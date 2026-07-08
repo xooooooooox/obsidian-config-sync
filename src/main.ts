@@ -1,5 +1,178 @@
-import { Plugin } from "obsidian";
+import { Notice, Platform, Plugin } from "obsidian";
+import {
+  CoreContext,
+  ExternalStoreReader,
+  PluginHost,
+  apply,
+  checkApply,
+  groupsForDevice,
+  importExternal,
+  loadManifest,
+  publish,
+  revertLastApply,
+} from "./core/ConfigSyncCore";
+import { ExternalSource } from "./core/types";
+import { GroupSelectModal } from "./ui/GroupSelectModal";
+import { confirmWarnings } from "./ui/ConfirmModal";
+import { ReportModal } from "./ui/ReportModal";
+import { SourceSelectModal } from "./ui/SourceSelectModal";
+import { ConfigSyncSettingTab } from "./ui/SettingTab";
+
+interface ConfigSyncSettings {
+  rootPath: string;
+  externalSources: ExternalSource[];
+}
+
+const DEFAULT_SETTINGS: ConfigSyncSettings = { rootPath: "config-sync", externalSources: [] };
+
+// app.plugins is not part of the public API; this is the community-standard access path.
+interface CommunityPluginRegistry {
+  manifests: Record<string, { version: string }>;
+  enabledPlugins: Set<string>;
+  disablePlugin(id: string): Promise<void>;
+  enablePlugin(id: string): Promise<void>;
+}
 
 export default class ConfigSyncPlugin extends Plugin {
-  async onload(): Promise<void> {}
+  settings: ConfigSyncSettings = DEFAULT_SETTINGS;
+
+  async onload(): Promise<void> {
+    await this.loadSettings();
+    this.addSettingTab(new ConfigSyncSettingTab(this.app, this));
+    this.addRibbonIcon("folder-sync", "Config Sync: Apply", () => {
+      void this.runApply();
+    });
+    this.addCommand({ id: "publish", name: "Publish (vault config → store)", callback: () => void this.runPublish() });
+    this.addCommand({ id: "apply", name: "Apply (store → this device)", callback: () => void this.runApply() });
+    this.addCommand({ id: "revert-last-apply", name: "Revert last apply", callback: () => void this.runRevert() });
+    this.addCommand({
+      id: "import-from-external",
+      name: "Import from external source",
+      checkCallback: (checking) => {
+        if (!Platform.isDesktop) return false;
+        if (!checking) void this.runImport();
+        return true;
+      },
+    });
+  }
+
+  private pluginRegistry(): CommunityPluginRegistry {
+    return (this.app as unknown as { plugins: CommunityPluginRegistry }).plugins;
+  }
+
+  private coreContext(): CoreContext {
+    const registry = this.pluginRegistry();
+    const host: PluginHost = {
+      getInstalledPluginVersion: (id) => registry.manifests[id]?.version ?? null,
+      isPluginEnabled: (id) => registry.enabledPlugins.has(id),
+      disablePlugin: (id) => registry.disablePlugin(id),
+      enablePlugin: (id) => registry.enablePlugin(id),
+    };
+    return {
+      io: this.app.vault.adapter,
+      configDir: this.app.vault.configDir,
+      rootPath: this.settings.rootPath,
+      plugins: host,
+      now: () => new Date().toISOString(),
+    };
+  }
+
+  private async runPublish(): Promise<void> {
+    const ctx = this.coreContext();
+    try {
+      const results = await publish(ctx);
+      new ReportModal(this.app, "Config Sync: Publish report", results).open();
+    } catch (e) {
+      new Notice(`Config Sync publish failed: ${(e as Error).message}`, 10000);
+    }
+  }
+
+  private async runApply(): Promise<void> {
+    const ctx = this.coreContext();
+    try {
+      const manifest = await loadManifest(ctx);
+      const device = Platform.isMobile ? ("mobile" as const) : ("desktop" as const);
+      const groups = groupsForDevice(manifest, device);
+      if (groups.length === 0) {
+        new Notice("Config Sync: no groups available for this device");
+        return;
+      }
+      new GroupSelectModal(this.app, groups, "Config Sync: select groups to apply", (names) => {
+        void this.applyGroups(ctx, names);
+      }).open();
+    } catch (e) {
+      new Notice(`Config Sync apply failed: ${(e as Error).message}`, 10000);
+    }
+  }
+
+  private async applyGroups(ctx: CoreContext, names: string[]): Promise<void> {
+    if (names.length === 0) return;
+    try {
+      const warnings = await checkApply(ctx, names);
+      if (warnings.length > 0) {
+        const ok = await confirmWarnings(
+          this.app,
+          "Config Sync: version warnings",
+          warnings.map((w) => `${w.group}: ${w.message}`)
+        );
+        if (!ok) return;
+      }
+      const results = await apply(ctx, names);
+      new ReportModal(this.app, "Config Sync: Apply report", results).open();
+    } catch (e) {
+      new Notice(`Config Sync apply failed: ${(e as Error).message}`, 10000);
+    }
+  }
+
+  private async runRevert(): Promise<void> {
+    const ctx = this.coreContext();
+    try {
+      const result = await revertLastApply(ctx);
+      new ReportModal(this.app, "Config Sync: Revert report", [result]).open();
+    } catch (e) {
+      new Notice(`Config Sync revert failed: ${(e as Error).message}`, 10000);
+    }
+  }
+
+  private async runImport(): Promise<void> {
+    const sources = this.settings.externalSources;
+    if (sources.length === 0) {
+      new Notice("Config Sync: no external sources configured (Settings → Config Sync)");
+      return;
+    }
+    new SourceSelectModal(this.app, sources, (source) => {
+      void this.importFrom(source);
+    }).open();
+  }
+
+  private async importFrom(source: ExternalSource): Promise<void> {
+    const ctx = this.coreContext();
+    try {
+      const reader = await this.createReader(source);
+      const result = await importExternal(ctx, reader);
+      new ReportModal(this.app, `Config Sync: Import report (${source.name})`, [result]).open();
+    } catch (e) {
+      new Notice(`Config Sync import failed: ${(e as Error).message}`, 10000);
+    }
+  }
+
+  // Dynamic import() keeps Node fs/child_process out of the mobile load path (spec D6):
+  // a static import would execute require("fs") at plugin load and crash on mobile.
+  private async createReader(source: ExternalSource): Promise<ExternalStoreReader> {
+    if (source.type === "local-path") {
+      const { createLocalPathReader } = await import("./external/localPath");
+      return createLocalPathReader(source.path, source.root);
+    }
+    const { createGitReader } = await import("./external/gitSource");
+    const adapter = this.app.vault.adapter as unknown as { getBasePath(): string };
+    return createGitReader(adapter.getBasePath(), source.remote, source.branch, source.root);
+  }
+
+  async loadSettings(): Promise<void> {
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, (await this.loadData()) as Partial<ConfigSyncSettings> | null);
+  }
+
+  async saveSettings(): Promise<void> {
+    await this.saveData(this.settings);
+  }
 }
