@@ -7,7 +7,7 @@ Obsidian plugin: selective config distribution across devices/vaults. Spec: `doc
 - `npm run dev` — esbuild watch → `main.js`
 - `npm run build` — `tsc -noEmit` + production bundle (run before finishing any change)
 - `npm test` — vitest; `tests/external.test.ts` needs the `git` binary
-- `npm run smoke:install` — build and install the plugin into `./dev-vault` (gitignored copy of a test vault)
+- `npm run smoke:install` — build and install the plugin into `./dev/vault` (gitignored copy of a test vault)
 
 ## Architecture
 
@@ -22,7 +22,7 @@ The repo's git history is rooted at `obsidianmd/obsidian-sample-plugin` (remote 
 
 ## Smoke testing
 
-`dev-vault/` (gitignored) is a disposable Obsidian vault for manual/CLI smoke tests. Install the current build with `npm run smoke:install`, open the vault in Obsidian, then drive it with the official CLI (`/Applications/Obsidian.app/Contents/MacOS/obsidian-cli`): `plugin:reload id=obsidian-config-sync`, `command id=obsidian-config-sync:publish` (also `:apply`, `:revert-last-apply`, `:import-from-external`), `eval code=...` for assertions, `dev:errors` for console errors. Never smoke-test in a real vault.
+`dev/vault/` (gitignored) is a disposable Obsidian vault for manual/CLI smoke tests. Install the current build with `npm run smoke:install`, open the vault in Obsidian, then drive it with the official CLI (`/Applications/Obsidian.app/Contents/MacOS/obsidian-cli`): `plugin:reload id=obsidian-config-sync`, `command id=obsidian-config-sync:publish` (also `:apply`, `:revert-last-apply`, `:import-from-external`), `eval code=...` for assertions, `dev:errors` for console errors. Never smoke-test in a real vault.
 
 ## Rules
 
