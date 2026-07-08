@@ -16,7 +16,7 @@ beforeAll(async () => {
   sourceRepo = await mkdtemp(nodePath.join(tmpdir(), "cs-source-"));
   consumerRepo = await mkdtemp(nodePath.join(tmpdir(), "cs-consumer-"));
   await mkdir(nodePath.join(sourceRepo, "0-Extra/config-sync/store/configdir"), { recursive: true });
-  await writeFile(nodePath.join(sourceRepo, "0-Extra/config-sync/manifest.json"), '{"version":1,"groups":[]}');
+  await writeFile(nodePath.join(sourceRepo, "0-Extra/config-sync/config-sync.json"), '{"version":1,"groups":[]}');
   await writeFile(nodePath.join(sourceRepo, "0-Extra/config-sync/store/configdir/hotkeys.json"), "{}");
   await run("git", ["init", "-b", "main"], { cwd: sourceRepo });
   await run("git", ["add", "."], { cwd: sourceRepo });
@@ -32,7 +32,7 @@ afterAll(async () => {
 describe("createLocalPathReader", () => {
   it("lists and reads files under the source root", async () => {
     const reader = createLocalPathReader(sourceRepo, "0-Extra/config-sync");
-    expect(await reader.listFiles()).toEqual(["manifest.json", "store/configdir/hotkeys.json"]);
+    expect(await reader.listFiles()).toEqual(["config-sync.json", "store/configdir/hotkeys.json"]);
     expect(await reader.readFile("store/configdir/hotkeys.json")).toBe("{}");
   });
 
@@ -45,15 +45,15 @@ describe("createLocalPathReader", () => {
 describe("createGitReader", () => {
   it("lists and reads files from a remote branch without touching the worktree", async () => {
     const reader = await createGitReader(consumerRepo, sourceRepo, "main", "0-Extra/config-sync");
-    expect(await reader.listFiles()).toEqual(["manifest.json", "store/configdir/hotkeys.json"]);
-    expect(await reader.readFile("manifest.json")).toBe('{"version":1,"groups":[]}');
+    expect(await reader.listFiles()).toEqual(["config-sync.json", "store/configdir/hotkeys.json"]);
+    expect(await reader.readFile("config-sync.json")).toBe('{"version":1,"groups":[]}');
     const status = (await run("git", ["status", "--porcelain"], { cwd: consumerRepo })).stdout;
     expect(status).toBe("");
   });
 
   it("updates the remote url on subsequent calls instead of failing", async () => {
     const reader = await createGitReader(consumerRepo, sourceRepo, "main", "0-Extra/config-sync");
-    expect(await reader.listFiles()).toContain("manifest.json");
+    expect(await reader.listFiles()).toContain("config-sync.json");
   });
 
   it("fails with a contextual error for an unreachable remote", async () => {

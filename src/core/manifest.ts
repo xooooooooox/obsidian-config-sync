@@ -28,7 +28,7 @@ export function parseSyncManifest(raw: string): SyncManifest {
   try {
     parsed = JSON.parse(raw);
   } catch (e) {
-    throw new ManifestValidationError(`manifest.json is not valid JSON: ${(e as Error).message}`);
+    throw new ManifestValidationError(`config-sync.json is not valid JSON: ${(e as Error).message}`);
   }
   if (!isPlainObject(parsed)) throw new ManifestValidationError("manifest top level must be an object");
   if (parsed.version !== 1) {

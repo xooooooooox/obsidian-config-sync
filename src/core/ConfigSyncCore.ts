@@ -20,7 +20,7 @@ export interface CoreContext {
 }
 
 export function manifestPath(ctx: CoreContext): string {
-  return `${ctx.rootPath}/manifest.json`;
+  return `${ctx.rootPath}/config-sync.json`;
 }
 
 export function lockPath(ctx: CoreContext): string {
@@ -43,7 +43,9 @@ export function pluginIdForGroup(group: SyncGroup): string | null {
 export async function loadManifest(ctx: CoreContext): Promise<SyncManifest> {
   const p = manifestPath(ctx);
   if (!(await ctx.io.exists(p))) {
-    throw new Error(`Config Sync manifest not found: ${p}. Create it before running commands (see README).`);
+    throw new Error(
+      `Config Sync groups file not found: ${p}. Create it from the plugin settings (Settings → Config Sync → Create config-sync.json).`
+    );
   }
   return parseSyncManifest(await ctx.io.read(p));
 }
@@ -73,7 +75,7 @@ function emptyResult(group: string, needsAppReload: boolean): GroupResult {
 function requireGroup(manifest: SyncManifest, name: string): SyncGroup {
   const group = manifest.groups.find((g) => g.name === name);
   if (group === undefined) {
-    throw new Error(`Unknown config-sync group "${name}" — not defined in manifest.json`);
+    throw new Error(`Unknown config-sync group "${name}" — not defined in config-sync.json`);
   }
   return group;
 }
@@ -317,10 +319,10 @@ export interface ExternalStoreReader {
 
 export async function importExternal(ctx: CoreContext, reader: ExternalStoreReader): Promise<GroupResult> {
   const files = await reader.listFiles();
-  if (!files.includes("manifest.json")) {
-    throw new Error(`External source has no manifest.json at its root — check the source "root" setting.`);
+  if (!files.includes("config-sync.json")) {
+    throw new Error(`External source has no config-sync.json at its root — check the source "root" setting.`);
   }
-  parseSyncManifest(await reader.readFile("manifest.json")); // fail fast on invalid upstream data
+  parseSyncManifest(await reader.readFile("config-sync.json")); // fail fast on invalid upstream data
   const result = emptyResult("import", false);
   for (const rel of files) {
     const target = `${ctx.rootPath}/${rel}`;
@@ -338,4 +340,29 @@ export async function importExternal(ctx: CoreContext, reader: ExternalStoreRead
   }
   await pruneEmptyDirsUnder(ctx.io, ctx.rootPath);
   return result;
+}
+
+export const SCHEMA_URL =
+  "https://raw.githubusercontent.com/xooooooooox/obsidian-config-sync/main/schema/config-sync.schema.json";
+
+export const STARTER_MANIFEST =
+  JSON.stringify(
+    {
+      $schema: SCHEMA_URL,
+      version: 1,
+      groups: [
+        { name: "snippets", path: "{configDir}/snippets", type: "dir", devices: "all" },
+        { name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all" },
+      ],
+    },
+    null,
+    2
+  ) + "\n";
+
+export async function createStarterManifest(ctx: CoreContext): Promise<"created" | "exists"> {
+  const p = manifestPath(ctx);
+  if (await ctx.io.exists(p)) return "exists";
+  await ensureParentDir(ctx.io, p);
+  await ctx.io.write(p, STARTER_MANIFEST);
+  return "created";
 }

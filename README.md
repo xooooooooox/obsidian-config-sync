@@ -4,26 +4,29 @@ Selective, on-demand distribution of Obsidian vault configuration (CSS snippets,
 
 ## How it works
 
-- **Publish** (source vault): copies the config groups defined in `<root>/manifest.json` into `<root>/store/`, stripping credential keys (`sanitize` patterns) and recording source plugin versions in `<root>/store.lock.json`. The store is plain vault content — your note-sync carries it everywhere.
+- **Publish** (source vault): copies the config groups defined in `<root>/config-sync.json` into `<root>/store/`, stripping credential keys (`sanitize` patterns) and recording source plugin versions in `<root>/store.lock.json`. The store is plain vault content — your note-sync carries it everywhere.
 - **Apply** (any device): pick groups, get version-mismatch warnings, then land them into this device's config dir (`app.vault.configDir`, whatever its name). Sanitized keys keep their local values, so credentials entered once survive every apply. The previous state of every touched file is kept in a single-slot backup.
 - **Revert last apply**: restores that backup.
 - **Import from external source** (desktop): overwrite this vault's `<root>/` from another vault — via filesystem path, or via a read-only git remote (`fetch` + `ls-tree` + `show`, worktree untouched).
+
+All four commands have ribbon icons (Publish, Apply, Revert last apply; Import from external source is desktop-only). The groups file can be created from Settings → Config Sync → "Create config-sync.json", which writes a starter file with a `$schema` reference and two example groups.
 
 ## Store layout
 
 ```
 <root>/                      # default "config-sync", configurable
-├── manifest.json            # group definitions (yours to edit)
+├── config-sync.json         # group definitions (yours to edit)
 ├── store.lock.json          # publish metadata (machine-written)
 └── store/
     ├── configdir/…          # mirror of {configDir}/…
     └── <dotless files>      # vault-root dotfiles, leading dot stripped
 ```
 
-`manifest.json` example:
+`config-sync.json` example:
 
 ```json
 {
+  "$schema": "https://raw.githubusercontent.com/xooooooooox/obsidian-config-sync/main/schema/config-sync.schema.json",
   "version": 1,
   "groups": [
     { "name": "snippets", "path": "{configDir}/snippets", "type": "dir", "devices": "all" },

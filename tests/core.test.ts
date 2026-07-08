@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CoreContext, publish, loadManifest, groupsForDevice, apply, checkApply, revertLastApply, importExternal, ExternalStoreReader, pluginIdForGroup } from "../src/core/ConfigSyncCore";
+import { CoreContext, publish, loadManifest, groupsForDevice, apply, checkApply, revertLastApply, importExternal, ExternalStoreReader, pluginIdForGroup, createStarterManifest } from "../src/core/ConfigSyncCore";
 import { parseSyncManifest } from "../src/core/manifest";
 import { MemFS, FakePlugins } from "./memfs";
 
@@ -29,7 +29,7 @@ export function setup(): { io: MemFS; plugins: FakePlugins; ctx: CoreContext } {
 describe("loadManifest", () => {
   it("throws a clear error when the manifest is missing", async () => {
     const { ctx } = setup();
-    await expect(loadManifest(ctx)).rejects.toThrow("cs/manifest.json");
+    await expect(loadManifest(ctx)).rejects.toThrow("cs/config-sync.json");
   });
 });
 
@@ -54,7 +54,7 @@ describe("publish", () => {
     const { io, plugins, ctx } = setup();
     plugins.installed.set("demo", "1.2.3");
     io.seed({
-      "cs/manifest.json": MANIFEST,
+      "cs/config-sync.json": MANIFEST,
       ".obs/hotkeys.json": '{"a":1}',
       ".obs/snippets/one.css": "one",
       ".obs/snippets/sub/two.css": "two",
@@ -78,14 +78,14 @@ describe("publish", () => {
 
   it("fails with the group name when a source is missing", async () => {
     const { io, ctx } = setup();
-    io.seed({ "cs/manifest.json": MANIFEST });
+    io.seed({ "cs/config-sync.json": MANIFEST });
     await expect(publish(ctx)).rejects.toThrow('group "hotkeys"');
   });
 });
 
 export function seedStore(io: MemFS): void {
   io.seed({
-    "cs/manifest.json": MANIFEST,
+    "cs/config-sync.json": MANIFEST,
     "cs/store.lock.json": JSON.stringify({
       publishedAt: "t",
       groups: { "plugin-demo": { sourcePluginVersion: "1.2.3" } },
@@ -138,7 +138,7 @@ describe("apply", () => {
 
   it("reports an error result when the store has no data for a group", async () => {
     const { io, ctx } = setup();
-    io.seed({ "cs/manifest.json": MANIFEST });
+    io.seed({ "cs/config-sync.json": MANIFEST });
     const results = await apply(ctx, ["hotkeys"]);
     expect(results[0]?.status).toBe("error");
     expect(results[0]?.messages[0]).toContain("publish it from the source vault first");
@@ -220,26 +220,38 @@ function fakeReader(files: Record<string, string>): ExternalStoreReader {
 describe("importExternal", () => {
   it("overwrites the local root with deletion propagation", async () => {
     const { io, ctx } = setup();
-    io.seed({ "cs/manifest.json": '{"version":1,"groups":[]}', "cs/store/old.css": "old" });
+    io.seed({ "cs/config-sync.json": '{"version":1,"groups":[]}', "cs/store/old.css": "old" });
     const result = await importExternal(ctx, fakeReader({
-      "manifest.json": MANIFEST,
+      "config-sync.json": MANIFEST,
       "store.lock.json": '{"publishedAt":"t","groups":{}}',
       "store/configdir/hotkeys.json": '{"a":3}',
     }));
     expect(result.status).toBe("ok");
     expect(await io.read("cs/store/configdir/hotkeys.json")).toBe('{"a":3}');
-    expect(await io.read("cs/manifest.json")).toBe(MANIFEST);
+    expect(await io.read("cs/config-sync.json")).toBe(MANIFEST);
     expect(await io.exists("cs/store/old.css")).toBe(false);
     expect(result.filesDeleted).toEqual(["cs/store/old.css"]);
   });
 
-  it("rejects sources without a manifest.json", async () => {
+  it("rejects sources without a config-sync.json", async () => {
     const { ctx } = setup();
-    await expect(importExternal(ctx, fakeReader({ "store/x.css": "x" }))).rejects.toThrow("no manifest.json");
+    await expect(importExternal(ctx, fakeReader({ "store/x.css": "x" }))).rejects.toThrow("no config-sync.json");
   });
 
   it("rejects sources whose manifest is invalid", async () => {
     const { ctx } = setup();
-    await expect(importExternal(ctx, fakeReader({ "manifest.json": '{"version":9}' }))).rejects.toThrow("unsupported version");
+    await expect(importExternal(ctx, fakeReader({ "config-sync.json": '{"version":9}' }))).rejects.toThrow("unsupported version");
+  });
+});
+
+describe("createStarterManifest", () => {
+  it("creates a parseable starter groups file and never overwrites", async () => {
+    const { io, ctx } = setup();
+    expect(await createStarterManifest(ctx)).toBe("created");
+    const manifest = await loadManifest(ctx);
+    expect(manifest.groups.map((g) => g.name)).toEqual(["snippets", "hotkeys"]);
+    await io.write("cs/config-sync.json", '{"version":1,"groups":[]}');
+    expect(await createStarterManifest(ctx)).toBe("exists");
+    expect(await io.read("cs/config-sync.json")).toBe('{"version":1,"groups":[]}');
   });
 });

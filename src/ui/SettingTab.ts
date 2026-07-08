@@ -5,6 +5,7 @@ import { parseExternalSources } from "../core/manifest";
 export interface SettingsHost extends Plugin {
   settings: { rootPath: string; externalSources: ExternalSource[] };
   saveSettings(): Promise<void>;
+  createStarterManifest(): Promise<"created" | "exists">;
 }
 
 export class ConfigSyncSettingTab extends PluginSettingTab {
@@ -18,7 +19,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Data folder")
-      .setDesc("Vault-relative folder holding manifest.json, store.lock.json and store/. Synced by remotely-save like normal notes.")
+      .setDesc("Vault-relative folder holding config-sync.json, store.lock.json and store/. Synced by remotely-save like normal notes.")
       .addText((t) =>
         t.setValue(this.host.settings.rootPath).onChange(async (v) => {
           const trimmed = v.trim();
@@ -28,6 +29,24 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
           }
           this.host.settings.rootPath = trimmed;
           await this.host.saveSettings();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName("Groups file")
+      .setDesc("Create <data folder>/config-sync.json with a starter group list and a JSON Schema reference. An existing file is never overwritten.")
+      .addButton((b) =>
+        b.setButtonText("Create config-sync.json").onClick(async () => {
+          try {
+            const outcome = await this.host.createStarterManifest();
+            new Notice(
+              outcome === "created"
+                ? "Config Sync: groups file created"
+                : "Config Sync: groups file already exists — not overwritten"
+            );
+          } catch (e) {
+            new Notice(`Config Sync: could not create groups file: ${(e as Error).message}`);
+          }
         })
       );
 

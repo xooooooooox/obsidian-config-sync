@@ -5,6 +5,7 @@ import {
   PluginHost,
   apply,
   checkApply,
+  createStarterManifest as coreCreateStarterManifest,
   groupsForDevice,
   importExternal,
   loadManifest,
@@ -39,9 +40,20 @@ export default class ConfigSyncPlugin extends Plugin {
   async onload(): Promise<void> {
     await this.loadSettings();
     this.addSettingTab(new ConfigSyncSettingTab(this.app, this));
+    this.addRibbonIcon("upload", "Config Sync: Publish", () => {
+      void this.runPublish();
+    });
     this.addRibbonIcon("folder-sync", "Config Sync: Apply", () => {
       void this.runApply();
     });
+    this.addRibbonIcon("undo-2", "Config Sync: Revert last apply", () => {
+      void this.runRevert();
+    });
+    if (Platform.isDesktop) {
+      this.addRibbonIcon("folder-input", "Config Sync: Import from external source", () => {
+        void this.runImport();
+      });
+    }
     this.addCommand({ id: "publish", name: "Publish (vault config → store)", callback: () => void this.runPublish() });
     this.addCommand({ id: "apply", name: "Apply (store → this device)", callback: () => void this.runApply() });
     this.addCommand({ id: "revert-last-apply", name: "Revert last apply", callback: () => void this.runRevert() });
@@ -170,6 +182,10 @@ export default class ConfigSyncPlugin extends Plugin {
     const { createGitReader } = await import("./external/gitSource");
     const adapter = this.app.vault.adapter as unknown as { getBasePath(): string };
     return createGitReader(adapter.getBasePath(), source.remote, source.branch, source.root);
+  }
+
+  async createStarterManifest(): Promise<"created" | "exists"> {
+    return coreCreateStarterManifest(this.coreContext());
   }
 
   async loadSettings(): Promise<void> {

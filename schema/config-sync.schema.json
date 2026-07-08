@@ -1,0 +1,31 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/xooooooooox/obsidian-config-sync/main/schema/config-sync.schema.json",
+  "title": "Config Sync groups file",
+  "description": "Defines which config groups obsidian-config-sync publishes/applies. Lives at <data folder>/config-sync.json inside the vault.",
+  "type": "object",
+  "required": ["version", "groups"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "version": { "const": 1 },
+    "groups": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "path", "type", "devices"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string", "minLength": 1, "description": "Unique group name" },
+          "path": { "type": "string", "minLength": 1, "description": "Vault-relative path; {configDir} expands to this device's config dir" },
+          "type": { "enum": ["file", "dir"] },
+          "devices": { "enum": ["all", "desktop", "mobile"] },
+          "sanitize": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 },
+            "description": "Key-name glob patterns (* wildcard) stripped on publish and preserved locally on apply. File groups only."
+          }
+        }
+      }
+    }
+  }
+}

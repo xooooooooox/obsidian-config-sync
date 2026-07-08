@@ -7,6 +7,7 @@ Obsidian plugin: selective config distribution across devices/vaults. Spec: `doc
 - `npm run dev` — esbuild watch → `main.js`
 - `npm run build` — `tsc -noEmit` + production bundle (run before finishing any change)
 - `npm test` — vitest; `tests/external.test.ts` needs the `git` binary
+- `npm run smoke:install` — build and install the plugin into `./dev-vault` (gitignored copy of a test vault)
 
 ## Architecture
 
@@ -18,6 +19,10 @@ Obsidian plugin: selective config distribution across devices/vaults. Spec: `doc
 ## Template upstream
 
 The repo's git history is rooted at `obsidianmd/obsidian-sample-plugin` (remote `template`); toolchain files are vendored from it. To pull upstream updates: `git fetch template && git merge template/master`. Conflict rules: toolchain files (esbuild/eslint/version-bump/.npmrc/.editorconfig/styles.css/.gitignore) take theirs; identity files (manifest.json, package.json name/author/license, versions.json) and `src/`/`tests/` stay ours; tsconfig takes theirs plus `tests/**/*.ts` re-added to `include`.
+
+## Smoke testing
+
+`dev-vault/` (gitignored) is a disposable Obsidian vault for manual/CLI smoke tests. Install the current build with `npm run smoke:install`, open the vault in Obsidian, then drive it with the official CLI (`/Applications/Obsidian.app/Contents/MacOS/obsidian-cli`): `plugin:reload id=obsidian-config-sync`, `command id=obsidian-config-sync:publish` (also `:apply`, `:revert-last-apply`, `:import-from-external`), `eval code=...` for assertions, `dev:errors` for console errors. Never smoke-test in a real vault.
 
 ## Rules
 
