@@ -27,6 +27,9 @@ export function sanitizeJson(value: unknown, patterns: string[]): unknown {
 }
 
 export function mergePreservingSanitized(local: unknown, incoming: unknown, patterns: string[]): unknown {
+  if (Array.isArray(incoming) && Array.isArray(local)) {
+    return incoming.map((v, i) => mergePreservingSanitized(local[i], v, patterns));
+  }
   if (isPlainObject(incoming) && isPlainObject(local)) {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(incoming)) {

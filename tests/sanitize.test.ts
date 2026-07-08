@@ -36,4 +36,9 @@ describe("mergePreservingSanitized", () => {
   it("returns incoming when local content is not an object", () => {
     expect(mergePreservingSanitized("bad", { a: 1 }, patterns)).toEqual({ a: 1 });
   });
+  it("preserves sanitized keys inside arrays index-wise", () => {
+    const local = { list: [{ apiTokenX: "secret", other: 1 }] };
+    const incoming = { list: [{ other: 2 }] };
+    expect(mergePreservingSanitized(local, incoming, patterns)).toEqual({ list: [{ other: 2, apiTokenX: "secret" }] });
+  });
 });
