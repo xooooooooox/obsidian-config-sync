@@ -285,3 +285,24 @@ async function applyGroup(ctx: CoreContext, group: SyncGroup, state: BackupState
   }
   return result;
 }
+
+export async function revertLastApply(ctx: CoreContext): Promise<GroupResult> {
+  const indexPath = `${backupDir(ctx)}/index.json`;
+  if (!(await ctx.io.exists(indexPath))) {
+    throw new Error(`No apply backup found (${indexPath}). Nothing to revert.`);
+  }
+  const index = JSON.parse(await ctx.io.read(indexPath)) as BackupIndex;
+  const result = emptyResult("revert", true);
+  result.messages.push(`reverted the apply from ${index.createdAt}; reload the app to take effect`);
+  for (const entry of index.entries) {
+    if (entry.existed && entry.backupFile !== null) {
+      await ensureParentDir(ctx.io, entry.realPath);
+      await ctx.io.write(entry.realPath, await ctx.io.read(`${backupDir(ctx)}/${entry.backupFile}`));
+      result.filesWritten.push(entry.realPath);
+    } else if (await ctx.io.exists(entry.realPath)) {
+      await ctx.io.remove(entry.realPath);
+      result.filesDeleted.push(entry.realPath);
+    }
+  }
+  return result;
+}

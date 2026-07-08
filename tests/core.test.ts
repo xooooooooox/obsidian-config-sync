@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CoreContext, publish, loadManifest, groupsForDevice, apply, checkApply } from "../src/core/ConfigSyncCore";
+import { CoreContext, publish, loadManifest, groupsForDevice, apply, checkApply, revertLastApply } from "../src/core/ConfigSyncCore";
 import { parseSyncManifest } from "../src/core/manifest";
 import { MemFS, FakePlugins } from "./memfs";
 
@@ -155,5 +155,26 @@ describe("checkApply", () => {
     const warnings = await checkApply(ctx, ["plugin-demo"]);
     expect(warnings).toHaveLength(1);
     expect(warnings[0]?.message).toContain("not installed");
+  });
+});
+
+describe("revertLastApply", () => {
+  it("restores overwritten files and deletes files created by apply", async () => {
+    const { io, ctx } = setup();
+    seedStore(io);
+    io.seed({ ".obs/snippets/local-only.css": "bye" });
+    await apply(ctx, ["snippets", "hotkeys"]);
+    expect(await io.exists(".obs/snippets/local-only.css")).toBe(false);
+    expect(await io.read(".obs/hotkeys.json")).toBe('{"a":2}');
+    const result = await revertLastApply(ctx);
+    expect(result.status).toBe("ok");
+    expect(result.needsAppReload).toBe(true);
+    expect(await io.read(".obs/snippets/local-only.css")).toBe("bye");
+    expect(await io.exists(".obs/hotkeys.json")).toBe(false);
+  });
+
+  it("throws a clear error when there is no backup", async () => {
+    const { ctx } = setup();
+    await expect(revertLastApply(ctx)).rejects.toThrow("Nothing to revert");
   });
 });
