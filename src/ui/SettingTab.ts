@@ -21,7 +21,12 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       .setDesc("Vault-relative folder holding manifest.json, store.lock.json and store/. Synced by remotely-save like normal notes.")
       .addText((t) =>
         t.setValue(this.host.settings.rootPath).onChange(async (v) => {
-          this.host.settings.rootPath = v.trim();
+          const trimmed = v.trim();
+          if (trimmed === "" || trimmed.startsWith("/") || trimmed.split("/").includes("..")) {
+            new Notice(`Config Sync: invalid data folder "${trimmed}" — must be a vault-relative path`);
+            return;
+          }
+          this.host.settings.rootPath = trimmed;
           await this.host.saveSettings();
         })
       );

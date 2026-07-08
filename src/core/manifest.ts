@@ -85,6 +85,11 @@ function parseGroup(g: unknown, index: number): SyncGroup {
 }
 
 function assertNotBlacklisted(name: string, path: string): void {
+  if (path === "{configDir}" || path === "{configDir}/plugins") {
+    throw new ManifestValidationError(
+      `group "${name}": "${path}" would sweep blacklisted plugin dirs into the store — target specific plugins instead`
+    );
+  }
   const m = path.match(/^\{configDir\}\/plugins\/([^/]+)(\/|$)/);
   if (m !== null && m[1] !== undefined && BLACKLISTED_PLUGIN_DIRS.includes(m[1])) {
     throw new ManifestValidationError(

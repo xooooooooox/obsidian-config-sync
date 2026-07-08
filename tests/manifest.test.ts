@@ -45,6 +45,12 @@ describe("parseSyncManifest", () => {
     const g = { name: "e", path: "../outside", type: "file", devices: "all" };
     expect(() => parseSyncManifest(manifestWith([g]))).toThrow("vault-relative");
   });
+  it("rejects groups that are ancestors of blacklisted dirs", () => {
+    const plugins = { name: "all-plugins", path: "{configDir}/plugins", type: "dir", devices: "all" };
+    expect(() => parseSyncManifest(manifestWith([plugins]))).toThrow("sweep");
+    const configdir = { name: "whole-configdir", path: "{configDir}", type: "dir", devices: "all" };
+    expect(() => parseSyncManifest(manifestWith([configdir]))).toThrow("sweep");
+  });
 });
 
 describe("parseStoreLock", () => {

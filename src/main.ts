@@ -68,18 +68,22 @@ export default class ConfigSyncPlugin extends Plugin {
       disablePlugin: (id) => registry.disablePlugin(id),
       enablePlugin: (id) => registry.enablePlugin(id),
     };
+    const rootPath = this.settings.rootPath.trim();
+    if (rootPath === "" || rootPath.startsWith("/") || rootPath.split("/").includes("..")) {
+      throw new Error(`Config Sync: invalid data folder "${rootPath}" — set a vault-relative path in settings`);
+    }
     return {
       io: this.app.vault.adapter,
       configDir: this.app.vault.configDir,
-      rootPath: this.settings.rootPath,
+      rootPath,
       plugins: host,
       now: () => new Date().toISOString(),
     };
   }
 
   private async runPublish(): Promise<void> {
-    const ctx = this.coreContext();
     try {
+      const ctx = this.coreContext();
       const results = await publish(ctx);
       new ReportModal(this.app, "Config Sync: Publish report", results).open();
     } catch (e) {
@@ -88,8 +92,8 @@ export default class ConfigSyncPlugin extends Plugin {
   }
 
   private async runApply(): Promise<void> {
-    const ctx = this.coreContext();
     try {
+      const ctx = this.coreContext();
       const manifest = await loadManifest(ctx);
       const device = Platform.isMobile ? ("mobile" as const) : ("desktop" as const);
       const groups = groupsForDevice(manifest, device);
@@ -125,8 +129,8 @@ export default class ConfigSyncPlugin extends Plugin {
   }
 
   private async runRevert(): Promise<void> {
-    const ctx = this.coreContext();
     try {
+      const ctx = this.coreContext();
       const result = await revertLastApply(ctx);
       new ReportModal(this.app, "Config Sync: Revert report", [result]).open();
     } catch (e) {
@@ -146,8 +150,8 @@ export default class ConfigSyncPlugin extends Plugin {
   }
 
   private async importFrom(source: ExternalSource): Promise<void> {
-    const ctx = this.coreContext();
     try {
+      const ctx = this.coreContext();
       const reader = await this.createReader(source);
       const result = await importExternal(ctx, reader);
       new ReportModal(this.app, `Config Sync: Import report (${source.name})`, [result]).open();

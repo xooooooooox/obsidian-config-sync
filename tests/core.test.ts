@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CoreContext, publish, loadManifest, groupsForDevice, apply, checkApply, revertLastApply, importExternal, ExternalStoreReader } from "../src/core/ConfigSyncCore";
+import { CoreContext, publish, loadManifest, groupsForDevice, apply, checkApply, revertLastApply, importExternal, ExternalStoreReader, pluginIdForGroup } from "../src/core/ConfigSyncCore";
 import { parseSyncManifest } from "../src/core/manifest";
 import { MemFS, FakePlugins } from "./memfs";
 
@@ -38,6 +38,14 @@ describe("groupsForDevice", () => {
     const manifest = parseSyncManifest(MANIFEST);
     expect(groupsForDevice(manifest, "mobile").map((g) => g.name)).toEqual(["hotkeys", "snippets", "plugin-demo"]);
     expect(groupsForDevice(manifest, "desktop").map((g) => g.name)).toEqual(["hotkeys", "snippets", "vimrc", "plugin-demo"]);
+  });
+});
+
+describe("pluginIdForGroup", () => {
+  it("extracts the id from data.json paths and whole-plugin-dir paths", () => {
+    expect(pluginIdForGroup({ name: "a", path: "{configDir}/plugins/cmdr/data.json", type: "file", devices: "all" })).toBe("cmdr");
+    expect(pluginIdForGroup({ name: "b", path: "{configDir}/plugins/cmdr", type: "dir", devices: "all" })).toBe("cmdr");
+    expect(pluginIdForGroup({ name: "c", path: "{configDir}/hotkeys.json", type: "file", devices: "all" })).toBe(null);
   });
 });
 
@@ -134,6 +142,23 @@ describe("apply", () => {
     const results = await apply(ctx, ["hotkeys"]);
     expect(results[0]?.status).toBe("error");
     expect(results[0]?.messages[0]).toContain("publish it from the source vault first");
+  });
+
+  it("still writes the backup index when a group throws mid-run", async () => {
+    const { io, ctx } = setup();
+    seedStore(io);
+    io.seed({
+      ".obs/snippets/local-only.css": "bye",
+      ".obs/plugins/demo/data.json": "not json",
+    });
+    await expect(apply(ctx, ["snippets", "plugin-demo"])).rejects.toThrow("not valid JSON");
+    const index = JSON.parse(await io.read(".obs/plugins/obsidian-config-sync/backup/index.json")) as {
+      entries: Array<{ realPath: string }>;
+    };
+    expect(index.entries.length).toBeGreaterThan(0);
+    const result = await revertLastApply(ctx);
+    expect(result.status).toBe("ok");
+    expect(await io.read(".obs/snippets/local-only.css")).toBe("bye");
   });
 });
 

@@ -36,7 +36,7 @@ export function backupDir(ctx: CoreContext): string {
 }
 
 export function pluginIdForGroup(group: SyncGroup): string | null {
-  const m = group.path.match(/^\{configDir\}\/plugins\/([^/]+)\//);
+  const m = group.path.match(/^\{configDir\}\/plugins\/([^/]+)(\/|$)/);
   return m && m[1] !== undefined ? m[1] : null;
 }
 
@@ -204,12 +204,15 @@ export async function apply(ctx: CoreContext, groupNames: string[]): Promise<Gro
     backedUp: new Set(),
   };
   const results: GroupResult[] = [];
-  for (const name of groupNames) {
-    results.push(await applyGroup(ctx, requireGroup(manifest, name), state));
+  try {
+    for (const name of groupNames) {
+      results.push(await applyGroup(ctx, requireGroup(manifest, name), state));
+    }
+  } finally {
+    const indexPath = `${backupDir(ctx)}/index.json`;
+    await ensureParentDir(ctx.io, indexPath);
+    await ctx.io.write(indexPath, JSON.stringify(state.index, null, 2) + "\n");
   }
-  const indexPath = `${backupDir(ctx)}/index.json`;
-  await ensureParentDir(ctx.io, indexPath);
-  await ctx.io.write(indexPath, JSON.stringify(state.index, null, 2) + "\n");
   return results;
 }
 
