@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CoreContext, publish, loadManifest, groupsForDevice } from "../src/core/ConfigSyncCore";
+import { CoreContext, publish, loadManifest, groupsForDevice, apply, checkApply } from "../src/core/ConfigSyncCore";
 import { parseSyncManifest } from "../src/core/manifest";
 import { MemFS, FakePlugins } from "./memfs";
 
@@ -72,5 +72,88 @@ describe("publish", () => {
     const { io, ctx } = setup();
     io.seed({ "cs/manifest.json": MANIFEST });
     await expect(publish(ctx)).rejects.toThrow('group "hotkeys"');
+  });
+});
+
+export function seedStore(io: MemFS): void {
+  io.seed({
+    "cs/manifest.json": MANIFEST,
+    "cs/store.lock.json": JSON.stringify({
+      publishedAt: "t",
+      groups: { "plugin-demo": { sourcePluginVersion: "1.2.3" } },
+    }),
+    "cs/store/configdir/hotkeys.json": '{"a":2}',
+    "cs/store/configdir/snippets/one.css": "one-v2",
+    "cs/store/configdir/plugins/demo/data.json": '{"theme":"new"}',
+  });
+}
+
+describe("apply", () => {
+  it("applies only the selected groups", async () => {
+    const { io, ctx } = setup();
+    seedStore(io);
+    io.seed({ ".obs/hotkeys.json": '{"a":1}' });
+    const results = await apply(ctx, ["hotkeys"]);
+    expect(results).toHaveLength(1);
+    expect(results[0]?.needsAppReload).toBe(true);
+    expect(await io.read(".obs/hotkeys.json")).toBe('{"a":2}');
+    expect(await io.exists(".obs/snippets/one.css")).toBe(false);
+  });
+
+  it("merges sanitized keys from the local file and cycles the plugin", async () => {
+    const { io, plugins, ctx } = setup();
+    seedStore(io);
+    plugins.installed.set("demo", "1.2.3");
+    plugins.enabled.add("demo");
+    io.seed({ ".obs/plugins/demo/data.json": '{"vikaToken":"secret","theme":"old"}' });
+    const results = await apply(ctx, ["plugin-demo"]);
+    expect(results[0]?.status).toBe("ok");
+    expect(results[0]?.needsAppReload).toBe(false);
+    expect(JSON.parse(await io.read(".obs/plugins/demo/data.json"))).toEqual({ theme: "new", vikaToken: "secret" });
+    expect(plugins.log).toEqual(["disable:demo", "enable:demo"]);
+  });
+
+  it("mirrors dir groups with deletion and records a backup", async () => {
+    const { io, ctx } = setup();
+    seedStore(io);
+    io.seed({ ".obs/snippets/local-only.css": "bye", ".obs/snippets/one.css": "one-v1" });
+    const results = await apply(ctx, ["snippets"]);
+    expect(await io.read(".obs/snippets/one.css")).toBe("one-v2");
+    expect(await io.exists(".obs/snippets/local-only.css")).toBe(false);
+    expect(results[0]?.filesDeleted).toEqual([".obs/snippets/local-only.css"]);
+    const indexData = JSON.parse(await io.read(".obs/plugins/obsidian-config-sync/backup/index.json")) as {
+      entries: Array<{ realPath: string }>;
+    };
+    const paths = indexData.entries.map((e) => e.realPath).sort();
+    expect(paths).toEqual([".obs/snippets/local-only.css", ".obs/snippets/one.css"]);
+  });
+
+  it("reports an error result when the store has no data for a group", async () => {
+    const { io, ctx } = setup();
+    io.seed({ "cs/manifest.json": MANIFEST });
+    const results = await apply(ctx, ["hotkeys"]);
+    expect(results[0]?.status).toBe("error");
+    expect(results[0]?.messages[0]).toContain("publish it from the source vault first");
+  });
+});
+
+describe("checkApply", () => {
+  it("warns on version mismatch", async () => {
+    const { io, plugins, ctx } = setup();
+    seedStore(io);
+    plugins.installed.set("demo", "9.9.9");
+    const warnings = await checkApply(ctx, ["hotkeys", "plugin-demo"]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.group).toBe("plugin-demo");
+    expect(warnings[0]?.message).toContain("1.2.3");
+    expect(warnings[0]?.message).toContain("9.9.9");
+  });
+
+  it("warns when the plugin is not installed on this device", async () => {
+    const { io, ctx } = setup();
+    seedStore(io);
+    const warnings = await checkApply(ctx, ["plugin-demo"]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.message).toContain("not installed");
   });
 });

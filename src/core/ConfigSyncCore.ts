@@ -2,7 +2,7 @@ import { FileIO, ensureParentDir, listFilesRecursive, pruneEmptyDirsUnder } from
 import { GroupResult, StoreLock, SyncGroup, SyncManifest } from "./types";
 import { groupRealPath, groupStorePath, relativeTo } from "./pathing";
 import { parseStoreLock, parseSyncManifest } from "./manifest";
-import { sanitizeJson } from "./sanitize";
+import { sanitizeJson, mergePreservingSanitized } from "./sanitize";
 
 export interface PluginHost {
   getInstalledPluginVersion(id: string): string | null;
@@ -70,6 +70,14 @@ function emptyResult(group: string, needsAppReload: boolean): GroupResult {
   return { group, status: "ok", filesWritten: [], filesDeleted: [], messages: [], needsAppReload };
 }
 
+function requireGroup(manifest: SyncManifest, name: string): SyncGroup {
+  const group = manifest.groups.find((g) => g.name === name);
+  if (group === undefined) {
+    throw new Error(`Unknown config-sync group "${name}" — not defined in manifest.json`);
+  }
+  return group;
+}
+
 export async function publish(ctx: CoreContext): Promise<GroupResult[]> {
   const manifest = await loadManifest(ctx);
   const lock: StoreLock = { publishedAt: ctx.now(), groups: {} };
@@ -129,6 +137,151 @@ async function publishGroup(ctx: CoreContext, group: SyncGroup): Promise<GroupRe
       }
     }
     await pruneEmptyDirsUnder(ctx.io, store);
+  }
+  return result;
+}
+
+export interface ApplyWarning {
+  group: string;
+  message: string;
+}
+
+export interface BackupEntry {
+  realPath: string;
+  existed: boolean;
+  backupFile: string | null;
+}
+
+export interface BackupIndex {
+  createdAt: string;
+  entries: BackupEntry[];
+}
+
+interface BackupState {
+  index: BackupIndex;
+  counter: number;
+  backedUp: Set<string>;
+}
+
+export async function checkApply(ctx: CoreContext, groupNames: string[]): Promise<ApplyWarning[]> {
+  const manifest = await loadManifest(ctx);
+  const lock = await loadLock(ctx);
+  const warnings: ApplyWarning[] = [];
+  for (const name of groupNames) {
+    const group = requireGroup(manifest, name);
+    const pluginId = pluginIdForGroup(group);
+    if (pluginId === null) continue;
+    const installed = ctx.plugins.getInstalledPluginVersion(pluginId);
+    const recorded = lock?.groups[name]?.sourcePluginVersion ?? null;
+    if (installed === null) {
+      warnings.push({
+        group: name,
+        message: `plugin "${pluginId}" is not installed on this device; its config will be staged for a future install`,
+      });
+    } else if (recorded !== null && recorded !== installed) {
+      warnings.push({
+        group: name,
+        message: `store config was published from ${pluginId}@${recorded}, this device runs ${pluginId}@${installed} — settings schema may differ`,
+      });
+    } else if (recorded === null) {
+      warnings.push({
+        group: name,
+        message: `store.lock.json has no recorded version for this group — cannot verify compatibility`,
+      });
+    }
+  }
+  return warnings;
+}
+
+export async function apply(ctx: CoreContext, groupNames: string[]): Promise<GroupResult[]> {
+  const manifest = await loadManifest(ctx);
+  if (await ctx.io.exists(backupDir(ctx))) {
+    await ctx.io.rmdir(backupDir(ctx), true);
+  }
+  const state: BackupState = {
+    index: { createdAt: ctx.now(), entries: [] },
+    counter: 0,
+    backedUp: new Set(),
+  };
+  const results: GroupResult[] = [];
+  for (const name of groupNames) {
+    results.push(await applyGroup(ctx, requireGroup(manifest, name), state));
+  }
+  const indexPath = `${backupDir(ctx)}/index.json`;
+  await ensureParentDir(ctx.io, indexPath);
+  await ctx.io.write(indexPath, JSON.stringify(state.index, null, 2) + "\n");
+  return results;
+}
+
+async function backupOnce(ctx: CoreContext, state: BackupState, realPath: string): Promise<void> {
+  if (state.backedUp.has(realPath)) return;
+  state.backedUp.add(realPath);
+  const existed = await ctx.io.exists(realPath);
+  let backupFile: string | null = null;
+  if (existed) {
+    backupFile = `files/${state.counter}`;
+    state.counter += 1;
+    const target = `${backupDir(ctx)}/${backupFile}`;
+    await ensureParentDir(ctx.io, target);
+    await ctx.io.write(target, await ctx.io.read(realPath));
+  }
+  state.index.entries.push({ realPath, existed, backupFile });
+}
+
+async function applyGroup(ctx: CoreContext, group: SyncGroup, state: BackupState): Promise<GroupResult> {
+  const real = groupRealPath(group.path, ctx.configDir);
+  const store = `${storeDir(ctx)}/${groupStorePath(group.path)}`;
+  const pluginId = pluginIdForGroup(group);
+  const result = emptyResult(group.name, pluginId === null);
+  if (!(await ctx.io.exists(store))) {
+    result.status = "error";
+    result.needsAppReload = false;
+    result.messages.push(`store has no data for this group (expected at ${store}) — publish it from the source vault first`);
+    return result;
+  }
+  const pluginWasEnabled = pluginId !== null && ctx.plugins.isPluginEnabled(pluginId);
+  if (pluginId !== null && pluginWasEnabled) {
+    await ctx.plugins.disablePlugin(pluginId);
+  }
+  try {
+    if (group.type === "file") {
+      let content = await ctx.io.read(store);
+      if (group.sanitize !== undefined && (await ctx.io.exists(real))) {
+        const local = parseJsonOrThrow(await ctx.io.read(real), group.name, real);
+        const incoming = parseJsonOrThrow(content, group.name, store);
+        content = JSON.stringify(mergePreservingSanitized(local, incoming, group.sanitize), null, 2) + "\n";
+      }
+      await backupOnce(ctx, state, real);
+      await ensureParentDir(ctx.io, real);
+      await ctx.io.write(real, content);
+      result.filesWritten.push(real);
+    } else {
+      const storeFiles = await listFilesRecursive(ctx.io, store);
+      const rels = storeFiles.map((f) => relativeTo(store, f));
+      for (const rel of rels) {
+        const target = `${real}/${rel}`;
+        await backupOnce(ctx, state, target);
+        await ensureParentDir(ctx.io, target);
+        await ctx.io.write(target, await ctx.io.read(`${store}/${rel}`));
+        result.filesWritten.push(target);
+      }
+      if (await ctx.io.exists(real)) {
+        const realFiles = await listFilesRecursive(ctx.io, real);
+        const wanted = new Set(rels);
+        for (const f of realFiles) {
+          if (!wanted.has(relativeTo(real, f))) {
+            await backupOnce(ctx, state, f);
+            await ctx.io.remove(f);
+            result.filesDeleted.push(f);
+          }
+        }
+        await pruneEmptyDirsUnder(ctx.io, real);
+      }
+    }
+  } finally {
+    if (pluginId !== null && pluginWasEnabled) {
+      await ctx.plugins.enablePlugin(pluginId);
+    }
   }
   return result;
 }
