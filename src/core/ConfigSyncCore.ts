@@ -306,3 +306,33 @@ export async function revertLastApply(ctx: CoreContext): Promise<GroupResult> {
   }
   return result;
 }
+
+export interface ExternalStoreReader {
+  listFiles(): Promise<string[]>; // relative to the source <root>/, "/"-separated
+  readFile(relPath: string): Promise<string>;
+}
+
+export async function importExternal(ctx: CoreContext, reader: ExternalStoreReader): Promise<GroupResult> {
+  const files = await reader.listFiles();
+  if (!files.includes("manifest.json")) {
+    throw new Error(`External source has no manifest.json at its root — check the source "root" setting.`);
+  }
+  parseSyncManifest(await reader.readFile("manifest.json")); // fail fast on invalid upstream data
+  const result = emptyResult("import", false);
+  for (const rel of files) {
+    const target = `${ctx.rootPath}/${rel}`;
+    await ensureParentDir(ctx.io, target);
+    await ctx.io.write(target, await reader.readFile(rel));
+    result.filesWritten.push(target);
+  }
+  const wanted = new Set(files.map((f) => `${ctx.rootPath}/${f}`));
+  const localFiles = await listFilesRecursive(ctx.io, ctx.rootPath);
+  for (const f of localFiles) {
+    if (!wanted.has(f)) {
+      await ctx.io.remove(f);
+      result.filesDeleted.push(f);
+    }
+  }
+  await pruneEmptyDirsUnder(ctx.io, ctx.rootPath);
+  return result;
+}

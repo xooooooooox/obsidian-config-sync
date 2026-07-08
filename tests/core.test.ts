@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CoreContext, publish, loadManifest, groupsForDevice, apply, checkApply, revertLastApply } from "../src/core/ConfigSyncCore";
+import { CoreContext, publish, loadManifest, groupsForDevice, apply, checkApply, revertLastApply, importExternal, ExternalStoreReader } from "../src/core/ConfigSyncCore";
 import { parseSyncManifest } from "../src/core/manifest";
 import { MemFS, FakePlugins } from "./memfs";
 
@@ -176,5 +176,45 @@ describe("revertLastApply", () => {
   it("throws a clear error when there is no backup", async () => {
     const { ctx } = setup();
     await expect(revertLastApply(ctx)).rejects.toThrow("Nothing to revert");
+  });
+});
+
+function fakeReader(files: Record<string, string>): ExternalStoreReader {
+  return {
+    async listFiles() {
+      return Object.keys(files).sort();
+    },
+    async readFile(rel) {
+      const content = files[rel];
+      if (content === undefined) throw new Error(`missing ${rel}`);
+      return content;
+    },
+  };
+}
+
+describe("importExternal", () => {
+  it("overwrites the local root with deletion propagation", async () => {
+    const { io, ctx } = setup();
+    io.seed({ "cs/manifest.json": '{"version":1,"groups":[]}', "cs/store/old.css": "old" });
+    const result = await importExternal(ctx, fakeReader({
+      "manifest.json": MANIFEST,
+      "store.lock.json": '{"publishedAt":"t","groups":{}}',
+      "store/configdir/hotkeys.json": '{"a":3}',
+    }));
+    expect(result.status).toBe("ok");
+    expect(await io.read("cs/store/configdir/hotkeys.json")).toBe('{"a":3}');
+    expect(await io.read("cs/manifest.json")).toBe(MANIFEST);
+    expect(await io.exists("cs/store/old.css")).toBe(false);
+    expect(result.filesDeleted).toEqual(["cs/store/old.css"]);
+  });
+
+  it("rejects sources without a manifest.json", async () => {
+    const { ctx } = setup();
+    await expect(importExternal(ctx, fakeReader({ "store/x.css": "x" }))).rejects.toThrow("no manifest.json");
+  });
+
+  it("rejects sources whose manifest is invalid", async () => {
+    const { ctx } = setup();
+    await expect(importExternal(ctx, fakeReader({ "manifest.json": '{"version":9}' }))).rejects.toThrow("unsupported version");
   });
 });
