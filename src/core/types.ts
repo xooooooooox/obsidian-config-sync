@@ -1,0 +1,32 @@
+export type DeviceClass = "all" | "desktop" | "mobile";
+
+export interface SyncGroup {
+  name: string;
+  path: string; // real vault-relative path; may start with the {configDir} variable
+  type: "file" | "dir";
+  devices: DeviceClass;
+  sanitize?: string[]; // key-name glob patterns; file groups only
+}
+
+export interface SyncManifest {
+  version: 1;
+  groups: SyncGroup[];
+}
+
+export interface StoreLock {
+  publishedAt: string;
+  groups: Record<string, { sourcePluginVersion: string }>;
+}
+
+export interface GroupResult {
+  group: string;
+  status: "ok" | "warning" | "error";
+  filesWritten: string[];
+  filesDeleted: string[];
+  messages: string[];
+  needsAppReload: boolean;
+}
+
+export type ExternalSource =
+  | { name: string; type: "local-path"; path: string; root: string }
+  | { name: string; type: "git"; remote: string; branch: string; root: string };
