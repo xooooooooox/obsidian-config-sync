@@ -14,7 +14,7 @@ import {
   revertLastApply,
   writeGroups,
 } from "./core/ConfigSyncCore";
-import { listOptionItems, listPluginItems, type CatalogItem, type PluginItem } from "./core/catalog";
+import { listOptionSections, type CatalogItem } from "./core/catalog";
 import { PkmMode, PkmProbe, resolveEffectiveMode, resolveRootPath } from "./core/pkm";
 import { ExternalSource, SyncGroup } from "./core/types";
 import { GroupSelectModal } from "./ui/GroupSelectModal";
@@ -217,12 +217,12 @@ export default class ConfigSyncPlugin extends Plugin {
   }
 
   async listOptionItems(groups: SyncGroup[]): Promise<CatalogItem[]> {
-    return listOptionItems(this.app.vault.adapter, this.app.vault.configDir, groups);
+    const sections = await listOptionSections(this.app.vault.adapter, this.app.vault.configDir, groups);
+    return sections.flatMap((s) => s.items);
   }
 
-  listPluginItems(): PluginItem[] {
-    const manifests = this.pluginRegistry().manifests;
-    return listPluginItems(Object.values(manifests).map((m) => ({ id: m.id, name: m.name })));
+  listPluginItems(): unknown[] {
+    return []; // superseded in Task 5; temporary to keep the build green
   }
 
   detectedMode(): "ioto" | "default" {

@@ -1,104 +1,154 @@
 import { describe, expect, it } from "vitest";
 import {
+  CatalogItem,
   corePluginFile,
   expectedPathForName,
   findGroupByName,
-  findGroupByPath,
   groupForItem,
   joinLocation,
-  listOptionItems,
-  listPluginItems,
+  listCoreSections,
+  listOptionSections,
+  listPluginSections,
   optionReservedName,
   reservedNames,
-  slugForPath,
   splitLocation,
+  toggleSection,
 } from "../src/core/catalog";
 import { SyncGroup } from "../src/core/types";
 import { MemFS } from "./memfs";
 
-function seededFs(): MemFS {
+function optionFs(): MemFS {
   const io = new MemFS();
   io.seed({
     ".obs/app.json": "{}",
-    ".obs/hotkeys.json": "{}",
+    ".obs/appearance.json": "{}",
+    ".obs/graph.json": "{}",           // core file — must NOT appear in options
     ".obs/workspace.json": "{}",
-    ".obs/core-plugins-migration.json": "{}",
     ".obs/custom-unknown.json": "{}",
+    ".obs/core-plugins-migration.json": "{}",
     ".obs/snippets/one.css": "x",
     ".obs/plugins/demo/data.json": "{}",
   });
   return io;
 }
+const NO_GROUPS: SyncGroup[] = [];
 
-describe("listOptionItems", () => {
-  it("labels known items, keeps unknown filenames, hides machine files and plugins/", async () => {
-    const items = await listOptionItems(seededFs(), ".obs", []);
-    const byPath = Object.fromEntries(items.map((i) => [i.path, i]));
-    expect(byPath["{configDir}/app.json"]?.label).toBe("Editor & general");
-    expect(byPath["{configDir}/hotkeys.json"]?.label).toBe("Hotkeys");
-    expect(byPath["{configDir}/snippets"]?.type).toBe("dir");
-    expect(byPath["{configDir}/custom-unknown.json"]?.label).toBe("custom-unknown.json");
-    expect(byPath["{configDir}/core-plugins-migration.json"]).toBeUndefined();
-    expect(items.some((i) => i.path === "{configDir}/plugins")).toBe(false);
+describe("listOptionSections", () => {
+  it("buckets known options by existence and puts workspace under Not recommended", async () => {
+    const sections = await listOptionSections(optionFs(), ".obs", NO_GROUPS);
+    const byBucket = Object.fromEntries(sections.map((s) => [s.bucket, s]));
+    const names = (b: string) => (byBucket[b]?.items ?? []).map((i) => i.name).sort();
+    expect(names("available")).toEqual(["app", "appearance", "custom-unknown", "snippets"]);
+    expect(names("notPresent")).toEqual(["hotkeys", "themes"]);
+    expect(names("notRecommended")).toEqual(["workspace"]);
+    expect(byBucket["notRecommended"]?.allowSyncAll).toBe(false);
+    expect(byBucket["available"]?.allowSyncAll).toBe(true);
   });
 
-  it("marks workspace files with a caution, not a hard disable", async () => {
-    const items = await listOptionItems(seededFs(), ".obs", []);
-    const ws = items.find((i) => i.path === "{configDir}/workspace.json");
+  it("excludes core files, plugins dir, switch lists and migration file from options", async () => {
+    const sections = await listOptionSections(optionFs(), ".obs", NO_GROUPS);
+    const all = sections.flatMap((s) => s.items.map((i) => i.name));
+    expect(all).not.toContain("graph");
+    expect(all).not.toContain("plugins");
+    expect(all).not.toContain("core-plugins");
+    expect(all).not.toContain("core-plugins-migration");
+  });
+
+  it("marks the workspace item with a caution and keeps it tickable", async () => {
+    const sections = await listOptionSections(optionFs(), ".obs", NO_GROUPS);
+    const ws = sections.flatMap((s) => s.items).find((i) => i.name === "workspace");
     expect(ws?.cautionReason).toContain("device-specific");
     expect(ws?.disabledReason).toBe(null);
   });
 
-  it("always lists known items, absent ones with exists=false", async () => {
-    const items = await listOptionItems(seededFs(), ".obs", []);
-    const themes = items.find((i) => i.path === "{configDir}/themes");
-    expect(themes).toBeDefined();
-    expect(themes?.exists).toBe(false);
-    expect(items.find((i) => i.path === "{configDir}/app.json")?.exists).toBe(true);
-  });
-
-  it("keeps a checked-but-absent unknown item visible with exists=false", async () => {
-    const groups: SyncGroup[] = [{ name: "gone", path: "{configDir}/custom-gone.json", type: "file", devices: "all" }];
-    const items = await listOptionItems(seededFs(), ".obs", groups);
-    const gone = items.find((i) => i.path === "{configDir}/custom-gone.json");
-    expect(gone?.exists).toBe(false);
-  });
-
-  it("lists all known items even for a missing configDir", async () => {
-    const items = await listOptionItems(new MemFS(), ".obs", []);
-    expect(items.length).toBeGreaterThan(0);
-    expect(items.every((i) => !i.exists)).toBe(true);
+  it("omits empty sections", async () => {
+    const io = new MemFS();
+    io.seed({ ".obs/app.json": "{}" });
+    const sections = await listOptionSections(io, ".obs", NO_GROUPS);
+    expect(sections.some((s) => s.bucket === "notRecommended")).toBe(false);
   });
 });
 
-describe("listPluginItems", () => {
-  it("maps installed plugins to data.json paths, sorted by name, blacklist disabled", () => {
-    const items = listPluginItems([
-      { id: "zzz-plugin", name: "Zzz" },
-      { id: "remotely-save", name: "Remotely Save" },
-      { id: "dataview", name: "Dataview" },
-    ]);
-    expect(items.map((i) => i.name)).toEqual(["Dataview", "Remotely Save", "Zzz"]);
-    expect(items[0]?.dataPath).toBe("{configDir}/plugins/dataview/data.json");
-    expect(items.find((i) => i.id === "remotely-save")?.disabledReason).toContain("cannot be synced");
-    expect(items.find((i) => i.id === "dataview")?.disabledReason).toBe(null);
+describe("listCoreSections", () => {
+  const cores = [
+    { id: "graph", name: "Graph view", enabled: true },
+    { id: "templates", name: "Templates", enabled: false },
+    { id: "properties", name: "Properties", enabled: true },
+    { id: "sync", name: "Sync", enabled: false },
+  ];
+  it("groups core settings by enabled state, sync under Not recommended, and reads runtime names", async () => {
+    const io = new MemFS();
+    io.seed({ ".obs/core-plugins.json": "{}", ".obs/graph.json": "{}", ".obs/types.json": "{}" });
+    const sections = await listCoreSections(io, ".obs", cores, NO_GROUPS);
+    const byBucket = Object.fromEntries(sections.map((s) => [s.bucket, s]));
+    expect(byBucket["list"]?.items[0]?.name).toBe("core-plugins");
+    expect(byBucket["enabled"]?.items.map((i) => i.name).sort()).toEqual(["graph", "properties"]);
+    expect(byBucket["enabled"]?.items.find((i) => i.name === "properties")?.label).toBe("Properties");
+    expect(byBucket["enabled"]?.items.find((i) => i.name === "properties")?.path).toBe("{configDir}/types.json");
+    expect(byBucket["disabled"]?.items.map((i) => i.name)).toEqual(["templates"]);
+    expect(byBucket["notRecommended"]?.items.map((i) => i.name)).toEqual(["sync"]);
+    expect(byBucket["notRecommended"]?.allowSyncAll).toBe(false);
+    expect(byBucket["enabled"]?.items.find((i) => i.name === "templates")).toBeUndefined();
+    expect(byBucket["disabled"]?.items[0]?.exists).toBe(false); // templates.json not seeded
   });
 });
 
-describe("slugForPath / groupForItem / findGroupByPath", () => {
-  it("derives friendly slugs and dedupes against existing names", () => {
-    expect(slugForPath("{configDir}/hotkeys.json", [])).toBe("hotkeys");
-    expect(slugForPath("{configDir}/plugins/dataview/data.json", [])).toBe("plugin-dataview");
-    expect(slugForPath("{configDir}/hotkeys.json", ["hotkeys"])).toBe("hotkeys-2");
+describe("listPluginSections", () => {
+  const plugins = [
+    { id: "dataview", name: "Dataview", enabled: true },
+    { id: "off-plugin", name: "Off Plugin", enabled: false },
+    { id: "remotely-save", name: "Remotely Save", enabled: true },
+  ];
+  it("buckets community plugins by enabled/disabled/blacklist and leads with the switch list", async () => {
+    const io = new MemFS();
+    io.seed({ ".obs/community-plugins.json": "{}" });
+    const sections = await listPluginSections(io, ".obs", plugins, NO_GROUPS);
+    const byBucket = Object.fromEntries(sections.map((s) => [s.bucket, s]));
+    expect(byBucket["list"]?.items[0]?.name).toBe("community-plugins");
+    expect(byBucket["enabled"]?.items.map((i) => i.name)).toEqual(["plugin-dataview"]);
+    expect(byBucket["disabled"]?.items.map((i) => i.name)).toEqual(["plugin-off-plugin"]);
+    expect(byBucket["notRecommended"]?.items[0]?.name).toBe("plugin-remotely-save");
+    expect(byBucket["notRecommended"]?.items[0]?.disabledReason).toContain("cannot be synced");
+    expect(byBucket["notRecommended"]?.allowSyncAll).toBe(false);
+  });
+});
+
+describe("groupForItem / toggleSection", () => {
+  it("groupForItem uses the fixed name (no slug dedup) and attaches description when given", () => {
+    expect(groupForItem("graph", "{configDir}/graph.json", "file", "Graph view")).toEqual({
+      name: "graph",
+      path: "{configDir}/graph.json",
+      type: "file",
+      devices: "all",
+      description: "Graph view",
+    });
+    expect(groupForItem("app", "{configDir}/app.json", "file", null)).toEqual({
+      name: "app",
+      path: "{configDir}/app.json",
+      type: "file",
+      devices: "all",
+    });
   });
 
-  it("groupForItem builds an all-devices group and findGroupByPath matches it", () => {
-    const g = groupForItem("{configDir}/snippets", "dir", [], "CSS snippets");
-    expect(g).toEqual({ name: "snippets", path: "{configDir}/snippets", type: "dir", devices: "all", description: "CSS snippets" });
-    const bare = groupForItem("{configDir}/x.json", "file", [], null);
-    expect(bare).toEqual({ name: "x", path: "{configDir}/x.json", type: "file", devices: "all" });
-    expect(findGroupByPath([g], "{configDir}/snippets")).toBe(g);
-    expect(findGroupByPath([g], "{configDir}/hotkeys.json")).toBeUndefined();
+  it("toggleSection adds groups for every tickable item, or removes them all", () => {
+    const items: CatalogItem[] = [
+      { name: "app", label: "Editor & general", description: "d", path: "{configDir}/app.json", type: "file", exists: true, disabledReason: null, cautionReason: null },
+      { name: "appearance", label: "Appearance", description: "d", path: "{configDir}/appearance.json", type: "file", exists: true, disabledReason: null, cautionReason: null },
+    ];
+    const on = toggleSection([], items, true);
+    expect(on.map((g) => g.name).sort()).toEqual(["app", "appearance"]);
+    const off = toggleSection(on, items, false);
+    expect(off).toEqual([]);
+  });
+
+  it("toggleSection(on) is idempotent and skips hard-disabled items", () => {
+    const items: CatalogItem[] = [
+      { name: "app", label: "l", description: null, path: "{configDir}/app.json", type: "file", exists: true, disabledReason: null, cautionReason: null },
+      { name: "plugin-x", label: "l", description: null, path: "{configDir}/plugins/x/data.json", type: "file", exists: true, disabledReason: "blocked", cautionReason: null },
+    ];
+    const start: SyncGroup[] = [{ name: "app", path: "{configDir}/app.json", type: "file", devices: "all" }];
+    const result = toggleSection(start, items, true);
+    expect(result.map((g) => g.name)).toEqual(["app"]);
   });
 });
 

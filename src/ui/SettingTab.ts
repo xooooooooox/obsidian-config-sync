@@ -2,7 +2,7 @@ import { App, Notice, Plugin, PluginSettingTab, Setting } from "obsidian";
 import { DeviceClass, ExternalSource, SyncGroup } from "../core/types";
 import { PkmMode } from "../core/pkm";
 import { validateExternalSources } from "../core/manifest";
-import { CatalogItem, PluginItem, findGroupByPath, groupForItem, joinLocation, splitLocation } from "../core/catalog";
+import { CatalogItem, findGroupByPath, groupForItem, joinLocation, splitLocation } from "../core/catalog";
 import { confirmWarnings } from "./ConfirmModal";
 
 export interface SettingsHost extends Plugin {
@@ -13,7 +13,7 @@ export interface SettingsHost extends Plugin {
   resolvedRootPath(): Promise<string>;
   detectedMode(): "ioto" | "default";
   listOptionItems(groups: SyncGroup[]): Promise<CatalogItem[]>;
-  listPluginItems(): PluginItem[];
+  listPluginItems(): unknown[];
 }
 
 interface SourceDraft {
@@ -229,10 +229,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       .setHeading()
       .setDesc("Sync a plugin's settings to your other devices. The plugin itself still installs from the community store or BRAT.");
     const listEl = containerEl.createDiv();
-    for (const p of this.host.listPluginItems()) {
+    for (const p of this.host.listPluginItems() as { id: string; name: string; dataPath: string; disabledReason: string | null }[]) {
       this.renderChecklistRow(
         listEl,
         {
+          name: p.dataPath,
           label: p.name,
           description: `Settings of ${p.id}.`,
           path: p.dataPath,
@@ -281,7 +282,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
               return;
             }
           }
-          this.groups.push(groupForItem(item.path, item.type, this.groups.map((g) => g.name), groupDescription));
+          this.groups.push(groupForItem(item.name, item.path, item.type, groupDescription));
         } else {
           const idx = this.groups.findIndex((g) => g.path === item.path);
           if (idx >= 0) this.groups.splice(idx, 1);
