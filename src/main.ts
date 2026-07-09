@@ -14,7 +14,7 @@ import {
   revertLastApply,
   writeGroups,
 } from "./core/ConfigSyncCore";
-import { listOptionItems, listPluginItems, type CatalogItem, type PluginItem } from "./core/catalog";
+import { type CatalogSection, listCoreSections, listOptionSections, listPluginSections } from "./core/catalog";
 import { PkmMode, PkmProbe, resolveEffectiveMode, resolveRootPath } from "./core/pkm";
 import { ExternalSource, SyncGroup } from "./core/types";
 import { GroupSelectModal } from "./ui/GroupSelectModal";
@@ -37,6 +37,11 @@ interface CommunityPluginRegistry {
   enabledPlugins: Set<string>;
   disablePlugin(id: string): Promise<void>;
   enablePlugin(id: string): Promise<void>;
+}
+
+// app.internalPlugins is not part of the public API; this is the community-standard access path for core plugins.
+interface InternalPluginsRegistry {
+  plugins: Record<string, { enabled: boolean; instance?: { id: string; name: string } }>;
 }
 
 export default class ConfigSyncPlugin extends Plugin {
@@ -75,6 +80,20 @@ export default class ConfigSyncPlugin extends Plugin {
 
   private pluginRegistry(): CommunityPluginRegistry {
     return (this.app as unknown as { plugins: CommunityPluginRegistry }).plugins;
+  }
+
+  private internalPlugins(): InternalPluginsRegistry {
+    return (this.app as unknown as { internalPlugins: InternalPluginsRegistry }).internalPlugins;
+  }
+
+  private coreRuntime(): { id: string; name: string; enabled: boolean }[] {
+    const reg = this.internalPlugins().plugins;
+    return Object.entries(reg).map(([id, p]) => ({ id, name: p.instance?.name ?? id, enabled: p.enabled }));
+  }
+
+  private pluginRuntime(): { id: string; name: string; enabled: boolean }[] {
+    const reg = this.pluginRegistry();
+    return Object.values(reg.manifests).map((m) => ({ id: m.id, name: m.name, enabled: reg.enabledPlugins.has(m.id) }));
   }
 
   private pkmProbe(): PkmProbe {
@@ -216,13 +235,20 @@ export default class ConfigSyncPlugin extends Plugin {
     return resolveRootPath(this.settings.rootPath, this.settings.pkmMode, this.pkmProbe());
   }
 
-  async listOptionItems(groups: SyncGroup[]): Promise<CatalogItem[]> {
-    return listOptionItems(this.app.vault.adapter, this.app.vault.configDir, groups);
+  async listOptionSections(groups: SyncGroup[]): Promise<CatalogSection[]> {
+    return listOptionSections(this.app.vault.adapter, this.app.vault.configDir, groups);
   }
 
-  listPluginItems(): PluginItem[] {
-    const manifests = this.pluginRegistry().manifests;
-    return listPluginItems(Object.values(manifests).map((m) => ({ id: m.id, name: m.name })));
+  async listCoreSections(groups: SyncGroup[]): Promise<CatalogSection[]> {
+    return listCoreSections(this.app.vault.adapter, this.app.vault.configDir, this.coreRuntime(), groups);
+  }
+
+  async listPluginSections(groups: SyncGroup[]): Promise<CatalogSection[]> {
+    return listPluginSections(this.app.vault.adapter, this.app.vault.configDir, this.pluginRuntime(), groups);
+  }
+
+  installedPluginIds(): string[] {
+    return Object.values(this.pluginRegistry().manifests).map((m) => m.id);
   }
 
   detectedMode(): "ioto" | "default" {

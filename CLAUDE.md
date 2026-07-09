@@ -16,6 +16,7 @@ Obsidian plugin: selective config distribution across devices/vaults. Spec: `doc
 - `src/external/` — the only place Node `fs`/`child_process` are allowed; loaded exclusively via dynamic `import()` from desktop-gated code in `main.ts`.
 - `src/ui/` — thin Obsidian modals/settings; no logic worth testing.
 - `src/main.ts` — plugin shell; the only file that touches non-public API (`app.plugins`), typed via the local `CommunityPluginRegistry` interface.
+- `src/core/catalog.ts` builds the settings-picker sections. Hardcoding is limited to two tables: `OPTION_LABELS` (global option file → friendly name) and `CORE_PLUGIN_FILES` (core plugin id → its settings file, e.g. `properties → types.json` — Obsidian exposes no id→file link at runtime). All plugin *names* come from runtime (`instance.name` / `manifests[id].name`). Group identity is the `name` field (reserved names for picker items; `validateSyncManifest` rejects a custom rule that takes a reserved name at the wrong path).
 
 ## Template upstream
 
