@@ -19,6 +19,7 @@
           "path": { "type": "string", "minLength": 1, "description": "Vault-relative path; {configDir} expands to this device's config dir" },
           "type": { "enum": ["file", "dir"] },
           "devices": { "enum": ["all", "desktop", "mobile"] },
+          "description": { "type": "string", "minLength": 1, "description": "Human-readable label for this group, shown in the settings panel" },
           "sanitize": {
             "type": "array",
             "items": { "type": "string", "minLength": 1 },

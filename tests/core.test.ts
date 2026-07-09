@@ -281,6 +281,7 @@ describe("createStarterManifest", () => {
     expect(await createStarterManifest(ctx)).toBe("created");
     const manifest = await loadManifest(ctx);
     expect(manifest.groups.map((g) => g.name)).toEqual(["snippets", "hotkeys"]);
+    expect(manifest.groups[0]?.description).toBe("CSS snippets");
     await io.write("cs/config-sync.json", '{"version":1,"groups":[]}');
     expect(await createStarterManifest(ctx)).toBe("exists");
     expect(await io.read("cs/config-sync.json")).toBe('{"version":1,"groups":[]}');
@@ -309,6 +310,15 @@ describe("readGroups / writeGroups", () => {
     const bad = [{ name: "rs", path: "{configDir}/plugins/remotely-save/data.json", type: "file" as const, devices: "all" as const }];
     await expect(writeGroups(ctx, bad)).rejects.toThrow("blacklisted");
     expect(await io.read("cs/config-sync.json")).toBe(before);
+  });
+
+  it("round-trips a group description through writeGroups/readGroups", async () => {
+    const { ctx } = setup();
+    await writeGroups(ctx, [
+      { name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all", description: "Custom keyboard shortcuts" },
+    ]);
+    const groups = await readGroups(ctx);
+    expect(groups[0]?.description).toBe("Custom keyboard shortcuts");
   });
 });
 

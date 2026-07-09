@@ -19,7 +19,7 @@ Obsidian plugin: selective config distribution across devices/vaults. Spec: `doc
 
 ## Template upstream
 
-The repo's git history is rooted at `obsidianmd/obsidian-sample-plugin` (remote `template`); toolchain files are vendored from it. To pull upstream updates: `git fetch template && git merge template/master`. Conflict rules: toolchain files (esbuild/eslint/version-bump/.npmrc/.editorconfig/styles.css/.gitignore) take theirs; identity files (manifest.json, package.json name/author/license, versions.json) and `src/`/`tests/` stay ours; tsconfig takes theirs plus `tests/**/*.ts` re-added to `include`.
+The repo's git history is rooted at `obsidianmd/obsidian-sample-plugin` (remote `template`); toolchain files are vendored from it. To pull upstream updates: `git fetch template && git merge template/master`. Conflict rules: toolchain files (esbuild/eslint/version-bump/.npmrc/.editorconfig/.gitignore) take theirs; identity files (manifest.json, package.json name/author/license, versions.json), `styles.css` (plugin-owned styles since iter4), and `src/`/`tests/` stay ours; tsconfig takes theirs plus `tests/**/*.ts` re-added to `include`.
 
 ## Smoke testing
 

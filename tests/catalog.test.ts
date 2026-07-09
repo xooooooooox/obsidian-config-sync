@@ -37,22 +37,32 @@ describe("listOptionItems", () => {
     expect(items.some((i) => i.path === "{configDir}/plugins")).toBe(false);
   });
 
-  it("shows workspace files disabled with a device-specific reason", async () => {
+  it("marks workspace files with a caution, not a hard disable", async () => {
     const items = await listOptionItems(seededFs(), ".obs", []);
     const ws = items.find((i) => i.path === "{configDir}/workspace.json");
-    expect(ws?.disabledReason).toContain("Device-specific");
+    expect(ws?.cautionReason).toContain("device-specific");
+    expect(ws?.disabledReason).toBe(null);
   });
 
-  it("keeps a checked-but-absent item visible with exists=false", async () => {
-    const groups: SyncGroup[] = [{ name: "themes", path: "{configDir}/themes", type: "dir", devices: "all" }];
-    const items = await listOptionItems(seededFs(), ".obs", groups);
+  it("always lists known items, absent ones with exists=false", async () => {
+    const items = await listOptionItems(seededFs(), ".obs", []);
     const themes = items.find((i) => i.path === "{configDir}/themes");
     expect(themes).toBeDefined();
     expect(themes?.exists).toBe(false);
+    expect(items.find((i) => i.path === "{configDir}/app.json")?.exists).toBe(true);
   });
 
-  it("returns [] for a missing configDir with no groups", async () => {
-    expect(await listOptionItems(new MemFS(), ".obs", [])).toEqual([]);
+  it("keeps a checked-but-absent unknown item visible with exists=false", async () => {
+    const groups: SyncGroup[] = [{ name: "gone", path: "{configDir}/custom-gone.json", type: "file", devices: "all" }];
+    const items = await listOptionItems(seededFs(), ".obs", groups);
+    const gone = items.find((i) => i.path === "{configDir}/custom-gone.json");
+    expect(gone?.exists).toBe(false);
+  });
+
+  it("lists all known items even for a missing configDir", async () => {
+    const items = await listOptionItems(new MemFS(), ".obs", []);
+    expect(items.length).toBeGreaterThan(0);
+    expect(items.every((i) => !i.exists)).toBe(true);
   });
 });
 
@@ -78,8 +88,10 @@ describe("slugForPath / groupForItem / findGroupByPath", () => {
   });
 
   it("groupForItem builds an all-devices group and findGroupByPath matches it", () => {
-    const g = groupForItem("{configDir}/snippets", "dir", []);
-    expect(g).toEqual({ name: "snippets", path: "{configDir}/snippets", type: "dir", devices: "all" });
+    const g = groupForItem("{configDir}/snippets", "dir", [], "CSS snippets");
+    expect(g).toEqual({ name: "snippets", path: "{configDir}/snippets", type: "dir", devices: "all", description: "CSS snippets" });
+    const bare = groupForItem("{configDir}/x.json", "file", [], null);
+    expect(bare).toEqual({ name: "x", path: "{configDir}/x.json", type: "file", devices: "all" });
     expect(findGroupByPath([g], "{configDir}/snippets")).toBe(g);
     expect(findGroupByPath([g], "{configDir}/hotkeys.json")).toBeUndefined();
   });

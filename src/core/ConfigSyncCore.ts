@@ -353,8 +353,8 @@ export const STARTER_MANIFEST =
       $schema: SCHEMA_URL,
       version: 1,
       groups: [
-        { name: "snippets", path: "{configDir}/snippets", type: "dir", devices: "all" },
-        { name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all" },
+        { name: "snippets", path: "{configDir}/snippets", type: "dir", devices: "all", description: "CSS snippets" },
+        { name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all", description: "Custom keyboard shortcuts" },
       ],
     },
     null,

@@ -43,7 +43,7 @@ Pick what to sync in Settings → Config Sync: tick items under **Obsidian** (ho
 
 Group fields: `name` (unique) · `path` (`{configDir}` variable supported) · `type` (`file`/`dir`) · `devices` (`all`/`desktop`/`mobile`) · `sanitize` (optional key-glob list, file groups only).
 
-Never syncable (hard blacklist): `remotely-save`, `ioto-update`, `slides-rup`, `obsidian-config-sync` plugin dirs and `workspace*.json`.
+Never syncable (hard blacklist): `remotely-save`, `ioto-update`, `slides-rup`, `obsidian-config-sync` plugin dirs. `workspace*.json` (window layout) is allowed but discouraged — ticking it asks for confirmation because devices will overwrite each other's layout.
 
 ## Configuring what to sync — walkthroughs
 

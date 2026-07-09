@@ -1,8 +1,24 @@
-/*
+/* obsidian-config-sync — settings panel */
 
-This CSS file will be included with your plugin, and
-available in the app when your plugin is enabled.
+.config-sync-tabs {
+  display: flex;
+  gap: var(--size-4-1);
+  margin-bottom: var(--size-4-3);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
 
-If your plugin does not need CSS, delete this file.
+.config-sync-tab {
+  background: none;
+  box-shadow: none;
+  border: none;
+  border-radius: 0;
+  padding: var(--size-4-1) var(--size-4-2);
+  cursor: pointer;
+  color: var(--text-muted);
+  border-bottom: 2px solid transparent;
+}
 
-*/
+.config-sync-tab.is-active {
+  color: var(--text-normal);
+  border-bottom-color: var(--interactive-accent);
+}
