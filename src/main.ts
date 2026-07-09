@@ -14,6 +14,7 @@ import {
   revertLastApply,
   writeGroups,
 } from "./core/ConfigSyncCore";
+import { listOptionItems, listPluginItems, type CatalogItem, type PluginItem } from "./core/catalog";
 import { PkmMode, PkmProbe, resolveEffectiveMode, resolveRootPath } from "./core/pkm";
 import { ExternalSource, SyncGroup } from "./core/types";
 import { GroupSelectModal } from "./ui/GroupSelectModal";
@@ -32,7 +33,7 @@ const DEFAULT_SETTINGS: ConfigSyncSettings = { pkmMode: "auto", rootPath: "", ex
 
 // app.plugins is not part of the public API; this is the community-standard access path.
 interface CommunityPluginRegistry {
-  manifests: Record<string, { version: string }>;
+  manifests: Record<string, { id: string; name: string; version: string }>;
   enabledPlugins: Set<string>;
   disablePlugin(id: string): Promise<void>;
   enablePlugin(id: string): Promise<void>;
@@ -213,6 +214,15 @@ export default class ConfigSyncPlugin extends Plugin {
 
   async resolvedRootPath(): Promise<string> {
     return resolveRootPath(this.settings.rootPath, this.settings.pkmMode, this.pkmProbe());
+  }
+
+  async listOptionItems(groups: SyncGroup[]): Promise<CatalogItem[]> {
+    return listOptionItems(this.app.vault.adapter, this.app.vault.configDir, groups);
+  }
+
+  listPluginItems(): PluginItem[] {
+    const manifests = this.pluginRegistry().manifests;
+    return listPluginItems(Object.values(manifests).map((m) => ({ id: m.id, name: m.name })));
   }
 
   detectedMode(): "ioto" | "default" {

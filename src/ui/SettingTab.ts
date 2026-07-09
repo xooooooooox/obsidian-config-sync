@@ -2,6 +2,7 @@ import { App, Notice, Plugin, PluginSettingTab, Setting } from "obsidian";
 import { DeviceClass, ExternalSource, SyncGroup } from "../core/types";
 import { PkmMode } from "../core/pkm";
 import { validateExternalSources } from "../core/manifest";
+import { type CatalogItem, type PluginItem } from "../core/catalog";
 
 export interface SettingsHost extends Plugin {
   settings: { pkmMode: PkmMode; rootPath: string; externalSources: ExternalSource[] };
@@ -10,6 +11,8 @@ export interface SettingsHost extends Plugin {
   writeGroupsFile(groups: SyncGroup[]): Promise<void>;
   resolvedRootPath(): Promise<string>;
   detectedMode(): "ioto" | "default";
+  listOptionItems(groups: SyncGroup[]): Promise<CatalogItem[]>;
+  listPluginItems(): PluginItem[];
 }
 
 interface SourceDraft {
