@@ -30,12 +30,16 @@ export function parseSyncManifest(raw: string): SyncManifest {
   } catch (e) {
     throw new ManifestValidationError(`config-sync.json is not valid JSON: ${(e as Error).message}`);
   }
-  if (!isPlainObject(parsed)) throw new ManifestValidationError("manifest top level must be an object");
-  if (parsed.version !== 1) {
-    throw new ManifestValidationError(`unsupported version: ${String(parsed.version)} (expected 1)`);
+  return validateSyncManifest(parsed);
+}
+
+export function validateSyncManifest(data: unknown): SyncManifest {
+  if (!isPlainObject(data)) throw new ManifestValidationError("manifest top level must be an object");
+  if (data.version !== 1) {
+    throw new ManifestValidationError(`unsupported version: ${String(data.version)} (expected 1)`);
   }
-  if (!Array.isArray(parsed.groups)) throw new ManifestValidationError('"groups" must be an array');
-  const groups = parsed.groups.map((g, i) => parseGroup(g, i));
+  if (!Array.isArray(data.groups)) throw new ManifestValidationError('"groups" must be an array');
+  const groups = data.groups.map((g, i) => parseGroup(g, i));
   const names = new Set<string>();
   const storePaths = new Set<string>();
   for (const g of groups) {
@@ -129,8 +133,12 @@ export function parseExternalSources(raw: string): ExternalSource[] {
   } catch (e) {
     throw new ManifestValidationError(`external sources is not valid JSON: ${(e as Error).message}`);
   }
-  if (!Array.isArray(parsed)) throw new ManifestValidationError("external sources must be a JSON array");
-  return parsed.map((s, i) => parseSource(s, i));
+  return validateExternalSources(parsed);
+}
+
+export function validateExternalSources(data: unknown): ExternalSource[] {
+  if (!Array.isArray(data)) throw new ManifestValidationError("external sources must be a JSON array");
+  return data.map((s, i) => parseSource(s, i));
 }
 
 function parseSource(s: unknown, index: number): ExternalSource {
