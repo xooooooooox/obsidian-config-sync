@@ -207,22 +207,23 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     if (gen !== this.renderGen) return;
     for (const sec of sections) {
       const head = new Setting(containerEl).setName(sec.heading).setDesc(sec.description).setHeading();
-      if (sec.allowSyncAll) this.addSyncAllButton(head, sec);
+      if (sec.allowSyncAll) this.addSyncAllToggle(head, sec);
       const listEl = containerEl.createDiv();
       for (const item of sec.items) this.renderChecklistRow(listEl, item);
     }
   }
 
-  private addSyncAllButton(head: Setting, sec: CatalogSection): void {
+  private addSyncAllToggle(head: Setting, sec: CatalogSection): void {
     const tickable = sec.items.filter((i) => i.disabledReason === null);
     const allOn = tickable.length > 0 && tickable.every((i) => findGroupByName(this.groups, i.name) !== undefined);
-    head.addButton((b) => {
-      b.setButtonText(allOn ? "Sync none" : "Sync all").onClick(async () => {
-        this.groups = toggleSection(this.groups, sec.items, !allOn);
-        await this.saveGroups();
-        this.refresh();
-      });
-      b.buttonEl.addClass("config-sync-syncall");
+    head.addToggle((t) => {
+      t.setValue(allOn)
+        .setTooltip(allOn ? "Sync none" : "Sync all")
+        .onChange(async (v) => {
+          this.groups = toggleSection(this.groups, sec.items, v);
+          await this.saveGroups();
+          this.refresh();
+        });
     });
   }
 

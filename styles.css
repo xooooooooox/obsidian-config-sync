@@ -25,13 +25,11 @@
 
 .config-sync-search {
   display: flex;
-  justify-content: center;
   margin-bottom: var(--size-4-4);
 }
 
 .config-sync-search .search-input-container {
   width: 100%;
-  max-width: 40em;
 }
 
 .config-sync-empty {
@@ -93,6 +91,3 @@
   font-size: var(--font-ui-smaller);
 }
 
-.config-sync-syncall {
-  color: var(--text-accent);
-}
