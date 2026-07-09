@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   CatalogItem,
   corePluginFile,
+  defaultGroupForName,
   expectedPathForName,
   findGroupByName,
   groupForItem,
   joinLocation,
   listCoreSections,
+  listDiscovered,
   listOptionSections,
   listPluginSections,
   optionReservedName,
@@ -38,7 +40,7 @@ describe("listOptionSections", () => {
     const sections = await listOptionSections(optionFs(), ".obs", NO_GROUPS);
     const byBucket = Object.fromEntries(sections.map((s) => [s.bucket, s]));
     const names = (b: string) => (byBucket[b]?.items ?? []).map((i) => i.name).sort();
-    expect(names("available")).toEqual(["app", "appearance", "custom-unknown", "snippets"]);
+    expect(names("available")).toEqual(["app", "appearance", "snippets"]);
     expect(names("notPresent")).toEqual(["hotkeys", "themes"]);
     expect(names("notRecommended")).toEqual(["workspace"]);
     expect(byBucket["notRecommended"]?.allowSyncAll).toBe(false);
@@ -196,5 +198,84 @@ describe("name and path helpers", () => {
     const groups: SyncGroup[] = [{ name: "graph", path: "{configDir}/custom.json", type: "file", devices: "all" }];
     expect(findGroupByName(groups, "graph")?.path).toBe("{configDir}/custom.json");
     expect(findGroupByName(groups, "app")).toBeUndefined();
+  });
+});
+
+describe("defaultGroupForName", () => {
+  it("returns the picker default for an option name (with catalog description)", () => {
+    expect(defaultGroupForName("app")).toEqual({
+      name: "app",
+      path: "{configDir}/app.json",
+      type: "file",
+      devices: "all",
+      description: "Editor and general options.",
+    });
+    expect(defaultGroupForName("snippets")).toEqual({
+      name: "snippets",
+      path: "{configDir}/snippets",
+      type: "dir",
+      devices: "all",
+      description: "Your CSS snippets.",
+    });
+  });
+
+  it("returns the picker default for a community and core name", () => {
+    expect(defaultGroupForName("plugin-dataview")).toEqual({
+      name: "plugin-dataview",
+      path: "{configDir}/plugins/dataview/data.json",
+      type: "file",
+      devices: "all",
+      description: "Settings of dataview.",
+    });
+    expect(defaultGroupForName("properties")).toEqual({
+      name: "properties",
+      path: "{configDir}/types.json",
+      type: "file",
+      devices: "all",
+    });
+  });
+
+  it("returns null for a non-reserved name", () => {
+    expect(defaultGroupForName("my-own")).toBeNull();
+  });
+});
+
+describe("listDiscovered", () => {
+  it("lists unclassified config-root json, excludes junk/known/covered, prefills a slug name", async () => {
+    const io = new MemFS();
+    io.seed({
+      ".obs/app.json": "{}",                              // known option → excluded
+      ".obs/graph.json": "{}",                            // core file → excluded
+      ".obs/community-plugins.json": "{}",                // switch list → excluded
+      ".obs/core-plugins-migration.json": "{}",           // hidden → excluded
+      ".obs/.DS_Store": "junk",                           // dotfile/non-json → excluded
+      ".obs/image-converter-image-alignments.json": "{}", // unclassified → INCLUDED
+      ".obs/covered.json": "{}",                          // covered by a group below → excluded
+      ".obs/plugins/demo/data.json": "{}",                // under plugins/ → excluded
+    });
+    const groups: SyncGroup[] = [{ name: "covered-rule", path: "{configDir}/covered.json", type: "file", devices: "all" }];
+    const found = await listDiscovered(io, ".obs", groups);
+    expect(found).toEqual([
+      { name: "image-converter-image-alignments", path: "{configDir}/image-converter-image-alignments.json" },
+    ]);
+  });
+
+  it("excludes .DS_Store and non-json even when no group exists", async () => {
+    const io = new MemFS();
+    io.seed({ ".obs/.DS_Store": "junk", ".obs/notes.txt": "x" });
+    expect(await listDiscovered(io, ".obs", [])).toEqual([]);
+  });
+});
+
+describe("section copy (action-oriented)", () => {
+  it("uses the action-oriented descriptions", async () => {
+    const io = new MemFS();
+    io.seed({ ".obs/app.json": "{}" });
+    const opt = await listOptionSections(io, ".obs", []);
+    expect(opt.find((s) => s.bucket === "available")?.description).toBe("Sync these settings that already exist in this vault.");
+    const core = await listCoreSections(io, ".obs", [{ id: "graph", name: "Graph view", enabled: true }], []);
+    expect(core.find((s) => s.bucket === "enabled")?.description).toBe("Sync the settings files of your enabled core plugins.");
+    const com = await listPluginSections(io, ".obs", [{ id: "dataview", name: "Dataview", enabled: true }], []);
+    expect(com.find((s) => s.bucket === "enabled")?.description).toBe("Sync the settings files of your enabled community plugins.");
   });
 });
