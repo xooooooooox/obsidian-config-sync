@@ -114,6 +114,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       case "obsidian":
         if (!this.renderGroupsReadError(containerEl)) {
           await this.renderOptions(containerEl, gen);
+          if (gen !== this.renderGen) return;
           this.renderGroupsError(containerEl);
         }
         break;
