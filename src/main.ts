@@ -2,6 +2,7 @@ import { Notice, Platform, Plugin } from "obsidian";
 import {
   CoreContext,
   ExternalStoreReader,
+  ExternalStoreWriter,
   PluginHost,
   apply,
   capture,
@@ -10,6 +11,7 @@ import {
   groupsForDevice,
   importExternal,
   loadManifest,
+  pushExternal,
   readGroups,
   revertLastApply,
   writeGroups,
@@ -61,21 +63,34 @@ export default class ConfigSyncPlugin extends Plugin {
     });
     if (Platform.isDesktop) {
       this.addRibbonIcon("folder-input", "Config Sync: Import from external source", () => {
-        void this.runImport();
+        void this.runPull();
       });
     }
     this.addCommand({ id: "capture", name: "Capture (this device's config → store)", callback: () => void this.runCapture() });
     this.addCommand({ id: "apply", name: "Apply (store → this device)", callback: () => void this.runApply() });
     this.addCommand({ id: "revert-last-apply", name: "Revert last apply", callback: () => void this.runRevert() });
     this.addCommand({
-      id: "import-from-external",
-      name: "Import from external source",
+      id: "pull",
+      name: "Pull (remote → store)",
       checkCallback: (checking) => {
-        if (!Platform.isDesktop) return false;
-        if (!checking) void this.runImport();
+        if (!this.transportAvailable()) return false;
+        if (!checking) void this.runPull();
         return true;
       },
     });
+    this.addCommand({
+      id: "push",
+      name: "Push (store → remote)",
+      checkCallback: (checking) => {
+        if (!this.transportAvailable()) return false;
+        if (!checking) void this.runPush();
+        return true;
+      },
+    });
+  }
+
+  transportAvailable(): boolean {
+    return Platform.isDesktop && this.settings.externalSources.length > 0;
   }
 
   private pluginRegistry(): CommunityPluginRegistry {
@@ -189,25 +204,47 @@ export default class ConfigSyncPlugin extends Plugin {
     }
   }
 
-  private async runImport(): Promise<void> {
+  private async runPull(): Promise<void> {
     const sources = this.settings.externalSources;
     if (sources.length === 0) {
-      new Notice("Config Sync: no external sources configured (Settings → Config Sync)");
+      new Notice("Config Sync: no remotes configured (Settings → Config Sync → Remotes)");
       return;
     }
     new SourceSelectModal(this.app, sources, (source) => {
-      void this.importFrom(source);
+      void this.pullFrom(source);
     }).open();
   }
 
-  private async importFrom(source: ExternalSource): Promise<void> {
+  private async pullFrom(source: ExternalSource): Promise<void> {
     try {
       const ctx = await this.coreContext();
       const reader = await this.createReader(source);
       const result = await importExternal(ctx, reader);
-      new ReportModal(this.app, `Config Sync: Import report (${source.name})`, [result]).open();
+      new ReportModal(this.app, `Config Sync: Pull report (${source.name})`, [result]).open();
     } catch (e) {
-      new Notice(`Config Sync import failed: ${(e as Error).message}`, 10000);
+      new Notice(`Config Sync pull failed: ${(e as Error).message}`, 10000);
+    }
+  }
+
+  private async runPush(): Promise<void> {
+    const sources = this.settings.externalSources;
+    if (sources.length === 0) {
+      new Notice("Config Sync: no remotes configured (Settings → Config Sync → Remotes)");
+      return;
+    }
+    new SourceSelectModal(this.app, sources, (source) => {
+      void this.pushTo(source);
+    }).open();
+  }
+
+  private async pushTo(source: ExternalSource): Promise<void> {
+    try {
+      const ctx = await this.coreContext();
+      const writer = await this.createWriter(source);
+      const result = await pushExternal(ctx, writer);
+      new ReportModal(this.app, `Config Sync: Push report (${source.name})`, [result]).open();
+    } catch (e) {
+      new Notice(`Config Sync push failed: ${(e as Error).message}`, 10000);
     }
   }
 
@@ -221,6 +258,15 @@ export default class ConfigSyncPlugin extends Plugin {
     const { createGitReader } = await import("./external/gitSource");
     const adapter = this.app.vault.adapter as unknown as { getBasePath(): string };
     return createGitReader(adapter.getBasePath(), source.remote, source.branch, source.root);
+  }
+
+  private async createWriter(source: ExternalSource): Promise<ExternalStoreWriter> {
+    if (source.type === "local-path") {
+      const { createLocalPathWriter } = await import("./external/localPath");
+      return createLocalPathWriter(source.path, source.root);
+    }
+    const { createGitWriter } = await import("./external/gitSource");
+    return createGitWriter(source.remote, source.branch, source.root);
   }
 
   async readGroupsFile(): Promise<SyncGroup[]> {
