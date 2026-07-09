@@ -76,10 +76,41 @@ describe("publish", () => {
     });
   });
 
-  it("fails with the group name when a source is missing", async () => {
-    const { io, ctx } = setup();
-    io.seed({ "cs/config-sync.json": MANIFEST });
-    await expect(publish(ctx)).rejects.toThrow('group "hotkeys"');
+  it("reports missing sources as per-group errors and publishes the rest", async () => {
+    const { io, plugins, ctx } = setup();
+    plugins.installed.set("demo", "1.2.3");
+    io.seed({
+      "cs/config-sync.json": MANIFEST,
+      ".obs/hotkeys.json": '{"a":1}',
+      ".obsidian.vimrc": "imap jk <Esc>",
+      ".obs/plugins/demo/data.json": '{"theme":"x"}',
+      // snippets dir intentionally missing
+    });
+    const results = await publish(ctx);
+    const status = Object.fromEntries(results.map((r) => [r.group, r.status]));
+    expect(status["snippets"]).toBe("error");
+    expect(status["hotkeys"]).toBe("ok");
+    expect(results.find((r) => r.group === "snippets")?.messages[0]).toContain("nothing to publish yet");
+    expect(await io.read("cs/store/configdir/hotkeys.json")).toBe('{"a":1}');
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, unknown> };
+    expect(lock.groups["plugin-demo"]).toBeDefined();
+    expect(await io.exists("cs/store/configdir/snippets")).toBe(false);
+  });
+
+  it("skips the version stamp for a plugin group whose source is missing", async () => {
+    const { io, plugins, ctx } = setup();
+    plugins.installed.set("demo", "1.2.3");
+    io.seed({
+      "cs/config-sync.json": MANIFEST,
+      ".obs/hotkeys.json": '{"a":1}',
+      ".obs/snippets/one.css": "one",
+      ".obsidian.vimrc": "x",
+      // plugin demo data.json intentionally missing
+    });
+    const results = await publish(ctx);
+    expect(results.find((r) => r.group === "plugin-demo")?.status).toBe("error");
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, unknown> };
+    expect(lock.groups["plugin-demo"]).toBeUndefined();
   });
 });
 
