@@ -1,6 +1,6 @@
 import { FileIO } from "./io";
 import { SyncGroup } from "./types";
-import { BLACKLISTED_PLUGIN_DIRS } from "./manifest";
+import { BLACKLISTED_PLUGIN_DIRS, setReservedPathResolver } from "./manifest";
 
 export interface CatalogItem {
   name: string;
@@ -296,3 +296,5 @@ export function splitLocation(path: string): { location: "config" | "vault"; rel
 export function joinLocation(location: "config" | "vault", rel: string): string {
   return location === "config" ? `{configDir}/${rel}` : rel;
 }
+
+setReservedPathResolver(expectedPathForName);

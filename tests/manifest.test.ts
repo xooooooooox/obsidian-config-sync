@@ -6,6 +6,7 @@ import {
   validateSyncManifest,
   validateExternalSources,
   ManifestValidationError,
+  setReservedPathResolver,
 } from "../src/core/manifest";
 
 function manifestWith(groups: unknown[]): string {
@@ -128,5 +129,28 @@ describe("validateExternalSources", () => {
   });
   it("rejects non-array input", () => {
     expect(() => validateExternalSources({})).toThrow("array");
+  });
+});
+
+describe("reserved-name validation", () => {
+  it("rejects a group that takes a reserved name with the wrong path", () => {
+    setReservedPathResolver((name) => (name === "graph" ? "{configDir}/graph.json" : null));
+    const g = { name: "graph", path: "{configDir}/custom.json", type: "file", devices: "all" };
+    expect(() => parseSyncManifest(manifestWith([g]))).toThrow("reserved");
+    setReservedPathResolver(null);
+  });
+
+  it("accepts a reserved name at its expected path", () => {
+    setReservedPathResolver((name) => (name === "graph" ? "{configDir}/graph.json" : null));
+    const g = { name: "graph", path: "{configDir}/graph.json", type: "file", devices: "all" };
+    expect(parseSyncManifest(manifestWith([g])).groups[0]?.name).toBe("graph");
+    setReservedPathResolver(null);
+  });
+
+  it("leaves non-reserved names alone", () => {
+    setReservedPathResolver((name) => (name === "graph" ? "{configDir}/graph.json" : null));
+    const g = { name: "my-own", path: "{configDir}/whatever.json", type: "file", devices: "all" };
+    expect(parseSyncManifest(manifestWith([g])).groups[0]?.name).toBe("my-own");
+    setReservedPathResolver(null);
   });
 });

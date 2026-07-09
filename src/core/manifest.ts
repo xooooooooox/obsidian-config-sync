@@ -9,6 +9,12 @@ export class ManifestValidationError extends Error {
   }
 }
 
+let reservedPathResolver: ((name: string) => string | null) | null = null;
+
+export function setReservedPathResolver(fn: ((name: string) => string | null) | null): void {
+  reservedPathResolver = fn;
+}
+
 export const BLACKLISTED_PLUGIN_DIRS = ["remotely-save", "ioto-update", "slides-rup", "obsidian-config-sync"];
 
 function isValidType(v: unknown): v is "file" | "dir" {
@@ -86,6 +92,14 @@ function parseGroup(g: unknown, index: number): SyncGroup {
     throw new ManifestValidationError(`group "${name}": "description" must be a string`);
   }
   assertNotBlacklisted(name, path);
+  if (reservedPathResolver !== null) {
+    const expected = reservedPathResolver(name);
+    if (expected !== null && expected !== path) {
+      throw new ManifestValidationError(
+        `group "${name}": the name "${name}" is reserved for a built-in item at "${expected}" — rename this custom rule`
+      );
+    }
+  }
   const group: SyncGroup = { name, path, type, devices };
   if (validatedSanitize !== undefined) group.sanitize = validatedSanitize;
   const trimmedDescription = typeof description === "string" ? description.trim() : "";
