@@ -1,4 +1,4 @@
-import { Notice, Platform, Plugin } from "obsidian";
+import { Menu, Notice, Platform, Plugin } from "obsidian";
 import {
   CoreContext,
   ExternalStoreReader,
@@ -18,7 +18,7 @@ import {
 } from "./core/ConfigSyncCore";
 import { type CatalogSection, listCoreSections, listDiscovered, listOptionSections, listPluginSections } from "./core/catalog";
 import { PkmMode, PkmProbe, resolveEffectiveMode, resolveRootPath } from "./core/pkm";
-import { ExternalSource, SyncGroup } from "./core/types";
+import { ExternalSource, RibbonButtons, SyncGroup } from "./core/types";
 import { GroupSelectModal } from "./ui/GroupSelectModal";
 import { confirmWarnings } from "./ui/ConfirmModal";
 import { ReportModal } from "./ui/ReportModal";
@@ -29,9 +29,15 @@ interface ConfigSyncSettings {
   pkmMode: PkmMode;
   rootPath: string; // "" = follow the PKM mode default
   externalSources: ExternalSource[];
+  ribbonButtons: RibbonButtons;
 }
 
-const DEFAULT_SETTINGS: ConfigSyncSettings = { pkmMode: "auto", rootPath: "", externalSources: [] };
+const DEFAULT_SETTINGS: ConfigSyncSettings = {
+  pkmMode: "auto",
+  rootPath: "",
+  externalSources: [],
+  ribbonButtons: { capture: false, apply: false, revert: false, pull: false, push: false },
+};
 
 // app.plugins is not part of the public API; this is the community-standard access path.
 interface CommunityPluginRegistry {
@@ -48,24 +54,13 @@ interface InternalPluginsRegistry {
 
 export default class ConfigSyncPlugin extends Plugin {
   settings: ConfigSyncSettings = DEFAULT_SETTINGS;
+  private individualRibbons: HTMLElement[] = [];
 
   async onload(): Promise<void> {
     await this.loadSettings();
     this.addSettingTab(new ConfigSyncSettingTab(this.app, this));
-    this.addRibbonIcon("upload", "Config Sync: Capture", () => {
-      void this.runCapture();
-    });
-    this.addRibbonIcon("folder-sync", "Config Sync: Apply", () => {
-      void this.runApply();
-    });
-    this.addRibbonIcon("undo-2", "Config Sync: Revert last apply", () => {
-      void this.runRevert();
-    });
-    if (Platform.isDesktop) {
-      this.addRibbonIcon("folder-input", "Config Sync: Import from external source", () => {
-        void this.runPull();
-      });
-    }
+    this.addRibbonIcon("refresh-cw", "Config Sync", (evt) => this.openSyncMenu(evt));
+    this.refreshRibbons();
     this.addCommand({ id: "capture", name: "Capture (this device's config → store)", callback: () => void this.runCapture() });
     this.addCommand({ id: "apply", name: "Apply (store → this device)", callback: () => void this.runApply() });
     this.addCommand({ id: "revert-last-apply", name: "Revert last apply", callback: () => void this.runRevert() });
@@ -91,6 +86,33 @@ export default class ConfigSyncPlugin extends Plugin {
 
   transportAvailable(): boolean {
     return Platform.isDesktop && this.settings.externalSources.length > 0;
+  }
+
+  private openSyncMenu(evt: MouseEvent): void {
+    const menu = new Menu();
+    menu.addItem((i) => i.setTitle("Capture (config → store)").setIcon("upload").onClick(() => void this.runCapture()));
+    menu.addItem((i) => i.setTitle("Apply (store → this device)").setIcon("folder-sync").onClick(() => void this.runApply()));
+    menu.addItem((i) => i.setTitle("Revert last apply").setIcon("undo-2").onClick(() => void this.runRevert()));
+    if (this.transportAvailable()) {
+      menu.addSeparator();
+      menu.addItem((i) => i.setTitle("Pull (remote → store)").setIcon("folder-input").onClick(() => void this.runPull()));
+      menu.addItem((i) => i.setTitle("Push (store → remote)").setIcon("upload-cloud").onClick(() => void this.runPush()));
+    }
+    menu.showAtMouseEvent(evt);
+  }
+
+  refreshRibbons(): void {
+    for (const el of this.individualRibbons) el.remove();
+    this.individualRibbons = [];
+    const rb = this.settings.ribbonButtons;
+    const add = (icon: string, title: string, run: () => void): void => {
+      this.individualRibbons.push(this.addRibbonIcon(icon, title, () => run()));
+    };
+    if (rb.capture) add("upload", "Config Sync: Capture", () => void this.runCapture());
+    if (rb.apply) add("folder-sync", "Config Sync: Apply", () => void this.runApply());
+    if (rb.revert) add("undo-2", "Config Sync: Revert last apply", () => void this.runRevert());
+    if (rb.pull && this.transportAvailable()) add("folder-input", "Config Sync: Pull", () => void this.runPull());
+    if (rb.push && this.transportAvailable()) add("upload-cloud", "Config Sync: Push", () => void this.runPush());
   }
 
   private pluginRegistry(): CommunityPluginRegistry {

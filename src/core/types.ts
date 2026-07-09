@@ -31,3 +31,6 @@ export interface GroupResult {
 export type ExternalSource =
   | { name: string; type: "local-path"; path: string; root: string }
   | { name: string; type: "git"; remote: string; branch: string; root: string };
+
+export type RibbonKey = "capture" | "apply" | "revert" | "pull" | "push";
+export type RibbonButtons = Record<RibbonKey, boolean>;

@@ -1,5 +1,5 @@
 import { App, ButtonComponent, DropdownComponent, ExtraButtonComponent, Notice, Plugin, PluginSettingTab, SearchComponent, Setting, TextComponent } from "obsidian";
-import { DeviceClass, ExternalSource, SyncGroup } from "../core/types";
+import { DeviceClass, ExternalSource, RibbonKey, SyncGroup } from "../core/types";
 import { PkmMode } from "../core/pkm";
 import { validateExternalSources } from "../core/manifest";
 import {
@@ -17,8 +17,10 @@ import {
 import { confirmWarnings } from "./ConfirmModal";
 
 export interface SettingsHost extends Plugin {
-  settings: { pkmMode: PkmMode; rootPath: string; externalSources: ExternalSource[] };
+  settings: { pkmMode: PkmMode; rootPath: string; externalSources: ExternalSource[]; ribbonButtons: Record<RibbonKey, boolean> };
   saveSettings(): Promise<void>;
+  refreshRibbons(): void;
+  transportAvailable(): boolean;
   readGroupsFile(): Promise<SyncGroup[]>;
   writeGroupsFile(groups: SyncGroup[]): Promise<void>;
   resolvedRootPath(): Promise<string>;
@@ -171,6 +173,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       case "general":
         this.renderPkmMode(containerEl);
         await this.renderDataFolder(containerEl, gen);
+        this.renderRibbonToggles(containerEl);
         break;
       case "obsidian":
       case "core":
@@ -337,6 +340,33 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
           this.refresh();
         });
       });
+  }
+
+  private renderRibbonToggles(containerEl: HTMLElement): void {
+    new Setting(containerEl)
+      .setName("Ribbon buttons")
+      .setDesc("The Config Sync ribbon icon always opens a menu of available actions. Optionally also show individual ribbon icons.")
+      .setHeading();
+    const defs: { key: RibbonKey; label: string; transport: boolean }[] = [
+      { key: "capture", label: "Capture", transport: false },
+      { key: "apply", label: "Apply", transport: false },
+      { key: "revert", label: "Revert last apply", transport: false },
+      { key: "pull", label: "Pull", transport: true },
+      { key: "push", label: "Push", transport: true },
+    ];
+    for (const d of defs) {
+      const s = new Setting(containerEl).setName(d.label);
+      if (d.transport && !this.host.transportAvailable()) {
+        s.setDesc("Shown on desktop once a remote is configured.");
+      }
+      s.addToggle((t) =>
+        t.setValue(this.host.settings.ribbonButtons[d.key]).onChange(async (v) => {
+          this.host.settings.ribbonButtons[d.key] = v;
+          await this.host.saveSettings();
+          this.host.refreshRibbons();
+        })
+      );
+    }
   }
 
   private renderGroupsReadError(containerEl: HTMLElement): boolean {
