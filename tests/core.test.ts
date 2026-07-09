@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CoreContext, publish, loadManifest, groupsForDevice, apply, checkApply, revertLastApply, importExternal, ExternalStoreReader, pluginIdForGroup, createStarterManifest, readGroups, writeGroups, SCHEMA_URL } from "../src/core/ConfigSyncCore";
+import { CoreContext, capture, loadManifest, groupsForDevice, apply, checkApply, revertLastApply, importExternal, ExternalStoreReader, pushExternal, ExternalStoreWriter, pluginIdForGroup, createStarterManifest, readGroups, writeGroups, SCHEMA_URL } from "../src/core/ConfigSyncCore";
 import { parseSyncManifest } from "../src/core/manifest";
 import { MemFS, FakePlugins } from "./memfs";
 
@@ -49,7 +49,7 @@ describe("pluginIdForGroup", () => {
   });
 });
 
-describe("publish", () => {
+describe("capture", () => {
   it("mirrors groups into the store with sanitization, deletion propagation and version stamps", async () => {
     const { io, plugins, ctx } = setup();
     plugins.installed.set("demo", "1.2.3");
@@ -62,7 +62,7 @@ describe("publish", () => {
       ".obs/plugins/demo/data.json": '{"vikaToken":"secret","theme":"x"}',
       "cs/store/configdir/snippets/stale.css": "stale",
     });
-    const results = await publish(ctx);
+    const results = await capture(ctx);
     expect(results.every((r) => r.status === "ok")).toBe(true);
     expect(await io.read("cs/store/configdir/hotkeys.json")).toBe('{"a":1}');
     expect(await io.read("cs/store/obsidian.vimrc")).toBe("imap jk <Esc>");
@@ -86,11 +86,11 @@ describe("publish", () => {
       ".obs/plugins/demo/data.json": '{"theme":"x"}',
       // snippets dir intentionally missing
     });
-    const results = await publish(ctx);
+    const results = await capture(ctx);
     const status = Object.fromEntries(results.map((r) => [r.group, r.status]));
     expect(status["snippets"]).toBe("error");
     expect(status["hotkeys"]).toBe("ok");
-    expect(results.find((r) => r.group === "snippets")?.messages[0]).toContain("nothing to publish yet");
+    expect(results.find((r) => r.group === "snippets")?.messages[0]).toContain("nothing to capture yet");
     expect(await io.read("cs/store/configdir/hotkeys.json")).toBe('{"a":1}');
     const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, unknown> };
     expect(lock.groups["plugin-demo"]).toBeDefined();
@@ -107,7 +107,7 @@ describe("publish", () => {
       ".obsidian.vimrc": "x",
       // plugin demo data.json intentionally missing
     });
-    const results = await publish(ctx);
+    const results = await capture(ctx);
     expect(results.find((r) => r.group === "plugin-demo")?.status).toBe("error");
     const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, unknown> };
     expect(lock.groups["plugin-demo"]).toBeUndefined();
@@ -172,7 +172,7 @@ describe("apply", () => {
     io.seed({ "cs/config-sync.json": MANIFEST });
     const results = await apply(ctx, ["hotkeys"]);
     expect(results[0]?.status).toBe("error");
-    expect(results[0]?.messages[0]).toContain("publish it from the source vault first");
+    expect(results[0]?.messages[0]).toContain("capture it from the source vault first");
   });
 
   it("still writes the backup index when a group throws mid-run", async () => {
@@ -275,6 +275,62 @@ describe("importExternal", () => {
   });
 });
 
+function fakeWriter(initial: Record<string, string>): {
+  writer: ExternalStoreWriter;
+  files: Record<string, string>;
+  finalized: number;
+} {
+  const files: Record<string, string> = { ...initial };
+  const state = { finalized: 0 };
+  const writer: ExternalStoreWriter = {
+    async listFiles() {
+      return Object.keys(files).sort();
+    },
+    async writeFile(rel, content) {
+      files[rel] = content;
+    },
+    async deleteFile(rel) {
+      delete files[rel];
+    },
+    async finalize() {
+      state.finalized += 1;
+    },
+  };
+  return {
+    writer,
+    files,
+    get finalized() {
+      return state.finalized;
+    },
+  } as { writer: ExternalStoreWriter; files: Record<string, string>; finalized: number };
+}
+
+describe("pushExternal", () => {
+  it("writes the whole local store to the remote with deletion propagation and finalizes once", async () => {
+    const { io, ctx } = setup();
+    io.seed({
+      "cs/config-sync.json": '{"version":1,"groups":[]}',
+      "cs/store.lock.json": '{"publishedAt":"t","groups":{}}',
+      "cs/store/configdir/hotkeys.json": '{"a":9}',
+    });
+    const fw = fakeWriter({ "config-sync.json": "OLD", "store/gone.css": "stale" });
+    const result = await pushExternal(ctx, fw.writer);
+    expect(result.status).toBe("ok");
+    expect(fw.files["config-sync.json"]).toBe('{"version":1,"groups":[]}');
+    expect(fw.files["store/configdir/hotkeys.json"]).toBe('{"a":9}');
+    expect(fw.files["store/gone.css"]).toBeUndefined();
+    expect(result.filesDeleted).toEqual(["store/gone.css"]);
+    expect(fw.finalized).toBe(1);
+  });
+
+  it("refuses to push when the local store has no config-sync.json", async () => {
+    const { io, ctx } = setup();
+    io.seed({ "cs/store/configdir/hotkeys.json": "{}" });
+    const fw = fakeWriter({});
+    await expect(pushExternal(ctx, fw.writer)).rejects.toThrow("no config-sync.json");
+  });
+});
+
 describe("createStarterManifest", () => {
   it("creates a parseable starter groups file and never overwrites", async () => {
     const { io, ctx } = setup();
@@ -322,12 +378,12 @@ describe("readGroups / writeGroups", () => {
   });
 });
 
-describe("starter-then-publish (implicit creation flow)", () => {
+describe("starter-then-capture (implicit creation flow)", () => {
   it("publishes the starter groups created on demand", async () => {
     const { io, ctx } = setup();
     io.seed({ ".obs/snippets/one.css": "one", ".obs/hotkeys.json": "{}" });
     expect(await createStarterManifest(ctx)).toBe("created");
-    const results = await publish(ctx);
+    const results = await capture(ctx);
     expect(results.map((r) => r.group)).toEqual(["snippets", "hotkeys"]);
     expect(await io.read("cs/store/configdir/snippets/one.css")).toBe("one");
   });

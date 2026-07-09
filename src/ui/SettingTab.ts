@@ -1,5 +1,5 @@
 import { App, ButtonComponent, DropdownComponent, ExtraButtonComponent, Notice, Plugin, PluginSettingTab, SearchComponent, Setting, TextComponent } from "obsidian";
-import { DeviceClass, ExternalSource, SyncGroup } from "../core/types";
+import { DeviceClass, ExternalSource, RibbonKey, SyncGroup } from "../core/types";
 import { PkmMode } from "../core/pkm";
 import { validateExternalSources } from "../core/manifest";
 import {
@@ -17,8 +17,10 @@ import {
 import { confirmWarnings } from "./ConfirmModal";
 
 export interface SettingsHost extends Plugin {
-  settings: { pkmMode: PkmMode; rootPath: string; externalSources: ExternalSource[] };
+  settings: { pkmMode: PkmMode; rootPath: string; externalSources: ExternalSource[]; ribbonButtons: Record<RibbonKey, boolean> };
   saveSettings(): Promise<void>;
+  refreshRibbons(): void;
+  transportAvailable(): boolean;
   readGroupsFile(): Promise<SyncGroup[]>;
   writeGroupsFile(groups: SyncGroup[]): Promise<void>;
   resolvedRootPath(): Promise<string>;
@@ -64,7 +66,7 @@ const TABS: { id: PanelTab; label: string }[] = [
   { id: "core", label: "Core plugins" },
   { id: "plugins", label: "Community plugins" },
   { id: "advanced", label: "Advanced" },
-  { id: "sources", label: "External sources" },
+  { id: "sources", label: "Remotes" },
 ];
 
 const SECTION_TAB: Record<"obsidian" | "core" | "plugins", string> = {
@@ -169,8 +171,10 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private async renderActiveTab(containerEl: HTMLElement, gen: number): Promise<void> {
     switch (this.activeTab) {
       case "general":
+        this.renderTransportStatus(containerEl);
         this.renderPkmMode(containerEl);
         await this.renderDataFolder(containerEl, gen);
+        this.renderRibbonToggles(containerEl);
         break;
       case "obsidian":
       case "core":
@@ -292,6 +296,19 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     this.renderGroupsError(containerEl);
   }
 
+  private renderTransportStatus(containerEl: HTMLElement): void {
+    const remotes = this.host.settings.externalSources;
+    const s = new Setting(containerEl).setName("Store transport");
+    if (remotes.length === 0) {
+      s.setDesc(
+        "Store syncs via your note-sync tool (remotely-save / Obsidian Sync / …). Add a remote under Remotes for git or cross-vault sync."
+      );
+    } else {
+      const list = remotes.map((r) => `${r.name} (${r.type})`).join(", ");
+      s.setDesc(`Remotes: ${list}. Use Pull / Push to sync the store.`);
+    }
+  }
+
   private renderPkmMode(containerEl: HTMLElement): void {
     const detected = this.host.detectedMode();
     new Setting(containerEl)
@@ -337,6 +354,33 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
           this.refresh();
         });
       });
+  }
+
+  private renderRibbonToggles(containerEl: HTMLElement): void {
+    new Setting(containerEl)
+      .setName("Ribbon buttons")
+      .setDesc("The Config Sync ribbon icon always opens a menu of available actions. Optionally also show individual ribbon icons.")
+      .setHeading();
+    const defs: { key: RibbonKey; label: string; transport: boolean }[] = [
+      { key: "capture", label: "Capture", transport: false },
+      { key: "apply", label: "Apply", transport: false },
+      { key: "revert", label: "Revert last apply", transport: false },
+      { key: "pull", label: "Pull", transport: true },
+      { key: "push", label: "Push", transport: true },
+    ];
+    for (const d of defs) {
+      const s = new Setting(containerEl).setName(d.label);
+      if (d.transport && !this.host.transportAvailable()) {
+        s.setDesc("Shown on desktop once a remote is configured.");
+      }
+      s.addToggle((t) =>
+        t.setValue(this.host.settings.ribbonButtons[d.key]).onChange(async (v) => {
+          this.host.settings.ribbonButtons[d.key] = v;
+          await this.host.saveSettings();
+          this.host.refreshRibbons();
+        })
+      );
+    }
   }
 
   private renderGroupsReadError(containerEl: HTMLElement): boolean {
@@ -575,15 +619,17 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
 
   private renderSources(containerEl: HTMLElement): void {
     new Setting(containerEl)
-      .setName("External sources")
+      .setName("Remotes")
       .setHeading()
-      .setDesc("Pull the synced settings of another vault into this one (e.g. from your main vault into a published copy).");
+      .setDesc(
+        "Places you Pull the store from and Push it to — another vault (local path) or a git repo. note-sync handles your own devices without a remote."
+      );
     const listEl = containerEl.createDiv();
     this.sources.forEach((source, index) => this.renderSourceRow(listEl, source, index));
     this.sourcesErrorEl = containerEl.createEl("p", { cls: "mod-warning" });
     this.sourcesErrorEl.setText(this.sourcesErrorMsg);
     new Setting(containerEl).addButton((b) =>
-      b.setButtonText("Add source").onClick(() => {
+      b.setButtonText("Add remote").onClick(() => {
         this.sources.push({ name: "", type: "local-path", path: "", remote: "", branch: "", root: "" });
         this.refresh();
       })
@@ -633,7 +679,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       })
     );
     row.addExtraButton((b) =>
-      b.setIcon("trash").setTooltip("Delete source").onClick(async () => {
+      b.setIcon("trash").setTooltip("Delete remote").onClick(async () => {
         this.sources.splice(index, 1);
         await this.saveSources();
         this.refresh();
