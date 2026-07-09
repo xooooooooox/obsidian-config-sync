@@ -24,8 +24,14 @@
 }
 
 .config-sync-search {
-  border-top: none;
-  padding-top: 0;
+  display: flex;
+  justify-content: center;
+  margin-bottom: var(--size-4-4);
+}
+
+.config-sync-search .search-input-container {
+  width: 100%;
+  max-width: 40em;
 }
 
 .config-sync-empty {
