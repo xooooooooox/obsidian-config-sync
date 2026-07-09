@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CoreContext, publish, loadManifest, groupsForDevice, apply, checkApply, revertLastApply, importExternal, ExternalStoreReader, pluginIdForGroup, createStarterManifest } from "../src/core/ConfigSyncCore";
+import { CoreContext, publish, loadManifest, groupsForDevice, apply, checkApply, revertLastApply, importExternal, ExternalStoreReader, pluginIdForGroup, createStarterManifest, readGroups, writeGroups, SCHEMA_URL } from "../src/core/ConfigSyncCore";
 import { parseSyncManifest } from "../src/core/manifest";
 import { MemFS, FakePlugins } from "./memfs";
 
@@ -253,5 +253,41 @@ describe("createStarterManifest", () => {
     await io.write("cs/config-sync.json", '{"version":1,"groups":[]}');
     expect(await createStarterManifest(ctx)).toBe("exists");
     expect(await io.read("cs/config-sync.json")).toBe('{"version":1,"groups":[]}');
+  });
+});
+
+describe("readGroups / writeGroups", () => {
+  it("returns [] when the groups file is missing", async () => {
+    const { ctx } = setup();
+    expect(await readGroups(ctx)).toEqual([]);
+  });
+
+  it("writes a schema-referenced file that round-trips", async () => {
+    const { io, ctx } = setup();
+    await writeGroups(ctx, [{ name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all" }]);
+    const raw = JSON.parse(await io.read("cs/config-sync.json")) as Record<string, unknown>;
+    expect(raw.$schema).toBe(SCHEMA_URL);
+    const groups = await readGroups(ctx);
+    expect(groups.map((g) => g.name)).toEqual(["hotkeys"]);
+  });
+
+  it("rejects invalid group lists without touching the file", async () => {
+    const { io, ctx } = setup();
+    await writeGroups(ctx, []);
+    const before = await io.read("cs/config-sync.json");
+    const bad = [{ name: "rs", path: "{configDir}/plugins/remotely-save/data.json", type: "file" as const, devices: "all" as const }];
+    await expect(writeGroups(ctx, bad)).rejects.toThrow("blacklisted");
+    expect(await io.read("cs/config-sync.json")).toBe(before);
+  });
+});
+
+describe("starter-then-publish (implicit creation flow)", () => {
+  it("publishes the starter groups created on demand", async () => {
+    const { io, ctx } = setup();
+    io.seed({ ".obs/snippets/one.css": "one", ".obs/hotkeys.json": "{}" });
+    expect(await createStarterManifest(ctx)).toBe("created");
+    const results = await publish(ctx);
+    expect(results.map((r) => r.group)).toEqual(["snippets", "hotkeys"]);
+    expect(await io.read("cs/store/configdir/snippets/one.css")).toBe("one");
   });
 });

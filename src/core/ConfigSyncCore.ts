@@ -1,7 +1,7 @@
 import { FileIO, ensureParentDir, listFilesRecursive, pruneEmptyDirsUnder } from "./io";
 import { GroupResult, StoreLock, SyncGroup, SyncManifest } from "./types";
 import { groupRealPath, groupStorePath, relativeTo } from "./pathing";
-import { parseStoreLock, parseSyncManifest } from "./manifest";
+import { parseStoreLock, parseSyncManifest, validateSyncManifest } from "./manifest";
 import { sanitizeJson, mergePreservingSanitized } from "./sanitize";
 
 export interface PluginHost {
@@ -365,4 +365,17 @@ export async function createStarterManifest(ctx: CoreContext): Promise<"created"
   await ensureParentDir(ctx.io, p);
   await ctx.io.write(p, STARTER_MANIFEST);
   return "created";
+}
+
+export async function readGroups(ctx: CoreContext): Promise<SyncGroup[]> {
+  const p = manifestPath(ctx);
+  if (!(await ctx.io.exists(p))) return [];
+  return parseSyncManifest(await ctx.io.read(p)).groups;
+}
+
+export async function writeGroups(ctx: CoreContext, groups: SyncGroup[]): Promise<void> {
+  const manifest = validateSyncManifest({ version: 1, groups });
+  const p = manifestPath(ctx);
+  await ensureParentDir(ctx.io, p);
+  await ctx.io.write(p, JSON.stringify({ $schema: SCHEMA_URL, version: 1, groups: manifest.groups }, null, 2) + "\n");
 }
