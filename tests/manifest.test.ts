@@ -40,6 +40,12 @@ describe("parseSyncManifest", () => {
     const g = { name: "rs", path: "{configDir}/plugins/remotely-save/data.json", type: "file", devices: "all" };
     expect(() => parseSyncManifest(manifestWith([g]))).toThrow("blacklisted");
   });
+  it("rejects the plugin's own dir under both old and new ids", () => {
+    const neu = { name: "self", path: "{configDir}/plugins/config-sync/data.json", type: "file", devices: "all" };
+    expect(() => parseSyncManifest(manifestWith([neu]))).toThrow("blacklisted");
+    const old = { name: "self-old", path: "{configDir}/plugins/obsidian-config-sync/data.json", type: "file", devices: "all" };
+    expect(() => parseSyncManifest(manifestWith([old]))).toThrow("blacklisted");
+  });
   it("accepts workspace-pattern paths (soft-blocked in the UI, not in validation)", () => {
     const g = { name: "ws", path: "{configDir}/workspace.json", type: "file", devices: "all" };
     const m = parseSyncManifest(manifestWith([g]));

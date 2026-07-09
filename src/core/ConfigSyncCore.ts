@@ -32,7 +32,7 @@ export function storeDir(ctx: CoreContext): string {
 }
 
 export function backupDir(ctx: CoreContext): string {
-  return `${ctx.configDir}/plugins/obsidian-config-sync/backup`;
+  return `${ctx.configDir}/plugins/config-sync/backup`;
 }
 
 export function pluginIdForGroup(group: SyncGroup): string | null {
