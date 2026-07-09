@@ -290,6 +290,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       }
     }
     if (!any) listEl.createEl("p", { text: "No matching settings.", cls: "config-sync-empty" });
+    this.renderGroupsError(containerEl);
   }
 
   private renderPkmMode(containerEl: HTMLElement): void {

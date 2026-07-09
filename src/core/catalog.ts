@@ -1,6 +1,6 @@
 import { FileIO } from "./io";
 import { SyncGroup } from "./types";
-import { BLACKLISTED_PLUGIN_DIRS, setReservedPathResolver } from "./manifest";
+import { BLACKLISTED_PLUGIN_DIRS } from "./manifest";
 
 export interface CatalogItem {
   name: string;
@@ -94,10 +94,6 @@ export function findGroupByName(groups: SyncGroup[], name: string): SyncGroup | 
 
 function basename(p: string): string {
   return p.slice(p.lastIndexOf("/") + 1);
-}
-
-export function findGroupByPath(groups: SyncGroup[], path: string): SyncGroup | undefined {
-  return groups.find((g) => g.path === path);
 }
 
 const CORE_FILE_SET = new Set(Object.values(CORE_PLUGIN_FILES));
@@ -296,5 +292,3 @@ export function splitLocation(path: string): { location: "config" | "vault"; rel
 export function joinLocation(location: "config" | "vault", rel: string): string {
   return location === "config" ? `{configDir}/${rel}` : rel;
 }
-
-setReservedPathResolver(expectedPathForName);
