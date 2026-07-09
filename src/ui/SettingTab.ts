@@ -2,6 +2,7 @@ import { App, Notice, Plugin, PluginSettingTab, Setting } from "obsidian";
 import { DeviceClass, ExternalSource, SyncGroup } from "../core/types";
 import { PkmMode } from "../core/pkm";
 import { validateExternalSources } from "../core/manifest";
+import { CatalogItem, PluginItem, findGroupByPath, groupForItem, joinLocation, splitLocation } from "../core/catalog";
 
 export interface SettingsHost extends Plugin {
   settings: { pkmMode: PkmMode; rootPath: string; externalSources: ExternalSource[] };
@@ -10,6 +11,8 @@ export interface SettingsHost extends Plugin {
   writeGroupsFile(groups: SyncGroup[]): Promise<void>;
   resolvedRootPath(): Promise<string>;
   detectedMode(): "ioto" | "default";
+  listOptionItems(groups: SyncGroup[]): Promise<CatalogItem[]>;
+  listPluginItems(): PluginItem[];
 }
 
 interface SourceDraft {
@@ -47,6 +50,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private sourcesErrorEl: HTMLElement | null = null;
   private groupsErrorMsg = "";
   private sourcesErrorMsg = "";
+  private renderGen = 0;
 
   constructor(app: App, private host: SettingsHost) {
     super(app, host);
@@ -59,12 +63,14 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
 
   // Internal re-render that keeps in-progress drafts.
   private refresh(): void {
+    const gen = ++this.renderGen;
     const { containerEl } = this;
     containerEl.empty();
-    void this.render(containerEl);
+    void this.render(containerEl, gen);
   }
 
-  private async render(containerEl: HTMLElement): Promise<void> {
+  private async render(containerEl: HTMLElement, gen: number): Promise<void> {
+    if (gen !== this.renderGen) return;
     if (!this.loaded) {
       try {
         this.groups = await this.host.readGroupsFile();
@@ -75,10 +81,24 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       }
       this.sources = this.host.settings.externalSources.map(toDraft);
       this.loaded = true;
+      if (gen !== this.renderGen) return;
     }
     this.renderPkmMode(containerEl);
-    await this.renderDataFolder(containerEl);
-    this.renderGroups(containerEl);
+    await this.renderDataFolder(containerEl, gen);
+    if (gen !== this.renderGen) return;
+    if (this.groupsReadError !== null) {
+      containerEl.createEl("p", {
+        text: `Cannot read the sync configuration — fix <data folder>/config-sync.json manually and reopen this tab: ${this.groupsReadError}`,
+        cls: "mod-warning",
+      });
+    } else {
+      await this.renderOptions(containerEl, gen);
+      if (gen !== this.renderGen) return;
+      this.renderPlugins(containerEl);
+      this.groupsErrorEl = containerEl.createEl("p", { cls: "mod-warning" });
+      this.groupsErrorEl.setText(this.groupsErrorMsg);
+      this.renderAdvanced(containerEl);
+    }
     this.renderSources(containerEl);
   }
 
@@ -86,7 +106,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const detected = this.host.detectedMode();
     new Setting(containerEl)
       .setName("PKM mode")
-      .setDesc("Determines the default data folder. Auto detects IOTO through the ioto-update plugin.")
+      .setDesc("Adjusts the recommended storage location to match how your vault is organized. Auto detects IOTO vaults.")
       .addDropdown((d) =>
         d
           .addOption("auto", `Auto (detected: ${detected === "ioto" ? "IOTO" : "default"})`)
@@ -96,17 +116,20 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
           .onChange(async (v) => {
             this.host.settings.pkmMode = v as PkmMode;
             await this.host.saveSettings();
-            this.loaded = false; // effective root may have changed; reload drafts
-            this.refresh(); // update the data-folder placeholder
+            this.loaded = false; // effective root may change — reload drafts
+            this.refresh();
           })
       );
   }
 
-  private async renderDataFolder(containerEl: HTMLElement): Promise<void> {
+  private async renderDataFolder(containerEl: HTMLElement, gen: number): Promise<void> {
     const resolved = await this.host.resolvedRootPath();
+    if (gen !== this.renderGen) return;
     new Setting(containerEl)
       .setName("Data folder")
-      .setDesc(`Vault-relative folder holding config-sync.json and store/. Leave empty to follow the PKM mode default (currently: ${resolved}).`)
+      .setDesc(
+        `Where synced settings are stored inside your vault, so your note-sync app (e.g. remotely-save) carries them to your other devices. Leave empty to use the recommended location (currently: ${resolved}).`
+      )
       .addText((t) => {
         t.setPlaceholder(resolved);
         t.setValue(this.host.settings.rootPath);
@@ -126,26 +149,86 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       });
   }
 
-  private renderGroups(containerEl: HTMLElement): void {
+  private async renderOptions(containerEl: HTMLElement, gen: number): Promise<void> {
+    const items = await this.host.listOptionItems(this.groups);
+    if (gen !== this.renderGen) return;
     new Setting(containerEl)
-      .setName("Sync groups")
+      .setName("Obsidian")
       .setHeading()
-      .setDesc("Saved to <data folder>/config-sync.json when valid. The file can also be edited directly (JSON Schema referenced).");
-    if (this.groupsReadError !== null) {
-      containerEl.createEl("p", {
-        text: `Cannot read the groups file — fix it manually and reopen this tab: ${this.groupsReadError}`,
-        cls: "mod-warning",
-      });
-      return;
-    }
+      .setDesc("Choose which Obsidian settings follow you across devices.");
     const listEl = containerEl.createDiv();
+    for (const item of items) {
+      this.renderChecklistRow(listEl, item);
+    }
+  }
+
+  private renderPlugins(containerEl: HTMLElement): void {
+    new Setting(containerEl)
+      .setName("Community plugins")
+      .setHeading()
+      .setDesc("Sync a plugin's settings to your other devices. The plugin itself still installs from the community store or BRAT.");
+    const listEl = containerEl.createDiv();
+    for (const p of this.host.listPluginItems()) {
+      this.renderChecklistRow(listEl, {
+        label: p.name,
+        description: `Settings of ${p.id}.`,
+        path: p.dataPath,
+        type: "file",
+        exists: true,
+        disabledReason: p.disabledReason,
+      });
+    }
+  }
+
+  private renderChecklistRow(listEl: HTMLElement, item: CatalogItem): void {
+    const group = findGroupByPath(this.groups, item.path);
+    const row = new Setting(listEl).setName(item.label);
+    const descParts: string[] = [];
+    if (item.description !== null) descParts.push(item.description);
+    if (item.disabledReason !== null) descParts.push(item.disabledReason);
+    if (!item.exists && item.disabledReason === null) descParts.push("(not present in this vault yet)");
+    row.setDesc(descParts.join(" "));
+    if (group !== undefined && item.disabledReason === null) {
+      row.addDropdown((d) =>
+        d
+          .addOption("all", "all devices")
+          .addOption("desktop", "desktop only")
+          .addOption("mobile", "mobile only")
+          .setValue(group.devices)
+          .onChange((v) => {
+            group.devices = v as DeviceClass;
+            void this.saveGroups();
+          })
+      );
+    }
+    row.addToggle((t) => {
+      t.setValue(group !== undefined);
+      t.setDisabled(item.disabledReason !== null);
+      t.onChange(async (v) => {
+        if (v) {
+          this.groups.push(groupForItem(item.path, item.type, this.groups.map((g) => g.name)));
+        } else {
+          const idx = this.groups.findIndex((g) => g.path === item.path);
+          if (idx >= 0) this.groups.splice(idx, 1);
+        }
+        await this.saveGroups();
+        this.refresh();
+      });
+    });
+  }
+
+  private renderAdvanced(containerEl: HTMLElement): void {
+    const details = containerEl.createEl("details");
+    details.createEl("summary", { text: "Advanced" });
+    details.createEl("p", {
+      text: "Custom sync rules for anything not listed above — files at the vault root, extra folders, or per-key credential protection (sanitize).",
+    });
+    const listEl = details.createDiv();
     this.groups.forEach((group, index) => {
       this.renderGroupRow(listEl, group, index);
     });
-    this.groupsErrorEl = containerEl.createEl("p", { cls: "mod-warning" });
-    this.groupsErrorEl.setText(this.groupsErrorMsg);
-    new Setting(containerEl).addButton((b) =>
-      b.setButtonText("Add group").onClick(() => {
+    new Setting(details).addButton((b) =>
+      b.setButtonText("Add rule").onClick(() => {
         this.groups.push({ name: "", path: "", type: "file", devices: "all" });
         this.refresh();
       })
@@ -160,22 +243,40 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         void this.saveGroups();
       })
     );
+    const loc = splitLocation(group.path);
+    row.addDropdown((d) =>
+      d
+        .addOption("config", "Config folder")
+        .addOption("vault", "Vault root")
+        .setValue(loc.location)
+        .onChange((v) => {
+          group.path = joinLocation(v as "config" | "vault", splitLocation(group.path).rel);
+          void this.saveGroups();
+        })
+    );
     row.addText((t) =>
-      t.setPlaceholder("{configDir}/…").setValue(group.path).onChange((v) => {
-        group.path = v.trim();
+      t.setPlaceholder("relative path, e.g. plugins/x/data.json").setValue(loc.rel).onChange((v) => {
+        group.path = joinLocation(splitLocation(group.path).location, v.trim());
         void this.saveGroups();
       })
     );
     row.addDropdown((d) =>
-      d.addOption("file", "file").addOption("dir", "dir").setValue(group.type).onChange(async (v) => {
-        group.type = v as SyncGroup["type"];
-        if (group.type !== "file") delete group.sanitize;
-        await this.saveGroups();
-        this.refresh(); // enable/disable the sanitize field
-      })
+      d
+        .addOption("file", "file")
+        .addOption("dir", "dir")
+        .setValue(group.type)
+        .onChange(async (v) => {
+          group.type = v as SyncGroup["type"];
+          if (group.type !== "file") delete group.sanitize;
+          await this.saveGroups();
+          this.refresh();
+        })
     );
     row.addDropdown((d) =>
-      d.addOption("all", "all").addOption("desktop", "desktop").addOption("mobile", "mobile")
+      d
+        .addOption("all", "all")
+        .addOption("desktop", "desktop")
+        .addOption("mobile", "mobile")
         .setValue(group.devices)
         .onChange((v) => {
           group.devices = v as DeviceClass;
@@ -194,7 +295,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       });
     });
     row.addExtraButton((b) =>
-      b.setIcon("trash").setTooltip("Delete group").onClick(async () => {
+      b.setIcon("trash").setTooltip("Delete rule").onClick(async () => {
         this.groups.splice(index, 1);
         await this.saveGroups();
         this.refresh();
@@ -216,7 +317,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("External sources")
       .setHeading()
-      .setDesc("Import sources for this vault (used by the desktop-only Import command). Stored in plugin settings, never in the store.");
+      .setDesc("Pull the synced settings of another vault into this one (e.g. from your main vault into a published copy).");
     const listEl = containerEl.createDiv();
     this.sources.forEach((source, index) => {
       this.renderSourceRow(listEl, source, index);

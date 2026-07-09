@@ -87,7 +87,7 @@ export async function publish(ctx: CoreContext): Promise<GroupResult[]> {
   for (const group of manifest.groups) {
     const result = await publishGroup(ctx, group);
     const pluginId = pluginIdForGroup(group);
-    if (pluginId !== null) {
+    if (pluginId !== null && result.status !== "error") {
       const version = ctx.plugins.getInstalledPluginVersion(pluginId);
       if (version !== null) {
         lock.groups[group.name] = { sourcePluginVersion: version };
@@ -108,7 +108,9 @@ async function publishGroup(ctx: CoreContext, group: SyncGroup): Promise<GroupRe
   const store = `${storeDir(ctx)}/${groupStorePath(group.path)}`;
   const result = emptyResult(group.name, false);
   if (!(await ctx.io.exists(real))) {
-    throw new Error(`Publish failed: source of group "${group.name}" not found: ${real}`);
+    result.status = "error";
+    result.messages.push(`nothing to publish yet: ${real} does not exist in this vault`);
+    return result;
   }
   if (group.type === "file") {
     let content = await ctx.io.read(real);
