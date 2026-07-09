@@ -50,6 +50,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private sourcesErrorEl: HTMLElement | null = null;
   private groupsErrorMsg = "";
   private sourcesErrorMsg = "";
+  private renderGen = 0;
 
   constructor(app: App, private host: SettingsHost) {
     super(app, host);
@@ -62,12 +63,14 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
 
   // Internal re-render that keeps in-progress drafts.
   private refresh(): void {
+    const gen = ++this.renderGen;
     const { containerEl } = this;
     containerEl.empty();
-    void this.render(containerEl);
+    void this.render(containerEl, gen);
   }
 
-  private async render(containerEl: HTMLElement): Promise<void> {
+  private async render(containerEl: HTMLElement, gen: number): Promise<void> {
+    if (gen !== this.renderGen) return;
     if (!this.loaded) {
       try {
         this.groups = await this.host.readGroupsFile();
@@ -78,16 +81,19 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       }
       this.sources = this.host.settings.externalSources.map(toDraft);
       this.loaded = true;
+      if (gen !== this.renderGen) return;
     }
     this.renderPkmMode(containerEl);
-    await this.renderDataFolder(containerEl);
+    await this.renderDataFolder(containerEl, gen);
+    if (gen !== this.renderGen) return;
     if (this.groupsReadError !== null) {
       containerEl.createEl("p", {
         text: `Cannot read the sync configuration — fix <data folder>/config-sync.json manually and reopen this tab: ${this.groupsReadError}`,
         cls: "mod-warning",
       });
     } else {
-      await this.renderOptions(containerEl);
+      await this.renderOptions(containerEl, gen);
+      if (gen !== this.renderGen) return;
       this.renderPlugins(containerEl);
       this.groupsErrorEl = containerEl.createEl("p", { cls: "mod-warning" });
       this.groupsErrorEl.setText(this.groupsErrorMsg);
@@ -116,8 +122,9 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       );
   }
 
-  private async renderDataFolder(containerEl: HTMLElement): Promise<void> {
+  private async renderDataFolder(containerEl: HTMLElement, gen: number): Promise<void> {
     const resolved = await this.host.resolvedRootPath();
+    if (gen !== this.renderGen) return;
     new Setting(containerEl)
       .setName("Data folder")
       .setDesc(
@@ -142,13 +149,15 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       });
   }
 
-  private async renderOptions(containerEl: HTMLElement): Promise<void> {
+  private async renderOptions(containerEl: HTMLElement, gen: number): Promise<void> {
+    const items = await this.host.listOptionItems(this.groups);
+    if (gen !== this.renderGen) return;
     new Setting(containerEl)
       .setName("Obsidian")
       .setHeading()
       .setDesc("Choose which Obsidian settings follow you across devices.");
     const listEl = containerEl.createDiv();
-    for (const item of await this.host.listOptionItems(this.groups)) {
+    for (const item of items) {
       this.renderChecklistRow(listEl, item);
     }
   }
