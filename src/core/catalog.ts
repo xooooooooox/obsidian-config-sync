@@ -88,6 +88,28 @@ export function expectedPathForName(name: string): string | null {
   return null;
 }
 
+export function defaultGroupForName(name: string): SyncGroup | null {
+  for (const [file, meta] of Object.entries(OPTION_LABELS)) {
+    if (optionReservedName(file) === name) {
+      return {
+        name,
+        path: `{configDir}/${meta.type === "dir" ? name : file}`,
+        type: meta.type,
+        devices: "all",
+        description: meta.description,
+      };
+    }
+  }
+  if (name.startsWith("plugin-")) {
+    const id = name.slice("plugin-".length);
+    return { name, path: `{configDir}/plugins/${id}/data.json`, type: "file", devices: "all", description: `Settings of ${id}.` };
+  }
+  if (CORE_SETTINGS_IDS.includes(name)) {
+    return { name, path: `{configDir}/${corePluginFile(name)}`, type: "file", devices: "all" };
+  }
+  return null;
+}
+
 export function findGroupByName(groups: SyncGroup[], name: string): SyncGroup | undefined {
   return groups.find((g) => g.name === name);
 }
@@ -116,6 +138,25 @@ async function presentSets(io: FileIO, configDir: string): Promise<{ files: Set<
   return { files, dirs };
 }
 
+export async function listDiscovered(
+  io: FileIO,
+  configDir: string,
+  groups: SyncGroup[]
+): Promise<{ name: string; path: string }[]> {
+  const { files } = await presentSets(io, configDir);
+  const coveredPaths = new Set(groups.map((g) => g.path));
+  const knownOptionFiles = new Set(Object.keys(OPTION_LABELS));
+  const out: { name: string; path: string }[] = [];
+  for (const b of [...files].sort()) {
+    if (!b.endsWith(".json") || b.startsWith(".")) continue;
+    if (knownOptionFiles.has(b) || HIDDEN_FILES.has(b) || SWITCH_LISTS.has(b) || CORE_FILE_SET.has(b)) continue;
+    const path = `{configDir}/${b}`;
+    if (coveredPaths.has(path)) continue;
+    out.push({ name: optionReservedName(b), path });
+  }
+  return out;
+}
+
 export async function listOptionSections(io: FileIO, configDir: string, _groups: SyncGroup[]): Promise<CatalogSection[]> {
   const { files, dirs } = await presentSets(io, configDir);
   const available: CatalogItem[] = [];
@@ -142,20 +183,23 @@ export async function listOptionSections(io: FileIO, configDir: string, _groups:
   }
 
   for (const b of [...files].sort()) {
+    if (!b.endsWith(".json") || b.startsWith(".")) continue;
     if (covered.has(b) || HIDDEN_FILES.has(b) || SWITCH_LISTS.has(b) || CORE_FILE_SET.has(b)) continue;
-    const workspace = WORKSPACE_RE.test(b);
-    const item: CatalogItem = {
-      name: optionReservedName(b),
-      label: b,
-      description: null,
-      path: `{configDir}/${b}`,
-      type: "file",
-      exists: true,
-      disabledReason: null,
-      cautionReason: workspace ? WORKSPACE_CAUTION : null,
-    };
-    (workspace ? notRecommended : available).push(item);
-    covered.add(b);
+    if (WORKSPACE_RE.test(b)) {
+      notRecommended.push({
+        name: optionReservedName(b),
+        label: b,
+        description: null,
+        path: `{configDir}/${b}`,
+        type: "file",
+        exists: true,
+        disabledReason: null,
+        cautionReason: WORKSPACE_CAUTION,
+      });
+      covered.add(b);
+      continue;
+    }
+    // any other unclassified json → Discovered tab section, not here
   }
   for (const b of [...dirs].sort()) {
     if (covered.has(b) || HIDDEN_DIRS.has(b)) continue;
@@ -164,9 +208,9 @@ export async function listOptionSections(io: FileIO, configDir: string, _groups:
   }
 
   return [
-    ...section("available", "Available", "Ready to sync — these settings already exist in this vault.", true, available),
-    ...section("notPresent", "Not yet in this vault", "You haven't customized these yet, so there's nothing to sync until you do.", true, notPresent),
-    ...section("notRecommended", "Not recommended", "Tied to this specific device — syncing makes your devices fight over each other.", false, notRecommended),
+    ...section("available", "Available", "Sync these settings that already exist in this vault.", true, available),
+    ...section("notPresent", "Not yet in this vault", "Nothing to sync yet — customize these in Obsidian first, then they'll appear here.", true, notPresent),
+    ...section("notRecommended", "Not recommended", "Device-specific — syncing makes your devices overwrite each other's layout.", false, notRecommended),
   ];
 }
 
@@ -216,9 +260,9 @@ export async function listCoreSections(
 
   return [
     ...section("list", "Plugin on/off list", "Which core plugins are turned on, mirrored across devices.", false, [switchItem]),
-    ...section("enabled", "Enabled", "Turned on here.", true, enabled),
-    ...section("disabled", "Disabled", "Turned off — you can still sync its settings for when you enable it.", true, disabled),
-    ...section("notRecommended", "Not recommended", "Contains account or device-specific data — not meant to travel between vaults.", false, notRecommended),
+    ...section("enabled", "Enabled", "Sync the settings files of your enabled core plugins.", true, enabled),
+    ...section("disabled", "Disabled", "Sync a disabled core plugin's settings now, ready for when you turn it on.", true, disabled),
+    ...section("notRecommended", "Not recommended", "Holds account or device-specific data — not meant to travel between vaults.", false, notRecommended),
   ];
 }
 
@@ -258,8 +302,8 @@ export async function listPluginSections(
   }
   return [
     ...section("list", "Plugin on/off list", "Which community plugins are turned on, mirrored across devices.", false, [switchItem]),
-    ...section("enabled", "Enabled", "Turned on here.", true, enabled),
-    ...section("disabled", "Installed but disabled", "Installed but turned off — you can still sync its settings for later.", true, disabled),
+    ...section("enabled", "Enabled", "Sync the settings files of your enabled community plugins.", true, enabled),
+    ...section("disabled", "Installed but disabled", "Sync a disabled plugin's settings now, ready for when you turn it on.", true, disabled),
     ...section("notRecommended", "Not recommended", BLACKLIST_REASON, false, notRecommended),
   ];
 }

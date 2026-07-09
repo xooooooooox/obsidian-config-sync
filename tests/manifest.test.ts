@@ -130,3 +130,19 @@ describe("validateExternalSources", () => {
     expect(() => validateExternalSources({})).toThrow("array");
   });
 });
+
+describe("group name format", () => {
+  it("accepts variable-style names (reserved and custom)", () => {
+    for (const name of ["app", "community-plugins", "plugin-dataview", "my_rule", "graph"]) {
+      const g = { name, path: "{configDir}/x.json", type: "file", devices: "all" };
+      expect(parseSyncManifest(manifestWith([g])).groups[0]?.name).toBe(name);
+    }
+  });
+
+  it("rejects names with spaces, uppercase or illegal symbols", () => {
+    for (const name of ["My Rule", "Graph", "a b", "weird!", "-leading"]) {
+      const g = { name, path: "{configDir}/x.json", type: "file", devices: "all" };
+      expect(() => parseSyncManifest(manifestWith([g]))).toThrow("lowercase");
+    }
+  });
+});

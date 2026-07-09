@@ -60,6 +60,11 @@ function parseGroup(g: unknown, index: number): SyncGroup {
   if (typeof name !== "string" || name === "") {
     throw new ManifestValidationError(`group #${index}: "name" must be a non-empty string`);
   }
+  if (!/^[a-z0-9][a-z0-9_-]*$/.test(name)) {
+    throw new ManifestValidationError(
+      `group "${name}": name must be lowercase letters, digits, "-" or "_" and start with a letter or digit`
+    );
+  }
   if (typeof path !== "string" || path === "") {
     throw new ManifestValidationError(`group "${name}": "path" must be a non-empty string`);
   }

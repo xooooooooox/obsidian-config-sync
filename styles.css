@@ -24,11 +24,75 @@
 }
 
 .config-sync-search {
-  border-top: none;
-  padding-top: 0;
+  display: flex;
+  justify-content: center;
+  margin-bottom: var(--size-4-4);
+}
+
+.config-sync-search .search-input-container {
+  width: 100%;
+  max-width: 40em;
 }
 
 .config-sync-empty {
   color: var(--text-muted);
   font-style: italic;
+}
+
+.config-sync-rule {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  padding: var(--size-4-2);
+  margin-bottom: var(--size-4-2);
+}
+
+.config-sync-rule-head {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+  margin-bottom: var(--size-4-2);
+}
+
+.config-sync-rule-name {
+  font-family: var(--font-monospace);
+  font-weight: var(--font-semibold);
+}
+
+.config-sync-rule-name-input {
+  font-family: var(--font-monospace);
+}
+
+.config-sync-rule-spacer {
+  flex: 1;
+}
+
+.config-sync-badge {
+  color: var(--text-accent);
+  font-size: var(--font-ui-smaller);
+}
+
+.config-sync-rule-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-4-2) var(--size-4-3);
+  align-items: center;
+}
+
+.config-sync-field {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-1);
+}
+
+.config-sync-field-grow {
+  min-width: 12em;
+}
+
+.config-sync-field-label {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.config-sync-syncall {
+  color: var(--text-accent);
 }
