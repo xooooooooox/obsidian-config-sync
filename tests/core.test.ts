@@ -302,7 +302,7 @@ function fakeWriter(initial: Record<string, string>): {
     get finalized() {
       return state.finalized;
     },
-  } as { writer: ExternalStoreWriter; files: Record<string, string>; finalized: number };
+  };
 }
 
 describe("pushExternal", () => {
