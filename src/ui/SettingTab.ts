@@ -1,4 +1,4 @@
-import { App, ButtonComponent, DropdownComponent, ExtraButtonComponent, Notice, Plugin, PluginSettingTab, SearchComponent, Setting, TextComponent } from "obsidian";
+import { App, ButtonComponent, DropdownComponent, ExtraButtonComponent, Notice, Plugin, PluginSettingTab, SearchComponent, Setting, TextComponent, ToggleComponent } from "obsidian";
 import { DeviceClass, ExternalSource, RibbonKey, SyncGroup } from "../core/types";
 import { PkmMode } from "../core/pkm";
 import { validateExternalSources } from "../core/manifest";
@@ -428,9 +428,9 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       new Setting(containerEl)
         .setName("Discovered files")
         .setHeading()
-        .setDesc("Config files we found but couldn't classify. Give one a name to start syncing it — its path is fixed to the file on disk.");
+        .setDesc("Config files we found but couldn't classify. Turn one on to start syncing it — rename it under Custom rules.");
       const discEl = containerEl.createDiv();
-      for (const d of discovered) this.renderDiscoveredCard(discEl, d);
+      for (const d of discovered) this.renderDiscoveredRow(discEl, d);
     }
 
     new Setting(containerEl)
@@ -448,38 +448,22 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     );
   }
 
-  private renderDiscoveredCard(listEl: HTMLElement, d: { name: string; path: string }): void {
-    const card = listEl.createDiv({ cls: "config-sync-rule" });
-    const head = card.createDiv({ cls: "config-sync-rule-head" });
-    head.createSpan({ cls: "config-sync-rule-name", text: splitLocation(d.path).rel });
-    head.createDiv({ cls: "config-sync-rule-spacer" });
-
-    const controls = card.createDiv({ cls: "config-sync-rule-controls" });
-    const nameField = controls.createDiv({ cls: "config-sync-field" });
-    nameField.createEl("label", { cls: "config-sync-field-label", text: "Name" });
-    let draftName = d.name;
-    const nameC = new TextComponent(nameField);
-    nameC.setPlaceholder("name (a-z, 0-9, -, _)").setValue(draftName).onChange((v) => {
-      draftName = v.trim();
+  private renderDiscoveredRow(listEl: HTMLElement, d: { name: string; path: string }): void {
+    const row = listEl.createDiv({ cls: "config-sync-row is-static" });
+    row.createSpan({ cls: "config-sync-rule-name", text: splitLocation(d.path).rel });
+    row.createDiv({ cls: "config-sync-rule-spacer" });
+    new ToggleComponent(row).setValue(false).setTooltip("Sync this file").onChange(async (v) => {
+      if (!v) return;
+      this.groups.push({ name: d.name, path: d.path, type: "file", devices: "all" });
+      try {
+        await this.host.writeGroupsFile(this.groups);
+        this.groupsErrorMsg = "";
+      } catch (e) {
+        this.groups.pop(); // roll back so no broken group persists in memory
+        this.groupsErrorMsg = `Not saved: ${(e as Error).message}`;
+      }
+      this.refresh();
     });
-    nameC.inputEl.addClass("config-sync-field-grow");
-    nameC.inputEl.addClass("config-sync-rule-name-input");
-
-    new ButtonComponent(controls)
-      .setButtonText("Sync this file")
-      .setCta()
-      .onClick(async () => {
-        const group: SyncGroup = { name: draftName, path: d.path, type: "file", devices: "all" };
-        this.groups.push(group);
-        try {
-          await this.host.writeGroupsFile(this.groups);
-          this.groupsErrorMsg = "";
-        } catch (e) {
-          this.groups.pop(); // roll back an invalid name so no broken group persists in memory
-          this.groupsErrorMsg = `Not saved: ${(e as Error).message}`;
-        }
-        this.refresh();
-      });
   }
 
   private renderRuleCard(listEl: HTMLElement, group: SyncGroup, managed: boolean): void {
