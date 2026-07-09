@@ -44,7 +44,7 @@ export async function loadManifest(ctx: CoreContext): Promise<SyncManifest> {
   const p = manifestPath(ctx);
   if (!(await ctx.io.exists(p))) {
     throw new Error(
-      `Config Sync groups file not found: ${p}. Create it from the plugin settings (Settings → Config Sync → Create config-sync.json).`
+      `Config Sync groups file not found: ${p}. Run Publish or Apply to create a starter, or add a group in Settings → Config Sync.`
     );
   }
   return parseSyncManifest(await ctx.io.read(p));

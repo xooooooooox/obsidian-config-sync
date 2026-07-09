@@ -45,6 +45,8 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private loaded = false;
   private groupsErrorEl: HTMLElement | null = null;
   private sourcesErrorEl: HTMLElement | null = null;
+  private groupsErrorMsg = "";
+  private sourcesErrorMsg = "";
 
   constructor(app: App, private host: SettingsHost) {
     super(app, host);
@@ -136,6 +138,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       this.renderGroupRow(listEl, group, index);
     });
     this.groupsErrorEl = containerEl.createEl("p", { cls: "mod-warning" });
+    this.groupsErrorEl.setText(this.groupsErrorMsg);
     new Setting(containerEl).addButton((b) =>
       b.setButtonText("Add group").onClick(() => {
         this.groups.push({ name: "", path: "", type: "file", devices: "all" });
@@ -159,10 +162,10 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       })
     );
     row.addDropdown((d) =>
-      d.addOption("file", "file").addOption("dir", "dir").setValue(group.type).onChange((v) => {
+      d.addOption("file", "file").addOption("dir", "dir").setValue(group.type).onChange(async (v) => {
         group.type = v as SyncGroup["type"];
         if (group.type !== "file") delete group.sanitize;
-        void this.saveGroups();
+        await this.saveGroups();
         this.refresh(); // enable/disable the sanitize field
       })
     );
@@ -186,9 +189,9 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       });
     });
     row.addExtraButton((b) =>
-      b.setIcon("trash").setTooltip("Delete group").onClick(() => {
+      b.setIcon("trash").setTooltip("Delete group").onClick(async () => {
         this.groups.splice(index, 1);
-        void this.saveGroups();
+        await this.saveGroups();
         this.refresh();
       })
     );
@@ -197,10 +200,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private async saveGroups(): Promise<void> {
     try {
       await this.host.writeGroupsFile(this.groups);
-      this.groupsErrorEl?.setText("");
+      this.groupsErrorMsg = "";
     } catch (e) {
-      this.groupsErrorEl?.setText(`Not saved: ${(e as Error).message}`);
+      this.groupsErrorMsg = `Not saved: ${(e as Error).message}`;
     }
+    this.groupsErrorEl?.setText(this.groupsErrorMsg);
   }
 
   private renderSources(containerEl: HTMLElement): void {
@@ -213,6 +217,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       this.renderSourceRow(listEl, source, index);
     });
     this.sourcesErrorEl = containerEl.createEl("p", { cls: "mod-warning" });
+    this.sourcesErrorEl.setText(this.sourcesErrorMsg);
     new Setting(containerEl).addButton((b) =>
       b.setButtonText("Add source").onClick(() => {
         this.sources.push({ name: "", type: "local-path", path: "", remote: "", branch: "", root: "" });
@@ -230,9 +235,9 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       })
     );
     row.addDropdown((d) =>
-      d.addOption("local-path", "local-path").addOption("git", "git").setValue(source.type).onChange((v) => {
+      d.addOption("local-path", "local-path").addOption("git", "git").setValue(source.type).onChange(async (v) => {
         source.type = v as SourceDraft["type"];
-        void this.saveSources();
+        await this.saveSources();
         this.refresh(); // switch the conditional fields
       })
     );
@@ -264,9 +269,9 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       })
     );
     row.addExtraButton((b) =>
-      b.setIcon("trash").setTooltip("Delete source").onClick(() => {
+      b.setIcon("trash").setTooltip("Delete source").onClick(async () => {
         this.sources.splice(index, 1);
-        void this.saveSources();
+        await this.saveSources();
         this.refresh();
       })
     );
@@ -276,9 +281,10 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     try {
       this.host.settings.externalSources = validateExternalSources(this.sources.map(toCandidate));
       await this.host.saveSettings();
-      this.sourcesErrorEl?.setText("");
+      this.sourcesErrorMsg = "";
     } catch (e) {
-      this.sourcesErrorEl?.setText(`Not saved: ${(e as Error).message}`);
+      this.sourcesErrorMsg = `Not saved: ${(e as Error).message}`;
     }
+    this.sourcesErrorEl?.setText(this.sourcesErrorMsg);
   }
 }
