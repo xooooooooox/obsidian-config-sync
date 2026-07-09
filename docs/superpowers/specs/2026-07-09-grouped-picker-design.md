@@ -85,7 +85,7 @@ host 只负责**注入运行时状态**,分类/分桶/命名纯逻辑在 catalog
 - iter4 的 slug 去重(`hotkeys-2`)**废除**——固定名本就唯一;
 - **约束**(校验层硬拒,与黑名单同机制):
   1. name 全局唯一(iter1 起已有);
-  2. **保留名占用**:picker 固定名构成保留名表;若某组 name 是保留名但 **path ≠ 该项预期路径**,`validateSyncManifest` 报错拒绝("name 'graph' 属于内置项 Graph view,请为自定义规则改名");手写文件与面板两路都兜现;
+  2. **保留名占用**(iter5 定稿撤销):最初设想"保留名+错 path→拒绝",但这与 §I 的"解锁改 path + customized 标识"互斥(名叫 graph、path 改到别处**正是** customized 想要的形状),故**取消该校验**——name 唯一 + store-path 唯一已覆盖真实风险;手写一个保留名 + 另指 path 的组,即被视为"该项已自定义",在 §I 显 customized;
   3. path 唯一仍保留(iter3 起的 store-path 冲突校验)。
 - **零迁移**:starter 组 name = `snippets`/`hotkeys` 与新固定名一致,老文件打开即正确勾选;历史上 name 与保留名不符的手写组视为自定义规则进 Advanced。
 
@@ -100,7 +100,7 @@ host 只负责**注入运行时状态**,分类/分桶/命名纯逻辑在 catalog
 - **溯源标识(改了 path 后外显)**:某 managed 组的 `path` ≠ 其保留名对应的 catalog 预期 path 时,判定为"customized"——
   1. Advanced 该行显 **"⚙ customized (was `<预期path>`)"**;
   2. 该项**原属 picker tab 的那一行**(Obsidian / Core / Community 皆然,如 `plugin-dataview` 回追到 Community plugins tab 的 Dataview 行)显 **"⚙ customized"** 徽标——靠 name 命中稳定回追,即使 path 被改。
-- 保留名→预期 path 的映射由 catalog 提供(`expectedPathForName(name)`,如 `plugin-dataview → {configDir}/plugins/dataview/data.json`、`properties → {configDir}/types.json`),纯函数可测。
+- 保留名→预期 path 的映射(用于 customized 判定,不用于校验拒绝)由 catalog 提供(`expectedPathForName(name)`,如 `plugin-dataview → {configDir}/plugins/dataview/data.json`、`properties → {configDir}/types.json`),纯函数可测。
 
 ## J. 全局搜索(需求 #2)
 
@@ -111,13 +111,13 @@ host 只负责**注入运行时状态**,分类/分桶/命名纯逻辑在 catalog
 
 ## 错误处理
 
-沿用既有:非法不落盘、就地显示;软拦逐项确认取消 = 无副作用;批量写盘失败 = 现有 groupsErrorMsg 呈现;保留名占用报错走校验层(H.2)。
+沿用既有:非法不落盘、就地显示;软拦逐项确认取消 = 无副作用;批量写盘失败 = 现有 groupsErrorMsg 呈现(搜索视图内也重建该元素)。
 
 ## 测试
 
 - catalog 纯函数单测:分类(option/core/community,含 `CORE_PLUGIN_FILES` 默认同名 + 例外 `types.json→properties`)、分桶(option 三桶、core 三桶含 sync/publish→notRecommended、community 三桶、空桶不产出、workspace→Obsidian Not recommended、未知文件降级 option)、稳定 name 生成、`expectedPathForName`、`findGroupByName`;
 - 批量选择纯函数(某组全项→组集合增删)单测;
-- 校验单测:保留名 + 错 path 被拒(H.2)、保留名 + 对 path 通过、name 唯一;
+- 校验单测:name 唯一、store-path 唯一(保留名+错 path 不再拒绝——见 H.2 定稿撤销);
 - UI 不做单测,obsidian-cli 冒烟:六 tab、分组标题与描述、跨桶勾选重排、Core enabled/disabled 分组、每组 Sync all/none、Not recommended 无 Sync all 逐项确认、Advanced 两组与锁开合、改 path 后两处 customized 标识、全局搜索扁平结果与命中处勾选。
 
 ## 验收清单
@@ -129,5 +129,5 @@ host 只负责**注入运行时状态**,分类/分桶/命名纯逻辑在 catalog
 5. 每组(除 Not recommended)有 Sync all/Sync none,批量增删正确落盘;
 6. workspace 在 Obsidian Not recommended 组,逐项勾选弹确认,该组无 Sync all;sync/publish 在 Core Not recommended 组;
 7. Advanced 分 Managed(锁定,可解锁改 path)/ Custom 两组;改了某 managed 项 path 后,Advanced 行与其 picker 行都显 customized;
-8. 用户在 Advanced 建组占用保留名(如 name=graph 但 path 非 graph.json)被校验拒绝;手改文件同样兜现;
+8. 用户在 Advanced 把某 managed 组(如 graph)的 path 改到别处,保存成功且该项显 customized(取代最初"校验拒绝"的设想,见 H.2 定稿撤销);
 9. 顶部搜索框输入后跨 tab 扁平展示命中项(标注原 tab·组),可直接勾选;清空回到 tab 视图。
