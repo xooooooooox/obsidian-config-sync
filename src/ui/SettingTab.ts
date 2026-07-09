@@ -115,10 +115,6 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     this.rerender(0);
   }
 
-  private reservedSet(): Set<string> {
-    return reservedNames(this.host.installedPluginIds());
-  }
-
   private async render(containerEl: HTMLElement, gen: number, scrollTop: number): Promise<void> {
     if (gen !== this.renderGen) return;
     if (!this.loaded) {
