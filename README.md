@@ -9,7 +9,7 @@ Selective, on-demand distribution of Obsidian vault configuration (CSS snippets,
 - **Revert last apply**: restores that backup.
 - **Import from external source** (desktop): overwrite this vault's `<root>/` from another vault — via filesystem path, or via a read-only git remote (`fetch` + `ls-tree` + `show`, worktree untouched).
 
-All four commands have ribbon icons (Publish, Apply, Revert last apply; Import from external source is desktop-only). The groups file can be created from Settings → Config Sync → "Create config-sync.json", which writes a starter file with a `$schema` reference and two example groups.
+All four commands have ribbon icons (Publish, Apply, Revert last apply; Import from external source is desktop-only). Groups and external sources are edited as forms in Settings → Config Sync. The groups file `<data folder>/config-sync.json` is created automatically on first Publish/Apply (starter: snippets + hotkeys) or by the first valid edit in settings; JSON-savvy users can still edit it directly (a JSON Schema reference is included). **PKM mode** picks the default data folder — Auto detects IOTO via the `ioto-update` plugin and uses `<extraFolder>/config-sync` read from ioto-settings (fallback `0-Extra/config-sync`); otherwise `config-sync`. A non-empty Data folder value always overrides the mode; leave it empty to follow.
 
 ## Store layout
 
@@ -56,4 +56,11 @@ npm test        # vitest
 npm run build   # type-check + production bundle
 ```
 
-Develop against a dedicated test vault (never a real one). Releases: tag `x.y.z`, attach `main.js` + `manifest.json` to the GitHub release.
+Develop against a dedicated test vault (never a real one).
+
+## Releasing
+
+1. `npm version <x.y.z>` — bumps `manifest.json` + `versions.json` (via `version-bump.mjs`), commits, and tags.
+2. `git push --follow-tags`
+3. The "Release Obsidian plugin" workflow builds, attests build provenance, and creates a **draft** GitHub release with `main.js`, `manifest.json`, `styles.css`.
+4. Publish the draft on GitHub — BRAT only sees published releases.

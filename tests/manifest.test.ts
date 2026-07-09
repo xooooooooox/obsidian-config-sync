@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { parseSyncManifest, parseStoreLock, parseExternalSources, ManifestValidationError } from "../src/core/manifest";
+import {
+  parseSyncManifest,
+  parseStoreLock,
+  parseExternalSources,
+  validateSyncManifest,
+  validateExternalSources,
+  ManifestValidationError,
+} from "../src/core/manifest";
 
 function manifestWith(groups: unknown[]): string {
   return JSON.stringify({ version: 1, groups });
@@ -83,5 +90,30 @@ describe("parseExternalSources", () => {
   });
   it("rejects non-array input", () => {
     expect(() => parseExternalSources("{}")).toThrow("array");
+  });
+});
+
+describe("validateSyncManifest", () => {
+  it("accepts a plain object and ignores a $schema key", () => {
+    const m = validateSyncManifest({ $schema: "https://example.invalid/s.json", version: 1, groups: [GOOD] });
+    expect(m.groups).toHaveLength(1);
+    expect(m.version).toBe(1);
+  });
+  it("rejects blacklisted paths on direct objects", () => {
+    const g = { name: "rs", path: "{configDir}/plugins/remotely-save/data.json", type: "file", devices: "all" };
+    expect(() => validateSyncManifest({ version: 1, groups: [g] })).toThrow("blacklisted");
+  });
+  it("rejects duplicate names on direct objects", () => {
+    expect(() => validateSyncManifest({ version: 1, groups: [GOOD, { ...GOOD }] })).toThrow("duplicate group name");
+  });
+});
+
+describe("validateExternalSources", () => {
+  it("accepts an already-parsed array", () => {
+    const sources = validateExternalSources([{ name: "l", type: "local-path", path: "/v", root: "r" }]);
+    expect(sources).toHaveLength(1);
+  });
+  it("rejects non-array input", () => {
+    expect(() => validateExternalSources({})).toThrow("array");
   });
 });
