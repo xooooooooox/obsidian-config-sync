@@ -1,7 +1,7 @@
 {
 	"id": "obsidian-config-sync",
 	"name": "Config Sync",
-	"version": "0.2.0",
+	"version": "0.3.0",
 	"minAppVersion": "1.5.0",
 	"description": "Selective, on-demand distribution of vault configuration (snippets, hotkeys, plugin settings) across devices and vaults.",
 	"author": "xooooooooox",
