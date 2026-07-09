@@ -56,7 +56,7 @@ export function validateSyncManifest(data: unknown): SyncManifest {
 
 function parseGroup(g: unknown, index: number): SyncGroup {
   if (!isPlainObject(g)) throw new ManifestValidationError(`group #${index} must be an object`);
-  const { name, path, type, devices, sanitize } = g;
+  const { name, path, type, devices, sanitize, description } = g;
   if (typeof name !== "string" || name === "") {
     throw new ManifestValidationError(`group #${index}: "name" must be a non-empty string`);
   }
@@ -82,9 +82,14 @@ function parseGroup(g: unknown, index: number): SyncGroup {
     }
     validatedSanitize = sanitize;
   }
+  if (description !== undefined && typeof description !== "string") {
+    throw new ManifestValidationError(`group "${name}": "description" must be a string`);
+  }
   assertNotBlacklisted(name, path);
   const group: SyncGroup = { name, path, type, devices };
   if (validatedSanitize !== undefined) group.sanitize = validatedSanitize;
+  const trimmedDescription = typeof description === "string" ? description.trim() : "";
+  if (trimmedDescription !== "") group.description = trimmedDescription;
   return group;
 }
 

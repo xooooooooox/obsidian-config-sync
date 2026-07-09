@@ -6,6 +6,7 @@ export interface SyncGroup {
   type: "file" | "dir";
   devices: DeviceClass;
   sanitize?: string[]; // key-name glob patterns; file groups only
+  description?: string; // optional human-readable label, shown in the settings panel
 }
 
 export interface SyncManifest {

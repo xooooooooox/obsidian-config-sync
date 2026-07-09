@@ -106,6 +106,18 @@ describe("validateSyncManifest", () => {
   it("rejects duplicate names on direct objects", () => {
     expect(() => validateSyncManifest({ version: 1, groups: [GOOD, { ...GOOD }] })).toThrow("duplicate group name");
   });
+  it("carries a group description through validation", () => {
+    const g = { ...GOOD, description: "Custom keyboard shortcuts" };
+    const m = validateSyncManifest({ version: 1, groups: [g] });
+    expect(m.groups[0]?.description).toBe("Custom keyboard shortcuts");
+  });
+  it("omits blank descriptions and rejects non-string ones", () => {
+    const blank = validateSyncManifest({ version: 1, groups: [{ ...GOOD, description: "   " }] });
+    expect(blank.groups[0]?.description).toBeUndefined();
+    expect(() => validateSyncManifest({ version: 1, groups: [{ ...GOOD, description: 42 }] })).toThrow(
+      '"description" must be a string'
+    );
+  });
 });
 
 describe("validateExternalSources", () => {
