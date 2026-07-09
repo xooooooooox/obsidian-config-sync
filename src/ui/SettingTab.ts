@@ -176,6 +176,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         type: "file",
         exists: true,
         disabledReason: p.disabledReason,
+        cautionReason: null,
       });
     }
   }
@@ -206,7 +207,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       t.setDisabled(item.disabledReason !== null);
       t.onChange(async (v) => {
         if (v) {
-          this.groups.push(groupForItem(item.path, item.type, this.groups.map((g) => g.name)));
+          this.groups.push(groupForItem(item.path, item.type, this.groups.map((g) => g.name), item.description));
         } else {
           const idx = this.groups.findIndex((g) => g.path === item.path);
           if (idx >= 0) this.groups.splice(idx, 1);

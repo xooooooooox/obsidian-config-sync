@@ -105,10 +105,6 @@ function assertNotBlacklisted(name: string, path: string): void {
       `group "${name}": plugin "${m[1]}" is blacklisted (machine-bound or credential-bearing), it can never enter the store`
     );
   }
-  const basename = path.slice(path.lastIndexOf("/") + 1);
-  if (/^workspace.*\.json$/.test(basename)) {
-    throw new ManifestValidationError(`group "${name}": workspace files are blacklisted (device-specific)`);
-  }
 }
 
 export function parseStoreLock(raw: string): StoreLock {

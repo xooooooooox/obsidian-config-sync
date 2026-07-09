@@ -40,9 +40,10 @@ describe("parseSyncManifest", () => {
     const g = { name: "rs", path: "{configDir}/plugins/remotely-save/data.json", type: "file", devices: "all" };
     expect(() => parseSyncManifest(manifestWith([g]))).toThrow("blacklisted");
   });
-  it("rejects workspace files", () => {
+  it("accepts workspace-pattern paths (soft-blocked in the UI, not in validation)", () => {
     const g = { name: "ws", path: "{configDir}/workspace.json", type: "file", devices: "all" };
-    expect(() => parseSyncManifest(manifestWith([g]))).toThrow("blacklisted");
+    const m = parseSyncManifest(manifestWith([g]));
+    expect(m.groups[0]?.name).toBe("ws");
   });
   it("rejects sanitize on dir groups", () => {
     const g = { name: "s", path: "{configDir}/snippets", type: "dir", devices: "all", sanitize: ["*Token*"] };

@@ -9,6 +9,7 @@ export interface CatalogItem {
   type: "file" | "dir";
   exists: boolean;
   disabledReason: string | null;
+  cautionReason: string | null;
 }
 
 export interface PluginItem {
@@ -54,7 +55,8 @@ export const KNOWN_OPTIONS: KnownEntry[] = [
 const HIDDEN_FILES = new Set(["core-plugins-migration.json"]);
 const HIDDEN_DIRS = new Set(["plugins"]);
 const WORKSPACE_RE = /^workspace.*\.json$/;
-export const DEVICE_SPECIFIC_REASON = "Device-specific window layout — never synced.";
+export const WORKSPACE_CAUTION =
+  "Window layout and open tabs — highly device-specific; syncing will make devices overwrite each other.";
 
 function basename(p: string): string {
   return p.slice(p.lastIndexOf("/") + 1);
@@ -78,27 +80,45 @@ export async function listOptionItems(io: FileIO, configDir: string, groups: Syn
   const covered = new Set<string>();
   for (const known of KNOWN_OPTIONS) {
     const present = known.type === "file" ? files.has(known.file) : dirs.has(known.file);
-    const path = `{configDir}/${known.file}`;
-    const checked = findGroupByPath(groups, path) !== undefined;
-    if (present || checked) {
-      items.push({ label: known.label, description: known.description, path, type: known.type, exists: present, disabledReason: null });
-    }
+    items.push({
+      label: known.label,
+      description: known.description,
+      path: `{configDir}/${known.file}`,
+      type: known.type,
+      exists: present,
+      disabledReason: null,
+      cautionReason: WORKSPACE_RE.test(known.file) ? WORKSPACE_CAUTION : null,
+    });
     covered.add(known.file);
   }
   for (const b of [...files].filter((f) => !covered.has(f)).sort()) {
-    const disabled = WORKSPACE_RE.test(b) ? DEVICE_SPECIFIC_REASON : null;
-    items.push({ label: b, description: null, path: `{configDir}/${b}`, type: "file", exists: true, disabledReason: disabled });
+    items.push({
+      label: b,
+      description: null,
+      path: `{configDir}/${b}`,
+      type: "file",
+      exists: true,
+      disabledReason: null,
+      cautionReason: WORKSPACE_RE.test(b) ? WORKSPACE_CAUTION : null,
+    });
     covered.add(b);
   }
   for (const b of [...dirs].filter((d) => !covered.has(d)).sort()) {
-    items.push({ label: `${b}/`, description: null, path: `{configDir}/${b}`, type: "dir", exists: true, disabledReason: null });
+    items.push({ label: `${b}/`, description: null, path: `{configDir}/${b}`, type: "dir", exists: true, disabledReason: null, cautionReason: null });
     covered.add(b);
   }
   for (const g of groups) {
     const m = g.path.match(/^\{configDir\}\/([^/]+)$/);
     if (m && m[1] !== undefined && !covered.has(m[1])) {
-      const disabled = WORKSPACE_RE.test(m[1]) ? DEVICE_SPECIFIC_REASON : null;
-      items.push({ label: m[1], description: null, path: g.path, type: g.type, exists: false, disabledReason: disabled });
+      items.push({
+        label: m[1],
+        description: null,
+        path: g.path,
+        type: g.type,
+        exists: false,
+        disabledReason: null,
+        cautionReason: WORKSPACE_RE.test(m[1]) ? WORKSPACE_CAUTION : null,
+      });
       covered.add(m[1]);
     }
   }
@@ -137,8 +157,10 @@ export function slugForPath(path: string, existingNames: string[]): string {
   return `${base}-${i}`;
 }
 
-export function groupForItem(path: string, type: "file" | "dir", existingNames: string[]): SyncGroup {
-  return { name: slugForPath(path, existingNames), path, type, devices: "all" };
+export function groupForItem(path: string, type: "file" | "dir", existingNames: string[], description: string | null): SyncGroup {
+  const group: SyncGroup = { name: slugForPath(path, existingNames), path, type, devices: "all" };
+  if (description !== null) group.description = description;
+  return group;
 }
 
 export function splitLocation(path: string): { location: "config" | "vault"; rel: string } {
