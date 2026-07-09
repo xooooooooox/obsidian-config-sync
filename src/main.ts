@@ -14,7 +14,7 @@ import {
   revertLastApply,
   writeGroups,
 } from "./core/ConfigSyncCore";
-import { type CatalogSection, listCoreSections, listOptionSections, listPluginSections } from "./core/catalog";
+import { type CatalogSection, listCoreSections, listDiscovered, listOptionSections, listPluginSections } from "./core/catalog";
 import { PkmMode, PkmProbe, resolveEffectiveMode, resolveRootPath } from "./core/pkm";
 import { ExternalSource, SyncGroup } from "./core/types";
 import { GroupSelectModal } from "./ui/GroupSelectModal";
@@ -249,6 +249,10 @@ export default class ConfigSyncPlugin extends Plugin {
 
   installedPluginIds(): string[] {
     return Object.values(this.pluginRegistry().manifests).map((m) => m.id);
+  }
+
+  async listDiscoveredFiles(groups: SyncGroup[]): Promise<{ name: string; path: string }[]> {
+    return listDiscovered(this.app.vault.adapter, this.app.vault.configDir, groups);
   }
 
   detectedMode(): "ioto" | "default" {

@@ -1,10 +1,11 @@
-import { App, Notice, Plugin, PluginSettingTab, Setting } from "obsidian";
+import { App, ButtonComponent, DropdownComponent, ExtraButtonComponent, Notice, Plugin, PluginSettingTab, SearchComponent, Setting, TextComponent } from "obsidian";
 import { DeviceClass, ExternalSource, SyncGroup } from "../core/types";
 import { PkmMode } from "../core/pkm";
 import { validateExternalSources } from "../core/manifest";
 import {
   CatalogItem,
   CatalogSection,
+  defaultGroupForName,
   expectedPathForName,
   findGroupByName,
   groupForItem,
@@ -25,6 +26,7 @@ export interface SettingsHost extends Plugin {
   listOptionSections(groups: SyncGroup[]): Promise<CatalogSection[]>;
   listCoreSections(groups: SyncGroup[]): Promise<CatalogSection[]>;
   listPluginSections(groups: SyncGroup[]): Promise<CatalogSection[]>;
+  listDiscoveredFiles(groups: SyncGroup[]): Promise<{ name: string; path: string }[]>;
   installedPluginIds(): string[];
 }
 
@@ -148,16 +150,15 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   }
 
   private renderSearchBox(containerEl: HTMLElement): void {
-    const box = new Setting(containerEl).setName("Search").addText((t) => {
-      t.setPlaceholder("Find a setting or plugin to sync…");
-      t.setValue(this.search);
-      this.searchInputEl = t.inputEl;
-      t.onChange((v) => {
-        this.search = v;
-        this.refresh();
-      });
+    const wrap = containerEl.createDiv({ cls: "config-sync-search" });
+    const search = new SearchComponent(wrap);
+    search.setPlaceholder("Search all settings…");
+    search.setValue(this.search);
+    this.searchInputEl = search.inputEl;
+    search.onChange((v) => {
+      this.search = v;
+      this.refresh();
     });
-    box.settingEl.addClass("config-sync-search");
   }
 
   private renderTabNav(containerEl: HTMLElement): void {
@@ -185,7 +186,8 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         break;
       case "advanced":
         if (this.renderGroupsReadError(containerEl)) break;
-        this.renderAdvanced(containerEl);
+        await this.renderAdvanced(containerEl, gen);
+        if (gen !== this.renderGen) return;
         this.renderGroupsError(containerEl);
         break;
       case "sources":
@@ -214,13 +216,14 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private addSyncAllButton(head: Setting, sec: CatalogSection): void {
     const tickable = sec.items.filter((i) => i.disabledReason === null);
     const allOn = tickable.length > 0 && tickable.every((i) => findGroupByName(this.groups, i.name) !== undefined);
-    head.addButton((b) =>
+    head.addButton((b) => {
       b.setButtonText(allOn ? "Sync none" : "Sync all").onClick(async () => {
         this.groups = toggleSection(this.groups, sec.items, !allOn);
         await this.saveGroups();
         this.refresh();
-      })
-    );
+      });
+      b.buttonEl.addClass("config-sync-syncall");
+    });
   }
 
   private renderChecklistRow(listEl: HTMLElement, item: CatalogItem): void {
@@ -354,24 +357,55 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     this.groupsErrorEl.setText(this.groupsErrorMsg);
   }
 
-  private renderAdvanced(containerEl: HTMLElement): void {
-    const reserved = this.reservedSet();
+  private async renderAdvanced(containerEl: HTMLElement, gen: number): Promise<void> {
+    const reserved = reservedNames(this.host.installedPluginIds());
     const managed = this.groups.filter((g) => reserved.has(g.name));
     const custom = this.groups.filter((g) => !reserved.has(g.name));
 
-    new Setting(containerEl)
+    const managedHead = new Setting(containerEl)
       .setName("Managed by pickers")
       .setHeading()
-      .setDesc("Rules created from the other tabs. Locked by default — unlock a row to fix a path that has gone stale.");
+      .setDesc("Rules created from the other tabs. Locked by default — unlock a row to fix a path that has gone stale, or reset it to the picker default.");
+    if (managed.length > 0) {
+      managedHead.addButton((b) => b.setButtonText("Lock all").onClick(() => {
+        this.unlocked.clear();
+        this.refresh();
+      }));
+      managedHead.addButton((b) => b.setButtonText("Unlock all").onClick(() => {
+        for (const g of managed) this.unlocked.add(g.name);
+        this.refresh();
+      }));
+      managedHead.addButton((b) => b.setButtonText("Reset all").onClick(async () => {
+        for (let i = 0; i < this.groups.length; i++) {
+          const g = this.groups[i];
+          if (g === undefined || !reserved.has(g.name)) continue;
+          const def = defaultGroupForName(g.name);
+          if (def !== null) this.groups[i] = def;
+        }
+        await this.saveGroups();
+        this.refresh();
+      }));
+    }
     const managedEl = containerEl.createDiv();
-    for (const group of managed) this.renderGroupRow(managedEl, group, true);
+    for (const group of managed) this.renderRuleCard(managedEl, group, true);
+
+    const discovered = await this.host.listDiscoveredFiles(this.groups);
+    if (gen !== this.renderGen) return;
+    if (discovered.length > 0) {
+      new Setting(containerEl)
+        .setName("Discovered files")
+        .setHeading()
+        .setDesc("Config files we found but couldn't classify. Give one a name to start syncing it — its path is fixed to the file on disk.");
+      const discEl = containerEl.createDiv();
+      for (const d of discovered) this.renderDiscoveredCard(discEl, d);
+    }
 
     new Setting(containerEl)
       .setName("Custom rules")
       .setHeading()
       .setDesc("Your own rules for anything not listed elsewhere — vault-root files, extra folders, or per-key credential protection (sanitize).");
     const customEl = containerEl.createDiv();
-    custom.forEach((group) => this.renderGroupRow(customEl, group, false));
+    for (const group of custom) this.renderRuleCard(customEl, group, false);
     new Setting(containerEl).addButton((b) =>
       b.setButtonText("Add rule").onClick(() => {
         this.groups.push({ name: "", path: "", type: "file", devices: "all" });
@@ -380,88 +414,157 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     );
   }
 
-  private renderGroupRow(listEl: HTMLElement, group: SyncGroup, managed: boolean): void {
+  private renderDiscoveredCard(listEl: HTMLElement, d: { name: string; path: string }): void {
+    const card = listEl.createDiv({ cls: "config-sync-rule" });
+    const head = card.createDiv({ cls: "config-sync-rule-head" });
+    head.createSpan({ cls: "config-sync-rule-name", text: splitLocation(d.path).rel });
+    head.createDiv({ cls: "config-sync-rule-spacer" });
+
+    const controls = card.createDiv({ cls: "config-sync-rule-controls" });
+    const nameField = controls.createDiv({ cls: "config-sync-field" });
+    nameField.createEl("label", { cls: "config-sync-field-label", text: "Name" });
+    let draftName = d.name;
+    const nameC = new TextComponent(nameField);
+    nameC.setPlaceholder("name (a-z, 0-9, -, _)").setValue(draftName).onChange((v) => {
+      draftName = v.trim();
+    });
+    nameC.inputEl.addClass("config-sync-field-grow");
+    nameC.inputEl.addClass("config-sync-rule-name-input");
+
+    new ButtonComponent(controls)
+      .setButtonText("Sync this file")
+      .setCta()
+      .onClick(async () => {
+        const group: SyncGroup = { name: draftName, path: d.path, type: "file", devices: "all" };
+        this.groups.push(group);
+        try {
+          await this.host.writeGroupsFile(this.groups);
+          this.groupsErrorMsg = "";
+        } catch (e) {
+          this.groups.pop(); // roll back an invalid name so no broken group persists in memory
+          this.groupsErrorMsg = `Not saved: ${(e as Error).message}`;
+        }
+        this.refresh();
+      });
+  }
+
+  private renderRuleCard(listEl: HTMLElement, group: SyncGroup, managed: boolean): void {
     const locked = managed && !this.unlocked.has(group.name);
-    const row = new Setting(listEl);
+    const card = listEl.createDiv({ cls: "config-sync-rule" });
+
+    const head = card.createDiv({ cls: "config-sync-rule-head" });
     if (managed) {
+      new ExtraButtonComponent(head)
+        .setIcon(locked ? "lock" : "unlock")
+        .setTooltip(locked ? "Unlock to edit" : "Lock")
+        .onClick(() => {
+          if (locked) this.unlocked.add(group.name);
+          else this.unlocked.delete(group.name);
+          this.refresh();
+        });
+      head.createSpan({ cls: "config-sync-rule-name", text: group.name });
       const expected = expectedPathForName(group.name);
-      if (expected !== null && group.path !== expected) row.setName(`${group.name}  ⚙ customized (was ${expected})`);
-      else row.setName(group.name);
-      row.addExtraButton((b) =>
-        b
-          .setIcon(locked ? "lock" : "unlock")
-          .setTooltip(locked ? "Unlock to edit" : "Lock")
-          .onClick(() => {
-            if (locked) this.unlocked.add(group.name);
-            else this.unlocked.delete(group.name);
-            this.refresh();
-          })
-      );
+      if (expected !== null && group.path !== expected) {
+        head.createSpan({ cls: "config-sync-badge", text: `⚙ customized (was ${expected})` });
+      }
+      head.createDiv({ cls: "config-sync-rule-spacer" });
+      new ButtonComponent(head)
+        .setButtonText("Reset")
+        .setTooltip("Restore to the picker default")
+        .onClick(async () => {
+          const def = defaultGroupForName(group.name);
+          if (def === null) return;
+          const idx = this.groups.findIndex((g) => g === group);
+          if (idx >= 0) this.groups[idx] = def;
+          await this.saveGroups();
+          this.refresh();
+        });
     } else {
-      row.addText((t) =>
-        t.setPlaceholder("name").setValue(group.name).onChange((v) => {
-          group.name = v.trim();
-          void this.saveGroups();
-        })
-      );
-    }
-    row.addText((t) =>
-      t.setPlaceholder("description (optional)").setValue(group.description ?? "").setDisabled(locked).onChange((v) => {
-        const d = v.trim();
-        if (d !== "") group.description = d;
-        else delete group.description;
-        void this.saveGroups();
-      })
-    );
-    const loc = splitLocation(group.path);
-    row.addDropdown((d) =>
-      d.addOption("config", "Config folder").addOption("vault", "Vault root").setValue(loc.location).setDisabled(locked).onChange((v) => {
-        group.path = joinLocation(v as "config" | "vault", splitLocation(group.path).rel);
-        void this.saveGroups();
-      })
-    );
-    row.addText((t) =>
-      t.setPlaceholder("relative path").setValue(loc.rel).setDisabled(locked).onChange((v) => {
-        group.path = joinLocation(splitLocation(group.path).location, v.trim());
-        void this.saveGroups();
-      })
-    );
-    row.addDropdown((d) =>
-      d.addOption("file", "file").addOption("dir", "dir").setValue(group.type).setDisabled(locked).onChange(async (v) => {
-        group.type = v as SyncGroup["type"];
-        if (group.type !== "file") delete group.sanitize;
-        await this.saveGroups();
-        this.refresh();
-      })
-    );
-    row.addDropdown((d) =>
-      d.addOption("all", "all").addOption("desktop", "desktop").addOption("mobile", "mobile").setValue(group.devices).setDisabled(locked).onChange(async (v) => {
-        group.devices = v as DeviceClass;
-        await this.saveGroups();
-        this.refresh();
-      })
-    );
-    row.addText((t) => {
-      t.setPlaceholder("sanitize globs, comma-separated");
-      t.setValue(group.sanitize?.join(", ") ?? "");
-      t.setDisabled(locked || group.type !== "file");
-      t.onChange((v) => {
-        const patterns = v.split(",").map((s) => s.trim()).filter((s) => s !== "");
-        if (patterns.length > 0) group.sanitize = patterns;
-        else delete group.sanitize;
+      const nameC = new TextComponent(head);
+      nameC.setPlaceholder("name (a-z, 0-9, -, _)").setValue(group.name).onChange((v) => {
+        group.name = v.trim();
         void this.saveGroups();
       });
-    });
-    if (!managed) {
-      row.addExtraButton((b) =>
-        b.setIcon("trash").setTooltip("Delete rule").onClick(async () => {
+      nameC.inputEl.addClass("config-sync-rule-name-input");
+      head.createDiv({ cls: "config-sync-rule-spacer" });
+      new ExtraButtonComponent(head)
+        .setIcon("trash")
+        .setTooltip("Delete rule")
+        .onClick(async () => {
           const idx = this.groups.findIndex((g) => g === group);
           if (idx >= 0) this.groups.splice(idx, 1);
           await this.saveGroups();
           this.refresh();
-        })
-      );
+        });
     }
+
+    const controls = card.createDiv({ cls: "config-sync-rule-controls" });
+    const field = (label: string): HTMLElement => {
+      const f = controls.createDiv({ cls: "config-sync-field" });
+      f.createEl("label", { cls: "config-sync-field-label", text: label });
+      return f;
+    };
+
+    const locField = field("Location");
+    const loc = splitLocation(group.path);
+    new DropdownComponent(locField)
+      .addOption("config", "Config folder")
+      .addOption("vault", "Vault root")
+      .setValue(loc.location)
+      .setDisabled(locked)
+      .onChange((v) => {
+        group.path = joinLocation(v as "config" | "vault", splitLocation(group.path).rel);
+        void this.saveGroups();
+      });
+
+    const pathC = new TextComponent(field("Path"));
+    pathC.setPlaceholder("relative path").setValue(loc.rel).setDisabled(locked).onChange((v) => {
+      group.path = joinLocation(splitLocation(group.path).location, v.trim());
+      void this.saveGroups();
+    });
+    pathC.inputEl.addClass("config-sync-field-grow");
+
+    new DropdownComponent(field("Type"))
+      .addOption("file", "file")
+      .addOption("dir", "dir")
+      .setValue(group.type)
+      .setDisabled(locked)
+      .onChange(async (v) => {
+        group.type = v as SyncGroup["type"];
+        if (group.type !== "file") delete group.sanitize;
+        await this.saveGroups();
+        this.refresh();
+      });
+
+    new DropdownComponent(field("Devices"))
+      .addOption("all", "all")
+      .addOption("desktop", "desktop")
+      .addOption("mobile", "mobile")
+      .setValue(group.devices)
+      .setDisabled(locked)
+      .onChange(async (v) => {
+        group.devices = v as DeviceClass;
+        await this.saveGroups();
+        this.refresh();
+      });
+
+    const sanC = new TextComponent(field("Sanitize"));
+    sanC.setPlaceholder("globs, comma-separated").setValue(group.sanitize?.join(", ") ?? "").setDisabled(locked || group.type !== "file").onChange((v) => {
+      const patterns = v.split(",").map((s) => s.trim()).filter((s) => s !== "");
+      if (patterns.length > 0) group.sanitize = patterns;
+      else delete group.sanitize;
+      void this.saveGroups();
+    });
+    sanC.inputEl.addClass("config-sync-field-grow");
+
+    const descC = new TextComponent(field("Description"));
+    descC.setPlaceholder("optional").setValue(group.description ?? "").setDisabled(locked).onChange((v) => {
+      const d = v.trim();
+      if (d !== "") group.description = d;
+      else delete group.description;
+      void this.saveGroups();
+    });
+    descC.inputEl.addClass("config-sync-field-grow");
   }
 
   private async saveGroups(): Promise<void> {
