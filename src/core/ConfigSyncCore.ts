@@ -44,7 +44,7 @@ export async function loadManifest(ctx: CoreContext): Promise<SyncManifest> {
   const p = manifestPath(ctx);
   if (!(await ctx.io.exists(p))) {
     throw new Error(
-      `Config Sync groups file not found: ${p}. Run Publish or Apply to create a starter, or add a group in Settings → Config Sync.`
+      `Config Sync groups file not found: ${p}. Run Capture or Apply to create a starter, or add a group in Settings → Config Sync.`
     );
   }
   return parseSyncManifest(await ctx.io.read(p));
@@ -80,7 +80,7 @@ function requireGroup(manifest: SyncManifest, name: string): SyncGroup {
   return group;
 }
 
-export async function publish(ctx: CoreContext): Promise<GroupResult[]> {
+export async function capture(ctx: CoreContext): Promise<GroupResult[]> {
   const manifest = await loadManifest(ctx);
   const lock: StoreLock = { publishedAt: ctx.now(), groups: {} };
   const results: GroupResult[] = [];
@@ -109,7 +109,7 @@ async function publishGroup(ctx: CoreContext, group: SyncGroup): Promise<GroupRe
   const result = emptyResult(group.name, false);
   if (!(await ctx.io.exists(real))) {
     result.status = "error";
-    result.messages.push(`nothing to publish yet: ${real} does not exist in this vault`);
+    result.messages.push(`nothing to capture yet: ${real} does not exist in this vault`);
     return result;
   }
   if (group.type === "file") {
@@ -243,7 +243,7 @@ async function applyGroup(ctx: CoreContext, group: SyncGroup, state: BackupState
   if (!(await ctx.io.exists(store))) {
     result.status = "error";
     result.needsAppReload = false;
-    result.messages.push(`store has no data for this group (expected at ${store}) — publish it from the source vault first`);
+    result.messages.push(`store has no data for this group (expected at ${store}) — capture it from the source vault first`);
     return result;
   }
   const pluginWasEnabled = pluginId !== null && ctx.plugins.isPluginEnabled(pluginId);

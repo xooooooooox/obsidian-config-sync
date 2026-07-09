@@ -4,12 +4,12 @@ import {
   ExternalStoreReader,
   PluginHost,
   apply,
+  capture,
   checkApply,
   createStarterManifest as coreCreateStarterManifest,
   groupsForDevice,
   importExternal,
   loadManifest,
-  publish,
   readGroups,
   revertLastApply,
   writeGroups,
@@ -50,8 +50,8 @@ export default class ConfigSyncPlugin extends Plugin {
   async onload(): Promise<void> {
     await this.loadSettings();
     this.addSettingTab(new ConfigSyncSettingTab(this.app, this));
-    this.addRibbonIcon("upload", "Config Sync: Publish", () => {
-      void this.runPublish();
+    this.addRibbonIcon("upload", "Config Sync: Capture", () => {
+      void this.runCapture();
     });
     this.addRibbonIcon("folder-sync", "Config Sync: Apply", () => {
       void this.runApply();
@@ -64,7 +64,7 @@ export default class ConfigSyncPlugin extends Plugin {
         void this.runImport();
       });
     }
-    this.addCommand({ id: "publish", name: "Publish (vault config → store)", callback: () => void this.runPublish() });
+    this.addCommand({ id: "capture", name: "Capture (this device's config → store)", callback: () => void this.runCapture() });
     this.addCommand({ id: "apply", name: "Apply (store → this device)", callback: () => void this.runApply() });
     this.addCommand({ id: "revert-last-apply", name: "Revert last apply", callback: () => void this.runRevert() });
     this.addCommand({
@@ -126,16 +126,16 @@ export default class ConfigSyncPlugin extends Plugin {
     };
   }
 
-  private async runPublish(): Promise<void> {
+  private async runCapture(): Promise<void> {
     try {
       const ctx = await this.coreContext();
       if ((await coreCreateStarterManifest(ctx)) === "created") {
         new Notice(`Config Sync: created starter groups file at ${ctx.rootPath}/config-sync.json — review it in settings`);
       }
-      const results = await publish(ctx);
-      new ReportModal(this.app, "Config Sync: Publish report", results).open();
+      const results = await capture(ctx);
+      new ReportModal(this.app, "Config Sync: Capture report", results).open();
     } catch (e) {
-      new Notice(`Config Sync publish failed: ${(e as Error).message}`, 10000);
+      new Notice(`Config Sync capture failed: ${(e as Error).message}`, 10000);
     }
   }
 
