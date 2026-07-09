@@ -10,9 +10,12 @@ import {
   importExternal,
   loadManifest,
   publish,
+  readGroups,
   revertLastApply,
+  writeGroups,
 } from "./core/ConfigSyncCore";
-import { ExternalSource } from "./core/types";
+import { PkmMode, PkmProbe, resolveEffectiveMode, resolveRootPath } from "./core/pkm";
+import { ExternalSource, SyncGroup } from "./core/types";
 import { GroupSelectModal } from "./ui/GroupSelectModal";
 import { confirmWarnings } from "./ui/ConfirmModal";
 import { ReportModal } from "./ui/ReportModal";
@@ -20,11 +23,12 @@ import { SourceSelectModal } from "./ui/SourceSelectModal";
 import { ConfigSyncSettingTab } from "./ui/SettingTab";
 
 interface ConfigSyncSettings {
-  rootPath: string;
+  pkmMode: PkmMode;
+  rootPath: string; // "" = follow the PKM mode default
   externalSources: ExternalSource[];
 }
 
-const DEFAULT_SETTINGS: ConfigSyncSettings = { rootPath: "config-sync", externalSources: [] };
+const DEFAULT_SETTINGS: ConfigSyncSettings = { pkmMode: "auto", rootPath: "", externalSources: [] };
 
 // app.plugins is not part of the public API; this is the community-standard access path.
 interface CommunityPluginRegistry {
@@ -72,7 +76,20 @@ export default class ConfigSyncPlugin extends Plugin {
     return (this.app as unknown as { plugins: CommunityPluginRegistry }).plugins;
   }
 
-  private coreContext(): CoreContext {
+  private pkmProbe(): PkmProbe {
+    const registry = this.pluginRegistry();
+    return {
+      io: this.app.vault.adapter,
+      configDir: this.app.vault.configDir,
+      isPluginEnabled: (id) => registry.enabledPlugins.has(id),
+    };
+  }
+
+  private async coreContext(): Promise<CoreContext> {
+    const rootPath = await resolveRootPath(this.settings.rootPath, this.settings.pkmMode, this.pkmProbe());
+    if (rootPath === "" || rootPath.startsWith("/") || rootPath.split("/").includes("..")) {
+      throw new Error(`Config Sync: invalid data folder "${rootPath}" — set a vault-relative path in settings`);
+    }
     const registry = this.pluginRegistry();
     const host: PluginHost = {
       getInstalledPluginVersion: (id) => registry.manifests[id]?.version ?? null,
@@ -80,10 +97,6 @@ export default class ConfigSyncPlugin extends Plugin {
       disablePlugin: (id) => registry.disablePlugin(id),
       enablePlugin: (id) => registry.enablePlugin(id),
     };
-    const rootPath = this.settings.rootPath.trim();
-    if (rootPath === "" || rootPath.startsWith("/") || rootPath.split("/").includes("..")) {
-      throw new Error(`Config Sync: invalid data folder "${rootPath}" — set a vault-relative path in settings`);
-    }
     return {
       io: this.app.vault.adapter,
       configDir: this.app.vault.configDir,
@@ -95,7 +108,10 @@ export default class ConfigSyncPlugin extends Plugin {
 
   private async runPublish(): Promise<void> {
     try {
-      const ctx = this.coreContext();
+      const ctx = await this.coreContext();
+      if ((await coreCreateStarterManifest(ctx)) === "created") {
+        new Notice(`Config Sync: created starter groups file at ${ctx.rootPath}/config-sync.json — review it in settings`);
+      }
       const results = await publish(ctx);
       new ReportModal(this.app, "Config Sync: Publish report", results).open();
     } catch (e) {
@@ -105,7 +121,10 @@ export default class ConfigSyncPlugin extends Plugin {
 
   private async runApply(): Promise<void> {
     try {
-      const ctx = this.coreContext();
+      const ctx = await this.coreContext();
+      if ((await coreCreateStarterManifest(ctx)) === "created") {
+        new Notice(`Config Sync: created starter groups file at ${ctx.rootPath}/config-sync.json — review it in settings`);
+      }
       const manifest = await loadManifest(ctx);
       const device = Platform.isMobile ? ("mobile" as const) : ("desktop" as const);
       const groups = groupsForDevice(manifest, device);
@@ -142,7 +161,7 @@ export default class ConfigSyncPlugin extends Plugin {
 
   private async runRevert(): Promise<void> {
     try {
-      const ctx = this.coreContext();
+      const ctx = await this.coreContext();
       const result = await revertLastApply(ctx);
       new ReportModal(this.app, "Config Sync: Revert report", [result]).open();
     } catch (e) {
@@ -163,7 +182,7 @@ export default class ConfigSyncPlugin extends Plugin {
 
   private async importFrom(source: ExternalSource): Promise<void> {
     try {
-      const ctx = this.coreContext();
+      const ctx = await this.coreContext();
       const reader = await this.createReader(source);
       const result = await importExternal(ctx, reader);
       new ReportModal(this.app, `Config Sync: Import report (${source.name})`, [result]).open();
@@ -184,8 +203,20 @@ export default class ConfigSyncPlugin extends Plugin {
     return createGitReader(adapter.getBasePath(), source.remote, source.branch, source.root);
   }
 
-  async createStarterManifest(): Promise<"created" | "exists"> {
-    return coreCreateStarterManifest(this.coreContext());
+  async readGroupsFile(): Promise<SyncGroup[]> {
+    return readGroups(await this.coreContext());
+  }
+
+  async writeGroupsFile(groups: SyncGroup[]): Promise<void> {
+    await writeGroups(await this.coreContext(), groups);
+  }
+
+  async resolvedRootPath(): Promise<string> {
+    return resolveRootPath(this.settings.rootPath, this.settings.pkmMode, this.pkmProbe());
+  }
+
+  detectedMode(): "ioto" | "default" {
+    return resolveEffectiveMode("auto", this.pkmProbe());
   }
 
   async loadSettings(): Promise<void> {
