@@ -22,3 +22,13 @@
   color: var(--text-normal);
   border-bottom-color: var(--interactive-accent);
 }
+
+.config-sync-search {
+  border-top: none;
+  padding-top: 0;
+}
+
+.config-sync-empty {
+  color: var(--text-muted);
+  font-style: italic;
+}
