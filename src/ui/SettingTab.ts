@@ -2,7 +2,7 @@ import { App, Notice, Plugin, PluginSettingTab, Setting } from "obsidian";
 import { DeviceClass, ExternalSource, SyncGroup } from "../core/types";
 import { PkmMode } from "../core/pkm";
 import { validateExternalSources } from "../core/manifest";
-import { CatalogItem, findGroupByPath, groupForItem, joinLocation, splitLocation } from "../core/catalog";
+import { CatalogItem, CatalogSection, findGroupByPath, groupForItem, joinLocation, splitLocation } from "../core/catalog";
 import { confirmWarnings } from "./ConfirmModal";
 
 export interface SettingsHost extends Plugin {
@@ -12,8 +12,10 @@ export interface SettingsHost extends Plugin {
   writeGroupsFile(groups: SyncGroup[]): Promise<void>;
   resolvedRootPath(): Promise<string>;
   detectedMode(): "ioto" | "default";
-  listOptionItems(groups: SyncGroup[]): Promise<CatalogItem[]>;
-  listPluginItems(): unknown[];
+  listOptionSections(groups: SyncGroup[]): Promise<CatalogSection[]>;
+  listCoreSections(groups: SyncGroup[]): Promise<CatalogSection[]>;
+  listPluginSections(groups: SyncGroup[]): Promise<CatalogSection[]>;
+  installedPluginIds(): string[];
 }
 
 interface SourceDraft {
@@ -120,7 +122,8 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         break;
       case "plugins":
         if (!this.renderGroupsReadError(containerEl)) {
-          this.renderPlugins(containerEl);
+          await this.renderPlugins(containerEl);
+          if (gen !== this.renderGen) return;
           this.renderGroupsError(containerEl);
         }
         break;
@@ -215,7 +218,8 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       .setName("Obsidian")
       .setHeading()
       .setDesc("Choose which Obsidian settings follow you across devices.");
-    const items = await this.host.listOptionItems(this.groups);
+    // TODO(Task 5): Replace temporary flatten with proper section rendering.
+    const items = (await this.host.listOptionSections(this.groups)).flatMap((s) => s.items);
     if (gen !== this.renderGen) return;
     const listEl = containerEl.createDiv();
     for (const item of items) {
@@ -223,27 +227,16 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     }
   }
 
-  private renderPlugins(containerEl: HTMLElement): void {
+  private async renderPlugins(containerEl: HTMLElement): Promise<void> {
     new Setting(containerEl)
       .setName("Community plugins")
       .setHeading()
       .setDesc("Sync a plugin's settings to your other devices. The plugin itself still installs from the community store or BRAT.");
+    // TODO(Task 5): Replace temporary flatten with proper section rendering.
+    const items = (await this.host.listPluginSections(this.groups)).flatMap((s) => s.items);
     const listEl = containerEl.createDiv();
-    for (const p of this.host.listPluginItems() as { id: string; name: string; dataPath: string; disabledReason: string | null }[]) {
-      this.renderChecklistRow(
-        listEl,
-        {
-          name: p.dataPath,
-          label: p.name,
-          description: `Settings of ${p.id}.`,
-          path: p.dataPath,
-          type: "file",
-          exists: true,
-          disabledReason: p.disabledReason,
-          cautionReason: null,
-        },
-        `${p.name} plugin settings`
-      );
+    for (const item of items) {
+      this.renderChecklistRow(listEl, item, item.description !== null ? item.label : null);
     }
   }
 
