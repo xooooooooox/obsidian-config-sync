@@ -96,6 +96,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
           .onChange(async (v) => {
             this.host.settings.pkmMode = v as PkmMode;
             await this.host.saveSettings();
+            this.loaded = false; // effective root may have changed; reload drafts
             this.refresh(); // update the data-folder placeholder
           })
       );
@@ -117,6 +118,10 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
           }
           this.host.settings.rootPath = trimmed;
           await this.host.saveSettings();
+        });
+        t.inputEl.addEventListener("blur", () => {
+          this.loaded = false;
+          this.refresh();
         });
       });
   }
