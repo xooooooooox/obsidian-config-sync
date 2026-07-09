@@ -84,7 +84,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private activeTab: PanelTab = "general";
   private search = "";
   private searchInputEl: HTMLInputElement | null = null; // restore focus across search re-renders
-  private unlocked = new Set<string>(); // UI-transient: advanced rows unlocked this session
+  private expanded = new Set<string>(); // UI-transient: advanced rows expanded this session
   private groupsErrorEl: HTMLElement | null = null;
   private sourcesErrorEl: HTMLElement | null = null;
   private groupsErrorMsg = "";
@@ -98,7 +98,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     this.loaded = false;
     this.activeTab = "general";
     this.search = "";
-    this.unlocked.clear();
+    this.expanded.clear();
     this.rerender(0);
   }
 
@@ -406,16 +406,8 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const managedHead = new Setting(containerEl)
       .setName("Managed by pickers")
       .setHeading()
-      .setDesc("Rules created from the other tabs. Locked by default — unlock a row to fix a path that has gone stale, or reset it to the picker default.");
+      .setDesc("Rules created from the other tabs. Expand a row to edit it, or reset it to the picker default.");
     if (managed.length > 0) {
-      managedHead.addButton((b) => b.setButtonText("Lock all").onClick(() => {
-        this.unlocked.clear();
-        this.refresh();
-      }));
-      managedHead.addButton((b) => b.setButtonText("Unlock all").onClick(() => {
-        for (const g of managed) this.unlocked.add(g.name);
-        this.refresh();
-      }));
       managedHead.addButton((b) => b.setButtonText("Reset all").onClick(async () => {
         for (let i = 0; i < this.groups.length; i++) {
           const g = this.groups[i];
@@ -450,6 +442,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     new Setting(containerEl).addButton((b) =>
       b.setButtonText("Add rule").onClick(() => {
         this.groups.push({ name: "", path: "", type: "file", devices: "all" });
+        this.expanded.add("");
         this.refresh();
       })
     );
@@ -490,26 +483,20 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   }
 
   private renderRuleCard(listEl: HTMLElement, group: SyncGroup, managed: boolean): void {
-    const locked = managed && !this.unlocked.has(group.name);
-    const card = listEl.createDiv({ cls: "config-sync-rule" });
-
-    const head = card.createDiv({ cls: "config-sync-rule-head" });
+    const isOpen = this.expanded.has(group.name);
+    const row = listEl.createDiv({ cls: "config-sync-row" + (isOpen ? " is-open" : "") });
+    row.createSpan({ cls: "config-sync-row-chevron", text: isOpen ? "▾" : "▸" });
+    row.createSpan({ cls: "config-sync-rule-name", text: group.name === "" ? "(unnamed)" : group.name });
+    row.createSpan({ cls: "config-sync-row-path", text: splitLocation(group.path).rel });
     if (managed) {
-      new ExtraButtonComponent(head)
-        .setIcon(locked ? "lock" : "unlock")
-        .setTooltip(locked ? "Unlock to edit" : "Lock")
-        .onClick(() => {
-          if (locked) this.unlocked.add(group.name);
-          else this.unlocked.delete(group.name);
-          this.refresh();
-        });
-      head.createSpan({ cls: "config-sync-rule-name", text: group.name });
       const expected = expectedPathForName(group.name);
       if (expected !== null && group.path !== expected) {
-        head.createSpan({ cls: "config-sync-badge", text: `⚙ customized (was ${expected})` });
+        row.createSpan({ cls: "config-sync-badge", text: "⚙ customized", attr: { title: `was ${expected}` } });
       }
-      head.createDiv({ cls: "config-sync-rule-spacer" });
-      new ButtonComponent(head)
+    }
+    row.createDiv({ cls: "config-sync-rule-spacer" });
+    if (managed) {
+      new ButtonComponent(row)
         .setButtonText("Reset")
         .setTooltip("Restore to the picker default")
         .onClick(async () => {
@@ -521,91 +508,95 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
           this.refresh();
         });
     } else {
-      const nameC = new TextComponent(head);
-      nameC.setPlaceholder("name (a-z, 0-9, -, _)").setValue(group.name).onChange((v) => {
-        group.name = v.trim();
-        void this.saveGroups();
-      });
-      nameC.inputEl.addClass("config-sync-rule-name-input");
-      head.createDiv({ cls: "config-sync-rule-spacer" });
-      new ExtraButtonComponent(head)
+      new ExtraButtonComponent(row)
         .setIcon("trash")
         .setTooltip("Delete rule")
         .onClick(async () => {
           const idx = this.groups.findIndex((g) => g === group);
           if (idx >= 0) this.groups.splice(idx, 1);
+          this.expanded.delete(group.name);
           await this.saveGroups();
           this.refresh();
         });
     }
+    row.addEventListener("click", (e) => {
+      if ((e.target as HTMLElement).closest("button, .clickable-icon, input, select") !== null) return;
+      if (isOpen) this.expanded.delete(group.name);
+      else this.expanded.add(group.name);
+      this.refresh();
+    });
+    if (isOpen) this.renderRuleForm(listEl, group, managed);
+  }
 
-    const controls = card.createDiv({ cls: "config-sync-rule-controls" });
-    const field = (label: string): HTMLElement => {
-      const f = controls.createDiv({ cls: "config-sync-field" });
-      f.createEl("label", { cls: "config-sync-field-label", text: label });
+  private renderRuleForm(listEl: HTMLElement, group: SyncGroup, managed: boolean): void {
+    const panel = listEl.createDiv({ cls: "config-sync-expand" });
+    const field = (parent: HTMLElement, label: string): HTMLElement => {
+      const f = parent.createDiv();
+      f.createEl("label", { cls: "config-sync-form-label", text: label });
       return f;
     };
 
-    const locField = field("Location");
+    const line1 = panel.createDiv({ cls: "config-sync-form-line1" + (managed ? "" : " has-name") });
+    if (!managed) {
+      const nameC = new TextComponent(field(line1, "Name"));
+      nameC.setPlaceholder("name (a-z, 0-9, -, _)").setValue(group.name).onChange((v) => {
+        this.expanded.delete(group.name);
+        group.name = v.trim();
+        this.expanded.add(group.name);
+        void this.saveGroups();
+      });
+      nameC.inputEl.addClass("config-sync-rule-name-input");
+    }
     const loc = splitLocation(group.path);
-    new DropdownComponent(locField)
+    new DropdownComponent(field(line1, "Location"))
       .addOption("config", "Config folder")
       .addOption("vault", "Vault root")
       .setValue(loc.location)
-      .setDisabled(locked)
       .onChange((v) => {
         group.path = joinLocation(v as "config" | "vault", splitLocation(group.path).rel);
         void this.saveGroups();
       });
-
-    const pathC = new TextComponent(field("Path"));
-    pathC.setPlaceholder("relative path").setValue(loc.rel).setDisabled(locked).onChange((v) => {
+    const pathC = new TextComponent(field(line1, "Path"));
+    pathC.setPlaceholder("relative path").setValue(loc.rel).onChange((v) => {
       group.path = joinLocation(splitLocation(group.path).location, v.trim());
       void this.saveGroups();
     });
-    pathC.inputEl.addClass("config-sync-field-grow");
 
-    new DropdownComponent(field("Type"))
+    const line2 = panel.createDiv({ cls: "config-sync-form-line2" });
+    new DropdownComponent(field(line2, "Type"))
       .addOption("file", "file")
       .addOption("dir", "dir")
       .setValue(group.type)
-      .setDisabled(locked)
       .onChange(async (v) => {
         group.type = v as SyncGroup["type"];
         if (group.type !== "file") delete group.sanitize;
         await this.saveGroups();
         this.refresh();
       });
-
-    new DropdownComponent(field("Devices"))
+    new DropdownComponent(field(line2, "Devices"))
       .addOption("all", "all")
       .addOption("desktop", "desktop")
       .addOption("mobile", "mobile")
       .setValue(group.devices)
-      .setDisabled(locked)
       .onChange(async (v) => {
         group.devices = v as DeviceClass;
         await this.saveGroups();
         this.refresh();
       });
-
-    const sanC = new TextComponent(field("Sanitize"));
-    sanC.setPlaceholder("globs, comma-separated").setValue(group.sanitize?.join(", ") ?? "").setDisabled(locked || group.type !== "file").onChange((v) => {
+    const sanC = new TextComponent(field(line2, "Sanitize"));
+    sanC.setPlaceholder("globs, comma-separated").setValue(group.sanitize?.join(", ") ?? "").setDisabled(group.type !== "file").onChange((v) => {
       const patterns = v.split(",").map((s) => s.trim()).filter((s) => s !== "");
       if (patterns.length > 0) group.sanitize = patterns;
       else delete group.sanitize;
       void this.saveGroups();
     });
-    sanC.inputEl.addClass("config-sync-field-grow");
-
-    const descC = new TextComponent(field("Description"));
-    descC.setPlaceholder("optional").setValue(group.description ?? "").setDisabled(locked).onChange((v) => {
+    const descC = new TextComponent(field(line2, "Description"));
+    descC.setPlaceholder("optional").setValue(group.description ?? "").onChange((v) => {
       const d = v.trim();
       if (d !== "") group.description = d;
       else delete group.description;
       void this.saveGroups();
     });
-    descC.inputEl.addClass("config-sync-field-grow");
   }
 
   private async saveGroups(): Promise<void> {
