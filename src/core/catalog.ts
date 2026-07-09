@@ -58,6 +58,71 @@ const WORKSPACE_RE = /^workspace.*\.json$/;
 export const WORKSPACE_CAUTION =
   "Window layout and open tabs — highly device-specific; syncing will make devices overwrite each other.";
 
+export const OPTION_LABELS: Record<string, { label: string; description: string; type: "file" | "dir" }> = {
+  "app.json": { label: "Editor & general", description: "Editor and general options.", type: "file" },
+  "appearance.json": { label: "Appearance", description: "Theme choice, fonts and interface appearance.", type: "file" },
+  "hotkeys.json": { label: "Hotkeys", description: "Custom keyboard shortcuts.", type: "file" },
+  themes: { label: "Themes", description: "Installed theme files.", type: "dir" },
+  snippets: { label: "CSS snippets", description: "Your CSS snippets.", type: "dir" },
+  "core-plugins.json": {
+    label: "Enabled core plugins",
+    description: "Which core plugins are turned on. Mirrors the whole list across devices.",
+    type: "file",
+  },
+  "community-plugins.json": {
+    label: "Enabled community plugins",
+    description:
+      "Which community plugins are turned on — not the plugins themselves or their settings. Mirrors the whole list: plugins enabled only on the target device get turned off.",
+    type: "file",
+  },
+};
+
+export const CORE_PLUGIN_FILES: Record<string, string> = {
+  graph: "graph.json",
+  backlink: "backlink.json",
+  canvas: "canvas.json",
+  "page-preview": "page-preview.json",
+  "daily-notes": "daily-notes.json",
+  templates: "templates.json",
+  "zk-prefixer": "zk-prefixer.json",
+  bookmarks: "bookmarks.json",
+  "command-palette": "command-palette.json",
+  properties: "types.json",
+  sync: "sync.json",
+  publish: "publish.json",
+};
+export const CORE_SETTINGS_IDS = Object.keys(CORE_PLUGIN_FILES);
+export const CORE_NOT_RECOMMENDED = ["sync", "publish"];
+
+export function corePluginFile(id: string): string {
+  return CORE_PLUGIN_FILES[id] ?? `${id}.json`;
+}
+
+export function optionReservedName(file: string): string {
+  return file.endsWith(".json") ? file.slice(0, -".json".length) : file;
+}
+
+export function reservedNames(pluginIds: string[]): Set<string> {
+  const names = new Set<string>();
+  for (const file of Object.keys(OPTION_LABELS)) names.add(optionReservedName(file));
+  for (const id of CORE_SETTINGS_IDS) names.add(id);
+  for (const id of pluginIds) names.add(`plugin-${id}`);
+  return names;
+}
+
+export function expectedPathForName(name: string): string | null {
+  for (const [file, meta] of Object.entries(OPTION_LABELS)) {
+    if (optionReservedName(file) === name) return `{configDir}/${meta.type === "dir" ? name : file}`;
+  }
+  if (name.startsWith("plugin-")) return `{configDir}/plugins/${name.slice("plugin-".length)}/data.json`;
+  if (CORE_SETTINGS_IDS.includes(name)) return `{configDir}/${corePluginFile(name)}`;
+  return null;
+}
+
+export function findGroupByName(groups: SyncGroup[], name: string): SyncGroup | undefined {
+  return groups.find((g) => g.name === name);
+}
+
 function basename(p: string): string {
   return p.slice(p.lastIndexOf("/") + 1);
 }

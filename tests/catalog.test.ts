@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  corePluginFile,
+  expectedPathForName,
+  findGroupByName,
   findGroupByPath,
   groupForItem,
   joinLocation,
   listOptionItems,
   listPluginItems,
+  optionReservedName,
+  reservedNames,
   slugForPath,
   splitLocation,
 } from "../src/core/catalog";
@@ -103,5 +108,43 @@ describe("splitLocation / joinLocation", () => {
     expect(splitLocation(".obsidian.vimrc")).toEqual({ location: "vault", rel: ".obsidian.vimrc" });
     expect(joinLocation("config", "hotkeys.json")).toBe("{configDir}/hotkeys.json");
     expect(joinLocation("vault", ".obsidian.vimrc")).toBe(".obsidian.vimrc");
+  });
+});
+
+describe("name and path helpers", () => {
+  it("corePluginFile reads the map, with an <id>.json fallback", () => {
+    expect(corePluginFile("graph")).toBe("graph.json");
+    expect(corePluginFile("properties")).toBe("types.json");
+    expect(corePluginFile("brand-new-core")).toBe("brand-new-core.json");
+  });
+
+  it("optionReservedName strips the .json extension, keeps dir names", () => {
+    expect(optionReservedName("app.json")).toBe("app");
+    expect(optionReservedName("snippets")).toBe("snippets");
+  });
+
+  it("reservedNames unions option, core-settings and community identities", () => {
+    const names = reservedNames(["dataview"]);
+    expect(names.has("app")).toBe(true);
+    expect(names.has("graph")).toBe(true);
+    expect(names.has("properties")).toBe(true);
+    expect(names.has("plugin-dataview")).toBe(true);
+    expect(names.has("core-plugins")).toBe(true);
+    expect(names.has("nope")).toBe(false);
+  });
+
+  it("expectedPathForName maps each identity kind back to its path", () => {
+    expect(expectedPathForName("app")).toBe("{configDir}/app.json");
+    expect(expectedPathForName("snippets")).toBe("{configDir}/snippets");
+    expect(expectedPathForName("graph")).toBe("{configDir}/graph.json");
+    expect(expectedPathForName("properties")).toBe("{configDir}/types.json");
+    expect(expectedPathForName("plugin-dataview")).toBe("{configDir}/plugins/dataview/data.json");
+    expect(expectedPathForName("not-a-known-name")).toBe(null);
+  });
+
+  it("findGroupByName matches on name, not path", () => {
+    const groups: SyncGroup[] = [{ name: "graph", path: "{configDir}/custom.json", type: "file", devices: "all" }];
+    expect(findGroupByName(groups, "graph")?.path).toBe("{configDir}/custom.json");
+    expect(findGroupByName(groups, "app")).toBeUndefined();
   });
 });
