@@ -8,6 +8,7 @@ Obsidian plugin: selective config distribution across devices/vaults. Spec: `doc
 - `npm run build` — `tsc -noEmit` + production bundle (run before finishing any change)
 - `npm test` — vitest; `tests/external.test.ts` needs the `git` binary
 - `npm run smoke:install` — build and install the plugin into `./dev/vault` (gitignored copy of a test vault)
+- Releasing: `npm version <x.y.z>` → `git push --follow-tags` → CI drafts the release → publish the draft on GitHub (BRAT needs a published release).
 
 ## Architecture
 
@@ -22,7 +23,13 @@ The repo's git history is rooted at `obsidianmd/obsidian-sample-plugin` (remote 
 
 ## Smoke testing
 
-`dev/vault/` (gitignored) is a disposable Obsidian vault for manual/CLI smoke tests. Install the current build with `npm run smoke:install`, open the vault in Obsidian, then drive it with the official CLI (`/Applications/Obsidian.app/Contents/MacOS/obsidian-cli`): `plugin:reload id=obsidian-config-sync`, `command id=obsidian-config-sync:publish` (also `:apply`, `:revert-last-apply`, `:import-from-external`), `eval code=...` for assertions, `dev:errors` for console errors. Never smoke-test in a real vault.
+`dev/vault/` (gitignored) is a disposable Obsidian vault for CLI-driven smoke tests. Install the current build with `npm run smoke:install`, then drive the RUNNING app with the official CLI (`/Applications/Obsidian.app/Contents/MacOS/obsidian-cli`):
+
+- `vaults verbose` lists registered vaults; target one with `vault=<folder-basename>`.
+- `command id=obsidian-config-sync:<publish|apply|revert-last-apply|import-from-external>` runs commands; `plugin:reload id=obsidian-config-sync` reloads a dev build; `dev:errors` shows console errors; `dev:mobile on` emulates mobile; `dev:dom` / `dev:screenshot` inspect UI.
+- Drive modals via `eval code=...`: `document.querySelectorAll('.modal .checkbox-container')[i].click()` toggles, find buttons by textContent (e.g. Continue), `.modal-close-button` closes reports, `.suggestion-item` picks in fuzzy modals.
+- **Vault registration is human-only**: Obsidian rebuilds its vault registry from internal state at startup, pruning injected entries; the CLI cannot register or open new vaults. A human must "Open folder as vault" + Trust once — afterwards CLI automation is fully autonomous. CLI calls against a stale vault hang (~2 min).
+- Never smoke-test in a real vault.
 
 ## Rules
 
