@@ -21,7 +21,7 @@
 - Errors are explicit and contextual (group name, path, underlying message). No silent fallback, no catch-all swallowing.
 - JSON files are written with 2-space indent and a trailing newline.
 - All vault paths use `/` separators and are vault-relative (adapter convention).
-- Repo: `<repo>` (git, remote `https://github.com/xooooooooox/obsidian-config-sync`). All commands below run from the repo root.
+- Repo: https://github.com/xooooooooox/obsidian-config-sync . All commands below run from the repo root.
 
 ## File Structure
 

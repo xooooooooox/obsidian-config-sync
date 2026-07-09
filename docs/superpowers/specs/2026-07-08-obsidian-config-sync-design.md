@@ -11,7 +11,7 @@
   3. **版本绑定**——插件配置 schema 随插件版本演进，跨版本套用可能不兼容；
   4. **落地特殊**——须写进本设备配置目录（`app.vault.configDir`）并重载生效，remotely-save 默认不碰配置目录。
 - **形态**：直接开发为 Obsidian 插件（id：`obsidian-config-sync`），经 BRAT 分发安装。
-- **开发位置**：本仓库 `<repo>`，远端 https://github.com/xooooooooox/obsidian-config-sync 。
+- **开发位置**：本仓库（远端 https://github.com/xooooooooox/obsidian-config-sync ）。
 - **前提**：各设备 configDir 无需同名（动态获取，现场证据：kickstart 的 configDir 实为 `.obsidian_apple`，同目录下 `.obsidian` 为空壳）；main.vault 与 kickstart.vault 是独立 git 仓库（main 有 GitLab 远端）；设备间笔记同步 = remotely-save。
 
 ## 2. 核心原理：传输与落地分离

@@ -14,7 +14,7 @@
 - Groups file: `<root>/config-sync.json` with `$schema` = `SCHEMA_URL`. Starter groups: snippets (dir/all) + hotkeys (file/all).
 - PKM defaults (verbatim from spec E): `default` mode → `config-sync`; `ioto` mode → `<extraFolder>/config-sync` read from `{configDir}/plugins/ioto-settings/data.json` key `extraFolder`, fallback `0-Extra/config-sync`. Detection: `ioto-update` plugin enabled. rootPath `""` = follow mode; non-empty = user override.
 - Settings-form rule: text-field `onChange` handlers mutate drafts and save — they must NOT re-render (focus loss); only structural actions (add/delete/type change/mode change) re-render, and internal re-renders must NOT reload drafts (only Obsidian's own `display()` entry reloads from file/settings).
-- Repo: `<repo>`, branch to be created from `main` at execution time (`feat/settings-ux`). All commands run from repo root.
+- Repo: https://github.com/xooooooooox/obsidian-config-sync , branch to be created from `main` at execution time (`feat/settings-ux`). All commands run from the repo root.
 
 ## File Structure
 
