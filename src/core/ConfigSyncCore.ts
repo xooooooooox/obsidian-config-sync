@@ -344,6 +344,37 @@ export async function importExternal(ctx: CoreContext, reader: ExternalStoreRead
   return result;
 }
 
+export interface ExternalStoreWriter {
+  listFiles(): Promise<string[]>; // existing remote files, relative to <root>/, "/"-separated
+  writeFile(relPath: string, content: string): Promise<void>;
+  deleteFile(relPath: string): Promise<void>;
+  finalize(): Promise<void>; // git: add/commit/push; local-path: no-op
+}
+
+export async function pushExternal(ctx: CoreContext, writer: ExternalStoreWriter): Promise<GroupResult> {
+  const localAbs = await listFilesRecursive(ctx.io, ctx.rootPath);
+  const rels = localAbs.map((f) => f.slice(ctx.rootPath.length + 1)).sort();
+  if (!rels.includes("config-sync.json")) {
+    throw new Error(
+      `Local store has no config-sync.json at ${ctx.rootPath} — capture from this device (or pull) before pushing.`
+    );
+  }
+  const result = emptyResult("push", false);
+  for (const rel of rels) {
+    await writer.writeFile(rel, await ctx.io.read(`${ctx.rootPath}/${rel}`));
+    result.filesWritten.push(rel);
+  }
+  const wanted = new Set(rels);
+  for (const rel of await writer.listFiles()) {
+    if (!wanted.has(rel)) {
+      await writer.deleteFile(rel);
+      result.filesDeleted.push(rel);
+    }
+  }
+  await writer.finalize();
+  return result;
+}
+
 export const SCHEMA_URL =
   "https://raw.githubusercontent.com/xooooooooox/obsidian-config-sync/main/schema/config-sync.schema.json";
 
