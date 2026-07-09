@@ -4,6 +4,8 @@
 **Date:** 2026-07-10
 **Scope:** #3 from the 0.4.0/0.6.0 device-testing feedback: Advanced-tab layout, picker Sync-all control, Discovered-files interaction, search-box width. Pure UI layer — `src/ui/SettingTab.ts` + `styles.css`. No `src/core` changes, no data migration.
 
+**Scope addendum (added during planning):** community-submission readiness. The Obsidian directory rejected the submission because the plugin id `obsidian-config-sync` contains `obsidian` (forbidden by the manifest guidelines). The id becomes `config-sync` (verified available); the old id stays in `BLACKLISTED_PLUGIN_DIRS` alongside the new one because devices installed under the old id still carry that folder. Repo name, npm package name, and schema URL keep the old string. Details in the plan's Task 1.
+
 ## Problems (from real-device screenshots)
 
 1. The rule cards in Advanced cram six label+control pairs into one `flex-wrap` row; wrapping varies with panel width, every card looks different — "乱/丑".

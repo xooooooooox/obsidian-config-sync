@@ -2,26 +2,94 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Unify the settings panel visuals — full-width search, picker Sync-all as a toggle, Advanced tab as one summary-row + expand-to-edit language, Discovered files as name-less toggle rows.
+**Goal:** Make the plugin submittable to the Obsidian community directory (plugin id rename `obsidian-config-sync` → `config-sync`) and unify the settings panel visuals — full-width search, picker Sync-all as a toggle, Advanced tab as one summary-row + expand-to-edit language, Discovered files as name-less toggle rows.
 
-**Architecture:** Pure UI layer: `src/ui/SettingTab.ts` + `styles.css`. No `src/core` changes, no settings migration. The lock mechanism (lock icons, `unlocked` set, Lock all/Unlock all) is removed; a UI-transient `expanded` set drives collapse/expand. All existing save/validation/render invariants stay.
+**Architecture:** Task 1 is a mechanical id rename (manifest + the two hardcoded self-references in core + smoke path). Tasks 2-4 are pure UI layer: `src/ui/SettingTab.ts` + `styles.css`, no settings migration. The lock mechanism (lock icons, `unlocked` set, Lock all/Unlock all) is removed; a UI-transient `expanded` set drives collapse/expand. All existing save/validation/render invariants stay.
 
 **Tech Stack:** TypeScript, Obsidian `Setting`/`ToggleComponent`/`DropdownComponent`/`TextComponent`/`ButtonComponent`/`ExtraButtonComponent`, plugin-owned `styles.css` using Obsidian CSS variables.
 
 ## Global Constraints
 
 - **Spec:** `docs/superpowers/specs/2026-07-10-settings-visual-unification-design.md`.
-- **UI-only:** `src/core/*` must not change. `listDiscovered`, `defaultGroupForName`, `toggleSection`, `expectedPathForName`, `splitLocation`, `joinLocation` are reused as-is.
+- **UI-only (Tasks 2-4):** outside Task 1's two named core edits, `src/core/*` must not change. `listDiscovered`, `defaultGroupForName`, `toggleSection`, `expectedPathForName`, `splitLocation`, `joinLocation` are reused as-is.
 - **Render invariants (existing, must survive):** text-field `onChange` never re-renders (focus preservation); structural changes `await this.saveGroups(); this.refresh();`; render-generation guard around awaits in `renderAdvanced`; `display()` resets transient UI state.
 - **Lock removal is total:** no lock/unlock icons, no `unlocked` set, no Lock all / Unlock all buttons, no `setDisabled(locked)`. Keep Reset, Reset all, and the `⚙ customized` badge. The `Sanitize` field keeps its semantic disable (`group.type !== "file"`).
 - **Discovered toggle semantics:** switching on creates `{ name: d.name, path: d.path, type: "file", devices: "all" }` immediately (no Name input); on save failure roll back with `this.groups.pop()` and set `groupsErrorMsg`; the row leaves Discovered on success (existing `listDiscovered` exclusion).
 - **`expanded` keying:** by group name; Add rule adds `""`; custom Name `onChange` re-keys (`delete` old, `add` new).
 - **Verification gate per task (all three, before every commit):** `npm test` (103 passing) AND `npm run build` (tsc clean) AND `npm run lint` (**0 errors**; pre-existing warnings are acceptable — the 0.6.0 CI failure was a lint *error* the old test+build gate missed).
 - Commit only the files each task lists. Never stage `docs/`, `.superpowers/`, or `dev/`.
+- **Submission rules (from docs.obsidian.md/Reference/Manifest and …/Submit+your+plugin):** plugin `id` must contain only lowercase letters and hyphens, must not contain `obsidian`, must not end with `plugin`, and must be unique in the community directory (`config-sync` verified available). `name` must not contain "Obsidian" or "Plugin" ("Config Sync" verified available). Repo root must keep README.md, LICENSE, manifest.json (all present). Release tag must equal the manifest `version` (existing CI flow already complies).
 
 ---
 
-### Task 1: Full-width search box + picker Sync-all toggle
+### Task 1: Community submission readiness — plugin id rename
+
+The Obsidian directory rejected the submission: the id `obsidian-config-sync` contains `obsidian`, which the manifest guidelines forbid. Rename the id to `config-sync` everywhere it is load-bearing. The GitHub repo name, npm package name, and schema URL keep the old string (they are not governed by the manifest rules).
+
+**Files:**
+- Modify: `manifest.json` (id only)
+- Modify: `src/core/manifest.ts:12` (`BLACKLISTED_PLUGIN_DIRS`)
+- Modify: `src/core/ConfigSyncCore.ts:35` (`backupDir` path)
+- Modify: `package.json` (`smoke:install` path)
+- Test: `tests/core.test.ts` (2 backup-path assertions), `tests/manifest.test.ts` (self-blacklist coverage)
+
+**Interfaces:**
+- Consumes: nothing from other tasks.
+- Produces: the new plugin id `config-sync` (dev-vault smoke for later tasks installs under this id).
+
+- [ ] **Step 1: Update the failing test assertions first**
+
+In `tests/core.test.ts`, change both backup-path reads (~lines 163 and 186):
+
+```ts
+    const indexData = JSON.parse(await io.read(".obs/plugins/config-sync/backup/index.json")) as {
+```
+
+(and identically for the second `index` read at ~186 — both `.obs/plugins/obsidian-config-sync/backup/index.json` → `.obs/plugins/config-sync/backup/index.json`).
+
+In `tests/manifest.test.ts`, extend the existing blacklist test (`it("rejects blacklisted plugin dirs", ...)`) with assertions that BOTH the new and the old self-dir stay blacklisted:
+
+```ts
+  it("rejects the plugin's own dir under both old and new ids", () => {
+    const neu = { name: "self", path: "{configDir}/plugins/config-sync/data.json", type: "file", devices: "all" };
+    expect(() => parseSyncManifest(manifestWith([neu]))).toThrow("blacklisted");
+    const old = { name: "self-old", path: "{configDir}/plugins/obsidian-config-sync/data.json", type: "file", devices: "all" };
+    expect(() => parseSyncManifest(manifestWith([old]))).toThrow("blacklisted");
+  });
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run: `npm test`
+Expected: FAIL — the two core.test.ts reads miss (backup still written under the old dir) and the new-id blacklist assertion misses (`config-sync` not yet in the list).
+
+- [ ] **Step 3: Apply the renames**
+
+- `manifest.json`: `"id": "obsidian-config-sync"` → `"id": "config-sync"`. All other fields stay (name "Config Sync", description, minAppVersion 1.5.0, isDesktopOnly false are already compliant).
+- `src/core/manifest.ts:12`: keep the old id AND add the new one — devices that installed under the old id still have that folder, and its `data.json` is device-specific:
+
+```ts
+export const BLACKLISTED_PLUGIN_DIRS = ["remotely-save", "ioto-update", "slides-rup", "config-sync", "obsidian-config-sync"];
+```
+
+- `src/core/ConfigSyncCore.ts:35`: `` return `${ctx.configDir}/plugins/obsidian-config-sync/backup`; `` → `` return `${ctx.configDir}/plugins/config-sync/backup`; ``
+- `package.json` `smoke:install`: both occurrences of `dev/vault/.obsidian/plugins/obsidian-config-sync` → `dev/vault/.obsidian/plugins/config-sync`.
+
+- [ ] **Step 4: Verify gate**
+
+Run: `npm test && npm run build && npm run lint`
+Expected: all tests pass; tsc clean; lint **0 errors**.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add manifest.json src/core/manifest.ts src/core/ConfigSyncCore.ts package.json tests/core.test.ts tests/manifest.test.ts
+git commit -m "feat!: rename plugin id to config-sync for community submission"
+```
+
+---
+
+### Task 2: Full-width search box + picker Sync-all toggle
 
 **Files:**
 - Modify: `styles.css` (search rules; delete `.config-sync-syncall`)
@@ -124,7 +192,7 @@ git commit -m "feat: full-width search box and Sync-all toggle"
 
 ---
 
-### Task 2: Advanced summary rows + expand-to-edit (lock removal)
+### Task 3: Advanced summary rows + expand-to-edit (lock removal)
 
 **Files:**
 - Modify: `src/ui/SettingTab.ts` (field at :87, `display()` at :101, `renderAdvanced` at ~:400-455, `renderRuleCard` at ~:491-608)
@@ -132,7 +200,7 @@ git commit -m "feat: full-width search box and Sync-all toggle"
 
 **Interfaces:**
 - Consumes: `defaultGroupForName`, `expectedPathForName`, `splitLocation`, `joinLocation` (imported), `ButtonComponent`, `ExtraButtonComponent`, `DropdownComponent`, `TextComponent` (imported).
-- Produces: `.config-sync-row` / `.config-sync-rule-spacer` / `.config-sync-rule-name` CSS + row DOM pattern that Task 3 reuses; `private expanded = new Set<string>()`.
+- Produces: `.config-sync-row` / `.config-sync-rule-spacer` / `.config-sync-rule-name` CSS + row DOM pattern that Task 4 reuses; `private expanded = new Set<string>()`.
 
 - [ ] **Step 1: Swap the transient state**
 
@@ -313,7 +381,7 @@ Replace the entire `renderRuleCard` method (~:491-608) with:
 ```
 
 Notes for the implementer:
-- `renderDiscoveredCard` still exists and compiles against the old CSS classes until Task 3 — do not touch it here.
+- `renderDiscoveredCard` still exists and compiles against the old CSS classes until Task 4 — do not touch it here.
 - The `⚙ customized` badge keeps `.config-sync-badge` (existing class), with the expected path moved into a `title` tooltip.
 - The row click handler ignores clicks landing on interactive elements (`button`, Obsidian's `.clickable-icon`, `input`, `select`).
 
@@ -400,7 +468,7 @@ ADD:
 }
 ```
 
-(`.config-sync-row.is-static` is used by Task 3's Discovered rows.)
+(`.config-sync-row.is-static` is used by Task 4's Discovered rows.)
 
 - [ ] **Step 6: Verify gate**
 
@@ -416,13 +484,13 @@ git commit -m "feat: Advanced summary rows with expand-to-edit, lock mechanism r
 
 ---
 
-### Task 3: Discovered files as toggle rows
+### Task 4: Discovered files as toggle rows
 
 **Files:**
 - Modify: `src/ui/SettingTab.ts` (imports at :1; Discovered heading copy in `renderAdvanced` ~:435-438; replace `renderDiscoveredCard` ~:457-489)
 
 **Interfaces:**
-- Consumes: `.config-sync-row` / `.is-static` / `.config-sync-rule-name` / `.config-sync-rule-spacer` CSS from Task 2; `ToggleComponent` from `obsidian`; `splitLocation`; `this.host.writeGroupsFile`; `groupsErrorMsg` rollback pattern.
+- Consumes: `.config-sync-row` / `.is-static` / `.config-sync-rule-name` / `.config-sync-rule-spacer` CSS from Task 3; `ToggleComponent` from `obsidian`; `splitLocation`; `this.host.writeGroupsFile`; `groupsErrorMsg` rollback pattern.
 - Produces: nothing later tasks rely on.
 
 - [ ] **Step 1: Import ToggleComponent**
@@ -484,6 +552,6 @@ git commit -m "feat: Discovered files as toggle rows without name input"
 
 ## Notes for the executor
 
-- Order: Task 1 → 2 → 3 (Task 3 reuses Task 2's CSS row classes).
+- Order: Task 1 → 2 → 3 → 4 (Task 1 first so all dev-vault smoke runs under the new id `config-sync`; Task 4 reuses Task 3's CSS row classes).
 - There is no unit-test surface (pure DOM); the per-task gate is test+build+lint. The controller runs the obsidian-cli dev-vault smoke after the final whole-branch review, per the spec's smoke checklist.
 - The 54 pre-existing lint warnings are not the gate; only lint **errors** fail. New UI copy may add sentence-case warnings — acceptable, consistent with the existing panel copy.
