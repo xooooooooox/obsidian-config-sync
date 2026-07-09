@@ -1,15 +1,23 @@
 # obsidian-config-sync
 
-Selective, on-demand distribution of Obsidian vault configuration (CSS snippets, hotkeys, plugin settings) across devices and vaults. Transport rides your existing note-sync (e.g. remotely-save); landing is an explicit, per-device **Apply**.
+Selective, on-demand distribution of Obsidian vault configuration (CSS snippets, hotkeys, plugin settings) across devices and vaults. The store rides your existing note-sync (e.g. remotely-save) by default, or config-sync's own git/local-path transport; landing is always an explicit, per-device **Apply**.
 
 ## How it works
 
-- **Publish** (source vault): copies the config groups defined in `<root>/config-sync.json` into `<root>/store/`, stripping credential keys (`sanitize` patterns) and recording source plugin versions in `<root>/store.lock.json`. The store is plain vault content — your note-sync carries it everywhere.
+Two planes, kept separate.
+
+**Local plane** — this device's live config ↔ the store:
+
+- **Capture** (source vault): copies the config groups defined in `<root>/config-sync.json` into `<root>/store/`, stripping credential keys (`sanitize` patterns) and recording source plugin versions in `<root>/store.lock.json`.
 - **Apply** (any device): pick groups, get version-mismatch warnings, then land them into this device's config dir (`app.vault.configDir`, whatever its name). Sanitized keys keep their local values, so credentials entered once survive every apply. The previous state of every touched file is kept in a single-slot backup.
 - **Revert last apply**: restores that backup.
-- **Import from external source** (desktop): overwrite this vault's `<root>/` from another vault — via filesystem path, or via a read-only git remote (`fetch` + `ls-tree` + `show`, worktree untouched).
 
-All four commands have ribbon icons (Publish, Apply, Revert last apply; Import from external source is desktop-only).
+**Transport plane** — the store ↔ elsewhere; how it travels between devices/vaults:
+
+- **note-sync (default)**: the store is plain vault content, so your existing note-sync (remotely-save, Obsidian Sync, iCloud…) carries it everywhere — mobile included — with no configuration.
+- **Pull / Push** (desktop, optional): config-sync's own transport for a git repo or another vault. **Pull** overwrites this vault's `<root>/` from a configured **remote** — repeatable, so cold start and ongoing use the same command; **Push** sends the local store out to a remote. The git transport clones to a temp dir and never touches your vault's own repo.
+
+Commands live under one **Config Sync** ribbon icon that opens a menu of the currently-available actions (Capture/Apply/Revert always; Pull/Push when you're on desktop with at least one remote). Each command can also get its own ribbon icon — off by default; toggle them in Settings → Config Sync → **General**, which also shows a line telling you how your store currently travels. Configure remotes under Settings → Config Sync → **Remotes**.
 
 Pick what to sync in Settings → Config Sync. Items are grouped into tabs — **Obsidian** (global options), **Core plugins**, **Community plugins** — and within each tab by state (Available / Not yet in this vault / Not recommended, or Enabled / Disabled). Tick an item to sync it; each group has a **Sync all / Sync none** button. Core and community plugin names come from Obsidian at runtime. The Advanced tab groups rules into **Managed by pickers** (name fixed, path unlockable, reset to default individually or in bulk via Lock all / Unlock all / Reset all), **Discovered files** (config files we couldn't classify — name them to start syncing; path is fixed), and **Custom rules** (fully your own). Rule names are variable-style identifiers (lowercase letters, digits, `-`, `_`). A top **search box** finds items across all tabs. `workspace.json` and the `sync`/`publish` core plugins are shown under *Not recommended* and ask for confirmation before syncing. Everything is stored as named groups in `<data folder>/config-sync.json`.
 
@@ -18,7 +26,7 @@ Pick what to sync in Settings → Config Sync. Items are grouped into tabs — *
 ```
 <root>/                      # default "config-sync", configurable
 ├── config-sync.json         # group definitions (yours to edit)
-├── store.lock.json          # publish metadata (machine-written)
+├── store.lock.json          # capture metadata (machine-written)
 └── store/
     ├── configdir/…          # mirror of {configDir}/…
     └── <dotless files>      # vault-root dotfiles, leading dot stripped
@@ -49,17 +57,22 @@ Never syncable (hard blacklist): `remotely-save`, `ioto-update`, `slides-rup`, `
 
 **Sync hotkeys, appearance and CSS snippets everywhere**
 1. Settings → Config Sync → under *Obsidian*, tick **Hotkeys**, **Appearance**, **CSS snippets**.
-2. Run `Config Sync: Publish` (ribbon or command palette).
+2. Run `Config Sync: Capture` (ribbon menu or command palette).
 3. On each other device, run `Config Sync: Apply` once your note-sync has delivered the data folder.
 
 **Sync a plugin's settings but keep credentials out of the store**
 1. Under *Community plugins*, tick the plugin.
 2. Open *Advanced* — the rule the tick created is listed there. Add sanitize patterns for its credential keys, e.g. `*Token*, *Secret*, *APIKey*`.
-3. Publish. Credentials never enter the store; each device keeps its locally-entered values across applies.
+3. Capture. Credentials never enter the store; each device keeps its locally-entered values across applies.
 
 **IOTO vault, from zero**
 1. Install the plugin — PKM mode auto-detects IOTO and stores data under `0-Extra/config-sync` (from your ioto-settings aux folder).
-2. Tick what you want to sync, Publish, and let remotely-save carry it; other devices Apply.
+2. Tick what you want to sync, Capture, and let remotely-save carry it; other devices Apply.
+
+**Seed a second vault from another one, without a shared note-sync (desktop)**
+1. In the target vault: Settings → Config Sync → **Remotes** → add a remote — a filesystem path to the source vault, or its git repo + branch.
+2. Run `Config Sync: Pull` to overwrite this vault's store from that remote, then `Config Sync: Apply`.
+3. Later, from the source vault, `Config Sync: Push` back to the remote to publish updates for the other vault to pull.
 
 ## Install
 
