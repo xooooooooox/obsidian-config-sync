@@ -66,7 +66,7 @@ const TABS: { id: PanelTab; label: string }[] = [
   { id: "core", label: "Core plugins" },
   { id: "plugins", label: "Community plugins" },
   { id: "advanced", label: "Advanced" },
-  { id: "sources", label: "External sources" },
+  { id: "sources", label: "Remotes" },
 ];
 
 const SECTION_TAB: Record<"obsidian" | "core" | "plugins", string> = {
@@ -171,6 +171,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private async renderActiveTab(containerEl: HTMLElement, gen: number): Promise<void> {
     switch (this.activeTab) {
       case "general":
+        this.renderTransportStatus(containerEl);
         this.renderPkmMode(containerEl);
         await this.renderDataFolder(containerEl, gen);
         this.renderRibbonToggles(containerEl);
@@ -293,6 +294,19 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     }
     if (!any) listEl.createEl("p", { text: "No matching settings.", cls: "config-sync-empty" });
     this.renderGroupsError(containerEl);
+  }
+
+  private renderTransportStatus(containerEl: HTMLElement): void {
+    const remotes = this.host.settings.externalSources;
+    const s = new Setting(containerEl).setName("Store transport");
+    if (remotes.length === 0) {
+      s.setDesc(
+        "Store syncs via your note-sync tool (remotely-save / Obsidian Sync / …). Add a remote under Remotes for git or cross-vault sync."
+      );
+    } else {
+      const list = remotes.map((r) => `${r.name} (${r.type})`).join(", ");
+      s.setDesc(`Remotes: ${list}. Use Pull / Push to sync the store.`);
+    }
   }
 
   private renderPkmMode(containerEl: HTMLElement): void {
@@ -605,15 +619,17 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
 
   private renderSources(containerEl: HTMLElement): void {
     new Setting(containerEl)
-      .setName("External sources")
+      .setName("Remotes")
       .setHeading()
-      .setDesc("Pull the synced settings of another vault into this one (e.g. from your main vault into a published copy).");
+      .setDesc(
+        "Places you Pull the store from and Push it to — another vault (local path) or a git repo. note-sync handles your own devices without a remote."
+      );
     const listEl = containerEl.createDiv();
     this.sources.forEach((source, index) => this.renderSourceRow(listEl, source, index));
     this.sourcesErrorEl = containerEl.createEl("p", { cls: "mod-warning" });
     this.sourcesErrorEl.setText(this.sourcesErrorMsg);
     new Setting(containerEl).addButton((b) =>
-      b.setButtonText("Add source").onClick(() => {
+      b.setButtonText("Add remote").onClick(() => {
         this.sources.push({ name: "", type: "local-path", path: "", remote: "", branch: "", root: "" });
         this.refresh();
       })
@@ -663,7 +679,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       })
     );
     row.addExtraButton((b) =>
-      b.setIcon("trash").setTooltip("Delete source").onClick(async () => {
+      b.setIcon("trash").setTooltip("Delete remote").onClick(async () => {
         this.sources.splice(index, 1);
         await this.saveSources();
         this.refresh();
