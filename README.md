@@ -9,7 +9,9 @@ Selective, on-demand distribution of Obsidian vault configuration (CSS snippets,
 - **Revert last apply**: restores that backup.
 - **Import from external source** (desktop): overwrite this vault's `<root>/` from another vault — via filesystem path, or via a read-only git remote (`fetch` + `ls-tree` + `show`, worktree untouched).
 
-All four commands have ribbon icons (Publish, Apply, Revert last apply; Import from external source is desktop-only). Groups and external sources are edited as forms in Settings → Config Sync. The groups file `<data folder>/config-sync.json` is created automatically on first Publish/Apply (starter: snippets + hotkeys) or by the first valid edit in settings; JSON-savvy users can still edit it directly (a JSON Schema reference is included). **PKM mode** picks the default data folder — Auto detects IOTO via the `ioto-update` plugin and uses `<extraFolder>/config-sync` read from ioto-settings (fallback `0-Extra/config-sync`); otherwise `config-sync`. A non-empty Data folder value always overrides the mode; leave it empty to follow.
+All four commands have ribbon icons (Publish, Apply, Revert last apply; Import from external source is desktop-only).
+
+Pick what to sync in Settings → Config Sync: tick items under **Obsidian** (hotkeys, appearance, CSS snippets, …) and **Community plugins** (a plugin's settings — the plugin itself still installs from the store or BRAT). No paths to type; each ticked item can be limited to desktop or mobile. The **Advanced** section holds custom rules for anything else — vault-root files, extra folders, or per-key credential protection (sanitize). Under the hood every choice is stored as a group in `<data folder>/config-sync.json` (JSON Schema included), created automatically on first use. **PKM mode** picks the default data folder — Auto detects IOTO via the `ioto-update` plugin and uses `<extraFolder>/config-sync` read from ioto-settings (fallback `0-Extra/config-sync`); otherwise `config-sync`. A non-empty Data folder always overrides the mode; leave it empty to follow.
 
 ## Store layout
 
@@ -42,6 +44,22 @@ All four commands have ribbon icons (Publish, Apply, Revert last apply; Import f
 Group fields: `name` (unique) · `path` (`{configDir}` variable supported) · `type` (`file`/`dir`) · `devices` (`all`/`desktop`/`mobile`) · `sanitize` (optional key-glob list, file groups only).
 
 Never syncable (hard blacklist): `remotely-save`, `ioto-update`, `slides-rup`, `obsidian-config-sync` plugin dirs and `workspace*.json`.
+
+## Configuring what to sync — walkthroughs
+
+**Sync hotkeys, appearance and CSS snippets everywhere**
+1. Settings → Config Sync → under *Obsidian*, tick **Hotkeys**, **Appearance**, **CSS snippets**.
+2. Run `Config Sync: Publish` (ribbon or command palette).
+3. On each other device, run `Config Sync: Apply` once your note-sync has delivered the data folder.
+
+**Sync a plugin's settings but keep credentials out of the store**
+1. Under *Community plugins*, tick the plugin.
+2. Open *Advanced* — the rule the tick created is listed there. Add sanitize patterns for its credential keys, e.g. `*Token*, *Secret*, *APIKey*`.
+3. Publish. Credentials never enter the store; each device keeps its locally-entered values across applies.
+
+**IOTO vault, from zero**
+1. Install the plugin — PKM mode auto-detects IOTO and stores data under `0-Extra/config-sync` (from your ioto-settings aux folder).
+2. Tick what you want to sync, Publish, and let remotely-save carry it; other devices Apply.
 
 ## Install
 
