@@ -90,18 +90,21 @@ export async function createGitWriter(
         await rm(dir, { recursive: true, force: true });
         return;
       }
-      const stamp = new Date().toISOString();
-      await git(dir, [
-        "-c",
-        "user.email=config-sync@local",
-        "-c",
-        "user.name=config-sync",
-        "commit",
-        "-m",
-        `config-sync push: ${stamp}`,
-      ]);
-      await git(dir, ["push", "origin", branch]);
-      await rm(dir, { recursive: true, force: true });
+      try {
+        const stamp = new Date().toISOString();
+        await git(dir, [
+          "-c",
+          "user.email=config-sync@local",
+          "-c",
+          "user.name=config-sync",
+          "commit",
+          "-m",
+          `config-sync push: ${stamp}`,
+        ]);
+        await git(dir, ["push", "origin", branch]);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
     },
   };
 }

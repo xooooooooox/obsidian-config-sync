@@ -282,6 +282,8 @@ export default class ConfigSyncPlugin extends Plugin {
     return createGitReader(adapter.getBasePath(), source.remote, source.branch, source.root);
   }
 
+  // Dynamic import() keeps Node fs/child_process out of the mobile load path (spec D6):
+  // a static import would execute require("fs") at plugin load and crash on mobile.
   private async createWriter(source: ExternalSource): Promise<ExternalStoreWriter> {
     if (source.type === "local-path") {
       const { createLocalPathWriter } = await import("./external/localPath");
