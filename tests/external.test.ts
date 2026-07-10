@@ -5,7 +5,7 @@ import * as nodePath from "path";
 import { promisify } from "util";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createGitReader, createGitWriter } from "../src/external/gitSource";
-import { createLocalPathReader, createLocalPathWriter, expandTilde } from "../src/external/localPath";
+import { createLocalPathReader, createLocalPathWriter, expandTilde, findStoreDirs } from "../src/external/localPath";
 
 const run = promisify(execFile);
 
@@ -40,6 +40,26 @@ afterAll(async () => {
   await rm(sourceRepo, { recursive: true, force: true });
   await rm(consumerRepo, { recursive: true, force: true });
   await rm(bareRemote, { recursive: true, force: true });
+});
+
+describe("findStoreDirs", () => {
+  it("finds store dirs by config-sync.json, skipping dot dirs, stopping at a hit", async () => {
+    const base = await mkdtemp(nodePath.join(tmpdir(), "cs-find-"));
+    await mkdir(nodePath.join(base, "0-Extras/config-sync/plugin-x"), { recursive: true });
+    await writeFile(nodePath.join(base, "0-Extras/config-sync/config-sync.json"), "{}");
+    await writeFile(nodePath.join(base, "0-Extras/config-sync/plugin-x/config-sync.json"), "{}"); // below a hit → not reported
+    await mkdir(nodePath.join(base, ".obsidian/config-sync"), { recursive: true });
+    await writeFile(nodePath.join(base, ".obsidian/config-sync/config-sync.json"), "{}"); // dot dir → skipped
+    const dirs = await findStoreDirs(base);
+    expect(dirs).toEqual([nodePath.join(base, "0-Extras/config-sync")]);
+    await rm(base, { recursive: true, force: true });
+  });
+  it("returns [] when nothing matches and throws on an unreadable base", async () => {
+    const base = await mkdtemp(nodePath.join(tmpdir(), "cs-find-"));
+    expect(await findStoreDirs(base)).toEqual([]);
+    await rm(base, { recursive: true, force: true });
+    await expect(findStoreDirs(base)).rejects.toThrow("Cannot read folder");
+  });
 });
 
 describe("createLocalPathReader", () => {

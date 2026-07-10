@@ -64,3 +64,33 @@ async function walk(absBase: string, rel: string, out: string[]): Promise<void> 
     }
   }
 }
+
+/** BFS for directories containing config-sync.json: depth ≤ 4, skips dot-dirs and node_modules,
+ *  does not descend below a hit. Used by the settings Browse flow to locate a store. */
+export async function findStoreDirs(baseAbs: string): Promise<string[]> {
+  const base = expandTilde(baseAbs);
+  const hits: string[] = [];
+  const queue: { rel: string; depth: number }[] = [{ rel: "", depth: 0 }];
+  while (queue.length > 0) {
+    const item = queue.shift();
+    if (item === undefined) break;
+    const abs = item.rel === "" ? base : nodePath.join(base, item.rel);
+    let entries;
+    try {
+      entries = await fs.readdir(abs, { withFileTypes: true });
+    } catch (e) {
+      if (item.rel === "") throw new Error(`Cannot read folder ${base}: ${(e as Error).message}`);
+      continue; // unreadable subdir — keep scanning the rest
+    }
+    if (entries.some((e) => e.isFile() && e.name === "config-sync.json")) {
+      hits.push(abs);
+      continue;
+    }
+    if (item.depth >= 4) continue;
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name.startsWith(".") || entry.name === "node_modules") continue;
+      queue.push({ rel: item.rel === "" ? entry.name : `${item.rel}/${entry.name}`, depth: item.depth + 1 });
+    }
+  }
+  return hits.sort();
+}
