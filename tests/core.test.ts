@@ -69,14 +69,14 @@ describe("capture", () => {
     expect(await io.exists("cs/store/configdir/snippets/stale.css")).toBe(false);
     expect(await io.read("cs/store/configdir/snippets/sub/two.css")).toBe("two");
     expect(JSON.parse(await io.read("cs/store/configdir/plugins/demo/data.json"))).toEqual({ theme: "x" });
-    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { publishedAt: string; groups: Record<string, { sourcePluginVersion: string }> };
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { capturedAt: string; groups: Record<string, { sourcePluginVersion: string }> };
     expect(lock).toEqual({
-      publishedAt: "2026-07-08T00:00:00.000Z",
+      capturedAt: "2026-07-08T00:00:00.000Z",
       groups: { "plugin-demo": { sourcePluginVersion: "1.2.3" } },
     });
   });
 
-  it("reports missing sources as per-group errors and publishes the rest", async () => {
+  it("reports missing sources as per-group errors and captures the rest", async () => {
     const { io, plugins, ctx } = setup();
     plugins.installed.set("demo", "1.2.3");
     io.seed({
@@ -112,13 +112,65 @@ describe("capture", () => {
     const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, unknown> };
     expect(lock.groups["plugin-demo"]).toBeUndefined();
   });
+
+  it("carries forward the version stamp for a group that errors this capture", async () => {
+    const { io, plugins, ctx } = setup();
+    plugins.installed.set("demo", "1.2.3");
+    io.seed({
+      "cs/config-sync.json": MANIFEST,
+      ".obs/hotkeys.json": "{}",
+      ".obs/snippets/one.css": "x",
+      ".obsidian.vimrc": "v",
+      ".obs/plugins/demo/data.json": "{}",
+    });
+    await capture(ctx);
+    await io.remove(".obs/plugins/demo/data.json");
+    const results = await capture(ctx);
+    expect(results.find((r) => r.group === "plugin-demo")?.status).toBe("error");
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { capturedAt: string; groups: Record<string, { sourcePluginVersion: string }> };
+    expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.2.3" });
+  });
+
+  it("does not invent lock entries for errored groups that never had one", async () => {
+    const { io, plugins, ctx } = setup();
+    plugins.installed.set("demo", "1.2.3");
+    io.seed({
+      "cs/config-sync.json": MANIFEST,
+      ".obs/hotkeys.json": "{}",
+      ".obs/snippets/one.css": "x",
+      ".obsidian.vimrc": "v",
+      // plugin-demo source missing from the start
+    });
+    const results = await capture(ctx);
+    expect(results.find((r) => r.group === "plugin-demo")?.status).toBe("error");
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, unknown> };
+    expect(lock.groups["plugin-demo"]).toBeUndefined();
+  });
+
+  it("rebuilds an old-format lock on capture instead of failing", async () => {
+    const { io, plugins, ctx } = setup();
+    plugins.installed.set("demo", "1.2.3");
+    io.seed({
+      "cs/config-sync.json": MANIFEST,
+      "cs/store.lock.json": '{"publishedAt":"t","groups":{"plugin-demo":{"sourcePluginVersion":"9.9.9"}}}',
+      ".obs/hotkeys.json": "{}",
+      ".obs/snippets/one.css": "x",
+      ".obsidian.vimrc": "v",
+      ".obs/plugins/demo/data.json": "{}",
+    });
+    const results = await capture(ctx);
+    expect(results.every((r) => r.status === "ok")).toBe(true);
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { capturedAt: string; groups: Record<string, { sourcePluginVersion: string }> };
+    expect(lock.capturedAt).toBe("2026-07-08T00:00:00.000Z");
+    expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.2.3" }); // current version, not the stale 9.9.9 — success always re-stamps
+  });
 });
 
 export function seedStore(io: MemFS): void {
   io.seed({
     "cs/config-sync.json": MANIFEST,
     "cs/store.lock.json": JSON.stringify({
-      publishedAt: "t",
+      capturedAt: "t",
       groups: { "plugin-demo": { sourcePluginVersion: "1.2.3" } },
     }),
     "cs/store/configdir/hotkeys.json": '{"a":2}',
@@ -254,7 +306,7 @@ describe("importExternal", () => {
     io.seed({ "cs/config-sync.json": '{"version":1,"groups":[]}', "cs/store/old.css": "old" });
     const result = await importExternal(ctx, fakeReader({
       "config-sync.json": MANIFEST,
-      "store.lock.json": '{"publishedAt":"t","groups":{}}',
+      "store.lock.json": '{"capturedAt":"t","groups":{}}',
       "store/configdir/hotkeys.json": '{"a":3}',
     }));
     expect(result.status).toBe("ok");
@@ -310,7 +362,7 @@ describe("pushExternal", () => {
     const { io, ctx } = setup();
     io.seed({
       "cs/config-sync.json": '{"version":1,"groups":[]}',
-      "cs/store.lock.json": '{"publishedAt":"t","groups":{}}',
+      "cs/store.lock.json": '{"capturedAt":"t","groups":{}}',
       "cs/store/configdir/hotkeys.json": '{"a":9}',
     });
     const fw = fakeWriter({ "config-sync.json": "OLD", "store/gone.css": "stale" });
@@ -379,7 +431,7 @@ describe("readGroups / writeGroups", () => {
 });
 
 describe("starter-then-capture (implicit creation flow)", () => {
-  it("publishes the starter groups created on demand", async () => {
+  it("captures the starter groups created on demand", async () => {
     const { io, ctx } = setup();
     io.seed({ ".obs/snippets/one.css": "one", ".obs/hotkeys.json": "{}" });
     expect(await createStarterManifest(ctx)).toBe("created");

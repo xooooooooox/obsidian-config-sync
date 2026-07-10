@@ -16,7 +16,7 @@ export interface SyncManifest {
 }
 
 export interface StoreLock {
-  publishedAt: string;
+  capturedAt: string;
   groups: Record<string, { sourcePluginVersion: string }>;
 }
 

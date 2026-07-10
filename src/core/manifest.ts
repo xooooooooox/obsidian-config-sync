@@ -123,8 +123,8 @@ export function parseStoreLock(raw: string): StoreLock {
   } catch (e) {
     throw new ManifestValidationError(`store.lock.json is not valid JSON: ${(e as Error).message}`);
   }
-  if (!isPlainObject(parsed) || typeof parsed.publishedAt !== "string" || !isPlainObject(parsed.groups)) {
-    throw new ManifestValidationError("store.lock.json must be {publishedAt: string, groups: object}");
+  if (!isPlainObject(parsed) || typeof parsed.capturedAt !== "string" || !isPlainObject(parsed.groups)) {
+    throw new ManifestValidationError("store.lock.json must be {capturedAt: string, groups: object}");
   }
   const groups: Record<string, { sourcePluginVersion: string }> = {};
   for (const [k, v] of Object.entries(parsed.groups)) {
@@ -133,7 +133,7 @@ export function parseStoreLock(raw: string): StoreLock {
     }
     groups[k] = { sourcePluginVersion: v.sourcePluginVersion };
   }
-  return { publishedAt: parsed.publishedAt, groups };
+  return { capturedAt: parsed.capturedAt, groups };
 }
 
 export function validateRemotes(data: unknown): Remote[] {
