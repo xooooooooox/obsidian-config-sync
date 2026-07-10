@@ -3,6 +3,17 @@ import { FileIO, ListedDir } from "../src/core/io";
 export class MemFS implements FileIO {
   files = new Map<string, string>();
   dirs = new Set<string>();
+  mtimes = new Map<string, number>();
+
+  /** Test control: set a file's mtime (epoch ms). Seeded files default to 1000. */
+  touch(path: string, mtime: number): void {
+    this.mtimes.set(path, mtime);
+  }
+
+  async stat(path: string): Promise<{ mtime: number } | null> {
+    if (!this.files.has(path)) return null;
+    return { mtime: this.mtimes.get(path) ?? 1000 };
+  }
 
   seed(files: Record<string, string>): void {
     for (const [p, content] of Object.entries(files)) {

@@ -10,6 +10,7 @@ import {
   createStarterManifest as coreCreateStarterManifest,
   groupsForDevice,
   importExternal,
+  loadLock,
   loadManifest,
   pushExternal,
   readGroups,
@@ -18,11 +19,13 @@ import {
 } from "./core/ConfigSyncCore";
 import { type CatalogSection, listCoreSections, listDiscovered, listOptionSections, listPluginSections } from "./core/catalog";
 import { PkmMode, PkmProbe, resolveEffectiveMode, resolveRootPath } from "./core/pkm";
-import { Remote, RibbonButtons, SyncGroup } from "./core/types";
+import { checkRemote, statusForGroups } from "./core/status";
+import { Remote, RibbonButtons, StoreLock, SyncGroup } from "./core/types";
 import { GroupSelectModal } from "./ui/GroupSelectModal";
 import { confirmWarnings } from "./ui/ConfirmModal";
 import { ReportModal } from "./ui/ReportModal";
 import { SourceSelectModal } from "./ui/SourceSelectModal";
+import { remoteCheckText, StatusModal } from "./ui/StatusModal";
 import { ConfigSyncSettingTab } from "./ui/SettingTab";
 
 interface ConfigSyncSettings {
@@ -30,6 +33,8 @@ interface ConfigSyncSettings {
   rootPath: string; // "" = follow the PKM mode default
   remotes: Remote[];
   ribbonButtons: RibbonButtons;
+  statusInMenu: boolean;
+  statusInPickers: boolean;
 }
 
 const DEFAULT_SETTINGS: ConfigSyncSettings = {
@@ -37,6 +42,8 @@ const DEFAULT_SETTINGS: ConfigSyncSettings = {
   rootPath: "",
   remotes: [],
   ribbonButtons: { capture: false, apply: false, revert: false, pull: false, push: false },
+  statusInMenu: true,
+  statusInPickers: true,
 };
 
 // app.plugins is not part of the public API; this is the community-standard access path.
@@ -59,11 +66,12 @@ export default class ConfigSyncPlugin extends Plugin {
   async onload(): Promise<void> {
     await this.loadSettings();
     this.addSettingTab(new ConfigSyncSettingTab(this.app, this));
-    this.addRibbonIcon("refresh-cw", "Config Sync", (evt) => this.openSyncMenu(evt));
+    this.addRibbonIcon("refresh-cw", "Config Sync", (evt) => void this.openSyncMenu(evt));
     this.refreshRibbons();
     this.addCommand({ id: "capture", name: "Capture: save this device's settings", callback: () => void this.runCapture() });
     this.addCommand({ id: "apply", name: "Apply: update this device with synced settings", callback: () => void this.runApply() });
     this.addCommand({ id: "revert-last-apply", name: "Revert last apply", callback: () => void this.runRevert() });
+    this.addCommand({ id: "status", name: "Status: check what's in sync", callback: () => void this.runStatus() });
     this.addCommand({
       id: "pull",
       name: "Pull: get settings from a remote",
@@ -88,11 +96,28 @@ export default class ConfigSyncPlugin extends Plugin {
     return Platform.isDesktop && this.settings.remotes.length > 0;
   }
 
-  private openSyncMenu(evt: MouseEvent): void {
+  private async openSyncMenu(evt: MouseEvent): Promise<void> {
+    let captureTitle = "Capture: save this device's settings";
+    let applyTitle = "Apply: update this device with synced settings";
+    if (this.settings.statusInMenu) {
+      try {
+        const ctx = await this.coreContext();
+        const manifest = await loadManifest(ctx);
+        const device = Platform.isMobile ? ("mobile" as const) : ("desktop" as const);
+        const statuses = await statusForGroups(ctx, groupsForDevice(manifest, device));
+        const changedHere = statuses.filter((s) => s.state === "local-changed" || s.state === "differs").length;
+        const storeNewer = statuses.filter((s) => s.state === "store-newer").length;
+        if (changedHere > 0) captureTitle = `Capture (${changedHere} changed here)`;
+        if (storeNewer > 0) applyTitle = `Apply (${storeNewer} store-newer)`;
+      } catch (e) {
+        console.error("Config Sync: menu status check failed", e); // the menu must still open
+      }
+    }
     const menu = new Menu();
-    menu.addItem((i) => i.setTitle("Capture: save this device's settings").setIcon("upload").onClick(() => void this.runCapture()));
-    menu.addItem((i) => i.setTitle("Apply: update this device with synced settings").setIcon("folder-sync").onClick(() => void this.runApply()));
+    menu.addItem((i) => i.setTitle(captureTitle).setIcon("upload").onClick(() => void this.runCapture()));
+    menu.addItem((i) => i.setTitle(applyTitle).setIcon("folder-sync").onClick(() => void this.runApply()));
     menu.addItem((i) => i.setTitle("Revert last apply").setIcon("undo-2").onClick(() => void this.runRevert()));
+    menu.addItem((i) => i.setTitle("Status…").setIcon("activity").onClick(() => void this.runStatus()));
     if (this.transportAvailable()) {
       menu.addSeparator();
       menu.addItem((i) => i.setTitle("Pull: get settings from a remote").setIcon("folder-input").onClick(() => void this.runPull()));
@@ -189,7 +214,16 @@ export default class ConfigSyncPlugin extends Plugin {
         new Notice("Config Sync: no groups available for this device");
         return;
       }
-      new GroupSelectModal(this.app, groups, "Config Sync: select groups to apply", (names) => {
+      const statuses = this.settings.statusInPickers ? await statusForGroups(ctx, groups) : null;
+      const statusByName = statuses === null ? null : new Map(statuses.map((s) => [s.group, s]));
+      const deviceWords: Record<SyncGroup["devices"], string> = { all: "all devices", desktop: "desktop only", mobile: "mobile only" };
+      const items = groups.map((group) => ({
+        group,
+        resolvedPath: group.path.replace("{configDir}", this.app.vault.configDir),
+        meta: group.description ?? `${group.type === "dir" ? "folder" : "file"} · ${deviceWords[group.devices]}`,
+        status: statusByName?.get(group.name) ?? null,
+      }));
+      new GroupSelectModal(this.app, items, "Config Sync: select groups to apply", (names) => {
         void this.applyGroups(ctx, names);
       }).open();
     } catch (e) {
@@ -226,6 +260,34 @@ export default class ConfigSyncPlugin extends Plugin {
     }
   }
 
+  private async runStatus(): Promise<void> {
+    try {
+      const ctx = await this.coreContext();
+      const manifest = await loadManifest(ctx);
+      const device = Platform.isMobile ? ("mobile" as const) : ("desktop" as const);
+      const groups = groupsForDevice(manifest, device);
+      const statuses = await statusForGroups(ctx, groups);
+      const byName = new Map(groups.map((g) => [g.name, g]));
+      const entries = statuses.map((s) => ({
+        status: s,
+        resolvedPath: (byName.get(s.group)?.path ?? "").replace("{configDir}", this.app.vault.configDir),
+      }));
+      let localLock: StoreLock | null = null;
+      try {
+        localLock = await loadLock(ctx);
+      } catch {
+        localLock = null;
+      }
+      const remotes = Platform.isDesktop ? this.settings.remotes : [];
+      new StatusModal(this.app, entries, remotes, async (remote) => {
+        const reader = await this.createReader(remote);
+        return remoteCheckText(await checkRemote(localLock, reader));
+      }).open();
+    } catch (e) {
+      new Notice(`Config Sync status failed: ${(e as Error).message}`, 10000);
+    }
+  }
+
   private async runPull(): Promise<void> {
     const remotes = this.settings.remotes;
     if (remotes.length === 0) {
@@ -247,7 +309,7 @@ export default class ConfigSyncPlugin extends Plugin {
       const ctx = await this.coreContext();
       const reader = await this.createReader(remote);
       const result = await importExternal(ctx, reader);
-      new ReportModal(this.app, `Config Sync: Pull report (${remote.name})`, [result]).open();
+      new ReportModal(this.app, `Pulled from ${remote.name}`, [{ ...result, group: "" }]).open();
     } catch (e) {
       new Notice(`Config Sync pull failed: ${(e as Error).message}`, 10000);
     }
@@ -274,7 +336,7 @@ export default class ConfigSyncPlugin extends Plugin {
       const ctx = await this.coreContext();
       const writer = await this.createWriter(remote);
       const result = await pushExternal(ctx, writer);
-      new ReportModal(this.app, `Config Sync: Push report (${remote.name})`, [result]).open();
+      new ReportModal(this.app, `Pushed to ${remote.name}`, [{ ...result, group: "" }]).open();
     } catch (e) {
       new Notice(`Config Sync push failed: ${(e as Error).message}`, 10000);
     }

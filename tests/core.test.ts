@@ -164,6 +164,23 @@ describe("capture", () => {
     expect(lock.capturedAt).toBe("2026-07-08T00:00:00.000Z");
     expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.2.3" }); // current version, not the stale 9.9.9 — success always re-stamps
   });
+
+  it("skips OS junk when capturing dirs and cleans junk already in the store", async () => {
+    const { io, plugins, ctx } = setup();
+    plugins.installed.set("demo", "1.2.3");
+    io.seed({
+      "cs/config-sync.json": MANIFEST,
+      ".obs/hotkeys.json": "{}",
+      ".obs/snippets/one.css": "one",
+      ".obs/snippets/.DS_Store": "junk",
+      ".obsidian.vimrc": "v",
+      ".obs/plugins/demo/data.json": "{}",
+      "cs/store/configdir/snippets/.DS_Store": "old junk",
+    });
+    await capture(ctx);
+    expect(await io.exists("cs/store/configdir/snippets/.DS_Store")).toBe(false);
+    expect(await io.read("cs/store/configdir/snippets/one.css")).toBe("one");
+  });
 });
 
 export function seedStore(io: MemFS): void {

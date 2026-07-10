@@ -208,3 +208,32 @@ body.is-phone .config-sync-remote-git {
   grid-template-columns: 1fr;
 }
 
+.config-sync-status-row {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+  padding: var(--size-4-1) 0;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.config-sync-state {
+  font-size: var(--font-ui-smaller);
+  flex: none;
+}
+
+.config-sync-state.is-in-sync { color: var(--color-green); }
+.config-sync-state.is-local-changed { color: var(--color-orange); }
+.config-sync-state.is-store-newer { color: var(--color-blue); }
+.config-sync-state.is-differs { color: var(--color-orange); }
+.config-sync-state.is-not-captured { color: var(--text-faint); }
+
+.config-sync-status-error {
+  color: var(--text-error);
+  font-size: var(--font-ui-smaller);
+  margin: 0 0 var(--size-4-1) var(--size-4-3);
+}
+
+.config-sync-picker-insync {
+  opacity: 0.55;
+}
+
