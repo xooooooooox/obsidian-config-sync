@@ -5,7 +5,7 @@
 
 [English](README.md) · **中文**
 
-在多台设备和多个仓库之间，按需、选择性地同步 Obsidian 设置——快捷键、CSS 代码片段、主题、插件配置。数据默认借助你现有的笔记同步工具(note sync)（remotely-save、Obsidian Sync、iCloud……）传输，也可以使用 config-sync 自带的 git / vault 远程通道。任何设置在没有明确执行 **Apply**(应用) 之前，绝不会落到设备上。
+在多台设备和多个 vault 之间，按需、选择性地同步 Obsidian 设置——快捷键、CSS 代码片段、主题、插件配置。数据默认借助你现有的笔记同步工具(note sync)（remotely-save、Obsidian Sync、iCloud……）传输，也可以使用 config-sync 自带的 git / vault 远程通道。任何设置在没有明确执行 **Apply**(应用) 之前，绝不会落到设备上。
 
 ![Settings picker](docs/assets/settings-picker.png)
 
@@ -138,6 +138,6 @@ npm run build   # type-check + production bundle
 3. "Release Obsidian plugin" 工作流会执行构建、生成构建溯源认证(build provenance)，并创建一个包含 `main.js`、`manifest.json`、`styles.css` 的**草稿(draft)** GitHub release。
 4. 在 GitHub 上发布该草稿——插件目录和 BRAT 只会看到已发布的 release。
 
-## License
+## 许可证
 
 [MIT](LICENSE)
