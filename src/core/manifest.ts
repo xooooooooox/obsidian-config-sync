@@ -9,7 +9,7 @@ export class ManifestValidationError extends Error {
   }
 }
 
-export const BLACKLISTED_PLUGIN_DIRS = ["remotely-save", "ioto-update", "slides-rup", "obsidian-config-sync"];
+export const BLACKLISTED_PLUGIN_DIRS = ["remotely-save", "ioto-update", "slides-rup", "config-sync", "obsidian-config-sync"];
 
 function isValidType(v: unknown): v is "file" | "dir" {
   return v === "file" || v === "dir";

@@ -10,7 +10,7 @@
 		"version": "node version-bump.mjs && git add manifest.json versions.json",
 		"lint": "eslint .",
 		"test": "vitest run --passWithNoTests",
-		"smoke:install": "npm run build && mkdir -p dev/vault/.obsidian/plugins/obsidian-config-sync && cp main.js manifest.json styles.css dev/vault/.obsidian/plugins/obsidian-config-sync/"
+		"smoke:install": "npm run build && mkdir -p dev/vault/.obsidian/plugins/config-sync && cp main.js manifest.json styles.css dev/vault/.obsidian/plugins/config-sync/"
 	},
 	"keywords": [],
 	"author": "xooooooooox",

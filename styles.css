@@ -25,32 +25,16 @@
 
 .config-sync-search {
   display: flex;
-  justify-content: center;
   margin-bottom: var(--size-4-4);
 }
 
 .config-sync-search .search-input-container {
   width: 100%;
-  max-width: 40em;
 }
 
 .config-sync-empty {
   color: var(--text-muted);
   font-style: italic;
-}
-
-.config-sync-rule {
-  border: 1px solid var(--background-modifier-border);
-  border-radius: var(--radius-m);
-  padding: var(--size-4-2);
-  margin-bottom: var(--size-4-2);
-}
-
-.config-sync-rule-head {
-  display: flex;
-  align-items: center;
-  gap: var(--size-4-2);
-  margin-bottom: var(--size-4-2);
 }
 
 .config-sync-rule-name {
@@ -71,28 +55,76 @@
   font-size: var(--font-ui-smaller);
 }
 
-.config-sync-rule-controls {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--size-4-2) var(--size-4-3);
-  align-items: center;
-}
-
-.config-sync-field {
+.config-sync-row {
   display: flex;
   align-items: center;
-  gap: var(--size-4-1);
+  gap: var(--size-4-2);
+  padding: var(--size-4-2) var(--size-4-3);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  margin-bottom: var(--size-4-2);
+  cursor: pointer;
 }
 
-.config-sync-field-grow {
-  min-width: 12em;
+.config-sync-row.is-open {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  margin-bottom: 0;
 }
 
-.config-sync-field-label {
+.config-sync-row.is-static {
+  cursor: default;
+}
+
+.config-sync-row-chevron {
+  color: var(--text-muted);
+  width: 1em;
+  flex: none;
+}
+
+.config-sync-row-path {
+  font-family: var(--font-monospace);
   color: var(--text-muted);
   font-size: var(--font-ui-smaller);
 }
 
-.config-sync-syncall {
-  color: var(--text-accent);
+.config-sync-expand {
+  border: 1px solid var(--background-modifier-border);
+  border-top: none;
+  border-bottom-left-radius: var(--radius-m);
+  border-bottom-right-radius: var(--radius-m);
+  padding: var(--size-4-3);
+  margin-bottom: var(--size-4-2);
 }
+
+.config-sync-expand input,
+.config-sync-expand select {
+  width: 100%;
+}
+
+.config-sync-form-line1 {
+  display: grid;
+  grid-template-columns: 10em 1fr;
+  gap: var(--size-4-3);
+  margin-bottom: var(--size-4-2);
+}
+
+.config-sync-form-line1.has-name {
+  grid-template-columns: minmax(8em, 14em) 10em 1fr;
+}
+
+.config-sync-form-line2 {
+  display: grid;
+  grid-template-columns: 7em 8em 1fr 1fr;
+  gap: var(--size-4-3);
+}
+
+.config-sync-form-label {
+  display: block;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: var(--size-2-1);
+}
+
