@@ -15,7 +15,7 @@ export class ReportModal extends Modal {
     for (const r of this.results) {
       const icon = r.status === "ok" ? "✓" : r.status === "warning" ? "⚠" : "✗";
       const block = this.contentEl.createDiv();
-      block.createEl("strong", { text: `${icon} ${r.group}` });
+      block.createEl("strong", { text: r.group === "" ? icon : `${icon} ${r.group}` });
       block.createEl("div", { text: `${r.filesWritten.length} written, ${r.filesDeleted.length} deleted` });
       for (const m of r.messages) {
         block.createEl("div", { text: `• ${m}` });

@@ -214,7 +214,16 @@ export default class ConfigSyncPlugin extends Plugin {
         new Notice("Config Sync: no groups available for this device");
         return;
       }
-      new GroupSelectModal(this.app, groups, "Config Sync: select groups to apply", (names) => {
+      const statuses = this.settings.statusInPickers ? await statusForGroups(ctx, groups) : null;
+      const statusByName = statuses === null ? null : new Map(statuses.map((s) => [s.group, s]));
+      const deviceWords: Record<SyncGroup["devices"], string> = { all: "all devices", desktop: "desktop only", mobile: "mobile only" };
+      const items = groups.map((group) => ({
+        group,
+        resolvedPath: group.path.replace("{configDir}", this.app.vault.configDir),
+        meta: group.description ?? `${group.type === "dir" ? "folder" : "file"} · ${deviceWords[group.devices]}`,
+        status: statusByName?.get(group.name) ?? null,
+      }));
+      new GroupSelectModal(this.app, items, "Config Sync: select groups to apply", (names) => {
         void this.applyGroups(ctx, names);
       }).open();
     } catch (e) {
@@ -300,7 +309,7 @@ export default class ConfigSyncPlugin extends Plugin {
       const ctx = await this.coreContext();
       const reader = await this.createReader(remote);
       const result = await importExternal(ctx, reader);
-      new ReportModal(this.app, `Config Sync: Pull report (${remote.name})`, [result]).open();
+      new ReportModal(this.app, `Pulled from ${remote.name}`, [{ ...result, group: "" }]).open();
     } catch (e) {
       new Notice(`Config Sync pull failed: ${(e as Error).message}`, 10000);
     }
@@ -327,7 +336,7 @@ export default class ConfigSyncPlugin extends Plugin {
       const ctx = await this.coreContext();
       const writer = await this.createWriter(remote);
       const result = await pushExternal(ctx, writer);
-      new ReportModal(this.app, `Config Sync: Push report (${remote.name})`, [result]).open();
+      new ReportModal(this.app, `Pushed to ${remote.name}`, [{ ...result, group: "" }]).open();
     } catch (e) {
       new Notice(`Config Sync push failed: ${(e as Error).message}`, 10000);
     }

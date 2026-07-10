@@ -233,3 +233,7 @@ body.is-phone .config-sync-remote-git {
   margin: 0 0 var(--size-4-1) var(--size-4-3);
 }
 
+.config-sync-picker-insync {
+  opacity: 0.55;
+}
+
