@@ -61,12 +61,12 @@ export default class ConfigSyncPlugin extends Plugin {
     this.addSettingTab(new ConfigSyncSettingTab(this.app, this));
     this.addRibbonIcon("refresh-cw", "Config Sync", (evt) => this.openSyncMenu(evt));
     this.refreshRibbons();
-    this.addCommand({ id: "capture", name: "Capture (this device's config → store)", callback: () => void this.runCapture() });
-    this.addCommand({ id: "apply", name: "Apply (store → this device)", callback: () => void this.runApply() });
+    this.addCommand({ id: "capture", name: "Capture: save this device's settings", callback: () => void this.runCapture() });
+    this.addCommand({ id: "apply", name: "Apply: update this device with synced settings", callback: () => void this.runApply() });
     this.addCommand({ id: "revert-last-apply", name: "Revert last apply", callback: () => void this.runRevert() });
     this.addCommand({
       id: "pull",
-      name: "Pull (remote → store)",
+      name: "Pull: get settings from a remote",
       checkCallback: (checking) => {
         if (!this.transportAvailable()) return false;
         if (!checking) void this.runPull();
@@ -75,7 +75,7 @@ export default class ConfigSyncPlugin extends Plugin {
     });
     this.addCommand({
       id: "push",
-      name: "Push (store → remote)",
+      name: "Push: send settings to a remote",
       checkCallback: (checking) => {
         if (!this.transportAvailable()) return false;
         if (!checking) void this.runPush();
@@ -90,13 +90,13 @@ export default class ConfigSyncPlugin extends Plugin {
 
   private openSyncMenu(evt: MouseEvent): void {
     const menu = new Menu();
-    menu.addItem((i) => i.setTitle("Capture (config → store)").setIcon("upload").onClick(() => void this.runCapture()));
-    menu.addItem((i) => i.setTitle("Apply (store → this device)").setIcon("folder-sync").onClick(() => void this.runApply()));
+    menu.addItem((i) => i.setTitle("Capture: save this device's settings").setIcon("upload").onClick(() => void this.runCapture()));
+    menu.addItem((i) => i.setTitle("Apply: update this device with synced settings").setIcon("folder-sync").onClick(() => void this.runApply()));
     menu.addItem((i) => i.setTitle("Revert last apply").setIcon("undo-2").onClick(() => void this.runRevert()));
     if (this.transportAvailable()) {
       menu.addSeparator();
-      menu.addItem((i) => i.setTitle("Pull (remote → store)").setIcon("folder-input").onClick(() => void this.runPull()));
-      menu.addItem((i) => i.setTitle("Push (store → remote)").setIcon("upload-cloud").onClick(() => void this.runPush()));
+      menu.addItem((i) => i.setTitle("Pull: get settings from a remote").setIcon("folder-input").onClick(() => void this.runPull()));
+      menu.addItem((i) => i.setTitle("Push: send settings to a remote").setIcon("upload-cloud").onClick(() => void this.runPush()));
     }
     menu.showAtMouseEvent(evt);
   }

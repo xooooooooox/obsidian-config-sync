@@ -175,7 +175,6 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private async renderActiveTab(containerEl: HTMLElement, gen: number): Promise<void> {
     switch (this.activeTab) {
       case "general":
-        this.renderTransportStatus(containerEl);
         this.renderPkmMode(containerEl);
         await this.renderDataFolder(containerEl, gen);
         this.renderRibbonToggles(containerEl);
@@ -301,19 +300,6 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     this.renderGroupsError(containerEl);
   }
 
-  private renderTransportStatus(containerEl: HTMLElement): void {
-    const remotes = this.host.settings.remotes;
-    const s = new Setting(containerEl).setName("Store transport");
-    if (remotes.length === 0) {
-      s.setDesc(
-        "Store syncs via your note-sync tool (remotely-save / Obsidian Sync / …). Add a remote under Remotes for git or cross-vault sync."
-      );
-    } else {
-      const list = remotes.map((r) => `${r.name} (${r.type})`).join(", ");
-      s.setDesc(`Remotes: ${list}. Use Pull / Push to sync the store.`);
-    }
-  }
-
   private renderPkmMode(containerEl: HTMLElement): void {
     const detected = this.host.detectedMode();
     new Setting(containerEl)
@@ -340,7 +326,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Data folder")
       .setDesc(
-        `Where synced settings are stored inside your vault, so your note-sync app (e.g. remotely-save) carries them to your other devices. Leave empty to use the recommended location (currently: ${resolved}).`
+        `Where your synced settings live inside this vault. Your regular vault sync (e.g. remotely-save) carries this folder to your other devices. Leave empty for the recommended location (currently: ${resolved}).`
       )
       .addText((t) => {
         t.setPlaceholder(resolved);
