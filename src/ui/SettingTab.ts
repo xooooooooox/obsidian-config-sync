@@ -400,8 +400,8 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
 
   private async renderAdvanced(containerEl: HTMLElement, gen: number): Promise<void> {
     const reserved = reservedNames(this.host.installedPluginIds());
-    const managed = this.groups.filter((g) => reserved.has(g.name));
-    const custom = this.groups.filter((g) => !reserved.has(g.name));
+    const managed = this.groups.filter((g) => reserved.has(g.name) && g.origin === undefined);
+    const custom = this.groups.filter((g) => !reserved.has(g.name) && g.origin === undefined);
 
     const managedHead = new Setting(containerEl)
       .setName("Managed by pickers")
@@ -424,12 +424,14 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
 
     const discovered = await this.host.listDiscoveredFiles(this.groups);
     if (gen !== this.renderGen) return;
-    if (discovered.length > 0) {
+    const discoveredOn = this.groups.filter((g) => g.origin === "discovered");
+    if (discovered.length > 0 || discoveredOn.length > 0) {
       new Setting(containerEl)
         .setName("Discovered files")
         .setHeading()
-        .setDesc("Config files we found but couldn't classify. Turn one on to start syncing it — rename it under Custom rules.");
+        .setDesc("Config files we found but couldn't classify. Turn one on to start syncing it.");
       const discEl = containerEl.createDiv();
+      for (const group of discoveredOn) this.renderDiscoveredOnRow(discEl, group);
       for (const d of discovered) this.renderDiscoveredRow(discEl, d);
     }
 
@@ -454,7 +456,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     row.createDiv({ cls: "config-sync-rule-spacer" });
     new ToggleComponent(row).setValue(false).setTooltip("Sync this file").onChange(async (v) => {
       if (!v) return;
-      this.groups.push({ name: d.name, path: d.path, type: "file", devices: "all" });
+      this.groups.push({ name: d.name, path: d.path, type: "file", devices: "all", origin: "discovered" });
       try {
         await this.host.writeGroupsFile(this.groups);
         this.groupsErrorMsg = "";
@@ -464,6 +466,29 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       }
       this.refresh();
     });
+  }
+
+  private renderDiscoveredOnRow(listEl: HTMLElement, group: SyncGroup): void {
+    const isOpen = this.expanded.has(group.name);
+    const row = listEl.createDiv({ cls: "config-sync-row" + (isOpen ? " is-open" : "") });
+    row.createSpan({ cls: "config-sync-row-chevron", text: isOpen ? "▾" : "▸" });
+    row.createSpan({ cls: "config-sync-rule-name", text: splitLocation(group.path).rel });
+    row.createDiv({ cls: "config-sync-rule-spacer" });
+    new ToggleComponent(row).setValue(true).setTooltip("Stop syncing this file").onChange(async (v) => {
+      if (v) return;
+      const idx = this.groups.findIndex((g) => g === group);
+      if (idx >= 0) this.groups.splice(idx, 1);
+      this.expanded.delete(group.name);
+      await this.saveGroups();
+      this.refresh();
+    });
+    row.addEventListener("click", (e) => {
+      if ((e.target as HTMLElement).closest("button, .clickable-icon, input, select, .checkbox-container") !== null) return;
+      if (isOpen) this.expanded.delete(group.name);
+      else this.expanded.add(group.name);
+      this.refresh();
+    });
+    if (isOpen) this.renderRuleForm(listEl, group, "discovered");
   }
 
   private renderRuleCard(listEl: HTMLElement, group: SyncGroup, managed: boolean): void {
@@ -509,10 +534,10 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       else this.expanded.add(group.name);
       this.refresh();
     });
-    if (isOpen) this.renderRuleForm(listEl, group, managed);
+    if (isOpen) this.renderRuleForm(listEl, group, managed ? "managed" : "custom");
   }
 
-  private renderRuleForm(listEl: HTMLElement, group: SyncGroup, managed: boolean): void {
+  private renderRuleForm(listEl: HTMLElement, group: SyncGroup, mode: "managed" | "custom" | "discovered"): void {
     const panel = listEl.createDiv({ cls: "config-sync-expand" });
     const field = (parent: HTMLElement, label: string): HTMLElement => {
       const f = parent.createDiv();
@@ -520,31 +545,33 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       return f;
     };
 
-    const line1 = panel.createDiv({ cls: "config-sync-form-line1" + (managed ? "" : " has-name") });
-    if (!managed) {
-      const nameC = new TextComponent(field(line1, "Name"));
-      nameC.setPlaceholder("name (a-z, 0-9, -, _)").setValue(group.name).onChange((v) => {
-        this.expanded.delete(group.name);
-        group.name = v.trim();
-        this.expanded.add(group.name);
+    if (mode !== "discovered") {
+      const line1 = panel.createDiv({ cls: "config-sync-form-line1" + (mode === "custom" ? " has-name" : "") });
+      if (mode === "custom") {
+        const nameC = new TextComponent(field(line1, "Name"));
+        nameC.setPlaceholder("name (a-z, 0-9, -, _)").setValue(group.name).onChange((v) => {
+          this.expanded.delete(group.name);
+          group.name = v.trim();
+          this.expanded.add(group.name);
+          void this.saveGroups();
+        });
+        nameC.inputEl.addClass("config-sync-rule-name-input");
+      }
+      const loc = splitLocation(group.path);
+      new DropdownComponent(field(line1, "Location"))
+        .addOption("config", "Config folder")
+        .addOption("vault", "Vault root")
+        .setValue(loc.location)
+        .onChange((v) => {
+          group.path = joinLocation(v as "config" | "vault", splitLocation(group.path).rel);
+          void this.saveGroups();
+        });
+      const pathC = new TextComponent(field(line1, "Path"));
+      pathC.setPlaceholder("relative path").setValue(loc.rel).onChange((v) => {
+        group.path = joinLocation(splitLocation(group.path).location, v.trim());
         void this.saveGroups();
       });
-      nameC.inputEl.addClass("config-sync-rule-name-input");
     }
-    const loc = splitLocation(group.path);
-    new DropdownComponent(field(line1, "Location"))
-      .addOption("config", "Config folder")
-      .addOption("vault", "Vault root")
-      .setValue(loc.location)
-      .onChange((v) => {
-        group.path = joinLocation(v as "config" | "vault", splitLocation(group.path).rel);
-        void this.saveGroups();
-      });
-    const pathC = new TextComponent(field(line1, "Path"));
-    pathC.setPlaceholder("relative path").setValue(loc.rel).onChange((v) => {
-      group.path = joinLocation(splitLocation(group.path).location, v.trim());
-      void this.saveGroups();
-    });
 
     const line2 = panel.createDiv({ cls: "config-sync-form-line2" });
     new DropdownComponent(field(line2, "Type"))

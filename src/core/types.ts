@@ -7,6 +7,7 @@ export interface SyncGroup {
   devices: DeviceClass;
   sanitize?: string[]; // key-name glob patterns; file groups only
   description?: string; // optional human-readable label, shown in the settings panel
+  origin?: "discovered"; // rule created from the Discovered-files section; name/path are fixed by the file
 }
 
 export interface SyncManifest {
