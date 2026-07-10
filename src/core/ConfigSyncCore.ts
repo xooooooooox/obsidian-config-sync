@@ -1,4 +1,4 @@
-import { FileIO, ensureParentDir, listFilesRecursive, pruneEmptyDirsUnder } from "./io";
+import { FileIO, ensureParentDir, isJunkPath, listFilesRecursive, pruneEmptyDirsUnder } from "./io";
 import { GroupResult, StoreLock, SyncGroup, SyncManifest } from "./types";
 import { groupRealPath, groupStorePath, relativeTo } from "./pathing";
 import { parseStoreLock, parseSyncManifest, validateSyncManifest } from "./manifest";
@@ -60,7 +60,7 @@ export function groupsForDevice(manifest: SyncManifest, device: "desktop" | "mob
   return manifest.groups.filter((g) => g.devices === "all" || g.devices === device);
 }
 
-function parseJsonOrThrow(raw: string, groupName: string, path: string): unknown {
+export function parseJsonOrThrow(raw: string, groupName: string, path: string): unknown {
   try {
     return JSON.parse(raw);
   } catch (e) {
@@ -137,7 +137,7 @@ async function captureGroup(ctx: CoreContext, group: SyncGroup): Promise<GroupRe
     return result;
   }
   const sourceFiles = await listFilesRecursive(ctx.io, real);
-  const sourceRels = sourceFiles.map((f) => relativeTo(real, f));
+  const sourceRels = sourceFiles.map((f) => relativeTo(real, f)).filter((rel) => !isJunkPath(rel));
   for (const rel of sourceRels) {
     const target = `${store}/${rel}`;
     await ensureParentDir(ctx.io, target);

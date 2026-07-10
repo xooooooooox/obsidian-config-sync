@@ -3,6 +3,10 @@ export interface ListedDir {
   folders: string[];
 }
 
+export interface FileStat {
+  mtime: number; // epoch ms
+}
+
 // Structurally satisfied by Obsidian's DataAdapter (app.vault.adapter).
 export interface FileIO {
   read(path: string): Promise<string>;
@@ -12,6 +16,7 @@ export interface FileIO {
   rmdir(path: string, recursive: boolean): Promise<void>;
   mkdir(path: string): Promise<void>;
   list(path: string): Promise<ListedDir>;
+  stat(path: string): Promise<FileStat | null>;
 }
 
 export async function listFilesRecursive(io: FileIO, dir: string): Promise<string[]> {
@@ -58,4 +63,10 @@ async function pruneDir(io: FileIO, dir: string): Promise<boolean> {
     return true;
   }
   return false;
+}
+
+export const JUNK_FILES = new Set([".DS_Store", "Thumbs.db", "desktop.ini"]);
+
+export function isJunkPath(path: string): boolean {
+  return JUNK_FILES.has(path.slice(path.lastIndexOf("/") + 1));
 }
