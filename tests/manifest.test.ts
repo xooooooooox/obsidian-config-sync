@@ -51,6 +51,26 @@ describe("parseSyncManifest", () => {
     const m = parseSyncManifest(manifestWith([g]));
     expect(m.groups[0]?.name).toBe("ws");
   });
+  it("preserves origin: discovered on groups", () => {
+    const raw = JSON.stringify({
+      version: 1,
+      groups: [{ name: "workspace-x", path: "{configDir}/workspace-x.json", type: "file", devices: "all", origin: "discovered" }],
+    });
+    const parsed = parseSyncManifest(raw);
+    expect(parsed.groups[0]?.origin).toBe("discovered");
+  });
+  it("omits origin when absent and rejects invalid origin values", () => {
+    const ok = JSON.stringify({
+      version: 1,
+      groups: [{ name: "a", path: "{configDir}/a.json", type: "file", devices: "all" }],
+    });
+    expect(parseSyncManifest(ok).groups[0]?.origin).toBeUndefined();
+    const bad = JSON.stringify({
+      version: 1,
+      groups: [{ name: "a", path: "{configDir}/a.json", type: "file", devices: "all", origin: "picker" }],
+    });
+    expect(() => parseSyncManifest(bad)).toThrow('"origin" must be "discovered"');
+  });
   it("rejects sanitize on dir groups", () => {
     const g = { name: "s", path: "{configDir}/snippets", type: "dir", devices: "all", sanitize: ["*Token*"] };
     expect(() => parseSyncManifest(manifestWith([g]))).toThrow("file groups");

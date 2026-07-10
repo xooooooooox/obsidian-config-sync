@@ -1,4 +1,4 @@
-import { App, ButtonComponent, DropdownComponent, ExtraButtonComponent, Notice, Plugin, PluginSettingTab, SearchComponent, Setting, TextComponent, ToggleComponent } from "obsidian";
+import { App, DropdownComponent, ExtraButtonComponent, Notice, Plugin, PluginSettingTab, SearchComponent, Setting, setIcon, TextComponent, ToggleComponent } from "obsidian";
 import { DeviceClass, ExternalSource, RibbonKey, SyncGroup } from "../core/types";
 import { PkmMode } from "../core/pkm";
 import { validateExternalSources } from "../core/manifest";
@@ -60,13 +60,13 @@ function toCandidate(d: SourceDraft): unknown {
 
 type PanelTab = "general" | "obsidian" | "core" | "plugins" | "advanced" | "sources";
 
-const TABS: { id: PanelTab; label: string }[] = [
-  { id: "general", label: "General" },
-  { id: "obsidian", label: "Obsidian" },
-  { id: "core", label: "Core plugins" },
-  { id: "plugins", label: "Community plugins" },
-  { id: "advanced", label: "Advanced" },
-  { id: "sources", label: "Remotes" },
+const TABS: { id: PanelTab; label: string; icon: string }[] = [
+  { id: "general", label: "General", icon: "settings" },
+  { id: "obsidian", label: "Obsidian", icon: "gem" },
+  { id: "core", label: "Core plugins", icon: "blocks" },
+  { id: "plugins", label: "Community plugins", icon: "puzzle" },
+  { id: "advanced", label: "Advanced", icon: "wrench" },
+  { id: "sources", label: "Remotes", icon: "git-branch" },
 ];
 
 const SECTION_TAB: Record<"obsidian" | "core" | "plugins", string> = {
@@ -162,7 +162,9 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private renderTabNav(containerEl: HTMLElement): void {
     const nav = containerEl.createDiv({ cls: "config-sync-tabs" });
     for (const tab of TABS) {
-      const el = nav.createEl("button", { text: tab.label, cls: "config-sync-tab" });
+      const el = nav.createEl("button", { cls: "config-sync-tab" });
+      setIcon(el.createSpan({ cls: "config-sync-tab-icon" }), tab.icon);
+      el.createSpan({ cls: "config-sync-tab-label", text: tab.label });
       if (tab.id === this.activeTab) el.addClass("is-active");
       el.addEventListener("click", () => this.switchTab(tab.id));
     }
@@ -400,18 +402,18 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
 
   private async renderAdvanced(containerEl: HTMLElement, gen: number): Promise<void> {
     const reserved = reservedNames(this.host.installedPluginIds());
-    const managed = this.groups.filter((g) => reserved.has(g.name));
-    const custom = this.groups.filter((g) => !reserved.has(g.name));
+    const managed = this.groups.filter((g) => reserved.has(g.name) && g.origin === undefined);
+    const custom = this.groups.filter((g) => !reserved.has(g.name) && g.origin === undefined);
 
     const managedHead = new Setting(containerEl)
       .setName("Managed by pickers")
       .setHeading()
       .setDesc("Rules created from the other tabs. Expand a row to edit it, or reset it to the picker default.");
     if (managed.length > 0) {
-      managedHead.addButton((b) => b.setButtonText("Reset all").onClick(async () => {
+      managedHead.addExtraButton((b) => b.setIcon("rotate-ccw").setTooltip("Reset all to picker defaults").onClick(async () => {
         for (let i = 0; i < this.groups.length; i++) {
           const g = this.groups[i];
-          if (g === undefined || !reserved.has(g.name)) continue;
+          if (g === undefined || !reserved.has(g.name) || g.origin !== undefined) continue;
           const def = defaultGroupForName(g.name);
           if (def !== null) this.groups[i] = def;
         }
@@ -424,28 +426,28 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
 
     const discovered = await this.host.listDiscoveredFiles(this.groups);
     if (gen !== this.renderGen) return;
-    if (discovered.length > 0) {
+    const discoveredOn = this.groups.filter((g) => g.origin === "discovered");
+    if (discovered.length > 0 || discoveredOn.length > 0) {
       new Setting(containerEl)
         .setName("Discovered files")
         .setHeading()
-        .setDesc("Config files we found but couldn't classify. Turn one on to start syncing it — rename it under Custom rules.");
+        .setDesc("Config files we found but couldn't classify. Turn one on to start syncing it.");
       const discEl = containerEl.createDiv();
+      for (const group of discoveredOn) this.renderDiscoveredOnRow(discEl, group);
       for (const d of discovered) this.renderDiscoveredRow(discEl, d);
     }
 
-    new Setting(containerEl)
+    const customHead = new Setting(containerEl)
       .setName("Custom rules")
       .setHeading()
       .setDesc("Your own rules for anything not listed elsewhere — vault-root files, extra folders, or per-key credential protection (sanitize).");
+    customHead.addExtraButton((b) => b.setIcon("plus").setTooltip("Add rule").onClick(() => {
+      this.groups.push({ name: "", path: "", type: "file", devices: "all" });
+      this.expanded.add("");
+      this.refresh();
+    }));
     const customEl = containerEl.createDiv();
     for (const group of custom) this.renderRuleCard(customEl, group, false);
-    new Setting(containerEl).addButton((b) =>
-      b.setButtonText("Add rule").onClick(() => {
-        this.groups.push({ name: "", path: "", type: "file", devices: "all" });
-        this.expanded.add("");
-        this.refresh();
-      })
-    );
   }
 
   private renderDiscoveredRow(listEl: HTMLElement, d: { name: string; path: string }): void {
@@ -454,7 +456,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     row.createDiv({ cls: "config-sync-rule-spacer" });
     new ToggleComponent(row).setValue(false).setTooltip("Sync this file").onChange(async (v) => {
       if (!v) return;
-      this.groups.push({ name: d.name, path: d.path, type: "file", devices: "all" });
+      this.groups.push({ name: d.name, path: d.path, type: "file", devices: "all", origin: "discovered" });
       try {
         await this.host.writeGroupsFile(this.groups);
         this.groupsErrorMsg = "";
@@ -464,6 +466,29 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       }
       this.refresh();
     });
+  }
+
+  private renderDiscoveredOnRow(listEl: HTMLElement, group: SyncGroup): void {
+    const isOpen = this.expanded.has(group.name);
+    const row = listEl.createDiv({ cls: "config-sync-row" + (isOpen ? " is-open" : "") });
+    row.createSpan({ cls: "config-sync-row-chevron", text: isOpen ? "▾" : "▸" });
+    row.createSpan({ cls: "config-sync-rule-name", text: splitLocation(group.path).rel });
+    row.createDiv({ cls: "config-sync-rule-spacer" });
+    new ToggleComponent(row).setValue(true).setTooltip("Stop syncing this file").onChange(async (v) => {
+      if (v) return;
+      const idx = this.groups.findIndex((g) => g === group);
+      if (idx >= 0) this.groups.splice(idx, 1);
+      this.expanded.delete(group.name);
+      await this.saveGroups();
+      this.refresh();
+    });
+    row.addEventListener("click", (e) => {
+      if ((e.target as HTMLElement).closest("button, .clickable-icon, input, select, .checkbox-container") !== null) return;
+      if (isOpen) this.expanded.delete(group.name);
+      else this.expanded.add(group.name);
+      this.refresh();
+    });
+    if (isOpen) this.renderRuleForm(listEl, group, "discovered");
   }
 
   private renderRuleCard(listEl: HTMLElement, group: SyncGroup, managed: boolean): void {
@@ -480,8 +505,8 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     }
     row.createDiv({ cls: "config-sync-rule-spacer" });
     if (managed) {
-      new ButtonComponent(row)
-        .setButtonText("Reset")
+      new ExtraButtonComponent(row)
+        .setIcon("rotate-ccw")
         .setTooltip("Restore to the picker default")
         .onClick(async () => {
           const def = defaultGroupForName(group.name);
@@ -509,10 +534,10 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       else this.expanded.add(group.name);
       this.refresh();
     });
-    if (isOpen) this.renderRuleForm(listEl, group, managed);
+    if (isOpen) this.renderRuleForm(listEl, group, managed ? "managed" : "custom");
   }
 
-  private renderRuleForm(listEl: HTMLElement, group: SyncGroup, managed: boolean): void {
+  private renderRuleForm(listEl: HTMLElement, group: SyncGroup, mode: "managed" | "custom" | "discovered"): void {
     const panel = listEl.createDiv({ cls: "config-sync-expand" });
     const field = (parent: HTMLElement, label: string): HTMLElement => {
       const f = parent.createDiv();
@@ -520,31 +545,33 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       return f;
     };
 
-    const line1 = panel.createDiv({ cls: "config-sync-form-line1" + (managed ? "" : " has-name") });
-    if (!managed) {
-      const nameC = new TextComponent(field(line1, "Name"));
-      nameC.setPlaceholder("name (a-z, 0-9, -, _)").setValue(group.name).onChange((v) => {
-        this.expanded.delete(group.name);
-        group.name = v.trim();
-        this.expanded.add(group.name);
+    if (mode !== "discovered") {
+      const line1 = panel.createDiv({ cls: "config-sync-form-line1" + (mode === "custom" ? " has-name" : "") });
+      if (mode === "custom") {
+        const nameC = new TextComponent(field(line1, "Name"));
+        nameC.setPlaceholder("name (a-z, 0-9, -, _)").setValue(group.name).onChange((v) => {
+          this.expanded.delete(group.name);
+          group.name = v.trim();
+          this.expanded.add(group.name);
+          void this.saveGroups();
+        });
+        nameC.inputEl.addClass("config-sync-rule-name-input");
+      }
+      const loc = splitLocation(group.path);
+      new DropdownComponent(field(line1, "Location"))
+        .addOption("config", "Config folder")
+        .addOption("vault", "Vault root")
+        .setValue(loc.location)
+        .onChange((v) => {
+          group.path = joinLocation(v as "config" | "vault", splitLocation(group.path).rel);
+          void this.saveGroups();
+        });
+      const pathC = new TextComponent(field(line1, "Path"));
+      pathC.setPlaceholder("relative path").setValue(loc.rel).onChange((v) => {
+        group.path = joinLocation(splitLocation(group.path).location, v.trim());
         void this.saveGroups();
       });
-      nameC.inputEl.addClass("config-sync-rule-name-input");
     }
-    const loc = splitLocation(group.path);
-    new DropdownComponent(field(line1, "Location"))
-      .addOption("config", "Config folder")
-      .addOption("vault", "Vault root")
-      .setValue(loc.location)
-      .onChange((v) => {
-        group.path = joinLocation(v as "config" | "vault", splitLocation(group.path).rel);
-        void this.saveGroups();
-      });
-    const pathC = new TextComponent(field(line1, "Path"));
-    pathC.setPlaceholder("relative path").setValue(loc.rel).onChange((v) => {
-      group.path = joinLocation(splitLocation(group.path).location, v.trim());
-      void this.saveGroups();
-    });
 
     const line2 = panel.createDiv({ cls: "config-sync-form-line2" });
     new DropdownComponent(field(line2, "Type"))
@@ -594,22 +621,20 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   }
 
   private renderSources(containerEl: HTMLElement): void {
-    new Setting(containerEl)
+    const sourcesHead = new Setting(containerEl)
       .setName("Remotes")
       .setHeading()
       .setDesc(
         "Places you Pull the store from and Push it to — another vault (local path) or a git repo. note-sync handles your own devices without a remote."
       );
-    const listEl = containerEl.createDiv();
+    sourcesHead.addExtraButton((b) => b.setIcon("plus").setTooltip("Add remote").onClick(() => {
+      this.sources.push({ name: "", type: "local-path", path: "", remote: "", branch: "", root: "" });
+      this.refresh();
+    }));
+    const listEl = containerEl.createDiv({ cls: "config-sync-sources" });
     this.sources.forEach((source, index) => this.renderSourceRow(listEl, source, index));
     this.sourcesErrorEl = containerEl.createEl("p", { cls: "mod-warning" });
     this.sourcesErrorEl.setText(this.sourcesErrorMsg);
-    new Setting(containerEl).addButton((b) =>
-      b.setButtonText("Add remote").onClick(() => {
-        this.sources.push({ name: "", type: "local-path", path: "", remote: "", branch: "", root: "" });
-        this.refresh();
-      })
-    );
   }
 
   private renderSourceRow(listEl: HTMLElement, source: SourceDraft, index: number): void {
