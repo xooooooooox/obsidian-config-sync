@@ -256,22 +256,22 @@ git commit -m "fix: Browse uses window.require('electron') — bundled import() 
 
 ---
 
-### Task 3: Hide the Remotes tab on mobile
+### Task 3: Hide the Remotes tab on mobile; Core-plugins icon matches Obsidian
 
 **Files:**
 - Modify: `src/ui/SettingTab.ts` (`TABS`, `renderTabNav`)
 
 **Interfaces:** none new.
 
-- [ ] **Step 1: Flag and filter**
+- [ ] **Step 1: Flag, filter, and icon**
 
-In `src/ui/SettingTab.ts`, the `TABS` type and the `sources` entry gain a desktop-only flag:
+In `src/ui/SettingTab.ts`, the `TABS` type and the `sources` entry gain a desktop-only flag, and the `core` icon changes from `blocks` to `toy-brick` — the icon Obsidian's own settings sidebar uses for its Core plugins tab (probed live: `{id: "plugins", name: "Core plugins", icon: "toy-brick"}`; our Community-plugins `puzzle` already matches Obsidian's):
 
 ```ts
 const TABS: { id: PanelTab; label: string; icon: string; desktopOnly?: true }[] = [
   { id: "general", label: "General", icon: "settings" },
   { id: "obsidian", label: "Obsidian", icon: "gem" },
-  { id: "core", label: "Core plugins", icon: "blocks" },
+  { id: "core", label: "Core plugins", icon: "toy-brick" },
   { id: "plugins", label: "Community plugins", icon: "puzzle" },
   { id: "advanced", label: "Advanced", icon: "wrench" },
   { id: "sources", label: "Remotes", icon: "git-branch", desktopOnly: true },
@@ -296,7 +296,7 @@ Expected: pass / clean / 0 errors.
 
 ```bash
 git add src/ui/SettingTab.ts
-git commit -m "feat: hide the Remotes tab on mobile"
+git commit -m "feat: hide the Remotes tab on mobile; core-plugins tab icon matches Obsidian"
 ```
 
 ---
