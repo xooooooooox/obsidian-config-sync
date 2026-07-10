@@ -5,9 +5,13 @@
   gap: var(--size-4-1);
   margin-bottom: var(--size-4-3);
   border-bottom: 1px solid var(--background-modifier-border);
+  overflow-x: auto;
 }
 
 .config-sync-tab {
+  display: flex;
+  align-items: center;
+  gap: var(--size-2-2);
   background: none;
   box-shadow: none;
   border: none;
@@ -16,11 +20,18 @@
   cursor: pointer;
   color: var(--text-muted);
   border-bottom: 2px solid transparent;
+  white-space: nowrap;
+  flex: none;
 }
 
 .config-sync-tab.is-active {
   color: var(--text-normal);
   border-bottom-color: var(--interactive-accent);
+}
+
+.config-sync-tab-icon {
+  display: flex;
+  align-items: center;
 }
 
 .config-sync-search {
@@ -86,6 +97,14 @@
   font-family: var(--font-monospace);
   color: var(--text-muted);
   font-size: var(--font-ui-smaller);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.config-sync-row .config-sync-rule-name {
+  flex: none;
 }
 
 .config-sync-expand {
@@ -126,5 +145,20 @@
   text-transform: uppercase;
   letter-spacing: 0.05em;
   margin-bottom: var(--size-2-1);
+}
+
+/* Phone layout — Obsidian sets body.is-phone; no pixel breakpoints */
+body.is-phone .config-sync-tab:not(.is-active) .config-sync-tab-label {
+  display: none;
+}
+
+body.is-phone .config-sync-form-line1,
+body.is-phone .config-sync-form-line1.has-name,
+body.is-phone .config-sync-form-line2 {
+  grid-template-columns: 1fr;
+}
+
+body.is-phone .config-sync-sources .setting-item-control {
+  flex-wrap: wrap;
 }
 

@@ -1,4 +1,4 @@
-import { App, ButtonComponent, DropdownComponent, ExtraButtonComponent, Notice, Plugin, PluginSettingTab, SearchComponent, Setting, TextComponent, ToggleComponent } from "obsidian";
+import { App, DropdownComponent, ExtraButtonComponent, Notice, Plugin, PluginSettingTab, SearchComponent, Setting, setIcon, TextComponent, ToggleComponent } from "obsidian";
 import { DeviceClass, ExternalSource, RibbonKey, SyncGroup } from "../core/types";
 import { PkmMode } from "../core/pkm";
 import { validateExternalSources } from "../core/manifest";
@@ -60,13 +60,13 @@ function toCandidate(d: SourceDraft): unknown {
 
 type PanelTab = "general" | "obsidian" | "core" | "plugins" | "advanced" | "sources";
 
-const TABS: { id: PanelTab; label: string }[] = [
-  { id: "general", label: "General" },
-  { id: "obsidian", label: "Obsidian" },
-  { id: "core", label: "Core plugins" },
-  { id: "plugins", label: "Community plugins" },
-  { id: "advanced", label: "Advanced" },
-  { id: "sources", label: "Remotes" },
+const TABS: { id: PanelTab; label: string; icon: string }[] = [
+  { id: "general", label: "General", icon: "settings" },
+  { id: "obsidian", label: "Obsidian", icon: "gem" },
+  { id: "core", label: "Core plugins", icon: "blocks" },
+  { id: "plugins", label: "Community plugins", icon: "puzzle" },
+  { id: "advanced", label: "Advanced", icon: "wrench" },
+  { id: "sources", label: "Remotes", icon: "git-branch" },
 ];
 
 const SECTION_TAB: Record<"obsidian" | "core" | "plugins", string> = {
@@ -162,7 +162,9 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private renderTabNav(containerEl: HTMLElement): void {
     const nav = containerEl.createDiv({ cls: "config-sync-tabs" });
     for (const tab of TABS) {
-      const el = nav.createEl("button", { text: tab.label, cls: "config-sync-tab" });
+      const el = nav.createEl("button", { cls: "config-sync-tab" });
+      setIcon(el.createSpan({ cls: "config-sync-tab-icon" }), tab.icon);
+      el.createSpan({ cls: "config-sync-tab-label", text: tab.label });
       if (tab.id === this.activeTab) el.addClass("is-active");
       el.addEventListener("click", () => this.switchTab(tab.id));
     }
@@ -408,7 +410,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       .setHeading()
       .setDesc("Rules created from the other tabs. Expand a row to edit it, or reset it to the picker default.");
     if (managed.length > 0) {
-      managedHead.addButton((b) => b.setButtonText("Reset all").onClick(async () => {
+      managedHead.addExtraButton((b) => b.setIcon("rotate-ccw").setTooltip("Reset all to picker defaults").onClick(async () => {
         for (let i = 0; i < this.groups.length; i++) {
           const g = this.groups[i];
           if (g === undefined || !reserved.has(g.name) || g.origin !== undefined) continue;
@@ -435,19 +437,17 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       for (const d of discovered) this.renderDiscoveredRow(discEl, d);
     }
 
-    new Setting(containerEl)
+    const customHead = new Setting(containerEl)
       .setName("Custom rules")
       .setHeading()
       .setDesc("Your own rules for anything not listed elsewhere — vault-root files, extra folders, or per-key credential protection (sanitize).");
+    customHead.addExtraButton((b) => b.setIcon("plus").setTooltip("Add rule").onClick(() => {
+      this.groups.push({ name: "", path: "", type: "file", devices: "all" });
+      this.expanded.add("");
+      this.refresh();
+    }));
     const customEl = containerEl.createDiv();
     for (const group of custom) this.renderRuleCard(customEl, group, false);
-    new Setting(containerEl).addButton((b) =>
-      b.setButtonText("Add rule").onClick(() => {
-        this.groups.push({ name: "", path: "", type: "file", devices: "all" });
-        this.expanded.add("");
-        this.refresh();
-      })
-    );
   }
 
   private renderDiscoveredRow(listEl: HTMLElement, d: { name: string; path: string }): void {
@@ -505,8 +505,8 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     }
     row.createDiv({ cls: "config-sync-rule-spacer" });
     if (managed) {
-      new ButtonComponent(row)
-        .setButtonText("Reset")
+      new ExtraButtonComponent(row)
+        .setIcon("rotate-ccw")
         .setTooltip("Restore to the picker default")
         .onClick(async () => {
           const def = defaultGroupForName(group.name);
@@ -621,22 +621,20 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   }
 
   private renderSources(containerEl: HTMLElement): void {
-    new Setting(containerEl)
+    const sourcesHead = new Setting(containerEl)
       .setName("Remotes")
       .setHeading()
       .setDesc(
         "Places you Pull the store from and Push it to — another vault (local path) or a git repo. note-sync handles your own devices without a remote."
       );
-    const listEl = containerEl.createDiv();
+    sourcesHead.addExtraButton((b) => b.setIcon("plus").setTooltip("Add remote").onClick(() => {
+      this.sources.push({ name: "", type: "local-path", path: "", remote: "", branch: "", root: "" });
+      this.refresh();
+    }));
+    const listEl = containerEl.createDiv({ cls: "config-sync-sources" });
     this.sources.forEach((source, index) => this.renderSourceRow(listEl, source, index));
     this.sourcesErrorEl = containerEl.createEl("p", { cls: "mod-warning" });
     this.sourcesErrorEl.setText(this.sourcesErrorMsg);
-    new Setting(containerEl).addButton((b) =>
-      b.setButtonText("Add remote").onClick(() => {
-        this.sources.push({ name: "", type: "local-path", path: "", remote: "", branch: "", root: "" });
-        this.refresh();
-      })
-    );
   }
 
   private renderSourceRow(listEl: HTMLElement, source: SourceDraft, index: number): void {
