@@ -18,7 +18,14 @@ import { confirmWarnings } from "./ConfirmModal";
 import { FolderSelectModal } from "./FolderSelectModal";
 
 export interface SettingsHost extends Plugin {
-  settings: { pkmMode: PkmMode; rootPath: string; remotes: Remote[]; ribbonButtons: Record<RibbonKey, boolean> };
+  settings: {
+    pkmMode: PkmMode;
+    rootPath: string;
+    remotes: Remote[];
+    ribbonButtons: Record<RibbonKey, boolean>;
+    statusInMenu: boolean;
+    statusInPickers: boolean;
+  };
   saveSettings(): Promise<void>;
   refreshRibbons(): void;
   transportAvailable(): boolean;
@@ -178,6 +185,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       case "general":
         this.renderPkmMode(containerEl);
         await this.renderDataFolder(containerEl, gen);
+        this.renderStatusToggles(containerEl);
         this.renderRibbonToggles(containerEl);
         break;
       case "obsidian":
@@ -346,6 +354,27 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
           this.refresh();
         });
       });
+  }
+
+  private renderStatusToggles(containerEl: HTMLElement): void {
+    new Setting(containerEl)
+      .setName("Sync menu shows change counts")
+      .setDesc("Counts changed groups when the menu opens. Turn off if opening the menu feels slow.")
+      .addToggle((t) =>
+        t.setValue(this.host.settings.statusInMenu).onChange(async (v) => {
+          this.host.settings.statusInMenu = v;
+          await this.host.saveSettings();
+        })
+      );
+    new Setting(containerEl)
+      .setName("Apply picker shows group status")
+      .setDesc("Badges each group and pre-selects the ones the store updated.")
+      .addToggle((t) =>
+        t.setValue(this.host.settings.statusInPickers).onChange(async (v) => {
+          this.host.settings.statusInPickers = v;
+          await this.host.saveSettings();
+        })
+      );
   }
 
   private renderRibbonToggles(containerEl: HTMLElement): void {
