@@ -78,6 +78,15 @@ Never syncable (hard blacklist): `remotely-save`, `ioto-update`, `slides-rup`, `
 
 Via [BRAT](https://github.com/TfTHacker/obsidian42-brat): add beta plugin `xooooooooox/obsidian-config-sync`.
 
+## Security & privacy
+
+Everything the plugin does by default stays inside your vault: Capture/Apply copy files between your config folder and the data folder, and your own note-sync tool moves them between devices. Two **optional, desktop-only** remote features go further and are disclosed here:
+
+- **Network use (git remotes only).** If you add a git remote under Settings → Remotes, Pull/Push run the `git` binary against the URL you configured — that is the only network access the plugin ever performs. No telemetry, no other endpoints.
+- **Files outside the vault (local-path remotes and git temp clones).** If you add a local-path remote, Pull/Push read/write the absolute path you configured (typically another vault's data folder). Git pushes additionally use a temporary clone directory that is removed afterwards.
+
+Both features are disabled until you configure a remote, and never run without an explicit Pull or Push command.
+
 ## Development
 
 ```bash
