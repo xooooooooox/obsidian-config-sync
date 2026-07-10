@@ -51,7 +51,7 @@ describe("createLocalPathReader", () => {
 
   it("fails with a clear error when the root does not exist", async () => {
     const reader = createLocalPathReader(nodePath.join(sourceRepo, "no/such/root"));
-    await expect(reader.listFiles()).rejects.toThrow("External source root not found");
+    await expect(reader.listFiles()).rejects.toThrow("External store not found");
   });
 
   it("expandTilde expands a leading ~/", () => {

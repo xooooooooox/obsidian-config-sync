@@ -14,7 +14,7 @@ export function createLocalPathReader(storeDir: string): ExternalStoreReader {
       try {
         await fs.access(base);
       } catch {
-        throw new Error(`External source root not found: ${base} — check the source "path" and "root" settings`);
+        throw new Error(`External store not found: ${base} — check the remote's "Store path" setting`);
       }
       const out: string[] = [];
       await walk(base, "", out);
