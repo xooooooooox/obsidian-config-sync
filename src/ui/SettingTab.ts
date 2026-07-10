@@ -62,13 +62,13 @@ function toCandidate(d: RemoteDraft): unknown {
 
 type PanelTab = "general" | "obsidian" | "core" | "plugins" | "advanced" | "sources";
 
-const TABS: { id: PanelTab; label: string; icon: string }[] = [
+const TABS: { id: PanelTab; label: string; icon: string; desktopOnly?: true }[] = [
   { id: "general", label: "General", icon: "settings" },
   { id: "obsidian", label: "Obsidian", icon: "gem" },
-  { id: "core", label: "Core plugins", icon: "blocks" },
+  { id: "core", label: "Core plugins", icon: "toy-brick" },
   { id: "plugins", label: "Community plugins", icon: "puzzle" },
   { id: "advanced", label: "Advanced", icon: "wrench" },
-  { id: "sources", label: "Remotes", icon: "git-branch" },
+  { id: "sources", label: "Remotes", icon: "git-branch", desktopOnly: true },
 ];
 
 const SECTION_TAB: Record<"obsidian" | "core" | "plugins", string> = {
@@ -164,6 +164,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private renderTabNav(containerEl: HTMLElement): void {
     const nav = containerEl.createDiv({ cls: "config-sync-tabs" });
     for (const tab of TABS) {
+      if (tab.desktopOnly === true && Platform.isMobile) continue;
       const el = nav.createEl("button", { cls: "config-sync-tab" });
       setIcon(el.createSpan({ cls: "config-sync-tab-icon" }), tab.icon);
       el.createSpan({ cls: "config-sync-tab-label", text: tab.label });
