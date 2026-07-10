@@ -55,7 +55,7 @@
 
 **4.1 Release notes:** `release.yml`'s `gh release create` gains `--generate-notes`. GitHub autogenerates the body from commits since the previous tag; the draft can still be edited before publishing. Clears the "release has no description" recommendation.
 
-**4.2 Node-import warnings:** refactor `src/external/gitSource.ts` and `src/external/localPath.ts` to the scanner-sanctioned pattern:
+**4.2 Node-import warnings — DEFERRED (user decision during planning):** the warnings are warn-severity and non-blocking (the plugin was approved carrying them), and the Behavior warnings remain regardless. Not worth the async-factory churn and vitest stub this iteration; backlog item. The sanctioned pattern, for when it is picked up:
 
 - Remove all top-level Node builtin imports (`child_process`, `util`, `fs/promises`, `os`, `path`, `fs`).
 - Each exported factory (`createGitReader`, `createGitWriter`, `createLocalPathReader`, `createLocalPathWriter`) starts with `if (!Platform.isDesktop) { throw new Error("Config Sync: <feature> is desktop-only"); }` as its **first statement**, then dynamically imports the Node modules it needs; inner helpers receive the modules via closure/parameters.
