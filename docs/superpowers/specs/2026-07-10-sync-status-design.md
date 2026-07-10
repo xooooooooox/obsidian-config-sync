@@ -22,7 +22,7 @@ Per group:
 - Direction is a labeled guess (cross-device wall clocks); UI copy must present it as such ("likely").
 - Only ever computed for this device's groups (`groupsForDevice`), which callers pass in.
 
-**`FileIO` gains `mtime(path: string): Promise<number | null>`** (epoch ms; null when unavailable). Obsidian impl via `adapter.stat(path)?.mtime`; `tests/memfs.ts` gets settable mtimes (`io.touch(path, epochMs)` helper; `seed` defaults each file to a fixed base time).
+**`FileIO` gains `stat(path: string): Promise<{ mtime: number } | null>`** (epoch ms; null when unavailable) — shaped as `stat` rather than a bespoke `mtime()` so Obsidian's `DataAdapter` keeps satisfying `FileIO` structurally (`ctx.io = app.vault.adapter` unchanged). `tests/memfs.ts` gets settable mtimes (`io.touch(path, epochMs)` helper; seeded files default to a fixed base time).
 
 ## 2. Remote check — on demand, lock-only
 
