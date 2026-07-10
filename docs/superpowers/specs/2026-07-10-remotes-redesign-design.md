@@ -2,7 +2,7 @@
 
 **Status:** approved for planning
 **Date:** 2026-07-10
-**Scope:** the Remotes tab end-to-end: remote data model rename/simplification (no back-compat), local-path input replaced by a folder picker with store auto-detection, Advanced-style row UI, add-row affordance (Remotes AND Advanced), single-remote Pull/Push without the picker modal.
+**Scope:** the Remotes tab end-to-end: remote data model rename/simplification (no back-compat), local-path input replaced by a folder picker with store auto-detection, Advanced-style row UI, add-row affordance (Remotes AND Advanced), single-remote Pull/Push without the picker modal, removal of the General-tab "Store transport" row, and a product-language copy pass over the panel/commands.
 
 ## Decisions (from brainstorming)
 
@@ -63,6 +63,27 @@ export type Remote =
 
 - `runPull`/`runPush`: exactly 1 remote → use it directly, no `SourceSelectModal`; ≥ 2 → modal as today; 0 → existing Notice.
 
+## 6. General tab: remove "Store transport"; product-language copy pass
+
+**Store transport row is removed entirely** (both variants). The concept it explained is covered by the Data folder description and the Remotes tab description.
+
+**Copy pass** — every user-visible string in the settings panel, command palette, ribbon, and sync menu speaks the user's language: "your settings", "this device", "a remote". Internal architecture words (`store`, `transport`, arrow notations like `config → store`) do not appear. Exact strings:
+
+| Surface | New string |
+|---|---|
+| Command + menu: capture | `Capture: save this device's settings` |
+| Command + menu: apply | `Apply: update this device with synced settings` |
+| Command + menu: revert | `Revert last apply` (unchanged) |
+| Command + menu: pull | `Pull: get settings from a remote` |
+| Command + menu: push | `Push: send settings to a remote` |
+| Ribbon tooltips | `Config Sync: Capture` etc. (unchanged — verb only) |
+| Data folder desc | `Where your synced settings live inside this vault. Your regular vault sync (e.g. remotely-save) carries this folder to your other devices. Leave empty for the recommended location (currently: ${resolved}).` |
+| Remotes heading desc | `Sync your settings with another vault or a git repository. Your own devices don't need a remote — your regular vault sync already carries the settings.` |
+| Ribbon buttons heading desc | `The Config Sync ribbon icon always opens a menu of available actions. Optionally also show individual ribbon icons.` (unchanged) |
+| Pull/Push ribbon-toggle hint | `Shown on desktop once a remote is configured.` (unchanged) |
+
+PKM mode, Advanced-tab section descriptions, and picker-tab copy are already product-language; unchanged. Runtime Notices are out of scope for this pass.
+
 ## Error handling
 
 - Browse/scan failures (dialog unavailable, unreadable dirs) surface as specific error Notices; no silent fallbacks. Scan skips unreadable subdirectories without aborting the walk (partial results are still useful), but a completely unreadable base reports its error.
@@ -73,7 +94,7 @@ export type Remote =
 
 - Gate per task: `npm test` + `npm run build` + `npm run lint` (0 errors).
 - Unit: `validateRemotes` (both shapes, bad type, relative storePath, `..` in subdir); external factories with new signatures (existing fixtures re-pointed at store dirs); git `subdir: ""` round-trip; tilde expansion.
-- Smoke (obsidian-cli, dev vault): add-row visible and clickable in both tabs; remote summary row + expand; type switch re-renders form; Browse button present on desktop (dialog itself not automatable — manual once); single-remote Pull skips the modal; zero console errors.
+- Smoke (obsidian-cli, dev vault): add-row visible and clickable in both tabs; remote summary row + expand; type switch re-renders form; Browse button present on desktop (dialog itself not automatable — manual once); single-remote Pull skips the modal; General tab has no Store transport row; command palette shows the new command names; zero console errors.
 
 ## Non-goals
 
