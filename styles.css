@@ -147,6 +147,52 @@
   margin-bottom: var(--size-2-1);
 }
 
+.config-sync-add-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: var(--size-4-2);
+  margin: var(--size-4-2) 0;
+  border: 1px dashed var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background: none;
+  box-shadow: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: var(--font-ui-small);
+}
+
+.config-sync-add-row:hover {
+  color: var(--text-normal);
+  border-color: var(--interactive-accent);
+}
+
+.config-sync-row-type {
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  padding: 0 var(--size-2-2);
+  flex: none;
+}
+
+.config-sync-remote-path {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--size-4-2);
+}
+
+.config-sync-remote-path > div:first-child {
+  flex: 1;
+}
+
+.config-sync-remote-git {
+  display: grid;
+  grid-template-columns: 1fr 8em 1fr;
+  gap: var(--size-4-3);
+}
+
 /* Phone layout — Obsidian sets body.is-phone; no pixel breakpoints */
 body.is-phone .config-sync-tab:not(.is-active) .config-sync-tab-label {
   display: none;
@@ -158,7 +204,7 @@ body.is-phone .config-sync-form-line2 {
   grid-template-columns: 1fr;
 }
 
-body.is-phone .config-sync-sources .setting-item-control {
-  flex-wrap: wrap;
+body.is-phone .config-sync-remote-git {
+  grid-template-columns: 1fr;
 }
 
