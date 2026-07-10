@@ -1,11 +1,11 @@
 import { execFile } from "child_process";
 import { mkdtemp, mkdir, rm, writeFile } from "fs/promises";
-import { tmpdir } from "os";
+import { homedir, tmpdir } from "os";
 import * as nodePath from "path";
 import { promisify } from "util";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createGitReader, createGitWriter } from "../src/external/gitSource";
-import { createLocalPathReader, createLocalPathWriter } from "../src/external/localPath";
+import { createLocalPathReader, createLocalPathWriter, expandTilde } from "../src/external/localPath";
 
 const run = promisify(execFile);
 
@@ -44,14 +44,19 @@ afterAll(async () => {
 
 describe("createLocalPathReader", () => {
   it("lists and reads files under the source root", async () => {
-    const reader = createLocalPathReader(sourceRepo, "0-Extra/config-sync");
+    const reader = createLocalPathReader(nodePath.join(sourceRepo, "0-Extra/config-sync"));
     expect(await reader.listFiles()).toEqual(["config-sync.json", "store/configdir/hotkeys.json"]);
     expect(await reader.readFile("store/configdir/hotkeys.json")).toBe("{}");
   });
 
   it("fails with a clear error when the root does not exist", async () => {
-    const reader = createLocalPathReader(sourceRepo, "no/such/root");
+    const reader = createLocalPathReader(nodePath.join(sourceRepo, "no/such/root"));
     await expect(reader.listFiles()).rejects.toThrow("External source root not found");
+  });
+
+  it("expandTilde expands a leading ~/", () => {
+    expect(expandTilde("~/x/y")).toBe(nodePath.join(homedir(), "x/y"));
+    expect(expandTilde("/abs/x")).toBe("/abs/x");
   });
 });
 
@@ -77,15 +82,16 @@ describe("createGitReader", () => {
 describe("createLocalPathWriter", () => {
   it("writes files under the dest root and propagates deletions, round-tripping via the reader", async () => {
     const dest = await mkdtemp(nodePath.join(tmpdir(), "cs-dest-"));
-    const writer = createLocalPathWriter(dest, "0-Extra/config-sync");
+    const storeDir = nodePath.join(dest, "0-Extra/config-sync");
+    const writer = createLocalPathWriter(storeDir);
     await writer.writeFile("config-sync.json", '{"version":1,"groups":[]}');
     await writer.writeFile("store/configdir/hotkeys.json", '{"a":7}');
     await writer.finalize();
-    const reader = createLocalPathReader(dest, "0-Extra/config-sync");
+    const reader = createLocalPathReader(storeDir);
     expect(await reader.listFiles()).toEqual(["config-sync.json", "store/configdir/hotkeys.json"]);
     expect(await reader.readFile("store/configdir/hotkeys.json")).toBe('{"a":7}');
     await writer.deleteFile("store/configdir/hotkeys.json");
-    expect((await createLocalPathReader(dest, "0-Extra/config-sync").listFiles())).toEqual(["config-sync.json"]);
+    expect((await createLocalPathReader(storeDir).listFiles())).toEqual(["config-sync.json"]);
     await rm(dest, { recursive: true, force: true });
   });
 });
@@ -111,5 +117,17 @@ describe("createGitWriter", () => {
     await writer.finalize();
     const reader = await createGitReader(consumerRepo, bareRemote, "main", "cfg");
     expect(await reader.listFiles()).toEqual(["config-sync.json"]);
+  });
+
+  it("git writer at repo root (subdir '') skips .git and round-trips", async () => {
+    const writer = await createGitWriter(bareRemote, "main", "");
+    await writer.writeFile("config-sync.json", "{}");
+    await writer.finalize();
+    const reader = await createGitReader(consumerRepo, bareRemote, "main", "");
+    expect(await reader.listFiles()).toContain("config-sync.json");
+    const writer2 = await createGitWriter(bareRemote, "main", "");
+    const files = await writer2.listFiles();
+    expect(files.some((f) => f.startsWith(".git"))).toBe(false);
+    await writer2.finalize(); // no changes → cleans up
   });
 });

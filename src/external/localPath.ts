@@ -1,9 +1,14 @@
 import { promises as fs } from "fs";
 import * as nodePath from "path";
+import { homedir } from "os";
 import { ExternalStoreReader, ExternalStoreWriter } from "../core/ConfigSyncCore";
 
-export function createLocalPathReader(sourceVaultPath: string, sourceRoot: string): ExternalStoreReader {
-  const base = nodePath.join(sourceVaultPath, sourceRoot);
+export function expandTilde(p: string): string {
+  return p === "~" || p.startsWith("~/") ? nodePath.join(homedir(), p.slice(1)) : p;
+}
+
+export function createLocalPathReader(storeDir: string): ExternalStoreReader {
+  const base = expandTilde(storeDir);
   return {
     async listFiles(): Promise<string[]> {
       try {
@@ -21,8 +26,8 @@ export function createLocalPathReader(sourceVaultPath: string, sourceRoot: strin
   };
 }
 
-export function createLocalPathWriter(destVaultPath: string, destRoot: string): ExternalStoreWriter {
-  const base = nodePath.join(destVaultPath, destRoot);
+export function createLocalPathWriter(storeDir: string): ExternalStoreWriter {
+  const base = expandTilde(storeDir);
   return {
     async listFiles(): Promise<string[]> {
       const out: string[] = [];

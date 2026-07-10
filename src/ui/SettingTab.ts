@@ -1,7 +1,7 @@
 import { App, DropdownComponent, ExtraButtonComponent, Notice, Plugin, PluginSettingTab, SearchComponent, Setting, setIcon, TextComponent, ToggleComponent } from "obsidian";
-import { DeviceClass, ExternalSource, RibbonKey, SyncGroup } from "../core/types";
+import { DeviceClass, Remote, RibbonKey, SyncGroup } from "../core/types";
 import { PkmMode } from "../core/pkm";
-import { validateExternalSources } from "../core/manifest";
+import { validateRemotes } from "../core/manifest";
 import {
   CatalogItem,
   CatalogSection,
@@ -17,7 +17,7 @@ import {
 import { confirmWarnings } from "./ConfirmModal";
 
 export interface SettingsHost extends Plugin {
-  settings: { pkmMode: PkmMode; rootPath: string; externalSources: ExternalSource[]; ribbonButtons: Record<RibbonKey, boolean> };
+  settings: { pkmMode: PkmMode; rootPath: string; remotes: Remote[]; ribbonButtons: Record<RibbonKey, boolean> };
   saveSettings(): Promise<void>;
   refreshRibbons(): void;
   transportAvailable(): boolean;
@@ -32,30 +32,31 @@ export interface SettingsHost extends Plugin {
   installedPluginIds(): string[];
 }
 
-interface SourceDraft {
+interface RemoteDraft {
   name: string;
-  type: "local-path" | "git";
-  path: string;
-  remote: string;
+  type: "vault" | "git";
+  storePath: string;
+  url: string;
   branch: string;
-  root: string;
+  subdir: string;
 }
 
-function toDraft(s: ExternalSource): SourceDraft {
+function toDraft(r: Remote): RemoteDraft {
   return {
-    name: s.name,
-    type: s.type,
-    path: s.type === "local-path" ? s.path : "",
-    remote: s.type === "git" ? s.remote : "",
-    branch: s.type === "git" ? s.branch : "",
-    root: s.root,
+    name: r.name,
+    type: r.type,
+    storePath: r.type === "vault" ? r.storePath : "",
+    url: r.type === "git" ? r.url : "",
+    branch: r.type === "git" ? r.branch : "",
+    subdir: r.type === "git" ? (r.subdir ?? "") : "",
   };
 }
 
-function toCandidate(d: SourceDraft): unknown {
-  return d.type === "local-path"
-    ? { name: d.name, type: d.type, path: d.path, root: d.root }
-    : { name: d.name, type: d.type, remote: d.remote, branch: d.branch, root: d.root };
+function toCandidate(d: RemoteDraft): unknown {
+  if (d.type === "vault") return { name: d.name, type: d.type, storePath: d.storePath };
+  const c: Record<string, string> = { name: d.name, type: d.type, url: d.url, branch: d.branch };
+  if (d.subdir.trim() !== "") c.subdir = d.subdir.trim();
+  return c;
 }
 
 type PanelTab = "general" | "obsidian" | "core" | "plugins" | "advanced" | "sources";
@@ -77,7 +78,7 @@ const SECTION_TAB: Record<"obsidian" | "core" | "plugins", string> = {
 
 export class ConfigSyncSettingTab extends PluginSettingTab {
   private groups: SyncGroup[] = [];
-  private sources: SourceDraft[] = [];
+  private sources: RemoteDraft[] = [];
   private groupsReadError: string | null = null;
   private loaded = false;
   private renderGen = 0;
@@ -128,7 +129,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         this.groupsReadError = (e as Error).message;
       }
       if (gen !== this.renderGen) return;
-      this.sources = this.host.settings.externalSources.map(toDraft);
+      this.sources = this.host.settings.remotes.map(toDraft);
       this.loaded = true;
     }
     this.renderSearchBox(containerEl);
@@ -300,7 +301,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   }
 
   private renderTransportStatus(containerEl: HTMLElement): void {
-    const remotes = this.host.settings.externalSources;
+    const remotes = this.host.settings.remotes;
     const s = new Setting(containerEl).setName("Store transport");
     if (remotes.length === 0) {
       s.setDesc(
@@ -628,7 +629,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         "Places you Pull the store from and Push it to — another vault (local path) or a git repo. note-sync handles your own devices without a remote."
       );
     sourcesHead.addExtraButton((b) => b.setIcon("plus").setTooltip("Add remote").onClick(() => {
-      this.sources.push({ name: "", type: "local-path", path: "", remote: "", branch: "", root: "" });
+      this.sources.push({ name: "", type: "vault", storePath: "", url: "", branch: "", subdir: "" });
       this.refresh();
     }));
     const listEl = containerEl.createDiv({ cls: "config-sync-sources" });
@@ -637,60 +638,60 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     this.sourcesErrorEl.setText(this.sourcesErrorMsg);
   }
 
-  private renderSourceRow(listEl: HTMLElement, source: SourceDraft, index: number): void {
+  private renderSourceRow(listEl: HTMLElement, source: RemoteDraft, index: number): void {
     const row = new Setting(listEl);
     row.addText((t) =>
       t.setPlaceholder("name").setValue(source.name).onChange((v) => {
         source.name = v.trim();
-        void this.saveSources();
+        void this.saveRemotes();
       })
     );
     row.addDropdown((d) =>
-      d.addOption("local-path", "local-path").addOption("git", "git").setValue(source.type).onChange(async (v) => {
-        source.type = v as SourceDraft["type"];
-        await this.saveSources();
+      d.addOption("vault", "Another vault").addOption("git", "Git repository").setValue(source.type).onChange(async (v) => {
+        source.type = v as RemoteDraft["type"];
+        await this.saveRemotes();
         this.refresh();
       })
     );
-    if (source.type === "local-path") {
+    if (source.type === "vault") {
       row.addText((t) =>
-        t.setPlaceholder("/absolute/path/to/source-vault").setValue(source.path).onChange((v) => {
-          source.path = v.trim();
-          void this.saveSources();
+        t.setPlaceholder("/absolute/path/to/store").setValue(source.storePath).onChange((v) => {
+          source.storePath = v.trim();
+          void this.saveRemotes();
         })
       );
     } else {
       row.addText((t) =>
-        t.setPlaceholder("git remote url").setValue(source.remote).onChange((v) => {
-          source.remote = v.trim();
-          void this.saveSources();
+        t.setPlaceholder("git url").setValue(source.url).onChange((v) => {
+          source.url = v.trim();
+          void this.saveRemotes();
         })
       );
       row.addText((t) =>
         t.setPlaceholder("branch").setValue(source.branch).onChange((v) => {
           source.branch = v.trim();
-          void this.saveSources();
+          void this.saveRemotes();
+        })
+      );
+      row.addText((t) =>
+        t.setPlaceholder("folder in repo (optional)").setValue(source.subdir).onChange((v) => {
+          source.subdir = v.trim();
+          void this.saveRemotes();
         })
       );
     }
-    row.addText((t) =>
-      t.setPlaceholder("root, e.g. 0-Extra/config-sync").setValue(source.root).onChange((v) => {
-        source.root = v.trim();
-        void this.saveSources();
-      })
-    );
     row.addExtraButton((b) =>
       b.setIcon("trash").setTooltip("Delete remote").onClick(async () => {
         this.sources.splice(index, 1);
-        await this.saveSources();
+        await this.saveRemotes();
         this.refresh();
       })
     );
   }
 
-  private async saveSources(): Promise<void> {
+  private async saveRemotes(): Promise<void> {
     try {
-      this.host.settings.externalSources = validateExternalSources(this.sources.map(toCandidate));
+      this.host.settings.remotes = validateRemotes(this.sources.map(toCandidate));
       await this.host.saveSettings();
       this.sourcesErrorMsg = "";
     } catch (e) {

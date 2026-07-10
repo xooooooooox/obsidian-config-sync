@@ -1,4 +1,4 @@
-import { DeviceClass, ExternalSource, StoreLock, SyncGroup, SyncManifest } from "./types";
+import { DeviceClass, Remote, StoreLock, SyncGroup, SyncManifest } from "./types";
 import { groupStorePath } from "./pathing";
 import { isPlainObject } from "./sanitize";
 
@@ -136,44 +136,36 @@ export function parseStoreLock(raw: string): StoreLock {
   return { publishedAt: parsed.publishedAt, groups };
 }
 
-export function parseExternalSources(raw: string): ExternalSource[] {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (e) {
-    throw new ManifestValidationError(`external sources is not valid JSON: ${(e as Error).message}`);
-  }
-  return validateExternalSources(parsed);
+export function validateRemotes(data: unknown): Remote[] {
+  if (!Array.isArray(data)) throw new ManifestValidationError("remotes must be a JSON array");
+  return data.map((r, i) => parseRemote(r, i));
 }
 
-export function validateExternalSources(data: unknown): ExternalSource[] {
-  if (!Array.isArray(data)) throw new ManifestValidationError("external sources must be a JSON array");
-  return data.map((s, i) => parseSource(s, i));
-}
-
-function parseSource(s: unknown, index: number): ExternalSource {
-  if (!isPlainObject(s)) throw new ManifestValidationError(`source #${index} must be an object`);
-  const { name, type, path, remote, branch, root } = s;
+function parseRemote(r: unknown, index: number): Remote {
+  if (!isPlainObject(r)) throw new ManifestValidationError(`remote #${index} must be an object`);
+  const { name, type, storePath, url, branch, subdir } = r;
   if (typeof name !== "string" || name === "") {
-    throw new ManifestValidationError(`source #${index}: "name" must be a non-empty string`);
+    throw new ManifestValidationError(`remote #${index}: "name" must be a non-empty string`);
   }
-  if (typeof root !== "string" || root === "") {
-    throw new ManifestValidationError(`source "${name}": "root" must be a non-empty string`);
-  }
-  if (type === "local-path") {
-    if (typeof path !== "string" || path === "") {
-      throw new ManifestValidationError(`source "${name}": "path" must be a non-empty string`);
+  if (type === "vault") {
+    if (typeof storePath !== "string" || !(storePath.startsWith("/") || storePath === "~" || storePath.startsWith("~/"))) {
+      throw new ManifestValidationError(`remote "${name}": "storePath" must be an absolute path (a leading ~/ is allowed)`);
     }
-    return { name, type, path, root };
+    return { name, type, storePath };
   }
   if (type === "git") {
-    if (typeof remote !== "string" || remote === "") {
-      throw new ManifestValidationError(`source "${name}": "remote" must be a non-empty string`);
+    if (typeof url !== "string" || url === "") {
+      throw new ManifestValidationError(`remote "${name}": "url" must be a non-empty string`);
     }
     if (typeof branch !== "string" || branch === "") {
-      throw new ManifestValidationError(`source "${name}": "branch" must be a non-empty string`);
+      throw new ManifestValidationError(`remote "${name}": "branch" must be a non-empty string`);
     }
-    return { name, type, remote, branch, root };
+    if (subdir !== undefined && (typeof subdir !== "string" || subdir.startsWith("/") || subdir.split("/").includes(".."))) {
+      throw new ManifestValidationError(`remote "${name}": "subdir" must be a relative path without ".."`);
+    }
+    const remote: Remote = { name, type, url, branch };
+    if (typeof subdir === "string" && subdir !== "") remote.subdir = subdir;
+    return remote;
   }
-  throw new ManifestValidationError(`source "${name}": "type" must be "local-path" or "git"`);
+  throw new ManifestValidationError(`remote "${name}": "type" must be "vault" or "git"`);
 }

@@ -2,9 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   parseSyncManifest,
   parseStoreLock,
-  parseExternalSources,
   validateSyncManifest,
-  validateExternalSources,
+  validateRemotes,
   ManifestValidationError,
 } from "../src/core/manifest";
 
@@ -99,24 +98,33 @@ describe("parseStoreLock", () => {
   });
 });
 
-describe("parseExternalSources", () => {
-  it("parses valid sources of both types", () => {
-    const raw = JSON.stringify([
-      { name: "local", type: "local-path", path: "/v/main.vault", root: "0-Extra/config-sync" },
-      { name: "git", type: "git", remote: "git@host:g/r.git", branch: "main", root: "0-Extra/config-sync" },
+describe("validateRemotes", () => {
+  it("parses valid remotes of both types", () => {
+    const remotes = validateRemotes([
+      { name: "kickstart", type: "vault", storePath: "/abs/kickstart.vault/0-Extras/config-sync" },
+      { name: "backup", type: "git", url: "git@example.com:me/cfg.git", branch: "main", subdir: "config-sync" },
     ]);
-    const sources = parseExternalSources(raw);
-    expect(sources).toHaveLength(2);
-    const s1 = sources[1];
-    expect(s1).toBeDefined();
-    if (s1) expect(s1.type).toBe("git");
+    expect(remotes).toHaveLength(2);
+    expect(remotes[0]).toEqual({ name: "kickstart", type: "vault", storePath: "/abs/kickstart.vault/0-Extras/config-sync" });
+    expect(remotes[1]?.type).toBe("git");
   });
-  it("rejects a git source without a branch", () => {
-    const raw = JSON.stringify([{ name: "g", type: "git", remote: "u", root: "r" }]);
-    expect(() => parseExternalSources(raw)).toThrow('"branch"');
+  it("accepts tilde storePath and omits empty subdir", () => {
+    const remotes = validateRemotes([
+      { name: "a", type: "vault", storePath: "~/vaults/kick/0-Extras/config-sync" },
+      { name: "b", type: "git", url: "u", branch: "main", subdir: "" },
+    ]);
+    expect(remotes[0]?.type).toBe("vault");
+    expect(remotes[1]).toEqual({ name: "b", type: "git", url: "u", branch: "main" });
   });
-  it("rejects non-array input", () => {
-    expect(() => parseExternalSources("{}")).toThrow("array");
+  it("rejects a relative storePath", () => {
+    expect(() => validateRemotes([{ name: "a", type: "vault", storePath: "vaults/kick" }])).toThrow('"storePath" must be an absolute path');
+  });
+  it("rejects subdir escaping the repo", () => {
+    expect(() => validateRemotes([{ name: "b", type: "git", url: "u", branch: "m", subdir: "../x" }])).toThrow('"subdir"');
+  });
+  it("rejects unknown types and non-arrays", () => {
+    expect(() => validateRemotes([{ name: "a", type: "local-path", storePath: "/x" }])).toThrow('"type" must be "vault" or "git"');
+    expect(() => validateRemotes({})).toThrow("array");
   });
 });
 
@@ -144,16 +152,6 @@ describe("validateSyncManifest", () => {
     expect(() => validateSyncManifest({ version: 1, groups: [{ ...GOOD, description: 42 }] })).toThrow(
       '"description" must be a string'
     );
-  });
-});
-
-describe("validateExternalSources", () => {
-  it("accepts an already-parsed array", () => {
-    const sources = validateExternalSources([{ name: "l", type: "local-path", path: "/v", root: "r" }]);
-    expect(sources).toHaveLength(1);
-  });
-  it("rejects non-array input", () => {
-    expect(() => validateExternalSources({})).toThrow("array");
   });
 });
 
