@@ -411,7 +411,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       managedHead.addButton((b) => b.setButtonText("Reset all").onClick(async () => {
         for (let i = 0; i < this.groups.length; i++) {
           const g = this.groups[i];
-          if (g === undefined || !reserved.has(g.name)) continue;
+          if (g === undefined || !reserved.has(g.name) || g.origin !== undefined) continue;
           const def = defaultGroupForName(g.name);
           if (def !== null) this.groups[i] = def;
         }
