@@ -88,13 +88,16 @@ describe("parseSyncManifest", () => {
 
 describe("parseStoreLock", () => {
   it("parses a valid lock", () => {
-    const lock = parseStoreLock(JSON.stringify({ publishedAt: "t", groups: { g: { sourcePluginVersion: "1.0.0" } } }));
+    const lock = parseStoreLock(JSON.stringify({ capturedAt: "t", groups: { g: { sourcePluginVersion: "1.0.0" } } }));
     const g = lock.groups.g;
     expect(g).toBeDefined();
     if (g) expect(g.sourcePluginVersion).toBe("1.0.0");
   });
   it("rejects malformed locks", () => {
     expect(() => parseStoreLock(JSON.stringify({ groups: {} }))).toThrow(ManifestValidationError);
+  });
+  it("rejects the retired publishedAt key", () => {
+    expect(() => parseStoreLock('{"publishedAt":"t","groups":{}}')).toThrow("capturedAt");
   });
 });
 

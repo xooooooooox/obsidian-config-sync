@@ -82,18 +82,31 @@ function requireGroup(manifest: SyncManifest, name: string): SyncGroup {
 
 export async function capture(ctx: CoreContext): Promise<GroupResult[]> {
   const manifest = await loadManifest(ctx);
-  const lock: StoreLock = { publishedAt: ctx.now(), groups: {} };
+  // Capture is the lock's writer and its only healing path: a previous lock that is
+  // missing, old-format, or corrupt must never block capture — it is rewritten below.
+  let previous: StoreLock | null = null;
+  try {
+    previous = await loadLock(ctx);
+  } catch {
+    previous = null;
+  }
+  const lock: StoreLock = { capturedAt: ctx.now(), groups: {} };
   const results: GroupResult[] = [];
   for (const group of manifest.groups) {
-    const result = await publishGroup(ctx, group);
+    const result = await captureGroup(ctx, group);
     const pluginId = pluginIdForGroup(group);
-    if (pluginId !== null && result.status !== "error") {
-      const version = ctx.plugins.getInstalledPluginVersion(pluginId);
-      if (version !== null) {
-        lock.groups[group.name] = { sourcePluginVersion: version };
+    if (pluginId !== null) {
+      if (result.status !== "error") {
+        const version = ctx.plugins.getInstalledPluginVersion(pluginId);
+        if (version !== null) {
+          lock.groups[group.name] = { sourcePluginVersion: version };
+        } else {
+          result.status = "warning";
+          result.messages.push(`plugin "${pluginId}" is not installed in this vault; no version recorded`);
+        }
       } else {
-        result.status = "warning";
-        result.messages.push(`plugin "${pluginId}" is not installed in this vault; no version recorded`);
+        const prev = previous?.groups[group.name];
+        if (prev !== undefined) lock.groups[group.name] = prev; // errored capture keeps the last known version
       }
     }
     results.push(result);
@@ -103,7 +116,7 @@ export async function capture(ctx: CoreContext): Promise<GroupResult[]> {
   return results;
 }
 
-async function publishGroup(ctx: CoreContext, group: SyncGroup): Promise<GroupResult> {
+async function captureGroup(ctx: CoreContext, group: SyncGroup): Promise<GroupResult> {
   const real = groupRealPath(group.path, ctx.configDir);
   const store = `${storeDir(ctx)}/${groupStorePath(group.path)}`;
   const result = emptyResult(group.name, false);
@@ -185,7 +198,7 @@ export async function checkApply(ctx: CoreContext, groupNames: string[]): Promis
     } else if (recorded !== null && recorded !== installed) {
       warnings.push({
         group: name,
-        message: `store config was published from ${pluginId}@${recorded}, this device runs ${pluginId}@${installed} — settings schema may differ`,
+        message: `store config was captured with ${pluginId}@${recorded}, this device runs ${pluginId}@${installed} — settings schema may differ`,
       });
     } else if (recorded === null) {
       warnings.push({
