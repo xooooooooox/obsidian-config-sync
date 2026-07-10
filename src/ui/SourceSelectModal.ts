@@ -1,21 +1,21 @@
 import { App, FuzzySuggestModal } from "obsidian";
-import { ExternalSource } from "../core/types";
+import { Remote } from "../core/types";
 
-export class SourceSelectModal extends FuzzySuggestModal<ExternalSource> {
-  constructor(app: App, private sources: ExternalSource[], private onChoose: (s: ExternalSource) => void) {
+export class SourceSelectModal extends FuzzySuggestModal<Remote> {
+  constructor(app: App, private remotes: Remote[], private onChoose: (r: Remote) => void) {
     super(app);
-    this.setPlaceholder("Select an external source to import from");
+    this.setPlaceholder("Select a remote");
   }
 
-  getItems(): ExternalSource[] {
-    return this.sources;
+  getItems(): Remote[] {
+    return this.remotes;
   }
 
-  getItemText(s: ExternalSource): string {
-    return `${s.name} (${s.type})`;
+  getItemText(r: Remote): string {
+    return `${r.name} (${r.type})`;
   }
 
-  onChooseItem(s: ExternalSource): void {
-    this.onChoose(s);
+  onChooseItem(r: Remote): void {
+    this.onChoose(r);
   }
 }

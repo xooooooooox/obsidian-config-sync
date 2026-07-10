@@ -29,9 +29,9 @@ export interface GroupResult {
   needsAppReload: boolean;
 }
 
-export type ExternalSource =
-  | { name: string; type: "local-path"; path: string; root: string }
-  | { name: string; type: "git"; remote: string; branch: string; root: string };
+export type Remote =
+  | { name: string; type: "vault"; storePath: string } // storePath: absolute path of the store directory; leading ~ allowed
+  | { name: string; type: "git"; url: string; branch: string; subdir?: string }; // subdir: store folder inside the repo; absent = repo root
 
 export type RibbonKey = "capture" | "apply" | "revert" | "pull" | "push";
 export type RibbonButtons = Record<RibbonKey, boolean>;

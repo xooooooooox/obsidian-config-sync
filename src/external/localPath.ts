@@ -1,15 +1,20 @@
 import { promises as fs } from "fs";
 import * as nodePath from "path";
+import { homedir } from "os";
 import { ExternalStoreReader, ExternalStoreWriter } from "../core/ConfigSyncCore";
 
-export function createLocalPathReader(sourceVaultPath: string, sourceRoot: string): ExternalStoreReader {
-  const base = nodePath.join(sourceVaultPath, sourceRoot);
+export function expandTilde(p: string): string {
+  return p === "~" || p.startsWith("~/") ? nodePath.join(homedir(), p.slice(1)) : p;
+}
+
+export function createLocalPathReader(storeDir: string): ExternalStoreReader {
+  const base = expandTilde(storeDir);
   return {
     async listFiles(): Promise<string[]> {
       try {
         await fs.access(base);
       } catch {
-        throw new Error(`External source root not found: ${base} — check the source "path" and "root" settings`);
+        throw new Error(`External store not found: ${base} — check the remote's "Store path" setting`);
       }
       const out: string[] = [];
       await walk(base, "", out);
@@ -21,8 +26,8 @@ export function createLocalPathReader(sourceVaultPath: string, sourceRoot: strin
   };
 }
 
-export function createLocalPathWriter(destVaultPath: string, destRoot: string): ExternalStoreWriter {
-  const base = nodePath.join(destVaultPath, destRoot);
+export function createLocalPathWriter(storeDir: string): ExternalStoreWriter {
+  const base = expandTilde(storeDir);
   return {
     async listFiles(): Promise<string[]> {
       const out: string[] = [];
@@ -58,4 +63,34 @@ async function walk(absBase: string, rel: string, out: string[]): Promise<void> 
       out.push(childRel);
     }
   }
+}
+
+/** BFS for directories containing config-sync.json: depth ≤ 4, skips dot-dirs and node_modules,
+ *  does not descend below a hit. Used by the settings Browse flow to locate a store. */
+export async function findStoreDirs(baseAbs: string): Promise<string[]> {
+  const base = expandTilde(baseAbs);
+  const hits: string[] = [];
+  const queue: { rel: string; depth: number }[] = [{ rel: "", depth: 0 }];
+  while (queue.length > 0) {
+    const item = queue.shift();
+    if (item === undefined) break;
+    const abs = item.rel === "" ? base : nodePath.join(base, item.rel);
+    let entries;
+    try {
+      entries = await fs.readdir(abs, { withFileTypes: true });
+    } catch (e) {
+      if (item.rel === "") throw new Error(`Cannot read folder ${base}: ${(e as Error).message}`);
+      continue; // unreadable subdir — keep scanning the rest
+    }
+    if (entries.some((e) => e.isFile() && e.name === "config-sync.json")) {
+      hits.push(abs);
+      continue;
+    }
+    if (item.depth >= 4) continue;
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name.startsWith(".") || entry.name === "node_modules") continue;
+      queue.push({ rel: item.rel === "" ? entry.name : `${item.rel}/${entry.name}`, depth: item.depth + 1 });
+    }
+  }
+  return hits.sort();
 }

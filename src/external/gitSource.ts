@@ -21,7 +21,7 @@ export async function createGitReader(
   vaultBasePath: string,
   remoteUrl: string,
   branch: string,
-  sourceRoot: string
+  subdir: string
 ): Promise<ExternalStoreReader> {
   const remotes = (await git(vaultBasePath, ["remote"])).split("\n").filter(Boolean);
   if (remotes.includes(REMOTE_NAME)) {
@@ -30,8 +30,10 @@ export async function createGitReader(
     await git(vaultBasePath, ["remote", "add", REMOTE_NAME, remoteUrl]);
   }
   await git(vaultBasePath, ["fetch", REMOTE_NAME, branch]);
-  const prefix = sourceRoot.endsWith("/") ? sourceRoot : sourceRoot + "/";
-  const listed = await git(vaultBasePath, ["ls-tree", "-r", "--name-only", "FETCH_HEAD", "--", prefix]);
+  const prefix = subdir === "" ? "" : subdir.endsWith("/") ? subdir : subdir + "/";
+  const lsArgs = ["ls-tree", "-r", "--name-only", "FETCH_HEAD"];
+  if (prefix !== "") lsArgs.push("--", prefix);
+  const listed = await git(vaultBasePath, lsArgs);
   const files = listed
     .split("\n")
     .filter(Boolean)
@@ -50,20 +52,17 @@ export async function createGitReader(
 async function walkFs(absBase: string, rel: string, out: string[]): Promise<void> {
   const entries = await readdir(nodePath.join(absBase, rel), { withFileTypes: true });
   for (const entry of entries) {
+    if (rel === "" && entry.name === ".git") continue;
     const childRel = rel === "" ? entry.name : `${rel}/${entry.name}`;
     if (entry.isDirectory()) await walkFs(absBase, childRel, out);
     else if (entry.isFile()) out.push(childRel);
   }
 }
 
-export async function createGitWriter(
-  remoteUrl: string,
-  branch: string,
-  root: string
-): Promise<ExternalStoreWriter> {
+export async function createGitWriter(remoteUrl: string, branch: string, subdir: string): Promise<ExternalStoreWriter> {
   const dir = await mkdtemp(nodePath.join(tmpdir(), "cs-push-"));
   await git(dir, ["clone", "--branch", branch, remoteUrl, "."]);
-  const base = nodePath.join(dir, root);
+  const base = subdir === "" ? dir : nodePath.join(dir, subdir);
   return {
     async listFiles(): Promise<string[]> {
       const out: string[] = [];

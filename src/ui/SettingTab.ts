@@ -1,7 +1,7 @@
-import { App, DropdownComponent, ExtraButtonComponent, Notice, Plugin, PluginSettingTab, SearchComponent, Setting, setIcon, TextComponent, ToggleComponent } from "obsidian";
-import { DeviceClass, ExternalSource, RibbonKey, SyncGroup } from "../core/types";
+import { App, DropdownComponent, ExtraButtonComponent, Notice, Platform, Plugin, PluginSettingTab, SearchComponent, Setting, setIcon, TextComponent, ToggleComponent } from "obsidian";
+import { DeviceClass, Remote, RibbonKey, SyncGroup } from "../core/types";
 import { PkmMode } from "../core/pkm";
-import { validateExternalSources } from "../core/manifest";
+import { validateRemotes } from "../core/manifest";
 import {
   CatalogItem,
   CatalogSection,
@@ -15,9 +15,10 @@ import {
   toggleSection,
 } from "../core/catalog";
 import { confirmWarnings } from "./ConfirmModal";
+import { FolderSelectModal } from "./FolderSelectModal";
 
 export interface SettingsHost extends Plugin {
-  settings: { pkmMode: PkmMode; rootPath: string; externalSources: ExternalSource[]; ribbonButtons: Record<RibbonKey, boolean> };
+  settings: { pkmMode: PkmMode; rootPath: string; remotes: Remote[]; ribbonButtons: Record<RibbonKey, boolean> };
   saveSettings(): Promise<void>;
   refreshRibbons(): void;
   transportAvailable(): boolean;
@@ -32,30 +33,31 @@ export interface SettingsHost extends Plugin {
   installedPluginIds(): string[];
 }
 
-interface SourceDraft {
+interface RemoteDraft {
   name: string;
-  type: "local-path" | "git";
-  path: string;
-  remote: string;
+  type: "vault" | "git";
+  storePath: string;
+  url: string;
   branch: string;
-  root: string;
+  subdir: string;
 }
 
-function toDraft(s: ExternalSource): SourceDraft {
+function toDraft(r: Remote): RemoteDraft {
   return {
-    name: s.name,
-    type: s.type,
-    path: s.type === "local-path" ? s.path : "",
-    remote: s.type === "git" ? s.remote : "",
-    branch: s.type === "git" ? s.branch : "",
-    root: s.root,
+    name: r.name,
+    type: r.type,
+    storePath: r.type === "vault" ? r.storePath : "",
+    url: r.type === "git" ? r.url : "",
+    branch: r.type === "git" ? r.branch : "",
+    subdir: r.type === "git" ? (r.subdir ?? "") : "",
   };
 }
 
-function toCandidate(d: SourceDraft): unknown {
-  return d.type === "local-path"
-    ? { name: d.name, type: d.type, path: d.path, root: d.root }
-    : { name: d.name, type: d.type, remote: d.remote, branch: d.branch, root: d.root };
+function toCandidate(d: RemoteDraft): unknown {
+  if (d.type === "vault") return { name: d.name, type: d.type, storePath: d.storePath };
+  const c: Record<string, string> = { name: d.name, type: d.type, url: d.url, branch: d.branch };
+  if (d.subdir.trim() !== "") c.subdir = d.subdir.trim();
+  return c;
 }
 
 type PanelTab = "general" | "obsidian" | "core" | "plugins" | "advanced" | "sources";
@@ -77,7 +79,7 @@ const SECTION_TAB: Record<"obsidian" | "core" | "plugins", string> = {
 
 export class ConfigSyncSettingTab extends PluginSettingTab {
   private groups: SyncGroup[] = [];
-  private sources: SourceDraft[] = [];
+  private sources: RemoteDraft[] = [];
   private groupsReadError: string | null = null;
   private loaded = false;
   private renderGen = 0;
@@ -128,7 +130,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         this.groupsReadError = (e as Error).message;
       }
       if (gen !== this.renderGen) return;
-      this.sources = this.host.settings.externalSources.map(toDraft);
+      this.sources = this.host.settings.remotes.map(toDraft);
       this.loaded = true;
     }
     this.renderSearchBox(containerEl);
@@ -173,7 +175,6 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private async renderActiveTab(containerEl: HTMLElement, gen: number): Promise<void> {
     switch (this.activeTab) {
       case "general":
-        this.renderTransportStatus(containerEl);
         this.renderPkmMode(containerEl);
         await this.renderDataFolder(containerEl, gen);
         this.renderRibbonToggles(containerEl);
@@ -299,19 +300,6 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     this.renderGroupsError(containerEl);
   }
 
-  private renderTransportStatus(containerEl: HTMLElement): void {
-    const remotes = this.host.settings.externalSources;
-    const s = new Setting(containerEl).setName("Store transport");
-    if (remotes.length === 0) {
-      s.setDesc(
-        "Store syncs via your note-sync tool (remotely-save / Obsidian Sync / …). Add a remote under Remotes for git or cross-vault sync."
-      );
-    } else {
-      const list = remotes.map((r) => `${r.name} (${r.type})`).join(", ");
-      s.setDesc(`Remotes: ${list}. Use Pull / Push to sync the store.`);
-    }
-  }
-
   private renderPkmMode(containerEl: HTMLElement): void {
     const detected = this.host.detectedMode();
     new Setting(containerEl)
@@ -338,7 +326,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Data folder")
       .setDesc(
-        `Where synced settings are stored inside your vault, so your note-sync app (e.g. remotely-save) carries them to your other devices. Leave empty to use the recommended location (currently: ${resolved}).`
+        `Where your synced settings live inside this vault. Your regular vault sync (e.g. remotely-save) carries this folder to your other devices. Leave empty for the recommended location (currently: ${resolved}).`
       )
       .addText((t) => {
         t.setPlaceholder(resolved);
@@ -437,17 +425,18 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       for (const d of discovered) this.renderDiscoveredRow(discEl, d);
     }
 
-    const customHead = new Setting(containerEl)
+    new Setting(containerEl)
       .setName("Custom rules")
       .setHeading()
       .setDesc("Your own rules for anything not listed elsewhere — vault-root files, extra folders, or per-key credential protection (sanitize).");
-    customHead.addExtraButton((b) => b.setIcon("plus").setTooltip("Add rule").onClick(() => {
+    const customEl = containerEl.createDiv();
+    for (const group of custom) this.renderRuleCard(customEl, group, false);
+    const addRule = containerEl.createEl("button", { cls: "config-sync-add-row", text: "+ Add rule" });
+    addRule.addEventListener("click", () => {
       this.groups.push({ name: "", path: "", type: "file", devices: "all" });
       this.expanded.add("");
       this.refresh();
-    }));
-    const customEl = containerEl.createDiv();
-    for (const group of custom) this.renderRuleCard(customEl, group, false);
+    });
   }
 
   private renderDiscoveredRow(listEl: HTMLElement, d: { name: string; path: string }): void {
@@ -537,13 +526,15 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     if (isOpen) this.renderRuleForm(listEl, group, managed ? "managed" : "custom");
   }
 
+  private formField(parent: HTMLElement, label: string): HTMLElement {
+    const f = parent.createDiv();
+    f.createEl("label", { cls: "config-sync-form-label", text: label });
+    return f;
+  }
+
   private renderRuleForm(listEl: HTMLElement, group: SyncGroup, mode: "managed" | "custom" | "discovered"): void {
     const panel = listEl.createDiv({ cls: "config-sync-expand" });
-    const field = (parent: HTMLElement, label: string): HTMLElement => {
-      const f = parent.createDiv();
-      f.createEl("label", { cls: "config-sync-form-label", text: label });
-      return f;
-    };
+    const field = this.formField.bind(this);
 
     if (mode !== "discovered") {
       const line1 = panel.createDiv({ cls: "config-sync-form-line1" + (mode === "custom" ? " has-name" : "") });
@@ -621,76 +612,131 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   }
 
   private renderSources(containerEl: HTMLElement): void {
-    const sourcesHead = new Setting(containerEl)
+    new Setting(containerEl)
       .setName("Remotes")
       .setHeading()
-      .setDesc(
-        "Places you Pull the store from and Push it to — another vault (local path) or a git repo. note-sync handles your own devices without a remote."
-      );
-    sourcesHead.addExtraButton((b) => b.setIcon("plus").setTooltip("Add remote").onClick(() => {
-      this.sources.push({ name: "", type: "local-path", path: "", remote: "", branch: "", root: "" });
-      this.refresh();
-    }));
+      .setDesc("Sync your settings with another vault or a git repository. Your own devices don't need a remote — your regular vault sync already carries the settings.");
     const listEl = containerEl.createDiv({ cls: "config-sync-sources" });
-    this.sources.forEach((source, index) => this.renderSourceRow(listEl, source, index));
+    this.sources.forEach((draft, index) => this.renderRemoteRow(listEl, draft, index));
     this.sourcesErrorEl = containerEl.createEl("p", { cls: "mod-warning" });
     this.sourcesErrorEl.setText(this.sourcesErrorMsg);
+    const addBtn = containerEl.createEl("button", { cls: "config-sync-add-row", text: "+ Add remote" });
+    addBtn.addEventListener("click", () => {
+      this.sources.push({ name: "", type: "vault", storePath: "", url: "", branch: "", subdir: "" });
+      this.expanded.add("remote:");
+      this.refresh();
+    });
   }
 
-  private renderSourceRow(listEl: HTMLElement, source: SourceDraft, index: number): void {
-    const row = new Setting(listEl);
-    row.addText((t) =>
-      t.setPlaceholder("name").setValue(source.name).onChange((v) => {
-        source.name = v.trim();
-        void this.saveSources();
-      })
-    );
-    row.addDropdown((d) =>
-      d.addOption("local-path", "local-path").addOption("git", "git").setValue(source.type).onChange(async (v) => {
-        source.type = v as SourceDraft["type"];
-        await this.saveSources();
-        this.refresh();
-      })
-    );
-    if (source.type === "local-path") {
-      row.addText((t) =>
-        t.setPlaceholder("/absolute/path/to/source-vault").setValue(source.path).onChange((v) => {
-          source.path = v.trim();
-          void this.saveSources();
-        })
-      );
-    } else {
-      row.addText((t) =>
-        t.setPlaceholder("git remote url").setValue(source.remote).onChange((v) => {
-          source.remote = v.trim();
-          void this.saveSources();
-        })
-      );
-      row.addText((t) =>
-        t.setPlaceholder("branch").setValue(source.branch).onChange((v) => {
-          source.branch = v.trim();
-          void this.saveSources();
-        })
-      );
-    }
-    row.addText((t) =>
-      t.setPlaceholder("root, e.g. 0-Extra/config-sync").setValue(source.root).onChange((v) => {
-        source.root = v.trim();
-        void this.saveSources();
-      })
-    );
-    row.addExtraButton((b) =>
-      b.setIcon("trash").setTooltip("Delete remote").onClick(async () => {
+  private renderRemoteRow(listEl: HTMLElement, draft: RemoteDraft, index: number): void {
+    const key = `remote:${draft.name}`;
+    const isOpen = this.expanded.has(key);
+    const row = listEl.createDiv({ cls: "config-sync-row" + (isOpen ? " is-open" : "") });
+    row.createSpan({ cls: "config-sync-row-chevron", text: isOpen ? "▾" : "▸" });
+    row.createSpan({ cls: "config-sync-rule-name", text: draft.name === "" ? "(unnamed)" : draft.name });
+    row.createSpan({ cls: "config-sync-row-type", text: draft.type });
+    row.createSpan({
+      cls: "config-sync-row-path",
+      text: draft.type === "vault" ? draft.storePath : draft.url === "" ? "" : `${draft.url}#${draft.branch}`,
+    });
+    row.createDiv({ cls: "config-sync-rule-spacer" });
+    new ExtraButtonComponent(row)
+      .setIcon("trash")
+      .setTooltip("Delete remote")
+      .onClick(async () => {
         this.sources.splice(index, 1);
-        await this.saveSources();
+        this.expanded.delete(key);
+        await this.saveRemotes();
         this.refresh();
-      })
-    );
+      });
+    row.addEventListener("click", (e) => {
+      if ((e.target as HTMLElement).closest("button, .clickable-icon, input, select, .checkbox-container") !== null) return;
+      if (isOpen) this.expanded.delete(key);
+      else this.expanded.add(key);
+      this.refresh();
+    });
+    if (isOpen) this.renderRemoteForm(listEl, draft);
   }
 
-  private async saveSources(): Promise<void> {
+  private renderRemoteForm(listEl: HTMLElement, draft: RemoteDraft): void {
+    const panel = listEl.createDiv({ cls: "config-sync-expand" });
+    const field = this.formField.bind(this);
+    const line1 = panel.createDiv({ cls: "config-sync-form-line1" });
+    new DropdownComponent(field(line1, "Type"))
+      .addOption("vault", "Another vault")
+      .addOption("git", "Git repository")
+      .setValue(draft.type)
+      .onChange(async (v) => {
+        draft.type = v as RemoteDraft["type"];
+        await this.saveRemotes();
+        this.refresh();
+      });
+    const nameC = new TextComponent(field(line1, "Name"));
+    nameC.setPlaceholder("name").setValue(draft.name).onChange((v) => {
+      this.expanded.delete(`remote:${draft.name}`);
+      draft.name = v.trim();
+      this.expanded.add(`remote:${draft.name}`);
+      void this.saveRemotes();
+    });
+    nameC.inputEl.addClass("config-sync-rule-name-input");
+
+    if (draft.type === "vault") {
+      const line2 = panel.createDiv({ cls: "config-sync-remote-path" });
+      const pathField = field(line2, "Store path");
+      const pathC = new TextComponent(pathField);
+      pathC.setPlaceholder("/path/to/other-vault/…/config-sync").setValue(draft.storePath).onChange((v) => {
+        draft.storePath = v.trim();
+        void this.saveRemotes();
+      });
+      if (Platform.isDesktop) {
+        new ExtraButtonComponent(line2).setIcon("folder-open").setTooltip("Browse…").onClick(() => void this.browseStorePath(draft));
+      }
+    } else {
+      const line2 = panel.createDiv({ cls: "config-sync-remote-git" });
+      new TextComponent(field(line2, "URL")).setPlaceholder("git@host:me/config.git").setValue(draft.url).onChange((v) => {
+        draft.url = v.trim();
+        void this.saveRemotes();
+      });
+      new TextComponent(field(line2, "Branch")).setPlaceholder("main").setValue(draft.branch).onChange((v) => {
+        draft.branch = v.trim();
+        void this.saveRemotes();
+      });
+      new TextComponent(field(line2, "Folder in repo (optional)")).setPlaceholder("empty = repo root").setValue(draft.subdir).onChange((v) => {
+        draft.subdir = v.trim();
+        void this.saveRemotes();
+      });
+    }
+  }
+
+  private async browseStorePath(draft: RemoteDraft): Promise<void> {
     try {
-      this.host.settings.externalSources = validateExternalSources(this.sources.map(toCandidate));
+      const { pickFolder } = await import("../external/pickFolder");
+      const picked = await pickFolder();
+      if (picked === null) return;
+      const { findStoreDirs } = await import("../external/localPath");
+      const dirs = await findStoreDirs(picked);
+      const apply = (p: string): void => {
+        draft.storePath = p;
+        void this.saveRemotes();
+        this.refresh();
+      };
+      const first = dirs[0];
+      if (dirs.length === 1 && first !== undefined) {
+        apply(first);
+      } else if (dirs.length === 0) {
+        apply(picked);
+        new Notice("No store found here yet — Pull needs the other vault to Capture first; Push will initialize a store at this path.");
+      } else {
+        new FolderSelectModal(this.app, dirs, apply).open();
+      }
+    } catch (e) {
+      new Notice(`Config Sync: ${(e as Error).message}`);
+    }
+  }
+
+  private async saveRemotes(): Promise<void> {
+    try {
+      this.host.settings.remotes = validateRemotes(this.sources.map(toCandidate));
       await this.host.saveSettings();
       this.sourcesErrorMsg = "";
     } catch (e) {
