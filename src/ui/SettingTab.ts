@@ -392,18 +392,12 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       .setName("Ribbon buttons")
       .setDesc("The Config Sync ribbon icon always opens a menu of available actions. Optionally also show individual ribbon icons.")
       .setHeading();
-    const defs: { key: RibbonKey; label: string; transport: boolean }[] = [
-      { key: "capture", label: "Capture", transport: false },
-      { key: "apply", label: "Apply", transport: false },
-      { key: "revert", label: "Revert last apply", transport: false },
-      { key: "pull", label: "Pull", transport: true },
-      { key: "push", label: "Push", transport: true },
+    const defs: { key: RibbonKey; label: string }[] = [
+      { key: "sync", label: "Sync" },
+      { key: "revert", label: "Revert last apply" },
     ];
     for (const d of defs) {
       const s = new Setting(containerEl).setName(d.label);
-      if (d.transport && !this.host.transportAvailable()) {
-        s.setDesc("Shown on desktop once a remote is configured.");
-      }
       s.addToggle((t) =>
         t.setValue(this.host.settings.ribbonButtons[d.key]).onChange(async (v) => {
           this.host.settings.ribbonButtons[d.key] = v;

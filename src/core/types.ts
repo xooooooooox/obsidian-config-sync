@@ -44,5 +44,5 @@ export type Remote =
   | { name: string; type: "vault"; storePath: string } // storePath: absolute path of the store directory; leading ~ allowed
   | { name: string; type: "git"; url: string; branch: string; subdir?: string }; // subdir: store folder inside the repo; absent = repo root
 
-export type RibbonKey = "capture" | "apply" | "revert" | "pull" | "push";
+export type RibbonKey = "sync" | "revert";
 export type RibbonButtons = Record<RibbonKey, boolean>;
