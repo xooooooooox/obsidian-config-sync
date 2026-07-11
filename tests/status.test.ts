@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CoreContext, capture, loadManifest, groupsForDevice, ExternalStoreReader } from "../src/core/ConfigSyncCore";
-import { statusForGroups, checkRemote } from "../src/core/status";
+import { statusForGroups, checkRemote, diffRemote } from "../src/core/status";
 import { MemFS, FakePlugins } from "./memfs";
 
 const MANIFEST = JSON.stringify({
@@ -112,6 +112,42 @@ function fakeReader(files: Record<string, string>): ExternalStoreReader {
     },
   };
 }
+
+describe("diffRemote", () => {
+  it("diffRemote reports per-item differences against the local store", async () => {
+    const { io, ctx } = await seededAndCaptured();
+    const remote: Record<string, string> = {
+      "config-sync.json": await io.read("cs/config-sync.json"),
+      "store.lock.json": await io.read("cs/store.lock.json"),
+      "store/configdir/hotkeys.json": '{"a":1}', // same as local
+      "store/configdir/snippets/one.css": "REMOTE", // differs
+      "store/configdir/snippets/extra.css": "x", // remote-only
+    };
+    const entries = await diffRemote(ctx, fakeReader(remote));
+    const snip = entries.find((e) => e.group === "snippets");
+    expect(snip?.changes.updated).toEqual(["one.css"]);
+    expect(snip?.changes.added).toEqual(["extra.css"]);
+    expect(entries.find((e) => e.group === "hotkeys")).toBeUndefined();
+  });
+
+  it("omits the metadata entry when config-sync.json and store.lock.json match, includes it when they differ", async () => {
+    const { io, ctx } = await seededAndCaptured();
+    const sameRemote: Record<string, string> = {
+      "config-sync.json": await io.read("cs/config-sync.json"),
+      "store.lock.json": await io.read("cs/store.lock.json"),
+      "store/configdir/hotkeys.json": '{"a":1}',
+      "store/configdir/snippets/one.css": "one",
+      "store/configdir/plugins/demo/data.json": await io.read("cs/store/configdir/plugins/demo/data.json"),
+    };
+    const sameEntries = await diffRemote(ctx, fakeReader(sameRemote));
+    expect(sameEntries.find((e) => e.group === "")).toBeUndefined();
+
+    const diffRemoteFiles: Record<string, string> = { ...sameRemote, "config-sync.json": '{"version":1,"groups":[]}' };
+    const diffEntries = await diffRemote(ctx, fakeReader(diffRemoteFiles));
+    const meta = diffEntries.find((e) => e.group === "");
+    expect(meta?.changes.updated).toEqual(["config-sync.json"]);
+  });
+});
 
 describe("checkRemote", () => {
   const localLock = { capturedAt: "2026-07-08T00:00:00.000Z", groups: {} };

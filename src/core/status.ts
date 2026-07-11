@@ -1,4 +1,4 @@
-import { CoreContext, ExternalStoreReader, loadLock, parseJsonOrThrow, storeDir } from "./ConfigSyncCore";
+import { CoreContext, ExternalStoreReader, groupForStoreRel, loadLock, loadManifest, parseJsonOrThrow, storeDir } from "./ConfigSyncCore";
 import { isJunkPath, listFilesRecursive } from "./io";
 import { basename, groupRealPath, groupStorePath, relativeTo } from "./pathing";
 import { sanitizeJson } from "./sanitize";
@@ -124,4 +124,41 @@ export async function checkRemote(localLock: StoreLock | null, reader: ExternalS
   if (Number.isNaN(r) || Number.isNaN(l)) return { state: "unknown", remoteCapturedAt: remote.capturedAt };
   const state: RemoteState = r > l ? "remote-newer" : r < l ? "remote-older" : "same";
   return { state, remoteCapturedAt: remote.capturedAt };
+}
+
+export interface RemoteDiffEntry {
+  group: string;
+  changes: FileChanges;
+}
+
+export async function diffRemote(ctx: CoreContext, reader: ExternalStoreReader): Promise<RemoteDiffEntry[]> {
+  const manifest = await loadManifest(ctx);
+  const remoteFiles = await reader.listFiles();
+  const localFiles = (await ctx.io.exists(ctx.rootPath)) ? await listFilesRecursive(ctx.io, ctx.rootPath) : [];
+  const localRels = new Set(localFiles.map((f) => f.slice(ctx.rootPath.length + 1)));
+  const byName = new Map<string, RemoteDiffEntry>();
+  const entry = (name: string): RemoteDiffEntry => {
+    let e = byName.get(name);
+    if (e === undefined) {
+      e = { group: name, changes: { added: [], updated: [], deleted: [] } };
+      byName.set(name, e);
+    }
+    return e;
+  };
+  for (const rel of remoteFiles) {
+    const { name, itemRel } = groupForStoreRel(manifest.groups, rel);
+    if (!localRels.has(rel)) {
+      entry(name).changes.added.push(itemRel);
+    } else if ((await reader.readFile(rel)) !== (await ctx.io.read(`${ctx.rootPath}/${rel}`))) {
+      entry(name).changes.updated.push(itemRel);
+    }
+  }
+  const remoteSet = new Set(remoteFiles);
+  for (const rel of localRels) {
+    if (!remoteSet.has(rel)) {
+      const { name, itemRel } = groupForStoreRel(manifest.groups, rel);
+      entry(name).changes.deleted.push(itemRel);
+    }
+  }
+  return [...byName.values()].filter((e) => hasChanges(e.changes));
 }

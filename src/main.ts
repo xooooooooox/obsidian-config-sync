@@ -308,8 +308,8 @@ export default class ConfigSyncPlugin extends Plugin {
     try {
       const ctx = await this.coreContext();
       const reader = await this.createReader(remote);
-      const result = await importExternal(ctx, reader);
-      new ReportModal(this.app, `Pulled from ${remote.name}`, [{ ...result, group: "" }]).open();
+      const results = await importExternal(ctx, reader);
+      new ReportModal(this.app, `Pulled from ${remote.name}`, results).open();
     } catch (e) {
       new Notice(`Config Sync pull failed: ${(e as Error).message}`, 10000);
     }
@@ -335,8 +335,8 @@ export default class ConfigSyncPlugin extends Plugin {
     try {
       const ctx = await this.coreContext();
       const writer = await this.createWriter(remote);
-      const result = await pushExternal(ctx, writer);
-      new ReportModal(this.app, `Pushed to ${remote.name}`, [{ ...result, group: "" }]).open();
+      const results = await pushExternal(ctx, writer);
+      new ReportModal(this.app, `Pushed to ${remote.name}`, results).open();
     } catch (e) {
       new Notice(`Config Sync push failed: ${(e as Error).message}`, 10000);
     }

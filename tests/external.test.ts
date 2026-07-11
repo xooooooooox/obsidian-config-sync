@@ -106,6 +106,7 @@ describe("createLocalPathWriter", () => {
     const writer = createLocalPathWriter(storeDir);
     await writer.writeFile("config-sync.json", '{"version":1,"groups":[]}');
     await writer.writeFile("store/configdir/hotkeys.json", '{"a":7}');
+    expect(await writer.readFile("store/configdir/hotkeys.json")).toBe('{"a":7}');
     await writer.finalize();
     const reader = createLocalPathReader(storeDir);
     expect(await reader.listFiles()).toEqual(["config-sync.json", "store/configdir/hotkeys.json"]);
@@ -121,6 +122,7 @@ describe("createGitWriter", () => {
     const writer = await createGitWriter(bareRemote, "main", "cfg");
     await writer.writeFile("config-sync.json", '{"version":1,"groups":[]}');
     await writer.writeFile("store/configdir/hotkeys.json", '{"a":42}');
+    expect(await writer.readFile("store/configdir/hotkeys.json")).toBe('{"a":42}');
     await writer.finalize();
     const reader = await createGitReader(consumerRepo, bareRemote, "main", "cfg");
     expect(await reader.listFiles()).toContain("store/configdir/hotkeys.json");

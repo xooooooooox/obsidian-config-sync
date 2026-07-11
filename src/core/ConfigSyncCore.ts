@@ -1,5 +1,5 @@
 import { FileIO, ensureParentDir, isJunkPath, listFilesRecursive, pruneEmptyDirsUnder } from "./io";
-import { GroupResult, StoreLock, SyncGroup, SyncManifest } from "./types";
+import { GroupResult, hasChanges, StoreLock, SyncGroup, SyncManifest } from "./types";
 import { basename, groupRealPath, groupStorePath, relativeTo } from "./pathing";
 import { parseStoreLock, parseSyncManifest, validateSyncManifest } from "./manifest";
 import { sanitizeJson, mergePreservingSanitized } from "./sanitize";
@@ -66,6 +66,18 @@ export function parseJsonOrThrow(raw: string, groupName: string, path: string): 
   } catch (e) {
     throw new Error(`Group "${groupName}": ${path} is not valid JSON: ${(e as Error).message}`);
   }
+}
+
+export function groupForStoreRel(groups: SyncGroup[], rel: string): { name: string; itemRel: string } {
+  if (rel.startsWith("store/")) {
+    const inner = rel.slice("store/".length);
+    for (const g of groups) {
+      const sp = groupStorePath(g.path);
+      if (g.type === "file" && inner === sp) return { name: g.name, itemRel: basename(sp) };
+      if (g.type === "dir" && inner.startsWith(sp + "/")) return { name: g.name, itemRel: inner.slice(sp.length + 1) };
+    }
+  }
+  return { name: "", itemRel: rel }; // store metadata / unmatched
 }
 
 function emptyResult(group: string, needsAppReload: boolean): GroupResult {
@@ -365,39 +377,56 @@ export interface ExternalStoreReader {
   readFile(relPath: string): Promise<string>;
 }
 
-export async function importExternal(ctx: CoreContext, reader: ExternalStoreReader): Promise<GroupResult> {
+export async function importExternal(ctx: CoreContext, reader: ExternalStoreReader): Promise<GroupResult[]> {
   const files = await reader.listFiles();
   if (!files.includes("config-sync.json")) {
     throw new Error(`External source has no config-sync.json at its root — check the source "root" setting.`);
   }
-  parseSyncManifest(await reader.readFile("config-sync.json")); // fail fast on invalid upstream data
-  const result = emptyResult("import", false);
+  const incoming = parseSyncManifest(await reader.readFile("config-sync.json")); // fail fast on invalid upstream data
+  const byName = new Map<string, GroupResult>();
+  const resultFor = (name: string): GroupResult => {
+    let r = byName.get(name);
+    if (r === undefined) {
+      r = emptyResult(name, false);
+      byName.set(name, r);
+    }
+    return r;
+  };
   for (const rel of files) {
     const target = `${ctx.rootPath}/${rel}`;
-    await ensureParentDir(ctx.io, target);
-    await ctx.io.write(target, await reader.readFile(rel));
-    result.filesWritten.push(target);
+    const { name, itemRel } = groupForStoreRel(incoming.groups, rel);
+    await writeClassified(ctx, target, await reader.readFile(rel), itemRel, resultFor(name));
   }
   const wanted = new Set(files.map((f) => `${ctx.rootPath}/${f}`));
   const localFiles = await listFilesRecursive(ctx.io, ctx.rootPath);
   for (const f of localFiles) {
     if (!wanted.has(f)) {
+      const rel = relativeTo(ctx.rootPath, f);
+      const { name, itemRel } = groupForStoreRel(incoming.groups, rel);
       await ctx.io.remove(f);
+      const result = resultFor(name);
       result.filesDeleted.push(f);
+      result.changes.deleted.push(itemRel);
     }
   }
   await pruneEmptyDirsUnder(ctx.io, ctx.rootPath);
-  return result;
+  const isAffected = (r: GroupResult): boolean => hasChanges(r.changes);
+  const named = incoming.groups
+    .map((g) => byName.get(g.name))
+    .filter((r): r is GroupResult => r !== undefined && isAffected(r));
+  const meta = byName.get("");
+  return meta !== undefined && isAffected(meta) ? [...named, meta] : named;
 }
 
 export interface ExternalStoreWriter {
   listFiles(): Promise<string[]>; // existing remote files, relative to <root>/, "/"-separated
+  readFile(relPath: string): Promise<string>;
   writeFile(relPath: string, content: string): Promise<void>;
   deleteFile(relPath: string): Promise<void>;
   finalize(): Promise<void>; // git: add/commit/push; local-path: no-op
 }
 
-export async function pushExternal(ctx: CoreContext, writer: ExternalStoreWriter): Promise<GroupResult> {
+export async function pushExternal(ctx: CoreContext, writer: ExternalStoreWriter): Promise<GroupResult[]> {
   const localAbs = await listFilesRecursive(ctx.io, ctx.rootPath);
   const rels = localAbs.map((f) => f.slice(ctx.rootPath.length + 1)).sort();
   if (!rels.includes("config-sync.json")) {
@@ -405,20 +434,41 @@ export async function pushExternal(ctx: CoreContext, writer: ExternalStoreWriter
       `Local store has no config-sync.json at ${ctx.rootPath} — capture from this device (or pull) before pushing.`
     );
   }
-  const result = emptyResult("push", false);
+  const manifest = await loadManifest(ctx);
+  const byName = new Map<string, GroupResult>();
+  const resultFor = (name: string): GroupResult => {
+    let r = byName.get(name);
+    if (r === undefined) {
+      r = emptyResult(name, false);
+      byName.set(name, r);
+    }
+    return r;
+  };
+  const remoteFiles = new Set(await writer.listFiles());
   for (const rel of rels) {
-    await writer.writeFile(rel, await ctx.io.read(`${ctx.rootPath}/${rel}`));
+    const { name, itemRel } = groupForStoreRel(manifest.groups, rel);
+    const content = await ctx.io.read(`${ctx.rootPath}/${rel}`);
+    const existed = remoteFiles.has(rel);
+    if (existed && (await writer.readFile(rel)) === content) continue; // unchanged: skip the write
+    await writer.writeFile(rel, content);
+    const result = resultFor(name);
     result.filesWritten.push(rel);
+    (existed ? result.changes.updated : result.changes.added).push(itemRel);
   }
   const wanted = new Set(rels);
-  for (const rel of await writer.listFiles()) {
+  for (const rel of remoteFiles) {
     if (!wanted.has(rel)) {
+      const { name, itemRel } = groupForStoreRel(manifest.groups, rel);
       await writer.deleteFile(rel);
+      const result = resultFor(name);
       result.filesDeleted.push(rel);
+      result.changes.deleted.push(itemRel);
     }
   }
   await writer.finalize();
-  return result;
+  const named = manifest.groups.map((g) => byName.get(g.name)).filter((r): r is GroupResult => r !== undefined);
+  const meta = byName.get("");
+  return meta !== undefined ? [...named, meta] : named;
 }
 
 export const SCHEMA_URL =

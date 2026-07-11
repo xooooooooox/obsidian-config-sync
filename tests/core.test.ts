@@ -381,19 +381,44 @@ function fakeReader(files: Record<string, string>): ExternalStoreReader {
 }
 
 describe("importExternal", () => {
+  it("maps pulled changes to items and skips identical files", async () => {
+    const { io, ctx } = setup();
+    io.seed({ "cs/config-sync.json": MANIFEST, "cs/store/configdir/hotkeys.json": '{"a":1}' });
+    const remote: Record<string, string> = {
+      "config-sync.json": MANIFEST,
+      "store/configdir/hotkeys.json": '{"a":2}',
+      "store/configdir/snippets/one.css": "one",
+    };
+    const results = await importExternal(ctx, fakeReader(remote));
+    const byGroup = Object.fromEntries(results.map((r) => [r.group, r.changes]));
+    expect(byGroup["hotkeys"]).toEqual({ added: [], updated: ["hotkeys.json"], deleted: [] });
+    expect(byGroup["snippets"]).toEqual({ added: ["one.css"], updated: [], deleted: [] });
+    // local cs/config-sync.json seeded identical to the remote copy → metadata is unchanged → "" entry absent
+    expect(byGroup[""]).toBeUndefined();
+  });
+
+  it("reports a '' metadata result when config-sync.json itself changes", async () => {
+    const { io, ctx } = setup();
+    io.seed({ "cs/config-sync.json": '{"version":1,"groups":[]}' });
+    const results = await importExternal(ctx, fakeReader({ "config-sync.json": MANIFEST }));
+    const byGroup = Object.fromEntries(results.map((r) => [r.group, r.changes]));
+    expect(byGroup[""]).toEqual({ added: [], updated: ["config-sync.json"], deleted: [] });
+  });
+
   it("overwrites the local root with deletion propagation", async () => {
     const { io, ctx } = setup();
     io.seed({ "cs/config-sync.json": '{"version":1,"groups":[]}', "cs/store/old.css": "old" });
-    const result = await importExternal(ctx, fakeReader({
+    const results = await importExternal(ctx, fakeReader({
       "config-sync.json": MANIFEST,
       "store.lock.json": '{"capturedAt":"t","groups":{}}',
       "store/configdir/hotkeys.json": '{"a":3}',
     }));
-    expect(result.status).toBe("ok");
+    expect(results.every((r) => r.status === "ok")).toBe(true);
     expect(await io.read("cs/store/configdir/hotkeys.json")).toBe('{"a":3}');
     expect(await io.read("cs/config-sync.json")).toBe(MANIFEST);
     expect(await io.exists("cs/store/old.css")).toBe(false);
-    expect(result.filesDeleted).toEqual(["cs/store/old.css"]);
+    const meta = results.find((r) => r.group === "");
+    expect(meta?.filesDeleted).toEqual(["cs/store/old.css"]);
   });
 
   it("rejects sources without a config-sync.json", async () => {
@@ -411,15 +436,23 @@ function fakeWriter(initial: Record<string, string>): {
   writer: ExternalStoreWriter;
   files: Record<string, string>;
   finalized: number;
+  writeLog: string[];
 } {
   const files: Record<string, string> = { ...initial };
   const state = { finalized: 0 };
+  const writeLog: string[] = [];
   const writer: ExternalStoreWriter = {
     async listFiles() {
       return Object.keys(files).sort();
     },
+    async readFile(rel) {
+      const content = files[rel];
+      if (content === undefined) throw new Error(`missing ${rel}`);
+      return content;
+    },
     async writeFile(rel, content) {
       files[rel] = content;
+      writeLog.push(rel);
     },
     async deleteFile(rel) {
       delete files[rel];
@@ -431,6 +464,7 @@ function fakeWriter(initial: Record<string, string>): {
   return {
     writer,
     files,
+    writeLog,
     get finalized() {
       return state.finalized;
     },
@@ -446,13 +480,33 @@ describe("pushExternal", () => {
       "cs/store/configdir/hotkeys.json": '{"a":9}',
     });
     const fw = fakeWriter({ "config-sync.json": "OLD", "store/gone.css": "stale" });
-    const result = await pushExternal(ctx, fw.writer);
-    expect(result.status).toBe("ok");
+    const results = await pushExternal(ctx, fw.writer);
+    expect(results.every((r) => r.status === "ok")).toBe(true);
     expect(fw.files["config-sync.json"]).toBe('{"version":1,"groups":[]}');
     expect(fw.files["store/configdir/hotkeys.json"]).toBe('{"a":9}');
     expect(fw.files["store/gone.css"]).toBeUndefined();
-    expect(result.filesDeleted).toEqual(["store/gone.css"]);
+    const meta = results.find((r) => r.group === "");
+    expect(meta?.filesDeleted).toEqual(["store/gone.css"]);
     expect(fw.finalized).toBe(1);
+  });
+
+  it("skips writing identical files and reports per-item changes", async () => {
+    const { io, ctx } = setup();
+    io.seed({
+      "cs/config-sync.json": MANIFEST,
+      "cs/store/configdir/hotkeys.json": '{"a":1}',
+      "cs/store/configdir/snippets/one.css": "one",
+    });
+    const fw = fakeWriter({
+      "config-sync.json": MANIFEST,
+      "store/configdir/hotkeys.json": '{"a":1}', // identical to local -> must not be rewritten
+    });
+    const results = await pushExternal(ctx, fw.writer);
+    expect(fw.writeLog).not.toContain("store/configdir/hotkeys.json");
+    expect(fw.writeLog).toContain("store/configdir/snippets/one.css");
+    const byGroup = Object.fromEntries(results.map((r) => [r.group, r.changes]));
+    expect(byGroup["hotkeys"]).toBeUndefined(); // unaffected -> no result
+    expect(byGroup["snippets"]).toEqual({ added: ["one.css"], updated: [], deleted: [] });
   });
 
   it("refuses to push when the local store has no config-sync.json", async () => {
