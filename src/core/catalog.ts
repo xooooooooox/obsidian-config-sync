@@ -28,7 +28,7 @@ export const WORKSPACE_CAUTION =
   "Window layout and open tabs — highly device-specific; syncing will make devices overwrite each other.";
 
 export const OPTION_LABELS: Record<string, { label: string; description: string; type: "file" | "dir" }> = {
-  "app.json": { label: "Editor & general", description: "Editor and general options.", type: "file" },
+  "app.json": { label: "App settings", description: "Editor, Files & links and other general options (app.json).", type: "file" },
   "appearance.json": { label: "Appearance", description: "Theme choice, fonts and interface appearance.", type: "file" },
   "hotkeys.json": { label: "Hotkeys", description: "Custom keyboard shortcuts.", type: "file" },
   themes: { label: "Themes", description: "Installed theme files.", type: "dir" },

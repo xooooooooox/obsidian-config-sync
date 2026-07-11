@@ -169,10 +169,6 @@ export default class ConfigSyncPlugin extends Plugin {
     el.setAttribute("aria-label", parts.length > 0 ? `Config Sync — ${parts.join(", ")}` : "Config Sync");
   }
 
-  transportAvailable(): boolean {
-    return Platform.isDesktop && this.settings.remotes.length > 0;
-  }
-
   private async openSyncMenu(evt: MouseEvent): Promise<void> {
     if (this.settings.statusInMenu) await this.refreshLocalStatus(); // never throws
     const s = this.localStatuses ?? [];

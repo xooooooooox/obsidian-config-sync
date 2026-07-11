@@ -29,7 +29,6 @@ export interface SettingsHost extends Plugin {
   };
   saveSettings(): Promise<void>;
   refreshRibbons(): void;
-  transportAvailable(): boolean;
   readGroupsFile(): Promise<SyncGroup[]>;
   writeGroupsFile(groups: SyncGroup[]): Promise<void>;
   resolvedRootPath(): Promise<string>;
@@ -360,7 +359,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private renderStatusToggles(containerEl: HTMLElement): void {
     new Setting(containerEl)
       .setName("Sync menu shows change counts")
-      .setDesc("Counts changed groups when the menu opens. Turn off if opening the menu feels slow.")
+      .setDesc("Counts changed items when the menu opens. Turn off if opening the menu feels slow.")
       .addToggle((t) =>
         t.setValue(this.host.settings.statusInMenu).onChange(async (v) => {
           this.host.settings.statusInMenu = v;

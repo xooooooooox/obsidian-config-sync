@@ -135,7 +135,7 @@ describe("groupForItem / toggleSection", () => {
 
   it("toggleSection adds groups for every tickable item, or removes them all", () => {
     const items: CatalogItem[] = [
-      { name: "app", label: "Editor & general", description: "d", path: "{configDir}/app.json", type: "file", exists: true, disabledReason: null, cautionReason: null },
+      { name: "app", label: "App settings", description: "d", path: "{configDir}/app.json", type: "file", exists: true, disabledReason: null, cautionReason: null },
       { name: "appearance", label: "Appearance", description: "d", path: "{configDir}/appearance.json", type: "file", exists: true, disabledReason: null, cautionReason: null },
     ];
     const on = toggleSection([], items, true);
@@ -209,7 +209,7 @@ describe("defaultGroupForName", () => {
       path: "{configDir}/app.json",
       type: "file",
       devices: "all",
-      description: "Editor and general options.",
+      description: "Editor, Files & links and other general options (app.json).",
     });
     expect(defaultGroupForName("snippets")).toEqual({
       name: "snippets",
