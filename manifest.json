@@ -1,7 +1,7 @@
 {
 	"id": "config-sync",
 	"name": "Config Sync",
-	"version": "0.11.0",
+	"version": "0.12.0",
 	"minAppVersion": "1.5.0",
 	"description": "Selective, on-demand distribution of vault configuration (snippets, hotkeys, plugin settings) across devices and vaults.",
 	"author": "xooooooooox",
