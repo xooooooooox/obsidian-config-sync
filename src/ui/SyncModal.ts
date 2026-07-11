@@ -67,6 +67,7 @@ export class SyncModal extends Modal {
     // own close handler never fires. Esc and the × button close through separate paths, untouched.
     const bg = this.containerEl.children[0] as HTMLElement;
     bg.addEventListener("click", (e) => e.stopImmediatePropagation(), { capture: true });
+    this.titleEl.addClass("config-sync-panel-title");
     this.titleEl.setText("Config Sync");
     void this.reload();
   }
@@ -114,16 +115,20 @@ export class SyncModal extends Modal {
     this.titleEl.empty();
     this.titleEl.setText("Config Sync");
     const pills = this.titleEl.createSpan({ cls: "config-sync-report-pills" });
-    pills.createSpan({
-      cls: "config-sync-pill is-up",
-      text: `↑ ${up}`,
-      attr: { "aria-label": `${up} item${up === 1 ? "" : "s"} changed on this device` },
-    });
-    pills.createSpan({
-      cls: "config-sync-pill is-down",
-      text: `↓ ${down}`,
-      attr: { "aria-label": `${down} item${down === 1 ? "" : "s"}: store is newer` },
-    });
+    if (up > 0) {
+      pills.createSpan({
+        cls: "config-sync-pill is-up",
+        text: `↑ ${up}`,
+        attr: { "aria-label": `${up} item${up === 1 ? "" : "s"} changed on this device` },
+      });
+    }
+    if (down > 0) {
+      pills.createSpan({
+        cls: "config-sync-pill is-down",
+        text: `↓ ${down}`,
+        attr: { "aria-label": `${down} item${down === 1 ? "" : "s"}: store is newer` },
+      });
+    }
     pills.createSpan({
       cls: "config-sync-pill is-ok",
       text: `✓ ${ok}`,
@@ -139,11 +144,12 @@ export class SyncModal extends Modal {
       const inCat = this.rows().filter((r) => categoryForGroup(r.group.name) === cat);
       if (inCat.length === 0) continue;
       const sect = macro.createDiv({ cls: "config-sync-sect" });
+      sect.createSpan({ text: CATEGORY_LABELS[cat] });
+      sect.createDiv({ cls: "config-sync-rule-spacer" });
       const boxCb = sect.createEl("input", {
         type: "checkbox",
         attr: { "aria-label": `Select all ${CATEGORY_LABELS[cat]}` },
       });
-      sect.createSpan({ text: ` ${CATEGORY_LABELS[cat]}` });
       const card = macro.createDiv({ cls: "config-sync-card" });
       for (const r of inCat) this.renderItemRow(card, r);
       this.wireSectionCheckbox(boxCb, inCat);
@@ -376,26 +382,28 @@ export class SyncModal extends Modal {
       for (const e of inCat) this.renderRemoteDiffEntry(detail, e);
     }
 
+    const state = check?.state ?? "unknown";
+    const pullAligned = state === "remote-newer" || state === "same" || state === "unknown" || state === "no-store";
+    const directionText = pullAligned ? "Pull would bring these changes" : "Push would send these changes";
+
     // "N more items match" line: groups present in this device's list minus the entries that differ
     // (excludes the "" store-metadata pseudo-entry and any remote-only groups from the count).
     const changedNames = new Set(changed.map((e) => e.group));
     const matchNames = this.groups.filter((g) => !changedNames.has(g.name)).map((g) => g.name);
     const matched = matchNames.length;
-    if (matched > 0) {
+    if (entries.length === 0) {
+      detail.createDiv({ cls: "config-sync-unchanged", text: "✓ remote matches the local store" });
+    } else if (matched > 0) {
       const line = detail.createDiv({
         cls: "config-sync-unchanged",
-        text: `✓ ${matched} more item${matched === 1 ? "" : "s"} match ▸`,
+        text: `✓ ${matched} more item${matched === 1 ? "" : "s"} match ▸ · ${directionText}`,
       });
       line.addEventListener("click", () => line.setText(`✓ ${matchNames.join(" · ")}`));
+    } else {
+      detail.createDiv({ cls: "config-sync-remote-summary", text: directionText });
     }
 
-    const state = check?.state ?? "unknown";
-    const pullAligned = state === "remote-newer" || state === "same" || state === "unknown" || state === "no-store";
-    detail.createDiv({
-      cls: "config-sync-remote-summary",
-      text: pullAligned ? "Pull would bring these changes" : "Push would send these changes",
-    });
-    this.renderRemoteButtons(detail, remote, pullAligned);
+    this.renderRemoteButtons(detail, remote, pullAligned, entries.length === 0);
   }
 
   private renderRemoteDiffEntry(detail: HTMLElement, e: RemoteDiffEntry): void {
@@ -407,13 +415,14 @@ export class SyncModal extends Modal {
     if (e.changes.deleted.length > 0) row.createSpan({ cls: "config-sync-chip is-del", text: `−${e.changes.deleted.length}` });
   }
 
-  private renderRemoteButtons(detail: HTMLElement, remote: Remote, pullAligned: boolean): void {
+  private renderRemoteButtons(detail: HTMLElement, remote: Remote, pullAligned: boolean, noChanges: boolean): void {
     const bar = detail.createDiv({ cls: "config-sync-actionbar" });
 
     const pull = new ButtonComponent(bar);
     pull.setButtonText(`↓ Pull from ${remote.name}`);
     pull.buttonEl.addClass("config-sync-remote-btn", "is-pull");
-    if (pullAligned) pull.buttonEl.addClass("is-primary");
+    if (noChanges) pull.buttonEl.addClass("is-dimmed");
+    else if (pullAligned) pull.buttonEl.addClass("is-primary");
     else {
       pull.buttonEl.addClass("is-dimmed");
       pull.buttonEl.setAttribute("aria-label", "Pull would overwrite your newer local store");
@@ -426,7 +435,8 @@ export class SyncModal extends Modal {
     const push = new ButtonComponent(bar);
     push.setButtonText(`↑ Push to ${remote.name}`);
     push.buttonEl.addClass("config-sync-remote-btn", "is-push");
-    if (!pullAligned) push.buttonEl.addClass("is-primary");
+    if (noChanges) push.buttonEl.addClass("is-dimmed");
+    else if (!pullAligned) push.buttonEl.addClass("is-primary");
     else {
       push.buttonEl.addClass("is-dimmed");
       push.buttonEl.setAttribute("aria-label", "Push would overwrite the newer remote");
