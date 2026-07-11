@@ -396,7 +396,7 @@ export class SyncModal extends Modal {
     } else if (matched > 0) {
       const line = detail.createDiv({
         cls: "config-sync-unchanged",
-        text: `✓ ${matched} more item${matched === 1 ? "" : "s"} match ▸ · ${directionText}`,
+        text: `✓ ${matched} more item${matched === 1 ? " matches" : "s match"} ▸ · ${directionText}`,
       });
       line.addEventListener("click", () => line.setText(`✓ ${matchNames.join(" · ")}`));
     } else {
