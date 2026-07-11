@@ -175,13 +175,11 @@ export default class ConfigSyncPlugin extends Plugin {
     const up = s.filter((x) => x.state === "local-changed" || x.state === "differs").length;
     const down = s.filter((x) => x.state === "store-newer").length;
     const menu = new Menu();
-    menu.addItem((i) => {
-      const frag = createFragment();
-      frag.createSpan({ text: "Sync…" });
-      if (this.settings.statusInMenu && up > 0) frag.createSpan({ cls: "config-sync-menu-badge is-up", text: `↑ ${up}` });
-      if (this.settings.statusInMenu && down > 0) frag.createSpan({ cls: "config-sync-menu-badge is-down", text: `↓ ${down}` });
-      i.setTitle(frag).setIcon("refresh-cw").onClick(() => void this.openSyncPanel());
-    });
+    const parts: string[] = [];
+    if (this.settings.statusInMenu && up > 0) parts.push(`↑${up}`);
+    if (this.settings.statusInMenu && down > 0) parts.push(`↓${down}`);
+    const syncTitle = parts.length > 0 ? `Sync… (${parts.join(" ")})` : "Sync…";
+    menu.addItem((i) => i.setTitle(syncTitle).setIcon("refresh-cw").onClick(() => void this.openSyncPanel()));
     menu.addItem((i) => i.setTitle("Revert last apply").setIcon("undo-2").onClick(() => void this.runRevert()));
     menu.showAtMouseEvent(evt);
   }
