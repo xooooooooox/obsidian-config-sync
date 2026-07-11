@@ -185,10 +185,12 @@ export class SyncModal extends Modal {
   private renderItemRow(card: HTMLElement, r: StatusRow): void {
     const { group, status } = r;
     const insync = status.state === "in-sync";
-    const row = card.createDiv({ cls: `config-sync-hub-row${insync ? " is-insync" : ""}` });
+    const row = card.createDiv({
+      cls: `config-sync-hub-row${insync ? " is-insync" : ""}`,
+      attr: { "aria-label": this.host.resolvedPath(group) },
+    });
     const chev = row.createSpan({ cls: "config-sync-row-chevron", text: this.expandedItems.has(group.name) ? "▾" : "▸" });
     row.createSpan({ cls: "config-sync-rule-name", text: group.name });
-    row.createSpan({ cls: "config-sync-row-path", text: this.host.resolvedPath(group) });
     row.createDiv({ cls: "config-sync-rule-spacer" });
 
     const icon = this.stateIcon(status.state);
