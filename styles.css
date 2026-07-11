@@ -237,3 +237,24 @@ body.is-phone .config-sync-remote-git {
   opacity: 0.55;
 }
 
+.config-sync-report-title { display: flex; align-items: center; gap: var(--size-4-2); }
+.config-sync-report-pills { display: flex; gap: var(--size-4-1); margin-left: auto; }
+.config-sync-pill { font-size: var(--font-ui-smaller); border-radius: 999px; padding: 0 var(--size-4-2); }
+.config-sync-pill.is-neutral { background: var(--background-modifier-border); color: var(--text-normal); }
+.config-sync-pill.is-ok { background: rgba(var(--color-green-rgb), 0.15); color: var(--color-green); }
+.config-sync-pill.is-warn { background: none; color: var(--color-orange); margin-left: var(--size-4-1); }
+.config-sync-report-sub { color: var(--text-muted); font-size: var(--font-ui-smaller); margin-bottom: var(--size-4-2); }
+.config-sync-sect { font-size: var(--font-ui-smaller); text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin: var(--size-4-3) 0 var(--size-4-1); }
+.config-sync-card { background: var(--background-secondary); border: 1px solid var(--background-modifier-border); border-radius: var(--radius-m); padding: 0 var(--size-4-3); }
+.config-sync-report-row { display: flex; align-items: center; gap: var(--size-4-2); padding: var(--size-4-2) 0; border-bottom: 1px solid var(--background-modifier-border); cursor: pointer; }
+.config-sync-card > .config-sync-report-row:last-of-type { border-bottom: none; }
+.config-sync-chip { font-size: var(--font-ui-smaller); border-radius: 999px; padding: 0 var(--size-4-2); flex: none; }
+.config-sync-chip.is-add { background: rgba(var(--color-green-rgb), 0.15); color: var(--color-green); }
+.config-sync-chip.is-upd { background: rgba(var(--color-blue-rgb), 0.15); color: var(--color-blue); }
+.config-sync-chip.is-del { background: rgba(var(--color-red-rgb), 0.15); color: var(--color-red); }
+.config-sync-report-files { font-family: var(--font-monospace); font-size: var(--font-ui-smaller); margin: 0 0 var(--size-4-2) var(--size-4-4); }
+.config-sync-report-files .is-add { color: var(--color-green); }
+.config-sync-report-files .is-upd { color: var(--color-blue); }
+.config-sync-report-files .is-del { color: var(--color-red); text-decoration: line-through; }
+.config-sync-unchanged { color: var(--text-muted); font-size: var(--font-ui-smaller); margin-top: var(--size-4-2); cursor: pointer; }
+
