@@ -181,7 +181,7 @@ export class SyncModal extends Modal {
     const row = card.createDiv({ cls: `config-sync-hub-row${insync ? " is-insync" : ""}` });
     const chev = row.createSpan({ cls: "config-sync-row-chevron", text: this.expandedItems.has(group.name) ? "▾" : "▸" });
     row.createSpan({ cls: "config-sync-rule-name", text: group.name });
-    row.createSpan({ cls: "config-sync-rule-path", text: this.host.resolvedPath(group) });
+    row.createSpan({ cls: "config-sync-row-path", text: this.host.resolvedPath(group) });
     row.createDiv({ cls: "config-sync-rule-spacer" });
 
     const icon = this.stateIcon(status.state);
@@ -313,7 +313,7 @@ export class SyncModal extends Modal {
     const icon = this.remoteIcon(check);
     row.createSpan({ cls: `config-sync-state-icon ${icon.cls}`, text: icon.glyph, attr: { "aria-label": icon.tip } });
     row.createDiv({ cls: "config-sync-rule-spacer" });
-    row.createSpan({ cls: "config-sync-rule-path", text: `captured ${isoAge(check?.remoteCapturedAt ?? null)}` });
+    row.createSpan({ cls: "config-sync-row-path", text: `captured ${isoAge(check?.remoteCapturedAt ?? null)}` });
 
     const detail = card.createDiv({ cls: "config-sync-report-files" });
     detail.hidden = !expanded;
