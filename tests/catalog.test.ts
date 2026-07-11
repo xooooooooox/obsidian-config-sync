@@ -266,6 +266,19 @@ describe("listDiscovered", () => {
     io.seed({ ".obs/.DS_Store": "junk", ".obs/notes.txt": "x" });
     expect(await listDiscovered(io, ".obs", [])).toEqual([]);
   });
+
+  it("discovered files exclude workspace-pattern files (offered under Not recommended instead)", async () => {
+    const io = new MemFS();
+    io.seed({
+      ".obs/workspace.json": "{}",                        // workspace pattern → excluded (Not recommended instead)
+      ".obs/workspaces.json": "{}",                        // workspace pattern → excluded (Not recommended instead)
+      ".obs/image-converter-image-alignments.json": "{}", // unclassified → INCLUDED
+    });
+    const found = await listDiscovered(io, ".obs", []);
+    expect(found).toEqual([
+      { name: "image-converter-image-alignments", path: "{configDir}/image-converter-image-alignments.json" },
+    ]);
+  });
 });
 
 describe("section copy (action-oriented)", () => {

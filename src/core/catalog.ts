@@ -149,7 +149,7 @@ export async function listDiscovered(
   const out: { name: string; path: string }[] = [];
   for (const b of [...files].sort()) {
     if (!b.endsWith(".json") || b.startsWith(".")) continue;
-    if (knownOptionFiles.has(b) || HIDDEN_FILES.has(b) || SWITCH_LISTS.has(b) || CORE_FILE_SET.has(b)) continue;
+    if (knownOptionFiles.has(b) || HIDDEN_FILES.has(b) || SWITCH_LISTS.has(b) || CORE_FILE_SET.has(b) || WORKSPACE_RE.test(b)) continue;
     const path = `{configDir}/${b}`;
     if (coveredPaths.has(path)) continue;
     out.push({ name: optionReservedName(b), path });

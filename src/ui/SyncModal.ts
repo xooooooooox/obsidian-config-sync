@@ -1,5 +1,5 @@
 import { App, ButtonComponent, ExtraButtonComponent, Modal } from "obsidian";
-import { GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry } from "../core/status";
+import { bucketCounts, GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry } from "../core/status";
 import { CATEGORY_LABELS, ItemCategory, categoryForGroup } from "../core/catalog";
 import { FileChanges, Remote, SyncGroup, hasChanges } from "../core/types";
 
@@ -109,9 +109,7 @@ export class SyncModal extends Modal {
   }
 
   private renderHeaderPills(): void {
-    const up = this.rows().filter((r) => r.status.state === "local-changed").length;
-    const down = this.rows().filter((r) => r.status.state === "store-newer").length;
-    const ok = this.rows().filter((r) => r.status.state === "in-sync").length;
+    const { up, down, ok } = bucketCounts(this.rows().map((r) => r.status));
     this.titleEl.empty();
     this.titleEl.setText("Config Sync");
     const pills = this.titleEl.createSpan({ cls: "config-sync-report-pills" });
@@ -119,14 +117,14 @@ export class SyncModal extends Modal {
       pills.createSpan({
         cls: "config-sync-pill is-up",
         text: `↑ ${up}`,
-        attr: { "aria-label": `${up} item${up === 1 ? "" : "s"} changed on this device` },
+        attr: { "aria-label": `${up} item${up === 1 ? "" : "s"} to capture` },
       });
     }
     if (down > 0) {
       pills.createSpan({
         cls: "config-sync-pill is-down",
         text: `↓ ${down}`,
-        attr: { "aria-label": `${down} item${down === 1 ? "" : "s"}: store is newer` },
+        attr: { "aria-label": `${down} item${down === 1 ? "" : "s"} to apply` },
       });
     }
     pills.createSpan({
