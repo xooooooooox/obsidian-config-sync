@@ -24,7 +24,8 @@ export interface SettingsHost extends Plugin {
     remotes: Remote[];
     ribbonButtons: Record<RibbonKey, boolean>;
     statusInMenu: boolean;
-    statusInPickers: boolean;
+    remoteAutoCheck: boolean;
+    localPeriodicCheck: boolean;
   };
   saveSettings(): Promise<void>;
   refreshRibbons(): void;
@@ -367,11 +368,20 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         })
       );
     new Setting(containerEl)
-      .setName("Apply picker shows group status")
-      .setDesc("Badges each group and pre-selects the ones the store updated.")
+      .setName("Check remotes automatically")
+      .setDesc("Checks each remote's last capture shortly after startup and every few hours.")
       .addToggle((t) =>
-        t.setValue(this.host.settings.statusInPickers).onChange(async (v) => {
-          this.host.settings.statusInPickers = v;
+        t.setValue(this.host.settings.remoteAutoCheck).onChange(async (v) => {
+          this.host.settings.remoteAutoCheck = v;
+          await this.host.saveSettings();
+        })
+      );
+    new Setting(containerEl)
+      .setName("Periodic local check")
+      .setDesc("Re-scans for local changes every 5 minutes while the window is focused, keeping the ribbon dot fresh.")
+      .addToggle((t) =>
+        t.setValue(this.host.settings.localPeriodicCheck).onChange(async (v) => {
+          this.host.settings.localPeriodicCheck = v;
           await this.host.saveSettings();
         })
       );

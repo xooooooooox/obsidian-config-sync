@@ -258,3 +258,16 @@ body.is-phone .config-sync-remote-git {
 .config-sync-report-files .is-del { color: var(--color-red); text-decoration: line-through; }
 .config-sync-unchanged { color: var(--text-muted); font-size: var(--font-ui-smaller); margin-top: var(--size-4-2); cursor: pointer; }
 
+.config-sync-dot-capture, .config-sync-dot-apply { position: relative; }
+.config-sync-dot-capture::after, .config-sync-dot-apply::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+.config-sync-dot-capture::after { background: var(--color-orange); }
+.config-sync-dot-apply::after { background: var(--color-blue); }
+

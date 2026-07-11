@@ -19,7 +19,7 @@ import {
 } from "./core/ConfigSyncCore";
 import { type CatalogSection, listCoreSections, listDiscovered, listOptionSections, listPluginSections } from "./core/catalog";
 import { PkmMode, PkmProbe, resolveEffectiveMode, resolveRootPath } from "./core/pkm";
-import { checkRemote, statusForGroups } from "./core/status";
+import { checkRemote, GroupStatus, RemoteCheck, statusForGroups } from "./core/status";
 import { Remote, RibbonButtons, StoreLock, SyncGroup } from "./core/types";
 import { GroupSelectModal } from "./ui/GroupSelectModal";
 import { confirmWarnings } from "./ui/ConfirmModal";
@@ -34,7 +34,8 @@ interface ConfigSyncSettings {
   remotes: Remote[];
   ribbonButtons: RibbonButtons;
   statusInMenu: boolean;
-  statusInPickers: boolean;
+  remoteAutoCheck: boolean;
+  localPeriodicCheck: boolean;
 }
 
 const DEFAULT_SETTINGS: ConfigSyncSettings = {
@@ -43,7 +44,8 @@ const DEFAULT_SETTINGS: ConfigSyncSettings = {
   remotes: [],
   ribbonButtons: { capture: false, apply: false, revert: false, pull: false, push: false },
   statusInMenu: true,
-  statusInPickers: true,
+  remoteAutoCheck: true,
+  localPeriodicCheck: true,
 };
 
 // app.plugins is not part of the public API; this is the community-standard access path.
@@ -62,11 +64,17 @@ interface InternalPluginsRegistry {
 export default class ConfigSyncPlugin extends Plugin {
   settings: ConfigSyncSettings = DEFAULT_SETTINGS;
   private individualRibbons: HTMLElement[] = [];
+  private mainRibbonEl: HTMLElement | null = null;
+  private lastResolvedRoot: string | null = null;
+  localStatuses: GroupStatus[] | null = null;
+  remoteChecks = new Map<string, { check: RemoteCheck; at: number }>();
+  private storeEventTimer: number | null = null;
+  private remoteAutoCheckStartupTimer: number | null = null;
 
   async onload(): Promise<void> {
     await this.loadSettings();
     this.addSettingTab(new ConfigSyncSettingTab(this.app, this));
-    this.addRibbonIcon("refresh-cw", "Config Sync", (evt) => void this.openSyncMenu(evt));
+    this.mainRibbonEl = this.addRibbonIcon("refresh-cw", "Config Sync", (evt) => void this.openSyncMenu(evt));
     this.refreshRibbons();
     this.addCommand({ id: "capture", name: "Capture: save this device's settings", callback: () => void this.runCapture() });
     this.addCommand({ id: "apply", name: "Apply: update this device with synced settings", callback: () => void this.runApply() });
@@ -90,6 +98,97 @@ export default class ConfigSyncPlugin extends Plugin {
         return true;
       },
     });
+
+    // --- awareness runtime ---
+    this.registerEvent(this.app.vault.on("modify", (f) => this.onStoreFileEvent(f.path)));
+    this.registerEvent(this.app.vault.on("create", (f) => this.onStoreFileEvent(f.path)));
+    this.registerEvent(this.app.vault.on("delete", (f) => this.onStoreFileEvent(f.path)));
+    this.registerEvent(
+      this.app.vault.on("rename", (f, old) => {
+        this.onStoreFileEvent(f.path);
+        this.onStoreFileEvent(old);
+      })
+    );
+    this.registerInterval(
+      window.setInterval(() => {
+        if (this.settings.localPeriodicCheck && document.hasFocus()) void this.refreshLocalStatus();
+      }, 5 * 60 * 1000)
+    );
+    if (Platform.isDesktop) {
+      this.remoteAutoCheckStartupTimer = window.setTimeout(() => {
+        this.remoteAutoCheckStartupTimer = null;
+        if (this.settings.remoteAutoCheck) void this.refreshRemoteChecks();
+      }, 30 * 1000);
+      this.registerInterval(
+        window.setInterval(() => {
+          if (this.settings.remoteAutoCheck) void this.refreshRemoteChecks();
+        }, 4 * 60 * 60 * 1000)
+      );
+    }
+    this.app.workspace.onLayoutReady(() => void this.refreshLocalStatus());
+  }
+
+  onunload(): void {
+    if (this.storeEventTimer !== null) window.clearTimeout(this.storeEventTimer);
+    if (this.remoteAutoCheckStartupTimer !== null) window.clearTimeout(this.remoteAutoCheckStartupTimer);
+  }
+
+  private onStoreFileEvent(path: string): void {
+    const root = this.settings.rootPath !== "" ? this.settings.rootPath : this.lastResolvedRoot;
+    if (root === null || !(path === root || path.startsWith(root + "/"))) return;
+    if (this.storeEventTimer !== null) window.clearTimeout(this.storeEventTimer);
+    this.storeEventTimer = window.setTimeout(() => {
+      this.storeEventTimer = null;
+      void this.refreshLocalStatus();
+    }, 2000);
+  }
+
+  async refreshLocalStatus(): Promise<void> {
+    try {
+      const ctx = await this.coreContext();
+      const manifest = await loadManifest(ctx);
+      const device = Platform.isMobile ? ("mobile" as const) : ("desktop" as const);
+      this.localStatuses = await statusForGroups(ctx, groupsForDevice(manifest, device));
+    } catch (e) {
+      console.error("Config Sync: status refresh failed", e);
+    }
+    this.updateRibbonDot();
+  }
+
+  async refreshRemoteChecks(): Promise<void> {
+    if (!Platform.isDesktop) return;
+    let localLock: StoreLock | null = null;
+    try {
+      localLock = await loadLock(await this.coreContext());
+    } catch {
+      localLock = null;
+    }
+    for (const remote of this.settings.remotes) {
+      try {
+        const reader = await this.createReader(remote);
+        this.remoteChecks.set(remote.name, { check: await checkRemote(localLock, reader), at: Date.now() });
+      } catch (e) {
+        this.remoteChecks.set(remote.name, { check: { state: "unknown", remoteCapturedAt: null }, at: Date.now() });
+        console.error(`Config Sync: remote check failed for ${remote.name}`, e);
+      }
+    }
+    this.updateRibbonDot();
+  }
+
+  updateRibbonDot(): void {
+    const el = this.mainRibbonEl;
+    if (el === null) return;
+    const s = this.localStatuses ?? [];
+    const changedHere = s.filter((x) => x.state === "local-changed" || x.state === "differs").length;
+    const storeNewer = s.filter((x) => x.state === "store-newer").length;
+    const remoteNewer = [...this.remoteChecks.entries()].filter(([, v]) => v.check.state === "remote-newer").map(([k]) => k);
+    el.toggleClass("config-sync-dot-capture", changedHere > 0);
+    el.toggleClass("config-sync-dot-apply", changedHere === 0 && (storeNewer > 0 || remoteNewer.length > 0));
+    const parts: string[] = [];
+    if (changedHere > 0) parts.push(`${changedHere} changed here`);
+    if (storeNewer > 0) parts.push(`${storeNewer} store-newer`);
+    for (const name of remoteNewer) parts.push(`remote "${name}" newer`);
+    el.setAttribute("aria-label", parts.length > 0 ? `Config Sync — ${parts.join(", ")}` : "Config Sync");
   }
 
   transportAvailable(): boolean {
@@ -172,6 +271,7 @@ export default class ConfigSyncPlugin extends Plugin {
     if (rootPath === "" || rootPath.startsWith("/") || rootPath.split("/").includes("..")) {
       throw new Error(`Config Sync: invalid data folder "${rootPath}" — set a vault-relative path in settings`);
     }
+    this.lastResolvedRoot = rootPath;
     const registry = this.pluginRegistry();
     const host: PluginHost = {
       getInstalledPluginVersion: (id) => registry.manifests[id]?.version ?? null,
@@ -196,6 +296,7 @@ export default class ConfigSyncPlugin extends Plugin {
       }
       const results = await capture(ctx);
       new ReportModal(this.app, "Config Sync: Capture report", results).open();
+      void this.refreshLocalStatus();
     } catch (e) {
       new Notice(`Config Sync capture failed: ${(e as Error).message}`, 10000);
     }
@@ -214,14 +315,14 @@ export default class ConfigSyncPlugin extends Plugin {
         new Notice("Config Sync: no groups available for this device");
         return;
       }
-      const statuses = this.settings.statusInPickers ? await statusForGroups(ctx, groups) : null;
-      const statusByName = statuses === null ? null : new Map(statuses.map((s) => [s.group, s]));
+      const statuses = await statusForGroups(ctx, groups);
+      const statusByName = new Map(statuses.map((s) => [s.group, s]));
       const deviceWords: Record<SyncGroup["devices"], string> = { all: "all devices", desktop: "desktop only", mobile: "mobile only" };
       const items = groups.map((group) => ({
         group,
         resolvedPath: group.path.replace("{configDir}", this.app.vault.configDir),
         meta: group.description ?? `${group.type === "dir" ? "folder" : "file"} · ${deviceWords[group.devices]}`,
-        status: statusByName?.get(group.name) ?? null,
+        status: statusByName.get(group.name) ?? null,
       }));
       new GroupSelectModal(this.app, items, "Config Sync: select groups to apply", (names) => {
         void this.applyGroups(ctx, names);
@@ -245,6 +346,7 @@ export default class ConfigSyncPlugin extends Plugin {
       }
       const results = await apply(ctx, names);
       new ReportModal(this.app, "Config Sync: Apply report", results).open();
+      void this.refreshLocalStatus();
     } catch (e) {
       new Notice(`Config Sync apply failed: ${(e as Error).message}`, 10000);
     }
@@ -310,6 +412,7 @@ export default class ConfigSyncPlugin extends Plugin {
       const reader = await this.createReader(remote);
       const results = await importExternal(ctx, reader);
       new ReportModal(this.app, `Pulled from ${remote.name}`, results).open();
+      void this.refreshLocalStatus();
     } catch (e) {
       new Notice(`Config Sync pull failed: ${(e as Error).message}`, 10000);
     }
@@ -337,6 +440,7 @@ export default class ConfigSyncPlugin extends Plugin {
       const writer = await this.createWriter(remote);
       const results = await pushExternal(ctx, writer);
       new ReportModal(this.app, `Pushed to ${remote.name}`, results).open();
+      void this.refreshLocalStatus();
     } catch (e) {
       new Notice(`Config Sync push failed: ${(e as Error).message}`, 10000);
     }
@@ -374,7 +478,9 @@ export default class ConfigSyncPlugin extends Plugin {
   }
 
   async resolvedRootPath(): Promise<string> {
-    return resolveRootPath(this.settings.rootPath, this.settings.pkmMode, this.pkmProbe());
+    const rootPath = await resolveRootPath(this.settings.rootPath, this.settings.pkmMode, this.pkmProbe());
+    this.lastResolvedRoot = rootPath;
+    return rootPath;
   }
 
   async listOptionSections(groups: SyncGroup[]): Promise<CatalogSection[]> {
