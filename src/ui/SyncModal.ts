@@ -139,7 +139,10 @@ export class SyncModal extends Modal {
       const inCat = this.rows().filter((r) => categoryForGroup(r.group.name) === cat);
       if (inCat.length === 0) continue;
       const sect = macro.createDiv({ cls: "config-sync-sect" });
-      const boxCb = sect.createEl("input", { type: "checkbox" });
+      const boxCb = sect.createEl("input", {
+        type: "checkbox",
+        attr: { "aria-label": `Select all ${CATEGORY_LABELS[cat]}` },
+      });
       sect.createSpan({ text: ` ${CATEGORY_LABELS[cat]}` });
       const card = macro.createDiv({ cls: "config-sync-card" });
       for (const r of inCat) this.renderItemRow(card, r);
@@ -373,15 +376,16 @@ export class SyncModal extends Modal {
       for (const e of inCat) this.renderRemoteDiffEntry(detail, e);
     }
 
-    // "N more items match" line: total groups compared minus the entries that differ.
-    const matched = this.groups.length - changed.length;
+    // "N more items match" line: groups present in this device's list minus the entries that differ
+    // (excludes the "" store-metadata pseudo-entry and any remote-only groups from the count).
+    const changedNames = new Set(changed.map((e) => e.group));
+    const matchNames = this.groups.filter((g) => !changedNames.has(g.name)).map((g) => g.name);
+    const matched = matchNames.length;
     if (matched > 0) {
       const line = detail.createDiv({
         cls: "config-sync-unchanged",
         text: `✓ ${matched} more item${matched === 1 ? "" : "s"} match ▸`,
       });
-      const changedNames = new Set(changed.map((e) => e.group));
-      const matchNames = this.groups.filter((g) => !changedNames.has(g.name)).map((g) => g.name);
       line.addEventListener("click", () => line.setText(`✓ ${matchNames.join(" · ")}`));
     }
 
