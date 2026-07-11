@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CatalogItem,
+  categoryForGroup,
   corePluginFile,
   defaultGroupForName,
   expectedPathForName,
@@ -277,5 +278,14 @@ describe("section copy (action-oriented)", () => {
     expect(core.find((s) => s.bucket === "enabled")?.description).toBe("Sync the settings files of your enabled core plugins.");
     const com = await listPluginSections(io, ".obs", [{ id: "dataview", name: "Dataview", enabled: true }], []);
     expect(com.find((s) => s.bucket === "enabled")?.description).toBe("Sync the settings files of your enabled community plugins.");
+  });
+});
+
+describe("categoryForGroup", () => {
+  it("categorizes group names", () => {
+    expect(categoryForGroup("themes")).toBe("obsidian");
+    expect(categoryForGroup("daily-notes")).toBe("core");
+    expect(categoryForGroup("plugin-dataview")).toBe("community");
+    expect(categoryForGroup("my-vimrc")).toBe("custom");
   });
 });

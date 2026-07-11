@@ -20,6 +20,16 @@ export interface StoreLock {
   groups: Record<string, { sourcePluginVersion: string }>;
 }
 
+export interface FileChanges {
+  added: string[];
+  updated: string[];
+  deleted: string[];
+}
+
+export function hasChanges(c: FileChanges): boolean {
+  return c.added.length > 0 || c.updated.length > 0 || c.deleted.length > 0;
+}
+
 export interface GroupResult {
   group: string;
   status: "ok" | "warning" | "error";
@@ -27,6 +37,7 @@ export interface GroupResult {
   filesDeleted: string[];
   messages: string[];
   needsAppReload: boolean;
+  changes: FileChanges;
 }
 
 export type Remote =

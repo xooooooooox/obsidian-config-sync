@@ -85,6 +85,19 @@ describe("statusForGroups", () => {
     io.touch(".obs/plugins/demo/data.json", Date.parse("2026-07-09T00:00:00.000Z"));
     expect((await allStates(ctx))["plugin-demo"]).toBe("in-sync");
   });
+
+  it("collects full file-level changes for differing items", async () => {
+    const { io, ctx } = await seededAndCaptured();
+    await io.write(".obs/snippets/two.css", "two");          // added live
+    await io.write(".obs/snippets/one.css", "ONE");          // updated (store still has "one")
+    io.seed({ "cs/store/configdir/snippets/three.css": "three" }); // store-only → deleted
+    const manifest = await loadManifest(ctx);
+    const statuses = await statusForGroups(ctx, groupsForDevice(manifest, "desktop"));
+    const snip = statuses.find((s) => s.group === "snippets");
+    expect(snip?.changes?.added).toEqual(["two.css"]);
+    expect(snip?.changes?.updated).toEqual(["one.css"]);
+    expect(snip?.changes?.deleted).toEqual(["three.css"]);
+  });
 });
 
 function fakeReader(files: Record<string, string>): ExternalStoreReader {

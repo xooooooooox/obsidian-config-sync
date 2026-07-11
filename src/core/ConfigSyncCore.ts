@@ -1,6 +1,6 @@
 import { FileIO, ensureParentDir, isJunkPath, listFilesRecursive, pruneEmptyDirsUnder } from "./io";
 import { GroupResult, StoreLock, SyncGroup, SyncManifest } from "./types";
-import { groupRealPath, groupStorePath, relativeTo } from "./pathing";
+import { basename, groupRealPath, groupStorePath, relativeTo } from "./pathing";
 import { parseStoreLock, parseSyncManifest, validateSyncManifest } from "./manifest";
 import { sanitizeJson, mergePreservingSanitized } from "./sanitize";
 
@@ -69,7 +69,30 @@ export function parseJsonOrThrow(raw: string, groupName: string, path: string): 
 }
 
 function emptyResult(group: string, needsAppReload: boolean): GroupResult {
-  return { group, status: "ok", filesWritten: [], filesDeleted: [], messages: [], needsAppReload };
+  return {
+    group,
+    status: "ok",
+    filesWritten: [],
+    filesDeleted: [],
+    messages: [],
+    needsAppReload,
+    changes: { added: [], updated: [], deleted: [] },
+  };
+}
+
+async function writeClassified(
+  ctx: CoreContext,
+  target: string,
+  content: string,
+  relName: string,
+  result: GroupResult
+): Promise<void> {
+  const existed = await ctx.io.exists(target);
+  if (existed && (await ctx.io.read(target)) === content) return; // unchanged: skip the write
+  await ensureParentDir(ctx.io, target);
+  await ctx.io.write(target, content);
+  result.filesWritten.push(target);
+  (existed ? result.changes.updated : result.changes.added).push(relName);
 }
 
 function requireGroup(manifest: SyncManifest, name: string): SyncGroup {
@@ -80,7 +103,7 @@ function requireGroup(manifest: SyncManifest, name: string): SyncGroup {
   return group;
 }
 
-export async function capture(ctx: CoreContext): Promise<GroupResult[]> {
+export async function capture(ctx: CoreContext, names?: string[]): Promise<GroupResult[]> {
   const manifest = await loadManifest(ctx);
   // Capture is the lock's writer and its only healing path: a previous lock that is
   // missing, old-format, or corrupt must never block capture — it is rewritten below.
@@ -90,9 +113,15 @@ export async function capture(ctx: CoreContext): Promise<GroupResult[]> {
   } catch {
     previous = null;
   }
+  const selected = names === undefined ? null : new Set(names);
   const lock: StoreLock = { capturedAt: ctx.now(), groups: {} };
   const results: GroupResult[] = [];
   for (const group of manifest.groups) {
+    if (selected !== null && !selected.has(group.name)) {
+      const prev = previous?.groups[group.name];
+      if (prev !== undefined) lock.groups[group.name] = prev; // not captured this run — carry forward
+      continue;
+    }
     const result = await captureGroup(ctx, group);
     const pluginId = pluginIdForGroup(group);
     if (pluginId !== null) {
@@ -131,18 +160,14 @@ async function captureGroup(ctx: CoreContext, group: SyncGroup): Promise<GroupRe
       const sanitized = sanitizeJson(parseJsonOrThrow(content, group.name, real), group.sanitize);
       content = JSON.stringify(sanitized, null, 2) + "\n";
     }
-    await ensureParentDir(ctx.io, store);
-    await ctx.io.write(store, content);
-    result.filesWritten.push(store);
+    await writeClassified(ctx, store, content, basename(real), result);
     return result;
   }
   const sourceFiles = await listFilesRecursive(ctx.io, real);
   const sourceRels = sourceFiles.map((f) => relativeTo(real, f)).filter((rel) => !isJunkPath(rel));
   for (const rel of sourceRels) {
     const target = `${store}/${rel}`;
-    await ensureParentDir(ctx.io, target);
-    await ctx.io.write(target, await ctx.io.read(`${real}/${rel}`));
-    result.filesWritten.push(target);
+    await writeClassified(ctx, target, await ctx.io.read(`${real}/${rel}`), rel, result);
   }
   if (await ctx.io.exists(store)) {
     const storeFiles = await listFilesRecursive(ctx.io, store);
@@ -151,6 +176,7 @@ async function captureGroup(ctx: CoreContext, group: SyncGroup): Promise<GroupRe
       if (!wanted.has(relativeTo(store, f))) {
         await ctx.io.remove(f);
         result.filesDeleted.push(f);
+        result.changes.deleted.push(relativeTo(store, f));
       }
     }
     await pruneEmptyDirsUnder(ctx.io, store);
@@ -248,6 +274,18 @@ async function backupOnce(ctx: CoreContext, state: BackupState, realPath: string
   state.index.entries.push({ realPath, existed, backupFile });
 }
 
+async function applyWriteClassified(
+  ctx: CoreContext,
+  state: BackupState,
+  real: string,
+  content: string,
+  relName: string,
+  result: GroupResult
+): Promise<void> {
+  await backupOnce(ctx, state, real);
+  await writeClassified(ctx, real, content, relName, result);
+}
+
 async function applyGroup(ctx: CoreContext, group: SyncGroup, state: BackupState): Promise<GroupResult> {
   const real = groupRealPath(group.path, ctx.configDir);
   const store = `${storeDir(ctx)}/${groupStorePath(group.path)}`;
@@ -271,19 +309,13 @@ async function applyGroup(ctx: CoreContext, group: SyncGroup, state: BackupState
         const incoming = parseJsonOrThrow(content, group.name, store);
         content = JSON.stringify(mergePreservingSanitized(local, incoming, group.sanitize), null, 2) + "\n";
       }
-      await backupOnce(ctx, state, real);
-      await ensureParentDir(ctx.io, real);
-      await ctx.io.write(real, content);
-      result.filesWritten.push(real);
+      await applyWriteClassified(ctx, state, real, content, basename(real), result);
     } else {
       const storeFiles = await listFilesRecursive(ctx.io, store);
       const rels = storeFiles.map((f) => relativeTo(store, f));
       for (const rel of rels) {
         const target = `${real}/${rel}`;
-        await backupOnce(ctx, state, target);
-        await ensureParentDir(ctx.io, target);
-        await ctx.io.write(target, await ctx.io.read(`${store}/${rel}`));
-        result.filesWritten.push(target);
+        await applyWriteClassified(ctx, state, target, await ctx.io.read(`${store}/${rel}`), rel, result);
       }
       if (await ctx.io.exists(real)) {
         const realFiles = await listFilesRecursive(ctx.io, real);
@@ -293,6 +325,7 @@ async function applyGroup(ctx: CoreContext, group: SyncGroup, state: BackupState
             await backupOnce(ctx, state, f);
             await ctx.io.remove(f);
             result.filesDeleted.push(f);
+            result.changes.deleted.push(relativeTo(real, f));
           }
         }
         await pruneEmptyDirsUnder(ctx.io, real);

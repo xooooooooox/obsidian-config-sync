@@ -336,3 +336,21 @@ export function splitLocation(path: string): { location: "config" | "vault"; rel
 export function joinLocation(location: "config" | "vault", rel: string): string {
   return location === "config" ? `{configDir}/${rel}` : rel;
 }
+
+export type ItemCategory = "obsidian" | "core" | "community" | "custom";
+
+export const CATEGORY_LABELS: Record<ItemCategory, string> = {
+  obsidian: "Obsidian",
+  core: "Core plugins",
+  community: "Community plugins",
+  custom: "Custom",
+};
+
+export function categoryForGroup(name: string): ItemCategory {
+  for (const file of Object.keys(OPTION_LABELS)) {
+    if (optionReservedName(file) === name) return "obsidian";
+  }
+  if (CORE_SETTINGS_IDS.includes(name)) return "core";
+  if (name.startsWith("plugin-")) return "community";
+  return "custom";
+}

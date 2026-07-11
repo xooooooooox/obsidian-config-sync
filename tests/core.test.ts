@@ -181,6 +181,49 @@ describe("capture", () => {
     expect(await io.exists("cs/store/configdir/snippets/.DS_Store")).toBe(false);
     expect(await io.read("cs/store/configdir/snippets/one.css")).toBe("one");
   });
+
+  it("classifies capture changes and skips unchanged writes", async () => {
+    const { io, plugins, ctx } = setup();
+    plugins.installed.set("demo", "1.2.3");
+    io.seed({
+      "cs/config-sync.json": MANIFEST,
+      ".obs/hotkeys.json": '{"a":1}',
+      ".obs/snippets/one.css": "one",
+      ".obsidian.vimrc": "v",
+      ".obs/plugins/demo/data.json": "{}",
+    });
+    await capture(ctx);
+    await io.write(".obs/snippets/two.css", "two");   // added
+    await io.write(".obs/snippets/one.css", "ONE");   // updated
+    const results = await capture(ctx);
+    const snip = results.find((r) => r.group === "snippets");
+    expect(snip?.changes).toEqual({ added: ["two.css"], updated: ["one.css"], deleted: [] });
+    const hk = results.find((r) => r.group === "hotkeys");
+    expect(hk?.changes).toEqual({ added: [], updated: [], deleted: [] });
+    expect(hk?.filesWritten).toEqual([]); // unchanged → not rewritten
+  });
+
+  it("selective capture touches only named items and carries the rest in the lock", async () => {
+    const { io, plugins, ctx } = setup();
+    plugins.installed.set("demo", "1.2.3");
+    io.seed({
+      "cs/config-sync.json": MANIFEST,
+      ".obs/hotkeys.json": '{"a":1}',
+      ".obs/snippets/one.css": "one",
+      ".obsidian.vimrc": "v",
+      ".obs/plugins/demo/data.json": "{}",
+    });
+    await capture(ctx); // demo stamped 1.2.3
+    plugins.installed.set("demo", "9.9.9");
+    await io.write(".obs/hotkeys.json", '{"a":2}');
+    await io.write(".obs/plugins/demo/data.json", '{"x":1}');
+    const results = await capture(ctx, ["hotkeys"]);
+    expect(results.map((r) => r.group)).toEqual(["hotkeys"]);
+    expect(await io.read("cs/store/configdir/hotkeys.json")).toBe('{"a":2}');
+    expect(await io.read("cs/store/configdir/plugins/demo/data.json")).toBe("{}\n"); // untouched (unchanged since first capture's sanitized write)
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, { sourcePluginVersion: string }> };
+    expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.2.3" }); // carried, not restamped
+  });
 });
 
 export function seedStore(io: MemFS): void {
@@ -259,6 +302,26 @@ describe("apply", () => {
     const result = await revertLastApply(ctx);
     expect(result.status).toBe("ok");
     expect(await io.read(".obs/snippets/local-only.css")).toBe("bye");
+  });
+
+  it("classifies apply changes and skips identical writes", async () => {
+    const { io, plugins, ctx } = setup();
+    plugins.installed.set("demo", "1.2.3");
+    io.seed({
+      "cs/config-sync.json": MANIFEST,
+      ".obs/hotkeys.json": '{"a":1}',
+      ".obs/snippets/one.css": "one",
+      ".obsidian.vimrc": "v",
+      ".obs/plugins/demo/data.json": "{}",
+    });
+    await capture(ctx);
+    await io.write("cs/store/configdir/hotkeys.json", '{"a":9}');    // store updated elsewhere
+    const results = await apply(ctx, ["hotkeys", "snippets"]);
+    const hk = results.find((r) => r.group === "hotkeys");
+    expect(hk?.changes.updated).toEqual(["hotkeys.json"]);
+    const snip = results.find((r) => r.group === "snippets");
+    expect(snip?.changes).toEqual({ added: [], updated: [], deleted: [] });
+    expect(snip?.filesWritten).toEqual([]); // identical → skipped
   });
 });
 
