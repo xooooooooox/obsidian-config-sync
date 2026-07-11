@@ -24,11 +24,11 @@ export interface SettingsHost extends Plugin {
     remotes: Remote[];
     ribbonButtons: Record<RibbonKey, boolean>;
     statusInMenu: boolean;
-    statusInPickers: boolean;
+    remoteAutoCheck: boolean;
+    localPeriodicCheck: boolean;
   };
   saveSettings(): Promise<void>;
   refreshRibbons(): void;
-  transportAvailable(): boolean;
   readGroupsFile(): Promise<SyncGroup[]>;
   writeGroupsFile(groups: SyncGroup[]): Promise<void>;
   resolvedRootPath(): Promise<string>;
@@ -359,7 +359,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private renderStatusToggles(containerEl: HTMLElement): void {
     new Setting(containerEl)
       .setName("Sync menu shows change counts")
-      .setDesc("Counts changed groups when the menu opens. Turn off if opening the menu feels slow.")
+      .setDesc("Counts changed items when the menu opens. Turn off if opening the menu feels slow.")
       .addToggle((t) =>
         t.setValue(this.host.settings.statusInMenu).onChange(async (v) => {
           this.host.settings.statusInMenu = v;
@@ -367,11 +367,20 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         })
       );
     new Setting(containerEl)
-      .setName("Apply picker shows group status")
-      .setDesc("Badges each group and pre-selects the ones the store updated.")
+      .setName("Check remotes automatically")
+      .setDesc("Checks each remote's last capture shortly after startup and every few hours.")
       .addToggle((t) =>
-        t.setValue(this.host.settings.statusInPickers).onChange(async (v) => {
-          this.host.settings.statusInPickers = v;
+        t.setValue(this.host.settings.remoteAutoCheck).onChange(async (v) => {
+          this.host.settings.remoteAutoCheck = v;
+          await this.host.saveSettings();
+        })
+      );
+    new Setting(containerEl)
+      .setName("Periodic local check")
+      .setDesc("Re-scans for local changes every 5 minutes while the window is focused, keeping the ribbon dot fresh.")
+      .addToggle((t) =>
+        t.setValue(this.host.settings.localPeriodicCheck).onChange(async (v) => {
+          this.host.settings.localPeriodicCheck = v;
           await this.host.saveSettings();
         })
       );
@@ -382,18 +391,12 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       .setName("Ribbon buttons")
       .setDesc("The Config Sync ribbon icon always opens a menu of available actions. Optionally also show individual ribbon icons.")
       .setHeading();
-    const defs: { key: RibbonKey; label: string; transport: boolean }[] = [
-      { key: "capture", label: "Capture", transport: false },
-      { key: "apply", label: "Apply", transport: false },
-      { key: "revert", label: "Revert last apply", transport: false },
-      { key: "pull", label: "Pull", transport: true },
-      { key: "push", label: "Push", transport: true },
+    const defs: { key: RibbonKey; label: string }[] = [
+      { key: "sync", label: "Sync" },
+      { key: "revert", label: "Revert last apply" },
     ];
     for (const d of defs) {
       const s = new Setting(containerEl).setName(d.label);
-      if (d.transport && !this.host.transportAvailable()) {
-        s.setDesc("Shown on desktop once a remote is configured.");
-      }
       s.addToggle((t) =>
         t.setValue(this.host.settings.ribbonButtons[d.key]).onChange(async (v) => {
           this.host.settings.ribbonButtons[d.key] = v;

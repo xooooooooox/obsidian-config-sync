@@ -31,3 +31,7 @@ export function relativeTo(base: string, full: string): string {
   }
   return full.slice(base.length + 1);
 }
+
+export function basename(p: string): string {
+  return p.slice(p.lastIndexOf("/") + 1);
+}

@@ -1,6 +1,6 @@
 import { execFile } from "child_process";
 import { promisify } from "util";
-import { mkdtemp, rm, mkdir, writeFile, unlink, access, readdir } from "fs/promises";
+import { mkdtemp, rm, mkdir, writeFile, unlink, access, readdir, readFile } from "fs/promises";
 import { tmpdir } from "os";
 import * as nodePath from "path";
 import { ExternalStoreReader, ExternalStoreWriter } from "../core/ConfigSyncCore";
@@ -73,6 +73,9 @@ export async function createGitWriter(remoteUrl: string, branch: string, subdir:
         // root not present in the remote yet
       }
       return out.sort();
+    },
+    async readFile(relPath: string): Promise<string> {
+      return readFile(nodePath.join(base, relPath), "utf8");
     },
     async writeFile(relPath: string, content: string): Promise<void> {
       const target = nodePath.join(base, relPath);

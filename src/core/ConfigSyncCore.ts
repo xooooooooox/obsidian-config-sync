@@ -1,6 +1,6 @@
 import { FileIO, ensureParentDir, isJunkPath, listFilesRecursive, pruneEmptyDirsUnder } from "./io";
-import { GroupResult, StoreLock, SyncGroup, SyncManifest } from "./types";
-import { groupRealPath, groupStorePath, relativeTo } from "./pathing";
+import { GroupResult, hasChanges, StoreLock, SyncGroup, SyncManifest } from "./types";
+import { basename, groupRealPath, groupStorePath, relativeTo } from "./pathing";
 import { parseStoreLock, parseSyncManifest, validateSyncManifest } from "./manifest";
 import { sanitizeJson, mergePreservingSanitized } from "./sanitize";
 
@@ -68,8 +68,43 @@ export function parseJsonOrThrow(raw: string, groupName: string, path: string): 
   }
 }
 
+export function groupForStoreRel(groups: SyncGroup[], rel: string): { name: string; itemRel: string } {
+  if (rel.startsWith("store/")) {
+    const inner = rel.slice("store/".length);
+    for (const g of groups) {
+      const sp = groupStorePath(g.path);
+      if (g.type === "file" && inner === sp) return { name: g.name, itemRel: basename(sp) };
+      if (g.type === "dir" && inner.startsWith(sp + "/")) return { name: g.name, itemRel: inner.slice(sp.length + 1) };
+    }
+  }
+  return { name: "", itemRel: rel }; // store metadata / unmatched
+}
+
 function emptyResult(group: string, needsAppReload: boolean): GroupResult {
-  return { group, status: "ok", filesWritten: [], filesDeleted: [], messages: [], needsAppReload };
+  return {
+    group,
+    status: "ok",
+    filesWritten: [],
+    filesDeleted: [],
+    messages: [],
+    needsAppReload,
+    changes: { added: [], updated: [], deleted: [] },
+  };
+}
+
+async function writeClassified(
+  ctx: CoreContext,
+  target: string,
+  content: string,
+  relName: string,
+  result: GroupResult
+): Promise<void> {
+  const existed = await ctx.io.exists(target);
+  if (existed && (await ctx.io.read(target)) === content) return; // unchanged: skip the write
+  await ensureParentDir(ctx.io, target);
+  await ctx.io.write(target, content);
+  result.filesWritten.push(target);
+  (existed ? result.changes.updated : result.changes.added).push(relName);
 }
 
 function requireGroup(manifest: SyncManifest, name: string): SyncGroup {
@@ -80,7 +115,7 @@ function requireGroup(manifest: SyncManifest, name: string): SyncGroup {
   return group;
 }
 
-export async function capture(ctx: CoreContext): Promise<GroupResult[]> {
+export async function capture(ctx: CoreContext, names?: string[]): Promise<GroupResult[]> {
   const manifest = await loadManifest(ctx);
   // Capture is the lock's writer and its only healing path: a previous lock that is
   // missing, old-format, or corrupt must never block capture — it is rewritten below.
@@ -90,9 +125,15 @@ export async function capture(ctx: CoreContext): Promise<GroupResult[]> {
   } catch {
     previous = null;
   }
+  const selected = names === undefined ? null : new Set(names);
   const lock: StoreLock = { capturedAt: ctx.now(), groups: {} };
   const results: GroupResult[] = [];
   for (const group of manifest.groups) {
+    if (selected !== null && !selected.has(group.name)) {
+      const prev = previous?.groups[group.name];
+      if (prev !== undefined) lock.groups[group.name] = prev; // not captured this run — carry forward
+      continue;
+    }
     const result = await captureGroup(ctx, group);
     const pluginId = pluginIdForGroup(group);
     if (pluginId !== null) {
@@ -131,18 +172,14 @@ async function captureGroup(ctx: CoreContext, group: SyncGroup): Promise<GroupRe
       const sanitized = sanitizeJson(parseJsonOrThrow(content, group.name, real), group.sanitize);
       content = JSON.stringify(sanitized, null, 2) + "\n";
     }
-    await ensureParentDir(ctx.io, store);
-    await ctx.io.write(store, content);
-    result.filesWritten.push(store);
+    await writeClassified(ctx, store, content, basename(real), result);
     return result;
   }
   const sourceFiles = await listFilesRecursive(ctx.io, real);
   const sourceRels = sourceFiles.map((f) => relativeTo(real, f)).filter((rel) => !isJunkPath(rel));
   for (const rel of sourceRels) {
     const target = `${store}/${rel}`;
-    await ensureParentDir(ctx.io, target);
-    await ctx.io.write(target, await ctx.io.read(`${real}/${rel}`));
-    result.filesWritten.push(target);
+    await writeClassified(ctx, target, await ctx.io.read(`${real}/${rel}`), rel, result);
   }
   if (await ctx.io.exists(store)) {
     const storeFiles = await listFilesRecursive(ctx.io, store);
@@ -151,6 +188,7 @@ async function captureGroup(ctx: CoreContext, group: SyncGroup): Promise<GroupRe
       if (!wanted.has(relativeTo(store, f))) {
         await ctx.io.remove(f);
         result.filesDeleted.push(f);
+        result.changes.deleted.push(relativeTo(store, f));
       }
     }
     await pruneEmptyDirsUnder(ctx.io, store);
@@ -248,6 +286,18 @@ async function backupOnce(ctx: CoreContext, state: BackupState, realPath: string
   state.index.entries.push({ realPath, existed, backupFile });
 }
 
+async function applyWriteClassified(
+  ctx: CoreContext,
+  state: BackupState,
+  real: string,
+  content: string,
+  relName: string,
+  result: GroupResult
+): Promise<void> {
+  await backupOnce(ctx, state, real);
+  await writeClassified(ctx, real, content, relName, result);
+}
+
 async function applyGroup(ctx: CoreContext, group: SyncGroup, state: BackupState): Promise<GroupResult> {
   const real = groupRealPath(group.path, ctx.configDir);
   const store = `${storeDir(ctx)}/${groupStorePath(group.path)}`;
@@ -271,19 +321,13 @@ async function applyGroup(ctx: CoreContext, group: SyncGroup, state: BackupState
         const incoming = parseJsonOrThrow(content, group.name, store);
         content = JSON.stringify(mergePreservingSanitized(local, incoming, group.sanitize), null, 2) + "\n";
       }
-      await backupOnce(ctx, state, real);
-      await ensureParentDir(ctx.io, real);
-      await ctx.io.write(real, content);
-      result.filesWritten.push(real);
+      await applyWriteClassified(ctx, state, real, content, basename(real), result);
     } else {
       const storeFiles = await listFilesRecursive(ctx.io, store);
       const rels = storeFiles.map((f) => relativeTo(store, f));
       for (const rel of rels) {
         const target = `${real}/${rel}`;
-        await backupOnce(ctx, state, target);
-        await ensureParentDir(ctx.io, target);
-        await ctx.io.write(target, await ctx.io.read(`${store}/${rel}`));
-        result.filesWritten.push(target);
+        await applyWriteClassified(ctx, state, target, await ctx.io.read(`${store}/${rel}`), rel, result);
       }
       if (await ctx.io.exists(real)) {
         const realFiles = await listFilesRecursive(ctx.io, real);
@@ -293,6 +337,7 @@ async function applyGroup(ctx: CoreContext, group: SyncGroup, state: BackupState
             await backupOnce(ctx, state, f);
             await ctx.io.remove(f);
             result.filesDeleted.push(f);
+            result.changes.deleted.push(relativeTo(real, f));
           }
         }
         await pruneEmptyDirsUnder(ctx.io, real);
@@ -332,39 +377,56 @@ export interface ExternalStoreReader {
   readFile(relPath: string): Promise<string>;
 }
 
-export async function importExternal(ctx: CoreContext, reader: ExternalStoreReader): Promise<GroupResult> {
+export async function importExternal(ctx: CoreContext, reader: ExternalStoreReader): Promise<GroupResult[]> {
   const files = await reader.listFiles();
   if (!files.includes("config-sync.json")) {
     throw new Error(`External source has no config-sync.json at its root — check the source "root" setting.`);
   }
-  parseSyncManifest(await reader.readFile("config-sync.json")); // fail fast on invalid upstream data
-  const result = emptyResult("import", false);
+  const incoming = parseSyncManifest(await reader.readFile("config-sync.json")); // fail fast on invalid upstream data
+  const byName = new Map<string, GroupResult>();
+  const resultFor = (name: string): GroupResult => {
+    let r = byName.get(name);
+    if (r === undefined) {
+      r = emptyResult(name, false);
+      byName.set(name, r);
+    }
+    return r;
+  };
   for (const rel of files) {
     const target = `${ctx.rootPath}/${rel}`;
-    await ensureParentDir(ctx.io, target);
-    await ctx.io.write(target, await reader.readFile(rel));
-    result.filesWritten.push(target);
+    const { name, itemRel } = groupForStoreRel(incoming.groups, rel);
+    await writeClassified(ctx, target, await reader.readFile(rel), itemRel, resultFor(name));
   }
   const wanted = new Set(files.map((f) => `${ctx.rootPath}/${f}`));
   const localFiles = await listFilesRecursive(ctx.io, ctx.rootPath);
   for (const f of localFiles) {
     if (!wanted.has(f)) {
+      const rel = relativeTo(ctx.rootPath, f);
+      const { name, itemRel } = groupForStoreRel(incoming.groups, rel);
       await ctx.io.remove(f);
+      const result = resultFor(name);
       result.filesDeleted.push(f);
+      result.changes.deleted.push(itemRel);
     }
   }
   await pruneEmptyDirsUnder(ctx.io, ctx.rootPath);
-  return result;
+  const isAffected = (r: GroupResult): boolean => hasChanges(r.changes);
+  const named = incoming.groups
+    .map((g) => byName.get(g.name))
+    .filter((r): r is GroupResult => r !== undefined && isAffected(r));
+  const meta = byName.get("");
+  return meta !== undefined && isAffected(meta) ? [...named, meta] : named;
 }
 
 export interface ExternalStoreWriter {
   listFiles(): Promise<string[]>; // existing remote files, relative to <root>/, "/"-separated
+  readFile(relPath: string): Promise<string>;
   writeFile(relPath: string, content: string): Promise<void>;
   deleteFile(relPath: string): Promise<void>;
   finalize(): Promise<void>; // git: add/commit/push; local-path: no-op
 }
 
-export async function pushExternal(ctx: CoreContext, writer: ExternalStoreWriter): Promise<GroupResult> {
+export async function pushExternal(ctx: CoreContext, writer: ExternalStoreWriter): Promise<GroupResult[]> {
   const localAbs = await listFilesRecursive(ctx.io, ctx.rootPath);
   const rels = localAbs.map((f) => f.slice(ctx.rootPath.length + 1)).sort();
   if (!rels.includes("config-sync.json")) {
@@ -372,20 +434,41 @@ export async function pushExternal(ctx: CoreContext, writer: ExternalStoreWriter
       `Local store has no config-sync.json at ${ctx.rootPath} — capture from this device (or pull) before pushing.`
     );
   }
-  const result = emptyResult("push", false);
+  const manifest = await loadManifest(ctx);
+  const byName = new Map<string, GroupResult>();
+  const resultFor = (name: string): GroupResult => {
+    let r = byName.get(name);
+    if (r === undefined) {
+      r = emptyResult(name, false);
+      byName.set(name, r);
+    }
+    return r;
+  };
+  const remoteFiles = new Set(await writer.listFiles());
   for (const rel of rels) {
-    await writer.writeFile(rel, await ctx.io.read(`${ctx.rootPath}/${rel}`));
+    const { name, itemRel } = groupForStoreRel(manifest.groups, rel);
+    const content = await ctx.io.read(`${ctx.rootPath}/${rel}`);
+    const existed = remoteFiles.has(rel);
+    if (existed && (await writer.readFile(rel)) === content) continue; // unchanged: skip the write
+    await writer.writeFile(rel, content);
+    const result = resultFor(name);
     result.filesWritten.push(rel);
+    (existed ? result.changes.updated : result.changes.added).push(itemRel);
   }
   const wanted = new Set(rels);
-  for (const rel of await writer.listFiles()) {
+  for (const rel of remoteFiles) {
     if (!wanted.has(rel)) {
+      const { name, itemRel } = groupForStoreRel(manifest.groups, rel);
       await writer.deleteFile(rel);
+      const result = resultFor(name);
       result.filesDeleted.push(rel);
+      result.changes.deleted.push(itemRel);
     }
   }
   await writer.finalize();
-  return result;
+  const named = manifest.groups.map((g) => byName.get(g.name)).filter((r): r is GroupResult => r !== undefined);
+  const meta = byName.get("");
+  return meta !== undefined ? [...named, meta] : named;
 }
 
 export const SCHEMA_URL =

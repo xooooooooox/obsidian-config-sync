@@ -39,6 +39,9 @@ export function createLocalPathWriter(storeDir: string): ExternalStoreWriter {
       }
       return out.sort();
     },
+    async readFile(relPath: string): Promise<string> {
+      return fs.readFile(nodePath.join(base, relPath), "utf8");
+    },
     async writeFile(relPath: string, content: string): Promise<void> {
       const target = nodePath.join(base, relPath);
       await fs.mkdir(nodePath.dirname(target), { recursive: true });

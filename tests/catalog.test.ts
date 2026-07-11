@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CatalogItem,
+  categoryForGroup,
   corePluginFile,
   defaultGroupForName,
   expectedPathForName,
@@ -134,7 +135,7 @@ describe("groupForItem / toggleSection", () => {
 
   it("toggleSection adds groups for every tickable item, or removes them all", () => {
     const items: CatalogItem[] = [
-      { name: "app", label: "Editor & general", description: "d", path: "{configDir}/app.json", type: "file", exists: true, disabledReason: null, cautionReason: null },
+      { name: "app", label: "App settings", description: "d", path: "{configDir}/app.json", type: "file", exists: true, disabledReason: null, cautionReason: null },
       { name: "appearance", label: "Appearance", description: "d", path: "{configDir}/appearance.json", type: "file", exists: true, disabledReason: null, cautionReason: null },
     ];
     const on = toggleSection([], items, true);
@@ -208,7 +209,7 @@ describe("defaultGroupForName", () => {
       path: "{configDir}/app.json",
       type: "file",
       devices: "all",
-      description: "Editor and general options.",
+      description: "Editor, Files & links and other general options (app.json).",
     });
     expect(defaultGroupForName("snippets")).toEqual({
       name: "snippets",
@@ -277,5 +278,14 @@ describe("section copy (action-oriented)", () => {
     expect(core.find((s) => s.bucket === "enabled")?.description).toBe("Sync the settings files of your enabled core plugins.");
     const com = await listPluginSections(io, ".obs", [{ id: "dataview", name: "Dataview", enabled: true }], []);
     expect(com.find((s) => s.bucket === "enabled")?.description).toBe("Sync the settings files of your enabled community plugins.");
+  });
+});
+
+describe("categoryForGroup", () => {
+  it("categorizes group names", () => {
+    expect(categoryForGroup("themes")).toBe("obsidian");
+    expect(categoryForGroup("daily-notes")).toBe("core");
+    expect(categoryForGroup("plugin-dataview")).toBe("community");
+    expect(categoryForGroup("my-vimrc")).toBe("custom");
   });
 });
