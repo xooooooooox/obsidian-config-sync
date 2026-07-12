@@ -12,7 +12,7 @@ Selective, on-demand sync of Obsidian settings — hotkeys, CSS snippets, themes
 ## Features
 
 - **Pick exactly what syncs** — Obsidian options, core-plugin and community-plugin settings, snippets, themes, vault-root dotfiles; per item, per device class (all / desktop / mobile).
-- **Credential-safe** — `sanitize` key globs strip tokens and secrets before anything enters the store; each device keeps its locally entered values across applies.
+- **Credential-safe** — per-item sync modes strip or encrypt sensitive keys before anything enters the store; each device keeps its locally entered values across applies.
 - **Explicit, reversible Apply** — pick items, see version-mismatch warnings, land them; every touched file is backed up and **Revert last apply** restores it.
 - **Always-visible awareness** — a ribbon status dot lights up orange (items to capture) or blue (store/remote updates); open the **Sync Center** for the details: every item badged (`✓ in sync`, `↑ changed on this device (likely)`, `↓ store is newer (likely)`, `≠ differs`, `— not captured yet`) with live `↑`/`↓` change-count badges, and remotes checked automatically.
 - **Remote-aware** — the Sync Center's Remotes block auto-checks whether a git or vault remote was captured after your local store; expand a remote for a Pull/Push preview.
@@ -36,8 +36,8 @@ Two planes, kept separate.
 
 **Local plane** — this device's live config ↔ the store:
 
-- **Capture** copies the items defined in `<data folder>/config-sync.json` into `<data folder>/store/`, strips `sanitize`d keys, skips OS junk files, and records source plugin versions in `store.lock.json`. Only changed files are rewritten; the Sync Center's Capture button captures just what you've ticked.
-- **Apply** picks items, warns on plugin-version mismatches, then lands them into this device's config dir (whatever its name). Sanitized keys keep their local values. A one-slot backup covers every touched file; **Revert last apply** restores it.
+- **Capture** copies the items defined in `<data folder>/config-sync.json` into `<data folder>/store/`, applies each item's sync mode (stripping or encrypting fields, or encrypting the whole file), skips OS junk files, and records source plugin versions in `store.lock.json`. Only changed files are rewritten; the Sync Center's Capture button captures just what you've ticked.
+- **Apply** picks items, warns on plugin-version mismatches, then lands them into this device's config dir (whatever its name). Stripped fields and encrypted content resolve per the item's sync mode; stripped keys keep their local values. A one-slot backup covers every touched file; **Revert last apply** restores it.
 - The **Sync Center** compares live config against the store per item, with best-effort direction hints (file times vs the last capture) and automatic remote freshness checks.
 
 **Transport plane** — how the store travels:
@@ -53,7 +53,7 @@ Everything hangs off one **Config Sync** ribbon icon: a status dot shows orange 
 
 - **General** — PKM mode (auto-detects IOTO vaults), the data folder location, status toggles (sync menu change counts, automatic remote checks, periodic local check), ribbon icons.
 - **Obsidian / Core plugins / Community plugins** — tick items to sync them; a heading toggle syncs all/none per section; a search box spans all tabs. `workspace.json` and the `sync`/`publish` core plugins are *Not recommended* and ask for confirmation.
-- **Advanced** — every rule as a compact row; expand to edit. **Managed by pickers** (created by ticks; reset to default per row or in bulk), **Discovered files** (config files we couldn't classify; toggle to sync — name and path are fixed by the file), **Custom rules** (fully yours: vault-root files, extra folders, sanitize patterns).
+- **Advanced** — every rule as a compact row; expand to edit. **Managed by pickers** (created by ticks; reset to default per row or in bulk), **Discovered files** (config files we couldn't classify; toggle to sync — name and path are fixed by the file), **Custom rules** (fully yours: vault-root files, extra folders, sync modes).
 - **Remotes** (desktop) — add a **git repository** (URL, branch, optional folder) or **another vault**: click **Browse…**, pick the vault folder, and the store inside it is auto-detected.
 
 ## Store layout
@@ -78,15 +78,20 @@ Everything hangs off one **Config Sync** ribbon icon: a status dot shows orange 
     { "name": "hotkeys", "path": "{configDir}/hotkeys.json", "type": "file", "devices": "all" },
     { "name": "vimrc", "path": ".obsidian.vimrc", "type": "file", "devices": "desktop" },
     { "name": "plugin-ioto-settings", "path": "{configDir}/plugins/ioto-settings/data.json",
-      "type": "file", "devices": "all",
-      "sanitize": ["*ForSync", "*ForFetch", "*APIKey*", "*Token*", "*Secret*", "userEmail"] }
+      "type": "file", "devices": "all", "mode": "fields",
+      "fields": [
+        { "pattern": "*APIKey*", "action": "encrypt" },
+        { "pattern": "*Token*", "action": "encrypt" },
+        { "pattern": "*Secret*", "action": "encrypt" },
+        { "pattern": "userEmail", "action": "strip" }
+      ] }
   ]
 }
 ```
 
-Group fields: `name` (unique) · `path` (`{configDir}` variable supported) · `type` (`file`/`dir`) · `devices` (`all`/`desktop`/`mobile`) · `sanitize` (optional key-glob list, file groups only).
+Group fields: `name` (unique) · `path` (`{configDir}` variable supported) · `type` (`file`/`dir`) · `devices` (`all`/`desktop`/`mobile`) · `mode` (`plain`/`fields`/`encrypted`, optional, default `plain`) · `fields` (per-key `Strip`/`Encrypt` rules, `fields` mode only — see [Sensitive settings](#sensitive-settings)).
 
-Never syncable (hard blacklist): the `remotely-save`, `ioto-update`, `slides-rup`, `config-sync` and `obsidian-config-sync` plugin dirs. OS junk (`.DS_Store`, `Thumbs.db`, `desktop.ini`) is never captured.
+OS junk (`.DS_Store`, `Thumbs.db`, `desktop.ini`) is never captured. See [Sensitive settings](#sensitive-settings) for per-item sync modes and passphrase-protected encryption.
 
 ## Walkthroughs
 
@@ -97,8 +102,8 @@ Never syncable (hard blacklist): the `remotely-save`, `ioto-update`, `slides-rup
 
 **Sync a plugin's settings but keep credentials out of the store**
 1. Under *Community plugins*, tick the plugin.
-2. Open *Advanced* — expand the rule the tick created and add sanitize patterns for its credential keys, e.g. `*Token*, *Secret*, *APIKey*`.
-3. Capture. Credentials never enter the store; each device keeps its locally entered values across applies.
+2. Set its mode to **Fields**, then add rules for its credential keys, e.g. `*Token*`, `*Secret*`, `*APIKey*` → `Strip` (or `Encrypt` if you want them to travel).
+3. Capture. Stripped credentials never enter the store; each device keeps its locally entered values across applies.
 
 **IOTO vault, from zero**
 1. Install the plugin — PKM mode auto-detects IOTO and stores data under `0-Extra/config-sync` (from your ioto-settings aux folder).
@@ -117,6 +122,20 @@ Everything the plugin does by default stays inside your vault: Capture/Apply cop
 - **Files outside the vault (vault remotes and git temp clones).** If you add a remote of type "Another vault", Pull/Push read/write the absolute store path you configured (typically another vault's data folder). Git pushes additionally use a temporary clone directory that is removed afterwards.
 
 Both features are disabled until you configure a remote, and never run without an explicit Pull or Push from the Sync Center.
+
+## Sensitive settings
+
+Every item has a sync mode, set per item in Settings:
+
+- **Plain** (default) — synced as-is.
+- **Fields** (file items only) — per-key rules: `Strip` keeps a key out of the store entirely (Apply preserves the local value); `Encrypt` stores the value as an encrypted envelope and decrypts it on Apply, so credentials can travel safely.
+- **Encrypt** — the whole file is stored encrypted (AES-256-GCM, key derived from a passphrase via PBKDF2).
+
+Encrypt modes need a vault-level **Passphrase**, set once per device in Settings → General — it's never written to any file and never synced; the same passphrase on each device is all that's needed. An item with encrypted content but no passphrase set on the current device shows a 🔒 *locked* state and won't capture or apply until the passphrase is set. A wrong passphrase on Apply fails cleanly without writing anything.
+
+Settings rows show a warning badge when a config contains sensitive-looking keys (API keys, tokens, secrets, passwords, emails) or is one opaque encrypted blob — this only informs; you choose the mode. The Sync Center badges each item with its mode (`🔒`/`▤`) and capture reports state exactly what was encrypted or stripped.
+
+There is no hard blacklist anymore — `remotely-save`, `ioto-update`, `slides-rup` and `config-sync` are now normal items like any other (e.g. `remotely-save` can be whole-file encrypted; `ioto-update` works well with Fields).
 
 ## Development
 

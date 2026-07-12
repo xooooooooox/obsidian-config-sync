@@ -8,13 +8,13 @@ const MANIFEST = JSON.stringify({
   groups: [
     { name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all" },
     { name: "snippets", path: "{configDir}/snippets", type: "dir", devices: "all" },
-    { name: "plugin-demo", path: "{configDir}/plugins/demo/data.json", type: "file", devices: "all", sanitize: ["*Token*"] },
+    { name: "plugin-demo", path: "{configDir}/plugins/demo/data.json", type: "file", devices: "all", mode: "fields", fields: [{ pattern: "*Token*", action: "strip" }] },
   ],
 });
 
 function setup(): { io: MemFS; ctx: CoreContext } {
   const io = new MemFS();
-  const ctx: CoreContext = { io, configDir: ".obs", rootPath: "cs", plugins: new FakePlugins(), now: () => "2026-07-08T00:00:00.000Z" };
+  const ctx: CoreContext = { io, configDir: ".obs", rootPath: "cs", plugins: new FakePlugins(), passphrase: null, now: () => "2026-07-08T00:00:00.000Z" };
   return { io, ctx };
 }
 
@@ -114,6 +114,28 @@ describe("statusForGroups", () => {
   });
 });
 
+const ENC_MANIFEST = JSON.stringify({
+  version: 1,
+  groups: [{ name: "secrets", path: "{configDir}/secrets.json", type: "file", devices: "all", mode: "encrypted" }],
+});
+
+describe("statusForGroups: encrypted mode", () => {
+  it("is in-sync right after capture, actionable after a local edit, and locked without a passphrase", async () => {
+    const { io, ctx } = setup();
+    ctx.passphrase = "pw";
+    io.seed({ "cs/config-sync.json": ENC_MANIFEST, ".obs/secrets.json": '{"token":"x"}' });
+    await capture(ctx);
+    expect((await allStates(ctx))["secrets"]).toBe("in-sync");
+
+    await io.write(".obs/secrets.json", '{"token":"y"}');
+    io.touch(".obs/secrets.json", Date.parse("2026-07-09T00:00:00.000Z"));
+    expect((await allStates(ctx))["secrets"]).toBe("local-changed");
+
+    ctx.passphrase = null;
+    expect((await allStates(ctx))["secrets"]).toBe("locked");
+  });
+});
+
 function fakeReader(files: Record<string, string>): ExternalStoreReader {
   return {
     async listFiles(): Promise<string[]> {
@@ -182,5 +204,13 @@ describe("bucketCounts", () => {
       { group: "f", state: "no-settings" },
     ];
     expect(bucketCounts(statuses)).toEqual({ up: 2, down: 2, ok: 1, none: 1 });
+  });
+
+  it("puts locked groups into the none bucket", () => {
+    const statuses: GroupStatus[] = [
+      { group: "a", state: "in-sync" },
+      { group: "b", state: "locked" },
+    ];
+    expect(bucketCounts(statuses)).toEqual({ up: 0, down: 0, ok: 1, none: 1 });
   });
 });

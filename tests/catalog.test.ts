@@ -102,17 +102,15 @@ describe("listPluginSections", () => {
     { id: "off-plugin", name: "Off Plugin", enabled: false },
     { id: "remotely-save", name: "Remotely Save", enabled: true },
   ];
-  it("buckets community plugins by enabled/disabled/blacklist and leads with the switch list", async () => {
+  it("buckets community plugins by enabled/disabled and leads with the switch list", async () => {
     const io = new MemFS();
     io.seed({ ".obs/community-plugins.json": "{}" });
     const sections = await listPluginSections(io, ".obs", plugins, NO_GROUPS);
     const byBucket = Object.fromEntries(sections.map((s) => [s.bucket, s]));
     expect(byBucket["list"]?.items[0]?.name).toBe("community-plugins");
-    expect(byBucket["enabled"]?.items.map((i) => i.name)).toEqual(["plugin-dataview"]);
+    expect(byBucket["enabled"]?.items.map((i) => i.name).sort()).toEqual(["plugin-dataview", "plugin-remotely-save"]);
     expect(byBucket["disabled"]?.items.map((i) => i.name)).toEqual(["plugin-off-plugin"]);
-    expect(byBucket["notRecommended"]?.items[0]?.name).toBe("plugin-remotely-save");
-    expect(byBucket["notRecommended"]?.items[0]?.disabledReason).toContain("cannot be synced");
-    expect(byBucket["notRecommended"]?.allowSyncAll).toBe(false);
+    expect(byBucket["notRecommended"]).toBeUndefined();
   });
 });
 

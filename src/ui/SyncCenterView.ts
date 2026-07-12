@@ -406,7 +406,7 @@ export class SyncCenterView extends ItemView {
   // Tri-state select-all over the currently visible checkable rows (scope + filter + search).
   private checkableRows(scoped: StatusRow[]): string[] {
     return this.visibleRows(scoped)
-      .filter((r) => r.status.state !== "in-sync" && r.status.state !== "no-settings")
+      .filter((r) => r.status.state !== "in-sync" && r.status.state !== "no-settings" && r.status.state !== "locked")
       .map((r) => r.group.name);
   }
 
@@ -445,13 +445,15 @@ export class SyncCenterView extends ItemView {
 
   private renderItemRow(card: HTMLElement, r: StatusRow): void {
     const { group, status } = r;
-    const inert = status.state === "in-sync" || status.state === "no-settings";
+    const inert = status.state === "in-sync" || status.state === "no-settings" || status.state === "locked";
     const row = card.createDiv({
       cls: `config-sync-hub-row${inert ? " is-insync" : ""}${status.state === "no-settings" ? " is-nosettings" : ""}`,
       attr: { "aria-label": this.host.resolvedPath(group) },
     });
     const chev = row.createSpan({ cls: "config-sync-row-chevron", text: this.expandedItems.has(group.name) ? "▾" : "▸" });
     row.createSpan({ cls: "config-sync-rule-name", text: group.name });
+    if (group.mode === "encrypted") row.createSpan({ cls: "config-sync-mode-badge", text: "🔒" });
+    else if (group.mode === "fields") row.createSpan({ cls: "config-sync-mode-badge", text: "▤" });
     row.createDiv({ cls: "config-sync-rule-spacer" });
 
     const icon = this.stateIcon(status.state);
@@ -492,6 +494,8 @@ export class SyncCenterView extends ItemView {
         return { glyph: "—", cls: "is-miss", tip: "not yet captured" };
       case "no-settings":
         return { glyph: "○", cls: "is-none", tip: "no settings yet — nothing on this device or in the store" };
+      case "locked":
+        return { glyph: "🔒", cls: "is-locked", tip: "encrypted — set the passphrase in settings to compare" };
       case "in-sync":
       default:
         return { glyph: "✓", cls: "is-ok", tip: "in sync" };
@@ -518,6 +522,13 @@ export class SyncCenterView extends ItemView {
     }
     if (status.state === "not-captured") {
       detail.createDiv({ cls: "config-sync-expand-note", text: "not captured yet — nothing in the store" });
+      return;
+    }
+    if (status.state === "locked") {
+      detail.createDiv({
+        cls: "config-sync-expand-note",
+        text: "encrypted — set the passphrase in Settings → General to compare or apply",
+      });
       return;
     }
     if (status.changes === undefined) return;

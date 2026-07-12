@@ -1,4 +1,4 @@
-import { DeviceClass, Remote, StoreLock, SyncGroup, SyncManifest } from "./types";
+import { DeviceClass, FieldRule, Remote, StoreLock, SyncGroup, SyncManifest, SyncMode } from "./types";
 import { groupStorePath } from "./pathing";
 import { isPlainObject } from "./sanitize";
 
@@ -9,8 +9,6 @@ export class ManifestValidationError extends Error {
   }
 }
 
-export const BLACKLISTED_PLUGIN_DIRS = ["remotely-save", "ioto-update", "slides-rup", "config-sync", "obsidian-config-sync"];
-
 function isValidType(v: unknown): v is "file" | "dir" {
   return v === "file" || v === "dir";
 }
@@ -19,8 +17,21 @@ function isValidDevice(v: unknown): v is DeviceClass {
   return v === "all" || v === "desktop" || v === "mobile";
 }
 
-function isValidSanitizeArray(v: unknown): v is string[] {
-  return Array.isArray(v) && v.every((p) => typeof p === "string" && p !== "");
+function isValidMode(v: unknown): v is SyncMode {
+  return v === "plain" || v === "fields" || v === "encrypted";
+}
+
+function isValidFieldRule(v: unknown): v is FieldRule {
+  return (
+    isPlainObject(v) &&
+    typeof v.pattern === "string" &&
+    v.pattern !== "" &&
+    (v.action === "strip" || v.action === "encrypt")
+  );
+}
+
+function isValidFieldsArray(v: unknown): v is FieldRule[] {
+  return Array.isArray(v) && v.every((f) => isValidFieldRule(f));
 }
 
 export function parseSyncManifest(raw: string): SyncManifest {
@@ -56,7 +67,7 @@ export function validateSyncManifest(data: unknown): SyncManifest {
 
 function parseGroup(g: unknown, index: number): SyncGroup {
   if (!isPlainObject(g)) throw new ManifestValidationError(`group #${index} must be an object`);
-  const { name, path, type, devices, sanitize, description, origin } = g;
+  const { name, path, type, devices, sanitize, mode, fields, description, origin } = g;
   if (typeof name !== "string" || name === "") {
     throw new ManifestValidationError(`group #${index}: "name" must be a non-empty string`);
   }
@@ -77,15 +88,32 @@ function parseGroup(g: unknown, index: number): SyncGroup {
   if (!isValidDevice(devices)) {
     throw new ManifestValidationError(`group "${name}": "devices" must be "all", "desktop" or "mobile"`);
   }
-  let validatedSanitize: string[] | undefined;
   if (sanitize !== undefined) {
-    if (type !== "file") {
-      throw new ManifestValidationError(`group "${name}": "sanitize" is only supported on file groups`);
+    throw new ManifestValidationError(
+      `group "${name}": "sanitize" was replaced by "mode": "fields" with "fields" rules`
+    );
+  }
+  let validatedMode: SyncMode | undefined;
+  if (mode !== undefined) {
+    if (!isValidMode(mode)) {
+      throw new ManifestValidationError(`group "${name}": "mode" must be "plain", "fields" or "encrypted"`);
     }
-    if (!isValidSanitizeArray(sanitize)) {
-      throw new ManifestValidationError(`group "${name}": "sanitize" must be an array of non-empty strings`);
+    if (mode === "fields" && type !== "file") {
+      throw new ManifestValidationError(`group "${name}": "mode": "fields" is only supported on file groups`);
     }
-    validatedSanitize = sanitize;
+    validatedMode = mode;
+  }
+  let validatedFields: FieldRule[] | undefined;
+  if (fields !== undefined) {
+    if (validatedMode !== "fields") {
+      throw new ManifestValidationError(`group "${name}": "fields" is only supported with "mode": "fields"`);
+    }
+    if (!isValidFieldsArray(fields)) {
+      throw new ManifestValidationError(
+        `group "${name}": "fields" must be an array of {pattern: non-empty string, action: "strip"|"encrypt"}`
+      );
+    }
+    validatedFields = fields;
   }
   if (description !== undefined && typeof description !== "string") {
     throw new ManifestValidationError(`group "${name}": "description" must be a string`);
@@ -93,27 +121,13 @@ function parseGroup(g: unknown, index: number): SyncGroup {
   if (origin !== undefined && origin !== "discovered") {
     throw new ManifestValidationError(`group "${name}": "origin" must be "discovered" when present`);
   }
-  assertNotBlacklisted(name, path);
   const group: SyncGroup = { name, path, type, devices };
-  if (validatedSanitize !== undefined) group.sanitize = validatedSanitize;
+  if (validatedMode !== undefined) group.mode = validatedMode;
+  if (validatedFields !== undefined) group.fields = validatedFields;
   const trimmedDescription = typeof description === "string" ? description.trim() : "";
   if (trimmedDescription !== "") group.description = trimmedDescription;
   if (origin === "discovered") group.origin = "discovered";
   return group;
-}
-
-function assertNotBlacklisted(name: string, path: string): void {
-  if (path === "{configDir}" || path === "{configDir}/plugins") {
-    throw new ManifestValidationError(
-      `group "${name}": "${path}" would sweep blacklisted plugin dirs into the store — target specific plugins instead`
-    );
-  }
-  const m = path.match(/^\{configDir\}\/plugins\/([^/]+)(\/|$)/);
-  if (m !== null && m[1] !== undefined && BLACKLISTED_PLUGIN_DIRS.includes(m[1])) {
-    throw new ManifestValidationError(
-      `group "${name}": plugin "${m[1]}" is blacklisted (machine-bound or credential-bearing), it can never enter the store`
-    );
-  }
 }
 
 export function parseStoreLock(raw: string): StoreLock {

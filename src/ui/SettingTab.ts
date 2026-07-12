@@ -1,7 +1,9 @@
 import { App, DropdownComponent, ExtraButtonComponent, Notice, Platform, Plugin, PluginSettingTab, SearchComponent, Setting, setIcon, TextComponent, ToggleComponent } from "obsidian";
-import { DeviceClass, Remote, RibbonKey, SyncGroup } from "../core/types";
+import { DeviceClass, FieldRule, Remote, RibbonKey, SyncGroup, SyncMode } from "../core/types";
+import { SensitiveScan } from "../core/modes";
 import { PkmMode } from "../core/pkm";
 import { validateRemotes } from "../core/manifest";
+import { keyMatchesAny } from "../core/sanitize";
 import {
   CatalogItem,
   CatalogSection,
@@ -38,6 +40,15 @@ export interface SettingsHost extends Plugin {
   listPluginSections(groups: SyncGroup[]): Promise<CatalogSection[]>;
   listDiscoveredFiles(groups: SyncGroup[]): Promise<{ name: string; path: string }[]>;
   installedPluginIds(): string[];
+  detectSensitive(group: SyncGroup): Promise<SensitiveScan>;
+  passphrase(): string | null;
+  setPassphrase(v: string | null): void;
+}
+
+const SENSITIVE_ENCRYPT_RE = /apikey|api_key|token|secret|password|credential/i;
+
+function defaultFieldsFromDetection(keys: string[]): FieldRule[] {
+  return keys.map((pattern) => ({ pattern, action: SENSITIVE_ENCRYPT_RE.test(pattern) ? "encrypt" : "strip" }));
 }
 
 interface RemoteDraft {
@@ -98,6 +109,8 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private sourcesErrorEl: HTMLElement | null = null;
   private groupsErrorMsg = "";
   private sourcesErrorMsg = "";
+  private detections = new Map<string, SensitiveScan>(); // group name -> live scan, filled in as reads complete
+  private passphraseStatusEl: HTMLElement | null = null;
 
   constructor(app: App, private host: SettingsHost) {
     super(app, host);
@@ -187,6 +200,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         await this.renderDataFolder(containerEl, gen);
         this.renderStatusToggles(containerEl);
         this.renderRibbonToggles(containerEl);
+        this.renderPassphrase(containerEl);
         break;
       case "obsidian":
       case "core":
@@ -241,7 +255,8 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
 
   private renderChecklistRow(listEl: HTMLElement, item: CatalogItem): void {
     const group = findGroupByName(this.groups, item.name);
-    const row = new Setting(listEl).setName(item.label);
+    const wrap = listEl.createDiv();
+    const row = new Setting(wrap).setName(item.label);
     const parts: string[] = [];
     if (item.description !== null) parts.push(item.description);
     if (item.disabledReason !== null) parts.push(item.disabledReason);
@@ -264,6 +279,9 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
           })
       );
     }
+    if (group !== undefined && item.disabledReason === null) {
+      this.renderModeSegment(row.controlEl, group);
+    }
     row.addToggle((t) => {
       t.setValue(group !== undefined);
       t.setDisabled(item.disabledReason !== null);
@@ -284,6 +302,131 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         await this.saveGroups();
         this.refresh();
       });
+    });
+    if (group !== undefined && group.mode === "fields") {
+      this.renderFieldsEditor(wrap.createDiv(), group);
+    }
+    if (group !== undefined) this.renderDetection(row, group);
+  }
+
+  // Kicks off an async scan of the item's live file(s) and patches the row in place once it
+  // resolves, instead of blocking the tab or forcing a full re-render for every item.
+  private renderDetection(row: Setting, group: SyncGroup): void {
+    const cached = this.detections.get(group.name);
+    if (cached !== undefined) {
+      this.applyDetection(row, group, cached);
+      return;
+    }
+    void (async () => {
+      let scan: SensitiveScan;
+      try {
+        scan = await this.host.detectSensitive(group);
+      } catch {
+        return;
+      }
+      this.detections.set(group.name, scan);
+      if (row.settingEl.isConnected) this.applyDetection(row, group, scan);
+    })();
+  }
+
+  private applyDetection(row: Setting, group: SyncGroup, scan: SensitiveScan): void {
+    if (scan.keys.length === 0 && !scan.blob) return;
+    const badgeText = scan.blob ? "⚠ opaque encrypted blob" : `⚠ ${scan.keys.length} sensitive-looking keys`;
+    row.nameEl.createSpan({ cls: "config-sync-detect-badge", text: badgeText });
+    if (scan.keys.length > 0) {
+      const current = row.descEl.getText();
+      row.setDesc(current === "" ? `Detected: ${scan.keys.join(", ")}` : `${current} Detected: ${scan.keys.join(", ")}`);
+    }
+  }
+
+  private renderModeSegment(controlEl: HTMLElement, group: SyncGroup): void {
+    const seg = controlEl.createDiv({ cls: "config-sync-seg" });
+    const modes: { id: SyncMode; label: string }[] = [
+      { id: "plain", label: "Plain" },
+      { id: "fields", label: "Fields" },
+      { id: "encrypted", label: "Encrypt" },
+    ];
+    const current = group.mode ?? "plain";
+    for (const m of modes) {
+      if (m.id === "fields" && group.type !== "file") continue;
+      const on = current === m.id;
+      const btn = seg.createEl("button", {
+        cls: `config-sync-seg-btn is-mode${on ? " is-on" : ""}`,
+        text: m.label,
+      });
+      btn.addEventListener("click", () => {
+        void (async () => {
+          if (m.id === "plain") {
+            delete group.mode;
+            delete group.fields;
+          } else if (m.id === "encrypted") {
+            group.mode = "encrypted";
+            delete group.fields;
+          } else {
+            group.mode = "fields";
+            if (group.fields === undefined) {
+              const scan = this.detections.get(group.name) ?? (await this.host.detectSensitive(group));
+              this.detections.set(group.name, scan);
+              if (scan.keys.length > 0) group.fields = defaultFieldsFromDetection(scan.keys);
+            }
+          }
+          await this.saveGroups();
+          this.refresh();
+        })();
+      });
+    }
+  }
+
+  private renderFieldsEditor(hostEl: HTMLElement, group: SyncGroup): void {
+    const panel = hostEl.createDiv({ cls: "config-sync-fields-editor" });
+    const detectedKeys = this.detections.get(group.name)?.keys ?? [];
+    const rules = group.fields ?? [];
+    for (const rule of rules) {
+      const isDetected = detectedKeys.some((k) => keyMatchesAny(k, [rule.pattern]));
+      const fr = panel.createDiv({ cls: "config-sync-fieldrow" });
+      fr.createSpan({ cls: "config-sync-fkey", text: rule.pattern });
+      fr.createSpan({ cls: "config-sync-ftag", text: isDetected ? "detected" : "manual" });
+      fr.createDiv({ cls: "config-sync-rule-spacer" });
+      const act = fr.createDiv({ cls: "config-sync-act" });
+      const actions: { id: FieldRule["action"]; label: string }[] = [
+        { id: "strip", label: "Strip" },
+        { id: "encrypt", label: "Encrypt" },
+      ];
+      for (const a of actions) {
+        const on = rule.action === a.id;
+        const btn = act.createEl("button", {
+          cls: `config-sync-act-btn is-${a.id}${on ? " is-on" : ""}`,
+          text: a.label,
+        });
+        btn.addEventListener("click", () => {
+          void (async () => {
+            rule.action = a.id;
+            await this.saveGroups();
+            this.refresh();
+          })();
+        });
+      }
+      new ExtraButtonComponent(fr).setIcon("x").setTooltip("Remove rule").onClick(() => {
+        void (async () => {
+          group.fields = rules.filter((r) => r !== rule);
+          if (group.fields.length === 0) delete group.fields;
+          await this.saveGroups();
+          this.refresh();
+        })();
+      });
+    }
+    const addRow = panel.createDiv({ cls: "config-sync-addrow" });
+    const input = addRow.createEl("input", { cls: "config-sync-addrow-input", attr: { placeholder: "Add key pattern… e.g. *Token*" } });
+    const addBtn = addRow.createEl("button", { cls: "config-sync-addrow-btn", text: "Add" });
+    addBtn.addEventListener("click", () => {
+      void (async () => {
+        const pattern = input.value.trim();
+        if (pattern === "") return;
+        const next = [...rules, { pattern, action: "strip" as const }];
+        group.fields = next;
+        await this.saveGroups();
+        this.refresh();
+      })();
     });
   }
 
@@ -405,6 +548,32 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         })
       );
     }
+  }
+
+  private renderPassphrase(containerEl: HTMLElement): void {
+    const setting = new Setting(containerEl)
+      .setName("Passphrase")
+      .setDesc("Needed for Encrypt modes. Enter the same passphrase on each device; it is never stored in the store or synced.");
+    let draft = "";
+    setting.addText((t) => {
+      t.inputEl.type = "password";
+      t.setValue("").onChange((v) => {
+        draft = v;
+      });
+    });
+    setting.addButton((b) =>
+      b.setButtonText("Set").onClick(() => {
+        this.host.setPassphrase(draft === "" ? null : draft);
+        this.updatePassphraseStatus();
+      })
+    );
+    this.passphraseStatusEl = setting.descEl.createDiv({ cls: "config-sync-passphrase-status" });
+    this.updatePassphraseStatus();
+  }
+
+  private updatePassphraseStatus(): void {
+    if (this.passphraseStatusEl === null) return;
+    this.passphraseStatusEl.setText(this.host.passphrase() !== null ? "set on this device" : "not set");
   }
 
   private renderGroupsReadError(containerEl: HTMLElement): boolean {
@@ -604,7 +773,10 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       .setValue(group.type)
       .onChange(async (v) => {
         group.type = v as SyncGroup["type"];
-        if (group.type !== "file") delete group.sanitize;
+        if (group.type !== "file") {
+          delete group.mode;
+          delete group.fields;
+        }
         await this.saveGroups();
         this.refresh();
       });
@@ -618,13 +790,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         await this.saveGroups();
         this.refresh();
       });
-    const sanC = new TextComponent(field(line2, "Sanitize"));
-    sanC.setPlaceholder("globs, comma-separated").setValue(group.sanitize?.join(", ") ?? "").setDisabled(group.type !== "file").onChange((v) => {
-      const patterns = v.split(",").map((s) => s.trim()).filter((s) => s !== "");
-      if (patterns.length > 0) group.sanitize = patterns;
-      else delete group.sanitize;
-      void this.saveGroups();
-    });
+    this.renderModeSegment(field(line2, "Mode"), group);
     const descC = new TextComponent(field(line2, "Description"));
     descC.setPlaceholder("optional").setValue(group.description ?? "").onChange((v) => {
       const d = v.trim();
@@ -632,6 +798,35 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       else delete group.description;
       void this.saveGroups();
     });
+    if (group.mode === "fields") {
+      this.renderFieldsEditor(panel.createDiv(), group);
+    }
+    this.renderDetectionNote(panel, group);
+  }
+
+  // Advanced-tab rule cards have no CatalogItem, so detection state isn't pre-fetched by
+  // renderChecklistRow; kick off a scan here too (cached in the same map, keyed by group name).
+  private renderDetectionNote(panel: HTMLElement, group: SyncGroup): void {
+    const cached = this.detections.get(group.name);
+    const noteEl = panel.createDiv({ cls: "config-sync-expand-note" });
+    const show = (scan: SensitiveScan): void => {
+      if (scan.keys.length === 0 && !scan.blob) return;
+      noteEl.setText(scan.blob ? "⚠ opaque encrypted blob" : `⚠ Detected: ${scan.keys.join(", ")}`);
+    };
+    if (cached !== undefined) {
+      show(cached);
+      return;
+    }
+    void (async () => {
+      let scan: SensitiveScan;
+      try {
+        scan = await this.host.detectSensitive(group);
+      } catch {
+        return;
+      }
+      this.detections.set(group.name, scan);
+      if (noteEl.isConnected) show(scan);
+    })();
   }
 
   private async saveGroups(): Promise<void> {

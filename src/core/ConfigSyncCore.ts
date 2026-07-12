@@ -2,7 +2,7 @@ import { FileIO, ensureParentDir, isJunkPath, listFilesRecursive, pruneEmptyDirs
 import { GroupResult, hasChanges, StoreLock, SyncGroup, SyncManifest } from "./types";
 import { basename, groupRealPath, groupStorePath, relativeTo } from "./pathing";
 import { parseStoreLock, parseSyncManifest, validateSyncManifest } from "./manifest";
-import { sanitizeJson, mergePreservingSanitized } from "./sanitize";
+import { applyTransform, captureTransform, contentUnchanged } from "./modes";
 
 export interface PluginHost {
   getInstalledPluginVersion(id: string): string | null;
@@ -16,6 +16,7 @@ export interface CoreContext {
   configDir: string;
   rootPath: string;
   plugins: PluginHost;
+  passphrase: string | null;
   now(): string; // ISO-8601 timestamp, injectable for tests
 }
 
@@ -97,10 +98,15 @@ async function writeClassified(
   target: string,
   content: string,
   relName: string,
-  result: GroupResult
+  result: GroupResult,
+  unchanged?: (existing: string) => Promise<boolean>
 ): Promise<void> {
   const existed = await ctx.io.exists(target);
-  if (existed && (await ctx.io.read(target)) === content) return; // unchanged: skip the write
+  if (existed) {
+    const existing = await ctx.io.read(target);
+    const isUnchanged = unchanged !== undefined ? await unchanged(existing) : existing === content;
+    if (isUnchanged) return; // unchanged: skip the write
+  }
   await ensureParentDir(ctx.io, target);
   await ctx.io.write(target, content);
   result.filesWritten.push(target);
@@ -167,19 +173,27 @@ async function captureGroup(ctx: CoreContext, group: SyncGroup): Promise<GroupRe
     return result;
   }
   if (group.type === "file") {
-    let content = await ctx.io.read(real);
-    if (group.sanitize !== undefined) {
-      const sanitized = sanitizeJson(parseJsonOrThrow(content, group.name, real), group.sanitize);
-      content = JSON.stringify(sanitized, null, 2) + "\n";
-    }
-    await writeClassified(ctx, store, content, basename(real), result);
+    const plainLocalContent = await ctx.io.read(real);
+    const t = await captureTransform(group, plainLocalContent, ctx.passphrase);
+    if (t.note !== null) result.messages.push(t.note);
+    await writeClassified(ctx, store, t.content, basename(real), result, (existing) =>
+      contentUnchanged(group, plainLocalContent, existing, ctx.passphrase)
+    );
     return result;
   }
   const sourceFiles = await listFilesRecursive(ctx.io, real);
   const sourceRels = sourceFiles.map((f) => relativeTo(real, f)).filter((rel) => !isJunkPath(rel));
   for (const rel of sourceRels) {
     const target = `${store}/${rel}`;
-    await writeClassified(ctx, target, await ctx.io.read(`${real}/${rel}`), rel, result);
+    const plainLocalContent = await ctx.io.read(`${real}/${rel}`);
+    if (group.mode === "encrypted") {
+      const t = await captureTransform(group, plainLocalContent, ctx.passphrase);
+      await writeClassified(ctx, target, t.content, rel, result, (existing) =>
+        contentUnchanged(group, plainLocalContent, existing, ctx.passphrase)
+      );
+    } else {
+      await writeClassified(ctx, target, plainLocalContent, rel, result);
+    }
   }
   if (await ctx.io.exists(store)) {
     const storeFiles = await listFilesRecursive(ctx.io, store);
@@ -315,19 +329,21 @@ async function applyGroup(ctx: CoreContext, group: SyncGroup, state: BackupState
   }
   try {
     if (group.type === "file") {
-      let content = await ctx.io.read(store);
-      if (group.sanitize !== undefined && (await ctx.io.exists(real))) {
-        const local = parseJsonOrThrow(await ctx.io.read(real), group.name, real);
-        const incoming = parseJsonOrThrow(content, group.name, store);
-        content = JSON.stringify(mergePreservingSanitized(local, incoming, group.sanitize), null, 2) + "\n";
-      }
+      const storeContent = await ctx.io.read(store);
+      const localContent = (await ctx.io.exists(real)) ? await ctx.io.read(real) : null;
+      const content = await applyTransform(group, storeContent, localContent, ctx.passphrase);
       await applyWriteClassified(ctx, state, real, content, basename(real), result);
     } else {
       const storeFiles = await listFilesRecursive(ctx.io, store);
       const rels = storeFiles.map((f) => relativeTo(store, f));
       for (const rel of rels) {
         const target = `${real}/${rel}`;
-        await applyWriteClassified(ctx, state, target, await ctx.io.read(`${store}/${rel}`), rel, result);
+        const storeContent = await ctx.io.read(`${store}/${rel}`);
+        const content =
+          group.mode === "encrypted"
+            ? await applyTransform(group, storeContent, null, ctx.passphrase)
+            : storeContent;
+        await applyWriteClassified(ctx, state, target, content, rel, result);
       }
       if (await ctx.io.exists(real)) {
         const realFiles = await listFilesRecursive(ctx.io, real);
