@@ -4,6 +4,7 @@ import { basename, groupRealPath, groupStorePath, relativeTo } from "./pathing";
 import { sanitizeJson } from "./sanitize";
 import { FileChanges, hasChanges, StoreLock, SyncGroup } from "./types";
 import { parseStoreLock } from "./manifest";
+import { stripPatterns } from "./modes";
 
 export type GroupState = "in-sync" | "local-changed" | "store-newer" | "differs" | "not-captured" | "no-settings";
 
@@ -67,9 +68,10 @@ async function compareFile(ctx: CoreContext, group: SyncGroup, real: string, sto
   const storeContent = await ctx.io.read(store);
   const liveContent = await ctx.io.read(real);
   let equal: boolean;
-  if (group.sanitize !== undefined) {
+  const strip = stripPatterns(group);
+  if (strip.length > 0) {
     // capture stores the sanitized view — compare canonical sanitized JSON, not raw text
-    const liveCanon = JSON.stringify(sanitizeJson(parseJsonOrThrow(liveContent, group.name, real), group.sanitize));
+    const liveCanon = JSON.stringify(sanitizeJson(parseJsonOrThrow(liveContent, group.name, real), strip));
     const storeCanon = JSON.stringify(parseJsonOrThrow(storeContent, group.name, store));
     equal = liveCanon === storeCanon;
   } else {

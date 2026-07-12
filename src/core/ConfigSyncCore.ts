@@ -3,6 +3,7 @@ import { GroupResult, hasChanges, StoreLock, SyncGroup, SyncManifest } from "./t
 import { basename, groupRealPath, groupStorePath, relativeTo } from "./pathing";
 import { parseStoreLock, parseSyncManifest, validateSyncManifest } from "./manifest";
 import { sanitizeJson, mergePreservingSanitized } from "./sanitize";
+import { stripPatterns } from "./modes";
 
 export interface PluginHost {
   getInstalledPluginVersion(id: string): string | null;
@@ -168,8 +169,9 @@ async function captureGroup(ctx: CoreContext, group: SyncGroup): Promise<GroupRe
   }
   if (group.type === "file") {
     let content = await ctx.io.read(real);
-    if (group.sanitize !== undefined) {
-      const sanitized = sanitizeJson(parseJsonOrThrow(content, group.name, real), group.sanitize);
+    const strip = stripPatterns(group);
+    if (strip.length > 0) {
+      const sanitized = sanitizeJson(parseJsonOrThrow(content, group.name, real), strip);
       content = JSON.stringify(sanitized, null, 2) + "\n";
     }
     await writeClassified(ctx, store, content, basename(real), result);
@@ -316,10 +318,11 @@ async function applyGroup(ctx: CoreContext, group: SyncGroup, state: BackupState
   try {
     if (group.type === "file") {
       let content = await ctx.io.read(store);
-      if (group.sanitize !== undefined && (await ctx.io.exists(real))) {
+      const strip = stripPatterns(group);
+      if (strip.length > 0 && (await ctx.io.exists(real))) {
         const local = parseJsonOrThrow(await ctx.io.read(real), group.name, real);
         const incoming = parseJsonOrThrow(content, group.name, store);
-        content = JSON.stringify(mergePreservingSanitized(local, incoming, group.sanitize), null, 2) + "\n";
+        content = JSON.stringify(mergePreservingSanitized(local, incoming, strip), null, 2) + "\n";
       }
       await applyWriteClassified(ctx, state, real, content, basename(real), result);
     } else {

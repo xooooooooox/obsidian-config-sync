@@ -1,6 +1,5 @@
 import { FileIO } from "./io";
 import { SyncGroup } from "./types";
-import { BLACKLISTED_PLUGIN_DIRS } from "./manifest";
 
 export interface CatalogItem {
   name: string;
@@ -120,7 +119,6 @@ function basename(p: string): string {
 
 const CORE_FILE_SET = new Set(Object.values(CORE_PLUGIN_FILES));
 const SWITCH_LISTS = new Set(["core-plugins.json", "community-plugins.json"]);
-const BLACKLIST_REASON = "Machine-bound or credential-bearing — cannot be synced.";
 const CORE_CAUTION = "Contains account or device-specific data — not meant to travel between vaults.";
 
 function section(bucket: string, heading: string, description: string, allowSyncAll: boolean, items: CatalogItem[]): CatalogSection[] {
@@ -285,7 +283,6 @@ export async function listPluginSections(
   };
   const enabled: CatalogItem[] = [];
   const disabled: CatalogItem[] = [];
-  const notRecommended: CatalogItem[] = [];
   for (const p of [...plugins].sort((a, b) => a.name.localeCompare(b.name))) {
     const item: CatalogItem = {
       name: `plugin-${p.id}`,
@@ -294,17 +291,15 @@ export async function listPluginSections(
       path: `{configDir}/plugins/${p.id}/data.json`,
       type: "file",
       exists: true,
-      disabledReason: BLACKLISTED_PLUGIN_DIRS.includes(p.id) ? BLACKLIST_REASON : null,
+      disabledReason: null,
       cautionReason: null,
     };
-    if (item.disabledReason !== null) notRecommended.push(item);
-    else (p.enabled ? enabled : disabled).push(item);
+    (p.enabled ? enabled : disabled).push(item);
   }
   return [
     ...section("list", "Plugin on/off list", "Which community plugins are turned on, mirrored across devices.", false, [switchItem]),
     ...section("enabled", "Enabled", "Sync the settings files of your enabled community plugins.", true, enabled),
     ...section("disabled", "Installed but disabled", "Sync a disabled plugin's settings now, ready for when you turn it on.", true, disabled),
-    ...section("notRecommended", "Not recommended", BLACKLIST_REASON, false, notRecommended),
   ];
 }
 

@@ -35,16 +35,6 @@ describe("parseSyncManifest", () => {
     const b = { name: "b", path: "vimrc", type: "file", devices: "all" };
     expect(() => parseSyncManifest(manifestWith([a, b]))).toThrow("collides");
   });
-  it("rejects blacklisted plugin dirs", () => {
-    const g = { name: "rs", path: "{configDir}/plugins/remotely-save/data.json", type: "file", devices: "all" };
-    expect(() => parseSyncManifest(manifestWith([g]))).toThrow("blacklisted");
-  });
-  it("rejects the plugin's own dir under both old and new ids", () => {
-    const neu = { name: "self", path: "{configDir}/plugins/config-sync/data.json", type: "file", devices: "all" };
-    expect(() => parseSyncManifest(manifestWith([neu]))).toThrow("blacklisted");
-    const old = { name: "self-old", path: "{configDir}/plugins/obsidian-config-sync/data.json", type: "file", devices: "all" };
-    expect(() => parseSyncManifest(manifestWith([old]))).toThrow("blacklisted");
-  });
   it("accepts workspace-pattern paths (soft-blocked in the UI, not in validation)", () => {
     const g = { name: "ws", path: "{configDir}/workspace.json", type: "file", devices: "all" };
     const m = parseSyncManifest(manifestWith([g]));
@@ -70,19 +60,33 @@ describe("parseSyncManifest", () => {
     });
     expect(() => parseSyncManifest(bad)).toThrow('"origin" must be "discovered"');
   });
-  it("rejects sanitize on dir groups", () => {
-    const g = { name: "s", path: "{configDir}/snippets", type: "dir", devices: "all", sanitize: ["*Token*"] };
-    expect(() => parseSyncManifest(manifestWith([g]))).toThrow("file groups");
-  });
   it("rejects paths with .. or absolute paths", () => {
     const g = { name: "e", path: "../outside", type: "file", devices: "all" };
     expect(() => parseSyncManifest(manifestWith([g]))).toThrow("vault-relative");
   });
-  it("rejects groups that are ancestors of blacklisted dirs", () => {
-    const plugins = { name: "all-plugins", path: "{configDir}/plugins", type: "dir", devices: "all" };
-    expect(() => parseSyncManifest(manifestWith([plugins]))).toThrow("sweep");
-    const configdir = { name: "whole-configdir", path: "{configDir}", type: "dir", devices: "all" };
-    expect(() => parseSyncManifest(manifestWith([configdir]))).toThrow("sweep");
+  it("accepts mode/fields, rejects legacy sanitize and bad modes", () => {
+    const fields = { name: "f", path: "{configDir}/plugins/demo/data.json", type: "file", devices: "all", mode: "fields", fields: [{ pattern: "*Token*", action: "strip" }] };
+    expect(parseSyncManifest(manifestWith([fields])).groups[0]).toEqual(fields);
+
+    const encrypted = { name: "e2", path: "{configDir}/plugins/demo2/data.json", type: "file", devices: "all", mode: "encrypted" };
+    expect(parseSyncManifest(manifestWith([encrypted])).groups[0]).toEqual(encrypted);
+
+    const noMode = { name: "n", path: "{configDir}/hotkeys.json", type: "file", devices: "all" };
+    expect(parseSyncManifest(manifestWith([noMode])).groups[0]?.mode).toBeUndefined();
+
+    const legacy = { name: "s", path: "{configDir}/hotkeys.json", type: "file", devices: "all", sanitize: ["*Token*"] };
+    expect(() => parseSyncManifest(manifestWith([legacy]))).toThrow(
+      'group "s": "sanitize" was replaced by "mode": "fields" with "fields" rules'
+    );
+
+    const fieldsOnDir = { name: "d", path: "{configDir}/snippets", type: "dir", devices: "all", mode: "fields", fields: [{ pattern: "*Token*", action: "strip" }] };
+    expect(() => parseSyncManifest(manifestWith([fieldsOnDir]))).toThrow("file groups");
+
+    const badMode = { name: "b", path: "{configDir}/hotkeys.json", type: "file", devices: "all", mode: "weird" };
+    expect(() => parseSyncManifest(manifestWith([badMode]))).toThrow('"mode" must be "plain", "fields" or "encrypted"');
+
+    const fieldsWithoutMode = { name: "fw", path: "{configDir}/hotkeys.json", type: "file", devices: "all", fields: [{ pattern: "*Token*", action: "strip" }] };
+    expect(() => parseSyncManifest(manifestWith([fieldsWithoutMode]))).toThrow('"fields" is only supported with "mode": "fields"');
   });
 });
 
@@ -136,10 +140,6 @@ describe("validateSyncManifest", () => {
     const m = validateSyncManifest({ $schema: "https://example.invalid/s.json", version: 1, groups: [GOOD] });
     expect(m.groups).toHaveLength(1);
     expect(m.version).toBe(1);
-  });
-  it("rejects blacklisted paths on direct objects", () => {
-    const g = { name: "rs", path: "{configDir}/plugins/remotely-save/data.json", type: "file", devices: "all" };
-    expect(() => validateSyncManifest({ version: 1, groups: [g] })).toThrow("blacklisted");
   });
   it("rejects duplicate names on direct objects", () => {
     expect(() => validateSyncManifest({ version: 1, groups: [GOOD, { ...GOOD }] })).toThrow("duplicate group name");

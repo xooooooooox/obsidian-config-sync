@@ -1,11 +1,19 @@
 export type DeviceClass = "all" | "desktop" | "mobile";
 
+export type SyncMode = "plain" | "fields" | "encrypted";
+
+export interface FieldRule {
+  pattern: string; // key-name glob pattern
+  action: "strip" | "encrypt";
+}
+
 export interface SyncGroup {
   name: string;
   path: string; // real vault-relative path; may start with the {configDir} variable
   type: "file" | "dir";
   devices: DeviceClass;
-  sanitize?: string[]; // key-name glob patterns; file groups only
+  mode?: SyncMode; // absent = "plain"; "fields" only on file groups
+  fields?: FieldRule[]; // key-name glob rules; only with mode "fields"
   description?: string; // optional human-readable label, shown in the settings panel
   origin?: "discovered"; // rule created from the Discovered-files section; name/path are fixed by the file
 }

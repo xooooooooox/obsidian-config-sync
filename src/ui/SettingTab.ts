@@ -604,7 +604,10 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       .setValue(group.type)
       .onChange(async (v) => {
         group.type = v as SyncGroup["type"];
-        if (group.type !== "file") delete group.sanitize;
+        if (group.type !== "file") {
+          delete group.mode;
+          delete group.fields;
+        }
         await this.saveGroups();
         this.refresh();
       });
@@ -619,10 +622,15 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         this.refresh();
       });
     const sanC = new TextComponent(field(line2, "Sanitize"));
-    sanC.setPlaceholder("globs, comma-separated").setValue(group.sanitize?.join(", ") ?? "").setDisabled(group.type !== "file").onChange((v) => {
+    sanC.setPlaceholder("globs, comma-separated").setValue((group.fields ?? []).map((f) => f.pattern).join(", ")).setDisabled(group.type !== "file").onChange((v) => {
       const patterns = v.split(",").map((s) => s.trim()).filter((s) => s !== "");
-      if (patterns.length > 0) group.sanitize = patterns;
-      else delete group.sanitize;
+      if (patterns.length > 0) {
+        group.mode = "fields";
+        group.fields = patterns.map((pattern) => ({ pattern, action: "strip" }));
+      } else {
+        delete group.mode;
+        delete group.fields;
+      }
       void this.saveGroups();
     });
     const descC = new TextComponent(field(line2, "Description"));

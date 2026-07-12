@@ -8,7 +8,7 @@ const MANIFEST = JSON.stringify({
   groups: [
     { name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all" },
     { name: "snippets", path: "{configDir}/snippets", type: "dir", devices: "all" },
-    { name: "plugin-demo", path: "{configDir}/plugins/demo/data.json", type: "file", devices: "all", sanitize: ["*Token*"] },
+    { name: "plugin-demo", path: "{configDir}/plugins/demo/data.json", type: "file", devices: "all", mode: "fields", fields: [{ pattern: "*Token*", action: "strip" }] },
   ],
 });
 

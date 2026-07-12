@@ -20,10 +20,22 @@
           "type": { "enum": ["file", "dir"] },
           "devices": { "enum": ["all", "desktop", "mobile"] },
           "description": { "type": "string", "minLength": 1, "description": "Human-readable label for this group, shown in the settings panel" },
-          "sanitize": {
+          "mode": {
+            "enum": ["plain", "fields", "encrypted"],
+            "description": "Sync mode. Absent = \"plain\". \"fields\" (file groups only) applies per-field rules; \"encrypted\" encrypts the whole file."
+          },
+          "fields": {
             "type": "array",
-            "items": { "type": "string", "minLength": 1 },
-            "description": "Key-name glob patterns (* wildcard) stripped on publish and preserved locally on apply. File groups only."
+            "items": {
+              "type": "object",
+              "required": ["pattern", "action"],
+              "additionalProperties": false,
+              "properties": {
+                "pattern": { "type": "string", "minLength": 1, "description": "Key-name glob pattern (* wildcard)" },
+                "action": { "enum": ["strip", "encrypt"] }
+              }
+            },
+            "description": "Per-field rules. Only valid with \"mode\": \"fields\"."
           }
         }
       }

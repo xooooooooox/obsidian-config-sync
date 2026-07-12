@@ -9,7 +9,7 @@ export const MANIFEST = JSON.stringify({
     { name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all" },
     { name: "snippets", path: "{configDir}/snippets", type: "dir", devices: "all" },
     { name: "vimrc", path: ".obsidian.vimrc", type: "file", devices: "desktop" },
-    { name: "plugin-demo", path: "{configDir}/plugins/demo/data.json", type: "file", devices: "all", sanitize: ["*Token*"] },
+    { name: "plugin-demo", path: "{configDir}/plugins/demo/data.json", type: "file", devices: "all", mode: "fields", fields: [{ pattern: "*Token*", action: "strip" }] },
   ],
 });
 
@@ -549,8 +549,8 @@ describe("readGroups / writeGroups", () => {
     const { io, ctx } = setup();
     await writeGroups(ctx, []);
     const before = await io.read("cs/config-sync.json");
-    const bad = [{ name: "rs", path: "{configDir}/plugins/remotely-save/data.json", type: "file" as const, devices: "all" as const }];
-    await expect(writeGroups(ctx, bad)).rejects.toThrow("blacklisted");
+    const bad = [{ name: "rs", path: "{configDir}/plugins/remotely-save/data.json", type: "dir" as const, devices: "all" as const, mode: "fields" as const, fields: [{ pattern: "*Token*", action: "strip" as const }] }];
+    await expect(writeGroups(ctx, bad)).rejects.toThrow("file groups");
     expect(await io.read("cs/config-sync.json")).toBe(before);
   });
 
