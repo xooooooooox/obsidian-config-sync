@@ -5,7 +5,7 @@ import { sanitizeJson } from "./sanitize";
 import { FileChanges, hasChanges, StoreLock, SyncGroup } from "./types";
 import { parseStoreLock } from "./manifest";
 
-export type GroupState = "in-sync" | "local-changed" | "store-newer" | "differs" | "not-captured";
+export type GroupState = "in-sync" | "local-changed" | "store-newer" | "differs" | "not-captured" | "no-settings";
 
 export interface GroupStatus {
   group: string;
@@ -14,7 +14,7 @@ export interface GroupStatus {
   changes?: FileChanges;
 }
 
-type Comparison = "not-captured" | { changes: FileChanges; liveFiles: string[] };
+type Comparison = "not-captured" | "no-settings" | { changes: FileChanges; liveFiles: string[] };
 
 export async function statusForGroups(ctx: CoreContext, groups: SyncGroup[]): Promise<GroupStatus[]> {
   // The lock is optional context for direction hints; never let it block status.
@@ -43,6 +43,7 @@ async function groupStatus(ctx: CoreContext, group: SyncGroup, capturedAtMs: num
   const real = groupRealPath(group.path, ctx.configDir);
   const store = `${storeDir(ctx)}/${groupStorePath(group.path)}`;
   const cmp = group.type === "file" ? await compareFile(ctx, group, real, store) : await compareDir(ctx, real, store);
+  if (cmp === "no-settings") return { group: group.name, state: "no-settings" };
   if (cmp === "not-captured") return { group: group.name, state: "not-captured" };
   if (!hasChanges(cmp.changes)) return { group: group.name, state: "in-sync" };
   let maxMtime: number | null = null;
@@ -56,7 +57,9 @@ async function groupStatus(ctx: CoreContext, group: SyncGroup, capturedAtMs: num
 }
 
 async function compareFile(ctx: CoreContext, group: SyncGroup, real: string, store: string): Promise<Comparison> {
-  if (!(await ctx.io.exists(store))) return "not-captured";
+  if (!(await ctx.io.exists(store))) {
+    return (await ctx.io.exists(real)) ? "not-captured" : "no-settings";
+  }
   const name = basename(real);
   if (!(await ctx.io.exists(real))) {
     return { liveFiles: [], changes: { added: [], updated: [], deleted: [name] } };
@@ -77,9 +80,9 @@ async function compareFile(ctx: CoreContext, group: SyncGroup, real: string, sto
 }
 
 async function compareDir(ctx: CoreContext, real: string, store: string): Promise<Comparison> {
-  const storeFiles = (await ctx.io.exists(store)) ? (await listFilesRecursive(ctx.io, store)).filter((f) => !isJunkPath(f)) : [];
-  if (storeFiles.length === 0) return "not-captured";
   const liveFiles = (await ctx.io.exists(real)) ? (await listFilesRecursive(ctx.io, real)).filter((f) => !isJunkPath(f)) : [];
+  const storeFiles = (await ctx.io.exists(store)) ? (await listFilesRecursive(ctx.io, store)).filter((f) => !isJunkPath(f)) : [];
+  if (storeFiles.length === 0) return liveFiles.length === 0 ? "no-settings" : "not-captured";
   const liveRels = liveFiles.map((f) => relativeTo(real, f));
   const storeRels = storeFiles.map((f) => relativeTo(store, f));
   const liveSet = new Set(liveRels);
@@ -105,18 +108,21 @@ export interface BucketCounts {
   up: number; // resolved by Capture: changed here + never captured
   down: number; // resolved by Apply: store newer + differs
   ok: number;
+  none: number; // no files on either side — nothing to do
 }
 
 export function bucketCounts(statuses: GroupStatus[]): BucketCounts {
   let up = 0;
   let down = 0;
   let ok = 0;
+  let none = 0;
   for (const s of statuses) {
     if (s.state === "local-changed" || s.state === "not-captured") up++;
     else if (s.state === "store-newer" || s.state === "differs") down++;
+    else if (s.state === "no-settings") none++;
     else ok++;
   }
-  return { up, down, ok };
+  return { up, down, ok, none };
 }
 
 export type RemoteState = "no-store" | "same" | "remote-newer" | "remote-older" | "unknown";
@@ -178,5 +184,7 @@ export async function diffRemote(ctx: CoreContext, reader: ExternalStoreReader):
       entry(name).changes.deleted.push(itemRel);
     }
   }
-  return [...byName.values()].filter((e) => hasChanges(e.changes));
+  // The "" store-metadata pseudo-entry (lock + manifest bookkeeping) drifts on every capture;
+  // it is not a difference worth reporting here. Pull/push REPORTS still show it.
+  return [...byName.values()].filter((e) => e.group !== "" && hasChanges(e.changes));
 }

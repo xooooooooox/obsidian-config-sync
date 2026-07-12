@@ -98,6 +98,20 @@ describe("statusForGroups", () => {
     expect(snip?.changes?.updated).toEqual(["one.css"]);
     expect(snip?.changes?.deleted).toEqual(["three.css"]);
   });
+
+  it("reports no-settings when neither this device nor the store has files", async () => {
+    const { io, ctx } = setup();
+    io.seed({ "cs/config-sync.json": MANIFEST, ".obs/hotkeys.json": '{"a":1}' });
+    // hotkeys: local only -> not-captured; snippets dir + plugin-demo file: nothing anywhere -> no-settings
+    const states = await allStates(ctx);
+    expect(states).toEqual({ hotkeys: "not-captured", snippets: "no-settings", "plugin-demo": "no-settings" });
+  });
+
+  it("keeps deletion-only differs when the store has files but this device does not", async () => {
+    const { io, ctx } = await seededAndCaptured();
+    await io.remove(".obs/hotkeys.json");
+    expect((await allStates(ctx))["hotkeys"]).toBe("differs");
+  });
 });
 
 function fakeReader(files: Record<string, string>): ExternalStoreReader {
@@ -130,22 +144,17 @@ describe("diffRemote", () => {
     expect(entries.find((e) => e.group === "hotkeys")).toBeUndefined();
   });
 
-  it("omits the metadata entry when config-sync.json and store.lock.json match, includes it when they differ", async () => {
+  it("never reports the store-metadata pseudo-entry, even when bookkeeping files differ", async () => {
     const { io, ctx } = await seededAndCaptured();
-    const sameRemote: Record<string, string> = {
-      "config-sync.json": await io.read("cs/config-sync.json"),
-      "store.lock.json": await io.read("cs/store.lock.json"),
+    const remote: Record<string, string> = {
+      "config-sync.json": '{"version":1,"groups":[]}', // differs from local manifest
+      "store.lock.json": JSON.stringify({ capturedAt: "2026-07-09T00:00:00.000Z", groups: {} }), // differs from local lock
       "store/configdir/hotkeys.json": '{"a":1}',
       "store/configdir/snippets/one.css": "one",
       "store/configdir/plugins/demo/data.json": await io.read("cs/store/configdir/plugins/demo/data.json"),
     };
-    const sameEntries = await diffRemote(ctx, fakeReader(sameRemote));
-    expect(sameEntries.find((e) => e.group === "")).toBeUndefined();
-
-    const diffRemoteFiles: Record<string, string> = { ...sameRemote, "config-sync.json": '{"version":1,"groups":[]}' };
-    const diffEntries = await diffRemote(ctx, fakeReader(diffRemoteFiles));
-    const meta = diffEntries.find((e) => e.group === "");
-    expect(meta?.changes.updated).toEqual(["config-sync.json"]);
+    const entries = await diffRemote(ctx, fakeReader(remote));
+    expect(entries).toEqual([]); // bookkeeping drift alone means "matches"
   });
 });
 
@@ -163,14 +172,15 @@ describe("checkRemote", () => {
 });
 
 describe("bucketCounts", () => {
-  it("bucketCounts groups the five states into capture/apply/ok buckets", () => {
+  it("bucketCounts groups the six states into capture/apply/ok/none buckets", () => {
     const statuses: GroupStatus[] = [
       { group: "a", state: "local-changed" },
       { group: "b", state: "not-captured" },
       { group: "c", state: "store-newer" },
       { group: "d", state: "differs" },
       { group: "e", state: "in-sync" },
+      { group: "f", state: "no-settings" },
     ];
-    expect(bucketCounts(statuses)).toEqual({ up: 2, down: 2, ok: 1 });
+    expect(bucketCounts(statuses)).toEqual({ up: 2, down: 2, ok: 1, none: 1 });
   });
 });
