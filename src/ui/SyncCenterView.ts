@@ -1,4 +1,4 @@
-import { App, ButtonComponent, ExtraButtonComponent, Modal } from "obsidian";
+import { ButtonComponent, ExtraButtonComponent, ItemView, WorkspaceLeaf } from "obsidian";
 import { bucketCounts, GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry } from "../core/status";
 import { CATEGORY_LABELS, ItemCategory, categoryForGroup } from "../core/catalog";
 import { FileChanges, Remote, SyncGroup, hasChanges } from "../core/types";
@@ -23,7 +23,7 @@ const sessionUi = {
   nosettingsOpen: new Set<string>(),
 };
 
-export interface SyncModalHost {
+export interface SyncCenterHost {
   computeStatuses(): Promise<{ groups: SyncGroup[]; statuses: GroupStatus[] }>;
   resolvedPath(group: SyncGroup): string;
   captureItems(names: string[]): Promise<void>; // runs selective capture + shows its report
@@ -58,7 +58,9 @@ interface StatusRow {
   status: GroupStatus;
 }
 
-export class SyncModal extends Modal {
+export const SYNC_CENTER_VIEW_TYPE = "config-sync-center";
+
+export class SyncCenterView extends ItemView {
   private groups: SyncGroup[] = [];
   private statuses: Map<string, GroupStatus> = new Map();
   private selected: Set<string> = new Set();
@@ -69,22 +71,28 @@ export class SyncModal extends Modal {
   private panelScope: { kind: "device"; cat: ItemCategory | "all" } | { kind: "remote"; name: string } = { kind: "device", cat: "all" };
   private search = "";
 
-  constructor(app: App, private host: SyncModalHost) {
-    super(app);
+  constructor(leaf: WorkspaceLeaf, private host: SyncCenterHost) {
+    super(leaf);
   }
 
-  onOpen(): void {
-    // Disable scrim-close: swallow clicks on the modal background at capture phase so Obsidian's
-    // own close handler never fires. Esc and the × button close through separate paths, untouched.
-    const bg = this.containerEl.children[0] as HTMLElement;
-    bg.addEventListener("click", (e) => e.stopImmediatePropagation(), { capture: true });
-    this.titleEl.addClass("config-sync-panel-title");
-    this.titleEl.setText("Config Sync");
-    this.modalEl.addClass("config-sync-wide");
-    void this.reload();
+  getViewType(): string {
+    return SYNC_CENTER_VIEW_TYPE;
   }
 
-  onClose(): void {
+  getDisplayText(): string {
+    return "Sync Center";
+  }
+
+  getIcon(): string {
+    return "arrow-left-right";
+  }
+
+  async onOpen(): Promise<void> {
+    this.contentEl.addClass("config-sync-center");
+    await this.reload();
+  }
+
+  async onClose(): Promise<void> {
     this.contentEl.empty();
   }
 
@@ -120,7 +128,7 @@ export class SyncModal extends Modal {
   private render(gen: number): void {
     if (gen !== this.renderGen) return;
     this.contentEl.empty();
-    this.renderHeaderPills();
+    this.renderHeader();
     const shell = this.contentEl.createDiv({ cls: "config-sync-shell" });
     this.renderSidebar(shell);
     const main = shell.createDiv({ cls: "config-sync-main" });
@@ -190,11 +198,11 @@ export class SyncModal extends Modal {
     }
   }
 
-  private renderHeaderPills(): void {
+  private renderHeader(): void {
+    const head = this.contentEl.createDiv({ cls: "config-sync-center-head" });
+    head.createSpan({ cls: "config-sync-center-title", text: "Sync Center" });
     const { up, down, ok, none } = bucketCounts(this.rows().map((r) => r.status));
-    this.titleEl.empty();
-    this.titleEl.setText("Config Sync");
-    const pills = this.titleEl.createSpan({ cls: "config-sync-report-pills" });
+    const pills = head.createSpan({ cls: "config-sync-report-pills" });
     if (up > 0) {
       pills.createSpan({
         cls: "config-sync-pill is-up",

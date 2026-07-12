@@ -238,8 +238,6 @@ body.is-phone .config-sync-remote-git {
 }
 
 .config-sync-report-title { display: flex; align-items: center; gap: var(--size-4-2); }
-.config-sync-panel-title { display: flex; align-items: center; gap: var(--size-4-2); padding-right: 28px; }
-.config-sync-panel-title .config-sync-report-pills { margin-left: auto; }
 .config-sync-report-pills { display: flex; gap: var(--size-4-1); margin-left: auto; }
 .config-sync-pill { font-size: var(--font-ui-smaller); border-radius: 999px; padding: 1px 8px; }
 .config-sync-pill.is-neutral { background: var(--background-modifier-border); color: var(--text-normal); }
@@ -386,7 +384,11 @@ body.is-phone .config-sync-actionbar { flex-wrap: wrap; }
 
 .config-sync-staged-count { color: var(--text-muted); font-size: var(--font-ui-smaller); }
 
-.modal.config-sync-wide { width: 920px; max-width: 95vw; }
+.config-sync-center-head { display: flex; align-items: center; gap: var(--size-4-2); padding-bottom: var(--size-4-2); }
+
+.config-sync-center-title { font-size: var(--font-ui-medium); font-weight: 600; }
+
+.config-sync-center-head .config-sync-report-pills { margin-left: 0; }
 
 .config-sync-shell { display: grid; grid-template-columns: minmax(150px, 22%) minmax(0, 1fr); gap: var(--size-4-3); }
 
