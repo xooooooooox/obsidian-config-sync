@@ -254,7 +254,7 @@ export class SyncModal extends Modal {
     }
     const searchEl = bar.createEl("input", {
       type: "search",
-      cls: "config-sync-search",
+      cls: "config-sync-mainbar-search",
       attr: { placeholder: "Filter by name…" },
     });
     searchEl.value = this.search;

@@ -416,7 +416,7 @@ body.is-phone .config-sync-actionbar { flex-wrap: wrap; }
 
 .config-sync-mainbar { display: flex; align-items: center; gap: var(--size-4-1); padding-bottom: var(--size-4-2); flex-wrap: wrap; }
 
-.config-sync-search { margin-left: auto; background: var(--background-primary); border: 1px solid var(--background-modifier-border); border-radius: 6px; padding: 2px 8px; font-size: var(--font-ui-smaller); width: 140px; }
+.config-sync-mainbar-search { margin-left: auto; background: var(--background-primary); border: 1px solid var(--background-modifier-border); border-radius: 6px; padding: 2px 8px; font-size: var(--font-ui-smaller); width: 140px; }
 
 .config-sync-remote-head { color: var(--text-muted); font-size: var(--font-ui-small); padding-bottom: var(--size-4-2); }
 
