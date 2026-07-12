@@ -229,7 +229,6 @@ export class SyncCenterView extends ItemView {
     refresh.setTooltip("Re-check remotes");
     refresh.onClick(async () => {
       await this.host.refreshRemoteChecks();
-      this.switcherOpen = false;
       this.render(this.renderGen);
     });
     for (const remote of remotes) {
