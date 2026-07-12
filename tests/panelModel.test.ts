@@ -37,6 +37,14 @@ describe("visibleUnderFilter", () => {
     expect(visibleUnderFilter("no-settings", "ok")).toBe(false);
     expect(visibleUnderFilter("no-settings", "all")).toBe(true);
   });
+
+  it("locked shows only under all; capture/apply/ok/none exclude it", () => {
+    expect(visibleUnderFilter("locked", "all")).toBe(true);
+    expect(visibleUnderFilter("locked", "capture")).toBe(false);
+    expect(visibleUnderFilter("locked", "apply")).toBe(false);
+    expect(visibleUnderFilter("locked", "ok")).toBe(false);
+    expect(visibleUnderFilter("locked", "none")).toBe(false);
+  });
 });
 
 describe("capFileEntries", () => {

@@ -292,6 +292,9 @@ body.is-phone .config-sync-remote-git {
 .config-sync-state-icon.is-ok { color: var(--color-green); }
 .config-sync-state-icon.is-pull { color: var(--color-cyan); }
 .config-sync-state-icon.is-push { color: var(--color-pink); }
+.config-sync-state-icon.is-locked { color: var(--color-cyan); }
+
+.config-sync-mode-badge { color: var(--text-faint); font-size: 10px; }
 
 /* custom-drawn checkboxes (same inputs, no native rendering) */
 .config-sync-hub-row input[type="checkbox"],
