@@ -18,6 +18,9 @@ import {
   writeGroups,
 } from "./core/ConfigSyncCore";
 import { type CatalogSection, listCoreSections, listDiscovered, listOptionSections, listPluginSections } from "./core/catalog";
+import { listFilesRecursive } from "./core/io";
+import { groupRealPath } from "./core/pathing";
+import { scanSensitive, SensitiveScan } from "./core/modes";
 import { PkmMode, PkmProbe, resolveEffectiveMode, resolveRootPath } from "./core/pkm";
 import { bucketCounts, checkRemote, diffRemote, GroupStatus, RemoteCheck, statusForGroups } from "./core/status";
 import { Remote, RibbonButtons, StoreLock, SyncGroup } from "./core/types";
@@ -313,6 +316,15 @@ export default class ConfigSyncPlugin extends Plugin {
     };
   }
 
+  passphrase(): string | null {
+    const v: unknown = this.app.loadLocalStorage("config-sync-passphrase");
+    return typeof v === "string" && v !== "" ? v : null;
+  }
+
+  setPassphrase(v: string | null): void {
+    this.app.saveLocalStorage("config-sync-passphrase", v === "" ? null : v);
+  }
+
   private async coreContext(): Promise<CoreContext> {
     const rootPath = await resolveRootPath(this.settings.rootPath, this.settings.pkmMode, this.pkmProbe());
     if (rootPath === "" || rootPath.startsWith("/") || rootPath.split("/").includes("..")) {
@@ -331,7 +343,7 @@ export default class ConfigSyncPlugin extends Plugin {
       configDir: this.app.vault.configDir,
       rootPath,
       plugins: host,
-      passphrase: null,
+      passphrase: this.passphrase(),
       now: () => new Date().toISOString(),
     };
   }
@@ -401,6 +413,28 @@ export default class ConfigSyncPlugin extends Plugin {
 
   async listDiscoveredFiles(groups: SyncGroup[]): Promise<{ name: string; path: string }[]> {
     return listDiscovered(this.app.vault.adapter, this.app.vault.configDir, groups);
+  }
+
+  async detectSensitive(group: SyncGroup): Promise<SensitiveScan> {
+    const io = this.app.vault.adapter;
+    const real = groupRealPath(group.path, this.app.vault.configDir);
+    const dirExists = group.type === "dir" && (await io.exists(real));
+    const files = group.type === "file" ? [real] : dirExists ? await listFilesRecursive(io, real) : [];
+    const keys = new Set<string>();
+    let blob = false;
+    for (const f of files) {
+      if (!(await io.exists(f))) continue;
+      let content: string;
+      try {
+        content = await io.read(f);
+      } catch {
+        continue;
+      }
+      const scan = scanSensitive(content);
+      for (const k of scan.keys) keys.add(k);
+      if (scan.blob) blob = true;
+    }
+    return { keys: [...keys], blob };
   }
 
   detectedMode(): "ioto" | "default" {

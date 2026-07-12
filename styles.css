@@ -436,3 +436,35 @@ body.is-phone .config-sync-actionbar { flex-wrap: wrap; }
 
 .config-sync-switcher-menu { background: var(--background-secondary); border: 1px solid var(--background-modifier-border); border-radius: 9px; padding: 5px; box-shadow: var(--shadow-s); }
 
+/* iter20 — per-item sync mode, fields editor, passphrase */
+
+.config-sync-seg-btn.is-mode.is-on { background: rgba(var(--interactive-accent-rgb), 0.22); color: var(--text-accent); }
+
+.config-sync-detect-badge { margin-left: var(--size-4-2); font-size: var(--font-ui-smaller); color: var(--color-orange); background: rgba(var(--color-orange-rgb), 0.12); border-radius: 9px; padding: 1px 8px; }
+
+.config-sync-fields-editor { border-top: 1px solid var(--background-modifier-border); margin-top: var(--size-4-2); padding-top: var(--size-4-2); }
+
+.config-sync-fieldrow { display: flex; align-items: center; gap: var(--size-4-2); padding: var(--size-4-1) 0; border-bottom: 1px solid var(--background-modifier-border); font-size: var(--font-ui-smaller); }
+
+.config-sync-fieldrow:last-of-type { border-bottom: none; }
+
+.config-sync-fkey { font-family: var(--font-monospace); color: var(--text-normal); }
+
+.config-sync-ftag { font-size: 9.5px; color: var(--text-faint); }
+
+.config-sync-act { display: inline-flex; border: 1px solid var(--background-modifier-border); border-radius: 5px; overflow: hidden; flex: none; }
+
+.config-sync-act-btn { background: none; border: none; border-radius: 0; box-shadow: none; height: auto; padding: 1px 8px; font-size: 10px; color: var(--text-muted); cursor: pointer; }
+
+.config-sync-act-btn.is-strip.is-on { background: rgba(var(--color-red-rgb), 0.18); color: var(--color-red); }
+
+.config-sync-act-btn.is-encrypt.is-on { background: rgba(var(--color-cyan-rgb), 0.18); color: var(--color-cyan); }
+
+.config-sync-addrow { display: flex; gap: var(--size-4-2); margin-top: var(--size-4-2); }
+
+.config-sync-addrow-input { flex: 1; background: var(--background-primary); border: 1px solid var(--background-modifier-border); border-radius: 6px; padding: 3px 9px; font-size: var(--font-ui-smaller); color: var(--text-normal); }
+
+.config-sync-addrow-btn { background: var(--background-modifier-form-field); border: 1px solid var(--background-modifier-border); border-radius: 5px; padding: 3px 11px; font-size: var(--font-ui-smaller); color: var(--text-normal); cursor: pointer; }
+
+.config-sync-passphrase-status { color: var(--text-muted); font-size: var(--font-ui-smaller); margin-top: var(--size-2-1); }
+
