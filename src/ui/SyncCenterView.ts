@@ -93,7 +93,11 @@ export class SyncCenterView extends ItemView {
 
   async onOpen(): Promise<void> {
     this.contentEl.addClass("config-sync-center");
-    this.onResize();
+    const ro = new ResizeObserver(() => {
+      this.evaluateCompact();
+    });
+    ro.observe(this.contentEl);
+    this.register(() => ro.disconnect());
     this.registerEvent(
       this.app.workspace.on("active-leaf-change", (leaf) => {
         if (leaf === this.leaf) void this.reload();
@@ -116,6 +120,10 @@ export class SyncCenterView extends ItemView {
   }
 
   onResize(): void {
+    this.evaluateCompact();
+  }
+
+  private evaluateCompact(): void {
     const width = this.contentEl.clientWidth;
     if (width === 0) return; // hidden leaf
     const compact = width < 700;
