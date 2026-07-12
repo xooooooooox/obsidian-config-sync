@@ -382,8 +382,13 @@ body.is-phone .config-sync-actionbar { flex-wrap: wrap; }
 
 .config-sync-expand-note { color: var(--text-muted); font-size: var(--font-ui-smaller); font-style: italic; margin: 0 0 var(--size-4-1) 0; font-family: var(--font-interface); }
 .config-sync-more-files { color: var(--text-muted); cursor: pointer; }
-.config-sync-mini-actions { display: flex; gap: var(--size-4-2); flex-wrap: wrap; margin: 2px 0 var(--size-4-1) 0; font-family: var(--font-interface); }
-.config-sync-mini { background: none; border: 1px solid var(--background-modifier-border); border-radius: 4px; padding: 1px 8px; font-size: var(--font-ui-smaller); cursor: pointer; box-shadow: none; height: auto; }
-.config-sync-mini.is-capture { color: var(--color-orange); }
-.config-sync-mini.is-apply { color: var(--color-purple); }
+.config-sync-seg { display: inline-flex; border: 1px solid var(--background-modifier-border); border-radius: 5px; overflow: hidden; margin: 2px 0 var(--size-4-1) 0; font-family: var(--font-interface); }
+
+.config-sync-seg-btn { background: none; border: none; border-radius: 0; box-shadow: none; height: auto; padding: 1px 9px; font-size: var(--font-ui-smaller); color: var(--text-muted); cursor: pointer; }
+
+.config-sync-seg-btn.is-capture.is-on { background: rgba(var(--color-orange-rgb), 0.25); color: var(--color-orange); }
+
+.config-sync-seg-btn.is-apply.is-on { background: rgba(var(--color-purple-rgb), 0.25); color: var(--color-purple); }
+
+.config-sync-staged-count { color: var(--text-muted); font-size: var(--font-ui-smaller); }
 

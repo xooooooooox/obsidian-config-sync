@@ -2,7 +2,16 @@ import { App, ButtonComponent, ExtraButtonComponent, Modal } from "obsidian";
 import { bucketCounts, GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry } from "../core/status";
 import { CATEGORY_LABELS, ItemCategory, categoryForGroup } from "../core/catalog";
 import { FileChanges, Remote, SyncGroup, hasChanges } from "../core/types";
-import { capFileEntries, CappedEntry, insyncLineText, moreFilesText, PanelFilter, visibleUnderFilter, directionForState } from "./panelModel";
+import {
+  capFileEntries,
+  CappedEntry,
+  insyncLineText,
+  moreFilesText,
+  PanelFilter,
+  visibleUnderFilter,
+  Direction,
+  effectiveDirection,
+} from "./panelModel";
 
 const CATEGORY_ORDER: ItemCategory[] = ["obsidian", "core", "community", "custom"];
 
@@ -52,6 +61,7 @@ export class SyncModal extends Modal {
   private groups: SyncGroup[] = [];
   private statuses: Map<string, GroupStatus> = new Map();
   private selected: Set<string> = new Set();
+  private directionOverride: Map<string, Direction> = new Map();
   private expandedItems: Set<string> = new Set();
   private expandedRemotes: Set<string> = new Set();
   private renderGen = 0;
@@ -84,6 +94,7 @@ export class SyncModal extends Modal {
     this.statuses = new Map(statuses.map((s) => [s.group, s]));
     // Selections reset to defaults on every reload: pre-check local-changed + store-newer only.
     this.selected = new Set();
+    this.directionOverride.clear();
     for (const s of statuses) {
       if (s.state === "local-changed" || s.state === "store-newer") this.selected.add(s.group);
     }
@@ -97,6 +108,10 @@ export class SyncModal extends Modal {
       if (status !== undefined) out.push({ group, status });
     }
     return out;
+  }
+
+  private effDir(r: StatusRow): Direction {
+    return effectiveDirection(r.status.state, this.directionOverride.get(r.group.name));
   }
 
   private render(gen: number): void {
@@ -261,7 +276,7 @@ export class SyncModal extends Modal {
     const icon = this.stateIcon(status.state);
     row.createSpan({ cls: `config-sync-state-icon ${icon.cls}`, text: icon.glyph, attr: { "aria-label": icon.tip } });
 
-    const dir = directionForState(status.state);
+    const dir = this.effDir(r);
     const cb = row.createEl("input", { type: "checkbox" });
     cb.addClass(dir === "capture" ? "is-capture" : "is-apply");
     cb.disabled = inert;
@@ -304,7 +319,7 @@ export class SyncModal extends Modal {
 
   // Expanded rows always show content: an error, a state note, or actions + the file diff.
   private renderItemDetail(detail: HTMLElement, r: StatusRow): void {
-    const { group, status } = r;
+    const { status } = r;
     if (status.message !== undefined) {
       detail.createDiv({ cls: "config-sync-status-error", text: status.message });
       return;
@@ -325,30 +340,38 @@ export class SyncModal extends Modal {
       return;
     }
     if (status.changes === undefined) return;
-    this.renderMiniActions(detail, group.name);
+    this.renderDirectionToggle(detail, r);
     this.renderCappedChanges(detail, status.changes);
   }
 
-  // Per-item counter-direction actions: run immediately for this one item, reusing the
-  // host's normal capture/apply flows (confirm + report + reload prompt), then refresh.
-  private renderMiniActions(detail: HTMLElement, name: string): void {
-    const bar = detail.createDiv({ cls: "config-sync-mini-actions" });
-    const cap = bar.createEl("button", { cls: "config-sync-mini is-capture", text: "↑ Capture this (keep local)" });
-    cap.addEventListener("click", (e) => {
-      e.stopPropagation();
-      void (async () => {
-        await this.host.captureItems([name]);
-        await this.reload();
-      })();
-    });
-    const apply = bar.createEl("button", { cls: "config-sync-mini is-apply", text: "↓ Apply store version (overwrites local)" });
-    apply.addEventListener("click", (e) => {
-      e.stopPropagation();
-      void (async () => {
-        await this.host.applyItems([name]);
-        await this.reload();
-      })();
-    });
+  // Staging, not execution: a segment checks the row in that direction; clicking the
+  // active segment unstages it. The footer buttons are the only execution points.
+  private renderDirectionToggle(detail: HTMLElement, r: StatusRow): void {
+    const name = r.group.name;
+    const staged = this.selected.has(name);
+    const dir = this.effDir(r);
+    const seg = detail.createDiv({ cls: "config-sync-seg" });
+    const segBtn = (d: Direction, label: string, aria: string): void => {
+      const on = staged && dir === d;
+      const b = seg.createEl("button", {
+        cls: `config-sync-seg-btn is-${d}${on ? " is-on" : ""}`,
+        text: label,
+        attr: { "aria-label": aria },
+      });
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (on) {
+          this.selected.delete(name);
+          this.directionOverride.delete(name);
+        } else {
+          this.selected.add(name);
+          this.directionOverride.set(name, d);
+        }
+        this.render(this.renderGen);
+      });
+    };
+    segBtn("capture", "↑ Capture", "Capture this (keep local)");
+    segBtn("apply", "↓ Apply store", "Apply store version (overwrites local)");
   }
 
   private renderCappedChanges(detail: HTMLElement, changes: FileChanges): void {
@@ -370,18 +393,20 @@ export class SyncModal extends Modal {
 
   private captureNames(): string[] {
     return this.rows()
-      .filter((r) => this.selected.has(r.group.name) && directionForState(r.status.state) === "capture")
+      .filter((r) => this.selected.has(r.group.name) && this.effDir(r) === "capture")
       .map((r) => r.group.name);
   }
 
   private applyNames(): string[] {
     return this.rows()
-      .filter((r) => this.selected.has(r.group.name) && directionForState(r.status.state) === "apply")
+      .filter((r) => this.selected.has(r.group.name) && this.effDir(r) === "apply")
       .map((r) => r.group.name);
   }
 
   private renderActionBar(macro: HTMLElement): void {
     const bar = macro.createDiv({ cls: "config-sync-actionbar" });
+    bar.createSpan({ cls: "config-sync-staged-count", text: `${this.selected.size} staged` });
+    bar.createDiv({ cls: "config-sync-rule-spacer" });
     const capNames = this.captureNames();
     const applyNames = this.applyNames();
 
