@@ -23,7 +23,7 @@ import { bucketCounts, checkRemote, diffRemote, GroupStatus, RemoteCheck, status
 import { Remote, RibbonButtons, StoreLock, SyncGroup } from "./core/types";
 import { confirmWarnings } from "./ui/ConfirmModal";
 import { ReportModal } from "./ui/ReportModal";
-import { SyncModal } from "./ui/SyncModal";
+import { SYNC_CENTER_VIEW_TYPE, SyncCenterHost, SyncCenterView } from "./ui/SyncCenterView";
 import { ConfigSyncSettingTab } from "./ui/SettingTab";
 
 interface ConfigSyncSettings {
@@ -72,9 +72,10 @@ export default class ConfigSyncPlugin extends Plugin {
   async onload(): Promise<void> {
     await this.loadSettings();
     this.addSettingTab(new ConfigSyncSettingTab(this.app, this));
+    this.registerView(SYNC_CENTER_VIEW_TYPE, (leaf) => new SyncCenterView(leaf, this.syncCenterHost()));
     this.mainRibbonEl = this.addRibbonIcon("refresh-cw", "Config Sync", (evt) => void this.openSyncMenu(evt));
     this.refreshRibbons();
-    this.addCommand({ id: "sync", name: "Sync: open the sync panel", callback: () => void this.openSyncPanel() });
+    this.addCommand({ id: "sync", name: "Sync: open the sync panel", callback: () => void this.openSyncCenter() });
     this.addCommand({ id: "revert-last-apply", name: "Revert last apply", callback: () => void this.runRevert() });
 
     // --- awareness runtime ---
@@ -131,6 +132,7 @@ export default class ConfigSyncPlugin extends Plugin {
       console.error("Config Sync: status refresh failed", e);
     }
     this.updateRibbonDot();
+    this.notifySyncCenter();
   }
 
   async refreshRemoteChecks(): Promise<void> {
@@ -151,6 +153,14 @@ export default class ConfigSyncPlugin extends Plugin {
       }
     }
     this.updateRibbonDot();
+    this.notifySyncCenter();
+  }
+
+  private notifySyncCenter(): void {
+    for (const leaf of this.app.workspace.getLeavesOfType(SYNC_CENTER_VIEW_TYPE)) {
+      const view = leaf.view;
+      if (view instanceof SyncCenterView) view.notifyExternalChange();
+    }
   }
 
   updateRibbonDot(): void {
@@ -177,85 +187,92 @@ export default class ConfigSyncPlugin extends Plugin {
     if (this.settings.statusInMenu && up > 0) parts.push(`↑${up}`);
     if (this.settings.statusInMenu && down > 0) parts.push(`↓${down}`);
     const syncTitle = parts.length > 0 ? `Sync… (${parts.join(" ")})` : "Sync…";
-    menu.addItem((i) => i.setTitle(syncTitle).setIcon("refresh-cw").onClick(() => void this.openSyncPanel()));
+    menu.addItem((i) => i.setTitle(syncTitle).setIcon("refresh-cw").onClick(() => void this.openSyncCenter()));
     menu.addItem((i) => i.setTitle("Revert last apply").setIcon("undo-2").onClick(() => void this.runRevert()));
     menu.showAtMouseEvent(evt);
   }
 
-  private async openSyncPanel(): Promise<void> {
-    try {
-      new SyncModal(this.app, {
-        computeStatuses: async () => {
-          const ctx = await this.coreContext();
-          if ((await coreCreateStarterManifest(ctx)) === "created") {
-            new Notice(`Config Sync: created starter items file at ${ctx.rootPath}/config-sync.json — review it in settings`);
-          }
-          const manifest = await loadManifest(ctx);
-          const device = Platform.isMobile ? ("mobile" as const) : ("desktop" as const);
-          const groups = groupsForDevice(manifest, device);
-          const statuses = await statusForGroups(ctx, groups);
-          this.localStatuses = statuses;
-          this.updateRibbonDot();
-          return { groups, statuses };
-        },
-        resolvedPath: (g) => g.path.replace("{configDir}", this.app.vault.configDir),
-        captureItems: async (names) => {
-          try {
-            const ctx = await this.coreContext();
-            const results = await capture(ctx, names);
-            new ReportModal(this.app, "Captured", results, new Date().toLocaleString()).open();
-            await this.refreshLocalStatus();
-          } catch (e) {
-            new Notice(`Config Sync capture failed: ${(e as Error).message}`, 10000);
-          }
-        },
-        applyItems: async (names) => {
-          try {
-            const ctx = await this.coreContext();
-            const warnings = await checkApply(ctx, names);
-            if (warnings.length > 0) {
-              const ok = await confirmWarnings(this.app, "Config Sync: version warnings", warnings.map((w) => `${w.group}: ${w.message}`));
-              if (!ok) return;
-            }
-            const results = await apply(ctx, names);
-            new ReportModal(this.app, "Applied", results, new Date().toLocaleString()).open();
-            await this.refreshLocalStatus();
-          } catch (e) {
-            new Notice(`Config Sync apply failed: ${(e as Error).message}`, 10000);
-          }
-        },
-        remotes: () => (Platform.isDesktop ? this.settings.remotes : []),
-        remoteCheck: (name) => this.remoteChecks.get(name),
-        refreshRemoteChecks: () => this.refreshRemoteChecks(),
-        deepDiff: async (remote) => {
-          const ctx = await this.coreContext();
-          return diffRemote(ctx, await this.createReader(remote));
-        },
-        pullFrom: async (remote) => {
-          try {
-            const ctx = await this.coreContext();
-            const results = await importExternal(ctx, await this.createReader(remote));
-            new ReportModal(this.app, `Pulled from ${remote.name}`, results).open();
-            await this.refreshLocalStatus();
-            await this.refreshRemoteChecks();
-          } catch (e) {
-            new Notice(`Config Sync pull failed: ${(e as Error).message}`, 10000);
-          }
-        },
-        pushTo: async (remote) => {
-          try {
-            const ctx = await this.coreContext();
-            const results = await pushExternal(ctx, await this.createWriter(remote));
-            new ReportModal(this.app, `Pushed to ${remote.name}`, results).open();
-            await this.refreshRemoteChecks();
-          } catch (e) {
-            new Notice(`Config Sync push failed: ${(e as Error).message}`, 10000);
-          }
-        },
-      }).open();
-    } catch (e) {
-      new Notice(`Config Sync: ${(e as Error).message}`, 10000);
+  private async openSyncCenter(): Promise<void> {
+    const existing = this.app.workspace.getLeavesOfType(SYNC_CENTER_VIEW_TYPE)[0];
+    if (existing !== undefined) {
+      await this.app.workspace.revealLeaf(existing);
+      return;
     }
+    const leaf = this.app.workspace.getLeaf(true);
+    await leaf.setViewState({ type: SYNC_CENTER_VIEW_TYPE, active: true });
+    await this.app.workspace.revealLeaf(leaf);
+  }
+
+  private syncCenterHost(): SyncCenterHost {
+    return {
+      computeStatuses: async () => {
+        const ctx = await this.coreContext();
+        if ((await coreCreateStarterManifest(ctx)) === "created") {
+          new Notice(`Config Sync: created starter items file at ${ctx.rootPath}/config-sync.json — review it in settings`);
+        }
+        const manifest = await loadManifest(ctx);
+        const device = Platform.isMobile ? ("mobile" as const) : ("desktop" as const);
+        const groups = groupsForDevice(manifest, device);
+        const statuses = await statusForGroups(ctx, groups);
+        this.localStatuses = statuses;
+        this.updateRibbonDot();
+        return { groups, statuses };
+      },
+      resolvedPath: (g) => g.path.replace("{configDir}", this.app.vault.configDir),
+      captureItems: async (names) => {
+        try {
+          const ctx = await this.coreContext();
+          const results = await capture(ctx, names);
+          new ReportModal(this.app, "Captured", results, new Date().toLocaleString()).open();
+          await this.refreshLocalStatus();
+        } catch (e) {
+          new Notice(`Config Sync capture failed: ${(e as Error).message}`, 10000);
+        }
+      },
+      applyItems: async (names) => {
+        try {
+          const ctx = await this.coreContext();
+          const warnings = await checkApply(ctx, names);
+          if (warnings.length > 0) {
+            const ok = await confirmWarnings(this.app, "Config Sync: version warnings", warnings.map((w) => `${w.group}: ${w.message}`));
+            if (!ok) return;
+          }
+          const results = await apply(ctx, names);
+          new ReportModal(this.app, "Applied", results, new Date().toLocaleString()).open();
+          await this.refreshLocalStatus();
+        } catch (e) {
+          new Notice(`Config Sync apply failed: ${(e as Error).message}`, 10000);
+        }
+      },
+      remotes: () => (Platform.isDesktop ? this.settings.remotes : []),
+      remoteCheck: (name) => this.remoteChecks.get(name),
+      refreshRemoteChecks: () => this.refreshRemoteChecks(),
+      deepDiff: async (remote) => {
+        const ctx = await this.coreContext();
+        return diffRemote(ctx, await this.createReader(remote));
+      },
+      pullFrom: async (remote) => {
+        try {
+          const ctx = await this.coreContext();
+          const results = await importExternal(ctx, await this.createReader(remote));
+          new ReportModal(this.app, `Pulled from ${remote.name}`, results).open();
+          await this.refreshLocalStatus();
+          await this.refreshRemoteChecks();
+        } catch (e) {
+          new Notice(`Config Sync pull failed: ${(e as Error).message}`, 10000);
+        }
+      },
+      pushTo: async (remote) => {
+        try {
+          const ctx = await this.coreContext();
+          const results = await pushExternal(ctx, await this.createWriter(remote));
+          new ReportModal(this.app, `Pushed to ${remote.name}`, results).open();
+          await this.refreshRemoteChecks();
+        } catch (e) {
+          new Notice(`Config Sync push failed: ${(e as Error).message}`, 10000);
+        }
+      },
+    };
   }
 
   refreshRibbons(): void {
@@ -265,7 +282,7 @@ export default class ConfigSyncPlugin extends Plugin {
     const add = (icon: string, title: string, run: () => void): void => {
       this.individualRibbons.push(this.addRibbonIcon(icon, title, () => run()));
     };
-    if (rb.sync) add("refresh-cw", "Config Sync: Sync", () => void this.openSyncPanel());
+    if (rb.sync) add("refresh-cw", "Config Sync: Sync", () => void this.openSyncCenter());
     if (rb.revert) add("undo-2", "Config Sync: Revert last apply", () => void this.runRevert());
   }
 
