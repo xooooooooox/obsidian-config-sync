@@ -261,6 +261,7 @@ export class SyncModal extends Modal {
     searchEl.addEventListener("input", () => {
       this.search = searchEl.value;
       this.renderListInto(listHost, scoped); // re-render only the list; keeps the input focused
+      this.refreshGlobalSelectAll(selectAll, scoped); // resync tri-state against the new search
     });
     const selectAll = bar.createEl("input", { type: "checkbox", attr: { "aria-label": "Select all visible items" } });
 
@@ -307,24 +308,37 @@ export class SyncModal extends Modal {
     if (open) for (const r of rows) this.renderItemRow(card, r);
   }
 
-  // Tri-state select-all over the currently visible checkable rows.
-  private wireGlobalSelectAll(box: HTMLInputElement, scoped: StatusRow[]): void {
-    const checkable = this.visibleRows(scoped)
+  // Tri-state select-all over the currently visible checkable rows (scope + filter + search).
+  private checkableRows(scoped: StatusRow[]): string[] {
+    return this.visibleRows(scoped)
       .filter((r) => r.status.state !== "in-sync" && r.status.state !== "no-settings")
       .map((r) => r.group.name);
+  }
+
+  private refreshGlobalSelectAll(box: HTMLInputElement, scoped: StatusRow[]): void {
+    const checkable = this.checkableRows(scoped);
     const selectedCount = checkable.filter((n) => this.selected.has(n)).length;
+    box.indeterminate = false;
     if (checkable.length === 0) {
       box.disabled = true;
       box.checked = false;
     } else if (selectedCount === checkable.length) {
+      box.disabled = false;
       box.checked = true;
     } else if (selectedCount === 0) {
+      box.disabled = false;
       box.checked = false;
     } else {
+      box.disabled = false;
       box.indeterminate = true;
     }
+  }
+
+  private wireGlobalSelectAll(box: HTMLInputElement, scoped: StatusRow[]): void {
+    this.refreshGlobalSelectAll(box, scoped);
     box.addEventListener("click", (e) => {
       e.stopPropagation();
+      const checkable = this.checkableRows(scoped); // read live so it reflects the current search
       const turnOn = checkable.some((n) => !this.selected.has(n));
       for (const name of checkable) {
         if (turnOn) this.selected.add(name);
