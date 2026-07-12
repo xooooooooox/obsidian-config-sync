@@ -118,7 +118,7 @@ export class SyncModal extends Modal {
   }
 
   private renderHeaderPills(): void {
-    const { up, down, ok } = bucketCounts(this.rows().map((r) => r.status));
+    const { up, down, ok, none } = bucketCounts(this.rows().map((r) => r.status));
     this.titleEl.empty();
     this.titleEl.setText("Config Sync");
     const pills = this.titleEl.createSpan({ cls: "config-sync-report-pills" });
@@ -141,6 +141,13 @@ export class SyncModal extends Modal {
       text: `✓ ${ok}`,
       attr: { "aria-label": `${ok} item${ok === 1 ? "" : "s"} in sync` },
     });
+    if (none > 0) {
+      pills.createSpan({
+        cls: "config-sync-pill is-none",
+        text: `○ ${none}`,
+        attr: { "aria-label": `${none} item${none === 1 ? "" : "s"} with no settings yet` },
+      });
+    }
   }
 
   private renderDeviceMacro(): void {
@@ -164,6 +171,7 @@ export class SyncModal extends Modal {
       if (counts.up > 0) sect.createSpan({ cls: "config-sync-pill is-up", text: `↑ ${counts.up}` });
       if (counts.down > 0) sect.createSpan({ cls: "config-sync-pill is-down", text: `↓ ${counts.down}` });
       if (counts.ok > 0) sect.createSpan({ cls: "config-sync-pill is-ok", text: `✓ ${counts.ok}` });
+      if (counts.none > 0) sect.createSpan({ cls: "config-sync-pill is-none", text: `○ ${counts.none}` });
       const boxCb = sect.createEl("input", {
         type: "checkbox",
         attr: { "aria-label": `Select all ${CATEGORY_LABELS[cat]}` },
@@ -209,6 +217,7 @@ export class SyncModal extends Modal {
       { key: "capture", label: `To capture ${counts.up}` },
       { key: "apply", label: `To apply ${counts.down}` },
       { key: "ok", label: `In sync ${counts.ok}` },
+      { key: "none", label: `No settings yet ${counts.none}` },
     ];
     for (const d of defs) {
       const pill = bar.createEl("button", { cls: `config-sync-fpill${this.filter === d.key ? " is-active" : ""}`, text: d.label });
@@ -221,7 +230,9 @@ export class SyncModal extends Modal {
 
   // Native tri-state: checked when all checkable rows selected, indeterminate when some, else unchecked.
   private wireSectionCheckbox(box: HTMLInputElement, inCat: StatusRow[]): void {
-    const checkable = inCat.filter((r) => r.status.state !== "in-sync").map((r) => r.group.name);
+    const checkable = inCat
+      .filter((r) => r.status.state !== "in-sync" && r.status.state !== "no-settings")
+      .map((r) => r.group.name);
     const selectedCount = checkable.filter((n) => this.selected.has(n)).length;
     if (checkable.length === 0) {
       box.disabled = true;
@@ -247,9 +258,9 @@ export class SyncModal extends Modal {
 
   private renderItemRow(card: HTMLElement, r: StatusRow): void {
     const { group, status } = r;
-    const insync = status.state === "in-sync";
+    const inert = status.state === "in-sync" || status.state === "no-settings";
     const row = card.createDiv({
-      cls: `config-sync-hub-row${insync ? " is-insync" : ""}`,
+      cls: `config-sync-hub-row${inert ? " is-insync" : ""}${status.state === "no-settings" ? " is-nosettings" : ""}`,
       attr: { "aria-label": this.host.resolvedPath(group) },
     });
     const chev = row.createSpan({ cls: "config-sync-row-chevron", text: this.expandedItems.has(group.name) ? "▾" : "▸" });
@@ -262,7 +273,7 @@ export class SyncModal extends Modal {
     const dir = directionForState(status.state);
     const cb = row.createEl("input", { type: "checkbox" });
     cb.addClass(dir === "capture" ? "is-capture" : "is-apply");
-    cb.disabled = insync;
+    cb.disabled = inert;
     cb.checked = this.selected.has(group.name);
     cb.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -292,6 +303,8 @@ export class SyncModal extends Modal {
         return { glyph: "≠", cls: "is-neq", tip: "differs from store — direction unknown" };
       case "not-captured":
         return { glyph: "—", cls: "is-miss", tip: "not yet captured" };
+      case "no-settings":
+        return { glyph: "○", cls: "is-none", tip: "no settings yet — nothing on this device or in the store" };
       case "in-sync":
       default:
         return { glyph: "✓", cls: "is-ok", tip: "in sync" };
@@ -307,6 +320,13 @@ export class SyncModal extends Modal {
     }
     if (status.state === "in-sync") {
       detail.createDiv({ cls: "config-sync-expand-note", text: "identical to the store" });
+      return;
+    }
+    if (status.state === "no-settings") {
+      detail.createDiv({
+        cls: "config-sync-expand-note",
+        text: "no settings yet on this device or in the store — appears under “To capture” once this item has settings",
+      });
       return;
     }
     if (status.state === "not-captured") {
