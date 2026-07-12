@@ -2,6 +2,7 @@ import { App, ButtonComponent, ExtraButtonComponent, Modal } from "obsidian";
 import { bucketCounts, GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry } from "../core/status";
 import { CATEGORY_LABELS, ItemCategory, categoryForGroup } from "../core/catalog";
 import { FileChanges, Remote, SyncGroup, hasChanges } from "../core/types";
+import { capFileEntries, CappedEntry, moreFilesText } from "./panelModel";
 
 const CATEGORY_ORDER: ItemCategory[] = ["obsidian", "core", "community", "custom"];
 
@@ -208,14 +209,9 @@ export class SyncModal extends Modal {
       this.render(this.renderGen);
     });
 
-    // Checked apply-over-differs warns that store will overwrite uncommitted local edits.
-    if (status.state === "differs" && this.selected.has(group.name)) {
-      card.createDiv({ cls: "config-sync-hub-hint", text: "⚠ applying overwrites local changes" });
-    }
-
     const detail = card.createDiv({ cls: "config-sync-report-files" });
     detail.hidden = !this.expandedItems.has(group.name);
-    this.renderChangesInto(detail, status.changes);
+    this.renderItemDetail(detail, r);
     row.addEventListener("click", () => {
       if (this.expandedItems.has(group.name)) this.expandedItems.delete(group.name);
       else this.expandedItems.add(group.name);
@@ -240,11 +236,63 @@ export class SyncModal extends Modal {
     }
   }
 
-  private renderChangesInto(detail: HTMLElement, changes: FileChanges | undefined): void {
-    if (changes === undefined) return;
-    for (const f of changes.added) detail.createDiv({ cls: "is-add", text: `+ ${f}` });
-    for (const f of changes.updated) detail.createDiv({ cls: "is-upd", text: `~ ${f}` });
-    for (const f of changes.deleted) detail.createDiv({ cls: "is-del", text: `− ${f}` });
+  // Expanded rows always show content: an error, a state note, or actions + the file diff.
+  private renderItemDetail(detail: HTMLElement, r: StatusRow): void {
+    const { group, status } = r;
+    if (status.message !== undefined) {
+      detail.createDiv({ cls: "config-sync-status-error", text: status.message });
+      return;
+    }
+    if (status.state === "in-sync") {
+      detail.createDiv({ cls: "config-sync-expand-note", text: "identical to the store" });
+      return;
+    }
+    if (status.state === "not-captured") {
+      detail.createDiv({ cls: "config-sync-expand-note", text: "not captured yet — nothing in the store" });
+      return;
+    }
+    if (status.changes === undefined) return;
+    this.renderMiniActions(detail, group.name);
+    this.renderCappedChanges(detail, status.changes);
+  }
+
+  // Per-item counter-direction actions: run immediately for this one item, reusing the
+  // host's normal capture/apply flows (confirm + report + reload prompt), then refresh.
+  private renderMiniActions(detail: HTMLElement, name: string): void {
+    const bar = detail.createDiv({ cls: "config-sync-mini-actions" });
+    const cap = bar.createEl("button", { cls: "config-sync-mini is-capture", text: "↑ Capture this (keep local)" });
+    cap.addEventListener("click", (e) => {
+      e.stopPropagation();
+      void (async () => {
+        await this.host.captureItems([name]);
+        await this.reload();
+      })();
+    });
+    const apply = bar.createEl("button", { cls: "config-sync-mini is-apply", text: "↓ Apply store version (overwrites local)" });
+    apply.addEventListener("click", (e) => {
+      e.stopPropagation();
+      void (async () => {
+        await this.host.applyItems([name]);
+        await this.reload();
+      })();
+    });
+  }
+
+  private renderCappedChanges(detail: HTMLElement, changes: FileChanges): void {
+    const { shown, rest } = capFileEntries(changes, 10);
+    const renderEntry = (e: CappedEntry): void => {
+      const glyph = e.kind === "add" ? "+" : e.kind === "upd" ? "~" : "−";
+      detail.createDiv({ cls: `is-${e.kind}`, text: `${glyph} ${e.name}` });
+    };
+    for (const e of shown) renderEntry(e);
+    if (rest.length > 0) {
+      const more = detail.createDiv({ cls: "config-sync-more-files", text: moreFilesText(rest.length) });
+      more.addEventListener("click", (e) => {
+        e.stopPropagation();
+        more.remove();
+        for (const entry of rest) renderEntry(entry);
+      });
+    }
   }
 
   private captureNames(): string[] {
