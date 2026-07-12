@@ -247,6 +247,17 @@ body.is-phone .config-sync-remote-git {
 .config-sync-pill.is-down { background: rgba(var(--color-purple-rgb), 0.15); color: var(--color-purple); }
 .config-sync-pill.is-ok { background: rgba(var(--color-green-rgb), 0.15); color: var(--color-green); }
 .config-sync-pill.is-warn { background: none; color: var(--color-orange); margin-left: var(--size-4-1); }
+
+.config-sync-filterbar { display: flex; gap: var(--size-4-1); margin: 2px 0 var(--size-4-2) 0; flex-wrap: wrap; }
+
+.config-sync-fpill { background: none; border: 1px solid var(--background-modifier-border); border-radius: 999px; padding: 2px 10px; font-size: var(--font-ui-smaller); color: var(--text-muted); cursor: pointer; box-shadow: none; height: auto; }
+
+.config-sync-fpill.is-active { background: var(--interactive-accent); border-color: var(--interactive-accent); color: var(--text-on-accent); }
+
+.config-sync-sect { cursor: pointer; }
+
+.config-sync-sect .config-sync-pill { margin-right: var(--size-4-1); }
+
 .config-sync-report-sub { color: var(--text-muted); font-size: var(--font-ui-smaller); margin-bottom: var(--size-4-2); }
 .config-sync-sect { display: flex; align-items: center; font-size: var(--font-ui-smaller); text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); padding: var(--size-4-3) 2px var(--size-4-1); }
 .config-sync-card { background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.09); border-radius: var(--radius-m); padding: 0 var(--size-4-3); }

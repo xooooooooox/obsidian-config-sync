@@ -2,9 +2,16 @@ import { App, ButtonComponent, ExtraButtonComponent, Modal } from "obsidian";
 import { bucketCounts, GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry } from "../core/status";
 import { CATEGORY_LABELS, ItemCategory, categoryForGroup } from "../core/catalog";
 import { FileChanges, Remote, SyncGroup, hasChanges } from "../core/types";
-import { capFileEntries, CappedEntry, moreFilesText } from "./panelModel";
+import { capFileEntries, CappedEntry, insyncLineText, moreFilesText, PanelFilter, visibleUnderFilter } from "./panelModel";
 
 const CATEGORY_ORDER: ItemCategory[] = ["obsidian", "core", "community", "custom"];
+
+// Session-remembered UI state (per spec: survives modal close, resets on plugin reload).
+// undefined in sectionCollapsed = no explicit choice; default is "collapsed iff nothing actionable".
+const sessionUi = {
+  sectionCollapsed: new Map<ItemCategory, boolean>(),
+  insyncOpen: new Set<ItemCategory>(),
+};
 
 // Direction a checkable row acts in: capture pushes this device → store; apply pulls store → device.
 type Direction = "capture" | "apply";
@@ -58,6 +65,7 @@ export class SyncModal extends Modal {
   private expandedRemotes: Set<string> = new Set();
   private renderGen = 0;
   private remotesEl: HTMLElement | null = null;
+  private filter: PanelFilter = "all";
 
   constructor(app: App, private host: SyncModalHost) {
     super(app);
@@ -138,23 +146,77 @@ export class SyncModal extends Modal {
   private renderDeviceMacro(): void {
     const macro = this.contentEl.createDiv({ cls: "config-sync-macro" });
     macro.createDiv({ cls: "config-sync-macro-head", text: "This device ↔ store" });
+    this.renderFilterBar(macro);
 
     for (const cat of CATEGORY_ORDER) {
       const inCat = this.rows().filter((r) => categoryForGroup(r.group.name) === cat);
       if (inCat.length === 0) continue;
+      const visible = inCat.filter((r) => visibleUnderFilter(r.status.state, this.filter));
+      if (visible.length === 0) continue;
+
+      const counts = bucketCounts(inCat.map((r) => r.status));
+      const collapsed = sessionUi.sectionCollapsed.get(cat) ?? (counts.up === 0 && counts.down === 0);
+
       const sect = macro.createDiv({ cls: "config-sync-sect" });
+      sect.createSpan({ cls: "config-sync-row-chevron", text: collapsed ? "▸" : "▾" });
       sect.createSpan({ text: CATEGORY_LABELS[cat] });
       sect.createDiv({ cls: "config-sync-rule-spacer" });
+      if (counts.up > 0) sect.createSpan({ cls: "config-sync-pill is-up", text: `↑ ${counts.up}` });
+      if (counts.down > 0) sect.createSpan({ cls: "config-sync-pill is-down", text: `↓ ${counts.down}` });
+      if (counts.ok > 0) sect.createSpan({ cls: "config-sync-pill is-ok", text: `✓ ${counts.ok}` });
       const boxCb = sect.createEl("input", {
         type: "checkbox",
         attr: { "aria-label": `Select all ${CATEGORY_LABELS[cat]}` },
       });
-      const card = macro.createDiv({ cls: "config-sync-card" });
-      for (const r of inCat) this.renderItemRow(card, r);
-      this.wireSectionCheckbox(boxCb, inCat);
+      sect.addEventListener("click", () => {
+        sessionUi.sectionCollapsed.set(cat, !collapsed);
+        this.render(this.renderGen);
+      });
+
+      if (!collapsed) {
+        const card = macro.createDiv({ cls: "config-sync-card" });
+        if (this.filter === "all") {
+          const active = visible.filter((r) => r.status.state !== "in-sync");
+          const insync = visible.filter((r) => r.status.state === "in-sync");
+          for (const r of active) this.renderItemRow(card, r);
+          if (insync.length > 0) {
+            const open = sessionUi.insyncOpen.has(cat);
+            const line = card.createDiv({ cls: "config-sync-unchanged", text: insyncLineText(insync.length, open) });
+            line.addEventListener("click", (e) => {
+              e.stopPropagation();
+              if (open) sessionUi.insyncOpen.delete(cat);
+              else sessionUi.insyncOpen.add(cat);
+              this.render(this.renderGen);
+            });
+            if (open) for (const r of insync) this.renderItemRow(card, r);
+          }
+        } else {
+          for (const r of visible) this.renderItemRow(card, r);
+        }
+      }
+      this.wireSectionCheckbox(boxCb, visible);
     }
 
     this.renderActionBar(macro);
+  }
+
+  private renderFilterBar(macro: HTMLElement): void {
+    const counts = bucketCounts(this.rows().map((r) => r.status));
+    const total = this.rows().length;
+    const bar = macro.createDiv({ cls: "config-sync-filterbar" });
+    const defs: { key: PanelFilter; label: string }[] = [
+      { key: "all", label: `All ${total}` },
+      { key: "capture", label: `To capture ${counts.up}` },
+      { key: "apply", label: `To apply ${counts.down}` },
+      { key: "ok", label: `In sync ${counts.ok}` },
+    ];
+    for (const d of defs) {
+      const pill = bar.createEl("button", { cls: `config-sync-fpill${this.filter === d.key ? " is-active" : ""}`, text: d.label });
+      pill.addEventListener("click", () => {
+        this.filter = d.key;
+        this.render(this.renderGen);
+      });
+    }
   }
 
   // Native tri-state: checked when all checkable rows selected, indeterminate when some, else unchecked.
