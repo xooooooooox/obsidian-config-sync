@@ -2,7 +2,7 @@ import { App, ButtonComponent, ExtraButtonComponent, Modal } from "obsidian";
 import { bucketCounts, GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry } from "../core/status";
 import { CATEGORY_LABELS, ItemCategory, categoryForGroup } from "../core/catalog";
 import { FileChanges, Remote, SyncGroup, hasChanges } from "../core/types";
-import { capFileEntries, CappedEntry, insyncLineText, moreFilesText, PanelFilter, visibleUnderFilter } from "./panelModel";
+import { capFileEntries, CappedEntry, insyncLineText, moreFilesText, PanelFilter, visibleUnderFilter, directionForState } from "./panelModel";
 
 const CATEGORY_ORDER: ItemCategory[] = ["obsidian", "core", "community", "custom"];
 
@@ -12,9 +12,6 @@ const sessionUi = {
   sectionCollapsed: new Map<ItemCategory, boolean>(),
   insyncOpen: new Set<ItemCategory>(),
 };
-
-// Direction a checkable row acts in: capture pushes this device → store; apply pulls store → device.
-type Direction = "capture" | "apply";
 
 export interface SyncModalHost {
   computeStatuses(): Promise<{ groups: SyncGroup[]; statuses: GroupStatus[] }>;
@@ -27,12 +24,6 @@ export interface SyncModalHost {
   deepDiff(remote: Remote): Promise<RemoteDiffEntry[]>;
   pullFrom(remote: Remote): Promise<void>;
   pushTo(remote: Remote): Promise<void>;
-}
-
-// A checkable row acts in "capture" for local-changed/not-captured (this device is ahead / not stored),
-// and in "apply" for store-newer/differs (store should overwrite this device).
-function directionForState(state: GroupState): Direction {
-  return state === "local-changed" || state === "not-captured" ? "capture" : "apply";
 }
 
 function relativeAge(ms: number): string {
