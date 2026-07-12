@@ -5,7 +5,7 @@
 
 [English](README.md) · **中文**
 
-在多台设备和多个 vault 之间，按需、选择性地同步 Obsidian 设置——快捷键、CSS 代码片段、主题、插件配置。数据默认借助你现有的笔记同步工具(note sync)（remotely-save、Obsidian Sync、iCloud……）传输，也可以使用 config-sync 自带的 git / vault 远程通道。任何设置在没有在 Sync 面板中明确执行 **Apply**(应用) 之前，绝不会落到设备上。
+在多台设备和多个 vault 之间，按需、选择性地同步 Obsidian 设置——快捷键、CSS 代码片段、主题、插件配置。数据默认借助你现有的笔记同步工具(note sync)（remotely-save、Obsidian Sync、iCloud……）传输，也可以使用 config-sync 自带的 git / vault 远程通道。任何设置在没有在 Sync Center 中明确执行 **Apply**(应用) 之前，绝不会落到设备上。
 
 ![Settings picker](docs/assets/settings-picker.png)
 
@@ -14,9 +14,9 @@
 - **精确挑选要同步的内容** —— Obsidian 选项、核心插件与社区插件设置、代码片段、主题、vault 根目录下的点文件(dotfiles)；可按条目、按设备类别（全部 / 桌面端 / 移动端）分别控制。
 - **凭证安全** —— `sanitize`(脱敏) 键名通配符会在任何内容进入 store(配置存储) 之前剥离令牌和密钥；每台设备在每次 Apply 后都会保留自己本地填入的值。
 - **明确、可回退的 Apply** —— 挑选条目，查看版本不匹配警告，再落地；每个被改动的文件都会被备份，**Revert last apply**（撤销上次应用）可以将其还原。
-- **随时可见的状态感知** —— 功能区状态点会亮起橙色（有待 capture 的条目）或蓝色（store/远程有更新）；打开 **Sync**（同步）面板查看详情：每个条目都打上徽标（`✓ in sync`、`↑ changed on this device (likely)`、`↓ store is newer (likely)`、`≠ differs`、`— not captured yet`），并配有实时的 `↑`/`↓` 变更数量徽标，远程仓库会被自动检查。
-- **感知远程状态** —— Sync 面板的 Remotes 区块会自动检查 git 或 vault 远程仓库是否在你的本地 store 之后被捕获过；展开某个远程可预览 Pull/Push 的内容。
-- **移动端友好** —— capture、apply 以及 Sync 面板在手机上均可正常工作；store 本身就是普通的 vault 内容，因此任何笔记同步工具都能携带它。
+- **随时可见的状态感知** —— 功能区状态点会亮起橙色（有待 capture 的条目）或蓝色（store/远程有更新）；打开 **Sync Center** 查看详情：每个条目都打上徽标（`✓ in sync`、`↑ changed on this device (likely)`、`↓ store is newer (likely)`、`≠ differs`、`— not captured yet`），并配有实时的 `↑`/`↓` 变更数量徽标，远程仓库会被自动检查。
+- **感知远程状态** —— Sync Center 的 Remotes 区块会自动检查 git 或 vault 远程仓库是否在你的本地 store 之后被捕获过；展开某个远程可预览 Pull/Push 的内容。
+- **移动端友好** —— capture、apply 以及 Sync Center 在手机上均可正常工作；store 本身就是普通的 vault 内容，因此任何笔记同步工具都能携带它。
 
 ## 安装
 
@@ -27,7 +27,7 @@
 ## 快速开始
 
 1. **Settings → Config Sync** —— 勾选你想同步的内容（Obsidian / Core plugins / Community plugins 三个标签页）。
-2. 从功能区菜单打开 **Sync**（或使用 **Sync: open the sync panel** 命令），勾选要 capture 的条目，点击 **↑ Capture N items**。
+2. 从功能区菜单打开 **Sync**（或使用 **Sync: open the sync panel** 命令）以打开（若已打开则聚焦）Sync Center，勾选要 capture 的条目，点击 **↑ Capture N items**。
 3. 在另一台设备上，等你的笔记同步工具(note sync)把数据文件夹送达之后：打开 **Sync**，勾选要 apply 的条目，点击 **↓ Apply N items**。
 
 ## 工作原理
@@ -36,18 +36,18 @@
 
 **本地层面** —— 本设备的实时配置 ↔ store：
 
-- **Capture**（捕获） 把 `<数据文件夹>/config-sync.json` 中定义的条目复制进 `<数据文件夹>/store/`，剥离被 `sanitize` 标记的键，跳过操作系统垃圾文件，并把源插件版本号记录到 `store.lock.json` 中。只有发生变化的文件才会被重写；Sync 面板的 Capture 按钮只会 capture 你勾选的条目。
+- **Capture**（捕获） 把 `<数据文件夹>/config-sync.json` 中定义的条目复制进 `<数据文件夹>/store/`，剥离被 `sanitize` 标记的键，跳过操作系统垃圾文件，并把源插件版本号记录到 `store.lock.json` 中。只有发生变化的文件才会被重写；Sync Center 的 Capture 按钮只会 capture 你勾选的条目。
 - **Apply**（应用） 挑选条目，对插件版本不匹配的情况发出警告，然后把它们落地到本设备的配置目录（不论其名称是什么）。被脱敏的键会保留本设备的本地值。单槽位备份覆盖每一个被改动的文件；**Revert last apply** 可将其还原。
-- **Sync 面板** 按条目比较实时配置与 store，给出尽力而为的方向提示（文件时间对比最近一次 capture），并自动检查远程仓库的新鲜度。
+- **Sync Center** 按条目比较实时配置与 store，给出尽力而为的方向提示（文件时间对比最近一次 capture），并自动检查远程仓库的新鲜度。
 
 **传输层面** —— store 如何流转：
 
 - **你的笔记同步工具（默认）**：store 本身就是普通的 vault 内容——remotely-save、Obsidian Sync、iCloud 或其他任何工具都能把它带到任何地方，包括移动端，零配置。
-- **Pull / Push（桌面端，可选）**：config-sync 自带的传输通道，用于 git 仓库或本机上的另一个 vault，通过 Sync 面板的 Remotes 区块执行。Pull 会用远程内容覆盖本 vault 的 store（可重复执行——冷启动和日常使用是同一个操作）；Push 则把内容发送出去。git 传输方式会克隆到一个临时目录，绝不会触碰你 vault 自身的 git 仓库。
+- **Pull / Push（桌面端，可选）**：config-sync 自带的传输通道，用于 git 仓库或本机上的另一个 vault，通过 Sync Center 的 Remotes 区块执行。Pull 会用远程内容覆盖本 vault 的 store（可重复执行——冷启动和日常使用是同一个操作）；Push 则把内容发送出去。git 传输方式会克隆到一个临时目录，绝不会触碰你 vault 自身的 git 仓库。
 
-一切功能都挂在一个 **Config Sync** 功能区图标上：状态点在有待 capture 的条目时显示橙色，在 store 或远程有更新时显示蓝色。点击图标会打开一个菜单，包含 **Sync…**（标有 `↑`/`↓` 变更数量徽标）和 **Revert last apply**；Sync… 会打开 Sync 面板，Capture/Apply/Pull/Push 都在其中完成。也可以在 **Settings → General** 中为 Sync 和 Revert 单独启用功能区图标，默认关闭。
+一切功能都挂在一个 **Config Sync** 功能区图标上：状态点在有待 capture 的条目时显示橙色，在 store 或远程有更新时显示蓝色。点击图标会打开一个菜单，包含 **Sync…**（标有 `↑`/`↓` 变更数量徽标）和 **Revert last apply**；Sync… 会打开（若已打开则聚焦）Sync Center，Capture/Apply/Pull/Push 都在其中完成。也可以在 **Settings → General** 中为 Sync 和 Revert 单独启用功能区图标，默认关闭。
 
-![Sync panel](docs/assets/sync-panel.png)
+![Sync Center](docs/assets/sync-panel.png)
 
 ## 设置指南
 
@@ -102,12 +102,12 @@
 
 **IOTO vault，从零开始**
 1. 安装插件——PKM 模式会自动检测 IOTO，并将数据存放在 `0-Extra/config-sync`（取自你的 ioto-settings 辅助文件夹）。
-2. 勾选想同步的内容，在 Sync 面板中执行 Capture，交给 remotely-save 传输；其他设备在各自的 Sync 面板中执行 Apply。
+2. 勾选想同步的内容，在 Sync Center 中执行 Capture，交给 remotely-save 传输；其他设备在各自的 Sync Center 中执行 Apply。
 
 **在没有共享笔记同步的情况下，用一个 vault 为另一个 vault 做初始化（桌面端）**
 1. 在目标 vault 中：Settings → Config Sync → **Remotes** → 添加一个类型为 **Another vault** 的远程，点击 **Browse…** 并选择源 vault 的文件夹——其 store 会被自动识别并填入 **Store path**（也可以改为添加 git 远程：URL + 分支，可选仓库内的子文件夹）。
 2. 打开 **Sync**，展开该远程，点击 **↓ Pull from `<name>`**；然后勾选要 apply 的条目，点击 **↓ Apply N items**。
-3. 之后，在源 vault 自己的 Sync 面板中展开该远程，点击 **↑ Push to `<name>`**，发布更新供其他 vault 拉取。
+3. 之后，在源 vault 自己的 Sync Center 中展开该远程，点击 **↑ Push to `<name>`**，发布更新供其他 vault 拉取。
 
 ## 安全与隐私
 
@@ -116,7 +116,7 @@
 - **网络访问（仅限 git 远程）。** 如果你在 Settings → Remotes 下添加了 git 远程，Pull/Push 会针对你配置的 URL 运行 `git` 二进制程序——这是插件唯一会进行的网络访问。没有遥测，没有其他任何端点。
 - **访问 vault 之外的文件（vault 远程与 git 临时克隆）。** 如果你添加了类型为 "Another vault" 的远程，Pull/Push 会读写你配置的绝对 store 路径（通常是另一个 vault 的数据文件夹）。git 推送还会额外使用一个临时克隆目录，操作完成后会被删除。
 
-这两个功能在你配置远程之前都处于禁用状态，并且只有在你于 Sync 面板中明确执行 Pull 或 Push 时才会运行。
+这两个功能在你配置远程之前都处于禁用状态，并且只有在你于 Sync Center 中明确执行 Pull 或 Push 时才会运行。
 
 ## 开发
 
