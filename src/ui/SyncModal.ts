@@ -2,8 +2,16 @@ import { App, ButtonComponent, ExtraButtonComponent, Modal } from "obsidian";
 import { bucketCounts, GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry } from "../core/status";
 import { CATEGORY_LABELS, ItemCategory, categoryForGroup } from "../core/catalog";
 import { FileChanges, Remote, SyncGroup, hasChanges } from "../core/types";
+import { capFileEntries, CappedEntry, insyncLineText, moreFilesText, PanelFilter, visibleUnderFilter } from "./panelModel";
 
 const CATEGORY_ORDER: ItemCategory[] = ["obsidian", "core", "community", "custom"];
+
+// Session-remembered UI state (per spec: survives modal close, resets on plugin reload).
+// undefined in sectionCollapsed = no explicit choice; default is "collapsed iff nothing actionable".
+const sessionUi = {
+  sectionCollapsed: new Map<ItemCategory, boolean>(),
+  insyncOpen: new Set<ItemCategory>(),
+};
 
 // Direction a checkable row acts in: capture pushes this device → store; apply pulls store → device.
 type Direction = "capture" | "apply";
@@ -57,6 +65,7 @@ export class SyncModal extends Modal {
   private expandedRemotes: Set<string> = new Set();
   private renderGen = 0;
   private remotesEl: HTMLElement | null = null;
+  private filter: PanelFilter = "all";
 
   constructor(app: App, private host: SyncModalHost) {
     super(app);
@@ -137,23 +146,77 @@ export class SyncModal extends Modal {
   private renderDeviceMacro(): void {
     const macro = this.contentEl.createDiv({ cls: "config-sync-macro" });
     macro.createDiv({ cls: "config-sync-macro-head", text: "This device ↔ store" });
+    this.renderFilterBar(macro);
 
     for (const cat of CATEGORY_ORDER) {
       const inCat = this.rows().filter((r) => categoryForGroup(r.group.name) === cat);
       if (inCat.length === 0) continue;
+      const visible = inCat.filter((r) => visibleUnderFilter(r.status.state, this.filter));
+      if (visible.length === 0) continue;
+
+      const counts = bucketCounts(inCat.map((r) => r.status));
+      const collapsed = sessionUi.sectionCollapsed.get(cat) ?? (counts.up === 0 && counts.down === 0);
+
       const sect = macro.createDiv({ cls: "config-sync-sect" });
+      sect.createSpan({ cls: "config-sync-row-chevron", text: collapsed ? "▸" : "▾" });
       sect.createSpan({ text: CATEGORY_LABELS[cat] });
       sect.createDiv({ cls: "config-sync-rule-spacer" });
+      if (counts.up > 0) sect.createSpan({ cls: "config-sync-pill is-up", text: `↑ ${counts.up}` });
+      if (counts.down > 0) sect.createSpan({ cls: "config-sync-pill is-down", text: `↓ ${counts.down}` });
+      if (counts.ok > 0) sect.createSpan({ cls: "config-sync-pill is-ok", text: `✓ ${counts.ok}` });
       const boxCb = sect.createEl("input", {
         type: "checkbox",
         attr: { "aria-label": `Select all ${CATEGORY_LABELS[cat]}` },
       });
-      const card = macro.createDiv({ cls: "config-sync-card" });
-      for (const r of inCat) this.renderItemRow(card, r);
-      this.wireSectionCheckbox(boxCb, inCat);
+      sect.addEventListener("click", () => {
+        sessionUi.sectionCollapsed.set(cat, !collapsed);
+        this.render(this.renderGen);
+      });
+
+      if (!collapsed) {
+        const card = macro.createDiv({ cls: "config-sync-card" });
+        if (this.filter === "all") {
+          const active = visible.filter((r) => r.status.state !== "in-sync");
+          const insync = visible.filter((r) => r.status.state === "in-sync");
+          for (const r of active) this.renderItemRow(card, r);
+          if (insync.length > 0) {
+            const open = sessionUi.insyncOpen.has(cat);
+            const line = card.createDiv({ cls: "config-sync-unchanged", text: insyncLineText(insync.length, open) });
+            line.addEventListener("click", (e) => {
+              e.stopPropagation();
+              if (open) sessionUi.insyncOpen.delete(cat);
+              else sessionUi.insyncOpen.add(cat);
+              this.render(this.renderGen);
+            });
+            if (open) for (const r of insync) this.renderItemRow(card, r);
+          }
+        } else {
+          for (const r of visible) this.renderItemRow(card, r);
+        }
+      }
+      this.wireSectionCheckbox(boxCb, visible);
     }
 
     this.renderActionBar(macro);
+  }
+
+  private renderFilterBar(macro: HTMLElement): void {
+    const counts = bucketCounts(this.rows().map((r) => r.status));
+    const total = this.rows().length;
+    const bar = macro.createDiv({ cls: "config-sync-filterbar" });
+    const defs: { key: PanelFilter; label: string }[] = [
+      { key: "all", label: `All ${total}` },
+      { key: "capture", label: `To capture ${counts.up}` },
+      { key: "apply", label: `To apply ${counts.down}` },
+      { key: "ok", label: `In sync ${counts.ok}` },
+    ];
+    for (const d of defs) {
+      const pill = bar.createEl("button", { cls: `config-sync-fpill${this.filter === d.key ? " is-active" : ""}`, text: d.label });
+      pill.addEventListener("click", () => {
+        this.filter = d.key;
+        this.render(this.renderGen);
+      });
+    }
   }
 
   // Native tri-state: checked when all checkable rows selected, indeterminate when some, else unchecked.
@@ -208,14 +271,9 @@ export class SyncModal extends Modal {
       this.render(this.renderGen);
     });
 
-    // Checked apply-over-differs warns that store will overwrite uncommitted local edits.
-    if (status.state === "differs" && this.selected.has(group.name)) {
-      card.createDiv({ cls: "config-sync-hub-hint", text: "⚠ applying overwrites local changes" });
-    }
-
     const detail = card.createDiv({ cls: "config-sync-report-files" });
     detail.hidden = !this.expandedItems.has(group.name);
-    this.renderChangesInto(detail, status.changes);
+    this.renderItemDetail(detail, r);
     row.addEventListener("click", () => {
       if (this.expandedItems.has(group.name)) this.expandedItems.delete(group.name);
       else this.expandedItems.add(group.name);
@@ -240,11 +298,63 @@ export class SyncModal extends Modal {
     }
   }
 
-  private renderChangesInto(detail: HTMLElement, changes: FileChanges | undefined): void {
-    if (changes === undefined) return;
-    for (const f of changes.added) detail.createDiv({ cls: "is-add", text: `+ ${f}` });
-    for (const f of changes.updated) detail.createDiv({ cls: "is-upd", text: `~ ${f}` });
-    for (const f of changes.deleted) detail.createDiv({ cls: "is-del", text: `− ${f}` });
+  // Expanded rows always show content: an error, a state note, or actions + the file diff.
+  private renderItemDetail(detail: HTMLElement, r: StatusRow): void {
+    const { group, status } = r;
+    if (status.message !== undefined) {
+      detail.createDiv({ cls: "config-sync-status-error", text: status.message });
+      return;
+    }
+    if (status.state === "in-sync") {
+      detail.createDiv({ cls: "config-sync-expand-note", text: "identical to the store" });
+      return;
+    }
+    if (status.state === "not-captured") {
+      detail.createDiv({ cls: "config-sync-expand-note", text: "not captured yet — nothing in the store" });
+      return;
+    }
+    if (status.changes === undefined) return;
+    this.renderMiniActions(detail, group.name);
+    this.renderCappedChanges(detail, status.changes);
+  }
+
+  // Per-item counter-direction actions: run immediately for this one item, reusing the
+  // host's normal capture/apply flows (confirm + report + reload prompt), then refresh.
+  private renderMiniActions(detail: HTMLElement, name: string): void {
+    const bar = detail.createDiv({ cls: "config-sync-mini-actions" });
+    const cap = bar.createEl("button", { cls: "config-sync-mini is-capture", text: "↑ Capture this (keep local)" });
+    cap.addEventListener("click", (e) => {
+      e.stopPropagation();
+      void (async () => {
+        await this.host.captureItems([name]);
+        await this.reload();
+      })();
+    });
+    const apply = bar.createEl("button", { cls: "config-sync-mini is-apply", text: "↓ Apply store version (overwrites local)" });
+    apply.addEventListener("click", (e) => {
+      e.stopPropagation();
+      void (async () => {
+        await this.host.applyItems([name]);
+        await this.reload();
+      })();
+    });
+  }
+
+  private renderCappedChanges(detail: HTMLElement, changes: FileChanges): void {
+    const { shown, rest } = capFileEntries(changes, 10);
+    const renderEntry = (e: CappedEntry): void => {
+      const glyph = e.kind === "add" ? "+" : e.kind === "upd" ? "~" : "−";
+      detail.createDiv({ cls: `is-${e.kind}`, text: `${glyph} ${e.name}` });
+    };
+    for (const e of shown) renderEntry(e);
+    if (rest.length > 0) {
+      const more = detail.createDiv({ cls: "config-sync-more-files", text: moreFilesText(rest.length) });
+      more.addEventListener("click", (e) => {
+        e.stopPropagation();
+        more.remove();
+        for (const entry of rest) renderEntry(entry);
+      });
+    }
   }
 
   private captureNames(): string[] {
