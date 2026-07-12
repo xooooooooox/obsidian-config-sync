@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CoreContext, capture, loadManifest, groupsForDevice, apply, checkApply, revertLastApply, importExternal, ExternalStoreReader, pushExternal, ExternalStoreWriter, pluginIdForGroup, createStarterManifest, readGroups, writeGroups, SCHEMA_URL } from "../src/core/ConfigSyncCore";
 import { parseSyncManifest } from "../src/core/manifest";
+import { isFieldEnvelope, parseFileEnvelope } from "../src/core/crypto";
 import { MemFS, FakePlugins } from "./memfs";
 
 export const MANIFEST = JSON.stringify({
@@ -21,6 +22,7 @@ export function setup(): { io: MemFS; plugins: FakePlugins; ctx: CoreContext } {
     configDir: ".obs",
     rootPath: "cs",
     plugins,
+    passphrase: null,
     now: () => "2026-07-08T00:00:00.000Z",
   };
   return { io, plugins, ctx };
@@ -224,6 +226,24 @@ describe("capture", () => {
     const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, { sourcePluginVersion: string }> };
     expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.2.3" }); // carried, not restamped
   });
+
+  it("captures an encrypted-mode group as an envelope, and re-capture writes nothing when unchanged", async () => {
+    const ENC_MANIFEST = JSON.stringify({
+      version: 1,
+      groups: [{ name: "secrets", path: "{configDir}/secrets.json", type: "file", devices: "all", mode: "encrypted" }],
+    });
+    const { io, ctx } = setup();
+    ctx.passphrase = "pw";
+    io.seed({ "cs/config-sync.json": ENC_MANIFEST, ".obs/secrets.json": '{"token":"x"}' });
+    const results = await capture(ctx);
+    expect(results[0]?.status).toBe("ok");
+    expect(results[0]?.messages).toEqual(["whole file encrypted"]);
+    const stored = await io.read("cs/store/configdir/secrets.json");
+    expect(isFieldEnvelope(stored)).toBe(false);
+    expect(parseFileEnvelope(stored)).not.toBeNull();
+    const again = await capture(ctx);
+    expect(again[0]?.filesWritten).toEqual([]); // unchanged local content — nothing rewritten
+  });
 });
 
 export function seedStore(io: MemFS): void {
@@ -322,6 +342,21 @@ describe("apply", () => {
     const snip = results.find((r) => r.group === "snippets");
     expect(snip?.changes).toEqual({ added: [], updated: [], deleted: [] });
     expect(snip?.filesWritten).toEqual([]); // identical → skipped
+  });
+
+  it("applies an encrypted-mode group and restores byte-identical content", async () => {
+    const ENC_MANIFEST = JSON.stringify({
+      version: 1,
+      groups: [{ name: "secrets", path: "{configDir}/secrets.json", type: "file", devices: "all", mode: "encrypted" }],
+    });
+    const { io, ctx } = setup();
+    ctx.passphrase = "pw";
+    io.seed({ "cs/config-sync.json": ENC_MANIFEST, ".obs/secrets.json": '{"token":"x"}' });
+    await capture(ctx);
+    await io.remove(".obs/secrets.json");
+    const results = await apply(ctx, ["secrets"]);
+    expect(results[0]?.status).toBe("ok");
+    expect(await io.read(".obs/secrets.json")).toBe('{"token":"x"}');
   });
 });
 

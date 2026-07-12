@@ -331,6 +331,7 @@ export default class ConfigSyncPlugin extends Plugin {
       configDir: this.app.vault.configDir,
       rootPath,
       plugins: host,
+      passphrase: null,
       now: () => new Date().toISOString(),
     };
   }

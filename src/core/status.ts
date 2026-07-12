@@ -1,12 +1,12 @@
-import { CoreContext, ExternalStoreReader, groupForStoreRel, loadLock, loadManifest, parseJsonOrThrow, storeDir } from "./ConfigSyncCore";
+import { CoreContext, ExternalStoreReader, groupForStoreRel, loadLock, loadManifest, storeDir } from "./ConfigSyncCore";
 import { isJunkPath, listFilesRecursive } from "./io";
 import { basename, groupRealPath, groupStorePath, relativeTo } from "./pathing";
-import { sanitizeJson } from "./sanitize";
 import { FileChanges, hasChanges, StoreLock, SyncGroup } from "./types";
 import { parseStoreLock } from "./manifest";
-import { stripPatterns } from "./modes";
+import { contentUnchanged, groupNeedsPassphrase } from "./modes";
+import { parseFileEnvelope } from "./crypto";
 
-export type GroupState = "in-sync" | "local-changed" | "store-newer" | "differs" | "not-captured" | "no-settings";
+export type GroupState = "in-sync" | "local-changed" | "store-newer" | "differs" | "not-captured" | "no-settings" | "locked";
 
 export interface GroupStatus {
   group: string;
@@ -41,9 +41,12 @@ export async function statusForGroups(ctx: CoreContext, groups: SyncGroup[]): Pr
 }
 
 async function groupStatus(ctx: CoreContext, group: SyncGroup, capturedAtMs: number | null): Promise<GroupStatus> {
+  if (groupNeedsPassphrase(group) && ctx.passphrase === null) {
+    return { group: group.name, state: "locked" };
+  }
   const real = groupRealPath(group.path, ctx.configDir);
   const store = `${storeDir(ctx)}/${groupStorePath(group.path)}`;
-  const cmp = group.type === "file" ? await compareFile(ctx, group, real, store) : await compareDir(ctx, real, store);
+  const cmp = group.type === "file" ? await compareFile(ctx, group, real, store) : await compareDir(ctx, group, real, store);
   if (cmp === "no-settings") return { group: group.name, state: "no-settings" };
   if (cmp === "not-captured") return { group: group.name, state: "not-captured" };
   if (!hasChanges(cmp.changes)) return { group: group.name, state: "in-sync" };
@@ -67,21 +70,15 @@ async function compareFile(ctx: CoreContext, group: SyncGroup, real: string, sto
   }
   const storeContent = await ctx.io.read(store);
   const liveContent = await ctx.io.read(real);
-  let equal: boolean;
-  const strip = stripPatterns(group);
-  if (strip.length > 0) {
-    // capture stores the sanitized view — compare canonical sanitized JSON, not raw text
-    const liveCanon = JSON.stringify(sanitizeJson(parseJsonOrThrow(liveContent, group.name, real), strip));
-    const storeCanon = JSON.stringify(parseJsonOrThrow(storeContent, group.name, store));
-    equal = liveCanon === storeCanon;
-  } else {
-    equal = liveContent === storeContent;
-  }
+  const equal =
+    parseFileEnvelope(storeContent) !== null || group.mode === "fields" || group.mode === "encrypted"
+      ? await contentUnchanged(group, liveContent, storeContent, ctx.passphrase)
+      : liveContent === storeContent;
   const changes: FileChanges = equal ? { added: [], updated: [], deleted: [] } : { added: [], updated: [name], deleted: [] };
   return { liveFiles: equal ? [] : [real], changes };
 }
 
-async function compareDir(ctx: CoreContext, real: string, store: string): Promise<Comparison> {
+async function compareDir(ctx: CoreContext, group: SyncGroup, real: string, store: string): Promise<Comparison> {
   const liveFiles = (await ctx.io.exists(real)) ? (await listFilesRecursive(ctx.io, real)).filter((f) => !isJunkPath(f)) : [];
   const storeFiles = (await ctx.io.exists(store)) ? (await listFilesRecursive(ctx.io, store)).filter((f) => !isJunkPath(f)) : [];
   if (storeFiles.length === 0) return liveFiles.length === 0 ? "no-settings" : "not-captured";
@@ -95,9 +92,17 @@ async function compareDir(ctx: CoreContext, real: string, store: string): Promis
     if (!storeSet.has(rel)) {
       changes.added.push(rel);
       changedLiveFiles.push(`${real}/${rel}`);
-    } else if ((await ctx.io.read(`${real}/${rel}`)) !== (await ctx.io.read(`${store}/${rel}`))) {
-      changes.updated.push(rel);
-      changedLiveFiles.push(`${real}/${rel}`);
+    } else {
+      const liveContent = await ctx.io.read(`${real}/${rel}`);
+      const storeContent = await ctx.io.read(`${store}/${rel}`);
+      const equal =
+        group.mode === "encrypted"
+          ? await contentUnchanged(group, liveContent, storeContent, ctx.passphrase)
+          : liveContent === storeContent;
+      if (!equal) {
+        changes.updated.push(rel);
+        changedLiveFiles.push(`${real}/${rel}`);
+      }
     }
   }
   for (const rel of storeRels) {
@@ -121,7 +126,7 @@ export function bucketCounts(statuses: GroupStatus[]): BucketCounts {
   for (const s of statuses) {
     if (s.state === "local-changed" || s.state === "not-captured") up++;
     else if (s.state === "store-newer" || s.state === "differs") down++;
-    else if (s.state === "no-settings") none++;
+    else if (s.state === "no-settings" || s.state === "locked") none++;
     else ok++;
   }
   return { up, down, ok, none };
