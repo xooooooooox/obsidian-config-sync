@@ -27,6 +27,16 @@ describe("visibleUnderFilter", () => {
     expect(visibleUnderFilter("in-sync", "ok")).toBe(true);
     expect(visibleUnderFilter("local-changed", "ok")).toBe(false);
   });
+
+  it("none shows no-settings only; capture and ok exclude it; all includes it", () => {
+    expect(visibleUnderFilter("no-settings", "none")).toBe(true);
+    expect(visibleUnderFilter("in-sync", "none")).toBe(false);
+    expect(visibleUnderFilter("local-changed", "none")).toBe(false);
+    expect(visibleUnderFilter("no-settings", "capture")).toBe(false);
+    expect(visibleUnderFilter("no-settings", "apply")).toBe(false);
+    expect(visibleUnderFilter("no-settings", "ok")).toBe(false);
+    expect(visibleUnderFilter("no-settings", "all")).toBe(true);
+  });
 });
 
 describe("capFileEntries", () => {

@@ -3,12 +3,13 @@ import { FileChanges } from "../core/types";
 
 // Panel row filter. Buckets match core bucketCounts: capture = local-changed + not-captured,
 // apply = store-newer + differs, ok = in-sync.
-export type PanelFilter = "all" | "capture" | "apply" | "ok";
+export type PanelFilter = "all" | "capture" | "apply" | "ok" | "none";
 
 export function visibleUnderFilter(state: GroupState, filter: PanelFilter): boolean {
   if (filter === "all") return true;
   if (filter === "capture") return state === "local-changed" || state === "not-captured";
   if (filter === "apply") return state === "store-newer" || state === "differs";
+  if (filter === "none") return state === "no-settings";
   return state === "in-sync";
 }
 
