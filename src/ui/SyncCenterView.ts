@@ -72,6 +72,8 @@ export class SyncCenterView extends ItemView {
   private search = "";
   private firstLoad = true;
   private lastRefreshedAt: number | null = null;
+  private compact = false;
+  private switcherOpen = false;
 
   constructor(leaf: WorkspaceLeaf, private host: SyncCenterHost) {
     super(leaf);
@@ -91,16 +93,36 @@ export class SyncCenterView extends ItemView {
 
   async onOpen(): Promise<void> {
     this.contentEl.addClass("config-sync-center");
+    this.onResize();
     this.registerEvent(
       this.app.workspace.on("active-leaf-change", (leaf) => {
         if (leaf === this.leaf) void this.reload();
       })
     );
+    this.registerDomEvent(document, "click", (ev) => {
+      if (!this.switcherOpen) return;
+      const t = ev.target as Node;
+      const sw = this.contentEl.querySelector(".config-sync-switcher");
+      const menu = this.contentEl.querySelector(".config-sync-switcher-menu");
+      if (sw?.contains(t) === true || menu?.contains(t) === true) return;
+      this.switcherOpen = false;
+      this.render(this.renderGen);
+    });
     await this.reload();
   }
 
   async onClose(): Promise<void> {
     this.contentEl.empty();
+  }
+
+  onResize(): void {
+    const width = this.contentEl.clientWidth;
+    if (width === 0) return; // hidden leaf
+    const compact = width < 700;
+    if (compact !== this.compact) {
+      this.compact = compact;
+      this.render(this.renderGen);
+    }
   }
 
   // Called by the plugin when awareness state changes while the view is open.
@@ -147,8 +169,9 @@ export class SyncCenterView extends ItemView {
     if (gen !== this.renderGen) return;
     this.contentEl.empty();
     this.renderHeader();
-    const shell = this.contentEl.createDiv({ cls: "config-sync-shell" });
-    this.renderSidebar(shell);
+    const shell = this.contentEl.createDiv({ cls: `config-sync-shell${this.compact ? " is-compact" : ""}` });
+    if (this.compact) this.renderSwitcher(shell);
+    else this.renderSidebar(shell);
     const main = shell.createDiv({ cls: "config-sync-main" });
     if (this.panelScope.kind === "remote") {
       const remote = this.host.remotes().find((x) => this.panelScope.kind === "remote" && x.name === this.panelScope.name);
@@ -163,11 +186,15 @@ export class SyncCenterView extends ItemView {
 
   private renderSidebar(shell: HTMLElement): void {
     const side = shell.createDiv({ cls: "config-sync-side" });
-    side.createDiv({ cls: "config-sync-side-head", text: "This device ↔ store" });
+    this.renderScopeEntries(side);
+  }
+
+  private renderScopeEntries(container: HTMLElement): void {
+    container.createDiv({ cls: "config-sync-side-head", text: "This device ↔ store" });
 
     const deviceEntry = (cat: ItemCategory | "all", label: string, statuses: GroupStatus[]): void => {
       const active = this.panelScope.kind === "device" && this.panelScope.cat === cat;
-      const item = side.createDiv({ cls: `config-sync-side-item${active ? " is-active" : ""}` });
+      const item = container.createDiv({ cls: `config-sync-side-item${active ? " is-active" : ""}` });
       item.createSpan({ cls: "config-sync-side-name", text: label });
       const c = bucketCounts(statuses);
       if (c.up > 0) item.createSpan({ cls: "config-sync-side-badge is-up", text: `↑${c.up}` });
@@ -176,6 +203,7 @@ export class SyncCenterView extends ItemView {
       if (c.none > 0) item.createSpan({ cls: "config-sync-side-badge is-none", text: `○${c.none}` });
       item.addEventListener("click", () => {
         this.panelScope = { kind: "device", cat };
+        this.switcherOpen = false;
         this.render(this.renderGen);
       });
     };
@@ -194,25 +222,55 @@ export class SyncCenterView extends ItemView {
       const c = this.host.remoteCheck(remote.name);
       if (c !== undefined && (newestCheck === null || c.at > newestCheck)) newestCheck = c.at;
     }
-    const head = side.createDiv({ cls: "config-sync-side-head config-sync-side-head-remotes" });
+    const head = container.createDiv({ cls: "config-sync-side-head config-sync-side-head-remotes" });
     head.createSpan({ text: `Remotes · checked ${newestCheck === null ? "never" : relativeAge(newestCheck)}` });
     const refresh = new ExtraButtonComponent(head);
     refresh.setIcon("refresh-cw");
     refresh.setTooltip("Re-check remotes");
     refresh.onClick(async () => {
       await this.host.refreshRemoteChecks();
+      this.switcherOpen = false;
       this.render(this.renderGen);
     });
     for (const remote of remotes) {
       const active = this.panelScope.kind === "remote" && this.panelScope.name === remote.name;
-      const item = side.createDiv({ cls: `config-sync-side-item${active ? " is-active" : ""}` });
+      const item = container.createDiv({ cls: `config-sync-side-item${active ? " is-active" : ""}` });
       item.createSpan({ cls: "config-sync-side-name", text: remote.name });
       const icon = this.remoteIcon(this.host.remoteCheck(remote.name)?.check);
       item.createSpan({ cls: `config-sync-state-icon ${icon.cls}`, text: icon.glyph, attr: { "aria-label": icon.tip } });
       item.addEventListener("click", () => {
         this.panelScope = { kind: "remote", name: remote.name };
+        this.switcherOpen = false;
         this.render(this.renderGen);
       });
+    }
+  }
+
+  // Compact replacement for the sidebar: current scope as a button; dropdown mirrors the sidebar.
+  private renderSwitcher(shell: HTMLElement): void {
+    const sw = shell.createDiv({ cls: "config-sync-switcher" });
+    if (this.panelScope.kind === "device") {
+      const cat = this.panelScope.cat;
+      sw.createSpan({ text: cat === "all" ? "All items" : CATEGORY_LABELS[cat] });
+      const c = bucketCounts(this.scopedRows().map((r) => r.status));
+      if (c.up > 0) sw.createSpan({ cls: "config-sync-side-badge is-up", text: `↑${c.up}` });
+      if (c.down > 0) sw.createSpan({ cls: "config-sync-side-badge is-down", text: `↓${c.down}` });
+      if (c.ok > 0) sw.createSpan({ cls: "config-sync-side-badge is-ok", text: `✓${c.ok}` });
+      if (c.none > 0) sw.createSpan({ cls: "config-sync-side-badge is-none", text: `○${c.none}` });
+    } else {
+      sw.createSpan({ text: this.panelScope.name });
+      const icon = this.remoteIcon(this.host.remoteCheck(this.panelScope.name)?.check);
+      sw.createSpan({ cls: `config-sync-state-icon ${icon.cls}`, text: icon.glyph });
+    }
+    sw.createSpan({ cls: "config-sync-switcher-chev", text: this.switcherOpen ? "▴" : "▾" });
+    sw.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.switcherOpen = !this.switcherOpen;
+      this.render(this.renderGen);
+    });
+    if (this.switcherOpen) {
+      const menu = shell.createDiv({ cls: "config-sync-switcher-menu" });
+      this.renderScopeEntries(menu);
     }
   }
 

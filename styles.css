@@ -378,6 +378,10 @@ body.is-phone .config-sync-actionbar { flex-wrap: wrap; }
 
 .config-sync-seg-btn { background: none; border: none; border-radius: 0; box-shadow: none; height: auto; padding: 1px 9px; font-size: var(--font-ui-smaller); color: var(--text-muted); cursor: pointer; }
 
+.config-sync-seg-btn.is-capture { color: var(--color-orange); }
+
+.config-sync-seg-btn.is-apply { color: var(--color-purple); }
+
 .config-sync-seg-btn.is-capture.is-on { background: rgba(var(--color-orange-rgb), 0.25); color: var(--color-orange); }
 
 .config-sync-seg-btn.is-apply.is-on { background: rgba(var(--color-purple-rgb), 0.25); color: var(--color-purple); }
@@ -418,15 +422,17 @@ body.is-phone .config-sync-actionbar { flex-wrap: wrap; }
 
 .config-sync-main { display: flex; flex-direction: column; min-width: 0; }
 
-.config-sync-mainbar { display: flex; align-items: center; gap: var(--size-4-1); padding-bottom: var(--size-4-2); flex-wrap: wrap; }
+.config-sync-mainbar { display: flex; align-items: center; gap: var(--size-4-1); padding-bottom: var(--size-4-2); flex-wrap: wrap; padding-right: 11px; }
 
 .config-sync-mainbar-search { margin-left: auto; background: var(--background-primary); border: 1px solid var(--background-modifier-border); border-radius: 6px; padding: 2px 8px; font-size: var(--font-ui-smaller); width: 140px; }
 
 .config-sync-remote-head { color: var(--text-muted); font-size: var(--font-ui-small); padding-bottom: var(--size-4-2); }
 
-@media (max-width: 700px) {
-  .config-sync-shell { grid-template-columns: 1fr; }
-  .config-sync-side { flex-direction: row; flex-wrap: wrap; }
-  .config-sync-side-head { width: 100%; }
-}
+.config-sync-shell.is-compact { grid-template-columns: 1fr; }
+
+.config-sync-switcher { display: flex; align-items: center; gap: var(--size-4-1); width: 100%; background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 8px; padding: 7px 11px; cursor: pointer; font-size: var(--font-ui-small); }
+
+.config-sync-switcher-chev { margin-left: auto; color: var(--text-faint); }
+
+.config-sync-switcher-menu { background: var(--background-secondary); border: 1px solid var(--background-modifier-border); border-radius: 9px; padding: 5px; box-shadow: var(--shadow-s); }
 
