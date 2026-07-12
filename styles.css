@@ -254,9 +254,9 @@ body.is-phone .config-sync-remote-git {
 
 .config-sync-fpill.is-active { background: var(--interactive-accent); border-color: var(--interactive-accent); color: var(--text-on-accent); }
 
-.config-sync-sect { cursor: pointer; }
-
 .config-sync-sect .config-sync-pill { margin-right: var(--size-4-1); }
+
+.config-sync-macro > .config-sync-sect { cursor: pointer; }
 
 .config-sync-report-sub { color: var(--text-muted); font-size: var(--font-ui-smaller); margin-bottom: var(--size-4-2); }
 .config-sync-sect { display: flex; align-items: center; font-size: var(--font-ui-smaller); text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); padding: var(--size-4-3) 2px var(--size-4-1); }
