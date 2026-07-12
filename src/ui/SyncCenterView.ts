@@ -70,6 +70,8 @@ export class SyncCenterView extends ItemView {
   private filter: PanelFilter = "all";
   private panelScope: { kind: "device"; cat: ItemCategory | "all" } | { kind: "remote"; name: string } = { kind: "device", cat: "all" };
   private search = "";
+  private firstLoad = true;
+  private lastRefreshedAt: number | null = null;
 
   constructor(leaf: WorkspaceLeaf, private host: SyncCenterHost) {
     super(leaf);
@@ -89,11 +91,21 @@ export class SyncCenterView extends ItemView {
 
   async onOpen(): Promise<void> {
     this.contentEl.addClass("config-sync-center");
+    this.registerEvent(
+      this.app.workspace.on("active-leaf-change", (leaf) => {
+        if (leaf === this.leaf) void this.reload();
+      })
+    );
     await this.reload();
   }
 
   async onClose(): Promise<void> {
     this.contentEl.empty();
+  }
+
+  // Called by the plugin when awareness state changes while the view is open.
+  notifyExternalChange(): void {
+    void this.reload();
   }
 
   private async reload(): Promise<void> {
@@ -102,13 +114,19 @@ export class SyncCenterView extends ItemView {
     if (gen !== this.renderGen) return;
     this.groups = groups;
     this.statuses = new Map(statuses.map((s) => [s.group, s]));
-    // Selections reset to defaults on every reload: pre-check local-changed + store-newer only.
-    this.selected = new Set();
-    this.directionOverride.clear();
-    this.search = "";
-    for (const s of statuses) {
-      if (s.state === "local-changed" || s.state === "store-newer") this.selected.add(s.group);
+    // User state survives reloads; prune entries whose item vanished.
+    const names = new Set(groups.map((g) => g.name));
+    for (const n of [...this.selected]) if (!names.has(n)) this.selected.delete(n);
+    for (const n of [...this.directionOverride.keys()]) if (!names.has(n)) this.directionOverride.delete(n);
+    for (const n of [...this.expandedItems]) if (!names.has(n)) this.expandedItems.delete(n);
+    // Default pre-check seeds once per view lifetime, never on later refreshes.
+    if (this.firstLoad) {
+      this.firstLoad = false;
+      for (const s of statuses) {
+        if (s.state === "local-changed" || s.state === "store-newer") this.selected.add(s.group);
+      }
     }
+    this.lastRefreshedAt = Date.now();
     this.render(gen);
   }
 
@@ -229,6 +247,10 @@ export class SyncCenterView extends ItemView {
         attr: { "aria-label": `${none} item${none === 1 ? "" : "s"} with no settings yet` },
       });
     }
+    head.createSpan({
+      cls: "config-sync-center-refreshed",
+      text: this.lastRefreshedAt === null ? "" : `refreshed ${relativeAge(this.lastRefreshedAt)}`,
+    });
   }
 
   private scopeKey(): string {

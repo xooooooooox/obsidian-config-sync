@@ -132,6 +132,7 @@ export default class ConfigSyncPlugin extends Plugin {
       console.error("Config Sync: status refresh failed", e);
     }
     this.updateRibbonDot();
+    this.notifySyncCenter();
   }
 
   async refreshRemoteChecks(): Promise<void> {
@@ -152,6 +153,14 @@ export default class ConfigSyncPlugin extends Plugin {
       }
     }
     this.updateRibbonDot();
+    this.notifySyncCenter();
+  }
+
+  private notifySyncCenter(): void {
+    for (const leaf of this.app.workspace.getLeavesOfType(SYNC_CENTER_VIEW_TYPE)) {
+      const view = leaf.view;
+      if (view instanceof SyncCenterView) view.notifyExternalChange();
+    }
   }
 
   updateRibbonDot(): void {
