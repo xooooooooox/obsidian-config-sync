@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { capFileEntries, insyncLineText, moreFilesText, visibleUnderFilter } from "../src/ui/panelModel";
+import { capFileEntries, insyncLineText, moreFilesText, visibleUnderFilter, directionForState, effectiveDirection, matchesSearch, nosettingsLineText } from "../src/ui/panelModel";
 import { GroupState } from "../src/core/status";
 
 describe("visibleUnderFilter", () => {
@@ -75,5 +75,34 @@ describe("copy strings", () => {
 
   it("more-files line", () => {
     expect(moreFilesText(5)).toBe("… 5 more files ▸");
+  });
+});
+
+describe("direction", () => {
+  it("defaults by state and honors an explicit override", () => {
+    expect(directionForState("local-changed")).toBe("capture");
+    expect(directionForState("not-captured")).toBe("capture");
+    expect(directionForState("store-newer")).toBe("apply");
+    expect(directionForState("differs")).toBe("apply");
+    expect(effectiveDirection("differs", undefined)).toBe("apply");
+    expect(effectiveDirection("differs", "capture")).toBe("capture");
+    expect(effectiveDirection("local-changed", "apply")).toBe("apply");
+  });
+});
+
+describe("matchesSearch", () => {
+  it("is case-insensitive substring, empty/whitespace query matches all", () => {
+    expect(matchesSearch("plugin-templater-obsidian", "TEMPLA")).toBe(true);
+    expect(matchesSearch("hotkeys", "graph")).toBe(false);
+    expect(matchesSearch("anything", "")).toBe(true);
+    expect(matchesSearch("anything", "   ")).toBe(true);
+  });
+});
+
+describe("nosettingsLineText", () => {
+  it("pluralizes and carries the chevron", () => {
+    expect(nosettingsLineText(1, false)).toBe("○ 1 item with no settings yet ▸");
+    expect(nosettingsLineText(16, false)).toBe("○ 16 items with no settings yet ▸");
+    expect(nosettingsLineText(2, true)).toBe("○ 2 items with no settings yet ▾");
   });
 });

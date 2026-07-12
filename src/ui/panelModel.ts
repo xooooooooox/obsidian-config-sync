@@ -1,6 +1,9 @@
 import { GroupState } from "../core/status";
 import { FileChanges } from "../core/types";
 
+// Direction a checkable row acts in: capture pushes this device → store; apply pulls store → device.
+export type Direction = "capture" | "apply";
+
 // Panel row filter. Buckets match core bucketCounts: capture = local-changed + not-captured,
 // apply = store-newer + differs, ok = in-sync.
 export type PanelFilter = "all" | "capture" | "apply" | "ok" | "none";
@@ -35,4 +38,23 @@ export function insyncLineText(n: number, open: boolean): string {
 
 export function moreFilesText(n: number): string {
   return `… ${n} more files ▸`;
+}
+
+// Default direction by state: capture for local-changed/not-captured, apply otherwise.
+export function directionForState(state: GroupState): Direction {
+  return state === "local-changed" || state === "not-captured" ? "capture" : "apply";
+}
+
+// The staged direction: an explicit user choice wins over the state default.
+export function effectiveDirection(state: GroupState, override: Direction | undefined): Direction {
+  return override ?? directionForState(state);
+}
+
+export function matchesSearch(name: string, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  return q === "" || name.toLowerCase().includes(q);
+}
+
+export function nosettingsLineText(n: number, open: boolean): string {
+  return `○ ${n} item${n === 1 ? "" : "s"} with no settings yet ${open ? "▾" : "▸"}`;
 }

@@ -2,19 +2,26 @@ import { App, ButtonComponent, ExtraButtonComponent, Modal } from "obsidian";
 import { bucketCounts, GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry } from "../core/status";
 import { CATEGORY_LABELS, ItemCategory, categoryForGroup } from "../core/catalog";
 import { FileChanges, Remote, SyncGroup, hasChanges } from "../core/types";
-import { capFileEntries, CappedEntry, insyncLineText, moreFilesText, PanelFilter, visibleUnderFilter } from "./panelModel";
+import {
+  capFileEntries,
+  CappedEntry,
+  insyncLineText,
+  matchesSearch,
+  moreFilesText,
+  nosettingsLineText,
+  PanelFilter,
+  visibleUnderFilter,
+  Direction,
+  effectiveDirection,
+} from "./panelModel";
 
 const CATEGORY_ORDER: ItemCategory[] = ["obsidian", "core", "community", "custom"];
 
-// Session-remembered UI state (per spec: survives modal close, resets on plugin reload).
-// undefined in sectionCollapsed = no explicit choice; default is "collapsed iff nothing actionable".
+// Session-remembered UI state: which scopes have their ✓ / ○ trailing lines flattened open.
 const sessionUi = {
-  sectionCollapsed: new Map<ItemCategory, boolean>(),
-  insyncOpen: new Set<ItemCategory>(),
+  insyncOpen: new Set<string>(),
+  nosettingsOpen: new Set<string>(),
 };
-
-// Direction a checkable row acts in: capture pushes this device → store; apply pulls store → device.
-type Direction = "capture" | "apply";
 
 export interface SyncModalHost {
   computeStatuses(): Promise<{ groups: SyncGroup[]; statuses: GroupStatus[] }>;
@@ -27,12 +34,6 @@ export interface SyncModalHost {
   deepDiff(remote: Remote): Promise<RemoteDiffEntry[]>;
   pullFrom(remote: Remote): Promise<void>;
   pushTo(remote: Remote): Promise<void>;
-}
-
-// A checkable row acts in "capture" for local-changed/not-captured (this device is ahead / not stored),
-// and in "apply" for store-newer/differs (store should overwrite this device).
-function directionForState(state: GroupState): Direction {
-  return state === "local-changed" || state === "not-captured" ? "capture" : "apply";
 }
 
 function relativeAge(ms: number): string {
@@ -61,11 +62,12 @@ export class SyncModal extends Modal {
   private groups: SyncGroup[] = [];
   private statuses: Map<string, GroupStatus> = new Map();
   private selected: Set<string> = new Set();
+  private directionOverride: Map<string, Direction> = new Map();
   private expandedItems: Set<string> = new Set();
-  private expandedRemotes: Set<string> = new Set();
   private renderGen = 0;
-  private remotesEl: HTMLElement | null = null;
   private filter: PanelFilter = "all";
+  private panelScope: { kind: "device"; cat: ItemCategory | "all" } | { kind: "remote"; name: string } = { kind: "device", cat: "all" };
+  private search = "";
 
   constructor(app: App, private host: SyncModalHost) {
     super(app);
@@ -78,6 +80,7 @@ export class SyncModal extends Modal {
     bg.addEventListener("click", (e) => e.stopImmediatePropagation(), { capture: true });
     this.titleEl.addClass("config-sync-panel-title");
     this.titleEl.setText("Config Sync");
+    this.modalEl.addClass("config-sync-wide");
     void this.reload();
   }
 
@@ -93,6 +96,8 @@ export class SyncModal extends Modal {
     this.statuses = new Map(statuses.map((s) => [s.group, s]));
     // Selections reset to defaults on every reload: pre-check local-changed + store-newer only.
     this.selected = new Set();
+    this.directionOverride.clear();
+    this.search = "";
     for (const s of statuses) {
       if (s.state === "local-changed" || s.state === "store-newer") this.selected.add(s.group);
     }
@@ -108,13 +113,81 @@ export class SyncModal extends Modal {
     return out;
   }
 
+  private effDir(r: StatusRow): Direction {
+    return effectiveDirection(r.status.state, this.directionOverride.get(r.group.name));
+  }
+
   private render(gen: number): void {
     if (gen !== this.renderGen) return;
     this.contentEl.empty();
-    this.remotesEl = null;
     this.renderHeaderPills();
-    this.renderDeviceMacro();
-    this.renderRemotes();
+    const shell = this.contentEl.createDiv({ cls: "config-sync-shell" });
+    this.renderSidebar(shell);
+    const main = shell.createDiv({ cls: "config-sync-main" });
+    if (this.panelScope.kind === "remote") {
+      const remote = this.host.remotes().find((x) => this.panelScope.kind === "remote" && x.name === this.panelScope.name);
+      if (remote !== undefined) {
+        this.renderRemoteMode(main, remote);
+        return;
+      }
+      this.panelScope = { kind: "device", cat: "all" }; // remote vanished (settings change) — fall back
+    }
+    this.renderItemMode(main);
+  }
+
+  private renderSidebar(shell: HTMLElement): void {
+    const side = shell.createDiv({ cls: "config-sync-side" });
+    side.createDiv({ cls: "config-sync-side-head", text: "This device ↔ store" });
+
+    const deviceEntry = (cat: ItemCategory | "all", label: string, statuses: GroupStatus[]): void => {
+      const active = this.panelScope.kind === "device" && this.panelScope.cat === cat;
+      const item = side.createDiv({ cls: `config-sync-side-item${active ? " is-active" : ""}` });
+      item.createSpan({ cls: "config-sync-side-name", text: label });
+      const c = bucketCounts(statuses);
+      if (c.up > 0) item.createSpan({ cls: "config-sync-side-badge is-up", text: `↑${c.up}` });
+      if (c.down > 0) item.createSpan({ cls: "config-sync-side-badge is-down", text: `↓${c.down}` });
+      if (c.ok > 0) item.createSpan({ cls: "config-sync-side-badge is-ok", text: `✓${c.ok}` });
+      if (c.none > 0) item.createSpan({ cls: "config-sync-side-badge is-none", text: `○${c.none}` });
+      item.addEventListener("click", () => {
+        this.panelScope = { kind: "device", cat };
+        this.render(this.renderGen);
+      });
+    };
+
+    deviceEntry("all", "All items", this.rows().map((r) => r.status));
+    for (const cat of CATEGORY_ORDER) {
+      const inCat = this.rows().filter((r) => categoryForGroup(r.group.name) === cat);
+      if (inCat.length === 0) continue;
+      deviceEntry(cat, CATEGORY_LABELS[cat], inCat.map((r) => r.status));
+    }
+
+    const remotes = this.host.remotes();
+    if (remotes.length === 0) return;
+    let newestCheck: number | null = null;
+    for (const remote of remotes) {
+      const c = this.host.remoteCheck(remote.name);
+      if (c !== undefined && (newestCheck === null || c.at > newestCheck)) newestCheck = c.at;
+    }
+    const head = side.createDiv({ cls: "config-sync-side-head config-sync-side-head-remotes" });
+    head.createSpan({ text: `Remotes · checked ${newestCheck === null ? "never" : relativeAge(newestCheck)}` });
+    const refresh = new ExtraButtonComponent(head);
+    refresh.setIcon("refresh-cw");
+    refresh.setTooltip("Re-check remotes");
+    refresh.onClick(async () => {
+      await this.host.refreshRemoteChecks();
+      this.render(this.renderGen);
+    });
+    for (const remote of remotes) {
+      const active = this.panelScope.kind === "remote" && this.panelScope.name === remote.name;
+      const item = side.createDiv({ cls: `config-sync-side-item${active ? " is-active" : ""}` });
+      item.createSpan({ cls: "config-sync-side-name", text: remote.name });
+      const icon = this.remoteIcon(this.host.remoteCheck(remote.name)?.check);
+      item.createSpan({ cls: `config-sync-state-icon ${icon.cls}`, text: icon.glyph, attr: { "aria-label": icon.tip } });
+      item.addEventListener("click", () => {
+        this.panelScope = { kind: "remote", name: remote.name };
+        this.render(this.renderGen);
+      });
+    }
   }
 
   private renderHeaderPills(): void {
@@ -150,70 +223,23 @@ export class SyncModal extends Modal {
     }
   }
 
-  private renderDeviceMacro(): void {
-    const macro = this.contentEl.createDiv({ cls: "config-sync-macro" });
-    macro.createDiv({ cls: "config-sync-macro-head", text: "This device ↔ store" });
-    this.renderFilterBar(macro);
-
-    for (const cat of CATEGORY_ORDER) {
-      const inCat = this.rows().filter((r) => categoryForGroup(r.group.name) === cat);
-      if (inCat.length === 0) continue;
-      const visible = inCat.filter((r) => visibleUnderFilter(r.status.state, this.filter));
-      if (visible.length === 0) continue;
-
-      const counts = bucketCounts(inCat.map((r) => r.status));
-      const collapsed = sessionUi.sectionCollapsed.get(cat) ?? (counts.up === 0 && counts.down === 0);
-
-      const sect = macro.createDiv({ cls: "config-sync-sect" });
-      sect.createSpan({ cls: "config-sync-row-chevron", text: collapsed ? "▸" : "▾" });
-      sect.createSpan({ text: CATEGORY_LABELS[cat] });
-      sect.createDiv({ cls: "config-sync-rule-spacer" });
-      if (counts.up > 0) sect.createSpan({ cls: "config-sync-pill is-up", text: `↑ ${counts.up}` });
-      if (counts.down > 0) sect.createSpan({ cls: "config-sync-pill is-down", text: `↓ ${counts.down}` });
-      if (counts.ok > 0) sect.createSpan({ cls: "config-sync-pill is-ok", text: `✓ ${counts.ok}` });
-      if (counts.none > 0) sect.createSpan({ cls: "config-sync-pill is-none", text: `○ ${counts.none}` });
-      const boxCb = sect.createEl("input", {
-        type: "checkbox",
-        attr: { "aria-label": `Select all ${CATEGORY_LABELS[cat]}` },
-      });
-      sect.addEventListener("click", () => {
-        sessionUi.sectionCollapsed.set(cat, !collapsed);
-        this.render(this.renderGen);
-      });
-
-      if (!collapsed) {
-        const card = macro.createDiv({ cls: "config-sync-card" });
-        if (this.filter === "all") {
-          const active = visible.filter((r) => r.status.state !== "in-sync");
-          const insync = visible.filter((r) => r.status.state === "in-sync");
-          for (const r of active) this.renderItemRow(card, r);
-          if (insync.length > 0) {
-            const open = sessionUi.insyncOpen.has(cat);
-            const line = card.createDiv({ cls: "config-sync-unchanged", text: insyncLineText(insync.length, open) });
-            line.addEventListener("click", (e) => {
-              e.stopPropagation();
-              if (open) sessionUi.insyncOpen.delete(cat);
-              else sessionUi.insyncOpen.add(cat);
-              this.render(this.renderGen);
-            });
-            if (open) for (const r of insync) this.renderItemRow(card, r);
-          }
-        } else {
-          for (const r of visible) this.renderItemRow(card, r);
-        }
-      }
-      this.wireSectionCheckbox(boxCb, visible);
-    }
-
-    this.renderActionBar(macro);
+  private scopeKey(): string {
+    return this.panelScope.kind === "device" ? this.panelScope.cat : `remote:${this.panelScope.name}`;
   }
 
-  private renderFilterBar(macro: HTMLElement): void {
-    const counts = bucketCounts(this.rows().map((r) => r.status));
-    const total = this.rows().length;
-    const bar = macro.createDiv({ cls: "config-sync-filterbar" });
+  private scopedRows(): StatusRow[] {
+    if (this.panelScope.kind !== "device" || this.panelScope.cat === "all") return this.rows();
+    const cat = this.panelScope.cat;
+    return this.rows().filter((r) => categoryForGroup(r.group.name) === cat);
+  }
+
+  private renderItemMode(main: HTMLElement): void {
+    const scoped = this.scopedRows();
+    const counts = bucketCounts(scoped.map((r) => r.status));
+
+    const bar = main.createDiv({ cls: "config-sync-mainbar" });
     const defs: { key: PanelFilter; label: string }[] = [
-      { key: "all", label: `All ${total}` },
+      { key: "all", label: `All ${scoped.length}` },
       { key: "capture", label: `To capture ${counts.up}` },
       { key: "apply", label: `To apply ${counts.down}` },
       { key: "ok", label: `In sync ${counts.ok}` },
@@ -226,27 +252,93 @@ export class SyncModal extends Modal {
         this.render(this.renderGen);
       });
     }
+    const searchEl = bar.createEl("input", {
+      type: "search",
+      cls: "config-sync-mainbar-search",
+      attr: { placeholder: "Filter by name…" },
+    });
+    searchEl.value = this.search;
+    searchEl.addEventListener("input", () => {
+      this.search = searchEl.value;
+      this.renderListInto(listHost, scoped); // re-render only the list; keeps the input focused
+      this.refreshGlobalSelectAll(selectAll, scoped); // resync tri-state against the new search
+    });
+    const selectAll = bar.createEl("input", { type: "checkbox", attr: { "aria-label": "Select all visible items" } });
+
+    const listHost = main.createDiv();
+    this.renderListInto(listHost, scoped);
+    this.wireGlobalSelectAll(selectAll, scoped);
+
+    this.renderActionBar(main);
   }
 
-  // Native tri-state: checked when all checkable rows selected, indeterminate when some, else unchecked.
-  private wireSectionCheckbox(box: HTMLInputElement, inCat: StatusRow[]): void {
-    const checkable = inCat
+  private visibleRows(scoped: StatusRow[]): StatusRow[] {
+    return scoped.filter((r) => visibleUnderFilter(r.status.state, this.filter) && matchesSearch(r.group.name, this.search));
+  }
+
+  private renderListInto(listHost: HTMLElement, scoped: StatusRow[]): void {
+    listHost.empty();
+    const card = listHost.createDiv({ cls: "config-sync-card" });
+    const visible = this.visibleRows(scoped);
+    const searching = this.search.trim() !== "";
+    if (this.filter === "all" && !searching) {
+      const active = visible.filter((r) => r.status.state !== "in-sync" && r.status.state !== "no-settings");
+      const insync = visible.filter((r) => r.status.state === "in-sync");
+      const nosettings = visible.filter((r) => r.status.state === "no-settings");
+      for (const r of active) this.renderItemRow(card, r);
+      this.renderTrailingLine(card, insync, sessionUi.insyncOpen, (n, open) => insyncLineText(n, open));
+      this.renderTrailingLine(card, nosettings, sessionUi.nosettingsOpen, (n, open) => nosettingsLineText(n, open));
+    } else {
+      for (const r of visible) this.renderItemRow(card, r);
+    }
+  }
+
+  // ✓ / ○ rows fold into one dim line per scope; searching bypasses the fold entirely.
+  private renderTrailingLine(card: HTMLElement, rows: StatusRow[], openSet: Set<string>, text: (n: number, open: boolean) => string): void {
+    if (rows.length === 0) return;
+    const key = this.scopeKey();
+    const open = openSet.has(key);
+    const line = card.createDiv({ cls: "config-sync-unchanged", text: text(rows.length, open) });
+    line.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (open) openSet.delete(key);
+      else openSet.add(key);
+      this.render(this.renderGen);
+    });
+    if (open) for (const r of rows) this.renderItemRow(card, r);
+  }
+
+  // Tri-state select-all over the currently visible checkable rows (scope + filter + search).
+  private checkableRows(scoped: StatusRow[]): string[] {
+    return this.visibleRows(scoped)
       .filter((r) => r.status.state !== "in-sync" && r.status.state !== "no-settings")
       .map((r) => r.group.name);
+  }
+
+  private refreshGlobalSelectAll(box: HTMLInputElement, scoped: StatusRow[]): void {
+    const checkable = this.checkableRows(scoped);
     const selectedCount = checkable.filter((n) => this.selected.has(n)).length;
+    box.indeterminate = false;
     if (checkable.length === 0) {
       box.disabled = true;
       box.checked = false;
     } else if (selectedCount === checkable.length) {
+      box.disabled = false;
       box.checked = true;
     } else if (selectedCount === 0) {
+      box.disabled = false;
       box.checked = false;
     } else {
+      box.disabled = false;
       box.indeterminate = true;
     }
+  }
+
+  private wireGlobalSelectAll(box: HTMLInputElement, scoped: StatusRow[]): void {
+    this.refreshGlobalSelectAll(box, scoped);
     box.addEventListener("click", (e) => {
       e.stopPropagation();
-      // Decide from the pre-click selection, not the DOM: any-not-selected → select all, else clear all.
+      const checkable = this.checkableRows(scoped); // read live so it reflects the current search
       const turnOn = checkable.some((n) => !this.selected.has(n));
       for (const name of checkable) {
         if (turnOn) this.selected.add(name);
@@ -270,7 +362,7 @@ export class SyncModal extends Modal {
     const icon = this.stateIcon(status.state);
     row.createSpan({ cls: `config-sync-state-icon ${icon.cls}`, text: icon.glyph, attr: { "aria-label": icon.tip } });
 
-    const dir = directionForState(status.state);
+    const dir = this.effDir(r);
     const cb = row.createEl("input", { type: "checkbox" });
     cb.addClass(dir === "capture" ? "is-capture" : "is-apply");
     cb.disabled = inert;
@@ -313,7 +405,7 @@ export class SyncModal extends Modal {
 
   // Expanded rows always show content: an error, a state note, or actions + the file diff.
   private renderItemDetail(detail: HTMLElement, r: StatusRow): void {
-    const { group, status } = r;
+    const { status } = r;
     if (status.message !== undefined) {
       detail.createDiv({ cls: "config-sync-status-error", text: status.message });
       return;
@@ -334,30 +426,38 @@ export class SyncModal extends Modal {
       return;
     }
     if (status.changes === undefined) return;
-    this.renderMiniActions(detail, group.name);
+    this.renderDirectionToggle(detail, r);
     this.renderCappedChanges(detail, status.changes);
   }
 
-  // Per-item counter-direction actions: run immediately for this one item, reusing the
-  // host's normal capture/apply flows (confirm + report + reload prompt), then refresh.
-  private renderMiniActions(detail: HTMLElement, name: string): void {
-    const bar = detail.createDiv({ cls: "config-sync-mini-actions" });
-    const cap = bar.createEl("button", { cls: "config-sync-mini is-capture", text: "↑ Capture this (keep local)" });
-    cap.addEventListener("click", (e) => {
-      e.stopPropagation();
-      void (async () => {
-        await this.host.captureItems([name]);
-        await this.reload();
-      })();
-    });
-    const apply = bar.createEl("button", { cls: "config-sync-mini is-apply", text: "↓ Apply store version (overwrites local)" });
-    apply.addEventListener("click", (e) => {
-      e.stopPropagation();
-      void (async () => {
-        await this.host.applyItems([name]);
-        await this.reload();
-      })();
-    });
+  // Staging, not execution: a segment checks the row in that direction; clicking the
+  // active segment unstages it. The footer buttons are the only execution points.
+  private renderDirectionToggle(detail: HTMLElement, r: StatusRow): void {
+    const name = r.group.name;
+    const staged = this.selected.has(name);
+    const dir = this.effDir(r);
+    const seg = detail.createDiv({ cls: "config-sync-seg" });
+    const segBtn = (d: Direction, label: string, aria: string): void => {
+      const on = staged && dir === d;
+      const b = seg.createEl("button", {
+        cls: `config-sync-seg-btn is-${d}${on ? " is-on" : ""}`,
+        text: label,
+        attr: { "aria-label": aria },
+      });
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (on) {
+          this.selected.delete(name);
+          this.directionOverride.delete(name);
+        } else {
+          this.selected.add(name);
+          this.directionOverride.set(name, d);
+        }
+        this.render(this.renderGen);
+      });
+    };
+    segBtn("capture", "↑ Capture", "Capture this (keep local)");
+    segBtn("apply", "↓ Apply store", "Apply store version (overwrites local)");
   }
 
   private renderCappedChanges(detail: HTMLElement, changes: FileChanges): void {
@@ -379,18 +479,20 @@ export class SyncModal extends Modal {
 
   private captureNames(): string[] {
     return this.rows()
-      .filter((r) => this.selected.has(r.group.name) && directionForState(r.status.state) === "capture")
+      .filter((r) => this.selected.has(r.group.name) && this.effDir(r) === "capture")
       .map((r) => r.group.name);
   }
 
   private applyNames(): string[] {
     return this.rows()
-      .filter((r) => this.selected.has(r.group.name) && directionForState(r.status.state) === "apply")
+      .filter((r) => this.selected.has(r.group.name) && this.effDir(r) === "apply")
       .map((r) => r.group.name);
   }
 
   private renderActionBar(macro: HTMLElement): void {
     const bar = macro.createDiv({ cls: "config-sync-actionbar" });
+    bar.createSpan({ cls: "config-sync-staged-count", text: `${this.selected.size} staged` });
+    bar.createDiv({ cls: "config-sync-rule-spacer" });
     const capNames = this.captureNames();
     const applyNames = this.applyNames();
 
@@ -413,62 +515,15 @@ export class SyncModal extends Modal {
     });
   }
 
-  private renderRemotes(): void {
-    // Rebuild in place so the refresh button re-renders only this block, not the whole modal.
-    if (this.remotesEl !== null) {
-      this.remotesEl.remove();
-      this.remotesEl = null;
-    }
-    const remotes = this.host.remotes();
-    if (remotes.length === 0) return;
-    const macro = this.contentEl.createDiv({ cls: "config-sync-macro" });
-    this.remotesEl = macro;
-    let newestCheck: number | null = null;
-    for (const remote of remotes) {
-      const c = this.host.remoteCheck(remote.name);
-      if (c !== undefined && (newestCheck === null || c.at > newestCheck)) newestCheck = c.at;
-    }
-    const head = macro.createDiv({ cls: "config-sync-macro-head" });
-    head.createSpan({ text: `Remotes · checked ${newestCheck === null ? "never" : relativeAge(newestCheck)}` });
-    const refresh = new ExtraButtonComponent(head);
-    refresh.setIcon("refresh-cw");
-    refresh.setTooltip("Re-check remotes");
-    refresh.onClick(async () => {
-      await this.host.refreshRemoteChecks();
-      this.renderRemotes();
-    });
-
-    const card = macro.createDiv({ cls: "config-sync-card" });
-    for (const remote of remotes) this.renderRemoteRow(card, remote);
-  }
-
-  private renderRemoteRow(card: HTMLElement, remote: Remote): void {
-    const cached = this.host.remoteCheck(remote.name);
-    const check: RemoteCheck | undefined = cached?.check;
-    const expanded = this.expandedRemotes.has(remote.name);
-    const row = card.createDiv({ cls: "config-sync-hub-row" });
-    const chev = row.createSpan({ cls: "config-sync-row-chevron", text: expanded ? "▾" : "▸" });
-    row.createSpan({ cls: "config-sync-rule-name", text: remote.name });
+  private renderRemoteMode(main: HTMLElement, remote: Remote): void {
+    const check = this.host.remoteCheck(remote.name)?.check;
     const icon = this.remoteIcon(check);
-    row.createSpan({ cls: `config-sync-state-icon ${icon.cls}`, text: icon.glyph, attr: { "aria-label": icon.tip } });
-    row.createDiv({ cls: "config-sync-rule-spacer" });
-    row.createSpan({ cls: "config-sync-row-path", text: `captured ${isoAge(check?.remoteCapturedAt ?? null)}` });
-
-    const detail = card.createDiv({ cls: "config-sync-report-files" });
-    detail.hidden = !expanded;
-    if (expanded) void this.renderRemoteDetail(detail, remote, check);
-    row.addEventListener("click", () => {
-      if (this.expandedRemotes.has(remote.name)) {
-        this.expandedRemotes.delete(remote.name);
-        detail.hidden = true;
-        chev.setText("▸");
-      } else {
-        this.expandedRemotes.add(remote.name);
-        detail.hidden = false;
-        chev.setText("▾");
-        void this.renderRemoteDetail(detail, remote, this.host.remoteCheck(remote.name)?.check);
-      }
+    main.createDiv({
+      cls: "config-sync-remote-head",
+      text: `${remote.name} · captured ${isoAge(check?.remoteCapturedAt ?? null)} — ${icon.tip}`,
     });
+    const detail = main.createDiv({ cls: "config-sync-report-files config-sync-remote-pane" });
+    void this.renderRemoteDetail(detail, remote, check);
   }
 
   private remoteIcon(check: RemoteCheck | undefined): { glyph: string; cls: string; tip: string } {
@@ -496,12 +551,12 @@ export class SyncModal extends Modal {
     try {
       entries = await this.host.deepDiff(remote);
     } catch (e) {
-      if (gen !== this.renderGen || !this.expandedRemotes.has(remote.name)) return;
+      if (gen !== this.renderGen || this.panelScope.kind !== "remote" || this.panelScope.name !== remote.name) return;
       detail.empty();
       detail.createDiv({ cls: "config-sync-status-error", text: `cannot compare: ${(e as Error).message}` });
       return;
     }
-    if (gen !== this.renderGen || !this.expandedRemotes.has(remote.name)) return;
+    if (gen !== this.renderGen || this.panelScope.kind !== "remote" || this.panelScope.name !== remote.name) return;
     detail.empty();
 
     const changed = entries.filter((e) => hasChanges(e.changes));

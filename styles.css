@@ -249,15 +249,11 @@ body.is-phone .config-sync-remote-git {
 .config-sync-pill.is-none { background: rgba(255, 255, 255, 0.06); color: var(--text-muted); }
 .config-sync-pill.is-warn { background: none; color: var(--color-orange); margin-left: var(--size-4-1); }
 
-.config-sync-filterbar { display: flex; gap: var(--size-4-1); margin: 2px 0 var(--size-4-2) 0; flex-wrap: wrap; }
-
 .config-sync-fpill { background: none; border: 1px solid var(--background-modifier-border); border-radius: 999px; padding: 2px 10px; font-size: var(--font-ui-smaller); color: var(--text-muted); cursor: pointer; box-shadow: none; height: auto; }
 
 .config-sync-fpill.is-active { background: var(--interactive-accent); border-color: var(--interactive-accent); color: var(--text-on-accent); }
 
 .config-sync-sect .config-sync-pill { margin-right: var(--size-4-1); }
-
-.config-sync-macro > .config-sync-sect { cursor: pointer; }
 
 .config-sync-report-sub { color: var(--text-muted); font-size: var(--font-ui-smaller); margin-bottom: var(--size-4-2); }
 .config-sync-sect { display: flex; align-items: center; font-size: var(--font-ui-smaller); text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); padding: var(--size-4-3) 2px var(--size-4-1); }
@@ -287,8 +283,6 @@ body.is-phone .config-sync-remote-git {
 .config-sync-dot-capture::after { background: var(--color-orange); }
 .config-sync-dot-apply::after { background: var(--color-blue); }
 
-.config-sync-macro { background: rgba(255, 255, 255, 0.035); border: 1px solid rgba(255, 255, 255, 0.07); border-radius: var(--radius-m); padding: var(--size-4-2) var(--size-4-3) var(--size-4-3); margin-bottom: var(--size-4-3); }
-.config-sync-macro-head { font-size: var(--font-ui-smaller); text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); display: flex; align-items: center; gap: var(--size-4-2); padding-bottom: var(--size-4-1); }
 .config-sync-hub-row { display: flex; align-items: center; gap: var(--size-4-2); padding: var(--size-4-2) 0; border-bottom: 1px solid rgba(255, 255, 255, 0.07); cursor: pointer; white-space: nowrap; }
 .config-sync-hub-row .config-sync-rule-name { flex: none; }
 .config-sync-card > .config-sync-hub-row:last-of-type { border-bottom: none; }
@@ -303,7 +297,7 @@ body.is-phone .config-sync-remote-git {
 
 /* custom-drawn checkboxes (same inputs, no native rendering) */
 .config-sync-hub-row input[type="checkbox"],
-.config-sync-sect input[type="checkbox"] {
+.config-sync-mainbar input[type="checkbox"] {
   appearance: none;
   -webkit-appearance: none;
   width: 15px;
@@ -341,12 +335,12 @@ body.is-phone .config-sync-remote-git {
   color: var(--text-on-accent);
 }
 
-.config-sync-sect input[type="checkbox"]:checked {
+.config-sync-mainbar input[type="checkbox"]:checked {
   background: var(--text-muted);
   border-color: var(--text-muted);
 }
 
-.config-sync-sect input[type="checkbox"]:checked::after {
+.config-sync-mainbar input[type="checkbox"]:checked::after {
   content: "✓";
   position: absolute;
   top: -3px;
@@ -355,12 +349,12 @@ body.is-phone .config-sync-remote-git {
   color: var(--background-primary);
 }
 
-.config-sync-sect input[type="checkbox"]:indeterminate {
+.config-sync-mainbar input[type="checkbox"]:indeterminate {
   background: var(--text-faint);
   border-color: var(--text-faint);
 }
 
-.config-sync-sect input[type="checkbox"]:indeterminate::after {
+.config-sync-mainbar input[type="checkbox"]:indeterminate::after {
   content: "−";
   position: absolute;
   top: -3px;
@@ -382,8 +376,53 @@ body.is-phone .config-sync-actionbar { flex-wrap: wrap; }
 
 .config-sync-expand-note { color: var(--text-muted); font-size: var(--font-ui-smaller); font-style: italic; margin: 0 0 var(--size-4-1) 0; font-family: var(--font-interface); }
 .config-sync-more-files { color: var(--text-muted); cursor: pointer; }
-.config-sync-mini-actions { display: flex; gap: var(--size-4-2); flex-wrap: wrap; margin: 2px 0 var(--size-4-1) 0; font-family: var(--font-interface); }
-.config-sync-mini { background: none; border: 1px solid var(--background-modifier-border); border-radius: 4px; padding: 1px 8px; font-size: var(--font-ui-smaller); cursor: pointer; box-shadow: none; height: auto; }
-.config-sync-mini.is-capture { color: var(--color-orange); }
-.config-sync-mini.is-apply { color: var(--color-purple); }
+.config-sync-seg { display: inline-flex; border: 1px solid var(--background-modifier-border); border-radius: 5px; overflow: hidden; margin: 2px 0 var(--size-4-1) 0; font-family: var(--font-interface); }
+
+.config-sync-seg-btn { background: none; border: none; border-radius: 0; box-shadow: none; height: auto; padding: 1px 9px; font-size: var(--font-ui-smaller); color: var(--text-muted); cursor: pointer; }
+
+.config-sync-seg-btn.is-capture.is-on { background: rgba(var(--color-orange-rgb), 0.25); color: var(--color-orange); }
+
+.config-sync-seg-btn.is-apply.is-on { background: rgba(var(--color-purple-rgb), 0.25); color: var(--color-purple); }
+
+.config-sync-staged-count { color: var(--text-muted); font-size: var(--font-ui-smaller); }
+
+.modal.config-sync-wide { width: 920px; max-width: 95vw; }
+
+.config-sync-shell { display: grid; grid-template-columns: minmax(150px, 22%) minmax(0, 1fr); gap: var(--size-4-3); }
+
+.config-sync-side { display: flex; flex-direction: column; gap: 3px; }
+
+.config-sync-side-head { font-size: var(--font-ui-smaller); text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); padding: var(--size-4-1) 4px; display: flex; align-items: center; gap: var(--size-4-1); }
+
+.config-sync-side-head-remotes { margin-top: var(--size-4-2); }
+
+.config-sync-side-item { display: flex; align-items: center; gap: 5px; padding: 6px 9px; border-radius: 8px; border: 1px solid transparent; cursor: pointer; font-size: var(--font-ui-small); }
+
+.config-sync-side-item.is-active { background: rgba(var(--color-purple-rgb), 0.14); border-color: rgba(var(--color-purple-rgb), 0.4); color: var(--text-normal); }
+
+.config-sync-side-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.config-sync-side-badge { font-size: 10px; border-radius: 8px; padding: 0 5px; flex: none; }
+
+.config-sync-side-badge.is-up { background: rgba(var(--color-orange-rgb), 0.15); color: var(--color-orange); }
+
+.config-sync-side-badge.is-down { background: rgba(var(--color-purple-rgb), 0.15); color: var(--color-purple); }
+
+.config-sync-side-badge.is-ok { background: rgba(var(--color-green-rgb), 0.15); color: var(--color-green); }
+
+.config-sync-side-badge.is-none { background: rgba(255, 255, 255, 0.06); color: var(--text-muted); }
+
+.config-sync-main { display: flex; flex-direction: column; min-width: 0; }
+
+.config-sync-mainbar { display: flex; align-items: center; gap: var(--size-4-1); padding-bottom: var(--size-4-2); flex-wrap: wrap; }
+
+.config-sync-mainbar-search { margin-left: auto; background: var(--background-primary); border: 1px solid var(--background-modifier-border); border-radius: 6px; padding: 2px 8px; font-size: var(--font-ui-smaller); width: 140px; }
+
+.config-sync-remote-head { color: var(--text-muted); font-size: var(--font-ui-small); padding-bottom: var(--size-4-2); }
+
+@media (max-width: 700px) {
+  .config-sync-shell { grid-template-columns: 1fr; }
+  .config-sync-side { flex-direction: row; flex-wrap: wrap; }
+  .config-sync-side-head { width: 100%; }
+}
 
