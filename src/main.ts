@@ -19,7 +19,7 @@ import {
 } from "./core/ConfigSyncCore";
 import { type CatalogSection, listCoreSections, listDiscovered, listOptionSections, listPluginSections } from "./core/catalog";
 import { PkmMode, PkmProbe, resolveEffectiveMode, resolveRootPath } from "./core/pkm";
-import { checkRemote, diffRemote, GroupStatus, RemoteCheck, statusForGroups } from "./core/status";
+import { bucketCounts, checkRemote, diffRemote, GroupStatus, RemoteCheck, statusForGroups } from "./core/status";
 import { Remote, RibbonButtons, StoreLock, SyncGroup } from "./core/types";
 import { confirmWarnings } from "./ui/ConfirmModal";
 import { ReportModal } from "./ui/ReportModal";
@@ -157,14 +157,13 @@ export default class ConfigSyncPlugin extends Plugin {
     const el = this.mainRibbonEl;
     if (el === null) return;
     const s = this.localStatuses ?? [];
-    const changedHere = s.filter((x) => x.state === "local-changed" || x.state === "differs").length;
-    const storeNewer = s.filter((x) => x.state === "store-newer").length;
+    const { up, down } = bucketCounts(s);
     const remoteNewer = [...this.remoteChecks.entries()].filter(([, v]) => v.check.state === "remote-newer").map(([k]) => k);
-    el.toggleClass("config-sync-dot-capture", changedHere > 0);
-    el.toggleClass("config-sync-dot-apply", changedHere === 0 && (storeNewer > 0 || remoteNewer.length > 0));
+    el.toggleClass("config-sync-dot-capture", up > 0);
+    el.toggleClass("config-sync-dot-apply", up === 0 && (down > 0 || remoteNewer.length > 0));
     const parts: string[] = [];
-    if (changedHere > 0) parts.push(`${changedHere} changed here`);
-    if (storeNewer > 0) parts.push(`${storeNewer} store-newer`);
+    if (up > 0) parts.push(`${up} to capture`);
+    if (down > 0) parts.push(`${down} to apply`);
     for (const name of remoteNewer) parts.push(`remote "${name}" newer`);
     el.setAttribute("aria-label", parts.length > 0 ? `Config Sync — ${parts.join(", ")}` : "Config Sync");
   }
@@ -172,8 +171,7 @@ export default class ConfigSyncPlugin extends Plugin {
   private async openSyncMenu(evt: MouseEvent): Promise<void> {
     if (this.settings.statusInMenu) await this.refreshLocalStatus(); // never throws
     const s = this.localStatuses ?? [];
-    const up = s.filter((x) => x.state === "local-changed" || x.state === "differs").length;
-    const down = s.filter((x) => x.state === "store-newer").length;
+    const { up, down } = bucketCounts(s);
     const menu = new Menu();
     const parts: string[] = [];
     if (this.settings.statusInMenu && up > 0) parts.push(`↑${up}`);

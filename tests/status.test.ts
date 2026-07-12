@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CoreContext, capture, loadManifest, groupsForDevice, ExternalStoreReader } from "../src/core/ConfigSyncCore";
-import { statusForGroups, checkRemote, diffRemote } from "../src/core/status";
+import { statusForGroups, checkRemote, diffRemote, bucketCounts, GroupStatus } from "../src/core/status";
 import { MemFS, FakePlugins } from "./memfs";
 
 const MANIFEST = JSON.stringify({
@@ -159,5 +159,18 @@ describe("checkRemote", () => {
     expect((await checkRemote(localLock, fakeReader(at("2026-07-07T00:00:00.000Z")))).state).toBe("remote-older");
     expect((await checkRemote(localLock, fakeReader(at("2026-07-08T00:00:00.000Z")))).state).toBe("same");
     expect((await checkRemote(null, fakeReader(at("2026-07-09T00:00:00.000Z")))).state).toBe("unknown");
+  });
+});
+
+describe("bucketCounts", () => {
+  it("bucketCounts groups the five states into capture/apply/ok buckets", () => {
+    const statuses: GroupStatus[] = [
+      { group: "a", state: "local-changed" },
+      { group: "b", state: "not-captured" },
+      { group: "c", state: "store-newer" },
+      { group: "d", state: "differs" },
+      { group: "e", state: "in-sync" },
+    ];
+    expect(bucketCounts(statuses)).toEqual({ up: 2, down: 2, ok: 1 });
   });
 });

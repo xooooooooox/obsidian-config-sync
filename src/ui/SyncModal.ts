@@ -1,5 +1,5 @@
 import { App, ButtonComponent, ExtraButtonComponent, Modal } from "obsidian";
-import { GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry } from "../core/status";
+import { bucketCounts, GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry } from "../core/status";
 import { CATEGORY_LABELS, ItemCategory, categoryForGroup } from "../core/catalog";
 import { FileChanges, Remote, SyncGroup, hasChanges } from "../core/types";
 
@@ -109,9 +109,7 @@ export class SyncModal extends Modal {
   }
 
   private renderHeaderPills(): void {
-    const up = this.rows().filter((r) => r.status.state === "local-changed").length;
-    const down = this.rows().filter((r) => r.status.state === "store-newer").length;
-    const ok = this.rows().filter((r) => r.status.state === "in-sync").length;
+    const { up, down, ok } = bucketCounts(this.rows().map((r) => r.status));
     this.titleEl.empty();
     this.titleEl.setText("Config Sync");
     const pills = this.titleEl.createSpan({ cls: "config-sync-report-pills" });
@@ -119,14 +117,14 @@ export class SyncModal extends Modal {
       pills.createSpan({
         cls: "config-sync-pill is-up",
         text: `↑ ${up}`,
-        attr: { "aria-label": `${up} item${up === 1 ? "" : "s"} changed on this device` },
+        attr: { "aria-label": `${up} item${up === 1 ? "" : "s"} to capture` },
       });
     }
     if (down > 0) {
       pills.createSpan({
         cls: "config-sync-pill is-down",
         text: `↓ ${down}`,
-        attr: { "aria-label": `${down} item${down === 1 ? "" : "s"}: store is newer` },
+        attr: { "aria-label": `${down} item${down === 1 ? "" : "s"} to apply` },
       });
     }
     pills.createSpan({
@@ -187,10 +185,12 @@ export class SyncModal extends Modal {
   private renderItemRow(card: HTMLElement, r: StatusRow): void {
     const { group, status } = r;
     const insync = status.state === "in-sync";
-    const row = card.createDiv({ cls: `config-sync-hub-row${insync ? " is-insync" : ""}` });
+    const row = card.createDiv({
+      cls: `config-sync-hub-row${insync ? " is-insync" : ""}`,
+      attr: { "aria-label": this.host.resolvedPath(group) },
+    });
     const chev = row.createSpan({ cls: "config-sync-row-chevron", text: this.expandedItems.has(group.name) ? "▾" : "▸" });
     row.createSpan({ cls: "config-sync-rule-name", text: group.name });
-    row.createSpan({ cls: "config-sync-row-path", text: this.host.resolvedPath(group) });
     row.createDiv({ cls: "config-sync-rule-spacer" });
 
     const icon = this.stateIcon(status.state);
@@ -396,7 +396,7 @@ export class SyncModal extends Modal {
     } else if (matched > 0) {
       const line = detail.createDiv({
         cls: "config-sync-unchanged",
-        text: `✓ ${matched} more item${matched === 1 ? "" : "s"} match ▸ · ${directionText}`,
+        text: `✓ ${matched} more item${matched === 1 ? " matches" : "s match"} ▸ · ${directionText}`,
       });
       line.addEventListener("click", () => line.setText(`✓ ${matchNames.join(" · ")}`));
     } else {

@@ -101,6 +101,24 @@ async function compareDir(ctx: CoreContext, real: string, store: string): Promis
   return { liveFiles: changedLiveFiles, changes };
 }
 
+export interface BucketCounts {
+  up: number; // resolved by Capture: changed here + never captured
+  down: number; // resolved by Apply: store newer + differs
+  ok: number;
+}
+
+export function bucketCounts(statuses: GroupStatus[]): BucketCounts {
+  let up = 0;
+  let down = 0;
+  let ok = 0;
+  for (const s of statuses) {
+    if (s.state === "local-changed" || s.state === "not-captured") up++;
+    else if (s.state === "store-newer" || s.state === "differs") down++;
+    else ok++;
+  }
+  return { up, down, ok };
+}
+
 export type RemoteState = "no-store" | "same" | "remote-newer" | "remote-older" | "unknown";
 
 export interface RemoteCheck {
