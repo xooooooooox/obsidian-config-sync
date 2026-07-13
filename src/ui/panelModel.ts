@@ -1,5 +1,7 @@
 import { GroupState } from "../core/status";
 import { FileChanges } from "../core/types";
+import { Availability } from "../core/availability";
+import { StateAction } from "../core/ConfigSyncCore";
 
 // Direction a checkable row acts in: capture pushes this device → store; apply pulls store → device.
 export type Direction = "capture" | "apply";
@@ -58,4 +60,87 @@ export function matchesSearch(name: string, query: string): boolean {
 
 export function nosettingsLineText(n: number, open: boolean): string {
   return `○ ${n} item${n === 1 ? "" : "s"} with no settings yet ${open ? "▾" : "▸"}`;
+}
+
+export type SectionKind = "main" | "outdated" | "disabled" | "not-installed";
+
+export const SECTION_TITLES: Record<Exclude<SectionKind, "main">, string> = {
+  outdated: "Outdated on this device",
+  disabled: "Disabled on this device",
+  "not-installed": "Not installed on this device",
+};
+
+export const SECTION_NOTES: Record<Exclude<SectionKind, "main">, string> = {
+  outdated: "Store settings were captured on a newer plugin version than this device runs — updating first is the safe path.",
+  disabled: "Settings sync either way — choose whether applying also turns the plugin on.",
+  "not-installed": "Settings sync either way — choose whether applying also installs the plugin (latest version, from the community catalog).",
+};
+
+export function sectionForItem(a: Availability): SectionKind {
+  if (a.kind === "not-installed") return "not-installed";
+  if (a.kind === "disabled") return "disabled";
+  if (a.anchor === "plugin" && a.drift === "behind") return "outdated";
+  return "main";
+}
+
+export interface PolicyOption {
+  action: StateAction;
+  label: string;
+  pill: string | null; // collapsed-row pill; null = no state action
+}
+
+export function policyOptions(a: Availability): PolicyOption[] {
+  if (a.kind === "not-installed") {
+    return [
+      { action: "install-enable", label: "⤓ Install & enable", pill: "⤓ install & enable" },
+      { action: "install", label: "⤓ Install", pill: "⤓ install" },
+      { action: "none", label: "Stage only", pill: null },
+    ];
+  }
+  if (a.kind === "disabled") {
+    if (a.anchor === "plugin" && a.drift === "behind") {
+      return [
+        { action: "update-enable", label: "⤓ Update & enable", pill: "⤓ update & enable" },
+        { action: "enable", label: "⏻ Enable", pill: "⏻ enable" },
+        { action: "none", label: "Keep disabled", pill: null },
+      ];
+    }
+    return [
+      { action: "enable", label: "⏻ Enable", pill: "⏻ enable" },
+      { action: "none", label: "Keep disabled", pill: null },
+    ];
+  }
+  if (a.anchor === "plugin" && a.drift === "behind") {
+    return [
+      { action: "update", label: "⤓ Update to latest", pill: "⤓ update" },
+      { action: "none", label: `Keep ${a.localVersion ?? "current"}`, pill: null },
+    ];
+  }
+  return [];
+}
+
+export function defaultPolicy(a: Availability): StateAction {
+  return policyOptions(a)[0]?.action ?? "none";
+}
+
+export function versionLine(a: Availability): { text: string; tone: "gray" | "amber" } | null {
+  if (a.drift === null || a.localVersion === null || a.storeVersion === null) return null;
+  if (a.anchor === "app") {
+    return a.drift === "behind"
+      ? { text: `captured on Obsidian ${a.storeVersion} — this device runs ${a.localVersion}; update Obsidian if settings look off`, tone: "amber" }
+      : { text: `captured on Obsidian ${a.storeVersion} · this device runs ${a.localVersion}`, tone: "gray" };
+  }
+  if (a.drift === "ahead") {
+    return { text: `this device ${a.localVersion} · store ${a.storeVersion} — newer here; capturing will refresh the store`, tone: "gray" };
+  }
+  const suffix = a.kind === "disabled" ? " — settings were captured on a newer version" : "";
+  return { text: `this device ${a.localVersion} · store ${a.storeVersion}${suffix}`, tone: "gray" };
+}
+
+export function footerSummary(staged: number, outdated: number, disabled: number, toInstall: number): string {
+  const parts = [`${staged} staged`];
+  if (outdated > 0) parts.push(`+${outdated} outdated`);
+  if (disabled > 0) parts.push(`+${disabled} disabled`);
+  if (toInstall > 0) parts.push(`+${toInstall} to install`);
+  return parts.join(" · ");
 }

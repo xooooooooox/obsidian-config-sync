@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { capFileEntries, insyncLineText, moreFilesText, visibleUnderFilter, directionForState, effectiveDirection, matchesSearch, nosettingsLineText } from "../src/ui/panelModel";
+import { capFileEntries, insyncLineText, moreFilesText, visibleUnderFilter, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, footerSummary, policyOptions, sectionForItem, versionLine } from "../src/ui/panelModel";
 import { GroupState } from "../src/core/status";
+import { Availability } from "../src/core/availability";
 
 describe("visibleUnderFilter", () => {
   it("all shows every state", () => {
@@ -112,5 +113,55 @@ describe("nosettingsLineText", () => {
     expect(nosettingsLineText(1, false)).toBe("○ 1 item with no settings yet ▸");
     expect(nosettingsLineText(16, false)).toBe("○ 16 items with no settings yet ▸");
     expect(nosettingsLineText(2, true)).toBe("○ 2 items with no settings yet ▾");
+  });
+});
+
+const avail = (over: Partial<Availability>): Availability => ({
+  kind: "enabled", drift: null, localVersion: "1.0.0", storeVersion: "1.0.0", anchor: "plugin", ...over,
+});
+
+describe("sectionForItem", () => {
+  it("buckets by availability, then behind-drift for community plugins", () => {
+    expect(sectionForItem(avail({ kind: "not-installed" }))).toBe("not-installed");
+    expect(sectionForItem(avail({ kind: "disabled", drift: "behind" }))).toBe("disabled");
+    expect(sectionForItem(avail({ drift: "behind", storeVersion: "2.0.0" }))).toBe("outdated");
+    expect(sectionForItem(avail({ drift: "ahead" }))).toBe("main");
+    expect(sectionForItem(avail({ anchor: "app", drift: "behind" }))).toBe("main");
+  });
+});
+
+describe("policyOptions ladder", () => {
+  it("composes options from the gap list, default first", () => {
+    expect(policyOptions(avail({ kind: "not-installed" })).map((o) => o.action)).toEqual(["install-enable", "install", "none"]);
+    expect(policyOptions(avail({ kind: "disabled" })).map((o) => o.action)).toEqual(["enable", "none"]);
+    expect(policyOptions(avail({ kind: "disabled", drift: "behind" })).map((o) => o.action)).toEqual(["update-enable", "enable", "none"]);
+    const outdated = policyOptions(avail({ drift: "behind", localVersion: "2.2.1", storeVersion: "2.4.0" }));
+    expect(outdated.map((o) => o.action)).toEqual(["update", "none"]);
+    expect(outdated[1]?.label).toBe("Keep 2.2.1");
+    expect(policyOptions(avail({}))).toEqual([]);
+    expect(defaultPolicy(avail({ kind: "not-installed" }))).toBe("install-enable");
+    expect(defaultPolicy(avail({}))).toBe("none");
+  });
+});
+
+describe("versionLine", () => {
+  it("writes drift metadata per anchor and direction", () => {
+    expect(versionLine(avail({ drift: "ahead", localVersion: "1.5.10", storeVersion: "1.4.2" }))).toEqual({
+      text: "this device 1.5.10 · store 1.4.2 — newer here; capturing will refresh the store", tone: "gray",
+    });
+    expect(versionLine(avail({ kind: "disabled", drift: "behind", localVersion: "1.5.3", storeVersion: "1.8.0" }))?.text).toBe(
+      "this device 1.5.3 · store 1.8.0 — settings were captured on a newer version"
+    );
+    expect(versionLine(avail({ anchor: "app", drift: "behind", localVersion: "1.8.7", storeVersion: "1.9.2" }))).toEqual({
+      text: "captured on Obsidian 1.9.2 — this device runs 1.8.7; update Obsidian if settings look off", tone: "amber",
+    });
+    expect(versionLine(avail({}))).toBeNull();
+  });
+});
+
+describe("footerSummary", () => {
+  it("lists only non-zero sources", () => {
+    expect(footerSummary(3, 0, 1, 2)).toBe("3 staged · +1 disabled · +2 to install");
+    expect(footerSummary(4, 0, 0, 0)).toBe("4 staged");
   });
 });
