@@ -103,7 +103,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private renderGen = 0;
   private activeTab: PanelTab = "general";
   private search = "";
-  private searchInputEl: HTMLInputElement | null = null; // restore focus across search re-renders
+  private bodyEl: HTMLElement | null = null;
   private expanded = new Set<string>(); // UI-transient: advanced rows expanded this session
   private groupsErrorEl: HTMLElement | null = null;
   private sourcesErrorEl: HTMLElement | null = null;
@@ -130,6 +130,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
 
   private rerender(scrollTop: number): void {
     const gen = ++this.renderGen;
+    this.bodyEl = null;
     this.containerEl.empty();
     void this.render(this.containerEl, gen, scrollTop);
   }
@@ -154,18 +155,20 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       this.loaded = true;
     }
     this.renderSearchBox(containerEl);
-    if (this.search.trim() !== "") {
-      await this.renderSearchResults(containerEl, gen);
-    } else {
-      this.renderTabNav(containerEl);
-      await this.renderActiveTab(containerEl, gen);
-    }
+    this.bodyEl = containerEl.createDiv({ cls: "config-sync-settings-body" });
+    await this.renderBody(this.bodyEl, gen);
     if (gen !== this.renderGen) return;
     containerEl.scrollTop = scrollTop;
-    if (this.search.trim() !== "" && this.searchInputEl !== null) {
-      const el = this.searchInputEl;
-      el.focus();
-      el.setSelectionRange(el.value.length, el.value.length);
+  }
+
+  private async renderBody(bodyEl: HTMLElement, gen: number): Promise<void> {
+    if (gen !== this.renderGen) return;
+    bodyEl.empty();
+    if (this.search.trim() !== "") {
+      await this.renderSearchResults(bodyEl, gen);
+    } else {
+      this.renderTabNav(bodyEl);
+      await this.renderActiveTab(bodyEl, gen);
     }
   }
 
@@ -174,10 +177,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const search = new SearchComponent(wrap);
     search.setPlaceholder("Search all settings…");
     search.setValue(this.search);
-    this.searchInputEl = search.inputEl;
     search.onChange((v) => {
       this.search = v;
-      this.refresh();
+      const body = this.bodyEl;
+      if (body === null) return;
+      void this.renderBody(body, this.renderGen);
     });
   }
 
