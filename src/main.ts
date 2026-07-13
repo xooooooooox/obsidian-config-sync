@@ -1,4 +1,4 @@
-import { Menu, Notice, Platform, Plugin } from "obsidian";
+import { Menu, Notice, Platform, Plugin, apiVersion } from "obsidian";
 import {
   CoreContext,
   ExternalStoreReader,
@@ -56,11 +56,12 @@ interface CommunityPluginRegistry {
   enabledPlugins: Set<string>;
   disablePlugin(id: string): Promise<void>;
   enablePlugin(id: string): Promise<void>;
+  loadManifests(): Promise<void>;
 }
 
 // app.internalPlugins is not part of the public API; this is the community-standard access path for core plugins.
 interface InternalPluginsRegistry {
-  plugins: Record<string, { enabled: boolean; instance?: { id: string; name: string } }>;
+  plugins: Record<string, { enabled: boolean; instance?: { id: string; name: string }; enable(): Promise<void> }>;
 }
 
 export default class ConfigSyncPlugin extends Plugin {
@@ -336,6 +337,14 @@ export default class ConfigSyncPlugin extends Plugin {
       enablePlugin: (id) => registry.enablePlugin(id),
       getInstalledPluginName: (id) => registry.manifests[id]?.name ?? null,
       getCorePluginName: (id) => this.internalPlugins().plugins[id]?.instance?.name ?? null,
+      getAppVersion: () => apiVersion,
+      isCorePluginEnabled: (id) => this.internalPlugins().plugins[id]?.enabled === true,
+      enableCorePlugin: async (id) => {
+        const p = this.internalPlugins().plugins[id];
+        if (p === undefined) throw new Error(`core plugin "${id}" does not exist in this Obsidian build`);
+        await p.enable();
+      },
+      reloadPluginManifests: () => this.pluginRegistry().loadManifests(),
     };
   }
 

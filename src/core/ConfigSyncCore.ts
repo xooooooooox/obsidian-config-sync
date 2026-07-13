@@ -13,6 +13,10 @@ export interface PluginHost {
   enablePlugin(id: string): Promise<void>;
   getInstalledPluginName(id: string): string | null;
   getCorePluginName(id: string): string | null;
+  getAppVersion(): string;
+  isCorePluginEnabled(id: string): boolean;
+  enableCorePlugin(id: string): Promise<void>;
+  reloadPluginManifests(): Promise<void>;
 }
 
 export interface CoreContext {
@@ -163,6 +167,8 @@ export async function capture(ctx: CoreContext, names?: string[], onProgress?: P
         const prev = previous?.groups[group.name];
         if (prev !== undefined) lock.groups[group.name] = prev; // errored capture keeps the last known version
       }
+    } else if (result.status !== "error") {
+      lock.groups[group.name] = { sourceAppVersion: ctx.plugins.getAppVersion() };
     }
     results.push(result);
   }

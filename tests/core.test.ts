@@ -71,10 +71,15 @@ describe("capture", () => {
     expect(await io.exists("cs/store/configdir/snippets/stale.css")).toBe(false);
     expect(await io.read("cs/store/configdir/snippets/sub/two.css")).toBe("two");
     expect(JSON.parse(await io.read("cs/store/configdir/plugins/demo/data.json"))).toEqual({ theme: "x" });
-    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { capturedAt: string; groups: Record<string, { sourcePluginVersion: string }> };
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { capturedAt: string; groups: Record<string, unknown> };
     expect(lock).toEqual({
       capturedAt: "2026-07-08T00:00:00.000Z",
-      groups: { "plugin-demo": { sourcePluginVersion: "1.2.3" } },
+      groups: {
+        hotkeys: { sourceAppVersion: "1.8.7" },
+        snippets: { sourceAppVersion: "1.8.7" },
+        vimrc: { sourceAppVersion: "1.8.7" },
+        "plugin-demo": { sourcePluginVersion: "1.2.3" },
+      },
     });
   });
 
@@ -635,5 +640,21 @@ describe("starter-then-capture (implicit creation flow)", () => {
     const results = await capture(ctx);
     expect(results.map((r) => r.group)).toEqual(["snippets", "hotkeys"]);
     expect(await io.read("cs/store/configdir/snippets/one.css")).toBe("one");
+  });
+});
+
+describe("capture app-version recording", () => {
+  it("records sourceAppVersion for non-plugin groups and sourcePluginVersion for plugin groups", async () => {
+    const { io, plugins, ctx } = setup();
+    plugins.installed.set("demo", "1.2.3");
+    io.seed({
+      "cs/config-sync.json": MANIFEST,
+      ".obs/hotkeys.json": "{}",
+      ".obs/plugins/demo/data.json": "{}",
+    });
+    await capture(ctx, ["hotkeys", "plugin-demo"]);
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, unknown> };
+    expect(lock.groups["hotkeys"]).toEqual({ sourceAppVersion: "1.8.7" });
+    expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.2.3" });
   });
 });
