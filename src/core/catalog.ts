@@ -1,3 +1,4 @@
+import { PluginHost } from "./ConfigSyncCore";
 import { FileIO } from "./io";
 import { SyncGroup } from "./types";
 
@@ -348,4 +349,16 @@ export function categoryForGroup(name: string): ItemCategory {
   if (CORE_SETTINGS_IDS.includes(name)) return "core";
   if (name.startsWith("plugin-")) return "community";
   return "custom";
+}
+
+export function displayLabelForGroup(name: string, plugins: PluginHost): string {
+  for (const file of Object.keys(OPTION_LABELS)) {
+    if (optionReservedName(file) === name) return OPTION_LABELS[file]?.label ?? name;
+  }
+  if (CORE_SETTINGS_IDS.includes(name)) return plugins.getCorePluginName(name) ?? name;
+  if (name.startsWith("plugin-")) {
+    const id = name.slice("plugin-".length);
+    return plugins.getInstalledPluginName(id) ?? id;
+  }
+  return name;
 }

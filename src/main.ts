@@ -338,6 +338,8 @@ export default class ConfigSyncPlugin extends Plugin {
       isPluginEnabled: (id) => registry.enabledPlugins.has(id),
       disablePlugin: (id) => registry.disablePlugin(id),
       enablePlugin: (id) => registry.enablePlugin(id),
+      getInstalledPluginName: (id) => registry.manifests[id]?.name ?? null,
+      getCorePluginName: (id) => this.internalPlugins().plugins[id]?.instance?.name ?? null,
     };
     return {
       io: this.app.vault.adapter,

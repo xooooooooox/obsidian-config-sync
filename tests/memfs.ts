@@ -90,6 +90,8 @@ export class MemFS implements FileIO {
 export class FakePlugins {
   installed = new Map<string, string>();
   enabled = new Set<string>();
+  installedNames = new Map<string, string>();
+  coreNames = new Map<string, string>();
   log: string[] = [];
 
   getInstalledPluginVersion(id: string): string | null {
@@ -105,5 +107,11 @@ export class FakePlugins {
   async enablePlugin(id: string): Promise<void> {
     this.enabled.add(id);
     this.log.push(`enable:${id}`);
+  }
+  getInstalledPluginName(id: string): string | null {
+    return this.installedNames.get(id) ?? null;
+  }
+  getCorePluginName(id: string): string | null {
+    return this.coreNames.get(id) ?? null;
   }
 }

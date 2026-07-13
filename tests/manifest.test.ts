@@ -25,15 +25,15 @@ describe("parseSyncManifest", () => {
     expect(() => parseSyncManifest("{nope")).toThrow(ManifestValidationError);
   });
   it("rejects unsupported versions", () => {
-    expect(() => parseSyncManifest(JSON.stringify({ version: 2, groups: [] }))).toThrow("unsupported version");
+    expect(() => parseSyncManifest(JSON.stringify({ version: 2, groups: [] }))).toThrow('only supports "version": 1');
   });
   it("rejects duplicate group names", () => {
-    expect(() => parseSyncManifest(manifestWith([GOOD, { ...GOOD, path: ".x" }]))).toThrow("duplicate group name");
+    expect(() => parseSyncManifest(manifestWith([GOOD, { ...GOOD, path: ".x" }]))).toThrow("two rules are named");
   });
   it("rejects store path collisions", () => {
     const a = { name: "a", path: ".vimrc", type: "file", devices: "all" };
     const b = { name: "b", path: "vimrc", type: "file", devices: "all" };
-    expect(() => parseSyncManifest(manifestWith([a, b]))).toThrow("collides");
+    expect(() => parseSyncManifest(manifestWith([a, b]))).toThrow("same store location");
   });
   it("accepts workspace-pattern paths (soft-blocked in the UI, not in validation)", () => {
     const g = { name: "ws", path: "{configDir}/workspace.json", type: "file", devices: "all" };
@@ -58,11 +58,11 @@ describe("parseSyncManifest", () => {
       version: 1,
       groups: [{ name: "a", path: "{configDir}/a.json", type: "file", devices: "all", origin: "picker" }],
     });
-    expect(() => parseSyncManifest(bad)).toThrow('"origin" must be "discovered"');
+    expect(() => parseSyncManifest(bad)).toThrow('only supported value is "discovered"');
   });
   it("rejects paths with .. or absolute paths", () => {
     const g = { name: "e", path: "../outside", type: "file", devices: "all" };
-    expect(() => parseSyncManifest(manifestWith([g]))).toThrow("vault-relative");
+    expect(() => parseSyncManifest(manifestWith([g]))).toThrow("must stay inside the vault");
   });
   it("accepts mode/fields, rejects legacy sanitize and bad modes", () => {
     const fields = { name: "f", path: "{configDir}/plugins/demo/data.json", type: "file", devices: "all", mode: "fields", fields: [{ pattern: "*Token*", action: "strip" }] };
@@ -76,17 +76,17 @@ describe("parseSyncManifest", () => {
 
     const legacy = { name: "s", path: "{configDir}/hotkeys.json", type: "file", devices: "all", sanitize: ["*Token*"] };
     expect(() => parseSyncManifest(manifestWith([legacy]))).toThrow(
-      'group "s": "sanitize" was replaced by "mode": "fields" with "fields" rules'
+      'rule "s" uses the old "sanitize" list, which no longer exists — replace it with "mode": "fields" and a "fields" list, e.g. "fields": [{"pattern": "*Token*", "action": "strip"}]'
     );
 
     const fieldsOnDir = { name: "d", path: "{configDir}/snippets", type: "dir", devices: "all", mode: "fields", fields: [{ pattern: "*Token*", action: "strip" }] };
-    expect(() => parseSyncManifest(manifestWith([fieldsOnDir]))).toThrow("file groups");
+    expect(() => parseSyncManifest(manifestWith([fieldsOnDir]))).toThrow("only supported on file groups");
 
     const badMode = { name: "b", path: "{configDir}/hotkeys.json", type: "file", devices: "all", mode: "weird" };
-    expect(() => parseSyncManifest(manifestWith([badMode]))).toThrow('"mode" must be "plain", "fields" or "encrypted"');
+    expect(() => parseSyncManifest(manifestWith([badMode]))).toThrow('but it must be "plain", "fields" or "encrypted"');
 
     const fieldsWithoutMode = { name: "fw", path: "{configDir}/hotkeys.json", type: "file", devices: "all", fields: [{ pattern: "*Token*", action: "strip" }] };
-    expect(() => parseSyncManifest(manifestWith([fieldsWithoutMode]))).toThrow('"fields" is only supported with "mode": "fields"');
+    expect(() => parseSyncManifest(manifestWith([fieldsWithoutMode]))).toThrow('sets "fields" but not "mode": "fields"');
   });
 });
 
@@ -124,14 +124,16 @@ describe("validateRemotes", () => {
     expect(remotes[1]).toEqual({ name: "b", type: "git", url: "u", branch: "main" });
   });
   it("rejects a relative storePath", () => {
-    expect(() => validateRemotes([{ name: "a", type: "vault", storePath: "vaults/kick" }])).toThrow('"storePath" must be an absolute path');
+    expect(() => validateRemotes([{ name: "a", type: "vault", storePath: "vaults/kick" }])).toThrow(
+      'remote "a" needs an absolute store path — use "/path/to/store" or "~/path/to/store"'
+    );
   });
   it("rejects subdir escaping the repo", () => {
-    expect(() => validateRemotes([{ name: "b", type: "git", url: "u", branch: "m", subdir: "../x" }])).toThrow('"subdir"');
+    expect(() => validateRemotes([{ name: "b", type: "git", url: "u", branch: "m", subdir: "../x" }])).toThrow("must stay inside the repository");
   });
   it("rejects unknown types and non-arrays", () => {
-    expect(() => validateRemotes([{ name: "a", type: "local-path", storePath: "/x" }])).toThrow('"type" must be "vault" or "git"');
-    expect(() => validateRemotes({})).toThrow("array");
+    expect(() => validateRemotes([{ name: "a", type: "local-path", storePath: "/x" }])).toThrow('but it must be "vault" or "git"');
+    expect(() => validateRemotes({})).toThrow("remotes must be a list");
   });
 });
 
@@ -142,7 +144,7 @@ describe("validateSyncManifest", () => {
     expect(m.version).toBe(1);
   });
   it("rejects duplicate names on direct objects", () => {
-    expect(() => validateSyncManifest({ version: 1, groups: [GOOD, { ...GOOD }] })).toThrow("duplicate group name");
+    expect(() => validateSyncManifest({ version: 1, groups: [GOOD, { ...GOOD }] })).toThrow("two rules are named");
   });
   it("carries a group description through validation", () => {
     const g = { ...GOOD, description: "Custom keyboard shortcuts" };
@@ -153,7 +155,7 @@ describe("validateSyncManifest", () => {
     const blank = validateSyncManifest({ version: 1, groups: [{ ...GOOD, description: "   " }] });
     expect(blank.groups[0]?.description).toBeUndefined();
     expect(() => validateSyncManifest({ version: 1, groups: [{ ...GOOD, description: 42 }] })).toThrow(
-      '"description" must be a string'
+      'has a "description" that isn\'t text'
     );
   });
 });

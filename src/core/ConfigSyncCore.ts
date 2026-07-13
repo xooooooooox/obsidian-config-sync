@@ -11,6 +11,8 @@ export interface PluginHost {
   isPluginEnabled(id: string): boolean;
   disablePlugin(id: string): Promise<void>;
   enablePlugin(id: string): Promise<void>;
+  getInstalledPluginName(id: string): string | null;
+  getCorePluginName(id: string): string | null;
 }
 
 export interface CoreContext {
