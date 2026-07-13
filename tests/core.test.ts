@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CoreContext, capture, loadManifest, groupsForDevice, apply, checkApply, revertLastApply, importExternal, ExternalStoreReader, pushExternal, ExternalStoreWriter, pluginIdForGroup, createStarterManifest, readGroups, writeGroups, SCHEMA_URL } from "../src/core/ConfigSyncCore";
+import { CoreContext, capture, loadManifest, groupsForDevice, apply, applyWithActions, revertLastApply, importExternal, ExternalStoreReader, pushExternal, ExternalStoreWriter, pluginIdForGroup, createStarterManifest, readGroups, writeGroups, SCHEMA_URL } from "../src/core/ConfigSyncCore";
 import { parseSyncManifest } from "../src/core/manifest";
 import { isFieldEnvelope, parseFileEnvelope } from "../src/core/crypto";
 import { MemFS, FakePlugins } from "./memfs";
@@ -365,24 +365,59 @@ describe("apply", () => {
   });
 });
 
-describe("checkApply", () => {
-  it("warns on version mismatch", async () => {
+describe("applyWithActions", () => {
+  const seedStore = (io: MemFS): void => {
+    io.seed({
+      "cs/config-sync.json": MANIFEST,
+      "cs/store/configdir/plugins/demo/data.json": '{"theme":"x"}',
+    });
+  };
+  it("enable action enables then writes config and notes ⏻ enabled", async () => {
+    const { io, plugins, ctx } = setup();
+    plugins.installed.set("demo", "1.2.3");
+    seedStore(io);
+    const results = await applyWithActions(ctx, [{ name: "plugin-demo", action: "enable" }], async () => "9.9.9");
+    expect(results[0]?.stateNote).toEqual({ kind: "ok", text: "⏻ enabled" });
+    expect(plugins.enabled.has("demo")).toBe(true);
+    expect(await io.exists(".obs/plugins/demo/data.json")).toBe(true);
+  });
+  it("install-enable installs, reloads manifests, enables, writes config", async () => {
     const { io, plugins, ctx } = setup();
     seedStore(io);
-    plugins.installed.set("demo", "9.9.9");
-    const warnings = await checkApply(ctx, ["hotkeys", "plugin-demo"]);
-    expect(warnings).toHaveLength(1);
-    expect(warnings[0]?.group).toBe("plugin-demo");
-    expect(warnings[0]?.message).toContain("1.2.3");
-    expect(warnings[0]?.message).toContain("9.9.9");
+    const results = await applyWithActions(ctx, [{ name: "plugin-demo", action: "install-enable" }], async (id) => {
+      plugins.installed.set(id, "2.5.0");
+      return "2.5.0";
+    });
+    expect(results[0]?.stateNote).toEqual({ kind: "ok", text: "⤓ installed & enabled 2.5.0" });
+    expect(plugins.log).toContain("reload-manifests");
+    expect(plugins.enabled.has("demo")).toBe(true);
   });
-
-  it("warns when the plugin is not installed on this device", async () => {
-    const { io, ctx } = setup();
+  it("update failure skips the config write and warns; install failure still writes", async () => {
+    const { io, plugins, ctx } = setup();
+    plugins.installed.set("demo", "1.0.0");
+    plugins.enabled.add("demo");
     seedStore(io);
-    const warnings = await checkApply(ctx, ["plugin-demo"]);
-    expect(warnings).toHaveLength(1);
-    expect(warnings[0]?.message).toContain("not installed");
+    const failing = async (): Promise<string> => {
+      throw new Error("couldn't download demo from the community catalog");
+    };
+    const upd = await applyWithActions(ctx, [{ name: "plugin-demo", action: "update" }], failing);
+    expect(upd[0]?.status).toBe("warning");
+    expect(upd[0]?.stateNote).toEqual({ kind: "warn", text: "⚠ update failed" });
+    expect(upd[0]?.messages[0]).toContain("settings not applied; they were captured on a newer version");
+    expect(await io.exists(".obs/plugins/demo/data.json")).toBe(false);
+    plugins.installed.delete("demo");
+    plugins.enabled.delete("demo");
+    const inst = await applyWithActions(ctx, [{ name: "plugin-demo", action: "install" }], failing);
+    expect(inst[0]?.stateNote).toEqual({ kind: "warn", text: "⚠ install failed" });
+    expect(inst[0]?.messages[0]).toContain("settings were staged; install it manually to pick them up");
+    expect(await io.exists(".obs/plugins/demo/data.json")).toBe(true);
+  });
+  it('action "none" on a not-installed plugin notes staged for install', async () => {
+    const { io, plugins, ctx } = setup();
+    void plugins;
+    seedStore(io);
+    const results = await applyWithActions(ctx, [{ name: "plugin-demo", action: "none" }], async () => "x");
+    expect(results[0]?.stateNote).toEqual({ kind: "ok", text: "staged for install" });
   });
 });
 

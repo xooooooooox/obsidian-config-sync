@@ -46,6 +46,7 @@ export interface GroupResult {
   messages: string[];
   needsAppReload: boolean;
   changes: FileChanges;
+  stateNote?: { kind: "ok" | "warn"; text: string };
 }
 
 export type Remote =

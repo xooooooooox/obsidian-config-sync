@@ -29,7 +29,7 @@ export interface SyncCenterHost {
   resolvedPath(group: SyncGroup): string;
   displayName(group: string): string;
   captureItems(names: string[], onProgress?: ProgressFn): Promise<void>; // runs selective capture + shows its report
-  applyItems(names: string[], onProgress?: ProgressFn): Promise<void>; // warnings-confirm + apply + report
+  applyItems(names: string[], onProgress?: ProgressFn): Promise<void>; // apply + report
   remotes(): Remote[]; // [] on mobile
   remoteCheck(name: string): { check: RemoteCheck; at: number } | undefined;
   refreshRemoteChecks(): Promise<void>;

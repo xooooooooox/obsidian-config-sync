@@ -224,11 +224,6 @@ async function captureGroup(ctx: CoreContext, group: SyncGroup): Promise<GroupRe
   return result;
 }
 
-export interface ApplyWarning {
-  group: string;
-  message: string;
-}
-
 export interface BackupEntry {
   realPath: string;
   existed: boolean;
@@ -244,36 +239,6 @@ interface BackupState {
   index: BackupIndex;
   counter: number;
   backedUp: Set<string>;
-}
-
-export async function checkApply(ctx: CoreContext, groupNames: string[]): Promise<ApplyWarning[]> {
-  const manifest = await loadManifest(ctx);
-  const lock = await loadLock(ctx);
-  const warnings: ApplyWarning[] = [];
-  for (const name of groupNames) {
-    const group = requireGroup(manifest, name);
-    const pluginId = pluginIdForGroup(group);
-    if (pluginId === null) continue;
-    const installed = ctx.plugins.getInstalledPluginVersion(pluginId);
-    const recorded = lock?.groups[name]?.sourcePluginVersion ?? null;
-    if (installed === null) {
-      warnings.push({
-        group: name,
-        message: `plugin "${pluginId}" is not installed on this device; its config will be staged for a future install`,
-      });
-    } else if (recorded !== null && recorded !== installed) {
-      warnings.push({
-        group: name,
-        message: `store config was captured with ${pluginId}@${recorded}, this device runs ${pluginId}@${installed} — settings schema may differ`,
-      });
-    } else if (recorded === null) {
-      warnings.push({
-        group: name,
-        message: `store.lock.json has no recorded version for this group — cannot verify compatibility`,
-      });
-    }
-  }
-  return warnings;
 }
 
 export async function apply(ctx: CoreContext, groupNames: string[], onProgress?: ProgressFn): Promise<GroupResult[]> {
@@ -292,6 +257,141 @@ export async function apply(ctx: CoreContext, groupNames: string[], onProgress?:
     for (const name of groupNames) {
       onProgress?.(done, groupNames.length, name);
       results.push(await applyGroup(ctx, requireGroup(manifest, name), state));
+      done++;
+    }
+  } finally {
+    const indexPath = `${backupDir(ctx)}/index.json`;
+    await ensureParentDir(ctx.io, indexPath);
+    await ctx.io.write(indexPath, JSON.stringify(state.index, null, 2) + "\n");
+  }
+  return results;
+}
+
+export type StateAction = "none" | "enable" | "update" | "update-enable" | "install" | "install-enable";
+
+export interface ApplyItem {
+  name: string;
+  action: StateAction;
+}
+
+export type PluginInstallFn = (pluginId: string) => Promise<string>; // resolves to the installed version
+
+interface StatePrelude {
+  note: { kind: "ok" | "warn"; text: string } | null;
+  messages: string[];
+  skipConfig: boolean;
+}
+
+async function runStateAction(
+  ctx: CoreContext,
+  group: SyncGroup,
+  action: StateAction,
+  installPlugin: PluginInstallFn
+): Promise<StatePrelude> {
+  const pluginId = pluginIdForGroup(group);
+  if (action === "none") {
+    if (pluginId !== null && ctx.plugins.getInstalledPluginVersion(pluginId) === null) {
+      return { note: { kind: "ok", text: "staged for install" }, messages: [], skipConfig: false };
+    }
+    return { note: null, messages: [], skipConfig: false };
+  }
+  if (action === "enable") {
+    try {
+      if (pluginId !== null) await ctx.plugins.enablePlugin(pluginId);
+      else await ctx.plugins.enableCorePlugin(group.name);
+      return { note: { kind: "ok", text: "⏻ enabled" }, messages: [], skipConfig: false };
+    } catch (e) {
+      return { note: { kind: "warn", text: "⚠ enable failed" }, messages: [(e as Error).message], skipConfig: false };
+    }
+  }
+  if (pluginId === null) {
+    return {
+      note: { kind: "warn", text: "⚠ update failed" },
+      messages: [`"${group.name}" has no plugin directory — install and update actions only work for community plugin items`],
+      skipConfig: true,
+    };
+  }
+  const isUpdate = action === "update" || action === "update-enable";
+  const wantsEnable = action === "update-enable" || action === "install-enable";
+  const wasEnabled = ctx.plugins.isPluginEnabled(pluginId);
+  try {
+    if (isUpdate && wasEnabled) await ctx.plugins.disablePlugin(pluginId);
+    const version = await installPlugin(pluginId);
+    await ctx.plugins.reloadPluginManifests();
+    let enabled = false;
+    if (wantsEnable || (isUpdate && wasEnabled)) {
+      await ctx.plugins.enablePlugin(pluginId);
+      enabled = true;
+    }
+    const text = isUpdate
+      ? enabled
+        ? `⤓ updated to ${version} & enabled`
+        : `⤓ updated to ${version}`
+      : enabled
+        ? `⤓ installed & enabled ${version}`
+        : `⤓ installed ${version}`;
+    return { note: { kind: "ok", text }, messages: [], skipConfig: false };
+  } catch (e) {
+    const messages = [(e as Error).message];
+    if (isUpdate) {
+      if (wasEnabled) {
+        try {
+          await ctx.plugins.enablePlugin(pluginId); // download failed before files changed — restore the running state
+        } catch (re) {
+          messages.push((re as Error).message);
+        }
+      }
+      return {
+        note: { kind: "warn", text: "⚠ update failed" },
+        messages: [`${messages[0]} — settings not applied; they were captured on a newer version`, ...messages.slice(1)],
+        skipConfig: true,
+      };
+    }
+    return {
+      note: { kind: "warn", text: "⚠ install failed" },
+      messages: [`${messages[0]} — settings were staged; install it manually to pick them up`],
+      skipConfig: false,
+    };
+  }
+}
+
+export async function applyWithActions(
+  ctx: CoreContext,
+  items: ApplyItem[],
+  installPlugin: PluginInstallFn,
+  onProgress?: ProgressFn
+): Promise<GroupResult[]> {
+  const manifest = await loadManifest(ctx);
+  if (await ctx.io.exists(backupDir(ctx))) {
+    await ctx.io.rmdir(backupDir(ctx), true);
+  }
+  const state: BackupState = {
+    index: { createdAt: ctx.now(), entries: [] },
+    counter: 0,
+    backedUp: new Set(),
+  };
+  const results: GroupResult[] = [];
+  let done = 0;
+  try {
+    for (const item of items) {
+      onProgress?.(done, items.length, item.name);
+      const group = requireGroup(manifest, item.name);
+      const prelude = await runStateAction(ctx, group, item.action, installPlugin);
+      if (prelude.skipConfig) {
+        const r = emptyResult(item.name, false);
+        r.status = "warning";
+        if (prelude.note !== null) r.stateNote = prelude.note;
+        r.messages.push(...prelude.messages);
+        results.push(r);
+      } else {
+        const r = await applyGroup(ctx, group, state);
+        if (prelude.note !== null) r.stateNote = prelude.note;
+        if (prelude.messages.length > 0) {
+          r.messages.push(...prelude.messages);
+          if (r.status === "ok") r.status = "warning";
+        }
+        results.push(r);
+      }
       done++;
     }
   } finally {
