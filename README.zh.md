@@ -52,8 +52,8 @@
 ## 设置指南
 
 - **General** —— PKM 模式（自动检测 IOTO vault）、数据文件夹位置、状态提示开关（同步菜单变更数量、自动检查远程仓库、定期本地检查）、功能区图标。
-- **Obsidian / Core plugins / Community plugins** —— 勾选条目即可同步；每个分区的标题勾选框可一键全选/全不选；搜索框可跨所有标签页搜索。`workspace.json` 以及 `sync`/`publish` 两个核心插件被标记为*不建议同步*，勾选时会要求二次确认。
-- **Advanced** —— 每条规则以紧凑行的形式列出；点击展开可编辑。**Managed by pickers**（由勾选框创建的规则，可单条或批量重置为默认值）、**Discovered files**（我们无法自动分类的配置文件；名称和路径由文件本身决定，可切换是否同步）、**Custom rules**（完全由你自定义：vault 根目录文件、额外文件夹、sync mode）。
+- **Obsidian / Core plugins / Community plugins** —— 勾选条目即可同步；每个分区的标题勾选框可一键全选/全不选；全局搜索框支持作用域筛选，覆盖 General、所有选择器标签页、Advanced 和 Remotes。`workspace.json` 以及 `sync`/`publish` 两个核心插件被标记为*不建议同步*，勾选时会要求二次确认。
+- **Advanced** —— 每条规则以紧凑行的形式列出；点击展开可编辑。**Synced items**（由勾选框创建的规则，可单条或批量重置为默认值）、**Discovered files**（我们无法自动分类的配置文件；名称和路径由文件本身决定，可切换是否同步）、**Custom rules**（完全由你自定义：vault 根目录文件、额外文件夹、sync mode）。
 - **Remotes**（桌面端） —— 添加一个 **git repository**（URL、分支、可选子文件夹）或 **another vault**（另一个 vault）：点击 **Browse…**，选择目标 vault 文件夹，其中的 store 会被自动识别。
 
 ## Store 目录结构

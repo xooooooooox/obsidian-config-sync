@@ -52,8 +52,8 @@ Everything hangs off one **Config Sync** ribbon icon: a status dot shows orange 
 ## Settings guide
 
 - **General** — PKM mode (auto-detects IOTO vaults), the data folder location, status toggles (sync menu change counts, automatic remote checks, periodic local check), ribbon icons.
-- **Obsidian / Core plugins / Community plugins** — tick items to sync them; a heading toggle syncs all/none per section; a search box spans all tabs. `workspace.json` and the `sync`/`publish` core plugins are *Not recommended* and ask for confirmation.
-- **Advanced** — every rule as a compact row; expand to edit. **Managed by pickers** (created by ticks; reset to default per row or in bulk), **Discovered files** (config files we couldn't classify; toggle to sync — name and path are fixed by the file), **Custom rules** (fully yours: vault-root files, extra folders, sync modes).
+- **Obsidian / Core plugins / Community plugins** — tick items to sync them; a heading toggle syncs all/none per section; a global search box with scope filters covers General, all picker tabs, Advanced and Remotes. `workspace.json` and the `sync`/`publish` core plugins are *Not recommended* and ask for confirmation.
+- **Advanced** — every rule as a compact row; expand to edit. **Synced items** (created by ticks; reset to default per row or in bulk), **Discovered files** (config files we couldn't classify; toggle to sync — name and path are fixed by the file), **Custom rules** (fully yours: vault-root files, extra folders, sync modes).
 - **Remotes** (desktop) — add a **git repository** (URL, branch, optional folder) or **another vault**: click **Browse…**, pick the vault folder, and the store inside it is auto-detected.
 
 ## Store layout
