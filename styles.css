@@ -665,5 +665,3 @@ body.is-mobile .config-sync-mainbar input[type="checkbox"]:indeterminate::after 
 .config-sync-json-key.config-sync-json-strip { color: var(--color-red); background: rgba(var(--color-red-rgb), 0.15); }
 .config-sync-json-key.config-sync-json-detected { color: var(--color-orange); background: rgba(var(--color-orange-rgb), 0.15); }
 .config-sync-adv .config-sync-form-label { margin-top: var(--size-4-1); }
-.config-sync-reset-item { background: none; border: none; box-shadow: none; color: var(--text-muted); cursor: pointer; font-size: var(--font-ui-smaller); padding: var(--size-4-1) 0; }
-.config-sync-reset-item:hover { color: var(--text-normal); }

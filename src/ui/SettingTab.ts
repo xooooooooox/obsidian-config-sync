@@ -491,9 +491,10 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     });
     const reserved = reservedNames(this.host.installedPluginIds());
     if (reserved.has(group.name)) {
-      const reset = adv.createEl("button", { cls: "config-sync-reset-item", text: "↺ Reset this item to its default rule" });
-      reset.addEventListener("click", () => {
-        void (async () => {
+      new ExtraButtonComponent(adv)
+        .setIcon("rotate-ccw")
+        .setTooltip("Reset this item to its default rule")
+        .onClick(async () => {
           const def = defaultGroupForName(group.name);
           if (def === null) return;
           await this.commitGroups((draft) => {
@@ -501,8 +502,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
             if (idx >= 0) draft[idx] = def;
           }, group.name);
           this.renderItemInto(wrap, item);
-        })();
-      });
+        });
     }
   }
 
