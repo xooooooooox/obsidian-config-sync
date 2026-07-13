@@ -90,8 +90,8 @@ Before any UI-affecting change is shown to the user:
    a hardcoded-color smell.
 2. **Cross-tab consistency check** — the changed element's card/row must be visually
    identical to a General-tab setting and an Advanced custom-rule card in the same screenshot.
-3. **Hex scan** — `grep -nE "#[0-9a-fA-F]{6}" styles.css` must return nothing new; any hex is
-   a rule-2 violation and blocks the change.
+3. **Color scan** — `./scripts/check-no-hardcoded-color.sh` must pass; any hardcoded hex or
+   rgb channel is a rule-2 violation and blocks the change.
 4. **Compare against the 定稿 gallery** screen-by-screen for the element's structure and copy
    (per the standing "replicate, don't approximate" rule).
 
