@@ -325,7 +325,11 @@ export class SyncCenterView extends ItemView {
     if (this.panelScope.kind === "device") {
       const cat = this.panelScope.cat;
       sw.createSpan({ text: cat === "all" ? "All items" : CATEGORY_LABELS[cat] });
-      const c = bucketCounts(this.scopedRows().map((r) => r.status));
+      const c = bucketCounts(
+        this.scopedRows()
+          .filter((r) => this.sectionOf(r.group.name) === "main")
+          .map((r) => r.status),
+      );
       if (c.up > 0) sw.createSpan({ cls: "config-sync-side-badge is-up", text: `↑${c.up}` });
       if (c.down > 0) sw.createSpan({ cls: "config-sync-side-badge is-down", text: `↓${c.down}` });
       if (c.ok > 0) sw.createSpan({ cls: "config-sync-side-badge is-ok", text: `✓${c.ok}` });
@@ -424,9 +428,9 @@ export class SyncCenterView extends ItemView {
 
   private scopedRows(): StatusRow[] {
     if (this.searching()) return this.rows();
-    if (this.panelScope.kind !== "device" || this.panelScope.cat === "all") return this.mainRows();
+    if (this.panelScope.kind !== "device" || this.panelScope.cat === "all") return this.rows();
     const cat = this.panelScope.cat;
-    return this.mainRows().filter((r) => categoryForGroup(r.group.name) === cat);
+    return this.rows().filter((r) => categoryForGroup(r.group.name) === cat);
   }
 
   private renderItemMode(main: HTMLElement): void {
