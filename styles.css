@@ -644,3 +644,5 @@ body.is-mobile .config-sync-mainbar input[type="checkbox"]:indeterminate::after 
 .config-sync-version-line.is-amber { color: #e8b04b; }
 .config-sync-seg-label { color: var(--text-faint); font-size: 10px; margin-top: 4px; }
 .config-sync-seg-btn.is-policy.is-on { background: rgba(88, 166, 160, 0.25); color: #a8e0db; }
+.config-sync-side-search { width: 100%; margin-bottom: 6px; }
+.config-sync-side-badge.is-neutral { background: var(--background-modifier-hover); color: var(--text-normal); }

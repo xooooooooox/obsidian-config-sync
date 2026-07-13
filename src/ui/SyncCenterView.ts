@@ -234,6 +234,24 @@ export class SyncCenterView extends ItemView {
 
   private renderSidebar(shell: HTMLElement): void {
     const side = shell.createDiv({ cls: "config-sync-side" });
+    const searchEl = side.createEl("input", {
+      type: "search",
+      cls: "config-sync-side-search",
+      attr: { placeholder: "Filter by name…" },
+    });
+    searchEl.value = this.search;
+    if (this.panelScope.kind === "remote") searchEl.disabled = true;
+    searchEl.addEventListener("input", () => {
+      this.search = searchEl.value;
+      this.render(this.renderGen); // full render: badges, sections, list all react
+      const refocus = this.contentEl.querySelector<HTMLInputElement>(".config-sync-side-search");
+      if (refocus !== null) {
+        refocus.focus();
+        const v = refocus.value;
+        refocus.value = "";
+        refocus.value = v;
+      }
+    });
     this.renderScopeEntries(side);
   }
 
@@ -244,11 +262,19 @@ export class SyncCenterView extends ItemView {
       const active = this.panelScope.kind === "device" && this.panelScope.cat === cat;
       const item = container.createDiv({ cls: `config-sync-side-item${active ? " is-active" : ""}` });
       item.createSpan({ cls: "config-sync-side-name", text: label });
-      const c = bucketCounts(statuses);
-      if (c.up > 0) item.createSpan({ cls: "config-sync-side-badge is-up", text: `↑${c.up}` });
-      if (c.down > 0) item.createSpan({ cls: "config-sync-side-badge is-down", text: `↓${c.down}` });
-      if (c.ok > 0) item.createSpan({ cls: "config-sync-side-badge is-ok", text: `✓${c.ok}` });
-      if (c.none > 0) item.createSpan({ cls: "config-sync-side-badge is-none", text: `○${c.none}` });
+      if (this.searching()) {
+        const hits = statuses.filter((s) => {
+          const g = this.groups.find((x) => x.name === s.group);
+          return g !== undefined && matchesSearch(`${this.host.displayName(g.name)} ${g.name}`, this.search);
+        }).length;
+        item.createSpan({ cls: "config-sync-side-badge is-neutral", text: `${hits}` });
+      } else {
+        const c = bucketCounts(statuses);
+        if (c.up > 0) item.createSpan({ cls: "config-sync-side-badge is-up", text: `↑${c.up}` });
+        if (c.down > 0) item.createSpan({ cls: "config-sync-side-badge is-down", text: `↓${c.down}` });
+        if (c.ok > 0) item.createSpan({ cls: "config-sync-side-badge is-ok", text: `✓${c.ok}` });
+        if (c.none > 0) item.createSpan({ cls: "config-sync-side-badge is-none", text: `○${c.none}` });
+      }
       item.addEventListener("click", () => {
         this.panelScope = { kind: "device", cat };
         this.switcherOpen = false;
@@ -392,7 +418,12 @@ export class SyncCenterView extends ItemView {
     return this.panelScope.kind === "device" ? this.panelScope.cat : `remote:${this.panelScope.name}`;
   }
 
+  private searching(): boolean {
+    return this.search.trim() !== "";
+  }
+
   private scopedRows(): StatusRow[] {
+    if (this.searching()) return this.rows();
     if (this.panelScope.kind !== "device" || this.panelScope.cat === "all") return this.mainRows();
     const cat = this.panelScope.cat;
     return this.mainRows().filter((r) => categoryForGroup(r.group.name) === cat);
@@ -424,17 +455,19 @@ export class SyncCenterView extends ItemView {
         this.render(this.renderGen);
       });
     }
-    const searchEl = bar.createEl("input", {
-      type: "search",
-      cls: "config-sync-mainbar-search",
-      attr: { placeholder: "Filter by name…" },
-    });
-    searchEl.value = this.search;
-    searchEl.addEventListener("input", () => {
-      this.search = searchEl.value;
-      this.renderListInto(listHost, mainRows); // re-render only the list; keeps the input focused
-      this.refreshGlobalSelectAll(selectAll, mainRows); // resync tri-state against the new search
-    });
+    if (this.compact) {
+      const searchEl = bar.createEl("input", {
+        type: "search",
+        cls: "config-sync-mainbar-search",
+        attr: { placeholder: "Filter by name…" },
+      });
+      searchEl.value = this.search;
+      searchEl.addEventListener("input", () => {
+        this.search = searchEl.value;
+        this.renderListInto(listHost, mainRows); // re-render only the list; keeps the input focused
+        this.refreshGlobalSelectAll(selectAll, mainRows); // resync tri-state against the new search
+      });
+    }
     const selectAll = bar.createEl("input", { type: "checkbox", attr: { "aria-label": "Select all visible items" } });
 
     const listHost = main.createDiv();
@@ -526,14 +559,19 @@ export class SyncCenterView extends ItemView {
 
   private renderSection(main: HTMLElement, kind: Exclude<SectionKind, "main">, rows: StatusRow[]): void {
     if (rows.length === 0) return;
-    const open = this.sectionOpen.has(kind);
+    const matches = this.searching()
+      ? rows.filter((r) => matchesSearch(`${this.host.displayName(r.group.name)} ${r.group.name}`, this.search))
+      : rows;
+    if (this.searching() && matches.length === 0) return;
+    const open = this.searching() || this.sectionOpen.has(kind);
     const fold = main.createDiv({ cls: `config-sync-section is-${kind}${open ? " is-open" : ""}` });
     const head = fold.createDiv({ cls: "config-sync-section-head" });
     head.createSpan({ cls: "config-sync-row-chevron", text: open ? "▾" : "▸" });
     head.createSpan({ cls: "config-sync-section-title", text: SECTION_TITLES[kind] });
-    const insync = rows.filter((r) => r.status.state === "in-sync");
-    const checkable = rows.filter((r) => r.status.state !== "in-sync" && r.status.state !== "no-settings" && r.status.state !== "locked");
-    head.createSpan({ cls: "config-sync-pill is-neutral", text: `${rows.length - insync.length}` });
+    const insync = matches.filter((r) => r.status.state === "in-sync");
+    const checkable = matches.filter((r) => r.status.state !== "in-sync" && r.status.state !== "no-settings" && r.status.state !== "locked");
+    const countText = this.searching() ? `${matches.length} of ${rows.length}` : `${rows.length - insync.length}`;
+    head.createSpan({ cls: "config-sync-pill is-neutral", text: countText });
     if (insync.length > 0) head.createSpan({ cls: "config-sync-pill is-ok", text: `✓ ${insync.length}` });
     const staged = checkable.filter((r) => this.selected.has(r.group.name)).length;
     head.createSpan({ cls: "config-sync-section-hint", text: staged === 0 ? "not staged" : `${staged} staged` });
@@ -557,6 +595,7 @@ export class SyncCenterView extends ItemView {
       this.render(this.renderGen);
     });
     head.addEventListener("click", () => {
+      if (this.searching()) return; // force-open while searching; header click is a no-op
       if (open) this.sectionOpen.delete(kind);
       else this.sectionOpen.add(kind);
       this.render(this.renderGen);
@@ -564,7 +603,7 @@ export class SyncCenterView extends ItemView {
     if (!open) return;
     fold.createDiv({ cls: "config-sync-section-note", text: SECTION_NOTES[kind] });
     const card = fold.createDiv({ cls: "config-sync-card" });
-    for (const r of rows) this.renderItemRow(card, r);
+    for (const r of matches) this.renderItemRow(card, r);
   }
 
   private renderItemRow(card: HTMLElement, r: StatusRow): void {
