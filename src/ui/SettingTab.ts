@@ -113,6 +113,8 @@ const GENERAL_SETTINGS: GeneralSettingDef[] = [
   { name: "PKM mode", desc: "Adjusts the recommended storage location to match how your vault is organized. Auto detects IOTO vaults.", anchorId: "general-pkm-mode" },
   {
     name: "Data folder",
+    // Rendered desc appends a computed "(currently: <resolved path>)" suffix that depends on an
+    // async host.resolvedRootPath() call; this static text is the search-index copy only.
     desc: "Where your synced settings live inside this vault. Your regular vault sync (e.g. remotely-save) carries this folder to your other devices.",
     anchorId: "general-data-folder",
   },
@@ -518,7 +520,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
             scope: tab,
             kind: "item",
             name: item.label,
-            desc: `${item.description ?? ""} ${item.path}`,
+            desc: `${item.name} ${item.description ?? ""} ${item.path}`,
             anchorId: "",
             item: { ...item, label: `${item.label} — ${SECTION_TAB[tab]} · ${sec.heading}` },
           });
@@ -639,12 +641,22 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     return setting;
   }
 
+  // Looks up a General Setting's name/desc/anchorId from the GENERAL_SETTINGS registry, so
+  // render call sites and the search index can't drift. Throws on a miss so a future desync
+  // between a render call site and the registry fails loudly in dev instead of silently.
+  private generalSetting(anchorId: string): GeneralSettingDef {
+    const def = GENERAL_SETTINGS.find((s) => s.anchorId === anchorId);
+    if (def === undefined) throw new Error(`Config Sync: no GENERAL_SETTINGS entry for anchorId "${anchorId}"`);
+    return def;
+  }
+
   private renderPkmMode(containerEl: HTMLElement): void {
     const detected = this.host.detectedMode();
+    const def = this.generalSetting("general-pkm-mode");
     this.anchor(
       new Setting(containerEl)
-        .setName("PKM mode")
-        .setDesc("Adjusts the recommended storage location to match how your vault is organized. Auto detects IOTO vaults."),
+        .setName(def.name)
+        .setDesc(def.desc),
       "general-pkm-mode"
     ).addDropdown((d) =>
       d
@@ -664,9 +676,10 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private async renderDataFolder(containerEl: HTMLElement, gen: number): Promise<void> {
     const resolved = await this.host.resolvedRootPath();
     if (gen !== this.renderGen) return;
+    const def = this.generalSetting("general-data-folder");
     this.anchor(
-      new Setting(containerEl).setName("Data folder").setDesc(
-        `Where your synced settings live inside this vault. Your regular vault sync (e.g. remotely-save) carries this folder to your other devices. Leave empty for the recommended location (currently: ${resolved}).`
+      new Setting(containerEl).setName(def.name).setDesc(
+        `${def.desc} Leave empty for the recommended location (currently: ${resolved}).`
       ),
       "general-data-folder"
     ).addText((t) => {
@@ -689,10 +702,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   }
 
   private renderStatusToggles(containerEl: HTMLElement): void {
+    const statusInMenu = this.generalSetting("general-status-in-menu");
     this.anchor(
       new Setting(containerEl)
-        .setName("Sync menu shows change counts")
-        .setDesc("Counts changed items when the menu opens. Turn off if opening the menu feels slow."),
+        .setName(statusInMenu.name)
+        .setDesc(statusInMenu.desc),
       "general-status-in-menu"
     ).addToggle((t) =>
       t.setValue(this.host.settings.statusInMenu).onChange(async (v) => {
@@ -700,10 +714,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         await this.host.saveSettings();
       })
     );
+    const remoteAutoCheck = this.generalSetting("general-remote-auto-check");
     this.anchor(
       new Setting(containerEl)
-        .setName("Check remotes automatically")
-        .setDesc("Checks each remote's last capture shortly after startup and every few hours."),
+        .setName(remoteAutoCheck.name)
+        .setDesc(remoteAutoCheck.desc),
       "general-remote-auto-check"
     ).addToggle((t) =>
       t.setValue(this.host.settings.remoteAutoCheck).onChange(async (v) => {
@@ -711,10 +726,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         await this.host.saveSettings();
       })
     );
+    const localPeriodicCheck = this.generalSetting("general-local-periodic-check");
     this.anchor(
       new Setting(containerEl)
-        .setName("Periodic local check")
-        .setDesc("Re-scans for local changes every 5 minutes while the window is focused, keeping the ribbon dot fresh."),
+        .setName(localPeriodicCheck.name)
+        .setDesc(localPeriodicCheck.desc),
       "general-local-periodic-check"
     ).addToggle((t) =>
       t.setValue(this.host.settings.localPeriodicCheck).onChange(async (v) => {
@@ -725,10 +741,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   }
 
   private renderRibbonToggles(containerEl: HTMLElement): void {
+    const def = this.generalSetting("general-ribbon-buttons");
     this.anchor(
       new Setting(containerEl)
-        .setName("Ribbon buttons")
-        .setDesc("The Config Sync ribbon icon always opens a menu of available actions. Optionally also show individual ribbon icons.")
+        .setName(def.name)
+        .setDesc(def.desc)
         .setHeading(),
       "general-ribbon-buttons"
     );
@@ -749,10 +766,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   }
 
   private renderPassphrase(containerEl: HTMLElement): void {
+    const def = this.generalSetting("general-passphrase");
     const setting = this.anchor(
       new Setting(containerEl)
-        .setName("Passphrase")
-        .setDesc("Needed for Encrypt modes. Enter the same passphrase on each device; it is never stored in the store or synced."),
+        .setName(def.name)
+        .setDesc(def.desc),
       "general-passphrase"
     );
     let draft = "";
