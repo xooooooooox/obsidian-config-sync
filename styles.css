@@ -668,3 +668,6 @@ body.is-mobile .config-sync-mainbar input[type="checkbox"]:indeterminate::after 
 
 /* 0.21.0 select-all checkbox alignment */
 .config-sync-mainbar .config-sync-selectall { margin-left: auto; margin-right: var(--size-4-3); }
+
+/* 0.21.0 device-specific badge (§3.3): dissolved "Not recommended" section replaced by an inline caution badge */
+.config-sync-devbadge { margin-left: var(--size-4-2); font-size: var(--font-ui-smaller); color: var(--color-orange); background: rgba(var(--color-orange-rgb), 0.12); border-radius: 9px; padding: 1px 8px; }

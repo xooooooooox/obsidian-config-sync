@@ -353,11 +353,15 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const parts: string[] = [];
     if (item.description !== null) parts.push(item.description);
     if (item.disabledReason !== null) parts.push(item.disabledReason);
-    if (item.cautionReason !== null) parts.push(item.cautionReason);
     if (!item.exists && item.disabledReason === null && item.cautionReason === null) parts.push("(not present in this vault yet)");
     row.setDesc(parts.join(" "));
     if (group !== undefined && this.isCustomized(group)) {
       row.nameEl.createSpan({ cls: "config-sync-cust", text: "⚙ customized" });
+    }
+    if (item.cautionReason !== null) {
+      const devBadge = row.nameEl.createSpan({ cls: "config-sync-devbadge", text: "device-specific" });
+      devBadge.setAttribute("title", item.cautionReason);
+      devBadge.setAttribute("aria-label", item.cautionReason);
     }
     if (group !== undefined && item.disabledReason === null) {
       row.addDropdown((d) =>
@@ -784,6 +788,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       this.search = "";
       this.searchScope = "all";
       this.activeTab = this.scopeTab(hit.scope);
+      this.sortedSections.delete(this.activeTab);
       if (hit.kind === "item" && hit.item !== undefined) this.expanded.add(hit.item.name);
       await this.rerender(0);
       const target = this.containerEl.querySelector(`[data-search-anchor="${CSS.escape(hit.anchorId)}"]`);
