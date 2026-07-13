@@ -998,13 +998,13 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         const nameC = new TextComponent(field(line1, "Name"));
         nameC.setPlaceholder("name (a-z, 0-9, -, _)").setValue(group.name).onChange((v) => {
           const prevName = group.name;
-          this.expanded.delete(group.name);
-          group.name = v.trim();
-          this.expanded.add(group.name);
+          const newName = v.trim();
+          this.expanded.delete(prevName);
+          this.expanded.add(newName);
           void this.commitGroups((draft) => {
             const g = draft.find((x) => x.name === prevName);
-            if (g !== undefined) g.name = group.name;
-          }, group.name);
+            if (g !== undefined) g.name = newName;
+          }, prevName);
         });
         nameC.inputEl.addClass("config-sync-rule-name-input");
       }
@@ -1014,18 +1014,16 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         .addOption("vault", "Vault root")
         .setValue(loc.location)
         .onChange((v) => {
-          group.path = joinLocation(v as "config" | "vault", splitLocation(group.path).rel);
           void this.commitGroups((draft) => {
             const g = draft.find((x) => x.name === group.name);
-            if (g !== undefined) g.path = group.path;
+            if (g !== undefined) g.path = joinLocation(v as "config" | "vault", splitLocation(g.path).rel);
           }, group.name);
         });
       const pathC = new TextComponent(field(line1, "Path"));
       pathC.setPlaceholder("relative path").setValue(loc.rel).onChange((v) => {
-        group.path = joinLocation(splitLocation(group.path).location, v.trim());
         void this.commitGroups((draft) => {
           const g = draft.find((x) => x.name === group.name);
-          if (g !== undefined) g.path = group.path;
+          if (g !== undefined) g.path = joinLocation(splitLocation(g.path).location, v.trim());
         }, group.name);
       });
     }
@@ -1063,8 +1061,6 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const descC = new TextComponent(field(line2, "Description"));
     descC.setPlaceholder("optional").setValue(group.description ?? "").onChange((v) => {
       const d = v.trim();
-      if (d !== "") group.description = d;
-      else delete group.description;
       void this.commitGroups((draft) => {
         const g = draft.find((x) => x.name === group.name);
         if (g === undefined) return;
