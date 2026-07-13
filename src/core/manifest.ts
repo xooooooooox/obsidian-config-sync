@@ -4,7 +4,7 @@ import { isPlainObject } from "./sanitize";
 
 export class ManifestValidationError extends Error {
   constructor(message: string) {
-    super(`Invalid config-sync data: ${message}`);
+    super(message);
     this.name = "ManifestValidationError";
   }
 }
@@ -45,20 +45,20 @@ export function parseSyncManifest(raw: string): SyncManifest {
 }
 
 export function validateSyncManifest(data: unknown): SyncManifest {
-  if (!isPlainObject(data)) throw new ManifestValidationError("manifest top level must be an object");
+  if (!isPlainObject(data)) throw new ManifestValidationError("config-sync.json must contain a JSON object, e.g. {\"version\": 1, \"groups\": []}");
   if (data.version !== 1) {
-    throw new ManifestValidationError(`unsupported version: ${String(data.version)} (expected 1)`);
+    throw new ManifestValidationError(`config-sync.json has unsupported version ${String(data.version)} — this plugin version only supports "version": 1`);
   }
-  if (!Array.isArray(data.groups)) throw new ManifestValidationError('"groups" must be an array');
+  if (!Array.isArray(data.groups)) throw new ManifestValidationError('config-sync.json "groups" must be a list of rules, e.g. "groups": [{"name": "hotkeys", ...}]');
   const groups = data.groups.map((g, i) => parseGroup(g, i));
   const names = new Set<string>();
   const storePaths = new Set<string>();
   for (const g of groups) {
-    if (names.has(g.name)) throw new ManifestValidationError(`duplicate group name "${g.name}"`);
+    if (names.has(g.name)) throw new ManifestValidationError(`two rules are named "${g.name}" — rename one of them so each rule has a unique name`);
     names.add(g.name);
     const sp = groupStorePath(g.path);
     if (storePaths.has(sp)) {
-      throw new ManifestValidationError(`group "${g.name}" collides with another group on store path "${sp}"`);
+      throw new ManifestValidationError(`rule "${g.name}" saves to the same store location as another rule ("${sp}") — give one of them a different path`);
     }
     storePaths.add(sp);
   }
@@ -66,60 +66,60 @@ export function validateSyncManifest(data: unknown): SyncManifest {
 }
 
 function parseGroup(g: unknown, index: number): SyncGroup {
-  if (!isPlainObject(g)) throw new ManifestValidationError(`group #${index} must be an object`);
+  if (!isPlainObject(g)) throw new ManifestValidationError(`rule #${index + 1} must be an object, e.g. {"name": "hotkeys", "path": "{configDir}/hotkeys.json", "type": "file", "devices": "all"}`);
   const { name, path, type, devices, sanitize, mode, fields, description, origin } = g;
   if (typeof name !== "string" || name === "") {
-    throw new ManifestValidationError(`group #${index}: "name" must be a non-empty string`);
+    throw new ManifestValidationError(`rule #${index + 1} is missing a "name" — give it a short id, e.g. "name": "hotkeys"`);
   }
   if (!/^[a-z0-9][a-z0-9_-]*$/.test(name)) {
     throw new ManifestValidationError(
-      `group "${name}": name must be lowercase letters, digits, "-" or "_" and start with a letter or digit`
+      `rule "${name}" has an invalid name — use only lowercase letters, digits, "-" or "_", starting with a letter or digit, e.g. "my-plugin"`
     );
   }
   if (typeof path !== "string" || path === "") {
-    throw new ManifestValidationError(`group "${name}": "path" must be a non-empty string`);
+    throw new ManifestValidationError(`rule "${name}" is missing a "path" — point it at the file or folder to sync, e.g. "path": "{configDir}/hotkeys.json"`);
   }
   if (path.startsWith("/") || path.split("/").includes("..")) {
-    throw new ManifestValidationError(`group "${name}": path must be vault-relative without ".."`);
+    throw new ManifestValidationError(`rule "${name}" has path "${path}", which must stay inside the vault — use a relative path without "..", e.g. "{configDir}/hotkeys.json"`);
   }
   if (!isValidType(type)) {
-    throw new ManifestValidationError(`group "${name}": "type" must be "file" or "dir"`);
+    throw new ManifestValidationError(`rule "${name}" has "type": ${JSON.stringify(type)}, but it must be "file" or "dir"`);
   }
   if (!isValidDevice(devices)) {
-    throw new ManifestValidationError(`group "${name}": "devices" must be "all", "desktop" or "mobile"`);
+    throw new ManifestValidationError(`rule "${name}" has "devices": ${JSON.stringify(devices)}, but it must be "all", "desktop" or "mobile"`);
   }
   if (sanitize !== undefined) {
     throw new ManifestValidationError(
-      `group "${name}": "sanitize" was replaced by "mode": "fields" with "fields" rules`
+      `"${name}" still uses the old sanitize setting — rename it to "mode": "fields" with "fields" rules (see README → Sensitive settings).`
     );
   }
   let validatedMode: SyncMode | undefined;
   if (mode !== undefined) {
     if (!isValidMode(mode)) {
-      throw new ManifestValidationError(`group "${name}": "mode" must be "plain", "fields" or "encrypted"`);
+      throw new ManifestValidationError(`rule "${name}" has "mode": ${JSON.stringify(mode)}, but it must be "plain", "fields" or "encrypted"`);
     }
     if (mode === "fields" && type !== "file") {
-      throw new ManifestValidationError(`group "${name}": "mode": "fields" is only supported on file groups`);
+      throw new ManifestValidationError(`rule "${name}" uses "mode": "fields", which is only supported on file groups — this rule has "type": "${String(type)}"`);
     }
     validatedMode = mode;
   }
   let validatedFields: FieldRule[] | undefined;
   if (fields !== undefined) {
     if (validatedMode !== "fields") {
-      throw new ManifestValidationError(`group "${name}": "fields" is only supported with "mode": "fields"`);
+      throw new ManifestValidationError(`rule "${name}" sets "fields" but not "mode": "fields" — add "mode": "fields" so the rule list takes effect`);
     }
     if (!isValidFieldsArray(fields)) {
       throw new ManifestValidationError(
-        `group "${name}": "fields" must be an array of {pattern: non-empty string, action: "strip"|"encrypt"}`
+        `rule "${name}" has an invalid "fields" list — each entry needs a non-empty "pattern" and an "action" of "strip" or "encrypt", e.g. {"pattern": "*Token*", "action": "strip"}`
       );
     }
     validatedFields = fields;
   }
   if (description !== undefined && typeof description !== "string") {
-    throw new ManifestValidationError(`group "${name}": "description" must be a string`);
+    throw new ManifestValidationError(`rule "${name}" has a "description" that isn't text — use a plain string, e.g. "description": "My custom rule"`);
   }
   if (origin !== undefined && origin !== "discovered") {
-    throw new ManifestValidationError(`group "${name}": "origin" must be "discovered" when present`);
+    throw new ManifestValidationError(`rule "${name}" has "origin": ${JSON.stringify(origin)}, but the only supported value is "discovered" (or omit "origin" entirely)`);
   }
   const group: SyncGroup = { name, path, type, devices };
   if (validatedMode !== undefined) group.mode = validatedMode;
@@ -151,35 +151,35 @@ export function parseStoreLock(raw: string): StoreLock {
 }
 
 export function validateRemotes(data: unknown): Remote[] {
-  if (!Array.isArray(data)) throw new ManifestValidationError("remotes must be a JSON array");
+  if (!Array.isArray(data)) throw new ManifestValidationError("remotes must be a list, e.g. [{\"name\": \"laptop\", \"type\": \"vault\", \"storePath\": \"/path/to/store\"}]");
   return data.map((r, i) => parseRemote(r, i));
 }
 
 function parseRemote(r: unknown, index: number): Remote {
-  if (!isPlainObject(r)) throw new ManifestValidationError(`remote #${index} must be an object`);
+  if (!isPlainObject(r)) throw new ManifestValidationError(`remote #${index + 1} must be an object, e.g. {"name": "laptop", "type": "vault", "storePath": "/path/to/store"}`);
   const { name, type, storePath, url, branch, subdir } = r;
   if (typeof name !== "string" || name === "") {
-    throw new ManifestValidationError(`remote #${index}: "name" must be a non-empty string`);
+    throw new ManifestValidationError(`remote #${index + 1} is missing a "name" — give it a short label, e.g. "name": "laptop"`);
   }
   if (type === "vault") {
     if (typeof storePath !== "string" || !(storePath.startsWith("/") || storePath === "~" || storePath.startsWith("~/"))) {
-      throw new ManifestValidationError(`remote "${name}": "storePath" must be an absolute path (a leading ~/ is allowed)`);
+      throw new ManifestValidationError(`The store path for "${name}" needs to be a full path starting with / or ~/ — for example ~/Vaults/other-vault/config-sync.`);
     }
     return { name, type, storePath };
   }
   if (type === "git") {
     if (typeof url !== "string" || url === "") {
-      throw new ManifestValidationError(`remote "${name}": "url" must be a non-empty string`);
+      throw new ManifestValidationError(`remote "${name}" is missing a "url" — point it at the git repository, e.g. "url": "git@example.com:me/config.git"`);
     }
     if (typeof branch !== "string" || branch === "") {
-      throw new ManifestValidationError(`remote "${name}": "branch" must be a non-empty string`);
+      throw new ManifestValidationError(`remote "${name}" is missing a "branch" — name the branch to sync, e.g. "branch": "main"`);
     }
     if (subdir !== undefined && (typeof subdir !== "string" || subdir.startsWith("/") || subdir.split("/").includes(".."))) {
-      throw new ManifestValidationError(`remote "${name}": "subdir" must be a relative path without ".."`);
+      throw new ManifestValidationError(`remote "${name}" has a "subdir" that must stay inside the repository — use a relative path without "..", e.g. "config-sync"`);
     }
     const remote: Remote = { name, type, url, branch };
     if (typeof subdir === "string" && subdir !== "") remote.subdir = subdir;
     return remote;
   }
-  throw new ManifestValidationError(`remote "${name}": "type" must be "vault" or "git"`);
+  throw new ManifestValidationError(`remote "${name}" has "type": ${JSON.stringify(type)}, but it must be "vault" or "git"`);
 }

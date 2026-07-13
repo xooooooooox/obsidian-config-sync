@@ -4,6 +4,7 @@ import {
   categoryForGroup,
   corePluginFile,
   defaultGroupForName,
+  displayLabelForGroup,
   expectedPathForName,
   findGroupByName,
   groupForItem,
@@ -18,7 +19,7 @@ import {
   toggleSection,
 } from "../src/core/catalog";
 import { SyncGroup } from "../src/core/types";
-import { MemFS } from "./memfs";
+import { FakePlugins, MemFS } from "./memfs";
 
 function optionFs(): MemFS {
   const io = new MemFS();
@@ -298,5 +299,19 @@ describe("categoryForGroup", () => {
     expect(categoryForGroup("daily-notes")).toBe("core");
     expect(categoryForGroup("plugin-dataview")).toBe("community");
     expect(categoryForGroup("my-vimrc")).toBe("custom");
+  });
+});
+
+describe("displayLabelForGroup", () => {
+  it("resolves labels per source with fallbacks", () => {
+    const plugins = new FakePlugins();
+    plugins.installed.set("obsidian42-brat", "1.0.0");
+    plugins.installedNames.set("obsidian42-brat", "BRAT");
+    plugins.coreNames.set("daily-notes", "Daily notes");
+    expect(displayLabelForGroup("appearance", plugins)).toBe("Appearance");
+    expect(displayLabelForGroup("daily-notes", plugins)).toBe("Daily notes");
+    expect(displayLabelForGroup("plugin-obsidian42-brat", plugins)).toBe("BRAT");
+    expect(displayLabelForGroup("plugin-not-installed", plugins)).toBe("not-installed");
+    expect(displayLabelForGroup("my-custom-rule", plugins)).toBe("my-custom-rule");
   });
 });

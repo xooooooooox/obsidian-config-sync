@@ -18,7 +18,7 @@ import {
   revertLastApply,
   writeGroups,
 } from "./core/ConfigSyncCore";
-import { type CatalogSection, listCoreSections, listDiscovered, listOptionSections, listPluginSections } from "./core/catalog";
+import { type CatalogSection, displayLabelForGroup, listCoreSections, listDiscovered, listOptionSections, listPluginSections } from "./core/catalog";
 import { listFilesRecursive } from "./core/io";
 import { groupRealPath } from "./core/pathing";
 import { scanSensitive, SensitiveScan } from "./core/modes";
@@ -223,11 +223,12 @@ export default class ConfigSyncPlugin extends Plugin {
         return { groups, statuses };
       },
       resolvedPath: (g) => g.path.replace("{configDir}", this.app.vault.configDir),
+      displayName: (g) => this.displayName(g),
       captureItems: async (names: string[], onProgress?: ProgressFn) => {
         try {
           const ctx = await this.coreContext();
           const results = await capture(ctx, names, onProgress);
-          new ReportModal(this.app, "Captured", results, new Date().toLocaleString()).open();
+          new ReportModal(this.app, "Captured", results, new Date().toLocaleString(), (g) => this.displayName(g)).open();
           await this.refreshLocalStatus();
         } catch (e) {
           new Notice(`Config Sync capture failed: ${(e as Error).message}`, 10000);
@@ -238,11 +239,11 @@ export default class ConfigSyncPlugin extends Plugin {
           const ctx = await this.coreContext();
           const warnings = await checkApply(ctx, names);
           if (warnings.length > 0) {
-            const ok = await confirmWarnings(this.app, "Config Sync: version warnings", warnings.map((w) => `${w.group}: ${w.message}`));
+            const ok = await confirmWarnings(this.app, "Config Sync: version warnings", warnings.map((w) => `${this.displayName(w.group)}: ${w.message}`));
             if (!ok) return;
           }
           const results = await apply(ctx, names, onProgress);
-          new ReportModal(this.app, "Applied", results, new Date().toLocaleString()).open();
+          new ReportModal(this.app, "Applied", results, new Date().toLocaleString(), (g) => this.displayName(g)).open();
           await this.refreshLocalStatus();
         } catch (e) {
           new Notice(`Config Sync apply failed: ${(e as Error).message}`, 10000);
@@ -259,7 +260,7 @@ export default class ConfigSyncPlugin extends Plugin {
         try {
           const ctx = await this.coreContext();
           const results = await importExternal(ctx, await this.createReader(remote));
-          new ReportModal(this.app, `Pulled from ${remote.name}`, results).open();
+          new ReportModal(this.app, `Pulled from ${remote.name}`, results, undefined, (g) => this.displayName(g)).open();
           await this.refreshLocalStatus();
           await this.refreshRemoteChecks();
         } catch (e) {
@@ -270,7 +271,7 @@ export default class ConfigSyncPlugin extends Plugin {
         try {
           const ctx = await this.coreContext();
           const results = await pushExternal(ctx, await this.createWriter(remote));
-          new ReportModal(this.app, `Pushed to ${remote.name}`, results).open();
+          new ReportModal(this.app, `Pushed to ${remote.name}`, results, undefined, (g) => this.displayName(g)).open();
           await this.refreshRemoteChecks();
         } catch (e) {
           new Notice(`Config Sync push failed: ${(e as Error).message}`, 10000);
@@ -326,24 +327,33 @@ export default class ConfigSyncPlugin extends Plugin {
     this.app.saveLocalStorage("config-sync-passphrase", v === "" ? null : v);
   }
 
+  private pluginHost(): PluginHost {
+    const registry = this.pluginRegistry();
+    return {
+      getInstalledPluginVersion: (id) => registry.manifests[id]?.version ?? null,
+      isPluginEnabled: (id) => registry.enabledPlugins.has(id),
+      disablePlugin: (id) => registry.disablePlugin(id),
+      enablePlugin: (id) => registry.enablePlugin(id),
+      getInstalledPluginName: (id) => registry.manifests[id]?.name ?? null,
+      getCorePluginName: (id) => this.internalPlugins().plugins[id]?.instance?.name ?? null,
+    };
+  }
+
+  displayName(group: string): string {
+    return displayLabelForGroup(group, this.pluginHost());
+  }
+
   private async coreContext(): Promise<CoreContext> {
     const rootPath = await resolveRootPath(this.settings.rootPath, this.settings.pkmMode, this.pkmProbe());
     if (rootPath === "" || rootPath.startsWith("/") || rootPath.split("/").includes("..")) {
       throw new Error(`Config Sync: invalid data folder "${rootPath}" — set a vault-relative path in settings`);
     }
     this.lastResolvedRoot = rootPath;
-    const registry = this.pluginRegistry();
-    const host: PluginHost = {
-      getInstalledPluginVersion: (id) => registry.manifests[id]?.version ?? null,
-      isPluginEnabled: (id) => registry.enabledPlugins.has(id),
-      disablePlugin: (id) => registry.disablePlugin(id),
-      enablePlugin: (id) => registry.enablePlugin(id),
-    };
     return {
       io: this.app.vault.adapter,
       configDir: this.app.vault.configDir,
       rootPath,
-      plugins: host,
+      plugins: this.pluginHost(),
       passphrase: this.passphrase(),
       now: () => new Date().toISOString(),
     };
@@ -353,7 +363,7 @@ export default class ConfigSyncPlugin extends Plugin {
     try {
       const ctx = await this.coreContext();
       const result = await revertLastApply(ctx);
-      new ReportModal(this.app, "Config Sync: Revert report", [result]).open();
+      new ReportModal(this.app, "Config Sync: Revert report", [result], undefined, (g) => this.displayName(g)).open();
     } catch (e) {
       new Notice(`Config Sync revert failed: ${(e as Error).message}`, 10000);
     }

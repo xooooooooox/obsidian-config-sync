@@ -13,7 +13,8 @@ export class ReportModal extends Modal {
     app: App,
     private modalTitle: string,
     private results: GroupResult[],
-    private subtitle?: string
+    private subtitle: string | undefined,
+    private labelFor: (group: string) => string
   ) {
     super(app);
   }
@@ -61,7 +62,7 @@ export class ReportModal extends Modal {
     const isError = r.status !== "ok";
     const row = block.createDiv({ cls: "config-sync-report-row" });
     const chev = row.createSpan({ cls: "config-sync-row-chevron", text: isError ? "▾" : "▸" });
-    row.createSpan({ cls: "config-sync-rule-name", text: label ?? r.group });
+    row.createSpan({ cls: "config-sync-rule-name", text: label ?? this.labelFor(r.group) });
     if (isError) row.createSpan({ cls: "config-sync-pill is-warn", text: r.status === "warning" ? "⚠" : "✗" });
     row.createDiv({ cls: "config-sync-rule-spacer" });
     const chip = (cls: string, text: string): void => {
