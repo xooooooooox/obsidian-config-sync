@@ -4,6 +4,8 @@ import { basename, groupRealPath, groupStorePath, relativeTo } from "./pathing";
 import { parseStoreLock, parseSyncManifest, validateSyncManifest } from "./manifest";
 import { applyTransform, captureTransform, contentUnchanged } from "./modes";
 
+export type ProgressFn = (done: number, total: number, current: string) => void;
+
 export interface PluginHost {
   getInstalledPluginVersion(id: string): string | null;
   isPluginEnabled(id: string): boolean;
@@ -121,7 +123,7 @@ function requireGroup(manifest: SyncManifest, name: string): SyncGroup {
   return group;
 }
 
-export async function capture(ctx: CoreContext, names?: string[]): Promise<GroupResult[]> {
+export async function capture(ctx: CoreContext, names?: string[], onProgress?: ProgressFn): Promise<GroupResult[]> {
   const manifest = await loadManifest(ctx);
   // Capture is the lock's writer and its only healing path: a previous lock that is
   // missing, old-format, or corrupt must never block capture — it is rewritten below.
@@ -132,15 +134,19 @@ export async function capture(ctx: CoreContext, names?: string[]): Promise<Group
     previous = null;
   }
   const selected = names === undefined ? null : new Set(names);
+  const toProcess = manifest.groups.filter((g) => selected === null || selected.has(g.name));
   const lock: StoreLock = { capturedAt: ctx.now(), groups: {} };
   const results: GroupResult[] = [];
+  let done = 0;
   for (const group of manifest.groups) {
     if (selected !== null && !selected.has(group.name)) {
       const prev = previous?.groups[group.name];
       if (prev !== undefined) lock.groups[group.name] = prev; // not captured this run — carry forward
       continue;
     }
+    onProgress?.(done, toProcess.length, group.name);
     const result = await captureGroup(ctx, group);
+    done++;
     const pluginId = pluginIdForGroup(group);
     if (pluginId !== null) {
       if (result.status !== "error") {
@@ -262,7 +268,7 @@ export async function checkApply(ctx: CoreContext, groupNames: string[]): Promis
   return warnings;
 }
 
-export async function apply(ctx: CoreContext, groupNames: string[]): Promise<GroupResult[]> {
+export async function apply(ctx: CoreContext, groupNames: string[], onProgress?: ProgressFn): Promise<GroupResult[]> {
   const manifest = await loadManifest(ctx);
   if (await ctx.io.exists(backupDir(ctx))) {
     await ctx.io.rmdir(backupDir(ctx), true);
@@ -273,9 +279,12 @@ export async function apply(ctx: CoreContext, groupNames: string[]): Promise<Gro
     backedUp: new Set(),
   };
   const results: GroupResult[] = [];
+  let done = 0;
   try {
     for (const name of groupNames) {
+      onProgress?.(done, groupNames.length, name);
       results.push(await applyGroup(ctx, requireGroup(manifest, name), state));
+      done++;
     }
   } finally {
     const indexPath = `${backupDir(ctx)}/index.json`;
