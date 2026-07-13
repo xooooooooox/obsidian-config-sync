@@ -21,6 +21,7 @@ import {
 } from "./core/ConfigSyncCore";
 import { createInstaller } from "./core/installer";
 import { type CatalogSection, displayLabelForGroup, listCoreSections, listDiscovered, listOptionSections, listPluginSections } from "./core/catalog";
+import { Availability, availabilityForGroup } from "./core/availability";
 import { listFilesRecursive } from "./core/io";
 import { groupRealPath } from "./core/pathing";
 import { scanSensitive, SensitiveScan } from "./core/modes";
@@ -223,7 +224,15 @@ export default class ConfigSyncPlugin extends Plugin {
         const statuses = await statusForGroups(ctx, groups);
         this.localStatuses = statuses;
         this.updateRibbonDot();
-        return { groups, statuses };
+        let lock: StoreLock | null = null;
+        try {
+          lock = await loadLock(ctx);
+        } catch {
+          lock = null;
+        }
+        const availability: Record<string, Availability> = {};
+        for (const g of groups) availability[g.name] = availabilityForGroup(g, this.pluginHost(), lock);
+        return { groups, statuses, availability };
       },
       resolvedPath: (g) => g.path.replace("{configDir}", this.app.vault.configDir),
       displayName: (g) => this.displayName(g),
@@ -238,10 +247,9 @@ export default class ConfigSyncPlugin extends Plugin {
           return null;
         }
       },
-      applyItems: async (names: string[], onProgress?: ProgressFn) => {
+      applyItems: async (items: ApplyItem[], onProgress?: ProgressFn) => {
         try {
           const ctx = await this.coreContext();
-          const items: ApplyItem[] = names.map((name) => ({ name, action: "none" as const }));
           const results = await applyWithActions(ctx, items, this.installPlugin(), onProgress);
           await this.refreshLocalStatus();
           return results;

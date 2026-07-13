@@ -1,16 +1,25 @@
 import { ButtonComponent, ExtraButtonComponent, ItemView, WorkspaceLeaf } from "obsidian";
-import { ProgressFn } from "../core/ConfigSyncCore";
+import { ApplyItem, ProgressFn, StateAction } from "../core/ConfigSyncCore";
 import { bucketCounts, GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry } from "../core/status";
 import { CATEGORY_LABELS, ItemCategory, categoryForGroup } from "../core/catalog";
 import { FileChanges, GroupResult, Remote, SyncGroup, hasChanges } from "../core/types";
+import { Availability } from "../core/availability";
 import {
   capFileEntries,
   CappedEntry,
+  defaultPolicy,
+  footerSummary,
   insyncLineText,
   matchesSearch,
   moreFilesText,
   nosettingsLineText,
   PanelFilter,
+  policyOptions,
+  SECTION_NOTES,
+  SECTION_TITLES,
+  SectionKind,
+  sectionForItem,
+  versionLine,
   visibleUnderFilter,
   Direction,
   effectiveDirection,
@@ -26,11 +35,11 @@ const sessionUi = {
 };
 
 export interface SyncCenterHost {
-  computeStatuses(): Promise<{ groups: SyncGroup[]; statuses: GroupStatus[] }>;
+  computeStatuses(): Promise<{ groups: SyncGroup[]; statuses: GroupStatus[]; availability: Record<string, Availability> }>;
   resolvedPath(group: SyncGroup): string;
   displayName(group: string): string;
   captureItems(names: string[], onProgress?: ProgressFn): Promise<GroupResult[] | null>;
-  applyItems(names: string[], onProgress?: ProgressFn): Promise<GroupResult[] | null>;
+  applyItems(items: ApplyItem[], onProgress?: ProgressFn): Promise<GroupResult[] | null>;
   reloadApp(): void;
   remotes(): Remote[]; // [] on mobile
   remoteCheck(name: string): { check: RemoteCheck; at: number } | undefined;
@@ -67,6 +76,9 @@ export const SYNC_CENTER_VIEW_TYPE = "config-sync-center";
 export class SyncCenterView extends ItemView {
   private groups: SyncGroup[] = [];
   private statuses: Map<string, GroupStatus> = new Map();
+  private availability: Map<string, Availability> = new Map();
+  private policy: Map<string, StateAction> = new Map();
+  private sectionOpen: Set<SectionKind> = new Set();
   private selected: Set<string> = new Set();
   private directionOverride: Map<string, Direction> = new Map();
   private expandedItems: Set<string> = new Set();
@@ -146,24 +158,34 @@ export class SyncCenterView extends ItemView {
 
   private async reload(): Promise<void> {
     const gen = ++this.renderGen;
-    const { groups, statuses } = await this.host.computeStatuses();
+    const { groups, statuses, availability } = await this.host.computeStatuses();
     if (gen !== this.renderGen) return;
     this.groups = groups;
     this.statuses = new Map(statuses.map((s) => [s.group, s]));
+    this.availability = new Map(Object.entries(availability));
     // User state survives reloads; prune entries whose item vanished.
     const names = new Set(groups.map((g) => g.name));
     for (const n of [...this.selected]) if (!names.has(n)) this.selected.delete(n);
     for (const n of [...this.directionOverride.keys()]) if (!names.has(n)) this.directionOverride.delete(n);
     for (const n of [...this.expandedItems]) if (!names.has(n)) this.expandedItems.delete(n);
+    for (const n of [...this.policy.keys()]) if (!names.has(n)) this.policy.delete(n);
     // Default pre-check seeds once per view lifetime, never on later refreshes.
     if (this.firstLoad) {
       this.firstLoad = false;
       for (const s of statuses) {
-        if (s.state === "local-changed" || s.state === "store-newer") this.selected.add(s.group);
+        if ((s.state === "local-changed" || s.state === "store-newer") && this.sectionOf(s.group) === "main") this.selected.add(s.group);
       }
     }
     this.lastRefreshedAt = Date.now();
     this.render(gen);
+  }
+
+  private availOf(name: string): Availability {
+    return this.availability.get(name) ?? { kind: "enabled", drift: null, localVersion: null, storeVersion: null, anchor: "app" };
+  }
+
+  private sectionOf(name: string): SectionKind {
+    return sectionForItem(this.availOf(name));
   }
 
   private rows(): StatusRow[] {
@@ -173,6 +195,13 @@ export class SyncCenterView extends ItemView {
       if (status !== undefined) out.push({ group, status });
     }
     return out;
+  }
+
+  // Rows in the main section (availability "enabled", or app-anchored with no unhandled drift).
+  // Sidebar badges, header pills, filter pills, and select-all all bucket over this set only —
+  // outdated/disabled/not-installed rows live in their own sections with their own controls.
+  private mainRows(): StatusRow[] {
+    return this.rows().filter((r) => this.sectionOf(r.group.name) === "main");
   }
 
   private effDir(r: StatusRow): Direction {
@@ -222,9 +251,9 @@ export class SyncCenterView extends ItemView {
       });
     };
 
-    deviceEntry("all", "All items", this.rows().map((r) => r.status));
+    deviceEntry("all", "All items", this.mainRows().map((r) => r.status));
     for (const cat of CATEGORY_ORDER) {
-      const inCat = this.rows().filter((r) => categoryForGroup(r.group.name) === cat);
+      const inCat = this.mainRows().filter((r) => categoryForGroup(r.group.name) === cat);
       if (inCat.length === 0) continue;
       deviceEntry(cat, CATEGORY_LABELS[cat], inCat.map((r) => r.status));
     }
@@ -290,7 +319,7 @@ export class SyncCenterView extends ItemView {
   private renderHeader(): void {
     const head = this.contentEl.createDiv({ cls: "config-sync-center-head" });
     head.createSpan({ cls: "config-sync-center-title", text: "Sync Center" });
-    const { up, down, ok, none } = bucketCounts(this.rows().map((r) => r.status));
+    const { up, down, ok, none } = bucketCounts(this.mainRows().map((r) => r.status));
     const pills = head.createSpan({ cls: "config-sync-report-pills" });
     if (up > 0) {
       pills.createSpan({
@@ -359,19 +388,25 @@ export class SyncCenterView extends ItemView {
   }
 
   private scopedRows(): StatusRow[] {
-    if (this.panelScope.kind !== "device" || this.panelScope.cat === "all") return this.rows();
+    if (this.panelScope.kind !== "device" || this.panelScope.cat === "all") return this.mainRows();
     const cat = this.panelScope.cat;
-    return this.rows().filter((r) => categoryForGroup(r.group.name) === cat);
+    return this.mainRows().filter((r) => categoryForGroup(r.group.name) === cat);
   }
 
   private renderItemMode(main: HTMLElement): void {
     this.renderResultStrip(main);
     const scoped = this.scopedRows();
-    const counts = bucketCounts(scoped.map((r) => r.status));
+    const mainRows = scoped.filter((r) => this.sectionOf(r.group.name) === "main");
+    const sections: Record<Exclude<SectionKind, "main">, StatusRow[]> = { outdated: [], disabled: [], "not-installed": [] };
+    for (const r of scoped) {
+      const s = this.sectionOf(r.group.name);
+      if (s !== "main") sections[s].push(r);
+    }
+    const counts = bucketCounts(mainRows.map((r) => r.status));
 
     const bar = main.createDiv({ cls: "config-sync-mainbar" });
     const defs: { key: PanelFilter; label: string }[] = [
-      { key: "all", label: `All ${scoped.length}` },
+      { key: "all", label: `All ${mainRows.length}` },
       { key: "capture", label: `To capture ${counts.up}` },
       { key: "apply", label: `To apply ${counts.down}` },
       { key: "ok", label: `In sync ${counts.ok}` },
@@ -392,14 +427,18 @@ export class SyncCenterView extends ItemView {
     searchEl.value = this.search;
     searchEl.addEventListener("input", () => {
       this.search = searchEl.value;
-      this.renderListInto(listHost, scoped); // re-render only the list; keeps the input focused
-      this.refreshGlobalSelectAll(selectAll, scoped); // resync tri-state against the new search
+      this.renderListInto(listHost, mainRows); // re-render only the list; keeps the input focused
+      this.refreshGlobalSelectAll(selectAll, mainRows); // resync tri-state against the new search
     });
     const selectAll = bar.createEl("input", { type: "checkbox", attr: { "aria-label": "Select all visible items" } });
 
     const listHost = main.createDiv();
-    this.renderListInto(listHost, scoped);
-    this.wireGlobalSelectAll(selectAll, scoped);
+    this.renderListInto(listHost, mainRows);
+    this.wireGlobalSelectAll(selectAll, mainRows);
+
+    this.renderSection(main, "outdated", sections.outdated);
+    this.renderSection(main, "disabled", sections.disabled);
+    this.renderSection(main, "not-installed", sections["not-installed"]);
 
     this.renderActionBar(main);
   }
@@ -480,6 +519,49 @@ export class SyncCenterView extends ItemView {
     });
   }
 
+  private renderSection(main: HTMLElement, kind: Exclude<SectionKind, "main">, rows: StatusRow[]): void {
+    if (rows.length === 0) return;
+    const open = this.sectionOpen.has(kind);
+    const fold = main.createDiv({ cls: `config-sync-section is-${kind}${open ? " is-open" : ""}` });
+    const head = fold.createDiv({ cls: "config-sync-section-head" });
+    head.createSpan({ cls: "config-sync-row-chevron", text: open ? "▾" : "▸" });
+    head.createSpan({ cls: "config-sync-section-title", text: SECTION_TITLES[kind] });
+    const insync = rows.filter((r) => r.status.state === "in-sync");
+    const checkable = rows.filter((r) => r.status.state !== "in-sync" && r.status.state !== "no-settings" && r.status.state !== "locked");
+    head.createSpan({ cls: "config-sync-pill is-neutral", text: `${rows.length - insync.length}` });
+    if (insync.length > 0) head.createSpan({ cls: "config-sync-pill is-ok", text: `✓ ${insync.length}` });
+    const staged = checkable.filter((r) => this.selected.has(r.group.name)).length;
+    head.createSpan({ cls: "config-sync-section-hint", text: staged === 0 ? "not staged" : `${staged} staged` });
+    const box = head.createEl("input", { type: "checkbox", attr: { "aria-label": "Select all in this section" } });
+    box.indeterminate = staged > 0 && staged < checkable.length;
+    box.checked = checkable.length > 0 && staged === checkable.length;
+    box.disabled = checkable.length === 0;
+    box.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const turnOn = checkable.some((r) => !this.selected.has(r.group.name));
+      for (const r of checkable) {
+        const name = r.group.name;
+        if (turnOn) {
+          this.selected.add(name);
+          if (!this.policy.has(name)) this.policy.set(name, defaultPolicy(this.availOf(name)));
+        } else {
+          this.selected.delete(name);
+          this.policy.delete(name);
+        }
+      }
+      this.render(this.renderGen);
+    });
+    head.addEventListener("click", () => {
+      if (open) this.sectionOpen.delete(kind);
+      else this.sectionOpen.add(kind);
+      this.render(this.renderGen);
+    });
+    if (!open) return;
+    fold.createDiv({ cls: "config-sync-section-note", text: SECTION_NOTES[kind] });
+    const card = fold.createDiv({ cls: "config-sync-card" });
+    for (const r of rows) this.renderItemRow(card, r);
+  }
+
   private renderItemRow(card: HTMLElement, r: StatusRow): void {
     const { group, status } = r;
     const inert = status.state === "in-sync" || status.state === "no-settings" || status.state === "locked";
@@ -491,6 +573,11 @@ export class SyncCenterView extends ItemView {
     row.createSpan({ cls: "config-sync-rule-name", text: this.host.displayName(group.name) });
     if (group.mode === "encrypted") row.createSpan({ cls: "config-sync-mode-badge", text: "🔒" });
     else if (group.mode === "fields") row.createSpan({ cls: "config-sync-mode-badge", text: "▤" });
+    const chosen = this.policy.get(group.name);
+    if (this.selected.has(group.name) && chosen !== undefined) {
+      const opt = policyOptions(this.availOf(group.name)).find((o) => o.action === chosen);
+      if (opt !== undefined && opt.pill !== null) row.createSpan({ cls: "config-sync-pill is-statenote", text: opt.pill });
+    }
     row.createDiv({ cls: "config-sync-rule-spacer" });
 
     const icon = this.stateIcon(status.state);
@@ -503,8 +590,15 @@ export class SyncCenterView extends ItemView {
     cb.checked = this.selected.has(group.name);
     cb.addEventListener("click", (e) => {
       e.stopPropagation();
-      if (cb.checked) this.selected.add(group.name);
-      else this.selected.delete(group.name);
+      if (cb.checked) {
+        this.selected.add(group.name);
+        if (this.sectionOf(group.name) !== "main" && !this.policy.has(group.name)) {
+          this.policy.set(group.name, defaultPolicy(this.availOf(group.name)));
+        }
+      } else {
+        this.selected.delete(group.name);
+        this.policy.delete(group.name);
+      }
       this.render(this.renderGen);
     });
 
@@ -569,8 +663,39 @@ export class SyncCenterView extends ItemView {
       return;
     }
     if (status.changes === undefined) return;
+    const a = this.availOf(r.group.name);
+    const line = versionLine(a);
+    if (line !== null) detail.createDiv({ cls: `config-sync-version-line${line.tone === "amber" ? " is-amber" : ""}`, text: line.text });
+    const section = this.sectionOf(r.group.name);
+    if (section === "not-installed") {
+      this.renderPolicySeg(detail, r, a); // apply-only: no direction toggle
+      this.renderCappedChanges(detail, status.changes);
+      return;
+    }
     this.renderDirectionToggle(detail, r);
+    if (section !== "main" && this.effDir(r) === "apply") this.renderPolicySeg(detail, r, a);
     this.renderCappedChanges(detail, status.changes);
+  }
+
+  private renderPolicySeg(detail: HTMLElement, r: StatusRow, a: Availability): void {
+    const options = policyOptions(a);
+    if (options.length === 0) return;
+    const name = r.group.name;
+    detail.createDiv({ cls: "config-sync-seg-label", text: "On apply" });
+    const seg = detail.createDiv({ cls: "config-sync-seg" });
+    const current = this.policy.get(name) ?? defaultPolicy(a);
+    for (const opt of options) {
+      const b = seg.createEl("button", {
+        cls: `config-sync-seg-btn is-policy${this.selected.has(name) && current === opt.action ? " is-on" : ""}`,
+        text: opt.label,
+      });
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.selected.add(name);
+        this.policy.set(name, opt.action);
+        this.render(this.renderGen);
+      });
+    }
   }
 
   // Staging, not execution: a segment checks the row in that direction; clicking the
@@ -626,25 +751,32 @@ export class SyncCenterView extends ItemView {
       .map((r) => r.group.name);
   }
 
-  private applyNames(): string[] {
+  private applyPayload(): ApplyItem[] {
     return this.rows()
       .filter((r) => this.selected.has(r.group.name) && this.effDir(r) === "apply")
-      .map((r) => r.group.name);
+      .map((r) => ({
+        name: r.group.name,
+        action: this.sectionOf(r.group.name) === "main" ? "none" : (this.policy.get(r.group.name) ?? defaultPolicy(this.availOf(r.group.name))),
+      }));
   }
 
   private renderActionBar(macro: HTMLElement): void {
     const bar = macro.createDiv({ cls: "config-sync-actionbar" });
-    bar.createSpan({ cls: "config-sync-staged-count", text: `${this.selected.size} staged` });
+    const mainStaged = this.mainRows().filter((r) => this.selected.has(r.group.name)).length;
+    const outdatedStaged = this.rows().filter((r) => this.sectionOf(r.group.name) === "outdated" && this.selected.has(r.group.name)).length;
+    const disabledStaged = this.rows().filter((r) => this.sectionOf(r.group.name) === "disabled" && this.selected.has(r.group.name)).length;
+    const installStaged = this.rows().filter((r) => this.sectionOf(r.group.name) === "not-installed" && this.selected.has(r.group.name)).length;
+    bar.createSpan({ cls: "config-sync-staged-count", text: footerSummary(mainStaged, outdatedStaged, disabledStaged, installStaged) });
     bar.createDiv({ cls: "config-sync-rule-spacer" });
     const capNames = this.captureNames();
-    const applyNames = this.applyNames();
+    const applyItems = this.applyPayload();
 
-    const run = (
+    const run = <T>(
       btn: ButtonComponent,
       other: ButtonComponent,
       verb: "Capturing" | "Applying",
-      names: string[],
-      exec: (names: string[], onProgress: ProgressFn) => Promise<GroupResult[] | null>
+      payload: T[],
+      exec: (payload: T[], onProgress: ProgressFn) => Promise<GroupResult[] | null>
     ): void => {
       this.running = true;
       btn.setDisabled(true);
@@ -656,7 +788,7 @@ export class SyncCenterView extends ItemView {
       btn.buttonEl.addClass("is-busy");
       void (async () => {
         try {
-          const results = await exec(names, (done, total, current) => {
+          const results = await exec(payload, (done, total, current) => {
             btn.setButtonText(`${verb} ${done}/${total}…`);
             btn.buttonEl.setAttribute("aria-label", current);
             if (fill !== null) fill.style.width = `${total === 0 ? 0 : Math.round((done / total) * 100)}%`;
@@ -685,11 +817,11 @@ export class SyncCenterView extends ItemView {
 
     const applyW = mkWrapped();
     applyW.btn.setCta();
-    applyW.btn.setButtonText(`↓ Apply ${applyNames.length} item${applyNames.length === 1 ? "" : "s"}`);
-    applyW.btn.setDisabled(this.running || applyNames.length === 0);
+    applyW.btn.setButtonText(`↓ Apply ${applyItems.length} item${applyItems.length === 1 ? "" : "s"}`);
+    applyW.btn.setDisabled(this.running || applyItems.length === 0);
 
     capW.btn.onClick(() => run(capW.btn, applyW.btn, "Capturing", this.captureNames(), (n, p) => this.host.captureItems(n, p)));
-    applyW.btn.onClick(() => run(applyW.btn, capW.btn, "Applying", this.applyNames(), (n, p) => this.host.applyItems(n, p)));
+    applyW.btn.onClick(() => run(applyW.btn, capW.btn, "Applying", this.applyPayload(), (n, p) => this.host.applyItems(n, p)));
   }
 
   private renderRemoteMode(main: HTMLElement, remote: Remote): void {

@@ -629,3 +629,18 @@ body.is-mobile .config-sync-mainbar input[type="checkbox"]:indeterminate::after 
 .config-sync-strip-close { margin-left: auto; color: var(--text-faint); cursor: pointer; }
 .config-sync-strip-body { margin-top: 6px; }
 
+/* 0.20.0 availability sections */
+.config-sync-section { border: 1px dashed var(--background-modifier-border); border-radius: 8px; padding: 8px 10px; margin-top: 8px; }
+.config-sync-section.is-open { border-style: solid; }
+.config-sync-section.is-outdated { border-color: rgba(214, 123, 181, 0.45); }
+.config-sync-section.is-not-installed { border-color: rgba(232, 176, 75, 0.45); }
+.config-sync-section-head { display: flex; align-items: center; gap: 7px; cursor: pointer; }
+.config-sync-section.is-outdated .config-sync-section-title { color: #d67bb5; }
+.config-sync-section.is-not-installed .config-sync-section-title { color: #e8b04b; }
+.config-sync-section-title { font-weight: 600; }
+.config-sync-section-hint { margin-left: auto; color: var(--text-faint); font-size: var(--font-ui-smaller); }
+.config-sync-section-note { color: var(--text-faint); font-style: italic; font-size: var(--font-ui-smaller); padding: 4px 0 2px 18px; }
+.config-sync-version-line { color: var(--text-faint); font-size: var(--font-ui-smaller); padding: 2px 0; }
+.config-sync-version-line.is-amber { color: #e8b04b; }
+.config-sync-seg-label { color: var(--text-faint); font-size: 10px; margin-top: 4px; }
+.config-sync-seg-btn.is-policy.is-on { background: rgba(88, 166, 160, 0.25); color: #a8e0db; }
