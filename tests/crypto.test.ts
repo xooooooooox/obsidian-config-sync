@@ -44,3 +44,17 @@ describe("field envelopes", () => {
     await expect(decryptField("bad", f, "g")).rejects.toBeInstanceOf(DecryptError);
   });
 });
+
+describe("webcrypto capability guard", () => {
+  it("throws the verbatim error when crypto.subtle is unavailable", async () => {
+    const original = globalThis.crypto;
+    Object.defineProperty(globalThis, "crypto", { value: {}, configurable: true });
+    try {
+      await expect(encryptFile("pw", "x")).rejects.toThrowError(
+        "WebCrypto is unavailable in this environment — Encrypt modes cannot run on this device"
+      );
+    } finally {
+      Object.defineProperty(globalThis, "crypto", { value: original, configurable: true });
+    }
+  });
+});

@@ -194,6 +194,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   }
 
   private async renderActiveTab(containerEl: HTMLElement, gen: number): Promise<void> {
+    if (this.activeTab === "sources" && Platform.isMobile) this.activeTab = "general";
     switch (this.activeTab) {
       case "general":
         this.renderPkmMode(containerEl);
