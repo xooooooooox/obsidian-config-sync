@@ -5,15 +5,12 @@ import { PkmMode } from "../core/pkm";
 import { validateRemotes } from "../core/manifest";
 import { keyMatchesAny } from "../core/sanitize";
 import {
-  CATEGORY_LABELS,
   CatalogItem,
   CatalogSection,
-  categoryForGroup,
   defaultGroupForName,
   expectedPathForName,
   findGroupByName,
   groupForItem,
-  ItemCategory,
   joinLocation,
   reservedNames,
   splitLocation,
@@ -102,8 +99,6 @@ const SECTION_TAB: Record<"obsidian" | "core" | "plugins", string> = {
   core: "Core plugins",
   plugins: "Community plugins",
 };
-
-const CATEGORY_ORDER: ItemCategory[] = ["obsidian", "core", "community", "custom"];
 
 // Single source of truth for General's Settings: used both to render (data-search-anchor
 // attached to each Setting) and to build the search index, so the two can't drift.
@@ -354,6 +349,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       });
     }
     const row = new Setting(wrap).setName(item.label);
+    row.settingEl.setAttribute("data-search-anchor", `item-${item.name}`);
     const parts: string[] = [];
     if (item.description !== null) parts.push(item.description);
     if (item.disabledReason !== null) parts.push(item.disabledReason);
@@ -686,7 +682,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
             kind: "item",
             name: item.label,
             desc: `${item.name} ${item.description ?? ""} ${item.path}`,
-            anchorId: "",
+            anchorId: `item-${item.name}`,
             item: { ...item, label: `${item.label} — ${SECTION_TAB[tab]} · ${sec.heading}` },
           });
         }
@@ -704,12 +700,12 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         });
         continue;
       }
-      if (g.origin !== undefined) continue;
+      if (g.origin !== undefined || reserved.has(g.name)) continue;
       hits.push({
         scope: "advanced",
         kind: "rule",
         name: this.host.displayName(g.name, g.label),
-        desc: reserved.has(g.name) ? splitLocation(g.path).rel : "Custom rule",
+        desc: "Custom rule",
         anchorId: `advanced-rule-${g.name}`,
       });
     }
@@ -774,10 +770,6 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   }
 
   private renderSearchHit(listEl: HTMLElement, hit: SearchHit): void {
-    if (hit.kind === "item" && hit.item !== undefined) {
-      this.renderChecklistRow(listEl, hit.item);
-      return;
-    }
     const row = listEl.createDiv({ cls: "config-sync-hit" });
     const main = row.createDiv({ cls: "config-sync-hit-main" });
     main.createDiv({ cls: "config-sync-hit-name", text: hit.name });
@@ -792,6 +784,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       this.search = "";
       this.searchScope = "all";
       this.activeTab = this.scopeTab(hit.scope);
+      if (hit.kind === "item" && hit.item !== undefined) this.expanded.add(hit.item.name);
       await this.rerender(0);
       const target = this.containerEl.querySelector(`[data-search-anchor="${CSS.escape(hit.anchorId)}"]`);
       if (target === null) return;
@@ -978,31 +971,39 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const reserved = reservedNames(this.host.installedPluginIds());
     const managed = this.groups.filter((g) => reserved.has(g.name) && g.origin === undefined);
     const custom = this.groups.filter((g) => !reserved.has(g.name) && g.origin === undefined);
+    const customized = managed.filter((g) => this.isCustomized(g));
 
-    const managedHead = new Setting(containerEl)
-      .setName("Synced items")
+    if (customized.length > 0) {
+      new Setting(containerEl)
+        .setName(`${customized.length} items use a customized rule`)
+        .setDesc(`${customized.map((g) => this.host.displayName(g.name, g.label)).join(", ")} — edit each on its own tab.`)
+        .addButton((b) =>
+          b.setButtonText("Reset all to defaults").onClick(async () => {
+            await this.commitGroups((draft) => {
+              for (let i = 0; i < draft.length; i++) {
+                const g = draft[i];
+                if (g === undefined || !reserved.has(g.name) || g.origin !== undefined) continue;
+                const def = defaultGroupForName(g.name);
+                if (def !== null) draft[i] = def;
+              }
+            });
+            this.refresh();
+          })
+        );
+    }
+
+    new Setting(containerEl)
+      .setName("Custom rules")
       .setHeading()
-      .setDesc("Everything you turned on in the Obsidian / Core plugins / Community plugins tabs. Expand a row to fine-tune its rule; reset returns it to the default.");
-    if (managed.length > 0) {
-      managedHead.addExtraButton((b) => b.setIcon("rotate-ccw").setTooltip("Reset all to defaults").onClick(async () => {
-        await this.commitGroups((draft) => {
-          for (let i = 0; i < draft.length; i++) {
-            const g = draft[i];
-            if (g === undefined || !reserved.has(g.name) || g.origin !== undefined) continue;
-            const def = defaultGroupForName(g.name);
-            if (def !== null) draft[i] = def;
-          }
-        });
-        this.refresh();
-      }));
-    }
-    const managedEl = containerEl.createDiv();
-    for (const cat of CATEGORY_ORDER) {
-      const inCat = managed.filter((g) => categoryForGroup(g.name) === cat);
-      if (inCat.length === 0) continue;
-      managedEl.createDiv({ cls: "config-sync-sect", text: CATEGORY_LABELS[cat] });
-      for (const group of inCat) this.renderRuleCard(managedEl, group, true);
-    }
+      .setDesc("Your own rules for anything not listed elsewhere — vault-root files, extra folders, or per-key credential protection (sanitize).");
+    const customEl = containerEl.createDiv();
+    for (const group of custom) this.renderRuleCard(customEl, group);
+    const addRule = containerEl.createEl("button", { cls: "config-sync-add-row", text: "+ Add rule" });
+    addRule.addEventListener("click", () => {
+      this.groups.push({ name: "", path: "", type: "file", devices: "all" });
+      this.expanded.add("");
+      this.refresh();
+    });
 
     const discovered = await this.host.listDiscoveredFiles(this.groups);
     if (gen !== this.renderGen) return;
@@ -1016,19 +1017,6 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       for (const group of discoveredOn) this.renderDiscoveredOnRow(discEl, group);
       for (const d of discovered) this.renderDiscoveredRow(discEl, d);
     }
-
-    new Setting(containerEl)
-      .setName("Custom rules")
-      .setHeading()
-      .setDesc("Your own rules for anything not listed elsewhere — vault-root files, extra folders, or per-key credential protection (sanitize).");
-    const customEl = containerEl.createDiv();
-    for (const group of custom) this.renderRuleCard(customEl, group, false);
-    const addRule = containerEl.createEl("button", { cls: "config-sync-add-row", text: "+ Add rule" });
-    addRule.addEventListener("click", () => {
-      this.groups.push({ name: "", path: "", type: "file", devices: "all" });
-      this.expanded.add("");
-      this.refresh();
-    });
   }
 
   private renderDiscoveredRow(listEl: HTMLElement, d: { name: string; path: string }): void {
@@ -1069,46 +1057,25 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     if (isOpen) this.renderRuleForm(listEl, group, "discovered");
   }
 
-  private renderRuleCard(listEl: HTMLElement, group: SyncGroup, managed: boolean): void {
+  private renderRuleCard(listEl: HTMLElement, group: SyncGroup): void {
     const isOpen = this.expanded.has(group.name);
     const row = listEl.createDiv({ cls: "config-sync-row" + (isOpen ? " is-open" : "") });
     row.setAttribute("data-search-anchor", `advanced-rule-${group.name}`);
     row.createSpan({ cls: "config-sync-row-chevron", text: isOpen ? "▾" : "▸" });
     row.createSpan({ cls: "config-sync-card-title", text: group.name === "" ? "(unnamed)" : this.host.displayName(group.name, group.label) });
     row.createSpan({ cls: "config-sync-row-path", text: splitLocation(group.path).rel });
-    if (managed) {
-      const expected = expectedPathForName(group.name);
-      if (expected !== null && group.path !== expected) {
-        row.createSpan({ cls: "config-sync-badge", text: "⚙ customized", attr: { title: `was ${expected}` } });
-      }
-    }
     row.createDiv({ cls: "config-sync-rule-spacer" });
-    if (managed) {
-      new ExtraButtonComponent(row)
-        .setIcon("rotate-ccw")
-        .setTooltip("Restore to the picker default")
-        .onClick(async () => {
-          const def = defaultGroupForName(group.name);
-          if (def === null) return;
-          await this.commitGroups((draft) => {
-            const idx = draft.findIndex((g) => g.name === group.name);
-            if (idx >= 0) draft[idx] = def;
-          }, group.name);
-          this.refresh();
-        });
-    } else {
-      new ExtraButtonComponent(row)
-        .setIcon("trash")
-        .setTooltip("Delete rule")
-        .onClick(async () => {
-          await this.commitGroups((draft) => {
-            const idx = draft.findIndex((g) => g.name === group.name);
-            if (idx >= 0) draft.splice(idx, 1);
-          }, group.name);
-          this.expanded.delete(group.name);
-          this.refresh();
-        });
-    }
+    new ExtraButtonComponent(row)
+      .setIcon("trash")
+      .setTooltip("Delete rule")
+      .onClick(async () => {
+        await this.commitGroups((draft) => {
+          const idx = draft.findIndex((g) => g.name === group.name);
+          if (idx >= 0) draft.splice(idx, 1);
+        }, group.name);
+        this.expanded.delete(group.name);
+        this.refresh();
+      });
     row.addEventListener("click", (e) => {
       if ((e.target as HTMLElement).closest("button, .clickable-icon, input, select") !== null) return;
       if (isOpen) this.expanded.delete(group.name);
@@ -1118,7 +1085,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     if (this.saveErrorFor === group.name) {
       listEl.createDiv({ cls: "config-sync-save-error mod-warning", text: `couldn't save this change — ${this.groupsErrorMsg}. The change was reverted.` });
     }
-    if (isOpen) this.renderRuleForm(listEl, group, managed ? "managed" : "custom");
+    if (isOpen) this.renderRuleForm(listEl, group, "custom");
   }
 
   private formField(parent: HTMLElement, label: string): HTMLElement {
@@ -1127,7 +1094,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     return f;
   }
 
-  private renderRuleForm(listEl: HTMLElement, group: SyncGroup, mode: "managed" | "custom" | "discovered"): void {
+  private renderRuleForm(listEl: HTMLElement, group: SyncGroup, mode: "custom" | "discovered"): void {
     const panel = listEl.createDiv({ cls: "config-sync-expand" });
     const field = this.formField.bind(this);
     let currentName = group.name;
