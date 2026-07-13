@@ -161,6 +161,8 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private searchScope: SearchHit["scope"] | "all" = "all";
   private bodyEl: HTMLElement | null = null;
   private expanded = new Set<string>(); // UI-transient: advanced rows expanded this session
+  private advOpen = new Set<string>(); // UI-transient: which rows have the Advanced sub-section open
+  private jsonOpen = new Set<string>(); // UI-transient: which rows have the View data.json body open
   private groupsErrorEl: HTMLElement | null = null;
   private sourcesErrorEl: HTMLElement | null = null;
   private groupsErrorMsg = "";
@@ -339,22 +341,36 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private renderItemInto(wrap: HTMLElement, item: CatalogItem): void {
     wrap.empty();
     const group = findGroupByName(this.groups, item.name);
-    if (group !== undefined) {
-      const isOpen = this.expanded.has(group.name);
-      const chevron = wrap.createSpan({ cls: "config-sync-row-chevron", text: isOpen ? "▾" : "▸" });
-      chevron.addEventListener("click", () => {
-        if (isOpen) this.expanded.delete(group.name);
-        else this.expanded.add(group.name);
-        this.renderItemInto(wrap, item);
-      });
-    }
     const row = new Setting(wrap).setName(item.label);
     row.settingEl.setAttribute("data-search-anchor", `item-${item.name}`);
+    let syncExpansion = (): void => undefined;
+    if (group !== undefined) {
+      const grp = group;
+      const chevron = createSpan({ cls: "config-sync-row-chevron" });
+      // Toggle by adding/removing the drawer in place — no header rebuild, so expand/collapse
+      // doesn't jitter the row.
+      syncExpansion = (): void => {
+        const open = this.expanded.has(grp.name);
+        setIcon(chevron, open ? "chevron-down" : "chevron-right");
+        const existing = row.settingEl.querySelector(":scope > .config-sync-item-exp");
+        if (open && existing === null) this.renderItemExpansion(row.settingEl, wrap, grp, item);
+        else if (!open && existing !== null) existing.remove();
+      };
+      chevron.addEventListener("click", () => {
+        if (this.expanded.has(grp.name)) this.expanded.delete(grp.name);
+        else this.expanded.add(grp.name);
+        syncExpansion();
+      });
+      row.settingEl.prepend(chevron); // native chevron icon, inline left of the name
+    }
     const parts: string[] = [];
     if (item.description !== null) parts.push(item.description);
     if (item.disabledReason !== null) parts.push(item.disabledReason);
     if (!item.exists && item.disabledReason === null && item.cautionReason === null) parts.push("(not present in this vault yet)");
     row.setDesc(parts.join(" "));
+    // Badge order matches the design: ⚠ keys → ⚙ customized → device-specific. The detect badge
+    // is async, so a placeholder holds its slot before the later badges are appended.
+    const detectHolder = row.nameEl.createSpan({ cls: "config-sync-detect-holder" });
     if (group !== undefined && this.isCustomized(group)) {
       row.nameEl.createSpan({ cls: "config-sync-cust", text: "⚙ customized" });
     }
@@ -405,65 +421,67 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     });
     if (item.disabledReason === null && item.exists) {
       const probe = group ?? groupForItem(item.name, item.path, item.type, null);
-      this.renderDetection(row, probe, item.name);
+      this.renderDetection(detectHolder, probe, item.name);
     }
     if (this.saveErrorFor === item.name) {
       wrap.createDiv({ cls: "config-sync-save-error mod-warning", text: `couldn't save this change — ${this.groupsErrorMsg}. The change was reverted.` });
     }
-    if (group !== undefined && this.expanded.has(group.name)) {
-      this.renderItemExpansion(wrap, group, item);
-    }
+    syncExpansion(); // renders the drawer if this row is already expanded (e.g. after a content re-render)
   }
 
   // Fields to protect / Data file / Advanced — a synced row's expansion, opened via its chevron.
-  private renderItemExpansion(wrap: HTMLElement, group: SyncGroup, item: CatalogItem): void {
-    const exp = wrap.createDiv({ cls: "config-sync-item-exp" });
+  private renderItemExpansion(parent: HTMLElement, wrap: HTMLElement, group: SyncGroup, item: CatalogItem): void {
+    const exp = parent.createDiv({ cls: "config-sync-item-exp" });
     if (group.mode === "fields") {
       exp.createDiv({ cls: "config-sync-explabel", text: "Fields to protect" });
       this.renderFieldsEditor(exp.createDiv(), group, () => this.renderItemInto(wrap, item));
     }
-    exp.createDiv({ cls: "config-sync-explabel", text: "Data file" });
     this.renderDataFileSegment(exp, group, item, wrap);
-    exp.createDiv({ cls: "config-sync-explabel", text: "Advanced" });
     this.renderAdvancedSegment(exp, group, item, wrap);
   }
 
   private renderDataFileSegment(exp: HTMLElement, group: SyncGroup, item: CatalogItem, wrap: HTMLElement): void {
-    const toggle = exp.createEl("button", { cls: "config-sync-jsontoggle", text: "View data.json ▾" });
-    const body = exp.createDiv({ cls: "config-sync-jsonbody" });
-    body.hide();
-    let loaded = false;
-    toggle.addEventListener("click", () => {
-      void (async () => {
-        if (body.isShown()) {
-          body.hide();
-          return;
-        }
-        if (!loaded) {
-          loaded = true;
-          const raw = await this.host.readItemFile(group);
-          this.renderJsonPreview(body, raw, group, item, wrap);
-        }
-        body.show();
-      })();
+    const isOpen = this.jsonOpen.has(group.name);
+    const label = exp.createDiv({ cls: "config-sync-explabel" });
+    label.appendText("Data file ");
+    const link = label.createSpan({ cls: "config-sync-link", text: isOpen ? "View data.json ▾" : "View data.json ▸" });
+    link.addEventListener("click", () => {
+      if (isOpen) this.jsonOpen.delete(group.name);
+      else this.jsonOpen.add(group.name);
+      this.renderItemInto(wrap, item);
     });
+    if (!isOpen) return;
+    const body = exp.createDiv({ cls: "config-sync-jsonbody" });
+    void (async () => {
+      const raw = await this.host.readItemFile(group);
+      this.renderJsonPreview(body, raw, group, item, wrap);
+    })();
   }
 
+  // Read-only pretty-printed JSON of the item's live file: top-level keys are colored by rule
+  // state (teal encrypt / red strip / amber detected / blue none) and clicking an un-ruled key
+  // adds it as a rule. Values are shown as-is (local file, local render).
   private renderJsonPreview(body: HTMLElement, raw: string | null, group: SyncGroup, item: CatalogItem, wrap: HTMLElement): void {
     body.empty();
     if (raw === null) {
       body.createDiv({ cls: "config-sync-json-empty", text: "no local file to preview" });
       return;
     }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      parsed = undefined;
+    }
     const detectedKeys = this.detections.get(group.name)?.keys ?? [];
-    const classes = classifyJsonKeys(raw, group.fields ?? [], detectedKeys);
+    const stateByKey = new Map<string, string>();
+    for (const kc of classifyJsonKeys(raw, group.fields ?? [], detectedKeys)) stateByKey.set(kc.key, kc.state);
     const pre = body.createEl("pre", { cls: "config-sync-json-pre" });
-    for (const kc of classes) {
-      const span = pre.createSpan({ cls: `config-sync-json-key config-sync-json-${kc.state}`, text: kc.key });
-      if (kc.state === "encrypt" || kc.state === "strip") continue;
-      span.addEventListener("click", () => {
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+      pre.setText(raw); // not a JSON object — show the file text verbatim
+    } else {
+      const addRule = (key: string): void => {
         void (async () => {
-          const key = kc.key;
           const action = SENSITIVE_ENCRYPT_RE.test(key) ? "encrypt" : "strip";
           await this.commitGroups((draft) => {
             const g = draft.find((x) => x.name === group.name);
@@ -474,27 +492,74 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
           this.expanded.add(group.name);
           this.renderItemInto(wrap, item);
         })();
-      });
-      pre.createSpan({ text: " " });
+      };
+      for (const line of JSON.stringify(parsed, null, 2).split("\n")) {
+        const m = /^(\s{2})"([^"]+)":\s?(.*)$/.exec(line); // top-level key line (exactly two-space indent)
+        const key = m?.[2];
+        if (m !== null && key !== undefined && stateByKey.has(key)) {
+          const state = stateByKey.get(key) ?? "none";
+          pre.createSpan({ text: m[1] });
+          const kspan = pre.createSpan({ cls: `config-sync-json-key config-sync-json-${state}`, text: `"${key}"` });
+          if (state === "none" || state === "detected") kspan.addEventListener("click", () => addRule(key));
+          pre.appendText(": ");
+          const rest = m[3] ?? "";
+          const comma = rest.endsWith(",");
+          const val = comma ? rest.slice(0, -1) : rest;
+          if (/^".*"$/.test(val)) pre.createSpan({ cls: "config-sync-json-val", text: val });
+          else if (/^-?\d/.test(val)) pre.createSpan({ cls: "config-sync-json-num", text: val });
+          else pre.appendText(val);
+          if (comma) pre.appendText(",");
+        } else {
+          pre.appendText(line);
+        }
+        pre.appendText("\n");
+      }
     }
+    const legend = body.createDiv({ cls: "config-sync-json-legend" });
+    legend.appendText("click a key to add a rule · ");
+    legend.createSpan({ cls: "config-sync-json-encrypt", text: "teal=encrypt" });
+    legend.appendText(" · ");
+    legend.createSpan({ cls: "config-sync-json-strip", text: "red=strip" });
+    legend.appendText(" · ");
+    legend.createSpan({ cls: "config-sync-json-detected", text: "amber=detected" });
   }
 
+  // Advanced: a default-collapsed sub-section holding the item's Location + Path override and
+  // (for managed items) a reset link.
   private renderAdvancedSegment(exp: HTMLElement, group: SyncGroup, item: CatalogItem, wrap: HTMLElement): void {
+    const isOpen = this.advOpen.has(group.name);
+    const header = exp.createDiv({ cls: "config-sync-adv-header" });
+    setIcon(header.createSpan({ cls: "config-sync-adv-chev" }), isOpen ? "chevron-down" : "chevron-right");
+    header.createSpan({ cls: "config-sync-explabel", text: "Advanced" });
+    header.addEventListener("click", () => {
+      if (isOpen) this.advOpen.delete(group.name);
+      else this.advOpen.add(group.name);
+      this.renderItemInto(wrap, item);
+    });
+    if (!isOpen) return;
     const adv = exp.createDiv({ cls: "config-sync-adv" });
-    const pathField = this.formField(adv, "Store path");
-    const pathInput = new TextComponent(pathField);
-    pathInput.setValue(group.path).onChange((v) => {
+    const loc = splitLocation(group.path);
+    new DropdownComponent(this.formField(adv, "Location"))
+      .addOption("config", "Config folder")
+      .addOption("vault", "Vault root")
+      .setValue(loc.location)
+      .onChange((v) => {
+        void this.commitGroups((draft) => {
+          const g = draft.find((x) => x.name === group.name);
+          if (g !== undefined) g.path = joinLocation(v as "config" | "vault", splitLocation(g.path).rel);
+        }, group.name);
+      });
+    new TextComponent(this.formField(adv, "Path")).setValue(loc.rel).onChange((v) => {
       void this.commitGroups((draft) => {
         const g = draft.find((x) => x.name === group.name);
-        if (g !== undefined) g.path = v.trim();
+        if (g !== undefined) g.path = joinLocation(splitLocation(g.path).location, v.trim());
       }, group.name);
     });
     const reserved = reservedNames(this.host.installedPluginIds());
     if (reserved.has(group.name)) {
-      new ExtraButtonComponent(adv)
-        .setIcon("rotate-ccw")
-        .setTooltip("Reset this item to its default rule")
-        .onClick(async () => {
+      const reset = adv.createSpan({ cls: "config-sync-link config-sync-reset-link", text: "↺ Reset this item to its default rule" });
+      reset.addEventListener("click", () => {
+        void (async () => {
           const def = defaultGroupForName(group.name);
           if (def === null) return;
           await this.commitGroups((draft) => {
@@ -502,7 +567,8 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
             if (idx >= 0) draft[idx] = def;
           }, group.name);
           this.renderItemInto(wrap, item);
-        });
+        })();
+      });
     }
   }
 
@@ -511,10 +577,10 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   // every eligible catalog item (not just synced ones) so unsynced-but-sensitive files surface
   // a warning before the user turns sync on. Cached by cacheKey (the catalog item's stable name,
   // even when group is a throwaway probe built from groupForItem).
-  private renderDetection(row: Setting, group: SyncGroup, cacheKey: string): void {
+  private renderDetection(holder: HTMLElement, group: SyncGroup, cacheKey: string): void {
     const cached = this.detections.get(cacheKey);
     if (cached !== undefined) {
-      this.applyDetection(row, cached);
+      this.applyDetection(holder, cached);
       if (cached.keys.length > 0 || cached.blob) this.settleSensitiveOrder();
       return;
     }
@@ -526,7 +592,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         return;
       }
       this.detections.set(cacheKey, scan);
-      if (row.settingEl.isConnected) this.applyDetection(row, scan);
+      if (holder.isConnected) this.applyDetection(holder, scan);
       if (scan.keys.length > 0 || scan.blob) this.settleSensitiveOrder();
     })();
   }
@@ -543,10 +609,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     this.refresh();
   }
 
-  private applyDetection(row: Setting, scan: SensitiveScan): void {
+  private applyDetection(holder: HTMLElement, scan: SensitiveScan): void {
+    holder.empty();
     if (scan.keys.length === 0 && !scan.blob) return;
     const badgeText = scan.blob ? "⚠ opaque blob" : `⚠ ${scan.keys.length} keys`;
-    const badge = row.nameEl.createSpan({ cls: "config-sync-detect-badge", text: badgeText });
+    const badge = holder.createSpan({ cls: "config-sync-detect-badge", text: badgeText });
     badge.setAttribute("aria-label", scan.blob ? "opaque encrypted blob" : `${scan.keys.length} sensitive-looking keys`);
   }
 
@@ -612,7 +679,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       const isDetected = detectedKeys.some((k) => keyMatchesAny(k, [rule.pattern]));
       const fr = panel.createDiv({ cls: "config-sync-fieldrow" });
       fr.createSpan({ cls: "config-sync-fkey", text: rule.pattern });
-      fr.createSpan({ cls: "config-sync-ftag", text: isDetected ? "detected" : "manual" });
+      fr.createSpan({ cls: `config-sync-ftag${isDetected ? " is-detected" : ""}`, text: isDetected ? "detected" : "manual" });
       fr.createDiv({ cls: "config-sync-rule-spacer" });
       const act = fr.createDiv({ cls: "config-sync-act" });
       const actions: { id: FieldRule["action"]; label: string }[] = [
@@ -969,7 +1036,8 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
 
   private renderGroupsError(containerEl: HTMLElement): void {
     this.groupsErrorEl = containerEl.createEl("p", { cls: "mod-warning" });
-    this.groupsErrorEl.setText(this.groupsErrorMsg);
+    // Row-pinned (inline) errors are shown on their card; only surface page-level errors here.
+    this.groupsErrorEl.setText(this.saveErrorFor === "" ? this.groupsErrorMsg : "");
   }
 
   private async renderAdvanced(containerEl: HTMLElement, gen: number): Promise<void> {
@@ -1215,16 +1283,19 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   }
 
   private async commitGroups(mutator: (draft: SyncGroup[]) => void, culprit?: string): Promise<boolean> {
-    const res = await commitDraft(this.groups, mutator, (g) => this.host.writeGroupsFile(g));
+    // A blank "+ Add rule" placeholder (empty name) is in-memory only — never write it, so a
+    // half-created rule can't fail validation and block every other save.
+    const res = await commitDraft(this.groups, mutator, (g) => this.host.writeGroupsFile(g.filter((x) => x.name.trim() !== "")));
     if (res.ok) {
       this.groups = res.groups;
       this.groupsErrorMsg = "";
       this.saveErrorFor = "";
     } else {
       this.groupsErrorMsg = res.error;
-      this.saveErrorFor = culprit ?? "";
+      this.saveErrorFor = culprit !== undefined && culprit !== "" ? culprit : "";
     }
-    this.groupsErrorEl?.setText(this.groupsErrorMsg);
+    // When the error is pinned to a specific row (inline), don't also show it at the page bottom.
+    this.groupsErrorEl?.setText(this.saveErrorFor === "" ? this.groupsErrorMsg : "");
     return res.ok;
   }
 

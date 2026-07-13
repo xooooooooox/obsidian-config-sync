@@ -147,10 +147,28 @@
   cursor: default;
 }
 
+/* The wrap is layout-invisible so each item renders as a native theme .setting-item — identical
+   to the General tab and Advanced custom-rule cards (the deep-black card look comes from the
+   user's theme, not a hardcoded color). The chevron sits inline in the row; the expansion wraps
+   to a full-width drawer inside the same card. */
+.config-sync-item-wrap { display: contents; }
+.config-sync-item-wrap > .setting-item { flex-wrap: wrap; }
+.config-sync-item-wrap > .setting-item > .config-sync-item-exp { flex-basis: 100%; }
 .config-sync-row-chevron {
-  color: var(--text-muted);
-  width: 1em;
+  color: var(--text-faint);
   flex: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  align-self: center;
+  margin-right: var(--size-4-1);
+}
+.config-sync-row-chevron svg { width: 16px; height: 16px; }
+/* Compact the device dropdown so it reads at the same visual weight as the mode segment/toggle. */
+.config-sync-item-wrap > .setting-item .setting-item-control select.dropdown {
+  height: auto;
+  font-size: var(--font-ui-smaller);
+  padding: 3px 20px 3px 8px;
 }
 
 .config-sync-row-path {
@@ -560,6 +578,7 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 .config-sync-fkey { font-family: var(--font-monospace); color: var(--text-normal); }
 
 .config-sync-ftag { font-size: 9.5px; color: var(--text-faint); }
+.config-sync-ftag.is-detected { color: var(--color-orange); } /* matches the JSON legend's detected color */
 
 .config-sync-act { display: inline-flex; border: 1px solid var(--background-modifier-border); border-radius: 5px; overflow: hidden; flex: none; }
 
@@ -617,7 +636,7 @@ body.is-mobile .config-sync-mainbar input[type="checkbox"]:indeterminate::after 
 /* 0.20.0 report styling */
 .config-sync-report-legend { color: var(--text-faint); font-size: var(--font-ui-smaller); margin: 2px 0 8px; }
 .config-sync-sect .config-sync-sect-count { margin-left: 6px; font-size: 10px; }
-.config-sync-pill.is-statenote { background: rgba(88, 166, 160, 0.2); color: #58a6a0; }
+.config-sync-pill.is-statenote { background: rgba(var(--color-cyan-rgb), 0.18); color: var(--color-cyan); }
 
 /* 0.20.0 inline result strip */
 .config-sync-strip { border: 1px solid rgba(125, 200, 125, 0.35); background: rgba(125, 200, 125, 0.07); border-radius: 8px; padding: 8px 12px; margin-bottom: 8px; }
@@ -635,15 +654,15 @@ body.is-mobile .config-sync-mainbar input[type="checkbox"]:indeterminate::after 
 .config-sync-section.is-outdated { border-color: rgba(214, 123, 181, 0.45); }
 .config-sync-section.is-not-installed { border-color: rgba(232, 176, 75, 0.45); }
 .config-sync-section-head { display: flex; align-items: center; gap: 7px; cursor: pointer; }
-.config-sync-section.is-outdated .config-sync-section-title { color: #d67bb5; }
-.config-sync-section.is-not-installed .config-sync-section-title { color: #e8b04b; }
+.config-sync-section.is-outdated .config-sync-section-title { color: var(--color-pink); }
+.config-sync-section.is-not-installed .config-sync-section-title { color: var(--color-orange); }
 .config-sync-section-title { font-weight: 600; }
 .config-sync-section-hint { margin-left: auto; color: var(--text-faint); font-size: var(--font-ui-smaller); }
 .config-sync-section-note { color: var(--text-faint); font-style: italic; font-size: var(--font-ui-smaller); padding: 4px 0 2px 18px; }
 .config-sync-version-line { color: var(--text-faint); font-size: var(--font-ui-smaller); padding: 2px 0; }
-.config-sync-version-line.is-amber { color: #e8b04b; }
+.config-sync-version-line.is-amber { color: var(--color-orange); }
 .config-sync-seg-label { color: var(--text-faint); font-size: 10px; margin-top: 4px; }
-.config-sync-seg-btn.is-policy.is-on { background: rgba(88, 166, 160, 0.25); color: #a8e0db; }
+.config-sync-seg-btn.is-policy.is-on { background: rgba(var(--color-cyan-rgb), 0.22); color: var(--color-cyan); }
 .config-sync-side-search { width: 100%; margin-bottom: 6px; }
 .config-sync-side-badge.is-neutral { background: var(--background-modifier-hover); color: var(--text-normal); }
 
@@ -655,16 +674,29 @@ body.is-mobile .config-sync-mainbar input[type="checkbox"]:indeterminate::after 
 .config-sync-item-exp { border-top: 1px solid var(--background-modifier-border); margin-top: var(--size-4-2); padding-top: var(--size-4-2); }
 .config-sync-explabel { color: var(--text-muted); font-size: var(--font-ui-smaller); text-transform: uppercase; letter-spacing: 0.05em; margin: var(--size-4-2) 0 var(--size-2-1); }
 .config-sync-explabel:first-child { margin-top: 0; }
-.config-sync-jsontoggle { background: none; border: 1px solid var(--background-modifier-border); border-radius: var(--radius-s); padding: 2px 10px; font-size: var(--font-ui-smaller); color: var(--text-muted); cursor: pointer; }
-.config-sync-jsonbody { margin-top: var(--size-4-1); }
+.config-sync-link { color: var(--text-accent); cursor: pointer; font-size: var(--font-ui-smaller); }
+.config-sync-jsonbody { margin-top: var(--size-2-2); }
 .config-sync-json-empty { color: var(--text-faint); font-style: italic; font-size: var(--font-ui-smaller); }
-.config-sync-json-pre { white-space: pre-wrap; font-family: var(--font-monospace); font-size: var(--font-ui-smaller); background: var(--background-secondary); border-radius: var(--radius-s); padding: var(--size-4-2); max-height: 220px; overflow-y: auto; }
-.config-sync-json-key { border-radius: var(--radius-s); padding: 0 3px; }
+.config-sync-json-pre { white-space: pre-wrap; word-break: break-all; font-family: var(--font-monospace); font-size: var(--font-ui-smaller); line-height: 1.55; background: var(--background-secondary); border: 1px solid var(--background-modifier-border); border-radius: var(--radius-s); padding: var(--size-4-2); max-height: 220px; overflow: auto; margin: 0; }
+.config-sync-json-key { border-radius: 3px; padding: 0 2px; color: var(--color-blue); }
 .config-sync-json-key.config-sync-json-none, .config-sync-json-key.config-sync-json-detected { cursor: pointer; }
 .config-sync-json-key.config-sync-json-encrypt { color: var(--color-cyan); background: rgba(var(--color-cyan-rgb), 0.15); }
 .config-sync-json-key.config-sync-json-strip { color: var(--color-red); background: rgba(var(--color-red-rgb), 0.15); }
-.config-sync-json-key.config-sync-json-detected { color: var(--color-orange); background: rgba(var(--color-orange-rgb), 0.15); }
+.config-sync-json-key.config-sync-json-detected { color: var(--color-orange); text-decoration: underline dotted; }
+.config-sync-json-val { color: var(--text-muted); }
+.config-sync-json-num { color: var(--color-green); }
+.config-sync-json-legend { color: var(--text-muted); font-size: var(--font-ui-smaller); margin-top: var(--size-2-2); }
+.config-sync-json-legend .config-sync-json-encrypt { color: var(--color-cyan); }
+.config-sync-json-legend .config-sync-json-strip { color: var(--color-red); }
+.config-sync-json-legend .config-sync-json-detected { color: var(--color-orange); }
+.config-sync-adv-header { display: flex; align-items: center; gap: var(--size-2-2); cursor: pointer; margin: var(--size-4-2) 0 var(--size-2-1); }
+.config-sync-adv-header .config-sync-explabel { margin: 0; }
+.config-sync-adv-chev { display: flex; align-items: center; color: var(--text-faint); }
+.config-sync-adv-chev svg { width: 14px; height: 14px; }
+.config-sync-adv { display: flex; flex-direction: column; align-items: flex-start; gap: var(--size-2-2); padding-left: var(--size-4-4); }
 .config-sync-adv .config-sync-form-label { margin-top: var(--size-4-1); }
+.config-sync-adv input[type="text"] { width: min(360px, 100%); }
+.config-sync-reset-link { margin-top: var(--size-2-2); }
 
 /* 0.21.0 select-all checkbox alignment */
 .config-sync-mainbar .config-sync-selectall { margin-left: auto; margin-right: var(--size-4-3); }
