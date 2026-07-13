@@ -471,3 +471,40 @@ body.is-phone .config-sync-actionbar { flex-wrap: wrap; }
 
 .config-sync-passphrase-status { color: var(--text-muted); font-size: var(--font-ui-smaller); margin-top: var(--size-2-1); }
 
+/* Touch targets — Obsidian sets body.is-mobile on phones and tablets */
+body.is-mobile .config-sync-hub-row { min-height: 44px; }
+
+body.is-mobile .config-sync-hub-row input[type="checkbox"],
+body.is-mobile .config-sync-mainbar input[type="checkbox"],
+body.is-mobile .config-sync-sect input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  padding: 8px;
+  background-clip: content-box;
+  box-sizing: content-box;
+}
+
+body.is-mobile .config-sync-fpill,
+body.is-mobile .config-sync-seg-btn,
+body.is-mobile .config-sync-side-item,
+body.is-mobile .config-sync-switcher,
+body.is-mobile .config-sync-unchanged,
+body.is-mobile .config-sync-more-files {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+}
+
+body.is-mobile .config-sync-side-item,
+body.is-mobile .config-sync-switcher,
+body.is-mobile .config-sync-unchanged {
+  display: flex;
+}
+
+body.is-mobile .config-sync-hub-row input[type="checkbox"]:checked::after,
+body.is-mobile .config-sync-mainbar input[type="checkbox"]:checked::after,
+body.is-mobile .config-sync-mainbar input[type="checkbox"]:indeterminate::after {
+  top: 4px;
+  left: 4px;
+}
+

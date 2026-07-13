@@ -15,6 +15,12 @@ export interface FileEnvelope {
 
 const PBKDF2_ITERATIONS = 210000;
 
+function requireWebCrypto(): void {
+  if (globalThis.crypto?.subtle === undefined) {
+    throw new Error("WebCrypto is unavailable in this environment — Encrypt modes cannot run on this device");
+  }
+}
+
 function toB64(buf: ArrayBuffer | Uint8Array): string {
   const bytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
   let bin = "";
@@ -35,6 +41,7 @@ interface DerivedKeys {
 }
 
 async function deriveKeys(passphrase: string, salt: Uint8Array): Promise<DerivedKeys> {
+  requireWebCrypto();
   const subtle = globalThis.crypto.subtle;
   const base = await subtle.importKey("raw", new TextEncoder().encode(passphrase), "PBKDF2", false, ["deriveBits"]);
   const bits = await subtle.deriveBits(
@@ -61,6 +68,7 @@ interface RawEnvelope {
 }
 
 async function encryptRaw(passphrase: string, plaintext: string): Promise<RawEnvelope> {
+  requireWebCrypto();
   const salt = globalThis.crypto.getRandomValues(new Uint8Array(16));
   const iv = globalThis.crypto.getRandomValues(new Uint8Array(12));
   const keys = await deriveKeys(passphrase, salt);
