@@ -475,6 +475,17 @@ export default class ConfigSyncPlugin extends Plugin {
     return listDiscovered(this.app.vault.adapter, this.app.vault.configDir, groups);
   }
 
+  async readItemFile(group: SyncGroup): Promise<string | null> {
+    const io = this.app.vault.adapter;
+    const real = groupRealPath(group.path, this.app.vault.configDir);
+    if (group.type !== "file" || !(await io.exists(real))) return null;
+    try {
+      return await io.read(real);
+    } catch {
+      return null;
+    }
+  }
+
   async detectSensitive(group: SyncGroup): Promise<SensitiveScan> {
     const io = this.app.vault.adapter;
     const real = groupRealPath(group.path, this.app.vault.configDir);

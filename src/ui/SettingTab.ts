@@ -23,6 +23,7 @@ import { confirmWarnings } from "./ConfirmModal";
 import { FolderSelectModal } from "./FolderSelectModal";
 import { commitDraft } from "./commitGroups";
 import { sortBySensitiveFirst } from "./sensitiveSort";
+import { classifyJsonKeys } from "./jsonView";
 
 export interface SettingsHost extends Plugin {
   settings: {
@@ -46,6 +47,7 @@ export interface SettingsHost extends Plugin {
   listDiscoveredFiles(groups: SyncGroup[]): Promise<{ name: string; path: string }[]>;
   installedPluginIds(): string[];
   detectSensitive(group: SyncGroup): Promise<SensitiveScan>;
+  readItemFile(group: SyncGroup): Promise<string | null>;
   passphrase(): string | null;
   setPassphrase(v: string | null): void;
   displayName(group: string, storedLabel?: string): string;
@@ -336,21 +338,31 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     this.renderItemInto(wrap, item);
   }
 
-  // Rebuilds one item's row (Setting + mode segment + fields editor) in place. Mode-segment
-  // clicks and fields-editor mutations call this on their own wrap instead of a full refresh(),
+  // Rebuilds one item's row (chevron + Setting + mode segment + expansion) in place. Mode-segment
+  // clicks and expansion mutations call this on their own wrap instead of a full refresh(),
   // so the rest of the panel (scroll position, other rows) doesn't jolt.
   private renderItemInto(wrap: HTMLElement, item: CatalogItem): void {
     wrap.empty();
     const group = findGroupByName(this.groups, item.name);
+    if (group !== undefined) {
+      const isOpen = this.expanded.has(group.name);
+      const chevron = wrap.createSpan({ cls: "config-sync-row-chevron", text: isOpen ? "▾" : "▸" });
+      chevron.addEventListener("click", () => {
+        if (isOpen) this.expanded.delete(group.name);
+        else this.expanded.add(group.name);
+        this.renderItemInto(wrap, item);
+      });
+    }
     const row = new Setting(wrap).setName(item.label);
     const parts: string[] = [];
     if (item.description !== null) parts.push(item.description);
     if (item.disabledReason !== null) parts.push(item.disabledReason);
     if (item.cautionReason !== null) parts.push(item.cautionReason);
     if (!item.exists && item.disabledReason === null && item.cautionReason === null) parts.push("(not present in this vault yet)");
-    const expected = expectedPathForName(item.name);
-    if (group !== undefined && expected !== null && group.path !== expected) parts.push("⚙ customized");
     row.setDesc(parts.join(" "));
+    if (group !== undefined && this.isCustomized(group)) {
+      row.nameEl.createSpan({ cls: "config-sync-cust", text: "⚙ customized" });
+    }
     if (group !== undefined && item.disabledReason === null) {
       row.addDropdown((d) =>
         d
@@ -391,15 +403,106 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         this.refresh();
       });
     });
-    if (group !== undefined && group.mode === "fields") {
-      this.renderFieldsEditor(wrap.createDiv(), group, () => this.renderItemInto(wrap, item));
-    }
     if (item.disabledReason === null && item.exists) {
       const probe = group ?? groupForItem(item.name, item.path, item.type, null);
       this.renderDetection(row, probe, item.name);
     }
     if (this.saveErrorFor === item.name) {
       wrap.createDiv({ cls: "config-sync-save-error mod-warning", text: `couldn't save this change — ${this.groupsErrorMsg}. The change was reverted.` });
+    }
+    if (group !== undefined && this.expanded.has(group.name)) {
+      this.renderItemExpansion(wrap, group, item);
+    }
+  }
+
+  // Fields to protect / Data file / Advanced — a synced row's expansion, opened via its chevron.
+  private renderItemExpansion(wrap: HTMLElement, group: SyncGroup, item: CatalogItem): void {
+    const exp = wrap.createDiv({ cls: "config-sync-item-exp" });
+    if (group.mode === "fields") {
+      exp.createDiv({ cls: "config-sync-explabel", text: "Fields to protect" });
+      this.renderFieldsEditor(exp.createDiv(), group, () => this.renderItemInto(wrap, item));
+    }
+    exp.createDiv({ cls: "config-sync-explabel", text: "Data file" });
+    this.renderDataFileSegment(exp, group, item, wrap);
+    exp.createDiv({ cls: "config-sync-explabel", text: "Advanced" });
+    this.renderAdvancedSegment(exp, group, item, wrap);
+  }
+
+  private renderDataFileSegment(exp: HTMLElement, group: SyncGroup, item: CatalogItem, wrap: HTMLElement): void {
+    const toggle = exp.createEl("button", { cls: "config-sync-jsontoggle", text: "View data.json ▾" });
+    const body = exp.createDiv({ cls: "config-sync-jsonbody" });
+    body.hide();
+    let loaded = false;
+    toggle.addEventListener("click", () => {
+      void (async () => {
+        if (body.isShown()) {
+          body.hide();
+          return;
+        }
+        if (!loaded) {
+          loaded = true;
+          const raw = await this.host.readItemFile(group);
+          this.renderJsonPreview(body, raw, group, item, wrap);
+        }
+        body.show();
+      })();
+    });
+  }
+
+  private renderJsonPreview(body: HTMLElement, raw: string | null, group: SyncGroup, item: CatalogItem, wrap: HTMLElement): void {
+    body.empty();
+    if (raw === null) {
+      body.createDiv({ cls: "config-sync-json-empty", text: "no local file to preview" });
+      return;
+    }
+    const detectedKeys = this.detections.get(group.name)?.keys ?? [];
+    const classes = classifyJsonKeys(raw, group.fields ?? [], detectedKeys);
+    const pre = body.createEl("pre", { cls: "config-sync-json-pre" });
+    for (const kc of classes) {
+      const span = pre.createSpan({ cls: `config-sync-json-key config-sync-json-${kc.state}`, text: kc.key });
+      if (kc.state === "encrypt" || kc.state === "strip") continue;
+      span.addEventListener("click", () => {
+        void (async () => {
+          const key = kc.key;
+          const action = SENSITIVE_ENCRYPT_RE.test(key) ? "encrypt" : "strip";
+          await this.commitGroups((draft) => {
+            const g = draft.find((x) => x.name === group.name);
+            if (g === undefined) return;
+            if ((g.mode ?? "plain") !== "fields") g.mode = "fields";
+            g.fields = [...(g.fields ?? []), { pattern: key, action }];
+          }, group.name);
+          this.expanded.add(group.name);
+          this.renderItemInto(wrap, item);
+        })();
+      });
+      pre.createSpan({ text: " " });
+    }
+  }
+
+  private renderAdvancedSegment(exp: HTMLElement, group: SyncGroup, item: CatalogItem, wrap: HTMLElement): void {
+    const adv = exp.createDiv({ cls: "config-sync-adv" });
+    const pathField = this.formField(adv, "Store path");
+    const pathInput = new TextComponent(pathField);
+    pathInput.setValue(group.path).onChange((v) => {
+      void this.commitGroups((draft) => {
+        const g = draft.find((x) => x.name === group.name);
+        if (g !== undefined) g.path = v.trim();
+      }, group.name);
+    });
+    const reserved = reservedNames(this.host.installedPluginIds());
+    if (reserved.has(group.name)) {
+      const reset = adv.createEl("button", { cls: "config-sync-reset-item", text: "↺ Reset this item to its default rule" });
+      reset.addEventListener("click", () => {
+        void (async () => {
+          const def = defaultGroupForName(group.name);
+          if (def === null) return;
+          await this.commitGroups((draft) => {
+            const idx = draft.findIndex((g) => g.name === group.name);
+            if (idx >= 0) draft[idx] = def;
+          }, group.name);
+          this.renderItemInto(wrap, item);
+        })();
+      });
     }
   }
 
@@ -447,6 +550,16 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     badge.setAttribute("aria-label", scan.blob ? "opaque encrypted blob" : `${scan.keys.length} sensitive-looking keys`);
   }
 
+  private isCustomized(group: SyncGroup): boolean {
+    const expected = expectedPathForName(group.name);
+    if (expected !== null && group.path !== expected) return true;
+    const def = defaultGroupForName(group.name);
+    if (def === null) return false;
+    return (group.mode ?? "plain") !== (def.mode ?? "plain")
+      || group.devices !== def.devices
+      || JSON.stringify(group.fields ?? []) !== JSON.stringify(def.fields ?? []);
+  }
+
   private renderModeSegment(controlEl: HTMLElement, group: SyncGroup, afterChange: () => void): void {
     const seg = controlEl.createDiv({ cls: "config-sync-seg" });
     const modes: { id: SyncMode; label: string }[] = [
@@ -484,6 +597,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
               if (g.fields === undefined && fieldsForNewMode !== undefined) g.fields = fieldsForNewMode;
             }
           }, group.name);
+          if (m.id === "fields") this.expanded.add(group.name);
           afterChange();
         })();
       });

@@ -649,3 +649,21 @@ body.is-mobile .config-sync-mainbar input[type="checkbox"]:indeterminate::after 
 
 /* 0.21.0 settings-mutation rollback: inline per-row error when a write fails */
 .config-sync-save-error { color: var(--text-error); font-size: var(--font-ui-smaller); margin-top: 4px; }
+
+/* 0.21.0 unified row expansion: fields / data.json view / advanced */
+.config-sync-cust { color: var(--text-accent); font-size: var(--font-ui-smaller); margin-left: var(--size-4-2); }
+.config-sync-item-exp { border-top: 1px solid var(--background-modifier-border); margin-top: var(--size-4-2); padding-top: var(--size-4-2); }
+.config-sync-explabel { color: var(--text-muted); font-size: var(--font-ui-smaller); text-transform: uppercase; letter-spacing: 0.05em; margin: var(--size-4-2) 0 var(--size-2-1); }
+.config-sync-explabel:first-child { margin-top: 0; }
+.config-sync-jsontoggle { background: none; border: 1px solid var(--background-modifier-border); border-radius: var(--radius-s); padding: 2px 10px; font-size: var(--font-ui-smaller); color: var(--text-muted); cursor: pointer; }
+.config-sync-jsonbody { margin-top: var(--size-4-1); }
+.config-sync-json-empty { color: var(--text-faint); font-style: italic; font-size: var(--font-ui-smaller); }
+.config-sync-json-pre { white-space: pre-wrap; font-family: var(--font-monospace); font-size: var(--font-ui-smaller); background: var(--background-secondary); border-radius: var(--radius-s); padding: var(--size-4-2); max-height: 220px; overflow-y: auto; }
+.config-sync-json-key { border-radius: var(--radius-s); padding: 0 3px; }
+.config-sync-json-key.config-sync-json-none, .config-sync-json-key.config-sync-json-detected { cursor: pointer; }
+.config-sync-json-key.config-sync-json-encrypt { color: var(--color-cyan); background: rgba(var(--color-cyan-rgb), 0.15); }
+.config-sync-json-key.config-sync-json-strip { color: var(--color-red); background: rgba(var(--color-red-rgb), 0.15); }
+.config-sync-json-key.config-sync-json-detected { color: var(--color-orange); background: rgba(var(--color-orange-rgb), 0.15); }
+.config-sync-adv .config-sync-form-label { margin-top: var(--size-4-1); }
+.config-sync-reset-item { background: none; border: none; box-shadow: none; color: var(--text-muted); cursor: pointer; font-size: var(--font-ui-smaller); padding: var(--size-4-1) 0; }
+.config-sync-reset-item:hover { color: var(--text-normal); }
