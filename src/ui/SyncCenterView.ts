@@ -473,7 +473,7 @@ export class SyncCenterView extends ItemView {
         this.refreshGlobalSelectAll(selectAll, mainRows); // resync tri-state against the new search
       });
     }
-    const selectAll = bar.createEl("input", { type: "checkbox", attr: { "aria-label": "Select all visible items" } });
+    const selectAll = bar.createEl("input", { type: "checkbox", cls: "config-sync-selectall", attr: { "aria-label": "Select all visible items" } });
 
     const listHost = main.createDiv();
     this.renderListInto(listHost, mainRows);

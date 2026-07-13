@@ -665,3 +665,6 @@ body.is-mobile .config-sync-mainbar input[type="checkbox"]:indeterminate::after 
 .config-sync-json-key.config-sync-json-strip { color: var(--color-red); background: rgba(var(--color-red-rgb), 0.15); }
 .config-sync-json-key.config-sync-json-detected { color: var(--color-orange); background: rgba(var(--color-orange-rgb), 0.15); }
 .config-sync-adv .config-sync-form-label { margin-top: var(--size-4-1); }
+
+/* 0.21.0 select-all checkbox alignment */
+.config-sync-mainbar .config-sync-selectall { margin-left: auto; margin-right: var(--size-4-3); }
