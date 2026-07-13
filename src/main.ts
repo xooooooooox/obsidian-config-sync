@@ -243,6 +243,21 @@ export default class ConfigSyncPlugin extends Plugin {
         try {
           const ctx = await this.coreContext();
           const results = await capture(ctx, names, onProgress);
+          try {
+            const groups = await readGroups(ctx);
+            let changed = false;
+            for (const g of groups) {
+              if (g.label !== undefined) continue;
+              const resolved = this.displayName(g.name, g.label);
+              if (resolved !== g.name && resolved !== g.name.replace(/^plugin-/, "")) {
+                g.label = resolved;
+                changed = true;
+              }
+            }
+            if (changed) await writeGroups(ctx, groups);
+          } catch (e) {
+            console.error("Config Sync: label backfill skipped", e);
+          }
           await this.refreshLocalStatus();
           return results;
         } catch (e) {
