@@ -71,9 +71,9 @@ function parseGroup(g: unknown, index: number): SyncGroup {
   if (typeof name !== "string" || name === "") {
     throw new ManifestValidationError(`rule #${index + 1} is missing a "name" — give it a short id, e.g. "name": "hotkeys"`);
   }
-  if (!/^[a-z0-9][a-z0-9_-]*$/.test(name)) {
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(name)) {
     throw new ManifestValidationError(
-      `rule "${name}" has an invalid name — use only lowercase letters, digits, "-" or "_", starting with a letter or digit, e.g. "my-plugin"`
+      `rule "${name}" has an invalid name — use only letters, digits, "-" or "_", starting with a letter or digit, e.g. "my-plugin"`
     );
   }
   if (typeof path !== "string" || path === "") {

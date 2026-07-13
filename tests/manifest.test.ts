@@ -168,10 +168,10 @@ describe("group name format", () => {
     }
   });
 
-  it("rejects names with spaces, uppercase or illegal symbols", () => {
-    for (const name of ["My Rule", "Graph", "a b", "weird!", "-leading"]) {
+  it("rejects names with spaces, illegal symbols, or leading punctuation", () => {
+    for (const name of ["a b", "weird!", "-leading"]) {
       const g = { name, path: "{configDir}/x.json", type: "file", devices: "all" };
-      expect(() => parseSyncManifest(manifestWith([g]))).toThrow("lowercase");
+      expect(() => parseSyncManifest(manifestWith([g]))).toThrow("has an invalid name");
     }
   });
 });
@@ -184,6 +184,18 @@ describe("parseStoreLock widened schema", () => {
   it("rejects entries with neither version key", () => {
     expect(() => parseStoreLock(JSON.stringify({ capturedAt: "x", groups: { a: {} } }))).toThrow(
       'store.lock.json group "a" must have a string sourcePluginVersion or sourceAppVersion'
+    );
+  });
+});
+
+describe("group name validation allows uppercase", () => {
+  const mk = (name: string) => JSON.stringify({ version: 1, groups: [{ name, path: "{configDir}/x.json", type: "file", devices: "all" }] });
+  it("accepts a mixed-case plugin id", () => {
+    expect(() => parseSyncManifest(mk("plugin-DEVONlink-obsidian"))).not.toThrow();
+  });
+  it("still rejects a leading punctuation name with the reworded message", () => {
+    expect(() => parseSyncManifest(mk("-bad"))).toThrow(
+      'rule "-bad" has an invalid name — use only letters, digits, "-" or "_", starting with a letter or digit, e.g. "my-plugin"'
     );
   });
 });
