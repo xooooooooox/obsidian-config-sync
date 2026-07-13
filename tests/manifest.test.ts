@@ -76,7 +76,7 @@ describe("parseSyncManifest", () => {
 
     const legacy = { name: "s", path: "{configDir}/hotkeys.json", type: "file", devices: "all", sanitize: ["*Token*"] };
     expect(() => parseSyncManifest(manifestWith([legacy]))).toThrow(
-      'rule "s" uses the old "sanitize" list, which no longer exists — replace it with "mode": "fields" and a "fields" list, e.g. "fields": [{"pattern": "*Token*", "action": "strip"}]'
+      '"s" still uses the old sanitize setting — rename it to "mode": "fields" with "fields" rules (see README → Sensitive settings).'
     );
 
     const fieldsOnDir = { name: "d", path: "{configDir}/snippets", type: "dir", devices: "all", mode: "fields", fields: [{ pattern: "*Token*", action: "strip" }] };
@@ -125,7 +125,7 @@ describe("validateRemotes", () => {
   });
   it("rejects a relative storePath", () => {
     expect(() => validateRemotes([{ name: "a", type: "vault", storePath: "vaults/kick" }])).toThrow(
-      'remote "a" needs an absolute store path — use "/path/to/store" or "~/path/to/store"'
+      'The store path for "a" needs to be a full path starting with / or ~/ — for example ~/Vaults/other-vault/config-sync.'
     );
   });
   it("rejects subdir escaping the repo", () => {

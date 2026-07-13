@@ -90,7 +90,7 @@ function parseGroup(g: unknown, index: number): SyncGroup {
   }
   if (sanitize !== undefined) {
     throw new ManifestValidationError(
-      `rule "${name}" uses the old "sanitize" list, which no longer exists — replace it with "mode": "fields" and a "fields" list, e.g. "fields": [{"pattern": "*Token*", "action": "strip"}]`
+      `"${name}" still uses the old sanitize setting — rename it to "mode": "fields" with "fields" rules (see README → Sensitive settings).`
     );
   }
   let validatedMode: SyncMode | undefined;
@@ -163,7 +163,7 @@ function parseRemote(r: unknown, index: number): Remote {
   }
   if (type === "vault") {
     if (typeof storePath !== "string" || !(storePath.startsWith("/") || storePath === "~" || storePath.startsWith("~/"))) {
-      throw new ManifestValidationError(`remote "${name}" needs an absolute store path — use "/path/to/store" or "~/path/to/store"`);
+      throw new ManifestValidationError(`The store path for "${name}" needs to be a full path starting with / or ~/ — for example ~/Vaults/other-vault/config-sync.`);
     }
     return { name, type, storePath };
   }
