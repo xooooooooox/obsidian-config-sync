@@ -122,8 +122,11 @@ deleted along with their tests.
 | updated only | `⤓ updated to {v}` |
 | updated + enabled | `⤓ updated to {v} & enabled` |
 | not-installed item applied with `none` | `staged for install` |
-| install failed | kind `warn`, `⚠ install failed` + message `couldn't download {display} from the community catalog — settings were staged; install it manually to pick them up` (or the CatalogError variant `{display} isn't in the community catalog — install it manually; settings were staged`) |
-| update failed | kind `warn`, `⚠ update failed` + message `couldn't download {display} from the community catalog — settings not applied; they were captured on a newer version` |
+| install failed | kind `warn`, `⚠ install failed` + message `couldn't download {id} from the community catalog — settings were staged; install it manually to pick them up` (or the CatalogError variant `{id} isn't in the community catalog — install it manually — settings were staged; install it manually to pick them up`) |
+| update failed | kind `warn`, `⚠ update failed` + message `couldn't download {id} from the community catalog — settings not applied; they were captured on a newer version` |
+
+(Core-level messages use the plugin id — the core layer has no display-name access; the
+strip renders them verbatim, consistent with existing core messages.)
 | enable failed | kind `warn`, `⚠ enable failed` + the bare underlying error message |
 
 Enable uses `enablePlugin` (community) or new `enableCorePlugin` (core). After an install,
