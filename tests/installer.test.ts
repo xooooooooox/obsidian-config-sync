@@ -64,6 +64,18 @@ describe("createInstaller", () => {
       "couldn't download demo from the community catalog"
     );
   });
+  it("rejects when the release manifest identifies as a different plugin id, and writes nothing to disk", async () => {
+    const io = new MemFS();
+    const { http } = fakeHttp({
+      [COMMUNITY_CATALOG_URL]: CATALOG,
+      [`${base}/manifest.json`]: JSON.stringify({ id: "demo-beta", version: "9.0.0" }),
+      [`${base}/main.js`]: "x",
+      [`${base}/styles.css`]: ".x{}",
+    });
+    await expect(createInstaller(io, ".obs", http)("demo")).rejects.toThrow(DownloadError);
+    await expect(createInstaller(io, ".obs", http)("demo")).rejects.toThrow('identifies as "demo-beta"');
+    expect(await io.exists(".obs/plugins/demo/manifest.json")).toBe(false);
+  });
   it("rejects when styles.css write fails (disk full, permissions, etc)", async () => {
     const io = new MemFS();
     const { http } = fakeHttp({

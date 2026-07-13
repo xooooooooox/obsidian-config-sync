@@ -45,9 +45,14 @@ export function createInstaller(io: FileIO, configDir: string, http: HttpGet): (
     };
     const manifestRaw = await required("manifest.json");
     const mainJs = await required("main.js");
-    const manifest = JSON.parse(manifestRaw) as { version?: string };
+    const manifest = JSON.parse(manifestRaw) as { id?: string; version?: string };
     if (typeof manifest.version !== "string") {
       throw new DownloadError(`couldn't download ${pluginId} from the community catalog`);
+    }
+    if (manifest.id !== pluginId) {
+      throw new DownloadError(
+        `${pluginId}'s latest release identifies as "${manifest.id}" — install it manually from the community browser`
+      );
     }
     const dir = `${configDir}/plugins/${pluginId}`;
     await ensureParentDir(io, `${dir}/manifest.json`);

@@ -58,6 +58,7 @@ interface CommunityPluginRegistry {
   enabledPlugins: Set<string>;
   disablePlugin(id: string): Promise<void>;
   enablePlugin(id: string): Promise<void>;
+  enablePluginAndSave(id: string): Promise<void>;
   loadManifests(): Promise<void>;
 }
 
@@ -346,6 +347,7 @@ export default class ConfigSyncPlugin extends Plugin {
       isPluginEnabled: (id) => registry.enabledPlugins.has(id),
       disablePlugin: (id) => registry.disablePlugin(id),
       enablePlugin: (id) => registry.enablePlugin(id),
+      enablePluginPersistent: (id) => registry.enablePluginAndSave(id),
       getInstalledPluginName: (id) => registry.manifests[id]?.name ?? null,
       getCorePluginName: (id) => this.internalPlugins().plugins[id]?.instance?.name ?? null,
       getAppVersion: () => apiVersion,

@@ -11,6 +11,7 @@ export interface PluginHost {
   isPluginEnabled(id: string): boolean;
   disablePlugin(id: string): Promise<void>;
   enablePlugin(id: string): Promise<void>;
+  enablePluginPersistent(id: string): Promise<void>;
   getInstalledPluginName(id: string): string | null;
   getCorePluginName(id: string): string | null;
   getAppVersion(): string;
@@ -297,8 +298,17 @@ async function runStateAction(
   }
   if (action === "enable") {
     try {
-      if (pluginId !== null) await ctx.plugins.enablePlugin(pluginId);
-      else await ctx.plugins.enableCorePlugin(group.name);
+      if (pluginId !== null) {
+        await ctx.plugins.enablePluginPersistent(pluginId);
+        if (!ctx.plugins.isPluginEnabled(pluginId)) {
+          throw new Error(`Obsidian did not enable "${pluginId}" — enable it manually in Community plugins`);
+        }
+      } else {
+        await ctx.plugins.enableCorePlugin(group.name);
+        if (!ctx.plugins.isCorePluginEnabled(group.name)) {
+          throw new Error(`Obsidian did not enable "${group.name}" — enable it in Options → Core plugins`);
+        }
+      }
       return { note: { kind: "ok", text: "⏻ enabled" }, messages: [], skipConfig: false };
     } catch (e) {
       return { note: { kind: "warn", text: "⚠ enable failed" }, messages: [(e as Error).message], skipConfig: false };
@@ -314,23 +324,11 @@ async function runStateAction(
   const isUpdate = action === "update" || action === "update-enable";
   const wantsEnable = action === "update-enable" || action === "install-enable";
   const wasEnabled = ctx.plugins.isPluginEnabled(pluginId);
+  let version: string;
   try {
     if (isUpdate && wasEnabled) await ctx.plugins.disablePlugin(pluginId);
-    const version = await installPlugin(pluginId);
+    version = await installPlugin(pluginId);
     await ctx.plugins.reloadPluginManifests();
-    let enabled = false;
-    if (wantsEnable || (isUpdate && wasEnabled)) {
-      await ctx.plugins.enablePlugin(pluginId);
-      enabled = true;
-    }
-    const text = isUpdate
-      ? enabled
-        ? `⤓ updated to ${version} & enabled`
-        : `⤓ updated to ${version}`
-      : enabled
-        ? `⤓ installed & enabled ${version}`
-        : `⤓ installed ${version}`;
-    return { note: { kind: "ok", text }, messages: [], skipConfig: false };
   } catch (e) {
     const messages = [(e as Error).message];
     if (isUpdate) {
@@ -353,6 +351,34 @@ async function runStateAction(
       skipConfig: false,
     };
   }
+  // Install/update itself succeeded (files written, manifests reloaded) — from here on, any
+  // enable failure is reported as an enable failure, not an install/update failure, since the
+  // config write must still proceed.
+  let enabled = false;
+  if (wantsEnable || (isUpdate && wasEnabled)) {
+    try {
+      await ctx.plugins.enablePluginPersistent(pluginId);
+      if (!ctx.plugins.isPluginEnabled(pluginId)) {
+        throw new Error(`Obsidian did not enable "${pluginId}" — enable it manually in Community plugins`);
+      }
+      enabled = true;
+    } catch (e) {
+      const verb = isUpdate ? "updated" : "installed";
+      return {
+        note: { kind: "warn", text: "⚠ enable failed" },
+        messages: [`${verb} ${version}, but: ${(e as Error).message}`],
+        skipConfig: false,
+      };
+    }
+  }
+  const text = isUpdate
+    ? enabled
+      ? `⤓ updated to ${version} & enabled`
+      : `⤓ updated to ${version}`
+    : enabled
+      ? `⤓ installed & enabled ${version}`
+      : `⤓ installed ${version}`;
+  return { note: { kind: "ok", text }, messages: [], skipConfig: false };
 }
 
 export async function applyWithActions(

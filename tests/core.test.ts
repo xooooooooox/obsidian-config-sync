@@ -379,6 +379,7 @@ describe("applyWithActions", () => {
     const results = await applyWithActions(ctx, [{ name: "plugin-demo", action: "enable" }], async () => "9.9.9");
     expect(results[0]?.stateNote).toEqual({ kind: "ok", text: "⏻ enabled" });
     expect(plugins.enabled.has("demo")).toBe(true);
+    expect(plugins.log).toContain("enable-persist:demo");
     expect(await io.exists(".obs/plugins/demo/data.json")).toBe(true);
   });
   it("install-enable installs, reloads manifests, enables, writes config", async () => {
@@ -390,6 +391,7 @@ describe("applyWithActions", () => {
     });
     expect(results[0]?.stateNote).toEqual({ kind: "ok", text: "⤓ installed & enabled 2.5.0" });
     expect(plugins.log).toContain("reload-manifests");
+    expect(plugins.log).toContain("enable-persist:demo");
     expect(plugins.enabled.has("demo")).toBe(true);
   });
   it("update failure skips the config write and warns; install failure still writes", async () => {
@@ -418,6 +420,44 @@ describe("applyWithActions", () => {
     seedStore(io);
     const results = await applyWithActions(ctx, [{ name: "plugin-demo", action: "none" }], async () => "x");
     expect(results[0]?.stateNote).toEqual({ kind: "ok", text: "staged for install" });
+  });
+
+  describe("enable verification (Obsidian's enable resolves without throwing on a no-op)", () => {
+    class NoOpEnablePlugins extends FakePlugins {
+      async enablePluginPersistent(id: string): Promise<void> {
+        this.log.push(`enable-persist:${id}`); // does NOT add to `enabled` — simulates an unregistered id
+      }
+    }
+
+    it('action "enable" reports ⚠ enable failed with the exact message when Obsidian silently no-ops, but still writes config', async () => {
+      const io = new MemFS();
+      const plugins = new NoOpEnablePlugins();
+      const ctx: CoreContext = { io, configDir: ".obs", rootPath: "cs", plugins, passphrase: null, now: () => "2026-07-08T00:00:00.000Z" };
+      plugins.installed.set("demo", "1.2.3");
+      seedStore(io);
+      const results = await applyWithActions(ctx, [{ name: "plugin-demo", action: "enable" }], async () => "9.9.9");
+      expect(results[0]?.stateNote).toEqual({ kind: "warn", text: "⚠ enable failed" });
+      expect(results[0]?.messages).toEqual([`Obsidian did not enable "demo" — enable it manually in Community plugins`]);
+      expect(plugins.enabled.has("demo")).toBe(false);
+      expect(await io.exists(".obs/plugins/demo/data.json")).toBe(true); // config still written
+    });
+
+    it('action "install-enable" with a successful install but a silently no-op enable reports ⚠ enable failed (not install failed) and still writes config', async () => {
+      const io = new MemFS();
+      const plugins = new NoOpEnablePlugins();
+      const ctx: CoreContext = { io, configDir: ".obs", rootPath: "cs", plugins, passphrase: null, now: () => "2026-07-08T00:00:00.000Z" };
+      seedStore(io);
+      const results = await applyWithActions(ctx, [{ name: "plugin-demo", action: "install-enable" }], async (id) => {
+        plugins.installed.set(id, "2.5.0");
+        return "2.5.0";
+      });
+      expect(results[0]?.stateNote).toEqual({ kind: "warn", text: "⚠ enable failed" });
+      expect(results[0]?.messages).toEqual([
+        `installed 2.5.0, but: Obsidian did not enable "demo" — enable it manually in Community plugins`,
+      ]);
+      expect(plugins.enabled.has("demo")).toBe(false);
+      expect(await io.exists(".obs/plugins/demo/data.json")).toBe(true); // config still written — install succeeded
+    });
   });
 });
 

@@ -110,6 +110,10 @@ export class FakePlugins {
     this.enabled.add(id);
     this.log.push(`enable:${id}`);
   }
+  async enablePluginPersistent(id: string): Promise<void> {
+    this.enabled.add(id);
+    this.log.push(`enable-persist:${id}`);
+  }
   getInstalledPluginName(id: string): string | null {
     return this.installedNames.get(id) ?? null;
   }
