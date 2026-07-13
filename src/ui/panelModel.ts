@@ -123,6 +123,12 @@ export function defaultPolicy(a: Availability): StateAction {
   return policyOptions(a)[0]?.action ?? "none";
 }
 
+// A stored policy is only valid for the ladder of the item's *current* availability —
+// e.g. "update-enable" belongs to a disabled+behind ladder, not the outdated-only ladder.
+export function isValidPolicy(a: Availability, action: StateAction): boolean {
+  return policyOptions(a).some((o) => o.action === action);
+}
+
 export function versionLine(a: Availability): { text: string; tone: "gray" | "amber" } | null {
   if (a.drift === null || a.localVersion === null || a.storeVersion === null) return null;
   if (a.anchor === "app") {

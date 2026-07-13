@@ -10,6 +10,7 @@ import {
   defaultPolicy,
   footerSummary,
   insyncLineText,
+  isValidPolicy,
   matchesSearch,
   moreFilesText,
   nosettingsLineText,
@@ -169,6 +170,10 @@ export class SyncCenterView extends ItemView {
     for (const n of [...this.directionOverride.keys()]) if (!names.has(n)) this.directionOverride.delete(n);
     for (const n of [...this.expandedItems]) if (!names.has(n)) this.expandedItems.delete(n);
     for (const n of [...this.policy.keys()]) if (!names.has(n)) this.policy.delete(n);
+    // A row's availability may have changed since the last load (e.g. externally enabled),
+    // moving it to a different section with a different policy ladder. Drop any stored policy
+    // that no longer belongs to the current ladder so applyPayload() can't send a stale action.
+    for (const [n, action] of [...this.policy]) if (!isValidPolicy(this.availOf(n), action)) this.policy.delete(n);
     // Default pre-check seeds once per view lifetime, never on later refreshes.
     if (this.firstLoad) {
       this.firstLoad = false;
@@ -754,10 +759,13 @@ export class SyncCenterView extends ItemView {
   private applyPayload(): ApplyItem[] {
     return this.rows()
       .filter((r) => this.selected.has(r.group.name) && this.effDir(r) === "apply")
-      .map((r) => ({
-        name: r.group.name,
-        action: this.sectionOf(r.group.name) === "main" ? "none" : (this.policy.get(r.group.name) ?? defaultPolicy(this.availOf(r.group.name))),
-      }));
+      .map((r) => {
+        if (this.sectionOf(r.group.name) === "main") return { name: r.group.name, action: "none" as const };
+        const a = this.availOf(r.group.name);
+        const stored = this.policy.get(r.group.name);
+        const action = stored !== undefined && isValidPolicy(a, stored) ? stored : defaultPolicy(a);
+        return { name: r.group.name, action };
+      });
   }
 
   private renderActionBar(macro: HTMLElement): void {

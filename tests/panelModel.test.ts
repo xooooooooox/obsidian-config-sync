@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { capFileEntries, insyncLineText, moreFilesText, visibleUnderFilter, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, footerSummary, policyOptions, sectionForItem, versionLine } from "../src/ui/panelModel";
+import { capFileEntries, insyncLineText, moreFilesText, visibleUnderFilter, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, footerSummary, isValidPolicy, policyOptions, sectionForItem, versionLine } from "../src/ui/panelModel";
 import { GroupState } from "../src/core/status";
 import { Availability } from "../src/core/availability";
 
@@ -141,6 +141,17 @@ describe("policyOptions ladder", () => {
     expect(policyOptions(avail({}))).toEqual([]);
     expect(defaultPolicy(avail({ kind: "not-installed" }))).toBe("install-enable");
     expect(defaultPolicy(avail({}))).toBe("none");
+  });
+});
+
+describe("isValidPolicy", () => {
+  it("accepts an action only when it belongs to the current ladder", () => {
+    // "update-enable" is valid for disabled+behind, but a row moved to outdated-only
+    // (still enabled elsewhere, plugin still behind) has a shorter ladder that lacks it.
+    expect(isValidPolicy(avail({ kind: "disabled", drift: "behind" }), "update-enable")).toBe(true);
+    expect(isValidPolicy(avail({ drift: "behind", storeVersion: "2.0.0" }), "update-enable")).toBe(false);
+    expect(isValidPolicy(avail({ drift: "behind", storeVersion: "2.0.0" }), "update")).toBe(true);
+    expect(isValidPolicy(avail({}), "none")).toBe(false); // main ladder has no options at all
   });
 });
 
