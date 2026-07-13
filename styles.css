@@ -619,3 +619,13 @@ body.is-mobile .config-sync-mainbar input[type="checkbox"]:indeterminate::after 
 .config-sync-sect .config-sync-sect-count { margin-left: 6px; font-size: 10px; }
 .config-sync-pill.is-statenote { background: rgba(88, 166, 160, 0.2); color: #58a6a0; }
 
+/* 0.20.0 inline result strip */
+.config-sync-strip { border: 1px solid rgba(125, 200, 125, 0.35); background: rgba(125, 200, 125, 0.07); border-radius: 8px; padding: 8px 12px; margin-bottom: 8px; }
+.config-sync-strip.is-transfer { border-color: rgba(91, 200, 214, 0.4); background: rgba(91, 200, 214, 0.07); }
+.config-sync-strip-head { display: flex; align-items: center; gap: 8px; }
+.config-sync-strip-check { color: var(--color-green); }
+.config-sync-strip-title { font-weight: 600; }
+.config-sync-strip-toggle { color: var(--interactive-accent); cursor: pointer; font-size: var(--font-ui-smaller); }
+.config-sync-strip-close { margin-left: auto; color: var(--text-faint); cursor: pointer; }
+.config-sync-strip-body { margin-top: 6px; }
+

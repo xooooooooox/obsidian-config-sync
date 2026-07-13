@@ -2,7 +2,7 @@ import { ButtonComponent, ExtraButtonComponent, ItemView, WorkspaceLeaf } from "
 import { ProgressFn } from "../core/ConfigSyncCore";
 import { bucketCounts, GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry } from "../core/status";
 import { CATEGORY_LABELS, ItemCategory, categoryForGroup } from "../core/catalog";
-import { FileChanges, Remote, SyncGroup, hasChanges } from "../core/types";
+import { FileChanges, GroupResult, Remote, SyncGroup, hasChanges } from "../core/types";
 import {
   capFileEntries,
   CappedEntry,
@@ -15,6 +15,7 @@ import {
   Direction,
   effectiveDirection,
 } from "./panelModel";
+import { renderReportContent, renderReportPills } from "./reportContent";
 
 const CATEGORY_ORDER: ItemCategory[] = ["obsidian", "core", "community", "custom"];
 
@@ -28,14 +29,15 @@ export interface SyncCenterHost {
   computeStatuses(): Promise<{ groups: SyncGroup[]; statuses: GroupStatus[] }>;
   resolvedPath(group: SyncGroup): string;
   displayName(group: string): string;
-  captureItems(names: string[], onProgress?: ProgressFn): Promise<void>; // runs selective capture + shows its report
-  applyItems(names: string[], onProgress?: ProgressFn): Promise<void>; // apply + report
+  captureItems(names: string[], onProgress?: ProgressFn): Promise<GroupResult[] | null>;
+  applyItems(names: string[], onProgress?: ProgressFn): Promise<GroupResult[] | null>;
+  reloadApp(): void;
   remotes(): Remote[]; // [] on mobile
   remoteCheck(name: string): { check: RemoteCheck; at: number } | undefined;
   refreshRemoteChecks(): Promise<void>;
   deepDiff(remote: Remote): Promise<RemoteDiffEntry[]>;
-  pullFrom(remote: Remote): Promise<void>;
-  pushTo(remote: Remote): Promise<void>;
+  pullFrom(remote: Remote): Promise<GroupResult[] | null>;
+  pushTo(remote: Remote): Promise<GroupResult[] | null>;
 }
 
 function relativeAge(ms: number): string {
@@ -77,6 +79,7 @@ export class SyncCenterView extends ItemView {
   private compact = false;
   private switcherOpen = false;
   private running = false;
+  private lastRun: { title: string; tone: "local" | "transfer"; results: GroupResult[]; expanded: boolean } | null = null;
 
   constructor(leaf: WorkspaceLeaf, private host: SyncCenterHost) {
     super(leaf);
@@ -321,6 +324,36 @@ export class SyncCenterView extends ItemView {
     });
   }
 
+  private setLastRun(title: string, tone: "local" | "transfer", results: GroupResult[] | null): void {
+    if (results !== null) this.lastRun = { title, tone, results, expanded: false };
+  }
+
+  private renderResultStrip(main: HTMLElement): void {
+    const run = this.lastRun;
+    if (run === null) return;
+    const strip = main.createDiv({ cls: `config-sync-strip${run.tone === "transfer" ? " is-transfer" : ""}` });
+    const head = strip.createDiv({ cls: "config-sync-strip-head" });
+    head.createSpan({ cls: "config-sync-strip-check", text: "✓" });
+    head.createSpan({ cls: "config-sync-strip-title", text: run.title });
+    renderReportPills(head, run.results);
+    const toggle = head.createSpan({ cls: "config-sync-strip-toggle", text: run.expanded ? "details ▾" : "details ▸" });
+    toggle.addEventListener("click", () => {
+      run.expanded = !run.expanded;
+      this.render(this.renderGen);
+    });
+    const close = head.createSpan({ cls: "config-sync-strip-close", text: "✕" });
+    close.addEventListener("click", () => {
+      this.lastRun = null;
+      this.render(this.renderGen);
+    });
+    if (run.expanded) {
+      renderReportContent(strip.createDiv({ cls: "config-sync-strip-body" }), run.results, {
+        labelFor: (g) => this.host.displayName(g),
+        onReload: () => this.host.reloadApp(),
+      });
+    }
+  }
+
   private scopeKey(): string {
     return this.panelScope.kind === "device" ? this.panelScope.cat : `remote:${this.panelScope.name}`;
   }
@@ -332,6 +365,7 @@ export class SyncCenterView extends ItemView {
   }
 
   private renderItemMode(main: HTMLElement): void {
+    this.renderResultStrip(main);
     const scoped = this.scopedRows();
     const counts = bucketCounts(scoped.map((r) => r.status));
 
@@ -610,7 +644,7 @@ export class SyncCenterView extends ItemView {
       other: ButtonComponent,
       verb: "Capturing" | "Applying",
       names: string[],
-      exec: (names: string[], onProgress: ProgressFn) => Promise<void>
+      exec: (names: string[], onProgress: ProgressFn) => Promise<GroupResult[] | null>
     ): void => {
       this.running = true;
       btn.setDisabled(true);
@@ -622,11 +656,12 @@ export class SyncCenterView extends ItemView {
       btn.buttonEl.addClass("is-busy");
       void (async () => {
         try {
-          await exec(names, (done, total, current) => {
+          const results = await exec(names, (done, total, current) => {
             btn.setButtonText(`${verb} ${done}/${total}…`);
             btn.buttonEl.setAttribute("aria-label", current);
             if (fill !== null) fill.style.width = `${total === 0 ? 0 : Math.round((done / total) * 100)}%`;
           });
+          this.setLastRun(verb === "Capturing" ? "Captured" : "Applied", "local", results);
         } finally {
           this.running = false;
         }
@@ -658,6 +693,7 @@ export class SyncCenterView extends ItemView {
   }
 
   private renderRemoteMode(main: HTMLElement, remote: Remote): void {
+    this.renderResultStrip(main);
     const check = this.host.remoteCheck(remote.name)?.check;
     const icon = this.remoteIcon(check);
     main.createDiv({
@@ -755,7 +791,7 @@ export class SyncCenterView extends ItemView {
       pull.buttonEl.setAttribute("aria-label", "Pull would overwrite your newer local store");
     }
     pull.onClick(async () => {
-      await this.host.pullFrom(remote);
+      this.setLastRun(`Pulled from ${remote.name}`, "transfer", await this.host.pullFrom(remote));
       await this.reload();
     });
 
@@ -769,7 +805,7 @@ export class SyncCenterView extends ItemView {
       push.buttonEl.setAttribute("aria-label", "Push would overwrite the newer remote");
     }
     push.onClick(async () => {
-      await this.host.pushTo(remote);
+      this.setLastRun(`Pushed to ${remote.name}`, "transfer", await this.host.pushTo(remote));
       await this.reload();
     });
   }

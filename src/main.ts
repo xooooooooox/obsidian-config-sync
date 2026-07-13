@@ -231,10 +231,11 @@ export default class ConfigSyncPlugin extends Plugin {
         try {
           const ctx = await this.coreContext();
           const results = await capture(ctx, names, onProgress);
-          new ReportModal(this.app, "Captured", results, new Date().toLocaleString(), (g) => this.displayName(g)).open();
           await this.refreshLocalStatus();
+          return results;
         } catch (e) {
           new Notice(`Config Sync capture failed: ${(e as Error).message}`, 10000);
+          return null;
         }
       },
       applyItems: async (names: string[], onProgress?: ProgressFn) => {
@@ -242,12 +243,14 @@ export default class ConfigSyncPlugin extends Plugin {
           const ctx = await this.coreContext();
           const items: ApplyItem[] = names.map((name) => ({ name, action: "none" as const }));
           const results = await applyWithActions(ctx, items, this.installPlugin(), onProgress);
-          new ReportModal(this.app, "Applied", results, new Date().toLocaleString(), (g) => this.displayName(g)).open();
           await this.refreshLocalStatus();
+          return results;
         } catch (e) {
           new Notice(`Config Sync apply failed: ${(e as Error).message}`, 10000);
+          return null;
         }
       },
+      reloadApp: () => (this.app as unknown as { commands: { executeCommandById(id: string): void } }).commands.executeCommandById("app:reload"),
       remotes: () => (Platform.isDesktop ? this.settings.remotes : []),
       remoteCheck: (name) => this.remoteChecks.get(name),
       refreshRemoteChecks: () => this.refreshRemoteChecks(),
@@ -259,21 +262,23 @@ export default class ConfigSyncPlugin extends Plugin {
         try {
           const ctx = await this.coreContext();
           const results = await importExternal(ctx, await this.createReader(remote));
-          new ReportModal(this.app, `Pulled from ${remote.name}`, results, undefined, (g) => this.displayName(g)).open();
           await this.refreshLocalStatus();
           await this.refreshRemoteChecks();
+          return results;
         } catch (e) {
           new Notice(`Config Sync pull failed: ${(e as Error).message}`, 10000);
+          return null;
         }
       },
       pushTo: async (remote) => {
         try {
           const ctx = await this.coreContext();
           const results = await pushExternal(ctx, await this.createWriter(remote));
-          new ReportModal(this.app, `Pushed to ${remote.name}`, results, undefined, (g) => this.displayName(g)).open();
           await this.refreshRemoteChecks();
+          return results;
         } catch (e) {
           new Notice(`Config Sync push failed: ${(e as Error).message}`, 10000);
+          return null;
         }
       },
     };
