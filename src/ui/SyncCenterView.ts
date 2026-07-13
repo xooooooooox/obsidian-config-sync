@@ -371,7 +371,7 @@ export class SyncCenterView extends ItemView {
   }
 
   private visibleRows(scoped: StatusRow[]): StatusRow[] {
-    return scoped.filter((r) => visibleUnderFilter(r.status.state, this.filter) && matchesSearch(r.group.name, this.search));
+    return scoped.filter((r) => visibleUnderFilter(r.status.state, this.filter) && matchesSearch(`${this.host.displayName(r.group.name)} ${r.group.name}`, this.search));
   }
 
   private renderListInto(listHost: HTMLElement, scoped: StatusRow[]): void {
