@@ -255,8 +255,16 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   }
 
   private renderChecklistRow(listEl: HTMLElement, item: CatalogItem): void {
+    const wrap = listEl.createDiv({ cls: "config-sync-item-wrap" });
+    this.renderItemInto(wrap, item);
+  }
+
+  // Rebuilds one item's row (Setting + mode segment + fields editor) in place. Mode-segment
+  // clicks and fields-editor mutations call this on their own wrap instead of a full refresh(),
+  // so the rest of the panel (scroll position, other rows) doesn't jolt.
+  private renderItemInto(wrap: HTMLElement, item: CatalogItem): void {
+    wrap.empty();
     const group = findGroupByName(this.groups, item.name);
-    const wrap = listEl.createDiv();
     const row = new Setting(wrap).setName(item.label);
     const parts: string[] = [];
     if (item.description !== null) parts.push(item.description);
@@ -281,7 +289,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       );
     }
     if (group !== undefined && item.disabledReason === null) {
-      this.renderModeSegment(row.controlEl, group);
+      this.renderModeSegment(row.controlEl, group, () => this.renderItemInto(wrap, item));
     }
     row.addToggle((t) => {
       t.setValue(group !== undefined);
@@ -305,7 +313,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       });
     });
     if (group !== undefined && group.mode === "fields") {
-      this.renderFieldsEditor(wrap.createDiv(), group);
+      this.renderFieldsEditor(wrap.createDiv(), group, () => this.renderItemInto(wrap, item));
     }
     if (group !== undefined) this.renderDetection(row, group);
   }
@@ -340,7 +348,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     }
   }
 
-  private renderModeSegment(controlEl: HTMLElement, group: SyncGroup): void {
+  private renderModeSegment(controlEl: HTMLElement, group: SyncGroup, afterChange: () => void): void {
     const seg = controlEl.createDiv({ cls: "config-sync-seg" });
     const modes: { id: SyncMode; label: string }[] = [
       { id: "plain", label: "Plain" },
@@ -372,13 +380,13 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
             }
           }
           await this.saveGroups();
-          this.refresh();
+          afterChange();
         })();
       });
     }
   }
 
-  private renderFieldsEditor(hostEl: HTMLElement, group: SyncGroup): void {
+  private renderFieldsEditor(hostEl: HTMLElement, group: SyncGroup, afterChange: () => void): void {
     const panel = hostEl.createDiv({ cls: "config-sync-fields-editor" });
     const detectedKeys = this.detections.get(group.name)?.keys ?? [];
     const rules = group.fields ?? [];
@@ -403,7 +411,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
           void (async () => {
             rule.action = a.id;
             await this.saveGroups();
-            this.refresh();
+            afterChange();
           })();
         });
       }
@@ -412,7 +420,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
           group.fields = rules.filter((r) => r !== rule);
           if (group.fields.length === 0) delete group.fields;
           await this.saveGroups();
-          this.refresh();
+          afterChange();
         })();
       });
     }
@@ -426,7 +434,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         const next = [...rules, { pattern, action: "strip" as const }];
         group.fields = next;
         await this.saveGroups();
-        this.refresh();
+        afterChange();
       })();
     });
   }
@@ -791,7 +799,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         await this.saveGroups();
         this.refresh();
       });
-    this.renderModeSegment(field(line2, "Mode"), group);
+    this.renderModeSegment(field(line2, "Mode"), group, () => this.refresh());
     const descC = new TextComponent(field(line2, "Description"));
     descC.setPlaceholder("optional").setValue(group.description ?? "").onChange((v) => {
       const d = v.trim();
@@ -800,7 +808,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       void this.saveGroups();
     });
     if (group.mode === "fields") {
-      this.renderFieldsEditor(panel.createDiv(), group);
+      this.renderFieldsEditor(panel.createDiv(), group, () => this.refresh());
     }
     this.renderDetectionNote(panel, group);
   }

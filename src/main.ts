@@ -4,6 +4,7 @@ import {
   ExternalStoreReader,
   ExternalStoreWriter,
   PluginHost,
+  ProgressFn,
   apply,
   capture,
   checkApply,
@@ -222,17 +223,17 @@ export default class ConfigSyncPlugin extends Plugin {
         return { groups, statuses };
       },
       resolvedPath: (g) => g.path.replace("{configDir}", this.app.vault.configDir),
-      captureItems: async (names) => {
+      captureItems: async (names: string[], onProgress?: ProgressFn) => {
         try {
           const ctx = await this.coreContext();
-          const results = await capture(ctx, names);
+          const results = await capture(ctx, names, onProgress);
           new ReportModal(this.app, "Captured", results, new Date().toLocaleString()).open();
           await this.refreshLocalStatus();
         } catch (e) {
           new Notice(`Config Sync capture failed: ${(e as Error).message}`, 10000);
         }
       },
-      applyItems: async (names) => {
+      applyItems: async (names: string[], onProgress?: ProgressFn) => {
         try {
           const ctx = await this.coreContext();
           const warnings = await checkApply(ctx, names);
@@ -240,7 +241,7 @@ export default class ConfigSyncPlugin extends Plugin {
             const ok = await confirmWarnings(this.app, "Config Sync: version warnings", warnings.map((w) => `${w.group}: ${w.message}`));
             if (!ok) return;
           }
-          const results = await apply(ctx, names);
+          const results = await apply(ctx, names, onProgress);
           new ReportModal(this.app, "Applied", results, new Date().toLocaleString()).open();
           await this.refreshLocalStatus();
         } catch (e) {
