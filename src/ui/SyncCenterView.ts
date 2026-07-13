@@ -263,10 +263,11 @@ export class SyncCenterView extends ItemView {
       const item = container.createDiv({ cls: `config-sync-side-item${active ? " is-active" : ""}` });
       item.createSpan({ cls: "config-sync-side-name", text: label });
       if (this.searching()) {
-        const hits = statuses.filter((s) => {
-          const g = this.groups.find((x) => x.name === s.group);
-          return g !== undefined && matchesSearch(`${this.host.displayName(g.name)} ${g.name}`, this.search);
-        }).length;
+        // Hit counts must span the entry's full scope — every section (outdated/disabled/
+        // not-installed included), not just mainRows() — so a match hiding in e.g. "Not
+        // installed" still counts here. Bucket badges below stay main-section-only.
+        const scopeRows = cat === "all" ? this.rows() : this.rows().filter((r) => categoryForGroup(r.group.name) === cat);
+        const hits = scopeRows.filter((r) => matchesSearch(`${this.host.displayName(r.group.name)} ${r.group.name}`, this.search)).length;
         item.createSpan({ cls: "config-sync-side-badge is-neutral", text: `${hits}` });
       } else {
         const c = bucketCounts(statuses);
