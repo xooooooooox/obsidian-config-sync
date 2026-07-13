@@ -991,20 +991,24 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private renderRuleForm(listEl: HTMLElement, group: SyncGroup, mode: "managed" | "custom" | "discovered"): void {
     const panel = listEl.createDiv({ cls: "config-sync-expand" });
     const field = this.formField.bind(this);
+    let currentName = group.name;
 
     if (mode !== "discovered") {
       const line1 = panel.createDiv({ cls: "config-sync-form-line1" + (mode === "custom" ? " has-name" : "") });
       if (mode === "custom") {
         const nameC = new TextComponent(field(line1, "Name"));
-        nameC.setPlaceholder("name (a-z, 0-9, -, _)").setValue(group.name).onChange((v) => {
-          const prevName = group.name;
+        nameC.setPlaceholder("name (a-z, 0-9, -, _)").setValue(group.name).onChange(async (v) => {
           const newName = v.trim();
-          this.expanded.delete(prevName);
-          this.expanded.add(newName);
-          void this.commitGroups((draft) => {
-            const g = draft.find((x) => x.name === prevName);
+          const from = currentName;
+          const ok = await this.commitGroups((draft) => {
+            const g = draft.find((x) => x.name === from);
             if (g !== undefined) g.name = newName;
-          }, prevName);
+          }, from);
+          if (ok) {
+            this.expanded.delete(from);
+            this.expanded.add(newName);
+            currentName = newName;
+          }
         });
         nameC.inputEl.addClass("config-sync-rule-name-input");
       }
@@ -1015,16 +1019,16 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         .setValue(loc.location)
         .onChange((v) => {
           void this.commitGroups((draft) => {
-            const g = draft.find((x) => x.name === group.name);
+            const g = draft.find((x) => x.name === currentName);
             if (g !== undefined) g.path = joinLocation(v as "config" | "vault", splitLocation(g.path).rel);
-          }, group.name);
+          }, currentName);
         });
       const pathC = new TextComponent(field(line1, "Path"));
       pathC.setPlaceholder("relative path").setValue(loc.rel).onChange((v) => {
         void this.commitGroups((draft) => {
-          const g = draft.find((x) => x.name === group.name);
+          const g = draft.find((x) => x.name === currentName);
           if (g !== undefined) g.path = joinLocation(splitLocation(g.path).location, v.trim());
-        }, group.name);
+        }, currentName);
       });
     }
 
@@ -1062,11 +1066,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     descC.setPlaceholder("optional").setValue(group.description ?? "").onChange((v) => {
       const d = v.trim();
       void this.commitGroups((draft) => {
-        const g = draft.find((x) => x.name === group.name);
+        const g = draft.find((x) => x.name === currentName);
         if (g === undefined) return;
         if (d !== "") g.description = d;
         else delete g.description;
-      }, group.name);
+      }, currentName);
     });
     if (group.mode === "fields") {
       this.renderFieldsEditor(panel.createDiv(), group, () => this.refresh());
