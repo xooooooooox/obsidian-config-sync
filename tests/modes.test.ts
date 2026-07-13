@@ -18,6 +18,11 @@ describe("scanSensitive", () => {
   it("non-JSON content scans clean", () => {
     expect(scanSensitive("body { color: red }")).toEqual({ keys: [], blob: false });
   });
+
+  it("auth does not match author*, still matches real auth keys", () => {
+    const s = scanSensitive(JSON.stringify({ author: "x", authorUrl: "y", authors: ["a"], oauth: "t", authToken: "z", auth_key: "k" }));
+    expect(s.keys.sort()).toEqual(["authToken", "auth_key", "oauth"]);
+  });
 });
 
 describe("groupNeedsPassphrase", () => {

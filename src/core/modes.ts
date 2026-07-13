@@ -26,7 +26,7 @@ function collectSensitiveKeys(value: unknown, found: Set<string>): void {
   if (isPlainObject(value)) {
     for (const [k, v] of Object.entries(value)) {
       const lower = k.toLowerCase();
-      if (SENSITIVE_KEY_PATTERNS.some((p) => lower.includes(p))) found.add(k);
+      if (SENSITIVE_KEY_PATTERNS.some((p) => (p === "auth" ? /auth(?!or)/i.test(k) : lower.includes(p)))) found.add(k);
       collectSensitiveKeys(v, found);
     }
   }

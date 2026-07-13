@@ -552,6 +552,34 @@ describe("pushExternal", () => {
   });
 });
 
+describe("progress callbacks", () => {
+  it("capture reports done/total/current before each selected group", async () => {
+    const { io, plugins, ctx } = setup();
+    plugins.installed.set("demo", "1.2.3");
+    io.seed({
+      "cs/config-sync.json": MANIFEST,
+      ".obs/hotkeys.json": '{"a":1}',
+      ".obs/snippets/one.css": "one",
+      ".obsidian.vimrc": "imap jk <Esc>",
+      ".obs/plugins/demo/data.json": '{"vikaToken":"secret","theme":"x"}',
+    });
+    const calls: Array<[number, number, string]> = [];
+    await capture(ctx, ["hotkeys", "snippets"], (d, t, c) => calls.push([d, t, c]));
+    expect(calls).toEqual([
+      [0, 2, "hotkeys"],
+      [1, 2, "snippets"],
+    ]);
+  });
+
+  it("apply reports the same shape", async () => {
+    const { io, ctx } = setup();
+    seedStore(io);
+    const calls: Array<[number, number, string]> = [];
+    await apply(ctx, ["hotkeys"], (d, t, c) => calls.push([d, t, c]));
+    expect(calls).toEqual([[0, 1, "hotkeys"]]);
+  });
+});
+
 describe("createStarterManifest", () => {
   it("creates a parseable starter groups file and never overwrites", async () => {
     const { io, ctx } = setup();
