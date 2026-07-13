@@ -64,4 +64,31 @@ describe("createInstaller", () => {
       "couldn't download demo from the community catalog"
     );
   });
+  it("rejects when styles.css write fails (disk full, permissions, etc)", async () => {
+    const io = new MemFS();
+    const { http } = fakeHttp({
+      [COMMUNITY_CATALOG_URL]: CATALOG,
+      [`${base}/manifest.json`]: JSON.stringify({ id: "demo", version: "2.5.0" }),
+      [`${base}/main.js`]: "x",
+      [`${base}/styles.css`]: ".x{}",
+    });
+    // Wrap io.write to throw for styles.css after manifest/main.js are written
+    let manifestWritten = false;
+    let mainWritten = false;
+    const originalWrite = io.write.bind(io);
+    io.write = async (path: string, data: string) => {
+      if (path.endsWith("/manifest.json")) {
+        await originalWrite(path, data);
+        manifestWritten = true;
+      } else if (path.endsWith("/main.js")) {
+        await originalWrite(path, data);
+        mainWritten = true;
+      } else if (path.endsWith("/styles.css") && manifestWritten && mainWritten) {
+        throw new Error("disk full");
+      } else {
+        await originalWrite(path, data);
+      }
+    };
+    await expect(createInstaller(io, ".obs", http)("demo")).rejects.toThrow("disk full");
+  });
 });

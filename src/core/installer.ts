@@ -53,11 +53,13 @@ export function createInstaller(io: FileIO, configDir: string, http: HttpGet): (
     await ensureParentDir(io, `${dir}/manifest.json`);
     await io.write(`${dir}/manifest.json`, manifestRaw);
     await io.write(`${dir}/main.js`, mainJs);
+    let styles: string | null = null;
     try {
-      await io.write(`${dir}/styles.css`, decode(await http(`${base}/styles.css`)));
+      styles = decode(await http(`${base}/styles.css`));
     } catch {
       // styles.css is optional — many plugins ship without one
     }
+    if (styles !== null) await io.write(`${dir}/styles.css`, styles);
     return manifest.version;
   };
 }
