@@ -614,3 +614,8 @@ body.is-mobile .config-sync-mainbar input[type="checkbox"]:indeterminate::after 
   left: 4px;
 }
 
+/* 0.20.0 report styling */
+.config-sync-report-legend { color: var(--text-faint); font-size: var(--font-ui-smaller); margin: 2px 0 8px; }
+.config-sync-sect .config-sync-sect-count { margin-left: 6px; font-size: 10px; }
+.config-sync-pill.is-statenote { background: rgba(88, 166, 160, 0.2); color: #58a6a0; }
+

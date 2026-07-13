@@ -380,7 +380,7 @@ export default class ConfigSyncPlugin extends Plugin {
     try {
       const ctx = await this.coreContext();
       const result = await revertLastApply(ctx);
-      new ReportModal(this.app, "Config Sync: Revert report", [result], undefined, (g) => this.displayName(g)).open();
+      new ReportModal(this.app, "Reverted", [result], undefined, (g) => this.displayName(g)).open();
     } catch (e) {
       new Notice(`Config Sync revert failed: ${(e as Error).message}`, 10000);
     }
