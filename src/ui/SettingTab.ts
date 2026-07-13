@@ -22,6 +22,7 @@ import {
 import { confirmWarnings } from "./ConfirmModal";
 import { FolderSelectModal } from "./FolderSelectModal";
 import { commitDraft } from "./commitGroups";
+import { sortBySensitiveFirst } from "./sensitiveSort";
 
 export interface SettingsHost extends Plugin {
   settings: {
@@ -170,6 +171,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private saveErrorFor = "";
   private detections = new Map<string, SensitiveScan>(); // group name -> live scan, filled in as reads complete
   private passphraseStatusEl: HTMLElement | null = null;
+  private sortedSections = new Set<string>(); // tabs that already re-rendered once to settle sensitive-first ordering
 
   constructor(app: App, private host: SettingsHost) {
     super(app, host);
@@ -181,6 +183,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     this.search = "";
     this.searchScope = "all";
     this.expanded.clear();
+    this.sortedSections.clear();
     void this.rerender(0);
   }
 
@@ -198,6 +201,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private switchTab(tab: PanelTab): void {
     this.activeTab = tab;
     this.saveErrorFor = "";
+    this.sortedSections.delete(tab);
     void this.rerender(0);
   }
 
@@ -302,7 +306,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       const head = new Setting(containerEl).setName(sec.heading).setDesc(sec.description).setHeading();
       if (sec.allowSyncAll) this.addSyncAllToggle(head, sec);
       const listEl = containerEl.createDiv();
-      for (const item of sec.items) this.renderChecklistRow(listEl, item);
+      const items = sortBySensitiveFirst(sec.items, (i) => {
+        const s = this.detections.get(i.name);
+        return (s?.keys.length ?? 0) > 0 || (s?.blob ?? false);
+      });
+      for (const item of items) this.renderChecklistRow(listEl, item);
     }
   }
 
@@ -386,18 +394,25 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     if (group !== undefined && group.mode === "fields") {
       this.renderFieldsEditor(wrap.createDiv(), group, () => this.renderItemInto(wrap, item));
     }
-    if (group !== undefined) this.renderDetection(row, group);
+    if (item.disabledReason === null && item.exists) {
+      const probe = group ?? groupForItem(item.name, item.path, item.type, null);
+      this.renderDetection(row, probe, item.name);
+    }
     if (this.saveErrorFor === item.name) {
       wrap.createDiv({ cls: "config-sync-save-error mod-warning", text: `couldn't save this change — ${this.groupsErrorMsg}. The change was reverted.` });
     }
   }
 
   // Kicks off an async scan of the item's live file(s) and patches the row in place once it
-  // resolves, instead of blocking the tab or forcing a full re-render for every item.
-  private renderDetection(row: Setting, group: SyncGroup): void {
-    const cached = this.detections.get(group.name);
+  // resolves, instead of blocking the tab or forcing a full re-render for every item. Runs for
+  // every eligible catalog item (not just synced ones) so unsynced-but-sensitive files surface
+  // a warning before the user turns sync on. Cached by cacheKey (the catalog item's stable name,
+  // even when group is a throwaway probe built from groupForItem).
+  private renderDetection(row: Setting, group: SyncGroup, cacheKey: string): void {
+    const cached = this.detections.get(cacheKey);
     if (cached !== undefined) {
-      this.applyDetection(row, group, cached);
+      this.applyDetection(row, cached);
+      if (cached.keys.length > 0 || cached.blob) this.settleSensitiveOrder();
       return;
     }
     void (async () => {
@@ -407,19 +422,29 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       } catch {
         return;
       }
-      this.detections.set(group.name, scan);
-      if (row.settingEl.isConnected) this.applyDetection(row, group, scan);
+      this.detections.set(cacheKey, scan);
+      if (row.settingEl.isConnected) this.applyDetection(row, scan);
+      if (scan.keys.length > 0 || scan.blob) this.settleSensitiveOrder();
     })();
   }
 
-  private applyDetection(row: Setting, group: SyncGroup, scan: SensitiveScan): void {
+  // Sensitive-first ordering in renderSections is computed from whatever's cached in
+  // this.detections at render time; scans that resolve after that render leave the section
+  // temporarily mis-sorted. Re-render the active tab once per visit when that happens so
+  // ordering settles — guarded by sortedSections (cleared on tab switch / panel open) to avoid
+  // looping: the resulting re-render reads the now-cached scan directly (renderDetection's cache
+  // hit branch above), so it never re-enters the async fetch path for the same item.
+  private settleSensitiveOrder(): void {
+    if (this.sortedSections.has(this.activeTab)) return;
+    this.sortedSections.add(this.activeTab);
+    this.refresh();
+  }
+
+  private applyDetection(row: Setting, scan: SensitiveScan): void {
     if (scan.keys.length === 0 && !scan.blob) return;
-    const badgeText = scan.blob ? "⚠ opaque encrypted blob" : `⚠ ${scan.keys.length} sensitive-looking keys`;
-    row.nameEl.createSpan({ cls: "config-sync-detect-badge", text: badgeText });
-    if (scan.keys.length > 0) {
-      const current = row.descEl.getText();
-      row.setDesc(current === "" ? `Detected: ${scan.keys.join(", ")}` : `${current} Detected: ${scan.keys.join(", ")}`);
-    }
+    const badgeText = scan.blob ? "⚠ opaque blob" : `⚠ ${scan.keys.length} keys`;
+    const badge = row.nameEl.createSpan({ cls: "config-sync-detect-badge", text: badgeText });
+    badge.setAttribute("aria-label", scan.blob ? "opaque encrypted blob" : `${scan.keys.length} sensitive-looking keys`);
   }
 
   private renderModeSegment(controlEl: HTMLElement, group: SyncGroup, afterChange: () => void): void {
