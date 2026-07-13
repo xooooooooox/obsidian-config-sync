@@ -316,6 +316,20 @@ describe("displayLabelForGroup", () => {
   });
 });
 
+describe("displayLabelForGroup label priority", () => {
+  const noPlugins = { getInstalledPluginName: () => null, getCorePluginName: () => null } as unknown as import("../src/core/ConfigSyncCore").PluginHost;
+  it("uses the stored label when no runtime name resolves", () => {
+    expect(displayLabelForGroup("plugin-obsidian42-brat", noPlugins, "BRAT")).toBe("BRAT");
+  });
+  it("prefers the runtime plugin name over the stored label", () => {
+    const p = { getInstalledPluginName: (id: string) => (id === "obsidian42-brat" ? "BRAT live" : null), getCorePluginName: () => null } as unknown as import("../src/core/ConfigSyncCore").PluginHost;
+    expect(displayLabelForGroup("plugin-obsidian42-brat", p, "BRAT stale")).toBe("BRAT live");
+  });
+  it("falls back to the raw id when neither resolves", () => {
+    expect(displayLabelForGroup("plugin-obsidian42-brat", noPlugins)).toBe("obsidian42-brat");
+  });
+});
+
 describe("groupForItem", () => {
   it("records a label when given", () => {
     expect(groupForItem("plugin-x", "{configDir}/plugins/x/data.json", "file", null, "Xtension").label).toBe("Xtension");

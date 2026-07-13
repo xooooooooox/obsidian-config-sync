@@ -352,14 +352,14 @@ export function categoryForGroup(name: string): ItemCategory {
   return "custom";
 }
 
-export function displayLabelForGroup(name: string, plugins: PluginHost): string {
+export function displayLabelForGroup(name: string, plugins: PluginHost, storedLabel?: string): string {
   for (const file of Object.keys(OPTION_LABELS)) {
     if (optionReservedName(file) === name) return OPTION_LABELS[file]?.label ?? name;
   }
-  if (CORE_SETTINGS_IDS.includes(name)) return plugins.getCorePluginName(name) ?? name;
+  if (CORE_SETTINGS_IDS.includes(name)) return plugins.getCorePluginName(name) ?? storedLabel ?? name;
   if (name.startsWith("plugin-")) {
     const id = name.slice("plugin-".length);
-    return plugins.getInstalledPluginName(id) ?? id;
+    return plugins.getInstalledPluginName(id) ?? storedLabel ?? id;
   }
-  return name;
+  return storedLabel ?? name;
 }

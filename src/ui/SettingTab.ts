@@ -46,7 +46,7 @@ export interface SettingsHost extends Plugin {
   detectSensitive(group: SyncGroup): Promise<SensitiveScan>;
   passphrase(): string | null;
   setPassphrase(v: string | null): void;
-  displayName(group: string): string;
+  displayName(group: string, storedLabel?: string): string;
 }
 
 const SENSITIVE_ENCRYPT_RE = /apikey|api_key|token|secret|password|credential/i;
@@ -533,7 +533,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         hits.push({
           scope: "advanced",
           kind: "discovered",
-          name: this.host.displayName(g.name),
+          name: this.host.displayName(g.name, g.label),
           desc: splitLocation(g.path).rel,
           anchorId: `advanced-rule-${g.name}`,
         });
@@ -543,7 +543,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       hits.push({
         scope: "advanced",
         kind: "rule",
-        name: this.host.displayName(g.name),
+        name: this.host.displayName(g.name, g.label),
         desc: reserved.has(g.name) ? splitLocation(g.path).rel : "Custom rule",
         anchorId: `advanced-rule-${g.name}`,
       });
@@ -912,7 +912,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const row = listEl.createDiv({ cls: "config-sync-row" + (isOpen ? " is-open" : "") });
     row.setAttribute("data-search-anchor", `advanced-rule-${group.name}`);
     row.createSpan({ cls: "config-sync-row-chevron", text: isOpen ? "▾" : "▸" });
-    row.createSpan({ cls: "config-sync-card-title", text: group.name === "" ? "(unnamed)" : this.host.displayName(group.name) });
+    row.createSpan({ cls: "config-sync-card-title", text: group.name === "" ? "(unnamed)" : this.host.displayName(group.name, group.label) });
     row.createSpan({ cls: "config-sync-row-path", text: splitLocation(group.path).rel });
     if (managed) {
       const expected = expectedPathForName(group.name);

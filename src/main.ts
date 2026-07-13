@@ -74,6 +74,7 @@ export default class ConfigSyncPlugin extends Plugin {
   private lastResolvedRoot: string | null = null;
   private installFn: PluginInstallFn | null = null;
   localStatuses: GroupStatus[] | null = null;
+  private lastGroups: SyncGroup[] | null = null;
   remoteChecks = new Map<string, { check: RemoteCheck; at: number }>();
   private storeEventTimer: number | null = null;
   private remoteAutoCheckStartupTimer: number | null = null;
@@ -222,6 +223,7 @@ export default class ConfigSyncPlugin extends Plugin {
         const manifest = await loadManifest(ctx);
         const device = Platform.isMobile ? ("mobile" as const) : ("desktop" as const);
         const groups = groupsForDevice(manifest, device);
+        this.lastGroups = groups;
         const statuses = await statusForGroups(ctx, groups);
         this.localStatuses = statuses;
         this.updateRibbonDot();
@@ -236,7 +238,7 @@ export default class ConfigSyncPlugin extends Plugin {
         return { groups, statuses, availability };
       },
       resolvedPath: (g) => g.path.replace("{configDir}", this.app.vault.configDir),
-      displayName: (g) => this.displayName(g),
+      displayName: (g) => this.displayName(g, this.lastGroups?.find((x) => x.name === g)?.label),
       captureItems: async (names: string[], onProgress?: ProgressFn) => {
         try {
           const ctx = await this.coreContext();
@@ -371,8 +373,8 @@ export default class ConfigSyncPlugin extends Plugin {
     return this.installFn;
   }
 
-  displayName(group: string): string {
-    return displayLabelForGroup(group, this.pluginHost());
+  displayName(group: string, storedLabel?: string): string {
+    return displayLabelForGroup(group, this.pluginHost(), storedLabel);
   }
 
   private async coreContext(): Promise<CoreContext> {
@@ -395,7 +397,7 @@ export default class ConfigSyncPlugin extends Plugin {
     try {
       const ctx = await this.coreContext();
       const result = await revertLastApply(ctx);
-      new ReportModal(this.app, "Reverted", [result], undefined, (g) => this.displayName(g)).open();
+      new ReportModal(this.app, "Reverted", [result], undefined, (g) => this.displayName(g, this.lastGroups?.find((x) => x.name === g)?.label)).open();
     } catch (e) {
       new Notice(`Config Sync revert failed: ${(e as Error).message}`, 10000);
     }
