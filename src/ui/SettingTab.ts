@@ -21,6 +21,7 @@ import {
 } from "../core/catalog";
 import { confirmWarnings } from "./ConfirmModal";
 import { FolderSelectModal } from "./FolderSelectModal";
+import { commitDraft } from "./commitGroups";
 
 export interface SettingsHost extends Plugin {
   settings: {
@@ -166,6 +167,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private sourcesErrorEl: HTMLElement | null = null;
   private groupsErrorMsg = "";
   private sourcesErrorMsg = "";
+  private saveErrorFor = "";
   private detections = new Map<string, SensitiveScan>(); // group name -> live scan, filled in as reads complete
   private passphraseStatusEl: HTMLElement | null = null;
 
@@ -195,6 +197,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
 
   private switchTab(tab: PanelTab): void {
     this.activeTab = tab;
+    this.saveErrorFor = "";
     void this.rerender(0);
   }
 
@@ -310,8 +313,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       t.setValue(allOn)
         .setTooltip(allOn ? "Sync none" : "Sync all")
         .onChange(async (v) => {
-          this.groups = toggleSection(this.groups, sec.items, v);
-          await this.saveGroups();
+          await this.commitGroups((draft) => {
+            const next = toggleSection(draft, sec.items, v);
+            draft.length = 0;
+            draft.push(...next);
+          });
           this.refresh();
         });
     });
@@ -345,8 +351,10 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
           .addOption("mobile", "mobile only")
           .setValue(group.devices)
           .onChange(async (v) => {
-            group.devices = v as DeviceClass;
-            await this.saveGroups();
+            await this.commitGroups((draft) => {
+              const g = draft.find((x) => x.name === item.name);
+              if (g !== undefined) g.devices = v as DeviceClass;
+            }, item.name);
             this.refresh();
           })
       );
@@ -358,20 +366,20 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       t.setValue(group !== undefined);
       t.setDisabled(item.disabledReason !== null);
       t.onChange(async (v) => {
-        if (v) {
-          if (item.cautionReason !== null) {
-            const ok = await confirmWarnings(this.app, "Sync a device-specific file?", [item.cautionReason]);
-            if (!ok) {
-              this.refresh();
-              return;
-            }
+        if (v && item.cautionReason !== null) {
+          const ok = await confirmWarnings(this.app, "Sync a device-specific file?", [item.cautionReason]);
+          if (!ok) {
+            this.refresh();
+            return;
           }
-          this.groups.push(groupForItem(item.name, item.path, item.type, item.description));
-        } else {
-          const idx = this.groups.findIndex((g) => g.name === item.name);
-          if (idx >= 0) this.groups.splice(idx, 1);
         }
-        await this.saveGroups();
+        await this.commitGroups((draft) => {
+          if (v) draft.push(groupForItem(item.name, item.path, item.type, item.description, item.label));
+          else {
+            const idx = draft.findIndex((g) => g.name === item.name);
+            if (idx >= 0) draft.splice(idx, 1);
+          }
+        }, item.name);
         this.refresh();
       });
     });
@@ -379,6 +387,9 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       this.renderFieldsEditor(wrap.createDiv(), group, () => this.renderItemInto(wrap, item));
     }
     if (group !== undefined) this.renderDetection(row, group);
+    if (this.saveErrorFor === item.name) {
+      wrap.createDiv({ cls: "config-sync-save-error mod-warning", text: `couldn't save this change — ${this.groupsErrorMsg}. The change was reverted.` });
+    }
   }
 
   // Kicks off an async scan of the item's live file(s) and patches the row in place once it
@@ -428,21 +439,26 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       });
       btn.addEventListener("click", () => {
         void (async () => {
-          if (m.id === "plain") {
-            delete group.mode;
-            delete group.fields;
-          } else if (m.id === "encrypted") {
-            group.mode = "encrypted";
-            delete group.fields;
-          } else {
-            group.mode = "fields";
-            if (group.fields === undefined) {
-              const scan = this.detections.get(group.name) ?? (await this.host.detectSensitive(group));
-              this.detections.set(group.name, scan);
-              if (scan.keys.length > 0) group.fields = defaultFieldsFromDetection(scan.keys);
-            }
+          let fieldsForNewMode: FieldRule[] | undefined;
+          if (m.id === "fields" && group.fields === undefined) {
+            const scan = this.detections.get(group.name) ?? (await this.host.detectSensitive(group));
+            this.detections.set(group.name, scan);
+            if (scan.keys.length > 0) fieldsForNewMode = defaultFieldsFromDetection(scan.keys);
           }
-          await this.saveGroups();
+          await this.commitGroups((draft) => {
+            const g = draft.find((x) => x.name === group.name);
+            if (g === undefined) return;
+            if (m.id === "plain") {
+              delete g.mode;
+              delete g.fields;
+            } else if (m.id === "encrypted") {
+              g.mode = "encrypted";
+              delete g.fields;
+            } else {
+              g.mode = "fields";
+              if (g.fields === undefined && fieldsForNewMode !== undefined) g.fields = fieldsForNewMode;
+            }
+          }, group.name);
           afterChange();
         })();
       });
@@ -472,17 +488,25 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         });
         btn.addEventListener("click", () => {
           void (async () => {
-            rule.action = a.id;
-            await this.saveGroups();
+            const ruleIndex = rules.indexOf(rule);
+            await this.commitGroups((draft) => {
+              const g = draft.find((x) => x.name === group.name);
+              const r = g?.fields?.[ruleIndex];
+              if (r !== undefined) r.action = a.id;
+            }, group.name);
             afterChange();
           })();
         });
       }
       new ExtraButtonComponent(fr).setIcon("x").setTooltip("Remove rule").onClick(() => {
         void (async () => {
-          group.fields = rules.filter((r) => r !== rule);
-          if (group.fields.length === 0) delete group.fields;
-          await this.saveGroups();
+          const ruleIndex = rules.indexOf(rule);
+          await this.commitGroups((draft) => {
+            const g = draft.find((x) => x.name === group.name);
+            if (g === undefined || g.fields === undefined) return;
+            g.fields = g.fields.filter((_, i) => i !== ruleIndex);
+            if (g.fields.length === 0) delete g.fields;
+          }, group.name);
           afterChange();
         })();
       });
@@ -494,9 +518,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       void (async () => {
         const pattern = input.value.trim();
         if (pattern === "") return;
-        const next = [...rules, { pattern, action: "strip" as const }];
-        group.fields = next;
-        await this.saveGroups();
+        await this.commitGroups((draft) => {
+          const g = draft.find((x) => x.name === group.name);
+          if (g === undefined) return;
+          g.fields = [...(g.fields ?? []), { pattern, action: "strip" as const }];
+        }, group.name);
         afterChange();
       })();
     });
@@ -820,13 +846,14 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       .setDesc("Everything you turned on in the Obsidian / Core plugins / Community plugins tabs. Expand a row to fine-tune its rule; reset returns it to the default.");
     if (managed.length > 0) {
       managedHead.addExtraButton((b) => b.setIcon("rotate-ccw").setTooltip("Reset all to defaults").onClick(async () => {
-        for (let i = 0; i < this.groups.length; i++) {
-          const g = this.groups[i];
-          if (g === undefined || !reserved.has(g.name) || g.origin !== undefined) continue;
-          const def = defaultGroupForName(g.name);
-          if (def !== null) this.groups[i] = def;
-        }
-        await this.saveGroups();
+        await this.commitGroups((draft) => {
+          for (let i = 0; i < draft.length; i++) {
+            const g = draft[i];
+            if (g === undefined || !reserved.has(g.name) || g.origin !== undefined) continue;
+            const def = defaultGroupForName(g.name);
+            if (def !== null) draft[i] = def;
+          }
+        });
         this.refresh();
       }));
     }
@@ -871,14 +898,9 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     row.createDiv({ cls: "config-sync-rule-spacer" });
     new ToggleComponent(row).setValue(false).setTooltip("Sync this file").onChange(async (v) => {
       if (!v) return;
-      this.groups.push({ name: d.name, path: d.path, type: "file", devices: "all", origin: "discovered" });
-      try {
-        await this.host.writeGroupsFile(this.groups);
-        this.groupsErrorMsg = "";
-      } catch (e) {
-        this.groups.pop(); // roll back so no broken group persists in memory
-        this.groupsErrorMsg = (e as Error).message;
-      }
+      await this.commitGroups((draft) => {
+        draft.push({ name: d.name, path: d.path, type: "file", devices: "all", origin: "discovered" });
+      }, d.name);
       this.refresh();
     });
   }
@@ -892,10 +914,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     row.createDiv({ cls: "config-sync-rule-spacer" });
     new ToggleComponent(row).setValue(true).setTooltip("Stop syncing this file").onChange(async (v) => {
       if (v) return;
-      const idx = this.groups.findIndex((g) => g === group);
-      if (idx >= 0) this.groups.splice(idx, 1);
+      await this.commitGroups((draft) => {
+        const idx = draft.findIndex((g) => g.name === group.name);
+        if (idx >= 0) draft.splice(idx, 1);
+      }, group.name);
       this.expanded.delete(group.name);
-      await this.saveGroups();
       this.refresh();
     });
     row.addEventListener("click", (e) => {
@@ -928,9 +951,10 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         .onClick(async () => {
           const def = defaultGroupForName(group.name);
           if (def === null) return;
-          const idx = this.groups.findIndex((g) => g === group);
-          if (idx >= 0) this.groups[idx] = def;
-          await this.saveGroups();
+          await this.commitGroups((draft) => {
+            const idx = draft.findIndex((g) => g.name === group.name);
+            if (idx >= 0) draft[idx] = def;
+          }, group.name);
           this.refresh();
         });
     } else {
@@ -938,10 +962,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         .setIcon("trash")
         .setTooltip("Delete rule")
         .onClick(async () => {
-          const idx = this.groups.findIndex((g) => g === group);
-          if (idx >= 0) this.groups.splice(idx, 1);
+          await this.commitGroups((draft) => {
+            const idx = draft.findIndex((g) => g.name === group.name);
+            if (idx >= 0) draft.splice(idx, 1);
+          }, group.name);
           this.expanded.delete(group.name);
-          await this.saveGroups();
           this.refresh();
         });
     }
@@ -951,6 +976,9 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       else this.expanded.add(group.name);
       this.refresh();
     });
+    if (this.saveErrorFor === group.name) {
+      listEl.createDiv({ cls: "config-sync-save-error mod-warning", text: `couldn't save this change — ${this.groupsErrorMsg}. The change was reverted.` });
+    }
     if (isOpen) this.renderRuleForm(listEl, group, managed ? "managed" : "custom");
   }
 
@@ -969,10 +997,14 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       if (mode === "custom") {
         const nameC = new TextComponent(field(line1, "Name"));
         nameC.setPlaceholder("name (a-z, 0-9, -, _)").setValue(group.name).onChange((v) => {
+          const prevName = group.name;
           this.expanded.delete(group.name);
           group.name = v.trim();
           this.expanded.add(group.name);
-          void this.saveGroups();
+          void this.commitGroups((draft) => {
+            const g = draft.find((x) => x.name === prevName);
+            if (g !== undefined) g.name = group.name;
+          }, group.name);
         });
         nameC.inputEl.addClass("config-sync-rule-name-input");
       }
@@ -983,12 +1015,18 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         .setValue(loc.location)
         .onChange((v) => {
           group.path = joinLocation(v as "config" | "vault", splitLocation(group.path).rel);
-          void this.saveGroups();
+          void this.commitGroups((draft) => {
+            const g = draft.find((x) => x.name === group.name);
+            if (g !== undefined) g.path = group.path;
+          }, group.name);
         });
       const pathC = new TextComponent(field(line1, "Path"));
       pathC.setPlaceholder("relative path").setValue(loc.rel).onChange((v) => {
         group.path = joinLocation(splitLocation(group.path).location, v.trim());
-        void this.saveGroups();
+        void this.commitGroups((draft) => {
+          const g = draft.find((x) => x.name === group.name);
+          if (g !== undefined) g.path = group.path;
+        }, group.name);
       });
     }
 
@@ -998,12 +1036,15 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       .addOption("dir", "dir")
       .setValue(group.type)
       .onChange(async (v) => {
-        group.type = v as SyncGroup["type"];
-        if (group.type !== "file") {
-          delete group.mode;
-          delete group.fields;
-        }
-        await this.saveGroups();
+        await this.commitGroups((draft) => {
+          const g = draft.find((x) => x.name === group.name);
+          if (g === undefined) return;
+          g.type = v as SyncGroup["type"];
+          if (g.type !== "file") {
+            delete g.mode;
+            delete g.fields;
+          }
+        }, group.name);
         this.refresh();
       });
     new DropdownComponent(field(line2, "Devices"))
@@ -1012,8 +1053,10 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       .addOption("mobile", "mobile")
       .setValue(group.devices)
       .onChange(async (v) => {
-        group.devices = v as DeviceClass;
-        await this.saveGroups();
+        await this.commitGroups((draft) => {
+          const g = draft.find((x) => x.name === group.name);
+          if (g !== undefined) g.devices = v as DeviceClass;
+        }, group.name);
         this.refresh();
       });
     this.renderModeSegment(field(line2, "Mode"), group, () => this.refresh());
@@ -1022,7 +1065,12 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       const d = v.trim();
       if (d !== "") group.description = d;
       else delete group.description;
-      void this.saveGroups();
+      void this.commitGroups((draft) => {
+        const g = draft.find((x) => x.name === group.name);
+        if (g === undefined) return;
+        if (d !== "") g.description = d;
+        else delete g.description;
+      }, group.name);
     });
     if (group.mode === "fields") {
       this.renderFieldsEditor(panel.createDiv(), group, () => this.refresh());
@@ -1055,14 +1103,18 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     })();
   }
 
-  private async saveGroups(): Promise<void> {
-    try {
-      await this.host.writeGroupsFile(this.groups);
+  private async commitGroups(mutator: (draft: SyncGroup[]) => void, culprit?: string): Promise<boolean> {
+    const res = await commitDraft(this.groups, mutator, (g) => this.host.writeGroupsFile(g));
+    if (res.ok) {
+      this.groups = res.groups;
       this.groupsErrorMsg = "";
-    } catch (e) {
-      this.groupsErrorMsg = (e as Error).message;
+      this.saveErrorFor = "";
+    } else {
+      this.groupsErrorMsg = res.error;
+      this.saveErrorFor = culprit ?? "";
     }
     this.groupsErrorEl?.setText(this.groupsErrorMsg);
+    return res.ok;
   }
 
   private renderSources(containerEl: HTMLElement): void {
