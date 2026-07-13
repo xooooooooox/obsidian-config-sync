@@ -315,3 +315,10 @@ describe("displayLabelForGroup", () => {
     expect(displayLabelForGroup("my-custom-rule", plugins)).toBe("my-custom-rule");
   });
 });
+
+describe("groupForItem", () => {
+  it("records a label when given", () => {
+    expect(groupForItem("plugin-x", "{configDir}/plugins/x/data.json", "file", null, "Xtension").label).toBe("Xtension");
+    expect(groupForItem("plugin-x", "{configDir}/plugins/x/data.json", "file", null).label).toBeUndefined();
+  });
+});

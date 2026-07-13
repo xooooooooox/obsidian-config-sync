@@ -15,6 +15,7 @@ export interface SyncGroup {
   mode?: SyncMode; // absent = "plain"; "fields" only on file groups
   fields?: FieldRule[]; // key-name glob rules; only with mode "fields"
   description?: string; // optional human-readable label, shown in the settings panel
+  label?: string; // display name recorded at capture/enable; falls back through the resolver chain
   origin?: "discovered"; // rule created from the Discovered-files section; name/path are fixed by the file
 }
 

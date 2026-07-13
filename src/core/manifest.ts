@@ -67,7 +67,7 @@ export function validateSyncManifest(data: unknown): SyncManifest {
 
 function parseGroup(g: unknown, index: number): SyncGroup {
   if (!isPlainObject(g)) throw new ManifestValidationError(`rule #${index + 1} must be an object, e.g. {"name": "hotkeys", "path": "{configDir}/hotkeys.json", "type": "file", "devices": "all"}`);
-  const { name, path, type, devices, sanitize, mode, fields, description, origin } = g;
+  const { name, path, type, devices, sanitize, mode, fields, description, label, origin } = g;
   if (typeof name !== "string" || name === "") {
     throw new ManifestValidationError(`rule #${index + 1} is missing a "name" — give it a short id, e.g. "name": "hotkeys"`);
   }
@@ -126,6 +126,11 @@ function parseGroup(g: unknown, index: number): SyncGroup {
   if (validatedFields !== undefined) group.fields = validatedFields;
   const trimmedDescription = typeof description === "string" ? description.trim() : "";
   if (trimmedDescription !== "") group.description = trimmedDescription;
+  if (label !== undefined && typeof label !== "string") {
+    throw new ManifestValidationError(`rule "${name}" has a "label" that isn't text — use a plain string, e.g. "label": "BRAT"`);
+  }
+  const trimmedLabel = typeof label === "string" ? label.trim() : "";
+  if (trimmedLabel !== "") group.label = trimmedLabel;
   if (origin === "discovered") group.origin = "discovered";
   return group;
 }

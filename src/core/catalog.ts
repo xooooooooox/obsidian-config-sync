@@ -304,9 +304,10 @@ export async function listPluginSections(
   ];
 }
 
-export function groupForItem(name: string, path: string, type: "file" | "dir", description: string | null): SyncGroup {
+export function groupForItem(name: string, path: string, type: "file" | "dir", description: string | null, label?: string): SyncGroup {
   const group: SyncGroup = { name, path, type, devices: "all" };
   if (description !== null) group.description = description;
+  if (label !== undefined && label.trim() !== "") group.label = label.trim();
   return group;
 }
 

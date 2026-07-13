@@ -199,3 +199,14 @@ describe("group name validation allows uppercase", () => {
     );
   });
 });
+
+describe("group label field", () => {
+  it("round-trips a label through parse", () => {
+    const raw = JSON.stringify({ version: 1, groups: [{ name: "plugin-x", label: "Xtension", path: "{configDir}/plugins/x/data.json", type: "file", devices: "all" }] });
+    expect(parseSyncManifest(raw).groups[0]?.label).toBe("Xtension");
+  });
+  it("ignores an empty/whitespace label", () => {
+    const raw = JSON.stringify({ version: 1, groups: [{ name: "plugin-x", label: "  ", path: "{configDir}/plugins/x/data.json", type: "file", devices: "all" }] });
+    expect(parseSyncManifest(raw).groups[0]?.label).toBeUndefined();
+  });
+});
