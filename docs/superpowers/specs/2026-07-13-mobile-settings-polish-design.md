@@ -1,6 +1,6 @@
 # Mobile Settings Polish & Capture Progress (iter22)
 
-Approved mockup: `.superpowers/brainstorm/39264-1783912450/content/iter22-mobile-settings.html` (phone-width settings rows). Two additional user-reported behaviors folded in (capture blind-wait, settings jolt). Trigger: iOS screenshot showing the Themes row shattered by a false `author` detection plus clipped controls.
+Approved mockups: `.superpowers/brainstorm/39264-1783912450/content/iter22-mobile-settings.html` (phone-width settings rows) and `iter22-progress.html` (footer progress states). Two additional user-reported behaviors folded in (capture blind-wait, settings jolt). Trigger: iOS screenshot showing the Themes row shattered by a false `author` detection plus clipped controls.
 
 ## Problems
 
@@ -29,7 +29,7 @@ Under `body.is-phone` (this is a width problem, phones only — tablets keep the
 ### 3. Capture/apply progress
 
 - Core: `capture(ctx, names?, onProgress?)` and `apply(ctx, names, onProgress?)` gain an optional callback `(done: number, total: number, current: string) => void`, invoked before each group is processed. No behavior change when omitted.
-- Sync Center footer buttons: while running, the clicked button disables both buttons and shows live progress, copy verbatim: `Capturing {done}/{total}…` / `Applying {done}/{total}…` (counts update per group; `current` reserved for the tooltip `aria-label`). On completion the existing report flow takes over and the panel reloads (labels restore naturally).
+- Sync Center footer buttons (per approved mockup `iter22-progress.html`): on click BOTH buttons disable; the clicked one shows an inline spinner + live label, copy verbatim: `Capturing {done}/{total}…` / `Applying {done}/{total}…` (counts tick per group), a 2px progress bar under the button tracks `done/total`, and the button's `aria-label` carries `current` (the group being processed). On completion the existing report flow takes over and the panel reload restores the footer naturally — no new modals or persistent UI.
 - Also used by pull/push? No — out of scope (their per-file loops live elsewhere; the complaint is capture/apply).
 
 ### 4. Jolt-free settings edits
