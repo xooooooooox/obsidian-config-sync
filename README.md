@@ -13,8 +13,9 @@ Selective, on-demand sync of Obsidian settings — hotkeys, CSS snippets, themes
 
 - **Pick exactly what syncs** — Obsidian options, core-plugin and community-plugin settings, snippets, themes, vault-root dotfiles; per item, per device class (all / desktop / mobile).
 - **Credential-safe** — per-item sync modes strip or encrypt sensitive keys before anything enters the store; each device keeps its locally entered values across applies.
-- **Explicit, reversible Apply** — pick items, see version-mismatch warnings, land them; every touched file is backed up and **Revert last apply** restores it.
+- **Explicit, reversible Apply** — pick items, land them directly (no confirmation dialog); every touched file is backed up and **Revert last apply** restores it.
 - **Always-visible awareness** — a ribbon status dot lights up orange (items to capture) or blue (store/remote updates); open the **Sync Center** for the details: every item badged (`✓ in sync`, `↑ changed on this device (likely)`, `↓ store is newer (likely)`, `≠ differs`, `— not captured yet`) with live `↑`/`↓` change-count badges, and remotes checked automatically.
+- **Availability-aware** — plugins that are outdated, disabled, or not installed on this device get their own collapsed sections with a plugin-install/update engine, so applying can also update, enable or install a community plugin in the same step.
 - **Remote-aware** — the Sync Center's Remotes block auto-checks whether a git or vault remote was captured after your local store; expand a remote for a Pull/Push preview.
 - **Mobile-friendly** — capture, apply and the Sync Center all work on phones; the store is plain vault content, so any note sync carries it.
 
@@ -36,9 +37,28 @@ Two planes, kept separate.
 
 **Local plane** — this device's live config ↔ the store:
 
-- **Capture** copies the items defined in `<data folder>/config-sync.json` into `<data folder>/store/`, applies each item's sync mode (stripping or encrypting fields, or encrypting the whole file), skips OS junk files, and records source plugin versions in `store.lock.json`. Only changed files are rewritten; the Sync Center's Capture button captures just what you've ticked.
-- **Apply** picks items, warns on plugin-version mismatches, then lands them into this device's config dir (whatever its name). Stripped fields and encrypted content resolve per the item's sync mode; stripped keys keep their local values. A one-slot backup covers every touched file; **Revert last apply** restores it.
+- **Capture** copies the items defined in `<data folder>/config-sync.json` into `<data folder>/store/`, applies each item's sync mode (stripping or encrypting fields, or encrypting the whole file), skips OS junk files, and records source plugin versions (or the Obsidian app version, for Obsidian/core items) in `store.lock.json`. Only changed files are rewritten; the Sync Center's Capture button captures just what you've ticked.
+- **Apply** picks items and lands them into this device's config dir (whatever its name) — there's no confirmation dialog; ticking and pressing Apply executes directly. For a community plugin that's outdated, disabled or not installed on this device, Apply can also update, enable or install it first (see below). Stripped fields and encrypted content resolve per the item's sync mode; stripped keys keep their local values. A one-slot backup covers every touched file; **Revert last apply** restores it.
 - The **Sync Center** compares live config against the store per item, with best-effort direction hints (file times vs the last capture) and automatic remote freshness checks.
+
+### Availability sections and the install engine
+
+Beyond the main list, the Sync Center groups community/core plugin items by what's true on *this* device, in collapsed, opt-in sections that never count into the header pills, sidebar badges, filter pills or footer until you tick something inside them:
+
+- **Outdated on this device** — enabled plugins whose installed version is behind what the store was captured on.
+- **Disabled on this device** — plugins whose config is tracked but the plugin itself is switched off here.
+- **Not installed on this device** — plugins the store has config for but that aren't installed here at all.
+
+Each row in these sections carries an **On apply** choice alongside the usual checkbox — the checkbox decides whether the item's config is part of this run, the On apply choice decides what happens to the plugin's state before that config lands:
+
+- Outdated: `⤓ Update to latest` (default) or `Keep {version}`.
+- Disabled, no version drift: `⏻ Enable` (default) or `Keep disabled`.
+- Disabled and outdated: `⤓ Update & enable` (default), `⏻ Enable`, or `Keep disabled`.
+- Not installed: `⤓ Install & enable` (default), `⤓ Install`, or `Stage only`.
+
+Installs and updates fetch the plugin's latest release from the official community plugin catalog. A plugin that isn't in the catalog is staged (its config is written, ready for whenever you install it manually) with a note to that effect. A failed update leaves the existing config untouched (an old version is assumed unsafe to overwrite blindly); a failed install still stages the config, since an uninstalled plugin can't be harmed by it.
+
+A plugin ahead of the store's recorded version shows a quiet metadata line instead of a section (capturing again will refresh the store). Obsidian and core-plugin items are anchored to the Obsidian app version rather than a plugin version — drift there is reminder-only in both directions and never drives an install/update action.
 
 **Transport plane** — how the store travels:
 
@@ -46,6 +66,10 @@ Two planes, kept separate.
 - **Pull / Push (desktop, optional)**: config-sync's own transport for a git repo or another vault on this machine, run from the Sync Center's Remotes block. Pull overwrites this vault's store from a remote (repeatable — cold start and ongoing use are the same action); Push sends it out. The git transport clones to a temp dir and never touches your vault's own repo.
 
 Everything hangs off one **Config Sync** ribbon icon: a status dot shows orange when there are items to capture or blue when the store or a remote has updates. Clicking it opens a menu with **Sync…** (badged with `↑`/`↓` change counts) and **Revert last apply**; Sync… opens (or focuses, if already open) the Sync Center, where Capture/Apply/Pull/Push all happen. Individual ribbon icons for Sync and Revert are available under **Settings → General**, off by default.
+
+Capture, Apply, Pull and Push each finish by rendering a result strip at the top of the Sync Center — a collapsible summary (changed/unchanged counts, per-item detail on demand) rather than a popup dialog, so it doesn't interrupt further ticking. **Revert last apply** is the exception and still opens a report dialog, since it's run from outside the hub (ribbon menu or command palette).
+
+The **Filter by name…** search box lives in the Sync Center's sidebar and searches globally across every scope at once (Obsidian, Core plugins, Community plugins, snippets, themes, dotfiles); the sidebar shows a hit count per scope and sections with a match auto-expand to show just the hits.
 
 ![Sync Center](docs/assets/sync-panel.png)
 

@@ -1,13 +1,14 @@
-import { Menu, Notice, Platform, Plugin } from "obsidian";
+import { Menu, Notice, Platform, Plugin, apiVersion, requestUrl } from "obsidian";
 import {
+  ApplyItem,
   CoreContext,
   ExternalStoreReader,
   ExternalStoreWriter,
   PluginHost,
+  PluginInstallFn,
   ProgressFn,
-  apply,
+  applyWithActions,
   capture,
-  checkApply,
   createStarterManifest as coreCreateStarterManifest,
   groupsForDevice,
   importExternal,
@@ -18,14 +19,15 @@ import {
   revertLastApply,
   writeGroups,
 } from "./core/ConfigSyncCore";
+import { createInstaller } from "./core/installer";
 import { type CatalogSection, displayLabelForGroup, listCoreSections, listDiscovered, listOptionSections, listPluginSections } from "./core/catalog";
+import { Availability, availabilityForGroup } from "./core/availability";
 import { listFilesRecursive } from "./core/io";
 import { groupRealPath } from "./core/pathing";
 import { scanSensitive, SensitiveScan } from "./core/modes";
 import { PkmMode, PkmProbe, resolveEffectiveMode, resolveRootPath } from "./core/pkm";
 import { bucketCounts, checkRemote, diffRemote, GroupStatus, RemoteCheck, statusForGroups } from "./core/status";
 import { Remote, RibbonButtons, StoreLock, SyncGroup } from "./core/types";
-import { confirmWarnings } from "./ui/ConfirmModal";
 import { ReportModal } from "./ui/ReportModal";
 import { SYNC_CENTER_VIEW_TYPE, SyncCenterHost, SyncCenterView } from "./ui/SyncCenterView";
 import { ConfigSyncSettingTab } from "./ui/SettingTab";
@@ -56,11 +58,13 @@ interface CommunityPluginRegistry {
   enabledPlugins: Set<string>;
   disablePlugin(id: string): Promise<void>;
   enablePlugin(id: string): Promise<void>;
+  enablePluginAndSave(id: string): Promise<void>;
+  loadManifests(): Promise<void>;
 }
 
 // app.internalPlugins is not part of the public API; this is the community-standard access path for core plugins.
 interface InternalPluginsRegistry {
-  plugins: Record<string, { enabled: boolean; instance?: { id: string; name: string } }>;
+  plugins: Record<string, { enabled: boolean; instance?: { id: string; name: string }; enable(): Promise<void> }>;
 }
 
 export default class ConfigSyncPlugin extends Plugin {
@@ -68,6 +72,7 @@ export default class ConfigSyncPlugin extends Plugin {
   private individualRibbons: HTMLElement[] = [];
   private mainRibbonEl: HTMLElement | null = null;
   private lastResolvedRoot: string | null = null;
+  private installFn: PluginInstallFn | null = null;
   localStatuses: GroupStatus[] | null = null;
   remoteChecks = new Map<string, { check: RemoteCheck; at: number }>();
   private storeEventTimer: number | null = null;
@@ -220,7 +225,15 @@ export default class ConfigSyncPlugin extends Plugin {
         const statuses = await statusForGroups(ctx, groups);
         this.localStatuses = statuses;
         this.updateRibbonDot();
-        return { groups, statuses };
+        let lock: StoreLock | null = null;
+        try {
+          lock = await loadLock(ctx);
+        } catch {
+          lock = null;
+        }
+        const availability: Record<string, Availability> = {};
+        for (const g of groups) availability[g.name] = availabilityForGroup(g, this.pluginHost(), lock);
+        return { groups, statuses, availability };
       },
       resolvedPath: (g) => g.path.replace("{configDir}", this.app.vault.configDir),
       displayName: (g) => this.displayName(g),
@@ -228,27 +241,25 @@ export default class ConfigSyncPlugin extends Plugin {
         try {
           const ctx = await this.coreContext();
           const results = await capture(ctx, names, onProgress);
-          new ReportModal(this.app, "Captured", results, new Date().toLocaleString(), (g) => this.displayName(g)).open();
           await this.refreshLocalStatus();
+          return results;
         } catch (e) {
           new Notice(`Config Sync capture failed: ${(e as Error).message}`, 10000);
+          return null;
         }
       },
-      applyItems: async (names: string[], onProgress?: ProgressFn) => {
+      applyItems: async (items: ApplyItem[], onProgress?: ProgressFn) => {
         try {
           const ctx = await this.coreContext();
-          const warnings = await checkApply(ctx, names);
-          if (warnings.length > 0) {
-            const ok = await confirmWarnings(this.app, "Config Sync: version warnings", warnings.map((w) => `${this.displayName(w.group)}: ${w.message}`));
-            if (!ok) return;
-          }
-          const results = await apply(ctx, names, onProgress);
-          new ReportModal(this.app, "Applied", results, new Date().toLocaleString(), (g) => this.displayName(g)).open();
+          const results = await applyWithActions(ctx, items, this.installPlugin(), onProgress);
           await this.refreshLocalStatus();
+          return results;
         } catch (e) {
           new Notice(`Config Sync apply failed: ${(e as Error).message}`, 10000);
+          return null;
         }
       },
+      reloadApp: () => (this.app as unknown as { commands: { executeCommandById(id: string): void } }).commands.executeCommandById("app:reload"),
       remotes: () => (Platform.isDesktop ? this.settings.remotes : []),
       remoteCheck: (name) => this.remoteChecks.get(name),
       refreshRemoteChecks: () => this.refreshRemoteChecks(),
@@ -260,21 +271,23 @@ export default class ConfigSyncPlugin extends Plugin {
         try {
           const ctx = await this.coreContext();
           const results = await importExternal(ctx, await this.createReader(remote));
-          new ReportModal(this.app, `Pulled from ${remote.name}`, results, undefined, (g) => this.displayName(g)).open();
           await this.refreshLocalStatus();
           await this.refreshRemoteChecks();
+          return results;
         } catch (e) {
           new Notice(`Config Sync pull failed: ${(e as Error).message}`, 10000);
+          return null;
         }
       },
       pushTo: async (remote) => {
         try {
           const ctx = await this.coreContext();
           const results = await pushExternal(ctx, await this.createWriter(remote));
-          new ReportModal(this.app, `Pushed to ${remote.name}`, results, undefined, (g) => this.displayName(g)).open();
           await this.refreshRemoteChecks();
+          return results;
         } catch (e) {
           new Notice(`Config Sync push failed: ${(e as Error).message}`, 10000);
+          return null;
         }
       },
     };
@@ -334,9 +347,28 @@ export default class ConfigSyncPlugin extends Plugin {
       isPluginEnabled: (id) => registry.enabledPlugins.has(id),
       disablePlugin: (id) => registry.disablePlugin(id),
       enablePlugin: (id) => registry.enablePlugin(id),
+      enablePluginPersistent: (id) => registry.enablePluginAndSave(id),
       getInstalledPluginName: (id) => registry.manifests[id]?.name ?? null,
       getCorePluginName: (id) => this.internalPlugins().plugins[id]?.instance?.name ?? null,
+      getAppVersion: () => apiVersion,
+      isCorePluginEnabled: (id) => this.internalPlugins().plugins[id]?.enabled === true,
+      enableCorePlugin: async (id) => {
+        const p = this.internalPlugins().plugins[id];
+        if (p === undefined) throw new Error(`core plugin "${id}" does not exist in this Obsidian build`);
+        await p.enable();
+      },
+      reloadPluginManifests: () => this.pluginRegistry().loadManifests(),
     };
+  }
+
+  installPlugin(): PluginInstallFn {
+    if (this.installFn === null) {
+      this.installFn = createInstaller(this.app.vault.adapter, this.app.vault.configDir, async (url) => {
+        const res = await requestUrl({ url, throw: true });
+        return res.arrayBuffer;
+      });
+    }
+    return this.installFn;
   }
 
   displayName(group: string): string {
@@ -363,7 +395,7 @@ export default class ConfigSyncPlugin extends Plugin {
     try {
       const ctx = await this.coreContext();
       const result = await revertLastApply(ctx);
-      new ReportModal(this.app, "Config Sync: Revert report", [result], undefined, (g) => this.displayName(g)).open();
+      new ReportModal(this.app, "Reverted", [result], undefined, (g) => this.displayName(g)).open();
     } catch (e) {
       new Notice(`Config Sync revert failed: ${(e as Error).message}`, 10000);
     }

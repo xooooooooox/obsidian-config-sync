@@ -175,3 +175,15 @@ describe("group name format", () => {
     }
   });
 });
+
+describe("parseStoreLock widened schema", () => {
+  it("accepts sourceAppVersion entries", () => {
+    const lock = parseStoreLock(JSON.stringify({ capturedAt: "2026-01-01T00:00:00Z", groups: { hotkeys: { sourceAppVersion: "1.8.7" } } }));
+    expect(lock.groups["hotkeys"]).toEqual({ sourceAppVersion: "1.8.7" });
+  });
+  it("rejects entries with neither version key", () => {
+    expect(() => parseStoreLock(JSON.stringify({ capturedAt: "x", groups: { a: {} } }))).toThrow(
+      'store.lock.json group "a" must have a string sourcePluginVersion or sourceAppVersion'
+    );
+  });
+});

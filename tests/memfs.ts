@@ -92,6 +92,8 @@ export class FakePlugins {
   enabled = new Set<string>();
   installedNames = new Map<string, string>();
   coreNames = new Map<string, string>();
+  appVersion = "1.8.7";
+  coreEnabled = new Set<string>();
   log: string[] = [];
 
   getInstalledPluginVersion(id: string): string | null {
@@ -108,10 +110,27 @@ export class FakePlugins {
     this.enabled.add(id);
     this.log.push(`enable:${id}`);
   }
+  async enablePluginPersistent(id: string): Promise<void> {
+    this.enabled.add(id);
+    this.log.push(`enable-persist:${id}`);
+  }
   getInstalledPluginName(id: string): string | null {
     return this.installedNames.get(id) ?? null;
   }
   getCorePluginName(id: string): string | null {
     return this.coreNames.get(id) ?? null;
+  }
+  getAppVersion(): string {
+    return this.appVersion;
+  }
+  isCorePluginEnabled(id: string): boolean {
+    return this.coreEnabled.has(id);
+  }
+  async enableCorePlugin(id: string): Promise<void> {
+    this.coreEnabled.add(id);
+    this.log.push(`enable-core:${id}`);
+  }
+  async reloadPluginManifests(): Promise<void> {
+    this.log.push("reload-manifests");
   }
 }

@@ -13,8 +13,9 @@
 
 - **精确挑选要同步的内容** —— Obsidian 选项、核心插件与社区插件设置、代码片段、主题、vault 根目录下的点文件(dotfiles)；可按条目、按设备类别（全部 / 桌面端 / 移动端）分别控制。
 - **凭证安全** —— 按条目设置的 sync mode（同步模式）会在任何内容进入 store(配置存储) 之前剥离或加密敏感键；每台设备在每次 Apply 后都会保留自己本地填入的值。
-- **明确、可回退的 Apply** —— 挑选条目，查看版本不匹配警告，再落地；每个被改动的文件都会被备份，**Revert last apply**（撤销上次应用）可以将其还原。
+- **明确、可回退的 Apply** —— 挑选条目，直接落地（没有确认弹窗）；每个被改动的文件都会被备份，**Revert last apply**（撤销上次应用）可以将其还原。
 - **随时可见的状态感知** —— 功能区状态点会亮起橙色（有待 capture 的条目）或蓝色（store/远程有更新）；打开 **Sync Center** 查看详情：每个条目都打上徽标（`✓ in sync`、`↑ changed on this device (likely)`、`↓ store is newer (likely)`、`≠ differs`、`— not captured yet`），并配有实时的 `↑`/`↓` 变更数量徽标，远程仓库会被自动检查。
+- **感知可用性** —— 落后版本、被禁用或未安装的插件会各自出现在独立的折叠分区中，配合插件安装/更新引擎，让 apply 在同一步里也能顺带更新、启用或安装某个社区插件。
 - **感知远程状态** —— Sync Center 的 Remotes 区块会自动检查 git 或 vault 远程仓库是否在你的本地 store 之后被捕获过；展开某个远程可预览 Pull/Push 的内容。
 - **移动端友好** —— capture、apply 以及 Sync Center 在手机上均可正常工作；store 本身就是普通的 vault 内容，因此任何笔记同步工具都能携带它。
 
@@ -36,9 +37,28 @@
 
 **本地层面** —— 本设备的实时配置 ↔ store：
 
-- **Capture**（捕获） 把 `<数据文件夹>/config-sync.json` 中定义的条目复制进 `<数据文件夹>/store/`，按每个条目的 sync mode 处理（剥离或加密字段，或加密整个文件），跳过操作系统垃圾文件，并把源插件版本号记录到 `store.lock.json` 中。只有发生变化的文件才会被重写；Sync Center 的 Capture 按钮只会 capture 你勾选的条目。
-- **Apply**（应用） 挑选条目，对插件版本不匹配的情况发出警告，然后把它们落地到本设备的配置目录（不论其名称是什么）。被 Strip 或加密的内容按条目的 sync mode 处理；被 Strip 的键会保留本设备的本地值。单槽位备份覆盖每一个被改动的文件；**Revert last apply** 可将其还原。
+- **Capture**（捕获） 把 `<数据文件夹>/config-sync.json` 中定义的条目复制进 `<数据文件夹>/store/`，按每个条目的 sync mode 处理（剥离或加密字段，或加密整个文件），跳过操作系统垃圾文件，并把源插件版本号（Obsidian/核心条目则是 Obsidian 应用版本号）记录到 `store.lock.json` 中。只有发生变化的文件才会被重写；Sync Center 的 Capture 按钮只会 capture 你勾选的条目。
+- **Apply**（应用） 挑选条目，把它们落地到本设备的配置目录（不论其名称是什么）——没有确认弹窗，勾选后按下 Apply 即直接执行。对于在本设备上落后版本、被禁用或未安装的社区插件，Apply 还能先执行更新、启用或安装（见下文）。被 Strip 或加密的内容按条目的 sync mode 处理；被 Strip 的键会保留本设备的本地值。单槽位备份覆盖每一个被改动的文件；**Revert last apply** 可将其还原。
 - **Sync Center** 按条目比较实时配置与 store，给出尽力而为的方向提示（文件时间对比最近一次 capture），并自动检查远程仓库的新鲜度。
+
+### 可用性分区与安装引擎
+
+除了主列表之外，Sync Center 还会按"在本设备上的实际状态"把社区/核心插件条目归入几个折叠的、需主动勾选才生效的分区——在你勾选分区内的条目之前，它们不会计入页头小圆点数字、侧边栏徽标、筛选按钮或页脚：
+
+- **Outdated on this device**（本设备版本落后） —— 已启用的插件，但其本地安装版本落后于 store 捕获时的版本。
+- **Disabled on this device**（本设备已禁用） —— 配置被追踪，但插件本身在本设备上处于关闭状态。
+- **Not installed on this device**（本设备未安装） —— store 中有配置，但插件在本设备上根本没有安装。
+
+这些分区里的每一行，除了常规的复选框之外还带有一个 **On apply**（应用时动作）选项——复选框决定这个条目的配置是否参与本次运行，On apply 选项决定配置落地之前插件状态要如何变化：
+
+- 落后版本：`⤓ Update to latest`（默认）或 `Keep {version}`（保留当前版本）。
+- 已禁用、无版本落差：`⏻ Enable`（默认）或 `Keep disabled`（保持禁用）。
+- 已禁用且版本落后：`⤓ Update & enable`（默认）、`⏻ Enable`、或 `Keep disabled`。
+- 未安装：`⤓ Install & enable`（默认）、`⤓ Install`、或 `Stage only`（仅预铺配置）。
+
+安装与更新会从官方社区插件目录拉取该插件的最新 release。不在目录中的插件会被预铺（配置写入 store，等你以后手动安装即可），并附带相应提示。更新失败会保留原有配置不变（旧版本被认为不适合被盲目覆盖）；安装失败仍会预铺配置，因为一个尚未安装的插件本来就不会因此受损。
+
+如果插件本地版本领先于 store 记录的版本，对应行不会出现在分区里，而是以一行安静的灰色元数据文字展示（再次 capture 即可刷新 store）。Obsidian 与核心插件条目的版本锚点是 Obsidian 应用版本本身而非某个插件版本——这类版本落差在两个方向上都只是提醒，不会触发任何安装/更新动作。
 
 **传输层面** —— store 如何流转：
 
@@ -46,6 +66,10 @@
 - **Pull / Push（桌面端，可选）**：config-sync 自带的传输通道，用于 git 仓库或本机上的另一个 vault，通过 Sync Center 的 Remotes 区块执行。Pull 会用远程内容覆盖本 vault 的 store（可重复执行——冷启动和日常使用是同一个操作）；Push 则把内容发送出去。git 传输方式会克隆到一个临时目录，绝不会触碰你 vault 自身的 git 仓库。
 
 一切功能都挂在一个 **Config Sync** 功能区图标上：状态点在有待 capture 的条目时显示橙色，在 store 或远程有更新时显示蓝色。点击图标会打开一个菜单，包含 **Sync…**（标有 `↑`/`↓` 变更数量徽标）和 **Revert last apply**；Sync… 会打开（若已打开则聚焦）Sync Center，Capture/Apply/Pull/Push 都在其中完成。也可以在 **Settings → General** 中为 Sync 和 Revert 单独启用功能区图标，默认关闭。
+
+Capture、Apply、Pull、Push 每次执行完毕都会在 Sync Center 顶部渲染一条结果条(result strip)——一段可折叠的摘要（变更/未变更数量，按需展开查看每个条目的详情），而不是弹窗对话框，这样就不会打断你继续勾选。**Revert last apply** 是唯一的例外，它仍然会打开一个报告弹窗，因为它是从 Sync Center 之外（功能区菜单或命令面板）发起的。
+
+**Filter by name…**（按名称筛选）搜索框位于 Sync Center 的侧边栏，会在所有作用域（Obsidian、Core plugins、Community plugins、snippets、themes、dotfiles）中全局搜索；侧边栏会显示每个作用域的命中数量，有命中的分区会自动展开以仅显示命中项。
 
 ![Sync Center](docs/assets/sync-panel.png)
 

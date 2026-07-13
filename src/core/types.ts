@@ -25,7 +25,7 @@ export interface SyncManifest {
 
 export interface StoreLock {
   capturedAt: string;
-  groups: Record<string, { sourcePluginVersion: string }>;
+  groups: Record<string, { sourcePluginVersion?: string; sourceAppVersion?: string }>;
 }
 
 export interface FileChanges {
@@ -46,6 +46,7 @@ export interface GroupResult {
   messages: string[];
   needsAppReload: boolean;
   changes: FileChanges;
+  stateNote?: { kind: "ok" | "warn"; text: string };
 }
 
 export type Remote =
