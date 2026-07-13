@@ -877,7 +877,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         this.groupsErrorMsg = "";
       } catch (e) {
         this.groups.pop(); // roll back so no broken group persists in memory
-        this.groupsErrorMsg = `Not saved: ${(e as Error).message}`;
+        this.groupsErrorMsg = (e as Error).message;
       }
       this.refresh();
     });
@@ -1060,7 +1060,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       await this.host.writeGroupsFile(this.groups);
       this.groupsErrorMsg = "";
     } catch (e) {
-      this.groupsErrorMsg = `Not saved: ${(e as Error).message}`;
+      this.groupsErrorMsg = (e as Error).message;
     }
     this.groupsErrorEl?.setText(this.groupsErrorMsg);
   }
@@ -1195,7 +1195,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       await this.host.saveSettings();
       this.sourcesErrorMsg = "";
     } catch (e) {
-      this.sourcesErrorMsg = `Not saved: ${(e as Error).message}`;
+      this.sourcesErrorMsg = (e as Error).message;
     }
     this.sourcesErrorEl?.setText(this.sourcesErrorMsg);
   }
