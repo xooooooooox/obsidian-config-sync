@@ -75,6 +75,7 @@ export class SyncCenterView extends ItemView {
   private lastRefreshedAt: number | null = null;
   private compact = false;
   private switcherOpen = false;
+  private running = false;
 
   constructor(leaf: WorkspaceLeaf, private host: SyncCenterHost) {
     super(leaf);
@@ -610,6 +611,7 @@ export class SyncCenterView extends ItemView {
       names: string[],
       exec: (names: string[], onProgress: ProgressFn) => Promise<void>
     ): void => {
+      this.running = true;
       btn.setDisabled(true);
       other.setDisabled(true);
       const wrap = btn.buttonEl.parentElement; // the .config-sync-btnwrap span
@@ -618,11 +620,15 @@ export class SyncCenterView extends ItemView {
       if (barEl !== null) barEl.show();
       btn.buttonEl.addClass("is-busy");
       void (async () => {
-        await exec(names, (done, total, current) => {
-          btn.setButtonText(`${verb} ${done}/${total}…`);
-          btn.buttonEl.setAttribute("aria-label", current);
-          if (fill !== null) fill.style.width = `${total === 0 ? 0 : Math.round((done / total) * 100)}%`;
-        });
+        try {
+          await exec(names, (done, total, current) => {
+            btn.setButtonText(`${verb} ${done}/${total}…`);
+            btn.buttonEl.setAttribute("aria-label", current);
+            if (fill !== null) fill.style.width = `${total === 0 ? 0 : Math.round((done / total) * 100)}%`;
+          });
+        } finally {
+          this.running = false;
+        }
         await this.reload(); // re-render restores the idle footer
       })();
     };
@@ -639,12 +645,12 @@ export class SyncCenterView extends ItemView {
     const capW = mkWrapped();
     capW.btn.setButtonText(`↑ Capture ${capNames.length} item${capNames.length === 1 ? "" : "s"}`);
     capW.btn.buttonEl.addClass("config-sync-btn-capture");
-    capW.btn.setDisabled(capNames.length === 0);
+    capW.btn.setDisabled(this.running || capNames.length === 0);
 
     const applyW = mkWrapped();
     applyW.btn.setCta();
     applyW.btn.setButtonText(`↓ Apply ${applyNames.length} item${applyNames.length === 1 ? "" : "s"}`);
-    applyW.btn.setDisabled(applyNames.length === 0);
+    applyW.btn.setDisabled(this.running || applyNames.length === 0);
 
     capW.btn.onClick(() => run(capW.btn, applyW.btn, "Capturing", this.captureNames(), (n, p) => this.host.captureItems(n, p)));
     applyW.btn.onClick(() => run(applyW.btn, capW.btn, "Applying", this.applyNames(), (n, p) => this.host.applyItems(n, p)));
