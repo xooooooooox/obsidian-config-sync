@@ -5,12 +5,15 @@ import { PkmMode } from "../core/pkm";
 import { validateRemotes } from "../core/manifest";
 import { keyMatchesAny } from "../core/sanitize";
 import {
+  CATEGORY_LABELS,
   CatalogItem,
   CatalogSection,
+  categoryForGroup,
   defaultGroupForName,
   expectedPathForName,
   findGroupByName,
   groupForItem,
+  ItemCategory,
   joinLocation,
   reservedNames,
   splitLocation,
@@ -43,6 +46,7 @@ export interface SettingsHost extends Plugin {
   detectSensitive(group: SyncGroup): Promise<SensitiveScan>;
   passphrase(): string | null;
   setPassphrase(v: string | null): void;
+  displayName(group: string): string;
 }
 
 const SENSITIVE_ENCRYPT_RE = /apikey|api_key|token|secret|password|credential/i;
@@ -95,6 +99,56 @@ const SECTION_TAB: Record<"obsidian" | "core" | "plugins", string> = {
   plugins: "Community plugins",
 };
 
+const CATEGORY_ORDER: ItemCategory[] = ["obsidian", "core", "community", "custom"];
+
+// Single source of truth for General's Settings: used both to render (data-search-anchor
+// attached to each Setting) and to build the search index, so the two can't drift.
+interface GeneralSettingDef {
+  name: string;
+  desc: string;
+  anchorId: string;
+}
+
+const GENERAL_SETTINGS: GeneralSettingDef[] = [
+  { name: "PKM mode", desc: "Adjusts the recommended storage location to match how your vault is organized. Auto detects IOTO vaults.", anchorId: "general-pkm-mode" },
+  {
+    name: "Data folder",
+    desc: "Where your synced settings live inside this vault. Your regular vault sync (e.g. remotely-save) carries this folder to your other devices.",
+    anchorId: "general-data-folder",
+  },
+  { name: "Sync menu shows change counts", desc: "Counts changed items when the menu opens. Turn off if opening the menu feels slow.", anchorId: "general-status-in-menu" },
+  { name: "Check remotes automatically", desc: "Checks each remote's last capture shortly after startup and every few hours.", anchorId: "general-remote-auto-check" },
+  {
+    name: "Periodic local check",
+    desc: "Re-scans for local changes every 5 minutes while the window is focused, keeping the ribbon dot fresh.",
+    anchorId: "general-local-periodic-check",
+  },
+  {
+    name: "Ribbon buttons",
+    desc: "The Config Sync ribbon icon always opens a menu of available actions. Optionally also show individual ribbon icons.",
+    anchorId: "general-ribbon-buttons",
+  },
+  { name: "Passphrase", desc: "Needed for Encrypt modes. Enter the same passphrase on each device; it is never stored in the store or synced.", anchorId: "general-passphrase" },
+];
+
+interface SearchHit {
+  scope: "general" | "obsidian" | "core" | "plugins" | "advanced" | "sources";
+  kind: "setting" | "item" | "rule" | "discovered" | "remote";
+  name: string;
+  desc: string;
+  anchorId: string;
+  item?: CatalogItem;
+}
+
+const SCOPE_LABEL: Record<SearchHit["scope"], string> = {
+  general: "General",
+  obsidian: "Obsidian",
+  core: "Core",
+  plugins: "Community",
+  advanced: "Advanced",
+  sources: "Remotes",
+};
+
 export class ConfigSyncSettingTab extends PluginSettingTab {
   private groups: SyncGroup[] = [];
   private sources: RemoteDraft[] = [];
@@ -103,6 +157,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private renderGen = 0;
   private activeTab: PanelTab = "general";
   private search = "";
+  private searchScope: SearchHit["scope"] | "all" = "all";
   private bodyEl: HTMLElement | null = null;
   private expanded = new Set<string>(); // UI-transient: advanced rows expanded this session
   private groupsErrorEl: HTMLElement | null = null;
@@ -120,24 +175,25 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     this.loaded = false;
     this.activeTab = "general";
     this.search = "";
+    this.searchScope = "all";
     this.expanded.clear();
-    this.rerender(0);
+    void this.rerender(0);
   }
 
   private refresh(): void {
-    this.rerender(this.containerEl.scrollTop);
+    void this.rerender(this.containerEl.scrollTop);
   }
 
-  private rerender(scrollTop: number): void {
+  private rerender(scrollTop: number): Promise<void> {
     const gen = ++this.renderGen;
     this.bodyEl = null;
     this.containerEl.empty();
-    void this.render(this.containerEl, gen, scrollTop);
+    return this.render(this.containerEl, gen, scrollTop);
   }
 
   private switchTab(tab: PanelTab): void {
     this.activeTab = tab;
-    this.rerender(0);
+    void this.rerender(0);
   }
 
   private async render(containerEl: HTMLElement, gen: number, scrollTop: number): Promise<void> {
@@ -179,6 +235,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     search.setValue(this.search);
     search.onChange((v) => {
       this.search = v;
+      this.searchScope = "all";
       const body = this.bodyEl;
       if (body === null) return;
       void this.renderBody(body, this.renderGen);
@@ -443,110 +500,238 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     });
   }
 
-  private async renderSearchResults(containerEl: HTMLElement, gen: number): Promise<void> {
-    const q = this.search.trim().toLowerCase();
+  // Builds the full-vault search index: General settings (static registry), the three picker
+  // tabs' items (unchanged actionable-row behavior), Advanced rule/discovered cards, and remotes
+  // (desktop only). Unfiltered by query — callers substring-match against name+desc(+path).
+  private async buildSearchIndex(gen: number): Promise<SearchHit[] | null> {
+    const hits: SearchHit[] = [];
+    for (const s of GENERAL_SETTINGS) {
+      hits.push({ scope: "general", kind: "setting", name: s.name, desc: s.desc, anchorId: s.anchorId });
+    }
     const tabs: ("obsidian" | "core" | "plugins")[] = ["obsidian", "core", "plugins"];
-    const listEl = containerEl.createDiv();
-    let any = false;
     for (const tab of tabs) {
       const sections = await this.sectionsFor(tab);
-      if (gen !== this.renderGen) return;
+      if (gen !== this.renderGen) return null;
       for (const sec of sections) {
         for (const item of sec.items) {
-          const hay = `${item.name} ${item.label} ${item.path}`.toLowerCase();
-          if (!hay.includes(q)) continue;
-          any = true;
-          const labelled: CatalogItem = { ...item, label: `${item.label} — ${SECTION_TAB[tab]} · ${sec.heading}` };
-          this.renderChecklistRow(listEl, labelled);
+          hits.push({
+            scope: tab,
+            kind: "item",
+            name: item.label,
+            desc: `${item.description ?? ""} ${item.path}`,
+            anchorId: "",
+            item: { ...item, label: `${item.label} — ${SECTION_TAB[tab]} · ${sec.heading}` },
+          });
         }
       }
     }
-    if (!any) listEl.createEl("p", { text: "No matching settings.", cls: "config-sync-empty" });
+    const reserved = reservedNames(this.host.installedPluginIds());
+    for (const g of this.groups) {
+      if (g.origin === "discovered") {
+        hits.push({
+          scope: "advanced",
+          kind: "discovered",
+          name: this.host.displayName(g.name),
+          desc: splitLocation(g.path).rel,
+          anchorId: `advanced-rule-${g.name}`,
+        });
+        continue;
+      }
+      if (g.origin !== undefined) continue;
+      hits.push({
+        scope: "advanced",
+        kind: "rule",
+        name: this.host.displayName(g.name),
+        desc: reserved.has(g.name) ? splitLocation(g.path).rel : "Custom rule",
+        anchorId: `advanced-rule-${g.name}`,
+      });
+    }
+    if (Platform.isDesktop) {
+      for (const r of this.sources) {
+        hits.push({
+          scope: "sources",
+          kind: "remote",
+          name: r.name === "" ? "(unnamed)" : r.name,
+          desc: r.type === "vault" ? r.storePath : `${r.url}#${r.branch}`,
+          anchorId: `remote-${r.name}`,
+        });
+      }
+    }
+    return hits;
+  }
+
+  private async renderSearchResults(containerEl: HTMLElement, gen: number): Promise<void> {
+    const q = this.search.trim().toLowerCase();
+    const index = await this.buildSearchIndex(gen);
+    if (index === null) return;
+    const matches = index.filter((h) => `${h.name} ${h.desc}`.toLowerCase().includes(q));
+
+    const scopes: SearchHit["scope"][] = ["general", "obsidian", "core", "plugins", "advanced", "sources"];
+    const visibleScopes = Platform.isMobile ? scopes.filter((s) => s !== "sources") : scopes;
+    const countFor = (scope: SearchHit["scope"] | "all"): number =>
+      scope === "all" ? matches.length : matches.filter((h) => h.scope === scope).length;
+
+    if (this.searchScope !== "all" && !visibleScopes.includes(this.searchScope)) this.searchScope = "all";
+
+    const pillsEl = containerEl.createDiv({ cls: "config-sync-scope-pills" });
+    const addPill = (scope: SearchHit["scope"] | "all", label: string): void => {
+      const count = countFor(scope);
+      const pill = pillsEl.createEl("button", {
+        cls: `config-sync-fpill${this.searchScope === scope ? " is-active" : ""}${count === 0 ? " is-disabled" : ""}`,
+        text: `${label} ${count}`,
+      });
+      if (count === 0) {
+        pill.setAttr("disabled", "true");
+        return;
+      }
+      pill.addEventListener("click", () => {
+        this.searchScope = scope;
+        this.refresh();
+      });
+    };
+    addPill("all", "All");
+    for (const scope of visibleScopes) addPill(scope, SCOPE_LABEL[scope]);
+
+    const filtered = this.searchScope === "all" ? matches : matches.filter((h) => h.scope === this.searchScope);
+    const listEl = containerEl.createDiv();
+    if (filtered.length === 0) {
+      listEl.createEl("p", { text: "No matching settings.", cls: "config-sync-empty" });
+    } else {
+      for (const hit of filtered) this.renderSearchHit(listEl, hit);
+    }
     this.renderGroupsError(containerEl);
+  }
+
+  private scopeTab(scope: SearchHit["scope"]): PanelTab {
+    return scope === "general" ? "general" : scope === "advanced" ? "advanced" : scope === "sources" ? "sources" : scope;
+  }
+
+  private renderSearchHit(listEl: HTMLElement, hit: SearchHit): void {
+    if (hit.kind === "item" && hit.item !== undefined) {
+      this.renderChecklistRow(listEl, hit.item);
+      return;
+    }
+    const row = listEl.createDiv({ cls: "config-sync-hit" });
+    const main = row.createDiv({ cls: "config-sync-hit-main" });
+    main.createDiv({ cls: "config-sync-hit-name", text: hit.name });
+    if (hit.desc.trim() !== "") main.createDiv({ cls: "config-sync-hit-desc", text: hit.desc });
+    row.createSpan({ cls: "config-sync-scopetag", text: SCOPE_LABEL[hit.scope] });
+    row.createSpan({ cls: "config-sync-hit-go", text: "›" });
+    row.addEventListener("click", () => this.jumpTo(hit));
+  }
+
+  private jumpTo(hit: SearchHit): void {
+    void (async () => {
+      this.search = "";
+      this.searchScope = "all";
+      this.activeTab = this.scopeTab(hit.scope);
+      await this.rerender(0);
+      const target = this.containerEl.querySelector(`[data-search-anchor="${CSS.escape(hit.anchorId)}"]`);
+      if (target === null) return;
+      target.scrollIntoView({ block: "center" });
+      target.addClass("config-sync-search-highlight");
+      window.setTimeout(() => target.removeClass("config-sync-search-highlight"), 1500);
+    })();
+  }
+
+  private anchor(setting: Setting, anchorId: string): Setting {
+    setting.settingEl.setAttribute("data-search-anchor", anchorId);
+    return setting;
   }
 
   private renderPkmMode(containerEl: HTMLElement): void {
     const detected = this.host.detectedMode();
-    new Setting(containerEl)
-      .setName("PKM mode")
-      .setDesc("Adjusts the recommended storage location to match how your vault is organized. Auto detects IOTO vaults.")
-      .addDropdown((d) =>
-        d
-          .addOption("auto", `Auto (detected: ${detected === "ioto" ? "IOTO" : "default"})`)
-          .addOption("ioto", "IOTO")
-          .addOption("default", "Default")
-          .setValue(this.host.settings.pkmMode)
-          .onChange(async (v) => {
-            this.host.settings.pkmMode = v as PkmMode;
-            await this.host.saveSettings();
-            this.loaded = false;
-            this.refresh();
-          })
-      );
+    this.anchor(
+      new Setting(containerEl)
+        .setName("PKM mode")
+        .setDesc("Adjusts the recommended storage location to match how your vault is organized. Auto detects IOTO vaults."),
+      "general-pkm-mode"
+    ).addDropdown((d) =>
+      d
+        .addOption("auto", `Auto (detected: ${detected === "ioto" ? "IOTO" : "default"})`)
+        .addOption("ioto", "IOTO")
+        .addOption("default", "Default")
+        .setValue(this.host.settings.pkmMode)
+        .onChange(async (v) => {
+          this.host.settings.pkmMode = v as PkmMode;
+          await this.host.saveSettings();
+          this.loaded = false;
+          this.refresh();
+        })
+    );
   }
 
   private async renderDataFolder(containerEl: HTMLElement, gen: number): Promise<void> {
     const resolved = await this.host.resolvedRootPath();
     if (gen !== this.renderGen) return;
-    new Setting(containerEl)
-      .setName("Data folder")
-      .setDesc(
+    this.anchor(
+      new Setting(containerEl).setName("Data folder").setDesc(
         `Where your synced settings live inside this vault. Your regular vault sync (e.g. remotely-save) carries this folder to your other devices. Leave empty for the recommended location (currently: ${resolved}).`
-      )
-      .addText((t) => {
-        t.setPlaceholder(resolved);
-        t.setValue(this.host.settings.rootPath);
-        t.onChange(async (v) => {
-          const trimmed = v.trim();
-          if (trimmed.startsWith("/") || trimmed.split("/").includes("..")) {
-            new Notice(`Config Sync: invalid data folder "${trimmed}" — must be a vault-relative path`);
-            return;
-          }
-          this.host.settings.rootPath = trimmed;
-          await this.host.saveSettings();
-        });
-        t.inputEl.addEventListener("blur", () => {
-          this.loaded = false;
-          this.refresh();
-        });
+      ),
+      "general-data-folder"
+    ).addText((t) => {
+      t.setPlaceholder(resolved);
+      t.setValue(this.host.settings.rootPath);
+      t.onChange(async (v) => {
+        const trimmed = v.trim();
+        if (trimmed.startsWith("/") || trimmed.split("/").includes("..")) {
+          new Notice(`Config Sync: invalid data folder "${trimmed}" — must be a vault-relative path`);
+          return;
+        }
+        this.host.settings.rootPath = trimmed;
+        await this.host.saveSettings();
       });
+      t.inputEl.addEventListener("blur", () => {
+        this.loaded = false;
+        this.refresh();
+      });
+    });
   }
 
   private renderStatusToggles(containerEl: HTMLElement): void {
-    new Setting(containerEl)
-      .setName("Sync menu shows change counts")
-      .setDesc("Counts changed items when the menu opens. Turn off if opening the menu feels slow.")
-      .addToggle((t) =>
-        t.setValue(this.host.settings.statusInMenu).onChange(async (v) => {
-          this.host.settings.statusInMenu = v;
-          await this.host.saveSettings();
-        })
-      );
-    new Setting(containerEl)
-      .setName("Check remotes automatically")
-      .setDesc("Checks each remote's last capture shortly after startup and every few hours.")
-      .addToggle((t) =>
-        t.setValue(this.host.settings.remoteAutoCheck).onChange(async (v) => {
-          this.host.settings.remoteAutoCheck = v;
-          await this.host.saveSettings();
-        })
-      );
-    new Setting(containerEl)
-      .setName("Periodic local check")
-      .setDesc("Re-scans for local changes every 5 minutes while the window is focused, keeping the ribbon dot fresh.")
-      .addToggle((t) =>
-        t.setValue(this.host.settings.localPeriodicCheck).onChange(async (v) => {
-          this.host.settings.localPeriodicCheck = v;
-          await this.host.saveSettings();
-        })
-      );
+    this.anchor(
+      new Setting(containerEl)
+        .setName("Sync menu shows change counts")
+        .setDesc("Counts changed items when the menu opens. Turn off if opening the menu feels slow."),
+      "general-status-in-menu"
+    ).addToggle((t) =>
+      t.setValue(this.host.settings.statusInMenu).onChange(async (v) => {
+        this.host.settings.statusInMenu = v;
+        await this.host.saveSettings();
+      })
+    );
+    this.anchor(
+      new Setting(containerEl)
+        .setName("Check remotes automatically")
+        .setDesc("Checks each remote's last capture shortly after startup and every few hours."),
+      "general-remote-auto-check"
+    ).addToggle((t) =>
+      t.setValue(this.host.settings.remoteAutoCheck).onChange(async (v) => {
+        this.host.settings.remoteAutoCheck = v;
+        await this.host.saveSettings();
+      })
+    );
+    this.anchor(
+      new Setting(containerEl)
+        .setName("Periodic local check")
+        .setDesc("Re-scans for local changes every 5 minutes while the window is focused, keeping the ribbon dot fresh."),
+      "general-local-periodic-check"
+    ).addToggle((t) =>
+      t.setValue(this.host.settings.localPeriodicCheck).onChange(async (v) => {
+        this.host.settings.localPeriodicCheck = v;
+        await this.host.saveSettings();
+      })
+    );
   }
 
   private renderRibbonToggles(containerEl: HTMLElement): void {
-    new Setting(containerEl)
-      .setName("Ribbon buttons")
-      .setDesc("The Config Sync ribbon icon always opens a menu of available actions. Optionally also show individual ribbon icons.")
-      .setHeading();
+    this.anchor(
+      new Setting(containerEl)
+        .setName("Ribbon buttons")
+        .setDesc("The Config Sync ribbon icon always opens a menu of available actions. Optionally also show individual ribbon icons.")
+        .setHeading(),
+      "general-ribbon-buttons"
+    );
     const defs: { key: RibbonKey; label: string }[] = [
       { key: "sync", label: "Sync" },
       { key: "revert", label: "Revert last apply" },
@@ -564,9 +749,12 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   }
 
   private renderPassphrase(containerEl: HTMLElement): void {
-    const setting = new Setting(containerEl)
-      .setName("Passphrase")
-      .setDesc("Needed for Encrypt modes. Enter the same passphrase on each device; it is never stored in the store or synced.");
+    const setting = this.anchor(
+      new Setting(containerEl)
+        .setName("Passphrase")
+        .setDesc("Needed for Encrypt modes. Enter the same passphrase on each device; it is never stored in the store or synced."),
+      "general-passphrase"
+    );
     let draft = "";
     setting.addText((t) => {
       t.inputEl.type = "password";
@@ -609,11 +797,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const custom = this.groups.filter((g) => !reserved.has(g.name) && g.origin === undefined);
 
     const managedHead = new Setting(containerEl)
-      .setName("Managed by pickers")
+      .setName("Synced items")
       .setHeading()
-      .setDesc("Rules created from the other tabs. Expand a row to edit it, or reset it to the picker default.");
+      .setDesc("Everything you turned on in the Obsidian / Core plugins / Community plugins tabs. Expand a row to fine-tune its rule; reset returns it to the default.");
     if (managed.length > 0) {
-      managedHead.addExtraButton((b) => b.setIcon("rotate-ccw").setTooltip("Reset all to picker defaults").onClick(async () => {
+      managedHead.addExtraButton((b) => b.setIcon("rotate-ccw").setTooltip("Reset all to defaults").onClick(async () => {
         for (let i = 0; i < this.groups.length; i++) {
           const g = this.groups[i];
           if (g === undefined || !reserved.has(g.name) || g.origin !== undefined) continue;
@@ -625,7 +813,12 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       }));
     }
     const managedEl = containerEl.createDiv();
-    for (const group of managed) this.renderRuleCard(managedEl, group, true);
+    for (const cat of CATEGORY_ORDER) {
+      const inCat = managed.filter((g) => categoryForGroup(g.name) === cat);
+      if (inCat.length === 0) continue;
+      managedEl.createDiv({ cls: "config-sync-sect", text: CATEGORY_LABELS[cat] });
+      for (const group of inCat) this.renderRuleCard(managedEl, group, true);
+    }
 
     const discovered = await this.host.listDiscoveredFiles(this.groups);
     if (gen !== this.renderGen) return;
@@ -675,6 +868,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private renderDiscoveredOnRow(listEl: HTMLElement, group: SyncGroup): void {
     const isOpen = this.expanded.has(group.name);
     const row = listEl.createDiv({ cls: "config-sync-row" + (isOpen ? " is-open" : "") });
+    row.setAttribute("data-search-anchor", `advanced-rule-${group.name}`);
     row.createSpan({ cls: "config-sync-row-chevron", text: isOpen ? "▾" : "▸" });
     row.createSpan({ cls: "config-sync-rule-name", text: splitLocation(group.path).rel });
     row.createDiv({ cls: "config-sync-rule-spacer" });
@@ -698,8 +892,9 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private renderRuleCard(listEl: HTMLElement, group: SyncGroup, managed: boolean): void {
     const isOpen = this.expanded.has(group.name);
     const row = listEl.createDiv({ cls: "config-sync-row" + (isOpen ? " is-open" : "") });
+    row.setAttribute("data-search-anchor", `advanced-rule-${group.name}`);
     row.createSpan({ cls: "config-sync-row-chevron", text: isOpen ? "▾" : "▸" });
-    row.createSpan({ cls: "config-sync-rule-name", text: group.name === "" ? "(unnamed)" : group.name });
+    row.createSpan({ cls: "config-sync-card-title", text: group.name === "" ? "(unnamed)" : this.host.displayName(group.name) });
     row.createSpan({ cls: "config-sync-row-path", text: splitLocation(group.path).rel });
     if (managed) {
       const expected = expectedPathForName(group.name);
@@ -873,6 +1068,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const key = `remote:${draft.name}`;
     const isOpen = this.expanded.has(key);
     const row = listEl.createDiv({ cls: "config-sync-row" + (isOpen ? " is-open" : "") });
+    row.setAttribute("data-search-anchor", `remote-${draft.name}`);
     row.createSpan({ cls: "config-sync-row-chevron", text: isOpen ? "▾" : "▸" });
     row.createSpan({ cls: "config-sync-rule-name", text: draft.name === "" ? "(unnamed)" : draft.name });
     row.createSpan({ cls: "config-sync-row-type", text: draft.type });

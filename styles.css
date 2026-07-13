@@ -48,8 +48,69 @@
   font-style: italic;
 }
 
+.config-sync-scope-pills {
+  display: flex;
+  gap: var(--size-4-1);
+  flex-wrap: wrap;
+  margin-bottom: var(--size-4-3);
+}
+
+.config-sync-fpill.is-disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.config-sync-hit {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+  padding: var(--size-4-2) var(--size-4-3);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  margin-bottom: var(--size-4-2);
+  cursor: pointer;
+}
+
+.config-sync-hit-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.config-sync-hit-name {
+  font-weight: var(--font-semibold);
+}
+
+.config-sync-hit-desc {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  margin-top: var(--size-2-1);
+}
+
+.config-sync-scopetag {
+  font-size: var(--font-ui-smaller);
+  border-radius: 999px;
+  padding: 1px 8px;
+  background: rgba(var(--color-purple-rgb), 0.15);
+  color: var(--color-purple);
+  flex: none;
+}
+
+.config-sync-hit-go {
+  color: var(--text-faint);
+  flex: none;
+}
+
+.config-sync-search-highlight {
+  background: rgba(var(--color-purple-rgb), 0.12);
+  transition: background 0.4s;
+}
+
 .config-sync-rule-name {
   font-family: var(--font-monospace);
+  font-weight: var(--font-semibold);
+}
+
+.config-sync-card-title {
   font-weight: var(--font-semibold);
 }
 
@@ -103,7 +164,8 @@
   min-width: 0;
 }
 
-.config-sync-row .config-sync-rule-name {
+.config-sync-row .config-sync-rule-name,
+.config-sync-row .config-sync-card-title {
   flex: none;
 }
 

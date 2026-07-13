@@ -18,7 +18,7 @@ import {
   revertLastApply,
   writeGroups,
 } from "./core/ConfigSyncCore";
-import { type CatalogSection, listCoreSections, listDiscovered, listOptionSections, listPluginSections } from "./core/catalog";
+import { type CatalogSection, displayLabelForGroup, listCoreSections, listDiscovered, listOptionSections, listPluginSections } from "./core/catalog";
 import { listFilesRecursive } from "./core/io";
 import { groupRealPath } from "./core/pathing";
 import { scanSensitive, SensitiveScan } from "./core/modes";
@@ -326,14 +326,9 @@ export default class ConfigSyncPlugin extends Plugin {
     this.app.saveLocalStorage("config-sync-passphrase", v === "" ? null : v);
   }
 
-  private async coreContext(): Promise<CoreContext> {
-    const rootPath = await resolveRootPath(this.settings.rootPath, this.settings.pkmMode, this.pkmProbe());
-    if (rootPath === "" || rootPath.startsWith("/") || rootPath.split("/").includes("..")) {
-      throw new Error(`Config Sync: invalid data folder "${rootPath}" — set a vault-relative path in settings`);
-    }
-    this.lastResolvedRoot = rootPath;
+  private pluginHost(): PluginHost {
     const registry = this.pluginRegistry();
-    const host: PluginHost = {
+    return {
       getInstalledPluginVersion: (id) => registry.manifests[id]?.version ?? null,
       isPluginEnabled: (id) => registry.enabledPlugins.has(id),
       disablePlugin: (id) => registry.disablePlugin(id),
@@ -341,11 +336,23 @@ export default class ConfigSyncPlugin extends Plugin {
       getInstalledPluginName: (id) => registry.manifests[id]?.name ?? null,
       getCorePluginName: (id) => this.internalPlugins().plugins[id]?.instance?.name ?? null,
     };
+  }
+
+  displayName(group: string): string {
+    return displayLabelForGroup(group, this.pluginHost());
+  }
+
+  private async coreContext(): Promise<CoreContext> {
+    const rootPath = await resolveRootPath(this.settings.rootPath, this.settings.pkmMode, this.pkmProbe());
+    if (rootPath === "" || rootPath.startsWith("/") || rootPath.split("/").includes("..")) {
+      throw new Error(`Config Sync: invalid data folder "${rootPath}" — set a vault-relative path in settings`);
+    }
+    this.lastResolvedRoot = rootPath;
     return {
       io: this.app.vault.adapter,
       configDir: this.app.vault.configDir,
       rootPath,
-      plugins: host,
+      plugins: this.pluginHost(),
       passphrase: this.passphrase(),
       now: () => new Date().toISOString(),
     };
