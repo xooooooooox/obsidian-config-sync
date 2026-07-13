@@ -354,7 +354,7 @@ body.is-phone .config-sync-fkey {
 .config-sync-pill.is-up { background: rgba(var(--color-orange-rgb), 0.15); color: var(--color-orange); }
 .config-sync-pill.is-down { background: rgba(var(--color-purple-rgb), 0.15); color: var(--color-purple); }
 .config-sync-pill.is-ok { background: rgba(var(--color-green-rgb), 0.15); color: var(--color-green); }
-.config-sync-pill.is-none { background: rgba(255, 255, 255, 0.06); color: var(--text-muted); }
+.config-sync-pill.is-none { background: var(--background-modifier-hover); color: var(--text-muted); }
 .config-sync-pill.is-warn { background: none; color: var(--color-orange); margin-left: var(--size-4-1); }
 
 .config-sync-fpill { background: none; border: 1px solid var(--background-modifier-border); border-radius: 999px; padding: 2px 10px; font-size: var(--font-ui-smaller); color: var(--text-muted); cursor: pointer; box-shadow: none; height: auto; }
@@ -365,8 +365,8 @@ body.is-phone .config-sync-fkey {
 
 .config-sync-report-sub { color: var(--text-muted); font-size: var(--font-ui-smaller); margin-bottom: var(--size-4-2); }
 .config-sync-sect { display: flex; align-items: center; font-size: var(--font-ui-smaller); text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); padding: var(--size-4-3) 2px var(--size-4-1); }
-.config-sync-card { background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.09); border-radius: var(--radius-m); padding: 0 var(--size-4-3); }
-.config-sync-report-row { display: flex; align-items: center; gap: var(--size-4-2); padding: var(--size-4-2) 0; border-bottom: 1px solid rgba(255, 255, 255, 0.07); cursor: pointer; }
+.config-sync-card { background: var(--background-secondary); border: 1px solid var(--background-modifier-border); border-radius: var(--radius-m); padding: 0 var(--size-4-3); }
+.config-sync-report-row { display: flex; align-items: center; gap: var(--size-4-2); padding: var(--size-4-2) 0; border-bottom: 1px solid var(--background-modifier-border); cursor: pointer; }
 .config-sync-card > .config-sync-report-row:last-of-type { border-bottom: none; }
 .config-sync-chip { font-size: var(--font-ui-smaller); border-radius: 999px; padding: 0 var(--size-4-2); flex: none; }
 .config-sync-chip.is-add { background: rgba(var(--color-green-rgb), 0.15); color: var(--color-green); }
@@ -391,7 +391,7 @@ body.is-phone .config-sync-fkey {
 .config-sync-dot-capture::after { background: var(--color-orange); }
 .config-sync-dot-apply::after { background: var(--color-blue); }
 
-.config-sync-hub-row { display: flex; align-items: center; gap: var(--size-4-2); padding: var(--size-4-2) 0; border-bottom: 1px solid rgba(255, 255, 255, 0.07); cursor: pointer; white-space: nowrap; }
+.config-sync-hub-row { display: flex; align-items: center; gap: var(--size-4-2); padding: var(--size-4-2) 0; border-bottom: 1px solid var(--background-modifier-border); cursor: pointer; white-space: nowrap; }
 .config-sync-hub-row .config-sync-rule-name { flex: none; }
 .config-sync-card > .config-sync-hub-row:last-of-type { border-bottom: none; }
 .config-sync-state-icon { flex: none; width: 1.2em; text-align: center; font-size: var(--font-ui-small); }
@@ -495,7 +495,7 @@ body.is-phone .config-sync-actionbar { flex-wrap: wrap; }
 
 .config-sync-btnwrap:has(button.mod-cta) .config-sync-progress > div { background: var(--color-purple); }
 
-button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6px; border: 2px solid rgba(255, 255, 255, 0.3); border-top-color: currentColor; border-radius: 50%; display: inline-block; animation: config-sync-spin 0.9s linear infinite; }
+button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6px; border: 2px solid var(--background-modifier-border); border-top-color: currentColor; border-radius: 50%; display: inline-block; animation: config-sync-spin 0.9s linear infinite; }
 
 @keyframes config-sync-spin { to { transform: rotate(360deg); } }
 
@@ -545,7 +545,7 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 
 .config-sync-side-badge.is-ok { background: rgba(var(--color-green-rgb), 0.15); color: var(--color-green); }
 
-.config-sync-side-badge.is-none { background: rgba(255, 255, 255, 0.06); color: var(--text-muted); }
+.config-sync-side-badge.is-none { background: var(--background-modifier-hover); color: var(--text-muted); }
 
 .config-sync-main { display: flex; flex-direction: column; min-width: 0; }
 
@@ -557,7 +557,7 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 
 .config-sync-shell.is-compact { grid-template-columns: 1fr; }
 
-.config-sync-switcher { display: flex; align-items: center; gap: var(--size-4-1); width: 100%; background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 8px; padding: 7px 11px; cursor: pointer; font-size: var(--font-ui-small); }
+.config-sync-switcher { display: flex; align-items: center; gap: var(--size-4-1); width: 100%; background: var(--background-secondary); border: 1px solid var(--background-modifier-border); border-radius: 8px; padding: 7px 11px; cursor: pointer; font-size: var(--font-ui-small); }
 
 .config-sync-switcher-chev { margin-left: auto; color: var(--text-faint); }
 
