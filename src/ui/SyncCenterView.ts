@@ -27,6 +27,7 @@ const sessionUi = {
 export interface SyncCenterHost {
   computeStatuses(): Promise<{ groups: SyncGroup[]; statuses: GroupStatus[] }>;
   resolvedPath(group: SyncGroup): string;
+  displayName(group: string): string;
   captureItems(names: string[], onProgress?: ProgressFn): Promise<void>; // runs selective capture + shows its report
   applyItems(names: string[], onProgress?: ProgressFn): Promise<void>; // warnings-confirm + apply + report
   remotes(): Remote[]; // [] on mobile
@@ -453,7 +454,7 @@ export class SyncCenterView extends ItemView {
       attr: { "aria-label": this.host.resolvedPath(group) },
     });
     const chev = row.createSpan({ cls: "config-sync-row-chevron", text: this.expandedItems.has(group.name) ? "▾" : "▸" });
-    row.createSpan({ cls: "config-sync-rule-name", text: group.name });
+    row.createSpan({ cls: "config-sync-rule-name", text: this.host.displayName(group.name) });
     if (group.mode === "encrypted") row.createSpan({ cls: "config-sync-mode-badge", text: "🔒" });
     else if (group.mode === "fields") row.createSpan({ cls: "config-sync-mode-badge", text: "▤" });
     row.createDiv({ cls: "config-sync-rule-spacer" });
@@ -734,7 +735,7 @@ export class SyncCenterView extends ItemView {
 
   private renderRemoteDiffEntry(detail: HTMLElement, e: RemoteDiffEntry): void {
     const row = detail.createDiv({ cls: "config-sync-report-row" });
-    row.createSpan({ cls: "config-sync-rule-name", text: e.group });
+    row.createSpan({ cls: "config-sync-rule-name", text: this.host.displayName(e.group) });
     row.createDiv({ cls: "config-sync-rule-spacer" });
     if (e.changes.added.length > 0) row.createSpan({ cls: "config-sync-chip is-add", text: `+${e.changes.added.length}` });
     if (e.changes.updated.length > 0) row.createSpan({ cls: "config-sync-chip is-upd", text: `~${e.changes.updated.length}` });

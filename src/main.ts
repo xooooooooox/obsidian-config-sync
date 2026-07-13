@@ -223,11 +223,12 @@ export default class ConfigSyncPlugin extends Plugin {
         return { groups, statuses };
       },
       resolvedPath: (g) => g.path.replace("{configDir}", this.app.vault.configDir),
+      displayName: (g) => this.displayName(g),
       captureItems: async (names: string[], onProgress?: ProgressFn) => {
         try {
           const ctx = await this.coreContext();
           const results = await capture(ctx, names, onProgress);
-          new ReportModal(this.app, "Captured", results, new Date().toLocaleString()).open();
+          new ReportModal(this.app, "Captured", results, new Date().toLocaleString(), (g) => this.displayName(g)).open();
           await this.refreshLocalStatus();
         } catch (e) {
           new Notice(`Config Sync capture failed: ${(e as Error).message}`, 10000);
@@ -238,11 +239,11 @@ export default class ConfigSyncPlugin extends Plugin {
           const ctx = await this.coreContext();
           const warnings = await checkApply(ctx, names);
           if (warnings.length > 0) {
-            const ok = await confirmWarnings(this.app, "Config Sync: version warnings", warnings.map((w) => `${w.group}: ${w.message}`));
+            const ok = await confirmWarnings(this.app, "Config Sync: version warnings", warnings.map((w) => `${this.displayName(w.group)}: ${w.message}`));
             if (!ok) return;
           }
           const results = await apply(ctx, names, onProgress);
-          new ReportModal(this.app, "Applied", results, new Date().toLocaleString()).open();
+          new ReportModal(this.app, "Applied", results, new Date().toLocaleString(), (g) => this.displayName(g)).open();
           await this.refreshLocalStatus();
         } catch (e) {
           new Notice(`Config Sync apply failed: ${(e as Error).message}`, 10000);
@@ -259,7 +260,7 @@ export default class ConfigSyncPlugin extends Plugin {
         try {
           const ctx = await this.coreContext();
           const results = await importExternal(ctx, await this.createReader(remote));
-          new ReportModal(this.app, `Pulled from ${remote.name}`, results).open();
+          new ReportModal(this.app, `Pulled from ${remote.name}`, results, undefined, (g) => this.displayName(g)).open();
           await this.refreshLocalStatus();
           await this.refreshRemoteChecks();
         } catch (e) {
@@ -270,7 +271,7 @@ export default class ConfigSyncPlugin extends Plugin {
         try {
           const ctx = await this.coreContext();
           const results = await pushExternal(ctx, await this.createWriter(remote));
-          new ReportModal(this.app, `Pushed to ${remote.name}`, results).open();
+          new ReportModal(this.app, `Pushed to ${remote.name}`, results, undefined, (g) => this.displayName(g)).open();
           await this.refreshRemoteChecks();
         } catch (e) {
           new Notice(`Config Sync push failed: ${(e as Error).message}`, 10000);
@@ -362,7 +363,7 @@ export default class ConfigSyncPlugin extends Plugin {
     try {
       const ctx = await this.coreContext();
       const result = await revertLastApply(ctx);
-      new ReportModal(this.app, "Config Sync: Revert report", [result]).open();
+      new ReportModal(this.app, "Config Sync: Revert report", [result], undefined, (g) => this.displayName(g)).open();
     } catch (e) {
       new Notice(`Config Sync revert failed: ${(e as Error).message}`, 10000);
     }

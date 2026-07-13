@@ -106,7 +106,6 @@
 }
 
 .config-sync-rule-name {
-  font-family: var(--font-monospace);
   font-weight: var(--font-semibold);
 }
 
