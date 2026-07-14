@@ -138,11 +138,32 @@ export default class ConfigSyncPlugin extends Plugin {
       const manifest = await loadManifest(ctx);
       const device = Platform.isMobile ? ("mobile" as const) : ("desktop" as const);
       this.localStatuses = await statusForGroups(ctx, groupsForDevice(manifest, device));
+      await this.backfillLabels(ctx);
     } catch (e) {
       console.error("Config Sync: status refresh failed", e);
     }
     this.updateRibbonDot();
     this.notifySyncCenter();
+  }
+
+  // Fills in any missing display-name label using runtime plugin/core names, and persists the
+  // manifest only if at least one label was added. Never throws into the caller.
+  private async backfillLabels(ctx: CoreContext): Promise<void> {
+    try {
+      const groups = await readGroups(ctx);
+      let changed = false;
+      for (const g of groups) {
+        if (g.label !== undefined) continue;
+        const resolved = this.displayName(g.name, g.label);
+        if (resolved !== g.name && resolved !== g.name.replace(/^plugin-/, "")) {
+          g.label = resolved;
+          changed = true;
+        }
+      }
+      if (changed) await writeGroups(ctx, groups);
+    } catch (e) {
+      console.error("Config Sync: label backfill skipped", e);
+    }
   }
 
   async refreshRemoteChecks(): Promise<void> {
@@ -243,21 +264,6 @@ export default class ConfigSyncPlugin extends Plugin {
         try {
           const ctx = await this.coreContext();
           const results = await capture(ctx, names, onProgress);
-          try {
-            const groups = await readGroups(ctx);
-            let changed = false;
-            for (const g of groups) {
-              if (g.label !== undefined) continue;
-              const resolved = this.displayName(g.name, g.label);
-              if (resolved !== g.name && resolved !== g.name.replace(/^plugin-/, "")) {
-                g.label = resolved;
-                changed = true;
-              }
-            }
-            if (changed) await writeGroups(ctx, groups);
-          } catch (e) {
-            console.error("Config Sync: label backfill skipped", e);
-          }
           await this.refreshLocalStatus();
           return results;
         } catch (e) {
