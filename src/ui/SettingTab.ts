@@ -1,4 +1,4 @@
-import { App, DropdownComponent, ExtraButtonComponent, Notice, Platform, Plugin, PluginSettingTab, SearchComponent, Setting, setIcon, TextComponent, ToggleComponent } from "obsidian";
+import { App, ButtonComponent, DropdownComponent, ExtraButtonComponent, Notice, Platform, Plugin, PluginSettingTab, SearchComponent, Setting, setIcon, TextComponent, ToggleComponent } from "obsidian";
 import { DeviceClass, FieldRule, Remote, RibbonKey, SyncGroup, SyncMode } from "../core/types";
 import { SensitiveScan } from "../core/modes";
 import { PkmMode } from "../core/pkm";
@@ -1410,18 +1410,53 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       }
     } else {
       const line2 = panel.createDiv({ cls: "config-sync-remote-git" });
+      let strip: HTMLElement | null = null;
+      const clearStrip = (): void => {
+        if (strip) {
+          strip.setText("");
+          strip.className = "config-sync-test-strip";
+        }
+      };
       new TextComponent(field(line2, "URL")).setPlaceholder("git@host:me/config.git").setValue(draft.url).onChange((v) => {
         draft.url = v.trim();
+        clearStrip();
         void this.saveRemotes();
       });
       new TextComponent(field(line2, "Branch")).setPlaceholder("main").setValue(draft.branch).onChange((v) => {
         draft.branch = v.trim();
+        clearStrip();
         void this.saveRemotes();
       });
       new TextComponent(field(line2, "Store folder in repo (optional)")).setPlaceholder("empty = repo root").setValue(draft.subdir).onChange((v) => {
         draft.subdir = v.trim();
         void this.saveRemotes();
       });
+      if (Platform.isDesktop) {
+        const testLine = panel.createDiv({ cls: "config-sync-remote-test" });
+        const btn = new ButtonComponent(testLine).setButtonText("Test connection");
+        strip = panel.createDiv({ cls: "config-sync-test-strip" });
+        btn.onClick(async () => {
+          btn.setDisabled(true).setButtonText("Testing…");
+          strip!.className = "config-sync-test-strip is-testing";
+          strip!.setText("Contacting remote…");
+          try {
+            const { gitLsRemote } = await import("../external/gitSource");
+            const res = await gitLsRemote(draft.url, draft.branch);
+            if (res.kind === "error") {
+              strip!.className = "config-sync-test-strip is-error";
+              strip!.setText(`✗ Could not reach remote — ${res.message}`);
+            } else if (res.branchFound) {
+              strip!.className = "config-sync-test-strip is-ok";
+              strip!.setText(`✓ Reachable — branch ${draft.branch} found`);
+            } else {
+              strip!.className = "config-sync-test-strip is-caution";
+              strip!.setText(`Reachable, but branch "${draft.branch}" not found`);
+            }
+          } finally {
+            btn.setDisabled(false).setButtonText("Test connection");
+          }
+        });
+      }
     }
   }
 
