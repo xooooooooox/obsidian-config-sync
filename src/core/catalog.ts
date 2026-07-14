@@ -43,26 +43,37 @@ export const OPTION_LABELS: Record<string, { label: string; description: string;
   },
 };
 
-export const CORE_PLUGIN_FILES: Record<string, string> = {
-  graph: "graph.json",
-  backlink: "backlink.json",
-  canvas: "canvas.json",
-  "page-preview": "page-preview.json",
-  "daily-notes": "daily-notes.json",
-  templates: "templates.json",
-  "zk-prefixer": "zk-prefixer.json",
-  bookmarks: "bookmarks.json",
-  "command-palette": "command-palette.json",
-  properties: "types.json",
-  sync: "sync.json",
-  publish: "publish.json",
-  workspaces: "workspaces.json",
-};
-export const CORE_SETTINGS_IDS = Object.keys(CORE_PLUGIN_FILES);
+// The ONLY core plugin whose settings file is not `${id}.json`.
+const CORE_FILE_EXCEPTIONS: Record<string, string> = { properties: "types.json" };
+
+// Seed fallback for the injected core-id set. Overwritten by the runtime list at plugin load
+// (main.ts calls setCorePluginIds), so a stale seed never affects production — it only covers
+// unit tests and any pre-injection call. New core plugins are picked up from runtime, not here.
+export const CORE_ID_SEED = [
+  "graph", "backlink", "canvas", "page-preview", "daily-notes", "templates",
+  "zk-prefixer", "bookmarks", "command-palette", "properties", "sync", "publish", "workspaces",
+];
 export const CORE_NOT_RECOMMENDED = ["sync", "publish"];
 
+let coreIds: Set<string> = new Set(CORE_ID_SEED);
+
+// Injected by main.ts at load with the running Obsidian's core-plugin id set.
+export function setCorePluginIds(ids: Iterable<string>): void {
+  coreIds = new Set(ids);
+}
+
+export function coreSettingsIds(): ReadonlySet<string> {
+  return coreIds;
+}
+
 export function corePluginFile(id: string): string {
-  return CORE_PLUGIN_FILES[id] ?? `${id}.json`;
+  return CORE_FILE_EXCEPTIONS[id] ?? `${id}.json`;
+}
+
+function coreFileSet(): Set<string> {
+  const s = new Set<string>();
+  for (const id of coreIds) s.add(corePluginFile(id));
+  return s;
 }
 
 export function optionReservedName(file: string): string {
@@ -72,7 +83,7 @@ export function optionReservedName(file: string): string {
 export function reservedNames(pluginIds: string[]): Set<string> {
   const names = new Set<string>();
   for (const file of Object.keys(OPTION_LABELS)) names.add(optionReservedName(file));
-  for (const id of CORE_SETTINGS_IDS) names.add(id);
+  for (const id of coreSettingsIds()) names.add(id);
   for (const id of pluginIds) names.add(`plugin-${id}`);
   return names;
 }
@@ -82,7 +93,7 @@ export function expectedPathForName(name: string): string | null {
     if (optionReservedName(file) === name) return `{configDir}/${meta.type === "dir" ? name : file}`;
   }
   if (name.startsWith("plugin-")) return `{configDir}/plugins/${name.slice("plugin-".length)}/data.json`;
-  if (CORE_SETTINGS_IDS.includes(name)) return `{configDir}/${corePluginFile(name)}`;
+  if (coreSettingsIds().has(name)) return `{configDir}/${corePluginFile(name)}`;
   return null;
 }
 
@@ -102,7 +113,7 @@ export function defaultGroupForName(name: string): SyncGroup | null {
     const id = name.slice("plugin-".length);
     return { name, path: `{configDir}/plugins/${id}/data.json`, type: "file", devices: "all", description: `Settings of ${id}.` };
   }
-  if (CORE_SETTINGS_IDS.includes(name)) {
+  if (coreSettingsIds().has(name)) {
     return { name, path: `{configDir}/${corePluginFile(name)}`, type: "file", devices: "all" };
   }
   return null;
@@ -116,7 +127,6 @@ function basename(p: string): string {
   return p.slice(p.lastIndexOf("/") + 1);
 }
 
-const CORE_FILE_SET = new Set(Object.values(CORE_PLUGIN_FILES));
 const SWITCH_LISTS = new Set(["core-plugins.json", "community-plugins.json"]);
 const CORE_CAUTION = "Contains account or device-specific data — not meant to travel between vaults.";
 
@@ -143,10 +153,11 @@ export async function listDiscovered(
   const { files } = await presentSets(io, configDir);
   const coveredPaths = new Set(groups.map((g) => g.path));
   const knownOptionFiles = new Set(Object.keys(OPTION_LABELS));
+  const coreFiles = coreFileSet();
   const out: { name: string; path: string }[] = [];
   for (const b of [...files].sort()) {
     if (!b.endsWith(".json") || b.startsWith(".")) continue;
-    if (knownOptionFiles.has(b) || HIDDEN_FILES.has(b) || SWITCH_LISTS.has(b) || CORE_FILE_SET.has(b)) continue;
+    if (knownOptionFiles.has(b) || HIDDEN_FILES.has(b) || SWITCH_LISTS.has(b) || coreFiles.has(b)) continue;
     const path = `{configDir}/${b}`;
     if (coveredPaths.has(path)) continue;
     out.push({ name: optionReservedName(b), path });
@@ -178,9 +189,10 @@ export async function listOptionSections(io: FileIO, configDir: string, _groups:
     (present ? available : notPresent).push(item);
   }
 
+  const coreFiles = coreFileSet();
   for (const b of [...files].sort()) {
     if (!b.endsWith(".json") || b.startsWith(".")) continue;
-    if (covered.has(b) || HIDDEN_FILES.has(b) || SWITCH_LISTS.has(b) || CORE_FILE_SET.has(b)) continue;
+    if (covered.has(b) || HIDDEN_FILES.has(b) || SWITCH_LISTS.has(b) || coreFiles.has(b)) continue;
     // unclassified json → Discovered tab section, not here
   }
   for (const b of [...dirs].sort()) {
@@ -202,7 +214,6 @@ export async function listCoreSections(
   _groups: SyncGroup[]
 ): Promise<CatalogSection[]> {
   const { files } = await presentSets(io, configDir);
-  const byId = new Map(cores.map((c) => [c.id, c]));
   const switchItem: CatalogItem = {
     name: "core-plugins",
     label: OPTION_LABELS["core-plugins.json"]!.label,
@@ -216,19 +227,18 @@ export async function listCoreSections(
 
   const enabled: CatalogItem[] = [];
   const disabled: CatalogItem[] = [];
-  for (const id of CORE_SETTINGS_IDS) {
-    const core = byId.get(id);
-    if (core === undefined) continue; // core plugin absent in this Obsidian build
-    const file = corePluginFile(id);
+  for (const core of cores) {
+    const file = corePluginFile(core.id);
+    if (!files.has(file)) continue; // approach A: no settings file → nothing to sync
     const item: CatalogItem = {
-      name: id,
+      name: core.id,
       label: core.name,
       description: null,
       path: `{configDir}/${file}`,
       type: "file",
-      exists: files.has(file),
+      exists: true,
       disabledReason: null,
-      cautionReason: CORE_NOT_RECOMMENDED.includes(id) ? CORE_CAUTION : null,
+      cautionReason: CORE_NOT_RECOMMENDED.includes(core.id) ? CORE_CAUTION : null,
     };
     (core.enabled ? enabled : disabled).push(item);
   }
@@ -325,7 +335,7 @@ export function categoryForGroup(name: string): ItemCategory {
   for (const file of Object.keys(OPTION_LABELS)) {
     if (optionReservedName(file) === name) return "obsidian";
   }
-  if (CORE_SETTINGS_IDS.includes(name)) return "core";
+  if (coreSettingsIds().has(name)) return "core";
   if (name.startsWith("plugin-")) return "community";
   return "custom";
 }
@@ -334,7 +344,7 @@ export function displayLabelForGroup(name: string, plugins: PluginHost, storedLa
   for (const file of Object.keys(OPTION_LABELS)) {
     if (optionReservedName(file) === name) return OPTION_LABELS[file]?.label ?? name;
   }
-  if (CORE_SETTINGS_IDS.includes(name)) return plugins.getCorePluginName(name) ?? storedLabel ?? name;
+  if (coreSettingsIds().has(name)) return plugins.getCorePluginName(name) ?? storedLabel ?? name;
   if (name.startsWith("plugin-")) {
     const id = name.slice("plugin-".length);
     return plugins.getInstalledPluginName(id) ?? storedLabel ?? id;

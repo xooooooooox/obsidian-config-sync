@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   CatalogItem,
   categoryForGroup,
   corePluginFile,
+  CORE_ID_SEED,
   defaultGroupForName,
   displayLabelForGroup,
   expectedPathForName,
@@ -15,6 +16,7 @@ import {
   listPluginSections,
   optionReservedName,
   reservedNames,
+  setCorePluginIds,
   splitLocation,
   toggleSection,
 } from "../src/core/catalog";
@@ -79,21 +81,52 @@ describe("listCoreSections", () => {
     { id: "templates", name: "Templates", enabled: false },
     { id: "properties", name: "Properties", enabled: true },
     { id: "sync", name: "Sync", enabled: false },
+    { id: "switcher", name: "Quick switcher", enabled: true }, // runtime id NOT in the seed
   ];
-  it("groups core settings by enabled state, sync into Disabled with a cautionReason, and reads runtime names", async () => {
+
+  it("lists only cores whose settings file exists, split by enabled state, with caution on sync", async () => {
     const io = new MemFS();
-    io.seed({ ".obs/core-plugins.json": "{}", ".obs/graph.json": "{}", ".obs/types.json": "{}" });
+    // graph.json, types.json (properties), sync.json, switcher.json exist; templates.json does NOT
+    io.seed({
+      ".obs/core-plugins.json": "{}",
+      ".obs/graph.json": "{}",
+      ".obs/types.json": "{}",
+      ".obs/sync.json": "{}",
+      ".obs/switcher.json": "{}",
+    });
     const sections = await listCoreSections(io, ".obs", cores, NO_GROUPS);
     const byBucket = Object.fromEntries(sections.map((s) => [s.bucket, s]));
     expect(byBucket["list"]?.items[0]?.name).toBe("core-plugins");
-    expect(byBucket["enabled"]?.items.map((i) => i.name).sort()).toEqual(["graph", "properties"]);
-    expect(byBucket["enabled"]?.items.find((i) => i.name === "properties")?.label).toBe("Properties");
+    // switcher is picked up dynamically even though it is not in CORE_ID_SEED
+    expect(byBucket["enabled"]?.items.map((i) => i.name).sort()).toEqual(["graph", "properties", "switcher"]);
+    expect(byBucket["enabled"]?.items.find((i) => i.name === "switcher")?.path).toBe("{configDir}/switcher.json");
     expect(byBucket["enabled"]?.items.find((i) => i.name === "properties")?.path).toBe("{configDir}/types.json");
-    expect(byBucket["disabled"]?.items.map((i) => i.name).sort()).toEqual(["sync", "templates"]);
+    // sync.json exists → disabled + caution; templates.json absent → excluded by the file filter
+    expect(byBucket["disabled"]?.items.map((i) => i.name)).toEqual(["sync"]);
     expect(byBucket["disabled"]?.items.find((i) => i.name === "sync")?.cautionReason).not.toBeNull();
-    expect(byBucket["notRecommended"]).toBeUndefined();
-    expect(byBucket["enabled"]?.items.find((i) => i.name === "templates")).toBeUndefined();
-    expect(byBucket["disabled"]?.items.find((i) => i.name === "templates")?.exists).toBe(false); // templates.json not seeded
+    expect(sections.some((s) => s.items.some((i) => i.name === "templates"))).toBe(false);
+  });
+
+  it("excludes a core whose settings file is absent", async () => {
+    const io = new MemFS();
+    io.seed({ ".obs/core-plugins.json": "{}" }); // no per-core files
+    const sections = await listCoreSections(io, ".obs", cores, NO_GROUPS);
+    const byBucket = Object.fromEntries(sections.map((s) => [s.bucket, s]));
+    expect(byBucket["enabled"]).toBeUndefined();
+    expect(byBucket["disabled"]).toBeUndefined();
+  });
+});
+
+describe("setCorePluginIds injection", () => {
+  afterEach(() => setCorePluginIds(CORE_ID_SEED)); // restore seed so test order is independent
+
+  it("recognizes an injected non-seed core id in pure judgments", () => {
+    expect(categoryForGroup("switcher")).toBe("custom"); // not in seed yet
+    expect(expectedPathForName("switcher")).toBe(null);
+    setCorePluginIds(["switcher"]);
+    expect(categoryForGroup("switcher")).toBe("core");
+    expect(expectedPathForName("switcher")).toBe("{configDir}/switcher.json");
+    expect(reservedNames([]).has("switcher")).toBe(true);
   });
 });
 
@@ -270,7 +303,7 @@ describe("listDiscovered", () => {
     const io = new MemFS();
     io.seed({
       ".obs/workspace.json": "{}",                         // device-specific but unclassified → INCLUDED
-      ".obs/workspaces.json": "{}",                        // core plugin file → excluded via CORE_FILE_SET
+      ".obs/workspaces.json": "{}",                        // core plugin file → excluded via coreFileSet()
       ".obs/image-converter-image-alignments.json": "{}", // unclassified → INCLUDED
     });
     const found = await listDiscovered(io, ".obs", []);
@@ -284,7 +317,7 @@ describe("listDiscovered", () => {
 describe("section copy (action-oriented)", () => {
   it("uses the action-oriented descriptions", async () => {
     const io = new MemFS();
-    io.seed({ ".obs/app.json": "{}" });
+    io.seed({ ".obs/app.json": "{}", ".obs/graph.json": "{}" });
     const opt = await listOptionSections(io, ".obs", []);
     expect(opt.find((s) => s.bucket === "available")?.description).toBe("Sync these settings that already exist in this vault.");
     const core = await listCoreSections(io, ".obs", [{ id: "graph", name: "Graph view", enabled: true }], []);
