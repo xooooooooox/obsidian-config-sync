@@ -38,14 +38,13 @@ function optionFs(): MemFS {
 const NO_GROUPS: SyncGroup[] = [];
 
 describe("listOptionSections", () => {
-  it("buckets known options by existence and puts workspace under Not recommended", async () => {
+  it("buckets known options by existence and leaves workspace.json to discovered", async () => {
     const sections = await listOptionSections(optionFs(), ".obs", NO_GROUPS);
     const byBucket = Object.fromEntries(sections.map((s) => [s.bucket, s]));
     const names = (b: string) => (byBucket[b]?.items ?? []).map((i) => i.name).sort();
     expect(names("available")).toEqual(["app", "appearance", "snippets"]);
     expect(names("notPresent")).toEqual(["hotkeys", "themes"]);
-    expect(names("notRecommended")).toEqual(["workspace"]);
-    expect(byBucket["notRecommended"]?.allowSyncAll).toBe(false);
+    expect(byBucket["notRecommended"]).toBeUndefined();
     expect(byBucket["available"]?.allowSyncAll).toBe(true);
   });
 
@@ -58,11 +57,12 @@ describe("listOptionSections", () => {
     expect(all).not.toContain("core-plugins-migration");
   });
 
-  it("marks the workspace item with a caution and keeps it tickable", async () => {
+  it("does not first-class workspace.json — it falls through to discovered instead", async () => {
     const sections = await listOptionSections(optionFs(), ".obs", NO_GROUPS);
     const ws = sections.flatMap((s) => s.items).find((i) => i.name === "workspace");
-    expect(ws?.cautionReason).toContain("device-specific");
-    expect(ws?.disabledReason).toBe(null);
+    expect(ws).toBeUndefined();
+    const disc = await listDiscovered(optionFs(), ".obs", NO_GROUPS);
+    expect(disc.map((d) => d.name)).toContain("workspace");
   });
 
   it("omits empty sections", async () => {
@@ -80,7 +80,7 @@ describe("listCoreSections", () => {
     { id: "properties", name: "Properties", enabled: true },
     { id: "sync", name: "Sync", enabled: false },
   ];
-  it("groups core settings by enabled state, sync under Not recommended, and reads runtime names", async () => {
+  it("groups core settings by enabled state, sync into Disabled with a cautionReason, and reads runtime names", async () => {
     const io = new MemFS();
     io.seed({ ".obs/core-plugins.json": "{}", ".obs/graph.json": "{}", ".obs/types.json": "{}" });
     const sections = await listCoreSections(io, ".obs", cores, NO_GROUPS);
@@ -89,11 +89,11 @@ describe("listCoreSections", () => {
     expect(byBucket["enabled"]?.items.map((i) => i.name).sort()).toEqual(["graph", "properties"]);
     expect(byBucket["enabled"]?.items.find((i) => i.name === "properties")?.label).toBe("Properties");
     expect(byBucket["enabled"]?.items.find((i) => i.name === "properties")?.path).toBe("{configDir}/types.json");
-    expect(byBucket["disabled"]?.items.map((i) => i.name)).toEqual(["templates"]);
-    expect(byBucket["notRecommended"]?.items.map((i) => i.name)).toEqual(["sync"]);
-    expect(byBucket["notRecommended"]?.allowSyncAll).toBe(false);
+    expect(byBucket["disabled"]?.items.map((i) => i.name).sort()).toEqual(["sync", "templates"]);
+    expect(byBucket["disabled"]?.items.find((i) => i.name === "sync")?.cautionReason).not.toBeNull();
+    expect(byBucket["notRecommended"]).toBeUndefined();
     expect(byBucket["enabled"]?.items.find((i) => i.name === "templates")).toBeUndefined();
-    expect(byBucket["disabled"]?.items[0]?.exists).toBe(false); // templates.json not seeded
+    expect(byBucket["disabled"]?.items.find((i) => i.name === "templates")?.exists).toBe(false); // templates.json not seeded
   });
 });
 
@@ -266,16 +266,17 @@ describe("listDiscovered", () => {
     expect(await listDiscovered(io, ".obs", [])).toEqual([]);
   });
 
-  it("discovered files exclude workspace-pattern files (offered under Not recommended instead)", async () => {
+  it("discovered files include volatile workspace.json but exclude the workspaces core plugin file", async () => {
     const io = new MemFS();
     io.seed({
-      ".obs/workspace.json": "{}",                        // workspace pattern → excluded (Not recommended instead)
-      ".obs/workspaces.json": "{}",                        // workspace pattern → excluded (Not recommended instead)
+      ".obs/workspace.json": "{}",                         // device-specific but unclassified → INCLUDED
+      ".obs/workspaces.json": "{}",                        // core plugin file → excluded via CORE_FILE_SET
       ".obs/image-converter-image-alignments.json": "{}", // unclassified → INCLUDED
     });
     const found = await listDiscovered(io, ".obs", []);
     expect(found).toEqual([
       { name: "image-converter-image-alignments", path: "{configDir}/image-converter-image-alignments.json" },
+      { name: "workspace", path: "{configDir}/workspace.json" },
     ]);
   });
 });
@@ -313,5 +314,60 @@ describe("displayLabelForGroup", () => {
     expect(displayLabelForGroup("plugin-obsidian42-brat", plugins)).toBe("BRAT");
     expect(displayLabelForGroup("plugin-not-installed", plugins)).toBe("not-installed");
     expect(displayLabelForGroup("my-custom-rule", plugins)).toBe("my-custom-rule");
+  });
+});
+
+describe("displayLabelForGroup label priority", () => {
+  const noPlugins = { getInstalledPluginName: () => null, getCorePluginName: () => null } as unknown as import("../src/core/ConfigSyncCore").PluginHost;
+  it("uses the stored label when no runtime name resolves", () => {
+    expect(displayLabelForGroup("plugin-obsidian42-brat", noPlugins, "BRAT")).toBe("BRAT");
+  });
+  it("prefers the runtime plugin name over the stored label", () => {
+    const p = { getInstalledPluginName: (id: string) => (id === "obsidian42-brat" ? "BRAT live" : null), getCorePluginName: () => null } as unknown as import("../src/core/ConfigSyncCore").PluginHost;
+    expect(displayLabelForGroup("plugin-obsidian42-brat", p, "BRAT stale")).toBe("BRAT live");
+  });
+  it("falls back to the raw id when neither resolves", () => {
+    expect(displayLabelForGroup("plugin-obsidian42-brat", noPlugins)).toBe("obsidian42-brat");
+  });
+});
+
+describe("groupForItem", () => {
+  it("records a label when given", () => {
+    expect(groupForItem("plugin-x", "{configDir}/plugins/x/data.json", "file", null, "Xtension").label).toBe("Xtension");
+    expect(groupForItem("plugin-x", "{configDir}/plugins/x/data.json", "file", null).label).toBeUndefined();
+  });
+});
+
+describe("workspaces reclassification and section dissolution", () => {
+  it("lists workspaces.json as a core plugin item, not a discovered file", async () => {
+    const io = new MemFS();
+    io.seed({ ".obs/workspaces.json": "{}", ".obs/graph.json": "{}" });
+    const cores = [{ id: "workspaces", name: "Workspaces", enabled: true }, { id: "graph", name: "Graph view", enabled: true }];
+    const secs = await listCoreSections(io, ".obs", cores, []);
+    const names = secs.flatMap((s) => s.items.map((i) => i.name));
+    expect(names).toContain("workspaces");
+    expect(secs.map((s) => s.heading)).not.toContain("Not recommended");
+    const disc = await listDiscovered(io, ".obs", []);
+    expect(disc.map((d) => d.name)).not.toContain("workspaces");
+  });
+  it("keeps volatile workspace.json out of the Obsidian sections and lets it reach discovered", async () => {
+    const io = new MemFS();
+    io.seed({ ".obs/workspace.json": "{}", ".obs/app.json": "{}" });
+    const secs = await listOptionSections(io, ".obs", []);
+    const names = secs.flatMap((s) => s.items.map((i) => i.name));
+    expect(names).not.toContain("workspace");
+    expect(secs.map((s) => s.heading)).not.toContain("Not recommended");
+    const disc = await listDiscovered(io, ".obs", []);
+    expect(disc.map((d) => d.name)).toContain("workspace");
+  });
+  it("returns sync/publish to Enabled/Disabled with a cautionReason", async () => {
+    const io = new MemFS();
+    io.seed({ ".obs/sync.json": "{}", ".obs/publish.json": "{}" });
+    const cores = [{ id: "sync", name: "Sync", enabled: true }, { id: "publish", name: "Publish", enabled: false }];
+    const secs = await listCoreSections(io, ".obs", cores, []);
+    const enabled = secs.find((s) => s.heading === "Enabled")?.items ?? [];
+    const disabled = secs.find((s) => s.heading === "Disabled")?.items ?? [];
+    expect(enabled.find((i) => i.name === "sync")?.cautionReason).not.toBeNull();
+    expect(disabled.find((i) => i.name === "publish")?.cautionReason).not.toBeNull();
   });
 });

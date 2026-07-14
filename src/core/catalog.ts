@@ -23,9 +23,6 @@ export interface CatalogSection {
 
 const HIDDEN_FILES = new Set(["core-plugins-migration.json"]);
 const HIDDEN_DIRS = new Set(["plugins"]);
-const WORKSPACE_RE = /^workspace.*\.json$/;
-export const WORKSPACE_CAUTION =
-  "Window layout and open tabs — highly device-specific; syncing will make devices overwrite each other.";
 
 export const OPTION_LABELS: Record<string, { label: string; description: string; type: "file" | "dir" }> = {
   "app.json": { label: "App settings", description: "Editor, Files & links and other general options (app.json).", type: "file" },
@@ -59,6 +56,7 @@ export const CORE_PLUGIN_FILES: Record<string, string> = {
   properties: "types.json",
   sync: "sync.json",
   publish: "publish.json",
+  workspaces: "workspaces.json",
 };
 export const CORE_SETTINGS_IDS = Object.keys(CORE_PLUGIN_FILES);
 export const CORE_NOT_RECOMMENDED = ["sync", "publish"];
@@ -148,7 +146,7 @@ export async function listDiscovered(
   const out: { name: string; path: string }[] = [];
   for (const b of [...files].sort()) {
     if (!b.endsWith(".json") || b.startsWith(".")) continue;
-    if (knownOptionFiles.has(b) || HIDDEN_FILES.has(b) || SWITCH_LISTS.has(b) || CORE_FILE_SET.has(b) || WORKSPACE_RE.test(b)) continue;
+    if (knownOptionFiles.has(b) || HIDDEN_FILES.has(b) || SWITCH_LISTS.has(b) || CORE_FILE_SET.has(b)) continue;
     const path = `{configDir}/${b}`;
     if (coveredPaths.has(path)) continue;
     out.push({ name: optionReservedName(b), path });
@@ -160,7 +158,6 @@ export async function listOptionSections(io: FileIO, configDir: string, _groups:
   const { files, dirs } = await presentSets(io, configDir);
   const available: CatalogItem[] = [];
   const notPresent: CatalogItem[] = [];
-  const notRecommended: CatalogItem[] = [];
   const covered = new Set<string>();
 
   for (const [file, meta] of Object.entries(OPTION_LABELS)) {
@@ -184,21 +181,7 @@ export async function listOptionSections(io: FileIO, configDir: string, _groups:
   for (const b of [...files].sort()) {
     if (!b.endsWith(".json") || b.startsWith(".")) continue;
     if (covered.has(b) || HIDDEN_FILES.has(b) || SWITCH_LISTS.has(b) || CORE_FILE_SET.has(b)) continue;
-    if (WORKSPACE_RE.test(b)) {
-      notRecommended.push({
-        name: optionReservedName(b),
-        label: b,
-        description: null,
-        path: `{configDir}/${b}`,
-        type: "file",
-        exists: true,
-        disabledReason: null,
-        cautionReason: WORKSPACE_CAUTION,
-      });
-      covered.add(b);
-      continue;
-    }
-    // any other unclassified json → Discovered tab section, not here
+    // unclassified json → Discovered tab section, not here
   }
   for (const b of [...dirs].sort()) {
     if (covered.has(b) || HIDDEN_DIRS.has(b)) continue;
@@ -209,7 +192,6 @@ export async function listOptionSections(io: FileIO, configDir: string, _groups:
   return [
     ...section("available", "Available", "Sync these settings that already exist in this vault.", true, available),
     ...section("notPresent", "Not yet in this vault", "Nothing to sync yet — customize these in Obsidian first, then they'll appear here.", true, notPresent),
-    ...section("notRecommended", "Not recommended", "Device-specific — syncing makes your devices overwrite each other's layout.", false, notRecommended),
   ];
 }
 
@@ -234,7 +216,6 @@ export async function listCoreSections(
 
   const enabled: CatalogItem[] = [];
   const disabled: CatalogItem[] = [];
-  const notRecommended: CatalogItem[] = [];
   for (const id of CORE_SETTINGS_IDS) {
     const core = byId.get(id);
     if (core === undefined) continue; // core plugin absent in this Obsidian build
@@ -249,19 +230,16 @@ export async function listCoreSections(
       disabledReason: null,
       cautionReason: CORE_NOT_RECOMMENDED.includes(id) ? CORE_CAUTION : null,
     };
-    if (CORE_NOT_RECOMMENDED.includes(id)) notRecommended.push(item);
-    else (core.enabled ? enabled : disabled).push(item);
+    (core.enabled ? enabled : disabled).push(item);
   }
   const sort = (a: CatalogItem, b: CatalogItem) => a.label.localeCompare(b.label);
   enabled.sort(sort);
   disabled.sort(sort);
-  notRecommended.sort(sort);
 
   return [
     ...section("list", "Plugin on/off list", "Which core plugins are turned on, mirrored across devices.", false, [switchItem]),
     ...section("enabled", "Enabled", "Sync the settings files of your enabled core plugins.", true, enabled),
     ...section("disabled", "Disabled", "Sync a disabled core plugin's settings now, ready for when you turn it on.", true, disabled),
-    ...section("notRecommended", "Not recommended", "Holds account or device-specific data — not meant to travel between vaults.", false, notRecommended),
   ];
 }
 
@@ -304,9 +282,10 @@ export async function listPluginSections(
   ];
 }
 
-export function groupForItem(name: string, path: string, type: "file" | "dir", description: string | null): SyncGroup {
+export function groupForItem(name: string, path: string, type: "file" | "dir", description: string | null, label?: string): SyncGroup {
   const group: SyncGroup = { name, path, type, devices: "all" };
   if (description !== null) group.description = description;
+  if (label !== undefined && label.trim() !== "") group.label = label.trim();
   return group;
 }
 
@@ -351,14 +330,14 @@ export function categoryForGroup(name: string): ItemCategory {
   return "custom";
 }
 
-export function displayLabelForGroup(name: string, plugins: PluginHost): string {
+export function displayLabelForGroup(name: string, plugins: PluginHost, storedLabel?: string): string {
   for (const file of Object.keys(OPTION_LABELS)) {
     if (optionReservedName(file) === name) return OPTION_LABELS[file]?.label ?? name;
   }
-  if (CORE_SETTINGS_IDS.includes(name)) return plugins.getCorePluginName(name) ?? name;
+  if (CORE_SETTINGS_IDS.includes(name)) return plugins.getCorePluginName(name) ?? storedLabel ?? name;
   if (name.startsWith("plugin-")) {
     const id = name.slice("plugin-".length);
-    return plugins.getInstalledPluginName(id) ?? id;
+    return plugins.getInstalledPluginName(id) ?? storedLabel ?? id;
   }
-  return name;
+  return storedLabel ?? name;
 }

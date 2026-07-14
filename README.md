@@ -76,8 +76,9 @@ The **Filter by name…** search box lives in the Sync Center's sidebar and sear
 ## Settings guide
 
 - **General** — PKM mode (auto-detects IOTO vaults), the data folder location, status toggles (sync menu change counts, automatic remote checks, periodic local check), ribbon icons.
-- **Obsidian / Core plugins / Community plugins** — tick items to sync them; a heading toggle syncs all/none per section; a global search box with scope filters covers General, all picker tabs, Advanced and Remotes. `workspace.json` and the `sync`/`publish` core plugins are *Not recommended* and ask for confirmation.
-- **Advanced** — every rule as a compact row; expand to edit. **Synced items** (created by ticks; reset to default per row or in bulk), **Discovered files** (config files we couldn't classify; toggle to sync — name and path are fixed by the file), **Custom rules** (fully yours: vault-root files, extra folders, sync modes).
+- **Obsidian / Core plugins / Community plugins** — tick items to sync them; a heading toggle syncs all/none per section; a global search box with scope filters covers General, all picker tabs, Advanced and Remotes. Items with sensitive-looking keys sort to the top of their section with a `⚠ N keys` badge, so they're visible before you enable syncing. Device-specific items (the `sync`/`publish` core plugins) carry a `device-specific` badge and ask for confirmation when enabled. **Workspaces** (deliberately saved layouts, `workspaces.json`) is a Core-plugin item; the volatile `workspace.json`/`workspace-mobile.json` are not classified into any tab — they turn up under Advanced → Discovered files like any other unrecognized config file.
+- Every synced item's row has a chevron that opens an expansion: **Fields to protect** (when its mode is Fields), a read-only **View data.json** — keys are colored by rule state, and clicking one adds it as a strip/encrypt rule, covering anything the built-in sensitive-key detection misses — and **Advanced** (a store-path override and **↺ Reset this item to its default rule**).
+- **Advanced** — **Custom rules** (fully yours: vault-root files, extra folders, sync modes) and **Discovered files** (config files we couldn't classify; toggle to sync — name and path are fixed by the file), each row using the same expansion. When any managed item is customized (path, fields or mode diverge from its default), a summary banner lists them with a **↺ Reset all to defaults** button.
 - **Remotes** (desktop) — add a **git repository** (URL, branch, optional folder) or **another vault**: click **Browse…**, pick the vault folder, and the store inside it is auto-detected.
 
 ## Store layout
@@ -113,7 +114,7 @@ The **Filter by name…** search box lives in the Sync Center's sidebar and sear
 }
 ```
 
-Group fields: `name` (unique) · `path` (`{configDir}` variable supported) · `type` (`file`/`dir`) · `devices` (`all`/`desktop`/`mobile`) · `mode` (`plain`/`fields`/`encrypted`, optional, default `plain`) · `fields` (per-key `Strip`/`Encrypt` rules, `fields` mode only — see [Sensitive settings](#sensitive-settings)).
+Group fields: `name` (unique; letters, digits, `-`/`_`, starting with a letter or digit — real plugin ids may contain uppercase, e.g. `plugin-DEVONlink-obsidian`) · `path` (`{configDir}` variable supported) · `type` (`file`/`dir`) · `devices` (`all`/`desktop`/`mobile`) · `mode` (`plain`/`fields`/`encrypted`, optional, default `plain`) · `fields` (per-key `Strip`/`Encrypt` rules, `fields` mode only — see [Sensitive settings](#sensitive-settings)) · `label` (optional display name recorded when the item is enabled or captured, so it still shows correctly on a device where the plugin isn't installed).
 
 OS junk (`.DS_Store`, `Thumbs.db`, `desktop.ini`) is never captured. See [Sensitive settings](#sensitive-settings) for per-item sync modes and passphrase-protected encryption.
 
@@ -157,7 +158,7 @@ Every item has a sync mode, set per item in Settings:
 
 Encrypt modes need a vault-level **Passphrase**, set once per device in Settings → General — it's never written to any file and never synced; the same passphrase on each device is all that's needed. An item with encrypted content but no passphrase set on the current device shows a 🔒 *locked* state and won't capture or apply until the passphrase is set. A wrong passphrase on Apply fails cleanly without writing anything.
 
-Settings rows show a warning badge when a config contains sensitive-looking keys (API keys, tokens, secrets, passwords, emails) or is one opaque encrypted blob — this only informs; you choose the mode. The Sync Center badges each item with its mode (`🔒`/`▤`) and capture reports state exactly what was encrypted or stripped.
+Every installed plugin is scanned for sensitive-looking keys (API keys, tokens, secrets, passwords, emails) or an opaque encrypted blob before you ever enable syncing — a `⚠ N keys` / `⚠ opaque blob` badge appears on the row and sorts it to the top of its section; this only informs, you still choose the mode. Each synced item's row expansion (via its chevron) includes a read-only **View data.json**: keys are colored by rule state (teal = encrypted, red = stripped, amber = detected but unruled), and clicking a key adds it as a strip/encrypt rule directly — the escape hatch for anything the built-in detection misses. The Sync Center badges each item with its mode (`🔒`/`▤`) and capture reports state exactly what was encrypted or stripped.
 
 There is no hard blacklist anymore — `remotely-save`, `ioto-update`, `slides-rup` and `config-sync` are now normal items like any other (e.g. `remotely-save` can be whole-file encrypted; `ioto-update` works well with Fields).
 

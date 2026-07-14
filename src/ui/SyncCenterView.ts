@@ -1,7 +1,7 @@
 import { ButtonComponent, ExtraButtonComponent, ItemView, WorkspaceLeaf } from "obsidian";
 import { ApplyItem, ProgressFn, StateAction } from "../core/ConfigSyncCore";
 import { bucketCounts, GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry } from "../core/status";
-import { CATEGORY_LABELS, ItemCategory, categoryForGroup } from "../core/catalog";
+import { CATEGORY_LABELS, findGroupByName, ItemCategory, categoryForGroup } from "../core/catalog";
 import { FileChanges, GroupResult, Remote, SyncGroup, hasChanges } from "../core/types";
 import { Availability } from "../core/availability";
 import {
@@ -38,7 +38,7 @@ const sessionUi = {
 export interface SyncCenterHost {
   computeStatuses(): Promise<{ groups: SyncGroup[]; statuses: GroupStatus[]; availability: Record<string, Availability> }>;
   resolvedPath(group: SyncGroup): string;
-  displayName(group: string): string;
+  displayName(group: string, storedLabel?: string): string;
   captureItems(names: string[], onProgress?: ProgressFn): Promise<GroupResult[] | null>;
   applyItems(items: ApplyItem[], onProgress?: ProgressFn): Promise<GroupResult[] | null>;
   reloadApp(): void;
@@ -267,7 +267,7 @@ export class SyncCenterView extends ItemView {
         // not-installed included), not just mainRows() — so a match hiding in e.g. "Not
         // installed" still counts here. Bucket badges below stay main-section-only.
         const scopeRows = cat === "all" ? this.rows() : this.rows().filter((r) => categoryForGroup(r.group.name) === cat);
-        const hits = scopeRows.filter((r) => matchesSearch(`${this.host.displayName(r.group.name)} ${r.group.name}`, this.search)).length;
+        const hits = scopeRows.filter((r) => matchesSearch(`${this.host.displayName(r.group.name, r.group.label)} ${r.group.name}`, this.search)).length;
         item.createSpan({ cls: "config-sync-side-badge is-neutral", text: `${hits}` });
       } else {
         const c = bucketCounts(statuses);
@@ -413,7 +413,7 @@ export class SyncCenterView extends ItemView {
     });
     if (run.expanded) {
       renderReportContent(strip.createDiv({ cls: "config-sync-strip-body" }), run.results, {
-        labelFor: (g) => this.host.displayName(g),
+        labelFor: (g) => this.host.displayName(g, findGroupByName(this.groups, g)?.label),
         onReload: () => this.host.reloadApp(),
       });
     }
@@ -473,7 +473,7 @@ export class SyncCenterView extends ItemView {
         this.refreshGlobalSelectAll(selectAll, mainRows); // resync tri-state against the new search
       });
     }
-    const selectAll = bar.createEl("input", { type: "checkbox", attr: { "aria-label": "Select all visible items" } });
+    const selectAll = bar.createEl("input", { type: "checkbox", cls: "config-sync-selectall", attr: { "aria-label": "Select all visible items" } });
 
     const listHost = main.createDiv();
     this.renderListInto(listHost, mainRows);
@@ -487,7 +487,7 @@ export class SyncCenterView extends ItemView {
   }
 
   private visibleRows(scoped: StatusRow[]): StatusRow[] {
-    return scoped.filter((r) => visibleUnderFilter(r.status.state, this.filter) && matchesSearch(`${this.host.displayName(r.group.name)} ${r.group.name}`, this.search));
+    return scoped.filter((r) => visibleUnderFilter(r.status.state, this.filter) && matchesSearch(`${this.host.displayName(r.group.name, r.group.label)} ${r.group.name}`, this.search));
   }
 
   private renderListInto(listHost: HTMLElement, scoped: StatusRow[]): void {
@@ -565,7 +565,7 @@ export class SyncCenterView extends ItemView {
   private renderSection(main: HTMLElement, kind: Exclude<SectionKind, "main">, rows: StatusRow[]): void {
     if (rows.length === 0) return;
     const matches = this.searching()
-      ? rows.filter((r) => matchesSearch(`${this.host.displayName(r.group.name)} ${r.group.name}`, this.search))
+      ? rows.filter((r) => matchesSearch(`${this.host.displayName(r.group.name, r.group.label)} ${r.group.name}`, this.search))
       : rows;
     if (this.searching() && matches.length === 0) return;
     const open = this.searching() || this.sectionOpen.has(kind);
@@ -619,7 +619,7 @@ export class SyncCenterView extends ItemView {
       attr: { "aria-label": this.host.resolvedPath(group) },
     });
     const chev = row.createSpan({ cls: "config-sync-row-chevron", text: this.expandedItems.has(group.name) ? "▾" : "▸" });
-    row.createSpan({ cls: "config-sync-rule-name", text: this.host.displayName(group.name) });
+    row.createSpan({ cls: "config-sync-rule-name", text: this.host.displayName(group.name, group.label) });
     if (group.mode === "encrypted") row.createSpan({ cls: "config-sync-mode-badge", text: "🔒" });
     else if (group.mode === "fields") row.createSpan({ cls: "config-sync-mode-badge", text: "▤" });
     const chosen = this.policy.get(group.name);
@@ -955,7 +955,7 @@ export class SyncCenterView extends ItemView {
 
   private renderRemoteDiffEntry(detail: HTMLElement, e: RemoteDiffEntry): void {
     const row = detail.createDiv({ cls: "config-sync-report-row" });
-    row.createSpan({ cls: "config-sync-rule-name", text: this.host.displayName(e.group) });
+    row.createSpan({ cls: "config-sync-rule-name", text: this.host.displayName(e.group, findGroupByName(this.groups, e.group)?.label) });
     row.createDiv({ cls: "config-sync-rule-spacer" });
     if (e.changes.added.length > 0) row.createSpan({ cls: "config-sync-chip is-add", text: `+${e.changes.added.length}` });
     if (e.changes.updated.length > 0) row.createSpan({ cls: "config-sync-chip is-upd", text: `~${e.changes.updated.length}` });

@@ -67,13 +67,13 @@ export function validateSyncManifest(data: unknown): SyncManifest {
 
 function parseGroup(g: unknown, index: number): SyncGroup {
   if (!isPlainObject(g)) throw new ManifestValidationError(`rule #${index + 1} must be an object, e.g. {"name": "hotkeys", "path": "{configDir}/hotkeys.json", "type": "file", "devices": "all"}`);
-  const { name, path, type, devices, sanitize, mode, fields, description, origin } = g;
+  const { name, path, type, devices, sanitize, mode, fields, description, label, origin } = g;
   if (typeof name !== "string" || name === "") {
     throw new ManifestValidationError(`rule #${index + 1} is missing a "name" — give it a short id, e.g. "name": "hotkeys"`);
   }
-  if (!/^[a-z0-9][a-z0-9_-]*$/.test(name)) {
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(name)) {
     throw new ManifestValidationError(
-      `rule "${name}" has an invalid name — use only lowercase letters, digits, "-" or "_", starting with a letter or digit, e.g. "my-plugin"`
+      `rule "${name}" has an invalid name — use only letters, digits, "-" or "_", starting with a letter or digit, e.g. "my-plugin"`
     );
   }
   if (typeof path !== "string" || path === "") {
@@ -126,6 +126,11 @@ function parseGroup(g: unknown, index: number): SyncGroup {
   if (validatedFields !== undefined) group.fields = validatedFields;
   const trimmedDescription = typeof description === "string" ? description.trim() : "";
   if (trimmedDescription !== "") group.description = trimmedDescription;
+  if (label !== undefined && typeof label !== "string") {
+    throw new ManifestValidationError(`rule "${name}" has a "label" that isn't text — use a plain string, e.g. "label": "BRAT"`);
+  }
+  const trimmedLabel = typeof label === "string" ? label.trim() : "";
+  if (trimmedLabel !== "") group.label = trimmedLabel;
   if (origin === "discovered") group.origin = "discovered";
   return group;
 }
