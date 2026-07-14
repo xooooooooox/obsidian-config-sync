@@ -230,8 +230,9 @@ Clicking a key adds it as a rule: pattern = the exact key name, action = `encryp
 `SENSITIVE_ENCRYPT_RE.test(key)` else `strip` (reuse `defaultFieldsFromDetection`'s logic);
 if the group isn't already `mode: "fields"`, switching it (set `group.mode = "fields"`)
 first. Route the mutation through `commitGroups`; on success re-render the row so the new
-rule appears in the Fields segment and the key recolors. Nested object keys are clickable
-too (pattern = the leaf key name; matching uses the existing glob semantics).
+rule appears in the Fields segment and the key recolors. Only top-level object keys are
+clickable-to-add-a-rule; a top-level rule's glob still matches a nested key of the same name,
+and a deeper key can always be ruled by typing a glob in the "Add key pattern" field.
 
 This is the escape hatch for detection gaps: the built-in `SENSITIVE_KEY_PATTERNS` can miss
 a key (e.g. `customEndpoint`), and the JSON view lets the user see and rule it without typing
