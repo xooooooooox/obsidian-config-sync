@@ -189,9 +189,10 @@ export async function listOptionSections(io: FileIO, configDir: string, _groups:
     (present ? available : notPresent).push(item);
   }
 
+  const coreFiles = coreFileSet();
   for (const b of [...files].sort()) {
     if (!b.endsWith(".json") || b.startsWith(".")) continue;
-    if (covered.has(b) || HIDDEN_FILES.has(b) || SWITCH_LISTS.has(b) || coreFileSet().has(b)) continue;
+    if (covered.has(b) || HIDDEN_FILES.has(b) || SWITCH_LISTS.has(b) || coreFiles.has(b)) continue;
     // unclassified json → Discovered tab section, not here
   }
   for (const b of [...dirs].sort()) {

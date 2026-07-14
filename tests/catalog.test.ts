@@ -303,7 +303,7 @@ describe("listDiscovered", () => {
     const io = new MemFS();
     io.seed({
       ".obs/workspace.json": "{}",                         // device-specific but unclassified → INCLUDED
-      ".obs/workspaces.json": "{}",                        // core plugin file → excluded via CORE_FILE_SET
+      ".obs/workspaces.json": "{}",                        // core plugin file → excluded via coreFileSet()
       ".obs/image-converter-image-alignments.json": "{}", // unclassified → INCLUDED
     });
     const found = await listDiscovered(io, ".obs", []);
