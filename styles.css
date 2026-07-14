@@ -464,8 +464,8 @@ body.is-phone .config-sync-fkey {
 }
 
 .config-sync-hub-row input[type="checkbox"]:disabled {
-  opacity: 0.25;
-  cursor: default;
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 .config-sync-hub-row input[type="checkbox"].is-capture:checked {
@@ -513,6 +513,11 @@ body.is-phone .config-sync-fkey {
   left: 3px;
   font-size: 12px;
   color: var(--background-primary);
+}
+
+.config-sync-mainbar input[type="checkbox"]:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 .config-sync-hub-row.is-insync { opacity: 0.55; }
@@ -590,7 +595,7 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 
 .config-sync-main { display: flex; flex-direction: column; min-width: 0; }
 
-.config-sync-mainbar { display: flex; align-items: center; gap: var(--size-4-1); padding-bottom: var(--size-4-2); flex-wrap: wrap; padding-right: 11px; }
+.config-sync-mainbar { display: flex; align-items: center; gap: var(--size-4-1); padding-bottom: var(--size-4-2); flex-wrap: wrap; padding-right: calc(var(--size-4-3) + 1px); }
 
 .config-sync-mainbar-search { margin-left: auto; background: var(--background-primary); border: 1px solid var(--background-modifier-border); border-radius: 6px; padding: 2px 8px; font-size: var(--font-ui-smaller); width: 140px; }
 
@@ -740,7 +745,9 @@ body.is-mobile .config-sync-mainbar input[type="checkbox"]:indeterminate::after 
 .config-sync-reset-link { display: inline-block; margin-top: var(--size-4-2); }
 
 /* 0.21.0 select-all checkbox alignment */
-.config-sync-mainbar .config-sync-selectall { margin-left: auto; margin-right: var(--size-4-3); }
+/* Specificity must beat the base `.config-sync-mainbar input[type="checkbox"] { margin: 0 }`
+   rule, or the auto margin is dropped and the box never right-aligns to the row column. */
+.config-sync-mainbar input[type="checkbox"].config-sync-selectall { margin-left: auto; }
 
 /* 0.21.0 device-specific badge (§3.3): dissolved "Not recommended" section replaced by an inline caution badge */
 .config-sync-devbadge { margin-left: var(--size-4-2); font-size: var(--font-ui-smaller); color: var(--color-orange); background: rgba(var(--color-orange-rgb), 0.12); border-radius: 9px; padding: 1px 8px; }
