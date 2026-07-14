@@ -528,9 +528,9 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   // (for managed items) a reset link.
   private renderAdvancedSegment(exp: HTMLElement, group: SyncGroup, item: CatalogItem, wrap: HTMLElement): void {
     const isOpen = this.advOpen.has(group.name);
-    const header = exp.createDiv({ cls: "config-sync-adv-header" });
-    setIcon(header.createSpan({ cls: "config-sync-adv-chev" }), isOpen ? "chevron-down" : "chevron-right");
-    header.createSpan({ cls: "config-sync-explabel", text: "Advanced" });
+    // Flush-left label with a trailing ▸/▾ (matching "Data file … View data.json ▸") so all
+    // three segment headers share the same left edge.
+    const header = exp.createDiv({ cls: "config-sync-explabel config-sync-adv-toggle", text: isOpen ? "Custom location ▾" : "Custom location ▸" });
     header.addEventListener("click", () => {
       if (isOpen) this.advOpen.delete(group.name);
       else this.advOpen.add(group.name);

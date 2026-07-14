@@ -689,10 +689,7 @@ body.is-mobile .config-sync-mainbar input[type="checkbox"]:indeterminate::after 
 .config-sync-json-legend .config-sync-json-encrypt { color: var(--color-cyan); }
 .config-sync-json-legend .config-sync-json-strip { color: var(--color-red); }
 .config-sync-json-legend .config-sync-json-detected { color: var(--color-orange); }
-.config-sync-adv-header { display: flex; align-items: center; gap: var(--size-2-2); cursor: pointer; margin: var(--size-4-2) 0 var(--size-2-1); }
-.config-sync-adv-header .config-sync-explabel { margin: 0; }
-.config-sync-adv-chev { display: flex; align-items: center; color: var(--text-faint); }
-.config-sync-adv-chev svg { width: 14px; height: 14px; }
+.config-sync-adv-toggle { cursor: pointer; }
 .config-sync-adv { display: flex; flex-direction: column; align-items: flex-start; gap: var(--size-2-2); padding-left: var(--size-4-4); }
 .config-sync-adv .config-sync-form-label { margin-top: var(--size-4-1); }
 .config-sync-adv input[type="text"] { width: min(360px, 100%); }
