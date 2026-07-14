@@ -368,11 +368,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     if (item.disabledReason !== null) parts.push(item.disabledReason);
     if (!item.exists && item.disabledReason === null && item.cautionReason === null) parts.push("(not present in this vault yet)");
     row.setDesc(parts.join(" "));
-    // Badge order matches the design: ⚠ keys → ⚙ customized → device-specific. The detect badge
-    // is async, so a placeholder holds its slot before the later badges are appended.
+    // Badge order matches the design: ⚠ keys → ⚙ custom location → device-specific. The detect
+    // badge is async, so a placeholder holds its slot before the later badges are appended.
     const detectHolder = row.nameEl.createSpan({ cls: "config-sync-detect-holder" });
     if (group !== undefined && this.isCustomized(group)) {
-      row.nameEl.createSpan({ cls: "config-sync-cust", text: "⚙ customized" });
+      row.nameEl.createSpan({ cls: "config-sync-cust", text: "⚙ custom location" });
     }
     if (item.cautionReason !== null) {
       const devBadge = row.nameEl.createSpan({ cls: "config-sync-devbadge", text: "device-specific" });
@@ -617,14 +617,15 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     badge.setAttribute("aria-label", scan.blob ? "opaque encrypted blob" : `${scan.keys.length} sensitive-looking keys`);
   }
 
+  // True only when the item's storage location (Location/Type/Path) differs from its default —
+  // the "⚙ custom location" state. Mode, devices, and field rules are everyday configuration
+  // and deliberately do NOT count as customization here.
   private isCustomized(group: SyncGroup): boolean {
     const expected = expectedPathForName(group.name);
-    if (expected !== null && group.path !== expected) return true;
+    const pathCustom = expected !== null && group.path !== expected;
     const def = defaultGroupForName(group.name);
-    if (def === null) return false;
-    return (group.mode ?? "plain") !== (def.mode ?? "plain")
-      || group.devices !== def.devices
-      || JSON.stringify(group.fields ?? []) !== JSON.stringify(def.fields ?? []);
+    const typeCustom = def !== null && group.type !== def.type;
+    return pathCustom || typeCustom;
   }
 
   private renderModeSegment(controlEl: HTMLElement, group: SyncGroup, afterChange: () => void): void {
