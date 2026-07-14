@@ -272,6 +272,47 @@
   gap: var(--size-4-3);
 }
 
+.config-sync-remote-test {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+  margin-top: var(--size-4-2);
+}
+
+.config-sync-test-strip:empty {
+  display: none;
+}
+
+.config-sync-test-strip {
+  margin-top: var(--size-4-1);
+  padding: var(--size-4-1) var(--size-4-2);
+  border-radius: var(--radius-s);
+  font-size: var(--font-ui-smaller);
+  border: 1px solid transparent;
+}
+
+.config-sync-test-strip.is-testing {
+  color: var(--text-muted);
+}
+
+.config-sync-test-strip.is-ok {
+  color: var(--color-green);
+  background: rgba(var(--color-green-rgb), 0.1);
+  border-color: rgba(var(--color-green-rgb), 0.4);
+}
+
+.config-sync-test-strip.is-caution {
+  color: var(--color-orange);
+  background: rgba(var(--color-orange-rgb), 0.1);
+  border-color: rgba(var(--color-orange-rgb), 0.4);
+}
+
+.config-sync-test-strip.is-error {
+  color: var(--color-red);
+  background: rgba(var(--color-red-rgb), 0.1);
+  border-color: rgba(var(--color-red-rgb), 0.4);
+}
+
 /* Phone layout — Obsidian sets body.is-phone; no pixel breakpoints */
 body.is-phone .config-sync-tab:not(.is-active) .config-sync-tab-label {
   display: none;

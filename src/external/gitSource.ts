@@ -17,6 +17,26 @@ async function git(cwd: string, args: string[]): Promise<string> {
   }
 }
 
+export type LsRemoteResult = { kind: "ok"; branchFound: boolean } | { kind: "error"; message: string };
+
+// Pure classification of an ls-remote outcome. Empty stdout = repo reachable but branch absent.
+export function classifyLsRemote(outcome: { stdout: string } | { error: Error }): LsRemoteResult {
+  if ("error" in outcome) return { kind: "error", message: outcome.error.message };
+  return { kind: "ok", branchFound: outcome.stdout.trim() !== "" };
+}
+
+// Reachability + auth check without downloading objects. Never throws — a failed git call
+// (unreachable host, auth failure, bad URL) becomes { kind: "error" }. cwd is irrelevant for
+// ls-remote against a URL, so "." (the spawn's working dir) is fine.
+export async function gitLsRemote(remoteUrl: string, branch: string): Promise<LsRemoteResult> {
+  try {
+    const stdout = await git(".", ["ls-remote", "--heads", remoteUrl, branch]);
+    return classifyLsRemote({ stdout });
+  } catch (e) {
+    return classifyLsRemote({ error: e as Error });
+  }
+}
+
 export async function createGitReader(
   vaultBasePath: string,
   remoteUrl: string,

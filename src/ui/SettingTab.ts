@@ -1,4 +1,4 @@
-import { App, DropdownComponent, ExtraButtonComponent, Notice, Platform, Plugin, PluginSettingTab, SearchComponent, Setting, setIcon, TextComponent, ToggleComponent } from "obsidian";
+import { App, ButtonComponent, DropdownComponent, ExtraButtonComponent, Notice, Platform, Plugin, PluginSettingTab, SearchComponent, Setting, setIcon, TextComponent, ToggleComponent } from "obsidian";
 import { DeviceClass, FieldRule, Remote, RibbonKey, SyncGroup, SyncMode } from "../core/types";
 import { SensitiveScan } from "../core/modes";
 import { PkmMode } from "../core/pkm";
@@ -111,7 +111,7 @@ interface GeneralSettingDef {
 const GENERAL_SETTINGS: GeneralSettingDef[] = [
   { name: "PKM mode", desc: "Adjusts the recommended storage location to match how your vault is organized. Auto detects IOTO vaults.", anchorId: "general-pkm-mode" },
   {
-    name: "Data folder",
+    name: "Store folder",
     // Rendered desc appends a computed "(currently: <resolved path>)" suffix that depends on an
     // async host.resolvedRootPath() call; this static text is the search-index copy only.
     desc: "Where your synced settings live inside this vault. Your regular vault sync (e.g. remotely-save) carries this folder to your other devices.",
@@ -1349,7 +1349,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const row = listEl.createDiv({ cls: "config-sync-row" + (isOpen ? " is-open" : "") });
     row.setAttribute("data-search-anchor", `remote-${draft.name}`);
     row.createSpan({ cls: "config-sync-row-chevron", text: isOpen ? "▾" : "▸" });
-    row.createSpan({ cls: "config-sync-rule-name", text: draft.name === "" ? "(unnamed)" : draft.name });
+    const nameSpan = row.createSpan({ cls: "config-sync-rule-name", text: draft.name === "" ? "(unnamed)" : draft.name });
     row.createSpan({ cls: "config-sync-row-type", text: draft.type });
     row.createSpan({
       cls: "config-sync-row-path",
@@ -1371,10 +1371,10 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       else this.expanded.add(key);
       this.refresh();
     });
-    if (isOpen) this.renderRemoteForm(listEl, draft);
+    if (isOpen) this.renderRemoteForm(listEl, draft, nameSpan);
   }
 
-  private renderRemoteForm(listEl: HTMLElement, draft: RemoteDraft): void {
+  private renderRemoteForm(listEl: HTMLElement, draft: RemoteDraft, nameSpan: HTMLElement): void {
     const panel = listEl.createDiv({ cls: "config-sync-expand" });
     const field = this.formField.bind(this);
     const line1 = panel.createDiv({ cls: "config-sync-form-line1" });
@@ -1393,6 +1393,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       draft.name = v.trim();
       this.expanded.add(`remote:${draft.name}`);
       void this.saveRemotes();
+      nameSpan.setText(draft.name === "" ? "(unnamed)" : draft.name);
     });
     nameC.inputEl.addClass("config-sync-rule-name-input");
 
@@ -1409,18 +1410,53 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       }
     } else {
       const line2 = panel.createDiv({ cls: "config-sync-remote-git" });
+      let strip: HTMLElement | null = null;
+      const clearStrip = (): void => {
+        if (strip) {
+          strip.setText("");
+          strip.className = "config-sync-test-strip";
+        }
+      };
       new TextComponent(field(line2, "URL")).setPlaceholder("git@host:me/config.git").setValue(draft.url).onChange((v) => {
         draft.url = v.trim();
+        clearStrip();
         void this.saveRemotes();
       });
       new TextComponent(field(line2, "Branch")).setPlaceholder("main").setValue(draft.branch).onChange((v) => {
         draft.branch = v.trim();
+        clearStrip();
         void this.saveRemotes();
       });
-      new TextComponent(field(line2, "Folder in repo (optional)")).setPlaceholder("empty = repo root").setValue(draft.subdir).onChange((v) => {
+      new TextComponent(field(line2, "Store folder in repo (optional)")).setPlaceholder("empty = repo root").setValue(draft.subdir).onChange((v) => {
         draft.subdir = v.trim();
         void this.saveRemotes();
       });
+      if (Platform.isDesktop) {
+        const testLine = panel.createDiv({ cls: "config-sync-remote-test" });
+        const btn = new ButtonComponent(testLine).setButtonText("Test connection");
+        strip = panel.createDiv({ cls: "config-sync-test-strip" });
+        btn.onClick(async () => {
+          btn.setDisabled(true).setButtonText("Testing…");
+          strip!.className = "config-sync-test-strip is-testing";
+          strip!.setText("Contacting remote…");
+          try {
+            const { gitLsRemote } = await import("../external/gitSource");
+            const res = await gitLsRemote(draft.url, draft.branch);
+            if (res.kind === "error") {
+              strip!.className = "config-sync-test-strip is-error";
+              strip!.setText(`✗ Could not reach remote — ${res.message}`);
+            } else if (res.branchFound) {
+              strip!.className = "config-sync-test-strip is-ok";
+              strip!.setText(`✓ Reachable — branch ${draft.branch} found`);
+            } else {
+              strip!.className = "config-sync-test-strip is-caution";
+              strip!.setText(`Reachable, but branch "${draft.branch}" not found`);
+            }
+          } finally {
+            btn.setDisabled(false).setButtonText("Test connection");
+          }
+        });
+      }
     }
   }
 
