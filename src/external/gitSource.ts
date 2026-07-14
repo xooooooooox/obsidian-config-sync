@@ -27,10 +27,10 @@ export function classifyLsRemote(outcome: { stdout: string } | { error: Error })
 
 // Reachability + auth check without downloading objects. Never throws — a failed git call
 // (unreachable host, auth failure, bad URL) becomes { kind: "error" }. cwd is irrelevant for
-// ls-remote against a URL, so process.cwd() is fine.
+// ls-remote against a URL, so "." (the spawn's working dir) is fine.
 export async function gitLsRemote(remoteUrl: string, branch: string): Promise<LsRemoteResult> {
   try {
-    const stdout = await git(process.cwd(), ["ls-remote", "--heads", remoteUrl, branch]);
+    const stdout = await git(".", ["ls-remote", "--heads", remoteUrl, branch]);
     return classifyLsRemote({ stdout });
   } catch (e) {
     return classifyLsRemote({ error: e as Error });
