@@ -20,7 +20,7 @@ import {
   writeGroups,
 } from "./core/ConfigSyncCore";
 import { createInstaller } from "./core/installer";
-import { type CatalogSection, displayLabelForGroup, listCoreSections, listDiscovered, listOptionSections, listPluginSections } from "./core/catalog";
+import { type CatalogSection, displayLabelForGroup, listCoreSections, listDiscovered, listOptionSections, listPluginSections, setCorePluginIds } from "./core/catalog";
 import { Availability, availabilityForGroup } from "./core/availability";
 import { listFilesRecursive } from "./core/io";
 import { groupRealPath } from "./core/pathing";
@@ -81,6 +81,7 @@ export default class ConfigSyncPlugin extends Plugin {
 
   async onload(): Promise<void> {
     await this.loadSettings();
+    setCorePluginIds(this.coreRuntime().map((c) => c.id));
     this.addSettingTab(new ConfigSyncSettingTab(this.app, this));
     this.registerView(SYNC_CENTER_VIEW_TYPE, (leaf) => new SyncCenterView(leaf, this.syncCenterHost()));
     this.mainRibbonEl = this.addRibbonIcon("refresh-cw", "Config Sync", (evt) => void this.openSyncMenu(evt));

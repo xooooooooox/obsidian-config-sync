@@ -1,5 +1,5 @@
 import { PluginHost, pluginIdForGroup } from "./ConfigSyncCore";
-import { CORE_SETTINGS_IDS } from "./catalog";
+import { coreSettingsIds } from "./catalog";
 import { StoreLock, SyncGroup } from "./types";
 
 export type AvailabilityKind = "enabled" | "disabled" | "not-installed";
@@ -55,7 +55,7 @@ export function availabilityForGroup(group: SyncGroup, plugins: PluginHost, lock
   }
   const localVersion = plugins.getAppVersion();
   const storeVersion = lock?.groups[group.name]?.sourceAppVersion ?? null;
-  const isCore = CORE_SETTINGS_IDS.includes(group.name);
+  const isCore = coreSettingsIds().has(group.name);
   const kind: AvailabilityKind = isCore && !plugins.isCorePluginEnabled(group.name) ? "disabled" : "enabled";
   return { kind, drift: driftFor(localVersion, storeVersion), localVersion, storeVersion, anchor: "app" };
 }
