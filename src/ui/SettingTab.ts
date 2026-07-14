@@ -161,7 +161,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private searchScope: SearchHit["scope"] | "all" = "all";
   private bodyEl: HTMLElement | null = null;
   private expanded = new Set<string>(); // UI-transient: advanced rows expanded this session
-  private advOpen = new Set<string>(); // UI-transient: which rows have the Advanced sub-section open
+  private customLocOpen = new Set<string>(); // UI-transient: which rows have the Custom location sub-section open
   private jsonOpen = new Set<string>(); // UI-transient: which rows have the View data.json body open
   private groupsErrorEl: HTMLElement | null = null;
   private sourcesErrorEl: HTMLElement | null = null;
@@ -437,7 +437,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       this.renderFieldsEditor(exp.createDiv(), group, () => this.renderItemInto(wrap, item));
     }
     this.renderDataFileSegment(exp, group, item, wrap);
-    this.renderAdvancedSegment(exp, group, item, wrap);
+    this.renderCustomLocationSegment(exp, group, item, wrap);
   }
 
   private renderDataFileSegment(exp: HTMLElement, group: SyncGroup, item: CatalogItem, wrap: HTMLElement): void {
@@ -526,20 +526,23 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
 
   // Advanced: a default-collapsed sub-section holding the item's Location + Path override and
   // (for managed items) a reset link.
-  private renderAdvancedSegment(exp: HTMLElement, group: SyncGroup, item: CatalogItem, wrap: HTMLElement): void {
-    const isOpen = this.advOpen.has(group.name);
+  private renderCustomLocationSegment(exp: HTMLElement, group: SyncGroup, item: CatalogItem, wrap: HTMLElement): void {
+    const isOpen = this.customLocOpen.has(group.name);
     // Flush-left label with a trailing ▸/▾ (matching "Data file … View data.json ▸") so all
     // three segment headers share the same left edge.
     const header = exp.createDiv({ cls: "config-sync-explabel config-sync-adv-toggle", text: isOpen ? "Custom location ▾" : "Custom location ▸" });
     header.addEventListener("click", () => {
-      if (isOpen) this.advOpen.delete(group.name);
-      else this.advOpen.add(group.name);
+      if (isOpen) this.customLocOpen.delete(group.name);
+      else this.customLocOpen.add(group.name);
       this.renderItemInto(wrap, item);
     });
     if (!isOpen) return;
-    const adv = exp.createDiv({ cls: "config-sync-adv" });
+    const adv = exp.createDiv({ cls: "config-sync-cl-row" });
     const loc = splitLocation(group.path);
-    new DropdownComponent(this.formField(adv, "Location"))
+
+    const locField = adv.createDiv({ cls: "config-sync-cl-field" });
+    locField.createSpan({ cls: "config-sync-cl-lbl", text: "Location" });
+    new DropdownComponent(locField)
       .addOption("config", "Config folder")
       .addOption("vault", "Vault root")
       .setValue(loc.location)
@@ -549,15 +552,38 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
           if (g !== undefined) g.path = joinLocation(v as "config" | "vault", splitLocation(g.path).rel);
         }, group.name);
       });
-    new TextComponent(this.formField(adv, "Path")).setValue(loc.rel).onChange((v) => {
+
+    const typeField = adv.createDiv({ cls: "config-sync-cl-field" });
+    typeField.createSpan({ cls: "config-sync-cl-lbl", text: "Type" });
+    new DropdownComponent(typeField)
+      .addOption("file", "File")
+      .addOption("dir", "Folder")
+      .setValue(group.type)
+      .onChange(async (v) => {
+        await this.commitGroups((draft) => {
+          const g = draft.find((x) => x.name === group.name);
+          if (g === undefined) return;
+          g.type = v as SyncGroup["type"];
+          if (g.type !== "file") {
+            delete g.mode;
+            delete g.fields;
+          }
+        }, group.name);
+        this.renderItemInto(wrap, item);
+      });
+
+    const pathField = adv.createDiv({ cls: "config-sync-cl-field path" });
+    pathField.createSpan({ cls: "config-sync-cl-lbl", text: "Path" });
+    new TextComponent(pathField).setValue(loc.rel).onChange((v) => {
       void this.commitGroups((draft) => {
         const g = draft.find((x) => x.name === group.name);
         if (g !== undefined) g.path = joinLocation(splitLocation(g.path).location, v.trim());
       }, group.name);
     });
+
     const reserved = reservedNames(this.host.installedPluginIds());
     if (reserved.has(group.name)) {
-      const reset = adv.createSpan({ cls: "config-sync-link config-sync-reset-link", text: "↺ Reset this item to its default rule" });
+      const reset = exp.createSpan({ cls: "config-sync-link config-sync-reset-link", text: "↺ Reset to default" });
       reset.addEventListener("click", () => {
         void (async () => {
           const def = defaultGroupForName(group.name);

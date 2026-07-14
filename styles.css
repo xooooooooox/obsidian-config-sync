@@ -690,10 +690,13 @@ body.is-mobile .config-sync-mainbar input[type="checkbox"]:indeterminate::after 
 .config-sync-json-legend .config-sync-json-strip { color: var(--color-red); }
 .config-sync-json-legend .config-sync-json-detected { color: var(--color-orange); }
 .config-sync-adv-toggle { cursor: pointer; }
-.config-sync-adv { display: flex; flex-direction: column; align-items: flex-start; gap: var(--size-2-2); padding-left: var(--size-4-4); }
-.config-sync-adv .config-sync-form-label { margin-top: var(--size-4-1); }
-.config-sync-adv input[type="text"] { width: min(360px, 100%); }
-.config-sync-reset-link { margin-top: var(--size-2-2); }
+/* Custom location: Location · Type · Path on one row, Path flexes to fill the rest. */
+.config-sync-cl-row { display: flex; gap: var(--size-4-2); align-items: flex-end; }
+.config-sync-cl-field { display: flex; flex-direction: column; gap: var(--size-2-1); }
+.config-sync-cl-field.path { flex: 1; min-width: 0; }
+.config-sync-cl-field.path input[type="text"] { width: 100%; box-sizing: border-box; }
+.config-sync-cl-lbl { font-size: var(--font-ui-smaller); text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); }
+.config-sync-reset-link { display: inline-block; margin-top: var(--size-4-2); }
 
 /* 0.21.0 select-all checkbox alignment */
 .config-sync-mainbar .config-sync-selectall { margin-left: auto; margin-right: var(--size-4-3); }
