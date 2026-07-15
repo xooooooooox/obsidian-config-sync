@@ -25,7 +25,7 @@ import { Availability, availabilityForGroup } from "./core/availability";
 import { listFilesRecursive } from "./core/io";
 import { ManifestValidationError, migrateLegacyManifest, parseStoreLock, validateSyncManifest } from "./core/manifest";
 import { groupRealPath, groupStorePath } from "./core/pathing";
-import { parseSwitchList, SwitchList } from "./core/switchList";
+import { parseSwitchList, SWITCH_LIST_GROUPS, SwitchList } from "./core/switchList";
 import { scanSensitive, SensitiveScan } from "./core/modes";
 import { PkmMode, PkmProbe, resolveEffectiveMode, resolveRootPath } from "./core/pkm";
 import { bucketCounts, checkRemote, diffRemote, GroupStatus, RemoteCheck, statusForGroups } from "./core/status";
@@ -315,6 +315,7 @@ export default class ConfigSyncPlugin extends Plugin {
       dismissBootstrap: () => {
         this.bootstrapDismissed = true;
       },
+      switchLocalDecisions: (name) => (SWITCH_LIST_GROUPS.has(name) ? this.settings.switchExceptions[name] ?? [] : []),
       adoptConfiguration: async () => {
         try {
           const ctx = await this.coreContext();

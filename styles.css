@@ -891,3 +891,6 @@ body.is-mobile .config-sync-mainbar input[type="checkbox"]:indeterminate::after 
 .config-sync-ldhint { color: var(--text-faint); font-size: var(--font-ui-smaller); }
 .config-sync-ldstate { color: var(--text-muted); font-size: var(--font-ui-smaller); }
 .config-sync-ldrow.is-local .config-sync-ldstate { color: var(--color-orange); }
+
+.config-sync-ldnote { color: var(--color-orange); font-size: var(--font-ui-smaller); margin-left: var(--size-4-1); }
+.config-sync-lddetail { color: var(--color-orange); font-family: var(--font-monospace); font-size: var(--font-ui-smaller); padding: 1px 0; }
