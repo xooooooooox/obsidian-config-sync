@@ -43,6 +43,7 @@ interface ConfigSyncSettings {
   remoteAutoCheck: boolean;
   localPeriodicCheck: boolean;
   groups: SyncGroup[];
+  switchExceptions: Record<string, string[]>; // group name -> excepted plugin/core ids (device-local)
 }
 
 const DEFAULT_SETTINGS: ConfigSyncSettings = {
@@ -54,6 +55,7 @@ const DEFAULT_SETTINGS: ConfigSyncSettings = {
   remoteAutoCheck: true,
   localPeriodicCheck: true,
   groups: [],
+  switchExceptions: {},
 };
 
 // app.plugins is not part of the public API; this is the community-standard access path.
@@ -509,6 +511,7 @@ export default class ConfigSyncPlugin extends Plugin {
       rootPath,
       plugins: this.pluginHost(),
       passphrase: this.passphrase(),
+      switchExceptions: this.settings.switchExceptions,
       groupsIO: {
         read: async () => this.settings.groups,
         write: async (groups) => {

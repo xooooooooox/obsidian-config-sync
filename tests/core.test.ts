@@ -3,6 +3,7 @@ import { CoreContext, capture, loadManifest, groupsForDevice, apply, applyWithAc
 import { parseSyncManifest } from "../src/core/manifest";
 import { SyncGroup } from "../src/core/types";
 import { isFieldEnvelope, parseFileEnvelope } from "../src/core/crypto";
+import { statusForGroups } from "../src/core/status";
 import { MemFS, FakePlugins, memGroupsIO } from "./memfs";
 
 export const MANIFEST = JSON.stringify({
@@ -26,6 +27,7 @@ export function setup(): { io: MemFS; plugins: FakePlugins; ctx: CoreContext } {
     passphrase: null,
     groupsIO: memGroupsIO(),
     now: () => "2026-07-08T00:00:00.000Z",
+    switchExceptions: {},
   };
   return { io, plugins, ctx };
 }
@@ -441,7 +443,7 @@ describe("applyWithActions", () => {
     it('action "enable" reports ⚠ enable failed with the exact message when Obsidian silently no-ops, but still writes config', async () => {
       const io = new MemFS();
       const plugins = new NoOpEnablePlugins();
-      const ctx: CoreContext = { io, configDir: ".obs", rootPath: "cs", plugins, passphrase: null, groupsIO: memGroupsIO(), now: () => "2026-07-08T00:00:00.000Z" };
+      const ctx: CoreContext = { io, configDir: ".obs", rootPath: "cs", plugins, passphrase: null, groupsIO: memGroupsIO(), now: () => "2026-07-08T00:00:00.000Z", switchExceptions: {} };
       plugins.installed.set("demo", "1.2.3");
       await seedStore(io, ctx);
       const results = await applyWithActions(ctx, [{ name: "plugin-demo", action: "enable" }], async () => "9.9.9");
@@ -454,7 +456,7 @@ describe("applyWithActions", () => {
     it('action "install-enable" with a successful install but a silently no-op enable reports ⚠ enable failed (not install failed) and still writes config', async () => {
       const io = new MemFS();
       const plugins = new NoOpEnablePlugins();
-      const ctx: CoreContext = { io, configDir: ".obs", rootPath: "cs", plugins, passphrase: null, groupsIO: memGroupsIO(), now: () => "2026-07-08T00:00:00.000Z" };
+      const ctx: CoreContext = { io, configDir: ".obs", rootPath: "cs", plugins, passphrase: null, groupsIO: memGroupsIO(), now: () => "2026-07-08T00:00:00.000Z", switchExceptions: {} };
       await seedStore(io, ctx);
       const results = await applyWithActions(ctx, [{ name: "plugin-demo", action: "install-enable" }], async (id) => {
         plugins.installed.set(id, "2.5.0");
@@ -903,5 +905,166 @@ describe("capture app-version recording", () => {
     const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, unknown> };
     expect(lock.groups["hotkeys"]).toEqual({ sourceAppVersion: "1.8.7" });
     expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.2.3" });
+  });
+});
+
+const COMMUNITY_MANIFEST = JSON.stringify({
+  version: 1,
+  groups: [{ name: "community-plugins", path: "{configDir}/community-plugins.json", type: "file", devices: "all" }],
+});
+
+const CORE_MANIFEST = JSON.stringify({
+  version: 1,
+  groups: [{ name: "core-plugins", path: "{configDir}/core-plugins.json", type: "file", devices: "all" }],
+});
+
+describe("switch-list exceptions", () => {
+  describe("capture (community-plugins array)", () => {
+    it("strips the excepted id from the store copy while the local file keeps it", async () => {
+      const { io, ctx } = setup();
+      ctx.switchExceptions["community-plugins"] = ["x"];
+      io.seed({ ".obs/community-plugins.json": JSON.stringify(["a", "x", "b"]) });
+      await seedGroups(ctx, COMMUNITY_MANIFEST);
+      await capture(ctx);
+      expect(JSON.parse(await io.read("cs/store/configdir/community-plugins.json"))).toEqual(["a", "b"]);
+      expect(JSON.parse(await io.read(".obs/community-plugins.json"))).toEqual(["a", "x", "b"]);
+    });
+
+    it("with no exceptions, captures byte-for-byte as today (identity)", async () => {
+      const { io, ctx } = setup();
+      io.seed({ ".obs/community-plugins.json": JSON.stringify(["a", "x", "b"], null, 2) + "\n" });
+      await seedGroups(ctx, COMMUNITY_MANIFEST);
+      await capture(ctx);
+      expect(await io.read("cs/store/configdir/community-plugins.json")).toBe(JSON.stringify(["a", "x", "b"], null, 2) + "\n");
+    });
+  });
+
+  describe("apply (community-plugins array)", () => {
+    it("keeps local state for the excepted id, follows the store for synced ids", async () => {
+      const { io, ctx } = setup();
+      ctx.switchExceptions["community-plugins"] = ["x"];
+      io.seed({
+        "cs/store/configdir/community-plugins.json": JSON.stringify(["a", "b"]),
+        ".obs/community-plugins.json": JSON.stringify(["x", "c"]),
+      });
+      await seedGroups(ctx, COMMUNITY_MANIFEST);
+      await apply(ctx, ["community-plugins"]);
+      expect(JSON.parse(await io.read(".obs/community-plugins.json"))).toEqual(["a", "b", "x"]);
+    });
+
+    it("with no local file, applies the store minus exceptions", async () => {
+      const { io, ctx } = setup();
+      ctx.switchExceptions["community-plugins"] = ["x"];
+      io.seed({ "cs/store/configdir/community-plugins.json": JSON.stringify(["a", "x", "b"]) });
+      await seedGroups(ctx, COMMUNITY_MANIFEST);
+      await apply(ctx, ["community-plugins"]);
+      expect(JSON.parse(await io.read(".obs/community-plugins.json"))).toEqual(["a", "b"]);
+    });
+  });
+
+  describe("status (community-plugins array)", () => {
+    it("is in-sync when local and store differ only in the excepted id", async () => {
+      const { io, ctx } = setup();
+      ctx.switchExceptions["community-plugins"] = ["x"];
+      io.seed({
+        "cs/store/configdir/community-plugins.json": JSON.stringify(["a", "b"]),
+        ".obs/community-plugins.json": JSON.stringify(["a", "b", "x"]),
+      });
+      await seedGroups(ctx, COMMUNITY_MANIFEST);
+      const manifest = await loadManifest(ctx);
+      const statuses = await statusForGroups(ctx, groupsForDevice(manifest, "desktop"));
+      expect(statuses).toEqual([{ group: "community-plugins", state: "in-sync" }]);
+    });
+
+    it("still reports a real diff when a synced id differs", async () => {
+      const { io, ctx } = setup();
+      ctx.switchExceptions["community-plugins"] = ["x"];
+      io.seed({
+        "cs/store/configdir/community-plugins.json": JSON.stringify(["a", "b"]),
+        ".obs/community-plugins.json": JSON.stringify(["a", "c", "x"]),
+      });
+      await seedGroups(ctx, COMMUNITY_MANIFEST);
+      const manifest = await loadManifest(ctx);
+      const statuses = await statusForGroups(ctx, groupsForDevice(manifest, "desktop"));
+      expect(statuses[0]?.state).not.toBe("in-sync");
+    });
+
+    it("capture does not rewrite the store when local and store differ only in the excepted id (masked-equal skip)", async () => {
+      const { io, ctx } = setup();
+      ctx.switchExceptions["community-plugins"] = ["x"];
+      io.seed({
+        "cs/store/configdir/community-plugins.json": JSON.stringify(["a", "b"], null, 2) + "\n",
+        ".obs/community-plugins.json": JSON.stringify(["a", "b", "x"]),
+      });
+      await seedGroups(ctx, COMMUNITY_MANIFEST);
+      const results = await capture(ctx);
+      expect(results[0]?.filesWritten).toEqual([]);
+    });
+  });
+
+  describe("capture (core-plugins map)", () => {
+    it("strips the excepted id from the store copy while the local file keeps it", async () => {
+      const { io, ctx } = setup();
+      ctx.switchExceptions["core-plugins"] = ["backlink"];
+      io.seed({ ".obs/core-plugins.json": JSON.stringify({ graph: true, backlink: false, canvas: true }) });
+      await seedGroups(ctx, CORE_MANIFEST);
+      await capture(ctx);
+      expect(JSON.parse(await io.read("cs/store/configdir/core-plugins.json"))).toEqual({ graph: true, canvas: true });
+      expect(JSON.parse(await io.read(".obs/core-plugins.json"))).toEqual({ graph: true, backlink: false, canvas: true });
+    });
+  });
+
+  describe("apply (core-plugins map)", () => {
+    it("keeps local entry state (present:false) for the excepted key, follows store otherwise", async () => {
+      const { io, ctx } = setup();
+      ctx.switchExceptions["core-plugins"] = ["backlink"];
+      io.seed({
+        "cs/store/configdir/core-plugins.json": JSON.stringify({ graph: true, canvas: true }),
+        ".obs/core-plugins.json": JSON.stringify({ backlink: false }),
+      });
+      await seedGroups(ctx, CORE_MANIFEST);
+      await apply(ctx, ["core-plugins"]);
+      expect(JSON.parse(await io.read(".obs/core-plugins.json"))).toEqual({ graph: true, canvas: true, backlink: false });
+    });
+
+    it("leaves an absent excepted key absent when local lacks it", async () => {
+      const { io, ctx } = setup();
+      ctx.switchExceptions["core-plugins"] = ["backlink"];
+      io.seed({
+        "cs/store/configdir/core-plugins.json": JSON.stringify({ graph: true, backlink: true, canvas: true }),
+        ".obs/core-plugins.json": JSON.stringify({ graph: false }),
+      });
+      await seedGroups(ctx, CORE_MANIFEST);
+      await apply(ctx, ["core-plugins"]);
+      expect(JSON.parse(await io.read(".obs/core-plugins.json"))).toEqual({ graph: true, canvas: true });
+    });
+  });
+
+  describe("status (core-plugins map)", () => {
+    it("is in-sync when local and store differ only in the excepted key", async () => {
+      const { io, ctx } = setup();
+      ctx.switchExceptions["core-plugins"] = ["backlink"];
+      io.seed({
+        "cs/store/configdir/core-plugins.json": JSON.stringify({ graph: true, canvas: true }),
+        ".obs/core-plugins.json": JSON.stringify({ graph: true, canvas: true, backlink: false }),
+      });
+      await seedGroups(ctx, CORE_MANIFEST);
+      const manifest = await loadManifest(ctx);
+      const statuses = await statusForGroups(ctx, groupsForDevice(manifest, "desktop"));
+      expect(statuses).toEqual([{ group: "core-plugins", state: "in-sync" }]);
+    });
+
+    it("still reports a real diff when a synced key differs", async () => {
+      const { io, ctx } = setup();
+      ctx.switchExceptions["core-plugins"] = ["backlink"];
+      io.seed({
+        "cs/store/configdir/core-plugins.json": JSON.stringify({ graph: true, canvas: true }),
+        ".obs/core-plugins.json": JSON.stringify({ graph: false, canvas: true, backlink: false }),
+      });
+      await seedGroups(ctx, CORE_MANIFEST);
+      const manifest = await loadManifest(ctx);
+      const statuses = await statusForGroups(ctx, groupsForDevice(manifest, "desktop"));
+      expect(statuses[0]?.state).not.toBe("in-sync");
+    });
   });
 });
