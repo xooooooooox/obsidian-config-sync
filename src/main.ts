@@ -19,7 +19,7 @@ import {
   writeGroups,
 } from "./core/ConfigSyncCore";
 import { createInstaller } from "./core/installer";
-import { type CatalogSection, displayLabelForGroup, listCoreSections, listDiscovered, listOptionSections, listPluginSections, setCorePluginIds } from "./core/catalog";
+import { type CatalogSection, displayLabelForGroup, ensureSelfPresets, listCoreSections, listDiscovered, listOptionSections, listPluginSections, SELF_GROUP_NAME, setCorePluginIds } from "./core/catalog";
 import { Availability, availabilityForGroup } from "./core/availability";
 import { listFilesRecursive } from "./core/io";
 import { ManifestValidationError, migrateLegacyManifest, validateSyncManifest } from "./core/manifest";
@@ -131,7 +131,7 @@ export default class ConfigSyncPlugin extends Plugin {
       const rootPath = await this.resolvedRootPath();
       const result = await migrateLegacyManifest(this.app.vault.adapter, rootPath, this.settings.groups, new Date().toISOString());
       if (result.migrated) {
-        this.settings.groups = result.groups;
+        this.settings.groups = ensureSelfPresets(result.groups);
         await this.saveSettings();
         new Notice("Config Sync: imported groups from config-sync.json (file renamed, now lives in plugin settings)");
       }
@@ -300,6 +300,11 @@ export default class ConfigSyncPlugin extends Plugin {
         try {
           const ctx = await this.coreContext();
           const results = await applyWithActions(ctx, items, this.installPlugin(), onProgress);
+          if (results.some((r) => r.group === SELF_GROUP_NAME && r.status !== "error")) {
+            // The apply just rewrote this plugin's own settings file on disk — reload before
+            // refreshing status so the running plugin picks up the new contract immediately.
+            await this.loadSettings();
+          }
           await this.refreshLocalStatus();
           return results;
         } catch (e) {

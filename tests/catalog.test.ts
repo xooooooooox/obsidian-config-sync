@@ -6,6 +6,7 @@ import {
   CORE_ID_SEED,
   defaultGroupForName,
   displayLabelForGroup,
+  ensureSelfPresets,
   expectedPathForName,
   findGroupByName,
   groupForItem,
@@ -16,6 +17,8 @@ import {
   listPluginSections,
   optionReservedName,
   reservedNames,
+  SELF_GROUP_NAME,
+  selfPresetRules,
   setCorePluginIds,
   splitLocation,
   toggleSection,
@@ -368,6 +371,86 @@ describe("groupForItem", () => {
   it("records a label when given", () => {
     expect(groupForItem("plugin-x", "{configDir}/plugins/x/data.json", "file", null, "Xtension").label).toBe("Xtension");
     expect(groupForItem("plugin-x", "{configDir}/plugins/x/data.json", "file", null).label).toBeUndefined();
+  });
+
+  it("attaches locked strip presets when the produced group is the self item", () => {
+    const g = groupForItem(SELF_GROUP_NAME, "{configDir}/plugins/config-sync/data.json", "file", null);
+    expect(g.mode).toBe("fields");
+    expect(g.fields).toEqual(selfPresetRules());
+    expect(g.fields).toEqual([
+      { pattern: "rootPath", action: "strip", locked: true },
+      { pattern: "remotes", action: "strip", locked: true },
+    ]);
+  });
+
+  it("leaves other item names unaffected (no mode/fields added)", () => {
+    const g = groupForItem("plugin-x", "{configDir}/plugins/x/data.json", "file", null);
+    expect(g.mode).toBeUndefined();
+    expect(g.fields).toBeUndefined();
+  });
+});
+
+describe("ensureSelfPresets", () => {
+  it("adds presets to a bare self group", () => {
+    const groups: SyncGroup[] = [{ name: SELF_GROUP_NAME, path: "{configDir}/plugins/config-sync/data.json", type: "file", devices: "all" }];
+    const out = ensureSelfPresets(groups);
+    const self = out.find((g) => g.name === SELF_GROUP_NAME);
+    expect(self?.mode).toBe("fields");
+    expect(self?.fields).toEqual(selfPresetRules());
+  });
+
+  it("normalizes an unlocked duplicate of a preset pattern to the locked preset", () => {
+    const groups: SyncGroup[] = [
+      {
+        name: SELF_GROUP_NAME,
+        path: "{configDir}/plugins/config-sync/data.json",
+        type: "file",
+        devices: "all",
+        mode: "fields",
+        fields: [{ pattern: "rootPath", action: "strip" }],
+      },
+    ];
+    const out = ensureSelfPresets(groups);
+    const self = out.find((g) => g.name === SELF_GROUP_NAME);
+    expect(self?.fields?.filter((f) => f.pattern === "rootPath")).toEqual([{ pattern: "rootPath", action: "strip", locked: true }]);
+    expect(self?.fields).toEqual(selfPresetRules());
+  });
+
+  it("keeps user-added other rules alongside the presets", () => {
+    const groups: SyncGroup[] = [
+      {
+        name: SELF_GROUP_NAME,
+        path: "{configDir}/plugins/config-sync/data.json",
+        type: "file",
+        devices: "all",
+        mode: "fields",
+        fields: [{ pattern: "myToken", action: "encrypt" }],
+      },
+    ];
+    const out = ensureSelfPresets(groups);
+    const self = out.find((g) => g.name === SELF_GROUP_NAME);
+    expect(self?.fields).toEqual([...selfPresetRules(), { pattern: "myToken", action: "encrypt" }]);
+  });
+
+  it("is idempotent: double-apply equals single-apply", () => {
+    const groups: SyncGroup[] = [{ name: SELF_GROUP_NAME, path: "{configDir}/plugins/config-sync/data.json", type: "file", devices: "all" }];
+    const once = ensureSelfPresets(groups);
+    const twice = ensureSelfPresets(once);
+    expect(twice).toEqual(once);
+  });
+
+  it("returns groups unchanged (same values) when no self group is present", () => {
+    const groups: SyncGroup[] = [{ name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all" }];
+    const out = ensureSelfPresets(groups);
+    expect(out).toEqual(groups);
+    expect(out).not.toBe(groups);
+  });
+
+  it("does not mutate its input", () => {
+    const groups: SyncGroup[] = [{ name: SELF_GROUP_NAME, path: "{configDir}/plugins/config-sync/data.json", type: "file", devices: "all" }];
+    const snapshot = structuredClone(groups);
+    ensureSelfPresets(groups);
+    expect(groups).toEqual(snapshot);
   });
 });
 

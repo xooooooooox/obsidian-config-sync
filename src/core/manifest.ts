@@ -27,7 +27,8 @@ function isValidFieldRule(v: unknown): v is FieldRule {
     isPlainObject(v) &&
     typeof v.pattern === "string" &&
     v.pattern !== "" &&
-    (v.action === "strip" || v.action === "encrypt")
+    (v.action === "strip" || v.action === "encrypt") &&
+    (v.locked === undefined || typeof v.locked === "boolean")
   );
 }
 

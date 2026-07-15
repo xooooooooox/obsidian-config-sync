@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { migrateLegacyManifest } from "../src/core/manifest";
 import { ManifestValidationError } from "../src/core/manifest";
+import { ensureSelfPresets, SELF_GROUP_NAME, selfPresetRules } from "../src/core/catalog";
 import { SyncGroup } from "../src/core/types";
 import { MemFS } from "./memfs";
 
@@ -53,5 +54,23 @@ describe("migrateLegacyManifest", () => {
 
     expect(await io.exists("cs/config-sync.json")).toBe(true);
     expect(await io.read("cs/config-sync.json")).toBe("not json");
+  });
+
+  it("a migrated plugin-config-sync group without presets gains the locked strip rules", async () => {
+    const io = new MemFS();
+    const legacyContent = JSON.stringify({
+      version: 1,
+      groups: [
+        { name: SELF_GROUP_NAME, path: "{configDir}/plugins/config-sync/data.json", type: "file", devices: "all" },
+      ],
+    });
+    io.seed({ "cs/config-sync.json": legacyContent });
+
+    const result = await migrateLegacyManifest(io, "cs", [], NOW);
+    const withPresets = ensureSelfPresets(result.groups);
+
+    const self = withPresets.find((g) => g.name === SELF_GROUP_NAME);
+    expect(self?.mode).toBe("fields");
+    expect(self?.fields).toEqual(selfPresetRules());
   });
 });

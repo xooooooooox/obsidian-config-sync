@@ -705,6 +705,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     for (const rule of rules) {
       const isDetected = detectedKeys.some((k) => keyMatchesAny(k, [rule.pattern]));
       const fr = panel.createDiv({ cls: "config-sync-fieldrow" });
+      if (rule.locked === true) {
+        const lock = fr.createSpan({ cls: "config-sync-flock", text: "🔒" });
+        lock.setAttribute("title", "Preset rule — cannot be removed");
+        lock.setAttribute("aria-label", "Preset rule — cannot be removed");
+      }
       fr.createSpan({ cls: "config-sync-fkey", text: rule.pattern });
       fr.createSpan({ cls: `config-sync-ftag${isDetected ? " is-detected" : ""}`, text: isDetected ? "detected" : "manual" });
       fr.createDiv({ cls: "config-sync-rule-spacer" });
@@ -731,18 +736,23 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
           })();
         });
       }
-      new ExtraButtonComponent(fr).setIcon("x").setTooltip("Remove rule").onClick(() => {
-        void (async () => {
-          const ruleIndex = rules.indexOf(rule);
-          await this.commitGroups((draft) => {
-            const g = draft.find((x) => x.name === group.name);
-            if (g === undefined || g.fields === undefined) return;
-            g.fields = g.fields.filter((_, i) => i !== ruleIndex);
-            if (g.fields.length === 0) delete g.fields;
-          }, group.name);
-          afterChange();
-        })();
-      });
+      new ExtraButtonComponent(fr)
+        .setIcon("x")
+        .setTooltip(rule.locked === true ? "Preset rule — cannot be removed" : "Remove rule")
+        .setDisabled(rule.locked === true)
+        .onClick(() => {
+          if (rule.locked === true) return;
+          void (async () => {
+            const ruleIndex = rules.indexOf(rule);
+            await this.commitGroups((draft) => {
+              const g = draft.find((x) => x.name === group.name);
+              if (g === undefined || g.fields === undefined) return;
+              g.fields = g.fields.filter((_, i) => i !== ruleIndex);
+              if (g.fields.length === 0) delete g.fields;
+            }, group.name);
+            afterChange();
+          })();
+        });
     }
     const addRow = panel.createDiv({ cls: "config-sync-addrow" });
     const input = addRow.createEl("input", { cls: "config-sync-addrow-input", attr: { placeholder: "Add key pattern… e.g. *Token*" } });

@@ -1,6 +1,6 @@
 import { PluginHost } from "./ConfigSyncCore";
 import { FileIO } from "./io";
-import { SyncGroup } from "./types";
+import { FieldRule, SyncGroup } from "./types";
 
 export interface CatalogItem {
   name: string;
@@ -292,11 +292,45 @@ export async function listPluginSections(
   ];
 }
 
+// The plugin's own sync item — its store copy carries the whole sync contract, so it ships
+// locked strip presets for the device-local fields (Part 2 — self-propagation).
+export const SELF_GROUP_NAME = "plugin-config-sync";
+
+export function selfPresetRules(): FieldRule[] {
+  return [
+    { pattern: "rootPath", action: "strip", locked: true },
+    { pattern: "remotes", action: "strip", locked: true },
+  ];
+}
+
+// Merges preset locked rules into a rule list: presets first (in preset order), then any
+// caller/user rules not already covered by a preset pattern. Never produces a duplicate pattern.
+function mergePresetFields(existing: FieldRule[]): FieldRule[] {
+  const presets = selfPresetRules();
+  const presetPatterns = new Set(presets.map((p) => p.pattern));
+  const rest = existing.filter((f) => !presetPatterns.has(f.pattern));
+  return [...presets, ...rest];
+}
+
 export function groupForItem(name: string, path: string, type: "file" | "dir", description: string | null, label?: string): SyncGroup {
   const group: SyncGroup = { name, path, type, devices: "all" };
   if (description !== null) group.description = description;
   if (label !== undefined && label.trim() !== "") group.label = label.trim();
+  if (name === SELF_GROUP_NAME) {
+    group.mode = "fields";
+    group.fields = mergePresetFields(group.fields ?? []);
+  }
   return group;
+}
+
+// Idempotent: guarantees the self group (if present) has mode "fields" and exactly one locked
+// copy of each preset rule; user-added other rules are kept. Pure — returns a new array, never
+// mutates the input.
+export function ensureSelfPresets(groups: SyncGroup[]): SyncGroup[] {
+  return groups.map((g) => {
+    if (g.name !== SELF_GROUP_NAME) return g;
+    return { ...g, mode: "fields", fields: mergePresetFields(g.fields ?? []) };
+  });
 }
 
 export function toggleSection(groups: SyncGroup[], items: CatalogItem[], on: boolean): SyncGroup[] {
