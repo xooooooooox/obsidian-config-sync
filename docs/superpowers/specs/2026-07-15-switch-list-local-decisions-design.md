@@ -101,6 +101,11 @@ Colors bind to palette vars (caution = `--color-orange`); zero hardcoded color.
   entry; the UI row list won't show it unless installed).
 - **Not-installed plugins from the store:** unchanged — the "Not installed on this device"
   section and its install policies are orthogonal to this mechanism.
+- **Orthogonal to the plugin's settings item (确认 2026-07-15):** a local decision affects ONLY
+  the plugin's entry in the on/off list. Its settings item (`plugin-<id>`, the data.json) still
+  appears in the Enabled/Disabled sections as usual and remains independently checkable for
+  settings sync — e.g. "settings shared everywhere, enabled only on desktop" combines a local
+  decision on the switch list with normal settings sync. Neither direction constrains the other.
 - **core-plugins map `false` vs absent:** apply preserves the local *entry state* for excepted
   keys — present:false stays present:false, absent stays absent.
 - **Exceptions on non-switch-list groups:** not representable (UI only offers the segment on the
