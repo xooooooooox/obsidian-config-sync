@@ -413,8 +413,16 @@ export default class ConfigSyncPlugin extends Plugin {
       groupsIO: {
         read: async () => this.settings.groups,
         write: async (groups) => {
+          // Swap-only-on-success, matching the commitDraft rollback pattern: a failed disk
+          // write must not leave unpersisted groups visible in memory.
+          const prev = this.settings.groups;
           this.settings.groups = groups;
-          await this.saveSettings();
+          try {
+            await this.saveSettings();
+          } catch (e) {
+            this.settings.groups = prev;
+            throw e;
+          }
         },
       },
       now: () => new Date().toISOString(),
