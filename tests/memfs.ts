@@ -62,6 +62,14 @@ export class MemFS implements FileIO {
     if (!this.files.delete(path)) throw new Error(`MemFS: remove of missing file ${path}`);
   }
 
+  async rename(path: string, newPath: string): Promise<void> {
+    const content = this.files.get(path);
+    if (content === undefined) throw new Error(`MemFS: rename of missing file ${path}`);
+    this.files.delete(path);
+    this.files.set(newPath, content);
+    this.addAncestors(newPath);
+  }
+
   async mkdir(path: string): Promise<void> {
     this.dirs.add(path);
     this.addAncestors(path);

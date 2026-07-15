@@ -22,7 +22,7 @@ import { createInstaller } from "./core/installer";
 import { type CatalogSection, displayLabelForGroup, listCoreSections, listDiscovered, listOptionSections, listPluginSections, setCorePluginIds } from "./core/catalog";
 import { Availability, availabilityForGroup } from "./core/availability";
 import { listFilesRecursive } from "./core/io";
-import { validateSyncManifest } from "./core/manifest";
+import { ManifestValidationError, migrateLegacyManifest, validateSyncManifest } from "./core/manifest";
 import { groupRealPath } from "./core/pathing";
 import { scanSensitive, SensitiveScan } from "./core/modes";
 import { PkmMode, PkmProbe, resolveEffectiveMode, resolveRootPath } from "./core/pkm";
@@ -117,7 +117,31 @@ export default class ConfigSyncPlugin extends Plugin {
         }, 4 * 60 * 60 * 1000)
       );
     }
-    this.app.workspace.onLayoutReady(() => void this.refreshLocalStatus());
+    this.app.workspace.onLayoutReady(
+      () =>
+        void (async () => {
+          await this.migrateLegacy();
+          await this.refreshLocalStatus();
+        })()
+    );
+  }
+
+  private async migrateLegacy(): Promise<void> {
+    try {
+      const rootPath = await this.resolvedRootPath();
+      const result = await migrateLegacyManifest(this.app.vault.adapter, rootPath, this.settings.groups, new Date().toISOString());
+      if (result.migrated) {
+        this.settings.groups = result.groups;
+        await this.saveSettings();
+        new Notice("Config Sync: imported groups from config-sync.json (file renamed, now lives in plugin settings)");
+      }
+    } catch (e) {
+      if (e instanceof ManifestValidationError) {
+        new Notice(`Config Sync: could not migrate config-sync.json — ${e.message}`, 10000);
+        return;
+      }
+      console.error("Config Sync: unexpected error migrating config-sync.json", e);
+    }
   }
 
   onunload(): void {

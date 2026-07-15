@@ -1,6 +1,7 @@
 import { DeviceClass, FieldRule, Remote, StoreLock, SyncGroup, SyncManifest, SyncMode } from "./types";
 import { groupStorePath } from "./pathing";
 import { isPlainObject } from "./sanitize";
+import { FileIO } from "./io";
 
 export class ManifestValidationError extends Error {
   constructor(message: string) {
@@ -157,6 +158,21 @@ export function parseStoreLock(raw: string): StoreLock {
     if (app !== undefined) groups[k].sourceAppVersion = app;
   }
   return { capturedAt: parsed.capturedAt, groups };
+}
+
+export async function migrateLegacyManifest(
+  io: FileIO,
+  rootPath: string,
+  existing: SyncGroup[],
+  now: string
+): Promise<{ groups: SyncGroup[]; migrated: boolean }> {
+  const p = `${rootPath}/config-sync.json`;
+  if (!(await io.exists(p))) return { groups: existing, migrated: false };
+  const legacy = parseSyncManifest(await io.read(p)).groups; // throws ManifestValidationError on bad JSON
+  const have = new Set(existing.map((g) => g.name));
+  const merged = [...existing, ...legacy.filter((g) => !have.has(g.name))];
+  await io.rename(p, `${p}.migrated-${now.slice(0, 10)}`);
+  return { groups: merged, migrated: true };
 }
 
 export function validateRemotes(data: unknown): Remote[] {
