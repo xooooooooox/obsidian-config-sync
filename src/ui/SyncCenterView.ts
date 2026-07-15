@@ -674,7 +674,7 @@ export class SyncCenterView extends ItemView {
     else if (group.mode === "fields") row.createSpan({ cls: "config-sync-mode-badge", text: "▤" });
     const ldCount = this.host.switchLocalDecisions(group.name).length;
     if (ldCount > 0) {
-      row.createSpan({ cls: "config-sync-ldnote", text: `· ${ldCount} local decision${ldCount === 1 ? "" : "s"}` });
+      row.createSpan({ cls: "config-sync-ldnote", text: `· ${ldCount} excluded` });
     }
     const chosen = this.policy.get(group.name);
     if (this.selected.has(group.name) && chosen !== undefined) {
@@ -741,9 +741,9 @@ export class SyncCenterView extends ItemView {
     const { status } = r;
     // Local decisions surface first (定稿 switch-exceptions.html): the ⌂ rows explain why the
     // item can be in-sync while raw contents differ.
-    const localDecisions = this.host.switchLocalDecisions(r.group.name);
-    for (const id of localDecisions) {
-      detail.createDiv({ cls: "config-sync-lddetail", text: `⌂ ${id} — local decision (kept on this device)` });
+    const excluded = this.host.switchLocalDecisions(r.group.name);
+    for (const id of excluded) {
+      detail.createDiv({ cls: "config-sync-lddetail", text: `⌂ ${id} — excluded from this list on this device` });
     }
     if (status.message !== undefined) {
       detail.createDiv({ cls: "config-sync-status-error", text: status.message });
@@ -752,7 +752,7 @@ export class SyncCenterView extends ItemView {
     if (status.state === "in-sync") {
       detail.createDiv({
         cls: "config-sync-expand-note",
-        text: localDecisions.length > 0 ? "in sync — local decisions excluded from the comparison" : "identical to the store",
+        text: excluded.length > 0 ? "in sync — excluded plugins are not compared" : "identical to the store",
       });
       return;
     }

@@ -386,8 +386,8 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     if (group !== undefined && SWITCH_LIST_GROUPS.has(item.name)) {
       const n = (this.host.settings.switchExceptions[item.name] ?? []).length;
       if (n > 0) {
-        const b = row.nameEl.createSpan({ cls: "config-sync-devbadge", text: `${n} local decision${n === 1 ? "" : "s"}` });
-        b.setAttribute("title", "Plugins this device decides for itself — excluded from sync");
+        const b = row.nameEl.createSpan({ cls: "config-sync-devbadge", text: `${n} excluded` });
+        b.setAttribute("title", "Plugins excluded from this list on this device — they keep their own on/off state");
       }
     }
     if (group !== undefined && item.disabledReason === null) {
@@ -443,7 +443,13 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   // Fields to protect / Data file / Advanced — a synced row's expansion, opened via its chevron.
   private renderItemExpansion(parent: HTMLElement, wrap: HTMLElement, group: SyncGroup, item: CatalogItem): void {
     const exp = parent.createDiv({ cls: "config-sync-item-exp" });
-    if (SWITCH_LIST_GROUPS.has(group.name)) this.renderLocalDecisions(exp, group, wrap, item);
+    if (SWITCH_LIST_GROUPS.has(group.name)) {
+      // Switch lists get only the per-device exclusion editor: the raw-JSON viewer exists for
+      // field-rule assignment (meaningless on a plain id list) and a custom location would
+      // break the fixed Obsidian file path — both are noise here.
+      this.renderLocalDecisions(exp, group, wrap, item);
+      return;
+    }
     if (group.mode === "fields") {
       exp.createDiv({ cls: "config-sync-explabel", text: "Fields to protect" });
       exp.createDiv({
@@ -459,10 +465,10 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   // "Local decisions (this device)" — per-device exceptions for the two switch-list items
   // (定稿 switch-exceptions.html): excepted ids never enter the store and never flip here.
   private renderLocalDecisions(exp: HTMLElement, group: SyncGroup, wrap: HTMLElement, item: CatalogItem): void {
-    exp.createDiv({ cls: "config-sync-explabel", text: "Local decisions (this device)" });
+    exp.createDiv({ cls: "config-sync-explabel", text: "Excluded from this list (this device)" });
     exp.createDiv({
       cls: "config-sync-expdesc",
-      text: "Marked plugins are yours to decide here — they never enter the store at capture, and sync never flips them on this device.",
+      text: "Excluded plugins keep their own on/off state on this device — the shared list neither includes nor changes them.",
     });
     const listEl = exp.createDiv({ cls: "config-sync-ldlist" });
     void this.host.switchListRows(group.name).then((rows) => {
@@ -474,7 +480,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         rowEl.createSpan({ cls: "config-sync-ldname", text: r.name });
         rowEl.createSpan({ cls: "config-sync-ldhint", text: r.hint });
         rowEl.createDiv({ cls: "config-sync-rule-spacer" });
-        rowEl.createSpan({ cls: "config-sync-ldstate", text: isLocal ? "local decision" : "synced" });
+        rowEl.createSpan({ cls: "config-sync-ldstate", text: isLocal ? "excluded" : "included" });
         new ToggleComponent(rowEl).setValue(isLocal).onChange(async (v) => {
           const cur = new Set(this.host.settings.switchExceptions[group.name] ?? []);
           if (v) cur.add(r.id);

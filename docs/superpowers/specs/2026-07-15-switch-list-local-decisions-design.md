@@ -81,17 +81,16 @@ Malformed content (neither shape) → fall back to plain byte comparison / passt
 
 ### UI (定稿 per mockup)
 
-**Config panel — item expansion** for the two switch-list items gains a **"Local decisions
-(this device)"** segment:
+**Config panel — item expansion** for the two switch-list items gains a **"Excluded from this list (this device)"** segment:
 
 - Row list = union of (ids in local list) ∪ (ids in store copy) ∪ (installed plugins / runtime
   cores), each row: display name + state hint ("enabled here · in store" etc.) + a
-  **synced ↔ local decision** toggle. Marked rows tinted with the caution accent.
-- The item's header shows an **"N local decisions"** badge (caution-tinted) when N > 0.
+  **included ↔ excluded** toggle. Marked rows tinted with the caution accent.
+- The item's header shows an **"N excluded"** badge (caution-tinted) when N > 0.
 - Toggling writes `settings.switchExceptions[group]` (device-local; normal saveSettings, no
   group/commitGroups involvement) and refreshes status.
 
-**Sync Center** — the switch-list row's status hint appends "· N local decisions" when N > 0;
+**Sync Center** — the switch-list row's status hint appends "· N excluded" when N > 0;
 the row expansion's change detail marks excepted ids with `⌂` (kept local) instead of `±`.
 Colors bind to palette vars (caution = `--color-orange`); zero hardcoded color.
 
@@ -133,3 +132,13 @@ Colors bind to palette vars (caution = `--color-orange`); zero hardcoded color.
 (settings field + ctx wiring), `src/ui/SettingTab.ts` (Local-decisions segment + badge),
 `src/ui/SyncCenterView.ts` (hint + ⌂ detail), `styles.css`, tests. Parked separately: backlog
 #5 (capture/pull interruption robustness — direction a/b/c still undecided).
+
+## Naming (确认 2026-07-16)
+
+UI copy uses the **exclude** word family anchored on the LIST, not on "sync": segment
+"Excluded from this list (this device)", row states `included ↔ excluded`, badge `N excluded`,
+Sync Center hint `· N excluded`, ⌂ detail "excluded from this list on this device". Rationale:
+marking an id shrinks the shared list's coverage — a different concept from whether that
+plugin's own settings item syncs, so "sync"-based wording (and the earlier "local decision")
+was rejected as ambiguous. The switch-list expansion shows ONLY this editor (the raw-JSON
+viewer and Custom location are meaningless for the fixed-path id lists and are hidden).
