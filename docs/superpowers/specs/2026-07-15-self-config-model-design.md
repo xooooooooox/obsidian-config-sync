@@ -114,7 +114,7 @@ is never written back locally as a file.
   migrated), it gets `mode: "fields"` with **locked** strip rules for `rootPath` and `remotes` —
   automatically. Other fields of data.json can be additionally stripped/encrypted by the user
   like any item.
-- **Capture:** the store copy `store/plugin-config-sync/data.json` therefore contains the
+- **Capture:** the store copy `store/configdir/plugins/config-sync/data.json` therefore contains the
   contract (`groups`) + portable prefs, with `rootPath`/`remotes` stripped.
 - **Apply on B:** the existing fields-mode apply path (`modes.ts:206-215`,
   `mergePreservingSanitized` — verified: local-only keys matching strip patterns are preserved,
@@ -192,7 +192,7 @@ merge story is pull's job on the other device). Push no longer writes any root
 ## Part 5 — Bootstrap on a fresh device
 
 On load, when `settings.groups` is empty AND no legacy `config-sync.json` exists AND
-`${resolvedRootPath}/store/plugin-config-sync/data.json` exists (typical: remotely-save brought
+`${resolvedRootPath}/store/configdir/plugins/config-sync/data.json` exists (typical: remotely-save brought
 the store before the user configured the plugin): show a Notice + Sync Center banner. Visual 定稿
 (companion, `gallery-self-config.html`): an accent-tinted banner at the top of the Sync Center —
 "Found an existing configuration in the store" with a summary line (item count, source device,
