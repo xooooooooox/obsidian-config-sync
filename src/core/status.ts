@@ -5,6 +5,7 @@ import { FileChanges, hasChanges, StoreLock, SyncGroup } from "./types";
 import { parseStoreLock } from "./manifest";
 import { contentUnchanged, groupNeedsPassphrase } from "./modes";
 import { parseFileEnvelope } from "./crypto";
+import { parseSwitchList, SWITCH_LIST_GROUPS, switchListsEqual } from "./switchList";
 
 export type GroupState = "in-sync" | "local-changed" | "store-newer" | "differs" | "not-captured" | "no-settings" | "locked";
 
@@ -70,12 +71,26 @@ async function compareFile(ctx: CoreContext, group: SyncGroup, real: string, sto
   }
   const storeContent = await ctx.io.read(store);
   const liveContent = await ctx.io.read(real);
+  const exc = SWITCH_LIST_GROUPS.has(group.name) ? ctx.switchExceptions[group.name] ?? [] : [];
+  const switchEqual =
+    exc.length > 0 ? switchListEqualOrNull(liveContent, storeContent, exc) : null;
   const equal =
-    parseFileEnvelope(storeContent) !== null || group.mode === "fields" || group.mode === "encrypted"
-      ? await contentUnchanged(group, liveContent, storeContent, ctx.passphrase)
-      : liveContent === storeContent;
+    switchEqual !== null
+      ? switchEqual
+      : parseFileEnvelope(storeContent) !== null || group.mode === "fields" || group.mode === "encrypted"
+        ? await contentUnchanged(group, liveContent, storeContent, ctx.passphrase)
+        : liveContent === storeContent;
   const changes: FileChanges = equal ? { added: [], updated: [], deleted: [] } : { added: [], updated: [name], deleted: [] };
   return { liveFiles: equal ? [] : [real], changes };
+}
+
+// For switch-list groups with exceptions: compare with switchListsEqual when both sides parse
+// as a switch list; otherwise return null to fall through to the existing comparison path.
+function switchListEqualOrNull(liveContent: string, storeContent: string, exc: string[]): boolean | null {
+  const live = parseSwitchList(liveContent);
+  const store = parseSwitchList(storeContent);
+  if (live === null || store === null) return null;
+  return switchListsEqual(live, store, exc);
 }
 
 async function compareDir(ctx: CoreContext, group: SyncGroup, real: string, store: string): Promise<Comparison> {

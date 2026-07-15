@@ -380,6 +380,7 @@ describe("groupForItem", () => {
     expect(g.fields).toEqual([
       { pattern: "rootPath", action: "strip", locked: true },
       { pattern: "remotes", action: "strip", locked: true },
+      { pattern: "switchExceptions", action: "strip", locked: true },
     ]);
   });
 
@@ -390,6 +391,14 @@ describe("groupForItem", () => {
   });
 });
 
+describe("selfPresetRules", () => {
+  it("has exactly three locked strip rules, the third being switchExceptions", () => {
+    const rules = selfPresetRules();
+    expect(rules).toHaveLength(3);
+    expect(rules[2]).toEqual({ pattern: "switchExceptions", action: "strip", locked: true });
+  });
+});
+
 describe("ensureSelfPresets", () => {
   it("adds presets to a bare self group", () => {
     const groups: SyncGroup[] = [{ name: SELF_GROUP_NAME, path: "{configDir}/plugins/config-sync/data.json", type: "file", devices: "all" }];
@@ -397,6 +406,26 @@ describe("ensureSelfPresets", () => {
     const self = out.find((g) => g.name === SELF_GROUP_NAME);
     expect(self?.mode).toBe("fields");
     expect(self?.fields).toEqual(selfPresetRules());
+  });
+
+  it("upgrades an existing two-preset self group to three presets", () => {
+    const groups: SyncGroup[] = [
+      {
+        name: SELF_GROUP_NAME,
+        path: "{configDir}/plugins/config-sync/data.json",
+        type: "file",
+        devices: "all",
+        mode: "fields",
+        fields: [
+          { pattern: "rootPath", action: "strip", locked: true },
+          { pattern: "remotes", action: "strip", locked: true },
+        ],
+      },
+    ];
+    const out = ensureSelfPresets(groups);
+    const self = out.find((g) => g.name === SELF_GROUP_NAME);
+    expect(self?.fields).toEqual(selfPresetRules());
+    expect(self?.fields).toHaveLength(3);
   });
 
   it("normalizes an unlocked duplicate of a preset pattern to the locked preset", () => {

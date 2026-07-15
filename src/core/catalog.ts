@@ -300,6 +300,7 @@ export function selfPresetRules(): FieldRule[] {
   return [
     { pattern: "rootPath", action: "strip", locked: true },
     { pattern: "remotes", action: "strip", locked: true },
+    { pattern: "switchExceptions", action: "strip", locked: true },
   ];
 }
 

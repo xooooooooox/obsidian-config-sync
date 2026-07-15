@@ -6,6 +6,7 @@ import { applyTransform, captureTransform, contentUnchanged } from "./modes";
 import { classifyMerge, MergePlan } from "./merge";
 import { ensureSelfPresets } from "./catalog";
 import { isPlainObject } from "./sanitize";
+import { applySwitchList, captureSwitchList, parseSwitchList, SWITCH_LIST_GROUPS, switchListsEqual } from "./switchList";
 
 export type ProgressFn = (done: number, total: number, current: string) => void;
 
@@ -35,6 +36,7 @@ export interface CoreContext {
   plugins: PluginHost;
   passphrase: string | null;
   groupsIO: GroupsIO;
+  switchExceptions: Record<string, string[]>; // group name -> excepted plugin/core ids (device-local)
   now(): string; // ISO-8601 timestamp, injectable for tests
 }
 
@@ -83,6 +85,14 @@ export function groupForStoreRel(groups: SyncGroup[], rel: string): { name: stri
   const sp = groupStorePath(g.path);
   const inner = rel.slice("store/".length);
   return { name: g.name, itemRel: g.type === "file" ? basename(sp) : inner.slice(sp.length + 1) };
+}
+
+function excFor(ctx: CoreContext, name: string): string[] {
+  return SWITCH_LIST_GROUPS.has(name) ? (ctx.switchExceptions[name] ?? []) : [];
+}
+
+function serializeSwitchList(v: ReturnType<typeof captureSwitchList>): string {
+  return JSON.stringify(v, null, 2) + "\n";
 }
 
 function emptyResult(group: string, needsAppReload: boolean): GroupResult {
@@ -184,11 +194,18 @@ async function captureGroup(ctx: CoreContext, group: SyncGroup): Promise<GroupRe
   }
   if (group.type === "file") {
     const plainLocalContent = await ctx.io.read(real);
-    const t = await captureTransform(group, plainLocalContent, ctx.passphrase);
+    const exc = excFor(ctx, group.name);
+    const localSwitchList = exc.length > 0 ? parseSwitchList(plainLocalContent) : null;
+    const captureInput = localSwitchList !== null ? serializeSwitchList(captureSwitchList(localSwitchList, exc)) : plainLocalContent;
+    const t = await captureTransform(group, captureInput, ctx.passphrase);
     if (t.note !== null) result.messages.push(t.note);
-    await writeClassified(ctx, store, t.content, basename(real), result, (existing) =>
-      contentUnchanged(group, plainLocalContent, existing, ctx.passphrase)
-    );
+    await writeClassified(ctx, store, t.content, basename(real), result, (existing) => {
+      if (localSwitchList !== null) {
+        const existingSwitchList = parseSwitchList(existing);
+        if (existingSwitchList !== null) return Promise.resolve(switchListsEqual(localSwitchList, existingSwitchList, exc));
+      }
+      return contentUnchanged(group, plainLocalContent, existing, ctx.passphrase);
+    });
     return result;
   }
   const sourceFiles = await listFilesRecursive(ctx.io, real);
@@ -469,7 +486,15 @@ async function applyGroup(ctx: CoreContext, group: SyncGroup, state: BackupState
     if (group.type === "file") {
       const storeContent = await ctx.io.read(store);
       const localContent = (await ctx.io.exists(real)) ? await ctx.io.read(real) : null;
-      const content = await applyTransform(group, storeContent, localContent, ctx.passphrase);
+      const exc = excFor(ctx, group.name);
+      const storeSwitchList = exc.length > 0 ? parseSwitchList(storeContent) : null;
+      let content: string;
+      if (storeSwitchList !== null) {
+        const localSwitchList = localContent !== null ? parseSwitchList(localContent) : null;
+        content = serializeSwitchList(applySwitchList(storeSwitchList, localSwitchList, exc));
+      } else {
+        content = await applyTransform(group, storeContent, localContent, ctx.passphrase);
+      }
       await applyWriteClassified(ctx, state, real, content, basename(real), result);
     } else {
       const storeFiles = await listFilesRecursive(ctx.io, store);

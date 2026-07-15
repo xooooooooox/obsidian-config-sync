@@ -1,0 +1,432 @@
+import { describe, expect, it } from "vitest";
+import {
+  SWITCH_LIST_GROUPS,
+  parseSwitchList,
+  captureSwitchList,
+  applySwitchList,
+  switchListsEqual,
+  type SwitchList,
+} from "../src/core/switchList";
+
+describe("SWITCH_LIST_GROUPS", () => {
+  it("exports readonly set with community-plugins and core-plugins", () => {
+    expect(SWITCH_LIST_GROUPS).toBeInstanceOf(Set);
+    expect(SWITCH_LIST_GROUPS.has("community-plugins")).toBe(true);
+    expect(SWITCH_LIST_GROUPS.has("core-plugins")).toBe(true);
+    expect(SWITCH_LIST_GROUPS.size).toBe(2);
+  });
+});
+
+describe("parseSwitchList", () => {
+  it("parses JSON array of strings", () => {
+    const result = parseSwitchList('["a", "b", "c"]');
+    expect(result).toEqual(["a", "b", "c"]);
+  });
+
+  it("parses JSON object with boolean values", () => {
+    const result = parseSwitchList('{"a": true, "b": false}');
+    expect(result).toEqual({ a: true, b: false });
+  });
+
+  it("parses empty array", () => {
+    const result = parseSwitchList("[]");
+    expect(result).toEqual([]);
+  });
+
+  it("parses empty object", () => {
+    const result = parseSwitchList("{}");
+    expect(result).toEqual({});
+  });
+
+  it("returns null for garbage input", () => {
+    expect(parseSwitchList("not json")).toBeNull();
+    expect(parseSwitchList("123")).toBeNull();
+    expect(parseSwitchList('"string"')).toBeNull();
+  });
+
+  it("returns null for array containing non-strings", () => {
+    expect(parseSwitchList("[1, 2, 3]")).toBeNull();
+    expect(parseSwitchList('["a", 1, "c"]')).toBeNull();
+    expect(parseSwitchList('["a", {"nested": true}]')).toBeNull();
+  });
+
+  it("returns null for object with non-boolean values", () => {
+    expect(parseSwitchList('{"a": "string"}')).toBeNull();
+    expect(parseSwitchList('{"a": true, "b": "false"}')).toBeNull();
+    expect(parseSwitchList('{"a": true, "b": 1}')).toBeNull();
+    expect(parseSwitchList('{"a": true, "b": null}')).toBeNull();
+  });
+
+  it("returns null for objects that are arrays", () => {
+    // Array is technically an object in JSON, but we reject it for the object path
+    expect(parseSwitchList('[{"a": true}]')).toBeNull();
+  });
+});
+
+describe("captureSwitchList (array shape)", () => {
+  it("returns structurally equal copy with empty exceptions", () => {
+    const input: SwitchList = ["a", "b", "c"];
+    const result = captureSwitchList(input, []);
+    expect(result).toEqual(input);
+    expect(result).not.toBe(input); // different reference
+  });
+
+  it("removes excepted ids preserving order", () => {
+    const input: SwitchList = ["a", "b", "c", "d"];
+    expect(captureSwitchList(input, ["b"])).toEqual(["a", "c", "d"]);
+    expect(captureSwitchList(input, ["b", "d"])).toEqual(["a", "c"]);
+    expect(captureSwitchList(input, ["a"])).toEqual(["b", "c", "d"]);
+  });
+
+  it("handles non-existent exceptions gracefully", () => {
+    const input: SwitchList = ["a", "b"];
+    expect(captureSwitchList(input, ["x", "y"])).toEqual(["a", "b"]);
+  });
+
+  it("removes all ids if all are excepted", () => {
+    const input: SwitchList = ["a", "b"];
+    expect(captureSwitchList(input, ["a", "b"])).toEqual([]);
+  });
+});
+
+describe("captureSwitchList (map shape)", () => {
+  it("returns structurally equal copy with empty exceptions", () => {
+    const input: SwitchList = { a: true, b: false };
+    const result = captureSwitchList(input, []);
+    expect(result).toEqual(input);
+    expect(result).not.toBe(input);
+  });
+
+  it("removes excepted keys preserving other entries", () => {
+    const input: SwitchList = { a: true, b: false, c: true };
+    expect(captureSwitchList(input, ["b"])).toEqual({ a: true, c: true });
+    expect(captureSwitchList(input, ["a", "c"])).toEqual({ b: false });
+  });
+
+  it("handles non-existent exceptions gracefully", () => {
+    const input: SwitchList = { a: true };
+    expect(captureSwitchList(input, ["x", "y"])).toEqual({ a: true });
+  });
+
+  it("removes all keys if all are excepted", () => {
+    const input: SwitchList = { a: true, b: false };
+    expect(captureSwitchList(input, ["a", "b"])).toEqual({});
+  });
+});
+
+describe("applySwitchList (array shape)", () => {
+  it("returns store with empty exceptions when local is null", () => {
+    const store: SwitchList = ["a", "b", "c"];
+    const result = applySwitchList(store, null, []);
+    expect(result).toEqual(["a", "b", "c"]);
+  });
+
+  it("returns store minus exceptions when local is null", () => {
+    const store: SwitchList = ["a", "b", "c", "d"];
+    expect(applySwitchList(store, null, ["b", "d"])).toEqual(["a", "c"]);
+  });
+
+  it("combines store (minus exceptions, store order) with local (intersect exceptions, local order)", () => {
+    // store has [a, b, c], exceptions are [b]
+    // result: (store - [b]) in store order = [a, c], then (local ∩ [b]) in local order
+    const store: SwitchList = ["a", "b", "c"];
+    const local: SwitchList = ["x", "b", "y"];
+    expect(applySwitchList(store, local, ["b"])).toEqual(["a", "c", "b"]);
+  });
+
+  it("orders synced ids by store, excepted ids by local", () => {
+    // store [a, b, c, d], local [d, x, b, y], exceptions [b, d]
+    // synced: [a, c] (store order)
+    // excepted in local: [d, b] (local order)
+    // result: [a, c, d, b]
+    const store: SwitchList = ["a", "b", "c", "d"];
+    const local: SwitchList = ["d", "x", "b", "y"];
+    expect(applySwitchList(store, local, ["b", "d"])).toEqual(["a", "c", "d", "b"]);
+  });
+
+  it("handles local ids that are not in exceptions", () => {
+    const store: SwitchList = ["a", "b"];
+    const local: SwitchList = ["b", "c"];
+    expect(applySwitchList(store, local, ["b"])).toEqual(["a", "b"]);
+  });
+
+  it("handles excepted ids absent from local", () => {
+    const store: SwitchList = ["a", "b", "c"];
+    const local: SwitchList = ["a", "c"];
+    expect(applySwitchList(store, local, ["b"])).toEqual(["a", "c"]);
+  });
+
+  it("handles empty store and exceptions", () => {
+    const store: SwitchList = [];
+    const local: SwitchList = ["a", "b"];
+    expect(applySwitchList(store, local, [])).toEqual([]);
+  });
+
+  it("handles empty local with exceptions", () => {
+    const store: SwitchList = ["a", "b"];
+    const local: SwitchList = [];
+    expect(applySwitchList(store, local, ["a"])).toEqual(["b"]);
+  });
+});
+
+describe("applySwitchList (map shape)", () => {
+  it("returns store with empty exceptions when local is null", () => {
+    const store: SwitchList = { a: true, b: false };
+    const result = applySwitchList(store, null, []);
+    expect(result).toEqual({ a: true, b: false });
+  });
+
+  it("returns store minus exceptions when local is null", () => {
+    const store: SwitchList = { a: true, b: false, c: true };
+    expect(applySwitchList(store, null, ["b"])).toEqual({ a: true, c: true });
+  });
+
+  it("combines store (minus exceptions) with local entries for excepted keys", () => {
+    const store: SwitchList = { a: true, b: false, c: true };
+    const local: SwitchList = { b: true };
+    expect(applySwitchList(store, local, ["b"])).toEqual({ a: true, c: true, b: true });
+  });
+
+  it("preserves local false value for excepted keys", () => {
+    const store: SwitchList = { a: true, b: true };
+    const local: SwitchList = { b: false };
+    expect(applySwitchList(store, local, ["b"])).toEqual({ a: true, b: false });
+  });
+
+  it("keeps absent excepted keys absent if absent locally", () => {
+    const store: SwitchList = { a: true };
+    const local: SwitchList = { a: false };
+    expect(applySwitchList(store, local, ["b"])).toEqual({ a: true });
+  });
+
+  it("adds local excepted keys that are absent from store", () => {
+    const store: SwitchList = { a: true };
+    const local: SwitchList = { a: false, b: true };
+    expect(applySwitchList(store, local, ["b"])).toEqual({ a: true, b: true });
+  });
+
+  it("handles multiple excepted keys", () => {
+    const store: SwitchList = { a: true, b: false, c: true, d: false };
+    const local: SwitchList = { b: true, d: true };
+    expect(applySwitchList(store, local, ["b", "d"])).toEqual({ a: true, c: true, b: true, d: true });
+  });
+
+  it("handles empty store and exceptions", () => {
+    const store: SwitchList = {};
+    const local: SwitchList = { a: true };
+    expect(applySwitchList(store, local, [])).toEqual({});
+  });
+
+  it("handles empty local with exceptions", () => {
+    const store: SwitchList = { a: true, b: false };
+    const local: SwitchList = {};
+    expect(applySwitchList(store, local, ["b"])).toEqual({ a: true });
+  });
+});
+
+describe("applySwitchList (mixed shapes)", () => {
+  it("when store is array and local is map, prefers store shape with membership semantics", () => {
+    // store is array [a, b], local is map {b: false}
+    // array result should contain: [a, b] (both in store) with [b] as exceptions from local
+    // Membership check: b present in store array, present in local map with false
+    const store: SwitchList = ["a", "b"];
+    const local: SwitchList = { b: false };
+    const result = applySwitchList(store, local, ["b"]);
+    // store minus exceptions [a], local map membership for [b] = false means don't include
+    expect(result).toEqual(["a"]);
+  });
+
+  it("when store is map and local is array, prefers store shape with membership semantics", () => {
+    const store: SwitchList = { a: true, b: true };
+    const local: SwitchList = ["a"];
+    const result = applySwitchList(store, local, ["b"]);
+    // store minus exceptions {a: true}, local array membership for [b] = not present
+    expect(result).toEqual({ a: true });
+  });
+});
+
+describe("switchListsEqual (array shape)", () => {
+  it("returns true for identical arrays with no exceptions", () => {
+    const a: SwitchList = ["x", "y", "z"];
+    const b: SwitchList = ["x", "y", "z"];
+    expect(switchListsEqual(a, b, [])).toBe(true);
+  });
+
+  it("returns false for different arrays with no exceptions", () => {
+    const a: SwitchList = ["x", "y"];
+    const b: SwitchList = ["x", "z"];
+    expect(switchListsEqual(a, b, [])).toBe(false);
+  });
+
+  it("returns true for arrays that differ only in order (masked sets, order-insensitive)", () => {
+    const a: SwitchList = ["x", "y"];
+    const b: SwitchList = ["y", "x"];
+    expect(switchListsEqual(a, b, [])).toBe(true);
+  });
+
+  it("masks exceptions and compares remaining as sets (order-insensitive)", () => {
+    // local [a, b, c], store [a, c, b], exceptions [b]
+    // masked: local [a, c], store [a, c] (sets, ignore order)
+    const local: SwitchList = ["a", "b", "c"];
+    const store: SwitchList = ["a", "c", "b"];
+    expect(switchListsEqual(local, store, ["b"])).toBe(true);
+  });
+
+  it("returns false if masked sets differ", () => {
+    const local: SwitchList = ["a", "b", "c"];
+    const store: SwitchList = ["a", "d"];
+    expect(switchListsEqual(local, store, ["b"])).toBe(false);
+  });
+
+  it("ignores excepted ids completely", () => {
+    const local: SwitchList = ["a", "x"];
+    const store: SwitchList = ["a", "y"];
+    expect(switchListsEqual(local, store, ["x", "y"])).toBe(true);
+  });
+
+  it("handles empty arrays", () => {
+    const a: SwitchList = [];
+    const b: SwitchList = [];
+    expect(switchListsEqual(a, b, [])).toBe(true);
+  });
+
+  it("returns false for different-length arrays with no common sync ids", () => {
+    const a: SwitchList = ["a"];
+    const b: SwitchList = [];
+    expect(switchListsEqual(a, b, [])).toBe(false);
+  });
+});
+
+describe("switchListsEqual (map shape)", () => {
+  it("returns true for identical maps with no exceptions", () => {
+    const a: SwitchList = { x: true, y: false };
+    const b: SwitchList = { x: true, y: false };
+    expect(switchListsEqual(a, b, [])).toBe(true);
+  });
+
+  it("returns false for different maps with no exceptions", () => {
+    const a: SwitchList = { x: true };
+    const b: SwitchList = { x: false };
+    expect(switchListsEqual(a, b, [])).toBe(false);
+  });
+
+  it("masks exceptions and compares remaining keys/values", () => {
+    const local: SwitchList = { a: true, b: false };
+    const store: SwitchList = { a: true, b: true };
+    expect(switchListsEqual(local, store, ["b"])).toBe(true);
+  });
+
+  it("returns false if masked maps differ in values", () => {
+    const local: SwitchList = { a: true, b: false };
+    const store: SwitchList = { a: false, b: false };
+    expect(switchListsEqual(local, store, ["b"])).toBe(false);
+  });
+
+  it("returns false if masked maps differ in synced keys", () => {
+    const local: SwitchList = { a: true, b: false };
+    const store: SwitchList = { a: true };
+    // After masking [b]: local {a: true}, store {a: true} → equal
+    expect(switchListsEqual(local, store, ["b"])).toBe(true);
+  });
+
+  it("returns false if masked maps differ in keys (synced key absent)", () => {
+    const local: SwitchList = { a: true, c: true, b: false };
+    const store: SwitchList = { a: true };
+    // After masking [b]: local {a: true, c: true}, store {a: true} → different
+    expect(switchListsEqual(local, store, ["b"])).toBe(false);
+  });
+
+  it("ignores excepted keys completely", () => {
+    const local: SwitchList = { a: true, x: false };
+    const store: SwitchList = { a: true, y: true };
+    expect(switchListsEqual(local, store, ["x", "y"])).toBe(true);
+  });
+
+  it("handles empty maps", () => {
+    const a: SwitchList = {};
+    const b: SwitchList = {};
+    expect(switchListsEqual(a, b, [])).toBe(true);
+  });
+});
+
+describe("switchListsEqual (mixed shapes)", () => {
+  it("returns false when shapes differ", () => {
+    const arr: SwitchList = ["a", "b"];
+    const map: SwitchList = { a: true, b: true };
+    expect(switchListsEqual(arr, map, [])).toBe(false);
+  });
+
+  it("returns false for mixed shapes even with exceptions that would mask differences", () => {
+    const arr: SwitchList = ["a"];
+    const map: SwitchList = { a: true };
+    expect(switchListsEqual(arr, map, [])).toBe(false);
+  });
+});
+
+describe("edge cases and identity", () => {
+  it("capture with no exceptions returns structurally-equal array", () => {
+    const input: SwitchList = ["a", "b"];
+    const result = captureSwitchList(input, []);
+    expect(result).toEqual(input);
+    expect(Array.isArray(result)).toBe(true);
+  });
+
+  it("capture with no exceptions returns structurally-equal map", () => {
+    const input: SwitchList = { a: true, b: false };
+    const result = captureSwitchList(input, []);
+    expect(result).toEqual(input);
+    expect(Array.isArray(result)).toBe(false);
+  });
+
+  it("apply with store and no local/exceptions is identity for arrays", () => {
+    const store: SwitchList = ["a", "b", "c"];
+    const result = applySwitchList(store, null, []);
+    expect(result).toEqual(store);
+  });
+
+  it("apply with store and no local/exceptions is identity for maps", () => {
+    const store: SwitchList = { a: true, b: false };
+    const result = applySwitchList(store, null, []);
+    expect(result).toEqual(store);
+  });
+
+  it("equality with no exceptions is plain deep equality for arrays", () => {
+    expect(switchListsEqual(["a", "b"], ["a", "b"], [])).toBe(true);
+    expect(switchListsEqual(["a", "b"], ["a"], [])).toBe(false);
+  });
+
+  it("equality with no exceptions is plain deep equality for maps", () => {
+    expect(switchListsEqual({ a: true }, { a: true }, [])).toBe(true);
+    expect(switchListsEqual({ a: true }, { a: false }, [])).toBe(false);
+  });
+
+  it("multiple calls with empty exceptions produce identical outputs", () => {
+    const arr: SwitchList = ["a", "b"];
+    const map: SwitchList = { a: true };
+    expect(captureSwitchList(arr, [])).toEqual(captureSwitchList(arr, []));
+    expect(captureSwitchList(map, [])).toEqual(captureSwitchList(map, []));
+  });
+
+  it("roundtrip: capture then apply with same local and empty exceptions", () => {
+    // If we capture with exceptions, store loses those ids
+    // Then apply with same local/exceptions, we should restore the full picture
+    const local: SwitchList = ["a", "b", "c"];
+    const captured = captureSwitchList(local, ["b"]);
+    // captured should be ["a", "c"]
+    expect(captured).toEqual(["a", "c"]);
+    // Now apply with the original local and same exceptions
+    const restored = applySwitchList(captured, local, ["b"]);
+    // should be (captured) + (local ∩ exceptions) = [a, c] + [b] = [a, c, b]
+    expect(restored).toEqual(["a", "c", "b"]);
+  });
+
+  it("preserves false in maps across capture and apply", () => {
+    const local: SwitchList = { a: true, b: false };
+    const captured = captureSwitchList(local, ["b"]);
+    expect(captured).toEqual({ a: true });
+
+    const store = captured;
+    const restored = applySwitchList(store, local, ["b"]);
+    expect(restored).toEqual({ a: true, b: false });
+  });
+});

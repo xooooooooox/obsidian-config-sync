@@ -15,7 +15,7 @@ const MANIFEST = JSON.stringify({
 
 function setup(): { io: MemFS; ctx: CoreContext } {
   const io = new MemFS();
-  const ctx: CoreContext = { io, configDir: ".obs", rootPath: "cs", plugins: new FakePlugins(), passphrase: null, groupsIO: memGroupsIO(), now: () => "2026-07-08T00:00:00.000Z" };
+  const ctx: CoreContext = { io, configDir: ".obs", rootPath: "cs", plugins: new FakePlugins(), passphrase: null, groupsIO: memGroupsIO(), now: () => "2026-07-08T00:00:00.000Z", switchExceptions: {} };
   return { io, ctx };
 }
 
