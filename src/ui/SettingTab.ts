@@ -13,6 +13,7 @@ import {
   groupForItem,
   joinLocation,
   reservedNames,
+  SELF_GROUP_NAME,
   splitLocation,
   toggleSection,
 } from "../core/catalog";
@@ -434,6 +435,10 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const exp = parent.createDiv({ cls: "config-sync-item-exp" });
     if (group.mode === "fields") {
       exp.createDiv({ cls: "config-sync-explabel", text: "Fields to protect" });
+      exp.createDiv({
+        cls: "config-sync-expdesc",
+        text: "Strip = don't sync: the field is removed from the store copy at capture and keeps its local value on apply.",
+      });
       this.renderFieldsEditor(exp.createDiv(), group, () => this.renderItemInto(wrap, item));
     }
     this.renderDataFileSegment(exp, group, item, wrap);
@@ -662,6 +667,10 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       { id: "encrypted", label: "Encrypt" },
     ];
     const current = group.mode ?? "plain";
+    // The plugin's own item is pinned to Fields mode: its locked device-local strip rules
+    // (rootPath/remotes) only exist under "fields", and ensureSelfPresets re-forces it on
+    // every commit — so offering Plain/Encrypt here would silently revert.
+    const pinnedToFields = group.name === SELF_GROUP_NAME;
     for (const m of modes) {
       if (m.id === "fields" && group.type !== "file") continue;
       const on = current === m.id;
@@ -669,6 +678,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         cls: `config-sync-seg-btn is-mode${on ? " is-on" : ""}`,
         text: m.label,
       });
+      if (pinnedToFields && m.id !== "fields") {
+        btn.disabled = true;
+        btn.setAttribute("title", "This item always uses fields mode — device-local fields stay on each device");
+        continue;
+      }
       btn.addEventListener("click", () => {
         void (async () => {
           let fieldsForNewMode: FieldRule[] | undefined;
@@ -705,6 +719,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     for (const rule of rules) {
       const isDetected = detectedKeys.some((k) => keyMatchesAny(k, [rule.pattern]));
       const fr = panel.createDiv({ cls: "config-sync-fieldrow" });
+      if (rule.locked === true) {
+        const lock = fr.createSpan({ cls: "config-sync-flock", text: "🔒" });
+        lock.setAttribute("title", "Preset rule — cannot be removed");
+        lock.setAttribute("aria-label", "Preset rule — cannot be removed");
+      }
       fr.createSpan({ cls: "config-sync-fkey", text: rule.pattern });
       fr.createSpan({ cls: `config-sync-ftag${isDetected ? " is-detected" : ""}`, text: isDetected ? "detected" : "manual" });
       fr.createDiv({ cls: "config-sync-rule-spacer" });
@@ -719,6 +738,13 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
           cls: `config-sync-act-btn is-${a.id}${on ? " is-on" : ""}`,
           text: a.label,
         });
+        // Locked preset rules are fixed to their action (ensureSelfPresets would revert any
+        // change on commit anyway) — disable the toggle so the UI matches the data.
+        if (rule.locked === true) {
+          btn.disabled = true;
+          btn.setAttribute("title", "Preset rule — action is fixed");
+          continue;
+        }
         btn.addEventListener("click", () => {
           void (async () => {
             const ruleIndex = rules.indexOf(rule);
@@ -731,18 +757,23 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
           })();
         });
       }
-      new ExtraButtonComponent(fr).setIcon("x").setTooltip("Remove rule").onClick(() => {
-        void (async () => {
-          const ruleIndex = rules.indexOf(rule);
-          await this.commitGroups((draft) => {
-            const g = draft.find((x) => x.name === group.name);
-            if (g === undefined || g.fields === undefined) return;
-            g.fields = g.fields.filter((_, i) => i !== ruleIndex);
-            if (g.fields.length === 0) delete g.fields;
-          }, group.name);
-          afterChange();
-        })();
-      });
+      new ExtraButtonComponent(fr)
+        .setIcon("x")
+        .setTooltip(rule.locked === true ? "Preset rule — cannot be removed" : "Remove rule")
+        .setDisabled(rule.locked === true)
+        .onClick(() => {
+          if (rule.locked === true) return;
+          void (async () => {
+            const ruleIndex = rules.indexOf(rule);
+            await this.commitGroups((draft) => {
+              const g = draft.find((x) => x.name === group.name);
+              if (g === undefined || g.fields === undefined) return;
+              g.fields = g.fields.filter((_, i) => i !== ruleIndex);
+              if (g.fields.length === 0) delete g.fields;
+            }, group.name);
+            afterChange();
+          })();
+        });
     }
     const addRow = panel.createDiv({ cls: "config-sync-addrow" });
     const input = addRow.createEl("input", { cls: "config-sync-addrow-input", attr: { placeholder: "Add key pattern… e.g. *Token*" } });
@@ -1055,7 +1086,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private renderGroupsReadError(containerEl: HTMLElement): boolean {
     if (this.groupsReadError === null) return false;
     containerEl.createEl("p", {
-      text: `Cannot read the sync configuration — fix <data folder>/config-sync.json manually and reopen this tab: ${this.groupsReadError}`,
+      text: `Cannot read the sync configuration — fix the plugin's saved groups (data.json) and reopen this tab: ${this.groupsReadError}`,
       cls: "mod-warning",
     });
     return true;

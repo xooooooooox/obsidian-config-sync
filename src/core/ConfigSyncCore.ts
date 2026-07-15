@@ -1,8 +1,11 @@
 import { FileIO, ensureParentDir, isJunkPath, listFilesRecursive, pruneEmptyDirsUnder } from "./io";
 import { GroupResult, hasChanges, StoreLock, SyncGroup, SyncManifest } from "./types";
-import { basename, groupRealPath, groupStorePath, relativeTo } from "./pathing";
+import { basename, groupRealPath, groupStorePath, relativeTo, resolveGroupByStoreRel } from "./pathing";
 import { parseStoreLock, parseSyncManifest, validateSyncManifest } from "./manifest";
 import { applyTransform, captureTransform, contentUnchanged } from "./modes";
+import { classifyMerge, MergePlan } from "./merge";
+import { ensureSelfPresets } from "./catalog";
+import { isPlainObject } from "./sanitize";
 
 export type ProgressFn = (done: number, total: number, current: string) => void;
 
@@ -20,17 +23,19 @@ export interface PluginHost {
   reloadPluginManifests(): Promise<void>;
 }
 
+export interface GroupsIO {
+  read(): Promise<SyncGroup[]>;
+  write(groups: SyncGroup[]): Promise<void>;
+}
+
 export interface CoreContext {
   io: FileIO;
   configDir: string;
   rootPath: string;
   plugins: PluginHost;
   passphrase: string | null;
+  groupsIO: GroupsIO;
   now(): string; // ISO-8601 timestamp, injectable for tests
-}
-
-export function manifestPath(ctx: CoreContext): string {
-  return `${ctx.rootPath}/config-sync.json`;
 }
 
 export function lockPath(ctx: CoreContext): string {
@@ -51,13 +56,7 @@ export function pluginIdForGroup(group: SyncGroup): string | null {
 }
 
 export async function loadManifest(ctx: CoreContext): Promise<SyncManifest> {
-  const p = manifestPath(ctx);
-  if (!(await ctx.io.exists(p))) {
-    throw new Error(
-      `Config Sync groups file not found: ${p}. Run Capture or Apply to create a starter, or add a group in Settings → Config Sync.`
-    );
-  }
-  return parseSyncManifest(await ctx.io.read(p));
+  return { version: 1, groups: await ctx.groupsIO.read() };
 }
 
 export async function loadLock(ctx: CoreContext): Promise<StoreLock | null> {
@@ -79,15 +78,11 @@ export function parseJsonOrThrow(raw: string, groupName: string, path: string): 
 }
 
 export function groupForStoreRel(groups: SyncGroup[], rel: string): { name: string; itemRel: string } {
-  if (rel.startsWith("store/")) {
-    const inner = rel.slice("store/".length);
-    for (const g of groups) {
-      const sp = groupStorePath(g.path);
-      if (g.type === "file" && inner === sp) return { name: g.name, itemRel: basename(sp) };
-      if (g.type === "dir" && inner.startsWith(sp + "/")) return { name: g.name, itemRel: inner.slice(sp.length + 1) };
-    }
-  }
-  return { name: "", itemRel: rel }; // store metadata / unmatched
+  const g = resolveGroupByStoreRel(groups, rel);
+  if (g === undefined) return { name: "", itemRel: rel }; // store metadata / unmatched
+  const sp = groupStorePath(g.path);
+  const inner = rel.slice("store/".length);
+  return { name: g.name, itemRel: g.type === "file" ? basename(sp) : inner.slice(sp.length + 1) };
 }
 
 function emptyResult(group: string, needsAppReload: boolean): GroupResult {
@@ -125,7 +120,7 @@ async function writeClassified(
 function requireGroup(manifest: SyncManifest, name: string): SyncGroup {
   const group = manifest.groups.find((g) => g.name === name);
   if (group === undefined) {
-    throw new Error(`Unknown config-sync group "${name}" — not defined in config-sync.json`);
+    throw new Error(`Unknown config-sync group "${name}" — not defined in plugin settings`);
   }
   return group;
 }
@@ -536,12 +531,79 @@ export interface ExternalStoreReader {
   readFile(relPath: string): Promise<string>;
 }
 
-export async function importExternal(ctx: CoreContext, reader: ExternalStoreReader): Promise<GroupResult[]> {
-  const files = await reader.listFiles();
-  if (!files.includes("config-sync.json")) {
-    throw new Error(`External source has no config-sync.json at its root — check the source "root" setting.`);
+const LOCK_REL = "store.lock.json";
+const LEGACY_MANIFEST_REL = "config-sync.json";
+// The self item's real path is always "{configDir}/plugins/config-sync/data.json" (the plugin
+// id, from manifest.json, never varies) — so its store rel is this fixed constant.
+const SELF_STORE_DATA_REL = `store/${groupStorePath("{configDir}/plugins/config-sync/data.json")}`;
+
+// A legacy root manifest — the deprecated format from before groups moved into plugin
+// settings — or a timestamped remnant left behind by migrateLegacyManifest. Neither is ever
+// written locally by the current format, so both are excluded from file classification.
+function isLegacyManifestRel(rel: string): boolean {
+  return rel === LEGACY_MANIFEST_REL || rel.startsWith(`${LEGACY_MANIFEST_REL}.migrated-`);
+}
+
+async function remoteGroupsFrom(reader: ExternalStoreReader, files: string[]): Promise<SyncGroup[]> {
+  if (files.includes(SELF_STORE_DATA_REL)) {
+    const parsed: unknown = JSON.parse(await reader.readFile(SELF_STORE_DATA_REL));
+    if (isPlainObject(parsed) && Array.isArray(parsed.groups)) {
+      return validateSyncManifest({ version: 1, groups: parsed.groups }).groups;
+    }
   }
-  const incoming = parseSyncManifest(await reader.readFile("config-sync.json")); // fail fast on invalid upstream data
+  if (files.includes(LEGACY_MANIFEST_REL)) {
+    return parseSyncManifest(await reader.readFile(LEGACY_MANIFEST_REL)).groups; // compat, deprecated format
+  }
+  return [];
+}
+
+export interface PendingPull {
+  plan: MergePlan;
+  remoteGroups: SyncGroup[];
+  remoteLockRaw: string | null;
+}
+
+// Phase 1: read-only. Never writes anything.
+export async function planImport(ctx: CoreContext, reader: ExternalStoreReader): Promise<PendingPull> {
+  const files = await reader.listFiles();
+  const remoteGroups = await remoteGroupsFrom(reader, files);
+  const remoteLockRaw = files.includes(LOCK_REL) ? await reader.readFile(LOCK_REL) : null;
+
+  const remoteFileMap = new Map<string, string>();
+  for (const rel of files) {
+    if (rel === LOCK_REL || isLegacyManifestRel(rel)) continue;
+    remoteFileMap.set(rel, await reader.readFile(rel));
+  }
+
+  const localGroups = await readGroups(ctx);
+  const localFileMap = new Map<string, string>();
+  if (await ctx.io.exists(ctx.rootPath)) {
+    const localAbs = await listFilesRecursive(ctx.io, ctx.rootPath);
+    for (const f of localAbs) {
+      const rel = relativeTo(ctx.rootPath, f);
+      if (rel === LOCK_REL || isLegacyManifestRel(rel)) continue;
+      localFileMap.set(rel, await ctx.io.read(f));
+    }
+  }
+
+  const plan = classifyMerge(localGroups, localFileMap, remoteGroups, remoteFileMap);
+  return { plan, remoteGroups, remoteLockRaw };
+}
+
+// Phase 2: writes the whole merge result — all auto-merged parts plus each conflict's chosen
+// side — in one pass. Never deletes local-only files or groups.
+export async function applyImport(
+  ctx: CoreContext,
+  pending: PendingPull,
+  choices: ("local" | "remote")[]
+): Promise<GroupResult[]> {
+  const { plan, remoteGroups, remoteLockRaw } = pending;
+  if (choices.length !== plan.conflicts.length) {
+    throw new Error(
+      `applyImport: expected ${plan.conflicts.length} conflict resolution choice(s), received ${choices.length}`
+    );
+  }
+
   const byName = new Map<string, GroupResult>();
   const resultFor = (name: string): GroupResult => {
     let r = byName.get(name);
@@ -551,28 +613,58 @@ export async function importExternal(ctx: CoreContext, reader: ExternalStoreRead
     }
     return r;
   };
-  for (const rel of files) {
-    const target = `${ctx.rootPath}/${rel}`;
-    const { name, itemRel } = groupForStoreRel(incoming.groups, rel);
-    await writeClassified(ctx, target, await reader.readFile(rel), itemRel, resultFor(name));
+
+  const remoteWonNames = new Set<string>(plan.auto.writeFiles.map((f) => f.name).filter((n) => n !== ""));
+
+  for (const f of plan.auto.writeFiles) {
+    await writeClassified(ctx, `${ctx.rootPath}/${f.rel}`, f.content, f.rel, resultFor(f.name));
   }
-  const wanted = new Set(files.map((f) => `${ctx.rootPath}/${f}`));
-  const localFiles = await listFilesRecursive(ctx.io, ctx.rootPath);
-  for (const f of localFiles) {
-    if (!wanted.has(f)) {
-      const rel = relativeTo(ctx.rootPath, f);
-      const { name, itemRel } = groupForStoreRel(incoming.groups, rel);
-      await ctx.io.remove(f);
-      const result = resultFor(name);
-      result.filesDeleted.push(f);
-      result.changes.deleted.push(itemRel);
-    }
+  for (let i = 0; i < plan.conflicts.length; i++) {
+    const conflict = plan.conflicts[i];
+    if (conflict === undefined) continue;
+    if (choices[i] !== "remote") continue;
+    if (conflict.kind !== "file") continue;
+    await writeClassified(ctx, `${ctx.rootPath}/${conflict.rel}`, conflict.remoteContent, conflict.rel, resultFor(conflict.name));
+    remoteWonNames.add(conflict.name);
   }
   await pruneEmptyDirsUnder(ctx.io, ctx.rootPath);
+
+  let groups = await readGroups(ctx);
+  groups = [...groups, ...plan.auto.addGroups];
+  for (let i = 0; i < plan.conflicts.length; i++) {
+    const conflict = plan.conflicts[i];
+    if (conflict === undefined) continue;
+    if (choices[i] !== "remote") continue;
+    if (conflict.kind !== "definition") continue;
+    groups = groups.map((g) => (g.name === conflict.name ? conflict.remote : g));
+    remoteWonNames.add(conflict.name);
+  }
+  groups = ensureSelfPresets(groups);
+  await writeGroups(ctx, groups);
+  for (const g of plan.auto.addGroups) resultFor(g.name);
+
+  const localLock = await loadLock(ctx);
+  const remoteLock = remoteLockRaw !== null ? parseStoreLock(remoteLockRaw) : null;
+  if (localLock !== null || remoteLock !== null) {
+    const mergedGroups: StoreLock["groups"] = { ...(localLock?.groups ?? {}) };
+    for (const name of remoteWonNames) {
+      const entry = remoteLock?.groups[name];
+      if (entry !== undefined) mergedGroups[name] = entry;
+    }
+    const merged: StoreLock = { capturedAt: remoteLock?.capturedAt ?? localLock?.capturedAt ?? ctx.now(), groups: mergedGroups };
+    await ctx.io.write(lockPath(ctx), JSON.stringify(merged, null, 2) + "\n");
+  }
+
   const isAffected = (r: GroupResult): boolean => hasChanges(r.changes);
-  const named = incoming.groups
-    .map((g) => byName.get(g.name))
-    .filter((r): r is GroupResult => r !== undefined && isAffected(r));
+  const orderedNames = [...remoteGroups.map((g) => g.name), ...groups.map((g) => g.name)];
+  const seen = new Set<string>();
+  const named: GroupResult[] = [];
+  for (const name of orderedNames) {
+    if (seen.has(name)) continue;
+    seen.add(name);
+    const r = byName.get(name);
+    if (r !== undefined && isAffected(r)) named.push(r);
+  }
   const meta = byName.get("");
   return meta !== undefined && isAffected(meta) ? [...named, meta] : named;
 }
@@ -586,13 +678,15 @@ export interface ExternalStoreWriter {
 }
 
 export async function pushExternal(ctx: CoreContext, writer: ExternalStoreWriter): Promise<GroupResult[]> {
-  const localAbs = await listFilesRecursive(ctx.io, ctx.rootPath);
+  const localAbs = (await ctx.io.exists(ctx.rootPath)) ? await listFilesRecursive(ctx.io, ctx.rootPath) : [];
   const rels = localAbs.map((f) => f.slice(ctx.rootPath.length + 1)).sort();
-  if (!rels.includes("config-sync.json")) {
+  const hasStore = rels.some((r) => r.startsWith("store/")) || rels.includes(LOCK_REL);
+  if (!hasStore) {
     throw new Error(
-      `Local store has no config-sync.json at ${ctx.rootPath} — capture from this device (or pull) before pushing.`
+      `Local store has no captured data at ${ctx.rootPath} — capture from this device (or pull) before pushing.`
     );
   }
+  const pushableRels = rels.filter((r) => !isLegacyManifestRel(r));
   const manifest = await loadManifest(ctx);
   const byName = new Map<string, GroupResult>();
   const resultFor = (name: string): GroupResult => {
@@ -603,8 +697,8 @@ export async function pushExternal(ctx: CoreContext, writer: ExternalStoreWriter
     }
     return r;
   };
-  const remoteFiles = new Set(await writer.listFiles());
-  for (const rel of rels) {
+  const remoteFiles = new Set((await writer.listFiles()).filter((r) => !isLegacyManifestRel(r)));
+  for (const rel of pushableRels) {
     const { name, itemRel } = groupForStoreRel(manifest.groups, rel);
     const content = await ctx.io.read(`${ctx.rootPath}/${rel}`);
     const existed = remoteFiles.has(rel);
@@ -614,7 +708,7 @@ export async function pushExternal(ctx: CoreContext, writer: ExternalStoreWriter
     result.filesWritten.push(rel);
     (existed ? result.changes.updated : result.changes.added).push(itemRel);
   }
-  const wanted = new Set(rels);
+  const wanted = new Set(pushableRels);
   for (const rel of remoteFiles) {
     if (!wanted.has(rel)) {
       const { name, itemRel } = groupForStoreRel(manifest.groups, rel);
@@ -630,40 +724,11 @@ export async function pushExternal(ctx: CoreContext, writer: ExternalStoreWriter
   return meta !== undefined ? [...named, meta] : named;
 }
 
-export const SCHEMA_URL =
-  "https://raw.githubusercontent.com/xooooooooox/obsidian-config-sync/main/schema/config-sync.schema.json";
-
-export const STARTER_MANIFEST =
-  JSON.stringify(
-    {
-      $schema: SCHEMA_URL,
-      version: 1,
-      groups: [
-        { name: "snippets", path: "{configDir}/snippets", type: "dir", devices: "all", description: "CSS snippets" },
-        { name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all", description: "Custom keyboard shortcuts" },
-      ],
-    },
-    null,
-    2
-  ) + "\n";
-
-export async function createStarterManifest(ctx: CoreContext): Promise<"created" | "exists"> {
-  const p = manifestPath(ctx);
-  if (await ctx.io.exists(p)) return "exists";
-  await ensureParentDir(ctx.io, p);
-  await ctx.io.write(p, STARTER_MANIFEST);
-  return "created";
-}
-
 export async function readGroups(ctx: CoreContext): Promise<SyncGroup[]> {
-  const p = manifestPath(ctx);
-  if (!(await ctx.io.exists(p))) return [];
-  return parseSyncManifest(await ctx.io.read(p)).groups;
+  return ctx.groupsIO.read();
 }
 
 export async function writeGroups(ctx: CoreContext, groups: SyncGroup[]): Promise<void> {
   const manifest = validateSyncManifest({ version: 1, groups });
-  const p = manifestPath(ctx);
-  await ensureParentDir(ctx.io, p);
-  await ctx.io.write(p, JSON.stringify({ $schema: SCHEMA_URL, version: 1, groups: manifest.groups }, null, 2) + "\n");
+  await ctx.groupsIO.write(manifest.groups);
 }

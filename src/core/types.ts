@@ -5,6 +5,7 @@ export type SyncMode = "plain" | "fields" | "encrypted";
 export interface FieldRule {
   pattern: string; // key-name glob pattern
   action: "strip" | "encrypt";
+  locked?: boolean; // preset rule; cannot be removed in the UI
 }
 
 export interface SyncGroup {

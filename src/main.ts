@@ -1,17 +1,17 @@
 import { Menu, Notice, Platform, Plugin, apiVersion, requestUrl } from "obsidian";
 import {
   ApplyItem,
+  applyImport,
   CoreContext,
   ExternalStoreReader,
   ExternalStoreWriter,
   PluginHost,
   PluginInstallFn,
+  planImport,
   ProgressFn,
   applyWithActions,
   capture,
-  createStarterManifest as coreCreateStarterManifest,
   groupsForDevice,
-  importExternal,
   loadLock,
   loadManifest,
   pushExternal,
@@ -20,14 +20,16 @@ import {
   writeGroups,
 } from "./core/ConfigSyncCore";
 import { createInstaller } from "./core/installer";
-import { type CatalogSection, displayLabelForGroup, listCoreSections, listDiscovered, listOptionSections, listPluginSections, setCorePluginIds } from "./core/catalog";
+import { type CatalogSection, displayLabelForGroup, ensureSelfPresets, groupForItem, listCoreSections, listDiscovered, listOptionSections, listPluginSections, SELF_GROUP_NAME, setCorePluginIds } from "./core/catalog";
 import { Availability, availabilityForGroup } from "./core/availability";
 import { listFilesRecursive } from "./core/io";
+import { ManifestValidationError, migrateLegacyManifest, parseStoreLock, validateSyncManifest } from "./core/manifest";
 import { groupRealPath } from "./core/pathing";
 import { scanSensitive, SensitiveScan } from "./core/modes";
 import { PkmMode, PkmProbe, resolveEffectiveMode, resolveRootPath } from "./core/pkm";
 import { bucketCounts, checkRemote, diffRemote, GroupStatus, RemoteCheck, statusForGroups } from "./core/status";
 import { Remote, RibbonButtons, StoreLock, SyncGroup } from "./core/types";
+import { ConflictModal } from "./ui/ConflictModal";
 import { ReportModal } from "./ui/ReportModal";
 import { SYNC_CENTER_VIEW_TYPE, SyncCenterHost, SyncCenterView } from "./ui/SyncCenterView";
 import { ConfigSyncSettingTab } from "./ui/SettingTab";
@@ -40,6 +42,7 @@ interface ConfigSyncSettings {
   statusInMenu: boolean;
   remoteAutoCheck: boolean;
   localPeriodicCheck: boolean;
+  groups: SyncGroup[];
 }
 
 const DEFAULT_SETTINGS: ConfigSyncSettings = {
@@ -50,6 +53,7 @@ const DEFAULT_SETTINGS: ConfigSyncSettings = {
   statusInMenu: true,
   remoteAutoCheck: true,
   localPeriodicCheck: true,
+  groups: [],
 };
 
 // app.plugins is not part of the public API; this is the community-standard access path.
@@ -78,6 +82,7 @@ export default class ConfigSyncPlugin extends Plugin {
   remoteChecks = new Map<string, { check: RemoteCheck; at: number }>();
   private storeEventTimer: number | null = null;
   private remoteAutoCheckStartupTimer: number | null = null;
+  private bootstrapDismissed = false; // session-only: "adopt configuration" banner dismissed
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -115,7 +120,32 @@ export default class ConfigSyncPlugin extends Plugin {
         }, 4 * 60 * 60 * 1000)
       );
     }
-    this.app.workspace.onLayoutReady(() => void this.refreshLocalStatus());
+    this.app.workspace.onLayoutReady(
+      () =>
+        void (async () => {
+          await this.migrateLegacy();
+          await this.refreshLocalStatus();
+        })()
+    );
+  }
+
+  private async migrateLegacy(): Promise<void> {
+    try {
+      const rootPath = await this.resolvedRootPath();
+      const result = await migrateLegacyManifest(this.app.vault.adapter, rootPath, this.settings.groups, new Date().toISOString());
+      if (result.migrated) {
+        this.settings.groups = ensureSelfPresets(result.groups);
+        await this.saveSettings();
+        new Notice("Config Sync: imported groups from config-sync.json (file renamed, now lives in plugin settings)");
+      }
+    } catch (e) {
+      if (e instanceof ManifestValidationError) {
+        new Notice(`Config Sync: could not migrate config-sync.json — ${e.message}`, 10000);
+        return;
+      }
+      console.error("Config Sync: unexpected error migrating config-sync.json", e);
+      new Notice(`Config Sync: migration hit an unexpected error — ${(e as Error).message}. The renamed config-sync.json.migrated-* file (if present) still holds your groups.`, 10000);
+    }
   }
 
   onunload(): void {
@@ -239,9 +269,6 @@ export default class ConfigSyncPlugin extends Plugin {
     return {
       computeStatuses: async () => {
         const ctx = await this.coreContext();
-        if ((await coreCreateStarterManifest(ctx)) === "created") {
-          new Notice(`Config Sync: created starter items file at ${ctx.rootPath}/config-sync.json — review it in settings`);
-        }
         const manifest = await loadManifest(ctx);
         const device = Platform.isMobile ? ("mobile" as const) : ("desktop" as const);
         const groups = groupsForDevice(manifest, device);
@@ -261,6 +288,49 @@ export default class ConfigSyncPlugin extends Plugin {
       },
       resolvedPath: (g) => g.path.replace("{configDir}", this.app.vault.configDir),
       displayName: (g) => this.displayName(g, this.lastGroups?.find((x) => x.name === g)?.label),
+      bootstrapOffer: async () => {
+        if (this.bootstrapDismissed || this.settings.groups.length > 0) return null;
+        try {
+          const root = await this.resolvedRootPath();
+          if (await this.app.vault.adapter.exists(`${root}/config-sync.json`)) return null; // legacy file → migration path handles it
+          const selfCopy = `${root}/store/configdir/plugins/config-sync/data.json`;
+          if (!(await this.app.vault.adapter.exists(selfCopy))) return null;
+          const raw = JSON.parse(await this.app.vault.adapter.read(selfCopy)) as { groups?: unknown };
+          const itemCount = Array.isArray(raw.groups) ? raw.groups.length : 0;
+          if (itemCount === 0) return null;
+          let capturedAt: string | null = null;
+          const lockPath = `${root}/store.lock.json`;
+          if (await this.app.vault.adapter.exists(lockPath)) {
+            capturedAt = parseStoreLock(await this.app.vault.adapter.read(lockPath)).capturedAt;
+          }
+          return { itemCount, capturedAt };
+        } catch (e) {
+          console.error("Config Sync: bootstrap offer check failed", e);
+          return null;
+        }
+      },
+      dismissBootstrap: () => {
+        this.bootstrapDismissed = true;
+      },
+      adoptConfiguration: async () => {
+        try {
+          const ctx = await this.coreContext();
+          const existing = await readGroups(ctx);
+          if (!existing.some((g) => g.name === SELF_GROUP_NAME)) {
+            const self = groupForItem(SELF_GROUP_NAME, "{configDir}/plugins/config-sync/data.json", "file", "Settings of config-sync.", "Config Sync");
+            await writeGroups(ctx, [...existing, self]);
+          }
+          const results = await applyWithActions(ctx, [{ name: SELF_GROUP_NAME, action: "none" }], this.installPlugin());
+          if (results.some((r) => r.group === SELF_GROUP_NAME && r.status !== "error")) {
+            await this.loadSettings(); // the apply rewrote our own settings file — pick up the adopted contract
+          }
+          await this.refreshLocalStatus();
+          return results;
+        } catch (e) {
+          new Notice(`Config Sync adopt failed: ${(e as Error).message}`, 10000);
+          return null;
+        }
+      },
       captureItems: async (names: string[], onProgress?: ProgressFn) => {
         try {
           const ctx = await this.coreContext();
@@ -276,6 +346,11 @@ export default class ConfigSyncPlugin extends Plugin {
         try {
           const ctx = await this.coreContext();
           const results = await applyWithActions(ctx, items, this.installPlugin(), onProgress);
+          if (results.some((r) => r.group === SELF_GROUP_NAME && r.status !== "error")) {
+            // The apply just rewrote this plugin's own settings file on disk — reload before
+            // refreshing status so the running plugin picks up the new contract immediately.
+            await this.loadSettings();
+          }
           await this.refreshLocalStatus();
           return results;
         } catch (e) {
@@ -294,7 +369,30 @@ export default class ConfigSyncPlugin extends Plugin {
       pullFrom: async (remote) => {
         try {
           const ctx = await this.coreContext();
-          const results = await importExternal(ctx, await this.createReader(remote));
+          const pending = await planImport(ctx, await this.createReader(remote));
+          if (pending.plan.conflicts.length > 0) {
+            // Conflicted pull: pause for git-style resolution. Nothing has been written
+            // (planImport is read-only); Cancel keeps it that way — all-or-nothing.
+            const choices = await new Promise<("local" | "remote")[] | null>((resolve) => {
+              new ConflictModal(
+                this.app,
+                pending,
+                remote.name,
+                (name) => this.displayName(name),
+                (picked) => resolve(picked),
+                () => resolve(null)
+              ).open();
+            });
+            if (choices === null) {
+              new Notice("Pull cancelled — nothing was changed");
+              return null;
+            }
+            const results = await applyImport(ctx, pending, choices);
+            await this.refreshLocalStatus();
+            await this.refreshRemoteChecks();
+            return results;
+          }
+          const results = await applyImport(ctx, pending, []);
           await this.refreshLocalStatus();
           await this.refreshRemoteChecks();
           return results;
@@ -411,6 +509,21 @@ export default class ConfigSyncPlugin extends Plugin {
       rootPath,
       plugins: this.pluginHost(),
       passphrase: this.passphrase(),
+      groupsIO: {
+        read: async () => this.settings.groups,
+        write: async (groups) => {
+          // Swap-only-on-success, matching the commitDraft rollback pattern: a failed disk
+          // write must not leave unpersisted groups visible in memory.
+          const prev = this.settings.groups;
+          this.settings.groups = groups;
+          try {
+            await this.saveSettings();
+          } catch (e) {
+            this.settings.groups = prev;
+            throw e;
+          }
+        },
+      },
       now: () => new Date().toISOString(),
     };
   }
@@ -521,6 +634,13 @@ export default class ConfigSyncPlugin extends Plugin {
 
   async loadSettings(): Promise<void> {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, (await this.loadData()) as Partial<ConfigSyncSettings> | null);
+    try {
+      this.settings.groups = validateSyncManifest({ version: 1, groups: this.settings.groups }).groups;
+    } catch (e) {
+      console.error("Config Sync: invalid groups in settings", e);
+      new Notice(`Config Sync: saved sync configuration is invalid (${(e as Error).message}) — fix it in Settings → Config Sync`, 10000);
+      this.settings.groups = [];
+    }
   }
 
   async saveSettings(): Promise<void> {

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { CoreContext, capture, loadManifest, groupsForDevice, ExternalStoreReader } from "../src/core/ConfigSyncCore";
+import { CoreContext, capture, loadManifest, groupsForDevice, ExternalStoreReader, writeGroups } from "../src/core/ConfigSyncCore";
+import { parseSyncManifest } from "../src/core/manifest";
 import { statusForGroups, checkRemote, diffRemote, bucketCounts, GroupStatus } from "../src/core/status";
-import { MemFS, FakePlugins } from "./memfs";
+import { MemFS, FakePlugins, memGroupsIO } from "./memfs";
 
 const MANIFEST = JSON.stringify({
   version: 1,
@@ -14,18 +15,18 @@ const MANIFEST = JSON.stringify({
 
 function setup(): { io: MemFS; ctx: CoreContext } {
   const io = new MemFS();
-  const ctx: CoreContext = { io, configDir: ".obs", rootPath: "cs", plugins: new FakePlugins(), passphrase: null, now: () => "2026-07-08T00:00:00.000Z" };
+  const ctx: CoreContext = { io, configDir: ".obs", rootPath: "cs", plugins: new FakePlugins(), passphrase: null, groupsIO: memGroupsIO(), now: () => "2026-07-08T00:00:00.000Z" };
   return { io, ctx };
 }
 
 async function seededAndCaptured(): Promise<{ io: MemFS; ctx: CoreContext }> {
   const { io, ctx } = setup();
   io.seed({
-    "cs/config-sync.json": MANIFEST,
     ".obs/hotkeys.json": '{"a":1}',
     ".obs/snippets/one.css": "one",
     ".obs/plugins/demo/data.json": '{"vikaToken":"secret","theme":"x"}',
   });
+  await writeGroups(ctx, parseSyncManifest(MANIFEST).groups);
   await capture(ctx); // capturedAt = 2026-07-08T00:00:00.000Z
   return { io, ctx };
 }
@@ -66,7 +67,8 @@ describe("statusForGroups", () => {
 
   it("reports not-captured when the store has no data for the group", async () => {
     const { io, ctx } = setup();
-    io.seed({ "cs/config-sync.json": MANIFEST, ".obs/hotkeys.json": "{}", ".obs/snippets/one.css": "x", ".obs/plugins/demo/data.json": "{}" });
+    io.seed({ ".obs/hotkeys.json": "{}", ".obs/snippets/one.css": "x", ".obs/plugins/demo/data.json": "{}" });
+    await writeGroups(ctx, parseSyncManifest(MANIFEST).groups);
     expect((await allStates(ctx))["hotkeys"]).toBe("not-captured");
   });
 
@@ -101,7 +103,8 @@ describe("statusForGroups", () => {
 
   it("reports no-settings when neither this device nor the store has files", async () => {
     const { io, ctx } = setup();
-    io.seed({ "cs/config-sync.json": MANIFEST, ".obs/hotkeys.json": '{"a":1}' });
+    io.seed({ ".obs/hotkeys.json": '{"a":1}' });
+    await writeGroups(ctx, parseSyncManifest(MANIFEST).groups);
     // hotkeys: local only -> not-captured; snippets dir + plugin-demo file: nothing anywhere -> no-settings
     const states = await allStates(ctx);
     expect(states).toEqual({ hotkeys: "not-captured", snippets: "no-settings", "plugin-demo": "no-settings" });
@@ -123,7 +126,8 @@ describe("statusForGroups: encrypted mode", () => {
   it("is in-sync right after capture, actionable after a local edit, and locked without a passphrase", async () => {
     const { io, ctx } = setup();
     ctx.passphrase = "pw";
-    io.seed({ "cs/config-sync.json": ENC_MANIFEST, ".obs/secrets.json": '{"token":"x"}' });
+    io.seed({ ".obs/secrets.json": '{"token":"x"}' });
+    await writeGroups(ctx, parseSyncManifest(ENC_MANIFEST).groups);
     await capture(ctx);
     expect((await allStates(ctx))["secrets"]).toBe("in-sync");
 
@@ -153,7 +157,7 @@ describe("diffRemote", () => {
   it("diffRemote reports per-item differences against the local store", async () => {
     const { io, ctx } = await seededAndCaptured();
     const remote: Record<string, string> = {
-      "config-sync.json": await io.read("cs/config-sync.json"),
+      "config-sync.json": MANIFEST, // legacy root manifest file, no longer written locally — filtered from the diff regardless
       "store.lock.json": await io.read("cs/store.lock.json"),
       "store/configdir/hotkeys.json": '{"a":1}', // same as local
       "store/configdir/snippets/one.css": "REMOTE", // differs
@@ -190,6 +194,15 @@ describe("checkRemote", () => {
     expect((await checkRemote(localLock, fakeReader(at("2026-07-07T00:00:00.000Z")))).state).toBe("remote-older");
     expect((await checkRemote(localLock, fakeReader(at("2026-07-08T00:00:00.000Z")))).state).toBe("same");
     expect((await checkRemote(null, fakeReader(at("2026-07-09T00:00:00.000Z")))).state).toBe("unknown");
+  });
+  it("recognizes a new-format store (store/** + lock, no root config-sync.json)", async () => {
+    const newFormat = {
+      "store.lock.json": JSON.stringify({ capturedAt: "2026-07-09T00:00:00.000Z", groups: {} }),
+      "store/configdir/hotkeys.json": "{}",
+    };
+    expect((await checkRemote(localLock, fakeReader(newFormat))).state).toBe("remote-newer");
+    // store files but no lock yet → present but unknown, NOT no-store
+    expect((await checkRemote(localLock, fakeReader({ "store/configdir/hotkeys.json": "{}" }))).state).toBe("unknown");
   });
 });
 

@@ -13,6 +13,7 @@ export interface FileIO {
   write(path: string, data: string): Promise<void>;
   exists(path: string): Promise<boolean>;
   remove(path: string): Promise<void>;
+  rename(path: string, newPath: string): Promise<void>;
   rmdir(path: string, recursive: boolean): Promise<void>;
   mkdir(path: string): Promise<void>;
   list(path: string): Promise<ListedDir>;

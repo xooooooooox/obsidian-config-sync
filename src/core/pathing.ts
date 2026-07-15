@@ -1,3 +1,5 @@
+import { SyncGroup } from "./types";
+
 export const CONFIG_DIR_VARIABLE = "{configDir}";
 export const STORE_CONFIG_DIR = "configdir";
 
@@ -34,4 +36,18 @@ export function relativeTo(base: string, full: string): string {
 
 export function basename(p: string): string {
   return p.slice(p.lastIndexOf("/") + 1);
+}
+
+// Resolves a "store/<groupStorePath>/..." rel to the owning group, by matching each group's
+// store path against the rel's "store/" prefix. Returns undefined for store metadata (e.g.
+// store.lock.json) or an unmatched rel.
+export function resolveGroupByStoreRel(groups: SyncGroup[], rel: string): SyncGroup | undefined {
+  if (!rel.startsWith("store/")) return undefined;
+  const inner = rel.slice("store/".length);
+  for (const g of groups) {
+    const sp = groupStorePath(g.path);
+    if (g.type === "file" && inner === sp) return g;
+    if (g.type === "dir" && inner.startsWith(sp + "/")) return g;
+  }
+  return undefined;
 }

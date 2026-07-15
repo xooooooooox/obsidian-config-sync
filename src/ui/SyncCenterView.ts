@@ -48,6 +48,9 @@ export interface SyncCenterHost {
   deepDiff(remote: Remote): Promise<RemoteDiffEntry[]>;
   pullFrom(remote: Remote): Promise<GroupResult[] | null>;
   pushTo(remote: Remote): Promise<GroupResult[] | null>;
+  bootstrapOffer(): Promise<{ itemCount: number; capturedAt: string | null } | null>;
+  dismissBootstrap(): void;
+  adoptConfiguration(): Promise<GroupResult[] | null>;
 }
 
 function relativeAge(ms: number): string {
@@ -217,6 +220,7 @@ export class SyncCenterView extends ItemView {
     if (gen !== this.renderGen) return;
     this.contentEl.empty();
     this.renderHeader();
+    this.renderBootstrapBanner(this.contentEl, gen);
     const shell = this.contentEl.createDiv({ cls: `config-sync-shell${this.compact ? " is-compact" : ""}` });
     if (this.compact) this.renderSwitcher(shell);
     else this.renderSidebar(shell);
@@ -230,6 +234,40 @@ export class SyncCenterView extends ItemView {
       this.panelScope = { kind: "device", cat: "all" }; // remote vanished (settings change) — fall back
     }
     this.renderItemMode(main);
+  }
+
+  // Fresh-device adopt banner (self-config model 定稿): shown when the store already holds a
+  // captured configuration but this device has no groups yet. Fetched async into a placeholder.
+  private renderBootstrapBanner(container: HTMLElement, gen: number): void {
+    const host = container.createDiv();
+    void this.host.bootstrapOffer().then((offer) => {
+      if (offer === null || gen !== this.renderGen) return;
+      const banner = host.createDiv({ cls: "config-sync-bootstrap" });
+      banner.createSpan({ cls: "config-sync-bootstrap-icon", text: "⬇" });
+      const textBox = banner.createDiv({ cls: "config-sync-bootstrap-text" });
+      textBox.createDiv({ cls: "config-sync-bootstrap-title", text: "Found an existing configuration in the store" });
+      const when = offer.capturedAt === null ? "" : ` · captured ${isoAge(offer.capturedAt)}`;
+      textBox.createDiv({
+        cls: "config-sync-bootstrap-sub",
+        text: `${offer.itemCount} sync item${offer.itemCount === 1 ? "" : "s"}${when}. Adopt it to set up this device.`,
+      });
+      const adopt = banner.createEl("button", { cls: "mod-cta config-sync-bootstrap-adopt", text: "Adopt" });
+      adopt.addEventListener("click", () => {
+        adopt.disabled = true;
+        adopt.setText("Adopting…");
+        void this.host.adoptConfiguration().then((results) => {
+          if (results !== null) this.setLastRun("Adopted", "local", results);
+          this.notifyExternalChange(); // recompute: groups now exist → banner disappears
+        });
+      });
+      const dismiss = banner.createSpan({ cls: "config-sync-bootstrap-dismiss", text: "✕" });
+      dismiss.setAttribute("aria-label", "Dismiss for this session");
+      dismiss.setAttribute("title", "Dismiss for this session");
+      dismiss.addEventListener("click", () => {
+        this.host.dismissBootstrap();
+        banner.remove();
+      });
+    });
   }
 
   private renderSidebar(shell: HTMLElement): void {

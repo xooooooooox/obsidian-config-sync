@@ -85,7 +85,8 @@ export async function findStoreDirs(baseAbs: string): Promise<string[]> {
       if (item.rel === "") throw new Error(`Cannot read folder ${base}: ${(e as Error).message}`);
       continue; // unreadable subdir — keep scanning the rest
     }
-    if (entries.some((e) => e.isFile() && e.name === "config-sync.json")) {
+    // A store dir is marked by store.lock.json (new format) or a root config-sync.json (legacy).
+    if (entries.some((e) => e.isFile() && (e.name === "store.lock.json" || e.name === "config-sync.json"))) {
       hits.push(abs);
       continue;
     }

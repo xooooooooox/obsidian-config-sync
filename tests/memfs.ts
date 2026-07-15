@@ -1,4 +1,17 @@
 import { FileIO, ListedDir } from "../src/core/io";
+import { GroupsIO } from "../src/core/ConfigSyncCore";
+import { SyncGroup } from "../src/core/types";
+
+/** In-memory GroupsIO backed by a closure array, for tests that build a CoreContext directly. */
+export function memGroupsIO(initial: SyncGroup[] = []): GroupsIO {
+  let groups = initial;
+  return {
+    read: async () => groups,
+    write: async (g) => {
+      groups = g;
+    },
+  };
+}
 
 export class MemFS implements FileIO {
   files = new Map<string, string>();
@@ -47,6 +60,14 @@ export class MemFS implements FileIO {
 
   async remove(path: string): Promise<void> {
     if (!this.files.delete(path)) throw new Error(`MemFS: remove of missing file ${path}`);
+  }
+
+  async rename(path: string, newPath: string): Promise<void> {
+    const content = this.files.get(path);
+    if (content === undefined) throw new Error(`MemFS: rename of missing file ${path}`);
+    this.files.delete(path);
+    this.files.set(newPath, content);
+    this.addAncestors(newPath);
   }
 
   async mkdir(path: string): Promise<void> {

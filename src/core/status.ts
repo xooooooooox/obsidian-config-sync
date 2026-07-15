@@ -141,7 +141,10 @@ export interface RemoteCheck {
 
 export async function checkRemote(localLock: StoreLock | null, reader: ExternalStoreReader): Promise<RemoteCheck> {
   const files = await reader.listFiles();
-  if (!files.includes("config-sync.json")) return { state: "no-store", remoteCapturedAt: null };
+  // Store presence: new-format stores hold only store/** + store.lock.json (no root manifest);
+  // a root config-sync.json still marks a legacy-format store.
+  const hasStore = files.some((f) => f.startsWith("store/")) || files.includes("store.lock.json") || files.includes("config-sync.json");
+  if (!hasStore) return { state: "no-store", remoteCapturedAt: null };
   if (!files.includes("store.lock.json")) return { state: "unknown", remoteCapturedAt: null };
   let remote: StoreLock;
   try {
