@@ -20,10 +20,10 @@ import {
   writeGroups,
 } from "./core/ConfigSyncCore";
 import { createInstaller } from "./core/installer";
-import { type CatalogSection, displayLabelForGroup, ensureSelfPresets, listCoreSections, listDiscovered, listOptionSections, listPluginSections, SELF_GROUP_NAME, setCorePluginIds } from "./core/catalog";
+import { type CatalogSection, displayLabelForGroup, ensureSelfPresets, groupForItem, listCoreSections, listDiscovered, listOptionSections, listPluginSections, SELF_GROUP_NAME, setCorePluginIds } from "./core/catalog";
 import { Availability, availabilityForGroup } from "./core/availability";
 import { listFilesRecursive } from "./core/io";
-import { ManifestValidationError, migrateLegacyManifest, validateSyncManifest } from "./core/manifest";
+import { ManifestValidationError, migrateLegacyManifest, parseStoreLock, validateSyncManifest } from "./core/manifest";
 import { groupRealPath } from "./core/pathing";
 import { scanSensitive, SensitiveScan } from "./core/modes";
 import { PkmMode, PkmProbe, resolveEffectiveMode, resolveRootPath } from "./core/pkm";
@@ -82,6 +82,7 @@ export default class ConfigSyncPlugin extends Plugin {
   remoteChecks = new Map<string, { check: RemoteCheck; at: number }>();
   private storeEventTimer: number | null = null;
   private remoteAutoCheckStartupTimer: number | null = null;
+  private bootstrapDismissed = false; // session-only: "adopt configuration" banner dismissed
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -287,6 +288,49 @@ export default class ConfigSyncPlugin extends Plugin {
       },
       resolvedPath: (g) => g.path.replace("{configDir}", this.app.vault.configDir),
       displayName: (g) => this.displayName(g, this.lastGroups?.find((x) => x.name === g)?.label),
+      bootstrapOffer: async () => {
+        if (this.bootstrapDismissed || this.settings.groups.length > 0) return null;
+        try {
+          const root = await this.resolvedRootPath();
+          if (await this.app.vault.adapter.exists(`${root}/config-sync.json`)) return null; // legacy file → migration path handles it
+          const selfCopy = `${root}/store/configdir/plugins/config-sync/data.json`;
+          if (!(await this.app.vault.adapter.exists(selfCopy))) return null;
+          const raw = JSON.parse(await this.app.vault.adapter.read(selfCopy)) as { groups?: unknown };
+          const itemCount = Array.isArray(raw.groups) ? raw.groups.length : 0;
+          if (itemCount === 0) return null;
+          let capturedAt: string | null = null;
+          const lockPath = `${root}/store.lock.json`;
+          if (await this.app.vault.adapter.exists(lockPath)) {
+            capturedAt = parseStoreLock(await this.app.vault.adapter.read(lockPath)).capturedAt;
+          }
+          return { itemCount, capturedAt };
+        } catch (e) {
+          console.error("Config Sync: bootstrap offer check failed", e);
+          return null;
+        }
+      },
+      dismissBootstrap: () => {
+        this.bootstrapDismissed = true;
+      },
+      adoptConfiguration: async () => {
+        try {
+          const ctx = await this.coreContext();
+          const existing = await readGroups(ctx);
+          if (!existing.some((g) => g.name === SELF_GROUP_NAME)) {
+            const self = groupForItem(SELF_GROUP_NAME, "{configDir}/plugins/config-sync/data.json", "file", "Settings of config-sync.", "Config Sync");
+            await writeGroups(ctx, [...existing, self]);
+          }
+          const results = await applyWithActions(ctx, [{ name: SELF_GROUP_NAME, action: "none" }], this.installPlugin());
+          if (results.some((r) => r.group === SELF_GROUP_NAME && r.status !== "error")) {
+            await this.loadSettings(); // the apply rewrote our own settings file — pick up the adopted contract
+          }
+          await this.refreshLocalStatus();
+          return results;
+        } catch (e) {
+          new Notice(`Config Sync adopt failed: ${(e as Error).message}`, 10000);
+          return null;
+        }
+      },
       captureItems: async (names: string[], onProgress?: ProgressFn) => {
         try {
           const ctx = await this.coreContext();

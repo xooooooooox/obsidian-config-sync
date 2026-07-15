@@ -847,3 +847,23 @@ body.is-mobile .config-sync-mainbar input[type="checkbox"]:indeterminate::after 
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* ── Fresh-device adopt banner (self-config model 定稿) ───────────────────── */
+.config-sync-bootstrap {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-3);
+  padding: var(--size-4-2) var(--size-4-3);
+  margin-bottom: var(--size-4-3);
+  border: 1px solid rgba(var(--interactive-accent-rgb), 0.4);
+  border-radius: var(--radius-m);
+  background: rgba(var(--interactive-accent-rgb), 0.08);
+}
+
+.config-sync-bootstrap-icon { font-size: var(--font-ui-large); }
+.config-sync-bootstrap-text { flex: 1; min-width: 0; }
+.config-sync-bootstrap-title { font-weight: 600; font-size: var(--font-ui-small); }
+.config-sync-bootstrap-sub { color: var(--text-muted); font-size: var(--font-ui-smaller); margin-top: 1px; }
+.config-sync-bootstrap-adopt { flex: none; }
+.config-sync-bootstrap-dismiss { color: var(--text-muted); cursor: pointer; flex: none; padding: 0 var(--size-4-1); }
+.config-sync-bootstrap-dismiss:hover { color: var(--text-normal); }
