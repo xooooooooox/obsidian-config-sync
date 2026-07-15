@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { CoreContext, capture, loadManifest, groupsForDevice, apply, applyWithActions, revertLastApply, importExternal, ExternalStoreReader, pushExternal, ExternalStoreWriter, pluginIdForGroup, createStarterManifest, readGroups, writeGroups, SCHEMA_URL } from "../src/core/ConfigSyncCore";
+import { CoreContext, capture, loadManifest, groupsForDevice, apply, applyWithActions, revertLastApply, importExternal, ExternalStoreReader, pushExternal, ExternalStoreWriter, pluginIdForGroup, readGroups, writeGroups } from "../src/core/ConfigSyncCore";
 import { parseSyncManifest } from "../src/core/manifest";
+import { SyncGroup } from "../src/core/types";
 import { isFieldEnvelope, parseFileEnvelope } from "../src/core/crypto";
-import { MemFS, FakePlugins } from "./memfs";
+import { MemFS, FakePlugins, memGroupsIO } from "./memfs";
 
 export const MANIFEST = JSON.stringify({
   version: 1,
@@ -23,15 +24,21 @@ export function setup(): { io: MemFS; plugins: FakePlugins; ctx: CoreContext } {
     rootPath: "cs",
     plugins,
     passphrase: null,
+    groupsIO: memGroupsIO(),
     now: () => "2026-07-08T00:00:00.000Z",
   };
   return { io, plugins, ctx };
 }
 
+/** Test helper: seed ctx.groupsIO from a manifest JSON string (replaces seeding a config-sync.json file). */
+async function seedGroups(ctx: CoreContext, manifestJson: string): Promise<void> {
+  await writeGroups(ctx, parseSyncManifest(manifestJson).groups);
+}
+
 describe("loadManifest", () => {
-  it("throws a clear error when the manifest is missing", async () => {
+  it("returns an empty group list when no groups are configured", async () => {
     const { ctx } = setup();
-    await expect(loadManifest(ctx)).rejects.toThrow("cs/config-sync.json");
+    expect(await loadManifest(ctx)).toEqual({ version: 1, groups: [] });
   });
 });
 
@@ -56,7 +63,6 @@ describe("capture", () => {
     const { io, plugins, ctx } = setup();
     plugins.installed.set("demo", "1.2.3");
     io.seed({
-      "cs/config-sync.json": MANIFEST,
       ".obs/hotkeys.json": '{"a":1}',
       ".obs/snippets/one.css": "one",
       ".obs/snippets/sub/two.css": "two",
@@ -64,6 +70,7 @@ describe("capture", () => {
       ".obs/plugins/demo/data.json": '{"vikaToken":"secret","theme":"x"}',
       "cs/store/configdir/snippets/stale.css": "stale",
     });
+    await seedGroups(ctx, MANIFEST);
     const results = await capture(ctx);
     expect(results.every((r) => r.status === "ok")).toBe(true);
     expect(await io.read("cs/store/configdir/hotkeys.json")).toBe('{"a":1}');
@@ -87,12 +94,12 @@ describe("capture", () => {
     const { io, plugins, ctx } = setup();
     plugins.installed.set("demo", "1.2.3");
     io.seed({
-      "cs/config-sync.json": MANIFEST,
       ".obs/hotkeys.json": '{"a":1}',
       ".obsidian.vimrc": "imap jk <Esc>",
       ".obs/plugins/demo/data.json": '{"theme":"x"}',
       // snippets dir intentionally missing
     });
+    await seedGroups(ctx, MANIFEST);
     const results = await capture(ctx);
     const status = Object.fromEntries(results.map((r) => [r.group, r.status]));
     expect(status["snippets"]).toBe("error");
@@ -108,12 +115,12 @@ describe("capture", () => {
     const { io, plugins, ctx } = setup();
     plugins.installed.set("demo", "1.2.3");
     io.seed({
-      "cs/config-sync.json": MANIFEST,
       ".obs/hotkeys.json": '{"a":1}',
       ".obs/snippets/one.css": "one",
       ".obsidian.vimrc": "x",
       // plugin demo data.json intentionally missing
     });
+    await seedGroups(ctx, MANIFEST);
     const results = await capture(ctx);
     expect(results.find((r) => r.group === "plugin-demo")?.status).toBe("error");
     const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, unknown> };
@@ -124,12 +131,12 @@ describe("capture", () => {
     const { io, plugins, ctx } = setup();
     plugins.installed.set("demo", "1.2.3");
     io.seed({
-      "cs/config-sync.json": MANIFEST,
       ".obs/hotkeys.json": "{}",
       ".obs/snippets/one.css": "x",
       ".obsidian.vimrc": "v",
       ".obs/plugins/demo/data.json": "{}",
     });
+    await seedGroups(ctx, MANIFEST);
     await capture(ctx);
     await io.remove(".obs/plugins/demo/data.json");
     const results = await capture(ctx);
@@ -142,12 +149,12 @@ describe("capture", () => {
     const { io, plugins, ctx } = setup();
     plugins.installed.set("demo", "1.2.3");
     io.seed({
-      "cs/config-sync.json": MANIFEST,
       ".obs/hotkeys.json": "{}",
       ".obs/snippets/one.css": "x",
       ".obsidian.vimrc": "v",
       // plugin-demo source missing from the start
     });
+    await seedGroups(ctx, MANIFEST);
     const results = await capture(ctx);
     expect(results.find((r) => r.group === "plugin-demo")?.status).toBe("error");
     const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, unknown> };
@@ -158,13 +165,13 @@ describe("capture", () => {
     const { io, plugins, ctx } = setup();
     plugins.installed.set("demo", "1.2.3");
     io.seed({
-      "cs/config-sync.json": MANIFEST,
       "cs/store.lock.json": '{"publishedAt":"t","groups":{"plugin-demo":{"sourcePluginVersion":"9.9.9"}}}',
       ".obs/hotkeys.json": "{}",
       ".obs/snippets/one.css": "x",
       ".obsidian.vimrc": "v",
       ".obs/plugins/demo/data.json": "{}",
     });
+    await seedGroups(ctx, MANIFEST);
     const results = await capture(ctx);
     expect(results.every((r) => r.status === "ok")).toBe(true);
     const lock = JSON.parse(await io.read("cs/store.lock.json")) as { capturedAt: string; groups: Record<string, { sourcePluginVersion: string }> };
@@ -176,7 +183,6 @@ describe("capture", () => {
     const { io, plugins, ctx } = setup();
     plugins.installed.set("demo", "1.2.3");
     io.seed({
-      "cs/config-sync.json": MANIFEST,
       ".obs/hotkeys.json": "{}",
       ".obs/snippets/one.css": "one",
       ".obs/snippets/.DS_Store": "junk",
@@ -184,6 +190,7 @@ describe("capture", () => {
       ".obs/plugins/demo/data.json": "{}",
       "cs/store/configdir/snippets/.DS_Store": "old junk",
     });
+    await seedGroups(ctx, MANIFEST);
     await capture(ctx);
     expect(await io.exists("cs/store/configdir/snippets/.DS_Store")).toBe(false);
     expect(await io.read("cs/store/configdir/snippets/one.css")).toBe("one");
@@ -193,12 +200,12 @@ describe("capture", () => {
     const { io, plugins, ctx } = setup();
     plugins.installed.set("demo", "1.2.3");
     io.seed({
-      "cs/config-sync.json": MANIFEST,
       ".obs/hotkeys.json": '{"a":1}',
       ".obs/snippets/one.css": "one",
       ".obsidian.vimrc": "v",
       ".obs/plugins/demo/data.json": "{}",
     });
+    await seedGroups(ctx, MANIFEST);
     await capture(ctx);
     await io.write(".obs/snippets/two.css", "two");   // added
     await io.write(".obs/snippets/one.css", "ONE");   // updated
@@ -214,12 +221,12 @@ describe("capture", () => {
     const { io, plugins, ctx } = setup();
     plugins.installed.set("demo", "1.2.3");
     io.seed({
-      "cs/config-sync.json": MANIFEST,
       ".obs/hotkeys.json": '{"a":1}',
       ".obs/snippets/one.css": "one",
       ".obsidian.vimrc": "v",
       ".obs/plugins/demo/data.json": "{}",
     });
+    await seedGroups(ctx, MANIFEST);
     await capture(ctx); // demo stamped 1.2.3
     plugins.installed.set("demo", "9.9.9");
     await io.write(".obs/hotkeys.json", '{"a":2}');
@@ -239,7 +246,8 @@ describe("capture", () => {
     });
     const { io, ctx } = setup();
     ctx.passphrase = "pw";
-    io.seed({ "cs/config-sync.json": ENC_MANIFEST, ".obs/secrets.json": '{"token":"x"}' });
+    io.seed({ ".obs/secrets.json": '{"token":"x"}' });
+    await seedGroups(ctx, ENC_MANIFEST);
     const results = await capture(ctx);
     expect(results[0]?.status).toBe("ok");
     expect(results[0]?.messages).toEqual(["whole file encrypted"]);
@@ -251,9 +259,8 @@ describe("capture", () => {
   });
 });
 
-export function seedStore(io: MemFS): void {
+export async function seedStore(io: MemFS, ctx: CoreContext): Promise<void> {
   io.seed({
-    "cs/config-sync.json": MANIFEST,
     "cs/store.lock.json": JSON.stringify({
       capturedAt: "t",
       groups: { "plugin-demo": { sourcePluginVersion: "1.2.3" } },
@@ -262,12 +269,13 @@ export function seedStore(io: MemFS): void {
     "cs/store/configdir/snippets/one.css": "one-v2",
     "cs/store/configdir/plugins/demo/data.json": '{"theme":"new"}',
   });
+  await seedGroups(ctx, MANIFEST);
 }
 
 describe("apply", () => {
   it("applies only the selected groups", async () => {
     const { io, ctx } = setup();
-    seedStore(io);
+    await seedStore(io, ctx);
     io.seed({ ".obs/hotkeys.json": '{"a":1}' });
     const results = await apply(ctx, ["hotkeys"]);
     expect(results).toHaveLength(1);
@@ -278,7 +286,7 @@ describe("apply", () => {
 
   it("merges sanitized keys from the local file and cycles the plugin", async () => {
     const { io, plugins, ctx } = setup();
-    seedStore(io);
+    await seedStore(io, ctx);
     plugins.installed.set("demo", "1.2.3");
     plugins.enabled.add("demo");
     io.seed({ ".obs/plugins/demo/data.json": '{"vikaToken":"secret","theme":"old"}' });
@@ -291,7 +299,7 @@ describe("apply", () => {
 
   it("mirrors dir groups with deletion and records a backup", async () => {
     const { io, ctx } = setup();
-    seedStore(io);
+    await seedStore(io, ctx);
     io.seed({ ".obs/snippets/local-only.css": "bye", ".obs/snippets/one.css": "one-v1" });
     const results = await apply(ctx, ["snippets"]);
     expect(await io.read(".obs/snippets/one.css")).toBe("one-v2");
@@ -305,8 +313,8 @@ describe("apply", () => {
   });
 
   it("reports an error result when the store has no data for a group", async () => {
-    const { io, ctx } = setup();
-    io.seed({ "cs/config-sync.json": MANIFEST });
+    const { ctx } = setup();
+    await seedGroups(ctx, MANIFEST);
     const results = await apply(ctx, ["hotkeys"]);
     expect(results[0]?.status).toBe("error");
     expect(results[0]?.messages[0]).toContain("capture it from the source vault first");
@@ -314,7 +322,7 @@ describe("apply", () => {
 
   it("still writes the backup index when a group throws mid-run", async () => {
     const { io, ctx } = setup();
-    seedStore(io);
+    await seedStore(io, ctx);
     io.seed({
       ".obs/snippets/local-only.css": "bye",
       ".obs/plugins/demo/data.json": "not json",
@@ -333,12 +341,12 @@ describe("apply", () => {
     const { io, plugins, ctx } = setup();
     plugins.installed.set("demo", "1.2.3");
     io.seed({
-      "cs/config-sync.json": MANIFEST,
       ".obs/hotkeys.json": '{"a":1}',
       ".obs/snippets/one.css": "one",
       ".obsidian.vimrc": "v",
       ".obs/plugins/demo/data.json": "{}",
     });
+    await seedGroups(ctx, MANIFEST);
     await capture(ctx);
     await io.write("cs/store/configdir/hotkeys.json", '{"a":9}');    // store updated elsewhere
     const results = await apply(ctx, ["hotkeys", "snippets"]);
@@ -356,7 +364,8 @@ describe("apply", () => {
     });
     const { io, ctx } = setup();
     ctx.passphrase = "pw";
-    io.seed({ "cs/config-sync.json": ENC_MANIFEST, ".obs/secrets.json": '{"token":"x"}' });
+    io.seed({ ".obs/secrets.json": '{"token":"x"}' });
+    await seedGroups(ctx, ENC_MANIFEST);
     await capture(ctx);
     await io.remove(".obs/secrets.json");
     const results = await apply(ctx, ["secrets"]);
@@ -366,16 +375,16 @@ describe("apply", () => {
 });
 
 describe("applyWithActions", () => {
-  const seedStore = (io: MemFS): void => {
+  const seedStore = async (io: MemFS, ctx: CoreContext): Promise<void> => {
     io.seed({
-      "cs/config-sync.json": MANIFEST,
       "cs/store/configdir/plugins/demo/data.json": '{"theme":"x"}',
     });
+    await seedGroups(ctx, MANIFEST);
   };
   it("enable action enables then writes config and notes ⏻ enabled", async () => {
     const { io, plugins, ctx } = setup();
     plugins.installed.set("demo", "1.2.3");
-    seedStore(io);
+    await seedStore(io, ctx);
     const results = await applyWithActions(ctx, [{ name: "plugin-demo", action: "enable" }], async () => "9.9.9");
     expect(results[0]?.stateNote).toEqual({ kind: "ok", text: "⏻ enabled" });
     expect(plugins.enabled.has("demo")).toBe(true);
@@ -384,7 +393,7 @@ describe("applyWithActions", () => {
   });
   it("install-enable installs, reloads manifests, enables, writes config", async () => {
     const { io, plugins, ctx } = setup();
-    seedStore(io);
+    await seedStore(io, ctx);
     const results = await applyWithActions(ctx, [{ name: "plugin-demo", action: "install-enable" }], async (id) => {
       plugins.installed.set(id, "2.5.0");
       return "2.5.0";
@@ -398,7 +407,7 @@ describe("applyWithActions", () => {
     const { io, plugins, ctx } = setup();
     plugins.installed.set("demo", "1.0.0");
     plugins.enabled.add("demo");
-    seedStore(io);
+    await seedStore(io, ctx);
     const failing = async (): Promise<string> => {
       throw new Error("couldn't download demo from the community catalog");
     };
@@ -417,7 +426,7 @@ describe("applyWithActions", () => {
   it('action "none" on a not-installed plugin notes staged for install', async () => {
     const { io, plugins, ctx } = setup();
     void plugins;
-    seedStore(io);
+    await seedStore(io, ctx);
     const results = await applyWithActions(ctx, [{ name: "plugin-demo", action: "none" }], async () => "x");
     expect(results[0]?.stateNote).toEqual({ kind: "ok", text: "staged for install" });
   });
@@ -432,9 +441,9 @@ describe("applyWithActions", () => {
     it('action "enable" reports ⚠ enable failed with the exact message when Obsidian silently no-ops, but still writes config', async () => {
       const io = new MemFS();
       const plugins = new NoOpEnablePlugins();
-      const ctx: CoreContext = { io, configDir: ".obs", rootPath: "cs", plugins, passphrase: null, now: () => "2026-07-08T00:00:00.000Z" };
+      const ctx: CoreContext = { io, configDir: ".obs", rootPath: "cs", plugins, passphrase: null, groupsIO: memGroupsIO(), now: () => "2026-07-08T00:00:00.000Z" };
       plugins.installed.set("demo", "1.2.3");
-      seedStore(io);
+      await seedStore(io, ctx);
       const results = await applyWithActions(ctx, [{ name: "plugin-demo", action: "enable" }], async () => "9.9.9");
       expect(results[0]?.stateNote).toEqual({ kind: "warn", text: "⚠ enable failed" });
       expect(results[0]?.messages).toEqual([`Obsidian did not enable "demo" — enable it manually in Community plugins`]);
@@ -445,8 +454,8 @@ describe("applyWithActions", () => {
     it('action "install-enable" with a successful install but a silently no-op enable reports ⚠ enable failed (not install failed) and still writes config', async () => {
       const io = new MemFS();
       const plugins = new NoOpEnablePlugins();
-      const ctx: CoreContext = { io, configDir: ".obs", rootPath: "cs", plugins, passphrase: null, now: () => "2026-07-08T00:00:00.000Z" };
-      seedStore(io);
+      const ctx: CoreContext = { io, configDir: ".obs", rootPath: "cs", plugins, passphrase: null, groupsIO: memGroupsIO(), now: () => "2026-07-08T00:00:00.000Z" };
+      await seedStore(io, ctx);
       const results = await applyWithActions(ctx, [{ name: "plugin-demo", action: "install-enable" }], async (id) => {
         plugins.installed.set(id, "2.5.0");
         return "2.5.0";
@@ -464,7 +473,7 @@ describe("applyWithActions", () => {
 describe("revertLastApply", () => {
   it("restores overwritten files and deletes files created by apply", async () => {
     const { io, ctx } = setup();
-    seedStore(io);
+    await seedStore(io, ctx);
     io.seed({ ".obs/snippets/local-only.css": "bye" });
     await apply(ctx, ["snippets", "hotkeys"]);
     expect(await io.exists(".obs/snippets/local-only.css")).toBe(false);
@@ -594,6 +603,7 @@ describe("pushExternal", () => {
       "cs/store.lock.json": '{"capturedAt":"t","groups":{}}',
       "cs/store/configdir/hotkeys.json": '{"a":9}',
     });
+    await seedGroups(ctx, '{"version":1,"groups":[]}');
     const fw = fakeWriter({ "config-sync.json": "OLD", "store/gone.css": "stale" });
     const results = await pushExternal(ctx, fw.writer);
     expect(results.every((r) => r.status === "ok")).toBe(true);
@@ -612,6 +622,7 @@ describe("pushExternal", () => {
       "cs/store/configdir/hotkeys.json": '{"a":1}',
       "cs/store/configdir/snippets/one.css": "one",
     });
+    await seedGroups(ctx, MANIFEST);
     const fw = fakeWriter({
       "config-sync.json": MANIFEST,
       "store/configdir/hotkeys.json": '{"a":1}', // identical to local -> must not be rewritten
@@ -637,12 +648,12 @@ describe("progress callbacks", () => {
     const { io, plugins, ctx } = setup();
     plugins.installed.set("demo", "1.2.3");
     io.seed({
-      "cs/config-sync.json": MANIFEST,
       ".obs/hotkeys.json": '{"a":1}',
       ".obs/snippets/one.css": "one",
       ".obsidian.vimrc": "imap jk <Esc>",
       ".obs/plugins/demo/data.json": '{"vikaToken":"secret","theme":"x"}',
     });
+    await seedGroups(ctx, MANIFEST);
     const calls: Array<[number, number, string]> = [];
     await capture(ctx, ["hotkeys", "snippets"], (d, t, c) => calls.push([d, t, c]));
     expect(calls).toEqual([
@@ -653,48 +664,32 @@ describe("progress callbacks", () => {
 
   it("apply reports the same shape", async () => {
     const { io, ctx } = setup();
-    seedStore(io);
+    await seedStore(io, ctx);
     const calls: Array<[number, number, string]> = [];
     await apply(ctx, ["hotkeys"], (d, t, c) => calls.push([d, t, c]));
     expect(calls).toEqual([[0, 1, "hotkeys"]]);
   });
 });
 
-describe("createStarterManifest", () => {
-  it("creates a parseable starter groups file and never overwrites", async () => {
-    const { io, ctx } = setup();
-    expect(await createStarterManifest(ctx)).toBe("created");
-    const manifest = await loadManifest(ctx);
-    expect(manifest.groups.map((g) => g.name)).toEqual(["snippets", "hotkeys"]);
-    expect(manifest.groups[0]?.description).toBe("CSS snippets");
-    await io.write("cs/config-sync.json", '{"version":1,"groups":[]}');
-    expect(await createStarterManifest(ctx)).toBe("exists");
-    expect(await io.read("cs/config-sync.json")).toBe('{"version":1,"groups":[]}');
-  });
-});
-
 describe("readGroups / writeGroups", () => {
-  it("returns [] when the groups file is missing", async () => {
+  it("returns [] when no groups are configured", async () => {
     const { ctx } = setup();
     expect(await readGroups(ctx)).toEqual([]);
   });
 
-  it("writes a schema-referenced file that round-trips", async () => {
-    const { io, ctx } = setup();
+  it("writes groups that round-trip through ctx.groupsIO", async () => {
+    const { ctx } = setup();
     await writeGroups(ctx, [{ name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all" }]);
-    const raw = JSON.parse(await io.read("cs/config-sync.json")) as Record<string, unknown>;
-    expect(raw.$schema).toBe(SCHEMA_URL);
     const groups = await readGroups(ctx);
     expect(groups.map((g) => g.name)).toEqual(["hotkeys"]);
   });
 
-  it("rejects invalid group lists without touching the file", async () => {
-    const { io, ctx } = setup();
-    await writeGroups(ctx, []);
-    const before = await io.read("cs/config-sync.json");
+  it("rejects invalid group lists without touching existing groups", async () => {
+    const { ctx } = setup();
+    await writeGroups(ctx, [{ name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all" }]);
     const bad = [{ name: "rs", path: "{configDir}/plugins/remotely-save/data.json", type: "dir" as const, devices: "all" as const, mode: "fields" as const, fields: [{ pattern: "*Token*", action: "strip" as const }] }];
     await expect(writeGroups(ctx, bad)).rejects.toThrow("file groups");
-    expect(await io.read("cs/config-sync.json")).toBe(before);
+    expect((await readGroups(ctx)).map((g) => g.name)).toEqual(["hotkeys"]);
   });
 
   it("round-trips a group description through writeGroups/readGroups", async () => {
@@ -705,16 +700,14 @@ describe("readGroups / writeGroups", () => {
     const groups = await readGroups(ctx);
     expect(groups[0]?.description).toBe("Custom keyboard shortcuts");
   });
-});
 
-describe("starter-then-capture (implicit creation flow)", () => {
-  it("captures the starter groups created on demand", async () => {
-    const { io, ctx } = setup();
-    io.seed({ ".obs/snippets/one.css": "one", ".obs/hotkeys.json": "{}" });
-    expect(await createStarterManifest(ctx)).toBe("created");
-    const results = await capture(ctx);
-    expect(results.map((r) => r.group)).toEqual(["snippets", "hotkeys"]);
-    expect(await io.read("cs/store/configdir/snippets/one.css")).toBe("one");
+  it("readGroups/writeGroups round-trip through ctx.groupsIO (no manifest file involved)", async () => {
+    const { ctx } = setup();
+    expect(await readGroups(ctx)).toEqual([]);
+    const g: SyncGroup = { name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all" };
+    await writeGroups(ctx, [g]);
+    expect(await readGroups(ctx)).toEqual([g]);
+    expect(await ctx.io.exists(`${ctx.rootPath}/config-sync.json`)).toBe(false); // no file written
   });
 });
 
@@ -723,10 +716,10 @@ describe("capture app-version recording", () => {
     const { io, plugins, ctx } = setup();
     plugins.installed.set("demo", "1.2.3");
     io.seed({
-      "cs/config-sync.json": MANIFEST,
       ".obs/hotkeys.json": "{}",
       ".obs/plugins/demo/data.json": "{}",
     });
+    await seedGroups(ctx, MANIFEST);
     await capture(ctx, ["hotkeys", "plugin-demo"]);
     const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, unknown> };
     expect(lock.groups["hotkeys"]).toEqual({ sourceAppVersion: "1.8.7" });

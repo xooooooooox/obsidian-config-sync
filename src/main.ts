@@ -9,7 +9,6 @@ import {
   ProgressFn,
   applyWithActions,
   capture,
-  createStarterManifest as coreCreateStarterManifest,
   groupsForDevice,
   importExternal,
   loadLock,
@@ -23,6 +22,7 @@ import { createInstaller } from "./core/installer";
 import { type CatalogSection, displayLabelForGroup, listCoreSections, listDiscovered, listOptionSections, listPluginSections, setCorePluginIds } from "./core/catalog";
 import { Availability, availabilityForGroup } from "./core/availability";
 import { listFilesRecursive } from "./core/io";
+import { validateSyncManifest } from "./core/manifest";
 import { groupRealPath } from "./core/pathing";
 import { scanSensitive, SensitiveScan } from "./core/modes";
 import { PkmMode, PkmProbe, resolveEffectiveMode, resolveRootPath } from "./core/pkm";
@@ -40,6 +40,7 @@ interface ConfigSyncSettings {
   statusInMenu: boolean;
   remoteAutoCheck: boolean;
   localPeriodicCheck: boolean;
+  groups: SyncGroup[];
 }
 
 const DEFAULT_SETTINGS: ConfigSyncSettings = {
@@ -50,6 +51,7 @@ const DEFAULT_SETTINGS: ConfigSyncSettings = {
   statusInMenu: true,
   remoteAutoCheck: true,
   localPeriodicCheck: true,
+  groups: [],
 };
 
 // app.plugins is not part of the public API; this is the community-standard access path.
@@ -239,9 +241,6 @@ export default class ConfigSyncPlugin extends Plugin {
     return {
       computeStatuses: async () => {
         const ctx = await this.coreContext();
-        if ((await coreCreateStarterManifest(ctx)) === "created") {
-          new Notice(`Config Sync: created starter items file at ${ctx.rootPath}/config-sync.json — review it in settings`);
-        }
         const manifest = await loadManifest(ctx);
         const device = Platform.isMobile ? ("mobile" as const) : ("desktop" as const);
         const groups = groupsForDevice(manifest, device);
@@ -411,6 +410,13 @@ export default class ConfigSyncPlugin extends Plugin {
       rootPath,
       plugins: this.pluginHost(),
       passphrase: this.passphrase(),
+      groupsIO: {
+        read: async () => this.settings.groups,
+        write: async (groups) => {
+          this.settings.groups = groups;
+          await this.saveSettings();
+        },
+      },
       now: () => new Date().toISOString(),
     };
   }
@@ -521,6 +527,13 @@ export default class ConfigSyncPlugin extends Plugin {
 
   async loadSettings(): Promise<void> {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, (await this.loadData()) as Partial<ConfigSyncSettings> | null);
+    try {
+      this.settings.groups = validateSyncManifest({ version: 1, groups: this.settings.groups }).groups;
+    } catch (e) {
+      console.error("Config Sync: invalid groups in settings", e);
+      new Notice(`Config Sync: saved sync configuration is invalid (${(e as Error).message}) — fix it in Settings → Config Sync`, 10000);
+      this.settings.groups = [];
+    }
   }
 
   async saveSettings(): Promise<void> {

@@ -20,17 +20,19 @@ export interface PluginHost {
   reloadPluginManifests(): Promise<void>;
 }
 
+export interface GroupsIO {
+  read(): Promise<SyncGroup[]>;
+  write(groups: SyncGroup[]): Promise<void>;
+}
+
 export interface CoreContext {
   io: FileIO;
   configDir: string;
   rootPath: string;
   plugins: PluginHost;
   passphrase: string | null;
+  groupsIO: GroupsIO;
   now(): string; // ISO-8601 timestamp, injectable for tests
-}
-
-export function manifestPath(ctx: CoreContext): string {
-  return `${ctx.rootPath}/config-sync.json`;
 }
 
 export function lockPath(ctx: CoreContext): string {
@@ -51,13 +53,7 @@ export function pluginIdForGroup(group: SyncGroup): string | null {
 }
 
 export async function loadManifest(ctx: CoreContext): Promise<SyncManifest> {
-  const p = manifestPath(ctx);
-  if (!(await ctx.io.exists(p))) {
-    throw new Error(
-      `Config Sync groups file not found: ${p}. Run Capture or Apply to create a starter, or add a group in Settings → Config Sync.`
-    );
-  }
-  return parseSyncManifest(await ctx.io.read(p));
+  return { version: 1, groups: await ctx.groupsIO.read() };
 }
 
 export async function loadLock(ctx: CoreContext): Promise<StoreLock | null> {
@@ -125,7 +121,7 @@ async function writeClassified(
 function requireGroup(manifest: SyncManifest, name: string): SyncGroup {
   const group = manifest.groups.find((g) => g.name === name);
   if (group === undefined) {
-    throw new Error(`Unknown config-sync group "${name}" — not defined in config-sync.json`);
+    throw new Error(`Unknown config-sync group "${name}" — not defined in plugin settings`);
   }
   return group;
 }
@@ -630,40 +626,11 @@ export async function pushExternal(ctx: CoreContext, writer: ExternalStoreWriter
   return meta !== undefined ? [...named, meta] : named;
 }
 
-export const SCHEMA_URL =
-  "https://raw.githubusercontent.com/xooooooooox/obsidian-config-sync/main/schema/config-sync.schema.json";
-
-export const STARTER_MANIFEST =
-  JSON.stringify(
-    {
-      $schema: SCHEMA_URL,
-      version: 1,
-      groups: [
-        { name: "snippets", path: "{configDir}/snippets", type: "dir", devices: "all", description: "CSS snippets" },
-        { name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all", description: "Custom keyboard shortcuts" },
-      ],
-    },
-    null,
-    2
-  ) + "\n";
-
-export async function createStarterManifest(ctx: CoreContext): Promise<"created" | "exists"> {
-  const p = manifestPath(ctx);
-  if (await ctx.io.exists(p)) return "exists";
-  await ensureParentDir(ctx.io, p);
-  await ctx.io.write(p, STARTER_MANIFEST);
-  return "created";
-}
-
 export async function readGroups(ctx: CoreContext): Promise<SyncGroup[]> {
-  const p = manifestPath(ctx);
-  if (!(await ctx.io.exists(p))) return [];
-  return parseSyncManifest(await ctx.io.read(p)).groups;
+  return ctx.groupsIO.read();
 }
 
 export async function writeGroups(ctx: CoreContext, groups: SyncGroup[]): Promise<void> {
   const manifest = validateSyncManifest({ version: 1, groups });
-  const p = manifestPath(ctx);
-  await ensureParentDir(ctx.io, p);
-  await ctx.io.write(p, JSON.stringify({ $schema: SCHEMA_URL, version: 1, groups: manifest.groups }, null, 2) + "\n");
+  await ctx.groupsIO.write(manifest.groups);
 }

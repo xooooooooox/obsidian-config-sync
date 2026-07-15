@@ -1,4 +1,17 @@
 import { FileIO, ListedDir } from "../src/core/io";
+import { GroupsIO } from "../src/core/ConfigSyncCore";
+import { SyncGroup } from "../src/core/types";
+
+/** In-memory GroupsIO backed by a closure array, for tests that build a CoreContext directly. */
+export function memGroupsIO(initial: SyncGroup[] = []): GroupsIO {
+  let groups = initial;
+  return {
+    read: async () => groups,
+    write: async (g) => {
+      groups = g;
+    },
+  };
+}
 
 export class MemFS implements FileIO {
   files = new Map<string, string>();
