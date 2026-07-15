@@ -29,6 +29,7 @@ import { scanSensitive, SensitiveScan } from "./core/modes";
 import { PkmMode, PkmProbe, resolveEffectiveMode, resolveRootPath } from "./core/pkm";
 import { bucketCounts, checkRemote, diffRemote, GroupStatus, RemoteCheck, statusForGroups } from "./core/status";
 import { Remote, RibbonButtons, StoreLock, SyncGroup } from "./core/types";
+import { ConflictModal } from "./ui/ConflictModal";
 import { ReportModal } from "./ui/ReportModal";
 import { SYNC_CENTER_VIEW_TYPE, SyncCenterHost, SyncCenterView } from "./ui/SyncCenterView";
 import { ConfigSyncSettingTab } from "./ui/SettingTab";
@@ -326,13 +327,26 @@ export default class ConfigSyncPlugin extends Plugin {
           const ctx = await this.coreContext();
           const pending = await planImport(ctx, await this.createReader(remote));
           if (pending.plan.conflicts.length > 0) {
-            // TEMPORARY bridge until the conflict resolution modal lands: abort with nothing
-            // written (planImport is read-only), so pull stays all-or-nothing.
-            new Notice(
-              `Config Sync: pull found ${pending.plan.conflicts.length} conflicts — the resolution dialog arrives in the next update; pull was not applied`,
-              10000
-            );
-            return null;
+            // Conflicted pull: pause for git-style resolution. Nothing has been written
+            // (planImport is read-only); Cancel keeps it that way — all-or-nothing.
+            const choices = await new Promise<("local" | "remote")[] | null>((resolve) => {
+              new ConflictModal(
+                this.app,
+                pending,
+                remote.name,
+                (name) => this.displayName(name),
+                (picked) => resolve(picked),
+                () => resolve(null)
+              ).open();
+            });
+            if (choices === null) {
+              new Notice("Pull cancelled — nothing was changed");
+              return null;
+            }
+            const results = await applyImport(ctx, pending, choices);
+            await this.refreshLocalStatus();
+            await this.refreshRemoteChecks();
+            return results;
           }
           const results = await applyImport(ctx, pending, []);
           await this.refreshLocalStatus();

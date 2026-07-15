@@ -751,3 +751,94 @@ body.is-mobile .config-sync-mainbar input[type="checkbox"]:indeterminate::after 
 
 /* 0.21.0 device-specific badge (§3.3): dissolved "Not recommended" section replaced by an inline caution badge */
 .config-sync-devbadge { margin-left: var(--size-4-2); font-size: var(--font-ui-smaller); color: var(--color-orange); background: rgba(var(--color-orange-rgb), 0.12); border-radius: 9px; padding: 1px 8px; }
+
+/* ── Pull conflict modal (self-config model, v4 定稿) ─────────────────────── */
+.config-sync-cm {
+  width: 680px;
+  max-width: 92vw;
+}
+
+.config-sync-cm-header {
+  padding-bottom: var(--size-4-2);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.config-sync-cm-title { font-weight: 600; font-size: var(--font-ui-large); }
+.config-sync-cm-sub { color: var(--text-muted); font-size: var(--font-ui-smaller); margin-top: 2px; }
+
+.config-sync-cm-body {
+  max-height: 55vh;
+  overflow-y: auto;
+  padding: var(--size-4-3) 0;
+}
+
+.config-sync-cm-auto {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background: rgba(var(--color-green-rgb), 0.05);
+  margin-bottom: var(--size-4-3);
+}
+
+.config-sync-cm-auto-head { display: flex; align-items: center; gap: var(--size-4-2); padding: var(--size-4-1) var(--size-4-3); cursor: pointer; }
+.config-sync-cm-auto-check { color: var(--color-green); }
+.config-sync-cm-auto-label { font-weight: 500; }
+.config-sync-cm-auto-counts { color: var(--text-muted); font-size: var(--font-ui-smaller); }
+.config-sync-cm-auto-list { padding: 0 var(--size-4-3) var(--size-4-2); font-size: var(--font-ui-smaller); color: var(--text-muted); line-height: 1.8; }
+.config-sync-cm-auto-line { display: flex; gap: var(--size-4-2); }
+.config-sync-cm-mark { width: 14px; text-align: center; flex: none; }
+.config-sync-cm-mark.is-add { color: var(--color-green); }
+.config-sync-cm-mark.is-same { color: var(--color-blue); }
+.config-sync-cm-mark.is-kept { color: var(--color-orange); }
+
+.config-sync-cm-chead { display: flex; align-items: center; gap: var(--size-4-2); margin-bottom: var(--size-4-2); }
+.config-sync-cm-ctitle { font-weight: 600; }
+.config-sync-cm-csub { color: var(--text-muted); font-size: var(--font-ui-smaller); }
+.config-sync-cm-allbtn { font-size: var(--font-ui-smaller); padding: 2px 10px; }
+
+.config-sync-cm-conflict {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  margin-bottom: var(--size-4-2);
+  overflow: hidden;
+}
+
+.config-sync-cm-conflict.is-unresolved { border-color: rgba(var(--color-orange-rgb), 0.55); }
+.config-sync-cm-conflict:not(.is-unresolved) .config-sync-cm-warn { display: none; }
+
+.config-sync-cm-crow { display: flex; align-items: center; gap: var(--size-4-2); padding: var(--size-4-2) var(--size-4-3); cursor: pointer; background: var(--background-secondary); }
+.config-sync-cm-cname { font-weight: 600; }
+.config-sync-cm-kind { font-size: 10px; letter-spacing: 0.4px; padding: 1px 7px; border-radius: 8px; flex: none; }
+.config-sync-cm-kind.is-definition { color: var(--color-orange); background: rgba(var(--color-orange-rgb), 0.13); border: 1px solid rgba(var(--color-orange-rgb), 0.35); }
+.config-sync-cm-kind.is-file { color: var(--color-blue); background: rgba(var(--color-blue-rgb), 0.13); border: 1px solid rgba(var(--color-blue-rgb), 0.35); }
+.config-sync-cm-rel { color: var(--text-faint); font-size: var(--font-ui-smaller); font-family: var(--font-monospace); }
+.config-sync-cm-warn { color: var(--color-orange); font-size: var(--font-ui-smaller); }
+.config-sync-cm-chev { color: var(--text-faint); }
+
+.config-sync-cm-seg { display: flex; border: 1px solid var(--background-modifier-border); border-radius: var(--radius-s); overflow: hidden; flex: none; }
+.config-sync-cm-segbtn { font-size: var(--font-ui-smaller); padding: 3px 12px; border: none; border-radius: 0; background: transparent; color: var(--text-muted); cursor: pointer; box-shadow: none; }
+.config-sync-cm-segbtn + .config-sync-cm-segbtn { border-left: 1px solid var(--background-modifier-border); }
+.config-sync-cm-segbtn.is-on { background: rgba(var(--interactive-accent-rgb), 0.18); color: var(--text-accent); }
+
+.config-sync-cm-difftools { display: flex; align-items: center; gap: var(--size-4-2); padding: var(--size-4-1) var(--size-4-3); border-top: 1px solid var(--background-modifier-border); }
+.config-sync-cm-diffmeta { color: var(--text-faint); font-size: var(--font-ui-smaller); font-family: var(--font-monospace); }
+.config-sync-cm-viewseg { display: flex; border: 1px solid var(--background-modifier-border); border-radius: var(--radius-s); overflow: hidden; }
+.config-sync-cm-viewbtn { font-size: 10.5px; padding: 2px 9px; border: none; border-radius: 0; background: transparent; color: var(--text-muted); cursor: pointer; box-shadow: none; }
+.config-sync-cm-viewbtn + .config-sync-cm-viewbtn { border-left: 1px solid var(--background-modifier-border); }
+.config-sync-cm-viewbtn.is-on { background: var(--background-modifier-hover); color: var(--text-normal); }
+
+.config-sync-cm-diffpane { border-top: 1px solid var(--background-modifier-border); font-family: var(--font-monospace); font-size: var(--font-ui-smaller); line-height: 1.75; max-height: 240px; overflow: auto; padding: var(--size-4-1) 0; }
+.config-sync-cm-dline { padding: 0 var(--size-4-3); white-space: pre; }
+.config-sync-cm-dline.is-common { color: var(--text-faint); }
+.config-sync-cm-dline.is-del { background: rgba(var(--color-red-rgb), 0.14); color: var(--color-red); }
+.config-sync-cm-dline.is-ins { background: rgba(var(--color-green-rgb), 0.14); color: var(--color-green); }
+.config-sync-cm-dline.is-delhead { color: var(--color-red); }
+.config-sync-cm-dline.is-inshead { color: var(--color-green); }
+.config-sync-cm-dline.is-pad { visibility: hidden; }
+.config-sync-cm-diffbig { padding: var(--size-4-2) var(--size-4-3); color: var(--text-muted); font-family: var(--font-ui); }
+
+.config-sync-cm-split { display: flex; }
+.config-sync-cm-splitpane { flex: 1; min-width: 0; overflow-x: auto; }
+.config-sync-cm-splitpane + .config-sync-cm-splitpane { border-left: 1px solid var(--background-modifier-border); }
+
+.config-sync-cm-footer { display: flex; align-items: center; gap: var(--size-4-2); padding-top: var(--size-4-2); border-top: 1px solid var(--background-modifier-border); }
+.config-sync-cm-status { color: var(--text-muted); font-size: var(--font-ui-smaller); }
