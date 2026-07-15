@@ -195,6 +195,15 @@ describe("checkRemote", () => {
     expect((await checkRemote(localLock, fakeReader(at("2026-07-08T00:00:00.000Z")))).state).toBe("same");
     expect((await checkRemote(null, fakeReader(at("2026-07-09T00:00:00.000Z")))).state).toBe("unknown");
   });
+  it("recognizes a new-format store (store/** + lock, no root config-sync.json)", async () => {
+    const newFormat = {
+      "store.lock.json": JSON.stringify({ capturedAt: "2026-07-09T00:00:00.000Z", groups: {} }),
+      "store/configdir/hotkeys.json": "{}",
+    };
+    expect((await checkRemote(localLock, fakeReader(newFormat))).state).toBe("remote-newer");
+    // store files but no lock yet → present but unknown, NOT no-store
+    expect((await checkRemote(localLock, fakeReader({ "store/configdir/hotkeys.json": "{}" }))).state).toBe("unknown");
+  });
 });
 
 describe("bucketCounts", () => {
