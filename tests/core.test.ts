@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CoreContext, capture, loadManifest, groupsForDevice, apply, applyWithActions, revertLastApply, importExternal, ExternalStoreReader, pushExternal, ExternalStoreWriter, pluginIdForGroup, readGroups, writeGroups } from "../src/core/ConfigSyncCore";
+import { CoreContext, capture, loadManifest, groupsForDevice, apply, applyWithActions, revertLastApply, planImport, applyImport, ExternalStoreReader, pushExternal, ExternalStoreWriter, pluginIdForGroup, readGroups, writeGroups } from "../src/core/ConfigSyncCore";
 import { parseSyncManifest } from "../src/core/manifest";
 import { SyncGroup } from "../src/core/types";
 import { isFieldEnvelope, parseFileEnvelope } from "../src/core/crypto";
@@ -504,55 +504,203 @@ function fakeReader(files: Record<string, string>): ExternalStoreReader {
   };
 }
 
-describe("importExternal", () => {
-  it("maps pulled changes to items and skips identical files", async () => {
+const HOTKEYS_GROUP: SyncGroup = { name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all" };
+const SNIPPETS_GROUP: SyncGroup = { name: "snippets", path: "{configDir}/snippets", type: "dir", devices: "all" };
+
+// Remote groups source (planImport precedence #1): store/plugin-config-sync's own store copy
+// (store/configdir/plugins/config-sync/data.json), parsed as {groups: [...]}. Building the raw
+// JSON directly (rather than round-tripping through capture) keeps these tests focused on the
+// merge/apply behavior under test.
+function selfDataJson(groups: SyncGroup[]): string {
+  return JSON.stringify({ groups });
+}
+
+describe("planImport / applyImport", () => {
+  it("local-only group and its store file survive a pull untouched", async () => {
     const { io, ctx } = setup();
-    io.seed({ "cs/config-sync.json": MANIFEST, "cs/store/configdir/hotkeys.json": '{"a":1}' });
-    const remote: Record<string, string> = {
-      "config-sync.json": MANIFEST,
-      "store/configdir/hotkeys.json": '{"a":2}',
+    await writeGroups(ctx, [SNIPPETS_GROUP]);
+    io.seed({ "cs/store/configdir/snippets/one.css": "local-only" });
+    const remote = { "store/configdir/plugins/config-sync/data.json": selfDataJson([]) };
+
+    const pending = await planImport(ctx, fakeReader(remote));
+    expect(pending.plan.conflicts).toEqual([]);
+    const results = await applyImport(ctx, pending, []);
+
+    expect(await io.read("cs/store/configdir/snippets/one.css")).toBe("local-only");
+    expect((await readGroups(ctx)).map((g) => g.name)).toEqual(["snippets"]);
+    expect(results.some((r) => r.group === "snippets")).toBe(false); // untouched -> no result
+  });
+
+  it("remote-only group and file land locally", async () => {
+    const { ctx } = setup();
+    const remote = {
+      "store/configdir/plugins/config-sync/data.json": selfDataJson([HOTKEYS_GROUP]),
+      "store/configdir/hotkeys.json": '{"a":1}',
+    };
+
+    const pending = await planImport(ctx, fakeReader(remote));
+    expect(pending.plan.conflicts).toEqual([]);
+    const results = await applyImport(ctx, pending, []);
+
+    expect(await ctx.io.read("cs/store/configdir/hotkeys.json")).toBe('{"a":1}');
+    expect((await readGroups(ctx)).map((g) => g.name)).toEqual(["hotkeys"]);
+    const byGroup = Object.fromEntries(results.map((r) => [r.group, r.changes]));
+    expect(byGroup["hotkeys"]).toEqual({ added: ["store/configdir/hotkeys.json"], updated: [], deleted: [] });
+  });
+
+  it("conflict-free pull (identical + auto-merged only) applies everything via applyImport(ctx, pending, [])", async () => {
+    const { io, ctx } = setup();
+    await writeGroups(ctx, [HOTKEYS_GROUP]);
+    io.seed({ "cs/store/configdir/hotkeys.json": '{"a":1}' });
+    const remote = {
+      "store/configdir/plugins/config-sync/data.json": selfDataJson([HOTKEYS_GROUP, SNIPPETS_GROUP]),
+      "store/configdir/hotkeys.json": '{"a":1}', // identical
+      "store/configdir/snippets/one.css": "one", // remote-only
+    };
+
+    const pending = await planImport(ctx, fakeReader(remote));
+    expect(pending.plan.conflicts).toEqual([]);
+    const results = await applyImport(ctx, pending, []);
+
+    expect(await io.read("cs/store/configdir/snippets/one.css")).toBe("one");
+    expect(results.every((r) => r.status === "ok")).toBe(true);
+  });
+
+  it("conflicted pull with choices=['remote'] writes the remote side", async () => {
+    const { io, ctx } = setup();
+    await writeGroups(ctx, [HOTKEYS_GROUP]);
+    io.seed({ "cs/store/configdir/hotkeys.json": '{"a":"local"}' });
+    const remote = {
+      "store/configdir/plugins/config-sync/data.json": selfDataJson([HOTKEYS_GROUP]),
+      "store/configdir/hotkeys.json": '{"a":"remote"}',
+    };
+
+    const pending = await planImport(ctx, fakeReader(remote));
+    expect(pending.plan.conflicts).toEqual([
+      { kind: "file", name: "hotkeys", rel: "store/configdir/hotkeys.json", localContent: '{"a":"local"}', remoteContent: '{"a":"remote"}' },
+    ]);
+    const results = await applyImport(ctx, pending, ["remote"]);
+
+    expect(await io.read("cs/store/configdir/hotkeys.json")).toBe('{"a":"remote"}');
+    expect(results.find((r) => r.group === "hotkeys")?.changes).toEqual({ added: [], updated: ["store/configdir/hotkeys.json"], deleted: [] });
+  });
+
+  it("conflicted pull with choices=['local'] keeps the local file untouched", async () => {
+    const { io, ctx } = setup();
+    await writeGroups(ctx, [HOTKEYS_GROUP]);
+    io.seed({ "cs/store/configdir/hotkeys.json": '{"a":"local"}' });
+    const remote = {
+      "store/configdir/plugins/config-sync/data.json": selfDataJson([HOTKEYS_GROUP]),
+      "store/configdir/hotkeys.json": '{"a":"remote"}',
+    };
+
+    const pending = await planImport(ctx, fakeReader(remote));
+    const results = await applyImport(ctx, pending, ["local"]);
+
+    expect(await io.read("cs/store/configdir/hotkeys.json")).toBe('{"a":"local"}');
+    expect(results.find((r) => r.group === "hotkeys")).toBeUndefined(); // nothing written for this group
+  });
+
+  it("a definition conflict resolved 'remote' replaces the local group definition", async () => {
+    const { ctx } = setup();
+    const localHotkeys = { ...HOTKEYS_GROUP, devices: "desktop" as const };
+    const remoteHotkeys = { ...HOTKEYS_GROUP, devices: "all" as const };
+    await writeGroups(ctx, [localHotkeys]);
+    const remote = { "store/configdir/plugins/config-sync/data.json": selfDataJson([remoteHotkeys]) };
+
+    const pending = await planImport(ctx, fakeReader(remote));
+    expect(pending.plan.conflicts).toEqual([{ kind: "definition", name: "hotkeys", local: localHotkeys, remote: remoteHotkeys }]);
+    await applyImport(ctx, pending, ["remote"]);
+
+    expect(await readGroups(ctx)).toEqual([remoteHotkeys]);
+  });
+
+  it("planImport writes nothing (read-only)", async () => {
+    const { io, ctx } = setup();
+    await writeGroups(ctx, [HOTKEYS_GROUP]);
+    io.seed({ "cs/store/configdir/hotkeys.json": '{"a":"local"}' });
+    const before = new Map(io.files);
+    const remote = {
+      "store/configdir/plugins/config-sync/data.json": selfDataJson([HOTKEYS_GROUP, SNIPPETS_GROUP]),
+      "store/configdir/hotkeys.json": '{"a":"remote"}',
       "store/configdir/snippets/one.css": "one",
     };
-    const results = await importExternal(ctx, fakeReader(remote));
-    const byGroup = Object.fromEntries(results.map((r) => [r.group, r.changes]));
-    expect(byGroup["hotkeys"]).toEqual({ added: [], updated: ["hotkeys.json"], deleted: [] });
-    expect(byGroup["snippets"]).toEqual({ added: ["one.css"], updated: [], deleted: [] });
-    // local cs/config-sync.json seeded identical to the remote copy → metadata is unchanged → "" entry absent
-    expect(byGroup[""]).toBeUndefined();
+
+    await planImport(ctx, fakeReader(remote));
+
+    expect(io.files).toEqual(before);
+    expect(await readGroups(ctx)).toEqual([HOTKEYS_GROUP]);
   });
 
-  it("reports a '' metadata result when config-sync.json itself changes", async () => {
-    const { io, ctx } = setup();
-    io.seed({ "cs/config-sync.json": '{"version":1,"groups":[]}' });
-    const results = await importExternal(ctx, fakeReader({ "config-sync.json": MANIFEST }));
-    const byGroup = Object.fromEntries(results.map((r) => [r.group, r.changes]));
-    expect(byGroup[""]).toEqual({ added: [], updated: ["config-sync.json"], deleted: [] });
+  it("throws when choices.length does not match the number of conflicts", async () => {
+    const { ctx } = setup();
+    await writeGroups(ctx, [HOTKEYS_GROUP]);
+    const pending = await planImport(ctx, fakeReader({}));
+    expect(pending.plan.conflicts).toEqual([]);
+    await expect(applyImport(ctx, pending, ["remote"])).rejects.toThrow("expected 0");
   });
 
-  it("overwrites the local root with deletion propagation", async () => {
-    const { io, ctx } = setup();
-    io.seed({ "cs/config-sync.json": '{"version":1,"groups":[]}', "cs/store/old.css": "old" });
-    const results = await importExternal(ctx, fakeReader({
+  it("legacy compat: falls back to a root config-sync.json when no self store item is present", async () => {
+    const { ctx } = setup();
+    const remote = {
       "config-sync.json": MANIFEST,
-      "store.lock.json": '{"capturedAt":"t","groups":{}}',
-      "store/configdir/hotkeys.json": '{"a":3}',
-    }));
-    expect(results.every((r) => r.status === "ok")).toBe(true);
-    expect(await io.read("cs/store/configdir/hotkeys.json")).toBe('{"a":3}');
-    expect(await io.read("cs/config-sync.json")).toBe(MANIFEST);
-    expect(await io.exists("cs/store/old.css")).toBe(false);
-    const meta = results.find((r) => r.group === "");
-    expect(meta?.filesDeleted).toEqual(["cs/store/old.css"]);
+      "store/configdir/hotkeys.json": '{"a":1}',
+    };
+
+    const pending = await planImport(ctx, fakeReader(remote));
+
+    expect(pending.remoteGroups.map((g) => g.name)).toEqual(["hotkeys", "snippets", "vimrc", "plugin-demo"]);
+    const results = await applyImport(ctx, pending, []);
+    expect(results.some((r) => r.group === "hotkeys")).toBe(true);
+    // the legacy root file is never written locally
+    expect(await ctx.io.exists("cs/config-sync.json")).toBe(false);
   });
 
-  it("rejects sources without a config-sync.json", async () => {
-    const { ctx } = setup();
-    await expect(importExternal(ctx, fakeReader({ "store/x.css": "x" }))).rejects.toThrow("no config-sync.json");
+  it("a legacy config-sync.json.migrated-* remnant is excluded from file classification on both sides", async () => {
+    const { io, ctx } = setup();
+    io.seed({ "cs/config-sync.json.migrated-2026-01-01T00-00-00": "leftover" });
+    const remote = { "config-sync.json.migrated-2020-01-01T00-00-00": "remote-leftover" };
+
+    const pending = await planImport(ctx, fakeReader(remote));
+
+    expect(pending.plan.auto.keptLocalFiles).toEqual([]);
+    expect(pending.plan.auto.writeFiles).toEqual([]);
+    expect(pending.plan.conflicts).toEqual([]);
+    await applyImport(ctx, pending, []);
+    expect(await io.read("cs/config-sync.json.migrated-2026-01-01T00-00-00")).toBe("leftover");
   });
 
-  it("rejects sources whose manifest is invalid", async () => {
-    const { ctx } = setup();
-    await expect(importExternal(ctx, fakeReader({ "config-sync.json": '{"version":9}' }))).rejects.toThrow("unsupported version");
+  describe("store.lock.json merge", () => {
+    it("adopts the remote lock entry for a group taken from remote; keeps local entries otherwise", async () => {
+      const { io, ctx } = setup();
+      await writeGroups(ctx, [HOTKEYS_GROUP, SNIPPETS_GROUP]);
+      io.seed({
+        "cs/store/configdir/hotkeys.json": '{"a":"local"}',
+        "cs/store/configdir/snippets/one.css": "local-only",
+        "cs/store.lock.json": JSON.stringify({ capturedAt: "local-time", groups: { hotkeys: { sourceAppVersion: "1.0.0" }, snippets: { sourceAppVersion: "1.0.0" } } }),
+      });
+      const remote = {
+        "store/configdir/plugins/config-sync/data.json": selfDataJson([HOTKEYS_GROUP]),
+        "store/configdir/hotkeys.json": '{"a":"remote"}',
+        "store.lock.json": JSON.stringify({ capturedAt: "remote-time", groups: { hotkeys: { sourceAppVersion: "2.0.0" } } }),
+      };
+
+      const pending = await planImport(ctx, fakeReader(remote));
+      await applyImport(ctx, pending, ["remote"]);
+
+      const lock = JSON.parse(await io.read("cs/store.lock.json")) as { capturedAt: string; groups: Record<string, unknown> };
+      expect(lock.groups["hotkeys"]).toEqual({ sourceAppVersion: "2.0.0" }); // taken from remote
+      expect(lock.groups["snippets"]).toEqual({ sourceAppVersion: "1.0.0" }); // kept local
+    });
+
+    it("writes nothing when neither side has a lock", async () => {
+      const { io, ctx } = setup();
+      await writeGroups(ctx, [HOTKEYS_GROUP]);
+      const remote = { "store/configdir/plugins/config-sync/data.json": selfDataJson([HOTKEYS_GROUP]) };
+      const pending = await planImport(ctx, fakeReader(remote));
+      await applyImport(ctx, pending, []);
+      expect(await io.exists("cs/store.lock.json")).toBe(false);
+    });
   });
 });
 
@@ -599,15 +747,13 @@ describe("pushExternal", () => {
   it("writes the whole local store to the remote with deletion propagation and finalizes once", async () => {
     const { io, ctx } = setup();
     io.seed({
-      "cs/config-sync.json": '{"version":1,"groups":[]}',
       "cs/store.lock.json": '{"capturedAt":"t","groups":{}}',
       "cs/store/configdir/hotkeys.json": '{"a":9}',
     });
     await seedGroups(ctx, '{"version":1,"groups":[]}');
-    const fw = fakeWriter({ "config-sync.json": "OLD", "store/gone.css": "stale" });
+    const fw = fakeWriter({ "store/gone.css": "stale" });
     const results = await pushExternal(ctx, fw.writer);
     expect(results.every((r) => r.status === "ok")).toBe(true);
-    expect(fw.files["config-sync.json"]).toBe('{"version":1,"groups":[]}');
     expect(fw.files["store/configdir/hotkeys.json"]).toBe('{"a":9}');
     expect(fw.files["store/gone.css"]).toBeUndefined();
     const meta = results.find((r) => r.group === "");
@@ -618,13 +764,11 @@ describe("pushExternal", () => {
   it("skips writing identical files and reports per-item changes", async () => {
     const { io, ctx } = setup();
     io.seed({
-      "cs/config-sync.json": MANIFEST,
       "cs/store/configdir/hotkeys.json": '{"a":1}',
       "cs/store/configdir/snippets/one.css": "one",
     });
     await seedGroups(ctx, MANIFEST);
     const fw = fakeWriter({
-      "config-sync.json": MANIFEST,
       "store/configdir/hotkeys.json": '{"a":1}', // identical to local -> must not be rewritten
     });
     const results = await pushExternal(ctx, fw.writer);
@@ -635,11 +779,46 @@ describe("pushExternal", () => {
     expect(byGroup["snippets"]).toEqual({ added: ["one.css"], updated: [], deleted: [] });
   });
 
-  it("refuses to push when the local store has no config-sync.json", async () => {
+  it("pushes fine with no root config-sync.json present (store files alone are enough)", async () => {
     const { io, ctx } = setup();
     io.seed({ "cs/store/configdir/hotkeys.json": "{}" });
+    await seedGroups(ctx, '{"version":1,"groups":[]}');
     const fw = fakeWriter({});
-    await expect(pushExternal(ctx, fw.writer)).rejects.toThrow("no config-sync.json");
+    const results = await pushExternal(ctx, fw.writer);
+    expect(fw.files["store/configdir/hotkeys.json"]).toBe("{}");
+    expect(results.every((r) => r.status === "ok")).toBe(true);
+  });
+
+  it("a lock file alone (no store/** tree) also satisfies the store-presence check", async () => {
+    const { io, ctx } = setup();
+    io.seed({ "cs/store.lock.json": '{"capturedAt":"t","groups":{}}' });
+    await seedGroups(ctx, '{"version":1,"groups":[]}');
+    const fw = fakeWriter({});
+    const results = await pushExternal(ctx, fw.writer);
+    expect(fw.files["store.lock.json"]).toBe('{"capturedAt":"t","groups":{}}');
+    expect(results.every((r) => r.status === "ok")).toBe(true);
+  });
+
+  it("refuses to push when the local store has no captured data at all", async () => {
+    const { ctx } = setup();
+    await seedGroups(ctx, '{"version":1,"groups":[]}');
+    const fw = fakeWriter({});
+    await expect(pushExternal(ctx, fw.writer)).rejects.toThrow("capture from this device");
+  });
+
+  it("never writes a root config-sync.json, and excludes any lingering legacy manifest / migrated remnants from the push", async () => {
+    const { io, ctx } = setup();
+    io.seed({
+      "cs/store/configdir/hotkeys.json": "{}",
+      "cs/config-sync.json": "LEGACY",
+      "cs/config-sync.json.migrated-2026-01-01T00-00-00": "leftover",
+    });
+    await seedGroups(ctx, '{"version":1,"groups":[]}');
+    const fw = fakeWriter({ "config-sync.json": "OLD-REMOTE" });
+    const results = await pushExternal(ctx, fw.writer);
+    expect(fw.files["config-sync.json"]).toBe("OLD-REMOTE"); // untouched: never written, never deleted
+    expect(fw.files["config-sync.json.migrated-2026-01-01T00-00-00"]).toBeUndefined();
+    expect(results.every((r) => r.status === "ok")).toBe(true);
   });
 });
 

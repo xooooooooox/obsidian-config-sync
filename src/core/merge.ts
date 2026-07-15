@@ -1,5 +1,5 @@
 import { SyncGroup } from "./types";
-import { groupStorePath } from "./pathing";
+import { resolveGroupByStoreRel } from "./pathing";
 
 export type MergeConflict =
   | { kind: "definition"; name: string; local: SyncGroup; remote: SyncGroup }
@@ -18,24 +18,11 @@ export interface MergePlan {
   conflicts: MergeConflict[];
 }
 
-// Mirrors ConfigSyncCore.groupForStoreRel's "store/<groupName>/..." matching, but resolves a
-// name from either side's groups (a 2-way merge has no single authoritative group list) and
-// only needs the owning name, not the item-relative path.
-function groupForStoreRel(groups: SyncGroup[], rel: string): string {
-  if (!rel.startsWith("store/")) return "";
-  const inner = rel.slice("store/".length);
-  for (const g of groups) {
-    const sp = groupStorePath(g.path);
-    if (g.type === "file" && inner === sp) return g.name;
-    if (g.type === "dir" && inner.startsWith(sp + "/")) return g.name;
-  }
-  return "";
-}
-
+// Resolves the owning group name from either side's groups (a 2-way merge has no single
+// authoritative group list); local takes precedence, falling back to remote, then "" (store
+// metadata / unmatched, e.g. store.lock.json).
 function owningGroupName(localGroups: SyncGroup[], remoteGroups: SyncGroup[], rel: string): string {
-  const local = groupForStoreRel(localGroups, rel);
-  if (local !== "") return local;
-  return groupForStoreRel(remoteGroups, rel);
+  return resolveGroupByStoreRel(localGroups, rel)?.name ?? resolveGroupByStoreRel(remoteGroups, rel)?.name ?? "";
 }
 
 // Recursively sorts object keys so JSON.stringify produces a key-order-independent string.

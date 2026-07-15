@@ -1,8 +1,11 @@
 import { FileIO, ensureParentDir, isJunkPath, listFilesRecursive, pruneEmptyDirsUnder } from "./io";
 import { GroupResult, hasChanges, StoreLock, SyncGroup, SyncManifest } from "./types";
-import { basename, groupRealPath, groupStorePath, relativeTo } from "./pathing";
+import { basename, groupRealPath, groupStorePath, relativeTo, resolveGroupByStoreRel } from "./pathing";
 import { parseStoreLock, parseSyncManifest, validateSyncManifest } from "./manifest";
 import { applyTransform, captureTransform, contentUnchanged } from "./modes";
+import { classifyMerge, MergePlan } from "./merge";
+import { ensureSelfPresets } from "./catalog";
+import { isPlainObject } from "./sanitize";
 
 export type ProgressFn = (done: number, total: number, current: string) => void;
 
@@ -75,15 +78,11 @@ export function parseJsonOrThrow(raw: string, groupName: string, path: string): 
 }
 
 export function groupForStoreRel(groups: SyncGroup[], rel: string): { name: string; itemRel: string } {
-  if (rel.startsWith("store/")) {
-    const inner = rel.slice("store/".length);
-    for (const g of groups) {
-      const sp = groupStorePath(g.path);
-      if (g.type === "file" && inner === sp) return { name: g.name, itemRel: basename(sp) };
-      if (g.type === "dir" && inner.startsWith(sp + "/")) return { name: g.name, itemRel: inner.slice(sp.length + 1) };
-    }
-  }
-  return { name: "", itemRel: rel }; // store metadata / unmatched
+  const g = resolveGroupByStoreRel(groups, rel);
+  if (g === undefined) return { name: "", itemRel: rel }; // store metadata / unmatched
+  const sp = groupStorePath(g.path);
+  const inner = rel.slice("store/".length);
+  return { name: g.name, itemRel: g.type === "file" ? basename(sp) : inner.slice(sp.length + 1) };
 }
 
 function emptyResult(group: string, needsAppReload: boolean): GroupResult {
@@ -532,12 +531,79 @@ export interface ExternalStoreReader {
   readFile(relPath: string): Promise<string>;
 }
 
-export async function importExternal(ctx: CoreContext, reader: ExternalStoreReader): Promise<GroupResult[]> {
-  const files = await reader.listFiles();
-  if (!files.includes("config-sync.json")) {
-    throw new Error(`External source has no config-sync.json at its root — check the source "root" setting.`);
+const LOCK_REL = "store.lock.json";
+const LEGACY_MANIFEST_REL = "config-sync.json";
+// The self item's real path is always "{configDir}/plugins/config-sync/data.json" (the plugin
+// id, from manifest.json, never varies) — so its store rel is this fixed constant.
+const SELF_STORE_DATA_REL = `store/${groupStorePath("{configDir}/plugins/config-sync/data.json")}`;
+
+// A legacy root manifest — the deprecated format from before groups moved into plugin
+// settings — or a timestamped remnant left behind by migrateLegacyManifest. Neither is ever
+// written locally by the current format, so both are excluded from file classification.
+function isLegacyManifestRel(rel: string): boolean {
+  return rel === LEGACY_MANIFEST_REL || rel.startsWith(`${LEGACY_MANIFEST_REL}.migrated-`);
+}
+
+async function remoteGroupsFrom(reader: ExternalStoreReader, files: string[]): Promise<SyncGroup[]> {
+  if (files.includes(SELF_STORE_DATA_REL)) {
+    const parsed: unknown = JSON.parse(await reader.readFile(SELF_STORE_DATA_REL));
+    if (isPlainObject(parsed) && Array.isArray(parsed.groups)) {
+      return validateSyncManifest({ version: 1, groups: parsed.groups }).groups;
+    }
   }
-  const incoming = parseSyncManifest(await reader.readFile("config-sync.json")); // fail fast on invalid upstream data
+  if (files.includes(LEGACY_MANIFEST_REL)) {
+    return parseSyncManifest(await reader.readFile(LEGACY_MANIFEST_REL)).groups; // compat, deprecated format
+  }
+  return [];
+}
+
+export interface PendingPull {
+  plan: MergePlan;
+  remoteGroups: SyncGroup[];
+  remoteLockRaw: string | null;
+}
+
+// Phase 1: read-only. Never writes anything.
+export async function planImport(ctx: CoreContext, reader: ExternalStoreReader): Promise<PendingPull> {
+  const files = await reader.listFiles();
+  const remoteGroups = await remoteGroupsFrom(reader, files);
+  const remoteLockRaw = files.includes(LOCK_REL) ? await reader.readFile(LOCK_REL) : null;
+
+  const remoteFileMap = new Map<string, string>();
+  for (const rel of files) {
+    if (rel === LOCK_REL || isLegacyManifestRel(rel)) continue;
+    remoteFileMap.set(rel, await reader.readFile(rel));
+  }
+
+  const localGroups = await readGroups(ctx);
+  const localFileMap = new Map<string, string>();
+  if (await ctx.io.exists(ctx.rootPath)) {
+    const localAbs = await listFilesRecursive(ctx.io, ctx.rootPath);
+    for (const f of localAbs) {
+      const rel = relativeTo(ctx.rootPath, f);
+      if (rel === LOCK_REL || isLegacyManifestRel(rel)) continue;
+      localFileMap.set(rel, await ctx.io.read(f));
+    }
+  }
+
+  const plan = classifyMerge(localGroups, localFileMap, remoteGroups, remoteFileMap);
+  return { plan, remoteGroups, remoteLockRaw };
+}
+
+// Phase 2: writes the whole merge result — all auto-merged parts plus each conflict's chosen
+// side — in one pass. Never deletes local-only files or groups.
+export async function applyImport(
+  ctx: CoreContext,
+  pending: PendingPull,
+  choices: ("local" | "remote")[]
+): Promise<GroupResult[]> {
+  const { plan, remoteGroups, remoteLockRaw } = pending;
+  if (choices.length !== plan.conflicts.length) {
+    throw new Error(
+      `applyImport: expected ${plan.conflicts.length} conflict resolution choice(s), received ${choices.length}`
+    );
+  }
+
   const byName = new Map<string, GroupResult>();
   const resultFor = (name: string): GroupResult => {
     let r = byName.get(name);
@@ -547,28 +613,58 @@ export async function importExternal(ctx: CoreContext, reader: ExternalStoreRead
     }
     return r;
   };
-  for (const rel of files) {
-    const target = `${ctx.rootPath}/${rel}`;
-    const { name, itemRel } = groupForStoreRel(incoming.groups, rel);
-    await writeClassified(ctx, target, await reader.readFile(rel), itemRel, resultFor(name));
+
+  const remoteWonNames = new Set<string>(plan.auto.writeFiles.map((f) => f.name).filter((n) => n !== ""));
+
+  for (const f of plan.auto.writeFiles) {
+    await writeClassified(ctx, `${ctx.rootPath}/${f.rel}`, f.content, f.rel, resultFor(f.name));
   }
-  const wanted = new Set(files.map((f) => `${ctx.rootPath}/${f}`));
-  const localFiles = await listFilesRecursive(ctx.io, ctx.rootPath);
-  for (const f of localFiles) {
-    if (!wanted.has(f)) {
-      const rel = relativeTo(ctx.rootPath, f);
-      const { name, itemRel } = groupForStoreRel(incoming.groups, rel);
-      await ctx.io.remove(f);
-      const result = resultFor(name);
-      result.filesDeleted.push(f);
-      result.changes.deleted.push(itemRel);
-    }
+  for (let i = 0; i < plan.conflicts.length; i++) {
+    const conflict = plan.conflicts[i];
+    if (conflict === undefined) continue;
+    if (choices[i] !== "remote") continue;
+    if (conflict.kind !== "file") continue;
+    await writeClassified(ctx, `${ctx.rootPath}/${conflict.rel}`, conflict.remoteContent, conflict.rel, resultFor(conflict.name));
+    remoteWonNames.add(conflict.name);
   }
   await pruneEmptyDirsUnder(ctx.io, ctx.rootPath);
+
+  let groups = await readGroups(ctx);
+  groups = [...groups, ...plan.auto.addGroups];
+  for (let i = 0; i < plan.conflicts.length; i++) {
+    const conflict = plan.conflicts[i];
+    if (conflict === undefined) continue;
+    if (choices[i] !== "remote") continue;
+    if (conflict.kind !== "definition") continue;
+    groups = groups.map((g) => (g.name === conflict.name ? conflict.remote : g));
+    remoteWonNames.add(conflict.name);
+  }
+  groups = ensureSelfPresets(groups);
+  await writeGroups(ctx, groups);
+  for (const g of plan.auto.addGroups) resultFor(g.name);
+
+  const localLock = await loadLock(ctx);
+  const remoteLock = remoteLockRaw !== null ? parseStoreLock(remoteLockRaw) : null;
+  if (localLock !== null || remoteLock !== null) {
+    const mergedGroups: StoreLock["groups"] = { ...(localLock?.groups ?? {}) };
+    for (const name of remoteWonNames) {
+      const entry = remoteLock?.groups[name];
+      if (entry !== undefined) mergedGroups[name] = entry;
+    }
+    const merged: StoreLock = { capturedAt: remoteLock?.capturedAt ?? localLock?.capturedAt ?? ctx.now(), groups: mergedGroups };
+    await ctx.io.write(lockPath(ctx), JSON.stringify(merged, null, 2) + "\n");
+  }
+
   const isAffected = (r: GroupResult): boolean => hasChanges(r.changes);
-  const named = incoming.groups
-    .map((g) => byName.get(g.name))
-    .filter((r): r is GroupResult => r !== undefined && isAffected(r));
+  const orderedNames = [...remoteGroups.map((g) => g.name), ...groups.map((g) => g.name)];
+  const seen = new Set<string>();
+  const named: GroupResult[] = [];
+  for (const name of orderedNames) {
+    if (seen.has(name)) continue;
+    seen.add(name);
+    const r = byName.get(name);
+    if (r !== undefined && isAffected(r)) named.push(r);
+  }
   const meta = byName.get("");
   return meta !== undefined && isAffected(meta) ? [...named, meta] : named;
 }
@@ -582,13 +678,15 @@ export interface ExternalStoreWriter {
 }
 
 export async function pushExternal(ctx: CoreContext, writer: ExternalStoreWriter): Promise<GroupResult[]> {
-  const localAbs = await listFilesRecursive(ctx.io, ctx.rootPath);
+  const localAbs = (await ctx.io.exists(ctx.rootPath)) ? await listFilesRecursive(ctx.io, ctx.rootPath) : [];
   const rels = localAbs.map((f) => f.slice(ctx.rootPath.length + 1)).sort();
-  if (!rels.includes("config-sync.json")) {
+  const hasStore = rels.some((r) => r.startsWith("store/")) || rels.includes(LOCK_REL);
+  if (!hasStore) {
     throw new Error(
-      `Local store has no config-sync.json at ${ctx.rootPath} — capture from this device (or pull) before pushing.`
+      `Local store has no captured data at ${ctx.rootPath} — capture from this device (or pull) before pushing.`
     );
   }
+  const pushableRels = rels.filter((r) => !isLegacyManifestRel(r));
   const manifest = await loadManifest(ctx);
   const byName = new Map<string, GroupResult>();
   const resultFor = (name: string): GroupResult => {
@@ -599,8 +697,8 @@ export async function pushExternal(ctx: CoreContext, writer: ExternalStoreWriter
     }
     return r;
   };
-  const remoteFiles = new Set(await writer.listFiles());
-  for (const rel of rels) {
+  const remoteFiles = new Set((await writer.listFiles()).filter((r) => !isLegacyManifestRel(r)));
+  for (const rel of pushableRels) {
     const { name, itemRel } = groupForStoreRel(manifest.groups, rel);
     const content = await ctx.io.read(`${ctx.rootPath}/${rel}`);
     const existed = remoteFiles.has(rel);
@@ -610,7 +708,7 @@ export async function pushExternal(ctx: CoreContext, writer: ExternalStoreWriter
     result.filesWritten.push(rel);
     (existed ? result.changes.updated : result.changes.added).push(itemRel);
   }
-  const wanted = new Set(rels);
+  const wanted = new Set(pushableRels);
   for (const rel of remoteFiles) {
     if (!wanted.has(rel)) {
       const { name, itemRel } = groupForStoreRel(manifest.groups, rel);

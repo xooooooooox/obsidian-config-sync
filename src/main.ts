@@ -1,16 +1,17 @@
 import { Menu, Notice, Platform, Plugin, apiVersion, requestUrl } from "obsidian";
 import {
   ApplyItem,
+  applyImport,
   CoreContext,
   ExternalStoreReader,
   ExternalStoreWriter,
   PluginHost,
   PluginInstallFn,
+  planImport,
   ProgressFn,
   applyWithActions,
   capture,
   groupsForDevice,
-  importExternal,
   loadLock,
   loadManifest,
   pushExternal,
@@ -323,7 +324,17 @@ export default class ConfigSyncPlugin extends Plugin {
       pullFrom: async (remote) => {
         try {
           const ctx = await this.coreContext();
-          const results = await importExternal(ctx, await this.createReader(remote));
+          const pending = await planImport(ctx, await this.createReader(remote));
+          if (pending.plan.conflicts.length > 0) {
+            // TEMPORARY bridge until the conflict resolution modal lands: abort with nothing
+            // written (planImport is read-only), so pull stays all-or-nothing.
+            new Notice(
+              `Config Sync: pull found ${pending.plan.conflicts.length} conflicts — the resolution dialog arrives in the next update; pull was not applied`,
+              10000
+            );
+            return null;
+          }
+          const results = await applyImport(ctx, pending, []);
           await this.refreshLocalStatus();
           await this.refreshRemoteChecks();
           return results;
