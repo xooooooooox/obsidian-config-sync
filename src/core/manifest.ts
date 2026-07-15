@@ -171,7 +171,9 @@ export async function migrateLegacyManifest(
   const legacy = parseSyncManifest(await io.read(p)).groups; // throws ManifestValidationError on bad JSON
   const have = new Set(existing.map((g) => g.name));
   const merged = [...existing, ...legacy.filter((g) => !have.has(g.name))];
-  await io.rename(p, `${p}.migrated-${now.slice(0, 10)}`);
+  // Timestamp to the second so a same-day second migration cannot overwrite the earlier
+  // renamed backup ("2026-07-15T08-30-05" — colons are not filesystem-safe).
+  await io.rename(p, `${p}.migrated-${now.slice(0, 19).replace(/:/g, "-")}`);
   return { groups: merged, migrated: true };
 }
 

@@ -141,6 +141,7 @@ export default class ConfigSyncPlugin extends Plugin {
         return;
       }
       console.error("Config Sync: unexpected error migrating config-sync.json", e);
+      new Notice(`Config Sync: migration hit an unexpected error — ${(e as Error).message}. The renamed config-sync.json.migrated-* file (if present) still holds your groups.`, 10000);
     }
   }
 

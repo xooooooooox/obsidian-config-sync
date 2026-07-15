@@ -32,8 +32,8 @@ describe("migrateLegacyManifest", () => {
     // original path gone
     expect(await io.exists("cs/config-sync.json")).toBe(false);
     // renamed file exists with original content
-    expect(await io.exists("cs/config-sync.json.migrated-2026-07-15")).toBe(true);
-    expect(await io.read("cs/config-sync.json.migrated-2026-07-15")).toBe(legacyContent);
+    expect(await io.exists("cs/config-sync.json.migrated-2026-07-15T12-00-00")).toBe(true);
+    expect(await io.read("cs/config-sync.json.migrated-2026-07-15T12-00-00")).toBe(legacyContent);
   });
 
   it("passes through unchanged when no legacy file exists", async () => {
