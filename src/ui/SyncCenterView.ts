@@ -20,6 +20,7 @@ import {
   SECTION_TITLES,
   SectionKind,
   sectionForItem,
+  stageableState,
   versionLine,
   visibleUnderFilter,
   Direction,
@@ -171,6 +172,16 @@ export class SyncCenterView extends ItemView {
     const names = new Set(groups.map((g) => g.name));
     for (const n of [...this.selected]) if (!names.has(n)) this.selected.delete(n);
     for (const n of [...this.directionOverride.keys()]) if (!names.has(n)) this.directionOverride.delete(n);
+    // Staging expires with the state that motivated it: an item that became inert (e.g.
+    // in-sync right after a capture/apply run) drops out of the staged set and loses its
+    // direction override — otherwise the footer keeps counting freshly-synced items.
+    for (const n of [...this.selected]) {
+      const st = this.statuses.get(n);
+      if (st !== undefined && !stageableState(st.state)) {
+        this.selected.delete(n);
+        this.directionOverride.delete(n);
+      }
+    }
     for (const n of [...this.expandedItems]) if (!names.has(n)) this.expandedItems.delete(n);
     for (const n of [...this.policy.keys()]) if (!names.has(n)) this.policy.delete(n);
     // A row's availability may have changed since the last load (e.g. externally enabled),
@@ -834,13 +845,13 @@ export class SyncCenterView extends ItemView {
 
   private captureNames(): string[] {
     return this.rows()
-      .filter((r) => this.selected.has(r.group.name) && this.effDir(r) === "capture")
+      .filter((r) => this.selected.has(r.group.name) && stageableState(r.status.state) && this.effDir(r) === "capture")
       .map((r) => r.group.name);
   }
 
   private applyPayload(): ApplyItem[] {
     return this.rows()
-      .filter((r) => this.selected.has(r.group.name) && this.effDir(r) === "apply")
+      .filter((r) => this.selected.has(r.group.name) && stageableState(r.status.state) && this.effDir(r) === "apply")
       .map((r) => {
         if (this.sectionOf(r.group.name) === "main") return { name: r.group.name, action: "none" as const };
         const a = this.availOf(r.group.name);
@@ -852,10 +863,11 @@ export class SyncCenterView extends ItemView {
 
   private renderActionBar(macro: HTMLElement): void {
     const bar = macro.createDiv({ cls: "config-sync-actionbar" });
-    const mainStaged = this.mainRows().filter((r) => this.selected.has(r.group.name)).length;
-    const outdatedStaged = this.rows().filter((r) => this.sectionOf(r.group.name) === "outdated" && this.selected.has(r.group.name)).length;
-    const disabledStaged = this.rows().filter((r) => this.sectionOf(r.group.name) === "disabled" && this.selected.has(r.group.name)).length;
-    const installStaged = this.rows().filter((r) => this.sectionOf(r.group.name) === "not-installed" && this.selected.has(r.group.name)).length;
+    const counted = (r: StatusRow): boolean => this.selected.has(r.group.name) && stageableState(r.status.state);
+    const mainStaged = this.mainRows().filter(counted).length;
+    const outdatedStaged = this.rows().filter((r) => this.sectionOf(r.group.name) === "outdated" && counted(r)).length;
+    const disabledStaged = this.rows().filter((r) => this.sectionOf(r.group.name) === "disabled" && counted(r)).length;
+    const installStaged = this.rows().filter((r) => this.sectionOf(r.group.name) === "not-installed" && counted(r)).length;
     bar.createSpan({ cls: "config-sync-staged-count", text: footerSummary(mainStaged, outdatedStaged, disabledStaged, installStaged) });
     bar.createDiv({ cls: "config-sync-rule-spacer" });
     const capNames = this.captureNames();

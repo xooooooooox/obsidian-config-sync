@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { capFileEntries, insyncLineText, moreFilesText, visibleUnderFilter, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, footerSummary, isValidPolicy, policyOptions, sectionForItem, versionLine } from "../src/ui/panelModel";
+import { capFileEntries, insyncLineText, moreFilesText, visibleUnderFilter, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, footerSummary, isValidPolicy, policyOptions, sectionForItem, stageableState, versionLine } from "../src/ui/panelModel";
 import { GroupState } from "../src/core/status";
 import { Availability } from "../src/core/availability";
 
@@ -96,6 +96,15 @@ describe("direction", () => {
     expect(effectiveDirection("differs", undefined)).toBe("apply");
     expect(effectiveDirection("differs", "capture")).toBe("capture");
     expect(effectiveDirection("local-changed", "apply")).toBe("apply");
+  });
+  it("stageableState: inert states can never be staged or counted", () => {
+    expect(stageableState("in-sync")).toBe(false);
+    expect(stageableState("no-settings")).toBe(false);
+    expect(stageableState("locked")).toBe(false);
+    expect(stageableState("local-changed")).toBe(true);
+    expect(stageableState("store-newer")).toBe(true);
+    expect(stageableState("differs")).toBe(true);
+    expect(stageableState("not-captured")).toBe(true);
   });
 });
 

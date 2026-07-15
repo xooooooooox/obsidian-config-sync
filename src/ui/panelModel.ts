@@ -48,6 +48,13 @@ export function directionForState(state: GroupState): Direction {
   return state === "local-changed" || state === "not-captured" ? "capture" : "apply";
 }
 
+// Inert states (checkbox disabled) can never be staged: they must not survive in the staged
+// set, count into the footer, or enter a capture/apply payload — otherwise items that just
+// became in-sync keep inflating "Apply N items" with stale selections.
+export function stageableState(state: GroupState): boolean {
+  return state !== "in-sync" && state !== "no-settings" && state !== "locked";
+}
+
 // The staged direction: an explicit user choice wins over the state default.
 export function effectiveDirection(state: GroupState, override: Direction | undefined): Direction {
   return override ?? directionForState(state);
