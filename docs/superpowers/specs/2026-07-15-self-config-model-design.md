@@ -98,11 +98,22 @@ is never written back locally as a file.
 
 `plugin-config-sync` stays a normal catalog item, with hardening:
 
-- **Preset, locked field rules.** When the group `plugin-config-sync` is created (or migrated),
-  it gets `mode: "fields"` with strip rules for `rootPath` and `remotes` — automatically, and the
-  config panel shows these two rules as locked (non-removable; the checkbox/remove control is
-  disabled with the standard disabled treatment). Other fields of data.json can be additionally
-  stripped/encrypted by the user like any item.
+- **No new mechanism — strip IS device-local.** Strip semantics (verified): `sanitizeJson`
+  removes matching keys **entirely** from the store copy (`sanitize.ts:20` `continue` — the key
+  does not exist in the captured JSON, it is not emptied), and apply's
+  `mergePreservingSanitized` keeps the local value for keys matching strip patterns
+  (`sanitize.ts:42-46`). So "don't sync this field / it stays per-device" is exactly what strip
+  already does, generically, for any JSON item. No leak (A's paths/remote addresses never appear
+  in the store), no ambiguity (absent key ≠ user-set empty value).
+- **One generic addition: `locked` on field rules.** `FieldRule` gains an optional boolean
+  `locked`; a locked rule cannot be removed in the UI (delete control disabled with the standard
+  disabled treatment, 🔒 prefix on the row; single "don't sync" badge — no separate
+  "device-local" badge, since it is not a second feature). The flag is generic (any preset could
+  use it); today only the self-item's presets set it.
+- **Preset locked rules for the self-item.** When the group `plugin-config-sync` is created (or
+  migrated), it gets `mode: "fields"` with **locked** strip rules for `rootPath` and `remotes` —
+  automatically. Other fields of data.json can be additionally stripped/encrypted by the user
+  like any item.
 - **Capture:** the store copy `store/plugin-config-sync/data.json` therefore contains the
   contract (`groups`) + portable prefs, with `rootPath`/`remotes` stripped.
 - **Apply on B:** the existing fields-mode apply path (`modes.ts:206-215`,
@@ -148,17 +159,31 @@ Already 90% present: `mode: "fields"` + strip rules exclude fields at capture. T
 
 ### Conflict resolution UI
 
-When the merge produces conflicts, pull pauses and shows a **conflict modal** (git-style):
+When the merge produces conflicts, pull pauses and shows a **conflict modal**. Visual 定稿
+(companion, 2026-07-15, `conflict-modal-v4.html` + `gallery-self-config.html`):
 
-- A list: one row per conflict — group name (display label), kind (definition / file path), and
-  two choices: **Keep local** / **Take remote**. Row-level radio, plus "all local" / "all remote"
-  shortcuts. A preview affordance per row shows a compact diff (local vs remote, read-only).
-- Confirm writes the whole merge result in one pass: all auto-merged (non-conflicting) parts
-  plus each conflict's chosen side. Cancel aborts the pull with **nothing** written — not even
-  the auto-merged parts. Pull is all-or-nothing per invocation to keep reasoning simple.
-- Choices are per-operation; nothing is persisted.
-- This modal is a new UI surface → **visual companion mockup + 定稿 before implementation**, per
-  the standing UI rule. The spec defines behavior; the visual is settled at plan/impl time.
+- **Structure:** pinned header ("Resolve pull conflicts", remote name, N items compared) →
+  scrollable middle → pinned footer. Middle: a collapsible **auto-merged section** (collapsed by
+  default, `＋n · ＝n · ⌂n` count summary; expanded rows list each clean item with its reason:
+  `＋` added from remote, `＝` identical, `⌂` local-only kept) then the **conflict list** with
+  "All local" / "All remote" shortcuts.
+- **Conflict row:** display label + kind badge (`DEFINITION` orange / `FILE` blue, file rows show
+  the store path) + a segmented **Local | Remote** toggle (chosen side accent-tinted). Unresolved
+  rows get an amber border + "⚠ choose a side"; **Apply stays disabled until every conflict is
+  resolved** (footer counts "k of n resolved").
+- **Diff preview (git-style):** each row expands to a read-only diff with a **Unified ⇄ Split**
+  toggle in the diff toolbar. Unified = `--- local` / `+++ remote` headers, `@@` hunks, context
+  lines dimmed, `-` red / `+` green. Split = side-by-side local|remote panes, differing lines
+  tinted per side. DEFINITION diffs show the group-definition JSON (differing properties ±
+  context); FILE diffs show file content with capture timestamps per side. View choice is
+  remembered for the session (not persisted); phones force Unified. Choice semantics stay whole
+  side (git ours/theirs) — the diff is for understanding, not per-line picking.
+- **Footer:** "nothing is written until you apply" + **Cancel pull** / **Apply merge**. Apply
+  writes the whole merge result in one pass: all auto-merged parts plus each conflict's chosen
+  side. Cancel aborts with **nothing** written — not even the auto-merged parts. Pull is
+  all-or-nothing per invocation.
+- Choices are per-operation; nothing is persisted. Colors bind to theme palette vars (accent for
+  chosen side, orange caution, red/green diff tints) per the design system.
 
 Push keeps mirror semantics for `store/**` (push publishes this device's store; the remote-side
 merge story is pull's job on the other device). Push no longer writes any root
@@ -168,8 +193,10 @@ merge story is pull's job on the other device). Push no longer writes any root
 
 On load, when `settings.groups` is empty AND no legacy `config-sync.json` exists AND
 `${resolvedRootPath}/store/plugin-config-sync/data.json` exists (typical: remotely-save brought
-the store before the user configured the plugin): show a Notice + Sync Center banner "Found an
-existing configuration in the store — adopt it?" with an Adopt action. Adopt = apply
+the store before the user configured the plugin): show a Notice + Sync Center banner. Visual 定稿
+(companion, `gallery-self-config.html`): an accent-tinted banner at the top of the Sync Center —
+"Found an existing configuration in the store" with a summary line (item count, source device,
+capture time), an **Adopt** primary button, and a ✕ that dismisses for the session. Adopt = apply
 `plugin-config-sync` (fields-mode apply preserves the empty-but-default local `rootPath`/
 `remotes`), reload settings, refresh. Decline = banner dismissed for the session; normal manual
 setup remains available. No auto-adopt — explicit user action required.
