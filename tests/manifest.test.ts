@@ -158,6 +158,12 @@ describe("validateSyncManifest", () => {
       'has a "description" that isn\'t text'
     );
   });
+  it("round-trips a boolean locked flag on field rules and rejects a non-boolean one", () => {
+    const withLocked = { ...GOOD, mode: "fields", fields: [{ pattern: "rootPath", action: "strip", locked: true }] };
+    expect(validateSyncManifest({ version: 1, groups: [withLocked] }).groups[0]?.fields?.[0]?.locked).toBe(true);
+    const badLocked = { ...GOOD, mode: "fields", fields: [{ pattern: "rootPath", action: "strip", locked: "yes" }] };
+    expect(() => validateSyncManifest({ version: 1, groups: [badLocked] })).toThrow('invalid "fields" list');
+  });
 });
 
 describe("group name format", () => {

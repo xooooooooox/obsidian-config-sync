@@ -305,6 +305,9 @@ export function selfPresetRules(): FieldRule[] {
 
 // Merges preset locked rules into a rule list: presets first (in preset order), then any
 // caller/user rules not already covered by a preset pattern. Never produces a duplicate pattern.
+// Matching is pattern-only, deliberately action-blind: a user rule like {rootPath, encrypt} is
+// replaced by the locked strip preset — device-local fields must never leave the device, even
+// encrypted, so the conflicting action is intentionally overridden (silently).
 function mergePresetFields(existing: FieldRule[]): FieldRule[] {
   const presets = selfPresetRules();
   const presetPatterns = new Set(presets.map((p) => p.pattern));

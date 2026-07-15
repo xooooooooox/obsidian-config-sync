@@ -13,6 +13,7 @@ import {
   groupForItem,
   joinLocation,
   reservedNames,
+  SELF_GROUP_NAME,
   splitLocation,
   toggleSection,
 } from "../core/catalog";
@@ -662,6 +663,10 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       { id: "encrypted", label: "Encrypt" },
     ];
     const current = group.mode ?? "plain";
+    // The plugin's own item is pinned to Fields mode: its locked device-local strip rules
+    // (rootPath/remotes) only exist under "fields", and ensureSelfPresets re-forces it on
+    // every commit — so offering Plain/Encrypt here would silently revert.
+    const pinnedToFields = group.name === SELF_GROUP_NAME;
     for (const m of modes) {
       if (m.id === "fields" && group.type !== "file") continue;
       const on = current === m.id;
@@ -669,6 +674,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         cls: `config-sync-seg-btn is-mode${on ? " is-on" : ""}`,
         text: m.label,
       });
+      if (pinnedToFields && m.id !== "fields") {
+        btn.disabled = true;
+        btn.setAttribute("title", "This item always uses fields mode — device-local fields stay on each device");
+        continue;
+      }
       btn.addEventListener("click", () => {
         void (async () => {
           let fieldsForNewMode: FieldRule[] | undefined;
@@ -724,6 +734,13 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
           cls: `config-sync-act-btn is-${a.id}${on ? " is-on" : ""}`,
           text: a.label,
         });
+        // Locked preset rules are fixed to their action (ensureSelfPresets would revert any
+        // change on commit anyway) — disable the toggle so the UI matches the data.
+        if (rule.locked === true) {
+          btn.disabled = true;
+          btn.setAttribute("title", "Preset rule — action is fixed");
+          continue;
+        }
         btn.addEventListener("click", () => {
           void (async () => {
             const ruleIndex = rules.indexOf(rule);
