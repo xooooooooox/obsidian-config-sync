@@ -435,6 +435,10 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const exp = parent.createDiv({ cls: "config-sync-item-exp" });
     if (group.mode === "fields") {
       exp.createDiv({ cls: "config-sync-explabel", text: "Fields to protect" });
+      exp.createDiv({
+        cls: "config-sync-expdesc",
+        text: "Strip = don't sync: the field is removed from the store copy at capture and keeps its local value on apply.",
+      });
       this.renderFieldsEditor(exp.createDiv(), group, () => this.renderItemInto(wrap, item));
     }
     this.renderDataFileSegment(exp, group, item, wrap);
@@ -1082,7 +1086,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private renderGroupsReadError(containerEl: HTMLElement): boolean {
     if (this.groupsReadError === null) return false;
     containerEl.createEl("p", {
-      text: `Cannot read the sync configuration — fix <data folder>/config-sync.json manually and reopen this tab: ${this.groupsReadError}`,
+      text: `Cannot read the sync configuration — fix the plugin's saved groups (data.json) and reopen this tab: ${this.groupsReadError}`,
       cls: "mod-warning",
     });
     return true;

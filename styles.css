@@ -867,3 +867,5 @@ body.is-mobile .config-sync-mainbar input[type="checkbox"]:indeterminate::after 
 .config-sync-bootstrap-adopt { flex: none; }
 .config-sync-bootstrap-dismiss { color: var(--text-muted); cursor: pointer; flex: none; padding: 0 var(--size-4-1); }
 .config-sync-bootstrap-dismiss:hover { color: var(--text-normal); }
+
+.config-sync-expdesc { color: var(--text-faint); font-size: var(--font-ui-smaller); margin-bottom: var(--size-4-1); }
