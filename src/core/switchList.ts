@@ -17,20 +17,21 @@ export type SwitchList = string[] | Record<string, boolean>;
  */
 export function parseSwitchList(content: string): SwitchList | null {
   try {
-    const parsed = JSON.parse(content);
+    const parsed: unknown = JSON.parse(content);
 
     // Array of strings
     if (Array.isArray(parsed)) {
-      if (parsed.every((item) => typeof item === "string")) {
+      if (parsed.every((item): item is string => typeof item === "string")) {
         return parsed;
       }
       return null;
     }
 
     // Record of booleans (object but not array)
-    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
-      if (Object.values(parsed).every((val) => typeof val === "boolean")) {
-        return parsed as Record<string, boolean>;
+    if (typeof parsed === "object" && parsed !== null) {
+      const rec = parsed as Record<string, unknown>;
+      if (Object.values(rec).every((val) => typeof val === "boolean")) {
+        return rec as Record<string, boolean>;
       }
       return null;
     }
@@ -120,10 +121,10 @@ export function applySwitchList(
       // For local array, we don't add anything new for excepted keys (membership check irrelevant for maps).
     } else {
       // local is also map; add/override with local entries for excepted keys
-      const localMap = local as Record<string, boolean>;
       for (const exc of exceptions) {
-        if (exc in localMap) {
-          result[exc] = localMap[exc]!;
+        const localVal = local[exc];
+        if (localVal !== undefined) {
+          result[exc] = localVal;
         }
       }
     }
