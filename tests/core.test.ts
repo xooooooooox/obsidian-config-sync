@@ -937,6 +937,16 @@ describe("switch-list exceptions", () => {
       await capture(ctx);
       expect(await io.read("cs/store/configdir/community-plugins.json")).toBe(JSON.stringify(["a", "x", "b"], null, 2) + "\n");
     });
+
+    it("with exceptions set but malformed local content, falls through to the plain path", async () => {
+      const { io, ctx } = setup();
+      ctx.switchExceptions["community-plugins"] = ["x"];
+      io.seed({ ".obs/community-plugins.json": "not json at all" });
+      await seedGroups(ctx, COMMUNITY_MANIFEST);
+      await capture(ctx);
+      // parseSwitchList → null → today's exact behavior: raw copy, no masking, no crash
+      expect(await io.read("cs/store/configdir/community-plugins.json")).toBe("not json at all");
+    });
   });
 
   describe("apply (community-plugins array)", () => {

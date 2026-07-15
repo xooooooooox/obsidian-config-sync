@@ -24,7 +24,8 @@ import { type CatalogSection, displayLabelForGroup, ensureSelfPresets, groupForI
 import { Availability, availabilityForGroup } from "./core/availability";
 import { listFilesRecursive } from "./core/io";
 import { ManifestValidationError, migrateLegacyManifest, parseStoreLock, validateSyncManifest } from "./core/manifest";
-import { groupRealPath } from "./core/pathing";
+import { groupRealPath, groupStorePath } from "./core/pathing";
+import { parseSwitchList, SwitchList } from "./core/switchList";
 import { scanSensitive, SensitiveScan } from "./core/modes";
 import { PkmMode, PkmProbe, resolveEffectiveMode, resolveRootPath } from "./core/pkm";
 import { bucketCounts, checkRemote, diffRemote, GroupStatus, RemoteCheck, statusForGroups } from "./core/status";
@@ -596,6 +597,34 @@ export default class ConfigSyncPlugin extends Plugin {
 
   async listDiscoveredFiles(groups: SyncGroup[]): Promise<{ name: string; path: string }[]> {
     return listDiscovered(this.app.vault.adapter, this.app.vault.configDir, groups);
+  }
+
+  // Rows for the switch-list "Local decisions" editor: union of local list ∪ store copy ∪
+  // runtime (installed plugins / core registry), each with a display name and a state hint.
+  async switchListRows(groupName: string): Promise<{ id: string; name: string; hint: string }[]> {
+    const io = this.app.vault.adapter;
+    const file = groupName === "community-plugins" ? "community-plugins.json" : "core-plugins.json";
+    const readList = async (path: string): Promise<SwitchList | null> => {
+      try {
+        return (await io.exists(path)) ? parseSwitchList(await io.read(path)) : null;
+      } catch {
+        return null;
+      }
+    };
+    const idsOf = (l: SwitchList | null): string[] => (l === null ? [] : Array.isArray(l) ? l : Object.keys(l));
+    const onIn = (l: SwitchList | null, id: string): boolean =>
+      l !== null && (Array.isArray(l) ? l.includes(id) : l[id] === true);
+    const local = await readList(`${this.app.vault.configDir}/${file}`);
+    const root = await this.resolvedRootPath();
+    const store = await readList(`${root}/store/${groupStorePath(`{configDir}/${file}`)}`);
+    const runtime = groupName === "community-plugins" ? this.pluginRuntime() : this.coreRuntime();
+    const nameOf = new Map(runtime.map((r) => [r.id, r.name]));
+    const ids = [...new Set([...idsOf(local), ...idsOf(store), ...runtime.map((r) => r.id)])].sort();
+    return ids.map((id) => ({
+      id,
+      name: nameOf.get(id) ?? id,
+      hint: `${onIn(local, id) ? "on here" : "off here"} · ${store === null ? "no store copy" : onIn(store, id) ? "store has on" : "store has off"}`,
+    }));
   }
 
   async readItemFile(group: SyncGroup): Promise<string | null> {

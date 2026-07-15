@@ -4,6 +4,7 @@ import { SensitiveScan } from "../core/modes";
 import { PkmMode } from "../core/pkm";
 import { validateRemotes } from "../core/manifest";
 import { keyMatchesAny } from "../core/sanitize";
+import { SWITCH_LIST_GROUPS } from "../core/switchList";
 import {
   CatalogItem,
   CatalogSection,
@@ -32,6 +33,7 @@ export interface SettingsHost extends Plugin {
     statusInMenu: boolean;
     remoteAutoCheck: boolean;
     localPeriodicCheck: boolean;
+    switchExceptions: Record<string, string[]>;
   };
   saveSettings(): Promise<void>;
   refreshRibbons(): void;
@@ -49,6 +51,7 @@ export interface SettingsHost extends Plugin {
   passphrase(): string | null;
   setPassphrase(v: string | null): void;
   displayName(group: string, storedLabel?: string): string;
+  switchListRows(group: string): Promise<{ id: string; name: string; hint: string }[]>;
 }
 
 const SENSITIVE_ENCRYPT_RE = /apikey|api_key|token|secret|password|credential/i;
@@ -380,6 +383,13 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       devBadge.setAttribute("title", item.cautionReason);
       devBadge.setAttribute("aria-label", item.cautionReason);
     }
+    if (group !== undefined && SWITCH_LIST_GROUPS.has(item.name)) {
+      const n = (this.host.settings.switchExceptions[item.name] ?? []).length;
+      if (n > 0) {
+        const b = row.nameEl.createSpan({ cls: "config-sync-devbadge", text: `${n} local decision${n === 1 ? "" : "s"}` });
+        b.setAttribute("title", "Plugins this device decides for itself — excluded from sync");
+      }
+    }
     if (group !== undefined && item.disabledReason === null) {
       row.addDropdown((d) =>
         d
@@ -433,6 +443,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   // Fields to protect / Data file / Advanced — a synced row's expansion, opened via its chevron.
   private renderItemExpansion(parent: HTMLElement, wrap: HTMLElement, group: SyncGroup, item: CatalogItem): void {
     const exp = parent.createDiv({ cls: "config-sync-item-exp" });
+    if (SWITCH_LIST_GROUPS.has(group.name)) this.renderLocalDecisions(exp, group, wrap, item);
     if (group.mode === "fields") {
       exp.createDiv({ cls: "config-sync-explabel", text: "Fields to protect" });
       exp.createDiv({
@@ -443,6 +454,37 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     }
     this.renderDataFileSegment(exp, group, item, wrap);
     this.renderCustomLocationSegment(exp, group, item, wrap);
+  }
+
+  // "Local decisions (this device)" — per-device exceptions for the two switch-list items
+  // (定稿 switch-exceptions.html): excepted ids never enter the store and never flip here.
+  private renderLocalDecisions(exp: HTMLElement, group: SyncGroup, wrap: HTMLElement, item: CatalogItem): void {
+    exp.createDiv({ cls: "config-sync-explabel", text: "Local decisions (this device)" });
+    exp.createDiv({
+      cls: "config-sync-expdesc",
+      text: "Marked plugins are yours to decide here — they never enter the store at capture, and sync never flips them on this device.",
+    });
+    const listEl = exp.createDiv({ cls: "config-sync-ldlist" });
+    void this.host.switchListRows(group.name).then((rows) => {
+      listEl.empty();
+      const exceptions = new Set(this.host.settings.switchExceptions[group.name] ?? []);
+      for (const r of rows) {
+        const isLocal = exceptions.has(r.id);
+        const rowEl = listEl.createDiv({ cls: `config-sync-ldrow${isLocal ? " is-local" : ""}` });
+        rowEl.createSpan({ cls: "config-sync-ldname", text: r.name });
+        rowEl.createSpan({ cls: "config-sync-ldhint", text: r.hint });
+        rowEl.createDiv({ cls: "config-sync-rule-spacer" });
+        rowEl.createSpan({ cls: "config-sync-ldstate", text: isLocal ? "local decision" : "synced" });
+        new ToggleComponent(rowEl).setValue(isLocal).onChange(async (v) => {
+          const cur = new Set(this.host.settings.switchExceptions[group.name] ?? []);
+          if (v) cur.add(r.id);
+          else cur.delete(r.id);
+          this.host.settings.switchExceptions[group.name] = [...cur].sort();
+          await this.host.saveSettings();
+          this.renderItemInto(wrap, item); // refresh badge + row tint
+        });
+      }
+    });
   }
 
   private renderDataFileSegment(exp: HTMLElement, group: SyncGroup, item: CatalogItem, wrap: HTMLElement): void {
@@ -671,6 +713,9 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     // (rootPath/remotes) only exist under "fields", and ensureSelfPresets re-forces it on
     // every commit — so offering Plain/Encrypt here would silently revert.
     const pinnedToFields = group.name === SELF_GROUP_NAME;
+    // Switch lists are pinned to Plain: exception masking reads the raw list, and encrypting an
+    // on/off list is meaningless — offering other modes would silently disable local decisions.
+    const pinnedToPlain = SWITCH_LIST_GROUPS.has(group.name);
     for (const m of modes) {
       if (m.id === "fields" && group.type !== "file") continue;
       const on = current === m.id;
@@ -681,6 +726,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       if (pinnedToFields && m.id !== "fields") {
         btn.disabled = true;
         btn.setAttribute("title", "This item always uses fields mode — device-local fields stay on each device");
+        continue;
+      }
+      if (pinnedToPlain && m.id !== "plain") {
+        btn.disabled = true;
+        btn.setAttribute("title", "Plugin on/off lists always use plain mode");
         continue;
       }
       btn.addEventListener("click", () => {

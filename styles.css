@@ -869,3 +869,25 @@ body.is-mobile .config-sync-mainbar input[type="checkbox"]:indeterminate::after 
 .config-sync-bootstrap-dismiss:hover { color: var(--text-normal); }
 
 .config-sync-expdesc { color: var(--text-faint); font-size: var(--font-ui-smaller); margin-bottom: var(--size-4-1); }
+
+/* ── Switch-list "Local decisions (this device)" (定稿 switch-exceptions.html) ── */
+.config-sync-ldlist { display: flex; flex-direction: column; gap: var(--size-2-1); }
+
+.config-sync-ldrow {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+  padding: var(--size-2-1) var(--size-4-2);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+}
+
+.config-sync-ldrow.is-local {
+  border-color: rgba(var(--color-orange-rgb), 0.4);
+  background: rgba(var(--color-orange-rgb), 0.05);
+}
+
+.config-sync-ldname { font-weight: 500; }
+.config-sync-ldhint { color: var(--text-faint); font-size: var(--font-ui-smaller); }
+.config-sync-ldstate { color: var(--text-muted); font-size: var(--font-ui-smaller); }
+.config-sync-ldrow.is-local .config-sync-ldstate { color: var(--color-orange); }
