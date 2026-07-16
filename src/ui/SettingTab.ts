@@ -365,7 +365,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         else this.expanded.add(grp.name);
         syncExpansion();
       });
-      row.settingEl.prepend(chevron); // native chevron icon, inline left of the name
+      row.nameEl.prepend(chevron); // inside the name element — never wraps onto its own line
     }
     const parts: string[] = [];
     if (item.description !== null) parts.push(item.description);
@@ -1151,21 +1151,44 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     // 定稿 feedback-trio.html: a fixed badge left of the input — green when set, caution when
     // not — replaces the old unstyled status tail buried in the description.
     this.passphraseStatusEl = setting.controlEl.createSpan({ cls: "config-sync-ppbadge" });
-    setting.controlEl.appendChild(this.passphraseStatusEl); // ensure badge precedes the input
+    let setBtn: ButtonComponent | null = null;
+    let clearBtn: ExtraButtonComponent | null = null;
+    const refreshControls = (): void => {
+      this.updatePassphraseStatus();
+      setBtn?.setDisabled(draft === ""); // empty input must not silently clear (确认 2026-07-16)
+      clearBtn?.extraSettingsEl.toggle(this.host.passphrase() !== null);
+    };
     setting.addText((t) => {
       t.inputEl.type = "password";
       t.setValue("").onChange((v) => {
         draft = v;
+        refreshControls();
       });
     });
-    setting.addButton((b) =>
+    setting.addButton((b) => {
+      setBtn = b;
       b.setButtonText("Set").onClick(() => {
-        this.host.setPassphrase(draft === "" ? null : draft);
-        this.updatePassphraseStatus();
-      })
-    );
+        if (draft === "") return;
+        this.host.setPassphrase(draft);
+        draft = "";
+        const input = setting.controlEl.querySelector("input");
+        if (input !== null) input.value = "";
+        new Notice("Passphrase set on this device");
+        refreshControls();
+      });
+    });
+    setting.addExtraButton((b) => {
+      clearBtn = b;
+      b.setIcon("x")
+        .setTooltip("Clear the passphrase on this device")
+        .onClick(() => {
+          this.host.setPassphrase(null);
+          new Notice("Passphrase cleared on this device");
+          refreshControls();
+        });
+    });
     setting.controlEl.prepend(this.passphraseStatusEl);
-    this.updatePassphraseStatus();
+    refreshControls();
   }
 
   private updatePassphraseStatus(): void {
