@@ -924,3 +924,7 @@ body.is-mobile .config-sync-mainbar input[type="checkbox"]:indeterminate::after 
   margin: var(--size-4-1) 0 var(--size-4-2);
   overflow: hidden;
 }
+
+/* Passphrase row: badge must never overlap the wrapped description (ddd.png) */
+.config-sync-ppset .setting-item-control { flex-wrap: wrap; justify-content: flex-end; row-gap: var(--size-2-1); }
+.config-sync-ppbadge { white-space: nowrap; }

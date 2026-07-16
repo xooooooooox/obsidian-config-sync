@@ -1146,6 +1146,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         .setDesc(def.desc),
       "general-passphrase"
     );
+    setting.settingEl.addClass("config-sync-ppset");
     let draft = "";
     // 定稿 feedback-trio.html: a fixed badge left of the input — green when set, caution when
     // not — replaces the old unstyled status tail buried in the description.
