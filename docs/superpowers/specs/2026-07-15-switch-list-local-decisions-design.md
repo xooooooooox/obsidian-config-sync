@@ -142,3 +142,28 @@ marking an id shrinks the shared list's coverage — a different concept from wh
 plugin's own settings item syncs, so "sync"-based wording (and the earlier "local decision")
 was rejected as ambiguous. The switch-list expansion shows ONLY this editor (the raw-JSON
 viewer and Custom location are meaningless for the fixed-path id lists and are hidden).
+
+## Amendment: pass-through capture (甲, 确认 2026-07-16)
+
+Real-device acceptance surfaced an incoherence: the capture WRITE path replaced the store list
+with `local − exceptions`, while the skip-if-unchanged check compared with exceptions masked on
+BOTH sides. A stale excluded id already in the store list therefore survived until any
+unrelated list change triggered a real write — at which point it was silently deleted (and, had
+another device legitimately synced that id, deleted THAT device's shared entry: ping-pong).
+
+**Decision (甲): capture is pass-through for excluded ids.**
+
+```ts
+export function captureSwitchList(local: SwitchList, store: SwitchList | null, exceptions: string[]): SwitchList
+```
+
+- Non-excluded ids: follow local (whole-list mirror as always).
+- Excluded ids: copy the store's existing state verbatim — present stays present, absent stays
+  absent; `store === null` (first capture / unreadable) contributes nothing.
+- Consequence: an excluding device can neither add NOR remove an excluded id from the shared
+  list ("不参与" made exact). B capturing with exceptions never deletes A's shared entries.
+- The masked skip check is now provably consistent with the write: masked-equal ⟺ the
+  would-be-written content equals the store. Status semantics unchanged.
+- Stale entries from before an exclusion are retained by design (not retroactively cleared);
+  removing an id from the shared list is a normal un-excluded operation. A dedicated "remove
+  from shared list" affordance is deferred until needed.
