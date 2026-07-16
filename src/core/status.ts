@@ -210,11 +210,20 @@ export async function diffRemote(ctx: CoreContext, reader: ExternalStoreReader):
     }
     return e;
   };
+  const filesMatch = (name: string, remoteContent: string, localContent: string): boolean => {
+    if (remoteContent === localContent) return true;
+    // Switch-list store copies are order-insensitive: each device captures in its own
+    // store-stable order, so equal membership in a different order is not a difference.
+    if (!SWITCH_LIST_GROUPS.has(name)) return false;
+    const a = parseSwitchList(remoteContent);
+    const b = parseSwitchList(localContent);
+    return a !== null && b !== null && switchListsEqual(a, b, []);
+  };
   for (const rel of remoteFiles) {
     const { name, itemRel } = resolve(rel);
     if (!localRels.has(rel)) {
       entry(name).changes.added.push(itemRel);
-    } else if ((await reader.readFile(rel)) !== (await ctx.io.read(`${ctx.rootPath}/${rel}`))) {
+    } else if (!filesMatch(name, await reader.readFile(rel), await ctx.io.read(`${ctx.rootPath}/${rel}`))) {
       entry(name).changes.updated.push(itemRel);
     }
   }

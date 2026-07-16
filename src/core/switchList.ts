@@ -89,6 +89,18 @@ export function captureSwitchList(local: SwitchList, store: SwitchList | null, e
   }
 }
 
+// Display-only canonical view for switch-list diffs: membership compares as a set, so diffs
+// render both sides sorted — a real difference shows as adds/removes instead of being buried
+// in per-device ordering noise. Unparseable content passes through untouched.
+export function switchListSortedView(content: string): string {
+  const parsed = parseSwitchList(content);
+  if (parsed === null) return content;
+  if (Array.isArray(parsed)) return JSON.stringify([...parsed].sort(), null, 2) + "\n";
+  const sorted: Record<string, boolean> = {};
+  for (const k of Object.keys(parsed).sort()) sorted[k] = parsed[k] ?? false;
+  return JSON.stringify(sorted, null, 2) + "\n";
+}
+
 /**
  * Apply: merge store and local based on exceptions.
  * Arrays: (store − exceptions) in store order, then (local ∩ exceptions) in local order.

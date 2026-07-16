@@ -18,6 +18,32 @@ function dirGroup(name: string, overrides: Partial<SyncGroup> = {}): SyncGroup {
 }
 
 describe("classifyMerge", () => {
+  it("switch-list files with equal membership in a different order classify identical, not conflict", () => {
+    const g = group("community-plugins");
+    const local = new Map([[storeRel("community-plugins"), '["a","b","c"]']]);
+    const remote = new Map([[storeRel("community-plugins"), '["c",\n "a", "b"]']]);
+    const plan = classifyMerge([g], local, [g], remote);
+    expect(plan.conflicts).toEqual([]);
+    expect(plan.auto.identical).toContain(`file:${storeRel("community-plugins")}`);
+  });
+
+  it("switch-list files with a real membership difference still conflict", () => {
+    const g = group("community-plugins");
+    const local = new Map([[storeRel("community-plugins"), '["a","b"]']]);
+    const remote = new Map([[storeRel("community-plugins"), '["a","b","c"]']]);
+    const plan = classifyMerge([g], local, [g], remote);
+    expect(plan.conflicts).toHaveLength(1);
+    expect(plan.conflicts[0]?.kind).toBe("file");
+  });
+
+  it("non-switch-list files keep byte comparison (reordered JSON arrays conflict)", () => {
+    const g = group("hotkeys");
+    const local = new Map([[storeRel("hotkeys"), '["a","b"]']]);
+    const remote = new Map([[storeRel("hotkeys"), '["b","a"]']]);
+    const plan = classifyMerge([g], local, [g], remote);
+    expect(plan.conflicts).toHaveLength(1);
+  });
+
   it("empty-empty edge: all empty inputs produce an empty plan", () => {
     const plan = classifyMerge([], new Map(), [], new Map());
     expect(plan).toEqual({

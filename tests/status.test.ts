@@ -196,6 +196,21 @@ describe("diffRemote", () => {
     expect(byName[""]).toBeUndefined(); // lock stays metadata
   });
 
+  it("treats switch-list store files as sets — reordered membership is not a difference", async () => {
+    const { io, ctx } = setup();
+    const SWITCH_MANIFEST = JSON.stringify({
+      version: 1,
+      groups: [{ name: "community-plugins", path: "{configDir}/community-plugins.json", type: "file", devices: "all" }],
+    });
+    io.seed({ ".obs/community-plugins.json": '["a","b","c"]', "cs/store/configdir/community-plugins.json": '["a","b","c"]' });
+    await writeGroups(ctx, parseSyncManifest(SWITCH_MANIFEST).groups);
+    const reordered = { "store/configdir/community-plugins.json": '["c","a","b"]' };
+    expect(await diffRemote(ctx, fakeReader(reordered))).toEqual([]);
+    const membershipDiff = { "store/configdir/community-plugins.json": '["c","a","b","d"]' };
+    const entries = await diffRemote(ctx, fakeReader(membershipDiff));
+    expect(entries.find((e) => e.group === "community-plugins")?.changes.updated).toEqual(["community-plugins.json"]);
+  });
+
   it("never reports the store-metadata pseudo-entry, even when bookkeeping files differ", async () => {
     const { io, ctx } = await seededAndCaptured();
     const remote: Record<string, string> = {

@@ -650,6 +650,25 @@ describe("planImport / applyImport", () => {
     expect(results.every((r) => r.status === "ok")).toBe(true);
   });
 
+  it("reordered switch-list membership pulls conflict-free (real-vault repro 2026-07-17)", async () => {
+    const { io, ctx } = setup();
+    const SWITCH_GROUP: SyncGroup = { name: "community-plugins", path: "{configDir}/community-plugins.json", type: "file", devices: "all" };
+    await writeGroups(ctx, [SWITCH_GROUP]);
+    io.seed({ "cs/store/configdir/community-plugins.json": '["obsidian-image-toolkit","ioto-tasks-center","config-sync"]' });
+    const remote = {
+      "store/configdir/plugins/config-sync/data.json": selfDataJson([SWITCH_GROUP]),
+      "store/configdir/community-plugins.json": '["ioto-tasks-center","config-sync","obsidian-image-toolkit"]', // same set, different order
+    };
+
+    const pending = await planImport(ctx, fakeReader(remote));
+    expect(pending.plan.conflicts).toEqual([]);
+    expect(pending.plan.auto.identical).toContain("file:store/configdir/community-plugins.json");
+    // local bytes stay — no churn from the pull
+    const results = await applyImport(ctx, pending, []);
+    expect(results.every((r) => r.status === "ok")).toBe(true);
+    expect(await io.read("cs/store/configdir/community-plugins.json")).toBe('["obsidian-image-toolkit","ioto-tasks-center","config-sync"]');
+  });
+
   it("conflicted pull with choices=['remote'] writes the remote side", async () => {
     const { io, ctx } = setup();
     await writeGroups(ctx, [HOTKEYS_GROUP]);
