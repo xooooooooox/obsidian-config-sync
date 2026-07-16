@@ -1147,6 +1147,10 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       "general-passphrase"
     );
     let draft = "";
+    // 定稿 feedback-trio.html: a fixed badge left of the input — green when set, caution when
+    // not — replaces the old unstyled status tail buried in the description.
+    this.passphraseStatusEl = setting.controlEl.createSpan({ cls: "config-sync-ppbadge" });
+    setting.controlEl.appendChild(this.passphraseStatusEl); // ensure badge precedes the input
     setting.addText((t) => {
       t.inputEl.type = "password";
       t.setValue("").onChange((v) => {
@@ -1159,13 +1163,16 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         this.updatePassphraseStatus();
       })
     );
-    this.passphraseStatusEl = setting.descEl.createDiv({ cls: "config-sync-passphrase-status" });
+    setting.controlEl.prepend(this.passphraseStatusEl);
     this.updatePassphraseStatus();
   }
 
   private updatePassphraseStatus(): void {
     if (this.passphraseStatusEl === null) return;
-    this.passphraseStatusEl.setText(this.host.passphrase() !== null ? "set on this device" : "not set");
+    const set = this.host.passphrase() !== null;
+    this.passphraseStatusEl.setText(set ? "✓ Set on this device" : "Not set");
+    this.passphraseStatusEl.toggleClass("is-set", set);
+    this.passphraseStatusEl.toggleClass("is-unset", !set);
   }
 
   private renderGroupsReadError(containerEl: HTMLElement): boolean {
