@@ -604,13 +604,12 @@ export default class ConfigSyncPlugin extends Plugin {
   }
 
   private async installViaBrat(id: string, repo: string): Promise<string> {
-    const brat = this.bratInstance();
-    const addPlugin = brat?.betaPlugins?.addPlugin;
-    if (brat === null || typeof addPlugin !== "function") {
+    const beta = this.bratInstance()?.betaPlugins;
+    if (beta === undefined || typeof beta.addPlugin !== "function") {
       throw new Error(`"${id}" is managed by BRAT (${repo}) — enable BRAT and retry, or run BRAT's update command`);
     }
     // enableAfterInstall stays false: enabling is config-sync's own On-apply decision.
-    const ok = await addPlugin.call(brat.betaPlugins, repo, true, false, false, "", false, false, "");
+    const ok = await beta.addPlugin(repo, true, false, false, "", false, false, "");
     await this.pluginHost().reloadPluginManifests();
     const version = this.pluginHost().getInstalledPluginVersion(id);
     if (!ok || version === null) {
