@@ -40,7 +40,22 @@ interface DerivedKeys {
   mac: CryptoKey;
 }
 
+// PBKDF2 at 210k iterations is intentionally expensive — but every stored envelope reuses its
+// fixed salt, so status checks re-derive the SAME keys on every refresh. Memoize by
+// passphrase+salt (promise-cached to dedupe concurrent derivations; bounded).
+const derivedKeyCache = new Map<string, Promise<DerivedKeys>>();
+
 async function deriveKeys(passphrase: string, salt: Uint8Array): Promise<DerivedKeys> {
+  const cacheId = `${passphrase}\u0000${Array.from(salt).join(",")}`;
+  const hit = derivedKeyCache.get(cacheId);
+  if (hit !== undefined) return hit;
+  const derived = deriveKeysUncached(passphrase, salt);
+  if (derivedKeyCache.size >= 256) derivedKeyCache.clear();
+  derivedKeyCache.set(cacheId, derived);
+  return derived;
+}
+
+async function deriveKeysUncached(passphrase: string, salt: Uint8Array): Promise<DerivedKeys> {
   requireWebCrypto();
   const subtle = globalThis.crypto.subtle;
   const base = await subtle.importKey("raw", new TextEncoder().encode(passphrase), "PBKDF2", false, ["deriveBits"]);

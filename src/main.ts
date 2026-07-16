@@ -244,7 +244,9 @@ export default class ConfigSyncPlugin extends Plugin {
   }
 
   private async openSyncMenu(evt: MouseEvent): Promise<void> {
-    if (this.settings.statusInMenu) await this.refreshLocalStatus(); // never throws
+    // Never block the menu on a full status scan (each encrypted-fields item costs a PBKDF2
+    // derivation): show last-known counts instantly, refresh in the background.
+    if (this.settings.statusInMenu) void this.refreshLocalStatus(); // never throws
     const s = this.localStatuses ?? [];
     const { up, down } = bucketCounts(s);
     const menu = new Menu();
