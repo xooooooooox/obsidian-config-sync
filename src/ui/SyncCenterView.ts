@@ -27,6 +27,7 @@ import {
   Direction,
   effectiveDirection,
 } from "./panelModel";
+import { renderDiffPanel } from "./diffView";
 import { renderReportContent, renderReportPills } from "./reportContent";
 
 const CATEGORY_ORDER: ItemCategory[] = ["obsidian", "core", "community", "custom"];
@@ -54,6 +55,9 @@ export interface SyncCenterHost {
   dismissBootstrap(): void;
   adoptConfiguration(): Promise<GroupResult[] | null>;
   switchLocalDecisions(name: string): string[]; // [] for non-switch-list groups
+  // Contents for an inline change diff: base = current state of the target side, produced =
+  // what the pending action (capture/apply) would write. null = no diff available.
+  diffPair(name: string, rel: string, dir: Direction): Promise<{ base: string; produced: string } | null>;
 }
 
 function relativeAge(ms: number): string {
@@ -795,12 +799,12 @@ export class SyncCenterView extends ItemView {
     const section = this.sectionOf(r.group.name);
     if (section === "not-installed") {
       this.renderPolicySeg(detail, r, a); // apply-only: no direction toggle
-      this.renderCappedChanges(detail, status.changes);
+      this.renderCappedChanges(detail, r, status.changes);
       return;
     }
     this.renderDirectionToggle(detail, r);
     if (section !== "main" && this.effDir(r) === "apply") this.renderPolicySeg(detail, r, a);
-    this.renderCappedChanges(detail, status.changes);
+    this.renderCappedChanges(detail, r, status.changes);
   }
 
   private renderPolicySeg(detail: HTMLElement, r: StatusRow, a: Availability): void {
@@ -854,11 +858,38 @@ export class SyncCenterView extends ItemView {
     segBtn("apply", "↓ Apply store", "Apply store version (overwrites local)");
   }
 
-  private renderCappedChanges(detail: HTMLElement, changes: FileChanges): void {
+  private renderCappedChanges(detail: HTMLElement, r: StatusRow, changes: FileChanges): void {
     const { shown, rest } = capFileEntries(changes, 10);
     const renderEntry = (e: CappedEntry): void => {
-      const glyph = e.kind === "add" ? "+" : e.kind === "upd" ? "~" : "−";
-      detail.createDiv({ cls: `is-${e.kind}`, text: `${glyph} ${e.name}` });
+      const line = detail.createDiv({ cls: `is-${e.kind}`, text: `${e.kind === "add" ? "+" : e.kind === "upd" ? "~" : "−"} ${e.name}` });
+      if (e.kind === "del") return; // nothing to diff for a pending deletion
+      line.addClass("config-sync-diffable");
+      const hint = line.createSpan({ cls: "config-sync-diffhint", text: " · diff ▾" });
+      let panel: HTMLElement | null = null;
+      line.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        if (panel !== null) {
+          panel.remove();
+          panel = null;
+          hint.setText(" · diff ▾");
+          return;
+        }
+        hint.setText(" · diff ▴");
+        const p = createDiv({ cls: "config-sync-inline-diff" });
+        panel = p;
+        line.insertAdjacentElement("afterend", p);
+        void this.host.diffPair(r.group.name, e.name, this.effDir(r)).then((pair) => {
+          if (panel !== p) return; // closed while loading
+          if (pair === null) {
+            p.createDiv({ cls: "config-sync-expand-note", text: "no diff available" });
+            return;
+          }
+          const dir = this.effDir(r);
+          const leftLabel = dir === "capture" ? "store" : "this device";
+          const rightLabel = dir === "capture" ? "this device (what capture would write)" : "store (what apply would write)";
+          renderDiffPanel(p, pair.base, pair.produced, leftLabel, rightLabel, e.name);
+        });
+      });
     };
     for (const e of shown) renderEntry(e);
     if (rest.length > 0) {

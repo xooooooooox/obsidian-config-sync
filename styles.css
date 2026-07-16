@@ -914,3 +914,13 @@ body.is-mobile .config-sync-mainbar input[type="checkbox"]:indeterminate::after 
   background: rgba(var(--color-orange-rgb), 0.12);
   border: 1px solid rgba(var(--color-orange-rgb), 0.4);
 }
+
+/* ── Inline change diff (Sync Center rows, 定稿 feedback-trio) ── */
+.config-sync-diffable { cursor: pointer; }
+.config-sync-diffhint { color: var(--text-faint); font-family: var(--font-ui); font-size: var(--font-ui-smaller); }
+.config-sync-inline-diff {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  margin: var(--size-4-1) 0 var(--size-4-2);
+  overflow: hidden;
+}
