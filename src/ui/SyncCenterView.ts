@@ -22,7 +22,6 @@ import {
   SectionKind,
   sectionForItem,
   stageableRow,
-  stageableState,
   versionLine,
   visibleUnderFilter,
   Direction,

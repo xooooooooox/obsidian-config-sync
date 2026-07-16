@@ -324,10 +324,22 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       t.setValue(allOn)
         .setTooltip(allOn ? "Sync none" : "Sync all")
         .onChange(async (v) => {
+          // Enabling in bulk runs the same sensitive-detection seeding as the per-item toggle.
+          const additions: SyncGroup[] = [];
+          if (v) {
+            for (const item of tickable) {
+              if (findGroupByName(this.groups, item.name) === undefined) additions.push(await this.seededGroupFor(item));
+            }
+          }
           await this.commitGroups((draft) => {
-            const next = toggleSection(draft, sec.items, v);
-            draft.length = 0;
-            draft.push(...next);
+            if (v) {
+              const have = new Set(draft.map((g) => g.name));
+              for (const g of additions) if (!have.has(g.name)) draft.push(g);
+            } else {
+              const next = toggleSection(draft, sec.items, false);
+              draft.length = 0;
+              draft.push(...next);
+            }
           });
           this.refresh();
         });
@@ -337,6 +349,25 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private renderChecklistRow(listEl: HTMLElement, item: CatalogItem): void {
     const wrap = listEl.createDiv({ cls: "config-sync-item-wrap" });
     this.renderItemInto(wrap, item);
+  }
+
+  // Builds the group a freshly enabled item gets. Sensitive items default to Fields mode with
+  // detection-seeded rules (encrypt the flagged keys, strip the rest) instead of plain —
+  // 确认 2026-07-16. Shared by the per-item toggle and the section "Sync all" toggle: bulk
+  // enable must not skip the seeding (real-vault finding 2026-07-16).
+  private async seededGroupFor(item: CatalogItem): Promise<SyncGroup> {
+    const g = groupForItem(item.name, item.path, item.type, item.description, item.label);
+    if (g.type === "file" && !SWITCH_LIST_GROUPS.has(item.name)) {
+      const scan = this.detections.get(item.name) ?? (await this.host.detectSensitive(g));
+      this.detections.set(item.name, scan);
+      const existing = g.fields ?? [];
+      const seeded = defaultFieldsFromDetection(scan.keys).filter((r) => !existing.some((f) => f.pattern === r.pattern));
+      if (seeded.length > 0) {
+        g.mode = "fields";
+        g.fields = [...existing, ...seeded];
+      }
+    }
+    return g;
   }
 
   // Rebuilds one item's row (chevron + Setting + mode segment + expansion) in place. Mode-segment
@@ -424,22 +455,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
             return;
           }
         }
-        let toAdd: SyncGroup | null = null;
-        if (v) {
-          toAdd = groupForItem(item.name, item.path, item.type, item.description, item.label);
-          // Sensitive items default to Fields mode with detection-seeded rules (encrypt the
-          // flagged keys, strip the rest) instead of plain — 确认 2026-07-16.
-          if (toAdd.type === "file" && !SWITCH_LIST_GROUPS.has(item.name)) {
-            const scan = this.detections.get(item.name) ?? (await this.host.detectSensitive(toAdd));
-            this.detections.set(item.name, scan);
-            const existing = toAdd.fields ?? [];
-            const seeded = defaultFieldsFromDetection(scan.keys).filter((r) => !existing.some((f) => f.pattern === r.pattern));
-            if (seeded.length > 0) {
-              toAdd.mode = "fields";
-              toAdd.fields = [...existing, ...seeded];
-            }
-          }
-        }
+        const toAdd: SyncGroup | null = v ? await this.seededGroupFor(item) : null;
         await this.commitGroups((draft) => {
           if (toAdd !== null) draft.push(toAdd);
           else {
@@ -737,6 +753,10 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   }
 
   private renderModeSegment(controlEl: HTMLElement, group: SyncGroup, afterChange: () => void): void {
+    // Switch lists are pinned to Plain: exception masking reads the raw list, and encrypting an
+    // on/off list is meaningless. A three-button segment with one forced choice is noise, so
+    // these rows render no segment at all.
+    if (SWITCH_LIST_GROUPS.has(group.name)) return;
     const seg = controlEl.createDiv({ cls: "config-sync-seg" });
     const modes: { id: SyncMode; label: string }[] = [
       { id: "plain", label: "Plain" },
@@ -748,9 +768,6 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     // (rootPath/remotes) only exist under "fields", and ensureSelfPresets re-forces it on
     // every commit — so offering Plain/Encrypt here would silently revert.
     const pinnedToFields = group.name === SELF_GROUP_NAME;
-    // Switch lists are pinned to Plain: exception masking reads the raw list, and encrypting an
-    // on/off list is meaningless — offering other modes would silently disable local decisions.
-    const pinnedToPlain = SWITCH_LIST_GROUPS.has(group.name);
     for (const m of modes) {
       if (m.id === "fields" && group.type !== "file") continue;
       const on = current === m.id;
@@ -761,11 +778,6 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       if (pinnedToFields && m.id !== "fields") {
         btn.disabled = true;
         btn.setAttribute("title", "This item always uses fields mode — device-local fields stay on each device");
-        continue;
-      }
-      if (pinnedToPlain && m.id !== "plain") {
-        btn.disabled = true;
-        btn.setAttribute("title", "Plugin on/off lists always use plain mode");
         continue;
       }
       btn.addEventListener("click", () => {
