@@ -697,6 +697,16 @@ export async function applyImport(
   const remoteLock = remoteLockRaw !== null ? parseStoreLock(remoteLockRaw) : null;
   if (localLock !== null || remoteLock !== null) {
     const mergedGroups: StoreLock["groups"] = { ...(localLock?.groups ?? {}) };
+    // Content-identical groups follow the remote's capture lineage too: a version-refresh
+    // capture on the other device updates ONLY the lock, and that update must survive the
+    // pull or the Outdated flow never fires here (确认 2026-07-16; B-newer edge in spec).
+    for (const id of plan.auto.identical) {
+      if (id.startsWith("group:")) remoteWonNames.add(id.slice("group:".length));
+      if (id.startsWith("file:")) {
+        const { name } = groupForStoreRel(groups, id.slice("file:".length));
+        if (name !== "") remoteWonNames.add(name);
+      }
+    }
     for (const name of remoteWonNames) {
       const entry = remoteLock?.groups[name];
       if (entry !== undefined) mergedGroups[name] = entry;

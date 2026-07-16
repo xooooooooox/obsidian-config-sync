@@ -30,6 +30,7 @@ import { applyTransform, captureTransform, scanSensitive, SensitiveScan } from "
 import { PkmMode, PkmProbe, resolveEffectiveMode, resolveRootPath } from "./core/pkm";
 import { bucketCounts, checkRemote, diffRemote, GroupStatus, RemoteCheck, statusForGroups } from "./core/status";
 import { Remote, RibbonButtons, StoreLock, SyncGroup } from "./core/types";
+import { presentedState } from "./ui/panelModel";
 import { ConflictModal } from "./ui/ConflictModal";
 import { ReportModal } from "./ui/ReportModal";
 import { SYNC_CENTER_VIEW_TYPE, SyncCenterHost, SyncCenterView } from "./ui/SyncCenterView";
@@ -81,6 +82,7 @@ export default class ConfigSyncPlugin extends Plugin {
   private lastResolvedRoot: string | null = null;
   private installFn: PluginInstallFn | null = null;
   localStatuses: GroupStatus[] | null = null;
+  private presentedStatuses: GroupStatus[] | null = null;
   private lastGroups: SyncGroup[] | null = null;
   remoteChecks = new Map<string, { check: RemoteCheck; at: number }>();
   private storeEventTimer: number | null = null;
@@ -171,7 +173,22 @@ export default class ConfigSyncPlugin extends Plugin {
       const ctx = await this.coreContext();
       const manifest = await loadManifest(ctx);
       const device = Platform.isMobile ? ("mobile" as const) : ("desktop" as const);
-      this.localStatuses = await statusForGroups(ctx, groupsForDevice(manifest, device));
+      const scoped = groupsForDevice(manifest, device);
+      this.localStatuses = await statusForGroups(ctx, scoped);
+      // Presented buckets for the ribbon dot: version-ahead in-sync items count as to-capture,
+      // matching the panel (0.23.4/0.23.5) — no crypto cost, just a lock read.
+      let lock: StoreLock | null = null;
+      try {
+        lock = await loadLock(ctx);
+      } catch {
+        lock = null;
+      }
+      const host = this.pluginHost();
+      this.presentedStatuses = this.localStatuses.map((st) => {
+        const g = scoped.find((x) => x.name === st.group);
+        const drift = g !== undefined ? availabilityForGroup(g, host, lock).drift : null;
+        return { ...st, state: presentedState(st.state, drift) };
+      });
       await this.backfillLabels(ctx);
     } catch (e) {
       console.error("Config Sync: status refresh failed", e);
@@ -231,7 +248,7 @@ export default class ConfigSyncPlugin extends Plugin {
   updateRibbonDot(): void {
     const el = this.mainRibbonEl;
     if (el === null) return;
-    const s = this.localStatuses ?? [];
+    const s = this.presentedStatuses ?? this.localStatuses ?? [];
     const { up, down } = bucketCounts(s);
     const remoteNewer = [...this.remoteChecks.entries()].filter(([, v]) => v.check.state === "remote-newer").map(([k]) => k);
     el.toggleClass("config-sync-dot-capture", up > 0);
@@ -380,7 +397,9 @@ export default class ConfigSyncPlugin extends Plugin {
         try {
           const ctx = await this.coreContext();
           const results = await capture(ctx, names, onProgress);
-          await this.refreshLocalStatus();
+          // Background: the panel reloads and rescans anyway — blocking here just pins the
+          // progress bar at N/N through a second full scan.
+          void this.refreshLocalStatus();
           return results;
         } catch (e) {
           new Notice(`Config Sync capture failed: ${(e as Error).message}`, 10000);
@@ -396,7 +415,7 @@ export default class ConfigSyncPlugin extends Plugin {
             // refreshing status so the running plugin picks up the new contract immediately.
             await this.loadSettings();
           }
-          await this.refreshLocalStatus();
+          void this.refreshLocalStatus(); // background — see captureItems
           return results;
         } catch (e) {
           new Notice(`Config Sync apply failed: ${(e as Error).message}`, 10000);
@@ -409,7 +428,19 @@ export default class ConfigSyncPlugin extends Plugin {
       refreshRemoteChecks: () => this.refreshRemoteChecks(),
       deepDiff: async (remote) => {
         const ctx = await this.coreContext();
-        return diffRemote(ctx, await this.createReader(remote));
+        const reader = await this.createReader(remote);
+        const entries = await diffRemote(ctx, reader);
+        // A lock-only delta (version-refresh capture on the other side) is real pull payload
+        // even when every store file matches — surface it so the hint isn't contradictory.
+        let lockDiffers = false;
+        try {
+          const remoteLock = (await reader.listFiles()).includes("store.lock.json") ? await reader.readFile("store.lock.json") : null;
+          const localLock = (await ctx.io.exists(`${ctx.rootPath}/store.lock.json`)) ? await ctx.io.read(`${ctx.rootPath}/store.lock.json`) : null;
+          lockDiffers = (remoteLock ?? "") !== (localLock ?? "");
+        } catch {
+          lockDiffers = false;
+        }
+        return { entries, lockDiffers };
       },
       pullFrom: async (remote) => {
         try {

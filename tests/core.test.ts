@@ -971,6 +971,52 @@ const CORE_MANIFEST = JSON.stringify({
   groups: [{ name: "core-plugins", path: "{configDir}/core-plugins.json", type: "file", devices: "all" }],
 });
 
+describe("pull lock adoption for identical groups (version-refresh chain)", () => {
+  it("an identical-only pull adopts the remote lock entries (version bump arrives)", async () => {
+    const { io, ctx } = setup();
+    io.seed({
+      ".obs/hotkeys.json": '{"a":2}',
+      "cs/store/configdir/hotkeys.json": '{"a":2}',
+      "cs/store.lock.json": JSON.stringify({ capturedAt: "old", groups: { hotkeys: { sourceAppVersion: "1.0.0" } } }),
+    });
+    await seedGroups(ctx, JSON.stringify({ version: 1, groups: [{ name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all" }] }));
+    const remoteFiles: Record<string, string> = {
+      "store/configdir/hotkeys.json": '{"a":2}', // identical content
+      "store.lock.json": JSON.stringify({ capturedAt: "newer", groups: { hotkeys: { sourceAppVersion: "2.0.0" } } }),
+    };
+    const reader: ExternalStoreReader = {
+      listFiles: async () => Object.keys(remoteFiles),
+      readFile: async (rel) => remoteFiles[rel]!,
+    };
+    const pending = await planImport(ctx, reader);
+    expect(pending.plan.conflicts).toEqual([]);
+    await applyImport(ctx, pending, []);
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { capturedAt: string; groups: Record<string, { sourceAppVersion?: string }> };
+    expect(lock.groups["hotkeys"]?.sourceAppVersion).toBe("2.0.0"); // adopted despite zero file writes
+    expect(lock.capturedAt).toBe("newer");
+  });
+
+  it("locally-kept groups keep their local lock entries", async () => {
+    const { io, ctx } = setup();
+    io.seed({
+      ".obs/hotkeys.json": '{"a":2}',
+      "cs/store/configdir/hotkeys.json": '{"local":"only"}', // differs → conflict
+      "cs/store.lock.json": JSON.stringify({ capturedAt: "old", groups: { hotkeys: { sourceAppVersion: "1.0.0" } } }),
+    });
+    await seedGroups(ctx, JSON.stringify({ version: 1, groups: [{ name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all" }] }));
+    const remoteFiles: Record<string, string> = {
+      "store/configdir/hotkeys.json": '{"remote":"side"}',
+      "store.lock.json": JSON.stringify({ capturedAt: "newer", groups: { hotkeys: { sourceAppVersion: "2.0.0" } } }),
+    };
+    const reader: ExternalStoreReader = { listFiles: async () => Object.keys(remoteFiles), readFile: async (rel) => remoteFiles[rel]! };
+    const pending = await planImport(ctx, reader);
+    expect(pending.plan.conflicts.length).toBe(1);
+    await applyImport(ctx, pending, ["local"]); // keep local content
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, { sourceAppVersion?: string }> };
+    expect(lock.groups["hotkeys"]?.sourceAppVersion).toBe("1.0.0"); // content stayed local → lock stays local
+  });
+});
+
 describe("switch-list exceptions", () => {
   describe("capture (community-plugins array)", () => {
     it("strips the excepted id from the store copy while the local file keeps it", async () => {

@@ -48,7 +48,7 @@ export interface SyncCenterHost {
   remotes(): Remote[]; // [] on mobile
   remoteCheck(name: string): { check: RemoteCheck; at: number } | undefined;
   refreshRemoteChecks(): Promise<void>;
-  deepDiff(remote: Remote): Promise<RemoteDiffEntry[]>;
+  deepDiff(remote: Remote): Promise<{ entries: RemoteDiffEntry[]; lockDiffers: boolean }>;
   pullFrom(remote: Remote): Promise<GroupResult[] | null>;
   pushTo(remote: Remote): Promise<GroupResult[] | null>;
   bootstrapOffer(): Promise<{ itemCount: number; capturedAt: string | null } | null>;
@@ -1021,8 +1021,11 @@ export class SyncCenterView extends ItemView {
     detail.createDiv({ cls: "config-sync-remote-comparing", text: "comparing…" });
     const gen = this.renderGen;
     let entries: RemoteDiffEntry[];
+    let lockDiffers = false;
     try {
-      entries = await this.host.deepDiff(remote);
+      const dd = await this.host.deepDiff(remote);
+      entries = dd.entries;
+      lockDiffers = dd.lockDiffers;
     } catch (e) {
       if (gen !== this.renderGen || this.panelScope.kind !== "remote" || this.panelScope.name !== remote.name) return;
       detail.empty();
@@ -1050,7 +1053,12 @@ export class SyncCenterView extends ItemView {
     const matchNames = this.groups.filter((g) => !changedNames.has(g.name)).map((g) => g.name);
     const matched = matchNames.length;
     if (entries.length === 0) {
-      detail.createDiv({ cls: "config-sync-unchanged", text: "✓ remote matches the local store" });
+      detail.createDiv({
+        cls: "config-sync-unchanged",
+        text: lockDiffers
+          ? "✓ contents match — remote has newer version info; Pull refreshes it"
+          : "✓ remote matches the local store",
+      });
     } else if (matched > 0) {
       const line = detail.createDiv({
         cls: "config-sync-unchanged",
