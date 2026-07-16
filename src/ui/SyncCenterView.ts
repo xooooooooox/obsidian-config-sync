@@ -16,6 +16,7 @@ import {
   nosettingsLineText,
   PanelFilter,
   policyOptions,
+  presentedState,
   SECTION_NOTES,
   SECTION_TITLES,
   SectionKind,
@@ -26,6 +27,7 @@ import {
   Direction,
   effectiveDirection,
 } from "./panelModel";
+import { renderDiffPanel } from "./diffView";
 import { renderReportContent, renderReportPills } from "./reportContent";
 
 const CATEGORY_ORDER: ItemCategory[] = ["obsidian", "core", "community", "custom"];
@@ -53,6 +55,9 @@ export interface SyncCenterHost {
   dismissBootstrap(): void;
   adoptConfiguration(): Promise<GroupResult[] | null>;
   switchLocalDecisions(name: string): string[]; // [] for non-switch-list groups
+  // Contents for an inline change diff: base = current state of the target side, produced =
+  // what the pending action (capture/apply) would write. null = no diff available.
+  diffPair(name: string, rel: string, dir: Direction): Promise<{ base: string; produced: string } | null>;
 }
 
 function relativeAge(ms: number): string {
@@ -225,7 +230,12 @@ export class SyncCenterView extends ItemView {
   }
 
   private effDir(r: StatusRow): Direction {
-    return effectiveDirection(r.status.state, this.directionOverride.get(r.group.name));
+    return effectiveDirection(this.presState(r), this.directionOverride.get(r.group.name));
+  }
+
+  // Presentation state: version-ahead in-sync rows surface as to-capture (定稿 feedback-trio).
+  private presState(r: StatusRow): GroupState {
+    return presentedState(r.status.state, this.availOf(r.group.name).drift);
   }
 
   private render(gen: number): void {
@@ -537,7 +547,7 @@ export class SyncCenterView extends ItemView {
   }
 
   private visibleRows(scoped: StatusRow[]): StatusRow[] {
-    return scoped.filter((r) => visibleUnderFilter(r.status.state, this.filter) && matchesSearch(`${this.host.displayName(r.group.name, r.group.label)} ${r.group.name}`, this.search));
+    return scoped.filter((r) => visibleUnderFilter(this.presState(r), this.filter) && matchesSearch(`${this.host.displayName(r.group.name, r.group.label)} ${r.group.name}`, this.search));
   }
 
   private renderListInto(listHost: HTMLElement, scoped: StatusRow[]): void {
@@ -546,9 +556,9 @@ export class SyncCenterView extends ItemView {
     const visible = this.visibleRows(scoped);
     const searching = this.search.trim() !== "";
     if (this.filter === "all" && !searching) {
-      const active = visible.filter((r) => r.status.state !== "in-sync" && r.status.state !== "no-settings");
-      const insync = visible.filter((r) => r.status.state === "in-sync");
-      const nosettings = visible.filter((r) => r.status.state === "no-settings");
+      const active = visible.filter((r) => this.presState(r) !== "in-sync" && this.presState(r) !== "no-settings");
+      const insync = visible.filter((r) => this.presState(r) === "in-sync");
+      const nosettings = visible.filter((r) => this.presState(r) === "no-settings");
       for (const r of active) this.renderItemRow(card, r);
       this.renderTrailingLine(card, insync, sessionUi.insyncOpen, (n, open) => insyncLineText(n, open));
       this.renderTrailingLine(card, nosettings, sessionUi.nosettingsOpen, (n, open) => nosettingsLineText(n, open));
@@ -575,7 +585,7 @@ export class SyncCenterView extends ItemView {
   // Tri-state select-all over the currently visible checkable rows (scope + filter + search).
   private checkableRows(scoped: StatusRow[]): string[] {
     return this.visibleRows(scoped)
-      .filter((r) => r.status.state !== "in-sync" && r.status.state !== "no-settings" && r.status.state !== "locked")
+      .filter((r) => stageableState(this.presState(r)))
       .map((r) => r.group.name);
   }
 
@@ -623,8 +633,8 @@ export class SyncCenterView extends ItemView {
     const head = fold.createDiv({ cls: "config-sync-section-head" });
     head.createSpan({ cls: "config-sync-row-chevron", text: open ? "▾" : "▸" });
     head.createSpan({ cls: "config-sync-section-title", text: SECTION_TITLES[kind] });
-    const insync = matches.filter((r) => r.status.state === "in-sync");
-    const checkable = matches.filter((r) => r.status.state !== "in-sync" && r.status.state !== "no-settings" && r.status.state !== "locked");
+    const insync = matches.filter((r) => this.presState(r) === "in-sync");
+    const checkable = matches.filter((r) => stageableState(this.presState(r)));
     const countText = this.searching() ? `${matches.length} of ${rows.length}` : `${rows.length - insync.length}`;
     head.createSpan({ cls: "config-sync-pill is-neutral", text: countText });
     if (insync.length > 0) head.createSpan({ cls: "config-sync-pill is-ok", text: `✓ ${insync.length}` });
@@ -662,10 +672,11 @@ export class SyncCenterView extends ItemView {
   }
 
   private renderItemRow(card: HTMLElement, r: StatusRow): void {
-    const { group, status } = r;
-    const inert = status.state === "in-sync" || status.state === "no-settings" || status.state === "locked";
+    const { group } = r;
+    const pres = this.presState(r);
+    const inert = !stageableState(pres);
     const row = card.createDiv({
-      cls: `config-sync-hub-row${inert ? " is-insync" : ""}${status.state === "no-settings" ? " is-nosettings" : ""}`,
+      cls: `config-sync-hub-row${inert ? " is-insync" : ""}${pres === "no-settings" ? " is-nosettings" : ""}`,
       attr: { "aria-label": this.host.resolvedPath(group) },
     });
     const chev = row.createSpan({ cls: "config-sync-row-chevron", text: this.expandedItems.has(group.name) ? "▾" : "▸" });
@@ -683,7 +694,7 @@ export class SyncCenterView extends ItemView {
     }
     row.createDiv({ cls: "config-sync-rule-spacer" });
 
-    const icon = this.stateIcon(status.state);
+    const icon = this.stateIcon(pres);
     row.createSpan({ cls: `config-sync-state-icon ${icon.cls}`, text: icon.glyph, attr: { "aria-label": icon.tip } });
 
     const dir = this.effDir(r);
@@ -750,6 +761,13 @@ export class SyncCenterView extends ItemView {
       return;
     }
     if (status.state === "in-sync") {
+      if (this.presState(r) === "local-changed") {
+        // Version-ahead with identical content: show the amber version line + why capture helps.
+        const line = versionLine(this.availOf(r.group.name));
+        if (line !== null) detail.createDiv({ cls: "config-sync-version-line is-amber", text: line.text });
+        detail.createDiv({ cls: "config-sync-expand-note", text: "no content changes — capturing refreshes the store version only" });
+        return;
+      }
       detail.createDiv({
         cls: "config-sync-expand-note",
         text: excluded.length > 0 ? "in sync — excluded plugins are not compared" : "identical to the store",
@@ -781,12 +799,12 @@ export class SyncCenterView extends ItemView {
     const section = this.sectionOf(r.group.name);
     if (section === "not-installed") {
       this.renderPolicySeg(detail, r, a); // apply-only: no direction toggle
-      this.renderCappedChanges(detail, status.changes);
+      this.renderCappedChanges(detail, r, status.changes);
       return;
     }
     this.renderDirectionToggle(detail, r);
     if (section !== "main" && this.effDir(r) === "apply") this.renderPolicySeg(detail, r, a);
-    this.renderCappedChanges(detail, status.changes);
+    this.renderCappedChanges(detail, r, status.changes);
   }
 
   private renderPolicySeg(detail: HTMLElement, r: StatusRow, a: Availability): void {
@@ -840,11 +858,38 @@ export class SyncCenterView extends ItemView {
     segBtn("apply", "↓ Apply store", "Apply store version (overwrites local)");
   }
 
-  private renderCappedChanges(detail: HTMLElement, changes: FileChanges): void {
+  private renderCappedChanges(detail: HTMLElement, r: StatusRow, changes: FileChanges): void {
     const { shown, rest } = capFileEntries(changes, 10);
     const renderEntry = (e: CappedEntry): void => {
-      const glyph = e.kind === "add" ? "+" : e.kind === "upd" ? "~" : "−";
-      detail.createDiv({ cls: `is-${e.kind}`, text: `${glyph} ${e.name}` });
+      const line = detail.createDiv({ cls: `is-${e.kind}`, text: `${e.kind === "add" ? "+" : e.kind === "upd" ? "~" : "−"} ${e.name}` });
+      if (e.kind === "del") return; // nothing to diff for a pending deletion
+      line.addClass("config-sync-diffable");
+      const hint = line.createSpan({ cls: "config-sync-diffhint", text: " · diff ▾" });
+      let panel: HTMLElement | null = null;
+      line.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        if (panel !== null) {
+          panel.remove();
+          panel = null;
+          hint.setText(" · diff ▾");
+          return;
+        }
+        hint.setText(" · diff ▴");
+        const p = createDiv({ cls: "config-sync-inline-diff" });
+        panel = p;
+        line.insertAdjacentElement("afterend", p);
+        void this.host.diffPair(r.group.name, e.name, this.effDir(r)).then((pair) => {
+          if (panel !== p) return; // closed while loading
+          if (pair === null) {
+            p.createDiv({ cls: "config-sync-expand-note", text: "no diff available" });
+            return;
+          }
+          const dir = this.effDir(r);
+          const leftLabel = dir === "capture" ? "store" : "this device";
+          const rightLabel = dir === "capture" ? "this device (what capture would write)" : "store (what apply would write)";
+          renderDiffPanel(p, pair.base, pair.produced, leftLabel, rightLabel, e.name);
+        });
+      });
     };
     for (const e of shown) renderEntry(e);
     if (rest.length > 0) {
@@ -859,13 +904,13 @@ export class SyncCenterView extends ItemView {
 
   private captureNames(): string[] {
     return this.rows()
-      .filter((r) => this.selected.has(r.group.name) && stageableState(r.status.state) && this.effDir(r) === "capture")
+      .filter((r) => this.selected.has(r.group.name) && stageableState(this.presState(r)) && this.effDir(r) === "capture")
       .map((r) => r.group.name);
   }
 
   private applyPayload(): ApplyItem[] {
     return this.rows()
-      .filter((r) => this.selected.has(r.group.name) && stageableState(r.status.state) && this.effDir(r) === "apply")
+      .filter((r) => this.selected.has(r.group.name) && stageableState(this.presState(r)) && this.effDir(r) === "apply")
       .map((r) => {
         if (this.sectionOf(r.group.name) === "main") return { name: r.group.name, action: "none" as const };
         const a = this.availOf(r.group.name);
@@ -877,7 +922,7 @@ export class SyncCenterView extends ItemView {
 
   private renderActionBar(macro: HTMLElement): void {
     const bar = macro.createDiv({ cls: "config-sync-actionbar" });
-    const counted = (r: StatusRow): boolean => this.selected.has(r.group.name) && stageableState(r.status.state);
+    const counted = (r: StatusRow): boolean => this.selected.has(r.group.name) && stageableState(this.presState(r));
     const mainStaged = this.mainRows().filter(counted).length;
     const outdatedStaged = this.rows().filter((r) => this.sectionOf(r.group.name) === "outdated" && counted(r)).length;
     const disabledStaged = this.rows().filter((r) => this.sectionOf(r.group.name) === "disabled" && counted(r)).length;

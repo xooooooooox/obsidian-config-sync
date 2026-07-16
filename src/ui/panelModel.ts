@@ -1,6 +1,6 @@
 import { GroupState } from "../core/status";
 import { FileChanges } from "../core/types";
-import { Availability } from "../core/availability";
+import { Availability, VersionDrift } from "../core/availability";
 import { StateAction } from "../core/ConfigSyncCore";
 
 // Direction a checkable row acts in: capture pushes this device → store; apply pulls store → device.
@@ -46,6 +46,14 @@ export function moreFilesText(n: number): string {
 // Default direction by state: capture for local-changed/not-captured, apply otherwise.
 export function directionForState(state: GroupState): Direction {
   return state === "local-changed" || state === "not-captured" ? "capture" : "apply";
+}
+
+// Version-ahead presentation (定稿 feedback-trio, 2026-07-16): an item whose content matches
+// the store but whose LOCAL version is newer than the store's lock entry presents as
+// to-capture — capturing refreshes the lock version so other devices' outdated flow can fire.
+// Core state stays "in-sync"; this is a view-level derivation.
+export function presentedState(state: GroupState, drift: VersionDrift): GroupState {
+  return state === "in-sync" && drift === "ahead" ? "local-changed" : state;
 }
 
 // Inert states (checkbox disabled) can never be staged: they must not survive in the staged

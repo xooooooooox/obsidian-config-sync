@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { capFileEntries, insyncLineText, moreFilesText, visibleUnderFilter, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, footerSummary, isValidPolicy, policyOptions, sectionForItem, stageableState, versionLine } from "../src/ui/panelModel";
+import { capFileEntries, insyncLineText, moreFilesText, visibleUnderFilter, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, footerSummary, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableState, versionLine } from "../src/ui/panelModel";
 import { GroupState } from "../src/core/status";
 import { Availability } from "../src/core/availability";
 
@@ -105,6 +105,22 @@ describe("direction", () => {
     expect(stageableState("store-newer")).toBe(true);
     expect(stageableState("differs")).toBe(true);
     expect(stageableState("not-captured")).toBe(true);
+  });
+});
+
+describe("presentedState (version-ahead surfaces as to-capture)", () => {
+  it("upgrades in-sync + ahead to local-changed", () => {
+    expect(presentedState("in-sync", "ahead")).toBe("local-changed");
+  });
+  it("leaves in-sync alone for behind/null drift", () => {
+    expect(presentedState("in-sync", "behind")).toBe("in-sync");
+    expect(presentedState("in-sync", null)).toBe("in-sync");
+  });
+  it("passes every non-in-sync state through unchanged regardless of drift", () => {
+    expect(presentedState("local-changed", "ahead")).toBe("local-changed");
+    expect(presentedState("store-newer", "ahead")).toBe("store-newer");
+    expect(presentedState("no-settings", "ahead")).toBe("no-settings");
+    expect(presentedState("locked", "ahead")).toBe("locked");
   });
 });
 

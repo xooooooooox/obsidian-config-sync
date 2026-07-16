@@ -25,8 +25,8 @@ import { Availability, availabilityForGroup } from "./core/availability";
 import { listFilesRecursive } from "./core/io";
 import { ManifestValidationError, migrateLegacyManifest, parseStoreLock, validateSyncManifest } from "./core/manifest";
 import { groupRealPath, groupStorePath } from "./core/pathing";
-import { parseSwitchList, SWITCH_LIST_GROUPS, SwitchList } from "./core/switchList";
-import { scanSensitive, SensitiveScan } from "./core/modes";
+import { applySwitchList, captureSwitchList, parseSwitchList, SWITCH_LIST_GROUPS, SwitchList } from "./core/switchList";
+import { applyTransform, captureTransform, scanSensitive, SensitiveScan } from "./core/modes";
 import { PkmMode, PkmProbe, resolveEffectiveMode, resolveRootPath } from "./core/pkm";
 import { bucketCounts, checkRemote, diffRemote, GroupStatus, RemoteCheck, statusForGroups } from "./core/status";
 import { Remote, RibbonButtons, StoreLock, SyncGroup } from "./core/types";
@@ -314,6 +314,45 @@ export default class ConfigSyncPlugin extends Plugin {
       },
       dismissBootstrap: () => {
         this.bootstrapDismissed = true;
+      },
+      diffPair: async (name, rel, dir) => {
+        try {
+          const group = this.settings.groups.find((g) => g.name === name);
+          if (group === undefined || group.mode === "encrypted") return null;
+          const io = this.app.vault.adapter;
+          const real = groupRealPath(group.path, this.app.vault.configDir);
+          const storeBase = `${await this.resolvedRootPath()}/store/${groupStorePath(group.path)}`;
+          const localPath = group.type === "file" ? real : `${real}/${rel}`;
+          const storePath = group.type === "file" ? storeBase : `${storeBase}/${rel}`;
+          const local = (await io.exists(localPath)) ? await io.read(localPath) : null;
+          const store = (await io.exists(storePath)) ? await io.read(storePath) : null;
+          const serialize = (v: SwitchList): string => JSON.stringify(v, null, 2) + "\n";
+          const exc = SWITCH_LIST_GROUPS.has(name) ? (this.settings.switchExceptions[name] ?? []) : [];
+          if (dir === "capture") {
+            let produced = local ?? "";
+            if (group.type === "file" && local !== null) {
+              if (SWITCH_LIST_GROUPS.has(name)) {
+                const l = parseSwitchList(local);
+                if (l !== null) produced = serialize(captureSwitchList(l, store !== null ? parseSwitchList(store) : null, exc));
+              } else if (group.mode === "fields") {
+                produced = (await captureTransform(group, local, this.passphrase())).content;
+              }
+            }
+            return { base: store ?? "", produced };
+          }
+          let produced = store ?? "";
+          if (group.type === "file" && store !== null) {
+            if (SWITCH_LIST_GROUPS.has(name)) {
+              const st = parseSwitchList(store);
+              if (st !== null) produced = serialize(applySwitchList(st, local !== null ? parseSwitchList(local) : null, exc));
+            } else if (group.mode === "fields") {
+              produced = await applyTransform(group, store, local, this.passphrase());
+            }
+          }
+          return { base: local ?? "", produced };
+        } catch {
+          return null; // e.g. passphrase needed for field encryption — no diff available
+        }
       },
       switchLocalDecisions: (name) => (SWITCH_LIST_GROUPS.has(name) ? this.settings.switchExceptions[name] ?? [] : []),
       adoptConfiguration: async () => {
