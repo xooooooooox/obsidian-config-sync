@@ -20,6 +20,7 @@ import {
   writeGroups,
 } from "./core/ConfigSyncCore";
 import { createInstaller } from "./core/installer";
+import { BratIndex, parseBratRepoList, resolveBratIndex } from "./core/bratIndex";
 import { type CatalogSection, displayLabelForGroup, ensureSelfPresets, groupForItem, listCoreSections, listDiscovered, listOptionSections, listPluginSections, SELF_GROUP_NAME, setCorePluginIds } from "./core/catalog";
 import { Availability, availabilityForGroup } from "./core/availability";
 import { listFilesRecursive } from "./core/io";
@@ -46,6 +47,7 @@ interface ConfigSyncSettings {
   localPeriodicCheck: boolean;
   groups: SyncGroup[];
   switchExceptions: Record<string, string[]>; // group name -> excepted plugin/core ids (device-local)
+  bratPluginIndex: BratIndex; // plugin id -> "owner/repo"; derived from BRAT's synced list, synced too
 }
 
 const DEFAULT_SETTINGS: ConfigSyncSettings = {
@@ -58,6 +60,7 @@ const DEFAULT_SETTINGS: ConfigSyncSettings = {
   localPeriodicCheck: true,
   groups: [],
   switchExceptions: {},
+  bratPluginIndex: {},
 };
 
 // app.plugins is not part of the public API; this is the community-standard access path.
@@ -68,6 +71,23 @@ interface CommunityPluginRegistry {
   enablePlugin(id: string): Promise<void>;
   enablePluginAndSave(id: string): Promise<void>;
   loadManifests(): Promise<void>;
+}
+
+// BRAT's runtime surface, feature-detected everywhere — its internals are not a public API.
+interface BratInstance {
+  settings?: { pluginList?: unknown };
+  betaPlugins?: {
+    addPlugin?(
+      repositoryPath: string,
+      updatePluginVersion: boolean,
+      seeIfUpdatedOnly: boolean,
+      reportIfNotUpdated: boolean,
+      specifyVersion: string,
+      forceReinstall: boolean,
+      enableAfterInstall: boolean,
+      tokenName: string
+    ): Promise<boolean>;
+  };
 }
 
 // app.internalPlugins is not part of the public API; this is the community-standard access path for core plugins.
@@ -561,12 +581,70 @@ export default class ConfigSyncPlugin extends Plugin {
 
   installPlugin(): PluginInstallFn {
     if (this.installFn === null) {
-      this.installFn = createInstaller(this.app.vault.adapter, this.app.vault.configDir, async (url) => {
+      const catalogInstall = createInstaller(this.app.vault.adapter, this.app.vault.configDir, async (url) => {
         const res = await requestUrl({ url, throw: true });
         return res.arrayBuffer;
       });
+      // Resolution order (spec C4): BRAT index → community catalog. An unmapped id gets one
+      // last-chance index refresh before falling back to the catalog path.
+      this.installFn = async (id: string): Promise<string> => {
+        if (this.settings.bratPluginIndex[id] === undefined) await this.refreshBratIndex();
+        const repo = this.settings.bratPluginIndex[id];
+        if (repo !== undefined) return this.installViaBrat(id, repo);
+        return catalogInstall(id);
+      };
     }
     return this.installFn;
+  }
+
+  private bratInstance(): BratInstance | null {
+    const reg = (this.app as unknown as { plugins: { plugins: Record<string, unknown>; enabledPlugins: Set<string> } }).plugins;
+    if (!reg.enabledPlugins.has("obsidian42-brat")) return null;
+    return (reg.plugins["obsidian42-brat"] as BratInstance | undefined) ?? null;
+  }
+
+  private async installViaBrat(id: string, repo: string): Promise<string> {
+    const brat = this.bratInstance();
+    const addPlugin = brat?.betaPlugins?.addPlugin;
+    if (brat === null || typeof addPlugin !== "function") {
+      throw new Error(`"${id}" is managed by BRAT (${repo}) — enable BRAT and retry, or run BRAT's update command`);
+    }
+    // enableAfterInstall stays false: enabling is config-sync's own On-apply decision.
+    const ok = await addPlugin.call(brat.betaPlugins, repo, true, false, false, "", false, false, "");
+    await this.pluginHost().reloadPluginManifests();
+    const version = this.pluginHost().getInstalledPluginVersion(id);
+    if (!ok || version === null) {
+      throw new Error(`BRAT could not install ${repo} — see BRAT's log for the reason`);
+    }
+    return version;
+  }
+
+  // BRAT's repo list: live instance first, its data.json on disk second (BRAT disabled), [] when absent.
+  private async bratRepos(): Promise<string[]> {
+    const live = this.bratInstance()?.settings?.pluginList;
+    if (Array.isArray(live)) return live.filter((r): r is string => typeof r === "string");
+    const path = `${this.app.vault.configDir}/plugins/obsidian42-brat/data.json`;
+    if (!(await this.app.vault.adapter.exists(path))) return [];
+    return parseBratRepoList(await this.app.vault.adapter.read(path));
+  }
+
+  // Fill + prune the id→repo index (spec C1). Never runs during capture; triggered by the Beta
+  // tab, its ↻ Re-scan, or an install for an unmapped id. Returns {resolved, total} for the UI.
+  async refreshBratIndex(): Promise<{ resolved: number; total: number }> {
+    const repos = await this.bratRepos();
+    const next = await resolveBratIndex(this.settings.bratPluginIndex, repos, async (repo) => {
+      try {
+        const res = await requestUrl({ url: `https://raw.githubusercontent.com/${repo}/HEAD/manifest.json`, throw: true });
+        return res.text;
+      } catch {
+        return null;
+      }
+    });
+    if (JSON.stringify(next) !== JSON.stringify(this.settings.bratPluginIndex)) {
+      this.settings.bratPluginIndex = next;
+      await this.saveSettings();
+    }
+    return { resolved: Object.keys(next).length, total: repos.length };
   }
 
   displayName(group: string, storedLabel?: string): string {
