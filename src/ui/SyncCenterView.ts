@@ -238,6 +238,12 @@ export class SyncCenterView extends ItemView {
     return presentedState(r.status.state, this.availOf(r.group.name).drift);
   }
 
+  // All user-facing counts (header pills, sidebar badges, filter pills, switcher) must agree
+  // with what the filters actually show — i.e. count PRESENTED states, not raw ones.
+  private presentedCounts(rows: StatusRow[]): ReturnType<typeof bucketCounts> {
+    return bucketCounts(rows.map((r) => ({ ...r.status, state: this.presState(r) })));
+  }
+
   private render(gen: number): void {
     if (gen !== this.renderGen) return;
     this.contentEl.empty();
@@ -318,7 +324,7 @@ export class SyncCenterView extends ItemView {
   private renderScopeEntries(container: HTMLElement): void {
     container.createDiv({ cls: "config-sync-side-head", text: "This device ↔ store" });
 
-    const deviceEntry = (cat: ItemCategory | "all", label: string, statuses: GroupStatus[]): void => {
+    const deviceEntry = (cat: ItemCategory | "all", label: string, rows: StatusRow[]): void => {
       const active = this.panelScope.kind === "device" && this.panelScope.cat === cat;
       const item = container.createDiv({ cls: `config-sync-side-item${active ? " is-active" : ""}` });
       item.createSpan({ cls: "config-sync-side-name", text: label });
@@ -330,7 +336,7 @@ export class SyncCenterView extends ItemView {
         const hits = scopeRows.filter((r) => matchesSearch(`${this.host.displayName(r.group.name, r.group.label)} ${r.group.name}`, this.search)).length;
         item.createSpan({ cls: "config-sync-side-badge is-neutral", text: `${hits}` });
       } else {
-        const c = bucketCounts(statuses);
+        const c = this.presentedCounts(rows);
         if (c.up > 0) item.createSpan({ cls: "config-sync-side-badge is-up", text: `↑${c.up}` });
         if (c.down > 0) item.createSpan({ cls: "config-sync-side-badge is-down", text: `↓${c.down}` });
         if (c.ok > 0) item.createSpan({ cls: "config-sync-side-badge is-ok", text: `✓${c.ok}` });
@@ -343,11 +349,11 @@ export class SyncCenterView extends ItemView {
       });
     };
 
-    deviceEntry("all", "All items", this.mainRows().map((r) => r.status));
+    deviceEntry("all", "All items", this.mainRows());
     for (const cat of CATEGORY_ORDER) {
       const inCat = this.mainRows().filter((r) => categoryForGroup(r.group.name) === cat);
       if (inCat.length === 0) continue;
-      deviceEntry(cat, CATEGORY_LABELS[cat], inCat.map((r) => r.status));
+      deviceEntry(cat, CATEGORY_LABELS[cat], inCat);
     }
 
     const remotes = this.host.remotes();
@@ -386,11 +392,7 @@ export class SyncCenterView extends ItemView {
     if (this.panelScope.kind === "device") {
       const cat = this.panelScope.cat;
       sw.createSpan({ text: cat === "all" ? "All items" : CATEGORY_LABELS[cat] });
-      const c = bucketCounts(
-        this.scopedRows()
-          .filter((r) => this.sectionOf(r.group.name) === "main")
-          .map((r) => r.status),
-      );
+      const c = this.presentedCounts(this.scopedRows().filter((r) => this.sectionOf(r.group.name) === "main"));
       if (c.up > 0) sw.createSpan({ cls: "config-sync-side-badge is-up", text: `↑${c.up}` });
       if (c.down > 0) sw.createSpan({ cls: "config-sync-side-badge is-down", text: `↓${c.down}` });
       if (c.ok > 0) sw.createSpan({ cls: "config-sync-side-badge is-ok", text: `✓${c.ok}` });
@@ -415,7 +417,7 @@ export class SyncCenterView extends ItemView {
   private renderHeader(): void {
     const head = this.contentEl.createDiv({ cls: "config-sync-center-head" });
     head.createSpan({ cls: "config-sync-center-title", text: "Sync Center" });
-    const { up, down, ok, none } = bucketCounts(this.mainRows().map((r) => r.status));
+    const { up, down, ok, none } = this.presentedCounts(this.mainRows());
     const pills = head.createSpan({ cls: "config-sync-report-pills" });
     if (up > 0) {
       pills.createSpan({
@@ -503,7 +505,7 @@ export class SyncCenterView extends ItemView {
       const s = this.sectionOf(r.group.name);
       if (s !== "main") sections[s].push(r);
     }
-    const counts = bucketCounts(mainRows.map((r) => r.status));
+    const counts = this.presentedCounts(mainRows);
 
     const bar = main.createDiv({ cls: "config-sync-mainbar" });
     const defs: { key: PanelFilter; label: string }[] = [
