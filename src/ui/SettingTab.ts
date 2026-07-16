@@ -384,11 +384,12 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       devBadge.setAttribute("aria-label", item.cautionReason);
     }
     if (group !== undefined && SWITCH_LIST_GROUPS.has(item.name)) {
+      // Always create the badge (hidden at 0) so the exclude toggle can update it in place
+      // without rebuilding the row — a full re-render here flashes visibly.
       const n = (this.host.settings.switchExceptions[item.name] ?? []).length;
-      if (n > 0) {
-        const b = row.nameEl.createSpan({ cls: "config-sync-devbadge", text: `${n} excluded` });
-        b.setAttribute("title", "Plugins excluded from this list on this device — they keep their own on/off state");
-      }
+      const b = row.nameEl.createSpan({ cls: "config-sync-devbadge config-sync-exbadge", text: `${n} excluded` });
+      b.setAttribute("title", "Plugins excluded from this list on this device — they keep their own on/off state");
+      if (n === 0) b.hide();
     }
     if (group !== undefined && item.disabledReason === null) {
       row.addDropdown((d) =>
@@ -398,11 +399,14 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
           .addOption("mobile", "mobile only")
           .setValue(group.devices)
           .onChange(async (v) => {
-            await this.commitGroups((draft) => {
+            const ok = await this.commitGroups((draft) => {
               const g = draft.find((x) => x.name === item.name);
               if (g !== undefined) g.devices = v as DeviceClass;
             }, item.name);
-            this.refresh();
+            // Nothing else in the row depends on the device scope — a full refresh here only
+            // caused a visible flash. Refresh solely on failure, to restore the real value
+            // and surface the inline error.
+            if (!ok) this.refresh();
           })
       );
     }
@@ -420,8 +424,24 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
             return;
           }
         }
+        let toAdd: SyncGroup | null = null;
+        if (v) {
+          toAdd = groupForItem(item.name, item.path, item.type, item.description, item.label);
+          // Sensitive items default to Fields mode with detection-seeded rules (encrypt the
+          // flagged keys, strip the rest) instead of plain — 确认 2026-07-16.
+          if (toAdd.type === "file" && !SWITCH_LIST_GROUPS.has(item.name)) {
+            const scan = this.detections.get(item.name) ?? (await this.host.detectSensitive(toAdd));
+            this.detections.set(item.name, scan);
+            const existing = toAdd.fields ?? [];
+            const seeded = defaultFieldsFromDetection(scan.keys).filter((r) => !existing.some((f) => f.pattern === r.pattern));
+            if (seeded.length > 0) {
+              toAdd.mode = "fields";
+              toAdd.fields = [...existing, ...seeded];
+            }
+          }
+        }
         await this.commitGroups((draft) => {
-          if (v) draft.push(groupForItem(item.name, item.path, item.type, item.description, item.label));
+          if (toAdd !== null) draft.push(toAdd);
           else {
             const idx = draft.findIndex((g) => g.name === item.name);
             if (idx >= 0) draft.splice(idx, 1);
@@ -480,14 +500,23 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         rowEl.createSpan({ cls: "config-sync-ldname", text: r.name });
         rowEl.createSpan({ cls: "config-sync-ldhint", text: r.hint });
         rowEl.createDiv({ cls: "config-sync-rule-spacer" });
-        rowEl.createSpan({ cls: "config-sync-ldstate", text: isLocal ? "excluded" : "included" });
+        const stateEl = rowEl.createSpan({ cls: "config-sync-ldstate", text: isLocal ? "excluded" : "included" });
         new ToggleComponent(rowEl).setValue(isLocal).onChange(async (v) => {
           const cur = new Set(this.host.settings.switchExceptions[group.name] ?? []);
           if (v) cur.add(r.id);
           else cur.delete(r.id);
           this.host.settings.switchExceptions[group.name] = [...cur].sort();
           await this.host.saveSettings();
-          this.renderItemInto(wrap, item); // refresh badge + row tint
+          // In-place update — a full renderItemInto rebuilds the expansion (async row refetch)
+          // and visibly flashes. Only the row tint, state text and header badge change.
+          rowEl.toggleClass("is-local", v);
+          stateEl.setText(v ? "excluded" : "included");
+          const badge = wrap.querySelector<HTMLElement>(".config-sync-exbadge");
+          if (badge !== null) {
+            badge.setText(`${cur.size} excluded`);
+            if (cur.size > 0) badge.show();
+            else badge.hide();
+          }
         });
       }
     });
