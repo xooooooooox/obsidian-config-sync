@@ -4,6 +4,7 @@ import {
   parseSwitchList,
   captureSwitchList,
   applySwitchList,
+  switchDivergence,
   switchListsEqual,
   switchListSortedView,
   type SwitchList,
@@ -127,6 +128,35 @@ describe("captureSwitchList (map shape) — pass-through for excluded ids (甲)"
     expect(captureSwitchList({ a: true, x: true }, { a: true, x: false }, ["x"])).toEqual({ a: true, x: false });
     // store absent → stays absent even though local has it
     expect(captureSwitchList({ a: true, x: true }, { a: true }, ["x"])).toEqual({ a: true });
+  });
+});
+
+describe("switchDivergence (bidirectional summary)", () => {
+  it("splits non-excluded divergence into captureRemoves / applyDisables, sorted", () => {
+    const local = ["z-local-only", "a-local-only", "common"];
+    const store = ["common", "store-only-b", "store-only-a"];
+    expect(switchDivergence(local, store, [])).toEqual({
+      captureRemoves: ["store-only-a", "store-only-b"],
+      applyDisables: ["a-local-only", "z-local-only"],
+    });
+  });
+
+  it("masks excluded ids on both sides", () => {
+    const local = ["mine", "kept-here"];
+    const store = ["theirs", "kept-here"];
+    expect(switchDivergence(local, store, ["mine", "theirs"])).toEqual({ captureRemoves: [], applyDisables: [] });
+  });
+
+  it("one-sided differences populate only their side", () => {
+    expect(switchDivergence(["a", "b"], ["a"], [])).toEqual({ captureRemoves: [], applyDisables: ["b"] });
+    expect(switchDivergence(["a"], ["a", "b"], [])).toEqual({ captureRemoves: ["b"], applyDisables: [] });
+  });
+
+  it("map shapes compare by truthy membership", () => {
+    expect(switchDivergence({ a: true, b: false, c: true }, { a: true, d: true }, [])).toEqual({
+      captureRemoves: ["d"],
+      applyDisables: ["c"], // b is false locally → not enabled → not a divergence
+    });
   });
 });
 

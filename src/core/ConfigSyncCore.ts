@@ -445,13 +445,10 @@ export async function applyWithActions(
       } else {
         // Install-only apply: a not-installed plugin with no settings in the store. The
         // install action IS the payload — applyGroup would error on the missing store data.
-        const installOnly = (item.action === "install" || item.action === "install-enable") && !storeExists;
-        const r = installOnly ? emptyResult(item.name, false) : await applyGroup(ctx, group, state);
-        const installedId = pluginIdForGroup(group);
-        // "installed the plugin only" must reflect reality — a failed install gets no such line.
-        if (installOnly && installedId !== null && ctx.plugins.getInstalledPluginVersion(installedId) !== null) {
-          r.messages.push("no settings in the store — installed the plugin only");
-        }
+        // Action-only apply: a plugin with no settings in the store — the state action
+        // (install and/or enable) IS the payload; applyGroup would error on the missing data.
+        const actionOnly = (item.action === "install" || item.action === "install-enable" || item.action === "enable") && !storeExists;
+        const r = actionOnly ? emptyResult(item.name, false) : await applyGroup(ctx, group, state);
         if (prelude.note !== null) r.stateNote = prelude.note;
         if (prelude.messages.length > 0) {
           r.messages.push(...prelude.messages);
@@ -464,6 +461,16 @@ export async function applyWithActions(
           if (fin.messages.length > 0) {
             r.messages.push(...fin.messages);
             if (r.status === "ok" && fin.note?.kind === "warn") r.status = "warning";
+          }
+        }
+        // The action-only line must reflect reality — resolved AFTER finish so a failed
+        // install/enable never claims success.
+        if (actionOnly) {
+          const pid = pluginIdForGroup(group);
+          if (item.action === "enable") {
+            if (pid !== null && ctx.plugins.isPluginEnabled(pid)) r.messages.push("no settings in the store — enabled the plugin only");
+          } else if (pid !== null && ctx.plugins.getInstalledPluginVersion(pid) !== null) {
+            r.messages.push("no settings in the store — installed the plugin only");
           }
         }
         results.push(r);

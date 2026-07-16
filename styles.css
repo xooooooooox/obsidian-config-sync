@@ -931,3 +931,42 @@ body.is-mobile .config-sync-mainbar input[type="checkbox"]:indeterminate::after 
 /* Passphrase row: badge must never overlap the wrapped description (ddd.png) */
 .config-sync-ppset .setting-item-control { flex-wrap: wrap; justify-content: flex-end; row-gap: var(--size-2-1); }
 .config-sync-ppbadge { white-space: nowrap; }
+
+/* Bidirectional switch-list divergence (定稿 2026-07-17): amber-edged summary of what each
+   direction destroys, plus the exclude shortcut button underneath. */
+.config-sync-divergence {
+  border-left: 3px solid var(--text-warning);
+  background: var(--background-secondary);
+  border-radius: 0 6px 6px 0;
+  padding: var(--size-4-1) var(--size-4-2);
+  margin: var(--size-4-1) 0;
+  font-size: var(--font-ui-smaller);
+}
+.config-sync-divergence-line { color: var(--text-muted); }
+.config-sync-divergence-line::first-letter { color: var(--text-warning); }
+
+/* Search context (定稿): the main card's labeled head while searching, and the inline
+   explanation under an inert (uncheckable) hit. */
+.config-sync-section-head.is-plain { cursor: default; padding: var(--size-4-1) 0; }
+.config-sync-inert-note {
+  color: var(--text-faint);
+  font-style: italic;
+  font-size: var(--font-ui-smaller);
+  padding: 0 var(--size-4-2) var(--size-4-1) calc(var(--size-4-2) + 20px);
+}
+
+/* Exclude-extras confirmation modal rows. */
+.config-sync-exclude-row {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+  padding: var(--size-4-1) 0;
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smaller);
+}
+.config-sync-modal-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--size-4-2);
+  margin-top: var(--size-4-3);
+}
