@@ -253,11 +253,39 @@ export async function listCoreSections(
   ];
 }
 
+// Items for synced plugin-* groups the picker wants (e.g. plugins not installed on this
+// device): the group definition arrived through the store, so the row is built from it rather
+// than from an installed manifest. The self item never shows up here.
+function pluginGroupItems(groups: SyncGroup[], want: (id: string) => boolean, describe: (id: string) => string): CatalogItem[] {
+  const items: CatalogItem[] = [];
+  for (const g of groups) {
+    if (!g.name.startsWith("plugin-") || g.name === SELF_GROUP_NAME) continue;
+    const id = g.name.slice("plugin-".length);
+    if (!want(id)) continue;
+    items.push({
+      name: g.name,
+      label: g.label ?? id,
+      description: describe(id),
+      path: g.path,
+      type: g.type,
+      exists: true,
+      disabledReason: null,
+      cautionReason: null,
+    });
+  }
+  items.sort((a, b) => a.label.localeCompare(b.label));
+  return items;
+}
+
+const NOT_INSTALLED_HEADING = "Not installed on this device";
+const NOT_INSTALLED_DESC = "Synced from the store — settings sync now; the plugin itself installs through the Sync Center.";
+
 export async function listPluginSections(
   io: FileIO,
   configDir: string,
   plugins: { id: string; name: string; enabled: boolean }[],
-  _groups: SyncGroup[]
+  groups: SyncGroup[],
+  betaIds: Set<string>
 ): Promise<CatalogSection[]> {
   const { files } = await presentSets(io, configDir);
   const switchItem: CatalogItem = {
@@ -273,6 +301,7 @@ export async function listPluginSections(
   const enabled: CatalogItem[] = [];
   const disabled: CatalogItem[] = [];
   for (const p of [...plugins].sort((a, b) => a.name.localeCompare(b.name))) {
+    if (betaIds.has(p.id)) continue; // BRAT-managed → Beta tab
     const item: CatalogItem = {
       name: `plugin-${p.id}`,
       label: p.name,
@@ -285,10 +314,51 @@ export async function listPluginSections(
     };
     (p.enabled ? enabled : disabled).push(item);
   }
+  const installedIds = new Set(plugins.map((p) => p.id));
+  const notInstalled = pluginGroupItems(
+    groups,
+    (id) => !installedIds.has(id) && !betaIds.has(id),
+    (id) => `Settings of ${id}.`
+  );
   return [
     ...section("list", "Plugin on/off list", "Which community plugins are turned on, mirrored across devices.", false, [switchItem]),
     ...section("enabled", "Enabled", "Sync the settings files of your enabled community plugins.", true, enabled),
     ...section("disabled", "Installed but disabled", "Sync a disabled plugin's settings now, ready for when you turn it on.", true, disabled),
+    ...section("notinstalled", NOT_INSTALLED_HEADING, NOT_INSTALLED_DESC, true, notInstalled),
+  ];
+}
+
+// Beta tab (定稿 mockup v2): plugins whose id resolves through the BRAT index. Same three
+// sections as Community; row descriptions carry the owner/repo so the source is visible.
+// No on/off-list section — the enabled list stays under Community plugins.
+export async function listBetaSections(
+  plugins: { id: string; name: string; enabled: boolean }[],
+  groups: SyncGroup[],
+  index: Record<string, string>
+): Promise<CatalogSection[]> {
+  const describe = (id: string): string => `Settings of ${id}. · ${index[id] ?? ""}`;
+  const enabled: CatalogItem[] = [];
+  const disabled: CatalogItem[] = [];
+  for (const p of [...plugins].sort((a, b) => a.name.localeCompare(b.name))) {
+    if (index[p.id] === undefined) continue;
+    const item: CatalogItem = {
+      name: `plugin-${p.id}`,
+      label: p.name,
+      description: describe(p.id),
+      path: `{configDir}/plugins/${p.id}/data.json`,
+      type: "file",
+      exists: true,
+      disabledReason: null,
+      cautionReason: null,
+    };
+    (p.enabled ? enabled : disabled).push(item);
+  }
+  const installedIds = new Set(plugins.map((p) => p.id));
+  const notInstalled = pluginGroupItems(groups, (id) => index[id] !== undefined && !installedIds.has(id), describe);
+  return [
+    ...section("enabled", "Enabled", "Sync the settings files of your enabled beta plugins.", true, enabled),
+    ...section("disabled", "Installed but disabled", "Sync a disabled plugin's settings now, ready for when you turn it on.", true, disabled),
+    ...section("notinstalled", NOT_INSTALLED_HEADING, NOT_INSTALLED_DESC, true, notInstalled),
   ];
 }
 

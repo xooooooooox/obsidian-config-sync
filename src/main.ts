@@ -21,7 +21,7 @@ import {
 } from "./core/ConfigSyncCore";
 import { createInstaller } from "./core/installer";
 import { BratIndex, parseBratRepoList, resolveBratIndex } from "./core/bratIndex";
-import { type CatalogSection, displayLabelForGroup, ensureSelfPresets, groupForItem, listCoreSections, listDiscovered, listOptionSections, listPluginSections, SELF_GROUP_NAME, setCorePluginIds } from "./core/catalog";
+import { type CatalogSection, displayLabelForGroup, ensureSelfPresets, groupForItem, listBetaSections, listCoreSections, listDiscovered, listOptionSections, listPluginSections, SELF_GROUP_NAME, setCorePluginIds } from "./core/catalog";
 import { Availability, availabilityForGroup } from "./core/availability";
 import { listFilesRecursive } from "./core/io";
 import { ManifestValidationError, migrateLegacyManifest, parseStoreLock, validateSyncManifest } from "./core/manifest";
@@ -739,7 +739,18 @@ export default class ConfigSyncPlugin extends Plugin {
   }
 
   async listPluginSections(groups: SyncGroup[]): Promise<CatalogSection[]> {
-    return listPluginSections(this.app.vault.adapter, this.app.vault.configDir, this.pluginRuntime(), groups);
+    return listPluginSections(this.app.vault.adapter, this.app.vault.configDir, this.pluginRuntime(), groups, new Set(Object.keys(this.settings.bratPluginIndex)));
+  }
+
+  async listBetaSections(groups: SyncGroup[]): Promise<CatalogSection[]> {
+    return listBetaSections(this.pluginRuntime(), groups, this.settings.bratPluginIndex);
+  }
+
+  // Local-only status for the Beta tab's map-note (no network): index size vs BRAT's list.
+  async bratScanStatus(): Promise<{ resolved: number; total: number }> {
+    const repos = await this.bratRepos();
+    const resolved = Object.values(this.settings.bratPluginIndex).filter((r) => repos.includes(r)).length;
+    return { resolved, total: repos.length };
   }
 
   installedPluginIds(): string[] {
