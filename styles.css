@@ -158,9 +158,12 @@
   color: var(--text-faint);
   flex: none;
   cursor: pointer;
-  display: flex;
+  /* inline-flex: identical inside flex rows (flex items blockify), but stays on the same line
+     as the text when the chevron lives inside .setting-item-name. */
+  display: inline-flex;
   align-items: center;
   align-self: center;
+  vertical-align: text-bottom;
   margin-right: var(--size-4-1);
 }
 .config-sync-row-chevron svg { width: 16px; height: 16px; }
