@@ -5,6 +5,7 @@ import {
   captureSwitchList,
   applySwitchList,
   switchListsEqual,
+  switchListSortedView,
   type SwitchList,
 } from "../src/core/switchList";
 
@@ -126,6 +127,14 @@ describe("captureSwitchList (map shape) — pass-through for excluded ids (甲)"
     expect(captureSwitchList({ a: true, x: true }, { a: true, x: false }, ["x"])).toEqual({ a: true, x: false });
     // store absent → stays absent even though local has it
     expect(captureSwitchList({ a: true, x: true }, { a: true }, ["x"])).toEqual({ a: true });
+  });
+});
+
+describe("switchListSortedView (display canonicalization)", () => {
+  it("sorts array lists and map keys; passes unparseable content through", () => {
+    expect(switchListSortedView('["c","a","b"]')).toBe(JSON.stringify(["a", "b", "c"], null, 2) + "\n");
+    expect(switchListSortedView('{"b":false,"a":true}')).toBe(JSON.stringify({ a: true, b: false }, null, 2) + "\n");
+    expect(switchListSortedView("not json")).toBe("not json");
   });
 });
 

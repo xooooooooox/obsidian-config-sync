@@ -3,6 +3,7 @@ import { PendingPull } from "../core/ConfigSyncCore";
 import { MergeConflict } from "../core/merge";
 import { SyncGroup } from "../core/types";
 import { renderDiffPanel } from "./diffView";
+import { SWITCH_LIST_GROUPS, switchListSortedView } from "../core/switchList";
 
 type Side = "local" | "remote";
 
@@ -201,15 +202,18 @@ export class ConflictModal extends Modal {
   }
 
   private buildDiff(host: HTMLElement, c: MergeConflict): void {
-    const localText = c.kind === "definition" ? definitionText(c.local) : c.localContent;
-    const remoteText = c.kind === "definition" ? definitionText(c.remote) : c.remoteContent;
+    // On/off lists compare as sets — render both sides sorted so a real membership difference
+    // isn't buried in per-device ordering noise.
+    const sortedView = c.kind === "file" && SWITCH_LIST_GROUPS.has(c.name);
+    const localText = c.kind === "definition" ? definitionText(c.local) : sortedView ? switchListSortedView(c.localContent) : c.localContent;
+    const remoteText = c.kind === "definition" ? definitionText(c.remote) : sortedView ? switchListSortedView(c.remoteContent) : c.remoteContent;
     renderDiffPanel(
       host,
       localText,
       remoteText,
       "local  (this device)",
       `remote (${this.remoteName})`,
-      c.kind === "definition" ? "group definition" : "--- local · +++ remote"
+      c.kind === "definition" ? "group definition" : sortedView ? "--- local · +++ remote · sorted view" : "--- local · +++ remote"
     );
   }
 }

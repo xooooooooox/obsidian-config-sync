@@ -1,5 +1,6 @@
 import { SyncGroup } from "./types";
 import { resolveGroupByStoreRel } from "./pathing";
+import { parseSwitchList, SWITCH_LIST_GROUPS, switchListsEqual } from "./switchList";
 
 export type MergeConflict =
   | { kind: "definition"; name: string; local: SyncGroup; remote: SyncGroup }
@@ -52,6 +53,17 @@ function byRel<T extends { rel: string }>(a: T, b: T): number {
   return a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0;
 }
 
+// Switch-list store copies are order-insensitive: each device captures in its own store-stable
+// order, so two lineages can hold the same membership in different orders. Compare those as
+// sets (no exceptions — store copies are full lists); everything else stays byte-equal.
+function contentsMatch(localGroups: SyncGroup[], remoteGroups: SyncGroup[], rel: string, local: string, remote: string): boolean {
+  if (local === remote) return true;
+  if (!SWITCH_LIST_GROUPS.has(owningGroupName(localGroups, remoteGroups, rel))) return false;
+  const a = parseSwitchList(local);
+  const b = parseSwitchList(remote);
+  return a !== null && b !== null && switchListsEqual(a, b, []);
+}
+
 export function classifyMerge(
   localGroups: SyncGroup[],
   localFiles: Map<string, string>,
@@ -96,7 +108,7 @@ export function classifyMerge(
       const name = owningGroupName(localGroups, remoteGroups, rel);
       auto.writeFiles.push({ rel, content: remote, name });
     } else if (local !== undefined && remote !== undefined) {
-      if (local === remote) {
+      if (contentsMatch(localGroups, remoteGroups, rel, local, remote)) {
         identicalFiles.push(`file:${rel}`);
       } else {
         const name = owningGroupName(localGroups, remoteGroups, rel);
