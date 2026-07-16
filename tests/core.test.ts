@@ -419,6 +419,21 @@ describe("applyWithActions", () => {
     expect(plugins.enabled.has("demo")).toBe(true);
     expect(await io.exists(".obs/plugins/demo/data.json")).toBe(false);
   });
+  it("failed install-only apply reports the failure honestly (no 'installed' line, no settings clause)", async () => {
+    const { plugins, ctx } = setup();
+    await seedGroups(ctx, MANIFEST); // group registered, nothing captured
+    const failing = async (): Promise<string> => {
+      throw new Error("demo isn't in the community catalog");
+    };
+    const results = await applyWithActions(ctx, [{ name: "plugin-demo", action: "install-enable" }], failing);
+    expect(results[0]?.status).toBe("warning");
+    expect(results[0]?.stateNote).toEqual({ kind: "warn", text: "\u26a0 install failed" });
+    const joined = (results[0]?.messages ?? []).join(" | ");
+    expect(joined).toContain("install it manually");
+    expect(joined).not.toContain("installed the plugin only");
+    expect(joined).not.toContain("settings were staged");
+    expect(plugins.enabled.has("demo")).toBe(false);
+  });
   it("update failure skips the config write and warns; install failure still writes", async () => {
     const { io, plugins, ctx } = setup();
     plugins.installed.set("demo", "1.0.0");
