@@ -77,13 +77,19 @@ describe("captureSwitchList (array shape) — pass-through for excluded ids (甲
     expect(captureSwitchList(input, null, ["b", "d"])).toEqual(["a", "c"]);
   });
 
-  it("preserves the store's existing entry for an excluded id (stale entry retained)", () => {
-    // local has it, store has it, excluded → store keeps it (not deleted by my capture)
-    expect(captureSwitchList(["a", "x", "b"], ["a", "x", "b"], ["x"])).toEqual(["a", "b", "x"]);
+  it("preserves the store's existing entry for an excluded id, in its store position", () => {
+    // local has it, store has it, excluded → store keeps it IN PLACE (not deleted, not moved)
+    expect(captureSwitchList(["a", "x", "b"], ["a", "x", "b"], ["x"])).toEqual(["a", "x", "b"]);
     // local has it, store does NOT → excluded id is not added
     expect(captureSwitchList(["a", "x", "b"], ["a", "b"], ["x"])).toEqual(["a", "b"]);
-    // local lacks it, store has it → excluded id stays in store
-    expect(captureSwitchList(["a", "b"], ["a", "x"], ["x"])).toEqual(["a", "b", "x"]);
+    // local lacks it, store has it → excluded id stays in store, in place
+    expect(captureSwitchList(["a", "b"], ["a", "x"], ["x"])).toEqual(["a", "x", "b"]);
+  });
+
+  it("identical membership captures byte-identical to the store, whatever the local order", () => {
+    // Obsidian writes local lists in per-device enable order; same members must mean no churn
+    expect(captureSwitchList(["c", "a", "b"], ["a", "b", "c"], [])).toEqual(["a", "b", "c"]);
+    expect(captureSwitchList(["c", "a"], ["a", "x", "c"], ["x"])).toEqual(["a", "x", "c"]);
   });
 
   it("unrelated changes flow through while the excluded entry is untouched", () => {
@@ -91,8 +97,8 @@ describe("captureSwitchList (array shape) — pass-through for excluded ids (甲
     expect(captureSwitchList(["dataview", "brat", "calendar"], ["dataview", "brat", "remote-save"], ["remote-save"])).toEqual([
       "dataview",
       "brat",
-      "calendar",
       "remote-save",
+      "calendar",
     ]);
   });
 
