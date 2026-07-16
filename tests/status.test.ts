@@ -170,6 +170,32 @@ describe("diffRemote", () => {
     expect(entries.find((e) => e.group === "hotkeys")).toBeUndefined();
   });
 
+  it("resolves files unknown to the local manifest via the remote manifest (fresh device)", async () => {
+    const { ctx } = setup(); // fresh device: zero groups, empty local store
+    await writeGroups(ctx, []);
+    const remoteSelf = JSON.stringify({
+      groups: [
+        { name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all" },
+        { name: "snippets", path: "{configDir}/snippets", type: "dir", devices: "all" },
+        { name: "plugin-config-sync", path: "{configDir}/plugins/config-sync/data.json", type: "file", devices: "all" },
+      ],
+    });
+    const remote: Record<string, string> = {
+      "store.lock.json": JSON.stringify({ capturedAt: "2026-07-09T00:00:00.000Z", groups: {} }),
+      "store/configdir/hotkeys.json": '{"a":1}',
+      "store/configdir/snippets/one.css": "one",
+      "store/configdir/plugins/config-sync/data.json": remoteSelf,
+      "store/mystery/leftover.bin": "x", // matches neither manifest
+    };
+    const entries = await diffRemote(ctx, fakeReader(remote));
+    const byName = Object.fromEntries(entries.map((e) => [e.group, e.changes]));
+    expect(byName["hotkeys"]?.added).toEqual(["hotkeys.json"]);
+    expect(byName["snippets"]?.added).toEqual(["one.css"]);
+    expect(byName["plugin-config-sync"]?.added).toEqual(["data.json"]);
+    expect(byName["(other store files)"]?.added).toEqual(["store/mystery/leftover.bin"]);
+    expect(byName[""]).toBeUndefined(); // lock stays metadata
+  });
+
   it("never reports the store-metadata pseudo-entry, even when bookkeeping files differ", async () => {
     const { io, ctx } = await seededAndCaptured();
     const remote: Record<string, string> = {

@@ -1,4 +1,4 @@
-import { CoreContext, ExternalStoreReader, groupForStoreRel, loadLock, loadManifest, storeDir } from "./ConfigSyncCore";
+import { CoreContext, ExternalStoreReader, groupForStoreRel, loadLock, loadManifest, remoteGroupsFrom, storeDir } from "./ConfigSyncCore";
 import { isJunkPath, listFilesRecursive } from "./io";
 import { basename, groupRealPath, groupStorePath, relativeTo } from "./pathing";
 import { FileChanges, hasChanges, StoreLock, SyncGroup } from "./types";
@@ -180,9 +180,25 @@ export interface RemoteDiffEntry {
   changes: FileChanges;
 }
 
+// Store files that neither manifest can attribute to a group. Kept visible (instead of being
+// filtered as metadata) so a delta never silently reads as "contents match".
+export const OTHER_STORE_FILES_GROUP = "(other store files)";
+
 export async function diffRemote(ctx: CoreContext, reader: ExternalStoreReader): Promise<RemoteDiffEntry[]> {
   const manifest = await loadManifest(ctx);
   const remoteFiles = await reader.listFiles();
+  // A fresh device knows few or no groups yet, so attribution falls back to the REMOTE
+  // manifest — otherwise every remote file would land in the metadata pseudo-group and the
+  // whole delta would be dropped (the "contents match" false negative).
+  const remoteGroups = await remoteGroupsFrom(reader, remoteFiles);
+  const resolve = (rel: string): { name: string; itemRel: string } => {
+    const local = groupForStoreRel(manifest.groups, rel);
+    if (local.name !== "") return local;
+    const remote = groupForStoreRel(remoteGroups, rel);
+    if (remote.name !== "") return remote;
+    // Only true bookkeeping (store.lock.json, legacy root manifests) lives outside store/.
+    return rel.startsWith("store/") ? { name: OTHER_STORE_FILES_GROUP, itemRel: rel } : { name: "", itemRel: rel };
+  };
   const localFiles = (await ctx.io.exists(ctx.rootPath)) ? await listFilesRecursive(ctx.io, ctx.rootPath) : [];
   const localRels = new Set(localFiles.map((f) => f.slice(ctx.rootPath.length + 1)));
   const byName = new Map<string, RemoteDiffEntry>();
@@ -195,7 +211,7 @@ export async function diffRemote(ctx: CoreContext, reader: ExternalStoreReader):
     return e;
   };
   for (const rel of remoteFiles) {
-    const { name, itemRel } = groupForStoreRel(manifest.groups, rel);
+    const { name, itemRel } = resolve(rel);
     if (!localRels.has(rel)) {
       entry(name).changes.added.push(itemRel);
     } else if ((await reader.readFile(rel)) !== (await ctx.io.read(`${ctx.rootPath}/${rel}`))) {
@@ -205,7 +221,7 @@ export async function diffRemote(ctx: CoreContext, reader: ExternalStoreReader):
   const remoteSet = new Set(remoteFiles);
   for (const rel of localRels) {
     if (!remoteSet.has(rel)) {
-      const { name, itemRel } = groupForStoreRel(manifest.groups, rel);
+      const { name, itemRel } = resolve(rel);
       entry(name).changes.deleted.push(itemRel);
     }
   }

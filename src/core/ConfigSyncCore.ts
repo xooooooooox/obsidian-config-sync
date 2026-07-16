@@ -594,7 +594,7 @@ function isLegacyManifestRel(rel: string): boolean {
   return rel === LEGACY_MANIFEST_REL || rel.startsWith(`${LEGACY_MANIFEST_REL}.migrated-`);
 }
 
-async function remoteGroupsFrom(reader: ExternalStoreReader, files: string[]): Promise<SyncGroup[]> {
+export async function remoteGroupsFrom(reader: ExternalStoreReader, files: string[]): Promise<SyncGroup[]> {
   if (files.includes(SELF_STORE_DATA_REL)) {
     const parsed: unknown = JSON.parse(await reader.readFile(SELF_STORE_DATA_REL));
     if (isPlainObject(parsed) && Array.isArray(parsed.groups)) {
