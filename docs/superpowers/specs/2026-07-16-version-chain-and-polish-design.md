@@ -53,3 +53,12 @@ The 0.23.4 badge overlaps the wrapped description text (ddd.png). Fix by layout,
 #1 unit (lock adoption matrix incl. identical-only pull); #2 host flag unit-light + smoke; #3–#5
 smoke in dev vault (progress completes at N/N; dot lights on forged ahead; badge at multiple
 widths). Gates: 326+ tests, 0 errors/65 warnings, color scan.
+
+## Edge case (确认 2026-07-16): B's installed version newer than the remote record
+
+Adopting a remote lock entry that is OLDER than B's current one is intentional: the lock records
+the shared store's capture lineage, not B's installed version. Adoption makes B drift `ahead` →
+the item surfaces as To capture ("newer here") → B's capture writes the newer version into the
+shared record → the other device sees Outdated. Keeping B's local entry instead would leave the
+shared record stale and silent — the same stalled-chain failure in the reverse direction. The
+prompt is the feature; convergence requires one explicit user action, no automatic ping-pong.
