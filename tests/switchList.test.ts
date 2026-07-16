@@ -63,54 +63,63 @@ describe("parseSwitchList", () => {
   });
 });
 
-describe("captureSwitchList (array shape)", () => {
-  it("returns structurally equal copy with empty exceptions", () => {
+describe("captureSwitchList (array shape) — pass-through for excluded ids (甲)", () => {
+  it("returns structurally equal copy with empty exceptions (store irrelevant)", () => {
     const input: SwitchList = ["a", "b", "c"];
-    const result = captureSwitchList(input, []);
+    const result = captureSwitchList(input, ["stale"], []);
     expect(result).toEqual(input);
     expect(result).not.toBe(input); // different reference
   });
 
-  it("removes excepted ids preserving order", () => {
+  it("with no store (first capture), excluded ids contribute nothing", () => {
     const input: SwitchList = ["a", "b", "c", "d"];
-    expect(captureSwitchList(input, ["b"])).toEqual(["a", "c", "d"]);
-    expect(captureSwitchList(input, ["b", "d"])).toEqual(["a", "c"]);
-    expect(captureSwitchList(input, ["a"])).toEqual(["b", "c", "d"]);
+    expect(captureSwitchList(input, null, ["b"])).toEqual(["a", "c", "d"]);
+    expect(captureSwitchList(input, null, ["b", "d"])).toEqual(["a", "c"]);
+  });
+
+  it("preserves the store's existing entry for an excluded id (stale entry retained)", () => {
+    // local has it, store has it, excluded → store keeps it (not deleted by my capture)
+    expect(captureSwitchList(["a", "x", "b"], ["a", "x", "b"], ["x"])).toEqual(["a", "b", "x"]);
+    // local has it, store does NOT → excluded id is not added
+    expect(captureSwitchList(["a", "x", "b"], ["a", "b"], ["x"])).toEqual(["a", "b"]);
+    // local lacks it, store has it → excluded id stays in store
+    expect(captureSwitchList(["a", "b"], ["a", "x"], ["x"])).toEqual(["a", "b", "x"]);
+  });
+
+  it("unrelated changes flow through while the excluded entry is untouched", () => {
+    // B installs "calendar"; excluded "remote-save" must survive in the store list
+    expect(captureSwitchList(["dataview", "brat", "calendar"], ["dataview", "brat", "remote-save"], ["remote-save"])).toEqual([
+      "dataview",
+      "brat",
+      "calendar",
+      "remote-save",
+    ]);
   });
 
   it("handles non-existent exceptions gracefully", () => {
-    const input: SwitchList = ["a", "b"];
-    expect(captureSwitchList(input, ["x", "y"])).toEqual(["a", "b"]);
-  });
-
-  it("removes all ids if all are excepted", () => {
-    const input: SwitchList = ["a", "b"];
-    expect(captureSwitchList(input, ["a", "b"])).toEqual([]);
+    expect(captureSwitchList(["a", "b"], ["a", "b"], ["x", "y"])).toEqual(["a", "b"]);
   });
 });
 
-describe("captureSwitchList (map shape)", () => {
+describe("captureSwitchList (map shape) — pass-through for excluded ids (甲)", () => {
   it("returns structurally equal copy with empty exceptions", () => {
     const input: SwitchList = { a: true, b: false };
-    const result = captureSwitchList(input, []);
+    const result = captureSwitchList(input, { a: true }, []);
     expect(result).toEqual(input);
     expect(result).not.toBe(input);
   });
 
-  it("removes excepted keys preserving other entries", () => {
-    const input: SwitchList = { a: true, b: false, c: true };
-    expect(captureSwitchList(input, ["b"])).toEqual({ a: true, c: true });
-    expect(captureSwitchList(input, ["a", "c"])).toEqual({ b: false });
+  it("with no store, excluded keys contribute nothing", () => {
+    expect(captureSwitchList({ a: true, b: false, c: true }, null, ["b"])).toEqual({ a: true, c: true });
   });
 
-  it("handles non-existent exceptions gracefully", () => {
-    const input: SwitchList = { a: true };
-    expect(captureSwitchList(input, ["x", "y"])).toEqual({ a: true });
-  });
-
-  it("removes all keys if all are excepted", () => {
-    const input: SwitchList = { a: true, b: false };
-    expect(captureSwitchList(input, ["a", "b"])).toEqual({});
+  it("preserves the store's entry state for excluded keys (true, false, and absent)", () => {
+    // store has true → stays true regardless of local
+    expect(captureSwitchList({ a: true, x: false }, { a: true, x: true }, ["x"])).toEqual({ a: true, x: true });
+    // store has false → stays false
+    expect(captureSwitchList({ a: true, x: true }, { a: true, x: false }, ["x"])).toEqual({ a: true, x: false });
+    // store absent → stays absent even though local has it
+    expect(captureSwitchList({ a: true, x: true }, { a: true }, ["x"])).toEqual({ a: true });
   });
 });
 
@@ -366,14 +375,14 @@ describe("switchListsEqual (mixed shapes)", () => {
 describe("edge cases and identity", () => {
   it("capture with no exceptions returns structurally-equal array", () => {
     const input: SwitchList = ["a", "b"];
-    const result = captureSwitchList(input, []);
+    const result = captureSwitchList(input, null, []);
     expect(result).toEqual(input);
     expect(Array.isArray(result)).toBe(true);
   });
 
   it("capture with no exceptions returns structurally-equal map", () => {
     const input: SwitchList = { a: true, b: false };
-    const result = captureSwitchList(input, []);
+    const result = captureSwitchList(input, null, []);
     expect(result).toEqual(input);
     expect(Array.isArray(result)).toBe(false);
   });
@@ -403,15 +412,15 @@ describe("edge cases and identity", () => {
   it("multiple calls with empty exceptions produce identical outputs", () => {
     const arr: SwitchList = ["a", "b"];
     const map: SwitchList = { a: true };
-    expect(captureSwitchList(arr, [])).toEqual(captureSwitchList(arr, []));
-    expect(captureSwitchList(map, [])).toEqual(captureSwitchList(map, []));
+    expect(captureSwitchList(arr, null, [])).toEqual(captureSwitchList(arr, null, []));
+    expect(captureSwitchList(map, null, [])).toEqual(captureSwitchList(map, null, []));
   });
 
   it("roundtrip: capture then apply with same local and empty exceptions", () => {
     // If we capture with exceptions, store loses those ids
     // Then apply with same local/exceptions, we should restore the full picture
     const local: SwitchList = ["a", "b", "c"];
-    const captured = captureSwitchList(local, ["b"]);
+    const captured = captureSwitchList(local, null, ["b"]);
     // captured should be ["a", "c"]
     expect(captured).toEqual(["a", "c"]);
     // Now apply with the original local and same exceptions
@@ -422,7 +431,7 @@ describe("edge cases and identity", () => {
 
   it("preserves false in maps across capture and apply", () => {
     const local: SwitchList = { a: true, b: false };
-    const captured = captureSwitchList(local, ["b"]);
+    const captured = captureSwitchList(local, null, ["b"]);
     expect(captured).toEqual({ a: true });
 
     const store = captured;
