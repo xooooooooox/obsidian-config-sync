@@ -308,7 +308,8 @@ async function runStateAction(
   ctx: CoreContext,
   group: SyncGroup,
   action: StateAction,
-  installPlugin: PluginInstallFn
+  installPlugin: PluginInstallFn,
+  hasStoreData: boolean
 ): Promise<StatePrelude> {
   const pluginId = pluginIdForGroup(group);
   if (action === "none") {
@@ -373,9 +374,12 @@ async function runStateAction(
         skipConfig: true,
       };
     }
+    // With store data the settings still get written below; without it there is nothing else
+    // to do — the guidance must not claim settings were staged.
+    const guidance = hasStoreData ? "settings were staged; install it manually to pick them up" : "install it manually";
     return {
       note: { kind: "warn", text: "⚠ install failed" },
-      messages: [`${messages[0]} — settings were staged; install it manually to pick them up`],
+      messages: [`${messages[0]} — ${guidance}`],
       skipConfig: false,
     };
   }
@@ -430,7 +434,8 @@ export async function applyWithActions(
     for (const item of items) {
       onProgress?.(done, items.length, item.name);
       const group = requireGroup(manifest, item.name);
-      const prelude = await runStateAction(ctx, group, item.action, installPlugin);
+      const storeExists = await ctx.io.exists(`${storeDir(ctx)}/${groupStorePath(group.path)}`);
+      const prelude = await runStateAction(ctx, group, item.action, installPlugin, storeExists);
       if (prelude.skipConfig) {
         const r = emptyResult(item.name, false);
         r.status = "warning";
@@ -440,11 +445,13 @@ export async function applyWithActions(
       } else {
         // Install-only apply: a not-installed plugin with no settings in the store. The
         // install action IS the payload — applyGroup would error on the missing store data.
-        const installOnly =
-          (item.action === "install" || item.action === "install-enable") &&
-          !(await ctx.io.exists(`${storeDir(ctx)}/${groupStorePath(group.path)}`));
+        const installOnly = (item.action === "install" || item.action === "install-enable") && !storeExists;
         const r = installOnly ? emptyResult(item.name, false) : await applyGroup(ctx, group, state);
-        if (installOnly) r.messages.push("no settings in the store — installed the plugin only");
+        const installedId = pluginIdForGroup(group);
+        // "installed the plugin only" must reflect reality — a failed install gets no such line.
+        if (installOnly && installedId !== null && ctx.plugins.getInstalledPluginVersion(installedId) !== null) {
+          r.messages.push("no settings in the store — installed the plugin only");
+        }
         if (prelude.note !== null) r.stateNote = prelude.note;
         if (prelude.messages.length > 0) {
           r.messages.push(...prelude.messages);

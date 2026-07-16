@@ -52,30 +52,37 @@ export function parseSwitchList(content: string): SwitchList | null {
 // present stays present, absent stays absent. An excluding device can therefore neither add
 // nor remove an excluded id from the shared list. `store === null` (first capture or
 // unreadable) contributes nothing for excluded ids.
+//
+// Ordering is STORE-STABLE (2026-07-17): the produced list walks the store first — excluded ids
+// pass through in place, members still enabled locally keep their positions — then appends
+// local-only non-excluded entries in local order. Identical membership therefore captures
+// byte-identical to the store: diffs show only true adds/removes, and excluded ids never
+// appear in them. (Local file order is per-device enable order — never meaningful to mirror.)
 export function captureSwitchList(local: SwitchList, store: SwitchList | null, exceptions: string[]): SwitchList {
   const excSet = new Set(exceptions);
 
   if (Array.isArray(local)) {
-    const kept = local.filter((id) => !excSet.has(id));
-    if (store === null) return kept;
+    if (store === null) return local.filter((id) => !excSet.has(id));
+    const localSet = new Set(local);
     const storeIds = Array.isArray(store) ? store : Object.keys(store).filter((k) => (store)[k] === true);
-    const preserved = storeIds.filter((id) => excSet.has(id) && !kept.includes(id));
-    return [...kept, ...preserved];
+    const storeSet = new Set(storeIds);
+    const fromStore = storeIds.filter((id) => excSet.has(id) || localSet.has(id));
+    const additions = local.filter((id) => !excSet.has(id) && !storeSet.has(id));
+    return [...fromStore, ...additions];
   } else {
     const result: Record<string, boolean> = {};
-    for (const [key, value] of Object.entries(local)) {
-      if (!excSet.has(key)) {
-        result[key] = value;
+    const storeKeys: string[] = store === null ? [] : Array.isArray(store) ? store : Object.keys(store);
+    for (const key of storeKeys) {
+      if (excSet.has(key)) {
+        // Pass-through: array stores carry presence (true); map stores carry the stored value.
+        result[key] = store !== null && !Array.isArray(store) ? (store[key] ?? true) : true;
+      } else if (Object.prototype.hasOwnProperty.call(local, key)) {
+        result[key] = local[key] ?? false;
       }
     }
-    if (store !== null && !Array.isArray(store)) {
-      for (const exc of exceptions) {
-        const storeVal = store[exc];
-        if (storeVal !== undefined) result[exc] = storeVal;
-      }
-    } else if (store !== null && Array.isArray(store)) {
-      for (const exc of exceptions) {
-        if (store.includes(exc)) result[exc] = true;
+    for (const [key, value] of Object.entries(local)) {
+      if (!excSet.has(key) && !(key in result)) {
+        result[key] = value;
       }
     }
     return result;

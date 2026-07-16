@@ -14,6 +14,7 @@ import {
   listCoreSections,
   listDiscovered,
   listOptionSections,
+  listBetaSections,
   listPluginSections,
   optionReservedName,
   reservedNames,
@@ -142,12 +143,50 @@ describe("listPluginSections", () => {
   it("buckets community plugins by enabled/disabled and leads with the switch list", async () => {
     const io = new MemFS();
     io.seed({ ".obs/community-plugins.json": "{}" });
-    const sections = await listPluginSections(io, ".obs", plugins, NO_GROUPS);
+    const sections = await listPluginSections(io, ".obs", plugins, NO_GROUPS, new Set<string>());
     const byBucket = Object.fromEntries(sections.map((s) => [s.bucket, s]));
     expect(byBucket["list"]?.items[0]?.name).toBe("community-plugins");
     expect(byBucket["enabled"]?.items.map((i) => i.name).sort()).toEqual(["plugin-dataview", "plugin-remotely-save"]);
     expect(byBucket["disabled"]?.items.map((i) => i.name)).toEqual(["plugin-off-plugin"]);
     expect(byBucket["notRecommended"]).toBeUndefined();
+  });
+});
+
+describe("beta/community split (BRAT index)", () => {
+  const plugins = [
+    { id: "dataview", name: "Dataview", enabled: true },
+    { id: "slides-rup", name: "SlidesRup", enabled: true },
+    { id: "simpread", name: "SimpRead Sync", enabled: false },
+  ];
+  const index = { "slides-rup": "shawndotty/slidesrup", simpread: "Kenshin/simpread-obsidian-plugin", "my-text-tools": "shawndotty/my-text-tools" };
+  const groups: SyncGroup[] = [
+    { name: "plugin-my-text-tools", label: "My Text Tools", path: "{configDir}/plugins/my-text-tools/data.json", type: "file", devices: "all" },
+    { name: "plugin-devonlink", label: "DEVONlink", path: "{configDir}/plugins/devonlink/data.json", type: "file", devices: "all" },
+  ];
+
+  it("community tab excludes beta ids and lists non-beta not-installed groups", async () => {
+    const io = new MemFS();
+    io.seed({ ".obs/community-plugins.json": "{}" });
+    const sections = await listPluginSections(io, ".obs", plugins, groups, new Set(Object.keys(index)));
+    const byBucket = Object.fromEntries(sections.map((sec) => [sec.bucket, sec]));
+    expect(byBucket["enabled"]?.items.map((i) => i.name)).toEqual(["plugin-dataview"]);
+    expect(byBucket["disabled"]).toBeUndefined(); // simpread is beta → not here
+    expect(byBucket["notinstalled"]?.items.map((i) => i.name)).toEqual(["plugin-devonlink"]);
+  });
+
+  it("beta tab splits installed by enabled state and lists not-installed beta groups with repos", async () => {
+    const sections = await listBetaSections(plugins, groups, index);
+    const byBucket = Object.fromEntries(sections.map((sec) => [sec.bucket, sec]));
+    expect(byBucket["enabled"]?.items.map((i) => i.name)).toEqual(["plugin-slides-rup"]);
+    expect(byBucket["enabled"]?.items[0]?.description).toContain("shawndotty/slidesrup");
+    expect(byBucket["disabled"]?.items.map((i) => i.name)).toEqual(["plugin-simpread"]);
+    expect(byBucket["notinstalled"]?.items.map((i) => i.name)).toEqual(["plugin-my-text-tools"]);
+    expect(byBucket["notinstalled"]?.items[0]?.description).toContain("shawndotty/my-text-tools");
+    expect(byBucket["list"]).toBeUndefined(); // no on/off list on the beta tab
+  });
+
+  it("beta tab is empty with an empty index", async () => {
+    expect(await listBetaSections(plugins, groups, {})).toEqual([]);
   });
 });
 
@@ -325,7 +364,7 @@ describe("section copy (action-oriented)", () => {
     expect(opt.find((s) => s.bucket === "available")?.description).toBe("Sync these settings that already exist in this vault.");
     const core = await listCoreSections(io, ".obs", [{ id: "graph", name: "Graph view", enabled: true }], []);
     expect(core.find((s) => s.bucket === "enabled")?.description).toBe("Sync the settings files of your enabled core plugins.");
-    const com = await listPluginSections(io, ".obs", [{ id: "dataview", name: "Dataview", enabled: true }], []);
+    const com = await listPluginSections(io, ".obs", [{ id: "dataview", name: "Dataview", enabled: true }], [], new Set<string>());
     expect(com.find((s) => s.bucket === "enabled")?.description).toBe("Sync the settings files of your enabled community plugins.");
   });
 });

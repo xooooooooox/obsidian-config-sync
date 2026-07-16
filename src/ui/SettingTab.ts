@@ -44,6 +44,9 @@ export interface SettingsHost extends Plugin {
   listOptionSections(groups: SyncGroup[]): Promise<CatalogSection[]>;
   listCoreSections(groups: SyncGroup[]): Promise<CatalogSection[]>;
   listPluginSections(groups: SyncGroup[]): Promise<CatalogSection[]>;
+  listBetaSections(groups: SyncGroup[]): Promise<CatalogSection[]>;
+  bratScanStatus(): Promise<{ resolved: number; total: number }>;
+  refreshBratIndex(): Promise<{ resolved: number; total: number }>;
   listDiscoveredFiles(groups: SyncGroup[]): Promise<{ name: string; path: string }[]>;
   installedPluginIds(): string[];
   detectSensitive(group: SyncGroup): Promise<SensitiveScan>;
@@ -87,21 +90,23 @@ function toCandidate(d: RemoteDraft): unknown {
   return c;
 }
 
-type PanelTab = "general" | "obsidian" | "core" | "plugins" | "advanced" | "sources";
+type PanelTab = "general" | "obsidian" | "core" | "plugins" | "beta" | "advanced" | "sources";
 
 const TABS: { id: PanelTab; label: string; icon: string; desktopOnly?: true }[] = [
   { id: "general", label: "General", icon: "settings" },
   { id: "obsidian", label: "Obsidian", icon: "gem" },
   { id: "core", label: "Core plugins", icon: "toy-brick" },
   { id: "plugins", label: "Community plugins", icon: "puzzle" },
+  { id: "beta", label: "Beta", icon: "flask-conical" }, // BRAT's own BratIcon when registered (定稿)
   { id: "advanced", label: "Advanced", icon: "wrench" },
   { id: "sources", label: "Remotes", icon: "git-branch", desktopOnly: true },
 ];
 
-const SECTION_TAB: Record<"obsidian" | "core" | "plugins", string> = {
+const SECTION_TAB: Record<"obsidian" | "core" | "plugins" | "beta", string> = {
   obsidian: "Obsidian",
   core: "Core plugins",
   plugins: "Community plugins",
+  beta: "Beta",
 };
 
 // Single source of truth for General's Settings: used both to render (data-search-anchor
@@ -137,7 +142,7 @@ const GENERAL_SETTINGS: GeneralSettingDef[] = [
 ];
 
 interface SearchHit {
-  scope: "general" | "obsidian" | "core" | "plugins" | "advanced" | "sources";
+  scope: "general" | "obsidian" | "core" | "plugins" | "beta" | "advanced" | "sources";
   kind: "setting" | "item" | "rule" | "discovered" | "remote";
   name: string;
   desc: string;
@@ -150,6 +155,7 @@ const SCOPE_LABEL: Record<SearchHit["scope"], string> = {
   obsidian: "Obsidian",
   core: "Core",
   plugins: "Community",
+  beta: "Beta",
   advanced: "Advanced",
   sources: "Remotes",
 };
@@ -175,6 +181,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private detections = new Map<string, SensitiveScan>(); // group name -> live scan, filled in as reads complete
   private passphraseStatusEl: HTMLElement | null = null;
   private sortedSections = new Set<string>(); // tabs that already re-rendered once to settle sensitive-first ordering
+  private betaAutoScanned = false; // one automatic index re-scan per panel lifetime
 
   constructor(app: App, private host: SettingsHost) {
     super(app, host);
@@ -259,7 +266,15 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     for (const tab of TABS) {
       if (tab.desktopOnly === true && Platform.isMobile) continue;
       const el = nav.createEl("button", { cls: "config-sync-tab" });
-      setIcon(el.createSpan({ cls: "config-sync-tab-icon" }), tab.icon);
+      const iconEl = el.createSpan({ cls: "config-sync-tab-icon" });
+      if (tab.id === "beta") {
+        // BRAT registers "BratIcon" at load; setIcon leaves the span empty when the id is
+        // unknown, so probe first and fall back to the flask.
+        setIcon(iconEl, "BratIcon");
+        if (iconEl.childElementCount === 0) setIcon(iconEl, tab.icon);
+      } else {
+        setIcon(iconEl, tab.icon);
+      }
       el.createSpan({ cls: "config-sync-tab-label", text: tab.label });
       if (tab.id === this.activeTab) el.addClass("is-active");
       el.addEventListener("click", () => this.switchTab(tab.id));
@@ -279,7 +294,10 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       case "obsidian":
       case "core":
       case "plugins":
+      case "beta":
         if (this.renderGroupsReadError(containerEl)) break;
+        if (this.activeTab === "beta") await this.renderBetaHeader(containerEl, gen);
+        if (gen !== this.renderGen) return;
         await this.renderSections(containerEl, gen, this.activeTab);
         if (gen !== this.renderGen) return;
         this.renderGroupsError(containerEl);
@@ -296,13 +314,42 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     }
   }
 
-  private async sectionsFor(tab: "obsidian" | "core" | "plugins"): Promise<CatalogSection[]> {
+  private async sectionsFor(tab: "obsidian" | "core" | "plugins" | "beta"): Promise<CatalogSection[]> {
     if (tab === "obsidian") return this.host.listOptionSections(this.groups);
     if (tab === "core") return this.host.listCoreSections(this.groups);
+    if (tab === "beta") return this.host.listBetaSections(this.groups);
     return this.host.listPluginSections(this.groups);
   }
 
-  private async renderSections(containerEl: HTMLElement, gen: number, tab: "obsidian" | "core" | "plugins"): Promise<void> {
+  // Beta tab header (定稿 mockup v2): what the tab is, the map-note line with the resolve
+  // state, and ↻ Re-scan. Unresolved repos trigger one automatic background re-scan per
+  // panel lifetime — failures wait for the next manual scan instead of looping.
+  private async renderBetaHeader(containerEl: HTMLElement, gen: number): Promise<void> {
+    const status = await this.host.bratScanStatus();
+    if (gen !== this.renderGen) return;
+    const head = new Setting(containerEl)
+      .setName("Beta plugins")
+      .setDesc("Plugins installed through BRAT instead of the community catalog. Settings sync the same way — only the install path differs.")
+      .setHeading();
+    head.settingEl.setAttribute("data-search-anchor", "beta-header");
+    const note = new Setting(containerEl).setName(`Matched from BRAT's beta list · ${status.resolved} of ${status.total} repos resolved`);
+    note.settingEl.addClass("config-sync-beta-mapnote");
+    note.addExtraButton((b) =>
+      b
+        .setIcon("rotate-cw")
+        .setTooltip("Re-scan BRAT's list")
+        .onClick(async () => {
+          await this.host.refreshBratIndex();
+          this.refresh();
+        })
+    );
+    if (status.resolved < status.total && !this.betaAutoScanned) {
+      this.betaAutoScanned = true;
+      void this.host.refreshBratIndex().then(() => this.refresh());
+    }
+  }
+
+  private async renderSections(containerEl: HTMLElement, gen: number, tab: "obsidian" | "core" | "plugins" | "beta"): Promise<void> {
     const sections = await this.sectionsFor(tab);
     if (gen !== this.renderGen) return;
     for (const sec of sections) {
@@ -897,7 +944,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     for (const s of GENERAL_SETTINGS) {
       hits.push({ scope: "general", kind: "setting", name: s.name, desc: s.desc, anchorId: s.anchorId });
     }
-    const tabs: ("obsidian" | "core" | "plugins")[] = ["obsidian", "core", "plugins"];
+    const tabs: ("obsidian" | "core" | "plugins" | "beta")[] = ["obsidian", "core", "plugins", "beta"];
     for (const tab of tabs) {
       const sections = await this.sectionsFor(tab);
       if (gen !== this.renderGen) return null;
@@ -1228,8 +1275,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
 
   private async renderAdvanced(containerEl: HTMLElement, gen: number): Promise<void> {
     const reserved = reservedNames(this.host.installedPluginIds());
-    const managed = this.groups.filter((g) => reserved.has(g.name) && g.origin === undefined);
-    const custom = this.groups.filter((g) => !reserved.has(g.name) && g.origin === undefined);
+    // A plugin-* group with the standard path is a synced plugin item (it belongs to the
+    // Community/Beta tabs even when the plugin isn't installed here) — never a custom rule.
+    const syncedPlugin = (g: SyncGroup): boolean => g.name.startsWith("plugin-") && g.path === expectedPathForName(g.name);
+    const managed = this.groups.filter((g) => (reserved.has(g.name) || syncedPlugin(g)) && g.origin === undefined);
+    const custom = this.groups.filter((g) => !reserved.has(g.name) && !syncedPlugin(g) && g.origin === undefined);
     const customized = managed.filter((g) => this.isCustomized(g));
 
     if (customized.length > 0) {
