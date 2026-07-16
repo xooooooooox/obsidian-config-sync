@@ -298,6 +298,10 @@ interface StatePrelude {
   note: { kind: "ok" | "warn"; text: string } | null;
   messages: string[];
   skipConfig: boolean;
+  // Runs AFTER the config write. Enabling loads the plugin, and a loading plugin reads (and may
+  // later re-save) its data.json — so the applied settings must already be on disk, or the
+  // plugin's deferred save-on-load overwrites them with stale state.
+  finish?: () => Promise<{ note: { kind: "ok" | "warn"; text: string } | null; messages: string[] }>;
 }
 
 async function runStateAction(
@@ -314,22 +318,29 @@ async function runStateAction(
     return { note: null, messages: [], skipConfig: false };
   }
   if (action === "enable") {
-    try {
-      if (pluginId !== null) {
-        await ctx.plugins.enablePluginPersistent(pluginId);
-        if (!ctx.plugins.isPluginEnabled(pluginId)) {
-          throw new Error(`Obsidian did not enable "${pluginId}" — enable it manually in Community plugins`);
+    return {
+      note: null,
+      messages: [],
+      skipConfig: false,
+      finish: async () => {
+        try {
+          if (pluginId !== null) {
+            await ctx.plugins.enablePluginPersistent(pluginId);
+            if (!ctx.plugins.isPluginEnabled(pluginId)) {
+              throw new Error(`Obsidian did not enable "${pluginId}" — enable it manually in Community plugins`);
+            }
+          } else {
+            await ctx.plugins.enableCorePlugin(group.name);
+            if (!ctx.plugins.isCorePluginEnabled(group.name)) {
+              throw new Error(`Obsidian did not enable "${group.name}" — enable it in Options → Core plugins`);
+            }
+          }
+          return { note: { kind: "ok", text: "⏻ enabled" }, messages: [] };
+        } catch (e) {
+          return { note: { kind: "warn", text: "⚠ enable failed" }, messages: [(e as Error).message] };
         }
-      } else {
-        await ctx.plugins.enableCorePlugin(group.name);
-        if (!ctx.plugins.isCorePluginEnabled(group.name)) {
-          throw new Error(`Obsidian did not enable "${group.name}" — enable it in Options → Core plugins`);
-        }
-      }
-      return { note: { kind: "ok", text: "⏻ enabled" }, messages: [], skipConfig: false };
-    } catch (e) {
-      return { note: { kind: "warn", text: "⚠ enable failed" }, messages: [(e as Error).message], skipConfig: false };
-    }
+      },
+    };
   }
   if (pluginId === null) {
     return {
@@ -368,34 +379,34 @@ async function runStateAction(
       skipConfig: false,
     };
   }
-  // Install/update itself succeeded (files written, manifests reloaded) — from here on, any
-  // enable failure is reported as an enable failure, not an install/update failure, since the
-  // config write must still proceed.
-  let enabled = false;
-  if (wantsEnable || (isUpdate && wasEnabled)) {
-    try {
-      await ctx.plugins.enablePluginPersistent(pluginId);
-      if (!ctx.plugins.isPluginEnabled(pluginId)) {
-        throw new Error(`Obsidian did not enable "${pluginId}" — enable it manually in Community plugins`);
-      }
-      enabled = true;
-    } catch (e) {
-      const verb = isUpdate ? "updated" : "installed";
-      return {
-        note: { kind: "warn", text: "⚠ enable failed" },
-        messages: [`${verb} ${version}, but: ${(e as Error).message}`],
-        skipConfig: false,
-      };
-    }
+  // Install/update itself succeeded (files written, manifests reloaded). Enabling is deferred
+  // to `finish` — it runs after the config write, so the (re)loading plugin reads the APPLIED
+  // settings instead of stale ones it could later re-save over them.
+  const baseText = isUpdate ? `⤓ updated to ${version}` : `⤓ installed ${version}`;
+  if (!(wantsEnable || (isUpdate && wasEnabled))) {
+    return { note: { kind: "ok", text: baseText }, messages: [], skipConfig: false };
   }
-  const text = isUpdate
-    ? enabled
-      ? `⤓ updated to ${version} & enabled`
-      : `⤓ updated to ${version}`
-    : enabled
-      ? `⤓ installed & enabled ${version}`
-      : `⤓ installed ${version}`;
-  return { note: { kind: "ok", text }, messages: [], skipConfig: false };
+  return {
+    note: { kind: "ok", text: baseText }, // superseded by finish's note on completion
+    messages: [],
+    skipConfig: false,
+    finish: async () => {
+      try {
+        await ctx.plugins.enablePluginPersistent(pluginId);
+        if (!ctx.plugins.isPluginEnabled(pluginId)) {
+          throw new Error(`Obsidian did not enable "${pluginId}" — enable it manually in Community plugins`);
+        }
+        const text = isUpdate ? `⤓ updated to ${version} & enabled` : `⤓ installed & enabled ${version}`;
+        return { note: { kind: "ok", text }, messages: [] };
+      } catch (e) {
+        const verb = isUpdate ? "updated" : "installed";
+        return {
+          note: { kind: "warn", text: "⚠ enable failed" },
+          messages: [`${verb} ${version}, but: ${(e as Error).message}`],
+        };
+      }
+    },
+  };
 }
 
 export async function applyWithActions(
@@ -432,6 +443,15 @@ export async function applyWithActions(
         if (prelude.messages.length > 0) {
           r.messages.push(...prelude.messages);
           if (r.status === "ok") r.status = "warning";
+        }
+        if (prelude.finish !== undefined) {
+          // Config is on disk — now it's safe to (re)enable: the plugin loads the applied settings.
+          const fin = await prelude.finish();
+          if (fin.note !== null) r.stateNote = fin.note;
+          if (fin.messages.length > 0) {
+            r.messages.push(...fin.messages);
+            if (r.status === "ok" && fin.note?.kind === "warn") r.status = "warning";
+          }
         }
         results.push(r);
       }

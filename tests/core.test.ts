@@ -433,6 +433,59 @@ describe("applyWithActions", () => {
     expect(results[0]?.stateNote).toEqual({ kind: "ok", text: "staged for install" });
   });
 
+  describe("enable happens AFTER the config write (plugin loads with the applied settings)", () => {
+    // Regression for the outdated-section race: enabling a plugin makes it load its data.json;
+    // if enable ran before the config write, the plugin held stale settings in memory and its
+    // deferred save-on-load could overwrite the applied file. Enable must come last.
+    class ContentAtEnablePlugins extends FakePlugins {
+      contentAtEnable: string | null = null;
+      io: MemFS | null = null;
+      watchPath = "";
+      async enablePluginPersistent(id: string): Promise<void> {
+        this.contentAtEnable = this.io?.files.get(this.watchPath) ?? null;
+        await super.enablePluginPersistent(id);
+      }
+    }
+
+    it('"update" writes the store settings BEFORE re-enabling the plugin', async () => {
+      const io = new MemFS();
+      const plugins = new ContentAtEnablePlugins();
+      plugins.io = io;
+      plugins.watchPath = ".obs/plugins/demo/data.json";
+      const ctx: CoreContext = { io, configDir: ".obs", rootPath: "cs", plugins, passphrase: null, groupsIO: memGroupsIO(), now: () => "2026-07-08T00:00:00.000Z", switchExceptions: {} };
+      plugins.installed.set("demo", "1.0.0");
+      plugins.enabled.add("demo");
+      io.seed({ ".obs/plugins/demo/data.json": '{"theme":"old"}' });
+      await seedStore(io, ctx);
+      const results = await applyWithActions(ctx, [{ name: "plugin-demo", action: "update" }], async (id) => {
+        plugins.installed.set(id, "1.2.3");
+        return "1.2.3";
+      });
+      expect(results[0]?.status).toBe("ok");
+      expect(results[0]?.stateNote).toEqual({ kind: "ok", text: "⤓ updated to 1.2.3 & enabled" });
+      // the decisive assertion: at enable time the file already held the APPLIED settings
+      const applied = JSON.stringify({ theme: "x" }, null, 2) + "\n";
+      expect(plugins.contentAtEnable).toBe(applied);
+      expect(await io.read(".obs/plugins/demo/data.json")).toBe(applied);
+      expect(plugins.enabled.has("demo")).toBe(true);
+    });
+
+    it('"enable" (disabled section) also writes settings before enabling', async () => {
+      const io = new MemFS();
+      const plugins = new ContentAtEnablePlugins();
+      plugins.io = io;
+      plugins.watchPath = ".obs/plugins/demo/data.json";
+      const ctx: CoreContext = { io, configDir: ".obs", rootPath: "cs", plugins, passphrase: null, groupsIO: memGroupsIO(), now: () => "2026-07-08T00:00:00.000Z", switchExceptions: {} };
+      plugins.installed.set("demo", "1.2.3");
+      io.seed({ ".obs/plugins/demo/data.json": '{"theme":"old"}' });
+      await seedStore(io, ctx);
+      const results = await applyWithActions(ctx, [{ name: "plugin-demo", action: "enable" }], async () => "x");
+      expect(results[0]?.stateNote).toEqual({ kind: "ok", text: "⏻ enabled" });
+      expect(plugins.contentAtEnable).toBe(JSON.stringify({ theme: "x" }, null, 2) + "\n");
+      expect(plugins.enabled.has("demo")).toBe(true);
+    });
+  });
+
   describe("enable verification (Obsidian's enable resolves without throwing on a no-op)", () => {
     class NoOpEnablePlugins extends FakePlugins {
       async enablePluginPersistent(id: string): Promise<void> {
