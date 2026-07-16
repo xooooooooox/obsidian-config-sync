@@ -6,7 +6,7 @@ import { applyTransform, captureTransform, contentUnchanged } from "./modes";
 import { classifyMerge, MergePlan } from "./merge";
 import { ensureSelfPresets } from "./catalog";
 import { isPlainObject } from "./sanitize";
-import { applySwitchList, captureSwitchList, parseSwitchList, SWITCH_LIST_GROUPS, switchListsEqual } from "./switchList";
+import { applySwitchList, captureSwitchList, parseSwitchList, SWITCH_LIST_GROUPS, SwitchList, switchListsEqual } from "./switchList";
 
 export type ProgressFn = (done: number, total: number, current: string) => void;
 
@@ -196,7 +196,12 @@ async function captureGroup(ctx: CoreContext, group: SyncGroup): Promise<GroupRe
     const plainLocalContent = await ctx.io.read(real);
     const exc = excFor(ctx, group.name);
     const localSwitchList = exc.length > 0 ? parseSwitchList(plainLocalContent) : null;
-    const captureInput = localSwitchList !== null ? serializeSwitchList(captureSwitchList(localSwitchList, exc)) : plainLocalContent;
+    // Pass-through (甲): excluded ids copy the store's existing state, so read it first.
+    let existingStoreList: SwitchList | null = null;
+    if (localSwitchList !== null && (await ctx.io.exists(store))) {
+      existingStoreList = parseSwitchList(await ctx.io.read(store));
+    }
+    const captureInput = localSwitchList !== null ? serializeSwitchList(captureSwitchList(localSwitchList, existingStoreList, exc)) : plainLocalContent;
     const t = await captureTransform(group, captureInput, ctx.passphrase);
     if (t.note !== null) result.messages.push(t.note);
     await writeClassified(ctx, store, t.content, basename(real), result, (existing) => {

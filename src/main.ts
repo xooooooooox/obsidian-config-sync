@@ -620,12 +620,14 @@ export default class ConfigSyncPlugin extends Plugin {
     const store = await readList(`${root}/store/${groupStorePath(`{configDir}/${file}`)}`);
     const runtime = groupName === "community-plugins" ? this.pluginRuntime() : this.coreRuntime();
     const nameOf = new Map(runtime.map((r) => [r.id, r.name]));
-    const ids = [...new Set([...idsOf(local), ...idsOf(store), ...runtime.map((r) => r.id)])].sort();
-    return ids.map((id) => ({
-      id,
-      name: nameOf.get(id) ?? id,
-      hint: `${onIn(local, id) ? "on here" : "off here"} · ${store === null ? "no store copy" : onIn(store, id) ? "store has on" : "store has off"}`,
-    }));
+    const ids = [...new Set([...idsOf(local), ...idsOf(store), ...runtime.map((r) => r.id)])];
+    return ids
+      .map((id) => ({
+        id,
+        name: nameOf.get(id) ?? id,
+        hint: `${onIn(local, id) ? "on here" : "off here"} · ${store === null ? "no store copy" : onIn(store, id) ? "store has on" : "store has off"}`,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })); // sort by DISPLAY name — id order looked random in the UI
   }
 
   async readItemFile(group: SyncGroup): Promise<string | null> {

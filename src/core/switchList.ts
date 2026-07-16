@@ -47,16 +47,35 @@ export function parseSwitchList(content: string): SwitchList | null {
  * Arrays: remove excepted strings, preserve order.
  * Maps: remove excepted keys.
  */
-export function captureSwitchList(local: SwitchList, exceptions: string[]): SwitchList {
+// Capture is PASS-THROUGH for excluded ids (甲, 2026-07-16): non-excluded ids follow local
+// (whole-list mirror as always); excluded ids copy the store's existing state verbatim —
+// present stays present, absent stays absent. An excluding device can therefore neither add
+// nor remove an excluded id from the shared list. `store === null` (first capture or
+// unreadable) contributes nothing for excluded ids.
+export function captureSwitchList(local: SwitchList, store: SwitchList | null, exceptions: string[]): SwitchList {
   const excSet = new Set(exceptions);
 
   if (Array.isArray(local)) {
-    return local.filter((id) => !excSet.has(id));
+    const kept = local.filter((id) => !excSet.has(id));
+    if (store === null) return kept;
+    const storeIds = Array.isArray(store) ? store : Object.keys(store).filter((k) => (store)[k] === true);
+    const preserved = storeIds.filter((id) => excSet.has(id) && !kept.includes(id));
+    return [...kept, ...preserved];
   } else {
     const result: Record<string, boolean> = {};
     for (const [key, value] of Object.entries(local)) {
       if (!excSet.has(key)) {
         result[key] = value;
+      }
+    }
+    if (store !== null && !Array.isArray(store)) {
+      for (const exc of exceptions) {
+        const storeVal = store[exc];
+        if (storeVal !== undefined) result[exc] = storeVal;
+      }
+    } else if (store !== null && Array.isArray(store)) {
+      for (const exc of exceptions) {
+        if (store.includes(exc)) result[exc] = true;
       }
     }
     return result;
