@@ -21,6 +21,7 @@ import {
   SECTION_TITLES,
   SectionKind,
   sectionForItem,
+  stageableRow,
   stageableState,
   versionLine,
   visibleUnderFilter,
@@ -183,7 +184,7 @@ export class SyncCenterView extends ItemView {
     // direction override — otherwise the footer keeps counting freshly-synced items.
     for (const n of [...this.selected]) {
       const st = this.statuses.get(n);
-      if (st !== undefined && !stageableState(st.state)) {
+      if (st !== undefined && !stageableRow(st.state, this.sectionOf(n))) {
         this.selected.delete(n);
         this.directionOverride.delete(n);
       }
@@ -236,6 +237,11 @@ export class SyncCenterView extends ItemView {
   // Presentation state: version-ahead in-sync rows surface as to-capture (定稿 feedback-trio).
   private presState(r: StatusRow): GroupState {
     return presentedState(r.status.state, this.availOf(r.group.name).drift);
+  }
+
+  // Section-aware stageability: ○ rows in "Not installed" stage as install-only apply.
+  private rowStageable(r: StatusRow): boolean {
+    return stageableRow(this.presState(r), this.sectionOf(r.group.name));
   }
 
   // All user-facing counts (header pills, sidebar badges, filter pills, switcher) must agree
@@ -587,7 +593,7 @@ export class SyncCenterView extends ItemView {
   // Tri-state select-all over the currently visible checkable rows (scope + filter + search).
   private checkableRows(scoped: StatusRow[]): string[] {
     return this.visibleRows(scoped)
-      .filter((r) => stageableState(this.presState(r)))
+      .filter((r) => this.rowStageable(r))
       .map((r) => r.group.name);
   }
 
@@ -636,7 +642,7 @@ export class SyncCenterView extends ItemView {
     head.createSpan({ cls: "config-sync-row-chevron", text: open ? "▾" : "▸" });
     head.createSpan({ cls: "config-sync-section-title", text: SECTION_TITLES[kind] });
     const insync = matches.filter((r) => this.presState(r) === "in-sync");
-    const checkable = matches.filter((r) => stageableState(this.presState(r)));
+    const checkable = matches.filter((r) => this.rowStageable(r));
     const countText = this.searching() ? `${matches.length} of ${rows.length}` : `${rows.length - insync.length}`;
     head.createSpan({ cls: "config-sync-pill is-neutral", text: countText });
     if (insync.length > 0) head.createSpan({ cls: "config-sync-pill is-ok", text: `✓ ${insync.length}` });
@@ -676,7 +682,7 @@ export class SyncCenterView extends ItemView {
   private renderItemRow(card: HTMLElement, r: StatusRow): void {
     const { group } = r;
     const pres = this.presState(r);
-    const inert = !stageableState(pres);
+    const inert = !this.rowStageable(r);
     const row = card.createDiv({
       cls: `config-sync-hub-row${inert ? " is-insync" : ""}${pres === "no-settings" ? " is-nosettings" : ""}`,
       attr: { "aria-label": this.host.resolvedPath(group) },
@@ -777,6 +783,12 @@ export class SyncCenterView extends ItemView {
       return;
     }
     if (status.state === "no-settings") {
+      if (this.sectionOf(r.group.name) === "not-installed") {
+        // Install-only apply: nothing to write, but the plugin itself can be installed.
+        detail.createDiv({ cls: "config-sync-expand-note", text: "no settings to apply — installs the plugin only" });
+        this.renderPolicySeg(detail, r, this.availOf(r.group.name), true);
+        return;
+      }
       detail.createDiv({
         cls: "config-sync-expand-note",
         text: "no settings yet on this device or in the store — appears under “To capture” once this item has settings",
@@ -800,17 +812,19 @@ export class SyncCenterView extends ItemView {
     if (line !== null) detail.createDiv({ cls: `config-sync-version-line${line.tone === "amber" ? " is-amber" : ""}`, text: line.text });
     const section = this.sectionOf(r.group.name);
     if (section === "not-installed") {
-      this.renderPolicySeg(detail, r, a); // apply-only: no direction toggle
+      this.renderPolicySeg(detail, r, a, false); // apply-only: no direction toggle
       this.renderCappedChanges(detail, r, status.changes);
       return;
     }
     this.renderDirectionToggle(detail, r);
-    if (section !== "main" && this.effDir(r) === "apply") this.renderPolicySeg(detail, r, a);
+    if (section !== "main" && this.effDir(r) === "apply") this.renderPolicySeg(detail, r, a, false);
     this.renderCappedChanges(detail, r, status.changes);
   }
 
-  private renderPolicySeg(detail: HTMLElement, r: StatusRow, a: Availability): void {
-    const options = policyOptions(a);
+  private renderPolicySeg(detail: HTMLElement, r: StatusRow, a: Availability, installOnly: boolean): void {
+    // Install-only rows have no settings payload: "Stage only" would apply nothing at all,
+    // so the ladder keeps just the install actions.
+    const options = policyOptions(a).filter((o) => !installOnly || o.action !== "none");
     if (options.length === 0) return;
     const name = r.group.name;
     detail.createDiv({ cls: "config-sync-seg-label", text: "On apply" });
@@ -906,13 +920,13 @@ export class SyncCenterView extends ItemView {
 
   private captureNames(): string[] {
     return this.rows()
-      .filter((r) => this.selected.has(r.group.name) && stageableState(this.presState(r)) && this.effDir(r) === "capture")
+      .filter((r) => this.selected.has(r.group.name) && this.rowStageable(r) && this.effDir(r) === "capture")
       .map((r) => r.group.name);
   }
 
   private applyPayload(): ApplyItem[] {
     return this.rows()
-      .filter((r) => this.selected.has(r.group.name) && stageableState(this.presState(r)) && this.effDir(r) === "apply")
+      .filter((r) => this.selected.has(r.group.name) && this.rowStageable(r) && this.effDir(r) === "apply")
       .map((r) => {
         if (this.sectionOf(r.group.name) === "main") return { name: r.group.name, action: "none" as const };
         const a = this.availOf(r.group.name);
@@ -924,7 +938,7 @@ export class SyncCenterView extends ItemView {
 
   private renderActionBar(macro: HTMLElement): void {
     const bar = macro.createDiv({ cls: "config-sync-actionbar" });
-    const counted = (r: StatusRow): boolean => this.selected.has(r.group.name) && stageableState(this.presState(r));
+    const counted = (r: StatusRow): boolean => this.selected.has(r.group.name) && this.rowStageable(r);
     const mainStaged = this.mainRows().filter(counted).length;
     const outdatedStaged = this.rows().filter((r) => this.sectionOf(r.group.name) === "outdated" && counted(r)).length;
     const disabledStaged = this.rows().filter((r) => this.sectionOf(r.group.name) === "disabled" && counted(r)).length;

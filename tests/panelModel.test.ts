@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { capFileEntries, insyncLineText, moreFilesText, visibleUnderFilter, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, footerSummary, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableState, versionLine } from "../src/ui/panelModel";
+import { capFileEntries, insyncLineText, moreFilesText, visibleUnderFilter, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, footerSummary, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, versionLine } from "../src/ui/panelModel";
 import { GroupState } from "../src/core/status";
 import { Availability } from "../src/core/availability";
 
@@ -105,6 +105,13 @@ describe("direction", () => {
     expect(stageableState("store-newer")).toBe(true);
     expect(stageableState("differs")).toBe(true);
     expect(stageableState("not-captured")).toBe(true);
+  });
+  it("stageableRow: no-settings stages only in the not-installed section (install-only apply)", () => {
+    expect(stageableRow("no-settings", "not-installed")).toBe(true);
+    expect(stageableRow("no-settings", "main")).toBe(false);
+    expect(stageableRow("no-settings", "disabled")).toBe(false);
+    expect(stageableRow("in-sync", "not-installed")).toBe(false); // only ○ gets the exception
+    expect(stageableRow("store-newer", "not-installed")).toBe(true);
   });
 });
 

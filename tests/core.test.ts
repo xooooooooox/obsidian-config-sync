@@ -405,6 +405,20 @@ describe("applyWithActions", () => {
     expect(plugins.log).toContain("enable-persist:demo");
     expect(plugins.enabled.has("demo")).toBe(true);
   });
+  it("install-only apply (no settings in the store) installs and enables without writing files", async () => {
+    const { io, plugins, ctx } = setup();
+    await seedGroups(ctx, MANIFEST); // group registered, but nothing captured for it
+    const results = await applyWithActions(ctx, [{ name: "plugin-demo", action: "install-enable" }], async (id) => {
+      plugins.installed.set(id, "2.5.0");
+      return "2.5.0";
+    });
+    expect(results[0]?.status).toBe("ok");
+    expect(results[0]?.stateNote).toEqual({ kind: "ok", text: "\u2913 installed & enabled 2.5.0" });
+    expect(results[0]?.messages).toContain("no settings in the store \u2014 installed the plugin only");
+    expect(results[0]?.filesWritten).toEqual([]);
+    expect(plugins.enabled.has("demo")).toBe(true);
+    expect(await io.exists(".obs/plugins/demo/data.json")).toBe(false);
+  });
   it("update failure skips the config write and warns; install failure still writes", async () => {
     const { io, plugins, ctx } = setup();
     plugins.installed.set("demo", "1.0.0");
