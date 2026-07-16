@@ -79,6 +79,14 @@ export function nosettingsLineText(n: number, open: boolean): string {
 
 export type SectionKind = "main" | "outdated" | "disabled" | "not-installed";
 
+// A ○ no-settings row is stageable ONLY in the not-installed section: applying installs the
+// plugin from the community catalog (install-only — there are no settings to write).
+// Everywhere else no-settings stays inert, per stageableState.
+export function stageableRow(state: GroupState, section: SectionKind): boolean {
+  if (section === "not-installed" && state === "no-settings") return true;
+  return stageableState(state);
+}
+
 export const SECTION_TITLES: Record<Exclude<SectionKind, "main">, string> = {
   outdated: "Outdated on this device",
   disabled: "Disabled on this device",

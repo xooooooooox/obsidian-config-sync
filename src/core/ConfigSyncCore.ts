@@ -438,7 +438,13 @@ export async function applyWithActions(
         r.messages.push(...prelude.messages);
         results.push(r);
       } else {
-        const r = await applyGroup(ctx, group, state);
+        // Install-only apply: a not-installed plugin with no settings in the store. The
+        // install action IS the payload — applyGroup would error on the missing store data.
+        const installOnly =
+          (item.action === "install" || item.action === "install-enable") &&
+          !(await ctx.io.exists(`${storeDir(ctx)}/${groupStorePath(group.path)}`));
+        const r = installOnly ? emptyResult(item.name, false) : await applyGroup(ctx, group, state);
+        if (installOnly) r.messages.push("no settings in the store — installed the plugin only");
         if (prelude.note !== null) r.stateNote = prelude.note;
         if (prelude.messages.length > 0) {
           r.messages.push(...prelude.messages);
@@ -594,7 +600,7 @@ function isLegacyManifestRel(rel: string): boolean {
   return rel === LEGACY_MANIFEST_REL || rel.startsWith(`${LEGACY_MANIFEST_REL}.migrated-`);
 }
 
-async function remoteGroupsFrom(reader: ExternalStoreReader, files: string[]): Promise<SyncGroup[]> {
+export async function remoteGroupsFrom(reader: ExternalStoreReader, files: string[]): Promise<SyncGroup[]> {
   if (files.includes(SELF_STORE_DATA_REL)) {
     const parsed: unknown = JSON.parse(await reader.readFile(SELF_STORE_DATA_REL));
     if (isPlainObject(parsed) && Array.isArray(parsed.groups)) {
