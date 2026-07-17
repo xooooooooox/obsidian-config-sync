@@ -429,8 +429,8 @@ export class SyncCenterView extends ItemView {
   }
 
   private renderHeader(): void {
+    // No title span: the pane header already reads "Sync Center" (mobile polish round 2).
     const head = this.contentEl.createDiv({ cls: "config-sync-center-head" });
-    head.createSpan({ cls: "config-sync-center-title", text: "Sync Center" });
     const { up, down, ok, none } = this.presentedCounts(this.mainRows());
     const pills = head.createSpan({ cls: "config-sync-report-pills" });
     if (up > 0) {

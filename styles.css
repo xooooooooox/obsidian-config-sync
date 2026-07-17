@@ -1073,3 +1073,48 @@ body.is-mobile .config-sync-center-head .config-sync-pill {
   min-height: 0;
   line-height: 1.5;
 }
+
+/* ── Mobile polish round 2 (2026-07-17) ── */
+
+/* ① The action bar must clear Obsidian's floating mobile navbar — plus room for a floating
+   status-bar pill (a common snippet/theme pattern sits fixed above the navbar). Overshoot is
+   harmless: it is scroll-past space at the end of the list. */
+body.is-mobile .config-sync-center {
+  padding-bottom: calc(var(--mobile-toolbar-height, 48px) + 88px);
+}
+
+/* ② The search row separates from the filter pills (own line, full width minus select-all). */
+body.is-mobile .config-sync-mainbar { row-gap: var(--size-4-2); }
+body.is-mobile .config-sync-mainbar-search {
+  flex: 1 1 calc(100% - 44px);
+  min-width: 0;
+}
+
+/* ③ The scope switcher matches the pills' height instead of undercutting them. */
+body.is-mobile .config-sync-switcher {
+  min-height: 44px;
+  font-size: var(--font-ui-medium);
+}
+
+/* ④ The header ↻ glyph shares the checkbox column's right edge (desktop too).
+   7px = the cards' inner right inset (~13px: --size-4-3 + border) minus the
+   clickable-icon's own 6px padding around the glyph. */
+.config-sync-center-refresh {
+  margin-left: 0;
+  margin-right: 7px;
+}
+.config-sync-center-head { padding-right: 0; }
+.config-sync-center-head > :last-child { margin-left: auto; }
+
+/* ⑥ Expanded-item detail: one scale for everything inside (desktop + mobile) — buttons,
+   file lines and notes all sit at --font-ui-smaller with a shared indent and rhythm. */
+.config-sync-report-files .config-sync-seg { margin: var(--size-2-1) 0; }
+.config-sync-report-files .config-sync-seg-btn {
+  font-size: var(--font-ui-smaller);
+  padding: 2px 10px;
+}
+body.is-mobile .config-sync-report-files .config-sync-seg-btn {
+  min-height: 32px;
+  padding: 4px 12px;
+}
+body.is-mobile .config-sync-report-files { font-size: var(--font-ui-small); }
