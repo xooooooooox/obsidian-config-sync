@@ -810,6 +810,17 @@ export class SyncCenterView extends ItemView {
         return;
       }
       const sec = this.sectionOf(r.group.name);
+      if (sec === "disabled") {
+        // Unified rule (spec 2026-07-17): settings synced, plugin off — enabling is the payload.
+        detail.createDiv({ cls: "config-sync-expand-note", text: "identical to the store — applying just turns the plugin on" });
+        this.renderPolicySeg(detail, r, this.availOf(r.group.name), true);
+        return;
+      }
+      if (sec === "not-installed") {
+        detail.createDiv({ cls: "config-sync-expand-note", text: "identical to the store — applying installs the plugin" });
+        this.renderPolicySeg(detail, r, this.availOf(r.group.name), true);
+        return;
+      }
       if (sec === "outdated") {
         if (r.group.name === SELF_GROUP_NAME) {
           detail.createDiv({
@@ -843,6 +854,11 @@ export class SyncCenterView extends ItemView {
       if (section === "disabled") {
         // Enable-only apply (定稿 2026-07-17), symmetric to install-only.
         detail.createDiv({ cls: "config-sync-expand-note", text: "no settings to apply — enables the plugin only" });
+        this.renderPolicySeg(detail, r, this.availOf(r.group.name), true);
+        return;
+      }
+      if (section === "outdated") {
+        detail.createDiv({ cls: "config-sync-expand-note", text: "no settings anywhere — updates the plugin only" });
         this.renderPolicySeg(detail, r, this.availOf(r.group.name), true);
         return;
       }

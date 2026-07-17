@@ -79,13 +79,12 @@ export function nosettingsLineText(n: number, open: boolean): string {
 
 export type SectionKind = "main" | "outdated" | "disabled" | "not-installed";
 
-// The action-only family: rows whose transfer payload is empty but whose STATE ACTION is the
-// point. ○ no-settings stages in not-installed (install-only, 0.24.0) and disabled
-// (enable-only, 0.27.0); ✓ in-sync stages in outdated (update-only, 0.27.1 — settings match,
-// the plugin itself is behind). Everywhere else those states stay inert.
+// Unified rule (spec 2026-07-17, closes the install-only/enable-only/update-only family): in
+// the non-main sections the state ACTION is the payload, so every row stages except locked —
+// an empty settings transfer (no-settings, in-sync) no longer gates interaction. Main-section
+// rows keep the plain stageability (there is no action to run there).
 export function stageableRow(state: GroupState, section: SectionKind): boolean {
-  if ((section === "not-installed" || section === "disabled") && state === "no-settings") return true;
-  if (section === "outdated" && state === "in-sync") return true;
+  if (section !== "main") return state !== "locked";
   return stageableState(state);
 }
 

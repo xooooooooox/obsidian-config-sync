@@ -515,7 +515,7 @@ export async function applyWithActions(
         // install action IS the payload — applyGroup would error on the missing store data.
         // Action-only apply: a plugin with no settings in the store — the state action
         // (install and/or enable) IS the payload; applyGroup would error on the missing data.
-        const actionOnly = (item.action === "install" || item.action === "install-enable" || item.action === "enable") && !storeExists;
+        const actionOnly = item.action !== "none" && !storeExists;
         if (!actionOnly) phase("writing settings…");
         const r = actionOnly ? emptyResult(item.name, false) : await applyGroup(ctx, group, state);
         if (prelude.note !== null) r.stateNote = prelude.note;
@@ -537,10 +537,11 @@ export async function applyWithActions(
         // install/enable never claims success.
         if (actionOnly) {
           const pid = pluginIdForGroup(group);
+          const isUpd = item.action === "update" || item.action === "update-enable";
           if (item.action === "enable") {
             if (pid !== null && ctx.plugins.isPluginEnabled(pid)) r.messages.push("no settings in the store — enabled the plugin only");
-          } else if (pid !== null && ctx.plugins.getInstalledPluginVersion(pid) !== null) {
-            r.messages.push("no settings in the store — installed the plugin only");
+          } else if (pid !== null && ctx.plugins.getInstalledPluginVersion(pid) !== null && r.stateNote?.kind !== "warn") {
+            r.messages.push(isUpd ? "no settings in the store — updated the plugin only" : "no settings in the store — installed the plugin only");
           }
         }
         results.push(r);
