@@ -1301,7 +1301,9 @@ export class SyncCenterView extends ItemView {
       detail.createDiv({ cls: "config-sync-remote-summary", text: directionText });
     }
 
-    this.renderRemoteButtons(detail, remote, pullAligned, entries.length === 0);
+    // lockDiffers alone still gives Pull something to do (refresh the newer version info),
+    // so it keeps the buttons live even when every file's contents match.
+    this.renderRemoteButtons(detail, remote, pullAligned, entries.length === 0 && !lockDiffers);
   }
 
   private renderRemoteDiffEntry(detail: HTMLElement, e: RemoteDiffEntry): void {
