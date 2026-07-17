@@ -135,8 +135,10 @@ export function policyOptions(a: Availability): PolicyOption[] {
     ];
   }
   if (a.anchor === "plugin" && a.drift === "behind") {
+    // Update targets the version the store's settings were captured on (方案 c), not "latest":
+    // drift === "behind" guarantees storeVersion is non-null.
     return [
-      { action: "update", label: "⤓ Update to latest", pill: "⤓ update" },
+      { action: "update", label: `⤓ Update to ${a.storeVersion}`, pill: "⤓ update" },
       { action: "none", label: `Keep ${a.localVersion ?? "current"}`, pill: null },
     ];
   }
@@ -169,11 +171,15 @@ export function versionLine(a: Availability): { text: string; tone: "gray" | "am
 
 // "selected" wording (定稿 2026-07-17, replaces git-flavored "staged"); an empty selection
 // renders NOTHING — the idle state needs no label.
-export function footerSummary(selected: number, outdated: number, disabled: number, toInstall: number): string {
-  if (selected === 0 && outdated === 0 && disabled === 0 && toInstall === 0) return "";
-  const parts = [`${selected} selected`];
-  if (outdated > 0) parts.push(`+${outdated} outdated`);
-  if (disabled > 0) parts.push(`+${disabled} disabled`);
-  if (toInstall > 0) parts.push(`+${toInstall} to install`);
+// The lead number is the TOTAL staged across every section (matching the section heads and
+// the Apply button); the non-main sections are a composition breakdown — subsets of the
+// total, so no "+" (batch: footer consistency). `main` here is main-section staged rows.
+export function footerSummary(main: number, outdated: number, disabled: number, toInstall: number): string {
+  const total = main + outdated + disabled + toInstall;
+  if (total === 0) return "";
+  const parts = [`${total} selected`];
+  if (outdated > 0) parts.push(`${outdated} to update`);
+  if (disabled > 0) parts.push(`${disabled} to enable`);
+  if (toInstall > 0) parts.push(`${toInstall} to install`);
   return parts.join(" · ");
 }

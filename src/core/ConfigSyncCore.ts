@@ -310,7 +310,10 @@ export interface ApplyItem {
   action: StateAction;
 }
 
-export type PluginInstallFn = (pluginId: string, onPhase?: (phase: string) => void) => Promise<string>; // resolves to the installed version
+// targetVersion pins the install to the version the store's settings were captured on; the
+// installer falls back to latest-stable when that tag is gone and returns what it actually
+// installed (so the caller can warn on a mismatch).
+export type PluginInstallFn = (pluginId: string, onPhase?: (phase: string) => void, targetVersion?: string) => Promise<string>;
 
 interface StatePrelude {
   note: { kind: "ok" | "warn"; text: string } | null;
@@ -350,6 +353,7 @@ async function runStateAction(
   action: StateAction,
   installPlugin: PluginInstallFn,
   hasStoreData: boolean,
+  targetVersion: string | null,
   onPhase?: (phase: string) => void
 ): Promise<StatePrelude> {
   const pluginId = pluginIdForGroup(group);
@@ -390,7 +394,7 @@ async function runStateAction(
   try {
     if (isUpdate && wasEnabled) await ctx.plugins.disablePlugin(pluginId);
     onPhase?.(isUpdate ? "updating…" : "installing…");
-    version = await installPlugin(pluginId, onPhase);
+    version = await installPlugin(pluginId, onPhase, targetVersion ?? undefined);
     await ctx.plugins.reloadPluginManifests();
   } catch (e) {
     const messages = [(e as Error).message];
@@ -421,12 +425,16 @@ async function runStateAction(
   // to `finish` — it runs after the config write, so the (re)loading plugin reads the APPLIED
   // settings instead of stale ones it could later re-save over them.
   const baseText = isUpdate ? `⤓ updated to ${version}` : `⤓ installed ${version}`;
+  // The pinned version's release was gone, so the installer fell back to latest-stable.
+  const fallbackMsgs = targetVersion !== null && version !== targetVersion
+    ? [`the captured version ${targetVersion} is no longer downloadable — installed ${version} instead`]
+    : [];
   if (!(wantsEnable || (isUpdate && wasEnabled))) {
-    return { note: { kind: "ok", text: baseText }, messages: [], skipConfig: false };
+    return { note: { kind: "ok", text: baseText }, messages: fallbackMsgs, skipConfig: false };
   }
   return {
     note: { kind: "ok", text: baseText }, // superseded by finish's note on completion
-    messages: [],
+    messages: fallbackMsgs,
     skipConfig: false,
     finish: async () => {
       try {
@@ -435,7 +443,7 @@ async function runStateAction(
           throw new Error(`Obsidian did not enable "${pluginId}" — enable it manually in Community plugins`);
         }
         const text = isUpdate ? `⤓ updated to ${version} & enabled` : `⤓ installed & enabled ${version}`;
-        return { note: { kind: "ok", text }, messages: [] };
+        return { note: { kind: "ok", text }, messages: fallbackMsgs };
       } catch (e) {
         const verb = isUpdate ? "updated" : "installed";
         return {
@@ -487,6 +495,7 @@ export async function applyWithActions(
   onProgress?: ProgressFn
 ): Promise<GroupResult[]> {
   const manifest = await loadManifest(ctx);
+  const lock = await loadLock(ctx); // carries each group's sourcePluginVersion — the install target
   if (await ctx.io.exists(backupDir(ctx))) {
     await ctx.io.rmdir(backupDir(ctx), true);
   }
@@ -503,7 +512,8 @@ export async function applyWithActions(
       const group = requireGroup(manifest, item.name);
       const phase = (p: string): void => onProgress?.(done, items.length, item.name, p);
       const storeExists = await ctx.io.exists(`${storeDir(ctx)}/${groupStorePath(group.path)}`);
-      const prelude = await runStateAction(ctx, group, item.action, installPlugin, storeExists, phase);
+      const targetVersion = lock?.groups[group.name]?.sourcePluginVersion ?? null;
+      const prelude = await runStateAction(ctx, group, item.action, installPlugin, storeExists, targetVersion, phase);
       if (prelude.skipConfig) {
         const r = emptyResult(item.name, false);
         r.status = "warning";
