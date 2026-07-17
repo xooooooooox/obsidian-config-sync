@@ -101,7 +101,6 @@ export default class ConfigSyncPlugin extends Plugin {
   private mainRibbonEl: HTMLElement | null = null;
   private lastResolvedRoot: string | null = null;
   private installFn: PluginInstallFn | null = null;
-  private enabledSnapshot: string | null = null; // panel-freshness change detector
   localStatuses: GroupStatus[] | null = null;
   private presentedStatuses: GroupStatus[] | null = null;
   private lastGroups: SyncGroup[] | null = null;
@@ -135,17 +134,7 @@ export default class ConfigSyncPlugin extends Plugin {
         if (this.settings.localPeriodicCheck && document.hasFocus()) void this.refreshLocalStatus();
       }, 5 * 60 * 1000)
     );
-    // Panel freshness (spec 2026-07-17): toggling a plugin in Obsidian's settings modal fires
-    // no event and changes no leaf, so an open Sync Center kept stale sections. A cheap
-    // enabled-set snapshot catches it within ~10s.
-    this.registerInterval(
-      window.setInterval(() => {
-        if (!document.hasFocus() || this.app.workspace.getLeavesOfType(SYNC_CENTER_VIEW_TYPE).length === 0) return;
-        // The baseline is stamped by refreshLocalStatus itself, so a toggle that happened
-        // while this check was paused (unfocused window) is still caught on the next tick.
-        if (this.enabledSnapshot !== null && this.enabledSnapshot !== this.takeEnabledSnapshot()) void this.refreshLocalStatus();
-      }, 10 * 1000)
-    );
+
     if (Platform.isDesktop) {
       this.remoteAutoCheckStartupTimer = window.setTimeout(() => {
         this.remoteAutoCheckStartupTimer = null;
@@ -225,18 +214,8 @@ export default class ConfigSyncPlugin extends Plugin {
     } catch (e) {
       console.error("Config Sync: status refresh failed", e);
     }
-    this.enabledSnapshot = this.takeEnabledSnapshot(); // freshness baseline matches what was just computed
     this.updateRibbonDot();
     this.notifySyncCenter();
-  }
-
-  private takeEnabledSnapshot(): string {
-    const core = Object.entries(this.internalPlugins().plugins)
-      .filter(([, p]) => p.enabled)
-      .map(([id]) => id)
-      .sort()
-      .join(",");
-    return `${[...this.pluginRegistry().enabledPlugins].sort().join(",")}|${core}`;
   }
 
   // Fills in any missing display-name label using runtime plugin/core names, and persists the

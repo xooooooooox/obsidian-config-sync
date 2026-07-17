@@ -459,6 +459,14 @@ export class SyncCenterView extends ItemView {
       cls: "config-sync-center-refreshed",
       text: this.lastRefreshedAt === null ? "" : `refreshed ${relativeAge(this.lastRefreshedAt)}`,
     });
+    // Manual refresh (定稿 2026-07-17, replaces the enabled-set polling): same affordance as
+    // the Remotes ↻ — re-scans local state, catching plugin toggles made in Obsidian's
+    // settings modal while the panel stayed open.
+    const refresh = new ExtraButtonComponent(head);
+    refresh.setIcon("refresh-cw");
+    refresh.setTooltip("Refresh local state");
+    refresh.extraSettingsEl.addClass("config-sync-center-refresh");
+    refresh.onClick(() => void this.reload());
   }
 
   private setLastRun(title: string, tone: "local" | "transfer", results: GroupResult[] | null): void {
