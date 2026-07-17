@@ -838,7 +838,11 @@ export class SyncCenterView extends ItemView {
     row.createDiv({ cls: "config-sync-rule-spacer" });
 
     const icon = this.stateIcon(pres);
-    row.createSpan({ cls: `config-sync-state-icon ${icon.cls}`, text: icon.glyph, attr: { "aria-label": icon.tip } });
+    const stateEl = row.createSpan({ cls: `config-sync-state-icon ${icon.cls}`, attr: { "aria-label": icon.tip } });
+    // locked pairs the mode badge's lock with a key — "needs the passphrase" — instead of a
+    // second identical lock (and the emoji ignored the state column's theme color).
+    if (icon.cls === "is-locked") setIcon(stateEl, "key-round");
+    else stateEl.setText(icon.glyph);
     if (inert && this.searching() && !this.expandedItems.has(group.name)) {
       // A grey hit must explain itself without a hover (定稿 search UX).
       card.createDiv({ cls: "config-sync-inert-note", text: `${icon.glyph} ${icon.tip}` });
