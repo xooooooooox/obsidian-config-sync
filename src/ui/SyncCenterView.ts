@@ -247,6 +247,12 @@ export class SyncCenterView extends ItemView {
     return this.availability.get(name) ?? { kind: "enabled", drift: null, localVersion: null, storeVersion: null, anchor: "app" };
   }
 
+  // Install targets the version the store captured (方案 A); latest when unrecorded.
+  private installTargetText(name: string): string {
+    const v = this.availOf(name).storeVersion;
+    return v !== null ? `the captured version ${v}` : "the latest version";
+  }
+
   private sectionOf(name: string): SectionKind {
     return sectionForItem(this.availOf(name));
   }
@@ -928,7 +934,7 @@ export class SyncCenterView extends ItemView {
         return;
       }
       if (sec === "not-installed") {
-        detail.createDiv({ cls: "config-sync-expand-note", text: "identical to the store — applying installs the plugin" });
+        detail.createDiv({ cls: "config-sync-expand-note", text: `identical to the store — applying installs ${this.installTargetText(r.group.name)}` });
         this.renderPolicySeg(detail, r, this.availOf(r.group.name), true);
         return;
       }
@@ -958,7 +964,7 @@ export class SyncCenterView extends ItemView {
       const section = this.sectionOf(r.group.name);
       if (section === "not-installed") {
         // Install-only apply: nothing to write, but the plugin itself can be installed.
-        detail.createDiv({ cls: "config-sync-expand-note", text: "no settings to apply — installs the plugin only" });
+        detail.createDiv({ cls: "config-sync-expand-note", text: `no settings to apply — installs ${this.installTargetText(r.group.name)} only` });
         this.renderPolicySeg(detail, r, this.availOf(r.group.name), true);
         return;
       }

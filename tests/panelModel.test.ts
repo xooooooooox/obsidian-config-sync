@@ -207,8 +207,13 @@ describe("versionLine", () => {
 });
 
 describe("footerSummary", () => {
-  it("lists only non-zero sources", () => {
-    expect(footerSummary(3, 0, 1, 2)).toBe("3 selected · +1 disabled · +2 to install");
+  it("leads with the total staged and lists non-main sections as a subset breakdown", () => {
+    // 3 main + 1 disabled + 2 install = 6 total selected
+    expect(footerSummary(3, 0, 1, 2)).toBe("6 selected · 1 to enable · 2 to install");
     expect(footerSummary(4, 0, 0, 0)).toBe("4 selected");
+    // all staged rows in one non-main section still count in the total (the 0-selected bug)
+    expect(footerSummary(0, 0, 0, 9)).toBe("9 selected · 9 to install");
+    expect(footerSummary(1, 2, 0, 0)).toBe("3 selected · 2 to update");
+    expect(footerSummary(0, 0, 0, 0)).toBe("");
   });
 });
