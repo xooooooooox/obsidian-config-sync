@@ -395,6 +395,7 @@ export default class ConfigSyncPlugin extends Plugin {
         }
       },
       switchLocalDecisions: (name) => (SWITCH_LIST_GROUPS.has(name) ? this.settings.switchExceptions[name] ?? [] : []),
+      betaIds: () => new Set(Object.keys(this.settings.bratPluginIndex)),
       switchDivergenceFor: async (name) => {
         if (!SWITCH_LIST_GROUPS.has(name)) return null;
         const group = findGroupByName(this.settings.groups, name);

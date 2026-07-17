@@ -401,6 +401,7 @@ body.is-phone .config-sync-fkey {
 .config-sync-pill.is-none { background: var(--background-modifier-hover); color: var(--text-muted); }
 .config-sync-pill.is-warn { background: none; color: var(--color-orange); margin-left: var(--size-4-1); }
 
+.config-sync-fpillrow { display: flex; flex-wrap: wrap; gap: var(--size-4-1); min-width: 0; }
 .config-sync-fpill { background: none; border: 1px solid var(--background-modifier-border); border-radius: 999px; padding: 2px 10px; font-size: var(--font-ui-smaller); color: var(--text-muted); cursor: pointer; box-shadow: none; height: auto; }
 
 .config-sync-fpill.is-active { background: var(--interactive-accent); border-color: var(--interactive-accent); color: var(--text-on-accent); }
@@ -541,7 +542,9 @@ body.is-phone .config-sync-fkey {
 .config-sync-remote-btn.is-dimmed { opacity: 0.55; }
 .config-sync-remote-btn.is-pull:not(.is-primary) { color: var(--color-cyan); }
 .config-sync-remote-btn.is-push:not(.is-primary) { color: var(--color-pink); }
-body.is-phone .config-sync-actionbar { flex-wrap: wrap; }
+body.is-mobile .config-sync-actionbar { flex-wrap: wrap; }
+body.is-mobile .config-sync-actionbar .config-sync-staged-count { flex: 1 1 100%; }
+body.is-mobile .config-sync-actionbar button { padding: var(--size-4-1) var(--size-4-2); }
 
 .config-sync-btnwrap { display: inline-flex; flex-direction: column; }
 
@@ -659,6 +662,17 @@ body.is-mobile .config-sync-hub-row { min-height: 44px; }
 
 
 
+/* ⑦ Filter pills: one line, horizontal scroll (standard mobile chip row). */
+body.is-mobile .config-sync-fpillrow {
+  flex: 1 1 100%;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+body.is-mobile .config-sync-fpillrow::-webkit-scrollbar { display: none; }
+body.is-mobile .config-sync-fpill { flex: none; white-space: nowrap; }
+
 body.is-mobile .config-sync-fpill,
 body.is-mobile .config-sync-seg-btn,
 body.is-mobile .config-sync-side-item,
@@ -701,7 +715,12 @@ body.is-mobile .config-sync-section-head input[type="checkbox"]:indeterminate::a
 .config-sync-strip-body { margin-top: 6px; }
 
 /* 0.20.0 availability sections */
-.config-sync-section { border: 1px dashed var(--background-modifier-border); border-radius: 8px; padding: 8px 10px; margin-top: 8px; }
+.config-sync-section { border: 1px dashed var(--background-modifier-border); border-radius: 8px; padding: 8px var(--size-4-3); margin-top: 8px; }
+/* One checkbox column (batch 3 ①): the section's own frame carries the card inset; the
+   nested card drops its frame so section rows share the main card's checkbox column. */
+.config-sync-section .config-sync-card { border: none; background: transparent; padding: 0; border-radius: 0; }
+.config-sync-section-head input[type="checkbox"] { margin-left: auto; }
+.config-sync-section-hint + input[type="checkbox"] { margin-left: 0; }
 .config-sync-section.is-open { border-style: solid; }
 .config-sync-section.is-outdated { border-color: rgba(var(--color-pink-rgb), 0.45); }
 .config-sync-section.is-not-installed { border-color: rgba(var(--color-orange-rgb), 0.45); }
@@ -754,6 +773,7 @@ body.is-mobile .config-sync-section-head input[type="checkbox"]:indeterminate::a
 /* Specificity must beat the base `.config-sync-mainbar input[type="checkbox"] { margin: 0 }`
    rule, or the auto margin is dropped and the box never right-aligns to the row column. */
 .config-sync-mainbar input[type="checkbox"].config-sync-selectall { margin-left: auto; }
+.config-sync-selectall-idle { visibility: hidden; }
 
 /* 0.21.0 device-specific badge (§3.3): dissolved "Not recommended" section replaced by an inline caution badge */
 .config-sync-devbadge { margin-left: var(--size-4-2); font-size: var(--font-ui-smaller); color: var(--color-orange); background: rgba(var(--color-orange-rgb), 0.12); border-radius: 9px; padding: 1px 8px; }
