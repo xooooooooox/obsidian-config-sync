@@ -419,6 +419,28 @@ describe("applyWithActions", () => {
     expect(plugins.enabled.has("demo")).toBe(true);
     expect(await io.exists(".obs/plugins/demo/data.json")).toBe(false);
   });
+  it("enable-only apply (no settings in the store) enables without writing files", async () => {
+    const { io, plugins, ctx } = setup();
+    plugins.installed.set("demo", "1.2.3");
+    await seedGroups(ctx, MANIFEST); // group registered, nothing captured
+    const results = await applyWithActions(ctx, [{ name: "plugin-demo", action: "enable" }], async () => "9.9.9");
+    expect(results[0]?.status).toBe("ok");
+    expect(results[0]?.stateNote).toEqual({ kind: "ok", text: "\u23fb enabled" });
+    expect(results[0]?.messages).toContain("no settings in the store \u2014 enabled the plugin only");
+    expect(results[0]?.filesWritten).toEqual([]);
+    expect(plugins.enabled.has("demo")).toBe(true);
+    expect(await io.exists(".obs/plugins/demo/data.json")).toBe(false);
+  });
+  it("failed enable-only apply keeps the warn note and drops the 'enabled only' line", async () => {
+    const { plugins, ctx } = setup();
+    plugins.installed.set("demo", "1.2.3");
+    plugins.failEnable = true;
+    await seedGroups(ctx, MANIFEST);
+    const results = await applyWithActions(ctx, [{ name: "plugin-demo", action: "enable" }], async () => "9.9.9");
+    expect(results[0]?.status).toBe("warning");
+    expect(results[0]?.stateNote).toEqual({ kind: "warn", text: "\u26a0 enable failed" });
+    expect((results[0]?.messages ?? []).join(" | ")).not.toContain("enabled the plugin only");
+  });
   it("failed install-only apply reports the failure honestly (no 'installed' line, no settings clause)", async () => {
     const { plugins, ctx } = setup();
     await seedGroups(ctx, MANIFEST); // group registered, nothing captured

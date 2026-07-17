@@ -79,11 +79,11 @@ export function nosettingsLineText(n: number, open: boolean): string {
 
 export type SectionKind = "main" | "outdated" | "disabled" | "not-installed";
 
-// A ○ no-settings row is stageable ONLY in the not-installed section: applying installs the
-// plugin from the community catalog (install-only — there are no settings to write).
-// Everywhere else no-settings stays inert, per stageableState.
+// A ○ no-settings row is stageable in the not-installed section (apply = install-only,
+// 0.24.0) and in the disabled section (apply = enable-only, 定稿 2026-07-17): the state
+// action IS the payload, no settings are written. Everywhere else no-settings stays inert.
 export function stageableRow(state: GroupState, section: SectionKind): boolean {
-  if (section === "not-installed" && state === "no-settings") return true;
+  if ((section === "not-installed" || section === "disabled") && state === "no-settings") return true;
   return stageableState(state);
 }
 

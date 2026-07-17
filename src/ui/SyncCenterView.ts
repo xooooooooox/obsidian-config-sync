@@ -1,4 +1,4 @@
-import { ButtonComponent, ExtraButtonComponent, ItemView, WorkspaceLeaf } from "obsidian";
+import { App, ButtonComponent, ExtraButtonComponent, ItemView, Modal, WorkspaceLeaf } from "obsidian";
 import { ApplyItem, ProgressFn, StateAction } from "../core/ConfigSyncCore";
 import { bucketCounts, GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry } from "../core/status";
 import { CATEGORY_LABELS, findGroupByName, ItemCategory, categoryForGroup } from "../core/catalog";
@@ -28,6 +28,7 @@ import {
   effectiveDirection,
 } from "./panelModel";
 import { renderDiffPanel } from "./diffView";
+import { SWITCH_LIST_GROUPS, switchListSortedView } from "../core/switchList";
 import { renderReportContent, renderReportPills } from "./reportContent";
 
 const CATEGORY_ORDER: ItemCategory[] = ["obsidian", "core", "community", "custom"];
@@ -55,6 +56,10 @@ export interface SyncCenterHost {
   dismissBootstrap(): void;
   adoptConfiguration(): Promise<GroupResult[] | null>;
   switchLocalDecisions(name: string): string[]; // [] for non-switch-list groups
+  // Bidirectional divergence for a switch-list group (exceptions masked); null when either
+  // side is missing or unparseable.
+  switchDivergenceFor(name: string): Promise<{ captureRemoves: string[]; applyDisables: string[] } | null>;
+  addSwitchExceptions(name: string, ids: string[]): Promise<void>;
   // Contents for an inline change diff: base = current state of the target side, produced =
   // what the pending action (capture/apply) would write. null = no diff available.
   diffPair(name: string, rel: string, dir: Direction): Promise<{ base: string; produced: string } | null>;
@@ -510,11 +515,16 @@ export class SyncCenterView extends ItemView {
       const s = this.sectionOf(r.group.name);
       if (s !== "main") sections[s].push(r);
     }
-    const counts = this.presentedCounts(mainRows);
+    // While searching, the pills count the MATCHED set (定稿): the All pill keeps the
+    // unfiltered total as "n / m".
+    const pillRows = this.searching()
+      ? mainRows.filter((r) => matchesSearch(`${this.host.displayName(r.group.name, r.group.label)} ${r.group.name}`, this.search))
+      : mainRows;
+    const counts = this.presentedCounts(pillRows);
 
     const bar = main.createDiv({ cls: "config-sync-mainbar" });
     const defs: { key: PanelFilter; label: string }[] = [
-      { key: "all", label: `All ${mainRows.length}` },
+      { key: "all", label: this.searching() ? `All ${pillRows.length} / ${mainRows.length}` : `All ${mainRows.length}` },
       { key: "capture", label: `To capture ${counts.up}` },
       { key: "apply", label: `To apply ${counts.down}` },
       { key: "ok", label: `In sync ${counts.ok}` },
@@ -559,9 +569,16 @@ export class SyncCenterView extends ItemView {
 
   private renderListInto(listHost: HTMLElement, scoped: StatusRow[]): void {
     listHost.empty();
-    const card = listHost.createDiv({ cls: "config-sync-card" });
-    const visible = this.visibleRows(scoped);
     const searching = this.search.trim() !== "";
+    const visible = this.visibleRows(scoped);
+    if (searching) {
+      // Search keeps context (定稿): the main card gets a labeled head with hit counts,
+      // mirroring the sections' "n of m".
+      const head = listHost.createDiv({ cls: "config-sync-section-head is-plain" });
+      head.createSpan({ cls: "config-sync-section-title", text: "All items" });
+      head.createSpan({ cls: "config-sync-pill is-neutral", text: `${visible.length} of ${scoped.length}` });
+    }
+    const card = listHost.createDiv({ cls: "config-sync-card" });
     if (this.filter === "all" && !searching) {
       const active = visible.filter((r) => this.presState(r) !== "in-sync" && this.presState(r) !== "no-settings");
       const insync = visible.filter((r) => this.presState(r) === "in-sync");
@@ -703,6 +720,10 @@ export class SyncCenterView extends ItemView {
 
     const icon = this.stateIcon(pres);
     row.createSpan({ cls: `config-sync-state-icon ${icon.cls}`, text: icon.glyph, attr: { "aria-label": icon.tip } });
+    if (inert && this.searching() && !this.expandedItems.has(group.name)) {
+      // A grey hit must explain itself without a hover (定稿 search UX).
+      card.createDiv({ cls: "config-sync-inert-note", text: `${icon.glyph} ${icon.tip}` });
+    }
 
     const dir = this.effDir(r);
     const cb = row.createEl("input", { type: "checkbox" });
@@ -763,6 +784,7 @@ export class SyncCenterView extends ItemView {
     for (const id of excluded) {
       detail.createDiv({ cls: "config-sync-lddetail", text: `⌂ ${id} — excluded from this list on this device` });
     }
+    if (SWITCH_LIST_GROUPS.has(r.group.name)) this.renderSwitchDivergence(detail, r);
     if (status.message !== undefined) {
       detail.createDiv({ cls: "config-sync-status-error", text: status.message });
       return;
@@ -782,9 +804,16 @@ export class SyncCenterView extends ItemView {
       return;
     }
     if (status.state === "no-settings") {
-      if (this.sectionOf(r.group.name) === "not-installed") {
+      const section = this.sectionOf(r.group.name);
+      if (section === "not-installed") {
         // Install-only apply: nothing to write, but the plugin itself can be installed.
         detail.createDiv({ cls: "config-sync-expand-note", text: "no settings to apply — installs the plugin only" });
+        this.renderPolicySeg(detail, r, this.availOf(r.group.name), true);
+        return;
+      }
+      if (section === "disabled") {
+        // Enable-only apply (定稿 2026-07-17), symmetric to install-only.
+        detail.createDiv({ cls: "config-sync-expand-note", text: "no settings to apply — enables the plugin only" });
         this.renderPolicySeg(detail, r, this.availOf(r.group.name), true);
         return;
       }
@@ -818,6 +847,38 @@ export class SyncCenterView extends ItemView {
     this.renderDirectionToggle(detail, r);
     if (section !== "main" && this.effDir(r) === "apply") this.renderPolicySeg(detail, r, a, false);
     this.renderCappedChanges(detail, r, status.changes);
+  }
+
+  // Bidirectional divergence summary (定稿 2026-07-17): shown ONLY when both directions
+  // would destroy the other side's state — a one-sided difference renders nothing extra.
+  private renderSwitchDivergence(detail: HTMLElement, r: StatusRow): void {
+    const holder = detail.createDiv();
+    void this.host.switchDivergenceFor(r.group.name).then((d) => {
+      if (!holder.isConnected || d === null) return;
+      if (d.captureRemoves.length === 0 || d.applyDisables.length === 0) return;
+      const box = holder.createDiv({ cls: "config-sync-divergence" });
+      box.createDiv({ text: "This device and the store diverge both ways — either direction overwrites the other:" });
+      box.createDiv({
+        cls: "config-sync-divergence-line",
+        text: `↑ Capture removes ${d.captureRemoves.length} from the shared list — other devices will turn them off: ${d.captureRemoves.join(", ")}`,
+      });
+      box.createDiv({
+        cls: "config-sync-divergence-line",
+        text: `↓ Apply turns off ${d.applyDisables.length} on this device — exclude them first to keep them: ${d.applyDisables.join(", ")}`,
+      });
+      const btn = holder.createEl("button", {
+        cls: "config-sync-seg-btn",
+        text: `⌂ Exclude this device's ${d.applyDisables.length} extra${d.applyDisables.length === 1 ? "" : "s"}…`,
+      });
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        new ExcludeExtrasModal(this.app, this.host.displayName(r.group.name, r.group.label), d.applyDisables, async (ids) => {
+          if (ids.length === 0) return;
+          await this.host.addSwitchExceptions(r.group.name, ids);
+          await this.reload();
+        }).open();
+      });
+    });
   }
 
   private renderPolicySeg(detail: HTMLElement, r: StatusRow, a: Availability, installOnly: boolean): void {
@@ -902,7 +963,11 @@ export class SyncCenterView extends ItemView {
           const dir = this.effDir(r);
           const leftLabel = dir === "capture" ? "store" : "this device";
           const rightLabel = dir === "capture" ? "this device (what capture would write)" : "store (what apply would write)";
-          renderDiffPanel(p, pair.base, pair.produced, leftLabel, rightLabel, e.name);
+          // On/off lists compare as sets — sorted view keeps ordering/comma artifacts out.
+          const sorted = SWITCH_LIST_GROUPS.has(r.group.name);
+          const base = sorted ? switchListSortedView(pair.base) : pair.base;
+          const produced = sorted ? switchListSortedView(pair.produced) : pair.produced;
+          renderDiffPanel(p, base, produced, leftLabel, rightLabel, sorted ? `${e.name} · sorted view` : e.name);
         });
       });
     };
@@ -1124,5 +1189,46 @@ export class SyncCenterView extends ItemView {
       this.setLastRun(`Pushed to ${remote.name}`, "transfer", await this.host.pushTo(remote));
       await this.reload();
     });
+  }
+}
+
+// Confirmation for the divergence shortcut: pre-checked list of this device's extra ids;
+// confirming adds the checked ones to the device-local exceptions.
+class ExcludeExtrasModal extends Modal {
+  private checks = new Map<string, boolean>();
+
+  constructor(app: App, private listLabel: string, private ids: string[], private onConfirm: (ids: string[]) => Promise<void>) {
+    super(app);
+    for (const id of ids) this.checks.set(id, true);
+  }
+
+  onOpen(): void {
+    this.titleEl.setText("Exclude from this list (this device)");
+    this.contentEl.createDiv({
+      cls: "config-sync-expand-note",
+      text: `${this.listLabel}: excluded plugins keep their own on/off state on this device — the shared list neither includes nor changes them.`,
+    });
+    const list = this.contentEl.createDiv();
+    for (const id of this.ids) {
+      const row = list.createDiv({ cls: "config-sync-exclude-row" });
+      const cb = row.createEl("input", { type: "checkbox" });
+      cb.checked = true;
+      cb.addEventListener("change", () => this.checks.set(id, cb.checked));
+      row.createSpan({ text: id });
+    }
+    const bar = this.contentEl.createDiv({ cls: "config-sync-modal-buttons" });
+    new ButtonComponent(bar).setButtonText("Cancel").onClick(() => this.close());
+    new ButtonComponent(bar)
+      .setButtonText("Exclude")
+      .setCta()
+      .onClick(() => {
+        const picked = this.ids.filter((id) => this.checks.get(id) === true);
+        this.close();
+        void this.onConfirm(picked);
+      });
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
   }
 }

@@ -89,6 +89,25 @@ export function captureSwitchList(local: SwitchList, store: SwitchList | null, e
   }
 }
 
+// Bidirectional divergence summary (定稿 2026-07-17): the non-excluded ids each direction
+// would destroy. captureRemoves = enabled in the store but not here (capture drops them from
+// the shared list — other devices then turn them off); applyDisables = enabled only here
+// (apply turns them off — excluding them first keeps them). Both sorted for stable display.
+export function switchDivergence(
+  local: SwitchList,
+  store: SwitchList,
+  exceptions: string[]
+): { captureRemoves: string[]; applyDisables: string[] } {
+  const excSet = new Set(exceptions);
+  const enabledIds = (l: SwitchList): Set<string> =>
+    new Set(Array.isArray(l) ? l : Object.keys(l).filter((k) => l[k] === true));
+  const localIds = enabledIds(local);
+  const storeIds = enabledIds(store);
+  const captureRemoves = [...storeIds].filter((id) => !excSet.has(id) && !localIds.has(id)).sort();
+  const applyDisables = [...localIds].filter((id) => !excSet.has(id) && !storeIds.has(id)).sort();
+  return { captureRemoves, applyDisables };
+}
+
 // Display-only canonical view for switch-list diffs: membership compares as a set, so diffs
 // render both sides sorted — a real difference shows as adds/removes instead of being buried
 // in per-device ordering noise. Unparseable content passes through untouched.

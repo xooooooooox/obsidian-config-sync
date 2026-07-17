@@ -131,7 +131,12 @@ export class FakePlugins {
     this.enabled.add(id);
     this.log.push(`enable:${id}`);
   }
+  failEnable = false; // when true, enablePluginPersistent silently no-ops (Obsidian refusing)
   async enablePluginPersistent(id: string): Promise<void> {
+    if (this.failEnable) {
+      this.log.push(`enable-persist-noop:${id}`);
+      return;
+    }
     this.enabled.add(id);
     this.log.push(`enable-persist:${id}`);
   }

@@ -21,12 +21,12 @@ import {
 } from "./core/ConfigSyncCore";
 import { createInstaller } from "./core/installer";
 import { BratIndex, parseBratRepoList, resolveBratIndex } from "./core/bratIndex";
-import { type CatalogSection, displayLabelForGroup, ensureSelfPresets, groupForItem, listBetaSections, listCoreSections, listDiscovered, listOptionSections, listPluginSections, SELF_GROUP_NAME, setCorePluginIds } from "./core/catalog";
+import { type CatalogSection, displayLabelForGroup, ensureSelfPresets, findGroupByName, groupForItem, listBetaSections, listCoreSections, listDiscovered, listOptionSections, listPluginSections, SELF_GROUP_NAME, setCorePluginIds } from "./core/catalog";
 import { Availability, availabilityForGroup } from "./core/availability";
 import { listFilesRecursive } from "./core/io";
 import { ManifestValidationError, migrateLegacyManifest, parseStoreLock, validateSyncManifest } from "./core/manifest";
 import { groupRealPath, groupStorePath } from "./core/pathing";
-import { applySwitchList, captureSwitchList, parseSwitchList, SWITCH_LIST_GROUPS, SwitchList } from "./core/switchList";
+import { applySwitchList, captureSwitchList, parseSwitchList, SWITCH_LIST_GROUPS, switchDivergence, SwitchList } from "./core/switchList";
 import { applyTransform, captureTransform, scanSensitive, SensitiveScan } from "./core/modes";
 import { PkmMode, PkmProbe, resolveEffectiveMode, resolveRootPath } from "./core/pkm";
 import { bucketCounts, checkRemote, diffRemote, GroupStatus, RemoteCheck, statusForGroups } from "./core/status";
@@ -394,6 +394,30 @@ export default class ConfigSyncPlugin extends Plugin {
         }
       },
       switchLocalDecisions: (name) => (SWITCH_LIST_GROUPS.has(name) ? this.settings.switchExceptions[name] ?? [] : []),
+      switchDivergenceFor: async (name) => {
+        if (!SWITCH_LIST_GROUPS.has(name)) return null;
+        const group = findGroupByName(this.settings.groups, name);
+        if (group === undefined) return null;
+        try {
+          const ctx = await this.coreContext();
+          const real = groupRealPath(group.path, ctx.configDir);
+          const store = `${ctx.rootPath}/store/${groupStorePath(group.path)}`;
+          if (!(await ctx.io.exists(real)) || !(await ctx.io.exists(store))) return null;
+          const local = parseSwitchList(await ctx.io.read(real));
+          const stored = parseSwitchList(await ctx.io.read(store));
+          if (local === null || stored === null) return null;
+          return switchDivergence(local, stored, this.settings.switchExceptions[name] ?? []);
+        } catch {
+          return null;
+        }
+      },
+      addSwitchExceptions: async (name, ids) => {
+        const current = this.settings.switchExceptions[name] ?? [];
+        const merged = [...new Set([...current, ...ids])].sort();
+        this.settings.switchExceptions = { ...this.settings.switchExceptions, [name]: merged };
+        await this.saveSettings();
+        void this.refreshLocalStatus();
+      },
       adoptConfiguration: async () => {
         try {
           const ctx = await this.coreContext();
