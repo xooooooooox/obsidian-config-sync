@@ -118,7 +118,7 @@ export function policyOptions(a: Availability): PolicyOption[] {
     return [
       { action: "install-enable", label: "⤓ Install & enable", pill: "⤓ install & enable" },
       { action: "install", label: "⤓ Install", pill: "⤓ install" },
-      { action: "none", label: "Stage only", pill: null },
+      { action: "none", label: "Settings only", pill: null },
     ];
   }
   if (a.kind === "disabled") {
@@ -167,8 +167,11 @@ export function versionLine(a: Availability): { text: string; tone: "gray" | "am
   return { text: `this device ${a.localVersion} · store ${a.storeVersion}${suffix}`, tone: "gray" };
 }
 
-export function footerSummary(staged: number, outdated: number, disabled: number, toInstall: number): string {
-  const parts = [`${staged} staged`];
+// "selected" wording (定稿 2026-07-17, replaces git-flavored "staged"); an empty selection
+// renders NOTHING — the idle state needs no label.
+export function footerSummary(selected: number, outdated: number, disabled: number, toInstall: number): string {
+  if (selected === 0 && outdated === 0 && disabled === 0 && toInstall === 0) return "";
+  const parts = [`${selected} selected`];
   if (outdated > 0) parts.push(`+${outdated} outdated`);
   if (disabled > 0) parts.push(`+${disabled} disabled`);
   if (toInstall > 0) parts.push(`+${toInstall} to install`);
