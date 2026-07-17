@@ -31,17 +31,20 @@ jobs:
               run: |
                   [ -f styles.css ] && echo "exists=true" >> "$GITHUB_OUTPUT" || echo "exists=false" >> "$GITHUB_OUTPUT"
 
-            # Obsidian's automated review verifies build-provenance attestations; the generic
-            # actions/attest bundle failed its checker even though `gh attestation verify`
-            # passes. One single-subject attestation per asset, via the canonical action.
+            # Pinned to @v2 ON PURPOSE (2026-07-17): Obsidian's automated catalog review only
+            # verifies the older Sigstore bundle format. The v4-generation actions — including
+            # the official obsidian-sample-plugin template (actions/attest@v4) — produce
+            # bundles its checker rejects, even though `gh attestation verify` passes them
+            # (confirmed empirically: a v2 re-attestation of the same 0.27.1 digests cleared
+            # the errors). Bump only after Obsidian's verifier handles current bundles.
             - name: Attest main.js
-              uses: actions/attest-build-provenance@v4
+              uses: actions/attest-build-provenance@v2
               with:
                   subject-path: main.js
 
             - name: Attest styles.css
               if: steps.styles.outputs.exists == 'true'
-              uses: actions/attest-build-provenance@v4
+              uses: actions/attest-build-provenance@v2
               with:
                   subject-path: styles.css
 
