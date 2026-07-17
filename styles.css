@@ -974,3 +974,51 @@ body.is-mobile .config-sync-mainbar input[type="checkbox"]:indeterminate::after 
 /* Header manual-refresh sits inline with the "refreshed Xm ago" note. */
 .config-sync-center-refresh { margin-left: var(--size-4-1); }
 .config-sync-center-refresh svg { width: 14px; height: 14px; }
+
+/* Live run status line (定稿 2026-07-17): right-aligned monospace "Name — phase…" with a
+   pulsing dot; the slow hint appends after ~8s on one step. */
+.config-sync-runline {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--size-4-2);
+  margin-top: var(--size-4-1);
+  color: var(--text-muted);
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smaller);
+}
+.config-sync-runline-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--interactive-accent);
+  flex: none;
+  animation: config-sync-pulse 1s ease-in-out infinite alternate;
+}
+.config-sync-runline-slow { color: var(--text-faint); font-style: italic; }
+@keyframes config-sync-pulse {
+  from { opacity: 0.35; }
+  to { opacity: 1; }
+}
+
+/* Indeterminate shimmer over the button progress bar while a step runs. */
+.config-sync-progress.is-active { position: relative; overflow: hidden; }
+.config-sync-progress.is-active::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -30%;
+  height: 100%;
+  width: 30%;
+  background: linear-gradient(90deg, transparent, var(--text-on-accent), transparent);
+  opacity: 0.6;
+  animation: config-sync-shimmer 1.2s linear infinite;
+}
+@keyframes config-sync-shimmer {
+  from { left: -30%; }
+  to { left: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .config-sync-runline-dot { animation: none; }
+  .config-sync-progress.is-active::after { animation: none; opacity: 0.35; left: 35%; }
+}

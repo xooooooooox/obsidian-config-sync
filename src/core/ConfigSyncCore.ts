@@ -8,7 +8,9 @@ import { ensureSelfPresets } from "./catalog";
 import { isPlainObject } from "./sanitize";
 import { applySwitchList, captureSwitchList, parseSwitchList, SWITCH_LIST_GROUPS, SwitchList, switchListsEqual } from "./switchList";
 
-export type ProgressFn = (done: number, total: number, current: string) => void;
+// `current` is the group NAME (the UI maps it to a display label); `phase` is a short live
+// phrase for the in-item step ("downloading via BRAT…", "writing settings…") — spec 2026-07-17.
+export type ProgressFn = (done: number, total: number, current: string, phase?: string) => void;
 
 export interface PluginHost {
   getInstalledPluginVersion(id: string): string | null;
@@ -308,7 +310,7 @@ export interface ApplyItem {
   action: StateAction;
 }
 
-export type PluginInstallFn = (pluginId: string) => Promise<string>; // resolves to the installed version
+export type PluginInstallFn = (pluginId: string, onPhase?: (phase: string) => void) => Promise<string>; // resolves to the installed version
 
 interface StatePrelude {
   note: { kind: "ok" | "warn"; text: string } | null;
@@ -347,7 +349,8 @@ async function runStateAction(
   group: SyncGroup,
   action: StateAction,
   installPlugin: PluginInstallFn,
-  hasStoreData: boolean
+  hasStoreData: boolean,
+  onPhase?: (phase: string) => void
 ): Promise<StatePrelude> {
   const pluginId = pluginIdForGroup(group);
   if (action === "none") {
@@ -386,7 +389,8 @@ async function runStateAction(
   let version: string;
   try {
     if (isUpdate && wasEnabled) await ctx.plugins.disablePlugin(pluginId);
-    version = await installPlugin(pluginId);
+    onPhase?.(isUpdate ? "updating…" : "installing…");
+    version = await installPlugin(pluginId, onPhase);
     await ctx.plugins.reloadPluginManifests();
   } catch (e) {
     const messages = [(e as Error).message];
@@ -458,9 +462,12 @@ export async function captureWithActions(ctx: CoreContext, items: CaptureItem[],
     onProgress
   );
   const manifest = await loadManifest(ctx);
+  let done = 0;
   for (const item of items) {
+    done++;
     if (item.action !== "enable") continue;
     const group = requireGroup(manifest, item.name);
+    onProgress?.(done - 1, items.length, item.name, "enabling…");
     const fin = await enableForGroup(ctx, group);
     const r = results.find((x) => x.group === item.name);
     if (r === undefined) continue;
@@ -494,8 +501,9 @@ export async function applyWithActions(
     for (const item of items) {
       onProgress?.(done, items.length, item.name);
       const group = requireGroup(manifest, item.name);
+      const phase = (p: string): void => onProgress?.(done, items.length, item.name, p);
       const storeExists = await ctx.io.exists(`${storeDir(ctx)}/${groupStorePath(group.path)}`);
-      const prelude = await runStateAction(ctx, group, item.action, installPlugin, storeExists);
+      const prelude = await runStateAction(ctx, group, item.action, installPlugin, storeExists, phase);
       if (prelude.skipConfig) {
         const r = emptyResult(item.name, false);
         r.status = "warning";
@@ -508,6 +516,7 @@ export async function applyWithActions(
         // Action-only apply: a plugin with no settings in the store — the state action
         // (install and/or enable) IS the payload; applyGroup would error on the missing data.
         const actionOnly = (item.action === "install" || item.action === "install-enable" || item.action === "enable") && !storeExists;
+        if (!actionOnly) phase("writing settings…");
         const r = actionOnly ? emptyResult(item.name, false) : await applyGroup(ctx, group, state);
         if (prelude.note !== null) r.stateNote = prelude.note;
         if (prelude.messages.length > 0) {
@@ -516,6 +525,7 @@ export async function applyWithActions(
         }
         if (prelude.finish !== undefined) {
           // Config is on disk — now it's safe to (re)enable: the plugin loads the applied settings.
+          phase("enabling…");
           const fin = await prelude.finish();
           if (fin.note !== null) r.stateNote = fin.note;
           if (fin.messages.length > 0) {

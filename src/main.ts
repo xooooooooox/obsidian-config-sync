@@ -612,10 +612,14 @@ export default class ConfigSyncPlugin extends Plugin {
       });
       // Resolution order (spec C4): BRAT index → community catalog. An unmapped id gets one
       // last-chance index refresh before falling back to the catalog path.
-      this.installFn = async (id: string): Promise<string> => {
+      this.installFn = async (id: string, onPhase?: (phase: string) => void): Promise<string> => {
         if (this.settings.bratPluginIndex[id] === undefined) await this.refreshBratIndex();
         const repo = this.settings.bratPluginIndex[id];
-        if (repo !== undefined) return this.installViaBrat(id, repo);
+        if (repo !== undefined) {
+          onPhase?.("downloading via BRAT…");
+          return this.installViaBrat(id, repo);
+        }
+        onPhase?.("downloading from the community catalog…");
         return catalogInstall(id);
       };
     }

@@ -1074,17 +1074,38 @@ export class SyncCenterView extends ItemView {
       const wrap = btn.buttonEl.parentElement; // the .config-sync-btnwrap span
       const barEl = wrap?.querySelector<HTMLElement>(".config-sync-progress") ?? null;
       const fill = barEl?.querySelector<HTMLElement>("div") ?? null;
-      if (barEl !== null) barEl.show();
+      if (barEl !== null) {
+        barEl.show();
+        barEl.addClass("is-active"); // indeterminate shimmer while steps run (定稿 2026-07-17)
+      }
       btn.buttonEl.addClass("is-busy");
+      // Live status line under the action bar: "Name — phase…" + a slow-step hint after ~8s.
+      const statusEl = macro.createDiv({ cls: "config-sync-runline" });
+      statusEl.createSpan({ cls: "config-sync-runline-dot" });
+      const statusText = statusEl.createSpan();
+      const slowText = statusEl.createSpan({ cls: "config-sync-runline-slow" });
+      let slowTimer: number | null = null;
+      const setStatus = (current: string, phase: string): void => {
+        statusText.setText(`${this.host.displayName(current)} — ${phase}`);
+        slowText.setText("");
+        if (slowTimer !== null) window.clearTimeout(slowTimer);
+        slowTimer = window.setTimeout(() => {
+          slowText.setText("Still working — network fetches can take a while");
+        }, 8000);
+      };
       void (async () => {
         try {
-          const results = await exec(payload, (done, total, current) => {
+          const results = await exec(payload, (done, total, current, phase) => {
             btn.setButtonText(`${verb} ${done}/${total}…`);
             btn.buttonEl.setAttribute("aria-label", current);
+            setStatus(current, phase ?? (verb === "Capturing" ? "capturing…" : "applying…"));
             if (fill !== null) fill.style.width = `${total === 0 ? 0 : Math.round((done / total) * 100)}%`;
           });
           this.setLastRun(verb === "Capturing" ? "Captured" : "Applied", "local", results);
         } finally {
+          if (slowTimer !== null) window.clearTimeout(slowTimer);
+          statusEl.remove();
+          barEl?.removeClass("is-active");
           this.running = false;
         }
         await this.reload(); // re-render restores the idle footer
