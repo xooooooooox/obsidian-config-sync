@@ -38,3 +38,4 @@ The repo's git history is rooted at `obsidianmd/obsidian-sample-plugin` (remote 
 - Store path mapping and the blacklist live in `core/pathing.ts` / `core/manifest.ts` — change them only with matching spec + test updates.
 - Errors must carry context (group name, path, git command). No silent fallback.
 - Test in a dedicated dev vault, never in a real vault.
+- `docs/design/DESIGN.md` is the design-system reference (colors, type, icons, components, conventions). Read it before any UI work, and update it in the same branch as any UI 定稿 or change.
