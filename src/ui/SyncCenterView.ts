@@ -825,6 +825,9 @@ export class SyncCenterView extends ItemView {
     }
     if (status.state === "not-captured") {
       detail.createDiv({ cls: "config-sync-expand-note", text: "not captured yet — nothing in the store" });
+      // Disabled-section rows keep the enable choice even here (spec 2026-07-17): capturing
+      // Markmind-style local-only settings can also turn the plugin on.
+      if (this.sectionOf(r.group.name) === "disabled") this.renderPolicySeg(detail, r, this.availOf(r.group.name), false);
       return;
     }
     if (status.state === "locked") {
