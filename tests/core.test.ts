@@ -419,6 +419,20 @@ describe("applyWithActions", () => {
     expect(plugins.enabled.has("demo")).toBe(true);
     expect(await io.exists(".obs/plugins/demo/data.json")).toBe(false);
   });
+  it("update-only apply (no settings in the store) updates without an applyGroup error", async () => {
+    const { plugins, ctx } = setup();
+    plugins.installed.set("demo", "1.0.0");
+    plugins.enabled.add("demo");
+    await seedGroups(ctx, MANIFEST); // group registered, nothing captured
+    const results = await applyWithActions(ctx, [{ name: "plugin-demo", action: "update" }], async (id) => {
+      plugins.installed.set(id, "2.0.0");
+      return "2.0.0";
+    });
+    expect(results[0]?.status).toBe("ok");
+    expect(results[0]?.stateNote).toEqual({ kind: "ok", text: "\u2913 updated to 2.0.0 & enabled" });
+    expect(results[0]?.messages).toContain("no settings in the store \u2014 updated the plugin only");
+    expect(results[0]?.filesWritten).toEqual([]);
+  });
   it("enable-only apply (no settings in the store) enables without writing files", async () => {
     const { io, plugins, ctx } = setup();
     plugins.installed.set("demo", "1.2.3");

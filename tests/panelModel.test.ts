@@ -106,15 +106,16 @@ describe("direction", () => {
     expect(stageableState("differs")).toBe(true);
     expect(stageableState("not-captured")).toBe(true);
   });
-  it("stageableRow: action-only exceptions per section (install/enable/update-only)", () => {
-    expect(stageableRow("no-settings", "not-installed")).toBe(true);
-    expect(stageableRow("no-settings", "disabled")).toBe(true);
-    expect(stageableRow("no-settings", "main")).toBe(false);
-    expect(stageableRow("no-settings", "outdated")).toBe(false);
-    expect(stageableRow("in-sync", "outdated")).toBe(true); // update-only
-    expect(stageableRow("in-sync", "not-installed")).toBe(false);
+  it("stageableRow: non-main sections stage everything except locked; main unchanged", () => {
+    const states = ["in-sync", "no-settings", "not-captured", "local-changed", "store-newer", "differs"] as const;
+    for (const section of ["not-installed", "disabled", "outdated"] as const) {
+      for (const st of states) expect(stageableRow(st, section)).toBe(true);
+      expect(stageableRow("locked", section)).toBe(false);
+    }
     expect(stageableRow("in-sync", "main")).toBe(false);
-    expect(stageableRow("store-newer", "not-installed")).toBe(true);
+    expect(stageableRow("no-settings", "main")).toBe(false);
+    expect(stageableRow("locked", "main")).toBe(false);
+    expect(stageableRow("store-newer", "main")).toBe(true);
   });
 });
 
