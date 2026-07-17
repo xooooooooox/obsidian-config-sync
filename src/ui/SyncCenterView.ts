@@ -31,12 +31,24 @@ import { renderDiffPanel } from "./diffView";
 import { SWITCH_LIST_GROUPS, switchListSortedView } from "../core/switchList";
 import { renderReportContent, renderReportPills } from "./reportContent";
 
-const CATEGORY_ORDER: ItemCategory[] = ["obsidian", "core", "community", "custom"];
+// Sidebar scope order: Beta sits between Community and custom (batch 3 ③).
+const SCOPE_ORDER: (ItemCategory | "beta")[] = ["obsidian", "core", "community", "beta", "custom"];
+const SCOPE_LABELS: Record<ItemCategory | "beta", string> = { ...CATEGORY_LABELS, beta: "Beta" };
 
 // Session-remembered UI state: which scopes have their ✓ / ○ trailing lines flattened open.
 const sessionUi = {
   insyncOpen: new Set<string>(),
   nosettingsOpen: new Set<string>(),
+};
+
+// Staging state lives at session level, not view level: mobile Obsidian recreates views on
+// tab switches, and per-instance state would re-run the default pre-check on every
+// recreation — a run's cleared selection came back "self-checked" (batch 3 ⑥).
+const sessionStaging = {
+  selected: new Set<string>(),
+  directionOverride: new Map<string, Direction>(),
+  policy: new Map<string, StateAction>(),
+  seeded: false,
 };
 
 export interface SyncCenterHost {
@@ -56,6 +68,7 @@ export interface SyncCenterHost {
   dismissBootstrap(): void;
   adoptConfiguration(): Promise<GroupResult[] | null>;
   switchLocalDecisions(name: string): string[]; // [] for non-switch-list groups
+  betaIds(): Set<string>; // plugin ids tracked in the BRAT index (the Beta scope/tab)
   // Bidirectional divergence for a switch-list group (exceptions masked); null when either
   // side is missing or unparseable.
   switchDivergenceFor(name: string): Promise<{ captureRemoves: string[]; applyDisables: string[] } | null>;
@@ -111,16 +124,16 @@ export class SyncCenterView extends ItemView {
   private groups: SyncGroup[] = [];
   private statuses: Map<string, GroupStatus> = new Map();
   private availability: Map<string, Availability> = new Map();
-  private policy: Map<string, StateAction> = new Map();
+  private policy = sessionStaging.policy;
   private sectionOpen: Set<SectionKind> = new Set();
-  private selected: Set<string> = new Set();
-  private directionOverride: Map<string, Direction> = new Map();
+  private selected = sessionStaging.selected;
+  private directionOverride = sessionStaging.directionOverride;
   private expandedItems: Set<string> = new Set();
   private renderGen = 0;
   private filter: PanelFilter = "all";
-  private panelScope: { kind: "device"; cat: ItemCategory | "all" } | { kind: "remote"; name: string } = { kind: "device", cat: "all" };
+  private panelScope: { kind: "device"; cat: ItemCategory | "beta" | "all" } | { kind: "remote"; name: string } = { kind: "device", cat: "all" };
   private search = "";
-  private firstLoad = true;
+  private betaIds: Set<string> = new Set();
   private lastRefreshedAt: number | null = null;
   private compact = false;
   private switcherOpen = false;
@@ -197,6 +210,7 @@ export class SyncCenterView extends ItemView {
     this.groups = groups;
     this.statuses = new Map(statuses.map((s) => [s.group, s]));
     this.availability = new Map(Object.entries(availability));
+    this.betaIds = this.host.betaIds();
     // User state survives reloads; prune entries whose item vanished.
     const names = new Set(groups.map((g) => g.name));
     for (const n of [...this.selected]) if (!names.has(n)) this.selected.delete(n);
@@ -217,9 +231,10 @@ export class SyncCenterView extends ItemView {
     // moving it to a different section with a different policy ladder. Drop any stored policy
     // that no longer belongs to the current ladder so applyPayload() can't send a stale action.
     for (const [n, action] of [...this.policy]) if (!isValidPolicy(this.availOf(n), action)) this.policy.delete(n);
-    // Default pre-check seeds once per view lifetime, never on later refreshes.
-    if (this.firstLoad) {
-      this.firstLoad = false;
+    // Default pre-check seeds once per Obsidian session, never on later refreshes or
+    // view recreations (mobile recreates the view on tab switches).
+    if (!sessionStaging.seeded) {
+      sessionStaging.seeded = true;
       for (const s of statuses) {
         if ((s.state === "local-changed" || s.state === "store-newer") && this.sectionOf(s.group) === "main") this.selected.add(s.group);
       }
@@ -242,7 +257,23 @@ export class SyncCenterView extends ItemView {
       const status = this.statuses.get(group.name);
       if (status !== undefined) out.push({ group, status });
     }
+    // The store manifest accretes in capture order; the view sorts deterministically —
+    // scope rank, then display name — so e.g. core items never interleave the Obsidian
+    // ones (batch 3 ④).
+    out.sort((a, b) => {
+      const rank = SCOPE_ORDER.indexOf(this.scopeOf(a.group.name)) - SCOPE_ORDER.indexOf(this.scopeOf(b.group.name));
+      if (rank !== 0) return rank;
+      return this.host.displayName(a.group.name, a.group.label).localeCompare(this.host.displayName(b.group.name, b.group.label));
+    });
     return out;
+  }
+
+  // A group's sidebar scope: the catalog category, except community plugins tracked in the
+  // BRAT index, which belong to the Beta scope (parity with the settings Beta tab).
+  private scopeOf(name: string): ItemCategory | "beta" {
+    const cat = categoryForGroup(name);
+    if (cat === "community" && this.betaIds.has(name.slice("plugin-".length))) return "beta";
+    return cat;
   }
 
   // Rows in the main section (availability "enabled", or app-anchored with no unhandled drift).
@@ -356,7 +387,7 @@ export class SyncCenterView extends ItemView {
   private renderScopeEntries(container: HTMLElement): void {
     container.createDiv({ cls: "config-sync-side-head", text: "This device ↔ store" });
 
-    const deviceEntry = (cat: ItemCategory | "all", label: string, rows: StatusRow[]): void => {
+    const deviceEntry = (cat: ItemCategory | "beta" | "all", label: string, rows: StatusRow[]): void => {
       const active = this.panelScope.kind === "device" && this.panelScope.cat === cat;
       const item = container.createDiv({ cls: `config-sync-side-item${active ? " is-active" : ""}` });
       item.createSpan({ cls: "config-sync-side-name", text: label });
@@ -364,7 +395,7 @@ export class SyncCenterView extends ItemView {
         // Hit counts must span the entry's full scope — every section (outdated/disabled/
         // not-installed included), not just mainRows() — so a match hiding in e.g. "Not
         // installed" still counts here. Bucket badges below stay main-section-only.
-        const scopeRows = cat === "all" ? this.rows() : this.rows().filter((r) => categoryForGroup(r.group.name) === cat);
+        const scopeRows = cat === "all" ? this.rows() : this.rows().filter((r) => this.scopeOf(r.group.name) === cat);
         const hits = scopeRows.filter((r) => matchesSearch(`${this.host.displayName(r.group.name, r.group.label)} ${r.group.name}`, this.search)).length;
         item.createSpan({ cls: "config-sync-side-badge is-neutral", text: `${hits}` });
       } else {
@@ -382,10 +413,10 @@ export class SyncCenterView extends ItemView {
     };
 
     deviceEntry("all", "All items", this.mainRows());
-    for (const cat of CATEGORY_ORDER) {
-      const inCat = this.mainRows().filter((r) => categoryForGroup(r.group.name) === cat);
+    for (const cat of SCOPE_ORDER) {
+      const inCat = this.mainRows().filter((r) => this.scopeOf(r.group.name) === cat);
       if (inCat.length === 0) continue;
-      deviceEntry(cat, CATEGORY_LABELS[cat], inCat);
+      deviceEntry(cat, SCOPE_LABELS[cat], inCat);
     }
 
     const remotes = this.host.remotes();
@@ -423,7 +454,7 @@ export class SyncCenterView extends ItemView {
     const sw = shell.createDiv({ cls: "config-sync-switcher" });
     if (this.panelScope.kind === "device") {
       const cat = this.panelScope.cat;
-      sw.createSpan({ text: cat === "all" ? "All items" : CATEGORY_LABELS[cat] });
+      sw.createSpan({ text: cat === "all" ? "All items" : SCOPE_LABELS[cat] });
       const c = this.presentedCounts(this.scopedRows().filter((r) => this.sectionOf(r.group.name) === "main"));
       if (c.up > 0) sw.createSpan({ cls: "config-sync-side-badge is-up", text: `↑${c.up}` });
       if (c.down > 0) sw.createSpan({ cls: "config-sync-side-badge is-down", text: `↓${c.down}` });
@@ -533,7 +564,7 @@ export class SyncCenterView extends ItemView {
     if (this.searching()) return this.rows();
     if (this.panelScope.kind !== "device" || this.panelScope.cat === "all") return this.rows();
     const cat = this.panelScope.cat;
-    return this.rows().filter((r) => categoryForGroup(r.group.name) === cat);
+    return this.rows().filter((r) => this.scopeOf(r.group.name) === cat);
   }
 
   private renderItemMode(main: HTMLElement): void {
@@ -553,15 +584,21 @@ export class SyncCenterView extends ItemView {
     const counts = this.presentedCounts(pillRows);
 
     const bar = main.createDiv({ cls: "config-sync-mainbar" });
-    const defs: { key: PanelFilter; label: string }[] = [
-      { key: "all", label: this.searching() ? `All ${pillRows.length} / ${mainRows.length}` : `All ${mainRows.length}` },
-      { key: "capture", label: `To capture ${counts.up}` },
-      { key: "apply", label: `To apply ${counts.down}` },
-      { key: "ok", label: `In sync ${counts.ok}` },
-      { key: "none", label: `No settings yet ${counts.none}` },
+    const pillRow = bar.createDiv({ cls: "config-sync-fpillrow" });
+    // Mobile shows the short glyph form (定稿 B) — the panel's icon language (↑ ↓ ✓ ○) —
+    // so all five pills always fit one line; desktop keeps the full labels.
+    const allLabel = this.searching() ? `All ${pillRows.length} / ${mainRows.length}` : `All ${mainRows.length}`;
+    const defs: { key: PanelFilter; label: string; short: string }[] = [
+      { key: "all", label: allLabel, short: allLabel },
+      { key: "capture", label: `To capture ${counts.up}`, short: `↑ ${counts.up}` },
+      { key: "apply", label: `To apply ${counts.down}`, short: `↓ ${counts.down}` },
+      { key: "ok", label: `In sync ${counts.ok}`, short: `✓ ${counts.ok}` },
+      { key: "none", label: `No settings yet ${counts.none}`, short: `○ ${counts.none}` },
     ];
     for (const d of defs) {
-      const pill = bar.createEl("button", { cls: `config-sync-fpill${this.filter === d.key ? " is-active" : ""}`, text: d.label });
+      const pill = pillRow.createEl("button", { cls: `config-sync-fpill${this.filter === d.key ? " is-active" : ""}`, attr: { "aria-label": d.label } });
+      pill.createSpan({ cls: "config-sync-fpill-long", text: d.label });
+      pill.createSpan({ cls: "config-sync-fpill-short", text: d.short });
       pill.addEventListener("click", () => {
         this.filter = d.key;
         this.render(this.renderGen);
@@ -647,6 +684,8 @@ export class SyncCenterView extends ItemView {
     const checkable = this.checkableRows(scoped);
     const selectedCount = checkable.filter((n) => this.selected.has(n)).length;
     box.indeterminate = false;
+    // Idle renders nothing (0.27.5): a disabled ghost box reads as a broken checkbox.
+    box.toggleClass("config-sync-selectall-idle", checkable.length === 0);
     if (checkable.length === 0) {
       box.disabled = true;
       box.checked = false;
@@ -1229,10 +1268,10 @@ export class SyncCenterView extends ItemView {
     detail.empty();
 
     const changed = entries.filter((e) => hasChanges(e.changes));
-    for (const cat of CATEGORY_ORDER) {
-      const inCat = changed.filter((e) => categoryForGroup(e.group) === cat);
+    for (const cat of SCOPE_ORDER) {
+      const inCat = changed.filter((e) => this.scopeOf(e.group) === cat);
       if (inCat.length === 0) continue;
-      detail.createDiv({ cls: "config-sync-sect", text: CATEGORY_LABELS[cat] });
+      detail.createDiv({ cls: "config-sync-sect", text: SCOPE_LABELS[cat] });
       for (const e of inCat) this.renderRemoteDiffEntry(detail, e);
     }
 
