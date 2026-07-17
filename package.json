@@ -1,6 +1,6 @@
 {
 	"name": "obsidian-config-sync",
-	"version": "0.27.2",
+	"version": "0.27.3",
 	"description": "Selective, on-demand distribution of vault configuration across devices and vaults",
 	"main": "main.js",
 	"type": "module",
