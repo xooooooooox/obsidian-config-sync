@@ -20,6 +20,7 @@ import {
   writeGroups,
 } from "./core/ConfigSyncCore";
 import { createInstaller } from "./core/installer";
+import { retry, HttpStatusError, TimeoutError, isRetryableError } from "./core/async";
 import { BratIndex, parseBratRepoList, resolveBratIndex } from "./core/bratIndex";
 import { type CatalogSection, displayLabelForGroup, ensureSelfPresets, findGroupByName, groupForItem, listBetaSections, listCoreSections, listDiscovered, listOptionSections, listPluginSections, SELF_GROUP_NAME, setCorePluginIds } from "./core/catalog";
 import { Availability, availabilityForGroup } from "./core/availability";
@@ -101,6 +102,25 @@ export default class ConfigSyncPlugin extends Plugin {
   private mainRibbonEl: HTMLElement | null = null;
   private lastResolvedRoot: string | null = null;
   private installFn: PluginInstallFn | null = null;
+  private installPhase: ((phase: string) => void) | undefined = undefined; // active item's phase callback (installs are sequential)
+
+  // Races a promise against a timer. requestUrl (and BRAT's addPlugin) can't be aborted, so a
+  // timed-out call keeps running detached but its result is discarded — the caller unblocks.
+  private withTimeout<T>(work: Promise<T>, ms: number, label: string): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const timer = window.setTimeout(() => reject(new TimeoutError(label, ms)), ms);
+      work.then(
+        (value) => {
+          window.clearTimeout(timer);
+          resolve(value);
+        },
+        (err: unknown) => {
+          window.clearTimeout(timer);
+          reject(err instanceof Error ? err : new Error(String(err)));
+        }
+      );
+    });
+  }
   localStatuses: GroupStatus[] | null = null;
   private presentedStatuses: GroupStatus[] | null = null;
   private lastGroups: SyncGroup[] | null = null;
@@ -607,13 +627,25 @@ export default class ConfigSyncPlugin extends Plugin {
 
   installPlugin(): PluginInstallFn {
     if (this.installFn === null) {
-      const catalogInstall = createInstaller(this.app.vault.adapter, this.app.vault.configDir, async (url) => {
-        const res = await requestUrl({ url, throw: true });
-        return res.arrayBuffer;
-      });
+      // requestUrl has no timeout — a stalled download would hang the whole sequential
+      // install run. Bound each attempt (30s) and retry idempotent downloads; a 4xx fails
+      // fast (won't ever succeed), a timeout/5xx/network error retries before giving up.
+      const catalogInstall = createInstaller(this.app.vault.adapter, this.app.vault.configDir, (url) =>
+        retry(
+          async () => {
+            const res = await this.withTimeout(requestUrl({ url, throw: false }), 30_000, url);
+            if (res.status >= 200 && res.status < 300) return res.arrayBuffer;
+            throw new HttpStatusError(res.status);
+          },
+          { attempts: 3, retryable: isRetryableError, onAttempt: (n) => this.installPhase?.(`download failed — retrying (${n}/3)…`) }
+        )
+      );
       // Resolution order (spec C4): BRAT index → community catalog. An unmapped id gets one
       // last-chance index refresh before falling back to the catalog path.
       this.installFn = async (id: string, onPhase?: (phase: string) => void): Promise<string> => {
+        // Installs run strictly sequentially, so a single field safely carries the active
+        // item's phase callback into the retry closures (catalog download / BRAT).
+        this.installPhase = onPhase;
         if (this.settings.bratPluginIndex[id] === undefined) await this.refreshBratIndex();
         const repo = this.settings.bratPluginIndex[id];
         if (repo !== undefined) {
@@ -638,8 +670,14 @@ export default class ConfigSyncPlugin extends Plugin {
     if (beta === undefined || typeof beta.addPlugin !== "function") {
       throw new Error(`"${id}" is managed by BRAT (${repo}) — enable BRAT and retry, or run BRAT's update command`);
     }
+    const addPlugin = beta.addPlugin.bind(beta);
     // enableAfterInstall stays false: enabling is config-sync's own On-apply decision.
-    const ok = await beta.addPlugin(repo, true, false, false, "", false, false, "");
+    // addPlugin re-downloads and rewrites files (idempotent), so bound + retry it too — a
+    // stalled BRAT download would otherwise hang the whole run like a bare requestUrl.
+    const ok = await retry(
+      () => this.withTimeout(addPlugin(repo, true, false, false, "", false, false, ""), 30_000, repo),
+      { attempts: 3, retryable: isRetryableError, onAttempt: (n) => this.installPhase?.(`BRAT install failed — retrying (${n}/3)…`) }
+    );
     await this.pluginHost().reloadPluginManifests();
     const version = this.pluginHost().getInstalledPluginVersion(id);
     if (!ok || version === null) {
