@@ -31,22 +31,17 @@ jobs:
               run: |
                   [ -f styles.css ] && echo "exists=true" >> "$GITHUB_OUTPUT" || echo "exists=false" >> "$GITHUB_OUTPUT"
 
-            # Pinned to @v2 ON PURPOSE (2026-07-17): Obsidian's automated catalog review only
-            # verifies the older Sigstore bundle format. The v4-generation actions — including
-            # the official obsidian-sample-plugin template (actions/attest@v4) — produce
-            # bundles its checker rejects, even though `gh attestation verify` passes them
-            # (confirmed empirically: a v2 re-attestation of the same 0.27.1 digests cleared
-            # the errors). Bump only after Obsidian's verifier handles current bundles.
-            - name: Attest main.js
-              uses: actions/attest-build-provenance@v2
+            # Verbatim from the official obsidian-sample-plugin template. The 2026-07-17
+            # catalog-review "attestation failed" errors were a scorecard false positive
+            # (GitHub's attestations API moved the bundle behind bundle_url; Obsidian's
+            # verifier still read the inline field) — not an attestation problem here:
+            # https://forum.obsidian.md/t/scorecard-false-positive-release-asset-attestations-reported-as-failing-cryptographic-verification/116203
+            - name: Attest build provenance
+              uses: actions/attest@v4
               with:
-                  subject-path: main.js
-
-            - name: Attest styles.css
-              if: steps.styles.outputs.exists == 'true'
-              uses: actions/attest-build-provenance@v2
-              with:
-                  subject-path: styles.css
+                  subject-path: |
+                      main.js
+                      ${{ steps.styles.outputs.exists == 'true' && 'styles.css' || '' }}
 
             - name: Create release
               env:
