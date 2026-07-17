@@ -106,12 +106,14 @@ describe("direction", () => {
     expect(stageableState("differs")).toBe(true);
     expect(stageableState("not-captured")).toBe(true);
   });
-  it("stageableRow: no-settings stages in not-installed (install-only) and disabled (enable-only)", () => {
+  it("stageableRow: action-only exceptions per section (install/enable/update-only)", () => {
     expect(stageableRow("no-settings", "not-installed")).toBe(true);
     expect(stageableRow("no-settings", "disabled")).toBe(true);
     expect(stageableRow("no-settings", "main")).toBe(false);
     expect(stageableRow("no-settings", "outdated")).toBe(false);
-    expect(stageableRow("in-sync", "not-installed")).toBe(false); // only ○ gets the exception
+    expect(stageableRow("in-sync", "outdated")).toBe(true); // update-only
+    expect(stageableRow("in-sync", "not-installed")).toBe(false);
+    expect(stageableRow("in-sync", "main")).toBe(false);
     expect(stageableRow("store-newer", "not-installed")).toBe(true);
   });
 });

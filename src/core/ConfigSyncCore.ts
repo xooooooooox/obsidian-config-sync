@@ -95,6 +95,20 @@ function serializeSwitchList(v: ReturnType<typeof captureSwitchList>): string {
   return JSON.stringify(v, null, 2) + "\n";
 }
 
+// The enabled-set delta an on/off-list apply writes, as report lines ("turns on: a, b").
+function switchDeltaMessages(before: SwitchList | null, after: SwitchList): string[] {
+  const enabledIds = (l: SwitchList | null): Set<string> =>
+    l === null ? new Set<string>() : new Set(Array.isArray(l) ? l : Object.keys(l).filter((k) => l[k] === true));
+  const prev = enabledIds(before);
+  const next = enabledIds(after);
+  const on = [...next].filter((id) => !prev.has(id)).sort();
+  const off = [...prev].filter((id) => !next.has(id)).sort();
+  const lines: string[] = [];
+  if (on.length > 0) lines.push(`turns on: ${on.join(", ")}`);
+  if (off.length > 0) lines.push(`turns off: ${off.join(", ")}`);
+  return lines;
+}
+
 function emptyResult(group: string, needsAppReload: boolean): GroupResult {
   return {
     group,
@@ -195,7 +209,9 @@ async function captureGroup(ctx: CoreContext, group: SyncGroup): Promise<GroupRe
   if (group.type === "file") {
     const plainLocalContent = await ctx.io.read(real);
     const exc = excFor(ctx, group.name);
-    const localSwitchList = exc.length > 0 ? parseSwitchList(plainLocalContent) : null;
+    // Switch lists take the switch path whether or not exceptions exist — the old exc.length
+    // guard left exception-free devices writing local enable-order into the store (2026-07-17).
+    const localSwitchList = SWITCH_LIST_GROUPS.has(group.name) ? parseSwitchList(plainLocalContent) : null;
     // Pass-through (甲): excluded ids copy the store's existing state, so read it first.
     let existingStoreList: SwitchList | null = null;
     if (localSwitchList !== null && (await ctx.io.exists(store))) {
@@ -352,6 +368,15 @@ async function runStateAction(
     return {
       note: { kind: "warn", text: "⚠ update failed" },
       messages: [`"${group.name}" has no plugin directory — install and update actions only work for community plugin items`],
+      skipConfig: true,
+    };
+  }
+  if (pluginId === "config-sync") {
+    // Updating/reinstalling the self plugin from inside a run would disable the very code
+    // executing it (update disables first) — refuse and point at Obsidian's own updater.
+    return {
+      note: { kind: "warn", text: "⚠ update skipped" },
+      messages: ["Config Sync updates itself through Obsidian's plugin updater — Settings → Community plugins"],
       skipConfig: true,
     };
   }
@@ -567,11 +592,15 @@ async function applyGroup(ctx: CoreContext, group: SyncGroup, state: BackupState
       const storeContent = await ctx.io.read(store);
       const localContent = (await ctx.io.exists(real)) ? await ctx.io.read(real) : null;
       const exc = excFor(ctx, group.name);
-      const storeSwitchList = exc.length > 0 ? parseSwitchList(storeContent) : null;
+      const storeSwitchList = SWITCH_LIST_GROUPS.has(group.name) ? parseSwitchList(storeContent) : null;
       let content: string;
       if (storeSwitchList !== null) {
         const localSwitchList = localContent !== null ? parseSwitchList(localContent) : null;
-        content = serializeSwitchList(applySwitchList(storeSwitchList, localSwitchList, exc));
+        const merged = applySwitchList(storeSwitchList, localSwitchList, exc);
+        content = serializeSwitchList(merged);
+        // Name the plugins this write toggles (spec 2026-07-17): a store list lacking a
+        // just-enabled plugin turns it off persistently — that must be visible in the report.
+        for (const line of switchDeltaMessages(localSwitchList, merged)) result.messages.push(line);
       } else {
         content = await applyTransform(group, storeContent, localContent, ctx.passphrase);
       }

@@ -621,6 +621,64 @@ function selfDataJson(groups: SyncGroup[]): string {
   return JSON.stringify({ groups });
 }
 
+describe("self-update guard and switch-apply delta reporting", () => {
+  it("refuses to update the self plugin and points at Obsidian's updater", async () => {
+    const SELF_MANIFEST = JSON.stringify({
+      version: 1,
+      groups: [{ name: "plugin-config-sync", path: "{configDir}/plugins/config-sync/data.json", type: "file", devices: "all" }],
+    });
+    const { io, plugins, ctx } = setup();
+    plugins.installed.set("config-sync", "0.26.0");
+    plugins.enabled.add("config-sync");
+    io.seed({ ".obs/plugins/config-sync/data.json": '{"a":1}', "cs/store/configdir/plugins/config-sync/data.json": '{"a":1}' });
+    await writeGroups(ctx, parseSyncManifest(SELF_MANIFEST).groups);
+    let installCalled = false;
+    const results = await applyWithActions(ctx, [{ name: "plugin-config-sync", action: "update" }], async () => {
+      installCalled = true;
+      return "9.9.9";
+    });
+    expect(installCalled).toBe(false);
+    expect(results[0]?.status).toBe("warning");
+    expect(results[0]?.stateNote).toEqual({ kind: "warn", text: "\u26a0 update skipped" });
+    expect((results[0]?.messages ?? []).join(" ")).toContain("Obsidian's plugin updater");
+    expect(plugins.enabled.has("config-sync")).toBe(true); // never disabled
+  });
+
+  it("switch-list apply names the plugins it turns on and off", async () => {
+    const SWITCH_MANIFEST = JSON.stringify({
+      version: 1,
+      groups: [{ name: "community-plugins", path: "{configDir}/community-plugins.json", type: "file", devices: "all" }],
+    });
+    const { io, ctx } = setup();
+    io.seed({
+      ".obs/community-plugins.json": '["keep","local-only"]',
+      "cs/store/configdir/community-plugins.json": '["keep","store-only"]',
+    });
+    await writeGroups(ctx, parseSyncManifest(SWITCH_MANIFEST).groups);
+    const results = await apply(ctx, ["community-plugins"]);
+    const msgs = results.find((r) => r.group === "community-plugins")?.messages ?? [];
+    expect(msgs).toContain("turns on: store-only");
+    expect(msgs).toContain("turns off: local-only");
+  });
+
+  it("switch-list apply with excluded ids reports no delta for them", async () => {
+    const SWITCH_MANIFEST = JSON.stringify({
+      version: 1,
+      groups: [{ name: "community-plugins", path: "{configDir}/community-plugins.json", type: "file", devices: "all" }],
+    });
+    const { io, ctx } = setup();
+    ctx.switchExceptions = { "community-plugins": ["local-only"] };
+    io.seed({
+      ".obs/community-plugins.json": '["keep","local-only"]',
+      "cs/store/configdir/community-plugins.json": '["keep"]',
+    });
+    await writeGroups(ctx, parseSyncManifest(SWITCH_MANIFEST).groups);
+    const results = await apply(ctx, ["community-plugins"]);
+    const msgs = results.find((r) => r.group === "community-plugins")?.messages ?? [];
+    expect(msgs).toEqual([]); // excluded id keeps local state — nothing toggled
+  });
+});
+
 describe("captureWithActions (capture-side enable policy)", () => {
   it("captures then enables flagged items, noting \u23fb enabled", async () => {
     const { io, plugins, ctx } = setup();
