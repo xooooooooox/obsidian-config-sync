@@ -370,7 +370,7 @@ async function runStateAction(
       }
       return {
         note: { kind: "warn", text: "⚠ update failed" },
-        messages: [`${messages[0]} — settings not applied; they were captured on a newer version`, ...messages.slice(1)],
+        messages: [`${messages[0]} — settings not applied (they were captured on a newer plugin version); update the plugin manually, then apply again`, ...messages.slice(1)],
         skipConfig: true,
       };
     }

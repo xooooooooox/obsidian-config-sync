@@ -467,7 +467,7 @@ describe("applyWithActions", () => {
     const upd = await applyWithActions(ctx, [{ name: "plugin-demo", action: "update" }], failing);
     expect(upd[0]?.status).toBe("warning");
     expect(upd[0]?.stateNote).toEqual({ kind: "warn", text: "⚠ update failed" });
-    expect(upd[0]?.messages[0]).toContain("settings not applied; they were captured on a newer version");
+    expect(upd[0]?.messages[0]).toContain("update the plugin manually, then apply again");
     expect(await io.exists(".obs/plugins/demo/data.json")).toBe(false);
     plugins.installed.delete("demo");
     plugins.enabled.delete("demo");
