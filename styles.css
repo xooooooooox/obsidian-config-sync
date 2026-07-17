@@ -90,8 +90,8 @@
   font-size: var(--font-ui-smaller);
   border-radius: 999px;
   padding: 1px 8px;
-  background: rgba(var(--color-purple-rgb), 0.15);
-  color: var(--color-purple);
+  background: rgba(var(--interactive-accent-rgb), 0.15);
+  color: var(--interactive-accent);
   flex: none;
 }
 
@@ -101,7 +101,7 @@
 }
 
 .config-sync-search-highlight {
-  background: rgba(var(--color-purple-rgb), 0.12);
+  background: rgba(var(--interactive-accent-rgb), 0.12);
   transition: background 0.4s;
 }
 
@@ -377,7 +377,7 @@ body.is-phone .config-sync-fkey {
 
 .config-sync-state.is-in-sync { color: var(--color-green); }
 .config-sync-state.is-local-changed { color: var(--color-orange); }
-.config-sync-state.is-store-newer { color: var(--color-blue); }
+.config-sync-state.is-store-newer { color: var(--interactive-accent); }
 .config-sync-state.is-differs { color: var(--color-orange); }
 .config-sync-state.is-not-captured { color: var(--text-faint); }
 
@@ -396,7 +396,7 @@ body.is-phone .config-sync-fkey {
 .config-sync-pill { font-size: var(--font-ui-smaller); border-radius: 999px; padding: 1px 8px; }
 .config-sync-pill.is-neutral { background: var(--background-modifier-border); color: var(--text-normal); }
 .config-sync-pill.is-up { background: rgba(var(--color-orange-rgb), 0.15); color: var(--color-orange); }
-.config-sync-pill.is-down { background: rgba(var(--color-purple-rgb), 0.15); color: var(--color-purple); }
+.config-sync-pill.is-down { background: rgba(var(--interactive-accent-rgb), 0.15); color: var(--interactive-accent); }
 .config-sync-pill.is-ok { background: rgba(var(--color-green-rgb), 0.15); color: var(--color-green); }
 .config-sync-pill.is-none { background: var(--background-modifier-hover); color: var(--text-muted); }
 .config-sync-pill.is-warn { background: none; color: var(--color-orange); margin-left: var(--size-4-1); }
@@ -434,7 +434,7 @@ body.is-phone .config-sync-fkey {
   border-radius: 50%;
 }
 .config-sync-dot-capture::after { background: var(--color-orange); }
-.config-sync-dot-apply::after { background: var(--color-blue); }
+.config-sync-dot-apply::after { background: var(--interactive-accent); }
 
 .config-sync-hub-row { display: flex; align-items: center; gap: var(--size-4-2); padding: var(--size-4-2) 0; border-bottom: 1px solid var(--background-modifier-border); cursor: pointer; white-space: nowrap; }
 .config-sync-hub-row .config-sync-rule-name { flex: none; }
@@ -552,9 +552,9 @@ body.is-mobile .config-sync-actionbar button { padding: var(--size-4-1) var(--si
 
 .config-sync-progress > div { height: 100%; width: 0; background: var(--color-orange); }
 
-.config-sync-btnwrap:has(button.mod-cta) .config-sync-progress { background: rgba(var(--color-purple-rgb), 0.25); }
+.config-sync-btnwrap:has(button.mod-cta) .config-sync-progress { background: rgba(var(--interactive-accent-rgb), 0.25); }
 
-.config-sync-btnwrap:has(button.mod-cta) .config-sync-progress > div { background: var(--color-purple); }
+.config-sync-btnwrap:has(button.mod-cta) .config-sync-progress > div { background: var(--interactive-accent); }
 
 button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6px; border: 2px solid var(--background-modifier-border); border-top-color: currentColor; border-radius: 50%; display: inline-block; animation: config-sync-spin 0.9s linear infinite; }
 
@@ -568,11 +568,11 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 
 .config-sync-seg-btn.is-capture { color: var(--color-orange); }
 
-.config-sync-seg-btn.is-apply { color: var(--color-purple); }
+.config-sync-seg-btn.is-apply { color: var(--interactive-accent); }
 
 .config-sync-seg-btn.is-capture.is-on { background: rgba(var(--color-orange-rgb), 0.25); color: var(--color-orange); }
 
-.config-sync-seg-btn.is-apply.is-on { background: rgba(var(--color-purple-rgb), 0.25); color: var(--color-purple); }
+.config-sync-seg-btn.is-apply.is-on { background: rgba(var(--interactive-accent-rgb), 0.25); color: var(--interactive-accent); }
 
 .config-sync-staged-count { color: var(--text-muted); font-size: var(--font-ui-smaller); }
 
@@ -594,7 +594,7 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 
 .config-sync-side-item { display: flex; align-items: center; gap: 5px; padding: 6px 9px; border-radius: 8px; border: 1px solid transparent; cursor: pointer; font-size: var(--font-ui-small); }
 
-.config-sync-side-item.is-active { background: rgba(var(--color-purple-rgb), 0.14); border-color: rgba(var(--color-purple-rgb), 0.4); color: var(--text-normal); }
+.config-sync-side-item.is-active { background: rgba(var(--interactive-accent-rgb), 0.14); border-color: rgba(var(--interactive-accent-rgb), 0.4); color: var(--text-normal); }
 
 .config-sync-side-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
@@ -602,7 +602,7 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 
 .config-sync-side-badge.is-up { background: rgba(var(--color-orange-rgb), 0.15); color: var(--color-orange); }
 
-.config-sync-side-badge.is-down { background: rgba(var(--color-purple-rgb), 0.15); color: var(--color-purple); }
+.config-sync-side-badge.is-down { background: rgba(var(--interactive-accent-rgb), 0.15); color: var(--interactive-accent); }
 
 .config-sync-side-badge.is-ok { background: rgba(var(--color-green-rgb), 0.15); color: var(--color-green); }
 
@@ -662,7 +662,8 @@ body.is-mobile .config-sync-hub-row { min-height: 44px; }
 
 
 
-/* ⑦ Filter pills: one line, horizontal scroll (standard mobile chip row). */
+/* ⑦ Filter pills (定稿 B): compact glyph+count pills on one line; the scroll container
+   stays only as an overflow safety net for extreme counts/font scales. */
 body.is-mobile .config-sync-fpillrow {
   flex: 1 1 100%;
   flex-wrap: nowrap;
@@ -672,6 +673,9 @@ body.is-mobile .config-sync-fpillrow {
 }
 body.is-mobile .config-sync-fpillrow::-webkit-scrollbar { display: none; }
 body.is-mobile .config-sync-fpill { flex: none; white-space: nowrap; }
+.config-sync-fpill-short { display: none; }
+body.is-mobile .config-sync-fpill .config-sync-fpill-long { display: none; }
+body.is-mobile .config-sync-fpill .config-sync-fpill-short { display: inline; }
 
 body.is-mobile .config-sync-fpill,
 body.is-mobile .config-sync-seg-btn,

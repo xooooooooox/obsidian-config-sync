@@ -66,12 +66,29 @@ Obsidian session; reload keeps its existing pruning (stale names, inert rows, in
 policies). Desktop behavior is unchanged; on mobile, a recreated view now restores the
 previous selection instead of re-seeding.
 
-## ⑦ Mobile filter pills on one line
+## ⑦ Mobile filter pills on one line (定稿 B, mockup-approved)
 
 The filter pill row (All / To capture / To apply / In sync / No settings yet) wraps to a
-second line on phones. Switch the mobile pill row to the standard chip-row pattern: one
-line, `flex-wrap: nowrap`, horizontal scroll (`overflow-x: auto`, scrollbar hidden,
-momentum scrolling). Desktop keeps wrapping.
+second line on phones. 定稿 B: on mobile every pill shows the panel's glyph language with
+the count — `All n · ↑ n · ↓ n · ✓ n · ○ n` — so all five always fit one line with no
+scrolling or hidden content (the active-expands variant B′ was rejected: long labels can
+overflow). Desktop keeps the full text labels. Each pill carries the full label as
+aria-label. The one-line row keeps `overflow-x: auto` purely as a safety net for extreme
+counts or font scaling.
+
+## ⑧ One color per semantic (user follow-up)
+
+The apply direction and the "active/selected" highlight each used two colors. Unified:
+
+- **Apply/↓ = `--interactive-accent`** everywhere: header pill, sidebar badge, state icon,
+  checkbox fill, seg buttons, apply progress bar, settings state text (`is-store-newer`
+  was blue), runline apply dot (was blue).
+- **Active/selected = `--interactive-accent`**: sidebar active scope, settings search jump
+  highlight, search-hit scope tag (all were palette purple).
+- Untouched, verified consistent within their own families: capture orange, in-sync green,
+  pull cyan / push pink, locked + policy cyan, warnings orange, and the report file-change
+  triad (add green / update blue / delete red — a file-change semantic, not the apply
+  direction). `--color-purple` no longer appears in styles.css.
 
 ## Verification
 

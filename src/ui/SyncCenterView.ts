@@ -585,15 +585,20 @@ export class SyncCenterView extends ItemView {
 
     const bar = main.createDiv({ cls: "config-sync-mainbar" });
     const pillRow = bar.createDiv({ cls: "config-sync-fpillrow" });
-    const defs: { key: PanelFilter; label: string }[] = [
-      { key: "all", label: this.searching() ? `All ${pillRows.length} / ${mainRows.length}` : `All ${mainRows.length}` },
-      { key: "capture", label: `To capture ${counts.up}` },
-      { key: "apply", label: `To apply ${counts.down}` },
-      { key: "ok", label: `In sync ${counts.ok}` },
-      { key: "none", label: `No settings yet ${counts.none}` },
+    // Mobile shows the short glyph form (定稿 B) — the panel's icon language (↑ ↓ ✓ ○) —
+    // so all five pills always fit one line; desktop keeps the full labels.
+    const allLabel = this.searching() ? `All ${pillRows.length} / ${mainRows.length}` : `All ${mainRows.length}`;
+    const defs: { key: PanelFilter; label: string; short: string }[] = [
+      { key: "all", label: allLabel, short: allLabel },
+      { key: "capture", label: `To capture ${counts.up}`, short: `↑ ${counts.up}` },
+      { key: "apply", label: `To apply ${counts.down}`, short: `↓ ${counts.down}` },
+      { key: "ok", label: `In sync ${counts.ok}`, short: `✓ ${counts.ok}` },
+      { key: "none", label: `No settings yet ${counts.none}`, short: `○ ${counts.none}` },
     ];
     for (const d of defs) {
-      const pill = pillRow.createEl("button", { cls: `config-sync-fpill${this.filter === d.key ? " is-active" : ""}`, text: d.label });
+      const pill = pillRow.createEl("button", { cls: `config-sync-fpill${this.filter === d.key ? " is-active" : ""}`, attr: { "aria-label": d.label } });
+      pill.createSpan({ cls: "config-sync-fpill-long", text: d.label });
+      pill.createSpan({ cls: "config-sync-fpill-short", text: d.short });
       pill.addEventListener("click", () => {
         this.filter = d.key;
         this.render(this.renderGen);
