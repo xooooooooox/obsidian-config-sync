@@ -10,7 +10,7 @@ import {
   planImport,
   ProgressFn,
   applyWithActions,
-  capture,
+  captureWithActions, CaptureItem,
   groupsForDevice,
   loadLock,
   loadManifest,
@@ -101,6 +101,7 @@ export default class ConfigSyncPlugin extends Plugin {
   private mainRibbonEl: HTMLElement | null = null;
   private lastResolvedRoot: string | null = null;
   private installFn: PluginInstallFn | null = null;
+  private enabledSnapshot: string | null = null; // panel-freshness change detector
   localStatuses: GroupStatus[] | null = null;
   private presentedStatuses: GroupStatus[] | null = null;
   private lastGroups: SyncGroup[] | null = null;
@@ -133,6 +134,24 @@ export default class ConfigSyncPlugin extends Plugin {
       window.setInterval(() => {
         if (this.settings.localPeriodicCheck && document.hasFocus()) void this.refreshLocalStatus();
       }, 5 * 60 * 1000)
+    );
+    // Panel freshness (spec 2026-07-17): toggling a plugin in Obsidian's settings modal fires
+    // no event and changes no leaf, so an open Sync Center kept stale sections. A cheap
+    // enabled-set snapshot catches it within ~10s.
+    this.registerInterval(
+      window.setInterval(() => {
+        if (!document.hasFocus() || this.app.workspace.getLeavesOfType(SYNC_CENTER_VIEW_TYPE).length === 0) return;
+        const snapshot =
+          [...this.pluginRegistry().enabledPlugins].sort().join(",") +
+          "|" +
+          Object.entries(this.internalPlugins().plugins)
+            .filter(([, p]) => p.enabled)
+            .map(([id]) => id)
+            .sort()
+            .join(",");
+        if (this.enabledSnapshot !== null && this.enabledSnapshot !== snapshot) void this.refreshLocalStatus();
+        this.enabledSnapshot = snapshot;
+      }, 10 * 1000)
     );
     if (Platform.isDesktop) {
       this.remoteAutoCheckStartupTimer = window.setTimeout(() => {
@@ -437,10 +456,10 @@ export default class ConfigSyncPlugin extends Plugin {
           return null;
         }
       },
-      captureItems: async (names: string[], onProgress?: ProgressFn) => {
+      captureItems: async (items: CaptureItem[], onProgress?: ProgressFn) => {
         try {
           const ctx = await this.coreContext();
-          const results = await capture(ctx, names, onProgress);
+          const results = await captureWithActions(ctx, items, onProgress);
           // Background: the panel reloads and rescans anyway — blocking here just pins the
           // progress bar at N/N through a second full scan.
           void this.refreshLocalStatus();

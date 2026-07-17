@@ -304,6 +304,28 @@ interface StatePrelude {
   finish?: () => Promise<{ note: { kind: "ok" | "warn"; text: string } | null; messages: string[] }>;
 }
 
+// Turns a group's plugin (community or core) on and reports the outcome — shared by the
+// apply-side deferred finish and the capture-side enable policy.
+async function enableForGroup(ctx: CoreContext, group: SyncGroup): Promise<{ note: { kind: "ok" | "warn"; text: string } | null; messages: string[] }> {
+  const pluginId = pluginIdForGroup(group);
+  try {
+    if (pluginId !== null) {
+      await ctx.plugins.enablePluginPersistent(pluginId);
+      if (!ctx.plugins.isPluginEnabled(pluginId)) {
+        throw new Error(`Obsidian did not enable "${pluginId}" — enable it manually in Community plugins`);
+      }
+    } else {
+      await ctx.plugins.enableCorePlugin(group.name);
+      if (!ctx.plugins.isCorePluginEnabled(group.name)) {
+        throw new Error(`Obsidian did not enable "${group.name}" — enable it in Options → Core plugins`);
+      }
+    }
+    return { note: { kind: "ok", text: "⏻ enabled" }, messages: [] };
+  } catch (e) {
+    return { note: { kind: "warn", text: "⚠ enable failed" }, messages: [(e as Error).message] };
+  }
+}
+
 async function runStateAction(
   ctx: CoreContext,
   group: SyncGroup,
@@ -323,24 +345,7 @@ async function runStateAction(
       note: null,
       messages: [],
       skipConfig: false,
-      finish: async () => {
-        try {
-          if (pluginId !== null) {
-            await ctx.plugins.enablePluginPersistent(pluginId);
-            if (!ctx.plugins.isPluginEnabled(pluginId)) {
-              throw new Error(`Obsidian did not enable "${pluginId}" — enable it manually in Community plugins`);
-            }
-          } else {
-            await ctx.plugins.enableCorePlugin(group.name);
-            if (!ctx.plugins.isCorePluginEnabled(group.name)) {
-              throw new Error(`Obsidian did not enable "${group.name}" — enable it in Options → Core plugins`);
-            }
-          }
-          return { note: { kind: "ok", text: "⏻ enabled" }, messages: [] };
-        } catch (e) {
-          return { note: { kind: "warn", text: "⚠ enable failed" }, messages: [(e as Error).message] };
-        }
-      },
+      finish: () => enableForGroup(ctx, group),
     };
   }
   if (pluginId === null) {
@@ -411,6 +416,36 @@ async function runStateAction(
       }
     },
   };
+}
+
+// Capture-side policy (spec 2026-07-17): a disabled plugin whose settings flow device→store
+// can still be turned on as part of the run. Enabling has no ordering constraint against the
+// capture, so it runs after — keeping the report sequence natural.
+export interface CaptureItem {
+  name: string;
+  action: "enable" | "none";
+}
+
+export async function captureWithActions(ctx: CoreContext, items: CaptureItem[], onProgress?: ProgressFn): Promise<GroupResult[]> {
+  const results = await capture(
+    ctx,
+    items.map((i) => i.name),
+    onProgress
+  );
+  const manifest = await loadManifest(ctx);
+  for (const item of items) {
+    if (item.action !== "enable") continue;
+    const group = requireGroup(manifest, item.name);
+    const fin = await enableForGroup(ctx, group);
+    const r = results.find((x) => x.group === item.name);
+    if (r === undefined) continue;
+    if (fin.note !== null) r.stateNote = fin.note;
+    if (fin.messages.length > 0) {
+      r.messages.push(...fin.messages);
+      if (r.status === "ok" && fin.note?.kind === "warn") r.status = "warning";
+    }
+  }
+  return results;
 }
 
 export async function applyWithActions(

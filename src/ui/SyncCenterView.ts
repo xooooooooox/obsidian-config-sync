@@ -1,5 +1,5 @@
 import { App, ButtonComponent, ExtraButtonComponent, ItemView, Modal, WorkspaceLeaf } from "obsidian";
-import { ApplyItem, ProgressFn, StateAction } from "../core/ConfigSyncCore";
+import { ApplyItem, CaptureItem, ProgressFn, StateAction } from "../core/ConfigSyncCore";
 import { bucketCounts, GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry } from "../core/status";
 import { CATEGORY_LABELS, findGroupByName, ItemCategory, categoryForGroup } from "../core/catalog";
 import { FileChanges, GroupResult, Remote, SyncGroup, hasChanges } from "../core/types";
@@ -43,7 +43,7 @@ export interface SyncCenterHost {
   computeStatuses(): Promise<{ groups: SyncGroup[]; statuses: GroupStatus[]; availability: Record<string, Availability> }>;
   resolvedPath(group: SyncGroup): string;
   displayName(group: string, storedLabel?: string): string;
-  captureItems(names: string[], onProgress?: ProgressFn): Promise<GroupResult[] | null>;
+  captureItems(items: CaptureItem[], onProgress?: ProgressFn): Promise<GroupResult[] | null>;
   applyItems(items: ApplyItem[], onProgress?: ProgressFn): Promise<GroupResult[] | null>;
   reloadApp(): void;
   remotes(): Remote[]; // [] on mobile
@@ -675,7 +675,7 @@ export class SyncCenterView extends ItemView {
         const name = r.group.name;
         if (turnOn) {
           this.selected.add(name);
-          if (!this.policy.has(name)) this.policy.set(name, defaultPolicy(this.availOf(name)));
+          if (!this.policy.has(name)) this.policy.set(name, this.defaultPolicyFor(r));
         } else {
           this.selected.delete(name);
           this.policy.delete(name);
@@ -735,7 +735,7 @@ export class SyncCenterView extends ItemView {
       if (cb.checked) {
         this.selected.add(group.name);
         if (this.sectionOf(group.name) !== "main" && !this.policy.has(group.name)) {
-          this.policy.set(group.name, defaultPolicy(this.availOf(group.name)));
+          this.policy.set(group.name, this.defaultPolicyFor(r));
         }
       } else {
         this.selected.delete(group.name);
@@ -845,7 +845,9 @@ export class SyncCenterView extends ItemView {
       return;
     }
     this.renderDirectionToggle(detail, r);
-    if (section !== "main" && this.effDir(r) === "apply") this.renderPolicySeg(detail, r, a, false);
+    // The disabled section offers the enable ladder in BOTH directions (spec 2026-07-17):
+    // enabling has no ordering constraint against a capture, it just joins the run.
+    if (section === "disabled" || (section !== "main" && this.effDir(r) === "apply")) this.renderPolicySeg(detail, r, a, false);
     this.renderCappedChanges(detail, r, status.changes);
   }
 
@@ -883,11 +885,15 @@ export class SyncCenterView extends ItemView {
 
   private renderPolicySeg(detail: HTMLElement, r: StatusRow, a: Availability, installOnly: boolean): void {
     // Install-only rows have no settings payload: "Stage only" would apply nothing at all,
-    // so the ladder keeps just the install actions.
-    const options = policyOptions(a).filter((o) => !installOnly || o.action !== "none");
+    // so the ladder keeps just the install actions. Capture direction offers only the enable
+    // choices — install/update are apply-ordered actions.
+    const capturing = this.effDir(r) === "capture";
+    const options = policyOptions(a)
+      .filter((o) => !installOnly || o.action !== "none")
+      .filter((o) => !capturing || o.action === "enable" || o.action === "none");
     if (options.length === 0) return;
     const name = r.group.name;
-    detail.createDiv({ cls: "config-sync-seg-label", text: "On apply" });
+    detail.createDiv({ cls: "config-sync-seg-label", text: capturing ? "On capture" : "On apply" });
     const seg = detail.createDiv({ cls: "config-sync-seg" });
     const current = this.policy.get(name) ?? defaultPolicy(a);
     for (const opt of options) {
@@ -982,10 +988,21 @@ export class SyncCenterView extends ItemView {
     }
   }
 
-  private captureNames(): string[] {
+  // Capture-direction disabled rows default to ⏻ Enable (spec 2026-07-17); everything else
+  // takes the availability ladder's first action.
+  private defaultPolicyFor(r: StatusRow): StateAction {
+    if (this.sectionOf(r.group.name) === "disabled" && this.effDir(r) === "capture") return "enable";
+    return defaultPolicy(this.availOf(r.group.name));
+  }
+
+  private capturePayload(): CaptureItem[] {
     return this.rows()
       .filter((r) => this.selected.has(r.group.name) && this.rowStageable(r) && this.effDir(r) === "capture")
-      .map((r) => r.group.name);
+      .map((r) => {
+        const enable =
+          this.sectionOf(r.group.name) === "disabled" && this.policy.get(r.group.name) === "enable";
+        return { name: r.group.name, action: enable ? ("enable" as const) : ("none" as const) };
+      });
   }
 
   private applyPayload(): ApplyItem[] {
@@ -1009,7 +1026,7 @@ export class SyncCenterView extends ItemView {
     const installStaged = this.rows().filter((r) => this.sectionOf(r.group.name) === "not-installed" && counted(r)).length;
     bar.createSpan({ cls: "config-sync-staged-count", text: footerSummary(mainStaged, outdatedStaged, disabledStaged, installStaged) });
     bar.createDiv({ cls: "config-sync-rule-spacer" });
-    const capNames = this.captureNames();
+    const capItems = this.capturePayload();
     const applyItems = this.applyPayload();
 
     const run = <T>(
@@ -1052,16 +1069,16 @@ export class SyncCenterView extends ItemView {
     };
 
     const capW = mkWrapped();
-    capW.btn.setButtonText(`↑ Capture ${capNames.length} item${capNames.length === 1 ? "" : "s"}`);
+    capW.btn.setButtonText(`↑ Capture ${capItems.length} item${capItems.length === 1 ? "" : "s"}`);
     capW.btn.buttonEl.addClass("config-sync-btn-capture");
-    capW.btn.setDisabled(this.running || capNames.length === 0);
+    capW.btn.setDisabled(this.running || capItems.length === 0);
 
     const applyW = mkWrapped();
     applyW.btn.setCta();
     applyW.btn.setButtonText(`↓ Apply ${applyItems.length} item${applyItems.length === 1 ? "" : "s"}`);
     applyW.btn.setDisabled(this.running || applyItems.length === 0);
 
-    capW.btn.onClick(() => run(capW.btn, applyW.btn, "Capturing", this.captureNames(), (n, p) => this.host.captureItems(n, p)));
+    capW.btn.onClick(() => run(capW.btn, applyW.btn, "Capturing", this.capturePayload(), (n, p) => this.host.captureItems(n, p)));
     applyW.btn.onClick(() => run(applyW.btn, capW.btn, "Applying", this.applyPayload(), (n, p) => this.host.applyItems(n, p)));
   }
 
