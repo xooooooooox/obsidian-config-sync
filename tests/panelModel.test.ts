@@ -208,7 +208,7 @@ describe("versionLine", () => {
 
 describe("footerSummary", () => {
   it("lists only non-zero sources", () => {
-    expect(footerSummary(3, 0, 1, 2)).toBe("3 staged · +1 disabled · +2 to install");
-    expect(footerSummary(4, 0, 0, 0)).toBe("4 staged");
+    expect(footerSummary(3, 0, 1, 2)).toBe("3 selected · +1 disabled · +2 to install");
+    expect(footerSummary(4, 0, 0, 0)).toBe("4 selected");
   });
 });

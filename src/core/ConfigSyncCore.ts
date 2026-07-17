@@ -355,7 +355,7 @@ async function runStateAction(
   const pluginId = pluginIdForGroup(group);
   if (action === "none") {
     if (pluginId !== null && ctx.plugins.getInstalledPluginVersion(pluginId) === null) {
-      return { note: { kind: "ok", text: "staged for install" }, messages: [], skipConfig: false };
+      return { note: { kind: "ok", text: "selected for install" }, messages: [], skipConfig: false };
     }
     return { note: null, messages: [], skipConfig: false };
   }
@@ -410,7 +410,7 @@ async function runStateAction(
     }
     // With store data the settings still get written below; without it there is nothing else
     // to do — the guidance must not claim settings were staged.
-    const guidance = hasStoreData ? "settings were staged; install it manually to pick them up" : "install it manually";
+    const guidance = hasStoreData ? "settings were applied; install it manually to pick them up" : "install it manually";
     return {
       note: { kind: "warn", text: "⚠ install failed" },
       messages: [`${messages[0]} — ${guidance}`],

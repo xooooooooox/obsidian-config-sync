@@ -675,7 +675,7 @@ export class SyncCenterView extends ItemView {
     head.createSpan({ cls: "config-sync-pill is-neutral", text: countText });
     if (insync.length > 0) head.createSpan({ cls: "config-sync-pill is-ok", text: `✓ ${insync.length}` });
     const staged = checkable.filter((r) => this.selected.has(r.group.name)).length;
-    head.createSpan({ cls: "config-sync-section-hint", text: staged === 0 ? "not staged" : `${staged} staged` });
+    if (staged > 0) head.createSpan({ cls: "config-sync-section-hint", text: `${staged} selected` });
     const box = head.createEl("input", { type: "checkbox", attr: { "aria-label": "Select all in this section" } });
     box.indeterminate = staged > 0 && staged < checkable.length;
     box.checked = checkable.length > 0 && staged === checkable.length;

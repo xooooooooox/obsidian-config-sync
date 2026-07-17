@@ -487,15 +487,15 @@ describe("applyWithActions", () => {
     plugins.enabled.delete("demo");
     const inst = await applyWithActions(ctx, [{ name: "plugin-demo", action: "install" }], failing);
     expect(inst[0]?.stateNote).toEqual({ kind: "warn", text: "⚠ install failed" });
-    expect(inst[0]?.messages[0]).toContain("settings were staged; install it manually to pick them up");
+    expect(inst[0]?.messages[0]).toContain("settings were applied; install it manually to pick them up");
     expect(await io.exists(".obs/plugins/demo/data.json")).toBe(true);
   });
-  it('action "none" on a not-installed plugin notes staged for install', async () => {
+  it('action "none" on a not-installed plugin notes selected for install', async () => {
     const { io, plugins, ctx } = setup();
     void plugins;
     await seedStore(io, ctx);
     const results = await applyWithActions(ctx, [{ name: "plugin-demo", action: "none" }], async () => "x");
-    expect(results[0]?.stateNote).toEqual({ kind: "ok", text: "staged for install" });
+    expect(results[0]?.stateNote).toEqual({ kind: "ok", text: "selected for install" });
   });
 
   describe("enable happens AFTER the config write (plugin loads with the applied settings)", () => {
