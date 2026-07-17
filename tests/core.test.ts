@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CoreContext, capture, loadManifest, groupsForDevice, apply, applyWithActions, revertLastApply, planImport, applyImport, ExternalStoreReader, pushExternal, ExternalStoreWriter, pluginIdForGroup, readGroups, writeGroups } from "../src/core/ConfigSyncCore";
+import { CoreContext, capture, captureWithActions, loadManifest, groupsForDevice, apply, applyWithActions, revertLastApply, planImport, applyImport, ExternalStoreReader, pushExternal, ExternalStoreWriter, pluginIdForGroup, readGroups, writeGroups } from "../src/core/ConfigSyncCore";
 import { parseSyncManifest } from "../src/core/manifest";
 import { SyncGroup } from "../src/core/types";
 import { isFieldEnvelope, parseFileEnvelope } from "../src/core/crypto";
@@ -467,7 +467,7 @@ describe("applyWithActions", () => {
     const upd = await applyWithActions(ctx, [{ name: "plugin-demo", action: "update" }], failing);
     expect(upd[0]?.status).toBe("warning");
     expect(upd[0]?.stateNote).toEqual({ kind: "warn", text: "⚠ update failed" });
-    expect(upd[0]?.messages[0]).toContain("settings not applied; they were captured on a newer version");
+    expect(upd[0]?.messages[0]).toContain("update the plugin manually, then apply again");
     expect(await io.exists(".obs/plugins/demo/data.json")).toBe(false);
     plugins.installed.delete("demo");
     plugins.enabled.delete("demo");
@@ -620,6 +620,44 @@ const SNIPPETS_GROUP: SyncGroup = { name: "snippets", path: "{configDir}/snippet
 function selfDataJson(groups: SyncGroup[]): string {
   return JSON.stringify({ groups });
 }
+
+describe("captureWithActions (capture-side enable policy)", () => {
+  it("captures then enables flagged items, noting \u23fb enabled", async () => {
+    const { io, plugins, ctx } = setup();
+    plugins.installed.set("demo", "1.2.3");
+    io.seed({ ".obs/plugins/demo/data.json": '{"theme":"x"}' });
+    await seedGroups(ctx, MANIFEST);
+    const results = await captureWithActions(ctx, [{ name: "plugin-demo", action: "enable" }]);
+    const r = results.find((x) => x.group === "plugin-demo");
+    expect(r?.status).toBe("ok");
+    expect(r?.stateNote).toEqual({ kind: "ok", text: "\u23fb enabled" });
+    expect(plugins.enabled.has("demo")).toBe(true);
+    expect(await io.exists("cs/store/configdir/plugins/demo/data.json")).toBe(true); // capture still happened
+  });
+
+  it("a failed enable marks the result warning without undoing the capture", async () => {
+    const { io, plugins, ctx } = setup();
+    plugins.installed.set("demo", "1.2.3");
+    plugins.failEnable = true;
+    io.seed({ ".obs/plugins/demo/data.json": '{"theme":"x"}' });
+    await seedGroups(ctx, MANIFEST);
+    const results = await captureWithActions(ctx, [{ name: "plugin-demo", action: "enable" }]);
+    const r = results.find((x) => x.group === "plugin-demo");
+    expect(r?.status).toBe("warning");
+    expect(r?.stateNote).toEqual({ kind: "warn", text: "\u26a0 enable failed" });
+    expect(await io.exists("cs/store/configdir/plugins/demo/data.json")).toBe(true);
+  });
+
+  it('action "none" behaves exactly like a plain capture', async () => {
+    const { io, plugins, ctx } = setup();
+    plugins.installed.set("demo", "1.2.3");
+    io.seed({ ".obs/plugins/demo/data.json": '{"theme":"x"}' });
+    await seedGroups(ctx, MANIFEST);
+    const results = await captureWithActions(ctx, [{ name: "plugin-demo", action: "none" }]);
+    expect(results.find((x) => x.group === "plugin-demo")?.stateNote).toBeUndefined();
+    expect(plugins.enabled.has("demo")).toBe(false);
+  });
+});
 
 describe("planImport / applyImport", () => {
   it("local-only group and its store file survive a pull untouched", async () => {

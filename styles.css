@@ -970,3 +970,7 @@ body.is-mobile .config-sync-mainbar input[type="checkbox"]:indeterminate::after 
   gap: var(--size-4-2);
   margin-top: var(--size-4-3);
 }
+
+/* Header manual-refresh sits inline with the "refreshed Xm ago" note. */
+.config-sync-center-refresh { margin-left: var(--size-4-1); }
+.config-sync-center-refresh svg { width: 14px; height: 14px; }

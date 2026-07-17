@@ -21,8 +21,14 @@ export function changedOf(results: GroupResult[]): { changed: GroupResult[]; unc
 
 export function renderReportPills(host: HTMLElement, results: GroupResult[]): void {
   const { changed, unchanged } = changedOf(results);
+  // Failures must be visible without expanding details (real-vault finding 2026-07-17: a
+  // failed update read as "nothing happened" because only counts showed).
+  const errors = results.filter((r) => r.status === "error").length;
+  const warnings = results.filter((r) => r.status === "warning").length;
   const pills = host.createSpan({ cls: "config-sync-report-pills" });
   pills.createSpan({ cls: "config-sync-pill is-neutral", text: `${changed.length} changed` });
+  if (errors > 0) pills.createSpan({ cls: "config-sync-pill is-error", text: `✗ ${errors}` });
+  if (warnings > 0) pills.createSpan({ cls: "config-sync-pill is-warning", text: `⚠ ${warnings}` });
   if (unchanged.length > 0) pills.createSpan({ cls: "config-sync-pill is-ok", text: `✓ ${unchanged.length}` });
 }
 

@@ -407,6 +407,12 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     if (g.type === "file" && !SWITCH_LIST_GROUPS.has(item.name)) {
       const scan = this.detections.get(item.name) ?? (await this.host.detectSensitive(g));
       this.detections.set(item.name, scan);
+      if (scan.blob) {
+        // An opaque blob has no keys for Fields to work with — whole-file encryption is the
+        // only meaningful protection (real-vault gap 2026-07-17: remotely-save stayed plain).
+        g.mode = "encrypted";
+        return g;
+      }
       const existing = g.fields ?? [];
       const seeded = defaultFieldsFromDetection(scan.keys).filter((r) => !existing.some((f) => f.pattern === r.pattern));
       if (seeded.length > 0) {

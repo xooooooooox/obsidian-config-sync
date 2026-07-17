@@ -10,7 +10,7 @@ import {
   planImport,
   ProgressFn,
   applyWithActions,
-  capture,
+  captureWithActions, CaptureItem,
   groupsForDevice,
   loadLock,
   loadManifest,
@@ -134,6 +134,7 @@ export default class ConfigSyncPlugin extends Plugin {
         if (this.settings.localPeriodicCheck && document.hasFocus()) void this.refreshLocalStatus();
       }, 5 * 60 * 1000)
     );
+
     if (Platform.isDesktop) {
       this.remoteAutoCheckStartupTimer = window.setTimeout(() => {
         this.remoteAutoCheckStartupTimer = null;
@@ -437,10 +438,10 @@ export default class ConfigSyncPlugin extends Plugin {
           return null;
         }
       },
-      captureItems: async (names: string[], onProgress?: ProgressFn) => {
+      captureItems: async (items: CaptureItem[], onProgress?: ProgressFn) => {
         try {
           const ctx = await this.coreContext();
-          const results = await capture(ctx, names, onProgress);
+          const results = await captureWithActions(ctx, items, onProgress);
           // Background: the panel reloads and rescans anyway — blocking here just pins the
           // progress bar at N/N through a second full scan.
           void this.refreshLocalStatus();
