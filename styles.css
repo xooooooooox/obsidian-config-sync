@@ -648,15 +648,7 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 /* Touch targets — Obsidian sets body.is-mobile on phones and tablets */
 body.is-mobile .config-sync-hub-row { min-height: 44px; }
 
-body.is-mobile .config-sync-hub-row input[type="checkbox"],
-body.is-mobile .config-sync-mainbar input[type="checkbox"],
-body.is-mobile .config-sync-sect input[type="checkbox"] {
-  width: 20px;
-  height: 20px;
-  padding: 8px;
-  background-clip: content-box;
-  box-sizing: content-box;
-}
+
 
 body.is-mobile .config-sync-fpill,
 body.is-mobile .config-sync-seg-btn,
@@ -1021,4 +1013,63 @@ body.is-mobile .config-sync-mainbar input[type="checkbox"]:indeterminate::after 
 @media (prefers-reduced-motion: reduce) {
   .config-sync-runline-dot { animation: none; }
   .config-sync-progress.is-active::after { animation: none; opacity: 0.35; left: 35%; }
+}
+
+/* ── Mobile layout fixes (定稿 mobile-fixes-mockup, 2026-07-17) ──
+   All scoped to body.is-mobile: desktop layouts are untouched. */
+
+/* ① Passphrase: the input takes a full line of its own (the caret used to land on the Set
+   button); buttons follow on a right-aligned row below. */
+body.is-mobile .config-sync-ppset .setting-item-control { flex-wrap: wrap; justify-content: flex-end; }
+body.is-mobile .config-sync-ppset .setting-item-control input {
+  flex: 1 1 100%;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* ② Exclusion rows: the plugin name gets its own full line (no more mid-name wrapping);
+   the state phrase, included/excluded text and toggle share the second line. */
+body.is-mobile .config-sync-ldrow { flex-wrap: wrap; row-gap: 2px; }
+body.is-mobile .config-sync-ldrow .config-sync-ldname {
+  flex: 1 1 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ③ Long names truncate on one line instead of pushing the checkbox out of its column. */
+body.is-mobile .config-sync-hub-row .config-sync-rule-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+body.is-mobile .config-sync-hub-row .config-sync-rule-spacer { display: none; }
+
+/* ④ Checkboxes: compact 24px box (Obsidian's mobile default renders as a giant block).
+   A transparent-padding hit-area trick doesn't survive Obsidian's own checkbox styling
+   (background-clip/border land on the outer box), so visual = touch target here. */
+body.is-mobile .config-sync-hub-row input[type="checkbox"],
+body.is-mobile .config-sync-mainbar input[type="checkbox"],
+body.is-mobile .config-sync-sect input[type="checkbox"],
+body.is-mobile .config-sync-section-head input[type="checkbox"] {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  box-sizing: border-box;
+  border-radius: 6px;
+  flex: none;
+}
+
+/* ⑤ Compact header: title and small pills share one line, the "refreshed …" text hides
+   (the ↻ tooltip keeps the information), nothing wraps mid-word. */
+body.is-mobile .config-sync-center-refreshed { display: none; }
+body.is-mobile .config-sync-center-head { flex-wrap: wrap; row-gap: var(--size-2-1); }
+body.is-mobile .config-sync-center-title { white-space: nowrap; }
+body.is-mobile .config-sync-center-head .config-sync-pill {
+  font-size: var(--font-ui-smaller);
+  padding: 1px 8px;
+  min-height: 0;
+  line-height: 1.5;
 }
