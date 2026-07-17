@@ -409,7 +409,7 @@ body.is-phone .config-sync-fkey {
 .config-sync-sect .config-sync-pill { margin-right: var(--size-4-1); }
 
 .config-sync-report-sub { color: var(--text-muted); font-size: var(--font-ui-smaller); margin-bottom: var(--size-4-2); }
-.config-sync-sect { display: flex; align-items: center; font-size: var(--font-ui-smaller); text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); padding: var(--size-4-3) 2px var(--size-4-1); }
+.config-sync-sect { display: flex; align-items: center; font-size: var(--font-ui-smaller); text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-faint); padding: calc(var(--size-4-3) + var(--size-4-1)) 2px var(--size-4-1); border-bottom: 1px solid var(--background-modifier-border); }
 .config-sync-card { background: var(--background-secondary); border: 1px solid var(--background-modifier-border); border-radius: var(--radius-m); padding: 0 var(--size-4-3); }
 .config-sync-report-row { display: flex; align-items: center; gap: var(--size-4-2); padding: var(--size-4-2) 0; border-bottom: 1px solid var(--background-modifier-border); cursor: pointer; }
 .config-sync-card > .config-sync-report-row:last-of-type { border-bottom: none; }
@@ -536,7 +536,14 @@ body.is-phone .config-sync-fkey {
 .config-sync-hub-row.is-insync { opacity: 0.55; }
 .config-sync-hub-row.is-nosettings .config-sync-rule-name { color: var(--text-muted); font-weight: 400; }
 .config-sync-actionbar { display: flex; gap: var(--size-4-2); justify-content: flex-end; margin-top: var(--size-4-3); }
-.config-sync-btn-capture { color: var(--color-orange); border-color: var(--color-orange); }
+/* Direction-colored action buttons at every count (batch 4 ⑤): Capture is solid orange,
+   Apply solid accent (mod-cta) — the remote Pull/Push primary language. High enough
+   specificity to outrank theme button rules and Obsidian's button:disabled; the 0-item
+   state is the same color, just faded. */
+.config-sync-actionbar button.config-sync-btn-capture,
+.config-sync-actionbar button.config-sync-btn-capture:disabled { background: var(--color-orange); color: var(--background-primary); border: none; }
+.config-sync-actionbar button.mod-cta:disabled { background: var(--interactive-accent); color: var(--text-on-accent); }
+.config-sync-btnwrap button:disabled { opacity: 0.5; }
 .config-sync-remote-btn.is-pull.is-primary { background: var(--color-cyan); color: var(--background-primary); border: none; }
 .config-sync-remote-btn.is-push.is-primary { background: var(--color-pink); color: var(--background-primary); border: none; }
 .config-sync-remote-btn.is-dimmed { opacity: 0.55; }

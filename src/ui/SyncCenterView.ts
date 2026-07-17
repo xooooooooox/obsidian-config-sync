@@ -371,7 +371,9 @@ export class SyncCenterView extends ItemView {
     searchEl.value = this.search;
     if (this.panelScope.kind === "remote") searchEl.disabled = true;
     searchEl.addEventListener("input", () => {
+      const wasSearching = this.searching();
       this.search = searchEl.value;
+      if (!wasSearching && this.searching()) this.filter = "all"; // searching means "find this item"
       this.render(this.renderGen); // full render: badges, sections, list all react
       const refocus = this.contentEl.querySelector<HTMLInputElement>(".config-sync-side-search");
       if (refocus !== null) {
@@ -576,56 +578,77 @@ export class SyncCenterView extends ItemView {
       const s = this.sectionOf(r.group.name);
       if (s !== "main") sections[s].push(r);
     }
-    // While searching, the pills count the MATCHED set (定稿): the All pill keeps the
-    // unfiltered total as "n / m".
-    const pillRows = this.searching()
-      ? mainRows.filter((r) => matchesSearch(`${this.host.displayName(r.group.name, r.group.label)} ${r.group.name}`, this.search))
-      : mainRows;
-    const counts = this.presentedCounts(pillRows);
-
     const bar = main.createDiv({ cls: "config-sync-mainbar" });
     const pillRow = bar.createDiv({ cls: "config-sync-fpillrow" });
-    // Mobile shows the short glyph form (定稿 B) — the panel's icon language (↑ ↓ ✓ ○) —
-    // so all five pills always fit one line; desktop keeps the full labels.
-    const allLabel = this.searching() ? `All ${pillRows.length} / ${mainRows.length}` : `All ${mainRows.length}`;
-    const defs: { key: PanelFilter; label: string; short: string }[] = [
-      { key: "all", label: allLabel, short: allLabel },
-      { key: "capture", label: `To capture ${counts.up}`, short: `↑ ${counts.up}` },
-      { key: "apply", label: `To apply ${counts.down}`, short: `↓ ${counts.down}` },
-      { key: "ok", label: `In sync ${counts.ok}`, short: `✓ ${counts.ok}` },
-      { key: "none", label: `No settings yet ${counts.none}`, short: `○ ${counts.none}` },
-    ];
-    for (const d of defs) {
-      const pill = pillRow.createEl("button", { cls: `config-sync-fpill${this.filter === d.key ? " is-active" : ""}`, attr: { "aria-label": d.label } });
-      pill.createSpan({ cls: "config-sync-fpill-long", text: d.label });
-      pill.createSpan({ cls: "config-sync-fpill-short", text: d.short });
-      pill.addEventListener("click", () => {
-        this.filter = d.key;
-        this.render(this.renderGen);
-      });
-    }
+    let searchEl: HTMLInputElement | null = null;
     if (this.compact) {
-      const searchEl = bar.createEl("input", {
+      searchEl = bar.createEl("input", {
         type: "search",
         cls: "config-sync-mainbar-search",
         attr: { placeholder: "Filter by name…" },
       });
       searchEl.value = this.search;
-      searchEl.addEventListener("input", () => {
-        this.search = searchEl.value;
-        this.renderListInto(listHost, mainRows); // re-render only the list; keeps the input focused
-        this.refreshGlobalSelectAll(selectAll, mainRows); // resync tri-state against the new search
-      });
     }
     const selectAll = bar.createEl("input", { type: "checkbox", cls: "config-sync-selectall", attr: { "aria-label": "Select all visible items" } });
-
     const listHost = main.createDiv();
+    const sectionsHost = main.createDiv();
+
+    // Pills recompute from the live search term. While searching, they count the MATCHED
+    // set (定稿): the All pill keeps the unfiltered total as "n / m".
+    const renderPills = (): void => {
+      pillRow.empty();
+      const pillRows = this.searching()
+        ? mainRows.filter((r) => matchesSearch(`${this.host.displayName(r.group.name, r.group.label)} ${r.group.name}`, this.search))
+        : mainRows;
+      const counts = this.presentedCounts(pillRows);
+      // Mobile shows the short glyph form (定稿 B) — the panel's icon language (↑ ↓ ✓ ○) —
+      // so all five pills always fit one line; desktop keeps the full labels.
+      const allLabel = this.searching() ? `All ${pillRows.length} / ${mainRows.length}` : `All ${mainRows.length}`;
+      const defs: { key: PanelFilter; label: string; short: string }[] = [
+        { key: "all", label: allLabel, short: allLabel },
+        { key: "capture", label: `To capture ${counts.up}`, short: `↑ ${counts.up}` },
+        { key: "apply", label: `To apply ${counts.down}`, short: `↓ ${counts.down}` },
+        { key: "ok", label: `In sync ${counts.ok}`, short: `✓ ${counts.ok}` },
+        { key: "none", label: `No settings yet ${counts.none}`, short: `○ ${counts.none}` },
+      ];
+      for (const d of defs) {
+        const pill = pillRow.createEl("button", { cls: `config-sync-fpill${this.filter === d.key ? " is-active" : ""}`, attr: { "aria-label": d.label } });
+        pill.createSpan({ cls: "config-sync-fpill-long", text: d.label });
+        pill.createSpan({ cls: "config-sync-fpill-short", text: d.short });
+        pill.addEventListener("click", () => {
+          this.filter = d.key;
+          this.render(this.renderGen);
+        });
+      }
+    };
+    const renderSections = (): void => {
+      sectionsHost.empty();
+      this.renderSection(sectionsHost, "outdated", sections.outdated);
+      this.renderSection(sectionsHost, "disabled", sections.disabled);
+      this.renderSection(sectionsHost, "not-installed", sections["not-installed"]);
+    };
+
+    renderPills();
     this.renderListInto(listHost, mainRows);
     this.wireGlobalSelectAll(selectAll, mainRows);
+    renderSections();
 
-    this.renderSection(main, "outdated", sections.outdated);
-    this.renderSection(main, "disabled", sections.disabled);
-    this.renderSection(main, "not-installed", sections["not-installed"]);
+    // The compact search co-renders everything except its own input element, so the soft
+    // keyboard stays open while pills, list, sections and select-all track the search.
+    if (searchEl !== null) {
+      const input = searchEl;
+      input.addEventListener("input", () => {
+        const wasSearching = this.searching();
+        this.search = input.value;
+        // Entering a search resets the direction filter: searching means "find this item",
+        // and a leftover ↑/↓/✓/○ filter would silently hide the matches.
+        if (!wasSearching && this.searching()) this.filter = "all";
+        renderPills();
+        this.renderListInto(listHost, mainRows);
+        this.refreshGlobalSelectAll(selectAll, mainRows);
+        renderSections();
+      });
+    }
 
     this.renderActionBar(main);
   }
@@ -650,11 +673,27 @@ export class SyncCenterView extends ItemView {
       const active = visible.filter((r) => this.presState(r) !== "in-sync" && this.presState(r) !== "no-settings");
       const insync = visible.filter((r) => this.presState(r) === "in-sync");
       const nosettings = visible.filter((r) => this.presState(r) === "no-settings");
-      for (const r of active) this.renderItemRow(card, r);
+      this.renderRowList(card, active);
       this.renderTrailingLine(card, insync, sessionUi.insyncOpen, (n, open) => insyncLineText(n, open));
       this.renderTrailingLine(card, nosettings, sessionUi.nosettingsOpen, (n, open) => nosettingsLineText(n, open));
     } else {
-      for (const r of visible) this.renderItemRow(card, r);
+      this.renderRowList(card, visible);
+    }
+  }
+
+  // All-items scope groups its rows under scope headers (定稿 A); single-scope views stay
+  // flat — the scope itself is the title (定稿 B).
+  private renderRowList(card: HTMLElement, rows: StatusRow[]): void {
+    const grouped = this.panelScope.kind === "device" && this.panelScope.cat === "all";
+    if (!grouped) {
+      for (const r of rows) this.renderItemRow(card, r);
+      return;
+    }
+    for (const cat of SCOPE_ORDER) {
+      const inCat = rows.filter((r) => this.scopeOf(r.group.name) === cat);
+      if (inCat.length === 0) continue;
+      card.createDiv({ cls: "config-sync-sect", text: SCOPE_LABELS[cat] });
+      for (const r of inCat) this.renderItemRow(card, r);
     }
   }
 

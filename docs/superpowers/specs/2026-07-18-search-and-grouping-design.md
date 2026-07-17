@@ -41,6 +41,15 @@ room and a hairline divider under the label. No layout changes to the rows thems
 refreshes it". Now `noChanges = entries.length === 0 && !lockDiffers`: Pull goes primary,
 Push dims with its overwrite warning. (Committed as 905e02d.)
 
+## ⑤ Action buttons wear their direction colors at every count (user follow-up)
+
+Capture's orange was only a text/border-color rule with no border, and Obsidian's
+`button:disabled` outranked it — so Capture read as a plain grey button and, at 0 items,
+Apply kept its accent while Capture went washed-out. Now both are solid direction-colored
+buttons (the remote Pull/Push primary language): Capture solid orange with dark text,
+Apply solid accent (mod-cta); the 0-item/disabled state keeps the same colors at 0.5
+opacity.
+
 ## Verification
 
 Dev vault: mobile emulation — type into search with ↓ filter active and see pills/sections/
