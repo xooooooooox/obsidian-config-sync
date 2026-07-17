@@ -31,12 +31,19 @@ jobs:
               run: |
                   [ -f styles.css ] && echo "exists=true" >> "$GITHUB_OUTPUT" || echo "exists=false" >> "$GITHUB_OUTPUT"
 
-            - name: Attest build provenance
-              uses: actions/attest@v4
+            # Obsidian's automated review verifies build-provenance attestations; the generic
+            # actions/attest bundle failed its checker even though `gh attestation verify`
+            # passes. One single-subject attestation per asset, via the canonical action.
+            - name: Attest main.js
+              uses: actions/attest-build-provenance@v4
               with:
-                  subject-path: |
-                      main.js
-                      ${{ steps.styles.outputs.exists == 'true' && 'styles.css' || '' }}
+                  subject-path: main.js
+
+            - name: Attest styles.css
+              if: steps.styles.outputs.exists == 'true'
+              uses: actions/attest-build-provenance@v4
+              with:
+                  subject-path: styles.css
 
             - name: Create release
               env:

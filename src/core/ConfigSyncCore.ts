@@ -8,7 +8,9 @@ import { ensureSelfPresets } from "./catalog";
 import { isPlainObject } from "./sanitize";
 import { applySwitchList, captureSwitchList, parseSwitchList, SWITCH_LIST_GROUPS, SwitchList, switchListsEqual } from "./switchList";
 
-export type ProgressFn = (done: number, total: number, current: string) => void;
+// `current` is the group NAME (the UI maps it to a display label); `phase` is a short live
+// phrase for the in-item step ("downloading via BRAT…", "writing settings…") — spec 2026-07-17.
+export type ProgressFn = (done: number, total: number, current: string, phase?: string) => void;
 
 export interface PluginHost {
   getInstalledPluginVersion(id: string): string | null;
@@ -93,6 +95,20 @@ function excFor(ctx: CoreContext, name: string): string[] {
 
 function serializeSwitchList(v: ReturnType<typeof captureSwitchList>): string {
   return JSON.stringify(v, null, 2) + "\n";
+}
+
+// The enabled-set delta an on/off-list apply writes, as report lines ("turns on: a, b").
+function switchDeltaMessages(before: SwitchList | null, after: SwitchList): string[] {
+  const enabledIds = (l: SwitchList | null): Set<string> =>
+    l === null ? new Set<string>() : new Set(Array.isArray(l) ? l : Object.keys(l).filter((k) => l[k] === true));
+  const prev = enabledIds(before);
+  const next = enabledIds(after);
+  const on = [...next].filter((id) => !prev.has(id)).sort();
+  const off = [...prev].filter((id) => !next.has(id)).sort();
+  const lines: string[] = [];
+  if (on.length > 0) lines.push(`turns on: ${on.join(", ")}`);
+  if (off.length > 0) lines.push(`turns off: ${off.join(", ")}`);
+  return lines;
 }
 
 function emptyResult(group: string, needsAppReload: boolean): GroupResult {
@@ -195,7 +211,9 @@ async function captureGroup(ctx: CoreContext, group: SyncGroup): Promise<GroupRe
   if (group.type === "file") {
     const plainLocalContent = await ctx.io.read(real);
     const exc = excFor(ctx, group.name);
-    const localSwitchList = exc.length > 0 ? parseSwitchList(plainLocalContent) : null;
+    // Switch lists take the switch path whether or not exceptions exist — the old exc.length
+    // guard left exception-free devices writing local enable-order into the store (2026-07-17).
+    const localSwitchList = SWITCH_LIST_GROUPS.has(group.name) ? parseSwitchList(plainLocalContent) : null;
     // Pass-through (甲): excluded ids copy the store's existing state, so read it first.
     let existingStoreList: SwitchList | null = null;
     if (localSwitchList !== null && (await ctx.io.exists(store))) {
@@ -292,7 +310,7 @@ export interface ApplyItem {
   action: StateAction;
 }
 
-export type PluginInstallFn = (pluginId: string) => Promise<string>; // resolves to the installed version
+export type PluginInstallFn = (pluginId: string, onPhase?: (phase: string) => void) => Promise<string>; // resolves to the installed version
 
 interface StatePrelude {
   note: { kind: "ok" | "warn"; text: string } | null;
@@ -331,7 +349,8 @@ async function runStateAction(
   group: SyncGroup,
   action: StateAction,
   installPlugin: PluginInstallFn,
-  hasStoreData: boolean
+  hasStoreData: boolean,
+  onPhase?: (phase: string) => void
 ): Promise<StatePrelude> {
   const pluginId = pluginIdForGroup(group);
   if (action === "none") {
@@ -355,13 +374,23 @@ async function runStateAction(
       skipConfig: true,
     };
   }
+  if (pluginId === "config-sync") {
+    // Updating/reinstalling the self plugin from inside a run would disable the very code
+    // executing it (update disables first) — refuse and point at Obsidian's own updater.
+    return {
+      note: { kind: "warn", text: "⚠ update skipped" },
+      messages: ["Config Sync updates itself through Obsidian's plugin updater — Settings → Community plugins"],
+      skipConfig: true,
+    };
+  }
   const isUpdate = action === "update" || action === "update-enable";
   const wantsEnable = action === "update-enable" || action === "install-enable";
   const wasEnabled = ctx.plugins.isPluginEnabled(pluginId);
   let version: string;
   try {
     if (isUpdate && wasEnabled) await ctx.plugins.disablePlugin(pluginId);
-    version = await installPlugin(pluginId);
+    onPhase?.(isUpdate ? "updating…" : "installing…");
+    version = await installPlugin(pluginId, onPhase);
     await ctx.plugins.reloadPluginManifests();
   } catch (e) {
     const messages = [(e as Error).message];
@@ -433,9 +462,12 @@ export async function captureWithActions(ctx: CoreContext, items: CaptureItem[],
     onProgress
   );
   const manifest = await loadManifest(ctx);
+  let done = 0;
   for (const item of items) {
+    done++;
     if (item.action !== "enable") continue;
     const group = requireGroup(manifest, item.name);
+    onProgress?.(done - 1, items.length, item.name, "enabling…");
     const fin = await enableForGroup(ctx, group);
     const r = results.find((x) => x.group === item.name);
     if (r === undefined) continue;
@@ -469,8 +501,9 @@ export async function applyWithActions(
     for (const item of items) {
       onProgress?.(done, items.length, item.name);
       const group = requireGroup(manifest, item.name);
+      const phase = (p: string): void => onProgress?.(done, items.length, item.name, p);
       const storeExists = await ctx.io.exists(`${storeDir(ctx)}/${groupStorePath(group.path)}`);
-      const prelude = await runStateAction(ctx, group, item.action, installPlugin, storeExists);
+      const prelude = await runStateAction(ctx, group, item.action, installPlugin, storeExists, phase);
       if (prelude.skipConfig) {
         const r = emptyResult(item.name, false);
         r.status = "warning";
@@ -483,6 +516,7 @@ export async function applyWithActions(
         // Action-only apply: a plugin with no settings in the store — the state action
         // (install and/or enable) IS the payload; applyGroup would error on the missing data.
         const actionOnly = (item.action === "install" || item.action === "install-enable" || item.action === "enable") && !storeExists;
+        if (!actionOnly) phase("writing settings…");
         const r = actionOnly ? emptyResult(item.name, false) : await applyGroup(ctx, group, state);
         if (prelude.note !== null) r.stateNote = prelude.note;
         if (prelude.messages.length > 0) {
@@ -491,6 +525,7 @@ export async function applyWithActions(
         }
         if (prelude.finish !== undefined) {
           // Config is on disk — now it's safe to (re)enable: the plugin loads the applied settings.
+          phase("enabling…");
           const fin = await prelude.finish();
           if (fin.note !== null) r.stateNote = fin.note;
           if (fin.messages.length > 0) {
@@ -567,11 +602,15 @@ async function applyGroup(ctx: CoreContext, group: SyncGroup, state: BackupState
       const storeContent = await ctx.io.read(store);
       const localContent = (await ctx.io.exists(real)) ? await ctx.io.read(real) : null;
       const exc = excFor(ctx, group.name);
-      const storeSwitchList = exc.length > 0 ? parseSwitchList(storeContent) : null;
+      const storeSwitchList = SWITCH_LIST_GROUPS.has(group.name) ? parseSwitchList(storeContent) : null;
       let content: string;
       if (storeSwitchList !== null) {
         const localSwitchList = localContent !== null ? parseSwitchList(localContent) : null;
-        content = serializeSwitchList(applySwitchList(storeSwitchList, localSwitchList, exc));
+        const merged = applySwitchList(storeSwitchList, localSwitchList, exc);
+        content = serializeSwitchList(merged);
+        // Name the plugins this write toggles (spec 2026-07-17): a store list lacking a
+        // just-enabled plugin turns it off persistently — that must be visible in the report.
+        for (const line of switchDeltaMessages(localSwitchList, merged)) result.messages.push(line);
       } else {
         content = await applyTransform(group, storeContent, localContent, ctx.passphrase);
       }

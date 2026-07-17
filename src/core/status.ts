@@ -72,8 +72,11 @@ async function compareFile(ctx: CoreContext, group: SyncGroup, real: string, sto
   const storeContent = await ctx.io.read(store);
   const liveContent = await ctx.io.read(real);
   const exc = SWITCH_LIST_GROUPS.has(group.name) ? ctx.switchExceptions[group.name] ?? [] : [];
+  // Switch lists ALWAYS compare as sets — exceptions or not. The old `exc.length > 0` guard
+  // made exception-free devices fall through to byte comparison, where local enable-order vs
+  // store-stable order reads as a permanent phantom "To capture" (real-vault find 2026-07-17).
   const switchEqual =
-    exc.length > 0 ? switchListEqualOrNull(liveContent, storeContent, exc) : null;
+    SWITCH_LIST_GROUPS.has(group.name) ? switchListEqualOrNull(liveContent, storeContent, exc) : null;
   const equal =
     switchEqual !== null
       ? switchEqual

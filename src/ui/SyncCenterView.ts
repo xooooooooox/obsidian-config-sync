@@ -1,7 +1,7 @@
 import { App, ButtonComponent, ExtraButtonComponent, ItemView, Modal, WorkspaceLeaf } from "obsidian";
 import { ApplyItem, CaptureItem, ProgressFn, StateAction } from "../core/ConfigSyncCore";
 import { bucketCounts, GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry } from "../core/status";
-import { CATEGORY_LABELS, findGroupByName, ItemCategory, categoryForGroup } from "../core/catalog";
+import { CATEGORY_LABELS, findGroupByName, ItemCategory, SELF_GROUP_NAME, categoryForGroup } from "../core/catalog";
 import { FileChanges, GroupResult, Remote, SyncGroup, hasChanges } from "../core/types";
 import { Availability } from "../core/availability";
 import {
@@ -243,9 +243,13 @@ export class SyncCenterView extends ItemView {
     return presentedState(r.status.state, this.availOf(r.group.name).drift);
   }
 
-  // Section-aware stageability: ○ rows in "Not installed" stage as install-only apply.
+  // Section-aware stageability: action-only rows (install-only / enable-only / update-only)
+  // stage in their sections. The self plugin is exempt from update-only — updating it from
+  // inside a run would unload the code executing the run.
   private rowStageable(r: StatusRow): boolean {
-    return stageableRow(this.presState(r), this.sectionOf(r.group.name));
+    const section = this.sectionOf(r.group.name);
+    if (r.group.name === SELF_GROUP_NAME && section === "outdated" && this.presState(r) === "in-sync") return false;
+    return stageableRow(this.presState(r), section);
   }
 
   // All user-facing counts (header pills, sidebar badges, filter pills, switcher) must agree
@@ -805,6 +809,23 @@ export class SyncCenterView extends ItemView {
         detail.createDiv({ cls: "config-sync-expand-note", text: "no content changes — capturing refreshes the store version only" });
         return;
       }
+      const sec = this.sectionOf(r.group.name);
+      if (sec === "outdated") {
+        if (r.group.name === SELF_GROUP_NAME) {
+          detail.createDiv({
+            cls: "config-sync-expand-note",
+            text: "Config Sync updates itself through Obsidian's plugin updater — Settings → Community plugins.",
+          });
+          return;
+        }
+        // Update-only (spec 2026-07-17): settings match, the plugin is behind — the update
+        // action is the whole payload.
+        const line = versionLine(this.availOf(r.group.name));
+        if (line !== null) detail.createDiv({ cls: `config-sync-version-line${line.tone === "amber" ? " is-amber" : ""}`, text: line.text });
+        detail.createDiv({ cls: "config-sync-expand-note", text: "no content changes — updates the plugin only" });
+        this.renderPolicySeg(detail, r, this.availOf(r.group.name), true);
+        return;
+      }
       detail.createDiv({
         cls: "config-sync-expand-note",
         text: excluded.length > 0 ? "in sync — excluded plugins are not compared" : "identical to the store",
@@ -1053,17 +1074,38 @@ export class SyncCenterView extends ItemView {
       const wrap = btn.buttonEl.parentElement; // the .config-sync-btnwrap span
       const barEl = wrap?.querySelector<HTMLElement>(".config-sync-progress") ?? null;
       const fill = barEl?.querySelector<HTMLElement>("div") ?? null;
-      if (barEl !== null) barEl.show();
+      if (barEl !== null) {
+        barEl.show();
+        barEl.addClass("is-active"); // indeterminate shimmer while steps run (定稿 2026-07-17)
+      }
       btn.buttonEl.addClass("is-busy");
+      // Live status line under the action bar: "Name — phase…" + a slow-step hint after ~8s.
+      const statusEl = macro.createDiv({ cls: "config-sync-runline" });
+      statusEl.createSpan({ cls: "config-sync-runline-dot" });
+      const statusText = statusEl.createSpan();
+      const slowText = statusEl.createSpan({ cls: "config-sync-runline-slow" });
+      let slowTimer: number | null = null;
+      const setStatus = (current: string, phase: string): void => {
+        statusText.setText(`${this.host.displayName(current)} — ${phase}`);
+        slowText.setText("");
+        if (slowTimer !== null) window.clearTimeout(slowTimer);
+        slowTimer = window.setTimeout(() => {
+          slowText.setText("Still working — network fetches can take a while");
+        }, 8000);
+      };
       void (async () => {
         try {
-          const results = await exec(payload, (done, total, current) => {
+          const results = await exec(payload, (done, total, current, phase) => {
             btn.setButtonText(`${verb} ${done}/${total}…`);
             btn.buttonEl.setAttribute("aria-label", current);
+            setStatus(current, phase ?? (verb === "Capturing" ? "capturing…" : "applying…"));
             if (fill !== null) fill.style.width = `${total === 0 ? 0 : Math.round((done / total) * 100)}%`;
           });
           this.setLastRun(verb === "Capturing" ? "Captured" : "Applied", "local", results);
         } finally {
+          if (slowTimer !== null) window.clearTimeout(slowTimer);
+          statusEl.remove();
+          barEl?.removeClass("is-active");
           this.running = false;
         }
         await this.reload(); // re-render restores the idle footer

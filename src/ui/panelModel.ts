@@ -79,11 +79,13 @@ export function nosettingsLineText(n: number, open: boolean): string {
 
 export type SectionKind = "main" | "outdated" | "disabled" | "not-installed";
 
-// A ○ no-settings row is stageable in the not-installed section (apply = install-only,
-// 0.24.0) and in the disabled section (apply = enable-only, 定稿 2026-07-17): the state
-// action IS the payload, no settings are written. Everywhere else no-settings stays inert.
+// The action-only family: rows whose transfer payload is empty but whose STATE ACTION is the
+// point. ○ no-settings stages in not-installed (install-only, 0.24.0) and disabled
+// (enable-only, 0.27.0); ✓ in-sync stages in outdated (update-only, 0.27.1 — settings match,
+// the plugin itself is behind). Everywhere else those states stay inert.
 export function stageableRow(state: GroupState, section: SectionKind): boolean {
   if ((section === "not-installed" || section === "disabled") && state === "no-settings") return true;
+  if (section === "outdated" && state === "in-sync") return true;
   return stageableState(state);
 }
 
