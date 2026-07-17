@@ -1,4 +1,4 @@
-import { App, ButtonComponent, ExtraButtonComponent, ItemView, Modal, WorkspaceLeaf } from "obsidian";
+import { App, ButtonComponent, ExtraButtonComponent, ItemView, Modal, WorkspaceLeaf, setIcon } from "obsidian";
 import { ApplyItem, CaptureItem, ProgressFn, StateAction } from "../core/ConfigSyncCore";
 import { bucketCounts, GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry } from "../core/status";
 import { CATEGORY_LABELS, findGroupByName, ItemCategory, SELF_GROUP_NAME, categoryForGroup } from "../core/catalog";
@@ -80,6 +80,24 @@ function isoAge(iso: string | null): string {
   if (iso === null) return "never";
   const ms = Date.parse(iso);
   return Number.isNaN(ms) ? "unknown" : relativeAge(ms);
+}
+
+// Fields-mode badge (定稿方案 B 2026-07-17): three field lines with a small padlock at the
+// bottom-right corner — "some fields are locked". No Lucide icon carries this composite.
+function drawFieldsBadge(el: HTMLElement): void {
+  const svg = el.createSvg("svg", {
+    attr: {
+      viewBox: "0 0 24 24",
+      fill: "none",
+      stroke: "currentColor",
+      "stroke-width": "2",
+      "stroke-linecap": "round",
+      "stroke-linejoin": "round",
+    },
+  });
+  svg.createSvg("path", { attr: { d: "M3 5h18M3 11h9M3 17h7" } });
+  svg.createSvg("rect", { attr: { x: "14.5", y: "14.5", width: "8", height: "6.5", rx: "1.4", "stroke-width": "1.8" } });
+  svg.createSvg("path", { attr: { d: "M16.5 14.5v-2a2 2 0 0 1 4 0v2", "stroke-width": "1.8" } });
 }
 
 interface StatusRow {
@@ -429,8 +447,8 @@ export class SyncCenterView extends ItemView {
   }
 
   private renderHeader(): void {
+    // No title span: the pane header already reads "Sync Center" (mobile polish round 2).
     const head = this.contentEl.createDiv({ cls: "config-sync-center-head" });
-    head.createSpan({ cls: "config-sync-center-title", text: "Sync Center" });
     const { up, down, ok, none } = this.presentedCounts(this.mainRows());
     const pills = head.createSpan({ cls: "config-sync-report-pills" });
     if (up > 0) {
@@ -717,8 +735,19 @@ export class SyncCenterView extends ItemView {
     });
     const chev = row.createSpan({ cls: "config-sync-row-chevron", text: this.expandedItems.has(group.name) ? "▾" : "▸" });
     row.createSpan({ cls: "config-sync-rule-name", text: this.host.displayName(group.name, group.label) });
-    if (group.mode === "encrypted") row.createSpan({ cls: "config-sync-mode-badge", text: "🔒" });
-    else if (group.mode === "fields") row.createSpan({ cls: "config-sync-mode-badge", text: "▤" });
+    if (group.mode === "encrypted") {
+      const badge = row.createSpan({
+        cls: "config-sync-mode-badge",
+        attr: { "aria-label": "Encrypted mode — the whole file is stored encrypted" },
+      });
+      setIcon(badge, "lock");
+    } else if (group.mode === "fields") {
+      const badge = row.createSpan({
+        cls: "config-sync-mode-badge",
+        attr: { "aria-label": "Fields mode — only sensitive fields are filtered/encrypted" },
+      });
+      drawFieldsBadge(badge);
+    }
     const ldCount = this.host.switchLocalDecisions(group.name).length;
     if (ldCount > 0) {
       row.createSpan({ cls: "config-sync-ldnote", text: `· ${ldCount} excluded` });

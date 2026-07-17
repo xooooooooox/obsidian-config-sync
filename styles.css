@@ -448,11 +448,13 @@ body.is-phone .config-sync-fkey {
 .config-sync-state-icon.is-push { color: var(--color-pink); }
 .config-sync-state-icon.is-locked { color: var(--color-cyan); }
 
-.config-sync-mode-badge { color: var(--text-faint); font-size: 10px; }
+.config-sync-mode-badge { color: var(--text-faint); display: inline-flex; align-items: center; }
+.config-sync-mode-badge svg { width: 12px; height: 12px; }
 
 /* custom-drawn checkboxes (same inputs, no native rendering) */
 .config-sync-hub-row input[type="checkbox"],
-.config-sync-mainbar input[type="checkbox"] {
+.config-sync-mainbar input[type="checkbox"],
+.config-sync-section-head input[type="checkbox"] {
   appearance: none;
   -webkit-appearance: none;
   width: 15px;
@@ -490,12 +492,16 @@ body.is-phone .config-sync-fkey {
   color: var(--text-on-accent);
 }
 
-.config-sync-mainbar input[type="checkbox"]:checked {
-  background: var(--text-muted);
-  border-color: var(--text-muted);
+/* Select-alls (mainbar + section heads) stay grey — they carry no direction — but bright
+   grey (定稿档② 2026-07-17), not the muted fill that read as a broken checkbox. */
+.config-sync-mainbar input[type="checkbox"]:checked,
+.config-sync-section-head input[type="checkbox"]:checked {
+  background: var(--text-normal);
+  border-color: var(--text-normal);
 }
 
-.config-sync-mainbar input[type="checkbox"]:checked::after {
+.config-sync-mainbar input[type="checkbox"]:checked::after,
+.config-sync-section-head input[type="checkbox"]:checked::after {
   content: "✓";
   position: absolute;
   top: -3px;
@@ -504,12 +510,14 @@ body.is-phone .config-sync-fkey {
   color: var(--background-primary);
 }
 
-.config-sync-mainbar input[type="checkbox"]:indeterminate {
-  background: var(--text-faint);
-  border-color: var(--text-faint);
+.config-sync-mainbar input[type="checkbox"]:indeterminate,
+.config-sync-section-head input[type="checkbox"]:indeterminate {
+  background: var(--text-normal);
+  border-color: var(--text-normal);
 }
 
-.config-sync-mainbar input[type="checkbox"]:indeterminate::after {
+.config-sync-mainbar input[type="checkbox"]:indeterminate::after,
+.config-sync-section-head input[type="checkbox"]:indeterminate::after {
   content: "−";
   position: absolute;
   top: -3px;
@@ -518,7 +526,8 @@ body.is-phone .config-sync-fkey {
   color: var(--background-primary);
 }
 
-.config-sync-mainbar input[type="checkbox"]:disabled {
+.config-sync-mainbar input[type="checkbox"]:disabled,
+.config-sync-section-head input[type="checkbox"]:disabled {
   opacity: 0.35;
   cursor: not-allowed;
 }
@@ -669,7 +678,9 @@ body.is-mobile .config-sync-unchanged {
 
 body.is-mobile .config-sync-hub-row input[type="checkbox"]:checked::after,
 body.is-mobile .config-sync-mainbar input[type="checkbox"]:checked::after,
-body.is-mobile .config-sync-mainbar input[type="checkbox"]:indeterminate::after {
+body.is-mobile .config-sync-mainbar input[type="checkbox"]:indeterminate::after,
+body.is-mobile .config-sync-section-head input[type="checkbox"]:checked::after,
+body.is-mobile .config-sync-section-head input[type="checkbox"]:indeterminate::after {
   top: 4px;
   left: 4px;
 }
@@ -963,9 +974,9 @@ body.is-mobile .config-sync-mainbar input[type="checkbox"]:indeterminate::after 
   margin-top: var(--size-4-3);
 }
 
-/* Header manual-refresh sits inline with the "refreshed Xm ago" note. */
+/* Header manual-refresh sits inline with the "refreshed Xm ago" note, at the same default
+   icon size as the Remotes ↻ (batch 2 ④ — a forced 14px read as a different icon). */
 .config-sync-center-refresh { margin-left: var(--size-4-1); }
-.config-sync-center-refresh svg { width: 14px; height: 14px; }
 
 /* Live run status line (定稿 2026-07-17): right-aligned monospace "Name — phase…" with a
    pulsing dot; the slow hint appends after ~8s on one step. */
@@ -1073,3 +1084,51 @@ body.is-mobile .config-sync-center-head .config-sync-pill {
   min-height: 0;
   line-height: 1.5;
 }
+
+/* ── Mobile polish round 2 (2026-07-17) ── */
+
+/* ① The action bar must clear Obsidian's floating mobile navbar — plus room for a floating
+   status-bar pill (a common snippet/theme pattern sits fixed above the navbar). Overshoot is
+   harmless: it is scroll-past space at the end of the list. */
+body.is-mobile .config-sync-center {
+  padding-bottom: calc(var(--mobile-toolbar-height, 48px) + 88px);
+}
+
+/* ② The search row separates from the filter pills (own line, full width minus select-all). */
+body.is-mobile .config-sync-mainbar { row-gap: var(--size-4-2); }
+body.is-mobile .config-sync-mainbar-search {
+  flex: 1 1 calc(100% - 44px);
+  min-width: 0;
+}
+
+/* ③ The scope switcher matches the pills' height instead of undercutting them. */
+body.is-mobile .config-sync-switcher {
+  min-height: 44px;
+  font-size: var(--font-ui-medium);
+}
+
+/* ④ The header ↻ glyph shares the checkbox column's right edge (desktop too).
+   Calibrated by geometry probe for the default-size glyph (batch 2 ④ dropped the old
+   14px override): card inner right inset minus the clickable-icon's own padding. */
+.config-sync-center-refresh {
+  margin-left: 0;
+  margin-right: 7px;
+}
+.config-sync-center-head { padding-right: 0; }
+/* Mobile only: the "refreshed …" note is hidden there, so the ↻ (last child) needs its own
+   auto margin. On desktop the note's margin-left:auto already right-aligns the pair — a
+   second auto margin here would split the free space and center the note (batch 2 ①). */
+body.is-mobile .config-sync-center-head > :last-child { margin-left: auto; }
+
+/* ⑥ Expanded-item detail: one scale for everything inside (desktop + mobile) — buttons,
+   file lines and notes all sit at --font-ui-smaller with a shared indent and rhythm. */
+.config-sync-report-files .config-sync-seg { margin: var(--size-2-1) 0; }
+.config-sync-report-files .config-sync-seg-btn {
+  font-size: var(--font-ui-smaller);
+  padding: 2px 10px;
+}
+body.is-mobile .config-sync-report-files .config-sync-seg-btn {
+  min-height: 32px;
+  padding: 4px 12px;
+}
+body.is-mobile .config-sync-report-files { font-size: var(--font-ui-small); }
