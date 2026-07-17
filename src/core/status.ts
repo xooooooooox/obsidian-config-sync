@@ -178,6 +178,32 @@ export async function checkRemote(localLock: StoreLock | null, reader: ExternalS
   return { state, remoteCapturedAt: remote.capturedAt };
 }
 
+// "Remote has newer version info" — semantic, not byte, comparison of the two store locks
+// (2026-07-17: byte compare kept the hint alive forever, since a merged local lock keeps
+// local-only entries and its own formatting). True when the remote captured later, or when a
+// remote group entry is missing/different locally. Local-only entries and a locally-newer
+// capturedAt never count — a pull would not change them.
+export function remoteLockAhead(localRaw: string | null, remoteRaw: string | null): boolean {
+  if (remoteRaw === null) return false;
+  if (localRaw === null) return true;
+  let local: StoreLock;
+  let remote: StoreLock;
+  try {
+    local = parseStoreLock(localRaw);
+    remote = parseStoreLock(remoteRaw);
+  } catch {
+    return localRaw !== remoteRaw;
+  }
+  const l = Date.parse(local.capturedAt);
+  const r = Date.parse(remote.capturedAt);
+  if (!Number.isNaN(l) && !Number.isNaN(r) && r > l) return true;
+  for (const [name, entry] of Object.entries(remote.groups)) {
+    const mine = local.groups[name];
+    if (mine === undefined || JSON.stringify(mine) !== JSON.stringify(entry)) return true;
+  }
+  return false;
+}
+
 export interface RemoteDiffEntry {
   group: string;
   changes: FileChanges;

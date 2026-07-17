@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CoreContext, capture, loadManifest, groupsForDevice, ExternalStoreReader, writeGroups } from "../src/core/ConfigSyncCore";
 import { parseSyncManifest } from "../src/core/manifest";
-import { statusForGroups, checkRemote, diffRemote, bucketCounts, GroupStatus } from "../src/core/status";
+import { statusForGroups, checkRemote, diffRemote, bucketCounts, remoteLockAhead, GroupStatus } from "../src/core/status";
 import { MemFS, FakePlugins, memGroupsIO } from "./memfs";
 
 const MANIFEST = JSON.stringify({
@@ -238,6 +238,32 @@ describe("diffRemote", () => {
     };
     const entries = await diffRemote(ctx, fakeReader(remote));
     expect(entries).toEqual([]); // bookkeeping drift alone means "matches"
+  });
+});
+
+describe("remoteLockAhead", () => {
+  const lock = (capturedAt: string, groups: Record<string, object>) => JSON.stringify({ capturedAt, groups });
+  it("false when the local lock semantically covers the remote one (post-pull state)", () => {
+    const remote = lock("2026-07-17T10:00:00.000Z", { a: { sourcePluginVersion: "1.0" } });
+    // local adopted remote's time+entries but also has a local-only group and different formatting
+    const local = JSON.stringify({ capturedAt: "2026-07-17T10:00:00.000Z", groups: { a: { sourcePluginVersion: "1.0" }, localOnly: { sourceAppVersion: "1.8.7" } } }, null, 2);
+    expect(remoteLockAhead(local, remote)).toBe(false);
+  });
+  it("true when the remote captured later", () => {
+    expect(remoteLockAhead(lock("2026-07-17T10:00:00.000Z", {}), lock("2026-07-17T11:00:00.000Z", {}))).toBe(true);
+  });
+  it("true when a remote group entry is missing or different locally", () => {
+    const local = lock("2026-07-17T10:00:00.000Z", { a: { sourcePluginVersion: "1.0" } });
+    expect(remoteLockAhead(local, lock("2026-07-17T10:00:00.000Z", { a: { sourcePluginVersion: "2.0" } }))).toBe(true);
+    expect(remoteLockAhead(local, lock("2026-07-17T10:00:00.000Z", { b: { sourcePluginVersion: "1.0" } }))).toBe(true);
+  });
+  it("false when the local lock is simply newer (push side, not pull)", () => {
+    expect(remoteLockAhead(lock("2026-07-17T12:00:00.000Z", {}), lock("2026-07-17T10:00:00.000Z", {}))).toBe(false);
+  });
+  it("handles missing locks: remote absent → false; local absent with remote present → true", () => {
+    expect(remoteLockAhead(null, null)).toBe(false);
+    expect(remoteLockAhead(lock("2026-07-17T10:00:00.000Z", {}), null)).toBe(false);
+    expect(remoteLockAhead(null, lock("2026-07-17T10:00:00.000Z", {}))).toBe(true);
   });
 });
 

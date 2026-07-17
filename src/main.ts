@@ -29,7 +29,7 @@ import { groupRealPath, groupStorePath } from "./core/pathing";
 import { applySwitchList, captureSwitchList, parseSwitchList, SWITCH_LIST_GROUPS, switchDivergence, SwitchList } from "./core/switchList";
 import { applyTransform, captureTransform, scanSensitive, SensitiveScan } from "./core/modes";
 import { PkmMode, PkmProbe, resolveEffectiveMode, resolveRootPath } from "./core/pkm";
-import { bucketCounts, checkRemote, diffRemote, GroupStatus, RemoteCheck, statusForGroups } from "./core/status";
+import { bucketCounts, checkRemote, diffRemote, GroupStatus, RemoteCheck, remoteLockAhead, statusForGroups } from "./core/status";
 import { Remote, RibbonButtons, StoreLock, SyncGroup } from "./core/types";
 import { presentedState } from "./ui/panelModel";
 import { ConflictModal } from "./ui/ConflictModal";
@@ -481,7 +481,7 @@ export default class ConfigSyncPlugin extends Plugin {
         try {
           const remoteLock = (await reader.listFiles()).includes("store.lock.json") ? await reader.readFile("store.lock.json") : null;
           const localLock = (await ctx.io.exists(`${ctx.rootPath}/store.lock.json`)) ? await ctx.io.read(`${ctx.rootPath}/store.lock.json`) : null;
-          lockDiffers = (remoteLock ?? "") !== (localLock ?? "");
+          lockDiffers = remoteLockAhead(localLock, remoteLock);
         } catch {
           lockDiffers = false;
         }
