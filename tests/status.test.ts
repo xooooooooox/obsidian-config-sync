@@ -72,6 +72,22 @@ describe("statusForGroups", () => {
     expect((await allStates(ctx))["hotkeys"]).toBe("not-captured");
   });
 
+  it("switch lists with equal membership in a different order are in-sync even with NO exceptions", async () => {
+    const { io, ctx } = setup();
+    const SWITCH_MANIFEST = JSON.stringify({
+      version: 1,
+      groups: [{ name: "community-plugins", path: "{configDir}/community-plugins.json", type: "file", devices: "all" }],
+    });
+    io.seed({ ".obs/community-plugins.json": '["b","a","c"]' }); // local enable-order
+    await writeGroups(ctx, parseSyncManifest(SWITCH_MANIFEST).groups);
+    await capture(ctx);
+    await io.write("cs/store/configdir/community-plugins.json", '["a","b","c"]\n'); // store-stable order
+    io.touch(".obs/community-plugins.json", Date.parse("2026-07-09T00:00:00.000Z"));
+    const manifest = await loadManifest(ctx);
+    const statuses = await statusForGroups(ctx, groupsForDevice(manifest, "desktop"));
+    expect(statuses.find((s) => s.group === "community-plugins")?.state).toBe("in-sync");
+  });
+
   it("detects dir set differences and ignores junk on both sides", async () => {
     const { io, ctx } = await seededAndCaptured();
     io.seed({ ".obs/snippets/.DS_Store": "junk", "cs/store/configdir/snippets/.DS_Store": "junk" });
