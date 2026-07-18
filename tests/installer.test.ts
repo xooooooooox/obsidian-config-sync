@@ -99,9 +99,7 @@ describe("createInstaller", () => {
     const io = new MemFS();
     const miss = fakeHttp({ [COMMUNITY_CATALOG_URL]: CATALOG });
     await expect(createInstaller(io, ".obs", miss.http)("nope")).rejects.toThrow(CatalogError);
-    await expect(createInstaller(io, ".obs", miss.http)("nope")).rejects.toThrow(
-      "nope isn't in the community catalog — install it manually"
-    );
+    await expect(createInstaller(io, ".obs", miss.http)("nope")).rejects.toThrow("not in the community catalog");
     const noMain = fakeHttp({
       [COMMUNITY_CATALOG_URL]: CATALOG,
       [ROOT]: JSON.stringify({ id: "demo", version: "2.5.0" }),

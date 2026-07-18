@@ -604,6 +604,39 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 
 .config-sync-side-head-remotes { margin-top: var(--size-4-2); }
 
+/* Visual grouping in the sidebar (This device / Remotes / History). */
+.config-sync-side-divider { height: 1px; background: var(--background-modifier-border); margin: var(--size-4-2) 4px; }
+
+/* ── Run history ─────────────────────────────────────────────────────────── */
+.config-sync-hhead { display: flex; align-items: baseline; gap: var(--size-4-2); margin-bottom: var(--size-4-1); }
+.config-sync-hhead-title { font-size: var(--font-ui-medium); font-weight: 700; }
+.config-sync-hhead-count { color: var(--text-faint); font-size: var(--font-ui-smaller); }
+.config-sync-hclear { margin-left: auto; color: var(--color-orange); font-size: var(--font-ui-smaller); cursor: pointer; }
+.config-sync-hempty { color: var(--text-muted); font-style: italic; padding: var(--size-4-4) 0; }
+.config-sync-hlegend { display: flex; flex-wrap: wrap; gap: var(--size-4-3); color: var(--text-muted); font-size: var(--font-ui-smaller); margin-bottom: var(--size-4-2); }
+.config-sync-hstat.is-ok { color: var(--color-green); }
+.config-sync-hstat.is-warn { color: var(--color-orange); }
+.config-sync-hstat.is-error { color: var(--color-red); }
+.config-sync-htable { width: 100%; border-collapse: collapse; font-size: var(--font-ui-small); }
+.config-sync-htable th { text-align: left; font-size: var(--font-ui-smaller); text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint); font-weight: 600; padding: var(--size-4-1) var(--size-4-2); border-bottom: 1px solid var(--background-modifier-border); white-space: nowrap; }
+.config-sync-htable td { padding: var(--size-4-2); border-bottom: 1px solid var(--background-modifier-border); white-space: nowrap; }
+.config-sync-hrow { cursor: pointer; }
+.config-sync-hrow:hover td { background: var(--background-modifier-hover); }
+.config-sync-htd-st { text-align: center; }
+.config-sync-htd-act { font-weight: 600; }
+.config-sync-hglyph.is-in { color: var(--interactive-accent); }
+.config-sync-hglyph.is-out { color: var(--color-orange); }
+.config-sync-htd-when { font-family: var(--font-monospace); color: var(--text-muted); font-size: var(--font-ui-smaller); }
+.config-sync-htd-num { text-align: right; color: var(--text-muted); }
+.config-sync-htd-num.is-issues { color: var(--color-orange); font-weight: 600; }
+.config-sync-htd-sum { white-space: normal; color: var(--text-muted); width: 100%; }
+.config-sync-htd-chev { color: var(--text-faint); text-align: center; }
+.config-sync-hback { color: var(--interactive-accent); cursor: pointer; font-size: var(--font-ui-smaller); margin-bottom: var(--size-4-2); }
+.config-sync-hdhead { display: flex; align-items: center; gap: var(--size-4-2); }
+.config-sync-hdtitle { font-size: var(--font-ui-medium); font-weight: 700; }
+.config-sync-hdwhen { color: var(--text-faint); font-size: var(--font-ui-smaller); font-family: var(--font-monospace); }
+.config-sync-hddesc { color: var(--text-muted); margin: var(--size-4-1) 0 var(--size-4-3); }
+
 .config-sync-side-item { display: flex; align-items: center; gap: 5px; padding: 6px 9px; border-radius: 8px; border: 1px solid transparent; cursor: pointer; font-size: var(--font-ui-small); }
 
 .config-sync-side-item.is-active { background: rgba(var(--interactive-accent-rgb), 0.14); border-color: rgba(var(--interactive-accent-rgb), 0.4); color: var(--text-normal); }
@@ -723,6 +756,11 @@ body.is-mobile .config-sync-section-head input[type="checkbox"]:indeterminate::a
 /* 0.20.0 inline result strip */
 .config-sync-strip { border: 1px solid rgba(var(--color-green-rgb), 0.35); background: rgba(var(--color-green-rgb), 0.07); border-radius: 8px; padding: 8px 12px; margin-bottom: 8px; }
 .config-sync-strip.is-transfer { border-color: rgba(var(--color-cyan-rgb), 0.4); background: rgba(var(--color-cyan-rgb), 0.07); }
+/* Outcome tone (batch: honest run reports) — the strip is green only when the run is clean. */
+.config-sync-strip.is-warn { border-color: rgba(var(--color-orange-rgb), 0.5); background: rgba(var(--color-orange-rgb), 0.09); }
+.config-sync-strip.is-error { border-color: rgba(var(--color-red-rgb), 0.5); background: rgba(var(--color-red-rgb), 0.09); }
+.config-sync-strip.is-warn .config-sync-strip-check { color: var(--color-orange); }
+.config-sync-strip.is-error .config-sync-strip-check { color: var(--color-red); }
 .config-sync-strip-head { display: flex; align-items: center; gap: 8px; }
 .config-sync-strip-check { color: var(--color-green); }
 .config-sync-strip-title { font-weight: 600; }

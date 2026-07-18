@@ -34,8 +34,10 @@ export interface SettingsHost extends Plugin {
     remoteAutoCheck: boolean;
     localPeriodicCheck: boolean;
     switchExceptions: Record<string, string[]>;
+    runHistory: { enabled: boolean; path: string; maxCount: number; maxDays: number };
   };
   saveSettings(): Promise<void>;
+  clearRunHistory(): Promise<void>;
   refreshRibbons(): void;
   readGroupsFile(): Promise<SyncGroup[]>;
   writeGroupsFile(groups: SyncGroup[]): Promise<void>;
@@ -139,6 +141,11 @@ const GENERAL_SETTINGS: GeneralSettingDef[] = [
     anchorId: "general-ribbon-buttons",
   },
   { name: "Passphrase", desc: "Needed for Encrypt modes. Enter the same passphrase on each device; it is never stored in the store or synced.", anchorId: "general-passphrase" },
+  { name: "Run history", desc: "Record every capture, apply, pull and push, and browse past runs from the Sync Center's History entry. Kept on this device only — never synced.", anchorId: "general-run-history" },
+  { name: "History file", desc: "A separate file next to the plugin's data.json (never inside it). Change to store the history elsewhere; leave blank for the default.", anchorId: "general-run-history-path" },
+  { name: "Keep at most", desc: "Older runs beyond this count are pruned automatically. 0 keeps every run.", anchorId: "general-run-history-count" },
+  { name: "Keep for", desc: "Runs older than this many days are pruned automatically. 0 keeps runs forever.", anchorId: "general-run-history-days" },
+  { name: "Clear run history", desc: "Delete every recorded run. This cannot be undone.", anchorId: "general-run-history-clear" },
 ];
 
 interface SearchHit {
@@ -290,6 +297,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         this.renderStatusToggles(containerEl);
         this.renderRibbonToggles(containerEl);
         this.renderPassphrase(containerEl);
+        this.renderRunHistory(containerEl);
         break;
       case "obsidian":
       case "core":
@@ -1174,6 +1182,50 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       t.setValue(this.host.settings.localPeriodicCheck).onChange(async (v) => {
         this.host.settings.localPeriodicCheck = v;
         await this.host.saveSettings();
+      })
+    );
+  }
+
+  private renderRunHistory(containerEl: HTMLElement): void {
+    const s = this.host.settings.runHistory;
+    const heading = this.generalSetting("general-run-history");
+    this.anchor(new Setting(containerEl).setName(heading.name).setDesc(heading.desc).setHeading(), "general-run-history").addToggle((t) =>
+      t.setValue(s.enabled).onChange(async (v) => {
+        s.enabled = v;
+        await this.host.saveSettings();
+      })
+    );
+    const path = this.generalSetting("general-run-history-path");
+    this.anchor(new Setting(containerEl).setName(path.name).setDesc(path.desc), "general-run-history-path").addText((t) =>
+      t
+        .setPlaceholder("{configDir}/plugins/config-sync/run-history.json")
+        .setValue(s.path)
+        .onChange(async (v) => {
+          s.path = v.trim();
+          await this.host.saveSettings();
+        })
+    );
+    const count = this.generalSetting("general-run-history-count");
+    this.anchor(new Setting(containerEl).setName(count.name).setDesc(count.desc), "general-run-history-count").addText((t) =>
+      t.setValue(String(s.maxCount)).onChange(async (v) => {
+        const n = Number.parseInt(v, 10);
+        s.maxCount = Number.isFinite(n) && n >= 0 ? n : 0;
+        await this.host.saveSettings();
+      })
+    );
+    const days = this.generalSetting("general-run-history-days");
+    this.anchor(new Setting(containerEl).setName(days.name).setDesc(days.desc), "general-run-history-days").addText((t) =>
+      t.setValue(String(s.maxDays)).onChange(async (v) => {
+        const n = Number.parseInt(v, 10);
+        s.maxDays = Number.isFinite(n) && n >= 0 ? n : 0;
+        await this.host.saveSettings();
+      })
+    );
+    const clear = this.generalSetting("general-run-history-clear");
+    this.anchor(new Setting(containerEl).setName(clear.name).setDesc(clear.desc), "general-run-history-clear").addButton((b) =>
+      b.setButtonText("Clear history").setWarning().onClick(async () => {
+        await this.host.clearRunHistory();
+        new Notice("Run history cleared");
       })
     );
   }
