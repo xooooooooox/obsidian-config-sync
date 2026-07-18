@@ -43,7 +43,9 @@ export function createInstaller(io: FileIO, configDir: string, http: HttpGet): (
     const entries = await loadCatalog();
     const entry = entries.find((e) => e.id === pluginId);
     if (entry === undefined) {
-      throw new CatalogError(`${pluginId} isn't in the community catalog — install it manually`);
+      // No plugin identifier here: the report row header already carries the display name,
+      // and runStateAction appends the single "install it manually" guidance.
+      throw new CatalogError("not in the community catalog");
     }
     const repo = entry.repo;
 

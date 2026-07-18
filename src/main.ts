@@ -21,6 +21,7 @@ import {
 } from "./core/ConfigSyncCore";
 import { createInstaller } from "./core/installer";
 import { retry, HttpStatusError, TimeoutError, isRetryableError } from "./core/async";
+import { RunRecord, RunKind, summarizeRun, pruneHistory } from "./core/runHistory";
 import { BratIndex, parseBratRepoList, resolveBratIndex } from "./core/bratIndex";
 import { type CatalogSection, displayLabelForGroup, ensureSelfPresets, findGroupByName, groupForItem, listBetaSections, listCoreSections, listDiscovered, listOptionSections, listPluginSections, SELF_GROUP_NAME, setCorePluginIds } from "./core/catalog";
 import { Availability, availabilityForGroup } from "./core/availability";
@@ -31,7 +32,7 @@ import { applySwitchList, captureSwitchList, parseSwitchList, SWITCH_LIST_GROUPS
 import { applyTransform, captureTransform, scanSensitive, SensitiveScan } from "./core/modes";
 import { PkmMode, PkmProbe, resolveEffectiveMode, resolveRootPath } from "./core/pkm";
 import { bucketCounts, checkRemote, diffRemote, GroupStatus, RemoteCheck, remoteLockAhead, statusForGroups } from "./core/status";
-import { Remote, RibbonButtons, StoreLock, SyncGroup } from "./core/types";
+import { GroupResult, Remote, RibbonButtons, StoreLock, SyncGroup } from "./core/types";
 import { presentedState } from "./ui/panelModel";
 import { ConflictModal } from "./ui/ConflictModal";
 import { ReportModal } from "./ui/ReportModal";
@@ -49,6 +50,14 @@ interface ConfigSyncSettings {
   groups: SyncGroup[];
   switchExceptions: Record<string, string[]>; // group name -> excepted plugin/core ids (device-local)
   bratPluginIndex: BratIndex; // plugin id -> "owner/repo"; derived from BRAT's synced list, synced too
+  runHistory: RunHistorySettings; // local-only record of past runs; never synced
+}
+
+interface RunHistorySettings {
+  enabled: boolean;
+  path: string; // "" = default {configDir}/plugins/config-sync/run-history.json
+  maxCount: number; // 0 = unlimited
+  maxDays: number; // 0 = keep forever
 }
 
 const DEFAULT_SETTINGS: ConfigSyncSettings = {
@@ -62,6 +71,7 @@ const DEFAULT_SETTINGS: ConfigSyncSettings = {
   groups: [],
   switchExceptions: {},
   bratPluginIndex: {},
+  runHistory: { enabled: true, path: "", maxCount: 50, maxDays: 30 },
 };
 
 // app.plugins is not part of the public API; this is the community-standard access path.
@@ -416,6 +426,10 @@ export default class ConfigSyncPlugin extends Plugin {
       },
       switchLocalDecisions: (name) => (SWITCH_LIST_GROUPS.has(name) ? this.settings.switchExceptions[name] ?? [] : []),
       betaIds: () => new Set(Object.keys(this.settings.bratPluginIndex)),
+      runHistoryEnabled: () => this.settings.runHistory.enabled,
+      loadRunHistory: () => this.loadRunHistory(),
+      appendRunHistory: (kind, remote, results) => this.appendRunHistory(kind, remote, results),
+      clearRunHistory: () => this.clearRunHistory(),
       switchDivergenceFor: async (name) => {
         if (!SWITCH_LIST_GROUPS.has(name)) return null;
         const group = findGroupByName(this.settings.groups, name);
@@ -659,6 +673,47 @@ export default class ConfigSyncPlugin extends Plugin {
       };
     }
     return this.installFn;
+  }
+
+  // ── Run history (local-only, never synced) ──────────────────────────────────────────────
+  private runHistoryPath(): string {
+    const custom = this.settings.runHistory.path.trim();
+    return custom !== "" ? custom : `${this.app.vault.configDir}/plugins/config-sync/run-history.json`;
+  }
+
+  async loadRunHistory(): Promise<RunRecord[]> {
+    const path = this.runHistoryPath();
+    if (!(await this.app.vault.adapter.exists(path))) return [];
+    let records: RunRecord[];
+    try {
+      records = JSON.parse(await this.app.vault.adapter.read(path)) as RunRecord[];
+    } catch {
+      return []; // a corrupt history file must not break the panel
+    }
+    const { maxCount, maxDays } = this.settings.runHistory;
+    return pruneHistory(records, maxCount, maxDays, Date.now());
+  }
+
+  async appendRunHistory(kind: RunKind, remote: string | null, results: GroupResult[]): Promise<void> {
+    if (!this.settings.runHistory.enabled) return;
+    const record = summarizeRun(Date.now(), kind, remote, results);
+    const existing = await this.loadRunHistory();
+    const { maxCount, maxDays } = this.settings.runHistory;
+    const next = pruneHistory([record, ...existing], maxCount, maxDays, Date.now());
+    await this.writeRunHistory(next);
+  }
+
+  async clearRunHistory(): Promise<void> {
+    await this.writeRunHistory([]);
+  }
+
+  private async writeRunHistory(records: RunRecord[]): Promise<void> {
+    const path = this.runHistoryPath();
+    const parent = path.slice(0, path.lastIndexOf("/"));
+    if (parent !== "" && !(await this.app.vault.adapter.exists(parent))) {
+      await this.app.vault.adapter.mkdir(parent);
+    }
+    await this.app.vault.adapter.write(path, JSON.stringify(records, null, 2) + "\n");
   }
 
   private bratInstance(): BratInstance | null {

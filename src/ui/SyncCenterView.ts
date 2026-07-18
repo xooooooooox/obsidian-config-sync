@@ -30,10 +30,12 @@ import {
 import { renderDiffPanel } from "./diffView";
 import { SWITCH_LIST_GROUPS, switchListSortedView } from "../core/switchList";
 import { renderReportContent, renderReportPills } from "./reportContent";
+import { RunRecord, RunKind, RunStatus, worstStatus, formatRunTime } from "../core/runHistory";
 
 // Sidebar scope order: Beta sits between Community and custom (batch 3 ③).
 const SCOPE_ORDER: (ItemCategory | "beta")[] = ["obsidian", "core", "community", "beta", "custom"];
 const SCOPE_LABELS: Record<ItemCategory | "beta", string> = { ...CATEGORY_LABELS, beta: "Beta" };
+const STATUS_CLS: Record<RunStatus, string> = { ok: "is-ok", warning: "is-warn", error: "is-error" };
 
 // Session-remembered UI state: which scopes have their ✓ / ○ trailing lines flattened open.
 const sessionUi = {
@@ -69,6 +71,10 @@ export interface SyncCenterHost {
   adoptConfiguration(): Promise<GroupResult[] | null>;
   switchLocalDecisions(name: string): string[]; // [] for non-switch-list groups
   betaIds(): Set<string>; // plugin ids tracked in the BRAT index (the Beta scope/tab)
+  runHistoryEnabled(): boolean;
+  loadRunHistory(): Promise<RunRecord[]>;
+  appendRunHistory(kind: RunKind, remote: string | null, results: GroupResult[]): Promise<void>;
+  clearRunHistory(): Promise<void>;
   // Bidirectional divergence for a switch-list group (exceptions masked); null when either
   // side is missing or unparseable.
   switchDivergenceFor(name: string): Promise<{ captureRemoves: string[]; applyDisables: string[] } | null>;
@@ -131,14 +137,16 @@ export class SyncCenterView extends ItemView {
   private expandedItems: Set<string> = new Set();
   private renderGen = 0;
   private filter: PanelFilter = "all";
-  private panelScope: { kind: "device"; cat: ItemCategory | "beta" | "all" } | { kind: "remote"; name: string } = { kind: "device", cat: "all" };
+  private panelScope: { kind: "device"; cat: ItemCategory | "beta" | "all" } | { kind: "remote"; name: string } | { kind: "history" } = { kind: "device", cat: "all" };
   private search = "";
   private betaIds: Set<string> = new Set();
   private lastRefreshedAt: number | null = null;
   private compact = false;
   private switcherOpen = false;
   private running = false;
-  private lastRun: { title: string; tone: "local" | "transfer"; results: GroupResult[]; expanded: boolean } | null = null;
+  private lastRun: { kind: RunKind; remote: string | null; results: GroupResult[]; expanded: boolean } | null = null;
+  private history: RunRecord[] = [];
+  private historyOpen: number | null = null; // index of the run whose detail is shown; null = table
 
   constructor(leaf: WorkspaceLeaf, private host: SyncCenterHost) {
     super(leaf);
@@ -211,6 +219,7 @@ export class SyncCenterView extends ItemView {
     this.statuses = new Map(statuses.map((s) => [s.group, s]));
     this.availability = new Map(Object.entries(availability));
     this.betaIds = this.host.betaIds();
+    this.history = this.host.runHistoryEnabled() ? await this.host.loadRunHistory() : [];
     // User state survives reloads; prune entries whose item vanished.
     const names = new Set(groups.map((g) => g.name));
     for (const n of [...this.selected]) if (!names.has(n)) this.selected.delete(n);
@@ -322,6 +331,10 @@ export class SyncCenterView extends ItemView {
     if (this.compact) this.renderSwitcher(shell);
     else this.renderSidebar(shell);
     const main = shell.createDiv({ cls: "config-sync-main" });
+    if (this.panelScope.kind === "history") {
+      this.renderHistoryMode(main);
+      return;
+    }
     if (this.panelScope.kind === "remote") {
       const remote = this.host.remotes().find((x) => this.panelScope.kind === "remote" && x.name === this.panelScope.name);
       if (remote !== undefined) {
@@ -353,7 +366,7 @@ export class SyncCenterView extends ItemView {
         adopt.disabled = true;
         adopt.setText("Adopting…");
         void this.host.adoptConfiguration().then((results) => {
-          if (results !== null) this.setLastRun("Adopted", "local", results);
+          if (results !== null) this.setLastRun("adopt", null, results);
           this.notifyExternalChange(); // recompute: groups now exist → banner disappears
         });
       });
@@ -428,29 +441,45 @@ export class SyncCenterView extends ItemView {
     }
 
     const remotes = this.host.remotes();
-    if (remotes.length === 0) return;
-    let newestCheck: number | null = null;
-    for (const remote of remotes) {
-      const c = this.host.remoteCheck(remote.name);
-      if (c !== undefined && (newestCheck === null || c.at > newestCheck)) newestCheck = c.at;
+    if (remotes.length > 0) {
+      container.createDiv({ cls: "config-sync-side-divider" });
+      let newestCheck: number | null = null;
+      for (const remote of remotes) {
+        const c = this.host.remoteCheck(remote.name);
+        if (c !== undefined && (newestCheck === null || c.at > newestCheck)) newestCheck = c.at;
+      }
+      const head = container.createDiv({ cls: "config-sync-side-head config-sync-side-head-remotes" });
+      head.createSpan({ text: `Remotes · checked ${newestCheck === null ? "never" : relativeAge(newestCheck)}` });
+      const refresh = new ExtraButtonComponent(head);
+      refresh.setIcon("refresh-cw");
+      refresh.setTooltip("Re-check remotes");
+      refresh.onClick(async () => {
+        await this.host.refreshRemoteChecks();
+        this.render(this.renderGen);
+      });
+      for (const remote of remotes) {
+        const active = this.panelScope.kind === "remote" && this.panelScope.name === remote.name;
+        const item = container.createDiv({ cls: `config-sync-side-item${active ? " is-active" : ""}` });
+        item.createSpan({ cls: "config-sync-side-name", text: remote.name });
+        const icon = this.remoteIcon(this.host.remoteCheck(remote.name)?.check);
+        item.createSpan({ cls: `config-sync-state-icon ${icon.cls}`, text: icon.glyph, attr: { "aria-label": icon.tip } });
+        item.addEventListener("click", () => {
+          this.panelScope = { kind: "remote", name: remote.name };
+          this.switcherOpen = false;
+          this.render(this.renderGen);
+        });
+      }
     }
-    const head = container.createDiv({ cls: "config-sync-side-head config-sync-side-head-remotes" });
-    head.createSpan({ text: `Remotes · checked ${newestCheck === null ? "never" : relativeAge(newestCheck)}` });
-    const refresh = new ExtraButtonComponent(head);
-    refresh.setIcon("refresh-cw");
-    refresh.setTooltip("Re-check remotes");
-    refresh.onClick(async () => {
-      await this.host.refreshRemoteChecks();
-      this.render(this.renderGen);
-    });
-    for (const remote of remotes) {
-      const active = this.panelScope.kind === "remote" && this.panelScope.name === remote.name;
+
+    if (this.host.runHistoryEnabled()) {
+      container.createDiv({ cls: "config-sync-side-divider" });
+      const active = this.panelScope.kind === "history";
       const item = container.createDiv({ cls: `config-sync-side-item${active ? " is-active" : ""}` });
-      item.createSpan({ cls: "config-sync-side-name", text: remote.name });
-      const icon = this.remoteIcon(this.host.remoteCheck(remote.name)?.check);
-      item.createSpan({ cls: `config-sync-state-icon ${icon.cls}`, text: icon.glyph, attr: { "aria-label": icon.tip } });
+      item.createSpan({ cls: "config-sync-side-name", text: "History" });
+      if (this.history.length > 0) item.createSpan({ cls: "config-sync-side-badge is-neutral", text: `${this.history.length}` });
       item.addEventListener("click", () => {
-        this.panelScope = { kind: "remote", name: remote.name };
+        this.panelScope = { kind: "history" };
+        this.historyOpen = null;
         this.switcherOpen = false;
         this.render(this.renderGen);
       });
@@ -468,6 +497,8 @@ export class SyncCenterView extends ItemView {
       if (c.down > 0) sw.createSpan({ cls: "config-sync-side-badge is-down", text: `↓${c.down}` });
       if (c.ok > 0) sw.createSpan({ cls: "config-sync-side-badge is-ok", text: `✓${c.ok}` });
       if (c.none > 0) sw.createSpan({ cls: "config-sync-side-badge is-none", text: `○${c.none}` });
+    } else if (this.panelScope.kind === "history") {
+      sw.createSpan({ text: "History" });
     } else {
       sw.createSpan({ text: this.panelScope.name });
       const icon = this.remoteIcon(this.host.remoteCheck(this.panelScope.name)?.check);
@@ -530,21 +561,51 @@ export class SyncCenterView extends ItemView {
     refresh.onClick(() => void this.reload());
   }
 
-  private setLastRun(title: string, tone: "local" | "transfer", results: GroupResult[] | null): void {
-    if (results !== null) this.lastRun = { title, tone, results, expanded: false };
+  // The run's report is recorded to history and surfaced in the inline strip; the strip
+  // expands by default when the outcome isn't clean (定稿 2026-07-18 — no more silent-looking
+  // green success hiding failures behind "details").
+  private setLastRun(kind: RunKind, remote: string | null, results: GroupResult[] | null): void {
+    if (results === null) return;
+    this.lastRun = { kind, remote, results, expanded: worstStatus(results) !== "ok" };
+    void this.host.appendRunHistory(kind, remote, results);
+  }
+
+  private runTitle(kind: RunKind, remote: string | null): string {
+    switch (kind) {
+      case "capture": return "Captured";
+      case "apply": return "Applied";
+      case "pull": return `Pulled from ${remote ?? ""}`;
+      case "push": return `Pushed to ${remote ?? ""}`;
+      case "adopt": return "Adopted";
+    }
+  }
+
+  private statusIcon(status: RunStatus): string {
+    return status === "error" ? "✗" : status === "warning" ? "⚠" : "✓";
   }
 
   private renderResultStrip(main: HTMLElement): void {
     const run = this.lastRun;
     if (run === null) return;
-    const strip = main.createDiv({ cls: `config-sync-strip${run.tone === "transfer" ? " is-transfer" : ""}` });
+    const status = worstStatus(run.results);
+    const cls = status === "error" ? " is-error" : status === "warning" ? " is-warn" : "";
+    const strip = main.createDiv({ cls: `config-sync-strip${cls}` });
     const head = strip.createDiv({ cls: "config-sync-strip-head" });
-    head.createSpan({ cls: "config-sync-strip-check", text: "✓" });
-    head.createSpan({ cls: "config-sync-strip-title", text: run.title });
+    head.createSpan({ cls: "config-sync-strip-check", text: this.statusIcon(status) });
+    const issues = run.results.filter((r) => r.status !== "ok").length;
+    const title = this.runTitle(run.kind, run.remote) + (issues > 0 ? ` with ${issues} issue${issues === 1 ? "" : "s"}` : "");
+    head.createSpan({ cls: "config-sync-strip-title", text: title });
     renderReportPills(head, run.results);
     const toggle = head.createSpan({ cls: "config-sync-strip-toggle", text: run.expanded ? "details ▾" : "details ▸" });
     toggle.addEventListener("click", () => {
       run.expanded = !run.expanded;
+      this.render(this.renderGen);
+    });
+    const open = head.createSpan({ cls: "config-sync-strip-toggle", text: "open in history →" });
+    open.addEventListener("click", () => {
+      this.panelScope = { kind: "history" };
+      this.historyOpen = 0; // the run just recorded is newest
+      this.switcherOpen = false;
       this.render(this.renderGen);
     });
     const close = head.createSpan({ cls: "config-sync-strip-close", text: "✕" });
@@ -560,8 +621,100 @@ export class SyncCenterView extends ItemView {
     }
   }
 
+  // ── Run history browser ─────────────────────────────────────────────────────────────────
+  private actionCell(rec: RunRecord): { glyph: string; dir: "in" | "out"; label: string } {
+    const out = rec.kind === "capture" || rec.kind === "push";
+    const base = rec.kind.charAt(0).toUpperCase() + rec.kind.slice(1);
+    const label = rec.remote !== null ? `${base} · ${rec.remote}` : base;
+    return { glyph: out ? "↑" : "↓", dir: out ? "out" : "in", label };
+  }
+
+  private renderHistoryMode(main: HTMLElement): void {
+    const open = this.historyOpen !== null ? this.history[this.historyOpen] : undefined;
+    if (open !== undefined) {
+      this.renderHistoryDetail(main, open);
+      return;
+    }
+    this.historyOpen = null;
+    this.renderHistoryTable(main);
+  }
+
+  private renderHistoryTable(main: HTMLElement): void {
+    const head = main.createDiv({ cls: "config-sync-hhead" });
+    head.createSpan({ cls: "config-sync-hhead-title", text: "History" });
+    head.createSpan({ cls: "config-sync-hhead-count", text: `${this.history.length} run${this.history.length === 1 ? "" : "s"}` });
+    if (this.history.length > 0) {
+      const clear = head.createSpan({ cls: "config-sync-hclear", text: "Clear all" });
+      clear.addEventListener("click", () => {
+        void (async () => {
+          await this.host.clearRunHistory();
+          this.history = [];
+          this.render(this.renderGen);
+        })();
+      });
+    }
+    if (this.history.length === 0) {
+      main.createDiv({ cls: "config-sync-hempty", text: "No runs recorded yet." });
+      return;
+    }
+    const legend = main.createDiv({ cls: "config-sync-hlegend" });
+    const leg = (cls: string, glyph: string, text: string): void => {
+      const s = legend.createSpan();
+      s.createSpan({ cls: `config-sync-hstat ${cls}`, text: glyph });
+      s.appendText(` ${text}`);
+    };
+    leg("is-ok", "✓", "Done"); leg("is-warn", "⚠", "Action needed"); leg("is-error", "✗", "Failed");
+
+    const table = main.createEl("table", { cls: "config-sync-htable" });
+    const thead = table.createEl("thead").createEl("tr");
+    for (const h of ["", "When", "Action", "Changed", "Issues", "Summary", ""]) thead.createEl("th", { text: h });
+    const body = table.createEl("tbody");
+    this.history.forEach((rec, i) => {
+      const tr = body.createEl("tr", { cls: "config-sync-hrow" });
+      const st = this.statusTip(rec.status);
+      tr.createEl("td", { cls: "config-sync-htd-st" }).createSpan({ cls: `config-sync-hstat ${STATUS_CLS[rec.status]}`, text: this.statusIcon(rec.status), attr: { "aria-label": st } });
+      tr.createEl("td", { cls: "config-sync-htd-when", text: formatRunTime(rec.at) });
+      const act = this.actionCell(rec);
+      const td = tr.createEl("td", { cls: "config-sync-htd-act" });
+      td.createSpan({ cls: `config-sync-hglyph is-${act.dir}`, text: act.glyph });
+      td.appendText(` ${act.label}`);
+      tr.createEl("td", { cls: "config-sync-htd-num", text: `${rec.changed}` });
+      const iss = tr.createEl("td", { cls: `config-sync-htd-num${rec.issues > 0 ? " is-issues" : ""}` });
+      iss.setText(rec.issues > 0 ? `${rec.issues}` : "—");
+      tr.createEl("td", { cls: "config-sync-htd-sum", text: rec.desc });
+      tr.createEl("td", { cls: "config-sync-htd-chev", text: "›" });
+      tr.addEventListener("click", () => {
+        this.historyOpen = i;
+        this.render(this.renderGen);
+      });
+    });
+  }
+
+  private renderHistoryDetail(main: HTMLElement, rec: RunRecord): void {
+    const back = main.createDiv({ cls: "config-sync-hback", text: "‹ Back to history" });
+    back.addEventListener("click", () => {
+      this.historyOpen = null;
+      this.render(this.renderGen);
+    });
+    const rhead = main.createDiv({ cls: "config-sync-hdhead" });
+    rhead.createSpan({ cls: `config-sync-hstat ${STATUS_CLS[rec.status]}`, text: this.statusIcon(rec.status) });
+    rhead.createSpan({ cls: "config-sync-hdtitle", text: this.actionCell(rec).label });
+    rhead.createSpan({ cls: "config-sync-hdwhen", text: formatRunTime(rec.at) });
+    main.createDiv({ cls: "config-sync-hddesc", text: rec.desc });
+    renderReportContent(main.createDiv(), rec.results, {
+      labelFor: (g) => this.host.displayName(g, findGroupByName(this.groups, g)?.label),
+      onReload: () => this.host.reloadApp(),
+    });
+  }
+
+  private statusTip(status: RunStatus): string {
+    return status === "error" ? "Failed — some items couldn't run" : status === "warning" ? "Action needed — finish some items manually" : "Done — all succeeded";
+  }
+
   private scopeKey(): string {
-    return this.panelScope.kind === "device" ? this.panelScope.cat : `remote:${this.panelScope.name}`;
+    if (this.panelScope.kind === "device") return this.panelScope.cat;
+    if (this.panelScope.kind === "history") return "history";
+    return `remote:${this.panelScope.name}`;
   }
 
   private searching(): boolean {
@@ -1234,7 +1387,7 @@ export class SyncCenterView extends ItemView {
             setStatus(current, phase ?? (verb === "Capturing" ? "capturing…" : "applying…"));
             if (fill !== null) fill.style.width = `${total === 0 ? 0 : Math.round((done / total) * 100)}%`;
           });
-          this.setLastRun(verb === "Capturing" ? "Captured" : "Applied", "local", results);
+          this.setLastRun(verb === "Capturing" ? "capture" : "apply", null, results);
         } finally {
           if (slowTimer !== null) window.clearTimeout(slowTimer);
           statusEl.remove();
@@ -1331,7 +1484,9 @@ export class SyncCenterView extends ItemView {
     // "N more items match" line: groups present in this device's list minus the entries that differ
     // (excludes the "" store-metadata pseudo-entry and any remote-only groups from the count).
     const changedNames = new Set(changed.map((e) => e.group));
-    const matchNames = this.groups.filter((g) => !changedNames.has(g.name)).map((g) => g.name);
+    const matchNames = this.groups
+      .filter((g) => !changedNames.has(g.name))
+      .map((g) => this.host.displayName(g.name, g.label));
     const matched = matchNames.length;
     if (entries.length === 0) {
       detail.createDiv({
@@ -1377,7 +1532,7 @@ export class SyncCenterView extends ItemView {
       pull.buttonEl.setAttribute("aria-label", "Pull would overwrite your newer local store");
     }
     pull.onClick(async () => {
-      this.setLastRun(`Pulled from ${remote.name}`, "transfer", await this.host.pullFrom(remote));
+      this.setLastRun("pull", remote.name, await this.host.pullFrom(remote));
       await this.reload();
     });
 
@@ -1391,7 +1546,7 @@ export class SyncCenterView extends ItemView {
       push.buttonEl.setAttribute("aria-label", "Push would overwrite the newer remote");
     }
     push.onClick(async () => {
-      this.setLastRun(`Pushed to ${remote.name}`, "transfer", await this.host.pushTo(remote));
+      this.setLastRun("push", remote.name, await this.host.pushTo(remote));
       await this.reload();
     });
   }

@@ -1,5 +1,6 @@
 import { Setting } from "obsidian";
-import { GroupResult, hasChanges } from "../core/types";
+import { GroupResult } from "../core/types";
+import { isChanged } from "../core/runHistory";
 import { CATEGORY_LABELS, ItemCategory, categoryForGroup } from "../core/catalog";
 
 export const REPORT_CATEGORY_ORDER: ItemCategory[] = ["obsidian", "core", "community", "custom"];
@@ -15,7 +16,7 @@ export interface ReportContentOpts {
 }
 
 export function changedOf(results: GroupResult[]): { changed: GroupResult[]; unchanged: GroupResult[] } {
-  const changed = results.filter((r) => r.status !== "ok" || hasChanges(r.changes) || r.stateNote !== undefined);
+  const changed = results.filter(isChanged);
   return { changed, unchanged: results.filter((r) => !changed.includes(r)) };
 }
 
