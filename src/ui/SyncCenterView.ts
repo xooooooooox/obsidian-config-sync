@@ -667,17 +667,17 @@ export class SyncCenterView extends ItemView {
 
     const table = main.createEl("table", { cls: "config-sync-htable" });
     const thead = table.createEl("thead").createEl("tr");
-    for (const h of ["", "Action", "When", "Changed", "Issues", "Summary", ""]) thead.createEl("th", { text: h });
+    for (const h of ["", "When", "Action", "Changed", "Issues", "Summary", ""]) thead.createEl("th", { text: h });
     const body = table.createEl("tbody");
     this.history.forEach((rec, i) => {
       const tr = body.createEl("tr", { cls: "config-sync-hrow" });
       const st = this.statusTip(rec.status);
       tr.createEl("td", { cls: "config-sync-htd-st" }).createSpan({ cls: `config-sync-hstat ${STATUS_CLS[rec.status]}`, text: this.statusIcon(rec.status), attr: { "aria-label": st } });
+      tr.createEl("td", { cls: "config-sync-htd-when", text: formatRunTime(rec.at) });
       const act = this.actionCell(rec);
       const td = tr.createEl("td", { cls: "config-sync-htd-act" });
       td.createSpan({ cls: `config-sync-hglyph is-${act.dir}`, text: act.glyph });
       td.appendText(` ${act.label}`);
-      tr.createEl("td", { cls: "config-sync-htd-when", text: formatRunTime(rec.at) });
       tr.createEl("td", { cls: "config-sync-htd-num", text: `${rec.changed}` });
       const iss = tr.createEl("td", { cls: `config-sync-htd-num${rec.issues > 0 ? " is-issues" : ""}` });
       iss.setText(rec.issues > 0 ? `${rec.issues}` : "—");
