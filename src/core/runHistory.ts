@@ -1,6 +1,7 @@
 import { GroupResult, hasChanges } from "./types";
 
-export type RunKind = "capture" | "apply" | "pull" | "push" | "adopt";
+// Sync operations move settings; removal actions (0.32.0) prune the tracked set / store.
+export type RunKind = "capture" | "apply" | "pull" | "push" | "adopt" | "stop-sync" | "delete-leftover";
 export type RunStatus = "ok" | "warning" | "error";
 
 export interface RunRecord {
@@ -11,7 +12,19 @@ export interface RunRecord {
   changed: number; // items that did something
   issues: number; // items with status warning or error
   desc: string; // one-line human summary
-  results: GroupResult[]; // full per-group detail for the detail view
+  results: GroupResult[]; // full per-group detail for the detail view (empty for removals)
+  removed?: string[]; // stop-sync: item labels removed
+  deletedFiles?: string[]; // stop-sync / delete-leftover: store paths deleted (no "store/" prefix)
+}
+
+const files = (n: number): string => `${n} store file${n === 1 ? "" : "s"}`;
+
+export function stopSyncDesc(label: string, deletedCount: number): string {
+  return deletedCount > 0 ? `Stopped syncing ${label} · deleted ${files(deletedCount)}` : `Stopped syncing ${label}`;
+}
+
+export function deleteLeftoverDesc(count: number): string {
+  return `Deleted ${count} leftover ${count === 1 ? "store file" : "store files"}`;
 }
 
 // An item "did something" if it isn't a clean no-op: a non-ok status, real file changes, or a
@@ -32,7 +45,8 @@ export function worstStatus(results: GroupResult[]): RunStatus {
   return worst;
 }
 
-const KIND_VERB: Record<RunKind, string> = {
+// Sync kinds only — runDesc is never called for removal records.
+const KIND_VERB: Record<"capture" | "apply" | "pull" | "push" | "adopt", string> = {
   capture: "captured",
   apply: "applied",
   pull: "pulled",
@@ -55,7 +69,7 @@ export function runDesc(kind: RunKind, _remote: string | null, results: GroupRes
   }
   const changed = countChanged(results);
   if (changed === 0) return "no changes";
-  return `${plural(changed, "item")} ${KIND_VERB[kind]}`;
+  return `${plural(changed, "item")} ${KIND_VERB[kind as keyof typeof KIND_VERB] ?? "changed"}`;
 }
 
 export function summarizeRun(at: number, kind: RunKind, remote: string | null, results: GroupResult[]): RunRecord {
