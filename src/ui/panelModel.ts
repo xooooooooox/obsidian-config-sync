@@ -8,10 +8,12 @@ export type Direction = "capture" | "apply";
 
 // Panel row filter. Buckets match core bucketCounts: capture = local-changed + not-captured,
 // apply = store-newer + differs, ok = in-sync.
-export type PanelFilter = "all" | "capture" | "apply" | "ok" | "none";
+// "leftover" is a scope-level view (store orphans), not a row-state filter — the view renders
+// a dedicated section for it and never routes rows through visibleUnderFilter with it.
+export type PanelFilter = "all" | "capture" | "apply" | "ok" | "none" | "leftover";
 
 export function visibleUnderFilter(state: GroupState, filter: PanelFilter): boolean {
-  if (filter === "all") return true;
+  if (filter === "all" || filter === "leftover") return true;
   if (state === "locked") return false;
   if (filter === "capture") return state === "local-changed" || state === "not-captured";
   if (filter === "apply") return state === "store-newer" || state === "differs";

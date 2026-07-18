@@ -75,6 +75,10 @@ export interface SyncCenterHost {
   loadRunHistory(): Promise<RunRecord[]>;
   appendRunHistory(kind: RunKind, remote: string | null, results: GroupResult[]): Promise<void>;
   clearRunHistory(): Promise<void>;
+  stopSyncing(groupName: string, deleteStore: boolean): Promise<void>;
+  storeFileCount(groupName: string): Promise<number>;
+  listLeftoverStoreFiles(): Promise<{ rel: string; name: string; path: string; size: number }[]>;
+  deleteLeftoverStoreFiles(rels: string[]): Promise<void>;
   // Bidirectional divergence for a switch-list group (exceptions masked); null when either
   // side is missing or unparseable.
   switchDivergenceFor(name: string): Promise<{ captureRemoves: string[]; applyDisables: string[] } | null>;
@@ -147,6 +151,7 @@ export class SyncCenterView extends ItemView {
   private lastRun: { kind: RunKind; remote: string | null; results: GroupResult[]; expanded: boolean } | null = null;
   private history: RunRecord[] = [];
   private historyOpen: number | null = null; // index of the run whose detail is shown; null = table
+  private leftovers: { rel: string; name: string; path: string; size: number }[] = [];
 
   constructor(leaf: WorkspaceLeaf, private host: SyncCenterHost) {
     super(leaf);
@@ -220,6 +225,8 @@ export class SyncCenterView extends ItemView {
     this.availability = new Map(Object.entries(availability));
     this.betaIds = this.host.betaIds();
     this.history = this.host.runHistoryEnabled() ? await this.host.loadRunHistory() : [];
+    this.leftovers = await this.host.listLeftoverStoreFiles();
+    if (this.filter === "leftover" && this.leftovers.length === 0) this.filter = "all"; // orphans all cleared
     // User state survives reloads; prune entries whose item vanished.
     const names = new Set(groups.map((g) => g.name));
     for (const n of [...this.selected]) if (!names.has(n)) this.selected.delete(n);
@@ -779,9 +786,20 @@ export class SyncCenterView extends ItemView {
           this.render(this.renderGen);
         });
       }
+      // Leftover store files: an amber pill in the All-items scope, only when there are any.
+      if (this.panelScope.kind === "device" && this.panelScope.cat === "all" && this.leftovers.length > 0) {
+        const pill = pillRow.createEl("button", { cls: `config-sync-fpill is-leftover${this.filter === "leftover" ? " is-active" : ""}` });
+        pill.createSpan({ cls: "config-sync-fpill-long", text: `Leftover ${this.leftovers.length}` });
+        pill.createSpan({ cls: "config-sync-fpill-short", text: `⌫ ${this.leftovers.length}` });
+        pill.addEventListener("click", () => {
+          this.filter = "leftover";
+          this.render(this.renderGen);
+        });
+      }
     };
     const renderSections = (): void => {
       sectionsHost.empty();
+      if (this.filter === "leftover") return; // the leftover view owns the whole main area
       this.renderSection(sectionsHost, "outdated", sections.outdated);
       this.renderSection(sectionsHost, "disabled", sections.disabled);
       this.renderSection(sectionsHost, "not-installed", sections["not-installed"]);
@@ -818,6 +836,10 @@ export class SyncCenterView extends ItemView {
 
   private renderListInto(listHost: HTMLElement, scoped: StatusRow[]): void {
     listHost.empty();
+    if (this.filter === "leftover") {
+      this.renderLeftoverSection(listHost);
+      return;
+    }
     const searching = this.search.trim() !== "";
     const visible = this.visibleRows(scoped);
     if (searching) {
@@ -1029,6 +1051,11 @@ export class SyncCenterView extends ItemView {
     const detail = card.createDiv({ cls: "config-sync-report-files" });
     detail.hidden = !this.expandedItems.has(group.name);
     this.renderItemDetail(detail, r);
+    // Stop syncing sits inline with the action segment when there is one; otherwise it gets
+    // its own footer so every removable item exposes it.
+    if (this.canStopSyncing(group.name) && detail.querySelector(".config-sync-segrow") === null) {
+      this.renderStopSyncing(detail.createDiv({ cls: "config-sync-stopsync-foot" }), r);
+    }
     row.addEventListener("click", () => {
       if (this.expandedItems.has(group.name)) this.expandedItems.delete(group.name);
       else this.expandedItems.add(group.name);
@@ -1201,6 +1228,65 @@ export class SyncCenterView extends ItemView {
     });
   }
 
+  // Structural groups (the self plugin, the on/off switch lists) are not "items" a user would
+  // stop syncing — everything else can be removed from the tracked set.
+  private canStopSyncing(name: string): boolean {
+    return name !== SELF_GROUP_NAME && !SWITCH_LIST_GROUPS.has(name);
+  }
+
+  private renderStopSyncing(container: HTMLElement, r: StatusRow): void {
+    const btn = container.createSpan({ cls: "config-sync-stopsync" });
+    const svg = btn.createSvg("svg", { attr: { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": "2", "stroke-linecap": "round" } });
+    svg.createSvg("circle", { attr: { cx: "12", cy: "12", r: "9" } });
+    svg.createSvg("path", { attr: { d: "M6 6l12 12" } });
+    btn.createSpan({ text: "Stop syncing" });
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      void this.openStopSyncing(r);
+    });
+  }
+
+  private formatBytes(n: number): string {
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+    return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  private async deleteLeftovers(rels: string[]): Promise<void> {
+    await this.host.deleteLeftoverStoreFiles(rels);
+    await this.reload();
+  }
+
+  private renderLeftoverSection(host: HTMLElement): void {
+    const fold = host.createDiv({ cls: "config-sync-section is-leftover is-open" });
+    const head = fold.createDiv({ cls: "config-sync-section-head" });
+    head.createSpan({ cls: "config-sync-section-title", text: "Leftover in the store" });
+    head.createSpan({ cls: "config-sync-pill is-neutral", text: `${this.leftovers.length}` });
+    const all = head.createSpan({ cls: "config-sync-hclear", text: "Delete all" });
+    all.addEventListener("click", () => void this.deleteLeftovers(this.leftovers.map((l) => l.rel)));
+    fold.createDiv({ cls: "config-sync-section-note", text: "Settings Config Sync saved for items you no longer sync. Safe to delete." });
+    const card = fold.createDiv({ cls: "config-sync-card" });
+    for (const lf of this.leftovers) {
+      const row = card.createDiv({ cls: "config-sync-oflow" });
+      const info = row.createDiv({ cls: "config-sync-ofinfo" });
+      info.createDiv({ cls: "config-sync-ofname", text: lf.name });
+      info.createDiv({ cls: "config-sync-ofpath", text: lf.path });
+      row.createSpan({ cls: "config-sync-ofsize", text: this.formatBytes(lf.size) });
+      const del = row.createSpan({ cls: "config-sync-ofdel", text: "Delete" });
+      del.addEventListener("click", () => void this.deleteLeftovers([lf.rel]));
+    }
+  }
+
+  private async openStopSyncing(r: StatusRow): Promise<void> {
+    const label = this.host.displayName(r.group.name, r.group.label);
+    const count = await this.host.storeFileCount(r.group.name);
+    new StopSyncingModal(this.app, label, count, async (deleteStore) => {
+      await this.host.stopSyncing(r.group.name, deleteStore);
+      this.selected.delete(r.group.name);
+      await this.reload();
+    }).open();
+  }
+
   private renderPolicySeg(detail: HTMLElement, r: StatusRow, a: Availability, installOnly: boolean): void {
     // Install-only rows have no settings payload: "Stage only" would apply nothing at all,
     // so the ladder keeps just the install actions. Capture direction offers only the enable
@@ -1212,7 +1298,8 @@ export class SyncCenterView extends ItemView {
     if (options.length === 0) return;
     const name = r.group.name;
     detail.createDiv({ cls: "config-sync-seg-label", text: capturing ? "On capture" : "On apply" });
-    const seg = detail.createDiv({ cls: "config-sync-seg" });
+    const segrow = detail.createDiv({ cls: "config-sync-segrow" });
+    const seg = segrow.createDiv({ cls: "config-sync-seg" });
     const current = this.policy.get(name) ?? defaultPolicy(a);
     for (const opt of options) {
       const b = seg.createEl("button", {
@@ -1226,6 +1313,7 @@ export class SyncCenterView extends ItemView {
         this.render(this.renderGen);
       });
     }
+    if (this.canStopSyncing(name)) this.renderStopSyncing(segrow, r);
   }
 
   // Staging, not execution: a segment checks the row in that direction; clicking the
@@ -1554,6 +1642,47 @@ export class SyncCenterView extends ItemView {
 
 // Confirmation for the divergence shortcut: pre-checked list of this device's extra ids;
 // confirming adds the checked ones to the device-local exceptions.
+// Confirm removing an item from sync, offering to also delete its saved copy in the store.
+class StopSyncingModal extends Modal {
+  private deleteStore: boolean;
+
+  constructor(app: App, private label: string, private storeFiles: number, private onConfirm: (deleteStore: boolean) => Promise<void>) {
+    super(app);
+    this.deleteStore = storeFiles > 0; // default: clean removal, no leftover
+  }
+
+  onOpen(): void {
+    this.titleEl.setText(`Stop syncing ${this.label}?`);
+    this.contentEl.createDiv({
+      cls: "config-sync-expand-note",
+      text: "Config Sync will forget this item on all your devices. Nothing installed is touched.",
+    });
+    if (this.storeFiles > 0) {
+      const row = this.contentEl.createDiv({ cls: "config-sync-exclude-row" });
+      const cb = row.createEl("input", { type: "checkbox" });
+      cb.checked = this.deleteStore;
+      cb.addEventListener("change", () => (this.deleteStore = cb.checked));
+      const t = row.createSpan();
+      t.createSpan({ text: `Also delete its settings saved in the store (${this.storeFiles} file${this.storeFiles === 1 ? "" : "s"})` });
+      t.createDiv({ cls: "config-sync-expdesc", text: "Recommended — otherwise they stay in the store, unused. You can re-add the item later either way." });
+    }
+    const bar = this.contentEl.createDiv({ cls: "config-sync-modal-buttons" });
+    new ButtonComponent(bar).setButtonText("Cancel").onClick(() => this.close());
+    new ButtonComponent(bar)
+      .setButtonText("Stop syncing")
+      .setWarning()
+      .onClick(() => {
+        const del = this.deleteStore;
+        this.close();
+        void this.onConfirm(del);
+      });
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+  }
+}
+
 class ExcludeExtrasModal extends Modal {
   private checks = new Map<string, boolean>();
 
