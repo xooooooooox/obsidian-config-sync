@@ -30,7 +30,7 @@ import {
 import { renderDiffPanel } from "./diffView";
 import { SWITCH_LIST_GROUPS, switchListSortedView } from "../core/switchList";
 import { renderReportContent, renderReportPills } from "./reportContent";
-import { RunRecord, RunKind, RunStatus, worstStatus, formatRunTime } from "../core/runHistory";
+import { RunRecord, RunKind, RunStatus, worstStatus, formatRunTime, stopSyncDesc, deleteLeftoverDesc } from "../core/runHistory";
 
 // Sidebar scope order: Beta sits between Community and custom (batch 3 ③).
 const SCOPE_ORDER: (ItemCategory | "beta")[] = ["obsidian", "core", "community", "beta", "custom"];
@@ -75,10 +75,11 @@ export interface SyncCenterHost {
   loadRunHistory(): Promise<RunRecord[]>;
   appendRunHistory(kind: RunKind, remote: string | null, results: GroupResult[]): Promise<void>;
   clearRunHistory(): Promise<void>;
-  stopSyncing(groupName: string, deleteStore: boolean): Promise<void>;
+  stopSyncing(groupName: string, deleteStore: boolean): Promise<string[]>; // deleted store paths (display form)
   storeFileCount(groupName: string): Promise<number>;
   listLeftoverStoreFiles(): Promise<{ rel: string; name: string; path: string; size: number }[]>;
   deleteLeftoverStoreFiles(rels: string[]): Promise<void>;
+  appendActionHistory(entry: { kind: RunKind; desc: string; changed: number; removed?: string[]; deletedFiles?: string[] }): Promise<void>;
   // Bidirectional divergence for a switch-list group (exceptions masked); null when either
   // side is missing or unparseable.
   switchDivergenceFor(name: string): Promise<{ captureRemoves: string[]; applyDisables: string[] } | null>;
@@ -584,6 +585,7 @@ export class SyncCenterView extends ItemView {
       case "pull": return `Pulled from ${remote ?? ""}`;
       case "push": return `Pushed to ${remote ?? ""}`;
       case "adopt": return "Adopted";
+      default: return ""; // removal kinds never use the inline run strip
     }
   }
 
@@ -629,7 +631,9 @@ export class SyncCenterView extends ItemView {
   }
 
   // ── Run history browser ─────────────────────────────────────────────────────────────────
-  private actionCell(rec: RunRecord): { glyph: string; dir: "in" | "out"; label: string } {
+  private actionCell(rec: RunRecord): { glyph: string; dir: "in" | "out" | "remove"; label: string } {
+    if (rec.kind === "stop-sync") return { glyph: "⊘", dir: "remove", label: "Stop syncing" };
+    if (rec.kind === "delete-leftover") return { glyph: "⌫", dir: "remove", label: "Delete leftover" };
     const out = rec.kind === "capture" || rec.kind === "push";
     const base = rec.kind.charAt(0).toUpperCase() + rec.kind.slice(1);
     const label = rec.remote !== null ? `${base} · ${rec.remote}` : base;
@@ -708,6 +712,17 @@ export class SyncCenterView extends ItemView {
     rhead.createSpan({ cls: "config-sync-hdtitle", text: this.actionCell(rec).label });
     rhead.createSpan({ cls: "config-sync-hdwhen", text: formatRunTime(rec.at) });
     main.createDiv({ cls: "config-sync-hddesc", text: rec.desc });
+    if (rec.kind === "stop-sync" || rec.kind === "delete-leftover") {
+      // Removals carry no per-group report — list what was removed / deleted instead.
+      const section = (title: string, rows: string[], mono: boolean): void => {
+        if (rows.length === 0) return;
+        main.createDiv({ cls: "config-sync-sect", text: title });
+        for (const row of rows) main.createDiv({ cls: mono ? "config-sync-hd-affpath" : "config-sync-hd-affname", text: row });
+      };
+      section("Removed", rec.removed ?? [], false);
+      section("Deleted from store", rec.deletedFiles ?? [], true);
+      return;
+    }
     renderReportContent(main.createDiv(), rec.results, {
       labelFor: (g) => this.host.displayName(g, findGroupByName(this.groups, g)?.label),
       onReload: () => this.host.reloadApp(),
@@ -1253,7 +1268,14 @@ export class SyncCenterView extends ItemView {
   }
 
   private async deleteLeftovers(rels: string[]): Promise<void> {
+    const paths = this.leftovers.filter((l) => rels.includes(l.rel)).map((l) => l.path);
     await this.host.deleteLeftoverStoreFiles(rels);
+    await this.host.appendActionHistory({
+      kind: "delete-leftover",
+      desc: deleteLeftoverDesc(rels.length),
+      changed: rels.length,
+      deletedFiles: paths,
+    });
     await this.reload();
   }
 
@@ -1281,7 +1303,14 @@ export class SyncCenterView extends ItemView {
     const label = this.host.displayName(r.group.name, r.group.label);
     const count = await this.host.storeFileCount(r.group.name);
     new StopSyncingModal(this.app, label, count, async (deleteStore) => {
-      await this.host.stopSyncing(r.group.name, deleteStore);
+      const deleted = await this.host.stopSyncing(r.group.name, deleteStore);
+      await this.host.appendActionHistory({
+        kind: "stop-sync",
+        desc: stopSyncDesc(label, deleted.length),
+        changed: 1,
+        removed: [label],
+        deletedFiles: deleted.length > 0 ? deleted : undefined,
+      });
       this.selected.delete(r.group.name);
       await this.reload();
     }).open();

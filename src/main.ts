@@ -435,6 +435,7 @@ export default class ConfigSyncPlugin extends Plugin {
       storeFileCount: (groupName) => this.storeFileCount(groupName),
       listLeftoverStoreFiles: () => this.listLeftoverStoreFiles(),
       deleteLeftoverStoreFiles: (rels) => this.deleteLeftoverStoreFiles(rels),
+      appendActionHistory: (entry) => this.appendActionHistory(entry),
       switchDivergenceFor: async (name) => {
         if (!SWITCH_LIST_GROUPS.has(name)) return null;
         const group = findGroupByName(this.settings.groups, name);
@@ -712,6 +713,25 @@ export default class ConfigSyncPlugin extends Plugin {
     await this.writeRunHistory([]);
   }
 
+  // Removal/cleanup actions (Stop syncing, delete leftover) — no GroupResults, always "ok".
+  async appendActionHistory(entry: { kind: RunKind; desc: string; changed: number; removed?: string[]; deletedFiles?: string[] }): Promise<void> {
+    if (!this.settings.runHistory.enabled) return;
+    const record: RunRecord = {
+      at: Date.now(),
+      kind: entry.kind,
+      remote: null,
+      status: "ok",
+      changed: entry.changed,
+      issues: 0,
+      desc: entry.desc,
+      results: [],
+      removed: entry.removed,
+      deletedFiles: entry.deletedFiles,
+    };
+    const { maxCount, maxDays } = this.settings.runHistory;
+    await this.writeRunHistory(pruneHistory([record, ...(await this.loadRunHistory())], maxCount, maxDays, Date.now()));
+  }
+
   private async writeRunHistory(records: RunRecord[]): Promise<void> {
     const path = this.runHistoryPath();
     const parent = path.slice(0, path.lastIndexOf("/"));
@@ -858,17 +878,27 @@ export default class ConfigSyncPlugin extends Plugin {
     return `${ctx.rootPath}/store/${groupStorePath(group.path)}`;
   }
 
-  async stopSyncing(groupName: string, deleteStore: boolean): Promise<void> {
+  // Returns the store paths it deleted (display form, no "store/" prefix) so the caller can
+  // record them in run history; empty when deleteStore is false or there was no store data.
+  async stopSyncing(groupName: string, deleteStore: boolean): Promise<string[]> {
     const group = this.settings.groups.find((g) => g.name === groupName);
+    let deleted: string[] = [];
     if (deleteStore && group !== undefined) {
       const ctx = await this.coreContext();
       const abs = this.groupStoreAbs(ctx, group);
       if (await ctx.io.exists(abs)) {
-        if (group.type === "dir") await ctx.io.rmdir(abs, true);
-        else await ctx.io.remove(abs);
+        const rel = `store/${groupStorePath(group.path)}`;
+        if (group.type === "dir") {
+          deleted = (await listFilesRecursive(ctx.io, abs)).filter((f) => !isJunkPath(f)).map((f) => f.slice(ctx.rootPath.length + 1).slice("store/".length));
+          await ctx.io.rmdir(abs, true);
+        } else {
+          deleted = [rel.slice("store/".length)];
+          await ctx.io.remove(abs);
+        }
       }
     }
     await this.writeGroupsFile(this.settings.groups.filter((g) => g.name !== groupName));
+    return deleted;
   }
 
   async storeFileCount(groupName: string): Promise<number> {

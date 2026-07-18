@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { GroupResult } from "../src/core/types";
-import { worstStatus, countChanged, runDesc, summarizeRun, formatRunTime, pruneHistory, RunRecord } from "../src/core/runHistory";
+import { worstStatus, countChanged, runDesc, summarizeRun, formatRunTime, pruneHistory, RunRecord, stopSyncDesc, deleteLeftoverDesc } from "../src/core/runHistory";
 
 const noChange = { added: [], updated: [], deleted: [] };
 const res = (over: Partial<GroupResult>): GroupResult => ({
@@ -61,6 +61,18 @@ describe("summarizeRun", () => {
     expect(rec).toMatchObject({ at: 1000, kind: "apply", remote: null, status: "warning", changed: 1, issues: 1 });
     expect(rec.desc).toContain("not in the community catalog");
     expect(rec.results).toHaveLength(2);
+  });
+});
+
+describe("removal descriptions", () => {
+  it("stopSyncDesc mentions deleted files only when some were deleted", () => {
+    expect(stopSyncDesc("Templater", 0)).toBe("Stopped syncing Templater");
+    expect(stopSyncDesc("Templater", 1)).toBe("Stopped syncing Templater · deleted 1 store file");
+    expect(stopSyncDesc("Templater", 3)).toBe("Stopped syncing Templater · deleted 3 store files");
+  });
+  it("deleteLeftoverDesc pluralizes", () => {
+    expect(deleteLeftoverDesc(1)).toBe("Deleted 1 leftover store file");
+    expect(deleteLeftoverDesc(2)).toBe("Deleted 2 leftover store files");
   });
 });
 
