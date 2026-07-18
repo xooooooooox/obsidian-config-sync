@@ -640,6 +640,16 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 .config-sync-hdwhen { color: var(--text-faint); font-size: var(--font-ui-smaller); font-family: var(--font-monospace); }
 .config-sync-hddesc { color: var(--text-muted); margin: var(--size-4-1) 0 var(--size-4-3); }
 
+/* ── Post-adopt guidance banner ──────────────────────────────────────────── */
+.config-sync-guide { display: flex; gap: var(--size-4-3); border: 1px solid rgba(var(--interactive-accent-rgb), 0.45); background: rgba(var(--interactive-accent-rgb), 0.08); border-radius: 10px; padding: 12px 14px; margin-bottom: var(--size-4-3); }
+.config-sync-guide-ic { font-size: 18px; color: var(--interactive-accent); flex: none; }
+.config-sync-guide-body { flex: 1; min-width: 0; }
+.config-sync-guide-title { font-weight: var(--font-bold); }
+.config-sync-guide-sub { color: var(--text-muted); font-size: var(--font-ui-smaller); margin-top: 2px; }
+.config-sync-guide-caution { color: var(--color-orange); font-size: var(--font-ui-smaller); margin-top: 8px; padding: 7px 9px; border-radius: 7px; background: rgba(var(--color-orange-rgb), 0.1); border: 1px solid rgba(var(--color-orange-rgb), 0.35); }
+.config-sync-guide-acts { display: flex; gap: var(--size-4-2); margin-top: 10px; }
+.config-sync-guide-x { color: var(--text-faint); flex: none; cursor: pointer; }
+
 /* ── Stop syncing + store leftover ───────────────────────────────────────── */
 .config-sync-segrow { display: flex; align-items: center; gap: var(--size-4-2); }
 .config-sync-stopsync-foot { display: flex; margin-top: var(--size-4-2); }

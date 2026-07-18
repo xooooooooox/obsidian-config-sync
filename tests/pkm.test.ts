@@ -4,6 +4,7 @@ import {
   IOTO_FALLBACK_ROOT,
   PkmProbe,
   defaultRootForMode,
+  discoverStoreRoot,
   resolveEffectiveMode,
   resolveRootPath,
 } from "../src/core/pkm";
@@ -55,17 +56,36 @@ describe("defaultRootForMode", () => {
   });
 });
 
+describe("discoverStoreRoot", () => {
+  it("returns the first candidate that has a store, else null", async () => {
+    const has = async (root: string): Promise<boolean> => root === "0-Extra/config-sync";
+    expect(await discoverStoreRoot(["config-sync", "0-Extra/config-sync"], has)).toBe("0-Extra/config-sync");
+    expect(await discoverStoreRoot(["config-sync", "x/config-sync"], has)).toBeNull();
+  });
+});
+
 describe("resolveRootPath", () => {
-  it("a custom rootPath always wins", async () => {
+  it("a custom rootPath always wins (no discovery)", async () => {
     const { plugins, p } = probe();
     plugins.enabled.add("ioto-update");
     expect(await resolveRootPath("my/own", "auto", p)).toBe("my/own");
   });
-  it("empty rootPath follows the effective mode default", async () => {
+  it("empty rootPath follows the effective mode default when no store exists yet", async () => {
     const { io, plugins, p } = probe();
     plugins.enabled.add("ioto-update");
     io.seed({ ".obs/plugins/ioto-settings/data.json": '{"extraFolder":"0-Extra"}' });
     expect(await resolveRootPath("", "auto", p)).toBe("0-Extra/config-sync");
     expect(await resolveRootPath("   ", "default", p)).toBe(DEFAULT_ROOT);
+  });
+  it("discovers the real store even when auto-detection points elsewhere (F3)", async () => {
+    // auto → default (ioto-update not enabled) → would be config-sync, but the store is at 0-Extra
+    const { io, p } = probe();
+    io.seed({ "0-Extra/config-sync/store.lock.json": "{}" });
+    expect(await resolveRootPath("", "auto", p)).toBe(IOTO_FALLBACK_ROOT);
+  });
+  it("prefers the mode default when a store sits there", async () => {
+    const { io, p } = probe();
+    io.seed({ "config-sync/store.lock.json": "{}", "0-Extra/config-sync/store.lock.json": "{}" });
+    expect(await resolveRootPath("", "default", p)).toBe(DEFAULT_ROOT);
   });
 });
