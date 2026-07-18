@@ -637,6 +637,27 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 .config-sync-hdwhen { color: var(--text-faint); font-size: var(--font-ui-smaller); font-family: var(--font-monospace); }
 .config-sync-hddesc { color: var(--text-muted); margin: var(--size-4-1) 0 var(--size-4-3); }
 
+/* ── Stop syncing + store leftover ───────────────────────────────────────── */
+.config-sync-segrow { display: flex; align-items: center; gap: var(--size-4-2); }
+.config-sync-stopsync-foot { display: flex; margin-top: var(--size-4-2); }
+.config-sync-stopsync {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 5px;
+  color: var(--color-red); font-size: var(--font-ui-smaller); cursor: pointer;
+  padding: 3px 10px; border: 1px solid rgba(var(--color-red-rgb), 0.4); border-radius: 6px;
+}
+.config-sync-stopsync svg { width: 14px; height: 14px; }
+.config-sync-fpill.is-leftover { color: var(--color-orange); border-color: rgba(var(--color-orange-rgb), 0.5); }
+.config-sync-fpill.is-leftover.is-active { background: var(--color-orange); border-color: var(--color-orange); color: var(--background-primary); }
+.config-sync-section.is-leftover { border-color: rgba(var(--color-orange-rgb), 0.45); }
+.config-sync-section.is-leftover .config-sync-section-title { color: var(--color-orange); }
+.config-sync-oflow { display: flex; align-items: center; gap: var(--size-4-3); padding: var(--size-4-2) 0; border-bottom: 1px solid var(--background-modifier-border); }
+.config-sync-oflow:last-child { border-bottom: none; }
+.config-sync-ofinfo { min-width: 0; flex: 1; }
+.config-sync-ofname { font-weight: var(--font-semibold); }
+.config-sync-ofpath { font-family: var(--font-monospace); color: var(--text-faint); font-size: var(--font-ui-smaller); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.config-sync-ofsize { color: var(--text-faint); font-size: var(--font-ui-smaller); white-space: nowrap; }
+.config-sync-ofdel { color: var(--color-red); font-size: var(--font-ui-smaller); cursor: pointer; white-space: nowrap; }
+
 .config-sync-side-item { display: flex; align-items: center; gap: 5px; padding: 6px 9px; border-radius: 8px; border: 1px solid transparent; cursor: pointer; font-size: var(--font-ui-small); }
 
 .config-sync-side-item.is-active { background: rgba(var(--interactive-accent-rgb), 0.14); border-color: rgba(var(--interactive-accent-rgb), 0.4); color: var(--text-normal); }

@@ -25,7 +25,8 @@ import { RunRecord, RunKind, summarizeRun, pruneHistory } from "./core/runHistor
 import { BratIndex, parseBratRepoList, resolveBratIndex } from "./core/bratIndex";
 import { type CatalogSection, displayLabelForGroup, ensureSelfPresets, findGroupByName, groupForItem, listBetaSections, listCoreSections, listDiscovered, listOptionSections, listPluginSections, SELF_GROUP_NAME, setCorePluginIds } from "./core/catalog";
 import { Availability, availabilityForGroup } from "./core/availability";
-import { listFilesRecursive } from "./core/io";
+import { listFilesRecursive, isJunkPath } from "./core/io";
+import { leftoverStoreRels } from "./core/leftover";
 import { ManifestValidationError, migrateLegacyManifest, parseStoreLock, validateSyncManifest } from "./core/manifest";
 import { groupRealPath, groupStorePath } from "./core/pathing";
 import { applySwitchList, captureSwitchList, parseSwitchList, SWITCH_LIST_GROUPS, switchDivergence, SwitchList } from "./core/switchList";
@@ -430,6 +431,10 @@ export default class ConfigSyncPlugin extends Plugin {
       loadRunHistory: () => this.loadRunHistory(),
       appendRunHistory: (kind, remote, results) => this.appendRunHistory(kind, remote, results),
       clearRunHistory: () => this.clearRunHistory(),
+      stopSyncing: (groupName, deleteStore) => this.stopSyncing(groupName, deleteStore),
+      storeFileCount: (groupName) => this.storeFileCount(groupName),
+      listLeftoverStoreFiles: () => this.listLeftoverStoreFiles(),
+      deleteLeftoverStoreFiles: (rels) => this.deleteLeftoverStoreFiles(rels),
       switchDivergenceFor: async (name) => {
         if (!SWITCH_LIST_GROUPS.has(name)) return null;
         const group = findGroupByName(this.settings.groups, name);
@@ -846,6 +851,55 @@ export default class ConfigSyncPlugin extends Plugin {
 
   async writeGroupsFile(groups: SyncGroup[]): Promise<void> {
     await writeGroups(await this.coreContext(), groups);
+  }
+
+  // ── Stop syncing + store leftover cleanup ───────────────────────────────────────────────
+  private groupStoreAbs(ctx: CoreContext, group: SyncGroup): string {
+    return `${ctx.rootPath}/store/${groupStorePath(group.path)}`;
+  }
+
+  async stopSyncing(groupName: string, deleteStore: boolean): Promise<void> {
+    const group = this.settings.groups.find((g) => g.name === groupName);
+    if (deleteStore && group !== undefined) {
+      const ctx = await this.coreContext();
+      const abs = this.groupStoreAbs(ctx, group);
+      if (await ctx.io.exists(abs)) {
+        if (group.type === "dir") await ctx.io.rmdir(abs, true);
+        else await ctx.io.remove(abs);
+      }
+    }
+    await this.writeGroupsFile(this.settings.groups.filter((g) => g.name !== groupName));
+  }
+
+  async storeFileCount(groupName: string): Promise<number> {
+    const group = this.settings.groups.find((g) => g.name === groupName);
+    if (group === undefined) return 0;
+    const ctx = await this.coreContext();
+    const abs = this.groupStoreAbs(ctx, group);
+    if (!(await ctx.io.exists(abs))) return 0;
+    if (group.type === "dir") return (await listFilesRecursive(ctx.io, abs)).filter((f) => !isJunkPath(f)).length;
+    return 1;
+  }
+
+  async listLeftoverStoreFiles(): Promise<{ rel: string; name: string; path: string; size: number }[]> {
+    const ctx = await this.coreContext();
+    if (!(await ctx.io.exists(ctx.rootPath))) return [];
+    const files = (await listFilesRecursive(ctx.io, ctx.rootPath)).filter((f) => !isJunkPath(f));
+    const rels = files.map((f) => f.slice(ctx.rootPath.length + 1));
+    const out: { rel: string; name: string; path: string; size: number }[] = [];
+    for (const lf of leftoverStoreRels(rels, this.settings.groups)) {
+      const st = await this.app.vault.adapter.stat(`${ctx.rootPath}/${lf.rel}`);
+      out.push({ ...lf, size: st?.size ?? 0 });
+    }
+    return out;
+  }
+
+  async deleteLeftoverStoreFiles(rels: string[]): Promise<void> {
+    const ctx = await this.coreContext();
+    for (const rel of rels) {
+      const abs = `${ctx.rootPath}/${rel}`;
+      if (await ctx.io.exists(abs)) await ctx.io.remove(abs);
+    }
   }
 
   async resolvedRootPath(): Promise<string> {
