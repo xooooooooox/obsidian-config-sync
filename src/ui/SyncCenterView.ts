@@ -53,6 +53,17 @@ const sessionStaging = {
   seeded: false,
 };
 
+interface LastRun {
+  kind: RunKind;
+  remote: string | null;
+  results: GroupResult[];
+  expanded: boolean;
+}
+
+// The last-run strip and the post-adopt guidance also live at session level, so a view reload
+// (e.g. right after Adopt, or a mobile tab switch) doesn't drop the result strip / guidance.
+const sessionRun: { last: LastRun | null; adoptGuidance: boolean } = { last: null, adoptGuidance: false };
+
 export interface SyncCenterHost {
   computeStatuses(): Promise<{ groups: SyncGroup[]; statuses: GroupStatus[]; availability: Record<string, Availability> }>;
   resolvedPath(group: SyncGroup): string;
@@ -149,7 +160,12 @@ export class SyncCenterView extends ItemView {
   private compact = false;
   private switcherOpen = false;
   private running = false;
-  private lastRun: { kind: RunKind; remote: string | null; results: GroupResult[]; expanded: boolean } | null = null;
+  private get lastRun(): LastRun | null {
+    return sessionRun.last;
+  }
+  private set lastRun(v: LastRun | null) {
+    sessionRun.last = v;
+  }
   private history: RunRecord[] = [];
   private historyOpen: number | null = null; // index of the run whose detail is shown; null = table
   private leftovers: { rel: string; name: string; path: string; size: number }[] = [];
@@ -226,7 +242,10 @@ export class SyncCenterView extends ItemView {
     this.availability = new Map(Object.entries(availability));
     this.betaIds = this.host.betaIds();
     this.history = this.host.runHistoryEnabled() ? await this.host.loadRunHistory() : [];
-    this.leftovers = await this.host.listLeftoverStoreFiles();
+    // Leftover means "store files with no matching group"; a device with no groups (fresh /
+    // pre-adopt) has no baseline, so the whole store would look leftover — dangerous with
+    // "Delete all". Only compute it once the manifest exists.
+    this.leftovers = this.groups.length > 0 ? await this.host.listLeftoverStoreFiles() : [];
     if (this.filter === "leftover" && this.leftovers.length === 0) this.filter = "all"; // orphans all cleared
     // User state survives reloads; prune entries whose item vanished.
     const names = new Set(groups.map((g) => g.name));
@@ -374,7 +393,10 @@ export class SyncCenterView extends ItemView {
         adopt.disabled = true;
         adopt.setText("Adopting…");
         void this.host.adoptConfiguration().then((results) => {
-          if (results !== null) this.setLastRun("adopt", null, results);
+          if (results !== null) {
+            this.setLastRun("adopt", null, results);
+            sessionRun.adoptGuidance = true; // one-time "now apply the store" guidance
+          }
           this.notifyExternalChange(); // recompute: groups now exist → banner disappears
         });
       });
@@ -593,6 +615,45 @@ export class SyncCenterView extends ItemView {
     return status === "error" ? "✗" : status === "warning" ? "⚠" : "✓";
   }
 
+  // One-time guidance after Adopt: the manifest is set up but nothing is applied yet. Point the
+  // user at Apply (store → device) and warn against Capture on a fresh device.
+  private renderAdoptGuidance(main: HTMLElement): void {
+    if (!sessionRun.adoptGuidance) return;
+    const toApply = this.presentedCounts(this.mainRows()).down;
+    if (toApply === 0) {
+      sessionRun.adoptGuidance = false; // device reached sync — nothing left to guide
+      return;
+    }
+    const g = main.createDiv({ cls: "config-sync-guide" });
+    g.createSpan({ cls: "config-sync-guide-ic", text: "⬇" });
+    const body = g.createDiv({ cls: "config-sync-guide-body" });
+    body.createDiv({ cls: "config-sync-guide-title", text: "Configuration adopted — now set up this device" });
+    body.createDiv({
+      cls: "config-sync-guide-sub",
+      text: `Config Sync learned your ${this.groups.length} synced items. Apply the store to bring your settings and plugins onto this device.`,
+    });
+    body.createDiv({
+      cls: "config-sync-guide-caution",
+      text: "⚠ This device is new — its blank defaults differ from the store. Choose Apply store (store → device), not Capture, or you'll overwrite the store with this device's empty defaults. A few items differ both ways (e.g. app settings) — pick a direction per item; on a new device that's usually Apply store, except keep your own for Config Sync's settings.",
+    });
+    const acts = body.createDiv({ cls: "config-sync-guide-acts" });
+    const review = acts.createEl("button", { cls: "mod-cta", text: "Review what to apply" });
+    review.addEventListener("click", () => {
+      this.filter = "apply";
+      this.render(this.renderGen);
+    });
+    const not = acts.createEl("button", { text: "Not now" });
+    not.addEventListener("click", () => {
+      sessionRun.adoptGuidance = false;
+      this.render(this.renderGen);
+    });
+    const x = g.createSpan({ cls: "config-sync-guide-x", text: "✕" });
+    x.addEventListener("click", () => {
+      sessionRun.adoptGuidance = false;
+      this.render(this.renderGen);
+    });
+  }
+
   private renderResultStrip(main: HTMLElement): void {
     const run = this.lastRun;
     if (run === null) return;
@@ -752,6 +813,7 @@ export class SyncCenterView extends ItemView {
 
   private renderItemMode(main: HTMLElement): void {
     this.renderResultStrip(main);
+    this.renderAdoptGuidance(main);
     const scoped = this.scopedRows();
     const mainRows = scoped.filter((r) => this.sectionOf(r.group.name) === "main");
     const sections: Record<Exclude<SectionKind, "main">, StatusRow[]> = { outdated: [], disabled: [], "not-installed": [] };
