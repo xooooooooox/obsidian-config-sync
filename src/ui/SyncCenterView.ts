@@ -74,6 +74,7 @@ export interface SelfSyncInfo {
   capturedAt: string | null;
   contentChanged: boolean; // config-sync's own data.json differs beyond the list → pane shows a diff
   versionRefresh: { local: string; store: string } | null; // content in-sync but plugin version ahead
+  flagsRefresh: number | null; // installed plugins whose desktopOnly flag isn't recorded yet → nudge a capture
 }
 
 export interface SyncCenterHost {
@@ -592,7 +593,17 @@ export class SyncCenterView extends ItemView {
       });
       return;
     }
-    if (!info.contentChanged) return;
+    if (!info.contentChanged) {
+      // No data.json diff to show; fill the capture block with the flags nudge if one is pending.
+      if (dir === "capture" && info.flagsRefresh !== null) {
+        const n = info.flagsRefresh;
+        block.createDiv({
+          cls: "config-sync-self-block-s",
+          text: `${n} desktop-only plugin${n === 1 ? "" : "s"} not recorded in the store yet — capturing lets your phones skip installs that can't run there.`,
+        });
+      }
+      return;
+    }
     block.createDiv({ cls: "config-sync-self-block-s", text: "Config Sync's own settings changed:" });
     const holder = block.createDiv({ cls: "config-sync-inline-diff" });
     void this.host.diffPair(SELF_GROUP_NAME, "", dir).then((pair) => {
