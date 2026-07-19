@@ -74,6 +74,7 @@ export interface SelfSyncInfo {
   capturedAt: string | null;
   contentChanged: boolean; // config-sync's own data.json differs beyond the list → pane shows a diff
   versionRefresh: { local: string; store: string } | null; // content in-sync but plugin version ahead
+  flagsRefresh: number | null; // installed plugins whose desktopOnly flag isn't recorded yet → nudge a capture
 }
 
 export interface SyncCenterHost {
@@ -589,6 +590,14 @@ export class SyncCenterView extends ItemView {
       block.createDiv({
         cls: "config-sync-self-block-s",
         text: `Config Sync updated — this device ${info.versionRefresh.local} · store ${info.versionRefresh.store}. Capturing refreshes the store's recorded version.`,
+      });
+      return;
+    }
+    if (dir === "capture" && info.flagsRefresh !== null) {
+      const n = info.flagsRefresh;
+      block.createDiv({
+        cls: "config-sync-self-block-s",
+        text: `${n} desktop-only plugin${n === 1 ? "" : "s"} not recorded in the store yet — capturing lets your phones skip installs that can't run there.`,
       });
       return;
     }

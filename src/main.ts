@@ -24,7 +24,7 @@ import { retry, HttpStatusError, TimeoutError, isRetryableError } from "./core/a
 import { RunRecord, RunKind, summarizeRun, pruneHistory } from "./core/runHistory";
 import { BratIndex, parseBratRepoList, resolveBratIndex } from "./core/bratIndex";
 import { type CatalogSection, displayLabelForGroup, ensureSelfPresets, findGroupByName, groupForItem, listBetaSections, listCoreSections, listDiscovered, listOptionSections, listPluginSections, SELF_GROUP_NAME, setCorePluginIds } from "./core/catalog";
-import { Availability, availabilityForGroup } from "./core/availability";
+import { Availability, availabilityForGroup, desktopOnlyDrift } from "./core/availability";
 import { listFilesRecursive, isJunkPath, FileIO } from "./core/io";
 import { leftoverStoreRels, storeSelfCopyGroups } from "./core/leftover";
 import { ManifestValidationError, migrateLegacyManifest, parseStoreLock, validateSyncManifest } from "./core/manifest";
@@ -380,9 +380,9 @@ export default class ConfigSyncPlugin extends Plugin {
             capturedAt = null; // an unreadable lock must not break the pane
           }
         }
-        if (local.length === 0) return { state: "coldstart", delta, itemCount: storeGroups.length, capturedAt, contentChanged: false, versionRefresh: null };
+        if (local.length === 0) return { state: "coldstart", delta, itemCount: storeGroups.length, capturedAt, contentChanged: false, versionRefresh: null, flagsRefresh: null };
         const selfGroup = local.find((g) => g.name === SELF_GROUP_NAME);
-        if (selfGroup === undefined) return { state: "insync", delta, itemCount: local.length, capturedAt, contentChanged: false, versionRefresh: null };
+        if (selfGroup === undefined) return { state: "insync", delta, itemCount: local.length, capturedAt, contentChanged: false, versionRefresh: null, flagsRefresh: null };
         const [st] = await statusForGroups(ctx, [selfGroup]);
         let lock: StoreLock | null = null;
         try {
@@ -391,10 +391,11 @@ export default class ConfigSyncPlugin extends Plugin {
           lock = null;
         }
         const av = availabilityForGroup(selfGroup, this.pluginHost(), lock);
-        const decided = selfPaneState({ isColdStart: false, groupState: st?.state, drift: av.drift });
+        const flagsRefreshCount = desktopOnlyDrift(this.settings.groups, this.pluginHost(), lock);
+        const decided = selfPaneState({ isColdStart: false, groupState: st?.state, drift: av.drift, flagsDrift: flagsRefreshCount > 0 });
         const versionRefresh =
           decided.versionRefresh && av.localVersion !== null && av.storeVersion !== null ? { local: av.localVersion, store: av.storeVersion } : null;
-        return { state: decided.state, delta, itemCount: local.length, capturedAt, contentChanged: decided.contentChanged, versionRefresh };
+        return { state: decided.state, delta, itemCount: local.length, capturedAt, contentChanged: decided.contentChanged, versionRefresh, flagsRefresh: flagsRefreshCount > 0 ? flagsRefreshCount : null };
       },
       resolvedPath: (g) => g.path.replace("{configDir}", this.app.vault.configDir),
       displayName: (g) => this.displayName(g, this.lastGroups?.find((x) => x.name === g)?.label),
