@@ -30,16 +30,22 @@ describe("availabilityForGroup", () => {
     expect(ni.kind).toBe("not-installed");
     expect(ni.drift).toBeNull();
   });
-  it("carries desktopOnly from the lock (plugin groups only)", () => {
+  it("reads desktopOnly from the manifest when installed, lock when not (plugin groups only)", () => {
     const p = new FakePlugins();
     p.installed.set("demo", "2.2.1");
-    const on = availabilityForGroup(pluginGroup, p, lock({ "plugin-demo": { sourcePluginVersion: "2.2.1", desktopOnly: true } }));
-    expect(on.desktopOnly).toBe(true);
-    const off = availabilityForGroup(pluginGroup, p, lock({ "plugin-demo": { sourcePluginVersion: "2.2.1" } }));
-    expect(off.desktopOnly).toBe(false);
+    p.desktopOnlyIds.add("demo"); // manifest says desktop-only
+    // installed → manifest wins even when the lock lacks the flag
+    expect(availabilityForGroup(pluginGroup, p, lock({ "plugin-demo": { sourcePluginVersion: "2.2.1" } })).desktopOnly).toBe(true);
+    // installed → manifest wins even over a stale lock flag
+    p.desktopOnlyIds.delete("demo");
+    expect(availabilityForGroup(pluginGroup, p, lock({ "plugin-demo": { sourcePluginVersion: "2.2.1", desktopOnly: true } })).desktopOnly).toBe(false);
+    // not installed (the mobile case) → fall back to the lock
+    p.installed.delete("demo");
+    expect(availabilityForGroup(pluginGroup, p, lock({ "plugin-demo": { sourcePluginVersion: "2.2.1", desktopOnly: true } })).desktopOnly).toBe(true);
+    // app-anchored → always false
     p.appVersion = "1.8.7";
     p.coreEnabled.add("daily-notes");
-    expect(availabilityForGroup(coreGroup, p, null).desktopOnly).toBe(false); // app-anchored
+    expect(availabilityForGroup(coreGroup, p, null).desktopOnly).toBe(false);
   });
   it("anchors core and obsidian groups to the app version", () => {
     const p = new FakePlugins();

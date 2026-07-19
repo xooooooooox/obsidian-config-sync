@@ -52,7 +52,7 @@ export function availabilityForGroup(group: SyncGroup, plugins: PluginHost, lock
       localVersion,
       storeVersion,
       anchor: "plugin",
-      desktopOnly: lock?.groups[group.name]?.desktopOnly === true,
+      desktopOnly: localVersion !== null ? plugins.isDesktopOnly(pluginId) : lock?.groups[group.name]?.desktopOnly === true,
     };
   }
   const localVersion = plugins.getAppVersion();
