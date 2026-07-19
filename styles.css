@@ -784,6 +784,8 @@ body.is-mobile .config-sync-fpill { flex: none; white-space: nowrap; }
 body.is-mobile .config-sync-fpill .config-sync-fpill-long { display: none; }
 body.is-mobile .config-sync-fpill .config-sync-fpill-short { display: inline; }
 
+body.is-mobile .config-sync-segrow { flex-wrap: wrap; }
+
 body.is-mobile .config-sync-fpill,
 body.is-mobile .config-sync-seg-btn,
 body.is-mobile .config-sync-side-item,
@@ -828,11 +830,25 @@ body.is-mobile .config-sync-section-head input[type="checkbox"]:indeterminate::a
 .config-sync-strip.is-warn .config-sync-strip-check { color: var(--color-orange); }
 .config-sync-strip.is-error .config-sync-strip-check { color: var(--color-red); }
 .config-sync-strip-head { display: flex; align-items: center; gap: 8px; }
+.config-sync-strip-meta { display: contents; }
 .config-sync-strip-check { color: var(--color-green); }
 .config-sync-strip-title { font-weight: 600; }
 .config-sync-strip-toggle { color: var(--interactive-accent); cursor: pointer; font-size: var(--font-ui-smaller); }
 .config-sync-strip-close { margin-left: auto; color: var(--text-faint); cursor: pointer; }
 .config-sync-strip-body { margin-top: 6px; }
+body.is-mobile .config-sync-strip-head { flex-wrap: wrap; }
+body.is-mobile .config-sync-strip-close { order: 2; }
+body.is-mobile .config-sync-strip-meta {
+  order: 3;
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+  flex-wrap: wrap;
+  padding-left: var(--size-4-5);
+  margin-top: var(--size-2-3);
+}
+body.is-mobile .config-sync-strip-meta .config-sync-report-pills { margin-left: 0; }
 
 /* 0.20.0 availability sections */
 .config-sync-section { border: 1px dashed var(--background-modifier-border); border-radius: 8px; padding: 8px var(--size-4-3); margin-top: 8px; }

@@ -829,13 +829,14 @@ export class SyncCenterView extends ItemView {
     const issues = run.results.filter((r) => r.status !== "ok").length;
     const title = this.runTitle(run.kind, run.remote) + (issues > 0 ? ` with ${issues} issue${issues === 1 ? "" : "s"}` : "");
     head.createSpan({ cls: "config-sync-strip-title", text: title });
-    renderReportPills(head, run.results);
-    const toggle = head.createSpan({ cls: "config-sync-strip-toggle", text: run.expanded ? "details ▾" : "details ▸" });
+    const meta = head.createDiv({ cls: "config-sync-strip-meta" });
+    renderReportPills(meta, run.results);
+    const toggle = meta.createSpan({ cls: "config-sync-strip-toggle", text: run.expanded ? "details ▾" : "details ▸" });
     toggle.addEventListener("click", () => {
       run.expanded = !run.expanded;
       this.render(this.renderGen);
     });
-    const open = head.createSpan({ cls: "config-sync-strip-toggle", text: "open in history →" });
+    const open = meta.createSpan({ cls: "config-sync-strip-toggle", text: "open in history →" });
     open.addEventListener("click", () => {
       this.panelScope = { kind: "history" };
       this.historyOpen = 0; // the run just recorded is newest
