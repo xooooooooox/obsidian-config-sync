@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { availabilityForGroup, compareVersions } from "../src/core/availability";
+import { availabilityForGroup, compareVersions, desktopOnlyDrift } from "../src/core/availability";
 import { FakePlugins } from "./memfs";
 import { StoreLock, SyncGroup } from "../src/core/types";
 
@@ -57,5 +57,30 @@ describe("availabilityForGroup", () => {
     expect(availabilityForGroup(coreGroup, p, null).kind).toBe("disabled");
     const obs = availabilityForGroup(obsGroup, p, lock({ hotkeys: { sourceAppVersion: "1.8.7" } }));
     expect(obs).toEqual({ kind: "enabled", drift: null, localVersion: "1.8.7", storeVersion: "1.8.7", anchor: "app", desktopOnly: false });
+  });
+});
+
+describe("desktopOnlyDrift", () => {
+  const g = (name: string, path: string): SyncGroup => ({ name, path, type: "file", devices: "all" });
+  it("counts only installed plugins whose lock flag disagrees with the manifest and that have an entry", () => {
+    const p = new FakePlugins();
+    p.installed.set("demo", "1.0.0");
+    p.desktopOnlyIds.add("demo"); // manifest: desktop-only
+    const groups = [g("plugin-demo", "{configDir}/plugins/demo/data.json")];
+    // entry exists, flag missing → drift
+    expect(desktopOnlyDrift(groups, p, lock({ "plugin-demo": { sourcePluginVersion: "1.0.0" } }))).toBe(1);
+    // entry already flagged → no drift
+    expect(desktopOnlyDrift(groups, p, lock({ "plugin-demo": { sourcePluginVersion: "1.0.0", desktopOnly: true } }))).toBe(0);
+    // no lock entry → not counted (normal capture handles it; avoids a stuck nudge)
+    expect(desktopOnlyDrift(groups, p, lock({}))).toBe(0);
+    // not installed here → not counted
+    p.installed.delete("demo");
+    expect(desktopOnlyDrift(groups, p, lock({ "plugin-demo": { sourcePluginVersion: "1.0.0" } }))).toBe(0);
+  });
+  it("does not count a normal (non-desktop-only) installed plugin with no flag", () => {
+    const p = new FakePlugins();
+    p.installed.set("demo", "1.0.0"); // desktopOnlyIds empty → not desktop-only
+    const groups = [g("plugin-demo", "{configDir}/plugins/demo/data.json")];
+    expect(desktopOnlyDrift(groups, p, lock({ "plugin-demo": { sourcePluginVersion: "1.0.0" } }))).toBe(0);
   });
 });

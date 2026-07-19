@@ -61,3 +61,20 @@ export function availabilityForGroup(group: SyncGroup, plugins: PluginHost, lock
   const kind: AvailabilityKind = isCore && !plugins.isCorePluginEnabled(group.name) ? "disabled" : "enabled";
   return { kind, drift: driftFor(localVersion, storeVersion), localVersion, storeVersion, anchor: "app", desktopOnly: false };
 }
+
+// Counts installed plugin groups whose local desktop-only status differs from what the lock
+// records AND that a capture can fix (an entry already exists). Used to nudge a capture so the
+// flag propagates to devices that can't read the manifest (mobile). Excludes entryless groups so
+// the nudge can't get stuck on a never-captured plugin (the normal capture path handles those).
+export function desktopOnlyDrift(groups: SyncGroup[], plugins: PluginHost, lock: StoreLock | null): number {
+  let n = 0;
+  for (const g of groups) {
+    const id = pluginIdForGroup(g);
+    if (id === null) continue; // app-anchored
+    if (plugins.getInstalledPluginVersion(id) === null) continue; // not installed here
+    const entry = lock?.groups[g.name];
+    if (entry?.sourcePluginVersion === undefined) continue; // no entry to refresh
+    if (plugins.isDesktopOnly(id) !== (entry.desktopOnly === true)) n++;
+  }
+  return n;
+}
