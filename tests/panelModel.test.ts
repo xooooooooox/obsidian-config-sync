@@ -169,8 +169,13 @@ describe("sectionForItem", () => {
     expect(sectionForItem(a, true)).toBe("desktop-only");
     expect(sectionForItem(a, false)).toBe("not-installed"); // desktop: normal
   });
-  it("a desktop-only plugin that IS installed is not bucketed to desktop-only", () => {
-    expect(sectionForItem(avail({ kind: "disabled", drift: "behind", desktopOnly: true }), true)).toBe("disabled");
+  it("buckets an installed-but-disabled desktop-only plugin into desktop-only on mobile only", () => {
+    const a = avail({ kind: "disabled", drift: "behind", desktopOnly: true });
+    expect(sectionForItem(a, true)).toBe("desktop-only"); // can't run on a phone → informational
+    expect(sectionForItem(a, false)).toBe("disabled"); // desktop: normal disabled row
+  });
+  it("leaves an enabled desktop-only plugin in main on mobile (a running plugin isn't 'nothing to do')", () => {
+    expect(sectionForItem(avail({ kind: "enabled", desktopOnly: true }), true)).toBe("main");
   });
   it("desktop-only rows are never stageable", () => {
     expect(stageableRow("store-newer", "desktop-only")).toBe(false);

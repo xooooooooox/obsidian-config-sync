@@ -105,10 +105,12 @@ export const SECTION_NOTES: Record<Exclude<SectionKind, "main">, string> = {
   "desktop-only": "In your config but can't run on this device — nothing to do here.",
 };
 
-// isMobile: a desktop-only plugin (author-declared) that isn't installed on a phone can't run
-// there, so it's surfaced informationally rather than offered for a failing install.
+// isMobile: a desktop-only plugin (author-declared) can't run on a phone — whether it's
+// not-installed or installed-but-disabled (Obsidian refuses to enable it there). Either way it's
+// surfaced informationally rather than offered for a failing install/enable. A (practically
+// impossible) enabled one stays in main so a running plugin isn't mislabelled "nothing to do".
 export function sectionForItem(a: Availability, isMobile: boolean): SectionKind {
-  if (isMobile && a.desktopOnly && a.kind === "not-installed") return "desktop-only";
+  if (isMobile && a.desktopOnly && a.kind !== "enabled") return "desktop-only";
   if (a.kind === "not-installed") return "not-installed";
   if (a.kind === "disabled") return "disabled";
   if (a.anchor === "plugin" && a.drift === "behind") return "outdated";
