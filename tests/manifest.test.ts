@@ -192,6 +192,21 @@ describe("parseStoreLock widened schema", () => {
       'store.lock.json group "a" must have a string sourcePluginVersion or sourceAppVersion'
     );
   });
+  it("carries desktopOnly through the parse; omits it when absent or false", () => {
+    const lock = parseStoreLock(
+      JSON.stringify({
+        capturedAt: "2026-01-01T00:00:00Z",
+        groups: {
+          a: { sourcePluginVersion: "1.0.0", desktopOnly: true },
+          b: { sourcePluginVersion: "2.0.0", desktopOnly: false },
+          c: { sourcePluginVersion: "3.0.0" },
+        },
+      })
+    );
+    expect(lock.groups["a"]).toEqual({ sourcePluginVersion: "1.0.0", desktopOnly: true });
+    expect(lock.groups["b"]).toEqual({ sourcePluginVersion: "2.0.0" });
+    expect(lock.groups["c"]).toEqual({ sourcePluginVersion: "3.0.0" });
+  });
 });
 
 describe("group name validation allows uppercase", () => {
