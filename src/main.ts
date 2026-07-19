@@ -25,7 +25,7 @@ import { RunRecord, RunKind, summarizeRun, pruneHistory } from "./core/runHistor
 import { BratIndex, parseBratRepoList, resolveBratIndex } from "./core/bratIndex";
 import { type CatalogSection, displayLabelForGroup, ensureSelfPresets, findGroupByName, groupForItem, listBetaSections, listCoreSections, listDiscovered, listOptionSections, listPluginSections, SELF_GROUP_NAME, setCorePluginIds } from "./core/catalog";
 import { Availability, availabilityForGroup } from "./core/availability";
-import { listFilesRecursive, isJunkPath } from "./core/io";
+import { listFilesRecursive, isJunkPath, FileIO } from "./core/io";
 import { leftoverStoreRels } from "./core/leftover";
 import { ManifestValidationError, migrateLegacyManifest, parseStoreLock, validateSyncManifest } from "./core/manifest";
 import { groupRealPath, groupStorePath } from "./core/pathing";
@@ -800,6 +800,32 @@ export default class ConfigSyncPlugin extends Plugin {
     return displayLabelForGroup(group, this.pluginHost(), storedLabel);
   }
 
+  // The plugin's own data.json must not be written through the raw adapter: Obsidian watches
+  // the plugins folder and reloads Config Sync on an external write, wiping the Sync Center
+  // mid-adopt/apply. Routing it through saveData (an internal save) writes the same file with
+  // no reload. Everything else delegates to the vault adapter.
+  private configIO(): FileIO {
+    const a = this.app.vault.adapter;
+    const selfData = `${this.app.vault.configDir}/plugins/config-sync/data.json`;
+    return {
+      read: (p) => a.read(p),
+      write: async (p, data) => {
+        if (p === selfData) {
+          await this.saveData(JSON.parse(data));
+          return;
+        }
+        await a.write(p, data);
+      },
+      exists: (p) => a.exists(p),
+      remove: (p) => a.remove(p),
+      rename: (p, np) => a.rename(p, np),
+      rmdir: (p, r) => a.rmdir(p, r),
+      mkdir: (p) => a.mkdir(p),
+      list: (p) => a.list(p),
+      stat: (p) => a.stat(p),
+    };
+  }
+
   private async coreContext(): Promise<CoreContext> {
     const rootPath = await resolveRootPath(this.settings.rootPath, this.settings.pkmMode, this.pkmProbe());
     if (rootPath === "" || rootPath.startsWith("/") || rootPath.split("/").includes("..")) {
@@ -807,7 +833,7 @@ export default class ConfigSyncPlugin extends Plugin {
     }
     this.lastResolvedRoot = rootPath;
     return {
-      io: this.app.vault.adapter,
+      io: this.configIO(),
       configDir: this.app.vault.configDir,
       rootPath,
       plugins: this.pluginHost(),

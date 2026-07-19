@@ -50,8 +50,12 @@ export function storeDir(ctx: CoreContext): string {
   return `${ctx.rootPath}/store`;
 }
 
+// The apply backup lives OUTSIDE the plugin's own folder: Obsidian (and the Hot Reload
+// plugin) watch {configDir}/plugins/config-sync/** and reload Config Sync on any write there,
+// which would wipe the Sync Center mid-apply (0.34.0). A top-level configDir folder isn't
+// watched and isn't surfaced by discovery (which only scans configDir's top-level files).
 export function backupDir(ctx: CoreContext): string {
-  return `${ctx.configDir}/plugins/config-sync/backup`;
+  return `${ctx.configDir}/config-sync-backup`;
 }
 
 export function pluginIdForGroup(group: SyncGroup): string | null {
@@ -604,8 +608,12 @@ async function applyGroup(ctx: CoreContext, group: SyncGroup, state: BackupState
     result.messages.push(`store has no data for this group (expected at ${store}) — capture it from the source vault first`);
     return result;
   }
-  const pluginWasEnabled = pluginId !== null && ctx.plugins.isPluginEnabled(pluginId);
-  if (pluginId !== null && pluginWasEnabled) {
+  // Disabling a plugin while we rewrite its data.json stops it clobbering the applied file,
+  // then we re-enable it to load fresh. NEVER do this for config-sync itself: disabling the
+  // running plugin mid-apply reloads it and wipes the Sync Center. The self group's data.json
+  // is applied in place; the plugin reconciles via loadSettings after the run.
+  const cycle = pluginId !== null && pluginId !== "config-sync" && ctx.plugins.isPluginEnabled(pluginId);
+  if (cycle) {
     await ctx.plugins.disablePlugin(pluginId);
   }
   try {
@@ -653,7 +661,7 @@ async function applyGroup(ctx: CoreContext, group: SyncGroup, state: BackupState
       }
     }
   } finally {
-    if (pluginId !== null && pluginWasEnabled) {
+    if (cycle) {
       await ctx.plugins.enablePlugin(pluginId);
     }
   }

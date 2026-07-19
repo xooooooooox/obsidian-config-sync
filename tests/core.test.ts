@@ -307,7 +307,7 @@ describe("apply", () => {
     expect(await io.read(".obs/snippets/one.css")).toBe("one-v2");
     expect(await io.exists(".obs/snippets/local-only.css")).toBe(false);
     expect(results[0]?.filesDeleted).toEqual([".obs/snippets/local-only.css"]);
-    const indexData = JSON.parse(await io.read(".obs/plugins/config-sync/backup/index.json")) as {
+    const indexData = JSON.parse(await io.read(".obs/config-sync-backup/index.json")) as {
       entries: Array<{ realPath: string }>;
     };
     const paths = indexData.entries.map((e) => e.realPath).sort();
@@ -330,7 +330,7 @@ describe("apply", () => {
       ".obs/plugins/demo/data.json": "not json",
     });
     await expect(apply(ctx, ["snippets", "plugin-demo"])).rejects.toThrow("not valid JSON");
-    const index = JSON.parse(await io.read(".obs/plugins/config-sync/backup/index.json")) as {
+    const index = JSON.parse(await io.read(".obs/config-sync-backup/index.json")) as {
       entries: Array<{ realPath: string }>;
     };
     expect(index.entries.length).toBeGreaterThan(0);
@@ -656,6 +656,25 @@ describe("self-update guard and switch-apply delta reporting", () => {
     expect(results[0]?.stateNote).toEqual({ kind: "warn", text: "\u26a0 update skipped" });
     expect((results[0]?.messages ?? []).join(" ")).toContain("Obsidian's plugin updater");
     expect(plugins.enabled.has("config-sync")).toBe(true); // never disabled
+  });
+
+  it("applying the self plugin's own settings never disables/reloads config-sync", async () => {
+    const SELF_MANIFEST = JSON.stringify({
+      version: 1,
+      groups: [{ name: "plugin-config-sync", path: "{configDir}/plugins/config-sync/data.json", type: "file", devices: "all" }],
+    });
+    const { io, plugins, ctx } = setup();
+    plugins.installed.set("config-sync", "0.33.0");
+    plugins.enabled.add("config-sync");
+    io.seed({ ".obs/plugins/config-sync/data.json": '{"old":1}', "cs/store/configdir/plugins/config-sync/data.json": '{"new":1}' });
+    await writeGroups(ctx, parseSyncManifest(SELF_MANIFEST).groups);
+    const results = await applyWithActions(ctx, [{ name: "plugin-config-sync", action: "none" }], async () => "9.9.9");
+    expect(results[0]?.status).not.toBe("error");
+    // Disabling config-sync mid-apply reloads the plugin and wipes the Sync Center — the self
+    // group applies its data.json in place (the plugin reconciles via loadSettings).
+    expect(plugins.log.filter((l) => l.includes("config-sync"))).toEqual([]);
+    expect(plugins.enabled.has("config-sync")).toBe(true);
+    expect(await io.read(".obs/plugins/config-sync/data.json")).toBe('{"new":1}');
   });
 
   it("switch-list apply names the plugins it turns on and off", async () => {
