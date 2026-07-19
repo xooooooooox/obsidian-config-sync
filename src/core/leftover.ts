@@ -7,6 +7,19 @@ export interface LeftoverFile {
   path: string; // rel without the leading "store/", shown in the row
 }
 
+// The sync list carried inside the store's own config-sync copy
+// (`store/configdir/plugins/config-sync/data.json`). Files a device has pulled but not yet
+// adopted are attributable to this list, so callers pass local ∪ store-list groups to
+// `leftoverStoreRels` — pulled-but-unadopted data is pending, never deletable "leftover".
+export function storeSelfCopyGroups(json: string): SyncGroup[] {
+  try {
+    const raw = JSON.parse(json) as { groups?: unknown };
+    return Array.isArray(raw.groups) ? (raw.groups as SyncGroup[]) : [];
+  } catch {
+    return [];
+  }
+}
+
 // A friendly name for an orphaned store file: the plugin id for a plugin path, otherwise the
 // store-relative path itself.
 function deriveName(storeInner: string): string {

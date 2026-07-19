@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CoreContext, capture, captureWithActions, loadManifest, groupsForDevice, apply, applyWithActions, revertLastApply, planImport, applyImport, ExternalStoreReader, pushExternal, ExternalStoreWriter, pluginIdForGroup, readGroups, writeGroups } from "../src/core/ConfigSyncCore";
+import { CoreContext, capture, captureWithActions, loadManifest, groupsForDevice, apply, applyWithActions, revertLastApply, planImport, applyImport, PendingPull, ExternalStoreReader, pushExternal, ExternalStoreWriter, pluginIdForGroup, readGroups, writeGroups } from "../src/core/ConfigSyncCore";
 import { parseSyncManifest } from "../src/core/manifest";
 import { SyncGroup } from "../src/core/types";
 import { isFieldEnvelope, parseFileEnvelope } from "../src/core/crypto";
@@ -804,7 +804,7 @@ describe("planImport / applyImport", () => {
     expect(results.some((r) => r.group === "snippets")).toBe(false); // untouched -> no result
   });
 
-  it("remote-only group and file land locally", async () => {
+  it("remote-only file lands in the store but its group is NOT imported into the sync list", async () => {
     const { ctx } = setup();
     const remote = {
       "store/configdir/plugins/config-sync/data.json": selfDataJson([HOTKEYS_GROUP]),
@@ -815,8 +815,8 @@ describe("planImport / applyImport", () => {
     expect(pending.plan.conflicts).toEqual([]);
     const results = await applyImport(ctx, pending, []);
 
-    expect(await ctx.io.read("cs/store/configdir/hotkeys.json")).toBe('{"a":1}');
-    expect((await readGroups(ctx)).map((g) => g.name)).toEqual(["hotkeys"]);
+    expect(await ctx.io.read("cs/store/configdir/hotkeys.json")).toBe('{"a":1}'); // store file written
+    expect(await readGroups(ctx)).toEqual([]); // sync list untouched — the group stays adoptable via the Config Sync pane
     const byGroup = Object.fromEntries(results.map((r) => [r.group, r.changes]));
     expect(byGroup["hotkeys"]).toEqual({ added: ["store/configdir/hotkeys.json"], updated: [], deleted: [] });
   });
@@ -893,7 +893,7 @@ describe("planImport / applyImport", () => {
     expect(results.find((r) => r.group === "hotkeys")).toBeUndefined(); // nothing written for this group
   });
 
-  it("a definition conflict resolved 'remote' replaces the local group definition", async () => {
+  it("a definition-level difference is detected by planImport but NOT applied by pull", async () => {
     const { ctx } = setup();
     const localHotkeys = { ...HOTKEYS_GROUP, devices: "desktop" as const };
     const remoteHotkeys = { ...HOTKEYS_GROUP, devices: "all" as const };
@@ -901,10 +901,12 @@ describe("planImport / applyImport", () => {
     const remote = { "store/configdir/plugins/config-sync/data.json": selfDataJson([remoteHotkeys]) };
 
     const pending = await planImport(ctx, fakeReader(remote));
+    // planImport still surfaces the difference (the Config Sync pane uses it), but pull no longer
+    // resolves sync-list conflicts — no file conflicts, so choices = []. Convergence is via adopt.
     expect(pending.plan.conflicts).toEqual([{ kind: "definition", name: "hotkeys", local: localHotkeys, remote: remoteHotkeys }]);
-    await applyImport(ctx, pending, ["remote"]);
+    await applyImport(ctx, pending, []);
 
-    expect(await readGroups(ctx)).toEqual([remoteHotkeys]);
+    expect(await readGroups(ctx)).toEqual([localHotkeys]); // local definition kept — pull did not touch the sync list
   });
 
   it("planImport writes nothing (read-only)", async () => {
@@ -1412,5 +1414,30 @@ describe("switch-list exceptions", () => {
       const statuses = await statusForGroups(ctx, groupsForDevice(manifest, "desktop"));
       expect(statuses[0]?.state).not.toBe("in-sync");
     });
+  });
+});
+
+describe("applyImport — pull is pure store transport", () => {
+  it("writes store files but never changes the local sync list", async () => {
+    const { io, ctx } = setup();
+    await seedGroups(ctx, MANIFEST);
+    const before = await readGroups(ctx);
+    const pending: PendingPull = {
+      plan: {
+        auto: {
+          addGroups: [{ name: "plugin-new", path: "{configDir}/plugins/new/data.json", type: "file", devices: "all" }],
+          writeFiles: [{ rel: "store/configdir/plugins/new/data.json", content: '{"a":1}', name: "plugin-new" }],
+          keptLocalGroups: [],
+          keptLocalFiles: [],
+          identical: [],
+        },
+        conflicts: [],
+      },
+      remoteGroups: [],
+      remoteLockRaw: null,
+    };
+    await applyImport(ctx, pending, []);
+    expect(await readGroups(ctx)).toEqual(before); // sync list untouched
+    expect(await io.exists("cs/store/configdir/plugins/new/data.json")).toBe(true); // store file written
   });
 });

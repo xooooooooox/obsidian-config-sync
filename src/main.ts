@@ -26,19 +26,20 @@ import { BratIndex, parseBratRepoList, resolveBratIndex } from "./core/bratIndex
 import { type CatalogSection, displayLabelForGroup, ensureSelfPresets, findGroupByName, groupForItem, listBetaSections, listCoreSections, listDiscovered, listOptionSections, listPluginSections, SELF_GROUP_NAME, setCorePluginIds } from "./core/catalog";
 import { Availability, availabilityForGroup } from "./core/availability";
 import { listFilesRecursive, isJunkPath, FileIO } from "./core/io";
-import { leftoverStoreRels } from "./core/leftover";
+import { leftoverStoreRels, storeSelfCopyGroups } from "./core/leftover";
 import { ManifestValidationError, migrateLegacyManifest, parseStoreLock, validateSyncManifest } from "./core/manifest";
 import { groupRealPath, groupStorePath } from "./core/pathing";
 import { applySwitchList, captureSwitchList, parseSwitchList, SWITCH_LIST_GROUPS, switchDivergence, SwitchList } from "./core/switchList";
 import { applyTransform, captureTransform, scanSensitive, SensitiveScan } from "./core/modes";
 import { PkmMode, PkmProbe, resolveEffectiveMode, resolveRootPath } from "./core/pkm";
 import { pluginRuntimeEnabled } from "./core/pluginState";
+import { syncListDelta } from "./core/syncListDelta";
 import { bucketCounts, checkRemote, diffRemote, GroupStatus, RemoteCheck, remoteLockAhead, statusForGroups } from "./core/status";
 import { GroupResult, Remote, RibbonButtons, StoreLock, SyncGroup } from "./core/types";
 import { presentedState } from "./ui/panelModel";
 import { ConflictModal } from "./ui/ConflictModal";
 import { ReportModal } from "./ui/ReportModal";
-import { SYNC_CENTER_VIEW_TYPE, SyncCenterHost, SyncCenterView } from "./ui/SyncCenterView";
+import { SYNC_CENTER_VIEW_TYPE, SelfSyncInfo, SyncCenterHost, SyncCenterView } from "./ui/SyncCenterView";
 import { ConfigSyncSettingTab } from "./ui/SettingTab";
 
 interface ConfigSyncSettings {
@@ -363,6 +364,30 @@ export default class ConfigSyncPlugin extends Plugin {
         for (const g of groups) availability[g.name] = availabilityForGroup(g, this.pluginHost(), lock);
         return { groups, statuses, availability };
       },
+      selfStatus: async (): Promise<SelfSyncInfo> => {
+        const ctx = await this.coreContext();
+        const local = this.settings.groups; // the full shared list; `devices` gates applicability, not membership
+        const selfCopy = `${ctx.rootPath}/store/configdir/plugins/config-sync/data.json`;
+        const storeGroups = (await ctx.io.exists(selfCopy)) ? storeSelfCopyGroups(await ctx.io.read(selfCopy)) : [];
+        const delta = syncListDelta(local, storeGroups);
+        let capturedAt: string | null = null;
+        const lockPath = `${ctx.rootPath}/store.lock.json`;
+        if (await ctx.io.exists(lockPath)) {
+          try {
+            capturedAt = parseStoreLock(await ctx.io.read(lockPath)).capturedAt;
+          } catch {
+            capturedAt = null; // an unreadable lock must not break the pane
+          }
+        }
+        if (local.length === 0) return { state: "coldstart", delta, itemCount: storeGroups.length, capturedAt };
+        const selfGroup = local.find((g) => g.name === SELF_GROUP_NAME);
+        if (selfGroup === undefined) return { state: "insync", delta, itemCount: local.length, capturedAt };
+        const [st] = await statusForGroups(ctx, [selfGroup]);
+        const s = st?.state;
+        const state: SelfSyncInfo["state"] =
+          s === "store-newer" ? "adopt" : s === "differs" ? "both" : s === "local-changed" || s === "not-captured" ? "capture" : "insync";
+        return { state, delta, itemCount: local.length, capturedAt };
+      },
       resolvedPath: (g) => g.path.replace("{configDir}", this.app.vault.configDir),
       displayName: (g) => this.displayName(g, this.lastGroups?.find((x) => x.name === g)?.label),
       bootstrapOffer: async () => {
@@ -535,13 +560,17 @@ export default class ConfigSyncPlugin extends Plugin {
         try {
           const ctx = await this.coreContext();
           const pending = await planImport(ctx, await this.createReader(remote));
-          if (pending.plan.conflicts.length > 0) {
+          // Pull resolves file conflicts only; sync-list (definition) conflicts are no longer
+          // applied by Pull, so they don't prompt — the list converges via adopt.
+          const fileConflicts = pending.plan.conflicts.filter((c) => c.kind === "file");
+          if (fileConflicts.length > 0) {
+            const modalPending = { ...pending, plan: { ...pending.plan, conflicts: fileConflicts } };
             // Conflicted pull: pause for git-style resolution. Nothing has been written
             // (planImport is read-only); Cancel keeps it that way — all-or-nothing.
             const choices = await new Promise<("local" | "remote")[] | null>((resolve) => {
               new ConflictModal(
                 this.app,
-                pending,
+                modalPending,
                 remote.name,
                 (name) => this.displayName(name),
                 (picked) => resolve(picked),
@@ -552,7 +581,7 @@ export default class ConfigSyncPlugin extends Plugin {
               new Notice("Pull cancelled — nothing was changed");
               return null;
             }
-            const results = await applyImport(ctx, pending, choices);
+            const results = await applyImport(ctx, modalPending, choices);
             await this.refreshLocalStatus();
             await this.refreshRemoteChecks();
             return results;
@@ -945,8 +974,13 @@ export default class ConfigSyncPlugin extends Plugin {
     if (!(await ctx.io.exists(ctx.rootPath))) return [];
     const files = (await listFilesRecursive(ctx.io, ctx.rootPath)).filter((f) => !isJunkPath(f));
     const rels = files.map((f) => f.slice(ctx.rootPath.length + 1));
+    // Files the store's own sync list defines but this device hasn't adopted yet are pending, not
+    // leftover — union the local list with the store self-copy's list so a pull can't leave
+    // just-arrived data looking like deletable junk.
+    const selfCopy = `${ctx.rootPath}/store/configdir/plugins/config-sync/data.json`;
+    const storeGroups = (await ctx.io.exists(selfCopy)) ? storeSelfCopyGroups(await ctx.io.read(selfCopy)) : [];
     const out: { rel: string; name: string; path: string; size: number }[] = [];
-    for (const lf of leftoverStoreRels(rels, this.settings.groups)) {
+    for (const lf of leftoverStoreRels(rels, [...this.settings.groups, ...storeGroups])) {
       const st = await this.app.vault.adapter.stat(`${ctx.rootPath}/${lf.rel}`);
       out.push({ ...lf, size: st?.size ?? 0 });
     }

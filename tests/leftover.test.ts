@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { SyncGroup } from "../src/core/types";
-import { leftoverStoreRels } from "../src/core/leftover";
+import { leftoverStoreRels, storeSelfCopyGroups } from "../src/core/leftover";
 
 const groups: SyncGroup[] = [
   { name: "plugin-demo", path: "{configDir}/plugins/demo/data.json", type: "file", devices: "all" },
@@ -30,5 +30,25 @@ describe("leftoverStoreRels", () => {
       { rel: "store/configdir/plugins/cm-editor-syntax-highlight-obsidian/data.json", name: "cm-editor-syntax-highlight-obsidian", path: "configdir/plugins/cm-editor-syntax-highlight-obsidian/data.json" },
       { rel: "store/configdir/graph.json", name: "configdir/graph.json", path: "configdir/graph.json" },
     ]);
+  });
+
+  it("store files defined by the store's own sync list are pending, not leftover", () => {
+    const localGroups: SyncGroup[] = [{ name: "plugin-a", path: "{configDir}/plugins/a/data.json", type: "file", devices: "all" }];
+    const storeListGroups: SyncGroup[] = [{ name: "plugin-z", path: "{configDir}/plugins/z/data.json", type: "file", devices: "all" }];
+    const rels = [
+      "store/configdir/plugins/a/data.json", // local list → not leftover
+      "store/configdir/plugins/z/data.json", // store list (pulled, not yet adopted) → pending, not leftover
+      "store/configdir/plugins/orphan/data.json", // neither → leftover
+    ];
+    const out = leftoverStoreRels(rels, [...localGroups, ...storeListGroups]);
+    expect(out.map((f) => f.name)).toEqual(["orphan"]);
+  });
+});
+
+describe("storeSelfCopyGroups", () => {
+  it("parses the groups array and tolerates malformed json", () => {
+    expect(storeSelfCopyGroups('{"groups":[{"name":"x","path":"p","type":"file","devices":"all"}]}').map((g) => g.name)).toEqual(["x"]);
+    expect(storeSelfCopyGroups("not json")).toEqual([]);
+    expect(storeSelfCopyGroups('{"noGroups":true}')).toEqual([]);
   });
 });
