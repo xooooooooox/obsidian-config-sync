@@ -659,7 +659,10 @@ export class SyncCenterView extends ItemView {
     if (run === null) return;
     const status = worstStatus(run.results);
     const cls = status === "error" ? " is-error" : status === "warning" ? " is-warn" : "";
-    const strip = main.createDiv({ cls: `config-sync-strip${cls}` });
+    // Sticky dock: an opaque backing pins the strip to the top of the scroll viewport so the
+    // outcome stays visible even when the user is scrolled to the bottom of a long list.
+    const dock = main.createDiv({ cls: "config-sync-strip-dock" });
+    const strip = dock.createDiv({ cls: `config-sync-strip${cls}` });
     const head = strip.createDiv({ cls: "config-sync-strip-head" });
     head.createSpan({ cls: "config-sync-strip-check", text: this.statusIcon(status) });
     const issues = run.results.filter((r) => r.status !== "ok").length;

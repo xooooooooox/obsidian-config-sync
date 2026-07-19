@@ -513,51 +513,60 @@ export async function applyWithActions(
   try {
     for (const item of items) {
       onProgress?.(done, items.length, item.name);
-      const group = requireGroup(manifest, item.name);
-      const phase = (p: string): void => onProgress?.(done, items.length, item.name, p);
-      const storeExists = await ctx.io.exists(`${storeDir(ctx)}/${groupStorePath(group.path)}`);
-      const targetVersion = lock?.groups[group.name]?.sourcePluginVersion ?? null;
-      const prelude = await runStateAction(ctx, group, item.action, installPlugin, storeExists, targetVersion, phase);
-      if (prelude.skipConfig) {
-        const r = emptyResult(item.name, false);
-        r.status = "warning";
-        if (prelude.note !== null) r.stateNote = prelude.note;
-        r.messages.push(...prelude.messages);
-        results.push(r);
-      } else {
-        // Install-only apply: a not-installed plugin with no settings in the store. The
-        // install action IS the payload — applyGroup would error on the missing store data.
-        // Action-only apply: a plugin with no settings in the store — the state action
-        // (install and/or enable) IS the payload; applyGroup would error on the missing data.
-        const actionOnly = item.action !== "none" && !storeExists;
-        if (!actionOnly) phase("writing settings…");
-        const r = actionOnly ? emptyResult(item.name, false) : await applyGroup(ctx, group, state);
-        if (prelude.note !== null) r.stateNote = prelude.note;
-        if (prelude.messages.length > 0) {
+      // Per-item isolation: one item that throws (unknown group, io failure, a plugin's
+      // disable/enable) becomes a single error result — the rest of the batch still runs.
+      try {
+        const group = requireGroup(manifest, item.name);
+        const phase = (p: string): void => onProgress?.(done, items.length, item.name, p);
+        const storeExists = await ctx.io.exists(`${storeDir(ctx)}/${groupStorePath(group.path)}`);
+        const targetVersion = lock?.groups[group.name]?.sourcePluginVersion ?? null;
+        const prelude = await runStateAction(ctx, group, item.action, installPlugin, storeExists, targetVersion, phase);
+        if (prelude.skipConfig) {
+          const r = emptyResult(item.name, false);
+          r.status = "warning";
+          if (prelude.note !== null) r.stateNote = prelude.note;
           r.messages.push(...prelude.messages);
-          if (r.status === "ok") r.status = "warning";
-        }
-        if (prelude.finish !== undefined) {
-          // Config is on disk — now it's safe to (re)enable: the plugin loads the applied settings.
-          phase("enabling…");
-          const fin = await prelude.finish();
-          if (fin.note !== null) r.stateNote = fin.note;
-          if (fin.messages.length > 0) {
-            r.messages.push(...fin.messages);
-            if (r.status === "ok" && fin.note?.kind === "warn") r.status = "warning";
+          results.push(r);
+        } else {
+          // Install-only apply: a not-installed plugin with no settings in the store. The
+          // install action IS the payload — applyGroup would error on the missing store data.
+          // Action-only apply: a plugin with no settings in the store — the state action
+          // (install and/or enable) IS the payload; applyGroup would error on the missing data.
+          const actionOnly = item.action !== "none" && !storeExists;
+          if (!actionOnly) phase("writing settings…");
+          const r = actionOnly ? emptyResult(item.name, false) : await applyGroup(ctx, group, state);
+          if (prelude.note !== null) r.stateNote = prelude.note;
+          if (prelude.messages.length > 0) {
+            r.messages.push(...prelude.messages);
+            if (r.status === "ok") r.status = "warning";
           }
-        }
-        // The action-only line must reflect reality — resolved AFTER finish so a failed
-        // install/enable never claims success.
-        if (actionOnly) {
-          const pid = pluginIdForGroup(group);
-          const isUpd = item.action === "update" || item.action === "update-enable";
-          if (item.action === "enable") {
-            if (pid !== null && ctx.plugins.isPluginEnabled(pid)) r.messages.push("no settings in the store — enabled the plugin only");
-          } else if (pid !== null && ctx.plugins.getInstalledPluginVersion(pid) !== null && r.stateNote?.kind !== "warn") {
-            r.messages.push(isUpd ? "no settings in the store — updated the plugin only" : "no settings in the store — installed the plugin only");
+          if (prelude.finish !== undefined) {
+            // Config is on disk — now it's safe to (re)enable: the plugin loads the applied settings.
+            phase("enabling…");
+            const fin = await prelude.finish();
+            if (fin.note !== null) r.stateNote = fin.note;
+            if (fin.messages.length > 0) {
+              r.messages.push(...fin.messages);
+              if (r.status === "ok" && fin.note?.kind === "warn") r.status = "warning";
+            }
           }
+          // The action-only line must reflect reality — resolved AFTER finish so a failed
+          // install/enable never claims success.
+          if (actionOnly) {
+            const pid = pluginIdForGroup(group);
+            const isUpd = item.action === "update" || item.action === "update-enable";
+            if (item.action === "enable") {
+              if (pid !== null && ctx.plugins.isPluginEnabled(pid)) r.messages.push("no settings in the store — enabled the plugin only");
+            } else if (pid !== null && ctx.plugins.getInstalledPluginVersion(pid) !== null && r.stateNote?.kind !== "warn") {
+              r.messages.push(isUpd ? "no settings in the store — updated the plugin only" : "no settings in the store — installed the plugin only");
+            }
+          }
+          results.push(r);
         }
+      } catch (err) {
+        const r = emptyResult(item.name, false);
+        r.status = "error";
+        r.messages.push(err instanceof Error ? err.message : String(err));
         results.push(r);
       }
       done++;

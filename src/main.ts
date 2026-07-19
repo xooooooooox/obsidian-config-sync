@@ -32,6 +32,7 @@ import { groupRealPath, groupStorePath } from "./core/pathing";
 import { applySwitchList, captureSwitchList, parseSwitchList, SWITCH_LIST_GROUPS, switchDivergence, SwitchList } from "./core/switchList";
 import { applyTransform, captureTransform, scanSensitive, SensitiveScan } from "./core/modes";
 import { PkmMode, PkmProbe, resolveEffectiveMode, resolveRootPath } from "./core/pkm";
+import { pluginRuntimeEnabled } from "./core/pluginState";
 import { bucketCounts, checkRemote, diffRemote, GroupStatus, RemoteCheck, remoteLockAhead, statusForGroups } from "./core/status";
 import { GroupResult, Remote, RibbonButtons, StoreLock, SyncGroup } from "./core/types";
 import { presentedState } from "./ui/panelModel";
@@ -79,6 +80,8 @@ const DEFAULT_SETTINGS: ConfigSyncSettings = {
 interface CommunityPluginRegistry {
   manifests: Record<string, { id: string; name: string; version: string }>;
   enabledPlugins: Set<string>;
+  plugins: Record<string, unknown>; // currently loaded instances — diverges from enabledPlugins
+
   disablePlugin(id: string): Promise<void>;
   enablePlugin(id: string): Promise<void>;
   enablePluginAndSave(id: string): Promise<void>;
@@ -603,7 +606,7 @@ export default class ConfigSyncPlugin extends Plugin {
 
   private pluginRuntime(): { id: string; name: string; enabled: boolean }[] {
     const reg = this.pluginRegistry();
-    return Object.values(reg.manifests).map((m) => ({ id: m.id, name: m.name, enabled: reg.enabledPlugins.has(m.id) }));
+    return Object.values(reg.manifests).map((m) => ({ id: m.id, name: m.name, enabled: pluginRuntimeEnabled(reg, m.id) }));
   }
 
   private pkmProbe(): PkmProbe {
@@ -611,7 +614,7 @@ export default class ConfigSyncPlugin extends Plugin {
     return {
       io: this.app.vault.adapter,
       configDir: this.app.vault.configDir,
-      isPluginEnabled: (id) => registry.enabledPlugins.has(id),
+      isPluginEnabled: (id) => pluginRuntimeEnabled(registry, id),
     };
   }
 
@@ -628,7 +631,7 @@ export default class ConfigSyncPlugin extends Plugin {
     const registry = this.pluginRegistry();
     return {
       getInstalledPluginVersion: (id) => registry.manifests[id]?.version ?? null,
-      isPluginEnabled: (id) => registry.enabledPlugins.has(id),
+      isPluginEnabled: (id) => pluginRuntimeEnabled(registry, id),
       disablePlugin: (id) => registry.disablePlugin(id),
       enablePlugin: (id) => registry.enablePlugin(id),
       enablePluginPersistent: (id) => registry.enablePluginAndSave(id),
@@ -743,7 +746,7 @@ export default class ConfigSyncPlugin extends Plugin {
 
   private bratInstance(): BratInstance | null {
     const reg = (this.app as unknown as { plugins: { plugins: Record<string, unknown>; enabledPlugins: Set<string> } }).plugins;
-    if (!reg.enabledPlugins.has("obsidian42-brat")) return null;
+    if (!pluginRuntimeEnabled(reg, "obsidian42-brat")) return null;
     return (reg.plugins["obsidian42-brat"] as BratInstance | undefined) ?? null;
   }
 
