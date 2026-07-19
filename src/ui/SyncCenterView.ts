@@ -72,6 +72,8 @@ export interface SelfSyncInfo {
   delta: { added: string[]; removed: string[] };
   itemCount: number; // store item count on coldstart, else local list size
   capturedAt: string | null;
+  contentChanged: boolean; // config-sync's own data.json differs beyond the list → pane shows a diff
+  versionRefresh: { local: string; store: string } | null; // content in-sync but plugin version ahead
 }
 
 export interface SyncCenterHost {
@@ -420,14 +422,16 @@ export class SyncCenterView extends ItemView {
   }
 
   private selfBadge(info: SelfSyncInfo): { text: string; cls: string } | null {
+    // Count the sync-list delta; when the change is config-sync's own content/version (no list
+    // delta), show a bare glyph rather than a misleading "↑0"/"↓0".
     const n = info.delta.added.length + info.delta.removed.length;
     switch (info.state) {
       case "coldstart":
         return { text: "setup", cls: "is-down" };
       case "adopt":
-        return { text: `↓${n}`, cls: "is-down" };
+        return { text: n > 0 ? `↓${n}` : "↓", cls: "is-down" };
       case "capture":
-        return { text: `↑${n}`, cls: "is-up" };
+        return { text: n > 0 ? `↑${n}` : "↑", cls: "is-up" };
       case "both":
         return { text: "⚠", cls: "is-up" };
       case "insync":
@@ -436,15 +440,17 @@ export class SyncCenterView extends ItemView {
   }
 
   private selfStatePill(info: SelfSyncInfo): { text: string; cls: string } | null {
+    const adoptN = info.delta.added.length + info.delta.removed.length;
+    const capN = info.delta.removed.length;
     switch (info.state) {
       case "coldstart":
         return { text: "not set up", cls: "is-down" };
       case "adopt":
-        return { text: `${info.delta.added.length + info.delta.removed.length} to adopt`, cls: "is-down" };
+        return { text: adoptN > 0 ? `${adoptN} to adopt` : "to adopt", cls: "is-down" };
       case "capture":
-        return { text: `${info.delta.removed.length} to capture`, cls: "is-up" };
+        return { text: capN > 0 ? `${capN} to capture` : "to capture", cls: "is-up" };
       case "both":
-        return { text: `${info.delta.added.length} to adopt · ${info.delta.removed.length} to capture`, cls: "is-up" };
+        return { text: "to adopt · to capture", cls: "is-up" };
       case "insync":
         return { text: "in sync", cls: "is-ok" };
     }
@@ -550,7 +556,8 @@ export class SyncCenterView extends ItemView {
       const block = pane.createDiv({ cls: "config-sync-self-block is-act" });
       block.createDiv({ cls: "config-sync-self-block-h", text: info.state === "both" ? "① Adopt updates from the store first" : "Updates from the store" });
       if (info.state === "adopt") block.createDiv({ cls: "config-sync-self-block-s", text: "Adopting adds these to this device's sync list — it does not apply their settings; you still choose that per item afterward." });
-      this.renderSelfDelta(block, info.delta.added, info.delta.removed);
+      if (info.delta.added.length > 0 || info.delta.removed.length > 0) this.renderSelfDelta(block, info.delta.added, info.delta.removed);
+      else this.renderSelfContentDetail(block, info, "apply"); // store's config-sync settings changed, not the list
       const acts = block.createDiv({ cls: "config-sync-self-acts" });
       const adopt = acts.createEl("button", { cls: "mod-cta", text: "Adopt all" });
       adopt.addEventListener("click", () => this.runSelfAdopt(adopt));
@@ -560,7 +567,8 @@ export class SyncCenterView extends ItemView {
       const gated = info.state === "both";
       const block = pane.createDiv({ cls: `config-sync-self-block${gated ? " is-gated" : ""}` });
       block.createDiv({ cls: "config-sync-self-block-h", text: gated ? "② Then capture your local change" : "Local changes not yet in the store" });
-      this.renderSelfDelta(block, info.delta.removed, []); // your local-only groups (present here, absent in store)
+      if (info.delta.removed.length > 0) this.renderSelfDelta(block, info.delta.removed, []); // your local-only groups
+      else this.renderSelfContentDetail(block, info, "capture"); // config-sync's own settings/version changed, not the list
       const acts = block.createDiv({ cls: "config-sync-self-acts" });
       const cap = acts.createEl("button", { cls: "config-sync-btn-capture", text: "Capture" });
       if (gated) {
@@ -572,6 +580,30 @@ export class SyncCenterView extends ItemView {
     }
 
     this.renderSelfConfigSummary(pane);
+  }
+
+  // When config-sync's own data.json changed (not the sync list), show what changed: a version
+  // line for a plugin-update refresh, otherwise the data.json diff (so "what changed" is visible).
+  private renderSelfContentDetail(block: HTMLElement, info: SelfSyncInfo, dir: Direction): void {
+    if (info.versionRefresh !== null) {
+      block.createDiv({
+        cls: "config-sync-self-block-s",
+        text: `Config Sync updated — this device ${info.versionRefresh.local} · store ${info.versionRefresh.store}. Capturing refreshes the store's recorded version.`,
+      });
+      return;
+    }
+    if (!info.contentChanged) return;
+    block.createDiv({ cls: "config-sync-self-block-s", text: "Config Sync's own settings changed:" });
+    const holder = block.createDiv({ cls: "config-sync-inline-diff" });
+    void this.host.diffPair(SELF_GROUP_NAME, "", dir).then((pair) => {
+      if (pair === null) {
+        holder.createDiv({ cls: "config-sync-expand-note", text: "no diff available" });
+        return;
+      }
+      const leftLabel = dir === "capture" ? "store" : "this device";
+      const rightLabel = dir === "capture" ? "this device (what capture would write)" : "store (what apply would write)";
+      renderDiffPanel(holder, pair.base, pair.produced, leftLabel, rightLabel, "data.json");
+    });
   }
 
   private renderSidebar(shell: HTMLElement): void {

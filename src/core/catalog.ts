@@ -22,7 +22,7 @@ export interface CatalogSection {
 }
 
 const HIDDEN_FILES = new Set(["core-plugins-migration.json"]);
-const HIDDEN_DIRS = new Set(["plugins"]);
+const HIDDEN_DIRS = new Set(["plugins", "config-sync-backup"]); // config-sync's own working dirs — never syncable
 
 export const OPTION_LABELS: Record<string, { label: string; description: string; type: "file" | "dir" }> = {
   "app.json": { label: "App settings", description: "Editor, Files & links and other general options (app.json).", type: "file" },

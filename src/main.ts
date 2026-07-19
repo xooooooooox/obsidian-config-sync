@@ -34,6 +34,7 @@ import { applyTransform, captureTransform, scanSensitive, SensitiveScan } from "
 import { PkmMode, PkmProbe, resolveEffectiveMode, resolveRootPath } from "./core/pkm";
 import { pluginRuntimeEnabled } from "./core/pluginState";
 import { syncListDelta } from "./core/syncListDelta";
+import { selfPaneState } from "./core/selfPane";
 import { bucketCounts, checkRemote, diffRemote, GroupStatus, RemoteCheck, remoteLockAhead, statusForGroups } from "./core/status";
 import { GroupResult, Remote, RibbonButtons, StoreLock, SyncGroup } from "./core/types";
 import { presentedState } from "./ui/panelModel";
@@ -379,14 +380,21 @@ export default class ConfigSyncPlugin extends Plugin {
             capturedAt = null; // an unreadable lock must not break the pane
           }
         }
-        if (local.length === 0) return { state: "coldstart", delta, itemCount: storeGroups.length, capturedAt };
+        if (local.length === 0) return { state: "coldstart", delta, itemCount: storeGroups.length, capturedAt, contentChanged: false, versionRefresh: null };
         const selfGroup = local.find((g) => g.name === SELF_GROUP_NAME);
-        if (selfGroup === undefined) return { state: "insync", delta, itemCount: local.length, capturedAt };
+        if (selfGroup === undefined) return { state: "insync", delta, itemCount: local.length, capturedAt, contentChanged: false, versionRefresh: null };
         const [st] = await statusForGroups(ctx, [selfGroup]);
-        const s = st?.state;
-        const state: SelfSyncInfo["state"] =
-          s === "store-newer" ? "adopt" : s === "differs" ? "both" : s === "local-changed" || s === "not-captured" ? "capture" : "insync";
-        return { state, delta, itemCount: local.length, capturedAt };
+        let lock: StoreLock | null = null;
+        try {
+          lock = await loadLock(ctx);
+        } catch {
+          lock = null;
+        }
+        const av = availabilityForGroup(selfGroup, this.pluginHost(), lock);
+        const decided = selfPaneState({ isColdStart: false, groupState: st?.state, drift: av.drift });
+        const versionRefresh =
+          decided.versionRefresh && av.localVersion !== null && av.storeVersion !== null ? { local: av.localVersion, store: av.storeVersion } : null;
+        return { state: decided.state, delta, itemCount: local.length, capturedAt, contentChanged: decided.contentChanged, versionRefresh };
       },
       resolvedPath: (g) => g.path.replace("{configDir}", this.app.vault.configDir),
       displayName: (g) => this.displayName(g, this.lastGroups?.find((x) => x.name === g)?.label),
