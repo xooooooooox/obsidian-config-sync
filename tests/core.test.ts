@@ -245,7 +245,7 @@ describe("capture", () => {
   });
 
   it("leaves a carried-forward entry untouched when the plugin is not installed here", async () => {
-    const { io, plugins, ctx } = setup();
+    const { io, ctx } = setup();
     io.seed({
       ".obs/hotkeys.json": "{}",
       ".obs/snippets/one.css": "x",
