@@ -62,10 +62,21 @@ interface LastRun {
 
 // The last-run strip and the post-adopt guidance also live at session level, so a view reload
 // (e.g. right after Adopt, or a mobile tab switch) doesn't drop the result strip / guidance.
-const sessionRun: { last: LastRun | null; adoptGuidance: boolean } = { last: null, adoptGuidance: false };
+const sessionRun: { last: LastRun | null } = { last: null };
+
+// The config-sync self layer, surfaced in its own sidebar destination (renderConfigSyncMode).
+// `delta` is syncListDelta(local, store): `added` = groups the store has that this device's list
+// doesn't, `removed` = the reverse. The pane labels them per direction.
+export interface SelfSyncInfo {
+  state: "coldstart" | "adopt" | "capture" | "both" | "insync";
+  delta: { added: string[]; removed: string[] };
+  itemCount: number; // store item count on coldstart, else local list size
+  capturedAt: string | null;
+}
 
 export interface SyncCenterHost {
   computeStatuses(): Promise<{ groups: SyncGroup[]; statuses: GroupStatus[]; availability: Record<string, Availability> }>;
+  selfStatus(): Promise<SelfSyncInfo>;
   resolvedPath(group: SyncGroup): string;
   displayName(group: string, storedLabel?: string): string;
   captureItems(items: CaptureItem[], onProgress?: ProgressFn): Promise<GroupResult[] | null>;
@@ -153,7 +164,9 @@ export class SyncCenterView extends ItemView {
   private expandedItems: Set<string> = new Set();
   private renderGen = 0;
   private filter: PanelFilter = "all";
-  private panelScope: { kind: "device"; cat: ItemCategory | "beta" | "all" } | { kind: "remote"; name: string } | { kind: "history" } = { kind: "device", cat: "all" };
+  private panelScope: { kind: "device"; cat: ItemCategory | "beta" | "all" } | { kind: "remote"; name: string } | { kind: "history" } | { kind: "self" } = { kind: "device", cat: "all" };
+  private selfInfo: SelfSyncInfo | null = null;
+  private landedInitial = false; // cold-start auto-land to the Config Sync pane happens once
   private search = "";
   private betaIds: Set<string> = new Set();
   private lastRefreshedAt: number | null = null;
@@ -241,6 +254,13 @@ export class SyncCenterView extends ItemView {
     this.statuses = new Map(statuses.map((s) => [s.group, s]));
     this.availability = new Map(Object.entries(availability));
     this.betaIds = this.host.betaIds();
+    this.selfInfo = await this.host.selfStatus();
+    // Fresh device: open straight to the Config Sync pane (the adopt entry) instead of an empty
+    // item list — once. After that the user navigates freely.
+    if (!this.landedInitial) {
+      this.landedInitial = true;
+      if (this.selfInfo.state === "coldstart") this.panelScope = { kind: "self" };
+    }
     this.history = this.host.runHistoryEnabled() ? await this.host.loadRunHistory() : [];
     // Leftover means "store files with no matching group"; a device with no groups (fresh /
     // pre-adopt) has no baseline, so the whole store would look leftover — dangerous with
@@ -296,6 +316,10 @@ export class SyncCenterView extends ItemView {
   private rows(): StatusRow[] {
     const out: StatusRow[] = [];
     for (const group of this.groups) {
+      // config-sync manages itself in its own sidebar destination (renderConfigSyncMode), so it
+      // never appears in the item list, scopes, filter pills, or footer totals — all of which
+      // derive from this row set.
+      if (group.name === SELF_GROUP_NAME) continue;
       const status = this.statuses.get(group.name);
       if (status !== undefined) out.push({ group, status });
     }
@@ -353,11 +377,14 @@ export class SyncCenterView extends ItemView {
     if (gen !== this.renderGen) return;
     this.contentEl.empty();
     this.renderHeader();
-    this.renderBootstrapBanner(this.contentEl, gen);
     const shell = this.contentEl.createDiv({ cls: `config-sync-shell${this.compact ? " is-compact" : ""}` });
     if (this.compact) this.renderSwitcher(shell);
     else this.renderSidebar(shell);
     const main = shell.createDiv({ cls: "config-sync-main" });
+    if (this.panelScope.kind === "self") {
+      this.renderConfigSyncMode(main);
+      return;
+    }
     if (this.panelScope.kind === "history") {
       this.renderHistoryMode(main);
       return;
@@ -373,41 +400,178 @@ export class SyncCenterView extends ItemView {
     this.renderItemMode(main);
   }
 
-  // Fresh-device adopt banner (self-config model 定稿): shown when the store already holds a
-  // captured configuration but this device has no groups yet. Fetched async into a placeholder.
-  private renderBootstrapBanner(container: HTMLElement, gen: number): void {
-    const host = container.createDiv();
-    void this.host.bootstrapOffer().then((offer) => {
-      if (offer === null || gen !== this.renderGen) return;
-      const banner = host.createDiv({ cls: "config-sync-bootstrap" });
-      banner.createSpan({ cls: "config-sync-bootstrap-icon", text: "⬇" });
-      const textBox = banner.createDiv({ cls: "config-sync-bootstrap-text" });
-      textBox.createDiv({ cls: "config-sync-bootstrap-title", text: "Found an existing configuration in the store" });
-      const when = offer.capturedAt === null ? "" : ` · captured ${isoAge(offer.capturedAt)}`;
-      textBox.createDiv({
-        cls: "config-sync-bootstrap-sub",
-        text: `${offer.itemCount} sync item${offer.itemCount === 1 ? "" : "s"}${when}. Adopt it to set up this device.`,
-      });
-      const adopt = banner.createEl("button", { cls: "mod-cta config-sync-bootstrap-adopt", text: "Adopt" });
-      adopt.addEventListener("click", () => {
-        adopt.disabled = true;
-        adopt.setText("Adopting…");
-        void this.host.adoptConfiguration().then((results) => {
-          if (results !== null) {
-            this.setLastRun("adopt", null, results);
-            sessionRun.adoptGuidance = true; // one-time "now apply the store" guidance
-          }
-          this.notifyExternalChange(); // recompute: groups now exist → banner disappears
-        });
-      });
-      const dismiss = banner.createSpan({ cls: "config-sync-bootstrap-dismiss", text: "✕" });
-      dismiss.setAttribute("aria-label", "Dismiss for this session");
-      dismiss.setAttribute("title", "Dismiss for this session");
-      dismiss.addEventListener("click", () => {
-        this.host.dismissBootstrap();
-        banner.remove();
-      });
+  // The config-sync self layer lives in its own sidebar destination (the "Config Sync" entry),
+  // not in the item list. This entry carries a direction badge; clicking it opens the pane.
+  private renderSelfEntry(container: HTMLElement): void {
+    const info = this.selfInfo;
+    const active = this.panelScope.kind === "self";
+    const item = container.createDiv({ cls: `config-sync-side-item config-sync-side-self${active ? " is-active" : ""}` });
+    item.createSpan({ cls: "config-sync-side-self-ic", text: "⚙" });
+    item.createSpan({ cls: "config-sync-side-name", text: "Config Sync" });
+    if (info !== null) {
+      const b = this.selfBadge(info);
+      if (b !== null) item.createSpan({ cls: `config-sync-side-badge ${b.cls}`, text: b.text });
+    }
+    item.addEventListener("click", () => {
+      this.panelScope = { kind: "self" };
+      this.switcherOpen = false;
+      this.render(this.renderGen);
     });
+  }
+
+  private selfBadge(info: SelfSyncInfo): { text: string; cls: string } | null {
+    const n = info.delta.added.length + info.delta.removed.length;
+    switch (info.state) {
+      case "coldstart":
+        return { text: "setup", cls: "is-down" };
+      case "adopt":
+        return { text: `↓${n}`, cls: "is-down" };
+      case "capture":
+        return { text: `↑${n}`, cls: "is-up" };
+      case "both":
+        return { text: "⚠", cls: "is-up" };
+      case "insync":
+        return null;
+    }
+  }
+
+  private selfStatePill(info: SelfSyncInfo): { text: string; cls: string } | null {
+    switch (info.state) {
+      case "coldstart":
+        return { text: "not set up", cls: "is-down" };
+      case "adopt":
+        return { text: `${info.delta.added.length + info.delta.removed.length} to adopt`, cls: "is-down" };
+      case "capture":
+        return { text: `${info.delta.removed.length} to capture`, cls: "is-up" };
+      case "both":
+        return { text: `${info.delta.added.length} to adopt · ${info.delta.removed.length} to capture`, cls: "is-up" };
+      case "insync":
+        return { text: "in sync", cls: "is-ok" };
+    }
+  }
+
+  private runSelfAdopt(btn: HTMLButtonElement): void {
+    btn.disabled = true;
+    btn.setText("Adopting…");
+    void this.host.adoptConfiguration().then((results) => {
+      if (results !== null) this.setLastRun("adopt", null, results);
+      this.notifyExternalChange(); // recompute: the sync list changed
+    });
+  }
+
+  private runSelfCapture(btn: HTMLButtonElement): void {
+    btn.disabled = true;
+    btn.setText("Capturing…");
+    void this.host.captureItems([{ name: SELF_GROUP_NAME, action: "none" }]).then((results) => {
+      if (results !== null) this.setLastRun("capture", null, results);
+      this.notifyExternalChange();
+    });
+  }
+
+  private renderSelfDelta(block: HTMLElement, added: string[], removed: string[]): void {
+    if (added.length === 0 && removed.length === 0) return;
+    const list = block.createDiv({ cls: "config-sync-self-delta" });
+    const row = (glyph: string, cls: string, name: string): void => {
+      const r = list.createDiv({ cls: `config-sync-self-drow ${cls}` });
+      r.createSpan({ cls: "config-sync-self-dg", text: glyph });
+      r.createSpan({ text: this.host.displayName(name, findGroupByName(this.groups, name)?.label) });
+    };
+    for (const name of added) row("+", "is-add", name);
+    for (const name of removed) row("−", "is-del", name);
+  }
+
+  private renderSelfConfigSummary(pane: HTMLElement): void {
+    const block = pane.createDiv({ cls: "config-sync-self-block" });
+    block.createDiv({ cls: "config-sync-self-block-h", text: "This device's configuration" });
+    const link = block.createDiv({ cls: "config-sync-self-link", text: "Open Config Sync settings →" });
+    link.addEventListener("click", () => {
+      const setting = (this.app as unknown as { setting?: { open(): void; openTabById(id: string): void } }).setting;
+      setting?.open();
+      setting?.openTabById("config-sync");
+    });
+  }
+
+  // The Config Sync pane: the self layer's bidirectional adopt/capture surface (S0–S4).
+  private renderConfigSyncMode(main: HTMLElement): void {
+    const info = this.selfInfo;
+    if (info === null) return;
+    const pane = main.createDiv({ cls: "config-sync-self-pane" });
+    const title = pane.createDiv({ cls: "config-sync-self-title" });
+    title.createSpan({ cls: "config-sync-self-title-ic", text: info.state === "coldstart" ? "⬇" : info.state === "capture" ? "⇧" : info.state === "both" ? "⚠" : "⚙" });
+    title.createSpan({ text: "Config Sync" });
+    const pill = this.selfStatePill(info);
+    if (pill !== null) title.createSpan({ cls: `config-sync-self-pill ${pill.cls}`, text: pill.text });
+
+    if (info.state === "coldstart") {
+      pane.createDiv({ cls: "config-sync-self-sub", text: "This is a new device — it has no sync list yet. The store holds a configuration you can adopt to set it up." });
+      const block = pane.createDiv({ cls: "config-sync-self-block is-act" });
+      const when = info.capturedAt === null ? "" : ` · captured ${isoAge(info.capturedAt)}`;
+      block.createDiv({ cls: "config-sync-self-block-h", text: "Found a configuration in the store" });
+      block.createDiv({ cls: "config-sync-self-block-s", text: `${info.itemCount} sync item${info.itemCount === 1 ? "" : "s"}${when}. Adopt sets up this device's list; then apply the items you want.` });
+      block.createDiv({ cls: "config-sync-self-caution", text: "⚠ Don't Capture first — that would overwrite the store with this blank device's defaults." });
+      const acts = block.createDiv({ cls: "config-sync-self-acts" });
+      const adopt = acts.createEl("button", { cls: "mod-cta", text: "Adopt configuration" });
+      adopt.addEventListener("click", () => this.runSelfAdopt(adopt));
+      const not = acts.createEl("button", { text: "Not now" });
+      not.addEventListener("click", () => {
+        this.panelScope = { kind: "device", cat: "all" };
+        this.render(this.renderGen);
+      });
+      return;
+    }
+
+    if (info.state === "insync") {
+      pane.createDiv({ cls: "config-sync-self-sub", text: `The list of what this device syncs — ${info.itemCount} item${info.itemCount === 1 ? "" : "s"}, in sync with the store.` });
+      // Post-adopt nudge (folds in the old guidance banner): the list is set up but items may not
+      // be applied to this device yet. Point at Apply (store → device), never Capture.
+      const toApply = this.presentedCounts(this.mainRows()).down;
+      if (toApply > 0) {
+        const block = pane.createDiv({ cls: "config-sync-self-block is-act" });
+        block.createDiv({ cls: "config-sync-self-block-h", text: "Now set up this device" });
+        block.createDiv({ cls: "config-sync-self-block-s", text: `${toApply} item${toApply === 1 ? "" : "s"} ready to apply from the store — Apply brings your settings and plugins onto this device.` });
+        const acts = block.createDiv({ cls: "config-sync-self-acts" });
+        const review = acts.createEl("button", { cls: "mod-cta", text: "Review what to apply" });
+        review.addEventListener("click", () => {
+          this.filter = "apply";
+          this.panelScope = { kind: "device", cat: "all" };
+          this.render(this.renderGen);
+        });
+      }
+      this.renderSelfConfigSummary(pane);
+      return;
+    }
+
+    const sub = pane.createDiv({ cls: "config-sync-self-sub" });
+    if (info.state === "both") sub.setText("Both your list and the store changed. Adopt first, then capture — capturing now would overwrite another device's list additions with this device's older list.");
+    else if (info.state === "adopt") sub.setText("The list of what this device syncs changed in the store. Adopt to bring the new items onto this device; they then appear under the item scopes as normal, apply-able rows.");
+    else sub.setText("You changed what this device syncs. Capture to publish it to the store, so your other devices can adopt it.");
+
+    if (info.state === "adopt" || info.state === "both") {
+      const block = pane.createDiv({ cls: "config-sync-self-block is-act" });
+      block.createDiv({ cls: "config-sync-self-block-h", text: info.state === "both" ? "① Adopt updates from the store first" : "Updates from the store" });
+      if (info.state === "adopt") block.createDiv({ cls: "config-sync-self-block-s", text: "Adopting adds these to this device's sync list — it does not apply their settings; you still choose that per item afterward." });
+      this.renderSelfDelta(block, info.delta.added, info.delta.removed);
+      const acts = block.createDiv({ cls: "config-sync-self-acts" });
+      const adopt = acts.createEl("button", { cls: "mod-cta", text: "Adopt all" });
+      adopt.addEventListener("click", () => this.runSelfAdopt(adopt));
+    }
+
+    if (info.state === "capture" || info.state === "both") {
+      const gated = info.state === "both";
+      const block = pane.createDiv({ cls: `config-sync-self-block${gated ? " is-gated" : ""}` });
+      block.createDiv({ cls: "config-sync-self-block-h", text: gated ? "② Then capture your local change" : "Local changes not yet in the store" });
+      this.renderSelfDelta(block, info.delta.removed, []); // your local-only groups (present here, absent in store)
+      const acts = block.createDiv({ cls: "config-sync-self-acts" });
+      const cap = acts.createEl("button", { cls: "config-sync-btn-capture", text: "Capture" });
+      if (gated) {
+        cap.disabled = true;
+        acts.createSpan({ cls: "config-sync-self-hint", text: "— available after adopting" });
+      } else {
+        cap.addEventListener("click", () => this.runSelfCapture(cap));
+      }
+    }
+
+    this.renderSelfConfigSummary(pane);
   }
 
   private renderSidebar(shell: HTMLElement): void {
@@ -436,6 +600,8 @@ export class SyncCenterView extends ItemView {
   }
 
   private renderScopeEntries(container: HTMLElement): void {
+    this.renderSelfEntry(container);
+    container.createDiv({ cls: "config-sync-side-divider" });
     container.createDiv({ cls: "config-sync-side-head", text: "This device ↔ store" });
 
     const deviceEntry = (cat: ItemCategory | "beta" | "all", label: string, rows: StatusRow[]): void => {
@@ -529,6 +695,8 @@ export class SyncCenterView extends ItemView {
       if (c.none > 0) sw.createSpan({ cls: "config-sync-side-badge is-none", text: `○${c.none}` });
     } else if (this.panelScope.kind === "history") {
       sw.createSpan({ text: "History" });
+    } else if (this.panelScope.kind === "self") {
+      sw.createSpan({ text: "⚙ Config Sync" });
     } else {
       sw.createSpan({ text: this.panelScope.name });
       const icon = this.remoteIcon(this.host.remoteCheck(this.panelScope.name)?.check);
@@ -613,45 +781,6 @@ export class SyncCenterView extends ItemView {
 
   private statusIcon(status: RunStatus): string {
     return status === "error" ? "✗" : status === "warning" ? "⚠" : "✓";
-  }
-
-  // One-time guidance after Adopt: the manifest is set up but nothing is applied yet. Point the
-  // user at Apply (store → device) and warn against Capture on a fresh device.
-  private renderAdoptGuidance(main: HTMLElement): void {
-    if (!sessionRun.adoptGuidance) return;
-    const toApply = this.presentedCounts(this.mainRows()).down;
-    if (toApply === 0) {
-      sessionRun.adoptGuidance = false; // device reached sync — nothing left to guide
-      return;
-    }
-    const g = main.createDiv({ cls: "config-sync-guide" });
-    g.createSpan({ cls: "config-sync-guide-ic", text: "⬇" });
-    const body = g.createDiv({ cls: "config-sync-guide-body" });
-    body.createDiv({ cls: "config-sync-guide-title", text: "Configuration adopted — now set up this device" });
-    body.createDiv({
-      cls: "config-sync-guide-sub",
-      text: `Config Sync learned your ${this.groups.length} synced items. Apply the store to bring your settings and plugins onto this device.`,
-    });
-    body.createDiv({
-      cls: "config-sync-guide-caution",
-      text: "⚠ This device is new — its blank defaults differ from the store. Choose Apply store (store → device), not Capture, or you'll overwrite the store with this device's empty defaults. A few items differ both ways (e.g. app settings) — pick a direction per item; on a new device that's usually Apply store, except keep your own for Config Sync's settings.",
-    });
-    const acts = body.createDiv({ cls: "config-sync-guide-acts" });
-    const review = acts.createEl("button", { cls: "mod-cta", text: "Review what to apply" });
-    review.addEventListener("click", () => {
-      this.filter = "apply";
-      this.render(this.renderGen);
-    });
-    const not = acts.createEl("button", { text: "Not now" });
-    not.addEventListener("click", () => {
-      sessionRun.adoptGuidance = false;
-      this.render(this.renderGen);
-    });
-    const x = g.createSpan({ cls: "config-sync-guide-x", text: "✕" });
-    x.addEventListener("click", () => {
-      sessionRun.adoptGuidance = false;
-      this.render(this.renderGen);
-    });
   }
 
   private renderResultStrip(main: HTMLElement): void {
@@ -800,6 +929,7 @@ export class SyncCenterView extends ItemView {
   private scopeKey(): string {
     if (this.panelScope.kind === "device") return this.panelScope.cat;
     if (this.panelScope.kind === "history") return "history";
+    if (this.panelScope.kind === "self") return "self";
     return `remote:${this.panelScope.name}`;
   }
 
@@ -816,7 +946,6 @@ export class SyncCenterView extends ItemView {
 
   private renderItemMode(main: HTMLElement): void {
     this.renderResultStrip(main);
-    this.renderAdoptGuidance(main);
     const scoped = this.scopedRows();
     const mainRows = scoped.filter((r) => this.sectionOf(r.group.name) === "main");
     const sections: Record<Exclude<SectionKind, "main">, StatusRow[]> = { outdated: [], disabled: [], "not-installed": [] };

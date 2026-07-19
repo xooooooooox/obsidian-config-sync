@@ -3,8 +3,7 @@ import { GroupResult, hasChanges, StoreLock, SyncGroup, SyncManifest } from "./t
 import { basename, groupRealPath, groupStorePath, relativeTo, resolveGroupByStoreRel } from "./pathing";
 import { parseStoreLock, parseSyncManifest, validateSyncManifest } from "./manifest";
 import { applyTransform, captureTransform, contentUnchanged } from "./modes";
-import { classifyMerge, MergePlan } from "./merge";
-import { ensureSelfPresets } from "./catalog";
+import { classifyMerge, MergeConflict, MergePlan } from "./merge";
 import { isPlainObject } from "./sanitize";
 import { applySwitchList, captureSwitchList, parseSwitchList, SWITCH_LIST_GROUPS, SwitchList, switchListsEqual } from "./switchList";
 
@@ -777,9 +776,13 @@ export async function applyImport(
   choices: ("local" | "remote")[]
 ): Promise<GroupResult[]> {
   const { plan, remoteGroups, remoteLockRaw } = pending;
-  if (choices.length !== plan.conflicts.length) {
+  // Pull is pure store transport: it resolves file conflicts only. Definition (sync-list)
+  // conflicts and remote-only group additions are no longer applied by Pull — the local sync
+  // list converges through adopting the config-sync self item, not through a pull side-write.
+  const fileConflicts = plan.conflicts.filter((c): c is Extract<MergeConflict, { kind: "file" }> => c.kind === "file");
+  if (choices.length !== fileConflicts.length) {
     throw new Error(
-      `applyImport: expected ${plan.conflicts.length} conflict resolution choice(s), received ${choices.length}`
+      `applyImport: expected ${fileConflicts.length} file-conflict resolution choice(s), received ${choices.length}`
     );
   }
 
@@ -798,29 +801,18 @@ export async function applyImport(
   for (const f of plan.auto.writeFiles) {
     await writeClassified(ctx, `${ctx.rootPath}/${f.rel}`, f.content, f.rel, resultFor(f.name));
   }
-  for (let i = 0; i < plan.conflicts.length; i++) {
-    const conflict = plan.conflicts[i];
-    if (conflict === undefined) continue;
-    if (choices[i] !== "remote") continue;
-    if (conflict.kind !== "file") continue;
+  for (let i = 0; i < fileConflicts.length; i++) {
+    const conflict = fileConflicts[i];
+    if (conflict === undefined || choices[i] !== "remote") continue;
     await writeClassified(ctx, `${ctx.rootPath}/${conflict.rel}`, conflict.remoteContent, conflict.rel, resultFor(conflict.name));
     remoteWonNames.add(conflict.name);
   }
   await pruneEmptyDirsUnder(ctx.io, ctx.rootPath);
 
-  let groups = await readGroups(ctx);
-  groups = [...groups, ...plan.auto.addGroups];
-  for (let i = 0; i < plan.conflicts.length; i++) {
-    const conflict = plan.conflicts[i];
-    if (conflict === undefined) continue;
-    if (choices[i] !== "remote") continue;
-    if (conflict.kind !== "definition") continue;
-    groups = groups.map((g) => (g.name === conflict.name ? conflict.remote : g));
-    remoteWonNames.add(conflict.name);
-  }
-  groups = ensureSelfPresets(groups);
-  await writeGroups(ctx, groups);
-  for (const g of plan.auto.addGroups) resultFor(g.name);
+  // Local groups only — read for lock attribution and result ordering below; Pull never writes
+  // the sync list (settings.groups). Remote-only additions land in the store here and become
+  // adoptable via the config-sync pane.
+  const groups = await readGroups(ctx);
 
   const localLock = await loadLock(ctx);
   const remoteLock = remoteLockRaw !== null ? parseStoreLock(remoteLockRaw) : null;
