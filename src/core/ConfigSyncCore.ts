@@ -185,6 +185,13 @@ export async function capture(ctx: CoreContext, names?: string[], onProgress?: P
         const version = ctx.plugins.getInstalledPluginVersion(pluginId);
         if (version !== null) {
           lock.groups[group.name] = { sourcePluginVersion: version };
+          // Version-only refresh: content is byte-identical but the store recorded an older
+          // version (local > store drift). captureGroup produces no file change, so without this
+          // the run report reads "no changes" even though the store's recorded version changed.
+          const prevVersion = previous?.groups[group.name]?.sourcePluginVersion ?? null;
+          if (prevVersion !== null && prevVersion !== version && !hasChanges(result.changes) && result.stateNote === undefined) {
+            result.stateNote = { kind: "ok", text: `store version refreshed ${prevVersion} → ${version}` };
+          }
         } else {
           result.status = "warning";
           result.messages.push(`plugin "${pluginId}" is not installed in this vault; no version recorded`);

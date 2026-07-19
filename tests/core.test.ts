@@ -4,6 +4,7 @@ import { parseSyncManifest } from "../src/core/manifest";
 import { SyncGroup } from "../src/core/types";
 import { isFieldEnvelope, parseFileEnvelope } from "../src/core/crypto";
 import { statusForGroups } from "../src/core/status";
+import { isChanged } from "../src/core/runHistory";
 import { MemFS, FakePlugins, memGroupsIO } from "./memfs";
 
 export const MANIFEST = JSON.stringify({
@@ -179,6 +180,25 @@ describe("capture", () => {
     const lock = JSON.parse(await io.read("cs/store.lock.json")) as { capturedAt: string; groups: Record<string, { sourcePluginVersion: string }> };
     expect(lock.capturedAt).toBe("2026-07-08T00:00:00.000Z");
     expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.2.3" }); // current version, not the stale 9.9.9 — success always re-stamps
+  });
+
+  it("a version-only capture (content identical, store version older) is recorded as a change", async () => {
+    const { io, plugins, ctx } = setup();
+    plugins.installed.set("demo", "1.2.3");
+    io.seed({
+      "cs/store.lock.json": JSON.stringify({ capturedAt: "old", groups: { "plugin-demo": { sourcePluginVersion: "1.2.0" } } }),
+      "cs/store/configdir/plugins/demo/data.json": '{"theme":"x"}',
+      ".obs/plugins/demo/data.json": '{"theme":"x"}', // byte-identical to the store — no file change
+    });
+    await seedGroups(ctx, MANIFEST);
+    const results = await capture(ctx, ["plugin-demo"]);
+    const r = results.find((x) => x.group === "plugin-demo");
+    expect(r?.changes).toEqual({ added: [], updated: [], deleted: [] }); // content unchanged — no file change
+    expect(r?.stateNote?.text).toContain("1.2.0");
+    expect(r?.stateNote?.text).toContain("1.2.3");
+    expect(isChanged(r!)).toBe(true); // the store version refresh must count in the run report
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, { sourcePluginVersion: string }> };
+    expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.2.3" });
   });
 
   it("skips OS junk when capturing dirs and cleans junk already in the store", async () => {
