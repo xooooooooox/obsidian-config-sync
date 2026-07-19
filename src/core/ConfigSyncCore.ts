@@ -101,6 +101,20 @@ function serializeSwitchList(v: ReturnType<typeof captureSwitchList>): string {
   return JSON.stringify(v, null, 2) + "\n";
 }
 
+// On capture, every group's lock entry is rewritten (selected → fresh, others → carried forward).
+// For carried-forward entries of installed plugins, refresh desktopOnly to match the live manifest
+// so the flag lands for the whole plugin set, not just the groups captured this run.
+function refreshLockDesktopOnly(
+  entry: StoreLock["groups"][string],
+  group: SyncGroup,
+  plugins: PluginHost
+): StoreLock["groups"][string] {
+  const pluginId = pluginIdForGroup(group);
+  if (pluginId === null || plugins.getInstalledPluginVersion(pluginId) === null) return entry;
+  const { desktopOnly, ...rest } = entry;
+  return plugins.isDesktopOnly(pluginId) ? { ...rest, desktopOnly: true } : rest;
+}
+
 // The enabled-set delta an on/off-list apply writes, as report lines ("turns on: a, b").
 function switchDeltaMessages(before: SwitchList | null, after: SwitchList): string[] {
   const enabledIds = (l: SwitchList | null): Set<string> =>
@@ -173,7 +187,7 @@ export async function capture(ctx: CoreContext, names?: string[], onProgress?: P
   for (const group of manifest.groups) {
     if (selected !== null && !selected.has(group.name)) {
       const prev = previous?.groups[group.name];
-      if (prev !== undefined) lock.groups[group.name] = prev; // not captured this run — carry forward
+      if (prev !== undefined) lock.groups[group.name] = refreshLockDesktopOnly(prev, group, ctx.plugins); // not captured this run — carry forward
       continue;
     }
     onProgress?.(done, toProcess.length, group.name);
@@ -200,7 +214,7 @@ export async function capture(ctx: CoreContext, names?: string[], onProgress?: P
         }
       } else {
         const prev = previous?.groups[group.name];
-        if (prev !== undefined) lock.groups[group.name] = prev; // errored capture keeps the last known version
+        if (prev !== undefined) lock.groups[group.name] = refreshLockDesktopOnly(prev, group, ctx.plugins); // errored capture keeps the last known version
       }
     } else if (result.status !== "error") {
       lock.groups[group.name] = { sourceAppVersion: ctx.plugins.getAppVersion() };

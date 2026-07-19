@@ -213,6 +213,50 @@ describe("capture", () => {
     expect(lock.groups["hotkeys"]?.desktopOnly).toBeUndefined(); // app-anchored: never flagged
   });
 
+  it("backfills desktopOnly onto a carried-forward installed desktop-only plugin", async () => {
+    const { io, plugins, ctx } = setup();
+    plugins.installed.set("demo", "1.2.3");
+    plugins.desktopOnlyIds.add("demo");
+    io.seed({
+      ".obs/plugins/demo/data.json": "{}",
+      ".obs/hotkeys.json": "{}",
+      ".obs/snippets/one.css": "x",
+      "cs/store.lock.json": JSON.stringify({ capturedAt: "t", groups: { "plugin-demo": { sourcePluginVersion: "1.2.3" }, hotkeys: { sourceAppVersion: "1.0.0" } } }),
+    });
+    await seedGroups(ctx, MANIFEST);
+    await capture(ctx, ["hotkeys"]);
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, { sourcePluginVersion?: string; desktopOnly?: boolean }> };
+    expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.2.3", desktopOnly: true });
+  });
+
+  it("clears a stale desktopOnly on carry-forward when the plugin is no longer desktop-only", async () => {
+    const { io, plugins, ctx } = setup();
+    plugins.installed.set("demo", "1.2.3");
+    io.seed({
+      ".obs/plugins/demo/data.json": "{}",
+      ".obs/hotkeys.json": "{}",
+      ".obs/snippets/one.css": "x",
+      "cs/store.lock.json": JSON.stringify({ capturedAt: "t", groups: { "plugin-demo": { sourcePluginVersion: "1.2.3", desktopOnly: true }, hotkeys: { sourceAppVersion: "1.0.0" } } }),
+    });
+    await seedGroups(ctx, MANIFEST);
+    await capture(ctx, ["hotkeys"]);
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, { sourcePluginVersion?: string; desktopOnly?: boolean }> };
+    expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.2.3" });
+  });
+
+  it("leaves a carried-forward entry untouched when the plugin is not installed here", async () => {
+    const { io, plugins, ctx } = setup();
+    io.seed({
+      ".obs/hotkeys.json": "{}",
+      ".obs/snippets/one.css": "x",
+      "cs/store.lock.json": JSON.stringify({ capturedAt: "t", groups: { "plugin-demo": { sourcePluginVersion: "1.2.3", desktopOnly: true }, hotkeys: { sourceAppVersion: "1.0.0" } } }),
+    });
+    await seedGroups(ctx, MANIFEST);
+    await capture(ctx, ["hotkeys"]);
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, { sourcePluginVersion?: string; desktopOnly?: boolean }> };
+    expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.2.3", desktopOnly: true });
+  });
+
   it("skips OS junk when capturing dirs and cleans junk already in the store", async () => {
     const { io, plugins, ctx } = setup();
     plugins.installed.set("demo", "1.2.3");
