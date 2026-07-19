@@ -12,6 +12,8 @@ Obsidian plugin: selective config distribution across devices/vaults. Spec: `doc
 
 ## Architecture
 
+Full code map, invariants, and extension points: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
 - `src/core/` — pure functions; ALL file I/O via the `FileIO` interface (`app.vault.adapter` in prod, `tests/memfs.ts` in tests). **Never import Node APIs here — core must run on mobile.**
 - `src/external/` — the only place Node `fs`/`child_process` are allowed; loaded exclusively via dynamic `import()` from desktop-gated code in `main.ts`.
 - `src/ui/` — thin Obsidian modals/settings; no logic worth testing.

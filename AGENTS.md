@@ -2,6 +2,7 @@
 
 ## Project overview
 
+- Architecture & code map: see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 - Target: Obsidian Community Plugin (TypeScript → bundled JavaScript).
 - Entry point: `src/main.ts` compiled to `main.js` and loaded by Obsidian.
 - Required release artifacts: `main.js`, `manifest.json`, and optional `styles.css`.
