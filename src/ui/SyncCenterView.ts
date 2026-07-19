@@ -1,4 +1,4 @@
-import { App, ButtonComponent, ExtraButtonComponent, ItemView, Modal, WorkspaceLeaf, setIcon } from "obsidian";
+import { App, ButtonComponent, ExtraButtonComponent, ItemView, Modal, Platform, WorkspaceLeaf, setIcon } from "obsidian";
 import { ApplyItem, CaptureItem, ProgressFn, StateAction } from "../core/ConfigSyncCore";
 import { bucketCounts, GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry } from "../core/status";
 import { CATEGORY_LABELS, findGroupByName, ItemCategory, SELF_GROUP_NAME, categoryForGroup } from "../core/catalog";
@@ -302,7 +302,7 @@ export class SyncCenterView extends ItemView {
   }
 
   private availOf(name: string): Availability {
-    return this.availability.get(name) ?? { kind: "enabled", drift: null, localVersion: null, storeVersion: null, anchor: "app" };
+    return this.availability.get(name) ?? { kind: "enabled", drift: null, localVersion: null, storeVersion: null, anchor: "app", desktopOnly: false };
   }
 
   // Install targets the version the store captured (方案 A); latest when unrecorded.
@@ -312,7 +312,7 @@ export class SyncCenterView extends ItemView {
   }
 
   private sectionOf(name: string): SectionKind {
-    return sectionForItem(this.availOf(name));
+    return sectionForItem(this.availOf(name), Platform.isMobile);
   }
 
   private rows(): StatusRow[] {
@@ -980,7 +980,7 @@ export class SyncCenterView extends ItemView {
     this.renderResultStrip(main);
     const scoped = this.scopedRows();
     const mainRows = scoped.filter((r) => this.sectionOf(r.group.name) === "main");
-    const sections: Record<Exclude<SectionKind, "main">, StatusRow[]> = { outdated: [], disabled: [], "not-installed": [] };
+    const sections: Record<Exclude<SectionKind, "main">, StatusRow[]> = { outdated: [], disabled: [], "not-installed": [], "desktop-only": [] };
     for (const r of scoped) {
       const s = this.sectionOf(r.group.name);
       if (s !== "main") sections[s].push(r);
@@ -1044,6 +1044,7 @@ export class SyncCenterView extends ItemView {
       this.renderSection(sectionsHost, "outdated", sections.outdated);
       this.renderSection(sectionsHost, "disabled", sections.disabled);
       this.renderSection(sectionsHost, "not-installed", sections["not-installed"]);
+      this.renderInfoSection(sectionsHost, "desktop-only", sections["desktop-only"]);
     };
 
     renderPills();
@@ -1176,6 +1177,35 @@ export class SyncCenterView extends ItemView {
     });
   }
 
+  // A controls-free availability section: no select-all, no per-row checkbox/On-apply — just the
+  // items + a note. Used for "Desktop-only" (mobile): those plugins can't run here, so there is
+  // nothing to stage or apply; they're shown for awareness only.
+  private renderInfoSection(main: HTMLElement, kind: "desktop-only", rows: StatusRow[]): void {
+    if (rows.length === 0) return;
+    const matches = this.searching()
+      ? rows.filter((r) => matchesSearch(`${this.host.displayName(r.group.name, r.group.label)} ${r.group.name}`, this.search))
+      : rows;
+    if (this.searching() && matches.length === 0) return;
+    const open = this.searching() || this.sectionOpen.has(kind);
+    const fold = main.createDiv({ cls: `config-sync-section is-${kind}${open ? " is-open" : ""}` });
+    const head = fold.createDiv({ cls: "config-sync-section-head" });
+    head.createSpan({ cls: "config-sync-row-chevron", text: open ? "▾" : "▸" });
+    head.createSpan({ cls: "config-sync-section-title", text: SECTION_TITLES[kind] });
+    head.createSpan({ cls: "config-sync-pill is-neutral", text: `${matches.length}` });
+    head.addEventListener("click", () => {
+      if (this.sectionOpen.has(kind)) this.sectionOpen.delete(kind);
+      else this.sectionOpen.add(kind);
+      this.render(this.renderGen);
+    });
+    if (!open) return;
+    fold.createDiv({ cls: "config-sync-report-legend", text: SECTION_NOTES[kind] });
+    for (const r of matches) {
+      const row = fold.createDiv({ cls: "config-sync-row is-static" });
+      row.createSpan({ cls: "config-sync-rule-name", text: this.host.displayName(r.group.name, r.group.label) });
+      row.createSpan({ cls: "config-sync-doto-pill", text: "desktop-only" });
+    }
+  }
+
   private renderSection(main: HTMLElement, kind: Exclude<SectionKind, "main">, rows: StatusRow[]): void {
     if (rows.length === 0) return;
     const matches = this.searching()
@@ -1235,6 +1265,7 @@ export class SyncCenterView extends ItemView {
     });
     const chev = row.createSpan({ cls: "config-sync-row-chevron", text: this.expandedItems.has(group.name) ? "▾" : "▸" });
     row.createSpan({ cls: "config-sync-rule-name", text: this.host.displayName(group.name, group.label) });
+    if (this.availOf(group.name).desktopOnly) row.createSpan({ cls: "config-sync-doto-pill", text: "desktop-only" });
     if (group.mode === "encrypted") {
       const badge = row.createSpan({
         cls: "config-sync-mode-badge",

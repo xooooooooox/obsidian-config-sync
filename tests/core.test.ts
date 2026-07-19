@@ -201,6 +201,18 @@ describe("capture", () => {
     expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.2.3" });
   });
 
+  it("records desktopOnly in the lock for a desktop-only plugin", async () => {
+    const { io, plugins, ctx } = setup();
+    plugins.installed.set("demo", "1.2.3");
+    plugins.desktopOnlyIds.add("demo");
+    io.seed({ ".obs/plugins/demo/data.json": "{}", ".obs/hotkeys.json": "{}", ".obs/snippets/one.css": "x" });
+    await seedGroups(ctx, MANIFEST);
+    await capture(ctx);
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, { sourcePluginVersion?: string; desktopOnly?: boolean }> };
+    expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.2.3", desktopOnly: true });
+    expect(lock.groups["hotkeys"]?.desktopOnly).toBeUndefined(); // app-anchored: never flagged
+  });
+
   it("skips OS junk when capturing dirs and cleans junk already in the store", async () => {
     const { io, plugins, ctx } = setup();
     plugins.installed.set("demo", "1.2.3");

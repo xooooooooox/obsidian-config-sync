@@ -11,6 +11,7 @@ export interface Availability {
   localVersion: string | null;
   storeVersion: string | null;
   anchor: "plugin" | "app";
+  desktopOnly: boolean; // the plugin can't run on mobile (from the lock; false for app-anchored)
 }
 
 // Dotted compare: numeric segments numerically, non-numeric lexically, missing = "0".
@@ -51,11 +52,12 @@ export function availabilityForGroup(group: SyncGroup, plugins: PluginHost, lock
       localVersion,
       storeVersion,
       anchor: "plugin",
+      desktopOnly: lock?.groups[group.name]?.desktopOnly === true,
     };
   }
   const localVersion = plugins.getAppVersion();
   const storeVersion = lock?.groups[group.name]?.sourceAppVersion ?? null;
   const isCore = coreSettingsIds().has(group.name);
   const kind: AvailabilityKind = isCore && !plugins.isCorePluginEnabled(group.name) ? "disabled" : "enabled";
-  return { kind, drift: driftFor(localVersion, storeVersion), localVersion, storeVersion, anchor: "app" };
+  return { kind, drift: driftFor(localVersion, storeVersion), localVersion, storeVersion, anchor: "app", desktopOnly: false };
 }

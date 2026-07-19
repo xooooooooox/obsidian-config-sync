@@ -22,7 +22,7 @@ describe("availabilityForGroup", () => {
     p.installed.set("demo", "2.2.1");
     p.enabled.add("demo");
     const a = availabilityForGroup(pluginGroup, p, lock({ "plugin-demo": { sourcePluginVersion: "2.4.0" } }));
-    expect(a).toEqual({ kind: "enabled", drift: "behind", localVersion: "2.2.1", storeVersion: "2.4.0", anchor: "plugin" });
+    expect(a).toEqual({ kind: "enabled", drift: "behind", localVersion: "2.2.1", storeVersion: "2.4.0", anchor: "plugin", desktopOnly: false });
     p.enabled.delete("demo");
     expect(availabilityForGroup(pluginGroup, p, null).kind).toBe("disabled");
     p.installed.delete("demo");
@@ -30,15 +30,26 @@ describe("availabilityForGroup", () => {
     expect(ni.kind).toBe("not-installed");
     expect(ni.drift).toBeNull();
   });
+  it("carries desktopOnly from the lock (plugin groups only)", () => {
+    const p = new FakePlugins();
+    p.installed.set("demo", "2.2.1");
+    const on = availabilityForGroup(pluginGroup, p, lock({ "plugin-demo": { sourcePluginVersion: "2.2.1", desktopOnly: true } }));
+    expect(on.desktopOnly).toBe(true);
+    const off = availabilityForGroup(pluginGroup, p, lock({ "plugin-demo": { sourcePluginVersion: "2.2.1" } }));
+    expect(off.desktopOnly).toBe(false);
+    p.appVersion = "1.8.7";
+    p.coreEnabled.add("daily-notes");
+    expect(availabilityForGroup(coreGroup, p, null).desktopOnly).toBe(false); // app-anchored
+  });
   it("anchors core and obsidian groups to the app version", () => {
     const p = new FakePlugins();
     p.appVersion = "1.8.7";
     p.coreEnabled.add("daily-notes");
     const core = availabilityForGroup(coreGroup, p, lock({ "daily-notes": { sourceAppVersion: "1.9.2" } }));
-    expect(core).toEqual({ kind: "enabled", drift: "behind", localVersion: "1.8.7", storeVersion: "1.9.2", anchor: "app" });
+    expect(core).toEqual({ kind: "enabled", drift: "behind", localVersion: "1.8.7", storeVersion: "1.9.2", anchor: "app", desktopOnly: false });
     p.coreEnabled.delete("daily-notes");
     expect(availabilityForGroup(coreGroup, p, null).kind).toBe("disabled");
     const obs = availabilityForGroup(obsGroup, p, lock({ hotkeys: { sourceAppVersion: "1.8.7" } }));
-    expect(obs).toEqual({ kind: "enabled", drift: null, localVersion: "1.8.7", storeVersion: "1.8.7", anchor: "app" });
+    expect(obs).toEqual({ kind: "enabled", drift: null, localVersion: "1.8.7", storeVersion: "1.8.7", anchor: "app", desktopOnly: false });
   });
 });

@@ -456,6 +456,7 @@ body.is-phone .config-sync-fkey {
 
 .config-sync-mode-badge { color: var(--text-faint); display: inline-flex; align-items: center; }
 .config-sync-mode-badge svg { width: 12px; height: 12px; }
+.config-sync-doto-pill { font-size: 10.5px; line-height: 1.6; border-radius: 6px; padding: 1px 8px; margin-left: var(--size-4-2); color: var(--color-orange); border: 1px solid rgba(var(--color-orange-rgb), 0.45); white-space: nowrap; }
 
 /* custom-drawn checkboxes (same inputs, no native rendering) */
 .config-sync-hub-row input[type="checkbox"],
@@ -951,12 +952,12 @@ body.is-mobile .config-sync-section-head input[type="checkbox"]:indeterminate::a
 .config-sync-cm-conflict:not(.is-unresolved) .config-sync-cm-warn { display: none; }
 
 .config-sync-cm-crow { display: flex; align-items: center; gap: var(--size-4-2); padding: var(--size-4-2) var(--size-4-3); cursor: pointer; background: var(--background-secondary); }
-.config-sync-cm-cname { font-weight: 600; }
+.config-sync-cm-cname { font-weight: 600; flex: none; }
 .config-sync-cm-kind { font-size: 10px; letter-spacing: 0.4px; padding: 1px 7px; border-radius: 8px; flex: none; }
 .config-sync-cm-kind.is-definition { color: var(--color-orange); background: rgba(var(--color-orange-rgb), 0.13); border: 1px solid rgba(var(--color-orange-rgb), 0.35); }
 .config-sync-cm-kind.is-file { color: var(--color-blue); background: rgba(var(--color-blue-rgb), 0.13); border: 1px solid rgba(var(--color-blue-rgb), 0.35); }
-.config-sync-cm-rel { color: var(--text-faint); font-size: var(--font-ui-smaller); font-family: var(--font-monospace); }
-.config-sync-cm-warn { color: var(--color-orange); font-size: var(--font-ui-smaller); }
+.config-sync-cm-rel { color: var(--text-faint); font-size: var(--font-ui-smaller); font-family: var(--font-monospace); flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.config-sync-cm-warn { color: var(--color-orange); font-size: var(--font-ui-smaller); flex: none; white-space: nowrap; }
 .config-sync-cm-chev { color: var(--text-faint); }
 
 .config-sync-cm-seg { display: flex; border: 1px solid var(--background-modifier-border); border-radius: var(--radius-s); overflow: hidden; flex: none; }

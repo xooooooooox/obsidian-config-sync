@@ -13,6 +13,7 @@ export type ProgressFn = (done: number, total: number, current: string, phase?: 
 
 export interface PluginHost {
   getInstalledPluginVersion(id: string): string | null;
+  isDesktopOnly(id: string): boolean; // the plugin's manifest.isDesktopOnly — can it run on mobile
   isPluginEnabled(id: string): boolean;
   disablePlugin(id: string): Promise<void>;
   enablePlugin(id: string): Promise<void>;
@@ -183,7 +184,9 @@ export async function capture(ctx: CoreContext, names?: string[], onProgress?: P
       if (result.status !== "error") {
         const version = ctx.plugins.getInstalledPluginVersion(pluginId);
         if (version !== null) {
-          lock.groups[group.name] = { sourcePluginVersion: version };
+          lock.groups[group.name] = ctx.plugins.isDesktopOnly(pluginId)
+            ? { sourcePluginVersion: version, desktopOnly: true }
+            : { sourcePluginVersion: version };
           // Version-only refresh: content is byte-identical but the store recorded an older
           // version (local > store drift). captureGroup produces no file change, so without this
           // the run report reads "no changes" even though the store's recorded version changed.

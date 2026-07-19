@@ -80,7 +80,7 @@ const DEFAULT_SETTINGS: ConfigSyncSettings = {
 
 // app.plugins is not part of the public API; this is the community-standard access path.
 interface CommunityPluginRegistry {
-  manifests: Record<string, { id: string; name: string; version: string }>;
+  manifests: Record<string, { id: string; name: string; version: string; isDesktopOnly?: boolean }>;
   enabledPlugins: Set<string>;
   plugins: Record<string, unknown>; // currently loaded instances — diverges from enabledPlugins
 
@@ -668,6 +668,7 @@ export default class ConfigSyncPlugin extends Plugin {
     const registry = this.pluginRegistry();
     return {
       getInstalledPluginVersion: (id) => registry.manifests[id]?.version ?? null,
+      isDesktopOnly: (id) => registry.manifests[id]?.isDesktopOnly === true,
       isPluginEnabled: (id) => pluginRuntimeEnabled(registry, id),
       disablePlugin: (id) => registry.disablePlugin(id),
       enablePlugin: (id) => registry.enablePlugin(id),
