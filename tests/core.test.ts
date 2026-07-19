@@ -497,6 +497,24 @@ describe("applyWithActions", () => {
     const results = await applyWithActions(ctx, [{ name: "plugin-demo", action: "none" }], async () => "x");
     expect(results[0]?.stateNote).toEqual({ kind: "ok", text: "selected for install" });
   });
+  it("a single item throwing becomes an error result without aborting the rest of the batch", async () => {
+    const { io, plugins, ctx } = setup();
+    plugins.installed.set("demo", "1.2.3");
+    await seedStore(io, ctx);
+    // First item's group is unknown → requireGroup throws. The second item must still run.
+    const results = await applyWithActions(
+      ctx,
+      [{ name: "plugin-missing", action: "enable" }, { name: "plugin-demo", action: "enable" }],
+      async () => "9.9.9"
+    );
+    expect(results.length).toBe(2);
+    expect(results[0]?.group).toBe("plugin-missing");
+    expect(results[0]?.status).toBe("error");
+    expect(results[0]?.messages.join(" ")).toContain("Unknown config-sync group");
+    expect(results[1]?.group).toBe("plugin-demo");
+    expect(results[1]?.status).toBe("ok");
+    expect(plugins.enabled.has("demo")).toBe(true);
+  });
 
   describe("enable happens AFTER the config write (plugin loads with the applied settings)", () => {
     // Regression for the outdated-section race: enabling a plugin makes it load its data.json;

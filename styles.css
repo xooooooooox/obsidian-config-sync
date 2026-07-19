@@ -788,6 +788,10 @@ body.is-mobile .config-sync-section-head input[type="checkbox"]:indeterminate::a
 .config-sync-pill.is-statenote { background: rgba(var(--color-cyan-rgb), 0.18); color: var(--color-cyan); }
 
 /* 0.20.0 inline result strip */
+/* Sticky dock: opaque backing so scrolling rows don't bleed through the strip's translucent
+   tint; pins the outcome to the top of the scroll viewport (see renderResultStrip). */
+.config-sync-strip-dock { position: sticky; top: 0; z-index: 5; background: var(--background-primary); padding-bottom: var(--size-4-2); border-bottom: 1px solid var(--background-modifier-border); margin-bottom: var(--size-4-2); }
+.config-sync-strip-dock .config-sync-strip { margin-bottom: 0; }
 .config-sync-strip { border: 1px solid rgba(var(--color-green-rgb), 0.35); background: rgba(var(--color-green-rgb), 0.07); border-radius: 8px; padding: 8px 12px; margin-bottom: 8px; }
 .config-sync-strip.is-transfer { border-color: rgba(var(--color-cyan-rgb), 0.4); background: rgba(var(--color-cyan-rgb), 0.07); }
 /* Outcome tone (batch: honest run reports) — the strip is green only when the run is clean. */
