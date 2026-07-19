@@ -115,10 +115,14 @@ export class FakePlugins {
   coreNames = new Map<string, string>();
   appVersion = "1.8.7";
   coreEnabled = new Set<string>();
+  desktopOnlyIds = new Set<string>();
   log: string[] = [];
 
   getInstalledPluginVersion(id: string): string | null {
     return this.installed.get(id) ?? null;
+  }
+  isDesktopOnly(id: string): boolean {
+    return this.desktopOnlyIds.has(id);
   }
   isPluginEnabled(id: string): boolean {
     return this.enabled.has(id);

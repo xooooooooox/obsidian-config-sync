@@ -79,13 +79,14 @@ export function nosettingsLineText(n: number, open: boolean): string {
   return `○ ${n} item${n === 1 ? "" : "s"} with no settings yet ${open ? "▾" : "▸"}`;
 }
 
-export type SectionKind = "main" | "outdated" | "disabled" | "not-installed";
+export type SectionKind = "main" | "outdated" | "disabled" | "not-installed" | "desktop-only";
 
 // Unified rule (spec 2026-07-17, closes the install-only/enable-only/update-only family): in
 // the non-main sections the state ACTION is the payload, so every row stages except locked —
 // an empty settings transfer (no-settings, in-sync) no longer gates interaction. Main-section
 // rows keep the plain stageability (there is no action to run there).
 export function stageableRow(state: GroupState, section: SectionKind): boolean {
+  if (section === "desktop-only") return false; // informational only — can't run here, nothing to stage
   if (section !== "main") return state !== "locked";
   return stageableState(state);
 }
@@ -94,15 +95,20 @@ export const SECTION_TITLES: Record<Exclude<SectionKind, "main">, string> = {
   outdated: "Outdated on this device",
   disabled: "Disabled on this device",
   "not-installed": "Not installed on this device",
+  "desktop-only": "Desktop-only",
 };
 
 export const SECTION_NOTES: Record<Exclude<SectionKind, "main">, string> = {
   outdated: "Store settings were captured on a newer plugin version than this device runs — updating first is the safe path.",
   disabled: "Settings sync either way — choose whether applying also turns the plugin on.",
   "not-installed": "Settings sync either way — choose whether applying also installs the plugin (latest version, from the community catalog).",
+  "desktop-only": "In your config but can't run on this device — nothing to do here.",
 };
 
-export function sectionForItem(a: Availability): SectionKind {
+// isMobile: a desktop-only plugin (author-declared) that isn't installed on a phone can't run
+// there, so it's surfaced informationally rather than offered for a failing install.
+export function sectionForItem(a: Availability, isMobile: boolean): SectionKind {
+  if (isMobile && a.desktopOnly && a.kind === "not-installed") return "desktop-only";
   if (a.kind === "not-installed") return "not-installed";
   if (a.kind === "disabled") return "disabled";
   if (a.anchor === "plugin" && a.drift === "behind") return "outdated";

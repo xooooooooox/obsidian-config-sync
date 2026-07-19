@@ -153,16 +153,27 @@ describe("nosettingsLineText", () => {
 });
 
 const avail = (over: Partial<Availability>): Availability => ({
-  kind: "enabled", drift: null, localVersion: "1.0.0", storeVersion: "1.0.0", anchor: "plugin", ...over,
+  kind: "enabled", drift: null, localVersion: "1.0.0", storeVersion: "1.0.0", anchor: "plugin", desktopOnly: false, ...over,
 });
 
 describe("sectionForItem", () => {
   it("buckets by availability, then behind-drift for community plugins", () => {
-    expect(sectionForItem(avail({ kind: "not-installed" }))).toBe("not-installed");
-    expect(sectionForItem(avail({ kind: "disabled", drift: "behind" }))).toBe("disabled");
-    expect(sectionForItem(avail({ drift: "behind", storeVersion: "2.0.0" }))).toBe("outdated");
-    expect(sectionForItem(avail({ drift: "ahead" }))).toBe("main");
-    expect(sectionForItem(avail({ anchor: "app", drift: "behind" }))).toBe("main");
+    expect(sectionForItem(avail({ kind: "not-installed" }), false)).toBe("not-installed");
+    expect(sectionForItem(avail({ kind: "disabled", drift: "behind" }), false)).toBe("disabled");
+    expect(sectionForItem(avail({ drift: "behind", storeVersion: "2.0.0" }), false)).toBe("outdated");
+    expect(sectionForItem(avail({ drift: "ahead" }), false)).toBe("main");
+    expect(sectionForItem(avail({ anchor: "app", drift: "behind" }), false)).toBe("main");
+  });
+  it("buckets a not-installed desktop-only plugin into desktop-only on mobile only", () => {
+    const a = avail({ kind: "not-installed", desktopOnly: true });
+    expect(sectionForItem(a, true)).toBe("desktop-only");
+    expect(sectionForItem(a, false)).toBe("not-installed"); // desktop: normal
+  });
+  it("a desktop-only plugin that IS installed is not bucketed to desktop-only", () => {
+    expect(sectionForItem(avail({ kind: "disabled", drift: "behind", desktopOnly: true }), true)).toBe("disabled");
+  });
+  it("desktop-only rows are never stageable", () => {
+    expect(stageableRow("store-newer", "desktop-only")).toBe(false);
   });
 });
 

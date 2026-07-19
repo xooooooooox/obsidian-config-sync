@@ -147,7 +147,7 @@ export function parseStoreLock(raw: string): StoreLock {
   if (!isPlainObject(parsed) || typeof parsed.capturedAt !== "string" || !isPlainObject(parsed.groups)) {
     throw new ManifestValidationError("store.lock.json must be {capturedAt: string, groups: object}");
   }
-  const groups: Record<string, { sourcePluginVersion?: string; sourceAppVersion?: string }> = {};
+  const groups: Record<string, { sourcePluginVersion?: string; sourceAppVersion?: string; desktopOnly?: boolean }> = {};
   for (const [k, v] of Object.entries(parsed.groups)) {
     const plugin = isPlainObject(v) && typeof v.sourcePluginVersion === "string" ? v.sourcePluginVersion : undefined;
     const app = isPlainObject(v) && typeof v.sourceAppVersion === "string" ? v.sourceAppVersion : undefined;
@@ -157,6 +157,7 @@ export function parseStoreLock(raw: string): StoreLock {
     groups[k] = {};
     if (plugin !== undefined) groups[k].sourcePluginVersion = plugin;
     if (app !== undefined) groups[k].sourceAppVersion = app;
+    if (isPlainObject(v) && v.desktopOnly === true) groups[k].desktopOnly = true;
   }
   return { capturedAt: parsed.capturedAt, groups };
 }

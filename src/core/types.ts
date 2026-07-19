@@ -27,7 +27,7 @@ export interface SyncManifest {
 
 export interface StoreLock {
   capturedAt: string;
-  groups: Record<string, { sourcePluginVersion?: string; sourceAppVersion?: string }>;
+  groups: Record<string, { sourcePluginVersion?: string; sourceAppVersion?: string; desktopOnly?: boolean }>;
 }
 
 export interface FileChanges {
