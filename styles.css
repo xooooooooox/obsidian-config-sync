@@ -1045,6 +1045,8 @@ body.is-mobile .config-sync-strip-meta .config-sync-report-pills { margin-left: 
   border-radius: var(--radius-s);
 }
 
+.config-sync-ldrow-gsep { margin-top: var(--size-4-3); }
+
 .config-sync-ldrow.is-local,
 .config-sync-ldrow.is-auto {
   border-color: rgba(var(--color-orange-rgb), 0.4);
