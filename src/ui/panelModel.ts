@@ -98,6 +98,32 @@ export const SECTION_TITLES: Record<Exclude<SectionKind, "main">, string> = {
   "desktop-only": "Desktop-only",
 };
 
+export type SwitchRow = { id: string; name: string; hint: string; desktopOnly: boolean; deviceScoped: boolean };
+export type SwitchRowBucket = "desktop-only" | "device-scoped" | "excluded" | "included";
+export type OrderedSwitchRow = SwitchRow & { bucket: SwitchRowBucket };
+
+// Bucket precedence for the settings "Excluded from this list" panel. Auto-exclusion
+// (desktop-only, then device-scoped) outranks a manual exclude even when a plugin is both —
+// a desktop-only / device-scoped plugin's exclusion is not the user's to toggle.
+const SWITCH_BUCKET_ORDER: SwitchRowBucket[] = ["desktop-only", "device-scoped", "excluded", "included"];
+
+export function switchRowBucket(row: SwitchRow, isManual: boolean): SwitchRowBucket {
+  if (row.desktopOnly) return "desktop-only";
+  if (row.deviceScoped) return "device-scoped";
+  if (isManual) return "excluded";
+  return "included";
+}
+
+export function orderSwitchRows(rows: SwitchRow[], manualIds: Set<string>): OrderedSwitchRow[] {
+  return rows
+    .map((r) => ({ ...r, bucket: switchRowBucket(r, manualIds.has(r.id)) }))
+    .sort(
+      (a, b) =>
+        SWITCH_BUCKET_ORDER.indexOf(a.bucket) - SWITCH_BUCKET_ORDER.indexOf(b.bucket) ||
+        a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
+    );
+}
+
 export const SECTION_NOTES: Record<Exclude<SectionKind, "main">, string> = {
   outdated: "Store settings were captured on a newer plugin version than this device runs — updating first is the safe path.",
   disabled: "Settings sync either way — choose whether applying also turns the plugin on.",

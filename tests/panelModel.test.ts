@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { capFileEntries, insyncLineText, moreFilesText, visibleUnderFilter, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, footerSummary, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, versionLine, runProgressLabel } from "../src/ui/panelModel";
+import { capFileEntries, insyncLineText, moreFilesText, visibleUnderFilter, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, footerSummary, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, versionLine, runProgressLabel, switchRowBucket, orderSwitchRows, SwitchRow } from "../src/ui/panelModel";
 import { GroupState } from "../src/core/status";
 import { Availability } from "../src/core/availability";
 
@@ -238,5 +238,48 @@ describe("runProgressLabel", () => {
   it("arrow-prefixes the verb with done/total", () => {
     expect(runProgressLabel("Applying", 5, 72)).toBe("↓ Applying 5/72…");
     expect(runProgressLabel("Capturing", 0, 3)).toBe("↑ Capturing 0/3…");
+  });
+});
+
+describe("switchRowBucket / orderSwitchRows", () => {
+  const row = (id: string, o: Partial<{ desktopOnly: boolean; deviceScoped: boolean }> = {}): SwitchRow => ({
+    id,
+    name: id,
+    hint: "",
+    desktopOnly: o.desktopOnly ?? false,
+    deviceScoped: o.deviceScoped ?? false,
+  });
+
+  it("classifies by precedence: desktop-only > device-scoped > manual > included", () => {
+    expect(switchRowBucket(row("a", { desktopOnly: true }), false)).toBe("desktop-only");
+    expect(switchRowBucket(row("b", { deviceScoped: true }), false)).toBe("device-scoped");
+    expect(switchRowBucket(row("c"), true)).toBe("excluded");
+    expect(switchRowBucket(row("d"), false)).toBe("included");
+  });
+
+  it("auto-exclusion outranks a manual exception when both apply", () => {
+    expect(switchRowBucket(row("a", { desktopOnly: true }), true)).toBe("desktop-only");
+    expect(switchRowBucket(row("b", { deviceScoped: true }), true)).toBe("device-scoped");
+  });
+
+  it("orders into four blocks, alphabetical within a block", () => {
+    const rows = [
+      row("Zebra"),
+      row("Vimrc", { deviceScoped: true }),
+      row("Better PDF", { desktopOnly: true }),
+      row("Apple"),
+      row("Obsidian Git", { deviceScoped: true }),
+      row("Quick Explorer", { desktopOnly: true }),
+    ];
+    const manual = new Set(["Apple"]);
+    const ordered = orderSwitchRows(rows, manual);
+    expect(ordered.map((r) => `${r.bucket}:${r.name}`)).toEqual([
+      "desktop-only:Better PDF",
+      "desktop-only:Quick Explorer",
+      "device-scoped:Obsidian Git",
+      "device-scoped:Vimrc",
+      "excluded:Apple",
+      "included:Zebra",
+    ]);
   });
 });
