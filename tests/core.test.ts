@@ -1537,6 +1537,18 @@ describe("enabled-css-snippets switch list (field-aware local, plain store)", ()
     const applied = JSON.parse(await io.read(".obs/appearance.json")) as { enabledCssSnippets: string[] };
     expect(applied.enabledCssSnippets).toEqual(["a", "keepPinned"]);
   });
+
+  it("status: snippet field equals its plain-array store (no phantom change)", async () => {
+    const { io, ctx } = setup();
+    await seedGroups(ctx, SNIPPET_MANIFEST);
+    io.seed({
+      "cs/store/configdir/enabled-css-snippets.json": JSON.stringify(["b", "a"]),
+      ".obs/appearance.json": JSON.stringify({ cssTheme: "X", enabledCssSnippets: ["a", "b"] }),
+    });
+    const manifest = await loadManifest(ctx);
+    const statuses = await statusForGroups(ctx, groupsForDevice(manifest, "desktop"));
+    expect(statuses.find((s) => s.group === "enabled-css-snippets")?.state).toBe("in-sync");
+  });
 });
 
 describe("applyImport — pull is pure store transport", () => {

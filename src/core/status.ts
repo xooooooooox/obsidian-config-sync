@@ -1,11 +1,11 @@
 import { CoreContext, ExternalStoreReader, groupForStoreRel, loadLock, loadManifest, remoteGroupsFrom, storeDir } from "./ConfigSyncCore";
 import { isJunkPath, listFilesRecursive } from "./io";
-import { basename, groupRealPath, groupStorePath, relativeTo } from "./pathing";
+import { basename, groupStorePath, relativeTo } from "./pathing";
 import { FileChanges, hasChanges, StoreLock, SyncGroup } from "./types";
 import { parseStoreLock } from "./manifest";
 import { contentUnchanged, groupNeedsPassphrase } from "./modes";
 import { parseFileEnvelope } from "./crypto";
-import { parseSwitchList, SWITCH_LIST_GROUPS, switchListsEqual } from "./switchList";
+import { localRealPath, parseSwitchList, readLocalSwitchList, SWITCH_LIST_GROUPS, switchListsEqual } from "./switchList";
 
 export type GroupState = "in-sync" | "local-changed" | "store-newer" | "differs" | "not-captured" | "no-settings" | "locked";
 
@@ -45,7 +45,7 @@ async function groupStatus(ctx: CoreContext, group: SyncGroup, capturedAtMs: num
   if (groupNeedsPassphrase(group) && ctx.passphrase === null) {
     return { group: group.name, state: "locked" };
   }
-  const real = groupRealPath(group.path, ctx.configDir);
+  const real = localRealPath(group.name, group.path, ctx.configDir);
   const store = `${storeDir(ctx)}/${groupStorePath(group.path)}`;
   const cmp = group.type === "file" ? await compareFile(ctx, group, real, store) : await compareDir(ctx, group, real, store);
   if (cmp === "no-settings") return { group: group.name, state: "no-settings" };
@@ -76,7 +76,7 @@ async function compareFile(ctx: CoreContext, group: SyncGroup, real: string, sto
   // made exception-free devices fall through to byte comparison, where local enable-order vs
   // store-stable order reads as a permanent phantom "To capture" (real-vault find 2026-07-17).
   const switchEqual =
-    SWITCH_LIST_GROUPS.has(group.name) ? switchListEqualOrNull(liveContent, storeContent, exc) : null;
+    SWITCH_LIST_GROUPS.has(group.name) ? switchListEqualOrNull(group.name, liveContent, storeContent, exc) : null;
   const equal =
     switchEqual !== null
       ? switchEqual
@@ -89,8 +89,8 @@ async function compareFile(ctx: CoreContext, group: SyncGroup, real: string, sto
 
 // For switch-list groups with exceptions: compare with switchListsEqual when both sides parse
 // as a switch list; otherwise return null to fall through to the existing comparison path.
-function switchListEqualOrNull(liveContent: string, storeContent: string, exc: string[]): boolean | null {
-  const live = parseSwitchList(liveContent);
+function switchListEqualOrNull(name: string, liveContent: string, storeContent: string, exc: string[]): boolean | null {
+  const live = readLocalSwitchList(name, liveContent);
   const store = parseSwitchList(storeContent);
   if (live === null || store === null) return null;
   return switchListsEqual(live, store, exc);
