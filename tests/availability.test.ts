@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { availabilityForGroup, compareVersions, desktopOnlyDrift } from "../src/core/availability";
+import { availabilityForGroup, compareVersions, desktopOnlyDrift, desktopOnlyPluginIds } from "../src/core/availability";
 import { FakePlugins } from "./memfs";
 import { StoreLock, SyncGroup } from "../src/core/types";
 
@@ -82,5 +82,21 @@ describe("desktopOnlyDrift", () => {
     p.installed.set("demo", "1.0.0"); // desktopOnlyIds empty → not desktop-only
     const groups = [g("plugin-demo", "{configDir}/plugins/demo/data.json")];
     expect(desktopOnlyDrift(groups, p, lock({ "plugin-demo": { sourcePluginVersion: "1.0.0" } }))).toBe(0);
+  });
+});
+
+describe("desktopOnlyPluginIds", () => {
+  it("collects plugin ids the lock marks desktop-only, ignoring non-plugin and unflagged entries", () => {
+    const ids = desktopOnlyPluginIds(
+      lock({
+        "plugin-media-extended": { sourcePluginVersion: "1.0.0", desktopOnly: true },
+        "plugin-dataview": { sourcePluginVersion: "1.0.0" }, // no flag
+        hotkeys: { sourceAppVersion: "1.0.0" }, // app-anchored, not plugin-prefixed
+      })
+    );
+    expect([...ids].sort()).toEqual(["media-extended"]);
+  });
+  it("returns an empty set for a null lock", () => {
+    expect(desktopOnlyPluginIds(null).size).toBe(0);
   });
 });
