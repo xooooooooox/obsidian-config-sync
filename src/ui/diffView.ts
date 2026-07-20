@@ -50,6 +50,40 @@ export function diffLines(leftText: string, rightText: string): DiffOp[] | null 
   return ops;
 }
 
+export type DiffRow = DiffOp | { kind: "gap"; count: number };
+
+// Keeps every change and `context` common lines around each change; folds the remaining runs of
+// common lines into a single gap row. A run shorter than `minGap` is shown inline rather than
+// replaced by a same-height gap marker (no visual saving).
+export function collapseUnchanged(ops: DiffOp[], context: number, minGap = 2): DiffRow[] {
+  const shown = new Array<boolean>(ops.length).fill(false);
+  for (let i = 0; i < ops.length; i++) {
+    if (ops[i]!.kind !== "common") {
+      for (let j = Math.max(0, i - context); j <= Math.min(ops.length - 1, i + context); j++) shown[j] = true;
+    }
+  }
+  const rows: DiffRow[] = [];
+  let runStart = -1;
+  let runLen = 0;
+  const flush = (): void => {
+    if (runLen === 0) return;
+    if (runLen < minGap) for (let k = runStart; k < runStart + runLen; k++) rows.push(ops[k]!);
+    else rows.push({ kind: "gap", count: runLen });
+    runLen = 0;
+  };
+  for (let i = 0; i < ops.length; i++) {
+    if (shown[i]) {
+      flush();
+      rows.push(ops[i]!);
+    } else {
+      if (runLen === 0) runStart = i;
+      runLen++;
+    }
+  }
+  flush();
+  return rows;
+}
+
 function renderUnified(pane: HTMLElement, ops: DiffOp[], leftLabel: string, rightLabel: string): void {
   const box = pane.createDiv({ cls: "config-sync-cm-unified" });
   box.createDiv({ cls: "config-sync-cm-dline is-delhead", text: `--- ${leftLabel}` });
