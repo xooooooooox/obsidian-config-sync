@@ -78,3 +78,15 @@ export function desktopOnlyDrift(groups: SyncGroup[], plugins: PluginHost, lock:
   }
   return n;
 }
+
+// Plugin ids the store records as desktop-only (from the lock's per-group flags). The lock is the
+// source that also works on a phone, where the plugin isn't installed and its manifest can't be
+// read — used to auto-except them from the enabled-plugins switch list so a phone doesn't drop them.
+export function desktopOnlyPluginIds(lock: StoreLock | null): Set<string> {
+  const ids = new Set<string>();
+  if (lock === null) return ids;
+  for (const [name, entry] of Object.entries(lock.groups)) {
+    if (entry.desktopOnly === true && name.startsWith("plugin-")) ids.add(name.slice("plugin-".length));
+  }
+  return ids;
+}

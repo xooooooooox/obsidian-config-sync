@@ -24,7 +24,7 @@ import { retry, HttpStatusError, TimeoutError, isRetryableError } from "./core/a
 import { RunRecord, RunKind, summarizeRun, pruneHistory } from "./core/runHistory";
 import { BratIndex, parseBratRepoList, resolveBratIndex } from "./core/bratIndex";
 import { type CatalogSection, displayLabelForGroup, ensureSelfPresets, findGroupByName, groupForItem, listBetaSections, listCoreSections, listDiscovered, listOptionSections, listPluginSections, SELF_GROUP_NAME, setCorePluginIds } from "./core/catalog";
-import { Availability, availabilityForGroup, desktopOnlyDrift } from "./core/availability";
+import { Availability, availabilityForGroup, desktopOnlyDrift, desktopOnlyPluginIds } from "./core/availability";
 import { listFilesRecursive, isJunkPath, FileIO } from "./core/io";
 import { leftoverStoreRels, storeSelfCopyGroups } from "./core/leftover";
 import { ManifestValidationError, migrateLegacyManifest, parseStoreLock, validateSyncManifest } from "./core/manifest";
@@ -429,13 +429,14 @@ export default class ConfigSyncPlugin extends Plugin {
           if (group === undefined || group.mode === "encrypted") return null;
           const io = this.app.vault.adapter;
           const real = groupRealPath(group.path, this.app.vault.configDir);
-          const storeBase = `${await this.resolvedRootPath()}/store/${groupStorePath(group.path)}`;
+          const rootPath = await this.resolvedRootPath();
+          const storeBase = `${rootPath}/store/${groupStorePath(group.path)}`;
           const localPath = group.type === "file" ? real : `${real}/${rel}`;
           const storePath = group.type === "file" ? storeBase : `${storeBase}/${rel}`;
           const local = (await io.exists(localPath)) ? await io.read(localPath) : null;
           const store = (await io.exists(storePath)) ? await io.read(storePath) : null;
           const serialize = (v: SwitchList): string => JSON.stringify(v, null, 2) + "\n";
-          const exc = SWITCH_LIST_GROUPS.has(name) ? (this.settings.switchExceptions[name] ?? []) : [];
+          const exc = SWITCH_LIST_GROUPS.has(name) ? ((await this.augmentedSwitchExceptions(rootPath))[name] ?? []) : [];
           if (dir === "capture") {
             let produced = local ?? "";
             if (group.type === "file" && local !== null) {
@@ -485,7 +486,7 @@ export default class ConfigSyncPlugin extends Plugin {
           const local = parseSwitchList(await ctx.io.read(real));
           const stored = parseSwitchList(await ctx.io.read(store));
           if (local === null || stored === null) return null;
-          return switchDivergence(local, stored, this.settings.switchExceptions[name] ?? []);
+          return switchDivergence(local, stored, ctx.switchExceptions[name] ?? []);
         } catch {
           return null;
         }
@@ -873,19 +874,46 @@ export default class ConfigSyncPlugin extends Plugin {
     };
   }
 
+  // The switch exceptions used at RUNTIME = the user's manual excepts plus every plugin the store
+  // records as desktop-only, folded into the community-plugins list. A phone can't enable a
+  // desktop-only plugin, so excepting it stops capture from dropping it from the store's enabled
+  // list (and apply from force-adding it). settings.switchExceptions (persisted) is left untouched.
+  private async augmentedSwitchExceptions(rootPath: string): Promise<Record<string, string[]>> {
+    // Mobile only: that is where a desktop-only plugin can't run and would otherwise be dropped
+    // from the enabled list. On desktop the plugin runs and its enable/disable must sync normally —
+    // auto-excepting there would stop a disable from propagating and a newly-enabled one from being
+    // captured. Desktop keeps the plain persisted exceptions.
+    if (!Platform.isMobile) return this.settings.switchExceptions;
+    const io = this.configIO();
+    const lockPath = `${rootPath}/store.lock.json`;
+    let lock: StoreLock | null = null;
+    if (await io.exists(lockPath)) {
+      try {
+        lock = parseStoreLock(await io.read(lockPath));
+      } catch {
+        lock = null;
+      }
+    }
+    const dtoIds = desktopOnlyPluginIds(lock);
+    if (dtoIds.size === 0) return this.settings.switchExceptions;
+    const manual = this.settings.switchExceptions["community-plugins"] ?? [];
+    return { ...this.settings.switchExceptions, "community-plugins": [...new Set([...manual, ...dtoIds])] };
+  }
+
   private async coreContext(): Promise<CoreContext> {
     const rootPath = await resolveRootPath(this.settings.rootPath, this.settings.pkmMode, this.pkmProbe());
     if (rootPath === "" || rootPath.startsWith("/") || rootPath.split("/").includes("..")) {
       throw new Error(`Config Sync: invalid data folder "${rootPath}" — set a vault-relative path in settings`);
     }
     this.lastResolvedRoot = rootPath;
+    const switchExceptions = await this.augmentedSwitchExceptions(rootPath);
     return {
       io: this.configIO(),
       configDir: this.app.vault.configDir,
       rootPath,
       plugins: this.pluginHost(),
       passphrase: this.passphrase(),
-      switchExceptions: this.settings.switchExceptions,
+      switchExceptions,
       groupsIO: {
         read: async () => this.settings.groups,
         write: async (groups) => {
