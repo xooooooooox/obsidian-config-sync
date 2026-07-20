@@ -1045,7 +1045,8 @@ body.is-mobile .config-sync-strip-meta .config-sync-report-pills { margin-left: 
   border-radius: var(--radius-s);
 }
 
-.config-sync-ldrow.is-local {
+.config-sync-ldrow.is-local,
+.config-sync-ldrow.is-auto {
   border-color: rgba(var(--color-orange-rgb), 0.4);
   background: rgba(var(--color-orange-rgb), 0.05);
 }
@@ -1053,7 +1054,8 @@ body.is-mobile .config-sync-strip-meta .config-sync-report-pills { margin-left: 
 .config-sync-ldname { font-weight: 500; }
 .config-sync-ldhint { color: var(--text-faint); font-size: var(--font-ui-smaller); }
 .config-sync-ldstate { color: var(--text-muted); font-size: var(--font-ui-smaller); }
-.config-sync-ldrow.is-local .config-sync-ldstate { color: var(--color-orange); }
+.config-sync-ldrow.is-local .config-sync-ldstate,
+.config-sync-ldrow.is-auto .config-sync-ldstate { color: var(--color-orange); }
 
 .config-sync-ldnote { color: var(--color-orange); font-size: var(--font-ui-smaller); margin-left: var(--size-4-1); }
 .config-sync-lddetail { color: var(--color-orange); font-family: var(--font-monospace); font-size: var(--font-ui-smaller); padding: 1px 0; }

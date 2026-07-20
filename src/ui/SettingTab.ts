@@ -56,7 +56,7 @@ export interface SettingsHost extends Plugin {
   passphrase(): string | null;
   setPassphrase(v: string | null): void;
   displayName(group: string, storedLabel?: string): string;
-  switchListRows(group: string): Promise<{ id: string; name: string; hint: string }[]>;
+  switchListRows(group: string): Promise<{ id: string; name: string; hint: string; desktopOnly: boolean }[]>;
 }
 
 const SENSITIVE_ENCRYPT_RE = /apikey|api_key|token|secret|password|credential/i;
@@ -572,7 +572,19 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       listEl.empty();
       const exceptions = new Set(this.host.settings.switchExceptions[group.name] ?? []);
       for (const r of rows) {
-        const isLocal = exceptions.has(r.id);
+        const isManual = exceptions.has(r.id);
+        if (r.desktopOnly && !isManual) {
+          const rowEl = listEl.createDiv({ cls: "config-sync-ldrow is-auto" });
+          rowEl.setAttribute("title", "Excluded automatically — this plugin can't run on this device");
+          rowEl.createSpan({ cls: "config-sync-ldname", text: r.name });
+          rowEl.createSpan({ cls: "config-sync-doto-pill", text: "desktop-only" });
+          rowEl.createSpan({ cls: "config-sync-ldhint", text: r.hint });
+          rowEl.createDiv({ cls: "config-sync-rule-spacer" });
+          rowEl.createSpan({ cls: "config-sync-ldstate", text: "auto-excluded" });
+          new ToggleComponent(rowEl).setValue(true).setDisabled(true);
+          continue;
+        }
+        const isLocal = isManual;
         const rowEl = listEl.createDiv({ cls: `config-sync-ldrow${isLocal ? " is-local" : ""}` });
         rowEl.createSpan({ cls: "config-sync-ldname", text: r.name });
         rowEl.createSpan({ cls: "config-sync-ldhint", text: r.hint });
