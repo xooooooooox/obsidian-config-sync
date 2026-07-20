@@ -1096,6 +1096,30 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     row.addEventListener("click", () => this.jumpTo(hit));
   }
 
+  // After rerender(0) the DOM can still be rebuilding: a settleSensitiveOrder refresh bumps
+  // renderGen and starts a second render, so the awaited render resolves early with the anchor
+  // absent and scrollTop about to be reset. Wait for a frame where renderGen did not advance and
+  // the anchor is present — then it is safe to scroll. Capped so a never-appearing anchor
+  // (e.g. a stale hit) can't spin forever.
+  private waitForSettledAnchor(anchorId: string): Promise<HTMLElement | null> {
+    const sel = `[data-search-anchor="${CSS.escape(anchorId)}"]`;
+    return new Promise((resolve) => {
+      let frames = 0;
+      const tick = (): void => {
+        const gen = this.renderGen;
+        window.requestAnimationFrame(() => {
+          const el = this.containerEl.querySelector<HTMLElement>(sel);
+          if ((el !== null && this.renderGen === gen) || frames++ >= 40) {
+            resolve(el);
+            return;
+          }
+          tick();
+        });
+      };
+      tick();
+    });
+  }
+
   private jumpTo(hit: SearchHit): void {
     void (async () => {
       this.search = "";
@@ -1104,11 +1128,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       this.sortedSections.delete(this.activeTab);
       if (hit.kind === "item" && hit.item !== undefined) this.expanded.add(hit.item.name);
       await this.rerender(0);
-      const target = this.containerEl.querySelector(`[data-search-anchor="${CSS.escape(hit.anchorId)}"]`);
+      const target = await this.waitForSettledAnchor(hit.anchorId);
       if (target === null) return;
       target.scrollIntoView({ block: "center" });
       target.addClass("config-sync-search-highlight");
-      window.setTimeout(() => target.removeClass("config-sync-search-highlight"), 1500);
+      window.setTimeout(() => target.removeClass("config-sync-search-highlight"), 1800);
     })();
   }
 
