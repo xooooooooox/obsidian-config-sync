@@ -1498,6 +1498,47 @@ describe("switch-list exceptions", () => {
   });
 });
 
+const SNIPPET_MANIFEST = JSON.stringify({
+  version: 1,
+  groups: [{ name: "enabled-css-snippets", path: "{configDir}/enabled-css-snippets.json", type: "file", devices: "all" }],
+});
+
+describe("enabled-css-snippets switch list (field-aware local, plain store)", () => {
+  it("captures the field to a dedicated plain-array store file", async () => {
+    const { io, ctx } = setup();
+    await seedGroups(ctx, SNIPPET_MANIFEST);
+    io.seed({ ".obs/appearance.json": JSON.stringify({ cssTheme: "X", enabledCssSnippets: ["a", "a-desktop"], baseFontSize: 16 }) });
+    await capture(ctx, ["enabled-css-snippets"]);
+    expect(JSON.parse(await io.read("cs/store/configdir/enabled-css-snippets.json"))).toEqual(["a", "a-desktop"]);
+  });
+
+  it("apply rewrites only enabledCssSnippets, preserving sibling fields", async () => {
+    const { io, ctx } = setup();
+    await seedGroups(ctx, SNIPPET_MANIFEST);
+    io.seed({
+      "cs/store/configdir/enabled-css-snippets.json": JSON.stringify(["a", "a-desktop"]),
+      ".obs/appearance.json": JSON.stringify({ cssTheme: "X", enabledCssSnippets: ["old"], baseFontSize: 16 }),
+    });
+    await apply(ctx, ["enabled-css-snippets"]);
+    expect(JSON.parse(await io.read(".obs/appearance.json"))).toEqual({ cssTheme: "X", enabledCssSnippets: ["a", "a-desktop"], baseFontSize: 16 });
+  });
+
+  it("force-off removes scope-away ids on apply; pins survive", async () => {
+    const { io, ctx } = setup();
+    ctx.switchExceptions = { "enabled-css-snippets": ["a-mobile", "keepPinned"] }; // mask (pins ∪ scoped)
+    ctx.switchForceOff = { "enabled-css-snippets": ["a-mobile"] }; // scoped-away, not pinned
+    await seedGroups(ctx, SNIPPET_MANIFEST);
+    io.seed({
+      "cs/store/configdir/enabled-css-snippets.json": JSON.stringify(["a"]),
+      ".obs/appearance.json": JSON.stringify({ enabledCssSnippets: ["a", "a-mobile", "keepPinned"] }),
+    });
+    await apply(ctx, ["enabled-css-snippets"]);
+    // a from store; a-mobile force-offed; keepPinned kept-local (pin)
+    const applied = JSON.parse(await io.read(".obs/appearance.json")) as { enabledCssSnippets: string[] };
+    expect(applied.enabledCssSnippets).toEqual(["a", "keepPinned"]);
+  });
+});
+
 describe("applyImport — pull is pure store transport", () => {
   it("writes store files but never changes the local sync list", async () => {
     const { io, ctx } = setup();
