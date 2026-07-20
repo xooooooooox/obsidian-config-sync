@@ -23,7 +23,7 @@ import { FolderSelectModal } from "./FolderSelectModal";
 import { commitDraft } from "./commitGroups";
 import { sortBySensitiveFirst } from "./sensitiveSort";
 import { classifyJsonKeys } from "./jsonView";
-import { orderSwitchRows, OrderedSwitchRow } from "./panelModel";
+import { orderSwitchRows, OrderedSwitchRow, SwitchRow } from "./panelModel";
 
 export interface SettingsHost extends Plugin {
   settings: {
@@ -596,90 +596,94 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       text: "Excluded plugins keep their own on/off state on this device — the shared list neither includes nor changes them.",
     });
     const listEl = exp.createDiv({ cls: "config-sync-ldlist" });
-    void this.host.switchListRows(group.name).then((rows) => {
-      // The device this list belongs to when it's scoped away from us (mobile → "desktop").
-      const boundDevice = Platform.isMobile ? "desktop" : "mobile";
-      const renderRows = (): void => {
-        listEl.empty();
-        const exceptions = new Set(this.host.settings.switchExceptions[group.name] ?? []);
-        const ordered = orderSwitchRows(rows, exceptions);
-        let prevBucket: OrderedSwitchRow["bucket"] | null = null;
-        for (const r of ordered) {
-          const gsep = prevBucket !== null && r.bucket !== prevBucket;
-          prevBucket = r.bucket;
-          if (r.bucket === "desktop-only" || r.bucket === "device-scoped") {
-            const rowEl = listEl.createDiv({ cls: `config-sync-ldrow is-auto${gsep ? " config-sync-ldrow-gsep" : ""}` });
-            rowEl.setAttribute(
-              "title",
-              r.bucket === "desktop-only"
-                ? "Excluded automatically — this plugin can't run on this device"
-                : `Excluded automatically — you set this plugin to devices: ${boundDevice}`,
-            );
-            rowEl.createSpan({ cls: "config-sync-ldname", text: r.name });
-            rowEl.createSpan({
-              cls: "config-sync-doto-pill",
-              text: r.bucket === "desktop-only" ? "desktop-only" : `${boundDevice}-only`,
-            });
-            rowEl.createSpan({ cls: "config-sync-ldhint", text: r.hint });
-            rowEl.createDiv({ cls: "config-sync-rule-spacer" });
-            rowEl.createSpan({ cls: "config-sync-ldstate", text: "auto-excluded" });
-            new ToggleComponent(rowEl).setValue(true).setDisabled(true);
-            continue;
-          }
-          const isLocal = r.bucket === "excluded";
-          const rowEl = listEl.createDiv({
-            cls: `config-sync-ldrow${isLocal ? " is-local" : ""}${gsep ? " config-sync-ldrow-gsep" : ""}`,
+    // The device this list belongs to when it's scoped away from us (mobile → "desktop").
+    const boundDevice = Platform.isMobile ? "desktop" : "mobile";
+    const renderRows = (rows: SwitchRow[]): void => {
+      listEl.empty();
+      const exceptions = new Set(this.host.settings.switchExceptions[group.name] ?? []);
+      const ordered = orderSwitchRows(rows, exceptions);
+      let prevBucket: OrderedSwitchRow["bucket"] | null = null;
+      for (const r of ordered) {
+        const gsep = prevBucket !== null && r.bucket !== prevBucket;
+        prevBucket = r.bucket;
+        if (r.bucket === "desktop-only" || r.bucket === "device-scoped") {
+          const rowEl = listEl.createDiv({ cls: `config-sync-ldrow is-auto${gsep ? " config-sync-ldrow-gsep" : ""}` });
+          rowEl.setAttribute(
+            "title",
+            r.bucket === "desktop-only"
+              ? "Excluded automatically — this plugin can't run on this device"
+              : `Excluded automatically — you set this plugin to devices: ${boundDevice}`,
+          );
+          rowEl.createSpan({ cls: "config-sync-ldname", text: r.name });
+          rowEl.createSpan({
+            cls: "config-sync-doto-pill",
+            text: r.bucket === "desktop-only" ? "desktop-only" : `${boundDevice}-only`,
           });
-          const nameEl = rowEl.createSpan({ cls: "config-sync-ldname" });
-          if (isSnippetGroup) setIcon(nameEl.createSpan({ cls: "config-sync-ldpinicon" }), "pin");
-          nameEl.appendText(r.name);
           rowEl.createSpan({ cls: "config-sync-ldhint", text: r.hint });
           rowEl.createDiv({ cls: "config-sync-rule-spacer" });
-          rowEl.createSpan({ cls: "config-sync-ldstate", text: isLocal ? (isSnippetGroup ? "Pinned here" : "excluded") : "included" });
-          if (isSnippetGroup) {
-            const scopeNow = this.host.settings.snippetScopes[r.id] ?? "all";
-            const scopeDd = new DropdownComponent(rowEl)
-              .addOption("all", "All devices")
-              .addOption("desktop", "Desktop only")
-              .addOption("mobile", "Mobile only")
-              .setValue(scopeNow)
-              .onChange(async (v) => {
-                this.host.settings.snippetScopes = setSnippetScope(this.host.settings.snippetScopes, r.id, v as "all" | "desktop" | "mobile");
-                await this.host.saveSettings();
-                const scopeBadge = wrap.querySelector<HTMLElement>(".config-sync-scopebadge");
-                if (scopeBadge !== null) {
-                  const count = Object.keys(this.host.settings.snippetScopes).length;
-                  scopeBadge.setText(`${count} device-scoped`);
-                  if (count > 0) scopeBadge.show();
-                  else scopeBadge.hide();
-                }
-                renderRows();
-              });
-            // Outlined orange chip only while a scope is actually set (定稿 snippet-scope-refined-v2.html) —
-            // "All devices" reads as a plain, low-emphasis control.
-            scopeDd.selectEl.addClass("config-sync-ld-scope");
-            scopeDd.selectEl.toggleClass("is-scoped", scopeNow !== "all");
-          }
-          new ToggleComponent(rowEl).setValue(isLocal).onChange(async (v) => {
-            const cur = new Set(this.host.settings.switchExceptions[group.name] ?? []);
-            if (v) cur.add(r.id);
-            else cur.delete(r.id);
-            this.host.settings.switchExceptions[group.name] = [...cur].sort();
-            await this.host.saveSettings();
-            const badge = wrap.querySelector<HTMLElement>(".config-sync-exbadge");
-            if (badge !== null) {
-              badge.setText(isSnippetGroup ? `${cur.size} pinned` : `${cur.size} excluded`);
-              if (cur.size > 0) badge.show();
-              else badge.hide();
-            }
-            // Re-sort the already-fetched rows so the toggled plugin jumps to/from the
-            // "excluded" block. No refetch, no async — no flash.
-            renderRows();
-          });
+          rowEl.createSpan({ cls: "config-sync-ldstate", text: "auto-excluded" });
+          new ToggleComponent(rowEl).setValue(true).setDisabled(true);
+          continue;
         }
-      };
-      renderRows();
-    });
+        const isLocal = r.bucket === "excluded";
+        const rowEl = listEl.createDiv({
+          cls: `config-sync-ldrow${isLocal ? " is-local" : ""}${gsep ? " config-sync-ldrow-gsep" : ""}`,
+        });
+        const nameEl = rowEl.createSpan({ cls: "config-sync-ldname" });
+        if (isSnippetGroup) setIcon(nameEl.createSpan({ cls: "config-sync-ldpinicon" }), "pin");
+        nameEl.appendText(r.name);
+        rowEl.createSpan({ cls: "config-sync-ldhint", text: r.hint });
+        rowEl.createDiv({ cls: "config-sync-rule-spacer" });
+        rowEl.createSpan({ cls: "config-sync-ldstate", text: isLocal ? (isSnippetGroup ? "Pinned here" : "excluded") : "included" });
+        if (isSnippetGroup) {
+          const scopeNow = this.host.settings.snippetScopes[r.id] ?? "all";
+          const scopeDd = new DropdownComponent(rowEl)
+            .addOption("all", "All devices")
+            .addOption("desktop", "Desktop only")
+            .addOption("mobile", "Mobile only")
+            .setValue(scopeNow)
+            .onChange(async (v) => {
+              this.host.settings.snippetScopes = setSnippetScope(this.host.settings.snippetScopes, r.id, v as "all" | "desktop" | "mobile");
+              await this.host.saveSettings();
+              const scopeBadge = wrap.querySelector<HTMLElement>(".config-sync-scopebadge");
+              if (scopeBadge !== null) {
+                const count = Object.keys(this.host.settings.snippetScopes).length;
+                scopeBadge.setText(`${count} device-scoped`);
+                if (count > 0) scopeBadge.show();
+                else scopeBadge.hide();
+              }
+              // Re-fetch: deviceScoped is baked in at fetch time from snippetScopes, so a scope
+              // change can only be reflected in the auto-excluded bucket by re-deriving it.
+              await reload();
+            });
+          // Outlined orange chip only while a scope is actually set (定稿 snippet-scope-refined-v2.html) —
+          // "All devices" reads as a plain, low-emphasis control.
+          scopeDd.selectEl.addClass("config-sync-ld-scope");
+          scopeDd.selectEl.toggleClass("is-scoped", scopeNow !== "all");
+        }
+        new ToggleComponent(rowEl).setValue(isLocal).onChange(async (v) => {
+          const cur = new Set(this.host.settings.switchExceptions[group.name] ?? []);
+          if (v) cur.add(r.id);
+          else cur.delete(r.id);
+          this.host.settings.switchExceptions[group.name] = [...cur].sort();
+          await this.host.saveSettings();
+          const badge = wrap.querySelector<HTMLElement>(".config-sync-exbadge");
+          if (badge !== null) {
+            badge.setText(isSnippetGroup ? `${cur.size} pinned` : `${cur.size} excluded`);
+            if (cur.size > 0) badge.show();
+            else badge.hide();
+          }
+          // Re-sort the already-fetched rows so the toggled plugin jumps to/from the
+          // "excluded" block. No refetch, no async — no flash.
+          renderRows(rows);
+        });
+      }
+    };
+    const reload = async (): Promise<void> => {
+      const fresh = await this.host.switchListRows(group.name);
+      renderRows(fresh);
+    };
+    void reload();
   }
 
   private renderDataFileSegment(exp: HTMLElement, group: SyncGroup, item: CatalogItem, wrap: HTMLElement): void {
