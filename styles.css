@@ -996,6 +996,7 @@ body.is-mobile .config-sync-strip-meta .config-sync-report-pills { margin-left: 
 .config-sync-cm-dline.is-delhead { color: var(--color-red); }
 .config-sync-cm-dline.is-inshead { color: var(--color-green); }
 .config-sync-cm-dline.is-pad { visibility: hidden; }
+.config-sync-cm-dgap { padding: 0 10px; color: var(--text-faint); font-style: italic; border-top: 1px dashed var(--background-modifier-border); border-bottom: 1px dashed var(--background-modifier-border); }
 .config-sync-cm-diffbig { padding: var(--size-4-2) var(--size-4-3); color: var(--text-muted); font-family: var(--font-ui); }
 
 .config-sync-cm-split { display: flex; }

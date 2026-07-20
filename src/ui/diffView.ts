@@ -9,6 +9,9 @@ export type DiffView = "unified" | "split";
 // Session-level view preference: switching one diff makes later renders follow. Not persisted.
 let sessionDiffView: DiffView = "unified";
 
+// Session-level: collapse long unchanged runs to a gap marker. Not persisted. Default collapsed.
+let sessionDiffCollapse = true;
+
 export interface DiffOp {
   kind: "common" | "del" | "ins";
   text: string;
@@ -84,32 +87,40 @@ export function collapseUnchanged(ops: DiffOp[], context: number, minGap = 2): D
   return rows;
 }
 
-function renderUnified(pane: HTMLElement, ops: DiffOp[], leftLabel: string, rightLabel: string): void {
+function renderUnified(pane: HTMLElement, rows: DiffRow[], leftLabel: string, rightLabel: string): void {
   const box = pane.createDiv({ cls: "config-sync-cm-unified" });
   box.createDiv({ cls: "config-sync-cm-dline is-delhead", text: `--- ${leftLabel}` });
   box.createDiv({ cls: "config-sync-cm-dline is-inshead", text: `+++ ${rightLabel}` });
-  for (const op of ops) {
-    const prefix = op.kind === "del" ? "- " : op.kind === "ins" ? "+ " : "  ";
-    box.createDiv({ cls: `config-sync-cm-dline is-${op.kind}`, text: prefix + op.text });
+  for (const row of rows) {
+    if (row.kind === "gap") {
+      box.createDiv({ cls: "config-sync-cm-dgap", text: `⋯ ${row.count} unchanged line${row.count === 1 ? "" : "s"} ⋯` });
+      continue;
+    }
+    const prefix = row.kind === "del" ? "- " : row.kind === "ins" ? "+ " : "  ";
+    box.createDiv({ cls: `config-sync-cm-dline is-${row.kind}`, text: prefix + row.text });
   }
 }
 
-function renderSplit(pane: HTMLElement, ops: DiffOp[], leftLabel: string, rightLabel: string): void {
+function renderSplit(pane: HTMLElement, rows: DiffRow[], leftLabel: string, rightLabel: string): void {
   const wrap = pane.createDiv({ cls: "config-sync-cm-split" });
   const left = wrap.createDiv({ cls: "config-sync-cm-splitpane" });
   const right = wrap.createDiv({ cls: "config-sync-cm-splitpane" });
   left.createDiv({ cls: "config-sync-cm-dline is-delhead", text: leftLabel });
   right.createDiv({ cls: "config-sync-cm-dline is-inshead", text: rightLabel });
-  for (const op of ops) {
-    if (op.kind === "common") {
-      left.createDiv({ cls: "config-sync-cm-dline is-common", text: op.text });
-      right.createDiv({ cls: "config-sync-cm-dline is-common", text: op.text });
-    } else if (op.kind === "del") {
-      left.createDiv({ cls: "config-sync-cm-dline is-del", text: op.text });
+  for (const row of rows) {
+    if (row.kind === "gap") {
+      const t = `⋯ ${row.count} unchanged line${row.count === 1 ? "" : "s"} ⋯`;
+      left.createDiv({ cls: "config-sync-cm-dgap", text: t });
+      right.createDiv({ cls: "config-sync-cm-dgap", text: t });
+    } else if (row.kind === "common") {
+      left.createDiv({ cls: "config-sync-cm-dline is-common", text: row.text });
+      right.createDiv({ cls: "config-sync-cm-dline is-common", text: row.text });
+    } else if (row.kind === "del") {
+      left.createDiv({ cls: "config-sync-cm-dline is-del", text: row.text });
       right.createDiv({ cls: "config-sync-cm-dline is-pad", text: " " });
     } else {
       left.createDiv({ cls: "config-sync-cm-dline is-pad", text: " " });
-      right.createDiv({ cls: "config-sync-cm-dline is-ins", text: op.text });
+      right.createDiv({ cls: "config-sync-cm-dline is-ins", text: row.text });
     }
   }
 }
@@ -134,8 +145,9 @@ export function renderDiffPanel(
       pane.createDiv({ cls: "config-sync-cm-diffbig", text: "Content differs — too large to diff inline." });
       return;
     }
-    if (sessionDiffView === "unified" || Platform.isMobile) renderUnified(pane, ops, leftLabel, rightLabel);
-    else renderSplit(pane, ops, leftLabel, rightLabel);
+    const rows: DiffRow[] = sessionDiffCollapse ? collapseUnchanged(ops, 3) : ops;
+    if (sessionDiffView === "unified" || Platform.isMobile) renderUnified(pane, rows, leftLabel, rightLabel);
+    else renderSplit(pane, rows, leftLabel, rightLabel);
   };
   if (!Platform.isMobile) {
     const toggle = toolbar.createDiv({ cls: "config-sync-cm-viewseg" });
@@ -159,5 +171,25 @@ export function renderDiffPanel(
     });
     paint();
   }
+  const collapseSeg = toolbar.createDiv({ cls: "config-sync-cm-viewseg" });
+  const colBtn = collapseSeg.createEl("button", { cls: "config-sync-cm-viewbtn", text: "Collapse" });
+  const fullBtn = collapseSeg.createEl("button", { cls: "config-sync-cm-viewbtn", text: "Full" });
+  const paintCollapse = (): void => {
+    colBtn.toggleClass("is-on", sessionDiffCollapse);
+    fullBtn.toggleClass("is-on", !sessionDiffCollapse);
+  };
+  colBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    sessionDiffCollapse = true;
+    paintCollapse();
+    render();
+  });
+  fullBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    sessionDiffCollapse = false;
+    paintCollapse();
+    render();
+  });
+  paintCollapse();
   render();
 }
