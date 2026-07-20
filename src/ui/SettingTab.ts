@@ -56,7 +56,7 @@ export interface SettingsHost extends Plugin {
   passphrase(): string | null;
   setPassphrase(v: string | null): void;
   displayName(group: string, storedLabel?: string): string;
-  switchListRows(group: string): Promise<{ id: string; name: string; hint: string; desktopOnly: boolean }[]>;
+  switchListRows(group: string): Promise<{ id: string; name: string; hint: string; desktopOnly: boolean; deviceScoped: boolean }[]>;
 }
 
 const SENSITIVE_ENCRYPT_RE = /apikey|api_key|token|secret|password|credential/i;
