@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  SWITCH_LISTS, SWITCH_LIST_GROUPS, readLocalSwitchList, writeLocalSwitchList, localRealPath, subtractForceOff,
+  SWITCH_LIST_GROUPS, readLocalSwitchList, writeLocalSwitchList, localRealPath, subtractForceOff,
   parseSwitchList,
   captureSwitchList,
   applySwitchList,
@@ -39,11 +39,11 @@ describe("readLocalSwitchList", () => {
 describe("writeLocalSwitchList", () => {
   it("field group replaces only the field, preserving siblings", () => {
     const prior = JSON.stringify({ cssTheme: "X", enabledCssSnippets: ["old"], baseFontSize: 16 });
-    const out = JSON.parse(writeLocalSwitchList("enabled-css-snippets", ["a", "a-desktop"], prior));
+    const out = JSON.parse(writeLocalSwitchList("enabled-css-snippets", ["a", "a-desktop"], prior)) as { cssTheme: string; enabledCssSnippets: string[]; baseFontSize: number };
     expect(out).toEqual({ cssTheme: "X", enabledCssSnippets: ["a", "a-desktop"], baseFontSize: 16 });
   });
   it("field group tolerates null/garbage prior content", () => {
-    expect(JSON.parse(writeLocalSwitchList("enabled-css-snippets", ["a"], null))).toEqual({ enabledCssSnippets: ["a"] });
+    expect(JSON.parse(writeLocalSwitchList("enabled-css-snippets", ["a"], null)) as { enabledCssSnippets: string[] }).toEqual({ enabledCssSnippets: ["a"] });
   });
   it("plain groups serialize the list as before (2-space + newline)", () => {
     expect(writeLocalSwitchList("community-plugins", ["a", "b"], null)).toBe(JSON.stringify(["a", "b"], null, 2) + "\n");
