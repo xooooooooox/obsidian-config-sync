@@ -879,6 +879,11 @@ export default class ConfigSyncPlugin extends Plugin {
   // desktop-only plugin, so excepting it stops capture from dropping it from the store's enabled
   // list (and apply from force-adding it). settings.switchExceptions (persisted) is left untouched.
   private async augmentedSwitchExceptions(rootPath: string): Promise<Record<string, string[]>> {
+    // Mobile only: that is where a desktop-only plugin can't run and would otherwise be dropped
+    // from the enabled list. On desktop the plugin runs and its enable/disable must sync normally —
+    // auto-excepting there would stop a disable from propagating and a newly-enabled one from being
+    // captured. Desktop keeps the plain persisted exceptions.
+    if (!Platform.isMobile) return this.settings.switchExceptions;
     const io = this.configIO();
     const lockPath = `${rootPath}/store.lock.json`;
     let lock: StoreLock | null = null;

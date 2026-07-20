@@ -88,13 +88,22 @@ the desktop-only ids as removed. Extract the augmentation into a private
 used by both `coreContext()` and `diffPair` (DRY — one lock read per call site,
 no duplicated logic).
 
+## Mobile-only
+
+The augmentation is gated on `Platform.isMobile`. The footgun exists only on a
+phone (where a desktop-only plugin can't run and is absent from the local list).
+On **desktop** the plugin runs and its enable/disable must sync normally — auto-
+excepting there would stop a user's *disable* from propagating and a newly-enabled
+desktop-only plugin from being captured. So `augmentedSwitchExceptions` returns the
+plain persisted `settings.switchExceptions` on desktop and only folds the
+desktop-only ids in on mobile.
+
 ## Data flow
 
 Phone: lock (synced, carries `desktopOnly` flags) → `desktopOnlyPluginIds` →
 folded into `ctx.switchExceptions["community-plugins"]` → capture keeps the
-desktop-only ids, apply skips them, status shows no `↑`. Desktop: the ids are
-enabled and already in the store, so excepting them changes nothing (capture
-result identical) — desktop is unaffected.
+desktop-only ids, apply skips them, status shows no `↑`. Desktop: gate returns
+early, no augmentation — desktop-only plugins sync exactly as before.
 
 ## Testing
 
