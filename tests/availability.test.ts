@@ -7,6 +7,7 @@ const pluginGroup: SyncGroup = { name: "plugin-demo", path: "{configDir}/plugins
 const coreGroup: SyncGroup = { name: "daily-notes", path: "{configDir}/daily-notes.json", type: "file", devices: "all" };
 const obsGroup: SyncGroup = { name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all" };
 const lock = (groups: StoreLock["groups"]): StoreLock => ({ capturedAt: "2026-01-01T00:00:00Z", groups });
+const scopes = { "a-mobile": "mobile", "a-desktop": "desktop" } as const;
 
 describe("compareVersions", () => {
   it("orders dotted numerics", () => {
@@ -111,7 +112,6 @@ describe("desktopOnlyPluginIds", () => {
 });
 
 describe("scopedAwaySnippets", () => {
-  const scopes = { "a-mobile": "mobile", "a-desktop": "desktop" } as const;
   it("on desktop, names mobile-scoped snippets", () => {
     expect(scopedAwaySnippets(scopes, false)).toEqual(new Set(["a-mobile"]));
   });
@@ -124,7 +124,6 @@ describe("scopedAwaySnippets", () => {
 });
 
 describe("snippetForceOff (pin > scope)", () => {
-  const scopes = { "a-mobile": "mobile", "a-desktop": "desktop" } as const;
   it("force-offs scope-away snippets on desktop", () => {
     expect(snippetForceOff(scopes, [], false)).toEqual(["a-mobile"]);
   });
