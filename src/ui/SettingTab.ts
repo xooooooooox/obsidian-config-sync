@@ -23,6 +23,7 @@ import { FolderSelectModal } from "./FolderSelectModal";
 import { commitDraft } from "./commitGroups";
 import { sortBySensitiveFirst } from "./sensitiveSort";
 import { classifyJsonKeys } from "./jsonView";
+import { orderSwitchRows, OrderedSwitchRow } from "./panelModel";
 
 export interface SettingsHost extends Plugin {
   settings: {
@@ -56,7 +57,7 @@ export interface SettingsHost extends Plugin {
   passphrase(): string | null;
   setPassphrase(v: string | null): void;
   displayName(group: string, storedLabel?: string): string;
-  switchListRows(group: string): Promise<{ id: string; name: string; hint: string; desktopOnly: boolean }[]>;
+  switchListRows(group: string): Promise<{ id: string; name: string; hint: string; desktopOnly: boolean; deviceScoped: boolean }[]>;
 }
 
 const SENSITIVE_ENCRYPT_RE = /apikey|api_key|token|secret|password|credential/i;
@@ -569,45 +570,62 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     });
     const listEl = exp.createDiv({ cls: "config-sync-ldlist" });
     void this.host.switchListRows(group.name).then((rows) => {
-      listEl.empty();
-      const exceptions = new Set(this.host.settings.switchExceptions[group.name] ?? []);
-      for (const r of rows) {
-        const isManual = exceptions.has(r.id);
-        if (r.desktopOnly && !isManual) {
-          const rowEl = listEl.createDiv({ cls: "config-sync-ldrow is-auto" });
-          rowEl.setAttribute("title", "Excluded automatically — this plugin can't run on this device");
+      // The device this list belongs to when it's scoped away from us (mobile → "desktop").
+      const boundDevice = Platform.isMobile ? "desktop" : "mobile";
+      const renderRows = (): void => {
+        listEl.empty();
+        const exceptions = new Set(this.host.settings.switchExceptions[group.name] ?? []);
+        const ordered = orderSwitchRows(rows, exceptions);
+        let prevBucket: OrderedSwitchRow["bucket"] | null = null;
+        for (const r of ordered) {
+          const gsep = prevBucket !== null && r.bucket !== prevBucket;
+          prevBucket = r.bucket;
+          if (r.bucket === "desktop-only" || r.bucket === "device-scoped") {
+            const rowEl = listEl.createDiv({ cls: `config-sync-ldrow is-auto${gsep ? " config-sync-ldrow-gsep" : ""}` });
+            rowEl.setAttribute(
+              "title",
+              r.bucket === "desktop-only"
+                ? "Excluded automatically — this plugin can't run on this device"
+                : `Excluded automatically — you set this plugin to devices: ${boundDevice}`,
+            );
+            rowEl.createSpan({ cls: "config-sync-ldname", text: r.name });
+            rowEl.createSpan({
+              cls: "config-sync-doto-pill",
+              text: r.bucket === "desktop-only" ? "desktop-only" : `${boundDevice}-only`,
+            });
+            rowEl.createSpan({ cls: "config-sync-ldhint", text: r.hint });
+            rowEl.createDiv({ cls: "config-sync-rule-spacer" });
+            rowEl.createSpan({ cls: "config-sync-ldstate", text: "auto-excluded" });
+            new ToggleComponent(rowEl).setValue(true).setDisabled(true);
+            continue;
+          }
+          const isLocal = r.bucket === "excluded";
+          const rowEl = listEl.createDiv({
+            cls: `config-sync-ldrow${isLocal ? " is-local" : ""}${gsep ? " config-sync-ldrow-gsep" : ""}`,
+          });
           rowEl.createSpan({ cls: "config-sync-ldname", text: r.name });
-          rowEl.createSpan({ cls: "config-sync-doto-pill", text: "desktop-only" });
           rowEl.createSpan({ cls: "config-sync-ldhint", text: r.hint });
           rowEl.createDiv({ cls: "config-sync-rule-spacer" });
-          rowEl.createSpan({ cls: "config-sync-ldstate", text: "auto-excluded" });
-          new ToggleComponent(rowEl).setValue(true).setDisabled(true);
-          continue;
+          rowEl.createSpan({ cls: "config-sync-ldstate", text: isLocal ? "excluded" : "included" });
+          new ToggleComponent(rowEl).setValue(isLocal).onChange(async (v) => {
+            const cur = new Set(this.host.settings.switchExceptions[group.name] ?? []);
+            if (v) cur.add(r.id);
+            else cur.delete(r.id);
+            this.host.settings.switchExceptions[group.name] = [...cur].sort();
+            await this.host.saveSettings();
+            const badge = wrap.querySelector<HTMLElement>(".config-sync-exbadge");
+            if (badge !== null) {
+              badge.setText(`${cur.size} excluded`);
+              if (cur.size > 0) badge.show();
+              else badge.hide();
+            }
+            // Re-sort the already-fetched rows so the toggled plugin jumps to/from the
+            // "excluded" block. No refetch, no async — no flash.
+            renderRows();
+          });
         }
-        const isLocal = isManual;
-        const rowEl = listEl.createDiv({ cls: `config-sync-ldrow${isLocal ? " is-local" : ""}` });
-        rowEl.createSpan({ cls: "config-sync-ldname", text: r.name });
-        rowEl.createSpan({ cls: "config-sync-ldhint", text: r.hint });
-        rowEl.createDiv({ cls: "config-sync-rule-spacer" });
-        const stateEl = rowEl.createSpan({ cls: "config-sync-ldstate", text: isLocal ? "excluded" : "included" });
-        new ToggleComponent(rowEl).setValue(isLocal).onChange(async (v) => {
-          const cur = new Set(this.host.settings.switchExceptions[group.name] ?? []);
-          if (v) cur.add(r.id);
-          else cur.delete(r.id);
-          this.host.settings.switchExceptions[group.name] = [...cur].sort();
-          await this.host.saveSettings();
-          // In-place update — a full renderItemInto rebuilds the expansion (async row refetch)
-          // and visibly flashes. Only the row tint, state text and header badge change.
-          rowEl.toggleClass("is-local", v);
-          stateEl.setText(v ? "excluded" : "included");
-          const badge = wrap.querySelector<HTMLElement>(".config-sync-exbadge");
-          if (badge !== null) {
-            badge.setText(`${cur.size} excluded`);
-            if (cur.size > 0) badge.show();
-            else badge.hide();
-          }
-        });
-      }
+      };
+      renderRows();
     });
   }
 

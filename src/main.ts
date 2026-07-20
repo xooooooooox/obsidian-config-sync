@@ -11,6 +11,7 @@ import {
   ProgressFn,
   applyWithActions,
   captureWithActions, CaptureItem,
+  deviceExcludedPluginIds,
   groupsForDevice,
   loadLock,
   loadManifest,
@@ -879,25 +880,29 @@ export default class ConfigSyncPlugin extends Plugin {
   // desktop-only plugin, so excepting it stops capture from dropping it from the store's enabled
   // list (and apply from force-adding it). settings.switchExceptions (persisted) is left untouched.
   private async augmentedSwitchExceptions(rootPath: string): Promise<Record<string, string[]>> {
-    // Mobile only: that is where a desktop-only plugin can't run and would otherwise be dropped
-    // from the enabled list. On desktop the plugin runs and its enable/disable must sync normally —
-    // auto-excepting there would stop a disable from propagating and a newly-enabled one from being
-    // captured. Desktop keeps the plain persisted exceptions.
-    if (!Platform.isMobile) return this.settings.switchExceptions;
-    const io = this.configIO();
-    const lockPath = `${rootPath}/store.lock.json`;
-    let lock: StoreLock | null = null;
-    if (await io.exists(lockPath)) {
-      try {
-        lock = parseStoreLock(await io.read(lockPath));
-      } catch {
-        lock = null;
+    const device: "desktop" | "mobile" = Platform.isMobile ? "mobile" : "desktop";
+    // Plugins the user scoped away from this device (devices:"desktop" on mobile,
+    // devices:"mobile" on desktop): never capture them out of / force them into the shared
+    // enabled list here. Symmetric — applies on both platforms.
+    const extraIds = deviceExcludedPluginIds(this.settings.groups, device);
+    // Desktop-only detection is mobile-only: that is where a desktop-only plugin can't run and
+    // would otherwise be dropped. On desktop the plugin runs and its enable/disable syncs normally.
+    if (Platform.isMobile) {
+      const io = this.configIO();
+      const lockPath = `${rootPath}/store.lock.json`;
+      let lock: StoreLock | null = null;
+      if (await io.exists(lockPath)) {
+        try {
+          lock = parseStoreLock(await io.read(lockPath));
+        } catch {
+          lock = null;
+        }
       }
+      for (const id of desktopOnlyPluginIds(this.settings.groups, this.pluginHost(), lock)) extraIds.add(id);
     }
-    const dtoIds = desktopOnlyPluginIds(this.settings.groups, this.pluginHost(), lock);
-    if (dtoIds.size === 0) return this.settings.switchExceptions;
+    if (extraIds.size === 0) return this.settings.switchExceptions;
     const manual = this.settings.switchExceptions["community-plugins"] ?? [];
-    return { ...this.settings.switchExceptions, "community-plugins": [...new Set([...manual, ...dtoIds])] };
+    return { ...this.settings.switchExceptions, "community-plugins": [...new Set([...manual, ...extraIds])] };
   }
 
   private async coreContext(): Promise<CoreContext> {
@@ -1077,7 +1082,7 @@ export default class ConfigSyncPlugin extends Plugin {
 
   // Rows for the switch-list "Local decisions" editor: union of local list ∪ store copy ∪
   // runtime (installed plugins / core registry), each with a display name and a state hint.
-  async switchListRows(groupName: string): Promise<{ id: string; name: string; hint: string; desktopOnly: boolean }[]> {
+  async switchListRows(groupName: string): Promise<{ id: string; name: string; hint: string; desktopOnly: boolean; deviceScoped: boolean }[]> {
     const io = this.app.vault.adapter;
     const file = groupName === "community-plugins" ? "community-plugins.json" : "core-plugins.json";
     const readList = async (path: string): Promise<SwitchList | null> => {
@@ -1105,6 +1110,11 @@ export default class ConfigSyncPlugin extends Plugin {
       }
       dtoIds = desktopOnlyPluginIds(this.settings.groups, this.pluginHost(), lock);
     }
+    let devScopedIds = new Set<string>();
+    if (groupName === "community-plugins") {
+      const device: "desktop" | "mobile" = Platform.isMobile ? "mobile" : "desktop";
+      devScopedIds = deviceExcludedPluginIds(this.settings.groups, device);
+    }
     const store = await readList(`${root}/store/${groupStorePath(`{configDir}/${file}`)}`);
     const runtime = groupName === "community-plugins" ? this.pluginRuntime() : this.coreRuntime();
     const nameOf = new Map(runtime.map((r) => [r.id, r.name]));
@@ -1115,6 +1125,7 @@ export default class ConfigSyncPlugin extends Plugin {
         name: nameOf.get(id) ?? id,
         hint: `${onIn(local, id) ? "on here" : "off here"} · ${store === null ? "no store copy" : onIn(store, id) ? "store has on" : "store has off"}`,
         desktopOnly: dtoIds.has(id),
+        deviceScoped: devScopedIds.has(id),
       }))
       .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })); // sort by DISPLAY name — id order looked random in the UI
   }
