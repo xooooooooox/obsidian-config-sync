@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { commitDraft } from "../src/ui/commitGroups";
 import { SELF_GROUP_NAME, selfPresetRules } from "../src/core/catalog";
 import { SyncGroup } from "../src/core/types";
+import { setSnippetScope } from "../src/ui/SettingTab";
 
 const base: SyncGroup[] = [{ name: "a", path: "{configDir}/a.json", type: "file", devices: "all" }];
 
@@ -37,5 +38,12 @@ describe("commitDraft", () => {
     const self = written.find((g) => g.name === SELF_GROUP_NAME);
     expect(self?.mode).toBe("fields");
     expect(self?.fields).toEqual(selfPresetRules());
+  });
+});
+
+describe("setSnippetScope", () => {
+  it("stores non-all and deletes on all", () => {
+    expect(setSnippetScope({}, "a-mobile", "mobile")).toEqual({ "a-mobile": "mobile" });
+    expect(setSnippetScope({ "a-mobile": "mobile" }, "a-mobile", "all")).toEqual({});
   });
 });

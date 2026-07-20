@@ -1,11 +1,11 @@
 import { FileIO, ensureParentDir, isJunkPath, listFilesRecursive, pruneEmptyDirsUnder } from "./io";
 import { GroupResult, hasChanges, StoreLock, SyncGroup, SyncManifest } from "./types";
-import { basename, groupRealPath, groupStorePath, relativeTo, resolveGroupByStoreRel } from "./pathing";
+import { basename, groupStorePath, relativeTo, resolveGroupByStoreRel } from "./pathing";
 import { parseStoreLock, parseSyncManifest, validateSyncManifest } from "./manifest";
 import { applyTransform, captureTransform, contentUnchanged } from "./modes";
 import { classifyMerge, MergeConflict, MergePlan } from "./merge";
 import { isPlainObject } from "./sanitize";
-import { applySwitchList, captureSwitchList, parseSwitchList, SWITCH_LIST_GROUPS, SwitchList, switchListsEqual } from "./switchList";
+import { applySwitchList, captureSwitchList, localRealPath, parseSwitchList, readLocalSwitchList, subtractForceOff, SWITCH_LIST_GROUPS, SwitchList, switchListsEqual, writeLocalSwitchList } from "./switchList";
 
 // `current` is the group NAME (the UI maps it to a display label); `phase` is a short live
 // phrase for the in-item step ("downloading via BRAT…", "writing settings…") — spec 2026-07-17.
@@ -39,6 +39,7 @@ export interface CoreContext {
   passphrase: string | null;
   groupsIO: GroupsIO;
   switchExceptions: Record<string, string[]>; // group name -> excepted plugin/core ids (device-local)
+  switchForceOff?: Record<string, string[]>; // group name -> ids removed from the applied list (snippet scope-away)
   now(): string; // ISO-8601 timestamp, injectable for tests
 }
 
@@ -241,7 +242,7 @@ export async function capture(ctx: CoreContext, names?: string[], onProgress?: P
 }
 
 async function captureGroup(ctx: CoreContext, group: SyncGroup): Promise<GroupResult> {
-  const real = groupRealPath(group.path, ctx.configDir);
+  const real = localRealPath(group.name, group.path, ctx.configDir);
   const store = `${storeDir(ctx)}/${groupStorePath(group.path)}`;
   const result = emptyResult(group.name, false);
   if (!(await ctx.io.exists(real))) {
@@ -254,7 +255,7 @@ async function captureGroup(ctx: CoreContext, group: SyncGroup): Promise<GroupRe
     const exc = excFor(ctx, group.name);
     // Switch lists take the switch path whether or not exceptions exist — the old exc.length
     // guard left exception-free devices writing local enable-order into the store (2026-07-17).
-    const localSwitchList = SWITCH_LIST_GROUPS.has(group.name) ? parseSwitchList(plainLocalContent) : null;
+    const localSwitchList = SWITCH_LIST_GROUPS.has(group.name) ? readLocalSwitchList(group.name, plainLocalContent) : null;
     // Pass-through (甲): excluded ids copy the store's existing state, so read it first.
     let existingStoreList: SwitchList | null = null;
     if (localSwitchList !== null && (await ctx.io.exists(store))) {
@@ -263,7 +264,7 @@ async function captureGroup(ctx: CoreContext, group: SyncGroup): Promise<GroupRe
     const captureInput = localSwitchList !== null ? serializeSwitchList(captureSwitchList(localSwitchList, existingStoreList, exc)) : plainLocalContent;
     const t = await captureTransform(group, captureInput, ctx.passphrase);
     if (t.note !== null) result.messages.push(t.note);
-    await writeClassified(ctx, store, t.content, basename(real), result, (existing) => {
+    await writeClassified(ctx, store, t.content, basename(store), result, (existing) => {
       if (localSwitchList !== null) {
         const existingSwitchList = parseSwitchList(existing);
         if (existingSwitchList !== null) return Promise.resolve(switchListsEqual(localSwitchList, existingSwitchList, exc));
@@ -644,7 +645,7 @@ async function applyWriteClassified(
 }
 
 async function applyGroup(ctx: CoreContext, group: SyncGroup, state: BackupState): Promise<GroupResult> {
-  const real = groupRealPath(group.path, ctx.configDir);
+  const real = localRealPath(group.name, group.path, ctx.configDir);
   const store = `${storeDir(ctx)}/${groupStorePath(group.path)}`;
   const pluginId = pluginIdForGroup(group);
   const result = emptyResult(group.name, pluginId === null);
@@ -670,12 +671,13 @@ async function applyGroup(ctx: CoreContext, group: SyncGroup, state: BackupState
       const storeSwitchList = SWITCH_LIST_GROUPS.has(group.name) ? parseSwitchList(storeContent) : null;
       let content: string;
       if (storeSwitchList !== null) {
-        const localSwitchList = localContent !== null ? parseSwitchList(localContent) : null;
+        const localSwitchList = localContent !== null ? readLocalSwitchList(group.name, localContent) : null;
         const merged = applySwitchList(storeSwitchList, localSwitchList, exc);
-        content = serializeSwitchList(merged);
+        const finalList = subtractForceOff(merged, ctx.switchForceOff?.[group.name] ?? []);
+        content = writeLocalSwitchList(group.name, finalList, localContent);
         // Name the plugins this write toggles (spec 2026-07-17): a store list lacking a
         // just-enabled plugin turns it off persistently — that must be visible in the report.
-        for (const line of switchDeltaMessages(localSwitchList, merged)) result.messages.push(line);
+        for (const line of switchDeltaMessages(localSwitchList, finalList)) result.messages.push(line);
       } else {
         content = await applyTransform(group, storeContent, localContent, ctx.passphrase);
       }

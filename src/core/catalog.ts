@@ -201,6 +201,19 @@ export async function listOptionSections(io: FileIO, configDir: string, _groups:
     covered.add(b);
   }
 
+  if (files.has("appearance.json")) {
+    available.push({
+      name: "enabled-css-snippets",
+      label: "Enabled CSS snippets",
+      description: "Which CSS snippets are on, per device.",
+      path: "{configDir}/enabled-css-snippets.json",
+      type: "file",
+      exists: true,
+      disabledReason: null,
+      cautionReason: null,
+    });
+  }
+
   return [
     ...section("available", "Available", "Sync these settings that already exist in this vault.", true, available),
     ...section("notPresent", "Not yet in this vault", "Nothing to sync yet — customize these in Obsidian first, then they'll appear here.", true, notPresent),
@@ -404,6 +417,24 @@ export function ensureSelfPresets(groups: SyncGroup[]): SyncGroup[] {
   return groups.map((g) => {
     if (g.name !== SELF_GROUP_NAME) return g;
     return { ...g, mode: "fields", fields: mergePresetFields(g.fields ?? []) };
+  });
+}
+
+export function appearancePresetRules(): FieldRule[] {
+  return [{ pattern: "enabledCssSnippets", action: "strip", locked: true }];
+}
+
+// When the enabled-css-snippets switch list is active, the appearance group (reserved name
+// "appearance" — see optionReservedName) must NOT also carry enabledCssSnippets (else both write
+// the field). Pin it to fields mode + a locked strip. No-op when the snippet group isn't present,
+// so opting out restores plain appearance sync.
+export function ensureAppearancePresets(groups: SyncGroup[]): SyncGroup[] {
+  if (!groups.some((g) => g.name === "enabled-css-snippets")) return groups;
+  const presets = appearancePresetRules();
+  const patterns = new Set(presets.map((p) => p.pattern));
+  return groups.map((g) => {
+    if (g.name !== "appearance") return g;
+    return { ...g, mode: "fields", fields: [...presets, ...(g.fields ?? []).filter((f) => !patterns.has(f.pattern))] };
   });
 }
 

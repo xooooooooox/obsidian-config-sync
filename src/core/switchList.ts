@@ -7,7 +7,20 @@
  * keep their local state on apply, and are masked out of in-sync comparison.
  */
 
-export const SWITCH_LIST_GROUPS: ReadonlySet<string> = new Set(["community-plugins", "core-plugins"]);
+import { groupRealPath } from "./pathing";
+
+export interface SwitchListSpec {
+  localFile: string; // file under {configDir} the LOCAL list lives in
+  field?: string;    // set => list is this array field inside localFile; unset => whole file
+}
+
+export const SWITCH_LISTS: Record<string, SwitchListSpec> = {
+  "community-plugins": { localFile: "community-plugins.json" },
+  "core-plugins": { localFile: "core-plugins.json" },
+  "enabled-css-snippets": { localFile: "appearance.json", field: "enabledCssSnippets" },
+};
+
+export const SWITCH_LIST_GROUPS: ReadonlySet<string> = new Set(Object.keys(SWITCH_LISTS));
 
 export type SwitchList = string[] | Record<string, boolean>;
 
@@ -40,6 +53,58 @@ export function parseSwitchList(content: string): SwitchList | null {
   } catch {
     return null;
   }
+}
+
+// LOCAL-side read: whole file for plain lists, the array field for field lists.
+export function readLocalSwitchList(name: string, content: string): SwitchList | null {
+  const spec = SWITCH_LISTS[name];
+  if (spec?.field !== undefined) {
+    try {
+      const arr = (JSON.parse(content) as Record<string, unknown>)[spec.field];
+      if (arr === undefined) return [];
+      if (Array.isArray(arr) && arr.every((x): x is string => typeof x === "string")) return arr;
+      return null;
+    } catch {
+      return null;
+    }
+  }
+  return parseSwitchList(content);
+}
+
+// LOCAL-side write: whole array for plain lists; for field lists, replace ONLY that field in
+// the prior file content so sibling fields (theme, fonts) survive.
+export function writeLocalSwitchList(name: string, list: SwitchList, priorContent: string | null): string {
+  const spec = SWITCH_LISTS[name];
+  if (spec?.field !== undefined) {
+    let obj: Record<string, unknown> = {};
+    if (priorContent !== null) {
+      try {
+        const parsed = JSON.parse(priorContent) as unknown;
+        if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) obj = parsed as Record<string, unknown>;
+      } catch {
+        obj = {};
+      }
+    }
+    obj[spec.field] = list;
+    return JSON.stringify(obj, null, 2) + "\n";
+  }
+  return JSON.stringify(list, null, 2) + "\n";
+}
+
+// LOCAL real path: field lists resolve to their localFile (appearance.json); everything else
+// resolves the group's own path. This is the ONLY place the virtual snippet path is redirected.
+export function localRealPath(name: string, groupPath: string, configDir: string): string {
+  const spec = SWITCH_LISTS[name];
+  return spec?.field !== undefined ? `${configDir}/${spec.localFile}` : groupRealPath(groupPath, configDir);
+}
+
+// Remove force-off ids from an applied list. Arrays only (snippet scope-away force-off);
+// maps and empty force-off sets pass through unchanged. Shared by applyGroup and diffPair so
+// the diff preview provably mirrors what apply writes.
+export function subtractForceOff(list: SwitchList, forceOff: string[]): SwitchList {
+  if (!Array.isArray(list) || forceOff.length === 0) return list;
+  const off = new Set(forceOff);
+  return list.filter((id) => !off.has(id));
 }
 
 /**

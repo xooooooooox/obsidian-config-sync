@@ -1,4 +1,4 @@
-import { ensureSelfPresets } from "../core/catalog";
+import { ensureAppearancePresets, ensureSelfPresets } from "../core/catalog";
 import { SyncGroup } from "../core/types";
 
 export interface CommitResult {
@@ -9,8 +9,8 @@ export interface CommitResult {
 
 // Applies mutator to a deep clone of `groups`, persists via write, and returns the draft only
 // when the write succeeds. On failure the original array reference is returned unchanged so the
-// caller's state and the disk stay in agreement. ensureSelfPresets runs last so no UI edit path
-// can ever drop the self item's locked strip rules.
+// caller's state and the disk stay in agreement. ensureSelfPresets/ensureAppearancePresets run
+// last so no UI edit path can ever drop the self item's or appearance group's locked strip rules.
 export async function commitDraft(
   groups: SyncGroup[],
   mutator: (draft: SyncGroup[]) => void,
@@ -18,7 +18,7 @@ export async function commitDraft(
 ): Promise<CommitResult> {
   const draft = structuredClone(groups);
   mutator(draft);
-  const withPresets = ensureSelfPresets(draft);
+  const withPresets = ensureAppearancePresets(ensureSelfPresets(draft));
   try {
     await write(withPresets);
   } catch (e) {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  SWITCH_LIST_GROUPS,
+  SWITCH_LIST_GROUPS, readLocalSwitchList, writeLocalSwitchList, localRealPath, subtractForceOff,
   parseSwitchList,
   captureSwitchList,
   applySwitchList,
@@ -10,12 +10,63 @@ import {
   type SwitchList,
 } from "../src/core/switchList";
 
-describe("SWITCH_LIST_GROUPS", () => {
-  it("exports readonly set with community-plugins and core-plugins", () => {
-    expect(SWITCH_LIST_GROUPS).toBeInstanceOf(Set);
+describe("SWITCH_LIST_GROUPS (now derived from SWITCH_LISTS)", () => {
+  it("has community-plugins, core-plugins, enabled-css-snippets", () => {
     expect(SWITCH_LIST_GROUPS.has("community-plugins")).toBe(true);
     expect(SWITCH_LIST_GROUPS.has("core-plugins")).toBe(true);
-    expect(SWITCH_LIST_GROUPS.size).toBe(2);
+    expect(SWITCH_LIST_GROUPS.has("enabled-css-snippets")).toBe(true);
+    expect(SWITCH_LIST_GROUPS.size).toBe(3);
+  });
+});
+
+describe("readLocalSwitchList", () => {
+  it("plain groups parse the whole file (unchanged)", () => {
+    expect(readLocalSwitchList("community-plugins", '["a","b"]')).toEqual(["a", "b"]);
+  });
+  it("field group extracts the array field", () => {
+    const app = JSON.stringify({ cssTheme: "X", enabledCssSnippets: ["a", "a-mobile"], baseFontSize: 16 });
+    expect(readLocalSwitchList("enabled-css-snippets", app)).toEqual(["a", "a-mobile"]);
+  });
+  it("field group returns [] when the field is absent", () => {
+    expect(readLocalSwitchList("enabled-css-snippets", '{"cssTheme":"X"}')).toEqual([]);
+  });
+  it("field group returns null on non-string array or bad json", () => {
+    expect(readLocalSwitchList("enabled-css-snippets", '{"enabledCssSnippets":[1,2]}')).toBeNull();
+    expect(readLocalSwitchList("enabled-css-snippets", "not json")).toBeNull();
+  });
+});
+
+describe("writeLocalSwitchList", () => {
+  it("field group replaces only the field, preserving siblings", () => {
+    const prior = JSON.stringify({ cssTheme: "X", enabledCssSnippets: ["old"], baseFontSize: 16 });
+    const out = JSON.parse(writeLocalSwitchList("enabled-css-snippets", ["a", "a-desktop"], prior)) as { cssTheme: string; enabledCssSnippets: string[]; baseFontSize: number };
+    expect(out).toEqual({ cssTheme: "X", enabledCssSnippets: ["a", "a-desktop"], baseFontSize: 16 });
+  });
+  it("field group tolerates null/garbage prior content", () => {
+    expect(JSON.parse(writeLocalSwitchList("enabled-css-snippets", ["a"], null)) as { enabledCssSnippets: string[] }).toEqual({ enabledCssSnippets: ["a"] });
+  });
+  it("plain groups serialize the list as before (2-space + newline)", () => {
+    expect(writeLocalSwitchList("community-plugins", ["a", "b"], null)).toBe(JSON.stringify(["a", "b"], null, 2) + "\n");
+  });
+});
+
+describe("localRealPath", () => {
+  it("redirects the snippet group to appearance.json", () => {
+    expect(localRealPath("enabled-css-snippets", "{configDir}/enabled-css-snippets.json", ".obs")).toBe(".obs/appearance.json");
+  });
+  it("returns groupRealPath for plain switch lists and other groups", () => {
+    expect(localRealPath("community-plugins", "{configDir}/community-plugins.json", ".obs")).toBe(".obs/community-plugins.json");
+    expect(localRealPath("hotkeys", "{configDir}/hotkeys.json", ".obs")).toBe(".obs/hotkeys.json");
+  });
+});
+
+describe("subtractForceOff", () => {
+  it("removes force-off ids from an array list", () => {
+    expect(subtractForceOff(["a", "a-mobile", "b"], ["a-mobile"])).toEqual(["a", "b"]);
+  });
+  it("is identity for empty force-off and for map lists", () => {
+    expect(subtractForceOff(["a", "b"], [])).toEqual(["a", "b"]);
+    expect(subtractForceOff({ a: true }, ["a"])).toEqual({ a: true });
   });
 });
 

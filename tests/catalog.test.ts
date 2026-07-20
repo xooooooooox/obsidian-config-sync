@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  appearancePresetRules,
   CatalogItem,
   categoryForGroup,
   corePluginFile,
   CORE_ID_SEED,
   defaultGroupForName,
   displayLabelForGroup,
+  ensureAppearancePresets,
   ensureSelfPresets,
   expectedPathForName,
   findGroupByName,
@@ -48,7 +50,7 @@ describe("listOptionSections", () => {
     const sections = await listOptionSections(optionFs(), ".obs", NO_GROUPS);
     const byBucket = Object.fromEntries(sections.map((s) => [s.bucket, s]));
     const names = (b: string) => (byBucket[b]?.items ?? []).map((i) => i.name).sort();
-    expect(names("available")).toEqual(["app", "appearance", "snippets"]);
+    expect(names("available")).toEqual(["app", "appearance", "enabled-css-snippets", "snippets"]);
     expect(names("notPresent")).toEqual(["hotkeys", "themes"]);
     expect(byBucket["notRecommended"]).toBeUndefined();
     expect(byBucket["available"]?.allowSyncAll).toBe(true);
@@ -76,6 +78,29 @@ describe("listOptionSections", () => {
     io.seed({ ".obs/app.json": "{}" });
     const sections = await listOptionSections(io, ".obs", NO_GROUPS);
     expect(sections.some((s) => s.bucket === "notRecommended")).toBe(false);
+  });
+
+  it("surfaces enabled-css-snippets as an available item when appearance.json is present", async () => {
+    const sections = await listOptionSections(optionFs(), ".obs", NO_GROUPS);
+    const item = sections.flatMap((s) => s.items).find((i) => i.name === "enabled-css-snippets");
+    expect(item).toEqual({
+      name: "enabled-css-snippets",
+      label: "Enabled CSS snippets",
+      description: "Which CSS snippets are on, per device.",
+      path: "{configDir}/enabled-css-snippets.json",
+      type: "file",
+      exists: true,
+      disabledReason: null,
+      cautionReason: null,
+    });
+  });
+
+  it("omits enabled-css-snippets when appearance.json is absent", async () => {
+    const io = new MemFS();
+    io.seed({ ".obs/app.json": "{}" });
+    const sections = await listOptionSections(io, ".obs", NO_GROUPS);
+    const all = sections.flatMap((s) => s.items.map((i) => i.name));
+    expect(all).not.toContain("enabled-css-snippets");
   });
 });
 
@@ -438,6 +463,12 @@ describe("selfPresetRules", () => {
   });
 });
 
+describe("appearancePresetRules", () => {
+  it("has exactly one locked strip rule for enabledCssSnippets", () => {
+    expect(appearancePresetRules()).toEqual([{ pattern: "enabledCssSnippets", action: "strip", locked: true }]);
+  });
+});
+
 describe("ensureSelfPresets", () => {
   it("adds presets to a bare self group", () => {
     const groups: SyncGroup[] = [{ name: SELF_GROUP_NAME, path: "{configDir}/plugins/config-sync/data.json", type: "file", devices: "all" }];
@@ -519,6 +550,24 @@ describe("ensureSelfPresets", () => {
     const snapshot = structuredClone(groups);
     ensureSelfPresets(groups);
     expect(groups).toEqual(snapshot);
+  });
+});
+
+describe("appearance strip when snippet list is active", () => {
+  // Group name is "appearance" (the reserved name — see optionReservedName), not "appearance.json";
+  // matches the fixtures used elsewhere in this file (e.g. line 238) and in merge.test.ts.
+  const appearance = { name: "appearance", path: "{configDir}/appearance.json", type: "file", devices: "all" } as const;
+  const snippet = { name: "enabled-css-snippets", path: "{configDir}/enabled-css-snippets.json", type: "file", devices: "all" } as const;
+
+  it("adds a locked enabledCssSnippets strip + fields mode ONLY when the snippet group is present", () => {
+    const out = ensureAppearancePresets([{ ...appearance }, { ...snippet }]);
+    const app = out.find((g) => g.name === "appearance")!;
+    expect(app.mode).toBe("fields");
+    expect(app.fields).toContainEqual({ pattern: "enabledCssSnippets", action: "strip", locked: true });
+  });
+  it("leaves appearance untouched when the snippet group is absent", () => {
+    const out = ensureAppearancePresets([{ ...appearance }]);
+    expect(out.find((g) => g.name === "appearance")).toEqual(appearance);
   });
 });
 
