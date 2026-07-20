@@ -1096,39 +1096,19 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     row.addEventListener("click", () => this.jumpTo(hit));
   }
 
-  // After rerender(0) the DOM can still be rebuilding: a settleSensitiveOrder refresh bumps
-  // renderGen and starts a second render, so the awaited render resolves early with the anchor
-  // absent and scrollTop about to be reset. Wait for a frame where renderGen did not advance and
-  // the anchor is present — then it is safe to scroll. Capped so a never-appearing anchor
-  // (e.g. a stale hit) can't spin forever.
-  private waitForSettledAnchor(anchorId: string): Promise<HTMLElement | null> {
-    const sel = `[data-search-anchor="${CSS.escape(anchorId)}"]`;
-    return new Promise((resolve) => {
-      let frames = 0;
-      const tick = (): void => {
-        const gen = this.renderGen;
-        window.requestAnimationFrame(() => {
-          const el = this.containerEl.querySelector<HTMLElement>(sel);
-          if ((el !== null && this.renderGen === gen) || frames++ >= 40) {
-            resolve(el);
-            return;
-          }
-          tick();
-        });
-      };
-      tick();
-    });
-  }
-
   private jumpTo(hit: SearchHit): void {
     void (async () => {
       this.search = "";
       this.searchScope = "all";
       this.activeTab = this.scopeTab(hit.scope);
-      this.sortedSections.delete(this.activeTab);
+      // Suppress the sensitive-first re-sort for this jump: its async settleSensitiveOrder →
+      // refresh() would fire a second render AFTER we scroll, resetting scrollTop and detaching
+      // the target row. Guarded by sortedSections.has(activeTab), so adding it makes the re-sort
+      // a no-op; the tab settles on the next normal render.
+      this.sortedSections.add(this.activeTab);
       if (hit.kind === "item" && hit.item !== undefined) this.expanded.add(hit.item.name);
       await this.rerender(0);
-      const target = await this.waitForSettledAnchor(hit.anchorId);
+      const target = this.containerEl.querySelector(`[data-search-anchor="${CSS.escape(hit.anchorId)}"]`);
       if (target === null) return;
       target.scrollIntoView({ block: "center" });
       target.addClass("config-sync-search-highlight");
