@@ -17,6 +17,7 @@ import {
   PanelFilter,
   policyOptions,
   presentedState,
+  runProgressLabel,
   SECTION_NOTES,
   SECTION_TITLES,
   SectionKind,
@@ -176,6 +177,7 @@ export class SyncCenterView extends ItemView {
   private compact = false;
   private switcherOpen = false;
   private running = false;
+  private activeRun: { verb: "Capturing" | "Applying"; done: number; total: number } | null = null;
   private get lastRun(): LastRun | null {
     return sessionRun.last;
   }
@@ -211,7 +213,7 @@ export class SyncCenterView extends ItemView {
     this.register(() => ro.disconnect());
     this.registerEvent(
       this.app.workspace.on("active-leaf-change", (leaf) => {
-        if (leaf === this.leaf) void this.reload();
+        if (leaf === this.leaf && !this.running) void this.reload();
       })
     );
     this.registerDomEvent(document, "click", (ev) => {
@@ -240,12 +242,13 @@ export class SyncCenterView extends ItemView {
     const compact = width < 700;
     if (compact !== this.compact) {
       this.compact = compact;
-      this.render(this.renderGen);
+      if (!this.running) this.render(this.renderGen);
     }
   }
 
   // Called by the plugin when awareness state changes while the view is open.
   notifyExternalChange(): void {
+    if (this.running) return; // a rebuild mid-run would replace the live progress button
     void this.reload();
   }
 
@@ -1741,6 +1744,7 @@ export class SyncCenterView extends ItemView {
       exec: (payload: T[], onProgress: ProgressFn) => Promise<GroupResult[] | null>
     ): void => {
       this.running = true;
+      this.activeRun = { verb, done: 0, total: payload.length };
       btn.setDisabled(true);
       other.setDisabled(true);
       const wrap = btn.buttonEl.parentElement; // the .config-sync-btnwrap span
@@ -1768,7 +1772,8 @@ export class SyncCenterView extends ItemView {
       void (async () => {
         try {
           const results = await exec(payload, (done, total, current, phase) => {
-            btn.setButtonText(`${verb} ${done}/${total}…`);
+            this.activeRun = { verb, done, total };
+            btn.setButtonText(runProgressLabel(verb, done, total));
             btn.buttonEl.setAttribute("aria-label", current);
             setStatus(current, phase ?? (verb === "Capturing" ? "capturing…" : "applying…"));
             if (fill !== null) fill.style.width = `${total === 0 ? 0 : Math.round((done / total) * 100)}%`;
@@ -1779,6 +1784,7 @@ export class SyncCenterView extends ItemView {
           statusEl.remove();
           barEl?.removeClass("is-active");
           this.running = false;
+          this.activeRun = null;
         }
         await this.reload(); // re-render restores the idle footer
       })();
@@ -1794,13 +1800,23 @@ export class SyncCenterView extends ItemView {
     };
 
     const capW = mkWrapped();
-    capW.btn.setButtonText(`↑ Capture ${capItems.length} item${capItems.length === 1 ? "" : "s"}`);
+    if (this.activeRun?.verb === "Capturing") {
+      capW.btn.setButtonText(runProgressLabel("Capturing", this.activeRun.done, this.activeRun.total));
+      capW.btn.buttonEl.addClass("is-busy");
+    } else {
+      capW.btn.setButtonText(`↑ Capture ${capItems.length} item${capItems.length === 1 ? "" : "s"}`);
+    }
     capW.btn.buttonEl.addClass("config-sync-btn-capture");
     capW.btn.setDisabled(this.running || capItems.length === 0);
 
     const applyW = mkWrapped();
     applyW.btn.setCta();
-    applyW.btn.setButtonText(`↓ Apply ${applyItems.length} item${applyItems.length === 1 ? "" : "s"}`);
+    if (this.activeRun?.verb === "Applying") {
+      applyW.btn.setButtonText(runProgressLabel("Applying", this.activeRun.done, this.activeRun.total));
+      applyW.btn.buttonEl.addClass("is-busy");
+    } else {
+      applyW.btn.setButtonText(`↓ Apply ${applyItems.length} item${applyItems.length === 1 ? "" : "s"}`);
+    }
     applyW.btn.setDisabled(this.running || applyItems.length === 0);
 
     capW.btn.onClick(() => run(capW.btn, applyW.btn, "Capturing", this.capturePayload(), (n, p) => this.host.captureItems(n, p)));
