@@ -193,3 +193,10 @@ export function footerSummary(main: number, outdated: number, disabled: number, 
   if (toInstall > 0) parts.push(`${toInstall} to install`);
   return parts.join(" · ");
 }
+
+// The busy-button label during a capture/apply run — arrow-prefixed to match the idle
+// "↑ Capture N items" / "↓ Apply N items" buttons. Rendered from the view's activeRun state so a
+// mid-run rebuild shows live progress instead of the stale staged count.
+export function runProgressLabel(verb: "Capturing" | "Applying", done: number, total: number): string {
+  return `${verb === "Capturing" ? "↑" : "↓"} ${verb} ${done}/${total}…`;
+}
