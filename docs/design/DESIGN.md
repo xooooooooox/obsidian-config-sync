@@ -128,7 +128,9 @@ noted):
   labels — the pattern the mobile filter pills echo), rows/expand/form-*, fields editor
   (`-fieldrow/-ftag/-act-btn`), remotes forms + `-test-strip`, search (`-hit/-scopetag`),
   passphrase `-ppset/-ppbadge`.
-- **Modals**: pull-conflict `config-sync-cm-*` + `diffView.ts`; exclude-extras
+- **Modals**: pull-conflict `config-sync-cm-*` + `diffView.ts` (shared diff panel:
+  Unified/Split toggle desktop-only, **Collapse/Full toggle both platforms** folding
+  unchanged runs into `-cm-dgap` "⋯ N unchanged lines ⋯" rows); exclude-extras
   `-exclude-row/-modal-buttons`. **Banner**: `-bootstrap*` adopt offer.
 - **Local decisions** `-ldrow` family (switch-list exceptions), **divergence** warning
   block, **inert-note**, **inline diffs** `-inline-diff/-diffhint`.
