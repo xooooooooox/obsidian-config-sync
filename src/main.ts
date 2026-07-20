@@ -24,7 +24,7 @@ import { createInstaller } from "./core/installer";
 import { retry, HttpStatusError, TimeoutError, isRetryableError } from "./core/async";
 import { RunRecord, RunKind, summarizeRun, pruneHistory } from "./core/runHistory";
 import { BratIndex, parseBratRepoList, resolveBratIndex } from "./core/bratIndex";
-import { type CatalogSection, displayLabelForGroup, ensureSelfPresets, findGroupByName, groupForItem, listBetaSections, listCoreSections, listDiscovered, listOptionSections, listPluginSections, SELF_GROUP_NAME, setCorePluginIds } from "./core/catalog";
+import { type CatalogSection, displayLabelForGroup, ensureAppearancePresets, ensureSelfPresets, findGroupByName, groupForItem, listBetaSections, listCoreSections, listDiscovered, listOptionSections, listPluginSections, SELF_GROUP_NAME, setCorePluginIds } from "./core/catalog";
 import { Availability, availabilityForGroup, desktopOnlyDrift, desktopOnlyPluginIds } from "./core/availability";
 import { listFilesRecursive, isJunkPath, FileIO } from "./core/io";
 import { leftoverStoreRels, storeSelfCopyGroups } from "./core/leftover";
@@ -197,7 +197,7 @@ export default class ConfigSyncPlugin extends Plugin {
       const rootPath = await this.resolvedRootPath();
       const result = await migrateLegacyManifest(this.app.vault.adapter, rootPath, this.settings.groups, new Date().toISOString());
       if (result.migrated) {
-        this.settings.groups = ensureSelfPresets(result.groups);
+        this.settings.groups = ensureAppearancePresets(ensureSelfPresets(result.groups));
         await this.saveSettings();
         new Notice("Config Sync: imported groups from config-sync.json (file renamed, now lives in plugin settings)");
       }
