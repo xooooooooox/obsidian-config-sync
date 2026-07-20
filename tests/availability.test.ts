@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { availabilityForGroup, compareVersions, desktopOnlyDrift, desktopOnlyPluginIds } from "../src/core/availability";
+import { availabilityForGroup, compareVersions, desktopOnlyDrift, desktopOnlyPluginIds, scopedAwaySnippets, snippetForceOff } from "../src/core/availability";
 import { FakePlugins } from "./memfs";
 import { StoreLock, SyncGroup } from "../src/core/types";
 
@@ -107,5 +107,28 @@ describe("desktopOnlyPluginIds", () => {
     const p = new FakePlugins();
     expect(desktopOnlyPluginIds([appGroup], p, null).size).toBe(0);
     expect(desktopOnlyPluginIds([], p, null).size).toBe(0);
+  });
+});
+
+describe("scopedAwaySnippets", () => {
+  const scopes = { "a-mobile": "mobile", "a-desktop": "desktop" } as const;
+  it("on desktop, names mobile-scoped snippets", () => {
+    expect(scopedAwaySnippets(scopes, false)).toEqual(new Set(["a-mobile"]));
+  });
+  it("on mobile, names desktop-scoped snippets", () => {
+    expect(scopedAwaySnippets(scopes, true)).toEqual(new Set(["a-desktop"]));
+  });
+  it("empty scopes → empty set", () => {
+    expect(scopedAwaySnippets({}, false)).toEqual(new Set());
+  });
+});
+
+describe("snippetForceOff (pin > scope)", () => {
+  const scopes = { "a-mobile": "mobile", "a-desktop": "desktop" } as const;
+  it("force-offs scope-away snippets on desktop", () => {
+    expect(snippetForceOff(scopes, [], false)).toEqual(["a-mobile"]);
+  });
+  it("a pinned scope-away snippet is NOT force-offed", () => {
+    expect(snippetForceOff(scopes, ["a-mobile"], false)).toEqual([]);
   });
 });
