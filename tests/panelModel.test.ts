@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { capFileEntries, insyncLineText, moreFilesText, visibleUnderFilter, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, footerSummary, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, versionLine } from "../src/ui/panelModel";
+import { capFileEntries, insyncLineText, moreFilesText, visibleUnderFilter, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, footerSummary, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, versionLine, runProgressLabel } from "../src/ui/panelModel";
 import { GroupState } from "../src/core/status";
 import { Availability } from "../src/core/availability";
 
@@ -231,5 +231,12 @@ describe("footerSummary", () => {
     expect(footerSummary(0, 0, 0, 9)).toBe("9 selected · 9 to install");
     expect(footerSummary(1, 2, 0, 0)).toBe("3 selected · 2 to update");
     expect(footerSummary(0, 0, 0, 0)).toBe("");
+  });
+});
+
+describe("runProgressLabel", () => {
+  it("arrow-prefixes the verb with done/total", () => {
+    expect(runProgressLabel("Applying", 5, 72)).toBe("↓ Applying 5/72…");
+    expect(runProgressLabel("Capturing", 0, 3)).toBe("↑ Capturing 0/3…");
   });
 });
