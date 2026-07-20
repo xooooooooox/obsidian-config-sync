@@ -130,8 +130,9 @@ noted):
   passphrase `-ppset/-ppbadge`.
 - **Modals**: pull-conflict `config-sync-cm-*` + `diffView.ts`; exclude-extras
   `-exclude-row/-modal-buttons`. **Banner**: `-bootstrap*` adopt offer.
-- **Local decisions** `-ldrow` family (switch-list exceptions), **divergence** warning
-  block, **inert-note**, **inline diffs** `-inline-diff/-diffhint`.
+- **Local decisions** `-ldrow` family (switch-list exceptions) — plus read-only `is-auto` rows
+  (`-doto-pill` + disabled toggle) surfacing desktop-only plugins auto-excepted on mobile,
+  **divergence** warning block, **inert-note**, **inline diffs** `-inline-diff/-diffhint`.
 
 ## 4. Conventions
 
