@@ -29,7 +29,7 @@ import { Availability, availabilityForGroup, desktopOnlyDrift, desktopOnlyPlugin
 import { listFilesRecursive, isJunkPath, FileIO } from "./core/io";
 import { leftoverStoreRels, storeSelfCopyGroups } from "./core/leftover";
 import { ManifestValidationError, migrateLegacyManifest, parseStoreLock, validateSyncManifest } from "./core/manifest";
-import { basename, groupRealPath, groupStorePath } from "./core/pathing";
+import { basename, groupStorePath } from "./core/pathing";
 import { applySwitchList, captureSwitchList, localRealPath, parseSwitchList, readLocalSwitchList, subtractForceOff, SWITCH_LIST_GROUPS, switchDivergence, SwitchList, writeLocalSwitchList } from "./core/switchList";
 import { applyTransform, captureTransform, scanSensitive, SensitiveScan } from "./core/modes";
 import { PkmMode, PkmProbe, resolveEffectiveMode, resolveRootPath } from "./core/pkm";
@@ -488,10 +488,10 @@ export default class ConfigSyncPlugin extends Plugin {
         if (group === undefined) return null;
         try {
           const ctx = await this.coreContext();
-          const real = groupRealPath(group.path, ctx.configDir);
+          const real = localRealPath(name, group.path, ctx.configDir);
           const store = `${ctx.rootPath}/store/${groupStorePath(group.path)}`;
           if (!(await ctx.io.exists(real)) || !(await ctx.io.exists(store))) return null;
-          const local = parseSwitchList(await ctx.io.read(real));
+          const local = readLocalSwitchList(name, await ctx.io.read(real));
           const stored = parseSwitchList(await ctx.io.read(store));
           if (local === null || stored === null) return null;
           return switchDivergence(local, stored, ctx.switchExceptions[name] ?? []);
@@ -1109,7 +1109,13 @@ export default class ConfigSyncPlugin extends Plugin {
     if (groupName === "enabled-css-snippets") {
       const cfg = this.app.vault.configDir;
       const readArr = async (p: string): Promise<string[]> => {
-        try { return (await io.exists(p)) ? (JSON.parse(await io.read(p)) as string[]) : []; } catch { return []; }
+        try {
+          if (!(await io.exists(p))) return [];
+          const parsed = parseSwitchList(await io.read(p));
+          return Array.isArray(parsed) ? parsed : [];
+        } catch {
+          return [];
+        }
       };
       // universe = .css files in snippets/ ∪ store list ∪ locally-enabled
       const files = (await io.exists(`${cfg}/snippets`)) ? (await io.list(`${cfg}/snippets`)).files : [];
@@ -1119,13 +1125,14 @@ export default class ConfigSyncPlugin extends Plugin {
       const root = await this.resolvedRootPath();
       const store = await readArr(`${root}/store/${groupStorePath("{configDir}/enabled-css-snippets.json")}`);
       const scopedAway = scopedAwaySnippets(this.settings.snippetScopes, Platform.isMobile);
+      const pins = new Set(this.settings.switchExceptions["enabled-css-snippets"] ?? []);
       const ids = [...new Set([...fromDir, ...store, ...local])].sort();
       return ids.map((id) => ({
         id,
         name: id,
         hint: `${local.includes(id) ? "on here" : "off here"} · ${store.includes(id) ? "store has on" : "store has off"}`,
         desktopOnly: false,
-        deviceScoped: scopedAway.has(id), // renders as an auto-excluded row via orderSwitchRows
+        deviceScoped: scopedAway.has(id) && !pins.has(id), // pin > scope: pinned rows are user-controlled/local, not auto-excluded
       }));
     }
     const file = groupName === "community-plugins" ? "community-plugins.json" : "core-plugins.json";
@@ -1176,10 +1183,15 @@ export default class ConfigSyncPlugin extends Plugin {
 
   async readItemFile(group: SyncGroup): Promise<string | null> {
     const io = this.app.vault.adapter;
-    const real = groupRealPath(group.path, this.app.vault.configDir);
+    const real = localRealPath(group.name, group.path, this.app.vault.configDir);
     if (group.type !== "file" || !(await io.exists(real))) return null;
     try {
-      return await io.read(real);
+      const content = await io.read(real);
+      if (group.name === "enabled-css-snippets") {
+        const list = readLocalSwitchList(group.name, content);
+        return list !== null ? JSON.stringify(list, null, 2) + "\n" : null;
+      }
+      return content;
     } catch {
       return null;
     }
@@ -1187,7 +1199,7 @@ export default class ConfigSyncPlugin extends Plugin {
 
   async detectSensitive(group: SyncGroup): Promise<SensitiveScan> {
     const io = this.app.vault.adapter;
-    const real = groupRealPath(group.path, this.app.vault.configDir);
+    const real = localRealPath(group.name, group.path, this.app.vault.configDir);
     const dirExists = group.type === "dir" && (await io.exists(real));
     const files = group.type === "file" ? [real] : dirExists ? await listFilesRecursive(io, real) : [];
     const keys = new Set<string>();
@@ -1199,6 +1211,11 @@ export default class ConfigSyncPlugin extends Plugin {
         content = await io.read(f);
       } catch {
         continue;
+      }
+      if (group.name === "enabled-css-snippets") {
+        const list = readLocalSwitchList(group.name, content);
+        if (list === null) continue;
+        content = JSON.stringify(list);
       }
       const scan = scanSensitive(content);
       for (const k of scan.keys) keys.add(k);
