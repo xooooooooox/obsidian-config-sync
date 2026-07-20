@@ -894,7 +894,7 @@ export default class ConfigSyncPlugin extends Plugin {
         lock = null;
       }
     }
-    const dtoIds = desktopOnlyPluginIds(lock);
+    const dtoIds = desktopOnlyPluginIds(this.settings.groups, this.pluginHost(), lock);
     if (dtoIds.size === 0) return this.settings.switchExceptions;
     const manual = this.settings.switchExceptions["community-plugins"] ?? [];
     return { ...this.settings.switchExceptions, "community-plugins": [...new Set([...manual, ...dtoIds])] };
