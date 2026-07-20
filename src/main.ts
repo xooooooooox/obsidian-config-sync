@@ -1077,7 +1077,7 @@ export default class ConfigSyncPlugin extends Plugin {
 
   // Rows for the switch-list "Local decisions" editor: union of local list ∪ store copy ∪
   // runtime (installed plugins / core registry), each with a display name and a state hint.
-  async switchListRows(groupName: string): Promise<{ id: string; name: string; hint: string }[]> {
+  async switchListRows(groupName: string): Promise<{ id: string; name: string; hint: string; desktopOnly: boolean }[]> {
     const io = this.app.vault.adapter;
     const file = groupName === "community-plugins" ? "community-plugins.json" : "core-plugins.json";
     const readList = async (path: string): Promise<SwitchList | null> => {
@@ -1092,6 +1092,19 @@ export default class ConfigSyncPlugin extends Plugin {
       l !== null && (Array.isArray(l) ? l.includes(id) : l[id] === true);
     const local = await readList(`${this.app.vault.configDir}/${file}`);
     const root = await this.resolvedRootPath();
+    let dtoIds = new Set<string>();
+    if (Platform.isMobile && groupName === "community-plugins") {
+      const lockPath = `${root}/store.lock.json`;
+      let lock: StoreLock | null = null;
+      if (await io.exists(lockPath)) {
+        try {
+          lock = parseStoreLock(await io.read(lockPath));
+        } catch {
+          lock = null;
+        }
+      }
+      dtoIds = desktopOnlyPluginIds(this.settings.groups, this.pluginHost(), lock);
+    }
     const store = await readList(`${root}/store/${groupStorePath(`{configDir}/${file}`)}`);
     const runtime = groupName === "community-plugins" ? this.pluginRuntime() : this.coreRuntime();
     const nameOf = new Map(runtime.map((r) => [r.id, r.name]));
@@ -1101,6 +1114,7 @@ export default class ConfigSyncPlugin extends Plugin {
         id,
         name: nameOf.get(id) ?? id,
         hint: `${onIn(local, id) ? "on here" : "off here"} · ${store === null ? "no store copy" : onIn(store, id) ? "store has on" : "store has off"}`,
+        desktopOnly: dtoIds.has(id),
       }))
       .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })); // sort by DISPLAY name — id order looked random in the UI
   }
