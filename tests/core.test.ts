@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CoreContext, capture, captureWithActions, loadManifest, groupsForDevice, apply, applyWithActions, revertLastApply, planImport, applyImport, PendingPull, ExternalStoreReader, pushExternal, ExternalStoreWriter, pluginIdForGroup, readGroups, writeGroups } from "../src/core/ConfigSyncCore";
+import { CoreContext, capture, captureWithActions, loadManifest, groupsForDevice, apply, applyWithActions, revertLastApply, planImport, applyImport, PendingPull, ExternalStoreReader, pushExternal, ExternalStoreWriter, pluginIdForGroup, readGroups, writeGroups, deviceExcludedPluginIds } from "../src/core/ConfigSyncCore";
 import { parseSyncManifest } from "../src/core/manifest";
 import { SyncGroup } from "../src/core/types";
 import { isFieldEnvelope, parseFileEnvelope } from "../src/core/crypto";
@@ -50,6 +50,31 @@ describe("groupsForDevice", () => {
     const manifest = parseSyncManifest(MANIFEST);
     expect(groupsForDevice(manifest, "mobile").map((g) => g.name)).toEqual(["hotkeys", "snippets", "plugin-demo"]);
     expect(groupsForDevice(manifest, "desktop").map((g) => g.name)).toEqual(["hotkeys", "snippets", "vimrc", "plugin-demo"]);
+  });
+});
+
+describe("deviceExcludedPluginIds", () => {
+  const pg = (id: string, devices: "all" | "desktop" | "mobile"): SyncGroup => ({
+    name: `plugin-${id}`,
+    path: `{configDir}/plugins/${id}/data.json`,
+    type: "file",
+    devices,
+  });
+  const appGroup: SyncGroup = { name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "desktop" };
+  const groups = [pg("vim-toggle", "desktop"), pg("mobile-only-thing", "mobile"), pg("dataview", "all"), appGroup];
+
+  it("on mobile, names plugins whose group is scoped to desktop", () => {
+    expect(deviceExcludedPluginIds(groups, "mobile")).toEqual(new Set(["vim-toggle"]));
+  });
+
+  it("on desktop, names plugins whose group is scoped to mobile", () => {
+    expect(deviceExcludedPluginIds(groups, "desktop")).toEqual(new Set(["mobile-only-thing"]));
+  });
+
+  it("never names devices:'all' plugins or app-anchored (non-plugin) groups", () => {
+    const ids = deviceExcludedPluginIds(groups, "mobile");
+    expect(ids.has("dataview")).toBe(false); // devices:'all'
+    expect(ids.has("hotkeys")).toBe(false); // app-anchored: pluginIdForGroup is null
   });
 });
 

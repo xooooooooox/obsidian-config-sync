@@ -77,6 +77,20 @@ export function groupsForDevice(manifest: SyncManifest, device: "desktop" | "mob
   return manifest.groups.filter((g) => g.devices === "all" || g.devices === device);
 }
 
+// Plugin ids whose group is scoped to a device class that excludes `device`
+// (devices:"desktop" on a mobile device, devices:"mobile" on desktop). On a device they are
+// scoped away from, they must never be captured out of — or forced into — the shared
+// enabled-plugins switch list; they simply do not belong to this device.
+export function deviceExcludedPluginIds(groups: SyncGroup[], device: "desktop" | "mobile"): Set<string> {
+  const ids = new Set<string>();
+  for (const g of groups) {
+    if (g.devices === "all" || g.devices === device) continue;
+    const id = pluginIdForGroup(g);
+    if (id !== null) ids.add(id);
+  }
+  return ids;
+}
+
 export function parseJsonOrThrow(raw: string, groupName: string, path: string): unknown {
   try {
     return JSON.parse(raw);
