@@ -795,11 +795,16 @@ export default class ConfigSyncPlugin extends Plugin {
       throw new Error(`"${id}" is managed by BRAT (${repo}) — enable BRAT and retry, or run BRAT's update command`);
     }
     const addPlugin = beta.addPlugin.bind(beta);
-    // enableAfterInstall stays false: enabling is config-sync's own On-apply decision.
-    // addPlugin re-downloads and rewrites files (idempotent), so bound + retry it too — a
-    // stalled BRAT download would otherwise hang the whole run like a bare requestUrl.
+    // addPlugin(repo, updatePluginFiles, seeIfUpdatedOnly, reportIfNotUpdated, specifyVersion,
+    // forceReinstall, enableAfterInstall, secretName). Use BRAT's *install* path
+    // (updatePluginFiles=false, forceReinstall=true) — the one BRAT's own "Add/Change version" UI
+    // uses and that installs on mobile. The *update* path (updatePluginFiles=true) fails on mobile
+    // with "JSON Parse error: Unexpected EOF" (a fetch there returns an empty body on mobile);
+    // desktop can't reproduce it since both paths succeed there. forceReinstall keeps the
+    // idempotent re-download the retry/timeout wrapper relies on; enableAfterInstall stays false —
+    // enabling is config-sync's own On-apply decision.
     const ok = await retry(
-      () => this.withTimeout(addPlugin(repo, true, false, false, "", false, false, ""), 30_000, repo),
+      () => this.withTimeout(addPlugin(repo, false, false, false, "", true, false, ""), 30_000, repo),
       { attempts: 3, retryable: isRetryableError, onAttempt: (n) => this.installPhase?.(`BRAT install failed — retrying (${n}/3)…`) }
     );
     await this.pluginHost().reloadPluginManifests();
