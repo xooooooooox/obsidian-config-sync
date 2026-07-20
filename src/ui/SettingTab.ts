@@ -1101,14 +1101,18 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       this.search = "";
       this.searchScope = "all";
       this.activeTab = this.scopeTab(hit.scope);
-      this.sortedSections.delete(this.activeTab);
+      // Suppress the sensitive-first re-sort for this jump: its async settleSensitiveOrder →
+      // refresh() would fire a second render AFTER we scroll, resetting scrollTop and detaching
+      // the target row. Guarded by sortedSections.has(activeTab), so adding it makes the re-sort
+      // a no-op; the tab settles on the next normal render.
+      this.sortedSections.add(this.activeTab);
       if (hit.kind === "item" && hit.item !== undefined) this.expanded.add(hit.item.name);
       await this.rerender(0);
       const target = this.containerEl.querySelector(`[data-search-anchor="${CSS.escape(hit.anchorId)}"]`);
       if (target === null) return;
       target.scrollIntoView({ block: "center" });
       target.addClass("config-sync-search-highlight");
-      window.setTimeout(() => target.removeClass("config-sync-search-highlight"), 1500);
+      window.setTimeout(() => target.removeClass("config-sync-search-highlight"), 1800);
     })();
   }
 
