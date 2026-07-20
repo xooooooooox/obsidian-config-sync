@@ -79,14 +79,16 @@ export function desktopOnlyDrift(groups: SyncGroup[], plugins: PluginHost, lock:
   return n;
 }
 
-// Plugin ids the store records as desktop-only (from the lock's per-group flags). The lock is the
-// source that also works on a phone, where the plugin isn't installed and its manifest can't be
-// read — used to auto-except them from the enabled-plugins switch list so a phone doesn't drop them.
-export function desktopOnlyPluginIds(lock: StoreLock | null): Set<string> {
+// Plugin ids config-sync treats as desktop-only on THIS device — the same manifest-first,
+// lock-fallback signal the Desktop-only section uses (via availabilityForGroup), so the auto-except
+// set and the section never disagree. Used to auto-except them from the enabled-plugins switch list
+// on mobile (a lock-only source missed installed-but-disabled plugins the section catches via manifest).
+export function desktopOnlyPluginIds(groups: SyncGroup[], plugins: PluginHost, lock: StoreLock | null): Set<string> {
   const ids = new Set<string>();
-  if (lock === null) return ids;
-  for (const [name, entry] of Object.entries(lock.groups)) {
-    if (entry.desktopOnly === true && name.startsWith("plugin-")) ids.add(name.slice("plugin-".length));
+  for (const g of groups) {
+    const id = pluginIdForGroup(g);
+    if (id === null) continue; // app-anchored
+    if (availabilityForGroup(g, plugins, lock).desktopOnly) ids.add(id);
   }
   return ids;
 }

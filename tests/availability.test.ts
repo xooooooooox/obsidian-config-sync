@@ -86,17 +86,26 @@ describe("desktopOnlyDrift", () => {
 });
 
 describe("desktopOnlyPluginIds", () => {
-  it("collects plugin ids the lock marks desktop-only, ignoring non-plugin and unflagged entries", () => {
-    const ids = desktopOnlyPluginIds(
-      lock({
-        "plugin-media-extended": { sourcePluginVersion: "1.0.0", desktopOnly: true },
-        "plugin-dataview": { sourcePluginVersion: "1.0.0" }, // no flag
-        hotkeys: { sourceAppVersion: "1.0.0" }, // app-anchored, not plugin-prefixed
-      })
-    );
-    expect([...ids].sort()).toEqual(["media-extended"]);
+  const pg = (id: string): SyncGroup => ({ name: `plugin-${id}`, path: `{configDir}/plugins/${id}/data.json`, type: "file", devices: "all" });
+  const appGroup: SyncGroup = { name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all" };
+  it("uses the section's signal: manifest when installed (lock flag not required), lock when not", () => {
+    const p = new FakePlugins();
+    p.installed.set("quick-explorer", "1.0.0");
+    p.desktopOnlyIds.add("quick-explorer"); // installed + manifest desktop-only, NO lock flag — the 1.1.6 bug case
+    p.installed.set("dataview", "0.5.0"); // installed, not desktop-only
+    const groups = [pg("quick-explorer"), pg("dataview"), appGroup];
+    const ids = desktopOnlyPluginIds(groups, p, lock({ "plugin-quick-explorer": { sourcePluginVersion: "1.0.0" }, "plugin-dataview": { sourcePluginVersion: "0.5.0" } }));
+    expect([...ids].sort()).toEqual(["quick-explorer"]);
   });
-  it("returns an empty set for a null lock", () => {
-    expect(desktopOnlyPluginIds(null).size).toBe(0);
+  it("falls back to the lock flag when not installed, and collects nothing without a signal", () => {
+    const p = new FakePlugins(); // nothing installed
+    const groups = [pg("media-extended")];
+    expect([...desktopOnlyPluginIds(groups, p, lock({ "plugin-media-extended": { sourcePluginVersion: "1.0.0", desktopOnly: true } }))]).toEqual(["media-extended"]);
+    expect(desktopOnlyPluginIds(groups, p, lock({ "plugin-media-extended": { sourcePluginVersion: "1.0.0" } })).size).toBe(0);
+  });
+  it("ignores app-anchored groups and empty input", () => {
+    const p = new FakePlugins();
+    expect(desktopOnlyPluginIds([appGroup], p, null).size).toBe(0);
+    expect(desktopOnlyPluginIds([], p, null).size).toBe(0);
   });
 });
