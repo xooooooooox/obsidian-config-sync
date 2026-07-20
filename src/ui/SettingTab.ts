@@ -35,6 +35,7 @@ export interface SettingsHost extends Plugin {
     remoteAutoCheck: boolean;
     localPeriodicCheck: boolean;
     switchExceptions: Record<string, string[]>;
+    snippetScopes: Record<string, "desktop" | "mobile">;
     runHistory: { enabled: boolean; path: string; maxCount: number; maxDays: number };
   };
   saveSettings(): Promise<void>;
@@ -167,6 +168,19 @@ const SCOPE_LABEL: Record<SearchHit["scope"], string> = {
   advanced: "Advanced",
   sources: "Remotes",
 };
+
+// Writes/clears a single snippet's device scope (`enabled-css-snippets` "Active on" dropdown).
+// "all" is the absent default, so it deletes the key rather than storing it explicitly.
+export function setSnippetScope(
+  scopes: Record<string, "desktop" | "mobile">,
+  name: string,
+  value: "all" | "desktop" | "mobile",
+): Record<string, "desktop" | "mobile"> {
+  const next = { ...scopes };
+  if (value === "all") delete next[name];
+  else next[name] = value;
+  return next;
+}
 
 export class ConfigSyncSettingTab extends PluginSettingTab {
   private groups: SyncGroup[] = [];
@@ -477,11 +491,23 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       devBadge.setAttribute("aria-label", item.cautionReason);
     }
     if (group !== undefined && SWITCH_LIST_GROUPS.has(item.name)) {
+      const isSnippetGroup = item.name === "enabled-css-snippets";
+      if (isSnippetGroup) {
+        const scopedCount = Object.keys(this.host.settings.snippetScopes).length;
+        const scopeBadge = row.nameEl.createSpan({ cls: "config-sync-devbadge config-sync-scopebadge", text: `${scopedCount} device-scoped` });
+        scopeBadge.setAttribute("title", 'Snippets restricted to a single device via "active on"');
+        if (scopedCount === 0) scopeBadge.hide();
+      }
       // Always create the badge (hidden at 0) so the exclude toggle can update it in place
       // without rebuilding the row — a full re-render here flashes visibly.
       const n = (this.host.settings.switchExceptions[item.name] ?? []).length;
-      const b = row.nameEl.createSpan({ cls: "config-sync-devbadge config-sync-exbadge", text: `${n} excluded` });
-      b.setAttribute("title", "Plugins excluded from this list on this device — they keep their own on/off state");
+      const b = row.nameEl.createSpan({ cls: "config-sync-devbadge config-sync-exbadge", text: isSnippetGroup ? `${n} pinned` : `${n} excluded` });
+      b.setAttribute(
+        "title",
+        isSnippetGroup
+          ? "Snippets pinned to this device — they keep their own on/off state here, regardless of the shared list"
+          : "Plugins excluded from this list on this device — they keep their own on/off state"
+      );
       if (n === 0) b.hide();
     }
     if (group !== undefined && item.disabledReason === null) {
@@ -563,6 +589,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   // "Local decisions (this device)" — per-device exceptions for the two switch-list items
   // (定稿 switch-exceptions.html): excepted ids never enter the store and never flip here.
   private renderLocalDecisions(exp: HTMLElement, group: SyncGroup, wrap: HTMLElement, item: CatalogItem): void {
+    const isSnippetGroup = group.name === "enabled-css-snippets";
     exp.createDiv({ cls: "config-sync-explabel", text: "Excluded from this list (this device)" });
     exp.createDiv({
       cls: "config-sync-expdesc",
@@ -603,10 +630,36 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
           const rowEl = listEl.createDiv({
             cls: `config-sync-ldrow${isLocal ? " is-local" : ""}${gsep ? " config-sync-ldrow-gsep" : ""}`,
           });
-          rowEl.createSpan({ cls: "config-sync-ldname", text: r.name });
+          const nameEl = rowEl.createSpan({ cls: "config-sync-ldname" });
+          if (isSnippetGroup) setIcon(nameEl.createSpan({ cls: "config-sync-ldpinicon" }), "pin");
+          nameEl.appendText(r.name);
           rowEl.createSpan({ cls: "config-sync-ldhint", text: r.hint });
           rowEl.createDiv({ cls: "config-sync-rule-spacer" });
-          rowEl.createSpan({ cls: "config-sync-ldstate", text: isLocal ? "excluded" : "included" });
+          rowEl.createSpan({ cls: "config-sync-ldstate", text: isLocal ? (isSnippetGroup ? "Pinned here" : "excluded") : "included" });
+          if (isSnippetGroup) {
+            const scopeNow = this.host.settings.snippetScopes[r.id] ?? "all";
+            const scopeDd = new DropdownComponent(rowEl)
+              .addOption("all", "All devices")
+              .addOption("desktop", "Desktop only")
+              .addOption("mobile", "Mobile only")
+              .setValue(scopeNow)
+              .onChange(async (v) => {
+                this.host.settings.snippetScopes = setSnippetScope(this.host.settings.snippetScopes, r.id, v as "all" | "desktop" | "mobile");
+                await this.host.saveSettings();
+                const scopeBadge = wrap.querySelector<HTMLElement>(".config-sync-scopebadge");
+                if (scopeBadge !== null) {
+                  const count = Object.keys(this.host.settings.snippetScopes).length;
+                  scopeBadge.setText(`${count} device-scoped`);
+                  if (count > 0) scopeBadge.show();
+                  else scopeBadge.hide();
+                }
+                renderRows();
+              });
+            // Outlined orange chip only while a scope is actually set (定稿 snippet-scope-refined-v2.html) —
+            // "All devices" reads as a plain, low-emphasis control.
+            scopeDd.selectEl.addClass("config-sync-ld-scope");
+            scopeDd.selectEl.toggleClass("is-scoped", scopeNow !== "all");
+          }
           new ToggleComponent(rowEl).setValue(isLocal).onChange(async (v) => {
             const cur = new Set(this.host.settings.switchExceptions[group.name] ?? []);
             if (v) cur.add(r.id);
@@ -615,7 +668,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
             await this.host.saveSettings();
             const badge = wrap.querySelector<HTMLElement>(".config-sync-exbadge");
             if (badge !== null) {
-              badge.setText(`${cur.size} excluded`);
+              badge.setText(isSnippetGroup ? `${cur.size} pinned` : `${cur.size} excluded`);
               if (cur.size > 0) badge.show();
               else badge.hide();
             }

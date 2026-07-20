@@ -1063,6 +1063,30 @@ body.is-mobile .config-sync-strip-meta .config-sync-report-pills { margin-left: 
 .config-sync-ldrow.is-local .config-sync-ldstate,
 .config-sync-ldrow.is-auto .config-sync-ldstate { color: var(--color-orange); }
 
+/* Lucide "pin" prefixing a snippet's name (enabled-css-snippets only) — muted until the row is
+   pinned (is-local), matching the outlined-vs-filled orange language used across this drawer. */
+.config-sync-ldpinicon {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: text-bottom;
+  margin-right: var(--size-4-1);
+  color: var(--text-faint);
+}
+.config-sync-ldpinicon svg { width: 12px; height: 12px; }
+.config-sync-ldrow.is-local .config-sync-ldpinicon { color: var(--color-orange); }
+
+/* Per-snippet "Active on" scope dropdown — outlined orange chip once a device scope is set,
+   plain/low-emphasis at the "All devices" default (定稿 snippet-scope-refined-v2.html). */
+.config-sync-ld-scope {
+  height: auto;
+  font-size: var(--font-ui-smaller);
+  padding: 3px 20px 3px 8px;
+}
+.config-sync-ld-scope.is-scoped {
+  color: var(--color-orange);
+  border-color: rgba(var(--color-orange-rgb), 0.5);
+}
+
 .config-sync-ldnote { color: var(--color-orange); font-size: var(--font-ui-smaller); margin-left: var(--size-4-1); }
 .config-sync-lddetail { color: var(--color-orange); font-family: var(--font-monospace); font-size: var(--font-ui-smaller); padding: 1px 0; }
 
