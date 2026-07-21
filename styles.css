@@ -1063,17 +1063,44 @@ body.is-mobile .config-sync-strip-meta .config-sync-report-pills { margin-left: 
 .config-sync-ldrow.is-local .config-sync-ldstate,
 .config-sync-ldrow.is-auto .config-sync-ldstate { color: var(--color-orange); }
 
-/* Lucide "pin" prefixing a snippet's name (enabled-css-snippets only) — muted until the row is
-   pinned (is-local), matching the outlined-vs-filled orange language used across this drawer. */
-.config-sync-ldpinicon {
+/* Pin affordance (enabled-css-snippets only), 定稿 snippet-scope-refined-v2.html.
+   Unpinned rows: a Lucide "pin" that stays hidden until the row is hovered — an occasional
+   action, not a permanent control. Pinned rows: a filled orange "Pinned here" chip + Unpin. */
+.config-sync-ld-pin {
   display: inline-flex;
   align-items: center;
-  vertical-align: text-bottom;
-  margin-right: var(--size-4-1);
-  color: var(--text-faint);
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 80ms ease-in-out;
 }
-.config-sync-ldpinicon svg { width: 12px; height: 12px; }
-.config-sync-ldrow.is-local .config-sync-ldpinicon { color: var(--color-orange); }
+.config-sync-ld-pin svg { width: 14px; height: 14px; }
+.config-sync-ldrow:hover .config-sync-ld-pin,
+.config-sync-ld-pin:focus-visible { opacity: 0.65; }
+.config-sync-ld-pin:hover { opacity: 1; }
+
+.config-sync-ld-pinchip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--size-2-1);
+  margin-left: var(--size-4-2);
+  padding: 1px 8px;
+  border-radius: 9px;
+  font-size: var(--font-ui-smaller);
+  line-height: 1.6;
+  white-space: nowrap;
+  color: var(--color-orange);
+  background: rgba(var(--color-orange-rgb), 0.14);
+}
+.config-sync-ld-pinchip-icon { display: inline-flex; align-items: center; }
+.config-sync-ld-pinchip-icon svg { width: 11px; height: 11px; }
+
+.config-sync-ld-unpin {
+  color: var(--text-accent);
+  font-size: var(--font-ui-smaller);
+  cursor: pointer;
+}
+.config-sync-ld-unpin:hover { text-decoration: underline; }
 
 /* Per-snippet "Active on" scope dropdown — outlined orange chip once a device scope is set,
    plain/low-emphasis at the "All devices" default (定稿 snippet-scope-refined-v2.html). */
