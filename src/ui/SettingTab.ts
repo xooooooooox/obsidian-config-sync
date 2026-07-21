@@ -633,6 +633,25 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         if (count > 0) scopeBadge.show();
         else scopeBadge.hide();
       };
+      // The shared "Active on" scope dropdown — rendered on normal snippet rows and on
+      // scoped-away snippet rows, so a snippet's scope stays editable from any device.
+      const renderScopeDropdown = (rowEl: HTMLElement, r: SwitchRow, disabled: boolean): void => {
+        const scopeNow = this.host.settings.snippetScopes[r.id] ?? "all";
+        const scopeDd = new DropdownComponent(rowEl)
+          .addOption("all", "All devices")
+          .addOption("desktop", "Desktop only")
+          .addOption("mobile", "Mobile only")
+          .setValue(scopeNow)
+          .setDisabled(disabled)
+          .onChange(async (v) => {
+            this.host.settings.snippetScopes = setSnippetScope(this.host.settings.snippetScopes, r.id, v as "all" | "desktop" | "mobile");
+            await this.host.saveSettings();
+            updateScopeBadge();
+            await reload();
+          });
+        scopeDd.selectEl.addClass("config-sync-ld-scope");
+        scopeDd.selectEl.toggleClass("is-scoped", scopeNow !== "all");
+      };
       const exceptions = new Set(this.host.settings.switchExceptions[group.name] ?? []);
       const ordered = orderSwitchRows(rows, exceptions);
       let prevBucket: OrderedSwitchRow["bucket"] | null = null;
@@ -640,13 +659,17 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         const gsep = prevBucket !== null && r.bucket !== prevBucket;
         prevBucket = r.bucket;
         if (r.bucket === "desktop-only" || r.bucket === "device-scoped") {
+          // A snippet scoped away from THIS device keeps its scope editable (the scope is
+          // shared, user-set metadata) — so it can be un-scoped from any device instead of
+          // locking here. Plugin desktop-only / device-scoped rows stay inert.
+          const editableScope = isSnippetGroup && r.bucket === "device-scoped";
           const rowEl = listEl.createDiv({ cls: `config-sync-ldrow is-auto${gsep ? " config-sync-ldrow-gsep" : ""}` });
           rowEl.setAttribute(
             "title",
-            r.bucket === "desktop-only"
-              ? "Excluded automatically — this plugin can't run on this device"
-              : isSnippetGroup
-                ? `Scoped to ${boundDevice} only — not active on this device (change it from a ${boundDevice} device)`
+            editableScope
+              ? `Scoped to ${boundDevice} only — not active on this device`
+              : r.bucket === "desktop-only"
+                ? "Excluded automatically — this plugin can't run on this device"
                 : `Excluded automatically — you set this plugin to devices: ${boundDevice}`,
           );
           rowEl.createSpan({ cls: "config-sync-ldname", text: r.name });
@@ -656,8 +679,12 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
           });
           rowEl.createSpan({ cls: "config-sync-ldhint", text: r.hint });
           rowEl.createDiv({ cls: "config-sync-rule-spacer" });
-          rowEl.createSpan({ cls: "config-sync-ldstate", text: "auto-excluded" });
-          new ToggleComponent(rowEl).setValue(true).setDisabled(true);
+          if (editableScope) {
+            renderScopeDropdown(rowEl, r, false);
+          } else {
+            rowEl.createSpan({ cls: "config-sync-ldstate", text: "auto-excluded" });
+            new ToggleComponent(rowEl).setValue(true).setDisabled(true);
+          }
           continue;
         }
         const isLocal = r.bucket === "excluded"; // snippets: "pinned to this device"
@@ -683,23 +710,9 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
             setIcon(pinBtn, "pin");
             pinBtn.addEventListener("click", () => void setPin(r.id, true));
           }
-          const scopeNow = this.host.settings.snippetScopes[r.id] ?? "all";
           // A pin makes this device user-controlled (pin > scope), so the shared scope doesn't
           // apply here — grey the dropdown while pinned.
-          const scopeDd = new DropdownComponent(rowEl)
-            .addOption("all", "All devices")
-            .addOption("desktop", "Desktop only")
-            .addOption("mobile", "Mobile only")
-            .setValue(scopeNow)
-            .setDisabled(isLocal)
-            .onChange(async (v) => {
-              this.host.settings.snippetScopes = setSnippetScope(this.host.settings.snippetScopes, r.id, v as "all" | "desktop" | "mobile");
-              await this.host.saveSettings();
-              updateScopeBadge();
-              await reload();
-            });
-          scopeDd.selectEl.addClass("config-sync-ld-scope");
-          scopeDd.selectEl.toggleClass("is-scoped", scopeNow !== "all");
+          renderScopeDropdown(rowEl, r, isLocal);
         } else {
           rowEl.createSpan({ cls: "config-sync-ldstate", text: isLocal ? "excluded" : "included" });
           new ToggleComponent(rowEl).setValue(isLocal).onChange((v) => void setPin(r.id, v));
