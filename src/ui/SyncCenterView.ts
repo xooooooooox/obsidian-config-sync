@@ -32,6 +32,7 @@ import { renderDiffPanel } from "./diffView";
 import { SWITCH_LIST_GROUPS, switchListSortedView } from "../core/switchList";
 import { renderReportContent, renderReportPills } from "./reportContent";
 import { RunRecord, RunKind, RunStatus, worstStatus, formatRunTime, stopSyncDesc, deleteLeftoverDesc } from "../core/runHistory";
+import { ACTION_ICON, type SyncAction } from "./actionIcons";
 
 // Sidebar scope order: Beta sits between Community and custom (batch 3 ③).
 const SCOPE_ORDER: (ItemCategory | "beta")[] = ["obsidian", "core", "community", "beta", "custom"];
@@ -704,7 +705,7 @@ export class SyncCenterView extends ItemView {
         const item = container.createDiv({ cls: `config-sync-side-item${active ? " is-active" : ""}` });
         item.createSpan({ cls: "config-sync-side-name", text: remote.name });
         const icon = this.remoteIcon(this.host.remoteCheck(remote.name)?.check);
-        item.createSpan({ cls: `config-sync-state-icon ${icon.cls}`, text: icon.glyph, attr: { "aria-label": icon.tip } });
+        this.paintStateIcon(item.createSpan({ cls: `config-sync-state-icon ${icon.cls}`, attr: { "aria-label": icon.tip } }), icon);
         item.addEventListener("click", () => {
           this.panelScope = { kind: "remote", name: remote.name };
           this.switcherOpen = false;
@@ -746,7 +747,7 @@ export class SyncCenterView extends ItemView {
     } else {
       sw.createSpan({ text: this.panelScope.name });
       const icon = this.remoteIcon(this.host.remoteCheck(this.panelScope.name)?.check);
-      sw.createSpan({ cls: `config-sync-state-icon ${icon.cls}`, text: icon.glyph });
+      this.paintStateIcon(sw.createSpan({ cls: `config-sync-state-icon ${icon.cls}` }), icon);
     }
     sw.createSpan({ cls: "config-sync-switcher-chev", text: this.switcherOpen ? "▴" : "▾" });
     sw.addEventListener("click", (e) => {
@@ -1307,10 +1308,9 @@ export class SyncCenterView extends ItemView {
 
     const icon = this.stateIcon(pres);
     const stateEl = row.createSpan({ cls: `config-sync-state-icon ${icon.cls}`, attr: { "aria-label": icon.tip } });
-    // locked pairs the mode badge's lock with a key — "needs the passphrase" — instead of a
-    // second identical lock (and the emoji ignored the state column's theme color).
-    if (icon.cls === "is-locked") setIcon(stateEl, "key-round");
-    else stateEl.setText(icon.glyph);
+    // locked pairs the mode badge's lock with a key — "needs the passphrase"; actions show
+    // their own icon; the rest stay text glyphs.
+    this.paintStateIcon(stateEl, icon);
     if (inert && this.searching() && !this.expandedItems.has(group.name)) {
       // A grey hit must explain itself without a hover (定稿 search UX).
       card.createDiv({ cls: "config-sync-inert-note", text: `${icon.glyph} ${icon.tip}` });
@@ -1351,12 +1351,20 @@ export class SyncCenterView extends ItemView {
     });
   }
 
-  private stateIcon(state: GroupState): { glyph: string; cls: string; tip: string } {
+  // Paint a state-icon span: an action shows its SVG, locked shows the key SVG, everything
+  // else stays a text glyph. The span already carries its `is-*` color class.
+  private paintStateIcon(el: HTMLElement, icon: { glyph: string; cls: string; action?: SyncAction }): void {
+    if (icon.action !== undefined) setIcon(el, ACTION_ICON[icon.action]);
+    else if (icon.cls === "is-locked") setIcon(el, "key-round");
+    else el.setText(icon.glyph);
+  }
+
+  private stateIcon(state: GroupState): { glyph: string; cls: string; tip: string; action?: SyncAction } {
     switch (state) {
       case "local-changed":
-        return { glyph: "↑", cls: "is-up", tip: "changed on this device (likely)" };
+        return { glyph: "↑", cls: "is-up", tip: "changed on this device (likely)", action: "capture" };
       case "store-newer":
-        return { glyph: "↓", cls: "is-down", tip: "store is newer (likely)" };
+        return { glyph: "↓", cls: "is-down", tip: "store is newer (likely)", action: "apply" };
       case "differs":
         return { glyph: "≠", cls: "is-neq", tip: "differs from store — direction unknown" };
       case "not-captured":
@@ -1835,13 +1843,13 @@ export class SyncCenterView extends ItemView {
     void this.renderRemoteDetail(detail, remote, check);
   }
 
-  private remoteIcon(check: RemoteCheck | undefined): { glyph: string; cls: string; tip: string } {
+  private remoteIcon(check: RemoteCheck | undefined): { glyph: string; cls: string; tip: string; action?: SyncAction } {
     const state = check?.state ?? "unknown";
     switch (state) {
       case "remote-newer":
-        return { glyph: "↓", cls: "is-pull", tip: "remote captured later — Pull would update your store" };
+        return { glyph: "↓", cls: "is-pull", tip: "remote captured later — Pull would update your store", action: "pull" };
       case "remote-older":
-        return { glyph: "↑", cls: "is-push", tip: "remote is older — Push would update the remote" };
+        return { glyph: "↑", cls: "is-push", tip: "remote is older — Push would update the remote", action: "push" };
       case "same":
         return { glyph: "✓", cls: "is-ok", tip: "remote matches your store" };
       case "no-store":
