@@ -637,6 +637,11 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 .config-sync-hglyph.is-in { color: var(--interactive-accent); }
 .config-sync-hglyph.is-out { color: var(--color-orange); }
 .config-sync-hglyph.is-remove { color: var(--text-muted); }
+.config-sync-hglyph.is-up { color: var(--color-orange); }
+.config-sync-hglyph.is-down { color: var(--interactive-accent); }
+.config-sync-hglyph.is-push { color: var(--color-pink); }
+.config-sync-hglyph.is-pull { color: var(--color-cyan); }
+.config-sync-hglyph svg { width: 13px; height: 13px; vertical-align: -0.12em; }
 .config-sync-hd-affname { font-weight: var(--font-semibold); padding: var(--size-4-1) 0; border-bottom: 1px solid var(--background-modifier-border); }
 .config-sync-hd-affpath { font-family: var(--font-monospace); color: var(--text-muted); font-size: var(--font-ui-smaller); padding: var(--size-4-1) 0; border-bottom: 1px solid var(--background-modifier-border); }
 .config-sync-htd-when { font-family: var(--font-monospace); color: var(--text-muted); font-size: var(--font-ui-smaller); }

@@ -32,12 +32,15 @@ import { renderDiffPanel } from "./diffView";
 import { SWITCH_LIST_GROUPS, switchListSortedView } from "../core/switchList";
 import { renderReportContent, renderReportPills } from "./reportContent";
 import { RunRecord, RunKind, RunStatus, worstStatus, formatRunTime, stopSyncDesc, deleteLeftoverDesc } from "../core/runHistory";
-import { ACTION_ICON, renderActionIcon, renderActionCount, type SyncAction } from "./actionIcons";
+import { ACTION_ICON, ACTION_COLOR_CLASS, renderActionIcon, renderActionCount, type SyncAction } from "./actionIcons";
 
 // Sidebar scope order: Beta sits between Community and custom (batch 3 ③).
 const SCOPE_ORDER: (ItemCategory | "beta")[] = ["obsidian", "core", "community", "beta", "custom"];
 const SCOPE_LABELS: Record<ItemCategory | "beta", string> = { ...CATEGORY_LABELS, beta: "Beta" };
 const STATUS_CLS: Record<RunStatus, string> = { ok: "is-ok", warning: "is-warn", error: "is-error" };
+// RunKind is wider than SyncAction (it also has "adopt"/"stop-sync"/"delete-leftover"), so
+// map explicitly rather than assigning rec.kind directly — undefined for the non-actions.
+const ACTION_CELL_MAP: Partial<Record<RunKind, SyncAction>> = { capture: "capture", apply: "apply", push: "push", pull: "pull" };
 
 // Session-remembered UI state: which scopes have their ✓ / ○ trailing lines flattened open.
 const sessionUi = {
@@ -874,13 +877,16 @@ export class SyncCenterView extends ItemView {
   }
 
   // ── Run history browser ─────────────────────────────────────────────────────────────────
-  private actionCell(rec: RunRecord): { glyph: string; dir: "in" | "out" | "remove"; label: string } {
+  private actionCell(rec: RunRecord): { glyph: string; dir: "in" | "out" | "remove"; label: string; action?: SyncAction } {
     if (rec.kind === "stop-sync") return { glyph: "⊘", dir: "remove", label: "Stop syncing" };
     if (rec.kind === "delete-leftover") return { glyph: "⌫", dir: "remove", label: "Delete leftover" };
     const out = rec.kind === "capture" || rec.kind === "push";
     const base = rec.kind.charAt(0).toUpperCase() + rec.kind.slice(1);
     const label = rec.remote !== null ? `${base} · ${rec.remote}` : base;
-    return { glyph: out ? "↑" : "↓", dir: out ? "out" : "in", label };
+    // Split the old out/in glyph into per-action icons so history matches the panel's
+    // vocabulary; action is undefined for "adopt" (falls back to the text glyph).
+    const action = ACTION_CELL_MAP[rec.kind];
+    return { glyph: out ? "↑" : "↓", dir: out ? "out" : "in", label, action };
   }
 
   private renderHistoryMode(main: HTMLElement): void {
@@ -930,7 +936,8 @@ export class SyncCenterView extends ItemView {
       tr.createEl("td", { cls: "config-sync-htd-when", text: formatRunTime(rec.at) });
       const act = this.actionCell(rec);
       const td = tr.createEl("td", { cls: "config-sync-htd-act" });
-      td.createSpan({ cls: `config-sync-hglyph is-${act.dir}`, text: act.glyph });
+      if (act.action !== undefined) setIcon(td.createSpan({ cls: `config-sync-hglyph ${ACTION_COLOR_CLASS[act.action]}` }), ACTION_ICON[act.action]);
+      else td.createSpan({ cls: `config-sync-hglyph is-${act.dir}`, text: act.glyph });
       td.appendText(` ${act.label}`);
       tr.createEl("td", { cls: "config-sync-htd-num", text: `${rec.changed}` });
       const iss = tr.createEl("td", { cls: `config-sync-htd-num${rec.issues > 0 ? " is-issues" : ""}` });
@@ -1504,14 +1511,12 @@ export class SyncCenterView extends ItemView {
       if (d.captureRemoves.length === 0 || d.applyDisables.length === 0) return;
       const box = holder.createDiv({ cls: "config-sync-divergence" });
       box.createDiv({ text: "This device and the store diverge both ways — either direction overwrites the other:" });
-      box.createDiv({
-        cls: "config-sync-divergence-line",
-        text: `↑ Capture removes ${d.captureRemoves.length} from the shared list — other devices will turn them off: ${d.captureRemoves.join(", ")}`,
-      });
-      box.createDiv({
-        cls: "config-sync-divergence-line",
-        text: `↓ Apply turns off ${d.applyDisables.length} on this device — exclude them first to keep them: ${d.applyDisables.join(", ")}`,
-      });
+      const capLine = box.createDiv({ cls: "config-sync-divergence-line" });
+      renderActionIcon(capLine, "capture").addClass(ACTION_COLOR_CLASS.capture);
+      capLine.appendText(` Capture removes ${d.captureRemoves.length} from the shared list — other devices will turn them off: ${d.captureRemoves.join(", ")}`);
+      const applyLine = box.createDiv({ cls: "config-sync-divergence-line" });
+      renderActionIcon(applyLine, "apply").addClass(ACTION_COLOR_CLASS.apply);
+      applyLine.appendText(` Apply turns off ${d.applyDisables.length} on this device — exclude them first to keep them: ${d.applyDisables.join(", ")}`);
       const btn = holder.createEl("button", {
         cls: "config-sync-seg-btn",
         text: `⌂ Exclude this device's ${d.applyDisables.length} extra${d.applyDisables.length === 1 ? "" : "s"}…`,

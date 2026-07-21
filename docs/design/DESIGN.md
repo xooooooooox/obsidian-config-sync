@@ -72,10 +72,11 @@ One color per meaning, everywhere (0.27.9 audit). Alpha fills always use
 
 ### 2.1 State column (`.config-sync-state-icon`, text glyphs + one SVG)
 
-`↑` up/orange · `↓` down/accent · `✓` ok/green · `≠` differs/faint · `—` miss/faint ·
-`○` no-settings/faint · **key** (`key-round` via setIcon) locked/cyan — "needs the
-passphrase", deliberately a key so it pairs with the mode badge's lock instead of
-duplicating it (定稿 2026-07-18). Remote variants: `↓` pull/cyan, `↑` push/pink, `?` unknown.
+Action states carry dedicated Lucide icons (via `setIcon`): capture `arrow-up-from-line`/orange,
+apply `arrow-down-to-line`/accent, push `cloud-upload`/pink, pull `cloud-download`/cyan
+(`src/ui/actionIcons.ts` is the single source). Status glyphs stay text: `≠` differs/faint ·
+`—` miss/faint · `○` no-settings/faint · `✓` ok/green · `?` unknown · **key** (`key-round`)
+locked/cyan.
 
 ### 2.2 Mode badges (`.config-sync-mode-badge`, 12px, `--text-faint`)
 
@@ -88,16 +89,19 @@ duplicating it (定稿 2026-07-18). Remote variants: `↓` pull/cyan, `↑` push
 
 `refresh-cw` ribbon + both panel refreshes · `undo-2` revert · `lock` mode badge ·
 `key-round` locked state · `chevron-down/right` settings rows · `x` clear/remove ·
-`trash` delete · `folder-open` browse · `rotate-cw` BRAT re-scan · tabs: `settings`,
+`trash` delete · `folder-open` browse · `rotate-cw` BRAT re-scan · `arrow-up-from-line` /
+`arrow-down-to-line` / `cloud-upload` / `cloud-download` sync-action icons · tabs: `settings`,
 `gem`, `toy-brick`, `puzzle`, `flask-conical` (BratIcon preferred when registered),
 `wrench`, `git-branch`.
 
 ### 2.4 Glyph language (text, reused everywhere)
 
-Direction/count vocabulary `↑ ↓ ✓ ○` powers header pills, sidebar/switcher badges, and
-the mobile filter pills (short form). Chevrons `▸ ▾ ▴`. Actions `⤓` install, `⏻` enable.
-Report chips `+ ~ −`. Warnings `⚠ ✗`. Conflict modal `＋ ＝ ⌂`. New UI must reuse this
-vocabulary rather than invent synonyms.
+Direction *actions* (capture/apply/push/pull) now render as the dedicated icons from
+`actionIcons.ts` rather than a shared `↑ ↓` glyph; count badges embed one of those icons
+plus a number (`renderActionCount`). `✓ ○` remain text and still power header pills,
+sidebar/switcher badges, and the mobile filter pills (short form). Chevrons `▸ ▾ ▴`.
+Actions `⤓` install, `⏻` enable. Report chips `+ ~ −`. Warnings `⚠ ✗`. Conflict modal
+`＋ ＝ ⌂`. New UI must reuse this vocabulary rather than invent synonyms.
 
 ## 3. Component library
 
