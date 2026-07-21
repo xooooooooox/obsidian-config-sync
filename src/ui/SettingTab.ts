@@ -586,7 +586,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       });
       this.renderFieldsEditor(exp.createDiv(), group, () => this.renderItemInto(wrap, item));
     }
-    this.renderDataFileSegment(exp, group, item, wrap);
+    if (group.type === "file") this.renderDataFileSegment(exp, group, item, wrap);
     this.renderCustomLocationSegment(exp, group, item, wrap);
   }
 
