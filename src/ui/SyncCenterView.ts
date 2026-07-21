@@ -40,7 +40,7 @@ const SCOPE_LABELS: Record<ItemCategory | "beta", string> = { ...CATEGORY_LABELS
 const STATUS_CLS: Record<RunStatus, string> = { ok: "is-ok", warning: "is-warn", error: "is-error" };
 // RunKind is wider than SyncAction (it also has "adopt"/"stop-sync"/"delete-leftover"), so
 // map explicitly rather than assigning rec.kind directly — undefined for the non-actions.
-const ACTION_CELL_MAP: Partial<Record<RunKind, SyncAction>> = { capture: "capture", apply: "apply", push: "push", pull: "pull" };
+const ACTION_CELL_MAP: Partial<Record<RunKind, SyncAction>> = { capture: "capture", apply: "apply", adopt: "apply", push: "push", pull: "pull" };
 
 // Session-remembered UI state: which scopes have their ✓ / ○ trailing lines flattened open.
 const sessionUi = {
@@ -884,7 +884,8 @@ export class SyncCenterView extends ItemView {
     const base = rec.kind.charAt(0).toUpperCase() + rec.kind.slice(1);
     const label = rec.remote !== null ? `${base} · ${rec.remote}` : base;
     // Split the old out/in glyph into per-action icons so history matches the panel's
-    // vocabulary; action is undefined for "adopt" (falls back to the text glyph).
+    // vocabulary; adopt maps to the apply icon (like the self-badge), and any unmapped
+    // kind falls back to the text glyph.
     const action = ACTION_CELL_MAP[rec.kind];
     return { glyph: out ? "↑" : "↓", dir: out ? "out" : "in", label, action };
   }
