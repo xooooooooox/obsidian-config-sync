@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { availabilityForGroup, compareVersions, desktopOnlyDrift, desktopOnlyPluginIds, scopedAwaySnippets, snippetForceOff } from "../src/core/availability";
+import { availabilityForGroup, compareVersions, desktopOnlyDrift, desktopOnlyPluginIds, scopedAwaySnippets, snippetForceOff, snippetOrphans } from "../src/core/availability";
 import { FakePlugins } from "./memfs";
 import { StoreLock, SyncGroup } from "../src/core/types";
 
@@ -129,5 +129,27 @@ describe("snippetForceOff (pin > scope)", () => {
   });
   it("a pinned scope-away snippet is NOT force-offed", () => {
     expect(snippetForceOff(scopes, ["a-mobile"], false)).toEqual([]);
+  });
+});
+
+describe("snippetOrphans", () => {
+  it("flags names enabled locally with no file and not in the store", () => {
+    const local = ["callouts", "mystyle", "IOTO-table"];
+    const fromDir = ["mystyle", "IOTO-table"]; // files present
+    const store = ["IOTO-table"]; // shared
+    expect(snippetOrphans(local, fromDir, store)).toEqual(["callouts"]);
+  });
+
+  it("does not flag a name that has a local file", () => {
+    expect(snippetOrphans(["mystyle"], ["mystyle"], [])).toEqual([]);
+  });
+
+  it("does not flag a name present in the store (fresh device, file not synced yet)", () => {
+    expect(snippetOrphans(["pending"], [], ["pending"])).toEqual([]);
+  });
+
+  it("returns a sorted, unique list and handles empty local", () => {
+    expect(snippetOrphans([], ["x"], ["y"])).toEqual([]);
+    expect(snippetOrphans(["b", "a", "b"], [], [])).toEqual(["a", "b"]);
   });
 });

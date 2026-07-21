@@ -25,7 +25,7 @@ import { retry, HttpStatusError, TimeoutError, isRetryableError } from "./core/a
 import { RunRecord, RunKind, summarizeRun, pruneHistory } from "./core/runHistory";
 import { BratIndex, parseBratRepoList, resolveBratIndex } from "./core/bratIndex";
 import { type CatalogSection, displayLabelForGroup, ensureAppearancePresets, ensureSelfPresets, findGroupByName, groupForItem, listBetaSections, listCoreSections, listDiscovered, listOptionSections, listPluginSections, SELF_GROUP_NAME, setCorePluginIds } from "./core/catalog";
-import { Availability, availabilityForGroup, desktopOnlyDrift, desktopOnlyPluginIds, scopedAwaySnippets, snippetForceOff } from "./core/availability";
+import { Availability, availabilityForGroup, desktopOnlyDrift, desktopOnlyPluginIds, scopedAwaySnippets, snippetForceOff, snippetOrphans } from "./core/availability";
 import { listFilesRecursive, isJunkPath, FileIO } from "./core/io";
 import { leftoverStoreRels, storeSelfCopyGroups } from "./core/leftover";
 import { ManifestValidationError, migrateLegacyManifest, parseStoreLock, validateSyncManifest } from "./core/manifest";
@@ -1102,31 +1102,38 @@ export default class ConfigSyncPlugin extends Plugin {
     return listDiscovered(this.app.vault.adapter, this.app.vault.configDir, groups);
   }
 
+  private async snippetUniverse(): Promise<{ fromDir: string[]; store: string[]; local: string[] }> {
+    const io = this.app.vault.adapter;
+    const cfg = this.app.vault.configDir;
+    const readArr = async (p: string): Promise<string[]> => {
+      try {
+        if (!(await io.exists(p))) return [];
+        const parsed = parseSwitchList(await io.read(p));
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    };
+    const files = (await io.exists(`${cfg}/snippets`)) ? (await io.list(`${cfg}/snippets`)).files : [];
+    const fromDir = files.filter((f) => f.endsWith(".css")).map((f) => basename(f).replace(/\.css$/, ""));
+    const appList = (await io.exists(`${cfg}/appearance.json`)) ? readLocalSwitchList("enabled-css-snippets", await io.read(`${cfg}/appearance.json`)) : [];
+    const local = Array.isArray(appList) ? appList : [];
+    const root = await this.resolvedRootPath();
+    const store = await readArr(`${root}/store/${groupStorePath("{configDir}/enabled-css-snippets.json")}`);
+    return { fromDir, store, local };
+  }
+
   // Rows for the switch-list "Local decisions" editor: union of local list ∪ store copy ∪
   // runtime (installed plugins / core registry), each with a display name and a state hint.
   async switchListRows(groupName: string): Promise<{ id: string; name: string; hint: string; desktopOnly: boolean; deviceScoped: boolean }[]> {
     const io = this.app.vault.adapter;
     if (groupName === "enabled-css-snippets") {
-      const cfg = this.app.vault.configDir;
-      const readArr = async (p: string): Promise<string[]> => {
-        try {
-          if (!(await io.exists(p))) return [];
-          const parsed = parseSwitchList(await io.read(p));
-          return Array.isArray(parsed) ? parsed : [];
-        } catch {
-          return [];
-        }
-      };
-      // universe = .css files in snippets/ ∪ store list ∪ locally-enabled
-      const files = (await io.exists(`${cfg}/snippets`)) ? (await io.list(`${cfg}/snippets`)).files : [];
-      const fromDir = files.filter((f) => f.endsWith(".css")).map((f) => basename(f).replace(/\.css$/, ""));
-      const app = (await io.exists(`${cfg}/appearance.json`)) ? readLocalSwitchList("enabled-css-snippets", await io.read(`${cfg}/appearance.json`)) : [];
-      const local = Array.isArray(app) ? app : [];
-      const root = await this.resolvedRootPath();
-      const store = await readArr(`${root}/store/${groupStorePath("{configDir}/enabled-css-snippets.json")}`);
+      const { fromDir, store, local } = await this.snippetUniverse();
       const scopedAway = scopedAwaySnippets(this.settings.snippetScopes, Platform.isMobile);
       const pins = new Set(this.settings.switchExceptions["enabled-css-snippets"] ?? []);
-      const ids = [...new Set([...fromDir, ...store, ...local])].sort();
+      // universe = files ∪ store; orphans (enabled locally, no file, not in store) are excluded
+      // and surfaced separately via snippetOrphanNames()/removeSnippetOrphans().
+      const ids = [...new Set([...fromDir, ...store])].sort();
       return ids.map((id) => ({
         id,
         name: id,
@@ -1179,6 +1186,30 @@ export default class ConfigSyncPlugin extends Plugin {
         deviceScoped: devScopedIds.has(id),
       }))
       .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })); // sort by DISPLAY name — id order looked random in the UI
+  }
+
+  async snippetOrphanNames(): Promise<string[]> {
+    const { fromDir, store, local } = await this.snippetUniverse();
+    return snippetOrphans(local, fromDir, store);
+  }
+
+  // Prune dead enabled-snippet names. Removes from both appearance.json on disk AND
+  // Obsidian's in-memory enabledSnippets set, so a later appearance-write can't re-add them.
+  async removeSnippetOrphans(names: string[]): Promise<void> {
+    if (names.length === 0) return;
+    const drop = new Set(names);
+    const customCss = (this.app as unknown as { customCss?: { enabledSnippets?: Set<string> } }).customCss;
+    if (customCss?.enabledSnippets !== undefined) {
+      for (const n of names) customCss.enabledSnippets.delete(n);
+    }
+    const io = this.app.vault.adapter;
+    const path = `${this.app.vault.configDir}/appearance.json`;
+    if (!(await io.exists(path))) return;
+    const prior = await io.read(path);
+    const current = readLocalSwitchList("enabled-css-snippets", prior);
+    const list = Array.isArray(current) ? current : [];
+    const filtered = list.filter((n) => !drop.has(n));
+    await io.write(path, writeLocalSwitchList("enabled-css-snippets", filtered, prior));
   }
 
   async readItemFile(group: SyncGroup): Promise<string | null> {

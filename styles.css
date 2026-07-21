@@ -1131,6 +1131,19 @@ body.is-mobile .config-sync-strip-meta .config-sync-report-pills { margin-left: 
 .config-sync-ldnote { color: var(--color-orange); font-size: var(--font-ui-smaller); margin-left: var(--size-4-1); }
 .config-sync-lddetail { color: var(--color-orange); font-family: var(--font-monospace); font-size: var(--font-ui-smaller); padding: 1px 0; }
 
+/* Orphan snippets notice + removal (Task 3) */
+.config-sync-orphan-sec { border-top: 1px solid var(--background-modifier-border); }
+.config-sync-orphan-notice { display: flex; align-items: center; gap: var(--size-4-2); padding: var(--size-4-2) var(--size-4-3); cursor: pointer; }
+.config-sync-orphan-ic { color: var(--text-faint); }
+.config-sync-orphan-nt { color: var(--text-muted); font-size: var(--font-ui-smaller); }
+.config-sync-orphan-act { color: var(--text-accent); font-size: var(--font-ui-smaller); }
+.config-sync-orphan-chev { color: var(--text-faint); font-size: var(--font-ui-smaller); }
+.config-sync-orphan-desc { color: var(--text-faint); font-size: var(--font-ui-smaller); padding: 0 var(--size-4-3) var(--size-4-2); line-height: 1.4; }
+.config-sync-orphan-row { display: flex; align-items: center; gap: var(--size-4-2); padding: var(--size-2-3) var(--size-4-3); opacity: 0.85; }
+.config-sync-orphan-name { color: var(--text-muted); }
+.config-sync-orphan-tag { color: var(--text-faint); font-size: var(--font-ui-smaller); border: 1px solid var(--background-modifier-border); border-radius: var(--radius-s); padding: 0 var(--size-2-2); }
+.config-sync-orphan-remove, .config-sync-orphan-removeall { color: var(--text-error); font-size: var(--font-ui-smaller); cursor: pointer; }
+
 /* ── Passphrase status badge (定稿 feedback-trio) ── */
 .config-sync-ppbadge {
   font-size: var(--font-ui-smaller);
