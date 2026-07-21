@@ -32,11 +32,15 @@ import { renderDiffPanel } from "./diffView";
 import { SWITCH_LIST_GROUPS, switchListSortedView } from "../core/switchList";
 import { renderReportContent, renderReportPills } from "./reportContent";
 import { RunRecord, RunKind, RunStatus, worstStatus, formatRunTime, stopSyncDesc, deleteLeftoverDesc } from "../core/runHistory";
+import { ACTION_ICON, ACTION_COLOR_CLASS, renderActionIcon, renderActionCount, type SyncAction } from "./actionIcons";
 
 // Sidebar scope order: Beta sits between Community and custom (batch 3 ③).
 const SCOPE_ORDER: (ItemCategory | "beta")[] = ["obsidian", "core", "community", "beta", "custom"];
 const SCOPE_LABELS: Record<ItemCategory | "beta", string> = { ...CATEGORY_LABELS, beta: "Beta" };
 const STATUS_CLS: Record<RunStatus, string> = { ok: "is-ok", warning: "is-warn", error: "is-error" };
+// RunKind is wider than SyncAction (it also has "adopt"/"stop-sync"/"delete-leftover"), so
+// map explicitly rather than assigning rec.kind directly — undefined for the non-actions.
+const ACTION_CELL_MAP: Partial<Record<RunKind, SyncAction>> = { capture: "capture", apply: "apply", adopt: "apply", push: "push", pull: "pull" };
 
 // Session-remembered UI state: which scopes have their ✓ / ○ trailing lines flattened open.
 const sessionUi = {
@@ -416,7 +420,11 @@ export class SyncCenterView extends ItemView {
     item.createSpan({ cls: "config-sync-side-name", text: "Config Sync" });
     if (info !== null) {
       const b = this.selfBadge(info);
-      if (b !== null) item.createSpan({ cls: `config-sync-side-badge ${b.cls}`, text: b.text });
+      if (b !== null) {
+        const badge = item.createSpan({ cls: `config-sync-side-badge ${b.cls}` });
+        if (b.action !== undefined) renderActionCount(badge, b.action, b.count ?? 0);
+        else badge.setText(b.text ?? "");
+      }
     }
     item.addEventListener("click", () => {
       this.panelScope = { kind: "self" };
@@ -425,19 +433,19 @@ export class SyncCenterView extends ItemView {
     });
   }
 
-  private selfBadge(info: SelfSyncInfo): { text: string; cls: string } | null {
+  private selfBadge(info: SelfSyncInfo): { cls: string; action?: SyncAction; count?: number; text?: string } | null {
     // Count the sync-list delta; when the change is config-sync's own content/version (no list
-    // delta), show a bare glyph rather than a misleading "↑0"/"↓0".
+    // delta), show a bare icon rather than a misleading "↑0"/"↓0".
     const n = info.delta.added.length + info.delta.removed.length;
     switch (info.state) {
       case "coldstart":
-        return { text: "setup", cls: "is-down" };
+        return { cls: "is-down", text: "setup" };
       case "adopt":
-        return { text: n > 0 ? `↓${n}` : "↓", cls: "is-down" };
+        return { cls: "is-down", action: "apply", count: n };
       case "capture":
-        return { text: n > 0 ? `↑${n}` : "↑", cls: "is-up" };
+        return { cls: "is-up", action: "capture", count: n };
       case "both":
-        return { text: "⚠", cls: "is-up" };
+        return { cls: "is-up", text: "⚠" };
       case "insync":
         return null;
     }
@@ -663,8 +671,8 @@ export class SyncCenterView extends ItemView {
         item.createSpan({ cls: "config-sync-side-badge is-neutral", text: `${hits}` });
       } else {
         const c = this.presentedCounts(rows);
-        if (c.up > 0) item.createSpan({ cls: "config-sync-side-badge is-up", text: `↑${c.up}` });
-        if (c.down > 0) item.createSpan({ cls: "config-sync-side-badge is-down", text: `↓${c.down}` });
+        if (c.up > 0) renderActionCount(item.createSpan({ cls: "config-sync-side-badge is-up" }), "capture", c.up);
+        if (c.down > 0) renderActionCount(item.createSpan({ cls: "config-sync-side-badge is-down" }), "apply", c.down);
         if (c.ok > 0) item.createSpan({ cls: "config-sync-side-badge is-ok", text: `✓${c.ok}` });
         if (c.none > 0) item.createSpan({ cls: "config-sync-side-badge is-none", text: `○${c.none}` });
       }
@@ -704,7 +712,7 @@ export class SyncCenterView extends ItemView {
         const item = container.createDiv({ cls: `config-sync-side-item${active ? " is-active" : ""}` });
         item.createSpan({ cls: "config-sync-side-name", text: remote.name });
         const icon = this.remoteIcon(this.host.remoteCheck(remote.name)?.check);
-        item.createSpan({ cls: `config-sync-state-icon ${icon.cls}`, text: icon.glyph, attr: { "aria-label": icon.tip } });
+        this.paintStateIcon(item.createSpan({ cls: `config-sync-state-icon ${icon.cls}`, attr: { "aria-label": icon.tip } }), icon);
         item.addEventListener("click", () => {
           this.panelScope = { kind: "remote", name: remote.name };
           this.switcherOpen = false;
@@ -735,8 +743,8 @@ export class SyncCenterView extends ItemView {
       const cat = this.panelScope.cat;
       sw.createSpan({ text: cat === "all" ? "All items" : SCOPE_LABELS[cat] });
       const c = this.presentedCounts(this.scopedRows().filter((r) => this.sectionOf(r.group.name) === "main"));
-      if (c.up > 0) sw.createSpan({ cls: "config-sync-side-badge is-up", text: `↑${c.up}` });
-      if (c.down > 0) sw.createSpan({ cls: "config-sync-side-badge is-down", text: `↓${c.down}` });
+      if (c.up > 0) renderActionCount(sw.createSpan({ cls: "config-sync-side-badge is-up" }), "capture", c.up);
+      if (c.down > 0) renderActionCount(sw.createSpan({ cls: "config-sync-side-badge is-down" }), "apply", c.down);
       if (c.ok > 0) sw.createSpan({ cls: "config-sync-side-badge is-ok", text: `✓${c.ok}` });
       if (c.none > 0) sw.createSpan({ cls: "config-sync-side-badge is-none", text: `○${c.none}` });
     } else if (this.panelScope.kind === "history") {
@@ -746,7 +754,7 @@ export class SyncCenterView extends ItemView {
     } else {
       sw.createSpan({ text: this.panelScope.name });
       const icon = this.remoteIcon(this.host.remoteCheck(this.panelScope.name)?.check);
-      sw.createSpan({ cls: `config-sync-state-icon ${icon.cls}`, text: icon.glyph });
+      this.paintStateIcon(sw.createSpan({ cls: `config-sync-state-icon ${icon.cls}` }), icon);
     }
     sw.createSpan({ cls: "config-sync-switcher-chev", text: this.switcherOpen ? "▴" : "▾" });
     sw.addEventListener("click", (e) => {
@@ -766,18 +774,16 @@ export class SyncCenterView extends ItemView {
     const { up, down, ok, none } = this.presentedCounts(this.mainRows());
     const pills = head.createSpan({ cls: "config-sync-report-pills" });
     if (up > 0) {
-      pills.createSpan({
-        cls: "config-sync-pill is-up",
-        text: `↑ ${up}`,
-        attr: { "aria-label": `${up} item${up === 1 ? "" : "s"} to capture` },
-      });
+      renderActionCount(
+        pills.createSpan({ cls: "config-sync-pill is-up", attr: { "aria-label": `${up} item${up === 1 ? "" : "s"} to capture` } }),
+        "capture", up,
+      );
     }
     if (down > 0) {
-      pills.createSpan({
-        cls: "config-sync-pill is-down",
-        text: `↓ ${down}`,
-        attr: { "aria-label": `${down} item${down === 1 ? "" : "s"} to apply` },
-      });
+      renderActionCount(
+        pills.createSpan({ cls: "config-sync-pill is-down", attr: { "aria-label": `${down} item${down === 1 ? "" : "s"} to apply` } }),
+        "apply", down,
+      );
     }
     pills.createSpan({
       cls: "config-sync-pill is-ok",
@@ -871,13 +877,17 @@ export class SyncCenterView extends ItemView {
   }
 
   // ── Run history browser ─────────────────────────────────────────────────────────────────
-  private actionCell(rec: RunRecord): { glyph: string; dir: "in" | "out" | "remove"; label: string } {
+  private actionCell(rec: RunRecord): { glyph: string; dir: "in" | "out" | "remove"; label: string; action?: SyncAction } {
     if (rec.kind === "stop-sync") return { glyph: "⊘", dir: "remove", label: "Stop syncing" };
     if (rec.kind === "delete-leftover") return { glyph: "⌫", dir: "remove", label: "Delete leftover" };
     const out = rec.kind === "capture" || rec.kind === "push";
     const base = rec.kind.charAt(0).toUpperCase() + rec.kind.slice(1);
     const label = rec.remote !== null ? `${base} · ${rec.remote}` : base;
-    return { glyph: out ? "↑" : "↓", dir: out ? "out" : "in", label };
+    // Split the old out/in glyph into per-action icons so history matches the panel's
+    // vocabulary; adopt maps to the apply icon (like the self-badge), and any unmapped
+    // kind falls back to the text glyph.
+    const action = ACTION_CELL_MAP[rec.kind];
+    return { glyph: out ? "↑" : "↓", dir: out ? "out" : "in", label, action };
   }
 
   private renderHistoryMode(main: HTMLElement): void {
@@ -927,7 +937,8 @@ export class SyncCenterView extends ItemView {
       tr.createEl("td", { cls: "config-sync-htd-when", text: formatRunTime(rec.at) });
       const act = this.actionCell(rec);
       const td = tr.createEl("td", { cls: "config-sync-htd-act" });
-      td.createSpan({ cls: `config-sync-hglyph is-${act.dir}`, text: act.glyph });
+      if (act.action !== undefined) setIcon(td.createSpan({ cls: `config-sync-hglyph ${ACTION_COLOR_CLASS[act.action]}` }), ACTION_ICON[act.action]);
+      else td.createSpan({ cls: `config-sync-hglyph is-${act.dir}`, text: act.glyph });
       td.appendText(` ${act.label}`);
       tr.createEl("td", { cls: "config-sync-htd-num", text: `${rec.changed}` });
       const iss = tr.createEl("td", { cls: `config-sync-htd-num${rec.issues > 0 ? " is-issues" : ""}` });
@@ -1026,17 +1037,19 @@ export class SyncCenterView extends ItemView {
       // Mobile shows the short glyph form (定稿 B) — the panel's icon language (↑ ↓ ✓ ○) —
       // so all five pills always fit one line; desktop keeps the full labels.
       const allLabel = this.searching() ? `All ${pillRows.length} / ${mainRows.length}` : `All ${mainRows.length}`;
-      const defs: { key: PanelFilter; label: string; short: string }[] = [
+      const defs: { key: PanelFilter; label: string; short: string; action?: SyncAction; count?: number }[] = [
         { key: "all", label: allLabel, short: allLabel },
-        { key: "capture", label: `To capture ${counts.up}`, short: `↑ ${counts.up}` },
-        { key: "apply", label: `To apply ${counts.down}`, short: `↓ ${counts.down}` },
+        { key: "capture", label: `To capture ${counts.up}`, short: "", action: "capture", count: counts.up },
+        { key: "apply", label: `To apply ${counts.down}`, short: "", action: "apply", count: counts.down },
         { key: "ok", label: `In sync ${counts.ok}`, short: `✓ ${counts.ok}` },
         { key: "none", label: `No settings yet ${counts.none}`, short: `○ ${counts.none}` },
       ];
       for (const d of defs) {
         const pill = pillRow.createEl("button", { cls: `config-sync-fpill${this.filter === d.key ? " is-active" : ""}`, attr: { "aria-label": d.label } });
         pill.createSpan({ cls: "config-sync-fpill-long", text: d.label });
-        pill.createSpan({ cls: "config-sync-fpill-short", text: d.short });
+        const shortEl = pill.createSpan({ cls: "config-sync-fpill-short" });
+        if (d.action !== undefined) renderActionCount(shortEl, d.action, d.count ?? 0);
+        else shortEl.setText(d.short);
         pill.addEventListener("click", () => {
           this.filter = d.key;
           this.render(this.renderGen);
@@ -1307,10 +1320,9 @@ export class SyncCenterView extends ItemView {
 
     const icon = this.stateIcon(pres);
     const stateEl = row.createSpan({ cls: `config-sync-state-icon ${icon.cls}`, attr: { "aria-label": icon.tip } });
-    // locked pairs the mode badge's lock with a key — "needs the passphrase" — instead of a
-    // second identical lock (and the emoji ignored the state column's theme color).
-    if (icon.cls === "is-locked") setIcon(stateEl, "key-round");
-    else stateEl.setText(icon.glyph);
+    // locked pairs the mode badge's lock with a key — "needs the passphrase"; actions show
+    // their own icon; the rest stay text glyphs.
+    this.paintStateIcon(stateEl, icon);
     if (inert && this.searching() && !this.expandedItems.has(group.name)) {
       // A grey hit must explain itself without a hover (定稿 search UX).
       card.createDiv({ cls: "config-sync-inert-note", text: `${icon.glyph} ${icon.tip}` });
@@ -1351,12 +1363,20 @@ export class SyncCenterView extends ItemView {
     });
   }
 
-  private stateIcon(state: GroupState): { glyph: string; cls: string; tip: string } {
+  // Paint a state-icon span: an action shows its SVG, locked shows the key SVG, everything
+  // else stays a text glyph. The span already carries its `is-*` color class.
+  private paintStateIcon(el: HTMLElement, icon: { glyph: string; cls: string; action?: SyncAction }): void {
+    if (icon.action !== undefined) setIcon(el, ACTION_ICON[icon.action]);
+    else if (icon.cls === "is-locked") setIcon(el, "key-round");
+    else el.setText(icon.glyph);
+  }
+
+  private stateIcon(state: GroupState): { glyph: string; cls: string; tip: string; action?: SyncAction } {
     switch (state) {
       case "local-changed":
-        return { glyph: "↑", cls: "is-up", tip: "changed on this device (likely)" };
+        return { glyph: "↑", cls: "is-up", tip: "changed on this device (likely)", action: "capture" };
       case "store-newer":
-        return { glyph: "↓", cls: "is-down", tip: "store is newer (likely)" };
+        return { glyph: "↓", cls: "is-down", tip: "store is newer (likely)", action: "apply" };
       case "differs":
         return { glyph: "≠", cls: "is-neq", tip: "differs from store — direction unknown" };
       case "not-captured":
@@ -1492,14 +1512,12 @@ export class SyncCenterView extends ItemView {
       if (d.captureRemoves.length === 0 || d.applyDisables.length === 0) return;
       const box = holder.createDiv({ cls: "config-sync-divergence" });
       box.createDiv({ text: "This device and the store diverge both ways — either direction overwrites the other:" });
-      box.createDiv({
-        cls: "config-sync-divergence-line",
-        text: `↑ Capture removes ${d.captureRemoves.length} from the shared list — other devices will turn them off: ${d.captureRemoves.join(", ")}`,
-      });
-      box.createDiv({
-        cls: "config-sync-divergence-line",
-        text: `↓ Apply turns off ${d.applyDisables.length} on this device — exclude them first to keep them: ${d.applyDisables.join(", ")}`,
-      });
+      const capLine = box.createDiv({ cls: "config-sync-divergence-line" });
+      renderActionIcon(capLine, "capture").addClass(ACTION_COLOR_CLASS.capture);
+      capLine.appendText(` Capture removes ${d.captureRemoves.length} from the shared list — other devices will turn them off: ${d.captureRemoves.join(", ")}`);
+      const applyLine = box.createDiv({ cls: "config-sync-divergence-line" });
+      renderActionIcon(applyLine, "apply").addClass(ACTION_COLOR_CLASS.apply);
+      applyLine.appendText(` Apply turns off ${d.applyDisables.length} on this device — exclude them first to keep them: ${d.applyDisables.join(", ")}`);
       const btn = holder.createEl("button", {
         cls: "config-sync-seg-btn",
         text: `⌂ Exclude this device's ${d.applyDisables.length} extra${d.applyDisables.length === 1 ? "" : "s"}…`,
@@ -1628,9 +1646,10 @@ export class SyncCenterView extends ItemView {
       const on = staged && dir === d;
       const b = seg.createEl("button", {
         cls: `config-sync-seg-btn is-${d}${on ? " is-on" : ""}`,
-        text: label,
         attr: { "aria-label": aria },
       });
+      renderActionIcon(b, d);
+      b.appendText(` ${label}`);
       b.addEventListener("click", (e) => {
         e.stopPropagation();
         if (on) {
@@ -1643,8 +1662,8 @@ export class SyncCenterView extends ItemView {
         this.render(this.renderGen);
       });
     };
-    segBtn("capture", "↑ Capture", "Capture this (keep local)");
-    segBtn("apply", "↓ Apply store", "Apply store version (overwrites local)");
+    segBtn("capture", "Capture", "Capture this (keep local)");
+    segBtn("apply", "Apply store", "Apply store version (overwrites local)");
   }
 
   private renderCappedChanges(detail: HTMLElement, r: StatusRow, changes: FileChanges): void {
@@ -1804,7 +1823,8 @@ export class SyncCenterView extends ItemView {
       capW.btn.setButtonText(runProgressLabel("Capturing", this.activeRun.done, this.activeRun.total));
       capW.btn.buttonEl.addClass("is-busy");
     } else {
-      capW.btn.setButtonText(`↑ Capture ${capItems.length} item${capItems.length === 1 ? "" : "s"}`);
+      renderActionIcon(capW.btn.buttonEl, "capture");
+      capW.btn.buttonEl.appendText(` Capture ${capItems.length} item${capItems.length === 1 ? "" : "s"}`);
     }
     capW.btn.buttonEl.addClass("config-sync-btn-capture");
     capW.btn.setDisabled(this.running || capItems.length === 0);
@@ -1815,7 +1835,8 @@ export class SyncCenterView extends ItemView {
       applyW.btn.setButtonText(runProgressLabel("Applying", this.activeRun.done, this.activeRun.total));
       applyW.btn.buttonEl.addClass("is-busy");
     } else {
-      applyW.btn.setButtonText(`↓ Apply ${applyItems.length} item${applyItems.length === 1 ? "" : "s"}`);
+      renderActionIcon(applyW.btn.buttonEl, "apply");
+      applyW.btn.buttonEl.appendText(` Apply ${applyItems.length} item${applyItems.length === 1 ? "" : "s"}`);
     }
     applyW.btn.setDisabled(this.running || applyItems.length === 0);
 
@@ -1835,13 +1856,13 @@ export class SyncCenterView extends ItemView {
     void this.renderRemoteDetail(detail, remote, check);
   }
 
-  private remoteIcon(check: RemoteCheck | undefined): { glyph: string; cls: string; tip: string } {
+  private remoteIcon(check: RemoteCheck | undefined): { glyph: string; cls: string; tip: string; action?: SyncAction } {
     const state = check?.state ?? "unknown";
     switch (state) {
       case "remote-newer":
-        return { glyph: "↓", cls: "is-pull", tip: "remote captured later — Pull would update your store" };
+        return { glyph: "↓", cls: "is-pull", tip: "remote captured later — Pull would update your store", action: "pull" };
       case "remote-older":
-        return { glyph: "↑", cls: "is-push", tip: "remote is older — Push would update the remote" };
+        return { glyph: "↑", cls: "is-push", tip: "remote is older — Push would update the remote", action: "push" };
       case "same":
         return { glyph: "✓", cls: "is-ok", tip: "remote matches your store" };
       case "no-store":
@@ -1925,7 +1946,8 @@ export class SyncCenterView extends ItemView {
     const bar = detail.createDiv({ cls: "config-sync-actionbar" });
 
     const pull = new ButtonComponent(bar);
-    pull.setButtonText(`↓ Pull from ${remote.name}`);
+    renderActionIcon(pull.buttonEl, "pull");
+    pull.buttonEl.appendText(` Pull from ${remote.name}`);
     pull.buttonEl.addClass("config-sync-remote-btn", "is-pull");
     if (noChanges) pull.buttonEl.addClass("is-dimmed");
     else if (pullAligned) pull.buttonEl.addClass("is-primary");
@@ -1939,7 +1961,8 @@ export class SyncCenterView extends ItemView {
     });
 
     const push = new ButtonComponent(bar);
-    push.setButtonText(`↑ Push to ${remote.name}`);
+    renderActionIcon(push.buttonEl, "push");
+    push.buttonEl.appendText(` Push to ${remote.name}`);
     push.buttonEl.addClass("config-sync-remote-btn", "is-push");
     if (noChanges) push.buttonEl.addClass("is-dimmed");
     else if (!pullAligned) push.buttonEl.addClass("is-primary");
