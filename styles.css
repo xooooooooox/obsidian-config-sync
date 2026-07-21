@@ -39,8 +39,11 @@
   margin-bottom: var(--size-4-4);
 }
 
+/* The qualifier autocomplete dropdown is appended to the input's immediate parent
+   (Obsidian's .search-input-container), so anchor it here — not on the outer wrap. */
 .config-sync-search .search-input-container {
   width: 100%;
+  position: relative;
 }
 
 .config-sync-empty {
@@ -752,7 +755,8 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 
 .config-sync-mainbar { display: flex; align-items: center; gap: var(--size-4-1); padding-bottom: var(--size-4-2); flex-wrap: wrap; padding-right: calc(var(--size-4-3) + 1px); }
 
-.config-sync-mainbar-search { margin-left: auto; background: var(--background-primary); border: 1px solid var(--background-modifier-border); border-radius: 6px; padding: 2px 8px; font-size: var(--font-ui-smaller); width: 140px; }
+.config-sync-mainbar .config-sync-search-wrap { margin-left: auto; width: 140px; }
+.config-sync-mainbar-search { background: var(--background-primary); border: 1px solid var(--background-modifier-border); border-radius: 6px; padding: 2px 8px; font-size: var(--font-ui-smaller); width: 100%; }
 
 .config-sync-remote-head { color: var(--text-muted); font-size: var(--font-ui-small); padding-bottom: var(--size-4-2); }
 
@@ -1357,7 +1361,7 @@ body.is-mobile .config-sync-center {
 
 /* ② The search row separates from the filter pills (own line, full width minus select-all). */
 body.is-mobile .config-sync-mainbar { row-gap: var(--size-4-2); }
-body.is-mobile .config-sync-mainbar-search {
+body.is-mobile .config-sync-mainbar .config-sync-search-wrap {
   flex: 1 1 calc(100% - 44px);
   min-width: 0;
 }
@@ -1393,3 +1397,48 @@ body.is-mobile .config-sync-report-files .config-sync-seg-btn {
   padding: 4px 12px;
 }
 body.is-mobile .config-sync-report-files { font-size: var(--font-ui-small); }
+
+/* Qualifier-search autocomplete dropdown */
+.config-sync-search-wrap {
+  position: relative;
+}
+.config-sync-qac {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: var(--layer-popover);
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  box-shadow: var(--shadow-s);
+  overflow: hidden;
+}
+.config-sync-qac-opt {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+  padding: var(--size-4-1) var(--size-4-3);
+  cursor: pointer;
+  font-size: var(--font-ui-small);
+}
+.config-sync-qac-opt.is-sel {
+  background: var(--background-modifier-hover);
+}
+.config-sync-qac-ic {
+  display: inline-flex;
+  color: var(--text-muted);
+}
+.config-sync-qac-ic svg {
+  width: var(--icon-xs);
+  height: var(--icon-xs);
+}
+.config-sync-qac-txt {
+  color: var(--text-normal);
+  font-family: var(--font-monospace);
+}
+.config-sync-qac-desc {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+}

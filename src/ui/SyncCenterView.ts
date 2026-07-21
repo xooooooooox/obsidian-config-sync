@@ -33,6 +33,37 @@ import { SWITCH_LIST_GROUPS, switchListSortedView } from "../core/switchList";
 import { renderReportContent, renderReportPills } from "./reportContent";
 import { RunRecord, RunKind, RunStatus, worstStatus, formatRunTime, stopSyncDesc, deleteLeftoverDesc } from "../core/runHistory";
 import { ACTION_ICON, ACTION_COLOR_CLASS, renderActionIcon, renderActionCount, type SyncAction } from "./actionIcons";
+import {
+  QualifierAutocomplete,
+  parseQuery,
+  matchesQualifiers,
+  type QualifierSpec,
+  type QualifierResolver,
+} from "./qualifierSearch";
+
+// --- Qualifier search vocabulary (Sync Center) ---
+export function syncTypeValue(g: SyncGroup): "file" | "folder" {
+  return g.type === "dir" ? "folder" : "file";
+}
+export function syncModeValue(g: SyncGroup): string {
+  return g.mode ?? "plain";
+}
+// The row's PanelFilter bucket, mirroring the state-filter pills. locked → null (no bucket).
+export function syncActionValue(state: GroupState): "capture" | "apply" | "ok" | "none" | null {
+  for (const f of ["capture", "apply", "ok", "none"] as const) {
+    if (visibleUnderFilter(state, f)) return f;
+  }
+  return null;
+}
+
+const SYNC_QUALIFIER_SPECS: QualifierSpec[] = [
+  { key: "type", description: "group kind", values: [{ value: "file", description: "single-file group" }, { value: "folder", description: "directory group" }] },
+  { key: "scope", description: "category", values: [{ value: "obsidian" }, { value: "core" }, { value: "community" }, { value: "beta" }, { value: "custom" }] },
+  { key: "action", description: "what it needs", values: [{ value: "capture", description: "needs capture" }, { value: "apply", description: "needs apply" }, { value: "ok", description: "in sync" }, { value: "none", description: "no settings yet" }] },
+  { key: "mode", description: "field handling", values: [{ value: "plain" }, { value: "fields" }, { value: "encrypted" }] },
+  { key: "device", description: "device class", values: [{ value: "all" }, { value: "desktop" }, { value: "mobile" }] },
+];
+const SYNC_QUALIFIER_KEYS = new Set(SYNC_QUALIFIER_SPECS.map((s) => s.key));
 
 // Sidebar scope order: Beta sits between Community and custom (batch 3 ③).
 const SCOPE_ORDER: (ItemCategory | "beta")[] = ["obsidian", "core", "community", "beta", "custom"];
@@ -192,6 +223,7 @@ export class SyncCenterView extends ItemView {
   private history: RunRecord[] = [];
   private historyOpen: number | null = null; // index of the run whose detail is shown; null = table
   private leftovers: { rel: string; name: string; path: string; size: number }[] = [];
+  private readonly qac = new QualifierAutocomplete(SYNC_QUALIFIER_SPECS);
 
   constructor(leaf: WorkspaceLeaf, private host: SyncCenterHost) {
     super(leaf);
@@ -234,6 +266,7 @@ export class SyncCenterView extends ItemView {
   }
 
   async onClose(): Promise<void> {
+    this.qac.destroy(); // release the widget's document-level listener if the view closes mid-dropdown
     this.contentEl.empty();
   }
 
@@ -652,13 +685,20 @@ export class SyncCenterView extends ItemView {
 
   private renderSidebar(shell: HTMLElement): void {
     const side = shell.createDiv({ cls: "config-sync-side" });
-    const searchEl = side.createEl("input", {
+    const searchWrap = side.createDiv({ cls: "config-sync-search-wrap" });
+    const searchEl = searchWrap.createEl("input", {
       type: "search",
       cls: "config-sync-side-search",
       attr: { placeholder: "Filter by name…" },
     });
     searchEl.value = this.search;
     if (this.panelScope.kind === "remote") searchEl.disabled = true;
+    // Attach the autocomplete BEFORE the re-render listener: the sidebar input triggers a full
+    // this.render() on every keystroke, which recreates the input and re-attaches the widget. If
+    // the widget's own input listener were registered second, the re-render (running first) would
+    // tear it down via detach() before it fired, so the dropdown could never open. Registering it
+    // first lets it open the dropdown, then the re-render preserves that open state on the new input.
+    this.qac.attach(searchEl);
     searchEl.addEventListener("input", () => {
       const wasSearching = this.searching();
       this.search = searchEl.value;
@@ -689,7 +729,7 @@ export class SyncCenterView extends ItemView {
         // not-installed included), not just mainRows() — so a match hiding in e.g. "Not
         // installed" still counts here. Bucket badges below stay main-section-only.
         const scopeRows = cat === "all" ? this.rows() : this.rows().filter((r) => this.scopeOf(r.group.name) === cat);
-        const hits = scopeRows.filter((r) => matchesSearch(`${this.host.displayName(r.group.name, r.group.label)} ${r.group.name}`, this.search)).length;
+        const hits = scopeRows.filter((r) => this.rowMatchesSearch(r)).length;
         item.createSpan({ cls: "config-sync-side-badge is-neutral", text: `${hits}` });
       } else {
         const c = this.presentedCounts(rows);
@@ -1053,6 +1093,24 @@ export class SyncCenterView extends ItemView {
     return this.search.trim() !== "";
   }
 
+  private syncResolvers(): Record<string, QualifierResolver<StatusRow>> {
+    return {
+      type: (r) => syncTypeValue(r.group),
+      scope: (r) => this.scopeOf(r.group.name),
+      action: (r) => syncActionValue(this.presState(r)),
+      mode: (r) => syncModeValue(r.group),
+      device: (r) => r.group.devices,
+    };
+  }
+
+  private rowMatchesSearch(r: StatusRow): boolean {
+    const parsed = parseQuery(this.search, SYNC_QUALIFIER_KEYS);
+    return (
+      matchesQualifiers(r, parsed.qualifiers, this.syncResolvers()) &&
+      matchesSearch(`${this.host.displayName(r.group.name, r.group.label)} ${r.group.name}`, parsed.text)
+    );
+  }
+
   private scopedRows(): StatusRow[] {
     if (this.searching()) return this.rows();
     if (this.panelScope.kind !== "device" || this.panelScope.cat === "all") return this.rows();
@@ -1073,7 +1131,8 @@ export class SyncCenterView extends ItemView {
     const pillRow = bar.createDiv({ cls: "config-sync-fpillrow" });
     let searchEl: HTMLInputElement | null = null;
     if (this.compact) {
-      searchEl = bar.createEl("input", {
+      const searchWrap = bar.createDiv({ cls: "config-sync-search-wrap" });
+      searchEl = searchWrap.createEl("input", {
         type: "search",
         cls: "config-sync-mainbar-search",
         attr: { placeholder: "Filter by name…" },
@@ -1089,7 +1148,7 @@ export class SyncCenterView extends ItemView {
     const renderPills = (): void => {
       pillRow.empty();
       const pillRows = this.searching()
-        ? mainRows.filter((r) => matchesSearch(`${this.host.displayName(r.group.name, r.group.label)} ${r.group.name}`, this.search))
+        ? mainRows.filter((r) => this.rowMatchesSearch(r))
         : mainRows;
       const counts = this.presentedCounts(pillRows);
       // Mobile shows the short glyph form (定稿 B) — the panel's icon language (↑ ↓ ✓ ○) —
@@ -1153,13 +1212,14 @@ export class SyncCenterView extends ItemView {
         this.refreshGlobalSelectAll(selectAll, mainRows);
         renderSections();
       });
+      this.qac.attach(searchEl);
     }
 
     this.renderActionBar(main);
   }
 
   private visibleRows(scoped: StatusRow[]): StatusRow[] {
-    return scoped.filter((r) => visibleUnderFilter(this.presState(r), this.filter) && matchesSearch(`${this.host.displayName(r.group.name, r.group.label)} ${r.group.name}`, this.search));
+    return scoped.filter((r) => visibleUnderFilter(this.presState(r), this.filter) && this.rowMatchesSearch(r));
   }
 
   private renderListInto(listHost: HTMLElement, scoped: StatusRow[]): void {
@@ -1269,7 +1329,7 @@ export class SyncCenterView extends ItemView {
   private renderInfoSection(main: HTMLElement, kind: "desktop-only", rows: StatusRow[]): void {
     if (rows.length === 0) return;
     const matches = this.searching()
-      ? rows.filter((r) => matchesSearch(`${this.host.displayName(r.group.name, r.group.label)} ${r.group.name}`, this.search))
+      ? rows.filter((r) => this.rowMatchesSearch(r))
       : rows;
     if (this.searching() && matches.length === 0) return;
     const open = this.searching() || this.sectionOpen.has(kind);
@@ -1295,7 +1355,7 @@ export class SyncCenterView extends ItemView {
   private renderSection(main: HTMLElement, kind: Exclude<SectionKind, "main">, rows: StatusRow[]): void {
     if (rows.length === 0) return;
     const matches = this.searching()
-      ? rows.filter((r) => matchesSearch(`${this.host.displayName(r.group.name, r.group.label)} ${r.group.name}`, this.search))
+      ? rows.filter((r) => this.rowMatchesSearch(r))
       : rows;
     if (this.searching() && matches.length === 0) return;
     const open = this.searching() || this.sectionOpen.has(kind);
