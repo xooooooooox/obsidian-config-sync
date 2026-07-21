@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CoreContext, capture, loadManifest, groupsForDevice, ExternalStoreReader, writeGroups } from "../src/core/ConfigSyncCore";
 import { parseSyncManifest } from "../src/core/manifest";
-import { statusForGroups, checkRemote, diffRemote, bucketCounts, remoteLockAhead, GroupStatus } from "../src/core/status";
+import { statusForGroups, checkRemote, diffRemote, bucketCounts, remoteLockAhead, remoteDirectionCounts, GroupStatus } from "../src/core/status";
 import { MemFS, FakePlugins, memGroupsIO } from "./memfs";
 
 const MANIFEST = JSON.stringify({
@@ -308,5 +308,23 @@ describe("bucketCounts", () => {
       { group: "b", state: "locked" },
     ];
     expect(bucketCounts(statuses)).toEqual({ up: 0, down: 0, ok: 1, none: 1 });
+  });
+});
+
+describe("remoteDirectionCounts", () => {
+  it("counts remote-older as push", () => {
+    expect(remoteDirectionCounts(["remote-older", "remote-older"])).toEqual({ push: 2, pull: 0 });
+  });
+  it("counts remote-newer as pull", () => {
+    expect(remoteDirectionCounts(["remote-newer"])).toEqual({ push: 0, pull: 1 });
+  });
+  it("ignores same/no-store/unknown", () => {
+    expect(remoteDirectionCounts(["same", "no-store", "unknown"])).toEqual({ push: 0, pull: 0 });
+  });
+  it("counts a mixed set", () => {
+    expect(remoteDirectionCounts(["remote-older", "remote-newer", "same"])).toEqual({ push: 1, pull: 1 });
+  });
+  it("returns zeroes for an empty list", () => {
+    expect(remoteDirectionCounts([])).toEqual({ push: 0, pull: 0 });
   });
 });
