@@ -692,6 +692,12 @@ export class SyncCenterView extends ItemView {
     });
     searchEl.value = this.search;
     if (this.panelScope.kind === "remote") searchEl.disabled = true;
+    // Attach the autocomplete BEFORE the re-render listener: the sidebar input triggers a full
+    // this.render() on every keystroke, which recreates the input and re-attaches the widget. If
+    // the widget's own input listener were registered second, the re-render (running first) would
+    // tear it down via detach() before it fired, so the dropdown could never open. Registering it
+    // first lets it open the dropdown, then the re-render preserves that open state on the new input.
+    this.qac.attach(searchEl);
     searchEl.addEventListener("input", () => {
       const wasSearching = this.searching();
       this.search = searchEl.value;
@@ -705,7 +711,6 @@ export class SyncCenterView extends ItemView {
         refocus.value = v;
       }
     });
-    this.qac.attach(searchEl);
     this.renderScopeEntries(side);
   }
 
