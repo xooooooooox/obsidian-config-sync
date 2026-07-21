@@ -32,7 +32,7 @@ import { renderDiffPanel } from "./diffView";
 import { SWITCH_LIST_GROUPS, switchListSortedView } from "../core/switchList";
 import { renderReportContent, renderReportPills } from "./reportContent";
 import { RunRecord, RunKind, RunStatus, worstStatus, formatRunTime, stopSyncDesc, deleteLeftoverDesc } from "../core/runHistory";
-import { ACTION_ICON, renderActionIcon, type SyncAction } from "./actionIcons";
+import { ACTION_ICON, renderActionIcon, renderActionCount, type SyncAction } from "./actionIcons";
 
 // Sidebar scope order: Beta sits between Community and custom (batch 3 ③).
 const SCOPE_ORDER: (ItemCategory | "beta")[] = ["obsidian", "core", "community", "beta", "custom"];
@@ -417,7 +417,11 @@ export class SyncCenterView extends ItemView {
     item.createSpan({ cls: "config-sync-side-name", text: "Config Sync" });
     if (info !== null) {
       const b = this.selfBadge(info);
-      if (b !== null) item.createSpan({ cls: `config-sync-side-badge ${b.cls}`, text: b.text });
+      if (b !== null) {
+        const badge = item.createSpan({ cls: `config-sync-side-badge ${b.cls}` });
+        if (b.action !== undefined) renderActionCount(badge, b.action, b.count ?? 0);
+        else badge.setText(b.text ?? "");
+      }
     }
     item.addEventListener("click", () => {
       this.panelScope = { kind: "self" };
@@ -426,19 +430,19 @@ export class SyncCenterView extends ItemView {
     });
   }
 
-  private selfBadge(info: SelfSyncInfo): { text: string; cls: string } | null {
+  private selfBadge(info: SelfSyncInfo): { cls: string; action?: SyncAction; count?: number; text?: string } | null {
     // Count the sync-list delta; when the change is config-sync's own content/version (no list
-    // delta), show a bare glyph rather than a misleading "↑0"/"↓0".
+    // delta), show a bare icon rather than a misleading "↑0"/"↓0".
     const n = info.delta.added.length + info.delta.removed.length;
     switch (info.state) {
       case "coldstart":
-        return { text: "setup", cls: "is-down" };
+        return { cls: "is-down", text: "setup" };
       case "adopt":
-        return { text: n > 0 ? `↓${n}` : "↓", cls: "is-down" };
+        return { cls: "is-down", action: "apply", count: n };
       case "capture":
-        return { text: n > 0 ? `↑${n}` : "↑", cls: "is-up" };
+        return { cls: "is-up", action: "capture", count: n };
       case "both":
-        return { text: "⚠", cls: "is-up" };
+        return { cls: "is-up", text: "⚠" };
       case "insync":
         return null;
     }
@@ -664,8 +668,8 @@ export class SyncCenterView extends ItemView {
         item.createSpan({ cls: "config-sync-side-badge is-neutral", text: `${hits}` });
       } else {
         const c = this.presentedCounts(rows);
-        if (c.up > 0) item.createSpan({ cls: "config-sync-side-badge is-up", text: `↑${c.up}` });
-        if (c.down > 0) item.createSpan({ cls: "config-sync-side-badge is-down", text: `↓${c.down}` });
+        if (c.up > 0) renderActionCount(item.createSpan({ cls: "config-sync-side-badge is-up" }), "capture", c.up);
+        if (c.down > 0) renderActionCount(item.createSpan({ cls: "config-sync-side-badge is-down" }), "apply", c.down);
         if (c.ok > 0) item.createSpan({ cls: "config-sync-side-badge is-ok", text: `✓${c.ok}` });
         if (c.none > 0) item.createSpan({ cls: "config-sync-side-badge is-none", text: `○${c.none}` });
       }
@@ -736,8 +740,8 @@ export class SyncCenterView extends ItemView {
       const cat = this.panelScope.cat;
       sw.createSpan({ text: cat === "all" ? "All items" : SCOPE_LABELS[cat] });
       const c = this.presentedCounts(this.scopedRows().filter((r) => this.sectionOf(r.group.name) === "main"));
-      if (c.up > 0) sw.createSpan({ cls: "config-sync-side-badge is-up", text: `↑${c.up}` });
-      if (c.down > 0) sw.createSpan({ cls: "config-sync-side-badge is-down", text: `↓${c.down}` });
+      if (c.up > 0) renderActionCount(sw.createSpan({ cls: "config-sync-side-badge is-up" }), "capture", c.up);
+      if (c.down > 0) renderActionCount(sw.createSpan({ cls: "config-sync-side-badge is-down" }), "apply", c.down);
       if (c.ok > 0) sw.createSpan({ cls: "config-sync-side-badge is-ok", text: `✓${c.ok}` });
       if (c.none > 0) sw.createSpan({ cls: "config-sync-side-badge is-none", text: `○${c.none}` });
     } else if (this.panelScope.kind === "history") {
@@ -767,18 +771,16 @@ export class SyncCenterView extends ItemView {
     const { up, down, ok, none } = this.presentedCounts(this.mainRows());
     const pills = head.createSpan({ cls: "config-sync-report-pills" });
     if (up > 0) {
-      pills.createSpan({
-        cls: "config-sync-pill is-up",
-        text: `↑ ${up}`,
-        attr: { "aria-label": `${up} item${up === 1 ? "" : "s"} to capture` },
-      });
+      renderActionCount(
+        pills.createSpan({ cls: "config-sync-pill is-up", attr: { "aria-label": `${up} item${up === 1 ? "" : "s"} to capture` } }),
+        "capture", up,
+      );
     }
     if (down > 0) {
-      pills.createSpan({
-        cls: "config-sync-pill is-down",
-        text: `↓ ${down}`,
-        attr: { "aria-label": `${down} item${down === 1 ? "" : "s"} to apply` },
-      });
+      renderActionCount(
+        pills.createSpan({ cls: "config-sync-pill is-down", attr: { "aria-label": `${down} item${down === 1 ? "" : "s"} to apply` } }),
+        "apply", down,
+      );
     }
     pills.createSpan({
       cls: "config-sync-pill is-ok",
@@ -1027,17 +1029,19 @@ export class SyncCenterView extends ItemView {
       // Mobile shows the short glyph form (定稿 B) — the panel's icon language (↑ ↓ ✓ ○) —
       // so all five pills always fit one line; desktop keeps the full labels.
       const allLabel = this.searching() ? `All ${pillRows.length} / ${mainRows.length}` : `All ${mainRows.length}`;
-      const defs: { key: PanelFilter; label: string; short: string }[] = [
+      const defs: { key: PanelFilter; label: string; short: string; action?: SyncAction; count?: number }[] = [
         { key: "all", label: allLabel, short: allLabel },
-        { key: "capture", label: `To capture ${counts.up}`, short: `↑ ${counts.up}` },
-        { key: "apply", label: `To apply ${counts.down}`, short: `↓ ${counts.down}` },
+        { key: "capture", label: `To capture ${counts.up}`, short: "", action: "capture", count: counts.up },
+        { key: "apply", label: `To apply ${counts.down}`, short: "", action: "apply", count: counts.down },
         { key: "ok", label: `In sync ${counts.ok}`, short: `✓ ${counts.ok}` },
         { key: "none", label: `No settings yet ${counts.none}`, short: `○ ${counts.none}` },
       ];
       for (const d of defs) {
         const pill = pillRow.createEl("button", { cls: `config-sync-fpill${this.filter === d.key ? " is-active" : ""}`, attr: { "aria-label": d.label } });
         pill.createSpan({ cls: "config-sync-fpill-long", text: d.label });
-        pill.createSpan({ cls: "config-sync-fpill-short", text: d.short });
+        const shortEl = pill.createSpan({ cls: "config-sync-fpill-short" });
+        if (d.action !== undefined) renderActionCount(shortEl, d.action, d.count ?? 0);
+        else shortEl.setText(d.short);
         pill.addEventListener("click", () => {
           this.filter = d.key;
           this.render(this.renderGen);
