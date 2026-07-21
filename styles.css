@@ -407,6 +407,8 @@ body.is-phone .config-sync-fkey {
 .config-sync-pill.is-down { background: rgba(var(--interactive-accent-rgb), 0.15); color: var(--interactive-accent); }
 .config-sync-pill.is-ok { background: rgba(var(--color-green-rgb), 0.15); color: var(--color-green); }
 .config-sync-pill.is-none { background: var(--background-modifier-hover); color: var(--text-muted); }
+.config-sync-pill.is-push { background: rgba(var(--color-pink-rgb), 0.15); color: var(--color-pink); }
+.config-sync-pill.is-pull { background: rgba(var(--color-cyan-rgb), 0.15); color: var(--color-cyan); }
 .config-sync-pill.is-warn { background: none; color: var(--color-orange); margin-left: var(--size-4-1); }
 
 .config-sync-fpillrow { display: flex; flex-wrap: wrap; gap: var(--size-4-1); min-width: 0; }
@@ -610,6 +612,14 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 
 .config-sync-center-refreshed { margin-left: auto; color: var(--text-faint); font-size: var(--font-ui-smaller); }
 
+.config-sync-self-chip { display: inline-flex; align-items: center; gap: 4px; font-size: var(--font-ui-smaller); border-radius: 999px; padding: 1px 9px; border: 1px solid transparent; cursor: pointer; }
+.config-sync-self-chip .config-sync-self-chip-ic { display: inline-flex; }
+.config-sync-self-chip .config-sync-self-chip-ic svg { width: 13px; height: 13px; }
+.config-sync-self-chip.is-up { border-color: rgba(var(--color-orange-rgb), 0.5); color: var(--color-orange); }
+.config-sync-self-chip.is-down { border-color: rgba(var(--interactive-accent-rgb), 0.5); color: var(--interactive-accent); }
+.config-sync-self-chip.is-ok { border-color: rgba(var(--color-green-rgb), 0.5); color: var(--color-green); }
+.config-sync-head-divider { width: 1px; height: 16px; background: var(--background-modifier-border); flex: none; }
+
 .config-sync-shell { display: grid; grid-template-columns: minmax(150px, 22%) minmax(0, 1fr); gap: var(--size-4-3); }
 
 .config-sync-side { display: flex; flex-direction: column; gap: 3px; }
@@ -715,6 +725,11 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 .config-sync-self-pill.is-down { background: rgba(var(--interactive-accent-rgb), 0.15); color: var(--interactive-accent); }
 .config-sync-self-pill.is-up { background: rgba(var(--color-orange-rgb), 0.15); color: var(--color-orange); }
 .config-sync-self-pill.is-ok { background: rgba(var(--color-green-rgb), 0.15); color: var(--color-green); }
+.config-sync-self-title-sp { flex: 1; }
+.config-sync-self-settings-btn { display: inline-flex; align-items: center; gap: 4px; font-size: var(--font-ui-smaller); color: var(--text-muted); background: var(--background-modifier-hover); border: 1px solid var(--background-modifier-border); border-radius: 6px; padding: 2px 9px; cursor: pointer; box-shadow: none; height: auto; }
+.config-sync-self-settings-btn:hover { color: var(--interactive-accent); border-color: rgba(var(--interactive-accent-rgb), 0.5); }
+.config-sync-self-settings-btn .config-sync-self-settings-ic { display: inline-flex; }
+.config-sync-self-settings-btn .config-sync-self-settings-ic svg { width: 13px; height: 13px; }
 .config-sync-self-sub { color: var(--text-muted); font-size: var(--font-ui-smaller); margin: 8px 0 14px; line-height: 1.5; max-width: 640px; }
 .config-sync-self-block { border: 1px solid var(--background-modifier-border); background: var(--background-secondary); border-radius: 9px; padding: 12px 14px; margin-bottom: 12px; }
 .config-sync-self-block.is-act { border-color: rgba(var(--interactive-accent-rgb), 0.45); background: rgba(var(--interactive-accent-rgb), 0.06); }
@@ -731,7 +746,7 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 .config-sync-self-acts { display: flex; align-items: center; gap: 8px; }
 .config-sync-self-acts button.config-sync-btn-capture { background: var(--color-orange); color: var(--background-primary); border: none; }
 .config-sync-self-hint { color: var(--text-muted); font-size: var(--font-ui-smaller); }
-.config-sync-self-link { color: var(--interactive-accent); font-size: var(--font-ui-smaller); cursor: pointer; margin-top: 4px; }
+.config-sync-self-viewchange { color: var(--interactive-accent); font-size: var(--font-ui-smaller); cursor: pointer; margin-top: var(--size-4-1); }
 
 .config-sync-main { display: flex; flex-direction: column; min-width: 0; }
 
@@ -762,6 +777,9 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 .config-sync-fieldrow:last-of-type { border-bottom: none; }
 
 .config-sync-fkey { font-family: var(--font-monospace); color: var(--text-normal); }
+.config-sync-flock { display: inline-flex; align-items: center; color: var(--text-muted); flex: none; }
+.config-sync-flock svg { width: 13px; height: 13px; }
+.config-sync-fieldrow-xspacer { width: var(--size-4-6); flex: none; }
 
 .config-sync-ftag { font-size: 9.5px; color: var(--text-faint); }
 .config-sync-ftag.is-detected { color: var(--color-orange); } /* matches the JSON legend's detected color */

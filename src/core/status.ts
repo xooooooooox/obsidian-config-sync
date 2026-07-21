@@ -150,6 +150,19 @@ export function bucketCounts(statuses: GroupStatus[]): BucketCounts {
   return { up, down, ok, none };
 }
 
+// Push/pull are per-remote whole-store states, not item counts: a remote is
+// "older" (push would update it) or "newer" (pull would update the store).
+// Counts how many remotes need each direction. same/no-store/unknown → neither.
+export function remoteDirectionCounts(states: RemoteState[]): { push: number; pull: number } {
+  let push = 0;
+  let pull = 0;
+  for (const s of states) {
+    if (s === "remote-older") push++;
+    else if (s === "remote-newer") pull++;
+  }
+  return { push, pull };
+}
+
 export type RemoteState = "no-store" | "same" | "remote-newer" | "remote-older" | "unknown";
 
 export interface RemoteCheck {

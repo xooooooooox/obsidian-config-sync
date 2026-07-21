@@ -1,6 +1,6 @@
 import { App, ButtonComponent, ExtraButtonComponent, ItemView, Modal, Platform, WorkspaceLeaf, setIcon } from "obsidian";
 import { ApplyItem, CaptureItem, ProgressFn, StateAction } from "../core/ConfigSyncCore";
-import { bucketCounts, GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry } from "../core/status";
+import { bucketCounts, GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry, remoteDirectionCounts } from "../core/status";
 import { CATEGORY_LABELS, findGroupByName, ItemCategory, SELF_GROUP_NAME, categoryForGroup } from "../core/catalog";
 import { FileChanges, GroupResult, Remote, SyncGroup, hasChanges } from "../core/types";
 import { Availability } from "../core/availability";
@@ -174,6 +174,7 @@ export class SyncCenterView extends ItemView {
   private filter: PanelFilter = "all";
   private panelScope: { kind: "device"; cat: ItemCategory | "beta" | "all" } | { kind: "remote"; name: string } | { kind: "history" } | { kind: "self" } = { kind: "device", cat: "all" };
   private selfInfo: SelfSyncInfo | null = null;
+  private selfDiffOpen = new Set<Direction>(); // which self data.json diffs are expanded
   private landedInitial = false; // cold-start auto-land to the Config Sync pane happens once
   private search = "";
   private betaIds: Set<string> = new Set();
@@ -498,15 +499,10 @@ export class SyncCenterView extends ItemView {
     for (const name of removed) row("−", "is-del", name);
   }
 
-  private renderSelfConfigSummary(pane: HTMLElement): void {
-    const block = pane.createDiv({ cls: "config-sync-self-block" });
-    block.createDiv({ cls: "config-sync-self-block-h", text: "This device's configuration" });
-    const link = block.createDiv({ cls: "config-sync-self-link", text: "Open Config Sync settings →" });
-    link.addEventListener("click", () => {
-      const setting = (this.app as unknown as { setting?: { open(): void; openTabById(id: string): void } }).setting;
-      setting?.open();
-      setting?.openTabById("config-sync");
-    });
+  private openConfigSyncSettings(): void {
+    const setting = (this.app as unknown as { setting?: { open(): void; openTabById(id: string): void } }).setting;
+    setting?.open();
+    setting?.openTabById("config-sync");
   }
 
   // The Config Sync pane: the self layer's bidirectional adopt/capture surface (S0–S4).
@@ -519,6 +515,12 @@ export class SyncCenterView extends ItemView {
     title.createSpan({ text: "Config Sync" });
     const pill = this.selfStatePill(info);
     if (pill !== null) title.createSpan({ cls: `config-sync-self-pill ${pill.cls}`, text: pill.text });
+    title.createSpan({ cls: "config-sync-self-title-sp" });
+    const cfgBtn = title.createEl("button", { cls: "config-sync-self-settings-btn", attr: { "aria-label": "Open settings" } });
+    const cfgIc = cfgBtn.createSpan({ cls: "config-sync-self-settings-ic" });
+    setIcon(cfgIc, "settings-2");
+    cfgBtn.createSpan({ text: "Settings" });
+    cfgBtn.addEventListener("click", () => this.openConfigSyncSettings());
 
     if (info.state === "coldstart") {
       pane.createDiv({ cls: "config-sync-self-sub", text: "This is a new device — it has no sync list yet. The store holds a configuration you can adopt to set it up." });
@@ -555,7 +557,6 @@ export class SyncCenterView extends ItemView {
           this.render(this.renderGen);
         });
       }
-      this.renderSelfConfigSummary(pane);
       return;
     }
 
@@ -568,8 +569,12 @@ export class SyncCenterView extends ItemView {
       const block = pane.createDiv({ cls: "config-sync-self-block is-act" });
       block.createDiv({ cls: "config-sync-self-block-h", text: info.state === "both" ? "① Adopt updates from the store first" : "Updates from the store" });
       if (info.state === "adopt") block.createDiv({ cls: "config-sync-self-block-s", text: "Adopting adds these to this device's sync list — it does not apply their settings; you still choose that per item afterward." });
-      if (info.delta.added.length > 0 || info.delta.removed.length > 0) this.renderSelfDelta(block, info.delta.added, info.delta.removed);
-      else this.renderSelfContentDetail(block, info, "apply"); // store's config-sync settings changed, not the list
+      if (info.delta.added.length > 0 || info.delta.removed.length > 0) {
+        this.renderSelfDelta(block, info.delta.added, info.delta.removed);
+        this.renderSelfViewChange(block, "apply");
+      } else {
+        this.renderSelfContentDetail(block, info, "apply"); // store's config-sync settings changed, not the list
+      }
       const acts = block.createDiv({ cls: "config-sync-self-acts" });
       const adopt = acts.createEl("button", { cls: "mod-cta", text: "Adopt all" });
       adopt.addEventListener("click", () => this.runSelfAdopt(adopt));
@@ -579,8 +584,13 @@ export class SyncCenterView extends ItemView {
       const gated = info.state === "both";
       const block = pane.createDiv({ cls: `config-sync-self-block${gated ? " is-gated" : ""}` });
       block.createDiv({ cls: "config-sync-self-block-h", text: gated ? "② Then capture your local change" : "Local changes not yet in the store" });
-      if (info.delta.removed.length > 0) this.renderSelfDelta(block, info.delta.removed, []); // your local-only groups
-      else this.renderSelfContentDetail(block, info, "capture"); // config-sync's own settings/version changed, not the list
+      if (info.delta.removed.length > 0) {
+        this.renderSelfDelta(block, info.delta.removed, []); // your local-only groups
+        block.createDiv({ cls: "config-sync-self-block-s", text: "These are in this device's sync list but not the store's — Capture publishes their definitions." });
+        this.renderSelfViewChange(block, "capture");
+      } else {
+        this.renderSelfContentDetail(block, info, "capture"); // config-sync's own settings/version changed, not the list
+      }
       const acts = block.createDiv({ cls: "config-sync-self-acts" });
       const cap = acts.createEl("button", { cls: "config-sync-btn-capture", text: "Capture" });
       if (gated) {
@@ -590,8 +600,6 @@ export class SyncCenterView extends ItemView {
         cap.addEventListener("click", () => this.runSelfCapture(cap));
       }
     }
-
-    this.renderSelfConfigSummary(pane);
   }
 
   // When config-sync's own data.json changed (not the sync list), show what changed: a version
@@ -616,7 +624,10 @@ export class SyncCenterView extends ItemView {
       return;
     }
     block.createDiv({ cls: "config-sync-self-block-s", text: "Config Sync's own settings changed:" });
-    const holder = block.createDiv({ cls: "config-sync-inline-diff" });
+    this.renderSelfDataJsonDiff(block.createDiv({ cls: "config-sync-inline-diff" }), dir);
+  }
+
+  private renderSelfDataJsonDiff(holder: HTMLElement, dir: Direction): void {
     void this.host.diffPair(SELF_GROUP_NAME, "", dir).then((pair) => {
       if (pair === null) {
         holder.createDiv({ cls: "config-sync-expand-note", text: "no diff available" });
@@ -626,6 +637,17 @@ export class SyncCenterView extends ItemView {
       const rightLabel = dir === "capture" ? "this device (what capture would write)" : "store (what apply would write)";
       renderDiffPanel(holder, pair.base, pair.produced, leftLabel, rightLabel, "data.json");
     });
+  }
+
+  private renderSelfViewChange(block: HTMLElement, dir: Direction): void {
+    const open = this.selfDiffOpen.has(dir);
+    const link = block.createDiv({ cls: "config-sync-self-viewchange", text: open ? "▾ hide change (data.json)" : "▸ view change (data.json)" });
+    link.addEventListener("click", () => {
+      if (open) this.selfDiffOpen.delete(dir);
+      else this.selfDiffOpen.add(dir);
+      this.render(this.renderGen);
+    });
+    if (open) this.renderSelfDataJsonDiff(block.createDiv({ cls: "config-sync-inline-diff" }), dir);
   }
 
   private renderSidebar(shell: HTMLElement): void {
@@ -768,10 +790,34 @@ export class SyncCenterView extends ItemView {
     }
   }
 
+  // The self chip for the global status bar (Layout B): Config Sync's own state,
+  // always shown (green check when in sync) so mobile can confirm self status
+  // even with the sidebar collapsed. Reuses selfStatePill so the pane and the
+  // header can't drift. Clicking opens the self pane.
+  private renderSelfChip(parent: HTMLElement): void {
+    const info = this.selfInfo;
+    if (info === null) return;
+    const pill = this.selfStatePill(info);
+    if (pill === null) return;
+    const chip = parent.createSpan({ cls: `config-sync-self-chip ${pill.cls}`, attr: { "aria-label": `Config Sync: ${pill.text}` } });
+    const ic = chip.createSpan({ cls: "config-sync-self-chip-ic" });
+    setIcon(ic, info.state === "insync" ? "check" : "settings");
+    chip.createSpan({ text: pill.text });
+    chip.addEventListener("click", () => {
+      this.panelScope = { kind: "self" };
+      this.switcherOpen = false;
+      this.render(this.renderGen);
+    });
+  }
+
   private renderHeader(): void {
     // No title span: the pane header already reads "Sync Center" (mobile polish round 2).
     const head = this.contentEl.createDiv({ cls: "config-sync-center-head" });
+    this.renderSelfChip(head);
+    if (this.selfInfo !== null) head.createSpan({ cls: "config-sync-head-divider" });
     const { up, down, ok, none } = this.presentedCounts(this.mainRows());
+    const remoteStates = this.host.remotes().map((r) => this.host.remoteCheck(r.name)?.check.state ?? "unknown");
+    const { push, pull } = remoteDirectionCounts(remoteStates);
     const pills = head.createSpan({ cls: "config-sync-report-pills" });
     if (up > 0) {
       renderActionCount(
@@ -783,6 +829,18 @@ export class SyncCenterView extends ItemView {
       renderActionCount(
         pills.createSpan({ cls: "config-sync-pill is-down", attr: { "aria-label": `${down} item${down === 1 ? "" : "s"} to apply` } }),
         "apply", down,
+      );
+    }
+    if (push > 0) {
+      renderActionCount(
+        pills.createSpan({ cls: "config-sync-pill is-push", attr: { "aria-label": `${push} remote${push === 1 ? "" : "s"} to push` } }),
+        "push", push,
+      );
+    }
+    if (pull > 0) {
+      renderActionCount(
+        pills.createSpan({ cls: "config-sync-pill is-pull", attr: { "aria-label": `${pull} remote${pull === 1 ? "" : "s"} to pull` } }),
+        "pull", pull,
       );
     }
     pills.createSpan({
