@@ -1022,7 +1022,6 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     // on/off list is meaningless. A three-button segment with one forced choice is noise, so
     // these rows render no segment at all.
     if (SWITCH_LIST_GROUPS.has(group.name)) return;
-    const seg = controlEl.createDiv({ cls: "config-sync-seg" });
     const modes: { id: SyncMode; label: string }[] = [
       { id: "plain", label: "Plain" },
       { id: "fields", label: "Fields" },
@@ -1038,45 +1037,45 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     // silently revert here too.
     const appearancePinned = group.name === "appearance" && this.groups.some((g) => g.name === "enabled-css-snippets");
     const pinnedToFields = group.name === SELF_GROUP_NAME || appearancePinned;
+    const dd = new DropdownComponent(controlEl);
     for (const m of modes) {
       if (m.id === "fields" && group.type !== "file") continue;
-      const on = current === m.id;
-      const btn = seg.createEl("button", {
-        cls: `config-sync-seg-btn is-mode${on ? " is-on" : ""}`,
-        text: m.label,
-      });
-      if (pinnedToFields && m.id !== "fields") {
-        btn.disabled = true;
-        btn.setAttribute("title", "This item always uses fields mode — device-local fields stay on each device");
-        continue;
-      }
-      btn.addEventListener("click", () => {
-        void (async () => {
-          let fieldsForNewMode: FieldRule[] | undefined;
-          if (m.id === "fields" && group.fields === undefined) {
-            const scan = this.detections.get(group.name) ?? (await this.host.detectSensitive(group));
-            this.detections.set(group.name, scan);
-            if (scan.keys.length > 0) fieldsForNewMode = defaultFieldsFromDetection(scan.keys);
-          }
-          await this.commitGroups((draft) => {
-            const g = draft.find((x) => x.name === group.name);
-            if (g === undefined) return;
-            if (m.id === "plain") {
-              delete g.mode;
-              delete g.fields;
-            } else if (m.id === "encrypted") {
-              g.mode = "encrypted";
-              delete g.fields;
-            } else {
-              g.mode = "fields";
-              if (g.fields === undefined && fieldsForNewMode !== undefined) g.fields = fieldsForNewMode;
-            }
-          }, group.name);
-          if (m.id === "fields") this.expanded.add(group.name);
-          afterChange();
-        })();
-      });
+      // A pinned item can only ever be Fields, so it offers no other choice to revert to.
+      if (pinnedToFields && m.id !== "fields") continue;
+      dd.addOption(m.id, m.label);
     }
+    dd.setValue(pinnedToFields ? "fields" : current);
+    if (pinnedToFields) {
+      dd.setDisabled(true);
+      dd.selectEl.setAttribute("title", "This item always uses fields mode — device-local fields stay on each device");
+    }
+    dd.onChange((v) => {
+      const mode = v as SyncMode;
+      void (async () => {
+        let fieldsForNewMode: FieldRule[] | undefined;
+        if (mode === "fields" && group.fields === undefined) {
+          const scan = this.detections.get(group.name) ?? (await this.host.detectSensitive(group));
+          this.detections.set(group.name, scan);
+          if (scan.keys.length > 0) fieldsForNewMode = defaultFieldsFromDetection(scan.keys);
+        }
+        await this.commitGroups((draft) => {
+          const g = draft.find((x) => x.name === group.name);
+          if (g === undefined) return;
+          if (mode === "plain") {
+            delete g.mode;
+            delete g.fields;
+          } else if (mode === "encrypted") {
+            g.mode = "encrypted";
+            delete g.fields;
+          } else {
+            g.mode = "fields";
+            if (g.fields === undefined && fieldsForNewMode !== undefined) g.fields = fieldsForNewMode;
+          }
+        }, group.name);
+        if (mode === "fields") this.expanded.add(group.name);
+        afterChange();
+      })();
+    });
   }
 
   private renderFieldsEditor(hostEl: HTMLElement, group: SyncGroup, afterChange: () => void): void {
