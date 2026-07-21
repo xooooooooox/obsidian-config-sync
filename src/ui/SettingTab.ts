@@ -510,7 +510,9 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       );
       if (n === 0) b.hide();
     }
-    if (group !== undefined && item.disabledReason === null) {
+    // The enabled-css-snippets list is scoped per-snippet ("Active on" in its drawer), so the
+    // coarse group-level device dropdown would be a redundant, confusing second scope control.
+    if (group !== undefined && item.disabledReason === null && item.name !== "enabled-css-snippets") {
       row.addDropdown((d) =>
         d
           .addOption("all", "all devices")
@@ -590,16 +592,47 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   // (定稿 switch-exceptions.html): excepted ids never enter the store and never flip here.
   private renderLocalDecisions(exp: HTMLElement, group: SyncGroup, wrap: HTMLElement, item: CatalogItem): void {
     const isSnippetGroup = group.name === "enabled-css-snippets";
-    exp.createDiv({ cls: "config-sync-explabel", text: "Excluded from this list (this device)" });
+    exp.createDiv({
+      cls: "config-sync-explabel",
+      text: isSnippetGroup ? "Device scope & pins (this device)" : "Excluded from this list (this device)",
+    });
     exp.createDiv({
       cls: "config-sync-expdesc",
-      text: "Excluded plugins keep their own on/off state on this device — the shared list neither includes nor changes them.",
+      text: isSnippetGroup
+        ? 'Set which devices a snippet belongs to with "Active on". Pin a snippet to keep its own on/off on this device only — a pin isn\'t touched by the shared list and always wins over the scope.'
+        : "Excluded plugins keep their own on/off state on this device — the shared list neither includes nor changes them.",
     });
     const listEl = exp.createDiv({ cls: "config-sync-ldlist" });
     // The device this list belongs to when it's scoped away from us (mobile → "desktop").
     const boundDevice = Platform.isMobile ? "desktop" : "mobile";
     const renderRows = (rows: SwitchRow[]): void => {
       listEl.empty();
+      const setPin = async (id: string, pinned: boolean): Promise<void> => {
+        const cur = new Set(this.host.settings.switchExceptions[group.name] ?? []);
+        if (pinned) cur.add(id);
+        else cur.delete(id);
+        this.host.settings.switchExceptions[group.name] = [...cur].sort();
+        await this.host.saveSettings();
+        const badge = wrap.querySelector<HTMLElement>(".config-sync-exbadge");
+        if (badge !== null) {
+          badge.setText(isSnippetGroup ? `${cur.size} pinned` : `${cur.size} excluded`);
+          if (cur.size > 0) badge.show();
+          else badge.hide();
+        }
+        // Snippets: a pin flips the row's bucket (pin > scope removes it from the auto
+        // device-scoped block), and that is baked into the fetched rows — so re-fetch. Plugins:
+        // an exclude doesn't touch deviceScoped, so an in-place re-sort suffices (no flash).
+        if (isSnippetGroup) await reload();
+        else renderRows(rows);
+      };
+      const updateScopeBadge = (): void => {
+        const scopeBadge = wrap.querySelector<HTMLElement>(".config-sync-scopebadge");
+        if (scopeBadge === null) return;
+        const count = Object.keys(this.host.settings.snippetScopes).length;
+        scopeBadge.setText(`${count} device-scoped`);
+        if (count > 0) scopeBadge.show();
+        else scopeBadge.hide();
+      };
       const exceptions = new Set(this.host.settings.switchExceptions[group.name] ?? []);
       const ordered = orderSwitchRows(rows, exceptions);
       let prevBucket: OrderedSwitchRow["bucket"] | null = null;
@@ -612,7 +645,9 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
             "title",
             r.bucket === "desktop-only"
               ? "Excluded automatically — this plugin can't run on this device"
-              : `Excluded automatically — you set this plugin to devices: ${boundDevice}`,
+              : isSnippetGroup
+                ? `Scoped to ${boundDevice} only — not active on this device (change it from a ${boundDevice} device)`
+                : `Excluded automatically — you set this plugin to devices: ${boundDevice}`,
           );
           rowEl.createSpan({ cls: "config-sync-ldname", text: r.name });
           rowEl.createSpan({
@@ -625,58 +660,50 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
           new ToggleComponent(rowEl).setValue(true).setDisabled(true);
           continue;
         }
-        const isLocal = r.bucket === "excluded";
+        const isLocal = r.bucket === "excluded"; // snippets: "pinned to this device"
         const rowEl = listEl.createDiv({
           cls: `config-sync-ldrow${isLocal ? " is-local" : ""}${gsep ? " config-sync-ldrow-gsep" : ""}`,
         });
-        const nameEl = rowEl.createSpan({ cls: "config-sync-ldname" });
-        if (isSnippetGroup) setIcon(nameEl.createSpan({ cls: "config-sync-ldpinicon" }), "pin");
-        nameEl.appendText(r.name);
+        rowEl.createSpan({ cls: "config-sync-ldname", text: r.name });
+        // 定稿 snippet-scope-refined-v2.html: a pinned snippet reads as a filled "Pinned here" chip
+        // beside its name; an unpinned one shows only its "Active on" dropdown plus a hover pin.
+        if (isSnippetGroup && isLocal) {
+          const chip = rowEl.createSpan({ cls: "config-sync-ld-pinchip" });
+          setIcon(chip.createSpan({ cls: "config-sync-ld-pinchip-icon" }), "pin");
+          chip.appendText(`Pinned here · ${r.hint.startsWith("on here") ? "on" : "off"}`);
+        }
         rowEl.createSpan({ cls: "config-sync-ldhint", text: r.hint });
         rowEl.createDiv({ cls: "config-sync-rule-spacer" });
-        rowEl.createSpan({ cls: "config-sync-ldstate", text: isLocal ? (isSnippetGroup ? "Pinned here" : "excluded") : "included" });
         if (isSnippetGroup) {
+          if (isLocal) {
+            const unpin = rowEl.createSpan({ cls: "config-sync-ld-unpin", text: "Unpin", attr: { role: "button", tabindex: "0" } });
+            unpin.addEventListener("click", () => void setPin(r.id, false));
+          } else {
+            const pinBtn = rowEl.createSpan({ cls: "config-sync-ld-pin", attr: { role: "button", tabindex: "0", "aria-label": "Pin to this device" } });
+            setIcon(pinBtn, "pin");
+            pinBtn.addEventListener("click", () => void setPin(r.id, true));
+          }
           const scopeNow = this.host.settings.snippetScopes[r.id] ?? "all";
+          // A pin makes this device user-controlled (pin > scope), so the shared scope doesn't
+          // apply here — grey the dropdown while pinned.
           const scopeDd = new DropdownComponent(rowEl)
             .addOption("all", "All devices")
             .addOption("desktop", "Desktop only")
             .addOption("mobile", "Mobile only")
             .setValue(scopeNow)
+            .setDisabled(isLocal)
             .onChange(async (v) => {
               this.host.settings.snippetScopes = setSnippetScope(this.host.settings.snippetScopes, r.id, v as "all" | "desktop" | "mobile");
               await this.host.saveSettings();
-              const scopeBadge = wrap.querySelector<HTMLElement>(".config-sync-scopebadge");
-              if (scopeBadge !== null) {
-                const count = Object.keys(this.host.settings.snippetScopes).length;
-                scopeBadge.setText(`${count} device-scoped`);
-                if (count > 0) scopeBadge.show();
-                else scopeBadge.hide();
-              }
-              // Re-fetch: deviceScoped is baked in at fetch time from snippetScopes, so a scope
-              // change can only be reflected in the auto-excluded bucket by re-deriving it.
+              updateScopeBadge();
               await reload();
             });
-          // Outlined orange chip only while a scope is actually set (定稿 snippet-scope-refined-v2.html) —
-          // "All devices" reads as a plain, low-emphasis control.
           scopeDd.selectEl.addClass("config-sync-ld-scope");
           scopeDd.selectEl.toggleClass("is-scoped", scopeNow !== "all");
+        } else {
+          rowEl.createSpan({ cls: "config-sync-ldstate", text: isLocal ? "excluded" : "included" });
+          new ToggleComponent(rowEl).setValue(isLocal).onChange((v) => void setPin(r.id, v));
         }
-        new ToggleComponent(rowEl).setValue(isLocal).onChange(async (v) => {
-          const cur = new Set(this.host.settings.switchExceptions[group.name] ?? []);
-          if (v) cur.add(r.id);
-          else cur.delete(r.id);
-          this.host.settings.switchExceptions[group.name] = [...cur].sort();
-          await this.host.saveSettings();
-          const badge = wrap.querySelector<HTMLElement>(".config-sync-exbadge");
-          if (badge !== null) {
-            badge.setText(isSnippetGroup ? `${cur.size} pinned` : `${cur.size} excluded`);
-            if (cur.size > 0) badge.show();
-            else badge.hide();
-          }
-          // Re-sort the already-fetched rows so the toggled plugin jumps to/from the
-          // "excluded" block. No refetch, no async — no flash.
-          renderRows(rows);
-        });
       }
     };
     const reload = async (): Promise<void> => {
