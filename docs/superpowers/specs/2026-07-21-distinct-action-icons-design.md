@@ -109,8 +109,20 @@ the current locations (verify at implementation time):
     "↑ Capture removes …" / "↓ Apply turns off …" becomes a small leading colored action
     icon; the sentence keeps the word "Capture"/"Apply". No bare arrow remains in prose.
 
+11. **Run-history action cell** (`actionCell` `:874-880`, rendered `:930`) — collapses
+    all four actions to `↑`(out: capture+push) / `↓`(in: apply+pull) by direction. Split
+    by `rec.kind` into the four actions, each its own icon + color class (currently the
+    glyph is colored by `is-${dir}`). Removal kinds `stop-sync` (`⊘`) / `delete-leftover`
+    (`⌫`) stay text glyphs with `is-remove`. The `.label` text (`:952`) is unchanged.
+12. **Config Sync self-item badge** (`selfBadge` `:428-444`, rendered `:419`) — `capture`
+    → capture icon (+count), `adopt` → apply icon (+count); `coldstart` ("setup") and
+    `both` (`⚠`) stay text. Bare icon when count is 0.
+
+*(Surfaces 11-12 added after the spec's first pass, per owner decision — the
+"no glyph reuse" invariant is absolute, and both reuse `↑`/`↓` across actions.)*
+
 Out of scope (no direction glyph): conflict-modal `✓/＋/＝/⌂`, report chips `+ ~ −`,
-warnings `⚠ ✗`, chevrons — untouched.
+warnings `⚠ ✗`, chevrons, and the removal glyphs `⊘ ⌫` — untouched.
 
 ## CSS (`styles.css`)
 
