@@ -1032,7 +1032,12 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     // The plugin's own item is pinned to Fields mode: its locked device-local strip rules
     // (rootPath/remotes) only exist under "fields", and ensureSelfPresets re-forces it on
     // every commit — so offering Plain/Encrypt here would silently revert.
-    const pinnedToFields = group.name === SELF_GROUP_NAME;
+    // Appearance is pinned the same way whenever the enabled-css-snippets group is active:
+    // ensureAppearancePresets re-forces mode:"fields" + a locked enabledCssSnippets strip on
+    // every commit (the device-local snippet list must never sync), so Plain/Encrypt would
+    // silently revert here too.
+    const appearancePinned = group.name === "appearance" && this.groups.some((g) => g.name === "enabled-css-snippets");
+    const pinnedToFields = group.name === SELF_GROUP_NAME || appearancePinned;
     for (const m of modes) {
       if (m.id === "fields" && group.type !== "file") continue;
       const on = current === m.id;
@@ -1549,8 +1554,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     // A plugin-* group with the standard path is a synced plugin item (it belongs to the
     // Community/Beta tabs even when the plugin isn't installed here) — never a custom rule.
     const syncedPlugin = (g: SyncGroup): boolean => g.name.startsWith("plugin-") && g.path === expectedPathForName(g.name);
+    // Switch-list groups (e.g. enabled-css-snippets) are managed items surfaced on the Obsidian
+    // tab with their own scope/pins UI — they are not custom rules, so keep them out of Advanced
+    // (rendering one here as a deletable rule would let a delete silently tear down snippet sync).
     const managed = this.groups.filter((g) => (reserved.has(g.name) || syncedPlugin(g)) && g.origin === undefined);
-    const custom = this.groups.filter((g) => !reserved.has(g.name) && !syncedPlugin(g) && g.origin === undefined);
+    const custom = this.groups.filter((g) => !reserved.has(g.name) && !syncedPlugin(g) && !SWITCH_LIST_GROUPS.has(g.name) && g.origin === undefined);
     const customized = managed.filter((g) => this.isCustomized(g));
 
     if (customized.length > 0) {

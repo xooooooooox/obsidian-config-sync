@@ -32,11 +32,14 @@
               "additionalProperties": false,
               "properties": {
                 "pattern": { "type": "string", "minLength": 1, "description": "Key-name glob pattern (* wildcard)" },
-                "action": { "enum": ["strip", "encrypt"] }
+                "action": { "enum": ["strip", "encrypt"] },
+                "locked": { "type": "boolean", "description": "Preset rule injected by the plugin; cannot be removed in the UI." }
               }
             },
             "description": "Per-field rules. Only valid with \"mode\": \"fields\"."
-          }
+          },
+          "label": { "type": "string", "minLength": 1, "description": "Display name recorded when the item is enabled or captured; shown even where the plugin isn't installed." },
+          "origin": { "const": "discovered", "description": "Set by the plugin for rules created from the Discovered-files section; name and path are fixed by the file." }
         }
       }
     }
