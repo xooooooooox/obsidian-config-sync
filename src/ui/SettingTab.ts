@@ -59,6 +59,8 @@ export interface SettingsHost extends Plugin {
   setPassphrase(v: string | null): void;
   displayName(group: string, storedLabel?: string): string;
   switchListRows(group: string): Promise<{ id: string; name: string; hint: string; desktopOnly: boolean; deviceScoped: boolean }[]>;
+  snippetOrphanNames(): Promise<string[]>;
+  removeSnippetOrphans(names: string[]): Promise<void>;
 }
 
 const SENSITIVE_ENCRYPT_RE = /apikey|api_key|token|secret|password|credential/i;
@@ -605,6 +607,8 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const listEl = exp.createDiv({ cls: "config-sync-ldlist" });
     // The device this list belongs to when it's scoped away from us (mobile → "desktop").
     const boundDevice = Platform.isMobile ? "desktop" : "mobile";
+    let orphans: string[] = [];
+    let orphansExpanded = false;
     const renderRows = (rows: SwitchRow[]): void => {
       listEl.empty();
       const setPin = async (id: string, pinned: boolean): Promise<void> => {
@@ -718,9 +722,48 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
           new ToggleComponent(rowEl).setValue(isLocal).onChange((v) => void setPin(r.id, v));
         }
       }
+      if (isSnippetGroup && orphans.length > 0) {
+        const sec = listEl.createDiv({ cls: "config-sync-orphan-sec" });
+        const notice = sec.createDiv({ cls: "config-sync-orphan-notice", attr: { role: "button", tabindex: "0" } });
+        notice.createSpan({ cls: "config-sync-orphan-ic", text: "○" });
+        notice.createSpan({ cls: "config-sync-orphan-nt", text: `${orphans.length} enabled snippet${orphans.length === 1 ? "" : "s"} have no file` });
+        notice.createDiv({ cls: "config-sync-rule-spacer" });
+        notice.createSpan({ cls: "config-sync-orphan-act", text: "Clean up" });
+        notice.createSpan({ cls: "config-sync-orphan-chev", text: orphansExpanded ? "▾" : "▸" });
+        notice.addEventListener("click", () => {
+          orphansExpanded = !orphansExpanded;
+          renderRows(rows);
+        });
+        if (orphansExpanded) {
+          const body = sec.createDiv({ cls: "config-sync-orphan-body" });
+          body.createDiv({
+            cls: "config-sync-orphan-desc",
+            text: "Enabled in Obsidian but their .css file is gone (deleted or renamed). They do nothing and aren't synced. Remove to clean appearance.json.",
+          });
+          for (const name of orphans) {
+            const orow = body.createDiv({ cls: "config-sync-orphan-row" });
+            orow.createSpan({ cls: "config-sync-orphan-name", text: name });
+            orow.createSpan({ cls: "config-sync-orphan-tag", text: "no file" });
+            orow.createDiv({ cls: "config-sync-rule-spacer" });
+            const rm = orow.createSpan({ cls: "config-sync-orphan-remove", text: "Remove", attr: { role: "button", tabindex: "0" } });
+            rm.addEventListener("click", () => void (async () => {
+              await this.host.removeSnippetOrphans([name]);
+              await reload();
+            })());
+          }
+          const allRow = body.createDiv({ cls: "config-sync-orphan-row" });
+          allRow.createDiv({ cls: "config-sync-rule-spacer" });
+          const rmAll = allRow.createSpan({ cls: "config-sync-orphan-removeall", text: `Remove all ${orphans.length}`, attr: { role: "button", tabindex: "0" } });
+          rmAll.addEventListener("click", () => void (async () => {
+            await this.host.removeSnippetOrphans([...orphans]);
+            await reload();
+          })());
+        }
+      }
     };
     const reload = async (): Promise<void> => {
       const fresh = await this.host.switchListRows(group.name);
+      orphans = isSnippetGroup ? await this.host.snippetOrphanNames() : [];
       renderRows(fresh);
     };
     void reload();
