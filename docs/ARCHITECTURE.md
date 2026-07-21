@@ -84,10 +84,15 @@ functions.
   `window`-based timeout wrapper lives in `main.ts`, keeping timers out of the core).
 
 **UI** (`src/ui/`)
-- `SyncCenterView.ts` — the hub: status list, filters/search, availability sections, the sticky
+- `SyncCenterView.ts` — the hub: the header status bar (self "this device" chip + push/pull
+  totals), the self pane, status list, filters/search, availability sections, the sticky
   result strip, run History, the Remotes block, and Capture/Apply/Pull/Push actions.
 - `SettingTab.ts` — the settings tab (General / Obsidian / Core plugins / Community plugins /
-  Advanced / Remotes).
+  Beta / Advanced / Remotes).
+- `actionIcons.ts` — the single source for the per-action Lucide icons + color classes
+  (Capture/Apply/Push/Pull) reused across the panel, buttons, badges and History.
+- `qualifierSearch.ts` — the `key:value` search shared by both search boxes: pure `parseQuery` /
+  `matchesQualifiers` / `suggest` / `applySuggestion`, plus the `QualifierAutocomplete` DOM widget.
 - `panelModel.ts` — the pure view-model deciding what state each row presents under the filters.
 - `reportContent.ts` — shared run-report rendering (the strip and the Revert modal).
 - `diffView.ts` — unified-diff rendering; `jsonView.ts` — read-only `data.json` viewer with keys
