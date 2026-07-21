@@ -1,6 +1,6 @@
 import { App, ButtonComponent, ExtraButtonComponent, ItemView, Modal, Platform, WorkspaceLeaf, setIcon } from "obsidian";
 import { ApplyItem, CaptureItem, ProgressFn, StateAction } from "../core/ConfigSyncCore";
-import { bucketCounts, GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry } from "../core/status";
+import { bucketCounts, GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry, remoteDirectionCounts } from "../core/status";
 import { CATEGORY_LABELS, findGroupByName, ItemCategory, SELF_GROUP_NAME, categoryForGroup } from "../core/catalog";
 import { FileChanges, GroupResult, Remote, SyncGroup, hasChanges } from "../core/types";
 import { Availability } from "../core/availability";
@@ -768,10 +768,34 @@ export class SyncCenterView extends ItemView {
     }
   }
 
+  // The self chip for the global status bar (Layout B): Config Sync's own state,
+  // always shown (green check when in sync) so mobile can confirm self status
+  // even with the sidebar collapsed. Reuses selfStatePill so the pane and the
+  // header can't drift. Clicking opens the self pane.
+  private renderSelfChip(parent: HTMLElement): void {
+    const info = this.selfInfo;
+    if (info === null) return;
+    const pill = this.selfStatePill(info);
+    if (pill === null) return;
+    const chip = parent.createSpan({ cls: `config-sync-self-chip ${pill.cls}`, attr: { "aria-label": `Config Sync: ${pill.text}` } });
+    const ic = chip.createSpan({ cls: "config-sync-self-chip-ic" });
+    setIcon(ic, info.state === "insync" ? "check" : "settings");
+    chip.createSpan({ text: pill.text });
+    chip.addEventListener("click", () => {
+      this.panelScope = { kind: "self" };
+      this.switcherOpen = false;
+      this.render(this.renderGen);
+    });
+  }
+
   private renderHeader(): void {
     // No title span: the pane header already reads "Sync Center" (mobile polish round 2).
     const head = this.contentEl.createDiv({ cls: "config-sync-center-head" });
+    this.renderSelfChip(head);
+    if (this.selfInfo !== null) head.createSpan({ cls: "config-sync-head-divider" });
     const { up, down, ok, none } = this.presentedCounts(this.mainRows());
+    const remoteStates = this.host.remotes().map((r) => this.host.remoteCheck(r.name)?.check.state ?? "unknown");
+    const { push, pull } = remoteDirectionCounts(remoteStates);
     const pills = head.createSpan({ cls: "config-sync-report-pills" });
     if (up > 0) {
       renderActionCount(
@@ -783,6 +807,18 @@ export class SyncCenterView extends ItemView {
       renderActionCount(
         pills.createSpan({ cls: "config-sync-pill is-down", attr: { "aria-label": `${down} item${down === 1 ? "" : "s"} to apply` } }),
         "apply", down,
+      );
+    }
+    if (push > 0) {
+      renderActionCount(
+        pills.createSpan({ cls: "config-sync-pill is-push", attr: { "aria-label": `${push} remote${push === 1 ? "" : "s"} to push` } }),
+        "push", push,
+      );
+    }
+    if (pull > 0) {
+      renderActionCount(
+        pills.createSpan({ cls: "config-sync-pill is-pull", attr: { "aria-label": `${pull} remote${pull === 1 ? "" : "s"} to pull` } }),
+        "pull", pull,
       );
     }
     pills.createSpan({
