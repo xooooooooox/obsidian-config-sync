@@ -32,7 +32,7 @@ import { renderDiffPanel } from "./diffView";
 import { SWITCH_LIST_GROUPS, switchListSortedView } from "../core/switchList";
 import { renderReportContent, renderReportPills } from "./reportContent";
 import { RunRecord, RunKind, RunStatus, worstStatus, formatRunTime, stopSyncDesc, deleteLeftoverDesc } from "../core/runHistory";
-import { ACTION_ICON, type SyncAction } from "./actionIcons";
+import { ACTION_ICON, renderActionIcon, type SyncAction } from "./actionIcons";
 
 // Sidebar scope order: Beta sits between Community and custom (batch 3 ③).
 const SCOPE_ORDER: (ItemCategory | "beta")[] = ["obsidian", "core", "community", "beta", "custom"];
@@ -1636,9 +1636,10 @@ export class SyncCenterView extends ItemView {
       const on = staged && dir === d;
       const b = seg.createEl("button", {
         cls: `config-sync-seg-btn is-${d}${on ? " is-on" : ""}`,
-        text: label,
         attr: { "aria-label": aria },
       });
+      renderActionIcon(b, d);
+      b.appendText(` ${label}`);
       b.addEventListener("click", (e) => {
         e.stopPropagation();
         if (on) {
@@ -1651,8 +1652,8 @@ export class SyncCenterView extends ItemView {
         this.render(this.renderGen);
       });
     };
-    segBtn("capture", "↑ Capture", "Capture this (keep local)");
-    segBtn("apply", "↓ Apply store", "Apply store version (overwrites local)");
+    segBtn("capture", "Capture", "Capture this (keep local)");
+    segBtn("apply", "Apply store", "Apply store version (overwrites local)");
   }
 
   private renderCappedChanges(detail: HTMLElement, r: StatusRow, changes: FileChanges): void {
@@ -1812,7 +1813,8 @@ export class SyncCenterView extends ItemView {
       capW.btn.setButtonText(runProgressLabel("Capturing", this.activeRun.done, this.activeRun.total));
       capW.btn.buttonEl.addClass("is-busy");
     } else {
-      capW.btn.setButtonText(`↑ Capture ${capItems.length} item${capItems.length === 1 ? "" : "s"}`);
+      renderActionIcon(capW.btn.buttonEl, "capture");
+      capW.btn.buttonEl.appendText(` Capture ${capItems.length} item${capItems.length === 1 ? "" : "s"}`);
     }
     capW.btn.buttonEl.addClass("config-sync-btn-capture");
     capW.btn.setDisabled(this.running || capItems.length === 0);
@@ -1823,7 +1825,8 @@ export class SyncCenterView extends ItemView {
       applyW.btn.setButtonText(runProgressLabel("Applying", this.activeRun.done, this.activeRun.total));
       applyW.btn.buttonEl.addClass("is-busy");
     } else {
-      applyW.btn.setButtonText(`↓ Apply ${applyItems.length} item${applyItems.length === 1 ? "" : "s"}`);
+      renderActionIcon(applyW.btn.buttonEl, "apply");
+      applyW.btn.buttonEl.appendText(` Apply ${applyItems.length} item${applyItems.length === 1 ? "" : "s"}`);
     }
     applyW.btn.setDisabled(this.running || applyItems.length === 0);
 
@@ -1933,7 +1936,8 @@ export class SyncCenterView extends ItemView {
     const bar = detail.createDiv({ cls: "config-sync-actionbar" });
 
     const pull = new ButtonComponent(bar);
-    pull.setButtonText(`↓ Pull from ${remote.name}`);
+    renderActionIcon(pull.buttonEl, "pull");
+    pull.buttonEl.appendText(` Pull from ${remote.name}`);
     pull.buttonEl.addClass("config-sync-remote-btn", "is-pull");
     if (noChanges) pull.buttonEl.addClass("is-dimmed");
     else if (pullAligned) pull.buttonEl.addClass("is-primary");
@@ -1947,7 +1951,8 @@ export class SyncCenterView extends ItemView {
     });
 
     const push = new ButtonComponent(bar);
-    push.setButtonText(`↑ Push to ${remote.name}`);
+    renderActionIcon(push.buttonEl, "push");
+    push.buttonEl.appendText(` Push to ${remote.name}`);
     push.buttonEl.addClass("config-sync-remote-btn", "is-push");
     if (noChanges) push.buttonEl.addClass("is-dimmed");
     else if (!pullAligned) push.buttonEl.addClass("is-primary");
