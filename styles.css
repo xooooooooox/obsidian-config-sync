@@ -37,11 +37,13 @@
 .config-sync-search {
   display: flex;
   margin-bottom: var(--size-4-4);
-  position: relative;
 }
 
+/* The qualifier autocomplete dropdown is appended to the input's immediate parent
+   (Obsidian's .search-input-container), so anchor it here — not on the outer wrap. */
 .config-sync-search .search-input-container {
   width: 100%;
+  position: relative;
 }
 
 .config-sync-empty {

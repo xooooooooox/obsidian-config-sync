@@ -250,6 +250,10 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     void this.rerender(0);
   }
 
+  hide(): void {
+    this.qac.destroy(); // release the widget's document-level listener when the settings tab closes
+  }
+
   private refresh(): void {
     void this.rerender(this.containerEl.scrollTop);
   }

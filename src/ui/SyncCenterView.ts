@@ -266,6 +266,7 @@ export class SyncCenterView extends ItemView {
   }
 
   async onClose(): Promise<void> {
+    this.qac.destroy(); // release the widget's document-level listener if the view closes mid-dropdown
     this.contentEl.empty();
   }
 
