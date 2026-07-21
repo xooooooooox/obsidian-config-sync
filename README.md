@@ -15,9 +15,10 @@ Selective, on-demand sync of Obsidian settings — hotkeys, CSS snippets, themes
 - **Credential-safe** — per-item sync modes strip or encrypt sensitive keys before anything enters the store; each device keeps its locally entered values across applies.
 - **Explicit, reversible Apply** — pick items, land them directly (no confirmation dialog); every touched file is backed up and **Revert last apply** restores it.
 - **Removable and tidy** — stop syncing an item at any time (optionally deleting its store copy), and store files left behind with no matching item surface as **Leftover** for one-click cleanup.
-- **Always-visible awareness** — a ribbon status dot lights up orange (items to capture) or blue (store/remote updates); open the **Sync Center** for the details: every item badged (`✓ in sync`, `↑ changed on this device (likely)`, `↓ store is newer (likely)`, `≠ differs`, `— not captured yet`) with live `↑`/`↓` change-count badges, and remotes checked automatically.
-- **Availability-aware** — plugins that are outdated, disabled, or not installed on this device get their own collapsed sections with a plugin-install/update engine, so applying can also update, enable or install a community plugin in the same step.
+- **Always-visible awareness** — a ribbon status dot lights up orange (items to capture) or blue (store/remote updates); open the **Sync Center** for the details. Its header is a single status bar: a *this device* chip (a green check when everything is in sync, otherwise the current state and a shortcut into settings) followed by the totals for every pending action, including per-remote push/pull counts. Every item is badged by state (`✓ in sync`, changed-on-this-device, store-is-newer, `≠ differs`, `— not captured yet`), each sync action (Capture, Apply, Push, Pull) has its own icon, and remotes are checked automatically.
+- **Availability-aware** — plugins that are outdated, disabled, or not installed on this device get their own collapsed sections with a plugin-install/update engine, so applying can also update, enable or install a community plugin in the same step. A **Beta** tab tracks community plugins installed through BRAT, so their configs sync like any other.
 - **Remote-aware** — the Sync Center's Remotes block auto-checks whether a git or vault remote was captured after your local store; expand a remote for a Pull/Push preview.
+- **Fast filtering & search** — both search boxes accept `key:value` qualifiers with autocomplete: in the Sync Center `type:`/`scope:`/`action:`/`mode:`/`device:`, in settings `scope:`/`type:` — combined freely with plain text.
 - **Mobile-friendly** — capture, apply and the Sync Center all work on phones; the store is plain vault content, so any note sync carries it.
 
 ## Install
@@ -29,8 +30,8 @@ Beta builds: via [BRAT](https://github.com/TfTHacker/obsidian42-brat), add `xooo
 ## Quick start
 
 1. **Settings → Config Sync** — tick what you want to sync (Obsidian / Core plugins / Community plugins tabs).
-2. Open **Sync** from the ribbon menu (or the **Sync: open the sync panel** command) to open (or focus, if already open) the Sync Center, tick what to capture, and press **↑ Capture N items**.
-3. On another device, once your note sync has delivered the data folder: open **Sync**, tick what to apply, and press **↓ Apply N items**.
+2. Open **Sync** from the ribbon menu (or the **Sync: open the sync panel** command) to open (or focus, if already open) the Sync Center, tick what to capture, and press **Capture N items**.
+3. On another device, once your note sync has delivered the data folder: open **Sync**, tick what to apply, and press **Apply N items**.
 
 ## How it works
 
@@ -66,18 +67,20 @@ A plugin ahead of the store's recorded version shows a quiet metadata line inste
 - **Your note sync (default)**: the store is plain vault content — remotely-save, Obsidian Sync, iCloud or anything else carries it everywhere, mobile included, zero configuration. On a **fresh device**, once the store arrives, the Sync Center discovers it on its own and shows an **Adopt** banner; adopting it runs a one-time guide that walks you through applying the store to set the device up — and warns against capturing over it with the new device's empty defaults.
 - **Pull / Push (desktop, optional)**: config-sync's own transport for a git repo or another vault on this machine, run from the Sync Center's Remotes block. Pull overwrites this vault's store from a remote (repeatable — cold start and ongoing use are the same action); Push sends it out. The git transport clones to a temp dir and never touches your vault's own repo.
 
-Everything hangs off one **Config Sync** ribbon icon: a status dot shows orange when there are items to capture or blue when the store or a remote has updates. Clicking it opens a menu with **Sync…** (badged with `↑`/`↓` change counts) and **Revert last apply**; Sync… opens (or focuses, if already open) the Sync Center, where Capture/Apply/Pull/Push all happen. Individual ribbon icons for Sync and Revert are available under **Settings → General**, off by default.
+Everything hangs off one **Config Sync** ribbon icon: a status dot shows orange when there are items to capture or blue when the store or a remote has updates. Clicking it opens a menu with **Sync…** (badged with the pending capture/apply counts) and **Revert last apply**; Sync… opens (or focuses, if already open) the Sync Center, where Capture/Apply/Pull/Push all happen. Individual ribbon icons for Sync and Revert are available under **Settings → General**, off by default.
 
 Capture, Apply, Pull and Push each finish by rendering a result strip **pinned to the top of the Sync Center** — a collapsible summary (changed/unchanged counts, per-item detail on demand) rather than a popup dialog, so it stays visible while you scroll a long list and doesn't interrupt further ticking. Its tone reflects the outcome — green when the run is clean, amber or red when items need attention, with failures expanded by default. Every run is also recorded in a browsable, clearable **History**: a sidebar entry opens a table of past runs, each expandable to its per-item detail. **Revert last apply** is the exception and still opens a report dialog, since it's run from outside the hub (ribbon menu or command palette).
 
-The **Filter by name…** search box lives in the Sync Center's sidebar and searches globally across every scope at once (Obsidian, Core plugins, Community plugins, snippets, themes, dotfiles); the sidebar shows a hit count per scope and sections with a match auto-expand to show just the hits.
+The Sync Center header is a status bar: a **this device** chip shows Config Sync's own sync state — a green check when in sync, otherwise its state plus a Settings shortcut — followed by totals for every pending action, including per-remote push/pull counts. The chip opens the **this device** pane, where Config Sync's own configuration (its item list, field rules and options) is captured and applied like any other item; when that list changes, an expandable *view change* shows the exact `data.json` delta and what capturing will publish.
+
+The **Filter by name…** search box lives in the Sync Center's sidebar and searches globally across every scope at once (Obsidian, Core plugins, Community plugins, snippets, themes, dotfiles). Beyond plain text it accepts `key:value` qualifiers — `type:` (file/folder), `scope:` (obsidian/core/community/beta/custom), `action:` (capture/apply/ok/none), `mode:` (plain/fields/encrypted) and `device:` (all/desktop/mobile) — that narrow together and combine with free text, with an autocomplete dropdown suggesting keys then values. The sidebar shows a hit count per scope and sections with a match auto-expand to show just the hits.
 
 ![Sync Center](docs/assets/sync-panel.png)
 
 ## Settings guide
 
 - **General** — PKM mode (auto-detects IOTO vaults), the data folder location, status toggles (sync menu change counts, automatic remote checks, periodic local check), ribbon icons.
-- **Obsidian / Core plugins / Community plugins** — tick items to sync them; a heading toggle syncs all/none per section; a global search box with scope filters covers General, all picker tabs, Advanced and Remotes. Items with sensitive-looking keys sort to the top of their section with a `⚠ N keys` badge, so they're visible before you enable syncing. Device-specific items (the `sync`/`publish` core plugins) carry a `device-specific` badge and ask for confirmation when enabled. **Workspaces** (deliberately saved layouts, `workspaces.json`) is a Core-plugin item; the volatile `workspace.json`/`workspace-mobile.json` are not classified into any tab — they turn up under Advanced → Discovered files like any other unrecognized config file.
+- **Obsidian / Core plugins / Community plugins / Beta** — tick items to sync them; a heading toggle syncs all/none per section. The **Search all settings…** box spans General, all picker tabs, Advanced and Remotes, and accepts `scope:` (general/obsidian/core/community/advanced/remotes) and `type:` (file/folder) qualifiers with autocomplete alongside plain text. The **Beta** tab tracks community plugins installed through [BRAT](https://github.com/TfTHacker/obsidian42-brat) — grouped by enabled / installed-but-disabled / not-installed — so their configs sync like any other plugin. Items with sensitive-looking keys sort to the top of their section with a `⚠ N keys` badge, so they're visible before you enable syncing. Device-specific items (the `sync`/`publish` core plugins) carry a `device-specific` badge and ask for confirmation when enabled. **Workspaces** (deliberately saved layouts, `workspaces.json`) is a Core-plugin item; the volatile `workspace.json`/`workspace-mobile.json` are not classified into any tab — they turn up under Advanced → Discovered files like any other unrecognized config file.
 - Every synced item's row has a chevron that opens an expansion: **Fields to protect** (when its mode is Fields), a read-only **View data.json** — keys are colored by rule state, and clicking one adds it as a strip/encrypt rule, covering anything the built-in sensitive-key detection misses — and **Advanced** (a store-path override and **↺ Reset this item to its default rule**).
 - **Advanced** — **Custom rules** (fully yours: vault-root files, extra folders, sync modes) and **Discovered files** (config files we couldn't classify; toggle to sync — name and path are fixed by the file), each row using the same expansion. When any managed item is customized (path, fields or mode diverge from its default), a summary banner lists them with a **↺ Reset all to defaults** button.
 - **Remotes** (desktop) — add a **git repository** (URL, branch, optional folder) or **another vault**: click **Browse…**, pick the vault folder, and the store inside it is auto-detected.
@@ -123,8 +126,9 @@ OS junk (`.DS_Store`, `Thumbs.db`, `desktop.ini`) is never captured. See [Sensit
 
 **Sync hotkeys, appearance and CSS snippets everywhere**
 1. Settings → Config Sync → under *Obsidian*, tick **Hotkeys**, **Appearance**, **CSS snippets**.
-2. Open **Sync** from the ribbon menu and press **↑ Capture N items**.
-3. On each other device, once your note sync has delivered the data folder: open **Sync** and press **↓ Apply N items**.
+2. Open **Sync** from the ribbon menu and press **Capture N items**.
+3. On each other device, once your note sync has delivered the data folder: open **Sync** and press **Apply N items**.
+4. Each CSS snippet's *active on* scope (all / desktop / mobile) is per-device and can be re-scoped at any time. If enabled-snippet names linger after you rename or delete the underlying files, the settings panel surfaces them as *N enabled snippets have no file · Clean up* for one-click tidying.
 
 **Sync a plugin's settings but keep credentials out of the store**
 1. Under *Community plugins*, tick the plugin.
@@ -137,8 +141,8 @@ OS junk (`.DS_Store`, `Thumbs.db`, `desktop.ini`) is never captured. See [Sensit
 
 **Seed a second vault from another one, without a shared note sync (desktop)**
 1. In the target vault: Settings → Config Sync → **Remotes** → add a remote of type **Another vault**, click **Browse…** and pick the source vault's folder — its store is auto-detected into **Store path** (or add a git remote: URL + branch, optionally a folder in the repo).
-2. Open **Sync**, expand the remote, and press **↓ Pull from `<name>`**; then tick what to apply and press **↓ Apply N items**.
-3. Later, from the source vault, expand the remote in its own Sync Center and press **↑ Push to `<name>`** to publish updates for the other vault to pull.
+2. Open **Sync**, expand the remote, and press **Pull from `<name>`**; then tick what to apply and press **Apply N items**.
+3. Later, from the source vault, expand the remote in its own Sync Center and press **Push to `<name>`** to publish updates for the other vault to pull.
 
 ## Security & privacy
 
@@ -157,9 +161,9 @@ Every item has a sync mode, set per item in Settings:
 - **Fields** (file items only) — per-key rules: `Strip` keeps a key out of the store entirely (Apply preserves the local value); `Encrypt` stores the value as an encrypted envelope and decrypts it on Apply, so credentials can travel safely.
 - **Encrypt** — the whole file is stored encrypted (AES-256-GCM, key derived from a passphrase via PBKDF2).
 
-Encrypt modes need a vault-level **Passphrase**, set once per device in Settings → General — it's never written to any file and never synced; the same passphrase on each device is all that's needed. An item with encrypted content but no passphrase set on the current device shows a 🔒 *locked* state and won't capture or apply until the passphrase is set. A wrong passphrase on Apply fails cleanly without writing anything.
+Encrypt modes need a vault-level **Passphrase**, set once per device in Settings → General — it's never written to any file and never synced; the same passphrase on each device is all that's needed. An item with encrypted content but no passphrase set on the current device shows a *locked* state (marked with a key icon) and won't capture or apply until the passphrase is set. A wrong passphrase on Apply fails cleanly without writing anything.
 
-Every installed plugin is scanned for sensitive-looking keys (API keys, tokens, secrets, passwords, emails) or an opaque encrypted blob before you ever enable syncing — a `⚠ N keys` / `⚠ opaque blob` badge appears on the row and sorts it to the top of its section; this only informs, you still choose the mode. Each synced item's row expansion (via its chevron) includes a read-only **View data.json**: keys are colored by rule state (teal = encrypted, red = stripped, amber = detected but unruled), and clicking a key adds it as a strip/encrypt rule directly — the escape hatch for anything the built-in detection misses. The Sync Center badges each item with its mode (`🔒`/`▤`) and capture reports state exactly what was encrypted or stripped.
+Every installed plugin is scanned for sensitive-looking keys (API keys, tokens, secrets, passwords, emails) or an opaque encrypted blob before you ever enable syncing — a `⚠ N keys` / `⚠ opaque blob` badge appears on the row and sorts it to the top of its section; this only informs, you still choose the mode. Each synced item's row expansion (via its chevron) includes a read-only **View data.json**: keys are colored by rule state (teal = encrypted, red = stripped, amber = detected but unruled), and clicking a key adds it as a strip/encrypt rule directly — the escape hatch for anything the built-in detection misses. The Sync Center badges each item with its mode — a lock icon for whole-file **Encrypt**, a fields badge (field lines with a small padlock) for **Fields**, nothing for **Plain** — and capture reports state exactly what was encrypted or stripped.
 
 There is no hard blacklist anymore — `remotely-save`, `ioto-update`, `slides-rup` and `config-sync` are now normal items like any other (e.g. `remotely-save` can be whole-file encrypted; `ioto-update` works well with Fields).
 
