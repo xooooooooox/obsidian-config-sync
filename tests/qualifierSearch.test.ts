@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseQuery, applySuggestion, matchesQualifiers, suggest, type QualifierSpec } from "../src/ui/qualifierSearch";
+import { syncTypeValue, syncModeValue, syncActionValue } from "../src/ui/SyncCenterView";
 
 const KEYS = new Set(["type", "scope", "action", "mode", "device"]);
 
@@ -114,5 +115,26 @@ describe("suggest", () => {
   });
   it("unknown key before colon → no suggestions", () => {
     expect(suggest("bogus:x", SPECS)).toEqual([]);
+  });
+});
+
+describe("sync resolver values", () => {
+  it("type: dir → folder, file → file", () => {
+    expect(syncTypeValue({ type: "dir" } as never)).toBe("folder");
+    expect(syncTypeValue({ type: "file" } as never)).toBe("file");
+  });
+  it("mode: absent → plain, else the mode", () => {
+    expect(syncModeValue({} as never)).toBe("plain");
+    expect(syncModeValue({ mode: "fields" } as never)).toBe("fields");
+    expect(syncModeValue({ mode: "encrypted" } as never)).toBe("encrypted");
+  });
+  it("action: state → PanelFilter bucket, locked → null", () => {
+    expect(syncActionValue("local-changed")).toBe("capture");
+    expect(syncActionValue("not-captured")).toBe("capture");
+    expect(syncActionValue("store-newer")).toBe("apply");
+    expect(syncActionValue("differs")).toBe("apply");
+    expect(syncActionValue("in-sync")).toBe("ok");
+    expect(syncActionValue("no-settings")).toBe("none");
+    expect(syncActionValue("locked")).toBeNull();
   });
 });

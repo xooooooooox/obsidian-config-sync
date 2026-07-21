@@ -33,6 +33,7 @@ export class App {}
 // `class X extends <mocked base>` — no test drives these components, so they carry no behavior.
 export class Plugin {}
 export class PluginSettingTab {}
+export class ItemView {}
 export class FuzzySuggestModal<T> {
   protected items: T[] = [];
 }
