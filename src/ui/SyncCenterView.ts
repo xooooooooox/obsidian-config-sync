@@ -498,15 +498,10 @@ export class SyncCenterView extends ItemView {
     for (const name of removed) row("−", "is-del", name);
   }
 
-  private renderSelfConfigSummary(pane: HTMLElement): void {
-    const block = pane.createDiv({ cls: "config-sync-self-block" });
-    block.createDiv({ cls: "config-sync-self-block-h", text: "This device's configuration" });
-    const link = block.createDiv({ cls: "config-sync-self-link", text: "Open Config Sync settings →" });
-    link.addEventListener("click", () => {
-      const setting = (this.app as unknown as { setting?: { open(): void; openTabById(id: string): void } }).setting;
-      setting?.open();
-      setting?.openTabById("config-sync");
-    });
+  private openConfigSyncSettings(): void {
+    const setting = (this.app as unknown as { setting?: { open(): void; openTabById(id: string): void } }).setting;
+    setting?.open();
+    setting?.openTabById("config-sync");
   }
 
   // The Config Sync pane: the self layer's bidirectional adopt/capture surface (S0–S4).
@@ -519,6 +514,12 @@ export class SyncCenterView extends ItemView {
     title.createSpan({ text: "Config Sync" });
     const pill = this.selfStatePill(info);
     if (pill !== null) title.createSpan({ cls: `config-sync-self-pill ${pill.cls}`, text: pill.text });
+    title.createSpan({ cls: "config-sync-self-title-sp" });
+    const cfgBtn = title.createEl("button", { cls: "config-sync-self-settings-btn", attr: { "aria-label": "Open settings" } });
+    const cfgIc = cfgBtn.createSpan({ cls: "config-sync-self-settings-ic" });
+    setIcon(cfgIc, "settings-2");
+    cfgBtn.createSpan({ text: "Settings" });
+    cfgBtn.addEventListener("click", () => this.openConfigSyncSettings());
 
     if (info.state === "coldstart") {
       pane.createDiv({ cls: "config-sync-self-sub", text: "This is a new device — it has no sync list yet. The store holds a configuration you can adopt to set it up." });
@@ -555,7 +556,6 @@ export class SyncCenterView extends ItemView {
           this.render(this.renderGen);
         });
       }
-      this.renderSelfConfigSummary(pane);
       return;
     }
 
@@ -590,8 +590,6 @@ export class SyncCenterView extends ItemView {
         cap.addEventListener("click", () => this.runSelfCapture(cap));
       }
     }
-
-    this.renderSelfConfigSummary(pane);
   }
 
   // When config-sync's own data.json changed (not the sync list), show what changed: a version

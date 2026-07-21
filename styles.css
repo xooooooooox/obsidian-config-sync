@@ -725,6 +725,11 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 .config-sync-self-pill.is-down { background: rgba(var(--interactive-accent-rgb), 0.15); color: var(--interactive-accent); }
 .config-sync-self-pill.is-up { background: rgba(var(--color-orange-rgb), 0.15); color: var(--color-orange); }
 .config-sync-self-pill.is-ok { background: rgba(var(--color-green-rgb), 0.15); color: var(--color-green); }
+.config-sync-self-title-sp { flex: 1; }
+.config-sync-self-settings-btn { display: inline-flex; align-items: center; gap: 4px; font-size: var(--font-ui-smaller); color: var(--text-muted); background: var(--background-modifier-hover); border: 1px solid var(--background-modifier-border); border-radius: 6px; padding: 2px 9px; cursor: pointer; box-shadow: none; height: auto; }
+.config-sync-self-settings-btn:hover { color: var(--interactive-accent); border-color: rgba(var(--interactive-accent-rgb), 0.5); }
+.config-sync-self-settings-btn .config-sync-self-settings-ic { display: inline-flex; }
+.config-sync-self-settings-btn .config-sync-self-settings-ic svg { width: 13px; height: 13px; }
 .config-sync-self-sub { color: var(--text-muted); font-size: var(--font-ui-smaller); margin: 8px 0 14px; line-height: 1.5; max-width: 640px; }
 .config-sync-self-block { border: 1px solid var(--background-modifier-border); background: var(--background-secondary); border-radius: 9px; padding: 12px 14px; margin-bottom: 12px; }
 .config-sync-self-block.is-act { border-color: rgba(var(--interactive-accent-rgb), 0.45); background: rgba(var(--interactive-accent-rgb), 0.06); }
@@ -741,7 +746,6 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 .config-sync-self-acts { display: flex; align-items: center; gap: 8px; }
 .config-sync-self-acts button.config-sync-btn-capture { background: var(--color-orange); color: var(--background-primary); border: none; }
 .config-sync-self-hint { color: var(--text-muted); font-size: var(--font-ui-smaller); }
-.config-sync-self-link { color: var(--interactive-accent); font-size: var(--font-ui-smaller); cursor: pointer; margin-top: 4px; }
 
 .config-sync-main { display: flex; flex-direction: column; min-width: 0; }
 
