@@ -746,6 +746,7 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 .config-sync-self-acts { display: flex; align-items: center; gap: 8px; }
 .config-sync-self-acts button.config-sync-btn-capture { background: var(--color-orange); color: var(--background-primary); border: none; }
 .config-sync-self-hint { color: var(--text-muted); font-size: var(--font-ui-smaller); }
+.config-sync-self-viewchange { color: var(--interactive-accent); font-size: var(--font-ui-smaller); cursor: pointer; margin-top: var(--size-4-1); }
 
 .config-sync-main { display: flex; flex-direction: column; min-width: 0; }
 

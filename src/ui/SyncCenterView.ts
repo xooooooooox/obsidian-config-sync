@@ -174,6 +174,7 @@ export class SyncCenterView extends ItemView {
   private filter: PanelFilter = "all";
   private panelScope: { kind: "device"; cat: ItemCategory | "beta" | "all" } | { kind: "remote"; name: string } | { kind: "history" } | { kind: "self" } = { kind: "device", cat: "all" };
   private selfInfo: SelfSyncInfo | null = null;
+  private selfDiffOpen = new Set<Direction>(); // which self data.json diffs are expanded
   private landedInitial = false; // cold-start auto-land to the Config Sync pane happens once
   private search = "";
   private betaIds: Set<string> = new Set();
@@ -568,8 +569,12 @@ export class SyncCenterView extends ItemView {
       const block = pane.createDiv({ cls: "config-sync-self-block is-act" });
       block.createDiv({ cls: "config-sync-self-block-h", text: info.state === "both" ? "① Adopt updates from the store first" : "Updates from the store" });
       if (info.state === "adopt") block.createDiv({ cls: "config-sync-self-block-s", text: "Adopting adds these to this device's sync list — it does not apply their settings; you still choose that per item afterward." });
-      if (info.delta.added.length > 0 || info.delta.removed.length > 0) this.renderSelfDelta(block, info.delta.added, info.delta.removed);
-      else this.renderSelfContentDetail(block, info, "apply"); // store's config-sync settings changed, not the list
+      if (info.delta.added.length > 0 || info.delta.removed.length > 0) {
+        this.renderSelfDelta(block, info.delta.added, info.delta.removed);
+        this.renderSelfViewChange(block, "apply");
+      } else {
+        this.renderSelfContentDetail(block, info, "apply"); // store's config-sync settings changed, not the list
+      }
       const acts = block.createDiv({ cls: "config-sync-self-acts" });
       const adopt = acts.createEl("button", { cls: "mod-cta", text: "Adopt all" });
       adopt.addEventListener("click", () => this.runSelfAdopt(adopt));
@@ -579,8 +584,13 @@ export class SyncCenterView extends ItemView {
       const gated = info.state === "both";
       const block = pane.createDiv({ cls: `config-sync-self-block${gated ? " is-gated" : ""}` });
       block.createDiv({ cls: "config-sync-self-block-h", text: gated ? "② Then capture your local change" : "Local changes not yet in the store" });
-      if (info.delta.removed.length > 0) this.renderSelfDelta(block, info.delta.removed, []); // your local-only groups
-      else this.renderSelfContentDetail(block, info, "capture"); // config-sync's own settings/version changed, not the list
+      if (info.delta.removed.length > 0) {
+        this.renderSelfDelta(block, info.delta.removed, []); // your local-only groups
+        block.createDiv({ cls: "config-sync-self-block-s", text: "These are in this device's sync list but not the store's — Capture publishes their definitions." });
+        this.renderSelfViewChange(block, "capture");
+      } else {
+        this.renderSelfContentDetail(block, info, "capture"); // config-sync's own settings/version changed, not the list
+      }
       const acts = block.createDiv({ cls: "config-sync-self-acts" });
       const cap = acts.createEl("button", { cls: "config-sync-btn-capture", text: "Capture" });
       if (gated) {
@@ -614,7 +624,10 @@ export class SyncCenterView extends ItemView {
       return;
     }
     block.createDiv({ cls: "config-sync-self-block-s", text: "Config Sync's own settings changed:" });
-    const holder = block.createDiv({ cls: "config-sync-inline-diff" });
+    this.renderSelfDataJsonDiff(block.createDiv({ cls: "config-sync-inline-diff" }), dir);
+  }
+
+  private renderSelfDataJsonDiff(holder: HTMLElement, dir: Direction): void {
     void this.host.diffPair(SELF_GROUP_NAME, "", dir).then((pair) => {
       if (pair === null) {
         holder.createDiv({ cls: "config-sync-expand-note", text: "no diff available" });
@@ -624,6 +637,17 @@ export class SyncCenterView extends ItemView {
       const rightLabel = dir === "capture" ? "this device (what capture would write)" : "store (what apply would write)";
       renderDiffPanel(holder, pair.base, pair.produced, leftLabel, rightLabel, "data.json");
     });
+  }
+
+  private renderSelfViewChange(block: HTMLElement, dir: Direction): void {
+    const open = this.selfDiffOpen.has(dir);
+    const link = block.createDiv({ cls: "config-sync-self-viewchange", text: open ? "▾ hide change (data.json)" : "▸ view change (data.json)" });
+    link.addEventListener("click", () => {
+      if (open) this.selfDiffOpen.delete(dir);
+      else this.selfDiffOpen.add(dir);
+      this.render(this.renderGen);
+    });
+    if (open) this.renderSelfDataJsonDiff(block.createDiv({ cls: "config-sync-inline-diff" }), dir);
   }
 
   private renderSidebar(shell: HTMLElement): void {
