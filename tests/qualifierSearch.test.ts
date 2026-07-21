@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseQuery, applySuggestion } from "../src/ui/qualifierSearch";
+import { parseQuery, applySuggestion, matchesQualifiers, suggest, type QualifierSpec } from "../src/ui/qualifierSearch";
 
 const KEYS = new Set(["type", "scope", "action", "mode", "device"]);
 
@@ -57,5 +57,62 @@ describe("applySuggestion", () => {
   });
   it("appends when input ends with a space", () => {
     expect(applySuggestion("type:folder ", "scope:")).toBe("type:folder scope:");
+  });
+});
+
+interface Row { t: string; tags: string[]; opt: string | null }
+const RESOLVERS = {
+  type: (r: Row) => r.t,
+  tag: (r: Row) => r.tags,
+  opt: (r: Row) => r.opt,
+};
+
+describe("matchesQualifiers", () => {
+  const row: Row = { t: "folder", tags: ["a", "b"], opt: null };
+  it("no qualifiers → matches", () => {
+    expect(matchesQualifiers(row, [], RESOLVERS)).toBe(true);
+  });
+  it("single scalar match, case-insensitive", () => {
+    expect(matchesQualifiers(row, [{ key: "type", value: "folder" }], RESOLVERS)).toBe(true);
+    expect(matchesQualifiers(row, [{ key: "type", value: "file" }], RESOLVERS)).toBe(false);
+  });
+  it("AND across qualifiers", () => {
+    expect(matchesQualifiers(row, [{ key: "type", value: "folder" }, { key: "tag", value: "a" }], RESOLVERS)).toBe(true);
+    expect(matchesQualifiers(row, [{ key: "type", value: "folder" }, { key: "tag", value: "z" }], RESOLVERS)).toBe(false);
+  });
+  it("array resolver matches any element", () => {
+    expect(matchesQualifiers(row, [{ key: "tag", value: "b" }], RESOLVERS)).toBe(true);
+  });
+  it("empty value is a no-op", () => {
+    expect(matchesQualifiers(row, [{ key: "type", value: "" }], RESOLVERS)).toBe(true);
+  });
+  it("null resolver result → no match", () => {
+    expect(matchesQualifiers(row, [{ key: "opt", value: "x" }], RESOLVERS)).toBe(false);
+  });
+  it("unknown key is skipped (defensive)", () => {
+    expect(matchesQualifiers(row, [{ key: "nope", value: "x" }], RESOLVERS)).toBe(true);
+  });
+});
+
+const SPECS: QualifierSpec[] = [
+  { key: "type", description: "kind", values: [{ value: "file" }, { value: "folder" }] },
+  { key: "scope", description: "area", values: [{ value: "core" }, { value: "community" }] },
+];
+
+describe("suggest", () => {
+  it("empty token → all keys", () => {
+    expect(suggest("", SPECS).map((s) => s.insert)).toEqual(["type:", "scope:"]);
+  });
+  it("key prefix filters keys", () => {
+    expect(suggest("sc", SPECS).map((s) => s.insert)).toEqual(["scope:"]);
+  });
+  it("key: → that key's values, with trailing space", () => {
+    expect(suggest("type:", SPECS).map((s) => s.insert)).toEqual(["type:file ", "type:folder "]);
+  });
+  it("value prefix filters values", () => {
+    expect(suggest("scope:comm", SPECS).map((s) => s.insert)).toEqual(["scope:community "]);
+  });
+  it("unknown key before colon → no suggestions", () => {
+    expect(suggest("bogus:x", SPECS)).toEqual([]);
   });
 });
