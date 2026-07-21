@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseQuery, applySuggestion, matchesQualifiers, suggest, type QualifierSpec } from "../src/ui/qualifierSearch";
 import { syncTypeValue, syncModeValue, syncActionValue } from "../src/ui/SyncCenterView";
+import { settingScopeValue, settingTypeValue } from "../src/ui/SettingTab";
 
 const KEYS = new Set(["type", "scope", "action", "mode", "device"]);
 
@@ -136,5 +137,22 @@ describe("sync resolver values", () => {
     expect(syncActionValue("in-sync")).toBe("ok");
     expect(syncActionValue("no-settings")).toBe("none");
     expect(syncActionValue("locked")).toBeNull();
+  });
+});
+
+describe("setting resolver values", () => {
+  it("scope: plugins & beta → community; sources → remotes; others pass through", () => {
+    expect(settingScopeValue("plugins")).toBe("community");
+    expect(settingScopeValue("beta")).toBe("community");
+    expect(settingScopeValue("sources")).toBe("remotes");
+    expect(settingScopeValue("general")).toBe("general");
+    expect(settingScopeValue("obsidian")).toBe("obsidian");
+    expect(settingScopeValue("core")).toBe("core");
+    expect(settingScopeValue("advanced")).toBe("advanced");
+  });
+  it("type: only on item hits; dir → folder", () => {
+    expect(settingTypeValue({ item: { type: "dir" } as never })).toBe("folder");
+    expect(settingTypeValue({ item: { type: "file" } as never })).toBe("file");
+    expect(settingTypeValue({ item: undefined })).toBeNull();
   });
 });

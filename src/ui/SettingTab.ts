@@ -1,4 +1,11 @@
 import { App, ButtonComponent, DropdownComponent, ExtraButtonComponent, Notice, Platform, Plugin, PluginSettingTab, SearchComponent, Setting, setIcon, TextComponent, ToggleComponent } from "obsidian";
+import {
+  QualifierAutocomplete,
+  parseQuery,
+  matchesQualifiers,
+  type QualifierSpec,
+  type QualifierResolver,
+} from "./qualifierSearch";
 import { DeviceClass, FieldRule, Remote, RibbonKey, SyncGroup, SyncMode } from "../core/types";
 import { SensitiveScan } from "../core/modes";
 import { PkmMode } from "../core/pkm";
@@ -171,6 +178,27 @@ const SCOPE_LABEL: Record<SearchHit["scope"], string> = {
   sources: "Remotes",
 };
 
+// --- Qualifier search vocabulary (SettingTab) ---
+export function settingScopeValue(scope: SearchHit["scope"]): string {
+  if (scope === "plugins" || scope === "beta") return "community";
+  if (scope === "sources") return "remotes";
+  return scope; // general | obsidian | core | advanced
+}
+export function settingTypeValue(hit: Pick<SearchHit, "item">): "file" | "folder" | null {
+  if (hit.item === undefined) return null;
+  return hit.item.type === "dir" ? "folder" : "file";
+}
+
+const SETTING_QUALIFIER_SPECS: QualifierSpec[] = [
+  { key: "scope", description: "settings area", values: [{ value: "general" }, { value: "obsidian" }, { value: "core" }, { value: "community" }, { value: "advanced" }, { value: "remotes" }] },
+  { key: "type", description: "item kind", values: [{ value: "file", description: "single file" }, { value: "folder", description: "directory" }] },
+];
+const SETTING_QUALIFIER_KEYS = new Set(SETTING_QUALIFIER_SPECS.map((s) => s.key));
+const SETTING_QUALIFIER_RESOLVERS: Record<string, QualifierResolver<SearchHit>> = {
+  scope: (h) => settingScopeValue(h.scope),
+  type: (h) => settingTypeValue(h),
+};
+
 // Writes/clears a single snippet's device scope (`enabled-css-snippets` "Active on" dropdown).
 // "all" is the absent default, so it deletes the key rather than storing it explicitly.
 export function setSnippetScope(
@@ -193,6 +221,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private activeTab: PanelTab = "general";
   private search = "";
   private searchScope: SearchHit["scope"] | "all" = "all";
+  private readonly qac = new QualifierAutocomplete(SETTING_QUALIFIER_SPECS);
   private bodyEl: HTMLElement | null = null;
   private expanded = new Set<string>(); // UI-transient: advanced rows expanded this session
   private customLocOpen = new Set<string>(); // UI-transient: which rows have the Custom location sub-section open
@@ -283,6 +312,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       if (body === null) return;
       void this.renderBody(body, this.renderGen);
     });
+    this.qac.attach(search.inputEl);
   }
 
   private renderTabNav(containerEl: HTMLElement): void {
@@ -1183,10 +1213,13 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   }
 
   private async renderSearchResults(containerEl: HTMLElement, gen: number): Promise<void> {
-    const q = this.search.trim().toLowerCase();
+    const parsed = parseQuery(this.search, SETTING_QUALIFIER_KEYS);
+    const text = parsed.text.trim().toLowerCase();
     const index = await this.buildSearchIndex(gen);
     if (index === null) return;
-    const matches = index.filter((h) => `${h.name} ${h.desc}`.toLowerCase().includes(q));
+    const matches = index.filter(
+      (h) => matchesQualifiers(h, parsed.qualifiers, SETTING_QUALIFIER_RESOLVERS) && `${h.name} ${h.desc}`.toLowerCase().includes(text),
+    );
 
     const scopes: SearchHit["scope"][] = ["general", "obsidian", "core", "plugins", "advanced", "sources"];
     const visibleScopes = Platform.isMobile ? scopes.filter((s) => s !== "sources") : scopes;

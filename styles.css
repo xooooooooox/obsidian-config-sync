@@ -37,6 +37,7 @@
 .config-sync-search {
   display: flex;
   margin-bottom: var(--size-4-4);
+  position: relative;
 }
 
 .config-sync-search .search-input-container {
