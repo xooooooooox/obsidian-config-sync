@@ -58,6 +58,18 @@ describe("captureTransform / applyTransform round-trip", () => {
     expect(await contentUnchanged(g, changed, cap.content, "pw")).toBe(false);
   });
 
+  it("fields mode: a store copy that still holds a stripped key compares equal (apply keeps local)", async () => {
+    // The store was captured before the strip rule existed, so it retains the stripped key.
+    // Apply keeps the local value for stripped keys, so this is effectively in sync — not a diff.
+    const g = group({ mode: "fields", fields: [{ pattern: "enabledCssSnippets", action: "strip" }] });
+    const local = JSON.stringify({ theme: "dark", enabledCssSnippets: ["a", "b"] }, null, 2);
+    const staleStore = JSON.stringify({ theme: "dark", enabledCssSnippets: ["x"] }, null, 2);
+    expect(await contentUnchanged(g, local, staleStore, "pw")).toBe(true);
+    // A genuine difference in a non-stripped field is still detected.
+    const changedStore = JSON.stringify({ theme: "light", enabledCssSnippets: ["x"] }, null, 2);
+    expect(await contentUnchanged(g, local, changedStore, "pw")).toBe(false);
+  });
+
   it("encrypted mode round-trips and compares", async () => {
     const g = group({ mode: "encrypted" });
     const cap = await captureTransform(g, src, "pw");

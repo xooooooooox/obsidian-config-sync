@@ -233,8 +233,11 @@ export async function contentUnchanged(
   // fields
   const strip = stripPatterns(group);
   const pw = requirePassphrase(group, passphrase);
+  // Strip both sides symmetrically: apply keeps the local value for stripped keys, so a store
+  // copy that still carries a stripped key (captured before the rule existed) is not a real diff.
+  // Without this, the key-count guard in fieldsUnchanged flags a to-apply that applying is a no-op for.
   const localParsed = strip.length > 0 ? sanitizeJson(JSON.parse(localContent) as unknown, strip) : (JSON.parse(localContent) as unknown);
-  const storeParsed = JSON.parse(storeContent) as unknown;
+  const storeParsed = strip.length > 0 ? sanitizeJson(JSON.parse(storeContent) as unknown, strip) : (JSON.parse(storeContent) as unknown);
   return fieldsUnchanged(localParsed, storeParsed, pw, group.name);
 }
 
