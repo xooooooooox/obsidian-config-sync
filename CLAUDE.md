@@ -41,3 +41,4 @@ The repo's git history is rooted at `obsidianmd/obsidian-sample-plugin` (remote 
 - Errors must carry context (group name, path, git command). No silent fallback.
 - Test in a dedicated dev vault, never in a real vault.
 - `docs/design/DESIGN.md` is the design-system reference (colors, type, icons, components, conventions). Read it before any UI work, and update it in the same branch as any UI 定稿 or change.
+- Documentation currency: when a change alters user-facing behavior (features, UI, commands, settings, workflows), update the affected docs in the SAME branch — `README.md` and `README.zh.md` (keep the two in sync), `docs/ARCHITECTURE.md` (code map / invariants, when structure changes), and `docs/design/DESIGN.md` (per the rule above). Pure internal refactors that change nothing a user sees need no doc edit. Gate: docs must be current before merging to `main` and before cutting a release.
