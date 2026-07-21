@@ -772,6 +772,9 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 .config-sync-fieldrow:last-of-type { border-bottom: none; }
 
 .config-sync-fkey { font-family: var(--font-monospace); color: var(--text-normal); }
+.config-sync-flock { display: inline-flex; align-items: center; color: var(--text-muted); flex: none; }
+.config-sync-flock svg { width: 13px; height: 13px; }
+.config-sync-fieldrow-xspacer { width: var(--size-4-6); flex: none; }
 
 .config-sync-ftag { font-size: 9.5px; color: var(--text-faint); }
 .config-sync-ftag.is-detected { color: var(--color-orange); } /* matches the JSON legend's detected color */
