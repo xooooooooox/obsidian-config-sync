@@ -449,6 +449,11 @@ body.is-phone .config-sync-fkey {
 .config-sync-card > .config-sync-hub-row:last-of-type { border-bottom: none; }
 .config-sync-state-icon { flex: none; width: 1.2em; text-align: center; font-size: var(--font-ui-small); display: inline-flex; align-items: center; justify-content: center; }
 .config-sync-state-icon svg { width: 13px; height: 13px; }
+.config-sync-action-icon { display: inline-flex; align-items: center; vertical-align: -0.12em; }
+.config-sync-action-icon svg { width: 1em; height: 1em; }
+.config-sync-side-badge .config-sync-action-icon,
+.config-sync-pill .config-sync-action-icon,
+.config-sync-fpill-short .config-sync-action-icon { margin-right: 2px; }
 .config-sync-state-icon.is-up { color: var(--color-orange); }
 .config-sync-state-icon.is-down { color: var(--interactive-accent); }
 .config-sync-state-icon.is-neq, .config-sync-state-icon.is-miss { color: var(--text-faint); }
