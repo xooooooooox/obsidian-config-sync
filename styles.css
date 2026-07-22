@@ -1476,7 +1476,8 @@ body.is-mobile .config-sync-report-files { font-size: var(--font-ui-small); }
 .config-sync-qc-row.is-missing { opacity: 0.55; }
 .config-sync-qc-icon { flex: none; width: 32px; height: 32px; display: flex; align-items: center;
   justify-content: center; background: var(--background-primary);
-  border: 1px solid var(--background-modifier-border); border-radius: 7px; cursor: pointer; }
+  border: 1px solid var(--background-modifier-border); border-radius: 7px; cursor: pointer; --icon-size: 18px; }
+.config-sync-qc-icon .svg-icon { flex: none; }
 .config-sync-qc-meta { flex: 1; min-width: 0; }
 .config-sync-qc-label { width: 100%; }
 .config-sync-qc-cid { font-size: var(--font-ui-smaller); color: var(--text-faint);
@@ -1487,6 +1488,9 @@ body.is-mobile .config-sync-report-files { font-size: var(--font-ui-small); }
 .config-sync-qc-sepline { flex: 1; height: 1px; background: var(--background-modifier-border); }
 .config-sync-qc-septxt { font-size: var(--font-ui-smaller); text-transform: uppercase;
   letter-spacing: 0.05em; color: var(--text-faint); }
-.config-sync-qc-addbar { display: flex; gap: 8px; }
-.config-sync-iconpick { display: flex; align-items: center; gap: 10px; }
+.config-sync-qc-addbar { display: flex; gap: 8px; margin-bottom: 18px; }
+.config-sync-iconpick { display: flex; align-items: center; gap: 10px; --icon-size: 18px; }
 .config-sync-iconpick-glyph { display: inline-flex; align-items: center; }
+.config-sync-iconpick-glyph .svg-icon { flex: none; }
+.config-sync-iconpick-pack { margin-left: auto; font-size: var(--font-ui-smaller); color: var(--text-faint);
+  text-transform: uppercase; letter-spacing: 0.05em; }

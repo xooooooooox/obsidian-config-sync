@@ -35,6 +35,7 @@ import { applyTransform, captureTransform, scanSensitive, SensitiveScan } from "
 import { PkmMode, PkmProbe, resolveEffectiveMode, resolveRootPath } from "./core/pkm";
 import { pluginRuntimeEnabled } from "./core/pluginState";
 import { quickMenuEntries } from "./core/quickCommands";
+import { renderIcon } from "./ui/iconRender";
 import { syncListDelta } from "./core/syncListDelta";
 import { selfPaneState } from "./core/selfPane";
 import { bucketCounts, checkRemote, diffRemote, GroupStatus, RemoteCheck, remoteLockAhead, statusForGroups } from "./core/status";
@@ -316,11 +317,7 @@ export default class ConfigSyncPlugin extends Plugin {
     const remoteNewer = [...this.remoteChecks.entries()].filter(([, v]) => v.check.state === "remote-newer").map(([k]) => k);
     el.toggleClass("config-sync-dot-capture", up > 0);
     el.toggleClass("config-sync-dot-apply", up === 0 && (down > 0 || remoteNewer.length > 0));
-    const parts: string[] = [];
-    if (up > 0) parts.push(`${up} to capture`);
-    if (down > 0) parts.push(`${down} to apply`);
-    for (const name of remoteNewer) parts.push(`remote "${name}" newer`);
-    el.setAttribute("aria-label", parts.length > 0 ? `Config Sync — ${parts.join(", ")}` : "Config Sync");
+    // aria-label stays "Config Sync" from addRibbonIcon — no pending-count suffix.
   }
 
   private async openSyncMenu(evt: MouseEvent): Promise<void> {
@@ -333,11 +330,11 @@ export default class ConfigSyncPlugin extends Plugin {
     const parts: string[] = [];
     if (this.settings.statusInMenu && up > 0) parts.push(`↑${up}`);
     if (this.settings.statusInMenu && down > 0) parts.push(`↓${down}`);
-    const syncTitle = parts.length > 0 ? `Sync… (${parts.join(" ")})` : "Sync…";
+    const syncTitle = parts.length > 0 ? `Sync Center (${parts.join(" ")})` : "Sync Center";
     menu.addItem((i) => i.setTitle(syncTitle).setIcon("refresh-cw").onClick(() => void this.openSyncCenter()));
     menu.addItem((i) => i.setTitle("Revert last apply").setIcon("undo-2").onClick(() => void this.runRevert()));
     const commands = (this.app as unknown as {
-      commands: { commands: Record<string, unknown>; executeCommandById: (id: string) => void };
+      commands: { commands: Record<string, { icon?: string }>; executeCommandById: (id: string) => void };
     }).commands;
     const quick = quickMenuEntries(this.settings.quickCommands, (id) => id in commands.commands);
     if (quick.length > 0) {
@@ -349,7 +346,9 @@ export default class ConfigSyncPlugin extends Plugin {
         }
         menu.addItem((i) => {
           i.setTitle(e.label);
-          if (e.icon) i.setIcon(e.icon);
+          i.setIcon(e.icon); // forces the icon slot to exist; renderIcon then fixes iconize ids
+          const iconEl = (i as unknown as { iconEl?: HTMLElement }).iconEl;
+          if (iconEl) renderIcon(iconEl, e.icon, commands.commands[e.commandId]?.icon, this.app);
           if (e.disabled) i.setDisabled(true);
           else i.onClick(() => commands.executeCommandById(e.commandId));
         });

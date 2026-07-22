@@ -28,6 +28,7 @@ import {
 import { confirmWarnings } from "./ConfirmModal";
 import { CommandSelectModal } from "./CommandSelectModal";
 import { IconSelectModal } from "./IconSelectModal";
+import { renderIcon } from "./iconRender";
 import { FolderSelectModal } from "./FolderSelectModal";
 import { commitDraft } from "./commitGroups";
 import { sortBySensitiveFirst } from "./sensitiveSort";
@@ -1487,7 +1488,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       new Setting(containerEl).setName(def.name).setDesc(def.desc).setHeading(),
       "general-quick-commands"
     );
-    const registry = (this.host.app as unknown as { commands: { commands: Record<string, unknown> } }).commands.commands;
+    const registry = (this.host.app as unknown as { commands: { commands: Record<string, { icon?: string }> } }).commands.commands;
     const list = this.host.settings.quickCommands;
     const listEl = containerEl.createDiv({ cls: "config-sync-qc-list" });
 
@@ -1528,11 +1529,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       const row = listEl.createDiv({ cls: "config-sync-qc-row" });
       if (missing) row.addClass("is-missing");
       const iconBtn = row.createEl("button", { cls: "config-sync-qc-icon", attr: { "aria-label": "Change icon" } });
-      const paint = (id: string): void => {
-        iconBtn.empty();
-        setIcon(iconBtn, id);
-        if (iconBtn.childElementCount === 0) setIcon(iconBtn, "command");
-      };
+      const paint = (id: string): void => renderIcon(iconBtn, id, registry[entry.commandId]?.icon, this.host.app);
       paint(entry.icon);
       iconBtn.onclick = (): void => {
         new IconSelectModal(this.host.app, (icon) => {
