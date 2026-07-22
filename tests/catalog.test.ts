@@ -401,6 +401,12 @@ describe("categoryForGroup", () => {
     expect(categoryForGroup("plugin-dataview")).toBe("community");
     expect(categoryForGroup("my-vimrc")).toBe("custom");
   });
+
+  it("categorizes the synthetic enabled-css-snippets switch list as Obsidian", () => {
+    // It is derived from appearance.json and surfaces under the Obsidian settings tab, so the
+    // Sync Center scope must match — not fall through to Custom.
+    expect(categoryForGroup("enabled-css-snippets")).toBe("obsidian");
+  });
 });
 
 describe("displayLabelForGroup", () => {
