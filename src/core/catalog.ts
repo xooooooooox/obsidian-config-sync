@@ -471,6 +471,11 @@ export const CATEGORY_LABELS: Record<ItemCategory, string> = {
 };
 
 export function categoryForGroup(name: string): ItemCategory {
+  // The enabled-css-snippets switch list is synthesized from appearance.json (see
+  // listOptionSections) rather than being an OPTION_LABELS entry, so it has no reserved-name
+  // match below. It still belongs to the Obsidian settings tab — pin it there explicitly so the
+  // Sync Center scope agrees with the settings panel.
+  if (name === "enabled-css-snippets") return "obsidian";
   for (const file of Object.keys(OPTION_LABELS)) {
     if (optionReservedName(file) === name) return "obsidian";
   }
