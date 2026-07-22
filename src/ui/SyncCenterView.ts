@@ -985,7 +985,8 @@ export class SyncCenterView extends ItemView {
       return;
     }
     this.renderHistoryLegend(main);
-    this.renderHistoryTable(main);
+    if (this.compact) this.renderHistoryCards(main);
+    else this.renderHistoryTable(main);
   }
 
   private renderHistoryHead(main: HTMLElement): void {
@@ -1038,6 +1039,26 @@ export class SyncCenterView extends ItemView {
       tr.createEl("td", { cls: "config-sync-htd-sum", text: rec.desc });
       tr.createEl("td", { cls: "config-sync-htd-chev", text: "›" });
       tr.addEventListener("click", () => {
+        this.historyOpen = i;
+        this.render(this.renderGen);
+      });
+    });
+  }
+
+  private renderHistoryCards(main: HTMLElement): void {
+    this.history.forEach((rec, i) => {
+      const card = main.createDiv({ cls: "config-sync-hcard" });
+      const top = card.createDiv({ cls: "config-sync-hcard-top" });
+      top.createSpan({ cls: `config-sync-hstat ${STATUS_CLS[rec.status]}`, text: this.statusIcon(rec.status), attr: { "aria-label": this.statusTip(rec.status) } });
+      this.renderActionInto(top.createSpan({ cls: "config-sync-hcard-act" }), rec);
+      top.createSpan({ cls: "config-sync-hcard-chev", text: "›" });
+      card.createDiv({ cls: "config-sync-hcard-when", text: formatRunTime(rec.at) });
+      card.createDiv({ cls: "config-sync-hcard-sum", text: rec.desc });
+      const foot = card.createDiv({ cls: "config-sync-hcard-foot" });
+      foot.createSpan({ cls: "config-sync-hcard-pill is-chg", text: `✎ ${rec.changed} changed` });
+      if (rec.issues > 0)
+        foot.createSpan({ cls: "config-sync-hcard-pill is-iss", text: `⚠ ${rec.issues} issue${rec.issues === 1 ? "" : "s"}` });
+      card.addEventListener("click", () => {
         this.historyOpen = i;
         this.render(this.renderGen);
       });
