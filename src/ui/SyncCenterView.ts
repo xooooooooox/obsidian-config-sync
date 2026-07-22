@@ -224,6 +224,10 @@ export class SyncCenterView extends ItemView {
   private historyOpen: number | null = null; // index of the run whose detail is shown; null = table
   private leftovers: { rel: string; name: string; path: string; size: number }[] = [];
   private readonly qac = new QualifierAutocomplete(SYNC_QUALIFIER_SPECS);
+  // Regions the sidebar search updates in place, so a keystroke never rebuilds (and refocuses)
+  // the search input itself. Set on every full render().
+  private mainEl: HTMLElement | null = null;
+  private sideScopeEl: HTMLElement | null = null;
 
   constructor(leaf: WorkspaceLeaf, private host: SyncCenterHost) {
     super(leaf);
@@ -424,7 +428,18 @@ export class SyncCenterView extends ItemView {
     const shell = this.contentEl.createDiv({ cls: `config-sync-shell${this.compact ? " is-compact" : ""}` });
     if (this.compact) this.renderSwitcher(shell);
     else this.renderSidebar(shell);
-    const main = shell.createDiv({ cls: "config-sync-main" });
+    this.mainEl = shell.createDiv({ cls: "config-sync-main" });
+    this.renderMainRegion();
+  }
+
+  // Rebuilds only the main pane from the current panelScope. The sidebar search calls this (plus
+  // an in-place sidebar scope-list refresh) on each keystroke instead of render(), so the search
+  // input and its autocomplete are never torn down mid-type — which used to blink the dropdown
+  // once per keystroke.
+  private renderMainRegion(): void {
+    const main = this.mainEl;
+    if (main === null) return;
+    main.empty();
     if (this.panelScope.kind === "self") {
       this.renderConfigSyncMode(main);
       return;
@@ -677,26 +692,24 @@ export class SyncCenterView extends ItemView {
     });
     searchEl.value = this.search;
     if (this.panelScope.kind === "remote") searchEl.disabled = true;
-    // Attach the autocomplete BEFORE the re-render listener: the sidebar input triggers a full
-    // this.render() on every keystroke, which recreates the input and re-attaches the widget. If
-    // the widget's own input listener were registered second, the re-render (running first) would
-    // tear it down via detach() before it fired, so the dropdown could never open. Registering it
-    // first lets it open the dropdown, then the re-render preserves that open state on the new input.
     this.qac.attach(searchEl);
+    // The scope list lives in its own container so a keystroke can refresh its hit-count badges in
+    // place — the search input (and the autocomplete anchored to it) stays put, keeping focus and
+    // never blinking mid-type.
+    this.sideScopeEl = side.createDiv({ cls: "config-sync-side-scope" });
+    this.renderScopeEntries(this.sideScopeEl);
     searchEl.addEventListener("input", () => {
       const wasSearching = this.searching();
       this.search = searchEl.value;
       if (!wasSearching && this.searching()) this.filter = "all"; // searching means "find this item"
-      this.render(this.renderGen); // full render: badges, sections, list all react
-      const refocus = this.contentEl.querySelector<HTMLInputElement>(".config-sync-side-search");
-      if (refocus !== null) {
-        refocus.focus();
-        const v = refocus.value;
-        refocus.value = "";
-        refocus.value = v;
+      // Co-render everything the query affects except the input itself: the sidebar hit badges and
+      // the whole main pane (pills, list, sections all read this.search).
+      if (this.sideScopeEl !== null) {
+        this.sideScopeEl.empty();
+        this.renderScopeEntries(this.sideScopeEl);
       }
+      this.renderMainRegion();
     });
-    this.renderScopeEntries(side);
   }
 
   private renderScopeEntries(container: HTMLElement): void {

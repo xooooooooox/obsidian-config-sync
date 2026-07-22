@@ -626,6 +626,9 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 .config-sync-shell { display: grid; grid-template-columns: minmax(150px, 22%) minmax(0, 1fr); gap: var(--size-4-3); }
 
 .config-sync-side { display: flex; flex-direction: column; gap: 3px; }
+/* Scope list container: rebuilt in place on each search keystroke (hit-count badges), so it
+   carries the sidebar's own column layout while the search input above it stays put. */
+.config-sync-side-scope { display: flex; flex-direction: column; gap: 3px; }
 
 .config-sync-side-head { font-size: var(--font-ui-smaller); text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); padding: var(--size-4-1) 4px; display: flex; align-items: center; gap: var(--size-4-1); }
 
