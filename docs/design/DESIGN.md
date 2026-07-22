@@ -131,6 +131,11 @@ noted):
 - **Remote** `config-sync-remote-btn` is-pull/is-push (solid cyan/pink when primary,
   dimmed otherwise); diff entries reuse report rows + chips.
 - **Reports** `config-sync-report-*`, chips, `-strip` result strip (green; cyan transfer).
+- **History** `config-sync-htable` (desktop 7-col table) / `config-sync-hcard*`
+  (`-hcard-top/-act/-chev/-when/-sum/-foot`, `-hcard-pill.is-chg` neutral / `.is-iss` orange) —
+  the run-history list; the view swaps table → card layout when compact (`<700px`) so mobile
+  reads top-to-bottom without horizontal scroll (`-hcard-sum` wraps; `-hcard-act` `min-width:0`).
+  Head/legend and the `renderActionInto` action painter are shared by both layouts; detail view unchanged.
 - **Header status bar** — **self chip** `config-sync-self-chip` (is-up/down/ok tints) + `-self-chip-ic`, `config-sync-head-divider`, then the pills; push/pull totals use `config-sync-pill.is-push` (pink) / `.is-pull` (cyan).
 - **Self pane** (Config Sync's own state) `config-sync-self-pane` — `-self-title/-self-title-ic/-self-title-sp/-self-sub`, `-self-settings-btn`/`-self-settings-ic` (title-row Settings), `-self-block/-block-h/-block-s`, membership delta `-self-delta/-self-drow/-self-dg`, `-self-viewchange` (expandable `data.json` diff), `-self-pill/-self-hint/-self-caution/-self-acts`.
 - **Qualifier autocomplete** `config-sync-qac/-qac-opt` (is-sel)/`-qac-ic/-qac-txt/-qac-desc` — the `key:value` search dropdown under both search boxes, anchored by `config-sync-search-wrap`; key→value suggestions, keyboard-navigable. Logic in `src/ui/qualifierSearch.ts`.
