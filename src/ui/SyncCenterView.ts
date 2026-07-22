@@ -979,10 +979,17 @@ export class SyncCenterView extends ItemView {
       return;
     }
     this.historyOpen = null;
-    this.renderHistoryTable(main);
+    this.renderHistoryHead(main);
+    if (this.history.length === 0) {
+      main.createDiv({ cls: "config-sync-hempty", text: "No runs recorded yet." });
+      return;
+    }
+    this.renderHistoryLegend(main);
+    if (this.compact) this.renderHistoryCards(main);
+    else this.renderHistoryTable(main);
   }
 
-  private renderHistoryTable(main: HTMLElement): void {
+  private renderHistoryHead(main: HTMLElement): void {
     const head = main.createDiv({ cls: "config-sync-hhead" });
     head.createSpan({ cls: "config-sync-hhead-title", text: "History" });
     head.createSpan({ cls: "config-sync-hhead-count", text: `${this.history.length} run${this.history.length === 1 ? "" : "s"}` });
@@ -996,10 +1003,9 @@ export class SyncCenterView extends ItemView {
         })();
       });
     }
-    if (this.history.length === 0) {
-      main.createDiv({ cls: "config-sync-hempty", text: "No runs recorded yet." });
-      return;
-    }
+  }
+
+  private renderHistoryLegend(main: HTMLElement): void {
     const legend = main.createDiv({ cls: "config-sync-hlegend" });
     const leg = (cls: string, glyph: string, text: string): void => {
       const s = legend.createSpan();
@@ -1007,7 +1013,16 @@ export class SyncCenterView extends ItemView {
       s.appendText(` ${text}`);
     };
     leg("is-ok", "✓", "Done"); leg("is-warn", "⚠", "Action needed"); leg("is-error", "✗", "Failed");
+  }
 
+  private renderActionInto(el: HTMLElement, rec: RunRecord): void {
+    const act = this.actionCell(rec);
+    if (act.action !== undefined) setIcon(el.createSpan({ cls: `config-sync-hglyph ${ACTION_COLOR_CLASS[act.action]}` }), ACTION_ICON[act.action]);
+    else el.createSpan({ cls: `config-sync-hglyph is-${act.dir}`, text: act.glyph });
+    el.appendText(` ${act.label}`);
+  }
+
+  private renderHistoryTable(main: HTMLElement): void {
     const table = main.createEl("table", { cls: "config-sync-htable" });
     const thead = table.createEl("thead").createEl("tr");
     for (const h of ["", "When", "Action", "Changed", "Issues", "Summary", ""]) thead.createEl("th", { text: h });
@@ -1017,17 +1032,33 @@ export class SyncCenterView extends ItemView {
       const st = this.statusTip(rec.status);
       tr.createEl("td", { cls: "config-sync-htd-st" }).createSpan({ cls: `config-sync-hstat ${STATUS_CLS[rec.status]}`, text: this.statusIcon(rec.status), attr: { "aria-label": st } });
       tr.createEl("td", { cls: "config-sync-htd-when", text: formatRunTime(rec.at) });
-      const act = this.actionCell(rec);
-      const td = tr.createEl("td", { cls: "config-sync-htd-act" });
-      if (act.action !== undefined) setIcon(td.createSpan({ cls: `config-sync-hglyph ${ACTION_COLOR_CLASS[act.action]}` }), ACTION_ICON[act.action]);
-      else td.createSpan({ cls: `config-sync-hglyph is-${act.dir}`, text: act.glyph });
-      td.appendText(` ${act.label}`);
+      this.renderActionInto(tr.createEl("td", { cls: "config-sync-htd-act" }), rec);
       tr.createEl("td", { cls: "config-sync-htd-num", text: `${rec.changed}` });
       const iss = tr.createEl("td", { cls: `config-sync-htd-num${rec.issues > 0 ? " is-issues" : ""}` });
       iss.setText(rec.issues > 0 ? `${rec.issues}` : "—");
       tr.createEl("td", { cls: "config-sync-htd-sum", text: rec.desc });
       tr.createEl("td", { cls: "config-sync-htd-chev", text: "›" });
       tr.addEventListener("click", () => {
+        this.historyOpen = i;
+        this.render(this.renderGen);
+      });
+    });
+  }
+
+  private renderHistoryCards(main: HTMLElement): void {
+    this.history.forEach((rec, i) => {
+      const card = main.createDiv({ cls: "config-sync-hcard" });
+      const top = card.createDiv({ cls: "config-sync-hcard-top" });
+      top.createSpan({ cls: `config-sync-hstat ${STATUS_CLS[rec.status]}`, text: this.statusIcon(rec.status), attr: { "aria-label": this.statusTip(rec.status) } });
+      this.renderActionInto(top.createSpan({ cls: "config-sync-hcard-act" }), rec);
+      top.createSpan({ cls: "config-sync-hcard-chev", text: "›" });
+      card.createDiv({ cls: "config-sync-hcard-when", text: formatRunTime(rec.at) });
+      card.createDiv({ cls: "config-sync-hcard-sum", text: rec.desc });
+      const foot = card.createDiv({ cls: "config-sync-hcard-foot" });
+      foot.createSpan({ cls: "config-sync-hcard-pill is-chg", text: `✎ ${rec.changed} changed` });
+      if (rec.issues > 0)
+        foot.createSpan({ cls: "config-sync-hcard-pill is-iss", text: `⚠ ${rec.issues} issue${rec.issues === 1 ? "" : "s"}` });
+      card.addEventListener("click", () => {
         this.historyOpen = i;
         this.render(this.renderGen);
       });

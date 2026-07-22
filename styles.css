@@ -672,6 +672,19 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 .config-sync-hdwhen { color: var(--text-faint); font-size: var(--font-ui-smaller); font-family: var(--font-monospace); }
 .config-sync-hddesc { color: var(--text-muted); margin: var(--size-4-1) 0 var(--size-4-3); }
 
+/* ── Run history — compact card layout (narrow screens) ──────────────────── */
+.config-sync-hcard { border: 1px solid var(--background-modifier-border); background: var(--background-secondary); border-radius: var(--radius-m); padding: 11px 12px; margin-bottom: var(--size-4-2); cursor: pointer; }
+.config-sync-hcard:hover { background: var(--background-modifier-hover); }
+.config-sync-hcard-top { display: flex; align-items: center; gap: var(--size-4-2); }
+.config-sync-hcard-act { flex: 1; min-width: 0; font-weight: var(--font-semibold); display: inline-flex; align-items: center; gap: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.config-sync-hcard-chev { margin-left: auto; color: var(--text-faint); font-size: var(--font-ui-medium); flex: none; }
+.config-sync-hcard-when { font-family: var(--font-monospace); color: var(--text-faint); font-size: var(--font-ui-smaller); margin: 3px 0 6px; }
+.config-sync-hcard-sum { color: var(--text-muted); font-size: var(--font-ui-small); margin-bottom: 9px; }
+.config-sync-hcard-foot { display: flex; flex-wrap: wrap; gap: var(--size-4-2); }
+.config-sync-hcard-pill { font-size: var(--font-ui-smaller); padding: 1px 8px; border-radius: 999px; }
+.config-sync-hcard-pill.is-chg { background: var(--background-modifier-hover); color: var(--text-muted); }
+.config-sync-hcard-pill.is-iss { background: rgba(var(--color-orange-rgb), 0.14); color: var(--color-orange); }
+
 /* ── Post-adopt guidance banner ──────────────────────────────────────────── */
 .config-sync-guide { display: flex; gap: var(--size-4-3); border: 1px solid rgba(var(--interactive-accent-rgb), 0.45); background: rgba(var(--interactive-accent-rgb), 0.08); border-radius: 10px; padding: 12px 14px; margin-bottom: var(--size-4-3); }
 .config-sync-guide-ic { font-size: 18px; color: var(--interactive-accent); flex: none; }
