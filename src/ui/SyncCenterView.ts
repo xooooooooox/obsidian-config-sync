@@ -449,40 +449,24 @@ export class SyncCenterView extends ItemView {
   private renderSelfEntry(container: HTMLElement): void {
     const info = this.selfInfo;
     const active = this.panelScope.kind === "self";
-    const item = container.createDiv({ cls: `config-sync-side-item config-sync-side-self${active ? " is-active" : ""}` });
-    item.createSpan({ cls: "config-sync-side-self-ic", text: "⚙" });
-    item.createSpan({ cls: "config-sync-side-name", text: "Config Sync" });
+    // A distinct hero card, not a stray list row: this is the plugin syncing its own settings to
+    // the store — a meta destination separate from the config items below. The icon tile, title +
+    // sublabel, and status pill echo the self-chip in the header and the self pane this opens.
+    const card = container.createDiv({ cls: `config-sync-side-self${active ? " is-active" : ""}` });
+    const tile = card.createSpan({ cls: "config-sync-side-self-ic" });
+    setIcon(tile, "settings-2");
+    const text = card.createDiv({ cls: "config-sync-side-self-text" });
+    text.createDiv({ cls: "config-sync-side-self-title", text: "Config Sync" });
+    text.createDiv({ cls: "config-sync-side-self-sub", text: "plugin settings ↔ store" });
     if (info !== null) {
-      const b = this.selfBadge(info);
-      if (b !== null) {
-        const badge = item.createSpan({ cls: `config-sync-side-badge ${b.cls}` });
-        if (b.action !== undefined) renderActionCount(badge, b.action, b.count ?? 0);
-        else badge.setText(b.text ?? "");
-      }
+      const pill = this.selfStatePill(info);
+      if (pill !== null) card.createSpan({ cls: `config-sync-side-self-pill ${pill.cls}`, text: pill.text });
     }
-    item.addEventListener("click", () => {
+    card.addEventListener("click", () => {
       this.panelScope = { kind: "self" };
       this.switcherOpen = false;
       this.render(this.renderGen);
     });
-  }
-
-  private selfBadge(info: SelfSyncInfo): { cls: string; action?: SyncAction; count?: number; text?: string } | null {
-    // Count the sync-list delta; when the change is config-sync's own content/version (no list
-    // delta), show a bare icon rather than a misleading "↑0"/"↓0".
-    const n = info.delta.added.length + info.delta.removed.length;
-    switch (info.state) {
-      case "coldstart":
-        return { cls: "is-down", text: "setup" };
-      case "adopt":
-        return { cls: "is-down", action: "apply", count: n };
-      case "capture":
-        return { cls: "is-up", action: "capture", count: n };
-      case "both":
-        return { cls: "is-up", text: "⚠" };
-      case "insync":
-        return null;
-    }
   }
 
   private selfStatePill(info: SelfSyncInfo): { text: string; cls: string } | null {

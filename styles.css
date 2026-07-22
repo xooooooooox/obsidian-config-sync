@@ -719,8 +719,20 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 
 .config-sync-side-badge.is-none { background: var(--background-modifier-hover); color: var(--text-muted); }
 
-/* Config Sync self layer: the sidebar entry's gear + its dedicated pane (renderConfigSyncMode). */
-.config-sync-side-self-ic { color: var(--interactive-accent); font-size: var(--font-ui-small); flex: none; }
+/* Config Sync self layer: the sidebar hero card + its dedicated pane (renderConfigSyncMode). */
+/* A distinct card (not a list row): icon tile + title/sublabel + status pill, echoing the header self-chip. */
+.config-sync-side-self { display: flex; align-items: center; gap: 8px; padding: 9px 10px; border-radius: 8px; cursor: pointer; background: rgba(var(--interactive-accent-rgb), 0.08); border: 1px solid rgba(var(--interactive-accent-rgb), 0.28); }
+.config-sync-side-self:hover { border-color: rgba(var(--interactive-accent-rgb), 0.5); }
+.config-sync-side-self.is-active { background: rgba(var(--interactive-accent-rgb), 0.16); border-color: rgba(var(--interactive-accent-rgb), 0.55); }
+.config-sync-side-self-ic { display: flex; align-items: center; justify-content: center; flex: none; width: 26px; height: 26px; border-radius: 7px; background: rgba(var(--interactive-accent-rgb), 0.18); color: var(--interactive-accent); }
+.config-sync-side-self-ic svg { width: 15px; height: 15px; }
+.config-sync-side-self-text { flex: 1; min-width: 0; }
+.config-sync-side-self-title { font-size: var(--font-ui-small); font-weight: var(--font-semibold); line-height: 1.2; color: var(--text-normal); }
+.config-sync-side-self-sub { font-size: var(--font-ui-smaller); color: var(--text-muted); line-height: 1.3; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.config-sync-side-self-pill { flex: none; font-size: 10px; border-radius: 999px; padding: 1px 8px; border: 1px solid transparent; }
+.config-sync-side-self-pill.is-up { border-color: rgba(var(--color-orange-rgb), 0.5); color: var(--color-orange); }
+.config-sync-side-self-pill.is-down { border-color: rgba(var(--interactive-accent-rgb), 0.5); color: var(--interactive-accent); }
+.config-sync-side-self-pill.is-ok { border-color: rgba(var(--color-green-rgb), 0.5); color: var(--color-green); }
 .config-sync-self-pane { padding: 2px 2px 12px; }
 .config-sync-self-title { display: flex; align-items: center; gap: 8px; font-size: var(--font-ui-medium); font-weight: var(--font-bold); }
 .config-sync-self-title-ic { color: var(--interactive-accent); flex: none; }
@@ -769,8 +781,6 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 .config-sync-switcher-menu { background: var(--background-secondary); border: 1px solid var(--background-modifier-border); border-radius: 9px; padding: 5px; box-shadow: var(--shadow-s); }
 
 /* iter20 — per-item sync mode, fields editor, passphrase */
-
-.config-sync-seg-btn.is-mode.is-on { background: rgba(var(--interactive-accent-rgb), 0.22); color: var(--text-accent); }
 
 .config-sync-detect-badge { margin-left: var(--size-4-2); font-size: var(--font-ui-smaller); color: var(--color-orange); background: rgba(var(--color-orange-rgb), 0.12); border-radius: 9px; padding: 1px 8px; }
 

@@ -112,7 +112,10 @@ noted):
   states; never interactive. **Filter pills** `config-sync-fpill` in `-fpillrow` — buttons;
   long/short label spans; mobile = glyph form, one line. Shared with settings search scopes.
 - **Sidebar** `config-sync-side-item/-side-badge/-side-head` — scopes with tiny count
-  badges; active = accent tint. **Switcher** `config-sync-switcher` — compact replacement.
+  badges; active = accent tint. The Config Sync self layer leads as a distinct hero card
+  `config-sync-side-self` (`-side-self-ic` icon tile, `-side-self-title`/`-side-self-sub`,
+  `-side-self-pill` reusing `selfStatePill`), echoing the header self-chip. **Switcher**
+  `config-sync-switcher` — compact replacement.
 - **Rows** `config-sync-hub-row` — chevron, name (`-rule-name`), optional mode badge /
   excluded note / statenote pill, state icon, checkbox. Names truncate on mobile.
 - **Checkboxes** — custom-drawn inputs (hub-row/mainbar/section-head): direction-colored
