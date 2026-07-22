@@ -62,5 +62,16 @@ export type RibbonButtons = Record<RibbonKey, boolean>;
 export interface QuickCommand {
   commandId: string; // e.g. "remotely-save:start-sync"; run via app.commands.executeCommandById
   label: string;     // menu title; defaults to the command's name at add-time, editable
-  icon: string;      // lucide id; defaults to "command"; setIcon falls back when unknown
+  icon: string;      // lucide id; defaults to the command's own icon; editable via the icon picker
+}
+
+// A divider inserted between quick commands in the ribbon menu.
+export interface QuickSeparator {
+  kind: "separator";
+}
+
+export type QuickEntry = QuickCommand | QuickSeparator;
+
+export function isSeparator(e: QuickEntry): e is QuickSeparator {
+  return (e as QuickSeparator).kind === "separator";
 }

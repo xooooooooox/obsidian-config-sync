@@ -6,7 +6,7 @@ import {
   type QualifierSpec,
   type QualifierResolver,
 } from "./qualifierSearch";
-import { DeviceClass, FieldRule, QuickCommand, Remote, RibbonKey, SyncGroup, SyncMode } from "../core/types";
+import { DeviceClass, FieldRule, isSeparator, QuickEntry, Remote, RibbonKey, SyncGroup, SyncMode } from "../core/types";
 import { SensitiveScan } from "../core/modes";
 import { PkmMode } from "../core/pkm";
 import { validateRemotes } from "../core/manifest";
@@ -27,6 +27,7 @@ import {
 } from "../core/catalog";
 import { confirmWarnings } from "./ConfirmModal";
 import { CommandSelectModal } from "./CommandSelectModal";
+import { IconSelectModal } from "./IconSelectModal";
 import { FolderSelectModal } from "./FolderSelectModal";
 import { commitDraft } from "./commitGroups";
 import { sortBySensitiveFirst } from "./sensitiveSort";
@@ -38,7 +39,7 @@ export interface SettingsHost extends Plugin {
     pkmMode: PkmMode;
     rootPath: string;
     remotes: Remote[];
-    quickCommands: QuickCommand[];
+    quickCommands: QuickEntry[];
     ribbonButtons: Record<RibbonKey, boolean>;
     statusInMenu: boolean;
     remoteAutoCheck: boolean;
@@ -1488,76 +1489,81 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     );
     const registry = (this.host.app as unknown as { commands: { commands: Record<string, unknown> } }).commands.commands;
     const list = this.host.settings.quickCommands;
-    list.forEach((qc, idx) => {
-      const missing = !(qc.commandId in registry);
-      const s = new Setting(containerEl).setDesc(qc.commandId + (missing ? " — not on this device" : ""));
-      s.settingEl.addClass("config-sync-qc-row");
-      if (missing) s.settingEl.addClass("is-missing");
-      const ico = s.nameEl.createSpan({ cls: "config-sync-qc-icon" });
-      const paintIcon = (id: string): void => {
-        ico.empty();
-        setIcon(ico, id);
-        if (ico.childElementCount === 0) setIcon(ico, "command");
-      };
-      paintIcon(qc.icon);
-      s.nameEl.prepend(ico);
-      // Label + icon edit in place (no rerender) so the text field keeps focus while typing.
-      s.addText((t) =>
-        t.setPlaceholder("Label").setValue(qc.label).onChange(async (v) => {
-          qc.label = v.trim() || qc.commandId;
-          await this.host.saveSettings();
-        })
-      );
-      s.addText((t) => {
-        t.setPlaceholder("Icon").setValue(qc.icon).onChange(async (v) => {
-          qc.icon = v.trim() || "command";
-          paintIcon(qc.icon);
-          await this.host.saveSettings();
-        });
-        t.inputEl.addClass("config-sync-qc-iconinput");
+    const listEl = containerEl.createDiv({ cls: "config-sync-qc-list" });
+
+    const persist = (): void => {
+      void (async () => {
+        await this.host.saveSettings();
+        void this.rerender(this.containerEl.scrollTop);
+      })();
+    };
+    const move = (idx: number, delta: number): void => {
+      const a = list[idx];
+      const b = list[idx + delta];
+      if (a === undefined || b === undefined) return;
+      list[idx + delta] = a;
+      list[idx] = b;
+      persist();
+    };
+    const reorderButtons = (row: HTMLElement, idx: number): void => {
+      const btns = row.createDiv({ cls: "config-sync-qc-btns" });
+      new ExtraButtonComponent(btns).setIcon("chevron-up").setTooltip("Move up").setDisabled(idx === 0).onClick(() => move(idx, -1));
+      new ExtraButtonComponent(btns).setIcon("chevron-down").setTooltip("Move down").setDisabled(idx === list.length - 1).onClick(() => move(idx, 1));
+      new ExtraButtonComponent(btns).setIcon("trash").setTooltip("Remove").onClick(() => {
+        list.splice(idx, 1);
+        persist();
       });
-      // Reorder / delete rerender the tab (order change is structural).
-      s.addExtraButton((b) =>
-        b.setIcon("chevron-up").setTooltip("Move up").setDisabled(idx === 0).onClick(async () => {
-          const prev = list[idx - 1];
-          const cur = list[idx];
-          if (prev === undefined || cur === undefined) return;
-          list[idx - 1] = cur;
-          list[idx] = prev;
-          await this.host.saveSettings();
-          void this.rerender(this.containerEl.scrollTop);
-        })
-      );
-      s.addExtraButton((b) =>
-        b.setIcon("chevron-down").setTooltip("Move down").setDisabled(idx === list.length - 1).onClick(async () => {
-          const next = list[idx + 1];
-          const cur = list[idx];
-          if (next === undefined || cur === undefined) return;
-          list[idx + 1] = cur;
-          list[idx] = next;
-          await this.host.saveSettings();
-          void this.rerender(this.containerEl.scrollTop);
-        })
-      );
-      s.addExtraButton((b) =>
-        b.setIcon("trash").setTooltip("Remove").onClick(async () => {
-          list.splice(idx, 1);
-          await this.host.saveSettings();
-          void this.rerender(this.containerEl.scrollTop);
-        })
-      );
-    });
-    new Setting(containerEl).addButton((b) =>
-      b.setButtonText("Add command").setCta().onClick(() => {
-        new CommandSelectModal(this.host.app, (cmd) => {
-          list.push({ commandId: cmd.id, label: cmd.name, icon: "command" });
-          void (async () => {
-            await this.host.saveSettings();
-            void this.rerender(this.containerEl.scrollTop);
-          })();
+    };
+
+    list.forEach((entry, idx) => {
+      if (isSeparator(entry)) {
+        const row = listEl.createDiv({ cls: "config-sync-qc-seprow" });
+        row.createDiv({ cls: "config-sync-qc-sepline" });
+        row.createSpan({ cls: "config-sync-qc-septxt", text: "Separator" });
+        row.createDiv({ cls: "config-sync-qc-sepline" });
+        reorderButtons(row, idx);
+        return;
+      }
+      const missing = !(entry.commandId in registry);
+      const row = listEl.createDiv({ cls: "config-sync-qc-row" });
+      if (missing) row.addClass("is-missing");
+      const iconBtn = row.createEl("button", { cls: "config-sync-qc-icon", attr: { "aria-label": "Change icon" } });
+      const paint = (id: string): void => {
+        iconBtn.empty();
+        setIcon(iconBtn, id);
+        if (iconBtn.childElementCount === 0) setIcon(iconBtn, "command");
+      };
+      paint(entry.icon);
+      iconBtn.onclick = (): void => {
+        new IconSelectModal(this.host.app, (icon) => {
+          entry.icon = icon;
+          paint(icon);
+          void this.host.saveSettings();
         }).open();
-      })
-    );
+      };
+      const meta = row.createDiv({ cls: "config-sync-qc-meta" });
+      const input = meta.createEl("input", { cls: "config-sync-qc-label", attr: { type: "text", placeholder: "Label" } });
+      input.value = entry.label;
+      // Inline edit, no rerender, so the input keeps focus while typing.
+      input.addEventListener("input", () => {
+        entry.label = input.value.trim() || entry.commandId;
+        void this.host.saveSettings();
+      });
+      meta.createDiv({ cls: "config-sync-qc-cid", text: entry.commandId + (missing ? " — not on this device" : "") });
+      reorderButtons(row, idx);
+    });
+
+    const addbar = containerEl.createDiv({ cls: "config-sync-qc-addbar" });
+    new ButtonComponent(addbar).setButtonText("Add command").setCta().onClick(() => {
+      new CommandSelectModal(this.host.app, (cmd) => {
+        list.push({ commandId: cmd.id, label: cmd.name, icon: cmd.icon ?? "command" });
+        persist();
+      }).open();
+    });
+    new ButtonComponent(addbar).setButtonText("Add separator").onClick(() => {
+      list.push({ kind: "separator" });
+      persist();
+    });
   }
 
   private renderPassphrase(containerEl: HTMLElement): void {

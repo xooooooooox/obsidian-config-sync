@@ -34,11 +34,11 @@ import { applySwitchList, captureSwitchList, localRealPath, parseSwitchList, rea
 import { applyTransform, captureTransform, scanSensitive, SensitiveScan } from "./core/modes";
 import { PkmMode, PkmProbe, resolveEffectiveMode, resolveRootPath } from "./core/pkm";
 import { pluginRuntimeEnabled } from "./core/pluginState";
-import { quickCommandEntries } from "./core/quickCommands";
+import { quickMenuEntries } from "./core/quickCommands";
 import { syncListDelta } from "./core/syncListDelta";
 import { selfPaneState } from "./core/selfPane";
 import { bucketCounts, checkRemote, diffRemote, GroupStatus, RemoteCheck, remoteLockAhead, statusForGroups } from "./core/status";
-import { GroupResult, QuickCommand, Remote, RibbonButtons, StoreLock, SyncGroup } from "./core/types";
+import { GroupResult, QuickEntry, Remote, RibbonButtons, StoreLock, SyncGroup } from "./core/types";
 import { presentedState } from "./ui/panelModel";
 import { ConflictModal } from "./ui/ConflictModal";
 import { ReportModal } from "./ui/ReportModal";
@@ -54,7 +54,7 @@ interface ConfigSyncSettings {
   remoteAutoCheck: boolean;
   localPeriodicCheck: boolean;
   groups: SyncGroup[];
-  quickCommands: QuickCommand[]; // commands surfaced in the ribbon menu; synced (not device-local)
+  quickCommands: QuickEntry[]; // commands + separators surfaced in the ribbon menu; synced (not device-local)
   switchExceptions: Record<string, string[]>; // group name -> excepted plugin/core ids (device-local)
   snippetScopes: Record<string, "desktop" | "mobile">; // snippet name -> scope; absent = "all" (shared, travels)
   bratPluginIndex: BratIndex; // plugin id -> "owner/repo"; derived from BRAT's synced list, synced too
@@ -339,10 +339,14 @@ export default class ConfigSyncPlugin extends Plugin {
     const commands = (this.app as unknown as {
       commands: { commands: Record<string, unknown>; executeCommandById: (id: string) => void };
     }).commands;
-    const quick = quickCommandEntries(this.settings.quickCommands, (id) => id in commands.commands);
+    const quick = quickMenuEntries(this.settings.quickCommands, (id) => id in commands.commands);
     if (quick.length > 0) {
       menu.addSeparator();
       for (const e of quick) {
+        if (e.kind === "separator") {
+          menu.addSeparator();
+          continue;
+        }
         menu.addItem((i) => {
           i.setTitle(e.label);
           if (e.icon) i.setIcon(e.icon);

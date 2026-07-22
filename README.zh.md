@@ -67,7 +67,7 @@
 - **你的笔记同步工具（默认）**：store 本身就是普通的 vault 内容——remotely-save、Obsidian Sync、iCloud 或其他任何工具都能把它带到任何地方，包括移动端，零配置。在**全新设备**上，一旦 store 送达，Sync Center 会自行发现它并显示一条 **Adopt**（采纳）横幅；采纳后会触发一次性引导，带你把 store 应用到本设备完成初始化——并提醒你不要用新设备的空默认值反向 capture 覆盖它。
 - **Pull / Push（桌面端，可选）**：config-sync 自带的传输通道，用于 git 仓库或本机上的另一个 vault，通过 Sync Center 的 Remotes 区块执行。Pull 会用远程内容覆盖本 vault 的 store（可重复执行——冷启动和日常使用是同一个操作）；Push 则把内容发送出去。git 传输方式会克隆到一个临时目录，绝不会触碰你 vault 自身的 git 仓库。
 
-一切功能都挂在一个 **Config Sync** 功能区图标上：状态点在有待 capture 的条目时显示橙色，在 store 或远程有更新时显示蓝色。点击图标会打开一个菜单，包含 **Sync…**（标有待处理的 capture/apply 数量）和 **Revert last apply**；Sync… 会打开（若已打开则聚焦）Sync Center，Capture/Apply/Pull/Push 都在其中完成。也可以在 **Settings → General** 中为 Sync 和 Revert 单独启用功能区图标，默认关闭。你还可以在 Settings → General 中为该菜单添加自己的 **Quick commands**（快捷命令）——任意 Obsidian 命令（例如 remotely-save 的 *Start sync*）都会出现在分隔线下，点击即执行；在当前设备上未安装的命令会被灰掉。这份列表会随 Config Sync 的其余设置一起跨设备同步。
+一切功能都挂在一个 **Config Sync** 功能区图标上：状态点在有待 capture 的条目时显示橙色，在 store 或远程有更新时显示蓝色。点击图标会打开一个菜单，包含 **Sync…**（标有待处理的 capture/apply 数量）和 **Revert last apply**；Sync… 会打开（若已打开则聚焦）Sync Center，Capture/Apply/Pull/Push 都在其中完成。也可以在 **Settings → General** 中为 Sync 和 Revert 单独启用功能区图标，默认关闭。你还可以在 Settings → General 中为该菜单添加自己的 **Quick commands**（快捷命令）——任意 Obsidian 命令（例如 remotely-save 的 *Start sync*）都会出现在分隔线下，点击即执行；在当前设备上未安装的命令会被灰掉。这份列表会随 Config Sync 的其余设置一起跨设备同步。每一项默认采用命令自带的图标(也可从可搜索的图标选择器里更换),还能插入**分隔线**给它们分组。
 
 Capture、Apply、Pull、Push 每次执行完毕都会在 Sync Center 顶部渲染一条**贴顶固定（sticky）**的结果条(result strip)——一段可折叠的摘要（变更/未变更数量，按需展开查看每个条目的详情），而不是弹窗对话框，因此你滚动长列表时它始终可见，也不会打断你继续勾选。它的配色反映结果——干净时为绿色，有条目需要处理时为琥珀或红色，失败项默认展开。每次运行还会记入可浏览、可清空的 **History**（历史）：侧栏入口打开一张历史运行表（窄屏/移动端改为卡片列表，自上而下阅读、无需水平滚动），每条都可展开查看逐条目详情。**Revert last apply** 是唯一的例外，它仍然会打开一个报告弹窗，因为它是从 Sync Center 之外（功能区菜单或命令面板）发起的。
 

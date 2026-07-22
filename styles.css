@@ -1469,7 +1469,24 @@ body.is-mobile .config-sync-report-files { font-size: var(--font-ui-small); }
   font-size: var(--font-ui-smaller);
 }
 
-/* Quick commands settings rows */
-.config-sync-qc-icon { display: inline-flex; align-items: center; margin-right: 6px; vertical-align: middle; }
+/* Quick commands settings */
+.config-sync-qc-list { display: flex; flex-direction: column; gap: 7px; margin-bottom: 8px; }
+.config-sync-qc-row { display: flex; align-items: center; gap: 11px; padding: 9px 11px;
+  background: var(--background-secondary); border: 1px solid var(--background-modifier-border); border-radius: 8px; }
 .config-sync-qc-row.is-missing { opacity: 0.55; }
-.config-sync-qc-row .config-sync-qc-iconinput { width: 6em; }
+.config-sync-qc-icon { flex: none; width: 32px; height: 32px; display: flex; align-items: center;
+  justify-content: center; background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border); border-radius: 7px; cursor: pointer; }
+.config-sync-qc-meta { flex: 1; min-width: 0; }
+.config-sync-qc-label { width: 100%; }
+.config-sync-qc-cid { font-size: var(--font-ui-smaller); color: var(--text-faint);
+  font-family: var(--font-monospace); margin-top: 3px; }
+.config-sync-qc-btns { flex: none; display: flex; gap: 2px; }
+.config-sync-qc-seprow { display: flex; align-items: center; gap: 10px; padding: 6px 11px;
+  border: 1px dashed var(--background-modifier-border); border-radius: 8px; }
+.config-sync-qc-sepline { flex: 1; height: 1px; background: var(--background-modifier-border); }
+.config-sync-qc-septxt { font-size: var(--font-ui-smaller); text-transform: uppercase;
+  letter-spacing: 0.05em; color: var(--text-faint); }
+.config-sync-qc-addbar { display: flex; gap: 8px; }
+.config-sync-iconpick { display: flex; align-items: center; gap: 10px; }
+.config-sync-iconpick-glyph { display: inline-flex; align-items: center; }
