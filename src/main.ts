@@ -327,6 +327,10 @@ export default class ConfigSyncPlugin extends Plugin {
     const s = this.localStatuses ?? [];
     const { up, down } = bucketCounts(s);
     const menu = new Menu();
+    // Force a DOM menu: on macOS (nativeMenus default) the ribbon menu would render as a native OS
+    // menu, which cannot show the built-in or iconize command icons. DOM mode renders them; no-op on
+    // mobile, where menus are already DOM.
+    menu.setUseNativeMenu(false);
     const parts: string[] = [];
     if (this.settings.statusInMenu && up > 0) parts.push(`↑${up}`);
     if (this.settings.statusInMenu && down > 0) parts.push(`↓${down}`);
