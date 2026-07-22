@@ -57,3 +57,10 @@ export type Remote =
 
 export type RibbonKey = "sync" | "revert";
 export type RibbonButtons = Record<RibbonKey, boolean>;
+
+// A user-added command surfaced in the Config Sync ribbon menu (see core/quickCommands.ts).
+export interface QuickCommand {
+  commandId: string; // e.g. "remotely-save:start-sync"; run via app.commands.executeCommandById
+  label: string;     // menu title; defaults to the command's name at add-time, editable
+  icon: string;      // lucide id; defaults to "command"; setIcon falls back when unknown
+}

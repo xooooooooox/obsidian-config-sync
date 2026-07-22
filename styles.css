@@ -1468,3 +1468,8 @@ body.is-mobile .config-sync-report-files { font-size: var(--font-ui-small); }
   color: var(--text-faint);
   font-size: var(--font-ui-smaller);
 }
+
+/* Quick commands settings rows */
+.config-sync-qc-icon { display: inline-flex; align-items: center; margin-right: 6px; vertical-align: middle; }
+.config-sync-qc-row.is-missing { opacity: 0.55; }
+.config-sync-qc-row .config-sync-qc-iconinput { width: 6em; }

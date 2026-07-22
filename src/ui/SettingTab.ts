@@ -6,7 +6,7 @@ import {
   type QualifierSpec,
   type QualifierResolver,
 } from "./qualifierSearch";
-import { DeviceClass, FieldRule, Remote, RibbonKey, SyncGroup, SyncMode } from "../core/types";
+import { DeviceClass, FieldRule, QuickCommand, Remote, RibbonKey, SyncGroup, SyncMode } from "../core/types";
 import { SensitiveScan } from "../core/modes";
 import { PkmMode } from "../core/pkm";
 import { validateRemotes } from "../core/manifest";
@@ -26,6 +26,7 @@ import {
   toggleSection,
 } from "../core/catalog";
 import { confirmWarnings } from "./ConfirmModal";
+import { CommandSelectModal } from "./CommandSelectModal";
 import { FolderSelectModal } from "./FolderSelectModal";
 import { commitDraft } from "./commitGroups";
 import { sortBySensitiveFirst } from "./sensitiveSort";
@@ -37,6 +38,7 @@ export interface SettingsHost extends Plugin {
     pkmMode: PkmMode;
     rootPath: string;
     remotes: Remote[];
+    quickCommands: QuickCommand[];
     ribbonButtons: Record<RibbonKey, boolean>;
     statusInMenu: boolean;
     remoteAutoCheck: boolean;
@@ -150,6 +152,11 @@ const GENERAL_SETTINGS: GeneralSettingDef[] = [
     name: "Ribbon buttons",
     desc: "The Config Sync ribbon icon always opens a menu of available actions. Optionally also show individual ribbon icons.",
     anchorId: "general-ribbon-buttons",
+  },
+  {
+    name: "Quick commands",
+    desc: "Commands added to the Config Sync ribbon menu. A command not installed on this device is greyed out.",
+    anchorId: "general-quick-commands",
   },
   { name: "Passphrase", desc: "Needed for Encrypt modes. Enter the same passphrase on each device; it is never stored in the store or synced.", anchorId: "general-passphrase" },
   { name: "Run history", desc: "Record every capture, apply, pull and push, and browse past runs from the Sync Center's History entry. Kept on this device only — never synced.", anchorId: "general-run-history" },
@@ -347,6 +354,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         await this.renderDataFolder(containerEl, gen);
         this.renderStatusToggles(containerEl);
         this.renderRibbonToggles(containerEl);
+        this.renderQuickCommands(containerEl);
         this.renderPassphrase(containerEl);
         this.renderRunHistory(containerEl);
         break;
@@ -1470,6 +1478,86 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         })
       );
     }
+  }
+
+  private renderQuickCommands(containerEl: HTMLElement): void {
+    const def = this.generalSetting("general-quick-commands");
+    this.anchor(
+      new Setting(containerEl).setName(def.name).setDesc(def.desc).setHeading(),
+      "general-quick-commands"
+    );
+    const registry = (this.host.app as unknown as { commands: { commands: Record<string, unknown> } }).commands.commands;
+    const list = this.host.settings.quickCommands;
+    list.forEach((qc, idx) => {
+      const missing = !(qc.commandId in registry);
+      const s = new Setting(containerEl).setDesc(qc.commandId + (missing ? " — not on this device" : ""));
+      s.settingEl.addClass("config-sync-qc-row");
+      if (missing) s.settingEl.addClass("is-missing");
+      const ico = s.nameEl.createSpan({ cls: "config-sync-qc-icon" });
+      const paintIcon = (id: string): void => {
+        ico.empty();
+        setIcon(ico, id);
+        if (ico.childElementCount === 0) setIcon(ico, "command");
+      };
+      paintIcon(qc.icon);
+      s.nameEl.prepend(ico);
+      // Label + icon edit in place (no rerender) so the text field keeps focus while typing.
+      s.addText((t) =>
+        t.setPlaceholder("Label").setValue(qc.label).onChange(async (v) => {
+          qc.label = v.trim() || qc.commandId;
+          await this.host.saveSettings();
+        })
+      );
+      s.addText((t) => {
+        t.setPlaceholder("Icon").setValue(qc.icon).onChange(async (v) => {
+          qc.icon = v.trim() || "command";
+          paintIcon(qc.icon);
+          await this.host.saveSettings();
+        });
+        t.inputEl.addClass("config-sync-qc-iconinput");
+      });
+      // Reorder / delete rerender the tab (order change is structural).
+      s.addExtraButton((b) =>
+        b.setIcon("chevron-up").setTooltip("Move up").setDisabled(idx === 0).onClick(async () => {
+          const prev = list[idx - 1];
+          const cur = list[idx];
+          if (prev === undefined || cur === undefined) return;
+          list[idx - 1] = cur;
+          list[idx] = prev;
+          await this.host.saveSettings();
+          void this.rerender(this.containerEl.scrollTop);
+        })
+      );
+      s.addExtraButton((b) =>
+        b.setIcon("chevron-down").setTooltip("Move down").setDisabled(idx === list.length - 1).onClick(async () => {
+          const next = list[idx + 1];
+          const cur = list[idx];
+          if (next === undefined || cur === undefined) return;
+          list[idx + 1] = cur;
+          list[idx] = next;
+          await this.host.saveSettings();
+          void this.rerender(this.containerEl.scrollTop);
+        })
+      );
+      s.addExtraButton((b) =>
+        b.setIcon("trash").setTooltip("Remove").onClick(async () => {
+          list.splice(idx, 1);
+          await this.host.saveSettings();
+          void this.rerender(this.containerEl.scrollTop);
+        })
+      );
+    });
+    new Setting(containerEl).addButton((b) =>
+      b.setButtonText("Add command").setCta().onClick(() => {
+        new CommandSelectModal(this.host.app, (cmd) => {
+          list.push({ commandId: cmd.id, label: cmd.name, icon: "command" });
+          void (async () => {
+            await this.host.saveSettings();
+            void this.rerender(this.containerEl.scrollTop);
+          })();
+        }).open();
+      })
+    );
   }
 
   private renderPassphrase(containerEl: HTMLElement): void {

@@ -92,7 +92,7 @@ locked/cyan.
 `trash` delete · `folder-open` browse · `rotate-cw` BRAT re-scan · `arrow-up-from-line` /
 `arrow-down-to-line` / `cloud-upload` / `cloud-download` sync-action icons · tabs: `settings`,
 `gem`, `toy-brick`, `puzzle`, `flask-conical` (BratIcon preferred when registered),
-`wrench`, `git-branch`.
+`wrench`, `git-branch` · `command` default icon for user-added quick-command menu items (user-overridable).
 
 ### 2.4 Glyph language (text, reused everywhere)
 
