@@ -34,12 +34,10 @@ import { applySwitchList, captureSwitchList, localRealPath, parseSwitchList, rea
 import { applyTransform, captureTransform, scanSensitive, SensitiveScan } from "./core/modes";
 import { PkmMode, PkmProbe, resolveEffectiveMode, resolveRootPath } from "./core/pkm";
 import { pluginRuntimeEnabled } from "./core/pluginState";
-import { quickMenuEntries } from "./core/quickCommands";
-import { renderIcon } from "./ui/iconRender";
 import { syncListDelta } from "./core/syncListDelta";
 import { selfPaneState } from "./core/selfPane";
 import { bucketCounts, checkRemote, diffRemote, GroupStatus, RemoteCheck, remoteLockAhead, statusForGroups } from "./core/status";
-import { GroupResult, QuickEntry, Remote, RibbonButtons, StoreLock, SyncGroup } from "./core/types";
+import { GroupResult, Remote, RibbonButtons, StoreLock, SyncGroup } from "./core/types";
 import { presentedState } from "./ui/panelModel";
 import { ConflictModal } from "./ui/ConflictModal";
 import { ReportModal } from "./ui/ReportModal";
@@ -55,7 +53,6 @@ interface ConfigSyncSettings {
   remoteAutoCheck: boolean;
   localPeriodicCheck: boolean;
   groups: SyncGroup[];
-  quickCommands: QuickEntry[]; // commands + separators surfaced in the ribbon menu; synced (not device-local)
   switchExceptions: Record<string, string[]>; // group name -> excepted plugin/core ids (device-local)
   snippetScopes: Record<string, "desktop" | "mobile">; // snippet name -> scope; absent = "all" (shared, travels)
   bratPluginIndex: BratIndex; // plugin id -> "owner/repo"; derived from BRAT's synced list, synced too
@@ -78,7 +75,6 @@ const DEFAULT_SETTINGS: ConfigSyncSettings = {
   remoteAutoCheck: true,
   localPeriodicCheck: true,
   groups: [],
-  quickCommands: [],
   switchExceptions: {},
   snippetScopes: {},
   bratPluginIndex: {},
@@ -337,27 +333,6 @@ export default class ConfigSyncPlugin extends Plugin {
     const syncTitle = parts.length > 0 ? `Sync Center (${parts.join(" ")})` : "Sync Center";
     menu.addItem((i) => i.setTitle(syncTitle).setIcon("refresh-cw").onClick(() => void this.openSyncCenter()));
     menu.addItem((i) => i.setTitle("Revert last apply").setIcon("undo-2").onClick(() => void this.runRevert()));
-    const commands = (this.app as unknown as {
-      commands: { commands: Record<string, { icon?: string }>; executeCommandById: (id: string) => void };
-    }).commands;
-    const quick = quickMenuEntries(this.settings.quickCommands, (id) => id in commands.commands);
-    if (quick.length > 0) {
-      menu.addSeparator();
-      for (const e of quick) {
-        if (e.kind === "separator") {
-          menu.addSeparator();
-          continue;
-        }
-        menu.addItem((i) => {
-          i.setTitle(e.label);
-          i.setIcon(e.icon); // forces the icon slot to exist; renderIcon then fixes iconize ids
-          const iconEl = (i as unknown as { iconEl?: HTMLElement }).iconEl;
-          if (iconEl) renderIcon(iconEl, e.icon, commands.commands[e.commandId]?.icon, this.app);
-          if (e.disabled) i.setDisabled(true);
-          else i.onClick(() => commands.executeCommandById(e.commandId));
-        });
-      }
-    }
     menu.showAtMouseEvent(evt);
   }
 
@@ -1285,7 +1260,11 @@ export default class ConfigSyncPlugin extends Plugin {
   }
 
   async loadSettings(): Promise<void> {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, (await this.loadData()) as Partial<ConfigSyncSettings> | null);
+    const data = (await this.loadData()) as (Partial<ConfigSyncSettings> & { quickCommands?: unknown }) | null;
+    // Quick commands moved to the Ribbon Organizer plugin in 1.7.0; drop the stale key so the
+    // next save cleans data.json.
+    if (data !== null) delete data.quickCommands;
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
     try {
       this.settings.groups = validateSyncManifest({ version: 1, groups: this.settings.groups }).groups;
     } catch (e) {

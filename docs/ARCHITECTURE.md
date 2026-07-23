@@ -110,9 +110,7 @@ functions.
 **Connector**
 - `main.ts` — the `Plugin` subclass: builds `CoreContext` from Obsidian's runtime, implements the
   `PluginHost` (plugin registry, install/enable, versions), persists run history to a local file,
-  registers the ribbon/commands (the ribbon menu also lists user-configured **quick commands**,
-  run via `app.commands.executeCommandById` and greyed out when unregistered on the device) and the
-  Sync Center view, and dynamic-imports `src/external/`
+  registers the ribbon/commands and the Sync Center view, and dynamic-imports `src/external/`
   behind desktop gates.
 
 ## Core invariants

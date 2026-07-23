@@ -6,7 +6,7 @@ import {
   type QualifierSpec,
   type QualifierResolver,
 } from "./qualifierSearch";
-import { DeviceClass, FieldRule, isSeparator, QuickEntry, Remote, RibbonKey, SyncGroup, SyncMode } from "../core/types";
+import { DeviceClass, FieldRule, Remote, RibbonKey, SyncGroup, SyncMode } from "../core/types";
 import { SensitiveScan } from "../core/modes";
 import { PkmMode } from "../core/pkm";
 import { validateRemotes } from "../core/manifest";
@@ -26,9 +26,6 @@ import {
   toggleSection,
 } from "../core/catalog";
 import { confirmWarnings } from "./ConfirmModal";
-import { CommandSelectModal } from "./CommandSelectModal";
-import { IconSelectModal } from "./IconSelectModal";
-import { renderIcon } from "./iconRender";
 import { FolderSelectModal } from "./FolderSelectModal";
 import { commitDraft } from "./commitGroups";
 import { sortBySensitiveFirst } from "./sensitiveSort";
@@ -40,7 +37,6 @@ export interface SettingsHost extends Plugin {
     pkmMode: PkmMode;
     rootPath: string;
     remotes: Remote[];
-    quickCommands: QuickEntry[];
     ribbonButtons: Record<RibbonKey, boolean>;
     statusInMenu: boolean;
     remoteAutoCheck: boolean;
@@ -154,11 +150,6 @@ const GENERAL_SETTINGS: GeneralSettingDef[] = [
     name: "Ribbon buttons",
     desc: "The Config Sync ribbon icon always opens a menu of available actions. Optionally also show individual ribbon icons.",
     anchorId: "general-ribbon-buttons",
-  },
-  {
-    name: "Quick commands",
-    desc: "Commands added to the Config Sync ribbon menu. A command not installed on this device is greyed out.",
-    anchorId: "general-quick-commands",
   },
   { name: "Passphrase", desc: "Needed for Encrypt modes. Enter the same passphrase on each device; it is never stored in the store or synced.", anchorId: "general-passphrase" },
   { name: "Run history", desc: "Record every capture, apply, pull and push, and browse past runs from the Sync Center's History entry. Kept on this device only — never synced.", anchorId: "general-run-history" },
@@ -356,7 +347,6 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         await this.renderDataFolder(containerEl, gen);
         this.renderStatusToggles(containerEl);
         this.renderRibbonToggles(containerEl);
-        this.renderQuickCommands(containerEl);
         this.renderPassphrase(containerEl);
         this.renderRunHistory(containerEl);
         break;
@@ -1480,87 +1470,6 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         })
       );
     }
-  }
-
-  private renderQuickCommands(containerEl: HTMLElement): void {
-    const def = this.generalSetting("general-quick-commands");
-    this.anchor(
-      new Setting(containerEl).setName(def.name).setDesc(def.desc).setHeading(),
-      "general-quick-commands"
-    );
-    const registry = (this.host.app as unknown as { commands: { commands: Record<string, { icon?: string }> } }).commands.commands;
-    const list = this.host.settings.quickCommands;
-    const listEl = containerEl.createDiv({ cls: "config-sync-qc-list" });
-
-    const persist = (): void => {
-      void (async () => {
-        await this.host.saveSettings();
-        void this.rerender(this.containerEl.scrollTop);
-      })();
-    };
-    const move = (idx: number, delta: number): void => {
-      const a = list[idx];
-      const b = list[idx + delta];
-      if (a === undefined || b === undefined) return;
-      list[idx + delta] = a;
-      list[idx] = b;
-      persist();
-    };
-    const reorderButtons = (row: HTMLElement, idx: number): void => {
-      const btns = row.createDiv({ cls: "config-sync-qc-btns" });
-      new ExtraButtonComponent(btns).setIcon("chevron-up").setTooltip("Move up").setDisabled(idx === 0).onClick(() => move(idx, -1));
-      new ExtraButtonComponent(btns).setIcon("chevron-down").setTooltip("Move down").setDisabled(idx === list.length - 1).onClick(() => move(idx, 1));
-      new ExtraButtonComponent(btns).setIcon("trash").setTooltip("Remove").onClick(() => {
-        list.splice(idx, 1);
-        persist();
-      });
-    };
-
-    list.forEach((entry, idx) => {
-      if (isSeparator(entry)) {
-        const row = listEl.createDiv({ cls: "config-sync-qc-seprow" });
-        row.createDiv({ cls: "config-sync-qc-sepline" });
-        row.createSpan({ cls: "config-sync-qc-septxt", text: "Separator" });
-        row.createDiv({ cls: "config-sync-qc-sepline" });
-        reorderButtons(row, idx);
-        return;
-      }
-      const missing = !(entry.commandId in registry);
-      const row = listEl.createDiv({ cls: "config-sync-qc-row" });
-      if (missing) row.addClass("is-missing");
-      const iconBtn = row.createEl("button", { cls: "config-sync-qc-icon", attr: { "aria-label": "Change icon" } });
-      const paint = (id: string): void => renderIcon(iconBtn, id, registry[entry.commandId]?.icon, this.host.app);
-      paint(entry.icon);
-      iconBtn.onclick = (): void => {
-        new IconSelectModal(this.host.app, (icon) => {
-          entry.icon = icon;
-          paint(icon);
-          void this.host.saveSettings();
-        }).open();
-      };
-      const meta = row.createDiv({ cls: "config-sync-qc-meta" });
-      const input = meta.createEl("input", { cls: "config-sync-qc-label", attr: { type: "text", placeholder: "Label" } });
-      input.value = entry.label;
-      // Inline edit, no rerender, so the input keeps focus while typing.
-      input.addEventListener("input", () => {
-        entry.label = input.value.trim() || entry.commandId;
-        void this.host.saveSettings();
-      });
-      meta.createDiv({ cls: "config-sync-qc-cid", text: entry.commandId + (missing ? " — not on this device" : "") });
-      reorderButtons(row, idx);
-    });
-
-    const addbar = containerEl.createDiv({ cls: "config-sync-qc-addbar" });
-    new ButtonComponent(addbar).setButtonText("Add command").setCta().onClick(() => {
-      new CommandSelectModal(this.host.app, (cmd) => {
-        list.push({ commandId: cmd.id, label: cmd.name, icon: cmd.icon ?? "command" });
-        persist();
-      }).open();
-    });
-    new ButtonComponent(addbar).setButtonText("Add separator").onClick(() => {
-      list.push({ kind: "separator" });
-      persist();
-    });
   }
 
   private renderPassphrase(containerEl: HTMLElement): void {
