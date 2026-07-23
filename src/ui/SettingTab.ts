@@ -66,7 +66,7 @@ export interface SettingsHost extends Plugin {
   setPassphrase(v: string | null): void;
   displayName(group: string, storedLabel?: string): string;
   switchListRows(group: string): Promise<{ id: string; name: string; hint: string; desktopOnly: boolean; deviceScoped: boolean }[]>;
-  snippetOrphanNames(): Promise<string[]>;
+  snippetOrphanNames(): Promise<{ name: string; storeOn: boolean }[]>;
   removeSnippetOrphans(names: string[]): Promise<void>;
 }
 
@@ -146,12 +146,12 @@ const GENERAL_SETTINGS: GeneralSettingDef[] = [
     desc: "Re-scans for local changes every 5 minutes while the window is focused, keeping the ribbon dot fresh.",
     anchorId: "general-local-periodic-check",
   },
+  { name: "Passphrase", desc: "Needed for Encrypt modes. Enter the same passphrase on each device; it is never stored in the store or synced.", anchorId: "general-passphrase" },
   {
     name: "Ribbon buttons",
     desc: "The Config Sync ribbon icon always opens a menu of available actions. Optionally also show individual ribbon icons.",
     anchorId: "general-ribbon-buttons",
   },
-  { name: "Passphrase", desc: "Needed for Encrypt modes. Enter the same passphrase on each device; it is never stored in the store or synced.", anchorId: "general-passphrase" },
   { name: "Run history", desc: "Record every capture, apply, pull and push, and browse past runs from the Sync Center's History entry. Kept on this device only — never synced.", anchorId: "general-run-history" },
   { name: "History file", desc: "A separate file next to the plugin's data.json (never inside it). Change to store the history elsewhere; leave blank for the default.", anchorId: "general-run-history-path" },
   { name: "Keep at most", desc: "Older runs beyond this count are pruned automatically. 0 keeps every run.", anchorId: "general-run-history-count" },
@@ -346,8 +346,8 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         this.renderPkmMode(containerEl);
         await this.renderDataFolder(containerEl, gen);
         this.renderStatusToggles(containerEl);
-        this.renderRibbonToggles(containerEl);
         this.renderPassphrase(containerEl);
+        this.renderRibbonToggles(containerEl);
         this.renderRunHistory(containerEl);
         break;
       case "obsidian":
@@ -641,7 +641,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const listEl = exp.createDiv({ cls: "config-sync-ldlist" });
     // The device this list belongs to when it's scoped away from us (mobile → "desktop").
     const boundDevice = Platform.isMobile ? "desktop" : "mobile";
-    let orphans: string[] = [];
+    let orphans: { name: string; storeOn: boolean }[] = [];
     let orphansExpanded = false;
     const renderRows = (rows: SwitchRow[]): void => {
       listEl.empty();
@@ -772,16 +772,16 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
           const body = sec.createDiv({ cls: "config-sync-orphan-body" });
           body.createDiv({
             cls: "config-sync-orphan-desc",
-            text: "Enabled in Obsidian but their .css file is gone (deleted or renamed). They do nothing and aren't synced. Remove to clean appearance.json.",
+            text: "Enabled somewhere but the .css file no longer exists here or in the store. Removing also clears them from the shared store list, scopes and pins.",
           });
-          for (const name of orphans) {
+          for (const o of orphans) {
             const orow = body.createDiv({ cls: "config-sync-orphan-row" });
-            orow.createSpan({ cls: "config-sync-orphan-name", text: name });
-            orow.createSpan({ cls: "config-sync-orphan-tag", text: "no file" });
+            orow.createSpan({ cls: "config-sync-orphan-name", text: o.name });
+            orow.createSpan({ cls: "config-sync-orphan-tag", text: o.storeOn ? "no file · store has on" : "no file" });
             orow.createDiv({ cls: "config-sync-rule-spacer" });
             const rm = orow.createSpan({ cls: "config-sync-orphan-remove", text: "Remove", attr: { role: "button", tabindex: "0" } });
             rm.addEventListener("click", () => void (async () => {
-              await this.host.removeSnippetOrphans([name]);
+              await this.host.removeSnippetOrphans([o.name]);
               await reload();
             })());
           }
@@ -789,7 +789,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
           allRow.createDiv({ cls: "config-sync-rule-spacer" });
           const rmAll = allRow.createSpan({ cls: "config-sync-orphan-removeall", text: `Remove all ${orphans.length}`, attr: { role: "button", tabindex: "0" } });
           rmAll.addEventListener("click", () => void (async () => {
-            await this.host.removeSnippetOrphans([...orphans]);
+            await this.host.removeSnippetOrphans(orphans.map((o) => o.name));
             await reload();
           })());
         }
@@ -1457,7 +1457,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       "general-ribbon-buttons"
     );
     const defs: { key: RibbonKey; label: string }[] = [
-      { key: "sync", label: "Sync" },
+      { key: "sync", label: "Sync Center" },
       { key: "revert", label: "Revert last apply" },
     ];
     for (const d of defs) {

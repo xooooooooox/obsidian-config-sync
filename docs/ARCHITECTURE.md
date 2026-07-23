@@ -53,7 +53,10 @@ functions.
 - `core/status.ts` — per-item status (`statusForGroups`), remote freshness (`diffRemote`,
   `remoteLockAhead`), and the counts the UI shows (`bucketCounts`).
 - `core/availability.ts` — is a plugin enabled / disabled / not-installed on this device, plus
-  version drift (`availabilityForGroup`, `compareVersions`).
+  version drift (`availabilityForGroup`, `compareVersions`); `snippetOrphans(local, store,
+  localFiles, storeFiles)` — enabled-snippet names with no `.css` file locally **and** none in
+  the store's snippets dir (the store-file check is a fresh-device safeguard: before its
+  `snippets/` dir has synced down, the store copy still covers it).
 - `core/pluginState.ts` — `pluginRuntimeEnabled`: a plugin is "on" when **loaded OR persisted**.
 - `core/catalog.ts` — the group taxonomy: how items sort into Options / Core / Community / Beta
   sections and their display labels; discovery of unclassified files.
@@ -111,7 +114,15 @@ functions.
 - `main.ts` — the `Plugin` subclass: builds `CoreContext` from Obsidian's runtime, implements the
   `PluginHost` (plugin registry, install/enable, versions), persists run history to a local file,
   registers the ribbon/commands and the Sync Center view, and dynamic-imports `src/external/`
-  behind desktop gates.
+  behind desktop gates. `removeSnippetOrphans` prunes dead enabled-snippet names: local cleanup
+  first (`appearance.json` + the in-memory `customCss.enabledSnippets` set, then the name's
+  `snippetScopes` entry and switch-list pin), then a single-group `capture(ctx,
+  ["enabled-css-snippets"])` propagates the pruned list to the store — never a hand-edit of the
+  store file, which would leave its index stale.
+
+**Brand assets**
+- `assets/` — brand SVGs: `icon.svg` (24×24, `currentColor`, iconize-importable), `logo.svg`
+  (256×256 README tile), `social-preview.svg` (1280×640 GitHub social card).
 
 ## Core invariants
 

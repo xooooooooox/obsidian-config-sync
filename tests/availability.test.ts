@@ -133,23 +133,23 @@ describe("snippetForceOff (pin > scope)", () => {
 });
 
 describe("snippetOrphans", () => {
-  it("flags names enabled locally with no file and not in the store", () => {
-    const local = ["callouts", "mystyle", "IOTO-table"];
-    const fromDir = ["mystyle", "IOTO-table"]; // files present
-    const store = ["IOTO-table"]; // shared
-    expect(snippetOrphans(local, fromDir, store)).toEqual(["callouts"]);
+  it("flags names enabled locally with no file anywhere", () => {
+    expect(snippetOrphans(["callouts", "mystyle"], [], ["mystyle"], [])).toEqual(["callouts"]);
   });
 
-  it("does not flag a name that has a local file", () => {
-    expect(snippetOrphans(["mystyle"], ["mystyle"], [])).toEqual([]);
+  it("flags names enabled only in the store with no file anywhere", () => {
+    expect(snippetOrphans([], ["dead"], [], [])).toEqual(["dead"]);
   });
 
-  it("does not flag a name present in the store (fresh device, file not synced yet)", () => {
-    expect(snippetOrphans(["pending"], [], ["pending"])).toEqual([]);
+  it("keeps names whose file exists locally", () => {
+    expect(snippetOrphans(["mystyle"], ["mystyle"], ["mystyle"], [])).toEqual([]);
   });
 
-  it("returns a sorted, unique list and handles empty local", () => {
-    expect(snippetOrphans([], ["x"], ["y"])).toEqual([]);
-    expect(snippetOrphans(["b", "a", "b"], [], [])).toEqual(["a", "b"]);
+  it("keeps names whose file exists in the store (fresh device before snippets sync)", () => {
+    expect(snippetOrphans([], ["pending"], [], ["pending"])).toEqual([]);
+  });
+
+  it("dedupes and sorts", () => {
+    expect(snippetOrphans(["b", "a"], ["b", "c"], [], [])).toEqual(["a", "b", "c"]);
   });
 });

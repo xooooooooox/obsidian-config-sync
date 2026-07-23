@@ -149,7 +149,13 @@ noted):
   `-exclude-row/-modal-buttons`. **Banner**: `-bootstrap*` adopt offer.
 - **Local decisions** `-ldrow` family (switch-list exceptions) — plus read-only `is-auto` rows
   (`-doto-pill` + disabled toggle) surfacing desktop-only plugins auto-excepted on mobile,
-  **divergence** warning block, **inert-note**, **inline diffs** `-inline-diff/-diffhint`.
+  **divergence** warning block, **inert-note**, **inline diffs** `-inline-diff/-diffhint`. The
+  snippet drawer's **Clean up** block (`-orphan-*`) surfaces dead enabled-snippet names — no
+  `.css` file locally **and** none in the store's snippets dir; checking the store copy, not just
+  the local dir, is what keeps a fresh device safe before its `snippets/` folder has synced down.
+  Its per-row chip is provenance-aware (`no file` vs `no file · store has on`). Remove clears the
+  name locally (list + scope + pin) and then propagates through a single-group `capture`, so the
+  store list and its lock/index bookkeeping stay consistent instead of drifting from a hand-edit.
 
 ## 4. Conventions
 

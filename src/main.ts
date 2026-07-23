@@ -10,6 +10,7 @@ import {
   planImport,
   ProgressFn,
   applyWithActions,
+  capture,
   captureWithActions, CaptureItem,
   deviceExcludedPluginIds,
   groupsForDevice,
@@ -1102,7 +1103,7 @@ export default class ConfigSyncPlugin extends Plugin {
     return listDiscovered(this.app.vault.adapter, this.app.vault.configDir, groups);
   }
 
-  private async snippetUniverse(): Promise<{ fromDir: string[]; store: string[]; local: string[] }> {
+  private async snippetUniverse(): Promise<{ fromDir: string[]; store: string[]; local: string[]; storeFiles: string[] }> {
     const io = this.app.vault.adapter;
     const cfg = this.app.vault.configDir;
     const readArr = async (p: string): Promise<string[]> => {
@@ -1120,7 +1121,10 @@ export default class ConfigSyncPlugin extends Plugin {
     const local = Array.isArray(appList) ? appList : [];
     const root = await this.resolvedRootPath();
     const store = await readArr(`${root}/store/${groupStorePath("{configDir}/enabled-css-snippets.json")}`);
-    return { fromDir, store, local };
+    const storeSnips = `${root}/store/${groupStorePath("{configDir}/snippets")}`;
+    const storeFileList = (await io.exists(storeSnips)) ? (await io.list(storeSnips)).files : [];
+    const storeFiles = storeFileList.filter((f) => f.endsWith(".css")).map((f) => basename(f).replace(/\.css$/, ""));
+    return { fromDir, store, local, storeFiles };
   }
 
   // Rows for the switch-list "Local decisions" editor: union of local list ∪ store copy ∪
@@ -1128,12 +1132,13 @@ export default class ConfigSyncPlugin extends Plugin {
   async switchListRows(groupName: string): Promise<{ id: string; name: string; hint: string; desktopOnly: boolean; deviceScoped: boolean }[]> {
     const io = this.app.vault.adapter;
     if (groupName === "enabled-css-snippets") {
-      const { fromDir, store, local } = await this.snippetUniverse();
+      const { fromDir, store, local, storeFiles } = await this.snippetUniverse();
+      const dead = new Set(snippetOrphans(local, store, fromDir, storeFiles));
       const scopedAway = scopedAwaySnippets(this.settings.snippetScopes, Platform.isMobile);
       const pins = new Set(this.settings.switchExceptions["enabled-css-snippets"] ?? []);
-      // universe = files ∪ store; orphans (enabled locally, no file, not in store) are excluded
-      // and surfaced separately via snippetOrphanNames()/removeSnippetOrphans().
-      const ids = [...new Set([...fromDir, ...store])].sort();
+      // universe = files ∪ store, minus dead names (no file locally OR in the store) — those are
+      // surfaced in the Clean up block via snippetOrphanNames()/removeSnippetOrphans().
+      const ids = [...new Set([...fromDir, ...store])].filter((id) => !dead.has(id)).sort();
       return ids.map((id) => ({
         id,
         name: id,
@@ -1188,9 +1193,9 @@ export default class ConfigSyncPlugin extends Plugin {
       .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })); // sort by DISPLAY name — id order looked random in the UI
   }
 
-  async snippetOrphanNames(): Promise<string[]> {
-    const { fromDir, store, local } = await this.snippetUniverse();
-    return snippetOrphans(local, fromDir, store);
+  async snippetOrphanNames(): Promise<{ name: string; storeOn: boolean }[]> {
+    const { fromDir, store, local, storeFiles } = await this.snippetUniverse();
+    return snippetOrphans(local, store, fromDir, storeFiles).map((name) => ({ name, storeOn: store.includes(name) }));
   }
 
   // Prune dead enabled-snippet names. Removes from both appearance.json on disk AND
@@ -1204,12 +1209,48 @@ export default class ConfigSyncPlugin extends Plugin {
     }
     const io = this.app.vault.adapter;
     const path = `${this.app.vault.configDir}/appearance.json`;
-    if (!(await io.exists(path))) return;
-    const prior = await io.read(path);
-    const current = readLocalSwitchList("enabled-css-snippets", prior);
-    const list = Array.isArray(current) ? current : [];
-    const filtered = list.filter((n) => !drop.has(n));
-    await io.write(path, writeLocalSwitchList("enabled-css-snippets", filtered, prior));
+    if (await io.exists(path)) {
+      const prior = await io.read(path);
+      const current = readLocalSwitchList("enabled-css-snippets", prior);
+      const list = Array.isArray(current) ? current : [];
+      const filtered = list.filter((n) => !drop.has(n));
+      await io.write(path, writeLocalSwitchList("enabled-css-snippets", filtered, prior));
+    }
+    // Device-local bookkeeping: a dead name's scope and pin are meaningless. MUST be cleared and
+    // saved BEFORE the capture below — a still-scoped-away name would pass through the old store
+    // value and resurrect itself in the fresh store copy.
+    let touched = false;
+    for (const n of names) {
+      if (n in this.settings.snippetScopes) {
+        const next = { ...this.settings.snippetScopes };
+        delete next[n];
+        this.settings.snippetScopes = next;
+        touched = true;
+      }
+    }
+    const pins = this.settings.switchExceptions["enabled-css-snippets"];
+    if (pins !== undefined && pins.some((p) => drop.has(p))) {
+      this.settings.switchExceptions["enabled-css-snippets"] = pins.filter((p) => !drop.has(p));
+      touched = true;
+    }
+    if (touched) await this.saveSettings();
+    // Propagate to the store through the sanctioned path: a single-group capture rewrites the
+    // store copy plus lock/index bookkeeping (hand-editing the store file leaves the index stale).
+    // The local cleanup above already applied regardless of what happens here.
+    try {
+      const ctx = await this.coreContext();
+      // Per-group failures come back as error RESULTS, not throws (e.g. appearance.json absent).
+      const results = await capture(ctx, ["enabled-css-snippets"]);
+      const failed = results.find((r) => r.status === "error");
+      if (failed !== undefined) throw new Error(failed.messages.join("; ") || "capture reported an error");
+      void this.refreshLocalStatus();
+    } catch (e) {
+      console.error("Config Sync: removeSnippetOrphans capture failed", e);
+      new Notice(
+        `Config Sync: removed orphaned snippet(s) locally, but failed to update the store: ${(e as Error).message}. Run a manual capture of "Enabled CSS snippets" to sync the change.`,
+        10000,
+      );
+    }
   }
 
   async readItemFile(group: SyncGroup): Promise<string | null> {

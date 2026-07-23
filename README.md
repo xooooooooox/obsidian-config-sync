@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/logo.svg" width="96" alt="Config Sync logo"></p>
+
 # Config Sync
 
 [![release](https://img.shields.io/github/v/release/xooooooooox/obsidian-config-sync?label=release)](https://github.com/xooooooooox/obsidian-config-sync/releases/latest)
@@ -128,7 +130,7 @@ OS junk (`.DS_Store`, `Thumbs.db`, `desktop.ini`) is never captured. See [Sensit
 1. Settings → Config Sync → under *Obsidian*, tick **Hotkeys**, **Appearance**, **CSS snippets**.
 2. Open **Sync** from the ribbon menu and press **Capture N items**.
 3. On each other device, once your note sync has delivered the data folder: open **Sync** and press **Apply N items**.
-4. Each CSS snippet's *active on* scope (all / desktop / mobile) is per-device and can be re-scoped at any time. If enabled-snippet names linger after you rename or delete the underlying files, the settings panel surfaces them as *N enabled snippets have no file · Clean up* for one-click tidying.
+4. Each CSS snippet's *active on* scope (all / desktop / mobile) is per-device and can be re-scoped at any time. If enabled-snippet names linger after you rename or delete the underlying files, the settings panel surfaces them as *N enabled snippets have no file · Clean up* for one-click tidying. A name only counts as dead once its `.css` file is missing both here and in the store (a fresh device still mid-sync keeps its names safe); removing one there clears it from the local enabled list, the shared store list, its scope and its pin. The store side is updated by capturing the snippet list, so any pending local on/off changes to it are published in the same step.
 
 **Sync a plugin's settings but keep credentials out of the store**
 1. Under *Community plugins*, tick the plugin.

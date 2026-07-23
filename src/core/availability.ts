@@ -109,11 +109,11 @@ export function snippetForceOff(scopes: Record<string, "desktop" | "mobile">, pi
   return [...scopedAwaySnippets(scopes, isMobile)].filter((id) => !pinSet.has(id));
 }
 
-// Enabled snippet names with no local .css file and not in the shared store — dead
-// leftovers from deleted/renamed snippets. "not in store" excludes a fresh device whose
-// snippets/ dir hasn't synced yet (its enabled names travel in the store).
-export function snippetOrphans(local: string[], fromDir: string[], store: string[]): string[] {
-  const files = new Set(fromDir);
-  const shared = new Set(store);
-  return [...new Set(local.filter((n) => !files.has(n) && !shared.has(n)))].sort();
+// Enabled snippet names (local list or store list) whose .css file exists neither locally nor
+// in the store's snippets dir — dead leftovers from deleted/renamed snippets. Checking the
+// store FILES keeps a fresh device safe: before its snippets/ dir syncs down, the store still
+// holds the files, so nothing there is offered for cleanup.
+export function snippetOrphans(localOn: string[], storeOn: string[], localFiles: string[], storeFiles: string[]): string[] {
+  const files = new Set([...localFiles, ...storeFiles]);
+  return [...new Set([...localOn, ...storeOn].filter((n) => !files.has(n)))].sort();
 }
