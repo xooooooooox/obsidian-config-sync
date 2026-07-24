@@ -94,6 +94,9 @@ functions.
   Beta / Advanced / Remotes).
 - `actionIcons.ts` — the single source for the per-action Lucide icons + color classes
   (Capture/Apply/Push/Pull) reused across the panel, buttons, badges and History.
+- `statusBar.ts` — pure segment model (`statusBarSegments`, `statusBarAriaLabel`) + a thin DOM
+  renderer for the status-bar item; segments mirror the Sync Center header pills (↑/↓ from
+  presented bucket counts, ⇡/⇣ from `remoteDirectionCounts`).
 - `qualifierSearch.ts` — the `key:value` search shared by both search boxes: pure `parseQuery` /
   `matchesQualifiers` / `suggest` / `applySuggestion`, plus the `QualifierAutocomplete` DOM widget.
 - `panelModel.ts` — the pure view-model deciding what state each row presents under the filters.
@@ -114,7 +117,12 @@ functions.
 - `main.ts` — the `Plugin` subclass: builds `CoreContext` from Obsidian's runtime, implements the
   `PluginHost` (plugin registry, install/enable, versions), persists run history to a local file,
   registers the ribbon/commands and the Sync Center view, and dynamic-imports `src/external/`
-  behind desktop gates. `removeSnippetOrphans` prunes dead enabled-snippet names: local cleanup
+  behind desktop gates. `updateStatusIndicators()` (formerly `updateRibbonDot()`) drives both
+  status surfaces from the same bucket/remote counts: the opt-in ribbon dot (unchanged
+  `config-sync-dot-*` classes, gated by `settings.ribbonDot`) and the status-bar item
+  (`ui/statusBar.ts`) — the dot folds remote-newer into its apply state (legacy behavior), while
+  the status bar shows remote-newer as a ⇣ pull segment, matching the panel.
+  `removeSnippetOrphans` prunes dead enabled-snippet names: local cleanup
   first (`appearance.json` + the in-memory `customCss.enabledSnippets` set, then the name's
   `snippetScopes` entry and switch-list pin), then a single-group `capture(ctx,
   ["enabled-css-snippets"])` propagates the pruned list to the store — never a hand-edit of the

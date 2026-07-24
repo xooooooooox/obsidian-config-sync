@@ -449,6 +449,23 @@ body.is-phone .config-sync-fkey {
 .config-sync-dot-capture::after { background: var(--color-orange); }
 .config-sync-dot-apply::after { background: var(--interactive-accent); }
 
+.config-sync-statusbar { display: inline-flex; align-items: center; gap: var(--size-2-2); }
+.config-sync-statusbar .config-sync-sb-icon { display: inline-flex; --icon-size: 13px; }
+.config-sync-statusbar .svg-icon { flex: none; }
+.config-sync-statusbar.is-clean .config-sync-sb-icon { color: var(--text-faint); }
+.config-sync-sb-seg { font-variant-numeric: tabular-nums; font-weight: 500; }
+.config-sync-sb-seg.is-up { color: var(--color-orange); }
+.config-sync-sb-seg.is-down { color: var(--interactive-accent); }
+.config-sync-sb-seg.is-push { color: var(--color-pink); }
+.config-sync-sb-seg.is-pull { color: var(--color-cyan); }
+
+/* Opt-in mobile force-show: CSS class only — no MutationObserver, no inline styles, so it
+   cannot fight Remotely Save's mechanism (whichever is enabled wins its own lane). */
+body.is-mobile.config-sync-mobile-statusbar .status-bar {
+  display: flex;
+  margin-bottom: var(--mobile-toolbar-height, 52px);
+}
+
 .config-sync-hub-row { display: flex; align-items: center; gap: var(--size-4-2); padding: var(--size-4-2) 0; border-bottom: 1px solid var(--background-modifier-border); cursor: pointer; white-space: nowrap; }
 .config-sync-hub-row .config-sync-rule-name { flex: none; }
 .config-sync-card > .config-sync-hub-row:last-of-type { border-bottom: none; }

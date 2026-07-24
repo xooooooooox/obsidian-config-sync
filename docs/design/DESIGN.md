@@ -19,12 +19,12 @@ One color per meaning, everywhere (0.27.9 audit). Alpha fills always use
 
 | Semantic | Variable | Used by |
 |---|---|---|
-| Capture / ↑ direction | `--color-orange` | state icons, pills, sidebar badges, checkbox `.is-capture` fill, seg buttons, Capture button (solid), capture progress bar, ribbon dot |
-| Apply / ↓ direction | `--interactive-accent` | same family as capture; Apply button is `mod-cta`; apply progress bar, runline dot |
+| Capture / ↑ direction | `--color-orange` | state icons, pills, sidebar badges, checkbox `.is-capture` fill, seg buttons, Capture button (solid), capture progress bar, ribbon dot, status-bar segment |
+| Apply / ↓ direction | `--interactive-accent` | same family as capture; Apply button is `mod-cta`; apply progress bar, runline dot, status-bar segment |
 | Active / selected | `--interactive-accent` | active filter pill, active settings tab underline, active sidebar scope, seg `.is-on`, search-jump highlight, search scope tag |
 | In sync / success | `--color-green` | ✓ state icon, pills, result strip frame, test-strip ok, diff insertions, passphrase set badge |
-| Pull (remote → store) | `--color-cyan` | pull state icon, Pull button (solid primary), transfer strip, encrypt-related accents (see below) |
-| Push (store → remote) | `--color-pink` | push state icon, Push button (solid primary), outdated-section frame |
+| Pull (remote → store) | `--color-cyan` | pull state icon, Pull button (solid primary), transfer strip, status-bar segment, encrypt-related accents (see below) |
+| Push (store → remote) | `--color-pink` | push state icon, Push button (solid primary), outdated-section frame, status-bar segment |
 | Locked / encrypted-at-rest | `--color-cyan` | key state icon, statenote pills, policy seg on-state, json encrypt highlighting |
 | Warning / caution | `--color-orange` | ⚠ pills, detect/device badges, not-installed section frame, amber version lines, local-decision rows, unresolved conflicts |
 | Error / destructive | `--color-red` | ✗ pills, test-strip error, diff deletions, strip-action on-state |
@@ -87,7 +87,7 @@ locked/cyan.
 
 ### 2.3 Lucide usage (setIcon)
 
-`refresh-cw` ribbon + both panel refreshes · `undo-2` revert · `lock` mode badge ·
+`refresh-cw` ribbon + both panel refreshes + status-bar item · `undo-2` revert · `lock` mode badge ·
 `key-round` locked state · `chevron-down/right` settings rows · `x` clear/remove ·
 `trash` delete · `folder-open` browse · `rotate-cw` BRAT re-scan · `arrow-up-from-line` /
 `arrow-down-to-line` / `cloud-upload` / `cloud-download` sync-action icons · tabs: `settings`,
@@ -137,6 +137,11 @@ noted):
   reads top-to-bottom without horizontal scroll (`-hcard-sum` wraps; `-hcard-act` `min-width:0`).
   Head/legend and the `renderActionInto` action painter are shared by both layouts; detail view unchanged.
 - **Header status bar** — **self chip** `config-sync-self-chip` (is-up/down/ok tints) + `-self-chip-ic`, `config-sync-head-divider`, then the pills; push/pull totals use `config-sync-pill.is-push` (pink) / `.is-pull` (cyan).
+- **Status bar item** (`src/ui/statusBar.ts`, rendered by `main.ts`) — plain colored text
+  segments, no pill backgrounds (mockup candidate A); colors identical to the header pills
+  (`is-up` orange, `is-down` accent, `is-push` pink, `is-pull` cyan). Clean state = a dimmed
+  `refresh-cw` icon only (`--text-faint`). `mod-clickable`; aria-label lists the non-zero parts
+  (`Config Sync — 2 to capture · 1 to apply · push 1`).
 - **Self pane** (Config Sync's own state) `config-sync-self-pane` — `-self-title/-self-title-ic/-self-title-sp/-self-sub`, `-self-settings-btn`/`-self-settings-ic` (title-row Settings), `-self-block/-block-h/-block-s`, membership delta `-self-delta/-self-drow/-self-dg`, `-self-viewchange` (expandable `data.json` diff), `-self-pill/-self-hint/-self-caution/-self-acts`.
 - **Qualifier autocomplete** `config-sync-qac/-qac-opt` (is-sel)/`-qac-ic/-qac-txt/-qac-desc` — the `key:value` search dropdown under both search boxes, anchored by `config-sync-search-wrap`; key→value suggestions, keyboard-navigable. Logic in `src/ui/qualifierSearch.ts`.
 - **Settings tab** (`src/ui/SettingTab.ts`): `config-sync-tabs/-tab` (phone hides inactive

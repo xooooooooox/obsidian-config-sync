@@ -39,6 +39,10 @@ export interface SettingsHost extends Plugin {
     remotes: Remote[];
     ribbonButtons: Record<RibbonKey, boolean>;
     statusInMenu: boolean;
+    statusBarItem: boolean;
+    statusBarRemote: boolean;
+    ribbonDot: boolean;
+    mobileStatusBar: boolean;
     remoteAutoCheck: boolean;
     localPeriodicCheck: boolean;
     switchExceptions: Record<string, string[]>;
@@ -48,6 +52,8 @@ export interface SettingsHost extends Plugin {
   saveSettings(): Promise<void>;
   clearRunHistory(): Promise<void>;
   refreshRibbons(): void;
+  updateStatusIndicators(): void;
+  applyMobileStatusBar(): void;
   readGroupsFile(): Promise<SyncGroup[]>;
   writeGroupsFile(groups: SyncGroup[]): Promise<void>;
   resolvedRootPath(): Promise<string>;
@@ -143,10 +149,30 @@ const GENERAL_SETTINGS: GeneralSettingDef[] = [
   { name: "Check remotes automatically", desc: "Checks each remote's last capture shortly after startup and every few hours.", anchorId: "general-remote-auto-check" },
   {
     name: "Periodic local check",
-    desc: "Re-scans for local changes every 5 minutes while the window is focused, keeping the ribbon dot fresh.",
+    desc: "Re-scans for local changes every 5 minutes while the window is focused, keeping the status bar fresh.",
     anchorId: "general-local-periodic-check",
   },
   { name: "Passphrase", desc: "Needed for Encrypt modes. Enter the same passphrase on each device; it is never stored in the store or synced.", anchorId: "general-passphrase" },
+  {
+    name: "Show status bar item",
+    desc: "Sync status in the status bar: ↑ to capture, ↓ to apply. Click opens the Sync Center.",
+    anchorId: "general-status-bar-item",
+  },
+  {
+    name: "Show remote push/pull in status bar",
+    desc: "Include per-remote push ⇡ and pull ⇣ counts. Desktop only — remote checks don't run on mobile.",
+    anchorId: "general-status-bar-remote",
+  },
+  {
+    name: "Ribbon icon status dot",
+    desc: "Colored corner dot on the ribbon icon — the old indicator, now off by default (invisible when the icon sits inside a ribbon group).",
+    anchorId: "general-ribbon-dot",
+  },
+  {
+    name: "Show status bar on mobile",
+    desc: "Force the status bar visible on phones (Obsidian hides it by default). Leave off if another plugin or snippet already shows it.",
+    anchorId: "general-mobile-status-bar",
+  },
   {
     name: "Ribbon buttons",
     desc: "The Config Sync ribbon icon always opens a menu of available actions. Optionally also show individual ribbon icons.",
@@ -347,6 +373,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         await this.renderDataFolder(containerEl, gen);
         this.renderStatusToggles(containerEl);
         this.renderPassphrase(containerEl);
+        this.renderStatusBarToggles(containerEl);
         this.renderRibbonToggles(containerEl);
         this.renderRunHistory(containerEl);
         break;
@@ -1469,6 +1496,26 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
           this.host.refreshRibbons();
         })
       );
+    }
+  }
+
+  private renderStatusBarToggles(containerEl: HTMLElement): void {
+    new Setting(containerEl).setName("Status bar").setHeading();
+    const toggleRow = (anchorId: string, get: () => boolean, set: (v: boolean) => void, after: () => void): void => {
+      const def = this.generalSetting(anchorId);
+      this.anchor(new Setting(containerEl).setName(def.name).setDesc(def.desc), anchorId).addToggle((t) =>
+        t.setValue(get()).onChange(async (v) => {
+          set(v);
+          await this.host.saveSettings();
+          after();
+        })
+      );
+    };
+    toggleRow("general-status-bar-item", () => this.host.settings.statusBarItem, (v) => (this.host.settings.statusBarItem = v), () => this.host.updateStatusIndicators());
+    toggleRow("general-status-bar-remote", () => this.host.settings.statusBarRemote, (v) => (this.host.settings.statusBarRemote = v), () => this.host.updateStatusIndicators());
+    toggleRow("general-ribbon-dot", () => this.host.settings.ribbonDot, (v) => (this.host.settings.ribbonDot = v), () => this.host.updateStatusIndicators());
+    if (Platform.isMobile) {
+      toggleRow("general-mobile-status-bar", () => this.host.settings.mobileStatusBar, (v) => (this.host.settings.mobileStatusBar = v), () => this.host.applyMobileStatusBar());
     }
   }
 

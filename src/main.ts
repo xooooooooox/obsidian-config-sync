@@ -37,11 +37,12 @@ import { PkmMode, PkmProbe, resolveEffectiveMode, resolveRootPath } from "./core
 import { pluginRuntimeEnabled } from "./core/pluginState";
 import { syncListDelta } from "./core/syncListDelta";
 import { selfPaneState } from "./core/selfPane";
-import { bucketCounts, checkRemote, diffRemote, GroupStatus, RemoteCheck, remoteLockAhead, statusForGroups } from "./core/status";
+import { bucketCounts, checkRemote, diffRemote, GroupStatus, remoteDirectionCounts, RemoteCheck, remoteLockAhead, statusForGroups } from "./core/status";
 import { GroupResult, Remote, RibbonButtons, StoreLock, SyncGroup } from "./core/types";
 import { presentedState } from "./ui/panelModel";
 import { ConflictModal } from "./ui/ConflictModal";
 import { ReportModal } from "./ui/ReportModal";
+import { renderStatusBarItem, statusBarSegments } from "./ui/statusBar";
 import { SYNC_CENTER_VIEW_TYPE, SelfSyncInfo, SyncCenterHost, SyncCenterView } from "./ui/SyncCenterView";
 import { ConfigSyncSettingTab } from "./ui/SettingTab";
 
@@ -51,6 +52,10 @@ interface ConfigSyncSettings {
   remotes: Remote[];
   ribbonButtons: RibbonButtons;
   statusInMenu: boolean;
+  statusBarItem: boolean; // master toggle for the status-bar item
+  statusBarRemote: boolean; // include per-remote ⇡ push / ⇣ pull segments
+  ribbonDot: boolean; // legacy corner dot on the ribbon icon (off by default since the status bar took over)
+  mobileStatusBar: boolean; // force-show Obsidian's status bar on phones (CSS class only)
   remoteAutoCheck: boolean;
   localPeriodicCheck: boolean;
   groups: SyncGroup[];
@@ -73,6 +78,10 @@ const DEFAULT_SETTINGS: ConfigSyncSettings = {
   remotes: [],
   ribbonButtons: { sync: false, revert: false },
   statusInMenu: true,
+  statusBarItem: true,
+  statusBarRemote: true,
+  ribbonDot: false,
+  mobileStatusBar: false,
   remoteAutoCheck: true,
   localPeriodicCheck: true,
   groups: [],
@@ -120,6 +129,7 @@ export default class ConfigSyncPlugin extends Plugin {
   settings: ConfigSyncSettings = DEFAULT_SETTINGS;
   private individualRibbons: HTMLElement[] = [];
   private mainRibbonEl: HTMLElement | null = null;
+  private statusBarEl: HTMLElement | null = null;
   private lastResolvedRoot: string | null = null;
   private installFn: PluginInstallFn | null = null;
   private installPhase: ((phase: string) => void) | undefined = undefined; // active item's phase callback (installs are sequential)
@@ -156,6 +166,11 @@ export default class ConfigSyncPlugin extends Plugin {
     this.registerView(SYNC_CENTER_VIEW_TYPE, (leaf) => new SyncCenterView(leaf, this.syncCenterHost()));
     this.mainRibbonEl = this.addRibbonIcon("refresh-cw", "Config Sync", (evt) => void this.openSyncMenu(evt));
     this.refreshRibbons();
+    this.statusBarEl = this.addStatusBarItem();
+    this.statusBarEl.addClass("config-sync-statusbar", "mod-clickable");
+    this.registerDomEvent(this.statusBarEl, "click", () => void this.openSyncCenter());
+    this.updateStatusIndicators();
+    this.applyMobileStatusBar();
     this.addCommand({ id: "sync", name: "Sync: open the sync panel", callback: () => void this.openSyncCenter() });
     this.addCommand({ id: "revert-last-apply", name: "Revert last apply", callback: () => void this.runRevert() });
 
@@ -217,6 +232,7 @@ export default class ConfigSyncPlugin extends Plugin {
   onunload(): void {
     if (this.storeEventTimer !== null) window.clearTimeout(this.storeEventTimer);
     if (this.remoteAutoCheckStartupTimer !== null) window.clearTimeout(this.remoteAutoCheckStartupTimer);
+    document.body.removeClass("config-sync-mobile-statusbar");
   }
 
   private onStoreFileEvent(path: string): void {
@@ -254,7 +270,7 @@ export default class ConfigSyncPlugin extends Plugin {
     } catch (e) {
       console.error("Config Sync: status refresh failed", e);
     }
-    this.updateRibbonDot();
+    this.updateStatusIndicators();
     this.notifySyncCenter();
   }
 
@@ -295,7 +311,7 @@ export default class ConfigSyncPlugin extends Plugin {
         console.error(`Config Sync: remote check failed for ${remote.name}`, e);
       }
     }
-    this.updateRibbonDot();
+    this.updateStatusIndicators();
     this.notifySyncCenter();
   }
 
@@ -306,15 +322,26 @@ export default class ConfigSyncPlugin extends Plugin {
     }
   }
 
-  updateRibbonDot(): void {
-    const el = this.mainRibbonEl;
-    if (el === null) return;
+  updateStatusIndicators(): void {
     const s = this.presentedStatuses ?? this.localStatuses ?? [];
     const { up, down } = bucketCounts(s);
-    const remoteNewer = [...this.remoteChecks.entries()].filter(([, v]) => v.check.state === "remote-newer").map(([k]) => k);
-    el.toggleClass("config-sync-dot-capture", up > 0);
-    el.toggleClass("config-sync-dot-apply", up === 0 && (down > 0 || remoteNewer.length > 0));
-    // aria-label stays "Config Sync" from addRibbonIcon — no pending-count suffix.
+    const remoteStates = [...this.remoteChecks.values()].map((v) => v.check.state);
+    const el = this.mainRibbonEl;
+    if (el !== null) {
+      const remoteNewer = remoteStates.some((st) => st === "remote-newer");
+      el.toggleClass("config-sync-dot-capture", this.settings.ribbonDot && up > 0);
+      el.toggleClass("config-sync-dot-apply", this.settings.ribbonDot && up === 0 && (down > 0 || remoteNewer));
+      // aria-label stays "Config Sync" from addRibbonIcon — no pending-count suffix.
+    }
+    const sb = this.statusBarEl;
+    if (sb !== null) {
+      sb.toggle(this.settings.statusBarItem);
+      renderStatusBarItem(sb, statusBarSegments({ up, down }, remoteDirectionCounts(remoteStates), this.settings.statusBarRemote));
+    }
+  }
+
+  applyMobileStatusBar(): void {
+    document.body.toggleClass("config-sync-mobile-statusbar", Platform.isMobile && this.settings.mobileStatusBar);
   }
 
   private async openSyncMenu(evt: MouseEvent): Promise<void> {
@@ -358,7 +385,7 @@ export default class ConfigSyncPlugin extends Plugin {
         this.lastGroups = groups;
         const statuses = await statusForGroups(ctx, groups);
         this.localStatuses = statuses;
-        this.updateRibbonDot();
+        this.updateStatusIndicators();
         let lock: StoreLock | null = null;
         try {
           lock = await loadLock(ctx);
