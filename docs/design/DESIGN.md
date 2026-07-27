@@ -145,7 +145,7 @@ noted):
   `refresh-cw` icon only (`--text-faint`). `mod-clickable`; aria-label lists the non-zero parts
   (`Config Sync — 2 to capture · 1 to apply · push 1`).
 - **Self pane** (Config Sync's own state) `config-sync-self-pane` — `-self-title/-self-title-ic/-self-title-sp/-self-sub`, `-self-settings-btn`/`-self-settings-ic` (title-row Settings), `-self-block/-block-h/-block-s`, membership delta `-self-delta/-self-drow/-self-dg`, `-self-viewchange` (expandable `data.json` diff), `-self-pill/-self-hint/-self-caution/-self-acts`.
-- **Qualifier autocomplete** `config-sync-qac/-qac-opt` (is-sel)/`-qac-ic/-qac-txt/-qac-desc` — the `key:value` search dropdown under both search boxes, anchored by `config-sync-search-wrap`; key→value suggestions, keyboard-navigable. Logic in `src/ui/qualifierSearch.ts`.
+- **Qualifier autocomplete** `config-sync-qac/-qac-opt` (is-sel)/`-qac-ic/-qac-txt/-qac-desc` — the `key:value` search dropdown under both search boxes, anchored by `config-sync-search-wrap`; opens on focus (an empty box lists every key), key→value suggestions, keyboard-navigable. Logic in `src/ui/qualifierSearch.ts`.
 - **Settings tab** (`src/ui/SettingTab.ts`): `config-sync-tabs/-tab` (phone hides inactive
   labels — the pattern the mobile filter pills echo), rows/expand/form-*, fields editor
   (`-fieldrow/-ftag/-act-btn`), remotes forms + `-test-strip`, search (`-hit/-scopetag`),
@@ -166,7 +166,8 @@ noted):
   branches remain: an Obsidian option group, a core plugin, a community/beta plugin and a
   state-only plugin (no settings file yet) all render through the same function.
   - **Row** `config-sync-item-wrap` — chevron, name, badges (`config-sync-card-badge*`; order:
-    enablement scope when non-default → `N device-scoped` → `N encrypted`; a zero count never
+    grey `desktop-only plugin` chip (manifest `isDesktopOnly`, monitor icon via `-badge-plat/-badge-ic`)
+    → enablement scope when non-default → `N device-scoped` → `N encrypted`; a zero count never
     renders), sync toggle. No mode chip and no other row content — mode is a derived, drawer-only
     state (`itemCard.ts`'s `deriveMode`, see Drawer ② below), never a header control — the same
     terse rows-are-lists-nothing-else rule the Sync Center already follows.

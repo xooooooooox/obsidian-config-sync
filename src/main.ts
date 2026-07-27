@@ -284,7 +284,7 @@ export default class ConfigSyncPlugin extends Plugin {
       this.coreRuntime().map(async (c) => ({ id: c.id, name: c.name, fileExists: await io.exists(`${configDir}/${corePluginFile(c.id)}`) }))
     );
     const betaIds = new Set(Object.keys(this.settings.bratPluginIndex));
-    return { cores, plugins: this.pluginRuntime().map((p) => ({ id: p.id, name: p.name })), betaIds };
+    return { cores, plugins: this.pluginRuntime().map((p) => ({ id: p.id, name: p.name, desktopOnly: p.desktopOnly })), betaIds };
   }
 
   onunload(): void {
@@ -726,9 +726,9 @@ export default class ConfigSyncPlugin extends Plugin {
     return Object.entries(reg).map(([id, p]) => ({ id, name: p.instance?.name ?? id, enabled: p.enabled }));
   }
 
-  private pluginRuntime(): { id: string; name: string; enabled: boolean }[] {
+  private pluginRuntime(): { id: string; name: string; enabled: boolean; desktopOnly: boolean }[] {
     const reg = this.pluginRegistry();
-    return Object.values(reg.manifests).map((m) => ({ id: m.id, name: m.name, enabled: pluginRuntimeEnabled(reg, m.id) }));
+    return Object.values(reg.manifests).map((m) => ({ id: m.id, name: m.name, enabled: pluginRuntimeEnabled(reg, m.id), desktopOnly: m.isDesktopOnly === true }));
   }
 
   private pkmProbe(): PkmProbe {

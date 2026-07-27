@@ -27,6 +27,11 @@ export interface ItemDef {
   enablement?: { carrier: "core-plugins.json" | "community-plugins.json"; element: string };
   settingsFile?: { defaultPath: string | null };
   presetCompanions?: { path: string; mapKey?: string }[];
+  // The plugin manifest's isDesktopOnly (community/beta only, set only when true) — an innate
+  // property (the plugin cannot install on mobile), distinct from the user's enabledOn choice.
+  // Drives the neutral "desktop-only plugin" card badge and trims "mobile" out of the ENABLED ON
+  // scope cycle (round-8 spec §2).
+  desktopOnly?: boolean;
 }
 
 // The map KEY is the key-name pattern (see task-4-brief.md's ItemConfig.settingsFile.rules —
@@ -93,6 +98,7 @@ export interface RegistryCoreEnv {
 export interface RegistryPluginEnv {
   id: string;
   name: string;
+  desktopOnly?: boolean; // manifest isDesktopOnly === true; absent means false
 }
 
 export interface RegistryEnv {
@@ -156,6 +162,7 @@ export function buildItemDefs(env: RegistryEnv): ItemDef[] {
     section: env.betaIds.has(p.id) ? "beta" : "community",
     enablement: { carrier: "community-plugins.json", element: p.id },
     settingsFile: { defaultPath: `{configDir}/plugins/${p.id}/data.json` },
+    ...(p.desktopOnly ? { desktopOnly: true } : {}),
   }));
   communityAndBeta.sort(byLabel);
 

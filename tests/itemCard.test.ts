@@ -20,6 +20,7 @@ import {
   memberCountLabel,
   nextScope,
   PREVIEW_LEGEND_ENTRIES,
+  DESKTOP_ONLY_ENABLED_OPTIONS,
   FIELD_SCOPE_OPTIONS,
   FILE_SCOPE_OPTIONS,
   COMPANION_SCOPE_OPTIONS,
@@ -86,6 +87,15 @@ describe("computeBadges", () => {
   it("enabledOn default (\"all\"/undefined) never shows an on: badge, even with enablement", () => {
     expect(computeBadges(COMMUNITY_DEF, cfg({ enabled: true, enabledOn: "all" }))).toEqual([]);
     expect(computeBadges(COMMUNITY_DEF, cfg({ enabled: true }))).toEqual([]);
+  });
+
+  it("desktop-only def prepends the innate grey chip ahead of every config badge (round-8 spec §2)", () => {
+    const dOnly: ItemDef = { ...COMMUNITY_DEF, desktopOnly: true };
+    expect(computeBadges(dOnly, cfg())).toEqual([{ text: "desktop-only plugin", cls: "config-sync-card-badge-plat", icon: "monitor" }]);
+    expect(computeBadges(dOnly, cfg({ enabledOn: "desktop" }))).toEqual([
+      { text: "desktop-only plugin", cls: "config-sync-card-badge-plat", icon: "monitor" },
+      { text: "on: desktop", cls: "config-sync-card-badge-desktop" },
+    ]);
   });
 
   it("enabledOn non-default shows the matching on: badge — only when the def has an enablement", () => {
@@ -415,6 +425,21 @@ describe("nextScope / scope icon cycle (round-6 定稿: Commander-style scope co
   it("cycles companion scopes without local: all → desktop → mobile → all", () => {
     expect(nextScope("all", COMPANION_SCOPE_OPTIONS)).toBe("desktop");
     expect(nextScope("mobile", COMPANION_SCOPE_OPTIONS)).toBe("all");
+  });
+
+  it("desktop-only ENABLED ON cycle skips mobile: all → desktop → local → all", () => {
+    expect(DESKTOP_ONLY_ENABLED_OPTIONS).toEqual(["all", "desktop", "local"]);
+    expect(nextScope("all", DESKTOP_ONLY_ENABLED_OPTIONS)).toBe("desktop");
+    expect(nextScope("desktop", DESKTOP_ONLY_ENABLED_OPTIONS)).toBe("local");
+    expect(nextScope("local", DESKTOP_ONLY_ENABLED_OPTIONS)).toBe("all");
+  });
+
+  it("stale stored value missing from the options resumes at the next offered canonical stop (round-8 spec §2)", () => {
+    // enabledOn:"mobile" left behind on a plugin that later became desktop-only → local, not "all"
+    expect(nextScope("mobile", DESKTOP_ONLY_ENABLED_OPTIONS)).toBe("local");
+    // options without local either: mobile wraps past local to all
+    expect(nextScope("mobile", ["all", "desktop"])).toBe("all");
+    expect(nextScope("local", FILE_SCOPE_OPTIONS)).toBe("all");
   });
 
   it("maps every scope to a distinct lucide icon", () => {

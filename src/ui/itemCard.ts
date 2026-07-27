@@ -23,6 +23,7 @@ import { DeviceClass, PerItemScopes, RuleScope } from "../core/types";
 export interface Badge {
   text: string;
   cls: string;
+  icon?: string; // lucide icon rendered before the text (round-8 "desktop-only plugin" chip)
 }
 
 const ON_BADGE_TEXT: Record<Exclude<RuleScope, "all">, string> = {
@@ -69,6 +70,11 @@ export function countEncrypted(cfg: ItemConfig): number {
 
 export function computeBadges(def: ItemDef, cfg: ItemConfig): Badge[] {
   const badges: Badge[] = [];
+  // Innate manifest property first, ahead of every config-driven badge — neutral grey so the
+  // colored "on: …" (the user's CHOICE) keeps its contrast (round-8 spec §2, mockup-approved).
+  if (def.desktopOnly === true) {
+    badges.push({ text: "desktop-only plugin", cls: "config-sync-card-badge-plat", icon: "monitor" });
+  }
   if (def.enablement !== undefined && cfg.enabledOn !== undefined && cfg.enabledOn !== "all") {
     badges.push({ text: ON_BADGE_TEXT[cfg.enabledOn], cls: ON_BADGE_CLASS[cfg.enabledOn] });
   }
@@ -353,6 +359,9 @@ export const SCOPE_LABELS: Record<RuleScope, string> = {
 
 export const FILE_SCOPE_OPTIONS: Exclude<RuleScope, "local">[] = ["all", "desktop", "mobile"];
 export const FIELD_SCOPE_OPTIONS: RuleScope[] = ["all", "desktop", "mobile", "local"];
+// ENABLED ON cycle for a manifest-desktop-only plugin: mobile can never install it, so that
+// stop is meaningless — the cycle runs all → desktop → local (round-8 spec §2).
+export const DESKTOP_ONLY_ENABLED_OPTIONS: RuleScope[] = ["all", "desktop", "local"];
 export const COMPANION_SCOPE_OPTIONS: DeviceClass[] = ["all", "desktop", "mobile"];
 
 // Scope renders as a Commander-style clickable icon (round-6 定稿): the icon IS the state, a
@@ -365,9 +374,23 @@ export const SCOPE_ICONS: Record<RuleScope, string> = {
 };
 
 export function nextScope<T extends RuleScope>(current: T, options: readonly T[]): T {
-  const next = options[(options.indexOf(current) + 1) % options.length];
-  if (next === undefined) throw new Error("nextScope: options list is empty");
-  return next;
+  const i = options.indexOf(current);
+  if (i !== -1) {
+    const next = options[(i + 1) % options.length];
+    if (next === undefined) throw new Error("nextScope: options list is empty");
+    return next;
+  }
+  // Stored value missing from the offered options (e.g. a stale enabledOn:"mobile" on a
+  // desktop-only plugin whose cycle no longer offers mobile): resume from the value's slot in
+  // the canonical order to the next offered option instead of snapping back to options[0]
+  // (round-8 spec §2 — the cycle continues, the stale stored value is never silently rewritten).
+  const canon: readonly RuleScope[] = ["all", "desktop", "mobile", "local"];
+  const start = canon.indexOf(current);
+  for (let step = 1; step <= canon.length; step++) {
+    const candidate = canon[(start + step) % canon.length] as T;
+    if (options.includes(candidate)) return candidate;
+  }
+  throw new Error("nextScope: options list is empty");
 }
 
 export function scopeCycleTooltip(scope: RuleScope): string {

@@ -33,6 +33,7 @@ import {
   applySyncAll,
   buildCompanionRows,
   buildPerItemElementRows,
+  Badge,
   buildRuleRows,
   buildSnippetMemberRows,
   CompanionRowModel,
@@ -42,6 +43,7 @@ import {
   defaultSettingsFile,
   DEFAULT_FIELD_RULE,
   deriveMode,
+  DESKTOP_ONLY_ENABLED_OPTIONS,
   ENABLED_ON_HINT,
   ENABLED_CSS_SNIPPETS_KEY,
   ENABLED_ON_LABEL,
@@ -652,9 +654,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       syncExpansion();
     });
     row.nameEl.prepend(chevron);
-    for (const badge of computeBadges(def, cfg)) {
-      row.nameEl.createSpan({ cls: `config-sync-card-badge ${badge.cls}`, text: badge.text });
-    }
+    for (const badge of computeBadges(def, cfg)) this.renderBadge(row.nameEl, badge);
     row.addToggle((t) =>
       t.setValue(cfg.enabled).onChange(async (v) => {
         await this.updateItem(def.id, (c) => ({ ...c, enabled: v }));
@@ -671,9 +671,13 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const nameEl = wrap.querySelector(":scope > .setting-item > .setting-item-info > .setting-item-name");
     if (!(nameEl instanceof HTMLElement)) return;
     for (const b of Array.from(nameEl.querySelectorAll(".config-sync-card-badge"))) b.remove();
-    for (const badge of computeBadges(def, this.itemConfig(def.id))) {
-      nameEl.createSpan({ cls: `config-sync-card-badge ${badge.cls}`, text: badge.text });
-    }
+    for (const badge of computeBadges(def, this.itemConfig(def.id))) this.renderBadge(nameEl, badge);
+  }
+
+  private renderBadge(nameEl: HTMLElement, badge: Badge): void {
+    const el = nameEl.createSpan({ cls: `config-sync-card-badge ${badge.cls}` });
+    if (badge.icon !== undefined) setIcon(el.createSpan({ cls: "config-sync-card-badge-ic" }), badge.icon);
+    el.appendText(badge.text);
   }
 
   // In-place Settings-file body refresh: rebuild rule rows + (when expanded) File preview into a
@@ -729,7 +733,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       scopeCell.empty();
       this.renderScopeCycle(scopeCell, {
         scope: this.itemConfig(def.id).enabledOn ?? "all",
-        options: FIELD_SCOPE_OPTIONS,
+        options: def.desktopOnly === true ? DESKTOP_ONLY_ENABLED_OPTIONS : FIELD_SCOPE_OPTIONS,
         disabled: false,
         onChange: (v) => {
           void (async () => {
@@ -832,7 +836,6 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       const pathEl = pathHost.createEl("code", { cls: `config-sync-card-path config-sync-card-pathbtn${committed ? " is-custom" : ""}`, text: splitLocation(current).rel });
       pathEl.setAttribute("role", "button");
       pathEl.setAttribute("tabindex", "0");
-      pathEl.setAttribute("title", CUSTOM_PATH_LABEL);
       pathEl.setAttribute("aria-label", CUSTOM_PATH_LABEL);
       const startEdit = (): void => {
         this.customPathEditing.add(key);
@@ -881,7 +884,6 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     if (locked) {
       for (const cell of [scopeCell, lockCell]) {
         cell.addClass("config-sync-dim");
-        cell.setAttribute("title", PER_KEY_RULES_ACTIVE_HINT);
         cell.setAttribute("aria-label", PER_KEY_RULES_ACTIVE_HINT);
       }
     }
@@ -952,9 +954,9 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private renderScopeCycle<T extends RuleScope>(cell: HTMLElement, opts: { scope: T; options: readonly T[]; disabled: boolean; onChange: (v: T) => void }): void {
     const icon = cell.createSpan({ cls: `config-sync-scopeicon${opts.scope !== "all" ? " is-set" : ""}` });
     setIcon(icon, SCOPE_ICONS[opts.scope]);
-    const tip = scopeCycleTooltip(opts.scope);
-    icon.setAttribute("aria-label", tip);
-    icon.setAttribute("title", tip);
+    // aria-label alone: Obsidian renders its own tooltip for [aria-label] elements — adding
+    // `title` too stacks a second (native) tooltip on hover (round-8 feedback ①).
+    icon.setAttribute("aria-label", scopeCycleTooltip(opts.scope));
     if (opts.disabled) {
       icon.addClass("config-sync-dim");
       return;
@@ -974,9 +976,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private renderLockToggle(cell: HTMLElement, opts: { encrypted: boolean; disabled: boolean; onChange: (v: boolean) => void }): void {
     const icon = cell.createSpan({ cls: `config-sync-lock${opts.encrypted ? " is-on" : ""}` });
     setIcon(icon, "lock");
-    const label = opts.encrypted ? "Encrypted" : "Encrypt";
-    icon.setAttribute("aria-label", label);
-    icon.setAttribute("title", label);
+    icon.setAttribute("aria-label", opts.encrypted ? "Encrypted" : "Encrypt");
     if (opts.disabled) {
       icon.addClass("config-sync-dim");
       return;
@@ -1073,7 +1073,6 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const lockDisabled = encryptToggleDisabled(row.rule.scope, row.perItemEnabled);
     this.renderLockToggle(lockCell, { encrypted: row.rule.encrypted, disabled: lockDisabled, onChange: (v) => setRule((r) => ({ ...r, encrypted: v })) });
     if (lockDisabled && row.perItemEnabled) {
-      lockCell.setAttribute("title", ENCRYPT_DISABLED_PERITEM_HINT);
       lockCell.setAttribute("aria-label", ENCRYPT_DISABLED_PERITEM_HINT);
     }
     const actionCell = fr.createDiv({ cls: "config-sync-card-actioncell" });
@@ -1354,7 +1353,6 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const pathEl = contentCell.createEl("code", { cls: "config-sync-card-path config-sync-card-pathbtn", text: splitLocation(row.path).rel });
     pathEl.setAttribute("role", "button");
     pathEl.setAttribute("tabindex", "0");
-    pathEl.setAttribute("title", "Change path");
     pathEl.setAttribute("aria-label", "Change path");
     const startPathEdit = (): void => {
       this.companionPathEditing.add(editKey);
@@ -1743,7 +1741,6 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       if (rule.locked === true) {
         const lock = fr.createSpan({ cls: "config-sync-flock", attr: { "aria-label": "Preset rule — cannot be removed" } });
         setIcon(lock, "lock");
-        lock.setAttribute("title", "Preset rule — cannot be removed");
       }
       fr.createSpan({ cls: "config-sync-fkey", text: rule.pattern });
       fr.createSpan({ cls: `config-sync-ftag${isDetected ? " is-detected" : ""}`, text: isDetected ? "detected" : "manual" });

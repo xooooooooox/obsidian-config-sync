@@ -943,6 +943,10 @@ body.is-mobile .config-sync-strip-meta .config-sync-report-pills { margin-left: 
 .config-sync-card-badge-local { color: var(--color-pink); background: rgba(var(--color-pink-rgb), 0.12); }
 .config-sync-card-badge-count { color: var(--color-cyan); background: rgba(var(--color-cyan-rgb), 0.12); }
 .config-sync-card-badge-array, .config-sync-card-badge-fromapp { color: var(--text-muted); background: var(--background-modifier-border); }
+/* Innate platform chip ("desktop-only plugin", round-8 spec §2): same neutral grey as the
+   array/fromapp badges, inline-flex only here so the embedded monitor icon aligns with the text. */
+.config-sync-card-badge-plat { color: var(--text-muted); background: var(--background-modifier-border); display: inline-flex; align-items: center; gap: 4px; vertical-align: -1px; }
+.config-sync-card-badge-ic svg { width: 11px; height: 11px; display: block; }
 
 /* Card visual refresh (spec 2026-07-26-card-visual-refresh-design.md §2) — the four-column grid
    every "row" in a card drawer aligns to: content 1fr | scope icon | lock icon | action icon.

@@ -107,6 +107,10 @@ export class QualifierAutocomplete {
   private selected = 0;
   private open = false;
   private readonly onInput = (): void => this.refresh(true);
+  // Discoverability (round-8 spec §3): focusing the input opens the suggestions immediately —
+  // an empty (or trailing-space) input lists every qualifier key; a mid-word token prefix-
+  // filters, and a token matching no key closes the dropdown so plain text search stays quiet.
+  private readonly onFocus = (): void => this.refresh(true);
   private readonly onKeydown = (e: KeyboardEvent): void => this.handleKey(e);
   private readonly onBlur = (): void => {
     window.setTimeout(() => this.close(), 120);
@@ -122,6 +126,7 @@ export class QualifierAutocomplete {
     this.detach();
     this.input = input;
     input.addEventListener("input", this.onInput);
+    input.addEventListener("focus", this.onFocus);
     input.addEventListener("keydown", this.onKeydown);
     input.addEventListener("blur", this.onBlur);
     if (this.open) this.refresh(false); // re-render after a host full re-render recreated the input
@@ -137,6 +142,7 @@ export class QualifierAutocomplete {
     this.removeDropdown();
     if (this.input !== null) {
       this.input.removeEventListener("input", this.onInput);
+      this.input.removeEventListener("focus", this.onFocus);
       this.input.removeEventListener("keydown", this.onKeydown);
       this.input.removeEventListener("blur", this.onBlur);
     }
