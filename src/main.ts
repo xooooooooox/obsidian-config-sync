@@ -442,7 +442,6 @@ export default class ConfigSyncPlugin extends Plugin {
         this.lastGroups = groups;
         const statuses = await statusForGroups(ctx, groups);
         this.localStatuses = statuses;
-        this.updateStatusIndicators();
         let lock: StoreLock | null = null;
         try {
           lock = await loadLock(ctx);
@@ -451,6 +450,12 @@ export default class ConfigSyncPlugin extends Plugin {
         }
         const availability: Record<string, Availability> = {};
         for (const g of groups) availability[g.name] = availabilityForGroup(g, this.pluginHost(), lock);
+        // The status bar prefers presentedStatuses, which only refreshLocalStatus() used to
+        // update — so a Sync Center recompute could leave the status bar rendering a stale
+        // snapshot indefinitely (center "in sync", bar "↓2"). Keep both snapshots in step with
+        // THIS compute, and only then repaint the indicators.
+        this.presentedStatuses = statuses.map((st) => ({ ...st, state: presentedState(st.state, availability[st.group]?.drift ?? null) }));
+        this.updateStatusIndicators();
         return { groups, statuses, availability };
       },
       selfStatus: async (): Promise<SelfSyncInfo> => {
