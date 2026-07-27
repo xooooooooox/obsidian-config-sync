@@ -4,6 +4,7 @@ import { parseSyncManifest } from "../src/core/manifest";
 import { SyncGroup } from "../src/core/types";
 import { isFieldEnvelope, parseFileEnvelope } from "../src/core/crypto";
 import { statusForGroups } from "../src/core/status";
+import { emptyLedger } from "../src/core/ledger";
 import { isChanged } from "../src/core/runHistory";
 import { MemFS, FakePlugins, memGroupsIO } from "./memfs";
 
@@ -1368,7 +1369,7 @@ describe("switch-list exceptions", () => {
       });
       await seedGroups(ctx, COMMUNITY_MANIFEST);
       const manifest = await loadManifest(ctx);
-      const statuses = await statusForGroups(ctx, groupsForDevice(manifest, "desktop"));
+      const { statuses } = await statusForGroups(ctx, groupsForDevice(manifest, "desktop"), emptyLedger());
       expect(statuses).toEqual([{ group: "community-plugins", state: "in-sync" }]);
     });
 
@@ -1381,7 +1382,7 @@ describe("switch-list exceptions", () => {
       });
       await seedGroups(ctx, COMMUNITY_MANIFEST);
       const manifest = await loadManifest(ctx);
-      const statuses = await statusForGroups(ctx, groupsForDevice(manifest, "desktop"));
+      const { statuses } = await statusForGroups(ctx, groupsForDevice(manifest, "desktop"), emptyLedger());
       expect(statuses[0]?.state).not.toBe("in-sync");
     });
 
@@ -1446,7 +1447,7 @@ describe("switch-list exceptions", () => {
       });
       await seedGroups(ctx, CORE_MANIFEST);
       const manifest = await loadManifest(ctx);
-      const statuses = await statusForGroups(ctx, groupsForDevice(manifest, "desktop"));
+      const { statuses } = await statusForGroups(ctx, groupsForDevice(manifest, "desktop"), emptyLedger());
       expect(statuses).toEqual([{ group: "core-plugins", state: "in-sync" }]);
     });
 
@@ -1459,7 +1460,7 @@ describe("switch-list exceptions", () => {
       });
       await seedGroups(ctx, CORE_MANIFEST);
       const manifest = await loadManifest(ctx);
-      const statuses = await statusForGroups(ctx, groupsForDevice(manifest, "desktop"));
+      const { statuses } = await statusForGroups(ctx, groupsForDevice(manifest, "desktop"), emptyLedger());
       expect(statuses[0]?.state).not.toBe("in-sync");
     });
   });
@@ -1513,7 +1514,7 @@ describe("enabled-css-snippets switch list (field-aware local, plain store)", ()
       ".obs/appearance.json": JSON.stringify({ cssTheme: "X", enabledCssSnippets: ["a", "b"] }),
     });
     const manifest = await loadManifest(ctx);
-    const statuses = await statusForGroups(ctx, groupsForDevice(manifest, "desktop"));
+    const { statuses } = await statusForGroups(ctx, groupsForDevice(manifest, "desktop"), emptyLedger());
     expect(statuses.find((s) => s.group === "enabled-css-snippets")?.state).toBe("in-sync");
   });
 });

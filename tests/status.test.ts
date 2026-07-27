@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { CoreContext, capture, loadManifest, groupsForDevice, ExternalStoreReader, writeGroups } from "../src/core/ConfigSyncCore";
 import { parseSyncManifest } from "../src/core/manifest";
 import { statusForGroups, checkRemote, diffRemote, bucketCounts, remoteLockAhead, remoteDirectionCounts, GroupStatus } from "../src/core/status";
+import { applyUpdates, emptyLedger, Ledger } from "../src/core/ledger";
 import { MemFS, FakePlugins, memGroupsIO } from "./memfs";
 
 const MANIFEST = JSON.stringify({
@@ -31,10 +32,21 @@ async function seededAndCaptured(): Promise<{ io: MemFS; ctx: CoreContext }> {
   return { io, ctx };
 }
 
-async function allStates(ctx: CoreContext): Promise<Record<string, string>> {
+async function statusAndUpdates(ctx: CoreContext, ledger: Ledger = emptyLedger()) {
   const manifest = await loadManifest(ctx);
-  const statuses = await statusForGroups(ctx, groupsForDevice(manifest, "desktop"));
+  return statusForGroups(ctx, groupsForDevice(manifest, "desktop"), ledger);
+}
+
+async function allStates(ctx: CoreContext, ledger: Ledger = emptyLedger()): Promise<Record<string, string>> {
+  const { statuses } = await statusAndUpdates(ctx, ledger);
   return Object.fromEntries(statuses.map((s) => [s.group, s.state]));
+}
+
+// Produces a seeded ledger the way production does: run one pass on an in-sync vault and apply
+// its reseed updates.
+async function seededLedger(ctx: CoreContext): Promise<Ledger> {
+  const { updates } = await statusAndUpdates(ctx);
+  return applyUpdates(emptyLedger(), updates);
 }
 
 describe("statusForGroups", () => {
@@ -44,25 +56,66 @@ describe("statusForGroups", () => {
     expect(states).toEqual({ hotkeys: "in-sync", snippets: "in-sync", "plugin-demo": "in-sync" });
   });
 
-  it("reports local-changed when a live file is newer than capturedAt", async () => {
+  it("in-sync groups emit reseed updates; no-settings/not-captured emit drops", async () => {
+    const { ctx } = await seededAndCaptured();
+    const { statuses, updates } = await statusAndUpdates(ctx);
+    expect(statuses.every((s) => s.state === "in-sync")).toBe(true);
+    expect(Object.keys(updates).sort()).toEqual(["hotkeys", "plugin-demo", "snippets"]);
+    expect(updates["hotkeys"]).not.toBeNull();
+  });
+
+  it("reports local-changed when only the local side moved off the baseline", async () => {
+    const { io, ctx } = await seededAndCaptured();
+    const ledger = await seededLedger(ctx);
+    await io.write(".obs/hotkeys.json", '{"a":2}');
+    expect((await allStates(ctx, ledger))["hotkeys"]).toBe("local-changed");
+  });
+
+  it("reports store-newer when only the store side moved off the baseline", async () => {
+    const { io, ctx } = await seededAndCaptured();
+    const ledger = await seededLedger(ctx);
+    await io.write("cs/store/configdir/hotkeys.json", '{"a":9}');
+    expect((await allStates(ctx, ledger))["hotkeys"]).toBe("store-newer");
+  });
+
+  it("reports differs when both sides moved off the baseline", async () => {
+    const { io, ctx } = await seededAndCaptured();
+    const ledger = await seededLedger(ctx);
+    await io.write(".obs/hotkeys.json", '{"a":2}');
+    await io.write("cs/store/configdir/hotkeys.json", '{"a":9}');
+    expect((await allStates(ctx, ledger))["hotkeys"]).toBe("differs");
+  });
+
+  it("reports never-synced for a differing group with no baseline entry", async () => {
     const { io, ctx } = await seededAndCaptured();
     await io.write(".obs/hotkeys.json", '{"a":2}');
-    io.touch(".obs/hotkeys.json", Date.parse("2026-07-09T00:00:00.000Z"));
-    expect((await allStates(ctx))["hotkeys"]).toBe("local-changed");
+    expect((await allStates(ctx))["hotkeys"]).toBe("never-synced"); // empty ledger
   });
 
-  it("reports store-newer when content differs but live mtimes predate capturedAt", async () => {
+  it("dir groups get directions from baselines too, including added/deleted files", async () => {
     const { io, ctx } = await seededAndCaptured();
-    await io.write("cs/store/configdir/hotkeys.json", '{"a":9}'); // simulate a fresher pulled store
-    io.touch(".obs/hotkeys.json", Date.parse("2026-07-07T00:00:00.000Z"));
-    expect((await allStates(ctx))["hotkeys"]).toBe("store-newer");
+    const ledger = await seededLedger(ctx);
+    await io.write(".obs/snippets/two.css", "two"); // local added a file
+    expect((await allStates(ctx, ledger))["snippets"]).toBe("local-changed");
   });
 
-  it("reports differs (no direction) when there is no lock", async () => {
-    const { io, ctx } = await seededAndCaptured();
-    await io.remove("cs/store.lock.json");
-    await io.write(".obs/hotkeys.json", '{"a":3}');
-    expect((await allStates(ctx))["hotkeys"]).toBe("differs");
+  it("switch-list enable-order churn does not read as local movement", async () => {
+    const { io, ctx } = setup();
+    const SWITCH_MANIFEST = JSON.stringify({
+      version: 1,
+      groups: [{ name: "community-plugins", path: "{configDir}/community-plugins.json", type: "file", devices: "all" }],
+    });
+    io.seed({ ".obs/community-plugins.json": '["a","b"]' });
+    await writeGroups(ctx, parseSyncManifest(SWITCH_MANIFEST).groups);
+    await capture(ctx);
+    const manifest = await loadManifest(ctx);
+    const groups = groupsForDevice(manifest, "desktop");
+    const first = await statusForGroups(ctx, groups, emptyLedger());
+    const ledger = applyUpdates(emptyLedger(), first.updates);
+    await io.write(".obs/community-plugins.json", '["b","a"]'); // reorder only, same set
+    await io.write("cs/store/configdir/community-plugins.json", '["a","b","c"]\n'); // store gained "c"
+    const { statuses } = await statusForGroups(ctx, groups, ledger);
+    expect(statuses.find((s) => s.group === "community-plugins")?.state).toBe("store-newer");
   });
 
   it("reports not-captured when the store has no data for the group", async () => {
@@ -82,25 +135,20 @@ describe("statusForGroups", () => {
     await writeGroups(ctx, parseSyncManifest(SWITCH_MANIFEST).groups);
     await capture(ctx);
     await io.write("cs/store/configdir/community-plugins.json", '["a","b","c"]\n'); // store-stable order
-    io.touch(".obs/community-plugins.json", Date.parse("2026-07-09T00:00:00.000Z"));
     const manifest = await loadManifest(ctx);
-    const statuses = await statusForGroups(ctx, groupsForDevice(manifest, "desktop"));
+    const { statuses } = await statusForGroups(ctx, groupsForDevice(manifest, "desktop"), emptyLedger());
     expect(statuses.find((s) => s.group === "community-plugins")?.state).toBe("in-sync");
   });
 
-  it("detects dir set differences and ignores junk on both sides", async () => {
+  it("ignores junk on both sides", async () => {
     const { io, ctx } = await seededAndCaptured();
     io.seed({ ".obs/snippets/.DS_Store": "junk", "cs/store/configdir/snippets/.DS_Store": "junk" });
     expect((await allStates(ctx))["snippets"]).toBe("in-sync"); // junk alone never differs
-    io.seed({ ".obs/snippets/two.css": "two" });
-    io.touch(".obs/snippets/two.css", Date.parse("2026-07-09T00:00:00.000Z"));
-    expect((await allStates(ctx))["snippets"]).toBe("local-changed");
   });
 
   it("sanitize groups stay in-sync when only sanitized keys differ from raw", async () => {
     const { io, ctx } = await seededAndCaptured();
     await io.write(".obs/plugins/demo/data.json", '{"vikaToken":"ROTATED","theme":"x"}'); // token differs, sanitized view identical
-    io.touch(".obs/plugins/demo/data.json", Date.parse("2026-07-09T00:00:00.000Z"));
     expect((await allStates(ctx))["plugin-demo"]).toBe("in-sync");
   });
 
@@ -110,7 +158,7 @@ describe("statusForGroups", () => {
     await io.write(".obs/snippets/one.css", "ONE");          // updated (store still has "one")
     io.seed({ "cs/store/configdir/snippets/three.css": "three" }); // store-only → deleted
     const manifest = await loadManifest(ctx);
-    const statuses = await statusForGroups(ctx, groupsForDevice(manifest, "desktop"));
+    const { statuses } = await statusForGroups(ctx, groupsForDevice(manifest, "desktop"), emptyLedger());
     const snip = statuses.find((s) => s.group === "snippets");
     expect(snip?.changes?.added).toEqual(["two.css"]);
     expect(snip?.changes?.updated).toEqual(["one.css"]);
@@ -126,10 +174,10 @@ describe("statusForGroups", () => {
     expect(states).toEqual({ hotkeys: "not-captured", snippets: "no-settings", "plugin-demo": "no-settings" });
   });
 
-  it("keeps deletion-only differs when the store has files but this device does not", async () => {
+  it("reports never-synced when the store has files but this device does not (no baseline)", async () => {
     const { io, ctx } = await seededAndCaptured();
     await io.remove(".obs/hotkeys.json");
-    expect((await allStates(ctx))["hotkeys"]).toBe("differs");
+    expect((await allStates(ctx))["hotkeys"]).toBe("never-synced");
   });
 });
 
@@ -145,14 +193,14 @@ describe("statusForGroups: encrypted mode", () => {
     io.seed({ ".obs/secrets.json": '{"token":"x"}' });
     await writeGroups(ctx, parseSyncManifest(ENC_MANIFEST).groups);
     await capture(ctx);
-    expect((await allStates(ctx))["secrets"]).toBe("in-sync");
+    const ledger = await seededLedger(ctx);
+    expect((await allStates(ctx, ledger))["secrets"]).toBe("in-sync");
 
     await io.write(".obs/secrets.json", '{"token":"y"}');
-    io.touch(".obs/secrets.json", Date.parse("2026-07-09T00:00:00.000Z"));
-    expect((await allStates(ctx))["secrets"]).toBe("local-changed");
+    expect((await allStates(ctx, ledger))["secrets"]).toBe("local-changed");
 
     ctx.passphrase = null;
-    expect((await allStates(ctx))["secrets"]).toBe("locked");
+    expect((await allStates(ctx, ledger))["secrets"]).toBe("locked");
   });
 });
 
@@ -308,6 +356,11 @@ describe("bucketCounts", () => {
       { group: "b", state: "locked" },
     ];
     expect(bucketCounts(statuses)).toEqual({ up: 0, down: 0, ok: 1, none: 1 });
+  });
+
+  it("bucketCounts sends never-synced to the apply bucket", () => {
+    const statuses: GroupStatus[] = [{ group: "a", state: "never-synced" }];
+    expect(bucketCounts(statuses)).toEqual({ up: 0, down: 1, ok: 0, none: 0 });
   });
 });
 

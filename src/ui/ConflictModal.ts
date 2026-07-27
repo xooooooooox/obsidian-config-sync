@@ -1,22 +1,11 @@
 import { App, Modal } from "obsidian";
 import { PendingPull } from "../core/ConfigSyncCore";
-import { MergeConflict } from "../core/merge";
+import { MergeConflict, sortKeysDeep } from "../core/merge";
 import { SyncGroup } from "../core/types";
 import { renderDiffPanel } from "./diffView";
 import { SWITCH_LIST_GROUPS, switchListSortedView } from "../core/switchList";
 
 type Side = "local" | "remote";
-
-function sortKeysDeep(v: unknown): unknown {
-  if (Array.isArray(v)) return v.map(sortKeysDeep);
-  if (typeof v === "object" && v !== null) {
-    const rec = v as Record<string, unknown>;
-    const out: Record<string, unknown> = {};
-    for (const k of Object.keys(rec).sort()) out[k] = sortKeysDeep(rec[k]);
-    return out;
-  }
-  return v;
-}
 
 function definitionText(g: SyncGroup): string {
   return JSON.stringify(sortKeysDeep(g), null, 2);

@@ -434,6 +434,10 @@ export function categoryForGroup(name: string): ItemCategory {
   // match below. It still belongs to the Obsidian settings tab — pin it there explicitly so the
   // Sync Center scope agrees with the settings panel.
   if (name === "enabled-css-snippets") return "obsidian";
+  // The other two switch-list carriers (see SWITCH_LISTS) are the on/off lists OF those
+  // sections — pin them alongside the plugins they govern.
+  if (name === "community-plugins") return "community";
+  if (name === "core-plugins") return "core";
   for (const file of Object.keys(OPTION_LABELS)) {
     if (optionReservedName(file) === name) return "obsidian";
   }

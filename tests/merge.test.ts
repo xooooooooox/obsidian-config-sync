@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyMerge } from "../src/core/merge";
+import { classifyMerge, jsonSortedView } from "../src/core/merge";
 import { SyncGroup } from "../src/core/types";
 
 // {configDir}-relative file group → store rel "store/configdir/<name>.json" (groupStorePath
@@ -219,5 +219,11 @@ describe("classifyMerge", () => {
       { kind: "definition", name: "theme", local: bothDiffer, remote: bothDifferRemote },
       { kind: "file", name: "theme", rel: storeRel("theme"), localContent: "local-theme", remoteContent: "remote-theme" },
     ]);
+  });
+
+  it("jsonSortedView normalizes key order and formatting; null for non-JSON", () => {
+    expect(jsonSortedView('{"b":1,"a":{"d":2,"c":3}}')).toBe('{\n  "a": {\n    "c": 3,\n    "d": 2\n  },\n  "b": 1\n}\n');
+    expect(jsonSortedView('{"a":[2,1]}')).toBe('{\n  "a": [\n    2,\n    1\n  ]\n}\n'); // arrays keep order
+    expect(jsonSortedView("not json")).toBeNull();
   });
 });

@@ -16,7 +16,7 @@ export function visibleUnderFilter(state: GroupState, filter: PanelFilter): bool
   if (filter === "all" || filter === "leftover") return true;
   if (state === "locked") return false;
   if (filter === "capture") return state === "local-changed" || state === "not-captured";
-  if (filter === "apply") return state === "store-newer" || state === "differs";
+  if (filter === "apply") return state === "store-newer" || state === "differs" || state === "never-synced";
   if (filter === "none") return state === "no-settings";
   return state === "in-sync";
 }
@@ -134,6 +134,20 @@ export function statusBarStatuses(
     if (sectionForItem(a, isMobile) !== "main") return [];
     return [{ ...st, state: presentedState(st.state, a.drift) }];
   });
+}
+
+// Cold-start guidance (spec 2026-07-27): show only while the plugin's own settings are still
+// pending (coldstart/adopt/both) AND some group has never synced on this device. "capture"
+// pending is a normal working state, not a cold start. Dismissal is device-local and cleared
+// by main.ts when self returns to insync, so a future genuine cold start shows it again.
+export function showColdStartBanner(
+  selfState: "coldstart" | "adopt" | "capture" | "both" | "insync",
+  statuses: GroupStatus[],
+  dismissed: boolean
+): boolean {
+  if (dismissed) return false;
+  if (selfState !== "coldstart" && selfState !== "adopt" && selfState !== "both") return false;
+  return statuses.some((s) => s.state === "never-synced");
 }
 
 export interface PolicyOption {

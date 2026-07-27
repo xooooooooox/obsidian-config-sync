@@ -23,6 +23,7 @@ import {
   SECTION_TITLES,
   SectionKind,
   sectionForItem,
+  showColdStartBanner,
   stageableRow,
   versionLine,
   visibleUnderFilter,
@@ -31,6 +32,7 @@ import {
 } from "./panelModel";
 import { renderDiffPanel } from "./diffView";
 import { SWITCH_LIST_GROUPS, switchListSortedView } from "../core/switchList";
+import { jsonSortedView } from "../core/merge";
 import { renderReportContent, renderReportPills } from "./reportContent";
 import { RunRecord, RunKind, RunStatus, worstStatus, formatRunTime, stopSyncDesc, deleteLeftoverDesc } from "../core/runHistory";
 import { ACTION_ICON, ACTION_COLOR_CLASS, renderActionIcon, renderActionCount, type SyncAction } from "./actionIcons";
@@ -117,6 +119,8 @@ export interface SelfSyncInfo {
 export interface SyncCenterHost {
   computeStatuses(): Promise<{ groups: SyncGroup[]; statuses: GroupStatus[]; availability: Record<string, Availability> }>;
   selfStatus(): Promise<SelfSyncInfo>;
+  coldStartDismissed(): boolean;
+  setColdStartDismissed(v: boolean): void;
   resolvedPath(group: SyncGroup): string;
   displayName(group: string, storedLabel?: string): string;
   captureItems(items: CaptureItem[], onProgress?: ProgressFn): Promise<GroupResult[] | null>;
@@ -339,6 +343,10 @@ export class SyncCenterView extends ItemView {
     if (!sessionStaging.seeded) {
       sessionStaging.seeded = true;
       for (const s of statuses) {
+        // never-synced rows are deliberately NOT pre-checked (定稿 2026-07-28): in the upgrade
+        // window a group with uncaptured local edits also reads never-synced, and pre-checking
+        // it under the apply default would make one blind "Apply N items" press overwrite those
+        // edits. Cold-start users select-all instead; safety beats one click.
         if ((s.state === "local-changed" || s.state === "store-newer") && this.sectionOf(s.group) === "main") this.selected.add(s.group);
       }
     }
@@ -668,7 +676,16 @@ export class SyncCenterView extends ItemView {
       }
       const leftLabel = dir === "capture" ? "store" : "this device";
       const rightLabel = dir === "capture" ? "this device (what capture would write)" : "store (what apply would write)";
-      renderDiffPanel(holder, pair.base, pair.produced, leftLabel, rightLabel, "data.json");
+      const sb = jsonSortedView(pair.base);
+      const sp = jsonSortedView(pair.produced);
+      const bothSorted = sb !== null && sp !== null;
+      const base = bothSorted ? sb : pair.base;
+      const produced = bothSorted ? sp : pair.produced;
+      if (base === produced && pair.base !== pair.produced) {
+        holder.createDiv({ cls: "config-sync-expand-note", text: "Only key order / formatting differs." });
+        return;
+      }
+      renderDiffPanel(holder, base, produced, leftLabel, rightLabel, bothSorted ? "data.json · sorted view" : "data.json");
     });
   }
 
@@ -1148,6 +1165,23 @@ export class SyncCenterView extends ItemView {
   }
 
   private renderItemMode(main: HTMLElement): void {
+    if (this.selfInfo !== null && showColdStartBanner(this.selfInfo.state, [...this.statuses.values()], this.host.coldStartDismissed())) {
+      const banner = main.createDiv({ cls: "config-sync-coldstart-banner" });
+      const txt = banner.createDiv({ cls: "config-sync-coldstart-text" });
+      txt.createSpan({ cls: "config-sync-coldstart-head", text: "This device hasn't synced with the store yet. " });
+      txt.createSpan({ text: "Adopt the plugin settings first — they carry the scopes and device rules that make the diffs below trustworthy — then review and apply." });
+      const actions = banner.createDiv({ cls: "config-sync-coldstart-actions" });
+      const go = actions.createEl("button", { cls: "config-sync-coldstart-go", text: "Review settings →" });
+      go.addEventListener("click", () => {
+        this.panelScope = { kind: "self" };
+        this.renderMainRegion();
+      });
+      const close = actions.createEl("button", { cls: "config-sync-coldstart-x", text: "✕" });
+      close.addEventListener("click", () => {
+        this.host.setColdStartDismissed(true);
+        this.renderMainRegion();
+      });
+    }
     this.renderResultStrip(main);
     const scoped = this.scopedRows();
     const mainRows = scoped.filter((r) => this.sectionOf(r.group.name) === "main");
@@ -1524,8 +1558,10 @@ export class SyncCenterView extends ItemView {
         return { glyph: "↑", cls: "is-up", tip: "changed on this device (likely)", action: "capture" };
       case "store-newer":
         return { glyph: "↓", cls: "is-down", tip: "store is newer (likely)", action: "apply" };
+      case "never-synced":
+        return { glyph: "↓", cls: "is-down", tip: "not synced on this device yet — apply takes the store's settings", action: "apply" };
       case "differs":
-        return { glyph: "≠", cls: "is-neq", tip: "differs from store — direction unknown" };
+        return { glyph: "≠", cls: "is-neq", tip: "changed on both sides since this device last synced — review the diff" };
       case "not-captured":
         return { glyph: "—", cls: "is-miss", tip: "not yet captured" };
       case "no-settings":
@@ -1642,6 +1678,9 @@ export class SyncCenterView extends ItemView {
       this.renderPolicySeg(detail, r, a, false); // apply-only: no direction toggle
       this.renderCappedChanges(detail, r, status.changes);
       return;
+    }
+    if (status.state === "never-synced") {
+      detail.createDiv({ cls: "config-sync-expand-note", text: "not synced on this device yet — review the diff, then apply (or switch direction to capture)" });
     }
     this.renderDirectionToggle(detail, r);
     // The disabled section offers the enable ladder in BOTH directions (spec 2026-07-17):
@@ -1843,10 +1882,25 @@ export class SyncCenterView extends ItemView {
           const leftLabel = dir === "capture" ? "store" : "this device";
           const rightLabel = dir === "capture" ? "this device (what capture would write)" : "store (what apply would write)";
           // On/off lists compare as sets — sorted view keeps ordering/comma artifacts out.
-          const sorted = SWITCH_LIST_GROUPS.has(r.group.name);
-          const base = sorted ? switchListSortedView(pair.base) : pair.base;
-          const produced = sorted ? switchListSortedView(pair.produced) : pair.produced;
-          renderDiffPanel(p, base, produced, leftLabel, rightLabel, sorted ? `${e.name} · sorted view` : e.name);
+          // Other JSON files get key-order normalization for the same reason (spec 2026-07-27).
+          const switchSorted = SWITCH_LIST_GROUPS.has(r.group.name);
+          let base = switchSorted ? switchListSortedView(pair.base) : pair.base;
+          let produced = switchSorted ? switchListSortedView(pair.produced) : pair.produced;
+          let jsonSorted = false;
+          if (!switchSorted && e.name.endsWith(".json")) {
+            const sb = jsonSortedView(pair.base);
+            const sp = jsonSortedView(pair.produced);
+            if (sb !== null && sp !== null) {
+              base = sb;
+              produced = sp;
+              jsonSorted = true;
+            }
+          }
+          if (base === produced && pair.base !== pair.produced) {
+            p.createDiv({ cls: "config-sync-expand-note", text: "Only key order / formatting differs." });
+            return;
+          }
+          renderDiffPanel(p, base, produced, leftLabel, rightLabel, switchSorted || jsonSorted ? `${e.name} · sorted view` : e.name);
         });
       });
     };

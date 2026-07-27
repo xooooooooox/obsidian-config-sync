@@ -852,6 +852,18 @@ body.is-mobile .config-sync-section-head input[type="checkbox"]:indeterminate::a
 .config-sync-sect .config-sync-sect-count { margin-left: 6px; font-size: 10px; }
 .config-sync-pill.is-statenote { background: rgba(var(--color-cyan-rgb), 0.18); color: var(--color-cyan); }
 
+/* Cold-start guidance banner (spec 2026-07-27): shown above the result strip in item mode while
+   the plugin's own settings are still pending and some group has never synced on this device. */
+.config-sync-coldstart-banner { display: flex; align-items: center; gap: var(--size-4-3); border: 1px solid rgba(var(--interactive-accent-rgb), 0.35); background: rgba(var(--interactive-accent-rgb), 0.07); border-radius: 8px; padding: 8px 12px; margin-bottom: 8px; }
+.config-sync-coldstart-text { flex: 1; font-size: var(--font-ui-small); color: var(--text-normal); }
+.config-sync-coldstart-head { font-weight: 600; }
+.config-sync-coldstart-actions { display: flex; align-items: center; gap: var(--size-4-2); flex: none; }
+.config-sync-coldstart-go { background: var(--interactive-accent); color: var(--text-on-accent); border: none; border-radius: 6px; padding: 4px 10px; font-size: var(--font-ui-smaller); cursor: pointer; box-shadow: none; height: auto; white-space: nowrap; }
+.config-sync-coldstart-go:hover { background: var(--interactive-accent-hover); }
+.config-sync-coldstart-x { background: none; border: none; box-shadow: none; color: var(--text-faint); cursor: pointer; font-size: var(--font-ui-smaller); padding: 2px 4px; height: auto; }
+.config-sync-coldstart-x:hover { color: var(--text-normal); }
+body.is-mobile .config-sync-coldstart-banner { flex-wrap: wrap; }
+
 /* 0.20.0 inline result strip */
 /* Sticky dock: opaque backing so scrolling rows don't bleed through the strip's translucent
    tint; pins the outcome to the top of the scroll viewport (see renderResultStrip). */

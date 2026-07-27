@@ -101,7 +101,28 @@ functions.
 
 **Status & availability**
 - `core/status.ts` — per-item status (`statusForGroups`), remote freshness (`diffRemote`,
-  `remoteLockAhead`), and the counts the UI shows (`bucketCounts`).
+  `remoteLockAhead`), and the counts the UI shows (`bucketCounts`). Direction for a changed group
+  is a three-way comparison against this device's `core/ledger.ts` entry, never file mtimes or the
+  lock's `capturedAt`: no entry → `never-synced` (apply-default, counts into `bucketCounts.down`);
+  only the store side moved → `store-newer`; only the local side moved → `local-changed`; both
+  sides moved, or neither (a scope/rule edit shifted the comparison lens) → `differs`, meaning
+  specifically "changed on both sides since this device last synced". A comparison error still
+  reports `differs` with a `message`. `statusForGroups` is IO-free with respect to the ledger — it
+  takes the parsed `Ledger` and returns `{ statuses, updates }`; `main.ts` owns loading and
+  persisting it (see Connector below).
+- `core/ledger.ts` — the device-local sync-baseline ledger behind that direction logic. After
+  every group whose comparison reports `in-sync`, `statusForGroups` emits a fresh `{store, local,
+  at}` fingerprint (SHA-256 hex via `crypto.subtle`); switch-list groups (`SWITCH_LIST_GROUPS`)
+  hash their canonical *set* form rather than raw bytes, so on/off-list reordering never reads as
+  movement, and dir groups hash a sorted `rel\nsha256(content)` manifest. `main.ts` is the ledger's
+  only writer — there is no separate write hook in capture/apply, since every run already triggers
+  a status recompute whose `in-sync` results reseed the baseline (this also covers upgrade
+  migration and self-healing after a wiped ledger). `parseLedger`/`applyUpdates`/`pruneLedger` are
+  pure and total: malformed or missing input parses to an empty ledger, entries for groups that
+  left the compiled config are pruned on write, `no-settings`/`not-captured` groups drop
+  their entry, while comparison errors and `locked` groups keep theirs (a transient read failure
+  or missing passphrase must not degrade direction knowledge). A lost ledger only ever widens uncertainty toward
+  `never-synced`, never guesses a destructive direction.
 - `core/availability.ts` — is a plugin enabled / disabled / not-installed on this device, plus
   version drift (`availabilityForGroup`, `compareVersions`); `snippetOrphans(local, store,
   localFiles, storeFiles)` — enabled-snippet names with no `.css` file locally **and** none in
@@ -116,6 +137,11 @@ functions.
   taxonomy; they no longer drive any tab's rendering (that's `registry.ts` + `itemCard.ts` now —
   see UI below) and today only feed `SettingTab.ts`'s search index and a few Advanced-tab helpers.
   `listDiscovered` (unclassified config-root files) is still live for the Advanced tab.
+  `categoryForGroup(name)` maps a compiled group name to its search/leftover category (`obsidian`/
+  `core`/`community`/`custom`/…) for the `scope:` qualifier and leftover grouping; the switch-list
+  enablement-carrier groups `community-plugins`/`core-plugins` are pinned to `community`/`core`
+  (the same way `enabled-css-snippets` is pinned to `obsidian`) instead of falling through to
+  `custom`.
 - `core/leftover.ts` — `leftoverStoreRels`: store files with no matching group (cleanup surface).
 - `core/runHistory.ts` — the run-record model and helpers (`RunRecord`, `summarizeRun`,
   `worstStatus`, `countChanged`, `isChanged`, `pruneHistory`).
@@ -149,7 +175,11 @@ functions.
   rules); `RULE_SCOPES`-derived `FieldRule`/`FileRule` scope validation (single source of truth
   with `types.ts`, so the type and the validator can't drift — the failure mode a prior CRITICAL
   finding was named for); parse/validate `store.lock.json`.
-- `core/merge.ts` — merge a remote `store.lock.json` against the local one (`classifyMerge`).
+- `core/merge.ts` — merge a remote `store.lock.json` against the local one (`classifyMerge`); also
+  the shared `sortKeysDeep`/`jsonSortedView` helpers (key-order-normalized JSON rendering, arrays
+  keep their order), used by both the merge-conflict modal and the Sync Center's diff preview —
+  when a `.json` file's raw text differs but its sorted view doesn't, the preview shows a single
+  "Only key order / formatting differs." note instead of a blank-looking diff.
 
 **Install & discovery**
 - `core/installer.ts` — download a plugin from the community catalog, version-pinned via the
@@ -183,7 +213,11 @@ functions.
 - `qualifierSearch.ts` — the `key:value` search shared by both search boxes: pure `parseQuery` /
   `matchesQualifiers` / `suggest` / `applySuggestion`, plus the `QualifierAutocomplete` DOM widget.
 - `panelModel.ts` — the pure view-model deciding what state each Sync Center row presents under
-  the filters (unrelated to the settings-tab card renderer above).
+  the filters (unrelated to the settings-tab card renderer above); `never-synced` rows filter under
+  `apply` and default-direction to apply, same as `store-newer`/`differs`. `showColdStartBanner(
+  selfState, statuses, dismissed)` is the pure predicate behind the Sync Center's cold-start
+  banner: true while the plugin's own settings are still pending adoption (self state `coldstart`/
+  `adopt`/`both`) and at least one row is `never-synced`, unless dismissed.
 - `reportContent.ts` — shared run-report rendering (the Sync Center strip and History detail).
 - `diffView.ts` — unified-diff rendering; `jsonView.ts` — read-only `data.json` viewer with keys
   colored by `{scope, encrypted}` rule state (per-element coloring too, for a `perItem` array);
@@ -227,6 +261,15 @@ functions.
   wrong device class. `enabled-css-snippets` is unaffected by any of this — its per-element scope
   lives in the compiled "appearance" group's `perItem.enabledCssSnippets` map instead (see
   `core/perItem.ts` above).
+  `loadBaselines`/`saveBaselines` wrap `app.loadLocalStorage`/`saveLocalStorage` under the vault-
+  and device-scoped key `config-sync-baselines` (same storage shape as the `config-sync-passphrase`
+  key above) and are the ledger's only reader/writer, called before and after every
+  `statusForGroups` pass (the main list, the self group, and the periodic/manual status refresh).
+  The key is deliberately `localStorage`, not a vault file: remotely-save (or any note sync)
+  carries the vault, and the baseline is exactly the fact a vault-wide sync must not carry — what
+  THIS device last saw in sync. `coldStartDismissed`/`setColdStartDismissed` persist the cold-start
+  banner's dismissal the same way, under `config-sync-coldstart-dismissed`, cleared whenever self
+  state settles back to `insync` so a future genuine cold start shows the banner again.
 
 **Brand assets**
 - `assets/` — brand SVGs: `icon.svg` (24×24, `currentColor`, iconize-importable), `logo.svg`
@@ -244,6 +287,11 @@ Changes must preserve these:
 - **Switch lists are identified by group name and compared as sets.** `SWITCH_LIST_GROUPS`
   (`community-plugins`, `core-plugins`) drives set comparison — never byte comparison — at all
   five alignment points: `statusForGroups`, `classifyMerge`, `diffRemote`, capture, and apply.
+- **Direction comes from a device-local baseline, not timestamps.** `store.lock.json`'s
+  `capturedAt` and file mtimes never drive `local-changed`/`store-newer`/`differs`; only the
+  `core/ledger.ts` fingerprint this device last saw in sync does. Losing the ledger (reinstall,
+  cleared app data) only ever widens uncertainty to `never-synced` (apply-default) — it never
+  guesses a destructive direction.
 - **Class field rules (`desktop`/`mobile`) act on top-level keys only.** A glob match inside a
   nested object is ignored for class partitioning; `strip`/`encrypt` are unaffected and keep
   their any-depth semantics.

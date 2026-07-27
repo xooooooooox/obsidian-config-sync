@@ -1,4 +1,4 @@
-import { CoreContext, ExternalStoreReader, groupForStoreRel, loadLock, loadManifest, overlayGroup, remoteGroupsFrom, storeDir } from "./ConfigSyncCore";
+import { CoreContext, ExternalStoreReader, groupForStoreRel, loadManifest, overlayGroup, remoteGroupsFrom, storeDir } from "./ConfigSyncCore";
 import { isJunkPath, listFilesRecursive } from "./io";
 import { basename, groupStorePath, relativeTo, sidecarStoreSuffix } from "./pathing";
 import { FileChanges, hasChanges, StoreLock, SyncGroup } from "./types";
@@ -6,8 +6,9 @@ import { parseStoreLock } from "./manifest";
 import { contentUnchanged, groupNeedsPassphrase } from "./modes";
 import { parseFileEnvelope } from "./crypto";
 import { localRealPath, parseSwitchList, readLocalSwitchList, SWITCH_LIST_GROUPS, switchListsEqual } from "./switchList";
+import { ABSENT_HASH, BaselineEntry, hashDirSide, hashFileSide, Ledger, LedgerUpdates } from "./ledger";
 
-export type GroupState = "in-sync" | "local-changed" | "store-newer" | "differs" | "not-captured" | "no-settings" | "locked";
+export type GroupState = "in-sync" | "local-changed" | "store-newer" | "differs" | "not-captured" | "never-synced" | "no-settings" | "locked";
 
 export interface GroupStatus {
   group: string;
@@ -16,49 +17,57 @@ export interface GroupStatus {
   changes?: FileChanges;
 }
 
-type Comparison = "not-captured" | "no-settings" | { changes: FileChanges; liveFiles: string[] };
+type Comparison = "not-captured" | "no-settings" | { changes: FileChanges; localHash: string; storeHash: string };
 
-export async function statusForGroups(ctx: CoreContext, groups: SyncGroup[]): Promise<GroupStatus[]> {
-  // The lock is optional context for direction hints; never let it block status.
-  let capturedAtMs: number | null = null;
-  try {
-    const lock = await loadLock(ctx);
-    if (lock !== null) {
-      const ms = Date.parse(lock.capturedAt);
-      capturedAtMs = Number.isNaN(ms) ? null : ms;
-    }
-  } catch {
-    capturedAtMs = null;
-  }
-  const out: GroupStatus[] = [];
+export async function statusForGroups(
+  ctx: CoreContext,
+  groups: SyncGroup[],
+  ledger: Ledger
+): Promise<{ statuses: GroupStatus[]; updates: LedgerUpdates }> {
+  const statuses: GroupStatus[] = [];
+  const updates: LedgerUpdates = {};
   for (const group of groups) {
     try {
-      out.push(await groupStatus(ctx, group, capturedAtMs));
+      const r = await groupStatus(ctx, group, ledger.groups[group.name]);
+      statuses.push(r.status);
+      if (r.update !== undefined) updates[group.name] = r.update;
     } catch (e) {
-      out.push({ group: group.name, state: "differs", message: (e as Error).message });
+      statuses.push({ group: group.name, state: "differs", message: (e as Error).message });
     }
   }
-  return out;
+  return { statuses, updates };
 }
 
-async function groupStatus(ctx: CoreContext, group: SyncGroup, capturedAtMs: number | null): Promise<GroupStatus> {
+// Direction is a three-way comparison against this device's last-synced baseline (spec
+// 2026-07-27): no baseline → never-synced; one side moved → that side is the direction; both
+// moved (or neither — a scope/rule change shifted the comparison lens) → differs. in-sync
+// reseeds the baseline; not-captured/no-settings drop it; locked keeps it (a missing
+// passphrase is temporary and must not degrade direction knowledge).
+async function groupStatus(
+  ctx: CoreContext,
+  group: SyncGroup,
+  baseline: BaselineEntry | undefined
+): Promise<{ status: GroupStatus; update?: BaselineEntry | null }> {
   if (groupNeedsPassphrase(group) && ctx.passphrase === null) {
-    return { group: group.name, state: "locked" };
+    return { status: { group: group.name, state: "locked" } };
   }
   const real = localRealPath(group.name, group.path, ctx.configDir);
   const store = `${storeDir(ctx)}/${groupStorePath(group.path)}`;
   const cmp = group.type === "file" ? await compareFile(ctx, group, real, store) : await compareDir(ctx, group, real, store);
-  if (cmp === "no-settings") return { group: group.name, state: "no-settings" };
-  if (cmp === "not-captured") return { group: group.name, state: "not-captured" };
-  if (!hasChanges(cmp.changes)) return { group: group.name, state: "in-sync" };
-  let maxMtime: number | null = null;
-  for (const f of cmp.liveFiles) {
-    const s = await ctx.io.stat(f);
-    if (s !== null && (maxMtime === null || s.mtime > maxMtime)) maxMtime = s.mtime;
+  if (cmp === "no-settings") return { status: { group: group.name, state: "no-settings" }, update: null };
+  if (cmp === "not-captured") return { status: { group: group.name, state: "not-captured" }, update: null };
+  if (!hasChanges(cmp.changes)) {
+    return {
+      status: { group: group.name, state: "in-sync" },
+      update: { store: cmp.storeHash, local: cmp.localHash, at: ctx.now() },
+    };
   }
+  if (baseline === undefined) return { status: { group: group.name, state: "never-synced", changes: cmp.changes } };
+  const storeMoved = cmp.storeHash !== baseline.store;
+  const localMoved = cmp.localHash !== baseline.local;
   const state: GroupState =
-    maxMtime === null || capturedAtMs === null ? "differs" : maxMtime > capturedAtMs ? "local-changed" : "store-newer";
-  return { group: group.name, state, changes: cmp.changes };
+    storeMoved && !localMoved ? "store-newer" : localMoved && !storeMoved ? "local-changed" : "differs";
+  return { status: { group: group.name, state, changes: cmp.changes } };
 }
 
 async function compareFile(ctx: CoreContext, group: SyncGroup, real: string, store: string): Promise<Comparison> {
@@ -66,11 +75,13 @@ async function compareFile(ctx: CoreContext, group: SyncGroup, real: string, sto
     return (await ctx.io.exists(real)) ? "not-captured" : "no-settings";
   }
   const name = basename(real);
-  if (!(await ctx.io.exists(real))) {
-    return { liveFiles: [], changes: { added: [], updated: [], deleted: [name] } };
-  }
   const storeContent = await ctx.io.read(store);
+  const storeHash = await hashFileSide(group.name, storeContent, "store");
+  if (!(await ctx.io.exists(real))) {
+    return { changes: { added: [], updated: [], deleted: [name] }, localHash: ABSENT_HASH, storeHash };
+  }
   const liveContent = await ctx.io.read(real);
+  const localHash = await hashFileSide(group.name, liveContent, "local");
   const exc = SWITCH_LIST_GROUPS.has(group.name) ? ctx.switchExceptions[group.name] ?? [] : [];
   // Switch lists ALWAYS compare as sets — exceptions or not. The old `exc.length > 0` guard
   // made exception-free devices fall through to byte comparison, where local enable-order vs
@@ -87,7 +98,7 @@ async function compareFile(ctx: CoreContext, group: SyncGroup, real: string, sto
         ? await contentUnchanged(effGroup, liveContent, storeContent, ctx.passphrase, ctx.deviceClass, ownScope)
         : liveContent === storeContent;
   const changes: FileChanges = equal ? { added: [], updated: [], deleted: [] } : { added: [], updated: [name], deleted: [] };
-  return { liveFiles: equal ? [] : [real], changes };
+  return { changes, localHash, storeHash };
 }
 
 // For switch-list groups with exceptions: compare with switchListsEqual when both sides parse
@@ -103,33 +114,29 @@ async function compareDir(ctx: CoreContext, group: SyncGroup, real: string, stor
   const liveFiles = (await ctx.io.exists(real)) ? (await listFilesRecursive(ctx.io, real)).filter((f) => !isJunkPath(f)) : [];
   const storeFiles = (await ctx.io.exists(store)) ? (await listFilesRecursive(ctx.io, store)).filter((f) => !isJunkPath(f)) : [];
   if (storeFiles.length === 0) return liveFiles.length === 0 ? "no-settings" : "not-captured";
-  const liveRels = liveFiles.map((f) => relativeTo(real, f));
-  const storeRels = storeFiles.map((f) => relativeTo(store, f));
-  const liveSet = new Set(liveRels);
-  const storeSet = new Set(storeRels);
+  const liveEntries: { rel: string; content: string }[] = [];
+  for (const f of liveFiles) liveEntries.push({ rel: relativeTo(real, f), content: await ctx.io.read(f) });
+  const storeEntries: { rel: string; content: string }[] = [];
+  for (const f of storeFiles) storeEntries.push({ rel: relativeTo(store, f), content: await ctx.io.read(f) });
+  const liveByRel = new Map(liveEntries.map((e) => [e.rel, e.content]));
+  const storeByRel = new Map(storeEntries.map((e) => [e.rel, e.content]));
   const changes: FileChanges = { added: [], updated: [], deleted: [] };
-  const changedLiveFiles: string[] = [];
-  for (const rel of liveRels) {
-    if (!storeSet.has(rel)) {
-      changes.added.push(rel);
-      changedLiveFiles.push(`${real}/${rel}`);
-    } else {
-      const liveContent = await ctx.io.read(`${real}/${rel}`);
-      const storeContent = await ctx.io.read(`${store}/${rel}`);
-      const equal =
-        group.mode === "encrypted"
-          ? await contentUnchanged(group, liveContent, storeContent, ctx.passphrase, ctx.deviceClass, null)
-          : liveContent === storeContent;
-      if (!equal) {
-        changes.updated.push(rel);
-        changedLiveFiles.push(`${real}/${rel}`);
-      }
+  for (const e of liveEntries) {
+    const storeContent = storeByRel.get(e.rel);
+    if (storeContent === undefined) {
+      changes.added.push(e.rel);
+      continue;
     }
+    const equal =
+      group.mode === "encrypted"
+        ? await contentUnchanged(group, e.content, storeContent, ctx.passphrase, ctx.deviceClass, null)
+        : e.content === storeContent;
+    if (!equal) changes.updated.push(e.rel);
   }
-  for (const rel of storeRels) {
-    if (!liveSet.has(rel)) changes.deleted.push(rel);
+  for (const e of storeEntries) {
+    if (!liveByRel.has(e.rel)) changes.deleted.push(e.rel);
   }
-  return { liveFiles: changedLiveFiles, changes };
+  return { changes, localHash: await hashDirSide(liveEntries), storeHash: await hashDirSide(storeEntries) };
 }
 
 export interface BucketCounts {
@@ -146,7 +153,7 @@ export function bucketCounts(statuses: GroupStatus[]): BucketCounts {
   let none = 0;
   for (const s of statuses) {
     if (s.state === "local-changed" || s.state === "not-captured") up++;
-    else if (s.state === "store-newer" || s.state === "differs") down++;
+    else if (s.state === "store-newer" || s.state === "differs" || s.state === "never-synced") down++;
     else if (s.state === "no-settings" || s.state === "locked") none++;
     else ok++;
   }

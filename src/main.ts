@@ -60,6 +60,7 @@ import { PkmMode, PkmProbe, resolveEffectiveMode, resolveRootPath } from "./core
 import { pluginRuntimeEnabled } from "./core/pluginState";
 import { syncListDelta } from "./core/syncListDelta";
 import { selfPaneState } from "./core/selfPane";
+import { applyUpdates, Ledger, parseLedger, pruneLedger } from "./core/ledger";
 import { bucketCounts, checkRemote, diffRemote, GroupStatus, remoteDirectionCounts, RemoteCheck, remoteLockAhead, statusForGroups } from "./core/status";
 import { GroupResult, Remote, RibbonButtons, RuleScope, StoreLock, SyncGroup } from "./core/types";
 import { statusBarStatuses } from "./ui/panelModel";
@@ -309,7 +310,10 @@ export default class ConfigSyncPlugin extends Plugin {
       const manifest = await loadManifest(ctx);
       const device = Platform.isMobile ? ("mobile" as const) : ("desktop" as const);
       const scoped = groupsForDevice(manifest, device);
-      this.localStatuses = await statusForGroups(ctx, scoped);
+      const ledger = this.loadBaselines();
+      const { statuses, updates } = await statusForGroups(ctx, scoped, ledger);
+      this.localStatuses = statuses;
+      this.saveBaselines(pruneLedger(applyUpdates(ledger, updates), new Set(scoped.map((g) => g.name))));
       // Presented buckets for the ribbon dot: version-ahead in-sync items count as to-capture,
       // matching the panel (0.23.4/0.23.5) — no crypto cost, just a lock read.
       let lock: StoreLock | null = null;
@@ -443,8 +447,10 @@ export default class ConfigSyncPlugin extends Plugin {
         const device = Platform.isMobile ? ("mobile" as const) : ("desktop" as const);
         const groups = groupsForDevice(manifest, device);
         this.lastGroups = groups;
-        const statuses = await statusForGroups(ctx, groups);
+        const ledger = this.loadBaselines();
+        const { statuses, updates } = await statusForGroups(ctx, groups, ledger);
         this.localStatuses = statuses;
+        this.saveBaselines(pruneLedger(applyUpdates(ledger, updates), new Set(groups.map((g) => g.name))));
         let lock: StoreLock | null = null;
         try {
           lock = await loadLock(ctx);
@@ -478,7 +484,10 @@ export default class ConfigSyncPlugin extends Plugin {
         if (local.length === 0) return { state: "coldstart", delta, itemCount: storeGroups.length, capturedAt, contentChanged: false, versionRefresh: null, flagsRefresh: null };
         const selfGroup = local.find((g) => g.name === SELF_GROUP_NAME);
         if (selfGroup === undefined) return { state: "insync", delta, itemCount: local.length, capturedAt, contentChanged: false, versionRefresh: null, flagsRefresh: null };
-        const [st] = await statusForGroups(ctx, [selfGroup]);
+        const selfLedger = this.loadBaselines();
+        const { statuses: selfStatuses, updates: selfUpdates } = await statusForGroups(ctx, [selfGroup], selfLedger);
+        const [st] = selfStatuses;
+        this.saveBaselines(applyUpdates(selfLedger, selfUpdates));
         let lock: StoreLock | null = null;
         try {
           lock = await loadLock(ctx);
@@ -488,10 +497,13 @@ export default class ConfigSyncPlugin extends Plugin {
         const av = availabilityForGroup(selfGroup, this.pluginHost(), lock);
         const flagsRefreshCount = desktopOnlyDrift(this.compiledGroups, this.pluginHost(), lock);
         const decided = selfPaneState({ isColdStart: false, groupState: st?.state, drift: av.drift, flagsDrift: flagsRefreshCount > 0 });
+        if (decided.state === "insync") this.setColdStartDismissed(false);
         const versionRefresh =
           decided.versionRefresh && av.localVersion !== null && av.storeVersion !== null ? { local: av.localVersion, store: av.storeVersion } : null;
         return { state: decided.state, delta, itemCount: local.length, capturedAt, contentChanged: decided.contentChanged, versionRefresh, flagsRefresh: flagsRefreshCount > 0 ? flagsRefreshCount : null };
       },
+      coldStartDismissed: () => this.coldStartDismissed(),
+      setColdStartDismissed: (v) => this.setColdStartDismissed(v),
       resolvedPath: (g) => g.path.replace("{configDir}", this.app.vault.configDir),
       displayName: (g) => this.displayName(g, this.lastGroups?.find((x) => x.name === g)?.label),
       diffPair: async (name, rel, dir) => {
@@ -791,6 +803,22 @@ export default class ConfigSyncPlugin extends Plugin {
     const existing = ss.getSecret(PASSPHRASE_SECRET_ID);
     if (existing === null || existing === "") ss.setSecret(PASSPHRASE_SECRET_ID, plain);
     this.app.saveLocalStorage("config-sync-passphrase", null);
+  }
+
+  private loadBaselines(): Ledger {
+    return parseLedger(this.app.loadLocalStorage("config-sync-baselines"));
+  }
+
+  private saveBaselines(ledger: Ledger): void {
+    this.app.saveLocalStorage("config-sync-baselines", JSON.stringify(ledger));
+  }
+
+  private coldStartDismissed(): boolean {
+    return this.app.loadLocalStorage("config-sync-coldstart-dismissed") === "1";
+  }
+
+  private setColdStartDismissed(v: boolean): void {
+    this.app.saveLocalStorage("config-sync-coldstart-dismissed", v ? "1" : null);
   }
 
   private pluginHost(): PluginHost {

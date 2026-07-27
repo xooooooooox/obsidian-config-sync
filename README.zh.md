@@ -20,7 +20,7 @@
 - **凭证安全** —— 逐键或整文件加密，确保敏感键永远不会以明文形式进入 store；每台设备在每次 Apply 后都会保留自己本地填入的 `This device` 值。
 - **明确的 Apply** —— 挑选条目，直接落地（没有确认弹窗）；每次运行的变更都会留在贴顶结果条与 **History** 中可见。
 - **可移除、可清理** —— 随时停止同步某个条目（可选一并删除其 store 副本）；store 中遗留的、没有对应条目的文件会作为 **Leftover**（遗留）浮现出来，一键清理。
-- **随时可见的状态感知** —— 打开 **Sync Center** 随时查看详情；其页头本身就是一条状态栏：一个 *this device*（本设备）胶囊（全部 in sync 时显示绿色对勾，否则显示当前状态并提供进入设置的快捷入口），后面跟着每一类待办动作的总数，包括每个远程各自的 push/pull 计数。每个条目按状态打上徽标（`✓ in sync`、changed-on-this-device、store-is-newer、`≠ differs`、`— not captured yet`），每个同步动作（Capture、Apply、Push、Pull）都有各自独立的图标，远程仓库会被自动检查。
+- **随时可见的状态感知** —— 打开 **Sync Center** 随时查看详情；其页头本身就是一条状态栏：一个 *this device*（本设备）胶囊（全部 in sync 时显示绿色对勾，否则显示当前状态并提供进入设置的快捷入口），后面跟着每一类待办动作的总数，包括每个远程各自的 push/pull 计数。每个条目按状态打上徽标（`✓ in sync`、changed-on-this-device、store-is-newer、not-synced-on-this-device-yet、`≠ differs`、`— not captured yet`），每个同步动作（Capture、Apply、Push、Pull）都有各自独立的图标，JSON 差异会按统一的键顺序渲染，纯粹的键顺序/格式差异会被单独标注出来而不是显示成一堆噪声，远程仓库也会被自动检查。
 - **状态栏** —— 同步状态一目了然：↑ 待捕获、↓ 待应用，以及每个 remote 各自的 ⇡ push / ⇣ pull 计数；点击可直接打开 **Sync Center**。全部同步时只显示一个置灰图标。原有的 ribbon 图标圆点现在改为可选（默认关闭）；另有一个仅限手机端的开关，可强制显示被 Obsidian 隐藏的状态栏。
 - **感知可用性** —— 落后版本、被禁用或未安装的插件会各自出现在独立的折叠分区中，配合插件安装/更新引擎，让 apply 在同一步里也能顺带更新、启用或安装某个社区插件。**Beta** 标签页会追踪通过 BRAT 安装的社区插件，让它们的配置像其他条目一样同步。
 - **感知远程状态** —— Sync Center 的 Remotes 区块会自动检查 git 或 vault 远程仓库是否在你的本地 store 之后被捕获过；展开某个远程可预览 Pull/Push 的内容。
@@ -47,7 +47,7 @@
 
 - **Capture**（捕获） 把每个已启用条目的设置文件和 companion 文件夹复制进 `<数据文件夹>/store/`，按每个字段的 `{scope, encrypted}` 规则处理（没有逐键规则的条目则按整文件规则处理），跳过操作系统垃圾文件，并把源插件版本号（Obsidian/核心条目则是 Obsidian 应用版本号）记录到 `store.lock.json` 中。只有发生变化的文件才会被重写；Sync Center 的 Capture 按钮只会 capture 你勾选的条目。
 - **Apply**（应用） 挑选条目，把它们落地到本设备的配置目录（不论其名称是什么）——没有确认弹窗，勾选后按下 Apply 即直接执行。对于在本设备上落后版本、被禁用或未安装的社区插件，Apply 还能先执行更新、启用或安装（见下文）。scope 为 This device 的字段与加密内容按条目的规则处理；`This device` 字段会原样保留本地值。
-- **Sync Center** 按条目比较实时配置与 store，给出尽力而为的方向提示（文件时间对比最近一次 capture），并自动检查远程仓库的新鲜度。
+- **Sync Center** 按条目比较实时配置与 store；方向（↑ 待 capture、↓ 待 apply）来自每台设备各自的同步基线，而不是文件时间——本设备每次看到某个条目处于同步状态，都会记住双方内容的指纹，之后出现差异时就能据此判断究竟是哪一侧发生了变化。本设备上还没有基线的条目（全新安装，或升级后尚未完成首次同步的条目）会显示为**尚未在本设备同步**，默认按 apply 处理；自本设备上次同步以来两侧都发生过变化的条目则显示为 `≠ differs`。远程仓库的新鲜度仍会被自动检查。
 
 ### 可用性分区与安装引擎
 
@@ -70,7 +70,7 @@
 
 **传输层面** —— store 如何流转：
 
-- **你的笔记同步工具（默认）**：store 本身就是普通的 vault 内容——remotely-save、Obsidian Sync、iCloud 或其他任何工具都能把它带到任何地方，包括移动端，零配置。在**全新设备**上，一旦 store 送达，Sync Center 会自行发现它并显示一条 **Adopt**（采纳）横幅；采纳后会触发一次性引导，带你把 store 应用到本设备完成初始化——并提醒你不要用新设备的空默认值反向 capture 覆盖它。
+- **你的笔记同步工具（默认）**：store 本身就是普通的 vault 内容——remotely-save、Obsidian Sync、iCloud 或其他任何工具都能把它带到任何地方，包括移动端，零配置。在**全新设备**上，一旦 store 送达，Sync Center 会自行发现它并显示一条 **Adopt**（采纳）横幅；采纳后会触发一次性引导，带你把 store 应用到本设备完成初始化——并提醒你不要用新设备的空默认值反向 capture 覆盖它。在你采纳之前，条目列表顶部会出现一条可关闭的横幅，说明当前显示的差异还不可信——请先采纳插件自身的设置，因为比较逻辑依赖它携带的 scope 与设备规则。
 - **Pull / Push（桌面端，可选）**：config-sync 自带的传输通道，用于 git 仓库或本机上的另一个 vault，通过 Sync Center 的 Remotes 区块执行。Pull 会用远程内容覆盖本 vault 的 store（可重复执行——冷启动和日常使用是同一个操作）；Push 则把内容发送出去。git 传输方式会克隆到一个临时目录，绝不会触碰你 vault 自身的 git 仓库。
 
 一切功能都挂在一个 **Config Sync** 功能区图标上：点击图标会打开一个菜单，包含 **Sync Center**（标有待处理的 capture/apply 数量），点击即打开（若已打开则聚焦）Sync Center，Capture/Apply/Pull/Push 都在其中完成。状态栏是默认常显的主要指示器；功能区图标自身的状态点为可选项，默认关闭（**Settings → General → Status bar**）。也可以在 **Settings → General** 中为 Sync Center 单独启用功能区图标，默认关闭。Quick commands 功能已拆分为独立插件 [Ribbon Organizer](https://github.com/xooooooooox/obsidian-ribbon-organizer)。

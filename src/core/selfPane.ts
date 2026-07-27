@@ -20,9 +20,9 @@ export function selfPaneState(args: { isColdStart: boolean; groupState: GroupSta
   const s = args.groupState;
   const versionRefresh = s === "in-sync" && args.drift === "ahead";
   const flagsRefresh = args.flagsDrift;
-  const contentChanged = s === "local-changed" || s === "store-newer" || s === "differs" || s === "not-captured";
+  const contentChanged = s === "local-changed" || s === "store-newer" || s === "differs" || s === "not-captured" || s === "never-synced";
   let state: SelfPaneState;
-  if (s === "store-newer") state = "adopt";
+  if (s === "store-newer" || s === "never-synced") state = "adopt";
   else if (s === "differs") state = "both";
   else if (s === "local-changed" || s === "not-captured" || versionRefresh || flagsRefresh) state = "capture";
   else state = "insync";

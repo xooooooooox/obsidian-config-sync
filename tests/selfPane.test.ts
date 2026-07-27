@@ -29,4 +29,9 @@ describe("selfPaneState", () => {
   it("flags drift does not override adopt", () => {
     expect(selfPaneState({ isColdStart: false, groupState: "store-newer", drift: null, flagsDrift: true })).toEqual({ state: "adopt", versionRefresh: false, contentChanged: true, flagsRefresh: true });
   });
+  it("never-synced self maps to adopt with a content diff", () => {
+    const r = selfPaneState({ isColdStart: false, groupState: "never-synced", drift: null, flagsDrift: false });
+    expect(r.state).toBe("adopt");
+    expect(r.contentChanged).toBe(true);
+  });
 });

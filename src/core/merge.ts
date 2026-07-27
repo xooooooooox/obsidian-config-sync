@@ -28,7 +28,7 @@ function owningGroupName(localGroups: SyncGroup[], remoteGroups: SyncGroup[], re
 
 // Recursively sorts object keys so JSON.stringify produces a key-order-independent string.
 // Arrays keep their original order (order is meaningful there).
-function sortKeysDeep(v: unknown): unknown {
+export function sortKeysDeep(v: unknown): unknown {
   if (Array.isArray(v)) return v.map(sortKeysDeep);
   if (v !== null && typeof v === "object") {
     const obj = v as Record<string, unknown>;
@@ -39,6 +39,21 @@ function sortKeysDeep(v: unknown): unknown {
     return sorted;
   }
   return v;
+}
+
+/**
+ * Key-order/format-normalized rendering of a JSON document for diff previews: parse, sort keys
+ * deep (arrays keep order), pretty-print. Returns null when the content is not JSON so callers
+ * can fall back to the raw text. Preview-only — never feeds capture/apply bytes.
+ */
+export function jsonSortedView(content: string): string | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    return null;
+  }
+  return JSON.stringify(sortKeysDeep(parsed), null, 2) + "\n";
 }
 
 function canonical(g: SyncGroup): string {

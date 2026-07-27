@@ -450,6 +450,11 @@ describe("categoryForGroup", () => {
     // Sync Center scope must match — not fall through to Custom.
     expect(categoryForGroup("enabled-css-snippets")).toBe("obsidian");
   });
+
+  it("switch-list carrier groups land in their real categories, not custom", () => {
+    expect(categoryForGroup("community-plugins")).toBe("community");
+    expect(categoryForGroup("core-plugins")).toBe("core");
+  });
 });
 
 describe("displayLabelForGroup", () => {

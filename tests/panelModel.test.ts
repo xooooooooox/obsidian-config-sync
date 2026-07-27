@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { capFileEntries, insyncLineText, statusBarStatuses, moreFilesText, visibleUnderFilter, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, footerSummary, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, versionLine, runProgressLabel } from "../src/ui/panelModel";
-import { GroupState } from "../src/core/status";
+import { capFileEntries, insyncLineText, statusBarStatuses, moreFilesText, visibleUnderFilter, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, footerSummary, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, versionLine, runProgressLabel, showColdStartBanner } from "../src/ui/panelModel";
+import { GroupState, GroupStatus } from "../src/core/status";
 import { Availability } from "../src/core/availability";
 
 describe("visibleUnderFilter", () => {
@@ -45,6 +45,13 @@ describe("visibleUnderFilter", () => {
     expect(visibleUnderFilter("locked", "apply")).toBe(false);
     expect(visibleUnderFilter("locked", "ok")).toBe(false);
     expect(visibleUnderFilter("locked", "none")).toBe(false);
+  });
+
+  it("never-synced rows are visible under the apply filter, default apply, stageable", () => {
+    expect(visibleUnderFilter("never-synced", "apply")).toBe(true);
+    expect(visibleUnderFilter("never-synced", "capture")).toBe(false);
+    expect(directionForState("never-synced")).toBe("apply");
+    expect(stageableState("never-synced")).toBe(true);
   });
 });
 
@@ -275,5 +282,19 @@ describe("statusBarStatuses — the status bar counts what the Sync Center's mai
   it("drops outdated (drift-behind) rows like the center does", () => {
     const avail: Record<string, Availability> = { "plugin-b": av({ drift: "behind", localVersion: "0.9.0" }) };
     expect(statusBarStatuses([st("plugin-b", "store-newer")], (g) => avail[g], false)).toEqual([]);
+  });
+});
+
+describe("showColdStartBanner", () => {
+  it("cold-start banner: self pending + never-synced rows + not dismissed", () => {
+    const never: GroupStatus[] = [{ group: "a", state: "never-synced" }];
+    const synced: GroupStatus[] = [{ group: "a", state: "in-sync" }];
+    expect(showColdStartBanner("coldstart", never, false)).toBe(true);
+    expect(showColdStartBanner("adopt", never, false)).toBe(true);
+    expect(showColdStartBanner("both", never, false)).toBe(true);
+    expect(showColdStartBanner("insync", never, false)).toBe(false);
+    expect(showColdStartBanner("capture", never, false)).toBe(false);
+    expect(showColdStartBanner("coldstart", synced, false)).toBe(false);
+    expect(showColdStartBanner("coldstart", never, true)).toBe(false);
   });
 });
