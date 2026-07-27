@@ -169,6 +169,31 @@ export function buildItemDefs(env: RegistryEnv): ItemDef[] {
   return [...obsidian, ...core, ...communityAndBeta];
 }
 
+// Defs for parsing ANOTHER device's settings (the store's self copy, see leftover.ts's
+// storeSelfCopyGroups): the local registry plus a synthesized community def for every store item
+// id whose plugin isn't installed here. Without these, a store item for a not-yet-installed
+// plugin would silently drop out of the recompiled list — and its pulled-but-unadopted store
+// files would read as deletable leftover instead of pending data. Only community ids are
+// synthesizable from the id alone; core ids map to per-plugin settings files that corePluginFile
+// only knows for locally-known cores, and the three Obsidian cards exist in every registry.
+export function defsForForeignItems(defs: ItemDef[], itemIds: string[]): ItemDef[] {
+  const known = new Set(defs.map((d) => d.id));
+  const extras: ItemDef[] = [];
+  for (const id of itemIds) {
+    if (known.has(id) || !id.startsWith("community:")) continue;
+    const pluginId = id.slice("community:".length);
+    extras.push({
+      id,
+      label: pluginId,
+      description: COMMUNITY_PLUGIN_DESCRIPTION,
+      section: "community",
+      enablement: { carrier: "community-plugins.json", element: pluginId },
+      settingsFile: { defaultPath: `{configDir}/plugins/${pluginId}/data.json` },
+    });
+  }
+  return extras.length === 0 ? defs : [...defs, ...extras];
+}
+
 // ── Compile ──────────────────────────────────────────────────────────────────────────────────
 
 function legacyGroupName(id: string): string {

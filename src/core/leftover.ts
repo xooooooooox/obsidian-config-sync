@@ -1,5 +1,6 @@
 import { SyncGroup } from "./types";
 import { groupForStoreRel } from "./ConfigSyncCore";
+import { compileItems, CustomGroupConfig, defsForForeignItems, ItemConfig, ItemDef } from "./registry";
 
 export interface LeftoverFile {
   rel: string; // store-root-relative, e.g. "store/configdir/plugins/x/data.json"
@@ -11,10 +12,18 @@ export interface LeftoverFile {
 // (`store/configdir/plugins/config-sync/data.json`). Files a device has pulled but not yet
 // adopted are attributable to this list, so callers pass local ∪ store-list groups to
 // `leftoverStoreRels` — pulled-but-unadopted data is pending, never deletable "leftover".
-export function storeSelfCopyGroups(json: string): SyncGroup[] {
+// Schema v1 persisted the compiled `groups` list verbatim; schema v2 persists `items` +
+// `customGroups` instead, so the list must be recompiled (against the local defs, extended for
+// store items whose plugin isn't installed here — defsForForeignItems). Best-effort by contract:
+// malformed or uncompilable foreign content yields [] rather than breaking status/leftover views.
+export function storeSelfCopyGroups(json: string, defs: ItemDef[]): SyncGroup[] {
   try {
-    const raw = JSON.parse(json) as { groups?: unknown };
-    return Array.isArray(raw.groups) ? (raw.groups as SyncGroup[]) : [];
+    const raw = JSON.parse(json) as { groups?: unknown; items?: unknown; customGroups?: unknown };
+    if (Array.isArray(raw.groups)) return raw.groups as SyncGroup[];
+    if (typeof raw.items !== "object" || raw.items === null) return [];
+    const items = raw.items as Record<string, ItemConfig>;
+    const customGroups = Array.isArray(raw.customGroups) ? (raw.customGroups as CustomGroupConfig[]) : [];
+    return compileItems(defsForForeignItems(defs, Object.keys(items)), { items, customGroups });
   } catch {
     return [];
   }

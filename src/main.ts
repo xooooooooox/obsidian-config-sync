@@ -457,7 +457,7 @@ export default class ConfigSyncPlugin extends Plugin {
         const ctx = await this.coreContext();
         const local = this.compiledGroups; // the full compiled list; `devices` gates applicability, not membership
         const selfCopy = `${ctx.rootPath}/store/configdir/plugins/config-sync/data.json`;
-        const storeGroups = (await ctx.io.exists(selfCopy)) ? storeSelfCopyGroups(await ctx.io.read(selfCopy)) : [];
+        const storeGroups = (await ctx.io.exists(selfCopy)) ? storeSelfCopyGroups(await ctx.io.read(selfCopy), this.registryDefs) : [];
         const delta = syncListDelta(local, storeGroups);
         let capturedAt: string | null = null;
         const lockPath = `${ctx.rootPath}/store.lock.json`;
@@ -1207,7 +1207,7 @@ export default class ConfigSyncPlugin extends Plugin {
     // leftover — union the local list with the store self-copy's list so a pull can't leave
     // just-arrived data looking like deletable junk.
     const selfCopy = `${ctx.rootPath}/store/configdir/plugins/config-sync/data.json`;
-    const storeGroups = (await ctx.io.exists(selfCopy)) ? storeSelfCopyGroups(await ctx.io.read(selfCopy)) : [];
+    const storeGroups = (await ctx.io.exists(selfCopy)) ? storeSelfCopyGroups(await ctx.io.read(selfCopy), this.registryDefs) : [];
     const out: { rel: string; name: string; path: string; size: number }[] = [];
     for (const lf of leftoverStoreRels(rels, [...this.compiledGroups, ...storeGroups])) {
       const st = await this.app.vault.adapter.stat(`${ctx.rootPath}/${lf.rel}`);
