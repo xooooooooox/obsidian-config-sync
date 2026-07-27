@@ -184,7 +184,10 @@ noted):
     render only when they apply, ③ Companion folders always renders (down to just its quiet
     `+ Add folder` row, `config-sync-add-row-quiet`, when a card has no folders yet):
     ① **Enabled on** (plugin cards only) — one 4-option scope icon reading/writing
-    `ItemConfig.enabledOn` directly (no parallel state).
+    `ItemConfig.enabledOn` directly (no parallel state). A desktop-only plugin's cycle skips the
+    mobile stop (`DESKTOP_ONLY_ENABLED_OPTIONS`), and its `all` stop's tooltip appends
+    `DESKTOP_ONLY_ALL_NOTE` ("mobile is excluded automatically" — the runtime auto-mask, not this
+    setting, is what keeps mobile untouched).
     ② **Settings file** — mode is derived, never chosen: no per-key rule anywhere (`rules` and
     `perItem` both empty) is whole-file state, any rule is per-key state. The grid's first row
     (`config-sync-card-sfhead`) is always the path row: path code, a 3-option scope icon (no

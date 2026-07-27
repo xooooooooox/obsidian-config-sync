@@ -393,8 +393,14 @@ export function nextScope<T extends RuleScope>(current: T, options: readonly T[]
   throw new Error("nextScope: options list is empty");
 }
 
-export function scopeCycleTooltip(scope: RuleScope): string {
-  return `Change scope (currently: ${SCOPE_LABELS[scope]})`;
+// Appended to the "all" stop of a desktop-only plugin's ENABLED ON cycle: "all" never touches
+// mobile for these plugins (the runtime auto-mask keeps mobile's local state), so the tooltip
+// says so instead of letting "All devices" read as "mobile too".
+export const DESKTOP_ONLY_ALL_NOTE = "mobile is excluded automatically";
+
+export function scopeCycleTooltip(scope: RuleScope, note?: string): string {
+  const label = note === undefined ? SCOPE_LABELS[scope] : `${SCOPE_LABELS[scope]} — ${note}`;
+  return `Change scope (currently: ${label})`;
 }
 
 // Reused as the ✎ icon's tooltip/aria (spec 2026-07-26-card-visual-refresh-design.md §2/§5) — no

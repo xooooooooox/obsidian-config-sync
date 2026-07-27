@@ -1497,9 +1497,9 @@ export class SyncCenterView extends ItemView {
     const detail = card.createDiv({ cls: "config-sync-report-files" });
     detail.hidden = !this.expandedItems.has(group.name);
     this.renderItemDetail(detail, r);
-    // Stop syncing sits inline with the action segment when there is one; otherwise it gets
-    // its own footer so every removable item exposes it.
-    if (this.canStopSyncing(group.name) && detail.querySelector(".config-sync-segrow") === null) {
+    // Stop syncing always closes the drawer as a quiet footer under a divider (round-9 定稿 A):
+    // one placement for every removable row, clear of the file/diff rows a thumb aims for.
+    if (this.canStopSyncing(group.name)) {
       this.renderStopSyncing(detail.createDiv({ cls: "config-sync-stopsync-foot" }), r);
     }
     row.addEventListener("click", () => {
@@ -1779,7 +1779,6 @@ export class SyncCenterView extends ItemView {
         this.render(this.renderGen);
       });
     }
-    if (this.canStopSyncing(name)) this.renderStopSyncing(segrow, r);
   }
 
   // Staging, not execution: a segment checks the row in that direction; clicking the

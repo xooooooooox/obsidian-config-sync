@@ -671,13 +671,21 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 
 /* ── Stop syncing + store leftover ───────────────────────────────────────── */
 .config-sync-segrow { display: flex; align-items: center; gap: var(--size-4-2); }
-.config-sync-stopsync-foot { display: flex; margin-top: var(--size-4-2); }
+/* Quiet footer (round-9 定稿 A): always the drawer's last row, divider + spacing keep it clear
+   of the file/diff rows; muted text link that only turns red under the pointer. */
+.config-sync-stopsync-foot {
+  display: flex; margin-top: var(--size-4-3);
+  padding-top: var(--size-4-2); border-top: 1px solid var(--background-modifier-border);
+}
 .config-sync-stopsync {
   margin-left: auto; display: inline-flex; align-items: center; gap: 5px;
-  color: var(--color-red); font-size: var(--font-ui-smaller); cursor: pointer;
-  padding: 3px 10px; border: 1px solid rgba(var(--color-red-rgb), 0.4); border-radius: 6px;
+  color: var(--text-muted); font-size: var(--font-ui-smaller); cursor: pointer;
+  padding: 3px 2px;
 }
+.config-sync-stopsync:hover, .config-sync-stopsync:active { color: var(--color-red); }
 .config-sync-stopsync svg { width: 14px; height: 14px; }
+.is-mobile .config-sync-stopsync-foot { margin-top: var(--size-4-4); }
+.is-mobile .config-sync-stopsync { padding: 6px 2px; }
 .config-sync-fpill.is-leftover { color: var(--color-orange); border-color: rgba(var(--color-orange-rgb), 0.5); }
 .config-sync-fpill.is-leftover.is-active { background: var(--color-orange); border-color: var(--color-orange); color: var(--background-primary); }
 .config-sync-section.is-leftover { border-color: rgba(var(--color-orange-rgb), 0.45); }

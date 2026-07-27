@@ -20,6 +20,7 @@ import {
   memberCountLabel,
   nextScope,
   PREVIEW_LEGEND_ENTRIES,
+  DESKTOP_ONLY_ALL_NOTE,
   DESKTOP_ONLY_ENABLED_OPTIONS,
   FIELD_SCOPE_OPTIONS,
   FILE_SCOPE_OPTIONS,
@@ -450,6 +451,10 @@ describe("nextScope / scope icon cycle (round-6 定稿: Commander-style scope co
   it("tooltip names the current scope", () => {
     expect(scopeCycleTooltip("all")).toBe("Change scope (currently: All devices)");
     expect(scopeCycleTooltip("local")).toBe("Change scope (currently: This device)");
+  });
+
+  it("tooltip appends the desktop-only note to the all stop", () => {
+    expect(scopeCycleTooltip("all", DESKTOP_ONLY_ALL_NOTE)).toBe("Change scope (currently: All devices — mobile is excluded automatically)");
   });
 });
 

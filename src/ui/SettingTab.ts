@@ -43,6 +43,7 @@ import {
   defaultSettingsFile,
   DEFAULT_FIELD_RULE,
   deriveMode,
+  DESKTOP_ONLY_ALL_NOTE,
   DESKTOP_ONLY_ENABLED_OPTIONS,
   ENABLED_ON_HINT,
   ENABLED_CSS_SNIPPETS_KEY,
@@ -731,10 +732,12 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     // rebuilds itself from the freshly-saved config after each advance.
     const buildScope = (): void => {
       scopeCell.empty();
+      const current = this.itemConfig(def.id).enabledOn ?? "all";
       this.renderScopeCycle(scopeCell, {
-        scope: this.itemConfig(def.id).enabledOn ?? "all",
+        scope: current,
         options: def.desktopOnly === true ? DESKTOP_ONLY_ENABLED_OPTIONS : FIELD_SCOPE_OPTIONS,
         disabled: false,
+        ...(def.desktopOnly === true && current === "all" ? { note: DESKTOP_ONLY_ALL_NOTE } : {}),
         onChange: (v) => {
           void (async () => {
             await this.updateItem(def.id, (c) => ({ ...c, enabledOn: v === "all" ? undefined : v }));
@@ -951,12 +954,12 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   // the new value — the caller owns the write AND re-rendering this cell with the fresh scope
   // (most rows get that for free from their existing body/row refresh). Default "all" renders
   // dim, any narrower scope renders accented, mirroring the ghost-rail idle/active language.
-  private renderScopeCycle<T extends RuleScope>(cell: HTMLElement, opts: { scope: T; options: readonly T[]; disabled: boolean; onChange: (v: T) => void }): void {
+  private renderScopeCycle<T extends RuleScope>(cell: HTMLElement, opts: { scope: T; options: readonly T[]; disabled: boolean; note?: string; onChange: (v: T) => void }): void {
     const icon = cell.createSpan({ cls: `config-sync-scopeicon${opts.scope !== "all" ? " is-set" : ""}` });
     setIcon(icon, SCOPE_ICONS[opts.scope]);
     // aria-label alone: Obsidian renders its own tooltip for [aria-label] elements — adding
     // `title` too stacks a second (native) tooltip on hover (round-8 feedback ①).
-    icon.setAttribute("aria-label", scopeCycleTooltip(opts.scope));
+    icon.setAttribute("aria-label", scopeCycleTooltip(opts.scope, opts.note));
     if (opts.disabled) {
       icon.addClass("config-sync-dim");
       return;
