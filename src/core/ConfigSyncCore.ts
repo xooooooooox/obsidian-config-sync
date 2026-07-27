@@ -74,12 +74,17 @@ export function storeDir(ctx: CoreContext): string {
   return `${ctx.rootPath}/store`;
 }
 
-// The apply backup lives OUTSIDE the plugin's own folder: Obsidian (and the Hot Reload
-// plugin) watch {configDir}/plugins/config-sync/** and reload Config Sync on any write there,
-// which would wipe the Sync Center mid-apply (0.34.0). A top-level configDir folder isn't
-// watched and isn't surfaced by discovery (which only scans configDir's top-level files).
+// Legacy location only: 1.x wrote a one-slot apply backup here for "Revert last apply"
+// (feature removed in round-7 spec §3). Nothing writes it anymore — removeLegacyBackup deletes
+// a leftover copy on the next apply.
 export function backupDir(ctx: CoreContext): string {
   return `${ctx.configDir}/config-sync-backup`;
+}
+
+async function removeLegacyBackup(ctx: CoreContext): Promise<void> {
+  if (await ctx.io.exists(backupDir(ctx))) {
+    await ctx.io.rmdir(backupDir(ctx), true);
+  }
 }
 
 export function pluginIdForGroup(group: SyncGroup): string | null {
@@ -389,45 +394,15 @@ async function captureGroup(ctx: CoreContext, group: SyncGroup): Promise<GroupRe
   return result;
 }
 
-export interface BackupEntry {
-  realPath: string;
-  existed: boolean;
-  backupFile: string | null;
-}
-
-export interface BackupIndex {
-  createdAt: string;
-  entries: BackupEntry[];
-}
-
-interface BackupState {
-  index: BackupIndex;
-  counter: number;
-  backedUp: Set<string>;
-}
-
 export async function apply(ctx: CoreContext, groupNames: string[], onProgress?: ProgressFn): Promise<GroupResult[]> {
   const manifest = await loadManifest(ctx);
-  if (await ctx.io.exists(backupDir(ctx))) {
-    await ctx.io.rmdir(backupDir(ctx), true);
-  }
-  const state: BackupState = {
-    index: { createdAt: ctx.now(), entries: [] },
-    counter: 0,
-    backedUp: new Set(),
-  };
+  await removeLegacyBackup(ctx);
   const results: GroupResult[] = [];
   let done = 0;
-  try {
-    for (const name of groupNames) {
-      onProgress?.(done, groupNames.length, name);
-      results.push(await applyGroup(ctx, requireGroup(manifest, name), state));
-      done++;
-    }
-  } finally {
-    const indexPath = `${backupDir(ctx)}/index.json`;
-    await ensureParentDir(ctx.io, indexPath);
-    await ctx.io.write(indexPath, JSON.stringify(state.index, null, 2) + "\n");
+  for (const name of groupNames) {
+    onProgress?.(done, groupNames.length, name);
+    results.push(await applyGroup(ctx, requireGroup(manifest, name)));
+    done++;
   }
   return results;
 }
@@ -625,113 +600,73 @@ export async function applyWithActions(
 ): Promise<GroupResult[]> {
   const manifest = await loadManifest(ctx);
   const lock = await loadLock(ctx); // carries each group's sourcePluginVersion — the install target
-  if (await ctx.io.exists(backupDir(ctx))) {
-    await ctx.io.rmdir(backupDir(ctx), true);
-  }
-  const state: BackupState = {
-    index: { createdAt: ctx.now(), entries: [] },
-    counter: 0,
-    backedUp: new Set(),
-  };
+  await removeLegacyBackup(ctx);
   const results: GroupResult[] = [];
   let done = 0;
-  try {
-    for (const item of items) {
-      onProgress?.(done, items.length, item.name);
-      // Per-item isolation: one item that throws (unknown group, io failure, a plugin's
-      // disable/enable) becomes a single error result — the rest of the batch still runs.
-      try {
-        const group = requireGroup(manifest, item.name);
-        const phase = (p: string): void => onProgress?.(done, items.length, item.name, p);
-        const storeExists = await ctx.io.exists(`${storeDir(ctx)}/${groupStorePath(group.path)}`);
-        const targetVersion = lock?.groups[group.name]?.sourcePluginVersion ?? null;
-        const prelude = await runStateAction(ctx, group, item.action, installPlugin, storeExists, targetVersion, phase);
-        if (prelude.skipConfig) {
-          const r = emptyResult(item.name, false);
-          r.status = "warning";
-          if (prelude.note !== null) r.stateNote = prelude.note;
-          r.messages.push(...prelude.messages);
-          results.push(r);
-        } else {
-          // Install-only apply: a not-installed plugin with no settings in the store. The
-          // install action IS the payload — applyGroup would error on the missing store data.
-          // Action-only apply: a plugin with no settings in the store — the state action
-          // (install and/or enable) IS the payload; applyGroup would error on the missing data.
-          const actionOnly = item.action !== "none" && !storeExists;
-          if (!actionOnly) phase("writing settings…");
-          const r = actionOnly ? emptyResult(item.name, false) : await applyGroup(ctx, group, state);
-          if (prelude.note !== null) r.stateNote = prelude.note;
-          if (prelude.messages.length > 0) {
-            r.messages.push(...prelude.messages);
-            if (r.status === "ok") r.status = "warning";
-          }
-          if (prelude.finish !== undefined) {
-            // Config is on disk — now it's safe to (re)enable: the plugin loads the applied settings.
-            phase("enabling…");
-            const fin = await prelude.finish();
-            if (fin.note !== null) r.stateNote = fin.note;
-            if (fin.messages.length > 0) {
-              r.messages.push(...fin.messages);
-              if (r.status === "ok" && fin.note?.kind === "warn") r.status = "warning";
-            }
-          }
-          // The action-only line must reflect reality — resolved AFTER finish so a failed
-          // install/enable never claims success.
-          if (actionOnly) {
-            const pid = pluginIdForGroup(group);
-            const isUpd = item.action === "update" || item.action === "update-enable";
-            if (item.action === "enable") {
-              if (pid !== null && ctx.plugins.isPluginEnabled(pid)) r.messages.push("no settings in the store — enabled the plugin only");
-            } else if (pid !== null && ctx.plugins.getInstalledPluginVersion(pid) !== null && r.stateNote?.kind !== "warn") {
-              r.messages.push(isUpd ? "no settings in the store — updated the plugin only" : "no settings in the store — installed the plugin only");
-            }
-          }
-          results.push(r);
-        }
-      } catch (err) {
+  for (const item of items) {
+    onProgress?.(done, items.length, item.name);
+    // Per-item isolation: one item that throws (unknown group, io failure, a plugin's
+    // disable/enable) becomes a single error result — the rest of the batch still runs.
+    try {
+      const group = requireGroup(manifest, item.name);
+      const phase = (p: string): void => onProgress?.(done, items.length, item.name, p);
+      const storeExists = await ctx.io.exists(`${storeDir(ctx)}/${groupStorePath(group.path)}`);
+      const targetVersion = lock?.groups[group.name]?.sourcePluginVersion ?? null;
+      const prelude = await runStateAction(ctx, group, item.action, installPlugin, storeExists, targetVersion, phase);
+      if (prelude.skipConfig) {
         const r = emptyResult(item.name, false);
-        r.status = "error";
-        r.messages.push(err instanceof Error ? err.message : String(err));
+        r.status = "warning";
+        if (prelude.note !== null) r.stateNote = prelude.note;
+        r.messages.push(...prelude.messages);
+        results.push(r);
+      } else {
+        // Install-only apply: a not-installed plugin with no settings in the store. The
+        // install action IS the payload — applyGroup would error on the missing store data.
+        // Action-only apply: a plugin with no settings in the store — the state action
+        // (install and/or enable) IS the payload; applyGroup would error on the missing data.
+        const actionOnly = item.action !== "none" && !storeExists;
+        if (!actionOnly) phase("writing settings…");
+        const r = actionOnly ? emptyResult(item.name, false) : await applyGroup(ctx, group);
+        if (prelude.note !== null) r.stateNote = prelude.note;
+        if (prelude.messages.length > 0) {
+          r.messages.push(...prelude.messages);
+          if (r.status === "ok") r.status = "warning";
+        }
+        if (prelude.finish !== undefined) {
+          // Config is on disk — now it's safe to (re)enable: the plugin loads the applied settings.
+          phase("enabling…");
+          const fin = await prelude.finish();
+          if (fin.note !== null) r.stateNote = fin.note;
+          if (fin.messages.length > 0) {
+            r.messages.push(...fin.messages);
+            if (r.status === "ok" && fin.note?.kind === "warn") r.status = "warning";
+          }
+        }
+        // The action-only line must reflect reality — resolved AFTER finish so a failed
+        // install/enable never claims success.
+        if (actionOnly) {
+          const pid = pluginIdForGroup(group);
+          const isUpd = item.action === "update" || item.action === "update-enable";
+          if (item.action === "enable") {
+            if (pid !== null && ctx.plugins.isPluginEnabled(pid)) r.messages.push("no settings in the store — enabled the plugin only");
+          } else if (pid !== null && ctx.plugins.getInstalledPluginVersion(pid) !== null && r.stateNote?.kind !== "warn") {
+            r.messages.push(isUpd ? "no settings in the store — updated the plugin only" : "no settings in the store — installed the plugin only");
+          }
+        }
         results.push(r);
       }
-      done++;
+    } catch (err) {
+      const r = emptyResult(item.name, false);
+      r.status = "error";
+      r.messages.push(err instanceof Error ? err.message : String(err));
+      results.push(r);
     }
-  } finally {
-    const indexPath = `${backupDir(ctx)}/index.json`;
-    await ensureParentDir(ctx.io, indexPath);
-    await ctx.io.write(indexPath, JSON.stringify(state.index, null, 2) + "\n");
+    done++;
   }
   return results;
 }
 
-async function backupOnce(ctx: CoreContext, state: BackupState, realPath: string): Promise<void> {
-  if (state.backedUp.has(realPath)) return;
-  state.backedUp.add(realPath);
-  const existed = await ctx.io.exists(realPath);
-  let backupFile: string | null = null;
-  if (existed) {
-    backupFile = `files/${state.counter}`;
-    state.counter += 1;
-    const target = `${backupDir(ctx)}/${backupFile}`;
-    await ensureParentDir(ctx.io, target);
-    await ctx.io.write(target, await ctx.io.read(realPath));
-  }
-  state.index.entries.push({ realPath, existed, backupFile });
-}
-
-async function applyWriteClassified(
-  ctx: CoreContext,
-  state: BackupState,
-  real: string,
-  content: string,
-  relName: string,
-  result: GroupResult
-): Promise<void> {
-  await backupOnce(ctx, state, real);
-  await writeClassified(ctx, real, content, relName, result);
-}
-
-async function applyGroup(ctx: CoreContext, group: SyncGroup, state: BackupState): Promise<GroupResult> {
+async function applyGroup(ctx: CoreContext, group: SyncGroup): Promise<GroupResult> {
   const real = localRealPath(group.name, group.path, ctx.configDir);
   const store = `${storeDir(ctx)}/${groupStorePath(group.path)}`;
   const pluginId = pluginIdForGroup(group);
@@ -771,7 +706,7 @@ async function applyGroup(ctx: CoreContext, group: SyncGroup, state: BackupState
         const effGroup = overlayGroup(ctx, group, [storeContent, localContent, existingSidecar]);
         content = await applyTransform(effGroup, storeContent, localContent, ctx.passphrase, ctx.deviceClass, existingSidecar);
       }
-      await applyWriteClassified(ctx, state, real, content, basename(real), result);
+      await writeClassified(ctx, real, content, basename(real), result);
     } else {
       const storeFiles = await listFilesRecursive(ctx.io, store);
       const rels = storeFiles.map((f) => relativeTo(store, f));
@@ -782,14 +717,13 @@ async function applyGroup(ctx: CoreContext, group: SyncGroup, state: BackupState
           group.mode === "encrypted"
             ? await applyTransform(group, storeContent, null, ctx.passphrase, ctx.deviceClass, null)
             : storeContent;
-        await applyWriteClassified(ctx, state, target, content, rel, result);
+        await writeClassified(ctx, target, content, rel, result);
       }
       if (await ctx.io.exists(real)) {
         const realFiles = await listFilesRecursive(ctx.io, real);
         const wanted = new Set(rels);
         for (const f of realFiles) {
           if (!wanted.has(relativeTo(real, f))) {
-            await backupOnce(ctx, state, f);
             await ctx.io.remove(f);
             result.filesDeleted.push(f);
             result.changes.deleted.push(relativeTo(real, f));
@@ -801,27 +735,6 @@ async function applyGroup(ctx: CoreContext, group: SyncGroup, state: BackupState
   } finally {
     if (cycle) {
       await ctx.plugins.enablePlugin(pluginId);
-    }
-  }
-  return result;
-}
-
-export async function revertLastApply(ctx: CoreContext): Promise<GroupResult> {
-  const indexPath = `${backupDir(ctx)}/index.json`;
-  if (!(await ctx.io.exists(indexPath))) {
-    throw new Error(`No apply backup found (${indexPath}). Nothing to revert.`);
-  }
-  const index = JSON.parse(await ctx.io.read(indexPath)) as BackupIndex;
-  const result = emptyResult("revert", true);
-  result.messages.push(`reverted the apply from ${index.createdAt}; reload the app to take effect`);
-  for (const entry of index.entries) {
-    if (entry.existed && entry.backupFile !== null) {
-      await ensureParentDir(ctx.io, entry.realPath);
-      await ctx.io.write(entry.realPath, await ctx.io.read(`${backupDir(ctx)}/${entry.backupFile}`));
-      result.filesWritten.push(entry.realPath);
-    } else if (await ctx.io.exists(entry.realPath)) {
-      await ctx.io.remove(entry.realPath);
-      result.filesDeleted.push(entry.realPath);
     }
   }
   return result;

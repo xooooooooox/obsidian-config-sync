@@ -33,9 +33,9 @@ functions.
 - **Capture** — live config → store: `capture()` reads each group's files, applies its sync mode
   (strip/encrypt), writes changed files under `store/`, and stamps source versions into
   `store.lock.json`.
-- **Apply** — store → live config: `apply()` / `applyWithActions()` back up every touched file,
-  optionally install/enable/update the plugin first, then write the store's content into the
-  config dir. One-slot **Revert** restores the backup.
+- **Apply** — store → live config: `apply()` / `applyWithActions()` optionally
+  install/enable/update the plugin first, then write the store's content into the config dir
+  (no backup — the removed 1.x "Revert last apply" was the only consumer).
 - **Pull / Push** — store ↔ a remote (git repo or another vault): planned by `planImport()` /
   merged by `merge.ts`, transported by `main.ts`; external no-code targets go through
   `pushExternal()` with an `ExternalStoreReader`/`ExternalStoreWriter`.
@@ -44,7 +44,7 @@ functions.
 
 **Engine & context**
 - `core/ConfigSyncCore.ts` — the engine and its interfaces: `capture`, `apply`,
-  `applyWithActions`, `captureWithActions`, `revertLastApply`, `planImport`/`applyImport`,
+  `applyWithActions`, `captureWithActions`, `planImport`/`applyImport`,
   `pushExternal`, plus `CoreContext` (`deviceClass: "desktop" | "mobile"`; optional
   `fieldOverlay?: (group, topKeys) => FieldRule[] | null` — a seam for runtime category rules
   layered on top of a group's stored `fields`, via `overlayGroup(ctx, group, jsons)`; unused today
@@ -184,7 +184,7 @@ functions.
   `matchesQualifiers` / `suggest` / `applySuggestion`, plus the `QualifierAutocomplete` DOM widget.
 - `panelModel.ts` — the pure view-model deciding what state each Sync Center row presents under
   the filters (unrelated to the settings-tab card renderer above).
-- `reportContent.ts` — shared run-report rendering (the strip and the Revert modal).
+- `reportContent.ts` — shared run-report rendering (the Sync Center strip and History detail).
 - `diffView.ts` — unified-diff rendering; `jsonView.ts` — read-only `data.json` viewer with keys
   colored by `{scope, encrypted}` rule state (per-element coloring too, for a `perItem` array);
   `sensitiveSort.ts` — floats rows with sensitive keys to the top; `commitGroups.ts` — Advanced-tab
@@ -252,9 +252,9 @@ Changes must preserve these:
 - **Self-apply never disables/reloads Config Sync.** Applying a plugin's settings cycles it
   off/on so it reloads clean — but `applyGroup` skips this for `config-sync` itself, or the run
   would reload the plugin and wipe the panel mid-run.
-- **Backup / lock model.** Apply backs every touched file into `<configDir>/config-sync-backup`
-  (outside the plugin folder, so hot-reload can't fire mid-apply); one-slot **Revert** restores
-  it. `store.lock.json` records each group's `sourcePluginVersion`/`sourceAppVersion`.
+- **Lock model.** `store.lock.json` records each group's `sourcePluginVersion`/
+  `sourceAppVersion`. (The 1.x one-slot apply backup at `<configDir>/config-sync-backup` is
+  gone with the removed Revert feature; apply deletes a leftover copy.)
 - **The store is configDir-agnostic.** Paths use the literal `configdir` segment, so a vault on
   `.obsidian` and one on `.obsidian_apple` map to the same store.
 - **Run history is a separate, local-only file** — never captured, never synced.

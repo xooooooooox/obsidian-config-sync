@@ -89,7 +89,7 @@ locked/cyan.
 
 ### 2.3 Lucide usage (setIcon)
 
-`refresh-cw` ribbon + both panel refreshes + status-bar item · `undo-2` revert · `lock` mode badge ·
+`refresh-cw` ribbon + both panel refreshes + status-bar item · `lock` mode badge ·
 `key-round` locked state · `chevron-down/right` settings rows · `x` clear/remove ·
 `trash` delete · `folder-open` browse · `rotate-cw` BRAT re-scan · `arrow-up-from-line` /
 `arrow-down-to-line` / `cloud-upload` / `cloud-download` sync-action icons · tabs: `settings`,
@@ -187,7 +187,7 @@ noted):
     ② **Settings file** — mode is derived, never chosen: no per-key rule anywhere (`rules` and
     `perItem` both empty) is whole-file state, any rule is per-key state. The grid's first row
     (`config-sync-card-sfhead`) is always the path row: path code, a 3-option scope icon (no
-    `This device`) and a 🔒 icon toggle (`config-sync-lock`, `.is-on` when encrypted) that
+    `This device`) and a lock icon toggle (`config-sync-lock`, `.is-on` when encrypted) that
     encrypts the whole file. The path text itself is the edit entry point
     (`config-sync-card-pathbtn`, hover = dotted underline + soft backdrop; `.is-custom` accent
     once a custom path is committed): click it and the row swaps to an input — Enter/blur
@@ -199,15 +199,15 @@ noted):
     `config-sync-dim` and disabled (tooltip "Per-key rules are active — remove them to control
     the whole file again"), and a rule row (`config-sync-card-rulerow`) appears per configured
     key — never every key in the file, only ones with a rule; browsing the rest is File
-    preview's job (below) — each with its own scope icon, a 🔒 toggle (disabled at `This device`
+    preview's job (below) — each with its own scope icon, a lock toggle (disabled at `This device`
     or while `Per-item scopes` is on) and a ✕ (`Remove rule`) that deletes it; a string-array
     key adds a `Per-item scopes` toggle (`config-sync-card-peritem`) — flip it on and each
     element gets its own row (`config-sync-card-elrow`) instead of one rule for the whole key.
     Removing the last rule flips the card back to whole-file state. Below the rule rows, a
     collapsed disclosure (`config-sync-card-disclosure`, `▸ File preview` / `▾ File preview`)
     expands into the read-only `data.json` preview (`jsonView.ts`) — collapsed by default, so a
-    card with no rules never reads its file at all — keys colored by rule: `blue = desktop only
-    · amber = mobile only · red = this device`, `🔒` overlays an encrypted key,
+    card with no rules never reads its file at all — keys colored by rule, a color-dot legend (`config-sync-legend-dot`, round-7 定稿 B)
+    underneath, a lucide `lock` (`config-sync-json-lock`) marks an encrypted key,
     `--color-purple` = detected-but-unruled, faint = plain; a `perItem` array colors each
     element the same way. Click a key to add a rule for it directly (promotes the card to
     per-key state).
@@ -217,7 +217,8 @@ noted):
     preset, `· N files` otherwise) and a ▸/▾ arrow (`config-sync-card-memberarrow`) — click the
     row to expand its member list, while the folder name itself (same `config-sync-card-pathbtn`
     affordance, click/keydown stopPropagation so it never doubles as the member toggle) opens the
-    Save/Cancel path-edit row; scope icon + sync toggle in their own columns; the action column
+    Save/Cancel path-edit row (autofocused; Escape cancels via the same keymap `Scope` as the
+    settings-file path row); scope icon + sync toggle in their own columns; the action column
     holds only a ✕ (`Remove folder`) on a user-added row (a preset is only ever relocated via
     the warning-gated path edit, never removed outright). A trailing quiet `+ Add folder` row
     (`config-sync-add-row-quiet`, no longer a full-width button) closes every card (a card with
@@ -255,7 +256,8 @@ Each item ships only after a user decision. None change behavior silently.
    `.config-sync-picker-insync`, `.config-sync-center-title`) and every selector left behind
    by the v3 "Device scope"/"Domain" UI (`.config-sync-ldrow`/`-ld-scope`/`-ld-pinchip`/
    `-ld-ovr`, `.config-sync-orphan-*`, `.config-sync-bootstrap*`, `.config-sync-domain-sect*`,
-   the old "Custom location" editor `.config-sync-cl-*`/`-adv-toggle`/`-reset-link`,
+   the old "Custom location" editor `.config-sync-cl-*`/`-adv-toggle` (`-reset-link` has
+   since been revived by the click-to-edit path row's "Reset to default" action),
    `.config-sync-devbadge`/`-facebadge`, `.config-sync-badge`, `.config-sync-cust`,
    `.config-sync-link`, `.config-sync-jsonbody`, `.config-sync-shared-tag`,
    `.config-sync-passphrase-status`, `.config-sync-guide*`, `.config-sync-strip.is-transfer`)

@@ -17,12 +17,23 @@ import {
   loadManifest,
   pushExternal,
   readGroups,
-  revertLastApply,
   writeGroups,
 } from "./core/ConfigSyncCore";
 import { createInstaller } from "./core/installer";
 import { retry, HttpStatusError, TimeoutError, isRetryableError } from "./core/async";
 import { RunRecord, RunKind, summarizeRun, pruneHistory } from "./core/runHistory";
+
+// Keychain id for the passphrase (SecretStorage ids: lowercase alphanumerics and dashes).
+const PASSPHRASE_SECRET_ID = "config-sync-passphrase";
+
+// Structural view of app.secretStorage (Obsidian 1.12 / API 1.11.4): the plugin feature-detects
+// it at runtime and keeps compiling for minAppVersion 1.8.7, so it deliberately references its
+// own interface instead of the obsidian SecretStorage type (spec
+// 2026-07-27-passphrase-keychain-design.md).
+interface SecretStore {
+  getSecret(id: string): string | null;
+  setSecret(id: string, secret: string): void;
+}
 import { BratIndex, parseBratRepoList, resolveBratIndex } from "./core/bratIndex";
 import { type CatalogSection, corePluginFile, displayLabelForGroup, findGroupByName, listBetaSections, listCoreSections, listDiscovered, listOptionSections, listPluginSections, SELF_GROUP_NAME, setCorePluginIds } from "./core/catalog";
 import { Availability, availabilityForGroup, desktopOnlyDrift, desktopOnlyPluginIds, scopedAwayMembers, memberForceOff } from "./core/availability";
@@ -53,7 +64,6 @@ import { bucketCounts, checkRemote, diffRemote, GroupStatus, remoteDirectionCoun
 import { GroupResult, Remote, RibbonButtons, RuleScope, StoreLock, SyncGroup } from "./core/types";
 import { presentedState } from "./ui/panelModel";
 import { ConflictModal } from "./ui/ConflictModal";
-import { ReportModal } from "./ui/ReportModal";
 import { renderStatusBarItem, statusBarSegments } from "./ui/statusBar";
 import { SYNC_CENTER_VIEW_TYPE, SelfSyncInfo, SyncCenterHost, SyncCenterView } from "./ui/SyncCenterView";
 import { ConfigSyncSettingTab } from "./ui/SettingTab";
@@ -97,7 +107,7 @@ const DEFAULT_SETTINGS: ConfigSyncSettings = {
   pkmMode: "auto",
   rootPath: "",
   remotes: [],
-  ribbonButtons: { sync: false, revert: false },
+  ribbonButtons: { sync: false },
   statusInMenu: true,
   statusBarItem: true,
   statusBarRemote: true,
@@ -188,6 +198,7 @@ export default class ConfigSyncPlugin extends Plugin {
 
   async onload(): Promise<void> {
     await this.loadSettings();
+    this.migratePassphraseToKeychain();
     setCorePluginIds(this.coreRuntime().map((c) => c.id));
     await this.recompile();
     this.addSettingTab(new ConfigSyncSettingTab(this.app, this));
@@ -200,7 +211,6 @@ export default class ConfigSyncPlugin extends Plugin {
     this.updateStatusIndicators();
     this.applyMobileStatusBar();
     this.addCommand({ id: "sync", name: "Sync: open the sync panel", callback: () => void this.openSyncCenter() });
-    this.addCommand({ id: "revert-last-apply", name: "Revert last apply", callback: () => void this.runRevert() });
 
     // --- awareness runtime ---
     this.registerEvent(this.app.vault.on("modify", (f) => this.onStoreFileEvent(f.path)));
@@ -408,7 +418,6 @@ export default class ConfigSyncPlugin extends Plugin {
     if (this.settings.statusInMenu && down > 0) parts.push(`↓${down}`);
     const syncTitle = parts.length > 0 ? `Sync Center (${parts.join(" ")})` : "Sync Center";
     menu.addItem((i) => i.setTitle(syncTitle).setIcon("refresh-cw").onClick(() => void this.openSyncCenter()));
-    menu.addItem((i) => i.setTitle("Revert last apply").setIcon("undo-2").onClick(() => void this.runRevert()));
     menu.showAtMouseEvent(evt);
   }
 
@@ -702,7 +711,6 @@ export default class ConfigSyncPlugin extends Plugin {
       this.individualRibbons.push(this.addRibbonIcon(icon, title, () => run()));
     };
     if (rb.sync) add("refresh-cw", "Config Sync: Sync", () => void this.openSyncCenter());
-    if (rb.revert) add("undo-2", "Config Sync: Revert last apply", () => void this.runRevert());
   }
 
   private pluginRegistry(): CommunityPluginRegistry {
@@ -732,13 +740,50 @@ export default class ConfigSyncPlugin extends Plugin {
     };
   }
 
+  // app.secretStorage shipped with Obsidian 1.12 — on an older install the property is simply
+  // absent at runtime, and pre-1.12 installs take the localStorage fallback below.
+  private secretStore(): SecretStore | null {
+    return (this.app as unknown as { secretStorage?: SecretStore }).secretStorage ?? null;
+  }
+
+  passphraseKeychainBacked(): boolean {
+    return this.secretStore() !== null;
+  }
+
+  // The passphrase lives encrypted in Obsidian's keychain when this install has one, and falls
+  // back to plain per-vault localStorage on older installs (spec
+  // 2026-07-27-passphrase-keychain-design.md). "" means "not set" in both stores — clearing
+  // writes "" to the keychain because the public SecretStorage API has no delete.
   passphrase(): string | null {
+    const ss = this.secretStore();
+    if (ss !== null) {
+      const v = ss.getSecret(PASSPHRASE_SECRET_ID);
+      return v === null || v === "" ? null : v;
+    }
     const v: unknown = this.app.loadLocalStorage("config-sync-passphrase");
     return typeof v === "string" && v !== "" ? v : null;
   }
 
   setPassphrase(v: string | null): void {
+    const ss = this.secretStore();
+    if (ss !== null) {
+      ss.setSecret(PASSPHRASE_SECRET_ID, v ?? "");
+      return;
+    }
     this.app.saveLocalStorage("config-sync-passphrase", v === "" ? null : v);
+  }
+
+  // One-time move of a pre-1.12 plaintext passphrase into the keychain: runs only when this
+  // install has a keychain AND a plaintext copy exists; an already-set keychain value wins, and
+  // the plaintext copy is removed either way.
+  private migratePassphraseToKeychain(): void {
+    const ss = this.secretStore();
+    if (ss === null) return;
+    const plain: unknown = this.app.loadLocalStorage("config-sync-passphrase");
+    if (typeof plain !== "string" || plain === "") return;
+    const existing = ss.getSecret(PASSPHRASE_SECRET_ID);
+    if (existing === null || existing === "") ss.setSecret(PASSPHRASE_SECRET_ID, plain);
+    this.app.saveLocalStorage("config-sync-passphrase", null);
   }
 
   private pluginHost(): PluginHost {
@@ -1054,16 +1099,6 @@ export default class ConfigSyncPlugin extends Plugin {
       },
       now: () => new Date().toISOString(),
     };
-  }
-
-  private async runRevert(): Promise<void> {
-    try {
-      const ctx = await this.coreContext();
-      const result = await revertLastApply(ctx);
-      new ReportModal(this.app, "Reverted", [result], undefined, (g) => this.displayName(g, this.lastGroups?.find((x) => x.name === g)?.label)).open();
-    } catch (e) {
-      new Notice(`Config Sync revert failed: ${(e as Error).message}`, 10000);
-    }
   }
 
   // Dynamic import() keeps Node fs/child_process out of the mobile load path (spec D6):

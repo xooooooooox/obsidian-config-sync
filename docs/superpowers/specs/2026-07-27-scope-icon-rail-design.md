@@ -32,7 +32,7 @@ Mockup(定稿依据,固定深色):https://claude.ai/code/artifact/2d8435ab-3daf-
 
 - 循环切换跨值要多点几下;误点一下即写入(无确认),再点 N-1 下回到原值——Commander 同款行为,用户明确选择。
 - 路径编辑失去永久可见入口,靠 hover 提示发现(低频操作换常态干净)。
-- 伴生编辑行(Save/Cancel)的 Escape 仍会关设置窗口(有显式 Cancel 按钮,遗留现状,未在本轮范围)。
+- ~~伴生编辑行(Save/Cancel)的 Escape 仍会关设置窗口~~(已于 round 7 收尾批补齐:同款 keymap Scope + 自动聚焦,见 progress.md "Round 7 收尾")。
 
 ## 4. 测试与门
 

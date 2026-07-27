@@ -383,7 +383,21 @@ export const PER_ITEM_SCOPES_LABEL = "Per-item scopes";
 export const ADD_FOLDER_LABEL = "+ Add folder";
 export const SYNC_ALL_LABEL = "Sync all";
 export const SYNC_ALL_HINT = "Toggle every plugin below.";
-export const PREVIEW_LEGEND = "blue = desktop only · amber = mobile only · red = this device · 🔒 = encrypted · click a key to add a rule";
+// File-preview footer legend (round-7 spec §2, 定稿 B): color dots + neutral words. The old
+// single-string legend rendered as plain text, so the colors it *named* never showed; scope
+// entries reuse the preview's own key color classes so dot and key can never drift apart.
+export interface PreviewLegendEntry {
+  kind: "scope" | "lock" | "hint";
+  cls: string | null; // dot color class — set exactly when kind is "scope"
+  text: string;
+}
+export const PREVIEW_LEGEND_ENTRIES: PreviewLegendEntry[] = [
+  { kind: "scope", cls: "config-sync-json-desktop", text: "desktop only" },
+  { kind: "scope", cls: "config-sync-json-mobile", text: "mobile only" },
+  { kind: "scope", cls: "config-sync-json-strip", text: "this device" },
+  { kind: "lock", cls: null, text: "encrypted" },
+  { kind: "hint", cls: null, text: "click a key to add a rule" },
+];
 
 // ── Sync all (spec §4/§5/§10, D11) — one master row per Core/Community/Beta section: toggles
 // every card's ItemConfig.enabled in that section; its own value is derived (all-enabled), never

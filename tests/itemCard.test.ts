@@ -19,6 +19,7 @@ import {
   hasKeyRules,
   memberCountLabel,
   nextScope,
+  PREVIEW_LEGEND_ENTRIES,
   FIELD_SCOPE_OPTIONS,
   FILE_SCOPE_OPTIONS,
   COMPANION_SCOPE_OPTIONS,
@@ -424,5 +425,24 @@ describe("nextScope / scope icon cycle (round-6 定稿: Commander-style scope co
   it("tooltip names the current scope", () => {
     expect(scopeCycleTooltip("all")).toBe("Change scope (currently: All devices)");
     expect(scopeCycleTooltip("local")).toBe("Change scope (currently: This device)");
+  });
+});
+
+describe("PREVIEW_LEGEND_ENTRIES (round-7 spec §2, 定稿 B: color dots + neutral words, no emoji)", () => {
+  it("lists the three scope dots (preview key classes), then lock, then the hint", () => {
+    expect(PREVIEW_LEGEND_ENTRIES).toEqual([
+      { kind: "scope", cls: "config-sync-json-desktop", text: "desktop only" },
+      { kind: "scope", cls: "config-sync-json-mobile", text: "mobile only" },
+      { kind: "scope", cls: "config-sync-json-strip", text: "this device" },
+      { kind: "lock", cls: null, text: "encrypted" },
+      { kind: "hint", cls: null, text: "click a key to add a rule" },
+    ]);
+  });
+
+  it("carries a color class exactly on scope entries and no emoji anywhere", () => {
+    for (const e of PREVIEW_LEGEND_ENTRIES) {
+      expect(e.cls !== null).toBe(e.kind === "scope");
+      expect(/[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}]/u.test(e.text)).toBe(false);
+    }
   });
 });

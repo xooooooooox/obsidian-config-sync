@@ -59,7 +59,7 @@ import {
   normalizeCompanionPath,
   PER_ITEM_DISABLED_HINT,
   PER_ITEM_SCOPES_LABEL,
-  PREVIEW_LEGEND,
+  PREVIEW_LEGEND_ENTRIES,
   sectionAllEnabled,
   SCOPE_ICONS,
   scopeCycleTooltip,
@@ -135,6 +135,7 @@ export interface SettingsHost extends Plugin {
   readItemFile(group: SyncGroup): Promise<string | null>;
   passphrase(): string | null;
   setPassphrase(v: string | null): void;
+  passphraseKeychainBacked(): boolean;
   displayName(group: string, storedLabel?: string): string;
 }
 
@@ -678,14 +679,25 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   // In-place Settings-file body refresh: rebuild rule rows + (when expanded) File preview into a
   // detached node and swap it in only once any needed file read resolves — the drawer keeps its
   // height while the read is in flight (no collapse/re-expand jitter of a full renderItemCard).
-  // NOTE: the path row (scope/lock dim state) lives outside this host and is NOT refreshed here —
-  // spec 2026-07-26-card-visual-refresh-design.md §3's Step 3 pins this call site to badges+body
-  // only, so a write that flips hasKeyRules to false via the rule row's own ✕ (its only caller)
-  // can leave the path row dim until the drawer is next rebuilt.
+  // The path row (scope/lock dim state) lives outside this host — a write that flips hasKeyRules
+  // pairs this call with refreshPathRow below instead of a full card re-render.
   private refreshCardBody(wrap: HTMLElement, def: ItemDef): void {
     const host = wrap.querySelector(".config-sync-card-sfbodyhost");
     if (!(host instanceof HTMLElement)) return;
     this.renderCardBodyInto(host, def, this.itemConfig(def.id), wrap);
+  }
+
+  // In-place path-row refresh for hasKeyRules flips (round-7 spec §1): the row sits outside
+  // refreshCardBody's swap target, and the full renderItemCard previously used here collapsed
+  // the card around its async file read — the panel visibly jumped and the File preview lost its
+  // scroll position. The error element is the row's own next sibling (renderSettingsFileZone
+  // creates them adjacently), so both anchors are stable across body swaps.
+  private refreshPathRow(wrap: HTMLElement, def: ItemDef): void {
+    const row = wrap.querySelector(".config-sync-card-sfhead");
+    const errorEl = row?.nextElementSibling;
+    if (!(row instanceof HTMLElement) || !(errorEl instanceof HTMLElement)) return;
+    row.empty();
+    this.renderSettingsFilePathRow(row, errorEl, def, this.itemConfig(def.id), wrap);
   }
 
   private renderCardExpansion(parent: HTMLElement, wrap: HTMLElement, def: ItemDef): void {
@@ -988,6 +1000,12 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   // flight.
   private renderCardBodyInto(host: HTMLElement, def: ItemDef, cfg: ItemConfig, wrap: HTMLElement): void {
     const open = this.previewOpen.has(def.id);
+    // Per-host generation token: rapid successive writes (scope-icon cycling) fire overlapping
+    // async reads below, and without this the EARLIER read resolving LAST would swap a stale
+    // body over the fresh one (R4 backlog ③). Only the newest call may complete the swap; the
+    // synchronous branch bumps it too, so it also invalidates any read still in flight.
+    const gen = String(Number(host.dataset.csBodyGen ?? "0") + 1);
+    host.dataset.csBodyGen = gen;
     const build = (target: HTMLElement, doc: Record<string, unknown>, fileState: CardFileState): void => {
       const bodyEl = target.createDiv({ cls: "config-sync-card-sfbody" });
       this.renderRuleRows(bodyEl, def, cfg, doc, wrap);
@@ -1001,12 +1019,20 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     void (async () => {
       const probe = this.cardProbeGroup(def, cfg);
       const raw = probe === null ? null : await this.host.readItemFile(probe);
-      if (!host.isConnected) return; // the drawer closed (or the row rebuilt) while the file read was in flight
+      if (!host.isConnected || host.dataset.csBodyGen !== gen) return; // drawer closed, row rebuilt, or a newer refresh superseded this read
       const { doc, fileState } = parseCardDoc(raw);
       const tmp = createDiv();
       build(tmp, doc, fileState);
+      // The swap replaces the File preview's <pre> wholesale, so its scroll position is carried
+      // across by hand — a rule added by clicking a key deep in a long file must not snap the
+      // preview back to the first line (round-7 spec §1, bug 3).
+      const prevScroll = host.querySelector(".config-sync-json-pre")?.scrollTop ?? 0;
       host.empty();
       while (tmp.firstChild !== null) host.appendChild(tmp.firstChild);
+      if (prevScroll > 0) {
+        const pre = host.querySelector(".config-sync-json-pre");
+        if (pre !== null) pre.scrollTop = prevScroll;
+      }
     })();
   }
 
@@ -1061,13 +1087,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
           delete perItem[row.key];
           return { ...c, settingsFile: withDerivedMode({ ...sf, rules, perItem }) };
         });
-        const freshCfg = this.itemConfig(def.id);
-        if (!hasKeyRules(freshCfg)) {
+        if (!hasKeyRules(this.itemConfig(def.id))) {
           // Removing the last rule flips hasKeyRules -> false, which undims the path row's own
-          // scope/lock controls (spec §3.1) — that row lives outside refreshCardBody's swap
-          // target, so this needs a full card re-render, not just badges+body.
-          this.renderItemCard(wrap, def);
-          return;
+          // scope/lock controls (spec §3.1) — refreshed in place (round-7 spec §1; the full
+          // re-render used before jumped the panel and left the dim state stale on other paths).
+          this.refreshPathRow(wrap, def);
         }
         this.refreshCardBadges(wrap, def);
         this.refreshCardBody(wrap, def);
@@ -1193,15 +1217,19 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       const kc = key !== undefined ? classByKey.get(key) : undefined;
       if (m !== null && key !== undefined && kc !== undefined) {
         pre.createSpan({ text: m[1] });
-        const text = `"${key}"${kc.state.encrypted ? " 🔒" : ""}`;
-        const kspan = pre.createSpan({ cls: `config-sync-json-key ${jsonKeyClass(kc)}`, text });
+        const kspan = pre.createSpan({ cls: `config-sync-json-key ${jsonKeyClass(kc)}`, text: `"${key}"` });
+        // An encrypted rule marks its key with the same lucide lock the rest of the panel uses
+        // (round-7 spec §2 — the old " 🔒" emoji suffix is gone).
+        if (kc.state.encrypted) setIcon(kspan.createSpan({ cls: "config-sync-json-lock" }), "lock");
         if (kc.state.scope === "none") {
           kspan.addEventListener("click", () => {
             void this.addRuleForKey(def, key).then(() => {
-              // Adding the first rule flips hasKeyRules -> true, which dims the path row's own
-              // scope/lock controls (spec §3.1) — that row lives outside refreshCardBody's swap
-              // target, so this needs a full card re-render, not just badges+body.
-              this.renderItemCard(wrap, def);
+              // Adding a rule can flip hasKeyRules -> true, which dims the path row's own
+              // scope/lock controls (spec §3.1) — refreshed in place (round-7 spec §1; the full
+              // re-render used before reset this preview's scroll to the top, round-7 bug 3).
+              this.refreshPathRow(wrap, def);
+              this.refreshCardBadges(wrap, def);
+              this.refreshCardBody(wrap, def);
             });
           });
         }
@@ -1228,7 +1256,13 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       }
       pre.appendText("\n");
     }
-    bodyEl.createDiv({ cls: "config-sync-json-legend", text: PREVIEW_LEGEND });
+    const legend = bodyEl.createDiv({ cls: "config-sync-json-legend" });
+    PREVIEW_LEGEND_ENTRIES.forEach((entry, i) => {
+      if (i > 0) legend.createSpan({ cls: "config-sync-legend-sep", text: "·" });
+      if (entry.kind === "scope" && entry.cls !== null) legend.createSpan({ cls: `config-sync-legend-dot ${entry.cls}` });
+      if (entry.kind === "lock") setIcon(legend.createSpan({ cls: "config-sync-legend-lock" }), "lock");
+      legend.appendText(entry.text);
+    });
   }
 
   // "+ Add folder" is available on every card (spec §5) — a def with no preset companions and an
@@ -1472,6 +1506,19 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         submit();
       }
     });
+    // Escape cancels THIS edit, not the settings window — same keymap-Scope technique as the
+    // settings-file path row (Obsidian's keymap sees Escape at window capture before any element
+    // listener, so stopPropagation can't help). Deferred in round 6b (spec §3), closed out here.
+    // popScope is idempotent; cancel()'s re-render detaches the input without a blur in Chromium.
+    const escScope = new Scope();
+    escScope.register([], "Escape", () => {
+      this.app.keymap.popScope(escScope);
+      cancel();
+      return false;
+    });
+    input.inputEl.addEventListener("focus", () => this.app.keymap.pushScope(escScope));
+    input.inputEl.addEventListener("blur", () => this.app.keymap.popScope(escScope));
+    window.setTimeout(() => input.inputEl.focus(), 0); // autofocus, matching the path row's edit state
   }
 
   // Progressive disclosure (spec §4 Step 3): the count always patches into the folder row's own
@@ -1593,13 +1640,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
               const freshCfg = this.itemConfig(def.id);
               if (hasKeyRules(freshCfg) !== hadKeyRules) {
                 // The first scoped snippet (false -> true) or the last cleared one (true -> false,
-                // withSnippetScope's empty-map pruning) flips hasKeyRules, which undims the path
-                // row's own scope/lock controls (spec §3.1) — that row lives outside
-                // refreshCardBody's swap target, so this needs a full card re-render, not just
-                // badges+body (mirrors the rule-row ✕ handler above, two-directional here since
-                // either transition can happen).
-                this.renderItemCard(wrap, def);
-                return;
+                // withSnippetScope's empty-map pruning) flips hasKeyRules, which (un)dims the path
+                // row's own scope/lock controls (spec §3.1) — refreshed in place (round-7 spec §1;
+                // the full card re-render used before made the panel jump on 2 of every 4 cycle
+                // clicks, round-7 bug 1).
+                this.refreshPathRow(wrap, def);
               }
               curScope = v;
               buildScope(); // member rows live in the companion zone — nothing below rebuilds them
@@ -2083,10 +2128,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         .setHeading(),
       "general-ribbon-buttons"
     );
-    const defs: { key: RibbonKey; label: string }[] = [
-      { key: "sync", label: "Sync Center" },
-      { key: "revert", label: "Revert last apply" },
-    ];
+    const defs: { key: RibbonKey; label: string }[] = [{ key: "sync", label: "Sync Center" }];
     for (const d of defs) {
       const s = new Setting(containerEl).setName(d.label);
       s.addToggle((t) =>
@@ -2121,10 +2163,15 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
 
   private renderPassphrase(containerEl: HTMLElement): void {
     const def = this.generalSetting("general-passphrase");
+    // Storage-location note (spec 2026-07-27-passphrase-keychain-design.md), appended at render
+    // time like the data-folder suffix — the static desc stays the version-neutral search copy.
+    const storageNote = this.host.passphraseKeychainBacked()
+      ? "On this device it is stored encrypted in Obsidian's keychain (Settings → Keychain)."
+      : "This device's Obsidian is older than 1.12, so it is stored unencrypted in app storage — update Obsidian to keep it in the encrypted keychain.";
     const setting = this.anchor(
       new Setting(containerEl)
         .setName(def.name)
-        .setDesc(def.desc),
+        .setDesc(`${def.desc} ${storageNote}`),
       "general-passphrase"
     );
     setting.settingEl.addClass("config-sync-ppset");

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CoreContext, capture, captureWithActions, loadManifest, groupsForDevice, apply, applyWithActions, revertLastApply, planImport, applyImport, PendingPull, ExternalStoreReader, pushExternal, ExternalStoreWriter, pluginIdForGroup, readGroups, writeGroups, deviceExcludedPluginIds } from "../src/core/ConfigSyncCore";
+import { CoreContext, capture, captureWithActions, loadManifest, groupsForDevice, apply, applyWithActions, planImport, applyImport, PendingPull, ExternalStoreReader, pushExternal, ExternalStoreWriter, pluginIdForGroup, readGroups, writeGroups, deviceExcludedPluginIds } from "../src/core/ConfigSyncCore";
 import { parseSyncManifest } from "../src/core/manifest";
 import { SyncGroup } from "../src/core/types";
 import { isFieldEnvelope, parseFileEnvelope } from "../src/core/crypto";
@@ -401,7 +401,7 @@ describe("apply", () => {
     expect(plugins.log).toEqual(["disable:demo", "enable:demo"]);
   });
 
-  it("mirrors dir groups with deletion and records a backup", async () => {
+  it("mirrors dir groups with deletion and writes no backup (round-7 spec §3: revert removed)", async () => {
     const { io, ctx } = setup();
     await seedStore(io, ctx);
     io.seed({ ".obs/snippets/local-only.css": "bye", ".obs/snippets/one.css": "one-v1" });
@@ -409,11 +409,7 @@ describe("apply", () => {
     expect(await io.read(".obs/snippets/one.css")).toBe("one-v2");
     expect(await io.exists(".obs/snippets/local-only.css")).toBe(false);
     expect(results[0]?.filesDeleted).toEqual([".obs/snippets/local-only.css"]);
-    const indexData = JSON.parse(await io.read(".obs/config-sync-backup/index.json")) as {
-      entries: Array<{ realPath: string }>;
-    };
-    const paths = indexData.entries.map((e) => e.realPath).sort();
-    expect(paths).toEqual([".obs/snippets/local-only.css", ".obs/snippets/one.css"]);
+    expect(await io.exists(".obs/config-sync-backup")).toBe(false);
   });
 
   it("reports an error result when the store has no data for a group", async () => {
@@ -424,21 +420,12 @@ describe("apply", () => {
     expect(results[0]?.messages[0]).toContain("capture it from the source vault first");
   });
 
-  it("still writes the backup index when a group throws mid-run", async () => {
+  it("deletes a leftover 1.x backup folder on apply (round-7 spec §3: legacy cleanup)", async () => {
     const { io, ctx } = setup();
     await seedStore(io, ctx);
-    io.seed({
-      ".obs/snippets/local-only.css": "bye",
-      ".obs/plugins/demo/data.json": "not json",
-    });
-    await expect(apply(ctx, ["snippets", "plugin-demo"])).rejects.toThrow("not valid JSON");
-    const index = JSON.parse(await io.read(".obs/config-sync-backup/index.json")) as {
-      entries: Array<{ realPath: string }>;
-    };
-    expect(index.entries.length).toBeGreaterThan(0);
-    const result = await revertLastApply(ctx);
-    expect(result.status).toBe("ok");
-    expect(await io.read(".obs/snippets/local-only.css")).toBe("bye");
+    io.seed({ ".obs/config-sync-backup/index.json": "{}", ".obs/config-sync-backup/files/0": "old" });
+    await apply(ctx, ["snippets"]);
+    expect(await io.exists(".obs/config-sync-backup")).toBe(false);
   });
 
   it("classifies apply changes and skips identical writes", async () => {
@@ -707,27 +694,6 @@ describe("applyWithActions", () => {
       expect(plugins.enabled.has("demo")).toBe(false);
       expect(await io.exists(".obs/plugins/demo/data.json")).toBe(true); // config still written — install succeeded
     });
-  });
-});
-
-describe("revertLastApply", () => {
-  it("restores overwritten files and deletes files created by apply", async () => {
-    const { io, ctx } = setup();
-    await seedStore(io, ctx);
-    io.seed({ ".obs/snippets/local-only.css": "bye" });
-    await apply(ctx, ["snippets", "hotkeys"]);
-    expect(await io.exists(".obs/snippets/local-only.css")).toBe(false);
-    expect(await io.read(".obs/hotkeys.json")).toBe('{"a":2}');
-    const result = await revertLastApply(ctx);
-    expect(result.status).toBe("ok");
-    expect(result.needsAppReload).toBe(true);
-    expect(await io.read(".obs/snippets/local-only.css")).toBe("bye");
-    expect(await io.exists(".obs/hotkeys.json")).toBe(false);
-  });
-
-  it("throws a clear error when there is no backup", async () => {
-    const { ctx } = setup();
-    await expect(revertLastApply(ctx)).rejects.toThrow("Nothing to revert");
   });
 });
 

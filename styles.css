@@ -366,7 +366,6 @@ body.is-phone .config-sync-fkey {
   margin: 0 0 var(--size-4-1) var(--size-4-3);
 }
 
-.config-sync-report-title { display: flex; align-items: center; gap: var(--size-4-2); }
 .config-sync-report-pills { display: flex; gap: var(--size-4-1); margin-left: auto; }
 /* Panel base type scale (batch 4 ⑥): rows and anything unstyled inherit the same size as
    Obsidian's own list UIs; smaller/small overrides below stay as the compact steps. */
@@ -389,7 +388,6 @@ body.is-phone .config-sync-fkey {
 
 .config-sync-sect .config-sync-pill { margin-right: var(--size-4-1); }
 
-.config-sync-report-sub { color: var(--text-muted); font-size: var(--font-ui-smaller); margin-bottom: var(--size-4-2); }
 .config-sync-sect { display: flex; align-items: center; font-size: var(--font-ui-smaller); text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-faint); padding: calc(var(--size-4-3) + var(--size-4-1)) 2px var(--size-4-1); border-bottom: 1px solid var(--background-modifier-border); }
 .config-sync-card { background: var(--background-secondary); border: 1px solid var(--background-modifier-border); border-radius: var(--radius-m); padding: 0 var(--size-4-3); }
 .config-sync-report-row { display: flex; align-items: center; gap: var(--size-4-2); padding: var(--size-4-2) 0; border-bottom: 1px solid var(--background-modifier-border); cursor: pointer; }
@@ -920,9 +918,16 @@ body.is-mobile .config-sync-strip-meta .config-sync-report-pills { margin-left: 
 .config-sync-json-val { color: var(--text-muted); }
 .config-sync-json-num { color: var(--color-green); }
 .config-sync-json-legend { color: var(--text-muted); font-size: var(--font-ui-smaller); margin-top: var(--size-2-2); }
-.config-sync-json-legend .config-sync-json-strip { color: var(--color-red); }
-.config-sync-json-legend .config-sync-json-desktop { color: var(--color-blue); }
-.config-sync-json-legend .config-sync-json-mobile { color: var(--color-orange); }
+/* Legend 定稿 B (round-7 spec §2): color dots + neutral words, scope classes shared with the
+   key spans above so the palette can't drift. */
+.config-sync-legend-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 4px; }
+.config-sync-legend-dot.config-sync-json-desktop { background: var(--color-blue); }
+.config-sync-legend-dot.config-sync-json-mobile { background: var(--color-orange); }
+.config-sync-legend-dot.config-sync-json-strip { background: var(--color-red); }
+.config-sync-legend-sep { color: var(--text-faint); margin: 0 5px; }
+.config-sync-legend-lock { display: inline-block; margin-right: 4px; }
+.config-sync-json-lock { display: inline-block; margin-left: 4px; }
+.config-sync-legend-lock svg, .config-sync-json-lock svg { width: 11px; height: 11px; vertical-align: -1px; }
 /* Per-item array element coloring (spec D10 "逐项数组按元素着色") — same scope palette as the
    key classes above, applied to a plain (non-pill) span since an element is a whole line, not a
    key token. */
