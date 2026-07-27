@@ -4,6 +4,7 @@ import { bucketCounts, GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry, re
 import { CATEGORY_LABELS, findGroupByName, ItemCategory, SELF_GROUP_NAME, categoryForGroup } from "../core/catalog";
 import { FileChanges, GroupResult, Remote, SyncGroup, hasChanges } from "../core/types";
 import { Availability } from "../core/availability";
+import { isWholeFileEncrypted } from "../core/modes";
 import {
   capFileEntries,
   CappedEntry,
@@ -127,8 +128,6 @@ export interface SyncCenterHost {
   deepDiff(remote: Remote): Promise<{ entries: RemoteDiffEntry[]; lockDiffers: boolean }>;
   pullFrom(remote: Remote): Promise<GroupResult[] | null>;
   pushTo(remote: Remote): Promise<GroupResult[] | null>;
-  bootstrapOffer(): Promise<{ itemCount: number; capturedAt: string | null } | null>;
-  dismissBootstrap(): void;
   adoptConfiguration(): Promise<GroupResult[] | null>;
   switchLocalDecisions(name: string): string[]; // [] for non-switch-list groups
   betaIds(): Set<string>; // plugin ids tracked in the BRAT index (the Beta scope/tab)
@@ -662,7 +661,9 @@ export class SyncCenterView extends ItemView {
   private renderSelfDataJsonDiff(holder: HTMLElement, dir: Direction): void {
     void this.host.diffPair(SELF_GROUP_NAME, "", dir).then((pair) => {
       if (pair === null) {
-        holder.createDiv({ cls: "config-sync-expand-note", text: "no diff available" });
+        const selfGroup = findGroupByName(this.groups, SELF_GROUP_NAME);
+        const text = selfGroup !== undefined && isWholeFileEncrypted(selfGroup) ? "encrypted file" : "no diff available";
+        holder.createDiv({ cls: "config-sync-expand-note", text });
         return;
       }
       const leftLabel = dir === "capture" ? "store" : "this device";
@@ -1455,7 +1456,7 @@ export class SyncCenterView extends ItemView {
     }
     const ldCount = this.host.switchLocalDecisions(group.name).length;
     if (ldCount > 0) {
-      row.createSpan({ cls: "config-sync-ldnote", text: `· ${ldCount} excluded` });
+      row.createSpan({ cls: "config-sync-ldnote", text: `· ${ldCount} on this device` });
     }
     const chosen = this.policy.get(group.name);
     if (this.selected.has(group.name) && chosen !== undefined) {
@@ -1544,7 +1545,7 @@ export class SyncCenterView extends ItemView {
     // item can be in-sync while raw contents differ.
     const excluded = this.host.switchLocalDecisions(r.group.name);
     for (const id of excluded) {
-      detail.createDiv({ cls: "config-sync-lddetail", text: `⌂ ${id} — excluded from this list on this device` });
+      detail.createDiv({ cls: "config-sync-lddetail", text: `⌂ ${id} — this device keeps its own on/off state` });
     }
     if (SWITCH_LIST_GROUPS.has(r.group.name)) this.renderSwitchDivergence(detail, r);
     if (status.message !== undefined) {
@@ -1589,7 +1590,7 @@ export class SyncCenterView extends ItemView {
       }
       detail.createDiv({
         cls: "config-sync-expand-note",
-        text: excluded.length > 0 ? "in sync — excluded plugins are not compared" : "identical to the store",
+        text: excluded.length > 0 ? "in sync — this device's own plugins aren't compared" : "identical to the store",
       });
       return;
     }
@@ -1663,14 +1664,14 @@ export class SyncCenterView extends ItemView {
       capLine.appendText(` Capture removes ${d.captureRemoves.length} from the shared list — other devices will turn them off: ${d.captureRemoves.join(", ")}`);
       const applyLine = box.createDiv({ cls: "config-sync-divergence-line" });
       renderActionIcon(applyLine, "apply").addClass(ACTION_COLOR_CLASS.apply);
-      applyLine.appendText(` Apply turns off ${d.applyDisables.length} on this device — exclude them first to keep them: ${d.applyDisables.join(", ")}`);
+      applyLine.appendText(` Apply turns off ${d.applyDisables.length} on this device — keep them on this device first: ${d.applyDisables.join(", ")}`);
       const btn = holder.createEl("button", {
         cls: "config-sync-seg-btn",
-        text: `⌂ Exclude this device's ${d.applyDisables.length} extra${d.applyDisables.length === 1 ? "" : "s"}…`,
+        text: `⌂ Keep ${d.applyDisables.length} extra${d.applyDisables.length === 1 ? "" : "s"} on this device…`,
       });
       btn.addEventListener("click", (e) => {
         e.stopPropagation();
-        new ExcludeExtrasModal(this.app, this.host.displayName(r.group.name, r.group.label), d.applyDisables, async (ids) => {
+        new KeepOnDeviceModal(this.app, this.host.displayName(r.group.name, r.group.label), d.applyDisables, async (ids) => {
           if (ids.length === 0) return;
           await this.host.addSwitchExceptions(r.group.name, ids);
           await this.reload();
@@ -1835,7 +1836,8 @@ export class SyncCenterView extends ItemView {
         void this.host.diffPair(r.group.name, e.name, this.effDir(r)).then((pair) => {
           if (panel !== p) return; // closed while loading
           if (pair === null) {
-            p.createDiv({ cls: "config-sync-expand-note", text: "no diff available" });
+            const text = isWholeFileEncrypted(r.group) ? "encrypted file" : "no diff available";
+            p.createDiv({ cls: "config-sync-expand-note", text });
             return;
           }
           const dir = this.effDir(r);
@@ -2166,7 +2168,7 @@ class StopSyncingModal extends Modal {
   }
 }
 
-class ExcludeExtrasModal extends Modal {
+class KeepOnDeviceModal extends Modal {
   private checks = new Map<string, boolean>();
 
   constructor(app: App, private listLabel: string, private ids: string[], private onConfirm: (ids: string[]) => Promise<void>) {
@@ -2175,10 +2177,10 @@ class ExcludeExtrasModal extends Modal {
   }
 
   onOpen(): void {
-    this.titleEl.setText("Exclude from this list (this device)");
+    this.titleEl.setText("Keep on this device only");
     this.contentEl.createDiv({
       cls: "config-sync-expand-note",
-      text: `${this.listLabel}: excluded plugins keep their own on/off state on this device — the shared list neither includes nor changes them.`,
+      text: `${this.listLabel}: items kept on this device manage their own on/off state — the shared list neither includes nor changes them.`,
     });
     const list = this.contentEl.createDiv();
     for (const id of this.ids) {
@@ -2191,7 +2193,7 @@ class ExcludeExtrasModal extends Modal {
     const bar = this.contentEl.createDiv({ cls: "config-sync-modal-buttons" });
     new ButtonComponent(bar).setButtonText("Cancel").onClick(() => this.close());
     new ButtonComponent(bar)
-      .setButtonText("Exclude")
+      .setButtonText("Keep on this device")
       .setCta()
       .onClick(() => {
         const picked = this.ids.filter((id) => this.checks.get(id) === true);

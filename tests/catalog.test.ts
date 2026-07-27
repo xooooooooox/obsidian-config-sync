@@ -18,6 +18,7 @@ import {
   listOptionSections,
   listBetaSections,
   listPluginSections,
+  OPTION_LABELS,
   optionReservedName,
   reservedNames,
   SELF_GROUP_NAME,
@@ -50,7 +51,7 @@ describe("listOptionSections", () => {
     const sections = await listOptionSections(optionFs(), ".obs", NO_GROUPS);
     const byBucket = Object.fromEntries(sections.map((s) => [s.bucket, s]));
     const names = (b: string) => (byBucket[b]?.items ?? []).map((i) => i.name).sort();
-    expect(names("available")).toEqual(["app", "appearance", "enabled-css-snippets", "snippets"]);
+    expect(names("available")).toEqual(["app", "appearance", "snippets"]);
     expect(names("notPresent")).toEqual(["hotkeys", "themes"]);
     expect(byBucket["notRecommended"]).toBeUndefined();
     expect(byBucket["available"]?.allowSyncAll).toBe(true);
@@ -80,27 +81,31 @@ describe("listOptionSections", () => {
     expect(sections.some((s) => s.bucket === "notRecommended")).toBe(false);
   });
 
-  it("surfaces enabled-css-snippets as an available item when appearance.json is present", async () => {
+  it("app.json is a single plain row — the v3 app-view/appearance-domain split is gone (spec 2026-07-25-unified-card-design.md §7)", async () => {
     const sections = await listOptionSections(optionFs(), ".obs", NO_GROUPS);
-    const item = sections.flatMap((s) => s.items).find((i) => i.name === "enabled-css-snippets");
-    expect(item).toEqual({
-      name: "enabled-css-snippets",
-      label: "Enabled CSS snippets",
-      description: "Which CSS snippets are on, per device.",
-      path: "{configDir}/enabled-css-snippets.json",
+    const items = sections.flatMap((s) => s.items);
+    expect(items.find((i) => i.name === "app")).toEqual({
+      name: "app",
+      label: "App settings",
+      description: "Editing, new-note and link behavior, and other general options.",
+      path: "{configDir}/app.json",
       type: "file",
       exists: true,
       disabledReason: null,
       cautionReason: null,
     });
+    expect(items.some((i) => i.name === "app-view-general")).toBe(false);
+    expect(items.some((i) => i.name === "appearance-domain")).toBe(false);
+    expect(categoryForGroup("app")).toBe("obsidian");
   });
 
-  it("omits enabled-css-snippets when appearance.json is absent", async () => {
+  it("routes app to notPresent when app.json is absent from the vault", async () => {
     const io = new MemFS();
-    io.seed({ ".obs/app.json": "{}" });
+    io.seed({ ".obs/appearance.json": "{}" });
     const sections = await listOptionSections(io, ".obs", NO_GROUPS);
-    const all = sections.flatMap((s) => s.items.map((i) => i.name));
-    expect(all).not.toContain("enabled-css-snippets");
+    const byBucket = Object.fromEntries(sections.map((s) => [s.bucket, s]));
+    expect((byBucket["notPresent"]?.items ?? []).map((i) => i.name)).toContain("app");
+    expect((byBucket["available"]?.items ?? []).map((i) => i.name)).not.toContain("app");
   });
 });
 
@@ -125,7 +130,7 @@ describe("listCoreSections", () => {
     });
     const sections = await listCoreSections(io, ".obs", cores, NO_GROUPS);
     const byBucket = Object.fromEntries(sections.map((s) => [s.bucket, s]));
-    expect(byBucket["list"]?.items[0]?.name).toBe("core-plugins");
+    expect(byBucket["list"]).toBeUndefined(); // aggregate on/off-list row removed (spec §7 item 1)
     // switcher is picked up dynamically even though it is not in CORE_ID_SEED
     expect(byBucket["enabled"]?.items.map((i) => i.name).sort()).toEqual(["graph", "properties", "switcher"]);
     expect(byBucket["enabled"]?.items.find((i) => i.name === "switcher")?.path).toBe("{configDir}/switcher.json");
@@ -165,15 +170,47 @@ describe("listPluginSections", () => {
     { id: "off-plugin", name: "Off Plugin", enabled: false },
     { id: "remotely-save", name: "Remotely Save", enabled: true },
   ];
-  it("buckets community plugins by enabled/disabled and leads with the switch list", async () => {
+  it("buckets community plugins by enabled/disabled — no aggregate switch-list row", async () => {
     const io = new MemFS();
     io.seed({ ".obs/community-plugins.json": "{}" });
-    const sections = await listPluginSections(io, ".obs", plugins, NO_GROUPS, new Set<string>());
+    const sections = await listPluginSections(plugins, NO_GROUPS, new Set<string>());
     const byBucket = Object.fromEntries(sections.map((s) => [s.bucket, s]));
-    expect(byBucket["list"]?.items[0]?.name).toBe("community-plugins");
+    expect(byBucket["list"]).toBeUndefined(); // aggregate on/off-list row removed (spec §7 item 1)
     expect(byBucket["enabled"]?.items.map((i) => i.name).sort()).toEqual(["plugin-dataview", "plugin-remotely-save"]);
     expect(byBucket["disabled"]?.items.map((i) => i.name)).toEqual(["plugin-off-plugin"]);
     expect(byBucket["notRecommended"]).toBeUndefined();
+  });
+});
+
+describe("aggregate rows removed (spec 2026-07-25-unified-card-design.md §7 item 1)", () => {
+  it("OPTION_LABELS carries no core-plugins.json / community-plugins.json entries", () => {
+    expect(Object.keys(OPTION_LABELS)).not.toContain("core-plugins.json");
+    expect(Object.keys(OPTION_LABELS)).not.toContain("community-plugins.json");
+  });
+
+  it("listCoreSections never emits a 'core-plugins' item or the 'Enabled core plugins' label, anywhere", async () => {
+    const io = new MemFS();
+    io.seed({ ".obs/core-plugins.json": "{}", ".obs/graph.json": "{}" });
+    const cores = [{ id: "graph", name: "Graph view", enabled: true }];
+    const sections = await listCoreSections(io, ".obs", cores, NO_GROUPS);
+    expect(sections.every((s) => s.bucket !== "list")).toBe(true);
+    expect(sections.flatMap((s) => s.items).some((i) => i.name === "core-plugins")).toBe(false);
+    expect(JSON.stringify(sections)).not.toContain("Enabled core plugins");
+  });
+
+  it("listPluginSections never emits a 'community-plugins' item or the 'Enabled community plugins' label, anywhere", async () => {
+    const io = new MemFS();
+    io.seed({ ".obs/community-plugins.json": "{}" });
+    const plugins = [{ id: "dataview", name: "Dataview", enabled: true }];
+    const sections = await listPluginSections(plugins, NO_GROUPS, new Set<string>());
+    expect(sections.every((s) => s.bucket !== "list")).toBe(true);
+    expect(sections.flatMap((s) => s.items).some((i) => i.name === "community-plugins")).toBe(false);
+    expect(JSON.stringify(sections)).not.toContain("Enabled community plugins");
+  });
+
+  it("listBetaSections has no on/off-list bucket either (unchanged — never had one)", async () => {
+    const sections = await listBetaSections([{ id: "dataview", name: "Dataview", enabled: true }], NO_GROUPS, { dataview: "owner/repo" });
+    expect(sections.every((s) => s.bucket !== "list")).toBe(true);
   });
 });
 
@@ -192,7 +229,7 @@ describe("beta/community split (BRAT index)", () => {
   it("community tab excludes beta ids and lists non-beta not-installed groups", async () => {
     const io = new MemFS();
     io.seed({ ".obs/community-plugins.json": "{}" });
-    const sections = await listPluginSections(io, ".obs", plugins, groups, new Set(Object.keys(index)));
+    const sections = await listPluginSections(plugins, groups, new Set(Object.keys(index)));
     const byBucket = Object.fromEntries(sections.map((sec) => [sec.bucket, sec]));
     expect(byBucket["enabled"]?.items.map((i) => i.name)).toEqual(["plugin-dataview"]);
     expect(byBucket["disabled"]).toBeUndefined(); // simpread is beta → not here
@@ -252,6 +289,7 @@ describe("groupForItem / toggleSection", () => {
     const result = toggleSection(start, items, true);
     expect(result.map((g) => g.name)).toEqual(["app"]);
   });
+
 });
 
 describe("splitLocation / joinLocation", () => {
@@ -281,8 +319,13 @@ describe("name and path helpers", () => {
     expect(names.has("graph")).toBe(true);
     expect(names.has("properties")).toBe(true);
     expect(names.has("plugin-dataview")).toBe(true);
-    expect(names.has("core-plugins")).toBe(true);
     expect(names.has("nope")).toBe(false);
+  });
+
+  it("no longer reserves 'core-plugins'/'community-plugins' — the aggregate rows are gone (spec §7 item 1); those compiled group names are excluded from Advanced/search via SWITCH_LIST_GROUPS instead", () => {
+    const names = reservedNames(["dataview"]);
+    expect(names.has("core-plugins")).toBe(false);
+    expect(names.has("community-plugins")).toBe(false);
   });
 
   it("expectedPathForName maps each identity kind back to its path", () => {
@@ -308,7 +351,7 @@ describe("defaultGroupForName", () => {
       path: "{configDir}/app.json",
       type: "file",
       devices: "all",
-      description: "Editor, Files & links and other general options (app.json).",
+      description: "Editing, new-note and link behavior, and other general options.",
     });
     expect(defaultGroupForName("snippets")).toEqual({
       name: "snippets",
@@ -389,7 +432,7 @@ describe("section copy (action-oriented)", () => {
     expect(opt.find((s) => s.bucket === "available")?.description).toBe("Sync these settings that already exist in this vault.");
     const core = await listCoreSections(io, ".obs", [{ id: "graph", name: "Graph view", enabled: true }], []);
     expect(core.find((s) => s.bucket === "enabled")?.description).toBe("Sync the settings files of your enabled core plugins.");
-    const com = await listPluginSections(io, ".obs", [{ id: "dataview", name: "Dataview", enabled: true }], [], new Set<string>());
+    const com = await listPluginSections([{ id: "dataview", name: "Dataview", enabled: true }], [], new Set<string>());
     expect(com.find((s) => s.bucket === "enabled")?.description).toBe("Sync the settings files of your enabled community plugins.");
   });
 });
@@ -448,9 +491,8 @@ describe("groupForItem", () => {
     expect(g.mode).toBe("fields");
     expect(g.fields).toEqual(selfPresetRules());
     expect(g.fields).toEqual([
-      { pattern: "rootPath", action: "strip", locked: true },
-      { pattern: "remotes", action: "strip", locked: true },
-      { pattern: "switchExceptions", action: "strip", locked: true },
+      { pattern: "rootPath", scope: "local", encrypted: false, locked: true },
+      { pattern: "remotes", scope: "local", encrypted: false, locked: true },
     ]);
   });
 
@@ -462,16 +504,14 @@ describe("groupForItem", () => {
 });
 
 describe("selfPresetRules", () => {
-  it("has exactly three locked strip rules, the third being switchExceptions", () => {
-    const rules = selfPresetRules();
-    expect(rules).toHaveLength(3);
-    expect(rules[2]).toEqual({ pattern: "switchExceptions", action: "strip", locked: true });
+  it("only the genuinely device-local top-level settings — schema v2 has no memberScopes/memberLocal fields", () => {
+    expect(selfPresetRules().map((r) => r.pattern)).toEqual(["rootPath", "remotes"]);
   });
 });
 
 describe("appearancePresetRules", () => {
   it("has exactly one locked strip rule for enabledCssSnippets", () => {
-    expect(appearancePresetRules()).toEqual([{ pattern: "enabledCssSnippets", action: "strip", locked: true }]);
+    expect(appearancePresetRules()).toEqual([{ pattern: "enabledCssSnippets", scope: "local", encrypted: false, locked: true }]);
   });
 });
 
@@ -484,7 +524,7 @@ describe("ensureSelfPresets", () => {
     expect(self?.fields).toEqual(selfPresetRules());
   });
 
-  it("upgrades an existing two-preset self group to three presets", () => {
+  it("leaves an already-complete preset self group unchanged", () => {
     const groups: SyncGroup[] = [
       {
         name: SELF_GROUP_NAME,
@@ -493,15 +533,15 @@ describe("ensureSelfPresets", () => {
         devices: "all",
         mode: "fields",
         fields: [
-          { pattern: "rootPath", action: "strip", locked: true },
-          { pattern: "remotes", action: "strip", locked: true },
+          { pattern: "rootPath", scope: "local", encrypted: false, locked: true },
+          { pattern: "remotes", scope: "local", encrypted: false, locked: true },
         ],
       },
     ];
     const out = ensureSelfPresets(groups);
     const self = out.find((g) => g.name === SELF_GROUP_NAME);
     expect(self?.fields).toEqual(selfPresetRules());
-    expect(self?.fields).toHaveLength(3);
+    expect(self?.fields).toHaveLength(2);
   });
 
   it("normalizes an unlocked duplicate of a preset pattern to the locked preset", () => {
@@ -512,12 +552,12 @@ describe("ensureSelfPresets", () => {
         type: "file",
         devices: "all",
         mode: "fields",
-        fields: [{ pattern: "rootPath", action: "strip" }],
+        fields: [{ pattern: "rootPath", scope: "local", encrypted: false }],
       },
     ];
     const out = ensureSelfPresets(groups);
     const self = out.find((g) => g.name === SELF_GROUP_NAME);
-    expect(self?.fields?.filter((f) => f.pattern === "rootPath")).toEqual([{ pattern: "rootPath", action: "strip", locked: true }]);
+    expect(self?.fields?.filter((f) => f.pattern === "rootPath")).toEqual([{ pattern: "rootPath", scope: "local", encrypted: false, locked: true }]);
     expect(self?.fields).toEqual(selfPresetRules());
   });
 
@@ -529,12 +569,12 @@ describe("ensureSelfPresets", () => {
         type: "file",
         devices: "all",
         mode: "fields",
-        fields: [{ pattern: "myToken", action: "encrypt" }],
+        fields: [{ pattern: "myToken", scope: "all", encrypted: true }],
       },
     ];
     const out = ensureSelfPresets(groups);
     const self = out.find((g) => g.name === SELF_GROUP_NAME);
-    expect(self?.fields).toEqual([...selfPresetRules(), { pattern: "myToken", action: "encrypt" }]);
+    expect(self?.fields).toEqual([...selfPresetRules(), { pattern: "myToken", scope: "all", encrypted: true }]);
   });
 
   it("is idempotent: double-apply equals single-apply", () => {
@@ -569,7 +609,7 @@ describe("appearance strip when snippet list is active", () => {
     const out = ensureAppearancePresets([{ ...appearance }, { ...snippet }]);
     const app = out.find((g) => g.name === "appearance")!;
     expect(app.mode).toBe("fields");
-    expect(app.fields).toContainEqual({ pattern: "enabledCssSnippets", action: "strip", locked: true });
+    expect(app.fields).toContainEqual({ pattern: "enabledCssSnippets", scope: "local", encrypted: false, locked: true });
   });
   it("leaves appearance untouched when the snippet group is absent", () => {
     const out = ensureAppearancePresets([{ ...appearance }]);

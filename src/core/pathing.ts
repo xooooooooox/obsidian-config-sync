@@ -38,6 +38,10 @@ export function basename(p: string): string {
   return p.slice(p.lastIndexOf("/") + 1);
 }
 
+export function sidecarStoreSuffix(cls: "desktop" | "mobile"): string {
+  return `.__scopes__.${cls}.json`;
+}
+
 // Resolves a "store/<groupStorePath>/..." rel to the owning group, by matching each group's
 // store path against the rel's "store/" prefix. Returns undefined for store metadata (e.g.
 // store.lock.json) or an unmatched rel.
@@ -46,7 +50,7 @@ export function resolveGroupByStoreRel(groups: SyncGroup[], rel: string): SyncGr
   const inner = rel.slice("store/".length);
   for (const g of groups) {
     const sp = groupStorePath(g.path);
-    if (g.type === "file" && inner === sp) return g;
+    if (g.type === "file" && (inner === sp || inner.startsWith(sp + ".__scopes__."))) return g;
     if (g.type === "dir" && inner.startsWith(sp + "/")) return g;
   }
   return undefined;

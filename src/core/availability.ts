@@ -93,20 +93,20 @@ export function desktopOnlyPluginIds(groups: SyncGroup[], plugins: PluginHost, l
   return ids;
 }
 
-// Snippet names whose shared scope excludes the current device class. Feeds the exception mask
+// Member names whose shared scope excludes the current device class. Feeds the exception mask
 // (capture pass-through + compare masking) exactly like desktopOnlyPluginIds does for plugins.
-export function scopedAwaySnippets(scopes: Record<string, "desktop" | "mobile">, isMobile: boolean): Set<string> {
+export function scopedAwayMembers(scopes: Record<string, "desktop" | "mobile">, isMobile: boolean): Set<string> {
   const want = isMobile ? "mobile" : "desktop";
   const out = new Set<string>();
   for (const [name, scope] of Object.entries(scopes)) if (scope !== want) out.add(name);
   return out;
 }
 
-// The snippets apply must force OFF on the wrong device — scope-away minus pins, since an explicit
-// local pin (pin > scope) must keep the machine's own on/off.
-export function snippetForceOff(scopes: Record<string, "desktop" | "mobile">, pins: string[], isMobile: boolean): string[] {
-  const pinSet = new Set(pins);
-  return [...scopedAwaySnippets(scopes, isMobile)].filter((id) => !pinSet.has(id));
+// The apply must force OFF members scoped away from this device — scope-away minus This-device
+// ids, since an explicit local decision (local > scope) must keep the machine's own on/off.
+export function memberForceOff(scopes: Record<string, "desktop" | "mobile">, localIds: string[], isMobile: boolean): string[] {
+  const localSet = new Set(localIds);
+  return [...scopedAwayMembers(scopes, isMobile)].filter((id) => !localSet.has(id));
 }
 
 // Enabled snippet names (local list or store list) whose .css file exists neither locally nor

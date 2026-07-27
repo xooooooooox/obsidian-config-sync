@@ -98,13 +98,19 @@ export function localRealPath(name: string, groupPath: string, configDir: string
   return spec?.field !== undefined ? `${configDir}/${spec.localFile}` : groupRealPath(groupPath, configDir);
 }
 
-// Remove force-off ids from an applied list. Arrays only (snippet scope-away force-off);
-// maps and empty force-off sets pass through unchanged. Shared by applyGroup and diffPair so
-// the diff preview provably mirrors what apply writes.
+// Remove force-off ids from an applied list: user class scopes enforced on the wrong device
+// class. Arrays drop the id; maps set an EXISTING key to false (an absent key is already off).
+// Empty force-off passes through unchanged. Shared by applyGroup and diffPair so the diff
+// preview provably mirrors what apply writes.
 export function subtractForceOff(list: SwitchList, forceOff: string[]): SwitchList {
-  if (!Array.isArray(list) || forceOff.length === 0) return list;
-  const off = new Set(forceOff);
-  return list.filter((id) => !off.has(id));
+  if (forceOff.length === 0) return list;
+  if (Array.isArray(list)) {
+    const off = new Set(forceOff);
+    return list.filter((id) => !off.has(id));
+  }
+  const result: Record<string, boolean> = { ...list };
+  for (const id of forceOff) if (id in result) result[id] = false;
+  return result;
 }
 
 /**

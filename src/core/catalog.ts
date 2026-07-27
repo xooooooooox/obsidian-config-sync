@@ -25,22 +25,11 @@ const HIDDEN_FILES = new Set(["core-plugins-migration.json"]);
 const HIDDEN_DIRS = new Set(["plugins", "config-sync-backup"]); // config-sync's own working dirs — never syncable
 
 export const OPTION_LABELS: Record<string, { label: string; description: string; type: "file" | "dir" }> = {
-  "app.json": { label: "App settings", description: "Editor, Files & links and other general options (app.json).", type: "file" },
+  "app.json": { label: "App settings", description: "Editing, new-note and link behavior, and other general options.", type: "file" },
   "appearance.json": { label: "Appearance", description: "Theme choice, fonts and interface appearance.", type: "file" },
-  "hotkeys.json": { label: "Hotkeys", description: "Custom keyboard shortcuts.", type: "file" },
+  "hotkeys.json": { label: "Hotkeys", description: "Your custom keyboard shortcuts.", type: "file" },
   themes: { label: "Themes", description: "Installed theme files.", type: "dir" },
   snippets: { label: "CSS snippets", description: "Your CSS snippets.", type: "dir" },
-  "core-plugins.json": {
-    label: "Enabled core plugins",
-    description: "Which core plugins are turned on. Mirrors the whole list across devices.",
-    type: "file",
-  },
-  "community-plugins.json": {
-    label: "Enabled community plugins",
-    description:
-      "Which community plugins are turned on — not the plugins themselves or their settings. Mirrors the whole list: plugins enabled only on the target device get turned off.",
-    type: "file",
-  },
 };
 
 // The ONLY core plugin whose settings file is not `${id}.json`.
@@ -165,6 +154,12 @@ export async function listDiscovered(
   return out;
 }
 
+// NOTE: the unified-card engine (registry.ts) is now the source of truth for how app.json's
+// keys split across the Editor/Files and links/Appearance/Other cards and how appearance.json +
+// themes/ + snippets/ compose (spec 2026-07-25-unified-card-design.md §5). listOptionSections
+// stays at the pre-registry granularity — one row per reserved option name — for the settings
+// panel (Task 5/6 rebuilds SettingTab.ts directly on ItemDefs; this catalog is otherwise still
+// used by Sync Center scope/search plumbing).
 export async function listOptionSections(io: FileIO, configDir: string, _groups: SyncGroup[]): Promise<CatalogSection[]> {
   const { files, dirs } = await presentSets(io, configDir);
   const available: CatalogItem[] = [];
@@ -201,19 +196,6 @@ export async function listOptionSections(io: FileIO, configDir: string, _groups:
     covered.add(b);
   }
 
-  if (files.has("appearance.json")) {
-    available.push({
-      name: "enabled-css-snippets",
-      label: "Enabled CSS snippets",
-      description: "Which CSS snippets are on, per device.",
-      path: "{configDir}/enabled-css-snippets.json",
-      type: "file",
-      exists: true,
-      disabledReason: null,
-      cautionReason: null,
-    });
-  }
-
   return [
     ...section("available", "Available", "Sync these settings that already exist in this vault.", true, available),
     ...section("notPresent", "Not yet in this vault", "Nothing to sync yet — customize these in Obsidian first, then they'll appear here.", true, notPresent),
@@ -227,17 +209,6 @@ export async function listCoreSections(
   _groups: SyncGroup[]
 ): Promise<CatalogSection[]> {
   const { files } = await presentSets(io, configDir);
-  const switchItem: CatalogItem = {
-    name: "core-plugins",
-    label: OPTION_LABELS["core-plugins.json"]!.label,
-    description: OPTION_LABELS["core-plugins.json"]!.description,
-    path: "{configDir}/core-plugins.json",
-    type: "file",
-    exists: files.has("core-plugins.json"),
-    disabledReason: null,
-    cautionReason: null,
-  };
-
   const enabled: CatalogItem[] = [];
   const disabled: CatalogItem[] = [];
   for (const core of cores) {
@@ -260,7 +231,6 @@ export async function listCoreSections(
   disabled.sort(sort);
 
   return [
-    ...section("list", "Plugin on/off list", "Which core plugins are turned on, mirrored across devices.", false, [switchItem]),
     ...section("enabled", "Enabled", "Sync the settings files of your enabled core plugins.", true, enabled),
     ...section("disabled", "Disabled", "Sync a disabled core plugin's settings now, ready for when you turn it on.", true, disabled),
   ];
@@ -294,23 +264,10 @@ const NOT_INSTALLED_HEADING = "Not installed on this device";
 const NOT_INSTALLED_DESC = "Synced from the store — settings sync now; the plugin itself installs through the Sync Center.";
 
 export async function listPluginSections(
-  io: FileIO,
-  configDir: string,
   plugins: { id: string; name: string; enabled: boolean }[],
   groups: SyncGroup[],
   betaIds: Set<string>
 ): Promise<CatalogSection[]> {
-  const { files } = await presentSets(io, configDir);
-  const switchItem: CatalogItem = {
-    name: "community-plugins",
-    label: OPTION_LABELS["community-plugins.json"]!.label,
-    description: OPTION_LABELS["community-plugins.json"]!.description,
-    path: "{configDir}/community-plugins.json",
-    type: "file",
-    exists: files.has("community-plugins.json"),
-    disabledReason: null,
-    cautionReason: null,
-  };
   const enabled: CatalogItem[] = [];
   const disabled: CatalogItem[] = [];
   for (const p of [...plugins].sort((a, b) => a.name.localeCompare(b.name))) {
@@ -334,7 +291,6 @@ export async function listPluginSections(
     (id) => `Settings of ${id}.`
   );
   return [
-    ...section("list", "Plugin on/off list", "Which community plugins are turned on, mirrored across devices.", false, [switchItem]),
     ...section("enabled", "Enabled", "Sync the settings files of your enabled community plugins.", true, enabled),
     ...section("disabled", "Installed but disabled", "Sync a disabled plugin's settings now, ready for when you turn it on.", true, disabled),
     ...section("notinstalled", NOT_INSTALLED_HEADING, NOT_INSTALLED_DESC, true, notInstalled),
@@ -379,19 +335,21 @@ export async function listBetaSections(
 // locked strip presets for the device-local fields (Part 2 — self-propagation).
 export const SELF_GROUP_NAME = "plugin-config-sync";
 
+// Schema v2 (spec §6) has no memberScopes/memberLocal/switchExceptions settings fields any
+// more — per-item scope now lives inside `items`, which travels as part of the whole shared
+// sync contract. Only the genuinely device-local top-level fields stay local-only.
 export function selfPresetRules(): FieldRule[] {
   return [
-    { pattern: "rootPath", action: "strip", locked: true },
-    { pattern: "remotes", action: "strip", locked: true },
-    { pattern: "switchExceptions", action: "strip", locked: true },
+    { pattern: "rootPath", scope: "local", encrypted: false, locked: true },
+    { pattern: "remotes", scope: "local", encrypted: false, locked: true },
   ];
 }
 
 // Merges preset locked rules into a rule list: presets first (in preset order), then any
 // caller/user rules not already covered by a preset pattern. Never produces a duplicate pattern.
-// Matching is pattern-only, deliberately action-blind: a user rule like {rootPath, encrypt} is
-// replaced by the locked strip preset — device-local fields must never leave the device, even
-// encrypted, so the conflicting action is intentionally overridden (silently).
+// Matching is pattern-only, deliberately scope/encrypted-blind: a user rule like {rootPath, all,
+// encrypted:true} is replaced by the locked local-scope preset — device-local fields must never
+// leave the device, even encrypted, so the conflicting rule is intentionally overridden (silently).
 function mergePresetFields(existing: FieldRule[]): FieldRule[] {
   const presets = selfPresetRules();
   const presetPatterns = new Set(presets.map((p) => p.pattern));
@@ -421,7 +379,7 @@ export function ensureSelfPresets(groups: SyncGroup[]): SyncGroup[] {
 }
 
 export function appearancePresetRules(): FieldRule[] {
-  return [{ pattern: "enabledCssSnippets", action: "strip", locked: true }];
+  return [{ pattern: "enabledCssSnippets", scope: "local", encrypted: false, locked: true }];
 }
 
 // When the enabled-css-snippets switch list is active, the appearance group (reserved name

@@ -13,7 +13,7 @@ export const MANIFEST = JSON.stringify({
     { name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all" },
     { name: "snippets", path: "{configDir}/snippets", type: "dir", devices: "all" },
     { name: "vimrc", path: ".obsidian.vimrc", type: "file", devices: "desktop" },
-    { name: "plugin-demo", path: "{configDir}/plugins/demo/data.json", type: "file", devices: "all", mode: "fields", fields: [{ pattern: "*Token*", action: "strip" }] },
+    { name: "plugin-demo", path: "{configDir}/plugins/demo/data.json", type: "file", devices: "all", mode: "fields", fields: [{ pattern: "*Token*", scope: "local", encrypted: false }] },
   ],
 });
 
@@ -26,6 +26,7 @@ export function setup(): { io: MemFS; plugins: FakePlugins; ctx: CoreContext } {
     rootPath: "cs",
     plugins,
     passphrase: null,
+    deviceClass: "desktop",
     groupsIO: memGroupsIO(),
     now: () => "2026-07-08T00:00:00.000Z",
     switchExceptions: {},
@@ -636,7 +637,7 @@ describe("applyWithActions", () => {
       const plugins = new ContentAtEnablePlugins();
       plugins.io = io;
       plugins.watchPath = ".obs/plugins/demo/data.json";
-      const ctx: CoreContext = { io, configDir: ".obs", rootPath: "cs", plugins, passphrase: null, groupsIO: memGroupsIO(), now: () => "2026-07-08T00:00:00.000Z", switchExceptions: {} };
+      const ctx: CoreContext = { io, configDir: ".obs", rootPath: "cs", plugins, passphrase: null, deviceClass: "desktop", groupsIO: memGroupsIO(), now: () => "2026-07-08T00:00:00.000Z", switchExceptions: {} };
       plugins.installed.set("demo", "1.0.0");
       plugins.enabled.add("demo");
       io.seed({ ".obs/plugins/demo/data.json": '{"theme":"old"}' });
@@ -659,7 +660,7 @@ describe("applyWithActions", () => {
       const plugins = new ContentAtEnablePlugins();
       plugins.io = io;
       plugins.watchPath = ".obs/plugins/demo/data.json";
-      const ctx: CoreContext = { io, configDir: ".obs", rootPath: "cs", plugins, passphrase: null, groupsIO: memGroupsIO(), now: () => "2026-07-08T00:00:00.000Z", switchExceptions: {} };
+      const ctx: CoreContext = { io, configDir: ".obs", rootPath: "cs", plugins, passphrase: null, deviceClass: "desktop", groupsIO: memGroupsIO(), now: () => "2026-07-08T00:00:00.000Z", switchExceptions: {} };
       plugins.installed.set("demo", "1.2.3");
       io.seed({ ".obs/plugins/demo/data.json": '{"theme":"old"}' });
       await seedStore(io, ctx);
@@ -680,7 +681,7 @@ describe("applyWithActions", () => {
     it('action "enable" reports ⚠ enable failed with the exact message when Obsidian silently no-ops, but still writes config', async () => {
       const io = new MemFS();
       const plugins = new NoOpEnablePlugins();
-      const ctx: CoreContext = { io, configDir: ".obs", rootPath: "cs", plugins, passphrase: null, groupsIO: memGroupsIO(), now: () => "2026-07-08T00:00:00.000Z", switchExceptions: {} };
+      const ctx: CoreContext = { io, configDir: ".obs", rootPath: "cs", plugins, passphrase: null, deviceClass: "desktop", groupsIO: memGroupsIO(), now: () => "2026-07-08T00:00:00.000Z", switchExceptions: {} };
       plugins.installed.set("demo", "1.2.3");
       await seedStore(io, ctx);
       const results = await applyWithActions(ctx, [{ name: "plugin-demo", action: "enable" }], async () => "9.9.9");
@@ -693,7 +694,7 @@ describe("applyWithActions", () => {
     it('action "install-enable" with a successful install but a silently no-op enable reports ⚠ enable failed (not install failed) and still writes config', async () => {
       const io = new MemFS();
       const plugins = new NoOpEnablePlugins();
-      const ctx: CoreContext = { io, configDir: ".obs", rootPath: "cs", plugins, passphrase: null, groupsIO: memGroupsIO(), now: () => "2026-07-08T00:00:00.000Z", switchExceptions: {} };
+      const ctx: CoreContext = { io, configDir: ".obs", rootPath: "cs", plugins, passphrase: null, deviceClass: "desktop", groupsIO: memGroupsIO(), now: () => "2026-07-08T00:00:00.000Z", switchExceptions: {} };
       await seedStore(io, ctx);
       const results = await applyWithActions(ctx, [{ name: "plugin-demo", action: "install-enable" }], async (id) => {
         plugins.installed.set(id, "2.5.0");
@@ -1241,7 +1242,7 @@ describe("readGroups / writeGroups", () => {
   it("rejects invalid group lists without touching existing groups", async () => {
     const { ctx } = setup();
     await writeGroups(ctx, [{ name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all" }]);
-    const bad = [{ name: "rs", path: "{configDir}/plugins/remotely-save/data.json", type: "dir" as const, devices: "all" as const, mode: "fields" as const, fields: [{ pattern: "*Token*", action: "strip" as const }] }];
+    const bad = [{ name: "rs", path: "{configDir}/plugins/remotely-save/data.json", type: "dir" as const, devices: "all" as const, mode: "fields" as const, fields: [{ pattern: "*Token*", scope: "local" as const, encrypted: false }] }];
     await expect(writeGroups(ctx, bad)).rejects.toThrow("file groups");
     expect((await readGroups(ctx)).map((g) => g.name)).toEqual(["hotkeys"]);
   });

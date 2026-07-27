@@ -45,9 +45,59 @@ functions.
 **Engine & context**
 - `core/ConfigSyncCore.ts` — the engine and its interfaces: `capture`, `apply`,
   `applyWithActions`, `captureWithActions`, `revertLastApply`, `planImport`/`applyImport`,
-  `pushExternal`, plus `CoreContext`, `PluginHost`, `ExternalStoreReader`/`ExternalStoreWriter`.
+  `pushExternal`, plus `CoreContext` (`deviceClass: "desktop" | "mobile"`; optional
+  `fieldOverlay?: (group, topKeys) => FieldRule[] | null` — a seam for runtime category rules
+  layered on top of a group's stored `fields`, via `overlayGroup(ctx, group, jsons)`; unused today
+  — `main.ts` passes no `fieldOverlay`, since every registry item, including the "app" (app.json)
+  card, compiles as one ordinary single-file group like any other (`registry.ts`'s
+  `compileSingleFile`). Kept as a seam for a future runtime-only rule source). `overlayGroup`
+  early-returns for any group that carries a `fileRule` (even `encrypted: false`), so a future
+  fieldOverlay consumer can't silently bypass whole-file encryption.
 - `core/types.ts` — shared types: `SyncGroup`, `SyncManifest`, `StoreLock`, `GroupResult`,
-  `FileChanges`/`hasChanges`, `Remote`, `SyncMode`.
+  `FileChanges`/`hasChanges`, `Remote`, `SyncMode`. The rule model is orthogonal (spec
+  2026-07-25-unified-card-design.md §2, D1): `RULE_SCOPES = ["all", "desktop", "mobile", "local"]`
+  (`RuleScope`, "local" = This device) is the single source of truth both the types and
+  `manifest.ts`'s validator derive from, so they can't drift apart. `FieldRule = { pattern, scope:
+  RuleScope, encrypted: boolean, locked? }` — scope and encrypted combine freely (`local` +
+  `encrypted: true` is the one illegal combination, rejected by `manifest.ts`). `FileRule = {
+  scope: Exclude<RuleScope, "local">, encrypted: boolean }` — a Plain single-file group's
+  whole-file rule (no `local`: "don't sync it" is the group's own toggle, not a file-level scope);
+  `encrypted: true` here means the ENTIRE file is stored as one encrypted envelope, not per-field.
+  `PerItemScopes = Record<string, RuleScope>` — per-element scope for a string-array key
+  (`SyncGroup.perItem: Record<string, PerItemScopes>`), generalizing the old switch-list-only
+  per-member scope to any string-array key; governed exclusively by `core/perItem.ts`, never by
+  the key's own `FieldRule`.
+- `core/perItem.ts` — `capturePerItemArray`/`applyPerItemArray`: per-element merge for a
+  `PerItemScopes`-governed array key — captures each element by its own scope (local-only elements
+  never enter the store; desktop/mobile-only elements go through the same partition as class field
+  rules) while preserving the other device's already-captured elements, since the array is one
+  shared list, not a per-device sidecar.
+- `core/registry.ts` — the item registry and its compiler, replacing the v3-era per-kind catalog
+  rows (`app-view-*`, `appearance-domain`) with one flat list of `ItemDef` (task-4-brief.md, spec
+  §1/§6; app.json merged to a single card per `2026-07-26-ui-feedback-round2-design.md` §2).
+  `buildItemDefs(env)` builds one `ItemDef` per card — the three Obsidian cards (`app` /
+  `appearance` / `hotkeys`, fixed order from `OBSIDIAN_CARD_DEFS`), every core plugin (`core:<id>`,
+  including ones with no settings file yet, sorted by label) and every installed community/beta
+  plugin (`community:<id>`, beta reuses the community id form, also sorted by label).
+  `compileItems(defs, settings)` is the ONLY place that turns `(ItemDef[], ConfigSyncSettings)`
+  into the `SyncGroup[]` the existing capture/apply engine already knows how to run: every item —
+  including "app" — compiles through the same `compileSingleFile` path (there is no shared/merged
+  carrier any more), plus one group per companion folder, and — only when at least one plugin
+  element is enabled — the hidden `core-plugins`/`community-plugins` enablement-carrier groups (no
+  longer surfaced as their own rows; see Data model below). `enablementScopes(defs, settings,
+  carrier)` projects each plugin item's `enabledOn` into the carrier's per-element scope map, which
+  `main.ts` folds into the switch-list engine's existing runtime member-exception derivation
+  (`core-plugins.json`/`community-plugins.json` are not string-array files, so they cannot go
+  through `perItem.ts` the way `enabledCssSnippets` does). `compileCustomGroups(customGroups, defs,
+  seenPaths)` compiles `settings.customGroups` (freeform "Custom rules"/"Discovered files" entries
+  with no `ItemDef`) into the same `SyncGroup[]`, rejecting names `reservedCustomGroupNames(defs)`
+  already claims (every registry-owned group name). `groupOwners(defs, customGroups)` maps every
+  compiled group name back to the `ItemConfig`(s) that own it, plus a synthetic `custom:<name>`
+  owner per `customGroups` entry, so "Stop syncing" a group by name durably flips `settings.items`
+  (or removes the matching `settings.customGroups` entry) instead of a session-only compiled group
+  edit. `companionConflict(path, defs, settings)` rejects a new companion/custom path that's
+  already claimed by any item's settings file (default or custom) or any preset or user-added
+  companion.
 
 **Status & availability**
 - `core/status.ts` — per-item status (`statusForGroups`), remote freshness (`diffRemote`,
@@ -56,25 +106,49 @@ functions.
   version drift (`availabilityForGroup`, `compareVersions`); `snippetOrphans(local, store,
   localFiles, storeFiles)` — enabled-snippet names with no `.css` file locally **and** none in
   the store's snippets dir (the store-file check is a fresh-device safeguard: before its
-  `snippets/` dir has synced down, the store copy still covers it).
+  `snippets/` dir has synced down, the store copy still covers it). `scopedAwayMembers`/
+  `memberForceOff` (generalized from the old snippet-only `scopedAwaySnippets`/
+  `snippetForceOff`) compute, for any switch group, which member ids a shared class scope
+  keeps off this device and which of those must be force-removed from the applied list.
 - `core/pluginState.ts` — `pluginRuntimeEnabled`: a plugin is "on" when **loaded OR persisted**.
-- `core/catalog.ts` — the group taxonomy: how items sort into Options / Core / Community / Beta
-  sections and their display labels; discovery of unclassified files.
+- `core/catalog.ts` — `OPTION_LABELS`/`listOptionSections`/`listCoreSections`/
+  `listPluginSections`/`listBetaSections` are the pre-registry `CatalogItem`/`CatalogSection`
+  taxonomy; they no longer drive any tab's rendering (that's `registry.ts` + `itemCard.ts` now —
+  see UI below) and today only feed `SettingTab.ts`'s search index and a few Advanced-tab helpers.
+  `listDiscovered` (unclassified config-root files) is still live for the Advanced tab.
 - `core/leftover.ts` — `leftoverStoreRels`: store files with no matching group (cleanup surface).
 - `core/runHistory.ts` — the run-record model and helpers (`RunRecord`, `summarizeRun`,
   `worstStatus`, `countChanged`, `isChanged`, `pruneHistory`).
 
 **Transforms & storage**
 - `core/modes.ts` — sync modes: `captureTransform`/`applyTransform` (plain / fields / encrypted),
-  sensitive-key scanning (`scanSensitive`), passphrase gating.
-- `core/crypto.ts` — AES-256-GCM file and field envelopes, PBKDF2 key derivation.
-- `core/switchList.ts` — set-semantics for the on/off lists (`community-plugins`, `core-plugins`)
-  with per-device exception masking; `SWITCH_LIST_GROUPS` names them.
+  sensitive-key scanning (`scanSensitive`), passphrase gating. `classPatterns(group, cls)` reads a
+  group's `desktop`/`mobile` field rules — **top-level keys only**: class actions ignore a glob
+  match inside a nested object (`strip`/`encrypt` keep their existing any-depth semantics; a
+  shallow top-level merge is enough to reassemble the class partition, so nested support is
+  YAGNI). `dropTopLevel` partitions/reassembles the root object on both sides: Capture removes
+  both classes' keys from the base and returns the device's own-class subset as `ownScope`
+  (`captureTransform`'s third return field); Apply computes `store base ⊕ own-class sidecar`
+  (shallow merge, sidecar wins) via `applyTransform`'s `ownScopeContent` parameter, before
+  decrypt/strip run. With no sidecar yet (a pre-partition device), own-class keys fall back to
+  the local value; other-class keys are always dropped, never preserved from local.
+- `core/crypto.ts` — AES-256-GCM file and field envelopes, PBKDF2 key derivation; whole-file
+  encryption (a Plain-mode `FileRule.encrypted`) uses the same file-envelope primitive as
+  `mode: "encrypted"` groups, just gated by a different rule shape.
+- `core/switchList.ts` — set-semantics for the on/off lists (`community-plugins`, `core-plugins`,
+  `enabled-css-snippets`) with per-device exception masking; `SWITCH_LIST_GROUPS` names them.
 - `core/pathing.ts` — the configDir-agnostic mapping between a group's real path and its store
   path (`groupRealPath`, `groupStorePath`; `STORE_CONFIG_DIR` = literal `configdir`).
+  `sidecarStoreSuffix(cls)` = `.__scopes__.<cls>.json`, appended to a file group's flat store path
+  (there is no per-group store directory to nest a sidecar file under); `resolveGroupByStoreRel`
+  matches that suffix so leftover/merge logic attributes a sidecar to its owning group.
 - `core/io.ts` — the `FileIO` abstraction, recursive listing, OS-junk filtering (`isJunkPath`).
 - `core/sanitize.ts` — key/pattern matching helpers used by field rules.
-- `core/manifest.ts` — parse/validate/migrate `config-sync.json` and `store.lock.json`.
+- `core/manifest.ts` — `validateSyncManifest`: structural validation for a `SyncGroup[]` (the
+  `compileItems` safety net in `main.ts`'s `recompile`, and the hand-edited Advanced-tab custom
+  rules); `RULE_SCOPES`-derived `FieldRule`/`FileRule` scope validation (single source of truth
+  with `types.ts`, so the type and the validator can't drift — the failure mode a prior CRITICAL
+  finding was named for); parse/validate `store.lock.json`.
 - `core/merge.ts` — merge a remote `store.lock.json` against the local one (`classifyMerge`).
 
 **Install & discovery**
@@ -91,7 +165,16 @@ functions.
   totals), the self pane, status list, filters/search, availability sections, the sticky
   result strip, run History, the Remotes block, and Capture/Apply/Pull/Push actions.
 - `SettingTab.ts` — the settings tab (General / Obsidian / Core plugins / Community plugins /
-  Beta / Advanced / Remotes).
+  Beta / Advanced / Remotes). `renderRegistryCards`/`renderItemCard`/`renderCardExpansion` are the
+  ONE renderer for every `ItemDef` across the Obsidian/Core/Community/Beta tabs (`itemDefs()`
+  filtered by section) — there is no per-kind branch left; a plugin's own card carries its
+  enablement zone, so the old "Enabled community plugins"/"Enabled core plugins" aggregate rows
+  and their dedicated Device-scope drawer are gone. Advanced (custom rules / discovered files)
+  still renders the legacy per-`SyncGroup` rule form, unrelated to the card renderer.
+- `itemCard.ts` — pure render-model helpers for the card renderer (badges, zone presence, the
+  Fields/Companion-folders row models, path/companion validation) so the card's logic is
+  unit-testable without touching the DOM; `SettingTab.ts`'s renderers are the only consumer that
+  turns these models into elements.
 - `actionIcons.ts` — the single source for the per-action Lucide icons + color classes
   (Capture/Apply/Push/Pull) reused across the panel, buttons, badges and History.
 - `statusBar.ts` — pure segment model (`statusBarSegments`, `statusBarAriaLabel`) + a thin DOM
@@ -99,12 +182,14 @@ functions.
   presented bucket counts, ⇡/⇣ from `remoteDirectionCounts`).
 - `qualifierSearch.ts` — the `key:value` search shared by both search boxes: pure `parseQuery` /
   `matchesQualifiers` / `suggest` / `applySuggestion`, plus the `QualifierAutocomplete` DOM widget.
-- `panelModel.ts` — the pure view-model deciding what state each row presents under the filters.
+- `panelModel.ts` — the pure view-model deciding what state each Sync Center row presents under
+  the filters (unrelated to the settings-tab card renderer above).
 - `reportContent.ts` — shared run-report rendering (the strip and the Revert modal).
 - `diffView.ts` — unified-diff rendering; `jsonView.ts` — read-only `data.json` viewer with keys
-  colored by rule state; `sensitiveSort.ts` — floats rows with sensitive keys to the top;
-  `commitGroups.ts` — settings save/commit logic; `ConfirmModal`/`ConflictModal`/
-  `FolderSelectModal`/`ReportModal` — modals.
+  colored by `{scope, encrypted}` rule state (per-element coloring too, for a `perItem` array);
+  `sensitiveSort.ts` — floats rows with sensitive keys to the top; `commitGroups.ts` — Advanced-tab
+  custom-rule save/commit logic; `ConfirmModal`/`ConflictModal`/`FolderSelectModal`/`ReportModal`
+  — modals.
 
 **External** (`src/external/`, desktop-only, the only Node code — dynamic-imported from `main.ts`)
 - `gitSource.ts` — the git transport: `execFile('git', …)` against a temp clone, never touching
@@ -122,11 +207,26 @@ functions.
   `config-sync-dot-*` classes, gated by `settings.ribbonDot`) and the status-bar item
   (`ui/statusBar.ts`) — the dot folds remote-newer into its apply state (legacy behavior), while
   the status bar shows remote-newer as a ⇣ pull segment, matching the panel.
-  `removeSnippetOrphans` prunes dead enabled-snippet names: local cleanup
-  first (`appearance.json` + the in-memory `customCss.enabledSnippets` set, then the name's
-  `snippetScopes` entry and switch-list pin), then a single-group `capture(ctx,
-  ["enabled-css-snippets"])` propagates the pruned list to the store — never a hand-edit of the
-  store file, which would leave its index stale.
+  `recompile()` runs on load and after every `saveSettings()`: `buildItemDefs(env)` (env = the
+  running Obsidian's actual core-plugin/community-plugin/beta state) rebuilds `registryDefs`, then
+  `compileItems(registryDefs, settings)` (validated through `validateSyncManifest` as a safety net)
+  rebuilds `compiledGroups` — the only `SyncGroup[]` the capture/apply engine ever sees. A
+  `CompileError` (a path collision) is surfaced as a `Notice` and leaves the PREVIOUS
+  `compiledGroups` in place, so a bad edit can't silently wipe the working sync list.
+  `reloadSettings()` (`loadSettings()` + `recompile()`) is used wherever something just rewrote
+  `data.json` externally — e.g. a self-group apply or `adoptConfiguration` — so `compiledGroups`
+  reflects it immediately instead of staying stale until the next unrelated save. For the
+  `core-plugins`/`community-plugins` switch groups, `main.ts` derives the runtime mask/force-off
+  pair `CoreContext` needs from `registry.ts`'s `enablementScopes` (never from a standalone
+  settings field — see Data model below): `switchExceptions[group]` = local-scoped element ids ∪
+  desktop/mobile-scoped ids not matching this device ∪ auto-derived exclusions (community-plugins
+  only — desktop-only manifest ids on mobile, plus plugin groups whose `devices` class doesn't
+  match); `switchForceOff[group]` = the subset of those that must be force-removed from the applied
+  list. Auto-derived ids are mask-only and never appear in force-off, so they keep local state
+  instead of being forced off — an explicit `This device` scope, by contrast, is enforced on the
+  wrong device class. `enabled-css-snippets` is unaffected by any of this — its per-element scope
+  lives in the compiled "appearance" group's `perItem.enabledCssSnippets` map instead (see
+  `core/perItem.ts` above).
 
 **Brand assets**
 - `assets/` — brand SVGs: `icon.svg` (24×24, `currentColor`, iconize-importable), `logo.svg`
@@ -144,6 +244,9 @@ Changes must preserve these:
 - **Switch lists are identified by group name and compared as sets.** `SWITCH_LIST_GROUPS`
   (`community-plugins`, `core-plugins`) drives set comparison — never byte comparison — at all
   five alignment points: `statusForGroups`, `classifyMerge`, `diffRemote`, capture, and apply.
+- **Class field rules (`desktop`/`mobile`) act on top-level keys only.** A glob match inside a
+  nested object is ignored for class partitioning; `strip`/`encrypt` are unaffected and keep
+  their any-depth semantics.
 - **Enabled = loaded OR persisted** (`pluginRuntimeEnabled`). Reading `enabledPlugins` alone
   misclassifies a running-but-unpersisted plugin as disabled.
 - **Self-apply never disables/reloads Config Sync.** Applying a plugin's settings cycles it
@@ -157,18 +260,58 @@ Changes must preserve these:
 - **Run history is a separate, local-only file** — never captured, never synced.
 - **Bulk apply/install is per-item isolated.** One item that throws becomes an error row; the
   rest of the batch still runs. Installs use timeout + retry.
+- **The registry compiles, it never migrates.** `compileItems(registryDefs, settings)` is the only
+  path from `(ItemDef[], settings.items)` to the `SyncGroup[]` the engine runs; a `CompileError`
+  (a path collision) is surfaced as a `Notice` and leaves the PREVIOUS `compiledGroups` in place —
+  a bad edit must never silently wipe the working sync list.
+- **Schema v2 is a hard gate, not a migration.** `isLegacySettings` (any `data.json` without
+  `schemaVersion: 2`) blocks with a `Notice` and starts from `DEFAULT_SETTINGS` — there is no
+  field-by-field migration from the v1/v3-era `groups`/`memberScopes`/`memberLocal`/`appJsonTabs`.
 
 ## Data model
 
-- **`config-sync.json`** (`<store root>/`) — the user-editable group definitions, validated
-  against `schema/config-sync.schema.json`.
+- **`data.json`** (`ConfigSyncSettings`, plugin settings, `schemaVersion: 2`) — what syncs and how,
+  compiled to `SyncGroup[]` on every load/save; there is no separate hand-edited manifest file
+  anymore (the old `config-sync.json` at `<store root>/` is legacy and only ever read to detect a
+  pre-v2 install — see the schema-gate invariant above). Fields:
+  - `items: Record<string, ItemConfig>` — one entry per registry item id (`app` / `appearance` /
+    `hotkeys` / `core:<id>` / `community:<id>`). `ItemConfig = { enabled, settingsFile?,
+    companions: ItemCompanion[], enabledOn?: RuleScope }`. `settingsFile = { customPath?, mode:
+    "plain" | "fields", fileRule?: FileRule, rules: Record<string, ItemFieldRule>, perItem:
+    Record<string, PerItemScopes> }` (`ItemFieldRule = Omit<FieldRule, "pattern">` — the map key IS
+    the pattern, so there is exactly one source of truth for which key a rule governs).
+    `companions: { path, scope: DeviceClass, enabled }[]` — preset (`themes/`, `snippets/`) plus
+    user-added companion folders. `enabledOn` is only meaningful for a plugin item: which devices'
+    enabled-plugins list carries it (`undefined` = `"all"`). The `app` item's `settingsFile` covers
+    the whole `app.json` — one plain single-file item like any other, with no separate carrier or
+    shared mode.
+  - `customGroups: CustomGroupConfig[]` (= `SyncGroup[]`) — freeform Advanced-tab rules ("Custom
+    rules" and adopted "Discovered files") with no owning registry item; compiled by
+    `compileCustomGroups` (see `core/registry.ts` above) alongside the registry-driven groups.
+  - `bratPluginIndex`, PKM mode, run-history config, remotes, ribbon/status-bar toggles — unchanged
+    by the unified-card work.
+  - Written through Obsidian's `saveData` (never externally, to avoid a reload); `main.ts`'s
+    `recompile()` recomputes `compiledGroups` from `items`/`customGroups` after every save (see the
+    Connector section above) — nothing here is itself a `SyncGroup[]`.
+  - **Load-time shape normalizer** (`core/settingsMigration.ts`'s `mergeLegacyAppSliceItems`,
+    v2-internal, distinct from the schema-gate above): a `data.json` still carrying the pre-merge
+    `items.editor`/`items["files-links"]`/`items.other` cards or a top-level `appJson` field has
+    them merged into `items.app` on load — `enabled` ORs across the three, `rules`/`perItem` union
+    first-seen-wins in `editor → files-links → other → appearance` order (picking up appearance's
+    borrowed `showInlineTitle` rule too), `settingsFile.mode` falls back to the old `appJson.mode`
+    (default `fields`) — then the merged shape is saved once.
 - **`store.lock.json`** — capture metadata: `capturedAt` + per-group `sourcePluginVersion` (plugin
   items) or `sourceAppVersion` (Obsidian/core items).
 - **`store/`** — the mirrored content: `configdir/…` (device-independent mirror of the config
-  dir) plus vault-root dotfiles with the leading dot stripped.
+  dir) plus vault-root dotfiles with the leading dot stripped. A file group with `desktop`/
+  `mobile` field rules also carries a same-class sidecar next to its store copy —
+  `<storePath>.__scopes__.desktop.json` / `.mobile.json` — holding that class's own-class keys as
+  a flat object (desktop/mobile + `encrypted: true` stores CIPHERTEXT there instead of the raw
+  value); only same-class devices write or delete their own sidecar, and Apply merges it over the
+  base (see `core/modes.ts` above). A Plain-mode item with `fileRule.encrypted: true` stores its
+  entire store copy as one encrypted envelope (same crypto primitive as `mode: "encrypted"`,
+  applied to the whole file instead of per field).
 - **`run-history.json`** — the local-only run log (path/size/retention configurable).
-- **`data.json`** (plugin settings) — persisted groups, `bratPluginIndex`, PKM mode, run-history
-  config; written through Obsidian's `saveData` (never externally, to avoid a reload).
 
 ## How to extend
 
@@ -186,7 +329,7 @@ Changes must preserve these:
 
 - **Unit tests** — `vitest` over the pure core (in-memory `FileIO` + fake `PluginHost`);
   `npm test`.
-- **Lint** — `npx eslint .`, held at a **67-warning baseline / 0 errors** (two "BRAT"
+- **Lint** — `npx eslint .`, held at a **64-warning baseline / 0 errors** (two "BRAT"
   sentence-case false positives are kept without `eslint-disable`, per repo convention).
 - **No hardcoded colors** — `scripts/check-no-hardcoded-color.sh`; all CSS uses Obsidian theme
   variables, with `body.is-mobile`/`body.is-phone` scoping for touch.
@@ -196,10 +339,12 @@ Changes must preserve these:
 
 ## Current state & how to resume
 
-- **1.0.0** is the first stable release; the 0.x development history is retained on GitHub.
+- The version in `manifest.json` is the source of truth for the current release; older releases'
+  history is retained on GitHub.
 - **Parked backlog** (deferred by the maintainer — don't start without an explicit pick):
-  1. UI audit polish — `design/DESIGN.md` §5 (six findings: dead CSS, emoji remnants, micro font
-     sizes, text-on-fill variable split, border-radius tiers, one double-duty class).
+  1. UI audit polish — `design/DESIGN.md` §5 (remaining findings: emoji remnants, micro font
+     sizes, text-on-fill variable split, border-radius tiers, one double-duty class; the dead-CSS
+     finding is resolved).
   2. Capture/pull interruption robustness (crash-marker vs full atomicity — direction undecided).
   3. Run-history file diffs (unified diff per changed file, with a size cap).
 - **Release flow**: `npm version <x.y.z>` (bumps `manifest.json`/`versions.json`, commits, tags)

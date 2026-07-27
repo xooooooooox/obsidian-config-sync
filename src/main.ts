@@ -10,7 +10,6 @@ import {
   planImport,
   ProgressFn,
   applyWithActions,
-  capture,
   captureWithActions, CaptureItem,
   deviceExcludedPluginIds,
   groupsForDevice,
@@ -25,20 +24,33 @@ import { createInstaller } from "./core/installer";
 import { retry, HttpStatusError, TimeoutError, isRetryableError } from "./core/async";
 import { RunRecord, RunKind, summarizeRun, pruneHistory } from "./core/runHistory";
 import { BratIndex, parseBratRepoList, resolveBratIndex } from "./core/bratIndex";
-import { type CatalogSection, displayLabelForGroup, ensureAppearancePresets, ensureSelfPresets, findGroupByName, groupForItem, listBetaSections, listCoreSections, listDiscovered, listOptionSections, listPluginSections, SELF_GROUP_NAME, setCorePluginIds } from "./core/catalog";
-import { Availability, availabilityForGroup, desktopOnlyDrift, desktopOnlyPluginIds, scopedAwaySnippets, snippetForceOff, snippetOrphans } from "./core/availability";
+import { type CatalogSection, corePluginFile, displayLabelForGroup, findGroupByName, listBetaSections, listCoreSections, listDiscovered, listOptionSections, listPluginSections, SELF_GROUP_NAME, setCorePluginIds } from "./core/catalog";
+import { Availability, availabilityForGroup, desktopOnlyDrift, desktopOnlyPluginIds, scopedAwayMembers, memberForceOff } from "./core/availability";
 import { listFilesRecursive, isJunkPath, FileIO } from "./core/io";
 import { leftoverStoreRels, storeSelfCopyGroups } from "./core/leftover";
-import { ManifestValidationError, migrateLegacyManifest, parseStoreLock, validateSyncManifest } from "./core/manifest";
-import { basename, groupStorePath } from "./core/pathing";
+import { parseStoreLock, validateSyncManifest } from "./core/manifest";
+import { basename, groupRealPath, groupStorePath, sidecarStoreSuffix } from "./core/pathing";
+import {
+  buildItemDefs,
+  CompileError,
+  CustomGroupConfig,
+  emptyItemConfig,
+  enablementScopes,
+  groupOwners,
+  ItemConfig,
+  ItemDef,
+  compileItems,
+  RegistryEnv,
+} from "./core/registry";
+import { isLegacySettings, mergeLegacyAppSliceItems, SCHEMA_UPGRADE_NOTICE } from "./core/settingsMigration";
 import { applySwitchList, captureSwitchList, localRealPath, parseSwitchList, readLocalSwitchList, subtractForceOff, SWITCH_LIST_GROUPS, switchDivergence, SwitchList, writeLocalSwitchList } from "./core/switchList";
-import { applyTransform, captureTransform, scanSensitive, SensitiveScan } from "./core/modes";
+import { applyTransform, captureTransform, isWholeFileEncrypted, scanSensitive, SensitiveScan } from "./core/modes";
 import { PkmMode, PkmProbe, resolveEffectiveMode, resolveRootPath } from "./core/pkm";
 import { pluginRuntimeEnabled } from "./core/pluginState";
 import { syncListDelta } from "./core/syncListDelta";
 import { selfPaneState } from "./core/selfPane";
 import { bucketCounts, checkRemote, diffRemote, GroupStatus, remoteDirectionCounts, RemoteCheck, remoteLockAhead, statusForGroups } from "./core/status";
-import { GroupResult, Remote, RibbonButtons, StoreLock, SyncGroup } from "./core/types";
+import { GroupResult, Remote, RibbonButtons, RuleScope, StoreLock, SyncGroup } from "./core/types";
 import { presentedState } from "./ui/panelModel";
 import { ConflictModal } from "./ui/ConflictModal";
 import { ReportModal } from "./ui/ReportModal";
@@ -46,7 +58,13 @@ import { renderStatusBarItem, statusBarSegments } from "./ui/statusBar";
 import { SYNC_CENTER_VIEW_TYPE, SelfSyncInfo, SyncCenterHost, SyncCenterView } from "./ui/SyncCenterView";
 import { ConfigSyncSettingTab } from "./ui/SettingTab";
 
+// Settings schema v2 (spec 2026-07-25-unified-card-design.md §6, D13): the sync list is no
+// longer a stored SyncGroup[] — it is COMPILED (registry.ts's compileItems) from `items` on every
+// load/save. `groups`/`memberScopes`/`memberLocal`/`appJsonTabs` (v1/v3-era) are gone entirely;
+// there is no migration path from them — settingsMigration.ts's load gate blocks any data.json
+// that isn't already schemaVersion 2.
 interface ConfigSyncSettings {
+  schemaVersion: 2;
   pkmMode: PkmMode;
   rootPath: string; // "" = follow the PKM mode default
   remotes: Remote[];
@@ -58,9 +76,11 @@ interface ConfigSyncSettings {
   mobileStatusBar: boolean; // force-show Obsidian's status bar on phones (CSS class only)
   remoteAutoCheck: boolean;
   localPeriodicCheck: boolean;
-  groups: SyncGroup[];
-  switchExceptions: Record<string, string[]>; // group name -> excepted plugin/core ids (device-local)
-  snippetScopes: Record<string, "desktop" | "mobile">; // snippet name -> scope; absent = "all" (shared, travels)
+  items: Record<string, ItemConfig>; // item id (registry.ts) -> its own config; compiled to SyncGroup[] on load
+  // Advanced tab "Custom rules"/"Discovered files" (spec §6 addition): these have no ItemDef, so
+  // they're stored as their own SyncGroup literals rather than an ItemConfig — compileItems
+  // (registry.ts) appends them to the compiled list on every load/save, same as everything else.
+  customGroups: CustomGroupConfig[];
   bratPluginIndex: BratIndex; // plugin id -> "owner/repo"; derived from BRAT's synced list, synced too
   runHistory: RunHistorySettings; // local-only record of past runs; never synced
 }
@@ -73,6 +93,7 @@ interface RunHistorySettings {
 }
 
 const DEFAULT_SETTINGS: ConfigSyncSettings = {
+  schemaVersion: 2,
   pkmMode: "auto",
   rootPath: "",
   remotes: [],
@@ -84,12 +105,15 @@ const DEFAULT_SETTINGS: ConfigSyncSettings = {
   mobileStatusBar: false,
   remoteAutoCheck: true,
   localPeriodicCheck: true,
-  groups: [],
-  switchExceptions: {},
-  snippetScopes: {},
+  items: {},
+  customGroups: [],
   bratPluginIndex: {},
   runHistory: { enabled: true, path: "", maxCount: 50, maxDays: 30 },
 };
+
+// config-sync's own registry item id (registry.ts: community plugin ids are prefixed "community:")
+// — used by the self-propagation adopt flow to enable syncing config-sync's own settings.
+const SELF_ITEM_ID = "community:config-sync";
 
 // app.plugins is not part of the public API; this is the community-standard access path.
 interface CommunityPluginRegistry {
@@ -154,14 +178,18 @@ export default class ConfigSyncPlugin extends Plugin {
   localStatuses: GroupStatus[] | null = null;
   private presentedStatuses: GroupStatus[] | null = null;
   private lastGroups: SyncGroup[] | null = null;
+  // Compiled engine state (spec §6): the sync list is DERIVED from settings.items, never stored
+  // directly. Recomputed on load and after every settings save (see saveSettings/recompile).
+  private registryDefs: ItemDef[] = [];
+  private compiledGroups: SyncGroup[] = [];
   remoteChecks = new Map<string, { check: RemoteCheck; at: number }>();
   private storeEventTimer: number | null = null;
   private remoteAutoCheckStartupTimer: number | null = null;
-  private bootstrapDismissed = false; // session-only: "adopt configuration" banner dismissed
 
   async onload(): Promise<void> {
     await this.loadSettings();
     setCorePluginIds(this.coreRuntime().map((c) => c.id));
+    await this.recompile();
     this.addSettingTab(new ConfigSyncSettingTab(this.app, this));
     this.registerView(SYNC_CENTER_VIEW_TYPE, (leaf) => new SyncCenterView(leaf, this.syncCenterHost()));
     this.mainRibbonEl = this.addRibbonIcon("refresh-cw", "Config Sync", (evt) => void this.openSyncMenu(evt));
@@ -201,32 +229,52 @@ export default class ConfigSyncPlugin extends Plugin {
         }, 4 * 60 * 60 * 1000)
       );
     }
-    this.app.workspace.onLayoutReady(
-      () =>
-        void (async () => {
-          await this.migrateLegacy();
-          await this.refreshLocalStatus();
-        })()
-    );
+    this.app.workspace.onLayoutReady(() => void this.refreshLocalStatus());
   }
 
-  private async migrateLegacy(): Promise<void> {
+  // Builds the item registry from the running Obsidian's actual state (core plugin ids + which
+  // of them already have a settings file, installed community/beta plugins) and compiles it
+  // against settings.items into the SyncGroup[] the existing capture/apply engine consumes.
+  // Called on load and after every settings save (see saveSettings) so compiledGroups never goes
+  // stale. A path-collision CompileError is surfaced as a Notice and leaves the PREVIOUS compiled
+  // groups in place — a bad edit must never silently wipe out the working sync list.
+  private async recompile(): Promise<void> {
+    const env = await this.registryEnv();
+    this.registryDefs = buildItemDefs(env);
+    // Defense-in-depth (final-review fix): captured explicitly so "keep the last-good compiled
+    // list on failure" is provable rather than incidental (mid-session this already happened by
+    // omission — the catch branch never reassigned this.compiledGroups — but that's fragile to a
+    // future refactor that adds a second assignment inside the try block). At first-load failure
+    // there is no last-good yet, so this.compiledGroups correctly stays the constructor's `[]` —
+    // the Notice below (naming the offending group/item via e.message) is what has to make that
+    // failure actionable instead.
+    const lastGoodGroups = this.compiledGroups;
     try {
-      const rootPath = await this.resolvedRootPath();
-      const result = await migrateLegacyManifest(this.app.vault.adapter, rootPath, this.settings.groups, new Date().toISOString());
-      if (result.migrated) {
-        this.settings.groups = ensureAppearancePresets(ensureSelfPresets(result.groups));
-        await this.saveSettings();
-        new Notice("Config Sync: imported groups from config-sync.json (file renamed, now lives in plugin settings)");
-      }
+      const compiled = compileItems(this.registryDefs, this.settings);
+      // Safety net: compileItems is expected to always emit well-formed groups, but validating
+      // here (the same check every hand-written config-sync.json goes through) catches a
+      // registry bug before it reaches the capture/apply engine instead of failing obscurely.
+      this.compiledGroups = validateSyncManifest({ version: 1, groups: compiled }).groups;
     } catch (e) {
-      if (e instanceof ManifestValidationError) {
-        new Notice(`Config Sync: could not migrate config-sync.json — ${e.message}`, 10000);
+      this.compiledGroups = lastGoodGroups;
+      const reason = e instanceof Error ? e.message : String(e);
+      if (e instanceof CompileError) {
+        new Notice(`Config Sync: ${reason}`, 10000);
         return;
       }
-      console.error("Config Sync: unexpected error migrating config-sync.json", e);
-      new Notice(`Config Sync: migration hit an unexpected error — ${(e as Error).message}. The renamed config-sync.json.migrated-* file (if present) still holds your groups.`, 10000);
+      console.error("Config Sync: compiled sync groups failed validation", e);
+      new Notice(`Config Sync: compiled sync configuration is invalid (${reason})`, 10000);
     }
+  }
+
+  private async registryEnv(): Promise<RegistryEnv> {
+    const io = this.app.vault.adapter;
+    const configDir = this.app.vault.configDir;
+    const cores = await Promise.all(
+      this.coreRuntime().map(async (c) => ({ id: c.id, name: c.name, fileExists: await io.exists(`${configDir}/${corePluginFile(c.id)}`) }))
+    );
+    const betaIds = new Set(Object.keys(this.settings.bratPluginIndex));
+    return { cores, plugins: this.pluginRuntime().map((p) => ({ id: p.id, name: p.name })), betaIds };
   }
 
   onunload(): void {
@@ -398,7 +446,7 @@ export default class ConfigSyncPlugin extends Plugin {
       },
       selfStatus: async (): Promise<SelfSyncInfo> => {
         const ctx = await this.coreContext();
-        const local = this.settings.groups; // the full shared list; `devices` gates applicability, not membership
+        const local = this.compiledGroups; // the full compiled list; `devices` gates applicability, not membership
         const selfCopy = `${ctx.rootPath}/store/configdir/plugins/config-sync/data.json`;
         const storeGroups = (await ctx.io.exists(selfCopy)) ? storeSelfCopyGroups(await ctx.io.read(selfCopy)) : [];
         const delta = syncListDelta(local, storeGroups);
@@ -422,7 +470,7 @@ export default class ConfigSyncPlugin extends Plugin {
           lock = null;
         }
         const av = availabilityForGroup(selfGroup, this.pluginHost(), lock);
-        const flagsRefreshCount = desktopOnlyDrift(this.settings.groups, this.pluginHost(), lock);
+        const flagsRefreshCount = desktopOnlyDrift(this.compiledGroups, this.pluginHost(), lock);
         const decided = selfPaneState({ isColdStart: false, groupState: st?.state, drift: av.drift, flagsDrift: flagsRefreshCount > 0 });
         const versionRefresh =
           decided.versionRefresh && av.localVersion !== null && av.storeVersion !== null ? { local: av.localVersion, store: av.storeVersion } : null;
@@ -430,34 +478,10 @@ export default class ConfigSyncPlugin extends Plugin {
       },
       resolvedPath: (g) => g.path.replace("{configDir}", this.app.vault.configDir),
       displayName: (g) => this.displayName(g, this.lastGroups?.find((x) => x.name === g)?.label),
-      bootstrapOffer: async () => {
-        if (this.bootstrapDismissed || this.settings.groups.length > 0) return null;
-        try {
-          const root = await this.resolvedRootPath();
-          if (await this.app.vault.adapter.exists(`${root}/config-sync.json`)) return null; // legacy file → migration path handles it
-          const selfCopy = `${root}/store/configdir/plugins/config-sync/data.json`;
-          if (!(await this.app.vault.adapter.exists(selfCopy))) return null;
-          const raw = JSON.parse(await this.app.vault.adapter.read(selfCopy)) as { groups?: unknown };
-          const itemCount = Array.isArray(raw.groups) ? raw.groups.length : 0;
-          if (itemCount === 0) return null;
-          let capturedAt: string | null = null;
-          const lockPath = `${root}/store.lock.json`;
-          if (await this.app.vault.adapter.exists(lockPath)) {
-            capturedAt = parseStoreLock(await this.app.vault.adapter.read(lockPath)).capturedAt;
-          }
-          return { itemCount, capturedAt };
-        } catch (e) {
-          console.error("Config Sync: bootstrap offer check failed", e);
-          return null;
-        }
-      },
-      dismissBootstrap: () => {
-        this.bootstrapDismissed = true;
-      },
       diffPair: async (name, rel, dir) => {
         try {
-          const group = this.settings.groups.find((g) => g.name === name);
-          if (group === undefined || group.mode === "encrypted") return null;
+          const group = this.compiledGroups.find((g) => g.name === name);
+          if (group === undefined || isWholeFileEncrypted(group)) return null;
           const io = this.app.vault.adapter;
           const real = localRealPath(name, group.path, this.app.vault.configDir);
           const rootPath = await this.resolvedRootPath();
@@ -468,6 +492,7 @@ export default class ConfigSyncPlugin extends Plugin {
           const store = (await io.exists(storePath)) ? await io.read(storePath) : null;
           const serialize = (v: SwitchList): string => JSON.stringify(v, null, 2) + "\n";
           const exc = SWITCH_LIST_GROUPS.has(name) ? ((await this.augmentedSwitchExceptions(rootPath))[name] ?? []) : [];
+          const cls: "desktop" | "mobile" = Platform.isMobile ? "mobile" : "desktop";
           if (dir === "capture") {
             let produced = local ?? "";
             if (group.type === "file" && local !== null) {
@@ -475,7 +500,7 @@ export default class ConfigSyncPlugin extends Plugin {
                 const l = readLocalSwitchList(name, local);
                 if (l !== null) produced = serialize(captureSwitchList(l, store !== null ? parseSwitchList(store) : null, exc));
               } else if (group.mode === "fields") {
-                produced = (await captureTransform(group, local, this.passphrase())).content;
+                produced = (await captureTransform(group, local, this.passphrase(), cls, store)).content;
               }
             }
             return { base: store ?? "", produced };
@@ -487,11 +512,13 @@ export default class ConfigSyncPlugin extends Plugin {
               if (st !== null) {
                 const localList = local !== null ? readLocalSwitchList(name, local) : null;
                 const merged = applySwitchList(st, localList, exc);
-                const fo = name === "enabled-css-snippets" ? this.snippetForceOffIds() : [];
+                const fo = SWITCH_LIST_GROUPS.has(name) ? this.memberForceOffIds(name) : [];
                 produced = writeLocalSwitchList(name, subtractForceOff(merged, fo), local);
               }
             } else if (group.mode === "fields") {
-              produced = await applyTransform(group, store, local, this.passphrase());
+              const sidecarPath = `${storeBase}${sidecarStoreSuffix(cls)}`;
+              const ownScope = (await io.exists(sidecarPath)) ? await io.read(sidecarPath) : null;
+              produced = await applyTransform(group, store, local, this.passphrase(), cls, ownScope);
             }
           }
           return { base: local ?? "", produced };
@@ -499,7 +526,7 @@ export default class ConfigSyncPlugin extends Plugin {
           return null; // e.g. passphrase needed for field encryption — no diff available
         }
       },
-      switchLocalDecisions: (name) => (SWITCH_LIST_GROUPS.has(name) ? this.settings.switchExceptions[name] ?? [] : []),
+      switchLocalDecisions: (name) => (SWITCH_LIST_GROUPS.has(name) ? this.memberLocalFor(name) : []),
       betaIds: () => new Set(Object.keys(this.settings.bratPluginIndex)),
       runHistoryEnabled: () => this.settings.runHistory.enabled,
       loadRunHistory: () => this.loadRunHistory(),
@@ -512,7 +539,7 @@ export default class ConfigSyncPlugin extends Plugin {
       appendActionHistory: (entry) => this.appendActionHistory(entry),
       switchDivergenceFor: async (name) => {
         if (!SWITCH_LIST_GROUPS.has(name)) return null;
-        const group = findGroupByName(this.settings.groups, name);
+        const group = findGroupByName(this.compiledGroups, name);
         if (group === undefined) return null;
         try {
           const ctx = await this.coreContext();
@@ -528,23 +555,34 @@ export default class ConfigSyncPlugin extends Plugin {
         }
       },
       addSwitchExceptions: async (name, ids) => {
-        const current = this.settings.switchExceptions[name] ?? [];
-        const merged = [...new Set([...current, ...ids])].sort();
-        this.settings.switchExceptions = { ...this.settings.switchExceptions, [name]: merged };
+        // Schema v2 (spec §6): per-element enablement scope now lives on each plugin's own
+        // ItemConfig.enabledOn, not a group-keyed memberLocal map — pin every named id to "local"
+        // ("this device manages its own on/off") on its item.
+        const carrier = name === "community-plugins" ? "community-plugins.json" : name === "core-plugins" ? "core-plugins.json" : null;
+        if (carrier === null) return; // e.g. enabled-css-snippets: governed by its own perItem map, not this mechanism
+        const prefix = carrier === "core-plugins.json" ? "core:" : "community:";
+        const nextItems = { ...this.settings.items };
+        for (const id of ids) {
+          const itemId = `${prefix}${id}`;
+          nextItems[itemId] = { ...(nextItems[itemId] ?? emptyItemConfig()), enabledOn: "local" };
+        }
+        this.settings.items = nextItems;
         await this.saveSettings();
         void this.refreshLocalStatus();
       },
       adoptConfiguration: async () => {
         try {
-          const ctx = await this.coreContext();
-          const existing = await readGroups(ctx);
-          if (!existing.some((g) => g.name === SELF_GROUP_NAME)) {
-            const self = groupForItem(SELF_GROUP_NAME, "{configDir}/plugins/config-sync/data.json", "file", "Settings of config-sync.", "Config Sync");
-            await writeGroups(ctx, [...existing, self]);
+          // config-sync's own registry item (registry.ts builds one for every installed plugin,
+          // itself included) compiles to the same legacy group name (SELF_GROUP_NAME) the self-
+          // propagation apply below expects — enable it so compileItems actually emits that group.
+          if (this.settings.items[SELF_ITEM_ID]?.enabled !== true) {
+            this.settings.items = { ...this.settings.items, [SELF_ITEM_ID]: { ...(this.settings.items[SELF_ITEM_ID] ?? emptyItemConfig()), enabled: true } };
+            await this.saveSettings(); // recompiles — compiledGroups now carries SELF_GROUP_NAME
           }
+          const ctx = await this.coreContext();
           const results = await applyWithActions(ctx, [{ name: SELF_GROUP_NAME, action: "none" }], this.installPlugin());
           if (results.some((r) => r.group === SELF_GROUP_NAME && r.status !== "error")) {
-            await this.loadSettings(); // the apply rewrote our own settings file — pick up the adopted contract
+            await this.reloadSettings(); // the apply rewrote our own settings file — pick up the adopted contract
           }
           await this.refreshLocalStatus();
           return results;
@@ -571,9 +609,10 @@ export default class ConfigSyncPlugin extends Plugin {
           const ctx = await this.coreContext();
           const results = await applyWithActions(ctx, items, this.installPlugin(), onProgress);
           if (results.some((r) => r.group === SELF_GROUP_NAME && r.status !== "error")) {
-            // The apply just rewrote this plugin's own settings file on disk — reload before
-            // refreshing status so the running plugin picks up the new contract immediately.
-            await this.loadSettings();
+            // The apply just rewrote this plugin's own settings file on disk — reload and
+            // recompile before refreshing status so the running plugin picks up the new
+            // contract (including its sync list) immediately.
+            await this.reloadSettings();
           }
           void this.refreshLocalStatus(); // background — see captureItems
           return results;
@@ -910,18 +949,43 @@ export default class ConfigSyncPlugin extends Plugin {
     };
   }
 
-  // The switch exceptions used at RUNTIME = the user's manual excepts plus every plugin the store
-  // records as desktop-only, folded into the community-plugins list. A phone can't enable a
-  // desktop-only plugin, so excepting it stops capture from dropping it from the store's enabled
-  // list (and apply from force-adding it). settings.switchExceptions (persisted) is left untouched.
+  // Carrier name -> registry carrier file (spec §3/§4, D4/D5): the two real switch-list groups
+  // map onto their enablement carrier; anything else (e.g. enabled-css-snippets, a v3-era switch
+  // list superseded by a plain perItem key on the compiled "appearance" group — see registry.ts)
+  // has no items-backed carrier under schema v2.
+  private carrierFor(group: string): "core-plugins.json" | "community-plugins.json" | null {
+    if (group === "core-plugins") return "core-plugins.json";
+    if (group === "community-plugins") return "community-plugins.json";
+    return null;
+  }
+
+  private enablementScopesFor(group: string): Record<string, RuleScope> {
+    const carrier = this.carrierFor(group);
+    return carrier === null ? {} : enablementScopes(this.registryDefs, this.settings, carrier);
+  }
+
+  private memberScopesFor(group: string): Record<string, "desktop" | "mobile"> {
+    const out: Record<string, "desktop" | "mobile"> = {};
+    for (const [id, scope] of Object.entries(this.enablementScopesFor(group))) {
+      if (scope === "desktop" || scope === "mobile") out[id] = scope;
+    }
+    return out;
+  }
+
+  private memberLocalFor(group: string): string[] {
+    return Object.entries(this.enablementScopesFor(group))
+      .filter(([, scope]) => scope === "local")
+      .map(([id]) => id);
+  }
+
+  // The runtime mask per switch group = This-device ids (memberLocal) ∪ ids class-scoped away
+  // from this device (memberScopes) ∪ auto-derived exclusions (community-plugins only:
+  // desktop-only manifest ids on mobile, plus plugin groups with a non-matching devices class).
+  // Masked ids pass through at capture, keep local state on apply, and are hidden from in-sync
+  // comparison. The persisted settings are left untouched.
   private async augmentedSwitchExceptions(rootPath: string): Promise<Record<string, string[]>> {
     const device: "desktop" | "mobile" = Platform.isMobile ? "mobile" : "desktop";
-    // Plugins the user scoped away from this device (devices:"desktop" on mobile,
-    // devices:"mobile" on desktop): never capture them out of / force them into the shared
-    // enabled list here. Symmetric — applies on both platforms.
-    const extraIds = deviceExcludedPluginIds(this.settings.groups, device);
-    // Desktop-only detection is mobile-only: that is where a desktop-only plugin can't run and
-    // would otherwise be dropped. On desktop the plugin runs and its enable/disable syncs normally.
+    const derived = deviceExcludedPluginIds(this.compiledGroups, device);
     if (Platform.isMobile) {
       const io = this.configIO();
       const lockPath = `${rootPath}/store.lock.json`;
@@ -933,20 +997,22 @@ export default class ConfigSyncPlugin extends Plugin {
           lock = null;
         }
       }
-      for (const id of desktopOnlyPluginIds(this.settings.groups, this.pluginHost(), lock)) extraIds.add(id);
+      for (const id of desktopOnlyPluginIds(this.compiledGroups, this.pluginHost(), lock)) derived.add(id);
     }
-    const manual = this.settings.switchExceptions["community-plugins"] ?? [];
-    const base = extraIds.size === 0
-      ? this.settings.switchExceptions
-      : { ...this.settings.switchExceptions, "community-plugins": [...new Set([...manual, ...extraIds])] };
-    const pins = this.settings.switchExceptions["enabled-css-snippets"] ?? [];
-    const snippetMask = [...new Set([...pins, ...scopedAwaySnippets(this.settings.snippetScopes, Platform.isMobile)])];
-    return snippetMask.length === 0 ? base : { ...base, "enabled-css-snippets": snippetMask };
+    const out: Record<string, string[]> = {};
+    for (const name of SWITCH_LIST_GROUPS) {
+      const scoped = scopedAwayMembers(this.memberScopesFor(name), Platform.isMobile);
+      const auto = name === "community-plugins" ? derived : new Set<string>();
+      const mask = [...new Set([...this.memberLocalFor(name), ...scoped, ...auto])];
+      if (mask.length > 0) out[name] = mask;
+    }
+    return out;
   }
 
-  private snippetForceOffIds(): string[] {
-    const pins = this.settings.switchExceptions["enabled-css-snippets"] ?? [];
-    return snippetForceOff(this.settings.snippetScopes, pins, Platform.isMobile);
+  // Force-off = user class scopes enforced on the wrong device class, minus This-device ids
+  // (local wins). Auto-derived exclusions are never forced off — they keep local state.
+  private memberForceOffIds(group: string): string[] {
+    return memberForceOff(this.memberScopesFor(group), this.memberLocalFor(group), Platform.isMobile);
   }
 
   private async coreContext(): Promise<CoreContext> {
@@ -962,26 +1028,28 @@ export default class ConfigSyncPlugin extends Plugin {
       rootPath,
       plugins: this.pluginHost(),
       passphrase: this.passphrase(),
+      deviceClass: Platform.isMobile ? "mobile" : "desktop",
       switchExceptions,
       switchForceOff: (() => {
-        const f = this.snippetForceOffIds();
         const out: Record<string, string[]> = {};
-        if (f.length > 0) out["enabled-css-snippets"] = f;
+        for (const name of SWITCH_LIST_GROUPS) {
+          const f = this.memberForceOffIds(name);
+          if (f.length > 0) out[name] = f;
+        }
         return out;
       })(),
+      // No fieldOverlay: compileItems (registry.ts) already merges every app-slice card's rules
+      // into the compiled "app" group at settings-compile time — the v3-era runtime overlay
+      // (appTabRules/appTabsNonDefault, src/core/appTabs.ts) is superseded and removed.
       groupsIO: {
-        read: async () => this.settings.groups,
+        read: async () => this.compiledGroups,
+        // Under schema v2 the sync list is DERIVED from settings.items/settings.customGroups, not
+        // stored directly, so a raw group-list write has no durable home. The only remaining caller
+        // is stopSyncing's fallback for a group with no known owner (the hidden aggregate carrier
+        // groups) — kept in memory for the rest of the session, never a source of data loss, just
+        // non-persistence across a reload.
         write: async (groups) => {
-          // Swap-only-on-success, matching the commitDraft rollback pattern: a failed disk
-          // write must not leave unpersisted groups visible in memory.
-          const prev = this.settings.groups;
-          this.settings.groups = groups;
-          try {
-            await this.saveSettings();
-          } catch (e) {
-            this.settings.groups = prev;
-            throw e;
-          }
+          this.compiledGroups = groups;
         },
       },
       now: () => new Date().toISOString(),
@@ -1037,7 +1105,7 @@ export default class ConfigSyncPlugin extends Plugin {
   // Returns the store paths it deleted (display form, no "store/" prefix) so the caller can
   // record them in run history; empty when deleteStore is false or there was no store data.
   async stopSyncing(groupName: string, deleteStore: boolean): Promise<string[]> {
-    const group = this.settings.groups.find((g) => g.name === groupName);
+    const group = this.compiledGroups.find((g) => g.name === groupName);
     let deleted: string[] = [];
     if (deleteStore && group !== undefined) {
       const ctx = await this.coreContext();
@@ -1053,12 +1121,40 @@ export default class ConfigSyncPlugin extends Plugin {
         }
       }
     }
-    await this.writeGroupsFile(this.settings.groups.filter((g) => g.name !== groupName));
+    // Durable: flip the owning item(s)' enabled flag (or, for a companion group, just that one
+    // companion entry's enabled flag) in settings.items — or, for a custom group (Advanced tab
+    // "Custom rules"/"Discovered files"), remove its settings.customGroups entry entirely, since
+    // it has no "enabled" flag to flip — and save. saveSettings persists and recompiles, so the
+    // group stays gone across the next settings save instead of being resurrected by an
+    // in-memory-only groupsIO write (see coreContext()'s groupsIO comment). Any group name with no
+    // known owner (e.g. a future/unrecognized group) falls back to the old in-memory write rather
+    // than silently doing nothing.
+    const owners = groupOwners(this.registryDefs, this.settings.customGroups)[groupName];
+    if (owners !== undefined && owners.length > 0) {
+      const nextItems = { ...this.settings.items };
+      let nextCustomGroups = this.settings.customGroups;
+      for (const owner of owners) {
+        if (owner.custom === true) {
+          nextCustomGroups = nextCustomGroups.filter((g) => g.name !== groupName);
+          continue;
+        }
+        const cfg = nextItems[owner.itemId] ?? emptyItemConfig();
+        nextItems[owner.itemId] =
+          owner.companionPath !== undefined
+            ? { ...cfg, companions: cfg.companions.map((c) => (c.path === owner.companionPath ? { ...c, enabled: false } : c)) }
+            : { ...cfg, enabled: false };
+      }
+      this.settings.items = nextItems;
+      this.settings.customGroups = nextCustomGroups;
+      await this.saveSettings();
+    } else {
+      await this.writeGroupsFile(this.compiledGroups.filter((g) => g.name !== groupName));
+    }
     return deleted;
   }
 
   async storeFileCount(groupName: string): Promise<number> {
-    const group = this.settings.groups.find((g) => g.name === groupName);
+    const group = this.compiledGroups.find((g) => g.name === groupName);
     if (group === undefined) return 0;
     const ctx = await this.coreContext();
     const abs = this.groupStoreAbs(ctx, group);
@@ -1078,7 +1174,7 @@ export default class ConfigSyncPlugin extends Plugin {
     const selfCopy = `${ctx.rootPath}/store/configdir/plugins/config-sync/data.json`;
     const storeGroups = (await ctx.io.exists(selfCopy)) ? storeSelfCopyGroups(await ctx.io.read(selfCopy)) : [];
     const out: { rel: string; name: string; path: string; size: number }[] = [];
-    for (const lf of leftoverStoreRels(rels, [...this.settings.groups, ...storeGroups])) {
+    for (const lf of leftoverStoreRels(rels, [...this.compiledGroups, ...storeGroups])) {
       const st = await this.app.vault.adapter.stat(`${ctx.rootPath}/${lf.rel}`);
       out.push({ ...lf, size: st?.size ?? 0 });
     }
@@ -1108,7 +1204,7 @@ export default class ConfigSyncPlugin extends Plugin {
   }
 
   async listPluginSections(groups: SyncGroup[]): Promise<CatalogSection[]> {
-    return listPluginSections(this.app.vault.adapter, this.app.vault.configDir, this.pluginRuntime(), groups, new Set(Object.keys(this.settings.bratPluginIndex)));
+    return listPluginSections(this.pluginRuntime(), groups, new Set(Object.keys(this.settings.bratPluginIndex)));
   }
 
   async listBetaSections(groups: SyncGroup[]): Promise<CatalogSection[]> {
@@ -1126,8 +1222,34 @@ export default class ConfigSyncPlugin extends Plugin {
     return Object.values(this.pluginRegistry().manifests).map((m) => m.id);
   }
 
+  // The registry defs the unified-card renderer (SettingTab.ts) builds the Obsidian tab from —
+  // the same list recompile() just derived (registryDefs), never rebuilt separately, so the
+  // panel can never disagree with the compiled sync list about which cards exist.
+  itemDefs(): ItemDef[] {
+    return this.registryDefs;
+  }
+
   async listDiscoveredFiles(groups: SyncGroup[]): Promise<{ name: string; path: string }[]> {
     return listDiscovered(this.app.vault.adapter, this.app.vault.configDir, groups);
+  }
+
+  // Basenames (no extension) of .css files actually present under snippets/ — feeds the
+  // Appearance card's snippets companion member rows (spec §4/§5); reuses the same directory
+  // scan snippetUniverse() already does for the old switch-list drawer.
+  async listSnippetFiles(): Promise<string[]> {
+    return (await this.snippetUniverse()).fromDir;
+  }
+
+  // Immediate child file/folder names of a companion path — plain (non-mapKey) companion member
+  // listing (spec §4 "成员行"; task-7-brief.md). No per-member scope: an arbitrary "dir" SyncGroup
+  // has no per-file carry-scope mechanism today (only the three named switch lists in
+  // SWITCH_LIST_GROUPS do), so this is informational-only, unlike listSnippetFiles above.
+  async listCompanionFiles(path: string): Promise<string[]> {
+    const io = this.app.vault.adapter;
+    const real = groupRealPath(path, this.app.vault.configDir);
+    if (!(await io.exists(real))) return [];
+    const listed = await io.list(real);
+    return [...listed.files, ...listed.folders].map((p) => basename(p)).filter((n) => !isJunkPath(n));
   }
 
   private async snippetUniverse(): Promise<{ fromDir: string[]; store: string[]; local: string[]; storeFiles: string[] }> {
@@ -1152,132 +1274,6 @@ export default class ConfigSyncPlugin extends Plugin {
     const storeFileList = (await io.exists(storeSnips)) ? (await io.list(storeSnips)).files : [];
     const storeFiles = storeFileList.filter((f) => f.endsWith(".css")).map((f) => basename(f).replace(/\.css$/, ""));
     return { fromDir, store, local, storeFiles };
-  }
-
-  // Rows for the switch-list "Local decisions" editor: union of local list ∪ store copy ∪
-  // runtime (installed plugins / core registry), each with a display name and a state hint.
-  async switchListRows(groupName: string): Promise<{ id: string; name: string; hint: string; desktopOnly: boolean; deviceScoped: boolean }[]> {
-    const io = this.app.vault.adapter;
-    if (groupName === "enabled-css-snippets") {
-      const { fromDir, store, local, storeFiles } = await this.snippetUniverse();
-      const dead = new Set(snippetOrphans(local, store, fromDir, storeFiles));
-      const scopedAway = scopedAwaySnippets(this.settings.snippetScopes, Platform.isMobile);
-      const pins = new Set(this.settings.switchExceptions["enabled-css-snippets"] ?? []);
-      // universe = files ∪ store, minus dead names (no file locally OR in the store) — those are
-      // surfaced in the Clean up block via snippetOrphanNames()/removeSnippetOrphans().
-      const ids = [...new Set([...fromDir, ...store])].filter((id) => !dead.has(id)).sort();
-      return ids.map((id) => ({
-        id,
-        name: id,
-        hint: `${local.includes(id) ? "on here" : "off here"} · ${store.includes(id) ? "store has on" : "store has off"}`,
-        desktopOnly: false,
-        deviceScoped: scopedAway.has(id) && !pins.has(id), // pin > scope: pinned rows are user-controlled/local, not auto-excluded
-      }));
-    }
-    const file = groupName === "community-plugins" ? "community-plugins.json" : "core-plugins.json";
-    const readList = async (path: string): Promise<SwitchList | null> => {
-      try {
-        return (await io.exists(path)) ? parseSwitchList(await io.read(path)) : null;
-      } catch {
-        return null;
-      }
-    };
-    const idsOf = (l: SwitchList | null): string[] => (l === null ? [] : Array.isArray(l) ? l : Object.keys(l));
-    const onIn = (l: SwitchList | null, id: string): boolean =>
-      l !== null && (Array.isArray(l) ? l.includes(id) : l[id] === true);
-    const local = await readList(`${this.app.vault.configDir}/${file}`);
-    const root = await this.resolvedRootPath();
-    let dtoIds = new Set<string>();
-    if (Platform.isMobile && groupName === "community-plugins") {
-      const lockPath = `${root}/store.lock.json`;
-      let lock: StoreLock | null = null;
-      if (await io.exists(lockPath)) {
-        try {
-          lock = parseStoreLock(await io.read(lockPath));
-        } catch {
-          lock = null;
-        }
-      }
-      dtoIds = desktopOnlyPluginIds(this.settings.groups, this.pluginHost(), lock);
-    }
-    let devScopedIds = new Set<string>();
-    if (groupName === "community-plugins") {
-      const device: "desktop" | "mobile" = Platform.isMobile ? "mobile" : "desktop";
-      devScopedIds = deviceExcludedPluginIds(this.settings.groups, device);
-    }
-    const store = await readList(`${root}/store/${groupStorePath(`{configDir}/${file}`)}`);
-    const runtime = groupName === "community-plugins" ? this.pluginRuntime() : this.coreRuntime();
-    const nameOf = new Map(runtime.map((r) => [r.id, r.name]));
-    const ids = [...new Set([...idsOf(local), ...idsOf(store), ...runtime.map((r) => r.id)])];
-    return ids
-      .map((id) => ({
-        id,
-        name: nameOf.get(id) ?? id,
-        hint: `${onIn(local, id) ? "on here" : "off here"} · ${store === null ? "no store copy" : onIn(store, id) ? "store has on" : "store has off"}`,
-        desktopOnly: dtoIds.has(id),
-        deviceScoped: devScopedIds.has(id),
-      }))
-      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })); // sort by DISPLAY name — id order looked random in the UI
-  }
-
-  async snippetOrphanNames(): Promise<{ name: string; storeOn: boolean }[]> {
-    const { fromDir, store, local, storeFiles } = await this.snippetUniverse();
-    return snippetOrphans(local, store, fromDir, storeFiles).map((name) => ({ name, storeOn: store.includes(name) }));
-  }
-
-  // Prune dead enabled-snippet names. Removes from both appearance.json on disk AND
-  // Obsidian's in-memory enabledSnippets set, so a later appearance-write can't re-add them.
-  async removeSnippetOrphans(names: string[]): Promise<void> {
-    if (names.length === 0) return;
-    const drop = new Set(names);
-    const customCss = (this.app as unknown as { customCss?: { enabledSnippets?: Set<string> } }).customCss;
-    if (customCss?.enabledSnippets !== undefined) {
-      for (const n of names) customCss.enabledSnippets.delete(n);
-    }
-    const io = this.app.vault.adapter;
-    const path = `${this.app.vault.configDir}/appearance.json`;
-    if (await io.exists(path)) {
-      const prior = await io.read(path);
-      const current = readLocalSwitchList("enabled-css-snippets", prior);
-      const list = Array.isArray(current) ? current : [];
-      const filtered = list.filter((n) => !drop.has(n));
-      await io.write(path, writeLocalSwitchList("enabled-css-snippets", filtered, prior));
-    }
-    // Device-local bookkeeping: a dead name's scope and pin are meaningless. MUST be cleared and
-    // saved BEFORE the capture below — a still-scoped-away name would pass through the old store
-    // value and resurrect itself in the fresh store copy.
-    let touched = false;
-    for (const n of names) {
-      if (n in this.settings.snippetScopes) {
-        const next = { ...this.settings.snippetScopes };
-        delete next[n];
-        this.settings.snippetScopes = next;
-        touched = true;
-      }
-    }
-    const pins = this.settings.switchExceptions["enabled-css-snippets"];
-    if (pins !== undefined && pins.some((p) => drop.has(p))) {
-      this.settings.switchExceptions["enabled-css-snippets"] = pins.filter((p) => !drop.has(p));
-      touched = true;
-    }
-    if (touched) await this.saveSettings();
-    // Propagate to the store through the sanctioned path: a single-group capture rewrites the
-    // store copy plus lock/index bookkeeping (hand-editing the store file leaves the index stale).
-    // The local cleanup above already applied regardless of what happens here.
-    try {
-      const ctx = await this.coreContext();
-      // Per-group failures come back as error RESULTS, not throws (e.g. appearance.json absent).
-      const results = await capture(ctx, ["enabled-css-snippets"]);
-      const failed = results.find((r) => r.status === "error");
-      if (failed !== undefined) throw new Error(failed.messages.join("; ") || "capture reported an error");
-      void this.refreshLocalStatus();
-    } catch (e) {
-      console.error("Config Sync: removeSnippetOrphans capture failed", e);
-      new Notice(
-        `Config Sync: removed orphaned snippet(s) locally, but failed to update the store: ${(e as Error).message}. Run a manual capture of "Enabled CSS snippets" to sync the change.`,
-        10000,
-      );
-    }
   }
 
   async readItemFile(group: SyncGroup): Promise<string | null> {
@@ -1327,22 +1323,39 @@ export default class ConfigSyncPlugin extends Plugin {
     return resolveEffectiveMode("auto", this.pkmProbe());
   }
 
+  // Schema v2 blocking gate (spec §6, D13): a data.json without schemaVersion 2 (the old
+  // groups-based shape, or anything unversioned) is never migrated field-by-field — the plugin
+  // starts fresh with defaults and asks the user to reconfigure. A fresh install (no data.json
+  // yet) is NOT legacy; it just gets the defaults silently.
   async loadSettings(): Promise<void> {
-    const data = (await this.loadData()) as (Partial<ConfigSyncSettings> & { quickCommands?: unknown }) | null;
+    const data = (await this.loadData()) as Record<string, unknown> | null;
+    if (isLegacySettings(data)) {
+      new Notice(SCHEMA_UPGRADE_NOTICE, 10000);
+      this.settings = { ...DEFAULT_SETTINGS };
+      return;
+    }
     // Quick commands moved to the Ribbon Organizer plugin in 1.7.0; drop the stale key so the
     // next save cleans data.json.
     if (data !== null) delete data.quickCommands;
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
-    try {
-      this.settings.groups = validateSyncManifest({ version: 1, groups: this.settings.groups }).groups;
-    } catch (e) {
-      console.error("Config Sync: invalid groups in settings", e);
-      new Notice(`Config Sync: saved sync configuration is invalid (${(e as Error).message}) — fix it in Settings → Config Sync`, 10000);
-      this.settings.groups = [];
-    }
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, data as Partial<ConfigSyncSettings> | null);
+    // v2 shape revision (spec 2026-07-26-ui-feedback-round2-design.md §2.3): merge legacy
+    // editor/files-links/other + appJson into items.app before anything compiles the settings
+    // that just loaded. `data` may still carry the pre-merge `appJson` key even though it's no
+    // longer part of ConfigSyncSettings — Object.assign copied it onto this.settings above.
+    if (mergeLegacyAppSliceItems(this.settings)) await this.saveSettings();
   }
 
   async saveSettings(): Promise<void> {
     await this.saveData(this.settings);
+    await this.recompile();
+  }
+
+  // Reloads settings from disk and recompiles immediately — the shared shape for "something just
+  // rewrote our own data.json externally and compiledGroups must reflect it right now" (a
+  // self-group apply, see adoptConfiguration/applyItems). loadSettings() alone leaves
+  // compiledGroups stale until the next unrelated saveSettings() or a restart.
+  private async reloadSettings(): Promise<void> {
+    await this.loadSettings();
+    await this.recompile();
   }
 }

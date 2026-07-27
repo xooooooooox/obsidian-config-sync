@@ -9,12 +9,15 @@
 
 Selective, on-demand sync of Obsidian settings — hotkeys, CSS snippets, themes, plugin configs — across devices and vaults. The data rides your existing note sync (remotely-save, Obsidian Sync, iCloud…) by default, or config-sync's own git / vault remotes. Nothing ever lands on a device without an explicit **Apply** from the Sync Center.
 
+> **Breaking upgrade.** This version changes both the store format and the settings schema (`schemaVersion: 2`) — there is no migration from an older install. Upgrade every device to this version together, then revisit **Settings → Config Sync** on each one and re-tick what you want to sync before capturing or applying again.
+
 ![Settings picker](docs/assets/settings-picker.png)
 
 ## Features
 
-- **Pick exactly what syncs** — Obsidian options, core-plugin and community-plugin settings, snippets, themes, vault-root dotfiles; per item, per device class (all / desktop / mobile).
-- **Credential-safe** — per-item sync modes strip or encrypt sensitive keys before anything enters the store; each device keeps its locally entered values across applies.
+- **One card per item** — every synced thing (an Obsidian option group, a core or community plugin, a snippet) is the same row + expandable drawer: name, badges, a sync on/off toggle, and — once opened — up to three zones: **Enabled on** (which devices turn a plugin on), **Settings file** (its rules), **Companion folders** (themes, snippets, or any folder you add). No more separate "Enabled community plugins" / "Enabled core plugins" rows — a plugin's on/off state lives on its own card.
+- **Orthogonal rules, per key** — every field rule is a `{scope, encrypted}` pair you can combine freely: `All devices`, `Desktop only`, `Mobile only` or `This device`, each independently encryptable. A whole file can also be marked encrypted, not just individual fields. String-array keys (a plugin's enabled-elements list, CSS snippets, `app.json`'s `userIgnoreFilters`…) get a **Per-item scopes** toggle so every element carries its own scope instead of one rule for the whole key — one mechanism behind per-plugin enablement, per-snippet scope and per-ignore-pattern scope alike.
+- **Credential-safe** — per-key or whole-file encryption keeps sensitive keys out of the store in plaintext; each device keeps its locally entered `This device` values across applies.
 - **Explicit, reversible Apply** — pick items, land them directly (no confirmation dialog); every touched file is backed up and **Revert last apply** restores it.
 - **Removable and tidy** — stop syncing an item at any time (optionally deleting its store copy), and store files left behind with no matching item surface as **Leftover** for one-click cleanup.
 - **Always-visible awareness** — open the **Sync Center** any time for the details; its header is its own status bar: a *this device* chip (a green check when everything is in sync, otherwise the current state and a shortcut into settings) followed by the totals for every pending action, including per-remote push/pull counts. Every item is badged by state (`✓ in sync`, changed-on-this-device, store-is-newer, `≠ differs`, `— not captured yet`), each sync action (Capture, Apply, Push, Pull) has its own icon, and remotes are checked automatically.
@@ -42,8 +45,8 @@ Two planes, kept separate.
 
 **Local plane** — this device's live config ↔ the store:
 
-- **Capture** copies the items defined in `<data folder>/config-sync.json` into `<data folder>/store/`, applies each item's sync mode (stripping or encrypting fields, or encrypting the whole file), skips OS junk files, and records source plugin versions (or the Obsidian app version, for Obsidian/core items) in `store.lock.json`. Only changed files are rewritten; the Sync Center's Capture button captures just what you've ticked.
-- **Apply** picks items and lands them into this device's config dir (whatever its name) — there's no confirmation dialog; ticking and pressing Apply executes directly. For a community plugin that's outdated, disabled or not installed on this device, Apply can also update, enable or install it first (see below). Stripped fields and encrypted content resolve per the item's sync mode; stripped keys keep their local values. A one-slot backup covers every touched file; **Revert last apply** restores it.
+- **Capture** copies every enabled item's settings file and companion folders into `<data folder>/store/`, applying each field's `{scope, encrypted}` rule (or the whole-file rule, for items with no per-key rules), skips OS junk files, and records source plugin versions (or the Obsidian app version, for Obsidian/core items) in `store.lock.json`. Only changed files are rewritten; the Sync Center's Capture button captures just what you've ticked.
+- **Apply** picks items and lands them into this device's config dir (whatever its name) — there's no confirmation dialog; ticking and pressing Apply executes directly. For a community plugin that's outdated, disabled or not installed on this device, Apply can also update, enable or install it first (see below). This-device-scoped fields and encrypted content resolve per the item's rules; a `This device` field keeps its local value untouched. A one-slot backup covers every touched file; **Revert last apply** restores it.
 - The **Sync Center** compares live config against the store per item, with best-effort direction hints (file times vs the last capture) and automatic remote freshness checks.
 
 ### Availability sections and the install engine
@@ -83,60 +86,36 @@ The **Filter by name…** search box lives in the Sync Center's sidebar and sear
 ## Settings guide
 
 - **General** — PKM mode (auto-detects IOTO vaults), the data folder location, status toggles (sync menu change counts, automatic remote checks, periodic local check), the status bar (item, remote push/pull counts, opt-in ribbon dot, mobile force-show), ribbon icons.
-- **Obsidian / Core plugins / Community plugins / Beta** — tick items to sync them; a heading toggle syncs all/none per section. The **Search all settings…** box spans General, all picker tabs, Advanced and Remotes, and accepts `scope:` (general/obsidian/core/community/advanced/remotes) and `type:` (file/folder) qualifiers with autocomplete alongside plain text. The **Beta** tab tracks community plugins installed through [BRAT](https://github.com/TfTHacker/obsidian42-brat) — grouped by enabled / installed-but-disabled / not-installed — so their configs sync like any other plugin. Items with sensitive-looking keys sort to the top of their section with a `⚠ N keys` badge, so they're visible before you enable syncing. Device-specific items (the `sync`/`publish` core plugins) carry a `device-specific` badge and ask for confirmation when enabled. **Workspaces** (deliberately saved layouts, `workspaces.json`) is a Core-plugin item; the volatile `workspace.json`/`workspace-mobile.json` are not classified into any tab — they turn up under Advanced → Discovered files like any other unrecognized config file.
-- Every synced item's row has a chevron that opens an expansion: **Fields to protect** (when its mode is Fields), a read-only **View data.json** — keys are colored by rule state, and clicking one adds it as a strip/encrypt rule, covering anything the built-in sensitive-key detection misses — and **Advanced** (a store-path override and **↺ Reset this item to its default rule**).
-- **Advanced** — **Custom rules** (fully yours: vault-root files, extra folders, sync modes) and **Discovered files** (config files we couldn't classify; toggle to sync — name and path are fixed by the file), each row using the same expansion. When any managed item is customized (path, fields or mode diverge from its default), a summary banner lists them with a **↺ Reset all to defaults** button.
+- **Obsidian / Core plugins / Community plugins / Beta** — every row is a card: name, badges (`on: desktop`/`on: mobile`/`on: this device` when a plugin's enabled state isn't the default, plus counts of device-scoped and encrypted rules), a sync toggle, and a chevron that opens its drawer. The **Obsidian** tab has three cards: **App settings** (the whole `app.json` — editing, new-note and link behavior, and other general options), **Appearance** (theme, fonts and CSS snippets) and **Hotkeys** (your custom keyboard shortcuts). Core and Community plugins are listed in full: a core plugin with no settings file yet is a state-only card (just its **Enabled on** zone) until it writes one. The **Search all settings…** box spans General, all picker tabs, Advanced and Remotes, and accepts `scope:` (general/obsidian/core/community/advanced/remotes) and `type:` (file/folder) qualifiers with autocomplete alongside plain text. The **Beta** tab tracks community plugins installed through [BRAT](https://github.com/TfTHacker/obsidian42-brat) — same card, same three drawer zones — so their configs sync like any other plugin. Each section lists its cards alphabetically; sensitive-looking keys (tokens, secrets) are highlighted inside a card's File preview so you see them before enabling syncing.
+- A card's drawer has up to three zones, and every scope control in them is the same cycling icon: the glyph shows the current scope (a monitor+phone pair = `All devices`, a monitor = `Desktop only`, a phone = `Mobile only`, an airplay mark = `This device`), a click advances to the next value, and the default sits dimmed while anything narrower lights up in the accent color. **Enabled on** (plugin cards only) is one such icon for which devices turn the plugin itself on; it reads and writes the same enabled-plugins list Obsidian maintains. **Settings file** starts as one path row — the file's path, a scope icon (no `This device` here) and a 🔒 toggle that encrypts the whole file; the path text itself is the edit entry point — click it to edit in place (Enter commits, Esc cancels, and while editing a committed custom path a quiet **Reset to default** action restores the built-in default). Below it, a collapsed **File preview** (`▸ File preview`) expands into a read-only view of the file, keys colored by their rule (blue = desktop only, amber = mobile only, red = this device, 🔒 = encrypted); click a key to add a rule for it directly. The moment a card has any per-key rule, it switches to per-key mode: the path row's own scope/lock dim (each ruled key now governs itself), and a row appears per configured key with its own scope icon, a 🔒 toggle (greyed out at `This device`) and a ✕ to remove the rule; a string-array key's rule adds a **Per-item scopes** toggle so each element gets its own scope icon instead of one rule for the whole key. Removing the last rule reverts the card to whole-file mode. **Companion folders** lists any vault-relative folder that travels with the item — Appearance ships `themes/` and `snippets/` as presets, and every card's drawer ends with a quiet **+ Add folder** row to add any other path (duplicates and paths already claimed by another item are rejected); each folder row has a scope icon and a sync toggle (plus a ✕ on any folder you added yourself), and clicking the folder's name opens its path for editing. A folder's member list is collapsed behind a `· N files`/`· N themes` count — click to expand it. Opening `snippets/` lists each file as its own row with a scope icon: the file itself always syncs, and the icon only decides which devices turn it on. Any other companion folder syncs as a whole, so its members list for information only, without a per-file scope.
+- **Advanced** — **Custom rules** (fully yours: vault-root files, extra folders, sync modes) and **Discovered files** (config files we couldn't classify; toggle to sync — name and path are fixed by the file), each row using its own field-rule editor (a `This device`/`Encrypted`/`Desktop only`/`Mobile only` action dropdown, separate from a card's icon-based Settings file zone). When any managed item is customized (path, fields or mode diverge from its default), a summary banner lists them with a **↺ Reset all to defaults** button.
 - **Remotes** (desktop) — add a **git repository** (URL, branch, optional folder) or **another vault**: click **Browse…**, pick the vault folder, and the store inside it is auto-detected.
 
 ## Store layout
 
 ```
 <data folder>/               # default "config-sync", configurable
-├── config-sync.json         # group definitions (yours to edit)
 ├── store.lock.json          # capture metadata (machine-written)
 └── store/
     ├── configdir/…          # mirror of {configDir}/… (device-independent)
+    │   └── *.__scopes__.desktop.json / *.__scopes__.mobile.json   # Desktop-only/Mobile-only field sidecars
     └── <dotless files>      # vault-root dotfiles, leading dot stripped
 ```
 
-`config-sync.json` example:
-
-```json
-{
-  "$schema": "https://raw.githubusercontent.com/xooooooooox/obsidian-config-sync/main/schema/config-sync.schema.json",
-  "version": 1,
-  "groups": [
-    { "name": "snippets", "path": "{configDir}/snippets", "type": "dir", "devices": "all" },
-    { "name": "hotkeys", "path": "{configDir}/hotkeys.json", "type": "file", "devices": "all" },
-    { "name": "vimrc", "path": ".obsidian.vimrc", "type": "file", "devices": "desktop" },
-    { "name": "plugin-ioto-settings", "path": "{configDir}/plugins/ioto-settings/data.json",
-      "type": "file", "devices": "all", "mode": "fields",
-      "fields": [
-        { "pattern": "*APIKey*", "action": "encrypt" },
-        { "pattern": "*Token*", "action": "encrypt" },
-        { "pattern": "*Secret*", "action": "encrypt" },
-        { "pattern": "userEmail", "action": "strip" }
-      ] }
-  ]
-}
-```
-
-Group fields: `name` (unique; letters, digits, `-`/`_`, starting with a letter or digit — real plugin ids may contain uppercase, e.g. `plugin-DEVONlink-obsidian`) · `path` (`{configDir}` variable supported) · `type` (`file`/`dir`) · `devices` (`all`/`desktop`/`mobile`) · `mode` (`plain`/`fields`/`encrypted`, optional, default `plain`) · `fields` (per-key `Strip`/`Encrypt` rules, `fields` mode only — see [Sensitive settings](#sensitive-settings)) · `label` (optional display name recorded when the item is enabled or captured, so it still shows correctly on a device where the plugin isn't installed).
-
-OS junk (`.DS_Store`, `Thumbs.db`, `desktop.ini`) is never captured. See [Sensitive settings](#sensitive-settings) for per-item sync modes and passphrase-protected encryption.
+There is no hand-edited rule file anymore — what syncs, and each field's `{scope, encrypted}` rule, is configured entirely through **Settings → Config Sync**'s cards (stored in the plugin's own settings, `schemaVersion: 2`) and, for anything a card doesn't cover, the **Advanced → Custom rules** editor in the same tab. OS junk (`.DS_Store`, `Thumbs.db`, `desktop.ini`) is never captured. See [Sensitive settings](#sensitive-settings) for per-item rules and passphrase-protected encryption.
 
 ## Walkthroughs
 
 **Sync hotkeys, appearance and CSS snippets everywhere**
-1. Settings → Config Sync → under *Obsidian*, tick **Hotkeys**, **Appearance**, **CSS snippets**.
+1. Settings → Config Sync → under *Obsidian*, tick **Hotkeys** and **Appearance** (its card covers the settings file plus the `themes/` and `snippets/` companion folders).
 2. Open **Sync** from the ribbon menu and press **Capture N items**.
 3. On each other device, once your note sync has delivered the data folder: open **Sync** and press **Apply N items**.
-4. Each CSS snippet's *active on* scope (all / desktop / mobile) is per-device and can be re-scoped at any time. If enabled-snippet names linger after you rename or delete the underlying files, the settings panel surfaces them as *N enabled snippets have no file · Clean up* for one-click tidying. A name only counts as dead once its `.css` file is missing both here and in the store (a fresh device still mid-sync keeps its names safe); removing one there clears it from the local enabled list, the shared store list, its scope and its pin. The store side is updated by capturing the snippet list, so any pending local on/off changes to it are published in the same step.
+4. Open the Appearance card's `snippets/` companion folder to give any snippet its own scope: `All devices` (synced everywhere) / `Desktop only` / `Mobile only` (shared, travels, and is enforced on the other device class) / `This device` (keeps its own on/off here, never synced). A plugin's **Enabled on** zone works the same way for which devices turn it on.
 
 **Sync a plugin's settings but keep credentials out of the store**
-1. Under *Community plugins*, tick the plugin.
-2. Set its mode to **Fields**, then add rules for its credential keys, e.g. `*Token*`, `*Secret*`, `*APIKey*` → `Strip` (or `Encrypt` if you want them to travel).
-3. Capture. Stripped credentials never enter the store; each device keeps its locally entered values across applies.
+1. Under *Community plugins*, open the plugin's card.
+2. In its **File preview**, click each credential key to add a rule, set its scope to `This device` (or turn on its 🔒 if you want it to travel).
+3. Capture. This-device credentials never enter the store; each device keeps its locally entered values across applies.
 
 **IOTO vault, from zero**
 1. Install the plugin — PKM mode auto-detects IOTO and stores data under `0-Extra/config-sync` (from your ioto-settings aux folder).
@@ -158,17 +137,17 @@ Both features are disabled until you configure a remote, and never run without a
 
 ## Sensitive settings
 
-Every item has a sync mode, set per item in Settings:
+Every field or file rule is a `{scope, encrypted}` pair, set per key (or per file, when the item has no per-key rules) from a card's Settings file zone:
 
-- **Plain** (default) — synced as-is.
-- **Fields** (file items only) — per-key rules: `Strip` keeps a key out of the store entirely (Apply preserves the local value); `Encrypt` stores the value as an encrypted envelope and decrypts it on Apply, so credentials can travel safely.
-- **Encrypt** — the whole file is stored encrypted (AES-256-GCM, key derived from a passphrase via PBKDF2).
+- **Scope** — `All devices` keeps the key shared and identical everywhere; `Desktop only`/`Mobile only` keep it shared but let each device class hold its own value, in a `__scopes__` sidecar next to the file's store copy (e.g. `app.json`'s `userIgnoreFilters`, per-device search-ignore patterns, is commonly set `Desktop only`); `This device` (per-key rules only, not the whole-file rule) keeps a key out of the store entirely and never leaves this machine — Apply preserves the local value.
+- **Encrypt** — stores the value (or, for the whole-file rule, the whole file) as an encrypted envelope and decrypts it on Apply, so credentials can travel safely. Greyed out at `This device`, since a value that never leaves the device has nothing to encrypt for transit.
+- **Per-item scopes** — a string-array key (a plugin's enabled elements, a CSS-snippets list, `userIgnoreFilters`…) can turn on per-element scopes instead of one rule for the whole key, so each entry travels or stays local independently.
 
 Encrypt modes need a vault-level **Passphrase**, set once per device in Settings → General — it's never written to any file and never synced; the same passphrase on each device is all that's needed. An item with encrypted content but no passphrase set on the current device shows a *locked* state (marked with a key icon) and won't capture or apply until the passphrase is set. A wrong passphrase on Apply fails cleanly without writing anything.
 
-Every installed plugin is scanned for sensitive-looking keys (API keys, tokens, secrets, passwords, emails) or an opaque encrypted blob before you ever enable syncing — a `⚠ N keys` / `⚠ opaque blob` badge appears on the row and sorts it to the top of its section; this only informs, you still choose the mode. Each synced item's row expansion (via its chevron) includes a read-only **View data.json**: keys are colored by rule state (teal = encrypted, red = stripped, amber = detected but unruled), and clicking a key adds it as a strip/encrypt rule directly — the escape hatch for anything the built-in detection misses. The Sync Center badges each item with its mode — a lock icon for whole-file **Encrypt**, a fields badge (field lines with a small padlock) for **Fields**, nothing for **Plain** — and capture reports state exactly what was encrypted or stripped.
+Every installed plugin is scanned for sensitive-looking keys (API keys, tokens, secrets, passwords, emails) or an opaque encrypted blob before you ever enable syncing — a `⚠ N keys` / `⚠ opaque blob` badge appears on the row and sorts it to the top of its section; this only informs, you still choose the rule. A card's Settings file zone includes a read-only preview of the file, collapsed behind a **File preview** disclosure by default: keys are colored by rule state (teal = encrypted · red = this device · blue = desktop only · amber = mobile only; detected-but-unruled keys are purple, plain keys faint), and clicking a key adds it as a rule directly — the escape hatch for anything the built-in detection misses. Each card is badged with its own summary — `N device-scoped` and `N encrypted` counts, plus its **Enabled on** chip when non-default — and capture reports state exactly what was encrypted or stripped.
 
-There is no hard blacklist anymore — `remotely-save`, `ioto-update`, `slides-rup` and `config-sync` are now normal items like any other (e.g. `remotely-save` can be whole-file encrypted; `ioto-update` works well with Fields).
+There is no hard blacklist anymore — `remotely-save`, `ioto-update`, `slides-rup` and `config-sync` are now normal items like any other (e.g. `remotely-save` can be whole-file encrypted; `ioto-update` works well with per-key rules).
 
 ## Development
 

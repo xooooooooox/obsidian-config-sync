@@ -64,9 +64,21 @@ describe("subtractForceOff", () => {
   it("removes force-off ids from an array list", () => {
     expect(subtractForceOff(["a", "a-mobile", "b"], ["a-mobile"])).toEqual(["a", "b"]);
   });
-  it("is identity for empty force-off and for map lists", () => {
+  it("is identity for empty force-off", () => {
     expect(subtractForceOff(["a", "b"], [])).toEqual(["a", "b"]);
-    expect(subtractForceOff({ a: true }, ["a"])).toEqual({ a: true });
+  });
+});
+
+describe("subtractForceOff on maps", () => {
+  it("sets forced-off keys to false and leaves others untouched", () => {
+    expect(subtractForceOff({ a: true, b: true }, ["b"])).toEqual({ a: true, b: false });
+  });
+  it("ignores ids absent from the map", () => {
+    expect(subtractForceOff({ a: true }, ["zz"])).toEqual({ a: true });
+  });
+  it("returns the list unchanged when forceOff is empty", () => {
+    const m = { a: true };
+    expect(subtractForceOff(m, [])).toBe(m);
   });
 });
 

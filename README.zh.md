@@ -9,12 +9,15 @@
 
 在多台设备和多个 vault 之间，按需、选择性地同步 Obsidian 设置——快捷键、CSS 代码片段、主题、插件配置。数据默认借助你现有的笔记同步工具(note sync)（remotely-save、Obsidian Sync、iCloud……）传输，也可以使用 config-sync 自带的 git / vault 远程通道。任何设置在没有在 Sync Center 中明确执行 **Apply**(应用) 之前，绝不会落到设备上。
 
+> **破坏性升级。** 本版本同时改变了 store 格式与设置结构（`schemaVersion: 2`），不提供从旧版本的迁移。请把所有设备一并升级到本版本，然后在每台设备上重新打开 **Settings → Config Sync**，重新勾选要同步的内容，之后再执行 capture 或 apply。
+
 ![Settings picker](docs/assets/settings-picker.png)
 
 ## 功能特性
 
-- **精确挑选要同步的内容** —— Obsidian 选项、核心插件与社区插件设置、代码片段、主题、vault 根目录下的点文件(dotfiles)；可按条目、按设备类别（全部 / 桌面端 / 移动端）分别控制。
-- **凭证安全** —— 按条目设置的 sync mode（同步模式）会在任何内容进入 store(配置存储) 之前剥离或加密敏感键；每台设备在每次 Apply 后都会保留自己本地填入的值。
+- **每个条目一张卡片** —— 每个被同步的对象（一组 Obsidian 选项、一个核心/社区插件、一份代码片段）都是同一种行 + 可展开抽屉：名称、徽标、一个同步开关，展开后最多三个区域：**Enabled on**（哪些设备启用该插件）、**Settings file**（其字段规则）、**Companion folders**（主题、代码片段，或你自行添加的任意文件夹）。不再有独立的 "Enabled community plugins" / "Enabled core plugins" 行——插件的启用状态就在它自己的卡片上。
+- **逐键的正交规则** —— 每条字段规则都是一个可自由组合的 `{scope, encrypted}` 二元组：`All devices`、`Desktop only`、`Mobile only` 或 `This device`，每一种都可以独立选择是否加密。整个文件也可以标记为加密，而不仅限于单个字段。字符串数组类型的键（某插件的启用元素列表、CSS 代码片段列表、`app.json` 的 `userIgnoreFilters`……）可以打开 **Per-item scopes** 开关，让每个元素拥有自己的 scope，而不是整个键共用一条规则——插件逐项启用、代码片段逐项 scope、忽略规则逐项 scope 背后都是同一套机制。
+- **凭证安全** —— 逐键或整文件加密，确保敏感键永远不会以明文形式进入 store；每台设备在每次 Apply 后都会保留自己本地填入的 `This device` 值。
 - **明确、可回退的 Apply** —— 挑选条目，直接落地（没有确认弹窗）；每个被改动的文件都会被备份，**Revert last apply**（撤销上次应用）可以将其还原。
 - **可移除、可清理** —— 随时停止同步某个条目（可选一并删除其 store 副本）；store 中遗留的、没有对应条目的文件会作为 **Leftover**（遗留）浮现出来，一键清理。
 - **随时可见的状态感知** —— 打开 **Sync Center** 随时查看详情；其页头本身就是一条状态栏：一个 *this device*（本设备）胶囊（全部 in sync 时显示绿色对勾，否则显示当前状态并提供进入设置的快捷入口），后面跟着每一类待办动作的总数，包括每个远程各自的 push/pull 计数。每个条目按状态打上徽标（`✓ in sync`、changed-on-this-device、store-is-newer、`≠ differs`、`— not captured yet`），每个同步动作（Capture、Apply、Push、Pull）都有各自独立的图标，远程仓库会被自动检查。
@@ -42,8 +45,8 @@
 
 **本地层面** —— 本设备的实时配置 ↔ store：
 
-- **Capture**（捕获） 把 `<数据文件夹>/config-sync.json` 中定义的条目复制进 `<数据文件夹>/store/`，按每个条目的 sync mode 处理（剥离或加密字段，或加密整个文件），跳过操作系统垃圾文件，并把源插件版本号（Obsidian/核心条目则是 Obsidian 应用版本号）记录到 `store.lock.json` 中。只有发生变化的文件才会被重写；Sync Center 的 Capture 按钮只会 capture 你勾选的条目。
-- **Apply**（应用） 挑选条目，把它们落地到本设备的配置目录（不论其名称是什么）——没有确认弹窗，勾选后按下 Apply 即直接执行。对于在本设备上落后版本、被禁用或未安装的社区插件，Apply 还能先执行更新、启用或安装（见下文）。被 Strip 或加密的内容按条目的 sync mode 处理；被 Strip 的键会保留本设备的本地值。单槽位备份覆盖每一个被改动的文件；**Revert last apply** 可将其还原。
+- **Capture**（捕获） 把每个已启用条目的设置文件和 companion 文件夹复制进 `<数据文件夹>/store/`，按每个字段的 `{scope, encrypted}` 规则处理（没有逐键规则的条目则按整文件规则处理），跳过操作系统垃圾文件，并把源插件版本号（Obsidian/核心条目则是 Obsidian 应用版本号）记录到 `store.lock.json` 中。只有发生变化的文件才会被重写；Sync Center 的 Capture 按钮只会 capture 你勾选的条目。
+- **Apply**（应用） 挑选条目，把它们落地到本设备的配置目录（不论其名称是什么）——没有确认弹窗，勾选后按下 Apply 即直接执行。对于在本设备上落后版本、被禁用或未安装的社区插件，Apply 还能先执行更新、启用或安装（见下文）。scope 为 This device 的字段与加密内容按条目的规则处理；`This device` 字段会原样保留本地值。单槽位备份覆盖每一个被改动的文件；**Revert last apply** 可将其还原。
 - **Sync Center** 按条目比较实时配置与 store，给出尽力而为的方向提示（文件时间对比最近一次 capture），并自动检查远程仓库的新鲜度。
 
 ### 可用性分区与安装引擎
@@ -83,60 +86,36 @@ Sync Center 的页头是一条状态栏：**this device**（本设备）胶囊�
 ## 设置指南
 
 - **General** —— PKM 模式（自动检测 IOTO vault）、数据文件夹位置、状态提示开关（同步菜单变更数量、自动检查远程仓库、定期本地检查）、状态栏（状态栏项、远程 push/pull 计数、可选的 ribbon 圆点、手机端强制显示）、功能区图标。
-- **Obsidian / Core plugins / Community plugins / Beta** —— 勾选条目即可同步；每个分区的标题勾选框可一键全选/全不选。**Search all settings…** 搜索框覆盖 General、所有选择器标签页、Advanced 和 Remotes，并支持 `scope:`（general/obsidian/core/community/advanced/remotes）与 `type:`（file/folder）限定符及自动补全，可与纯文本并用。**Beta** 标签页追踪通过 [BRAT](https://github.com/TfTHacker/obsidian42-brat) 安装的社区插件——按 已启用 / 已安装但禁用 / 未安装 分组——让它们的配置像其他插件一样同步。在你勾选启用同步**之前**，插件就已经会扫描每个已安装插件是否包含敏感键，命中的条目会带上 `⚠ N keys` 徽标并排到所在分区的最前面。设备相关（device-specific）的条目（`sync`/`publish` 两个核心插件）会带有 `device-specific` 徽标，启用时会要求二次确认。**Workspaces**（已保存的工作区布局，对应 `workspaces.json`）是一个 Core 插件条目；易变的 `workspace.json`/`workspace-mobile.json` 不归入任何标签页的分区——它们会像其他无法识别的配置文件一样，出现在 Advanced → Discovered files 中。
-- 每个已同步条目的行都带有一个箭头(chevron)，点击可展开：**Fields to protect**（仅当该条目的 mode 为 Fields 时显示）、只读的 **View data.json**（键名按规则状态着色，点击某个键即可直接为其添加 strip/encrypt 规则——用来覆盖内置敏感键检测可能遗漏的情况）、以及 **Advanced**（store path 覆盖输入框 + **↺ Reset this item to its default rule**）。
-- **Advanced** —— **Custom rules**（完全由你自定义：vault 根目录文件、额外文件夹、sync mode）与 **Discovered files**（我们无法自动分类的配置文件；名称和路径由文件本身决定，可切换是否同步），两者的每一行都使用同一套展开区域。当有任意被管理的条目发生了自定义修改（path、fields 或 mode 偏离了默认值）时，页面顶部会出现一条摘要横幅，列出这些条目并提供 **↺ Reset all to defaults** 按钮。
+- **Obsidian / Core plugins / Community plugins / Beta** —— 每一行都是一张卡片：名称、徽标（当插件的启用状态不是默认值时显示 `on: desktop`/`on: mobile`/`on: this device`，外加设备限定规则数与加密规则数）、一个同步开关，以及一个可展开抽屉的箭头(chevron)。**Obsidian** 标签页共三张卡片：**App settings**（整个 `app.json`——编辑、新建笔记与链接行为，以及其他通用选项）、**Appearance**（主题、字体与 CSS 代码片段）与 **Hotkeys**（你的自定义快捷键）。Core plugins 与 Community plugins 会被全量列出：尚未写出设置文件的核心插件会显示为一张仅有状态的卡片（只有 **Enabled on** 区），等它写出文件后才会长出其余区域。**Search all settings…** 搜索框覆盖 General、所有选择器标签页、Advanced 和 Remotes，并支持 `scope:`（general/obsidian/core/community/advanced/remotes）与 `type:`（file/folder）限定符及自动补全，可与纯文本并用。**Beta** 标签页追踪通过 [BRAT](https://github.com/TfTHacker/obsidian42-brat) 安装的社区插件——同样的卡片、同样的三个抽屉区——让它们的配置像其他插件一样同步。每个分区的卡片均按字典序排列；疑似敏感的键（token、密钥等）会在卡片的 File preview 中高亮显示，方便你在启用同步之前先看到它们。
+- 一张卡片的抽屉最多有三个区域，其中所有 scope 控件都是同一种循环图标：图形本身就代表当前 scope（显示器+手机 = `All devices`，显示器 = `Desktop only`，手机 = `Mobile only`，airplay 标记 = `This device`），点击即切换到下一个值，默认值淡显、收窄后的值以强调色点亮。**Enabled on**（仅插件卡片）就是这样一个图标，决定哪些设备会启用该插件本身；它读写的正是 Obsidian 自己维护的那份启用插件列表。**Settings file** 一开始只是一行路径行——文件路径、一个 scope 图标（此处不含 `This device`）与一个给整个文件加密的 🔒 图标开关；路径文字本身就是编辑入口——点击即可原地编辑（Enter 提交，Esc 取消，编辑已提交的自定义路径时会出现一个安静的 **Reset to default** 动作用于还原内置默认路径）。下方默认折叠的 **File preview**（`▸ File preview`）展开后是一段只读的文件预览，键名按其规则着色（蓝色 = desktop only，琥珀色 = mobile only，红色 = this device，🔒 = 已加密）；点击某个键即可直接为其添加规则。一旦卡片存在任意逐键规则，就会切换到逐键状态：路径行自身的 scope/🔒 变灰（此时每个已加规则的键各自管理自己），并且每个已配置的键都会多出一行，带有自己的 scope 图标、一个 🔒 开关（scope 为 `This device` 时置灰）与一个用于删除该规则的 ✕；字符串数组类型的键的规则会额外带一个 **Per-item scopes** 开关，打开后每个元素各有自己的 scope 图标，而不是整个键共用一条规则。删光最后一条规则会让卡片回到整文件状态。**Companion folders** 列出任何随该条目一起同步的 vault 相对路径文件夹——Appearance 预置了 `themes/` 与 `snippets/`，每张卡片的抽屉末尾都有一行安静的 **+ Add folder**，可添加其他任意路径（重复路径、或已被其他条目占用的路径会被拒绝）；每个文件夹行都带有 scope 图标与一个同步开关（你自己添加的文件夹还会多一个 ✕），点击文件夹名称即可编辑其路径。文件夹的成员列表默认折叠在一个 `· N files`/`· N themes` 计数后面——点击即可展开。展开 `snippets/` 会把每个文件列为独立一行，配有 scope 图标：文件本身始终同步，图标只决定哪些设备启用它。其他 companion 文件夹整体同步，因此其成员仅作信息展示，没有逐文件 scope。
+- **Advanced** —— **Custom rules**（完全由你自定义：vault 根目录文件、额外文件夹、sync mode）与 **Discovered files**（我们无法自动分类的配置文件；名称和路径由文件本身决定，可切换是否同步），两者的每一行都使用各自的字段规则编辑器（一个 `This device`/`Encrypted`/`Desktop only`/`Mobile only` 动作下拉框，与卡片图标化的 Settings file 区是两套不同的控件）。当有任意被管理的条目发生了自定义修改（path、fields 或 mode 偏离了默认值）时，页面顶部会出现一条摘要横幅，列出这些条目并提供 **↺ Reset all to defaults** 按钮。
 - **Remotes**（桌面端） —— 添加一个 **git repository**（URL、分支、可选子文件夹）或 **another vault**（另一个 vault）：点击 **Browse…**，选择目标 vault 文件夹，其中的 store 会被自动识别。
 
 ## Store 目录结构
 
 ```
 <data folder>/               # default "config-sync", configurable
-├── config-sync.json         # group definitions (yours to edit)
 ├── store.lock.json          # capture metadata (machine-written)
 └── store/
     ├── configdir/…          # mirror of {configDir}/… (device-independent)
+    │   └── *.__scopes__.desktop.json / *.__scopes__.mobile.json   # Desktop-only/Mobile-only field sidecars
     └── <dotless files>      # vault-root dotfiles, leading dot stripped
 ```
 
-`config-sync.json` 示例：
-
-```json
-{
-  "$schema": "https://raw.githubusercontent.com/xooooooooox/obsidian-config-sync/main/schema/config-sync.schema.json",
-  "version": 1,
-  "groups": [
-    { "name": "snippets", "path": "{configDir}/snippets", "type": "dir", "devices": "all" },
-    { "name": "hotkeys", "path": "{configDir}/hotkeys.json", "type": "file", "devices": "all" },
-    { "name": "vimrc", "path": ".obsidian.vimrc", "type": "file", "devices": "desktop" },
-    { "name": "plugin-ioto-settings", "path": "{configDir}/plugins/ioto-settings/data.json",
-      "type": "file", "devices": "all", "mode": "fields",
-      "fields": [
-        { "pattern": "*APIKey*", "action": "encrypt" },
-        { "pattern": "*Token*", "action": "encrypt" },
-        { "pattern": "*Secret*", "action": "encrypt" },
-        { "pattern": "userEmail", "action": "strip" }
-      ] }
-  ]
-}
-```
-
-规则组字段：`name`（唯一标识；仅限字母、数字、`-`/`_`，且必须以字母或数字开头——真实插件 id 可能包含大写字母，例如 `plugin-DEVONlink-obsidian`） · `path`（支持 `{configDir}` 变量） · `type`（`file`/`dir`） · `devices`（`all`/`desktop`/`mobile`） · `mode`（`plain`/`fields`/`encrypted`，可选，默认 `plain`） · `fields`（按键名设置的 `Strip`/`Encrypt` 规则，仅 `fields` 模式可用——详见[敏感设置](#敏感设置)） · `label`（可选的显示名称，在条目被启用或 capture 时写入，这样即使在未安装该插件的设备上也能正确显示名称）。
-
-操作系统垃圾文件（`.DS_Store`、`Thumbs.db`、`desktop.ini`）永远不会被捕获。按条目的 sync mode 与密码短语加密详见[敏感设置](#敏感设置)。
+现在已经没有需要手写的规则文件了——什么会被同步、每个字段的 `{scope, encrypted}` 规则，全部通过 **Settings → Config Sync** 的卡片配置（保存在插件自身的设置里，`schemaVersion: 2`）；对于卡片没有覆盖到的内容，同一个标签页下的 **Advanced → Custom rules** 编辑器可以补充。操作系统垃圾文件（`.DS_Store`、`Thumbs.db`、`desktop.ini`）永远不会被捕获。按条目的规则与密码短语加密详见[敏感设置](#敏感设置)。
 
 ## 实战演练
 
 **在所有设备上同步快捷键、外观和 CSS 代码片段**
-1. Settings → Config Sync → 在 *Obsidian* 分区下，勾选 **Hotkeys**、**Appearance**、**CSS snippets**。
+1. Settings → Config Sync → 在 *Obsidian* 分区下，勾选 **Hotkeys** 与 **Appearance**（它的卡片同时覆盖设置文件以及 `themes/`、`snippets/` 两个 companion 文件夹）。
 2. 从功能区菜单打开 **Sync**，点击 **Capture N items**。
 3. 在其他每台设备上，等笔记同步工具把数据文件夹送达后：打开 **Sync**，点击 **Apply N items**。
-4. 每个 CSS 代码片段的 *active on*（生效于）范围（all / desktop / mobile）是按设备设置的，随时可以重新设定。如果在你重命名或删除底层文件后仍残留一些已启用的片段名称，设置面板会以 *N enabled snippets have no file · Clean up* 的形式把它们列出，供一键清理。只有当某个名称对应的 `.css` 文件在本地和 store 中都不存在时才会被判定为失效（笔记同步尚未完成的全新设备仍会因 store 中留有文件而被保护，不会被误判）；清理时会同时清除本地已启用列表、共享的 store 列表，以及它的 scope 与 pin。store 侧的更新通过对该列表执行一次 capture 完成，因此本地对这份列表尚未捕获的开关改动也会随之一并发布。
+4. 打开 Appearance 卡片的 `snippets/` companion 文件夹，为任意代码片段设置自己的 scope：`All devices`（全部同步） / `Desktop only` / `Mobile only`（共享、可跨设备传递，并会在另一类设备上被强制关闭） / `This device`（只保留本设备自己的开关状态，永不同步）。插件的 **Enabled on** 区决定哪些设备启用它本身，用法相同。
 
 **同步某个插件的设置，但让凭证不进入 store**
-1. 在 *Community plugins* 分区下，勾选该插件。
-2. 将其 mode 设为 **Fields**，然后为其凭证键添加规则，例如 `*Token*`、`*Secret*`、`*APIKey*` → `Strip`（如果希望这些值也能同步，则选 `Encrypt`）。
-3. 执行 Capture。被 Strip 的凭证永远不会进入 store；每台设备在每次 apply 后都会保留自己本地填入的值。
+1. 在 *Community plugins* 分区下，打开该插件的卡片。
+2. 在其 **File preview** 中点击每个凭证键为其添加规则，把 scope 设为 `This device`（如果希望这些值也能同步，则打开其 🔒）。
+3. 执行 Capture。标记为 This device 的凭证永远不会进入 store；每台设备在每次 apply 后都会保留自己本地填入的值。
 
 **IOTO vault，从零开始**
 1. 安装插件——PKM 模式会自动检测 IOTO，并将数据存放在 `0-Extra/config-sync`（取自你的 ioto-settings 辅助文件夹）。
@@ -158,17 +137,17 @@ Sync Center 的页头是一条状态栏：**this device**（本设备）胶囊�
 
 ## 敏感设置
 
-每个条目都有一个 sync mode（同步模式），在 Settings 中按条目设置：
+每条字段规则或文件规则都是一个 `{scope, encrypted}` 二元组，在卡片的 Settings file 区按键设置（条目没有任何逐键规则时则按整个文件设置）：
 
-- **Plain**（默认） —— 原样同步。
-- **Fields**（仅文件类条目） —— 按键设置规则：`Strip` 让某个键完全不进入 store（Apply 时保留本地值）；`Encrypt` 把该值存为加密信封，并在 Apply 时解密——凭证也能安全地传输。
-- **Encrypt** —— 整个文件以加密形式存储（AES-256-GCM，密钥通过 PBKDF2 从密码短语派生）。
+- **Scope** —— `All devices` 让该键在所有设备上共享且完全一致；`Desktop only`/`Mobile only` 让该键仍然共享，但各设备类别保留自己的值，存放在该文件 store 副本旁的 `__scopes__` sidecar 文件中（例如 `app.json` 的 `userIgnoreFilters`，即按设备保存的搜索忽略规则，通常会设为 `Desktop only`）；`This device`（仅逐键规则可选，整文件规则没有这一档）让某个键完全不进入 store、永不离开本机——Apply 时保留本地值。
+- **Encrypt** —— 把该值（整文件规则下则是整个文件）存为加密信封，并在 Apply 时解密，让凭证也能安全地传输。scope 为 `This device` 时置灰，因为一个永不离开本设备的值没有什么需要为传输而加密的。
+- **Per-item scopes** —— 字符串数组类型的键（某插件的启用元素列表、CSS 代码片段列表、`userIgnoreFilters`……）可以打开逐元素 scope，而不是整个键共用一条规则，让每个元素各自决定是否同步或只留在本机。
 
 Encrypt 相关模式需要一个 vault 级别的 **Passphrase**（密码短语），在 Settings → General 中按设备设置一次——它绝不会写入任何文件，也不会被同步；只要每台设备使用相同的密码短语即可。如果某个条目含有加密内容，而当前设备尚未设置密码短语，会显示为 *locked*（已锁定）状态（以一个 key 钥匙图标标记），在设置密码短语之前无法 capture 或 apply。Apply 时密码短语错误会干净地失败，不会写入任何内容。
 
-在你启用同步**之前**，每个已安装的插件就已经被扫描，检查是否包含看起来敏感的键（API 密钥、令牌、密钥、密码、邮箱）或本身就是一整块不透明的加密数据——命中的行会带上 `⚠ N keys` / `⚠ opaque blob` 徽标并排到所在分区最前面；这仅用于提示，模式仍由你决定。每个已同步条目的行展开区域（点击箭头 chevron）中都有一个只读的 **View data.json**：键名按规则状态着色（青色 = 已加密，红色 = 已剥离，琥珀色 = 已检测到但尚未设置规则），点击某个键即可直接为其添加 strip/encrypt 规则——用来兜底内置检测可能遗漏的键。Sync Center 会为每个条目标注其模式徽标——整文件 **Encrypt** 显示一个 lock 锁图标，**Fields** 显示一个字段徽标（若干字段线加一个小挂锁），**Plain** 则不显示徽标——capture 报告会准确说明哪些内容被加密、哪些被剥离。
+在你启用同步**之前**，每个已安装的插件就已经被扫描，检查是否包含看起来敏感的键（API 密钥、令牌、密钥、密码、邮箱）或本身就是一整块不透明的加密数据——命中的行会带上 `⚠ N keys` / `⚠ opaque blob` 徽标并排到所在分区最前面；这仅用于提示，规则仍由你决定。卡片的 Settings file 区包含一段只读的文件预览，默认折叠在 **File preview** 的展开项后面：键名按规则状态着色（青色 = 已加密 · 红色 = this device · 蓝色 = desktop only · 琥珀色 = mobile only；已检测到但尚未设置规则的键为紫色，普通键为淡色），点击某个键即可直接为其添加规则——用来兜底内置检测可能遗漏的键。每张卡片都会用自己的摘要打上徽标——`N device-scoped` 与 `N encrypted` 计数，以及非默认时的 **Enabled on** chip——capture 报告会准确说明哪些内容被加密、哪些被剥离。
 
-硬性黑名单已经取消——`remotely-save`、`ioto-update`、`slides-rup` 和 `config-sync` 现在都是与其他条目一样的普通条目（例如 `remotely-save` 可以整文件加密；`ioto-update` 很适合用 Fields 模式）。
+硬性黑名单已经取消——`remotely-save`、`ioto-update`、`slides-rup` 和 `config-sync` 现在都是与其他条目一样的普通条目（例如 `remotely-save` 可以整文件加密；`ioto-update` 很适合用逐键规则）。
 
 ## 开发
 

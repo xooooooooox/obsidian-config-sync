@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { availabilityForGroup, compareVersions, desktopOnlyDrift, desktopOnlyPluginIds, scopedAwaySnippets, snippetForceOff, snippetOrphans } from "../src/core/availability";
+import { availabilityForGroup, compareVersions, desktopOnlyDrift, desktopOnlyPluginIds, scopedAwayMembers, memberForceOff, snippetOrphans } from "../src/core/availability";
 import { FakePlugins } from "./memfs";
 import { StoreLock, SyncGroup } from "../src/core/types";
 
@@ -111,24 +111,35 @@ describe("desktopOnlyPluginIds", () => {
   });
 });
 
-describe("scopedAwaySnippets", () => {
-  it("on desktop, names mobile-scoped snippets", () => {
-    expect(scopedAwaySnippets(scopes, false)).toEqual(new Set(["a-mobile"]));
+describe("scopedAwayMembers", () => {
+  it("on desktop, names mobile-scoped members", () => {
+    expect(scopedAwayMembers(scopes, false)).toEqual(new Set(["a-mobile"]));
   });
-  it("on mobile, names desktop-scoped snippets", () => {
-    expect(scopedAwaySnippets(scopes, true)).toEqual(new Set(["a-desktop"]));
+  it("on mobile, names desktop-scoped members", () => {
+    expect(scopedAwayMembers(scopes, true)).toEqual(new Set(["a-desktop"]));
   });
   it("empty scopes → empty set", () => {
-    expect(scopedAwaySnippets({}, false)).toEqual(new Set());
+    expect(scopedAwayMembers({}, false)).toEqual(new Set());
   });
 });
 
-describe("snippetForceOff (pin > scope)", () => {
-  it("force-offs scope-away snippets on desktop", () => {
-    expect(snippetForceOff(scopes, [], false)).toEqual(["a-mobile"]);
+describe("memberForceOff (localIds > scope)", () => {
+  it("force-offs scope-away members on desktop", () => {
+    expect(memberForceOff(scopes, [], false)).toEqual(["a-mobile"]);
   });
-  it("a pinned scope-away snippet is NOT force-offed", () => {
-    expect(snippetForceOff(scopes, ["a-mobile"], false)).toEqual([]);
+  it("a local scope-away member is NOT force-offed", () => {
+    expect(memberForceOff(scopes, ["a-mobile"], false)).toEqual([]);
+  });
+});
+
+describe("scopedAwayMembers / memberForceOff", () => {
+  it("returns members whose scope excludes this device class", () => {
+    const scopes: Record<string, "desktop" | "mobile"> = { a: "desktop", b: "mobile" };
+    expect(scopedAwayMembers(scopes, false)).toEqual(new Set(["b"]));
+    expect(scopedAwayMembers(scopes, true)).toEqual(new Set(["a"]));
+  });
+  it("local ids win over a travelling scope — never forced off", () => {
+    expect(memberForceOff({ a: "mobile", b: "mobile" }, ["b"], false)).toEqual(["a"]);
   });
 });
 

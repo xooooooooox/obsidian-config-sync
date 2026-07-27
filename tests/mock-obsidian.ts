@@ -43,6 +43,19 @@ export class ExtraButtonComponent {}
 export class SearchComponent {}
 export class TextComponent {}
 export class ToggleComponent {}
-export class Notice {}
+// Captures the message every `new Notice(...)` call was constructed with — `lastMessage` lets a
+// test observe the (otherwise fire-and-forget) UI notice a production code path raised, e.g.
+// main.ts's recompile() failure Notice (final-review MUST-FIX defense-in-depth seam test). Not
+// reset automatically between tests — a test that cares should read it right after triggering the
+// call it's asserting on (and may clear it first if a prior call in the same test would confuse
+// the assertion).
+export class Notice {
+  static lastMessage: string | undefined;
+  message: string;
+  constructor(message: string, _timeout?: number) {
+    this.message = message;
+    Notice.lastMessage = message;
+  }
+}
 export const Platform = { isMobile: false, isDesktop: true, isDesktopApp: true, isMobileApp: false };
 export function setIcon(): void {}

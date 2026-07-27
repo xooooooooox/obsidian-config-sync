@@ -1,4 +1,4 @@
-import { App, ButtonComponent, DropdownComponent, ExtraButtonComponent, Notice, Platform, Plugin, PluginSettingTab, SearchComponent, Setting, setIcon, TextComponent, ToggleComponent } from "obsidian";
+import { App, ButtonComponent, DropdownComponent, ExtraButtonComponent, Notice, Platform, Plugin, PluginSettingTab, Scope, SearchComponent, Setting, setIcon, TextComponent, ToggleComponent } from "obsidian";
 import {
   QualifierAutocomplete,
   parseQuery,
@@ -6,7 +6,7 @@ import {
   type QualifierSpec,
   type QualifierResolver,
 } from "./qualifierSearch";
-import { DeviceClass, FieldRule, Remote, RibbonKey, SyncGroup, SyncMode } from "../core/types";
+import { DeviceClass, FieldRule, Remote, RibbonKey, RuleScope, SyncGroup, SyncMode } from "../core/types";
 import { SensitiveScan } from "../core/modes";
 import { PkmMode } from "../core/pkm";
 import { validateRemotes } from "../core/manifest";
@@ -15,22 +15,68 @@ import { SWITCH_LIST_GROUPS } from "../core/switchList";
 import {
   CatalogItem,
   CatalogSection,
+  corePluginFile,
   defaultGroupForName,
   expectedPathForName,
-  findGroupByName,
-  groupForItem,
   joinLocation,
   reservedNames,
   SELF_GROUP_NAME,
   splitLocation,
-  toggleSection,
 } from "../core/catalog";
-import { confirmWarnings } from "./ConfirmModal";
+import { CompileError, companionConflict, companionNameConflict, compileItems, CustomGroupConfig, emptyItemConfig, ItemConfig, ItemDef, ItemFieldRule, ItemSection, ItemSettingsFile } from "../core/registry";
 import { FolderSelectModal } from "./FolderSelectModal";
+import { confirmPresetPathChange } from "./ConfirmModal";
 import { commitDraft } from "./commitGroups";
-import { sortBySensitiveFirst } from "./sensitiveSort";
-import { classifyJsonKeys } from "./jsonView";
-import { orderSwitchRows, OrderedSwitchRow, SwitchRow } from "./panelModel";
+import { classifyJsonKeys, classifyPerItemLines, jsonElementClass, jsonKeyClass, KeyClass } from "./jsonView";
+import {
+  applyPerItemToggle,
+  applySyncAll,
+  buildCompanionRows,
+  buildPerItemElementRows,
+  buildRuleRows,
+  buildSnippetMemberRows,
+  CompanionRowModel,
+  companionConflictError,
+  companionNameConflictError,
+  computeBadges,
+  defaultSettingsFile,
+  DEFAULT_FIELD_RULE,
+  deriveMode,
+  ENABLED_ON_HINT,
+  ENABLED_CSS_SNIPPETS_KEY,
+  ENABLED_ON_LABEL,
+  encryptToggleDisabled,
+  ENCRYPT_DISABLED_PERITEM_HINT,
+  FIELD_SCOPE_OPTIONS,
+  FieldRowModel,
+  FILE_SCOPE_OPTIONS,
+  FOLDER_MEMBER_HINT,
+  hasEnablementZone,
+  hasKeyRules,
+  isStringArrayValue,
+  memberCountLabel,
+  nextScope,
+  normalizeCompanionPath,
+  PER_ITEM_DISABLED_HINT,
+  PER_ITEM_SCOPES_LABEL,
+  PREVIEW_LEGEND,
+  sectionAllEnabled,
+  SCOPE_ICONS,
+  scopeCycleTooltip,
+  settingsFileZoneKind,
+  SnippetMemberRow,
+  sortCompanionMemberNames,
+  SNIPPET_MEMBER_HINT,
+  stateOnlyHint,
+  SYNC_ALL_HINT,
+  SYNC_ALL_LABEL,
+  COMPANION_SCOPE_OPTIONS,
+  ADD_FOLDER_LABEL,
+  CUSTOM_PATH_LABEL,
+  validateCompanionBasename,
+  validateCompanionPath,
+  withSnippetScope,
+} from "./itemCard";
 
 export interface SettingsHost extends Plugin {
   settings: {
@@ -45,17 +91,36 @@ export interface SettingsHost extends Plugin {
     mobileStatusBar: boolean;
     remoteAutoCheck: boolean;
     localPeriodicCheck: boolean;
-    switchExceptions: Record<string, string[]>;
-    snippetScopes: Record<string, "desktop" | "mobile">;
     runHistory: { enabled: boolean; path: string; maxCount: number; maxDays: number };
+    // Unified-card model (spec 2026-07-25-unified-card-design.md §6): the Obsidian tab's card
+    // renderer reads/writes these fields directly, durably, through saveSettings() (which
+    // persists AND recompiles — see main.ts).
+    items: Record<string, ItemConfig>;
+    // Advanced tab "Custom rules"/"Discovered files" (spec §6 addition): read/written directly
+    // through host.saveSettings(), same durable contract as items above — see
+    // persistCustomGroups.
+    customGroups: CustomGroupConfig[];
   };
   saveSettings(): Promise<void>;
+  // The registry's item defs (registry.ts's buildItemDefs, rebuilt by main.ts on every
+  // recompile) — the unified-card renderer's only source of which cards exist.
+  itemDefs(): ItemDef[];
+  // Basenames (no extension) of .css files actually present under the vault's snippets/ folder —
+  // feeds the Appearance card's snippets companion member rows (spec §4/§5).
+  listSnippetFiles(): Promise<string[]>;
+  // Immediate child file/folder names of an arbitrary companion path (task-7-brief.md) — feeds
+  // the plain (non-mapKey) companion member listing zone ③ shows for themes/ and any user-added
+  // folder. `path` is a companion's own path field (may be "{configDir}/…" or vault-relative).
+  listCompanionFiles(path: string): Promise<string[]>;
   clearRunHistory(): Promise<void>;
   refreshRibbons(): void;
   updateStatusIndicators(): void;
   applyMobileStatusBar(): void;
+  // The full compiled sync list (registry-derived groups + settings.customGroups, merged by
+  // registry.ts's compileItems) — read-only from this file's point of view; every write path this
+  // file drives (unified cards AND the Advanced tab) goes through settings.items/customGroups +
+  // saveSettings(), never a raw group-list write.
   readGroupsFile(): Promise<SyncGroup[]>;
-  writeGroupsFile(groups: SyncGroup[]): Promise<void>;
   resolvedRootPath(): Promise<string>;
   detectedMode(): "ioto" | "default";
   listOptionSections(groups: SyncGroup[]): Promise<CatalogSection[]>;
@@ -71,15 +136,60 @@ export interface SettingsHost extends Plugin {
   passphrase(): string | null;
   setPassphrase(v: string | null): void;
   displayName(group: string, storedLabel?: string): string;
-  switchListRows(group: string): Promise<{ id: string; name: string; hint: string; desktopOnly: boolean; deviceScoped: boolean }[]>;
-  snippetOrphanNames(): Promise<{ name: string; storeOn: boolean }[]>;
-  removeSnippetOrphans(names: string[]): Promise<void>;
 }
 
 const SENSITIVE_ENCRYPT_RE = /apikey|api_key|token|secret|password|credential/i;
 
 function defaultFieldsFromDetection(keys: string[]): FieldRule[] {
-  return keys.map((pattern) => ({ pattern, action: SENSITIVE_ENCRYPT_RE.test(pattern) ? "encrypt" : "strip" }));
+  return keys.map((pattern) => ({ pattern, ...(SENSITIVE_ENCRYPT_RE.test(pattern) ? ENCRYPT_RULE : LOCAL_RULE) }));
+}
+
+// Path row lock/scope disabled tooltip (spec 2026-07-26-card-visual-refresh-design.md §5, exact) —
+// shown whenever the card has any per-key rule (hasKeyRules): the whole-file scope/encrypt row
+// hands control to the per-key rows below it.
+const PER_KEY_RULES_ACTIVE_HINT = "Per-key rules are active — remove them to control the whole file again";
+
+// zone ② body's file-read outcome (renderCardBodyInto below): "missing" = no file on this device
+// yet, "invalid" = present but not a JSON object, "ok" = usable — only "ok" carries a doc worth
+// handing to buildRuleRows/renderCardDataPreview.
+type CardFileState = "missing" | "invalid" | "ok";
+
+function parseCardDoc(raw: string | null): { doc: Record<string, unknown>; fileState: CardFileState } {
+  if (raw === null) return { doc: {}, fileState: "missing" };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    parsed = undefined;
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return { doc: {}, fileState: "invalid" };
+  return { doc: parsed as Record<string, unknown>, fileState: "ok" };
+}
+
+// Legacy single-select 5-way action, kept only as an adapter for the still-mutually-exclusive
+// dropdowns below (Task 5 replaces these with the real scope+encrypted card controls). Round-trips
+// exactly the mapping in the task brief: strip<->local/false, encrypt<->all/true,
+// desktop<->desktop/false, mobile<->mobile/false, all<->all/false (inert default).
+type LegacyFieldAction = "strip" | "encrypt" | "desktop" | "mobile" | "all";
+const LOCAL_RULE: Pick<FieldRule, "scope" | "encrypted"> = { scope: "local", encrypted: false };
+const ENCRYPT_RULE: Pick<FieldRule, "scope" | "encrypted"> = { scope: "all", encrypted: true };
+
+function legacyActionFromRule(r: Pick<FieldRule, "scope" | "encrypted">): LegacyFieldAction {
+  if (r.scope === "local") return "strip";
+  if (r.encrypted) return "encrypt";
+  if (r.scope === "desktop") return "desktop";
+  if (r.scope === "mobile") return "mobile";
+  return "all";
+}
+
+function legacyRuleFromAction(action: LegacyFieldAction): Pick<FieldRule, "scope" | "encrypted"> {
+  switch (action) {
+    case "strip": return LOCAL_RULE;
+    case "encrypt": return ENCRYPT_RULE;
+    case "desktop": return { scope: "desktop", encrypted: false };
+    case "mobile": return { scope: "mobile", encrypted: false };
+    case "all": return { scope: "all", encrypted: false };
+  }
 }
 
 interface RemoteDraft {
@@ -120,13 +230,6 @@ const TABS: { id: PanelTab; label: string; icon: string; desktopOnly?: true }[] 
   { id: "advanced", label: "Advanced", icon: "wrench" },
   { id: "sources", label: "Remotes", icon: "git-branch", desktopOnly: true },
 ];
-
-const SECTION_TAB: Record<"obsidian" | "core" | "plugins" | "beta", string> = {
-  obsidian: "Obsidian",
-  core: "Core plugins",
-  plugins: "Community plugins",
-  beta: "Beta",
-};
 
 // Single source of truth for General's Settings: used both to render (data-search-anchor
 // attached to each Setting) and to build the search index, so the two can't drift.
@@ -191,7 +294,7 @@ interface SearchHit {
   name: string;
   desc: string;
   anchorId: string;
-  item?: CatalogItem;
+  item?: Pick<CatalogItem, "type">;
 }
 
 const SCOPE_LABEL: Record<SearchHit["scope"], string> = {
@@ -225,9 +328,9 @@ const SETTING_QUALIFIER_RESOLVERS: Record<string, QualifierResolver<SearchHit>> 
   type: (h) => settingTypeValue(h),
 };
 
-// Writes/clears a single snippet's device scope (`enabled-css-snippets` "Active on" dropdown).
-// "all" is the absent default, so it deletes the key rather than storing it explicitly.
-export function setSnippetScope(
+// Writes/clears one member's shared class scope for a switch group; "all" is the absent
+// default, so it deletes the key.
+export function setMemberScope(
   scopes: Record<string, "desktop" | "mobile">,
   name: string,
   value: "all" | "desktop" | "mobile",
@@ -236,6 +339,17 @@ export function setSnippetScope(
   if (value === "all") delete next[name];
   else next[name] = value;
   return next;
+}
+
+// Every settingsFile write funnels through here (spec 2026-07-26-card-visual-refresh-design.md
+// §3.1 "自动切换") so the stored `mode` is never a user choice — it's re-derived from the rules/
+// perItem the write just produced. A write that lands on "fields" also drops any `fileRule`: the
+// two are a manifest-illegal combination (manifest.ts rejects fields+fileRule), and forcing this
+// here means every settingsFile-mutating call site gets that invariant for free instead of having
+// to remember it individually.
+function withDerivedMode(sf: ItemSettingsFile): ItemSettingsFile {
+  const mode = deriveMode(sf);
+  return mode === "fields" ? { ...sf, mode, fileRule: undefined } : { ...sf, mode };
 }
 
 export class ConfigSyncSettingTab extends PluginSettingTab {
@@ -250,8 +364,6 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private readonly qac = new QualifierAutocomplete(SETTING_QUALIFIER_SPECS);
   private bodyEl: HTMLElement | null = null;
   private expanded = new Set<string>(); // UI-transient: advanced rows expanded this session
-  private customLocOpen = new Set<string>(); // UI-transient: which rows have the Custom location sub-section open
-  private jsonOpen = new Set<string>(); // UI-transient: which rows have the View data.json body open
   private groupsErrorEl: HTMLElement | null = null;
   private sourcesErrorEl: HTMLElement | null = null;
   private groupsErrorMsg = "";
@@ -259,8 +371,17 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private saveErrorFor = "";
   private detections = new Map<string, SensitiveScan>(); // group name -> live scan, filled in as reads complete
   private passphraseStatusEl: HTMLElement | null = null;
-  private sortedSections = new Set<string>(); // tabs that already re-rendered once to settle sensitive-first ordering
   private betaAutoScanned = false; // one automatic index re-scan per panel lifetime
+  private customPathEditing = new Set<string>(); // UI-transient: zone ② "Custom path" inputs open but not yet committed
+  private addingCompanion = new Set<string>(); // UI-transient: zone ③ "+ Add folder" inputs open
+  private companionPathEditing = new Set<string>(); // UI-transient: zone ③ rows mid path-edit ("def.id::path")
+  private previewOpen = new Set<string>(); // UI-transient: zone ② "File preview" disclosure open this session, keyed by def.id
+  private membersOpen = new Set<string>(); // UI-transient: zone ③ member-list disclosure open this session, keyed "def.id:path" (spec 2026-07-26-card-visual-refresh-design.md §4)
+  // In-place refresh hooks for enable toggles: a per-card toggle rebuilds only the section "Sync
+  // all" headers, and "Sync all" rebuilds only the cards — never rerender(), whose
+  // containerEl.empty() + async rebuild visibly flashes and drops the panel mid-scroll.
+  private syncAllRebuilds: (() => void)[] = []; // cleared each rerender
+  private cardHosts: { wrap: HTMLElement; def: ItemDef }[] = []; // cleared each rerender
 
   constructor(app: App, private host: SettingsHost) {
     super(app, host);
@@ -272,7 +393,6 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     this.search = "";
     this.searchScope = "all";
     this.expanded.clear();
-    this.sortedSections.clear();
     void this.rerender(0);
   }
 
@@ -287,6 +407,8 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private rerender(scrollTop: number): Promise<void> {
     const gen = ++this.renderGen;
     this.bodyEl = null;
+    this.syncAllRebuilds = [];
+    this.cardHosts = [];
     this.containerEl.empty();
     return this.render(this.containerEl, gen, scrollTop);
   }
@@ -294,7 +416,6 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private switchTab(tab: PanelTab): void {
     this.activeTab = tab;
     this.saveErrorFor = "";
-    this.sortedSections.delete(tab);
     void this.rerender(0);
   }
 
@@ -378,15 +499,14 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         this.renderRunHistory(containerEl);
         break;
       case "obsidian":
+        await this.renderRegistryCards(containerEl, gen, "obsidian", false);
+        break;
       case "core":
       case "plugins":
       case "beta":
-        if (this.renderGroupsReadError(containerEl)) break;
         if (this.activeTab === "beta") await this.renderBetaHeader(containerEl, gen);
         if (gen !== this.renderGen) return;
-        await this.renderSections(containerEl, gen, this.activeTab);
-        if (gen !== this.renderGen) return;
-        this.renderGroupsError(containerEl);
+        await this.renderRegistryCards(containerEl, gen, this.activeTab === "plugins" ? "community" : this.activeTab, true);
         break;
       case "advanced":
         if (this.renderGroupsReadError(containerEl)) break;
@@ -435,602 +555,1065 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     }
   }
 
-  private async renderSections(containerEl: HTMLElement, gen: number, tab: "obsidian" | "core" | "plugins" | "beta"): Promise<void> {
-    const sections = await this.sectionsFor(tab);
-    if (gen !== this.renderGen) return;
-    for (const sec of sections) {
-      const head = new Setting(containerEl).setName(sec.heading).setDesc(sec.description).setHeading();
-      if (sec.allowSyncAll) this.addSyncAllToggle(head, sec);
-      const listEl = containerEl.createDiv();
-      const items = sortBySensitiveFirst(sec.items, (i) => {
-        const s = this.detections.get(i.name);
-        return (s?.keys.length ?? 0) > 0 || (s?.blob ?? false);
-      });
-      for (const item of items) this.renderChecklistRow(listEl, item);
-    }
+  // ── Unified card renderer — every ItemDef section (spec §4/§5, task-5/6-brief.md) ──────────
+  // One renderer for every ItemDef: name + badges + sync toggle + chevron on the row, a drawer
+  // with a Settings file zone (and, for Appearance, a Companion folders zone). Reads/writes
+  // settings.items directly through host.saveSettings() — durable, recompiles. The Advanced
+  // tab's custom-rule/discovered-file editor (below) is durable the same way, through
+  // settings.customGroups (persistCustomGroups).
+
+  private itemConfig(id: string): ItemConfig {
+    return this.host.settings.items[id] ?? emptyItemConfig();
   }
 
-  private addSyncAllToggle(head: Setting, sec: CatalogSection): void {
-    const tickable = sec.items.filter((i) => i.disabledReason === null);
-    const allOn = tickable.length > 0 && tickable.every((i) => findGroupByName(this.groups, i.name) !== undefined);
-    head.addToggle((t) => {
-      t.setValue(allOn)
-        .setTooltip(allOn ? "Sync none" : "Sync all")
-        .onChange(async (v) => {
-          // Enabling in bulk runs the same sensitive-detection seeding as the per-item toggle.
-          const additions: SyncGroup[] = [];
-          if (v) {
-            for (const item of tickable) {
-              if (findGroupByName(this.groups, item.name) === undefined) additions.push(await this.seededGroupFor(item));
-            }
-          }
-          await this.commitGroups((draft) => {
-            if (v) {
-              const have = new Set(draft.map((g) => g.name));
-              for (const g of additions) if (!have.has(g.name)) draft.push(g);
-            } else {
-              const next = toggleSection(draft, sec.items, false);
-              draft.length = 0;
-              draft.push(...next);
-            }
-          });
-          this.refresh();
-        });
-    });
+  private async updateItem(id: string, mutator: (cfg: ItemConfig) => ItemConfig): Promise<void> {
+    const next = mutator(this.itemConfig(id));
+    this.host.settings.items = { ...this.host.settings.items, [id]: next };
+    await this.host.saveSettings();
   }
 
-  private renderChecklistRow(listEl: HTMLElement, item: CatalogItem): void {
-    const wrap = listEl.createDiv({ cls: "config-sync-item-wrap" });
-    this.renderItemInto(wrap, item);
+  // A throwaway SyncGroup carrying only what readItemFile/detectSensitive actually read
+  // (name/path/type) — the unified card model has no compiled SyncGroup of its own to hand them.
+  private cardProbeGroup(def: ItemDef, cfg: ItemConfig): SyncGroup | null {
+    const path = cfg.settingsFile?.customPath ?? def.settingsFile?.defaultPath ?? null;
+    if (path === null) return null;
+    return { name: def.id, path, type: "file", devices: "all" };
   }
 
-  // Builds the group a freshly enabled item gets. Sensitive items default to Fields mode with
-  // detection-seeded rules (encrypt the flagged keys, strip the rest) instead of plain —
-  // 确认 2026-07-16. Shared by the per-item toggle and the section "Sync all" toggle: bulk
-  // enable must not skip the seeding (real-vault finding 2026-07-16).
-  private async seededGroupFor(item: CatalogItem): Promise<SyncGroup> {
-    const g = groupForItem(item.name, item.path, item.type, item.description, item.label);
-    if (g.type === "file" && !SWITCH_LIST_GROUPS.has(item.name)) {
-      const scan = this.detections.get(item.name) ?? (await this.host.detectSensitive(g));
-      this.detections.set(item.name, scan);
-      if (scan.blob) {
-        // An opaque blob has no keys for Fields to work with — whole-file encryption is the
-        // only meaningful protection (real-vault gap 2026-07-17: remotely-save stayed plain).
-        g.mode = "encrypted";
-        return g;
-      }
-      const existing = g.fields ?? [];
-      const seeded = defaultFieldsFromDetection(scan.keys).filter((r) => !existing.some((f) => f.pattern === r.pattern));
-      if (seeded.length > 0) {
-        g.mode = "fields";
-        g.fields = [...existing, ...seeded];
-      }
-    }
-    return g;
-  }
-
-  // Rebuilds one item's row (chevron + Setting + mode segment + expansion) in place. Mode-segment
-  // clicks and expansion mutations call this on their own wrap instead of a full refresh(),
-  // so the rest of the panel (scroll position, other rows) doesn't jolt.
-  private renderItemInto(wrap: HTMLElement, item: CatalogItem): void {
-    wrap.empty();
-    const group = findGroupByName(this.groups, item.name);
-    const row = new Setting(wrap).setName(item.label);
-    row.settingEl.setAttribute("data-search-anchor", `item-${item.name}`);
-    let syncExpansion = (): void => undefined;
-    if (group !== undefined) {
-      const grp = group;
-      const chevron = createSpan({ cls: "config-sync-row-chevron" });
-      // Toggle by adding/removing the drawer in place — no header rebuild, so expand/collapse
-      // doesn't jitter the row.
-      syncExpansion = (): void => {
-        const open = this.expanded.has(grp.name);
-        setIcon(chevron, open ? "chevron-down" : "chevron-right");
-        const existing = row.settingEl.querySelector(":scope > .config-sync-item-exp");
-        if (open && existing === null) this.renderItemExpansion(row.settingEl, wrap, grp, item);
-        else if (!open && existing !== null) existing.remove();
-      };
-      chevron.addEventListener("click", () => {
-        if (this.expanded.has(grp.name)) this.expanded.delete(grp.name);
-        else this.expanded.add(grp.name);
-        syncExpansion();
-      });
-      row.nameEl.prepend(chevron); // inside the name element — never wraps onto its own line
-    }
-    const parts: string[] = [];
-    if (item.description !== null) parts.push(item.description);
-    if (item.disabledReason !== null) parts.push(item.disabledReason);
-    if (!item.exists && item.disabledReason === null && item.cautionReason === null) parts.push("(not present in this vault yet)");
-    row.setDesc(parts.join(" "));
-    // Badge order matches the design: ⚠ keys → ⚙ custom location → device-specific. The detect
-    // badge is async, so a placeholder holds its slot before the later badges are appended.
-    const detectHolder = row.nameEl.createSpan({ cls: "config-sync-detect-holder" });
-    if (group !== undefined && this.isCustomized(group)) {
-      row.nameEl.createSpan({ cls: "config-sync-cust", text: "⚙ custom location" });
-    }
-    if (item.cautionReason !== null) {
-      const devBadge = row.nameEl.createSpan({ cls: "config-sync-devbadge", text: "device-specific" });
-      devBadge.setAttribute("title", item.cautionReason);
-      devBadge.setAttribute("aria-label", item.cautionReason);
-    }
-    if (group !== undefined && SWITCH_LIST_GROUPS.has(item.name)) {
-      const isSnippetGroup = item.name === "enabled-css-snippets";
-      if (isSnippetGroup) {
-        const scopedCount = Object.keys(this.host.settings.snippetScopes).length;
-        const scopeBadge = row.nameEl.createSpan({ cls: "config-sync-devbadge config-sync-scopebadge", text: `${scopedCount} device-scoped` });
-        scopeBadge.setAttribute("title", 'Snippets restricted to a single device via "active on"');
-        if (scopedCount === 0) scopeBadge.hide();
-      }
-      // Always create the badge (hidden at 0) so the exclude toggle can update it in place
-      // without rebuilding the row — a full re-render here flashes visibly.
-      const n = (this.host.settings.switchExceptions[item.name] ?? []).length;
-      const b = row.nameEl.createSpan({ cls: "config-sync-devbadge config-sync-exbadge", text: isSnippetGroup ? `${n} pinned` : `${n} excluded` });
-      b.setAttribute(
-        "title",
-        isSnippetGroup
-          ? "Snippets pinned to this device — they keep their own on/off state here, regardless of the shared list"
-          : "Plugins excluded from this list on this device — they keep their own on/off state"
-      );
-      if (n === 0) b.hide();
-    }
-    // The enabled-css-snippets list is scoped per-snippet ("Active on" in its drawer), so the
-    // coarse group-level device dropdown would be a redundant, confusing second scope control.
-    if (group !== undefined && item.disabledReason === null && item.name !== "enabled-css-snippets") {
-      row.addDropdown((d) =>
-        d
-          .addOption("all", "all devices")
-          .addOption("desktop", "desktop only")
-          .addOption("mobile", "mobile only")
-          .setValue(group.devices)
-          .onChange(async (v) => {
-            const ok = await this.commitGroups((draft) => {
-              const g = draft.find((x) => x.name === item.name);
-              if (g !== undefined) g.devices = v as DeviceClass;
-            }, item.name);
-            // Nothing else in the row depends on the device scope — a full refresh here only
-            // caused a visible flash. Refresh solely on failure, to restore the real value
-            // and surface the inline error.
-            if (!ok) this.refresh();
-          })
-      );
-    }
-    if (group !== undefined && item.disabledReason === null) {
-      this.renderModeSegment(row.controlEl, group, () => this.renderItemInto(wrap, item));
-    }
-    row.addToggle((t) => {
-      t.setValue(group !== undefined);
-      t.setDisabled(item.disabledReason !== null);
-      t.onChange(async (v) => {
-        if (v && item.cautionReason !== null) {
-          const ok = await confirmWarnings(this.app, "Sync a device-specific file?", [item.cautionReason]);
-          if (!ok) {
-            this.refresh();
-            return;
-          }
-        }
-        const toAdd: SyncGroup | null = v ? await this.seededGroupFor(item) : null;
-        await this.commitGroups((draft) => {
-          if (toAdd !== null) draft.push(toAdd);
-          else {
-            const idx = draft.findIndex((g) => g.name === item.name);
-            if (idx >= 0) draft.splice(idx, 1);
-          }
-        }, item.name);
-        this.refresh();
-      });
-    });
-    if (item.disabledReason === null && item.exists) {
-      const probe = group ?? groupForItem(item.name, item.path, item.type, null);
-      this.renderDetection(detectHolder, probe, item.name);
-    }
-    if (this.saveErrorFor === item.name) {
-      wrap.createDiv({ cls: "config-sync-save-error mod-warning", text: `couldn't save this change — ${this.groupsErrorMsg}. The change was reverted.` });
-    }
-    syncExpansion(); // renders the drawer if this row is already expanded (e.g. after a content re-render)
-  }
-
-  // Fields to protect / Data file / Advanced — a synced row's expansion, opened via its chevron.
-  private renderItemExpansion(parent: HTMLElement, wrap: HTMLElement, group: SyncGroup, item: CatalogItem): void {
-    const exp = parent.createDiv({ cls: "config-sync-item-exp" });
-    if (SWITCH_LIST_GROUPS.has(group.name)) {
-      // Switch lists get only the per-device exclusion editor: the raw-JSON viewer exists for
-      // field-rule assignment (meaningless on a plain id list) and a custom location would
-      // break the fixed Obsidian file path — both are noise here.
-      this.renderLocalDecisions(exp, group, wrap, item);
-      return;
-    }
-    if (group.mode === "fields") {
-      exp.createDiv({ cls: "config-sync-explabel", text: "Fields to protect" });
-      exp.createDiv({
-        cls: "config-sync-expdesc",
-        text: "Strip = don't sync: the field is removed from the store copy at capture and keeps its local value on apply.",
-      });
-      this.renderFieldsEditor(exp.createDiv(), group, () => this.renderItemInto(wrap, item));
-    }
-    if (group.type === "file") this.renderDataFileSegment(exp, group, item, wrap);
-    this.renderCustomLocationSegment(exp, group, item, wrap);
-  }
-
-  // "Local decisions (this device)" — per-device exceptions for the two switch-list items
-  // (定稿 switch-exceptions.html): excepted ids never enter the store and never flip here.
-  private renderLocalDecisions(exp: HTMLElement, group: SyncGroup, wrap: HTMLElement, item: CatalogItem): void {
-    const isSnippetGroup = group.name === "enabled-css-snippets";
-    exp.createDiv({
-      cls: "config-sync-explabel",
-      text: isSnippetGroup ? "Device scope & pins (this device)" : "Excluded from this list (this device)",
-    });
-    exp.createDiv({
-      cls: "config-sync-expdesc",
-      text: isSnippetGroup
-        ? 'Set which devices a snippet belongs to with "Active on". Pin a snippet to keep its own on/off on this device only — a pin isn\'t touched by the shared list and always wins over the scope.'
-        : "Excluded plugins keep their own on/off state on this device — the shared list neither includes nor changes them.",
-    });
-    const listEl = exp.createDiv({ cls: "config-sync-ldlist" });
-    // The device this list belongs to when it's scoped away from us (mobile → "desktop").
-    const boundDevice = Platform.isMobile ? "desktop" : "mobile";
-    let orphans: { name: string; storeOn: boolean }[] = [];
-    let orphansExpanded = false;
-    const renderRows = (rows: SwitchRow[]): void => {
-      listEl.empty();
-      const setPin = async (id: string, pinned: boolean): Promise<void> => {
-        const cur = new Set(this.host.settings.switchExceptions[group.name] ?? []);
-        if (pinned) cur.add(id);
-        else cur.delete(id);
-        this.host.settings.switchExceptions[group.name] = [...cur].sort();
-        await this.host.saveSettings();
-        const badge = wrap.querySelector<HTMLElement>(".config-sync-exbadge");
-        if (badge !== null) {
-          badge.setText(isSnippetGroup ? `${cur.size} pinned` : `${cur.size} excluded`);
-          if (cur.size > 0) badge.show();
-          else badge.hide();
-        }
-        // Snippets: a pin flips the row's bucket (pin > scope removes it from the auto
-        // device-scoped block), and that is baked into the fetched rows — so re-fetch. Plugins:
-        // an exclude doesn't touch deviceScoped, so an in-place re-sort suffices (no flash).
-        if (isSnippetGroup) await reload();
-        else renderRows(rows);
-      };
-      const updateScopeBadge = (): void => {
-        const scopeBadge = wrap.querySelector<HTMLElement>(".config-sync-scopebadge");
-        if (scopeBadge === null) return;
-        const count = Object.keys(this.host.settings.snippetScopes).length;
-        scopeBadge.setText(`${count} device-scoped`);
-        if (count > 0) scopeBadge.show();
-        else scopeBadge.hide();
-      };
-      // The shared "Active on" scope dropdown — rendered on normal snippet rows and on
-      // scoped-away snippet rows, so a snippet's scope stays editable from any device.
-      const renderScopeDropdown = (rowEl: HTMLElement, r: SwitchRow, disabled: boolean): void => {
-        const scopeNow = this.host.settings.snippetScopes[r.id] ?? "all";
-        const scopeDd = new DropdownComponent(rowEl)
-          .addOption("all", "All devices")
-          .addOption("desktop", "Desktop only")
-          .addOption("mobile", "Mobile only")
-          .setValue(scopeNow)
-          .setDisabled(disabled)
-          .onChange(async (v) => {
-            this.host.settings.snippetScopes = setSnippetScope(this.host.settings.snippetScopes, r.id, v as "all" | "desktop" | "mobile");
-            await this.host.saveSettings();
-            updateScopeBadge();
-            await reload();
-          });
-        scopeDd.selectEl.addClass("config-sync-ld-scope");
-        scopeDd.selectEl.toggleClass("is-scoped", scopeNow !== "all");
-      };
-      const exceptions = new Set(this.host.settings.switchExceptions[group.name] ?? []);
-      const ordered = orderSwitchRows(rows, exceptions);
-      let prevBucket: OrderedSwitchRow["bucket"] | null = null;
-      for (const r of ordered) {
-        const gsep = prevBucket !== null && r.bucket !== prevBucket;
-        prevBucket = r.bucket;
-        if (r.bucket === "desktop-only" || r.bucket === "device-scoped") {
-          // A snippet scoped away from THIS device keeps its scope editable (the scope is
-          // shared, user-set metadata) — so it can be un-scoped from any device instead of
-          // locking here. Plugin desktop-only / device-scoped rows stay inert.
-          const editableScope = isSnippetGroup && r.bucket === "device-scoped";
-          const rowEl = listEl.createDiv({ cls: `config-sync-ldrow is-auto${gsep ? " config-sync-ldrow-gsep" : ""}` });
-          rowEl.setAttribute(
-            "title",
-            editableScope
-              ? `Scoped to ${boundDevice} only — not active on this device`
-              : r.bucket === "desktop-only"
-                ? "Excluded automatically — this plugin can't run on this device"
-                : `Excluded automatically — you set this plugin to devices: ${boundDevice}`,
-          );
-          rowEl.createSpan({ cls: "config-sync-ldname", text: r.name });
-          rowEl.createSpan({
-            cls: "config-sync-doto-pill",
-            text: r.bucket === "desktop-only" ? "desktop-only" : `${boundDevice}-only`,
-          });
-          rowEl.createSpan({ cls: "config-sync-ldhint", text: r.hint });
-          rowEl.createDiv({ cls: "config-sync-rule-spacer" });
-          if (editableScope) {
-            renderScopeDropdown(rowEl, r, false);
-          } else {
-            rowEl.createSpan({ cls: "config-sync-ldstate", text: "auto-excluded" });
-            new ToggleComponent(rowEl).setValue(true).setDisabled(true);
-          }
-          continue;
-        }
-        const isLocal = r.bucket === "excluded"; // snippets: "pinned to this device"
-        const rowEl = listEl.createDiv({
-          cls: `config-sync-ldrow${isLocal ? " is-local" : ""}${gsep ? " config-sync-ldrow-gsep" : ""}`,
-        });
-        rowEl.createSpan({ cls: "config-sync-ldname", text: r.name });
-        // 定稿 snippet-scope-refined-v2.html: a pinned snippet reads as a filled "Pinned here" chip
-        // beside its name; an unpinned one shows only its "Active on" dropdown plus a hover pin.
-        if (isSnippetGroup && isLocal) {
-          const chip = rowEl.createSpan({ cls: "config-sync-ld-pinchip" });
-          setIcon(chip.createSpan({ cls: "config-sync-ld-pinchip-icon" }), "pin");
-          chip.appendText(`Pinned here · ${r.hint.startsWith("on here") ? "on" : "off"}`);
-        }
-        rowEl.createSpan({ cls: "config-sync-ldhint", text: r.hint });
-        rowEl.createDiv({ cls: "config-sync-rule-spacer" });
-        if (isSnippetGroup) {
-          if (isLocal) {
-            const unpin = rowEl.createSpan({ cls: "config-sync-ld-unpin", text: "Unpin", attr: { role: "button", tabindex: "0" } });
-            unpin.addEventListener("click", () => void setPin(r.id, false));
-          } else {
-            const pinBtn = rowEl.createSpan({ cls: "config-sync-ld-pin", attr: { role: "button", tabindex: "0", "aria-label": "Pin to this device" } });
-            setIcon(pinBtn, "pin");
-            pinBtn.addEventListener("click", () => void setPin(r.id, true));
-          }
-          // A pin makes this device user-controlled (pin > scope), so the shared scope doesn't
-          // apply here — grey the dropdown while pinned.
-          renderScopeDropdown(rowEl, r, isLocal);
-        } else {
-          rowEl.createSpan({ cls: "config-sync-ldstate", text: isLocal ? "excluded" : "included" });
-          new ToggleComponent(rowEl).setValue(isLocal).onChange((v) => void setPin(r.id, v));
-        }
-      }
-      if (isSnippetGroup && orphans.length > 0) {
-        const sec = listEl.createDiv({ cls: "config-sync-orphan-sec" });
-        const notice = sec.createDiv({ cls: "config-sync-orphan-notice", attr: { role: "button", tabindex: "0" } });
-        notice.createSpan({ cls: "config-sync-orphan-ic", text: "○" });
-        notice.createSpan({ cls: "config-sync-orphan-nt", text: `${orphans.length} enabled snippet${orphans.length === 1 ? "" : "s"} have no file` });
-        notice.createDiv({ cls: "config-sync-rule-spacer" });
-        notice.createSpan({ cls: "config-sync-orphan-act", text: "Clean up" });
-        notice.createSpan({ cls: "config-sync-orphan-chev", text: orphansExpanded ? "▾" : "▸" });
-        notice.addEventListener("click", () => {
-          orphansExpanded = !orphansExpanded;
-          renderRows(rows);
-        });
-        if (orphansExpanded) {
-          const body = sec.createDiv({ cls: "config-sync-orphan-body" });
-          body.createDiv({
-            cls: "config-sync-orphan-desc",
-            text: "Enabled somewhere but the .css file no longer exists here or in the store. Removing also clears them from the shared store list, scopes and pins.",
-          });
-          for (const o of orphans) {
-            const orow = body.createDiv({ cls: "config-sync-orphan-row" });
-            orow.createSpan({ cls: "config-sync-orphan-name", text: o.name });
-            orow.createSpan({ cls: "config-sync-orphan-tag", text: o.storeOn ? "no file · store has on" : "no file" });
-            orow.createDiv({ cls: "config-sync-rule-spacer" });
-            const rm = orow.createSpan({ cls: "config-sync-orphan-remove", text: "Remove", attr: { role: "button", tabindex: "0" } });
-            rm.addEventListener("click", () => void (async () => {
-              await this.host.removeSnippetOrphans([o.name]);
-              await reload();
-            })());
-          }
-          const allRow = body.createDiv({ cls: "config-sync-orphan-row" });
-          allRow.createDiv({ cls: "config-sync-rule-spacer" });
-          const rmAll = allRow.createSpan({ cls: "config-sync-orphan-removeall", text: `Remove all ${orphans.length}`, attr: { role: "button", tabindex: "0" } });
-          rmAll.addEventListener("click", () => void (async () => {
-            await this.host.removeSnippetOrphans(orphans.map((o) => o.name));
-            await reload();
-          })());
-        }
-      }
-    };
-    const reload = async (): Promise<void> => {
-      const fresh = await this.host.switchListRows(group.name);
-      orphans = isSnippetGroup ? await this.host.snippetOrphanNames() : [];
-      renderRows(fresh);
-    };
-    void reload();
-  }
-
-  private renderDataFileSegment(exp: HTMLElement, group: SyncGroup, item: CatalogItem, wrap: HTMLElement): void {
-    const isOpen = this.jsonOpen.has(group.name);
-    const label = exp.createDiv({ cls: "config-sync-explabel" });
-    label.appendText("Data file ");
-    const link = label.createSpan({ cls: "config-sync-link", text: isOpen ? "View data.json ▾" : "View data.json ▸" });
-    link.addEventListener("click", () => {
-      if (isOpen) this.jsonOpen.delete(group.name);
-      else this.jsonOpen.add(group.name);
-      this.renderItemInto(wrap, item);
-    });
-    if (!isOpen) return;
-    const body = exp.createDiv({ cls: "config-sync-jsonbody" });
-    void (async () => {
-      const raw = await this.host.readItemFile(group);
-      this.renderJsonPreview(body, raw, group, item, wrap);
-    })();
-  }
-
-  // Read-only pretty-printed JSON of the item's live file: top-level keys are colored by rule
-  // state (teal encrypt / red strip / amber detected / blue none) and clicking an un-ruled key
-  // adds it as a rule. Values are shown as-is (local file, local render).
-  private renderJsonPreview(body: HTMLElement, raw: string | null, group: SyncGroup, item: CatalogItem, wrap: HTMLElement): void {
-    body.empty();
-    if (raw === null) {
-      body.createDiv({ cls: "config-sync-json-empty", text: "no local file to preview" });
-      return;
-    }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      parsed = undefined;
-    }
-    const detectedKeys = this.detections.get(group.name)?.keys ?? [];
-    const stateByKey = new Map<string, string>();
-    for (const kc of classifyJsonKeys(raw, group.fields ?? [], detectedKeys)) stateByKey.set(kc.key, kc.state);
-    const pre = body.createEl("pre", { cls: "config-sync-json-pre" });
-    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-      pre.setText(raw); // not a JSON object — show the file text verbatim
-    } else {
-      const addRule = (key: string): void => {
-        void (async () => {
-          const action = SENSITIVE_ENCRYPT_RE.test(key) ? "encrypt" : "strip";
-          await this.commitGroups((draft) => {
-            const g = draft.find((x) => x.name === group.name);
-            if (g === undefined) return;
-            if ((g.mode ?? "plain") !== "fields") g.mode = "fields";
-            g.fields = [...(g.fields ?? []), { pattern: key, action }];
-          }, group.name);
-          this.expanded.add(group.name);
-          this.renderItemInto(wrap, item);
-        })();
-      };
-      for (const line of JSON.stringify(parsed, null, 2).split("\n")) {
-        const m = /^(\s{2})"([^"]+)":\s?(.*)$/.exec(line); // top-level key line (exactly two-space indent)
-        const key = m?.[2];
-        if (m !== null && key !== undefined && stateByKey.has(key)) {
-          const state = stateByKey.get(key) ?? "none";
-          pre.createSpan({ text: m[1] });
-          const kspan = pre.createSpan({ cls: `config-sync-json-key config-sync-json-${state}`, text: `"${key}"` });
-          if (state === "none" || state === "detected") kspan.addEventListener("click", () => addRule(key));
-          pre.appendText(": ");
-          const rest = m[3] ?? "";
-          const comma = rest.endsWith(",");
-          const val = comma ? rest.slice(0, -1) : rest;
-          if (/^".*"$/.test(val)) pre.createSpan({ cls: "config-sync-json-val", text: val });
-          else if (/^-?\d/.test(val)) pre.createSpan({ cls: "config-sync-json-num", text: val });
-          else pre.appendText(val);
-          if (comma) pre.appendText(",");
-        } else {
-          pre.appendText(line);
-        }
-        pre.appendText("\n");
-      }
-    }
-    const legend = body.createDiv({ cls: "config-sync-json-legend" });
-    legend.appendText("click a key to add a rule · ");
-    legend.createSpan({ cls: "config-sync-json-encrypt", text: "teal=encrypt" });
-    legend.appendText(" · ");
-    legend.createSpan({ cls: "config-sync-json-strip", text: "red=strip" });
-    legend.appendText(" · ");
-    legend.createSpan({ cls: "config-sync-json-detected", text: "amber=detected" });
-  }
-
-  // Advanced: a default-collapsed sub-section holding the item's Location + Path override and
-  // (for managed items) a reset link.
-  private renderCustomLocationSegment(exp: HTMLElement, group: SyncGroup, item: CatalogItem, wrap: HTMLElement): void {
-    const isOpen = this.customLocOpen.has(group.name);
-    // Flush-left label with a trailing ▸/▾ (matching "Data file … View data.json ▸") so all
-    // three segment headers share the same left edge.
-    const header = exp.createDiv({ cls: "config-sync-explabel config-sync-adv-toggle", text: isOpen ? "Custom location ▾" : "Custom location ▸" });
-    header.addEventListener("click", () => {
-      if (isOpen) this.customLocOpen.delete(group.name);
-      else this.customLocOpen.add(group.name);
-      this.renderItemInto(wrap, item);
-    });
-    if (!isOpen) return;
-    const adv = exp.createDiv({ cls: "config-sync-cl-row" });
-    const loc = splitLocation(group.path);
-
-    const locField = adv.createDiv({ cls: "config-sync-cl-field" });
-    locField.createSpan({ cls: "config-sync-cl-lbl", text: "Location" });
-    new DropdownComponent(locField)
-      .addOption("config", "Config folder")
-      .addOption("vault", "Vault root")
-      .setValue(loc.location)
-      .onChange((v) => {
-        void this.commitGroups((draft) => {
-          const g = draft.find((x) => x.name === group.name);
-          if (g !== undefined) g.path = joinLocation(v as "config" | "vault", splitLocation(g.path).rel);
-        }, group.name);
-      });
-
-    const typeField = adv.createDiv({ cls: "config-sync-cl-field" });
-    typeField.createSpan({ cls: "config-sync-cl-lbl", text: "Type" });
-    new DropdownComponent(typeField)
-      .addOption("file", "File")
-      .addOption("dir", "Folder")
-      .setValue(group.type)
-      .onChange(async (v) => {
-        await this.commitGroups((draft) => {
-          const g = draft.find((x) => x.name === group.name);
-          if (g === undefined) return;
-          g.type = v as SyncGroup["type"];
-          if (g.type !== "file") {
-            delete g.mode;
-            delete g.fields;
-          }
-        }, group.name);
-        this.renderItemInto(wrap, item);
-      });
-
-    const pathField = adv.createDiv({ cls: "config-sync-cl-field path" });
-    pathField.createSpan({ cls: "config-sync-cl-lbl", text: "Path" });
-    new TextComponent(pathField).setValue(loc.rel).onChange((v) => {
-      void this.commitGroups((draft) => {
-        const g = draft.find((x) => x.name === group.name);
-        if (g !== undefined) g.path = joinLocation(splitLocation(g.path).location, v.trim());
-      }, group.name);
-    });
-
-    const reserved = reservedNames(this.host.installedPluginIds());
-    if (reserved.has(group.name)) {
-      const reset = exp.createSpan({ cls: "config-sync-link config-sync-reset-link", text: "↺ Reset to default" });
-      reset.addEventListener("click", () => {
-        void (async () => {
-          const def = defaultGroupForName(group.name);
-          if (def === null) return;
-          await this.commitGroups((draft) => {
-            const idx = draft.findIndex((g) => g.name === group.name);
-            if (idx >= 0) draft[idx] = def;
-          }, group.name);
-          this.renderItemInto(wrap, item);
-        })();
-      });
-    }
-  }
-
-  // Kicks off an async scan of the item's live file(s) and patches the row in place once it
-  // resolves, instead of blocking the tab or forcing a full re-render for every item. Runs for
-  // every eligible catalog item (not just synced ones) so unsynced-but-sensitive files surface
-  // a warning before the user turns sync on. Cached by cacheKey (the catalog item's stable name,
-  // even when group is a throwaway probe built from groupForItem).
-  private renderDetection(holder: HTMLElement, group: SyncGroup, cacheKey: string): void {
-    const cached = this.detections.get(cacheKey);
-    if (cached !== undefined) {
-      this.applyDetection(holder, cached);
-      if (cached.keys.length > 0 || cached.blob) this.settleSensitiveOrder();
-      return;
-    }
+  private ensureCardDetection(def: ItemDef, cfg: ItemConfig): void {
+    if (this.detections.has(def.id)) return;
+    const probe = this.cardProbeGroup(def, cfg);
+    if (probe === null) return;
     void (async () => {
       let scan: SensitiveScan;
       try {
-        scan = await this.host.detectSensitive(group);
+        scan = await this.host.detectSensitive(probe);
       } catch {
         return;
       }
-      this.detections.set(cacheKey, scan);
-      if (holder.isConnected) this.applyDetection(holder, scan);
-      if (scan.keys.length > 0 || scan.blob) this.settleSensitiveOrder();
+      this.detections.set(def.id, scan);
     })();
   }
 
-  // Sensitive-first ordering in renderSections is computed from whatever's cached in
-  // this.detections at render time; scans that resolve after that render leave the section
-  // temporarily mis-sorted. Re-render the active tab once per visit when that happens so
-  // ordering settles — guarded by sortedSections (cleared on tab switch / panel open) to avoid
-  // looping: the resulting re-render reads the now-cached scan directly (renderDetection's cache
-  // hit branch above), so it never re-enters the async fetch path for the same item.
-  private settleSensitiveOrder(): void {
-    if (this.sortedSections.has(this.activeTab)) return;
-    this.sortedSections.add(this.activeTab);
-    this.refresh();
+  // One card list for any ItemDef section — the Obsidian tab (no Sync-all master row: its five
+  // cards are concept areas, not a plugin list) and Core/Community/Beta (Sync-all, spec §4/§5/§10,
+  // D11 — a single master row over every card in the section, no kind-exclusion of any kind: every
+  // def participates, including state-only core cards).
+  private async renderRegistryCards(containerEl: HTMLElement, gen: number, section: ItemSection, withSyncAll: boolean): Promise<void> {
+    const defs = this.host.itemDefs().filter((d) => d.section === section);
+    for (const def of defs) this.ensureCardDetection(def, this.itemConfig(def.id));
+    if (gen !== this.renderGen) return;
+    if (withSyncAll && defs.length > 0) this.renderSyncAllRow(containerEl, defs);
+    // Cards render in def order — buildItemDefs already alphabetizes each section (spec §4).
+    // No sensitive-first reordering: it broke the dictionary order users scan by (round-6 bug ②).
+    const listEl = containerEl.createDiv();
+    for (const def of defs) {
+      const wrap = listEl.createDiv({ cls: "config-sync-item-wrap" });
+      this.cardHosts.push({ wrap, def });
+      this.renderItemCard(wrap, def);
+    }
   }
 
-  private applyDetection(holder: HTMLElement, scan: SensitiveScan): void {
-    holder.empty();
-    if (scan.keys.length === 0 && !scan.blob) return;
-    const badgeText = scan.blob ? "⚠ opaque blob" : `⚠ ${scan.keys.length} keys`;
-    const badge = holder.createSpan({ cls: "config-sync-detect-badge", text: badgeText });
-    badge.setAttribute("aria-label", scan.blob ? "opaque encrypted blob" : `${scan.keys.length} sensitive-looking keys`);
+  private renderSyncAllRow(containerEl: HTMLElement, defs: ItemDef[]): void {
+    const host = containerEl.createDiv();
+    const build = (): void => {
+      host.empty();
+      const head = new Setting(host).setName(SYNC_ALL_LABEL).setDesc(SYNC_ALL_HINT).setHeading();
+      head.addToggle((t) =>
+        t.setValue(sectionAllEnabled(defs, this.host.settings.items)).onChange(async (v) => {
+          this.host.settings.items = applySyncAll(defs, this.host.settings.items, v);
+          await this.host.saveSettings();
+          for (const { wrap, def } of this.cardHosts) this.renderItemCard(wrap, def);
+        })
+      );
+    };
+    build();
+    this.syncAllRebuilds.push(build);
+  }
+
+  private renderItemCard(wrap: HTMLElement, def: ItemDef): void {
+    wrap.empty();
+    const cfg = this.itemConfig(def.id);
+    const expKey = `card:${def.id}`;
+    const row = new Setting(wrap).setName(def.label).setDesc(def.description);
+    row.settingEl.setAttribute("data-search-anchor", `item-${def.id}`);
+    const chevron = createSpan({ cls: "config-sync-row-chevron" });
+    const syncExpansion = (): void => {
+      const open = this.expanded.has(expKey);
+      setIcon(chevron, open ? "chevron-down" : "chevron-right");
+      const existing = row.settingEl.querySelector(":scope > .config-sync-item-exp");
+      if (open && existing === null) this.renderCardExpansion(row.settingEl, wrap, def);
+      else if (!open && existing !== null) existing.remove();
+    };
+    chevron.addEventListener("click", () => {
+      if (this.expanded.has(expKey)) this.expanded.delete(expKey);
+      else this.expanded.add(expKey);
+      syncExpansion();
+    });
+    row.nameEl.prepend(chevron);
+    for (const badge of computeBadges(def, cfg)) {
+      row.nameEl.createSpan({ cls: `config-sync-card-badge ${badge.cls}`, text: badge.text });
+    }
+    row.addToggle((t) =>
+      t.setValue(cfg.enabled).onChange(async (v) => {
+        await this.updateItem(def.id, (c) => ({ ...c, enabled: v }));
+        this.refreshCardBadges(wrap, def);
+        for (const rebuild of this.syncAllRebuilds) rebuild();
+      })
+    );
+    syncExpansion();
+  }
+
+  // In-place header badge refresh — value-only config changes (scopes, encrypt, enabledOn)
+  // update the count badges without rebuilding the card, so the panel never visibly jumps.
+  private refreshCardBadges(wrap: HTMLElement, def: ItemDef): void {
+    const nameEl = wrap.querySelector(":scope > .setting-item > .setting-item-info > .setting-item-name");
+    if (!(nameEl instanceof HTMLElement)) return;
+    for (const b of Array.from(nameEl.querySelectorAll(".config-sync-card-badge"))) b.remove();
+    for (const badge of computeBadges(def, this.itemConfig(def.id))) {
+      nameEl.createSpan({ cls: `config-sync-card-badge ${badge.cls}`, text: badge.text });
+    }
+  }
+
+  // In-place Settings-file body refresh: rebuild rule rows + (when expanded) File preview into a
+  // detached node and swap it in only once any needed file read resolves — the drawer keeps its
+  // height while the read is in flight (no collapse/re-expand jitter of a full renderItemCard).
+  // NOTE: the path row (scope/lock dim state) lives outside this host and is NOT refreshed here —
+  // spec 2026-07-26-card-visual-refresh-design.md §3's Step 3 pins this call site to badges+body
+  // only, so a write that flips hasKeyRules to false via the rule row's own ✕ (its only caller)
+  // can leave the path row dim until the drawer is next rebuilt.
+  private refreshCardBody(wrap: HTMLElement, def: ItemDef): void {
+    const host = wrap.querySelector(".config-sync-card-sfbodyhost");
+    if (!(host instanceof HTMLElement)) return;
+    this.renderCardBodyInto(host, def, this.itemConfig(def.id), wrap);
+  }
+
+  private renderCardExpansion(parent: HTMLElement, wrap: HTMLElement, def: ItemDef): void {
+    const exp = parent.createDiv({ cls: "config-sync-item-exp" });
+    const cfg = this.itemConfig(def.id);
+    if (hasEnablementZone(def)) this.renderEnabledOnZone(exp, def, cfg, wrap);
+    this.renderSettingsFileZone(exp, def, cfg, wrap);
+    // companionHost is its own stable container (mirrors zone ②'s bodyHost) so a member-list
+    // expand/collapse can refresh just zone ③ (refreshCompanionZone) without rebuilding the whole
+    // card — badges, the path row, and zone ②'s own disclosure state stay untouched.
+    const companionHost = exp.createDiv({ cls: "config-sync-card-companionzonehost" });
+    this.renderCompanionZone(companionHost, def, cfg, wrap);
+  }
+
+  // Zone ① "Enabled on" (spec §4/§10, D4 — core/community/beta plugin cards only): a 4-scope
+  // chip that reads/writes ItemConfig.enabledOn directly through updateItem/saveSettings — the
+  // same single write path every other card control uses (no parallel mechanism; registry.ts's
+  // enablementScopes/main.ts's switch-list masking read this same field at compile time).
+  // Grid row (spec 2026-07-26-card-visual-refresh-design.md §2.1/§4 Step 1): label in the content
+  // column, scope dropdown in the scope column, last two columns empty.
+  private renderEnabledOnZone(exp: HTMLElement, def: ItemDef, cfg: ItemConfig, wrap: HTMLElement): void {
+    const row = exp.createDiv({ cls: "config-sync-grid config-sync-card-fieldrow" });
+    row.createDiv({ cls: "config-sync-explabel config-sync-explabel-inline", text: ENABLED_ON_LABEL });
+    const scopeCell = row.createDiv();
+    scopeCell.setAttribute("aria-label", ENABLED_ON_HINT);
+    // Nothing else refreshes this row after a write (badges don't rebuild it), so the icon
+    // rebuilds itself from the freshly-saved config after each advance.
+    const buildScope = (): void => {
+      scopeCell.empty();
+      this.renderScopeCycle(scopeCell, {
+        scope: this.itemConfig(def.id).enabledOn ?? "all",
+        options: FIELD_SCOPE_OPTIONS,
+        disabled: false,
+        onChange: (v) => {
+          void (async () => {
+            await this.updateItem(def.id, (c) => ({ ...c, enabledOn: v === "all" ? undefined : v }));
+            this.refreshCardBadges(wrap, def);
+            buildScope();
+          })();
+        },
+      });
+    };
+    buildScope();
+    row.createDiv(); // state column — empty
+    row.createDiv(); // action column — empty
+  }
+
+  private renderSettingsFileZone(exp: HTMLElement, def: ItemDef, cfg: ItemConfig, wrap: HTMLElement): void {
+    exp.createDiv({ cls: "config-sync-explabel", text: "Settings file" });
+    const kind = settingsFileZoneKind(def);
+    if (kind === "none") return;
+    if (kind === "state-only") {
+      const expectedFile = def.id.startsWith("core:") ? corePluginFile(def.id.slice("core:".length)) : "its settings file";
+      exp.createDiv({ cls: "config-sync-expdesc", text: stateOnlyHint(def.label, expectedFile) });
+      return;
+    }
+    const pathRow = exp.createDiv({ cls: "config-sync-card-sfhead config-sync-grid" });
+    const pathErrorEl = exp.createDiv({ cls: "config-sync-save-error mod-warning" });
+    pathErrorEl.hide();
+    this.renderSettingsFilePathRow(pathRow, pathErrorEl, def, cfg, wrap);
+    // bodyHost is created synchronously so a swapped-in body always lands HERE — inside zone ②,
+    // before the Companion-folders zone — and so refreshCardBody has a stable container to target.
+    const bodyHost = exp.createDiv({ cls: "config-sync-card-sfbodyhost" });
+    this.renderCardBodyInto(bodyHost, def, cfg, wrap);
+  }
+
+  private customPathEditingKey(def: ItemDef): string {
+    return `custompath:${def.id}`;
+  }
+
+  // Zone ② path row = the grid's first row (spec 2026-07-26-card-visual-refresh-design.md §2/§3):
+  // path | scope ▾ | 🔒 | ✎. Locked (dim, disabled) whenever the card has any per-key rule —
+  // per-key state owns scope/encrypt then, not the whole-file row (spec §3.1). fileRule read/write
+  // below is moved VERBATIM from the old Plain-mode row (same normalization, only the shape moved).
+  private renderSettingsFilePathRow(row: HTMLElement, errorEl: HTMLElement, def: ItemDef, cfg: ItemConfig, wrap: HTMLElement): void {
+    const defaultPath = def.settingsFile!.defaultPath!;
+    const current = cfg.settingsFile?.customPath ?? defaultPath;
+    const committed = cfg.settingsFile?.customPath !== undefined;
+    const key = this.customPathEditingKey(def);
+    // The path text itself is the edit entry point (round-6 定稿: the ✎ pencil and the ↺ reset
+    // icon are gone) — a committed custom path shows as accented text like any other, and
+    // "Reset to default" becomes a text action inside the edit state.
+    const editing = this.customPathEditing.has(key);
+    const locked = hasKeyRules(cfg);
+
+    const pathHost = row.createDiv({ cls: "config-sync-card-pathhost" });
+    if (editing) {
+      const input = new TextComponent(pathHost);
+      input.setValue(current);
+      input.inputEl.addClass("config-sync-card-pathinput");
+      const commit = (): void => void this.commitSettingsFilePath(def, wrap, errorEl, input.getValue());
+      input.inputEl.addEventListener("blur", commit);
+      input.inputEl.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          input.inputEl.blur(); // triggers the blur handler above
+        }
+      });
+      // Escape must cancel THIS edit, not close the settings window — Obsidian's keymap sees the
+      // key at window capture before any element listener (stopPropagation is too late), so the
+      // cancel is registered as a keymap Scope pushed above the modal's own while the input has
+      // focus. popScope is idempotent, so the double pop on Escape (input detaches without a
+      // blur event in Chromium) is harmless.
+      const escScope = new Scope();
+      escScope.register([], "Escape", () => {
+        this.customPathEditing.delete(key);
+        this.app.keymap.popScope(escScope);
+        this.renderItemCard(wrap, def);
+        return false;
+      });
+      input.inputEl.addEventListener("focus", () => this.app.keymap.pushScope(escScope));
+      input.inputEl.addEventListener("blur", () => this.app.keymap.popScope(escScope));
+      if (committed) {
+        const reset = pathHost.createSpan({ cls: "config-sync-reset-link", text: "Reset to default" });
+        reset.setAttribute("role", "button");
+        reset.setAttribute("tabindex", "0");
+        // mousedown + preventDefault, NOT click: a click would first blur the input, whose
+        // blur-commit tears this button out of the DOM before the click ever lands.
+        reset.addEventListener("mousedown", (e) => {
+          e.preventDefault();
+          void this.commitSettingsFilePath(def, wrap, errorEl, defaultPath);
+        });
+        reset.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            void this.commitSettingsFilePath(def, wrap, errorEl, defaultPath);
+          }
+        });
+      }
+      window.setTimeout(() => input.inputEl.focus(), 0);
+    } else {
+      const pathEl = pathHost.createEl("code", { cls: `config-sync-card-path config-sync-card-pathbtn${committed ? " is-custom" : ""}`, text: splitLocation(current).rel });
+      pathEl.setAttribute("role", "button");
+      pathEl.setAttribute("tabindex", "0");
+      pathEl.setAttribute("title", CUSTOM_PATH_LABEL);
+      pathEl.setAttribute("aria-label", CUSTOM_PATH_LABEL);
+      const startEdit = (): void => {
+        this.customPathEditing.add(key);
+        this.renderItemCard(wrap, def);
+      };
+      pathEl.addEventListener("click", startEdit);
+      pathEl.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          startEdit();
+        }
+      });
+    }
+
+    const scopeCell = row.createDiv();
+    const rule = cfg.settingsFile?.fileRule ?? { scope: "all" as const, encrypted: false };
+    // The mutator MUST read the rule fresh inside updateItem (not the render-time `rule` above),
+    // and the row MUST rebuild itself after the write: this row lives outside refreshCardBody's
+    // swap target, so without the rebuild the lock/scope controls keep replaying their stale
+    // render-time value — a lock click after the first one re-sends the same boolean forever
+    // ("encrypted can never be turned off", round-6 bug ①).
+    const setFileRule = (mutator: (r: { scope: Exclude<RuleScope, "local">; encrypted: boolean }) => { scope: Exclude<RuleScope, "local">; encrypted: boolean }): void => {
+      void (async () => {
+        await this.updateItem(def.id, (c) => {
+          const sf = c.settingsFile ?? defaultSettingsFile();
+          return { ...c, settingsFile: withDerivedMode({ ...sf, fileRule: mutator(sf.fileRule ?? { scope: "all", encrypted: false }) }) };
+        });
+        this.refreshCardBadges(wrap, def);
+        this.refreshCardBody(wrap, def);
+        row.empty();
+        this.renderSettingsFilePathRow(row, errorEl, def, this.itemConfig(def.id), wrap);
+      })();
+    };
+    // setFileRule re-renders this whole row after every write, so the icon always reflects the
+    // freshly-saved scope without any extra bookkeeping here.
+    this.renderScopeCycle(scopeCell, {
+      scope: rule.scope,
+      options: FILE_SCOPE_OPTIONS,
+      disabled: locked,
+      onChange: (v) => setFileRule((r) => ({ ...r, scope: v })),
+    });
+
+    const lockCell = row.createDiv();
+    this.renderLockToggle(lockCell, { encrypted: rule.encrypted, disabled: locked, onChange: (v) => setFileRule((r) => ({ ...r, encrypted: v })) });
+
+    if (locked) {
+      for (const cell of [scopeCell, lockCell]) {
+        cell.addClass("config-sync-dim");
+        cell.setAttribute("title", PER_KEY_RULES_ACTIVE_HINT);
+        cell.setAttribute("aria-label", PER_KEY_RULES_ACTIVE_HINT);
+      }
+    }
+
+    row.createDiv({ cls: "config-sync-card-actioncell" }); // action column — empty (path edits via the path text)
+  }
+
+  // Shared commit path for every settings-file path change (typed edit, or the ↺ revert-to-default
+  // above): validate -> no-op guard -> companionConflict -> warning modal -> durable write. A
+  // validation/conflict rejection shows an inline error and returns WITHOUT touching the DOM
+  // further (so the user's in-progress typed text survives to be corrected) — a confirmed change
+  // or a Cancel both end in a full card re-render (Cancel's re-render is exactly how "revert the
+  // control to its prior value" is satisfied — cfg is untouched, so the rebuilt input/toggle reads
+  // the same committed state as before).
+  private async commitSettingsFilePath(def: ItemDef, wrap: HTMLElement, errorEl: HTMLElement, raw: string): Promise<void> {
+    const cfg = this.itemConfig(def.id);
+    const defaultPath = def.settingsFile!.defaultPath!;
+    const current = cfg.settingsFile?.customPath ?? defaultPath;
+    const validation = validateCompanionPath(raw);
+    if (!validation.ok) {
+      errorEl.setText(validation.error);
+      errorEl.show();
+      return;
+    }
+    const editKey = this.customPathEditingKey(def);
+    if (validation.path === normalizeCompanionPath(current)) {
+      errorEl.setText("");
+      errorEl.hide();
+      // Nothing actually changed — no modal, no write; leave edit mode back to the text view
+      // (click-to-edit means blurring an untouched input should just close it).
+      this.customPathEditing.delete(editKey);
+      this.renderItemCard(wrap, def);
+      return;
+    }
+    const conflict = companionConflict(validation.path, this.host.itemDefs(), this.host.settings);
+    if (conflict !== null) {
+      errorEl.setText(companionConflictError(conflict));
+      errorEl.show();
+      return;
+    }
+    // Every registry item's settingsFile carries a preset default path (task-7-brief.md), so
+    // ANY committed change here — first customization or a further edit — goes through the same
+    // preset-change guard (D7).
+    const confirmed = await confirmPresetPathChange(this.app, def.label);
+    if (!confirmed) {
+      this.customPathEditing.delete(editKey);
+      this.renderItemCard(wrap, def); // Cancel: revert to the committed text view
+      return;
+    }
+    errorEl.setText("");
+    errorEl.hide();
+    const nextCustomPath = validation.path === normalizeCompanionPath(defaultPath) ? undefined : validation.path;
+    await this.updateItem(def.id, (c) => ({ ...c, settingsFile: withDerivedMode({ ...(c.settingsFile ?? defaultSettingsFile()), customPath: nextCustomPath }) }));
+    this.customPathEditing.delete(editKey);
+    this.renderItemCard(wrap, def);
+  }
+
+  // Icon lock control (spec §2.2/§5) shared by the path row (whole-file encrypt) and every rule
+  // row (per-key encrypt) — also the interface Task 3's rows reuse. Tooltip/aria reflect only the
+  // CURRENT boolean (`Encrypt` / `Encrypted`); a disabled reason, if any, is the caller's job to
+  // surface (the caller owns the surrounding cell, which may need a DIFFERENT disabled reason —
+  // per-key-rules-active for the path row, per-item-scopes for a rule row).
+  // Commander-style scope control (round-6 定稿): a clickable icon whose glyph IS the current
+  // scope (SCOPE_ICONS); a click advances to the next option in `options` and hands the caller
+  // the new value — the caller owns the write AND re-rendering this cell with the fresh scope
+  // (most rows get that for free from their existing body/row refresh). Default "all" renders
+  // dim, any narrower scope renders accented, mirroring the ghost-rail idle/active language.
+  private renderScopeCycle<T extends RuleScope>(cell: HTMLElement, opts: { scope: T; options: readonly T[]; disabled: boolean; onChange: (v: T) => void }): void {
+    const icon = cell.createSpan({ cls: `config-sync-scopeicon${opts.scope !== "all" ? " is-set" : ""}` });
+    setIcon(icon, SCOPE_ICONS[opts.scope]);
+    const tip = scopeCycleTooltip(opts.scope);
+    icon.setAttribute("aria-label", tip);
+    icon.setAttribute("title", tip);
+    if (opts.disabled) {
+      icon.addClass("config-sync-dim");
+      return;
+    }
+    icon.setAttribute("role", "button");
+    icon.setAttribute("tabindex", "0");
+    const advance = (): void => opts.onChange(nextScope(opts.scope, opts.options));
+    icon.addEventListener("click", advance);
+    icon.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        advance();
+      }
+    });
+  }
+
+  private renderLockToggle(cell: HTMLElement, opts: { encrypted: boolean; disabled: boolean; onChange: (v: boolean) => void }): void {
+    const icon = cell.createSpan({ cls: `config-sync-lock${opts.encrypted ? " is-on" : ""}` });
+    setIcon(icon, "lock");
+    const label = opts.encrypted ? "Encrypted" : "Encrypt";
+    icon.setAttribute("aria-label", label);
+    icon.setAttribute("title", label);
+    if (opts.disabled) {
+      icon.addClass("config-sync-dim");
+      return;
+    }
+    icon.setAttribute("role", "button");
+    icon.setAttribute("tabindex", "0");
+    icon.addEventListener("click", () => opts.onChange(!opts.encrypted));
+    icon.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        opts.onChange(!opts.encrypted);
+      }
+    });
+  }
+
+  // Decides whether zone ②'s body needs a file read at all (spec §4 "渐进披露"): a card with no
+  // per-key rules AND a collapsed preview never reads the file — rule rows are empty either way
+  // (buildRuleRows needs no live doc to return []) and there's nothing else to show. Every other
+  // combination reads once and renders rule rows + the preview disclosure off-DOM before swapping
+  // into `host` in one shot, so refreshCardBody never flashes an empty body while the read is in
+  // flight.
+  private renderCardBodyInto(host: HTMLElement, def: ItemDef, cfg: ItemConfig, wrap: HTMLElement): void {
+    const open = this.previewOpen.has(def.id);
+    const build = (target: HTMLElement, doc: Record<string, unknown>, fileState: CardFileState): void => {
+      const bodyEl = target.createDiv({ cls: "config-sync-card-sfbody" });
+      this.renderRuleRows(bodyEl, def, cfg, doc, wrap);
+      this.renderPreviewDisclosure(bodyEl, def, cfg, doc, fileState, wrap);
+    };
+    if (!hasKeyRules(cfg) && !open) {
+      host.empty();
+      build(host, {}, "missing");
+      return;
+    }
+    void (async () => {
+      const probe = this.cardProbeGroup(def, cfg);
+      const raw = probe === null ? null : await this.host.readItemFile(probe);
+      if (!host.isConnected) return; // the drawer closed (or the row rebuilt) while the file read was in flight
+      const { doc, fileState } = parseCardDoc(raw);
+      const tmp = createDiv();
+      build(tmp, doc, fileState);
+      host.empty();
+      while (tmp.firstChild !== null) host.appendChild(tmp.firstChild);
+    })();
+  }
+
+  // Rule rows list ONLY configured keys (buildRuleRows) — browsing the file's full key set is
+  // File preview's job now (spec §3.1). Nothing renders when there are none.
+  private renderRuleRows(bodyEl: HTMLElement, def: ItemDef, cfg: ItemConfig, doc: Record<string, unknown>, wrap: HTMLElement): void {
+    const rows = buildRuleRows(def, cfg, doc);
+    if (rows.length === 0) return;
+    const panel = bodyEl.createDiv({ cls: "config-sync-card-fields" });
+    for (const row of rows) this.renderRuleRow(panel, def, cfg, row, doc, wrap);
+  }
+
+  private renderRuleRow(panel: HTMLElement, def: ItemDef, cfg: ItemConfig, row: FieldRowModel, doc: Record<string, unknown>, wrap: HTMLElement): void {
+    const fr = panel.createDiv({ cls: "config-sync-grid config-sync-card-rulerow" });
+    // Content cell holds the key AND (for array keys) the Per-item toggle — the grid has exactly
+    // four columns, so a fifth direct child would auto-place onto a wrapped second line.
+    const contentCell = fr.createDiv({ cls: "config-sync-card-rulecontent" });
+    contentCell.createSpan({ cls: "config-sync-fkey", text: row.key });
+    const setRule = (mutator: (r: ItemFieldRule) => ItemFieldRule): void => {
+      void (async () => {
+        await this.updateItem(def.id, (c) => {
+          const sf = c.settingsFile ?? defaultSettingsFile();
+          const nextRule = mutator(sf.rules[row.key] ?? DEFAULT_FIELD_RULE);
+          return { ...c, settingsFile: withDerivedMode({ ...sf, rules: { ...sf.rules, [row.key]: nextRule } }) };
+        });
+        this.refreshCardBadges(wrap, def);
+        this.refreshCardBody(wrap, def);
+      })();
+    };
+    // setRule → refreshCardBody rebuilds every rule row, so the icon re-reads the fresh scope.
+    this.renderScopeCycle(fr.createDiv(), {
+      scope: row.rule.scope,
+      options: FIELD_SCOPE_OPTIONS,
+      disabled: false,
+      onChange: (v) => setRule((r) => ({ ...r, scope: v, encrypted: v === "local" ? false : r.encrypted })),
+    });
+    const lockCell = fr.createDiv();
+    const lockDisabled = encryptToggleDisabled(row.rule.scope, row.perItemEnabled);
+    this.renderLockToggle(lockCell, { encrypted: row.rule.encrypted, disabled: lockDisabled, onChange: (v) => setRule((r) => ({ ...r, encrypted: v })) });
+    if (lockDisabled && row.perItemEnabled) {
+      lockCell.setAttribute("title", ENCRYPT_DISABLED_PERITEM_HINT);
+      lockCell.setAttribute("aria-label", ENCRYPT_DISABLED_PERITEM_HINT);
+    }
+    const actionCell = fr.createDiv({ cls: "config-sync-card-actioncell" });
+    const removeBtn = new ExtraButtonComponent(actionCell).setIcon("x").setTooltip("Remove rule").onClick(() => {
+      void (async () => {
+        await this.updateItem(def.id, (c) => {
+          const sf = c.settingsFile ?? defaultSettingsFile();
+          const rules = { ...sf.rules };
+          delete rules[row.key];
+          const perItem = { ...sf.perItem };
+          delete perItem[row.key];
+          return { ...c, settingsFile: withDerivedMode({ ...sf, rules, perItem }) };
+        });
+        const freshCfg = this.itemConfig(def.id);
+        if (!hasKeyRules(freshCfg)) {
+          // Removing the last rule flips hasKeyRules -> false, which undims the path row's own
+          // scope/lock controls (spec §3.1) — that row lives outside refreshCardBody's swap
+          // target, so this needs a full card re-render, not just badges+body.
+          this.renderItemCard(wrap, def);
+          return;
+        }
+        this.refreshCardBadges(wrap, def);
+        this.refreshCardBody(wrap, def);
+      })();
+    });
+    removeBtn.extraSettingsEl.addClass("config-sync-ghost");
+    if (row.isArray) {
+      const piWrap = contentCell.createDiv({ cls: "config-sync-card-peritem" });
+      // MUST-FIX 2 (final-review): Encrypt and Per-item scopes are mutually exclusive on the same
+      // rule (manifest.ts D3) — enabling Per-item here clears `encrypted` in the SAME write
+      // (applyPerItemToggle), and the toggle itself renders disabled while the rule is already
+      // encrypted (the lock icon above renders disabled the other way — see
+      // encryptToggleDisabled) so the UI can never produce the combination the compiler rejects.
+      const piToggle = new ToggleComponent(piWrap).setValue(row.perItemEnabled).onChange((v) => {
+        void (async () => {
+          await this.updateItem(def.id, (c) => ({
+            ...c,
+            settingsFile: withDerivedMode(applyPerItemToggle(c.settingsFile ?? defaultSettingsFile(), row.key, v)),
+          }));
+          this.refreshCardBadges(wrap, def);
+          this.refreshCardBody(wrap, def);
+        })();
+      });
+      piToggle.setDisabled(row.rule.encrypted);
+      if (row.rule.encrypted) piToggle.setTooltip(PER_ITEM_DISABLED_HINT);
+      piWrap.createSpan({ cls: "config-sync-card-peritem-label", text: PER_ITEM_SCOPES_LABEL });
+    }
+    if (row.isArray && row.perItemEnabled) {
+      const elements = isStringArrayValue(doc[row.key]) ? (doc[row.key] as string[]) : [];
+      const scopes = cfg.settingsFile?.perItem[row.key] ?? {};
+      for (const el of buildPerItemElementRows(elements, scopes)) this.renderPerItemElementRow(panel, def, row.key, el.element, el.scope, wrap);
+    }
+  }
+
+  // Array-key element row, indented under its rule row (spec §3.1 "保留现交互", reshaped into the
+  // grid: element name | scope | empty | empty).
+  private renderPerItemElementRow(panel: HTMLElement, def: ItemDef, key: string, element: string, scope: RuleScope, wrap: HTMLElement): void {
+    const r = panel.createDiv({ cls: "config-sync-grid config-sync-card-elrow" });
+    r.createSpan({ cls: "config-sync-card-elname", text: element });
+    const scopeCell = r.createDiv();
+    // refreshCardBody below rebuilds these element rows, so the icon re-reads the fresh scope.
+    this.renderScopeCycle(scopeCell, {
+      scope,
+      options: FIELD_SCOPE_OPTIONS,
+      disabled: false,
+      onChange: (v) => {
+        void (async () => {
+          await this.updateItem(def.id, (c) => {
+            const sf = c.settingsFile ?? defaultSettingsFile();
+            const scopes = { ...(sf.perItem[key] ?? {}) };
+            if (v === "all") delete scopes[element];
+            else scopes[element] = v;
+            return { ...c, settingsFile: withDerivedMode({ ...sf, perItem: { ...sf.perItem, [key]: scopes } }) };
+          });
+          this.refreshCardBadges(wrap, def);
+          this.refreshCardBody(wrap, def);
+        })();
+      },
+    });
+    r.createDiv(); // lock column — empty for an element row
+    r.createDiv(); // action column — empty for an element row
+  }
+
+  // Un-ruled key click in the File preview (spec D6): promotes this item's own settingsFile.mode
+  // to "fields" (deriveMode does this automatically once the rule below exists) and seeds an
+  // inert/encrypt-looking default rule, exactly like the old per-group JSON preview did.
+  private async addRuleForKey(def: ItemDef, key: string): Promise<void> {
+    const rule: ItemFieldRule = SENSITIVE_ENCRYPT_RE.test(key) ? { scope: "all", encrypted: true } : { scope: "all", encrypted: false };
+    await this.updateItem(def.id, (c) => {
+      const sf = c.settingsFile ?? defaultSettingsFile();
+      return { ...c, settingsFile: withDerivedMode({ ...sf, rules: { ...sf.rules, [key]: rule } }) };
+    });
+    this.expanded.add(`card:${def.id}`);
+  }
+
+  // Progressive disclosure (spec §4): collapsed by default, `previewOpen` is UI-transient
+  // (session-only, mirrors the drawer's own `expanded` set). Expanding is the only thing that can
+  // trigger the file read this row's content depends on — a card already read for its rule rows
+  // (renderCardBodyInto) reuses that same read, it is never repeated.
+  private renderPreviewDisclosure(bodyEl: HTMLElement, def: ItemDef, cfg: ItemConfig, doc: Record<string, unknown>, fileState: CardFileState, wrap: HTMLElement): void {
+    const open = this.previewOpen.has(def.id);
+    const toggleRow = bodyEl.createDiv({ cls: "config-sync-card-disclosure" });
+    toggleRow.setText(`${open ? "▾" : "▸"} File preview`);
+    toggleRow.setAttribute("role", "button");
+    toggleRow.setAttribute("tabindex", "0");
+    const toggle = (): void => {
+      if (this.previewOpen.has(def.id)) this.previewOpen.delete(def.id);
+      else this.previewOpen.add(def.id);
+      this.refreshCardBody(wrap, def);
+    };
+    toggleRow.addEventListener("click", toggle);
+    toggleRow.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        toggle();
+      }
+    });
+    if (!open) return;
+    if (fileState === "missing") {
+      bodyEl.createDiv({ cls: "config-sync-json-empty", text: "No file on this device yet — nothing to preview." });
+      return;
+    }
+    if (fileState === "invalid") {
+      bodyEl.createDiv({ cls: "config-sync-json-empty", text: "This file has no settings to show." });
+      return;
+    }
+    this.renderCardDataPreview(bodyEl, def, cfg, doc, wrap);
+  }
+
+  private renderCardDataPreview(bodyEl: HTMLElement, def: ItemDef, cfg: ItemConfig, doc: Record<string, unknown>, wrap: HTMLElement): void {
+    const pre = bodyEl.createEl("pre", { cls: "config-sync-json-pre" });
+    const detectedKeys = this.detections.get(def.id)?.keys ?? [];
+    const rules: FieldRule[] = Object.entries(cfg.settingsFile?.rules ?? {}).map(([pattern, r]) => ({ pattern, ...r }));
+    const raw = JSON.stringify(doc, null, 2);
+    const classByKey = new Map<string, KeyClass>();
+    for (const kc of classifyJsonKeys(raw, rules, detectedKeys)) classByKey.set(kc.key, kc);
+    const perItemLines = classifyPerItemLines(raw, cfg.settingsFile?.perItem ?? {});
+    const rawLines = raw.split("\n");
+    for (let i = 0; i < rawLines.length; i++) {
+      const line = rawLines[i]!;
+      const m = /^(\s{2})"([^"]+)":\s?(.*)$/.exec(line);
+      const key = m?.[2];
+      const kc = key !== undefined ? classByKey.get(key) : undefined;
+      if (m !== null && key !== undefined && kc !== undefined) {
+        pre.createSpan({ text: m[1] });
+        const text = `"${key}"${kc.state.encrypted ? " 🔒" : ""}`;
+        const kspan = pre.createSpan({ cls: `config-sync-json-key ${jsonKeyClass(kc)}`, text });
+        if (kc.state.scope === "none") {
+          kspan.addEventListener("click", () => {
+            void this.addRuleForKey(def, key).then(() => {
+              // Adding the first rule flips hasKeyRules -> true, which dims the path row's own
+              // scope/lock controls (spec §3.1) — that row lives outside refreshCardBody's swap
+              // target, so this needs a full card re-render, not just badges+body.
+              this.renderItemCard(wrap, def);
+            });
+          });
+        }
+        pre.appendText(": ");
+        const rest = m[3] ?? "";
+        const comma = rest.endsWith(",");
+        const val = comma ? rest.slice(0, -1) : rest;
+        if (/^".*"$/.test(val)) pre.createSpan({ cls: "config-sync-json-val", text: val });
+        else if (/^-?\d/.test(val)) pre.createSpan({ cls: "config-sync-json-num", text: val });
+        else pre.appendText(val);
+        if (comma) pre.appendText(",");
+      } else {
+        // Per-item array element line (D10): colored by that element's own scope, independent
+        // of the top-level key's own rule/color above.
+        const el = perItemLines.get(i);
+        const elCls = el !== undefined ? jsonElementClass(el) : null;
+        if (el !== undefined && elCls !== null) {
+          const indent = /^\s*/.exec(line)?.[0] ?? "";
+          pre.appendText(indent);
+          pre.createSpan({ cls: `config-sync-json-el ${elCls}`, text: line.slice(indent.length) });
+        } else {
+          pre.appendText(line);
+        }
+      }
+      pre.appendText("\n");
+    }
+    bodyEl.createDiv({ cls: "config-sync-json-legend", text: PREVIEW_LEGEND });
+  }
+
+  // "+ Add folder" is available on every card (spec §5) — a def with no preset companions and an
+  // empty config produces zero rows (buildCompanionRows), in which case the zone renders no
+  // header and no rows, just the Add-folder entry point below.
+  private renderCompanionZone(exp: HTMLElement, def: ItemDef, cfg: ItemConfig, wrap: HTMLElement): void {
+    const rows = buildCompanionRows(def, cfg);
+    if (rows.length > 0) exp.createDiv({ cls: "config-sync-explabel", text: "Companion folders" });
+    const listEl = exp.createDiv({ cls: "config-sync-card-companions" });
+    for (const row of rows) {
+      const key = this.companionMemberKey(def, row);
+      const open = this.membersOpen.has(key);
+      const countEl = this.renderCompanionRow(listEl, def, row, wrap);
+      // Synchronous per-row anchor: the async member scans below resolve in arbitrary order, so
+      // they must land in a host reserved DIRECTLY under their own folder row — appending to
+      // listEl would file one folder's members under whichever row happened to render last.
+      const membersHost = listEl.createDiv({ cls: "config-sync-card-memberhost" });
+      const mapKey = def.presetCompanions?.find((p) => p.path === row.path)?.mapKey;
+      if (mapKey === ENABLED_CSS_SNIPPETS_KEY) {
+        void (async () => {
+          const files = await this.host.listSnippetFiles();
+          const perItem = cfg.settingsFile?.perItem[ENABLED_CSS_SNIPPETS_KEY] ?? {};
+          if (!membersHost.isConnected) return; // the drawer closed while the scan was in flight
+          this.renderSnippetMembers(membersHost, def, buildSnippetMemberRows(files, perItem), wrap, countEl, open);
+        })();
+      } else {
+        // Plain (non-mapKey) companion: list-only member names, no per-member scope chip — the
+        // switch-list/memberScopes engine only knows community-plugins.json, core-plugins.json
+        // and enabledCssSnippets today, so an arbitrary "dir" group has no per-file carry-scope
+        // mechanism to wire a chip to (task-7-brief.md; see uc-task-7-report.md). isThemesPreset
+        // (spec §4's "· N themes" vs "· N files") is true only for a preset row with no mapKey —
+        // today that is exactly the Appearance card's themes/ preset, never a plain user folder.
+        const isThemesPreset = row.isPreset && mapKey === undefined;
+        void (async () => {
+          const files = await this.host.listCompanionFiles(row.path);
+          if (!membersHost.isConnected) return;
+          this.renderPlainCompanionMembers(membersHost, files, countEl, open, isThemesPreset);
+        })();
+      }
+    }
+    this.renderAddCompanionRow(exp, def, wrap);
+  }
+
+  private companionEditKey(def: ItemDef, path: string): string {
+    return `${def.id}::${path}`;
+  }
+
+  // Member-list collapse key (spec 2026-07-26-card-visual-refresh-design.md §4 Step 3) — UI-
+  // transient. Double-colon separator matches companionEditKey: def.id itself contains a single
+  // colon ("core:x"/"community:x"), so "::" keeps the join unambiguous.
+  private companionMemberKey(def: ItemDef, row: CompanionRowModel): string {
+    return `${def.id}::${row.path}`;
+  }
+
+  private refreshCompanionZone(wrap: HTMLElement, def: ItemDef): void {
+    const host = wrap.querySelector(".config-sync-card-companionzonehost");
+    if (!(host instanceof HTMLElement)) return;
+    host.empty();
+    this.renderCompanionZone(host, def, this.itemConfig(def.id), wrap);
+  }
+
+  private toggleCompanionMembers(wrap: HTMLElement, def: ItemDef, key: string): void {
+    if (this.membersOpen.has(key)) this.membersOpen.delete(key);
+    else this.membersOpen.add(key);
+    this.refreshCompanionZone(wrap, def);
+  }
+
+  // Folder row = the grid's row for one companion (spec §2.1/§4 Step 2/3): name + member count
+  // (patched in once the async scan below resolves) + ▸/▾ in the content column | scope ▾ | small
+  // toggle | ✎ (every row) with ✕ ADDITIONALLY for a user-added row (never for a preset — D8: a
+  // preset is only ever relocated via the warning-gated path edit, never removed outright). Returns
+  // the count span so renderCompanionZone's async scan can patch it in place; null while this row
+  // is mid path-edit (renderCompanionPathEditRow owns the DOM then, nothing here to patch).
+  private renderCompanionRow(listEl: HTMLElement, def: ItemDef, row: CompanionRowModel, wrap: HTMLElement): HTMLElement | null {
+    const editKey = this.companionEditKey(def, row.path);
+    if (this.companionPathEditing.has(editKey)) {
+      this.renderCompanionPathEditRow(listEl, def, row, wrap, editKey);
+      return null;
+    }
+    const r = listEl.createDiv({ cls: "config-sync-grid config-sync-card-companiongrid" });
+    const memberKey = this.companionMemberKey(def, row);
+    const open = this.membersOpen.has(memberKey);
+    const contentCell = r.createDiv({ cls: "config-sync-card-foldercontent" });
+    contentCell.setAttribute("role", "button");
+    contentCell.setAttribute("tabindex", "0");
+    // The folder name itself is the path-edit entry point (round-6 定稿: the ✎ pencil is gone) —
+    // it needs its own click/key handling with stopPropagation so it doesn't ALSO toggle the
+    // member list, which the rest of the content cell still does.
+    const pathEl = contentCell.createEl("code", { cls: "config-sync-card-path config-sync-card-pathbtn", text: splitLocation(row.path).rel });
+    pathEl.setAttribute("role", "button");
+    pathEl.setAttribute("tabindex", "0");
+    pathEl.setAttribute("title", "Change path");
+    pathEl.setAttribute("aria-label", "Change path");
+    const startPathEdit = (): void => {
+      this.companionPathEditing.add(editKey);
+      this.renderItemCard(wrap, def);
+    };
+    pathEl.addEventListener("click", (e) => {
+      e.stopPropagation();
+      startPathEdit();
+    });
+    pathEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        e.stopPropagation();
+        startPathEdit();
+      }
+    });
+    const countEl = contentCell.createSpan({ cls: "config-sync-card-membercount" });
+    contentCell.createSpan({ cls: "config-sync-card-memberarrow", text: open ? "▾" : "▸" });
+    const toggle = (): void => this.toggleCompanionMembers(wrap, def, memberKey);
+    contentCell.addEventListener("click", toggle);
+    contentCell.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        toggle();
+      }
+    });
+    const updateCompanion = (mutator: (c: { path: string; scope: DeviceClass; enabled: boolean }) => { path: string; scope: DeviceClass; enabled: boolean }): void => {
+      void (async () => {
+        await this.updateItem(def.id, (c) => {
+          const existing = c.companions.find((x) => x.path === row.path);
+          const next = mutator(existing ?? { path: row.path, scope: row.scope, enabled: row.enabled });
+          const companions = existing !== undefined ? c.companions.map((x) => (x.path === row.path ? next : x)) : [...c.companions, next];
+          return { ...c, companions };
+        });
+        // No re-render: the control the user just touched already shows the new value, and no
+        // header badge reads companion scope/enabled — a full card rebuild here only causes the
+        // panel to visibly jump while the drawer's async reads re-resolve.
+      })();
+    };
+    // updateCompanion deliberately never re-renders (see its comment), so the icon rebuilds
+    // itself from a locally-tracked scope after each advance.
+    const scopeCell = r.createDiv();
+    let curScope = row.scope;
+    const buildScope = (): void => {
+      scopeCell.empty();
+      this.renderScopeCycle(scopeCell, {
+        scope: curScope,
+        options: COMPANION_SCOPE_OPTIONS,
+        disabled: false,
+        onChange: (v) => {
+          curScope = v;
+          updateCompanion((c) => ({ ...c, scope: v }));
+          buildScope();
+        },
+      });
+    };
+    buildScope();
+    new ToggleComponent(r).setValue(row.enabled).onChange((v) => updateCompanion((c) => ({ ...c, enabled: v })));
+    const actionCell = r.createDiv({ cls: "config-sync-card-actioncell" });
+    if (!row.isPreset) {
+      const removeBtn = new ExtraButtonComponent(actionCell).setIcon("x").setTooltip("Remove folder").onClick(() => {
+        void (async () => {
+          await this.updateItem(def.id, (c) => ({ ...c, companions: c.companions.filter((x) => x.path !== row.path) }));
+          this.renderItemCard(wrap, def);
+        })();
+      });
+      removeBtn.extraSettingsEl.addClass("config-sync-ghost");
+    }
+    return countEl;
+  }
+
+  // Preset row path edit (spec §4/§8, D8): validate -> no-op guard -> companionConflict ->
+  // confirmPresetPathChange -> on confirm, drop the entry at the OLD preset path (if any — a
+  // never-toggled preset has none) and add a fresh one at the new path carrying over the same
+  // scope/enabled — this "captures the new path as a fresh item" (it renders as an ordinary user
+  // row from then on, since buildCompanionRows only treats an EXACT preset-path match as preset).
+  private renderCompanionPathEditRow(listEl: HTMLElement, def: ItemDef, row: CompanionRowModel, wrap: HTMLElement, editKey: string): void {
+    const r = listEl.createDiv({ cls: "config-sync-card-companionrow" });
+    const input = new TextComponent(r);
+    input.setValue(row.path);
+    input.inputEl.addClass("config-sync-card-pathinput");
+    r.createDiv({ cls: "config-sync-rule-spacer" });
+    const errorEl = listEl.createDiv({ cls: "config-sync-save-error mod-warning" });
+    errorEl.hide();
+    const cancel = (): void => {
+      this.companionPathEditing.delete(editKey);
+      this.renderItemCard(wrap, def);
+    };
+    const submit = (): void => {
+      void (async () => {
+        const validation = validateCompanionPath(input.getValue());
+        if (!validation.ok) {
+          errorEl.setText(validation.error);
+          errorEl.show();
+          return;
+        }
+        if (validation.path === normalizeCompanionPath(row.path)) {
+          cancel(); // no real change
+          return;
+        }
+        // MUST-FIX 1 (final-review): reject a basename that would never survive
+        // validateSyncManifest (illegal group-name shape) or that collides with another
+        // compiled group's name — BEFORE persisting, not just at the next recompile.
+        const basenameError = validateCompanionBasename(validation.path);
+        if (basenameError !== null) {
+          errorEl.setText(basenameError);
+          errorEl.show();
+          return;
+        }
+        const conflict = companionConflict(validation.path, this.host.itemDefs(), this.host.settings);
+        if (conflict !== null) {
+          errorEl.setText(companionConflictError(conflict));
+          errorEl.show();
+          return;
+        }
+        const nameConflict = companionNameConflict(validation.path, this.host.itemDefs(), this.host.settings, {
+          itemId: def.id,
+          path: row.path,
+        });
+        if (nameConflict !== null) {
+          errorEl.setText(companionNameConflictError(nameConflict));
+          errorEl.show();
+          return;
+        }
+        // The warning modal only makes sense for a PRESET path (ConfirmModal.ts) — a plain
+        // user-added folder has no preset identity to move away from, so its own ✎ (now offered
+        // on every companion row, spec 2026-07-26-card-visual-refresh-design.md §4 Step 2) commits
+        // straight away.
+        if (row.isPreset) {
+          const confirmed = await confirmPresetPathChange(this.app, def.label);
+          if (!confirmed) {
+            cancel(); // revert the control to its prior value
+            return;
+          }
+        }
+        await this.updateItem(def.id, (c) => {
+          const withoutOld = c.companions.filter((x) => x.path !== row.path);
+          return { ...c, companions: [...withoutOld, { path: validation.path, scope: row.scope, enabled: row.enabled }] };
+        });
+        this.companionPathEditing.delete(editKey);
+        this.renderItemCard(wrap, def);
+      })();
+    };
+    new ButtonComponent(r).setCta().setButtonText("Save").onClick(submit);
+    new ButtonComponent(r).setButtonText("Cancel").onClick(cancel);
+    input.inputEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        submit();
+      }
+    });
+  }
+
+  // Progressive disclosure (spec §4 Step 3): the count always patches into the folder row's own
+  // countEl once the scan resolves — collapsed or not — but the member rows + hint themselves only
+  // render while `open` (and there is anything to show).
+  private renderPlainCompanionMembers(listEl: HTMLElement, files: string[], countEl: HTMLElement | null, open: boolean, isThemesPreset: boolean): void {
+    const names = sortCompanionMemberNames(files);
+    countEl?.setText(memberCountLabel(isThemesPreset, names.length));
+    if (!open || names.length === 0) return;
+    const wrapEl = listEl.createDiv({ cls: "config-sync-card-snippetmembers" });
+    for (const name of names) {
+      wrapEl.createDiv({ cls: "config-sync-grid config-sync-card-companiongrid", text: name });
+    }
+    wrapEl.createDiv({ cls: "config-sync-ldhint", text: FOLDER_MEMBER_HINT });
+  }
+
+  private addCompanionKey(def: ItemDef): string {
+    return `addcompanion:${def.id}`;
+  }
+
+  // "+ Add folder" (spec §4/§10, D8): a plain vault-relative path, same validate/conflict guard
+  // as everything else in this zone — dedupe-within-the-card falls out of companionConflict for
+  // free (a duplicate add collides with THIS item's own existing preset/companion entry, see
+  // registry.ts's companionConflict doc comment). New rows land enabled — the user just asked
+  // for this folder to sync — at "All devices", same as any other freshly-added default.
+  private renderAddCompanionRow(exp: HTMLElement, def: ItemDef, wrap: HTMLElement): void {
+    const key = this.addCompanionKey(def);
+    if (!this.addingCompanion.has(key)) {
+      // Downgraded to a quiet link-like text row (spec §4 Step 4) — .config-sync-add-row-quiet
+      // overrides the bordered/centered chrome the "+ Add rule"/"+ Add remote" buttons elsewhere
+      // still use, so only this row's look changes.
+      const addBtn = exp.createEl("button", { cls: "config-sync-add-row config-sync-add-row-quiet", text: ADD_FOLDER_LABEL });
+      addBtn.addEventListener("click", () => {
+        this.addingCompanion.add(key);
+        this.renderItemCard(wrap, def);
+      });
+      return;
+    }
+    const form = exp.createDiv({ cls: "config-sync-card-addcompanion" });
+    const input = new TextComponent(form);
+    input.setPlaceholder("Vault-relative path");
+    input.inputEl.addClass("config-sync-card-pathinput");
+    const errorEl = exp.createDiv({ cls: "config-sync-save-error mod-warning" });
+    errorEl.hide();
+    const cancel = (): void => {
+      this.addingCompanion.delete(key);
+      this.renderItemCard(wrap, def);
+    };
+    const submit = (): void => {
+      const validation = validateCompanionPath(input.getValue());
+      if (!validation.ok) {
+        errorEl.setText(validation.error);
+        errorEl.show();
+        return;
+      }
+      // MUST-FIX 1 (final-review): reject a basename that would never survive
+      // validateSyncManifest (illegal group-name shape) or that collides with another compiled
+      // group's name — BEFORE persisting, not just at the next recompile.
+      const basenameError = validateCompanionBasename(validation.path);
+      if (basenameError !== null) {
+        errorEl.setText(basenameError);
+        errorEl.show();
+        return;
+      }
+      const conflict = companionConflict(validation.path, this.host.itemDefs(), this.host.settings);
+      if (conflict !== null) {
+        errorEl.setText(companionConflictError(conflict));
+        errorEl.show();
+        return;
+      }
+      const nameConflict = companionNameConflict(validation.path, this.host.itemDefs(), this.host.settings, null);
+      if (nameConflict !== null) {
+        errorEl.setText(companionNameConflictError(nameConflict));
+        errorEl.show();
+        return;
+      }
+      void (async () => {
+        await this.updateItem(def.id, (c) => ({ ...c, companions: [...c.companions, { path: validation.path, scope: "all", enabled: true }] }));
+        this.addingCompanion.delete(key);
+        this.renderItemCard(wrap, def);
+      })();
+    };
+    new ButtonComponent(form).setCta().setButtonText("Add").onClick(submit);
+    new ButtonComponent(form).setButtonText("Cancel").onClick(cancel);
+    input.inputEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        submit();
+      }
+    });
+    input.inputEl.focus();
+  }
+
+  // Progressive disclosure (spec §4 Step 3): count always patches into countEl; member rows +
+  // hint only render while `open`. Snippets are never the themes preset, so memberCountLabel's
+  // first argument is always false here.
+  private renderSnippetMembers(listEl: HTMLElement, def: ItemDef, rows: SnippetMemberRow[], wrap: HTMLElement, countEl: HTMLElement | null, open: boolean): void {
+    countEl?.setText(memberCountLabel(false, rows.length));
+    if (!open || rows.length === 0) return;
+    const wrapEl = listEl.createDiv({ cls: "config-sync-card-snippetmembers" });
+    for (const row of rows) {
+      const r = wrapEl.createDiv({ cls: "config-sync-grid config-sync-card-companiongrid" });
+      r.createSpan({ cls: "config-sync-ldname", text: row.name });
+      const scopeCell = r.createDiv();
+      let curScope = row.scope;
+      const buildScope = (): void => {
+        scopeCell.empty();
+        this.renderScopeCycle(scopeCell, {
+          scope: curScope,
+          options: FIELD_SCOPE_OPTIONS,
+          disabled: false,
+          onChange: (v) => {
+            void (async () => {
+              const hadKeyRules = hasKeyRules(this.itemConfig(def.id));
+              await this.updateItem(def.id, (c) => ({
+                ...c,
+                settingsFile: withDerivedMode(withSnippetScope(c.settingsFile ?? defaultSettingsFile(), row.name, v)),
+              }));
+              const freshCfg = this.itemConfig(def.id);
+              if (hasKeyRules(freshCfg) !== hadKeyRules) {
+                // The first scoped snippet (false -> true) or the last cleared one (true -> false,
+                // withSnippetScope's empty-map pruning) flips hasKeyRules, which undims the path
+                // row's own scope/lock controls (spec §3.1) — that row lives outside
+                // refreshCardBody's swap target, so this needs a full card re-render, not just
+                // badges+body (mirrors the rule-row ✕ handler above, two-directional here since
+                // either transition can happen).
+                this.renderItemCard(wrap, def);
+                return;
+              }
+              curScope = v;
+              buildScope(); // member rows live in the companion zone — nothing below rebuilds them
+              this.refreshCardBadges(wrap, def);
+              this.refreshCardBody(wrap, def); // per-item scope colors the enabledCssSnippets elements in File preview (when expanded)
+            })();
+          },
+        });
+      };
+      buildScope();
+      r.createDiv(); // state column — empty for a snippet member row
+      r.createDiv(); // action column — empty for a snippet member row
+    }
+    wrapEl.createDiv({ cls: "config-sync-ldhint", text: SNIPPET_MEMBER_HINT });
   }
 
   // True only when the item's storage location (Location/Type/Path) differs from its default —
@@ -1120,35 +1703,40 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       fr.createSpan({ cls: "config-sync-fkey", text: rule.pattern });
       fr.createSpan({ cls: `config-sync-ftag${isDetected ? " is-detected" : ""}`, text: isDetected ? "detected" : "manual" });
       fr.createDiv({ cls: "config-sync-rule-spacer" });
-      const act = fr.createDiv({ cls: "config-sync-act" });
-      const actions: { id: FieldRule["action"]; label: string }[] = [
-        { id: "strip", label: "Strip" },
-        { id: "encrypt", label: "Encrypt" },
-      ];
-      for (const a of actions) {
-        const on = rule.action === a.id;
-        const btn = act.createEl("button", {
-          cls: `config-sync-act-btn is-${a.id}${on ? " is-on" : ""}`,
-          text: a.label,
-        });
+      // The appearance group's locked enabledCssSnippets strip (ensureAppearancePresets) isn't
+      // an ordinary fixed-action rule — it exists only to keep the field out of THIS file because
+      // it's synced elsewhere, under CSS snippets → Device scope. A disabled "This device"
+      // dropdown would mislead (implying a choice), so it points at the real control instead.
+      const isSnippetPointer = rule.locked === true && rule.pattern === "enabledCssSnippets";
+      if (isSnippetPointer) {
+        fr.createSpan({ cls: "config-sync-ldhint", text: "locked — managed under CSS snippets → Device scope" });
+      } else {
+        const dd = new DropdownComponent(fr.createDiv({ cls: "config-sync-act" }));
+        dd.addOption("strip", "This device")
+          .addOption("encrypt", "Encrypted")
+          .addOption("desktop", "Desktop only")
+          .addOption("mobile", "Mobile only")
+          .setValue(legacyActionFromRule(rule) === "all" ? "strip" : legacyActionFromRule(rule))
+          .onChange((v) => {
+            void (async () => {
+              const ruleIndex = rules.indexOf(rule);
+              await this.commitGroups((draft) => {
+                const g = draft.find((x) => x.name === group.name);
+                const r = g?.fields?.[ruleIndex];
+                if (r !== undefined) Object.assign(r, legacyRuleFromAction(v as LegacyFieldAction));
+              }, group.name);
+              afterChange();
+            })();
+          });
         // Locked preset rules are fixed to their action (ensureSelfPresets would revert any
-        // change on commit anyway) — disable the toggle so the UI matches the data.
+        // change on commit anyway) — disable the dropdown so the UI matches the data.
         if (rule.locked === true) {
-          btn.disabled = true;
-          btn.setAttribute("title", "Preset rule — action is fixed");
-          continue;
+          dd.setDisabled(true);
+          dd.selectEl.setAttribute("title", "Preset rule — action is fixed");
         }
-        btn.addEventListener("click", () => {
-          void (async () => {
-            const ruleIndex = rules.indexOf(rule);
-            await this.commitGroups((draft) => {
-              const g = draft.find((x) => x.name === group.name);
-              const r = g?.fields?.[ruleIndex];
-              if (r !== undefined) r.action = a.id;
-            }, group.name);
-            afterChange();
-          })();
-        });
+        if (rule.scope === "desktop" || rule.scope === "mobile") {
+          fr.createSpan({ cls: "config-sync-ldhint", text: "each class keeps its own value" });
+        }
       }
       if (rule.locked === true) {
         fr.createSpan({ cls: "config-sync-fieldrow-xspacer" }); // keep Strip/Encrypt aligned with unlocked rows
@@ -1180,36 +1768,47 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         await this.commitGroups((draft) => {
           const g = draft.find((x) => x.name === group.name);
           if (g === undefined) return;
-          g.fields = [...(g.fields ?? []), { pattern, action: "strip" as const }];
+          g.fields = [...(g.fields ?? []), { pattern, ...LOCAL_RULE }];
         }, group.name);
         afterChange();
       })();
     });
   }
 
-  // Builds the full-vault search index: General settings (static registry), the three picker
-  // tabs' items (unchanged actionable-row behavior), Advanced rule/discovered cards, and remotes
-  // (desktop only). Unfiltered by query — callers substring-match against name+desc(+path).
+  // Builds the full-vault search index: General settings (static registry), the four card tabs'
+  // items, Advanced rule/discovered cards, and remotes (desktop only). Unfiltered by query —
+  // callers substring-match against name+desc(+path).
+  //
+  // The card-tab hits are sourced from itemDefs() — the SAME registry data renderItemCard reads
+  // (renderRegistryCards filters `this.host.itemDefs()` by section) — not from the old
+  // sectionsFor()/CatalogSection machinery, so `item-${def.id}` always matches the
+  // `data-search-anchor` renderItemCard actually sets (they used to diverge: sectionsFor's
+  // CatalogItem.name and def.id are different id schemes, so jumps silently no-opped).
   private async buildSearchIndex(gen: number): Promise<SearchHit[] | null> {
+    if (gen !== this.renderGen) return null;
     const hits: SearchHit[] = [];
     for (const s of GENERAL_SETTINGS) {
       hits.push({ scope: "general", kind: "setting", name: s.name, desc: s.desc, anchorId: s.anchorId });
     }
+    const tabSection: Record<"obsidian" | "core" | "plugins" | "beta", ItemSection> = {
+      obsidian: "obsidian",
+      core: "core",
+      plugins: "community",
+      beta: "beta",
+    };
     const tabs: ("obsidian" | "core" | "plugins" | "beta")[] = ["obsidian", "core", "plugins", "beta"];
     for (const tab of tabs) {
-      const sections = await this.sectionsFor(tab);
-      if (gen !== this.renderGen) return null;
-      for (const sec of sections) {
-        for (const item of sec.items) {
-          hits.push({
-            scope: tab,
-            kind: "item",
-            name: item.label,
-            desc: `${item.name} ${item.description ?? ""} ${item.path}`,
-            anchorId: `item-${item.name}`,
-            item: { ...item, label: `${item.label} — ${SECTION_TAB[tab]} · ${sec.heading}` },
-          });
-        }
+      const defs = this.host.itemDefs().filter((d) => d.section === tabSection[tab]);
+      for (const def of defs) {
+        const path = def.settingsFile?.defaultPath;
+        hits.push({
+          scope: tab,
+          kind: "item",
+          name: def.label,
+          desc: path !== null && path !== undefined ? `${def.description} ${path}` : def.description,
+          anchorId: `item-${def.id}`,
+          item: { type: "file" },
+        });
       }
     }
     const reserved = reservedNames(this.host.installedPluginIds());
@@ -1224,7 +1823,10 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         });
         continue;
       }
-      if (g.origin !== undefined || reserved.has(g.name)) continue;
+      // core-plugins/community-plugins are the hidden enablement carriers registry.ts compiles —
+      // never reserved names any more (the aggregate rows they used to back are gone, spec §7 item
+      // 1), but still not a generic "Custom rule" a user could edit here.
+      if (g.origin !== undefined || reserved.has(g.name) || SWITCH_LIST_GROUPS.has(g.name)) continue;
       hits.push({
         scope: "advanced",
         kind: "rule",
@@ -1311,12 +1913,10 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       this.search = "";
       this.searchScope = "all";
       this.activeTab = this.scopeTab(hit.scope);
-      // Suppress the sensitive-first re-sort for this jump: its async settleSensitiveOrder →
-      // refresh() would fire a second render AFTER we scroll, resetting scrollTop and detaching
-      // the target row. Guarded by sortedSections.has(activeTab), so adding it makes the re-sort
-      // a no-op; the tab settles on the next normal render.
-      this.sortedSections.add(this.activeTab);
-      if (hit.kind === "item" && hit.item !== undefined) this.expanded.add(hit.item.name);
+      // Card hits: open the matching card's drawer so the jump lands on visible detail, not just
+      // a collapsed row. anchorId is `item-${def.id}` (see buildSearchIndex); renderItemCard keys
+      // its drawer under `card:${def.id}` — strip the prefix to derive it, one source of truth.
+      if (hit.kind === "item" && hit.anchorId.startsWith("item-")) this.expanded.add(`card:${hit.anchorId.slice("item-".length)}`);
       await this.rerender(0);
       const target = this.containerEl.querySelector(`[data-search-anchor="${CSS.escape(hit.anchorId)}"]`);
       if (target === null) return;
@@ -1583,7 +2183,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private renderGroupsReadError(containerEl: HTMLElement): boolean {
     if (this.groupsReadError === null) return false;
     containerEl.createEl("p", {
-      text: `Cannot read the sync configuration — fix the plugin's saved groups (data.json) and reopen this tab: ${this.groupsReadError}`,
+      text: `Cannot read your sync configuration — fix the error below, then reopen this tab: ${this.groupsReadError}`,
       cls: "mod-warning",
     });
     return true;
@@ -1595,16 +2195,44 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     this.groupsErrorEl.setText(this.saveErrorFor === "" ? this.groupsErrorMsg : "");
   }
 
+  // A group name/path already spoken for by the registry-derived model: a reserved-name managed
+  // group (app/appearance/hotkeys/core/community, from catalog.ts's reservedNames), a plugin-*
+  // group with the standard path (a synced plugin item — belongs to Community/Beta even when not
+  // installed here), or a switch-list carrier (enabled-css-snippets et al. — managed on the
+  // Obsidian tab with their own scope/pins UI). Anything else is a genuine Advanced-tab custom
+  // rule or discovered file — see persistCustomGroups, which uses this same test to decide what
+  // durably belongs in settings.customGroups.
+  private isManagedGroup(g: SyncGroup, reserved: ReadonlySet<string>): boolean {
+    const syncedPlugin = g.name.startsWith("plugin-") && g.path === expectedPathForName(g.name);
+    return reserved.has(g.name) || syncedPlugin || SWITCH_LIST_GROUPS.has(g.name);
+  }
+
+  // Durable write path for the Advanced tab's "Custom rules"/"Discovered files" (task-8 concern
+  // fix, spec §6 addition): the old path wrote the FULL mutated draft (registry-derived groups
+  // included) through the session-only groupsIO/writeGroupsFile route, so a custom rule or an
+  // adopted discovered file vanished on the next Obsidian restart. Registry-derived groups are
+  // never stored — they're recompiled from settings.items on every load (registry.ts's
+  // compileItems) — so only the non-managed subset of `fullDraft` (custom rules + adopted
+  // discovered files alike; a discovered-file adoption is just a customGroups entry) gets
+  // persisted. Pre-validates through the real compile pipeline (same claimPath accounting
+  // compileItems always runs) so a name/path collision surfaces as the existing inline row error
+  // via commitDraft's throw→catch, instead of only a passive Notice from the next recompile.
+  private async persistCustomGroups(fullDraft: SyncGroup[]): Promise<void> {
+    const reserved = reservedNames(this.host.installedPluginIds());
+    const nextCustomGroups: CustomGroupConfig[] = fullDraft.filter((g) => g.name.trim() !== "" && !this.isManagedGroup(g, reserved));
+    try {
+      compileItems(this.host.itemDefs(), { items: this.host.settings.items, customGroups: nextCustomGroups });
+    } catch (e) {
+      throw new Error(e instanceof CompileError ? e.message : `unexpected error: ${(e as Error).message}`);
+    }
+    this.host.settings.customGroups = nextCustomGroups;
+    await this.host.saveSettings();
+  }
+
   private async renderAdvanced(containerEl: HTMLElement, gen: number): Promise<void> {
     const reserved = reservedNames(this.host.installedPluginIds());
-    // A plugin-* group with the standard path is a synced plugin item (it belongs to the
-    // Community/Beta tabs even when the plugin isn't installed here) — never a custom rule.
-    const syncedPlugin = (g: SyncGroup): boolean => g.name.startsWith("plugin-") && g.path === expectedPathForName(g.name);
-    // Switch-list groups (e.g. enabled-css-snippets) are managed items surfaced on the Obsidian
-    // tab with their own scope/pins UI — they are not custom rules, so keep them out of Advanced
-    // (rendering one here as a deletable rule would let a delete silently tear down snippet sync).
-    const managed = this.groups.filter((g) => (reserved.has(g.name) || syncedPlugin(g)) && g.origin === undefined);
-    const custom = this.groups.filter((g) => !reserved.has(g.name) && !syncedPlugin(g) && !SWITCH_LIST_GROUPS.has(g.name) && g.origin === undefined);
+    const managed = this.groups.filter((g) => this.isManagedGroup(g, reserved) && g.origin === undefined);
+    const custom = this.groups.filter((g) => !this.isManagedGroup(g, reserved) && g.origin === undefined);
     const customized = managed.filter((g) => this.isCustomized(g));
 
     if (customized.length > 0) {
@@ -1818,8 +2446,8 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     this.renderDetectionNote(panel, group);
   }
 
-  // Advanced-tab rule cards have no CatalogItem, so detection state isn't pre-fetched by
-  // renderChecklistRow; kick off a scan here too (cached in the same map, keyed by group name).
+  // Advanced-tab rule cards have no ItemDef, so detection state isn't pre-fetched by
+  // ensureCardDetection; kick off a scan here too (cached in the same map, keyed by group name).
   private renderDetectionNote(panel: HTMLElement, group: SyncGroup): void {
     const cached = this.detections.get(group.name);
     const noteEl = panel.createDiv({ cls: "config-sync-expand-note" });
@@ -1844,9 +2472,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   }
 
   private async commitGroups(mutator: (draft: SyncGroup[]) => void, culprit?: string): Promise<boolean> {
-    // A blank "+ Add rule" placeholder (empty name) is in-memory only — never write it, so a
-    // half-created rule can't fail validation and block every other save.
-    const res = await commitDraft(this.groups, mutator, (g) => this.host.writeGroupsFile(g.filter((x) => x.name.trim() !== "")));
+    // A blank "+ Add rule" placeholder (empty name) is in-memory only — persistCustomGroups itself
+    // filters it out, so a half-created rule can't fail validation and block every other save.
+    // Durable write: only the custom/discovered subset of the mutated draft persists
+    // (settings.customGroups) — see persistCustomGroups.
+    const res = await commitDraft(this.groups, mutator, (g) => this.persistCustomGroups(g));
     if (res.ok) {
       this.groups = res.groups;
       this.groupsErrorMsg = "";

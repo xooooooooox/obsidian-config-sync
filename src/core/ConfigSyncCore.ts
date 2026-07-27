@@ -1,10 +1,11 @@
 import { FileIO, ensureParentDir, isJunkPath, listFilesRecursive, pruneEmptyDirsUnder } from "./io";
-import { GroupResult, hasChanges, StoreLock, SyncGroup, SyncManifest } from "./types";
-import { basename, groupStorePath, relativeTo, resolveGroupByStoreRel } from "./pathing";
+import { FieldRule, GroupResult, hasChanges, StoreLock, SyncGroup, SyncManifest } from "./types";
+import { basename, groupStorePath, relativeTo, resolveGroupByStoreRel, sidecarStoreSuffix } from "./pathing";
 import { parseStoreLock, parseSyncManifest, validateSyncManifest } from "./manifest";
-import { applyTransform, captureTransform, contentUnchanged } from "./modes";
+import { applyTransform, captureTransform, classPatterns, contentUnchanged } from "./modes";
 import { classifyMerge, MergeConflict, MergePlan } from "./merge";
-import { isPlainObject } from "./sanitize";
+import { isPlainObject, keyMatchesAny } from "./sanitize";
+import { readPerItemArray, scopeOf } from "./perItem";
 import { applySwitchList, captureSwitchList, localRealPath, parseSwitchList, readLocalSwitchList, subtractForceOff, SWITCH_LIST_GROUPS, SwitchList, switchListsEqual, writeLocalSwitchList } from "./switchList";
 
 // `current` is the group NAME (the UI maps it to a display label); `phase` is a short live
@@ -37,10 +38,32 @@ export interface CoreContext {
   rootPath: string;
   plugins: PluginHost;
   passphrase: string | null;
+  deviceClass: "desktop" | "mobile";
   groupsIO: GroupsIO;
-  switchExceptions: Record<string, string[]>; // group name -> excepted plugin/core ids (device-local)
-  switchForceOff?: Record<string, string[]>; // group name -> ids removed from the applied list (snippet scope-away)
+  switchExceptions: Record<string, string[]>; // group name -> masked member ids (This-device ∪ scoped-away ∪ auto-derived)
+  switchForceOff?: Record<string, string[]>; // group name -> ids forced off on apply (user class scope on the wrong device class)
+  fieldOverlay?: (group: SyncGroup, topKeys: string[]) => FieldRule[] | null; // runtime category rules (e.g. app.json view rows)
   now(): string; // ISO-8601 timestamp, injectable for tests
+}
+
+// Composes runtime category rules (app.json view rows) into a group's effective field set.
+// jsons: any texts whose top-level keys should participate (local content, store base, sidecar).
+export function overlayGroup(ctx: CoreContext, group: SyncGroup, jsons: (string | null)[]): SyncGroup {
+  if (ctx.fieldOverlay === undefined) return group;
+  // Whole-file encryption (FileRule) owns this group's mode; a runtime field overlay must never
+  // rewrite it to "fields" and silently bypass the file-encryption branch (Task 2 fix round 1).
+  if (group.fileRule !== undefined) return group;
+  const keys = new Set<string>();
+  for (const j of jsons) {
+    if (j === null) continue;
+    try {
+      const p = JSON.parse(j) as unknown;
+      if (isPlainObject(p)) for (const k of Object.keys(p)) keys.add(k);
+    } catch { /* non-JSON content participates with no keys */ }
+  }
+  const extra = ctx.fieldOverlay(group, [...keys]);
+  if (extra === null || extra.length === 0) return group;
+  return { ...group, mode: "fields", fields: [...(group.fields ?? []), ...extra] };
 }
 
 export function lockPath(ctx: CoreContext): string {
@@ -176,6 +199,50 @@ async function writeClassified(
   (existed ? result.changes.updated : result.changes.added).push(relName);
 }
 
+// Base-hygiene guard (spec 2026-07-25-domain-mirror-design.md §2.2): contentUnchanged
+// deliberately ignores class-scoped top-level keys on both sides (correct for diff/status —
+// it prevents phantom to-capture entries), so a store base written before a class rule existed
+// can still carry those keys after contentUnchanged reports equal. The base must never keep
+// class-scoped keys, so this forces the rewrite that purges them. Guarded to a no-op when the
+// group has no class patterns, or when the existing content isn't parseable JSON object — in
+// both cases there is nothing to purge and the unchanged verdict stands.
+function baseHasStaleClassKeys(effGroup: SyncGroup, existing: string): boolean {
+  const patterns = [...classPatterns(effGroup, "desktop"), ...classPatterns(effGroup, "mobile")];
+  if (patterns.length === 0) return false;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(existing);
+  } catch {
+    return false;
+  }
+  if (!isPlainObject(parsed)) return false;
+  return Object.keys(parsed).some((k) => keyMatchesAny(k, patterns));
+}
+
+// Base-hygiene guard for stale local-scoped per-item elements (smoke-test fix, third extension of
+// the mechanism above): perItemArrayUnchanged deliberately ignores "local"-scoped elements
+// symmetrically on both sides (correct for diff/status — re-scoping an element to "local"
+// shouldn't read as a pending change), so a store base written before the re-scope (or before the
+// key had any perItem scopes at all) can still carry that element after contentUnchanged reports
+// equal. Forces the rewrite that purges it. Elements scoped to the OTHER device class are
+// legitimately present in the base (store holds the union of non-local elements across devices)
+// and must NOT be treated as stale — only "local"-scoped elements are. No-op when the group has no
+// perItem keys, or the existing content isn't a parseable JSON object.
+function baseHasStalePerItemElements(effGroup: SyncGroup, existing: string): boolean {
+  if (effGroup.perItem === undefined || Object.keys(effGroup.perItem).length === 0) return false;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(existing);
+  } catch {
+    return false;
+  }
+  if (!isPlainObject(parsed)) return false;
+  return Object.entries(effGroup.perItem).some(([key, scopes]) => {
+    const arr = readPerItemArray(parsed, effGroup.name, key, "compare");
+    return arr.some((el) => scopeOf(scopes, el) === "local");
+  });
+}
+
 function requireGroup(manifest: SyncManifest, name: string): SyncGroup {
   const group = manifest.groups.find((g) => g.name === name);
   if (group === undefined) {
@@ -262,15 +329,35 @@ async function captureGroup(ctx: CoreContext, group: SyncGroup): Promise<GroupRe
       existingStoreList = parseSwitchList(await ctx.io.read(store));
     }
     const captureInput = localSwitchList !== null ? serializeSwitchList(captureSwitchList(localSwitchList, existingStoreList, exc)) : plainLocalContent;
-    const t = await captureTransform(group, captureInput, ctx.passphrase);
+    const sidecarPath = store + sidecarStoreSuffix(ctx.deviceClass);
+    const existingSidecar = (await ctx.io.exists(sidecarPath)) ? await ctx.io.read(sidecarPath) : null;
+    const effGroup = overlayGroup(ctx, group, [plainLocalContent]);
+    // Prior store content for perItem keys (spec §3, D3): capturing a per-item array must
+    // preserve the other device's already-captured elements, which requires the OLD store copy —
+    // never needed for non-perItem groups, but harmless to read either way (see captureTransform's
+    // storeContent doc comment; a switch-list group's real store read already happened above).
+    const priorStoreContent = localSwitchList === null && (await ctx.io.exists(store)) ? await ctx.io.read(store) : null;
+    const t = await captureTransform(effGroup, captureInput, ctx.passphrase, ctx.deviceClass, priorStoreContent);
     if (t.note !== null) result.messages.push(t.note);
-    await writeClassified(ctx, store, t.content, basename(store), result, (existing) => {
+    await writeClassified(ctx, store, t.content, basename(store), result, async (existing) => {
       if (localSwitchList !== null) {
         const existingSwitchList = parseSwitchList(existing);
-        if (existingSwitchList !== null) return Promise.resolve(switchListsEqual(localSwitchList, existingSwitchList, exc));
+        if (existingSwitchList !== null) return switchListsEqual(localSwitchList, existingSwitchList, exc);
       }
-      return contentUnchanged(group, plainLocalContent, existing, ctx.passphrase);
+      const unchanged = await contentUnchanged(effGroup, plainLocalContent, existing, ctx.passphrase, ctx.deviceClass, existingSidecar);
+      if (!unchanged) return false;
+      // force the rewrite that purges stale class keys or stale local-scoped per-item elements
+      return !baseHasStaleClassKeys(effGroup, existing) && !baseHasStalePerItemElements(effGroup, existing);
     });
+    if (!SWITCH_LIST_GROUPS.has(group.name)) {
+      if (t.ownScope !== null) {
+        await writeClassified(ctx, sidecarPath, t.ownScope, basename(sidecarPath), result);
+      } else if (await ctx.io.exists(sidecarPath)) {
+        await ctx.io.remove(sidecarPath);
+        result.filesDeleted.push(sidecarPath);
+        result.changes.deleted.push(basename(sidecarPath));
+      }
+    }
     return result;
   }
   const sourceFiles = await listFilesRecursive(ctx.io, real);
@@ -279,9 +366,9 @@ async function captureGroup(ctx: CoreContext, group: SyncGroup): Promise<GroupRe
     const target = `${store}/${rel}`;
     const plainLocalContent = await ctx.io.read(`${real}/${rel}`);
     if (group.mode === "encrypted") {
-      const t = await captureTransform(group, plainLocalContent, ctx.passphrase);
+      const t = await captureTransform(group, plainLocalContent, ctx.passphrase, ctx.deviceClass);
       await writeClassified(ctx, target, t.content, rel, result, (existing) =>
-        contentUnchanged(group, plainLocalContent, existing, ctx.passphrase)
+        contentUnchanged(group, plainLocalContent, existing, ctx.passphrase, ctx.deviceClass, null)
       );
     } else {
       await writeClassified(ctx, target, plainLocalContent, rel, result);
@@ -679,7 +766,10 @@ async function applyGroup(ctx: CoreContext, group: SyncGroup, state: BackupState
         // just-enabled plugin turns it off persistently — that must be visible in the report.
         for (const line of switchDeltaMessages(localSwitchList, finalList)) result.messages.push(line);
       } else {
-        content = await applyTransform(group, storeContent, localContent, ctx.passphrase);
+        const sidecarPath = store + sidecarStoreSuffix(ctx.deviceClass);
+        const existingSidecar = (await ctx.io.exists(sidecarPath)) ? await ctx.io.read(sidecarPath) : null;
+        const effGroup = overlayGroup(ctx, group, [storeContent, localContent, existingSidecar]);
+        content = await applyTransform(effGroup, storeContent, localContent, ctx.passphrase, ctx.deviceClass, existingSidecar);
       }
       await applyWriteClassified(ctx, state, real, content, basename(real), result);
     } else {
@@ -690,7 +780,7 @@ async function applyGroup(ctx: CoreContext, group: SyncGroup, state: BackupState
         const storeContent = await ctx.io.read(`${store}/${rel}`);
         const content =
           group.mode === "encrypted"
-            ? await applyTransform(group, storeContent, null, ctx.passphrase)
+            ? await applyTransform(group, storeContent, null, ctx.passphrase, ctx.deviceClass, null)
             : storeContent;
         await applyWriteClassified(ctx, state, target, content, rel, result);
       }
@@ -843,8 +933,8 @@ export async function applyImport(
   await pruneEmptyDirsUnder(ctx.io, ctx.rootPath);
 
   // Local groups only — read for lock attribution and result ordering below; Pull never writes
-  // the sync list (settings.groups). Remote-only additions land in the store here and become
-  // adoptable via the config-sync pane.
+  // the sync list (the compiled item registry — schema v2, spec §6). Remote-only additions land
+  // in the store here and become adoptable via the config-sync pane.
   const groups = await readGroups(ctx);
 
   const localLock = await loadLock(ctx);

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { commitDraft } from "../src/ui/commitGroups";
 import { SELF_GROUP_NAME, selfPresetRules } from "../src/core/catalog";
 import { SyncGroup } from "../src/core/types";
-import { setSnippetScope } from "../src/ui/SettingTab";
+import { setMemberScope } from "../src/ui/SettingTab";
 
 const base: SyncGroup[] = [{ name: "a", path: "{configDir}/a.json", type: "file", devices: "all" }];
 
@@ -28,7 +28,7 @@ describe("commitDraft", () => {
       withSelfNoPresets,
       (d) => {
         const g = d.find((x) => x.name === SELF_GROUP_NAME);
-        if (g !== undefined) g.fields = [{ pattern: "rootPath", action: "strip" }]; // user tries to strip the preset unlocked
+        if (g !== undefined) g.fields = [{ pattern: "rootPath", scope: "local", encrypted: false }]; // user tries to strip the preset unlocked
       },
       async (g) => {
         written = g;
@@ -41,9 +41,9 @@ describe("commitDraft", () => {
   });
 });
 
-describe("setSnippetScope", () => {
+describe("setMemberScope", () => {
   it("stores non-all and deletes on all", () => {
-    expect(setSnippetScope({}, "a-mobile", "mobile")).toEqual({ "a-mobile": "mobile" });
-    expect(setSnippetScope({ "a-mobile": "mobile" }, "a-mobile", "all")).toEqual({});
+    expect(setMemberScope({}, "a-mobile", "mobile")).toEqual({ "a-mobile": "mobile" });
+    expect(setMemberScope({ "a-mobile": "mobile" }, "a-mobile", "all")).toEqual({});
   });
 });

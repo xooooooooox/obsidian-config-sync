@@ -1,6 +1,6 @@
-import { CoreContext, ExternalStoreReader, groupForStoreRel, loadLock, loadManifest, remoteGroupsFrom, storeDir } from "./ConfigSyncCore";
+import { CoreContext, ExternalStoreReader, groupForStoreRel, loadLock, loadManifest, overlayGroup, remoteGroupsFrom, storeDir } from "./ConfigSyncCore";
 import { isJunkPath, listFilesRecursive } from "./io";
-import { basename, groupStorePath, relativeTo } from "./pathing";
+import { basename, groupStorePath, relativeTo, sidecarStoreSuffix } from "./pathing";
 import { FileChanges, hasChanges, StoreLock, SyncGroup } from "./types";
 import { parseStoreLock } from "./manifest";
 import { contentUnchanged, groupNeedsPassphrase } from "./modes";
@@ -77,11 +77,14 @@ async function compareFile(ctx: CoreContext, group: SyncGroup, real: string, sto
   // store-stable order reads as a permanent phantom "To capture" (real-vault find 2026-07-17).
   const switchEqual =
     SWITCH_LIST_GROUPS.has(group.name) ? switchListEqualOrNull(group.name, liveContent, storeContent, exc) : null;
+  const sidecar = store + sidecarStoreSuffix(ctx.deviceClass);
+  const ownScope = (await ctx.io.exists(sidecar)) ? await ctx.io.read(sidecar) : null;
+  const effGroup = overlayGroup(ctx, group, [liveContent, storeContent, ownScope]);
   const equal =
     switchEqual !== null
       ? switchEqual
-      : parseFileEnvelope(storeContent) !== null || group.mode === "fields" || group.mode === "encrypted"
-        ? await contentUnchanged(group, liveContent, storeContent, ctx.passphrase)
+      : parseFileEnvelope(storeContent) !== null || effGroup.mode === "fields" || effGroup.mode === "encrypted"
+        ? await contentUnchanged(effGroup, liveContent, storeContent, ctx.passphrase, ctx.deviceClass, ownScope)
         : liveContent === storeContent;
   const changes: FileChanges = equal ? { added: [], updated: [], deleted: [] } : { added: [], updated: [name], deleted: [] };
   return { liveFiles: equal ? [] : [real], changes };
@@ -115,7 +118,7 @@ async function compareDir(ctx: CoreContext, group: SyncGroup, real: string, stor
       const storeContent = await ctx.io.read(`${store}/${rel}`);
       const equal =
         group.mode === "encrypted"
-          ? await contentUnchanged(group, liveContent, storeContent, ctx.passphrase)
+          ? await contentUnchanged(group, liveContent, storeContent, ctx.passphrase, ctx.deviceClass, null)
           : liveContent === storeContent;
       if (!equal) {
         changes.updated.push(rel);

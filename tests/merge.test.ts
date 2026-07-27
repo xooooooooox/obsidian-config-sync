@@ -113,15 +113,15 @@ describe("classifyMerge", () => {
       devices: "all",
       mode: "fields",
       fields: [
-        { pattern: "rootPath", action: "strip", locked: true },
-        { pattern: "remotes", action: "strip", locked: true },
+        { pattern: "rootPath", scope: "local", encrypted: false, locked: true },
+        { pattern: "remotes", scope: "local", encrypted: false, locked: true },
       ],
     };
     const remote: SyncGroup = {
       devices: "all",
       fields: [
-        { locked: true, action: "strip", pattern: "rootPath" },
-        { action: "strip", locked: true, pattern: "remotes" },
+        { locked: true, scope: "local", encrypted: false, pattern: "rootPath" },
+        { scope: "local", encrypted: false, locked: true, pattern: "remotes" },
       ],
       mode: "fields",
       name: "plugin-config-sync",

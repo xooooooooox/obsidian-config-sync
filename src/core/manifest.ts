@@ -1,6 +1,6 @@
-import { DeviceClass, FieldRule, Remote, StoreLock, SyncGroup, SyncManifest, SyncMode } from "./types";
+import { DeviceClass, FieldRule, FileRule, PerItemScopes, Remote, RULE_SCOPES, StoreLock, SyncGroup, SyncManifest, SyncMode } from "./types";
 import { groupStorePath } from "./pathing";
-import { isPlainObject } from "./sanitize";
+import { isPlainObject, keyMatchesAny } from "./sanitize";
 import { FileIO } from "./io";
 
 export class ManifestValidationError extends Error {
@@ -9,6 +9,13 @@ export class ManifestValidationError extends Error {
     this.name = "ManifestValidationError";
   }
 }
+
+// A rule/group name's legal shape — also enforced at the companion-add/edit UI boundary (see
+// registry.ts's companionNameConflict / itemCard.ts's validateCompanionBasename), so a basename
+// that would fail parseGroup below is rejected before it ever reaches settings, not just at
+// compile/validate time (final-review MUST-FIX 1: a persisted bad shape silently zeroes out
+// compiledGroups on next launch — see main.ts's recompile).
+export const GROUP_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 
 function isValidType(v: unknown): v is "file" | "dir" {
   return v === "file" || v === "dir";
@@ -27,13 +34,34 @@ function isValidFieldRule(v: unknown): v is FieldRule {
     isPlainObject(v) &&
     typeof v.pattern === "string" &&
     v.pattern !== "" &&
-    (v.action === "strip" || v.action === "encrypt") &&
+    (RULE_SCOPES as readonly unknown[]).includes(v.scope) &&
+    typeof v.encrypted === "boolean" &&
+    !(v.scope === "local" && v.encrypted === true) &&
     (v.locked === undefined || typeof v.locked === "boolean")
   );
 }
 
 function isValidFieldsArray(v: unknown): v is FieldRule[] {
   return Array.isArray(v) && v.every((f) => isValidFieldRule(f));
+}
+
+// Structural check only (spec §3, D3): every element scope must be a RULE_SCOPES value. Whether
+// the key it's attached to is actually a string array at runtime is checked at capture time
+// (perItem.ts's readPerItemArray) — it can't be verified statically from the manifest alone.
+function isValidPerItemScopes(v: unknown): v is PerItemScopes {
+  return isPlainObject(v) && Object.values(v).every((s) => (RULE_SCOPES as readonly unknown[]).includes(s));
+}
+
+function isValidPerItemMap(v: unknown): v is Record<string, PerItemScopes> {
+  return isPlainObject(v) && Object.values(v).every((s) => isValidPerItemScopes(s));
+}
+
+// D9: Plain-mode file-level scope excludes "local" — derived from RULE_SCOPES (same
+// anti-drift discipline as isValidFieldRule) rather than a second hand-written literal list.
+const FILE_RULE_SCOPES = RULE_SCOPES.filter((s): s is Exclude<(typeof RULE_SCOPES)[number], "local"> => s !== "local");
+
+function isValidFileRule(v: unknown): v is FileRule {
+  return isPlainObject(v) && (FILE_RULE_SCOPES as readonly unknown[]).includes(v.scope) && typeof v.encrypted === "boolean";
 }
 
 export function parseSyncManifest(raw: string): SyncManifest {
@@ -69,11 +97,11 @@ export function validateSyncManifest(data: unknown): SyncManifest {
 
 function parseGroup(g: unknown, index: number): SyncGroup {
   if (!isPlainObject(g)) throw new ManifestValidationError(`rule #${index + 1} must be an object, e.g. {"name": "hotkeys", "path": "{configDir}/hotkeys.json", "type": "file", "devices": "all"}`);
-  const { name, path, type, devices, sanitize, mode, fields, description, label, origin } = g;
+  const { name, path, type, devices, sanitize, mode, fields, fileRule, perItem, description, label, origin } = g;
   if (typeof name !== "string" || name === "") {
     throw new ManifestValidationError(`rule #${index + 1} is missing a "name" — give it a short id, e.g. "name": "hotkeys"`);
   }
-  if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(name)) {
+  if (!GROUP_NAME_RE.test(name)) {
     throw new ManifestValidationError(
       `rule "${name}" has an invalid name — use only letters, digits, "-" or "_", starting with a letter or digit, e.g. "my-plugin"`
     );
@@ -110,12 +138,67 @@ function parseGroup(g: unknown, index: number): SyncGroup {
     if (validatedMode !== "fields") {
       throw new ManifestValidationError(`rule "${name}" sets "fields" but not "mode": "fields" — add "mode": "fields" so the rule list takes effect`);
     }
+    if (Array.isArray(fields)) {
+      for (const f of fields) {
+        if (isPlainObject(f) && f.scope === "local" && f.encrypted === true) {
+          throw new ManifestValidationError(
+            `rule "${name}" has a field rule for key ${JSON.stringify(f.pattern)} with "scope": "local" and "encrypted": true — local (this-device) fields can never be encrypted`
+          );
+        }
+      }
+    }
     if (!isValidFieldsArray(fields)) {
       throw new ManifestValidationError(
-        `rule "${name}" has an invalid "fields" list — each entry needs a non-empty "pattern" and an "action" of "strip" or "encrypt", e.g. {"pattern": "*Token*", "action": "strip"}`
+        `rule "${name}" has an invalid "fields" list — each entry needs a non-empty "pattern", a "scope" of ${RULE_SCOPES.map((s) => `"${s}"`).join(", ")}, and a boolean "encrypted", e.g. {"pattern": "*Token*", "scope": "local", "encrypted": false}`
       );
     }
     validatedFields = fields;
+  }
+  let validatedFileRule: FileRule | undefined;
+  if (fileRule !== undefined) {
+    if (type !== "file") {
+      throw new ManifestValidationError(
+        `rule "${name}" has a "fileRule" but "type": "${String(type)}" — whole-file encryption only applies to single-file rules ("type": "file"), never folder members`
+      );
+    }
+    if (validatedMode === "fields" || validatedMode === "encrypted") {
+      throw new ManifestValidationError(
+        `rule "${name}" has a "fileRule" together with "mode": "${String(validatedMode)}" — "fileRule" only applies in Plain mode (omit "mode" or use "mode": "plain")`
+      );
+    }
+    if (isPlainObject(fileRule) && fileRule.scope === "local") {
+      throw new ManifestValidationError(
+        `rule "${name}" has "fileRule.scope": "local" — Plain file-level rules use the rule's own sync toggle for "This device", not "local"; use "all", "desktop" or "mobile"`
+      );
+    }
+    if (!isValidFileRule(fileRule)) {
+      throw new ManifestValidationError(
+        `rule "${name}" has an invalid "fileRule" — it needs a "scope" of ${FILE_RULE_SCOPES.map((s) => `"${s}"`).join(", ")} and a boolean "encrypted", e.g. {"scope": "all", "encrypted": true}`
+      );
+    }
+    validatedFileRule = fileRule;
+  }
+  let validatedPerItem: Record<string, PerItemScopes> | undefined;
+  if (perItem !== undefined) {
+    if (validatedMode !== "fields") {
+      throw new ManifestValidationError(
+        `rule "${name}" sets "perItem" but not "mode": "fields" — add "mode": "fields" so per-item scopes take effect`
+      );
+    }
+    if (!isValidPerItemMap(perItem)) {
+      throw new ManifestValidationError(
+        `rule "${name}" has an invalid "perItem" map — each entry must map element values to a scope of ${RULE_SCOPES.map((s) => `"${s}"`).join(", ")}, e.g. {"myKey": {"element-id": "desktop"}}`
+      );
+    }
+    for (const key of Object.keys(perItem)) {
+      const encryptedRule = (validatedFields ?? []).find((f) => f.encrypted === true && keyMatchesAny(key, [f.pattern]));
+      if (encryptedRule !== undefined) {
+        throw new ManifestValidationError(
+          `rule "${name}" has "perItem" enabled for key "${key}", which also has "encrypted": true in its field rule — per-item scoped keys can never be encrypted (encrypt stays key-level, D3)`
+        );
+      }
+    }
+    validatedPerItem = perItem;
   }
   if (description !== undefined && typeof description !== "string") {
     throw new ManifestValidationError(`rule "${name}" has a "description" that isn't text — use a plain string, e.g. "description": "My custom rule"`);
@@ -126,6 +209,8 @@ function parseGroup(g: unknown, index: number): SyncGroup {
   const group: SyncGroup = { name, path, type, devices };
   if (validatedMode !== undefined) group.mode = validatedMode;
   if (validatedFields !== undefined) group.fields = validatedFields;
+  if (validatedFileRule !== undefined) group.fileRule = validatedFileRule;
+  if (validatedPerItem !== undefined) group.perItem = validatedPerItem;
   const trimmedDescription = typeof description === "string" ? description.trim() : "";
   if (trimmedDescription !== "") group.description = trimmedDescription;
   if (label !== undefined && typeof label !== "string") {

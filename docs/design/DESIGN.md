@@ -31,8 +31,10 @@ One color per meaning, everywhere (0.27.9 audit). Alpha fills always use
 | File changes (reports/diffs) | add `--color-green` · update `--color-blue` · delete `--color-red` | chips `+N ~N −N`, report file lines, conflict-modal marks — a *file-change* semantic, distinct from directions |
 | Neutral text ramp | `--text-normal` → `--text-muted` → `--text-faint` | content → secondary labels → hints/chevrons/idle |
 | Text on colored fills | `--text-on-accent` (accent fills) · `--background-primary` (orange/cyan/pink fills) | see Findings #4 |
+| Field rule: desktop/mobile only (json key) | `--color-blue` (desktop) · `--color-orange` (mobile) | json-preview key highlighting only, reusing existing tokens for a new per-key-scope semantic — no new variable |
+| Detected, unruled (json key) | `--color-purple` | json-preview key highlighting only (`config-sync-json-detected`) — the only live use of purple |
 
-`--color-purple` is banned (was a second apply/selection color; removed 0.27.9).
+`--color-purple`'s prior role (a second apply/selection color) was removed 0.27.9; it now has exactly the one use above and stays banned for anything else.
 
 ### 1.2 Type scale
 
@@ -151,16 +153,86 @@ noted):
 - **Modals**: pull-conflict `config-sync-cm-*` + `diffView.ts` (shared diff panel:
   Unified/Split toggle desktop-only, **Collapse/Full toggle both platforms** folding
   unchanged runs into `-cm-dgap` "⋯ N unchanged lines ⋯" rows); exclude-extras
-  `-exclude-row/-modal-buttons`. **Banner**: `-bootstrap*` adopt offer.
-- **Local decisions** `-ldrow` family (switch-list exceptions) — plus read-only `is-auto` rows
-  (`-doto-pill` + disabled toggle) surfacing desktop-only plugins auto-excepted on mobile,
-  **divergence** warning block, **inert-note**, **inline diffs** `-inline-diff/-diffhint`. The
-  snippet drawer's **Clean up** block (`-orphan-*`) surfaces dead enabled-snippet names — no
-  `.css` file locally **and** none in the store's snippets dir; checking the store copy, not just
-  the local dir, is what keeps a fresh device safe before its `snippets/` folder has synced down.
-  Its per-row chip is provenance-aware (`no file` vs `no file · store has on`). Remove clears the
-  name locally (list + scope + pin) and then propagates through a single-group `capture`, so the
-  store list and its lock/index bookkeeping stay consistent instead of drifting from a hand-edit.
+  `-exclude-row/-modal-buttons`. Cold-start adopt is not a banner: the self pane (above)
+  renders the coldstart state and drives it via `adoptConfiguration`.
+- **Unified card** (定稿 mockup artifact `v7-final-panorama`, 2026-07-25, plus the icon/
+  progressive-disclosure pass in artifact `239c8393-cd61-4faa-95aa-e49f1804b446`, 2026-07-26; specs
+  `docs/superpowers/specs/2026-07-25-unified-card-design.md` and
+  `docs/superpowers/specs/2026-07-26-card-visual-refresh-design.md`) — replaces every earlier
+  settings-tab shape (the per-switch-list `-ldrow` scope editor, the "Domain / companion"
+  container row, `kind: "app-view"`/`"appearance-domain"` special-casing, the aggregate "Enabled
+  community plugins"/"Enabled core plugins" rows) with ONE row + drawer renderer for every synced
+  item (`SettingTab.ts`'s `renderItemCard`, driven by `registry.ts`'s `ItemDef`). No kind
+  branches remain: an Obsidian option group, a core plugin, a community/beta plugin and a
+  state-only plugin (no settings file yet) all render through the same function.
+  - **Row** `config-sync-item-wrap` — chevron, name, badges (`config-sync-card-badge*`; order:
+    enablement scope when non-default → `N device-scoped` → `N encrypted`; a zero count never
+    renders), sync toggle. No mode chip and no other row content — mode is a derived, drawer-only
+    state (`itemCard.ts`'s `deriveMode`, see Drawer ② below), never a header control — the same
+    terse rows-are-lists-nothing-else rule the Sync Center already follows.
+  - **Drawer** `config-sync-item-exp`, up to three zones, every row across all three built on one
+    4-column grid (`config-sync-grid`: content `1fr` | scope `var(--cs-scope-w, 28px)` | state
+    `28px` | action `28px`; action-column icons are `config-sync-ghost`, faint 0.25 idle, full on
+    the row's `:hover`/`:focus-within` or `.is-active`, so the grid stays quiet until touched).
+    Every scope control in a drawer is one Commander-style cycling icon
+    (`config-sync-scopeicon`, `renderScopeCycle`): the glyph IS the state (`SCOPE_ICONS`:
+    monitor+smartphone = All devices, monitor = Desktop only, smartphone = Mobile only,
+    airplay = This device), a click advances to the next value in that row's own option list
+    (`nextScope`, wrapping), tooltip `Change scope (currently: …)`; the `all` default sits dim
+    (0.45) and any narrower scope renders `.is-set` (accent, full opacity). ① and ②
+    render only when they apply, ③ Companion folders always renders (down to just its quiet
+    `+ Add folder` row, `config-sync-add-row-quiet`, when a card has no folders yet):
+    ① **Enabled on** (plugin cards only) — one 4-option scope icon reading/writing
+    `ItemConfig.enabledOn` directly (no parallel state).
+    ② **Settings file** — mode is derived, never chosen: no per-key rule anywhere (`rules` and
+    `perItem` both empty) is whole-file state, any rule is per-key state. The grid's first row
+    (`config-sync-card-sfhead`) is always the path row: path code, a 3-option scope icon (no
+    `This device`) and a 🔒 icon toggle (`config-sync-lock`, `.is-on` when encrypted) that
+    encrypts the whole file. The path text itself is the edit entry point
+    (`config-sync-card-pathbtn`, hover = dotted underline + soft backdrop; `.is-custom` accent
+    once a custom path is committed): click it and the row swaps to an input — Enter/blur
+    commits, Escape cancels via a keymap `Scope` pushed while the input is focused (Obsidian's
+    own Escape handling would close the settings window otherwise), and a committed custom path
+    shows a quiet `Reset to default` text action (`config-sync-reset-link`, registered on
+    mousedown so the input's blur-commit can't tear it out first) inside the edit row. In
+    whole-file state the path row's scope/lock are live; in per-key state they render
+    `config-sync-dim` and disabled (tooltip "Per-key rules are active — remove them to control
+    the whole file again"), and a rule row (`config-sync-card-rulerow`) appears per configured
+    key — never every key in the file, only ones with a rule; browsing the rest is File
+    preview's job (below) — each with its own scope icon, a 🔒 toggle (disabled at `This device`
+    or while `Per-item scopes` is on) and a ✕ (`Remove rule`) that deletes it; a string-array
+    key adds a `Per-item scopes` toggle (`config-sync-card-peritem`) — flip it on and each
+    element gets its own row (`config-sync-card-elrow`) instead of one rule for the whole key.
+    Removing the last rule flips the card back to whole-file state. Below the rule rows, a
+    collapsed disclosure (`config-sync-card-disclosure`, `▸ File preview` / `▾ File preview`)
+    expands into the read-only `data.json` preview (`jsonView.ts`) — collapsed by default, so a
+    card with no rules never reads its file at all — keys colored by rule: `blue = desktop only
+    · amber = mobile only · red = this device`, `🔒` overlays an encrypted key,
+    `--color-purple` = detected-but-unruled, faint = plain; a `perItem` array colors each
+    element the same way. Click a key to add a rule for it directly (promotes the card to
+    per-key state).
+    ③ **Companion folders** — preset (`themes/`, `snippets/`) and user-added vault-relative
+    folders, each on the same grid (`config-sync-card-companiongrid`): content column is the path
+    plus a collapsed member count (`config-sync-card-membercount`: `· N themes` for the themes/
+    preset, `· N files` otherwise) and a ▸/▾ arrow (`config-sync-card-memberarrow`) — click the
+    row to expand its member list, while the folder name itself (same `config-sync-card-pathbtn`
+    affordance, click/keydown stopPropagation so it never doubles as the member toggle) opens the
+    Save/Cancel path-edit row; scope icon + sync toggle in their own columns; the action column
+    holds only a ✕ (`Remove folder`) on a user-added row (a preset is only ever relocated via
+    the warning-gated path edit, never removed outright). A trailing quiet `+ Add folder` row
+    (`config-sync-add-row-quiet`, no longer a full-width button) closes every card (a card with
+    zero rows renders no `Companion folders` header, just the Add-folder row). Opening
+    `snippets/` lists members (`config-sync-card-snippetmembers`), each its own scope icon — it
+    writes `enabledCssSnippets` AND decides whether the file itself travels — the only companion
+    whose members carry a scope control; a plain (unmapped) folder's members list for
+    information only (`ItemDef.presetCompanions` has no per-member carry mechanism today — a
+    future engine iteration, not this one).
+  - **Release notes** (binding for this cut): the store AND the settings schema both break —
+    `schemaVersion: 2` has no migration from any earlier `data.json` shape, and the store gains
+    whole-file-encryption envelopes alongside the existing `__scopes__` sidecars. Hand-written
+    release notes must say **all devices upgrade together, then reconfigure which items sync** —
+    this supersedes and folds in every earlier partial-compatibility clause (the phase-1
+    `memberScopes` window, the phase-2 `__scopes__` sidecar note) into the one blocking statement.
 
 ## 4. Conventions
 
@@ -178,12 +250,18 @@ noted):
 
 Each item ships only after a user decision. None change behavior silently.
 
-1. **Dead CSS**: `.config-sync-status-row`, `.config-sync-state.*`,
-   `.config-sync-picker-insync` (pre-Sync-Center status list) and
-   `.config-sync-center-title` (title removed 0.27.7) have no TS call sites. Also four
-   TS-only classes with no CSS rule (`-flock`, `-beta-mapnote`, `-remote-comparing`,
-   `-cm-unified`) — remove the dead rules; decide whether the TS-only classes get styles
-   or stay as semantic hooks.
+1. **Dead CSS** — resolved 2026-07-25 (unified-card cleanup, task-8-brief.md): the
+   pre-Sync-Center status-list rules (`.config-sync-status-row`, `.config-sync-state.*`,
+   `.config-sync-picker-insync`, `.config-sync-center-title`) and every selector left behind
+   by the v3 "Device scope"/"Domain" UI (`.config-sync-ldrow`/`-ld-scope`/`-ld-pinchip`/
+   `-ld-ovr`, `.config-sync-orphan-*`, `.config-sync-bootstrap*`, `.config-sync-domain-sect*`,
+   the old "Custom location" editor `.config-sync-cl-*`/`-adv-toggle`/`-reset-link`,
+   `.config-sync-devbadge`/`-facebadge`, `.config-sync-badge`, `.config-sync-cust`,
+   `.config-sync-link`, `.config-sync-jsonbody`, `.config-sync-shared-tag`,
+   `.config-sync-passphrase-status`, `.config-sync-guide*`, `.config-sync-strip.is-transfer`)
+   are all removed. Remaining, still open: three TS-only classes with no CSS rule
+   (`-beta-mapnote`, `-remote-comparing`, `-cm-unified`; `-flock` has since grown a real rule)
+   — decide whether they get styles or stay as semantic hooks.
 2. **Emoji remnants**: settings fields editor 🔒 (`-flock`), bootstrap banner ⬇, plus
    ⚠/⚙/↺/＋/＝/⌂ glyphs. The panel purged emoji (mode badges, locked state) because they
    ignore theme color; candidates: `-flock` → Lucide `lock`, ⬇ → Lucide `download`. The

@@ -65,7 +65,7 @@ describe("parseSyncManifest", () => {
     expect(() => parseSyncManifest(manifestWith([g]))).toThrow("must stay inside the vault");
   });
   it("accepts mode/fields, rejects legacy sanitize and bad modes", () => {
-    const fields = { name: "f", path: "{configDir}/plugins/demo/data.json", type: "file", devices: "all", mode: "fields", fields: [{ pattern: "*Token*", action: "strip" }] };
+    const fields = { name: "f", path: "{configDir}/plugins/demo/data.json", type: "file", devices: "all", mode: "fields", fields: [{ pattern: "*Token*", scope: "local", encrypted: false }] };
     expect(parseSyncManifest(manifestWith([fields])).groups[0]).toEqual(fields);
 
     const encrypted = { name: "e2", path: "{configDir}/plugins/demo2/data.json", type: "file", devices: "all", mode: "encrypted" };
@@ -79,14 +79,35 @@ describe("parseSyncManifest", () => {
       '"s" still uses the old sanitize setting — rename it to "mode": "fields" with "fields" rules (see README → Sensitive settings).'
     );
 
-    const fieldsOnDir = { name: "d", path: "{configDir}/snippets", type: "dir", devices: "all", mode: "fields", fields: [{ pattern: "*Token*", action: "strip" }] };
+    const fieldsOnDir = { name: "d", path: "{configDir}/snippets", type: "dir", devices: "all", mode: "fields", fields: [{ pattern: "*Token*", scope: "local", encrypted: false }] };
     expect(() => parseSyncManifest(manifestWith([fieldsOnDir]))).toThrow("only supported on file groups");
 
     const badMode = { name: "b", path: "{configDir}/hotkeys.json", type: "file", devices: "all", mode: "weird" };
     expect(() => parseSyncManifest(manifestWith([badMode]))).toThrow('but it must be "plain", "fields" or "encrypted"');
 
-    const fieldsWithoutMode = { name: "fw", path: "{configDir}/hotkeys.json", type: "file", devices: "all", fields: [{ pattern: "*Token*", action: "strip" }] };
+    const fieldsWithoutMode = { name: "fw", path: "{configDir}/hotkeys.json", type: "file", devices: "all", fields: [{ pattern: "*Token*", scope: "local", encrypted: false }] };
     expect(() => parseSyncManifest(manifestWith([fieldsWithoutMode]))).toThrow('sets "fields" but not "mode": "fields"');
+  });
+});
+
+// Orthogonal {scope, encrypted} matrix coverage (all 7 legal combos, local+encrypted rejection,
+// unknown scope) lives in tests/ruleMatrix.test.ts — this block keeps the pre-existing
+// old-action-equivalent acceptance/rejection smoke tests, mechanically remapped.
+describe("field rule scope/encrypted", () => {
+  it("accepts the five scope/encrypted combinations equivalent to the old actions", () => {
+    const fields = [
+      { pattern: "a", scope: "local", encrypted: false }, // old "strip"
+      { pattern: "b", scope: "all", encrypted: true }, // old "encrypt"
+      { pattern: "c", scope: "desktop", encrypted: false }, // old "desktop"
+      { pattern: "d", scope: "mobile", encrypted: false }, // old "mobile"
+      { pattern: "e", scope: "all", encrypted: false }, // old inert "all"
+    ];
+    const g = { ...GOOD, mode: "fields", fields };
+    expect(parseSyncManifest(manifestWith([g])).groups[0]?.fields).toEqual(fields);
+  });
+  it("rejects an unknown scope", () => {
+    const g = { ...GOOD, mode: "fields", fields: [{ pattern: "a", scope: "tablet", encrypted: false }] };
+    expect(() => parseSyncManifest(manifestWith([g]))).toThrow('invalid "fields" list');
   });
 });
 
@@ -159,9 +180,9 @@ describe("validateSyncManifest", () => {
     );
   });
   it("round-trips a boolean locked flag on field rules and rejects a non-boolean one", () => {
-    const withLocked = { ...GOOD, mode: "fields", fields: [{ pattern: "rootPath", action: "strip", locked: true }] };
+    const withLocked = { ...GOOD, mode: "fields", fields: [{ pattern: "rootPath", scope: "local", encrypted: false, locked: true }] };
     expect(validateSyncManifest({ version: 1, groups: [withLocked] }).groups[0]?.fields?.[0]?.locked).toBe(true);
-    const badLocked = { ...GOOD, mode: "fields", fields: [{ pattern: "rootPath", action: "strip", locked: "yes" }] };
+    const badLocked = { ...GOOD, mode: "fields", fields: [{ pattern: "rootPath", scope: "local", encrypted: false, locked: "yes" }] };
     expect(() => validateSyncManifest({ version: 1, groups: [badLocked] })).toThrow('invalid "fields" list');
   });
 });
