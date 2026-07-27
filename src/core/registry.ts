@@ -283,10 +283,21 @@ function compileCompanions(itemId: string, cfg: ItemConfig): SyncGroup[] {
 // masking machinery, driven by this map, is the correct home for per-element enable scope).
 export function enablementScopes(defs: ItemDef[], settings: CompileSettings, carrier: "core-plugins.json" | "community-plugins.json"): Record<string, RuleScope> {
   const out: Record<string, RuleScope> = {};
+  const covered = new Set<string>();
   for (const def of defs) {
     if (def.enablement?.carrier !== carrier) continue;
+    covered.add(def.id);
     const cfg = configFor(settings, def.id);
     out[def.enablement.element] = cfg.enabled ? (cfg.enabledOn ?? "all") : "local";
+  }
+  // Item configs with no local def: the plugin isn't installed on this device, but its element
+  // still lives in the store's switch list, so an adopted enabledOn / disabled-card decision must
+  // keep masking here (2026-07-27 mobile find: an adopted "desktop" scope for a not-installed
+  // plugin was dead config). The element id derives from the item id alone — no def needed.
+  const prefix = carrier === "core-plugins.json" ? "core:" : "community:";
+  for (const [id, cfg] of Object.entries(settings.items)) {
+    if (covered.has(id) || !id.startsWith(prefix)) continue;
+    out[id.slice(prefix.length)] = cfg.enabled ? (cfg.enabledOn ?? "all") : "local";
   }
   return out;
 }

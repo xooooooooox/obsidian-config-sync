@@ -90,6 +90,16 @@ export function desktopOnlyPluginIds(groups: SyncGroup[], plugins: PluginHost, l
     if (id === null) continue; // app-anchored
     if (availabilityForGroup(g, plugins, lock).desktopOnly) ids.add(id);
   }
+  // Lock entries with no local group: a flagged plugin that isn't installed on this device
+  // compiles to nothing, so the loop above never reaches its flag — but its element still lives
+  // in the store's switch list and must stay masked (2026-07-27 mobile find: "simpread" kept
+  // reappearing in every mobile diff). Manifest stays first: installed plugins are judged by
+  // their manifest above, so a stale lock flag alone never masks one.
+  for (const [name, entry] of Object.entries(lock?.groups ?? {})) {
+    if (entry?.desktopOnly !== true || !name.startsWith("plugin-")) continue;
+    const id = name.slice("plugin-".length);
+    if (plugins.getInstalledPluginVersion(id) === null) ids.add(id);
+  }
   return ids;
 }
 

@@ -258,6 +258,26 @@ describe("enablementScopes — per-element scope from enabledOn", () => {
     expect(Object.keys(enablementScopes(defs, s, "core-plugins.json"))).toEqual(["graph"]);
     expect(Object.keys(enablementScopes(defs, s, "community-plugins.json"))).toEqual(["dataview"]);
   });
+
+  // The 2026-07-27 mobile find: an adopted enabledOn for a plugin NOT installed on this device
+  // has no local def, so a defs-only scan dropped it — the scope was dead config and the element
+  // stayed unmasked ("obsidian-git" kept showing in every mobile diff after adopt).
+  it("covers item configs with no local def: their element id derives from the item id", () => {
+    const env: RegistryEnv = { ...EMPTY_ENV, plugins: [{ id: "dataview", name: "Dataview" }] };
+    const defs = buildItemDefs(env);
+    const s = settings({
+      "community:dataview": on(),
+      "community:obsidian-git": on({ enabledOn: "desktop" }), // not installed here
+      "community:simpread": emptyItemConfig(), // not installed, card disabled → This-device
+      app: on(), // obsidian card — no enablement carrier, must not leak in
+    });
+    expect(enablementScopes(defs, s, "community-plugins.json")).toEqual({
+      dataview: "all",
+      "obsidian-git": "desktop",
+      simpread: "local",
+    });
+    expect(Object.keys(enablementScopes(defs, s, "core-plugins.json"))).toEqual([]);
+  });
 });
 
 describe("compileItems — companion path collisions", () => {

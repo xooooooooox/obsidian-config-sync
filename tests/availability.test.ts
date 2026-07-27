@@ -104,6 +104,21 @@ describe("desktopOnlyPluginIds", () => {
     expect([...desktopOnlyPluginIds(groups, p, lock({ "plugin-media-extended": { sourcePluginVersion: "1.0.0", desktopOnly: true } }))]).toEqual(["media-extended"]);
     expect(desktopOnlyPluginIds(groups, p, lock({ "plugin-media-extended": { sourcePluginVersion: "1.0.0" } })).size).toBe(0);
   });
+  // The 2026-07-27 mobile find: a flagged plugin NOT installed on this device compiles no local
+  // group, so a groups-only scan never reached its lock flag — the switch-list element it still
+  // owns in the store went unmasked ("simpread" reappeared in every mobile diff).
+  it("masks a lock-flagged plugin even when no local group compiles for it (not installed here)", () => {
+    const p = new FakePlugins(); // nothing installed
+    const ids = desktopOnlyPluginIds([], p, lock({ "plugin-simpread": { sourcePluginVersion: "3.0.0", desktopOnly: true } }));
+    expect([...ids]).toEqual(["simpread"]);
+  });
+
+  it("manifest wins for an installed plugin: a stale lock flag alone never masks it", () => {
+    const p = new FakePlugins();
+    p.installed.set("demo", "1.0.0"); // manifest says NOT desktop-only
+    expect(desktopOnlyPluginIds([], p, lock({ "plugin-demo": { sourcePluginVersion: "1.0.0", desktopOnly: true } })).size).toBe(0);
+  });
+
   it("ignores app-anchored groups and empty input", () => {
     const p = new FakePlugins();
     expect(desktopOnlyPluginIds([appGroup], p, null).size).toBe(0);
