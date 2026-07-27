@@ -1,4 +1,4 @@
-import { GroupState } from "../core/status";
+import { GroupState, GroupStatus } from "../core/status";
 import { FileChanges } from "../core/types";
 import { Availability, VersionDrift } from "../core/availability";
 import { StateAction } from "../core/ConfigSyncCore";
@@ -115,6 +115,25 @@ export function sectionForItem(a: Availability, isMobile: boolean): SectionKind 
   if (a.kind === "disabled") return "disabled";
   if (a.anchor === "plugin" && a.drift === "behind") return "outdated";
   return "main";
+}
+
+// The status bar's data set: the same rows the Sync Center's header pills count — main-section
+// only, with the version-ahead presentation applied. Rows the center files under its own
+// sections (desktop-only / disabled / not-installed / outdated) are excluded here too;
+// counting them raw made the bar disagree with the center forever on devices where such
+// sections are populated (2026-07-27 phone find: center "in sync", bar "↓2"). A group with no
+// availability info is kept as-is — hiding it could silently blank a real pending state.
+export function statusBarStatuses(
+  statuses: GroupStatus[],
+  availabilityOf: (group: string) => Availability | undefined,
+  isMobile: boolean
+): GroupStatus[] {
+  return statuses.flatMap((st) => {
+    const a = availabilityOf(st.group);
+    if (a === undefined) return [st];
+    if (sectionForItem(a, isMobile) !== "main") return [];
+    return [{ ...st, state: presentedState(st.state, a.drift) }];
+  });
 }
 
 export interface PolicyOption {

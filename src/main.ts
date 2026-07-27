@@ -62,7 +62,7 @@ import { syncListDelta } from "./core/syncListDelta";
 import { selfPaneState } from "./core/selfPane";
 import { bucketCounts, checkRemote, diffRemote, GroupStatus, remoteDirectionCounts, RemoteCheck, remoteLockAhead, statusForGroups } from "./core/status";
 import { GroupResult, Remote, RibbonButtons, RuleScope, StoreLock, SyncGroup } from "./core/types";
-import { presentedState } from "./ui/panelModel";
+import { statusBarStatuses } from "./ui/panelModel";
 import { ConflictModal } from "./ui/ConflictModal";
 import { renderStatusBarItem, statusBarSegments } from "./ui/statusBar";
 import { SYNC_CENTER_VIEW_TYPE, SelfSyncInfo, SyncCenterHost, SyncCenterView } from "./ui/SyncCenterView";
@@ -319,11 +319,14 @@ export default class ConfigSyncPlugin extends Plugin {
         lock = null;
       }
       const host = this.pluginHost();
-      this.presentedStatuses = this.localStatuses.map((st) => {
-        const g = scoped.find((x) => x.name === st.group);
-        const drift = g !== undefined ? availabilityForGroup(g, host, lock).drift : null;
-        return { ...st, state: presentedState(st.state, drift) };
-      });
+      this.presentedStatuses = statusBarStatuses(
+        this.localStatuses,
+        (name) => {
+          const g = scoped.find((x) => x.name === name);
+          return g !== undefined ? availabilityForGroup(g, host, lock) : undefined;
+        },
+        Platform.isMobile
+      );
       await this.backfillLabels(ctx);
     } catch (e) {
       console.error("Config Sync: status refresh failed", e);
@@ -450,11 +453,10 @@ export default class ConfigSyncPlugin extends Plugin {
         }
         const availability: Record<string, Availability> = {};
         for (const g of groups) availability[g.name] = availabilityForGroup(g, this.pluginHost(), lock);
-        // The status bar prefers presentedStatuses, which only refreshLocalStatus() used to
-        // update — so a Sync Center recompute could leave the status bar rendering a stale
-        // snapshot indefinitely (center "in sync", bar "↓2"). Keep both snapshots in step with
-        // THIS compute, and only then repaint the indicators.
-        this.presentedStatuses = statuses.map((st) => ({ ...st, state: presentedState(st.state, availability[st.group]?.drift ?? null) }));
+        // Keep the status bar's snapshot in step with THIS compute (it used to be refreshed
+        // only by refreshLocalStatus), and count with the center's own lens — main-section
+        // rows only (statusBarStatuses) — so the bar can never disagree with the pills.
+        this.presentedStatuses = statusBarStatuses(statuses, (name) => availability[name], Platform.isMobile);
         this.updateStatusIndicators();
         return { groups, statuses, availability };
       },

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { capFileEntries, insyncLineText, moreFilesText, visibleUnderFilter, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, footerSummary, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, versionLine, runProgressLabel } from "../src/ui/panelModel";
+import { capFileEntries, insyncLineText, statusBarStatuses, moreFilesText, visibleUnderFilter, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, footerSummary, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, versionLine, runProgressLabel } from "../src/ui/panelModel";
 import { GroupState } from "../src/core/status";
 import { Availability } from "../src/core/availability";
 
@@ -241,3 +241,39 @@ describe("runProgressLabel", () => {
   });
 });
 
+
+describe("statusBarStatuses — the status bar counts what the Sync Center's main section counts", () => {
+  const av = (over: Partial<Availability>): Availability => ({
+    kind: "enabled", drift: null, localVersion: "1.0.0", storeVersion: "1.0.0", anchor: "plugin", desktopOnly: false, ...over,
+  });
+  const st = (group: string, state: GroupState) => ({ group, state });
+
+  // The 2026-07-27 phone find: groups for plugins not installed on this device (or desktop-only
+  // there) sat in their own Sync Center sections — excluded from the header pills — while the
+  // status bar's raw bucketCounts still counted them: center "in sync", bar "↓2", forever.
+  it("drops rows outside the main section", () => {
+    const avail: Record<string, Availability> = {
+      "plugin-a": av({}),
+      "plugin-git": av({ kind: "not-installed", localVersion: null }),
+      "plugin-simpread": av({ kind: "not-installed", localVersion: null, desktopOnly: true }),
+    };
+    const statuses = [st("plugin-a", "in-sync"), st("plugin-git", "store-newer"), st("plugin-simpread", "differs")];
+    const out = statusBarStatuses(statuses, (g) => avail[g], true);
+    expect(out).toEqual([{ group: "plugin-a", state: "in-sync" }]);
+  });
+
+  it("applies the version-ahead presentation to main-section rows and keeps unknown groups", () => {
+    const avail: Record<string, Availability> = { "plugin-a": av({ drift: "ahead", storeVersion: "0.9.0" }) };
+    const statuses = [st("plugin-a", "in-sync"), st("mystery", "store-newer")];
+    const out = statusBarStatuses(statuses, (g) => avail[g], false);
+    expect(out).toEqual([
+      { group: "plugin-a", state: "local-changed" }, // ahead + in-sync presents as to-capture
+      { group: "mystery", state: "store-newer" }, // no availability info → keep, don't hide
+    ]);
+  });
+
+  it("drops outdated (drift-behind) rows like the center does", () => {
+    const avail: Record<string, Availability> = { "plugin-b": av({ drift: "behind", localVersion: "0.9.0" }) };
+    expect(statusBarStatuses([st("plugin-b", "store-newer")], (g) => avail[g], false)).toEqual([]);
+  });
+});
