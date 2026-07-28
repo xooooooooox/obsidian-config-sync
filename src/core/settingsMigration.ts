@@ -14,7 +14,7 @@
 import { ItemConfig, ItemFieldRule } from "./registry";
 import { PerItemScopes } from "./types";
 
-export const SCHEMA_UPGRADE_NOTICE = "Config Sync: settings schema changed — please reconfigure your sync items.";
+export const SCHEMA_UPGRADE_NOTICE = "Config Sync: this update reset your sync setup — open Settings to choose what to sync again.";
 
 // `null` (no data.json yet — a fresh install) is NOT legacy: there is nothing to reconfigure,
 // just a brand-new default settings object.

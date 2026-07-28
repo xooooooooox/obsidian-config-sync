@@ -455,5 +455,8 @@ export function displayLabelForGroup(name: string, plugins: PluginHost, storedLa
     const id = name.slice("plugin-".length);
     return plugins.getInstalledPluginName(id) ?? storedLabel ?? id;
   }
+  if (name === "community-plugins") return "Community plugins on/off";
+  if (name === "core-plugins") return "Core plugins on/off";
+  if (name === "enabled-css-snippets") return "CSS snippets on/off";
   return storedLabel ?? name;
 }

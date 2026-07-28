@@ -125,7 +125,7 @@ export class ConflictModal extends Modal {
     const head = row.createDiv({ cls: "config-sync-cm-crow" });
     const chev = head.createSpan({ cls: "config-sync-cm-chev", text: "⌄" });
     head.createSpan({ cls: "config-sync-cm-cname", text: c.name === "" ? (c.kind === "file" ? c.rel : "(store)") : this.displayName(c.name) });
-    head.createSpan({ cls: `config-sync-cm-kind is-${c.kind}`, text: c.kind === "definition" ? "DEFINITION" : "FILE" });
+    head.createSpan({ cls: `config-sync-cm-kind is-${c.kind}`, text: c.kind === "definition" ? "Rule" : "File" });
     if (c.kind === "file") head.createSpan({ cls: "config-sync-cm-rel", text: c.rel });
     head.createDiv({ cls: "config-sync-rule-spacer" });
     head.createSpan({ cls: "config-sync-cm-warn", text: "⚠ choose a side" });
@@ -202,7 +202,7 @@ export class ConflictModal extends Modal {
       remoteText,
       "local  (this device)",
       `remote (${this.remoteName})`,
-      c.kind === "definition" ? "group definition" : sortedView ? "--- local · +++ remote · sorted view" : "--- local · +++ remote"
+      c.kind === "definition" ? "sync rule" : sortedView ? "--- local · +++ remote · sorted view" : "--- local · +++ remote"
     );
   }
 }

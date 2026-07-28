@@ -229,9 +229,9 @@ functions.
 - `reportContent.ts` — shared run-report rendering (the Sync Center strip and History detail).
 - `diffView.ts` — unified-diff rendering; `jsonView.ts` — read-only `data.json` viewer with keys
   colored by `{scope, encrypted}` rule state (per-element coloring too, for a `perItem` array);
-  `sensitiveSort.ts` — floats rows with sensitive keys to the top; `commitGroups.ts` — Advanced-tab
-  custom-rule save/commit logic; `ConfirmModal`/`ConflictModal`/`FolderSelectModal`/`ReportModal`
-  — modals.
+  `itemCard.ts`'s `PREVIEW_LEGEND_ENTRIES` drives the purple detected-key highlight in the File
+  preview; `commitGroups.ts` — Advanced-tab custom-rule save/commit logic; `ConfirmModal`/
+  `ConflictModal`/`FolderSelectModal` — modals.
 
 **External** (`src/external/`, desktop-only, the only Node code — dynamic-imported from `main.ts`)
 - `gitSource.ts` — the git transport: `execFile('git', …)` against a temp clone, never touching
@@ -398,7 +398,7 @@ Changes must preserve these:
 - The version in `manifest.json` is the source of truth for the current release; older releases'
   history is retained on GitHub.
 - **Parked backlog** (deferred by the maintainer — don't start without an explicit pick):
-  1. UI audit polish — `design/DESIGN.md` §5 (remaining findings: emoji remnants, micro font
+  1. UI audit polish — `design/DESIGN.md` §6 (remaining findings: emoji remnants, micro font
      sizes, text-on-fill variable split, border-radius tiers, one double-duty class; the dead-CSS
      finding is resolved).
   2. Capture/pull interruption robustness (crash-marker vs full atomicity — direction undecided).

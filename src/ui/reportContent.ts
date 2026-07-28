@@ -48,9 +48,9 @@ export function renderReportContent(container: HTMLElement, results: GroupResult
   const meta = changed.find((r) => r.group === "");
   if (meta !== undefined) {
     const sect = container.createDiv({ cls: "config-sync-sect" });
-    sect.createSpan({ text: "Store metadata" });
+    sect.createSpan({ text: "Sync setup" });
     sect.createSpan({ cls: "config-sync-pill is-neutral config-sync-sect-count", text: "1" });
-    renderResultRow(container.createDiv({ cls: "config-sync-card" }), meta, "store metadata");
+    renderResultRow(container.createDiv({ cls: "config-sync-card" }), meta, "sync setup");
   }
   if (unchanged.length > 0) {
     const line = container.createDiv({

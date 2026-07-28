@@ -730,7 +730,8 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 .config-sync-side-self-pill.is-ok { border-color: rgba(var(--color-green-rgb), 0.5); color: var(--color-green); }
 .config-sync-self-pane { padding: 2px 2px 12px; }
 .config-sync-self-title { display: flex; align-items: center; gap: 8px; font-size: var(--font-ui-medium); font-weight: var(--font-bold); }
-.config-sync-self-title-ic { color: var(--interactive-accent); flex: none; }
+.config-sync-self-title-ic { color: var(--interactive-accent); flex: none; display: inline-flex; }
+.config-sync-self-title-ic svg { width: 16px; height: 16px; }
 .config-sync-self-pill { font-size: var(--font-ui-smaller); border-radius: 999px; padding: 1px 9px; margin-left: 4px; }
 .config-sync-self-pill.is-down { background: rgba(var(--interactive-accent-rgb), 0.15); color: var(--interactive-accent); }
 .config-sync-self-pill.is-up { background: rgba(var(--color-orange-rgb), 0.15); color: var(--color-orange); }
@@ -964,9 +965,8 @@ body.is-mobile .config-sync-strip-meta .config-sync-report-pills { margin-left: 
    "this device" preview color (.config-sync-json-strip above); don't reuse it here (FINDING 3). */
 .config-sync-card-badge-local { color: var(--color-pink); background: rgba(var(--color-pink-rgb), 0.12); }
 .config-sync-card-badge-count { color: var(--color-cyan); background: rgba(var(--color-cyan-rgb), 0.12); }
-.config-sync-card-badge-array, .config-sync-card-badge-fromapp { color: var(--text-muted); background: var(--background-modifier-border); }
-/* Innate platform chip ("desktop-only plugin", round-8 spec §2): same neutral grey as the
-   array/fromapp badges, inline-flex only here so the embedded monitor icon aligns with the text. */
+/* Innate platform chip ("desktop-only plugin", round-8 spec §2): neutral grey,
+   inline-flex only here so the embedded monitor icon aligns with the text. */
 .config-sync-card-badge-plat { color: var(--text-muted); background: var(--background-modifier-border); display: inline-flex; align-items: center; gap: 4px; vertical-align: -1px; }
 .config-sync-card-badge-ic svg { width: 11px; height: 11px; display: block; }
 .config-sync-card-badge-state { color: var(--text-faint); background: transparent; border: 1px dashed var(--background-modifier-border-hover); }
@@ -1007,7 +1007,6 @@ body.is-mobile .config-sync-strip-meta .config-sync-report-pills { margin-left: 
 /* Flex so the edit state's input + Reset link share one line inside the content column. */
 .config-sync-card-pathhost { min-width: 8em; display: flex; align-items: center; }
 .config-sync-card-pathinput { width: 100%; font-family: var(--font-monospace); font-size: var(--font-ui-smaller); }
-.config-sync-card-sfhint { color: var(--text-faint); font-size: var(--font-ui-smaller); margin-bottom: var(--size-4-1); }
 .config-sync-card-sfbody { margin-top: var(--size-2-2); }
 
 .config-sync-card-fields { margin-bottom: var(--size-4-1); }

@@ -67,6 +67,7 @@ import {
   SCOPE_ICONS,
   scopeCycleTooltip,
   settingsFileZoneKind,
+  SCOPE_LABELS,
   SnippetMemberRow,
   sortCompanionMemberNames,
   SNIPPET_MEMBER_HINT,
@@ -1757,11 +1758,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       fr.createDiv({ cls: "config-sync-rule-spacer" });
       // The appearance group's locked enabledCssSnippets strip (ensureAppearancePresets) isn't
       // an ordinary fixed-action rule — it exists only to keep the field out of THIS file because
-      // it's synced elsewhere, under CSS snippets → Device scope. A disabled "This device"
+      // it's synced elsewhere, under CSS snippets → Device rules. A disabled "This device"
       // dropdown would mislead (implying a choice), so it points at the real control instead.
       const isSnippetPointer = rule.locked === true && rule.pattern === "enabledCssSnippets";
       if (isSnippetPointer) {
-        fr.createSpan({ cls: "config-sync-ldhint", text: "locked — managed under CSS snippets → Device scope" });
+        fr.createSpan({ cls: "config-sync-ldhint", text: "locked — managed under CSS snippets → Device rules" });
       } else {
         const dd = new DropdownComponent(fr.createDiv({ cls: "config-sync-act" }));
         dd.addOption("strip", "This device")
@@ -2457,8 +2458,8 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
 
     const line2 = panel.createDiv({ cls: "config-sync-form-line2" });
     new DropdownComponent(field(line2, "Type"))
-      .addOption("file", "file")
-      .addOption("dir", "dir")
+      .addOption("file", "File")
+      .addOption("dir", "Folder")
       .setValue(group.type)
       .onChange(async (v) => {
         await this.commitGroups((draft) => {
@@ -2473,9 +2474,9 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         this.refresh();
       });
     new DropdownComponent(field(line2, "Devices"))
-      .addOption("all", "all")
-      .addOption("desktop", "desktop")
-      .addOption("mobile", "mobile")
+      .addOption("all", SCOPE_LABELS.all)
+      .addOption("desktop", SCOPE_LABELS.desktop)
+      .addOption("mobile", SCOPE_LABELS.mobile)
       .setValue(group.devices)
       .onChange(async (v) => {
         await this.commitGroups((draft) => {

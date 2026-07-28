@@ -27,7 +27,7 @@ describe("isLegacySettings", () => {
 
 describe("SCHEMA_UPGRADE_NOTICE", () => {
   it("is the character-exact Notice copy", () => {
-    expect(SCHEMA_UPGRADE_NOTICE).toBe("Config Sync: settings schema changed — please reconfigure your sync items.");
+    expect(SCHEMA_UPGRADE_NOTICE).toBe("Config Sync: this update reset your sync setup — open Settings to choose what to sync again.");
   });
 });
 

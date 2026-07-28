@@ -275,7 +275,7 @@ export default class ConfigSyncPlugin extends Plugin {
         return;
       }
       console.error("Config Sync: compiled sync groups failed validation", e);
-      new Notice(`Config Sync: compiled sync configuration is invalid (${reason})`, 10000);
+      new Notice(`Config Sync: your sync setup has an invalid rule (${reason}) — fix it under Settings → Advanced.`, 10000);
     }
   }
 
@@ -476,7 +476,7 @@ export default class ConfigSyncPlugin extends Plugin {
         try {
           localList = selfListGroups(this.registryDefs, this.settings.items, this.settings.customGroups);
         } catch {
-          localList = this.compiledGroups; // CompileError — recompile() already surfaced the Notice
+          localList = this.compiledGroups; // best-effort fallback for any failure; in practice CompileError, which recompile() already surfaced as a Notice
         }
         const selfCopy = `${ctx.rootPath}/store/configdir/plugins/config-sync/data.json`;
         const storeGroups = (await ctx.io.exists(selfCopy)) ? storeSelfCopyGroups(await ctx.io.read(selfCopy), this.registryDefs) : [];
@@ -564,6 +564,10 @@ export default class ConfigSyncPlugin extends Plugin {
         }
       },
       switchMemberDecisions: (name) => (SWITCH_LIST_GROUPS.has(name) ? this.memberDecisionsFor(name) : []),
+      isDesktopOnlyPlugin: (id) => {
+        const manifest = this.pluginRegistry().manifests[id];
+        return manifest === undefined ? null : manifest.isDesktopOnly === true;
+      },
       betaIds: () => new Set(Object.keys(this.settings.bratPluginIndex)),
       runHistoryEnabled: () => this.settings.runHistory.enabled,
       loadRunHistory: () => this.loadRunHistory(),
@@ -720,7 +724,7 @@ export default class ConfigSyncPlugin extends Plugin {
           await this.refreshRemoteChecks();
           return results;
         } catch (e) {
-          new Notice(`Config Sync pull failed: ${(e as Error).message}`, 10000);
+          new Notice(`Config Sync pull failed: ${(e as Error).message} — check the remote's URL or path and try again.`, 10000);
           return null;
         }
       },
@@ -731,7 +735,7 @@ export default class ConfigSyncPlugin extends Plugin {
           await this.refreshRemoteChecks();
           return results;
         } catch (e) {
-          new Notice(`Config Sync push failed: ${(e as Error).message}`, 10000);
+          new Notice(`Config Sync push failed: ${(e as Error).message} — check the remote's URL or path and try again.`, 10000);
           return null;
         }
       },

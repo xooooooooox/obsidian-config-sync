@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { capFileEntries, insyncLineText, statusBarStatuses, moreFilesText, visibleUnderFilter, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, footerSummary, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, versionLine, runProgressLabel, showColdStartBanner, memberChangeRows, memberDecisionsFromScopes, memberDecisionText } from "../src/ui/panelModel";
+import { capFileEntries, insyncLineText, statusBarStatuses, moreFilesText, visibleUnderFilter, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, footerSummary, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, versionLine, runProgressLabel, showColdStartBanner, memberChangeRows, memberDecisionsFromScopes, memberDecisionText, whereItRunsEntries } from "../src/ui/panelModel";
 import { GroupState, GroupStatus } from "../src/core/status";
 import { Availability } from "../src/core/availability";
 
@@ -324,6 +324,23 @@ describe("memberChangeRows (spec 2026-07-28 §4)", () => {
     expect(rows[0]?.why).toBe("on for your other devices, off on this computer — Apply would turn it on here too");
     expect(rows[0]?.recommended).toBe("mobile");
     expect(rows[2]?.why).toBe("on only on this computer — Capture would turn it on for your other devices");
+  });
+});
+
+describe("whereItRunsEntries", () => {
+  const entries = [
+    { title: "Desktop only", kind: "desktop" as const },
+    { title: "Mobile only", kind: "mobile" as const },
+    { title: "This device decides for itself" },
+    { title: "Everywhere" },
+  ];
+
+  it("drops the mobile-only entry for a known desktop-only member", () => {
+    expect(whereItRunsEntries(entries, true).map((e) => e.title)).toEqual(["Desktop only", "This device decides for itself", "Everywhere"]);
+  });
+
+  it("keeps every option when desktop-only-ness is unknown", () => {
+    expect(whereItRunsEntries(entries, false)).toEqual(entries);
   });
 });
 

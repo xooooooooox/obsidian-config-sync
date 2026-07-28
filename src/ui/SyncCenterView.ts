@@ -35,6 +35,7 @@ import {
   visibleUnderFilter,
   Direction,
   effectiveDirection,
+  whereItRunsEntries,
 } from "./panelModel";
 import { renderDiffPanel } from "./diffView";
 import { SWITCH_LIST_GROUPS, switchListSortedView } from "../core/switchList";
@@ -143,6 +144,10 @@ export interface SyncCenterHost {
   pushTo(remote: Remote): Promise<GroupResult[] | null>;
   adoptConfiguration(): Promise<GroupResult[] | null>;
   switchMemberDecisions(name: string): MemberDecision[]; // [] for non-switch-list groups
+  // The installed plugin's manifest desktop-only flag — the source of truth regardless of
+  // whether the member's own settings-file sync is enabled (the availability map only covers
+  // that subset). null = unknown (not installed on this device), not "false".
+  isDesktopOnlyPlugin(id: string): boolean | null;
   betaIds(): Set<string>; // plugin ids tracked in the BRAT index (the Beta scope/tab)
   runHistoryEnabled(): boolean;
   loadRunHistory(): Promise<RunRecord[]>;
@@ -560,7 +565,8 @@ export class SyncCenterView extends ItemView {
     if (info === null) return;
     const pane = main.createDiv({ cls: "config-sync-self-pane" });
     const title = pane.createDiv({ cls: "config-sync-self-title" });
-    title.createSpan({ cls: "config-sync-self-title-ic", text: info.state === "coldstart" ? "⬇" : info.state === "capture" ? "⇧" : info.state === "both" ? "⚠" : "⚙" });
+    const titleIc = title.createSpan({ cls: "config-sync-self-title-ic" });
+    setIcon(titleIc, info.state === "coldstart" ? ACTION_ICON.apply : info.state === "capture" ? ACTION_ICON.capture : info.state === "both" ? "alert-triangle" : "settings");
     title.createSpan({ text: "Config Sync" });
     const pill = this.selfStatePill(info);
     if (pill !== null) title.createSpan({ cls: `config-sync-self-pill ${pill.cls}`, text: pill.text });
@@ -611,7 +617,7 @@ export class SyncCenterView extends ItemView {
 
     const sub = pane.createDiv({ cls: "config-sync-self-sub" });
     if (info.state === "both") sub.setText("Both your list and the store changed. Adopt first, then capture — capturing now would overwrite another device's list additions with this device's older list.");
-    else if (info.state === "adopt") sub.setText("The list of what this device syncs changed in the store. Adopt to bring the new items onto this device; they then appear under the item scopes as normal, apply-able rows.");
+    else if (info.state === "adopt") sub.setText("The list of what this device syncs changed in the store. Adopt to bring the new items onto this device; they then appear in your item list as normal, apply-able rows.");
     else sub.setText("You changed what this device syncs. Capture to publish it to the store, so your other devices can adopt it.");
 
     if (info.state === "adopt" || info.state === "both") {
@@ -1515,8 +1521,12 @@ export class SyncCenterView extends ItemView {
     // their own icon; the rest stay text glyphs.
     this.paintStateIcon(stateEl, icon);
     if (inert && this.searching() && !this.expandedItems.has(group.name)) {
-      // A grey hit must explain itself without a hover (定稿 search UX).
-      card.createDiv({ cls: "config-sync-inert-note", text: `${icon.glyph} ${icon.tip}` });
+      // A grey hit must explain itself without a hover (定稿 search UX). Route the glyph through
+      // paintStateIcon so a locked row's 🔒 renders as the key-round icon, same as stateEl above,
+      // instead of splicing the raw emoji character into the note text.
+      const note = card.createDiv({ cls: "config-sync-inert-note" });
+      this.paintStateIcon(note.createSpan({ cls: `config-sync-state-icon ${icon.cls}` }), icon);
+      note.appendText(` ${icon.tip}`);
     }
 
     const dir = this.effDir(r);
@@ -1707,8 +1717,9 @@ export class SyncCenterView extends ItemView {
     this.renderCappedChanges(detail, r, status.changes);
   }
 
-  // Bidirectional divergence summary (定稿 2026-07-17): shown ONLY when both directions
-  // would destroy the other side's state — a one-sided difference renders nothing extra.
+  // Bidirectional divergence summary (定稿 2026-07-17): only the red warning box above is gated
+  // on both directions destroying the other side's state — the per-member where-it-runs
+  // guidance rows below (renderMemberBlock) render for any one-sided difference too.
   private renderSwitchDivergence(detail: HTMLElement, r: StatusRow): void {
     const holder = detail.createDiv();
     void this.host.switchDivergenceFor(r.group.name).then((d) => {
@@ -1766,21 +1777,33 @@ export class SyncCenterView extends ItemView {
     menu.setUseNativeMenu(false); // DOM menu — renders our Lucide icons on macOS too
     const consequence = m.action === "apply" ? "no rule, Apply turns it on here" : "no rule, Capture turns it on for your other devices";
     const rec = " · matches where it's used today";
-    const entries: { title: string; icon?: string; write: (() => Promise<void>) | null }[] = [
+    // Known (not unknown-because-not-installed) desktop-only members can never actually run on
+    // mobile, so "Mobile only" is dropped for them below (whereItRunsEntries) — a rule that can
+    // never take effect. The manifest is the source of truth (works even for switch-list members
+    // whose own settings-file sync is off, so they never land in the availability map); the
+    // availability map is a fallback for members not installed on this device.
+    const knownDesktopOnly = this.host.isDesktopOnlyPlugin(m.id) ?? this.availOf(`plugin-${m.id}`).desktopOnly;
+    const allEntries: { title: string; icon?: string; write: (() => Promise<void>) | null; kind?: "desktop" | "mobile" }[] = [
       {
         title: `Desktop only — stays off on phones${m.recommended === "desktop" ? rec : ""}`,
         icon: "monitor",
         write: () => this.host.setMemberEnabledOn(carrier, m.id, "desktop"),
+        kind: "desktop",
       },
       {
         title: `Mobile only — stays off on desktops${m.recommended === "mobile" ? rec : ""}`,
         icon: "smartphone",
         write: () => this.host.setMemberEnabledOn(carrier, m.id, "mobile"),
+        kind: "mobile",
       },
       { title: "⌂ This device decides for itself", write: () => this.host.addSwitchExceptions(carrier, [m.id]) },
       { title: `Everywhere — ${consequence}`, icon: "globe", write: null },
     ];
-    if (m.recommended === "mobile") entries.unshift(entries.splice(1, 1)[0]!); // recommended leads
+    const entries = whereItRunsEntries(allEntries, knownDesktopOnly);
+    if (m.recommended === "mobile") {
+      const idx = entries.findIndex((e) => e.kind === "mobile");
+      if (idx > 0) entries.unshift(entries.splice(idx, 1)[0]!); // recommended leads
+    }
     for (const it of entries) {
       menu.addItem((i) => {
         i.setTitle(it.title);
@@ -2163,7 +2186,7 @@ export class SyncCenterView extends ItemView {
     } catch (e) {
       if (gen !== this.renderGen || this.panelScope.kind !== "remote" || this.panelScope.name !== remote.name) return;
       detail.empty();
-      detail.createDiv({ cls: "config-sync-status-error", text: `cannot compare: ${(e as Error).message}` });
+      detail.createDiv({ cls: "config-sync-status-error", text: `Couldn't compare with this remote: ${(e as Error).message} — check the connection and try again.` });
       return;
     }
     if (gen !== this.renderGen || this.panelScope.kind !== "remote" || this.panelScope.name !== remote.name) return;

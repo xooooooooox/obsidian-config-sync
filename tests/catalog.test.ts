@@ -469,6 +469,13 @@ describe("displayLabelForGroup", () => {
     expect(displayLabelForGroup("plugin-not-installed", plugins)).toBe("not-installed");
     expect(displayLabelForGroup("my-custom-rule", plugins)).toBe("my-custom-rule");
   });
+
+  it("labels the switch-list carrier groups instead of rendering their raw internal names", () => {
+    const plugins = new FakePlugins();
+    expect(displayLabelForGroup("community-plugins", plugins)).toBe("Community plugins on/off");
+    expect(displayLabelForGroup("core-plugins", plugins)).toBe("Core plugins on/off");
+    expect(displayLabelForGroup("enabled-css-snippets", plugins)).toBe("CSS snippets on/off");
+  });
 });
 
 describe("displayLabelForGroup label priority", () => {

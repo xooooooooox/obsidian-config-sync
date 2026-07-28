@@ -92,20 +92,55 @@ locked/cyan.
 `refresh-cw` ribbon + both panel refreshes + status-bar item · `lock` mode badge ·
 `key-round` locked state · `chevron-down/right` settings rows · `x` clear/remove ·
 `trash` delete · `folder-open` browse · `rotate-cw` BRAT re-scan · `arrow-up-from-line` /
-`arrow-down-to-line` / `cloud-upload` / `cloud-download` sync-action icons · tabs: `settings`,
+`arrow-down-to-line` / `cloud-upload` / `cloud-download` sync-action icons (the first two
+double as the self-pane title's capture/coldstart states, with `alert-triangle` both and
+`settings` default — see §2.4) · tabs: `settings`,
 `gem`, `toy-brick`, `puzzle`, `flask-conical` (BratIcon preferred when registered),
-`wrench`, `git-branch` · quick-command menu items take the command's own icon by default, changeable via the `getIconIds()` icon picker (`IconSelectModal`) · `monitor` / `smartphone` — the "where it runs" menu's Desktop only/Mobile only items and the per-member decision note rows (`config-sync-lddetail-ic`) · `globe` — the same menu's Everywhere item.
+`wrench`, `git-branch` · `monitor` / `smartphone` — the "where it runs" menu's Desktop only/Mobile
+only items, the per-member decision note rows (`config-sync-lddetail-ic`), and the row-level
+desktop-only-plugin badge (`config-sync-card-badge-plat`, itemCard.ts) · `globe` — the "where it
+runs" menu's Everywhere item · `airplay` — `SCOPE_ICONS` "This device" stop, rendered by every
+drawer scope-cycle (`renderScopeCycle`, itemCard.ts) · `settings-2` — the sidebar Config Sync
+self-entry tile and the self pane's title-row Settings button.
 
 ### 2.4 Glyph language (text, reused everywhere)
 
 Direction *actions* (capture/apply/push/pull) now render as the dedicated icons from
 `actionIcons.ts` rather than a shared `↑ ↓` glyph; count badges embed one of those icons
 plus a number (`renderActionCount`). `✓ ○` remain text and still power header pills,
-sidebar/switcher badges, and the mobile filter pills (short form). Chevrons `▸ ▾ ▴`.
-Actions `⤓` install, `⏻` enable. Report chips `+ ~ −`. Warnings `⚠ ✗`. Conflict modal
-`＋ ＝ ⌂`. New UI must reuse this vocabulary rather than invent synonyms.
+sidebar/switcher badges, and the mobile filter pills (short form) — except two hero
+surfaces, which render real Lucide icons instead, parallel to §2.1's key-round exception:
+the header/self-pane self-chip (`check`/`settings`, SyncCenterView.ts) and the
+qualifier-autocomplete value rows (`check`, qualifierSearch.ts). Everywhere else ✓/○
+remain text. Chevrons `▸ ▾ ▴`. Actions `⤓` install, `⏻` enable. Report chips `+ ~ −`.
+Warnings `⚠ ✗`. Conflict modal `＋ ＝`. `⌂` is the vocabulary's local/device-exception
+glyph, used wherever a decision is pinned to one device — the conflict modal is one case
+(`＋ ＝ ⌂`), but it also appears in local-decision detail rows, the "⌂ Keep N extra…"
+button, and the "where it runs" menu's "⌂ This device decides for itself" item. Self-pane
+title icon (`config-sync-self-title-ic`) is Lucide (the self pane is a hero surface):
+`arrow-down-to-line` coldstart · `arrow-up-from-line` capture — the ACTION_ICON pair —
+plus `alert-triangle` both · `settings` default. New UI must reuse this vocabulary rather
+than invent synonyms.
 
-## 3. Component library
+## 3. Copy principles
+
+- All user-facing copy is written from the user/product perspective, never the
+  implementation's.
+- Forbidden implementation vocabulary in copy: scope, carrier, mask, self group, ledger,
+  shared list, compiled, registry, delta, schema. Use device narrative ("on for your other
+  devices", "off on this phone") and consequence narrative ("Apply would turn it on here
+  too") instead.
+- Anchor to established product terms: Apply, Capture, the store, Sync Center, "your other
+  devices". Don't invent synonyms.
+- Controls state their click consequence; recommended options give their reason ("matches
+  where it's used today").
+- Error/diagnostic copy is a separate tier: KEEP actionable technical detail (paths,
+  params, status codes) and always give a next step; strip only pure-internal jargon.
+- No emoji in copy; icons are Lucide via `setIcon` or the established text-glyph
+  vocabulary (§2.3/§2.4).
+- Mockup copy is final copy — review it to this standard at mockup time.
+
+## 4. Component library
 
 Class prefix → role (all in `styles.css`, rendered from `src/ui/SyncCenterView.ts` unless
 noted):
@@ -251,7 +286,7 @@ noted):
     this supersedes and folds in every earlier partial-compatibility clause (the phase-1
     `memberScopes` window, the phase-2 `__scopes__` sidecar note) into the one blocking statement.
 
-## 4. Conventions
+## 5. Conventions
 
 - Theme variables only; the no-hardcoded-color script is a release gate. Alpha via
   `rgba(var(--*-rgb), α)`.
@@ -263,7 +298,7 @@ noted):
 - New icons come from Lucide via `setIcon` or the glyph vocabulary (§2.4); no emoji in
   chrome (they ignore theme colors) — see Findings #2 for the remaining ones.
 
-## 5. Audit findings — 2026-07-18 (decisions pending)
+## 6. Audit findings — 2026-07-18 (decisions pending)
 
 Each item ships only after a user decision. None change behavior silently.
 
@@ -277,13 +312,20 @@ Each item ships only after a user decision. None change behavior silently.
    `.config-sync-devbadge`/`-facebadge`, `.config-sync-badge`, `.config-sync-cust`,
    `.config-sync-link`, `.config-sync-jsonbody`, `.config-sync-shared-tag`,
    `.config-sync-passphrase-status`, `.config-sync-guide*`, `.config-sync-strip.is-transfer`)
-   are all removed. Remaining, still open: three TS-only classes with no CSS rule
-   (`-beta-mapnote`, `-remote-comparing`, `-cm-unified`; `-flock` has since grown a real rule)
-   — decide whether they get styles or stay as semantic hooks.
-2. **Emoji remnants**: settings fields editor 🔒 (`-flock`), bootstrap banner ⬇, plus
-   ⚠/⚙/↺/＋/＝/⌂ glyphs. The panel purged emoji (mode badges, locked state) because they
-   ignore theme color; candidates: `-flock` → Lucide `lock`, ⬇ → Lucide `download`. The
-   pure-text glyphs (⚠ etc.) render monochrome and can stay.
+   are all removed. Remaining, still open: seven TS-only classes with no CSS rule
+   (`-flock` has since grown a real rule and is off this list). Three are undecided:
+   `-beta-mapnote`, `-remote-comparing`, `-cm-unified` — decide whether they get styles or
+   stay as semantic hooks. Four more, found on re-audit, are structural query/layout
+   anchors, deliberately unstyled: `config-sync-card-companionzonehost`
+   (SettingTab.ts:723,1330), `config-sync-card-memberhost` (SettingTab.ts:1291),
+   `config-sync-card-sfbodyhost` (SettingTab.ts:697,777), `config-sync-cm-diffhost`
+   (ConflictModal.ts:149).
+2. **Emoji remnants**: the self-pane title (`config-sync-self-title-ic`) converted to
+   Lucide state icons (see §2.4) — no longer a candidate, like `-flock`, which shipped its
+   Lucide `lock` replacement (SettingTab.ts:1752-1753, styles.css:787-788). Remaining
+   text glyphs: ↺/＋/＝/⌂ and the ⚠/✗/✓ status set. The panel purged emoji (mode badges,
+   locked state) because they ignore theme color; the remaining pure-text glyphs render
+   monochrome and can stay.
 3. **Micro px font sizes** (9.5–10.5px: side badges, ftag, act-btn, sect-count, seg-label,
    cm-kind, cm-viewbtn): below `--font-ui-smaller` and not theme-responsive. Options:
    normalize to `--font-ui-smaller`, or bless a documented "micro" tier. (Checkbox pseudo

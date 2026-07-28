@@ -274,6 +274,15 @@ export function memberChangeRows(
   return [...storeOnly, ...localOnly];
 }
 
+// The "where it runs" menu offers a "Mobile only" option that pins a member to phones — never a
+// real choice for a plugin whose manifest is desktop-only, since it can never run there. Omit
+// that entry once the member's desktop-only-ness is known; an unknown member (not installed on
+// this device, a core-plugins member — which is never desktop-only — or an installed plugin
+// whose manifest can't be read here) keeps every option.
+export function whereItRunsEntries<T extends { kind?: "desktop" | "mobile" }>(entries: T[], knownDesktopOnly: boolean): T[] {
+  return knownDesktopOnly ? entries.filter((e) => e.kind !== "mobile") : entries;
+}
+
 export interface MemberDecision {
   id: string;
   scope: "local" | "desktop" | "mobile";

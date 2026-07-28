@@ -201,8 +201,8 @@ export function encryptToggleDisabled(scope: RuleScope, perItemEnabled: boolean)
   return encryptDisabledForScope(scope) || perItemEnabled;
 }
 
-export const PER_ITEM_DISABLED_HINT = "Turn off Encrypt to enable Per-item scopes.";
-export const ENCRYPT_DISABLED_PERITEM_HINT = "Turn off Per-item scopes to encrypt.";
+export const PER_ITEM_DISABLED_HINT = "Turn off Encrypt to enable Per-item device rules.";
+export const ENCRYPT_DISABLED_PERITEM_HINT = "Turn off Per-item device rules to encrypt.";
 
 // Toggling Per-item scopes on/off for one Fields-mode row (D3 + MUST-FIX 2): turning it ON must
 // clear `encrypted` on the SAME rule in the SAME write.
@@ -409,7 +409,7 @@ export const DESKTOP_ONLY_ALL_NOTE = "mobile is excluded automatically";
 
 export function scopeCycleTooltip(scope: RuleScope, note?: string): string {
   const label = note === undefined ? SCOPE_LABELS[scope] : `${SCOPE_LABELS[scope]} — ${note}`;
-  return `Change scope (currently: ${label})`;
+  return `Where it syncs (currently: ${label})`;
 }
 
 // Reused as the ✎ icon's tooltip/aria (spec 2026-07-26-card-visual-refresh-design.md §2/§5) — no
@@ -417,7 +417,7 @@ export function scopeCycleTooltip(scope: RuleScope, note?: string): string {
 // active — remove them to control the whole file again`/`Remove rule`/`Reset to default path`/
 // `Encrypt` · `Encrypted`, which are single-call-site literals inlined directly in SettingTab.ts.
 export const CUSTOM_PATH_LABEL = "Custom path";
-export const PER_ITEM_SCOPES_LABEL = "Per-item scopes";
+export const PER_ITEM_SCOPES_LABEL = "Per-item device rules";
 export const ADD_FOLDER_LABEL = "+ Add folder";
 export const SYNC_ALL_LABEL = "Sync all";
 export const SYNC_ALL_HINT = "Toggle every plugin below.";

@@ -464,12 +464,12 @@ describe("nextScope / scope icon cycle (round-6 定稿: Commander-style scope co
   });
 
   it("tooltip names the current scope", () => {
-    expect(scopeCycleTooltip("all")).toBe("Change scope (currently: All devices)");
-    expect(scopeCycleTooltip("local")).toBe("Change scope (currently: This device)");
+    expect(scopeCycleTooltip("all")).toBe("Where it syncs (currently: All devices)");
+    expect(scopeCycleTooltip("local")).toBe("Where it syncs (currently: This device)");
   });
 
   it("tooltip appends the desktop-only note to the all stop", () => {
-    expect(scopeCycleTooltip("all", DESKTOP_ONLY_ALL_NOTE)).toBe("Change scope (currently: All devices — mobile is excluded automatically)");
+    expect(scopeCycleTooltip("all", DESKTOP_ONLY_ALL_NOTE)).toBe("Where it syncs (currently: All devices — mobile is excluded automatically)");
   });
 });
 

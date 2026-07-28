@@ -4,8 +4,8 @@
 
 [![release](https://img.shields.io/github/v/release/xooooooooox/obsidian-config-sync?label=release)](https://github.com/xooooooooox/obsidian-config-sync/releases/latest)
 [![downloads](https://img.shields.io/badge/dynamic/json?logo=obsidian&color=%23483699&label=downloads&query=%24%5B%22config-sync%22%5D.downloads&url=https%3A%2F%2Fraw.githubusercontent.com%2Fobsidianmd%2Fobsidian-releases%2Fmaster%2Fcommunity-plugin-stats.json)](https://obsidian.md/plugins?id=config-sync)
-
-[English](README.md) · **中文**
+[![Static Badge](https://img.shields.io/badge/README-EN-blue)](./README.md)
+[![Static Badge](https://img.shields.io/badge/README-中-red)](./README.zh.md)
 
 在多台设备和多个 vault 之间，按需、选择性地同步 Obsidian 设置——快捷键、CSS 代码片段、主题、插件配置。数据默认借助你现有的笔记同步工具(note sync)（remotely-save、Obsidian Sync、iCloud……）传输，也可以使用 config-sync 自带的 git / vault 远程通道。任何设置在没有在 Sync Center 中明确执行 **Apply**(应用) 之前，绝不会落到设备上。
 
@@ -147,7 +147,7 @@ Sync Center 的页头是一条状态栏：**this device**（本设备）胶囊�
 
 Encrypt 相关模式需要一个 vault 级别的 **Passphrase**（密码短语），在 Settings → General 中按设备设置一次——它绝不会写入任何文件，也不会被同步；只要每台设备使用相同的密码短语即可。在 Obsidian 1.12+ 上它加密存放在应用的 keychain 中（Settings → Keychain）；更旧的版本则以明文保存在应用存储里。如果某个条目含有加密内容，而当前设备尚未设置密码短语，会显示为 *locked*（已锁定）状态（以一个 key 钥匙图标标记），在设置密码短语之前无法 capture 或 apply。Apply 时密码短语错误会干净地失败，不会写入任何内容。
 
-在你启用同步**之前**，每个已安装的插件就已经被扫描，检查是否包含看起来敏感的键（API 密钥、令牌、密钥、密码、邮箱）或本身就是一整块不透明的加密数据——命中的行会带上 `⚠ N keys` / `⚠ opaque blob` 徽标并排到所在分区最前面；这仅用于提示，规则仍由你决定。卡片的 Settings file 区包含一段只读的文件预览，默认折叠在 **File preview** 的展开项后面：键名按规则状态着色（青色 = 已加密 · 红色 = this device · 蓝色 = desktop only · 琥珀色 = mobile only；已检测到但尚未设置规则的键为紫色，普通键为淡色），点击某个键即可直接为其添加规则——用来兜底内置检测可能遗漏的键。每张卡片都会用自己的摘要打上徽标——`N device-scoped` 与 `N encrypted` 计数，以及非默认时的 **Enabled on** chip——capture 报告会准确说明哪些内容被加密、哪些被剥离。
+在你启用同步**之前**，每个已安装的插件就已经被扫描，检查是否包含看起来敏感的键（API 密钥、令牌、密钥、密码、邮箱）或本身就是一整块不透明的加密数据；这仅用于提示，规则仍由你决定。卡片的 Settings file 区包含一段只读的文件预览，默认折叠在 **File preview** 的展开项后面：检测到的键会在卡片的 File preview 中以紫色点状下划线高亮标出；锁形图标 = 已加密，其他键按规则状态着色（红色 = this device · 蓝色 = desktop only · 琥珀色 = mobile only，普通键为淡色），点击某个键即可直接为其添加规则——用来兜底内置检测可能遗漏的键。每张卡片都会用自己的摘要打上徽标——`N device-scoped` 与 `N encrypted` 计数，以及非默认时的 **Enabled on** chip——capture 报告会准确说明哪些内容被加密、哪些被剥离。
 
 硬性黑名单已经取消——`remotely-save`、`ioto-update`、`slides-rup` 和 `config-sync` 现在都是与其他条目一样的普通条目（例如 `remotely-save` 可以整文件加密；`ioto-update` 很适合用逐键规则）。
 

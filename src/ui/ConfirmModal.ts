@@ -50,7 +50,7 @@ export function confirmWarnings(app: App, title: string, lines: string[]): Promi
 const PRESET_PATH_CHANGE_TITLE = "Change a preset folder?";
 
 function presetPathChangeBody(itemLabel: string): string {
-  return `This folder is part of ${itemLabel}'s preset configuration. Changing it makes the old store entry a leftover (cleaned up by the usual flow) and captures the new path as a fresh item.`;
+  return `This folder is part of ${itemLabel}'s built-in setup. If you change it, the old folder stops syncing (it's cleaned up automatically) and the new path syncs as its own item.`;
 }
 
 class PresetPathChangeModal extends Modal {

@@ -37,11 +37,11 @@ describe("statusBarAriaLabel", () => {
         { kind: "down", count: 1, text: "↓1" },
         { kind: "push", count: 1, text: "⇡1" },
       ])
-    ).toBe("Config Sync — 2 to capture · 1 to apply · push 1");
+    ).toBe("Config Sync — 2 to capture · 1 to apply · 1 to push");
   });
 
   it("includes pull when present", () => {
-    expect(statusBarAriaLabel([{ kind: "pull", count: 2, text: "⇣2" }])).toBe("Config Sync — pull 2");
+    expect(statusBarAriaLabel([{ kind: "pull", count: 2, text: "⇣2" }])).toBe("Config Sync — 2 to pull");
   });
 
   it("reports all in sync for the empty list", () => {

@@ -30,7 +30,13 @@ export function statusBarSegments(
 export function statusBarAriaLabel(segments: StatusBarSegment[]): string {
   if (segments.length === 0) return "Config Sync — all in sync";
   const phrase = (s: StatusBarSegment): string =>
-    s.kind === "up" ? `${s.count} to capture` : s.kind === "down" ? `${s.count} to apply` : `${s.kind} ${s.count}`;
+    s.kind === "up"
+      ? `${s.count} to capture`
+      : s.kind === "down"
+        ? `${s.count} to apply`
+        : s.kind === "push"
+          ? `${s.count} to push`
+          : `${s.count} to pull`;
   return `Config Sync — ${segments.map(phrase).join(" · ")}`;
 }
 
