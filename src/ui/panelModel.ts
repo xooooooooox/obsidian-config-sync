@@ -1,5 +1,5 @@
 import { GroupState, GroupStatus } from "../core/status";
-import { FileChanges } from "../core/types";
+import { FileChanges, RuleScope } from "../core/types";
 import { Availability, VersionDrift } from "../core/availability";
 import { StateAction } from "../core/ConfigSyncCore";
 
@@ -232,4 +232,61 @@ export function footerSummary(main: number, outdated: number, disabled: number, 
 // mid-run rebuild shows live progress instead of the stale staged count.
 export function runProgressLabel(verb: "Capturing" | "Applying", done: number, total: number): string {
   return `${verb === "Capturing" ? "↑" : "↓"} ${verb} ${done}/${total}…`;
+}
+
+// ── In-place "where it runs" guidance (spec 2026-07-28 §4) ────────────────────────────────────
+
+export const MEMBER_BLOCK_TITLE = "These plugins are switched on differently — decide where each belongs:";
+export const MEMBER_PUBLISH_NOTE = "Your choices are saved on this device — capture Settings so your other devices pick them up.";
+
+export interface MemberChangeRow {
+  id: string;
+  action: Direction; // apply = enabled only in the store's list, capture = enabled only here
+  why: string;
+  recommended: "desktop" | "mobile" | null;
+}
+
+// One row per element the pending direction would flip, in device language. Store-only
+// elements lead; each set alphabetical. Recommendation only where intent is inferable:
+// an element on everywhere-but-here most likely belongs to the other device class.
+export function memberChangeRows(
+  d: { captureRemoves: string[]; applyDisables: string[] },
+  device: "desktop" | "mobile"
+): MemberChangeRow[] {
+  const here = device === "mobile" ? "this phone" : "this computer";
+  const other: "desktop" | "mobile" = device === "mobile" ? "desktop" : "mobile";
+  const storeOnly = [...d.captureRemoves].sort().map(
+    (id): MemberChangeRow => ({
+      id,
+      action: "apply",
+      why: `on for your other devices, off on ${here} — Apply would turn it on here too`,
+      recommended: other,
+    })
+  );
+  const localOnly = [...d.applyDisables].sort().map(
+    (id): MemberChangeRow => ({
+      id,
+      action: "capture",
+      why: `on only on ${here} — Capture would turn it on for your other devices`,
+      recommended: null,
+    })
+  );
+  return [...storeOnly, ...localOnly];
+}
+
+export interface MemberDecision {
+  id: string;
+  scope: "local" | "desktop" | "mobile";
+}
+
+// Every per-member decision worth a note row: ⌂ local exceptions plus device-class rules.
+export function memberDecisionsFromScopes(scopes: Record<string, RuleScope>): MemberDecision[] {
+  return Object.entries(scopes)
+    .filter((e): e is [string, "local" | "desktop" | "mobile"] => e[1] !== "all")
+    .map(([id, scope]) => ({ id, scope }))
+    .sort((a, b) => a.id.localeCompare(b.id));
+}
+
+export function memberDecisionText(m: MemberDecision): string {
+  return m.scope === "local" ? `${m.id} — this device keeps its own on/off state` : `${m.id} — runs on ${m.scope} only`;
 }

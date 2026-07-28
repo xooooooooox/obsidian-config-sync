@@ -24,6 +24,7 @@ export interface Badge {
   text: string;
   cls: string;
   icon?: string; // lucide icon rendered before the text (round-8 "desktop-only plugin" chip)
+  tooltip?: string;
 }
 
 const ON_BADGE_TEXT: Record<Exclude<RuleScope, "all">, string> = {
@@ -70,6 +71,14 @@ export function countEncrypted(cfg: ItemConfig): number {
 
 export function computeBadges(def: ItemDef, cfg: ItemConfig): Badge[] {
   const badges: Badge[] = [];
+  // On/off-only badge first, innate property (settingsFile state on the def)
+  if (def.settingsFile !== undefined && def.settingsFile.defaultPath === null) {
+    badges.push({
+      text: "on/off only",
+      cls: "config-sync-card-badge-state",
+      tooltip: "No settings file on this device yet — only the enable state syncs.",
+    });
+  }
   // Innate manifest property first, ahead of every config-driven badge — neutral grey so the
   // colored "on: …" (the user's CHOICE) keeps its contrast (round-8 spec §2, mockup-approved).
   if (def.desktopOnly === true) {

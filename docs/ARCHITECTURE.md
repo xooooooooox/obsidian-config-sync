@@ -143,6 +143,10 @@ functions.
   (the same way `enabled-css-snippets` is pinned to `obsidian`) instead of falling through to
   `custom`.
 - `core/leftover.ts` — `leftoverStoreRels`: store files with no matching group (cleanup surface).
+  `selfListGroups` is the list-membership compile the self pane's delta/coldstart/`itemCount`
+  now share with the store side (`storeSelfCopyGroups` calls it too): items compiled with
+  synthesized defs for ids whose plugin isn't installed on this device, so an item this device's
+  own `data.json` carries never drops out of membership just because its plugin is absent here.
 - `core/runHistory.ts` — the run-record model and helpers (`RunRecord`, `summarizeRun`,
   `worstStatus`, `countChanged`, `isChanged`, `pruneHistory`).
 
@@ -217,7 +221,11 @@ functions.
   `apply` and default-direction to apply, same as `store-newer`/`differs`. `showColdStartBanner(
   selfState, statuses, dismissed)` is the pure predicate behind the Sync Center's cold-start
   banner: true while the plugin's own settings are still pending adoption (self state `coldstart`/
-  `adopt`/`both`) and at least one row is `never-synced`, unless dismissed.
+  `adopt`/`both`) and at least one row is `never-synced`, unless dismissed. It also carries the
+  switch-list member-guidance models: `memberChangeRows` turns a switch group's divergence into
+  one row per element the pending action would flip, worded in device language; `memberDecisionsFromScopes`/
+  `memberDecisionText` turn a group's per-member rule scopes into the note rows the Sync Center
+  renders under each switch group's detail.
 - `reportContent.ts` — shared run-report rendering (the Sync Center strip and History detail).
 - `diffView.ts` — unified-diff rendering; `jsonView.ts` — read-only `data.json` viewer with keys
   colored by `{scope, encrypted}` rule state (per-element coloring too, for a `perItem` array);

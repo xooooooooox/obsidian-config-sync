@@ -8,6 +8,7 @@ import {
   emptyItemConfig,
   enablementScopes,
   groupOwners,
+  itemConfigWithEnabledOn,
   ItemConfig,
   RegistryEnv,
 } from "../src/core/registry";
@@ -52,8 +53,8 @@ describe("buildItemDefs", () => {
     expect(graph?.enablement).toEqual({ carrier: "core-plugins.json", element: "graph" });
     expect(graph?.settingsFile?.defaultPath).toBe("{configDir}/graph.json");
     expect(zk?.settingsFile?.defaultPath).toBeNull(); // state-only: no settings file exists yet
-    expect(graph?.description).toBe("Settings and on/off state.");
-    expect(zk?.description).toBe("On/off state — no saved settings on this device yet.");
+    expect(graph?.description).toBe("");
+    expect(zk?.description).toBe("");
   });
 
   it("community/beta defs come from the plugins-dir scan, split by the BRAT index", () => {
@@ -71,7 +72,7 @@ describe("buildItemDefs", () => {
     expect(dv?.section).toBe("community");
     expect(dv?.enablement).toEqual({ carrier: "community-plugins.json", element: "dataview" });
     expect(dv?.settingsFile?.defaultPath).toBe("{configDir}/plugins/dataview/data.json");
-    expect(dv?.description).toBe("Plugin files, settings and on/off state.");
+    expect(dv?.description).toBe("");
     expect(beta?.section).toBe("beta"); // beta reuses the community id form (spec §1)
     expect(beta?.id).toBe("community:slides-rup");
   });
@@ -471,4 +472,18 @@ describe("compileItems — settings.customGroups (spec §6 addition)", () => {
     expect(compileItems(defs, settings({}, custom))).toEqual([]);
   });
 
+});
+
+describe("itemConfigWithEnabledOn", () => {
+  it("creates an enabled config from nothing", () => {
+    expect(itemConfigWithEnabledOn(undefined, "desktop")).toEqual({ enabled: true, companions: [], enabledOn: "desktop" });
+  });
+  it("preserves existing fields and forces enabled", () => {
+    const existing: ItemConfig = { enabled: false, companions: [{ path: "x", enabled: true, scope: "all" }], settingsFile: { mode: "plain", rules: {}, perItem: {} } };
+    const out = itemConfigWithEnabledOn(existing, "mobile");
+    expect(out.enabledOn).toBe("mobile");
+    expect(out.enabled).toBe(true);
+    expect(out.companions).toEqual(existing.companions);
+    expect(out.settingsFile).toEqual(existing.settingsFile);
+  });
 });

@@ -94,7 +94,7 @@ locked/cyan.
 `trash` delete · `folder-open` browse · `rotate-cw` BRAT re-scan · `arrow-up-from-line` /
 `arrow-down-to-line` / `cloud-upload` / `cloud-download` sync-action icons · tabs: `settings`,
 `gem`, `toy-brick`, `puzzle`, `flask-conical` (BratIcon preferred when registered),
-`wrench`, `git-branch` · quick-command menu items take the command's own icon by default, changeable via the `getIconIds()` icon picker (`IconSelectModal`).
+`wrench`, `git-branch` · quick-command menu items take the command's own icon by default, changeable via the `getIconIds()` icon picker (`IconSelectModal`) · `monitor` / `smartphone` — the "where it runs" menu's Desktop only/Mobile only items and the per-member decision note rows (`config-sync-lddetail-ic`) · `globe` — the same menu's Everywhere item.
 
 ### 2.4 Glyph language (text, reused everywhere)
 
@@ -149,7 +149,16 @@ noted):
 - **Settings tab** (`src/ui/SettingTab.ts`): `config-sync-tabs/-tab` (phone hides inactive
   labels — the pattern the mobile filter pills echo), rows/expand/form-*, fields editor
   (`-fieldrow/-ftag/-act-btn`), remotes forms + `-test-strip`, search (`-hit/-scopetag`),
-  passphrase `-ppset/-ppbadge`.
+  passphrase `-ppset/-ppbadge`. `config-sync-section-sub` — one subtitle per tab, above the
+  Sync all row ("Each plugin syncs its settings and on/off state." for Core, "…its files,
+  settings and on/off state." elsewhere), replacing the old per-row boilerplate description
+  (the `on/off only` badge for state-only cards is documented under Row, below).
+- **Member guidance** `config-sync-memberblock/-memberrow/-memberrow-btn` — inside a
+  community/core switch-list group's divergence detail, one row per element the pending
+  Capture/Apply would flip, worded in device language (`renderMemberBlock`); each row's
+  `where it runs ▾` button opens a `Menu` (`openWhereItRunsMenu`) offering Desktop only /
+  Mobile only / `⌂ This device decides for itself` (a local exception) / Everywhere (no
+  rule — leaves the pending action as-is).
 - **Modals**: pull-conflict `config-sync-cm-*` + `diffView.ts` (shared diff panel:
   Unified/Split toggle desktop-only, **Collapse/Full toggle both platforms** folding
   unchanged runs into `-cm-dgap` "⋯ N unchanged lines ⋯" rows); exclude-extras
@@ -166,7 +175,10 @@ noted):
   branches remain: an Obsidian option group, a core plugin, a community/beta plugin and a
   state-only plugin (no settings file yet) all render through the same function.
   - **Row** `config-sync-item-wrap` — chevron, name, badges (`config-sync-card-badge*`; order:
-    grey `desktop-only plugin` chip (manifest `isDesktopOnly`, monitor icon via `-badge-plat/-badge-ic`)
+    dashed `config-sync-card-badge-state` `on/off only` chip (state-only core plugin — its def
+    has a `settingsFile` with `defaultPath: null`, no file written on this device yet; tooltip
+    "No settings file on this device yet — only the enable state syncs.") → grey `desktop-only
+    plugin` chip (manifest `isDesktopOnly`, monitor icon via `-badge-plat/-badge-ic`)
     → enablement scope when non-default → `N device-scoped` → `N encrypted`; a zero count never
     renders), sync toggle. No mode chip and no other row content — mode is a derived, drawer-only
     state (`itemCard.ts`'s `deriveMode`, see Drawer ② below), never a header control — the same

@@ -8,6 +8,13 @@ export interface LeftoverFile {
   path: string; // rel without the leading "store/", shown in the row
 }
 
+// The list-membership compile BOTH delta sides share (spec 2026-07-28 §2): items compiled WITH
+// synthesized defs for ids whose plugin isn't installed here, so an item this data.json carries
+// never drops out of membership just because its plugin is absent on this device.
+export function selfListGroups(defs: ItemDef[], items: Record<string, ItemConfig>, customGroups: CustomGroupConfig[]): SyncGroup[] {
+  return compileItems(defsForForeignItems(defs, Object.keys(items)), { items, customGroups });
+}
+
 // The sync list carried inside the store's own config-sync copy
 // (`store/configdir/plugins/config-sync/data.json`). Files a device has pulled but not yet
 // adopted are attributable to this list, so callers pass local ∪ store-list groups to
@@ -23,7 +30,7 @@ export function storeSelfCopyGroups(json: string, defs: ItemDef[]): SyncGroup[] 
     if (typeof raw.items !== "object" || raw.items === null) return [];
     const items = raw.items as Record<string, ItemConfig>;
     const customGroups = Array.isArray(raw.customGroups) ? (raw.customGroups as CustomGroupConfig[]) : [];
-    return compileItems(defsForForeignItems(defs, Object.keys(items)), { items, customGroups });
+    return selfListGroups(defs, items, customGroups);
   } catch {
     return [];
   }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { capFileEntries, insyncLineText, statusBarStatuses, moreFilesText, visibleUnderFilter, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, footerSummary, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, versionLine, runProgressLabel, showColdStartBanner } from "../src/ui/panelModel";
+import { capFileEntries, insyncLineText, statusBarStatuses, moreFilesText, visibleUnderFilter, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, footerSummary, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, versionLine, runProgressLabel, showColdStartBanner, memberChangeRows, memberDecisionsFromScopes, memberDecisionText } from "../src/ui/panelModel";
 import { GroupState, GroupStatus } from "../src/core/status";
 import { Availability } from "../src/core/availability";
 
@@ -296,5 +296,48 @@ describe("showColdStartBanner", () => {
     expect(showColdStartBanner("capture", never, false)).toBe(false);
     expect(showColdStartBanner("coldstart", synced, false)).toBe(false);
     expect(showColdStartBanner("coldstart", never, true)).toBe(false);
+  });
+});
+
+describe("memberChangeRows (spec 2026-07-28 §4)", () => {
+  const d = { captureRemoves: ["simpread", "obsidian-git"], applyDisables: ["vim-toggle"] };
+
+  it("mobile view: store-only rows lead, sorted, with desktop recommendation", () => {
+    const rows = memberChangeRows(d, "mobile");
+    expect(rows.map((r) => r.id)).toEqual(["obsidian-git", "simpread", "vim-toggle"]);
+    expect(rows[0]).toEqual({
+      id: "obsidian-git",
+      action: "apply",
+      why: "on for your other devices, off on this phone — Apply would turn it on here too",
+      recommended: "desktop",
+    });
+    expect(rows[2]).toEqual({
+      id: "vim-toggle",
+      action: "capture",
+      why: "on only on this phone — Capture would turn it on for your other devices",
+      recommended: null,
+    });
+  });
+
+  it("desktop view mirrors wording and recommendation", () => {
+    const rows = memberChangeRows(d, "desktop");
+    expect(rows[0]?.why).toBe("on for your other devices, off on this computer — Apply would turn it on here too");
+    expect(rows[0]?.recommended).toBe("mobile");
+    expect(rows[2]?.why).toBe("on only on this computer — Capture would turn it on for your other devices");
+  });
+});
+
+describe("memberDecisionsFromScopes / memberDecisionText", () => {
+  it("keeps only non-all scopes, sorted by id", () => {
+    expect(memberDecisionsFromScopes({ b: "desktop", a: "local", c: "all", d: "mobile" })).toEqual([
+      { id: "a", scope: "local" },
+      { id: "b", scope: "desktop" },
+      { id: "d", scope: "mobile" },
+    ]);
+  });
+  it("copy", () => {
+    expect(memberDecisionText({ id: "x", scope: "local" })).toBe("x — this device keeps its own on/off state");
+    expect(memberDecisionText({ id: "x", scope: "desktop" })).toBe("x — runs on desktop only");
+    expect(memberDecisionText({ id: "x", scope: "mobile" })).toBe("x — runs on mobile only");
   });
 });

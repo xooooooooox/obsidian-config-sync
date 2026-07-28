@@ -81,6 +81,21 @@ function cfg(overrides: Partial<ItemConfig> = {}): ItemConfig {
 }
 
 describe("computeBadges", () => {
+  it("state-only def gets the on/off-only badge first, with tooltip", () => {
+    const def: ItemDef = { id: "core:bases", label: "Bases", description: "", section: "core", settingsFile: { defaultPath: null } };
+    const badges = computeBadges(def, { enabled: true, companions: [] });
+    expect(badges[0]).toEqual({
+      text: "on/off only",
+      cls: "config-sync-card-badge-state",
+      tooltip: "No settings file on this device yet — only the enable state syncs.",
+    });
+  });
+
+  it("a def with a settings file gets no on/off-only badge", () => {
+    const def: ItemDef = { id: "core:backlinks", label: "Backlinks", description: "", section: "core", settingsFile: { defaultPath: "{configDir}/backlink.json" } };
+    expect(computeBadges(def, { enabled: true, companions: [] }).some((b) => b.text === "on/off only")).toBe(false);
+  });
+
   it("no badges for a plain off/default card", () => {
     expect(computeBadges(APP_DEF, cfg())).toEqual([]);
   });

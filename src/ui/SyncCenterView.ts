@@ -1,4 +1,4 @@
-import { App, ButtonComponent, ExtraButtonComponent, ItemView, Modal, Platform, WorkspaceLeaf, setIcon } from "obsidian";
+import { App, ButtonComponent, ExtraButtonComponent, ItemView, Menu, Modal, Platform, WorkspaceLeaf, setIcon } from "obsidian";
 import { ApplyItem, CaptureItem, ProgressFn, StateAction } from "../core/ConfigSyncCore";
 import { bucketCounts, GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry, remoteDirectionCounts } from "../core/status";
 import { CATEGORY_LABELS, findGroupByName, ItemCategory, SELF_GROUP_NAME, categoryForGroup } from "../core/catalog";
@@ -13,6 +13,12 @@ import {
   insyncLineText,
   isValidPolicy,
   matchesSearch,
+  MemberChangeRow,
+  MemberDecision,
+  memberChangeRows,
+  memberDecisionText,
+  MEMBER_BLOCK_TITLE,
+  MEMBER_PUBLISH_NOTE,
   moreFilesText,
   nosettingsLineText,
   PanelFilter,
@@ -75,6 +81,9 @@ const STATUS_CLS: Record<RunStatus, string> = { ok: "is-ok", warning: "is-warn",
 // RunKind is wider than SyncAction (it also has "adopt"/"stop-sync"/"delete-leftover"), so
 // map explicitly rather than assigning rec.kind directly — undefined for the non-actions.
 const ACTION_CELL_MAP: Partial<Record<RunKind, SyncAction>> = { capture: "capture", apply: "apply", adopt: "apply", push: "push", pull: "pull" };
+// Member-decision guidance (spec 2026-07-28 §4) applies to the plugin switch lists only —
+// enabled-css-snippets has its own per-snippet scope + pin mechanism.
+const MEMBER_GUIDE_GROUPS = new Set(["community-plugins", "core-plugins"]);
 
 // Session-remembered UI state: which scopes have their ✓ / ○ trailing lines flattened open.
 const sessionUi = {
@@ -133,7 +142,7 @@ export interface SyncCenterHost {
   pullFrom(remote: Remote): Promise<GroupResult[] | null>;
   pushTo(remote: Remote): Promise<GroupResult[] | null>;
   adoptConfiguration(): Promise<GroupResult[] | null>;
-  switchLocalDecisions(name: string): string[]; // [] for non-switch-list groups
+  switchMemberDecisions(name: string): MemberDecision[]; // [] for non-switch-list groups
   betaIds(): Set<string>; // plugin ids tracked in the BRAT index (the Beta scope/tab)
   runHistoryEnabled(): boolean;
   loadRunHistory(): Promise<RunRecord[]>;
@@ -148,6 +157,7 @@ export interface SyncCenterHost {
   // side is missing or unparseable.
   switchDivergenceFor(name: string): Promise<{ captureRemoves: string[]; applyDisables: string[] } | null>;
   addSwitchExceptions(name: string, ids: string[]): Promise<void>;
+  setMemberEnabledOn(carrier: string, elementId: string, scope: "desktop" | "mobile"): Promise<void>;
   // Contents for an inline change diff: base = current state of the target side, produced =
   // what the pending action (capture/apply) would write. null = no diff available.
   diffPair(name: string, rel: string, dir: Direction): Promise<{ base: string; produced: string } | null>;
@@ -1488,9 +1498,9 @@ export class SyncCenterView extends ItemView {
       });
       drawFieldsBadge(badge);
     }
-    const ldCount = this.host.switchLocalDecisions(group.name).length;
+    const ldCount = this.host.switchMemberDecisions(group.name).length;
     if (ldCount > 0) {
-      row.createSpan({ cls: "config-sync-ldnote", text: `· ${ldCount} on this device` });
+      row.createSpan({ cls: "config-sync-ldnote", text: `· ${ldCount} device-scoped` });
     }
     const chosen = this.policy.get(group.name);
     if (this.selected.has(group.name) && chosen !== undefined) {
@@ -1579,9 +1589,17 @@ export class SyncCenterView extends ItemView {
     const { status } = r;
     // Local decisions surface first (定稿 switch-exceptions.html): the ⌂ rows explain why the
     // item can be in-sync while raw contents differ.
-    const excluded = this.host.switchLocalDecisions(r.group.name);
-    for (const id of excluded) {
-      detail.createDiv({ cls: "config-sync-lddetail", text: `⌂ ${id} — this device keeps its own on/off state` });
+    const decisions = this.host.switchMemberDecisions(r.group.name);
+    for (const m of decisions) {
+      const line = detail.createDiv({ cls: "config-sync-lddetail" });
+      if (m.scope === "local") line.setText(`⌂ ${memberDecisionText(m)}`);
+      else {
+        setIcon(line.createSpan({ cls: "config-sync-lddetail-ic" }), m.scope === "desktop" ? "monitor" : "smartphone");
+        line.appendText(` ${memberDecisionText(m)}`);
+      }
+    }
+    if (decisions.length > 0 && this.selfInfo !== null && (this.selfInfo.state === "capture" || this.selfInfo.state === "both")) {
+      detail.createDiv({ cls: "config-sync-lddetail", text: MEMBER_PUBLISH_NOTE });
     }
     if (SWITCH_LIST_GROUPS.has(r.group.name)) this.renderSwitchDivergence(detail, r);
     if (status.message !== undefined) {
@@ -1626,7 +1644,7 @@ export class SyncCenterView extends ItemView {
       }
       detail.createDiv({
         cls: "config-sync-expand-note",
-        text: excluded.length > 0 ? "in sync — this device's own plugins aren't compared" : "identical to the store",
+        text: decisions.length > 0 ? "in sync — this device's own plugins aren't compared" : "identical to the store",
       });
       return;
     }
@@ -1695,28 +1713,86 @@ export class SyncCenterView extends ItemView {
     const holder = detail.createDiv();
     void this.host.switchDivergenceFor(r.group.name).then((d) => {
       if (!holder.isConnected || d === null) return;
-      if (d.captureRemoves.length === 0 || d.applyDisables.length === 0) return;
-      const box = holder.createDiv({ cls: "config-sync-divergence" });
-      box.createDiv({ text: "This device and the store diverge both ways — either direction overwrites the other:" });
-      const capLine = box.createDiv({ cls: "config-sync-divergence-line" });
-      renderActionIcon(capLine, "capture").addClass(ACTION_COLOR_CLASS.capture);
-      capLine.appendText(` Capture removes ${d.captureRemoves.length} from the shared list — other devices will turn them off: ${d.captureRemoves.join(", ")}`);
-      const applyLine = box.createDiv({ cls: "config-sync-divergence-line" });
-      renderActionIcon(applyLine, "apply").addClass(ACTION_COLOR_CLASS.apply);
-      applyLine.appendText(` Apply turns off ${d.applyDisables.length} on this device — keep them on this device first: ${d.applyDisables.join(", ")}`);
-      const btn = holder.createEl("button", {
-        cls: "config-sync-seg-btn",
-        text: `⌂ Keep ${d.applyDisables.length} extra${d.applyDisables.length === 1 ? "" : "s"} on this device…`,
-      });
+      if (d.captureRemoves.length > 0 && d.applyDisables.length > 0) {
+        const box = holder.createDiv({ cls: "config-sync-divergence" });
+        box.createDiv({ text: "This device and the store diverge both ways — either direction overwrites the other:" });
+        const capLine = box.createDiv({ cls: "config-sync-divergence-line" });
+        renderActionIcon(capLine, "capture").addClass(ACTION_COLOR_CLASS.capture);
+        capLine.appendText(` Capture would turn ${d.captureRemoves.length} off on your other devices: ${d.captureRemoves.join(", ")}`);
+        const applyLine = box.createDiv({ cls: "config-sync-divergence-line" });
+        renderActionIcon(applyLine, "apply").addClass(ACTION_COLOR_CLASS.apply);
+        applyLine.appendText(` Apply turns off ${d.applyDisables.length} on this device — keep them on this device first: ${d.applyDisables.join(", ")}`);
+        const btn = holder.createEl("button", {
+          cls: "config-sync-seg-btn",
+          text: `⌂ Keep ${d.applyDisables.length} extra${d.applyDisables.length === 1 ? "" : "s"} on this device…`,
+        });
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          new KeepOnDeviceModal(this.app, this.host.displayName(r.group.name, r.group.label), d.applyDisables, async (ids) => {
+            if (ids.length === 0) return;
+            await this.host.addSwitchExceptions(r.group.name, ids);
+            await this.reload();
+          }).open();
+        });
+      }
+      if (MEMBER_GUIDE_GROUPS.has(r.group.name)) this.renderMemberBlock(holder, r, d);
+    });
+  }
+
+  private renderMemberBlock(holder: HTMLElement, r: StatusRow, d: { captureRemoves: string[]; applyDisables: string[] }): void {
+    const rows = memberChangeRows(d, Platform.isMobile ? "mobile" : "desktop");
+    if (rows.length === 0) return;
+    const block = holder.createDiv({ cls: "config-sync-memberblock" });
+    block.createDiv({ cls: "config-sync-memberblock-t", text: MEMBER_BLOCK_TITLE });
+    for (const m of rows) {
+      const row = block.createDiv({ cls: "config-sync-memberrow" });
+      renderActionIcon(row.createSpan({ cls: "config-sync-memberrow-ic" }), m.action).addClass(ACTION_COLOR_CLASS[m.action]);
+      const mid = row.createDiv({ cls: "config-sync-memberrow-mid" });
+      mid.createDiv({ cls: "config-sync-memberrow-n", text: m.id });
+      mid.createDiv({ cls: "config-sync-memberrow-why", text: m.why });
+      // appendText (not a static `text:` option) — the obsidianmd/ui/sentence-case rule can't
+      // be disabled inline, and this label's lowercase lead is spec'd copy (定稿 2026-07-28 §4).
+      const btn = row.createEl("button", { cls: "config-sync-memberrow-btn" });
+      btn.appendText("where it runs ▾");
       btn.addEventListener("click", (e) => {
         e.stopPropagation();
-        new KeepOnDeviceModal(this.app, this.host.displayName(r.group.name, r.group.label), d.applyDisables, async (ids) => {
-          if (ids.length === 0) return;
-          await this.host.addSwitchExceptions(r.group.name, ids);
-          await this.reload();
-        }).open();
+        this.openWhereItRunsMenu(e, r.group.name, m);
       });
-    });
+    }
+  }
+
+  private openWhereItRunsMenu(evt: MouseEvent, carrier: string, m: MemberChangeRow): void {
+    const menu = new Menu();
+    menu.setUseNativeMenu(false); // DOM menu — renders our Lucide icons on macOS too
+    const consequence = m.action === "apply" ? "no rule, Apply turns it on here" : "no rule, Capture turns it on for your other devices";
+    const rec = " · matches where it's used today";
+    const entries: { title: string; icon?: string; write: (() => Promise<void>) | null }[] = [
+      {
+        title: `Desktop only — stays off on phones${m.recommended === "desktop" ? rec : ""}`,
+        icon: "monitor",
+        write: () => this.host.setMemberEnabledOn(carrier, m.id, "desktop"),
+      },
+      {
+        title: `Mobile only — stays off on desktops${m.recommended === "mobile" ? rec : ""}`,
+        icon: "smartphone",
+        write: () => this.host.setMemberEnabledOn(carrier, m.id, "mobile"),
+      },
+      { title: "⌂ This device decides for itself", write: () => this.host.addSwitchExceptions(carrier, [m.id]) },
+      { title: `Everywhere — ${consequence}`, icon: "globe", write: null },
+    ];
+    if (m.recommended === "mobile") entries.unshift(entries.splice(1, 1)[0]!); // recommended leads
+    for (const it of entries) {
+      menu.addItem((i) => {
+        i.setTitle(it.title);
+        if (it.icon !== undefined) i.setIcon(it.icon);
+        i.onClick(async () => {
+          if (it.write === null) return;
+          await it.write();
+          await this.reload();
+        });
+      });
+    }
+    menu.showAtMouseEvent(evt);
   }
 
   // Structural groups (the self plugin, the on/off switch lists) are not "items" a user would
@@ -2233,7 +2309,7 @@ class KeepOnDeviceModal extends Modal {
     this.titleEl.setText("Keep on this device only");
     this.contentEl.createDiv({
       cls: "config-sync-expand-note",
-      text: `${this.listLabel}: items kept on this device manage their own on/off state — the shared list neither includes nor changes them.`,
+      text: `${this.listLabel}: items kept on this device manage their own on/off state — they don't follow your other devices, and aren't pushed to them.`,
     });
     const list = this.contentEl.createDiv();
     for (const id of this.ids) {

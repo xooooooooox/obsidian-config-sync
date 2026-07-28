@@ -59,3 +59,4 @@ export class Notice {
 }
 export const Platform = { isMobile: false, isDesktop: true, isDesktopApp: true, isMobileApp: false };
 export function setIcon(): void {}
+export function setTooltip(): void {}

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { SyncGroup } from "../src/core/types";
-import { leftoverStoreRels, storeSelfCopyGroups } from "../src/core/leftover";
+import { leftoverStoreRels, storeSelfCopyGroups, selfListGroups } from "../src/core/leftover";
 import { buildItemDefs, ItemDef, RegistryEnv } from "../src/core/registry";
+import { syncListDelta } from "../src/core/syncListDelta";
 
 const groups: SyncGroup[] = [
   { name: "plugin-demo", path: "{configDir}/plugins/demo/data.json", type: "file", devices: "all" },
@@ -102,5 +103,36 @@ describe("storeSelfCopyGroups", () => {
       });
       expect(storeSelfCopyGroups(json, defs)).toEqual([]);
     });
+  });
+});
+
+describe("selfListGroups (delta ghost regression, spec 2026-07-28 §2)", () => {
+  const defs = buildItemDefs({
+    cores: [],
+    plugins: [{ id: "omnisearch", name: "Omnisearch", desktopOnly: false }],
+    betaIds: new Set<string>(),
+  });
+  const items = {
+    "community:omnisearch": { enabled: true, companions: [] },
+    // obsidian-git is NOT installed on this device (no def) but IS in the local items:
+    "community:obsidian-git": { enabled: true, companions: [], enabledOn: "desktop" as const },
+  };
+
+  it("keeps items whose plugin has no local def", () => {
+    const names = selfListGroups(defs, items, []).map((g) => g.name);
+    expect(names).toContain("plugin-omnisearch");
+    expect(names).toContain("plugin-obsidian-git");
+  });
+
+  it("identical items on both sides produce an empty delta", () => {
+    const local = selfListGroups(defs, items, []);
+    const store = selfListGroups(defs, items, []);
+    expect(syncListDelta(local, store)).toEqual({ added: [], removed: [] });
+  });
+
+  it("a store-only item still reports added", () => {
+    const local = selfListGroups(defs, items, []);
+    const store = selfListGroups(defs, { ...items, "community:newone": { enabled: true, companions: [] } }, []);
+    expect(syncListDelta(local, store).added).toContain("plugin-newone");
   });
 });

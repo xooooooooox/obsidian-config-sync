@@ -87,6 +87,13 @@ export function emptyItemConfig(): ItemConfig {
   return { enabled: false, companions: [] };
 }
 
+// The exact write the in-place "where it runs" menu performs (spec 2026-07-28 §4): keep the
+// card's existing config, force the card on (a rule on a disabled card would read back as
+// "local"), pin enabledOn.
+export function itemConfigWithEnabledOn(existing: ItemConfig | undefined, scope: "desktop" | "mobile"): ItemConfig {
+  return { ...(existing ?? emptyItemConfig()), enabled: true, enabledOn: scope };
+}
+
 // ── Registry construction ───────────────────────────────────────────────────────────────────
 
 export interface RegistryCoreEnv {
@@ -129,11 +136,7 @@ const OBSIDIAN_CARD_DEFS: readonly Omit<ItemDef, "section">[] = [
   },
 ] as const;
 
-function corePluginDescription(fileExists: boolean): string {
-  return fileExists ? "Settings and on/off state." : "On/off state — no saved settings on this device yet.";
-}
-
-const COMMUNITY_PLUGIN_DESCRIPTION = "Plugin files, settings and on/off state.";
+const COMMUNITY_PLUGIN_DESCRIPTION = "";
 
 // Deterministic display order (spec §4): core and community/beta each sort by their own label,
 // independent of runtime scan order — the obsidian section keeps its fixed App settings/
@@ -148,7 +151,7 @@ export function buildItemDefs(env: RegistryEnv): ItemDef[] {
   const core: ItemDef[] = env.cores.map((c) => ({
     id: `core:${c.id}`,
     label: c.name,
-    description: corePluginDescription(c.fileExists),
+    description: "",
     section: "core",
     enablement: { carrier: "core-plugins.json", element: c.id },
     settingsFile: { defaultPath: c.fileExists ? `{configDir}/${corePluginFile(c.id)}` : null },

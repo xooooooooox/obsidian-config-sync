@@ -863,6 +863,8 @@ body.is-mobile .config-sync-section-head input[type="checkbox"]:indeterminate::a
 .config-sync-coldstart-x { background: none; border: none; box-shadow: none; color: var(--text-faint); cursor: pointer; font-size: var(--font-ui-smaller); padding: 2px 4px; height: auto; }
 .config-sync-coldstart-x:hover { color: var(--text-normal); }
 body.is-mobile .config-sync-coldstart-banner { flex-wrap: wrap; }
+body.is-mobile .config-sync-coldstart-text { flex-basis: 100%; }
+body.is-mobile .config-sync-coldstart-actions { margin-left: auto; }
 
 /* 0.20.0 inline result strip */
 /* Sticky dock: opaque backing so scrolling rows don't bleed through the strip's translucent
@@ -967,6 +969,9 @@ body.is-mobile .config-sync-strip-meta .config-sync-report-pills { margin-left: 
    array/fromapp badges, inline-flex only here so the embedded monitor icon aligns with the text. */
 .config-sync-card-badge-plat { color: var(--text-muted); background: var(--background-modifier-border); display: inline-flex; align-items: center; gap: 4px; vertical-align: -1px; }
 .config-sync-card-badge-ic svg { width: 11px; height: 11px; display: block; }
+.config-sync-card-badge-state { color: var(--text-faint); background: transparent; border: 1px dashed var(--background-modifier-border-hover); }
+.config-sync-item-wrap .setting-item-description:empty { display: none; }
+.config-sync-section-sub { color: var(--text-muted); font-size: var(--font-ui-small); padding: 4px 0 2px; }
 
 /* Card visual refresh (spec 2026-07-26-card-visual-refresh-design.md §2) — the four-column grid
    every "row" in a card drawer aligns to: content 1fr | scope icon | lock icon | action icon.
@@ -1160,6 +1165,8 @@ button.config-sync-add-row, button.config-sync-add-row:hover { background: none;
 
 .config-sync-ldnote { color: var(--color-orange); font-size: var(--font-ui-smaller); margin-left: var(--size-4-1); }
 .config-sync-lddetail { color: var(--color-orange); font-family: var(--font-monospace); font-size: var(--font-ui-smaller); padding: 1px 0; }
+.config-sync-lddetail-ic { display: inline-flex; vertical-align: -2px; }
+.config-sync-lddetail-ic svg { width: 12px; height: 12px; }
 
 /* ── Passphrase status badge (定稿 feedback-trio) ── */
 .config-sync-ppbadge {
@@ -1207,6 +1214,20 @@ button.config-sync-add-row, button.config-sync-add-row:hover { background: none;
 }
 .config-sync-divergence-line { color: var(--text-muted); }
 .config-sync-divergence-line::first-letter { color: var(--text-warning); }
+
+/* In-place "where it runs" guidance (spec 2026-07-28 §4): per-member rows for plugins switched
+   on differently between this device and the store, each with a device-scope menu. */
+.config-sync-memberblock { border: 1px solid var(--background-modifier-border); border-radius: 8px; padding: 6px 10px; margin: 6px 0; }
+.config-sync-memberblock-t { color: var(--text-muted); font-size: var(--font-ui-smaller); margin-bottom: 2px; }
+.config-sync-memberrow { display: flex; align-items: center; gap: 8px; padding: 5px 0; }
+.config-sync-memberrow + .config-sync-memberrow { border-top: 1px solid var(--background-modifier-border); }
+.config-sync-memberrow-ic svg { width: 14px; height: 14px; display: block; }
+.config-sync-memberrow-mid { flex: 1; min-width: 0; }
+.config-sync-memberrow-n { font-weight: 600; font-size: var(--font-ui-small); }
+.config-sync-memberrow-why { color: var(--text-muted); font-size: var(--font-ui-smaller); }
+.config-sync-memberrow-btn { font-size: var(--font-ui-smaller); color: var(--text-muted); background: var(--background-secondary); border: 1px solid var(--background-modifier-border); border-radius: 6px; padding: 2px 8px; box-shadow: none; height: auto; white-space: nowrap; }
+.config-sync-memberrow-btn:hover { color: var(--text-normal); }
+body.is-mobile .config-sync-memberrow { flex-wrap: wrap; }
 
 /* Search context (定稿): the main card's labeled head while searching, and the inline
    explanation under an inert (uncheckable) hit. */

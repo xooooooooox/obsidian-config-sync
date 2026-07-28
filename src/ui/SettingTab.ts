@@ -1,4 +1,4 @@
-import { App, ButtonComponent, DropdownComponent, ExtraButtonComponent, Notice, Platform, Plugin, PluginSettingTab, Scope, SearchComponent, Setting, setIcon, TextComponent, ToggleComponent } from "obsidian";
+import { App, ButtonComponent, DropdownComponent, ExtraButtonComponent, Notice, Platform, Plugin, PluginSettingTab, Scope, SearchComponent, Setting, setIcon, setTooltip, TextComponent, ToggleComponent } from "obsidian";
 import {
   QualifierAutocomplete,
   parseQuery,
@@ -607,7 +607,13 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const defs = this.host.itemDefs().filter((d) => d.section === section);
     for (const def of defs) this.ensureCardDetection(def, this.itemConfig(def.id));
     if (gen !== this.renderGen) return;
-    if (withSyncAll && defs.length > 0) this.renderSyncAllRow(containerEl, defs);
+    if (withSyncAll && defs.length > 0) {
+      containerEl.createDiv({
+        cls: "config-sync-section-sub",
+        text: section === "core" ? "Each plugin syncs its settings and on/off state." : "Each plugin syncs its files, settings and on/off state.",
+      });
+      this.renderSyncAllRow(containerEl, defs);
+    }
     // Cards render in def order — buildItemDefs already alphabetizes each section (spec §4).
     // No sensitive-first reordering: it broke the dictionary order users scan by (round-6 bug ②).
     const listEl = containerEl.createDiv();
@@ -679,6 +685,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const el = nameEl.createSpan({ cls: `config-sync-card-badge ${badge.cls}` });
     if (badge.icon !== undefined) setIcon(el.createSpan({ cls: "config-sync-card-badge-ic" }), badge.icon);
     el.appendText(badge.text);
+    if (badge.tooltip !== undefined) setTooltip(el, badge.tooltip);
   }
 
   // In-place Settings-file body refresh: rebuild rule rows + (when expanded) File preview into a
@@ -1846,11 +1853,12 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       const defs = this.host.itemDefs().filter((d) => d.section === tabSection[tab]);
       for (const def of defs) {
         const path = def.settingsFile?.defaultPath;
+        const stateOnly = def.settingsFile !== undefined && def.settingsFile.defaultPath === null;
         hits.push({
           scope: tab,
           kind: "item",
           name: def.label,
-          desc: path !== null && path !== undefined ? `${def.description} ${path}` : def.description,
+          desc: [def.description, stateOnly ? "on/off only" : "", path ?? ""].filter((s) => s !== "").join(" "),
           anchorId: `item-${def.id}`,
           item: { type: "file" },
         });

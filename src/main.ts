@@ -38,7 +38,7 @@ import { BratIndex, parseBratRepoList, resolveBratIndex } from "./core/bratIndex
 import { type CatalogSection, corePluginFile, displayLabelForGroup, findGroupByName, listBetaSections, listCoreSections, listDiscovered, listOptionSections, listPluginSections, SELF_GROUP_NAME, setCorePluginIds } from "./core/catalog";
 import { Availability, availabilityForGroup, desktopOnlyDrift, desktopOnlyPluginIds, scopedAwayMembers, memberForceOff } from "./core/availability";
 import { listFilesRecursive, isJunkPath, FileIO } from "./core/io";
-import { leftoverStoreRels, storeSelfCopyGroups } from "./core/leftover";
+import { leftoverStoreRels, storeSelfCopyGroups, selfListGroups } from "./core/leftover";
 import { parseStoreLock, validateSyncManifest } from "./core/manifest";
 import { basename, groupRealPath, groupStorePath, sidecarStoreSuffix } from "./core/pathing";
 import {
@@ -49,6 +49,7 @@ import {
   enablementScopes,
   groupOwners,
   ItemConfig,
+  itemConfigWithEnabledOn,
   ItemDef,
   compileItems,
   RegistryEnv,
@@ -63,7 +64,7 @@ import { selfPaneState } from "./core/selfPane";
 import { applyUpdates, Ledger, parseLedger, pruneLedger } from "./core/ledger";
 import { bucketCounts, checkRemote, diffRemote, GroupStatus, remoteDirectionCounts, RemoteCheck, remoteLockAhead, statusForGroups } from "./core/status";
 import { GroupResult, Remote, RibbonButtons, RuleScope, StoreLock, SyncGroup } from "./core/types";
-import { statusBarStatuses } from "./ui/panelModel";
+import { MemberDecision, memberDecisionsFromScopes, statusBarStatuses } from "./ui/panelModel";
 import { ConflictModal } from "./ui/ConflictModal";
 import { renderStatusBarItem, statusBarSegments } from "./ui/statusBar";
 import { SYNC_CENTER_VIEW_TYPE, SelfSyncInfo, SyncCenterHost, SyncCenterView } from "./ui/SyncCenterView";
@@ -468,10 +469,18 @@ export default class ConfigSyncPlugin extends Plugin {
       },
       selfStatus: async (): Promise<SelfSyncInfo> => {
         const ctx = await this.coreContext();
-        const local = this.compiledGroups; // the full compiled list; `devices` gates applicability, not membership
+        // Membership truth (delta / coldstart / itemCount) uses the same compile as the store
+        // side (selfListGroups): items whose plugin isn't installed here stay members instead of
+        // ghosting into delta.added forever (2026-07-28 phone find).
+        let localList: SyncGroup[];
+        try {
+          localList = selfListGroups(this.registryDefs, this.settings.items, this.settings.customGroups);
+        } catch {
+          localList = this.compiledGroups; // CompileError — recompile() already surfaced the Notice
+        }
         const selfCopy = `${ctx.rootPath}/store/configdir/plugins/config-sync/data.json`;
         const storeGroups = (await ctx.io.exists(selfCopy)) ? storeSelfCopyGroups(await ctx.io.read(selfCopy), this.registryDefs) : [];
-        const delta = syncListDelta(local, storeGroups);
+        const delta = syncListDelta(localList, storeGroups);
         let capturedAt: string | null = null;
         const lockPath = `${ctx.rootPath}/store.lock.json`;
         if (await ctx.io.exists(lockPath)) {
@@ -481,9 +490,9 @@ export default class ConfigSyncPlugin extends Plugin {
             capturedAt = null; // an unreadable lock must not break the pane
           }
         }
-        if (local.length === 0) return { state: "coldstart", delta, itemCount: storeGroups.length, capturedAt, contentChanged: false, versionRefresh: null, flagsRefresh: null };
-        const selfGroup = local.find((g) => g.name === SELF_GROUP_NAME);
-        if (selfGroup === undefined) return { state: "insync", delta, itemCount: local.length, capturedAt, contentChanged: false, versionRefresh: null, flagsRefresh: null };
+        if (localList.length === 0) return { state: "coldstart", delta, itemCount: storeGroups.length, capturedAt, contentChanged: false, versionRefresh: null, flagsRefresh: null };
+        const selfGroup = this.compiledGroups.find((g) => g.name === SELF_GROUP_NAME);
+        if (selfGroup === undefined) return { state: "insync", delta, itemCount: localList.length, capturedAt, contentChanged: false, versionRefresh: null, flagsRefresh: null };
         const selfLedger = this.loadBaselines();
         const { statuses: selfStatuses, updates: selfUpdates } = await statusForGroups(ctx, [selfGroup], selfLedger);
         const [st] = selfStatuses;
@@ -500,7 +509,7 @@ export default class ConfigSyncPlugin extends Plugin {
         if (decided.state === "insync") this.setColdStartDismissed(false);
         const versionRefresh =
           decided.versionRefresh && av.localVersion !== null && av.storeVersion !== null ? { local: av.localVersion, store: av.storeVersion } : null;
-        return { state: decided.state, delta, itemCount: local.length, capturedAt, contentChanged: decided.contentChanged, versionRefresh, flagsRefresh: flagsRefreshCount > 0 ? flagsRefreshCount : null };
+        return { state: decided.state, delta, itemCount: localList.length, capturedAt, contentChanged: decided.contentChanged, versionRefresh, flagsRefresh: flagsRefreshCount > 0 ? flagsRefreshCount : null };
       },
       coldStartDismissed: () => this.coldStartDismissed(),
       setColdStartDismissed: (v) => this.setColdStartDismissed(v),
@@ -554,7 +563,7 @@ export default class ConfigSyncPlugin extends Plugin {
           return null; // e.g. passphrase needed for field encryption — no diff available
         }
       },
-      switchLocalDecisions: (name) => (SWITCH_LIST_GROUPS.has(name) ? this.memberLocalFor(name) : []),
+      switchMemberDecisions: (name) => (SWITCH_LIST_GROUPS.has(name) ? this.memberDecisionsFor(name) : []),
       betaIds: () => new Set(Object.keys(this.settings.bratPluginIndex)),
       runHistoryEnabled: () => this.settings.runHistory.enabled,
       loadRunHistory: () => this.loadRunHistory(),
@@ -597,6 +606,13 @@ export default class ConfigSyncPlugin extends Plugin {
         this.settings.items = nextItems;
         await this.saveSettings();
         void this.refreshLocalStatus();
+      },
+      setMemberEnabledOn: async (carrier, elementId, scope) => {
+        // Same field the settings card's "Enabled on" writes; masking covers not-installed
+        // plugins since the 2026-07-27 enablementScopes fix.
+        const itemId = `${carrier === "core-plugins" ? "core" : "community"}:${elementId}`;
+        this.settings.items = { ...this.settings.items, [itemId]: itemConfigWithEnabledOn(this.settings.items[itemId], scope) };
+        await this.saveSettings();
       },
       adoptConfiguration: async () => {
         try {
@@ -1052,10 +1068,14 @@ export default class ConfigSyncPlugin extends Plugin {
     return out;
   }
 
-  private memberLocalFor(group: string): string[] {
-    return Object.entries(this.enablementScopesFor(group))
-      .filter(([, scope]) => scope === "local")
-      .map(([id]) => id);
+  private memberDecisionsFor(group: string): MemberDecision[] {
+    return memberDecisionsFromScopes(this.enablementScopesFor(group));
+  }
+
+  private memberLocalIdsFor(group: string): string[] {
+    return this.memberDecisionsFor(group)
+      .filter((d) => d.scope === "local")
+      .map((d) => d.id);
   }
 
   // The runtime mask per switch group = This-device ids (memberLocal) ∪ ids class-scoped away
@@ -1083,7 +1103,7 @@ export default class ConfigSyncPlugin extends Plugin {
     for (const name of SWITCH_LIST_GROUPS) {
       const scoped = scopedAwayMembers(this.memberScopesFor(name), Platform.isMobile);
       const auto = name === "community-plugins" ? derived : new Set<string>();
-      const mask = [...new Set([...this.memberLocalFor(name), ...scoped, ...auto])];
+      const mask = [...new Set([...this.memberLocalIdsFor(name), ...scoped, ...auto])];
       if (mask.length > 0) out[name] = mask;
     }
     return out;
@@ -1092,7 +1112,7 @@ export default class ConfigSyncPlugin extends Plugin {
   // Force-off = user class scopes enforced on the wrong device class, minus This-device ids
   // (local wins). Auto-derived exclusions are never forced off — they keep local state.
   private memberForceOffIds(group: string): string[] {
-    return memberForceOff(this.memberScopesFor(group), this.memberLocalFor(group), Platform.isMobile);
+    return memberForceOff(this.memberScopesFor(group), this.memberLocalIdsFor(group), Platform.isMobile);
   }
 
   private async coreContext(): Promise<CoreContext> {
