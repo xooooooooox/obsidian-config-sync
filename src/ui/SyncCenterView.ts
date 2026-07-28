@@ -1796,7 +1796,9 @@ export class SyncCenterView extends ItemView {
         write: () => this.host.setMemberEnabledOn(carrier, m.id, "mobile"),
         kind: "mobile",
       },
-      { title: "⌂ This device decides for itself", write: () => this.host.addSwitchExceptions(carrier, [m.id]) },
+      // airplay = SCOPE_ICONS.local, matching its SVG-icon menu neighbors — the text ⌂ glyph
+      // rendered visibly smaller than their Lucide icons.
+      { title: "This device decides for itself", icon: "airplay", write: () => this.host.addSwitchExceptions(carrier, [m.id]) },
       { title: `Everywhere — ${consequence}`, icon: "globe", write: null },
     ];
     const entries = whereItRunsEntries(allEntries, knownDesktopOnly);

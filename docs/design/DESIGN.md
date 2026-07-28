@@ -100,7 +100,9 @@ double as the self-pane title's capture/coldstart states, with `alert-triangle` 
 only items, the per-member decision note rows (`config-sync-lddetail-ic`), and the row-level
 desktop-only-plugin badge (`config-sync-card-badge-plat`, itemCard.ts) · `globe` — the "where it
 runs" menu's Everywhere item · `airplay` — `SCOPE_ICONS` "This device" stop, rendered by every
-drawer scope-cycle (`renderScopeCycle`, itemCard.ts) · `settings-2` — the sidebar Config Sync
+drawer scope-cycle (`renderScopeCycle`, itemCard.ts) and by the "where it runs" menu's "This
+device decides for itself" item (icons-only menu — a text `⌂` rendered visibly smaller than
+its SVG neighbors) · `settings-2` — the sidebar Config Sync
 self-entry tile and the self pane's title-row Settings button.
 
 ### 2.4 Glyph language (text, reused everywhere)
@@ -115,8 +117,9 @@ qualifier-autocomplete value rows (`check`, qualifierSearch.ts). Everywhere else
 remain text. Chevrons `▸ ▾ ▴`. Actions `⤓` install, `⏻` enable. Report chips `+ ~ −`.
 Warnings `⚠ ✗`. Conflict modal `＋ ＝`. `⌂` is the vocabulary's local/device-exception
 glyph, used wherever a decision is pinned to one device — the conflict modal is one case
-(`＋ ＝ ⌂`), but it also appears in local-decision detail rows, the "⌂ Keep N extra…"
-button, and the "where it runs" menu's "⌂ This device decides for itself" item. Self-pane
+(`＋ ＝ ⌂`), but it also appears in local-decision detail rows and the "⌂ Keep N extra…"
+button. Not in the "where it runs" menu: its items are Lucide-iconed, so the local stop
+uses `airplay` there (§2.1). Self-pane
 title icon (`config-sync-self-title-ic`) is Lucide (the self pane is a hero surface):
 `arrow-down-to-line` coldstart · `arrow-up-from-line` capture — the ACTION_ICON pair —
 plus `alert-triangle` both · `settings` default. New UI must reuse this vocabulary rather
@@ -192,8 +195,8 @@ noted):
   community/core switch-list group's divergence detail, one row per element the pending
   Capture/Apply would flip, worded in device language (`renderMemberBlock`); each row's
   `where it runs ▾` button opens a `Menu` (`openWhereItRunsMenu`) offering Desktop only /
-  Mobile only / `⌂ This device decides for itself` (a local exception) / Everywhere (no
-  rule — leaves the pending action as-is).
+  Mobile only / This device decides for itself (a local exception) / Everywhere (no
+  rule — leaves the pending action as-is), each with its §2.1 Lucide icon.
 - **Modals**: pull-conflict `config-sync-cm-*` + `diffView.ts` (shared diff panel:
   Unified/Split toggle desktop-only, **Collapse/Full toggle both platforms** folding
   unchanged runs into `-cm-dgap` "⋯ N unchanged lines ⋯" rows); exclude-extras
