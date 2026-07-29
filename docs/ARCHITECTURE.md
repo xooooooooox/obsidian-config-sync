@@ -97,7 +97,14 @@ functions.
   (or removes the matching `settings.customGroups` entry) instead of a session-only compiled group
   edit. `companionConflict(path, defs, settings)` rejects a new companion/custom path that's
   already claimed by any item's settings file (default or custom) or any preset or user-added
-  companion.
+  companion. `parentCardLabel(groupName, defs, settings)` resolves the host-card label for a
+  card-derived group — an enabled companion folder (matched the same way `compileCompanions`
+  names it) or, for v3-era store manifests that still carry it as a group, the
+  `enabled-css-snippets` switch list (pinned to the `appearance` def's label); `null` for a
+  standalone group. It backs `GroupDisplayParts` and the host's `displayParts(group,
+  storedLabel)` (`main.ts`), which the Sync Center (`SyncCenterView.ts`) renders as a faint
+  `Parent › ` prefix and folds into its sort key and search text — display-only, never persisted
+  (`displayName`/`backfillLabels` still write the bare label to the store manifest).
 
 **Status & availability**
 - `core/status.ts` — per-item status (`statusForGroups`), remote freshness (`diffRemote`,
@@ -314,6 +321,10 @@ Changes must preserve these:
 - **The store is configDir-agnostic.** Paths use the literal `configdir` segment, so a vault on
   `.obsidian` and one on `.obsidian_apple` map to the same store.
 - **Run history is a separate, local-only file** — never captured, never synced.
+- **A snippet orphan is never auto-removed.** A `snippets/` member whose file is gone but still
+  has a per-item device choice (`SnippetMemberRow.fileExists: false`, `itemCard.ts`) stays listed
+  until an explicit Forget clears the choice — the file's absence may be transient (mid-sync), so
+  silently dropping the record would risk losing a real device choice.
 - **Bulk apply/install is per-item isolated.** One item that throws becomes an error row; the
   rest of the batch still runs. Installs use timeout + retry.
 - **The registry compiles, it never migrates.** `compileItems(registryDefs, settings)` is the only

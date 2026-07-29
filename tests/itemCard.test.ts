@@ -305,9 +305,17 @@ describe("buildSnippetMemberRows", () => {
   it("unions files on disk with names already scoped, sorted", () => {
     const rows = buildSnippetMemberRows(["b.css", "a.css"], { "c.css": "mobile" });
     expect(rows).toEqual([
-      { name: "a.css", scope: "all" },
-      { name: "b.css", scope: "all" },
-      { name: "c.css", scope: "mobile" },
+      { name: "a.css", scope: "all", fileExists: true },
+      { name: "b.css", scope: "all", fileExists: true },
+      { name: "c.css", scope: "mobile", fileExists: false },
+    ]);
+  });
+
+  it("marks scope-only names as orphans", () => {
+    const rows = buildSnippetMemberRows(["a.css"], { "gone.css": "mobile" });
+    expect(rows).toEqual([
+      { name: "a.css", scope: "all", fileExists: true },
+      { name: "gone.css", scope: "mobile", fileExists: false },
     ]);
   });
 });

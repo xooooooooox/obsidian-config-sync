@@ -277,6 +277,29 @@ function compileCompanions(itemId: string, cfg: ItemConfig): SyncGroup[] {
   return cfg.companions.filter((c) => c.enabled).map((c) => ({ name: basename(c.path), path: c.path, type: "dir", devices: c.scope }));
 }
 
+export interface GroupDisplayParts {
+  parent: string | null;
+  label: string;
+}
+
+// Parent card label for a card-derived group — an enabled companion (matched exactly the way
+// compileCompanions emits group names) or the enabled-css-snippets switch list (governed by the
+// Appearance card). null = standalone group. The Sync Center renders these as "Parent › Name";
+// the composed form is display-only and must never be persisted (backfillLabels stores
+// displayName's base label).
+export function parentCardLabel(groupName: string, defs: ItemDef[], settings: CompileSettings): string | null {
+  // compileItems never emits this name under schema v2 (see the reserved-name note above) — the
+  // branch covers v3-era store manifests, which can still carry the group at runtime (main.ts
+  // special-cases it the same way).
+  if (groupName === "enabled-css-snippets") return defs.find((d) => d.id === "appearance")?.label ?? "Appearance";
+  for (const def of defs) {
+    const cfg = configFor(settings, def.id);
+    if (!cfg.enabled) continue;
+    if (cfg.companions.some((c) => c.enabled && basename(c.path) === groupName)) return def.label;
+  }
+  return null;
+}
+
 // Per-element scope for a plugin's enablement (spec §3/§4, D4/D5): "enabledOn" default "all";
 // a disabled card forces its element to "local" ("each device manages its own", never inherits
 // another device's enabled state). Exported for main.ts to fold into the switch-list engine's

@@ -157,7 +157,11 @@ noted):
   `-side-self-pill` reusing `selfStatePill`), echoing the header self-chip. **Switcher**
   `config-sync-switcher` — compact replacement.
 - **Rows** `config-sync-hub-row` — chevron, name (`-rule-name`), optional mode badge /
-  excluded note / statenote pill, state icon, checkbox. Names truncate on mobile.
+  excluded note / statenote pill, state icon, checkbox. Names truncate on mobile. A card-derived
+  group — a companion folder or the `enabled-css-snippets` switch list — renders its name
+  two-tone: a faint `Parent › ` prefix (`-rule-parent` + `-rule-parentsep`, `--text-faint`) ahead
+  of the plain label (`renderRuleName`, `SyncCenterView.ts`), so it reads and sorts under its
+  host card; a standalone group renders just the label, unchanged.
 - **Checkboxes** — custom-drawn inputs (hub-row/mainbar/section-head): direction-colored
   when a row (orange capture / accent apply), bright grey (`--text-normal`) for
   select-alls (they carry no direction); idle select-all hides (`-selectall-idle`).
@@ -281,7 +285,16 @@ noted):
     writes `enabledCssSnippets` AND decides whether the file itself travels — the only companion
     whose members carry a scope control; a plain (unmapped) folder's members list for
     information only (`ItemDef.presetCompanions` has no per-member carry mechanism today — a
-    future engine iteration, not this one).
+    future engine iteration, not this one). A member whose file has been deleted but still holds a
+    device choice is an orphan row (`is-orphan`): its name renders struck faint
+    (`.config-sync-card-companiongrid.is-orphan .config-sync-ldname`), a `file deleted` pill
+    follows it (`config-sync-orphanpill`, `--text-error`/`--background-modifier-error`), and the
+    action column carries a **Forget** button (`config-sync-orphan-forget`) that clears the
+    choice (scope → `all`) and rebuilds the member zone in place — the scope icon itself stays
+    interactive, since keeping the choice is a valid response to a transient absence (mid-sync).
+    The member count (`config-sync-card-membercount`) counts real files only. While any orphan row
+    is present, a warning-toned hint (`config-sync-ldhint config-sync-orphanhint`, `--text-warning`)
+    renders above the always-on `SNIPPET_MEMBER_HINT`, explaining the Forget affordance.
   - **Release notes** (binding for this cut): the store AND the settings schema both break —
     `schemaVersion: 2` has no migration from any earlier `data.json` shape, and the store gains
     whole-file-encryption envelopes alongside the existing `__scopes__` sidecars. Hand-written

@@ -116,6 +116,8 @@
   font-weight: var(--font-semibold);
 }
 
+.config-sync-rule-parent, .config-sync-rule-parentsep { color: var(--text-faint); }
+
 .config-sync-card-title {
   font-weight: var(--font-semibold);
 }
@@ -1042,6 +1044,10 @@ body.is-mobile .config-sync-strip-meta .config-sync-report-pills { margin-left: 
 .config-sync-card-membercount { color: var(--text-faint); }
 .config-sync-card-memberarrow { color: var(--text-muted); }
 .config-sync-card-snippetmembers { margin-left: var(--size-4-6); }
+.config-sync-card-companiongrid.is-orphan .config-sync-ldname { color: var(--text-faint); text-decoration: line-through; }
+.config-sync-orphanpill { font-size: var(--font-ui-smaller); color: var(--text-error); border: 1px solid var(--background-modifier-error); border-radius: 999px; padding: 0 7px; }
+.config-sync-orphan-forget { font-size: var(--font-ui-smaller); }
+.config-sync-orphanhint { color: var(--text-warning); }
 .config-sync-card-addcompanion { display: flex; align-items: center; gap: var(--size-4-2); margin: var(--size-4-1) 0; }
 .config-sync-card-addcompanion .config-sync-card-pathinput { flex: 1; }
 /* "+ Add folder" downgrades to a quiet link-like text row (spec §4 Step 4) — overrides

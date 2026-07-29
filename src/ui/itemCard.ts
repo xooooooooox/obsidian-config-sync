@@ -232,16 +232,22 @@ export function defaultSettingsFile(): ItemSettingsFile {
 
 export const SNIPPET_MEMBER_HINT = "Files always sync — each snippet's choice here is where it's turned on.";
 
+export const SNIPPET_ORPHAN_HINT =
+  "A deleted file stays listed while it still has a device choice. Forget clears the choice — the next capture then removes the snippet from every device.";
+
 export interface SnippetMemberRow {
   name: string;
   scope: RuleScope;
+  fileExists: boolean;
 }
 
 // Union of files actually present under snippets/ and any name already scoped in
-// perItem.enabledCssSnippets (so a scoped-but-since-deleted file doesn't just vanish from view).
+// perItem.enabledCssSnippets (so a scoped-but-since-deleted file doesn't just vanish from view —
+// fileExists: false marks those orphans for the pill/Forget affordance).
 export function buildSnippetMemberRows(fileNames: string[], perItem: PerItemScopes): SnippetMemberRow[] {
+  const files = new Set(fileNames);
   const names = new Set([...fileNames, ...Object.keys(perItem)]);
-  return [...names].sort((a, b) => a.localeCompare(b)).map((name) => ({ name, scope: perItem[name] ?? "all" }));
+  return [...names].sort((a, b) => a.localeCompare(b)).map((name) => ({ name, scope: perItem[name] ?? "all", fileExists: files.has(name) }));
 }
 
 // Writes one snippet member's scope into perItem[ENABLED_CSS_SNIPPETS_KEY] (final-review blocker:

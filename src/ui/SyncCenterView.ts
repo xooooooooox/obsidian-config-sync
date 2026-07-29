@@ -5,6 +5,7 @@ import { CATEGORY_LABELS, findGroupByName, ItemCategory, SELF_GROUP_NAME, catego
 import { FileChanges, GroupResult, Remote, SyncGroup, hasChanges } from "../core/types";
 import { Availability } from "../core/availability";
 import { isWholeFileEncrypted } from "../core/modes";
+import { GroupDisplayParts } from "../core/registry";
 import {
   capFileEntries,
   CappedEntry,
@@ -133,6 +134,7 @@ export interface SyncCenterHost {
   setColdStartDismissed(v: boolean): void;
   resolvedPath(group: SyncGroup): string;
   displayName(group: string, storedLabel?: string): string;
+  displayParts(group: string, storedLabel?: string): GroupDisplayParts;
   captureItems(items: CaptureItem[], onProgress?: ProgressFn): Promise<GroupResult[] | null>;
   applyItems(items: ApplyItem[], onProgress?: ProgressFn): Promise<GroupResult[] | null>;
   reloadApp(): void;
@@ -383,6 +385,13 @@ export class SyncCenterView extends ItemView {
     return sectionForItem(this.availOf(name), Platform.isMobile);
   }
 
+  // Composed display string for sorting and search — parent prefix groups companions directly
+  // under their host card in name order.
+  private fullName(name: string, storedLabel?: string): string {
+    const p = this.host.displayParts(name, storedLabel);
+    return p.parent === null ? p.label : `${p.parent} › ${p.label}`;
+  }
+
   private rows(): StatusRow[] {
     const out: StatusRow[] = [];
     for (const group of this.groups) {
@@ -399,7 +408,7 @@ export class SyncCenterView extends ItemView {
     out.sort((a, b) => {
       const rank = SCOPE_ORDER.indexOf(this.scopeOf(a.group.name)) - SCOPE_ORDER.indexOf(this.scopeOf(b.group.name));
       if (rank !== 0) return rank;
-      return this.host.displayName(a.group.name, a.group.label).localeCompare(this.host.displayName(b.group.name, b.group.label));
+      return this.fullName(a.group.name, a.group.label).localeCompare(this.fullName(b.group.name, b.group.label));
     });
     return out;
   }
@@ -1169,7 +1178,7 @@ export class SyncCenterView extends ItemView {
     const parsed = parseQuery(this.search, SYNC_QUALIFIER_KEYS);
     return (
       matchesQualifiers(r, parsed.qualifiers, this.syncResolvers()) &&
-      matchesSearch(`${this.host.displayName(r.group.name, r.group.label)} ${r.group.name}`, parsed.text)
+      matchesSearch(`${this.fullName(r.group.name, r.group.label)} ${r.group.name}`, parsed.text)
     );
   }
 
@@ -1426,7 +1435,7 @@ export class SyncCenterView extends ItemView {
     fold.createDiv({ cls: "config-sync-report-legend", text: SECTION_NOTES[kind] });
     for (const r of matches) {
       const row = fold.createDiv({ cls: "config-sync-row is-static" });
-      row.createSpan({ cls: "config-sync-rule-name", text: this.host.displayName(r.group.name, r.group.label) });
+      this.renderRuleName(row, r.group.name, r.group.label);
       row.createSpan({ cls: "config-sync-doto-pill", text: "desktop-only" });
     }
   }
@@ -1480,6 +1489,17 @@ export class SyncCenterView extends ItemView {
     for (const r of matches) this.renderItemRow(card, r);
   }
 
+  // Two-tone group name: faint "Parent › " prefix for card-derived groups, plain label otherwise.
+  private renderRuleName(row: HTMLElement, name: string, storedLabel?: string): void {
+    const parts = this.host.displayParts(name, storedLabel);
+    const el = row.createSpan({ cls: "config-sync-rule-name" });
+    if (parts.parent !== null) {
+      el.createSpan({ cls: "config-sync-rule-parent", text: parts.parent });
+      el.createSpan({ cls: "config-sync-rule-parentsep", text: " › " });
+    }
+    el.appendText(parts.label);
+  }
+
   private renderItemRow(card: HTMLElement, r: StatusRow): void {
     const { group } = r;
     const pres = this.presState(r);
@@ -1489,7 +1509,7 @@ export class SyncCenterView extends ItemView {
       attr: { "aria-label": this.host.resolvedPath(group) },
     });
     const chev = row.createSpan({ cls: "config-sync-row-chevron", text: this.expandedItems.has(group.name) ? "▾" : "▸" });
-    row.createSpan({ cls: "config-sync-rule-name", text: this.host.displayName(group.name, group.label) });
+    this.renderRuleName(row, group.name, group.label);
     if (this.availOf(group.name).desktopOnly) row.createSpan({ cls: "config-sync-doto-pill", text: "desktop-only" });
     if (group.mode === "encrypted") {
       const badge = row.createSpan({

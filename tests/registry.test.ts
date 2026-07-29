@@ -10,6 +10,7 @@ import {
   groupOwners,
   itemConfigWithEnabledOn,
   ItemConfig,
+  parentCardLabel,
   RegistryEnv,
 } from "../src/core/registry";
 import { SyncGroup } from "../src/core/types";
@@ -485,5 +486,55 @@ describe("itemConfigWithEnabledOn", () => {
     expect(out.enabled).toBe(true);
     expect(out.companions).toEqual(existing.companions);
     expect(out.settingsFile).toEqual(existing.settingsFile);
+  });
+});
+
+describe("parentCardLabel", () => {
+  const env: RegistryEnv = { ...EMPTY_ENV, plugins: [{ id: "dataview", name: "Dataview" }] };
+  const defs = buildItemDefs(env);
+  const appearanceSettings = settings({
+    appearance: on({
+      companions: [
+        { path: "{configDir}/themes", scope: "all", enabled: true },
+        { path: "{configDir}/snippets", scope: "all", enabled: true },
+      ],
+    }),
+  });
+
+  it("resolves a preset companion to its card label", () => {
+    expect(parentCardLabel("snippets", defs, appearanceSettings)).toBe("Appearance");
+    expect(parentCardLabel("themes", defs, appearanceSettings)).toBe("Appearance");
+  });
+
+  // Legacy path: compileItems never emits this group under schema v2, but v3-era store
+  // manifests can still carry it at runtime.
+  it("resolves enabled-css-snippets to Appearance", () => {
+    expect(parentCardLabel("enabled-css-snippets", defs, appearanceSettings)).toBe("Appearance");
+  });
+
+  it("returns null when the card is disabled", () => {
+    const s = settings({
+      appearance: { enabled: false, companions: [{ path: "{configDir}/themes", scope: "all", enabled: true }] },
+    });
+    expect(parentCardLabel("themes", defs, s)).toBeNull();
+  });
+
+  it("returns null when the companion itself is disabled", () => {
+    const s = settings({
+      appearance: on({ companions: [{ path: "{configDir}/themes", scope: "all", enabled: false }] }),
+    });
+    expect(parentCardLabel("themes", defs, s)).toBeNull();
+  });
+
+  it("returns null for standalone groups", () => {
+    expect(parentCardLabel("app", defs, appearanceSettings)).toBeNull();
+    expect(parentCardLabel("community-plugins", defs, appearanceSettings)).toBeNull();
+  });
+
+  it("resolves a user-added companion on an enabled card", () => {
+    const s = settings({
+      "community:dataview": on({ companions: [{ path: "scripts-folder/scripts", scope: "all", enabled: true }] }),
+    });
+    expect(parentCardLabel("scripts", defs, s)).toBe("Dataview");
   });
 });

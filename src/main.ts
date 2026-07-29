@@ -48,10 +48,12 @@ import {
   emptyItemConfig,
   enablementScopes,
   groupOwners,
+  GroupDisplayParts,
   ItemConfig,
   itemConfigWithEnabledOn,
   ItemDef,
   compileItems,
+  parentCardLabel,
   RegistryEnv,
 } from "./core/registry";
 import { isLegacySettings, mergeLegacyAppSliceItems, SCHEMA_UPGRADE_NOTICE } from "./core/settingsMigration";
@@ -515,6 +517,7 @@ export default class ConfigSyncPlugin extends Plugin {
       setColdStartDismissed: (v) => this.setColdStartDismissed(v),
       resolvedPath: (g) => g.path.replace("{configDir}", this.app.vault.configDir),
       displayName: (g) => this.displayName(g, this.lastGroups?.find((x) => x.name === g)?.label),
+      displayParts: (g) => this.displayParts(g, this.lastGroups?.find((x) => x.name === g)?.label),
       diffPair: async (name, rel, dir) => {
         try {
           const group = this.compiledGroups.find((g) => g.name === name);
@@ -1021,6 +1024,13 @@ export default class ConfigSyncPlugin extends Plugin {
 
   displayName(group: string, storedLabel?: string): string {
     return displayLabelForGroup(group, this.pluginHost(), storedLabel);
+  }
+
+  displayParts(group: string, storedLabel?: string): GroupDisplayParts {
+    return {
+      parent: parentCardLabel(group, this.registryDefs, this.settings),
+      label: this.displayName(group, storedLabel),
+    };
   }
 
   // The plugin's own data.json must not be written through the raw adapter: Obsidian watches

@@ -71,6 +71,7 @@ import {
   SnippetMemberRow,
   sortCompanionMemberNames,
   SNIPPET_MEMBER_HINT,
+  SNIPPET_ORPHAN_HINT,
   stateOnlyHint,
   SYNC_ALL_HINT,
   SYNC_ALL_LABEL,
@@ -1625,12 +1626,13 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   // hint only render while `open`. Snippets are never the themes preset, so memberCountLabel's
   // first argument is always false here.
   private renderSnippetMembers(listEl: HTMLElement, def: ItemDef, rows: SnippetMemberRow[], wrap: HTMLElement, countEl: HTMLElement | null, open: boolean): void {
-    countEl?.setText(memberCountLabel(false, rows.length));
+    countEl?.setText(memberCountLabel(false, rows.filter((r) => r.fileExists).length));
     if (!open || rows.length === 0) return;
     const wrapEl = listEl.createDiv({ cls: "config-sync-card-snippetmembers" });
     for (const row of rows) {
-      const r = wrapEl.createDiv({ cls: "config-sync-grid config-sync-card-companiongrid" });
+      const r = wrapEl.createDiv({ cls: `config-sync-grid config-sync-card-companiongrid${row.fileExists ? "" : " is-orphan"}` });
       r.createSpan({ cls: "config-sync-ldname", text: row.name });
+      if (!row.fileExists) r.createSpan({ cls: "config-sync-orphanpill", text: "file deleted" });
       const scopeCell = r.createDiv();
       let curScope = row.scope;
       const buildScope = (): void => {
@@ -1665,8 +1667,32 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       };
       buildScope();
       r.createDiv(); // state column — empty for a snippet member row
-      r.createDiv(); // action column — empty for a snippet member row
+      const actionCell = r.createDiv();
+      if (!row.fileExists) {
+        const forget = actionCell.createEl("button", { cls: "config-sync-orphan-forget", text: "Forget" });
+        forget.addEventListener("click", () => {
+          forget.disabled = true; // the rebuild below replaces the row — no re-enable path needed
+          void (async () => {
+            const hadKeyRules = hasKeyRules(this.itemConfig(def.id));
+            await this.updateItem(def.id, (c) => ({
+              ...c,
+              settingsFile: withDerivedMode(withSnippetScope(c.settingsFile ?? defaultSettingsFile(), row.name, "all")),
+            }));
+            if (hasKeyRules(this.itemConfig(def.id)) !== hadKeyRules) this.refreshPathRow(wrap, def);
+            // The row leaves the union — rebuild the member zone in place (fresh file list +
+            // fresh perItem), then the badge/body refreshes the scope cycle already does.
+            const files = await this.host.listSnippetFiles();
+            if (!listEl.isConnected) return; // the drawer closed while the scan was in flight
+            const perItem = this.itemConfig(def.id).settingsFile?.perItem[ENABLED_CSS_SNIPPETS_KEY] ?? {};
+            listEl.empty();
+            this.renderSnippetMembers(listEl, def, buildSnippetMemberRows(files, perItem), wrap, countEl, open);
+            this.refreshCardBadges(wrap, def);
+            this.refreshCardBody(wrap, def);
+          })();
+        });
+      }
     }
+    if (rows.some((r) => !r.fileExists)) wrapEl.createDiv({ cls: "config-sync-ldhint config-sync-orphanhint", text: SNIPPET_ORPHAN_HINT });
     wrapEl.createDiv({ cls: "config-sync-ldhint", text: SNIPPET_MEMBER_HINT });
   }
 
