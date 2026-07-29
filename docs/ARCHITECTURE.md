@@ -108,7 +108,8 @@ functions.
 
 **Status & availability**
 - `core/status.ts` — per-item status (`statusForGroups`), remote freshness (`diffRemote`,
-  `remoteLockAhead`), and the counts the UI shows (`bucketCounts`). Direction for a changed group
+  `remoteLockAhead`), and the counts the UI shows (`bucketCounts`, `remoteDirectionCounts` —
+  the per-remote ⇡ push / ⇣ pull totals behind the header pills and the status bar). Direction for a changed group
   is a three-way comparison against this device's `core/ledger.ts` entry, never file mtimes or the
   lock's `capturedAt`: no entry → `never-synced` (apply-default, counts into `bucketCounts.down`);
   only the store side moved → `store-newer`; only the local side moved → `local-changed`; both
@@ -300,7 +301,9 @@ Changes must preserve these:
   `src/external/`, reached via dynamic `import()` from desktop-gated code in `main.ts` — so the
   core never pulls Node into the mobile bundle.
 - **Switch lists are identified by group name and compared as sets.** `SWITCH_LIST_GROUPS`
-  (`community-plugins`, `core-plugins`) drives set comparison — never byte comparison — at all
+  (`community-plugins`, `core-plugins`, plus the legacy-only `enabled-css-snippets` — never
+  compiled as its own group since the perItem move) drives set comparison — never byte
+  comparison — at all
   five alignment points: `statusForGroups`, `classifyMerge`, `diffRemote`, capture, and apply.
 - **Direction comes from a device-local baseline, not timestamps.** `store.lock.json`'s
   `capturedAt` and file mtimes never drive `local-changed`/`store-newer`/`differs`; only the
@@ -396,8 +399,10 @@ Changes must preserve these:
 
 - **Unit tests** — `vitest` over the pure core (in-memory `FileIO` + fake `PluginHost`);
   `npm test`.
-- **Lint** — `npx eslint .`, held at a **64-warning baseline / 0 errors** (two "BRAT"
-  sentence-case false positives are kept without `eslint-disable`, per repo convention).
+- **Lint** — `npx eslint .`, held at a **57-warning baseline / 0 errors** (two "BRAT"
+  sentence-case false positives are kept without `eslint-disable`; product terms like
+  "Sync Center" pass via the sentence-case rule's `ignoreWords` in `eslint.config.mts` —
+  never via inline disables, per repo convention).
 - **No hardcoded colors** — `scripts/check-no-hardcoded-color.sh`; all CSS uses Obsidian theme
   variables, with `body.is-mobile`/`body.is-phone` scoping for touch.
 - **Live checks** — drive a dedicated dev vault via **obsidian-cli**, which routes by CWD, so run
@@ -409,9 +414,9 @@ Changes must preserve these:
 - The version in `manifest.json` is the source of truth for the current release; older releases'
   history is retained on GitHub.
 - **Parked backlog** (deferred by the maintainer — don't start without an explicit pick):
-  1. UI audit polish — `design/DESIGN.md` §6 (remaining findings: emoji remnants, micro font
-     sizes, text-on-fill variable split, border-radius tiers, one double-duty class; the dead-CSS
-     finding is resolved).
+  1. UI audit polish — `design/DESIGN.md` §6 (remaining: three undecided TS-only classes,
+     micro font sizes, text-on-fill variable split, border-radius tiers, the shared `-fpill`
+     class; dead-CSS and emoji-remnant findings are resolved).
   2. Capture/pull interruption robustness (crash-marker vs full atomicity — direction undecided).
   3. Run-history file diffs (unified diff per changed file, with a size cap).
 - **Release flow**: `npm version <x.y.z>` (bumps `manifest.json`/`versions.json`, commits, tags)

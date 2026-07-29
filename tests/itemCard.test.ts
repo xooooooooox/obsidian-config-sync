@@ -87,7 +87,7 @@ describe("computeBadges", () => {
     expect(badges[0]).toEqual({
       text: "on/off only",
       cls: "config-sync-card-badge-state",
-      tooltip: "No settings file on this device yet — only the enable state syncs.",
+      tooltip: "No settings file on this device yet — only the on/off state syncs.",
     });
   });
 

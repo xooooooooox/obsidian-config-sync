@@ -8,7 +8,7 @@ Obsidian plugin: selective config distribution across devices/vaults. Spec: `doc
 - `npm run build` — `tsc -noEmit` + production bundle (run before finishing any change)
 - `npm test` — vitest; `tests/external.test.ts` needs the `git` binary
 - `npm run smoke:install` — build and install the plugin into `./dev/vault` (gitignored copy of a test vault)
-- Releasing: `npm version <x.y.z>` → `git push --follow-tags` → CI drafts the release → publish the draft on GitHub (BRAT needs a published release).
+- Releasing: `npm version <x.y.z>` → `git push --follow-tags` → CI drafts the release → hand-write the release notes → publish the draft on GitHub (BRAT needs a published release).
 
 ## Architecture
 
@@ -16,10 +16,10 @@ Full code map, invariants, and extension points: [`docs/ARCHITECTURE.md`](docs/A
 
 - `src/core/` — pure functions; ALL file I/O via the `FileIO` interface (`app.vault.adapter` in prod, `tests/memfs.ts` in tests). **Never import Node APIs here — core must run on mobile.**
 - `src/external/` — the only place Node `fs`/`child_process` are allowed; loaded exclusively via dynamic `import()` from desktop-gated code in `main.ts`.
-- `src/ui/` — thin Obsidian modals/settings; no logic worth testing.
+- `src/ui/` — views/modals plus pure, unit-tested view-models (`panelModel`, `itemCard`, `qualifierSearch`, `statusBar`); DOM code stays thin.
 - `src/main.ts` — plugin shell; the only file that touches non-public API (`app.plugins`), typed via the local `CommunityPluginRegistry` interface.
-- `src/core/catalog.ts` builds the settings-picker sections. Hardcoding is limited to two tables: `OPTION_LABELS` (global option file → friendly name) and `CORE_PLUGIN_FILES` (core plugin id → its settings file, e.g. `properties → types.json` — Obsidian exposes no id→file link at runtime). All plugin *names* come from runtime (`instance.name` / `manifests[id].name`). Group identity is the `name` field (reserved names for picker items; `validateSyncManifest` rejects a custom rule that takes a reserved name at the wrong path).
-- The Advanced tab renders each rule as a card (`config-sync-rule`) with a title row (name + lock + customized badge + reset) and a wrapping control row; `defaultGroupForName(name)` in catalog.ts computes the picker default used by per-row and bulk reset. Group names must match `^[a-z0-9][a-z0-9_-]*$` (enforced in `validateSyncManifest`).
+- `src/core/registry.ts` + `src/ui/SettingTab.ts`/`itemCard.ts` drive the picker tabs (one card per `ItemDef`); `src/core/catalog.ts` only feeds the settings search index and Advanced-tab helpers. Hardcoding is limited to `OPTION_LABELS` (option file → friendly name) and `CORE_FILE_EXCEPTIONS`/`corePluginFile()` (core plugin id → settings file, e.g. `properties → types.json` — Obsidian exposes no id→file link at runtime). All plugin *names* come from runtime (`instance.name` / `manifests[id].name`). Group identity is the `name` field (reserved names for picker items; `validateSyncManifest` rejects a custom rule that takes a reserved name at the wrong path).
+- The Advanced tab renders each custom rule as a `config-sync-row` (chevron + name + path + delete); customized managed items surface only as a one-row summary with a bulk "Reset all to defaults" (`defaultGroupForName` in catalog.ts computes the default). Group names must match `^[A-Za-z0-9][A-Za-z0-9_-]*$` (enforced in `validateSyncManifest`).
 
 ## Template upstream
 
@@ -30,14 +30,14 @@ The repo's git history is rooted at `obsidianmd/obsidian-sample-plugin` (remote 
 `dev/vault/` (gitignored) is a disposable Obsidian vault for CLI-driven smoke tests. Install the current build with `npm run smoke:install`, then drive the RUNNING app with the official CLI (`/Applications/Obsidian.app/Contents/MacOS/obsidian-cli`):
 
 - `vaults verbose` lists registered vaults; target one with `vault=<folder-basename>`.
-- `command id=obsidian-config-sync:<publish|apply|revert-last-apply|import-from-external>` runs commands; `plugin:reload id=obsidian-config-sync` reloads a dev build; `dev:errors` shows console errors; `dev:mobile on` emulates mobile; `dev:dom` / `dev:screenshot` inspect UI.
-- Drive modals via `eval code=...`: `document.querySelectorAll('.modal .checkbox-container')[i].click()` toggles, find buttons by textContent (e.g. Continue), `.modal-close-button` closes reports, `.suggestion-item` picks in fuzzy modals.
+- `command id=config-sync:sync` opens the Sync Center (the only registered command — Capture/Apply/Pull/Push are driven from its DOM); `plugin:reload id=config-sync` reloads a dev build; `dev:errors` shows console errors; `dev:mobile on` emulates mobile; `dev:dom` / `dev:screenshot` inspect UI.
+- Drive the Sync Center via `eval code=...`: tick `.config-sync-*` checkboxes and click the Capture/Apply buttons by textContent; run reports render as the pinned result strip (no report modal). Remaining modals (Stop syncing, Keep on this device, conflict, folder picker) still use `.modal` selectors.
 - **Vault registration is human-only**: Obsidian rebuilds its vault registry from internal state at startup, pruning injected entries; the CLI cannot register or open new vaults. A human must "Open folder as vault" + Trust once — afterwards CLI automation is fully autonomous. CLI calls against a stale vault hang (~2 min).
 - Never smoke-test in a real vault.
 
 ## Rules
 
-- Store path mapping and the blacklist live in `core/pathing.ts` / `core/manifest.ts` — change them only with matching spec + test updates.
+- Store path mapping and manifest validation live in `core/pathing.ts` / `core/manifest.ts` — change them only with matching spec + test updates.
 - Errors must carry context (group name, path, git command). No silent fallback.
 - Test in a dedicated dev vault, never in a real vault.
 - `docs/design/DESIGN.md` is the design-system reference (colors, type, icons, components, conventions). Read it before any UI work, and update it in the same branch as any UI 定稿 or change.

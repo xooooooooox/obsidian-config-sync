@@ -30,4 +30,10 @@ export default defineConfig(
 		},
 	},
 	...obsidianmd.configs.recommended,
+	{
+		rules: {
+			// Product terms keep their casing in UI copy: "Config Sync", "Sync Center", "Fields mode".
+			'obsidianmd/ui/sentence-case': ['warn', { ignoreWords: ['Sync', 'Center', 'Fields'] }],
+		},
+	},
 );

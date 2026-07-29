@@ -76,7 +76,7 @@ export function computeBadges(def: ItemDef, cfg: ItemConfig): Badge[] {
     badges.push({
       text: "on/off only",
       cls: "config-sync-card-badge-state",
-      tooltip: "No settings file on this device yet — only the enable state syncs.",
+      tooltip: "No settings file on this device yet — only the on/off state syncs.",
     });
   }
   // Innate manifest property first, ahead of every config-driven badge — neutral grey so the

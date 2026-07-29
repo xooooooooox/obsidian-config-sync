@@ -68,7 +68,7 @@ export function syncActionValue(state: GroupState): "capture" | "apply" | "ok" |
 }
 
 const SYNC_QUALIFIER_SPECS: QualifierSpec[] = [
-  { key: "type", description: "group kind", values: [{ value: "file", description: "single-file group" }, { value: "folder", description: "directory group" }] },
+  { key: "type", description: "item kind", values: [{ value: "file", description: "single-file item" }, { value: "folder", description: "folder item" }] },
   { key: "scope", description: "category", values: [{ value: "obsidian" }, { value: "core" }, { value: "community" }, { value: "beta" }, { value: "custom" }] },
   { key: "action", description: "what it needs", values: [{ value: "capture", description: "needs capture" }, { value: "apply", description: "needs apply" }, { value: "ok", description: "in sync" }, { value: "none", description: "no settings yet" }] },
   { key: "mode", description: "field handling", values: [{ value: "plain" }, { value: "fields" }, { value: "encrypted" }] },
@@ -852,7 +852,8 @@ export class SyncCenterView extends ItemView {
     } else if (this.panelScope.kind === "history") {
       sw.createSpan({ text: "History" });
     } else if (this.panelScope.kind === "self") {
-      sw.createSpan({ text: "⚙ Config Sync" });
+      setIcon(sw.createSpan({ cls: "config-sync-switcher-selfic" }), "settings-2");
+      sw.createSpan({ text: "Config Sync" });
     } else {
       sw.createSpan({ text: this.panelScope.name });
       const icon = this.remoteIcon(this.host.remoteCheck(this.panelScope.name)?.check);
@@ -1001,7 +1002,8 @@ export class SyncCenterView extends ItemView {
       this.switcherOpen = false;
       this.render(this.renderGen);
     });
-    const close = head.createSpan({ cls: "config-sync-strip-close", text: "✕" });
+    const close = head.createSpan({ cls: "config-sync-strip-close" });
+    setIcon(close, "x");
     close.addEventListener("click", () => {
       this.lastRun = null;
       this.render(this.renderGen);
@@ -1111,7 +1113,7 @@ export class SyncCenterView extends ItemView {
       card.createDiv({ cls: "config-sync-hcard-when", text: formatRunTime(rec.at) });
       card.createDiv({ cls: "config-sync-hcard-sum", text: rec.desc });
       const foot = card.createDiv({ cls: "config-sync-hcard-foot" });
-      foot.createSpan({ cls: "config-sync-hcard-pill is-chg", text: `✎ ${rec.changed} changed` });
+      foot.createSpan({ cls: "config-sync-hcard-pill is-chg", text: `${rec.changed} changed` });
       if (rec.issues > 0)
         foot.createSpan({ cls: "config-sync-hcard-pill is-iss", text: `⚠ ${rec.issues} issue${rec.issues === 1 ? "" : "s"}` });
       card.addEventListener("click", () => {
@@ -1194,14 +1196,15 @@ export class SyncCenterView extends ItemView {
       const banner = main.createDiv({ cls: "config-sync-coldstart-banner" });
       const txt = banner.createDiv({ cls: "config-sync-coldstart-text" });
       txt.createSpan({ cls: "config-sync-coldstart-head", text: "This device hasn't synced with the store yet. " });
-      txt.createSpan({ text: "Adopt the plugin settings first — they carry the scopes and device rules that make the diffs below trustworthy — then review and apply." });
+      txt.createSpan({ text: "Adopt the plugin settings first — they carry the device rules that make the diffs below trustworthy — then review and apply." });
       const actions = banner.createDiv({ cls: "config-sync-coldstart-actions" });
       const go = actions.createEl("button", { cls: "config-sync-coldstart-go", text: "Review settings →" });
       go.addEventListener("click", () => {
         this.panelScope = { kind: "self" };
         this.renderMainRegion();
       });
-      const close = actions.createEl("button", { cls: "config-sync-coldstart-x", text: "✕" });
+      const close = actions.createEl("button", { cls: "config-sync-coldstart-x" });
+      setIcon(close, "x");
       close.addEventListener("click", () => {
         this.host.setColdStartDismissed(true);
         this.renderMainRegion();
@@ -1848,9 +1851,7 @@ export class SyncCenterView extends ItemView {
 
   private renderStopSyncing(container: HTMLElement, r: StatusRow): void {
     const btn = container.createSpan({ cls: "config-sync-stopsync" });
-    const svg = btn.createSvg("svg", { attr: { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": "2", "stroke-linecap": "round" } });
-    svg.createSvg("circle", { attr: { cx: "12", cy: "12", r: "9" } });
-    svg.createSvg("path", { attr: { d: "M6 6l12 12" } });
+    setIcon(btn.createSpan({ cls: "config-sync-stopsync-ic" }), "ban");
     btn.createSpan({ text: "Stop syncing" });
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -1968,8 +1969,8 @@ export class SyncCenterView extends ItemView {
         this.render(this.renderGen);
       });
     };
-    segBtn("capture", "Capture", "Capture this (keep local)");
-    segBtn("apply", "Apply store", "Apply store version (overwrites local)");
+    segBtn("capture", "Capture", "Capture this device's version");
+    segBtn("apply", "Apply store", "Apply the store's version (overwrites this device)");
   }
 
   private renderCappedChanges(detail: HTMLElement, r: StatusRow, changes: FileChanges): void {
@@ -2354,7 +2355,7 @@ class KeepOnDeviceModal extends Modal {
     this.titleEl.setText("Keep on this device only");
     this.contentEl.createDiv({
       cls: "config-sync-expand-note",
-      text: `${this.listLabel}: items kept on this device manage their own on/off state — they don't follow your other devices, and aren't pushed to them.`,
+      text: `${this.listLabel}: items kept on this device manage their own on/off state — they don't follow your other devices, and your other devices don't follow them.`,
     });
     const list = this.contentEl.createDiv();
     for (const id of this.ids) {

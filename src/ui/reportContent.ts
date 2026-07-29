@@ -29,7 +29,7 @@ export function renderReportPills(host: HTMLElement, results: GroupResult[]): vo
   const pills = host.createSpan({ cls: "config-sync-report-pills" });
   pills.createSpan({ cls: "config-sync-pill is-neutral", text: `${changed.length} changed` });
   if (errors > 0) pills.createSpan({ cls: "config-sync-pill is-error", text: `✗ ${errors}` });
-  if (warnings > 0) pills.createSpan({ cls: "config-sync-pill is-warning", text: `⚠ ${warnings}` });
+  if (warnings > 0) pills.createSpan({ cls: "config-sync-pill is-warn", text: `⚠ ${warnings}` });
   if (unchanged.length > 0) pills.createSpan({ cls: "config-sync-pill is-ok", text: `✓ ${unchanged.length}` });
 }
 
@@ -50,7 +50,7 @@ export function renderReportContent(container: HTMLElement, results: GroupResult
     const sect = container.createDiv({ cls: "config-sync-sect" });
     sect.createSpan({ text: "Sync setup" });
     sect.createSpan({ cls: "config-sync-pill is-neutral config-sync-sect-count", text: "1" });
-    renderResultRow(container.createDiv({ cls: "config-sync-card" }), meta, "sync setup");
+    renderResultRow(container.createDiv({ cls: "config-sync-card" }), meta, "Sync setup");
   }
   if (unchanged.length > 0) {
     const line = container.createDiv({

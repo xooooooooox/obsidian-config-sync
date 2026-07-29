@@ -214,7 +214,7 @@ export default class ConfigSyncPlugin extends Plugin {
     this.registerDomEvent(this.statusBarEl, "click", () => void this.openSyncCenter());
     this.updateStatusIndicators();
     this.applyMobileStatusBar();
-    this.addCommand({ id: "sync", name: "Sync: open the sync panel", callback: () => void this.openSyncCenter() });
+    this.addCommand({ id: "sync", name: "Open Sync Center", callback: () => void this.openSyncCenter() });
 
     // --- awareness runtime ---
     this.registerEvent(this.app.vault.on("modify", (f) => this.onStoreFileEvent(f.path)));
@@ -752,7 +752,7 @@ export default class ConfigSyncPlugin extends Plugin {
     const add = (icon: string, title: string, run: () => void): void => {
       this.individualRibbons.push(this.addRibbonIcon(icon, title, () => run()));
     };
-    if (rb.sync) add("refresh-cw", "Config Sync: Sync", () => void this.openSyncCenter());
+    if (rb.sync) add("refresh-cw", "Config Sync: Open Sync Center", () => void this.openSyncCenter());
   }
 
   private pluginRegistry(): CommunityPluginRegistry {

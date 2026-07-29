@@ -23,9 +23,9 @@ One color per meaning, everywhere (0.27.9 audit). Alpha fills always use
 | Apply / ↓ direction | `--interactive-accent` | same family as capture; Apply button is `mod-cta`; apply progress bar, runline dot, status-bar segment |
 | Active / selected | `--interactive-accent` | active filter pill, active settings tab underline, active sidebar scope, seg `.is-on`, search-jump highlight, search scope tag |
 | In sync / success | `--color-green` | ✓ state icon, pills, result strip frame, test-strip ok, diff insertions, passphrase set badge |
-| Pull (remote → store) | `--color-cyan` | pull state icon, Pull button (solid primary), transfer strip, status-bar segment, encrypt-related accents (see below) |
+| Pull (remote → store) | `--color-cyan` | pull state icon, Pull button (solid primary), status-bar segment, encrypt-related accents (see below) |
 | Push (store → remote) | `--color-pink` | push state icon, Push button (solid primary), outdated-section frame, status-bar segment |
-| Locked / encrypted-at-rest | `--color-cyan` | key state icon, statenote pills, policy seg on-state, json encrypt highlighting |
+| Locked / encrypted-at-rest | `--color-cyan` | key state icon, statenote pills, policy seg on-state (json keys mark encryption with a colorless `lock` suffix — scope alone drives key color since the D1 split) |
 | Warning / caution | `--color-orange` | ⚠ pills, detect/device badges, not-installed section frame, amber version lines, local-decision rows, unresolved conflicts |
 | Error / destructive | `--color-red` | ✗ pills, test-strip error, diff deletions, strip-action on-state |
 | File changes (reports/diffs) | add `--color-green` · update `--color-blue` · delete `--color-red` | chips `+N ~N −N`, report file lines, conflict-modal marks — a *file-change* semantic, distinct from directions |
@@ -36,6 +36,10 @@ One color per meaning, everywhere (0.27.9 audit). Alpha fills always use
 
 `--color-purple`'s prior role (a second apply/selection color) was removed 0.27.9; it now has exactly the one use above and stays banned for anything else.
 
+Textual notes use `--text-warning`/`--text-error`; fills, borders, and icons use
+`--color-orange`/`--color-red`. Destructive text actions render red on hover (idle muted),
+single-row and bulk alike.
+
 ### 1.2 Type scale
 
 - Panel base: `.config-sync-center { font-size: var(--font-ui-small) }` — rows and
@@ -43,10 +47,12 @@ One color per meaning, everywhere (0.27.9 audit). Alpha fills always use
 - Compact step: `--font-ui-smaller` — pills, badges, chips, group headers, hints, notes,
   seg buttons, expanded-detail contents (one scale inside a detail, 0.27.7).
 - `--font-ui-large` only for modal titles and the bootstrap banner icon.
-- Weights: `--font-semibold` for row/item names; 600 for section/modal titles; 400 reset
-  for no-settings row names.
-- Micro sizes in raw px exist (9.5–10.5px: sidebar badges, field tags, act buttons,
-  cm-kind/viewbtn, sect-count) — see Findings #3 before adding more.
+- Weights: `--font-semibold` for row/item names; 600 for section, modal, History and
+  self-pane titles; 500 for status-bar segments, the conflict modal's auto label and drawer
+  member names; 400 reset for no-settings row names.
+- Micro sizes in raw px exist (9.5–10.5px: sidebar badges, the sidebar self card's 10px
+  status pill (`-side-self-pill`), field tags, act buttons, cm-kind/viewbtn, sect-count) —
+  see Findings #3 before adding more.
 - Uppercase labels (group headers, sidebar heads, form labels) carry letter-spacing
   0.05–0.08em and `--text-muted`/`--text-faint`.
 - Monospace (`--font-monospace`): paths, file lists, json viewer, diff panes, runline.
@@ -69,6 +75,7 @@ One color per meaning, everywhere (0.27.9 audit). Alpha fills always use
 | Checkboxes | 15px desktop / 24px mobile (radius 6px), pseudo ✓ offsets differ per platform | Obsidian's mobile checkbox styling defeats hit-area tricks; visual = touch target |
 | Touch targets | 44px rows/switcher/search-adjacent, 36px pills/seg/side items, 32px detail seg buttons | mobile minimums |
 | Mobile bottom clearance | `calc(var(--mobile-toolbar-height, 48px) + 88px)` | clears navbar + user status-bar snippets |
+| Inline micro-gaps | 3px (sidebar column rhythm) · 5px (icon↔label clusters) | between `--size-4-*` steps; 8px gaps use `var(--size-4-2)` |
 
 ## 2. Icon set
 
@@ -103,7 +110,10 @@ runs" menu's Everywhere item · `airplay` — `SCOPE_ICONS` "This device" stop, 
 drawer scope-cycle (`renderScopeCycle`, itemCard.ts) and by the "where it runs" menu's "This
 device decides for itself" item (icons-only menu — a text `⌂` rendered visibly smaller than
 its SVG neighbors) · `settings-2` — the sidebar Config Sync
-self-entry tile and the self pane's title-row Settings button.
+self-entry tile, the compact switcher's self entry, and the self pane's title-row Settings
+button · `ban` — the drawer's Stop-syncing footer action · `monitor-smartphone` — the
+scope-cycle "All devices" stop · `arrow-left-right` — the Sync Center leaf/tab icon ·
+`chevron-right` — qualifier-autocomplete key rows (value rows use `check`, §2.4).
 
 ### 2.4 Glyph language (text, reused everywhere)
 
@@ -122,7 +132,10 @@ button. Not in the "where it runs" menu: its items are Lucide-iconed, so the loc
 uses `airplay` there (§2.1). Self-pane
 title icon (`config-sync-self-title-ic`) is Lucide (the self pane is a hero surface):
 `arrow-down-to-line` coldstart · `arrow-up-from-line` capture — the ACTION_ICON pair —
-plus `alert-triangle` both · `settings` default. New UI must reuse this vocabulary rather
+plus `alert-triangle` both · `settings` default. Removal glyphs `⊘` stop-sync · `⌫`
+leftover. Status-bar remote counts use `⇡ ⇣` (text, matching the pill colors); navigation
+is `› ‹`; the sidebar's device↔store relation renders `↔`; strips/banners close with
+Lucide `x`. New UI must reuse this vocabulary rather
 than invent synonyms.
 
 ## 3. Copy principles
@@ -148,7 +161,7 @@ than invent synonyms.
 Class prefix → role (all in `styles.css`, rendered from `src/ui/SyncCenterView.ts` unless
 noted):
 
-- **Pills** `config-sync-pill` (is-up/down/ok/none/neutral/warn/statenote) — counts and
+- **Pills** `config-sync-pill` (is-up/down/ok/none/neutral/warn/error/statenote) — counts and
   states; never interactive. **Filter pills** `config-sync-fpill` in `-fpillrow` — buttons;
   long/short label spans; mobile = glyph form, one line. Shared with settings search scopes.
 - **Sidebar** `config-sync-side-item/-side-badge/-side-head` — scopes with tiny count
@@ -169,12 +182,18 @@ noted):
   (`-btn-capture` orange; Apply = `mod-cta`); 0-item = same color at 0.5 opacity; btnwrap
   hosts the 2px progress bar + shimmer; `-runline` is the live status line.
 - **Cards & sections** `config-sync-card`; availability sections `config-sync-section`
-  (dashed frame, pink outdated / orange not-installed), nested card unframed; group
+  (dashed frame: pink outdated · orange not-installed · orange leftover; disabled and
+  desktop-only keep the neutral border deliberately), nested card unframed; group
   headers `config-sync-sect` (uppercase + hairline) — used in All-items grouping and
-  remote diff.
+  remote diff. On narrow phones a section head keeps its pills and the "N selected" hint
+  on one line (`white-space: nowrap; flex: none`) — the title is the only element allowed
+  to wrap.
 - **Remote** `config-sync-remote-btn` is-pull/is-push (solid cyan/pink when primary,
   dimmed otherwise); diff entries reuse report rows + chips.
-- **Reports** `config-sync-report-*`, chips, `-strip` result strip (green; cyan transfer).
+- **Reports** `config-sync-report-*`, chips, `-strip` result strip — outcome-toned: green
+  only when the run is clean, `is-warn` orange / `is-error` red otherwise; it sits in a
+  sticky `-strip-dock` (opaque backing, pinned to the top of the scroll viewport) so the
+  outcome survives scrolling.
 - **History** `config-sync-htable` (desktop 7-col table) / `config-sync-hcard*`
   (`-hcard-top/-act/-chev/-when/-sum/-foot`, `-hcard-pill.is-chg` neutral / `.is-iss` orange) —
   the run-history list; the view swaps table → card layout when compact (`<700px`) so mobile
@@ -185,7 +204,7 @@ noted):
   segments, no pill backgrounds (mockup candidate A); colors identical to the header pills
   (`is-up` orange, `is-down` accent, `is-push` pink, `is-pull` cyan). Clean state = a dimmed
   `refresh-cw` icon only (`--text-faint`). `mod-clickable`; aria-label lists the non-zero parts
-  (`Config Sync — 2 to capture · 1 to apply · push 1`).
+  (`Config Sync — 2 to capture · 1 to apply · 1 to push`).
 - **Self pane** (Config Sync's own state) `config-sync-self-pane` — `-self-title/-self-title-ic/-self-title-sp/-self-sub`, `-self-settings-btn`/`-self-settings-ic` (title-row Settings), `-self-block/-block-h/-block-s`, membership delta `-self-delta/-self-drow/-self-dg`, `-self-viewchange` (expandable `data.json` diff), `-self-pill/-self-hint/-self-caution/-self-acts`.
 - **Qualifier autocomplete** `config-sync-qac/-qac-opt` (is-sel)/`-qac-ic/-qac-txt/-qac-desc` — the `key:value` search dropdown under both search boxes, anchored by `config-sync-search-wrap`; opens on focus (an empty box lists every key), key→value suggestions, keyboard-navigable. Logic in `src/ui/qualifierSearch.ts`.
 - **Settings tab** (`src/ui/SettingTab.ts`): `config-sync-tabs/-tab` (phone hides inactive
@@ -206,6 +225,17 @@ noted):
   unchanged runs into `-cm-dgap` "⋯ N unchanged lines ⋯" rows); exclude-extras
   `-exclude-row/-modal-buttons`. Cold-start adopt is not a banner: the self pane (above)
   renders the coldstart state and drives it via `adoptConfiguration`.
+- **Cold-start guidance banner** `config-sync-coldstart-*` (spec 2026-07-27) — accent-tinted
+  banner above the result strip in item mode, shown only while the plugin's own settings are
+  pending (coldstart/adopt/both) AND some group has never synced here (`showColdStartBanner`);
+  "Review settings →" routes to the self pane; dismissal (Lucide `x`) is device-local and
+  resets when self returns to insync. Adopt itself still lives in the self pane, never in the
+  banner.
+- **Leftover store files** — an amber `is-leftover` filter pill in the All-items scope (short
+  form `⌫ N`), opening an always-open amber `config-sync-section.is-leftover` of `-oflow`
+  rows (name / mono path / size / a Delete text action), with "Delete all" in the head —
+  both destructive text actions render per §1.1 (idle muted, red on hover). Removal kinds in
+  History render `⊘` (stop-sync) and `⌫` (delete-leftover), muted.
 - **Unified card** (定稿 mockup artifact `v7-final-panorama`, 2026-07-25, plus the icon/
   progressive-disclosure pass in artifact `239c8393-cd61-4faa-95aa-e49f1804b446`, 2026-07-26; specs
   `docs/superpowers/specs/2026-07-25-unified-card-design.md` and
@@ -219,7 +249,7 @@ noted):
   - **Row** `config-sync-item-wrap` — chevron, name, badges (`config-sync-card-badge*`; order:
     dashed `config-sync-card-badge-state` `on/off only` chip (state-only core plugin — its def
     has a `settingsFile` with `defaultPath: null`, no file written on this device yet; tooltip
-    "No settings file on this device yet — only the enable state syncs.") → grey `desktop-only
+    "No settings file on this device yet — only the on/off state syncs.") → grey `desktop-only
     plugin` chip (manifest `isDesktopOnly`, monitor icon via `-badge-plat/-badge-ic`)
     → enablement scope when non-default → `N device-scoped` → `N encrypted`; a zero count never
     renders), sync toggle. No mode chip and no other row content — mode is a derived, drawer-only
@@ -233,7 +263,7 @@ noted):
     (`config-sync-scopeicon`, `renderScopeCycle`): the glyph IS the state (`SCOPE_ICONS`:
     monitor+smartphone = All devices, monitor = Desktop only, smartphone = Mobile only,
     airplay = This device), a click advances to the next value in that row's own option list
-    (`nextScope`, wrapping), tooltip `Change scope (currently: …)`; the `all` default sits dim
+    (`nextScope`, wrapping), tooltip `Where it syncs (currently: …)`; the `all` default sits dim
     (0.45) and any narrower scope renders `.is-set` (accent, full opacity). ① and ②
     render only when they apply, ③ Companion folders always renders (down to just its quiet
     `+ Add folder` row, `config-sync-add-row-quiet`, when a card has no folders yet):
@@ -288,8 +318,9 @@ noted):
     future engine iteration, not this one). A member whose file has been deleted but still holds a
     device choice is an orphan row (`is-orphan`): its name renders struck faint
     (`.config-sync-card-companiongrid.is-orphan .config-sync-ldname`), a `file deleted` pill
-    follows it (`config-sync-orphanpill`, `--text-error`/`--background-modifier-error`), and the
-    action column carries a **Forget** button (`config-sync-orphan-forget`) that clears the
+    follows it (`config-sync-orphan-forget`'s **Forget** button sits at the right edge of the
+    content cell — inside `config-sync-orphancell`, never in the 28px action column, which a
+    text button cannot fit; the action column stays empty). Forget clears the
     choice (scope → `all`) and rebuilds the member zone in place — the scope icon itself stays
     interactive, since keeping the choice is a valid response to a transient absence (mid-sync).
     The member count (`config-sync-card-membercount`) counts real files only. While any orphan row
@@ -328,18 +359,22 @@ Each item ships only after a user decision. None change behavior silently.
    `.config-sync-devbadge`/`-facebadge`, `.config-sync-badge`, `.config-sync-cust`,
    `.config-sync-link`, `.config-sync-jsonbody`, `.config-sync-shared-tag`,
    `.config-sync-passphrase-status`, `.config-sync-guide*`, `.config-sync-strip.is-transfer`)
-   are all removed. Remaining, still open: seven TS-only classes with no CSS rule
+   are all removed. Remaining, still open: eleven TS-only classes with no CSS rule
    (`-flock` has since grown a real rule and is off this list). Three are undecided:
    `-beta-mapnote`, `-remote-comparing`, `-cm-unified` — decide whether they get styles or
-   stay as semantic hooks. Four more, found on re-audit, are structural query/layout
+   stay as semantic hooks. Four, found on re-audit, are structural query/layout
    anchors, deliberately unstyled: `config-sync-card-companionzonehost`
    (SettingTab.ts:723,1330), `config-sync-card-memberhost` (SettingTab.ts:1291),
    `config-sync-card-sfbodyhost` (SettingTab.ts:697,777), `config-sync-cm-diffhost`
-   (ConflictModal.ts:149).
+   (ConflictModal.ts:149). Four more are semantic/structural wrappers found on this
+   re-audit: `config-sync-remote-pane` (SyncCenterView.ts:2178), `config-sync-remote-summary`
+   (SyncCenterView.ts:2251), `config-sync-settings-body` (SettingTab.ts:443),
+   `config-sync-sources` (SettingTab.ts:2584).
 2. **Emoji remnants**: the self-pane title (`config-sync-self-title-ic`) converted to
    Lucide state icons (see §2.4) — no longer a candidate, like `-flock`, which shipped its
    Lucide `lock` replacement (SettingTab.ts:1752-1753, styles.css:787-788). Remaining
-   text glyphs: ↺/＋/＝/⌂ and the ⚠/✗/✓ status set. The panel purged emoji (mode badges,
+   text glyphs: ＋/＝/⌂ and the ⚠/✗/✓ status set (↺ is gone from the code, and the History
+   card pill's ✎ was removed in the 2026-07-29 polish pass). The panel purged emoji (mode badges,
    locked state) because they ignore theme color; the remaining pure-text glyphs render
    monochrome and can stay.
 3. **Micro px font sizes** (9.5–10.5px: side badges, ftag, act-btn, sect-count, seg-label,

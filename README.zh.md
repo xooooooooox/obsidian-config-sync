@@ -21,7 +21,7 @@
 - **明确的 Apply** —— 挑选条目，直接落地（没有确认弹窗）；每次运行的变更都会留在贴顶结果条与 **History** 中可见。
 - **可移除、可清理** —— 随时停止同步某个条目（可选一并删除其 store 副本）；store 中遗留的、没有对应条目的文件会作为 **Leftover**（遗留）浮现出来，一键清理。
 - **随时可见的状态感知** —— 打开 **Sync Center** 随时查看详情；其页头本身就是一条状态栏：一个 *this device*（本设备）胶囊（全部 in sync 时显示绿色对勾，否则显示当前状态并提供进入设置的快捷入口），后面跟着每一类待办动作的总数，包括每个远程各自的 push/pull 计数。每个条目按状态打上徽标（`✓ in sync`、changed-on-this-device、store-is-newer、not-synced-on-this-device-yet、`≠ differs`、`— not captured yet`），每个同步动作（Capture、Apply、Push、Pull）都有各自独立的图标，JSON 差异会按统一的键顺序渲染，纯粹的键顺序/格式差异会被单独标注出来而不是显示成一堆噪声，远程仓库也会被自动检查。来自某张卡片自身 companion 文件夹或 switch list 的分组——CSS snippets、`themes/` 文件夹、任意用户添加的文件夹——会显示为 `Parent › Name`（parent 部分淡显），因此排序与搜索时会归入其所属卡片，而不是显示成一行无关的独立条目。
-- **在 diff 里直接决定插件归属** —— 当某个插件仅在一侧被启用时，对应行会说明这样做的后果，并提供一个 "where it runs" 菜单，可在原地设为 Desktop only / Mobile only 或按设备自行决定。
+- **在 diff 里直接决定插件归属** —— 当某个插件仅在一侧被启用时，对应行会说明这样做的后果，并提供一个 "where it runs" 菜单，可原地设为 Desktop only / Mobile only / 本设备自行决定 / 到处启用（不可能生效的选项会被隐去）。
 - **状态栏** —— 同步状态一目了然：↑ 待捕获、↓ 待应用，以及每个 remote 各自的 ⇡ push / ⇣ pull 计数；点击可直接打开 **Sync Center**。全部同步时只显示一个置灰图标。原有的 ribbon 图标圆点现在改为可选（默认关闭）；另有一个仅限手机端的开关，可强制显示被 Obsidian 隐藏的状态栏。
 - **感知可用性** —— 落后版本、被禁用或未安装的插件会各自出现在独立的折叠分区中，配合插件安装/更新引擎，让 apply 在同一步里也能顺带更新、启用或安装某个社区插件。**Beta** 标签页会追踪通过 BRAT 安装的社区插件，让它们的配置像其他条目一样同步。
 - **感知远程状态** —— Sync Center 的 Remotes 区块会自动检查 git 或 vault 远程仓库是否在你的本地 store 之后被捕获过；展开某个远程可预览 Pull/Push 的内容。
@@ -36,8 +36,8 @@
 
 ## 快速开始
 
-1. **Settings → Config Sync** —— 勾选你想同步的内容（Obsidian / Core plugins / Community plugins 三个标签页）。
-2. 从功能区菜单打开 **Sync Center**（或使用 **Sync: open the sync panel** 命令），勾选要 capture 的条目，点击 **Capture N items**。
+1. **Settings → Config Sync** —— 勾选你想同步的内容（Obsidian / Core plugins / Community plugins / Beta 四个标签页）。
+2. 从功能区菜单打开 **Sync Center**（或使用 **Open Sync Center** 命令），勾选要 capture 的条目，点击 **Capture N items**。
 3. 在另一台设备上，等你的笔记同步工具(note sync)把数据文件夹送达之后：打开 **Sync Center**，勾选要 apply 的条目，点击 **Apply N items**。
 
 ## 工作原理
@@ -57,13 +57,14 @@
 - **Outdated on this device**（本设备版本落后） —— 已启用的插件，但其本地安装版本落后于 store 捕获时的版本。
 - **Disabled on this device**（本设备已禁用） —— 配置被追踪，但插件本身在本设备上处于关闭状态。
 - **Not installed on this device**（本设备未安装） —— store 中有配置，但插件在本设备上根本没有安装。
+- **Desktop-only**（仅手机端出现）—— 配置中存在、但无法在本设备运行的插件；纯信息展示，无可勾选项。
 
 这些分区里的每一行，除了常规的复选框之外还带有一个 **On apply**（应用时动作）选项——复选框决定这个条目的配置是否参与本次运行，On apply 选项决定配置落地之前插件状态要如何变化：
 
-- 落后版本：`⤓ Update to latest`（默认）或 `Keep {version}`（保留当前版本）。
+- 落后版本：`⤓ Update to {store 版本}`（默认）或 `Keep {version}`（保留当前版本）。
 - 已禁用、无版本落差：`⏻ Enable`（默认）或 `Keep disabled`（保持禁用）。
 - 已禁用且版本落后：`⤓ Update & enable`（默认）、`⏻ Enable`、或 `Keep disabled`。
-- 未安装：`⤓ Install & enable`（默认）、`⤓ Install`、或 `Stage only`（仅预铺配置）。
+- 未安装：`⤓ Install & enable`（默认）、`⤓ Install`、或 `Settings only`（仅落配置，不装插件）。
 
 安装与更新会从官方社区插件目录拉取该插件，并**锁定到 store 被 capture 时的版本**（记录在 `store.lock.json` 中），让每台设备都收敛到同一版本；当该精确 release 缺失时，会回退到最新稳定版并给出警告。不在目录中的插件会被预铺（配置写入 store，等你以后手动安装即可），并附带相应提示。更新失败会保留原有配置不变（旧版本被认为不适合被盲目覆盖）；安装失败仍会预铺配置，因为一个尚未安装的插件本来就不会因此受损。**单个失败绝不会中断整批安装**——出问题的插件只会变成结果里的一条错误行，其余照常安装。
 
@@ -71,7 +72,7 @@
 
 **传输层面** —— store 如何流转：
 
-- **你的笔记同步工具（默认）**：store 本身就是普通的 vault 内容——remotely-save、Obsidian Sync、iCloud 或其他任何工具都能把它带到任何地方，包括移动端，零配置。在**全新设备**上，一旦 store 送达，Sync Center 会自行发现它并显示一条 **Adopt**（采纳）横幅；采纳后会触发一次性引导，带你把 store 应用到本设备完成初始化——并提醒你不要用新设备的空默认值反向 capture 覆盖它。在你采纳之前，条目列表顶部会出现一条可关闭的横幅，说明当前显示的差异还不可信——请先采纳插件自身的设置，因为比较逻辑依赖它携带的 scope 与设备规则。
+- **你的笔记同步工具（默认）**：store 本身就是普通的 vault 内容——remotely-save、Obsidian Sync、iCloud 或其他任何工具都能把它带到任何地方，包括移动端，零配置。在**全新设备**上，一旦 store 送达，Sync Center 会自行发现它并显示一条 **Adopt**（采纳）横幅；采纳后会触发一次性引导，带你把 store 应用到本设备完成初始化——并提醒你不要用新设备的空默认值反向 capture 覆盖它。在你采纳之前，条目列表顶部会出现一条可关闭的横幅，说明当前显示的差异还不可信——请先采纳插件自身的设置，因为比较逻辑依赖它携带的设备规则。
 - **Pull / Push（桌面端，可选）**：config-sync 自带的传输通道，用于 git 仓库或本机上的另一个 vault，通过 Sync Center 的 Remotes 区块执行。Pull 会用远程内容覆盖本 vault 的 store（可重复执行——冷启动和日常使用是同一个操作）；Push 则把内容发送出去。git 传输方式会克隆到一个临时目录，绝不会触碰你 vault 自身的 git 仓库。
 
 一切功能都挂在一个 **Config Sync** 功能区图标上：点击图标会打开一个菜单，包含 **Sync Center**（标有待处理的 capture/apply 数量），点击即打开（若已打开则聚焦）Sync Center，Capture/Apply/Pull/Push 都在其中完成。状态栏是默认常显的主要指示器；功能区图标自身的状态点为可选项，默认关闭（**Settings → General → Status bar**）。也可以在 **Settings → General** 中为 Sync Center 单独启用功能区图标，默认关闭。Quick commands 功能已拆分为独立插件 [Ribbon Organizer](https://github.com/xooooooooox/obsidian-ribbon-organizer)。
@@ -80,7 +81,7 @@ Capture、Apply、Pull、Push 每次执行完毕都会在 Sync Center 顶部渲�
 
 Sync Center 的页头是一条状态栏：**this device**（本设备）胶囊显示 Config Sync 自身的同步状态——in sync 时显示绿色对勾，否则显示其状态并提供一个 Settings 快捷入口——后面跟着每一类待办动作的总数，包括每个远程各自的 push/pull 计数。点击该胶囊会打开 **this device** 面板，Config Sync 自身的配置（它的条目清单、字段规则与选项）会像其他条目一样被 capture 和 apply；当该清单发生变化时，可展开的 *view change* 会显示确切的 `data.json` 差异以及 capture 将会发布的内容。
 
-**Filter by name…**（按名称筛选）搜索框位于 Sync Center 的侧边栏，会在所有作用域（Obsidian、Core plugins、Community plugins、snippets、themes、dotfiles）中全局搜索。除纯文本外，它还支持 `key:value` 限定符——`type:`（file/folder）、`scope:`（obsidian/core/community/beta/custom）、`action:`（capture/apply/ok/none）、`mode:`（plain/fields/encrypted）与 `device:`（all/desktop/mobile）——多个限定符会一起收窄结果，并可与自由文本组合，配有一个聚焦即弹出、先提示 key、再提示 value 的自动补全下拉。侧边栏会显示每个作用域的命中数量，有命中的分区会自动展开以仅显示命中项。
+**Filter by name…**（按名称筛选）搜索框位于 Sync Center 的侧边栏，会在所有作用域（Obsidian、Core plugins、Community plugins、Beta、Custom）中全局搜索。除纯文本外，它还支持 `key:value` 限定符——`type:`（file/folder）、`scope:`（obsidian/core/community/beta/custom）、`action:`（capture/apply/ok/none）、`mode:`（plain/fields/encrypted）与 `device:`（all/desktop/mobile）——多个限定符会一起收窄结果，并可与自由文本组合，配有一个聚焦即弹出、先提示 key、再提示 value 的自动补全下拉。侧边栏会显示每个作用域的命中数量，有命中的分区会自动展开以仅显示命中项。
 
 ![Sync Center](docs/assets/sync-panel.png)
 
@@ -89,7 +90,7 @@ Sync Center 的页头是一条状态栏：**this device**（本设备）胶囊�
 - **General** —— PKM 模式（自动检测 IOTO vault）、数据文件夹位置、状态提示开关（同步菜单变更数量、自动检查远程仓库、定期本地检查）、状态栏（状态栏项、远程 push/pull 计数、可选的 ribbon 圆点、手机端强制显示）、功能区图标。
 - **Obsidian / Core plugins / Community plugins / Beta** —— 每一行都是一张卡片：名称、徽标（无法在移动端运行的插件显示灰色 `desktop-only plugin` 标记；当插件的启用状态不是默认值时显示 `on: desktop`/`on: mobile`/`on: this device`；外加设备限定规则数与加密规则数）、一个同步开关，以及一个可展开抽屉的箭头(chevron)。**Obsidian** 标签页共三张卡片：**App settings**（整个 `app.json`——编辑、新建笔记与链接行为，以及其他通用选项）、**Appearance**（主题、字体与 CSS 代码片段）与 **Hotkeys**（你的自定义快捷键）。Core plugins 与 Community plugins 会被全量列出：尚未写出设置文件的核心插件会显示为一张仅有状态的卡片（只有 **Enabled on** 区），等它写出文件后才会长出其余区域。**Search all settings…** 搜索框覆盖 General、所有选择器标签页、Advanced 和 Remotes，并支持 `scope:`（general/obsidian/core/community/advanced/remotes）与 `type:`（file/folder）限定符及自动补全，可与纯文本并用。**Beta** 标签页追踪通过 [BRAT](https://github.com/TfTHacker/obsidian42-brat) 安装的社区插件——同样的卡片、同样的三个抽屉区——让它们的配置像其他插件一样同步。每个分区的卡片均按字典序排列；疑似敏感的键（token、密钥等）会在卡片的 File preview 中高亮显示，方便你在启用同步之前先看到它们。
 - 一张卡片的抽屉最多有三个区域，其中所有 scope 控件都是同一种循环图标：图形本身就代表当前 scope（显示器+手机 = `All devices`，显示器 = `Desktop only`，手机 = `Mobile only`，airplay 标记 = `This device`），点击即切换到下一个值，默认值淡显、收窄后的值以强调色点亮。**Enabled on**（仅插件卡片）就是这样一个图标，决定哪些设备会启用该插件本身；它读写的正是 Obsidian 自己维护的那份启用插件列表。**Settings file** 一开始只是一行路径行——文件路径、一个 scope 图标（此处不含 `This device`）与一个给整个文件加密的锁形图标开关；路径文字本身就是编辑入口——点击即可原地编辑（Enter 提交，Esc 取消，编辑已提交的自定义路径时会出现一个安静的 **Reset to default** 动作用于还原内置默认路径）。下方默认折叠的 **File preview**（`▸ File preview`）展开后是一段只读的文件预览，键名按其规则着色，下方配有色点图例（蓝色 = desktop only，琥珀色 = mobile only，红色 = this device，锁形 = 已加密）；点击某个键即可直接为其添加规则。一旦卡片存在任意逐键规则，就会切换到逐键状态：路径行自身的 scope/锁 变灰（此时每个已加规则的键各自管理自己），并且每个已配置的键都会多出一行，带有自己的 scope 图标、一个锁形开关（scope 为 `This device` 时置灰）与一个用于删除该规则的 ✕；字符串数组类型的键的规则会额外带一个 **Per-item scopes** 开关，打开后每个元素各有自己的 scope 图标，而不是整个键共用一条规则。删光最后一条规则会让卡片回到整文件状态。**Companion folders** 列出任何随该条目一起同步的 vault 相对路径文件夹——Appearance 预置了 `themes/` 与 `snippets/`，每张卡片的抽屉末尾都有一行安静的 **+ Add folder**，可添加其他任意路径（重复路径、或已被其他条目占用的路径会被拒绝）；每个文件夹行都带有 scope 图标与一个同步开关（你自己添加的文件夹还会多一个 ✕），点击文件夹名称即可编辑其路径。文件夹的成员列表默认折叠在一个 `· N files`/`· N themes` 计数后面——点击即可展开。展开 `snippets/` 会把每个文件列为独立一行，配有 scope 图标：文件本身始终同步，图标只决定哪些设备启用它。文件已被删除、但仍带有设备选择的成员会继续留在列表中——名称划线淡显，标有 `file deleted`——直到你点击 **Forget** 清除该选择（下次 capture 就会把它从 store 中移除）；文件夹的成员计数只统计仍然存在的文件。其他 companion 文件夹整体同步，因此其成员仅作信息展示，没有逐文件 scope。
-- **Advanced** —— **Custom rules**（完全由你自定义：vault 根目录文件、额外文件夹、sync mode）与 **Discovered files**（我们无法自动分类的配置文件；名称和路径由文件本身决定，可切换是否同步），两者的每一行都使用各自的字段规则编辑器（一个 `This device`/`Encrypted`/`Desktop only`/`Mobile only` 动作下拉框，与卡片图标化的 Settings file 区是两套不同的控件）。当有任意被管理的条目发生了自定义修改（path、fields 或 mode 偏离了默认值）时，页面顶部会出现一条摘要横幅，列出这些条目并提供 **↺ Reset all to defaults** 按钮。
+- **Advanced** —— **Custom rules**（完全由你自定义：vault 根目录文件、额外文件夹、sync mode）与 **Discovered files**（我们无法自动分类的配置文件；名称和路径由文件本身决定，可切换是否同步），两者的每一行都使用各自的字段规则编辑器（一个 `This device`/`Encrypted`/`Desktop only`/`Mobile only` 动作下拉框，与卡片图标化的 Settings file 区是两套不同的控件）。当有任意被管理的条目发生了自定义修改（path、fields 或 mode 偏离了默认值）时，页面顶部会出现一行摘要，列出这些条目并提供 **Reset all to defaults** 按钮。
 - **Remotes**（桌面端） —— 添加一个 **git repository**（URL、分支、可选子文件夹）或 **another vault**（另一个 vault）：点击 **Browse…**，选择目标 vault 文件夹，其中的 store 会被自动识别。
 
 ## Store 目录结构

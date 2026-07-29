@@ -54,7 +54,7 @@ export class ConflictModal extends Modal {
     autoHead.createSpan({ cls: "config-sync-cm-auto-label", text: `${autoCount} item${autoCount === 1 ? "" : "s"} merge cleanly` });
     autoHead.createSpan({ cls: "config-sync-cm-auto-counts", text: `＋${addCount} · ＝${identCount} · ⌂${keptCount}` });
     autoHead.createDiv({ cls: "config-sync-rule-spacer" });
-    const autoChev = autoHead.createSpan({ cls: "config-sync-cm-chev", text: "⌄" });
+    const autoChev = autoHead.createSpan({ cls: "config-sync-cm-chev", text: "▸" });
     const autoList = autoBox.createDiv({ cls: "config-sync-cm-auto-list" });
     autoList.hide();
     const reason = (mark: string, cls: string, text: string): void => {
@@ -62,7 +62,7 @@ export class ConflictModal extends Modal {
       line.createSpan({ cls: `config-sync-cm-mark ${cls}`, text: mark });
       line.createSpan({ text });
     };
-    for (const g of auto.addGroups) reason("＋", "is-add", `${this.displayName(g.name)} — new group from remote (added, incl. store files)`);
+    for (const g of auto.addGroups) reason("＋", "is-add", `${this.displayName(g.name)} — new item from remote (added, incl. its store files)`);
     for (const f of auto.writeFiles) reason("＋", "is-add", `${f.name === "" ? f.rel : this.displayName(f.name)} — store file only on remote (written locally)`);
     for (const id of auto.identical) reason("＝", "is-same", `${this.autoLabel(id)} — identical on both sides`);
     for (const name of auto.keptLocalGroups) reason("⌂", "is-kept", `${this.displayName(name)} — only exists locally (kept, never deleted)`);
@@ -71,7 +71,7 @@ export class ConflictModal extends Modal {
       const open = autoList.isShown();
       if (open) autoList.hide();
       else autoList.show();
-      autoChev.setText(open ? "⌄" : "⌃");
+      autoChev.setText(open ? "▸" : "▾");
     });
 
     // ── conflicts header + shortcuts ──
@@ -123,8 +123,8 @@ export class ConflictModal extends Modal {
     const row = body.createDiv({ cls: "config-sync-cm-conflict is-unresolved" });
     this.rowEls.push(row);
     const head = row.createDiv({ cls: "config-sync-cm-crow" });
-    const chev = head.createSpan({ cls: "config-sync-cm-chev", text: "⌄" });
-    head.createSpan({ cls: "config-sync-cm-cname", text: c.name === "" ? (c.kind === "file" ? c.rel : "(store)") : this.displayName(c.name) });
+    const chev = head.createSpan({ cls: "config-sync-cm-chev", text: "▸" });
+    head.createSpan({ cls: "config-sync-cm-cname", text: c.name === "" ? (c.kind === "file" ? c.rel : "Sync setup") : this.displayName(c.name) });
     head.createSpan({ cls: `config-sync-cm-kind is-${c.kind}`, text: c.kind === "definition" ? "Rule" : "File" });
     if (c.kind === "file") head.createSpan({ cls: "config-sync-cm-rel", text: c.rel });
     head.createDiv({ cls: "config-sync-rule-spacer" });
@@ -153,7 +153,7 @@ export class ConflictModal extends Modal {
       const open = diffHost.isShown();
       if (open) {
         diffHost.hide();
-        chev.setText("⌄");
+        chev.setText("▸");
         return;
       }
       if (!built) {
@@ -161,7 +161,7 @@ export class ConflictModal extends Modal {
         built = true;
       }
       diffHost.show();
-      chev.setText("⌃");
+      chev.setText("▾");
     });
   }
 

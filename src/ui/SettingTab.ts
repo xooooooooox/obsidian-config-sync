@@ -1741,7 +1741,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     dd.setValue(pinnedToFields ? "fields" : current);
     if (pinnedToFields) {
       dd.setDisabled(true);
-      dd.selectEl.setAttribute("title", "This item always uses fields mode — device-local fields stay on each device");
+      dd.selectEl.setAttribute("title", "This item always uses Fields mode — some of its settings stay on each device");
     }
     dd.onChange((v) => {
       const mode = v as SyncMode;
@@ -1788,11 +1788,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       fr.createDiv({ cls: "config-sync-rule-spacer" });
       // The appearance group's locked enabledCssSnippets strip (ensureAppearancePresets) isn't
       // an ordinary fixed-action rule — it exists only to keep the field out of THIS file because
-      // it's synced elsewhere, under CSS snippets → Device rules. A disabled "This device"
+      // it's synced elsewhere, per snippet on the Appearance card. A disabled "This device"
       // dropdown would mislead (implying a choice), so it points at the real control instead.
       const isSnippetPointer = rule.locked === true && rule.pattern === "enabledCssSnippets";
       if (isSnippetPointer) {
-        fr.createSpan({ cls: "config-sync-ldhint", text: "locked — managed under CSS snippets → Device rules" });
+        fr.createSpan({ cls: "config-sync-ldhint", text: "locked — managed per snippet on the Appearance card (Companion folders → snippets)" });
       } else {
         const dd = new DropdownComponent(fr.createDiv({ cls: "config-sync-act" }));
         dd.addOption("strip", "This device")
@@ -2323,7 +2323,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
 
     if (customized.length > 0) {
       new Setting(containerEl)
-        .setName(`${customized.length} items use a customized rule`)
+        .setName(`${customized.length} item${customized.length === 1 ? " uses" : "s use"} a customized rule`)
         .setDesc(`${customized.map((g) => this.host.displayName(g.name, g.label)).join(", ")} — edit each on its own tab.`)
         .addButton((b) =>
           b.setButtonText("Reset all to defaults").onClick(async () => {
@@ -2343,7 +2343,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Custom rules")
       .setHeading()
-      .setDesc("Your own rules for anything not listed elsewhere — vault-root files, extra folders, or per-key credential protection (sanitize).");
+      .setDesc("Your own rules for anything not listed elsewhere — vault-root files, extra folders, or per-key credential protection.");
     const customEl = containerEl.createDiv();
     for (const group of custom) this.renderRuleCard(customEl, group);
     const addRule = containerEl.createEl("button", { cls: "config-sync-add-row", text: "+ Add rule" });
@@ -2431,7 +2431,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       this.refresh();
     });
     if (this.saveErrorFor === group.name) {
-      listEl.createDiv({ cls: "config-sync-save-error mod-warning", text: `couldn't save this change — ${this.groupsErrorMsg}. The change was reverted.` });
+      listEl.createDiv({ cls: "config-sync-save-error mod-warning", text: `Couldn't save this change — ${this.groupsErrorMsg}. The change was reverted.` });
     }
     if (isOpen) this.renderRuleForm(listEl, group, "custom");
   }
@@ -2539,7 +2539,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const noteEl = panel.createDiv({ cls: "config-sync-expand-note" });
     const show = (scan: SensitiveScan): void => {
       if (scan.keys.length === 0 && !scan.blob) return;
-      noteEl.setText(scan.blob ? "⚠ opaque encrypted blob" : `⚠ Detected: ${scan.keys.join(", ")}`);
+      noteEl.setText(scan.blob ? "⚠ This file looks already encrypted — its keys can't be scanned." : `⚠ Sensitive keys detected: ${scan.keys.join(", ")}`);
     };
     if (cached !== undefined) {
       show(cached);
@@ -2600,7 +2600,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     row.setAttribute("data-search-anchor", `remote-${draft.name}`);
     row.createSpan({ cls: "config-sync-row-chevron", text: isOpen ? "▾" : "▸" });
     const nameSpan = row.createSpan({ cls: "config-sync-rule-name", text: draft.name === "" ? "(unnamed)" : draft.name });
-    row.createSpan({ cls: "config-sync-row-type", text: draft.type });
+    row.createSpan({ cls: "config-sync-row-type", text: draft.type === "vault" ? "Vault" : "Git" });
     row.createSpan({
       cls: "config-sync-row-path",
       text: draft.type === "vault" ? draft.storePath : draft.url === "" ? "" : `${draft.url}#${draft.branch}`,

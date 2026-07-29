@@ -382,6 +382,7 @@ body.is-phone .config-sync-fkey {
 .config-sync-pill.is-push { background: rgba(var(--color-pink-rgb), 0.15); color: var(--color-pink); }
 .config-sync-pill.is-pull { background: rgba(var(--color-cyan-rgb), 0.15); color: var(--color-cyan); }
 .config-sync-pill.is-warn { background: none; color: var(--color-orange); margin-left: var(--size-4-1); }
+.config-sync-pill.is-error { background: none; color: var(--color-red); margin-left: var(--size-4-1); }
 
 .config-sync-fpillrow { display: flex; flex-wrap: wrap; gap: var(--size-4-1); min-width: 0; }
 .config-sync-fpill { background: none; border: 1px solid var(--background-modifier-border); border-radius: 999px; padding: 2px 10px; font-size: var(--font-ui-smaller); color: var(--text-muted); cursor: pointer; box-shadow: none; height: auto; }
@@ -431,7 +432,7 @@ body.is-phone .config-sync-fkey {
    cannot fight Remotely Save's mechanism (whichever is enabled wins its own lane). */
 body.is-mobile.config-sync-mobile-statusbar .status-bar {
   display: flex;
-  margin-bottom: var(--mobile-toolbar-height, 52px);
+  margin-bottom: var(--mobile-toolbar-height, 48px);
 }
 
 .config-sync-hub-row { display: flex; align-items: center; gap: var(--size-4-2); padding: var(--size-4-2) 0; border-bottom: 1px solid var(--background-modifier-border); cursor: pointer; white-space: nowrap; }
@@ -459,7 +460,7 @@ body.is-mobile.config-sync-mobile-statusbar .status-bar {
 
 .config-sync-mode-badge { color: var(--text-faint); display: inline-flex; align-items: center; }
 .config-sync-mode-badge svg { width: 12px; height: 12px; }
-.config-sync-doto-pill { font-size: 10.5px; line-height: 1.6; border-radius: 6px; padding: 1px 8px; margin-left: var(--size-4-2); color: var(--color-orange); border: 1px solid rgba(var(--color-orange-rgb), 0.45); white-space: nowrap; }
+.config-sync-doto-pill { font-size: var(--font-ui-smaller); line-height: 1.6; border-radius: 999px; padding: 1px 8px; margin-left: var(--size-4-2); color: var(--color-orange); border: 1px solid rgba(var(--color-orange-rgb), 0.45); white-space: nowrap; }
 
 /* custom-drawn checkboxes (same inputs, no native rendering) */
 .config-sync-hub-row input[type="checkbox"],
@@ -500,6 +501,11 @@ body.is-mobile.config-sync-mobile-statusbar .status-bar {
   left: 1px;
   font-size: 12px;
   color: var(--text-on-accent);
+}
+
+/* Orange fills carry --background-primary text (§1.1); --text-on-accent is accent-fill only. */
+.config-sync-hub-row input[type="checkbox"].is-capture:checked::after {
+  color: var(--background-primary);
 }
 
 /* Select-alls (mainbar + section heads) stay grey — they carry no direction — but bright
@@ -622,16 +628,17 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 
 /* ── Run history ─────────────────────────────────────────────────────────── */
 .config-sync-hhead { display: flex; align-items: baseline; gap: var(--size-4-2); margin-bottom: var(--size-4-1); }
-.config-sync-hhead-title { font-size: var(--font-ui-medium); font-weight: 700; }
+.config-sync-hhead-title { font-size: var(--font-ui-medium); font-weight: 600; }
 .config-sync-hhead-count { color: var(--text-faint); font-size: var(--font-ui-smaller); }
-.config-sync-hclear { margin-left: auto; color: var(--color-orange); font-size: var(--font-ui-smaller); cursor: pointer; }
+.config-sync-hclear { margin-left: auto; color: var(--text-muted); font-size: var(--font-ui-smaller); cursor: pointer; }
+.config-sync-hclear:hover { color: var(--color-red); }
 .config-sync-hempty { color: var(--text-muted); font-style: italic; padding: var(--size-4-4) 0; }
 .config-sync-hlegend { display: flex; flex-wrap: wrap; gap: var(--size-4-3); color: var(--text-muted); font-size: var(--font-ui-smaller); margin-bottom: var(--size-4-2); }
 .config-sync-hstat.is-ok { color: var(--color-green); }
 .config-sync-hstat.is-warn { color: var(--color-orange); }
 .config-sync-hstat.is-error { color: var(--color-red); }
 .config-sync-htable { width: 100%; border-collapse: collapse; font-size: var(--font-ui-small); }
-.config-sync-htable th { text-align: left; font-size: var(--font-ui-smaller); text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint); font-weight: 600; padding: var(--size-4-1) var(--size-4-2); border-bottom: 1px solid var(--background-modifier-border); white-space: nowrap; }
+.config-sync-htable th { text-align: left; font-size: var(--font-ui-smaller); text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-faint); font-weight: 600; padding: var(--size-4-1) var(--size-4-2); border-bottom: 1px solid var(--background-modifier-border); white-space: nowrap; }
 .config-sync-htable td { padding: var(--size-4-2); border-bottom: 1px solid var(--background-modifier-border); white-space: nowrap; }
 .config-sync-hrow { cursor: pointer; }
 .config-sync-hrow:hover td { background: var(--background-modifier-hover); }
@@ -654,7 +661,7 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 .config-sync-htd-chev { color: var(--text-faint); text-align: center; }
 .config-sync-hback { color: var(--interactive-accent); cursor: pointer; font-size: var(--font-ui-smaller); margin-bottom: var(--size-4-2); }
 .config-sync-hdhead { display: flex; align-items: center; gap: var(--size-4-2); }
-.config-sync-hdtitle { font-size: var(--font-ui-medium); font-weight: 700; }
+.config-sync-hdtitle { font-size: var(--font-ui-medium); font-weight: 600; }
 .config-sync-hdwhen { color: var(--text-faint); font-size: var(--font-ui-smaller); font-family: var(--font-monospace); }
 .config-sync-hddesc { color: var(--text-muted); margin: var(--size-4-1) 0 var(--size-4-3); }
 
@@ -685,6 +692,7 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
   padding: 3px 2px;
 }
 .config-sync-stopsync:hover, .config-sync-stopsync:active { color: var(--color-red); }
+.config-sync-stopsync-ic { display: inline-flex; align-items: center; }
 .config-sync-stopsync svg { width: 14px; height: 14px; }
 .is-mobile .config-sync-stopsync-foot { margin-top: var(--size-4-4); }
 .is-mobile .config-sync-stopsync { padding: 6px 2px; }
@@ -698,7 +706,8 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 .config-sync-ofname { font-weight: var(--font-semibold); }
 .config-sync-ofpath { font-family: var(--font-monospace); color: var(--text-faint); font-size: var(--font-ui-smaller); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .config-sync-ofsize { color: var(--text-faint); font-size: var(--font-ui-smaller); white-space: nowrap; }
-.config-sync-ofdel { color: var(--color-red); font-size: var(--font-ui-smaller); cursor: pointer; white-space: nowrap; }
+.config-sync-ofdel { color: var(--text-muted); font-size: var(--font-ui-smaller); cursor: pointer; white-space: nowrap; }
+.config-sync-ofdel:hover { color: var(--color-red); }
 
 .config-sync-side-item { display: flex; align-items: center; gap: 5px; padding: 6px 9px; border-radius: 8px; border: 1px solid transparent; cursor: pointer; font-size: var(--font-ui-small); }
 
@@ -718,10 +727,10 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 
 /* Config Sync self layer: the sidebar hero card + its dedicated pane (renderConfigSyncMode). */
 /* A distinct card (not a list row): icon tile + title/sublabel + status pill, echoing the header self-chip. */
-.config-sync-side-self { display: flex; align-items: center; gap: 8px; padding: 9px 10px; border-radius: 8px; cursor: pointer; background: rgba(var(--interactive-accent-rgb), 0.08); border: 1px solid rgba(var(--interactive-accent-rgb), 0.28); }
+.config-sync-side-self { display: flex; align-items: center; gap: var(--size-4-2); padding: 9px 10px; border-radius: 8px; cursor: pointer; background: rgba(var(--interactive-accent-rgb), 0.08); border: 1px solid rgba(var(--interactive-accent-rgb), 0.28); }
 .config-sync-side-self:hover { border-color: rgba(var(--interactive-accent-rgb), 0.5); }
 .config-sync-side-self.is-active { background: rgba(var(--interactive-accent-rgb), 0.16); border-color: rgba(var(--interactive-accent-rgb), 0.55); }
-.config-sync-side-self-ic { display: flex; align-items: center; justify-content: center; flex: none; width: 26px; height: 26px; border-radius: 7px; background: rgba(var(--interactive-accent-rgb), 0.18); color: var(--interactive-accent); }
+.config-sync-side-self-ic { display: flex; align-items: center; justify-content: center; flex: none; width: 26px; height: 26px; border-radius: 8px; background: rgba(var(--interactive-accent-rgb), 0.18); color: var(--interactive-accent); }
 .config-sync-side-self-ic svg { width: 15px; height: 15px; }
 .config-sync-side-self-text { flex: 1; min-width: 0; }
 .config-sync-side-self-title { font-size: var(--font-ui-small); font-weight: var(--font-semibold); line-height: 1.2; color: var(--text-normal); }
@@ -731,7 +740,7 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 .config-sync-side-self-pill.is-down { border-color: rgba(var(--interactive-accent-rgb), 0.5); color: var(--interactive-accent); }
 .config-sync-side-self-pill.is-ok { border-color: rgba(var(--color-green-rgb), 0.5); color: var(--color-green); }
 .config-sync-self-pane { padding: 2px 2px 12px; }
-.config-sync-self-title { display: flex; align-items: center; gap: 8px; font-size: var(--font-ui-medium); font-weight: var(--font-bold); }
+.config-sync-self-title { display: flex; align-items: center; gap: var(--size-4-2); font-size: var(--font-ui-medium); font-weight: 600; }
 .config-sync-self-title-ic { color: var(--interactive-accent); flex: none; display: inline-flex; }
 .config-sync-self-title-ic svg { width: 16px; height: 16px; }
 .config-sync-self-pill { font-size: var(--font-ui-smaller); border-radius: 999px; padding: 1px 9px; margin-left: 4px; }
@@ -747,16 +756,16 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 .config-sync-self-block { border: 1px solid var(--background-modifier-border); background: var(--background-secondary); border-radius: 9px; padding: 12px 14px; margin-bottom: 12px; }
 .config-sync-self-block.is-act { border-color: rgba(var(--interactive-accent-rgb), 0.45); background: rgba(var(--interactive-accent-rgb), 0.06); }
 .config-sync-self-block.is-gated { opacity: 0.6; }
-.config-sync-self-block-h { font-weight: var(--font-bold); font-size: var(--font-ui-small); margin-bottom: 4px; }
+.config-sync-self-block-h { font-weight: 600; font-size: var(--font-ui-small); margin-bottom: 4px; }
 .config-sync-self-block-s { color: var(--text-muted); font-size: var(--font-ui-smaller); margin-bottom: 10px; line-height: 1.45; }
-.config-sync-self-caution { color: var(--color-orange); font-size: var(--font-ui-smaller); margin: 8px 0 10px; padding: 7px 9px; border-radius: 7px; background: rgba(var(--color-orange-rgb), 0.1); border: 1px solid rgba(var(--color-orange-rgb), 0.35); }
+.config-sync-self-caution { color: var(--color-orange); font-size: var(--font-ui-smaller); margin: 8px 0 10px; padding: 7px 9px; border-radius: 8px; background: rgba(var(--color-orange-rgb), 0.1); border: 1px solid rgba(var(--color-orange-rgb), 0.35); }
 .config-sync-self-delta { display: flex; flex-direction: column; gap: 4px; margin-bottom: 11px; }
-.config-sync-self-drow { display: flex; align-items: center; gap: 8px; font-size: var(--font-ui-small); }
+.config-sync-self-drow { display: flex; align-items: center; gap: var(--size-4-2); font-size: var(--font-ui-small); }
 .config-sync-self-dg { width: 14px; text-align: center; font-family: var(--font-monospace); }
 .config-sync-self-drow.is-add .config-sync-self-dg { color: var(--color-green); }
 .config-sync-self-drow.is-del { color: var(--text-muted); text-decoration: line-through; }
 .config-sync-self-drow.is-del .config-sync-self-dg { color: var(--color-red); }
-.config-sync-self-acts { display: flex; align-items: center; gap: 8px; }
+.config-sync-self-acts { display: flex; align-items: center; gap: var(--size-4-2); }
 .config-sync-self-acts button.config-sync-btn-capture { background: var(--color-orange); color: var(--background-primary); border: none; }
 .config-sync-self-hint { color: var(--text-muted); font-size: var(--font-ui-smaller); }
 .config-sync-self-viewchange { color: var(--interactive-accent); font-size: var(--font-ui-smaller); cursor: pointer; margin-top: var(--size-4-1); }
@@ -775,6 +784,9 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 .config-sync-switcher { display: flex; align-items: center; gap: var(--size-4-1); width: 100%; background: var(--background-secondary); border: 1px solid var(--background-modifier-border); border-radius: 8px; padding: 7px 11px; cursor: pointer; font-size: var(--font-ui-small); }
 
 .config-sync-switcher-chev { margin-left: auto; color: var(--text-faint); }
+
+.config-sync-switcher-selfic { display: inline-flex; align-items: center; color: var(--interactive-accent); }
+.config-sync-switcher-selfic svg { width: 14px; height: 14px; }
 
 .config-sync-switcher-menu { background: var(--background-secondary); border: 1px solid var(--background-modifier-border); border-radius: 9px; padding: 5px; box-shadow: var(--shadow-s); }
 
@@ -863,7 +875,8 @@ body.is-mobile .config-sync-section-head input[type="checkbox"]:indeterminate::a
 .config-sync-coldstart-actions { display: flex; align-items: center; gap: var(--size-4-2); flex: none; }
 .config-sync-coldstart-go { background: var(--interactive-accent); color: var(--text-on-accent); border: none; border-radius: 6px; padding: 4px 10px; font-size: var(--font-ui-smaller); cursor: pointer; box-shadow: none; height: auto; white-space: nowrap; }
 .config-sync-coldstart-go:hover { background: var(--interactive-accent-hover); }
-.config-sync-coldstart-x { background: none; border: none; box-shadow: none; color: var(--text-faint); cursor: pointer; font-size: var(--font-ui-smaller); padding: 2px 4px; height: auto; }
+.config-sync-coldstart-x { background: none; border: none; box-shadow: none; color: var(--text-faint); cursor: pointer; display: inline-flex; align-items: center; padding: 2px 4px; height: auto; }
+.config-sync-coldstart-x svg { width: 14px; height: 14px; }
 .config-sync-coldstart-x:hover { color: var(--text-normal); }
 body.is-mobile .config-sync-coldstart-banner { flex-wrap: wrap; }
 body.is-mobile .config-sync-coldstart-text { flex-basis: 100%; }
@@ -880,12 +893,13 @@ body.is-mobile .config-sync-coldstart-actions { margin-left: auto; }
 .config-sync-strip.is-error { border-color: rgba(var(--color-red-rgb), 0.5); background: rgba(var(--color-red-rgb), 0.09); }
 .config-sync-strip.is-warn .config-sync-strip-check { color: var(--color-orange); }
 .config-sync-strip.is-error .config-sync-strip-check { color: var(--color-red); }
-.config-sync-strip-head { display: flex; align-items: center; gap: 8px; }
+.config-sync-strip-head { display: flex; align-items: center; gap: var(--size-4-2); }
 .config-sync-strip-meta { display: contents; }
 .config-sync-strip-check { color: var(--color-green); }
 .config-sync-strip-title { font-weight: 600; }
 .config-sync-strip-toggle { color: var(--interactive-accent); cursor: pointer; font-size: var(--font-ui-smaller); }
-.config-sync-strip-close { margin-left: auto; color: var(--text-faint); cursor: pointer; }
+.config-sync-strip-close { margin-left: auto; color: var(--text-faint); cursor: pointer; display: inline-flex; align-items: center; }
+.config-sync-strip-close svg { width: 14px; height: 14px; }
 .config-sync-strip-body { margin-top: 6px; }
 body.is-mobile .config-sync-strip-head { flex-wrap: wrap; }
 body.is-mobile .config-sync-strip-close { order: 2; }
@@ -984,13 +998,13 @@ body.is-mobile .config-sync-strip-meta .config-sync-report-pills { margin-left: 
    every "row" in a card drawer aligns to: content 1fr | scope icon | lock icon | action icon.
    Scope is a Commander-style cycling icon since round 6 (2026-07-27 定稿), so its column shrank
    from the old 120px dropdown width to match the other icon columns. */
-.config-sync-grid { display: grid; grid-template-columns: 1fr var(--cs-scope-w, 28px) 28px 28px; align-items: center; column-gap: 8px; }
+.config-sync-grid { display: grid; grid-template-columns: 1fr var(--cs-scope-w, 28px) 28px 28px; align-items: center; column-gap: var(--size-4-2); }
 /* Idle ghosts stay faintly visible (0.25) rather than fully hidden — an invisible reserved
    action column reads as a dead gutter at the card's right rail (round-5 feedback). */
 .config-sync-ghost { opacity: 0.25; transition: opacity 0.12s; }
 .config-sync-grid:hover .config-sync-ghost, .config-sync-grid:focus-within .config-sync-ghost, .config-sync-ghost.is-active { opacity: 1; }
 .config-sync-lock { color: var(--text-muted); cursor: pointer; }
-.config-sync-lock.is-on { color: var(--interactive-accent); background: var(--background-modifier-hover); border-radius: var(--radius-s); }
+.config-sync-lock.is-on { color: var(--color-cyan); background: var(--background-modifier-hover); border-radius: var(--radius-s); }
 .config-sync-dim { opacity: 0.5; pointer-events: none; cursor: default; }
 /* Dim exactly once: a locked path row dims the CELL, while the lock icon/disabled select inside
    carry their own dim/disabled styling — stacked opacities looked like a rendering glitch
@@ -1053,7 +1067,7 @@ body.is-mobile .config-sync-strip-meta .config-sync-report-pills { margin-left: 
 /* Content-cell flex wrapper for orphan rows: name + pill left, Forget pushed against the scope
    column — everything stays inside grid column 1 (the pill/button would break the 4-column
    track as direct grid children). */
-.config-sync-orphancell { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.config-sync-orphancell { display: flex; align-items: center; gap: var(--size-4-2); min-width: 0; }
 .config-sync-orphancell .config-sync-ldname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .config-sync-orphanpill { font-size: var(--font-ui-smaller); color: var(--text-error); border: 1px solid var(--background-modifier-error); border-radius: 999px; padding: 0 7px; white-space: nowrap; flex: none; }
 .config-sync-orphan-forget { font-size: var(--font-ui-smaller); margin-left: auto; flex: none; height: 22px; padding: 0 10px; line-height: 1; }
@@ -1131,7 +1145,7 @@ button.config-sync-add-row, button.config-sync-add-row:hover { background: none;
 
 .config-sync-cm-crow { display: flex; align-items: center; gap: var(--size-4-2); padding: var(--size-4-2) var(--size-4-3); cursor: pointer; background: var(--background-secondary); }
 .config-sync-cm-cname { font-weight: 600; flex: none; }
-.config-sync-cm-kind { font-size: 10px; letter-spacing: 0.4px; padding: 1px 7px; border-radius: 8px; flex: none; }
+.config-sync-cm-kind { font-size: 10px; letter-spacing: 0.05em; padding: 1px 7px; border-radius: 8px; flex: none; }
 .config-sync-cm-kind.is-definition { color: var(--color-orange); background: rgba(var(--color-orange-rgb), 0.13); border: 1px solid rgba(var(--color-orange-rgb), 0.35); }
 .config-sync-cm-kind.is-file { color: var(--color-blue); background: rgba(var(--color-blue-rgb), 0.13); border: 1px solid rgba(var(--color-blue-rgb), 0.35); }
 .config-sync-cm-rel { color: var(--text-faint); font-size: var(--font-ui-smaller); font-family: var(--font-monospace); flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1220,7 +1234,7 @@ button.config-sync-add-row, button.config-sync-add-row:hover { background: none;
 /* Bidirectional switch-list divergence (定稿 2026-07-17): amber-edged summary of what each
    direction destroys, plus the keep-on-device shortcut button underneath. */
 .config-sync-divergence {
-  border-left: 3px solid var(--text-warning);
+  border-left: 3px solid var(--color-orange);
   background: var(--background-secondary);
   border-radius: 0 6px 6px 0;
   padding: var(--size-4-1) var(--size-4-2);
@@ -1228,13 +1242,13 @@ button.config-sync-add-row, button.config-sync-add-row:hover { background: none;
   font-size: var(--font-ui-smaller);
 }
 .config-sync-divergence-line { color: var(--text-muted); }
-.config-sync-divergence-line::first-letter { color: var(--text-warning); }
+.config-sync-divergence-line::first-letter { color: var(--color-orange); }
 
 /* In-place "where it runs" guidance (spec 2026-07-28 §4): per-member rows for plugins switched
    on differently between this device and the store, each with a device-scope menu. */
 .config-sync-memberblock { border: 1px solid var(--background-modifier-border); border-radius: 8px; padding: 6px 10px; margin: 6px 0; }
 .config-sync-memberblock-t { color: var(--text-muted); font-size: var(--font-ui-smaller); margin-bottom: 2px; }
-.config-sync-memberrow { display: flex; align-items: center; gap: 8px; padding: 5px 0; }
+.config-sync-memberrow { display: flex; align-items: center; gap: var(--size-4-2); padding: 5px 0; }
 .config-sync-memberrow + .config-sync-memberrow { border-top: 1px solid var(--background-modifier-border); }
 .config-sync-memberrow-ic svg { width: 14px; height: 14px; display: block; }
 .config-sync-memberrow-mid { flex: 1; min-width: 0; }
@@ -1309,9 +1323,13 @@ body.is-mobile .config-sync-memberrow { flex-wrap: wrap; }
   left: -30%;
   height: 100%;
   width: 30%;
-  background: linear-gradient(90deg, transparent, var(--text-on-accent), transparent);
+  background: linear-gradient(90deg, transparent, var(--background-primary), transparent);
   opacity: 0.6;
   animation: config-sync-shimmer 1.2s linear infinite;
+}
+/* The apply bar is an accent fill, so its shimmer keeps --text-on-accent (§1.1). */
+.config-sync-btnwrap:has(button.mod-cta) .config-sync-progress.is-active::after {
+  background: linear-gradient(90deg, transparent, var(--text-on-accent), transparent);
 }
 @keyframes config-sync-shimmer {
   from { left: -30%; }
