@@ -916,6 +916,11 @@ body.is-mobile .config-sync-strip-meta .config-sync-report-pills { margin-left: 
 .config-sync-section.is-not-installed .config-sync-section-title { color: var(--color-orange); }
 .config-sync-section-title { font-weight: 600; }
 .config-sync-section-hint { margin-left: auto; color: var(--text-faint); font-size: var(--font-ui-smaller); }
+/* When the "N selected" hint joins the row on a narrow phone, the head overflows and flex
+   squeezes every span to min-content — pills fold vertical, the hint breaks in two. Pills
+   and hint hold their shape; the title is the only element allowed to wrap. */
+.config-sync-section-head .config-sync-pill,
+.config-sync-section-hint { white-space: nowrap; flex: none; }
 .config-sync-section-note { color: var(--text-faint); font-style: italic; font-size: var(--font-ui-smaller); padding: 4px 0 2px 18px; }
 .config-sync-version-line { color: var(--text-faint); font-size: var(--font-ui-smaller); padding: 2px 0; }
 .config-sync-version-line.is-amber { color: var(--color-orange); }
