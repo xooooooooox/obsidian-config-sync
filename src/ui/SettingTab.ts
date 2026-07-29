@@ -1631,8 +1631,12 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const wrapEl = listEl.createDiv({ cls: "config-sync-card-snippetmembers" });
     for (const row of rows) {
       const r = wrapEl.createDiv({ cls: `config-sync-grid config-sync-card-companiongrid${row.fileExists ? "" : " is-orphan"}` });
-      r.createSpan({ cls: "config-sync-ldname", text: row.name });
-      if (!row.fileExists) r.createSpan({ cls: "config-sync-orphanpill", text: "file deleted" });
+      // The grid is a fixed 4-column track (content | scope | state | action) — the pill and the
+      // Forget button must live INSIDE the content cell, or every later cell shifts one column
+      // over and the button wraps onto an implicit second grid row.
+      const contentCell = row.fileExists ? r : r.createDiv({ cls: "config-sync-orphancell" });
+      contentCell.createSpan({ cls: "config-sync-ldname", text: row.name });
+      if (!row.fileExists) contentCell.createSpan({ cls: "config-sync-orphanpill", text: "file deleted" });
       const scopeCell = r.createDiv();
       let curScope = row.scope;
       const buildScope = (): void => {
@@ -1667,9 +1671,9 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       };
       buildScope();
       r.createDiv(); // state column — empty for a snippet member row
-      const actionCell = r.createDiv();
+      r.createDiv(); // action column — empty for a snippet member row (Forget lives in the content cell: a text button cannot fit the 28px track)
       if (!row.fileExists) {
-        const forget = actionCell.createEl("button", { cls: "config-sync-orphan-forget", text: "Forget" });
+        const forget = contentCell.createEl("button", { cls: "config-sync-orphan-forget", text: "Forget" });
         forget.addEventListener("click", () => {
           forget.disabled = true; // the rebuild below replaces the row — no re-enable path needed
           void (async () => {

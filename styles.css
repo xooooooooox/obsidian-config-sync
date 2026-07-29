@@ -1045,8 +1045,13 @@ body.is-mobile .config-sync-strip-meta .config-sync-report-pills { margin-left: 
 .config-sync-card-memberarrow { color: var(--text-muted); }
 .config-sync-card-snippetmembers { margin-left: var(--size-4-6); }
 .config-sync-card-companiongrid.is-orphan .config-sync-ldname { color: var(--text-faint); text-decoration: line-through; }
-.config-sync-orphanpill { font-size: var(--font-ui-smaller); color: var(--text-error); border: 1px solid var(--background-modifier-error); border-radius: 999px; padding: 0 7px; }
-.config-sync-orphan-forget { font-size: var(--font-ui-smaller); }
+/* Content-cell flex wrapper for orphan rows: name + pill left, Forget pushed against the scope
+   column — everything stays inside grid column 1 (the pill/button would break the 4-column
+   track as direct grid children). */
+.config-sync-orphancell { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.config-sync-orphancell .config-sync-ldname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.config-sync-orphanpill { font-size: var(--font-ui-smaller); color: var(--text-error); border: 1px solid var(--background-modifier-error); border-radius: 999px; padding: 0 7px; white-space: nowrap; flex: none; }
+.config-sync-orphan-forget { font-size: var(--font-ui-smaller); margin-left: auto; flex: none; height: 22px; padding: 0 10px; line-height: 1; }
 .config-sync-orphanhint { color: var(--text-warning); }
 .config-sync-card-addcompanion { display: flex; align-items: center; gap: var(--size-4-2); margin: var(--size-4-1) 0; }
 .config-sync-card-addcompanion .config-sync-card-pathinput { flex: 1; }
