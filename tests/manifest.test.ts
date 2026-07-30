@@ -156,6 +156,21 @@ describe("validateRemotes", () => {
     expect(() => validateRemotes([{ name: "a", type: "local-path", storePath: "/x" }])).toThrow('but it must be "vault" or "git"');
     expect(() => validateRemotes({})).toThrow("remotes must be a list");
   });
+
+  it("accepts excludeSelf: true on both types; false/absent serialize as absent", () => {
+    const remotes = validateRemotes([
+      { name: "a", type: "vault", storePath: "/s", excludeSelf: true },
+      { name: "b", type: "vault", storePath: "/s", excludeSelf: false },
+      { name: "c", type: "git", url: "git@h:r.git", branch: "main", excludeSelf: true },
+    ]);
+    expect(remotes[0]).toEqual({ name: "a", type: "vault", storePath: "/s", excludeSelf: true });
+    expect(remotes[1]).toEqual({ name: "b", type: "vault", storePath: "/s" });
+    expect(remotes[2]).toEqual({ name: "c", type: "git", url: "git@h:r.git", branch: "main", excludeSelf: true });
+  });
+
+  it("rejects a non-boolean excludeSelf", () => {
+    expect(() => validateRemotes([{ name: "a", type: "vault", storePath: "/s", excludeSelf: "yes" }])).toThrow("must be true or false");
+  });
 });
 
 describe("validateSyncManifest", () => {

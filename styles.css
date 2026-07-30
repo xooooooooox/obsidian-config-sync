@@ -320,6 +320,28 @@
   border-color: rgba(var(--color-red-rgb), 0.4);
 }
 
+.config-sync-remote-selfline {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.config-sync-remote-selftext {
+  flex: 1;
+}
+
+.config-sync-remote-selfname {
+  font-size: var(--font-ui-small);
+}
+
+.config-sync-remote-selfdesc {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
 /* Phone layout — Obsidian sets body.is-phone; no pixel breakpoints */
 body.is-phone .config-sync-tab:not(.is-active) .config-sync-tab-label {
   display: none;
@@ -1157,6 +1179,15 @@ button.config-sync-add-row, button.config-sync-add-row:hover { background: none;
 .config-sync-cm-rel { color: var(--text-faint); font-size: var(--font-ui-smaller); font-family: var(--font-monospace); flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .config-sync-cm-warn { color: var(--color-orange); font-size: var(--font-ui-smaller); flex: none; white-space: nowrap; }
 .config-sync-cm-chev { color: var(--text-faint); }
+.config-sync-cm-selfhint {
+  margin: 6px 10px 10px;
+  padding: 6px 10px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  background: var(--background-secondary);
+  border-left: 3px solid var(--background-modifier-border-hover);
+  border-radius: 4px;
+}
 
 .config-sync-cm-seg { display: flex; border: 1px solid var(--background-modifier-border); border-radius: var(--radius-s); overflow: hidden; flex: none; }
 .config-sync-cm-segbtn { font-size: var(--font-ui-smaller); padding: 3px 12px; border: none; border-radius: 0; background: transparent; color: var(--text-muted); cursor: pointer; box-shadow: none; }
@@ -1485,5 +1516,54 @@ body.is-mobile .config-sync-report-files { font-size: var(--font-ui-small); }
   margin-left: auto;
   color: var(--text-faint);
   font-size: var(--font-ui-smaller);
+}
+.config-sync-remote-row {
+  cursor: pointer;
+}
+.config-sync-remote-row:hover {
+  background: var(--background-modifier-hover);
+}
+.config-sync-remote-files {
+  margin: 2px 0 8px 22px;
+  padding-left: 10px;
+  border-left: 2px solid var(--background-modifier-border);
+}
+.config-sync-remote-frow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: var(--font-ui-small);
+}
+.config-sync-remote-fglyph {
+  width: 12px;
+  text-align: center;
+  font-weight: 600;
+}
+.config-sync-remote-frow.is-add .config-sync-remote-fglyph {
+  color: var(--color-green);
+}
+.config-sync-remote-frow.is-upd .config-sync-remote-fglyph {
+  color: var(--color-yellow);
+}
+.config-sync-remote-frow.is-del .config-sync-remote-fglyph {
+  color: var(--color-red);
+}
+.config-sync-remote-fname {
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smaller);
+  color: var(--text-normal);
+}
+.config-sync-remote-kept {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  margin-top: 4px;
+}
+.config-sync-remote-selfnote {
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+  font-style: italic;
+  margin-top: 8px;
 }
 

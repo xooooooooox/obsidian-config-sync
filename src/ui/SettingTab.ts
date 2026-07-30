@@ -205,6 +205,7 @@ interface RemoteDraft {
   url: string;
   branch: string;
   subdir: string;
+  excludeSelf: boolean;
 }
 
 function toDraft(r: Remote): RemoteDraft {
@@ -215,13 +216,20 @@ function toDraft(r: Remote): RemoteDraft {
     url: r.type === "git" ? r.url : "",
     branch: r.type === "git" ? r.branch : "",
     subdir: r.type === "git" ? (r.subdir ?? "") : "",
+    excludeSelf: r.excludeSelf === true,
   };
 }
 
 function toCandidate(d: RemoteDraft): unknown {
-  if (d.type === "vault") return { name: d.name, type: d.type, storePath: d.storePath };
-  const c: Record<string, string> = { name: d.name, type: d.type, url: d.url, branch: d.branch };
-  if (d.subdir.trim() !== "") c.subdir = d.subdir.trim();
+  const c: Record<string, unknown> = { name: d.name, type: d.type };
+  if (d.type === "vault") {
+    c.storePath = d.storePath;
+  } else {
+    c.url = d.url;
+    c.branch = d.branch;
+    if (d.subdir.trim() !== "") c.subdir = d.subdir.trim();
+  }
+  if (d.excludeSelf) c.excludeSelf = true;
   return c;
 }
 
@@ -2587,7 +2595,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     this.sourcesErrorEl.setText(this.sourcesErrorMsg);
     const addBtn = containerEl.createEl("button", { cls: "config-sync-add-row", text: "+ Add remote" });
     addBtn.addEventListener("click", () => {
-      this.sources.push({ name: "", type: "vault", storePath: "", url: "", branch: "", subdir: "" });
+      this.sources.push({ name: "", type: "vault", storePath: "", url: "", branch: "", subdir: "", excludeSelf: false });
       this.expanded.add("remote:");
       this.refresh();
     });
@@ -2708,6 +2716,14 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         });
       }
     }
+    const selfLine = panel.createDiv({ cls: "config-sync-remote-selfline" });
+    const selfText = selfLine.createDiv({ cls: "config-sync-remote-selftext" });
+    selfText.createDiv({ cls: "config-sync-remote-selfname", text: "Keep Config Sync's own settings out of this remote" });
+    selfText.createDiv({ cls: "config-sync-remote-selfdesc", text: "For a vault that keeps its own setup: Pull and Push skip Config Sync's settings, and the comparison stops reporting them." });
+    new ToggleComponent(selfLine).setValue(draft.excludeSelf).onChange((v) => {
+      draft.excludeSelf = v;
+      void this.saveRemotes();
+    });
   }
 
   private async browseStorePath(draft: RemoteDraft): Promise<void> {

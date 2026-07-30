@@ -227,10 +227,12 @@ describe("diffRemote", () => {
       "store/configdir/snippets/one.css": "REMOTE", // differs
       "store/configdir/snippets/extra.css": "x", // remote-only
     };
-    const entries = await diffRemote(ctx, fakeReader(remote));
+    const entries = await diffRemote(ctx, fakeReader(remote), { excludeSelf: false });
     const snip = entries.find((e) => e.group === "snippets");
-    expect(snip?.changes.updated).toEqual(["one.css"]);
-    expect(snip?.changes.added).toEqual(["extra.css"]);
+    expect(snip?.files).toEqual([
+      { itemRel: "extra.css", kind: "added", local: null, remote: "x" },
+      { itemRel: "one.css", kind: "updated", local: "one", remote: "REMOTE" },
+    ]);
     expect(entries.find((e) => e.group === "hotkeys")).toBeUndefined();
   });
 
@@ -251,12 +253,12 @@ describe("diffRemote", () => {
       "store/configdir/plugins/config-sync/data.json": remoteSelf,
       "store/mystery/leftover.bin": "x", // matches neither manifest
     };
-    const entries = await diffRemote(ctx, fakeReader(remote));
-    const byName = Object.fromEntries(entries.map((e) => [e.group, e.changes]));
-    expect(byName["hotkeys"]?.added).toEqual(["hotkeys.json"]);
-    expect(byName["snippets"]?.added).toEqual(["one.css"]);
-    expect(byName["plugin-config-sync"]?.added).toEqual(["data.json"]);
-    expect(byName["(other store files)"]?.added).toEqual(["store/mystery/leftover.bin"]);
+    const entries = await diffRemote(ctx, fakeReader(remote), { excludeSelf: false });
+    const byName = Object.fromEntries(entries.map((e) => [e.group, e.files]));
+    expect(byName["hotkeys"]).toEqual([{ itemRel: "hotkeys.json", kind: "added", local: null, remote: '{"a":1}' }]);
+    expect(byName["snippets"]).toEqual([{ itemRel: "one.css", kind: "added", local: null, remote: "one" }]);
+    expect(byName["plugin-config-sync"]?.map((f) => f.itemRel)).toEqual(["data.json"]);
+    expect(byName["(other store files)"]?.map((f) => f.itemRel)).toEqual(["store/mystery/leftover.bin"]);
     expect(byName[""]).toBeUndefined(); // lock stays metadata
   });
 
@@ -269,10 +271,10 @@ describe("diffRemote", () => {
     io.seed({ ".obs/community-plugins.json": '["a","b","c"]', "cs/store/configdir/community-plugins.json": '["a","b","c"]' });
     await writeGroups(ctx, parseSyncManifest(SWITCH_MANIFEST).groups);
     const reordered = { "store/configdir/community-plugins.json": '["c","a","b"]' };
-    expect(await diffRemote(ctx, fakeReader(reordered))).toEqual([]);
+    expect(await diffRemote(ctx, fakeReader(reordered), { excludeSelf: false })).toEqual([]);
     const membershipDiff = { "store/configdir/community-plugins.json": '["c","a","b","d"]' };
-    const entries = await diffRemote(ctx, fakeReader(membershipDiff));
-    expect(entries.find((e) => e.group === "community-plugins")?.changes.updated).toEqual(["community-plugins.json"]);
+    const entries = await diffRemote(ctx, fakeReader(membershipDiff), { excludeSelf: false });
+    expect(entries.find((e) => e.group === "community-plugins")?.files.map((f) => [f.itemRel, f.kind])).toEqual([["community-plugins.json", "updated"]]);
   });
 
   it("never reports the store-metadata pseudo-entry, even when bookkeeping files differ", async () => {
@@ -284,8 +286,26 @@ describe("diffRemote", () => {
       "store/configdir/snippets/one.css": "one",
       "store/configdir/plugins/demo/data.json": await io.read("cs/store/configdir/plugins/demo/data.json"),
     };
-    const entries = await diffRemote(ctx, fakeReader(remote));
+    const entries = await diffRemote(ctx, fakeReader(remote), { excludeSelf: false });
     expect(entries).toEqual([]); // bookkeeping drift alone means "matches"
+  });
+
+  it("excludeSelf drops the self data file and sidecars from both sides", async () => {
+    const { io, ctx } = await seededAndCaptured();
+    io.seed({ "cs/store/configdir/plugins/config-sync/data.json": '{"mine":true}' });
+    const selfGroups = [{ name: "plugin-config-sync", path: "{configDir}/plugins/config-sync/data.json", type: "file", devices: "all" }];
+    const remote: Record<string, string> = {
+      "store.lock.json": await io.read("cs/store.lock.json"),
+      "store/configdir/hotkeys.json": '{"a":1}',
+      "store/configdir/snippets/one.css": "one",
+      "store/configdir/plugins/demo/data.json": await io.read("cs/store/configdir/plugins/demo/data.json"),
+      "store/configdir/plugins/config-sync/data.json": JSON.stringify({ groups: selfGroups, theirs: true }),
+      "store/configdir/plugins/config-sync/data.json.__scopes__.desktop.json": "{}",
+    };
+    expect(await diffRemote(ctx, fakeReader(remote), { excludeSelf: true })).toEqual([]);
+    const withSelf = await diffRemote(ctx, fakeReader(remote), { excludeSelf: false });
+    expect(withSelf.map((e) => e.group)).toEqual(["plugin-config-sync"]);
+    expect(withSelf[0]?.files.map((f) => f.kind).sort()).toEqual(["added", "updated"]);
   });
 });
 
@@ -295,23 +315,32 @@ describe("remoteLockAhead", () => {
     const remote = lock("2026-07-17T10:00:00.000Z", { a: { sourcePluginVersion: "1.0" } });
     // local adopted remote's time+entries but also has a local-only group and different formatting
     const local = JSON.stringify({ capturedAt: "2026-07-17T10:00:00.000Z", groups: { a: { sourcePluginVersion: "1.0" }, localOnly: { sourceAppVersion: "1.8.7" } } }, null, 2);
-    expect(remoteLockAhead(local, remote)).toBe(false);
+    expect(remoteLockAhead(local, remote, [])).toBe(false);
   });
   it("true when the remote captured later", () => {
-    expect(remoteLockAhead(lock("2026-07-17T10:00:00.000Z", {}), lock("2026-07-17T11:00:00.000Z", {}))).toBe(true);
+    expect(remoteLockAhead(lock("2026-07-17T10:00:00.000Z", {}), lock("2026-07-17T11:00:00.000Z", {}), [])).toBe(true);
   });
   it("true when a remote group entry is missing or different locally", () => {
     const local = lock("2026-07-17T10:00:00.000Z", { a: { sourcePluginVersion: "1.0" } });
-    expect(remoteLockAhead(local, lock("2026-07-17T10:00:00.000Z", { a: { sourcePluginVersion: "2.0" } }))).toBe(true);
-    expect(remoteLockAhead(local, lock("2026-07-17T10:00:00.000Z", { b: { sourcePluginVersion: "1.0" } }))).toBe(true);
+    expect(remoteLockAhead(local, lock("2026-07-17T10:00:00.000Z", { a: { sourcePluginVersion: "2.0" } }), [])).toBe(true);
+    expect(remoteLockAhead(local, lock("2026-07-17T10:00:00.000Z", { b: { sourcePluginVersion: "1.0" } }), [])).toBe(true);
   });
   it("false when the local lock is simply newer (push side, not pull)", () => {
-    expect(remoteLockAhead(lock("2026-07-17T12:00:00.000Z", {}), lock("2026-07-17T10:00:00.000Z", {}))).toBe(false);
+    expect(remoteLockAhead(lock("2026-07-17T12:00:00.000Z", {}), lock("2026-07-17T10:00:00.000Z", {}), [])).toBe(false);
   });
   it("handles missing locks: remote absent → false; local absent with remote present → true", () => {
-    expect(remoteLockAhead(null, null)).toBe(false);
-    expect(remoteLockAhead(lock("2026-07-17T10:00:00.000Z", {}), null)).toBe(false);
-    expect(remoteLockAhead(null, lock("2026-07-17T10:00:00.000Z", {}))).toBe(true);
+    expect(remoteLockAhead(null, null, [])).toBe(false);
+    expect(remoteLockAhead(lock("2026-07-17T10:00:00.000Z", {}), null, [])).toBe(false);
+    expect(remoteLockAhead(null, lock("2026-07-17T10:00:00.000Z", {}), [])).toBe(true);
+  });
+
+  it("ignoreGroups suppresses a difference from the named group only", () => {
+    const local = lock("2026-07-17T10:00:00.000Z", { "plugin-config-sync": { sourcePluginVersion: "1.0" } });
+    const selfDiff = lock("2026-07-17T10:00:00.000Z", { "plugin-config-sync": { sourcePluginVersion: "2.0" } });
+    expect(remoteLockAhead(local, selfDiff, [])).toBe(true);
+    expect(remoteLockAhead(local, selfDiff, ["plugin-config-sync"])).toBe(false);
+    const otherDiff = lock("2026-07-17T10:00:00.000Z", { "plugin-config-sync": { sourcePluginVersion: "2.0" }, a: { sourcePluginVersion: "1.0" } });
+    expect(remoteLockAhead(local, otherDiff, ["plugin-config-sync"])).toBe(true);
   });
 });
 

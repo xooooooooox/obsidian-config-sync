@@ -681,14 +681,14 @@ export default class ConfigSyncPlugin extends Plugin {
       deepDiff: async (remote) => {
         const ctx = await this.coreContext();
         const reader = await this.createReader(remote);
-        const entries = await diffRemote(ctx, reader);
+        const entries = await diffRemote(ctx, reader, { excludeSelf: remote.excludeSelf === true });
         // A lock-only delta (version-refresh capture on the other side) is real pull payload
         // even when every store file matches — surface it so the hint isn't contradictory.
         let lockDiffers = false;
         try {
           const remoteLock = (await reader.listFiles()).includes("store.lock.json") ? await reader.readFile("store.lock.json") : null;
           const localLock = (await ctx.io.exists(`${ctx.rootPath}/store.lock.json`)) ? await ctx.io.read(`${ctx.rootPath}/store.lock.json`) : null;
-          lockDiffers = remoteLockAhead(localLock, remoteLock);
+          lockDiffers = remoteLockAhead(localLock, remoteLock, remote.excludeSelf === true ? [SELF_GROUP_NAME] : []);
         } catch {
           lockDiffers = false;
         }
@@ -697,7 +697,7 @@ export default class ConfigSyncPlugin extends Plugin {
       pullFrom: async (remote) => {
         try {
           const ctx = await this.coreContext();
-          const pending = await planImport(ctx, await this.createReader(remote));
+          const pending = await planImport(ctx, await this.createReader(remote), { excludeSelf: remote.excludeSelf === true });
           // Pull resolves file conflicts only; sync-list (definition) conflicts are no longer
           // applied by Pull, so they don't prompt — the list converges via adopt.
           const fileConflicts = pending.plan.conflicts.filter((c) => c.kind === "file");
@@ -736,7 +736,7 @@ export default class ConfigSyncPlugin extends Plugin {
       pushTo: async (remote) => {
         try {
           const ctx = await this.coreContext();
-          const results = await pushExternal(ctx, await this.createWriter(remote));
+          const results = await pushExternal(ctx, await this.createWriter(remote), { excludeSelf: remote.excludeSelf === true });
           await this.refreshRemoteChecks();
           return results;
         } catch (e) {

@@ -271,15 +271,20 @@ export function validateRemotes(data: unknown): Remote[] {
 
 function parseRemote(r: unknown, index: number): Remote {
   if (!isPlainObject(r)) throw new ManifestValidationError(`remote #${index + 1} must be an object, e.g. {"name": "laptop", "type": "vault", "storePath": "/path/to/store"}`);
-  const { name, type, storePath, url, branch, subdir } = r;
+  const { name, type, storePath, url, branch, subdir, excludeSelf } = r;
   if (typeof name !== "string" || name === "") {
     throw new ManifestValidationError(`remote #${index + 1} is missing a "name" — give it a short label, e.g. "name": "laptop"`);
+  }
+  if (excludeSelf !== undefined && typeof excludeSelf !== "boolean") {
+    throw new ManifestValidationError(`remote "${name}" has "excludeSelf": ${JSON.stringify(excludeSelf)}, but it must be true or false`);
   }
   if (type === "vault") {
     if (typeof storePath !== "string" || !(storePath.startsWith("/") || storePath === "~" || storePath.startsWith("~/"))) {
       throw new ManifestValidationError(`The store path for "${name}" needs to be a full path starting with / or ~/ — for example ~/Vaults/other-vault/config-sync.`);
     }
-    return { name, type, storePath };
+    const remote: Remote = { name, type, storePath };
+    if (excludeSelf === true) remote.excludeSelf = true;
+    return remote;
   }
   if (type === "git") {
     if (typeof url !== "string" || url === "") {
@@ -293,6 +298,7 @@ function parseRemote(r: unknown, index: number): Remote {
     }
     const remote: Remote = { name, type, url, branch };
     if (typeof subdir === "string" && subdir !== "") remote.subdir = subdir;
+    if (excludeSelf === true) remote.excludeSelf = true;
     return remote;
   }
   throw new ManifestValidationError(`remote "${name}" has "type": ${JSON.stringify(type)}, but it must be "vault" or "git"`);

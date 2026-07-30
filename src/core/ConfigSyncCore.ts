@@ -751,6 +751,16 @@ const LEGACY_MANIFEST_REL = "config-sync.json";
 // id, from manifest.json, never varies) — so its store rel is this fixed constant.
 const SELF_STORE_DATA_REL = `store/${groupStorePath("{configDir}/plugins/config-sync/data.json")}`;
 
+// Every store rel belonging to the self item: its data file plus the two device-class sidecars.
+// The excludeSelf remote option uses this to keep the self item out of pull/push/diff entirely.
+export function isSelfStoreRel(rel: string): boolean {
+  return (
+    rel === SELF_STORE_DATA_REL ||
+    rel === SELF_STORE_DATA_REL + sidecarStoreSuffix("desktop") ||
+    rel === SELF_STORE_DATA_REL + sidecarStoreSuffix("mobile")
+  );
+}
+
 // A legacy root manifest — the deprecated format from before groups moved into plugin
 // settings — or a timestamped remnant left behind by migrateLegacyManifest. Neither is ever
 // written locally by the current format, so both are excluded from file classification.
@@ -778,14 +788,14 @@ export interface PendingPull {
 }
 
 // Phase 1: read-only. Never writes anything.
-export async function planImport(ctx: CoreContext, reader: ExternalStoreReader): Promise<PendingPull> {
+export async function planImport(ctx: CoreContext, reader: ExternalStoreReader, opts: { excludeSelf: boolean }): Promise<PendingPull> {
   const files = await reader.listFiles();
   const remoteGroups = await remoteGroupsFrom(reader, files);
   const remoteLockRaw = files.includes(LOCK_REL) ? await reader.readFile(LOCK_REL) : null;
 
   const remoteFileMap = new Map<string, string>();
   for (const rel of files) {
-    if (rel === LOCK_REL || isLegacyManifestRel(rel)) continue;
+    if (rel === LOCK_REL || isLegacyManifestRel(rel) || (opts.excludeSelf && isSelfStoreRel(rel))) continue;
     remoteFileMap.set(rel, await reader.readFile(rel));
   }
 
@@ -795,7 +805,7 @@ export async function planImport(ctx: CoreContext, reader: ExternalStoreReader):
     const localAbs = await listFilesRecursive(ctx.io, ctx.rootPath);
     for (const f of localAbs) {
       const rel = relativeTo(ctx.rootPath, f);
-      if (rel === LOCK_REL || isLegacyManifestRel(rel)) continue;
+      if (rel === LOCK_REL || isLegacyManifestRel(rel) || (opts.excludeSelf && isSelfStoreRel(rel))) continue;
       localFileMap.set(rel, await ctx.io.read(f));
     }
   }
@@ -894,7 +904,7 @@ export interface ExternalStoreWriter {
   finalize(): Promise<void>; // git: add/commit/push; local-path: no-op
 }
 
-export async function pushExternal(ctx: CoreContext, writer: ExternalStoreWriter): Promise<GroupResult[]> {
+export async function pushExternal(ctx: CoreContext, writer: ExternalStoreWriter, opts: { excludeSelf: boolean }): Promise<GroupResult[]> {
   const localAbs = (await ctx.io.exists(ctx.rootPath)) ? await listFilesRecursive(ctx.io, ctx.rootPath) : [];
   const rels = localAbs.map((f) => f.slice(ctx.rootPath.length + 1)).sort();
   const hasStore = rels.some((r) => r.startsWith("store/")) || rels.includes(LOCK_REL);
@@ -903,7 +913,7 @@ export async function pushExternal(ctx: CoreContext, writer: ExternalStoreWriter
       `Local store has no captured data at ${ctx.rootPath} — capture from this device (or pull) before pushing.`
     );
   }
-  const pushableRels = rels.filter((r) => !isLegacyManifestRel(r));
+  const pushableRels = rels.filter((r) => !isLegacyManifestRel(r) && !(opts.excludeSelf && isSelfStoreRel(r)));
   const manifest = await loadManifest(ctx);
   const byName = new Map<string, GroupResult>();
   const resultFor = (name: string): GroupResult => {
@@ -927,6 +937,7 @@ export async function pushExternal(ctx: CoreContext, writer: ExternalStoreWriter
   }
   const wanted = new Set(pushableRels);
   for (const rel of remoteFiles) {
+    if (opts.excludeSelf && isSelfStoreRel(rel)) continue; // the remote's own contract is not ours to delete
     if (!wanted.has(rel)) {
       const { name, itemRel } = groupForStoreRel(manifest.groups, rel);
       await writer.deleteFile(rel);

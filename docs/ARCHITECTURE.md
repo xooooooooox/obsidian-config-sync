@@ -45,7 +45,14 @@ functions.
 **Engine & context**
 - `core/ConfigSyncCore.ts` — the engine and its interfaces: `capture`, `apply`,
   `applyWithActions`, `captureWithActions`, `planImport`/`applyImport`,
-  `pushExternal`, plus `CoreContext` (`deviceClass: "desktop" | "mobile"`; optional
+  `pushExternal`. `planImport(ctx, reader, opts: { excludeSelf: boolean })` and
+  `pushExternal(ctx, writer, opts: { excludeSelf: boolean })` both take an explicit options param
+  (no default): when `excludeSelf` is set, `isSelfStoreRel(rel)` (exported next to
+  `SELF_STORE_DATA_REL`) names the self item's data-file and sidecar rels, which `planImport` then
+  drops from both file maps before `classifyMerge` and `pushExternal` skips in its write loop —
+  and, on the push side, exempts from the mirror-delete loop too, so the remote's own self copy is
+  never deleted even though it's absent from the local push set. The module also exports
+  `CoreContext` (`deviceClass: "desktop" | "mobile"`; optional
   `fieldOverlay?: (group, topKeys) => FieldRule[] | null` — a seam for runtime category rules
   layered on top of a group's stored `fields`, via `overlayGroup(ctx, group, jsons)`; unused today
   — `main.ts` passes no `fieldOverlay`, since every registry item, including the "app" (app.json)
@@ -109,7 +116,14 @@ functions.
 **Status & availability**
 - `core/status.ts` — per-item status (`statusForGroups`), remote freshness (`diffRemote`,
   `remoteLockAhead`), and the counts the UI shows (`bucketCounts`, `remoteDirectionCounts` —
-  the per-remote ⇡ push / ⇣ pull totals behind the header pills and the status bar). Direction for a changed group
+  the per-remote ⇡ push / ⇣ pull totals behind the header pills and the status bar).
+  `diffRemote(ctx, reader, opts: { excludeSelf: boolean })` returns per-group `RemoteDiffEntry.files:
+  RemoteDiffFile[]` — one entry per file with its `kind` (`added`/`updated`/`deleted`) and both
+  sides' content, so the UI renders file lists and content diffs instead of bare counts;
+  `excludeSelf` drops the self item's store rels from both sides before diffing.
+  `remoteLockAhead(localRaw, remoteRaw, ignoreGroups)` takes an explicit `ignoreGroups` list —
+  callers pass `[SELF_GROUP_NAME]` when a remote's `excludeSelf` is set, so a divergent self lock
+  entry never keeps the "remote has newer version info" hint alive forever. Direction for a changed group
   is a three-way comparison against this device's `core/ledger.ts` entry, never file mtimes or the
   lock's `capturedAt`: no entry → `never-synced` (apply-default, counts into `bucketCounts.down`);
   only the store side moved → `store-newer`; only the local side moved → `local-changed`; both

@@ -1,8 +1,8 @@
 import { App, ButtonComponent, ExtraButtonComponent, ItemView, Menu, Modal, Platform, WorkspaceLeaf, setIcon } from "obsidian";
 import { ApplyItem, CaptureItem, ProgressFn, StateAction } from "../core/ConfigSyncCore";
-import { bucketCounts, GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry, remoteDirectionCounts } from "../core/status";
+import { bucketCounts, GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry, RemoteDiffFile, remoteDirectionCounts } from "../core/status";
 import { CATEGORY_LABELS, findGroupByName, ItemCategory, SELF_GROUP_NAME, categoryForGroup } from "../core/catalog";
-import { FileChanges, GroupResult, Remote, SyncGroup, hasChanges } from "../core/types";
+import { FileChanges, GroupResult, Remote, SyncGroup } from "../core/types";
 import { Availability } from "../core/availability";
 import { isWholeFileEncrypted } from "../core/modes";
 import { GroupDisplayParts } from "../core/registry";
@@ -2230,24 +2230,23 @@ export class SyncCenterView extends ItemView {
     if (gen !== this.renderGen || this.panelScope.kind !== "remote" || this.panelScope.name !== remote.name) return;
     detail.empty();
 
-    const changed = entries.filter((e) => hasChanges(e.changes));
+    const changed = entries.filter((e) => e.files.length > 0);
     for (const cat of SCOPE_ORDER) {
       const inCat = changed.filter((e) => this.scopeOf(e.group) === cat);
       if (inCat.length === 0) continue;
       detail.createDiv({ cls: "config-sync-sect", text: SCOPE_LABELS[cat] });
-      for (const e of inCat) this.renderRemoteDiffEntry(detail, e);
+      for (const e of inCat) this.renderRemoteDiffEntry(detail, e, remote.name);
     }
 
     const state = check?.state ?? "unknown";
     const pullAligned = state === "remote-newer" || state === "same" || state === "unknown" || state === "no-store";
-    const directionText = pullAligned ? "Pull would bring these changes" : "Push would send these changes";
 
     // "N more items match" line: groups present in this device's list minus the entries that differ
     // (excludes the "" store-metadata pseudo-entry and any remote-only groups from the count).
     const changedNames = new Set(changed.map((e) => e.group));
     const matchNames = this.groups
       .filter((g) => !changedNames.has(g.name))
-      .map((g) => this.host.displayName(g.name, g.label));
+      .map((g) => this.fullName(g.name, g.label));
     const matched = matchNames.length;
     if (entries.length === 0) {
       detail.createDiv({
@@ -2256,14 +2255,46 @@ export class SyncCenterView extends ItemView {
           ? "✓ contents match — remote has newer version info; Pull refreshes it"
           : "✓ remote matches the local store",
       });
-    } else if (matched > 0) {
-      const line = detail.createDiv({
-        cls: "config-sync-unchanged",
-        text: `✓ ${matched} more item${matched === 1 ? " matches" : "s match"} ▸ · ${directionText}`,
-      });
-      line.addEventListener("click", () => line.setText(`✓ ${matchNames.join(" · ")}`));
     } else {
-      detail.createDiv({ cls: "config-sync-remote-summary", text: directionText });
+      // The aligned action's REAL payload, then what it will not do (spec Item 3): Pull is
+      // additive (never removes local files); Push mirrors (removes remote-only files).
+      const allFiles = changed.flatMap((e) => e.files);
+      const incoming = allFiles.filter((f) => f.kind !== "deleted").length;
+      const keptLocal = allFiles.filter((f) => f.kind === "deleted").length;
+      const outgoing = allFiles.filter((f) => f.kind !== "added").length;
+      const remoteOnly = allFiles.filter((f) => f.kind === "added").length;
+      const summary = detail.createDiv({ cls: "config-sync-remote-summary" });
+      summary.createDiv({
+        text: pullAligned
+          ? incoming === 0 ? "Pull would bring nothing" : `Pull would bring ${incoming} file${incoming === 1 ? "" : "s"}`
+          : outgoing === 0 ? "Push would send nothing" : `Push would send ${outgoing} file${outgoing === 1 ? "" : "s"}`,
+      });
+      if (pullAligned && keptLocal > 0) {
+        summary.createDiv({
+          cls: "config-sync-remote-kept",
+          text: keptLocal === 1
+            ? `1 file exists only in your store — Pull never removes files; Push would add it to ${remote.name}.`
+            : `${keptLocal} files exist only in your store — Pull never removes files; Push would add them to ${remote.name}.`,
+        });
+      }
+      if (!pullAligned && remoteOnly > 0) {
+        summary.createDiv({
+          cls: "config-sync-remote-kept",
+          text: remoteOnly === 1
+            ? `1 file exists only at ${remote.name} — Push would remove it there; Pull would bring it here.`
+            : `${remoteOnly} files exist only at ${remote.name} — Push would remove them there; Pull would bring them here.`,
+        });
+      }
+      if (matched > 0) {
+        const line = detail.createDiv({
+          cls: "config-sync-unchanged",
+          text: `✓ ${matched} more item${matched === 1 ? " matches" : "s match"} ▸`,
+        });
+        line.addEventListener("click", () => line.setText(`✓ ${matchNames.join(" · ")}`));
+      }
+    }
+    if (remote.excludeSelf === true) {
+      detail.createDiv({ cls: "config-sync-remote-selfnote", text: "Config Sync's own settings stay out of this remote" });
     }
 
     // lockDiffers alone still gives Pull something to do (refresh the newer version info),
@@ -2271,13 +2302,88 @@ export class SyncCenterView extends ItemView {
     this.renderRemoteButtons(detail, remote, pullAligned, entries.length === 0 && !lockDiffers);
   }
 
-  private renderRemoteDiffEntry(detail: HTMLElement, e: RemoteDiffEntry): void {
-    const row = detail.createDiv({ cls: "config-sync-report-row" });
-    row.createSpan({ cls: "config-sync-rule-name", text: this.host.displayName(e.group, findGroupByName(this.groups, e.group)?.label) });
+  private renderRemoteDiffEntry(detail: HTMLElement, e: RemoteDiffEntry, remoteName: string): void {
+    const row = detail.createDiv({ cls: "config-sync-report-row config-sync-remote-row" });
+    const chev = row.createSpan({ cls: "config-sync-cm-chev", text: "▸" });
+    this.renderRuleName(row, e.group, findGroupByName(this.groups, e.group)?.label);
     row.createDiv({ cls: "config-sync-rule-spacer" });
-    if (e.changes.added.length > 0) row.createSpan({ cls: "config-sync-chip is-add", text: `+${e.changes.added.length}` });
-    if (e.changes.updated.length > 0) row.createSpan({ cls: "config-sync-chip is-upd", text: `~${e.changes.updated.length}` });
-    if (e.changes.deleted.length > 0) row.createSpan({ cls: "config-sync-chip is-del", text: `−${e.changes.deleted.length}` });
+    const counts = { added: 0, updated: 0, deleted: 0 };
+    for (const f of e.files) counts[f.kind]++;
+    if (counts.added > 0) row.createSpan({ cls: "config-sync-chip is-add", text: `+${counts.added}` });
+    if (counts.updated > 0) row.createSpan({ cls: "config-sync-chip is-upd", text: `~${counts.updated}` });
+    if (counts.deleted > 0) row.createSpan({ cls: "config-sync-chip is-del", text: `−${counts.deleted}` });
+    const fold = detail.createDiv({ cls: "config-sync-remote-files" });
+    fold.hide();
+    let built = false;
+    row.addEventListener("click", () => {
+      const open = fold.isShown();
+      if (open) {
+        fold.hide();
+        chev.setText("▸");
+        return;
+      }
+      if (!built) {
+        this.renderRemoteFileRows(fold, e, remoteName);
+        built = true;
+      }
+      fold.show();
+      chev.setText("▾");
+    });
+  }
+
+  // File-level detail for one remote diff row: added → updated → deleted, each line expandable
+  // into a content diff (single-sided kinds diff against an empty side).
+  private renderRemoteFileRows(fold: HTMLElement, e: RemoteDiffEntry, remoteName: string): void {
+    const order = { added: 0, updated: 1, deleted: 2 } as const;
+    const files = [...e.files].sort((a, b) => order[a.kind] - order[b.kind] || (a.itemRel < b.itemRel ? -1 : a.itemRel > b.itemRel ? 1 : 0));
+    for (const f of files) {
+      const cls = f.kind === "added" ? "is-add" : f.kind === "updated" ? "is-upd" : "is-del";
+      const line = fold.createDiv({ cls: `config-sync-remote-frow ${cls} config-sync-diffable` });
+      line.createSpan({ cls: "config-sync-remote-fglyph", text: f.kind === "added" ? "+" : f.kind === "updated" ? "~" : "−" });
+      line.createSpan({ cls: "config-sync-remote-fname", text: f.itemRel });
+      const hint = line.createSpan({ cls: "config-sync-diffhint", text: " · diff ▾" });
+      let panel: HTMLElement | null = null;
+      line.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        if (panel !== null) {
+          panel.remove();
+          panel = null;
+          hint.setText(" · diff ▾");
+          return;
+        }
+        hint.setText(" · diff ▴");
+        const p = createDiv({ cls: "config-sync-inline-diff" });
+        panel = p;
+        line.insertAdjacentElement("afterend", p);
+        this.renderRemoteFileDiff(p, e.group, f, remoteName);
+      });
+    }
+  }
+
+  private renderRemoteFileDiff(p: HTMLElement, group: string, f: RemoteDiffFile, remoteName: string): void {
+    let left = f.local ?? "";
+    let right = f.remote ?? "";
+    const switchSorted = SWITCH_LIST_GROUPS.has(group);
+    let jsonSorted = false;
+    if (switchSorted) {
+      left = f.local !== null ? switchListSortedView(f.local) : "";
+      right = f.remote !== null ? switchListSortedView(f.remote) : "";
+    } else if (f.itemRel.endsWith(".json") && f.local !== null && f.remote !== null) {
+      const sl = jsonSortedView(f.local);
+      const sr = jsonSortedView(f.remote);
+      if (sl !== null && sr !== null) {
+        left = sl;
+        right = sr;
+        jsonSorted = true;
+      }
+    }
+    if (f.local !== null && f.remote !== null && left === right) {
+      p.createDiv({ cls: "config-sync-expand-note", text: "Only key order / formatting differs." });
+      return;
+    }
+    const leftLabel = f.local !== null ? "your store" : "not in your store";
+    const rightLabel = f.remote !== null ? remoteName : `not at ${remoteName}`;
+    renderDiffPanel(p, left, right, leftLabel, rightLabel, switchSorted || jsonSorted ? `${f.itemRel} · sorted view` : f.itemRel);
   }
 
   private renderRemoteButtons(detail: HTMLElement, remote: Remote, pullAligned: boolean, noChanges: boolean): void {

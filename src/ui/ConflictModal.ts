@@ -1,5 +1,5 @@
 import { App, Modal } from "obsidian";
-import { PendingPull } from "../core/ConfigSyncCore";
+import { isSelfStoreRel, PendingPull } from "../core/ConfigSyncCore";
 import { MergeConflict, sortKeysDeep } from "../core/merge";
 import { SyncGroup } from "../core/types";
 import { renderDiffPanel } from "./diffView";
@@ -163,6 +163,12 @@ export class ConflictModal extends Modal {
       diffHost.show();
       chev.setText("▾");
     });
+    if (c.kind === "file" && isSelfStoreRel(c.rel)) {
+      row.createDiv({
+        cls: "config-sync-cm-selfhint",
+        text: "If this vault keeps its own Config Sync setup, you can leave it out of this remote — Settings → Remotes.",
+      });
+    }
   }
 
   private paintChoice(row: HTMLElement, side: Side | null): void {

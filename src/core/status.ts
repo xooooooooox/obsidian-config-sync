@@ -1,4 +1,4 @@
-import { CoreContext, ExternalStoreReader, groupForStoreRel, loadManifest, overlayGroup, remoteGroupsFrom, storeDir } from "./ConfigSyncCore";
+import { CoreContext, ExternalStoreReader, groupForStoreRel, isSelfStoreRel, loadManifest, overlayGroup, remoteGroupsFrom, storeDir } from "./ConfigSyncCore";
 import { isJunkPath, listFilesRecursive } from "./io";
 import { basename, groupStorePath, relativeTo, sidecarStoreSuffix } from "./pathing";
 import { FileChanges, hasChanges, StoreLock, SyncGroup } from "./types";
@@ -205,8 +205,9 @@ export async function checkRemote(localLock: StoreLock | null, reader: ExternalS
 // (2026-07-17: byte compare kept the hint alive forever, since a merged local lock keeps
 // local-only entries and its own formatting). True when the remote captured later, or when a
 // remote group entry is missing/different locally. Local-only entries and a locally-newer
-// capturedAt never count — a pull would not change them.
-export function remoteLockAhead(localRaw: string | null, remoteRaw: string | null): boolean {
+// capturedAt never count — a pull would not change them. ignoreGroups names lock entries that
+// never count (the self group when the remote excludes it).
+export function remoteLockAhead(localRaw: string | null, remoteRaw: string | null, ignoreGroups: string[]): boolean {
   if (remoteRaw === null) return false;
   if (localRaw === null) return true;
   let local: StoreLock;
@@ -221,22 +222,30 @@ export function remoteLockAhead(localRaw: string | null, remoteRaw: string | nul
   const r = Date.parse(remote.capturedAt);
   if (!Number.isNaN(l) && !Number.isNaN(r) && r > l) return true;
   for (const [name, entry] of Object.entries(remote.groups)) {
+    if (ignoreGroups.includes(name)) continue;
     const mine = local.groups[name];
     if (mine === undefined || JSON.stringify(mine) !== JSON.stringify(entry)) return true;
   }
   return false;
 }
 
+export interface RemoteDiffFile {
+  itemRel: string;                       // display path within the item (resolve()'s itemRel)
+  kind: "added" | "updated" | "deleted"; // added = only at the remote; deleted = only in the local store
+  local: string | null;                  // content in the local store; null when the file doesn't exist there
+  remote: string | null;                 // content at the remote; null when the file doesn't exist there
+}
+
 export interface RemoteDiffEntry {
   group: string;
-  changes: FileChanges;
+  files: RemoteDiffFile[];
 }
 
 // Store files that neither manifest can attribute to a group. Kept visible (instead of being
 // filtered as metadata) so a delta never silently reads as "contents match".
 export const OTHER_STORE_FILES_GROUP = "(other store files)";
 
-export async function diffRemote(ctx: CoreContext, reader: ExternalStoreReader): Promise<RemoteDiffEntry[]> {
+export async function diffRemote(ctx: CoreContext, reader: ExternalStoreReader, opts: { excludeSelf: boolean }): Promise<RemoteDiffEntry[]> {
   const manifest = await loadManifest(ctx);
   const remoteFiles = await reader.listFiles();
   // A fresh device knows few or no groups yet, so attribution falls back to the REMOTE
@@ -257,7 +266,7 @@ export async function diffRemote(ctx: CoreContext, reader: ExternalStoreReader):
   const entry = (name: string): RemoteDiffEntry => {
     let e = byName.get(name);
     if (e === undefined) {
-      e = { group: name, changes: { added: [], updated: [], deleted: [] } };
+      e = { group: name, files: [] };
       byName.set(name, e);
     }
     return e;
@@ -272,21 +281,27 @@ export async function diffRemote(ctx: CoreContext, reader: ExternalStoreReader):
     return a !== null && b !== null && switchListsEqual(a, b, []);
   };
   for (const rel of remoteFiles) {
+    if (opts.excludeSelf && isSelfStoreRel(rel)) continue;
     const { name, itemRel } = resolve(rel);
     if (!localRels.has(rel)) {
-      entry(name).changes.added.push(itemRel);
-    } else if (!filesMatch(name, await reader.readFile(rel), await ctx.io.read(`${ctx.rootPath}/${rel}`))) {
-      entry(name).changes.updated.push(itemRel);
+      entry(name).files.push({ itemRel, kind: "added", local: null, remote: await reader.readFile(rel) });
+    } else {
+      const remoteContent = await reader.readFile(rel);
+      const localContent = await ctx.io.read(`${ctx.rootPath}/${rel}`);
+      if (!filesMatch(name, remoteContent, localContent)) {
+        entry(name).files.push({ itemRel, kind: "updated", local: localContent, remote: remoteContent });
+      }
     }
   }
   const remoteSet = new Set(remoteFiles);
   for (const rel of localRels) {
+    if (opts.excludeSelf && isSelfStoreRel(rel)) continue;
     if (!remoteSet.has(rel)) {
       const { name, itemRel } = resolve(rel);
-      entry(name).changes.deleted.push(itemRel);
+      entry(name).files.push({ itemRel, kind: "deleted", local: await ctx.io.read(`${ctx.rootPath}/${rel}`), remote: null });
     }
   }
   // The "" store-metadata pseudo-entry (lock + manifest bookkeeping) drifts on every capture;
   // it is not a difference worth reporting here. Pull/push REPORTS still show it.
-  return [...byName.values()].filter((e) => e.group !== "" && hasChanges(e.changes));
+  return [...byName.values()].filter((e) => e.group !== "" && e.files.length > 0);
 }

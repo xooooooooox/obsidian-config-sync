@@ -80,9 +80,12 @@ export interface GroupResult {
   stateNote?: { kind: "ok" | "warn"; text: string };
 }
 
+// excludeSelf (either type): true = Config Sync's own settings (the self item's store copy)
+// never travel to/from this remote — pull/push skip them and the comparison stops reporting
+// them. Absent = false = the self item travels like any other (same-lineage stores).
 export type Remote =
-  | { name: string; type: "vault"; storePath: string } // storePath: absolute path of the store directory; leading ~ allowed
-  | { name: string; type: "git"; url: string; branch: string; subdir?: string }; // subdir: store folder inside the repo; absent = repo root
+  | { name: string; type: "vault"; storePath: string; excludeSelf?: boolean } // storePath: absolute path of the store directory; leading ~ allowed
+  | { name: string; type: "git"; url: string; branch: string; subdir?: string; excludeSelf?: boolean }; // subdir: store folder inside the repo; absent = repo root
 
 export type RibbonKey = "sync";
 export type RibbonButtons = Record<RibbonKey, boolean>;
