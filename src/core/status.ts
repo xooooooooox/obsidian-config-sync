@@ -251,7 +251,7 @@ export async function diffRemote(ctx: CoreContext, reader: ExternalStoreReader, 
   // A fresh device knows few or no groups yet, so attribution falls back to the REMOTE
   // manifest — otherwise every remote file would land in the metadata pseudo-group and the
   // whole delta would be dropped (the "contents match" false negative).
-  const remoteGroups = await remoteGroupsFrom(reader, remoteFiles);
+  const remoteGroups = await remoteGroupsFrom(ctx, reader, remoteFiles);
   const resolve = (rel: string): { name: string; itemRel: string } => {
     const local = groupForStoreRel(manifest.groups, rel);
     if (local.name !== "") return local;

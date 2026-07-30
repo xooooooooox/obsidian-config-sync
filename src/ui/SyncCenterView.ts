@@ -2245,7 +2245,9 @@ export class SyncCenterView extends ItemView {
     // (excludes the "" store-metadata pseudo-entry and any remote-only groups from the count).
     const changedNames = new Set(changed.map((e) => e.group));
     const matchNames = this.groups
-      .filter((g) => !changedNames.has(g.name))
+      // The excluded self item was never compared — it is neither changed nor matched, and
+      // listing it two lines above the "stays out of this remote" note would contradict it.
+      .filter((g) => !changedNames.has(g.name) && !(remote.excludeSelf === true && g.name === SELF_GROUP_NAME))
       .map((g) => this.fullName(g.name, g.label));
     const matched = matchNames.length;
     if (entries.length === 0) {

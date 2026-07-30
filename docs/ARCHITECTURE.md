@@ -32,7 +32,8 @@ functions.
 
 - **Capture** — live config → store: `capture()` reads each group's files, applies its sync mode
   (strip/encrypt), writes changed files under `store/`, and stamps source versions into
-  `store.lock.json`.
+  `store.lock.json` — carrying forward lock entries for groups outside this vault's compiled
+  registry, whose store content only pulls (not local flows) manage.
 - **Apply** — store → live config: `apply()` / `applyWithActions()` optionally
   install/enable/update the plugin first, then write the store's content into the config dir
   (no backup — the removed 1.x "Revert last apply" was the only consumer).
@@ -51,7 +52,13 @@ functions.
   `SELF_STORE_DATA_REL`) names the self item's data-file and sidecar rels, which `planImport` then
   drops from both file maps before `classifyMerge` and `pushExternal` skips in its write loop —
   and, on the push side, exempts from the mirror-delete loop too, so the remote's own self copy is
-  never deleted even though it's absent from the local push set. The module also exports
+  never deleted even though it's absent from the local push set. `remoteGroupsFrom(ctx, reader,
+  files)` resolves the remote's sync list from its self store copy — schema v1 copies carry a
+  compiled `groups` array; v2 copies (items + customGroups) compile through the injected
+  `CoreContext.storeListGroups` hook (main.ts wires `storeSelfCopyGroups` with the plugin's
+  registry defs). `applyImport`'s lock merge attributes identical files two-sidedly
+  (`owningGroupName`), so store content outside the local registry still carries its lock entry
+  across on pull. The module also exports
   `CoreContext` (`deviceClass: "desktop" | "mobile"`; optional
   `fieldOverlay?: (group, topKeys) => FieldRule[] | null` — a seam for runtime category rules
   layered on top of a group's stored `fields`, via `overlayGroup(ctx, group, jsons)`; unused today

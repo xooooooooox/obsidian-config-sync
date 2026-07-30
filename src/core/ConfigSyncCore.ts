@@ -3,7 +3,7 @@ import { FieldRule, GroupResult, hasChanges, StoreLock, SyncGroup, SyncManifest 
 import { basename, groupStorePath, relativeTo, resolveGroupByStoreRel, sidecarStoreSuffix } from "./pathing";
 import { parseStoreLock, parseSyncManifest, validateSyncManifest } from "./manifest";
 import { applyTransform, captureTransform, classPatterns, contentUnchanged } from "./modes";
-import { classifyMerge, MergeConflict, MergePlan } from "./merge";
+import { classifyMerge, MergeConflict, MergePlan, owningGroupName } from "./merge";
 import { isPlainObject, keyMatchesAny } from "./sanitize";
 import { readPerItemArray, scopeOf } from "./perItem";
 import { applySwitchList, captureSwitchList, localRealPath, parseSwitchList, readLocalSwitchList, subtractForceOff, SWITCH_LIST_GROUPS, SwitchList, switchListsEqual, writeLocalSwitchList } from "./switchList";
@@ -43,6 +43,10 @@ export interface CoreContext {
   switchExceptions: Record<string, string[]>; // group name -> masked member ids (This-device ∪ scoped-away ∪ auto-derived)
   switchForceOff?: Record<string, string[]>; // group name -> ids forced off on apply (user class scope on the wrong device class)
   fieldOverlay?: (group: SyncGroup, topKeys: string[]) => FieldRule[] | null; // runtime category rules (e.g. app.json view rows)
+  // Compiles a self store copy's sync list. Schema v2 copies persist items+customGroups (no
+  // compiled groups array), and only the plugin holds the registry defs needed to compile them
+  // (leftover.ts's storeSelfCopyGroups) — absent in bare test contexts, where v2 copies yield [].
+  storeListGroups?: (selfCopyJson: string) => SyncGroup[];
   now(): string; // ISO-8601 timestamp, injectable for tests
 }
 
@@ -307,6 +311,15 @@ export async function capture(ctx: CoreContext, names?: string[], onProgress?: P
       lock.groups[group.name] = { sourceAppVersion: ctx.plugins.getAppVersion() };
     }
     results.push(result);
+  }
+  // The store legitimately holds content outside this vault's registry (additive pulls never
+  // delete, and no local flow prunes another contract's files). Its lock entries describe that
+  // content — dropping them here would resurrect the remote "newer version info" hint after
+  // every capture. Registry names always win: their entries were just written or deliberately
+  // dropped (e.g. plugin uninstalled) by the loop above.
+  const registryNames = new Set(manifest.groups.map((g) => g.name));
+  for (const [name, entry] of Object.entries(previous?.groups ?? {})) {
+    if (!registryNames.has(name)) lock.groups[name] = entry;
   }
   await ensureParentDir(ctx.io, lockPath(ctx));
   await ctx.io.write(lockPath(ctx), JSON.stringify(lock, null, 2) + "\n");
@@ -768,12 +781,14 @@ function isLegacyManifestRel(rel: string): boolean {
   return rel === LEGACY_MANIFEST_REL || rel.startsWith(`${LEGACY_MANIFEST_REL}.migrated-`);
 }
 
-export async function remoteGroupsFrom(reader: ExternalStoreReader, files: string[]): Promise<SyncGroup[]> {
+export async function remoteGroupsFrom(ctx: CoreContext, reader: ExternalStoreReader, files: string[]): Promise<SyncGroup[]> {
   if (files.includes(SELF_STORE_DATA_REL)) {
-    const parsed: unknown = JSON.parse(await reader.readFile(SELF_STORE_DATA_REL));
+    const raw = await reader.readFile(SELF_STORE_DATA_REL);
+    const parsed: unknown = JSON.parse(raw);
     if (isPlainObject(parsed) && Array.isArray(parsed.groups)) {
       return validateSyncManifest({ version: 1, groups: parsed.groups }).groups;
     }
+    if (ctx.storeListGroups !== undefined) return ctx.storeListGroups(raw); // schema v2: items + customGroups
   }
   if (files.includes(LEGACY_MANIFEST_REL)) {
     return parseSyncManifest(await reader.readFile(LEGACY_MANIFEST_REL)).groups; // compat, deprecated format
@@ -790,7 +805,7 @@ export interface PendingPull {
 // Phase 1: read-only. Never writes anything.
 export async function planImport(ctx: CoreContext, reader: ExternalStoreReader, opts: { excludeSelf: boolean }): Promise<PendingPull> {
   const files = await reader.listFiles();
-  const remoteGroups = await remoteGroupsFrom(reader, files);
+  const remoteGroups = await remoteGroupsFrom(ctx, reader, files);
   const remoteLockRaw = files.includes(LOCK_REL) ? await reader.readFile(LOCK_REL) : null;
 
   const remoteFileMap = new Map<string, string>();
@@ -867,10 +882,11 @@ export async function applyImport(
     // Content-identical groups follow the remote's capture lineage too: a version-refresh
     // capture on the other device updates ONLY the lock, and that update must survive the
     // pull or the Outdated flow never fires here (确认 2026-07-16; B-newer edge in spec).
+    // Attribution is two-sided (local first, then the remote contract): store content outside the local registry must still carry its lock entry across, or remoteLockAhead reports it forever.
     for (const id of plan.auto.identical) {
       if (id.startsWith("group:")) remoteWonNames.add(id.slice("group:".length));
       if (id.startsWith("file:")) {
-        const { name } = groupForStoreRel(groups, id.slice("file:".length));
+        const name = owningGroupName(groups, remoteGroups, id.slice("file:".length));
         if (name !== "") remoteWonNames.add(name);
       }
     }

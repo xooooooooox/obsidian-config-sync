@@ -22,7 +22,7 @@ export interface MergePlan {
 // Resolves the owning group name from either side's groups (a 2-way merge has no single
 // authoritative group list); local takes precedence, falling back to remote, then "" (store
 // metadata / unmatched, e.g. store.lock.json).
-function owningGroupName(localGroups: SyncGroup[], remoteGroups: SyncGroup[], rel: string): string {
+export function owningGroupName(localGroups: SyncGroup[], remoteGroups: SyncGroup[], rel: string): string {
   return resolveGroupByStoreRel(localGroups, rel)?.name ?? resolveGroupByStoreRel(remoteGroups, rel)?.name ?? "";
 }
 

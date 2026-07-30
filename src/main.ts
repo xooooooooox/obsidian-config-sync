@@ -1168,6 +1168,9 @@ export default class ConfigSyncPlugin extends Plugin {
           this.compiledGroups = groups;
         },
       },
+      // Schema v2 self copies carry items+customGroups, not a compiled groups array — core needs
+      // the plugin's registry defs to compile them (storeSelfCopyGroups' contract).
+      storeListGroups: (json) => storeSelfCopyGroups(json, this.registryDefs),
       now: () => new Date().toISOString(),
     };
   }

@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { CoreContext, capture, captureWithActions, loadManifest, groupsForDevice, apply, applyWithActions, planImport, applyImport, PendingPull, ExternalStoreReader, pushExternal, ExternalStoreWriter, pluginIdForGroup, readGroups, writeGroups, deviceExcludedPluginIds, isSelfStoreRel } from "../src/core/ConfigSyncCore";
+import { CoreContext, capture, captureWithActions, loadManifest, groupsForDevice, apply, applyWithActions, planImport, applyImport, PendingPull, ExternalStoreReader, pushExternal, ExternalStoreWriter, pluginIdForGroup, readGroups, writeGroups, deviceExcludedPluginIds, isSelfStoreRel, remoteGroupsFrom } from "../src/core/ConfigSyncCore";
 import { parseSyncManifest } from "../src/core/manifest";
 import { SyncGroup } from "../src/core/types";
 import { isFieldEnvelope, parseFileEnvelope } from "../src/core/crypto";
-import { statusForGroups } from "../src/core/status";
+import { statusForGroups, remoteLockAhead } from "../src/core/status";
 import { emptyLedger } from "../src/core/ledger";
 import { isChanged } from "../src/core/runHistory";
 import { MemFS, FakePlugins, memGroupsIO } from "./memfs";
@@ -1080,6 +1080,62 @@ describe("planImport / applyImport", () => {
       await applyImport(ctx, pending, []);
       expect(await io.exists("cs/store.lock.json")).toBe(false);
     });
+
+    it("pull adopts the remote lock entry for an identical store file whose group exists only in the remote contract", async () => {
+      const io = new MemFS();
+      const plugins = new FakePlugins();
+      const FOREIGN: SyncGroup = { name: "plugin-foreign", path: "{configDir}/plugins/foreign/data.json", type: "file", devices: "all" };
+      const ctx: CoreContext = { io, configDir: ".obs", rootPath: "cs", plugins, passphrase: null, deviceClass: "desktop", groupsIO: memGroupsIO(), now: () => "2026-07-30T00:00:00.000Z", switchExceptions: {}, storeListGroups: () => [FOREIGN] };
+      await writeGroups(ctx, [HOTKEYS_GROUP]);
+      const remoteLock = JSON.stringify({ capturedAt: "2026-07-30T09:00:00.000Z", groups: { hotkeys: { sourceAppVersion: "1.6.0" }, "plugin-foreign": { sourcePluginVersion: "0.5.25" } } }, null, 2) + "\n";
+      io.seed({
+        "cs/store/configdir/hotkeys.json": '{"a":1}',
+        "cs/store/configdir/plugins/foreign/data.json": '{"x":1}',
+        "cs/store.lock.json": JSON.stringify({ capturedAt: "2026-07-30T08:00:00.000Z", groups: { hotkeys: { sourceAppVersion: "1.6.0" } } }, null, 2) + "\n",
+      });
+      const remote = {
+        "store/configdir/hotkeys.json": '{"a":1}',
+        "store/configdir/plugins/foreign/data.json": '{"x":1}',
+        "store/configdir/plugins/config-sync/data.json": JSON.stringify({ schemaVersion: 2, items: { "community:foreign": { enabled: true } } }),
+        "store.lock.json": remoteLock,
+      };
+      const pending = await planImport(ctx, fakeReader(remote), { excludeSelf: false });
+      expect(pending.plan.conflicts.filter((c) => c.kind === "file")).toEqual([]);
+      await applyImport(ctx, pending, []);
+      const mergedRaw = await io.read("cs/store.lock.json");
+      const merged = JSON.parse(mergedRaw) as { capturedAt: string; groups: Record<string, unknown> };
+      expect(merged.groups["plugin-foreign"]).toEqual({ sourcePluginVersion: "0.5.25" }); // adopted across
+      expect(remoteLockAhead(mergedRaw, remoteLock, [])).toBe(false); // the hint clears
+    });
+
+    it("capture carries forward lock entries for groups outside the compiled registry", async () => {
+      const io = new MemFS();
+      const plugins = new FakePlugins();
+      const ctx: CoreContext = { io, configDir: ".obs", rootPath: "cs", plugins, passphrase: null, deviceClass: "desktop", groupsIO: memGroupsIO(), now: () => "2026-07-30T12:00:00.000Z", switchExceptions: {} };
+      await writeGroups(ctx, [HOTKEYS_GROUP]);
+      io.seed({
+        ".obs/hotkeys.json": '{"a":1}',
+        "cs/store.lock.json": JSON.stringify({ capturedAt: "2026-07-30T09:00:00.000Z", groups: { hotkeys: { sourceAppVersion: "0.0.9" }, "plugin-foreign": { sourcePluginVersion: "0.5.25" } } }, null, 2) + "\n",
+      });
+      await capture(ctx);
+      const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, Record<string, unknown>> };
+      expect(lock.groups["plugin-foreign"]).toEqual({ sourcePluginVersion: "0.5.25" }); // carried forward
+      expect(lock.groups["hotkeys"]).toEqual({ sourceAppVersion: plugins.getAppVersion() }); // fresh registry entry wins over 0.0.9
+    });
+
+    it("capture still drops the entry of a registry group whose plugin is uninstalled (carry-forward is for foreign names only)", async () => {
+      const io = new MemFS();
+      const plugins = new FakePlugins(); // "demo" NOT installed
+      const ctx: CoreContext = { io, configDir: ".obs", rootPath: "cs", plugins, passphrase: null, deviceClass: "desktop", groupsIO: memGroupsIO(), now: () => "2026-07-30T12:00:00.000Z", switchExceptions: {} };
+      await writeGroups(ctx, [{ name: "plugin-demo", path: "{configDir}/plugins/demo/data.json", type: "file", devices: "all" }]);
+      io.seed({
+        ".obs/plugins/demo/data.json": '{"a":1}',
+        "cs/store.lock.json": JSON.stringify({ capturedAt: "2026-07-30T09:00:00.000Z", groups: { "plugin-demo": { sourcePluginVersion: "1.0.0" } } }, null, 2) + "\n",
+      });
+      await capture(ctx);
+      const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, Record<string, unknown>> };
+      expect(lock.groups["plugin-demo"]).toBeUndefined(); // registry name: the no-version drop stands, never resurrected
+    });
   });
 });
 
@@ -1567,6 +1623,26 @@ describe("enabled-css-snippets switch list (field-aware local, plain store)", ()
     const manifest = await loadManifest(ctx);
     const { statuses } = await statusForGroups(ctx, groupsForDevice(manifest, "desktop"), emptyLedger());
     expect(statuses.find((s) => s.group === "enabled-css-snippets")?.state).toBe("in-sync");
+  });
+});
+
+describe("remoteGroupsFrom (schema v2 self copy)", () => {
+  const DEMO_GROUP: SyncGroup = { name: "plugin-demo", path: "{configDir}/plugins/demo/data.json", type: "file", devices: "all" };
+  const v2SelfCopy = JSON.stringify({ schemaVersion: 2, items: { "community:demo": { enabled: true } }, customGroups: [] });
+  const files = { "store/configdir/plugins/config-sync/data.json": v2SelfCopy };
+
+  it("compiles a v2 self copy through ctx.storeListGroups", async () => {
+    const io = new MemFS();
+    const plugins = new FakePlugins();
+    const ctx: CoreContext = { io, configDir: ".obs", rootPath: "cs", plugins, passphrase: null, deviceClass: "desktop", groupsIO: memGroupsIO(), now: () => "2026-07-30T00:00:00.000Z", switchExceptions: {}, storeListGroups: (json) => (json === v2SelfCopy ? [DEMO_GROUP] : []) };
+    expect(await remoteGroupsFrom(ctx, fakeReader(files), Object.keys(files))).toEqual([DEMO_GROUP]);
+  });
+
+  it("yields [] for a v2 self copy when the hook is absent (bare context)", async () => {
+    const io = new MemFS();
+    const plugins = new FakePlugins();
+    const ctx: CoreContext = { io, configDir: ".obs", rootPath: "cs", plugins, passphrase: null, deviceClass: "desktop", groupsIO: memGroupsIO(), now: () => "2026-07-30T00:00:00.000Z", switchExceptions: {} };
+    expect(await remoteGroupsFrom(ctx, fakeReader(files), Object.keys(files))).toEqual([]);
   });
 });
 
