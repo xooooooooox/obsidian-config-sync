@@ -20,7 +20,7 @@
 - **凭证安全** —— 逐键或整文件加密，确保敏感键永远不会以明文形式进入 store；每台设备在每次 Apply 后都会保留自己本地填入的 `This device` 值。
 - **明确的 Apply** —— 挑选条目，直接落地（没有确认弹窗）；每次运行的变更都会留在贴顶结果条与 **History** 中可见。
 - **可移除、可清理** —— 随时停止同步某个条目（可选一并删除其 store 副本）；store 中遗留的、没有对应条目的文件会作为 **Leftover**（遗留）浮现出来，一键清理。
-- **随时可见的状态感知** —— 打开 **Sync Center** 随时查看详情；其页头本身就是一条状态栏：一个 *this device*（本设备）胶囊（全部 in sync 时显示绿色对勾，否则显示当前状态并提供进入设置的快捷入口），后面跟着每一类待办动作的总数，包括每个远程各自的 push/pull 计数。每个条目按状态打上徽标（`✓ in sync`、changed-on-this-device、store-is-newer、not-synced-on-this-device-yet、`≠ differs`、`— not captured yet`），每个同步动作（Capture、Apply、Push、Pull）都有各自独立的图标，JSON 差异会按统一的键顺序渲染，纯粹的键顺序/格式差异会被单独标注出来而不是显示成一堆噪声，远程仓库也会被自动检查。来自某张卡片自身 companion 文件夹或 switch list 的分组——CSS snippets、`themes/` 文件夹、任意用户添加的文件夹——会显示为 `Parent › Name`（parent 部分淡显），因此排序与搜索时会归入其所属卡片，而不是显示成一行无关的独立条目。
+- **随时可见的状态感知** —— 打开 **Sync Center** 随时查看详情；其页头本身就是一条状态栏：一个 *this device*（本设备）胶囊（全部 in sync 时显示绿色对勾，当本设备的 Config Sync 比 store 捕获时的版本旧时显示橙色 *update available*，否则显示当前状态并提供进入设置的快捷入口），后面跟着每一类待办动作的总数，包括每个远程各自的 push/pull 计数。每个条目按状态打上徽标（`✓ in sync`、changed-on-this-device、store-is-newer、not-synced-on-this-device-yet、`≠ differs`、`— not captured yet`），每个同步动作（Capture、Apply、Push、Pull）都有各自独立的图标，JSON 差异会按统一的键顺序渲染，纯粹的键顺序/格式差异会被单独标注出来而不是显示成一堆噪声，远程仓库也会被自动检查。来自某张卡片自身 companion 文件夹或 switch list 的分组——CSS snippets、`themes/` 文件夹、任意用户添加的文件夹——会显示为 `Parent › Name`（parent 部分淡显），因此排序与搜索时会归入其所属卡片，而不是显示成一行无关的独立条目。
 - **在 diff 里直接决定插件归属** —— 当某个插件仅在一侧被启用时，对应行会说明这样做的后果，并提供一个 "where it runs" 菜单，可原地设为 Desktop only / Mobile only / 本设备自行决定 / 到处启用（不可能生效的选项会被隐去）。
 - **状态栏** —— 同步状态一目了然：↑ 待捕获、↓ 待应用，以及每个 remote 各自的 ⇡ push / ⇣ pull 计数；点击可直接打开 **Sync Center**。全部同步时只显示一个置灰图标。原有的 ribbon 图标圆点现在改为可选（默认关闭）；另有一个仅限手机端的开关，可强制显示被 Obsidian 隐藏的状态栏。
 - **感知可用性** —— 落后版本、被禁用或未安装的插件会各自出现在独立的折叠分区中，配合插件安装/更新引擎，让 apply 在同一步里也能顺带更新、启用或安装某个社区插件。**Beta** 标签页会追踪通过 BRAT 安装的社区插件，让它们的配置像其他条目一样同步。
@@ -79,7 +79,7 @@
 
 Capture、Apply、Pull、Push 每次执行完毕都会在 Sync Center 顶部渲染一条**贴顶固定（sticky）**的结果条(result strip)——一段可折叠的摘要（变更/未变更数量，按需展开查看每个条目的详情），而不是弹窗对话框，因此你滚动长列表时它始终可见，也不会打断你继续勾选。它的配色反映结果——干净时为绿色，有条目需要处理时为琥珀或红色，失败项默认展开。每次运行还会记入可浏览、可清空的 **History**（历史）：侧栏入口打开一张历史运行表（窄屏/移动端改为卡片列表，自上而下阅读、无需水平滚动），每条都可展开查看逐条目详情。
 
-Sync Center 的页头是一条状态栏：**this device**（本设备）胶囊显示 Config Sync 自身的同步状态——in sync 时显示绿色对勾，否则显示其状态并提供一个 Settings 快捷入口——后面跟着每一类待办动作的总数，包括每个远程各自的 push/pull 计数。点击该胶囊会打开 **this device** 面板，Config Sync 自身的配置（它的条目清单、字段规则与选项）会像其他条目一样被 capture 和 apply；当该清单发生变化时，可展开的 *view change* 会显示确切的 `data.json` 差异以及 capture 将会发布的内容。
+Sync Center 的页头是一条状态栏：**this device**（本设备）胶囊显示 Config Sync 自身的同步状态——in sync 时显示绿色对勾，当本设备运行的 Config Sync 比 store 捕获时的版本旧时显示橙色 *update available*（面板会提示先到 **Community plugins** 更新），否则显示其状态并提供一个 Settings 快捷入口——后面跟着每一类待办动作的总数，包括每个远程各自的 push/pull 计数。点击该胶囊会打开 **this device** 面板，Config Sync 自身的配置（它的条目清单、字段规则与选项）会像其他条目一样被 capture 和 apply；当该清单发生变化时，可展开的 *view change* 会显示确切的 `data.json` 差异以及 capture 将会发布的内容。
 
 **Filter by name…**（按名称筛选）搜索框位于 Sync Center 的侧边栏，会在所有作用域（Obsidian、Core plugins、Community plugins、Beta、Custom）中全局搜索。除纯文本外，它还支持 `key:value` 限定符——`type:`（file/folder）、`scope:`（obsidian/core/community/beta/custom）、`action:`（capture/apply/ok/none）、`mode:`（plain/fields/encrypted）与 `device:`（all/desktop/mobile）——多个限定符会一起收窄结果，并可与自由文本组合，配有一个聚焦即弹出、先提示 key、再提示 value 的自动补全下拉。侧边栏会显示每个作用域的命中数量，有命中的分区会自动展开以仅显示命中项。
 

@@ -492,9 +492,9 @@ export default class ConfigSyncPlugin extends Plugin {
             capturedAt = null; // an unreadable lock must not break the pane
           }
         }
-        if (localList.length === 0) return { state: "coldstart", delta, itemCount: storeGroups.length, capturedAt, contentChanged: false, versionRefresh: null, flagsRefresh: null };
+        if (localList.length === 0) return { state: "coldstart", delta, itemCount: storeGroups.length, capturedAt, contentChanged: false, versionRefresh: null, updateAvailable: null, flagsRefresh: null };
         const selfGroup = this.compiledGroups.find((g) => g.name === SELF_GROUP_NAME);
-        if (selfGroup === undefined) return { state: "insync", delta, itemCount: localList.length, capturedAt, contentChanged: false, versionRefresh: null, flagsRefresh: null };
+        if (selfGroup === undefined) return { state: "insync", delta, itemCount: localList.length, capturedAt, contentChanged: false, versionRefresh: null, updateAvailable: null, flagsRefresh: null };
         const selfLedger = this.loadBaselines();
         const { statuses: selfStatuses, updates: selfUpdates } = await statusForGroups(ctx, [selfGroup], selfLedger);
         const [st] = selfStatuses;
@@ -511,7 +511,9 @@ export default class ConfigSyncPlugin extends Plugin {
         if (decided.state === "insync") this.setColdStartDismissed(false);
         const versionRefresh =
           decided.versionRefresh && av.localVersion !== null && av.storeVersion !== null ? { local: av.localVersion, store: av.storeVersion } : null;
-        return { state: decided.state, delta, itemCount: localList.length, capturedAt, contentChanged: decided.contentChanged, versionRefresh, flagsRefresh: flagsRefreshCount > 0 ? flagsRefreshCount : null };
+        const updateAvailable =
+          decided.versionBehind && av.localVersion !== null && av.storeVersion !== null ? { local: av.localVersion, store: av.storeVersion } : null;
+        return { state: decided.state, delta, itemCount: localList.length, capturedAt, contentChanged: decided.contentChanged, versionRefresh, updateAvailable, flagsRefresh: flagsRefreshCount > 0 ? flagsRefreshCount : null };
       },
       coldStartDismissed: () => this.coldStartDismissed(),
       setColdStartDismissed: (v) => this.setColdStartDismissed(v),

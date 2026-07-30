@@ -610,6 +610,7 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 .config-sync-self-chip.is-up { border-color: rgba(var(--color-orange-rgb), 0.5); color: var(--color-orange); }
 .config-sync-self-chip.is-down { border-color: rgba(var(--interactive-accent-rgb), 0.5); color: var(--interactive-accent); }
 .config-sync-self-chip.is-ok { border-color: rgba(var(--color-green-rgb), 0.5); color: var(--color-green); }
+.config-sync-self-chip.is-behind { border-color: rgba(var(--color-orange-rgb), 0.5); color: var(--color-orange); }
 .config-sync-head-divider { width: 1px; height: 16px; background: var(--background-modifier-border); flex: none; }
 
 .config-sync-shell { display: grid; grid-template-columns: minmax(150px, 22%) minmax(0, 1fr); gap: var(--size-4-3); }
@@ -739,6 +740,7 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 .config-sync-side-self-pill.is-up { border-color: rgba(var(--color-orange-rgb), 0.5); color: var(--color-orange); }
 .config-sync-side-self-pill.is-down { border-color: rgba(var(--interactive-accent-rgb), 0.5); color: var(--interactive-accent); }
 .config-sync-side-self-pill.is-ok { border-color: rgba(var(--color-green-rgb), 0.5); color: var(--color-green); }
+.config-sync-side-self-pill.is-behind { border-color: rgba(var(--color-orange-rgb), 0.5); color: var(--color-orange); }
 .config-sync-self-pane { padding: 2px 2px 12px; }
 .config-sync-self-title { display: flex; align-items: center; gap: var(--size-4-2); font-size: var(--font-ui-medium); font-weight: 600; }
 .config-sync-self-title-ic { color: var(--interactive-accent); flex: none; display: inline-flex; }
@@ -747,6 +749,7 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 .config-sync-self-pill.is-down { background: rgba(var(--interactive-accent-rgb), 0.15); color: var(--interactive-accent); }
 .config-sync-self-pill.is-up { background: rgba(var(--color-orange-rgb), 0.15); color: var(--color-orange); }
 .config-sync-self-pill.is-ok { background: rgba(var(--color-green-rgb), 0.15); color: var(--color-green); }
+.config-sync-self-pill.is-behind { background: rgba(var(--color-orange-rgb), 0.15); color: var(--color-orange); }
 .config-sync-self-title-sp { flex: 1; }
 .config-sync-self-settings-btn { display: inline-flex; align-items: center; gap: 4px; font-size: var(--font-ui-smaller); color: var(--text-muted); background: var(--background-modifier-hover); border: 1px solid var(--background-modifier-border); border-radius: 6px; padding: 2px 9px; cursor: pointer; box-shadow: none; height: auto; }
 .config-sync-self-settings-btn:hover { color: var(--interactive-accent); border-color: rgba(var(--interactive-accent-rgb), 0.5); }
@@ -758,6 +761,9 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 .config-sync-self-block.is-gated { opacity: 0.6; }
 .config-sync-self-block-h { font-weight: 600; font-size: var(--font-ui-small); margin-bottom: 4px; }
 .config-sync-self-block-s { color: var(--text-muted); font-size: var(--font-ui-smaller); margin-bottom: 10px; line-height: 1.45; }
+.config-sync-self-behind { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; border: 1px solid rgba(var(--color-orange-rgb), 0.35); border-left: 3px solid var(--color-orange); background: rgba(var(--color-orange-rgb), 0.07); border-radius: 8px; padding: 10px 12px; margin: 10px 0 12px; }
+.config-sync-self-behind-txt { flex: 1 1 260px; color: var(--text-muted); font-size: var(--font-ui-smaller); line-height: 1.45; }
+.config-sync-self-behind-btn { flex: none; font-size: var(--font-ui-smaller); color: var(--color-orange); background: rgba(var(--color-orange-rgb), 0.12); border: 1px solid rgba(var(--color-orange-rgb), 0.45); border-radius: 6px; padding: 4px 10px; white-space: nowrap; cursor: pointer; }
 .config-sync-self-caution { color: var(--color-orange); font-size: var(--font-ui-smaller); margin: 8px 0 10px; padding: 7px 9px; border-radius: 8px; background: rgba(var(--color-orange-rgb), 0.1); border: 1px solid rgba(var(--color-orange-rgb), 0.35); }
 .config-sync-self-delta { display: flex; flex-direction: column; gap: 4px; margin-bottom: 11px; }
 .config-sync-self-drow { display: flex; align-items: center; gap: var(--size-4-2); font-size: var(--font-ui-small); }

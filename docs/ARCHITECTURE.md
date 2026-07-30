@@ -155,6 +155,11 @@ functions.
   now share with the store side (`storeSelfCopyGroups` calls it too): items compiled with
   synthesized defs for ids whose plugin isn't installed on this device, so an item this device's
   own `data.json` carries never drops out of membership just because its plugin is absent here.
+- `core/selfPane.ts` — `selfPaneState`: decides the Config Sync pane's direction from the self
+  item's content status and version drift. It also reports an orthogonal `versionBehind` advisory
+  (this device's plugin older than the store's captured version) — surfaced as the pane's
+  update-available block and the orange `is-behind` pill; it never becomes a stageable action,
+  since updating config-sync mid-run would unload the running code.
 - `core/runHistory.ts` — the run-record model and helpers (`RunRecord`, `summarizeRun`,
   `worstStatus`, `countChanged`, `isChanged`, `pruneHistory`).
 

@@ -33,7 +33,8 @@ export default defineConfig(
 	{
 		rules: {
 			// Product terms keep their casing in UI copy: "Config Sync", "Sync Center", "Fields mode".
-			'obsidianmd/ui/sentence-case': ['warn', { ignoreWords: ['Sync', 'Center', 'Fields'] }],
+			// "Community" is Obsidian's own settings-tab proper name, quoted in the self-pane advisory button.
+			'obsidianmd/ui/sentence-case': ['warn', { ignoreWords: ['Sync', 'Center', 'Fields', 'Community'] }],
 		},
 	},
 );

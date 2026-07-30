@@ -124,6 +124,7 @@ export interface SelfSyncInfo {
   capturedAt: string | null;
   contentChanged: boolean; // config-sync's own data.json differs beyond the list → pane shows a diff
   versionRefresh: { local: string; store: string } | null; // content in-sync but plugin version ahead
+  updateAvailable: { local: string; store: string } | null; // plugin version behind the store's captured version — advisory only
   flagsRefresh: number | null; // installed plugins whose desktopOnly flag isn't recorded yet → nudge a capture
 }
 
@@ -438,12 +439,10 @@ export class SyncCenterView extends ItemView {
   }
 
   // Section-aware stageability: action-only rows (install-only / enable-only / update-only)
-  // stage in their sections. The self plugin is exempt from update-only — updating it from
-  // inside a run would unload the code executing the run.
+  // stage in their sections. (The self group never reaches here — rows() excludes it; its
+  // update-available case is the pane advisory instead.)
   private rowStageable(r: StatusRow): boolean {
-    const section = this.sectionOf(r.group.name);
-    if (r.group.name === SELF_GROUP_NAME && section === "outdated" && this.presState(r) === "in-sync") return false;
-    return stageableRow(this.presState(r), section);
+    return stageableRow(this.presState(r), this.sectionOf(r.group.name));
   }
 
   // All user-facing counts (header pills, sidebar badges, filter pills, switcher) must agree
@@ -528,7 +527,9 @@ export class SyncCenterView extends ItemView {
       case "both":
         return { text: "to adopt · to capture", cls: "is-up" };
       case "insync":
-        return { text: "in sync", cls: "is-ok" };
+        // Content is in sync, but an older plugin here shouldn't read as "all good" —
+        // the store's settings were captured on a newer Config Sync.
+        return info.updateAvailable !== null ? { text: "update available", cls: "is-behind" } : { text: "in sync", cls: "is-ok" };
     }
   }
 
@@ -568,6 +569,12 @@ export class SyncCenterView extends ItemView {
     setting?.openTabById("config-sync");
   }
 
+  private openCommunityPlugins(): void {
+    const setting = (this.app as unknown as { setting?: { open(): void; openTabById(id: string): void } }).setting;
+    setting?.open();
+    setting?.openTabById("community-plugins");
+  }
+
   // The Config Sync pane: the self layer's bidirectional adopt/capture surface (S0–S4).
   private renderConfigSyncMode(main: HTMLElement): void {
     const info = this.selfInfo;
@@ -585,6 +592,18 @@ export class SyncCenterView extends ItemView {
     setIcon(cfgIc, "settings-2");
     cfgBtn.createSpan({ text: "Settings" });
     cfgBtn.addEventListener("click", () => this.openConfigSyncSettings());
+
+    if (info.updateAvailable !== null) {
+      // Advisory only — no update action: updating config-sync from inside a run would
+      // unload the code executing the run, so the pane can only point at Obsidian's updater.
+      const behind = pane.createDiv({ cls: "config-sync-self-behind" });
+      behind.createSpan({
+        cls: "config-sync-self-behind-txt",
+        text: `Captured on Config Sync ${info.updateAvailable.store} — this device runs ${info.updateAvailable.local}. Update before adopting or applying.`,
+      });
+      const open = behind.createEl("button", { cls: "config-sync-self-behind-btn", text: "Open Community plugins" });
+      open.addEventListener("click", () => this.openCommunityPlugins());
+    }
 
     if (info.state === "coldstart") {
       pane.createDiv({ cls: "config-sync-self-sub", text: "This is a new device — it has no sync list yet. The store holds a configuration you can adopt to set it up." });
@@ -882,7 +901,7 @@ export class SyncCenterView extends ItemView {
     if (pill === null) return;
     const chip = parent.createSpan({ cls: `config-sync-self-chip ${pill.cls}`, attr: { "aria-label": `Config Sync: ${pill.text}` } });
     const ic = chip.createSpan({ cls: "config-sync-self-chip-ic" });
-    setIcon(ic, info.state === "insync" ? "check" : "settings");
+    setIcon(ic, pill.cls === "is-ok" ? "check" : pill.cls === "is-behind" ? "arrow-down-to-line" : "settings");
     chip.createSpan({ text: pill.text });
     chip.addEventListener("click", () => {
       this.panelScope = { kind: "self" };
@@ -1454,11 +1473,14 @@ export class SyncCenterView extends ItemView {
     const head = fold.createDiv({ cls: "config-sync-section-head" });
     head.createSpan({ cls: "config-sync-row-chevron", text: open ? "▾" : "▸" });
     head.createSpan({ cls: "config-sync-section-title", text: SECTION_TITLES[kind] });
-    const insync = matches.filter((r) => this.presState(r) === "in-sync");
     const checkable = matches.filter((r) => this.rowStageable(r));
-    const countText = this.searching() ? `${matches.length} of ${rows.length}` : `${rows.length - insync.length}`;
+    // Unified rule (spec 2026-07-17): every row in these sections carries an action payload —
+    // content-in-sync is the NORMAL case for update-only/enable-only/install-only rows, so the
+    // head counts rows, not content drift, and never shows a ✓ pill (a green check would
+    // mislabel a row that still needs an update/enable/install). Same semantics as the
+    // desktop-only info section.
+    const countText = this.searching() ? `${matches.length} of ${rows.length}` : `${rows.length}`;
     head.createSpan({ cls: "config-sync-pill is-neutral", text: countText });
-    if (insync.length > 0) head.createSpan({ cls: "config-sync-pill is-ok", text: `✓ ${insync.length}` });
     const staged = checkable.filter((r) => this.selected.has(r.group.name)).length;
     if (staged > 0) head.createSpan({ cls: "config-sync-section-hint", text: `${staged} selected` });
     const box = head.createEl("input", { type: "checkbox", attr: { "aria-label": "Select all in this section" } });
@@ -1660,13 +1682,6 @@ export class SyncCenterView extends ItemView {
         return;
       }
       if (sec === "outdated") {
-        if (r.group.name === SELF_GROUP_NAME) {
-          detail.createDiv({
-            cls: "config-sync-expand-note",
-            text: "Config Sync updates itself through Obsidian's plugin updater — Settings → Community plugins.",
-          });
-          return;
-        }
         // Update-only (spec 2026-07-17): settings match, the plugin is behind — the update
         // action is the whole payload.
         const line = versionLine(this.availOf(r.group.name));
