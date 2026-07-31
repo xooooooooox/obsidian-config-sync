@@ -76,7 +76,7 @@ describe("parseSyncManifest", () => {
 
     const legacy = { name: "s", path: "{configDir}/hotkeys.json", type: "file", devices: "all", sanitize: ["*Token*"] };
     expect(() => parseSyncManifest(manifestWith([legacy]))).toThrow(
-      '"s" still uses the old sanitize setting — rename it to "mode": "fields" with "fields" rules (see README → Sensitive settings).'
+      '"s" still uses the old sanitize setting — rename it to "mode": "fields" with "fields" rules (see the sensitive-settings guide in docs/GUIDE.md).'
     );
 
     const fieldsOnDir = { name: "d", path: "{configDir}/snippets", type: "dir", devices: "all", mode: "fields", fields: [{ pattern: "*Token*", scope: "local", encrypted: false }] };

@@ -120,7 +120,7 @@ function parseGroup(g: unknown, index: number): SyncGroup {
   }
   if (sanitize !== undefined) {
     throw new ManifestValidationError(
-      `"${name}" still uses the old sanitize setting — rename it to "mode": "fields" with "fields" rules (see README → Sensitive settings).`
+      `"${name}" still uses the old sanitize setting — rename it to "mode": "fields" with "fields" rules (see the sensitive-settings guide in docs/GUIDE.md).`
     );
   }
   let validatedMode: SyncMode | undefined;
