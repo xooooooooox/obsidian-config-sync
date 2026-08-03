@@ -3,7 +3,8 @@ import { FieldRule, GroupResult, hasChanges, StoreLock, SyncGroup, SyncManifest 
 import { basename, groupStorePath, relativeTo, resolveGroupByStoreRel, sidecarStoreSuffix } from "./pathing";
 import { parseStoreLock, parseSyncManifest, validateSyncManifest } from "./manifest";
 import { applyTransform, captureTransform, classPatterns, contentUnchanged } from "./modes";
-import { classifyMerge, MergeConflict, MergePlan, owningGroupName } from "./merge";
+import { classifyMerge, MergeConflict, MergePlan } from "./merge";
+import { SELF_GROUP_NAME } from "./catalog";
 import { isPlainObject, keyMatchesAny } from "./sanitize";
 import { readPerItemArray, scopeOf } from "./perItem";
 import { applySwitchList, captureSwitchList, localRealPath, parseSwitchList, readLocalSwitchList, subtractForceOff, SWITCH_LIST_GROUPS, SwitchList, switchListsEqual, writeLocalSwitchList } from "./switchList";
@@ -800,6 +801,7 @@ export interface PendingPull {
   plan: MergePlan;
   remoteGroups: SyncGroup[];
   remoteLockRaw: string | null;
+  excludeSelf: boolean;
 }
 
 // Phase 1: read-only. Never writes anything.
@@ -826,7 +828,7 @@ export async function planImport(ctx: CoreContext, reader: ExternalStoreReader, 
   }
 
   const plan = classifyMerge(localGroups, localFileMap, remoteGroups, remoteFileMap);
-  return { plan, remoteGroups, remoteLockRaw };
+  return { plan, remoteGroups, remoteLockRaw, excludeSelf: opts.excludeSelf };
 }
 
 // Phase 2: writes the whole merge result — all auto-merged parts plus each conflict's chosen
@@ -857,8 +859,6 @@ export async function applyImport(
     return r;
   };
 
-  const remoteWonNames = new Set<string>(plan.auto.writeFiles.map((f) => f.name).filter((n) => n !== ""));
-
   for (const f of plan.auto.writeFiles) {
     await writeClassified(ctx, `${ctx.rootPath}/${f.rel}`, f.content, f.rel, resultFor(f.name));
   }
@@ -866,7 +866,6 @@ export async function applyImport(
     const conflict = fileConflicts[i];
     if (conflict === undefined || choices[i] !== "remote") continue;
     await writeClassified(ctx, `${ctx.rootPath}/${conflict.rel}`, conflict.remoteContent, conflict.rel, resultFor(conflict.name));
-    remoteWonNames.add(conflict.name);
   }
   await pruneEmptyDirsUnder(ctx.io, ctx.rootPath);
 
@@ -879,22 +878,29 @@ export async function applyImport(
   const remoteLock = remoteLockRaw !== null ? parseStoreLock(remoteLockRaw) : null;
   if (localLock !== null || remoteLock !== null) {
     const mergedGroups: StoreLock["groups"] = { ...(localLock?.groups ?? {}) };
-    // Content-identical groups follow the remote's capture lineage too: a version-refresh
-    // capture on the other device updates ONLY the lock, and that update must survive the
-    // pull or the Outdated flow never fires here (确认 2026-07-16; B-newer edge in spec).
-    // Attribution is two-sided (local first, then the remote contract): store content outside the local registry must still carry its lock entry across, or remoteLockAhead reports it forever.
-    for (const id of plan.auto.identical) {
-      if (id.startsWith("group:")) remoteWonNames.add(id.slice("group:".length));
-      if (id.startsWith("file:")) {
-        const name = owningGroupName(groups, remoteGroups, id.slice("file:".length));
-        if (name !== "") remoteWonNames.add(name);
+    // Converge remoteLockAhead by construction: after a pull the local lock must carry every
+    // remote lock entry the hint checks — except the self group when this remote excludes it,
+    // and except a group whose file conflict the user kept as "local" (a real divergence that
+    // belongs to the local lineage). Copying an entry with no comparable store file is correct:
+    // a pull is additive, that content stays in the store, and its lock entry describes it.
+    const localWonNames = new Set<string>();
+    for (let i = 0; i < fileConflicts.length; i++) {
+      if (choices[i] === "local") {
+        const c = fileConflicts[i];
+        if (c !== undefined) localWonNames.add(c.name);
       }
     }
-    for (const name of remoteWonNames) {
-      const entry = remoteLock?.groups[name];
-      if (entry !== undefined) mergedGroups[name] = entry;
+    if (remoteLock !== null) {
+      for (const [name, entry] of Object.entries(remoteLock.groups)) {
+        if (pending.excludeSelf && name === SELF_GROUP_NAME) continue;
+        if (localWonNames.has(name)) continue;
+        mergedGroups[name] = entry;
+      }
     }
-    const merged: StoreLock = { capturedAt: remoteLock?.capturedAt ?? localLock?.capturedAt ?? ctx.now(), groups: mergedGroups };
+    const merged: StoreLock = {
+      capturedAt: remoteLock?.capturedAt ?? localLock?.capturedAt ?? ctx.now(),
+      groups: mergedGroups,
+    };
     await ctx.io.write(lockPath(ctx), JSON.stringify(merged, null, 2) + "\n");
   }
 

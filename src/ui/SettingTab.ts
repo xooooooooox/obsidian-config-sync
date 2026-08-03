@@ -109,6 +109,9 @@ export interface SettingsHost extends Plugin {
     customGroups: CustomGroupConfig[];
   };
   saveSettings(): Promise<void>;
+  // Drops the per-refresh reader cache (#3): call after settings.remotes changes so a stale
+  // reader for an edited/removed remote's old URL/branch/subdir/storePath is never reused.
+  clearReaderCache(): void;
   // The registry's item defs (registry.ts's buildItemDefs, rebuilt by main.ts on every
   // recompile) — the unified-card renderer's only source of which cards exist.
   itemDefs(): ItemDef[];
@@ -2830,6 +2833,9 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     try {
       this.host.settings.remotes = validateRemotes(this.sources.map(toCandidate));
       await this.host.saveSettings();
+      // A remote's url/branch/subdir/storePath may just have changed — never let a later compare
+      // reuse a reader built from the pre-edit coordinates (#3).
+      this.host.clearReaderCache();
       this.sourcesErrorMsg = "";
     } catch (e) {
       this.sourcesErrorMsg = (e as Error).message;

@@ -1136,6 +1136,78 @@ describe("planImport / applyImport", () => {
       const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, Record<string, unknown>> };
       expect(lock.groups["plugin-demo"]).toBeUndefined(); // registry name: the no-version drop stands, never resurrected
     });
+
+    it("pull converges the 'newer version info' hint for a store-only remote lock entry (repro)", async () => {
+      const { io, ctx } = setup();
+      await writeGroups(ctx, [HOTKEYS_GROUP]);
+      io.seed({
+        "cs/store/configdir/plugins/config-sync/data.json": selfDataJson([HOTKEYS_GROUP]),
+        "cs/store/configdir/hotkeys.json": '{"a":1}',
+        "cs/store.lock.json": JSON.stringify({ capturedAt: "T", groups: { hotkeys: { sourceAppVersion: "1.0.0" } } }),
+      });
+      const remoteLock = {
+        capturedAt: "T",
+        groups: { hotkeys: { sourceAppVersion: "1.0.0" }, "other-contract": { sourcePluginVersion: "3.1.0" } },
+      };
+      const remote = {
+        "store/configdir/plugins/config-sync/data.json": selfDataJson([HOTKEYS_GROUP]),
+        "store/configdir/hotkeys.json": '{"a":1}',
+        "store.lock.json": JSON.stringify(remoteLock),
+      };
+
+      const before = await io.read("cs/store.lock.json");
+      expect(remoteLockAhead(before, JSON.stringify(remoteLock), [])).toBe(true);
+
+      const pending = await planImport(ctx, fakeReader(remote), { excludeSelf: false });
+      expect(pending.plan.conflicts).toEqual([]);
+      await applyImport(ctx, pending, []);
+
+      const after = await io.read("cs/store.lock.json");
+      expect(remoteLockAhead(after, JSON.stringify(remoteLock), [])).toBe(false);
+    });
+
+    it("excludeSelf: a differing self lock entry is ignored and still converges", async () => {
+      const { io, ctx } = setup();
+      await writeGroups(ctx, [HOTKEYS_GROUP]);
+      io.seed({
+        "cs/store/configdir/hotkeys.json": '{"a":1}',
+        "cs/store.lock.json": JSON.stringify({ capturedAt: "T", groups: { hotkeys: { sourceAppVersion: "1.0.0" } } }),
+      });
+      const remoteLock = {
+        capturedAt: "T",
+        groups: { hotkeys: { sourceAppVersion: "1.0.0" }, "plugin-config-sync": { sourcePluginVersion: "2.13.2" } },
+      };
+      const remote = {
+        "store/configdir/hotkeys.json": '{"a":1}',
+        "store.lock.json": JSON.stringify(remoteLock),
+      };
+      const pending = await planImport(ctx, fakeReader(remote), { excludeSelf: true });
+      await applyImport(ctx, pending, []);
+      const after = await io.read("cs/store.lock.json");
+      expect(remoteLockAhead(after, JSON.stringify(remoteLock), ["plugin-config-sync"])).toBe(false);
+      const afterLock = JSON.parse(after) as { groups: Record<string, unknown> };
+      expect(afterLock.groups["plugin-config-sync"]).toBeUndefined();
+    });
+
+    it("a file conflict resolved 'local' keeps the local lock lineage (not overwritten by remote)", async () => {
+      const { io, ctx } = setup();
+      await writeGroups(ctx, [HOTKEYS_GROUP]);
+      io.seed({
+        "cs/store/configdir/hotkeys.json": '{"a":1}',
+        "cs/store.lock.json": JSON.stringify({ capturedAt: "T", groups: { hotkeys: { sourceAppVersion: "LOCAL" } } }),
+      });
+      const remoteLock = { capturedAt: "T", groups: { hotkeys: { sourceAppVersion: "REMOTE" } } };
+      const remote = {
+        "store/configdir/hotkeys.json": '{"b":2}',
+        "store.lock.json": JSON.stringify(remoteLock),
+      };
+      const pending = await planImport(ctx, fakeReader(remote), { excludeSelf: false });
+      const conflicts = pending.plan.conflicts.filter((c) => c.kind === "file");
+      expect(conflicts.length).toBe(1);
+      await applyImport(ctx, pending, ["local"]);
+      const after = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, { sourceAppVersion?: string }> };
+      expect(after.groups.hotkeys?.sourceAppVersion).toBe("LOCAL");
+    });
   });
 });
 
@@ -1664,6 +1736,7 @@ describe("applyImport — pull is pure store transport", () => {
       },
       remoteGroups: [],
       remoteLockRaw: null,
+      excludeSelf: false,
     };
     await applyImport(ctx, pending, []);
     expect(await readGroups(ctx)).toEqual(before); // sync list untouched

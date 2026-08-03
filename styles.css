@@ -443,6 +443,24 @@ body.is-phone .config-sync-fkey {
   margin: 0 0 var(--size-4-1) var(--size-4-3);
 }
 
+.config-sync-remote-comparing { display: flex; align-items: center; gap: 8px; font-size: var(--font-ui-small); color: var(--text-muted); }
+.config-sync-cmp-elapsed { margin-left: auto; color: var(--text-faint); font-variant-numeric: tabular-nums; }
+.config-sync-cmp-phase { font-size: var(--font-ui-smaller); color: var(--text-muted); margin: 6px 0; }
+.config-sync-cmp-spinner { width: 13px; height: 13px; border-radius: 50%; border: 2px solid var(--background-modifier-border); border-top-color: var(--interactive-accent); display: inline-block; animation: config-sync-spin 0.7s linear infinite; }
+.config-sync-cmp-bar { position: relative; height: 4px; border-radius: 3px; background: var(--background-modifier-border); overflow: hidden; }
+.config-sync-cmp-bar-fill { position: absolute; top: 0; height: 100%; width: 35%; border-radius: 3px; background: var(--interactive-accent); animation: config-sync-indeterminate 1.15s ease-in-out infinite; }
+@keyframes config-sync-spin { to { transform: rotate(360deg); } }
+@keyframes config-sync-indeterminate { 0% { left: -35%; } 100% { left: 100%; } }
+@media (prefers-reduced-motion: reduce) {
+  .config-sync-cmp-spinner { animation: none; }
+  .config-sync-cmp-bar-fill { animation: none; left: 0; width: 40%; }
+}
+
+.config-sync-cmp-agg { display: flex; align-items: center; gap: 8px; font-size: var(--font-ui-smaller); color: var(--text-muted); padding: 6px 8px; margin-bottom: 8px; background: var(--background-secondary-alt); border: 1px solid var(--background-modifier-border); border-radius: 6px; }
+.config-sync-refresh-spinning svg { animation: config-sync-spin 0.7s linear infinite; transform-origin: center; }
+.config-sync-row-checking { display: inline-flex; align-items: center; justify-content: center; }
+@media (prefers-reduced-motion: reduce) { .config-sync-refresh-spinning svg { animation: none; } }
+
 .config-sync-remote-errcard {
   border: 1px solid rgba(var(--color-red-rgb), 0.35);
   background: rgba(var(--color-red-rgb), 0.06);

@@ -130,7 +130,11 @@ functions.
   `excludeSelf` drops the self item's store rels from both sides before diffing.
   `remoteLockAhead(localRaw, remoteRaw, ignoreGroups)` takes an explicit `ignoreGroups` list —
   callers pass `[SELF_GROUP_NAME]` when a remote's `excludeSelf` is set, so a divergent self lock
-  entry never keeps the "remote has newer version info" hint alive forever. Direction for a changed group
+  entry never keeps the "remote has newer version info" hint alive forever. `applyImport` closes the
+  loop on the writer side: after a pull it carries every non-ignored remote lock entry (all but the
+  self group when `excludeSelf`, and any group whose file conflict the user kept as `local`) into the
+  local lock, so `remoteLockAhead` converges to false once contents match — the hint clears after a
+  single Pull instead of nagging. Direction for a changed group
   is a three-way comparison against this device's `core/ledger.ts` entry, never file mtimes or the
   lock's `capturedAt`: no entry → `never-synced` (apply-default, counts into `bucketCounts.down`);
   only the store side moved → `store-newer`; only the local side moved → `local-changed`; both
@@ -284,6 +288,11 @@ functions.
   PAT-only hosts ignore but a self-hosted GitLab validates.
 - `localPath.ts` — an `ExternalStoreReader`/`ExternalStoreWriter` over Node `fs` for a
   "another vault" remote (an absolute store path).
+- `readerCache.ts` — a framework-free `ReaderCache` + `remoteReaderKey`: since a reader is a
+  point-in-time in-memory snapshot (the git reader deletes its temp clone before returning), it is
+  cached per refresh generation and reused, so a compare no longer re-clones after the status check.
+  `refreshRemoteChecks` bumps the generation once per refresh; `deepDiff` reads with `{ reuse: true }`
+  while `pullFrom`/`pushTo` stay fresh; a remote add/edit/delete clears the cache.
 - `pickFolder.ts` — the Electron folder-picker dialog.
 
 **Connector**

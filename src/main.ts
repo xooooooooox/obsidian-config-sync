@@ -24,6 +24,7 @@ import { classifyRemoteFailure } from "./core/remoteFailure";
 // Keychain id for the passphrase (SecretStorage ids: lowercase alphanumerics and dashes).
 import { PASSPHRASE_SECRET_ID } from "./core/secrets";
 import { resolveGitToken } from "./external/gitToken";
+import { ReaderCache, remoteReaderKey } from "./external/readerCache";
 import { retry, HttpStatusError, TimeoutError, isRetryableError } from "./core/async";
 import { RunRecord, RunKind, summarizeRun, pruneHistory } from "./core/runHistory";
 
@@ -200,6 +201,12 @@ export default class ConfigSyncPlugin extends Plugin {
   remoteChecks = new Map<string, { check: RemoteCheck; at: number }>();
   private storeEventTimer: number | null = null;
   private remoteAutoCheckStartupTimer: number | null = null;
+  // Per-refresh reader cache (#3): a compare (deepDiff) reuses the reader refreshRemoteChecks
+  // already built for the same remote in this generation, instead of cloning the store again.
+  private readerCache = new ReaderCache<ExternalStoreReader>();
+  // Live progress for a global refresh (#3/#4b, option 2): non-null only while refreshRemoteChecks
+  // is running, so the Sync Center can paint a working state before the first clone completes.
+  private remoteRefreshProgress: { total: number; done: number } | null = null;
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -365,12 +372,18 @@ export default class ConfigSyncPlugin extends Plugin {
 
   async refreshRemoteChecks(): Promise<void> {
     if (!Platform.isDesktop) return;
+    // Exactly one bump per refresh (#3): every reader createReader builds in the loop below is
+    // cached under this generation, so a same-cycle deepDiff({ reuse: true }) can reuse it
+    // instead of cloning the remote store again.
+    this.readerCache.bumpGeneration();
     let localLock: StoreLock | null = null;
     try {
       localLock = await loadLock(await this.coreContext());
     } catch {
       localLock = null;
     }
+    this.remoteRefreshProgress = { total: this.settings.remotes.length, done: 0 };
+    this.notifySyncCenter(); // paint the working state before the first clone — no silent gap
     for (const remote of this.settings.remotes) {
       try {
         const reader = await this.createReader(remote);
@@ -379,7 +392,10 @@ export default class ConfigSyncPlugin extends Plugin {
         this.remoteChecks.set(remote.name, { check: { state: "unknown", remoteCapturedAt: null }, at: Date.now() });
         console.error(`Config Sync: remote check failed for ${remote.name}`, e);
       }
+      if (this.remoteRefreshProgress !== null) this.remoteRefreshProgress.done++;
+      this.notifySyncCenter();
     }
+    this.remoteRefreshProgress = null;
     this.updateStatusIndicators();
     this.notifySyncCenter();
   }
@@ -679,9 +695,12 @@ export default class ConfigSyncPlugin extends Plugin {
       remotes: () => (Platform.isDesktop ? this.settings.remotes : []),
       remoteCheck: (name) => this.remoteChecks.get(name),
       refreshRemoteChecks: () => this.refreshRemoteChecks(),
-      deepDiff: async (remote) => {
+      remoteRefreshProgress: () => this.remoteRefreshProgress,
+      deepDiff: async (remote, onPhase) => {
         const ctx = await this.coreContext();
-        const reader = await this.createReader(remote);
+        onPhase?.("fetch");
+        const reader = await this.createReader(remote, { reuse: true });
+        onPhase?.("compare");
         const entries = await diffRemote(ctx, reader, { excludeSelf: remote.excludeSelf === true });
         // A lock-only delta (version-refresh capture on the other side) is real pull payload
         // even when every store file matches — surface it so the hint isn't contradictory.
@@ -1180,9 +1199,24 @@ export default class ConfigSyncPlugin extends Plugin {
     };
   }
 
+  // Per-refresh cache (#3): reuses the reader refreshRemoteChecks already cloned for this remote
+  // in the current generation, so deepDiff doesn't clone the store a second time. Default (no
+  // reuse) always builds fresh and caches it under the current generation — pullFrom/pushTo want
+  // the freshest state, not a possibly-stale compare-time snapshot.
+  private async createReader(remote: Remote, opts?: { reuse?: boolean }): Promise<ExternalStoreReader> {
+    const key = remoteReaderKey(remote);
+    if (opts?.reuse === true) {
+      const hit = this.readerCache.getReusable(key);
+      if (hit !== undefined) return hit;
+    }
+    const reader = await this.buildReader(remote);
+    this.readerCache.store(key, reader);
+    return reader;
+  }
+
   // Dynamic import() keeps Node fs/child_process out of the mobile load path (spec D6):
   // a static import would execute require("fs") at plugin load and crash on mobile.
-  private async createReader(remote: Remote): Promise<ExternalStoreReader> {
+  private async buildReader(remote: Remote): Promise<ExternalStoreReader> {
     if (remote.type === "vault") {
       const { createLocalPathReader } = await import("./external/localPath");
       return createLocalPathReader(remote.storePath);
@@ -1340,6 +1374,13 @@ export default class ConfigSyncPlugin extends Plugin {
   // panel can never disagree with the compiled sync list about which cards exist.
   itemDefs(): ItemDef[] {
     return this.registryDefs;
+  }
+
+  // Drops every cached per-refresh reader (#3): called after the remote list (URL/branch/subdir/
+  // storePath) changes, so a stale reader for the old config can never be served to a later
+  // deepDiff({ reuse: true }) — see SettingTab.ts's saveRemotes, the sole place remotes mutate.
+  clearReaderCache(): void {
+    this.readerCache.clear();
   }
 
   async listDiscoveredFiles(groups: SyncGroup[]): Promise<{ name: string; path: string }[]> {

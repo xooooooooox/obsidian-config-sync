@@ -143,7 +143,8 @@ export interface SyncCenterHost {
   remotes(): Remote[]; // [] on mobile
   remoteCheck(name: string): { check: RemoteCheck; at: number } | undefined;
   refreshRemoteChecks(): Promise<void>;
-  deepDiff(remote: Remote): Promise<{ entries: RemoteDiffEntry[]; lockDiffers: boolean }>;
+  remoteRefreshProgress(): { total: number; done: number } | null;
+  deepDiff(remote: Remote, onPhase?: (phase: "fetch" | "compare") => void): Promise<{ entries: RemoteDiffEntry[]; lockDiffers: boolean }>;
   pullFrom(remote: Remote): Promise<GroupResult[] | null>;
   pushTo(remote: Remote): Promise<GroupResult[] | null>;
   adoptConfiguration(): Promise<GroupResult[] | null>;
@@ -324,18 +325,24 @@ export class SyncCenterView extends ItemView {
     this.statuses = new Map(statuses.map((s) => [s.group, s]));
     this.availability = new Map(Object.entries(availability));
     this.betaIds = this.host.betaIds();
-    this.selfInfo = await this.host.selfStatus();
+    const selfInfo = await this.host.selfStatus();
+    if (gen !== this.renderGen) return;
+    this.selfInfo = selfInfo;
     // Fresh device: open straight to the Config Sync pane (the adopt entry) instead of an empty
     // item list — once. After that the user navigates freely.
     if (!this.landedInitial) {
       this.landedInitial = true;
       if (this.selfInfo.state === "coldstart") this.panelScope = { kind: "self" };
     }
-    this.history = this.host.runHistoryEnabled() ? await this.host.loadRunHistory() : [];
+    const history = this.host.runHistoryEnabled() ? await this.host.loadRunHistory() : [];
+    if (gen !== this.renderGen) return;
+    this.history = history;
     // Leftover means "store files with no matching group"; a device with no groups (fresh /
     // pre-adopt) has no baseline, so the whole store would look leftover — dangerous with
     // "Delete all". Only compute it once the manifest exists.
-    this.leftovers = this.groups.length > 0 ? await this.host.listLeftoverStoreFiles() : [];
+    const leftovers = this.groups.length > 0 ? await this.host.listLeftoverStoreFiles() : [];
+    if (gen !== this.renderGen) return;
+    this.leftovers = leftovers;
     if (this.filter === "leftover" && this.leftovers.length === 0) this.filter = "all"; // orphans all cleared
     // User state survives reloads; prune entries whose item vanished.
     const names = new Set(groups.map((g) => g.name));
@@ -829,18 +836,25 @@ export class SyncCenterView extends ItemView {
         await this.host.refreshRemoteChecks();
         this.render(this.renderGen);
       });
-      for (const remote of remotes) {
+      refresh.extraSettingsEl.toggleClass("config-sync-refresh-spinning", this.host.remoteRefreshProgress() !== null);
+      remotes.forEach((remote, idx) => {
         const active = this.panelScope.kind === "remote" && this.panelScope.name === remote.name;
         const item = container.createDiv({ cls: `config-sync-side-item${active ? " is-active" : ""}` });
         item.createSpan({ cls: "config-sync-side-name", text: remote.name });
-        const icon = this.remoteIcon(this.host.remoteCheck(remote.name)?.check);
-        this.paintStateIcon(item.createSpan({ cls: `config-sync-state-icon ${icon.cls}`, attr: { "aria-label": icon.tip } }), icon);
+        const prog = this.host.remoteRefreshProgress();
+        if (prog !== null && idx >= prog.done) {
+          const s = item.createSpan({ cls: "config-sync-state-icon config-sync-row-checking" });
+          s.createSpan({ cls: "config-sync-cmp-spinner" });
+        } else {
+          const icon = this.remoteIcon(this.host.remoteCheck(remote.name)?.check);
+          this.paintStateIcon(item.createSpan({ cls: `config-sync-state-icon ${icon.cls}`, attr: { "aria-label": icon.tip } }), icon);
+        }
         item.addEventListener("click", () => {
           this.panelScope = { kind: "remote", name: remote.name };
           this.switcherOpen = false;
           this.render(this.renderGen);
         });
-      }
+      });
     }
 
     if (this.host.runHistoryEnabled()) {
@@ -960,14 +974,18 @@ export class SyncCenterView extends ItemView {
       cls: "config-sync-center-refreshed",
       text: this.lastRefreshedAt === null ? "" : `refreshed ${relativeAge(this.lastRefreshedAt)}`,
     });
-    // Manual refresh (定稿 2026-07-17, replaces the enabled-set polling): same affordance as
-    // the Remotes ↻ — re-scans local state, catching plugin toggles made in Obsidian's
-    // settings modal while the panel stayed open.
+    // Manual refresh (定稿 2026-07-17, replaces the enabled-set polling; made global 定稿
+    // 2026-08-04 — #1): re-scans local state, catching plugin toggles made in Obsidian's
+    // settings modal while the panel stayed open, and re-checks every remote (desktop only).
     const refresh = new ExtraButtonComponent(head);
     refresh.setIcon("refresh-cw");
-    refresh.setTooltip("Refresh local state");
+    refresh.setTooltip("Refresh");
     refresh.extraSettingsEl.addClass("config-sync-center-refresh");
-    refresh.onClick(() => void this.reload());
+    refresh.extraSettingsEl.toggleClass("config-sync-refresh-spinning", this.host.remoteRefreshProgress() !== null);
+    refresh.onClick(async () => {
+      await this.host.refreshRemoteChecks(); // desktop: re-checks every remote (and reloads via notify)
+      await this.reload();                   // mobile no-ops the above; ensure local still refreshes
+    });
   }
 
   // The run's report is recorded to history and surfaced in the inline strip; the strip
@@ -2191,6 +2209,12 @@ export class SyncCenterView extends ItemView {
       cls: "config-sync-remote-head",
       text: `${remote.name} · captured ${isoAge(check?.remoteCapturedAt ?? null)} — ${icon.tip}`,
     });
+    const prog = this.host.remoteRefreshProgress();
+    if (prog !== null) {
+      const agg = main.createDiv({ cls: "config-sync-cmp-agg" });
+      agg.createSpan({ cls: "config-sync-cmp-spinner" });
+      agg.createSpan({ text: `Checking ${prog.total} remote${prog.total === 1 ? "" : "s"}… ${prog.done} done` });
+    }
     const detail = main.createDiv({ cls: "config-sync-report-files config-sync-remote-pane" });
     void this.renderRemoteDetail(detail, remote, check);
   }
@@ -2214,15 +2238,33 @@ export class SyncCenterView extends ItemView {
 
   private async renderRemoteDetail(detail: HTMLElement, remote: Remote, check: RemoteCheck | undefined): Promise<void> {
     detail.empty();
-    detail.createDiv({ cls: "config-sync-remote-comparing", text: "comparing…" });
     const gen = this.renderGen;
+    const box = detail.createDiv({ cls: "config-sync-remote-comparing" });
+    box.createSpan({ cls: "config-sync-cmp-spinner" });
+    box.createSpan({ cls: "config-sync-cmp-label", text: `Comparing with ${remote.name}` });
+    const elapsed = box.createSpan({ cls: "config-sync-cmp-elapsed", text: "0.0s" });
+    const phaseEl = detail.createDiv({ cls: "config-sync-cmp-phase", text: "Fetching remote…" });
+    detail.createDiv({ cls: "config-sync-cmp-bar" }).createDiv({ cls: "config-sync-cmp-bar-fill" });
+    const startedAt = Date.now();
+    const ticker = window.setInterval(() => {
+      elapsed.setText(`${((Date.now() - startedAt) / 1000).toFixed(1)}s`);
+    }, 100);
+    this.registerInterval(ticker); // safety net: cleared if the view unloads mid-compare
     let entries: RemoteDiffEntry[];
     let lockDiffers = false;
     try {
-      const dd = await this.host.deepDiff(remote);
+      const dd = await this.host.deepDiff(remote, (phase) => {
+        // A sidebar panel switch reuses renderGen (only reload() increments it), so also check
+        // panelScope — otherwise a stale onPhase from a since-abandoned remote pane could
+        // setText a detached node.
+        if (gen !== this.renderGen || this.panelScope.kind !== "remote" || this.panelScope.name !== remote.name) return;
+        phaseEl.setText(phase === "fetch" ? "Fetching remote…" : "Comparing files…");
+      });
+      window.clearInterval(ticker);
       entries = dd.entries;
       lockDiffers = dd.lockDiffers;
     } catch (e) {
+      window.clearInterval(ticker);
       if (gen !== this.renderGen || this.panelScope.kind !== "remote" || this.panelScope.name !== remote.name) return;
       detail.empty();
       const raw = (e as Error).message;
