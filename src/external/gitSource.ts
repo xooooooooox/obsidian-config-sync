@@ -9,14 +9,31 @@ const execFileP = promisify(execFile);
 const REMOTE_NAME = "config-sync-import";
 const GIT_TIMEOUT_MS = 60_000;
 
+const EXTRA_PATH_DIRS = ["/usr/local/bin", "/opt/homebrew/bin"];
+
+// GUI apps on macOS (and some Linux desktops) inherit a bare launchd PATH that misses the
+// dirs where git credential helpers usually live; git then can't run the configured helper
+// and every authenticated https call dies on "terminal prompts disabled". Windows GUI
+// processes inherit the user PATH (";"-separated) — leave it untouched there.
+export function gitEnv(base: NodeJS.ProcessEnv, platform: NodeJS.Platform): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...base, GIT_TERMINAL_PROMPT: "0" };
+  if (platform === "win32") return env;
+  const parts = (base.PATH ?? "").split(":").filter(Boolean);
+  for (const dir of EXTRA_PATH_DIRS) {
+    if (!parts.includes(dir)) parts.push(dir);
+  }
+  env.PATH = parts.join(":");
+  return env;
+}
+
 async function git(cwd: string, args: string[]): Promise<string> {
   try {
     const { stdout } = await execFileP("git", args, {
       cwd,
       maxBuffer: 50 * 1024 * 1024,
       timeout: GIT_TIMEOUT_MS,
-      // Never let git block on an interactive credential prompt; fail fast instead.
-      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+      // Fail fast on credential prompts; make helpers outside the GUI PATH reachable.
+      env: gitEnv(process.env, process.platform),
     });
     return stdout;
   } catch (e) {
