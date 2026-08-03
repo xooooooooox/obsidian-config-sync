@@ -1188,8 +1188,7 @@ export default class ConfigSyncPlugin extends Plugin {
       return createLocalPathReader(remote.storePath);
     }
     const { createGitReader } = await import("./external/gitSource");
-    const adapter = this.app.vault.adapter as unknown as { getBasePath(): string };
-    return createGitReader(adapter.getBasePath(), remote.url, remote.branch, remote.subdir ?? "", resolveGitToken(this.app.secretStorage, remote));
+    return createGitReader(remote.url, remote.branch, remote.subdir ?? "", resolveGitToken(this.app.secretStorage, remote));
   }
 
   // Dynamic import() keeps Node fs/child_process out of the mobile load path (spec D6):

@@ -12,19 +12,16 @@ const run = promisify(execFile);
 const REAL_AUTH: GitAuth = { username: "u", token: "t" };
 
 let sourceRepo: string;
-let consumerRepo: string;
 let bareRemote: string;
 
 beforeAll(async () => {
   sourceRepo = await mkdtemp(nodePath.join(tmpdir(), "cs-source-"));
-  consumerRepo = await mkdtemp(nodePath.join(tmpdir(), "cs-consumer-"));
   await mkdir(nodePath.join(sourceRepo, "0-Extra/config-sync/store/configdir"), { recursive: true });
   await writeFile(nodePath.join(sourceRepo, "0-Extra/config-sync/config-sync.json"), '{"version":1,"groups":[]}');
   await writeFile(nodePath.join(sourceRepo, "0-Extra/config-sync/store/configdir/hotkeys.json"), "{}");
   await run("git", ["init", "-b", "main"], { cwd: sourceRepo });
   await run("git", ["add", "."], { cwd: sourceRepo });
   await run("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "init"], { cwd: sourceRepo });
-  await run("git", ["init", "-b", "main"], { cwd: consumerRepo });
 
   bareRemote = await mkdtemp(nodePath.join(tmpdir(), "cs-bare-"));
   await run("git", ["init", "--bare", "-b", "main", bareRemote]);
@@ -40,7 +37,6 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await rm(sourceRepo, { recursive: true, force: true });
-  await rm(consumerRepo, { recursive: true, force: true });
   await rm(bareRemote, { recursive: true, force: true });
 });
 
@@ -83,32 +79,23 @@ describe("createLocalPathReader", () => {
 });
 
 describe("createGitReader", () => {
-  it("lists and reads files from a remote branch without touching the worktree", async () => {
-    const reader = await createGitReader(consumerRepo, sourceRepo, "main", "0-Extra/config-sync", null);
+  it("lists and reads files from a remote branch", async () => {
+    const reader = await createGitReader(sourceRepo, "main", "0-Extra/config-sync", null);
     expect(await reader.listFiles()).toEqual(["config-sync.json", "store/configdir/hotkeys.json"]);
     expect(await reader.readFile("config-sync.json")).toBe('{"version":1,"groups":[]}');
-    const status = (await run("git", ["status", "--porcelain"], { cwd: consumerRepo })).stdout;
-    expect(status).toBe("");
-  });
-
-  it("updates the remote url on subsequent calls instead of failing", async () => {
-    const reader = await createGitReader(consumerRepo, sourceRepo, "main", "0-Extra/config-sync", null);
-    expect(await reader.listFiles()).toContain("config-sync.json");
   });
 
   it("fails with a contextual error for an unreachable remote", async () => {
-    await expect(createGitReader(consumerRepo, "/no/such/repo", "main", "x", null)).rejects.toThrow("git fetch");
+    await expect(createGitReader("/no/such/repo", "main", "x", null)).rejects.toThrow("git clone");
   });
 
   // Local file remotes never consult a credential helper, so this proves git accepts the
-  // injected -c configuration for fetch/ls-tree/show rather than dying on a malformed helper
+  // injected -c configuration for clone/sparse-checkout rather than dying on a malformed helper
   // string — not that credentials actually flow anywhere.
   it("lists and reads files from a remote branch with a real auth object injected", async () => {
-    const reader = await createGitReader(consumerRepo, sourceRepo, "main", "0-Extra/config-sync", REAL_AUTH);
+    const reader = await createGitReader(sourceRepo, "main", "0-Extra/config-sync", REAL_AUTH);
     expect(await reader.listFiles()).toEqual(["config-sync.json", "store/configdir/hotkeys.json"]);
     expect(await reader.readFile("config-sync.json")).toBe('{"version":1,"groups":[]}');
-    const status = (await run("git", ["status", "--porcelain"], { cwd: consumerRepo })).stdout;
-    expect(status).toBe("");
   });
 });
 
@@ -137,7 +124,7 @@ describe("createGitWriter", () => {
     await writer.writeFile("store/configdir/hotkeys.json", '{"a":42}');
     expect(await writer.readFile("store/configdir/hotkeys.json")).toBe('{"a":42}');
     await writer.finalize();
-    const reader = await createGitReader(consumerRepo, bareRemote, "main", "cfg", null);
+    const reader = await createGitReader(bareRemote, "main", "cfg", null);
     expect(await reader.listFiles()).toContain("store/configdir/hotkeys.json");
     expect(await reader.readFile("store/configdir/hotkeys.json")).toBe('{"a":42}');
   });
@@ -150,7 +137,7 @@ describe("createGitWriter", () => {
       if (rel !== "config-sync.json") await writer.deleteFile(rel);
     }
     await writer.finalize();
-    const reader = await createGitReader(consumerRepo, bareRemote, "main", "cfg", null);
+    const reader = await createGitReader(bareRemote, "main", "cfg", null);
     expect(await reader.listFiles()).toEqual(["config-sync.json"]);
   });
 
@@ -158,7 +145,7 @@ describe("createGitWriter", () => {
     const writer = await createGitWriter(bareRemote, "main", "", null);
     await writer.writeFile("config-sync.json", "{}");
     await writer.finalize();
-    const reader = await createGitReader(consumerRepo, bareRemote, "main", "", null);
+    const reader = await createGitReader(bareRemote, "main", "", null);
     expect(await reader.listFiles()).toContain("config-sync.json");
     const writer2 = await createGitWriter(bareRemote, "main", "", null);
     const files = await writer2.listFiles();
@@ -175,7 +162,7 @@ describe("createGitWriter", () => {
     await writer.writeFile("store/configdir/hotkeys.json", '{"a":42}');
     expect(await writer.readFile("store/configdir/hotkeys.json")).toBe('{"a":42}');
     await writer.finalize();
-    const reader = await createGitReader(consumerRepo, bareRemote, "main", "cfg", REAL_AUTH);
+    const reader = await createGitReader(bareRemote, "main", "cfg", REAL_AUTH);
     expect(await reader.listFiles()).toContain("store/configdir/hotkeys.json");
     expect(await reader.readFile("store/configdir/hotkeys.json")).toBe('{"a":42}');
   });

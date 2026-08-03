@@ -7,7 +7,6 @@ import { ExternalStoreReader, ExternalStoreWriter } from "../core/ConfigSyncCore
 import { GitAuth } from "../core/types";
 
 const execFileP = promisify(execFile);
-const REMOTE_NAME = "config-sync-import";
 const GIT_TIMEOUT_MS = 60_000;
 
 const EXTRA_PATH_DIRS = ["/usr/local/bin", "/opt/homebrew/bin"];
@@ -94,36 +93,40 @@ export async function gitLsRemote(remoteUrl: string, branch: string, auth: GitAu
 }
 
 export async function createGitReader(
-  vaultBasePath: string,
   remoteUrl: string,
   branch: string,
   subdir: string,
   auth: GitAuth | null
 ): Promise<ExternalStoreReader> {
-  const remotes = (await git(vaultBasePath, ["remote"], auth)).split("\n").filter(Boolean);
-  if (remotes.includes(REMOTE_NAME)) {
-    await git(vaultBasePath, ["remote", "set-url", REMOTE_NAME, remoteUrl], auth);
-  } else {
-    await git(vaultBasePath, ["remote", "add", REMOTE_NAME, remoteUrl], auth);
+  const dir = await mkdtemp(nodePath.join(tmpdir(), "cs-read-"));
+  try {
+    await git(dir, buildCloneArgs(branch, remoteUrl, subdir), auth);
+    if (subdir !== "") await git(dir, ["sparse-checkout", "set", subdir], auth);
+    const base = subdir === "" ? dir : nodePath.join(dir, subdir);
+    const map = new Map<string, string>();
+    try {
+      await access(base);
+      const rels: string[] = [];
+      await walkFs(base, "", rels);
+      for (const rel of rels) {
+        map.set(rel, await readFile(nodePath.join(base, rel), "utf8"));
+      }
+    } catch {
+      // store root not present on the remote yet — leave the map empty
+    }
+    return {
+      async listFiles(): Promise<string[]> {
+        return [...map.keys()].sort();
+      },
+      async readFile(relPath: string): Promise<string> {
+        const value = map.get(relPath);
+        if (value === undefined) throw new Error(`file not in remote store: ${relPath}`);
+        return value;
+      },
+    };
+  } finally {
+    await rm(dir, { recursive: true, force: true });
   }
-  await git(vaultBasePath, ["fetch", "--depth=1", "--filter=blob:none", REMOTE_NAME, branch], auth);
-  const prefix = subdir === "" ? "" : subdir.endsWith("/") ? subdir : subdir + "/";
-  const lsArgs = ["ls-tree", "-r", "--name-only", "FETCH_HEAD"];
-  if (prefix !== "") lsArgs.push("--", prefix);
-  const listed = await git(vaultBasePath, lsArgs, auth);
-  const files = listed
-    .split("\n")
-    .filter(Boolean)
-    .map((f) => f.slice(prefix.length))
-    .sort();
-  return {
-    async listFiles(): Promise<string[]> {
-      return files;
-    },
-    async readFile(relPath: string): Promise<string> {
-      return git(vaultBasePath, ["show", `FETCH_HEAD:${prefix}${relPath}`], auth);
-    },
-  };
 }
 
 async function walkFs(absBase: string, rel: string, out: string[]): Promise<void> {
