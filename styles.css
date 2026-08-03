@@ -336,8 +336,26 @@
 }
 
 .config-sync-remote-token {
+  display: grid;
+  grid-template-columns: 1fr 12em;
+  gap: var(--size-4-3);
+  margin-top: var(--size-4-3);
+}
+
+.config-sync-remote-token > div {
   display: flex;
-  align-items: flex-end;
+  flex-direction: column;
+}
+
+/* token control and username input share a bottom baseline even if a label wraps */
+.config-sync-secret-control,
+.config-sync-remote-token > div input {
+  margin-top: auto;
+}
+
+.config-sync-secret-control {
+  display: flex;
+  align-items: center;
   gap: var(--size-4-2);
 }
 
@@ -385,6 +403,10 @@ body.is-phone .config-sync-form-line2 {
 }
 
 body.is-phone .config-sync-remote-git {
+  grid-template-columns: 1fr;
+}
+
+body.is-phone .config-sync-remote-token {
   grid-template-columns: 1fr;
 }
 
@@ -1632,3 +1654,7 @@ body.is-mobile .config-sync-report-files { font-size: var(--font-ui-small); }
   margin-top: 8px;
 }
 
+.config-sync-required {
+  color: var(--color-red);
+  margin-left: 2px;
+}

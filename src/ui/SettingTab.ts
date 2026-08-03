@@ -2460,6 +2460,10 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     return f;
   }
 
+  private markRequired(field: HTMLElement): void {
+    field.querySelector<HTMLElement>("label")?.createSpan({ cls: "config-sync-required", text: "*" });
+  }
+
   private renderRuleForm(listEl: HTMLElement, group: SyncGroup, mode: "custom" | "discovered"): void {
     const panel = listEl.createDiv({ cls: "config-sync-expand" });
     const field = this.formField.bind(this);
@@ -2655,7 +2659,9 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         await this.saveRemotes();
         this.refresh();
       });
-    const nameC = new TextComponent(field(line1, "Name"));
+    const nameField = field(line1, "Name");
+    this.markRequired(nameField);
+    const nameC = new TextComponent(nameField);
     nameC.setPlaceholder("name").setValue(draft.name).onChange((v) => {
       this.expanded.delete(`remote:${draft.name}`);
       draft.name = v.trim();
@@ -2668,6 +2674,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     if (draft.type === "vault") {
       const line2 = panel.createDiv({ cls: "config-sync-remote-path" });
       const pathField = field(line2, "Store path");
+      this.markRequired(pathField);
       const pathC = new TextComponent(pathField);
       pathC.setPlaceholder("/path/to/other-vault/…/config-sync").setValue(draft.storePath).onChange((v) => {
         draft.storePath = v.trim();
@@ -2685,17 +2692,21 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
           strip.className = "config-sync-test-strip";
         }
       };
-      new TextComponent(field(line2, "URL")).setPlaceholder("git@host:me/config.git").setValue(draft.url).onChange((v) => {
+      const urlField = field(line2, "URL");
+      this.markRequired(urlField);
+      new TextComponent(urlField).setPlaceholder("git@host:me/config.git").setValue(draft.url).onChange((v) => {
         draft.url = v.trim();
         clearStrip();
         void this.saveRemotes();
       });
-      new TextComponent(field(line2, "Branch")).setPlaceholder("main").setValue(draft.branch).onChange((v) => {
+      const branchField = field(line2, "Branch");
+      this.markRequired(branchField);
+      new TextComponent(branchField).setPlaceholder("main").setValue(draft.branch).onChange((v) => {
         draft.branch = v.trim();
         clearStrip();
         void this.saveRemotes();
       });
-      new TextComponent(field(line2, "Store folder in repo (optional)")).setPlaceholder("empty = repo root").setValue(draft.subdir).onChange((v) => {
+      new TextComponent(field(line2, "Store folder in repo")).setPlaceholder("empty = repo root").setValue(draft.subdir).onChange((v) => {
         draft.subdir = v.trim();
         void this.saveRemotes();
       });
@@ -2705,9 +2716,10 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       // the secret's NAME, which rides along in the synced settings; the value stays in each
       // device's keychain, never read here and never written here.
       const tokenLine = panel.createDiv({ cls: "config-sync-remote-token" });
-      const tokenField = field(tokenLine, "Access token (optional)");
-      const tokenC = new SecretComponent(this.app, tokenField);
-      new TextComponent(field(tokenLine, "Username (optional)"))
+      const tokenField = field(tokenLine, "Access token");
+      const tokenControl = tokenField.createDiv({ cls: "config-sync-secret-control" });
+      const tokenC = new SecretComponent(this.app, tokenControl);
+      new TextComponent(field(tokenLine, "Username"))
         .setPlaceholder("token")
         .setValue(draft.username)
         .onChange((v) => {

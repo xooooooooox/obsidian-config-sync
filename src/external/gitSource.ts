@@ -106,7 +106,7 @@ export async function createGitReader(
   } else {
     await git(vaultBasePath, ["remote", "add", REMOTE_NAME, remoteUrl], auth);
   }
-  await git(vaultBasePath, ["fetch", REMOTE_NAME, branch], auth);
+  await git(vaultBasePath, ["fetch", "--depth=1", "--filter=blob:none", REMOTE_NAME, branch], auth);
   const prefix = subdir === "" ? "" : subdir.endsWith("/") ? subdir : subdir + "/";
   const lsArgs = ["ls-tree", "-r", "--name-only", "FETCH_HEAD"];
   if (prefix !== "") lsArgs.push("--", prefix);
@@ -136,9 +136,20 @@ async function walkFs(absBase: string, rel: string, out: string[]): Promise<void
   }
 }
 
+// A blobless, shallow clone moves only the commit + trees; blobs arrive lazily on checkout.
+// With a subdir, --sparse limits the working tree to that folder (set via sparse-checkout);
+// at repo root the whole tree is the store, so --sparse is omitted.
+export function buildCloneArgs(branch: string, remoteUrl: string, subdir: string): string[] {
+  const args = ["clone", "--depth=1", "--filter=blob:none"];
+  if (subdir !== "") args.push("--sparse");
+  args.push("--branch", branch, remoteUrl, ".");
+  return args;
+}
+
 export async function createGitWriter(remoteUrl: string, branch: string, subdir: string, auth: GitAuth | null): Promise<ExternalStoreWriter> {
   const dir = await mkdtemp(nodePath.join(tmpdir(), "cs-push-"));
-  await git(dir, ["clone", "--branch", branch, remoteUrl, "."], auth);
+  await git(dir, buildCloneArgs(branch, remoteUrl, subdir), auth);
+  if (subdir !== "") await git(dir, ["sparse-checkout", "set", subdir], auth);
   const base = subdir === "" ? dir : nodePath.join(dir, subdir);
   return {
     async listFiles(): Promise<string[]> {
