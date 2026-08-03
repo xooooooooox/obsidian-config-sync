@@ -269,7 +269,19 @@ functions.
 
 **External** (`src/external/`, desktop-only, the only Node code — dynamic-imported from `main.ts`)
 - `gitSource.ts` — the git transport: `execFile('git', …)` against a temp clone, never touching
-  the vault's own repo.
+  the vault's own repo. Every spawn goes through one `git()` funnel that owns the child's
+  environment (`gitEnv`): terminal prompts off, credential-helper dirs appended to a GUI process's
+  bare PATH, no interactive credential-manager UI. Given a token it also clears the machine's
+  helper chain and injects an inline helper reading `CONFIG_SYNC_GIT_TOKEN` from the environment,
+  so the secret never reaches argv — and `stripCredentialArgs` keeps that plumbing out of error text.
+- `gitToken.ts` — free of Node, the bridge between a remote's `tokenId` (the NAME of a keychain
+  secret, chosen through Obsidian's own `SecretComponent` picker; it sits in the remotes list,
+  which `selfPresetRules` keeps device-local, so it never leaves through Config Sync's own sync)
+  and the value in `app.secretStorage`: `resolveGitToken()` returns `null` when a remote
+  has no token (fall back to the machine's git sign-in), throws an actionable error when the name
+  is set but this device never linked a secret under it, and otherwise returns the `GitAuth` pair
+  the helper answers with — the remote's own `username` when it has one, else `"token"`, which
+  PAT-only hosts ignore but a self-hosted GitLab validates.
 - `localPath.ts` — an `ExternalStoreReader`/`ExternalStoreWriter` over Node `fs` for a
   "another vault" remote (an absolute store path).
 - `pickFolder.ts` — the Electron folder-picker dialog.

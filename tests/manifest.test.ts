@@ -171,6 +171,44 @@ describe("validateRemotes", () => {
   it("rejects a non-boolean excludeSelf", () => {
     expect(() => validateRemotes([{ name: "a", type: "vault", storePath: "/s", excludeSelf: "yes" }])).toThrow("must be true or false");
   });
+
+  it("round-trips tokenId on git remotes", () => {
+    const remotes = validateRemotes([{ name: "b", type: "git", url: "u", branch: "main", tokenId: "gitlab-token" }]);
+    expect(remotes[0]).toEqual({ name: "b", type: "git", url: "u", branch: "main", tokenId: "gitlab-token" });
+  });
+
+  it("round-trips an explicit username and omits it when absent", () => {
+    const remotes = validateRemotes([
+      { name: "b", type: "git", url: "u", branch: "main", tokenId: "gitlab-token", username: "xozoz" },
+      { name: "c", type: "git", url: "u", branch: "main", tokenId: "gitlab-token" },
+    ]);
+    expect(remotes[0]).toEqual({ name: "b", type: "git", url: "u", branch: "main", tokenId: "gitlab-token", username: "xozoz" });
+    expect(remotes[1]).toEqual({ name: "c", type: "git", url: "u", branch: "main", tokenId: "gitlab-token" });
+  });
+
+  it("rejects a username carrying whitespace that could forge credential-protocol lines", () => {
+    expect(() => validateRemotes([{ name: "b", type: "git", url: "u", branch: "main", username: "me\npassword=x" }])).toThrow(
+      "single word without spaces"
+    );
+  });
+
+  it("rejects a malformed tokenId", () => {
+    expect(() => validateRemotes([{ name: "b", type: "git", url: "u", branch: "main", tokenId: "Bad_Id!" }])).toThrow(
+      "lowercase letters, digits, and dashes"
+    );
+  });
+
+  it("rejects a tokenId longer than 64 characters", () => {
+    expect(() =>
+      validateRemotes([{ name: "b", type: "git", url: "u", branch: "main", tokenId: "a".repeat(65) }])
+    ).toThrow("lowercase letters, digits, and dashes");
+  });
+
+  it("rejects the vault passphrase's secret id as a tokenId", () => {
+    expect(() =>
+      validateRemotes([{ name: "b", type: "git", url: "u", branch: "main", tokenId: "config-sync-passphrase" }])
+    ).toThrow("Config Sync's own vault passphrase");
+  });
 });
 
 describe("validateSyncManifest", () => {

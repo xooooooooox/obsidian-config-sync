@@ -2,6 +2,7 @@ import { DeviceClass, FieldRule, FileRule, PerItemScopes, Remote, RULE_SCOPES, S
 import { groupStorePath } from "./pathing";
 import { isPlainObject, keyMatchesAny } from "./sanitize";
 import { FileIO } from "./io";
+import { PASSPHRASE_SECRET_ID } from "./secrets";
 
 export class ManifestValidationError extends Error {
   constructor(message: string) {
@@ -271,7 +272,7 @@ export function validateRemotes(data: unknown): Remote[] {
 
 function parseRemote(r: unknown, index: number): Remote {
   if (!isPlainObject(r)) throw new ManifestValidationError(`remote #${index + 1} must be an object, e.g. {"name": "laptop", "type": "vault", "storePath": "/path/to/store"}`);
-  const { name, type, storePath, url, branch, subdir, excludeSelf } = r;
+  const { name, type, storePath, url, branch, subdir, excludeSelf, tokenId, username } = r;
   if (typeof name !== "string" || name === "") {
     throw new ManifestValidationError(`remote #${index + 1} is missing a "name" — give it a short label, e.g. "name": "laptop"`);
   }
@@ -296,9 +297,22 @@ function parseRemote(r: unknown, index: number): Remote {
     if (subdir !== undefined && (typeof subdir !== "string" || subdir.startsWith("/") || subdir.split("/").includes(".."))) {
       throw new ManifestValidationError(`remote "${name}" has a "subdir" that must stay inside the repository — use a relative path without "..", e.g. "config-sync"`);
     }
+    if (tokenId !== undefined && (typeof tokenId !== "string" || !/^[a-z0-9-]+$/.test(tokenId) || tokenId.length > 64)) {
+      throw new ManifestValidationError(`remote "${name}" has a "tokenId" that must name a keychain secret with lowercase letters, digits, and dashes, up to 64 characters, e.g. "gitlab-token"`);
+    }
+    if (tokenId === PASSPHRASE_SECRET_ID) {
+      throw new ManifestValidationError(`remote "${name}" has "tokenId": "${PASSPHRASE_SECRET_ID}", which is Config Sync's own vault passphrase — give this remote its own access token instead`);
+    }
+    // The username reaches git through the credential protocol, which is line-based: a newline
+    // in it would forge protocol lines, so reject control characters outright.
+    if (username !== undefined && (typeof username !== "string" || username === "" || /[\s\p{Cc}]/u.test(username))) {
+      throw new ManifestValidationError(`remote "${name}" has a "username" that must be a single word without spaces, e.g. "git" — leave it out entirely for hosts that ignore it`);
+    }
     const remote: Remote = { name, type, url, branch };
     if (typeof subdir === "string" && subdir !== "") remote.subdir = subdir;
     if (excludeSelf === true) remote.excludeSelf = true;
+    if (typeof tokenId === "string") remote.tokenId = tokenId;
+    if (typeof username === "string") remote.username = username;
     return remote;
   }
   throw new ManifestValidationError(`remote "${name}" has "type": ${JSON.stringify(type)}, but it must be "vault" or "git"`);

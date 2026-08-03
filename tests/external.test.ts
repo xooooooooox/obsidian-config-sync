@@ -6,8 +6,10 @@ import { promisify } from "util";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createGitReader, createGitWriter } from "../src/external/gitSource";
 import { createLocalPathReader, createLocalPathWriter, expandTilde, findStoreDirs } from "../src/external/localPath";
+import { GitAuth } from "../src/core/types";
 
 const run = promisify(execFile);
+const REAL_AUTH: GitAuth = { username: "u", token: "t" };
 
 let sourceRepo: string;
 let consumerRepo: string;
@@ -82,7 +84,7 @@ describe("createLocalPathReader", () => {
 
 describe("createGitReader", () => {
   it("lists and reads files from a remote branch without touching the worktree", async () => {
-    const reader = await createGitReader(consumerRepo, sourceRepo, "main", "0-Extra/config-sync");
+    const reader = await createGitReader(consumerRepo, sourceRepo, "main", "0-Extra/config-sync", null);
     expect(await reader.listFiles()).toEqual(["config-sync.json", "store/configdir/hotkeys.json"]);
     expect(await reader.readFile("config-sync.json")).toBe('{"version":1,"groups":[]}');
     const status = (await run("git", ["status", "--porcelain"], { cwd: consumerRepo })).stdout;
@@ -90,12 +92,23 @@ describe("createGitReader", () => {
   });
 
   it("updates the remote url on subsequent calls instead of failing", async () => {
-    const reader = await createGitReader(consumerRepo, sourceRepo, "main", "0-Extra/config-sync");
+    const reader = await createGitReader(consumerRepo, sourceRepo, "main", "0-Extra/config-sync", null);
     expect(await reader.listFiles()).toContain("config-sync.json");
   });
 
   it("fails with a contextual error for an unreachable remote", async () => {
-    await expect(createGitReader(consumerRepo, "/no/such/repo", "main", "x")).rejects.toThrow("git fetch");
+    await expect(createGitReader(consumerRepo, "/no/such/repo", "main", "x", null)).rejects.toThrow("git fetch");
+  });
+
+  // Local file remotes never consult a credential helper, so this proves git accepts the
+  // injected -c configuration for fetch/ls-tree/show rather than dying on a malformed helper
+  // string — not that credentials actually flow anywhere.
+  it("lists and reads files from a remote branch with a real auth object injected", async () => {
+    const reader = await createGitReader(consumerRepo, sourceRepo, "main", "0-Extra/config-sync", REAL_AUTH);
+    expect(await reader.listFiles()).toEqual(["config-sync.json", "store/configdir/hotkeys.json"]);
+    expect(await reader.readFile("config-sync.json")).toBe('{"version":1,"groups":[]}');
+    const status = (await run("git", ["status", "--porcelain"], { cwd: consumerRepo })).stdout;
+    expect(status).toBe("");
   });
 });
 
@@ -119,37 +132,51 @@ describe("createLocalPathWriter", () => {
 
 describe("createGitWriter", () => {
   it("commits and pushes the store to the remote branch, visible to a fresh reader", async () => {
-    const writer = await createGitWriter(bareRemote, "main", "cfg");
+    const writer = await createGitWriter(bareRemote, "main", "cfg", null);
     await writer.writeFile("config-sync.json", '{"version":1,"groups":[]}');
     await writer.writeFile("store/configdir/hotkeys.json", '{"a":42}');
     expect(await writer.readFile("store/configdir/hotkeys.json")).toBe('{"a":42}');
     await writer.finalize();
-    const reader = await createGitReader(consumerRepo, bareRemote, "main", "cfg");
+    const reader = await createGitReader(consumerRepo, bareRemote, "main", "cfg", null);
     expect(await reader.listFiles()).toContain("store/configdir/hotkeys.json");
     expect(await reader.readFile("store/configdir/hotkeys.json")).toBe('{"a":42}');
   });
 
   it("propagates deletions on the remote", async () => {
-    const writer = await createGitWriter(bareRemote, "main", "cfg");
+    const writer = await createGitWriter(bareRemote, "main", "cfg", null);
     // only config-sync.json this time — the previously pushed hotkeys.json must disappear
     await writer.writeFile("config-sync.json", '{"version":1,"groups":[]}');
     for (const rel of await writer.listFiles()) {
       if (rel !== "config-sync.json") await writer.deleteFile(rel);
     }
     await writer.finalize();
-    const reader = await createGitReader(consumerRepo, bareRemote, "main", "cfg");
+    const reader = await createGitReader(consumerRepo, bareRemote, "main", "cfg", null);
     expect(await reader.listFiles()).toEqual(["config-sync.json"]);
   });
 
   it("git writer at repo root (subdir '') skips .git and round-trips", async () => {
-    const writer = await createGitWriter(bareRemote, "main", "");
+    const writer = await createGitWriter(bareRemote, "main", "", null);
     await writer.writeFile("config-sync.json", "{}");
     await writer.finalize();
-    const reader = await createGitReader(consumerRepo, bareRemote, "main", "");
+    const reader = await createGitReader(consumerRepo, bareRemote, "main", "", null);
     expect(await reader.listFiles()).toContain("config-sync.json");
-    const writer2 = await createGitWriter(bareRemote, "main", "");
+    const writer2 = await createGitWriter(bareRemote, "main", "", null);
     const files = await writer2.listFiles();
     expect(files.some((f) => f.startsWith(".git"))).toBe(false);
     await writer2.finalize(); // no changes → cleans up
+  });
+
+  // Same rationale as the reader's real-auth case above: local file remotes never consult a
+  // credential helper, so this proves git accepts the injected -c configuration for
+  // clone/add/status/commit/push, not that credentials actually flow anywhere.
+  it("commits and pushes with a real auth object injected", async () => {
+    const writer = await createGitWriter(bareRemote, "main", "cfg", REAL_AUTH);
+    await writer.writeFile("config-sync.json", '{"version":1,"groups":[]}');
+    await writer.writeFile("store/configdir/hotkeys.json", '{"a":42}');
+    expect(await writer.readFile("store/configdir/hotkeys.json")).toBe('{"a":42}');
+    await writer.finalize();
+    const reader = await createGitReader(consumerRepo, bareRemote, "main", "cfg", REAL_AUTH);
+    expect(await reader.listFiles()).toContain("store/configdir/hotkeys.json");
+    expect(await reader.readFile("store/configdir/hotkeys.json")).toBe('{"a":42}');
   });
 });

@@ -2,6 +2,13 @@ import { describe, expect, it } from "vitest";
 import { classifyRemoteFailure } from "../src/core/remoteFailure";
 
 describe("classifyRemoteFailure", () => {
+  it("classifies a missing token from resolveGitToken as no-token", () => {
+    expect(
+      classifyRemoteFailure(
+        'No access token stored on this device for remote "my-repo" — link it once in Settings → Remotes.'
+      )
+    ).toBe("no-token");
+  });
   it("classifies a credential prompt failure as auth", () => {
     expect(
       classifyRemoteFailure(

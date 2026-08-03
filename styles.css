@@ -335,6 +335,26 @@
   border-color: rgba(var(--color-red-rgb), 0.4);
 }
 
+.config-sync-remote-token {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--size-4-2);
+}
+
+.config-sync-token-status {
+  margin-top: var(--size-4-1);
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
+.config-sync-token-status.is-ok {
+  color: var(--color-green);
+}
+
+.config-sync-token-status.is-warning {
+  color: var(--color-orange);
+}
+
 .config-sync-remote-selfline {
   display: flex;
   align-items: flex-start;

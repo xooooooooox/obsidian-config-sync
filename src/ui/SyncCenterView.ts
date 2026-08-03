@@ -2232,15 +2232,19 @@ export class SyncCenterView extends ItemView {
       const card = detail.createDiv({ cls: "config-sync-remote-errcard" });
       card.createDiv({ cls: "config-sync-remote-errcard-head", text: `Couldn't compare with ${remote.name}` });
       const body =
-        kind === "auth"
-          ? "The Git host asked for a login, and there's no way to answer it here. Set up this remote's credentials on this device, then check again."
-          : kind === "timeout"
-            ? "The remote didn't answer within a minute. Check the connection, then check again."
-            : "Couldn't reach this remote.";
+        kind === "no-token"
+          ? raw
+          : kind === "auth"
+            ? "The Git host asked for a login, and there's no way to answer it here. Set up this remote's credentials on this device, then check again."
+            : kind === "timeout"
+              ? "The remote didn't answer within a minute. Check the connection, then check again."
+              : "Couldn't reach this remote.";
       card.createDiv({ cls: "config-sync-remote-errcard-body", text: body });
-      const det = card.createEl("details");
-      det.createEl("summary", { text: remote.type === "git" ? "Show Git output" : "Show details" });
-      det.createEl("pre", { text: raw });
+      if (kind !== "no-token") {
+        const det = card.createEl("details");
+        det.createEl("summary", { text: remote.type === "git" ? "Show Git output" : "Show details" });
+        det.createEl("pre", { text: raw });
+      }
       return;
     }
     if (gen !== this.renderGen || this.panelScope.kind !== "remote" || this.panelScope.name !== remote.name) return;

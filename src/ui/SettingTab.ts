@@ -1,4 +1,4 @@
-import { App, ButtonComponent, DropdownComponent, ExtraButtonComponent, Notice, Platform, Plugin, PluginSettingTab, Scope, SearchComponent, Setting, setIcon, setTooltip, TextComponent, ToggleComponent } from "obsidian";
+import { App, ButtonComponent, DropdownComponent, ExtraButtonComponent, Notice, Platform, Plugin, PluginSettingTab, Scope, SearchComponent, SecretComponent, Setting, setIcon, setTooltip, TextComponent, ToggleComponent } from "obsidian";
 import {
   QualifierAutocomplete,
   parseQuery,
@@ -6,10 +6,11 @@ import {
   type QualifierSpec,
   type QualifierResolver,
 } from "./qualifierSearch";
-import { DeviceClass, FieldRule, Remote, RibbonKey, RuleScope, SyncGroup, SyncMode } from "../core/types";
+import { DeviceClass, FieldRule, GitAuth, Remote, RibbonKey, RuleScope, SyncGroup, SyncMode } from "../core/types";
 import { SensitiveScan } from "../core/modes";
 import { PkmMode } from "../core/pkm";
 import { validateRemotes } from "../core/manifest";
+import { PASSPHRASE_SECRET_ID } from "../core/secrets";
 import { keyMatchesAny } from "../core/sanitize";
 import { SWITCH_LIST_GROUPS } from "../core/switchList";
 import {
@@ -82,6 +83,7 @@ import {
   validateCompanionPath,
   withSnippetScope,
 } from "./itemCard";
+import { resolveGitToken } from "../external/gitToken";
 
 export interface SettingsHost extends Plugin {
   settings: {
@@ -206,6 +208,8 @@ interface RemoteDraft {
   branch: string;
   subdir: string;
   excludeSelf: boolean;
+  tokenId: string;
+  username: string;
 }
 
 function toDraft(r: Remote): RemoteDraft {
@@ -217,6 +221,8 @@ function toDraft(r: Remote): RemoteDraft {
     branch: r.type === "git" ? r.branch : "",
     subdir: r.type === "git" ? (r.subdir ?? "") : "",
     excludeSelf: r.excludeSelf === true,
+    tokenId: r.type === "git" ? (r.tokenId ?? "") : "",
+    username: r.type === "git" ? (r.username ?? "") : "",
   };
 }
 
@@ -228,6 +234,8 @@ function toCandidate(d: RemoteDraft): unknown {
     c.url = d.url;
     c.branch = d.branch;
     if (d.subdir.trim() !== "") c.subdir = d.subdir.trim();
+    if (d.tokenId !== "") c.tokenId = d.tokenId;
+    if (d.username !== "") c.username = d.username;
   }
   if (d.excludeSelf) c.excludeSelf = true;
   return c;
@@ -2597,7 +2605,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     this.sourcesErrorEl.setText(this.sourcesErrorMsg);
     const addBtn = containerEl.createEl("button", { cls: "config-sync-add-row", text: "+ Add remote" });
     addBtn.addEventListener("click", () => {
-      this.sources.push({ name: "", type: "vault", storePath: "", url: "", branch: "", subdir: "", excludeSelf: false });
+      this.sources.push({ name: "", type: "vault", storePath: "", url: "", branch: "", subdir: "", excludeSelf: false, tokenId: "", username: "" });
       this.expanded.add("remote:");
       this.refresh();
     });
@@ -2691,6 +2699,47 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         draft.subdir = v.trim();
         void this.saveRemotes();
       });
+      // Obsidian's own secret picker owns the token end to end: its button opens the keychain
+      // modal to link or create a secret, shows the linked one masked (click to reveal) and
+      // offers the ✕ that unlinks it. What it hands back — and all this plugin ever keeps — is
+      // the secret's NAME, which rides along in the synced settings; the value stays in each
+      // device's keychain, never read here and never written here.
+      const tokenLine = panel.createDiv({ cls: "config-sync-remote-token" });
+      const tokenField = field(tokenLine, "Access token (optional)");
+      const tokenC = new SecretComponent(this.app, tokenField);
+      new TextComponent(field(tokenLine, "Username (optional)"))
+        .setPlaceholder("token")
+        .setValue(draft.username)
+        .onChange((v) => {
+          draft.username = v.trim();
+          void this.saveRemotes();
+        });
+      const statusEl = panel.createDiv({ cls: "config-sync-token-status" });
+      const paintTokenStatus = (): void => {
+        const held = draft.tokenId !== "" && this.app.secretStorage.listSecrets().includes(draft.tokenId);
+        statusEl.className =
+          "config-sync-token-status" + (held ? " is-ok" : draft.tokenId !== "" ? " is-warning" : "");
+        statusEl.setText(
+          held
+            ? "✓ Token stored on this device."
+            : draft.tokenId !== ""
+              ? `⚠ This remote uses a token named "${draft.tokenId}", which this device doesn't have yet — link it here once.`
+              : "For https URLs. Without a token, this device's own git sign-in is used. Stored in Obsidian's keychain — link it once per device."
+        );
+      };
+      tokenC.setValue(draft.tokenId);
+      paintTokenStatus();
+      // The picker reports null when the user unlinks, which the typings spell as string.
+      tokenC.onChange((name: string | null) => {
+        if (name === PASSPHRASE_SECRET_ID) {
+          new Notice("Config Sync's own vault passphrase is stored under that name — pick or create a different secret for this remote.");
+          tokenC.setValue(draft.tokenId);
+          return;
+        }
+        draft.tokenId = name ?? "";
+        void this.saveRemotes();
+        paintTokenStatus();
+      });
       if (Platform.isDesktop) {
         const testLine = panel.createDiv({ cls: "config-sync-remote-test" });
         const btn = new ButtonComponent(testLine).setButtonText("Test connection");
@@ -2701,7 +2750,18 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
           strip!.setText("Contacting remote…");
           try {
             const { gitLsRemote } = await import("../external/gitSource");
-            const res = await gitLsRemote(draft.url, draft.branch);
+            let auth: GitAuth | null;
+            try {
+              const candidate: Remote = { name: draft.name, type: "git", url: draft.url, branch: draft.branch };
+              if (draft.tokenId !== "") candidate.tokenId = draft.tokenId;
+              if (draft.username !== "") candidate.username = draft.username;
+              auth = resolveGitToken(this.app.secretStorage, candidate);
+            } catch (e) {
+              strip!.className = "config-sync-test-strip is-error";
+              strip!.setText(`✗ ${(e as Error).message}`);
+              return;
+            }
+            const res = await gitLsRemote(draft.url, draft.branch, auth);
             if (res.kind === "error") {
               strip!.className = "config-sync-test-strip is-error";
               strip!.setText(`✗ Could not reach remote — ${res.message}`);

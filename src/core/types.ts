@@ -83,9 +83,13 @@ export interface GroupResult {
 // excludeSelf (either type): true = Config Sync's own settings (the self item's store copy)
 // never travel to/from this remote — pull/push skip them and the comparison stops reporting
 // them. Absent = false = the self item travels like any other (same-lineage stores).
+// What the git transport answers a credential prompt with. The username matters: PAT-only hosts
+// ignore it, a self-hosted GitLab validates it — so it is carried, never assumed at the edge.
+export type GitAuth = { username: string; token: string };
+
 export type Remote =
   | { name: string; type: "vault"; storePath: string; excludeSelf?: boolean } // storePath: absolute path of the store directory; leading ~ allowed
-  | { name: string; type: "git"; url: string; branch: string; subdir?: string; excludeSelf?: boolean }; // subdir: store folder inside the repo; absent = repo root
+  | { name: string; type: "git"; url: string; branch: string; subdir?: string; excludeSelf?: boolean; tokenId?: string; username?: string }; // subdir: store folder inside the repo; absent = repo root. tokenId: name of the keychain secret holding the token — the token itself never enters data.json. username: sent alongside it; absent = "token", which PAT-only hosts ignore but a self-hosted GitLab validates
 
 export type RibbonKey = "sync";
 export type RibbonButtons = Record<RibbonKey, boolean>;

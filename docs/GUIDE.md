@@ -155,7 +155,7 @@ Lists any vault-relative folder that travels with the item — Appearance ships 
 
 #### Remotes
 
-Desktop only. Add a **git repository** (URL, branch, optional folder) or **another vault**: click **Browse…**, pick the vault folder, and the store inside it is auto-detected. Each remote also has a **Keep Config Sync's own settings out of this remote** toggle: turn it on for a remote vault that keeps its own setup, and Pull, Push and the comparison stop touching Config Sync's own settings there.
+Desktop only. Add a **git repository** (URL, branch, optional folder) or **another vault**: click **Browse…**, pick the vault folder, and the store inside it is auto-detected. Each remote also has a **Keep Config Sync's own settings out of this remote** toggle: turn it on for a remote vault that keeps its own setup, and Pull, Push and the comparison stop touching Config Sync's own settings there. An https git remote can also carry an **access token** (a GitLab/GitHub personal access token): press **Link** to store it in Obsidian's keychain — or pick a secret already there — and Config Sync authenticates with it directly, with no reliance on the machine's git sign-in. Only the secret's name is written to the settings, and the remotes list is a this-device field Config Sync never sends anywhere — so every device links its own token once, and one that hasn't (because you copied `data.json` across, or removed the secret here) says so plainly instead of failing obscurely. Leave **Username** empty unless the host checks it: GitHub and GitLab.com ignore the username on token auth, while a self-hosted GitLab rejects anything but the account's own name.
 
 ## Field rules & sensitive settings
 

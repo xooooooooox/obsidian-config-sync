@@ -20,16 +20,17 @@ import {
   writeGroups,
 } from "./core/ConfigSyncCore";
 import { createInstaller } from "./core/installer";
+import { classifyRemoteFailure } from "./core/remoteFailure";
+// Keychain id for the passphrase (SecretStorage ids: lowercase alphanumerics and dashes).
+import { PASSPHRASE_SECRET_ID } from "./core/secrets";
+import { resolveGitToken } from "./external/gitToken";
 import { retry, HttpStatusError, TimeoutError, isRetryableError } from "./core/async";
 import { RunRecord, RunKind, summarizeRun, pruneHistory } from "./core/runHistory";
 
-// Keychain id for the passphrase (SecretStorage ids: lowercase alphanumerics and dashes).
-const PASSPHRASE_SECRET_ID = "config-sync-passphrase";
-
-// Structural view of app.secretStorage (Obsidian 1.12 / API 1.11.4): the plugin feature-detects
-// it at runtime and keeps compiling for minAppVersion 1.8.7, so it deliberately references its
-// own interface instead of the obsidian SecretStorage type (spec
-// 2026-07-27-passphrase-keychain-design.md).
+// Structural view of app.secretStorage, from when the plugin still compiled for minAppVersion
+// 1.8.7 and feature-detected the API at runtime (spec 2026-07-27-passphrase-keychain-design.md).
+// The floor is now 1.11.4, so the property is always present; the detection below and its
+// localStorage fallback are legacy. The git-token path uses the typed SecretStorage directly.
 interface SecretStore {
   getSecret(id: string): string | null;
   setSecret(id: string, secret: string): void;
@@ -729,7 +730,9 @@ export default class ConfigSyncPlugin extends Plugin {
           await this.refreshRemoteChecks();
           return results;
         } catch (e) {
-          new Notice(`Config Sync pull failed: ${(e as Error).message} — check the remote's URL or path and try again.`, 10000);
+          const message = (e as Error).message;
+          const advice = classifyRemoteFailure(message) === "no-token" ? "" : " — check the remote's URL or path and try again.";
+          new Notice(`Config Sync pull failed: ${message}${advice}`, 10000);
           return null;
         }
       },
@@ -740,7 +743,9 @@ export default class ConfigSyncPlugin extends Plugin {
           await this.refreshRemoteChecks();
           return results;
         } catch (e) {
-          new Notice(`Config Sync push failed: ${(e as Error).message} — check the remote's URL or path and try again.`, 10000);
+          const message = (e as Error).message;
+          const advice = classifyRemoteFailure(message) === "no-token" ? "" : " — check the remote's URL or path and try again.";
+          new Notice(`Config Sync push failed: ${message}${advice}`, 10000);
           return null;
         }
       },
@@ -1184,7 +1189,7 @@ export default class ConfigSyncPlugin extends Plugin {
     }
     const { createGitReader } = await import("./external/gitSource");
     const adapter = this.app.vault.adapter as unknown as { getBasePath(): string };
-    return createGitReader(adapter.getBasePath(), remote.url, remote.branch, remote.subdir ?? "");
+    return createGitReader(adapter.getBasePath(), remote.url, remote.branch, remote.subdir ?? "", resolveGitToken(this.app.secretStorage, remote));
   }
 
   // Dynamic import() keeps Node fs/child_process out of the mobile load path (spec D6):
@@ -1195,7 +1200,7 @@ export default class ConfigSyncPlugin extends Plugin {
       return createLocalPathWriter(remote.storePath);
     }
     const { createGitWriter } = await import("./external/gitSource");
-    return createGitWriter(remote.url, remote.branch, remote.subdir ?? "");
+    return createGitWriter(remote.url, remote.branch, remote.subdir ?? "", resolveGitToken(this.app.secretStorage, remote));
   }
 
   async readGroupsFile(): Promise<SyncGroup[]> {

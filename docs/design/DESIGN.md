@@ -22,11 +22,11 @@ One color per meaning, everywhere (0.27.9 audit). Alpha fills always use
 | Capture / ↑ direction | `--color-orange` | state icons, pills, sidebar badges, checkbox `.is-capture` fill, seg buttons, Capture button (solid), capture progress bar, ribbon dot, status-bar segment |
 | Apply / ↓ direction | `--interactive-accent` | same family as capture; Apply button is `mod-cta`; apply progress bar, runline dot, status-bar segment |
 | Active / selected | `--interactive-accent` | active filter pill, active settings tab underline, active sidebar scope, seg `.is-on`, search-jump highlight, search scope tag |
-| In sync / success | `--color-green` | ✓ state icon, pills, result strip frame, test-strip ok, diff insertions, passphrase set badge |
+| In sync / success | `--color-green` | ✓ state icon, pills, result strip frame, test-strip ok, diff insertions, passphrase set badge, remote token-status stored |
 | Pull (remote → store) | `--color-cyan` | pull state icon, Pull button (solid primary), status-bar segment, encrypt-related accents (see below) |
 | Push (store → remote) | `--color-pink` | push state icon, Push button (solid primary), outdated-section frame, status-bar segment |
 | Locked / encrypted-at-rest | `--color-cyan` | key state icon, statenote pills, policy seg on-state (json keys mark encryption with a colorless `lock` suffix — scope alone drives key color since the D1 split) |
-| Warning / caution | `--color-orange` | ⚠ pills, detect/device badges, not-installed section frame, amber version lines, local-decision rows, unresolved conflicts |
+| Warning / caution | `--color-orange` | ⚠ pills, detect/device badges, not-installed section frame, amber version lines, local-decision rows, unresolved conflicts, remote token-status awaiting this device's token |
 | Error / destructive | `--color-red` | ✗ pills, test-strip error, diff deletions, strip-action on-state |
 | File changes (reports/diffs) | add `--color-green` · update `--color-blue` · delete `--color-red` | chips `+N ~N −N`, report file lines, conflict-modal marks — a *file-change* semantic, distinct from directions |
 | Neutral text ramp | `--text-normal` → `--text-muted` → `--text-faint` | content → secondary labels → hints/chevrons/idle |
