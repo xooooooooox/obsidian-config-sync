@@ -5,6 +5,7 @@ import { CATEGORY_LABELS, findGroupByName, ItemCategory, SELF_GROUP_NAME, catego
 import { FileChanges, GroupResult, Remote, SyncGroup } from "../core/types";
 import { Availability } from "../core/availability";
 import { isWholeFileEncrypted } from "../core/modes";
+import { classifyRemoteFailure } from "../core/remoteFailure";
 import { GroupDisplayParts } from "../core/registry";
 import {
   capFileEntries,
@@ -2224,7 +2225,22 @@ export class SyncCenterView extends ItemView {
     } catch (e) {
       if (gen !== this.renderGen || this.panelScope.kind !== "remote" || this.panelScope.name !== remote.name) return;
       detail.empty();
-      detail.createDiv({ cls: "config-sync-status-error", text: `Couldn't compare with this remote: ${(e as Error).message} — check the connection and try again.` });
+      const raw = (e as Error).message;
+      // Vault remotes have no login and no timeout marker; raw fs errors like EACCES
+      // "permission denied" must not read as a Git login problem (spec 3b: non-git → other).
+      const kind = remote.type === "git" ? classifyRemoteFailure(raw) : "other";
+      const card = detail.createDiv({ cls: "config-sync-remote-errcard" });
+      card.createDiv({ cls: "config-sync-remote-errcard-head", text: `Couldn't compare with ${remote.name}` });
+      const body =
+        kind === "auth"
+          ? "The Git host asked for a login, and there's no way to answer it here. Set up this remote's credentials on this device, then check again."
+          : kind === "timeout"
+            ? "The remote didn't answer within a minute. Check the connection, then check again."
+            : "Couldn't reach this remote.";
+      card.createDiv({ cls: "config-sync-remote-errcard-body", text: body });
+      const det = card.createEl("details");
+      det.createEl("summary", { text: remote.type === "git" ? "Show Git output" : "Show details" });
+      det.createEl("pre", { text: raw });
       return;
     }
     if (gen !== this.renderGen || this.panelScope.kind !== "remote" || this.panelScope.name !== remote.name) return;

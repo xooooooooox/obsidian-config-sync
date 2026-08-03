@@ -29,6 +29,15 @@ export default defineConfig(
 			},
 		},
 	},
+	{
+		// src/external is the desktop-only Node adapter layer (child_process, fs, os, path).
+		files: ['src/external/**'],
+		languageOptions: {
+			globals: {
+				...globals.node,
+			},
+		},
+	},
 	...obsidianmd.configs.recommended,
 	{
 		rules: {

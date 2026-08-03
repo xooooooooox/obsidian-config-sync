@@ -495,6 +495,8 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         setIcon(iconEl, tab.icon);
       }
       el.createSpan({ cls: "config-sync-tab-label", text: tab.label });
+      setTooltip(el, tab.label);
+      el.setAttr("aria-label", tab.label);
       if (tab.id === this.activeTab) el.addClass("is-active");
       el.addEventListener("click", () => this.switchTab(tab.id));
     }

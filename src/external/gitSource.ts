@@ -7,13 +7,26 @@ import { ExternalStoreReader, ExternalStoreWriter } from "../core/ConfigSyncCore
 
 const execFileP = promisify(execFile);
 const REMOTE_NAME = "config-sync-import";
+const GIT_TIMEOUT_MS = 60_000;
 
 async function git(cwd: string, args: string[]): Promise<string> {
   try {
-    const { stdout } = await execFileP("git", args, { cwd, maxBuffer: 50 * 1024 * 1024 });
+    const { stdout } = await execFileP("git", args, {
+      cwd,
+      maxBuffer: 50 * 1024 * 1024,
+      timeout: GIT_TIMEOUT_MS,
+      // Never let git block on an interactive credential prompt; fail fast instead.
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+    });
     return stdout;
   } catch (e) {
-    throw new Error(`git ${args.join(" ")} failed in ${cwd}: ${(e as Error).message}`);
+    const err = e as Error & { killed?: boolean };
+    // execFile kills the child on timeout (killed=true); maxBuffer kills too but says so.
+    const detail =
+      err.killed === true && !err.message.includes("maxBuffer")
+        ? `timed out after ${GIT_TIMEOUT_MS / 1000}s`
+        : err.message;
+    throw new Error(`git ${args.join(" ")} failed in ${cwd}: ${detail}`);
   }
 }
 
