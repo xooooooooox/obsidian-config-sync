@@ -2,7 +2,7 @@ import { FileIO, ensureParentDir, isJunkPath, listFilesRecursive, pruneEmptyDirs
 import { FieldRule, GroupResult, hasChanges, StoreLock, SyncGroup, SyncManifest } from "./types";
 import { basename, groupStorePath, relativeTo, resolveGroupByStoreRel, sidecarStoreSuffix } from "./pathing";
 import { parseStoreLock, parseSyncManifest, validateSyncManifest } from "./manifest";
-import { applyTransform, captureTransform, classPatterns, contentUnchanged } from "./modes";
+import { applyTransform, captureTransform, classPatterns, contentUnchanged, stripPatterns } from "./modes";
 import { classifyMerge, MergeConflict, MergePlan } from "./merge";
 import { SELF_GROUP_NAME } from "./catalog";
 import { isPlainObject, keyMatchesAny } from "./sanitize";
@@ -275,6 +275,28 @@ function baseHasStalePerItemElements(effGroup: SyncGroup, existing: string): boo
   });
 }
 
+// Base-hygiene guard for stale top-level local-scoped keys (third family, 2026-08-04): like the
+// two guards above, contentUnchanged deliberately ignores top-level scope:"local" keys on both
+// sides (Fix B's withContractLocals — correct for diff/status, prevents a phantom to-capture on a
+// re-scoped field), so a base written before the field became local can still carry that key after
+// contentUnchanged reports equal. The store must never hold a device-local value, so this forces
+// the rewrite that captureTransform's strip has already removed the key from. A per-item key is
+// never a scope:"local" field (it lives in group.perItem, not group.fields), so stripPatterns
+// never overlaps the per-item guard's responsibility. No-op when the group has no local patterns,
+// or the existing content isn't a parseable JSON object.
+function baseHasStaleLocalKeys(effGroup: SyncGroup, existing: string): boolean {
+  const patterns = stripPatterns(effGroup);
+  if (patterns.length === 0) return false;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(existing);
+  } catch {
+    return false;
+  }
+  if (!isPlainObject(parsed)) return false;
+  return Object.keys(parsed).some((k) => keyMatchesAny(k, patterns));
+}
+
 function requireGroup(manifest: SyncManifest, name: string): SyncGroup {
   const group = manifest.groups.find((g) => g.name === name);
   if (group === undefined) {
@@ -391,8 +413,8 @@ async function captureGroup(ctx: CoreContext, group: SyncGroup): Promise<GroupRe
       }
       const unchanged = await contentUnchanged(effGroup, plainLocalContent, existing, ctx.passphrase, ctx.deviceClass, existingSidecar);
       if (!unchanged) return false;
-      // force the rewrite that purges stale class keys or stale local-scoped per-item elements
-      return !baseHasStaleClassKeys(effGroup, existing) && !baseHasStalePerItemElements(effGroup, existing);
+      // force the rewrite that purges stale class keys, stale local-scoped per-item elements, or stale top-level local keys
+      return !baseHasStaleClassKeys(effGroup, existing) && !baseHasStalePerItemElements(effGroup, existing) && !baseHasStaleLocalKeys(effGroup, existing);
     });
     if (!SWITCH_LIST_GROUPS.has(group.name)) {
       if (t.ownScope !== null) {
