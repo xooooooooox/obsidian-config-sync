@@ -29,6 +29,7 @@ import { FolderSelectModal } from "./FolderSelectModal";
 import { confirmPresetPathChange } from "./ConfirmModal";
 import { commitDraft } from "./commitGroups";
 import { classifyJsonKeys, classifyPerItemLines, jsonElementClass, jsonKeyClass, KeyClass } from "./jsonView";
+import { renderScopeCycle } from "./scopeCycle";
 import {
   applyPerItemToggle,
   applySyncAll,
@@ -59,14 +60,11 @@ import {
   hasKeyRules,
   isStringArrayValue,
   memberCountLabel,
-  nextScope,
   normalizeCompanionPath,
   PER_ITEM_DISABLED_HINT,
   PER_ITEM_SCOPES_LABEL,
   PREVIEW_LEGEND_ENTRIES,
   sectionAllEnabled,
-  SCOPE_ICONS,
-  scopeCycleTooltip,
   settingsFileZoneKind,
   SCOPE_LABELS,
   SnippetMemberRow,
@@ -779,7 +777,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       // A stored "local" is a pre-retarget artifact — ignored, same as enablementScopes; the real
       // "local" signal is localMembers membership.
       const current: RuleScope = this.host.settings.localMembers.includes(def.id) ? "local" : storedOn === "local" ? "all" : (storedOn ?? "all");
-      this.renderScopeCycle(scopeCell, {
+      renderScopeCycle(scopeCell, {
         scope: current,
         options: def.desktopOnly === true ? DESKTOP_ONLY_ENABLED_OPTIONS : FIELD_SCOPE_OPTIONS,
         disabled: false,
@@ -921,7 +919,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     };
     // setFileRule re-renders this whole row after every write, so the icon always reflects the
     // freshly-saved scope without any extra bookkeeping here.
-    this.renderScopeCycle(scopeCell, {
+    renderScopeCycle(scopeCell, {
       scope: rule.scope,
       options: FILE_SCOPE_OPTIONS,
       disabled: locked,
@@ -996,33 +994,6 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   // CURRENT boolean (`Encrypt` / `Encrypted`); a disabled reason, if any, is the caller's job to
   // surface (the caller owns the surrounding cell, which may need a DIFFERENT disabled reason —
   // per-key-rules-active for the path row, per-item-scopes for a rule row).
-  // Commander-style scope control (round-6 定稿): a clickable icon whose glyph IS the current
-  // scope (SCOPE_ICONS); a click advances to the next option in `options` and hands the caller
-  // the new value — the caller owns the write AND re-rendering this cell with the fresh scope
-  // (most rows get that for free from their existing body/row refresh). Default "all" renders
-  // dim, any narrower scope renders accented, mirroring the ghost-rail idle/active language.
-  private renderScopeCycle<T extends RuleScope>(cell: HTMLElement, opts: { scope: T; options: readonly T[]; disabled: boolean; note?: string; onChange: (v: T) => void }): void {
-    const icon = cell.createSpan({ cls: `config-sync-scopeicon${opts.scope !== "all" ? " is-set" : ""}` });
-    setIcon(icon, SCOPE_ICONS[opts.scope]);
-    // aria-label alone: Obsidian renders its own tooltip for [aria-label] elements — adding
-    // `title` too stacks a second (native) tooltip on hover (round-8 feedback ①).
-    icon.setAttribute("aria-label", scopeCycleTooltip(opts.scope, opts.note));
-    if (opts.disabled) {
-      icon.addClass("config-sync-dim");
-      return;
-    }
-    icon.setAttribute("role", "button");
-    icon.setAttribute("tabindex", "0");
-    const advance = (): void => opts.onChange(nextScope(opts.scope, opts.options));
-    icon.addEventListener("click", advance);
-    icon.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        advance();
-      }
-    });
-  }
-
   private renderLockToggle(cell: HTMLElement, opts: { encrypted: boolean; disabled: boolean; onChange: (v: boolean) => void }): void {
     const icon = cell.createSpan({ cls: `config-sync-lock${opts.encrypted ? " is-on" : ""}` });
     setIcon(icon, "lock");
@@ -1113,7 +1084,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       })();
     };
     // setRule → refreshCardBody rebuilds every rule row, so the icon re-reads the fresh scope.
-    this.renderScopeCycle(fr.createDiv(), {
+    renderScopeCycle(fr.createDiv(), {
       scope: row.rule.scope,
       options: FIELD_SCOPE_OPTIONS,
       disabled: false,
@@ -1182,7 +1153,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     r.createSpan({ cls: "config-sync-card-elname", text: element });
     const scopeCell = r.createDiv();
     // refreshCardBody below rebuilds these element rows, so the icon re-reads the fresh scope.
-    this.renderScopeCycle(scopeCell, {
+    renderScopeCycle(scopeCell, {
       scope,
       options: FIELD_SCOPE_OPTIONS,
       disabled: false,
@@ -1448,7 +1419,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     let curScope = row.scope;
     const buildScope = (): void => {
       scopeCell.empty();
-      this.renderScopeCycle(scopeCell, {
+      renderScopeCycle(scopeCell, {
         scope: curScope,
         options: COMPANION_SCOPE_OPTIONS,
         disabled: false,
@@ -1679,7 +1650,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       let curScope = row.scope;
       const buildScope = (): void => {
         scopeCell.empty();
-        this.renderScopeCycle(scopeCell, {
+        renderScopeCycle(scopeCell, {
           scope: curScope,
           options: FIELD_SCOPE_OPTIONS,
           disabled: false,

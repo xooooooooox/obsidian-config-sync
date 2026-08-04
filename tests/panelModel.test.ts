@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { capFileEntries, insyncLineText, statusBarStatuses, moreFilesText, visibleUnderFilter, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, footerSummary, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, versionLine, runProgressLabel, showColdStartBanner, memberChangeRows, memberDecisionsFromScopes, memberDecisionText, whereItRunsEntries } from "../src/ui/panelModel";
+import { capFileEntries, insyncLineText, statusBarStatuses, moreFilesText, visibleUnderFilter, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, footerSummary, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, versionLine, runProgressLabel, showColdStartBanner, memberDecisionsFromScopes, memberDecisionText, switchSummaryLine, memberScopeWrite, pendingScopeMembers, memberCurrentScope } from "../src/ui/panelModel";
 import { GroupState, GroupStatus } from "../src/core/status";
 import { Availability } from "../src/core/availability";
 
@@ -299,51 +299,6 @@ describe("showColdStartBanner", () => {
   });
 });
 
-describe("memberChangeRows (spec 2026-07-28 §4)", () => {
-  const d = { captureRemoves: ["simpread", "obsidian-git"], applyDisables: ["vim-toggle"] };
-
-  it("mobile view: store-only rows lead, sorted, with desktop recommendation", () => {
-    const rows = memberChangeRows(d, "mobile");
-    expect(rows.map((r) => r.id)).toEqual(["obsidian-git", "simpread", "vim-toggle"]);
-    expect(rows[0]).toEqual({
-      id: "obsidian-git",
-      action: "apply",
-      why: "on for your other devices, off on this phone — Apply would turn it on here too",
-      recommended: "desktop",
-    });
-    expect(rows[2]).toEqual({
-      id: "vim-toggle",
-      action: "capture",
-      why: "on only on this phone — Capture would turn it on for your other devices",
-      recommended: null,
-    });
-  });
-
-  it("desktop view mirrors wording and recommendation", () => {
-    const rows = memberChangeRows(d, "desktop");
-    expect(rows[0]?.why).toBe("on for your other devices, off on this computer — Apply would turn it on here too");
-    expect(rows[0]?.recommended).toBe("mobile");
-    expect(rows[2]?.why).toBe("on only on this computer — Capture would turn it on for your other devices");
-  });
-});
-
-describe("whereItRunsEntries", () => {
-  const entries = [
-    { title: "Desktop only", kind: "desktop" as const },
-    { title: "Mobile only", kind: "mobile" as const },
-    { title: "This device decides for itself" },
-    { title: "Everywhere" },
-  ];
-
-  it("drops the mobile-only entry for a known desktop-only member", () => {
-    expect(whereItRunsEntries(entries, true).map((e) => e.title)).toEqual(["Desktop only", "This device decides for itself", "Everywhere"]);
-  });
-
-  it("keeps every option when desktop-only-ness is unknown", () => {
-    expect(whereItRunsEntries(entries, false)).toEqual(entries);
-  });
-});
-
 describe("memberDecisionsFromScopes / memberDecisionText", () => {
   it("keeps only non-all scopes, sorted by id", () => {
     expect(memberDecisionsFromScopes({ b: "desktop", a: "local", c: "all", d: "mobile" })).toEqual([
@@ -356,5 +311,55 @@ describe("memberDecisionsFromScopes / memberDecisionText", () => {
     expect(memberDecisionText({ id: "x", scope: "local" })).toBe("x — this device keeps its own on/off state");
     expect(memberDecisionText({ id: "x", scope: "desktop" })).toBe("x — runs on desktop only");
     expect(memberDecisionText({ id: "x", scope: "mobile" })).toBe("x — runs on mobile only");
+  });
+});
+
+describe("memberScopeWrite", () => {
+  it("maps each scope to its host write", () => {
+    expect(memberScopeWrite("desktop")).toEqual({ kind: "enabledOn", scope: "desktop" });
+    expect(memberScopeWrite("mobile")).toEqual({ kind: "enabledOn", scope: "mobile" });
+    expect(memberScopeWrite("local")).toEqual({ kind: "local" });
+    expect(memberScopeWrite("all")).toEqual({ kind: "clear" });
+  });
+});
+
+describe("pendingScopeMembers", () => {
+  it("returns the apply-direction set when only the store is ahead", () => {
+    expect(pendingScopeMembers({ captureRemoves: ["b", "a"], applyDisables: [] })).toEqual(["b", "a"]);
+  });
+  it("returns the capture-direction set when only this device is ahead", () => {
+    expect(pendingScopeMembers({ captureRemoves: [], applyDisables: ["x"] })).toEqual(["x"]);
+  });
+  it("returns [] when both sides diverge (the red box owns that case)", () => {
+    expect(pendingScopeMembers({ captureRemoves: ["a"], applyDisables: ["b"] })).toEqual([]);
+  });
+});
+
+describe("memberCurrentScope", () => {
+  const decisions = [{ id: "git", scope: "desktop" as const }, { id: "rs", scope: "local" as const }];
+  it("reads a scoped member's scope", () => {
+    expect(memberCurrentScope(decisions, "git")).toBe("desktop");
+    expect(memberCurrentScope(decisions, "rs")).toBe("local");
+  });
+  it("defaults to all for an unscoped member", () => {
+    expect(memberCurrentScope(decisions, "dataview")).toBe("all");
+  });
+});
+
+describe("switchSummaryLine", () => {
+  it("apply direction, plural, desktop wording", () => {
+    expect(switchSummaryLine({ captureRemoves: ["a", "b"], applyDisables: [] }, "desktop"))
+      .toBe("2 plugins are on for your other devices but off this computer — Apply turns them on.");
+  });
+  it("apply direction, singular, mobile wording", () => {
+    expect(switchSummaryLine({ captureRemoves: ["a"], applyDisables: [] }, "mobile"))
+      .toBe("1 plugin is on for your other devices but off this phone — Apply turns it on.");
+  });
+  it("capture direction, plural", () => {
+    expect(switchSummaryLine({ captureRemoves: [], applyDisables: ["a", "b"] }, "desktop"))
+      .toBe("2 plugins are on this computer but off on your other devices — Capture shares them.");
+  });
+  it("returns null when both sides diverge", () => {
+    expect(switchSummaryLine({ captureRemoves: ["a"], applyDisables: ["b"] }, "desktop")).toBeNull();
   });
 });

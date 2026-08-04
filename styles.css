@@ -1336,8 +1336,6 @@ button.config-sync-add-row, button.config-sync-add-row:hover { background: none;
 
 .config-sync-ldnote { color: var(--color-orange); font-size: var(--font-ui-smaller); margin-left: var(--size-4-1); }
 .config-sync-lddetail { color: var(--color-orange); font-family: var(--font-monospace); font-size: var(--font-ui-smaller); padding: 1px 0; }
-.config-sync-lddetail-ic { display: inline-flex; vertical-align: -2px; }
-.config-sync-lddetail-ic svg { width: 12px; height: 12px; }
 
 /* ── Passphrase status badge (定稿 feedback-trio) ── */
 .config-sync-ppbadge {
@@ -1386,19 +1384,22 @@ button.config-sync-add-row, button.config-sync-add-row:hover { background: none;
 .config-sync-divergence-line { color: var(--text-muted); }
 .config-sync-divergence-line::first-letter { color: var(--color-orange); }
 
-/* In-place "where it runs" guidance (spec 2026-07-28 §4): per-member rows for plugins switched
-   on differently between this device and the store, each with a device-scope menu. */
-.config-sync-memberblock { border: 1px solid var(--background-modifier-border); border-radius: 8px; padding: 6px 10px; margin: 6px 0; }
-.config-sync-memberblock-t { color: var(--text-muted); font-size: var(--font-ui-smaller); margin-bottom: 2px; }
-.config-sync-memberrow { display: flex; align-items: center; gap: var(--size-4-2); padding: 5px 0; }
-.config-sync-memberrow + .config-sync-memberrow { border-top: 1px solid var(--background-modifier-border); }
-.config-sync-memberrow-ic svg { width: 14px; height: 14px; display: block; }
-.config-sync-memberrow-mid { flex: 1; min-width: 0; }
-.config-sync-memberrow-n { font-weight: 600; font-size: var(--font-ui-small); }
-.config-sync-memberrow-why { color: var(--text-muted); font-size: var(--font-ui-smaller); }
-.config-sync-memberrow-btn { font-size: var(--font-ui-smaller); color: var(--text-muted); background: var(--background-secondary); border: 1px solid var(--background-modifier-border); border-radius: 6px; padding: 2px 8px; box-shadow: none; height: auto; white-space: nowrap; }
-.config-sync-memberrow-btn:hover { color: var(--text-normal); }
-body.is-mobile .config-sync-memberrow { flex-wrap: wrap; }
+/* Switch-list summary + per-plugin-rule disclosures (round-6 定稿, replaces the per-member
+   flood + popover menu): a one-line summary of the pending direction, then two collapsible
+   disclosures sharing the scope-cycle icon (.config-sync-scopeicon, defined above). */
+.config-sync-member-summary { color: var(--text-muted); font-size: var(--font-ui-smaller); padding: 2px 0; }
+
+.config-sync-disclosure { cursor: pointer; color: var(--text-muted); font-size: var(--font-ui-smaller); padding: 3px 0; user-select: none; }
+.config-sync-disclosure:hover { color: var(--text-normal); }
+.config-sync-disclosure.is-amber { color: var(--color-orange); }
+.config-sync-disclosure-cx { display: inline-block; width: 1em; }
+.config-sync-disclosure-body { padding: 2px 0 4px var(--size-4-3); }
+
+.config-sync-rule-search { width: 100%; background: var(--background-primary); border: 1px solid var(--background-modifier-border); border-radius: 6px; padding: 2px 8px; font-size: var(--font-ui-smaller); margin-bottom: var(--size-4-1); }
+.config-sync-rule-list { display: flex; flex-direction: column; }
+.config-sync-rule-row { display: flex; align-items: center; justify-content: space-between; gap: var(--size-4-2); padding: 3px 0; }
+.config-sync-rule-row + .config-sync-rule-row { border-top: 1px solid var(--background-modifier-border); }
+.config-sync-rule-mid { flex: 1; min-width: 0; font-size: var(--font-ui-small); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Search context (定稿): the main card's labeled head while searching, and the inline
    explanation under an inert (uncheckable) hit. */

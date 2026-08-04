@@ -236,52 +236,7 @@ export function runProgressLabel(verb: "Capturing" | "Applying", done: number, t
 
 // ── In-place "where it runs" guidance (spec 2026-07-28 §4) ────────────────────────────────────
 
-export const MEMBER_BLOCK_TITLE = "These plugins are switched on differently — decide where each belongs:";
 export const MEMBER_PUBLISH_NOTE = "Your choices are saved on this device — capture Settings so your other devices pick them up.";
-
-export interface MemberChangeRow {
-  id: string;
-  action: Direction; // apply = enabled only in the store's list, capture = enabled only here
-  why: string;
-  recommended: "desktop" | "mobile" | null;
-}
-
-// One row per element the pending direction would flip, in device language. Store-only
-// elements lead; each set alphabetical. Recommendation only where intent is inferable:
-// an element on everywhere-but-here most likely belongs to the other device class.
-export function memberChangeRows(
-  d: { captureRemoves: string[]; applyDisables: string[] },
-  device: "desktop" | "mobile"
-): MemberChangeRow[] {
-  const here = device === "mobile" ? "this phone" : "this computer";
-  const other: "desktop" | "mobile" = device === "mobile" ? "desktop" : "mobile";
-  const storeOnly = [...d.captureRemoves].sort().map(
-    (id): MemberChangeRow => ({
-      id,
-      action: "apply",
-      why: `on for your other devices, off on ${here} — Apply would turn it on here too`,
-      recommended: other,
-    })
-  );
-  const localOnly = [...d.applyDisables].sort().map(
-    (id): MemberChangeRow => ({
-      id,
-      action: "capture",
-      why: `on only on ${here} — Capture would turn it on for your other devices`,
-      recommended: null,
-    })
-  );
-  return [...storeOnly, ...localOnly];
-}
-
-// The "where it runs" menu offers a "Mobile only" option that pins a member to phones — never a
-// real choice for a plugin whose manifest is desktop-only, since it can never run there. Omit
-// that entry once the member's desktop-only-ness is known; an unknown member (not installed on
-// this device, a core-plugins member — which is never desktop-only — or an installed plugin
-// whose manifest can't be read here) keeps every option.
-export function whereItRunsEntries<T extends { kind?: "desktop" | "mobile" }>(entries: T[], knownDesktopOnly: boolean): T[] {
-  return knownDesktopOnly ? entries.filter((e) => e.kind !== "mobile") : entries;
-}
 
 export interface MemberDecision {
   id: string;
@@ -298,4 +253,53 @@ export function memberDecisionsFromScopes(scopes: Record<string, RuleScope>): Me
 
 export function memberDecisionText(m: MemberDecision): string {
   return m.scope === "local" ? `${m.id} — this device keeps its own on/off state` : `${m.id} — runs on ${m.scope} only`;
+}
+
+export type MemberScopeWrite =
+  | { kind: "enabledOn"; scope: "desktop" | "mobile" }
+  | { kind: "local" }
+  | { kind: "clear" };
+
+// Maps a scope-cycle target to the host write that realizes it (semantics unchanged from the old
+// where-it-runs menu): desktop/mobile → setMemberEnabledOn; this-device → addSwitchExceptions;
+// all → clearMemberLocal (which clears both a prior enabledOn and a prior this-device exception).
+export function memberScopeWrite(scope: RuleScope): MemberScopeWrite {
+  if (scope === "desktop" || scope === "mobile") return { kind: "enabledOn", scope };
+  if (scope === "local") return { kind: "local" };
+  return { kind: "clear" };
+}
+
+// The one-sided divergent member set the per-plugin rule list offers. Both-sided divergence is
+// owned by the red both-ways box, so this returns [] there.
+export function pendingScopeMembers(d: { captureRemoves: string[]; applyDisables: string[] }): string[] {
+  if (d.captureRemoves.length > 0 && d.applyDisables.length > 0) return [];
+  return d.captureRemoves.length > 0 ? d.captureRemoves : d.applyDisables;
+}
+
+// Current scope of a switch-list member: its device rule if it has one, else "all" (no rule).
+export function memberCurrentScope(decisions: MemberDecision[], id: string): RuleScope {
+  return decisions.find((m) => m.id === id)?.scope ?? "all";
+}
+
+// Bulk summary that replaces the per-member flood. One-sided cases only; both-sided → null (the
+// red both-ways box states that case). `here` is device-aware.
+export function switchSummaryLine(
+  d: { captureRemoves: string[]; applyDisables: string[] },
+  device: "desktop" | "mobile"
+): string | null {
+  const here = device === "mobile" ? "this phone" : "this computer";
+  if (d.captureRemoves.length > 0 && d.applyDisables.length > 0) return null;
+  if (d.captureRemoves.length > 0) {
+    const n = d.captureRemoves.length;
+    return n === 1
+      ? `1 plugin is on for your other devices but off ${here} — Apply turns it on.`
+      : `${n} plugins are on for your other devices but off ${here} — Apply turns them on.`;
+  }
+  if (d.applyDisables.length > 0) {
+    const n = d.applyDisables.length;
+    return n === 1
+      ? `1 plugin is on ${here} but off on your other devices — Capture shares it.`
+      : `${n} plugins are on ${here} but off on your other devices — Capture shares them.`;
+  }
+  return null;
 }

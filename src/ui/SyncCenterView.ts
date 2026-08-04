@@ -1,8 +1,8 @@
-import { App, ButtonComponent, ExtraButtonComponent, ItemView, Menu, Modal, Platform, WorkspaceLeaf, setIcon } from "obsidian";
+import { App, ButtonComponent, ExtraButtonComponent, ItemView, Modal, Platform, WorkspaceLeaf, setIcon } from "obsidian";
 import { ApplyItem, CaptureItem, ProgressFn, StateAction } from "../core/ConfigSyncCore";
 import { bucketCounts, GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry, RemoteDiffFile, remoteDirectionCounts } from "../core/status";
 import { CATEGORY_LABELS, findGroupByName, ItemCategory, SELF_GROUP_NAME, categoryForGroup } from "../core/catalog";
-import { FileChanges, GroupResult, Remote, SyncGroup } from "../core/types";
+import { FileChanges, GroupResult, Remote, RuleScope, SyncGroup } from "../core/types";
 import { Availability } from "../core/availability";
 import { isWholeFileEncrypted } from "../core/modes";
 import { classifyRemoteFailure } from "../core/remoteFailure";
@@ -15,15 +15,14 @@ import {
   insyncLineText,
   isValidPolicy,
   matchesSearch,
-  MemberChangeRow,
   MemberDecision,
-  memberChangeRows,
-  memberDecisionText,
-  MEMBER_BLOCK_TITLE,
+  memberCurrentScope,
+  memberScopeWrite,
   MEMBER_PUBLISH_NOTE,
   moreFilesText,
   nosettingsLineText,
   PanelFilter,
+  pendingScopeMembers,
   policyOptions,
   presentedState,
   runProgressLabel,
@@ -33,11 +32,11 @@ import {
   sectionForItem,
   showColdStartBanner,
   stageableRow,
+  switchSummaryLine,
   versionLine,
   visibleUnderFilter,
   Direction,
   effectiveDirection,
-  whereItRunsEntries,
 } from "./panelModel";
 import { renderDiffPanel } from "./diffView";
 import { SWITCH_LIST_GROUPS, switchListSortedView } from "../core/switchList";
@@ -45,6 +44,8 @@ import { jsonSortedView } from "../core/merge";
 import { renderReportContent, renderReportPills } from "./reportContent";
 import { RunRecord, RunKind, RunStatus, worstStatus, formatRunTime, stopSyncDesc, deleteLeftoverDesc } from "../core/runHistory";
 import { ACTION_ICON, ACTION_COLOR_CLASS, renderActionIcon, renderActionCount, type SyncAction } from "./actionIcons";
+import { renderScopeCycle } from "./scopeCycle";
+import { DESKTOP_ONLY_ENABLED_OPTIONS, FIELD_SCOPE_OPTIONS } from "./itemCard";
 import {
   QualifierAutocomplete,
   parseQuery,
@@ -250,6 +251,8 @@ export class SyncCenterView extends ItemView {
   private historyOpen: number | null = null; // index of the run whose detail is shown; null = table
   private leftovers: { rel: string; name: string; path: string; size: number }[] = [];
   private readonly qac = new QualifierAutocomplete(SYNC_QUALIFIER_SPECS);
+  private expandedDisclosures = new Set<string>(); // keys: `${group}::rules`, `${group}::scoped`
+  private ruleSearch = new Map<string, string>(); // per-group per-plugin-rule filter query
   // Regions the sidebar search updates in place, so a keystroke never rebuilds (and refocuses)
   // the search input itself. Set on every full render().
   private mainEl: HTMLElement | null = null;
@@ -1664,20 +1667,6 @@ export class SyncCenterView extends ItemView {
   // Expanded rows always show content: an error, a state note, or actions + the file diff.
   private renderItemDetail(detail: HTMLElement, r: StatusRow): void {
     const { status } = r;
-    // Local decisions surface first (定稿 switch-exceptions.html): the ⌂ rows explain why the
-    // item can be in-sync while raw contents differ.
-    const decisions = this.host.switchMemberDecisions(r.group.name);
-    for (const m of decisions) {
-      const line = detail.createDiv({ cls: "config-sync-lddetail" });
-      if (m.scope === "local") line.setText(`⌂ ${memberDecisionText(m)}`);
-      else {
-        setIcon(line.createSpan({ cls: "config-sync-lddetail-ic" }), m.scope === "desktop" ? "monitor" : "smartphone");
-        line.appendText(` ${memberDecisionText(m)}`);
-      }
-    }
-    if (decisions.length > 0 && this.selfInfo !== null && (this.selfInfo.state === "capture" || this.selfInfo.state === "both")) {
-      detail.createDiv({ cls: "config-sync-lddetail", text: MEMBER_PUBLISH_NOTE });
-    }
     if (SWITCH_LIST_GROUPS.has(r.group.name)) this.renderSwitchDivergence(detail, r);
     if (status.message !== undefined) {
       detail.createDiv({ cls: "config-sync-status-error", text: status.message });
@@ -1712,6 +1701,7 @@ export class SyncCenterView extends ItemView {
         this.renderPolicySeg(detail, r, this.availOf(r.group.name), true);
         return;
       }
+      const decisions = this.host.switchMemberDecisions(r.group.name);
       detail.createDiv({
         cls: "config-sync-expand-note",
         text: decisions.length > 0 ? "in sync — this device's own plugins aren't compared" : "identical to the store",
@@ -1778,10 +1768,20 @@ export class SyncCenterView extends ItemView {
   }
 
   // Bidirectional divergence summary (定稿 2026-07-17): only the red warning box above is gated
-  // on both directions destroying the other side's state — the per-member where-it-runs
-  // guidance rows below (renderMemberBlock) render for any one-sided difference too.
+  // on both directions destroying the other side's state — the summary line + disclosures below
+  // render for any one-sided difference too.
   private renderSwitchDivergence(detail: HTMLElement, r: StatusRow): void {
     const holder = detail.createDiv();
+    // Scoped disclosure + publish note render synchronously (they only need
+    // switchMemberDecisions), independent of switchDivergenceFor's async result — that call
+    // resolves null when the store hasn't been captured yet, which must not hide these.
+    if (MEMBER_GUIDE_GROUPS.has(r.group.name)) {
+      this.renderScopedDisclosure(holder, r);
+      const decisions = this.host.switchMemberDecisions(r.group.name);
+      if (decisions.length > 0 && this.selfInfo !== null && (this.selfInfo.state === "capture" || this.selfInfo.state === "both")) {
+        holder.createDiv({ cls: "config-sync-lddetail", text: MEMBER_PUBLISH_NOTE });
+      }
+    }
     void this.host.switchDivergenceFor(r.group.name).then((d) => {
       if (!holder.isConnected || d === null) return;
       if (d.captureRemoves.length > 0 && d.applyDisables.length > 0) {
@@ -1806,81 +1806,98 @@ export class SyncCenterView extends ItemView {
           }).open();
         });
       }
-      if (MEMBER_GUIDE_GROUPS.has(r.group.name)) this.renderMemberBlock(holder, r, d);
+      if (MEMBER_GUIDE_GROUPS.has(r.group.name)) {
+        this.renderMemberSummary(holder, r, d);
+        const members = pendingScopeMembers(d);
+        if (members.length > 0) {
+          this.renderDisclosure(holder, `${r.group.name}::rules`, "Set a per-plugin rule", false, (panel) =>
+            this.renderPerPluginRules(panel, r, members)
+          );
+        }
+      }
     });
   }
 
-  private renderMemberBlock(holder: HTMLElement, r: StatusRow, d: { captureRemoves: string[]; applyDisables: string[] }): void {
-    const rows = memberChangeRows(d, Platform.isMobile ? "mobile" : "desktop");
-    if (rows.length === 0) return;
-    const block = holder.createDiv({ cls: "config-sync-memberblock" });
-    block.createDiv({ cls: "config-sync-memberblock-t", text: MEMBER_BLOCK_TITLE });
-    for (const m of rows) {
-      const row = block.createDiv({ cls: "config-sync-memberrow" });
-      renderActionIcon(row.createSpan({ cls: "config-sync-memberrow-ic" }), m.action).addClass(ACTION_COLOR_CLASS[m.action]);
-      const mid = row.createDiv({ cls: "config-sync-memberrow-mid" });
-      mid.createDiv({ cls: "config-sync-memberrow-n", text: m.id });
-      mid.createDiv({ cls: "config-sync-memberrow-why", text: m.why });
-      // appendText (not a static `text:` option) — the obsidianmd/ui/sentence-case rule can't
-      // be disabled inline, and this label's lowercase lead is spec'd copy (定稿 2026-07-28 §4).
-      const btn = row.createEl("button", { cls: "config-sync-memberrow-btn" });
-      btn.appendText("where it runs ▾");
-      btn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        this.openWhereItRunsMenu(e, r.group.name, m);
-      });
-    }
+  private scopeOptionsFor(id: string): readonly RuleScope[] {
+    const desktopOnly = this.host.isDesktopOnlyPlugin(id) ?? this.availOf(`plugin-${id}`).desktopOnly;
+    return desktopOnly ? DESKTOP_ONLY_ENABLED_OPTIONS : FIELD_SCOPE_OPTIONS;
   }
 
-  private openWhereItRunsMenu(evt: MouseEvent, carrier: string, m: MemberChangeRow): void {
-    const menu = new Menu();
-    menu.setUseNativeMenu(false); // DOM menu — renders our Lucide icons on macOS too
-    const consequence = m.action === "apply" ? "no rule, Apply turns it on here" : "no rule, Capture turns it on for your other devices";
-    const rec = " · matches where it's used today";
-    // Known (not unknown-because-not-installed) desktop-only members can never actually run on
-    // mobile, so "Mobile only" is dropped for them below (whereItRunsEntries) — a rule that can
-    // never take effect. The manifest is the source of truth (works even for switch-list members
-    // whose own settings-file sync is off, so they never land in the availability map); the
-    // availability map is a fallback for members not installed on this device.
-    const knownDesktopOnly = this.host.isDesktopOnlyPlugin(m.id) ?? this.availOf(`plugin-${m.id}`).desktopOnly;
-    const allEntries: { title: string; icon?: string; write: (() => Promise<void>) | null; kind?: "desktop" | "mobile" }[] = [
-      {
-        title: `Desktop only — stays off on phones${m.recommended === "desktop" ? rec : ""}`,
-        icon: "monitor",
-        write: () => this.host.setMemberEnabledOn(carrier, m.id, "desktop"),
-        kind: "desktop",
-      },
-      {
-        title: `Mobile only — stays off on desktops${m.recommended === "mobile" ? rec : ""}`,
-        icon: "smartphone",
-        write: () => this.host.setMemberEnabledOn(carrier, m.id, "mobile"),
-        kind: "mobile",
-      },
-      // airplay = SCOPE_ICONS.local, matching its SVG-icon menu neighbors — the text ⌂ glyph
-      // rendered visibly smaller than their Lucide icons.
-      { title: "This device decides for itself", icon: "airplay", write: () => this.host.addSwitchExceptions(carrier, [m.id]) },
-      // "Everywhere" itself writes no rule (unchanged) — it only clears a prior "this device"
-      // choice from localMembers (task-2 retarget), needed now that "this device" no longer
-      // round-trips through the single enabledOn field the other two entries above overwrite.
-      { title: `Everywhere — ${consequence}`, icon: "globe", write: () => this.host.clearMemberLocal(carrier, m.id) },
-    ];
-    const entries = whereItRunsEntries(allEntries, knownDesktopOnly);
-    if (m.recommended === "mobile") {
-      const idx = entries.findIndex((e) => e.kind === "mobile");
-      if (idx > 0) entries.unshift(entries.splice(idx, 1)[0]!); // recommended leads
-    }
-    for (const it of entries) {
-      menu.addItem((i) => {
-        i.setTitle(it.title);
-        if (it.icon !== undefined) i.setIcon(it.icon);
-        i.onClick(async () => {
-          if (it.write === null) return;
-          await it.write();
-          await this.reload();
+  private renderMemberSummary(holder: HTMLElement, r: StatusRow, d: { captureRemoves: string[]; applyDisables: string[] }): void {
+    const text = switchSummaryLine(d, Platform.isMobile ? "mobile" : "desktop");
+    if (text !== null) holder.createDiv({ cls: "config-sync-member-summary", text });
+  }
+
+  private renderDisclosure(holder: HTMLElement, key: string, title: string, amber: boolean, body: (el: HTMLElement) => void): void {
+    const open = this.expandedDisclosures.has(key);
+    const head = holder.createDiv({ cls: `config-sync-disclosure${amber ? " is-amber" : ""}` });
+    head.createSpan({ cls: "config-sync-disclosure-cx", text: open ? "▾" : "▸" });
+    head.appendText(` ${title}`);
+    const panel = holder.createDiv({ cls: "config-sync-disclosure-body" });
+    panel.hidden = !open;
+    if (open) body(panel);
+    head.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (this.expandedDisclosures.has(key)) this.expandedDisclosures.delete(key);
+      else this.expandedDisclosures.add(key);
+      this.render(this.renderGen);
+    });
+  }
+
+  private renderPerPluginRules(holder: HTMLElement, r: StatusRow, members: string[]): void {
+    const group = r.group.name;
+    const decisions = this.host.switchMemberDecisions(group);
+    const query = this.ruleSearch.get(group) ?? "";
+    const search = holder.createEl("input", { cls: "config-sync-rule-search", attr: { type: "text", placeholder: "Search a plugin to give it a rule…" } });
+    search.value = query;
+    const list = holder.createDiv({ cls: "config-sync-rule-list" });
+    const paint = (q: string): void => {
+      list.empty();
+      for (const id of members) {
+        if (q !== "" && !id.toLowerCase().includes(q.toLowerCase())) continue;
+        const row = list.createDiv({ cls: "config-sync-rule-row" });
+        row.createSpan({ cls: "config-sync-rule-mid", text: id });
+        const cell = row.createSpan();
+        renderScopeCycle(cell, {
+          scope: memberCurrentScope(decisions, id),
+          options: this.scopeOptionsFor(id),
+          disabled: false,
+          onChange: (v) => void this.writeMemberScope(group, id, v),
         });
-      });
-    }
-    menu.showAtMouseEvent(evt);
+      }
+    };
+    paint(query);
+    search.addEventListener("input", () => {
+      this.ruleSearch.set(group, search.value);
+      paint(search.value);
+    });
+  }
+
+  private renderScopedDisclosure(holder: HTMLElement, r: StatusRow): void {
+    const group = r.group.name;
+    const decisions = this.host.switchMemberDecisions(group);
+    if (decisions.length === 0) return;
+    this.renderDisclosure(holder, `${group}::scoped`, `${decisions.length} scoped to specific devices`, true, (panel) => {
+      for (const m of decisions) {
+        const row = panel.createDiv({ cls: "config-sync-rule-row" });
+        row.createSpan({ cls: "config-sync-rule-mid", text: m.id });
+        const cell = row.createSpan();
+        renderScopeCycle(cell, {
+          scope: m.scope,
+          options: this.scopeOptionsFor(m.id),
+          disabled: false,
+          onChange: (v) => void this.writeMemberScope(group, m.id, v),
+        });
+      }
+    });
+  }
+
+  private async writeMemberScope(group: string, id: string, scope: RuleScope): Promise<void> {
+    const w = memberScopeWrite(scope);
+    if (w.kind === "enabledOn") await this.host.setMemberEnabledOn(group, id, w.scope);
+    else if (w.kind === "local") await this.host.addSwitchExceptions(group, [id]);
+    else await this.host.clearMemberLocal(group, id);
+    await this.reload();
   }
 
   // Structural groups (the self plugin, the on/off switch lists) are not "items" a user would
