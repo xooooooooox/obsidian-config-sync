@@ -284,7 +284,7 @@ function baseHasStalePerItemElements(effGroup: SyncGroup, existing: string): boo
 // never a scope:"local" field (it lives in group.perItem, not group.fields), so stripPatterns
 // never overlaps the per-item guard's responsibility. No-op when the group has no local patterns,
 // or the existing content isn't a parseable JSON object.
-function baseHasStaleLocalKeys(effGroup: SyncGroup, existing: string): boolean {
+export function baseHasStaleLocalKeys(effGroup: SyncGroup, existing: string): boolean {
   const patterns = stripPatterns(effGroup);
   if (patterns.length === 0) return false;
   let parsed: unknown;

@@ -1,4 +1,4 @@
-import { CoreContext, ExternalStoreReader, groupForStoreRel, isSelfStoreRel, loadManifest, overlayGroup, readStoreContractLocals, remoteGroupsFrom, storeDir, withContractLocals } from "./ConfigSyncCore";
+import { baseHasStaleLocalKeys, CoreContext, ExternalStoreReader, groupForStoreRel, isSelfStoreRel, loadManifest, overlayGroup, readStoreContractLocals, remoteGroupsFrom, storeDir, withContractLocals } from "./ConfigSyncCore";
 import { isJunkPath, listFilesRecursive } from "./io";
 import { basename, groupStorePath, relativeTo, sidecarStoreSuffix } from "./pathing";
 import { FileChanges, hasChanges, StoreLock, SyncGroup } from "./types";
@@ -17,7 +17,7 @@ export interface GroupStatus {
   changes?: FileChanges;
 }
 
-type Comparison = "not-captured" | "no-settings" | { changes: FileChanges; localHash: string; storeHash: string };
+type Comparison = "not-captured" | "no-settings" | { changes: FileChanges; localHash: string; storeHash: string; staleLocal: boolean };
 
 export async function statusForGroups(
   ctx: CoreContext,
@@ -61,6 +61,15 @@ async function groupStatus(
   const cmp = group.type === "file" ? await compareFile(ctx, group, real, store) : await compareDir(ctx, group, real, store);
   if (cmp === "no-settings") return { status: { group: group.name, state: "no-settings" }, update: null };
   if (cmp === "not-captured") return { status: { group: group.name, state: "not-captured" }, update: null };
+  if (cmp.staleLocal) {
+    // The store base holds a top-level scope:"local" key it must never carry (2.14.1's
+    // baseHasStaleLocalKeys). The group is otherwise in-sync — contentUnchanged strips the key on
+    // both sides — so it would read in-sync forever, the UI would never offer it for capture, and
+    // the capture-time purge guard would never run. Surface it as local-changed (a capture
+    // direction) so a capture is offered; that capture purges the base, and the next scan finds it
+    // clean and returns to in-sync. No baseline reseed — this is a dirty state, not a synced one.
+    return { status: { group: group.name, state: "local-changed", changes: cmp.changes } };
+  }
   if (!hasChanges(cmp.changes)) {
     return {
       status: { group: group.name, state: "in-sync" },
@@ -83,7 +92,7 @@ async function compareFile(ctx: CoreContext, group: SyncGroup, real: string, sto
   const storeContent = await ctx.io.read(store);
   const storeHash = await hashFileSide(group.name, storeContent, "store");
   if (!(await ctx.io.exists(real))) {
-    return { changes: { added: [], updated: [], deleted: [name] }, localHash: ABSENT_HASH, storeHash };
+    return { changes: { added: [], updated: [], deleted: [name] }, localHash: ABSENT_HASH, storeHash, staleLocal: false };
   }
   const liveContent = await ctx.io.read(real);
   const localHash = await hashFileSide(group.name, liveContent, "local");
@@ -102,8 +111,13 @@ async function compareFile(ctx: CoreContext, group: SyncGroup, real: string, sto
       : parseFileEnvelope(storeContent) !== null || effGroup.mode === "fields" || effGroup.mode === "encrypted"
         ? await contentUnchanged(effGroup, liveContent, storeContent, ctx.passphrase, ctx.deviceClass, ownScope)
         : liveContent === storeContent;
-  const changes: FileChanges = equal ? { added: [], updated: [], deleted: [] } : { added: [], updated: [name], deleted: [] };
-  return { changes, localHash, storeHash };
+  const staleLocal = equal && baseHasStaleLocalKeys(effGroup, storeContent);
+  const changes: FileChanges = equal
+    ? staleLocal
+      ? { added: [], updated: [name], deleted: [] } // surface the store's stray local key as to-capture
+      : { added: [], updated: [], deleted: [] }
+    : { added: [], updated: [name], deleted: [] };
+  return { changes, localHash, storeHash, staleLocal };
 }
 
 // For switch-list groups with exceptions: compare with switchListsEqual when both sides parse
@@ -141,7 +155,7 @@ async function compareDir(ctx: CoreContext, group: SyncGroup, real: string, stor
   for (const e of storeEntries) {
     if (!liveByRel.has(e.rel)) changes.deleted.push(e.rel);
   }
-  return { changes, localHash: await hashDirSide(liveEntries), storeHash: await hashDirSide(storeEntries) };
+  return { changes, localHash: await hashDirSide(liveEntries), storeHash: await hashDirSide(storeEntries), staleLocal: false };
 }
 
 export interface BucketCounts {

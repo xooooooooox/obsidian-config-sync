@@ -3,6 +3,7 @@ import { CoreContext, capture, loadManifest, groupsForDevice, ExternalStoreReade
 import { parseSyncManifest } from "../src/core/manifest";
 import { statusForGroups, checkRemote, diffRemote, bucketCounts, remoteLockAhead, remoteDirectionCounts, GroupStatus } from "../src/core/status";
 import { applyUpdates, emptyLedger, Ledger } from "../src/core/ledger";
+import { directionForState, stageableRow } from "../src/ui/panelModel";
 import { MemFS, FakePlugins, memGroupsIO } from "./memfs";
 
 const MANIFEST = JSON.stringify({
@@ -408,5 +409,38 @@ describe("remoteDirectionCounts", () => {
   });
   it("returns zeroes for an empty list", () => {
     expect(remoteDirectionCounts([])).toEqual({ push: 0, pull: 0 });
+  });
+});
+
+describe("stale device-local key in the store base", () => {
+  const DEMO_BASE = "cs/store/configdir/plugins/demo/data.json";
+
+  it("surfaces a group whose store base still carries a scope:local key as local-changed", async () => {
+    const { io, ctx } = await seededAndCaptured();
+    // Capture stripped vikaToken from the base ({theme:"x"}); simulate a base written before the
+    // local rule existed by putting the local-scoped key back into the store base.
+    await io.write(DEMO_BASE, '{"vikaToken":"stale","theme":"x"}');
+    // Empty ledger: proves the interception fires regardless of baseline (would otherwise be
+    // never-synced/in-sync via the three-way path).
+    expect((await allStates(ctx))["plugin-demo"]).toBe("local-changed");
+  });
+
+  it("a group with a scope:local field but a clean base stays in-sync (no phantom)", async () => {
+    const { ctx } = await seededAndCaptured();
+    expect((await allStates(ctx))["plugin-demo"]).toBe("in-sync");
+  });
+
+  it("capturing the surfaced group purges the base and it returns to in-sync (self-clearing)", async () => {
+    const { io, ctx } = await seededAndCaptured();
+    await io.write(DEMO_BASE, '{"vikaToken":"stale","theme":"x"}');
+    expect((await allStates(ctx))["plugin-demo"]).toBe("local-changed");
+    await capture(ctx); // 2.14.1's baseHasStaleLocalKeys guard purges the stale key
+    expect(JSON.parse(await io.read(DEMO_BASE))).toEqual({ theme: "x" });
+    expect((await allStates(ctx))["plugin-demo"]).toBe("in-sync");
+  });
+
+  it("local-changed routes to a capturable row (the direction the fix depends on)", () => {
+    expect(directionForState("local-changed")).toBe("capture");
+    expect(stageableRow("local-changed", "main")).toBe(true);
   });
 });

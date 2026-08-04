@@ -140,7 +140,11 @@ functions.
   only the store side moved → `store-newer`; only the local side moved → `local-changed`; both
   sides moved, or neither (a scope/rule edit shifted the comparison lens) → `differs`, meaning
   specifically "changed on both sides since this device last synced". A comparison error still
-  reports `differs` with a `message`. `statusForGroups` is IO-free with respect to the ledger — it
+  reports `differs` with a `message`. One case bypasses the three-way entirely: a group that is
+  otherwise `in-sync` but whose store base still carries a top-level `scope:"local"` key it must
+  never hold (`baseHasStaleLocalKeys`, the same predicate the capture guard purges by) reports
+  `local-changed` regardless of the ledger, so the Sync Center offers a capture — which purges the
+  base — and the next scan finds it clean and reads `in-sync` again. `statusForGroups` is IO-free with respect to the ledger — it
   takes the parsed `Ledger` and returns `{ statuses, updates }`; `main.ts` owns loading and
   persisting it (see Connector below).
 - `core/ledger.ts` — the device-local sync-baseline ledger behind that direction logic. After
