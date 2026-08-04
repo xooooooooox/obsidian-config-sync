@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isLegacySettings, mergeLegacyAppSliceItems, SCHEMA_UPGRADE_NOTICE } from "../src/core/settingsMigration";
+import { drainEnabledOnLocal, isLegacySettings, mergeLegacyAppSliceItems, SCHEMA_UPGRADE_NOTICE } from "../src/core/settingsMigration";
 import { emptyItemConfig, ItemConfig } from "../src/core/registry";
 
 // spec 2026-07-25-unified-card-design.md §6, D13: blocking upgrade — no data migration, no
@@ -106,5 +106,46 @@ describe("mergeLegacyAppSliceItems", () => {
     };
 
     expect(mergeLegacyAppSliceItems(s)).toBe(false);
+  });
+});
+
+// Task 3 (spec 2026-08-04-per-device-scope-local-containment-design.md): a stored
+// `enabledOn: "local"` is a pre-retarget artifact — Task 2 already makes enablementScopes ignore
+// it, so this is drain-only cleanup that moves every such id into localMembers and deletes the key.
+function drainSettings(items: Record<string, ItemConfig>, localMembers: string[]): { items: Record<string, ItemConfig>; localMembers: string[] } {
+  return { items, localMembers };
+}
+
+describe("drainEnabledOnLocal", () => {
+  it("moves each enabledOn 'local' into localMembers and deletes the key, idempotently", () => {
+    const s = drainSettings(
+      {
+        "community:a": cfg({ enabled: true, enabledOn: "local" }),
+        "community:b": cfg({ enabled: true, enabledOn: "desktop" }),
+      },
+      []
+    );
+
+    expect(drainEnabledOnLocal(s)).toBe(true);
+    expect(s.localMembers).toEqual(["community:a"]);
+    expect(s.items["community:a"]!.enabledOn).toBeUndefined();
+    expect(s.items["community:b"]!.enabledOn).toBe("desktop");
+    expect(drainEnabledOnLocal(s)).toBe(false); // idempotent
+  });
+
+  it("is a no-op (returns false) when nothing is enabledOn 'local'", () => {
+    const s = drainSettings({ "community:a": cfg({ enabled: true }) }, ["community:a"]);
+
+    expect(drainEnabledOnLocal(s)).toBe(false);
+    expect(s.localMembers).toEqual(["community:a"]);
+  });
+
+  it("does not duplicate an id already in localMembers", () => {
+    const s = drainSettings({ "community:a": cfg({ enabled: true, enabledOn: "local" }) }, ["community:a"]);
+
+    expect(drainEnabledOnLocal(s)).toBe(true);
+    expect(s.localMembers).toEqual(["community:a"]);
+    expect(s.items["community:a"]!.enabledOn).toBeUndefined();
+    expect(drainEnabledOnLocal(s)).toBe(false); // idempotent
   });
 });

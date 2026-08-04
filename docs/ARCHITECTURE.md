@@ -99,7 +99,7 @@ functions.
   carrier any more), plus one group per companion folder, and — only when at least one plugin
   element is enabled — the hidden `core-plugins`/`community-plugins` enablement-carrier groups (no
   longer surfaced as their own rows; see Data model below). `enablementScopes(defs, settings,
-  carrier)` projects each plugin item's `enabledOn` into the carrier's per-element scope map, which
+  carrier)` projects each plugin item's `enabledOn` (only `desktop`/`mobile` now — a stored `"local"` is ignored; the explicit **This device** choice lives in the device-local `localMembers` set instead, see Data model) into the carrier's per-element scope map, unioned with `localMembers`, which
   `main.ts` folds into the switch-list engine's existing runtime member-exception derivation
   (`core-plugins.json`/`community-plugins.json` are not string-array files, so they cannot go
   through `perItem.ts` the way `enabledCssSnippets` does). `compileCustomGroups(customGroups, defs,
@@ -315,7 +315,7 @@ functions.
   reflects it immediately instead of staying stale until the next unrelated save. For the
   `core-plugins`/`community-plugins` switch groups, `main.ts` derives the runtime mask/force-off
   pair `CoreContext` needs from `registry.ts`'s `enablementScopes` (never from a standalone
-  settings field — see Data model below): `switchExceptions[group]` = local-scoped element ids ∪
+  settings field — see Data model below): `switchExceptions[group]` = local-scoped element ids (from `localMembers` ∪ disabled-card structural locals) ∪
   desktop/mobile-scoped ids not matching this device ∪ auto-derived exclusions (community-plugins
   only — desktop-only manifest ids on mobile, plus plugin groups whose `devices` class doesn't
   match); `switchForceOff[group]` = the subset of those that must be force-removed from the applied
@@ -360,6 +360,13 @@ Changes must preserve these:
 - **Class field rules (`desktop`/`mobile`) act on top-level keys only.** A glob match inside a
   nested object is ignored for class partitioning; `strip`/`encrypt` are unaffected and keep
   their any-depth semantics.
+- **Device-local facts never enter the shared store; the store contract decides what is
+  device-local.** The explicit **This device** choice lives in `localMembers` (stripped from the
+  self store copy like `remotes`), never in `enabledOn`. On capture and comparison a group's
+  `local` fields are stripped using the union of the local rule and the store contract's rule for
+  that group (`withContractLocals` + `readStoreContractLocals`, applied identically to both sides so
+  they can't desync) — an un-adopted device can't publish device-local values downstream; a contract
+  `local` overrides a colliding local rule and promotes a plain-mode group to fields.
 - **Enabled = loaded OR persisted** (`pluginRuntimeEnabled`). Reading `enabledPlugins` alone
   misclassifies a running-but-unpersisted plugin as disabled.
 - **Self-apply never disables/reloads Config Sync.** Applying a plugin's settings cycles it
@@ -399,9 +406,15 @@ Changes must preserve these:
     the pattern, so there is exactly one source of truth for which key a rule governs).
     `companions: { path, scope: DeviceClass, enabled }[]` — preset (`themes/`, `snippets/`) plus
     user-added companion folders. `enabledOn` is only meaningful for a plugin item: which devices'
-    enabled-plugins list carries it (`undefined` = `"all"`). The `app` item's `settingsFile` covers
+    enabled-plugins list carries it (`undefined` = `"all"`). It stores only `"desktop"`/`"mobile"`
+    now — the **This device** choice moved to the top-level `localMembers` (below), and
+    `drainEnabledOnLocal` migrates any legacy `enabledOn:"local"` on load (and after adopt). The `app` item's `settingsFile` covers
     the whole `app.json` — one plain single-file item like any other, with no separate carrier or
     shared mode.
+  - `localMembers: string[]` — device-local set of plugin item ids (`community:<id>`/`core:<id>`)
+    the user pinned to **This device**. A locked `selfPresetRules` local strip keeps it out of the
+    shared self store copy (like `remotes`/`rootPath`), so the choice never travels and a pull can't
+    erase it; `enabledOn` no longer carries `"local"`.
   - `customGroups: CustomGroupConfig[]` (= `SyncGroup[]`) — freeform Advanced-tab rules ("Custom
     rules" and adopted "Discovered files") with no owning registry item; compiled by
     `compileCustomGroups` (see `core/registry.ts` above) alongside the registry-driven groups.

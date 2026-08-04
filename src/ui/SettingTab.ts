@@ -107,8 +107,15 @@ export interface SettingsHost extends Plugin {
     // through host.saveSettings(), same durable contract as items above — see
     // persistCustomGroups.
     customGroups: CustomGroupConfig[];
+    // Explicit "this device decides for itself" item ids (community:<id> / core:<id>) — task-2
+    // retarget (spec 2026-08-04-per-device-scope-local-containment-design.md): read-only here,
+    // written only through setMemberLocal below.
+    localMembers: string[];
   };
   saveSettings(): Promise<void>;
+  // The "Enabled on" chip's "This device" write (task-2 retarget): adds/removes itemId from
+  // settings.localMembers — never writes ItemConfig.enabledOn = "local" again. Persists itself.
+  setMemberLocal(itemId: string, on: boolean): Promise<void>;
   // Drops the per-refresh reader cache (#3): call after settings.remotes changes so a stale
   // reader for an edited/removed remote's old URL/branch/subdir/storePath is never reused.
   clearReaderCache(): void;
@@ -593,6 +600,10 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     return this.host.settings.items[id] ?? emptyItemConfig();
   }
 
+  private isThisDevice(id: string): boolean {
+    return this.host.settings.localMembers.includes(id);
+  }
+
   private async updateItem(id: string, mutator: (cfg: ItemConfig) => ItemConfig): Promise<void> {
     const next = mutator(this.itemConfig(id));
     this.host.settings.items = { ...this.host.settings.items, [id]: next };
@@ -684,7 +695,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       syncExpansion();
     });
     row.nameEl.prepend(chevron);
-    for (const badge of computeBadges(def, cfg)) this.renderBadge(row.nameEl, badge);
+    for (const badge of computeBadges(def, cfg, this.isThisDevice(def.id))) this.renderBadge(row.nameEl, badge);
     row.addToggle((t) =>
       t.setValue(cfg.enabled).onChange(async (v) => {
         await this.updateItem(def.id, (c) => ({ ...c, enabled: v }));
@@ -701,7 +712,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const nameEl = wrap.querySelector(":scope > .setting-item > .setting-item-info > .setting-item-name");
     if (!(nameEl instanceof HTMLElement)) return;
     for (const b of Array.from(nameEl.querySelectorAll(".config-sync-card-badge"))) b.remove();
-    for (const badge of computeBadges(def, this.itemConfig(def.id))) this.renderBadge(nameEl, badge);
+    for (const badge of computeBadges(def, this.itemConfig(def.id), this.isThisDevice(def.id))) this.renderBadge(nameEl, badge);
   }
 
   private renderBadge(nameEl: HTMLElement, badge: Badge): void {
@@ -748,9 +759,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   }
 
   // Zone ① "Enabled on" (spec §4/§10, D4 — core/community/beta plugin cards only): a 4-scope
-  // chip that reads/writes ItemConfig.enabledOn directly through updateItem/saveSettings — the
-  // same single write path every other card control uses (no parallel mechanism; registry.ts's
-  // enablementScopes/main.ts's switch-list masking read this same field at compile time).
+  // chip. "desktop"/"mobile"/"all" still read/write ItemConfig.enabledOn directly through
+  // updateItem/saveSettings (registry.ts's enablementScopes/main.ts's switch-list masking read
+  // that field at compile time); "local" ("This device") instead reads/writes
+  // host.settings.localMembers through host.setMemberLocal (task-2 retarget — see
+  // main.ts's setMemberLocal/memberLocalIdsFor) and never sets enabledOn to "local" again.
   // Grid row (spec 2026-07-26-card-visual-refresh-design.md §2.1/§4 Step 1): label in the content
   // column, scope dropdown in the scope column, last two columns empty.
   private renderEnabledOnZone(exp: HTMLElement, def: ItemDef, cfg: ItemConfig, wrap: HTMLElement): void {
@@ -762,7 +775,10 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     // rebuilds itself from the freshly-saved config after each advance.
     const buildScope = (): void => {
       scopeCell.empty();
-      const current = this.itemConfig(def.id).enabledOn ?? "all";
+      const storedOn = this.itemConfig(def.id).enabledOn;
+      // A stored "local" is a pre-retarget artifact — ignored, same as enablementScopes; the real
+      // "local" signal is localMembers membership.
+      const current: RuleScope = this.host.settings.localMembers.includes(def.id) ? "local" : storedOn === "local" ? "all" : (storedOn ?? "all");
       this.renderScopeCycle(scopeCell, {
         scope: current,
         options: def.desktopOnly === true ? DESKTOP_ONLY_ENABLED_OPTIONS : FIELD_SCOPE_OPTIONS,
@@ -770,7 +786,8 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         ...(def.desktopOnly === true && current === "all" ? { note: DESKTOP_ONLY_ALL_NOTE } : {}),
         onChange: (v) => {
           void (async () => {
-            await this.updateItem(def.id, (c) => ({ ...c, enabledOn: v === "all" ? undefined : v }));
+            await this.host.setMemberLocal(def.id, v === "local");
+            await this.updateItem(def.id, (c) => ({ ...c, enabledOn: v === "all" || v === "local" ? undefined : v }));
             this.refreshCardBadges(wrap, def);
             buildScope();
           })();

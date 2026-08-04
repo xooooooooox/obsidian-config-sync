@@ -168,6 +168,9 @@ export interface SyncCenterHost {
   switchDivergenceFor(name: string): Promise<{ captureRemoves: string[]; applyDisables: string[] } | null>;
   addSwitchExceptions(name: string, ids: string[]): Promise<void>;
   setMemberEnabledOn(carrier: string, elementId: string, scope: "desktop" | "mobile"): Promise<void>;
+  // The where-it-runs menu's "Everywhere" entry (task-2 retarget): clears a prior "this device"
+  // choice from settings.localMembers so the member follows the group's normal flow again.
+  clearMemberLocal(carrier: string, elementId: string): Promise<void>;
   // Contents for an inline change diff: base = current state of the target side, produced =
   // what the pending action (capture/apply) would write. null = no diff available.
   diffPair(name: string, rel: string, dir: Direction): Promise<{ base: string; produced: string } | null>;
@@ -1856,7 +1859,10 @@ export class SyncCenterView extends ItemView {
       // airplay = SCOPE_ICONS.local, matching its SVG-icon menu neighbors — the text ⌂ glyph
       // rendered visibly smaller than their Lucide icons.
       { title: "This device decides for itself", icon: "airplay", write: () => this.host.addSwitchExceptions(carrier, [m.id]) },
-      { title: `Everywhere — ${consequence}`, icon: "globe", write: null },
+      // "Everywhere" itself writes no rule (unchanged) — it only clears a prior "this device"
+      // choice from localMembers (task-2 retarget), needed now that "this device" no longer
+      // round-trips through the single enabledOn field the other two entries above overwrite.
+      { title: `Everywhere — ${consequence}`, icon: "globe", write: () => this.host.clearMemberLocal(carrier, m.id) },
     ];
     const entries = whereItRunsEntries(allEntries, knownDesktopOnly);
     if (m.recommended === "mobile") {

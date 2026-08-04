@@ -67,3 +67,22 @@ export function mergeLegacyAppSliceItems(settings: {
   delete settings.appJson;
   return true;
 }
+
+// Task-2 retarget (spec 2026-08-04-per-device-scope-local-containment-design.md): "this device"
+// now lives in settings.localMembers, never in ItemConfig.enabledOn — a stored enabledOn:"local"
+// is a pre-retarget artifact that enablementScopes already ignores. This drains every such id into
+// localMembers and deletes the dead key, so the old form stops being re-published. Idempotent and
+// runs on every load: during staggered rollout, other devices still on the old build keep pushing
+// enabledOn:"local" back into the shared contract, so a one-shot migration wouldn't stay clean.
+export function drainEnabledOnLocal(settings: { items: Record<string, ItemConfig>; localMembers: string[] }): boolean {
+  const members = new Set(settings.localMembers);
+  let changed = false;
+  for (const [id, cfg] of Object.entries(settings.items)) {
+    if (cfg.enabledOn !== "local") continue;
+    members.add(id);
+    delete cfg.enabledOn;
+    changed = true;
+  }
+  if (changed) settings.localMembers = [...members];
+  return changed;
+}

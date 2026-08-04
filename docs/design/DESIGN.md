@@ -267,8 +267,10 @@ noted):
     (0.45) and any narrower scope renders `.is-set` (accent, full opacity). ① and ②
     render only when they apply, ③ Companion folders always renders (down to just its quiet
     `+ Add folder` row, `config-sync-add-row-quiet`, when a card has no folders yet):
-    ① **Enabled on** (plugin cards only) — one 4-option scope icon reading/writing
-    `ItemConfig.enabledOn` directly (no parallel state). A desktop-only plugin's cycle skips the
+    ① **Enabled on** (plugin cards only) — one 4-option scope icon: Desktop/Mobile/All read & write
+    `ItemConfig.enabledOn` directly, but the **This device** stop reads & writes the device-local
+    `localMembers` set instead (a stored `enabledOn:"local"` is never written, so the choice stays
+    out of the shared self store copy and can't leak or be erased by a pull). A desktop-only plugin's cycle skips the
     mobile stop (`DESKTOP_ONLY_ENABLED_OPTIONS`), and its `all` stop's tooltip appends
     `DESKTOP_ONLY_ALL_NOTE` ("mobile is excluded automatically" — the runtime auto-mask, not this
     setting, is what keeps mobile untouched).

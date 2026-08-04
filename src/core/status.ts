@@ -1,4 +1,4 @@
-import { CoreContext, ExternalStoreReader, groupForStoreRel, isSelfStoreRel, loadManifest, overlayGroup, remoteGroupsFrom, storeDir } from "./ConfigSyncCore";
+import { CoreContext, ExternalStoreReader, groupForStoreRel, isSelfStoreRel, loadManifest, overlayGroup, readStoreContractLocals, remoteGroupsFrom, storeDir, withContractLocals } from "./ConfigSyncCore";
 import { isJunkPath, listFilesRecursive } from "./io";
 import { basename, groupStorePath, relativeTo, sidecarStoreSuffix } from "./pathing";
 import { FileChanges, hasChanges, StoreLock, SyncGroup } from "./types";
@@ -26,9 +26,14 @@ export async function statusForGroups(
 ): Promise<{ statuses: GroupStatus[]; updates: LedgerUpdates }> {
   const statuses: GroupStatus[] = [];
   const updates: LedgerUpdates = {};
+  // Computed ONCE for the whole run — same seam as capture() (Fix B): the SAME augmented group
+  // that fed capture's strip must feed comparison's strip too, or a captured-in-sync group would
+  // read as changed forever (contentUnchanged would strip using only the local rule).
+  const contractLocals = await readStoreContractLocals(ctx);
   for (const group of groups) {
     try {
-      const r = await groupStatus(ctx, group, ledger.groups[group.name]);
+      const effGroup = withContractLocals(group, contractLocals.get(group.name) ?? []);
+      const r = await groupStatus(ctx, effGroup, ledger.groups[group.name]);
       statuses.push(r.status);
       if (r.update !== undefined) updates[group.name] = r.update;
     } catch (e) {

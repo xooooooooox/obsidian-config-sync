@@ -505,6 +505,7 @@ describe("groupForItem", () => {
     expect(g.fields).toEqual([
       { pattern: "rootPath", scope: "local", encrypted: false, locked: true },
       { pattern: "remotes", scope: "local", encrypted: false, locked: true },
+      { pattern: "localMembers", scope: "local", encrypted: false, locked: true },
     ]);
   });
 
@@ -517,7 +518,7 @@ describe("groupForItem", () => {
 
 describe("selfPresetRules", () => {
   it("only the genuinely device-local top-level settings — schema v2 has no memberScopes/memberLocal fields", () => {
-    expect(selfPresetRules().map((r) => r.pattern)).toEqual(["rootPath", "remotes"]);
+    expect(selfPresetRules().map((r) => r.pattern)).toEqual(["rootPath", "remotes", "localMembers"]);
   });
 });
 
@@ -547,13 +548,14 @@ describe("ensureSelfPresets", () => {
         fields: [
           { pattern: "rootPath", scope: "local", encrypted: false, locked: true },
           { pattern: "remotes", scope: "local", encrypted: false, locked: true },
+          { pattern: "localMembers", scope: "local", encrypted: false, locked: true },
         ],
       },
     ];
     const out = ensureSelfPresets(groups);
     const self = out.find((g) => g.name === SELF_GROUP_NAME);
     expect(self?.fields).toEqual(selfPresetRules());
-    expect(self?.fields).toHaveLength(2);
+    expect(self?.fields).toHaveLength(3);
   });
 
   it("normalizes an unlocked duplicate of a preset pattern to the locked preset", () => {

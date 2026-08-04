@@ -179,3 +179,65 @@ describe("ConfigSyncPlugin.loadSettings — mergeLegacyAppSliceItems wiring (end
     expect(saveCallCount).toBe(1);
   });
 });
+
+// Task 3 (spec 2026-08-04-per-device-scope-local-containment-design.md): drainEnabledOnLocal
+// (settingsMigration.ts) is unit-tested directly, but its wiring into loadSettings() (`if
+// (drainEnabledOnLocal(this.settings)) await this.saveSettings();`) had no test driving the real
+// load path — same idiom as the mergeLegacyAppSliceItems wiring test above.
+describe("ConfigSyncPlugin.loadSettings — drainEnabledOnLocal wiring (end-to-end)", () => {
+  it("drains a stored enabledOn:'local' into localMembers and persists the drain via saveData exactly once", async () => {
+    const plugin = new ConfigSyncPlugin({} as never, {} as never);
+    const instance = plugin as unknown as {
+      app: unknown;
+      loadData: () => Promise<unknown>;
+      saveData: (d: unknown) => Promise<void>;
+      loadSettings: () => Promise<void>;
+      settings: { items: Record<string, { enabled: boolean; enabledOn?: string }>; localMembers: string[] };
+    };
+    instance.app = fakeApp();
+    instance.loadData = async () => baseData({ "community:config-sync": { enabled: true, enabledOn: "local", companions: [] } });
+    let saveCallCount = 0;
+    instance.saveData = async () => {
+      saveCallCount += 1;
+    };
+
+    await instance.loadSettings();
+
+    expect(instance.settings.localMembers).toEqual(["community:config-sync"]);
+    expect(instance.settings.items["community:config-sync"]?.enabledOn).toBeUndefined();
+    // persisted through the real saveSettings() -> saveData() path exactly once.
+    expect(saveCallCount).toBe(1);
+  });
+});
+
+// A self-apply (adoptConfiguration/applyItems, main.ts ~625-670) rewrites this plugin's own
+// data.json externally and then calls the private reloadSettings() = loadSettings() + recompile()
+// to pick it up. reloadSettings() has no logic of its own beyond that delegation, so wiring the
+// drain into loadSettings() already covers the adopt path — this end-to-end test proves a
+// freshly-adopted foreign enabledOn:"local" is drained on the very next reloadSettings(), rather
+// than round-tripping back out to the shared contract on the next save.
+describe("ConfigSyncPlugin.reloadSettings — drains a freshly-adopted enabledOn:'local' (adopt path)", () => {
+  it("drains the id adopted from a foreign data.json instead of re-capturing it", async () => {
+    const plugin = new ConfigSyncPlugin({} as never, {} as never);
+    const instance = plugin as unknown as {
+      app: unknown;
+      loadData: () => Promise<unknown>;
+      saveData: (d: unknown) => Promise<void>;
+      reloadSettings: () => Promise<void>;
+      settings: { items: Record<string, { enabled: boolean; enabledOn?: string }>; localMembers: string[] };
+    };
+    instance.app = fakeApp();
+    instance.loadData = async () => baseData({});
+    instance.saveData = async () => {};
+    await instance.reloadSettings();
+    expect(instance.settings.localMembers).toEqual([]);
+
+    // Simulate applyWithActions rewriting this plugin's own data.json externally after an adopt —
+    // the foreign contract's enabledOn:"local" lands on disk exactly as the old form wrote it.
+    instance.loadData = async () => baseData({ "community:config-sync": { enabled: true, enabledOn: "local", companions: [] } });
+    await instance.reloadSettings();
+
+    expect(instance.settings.localMembers).toEqual(["community:config-sync"]);
+    expect(instance.settings.items["community:config-sync"]?.enabledOn).toBeUndefined();
+  });
+});

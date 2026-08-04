@@ -7,6 +7,8 @@ import { statusForGroups, remoteLockAhead } from "../src/core/status";
 import { emptyLedger } from "../src/core/ledger";
 import { isChanged } from "../src/core/runHistory";
 import { MemFS, FakePlugins, memGroupsIO } from "./memfs";
+import ConfigSyncPlugin from "../src/main";
+import { MemberDecision } from "../src/ui/panelModel";
 
 export const MANIFEST = JSON.stringify({
   version: 1,
@@ -1645,6 +1647,94 @@ describe("switch-list exceptions", () => {
   });
 });
 
+// task-2 retarget (spec 2026-08-04-per-device-scope-local-containment-design.md): the explicit
+// "this device decides for itself" choice now lives in settings.localMembers, never in
+// ItemConfig.enabledOn — main.ts has no existing test harness beyond
+// tests/mainReloadSettings.test.ts's pattern (Plugin is stubbed to an empty class by
+// tests/mock-obsidian.ts). This drives a real ConfigSyncPlugin instance via bracket access to
+// bypass TypeScript's `private` (compile-time-only), same as customGroups.test.ts.
+function fakePluginApp(): unknown {
+  return {
+    vault: {
+      adapter: { exists: async () => false },
+      configDir: "config-dir",
+      on: () => ({}),
+    },
+    internalPlugins: { plugins: {} },
+    plugins: { manifests: {}, enabledPlugins: new Set<string>(), plugins: {} },
+    workspace: { getLeavesOfType: () => [] },
+  };
+}
+
+interface SwitchExceptionsPluginSurface {
+  app: unknown;
+  loadData: () => Promise<unknown>;
+  saveData: (d: unknown) => Promise<void>;
+  loadSettings: () => Promise<void>;
+  addSwitchExceptions: (name: string, ids: string[]) => Promise<void>;
+  settings: { localMembers: string[]; items: Record<string, { enabledOn?: string }> };
+  syncCenterHost: () => { switchMemberDecisions: (name: string) => MemberDecision[] };
+}
+
+function makeSwitchPlugin(): SwitchExceptionsPluginSurface {
+  const plugin = new ConfigSyncPlugin({} as never, {} as never);
+  const instance = plugin as unknown as SwitchExceptionsPluginSurface;
+  instance.app = fakePluginApp();
+  instance.loadData = async () => ({ schemaVersion: 2, items: {}, remotes: [], bratPluginIndex: {} });
+  instance.saveData = async () => {};
+  return instance;
+}
+
+describe("ConfigSyncPlugin.addSwitchExceptions — 'this device' retarget onto localMembers", () => {
+  it("choosing 'this device' records the member in localMembers and masks it", async () => {
+    const plugin = await (async () => {
+      const p = makeSwitchPlugin();
+      await p.loadSettings();
+      return p;
+    })();
+
+    await plugin.addSwitchExceptions("community-plugins", ["remotely-save"]);
+
+    expect(plugin.settings.localMembers).toContain("community:remotely-save");
+    expect(plugin.settings.items["community:remotely-save"]?.enabledOn).toBeUndefined();
+  });
+
+  // Review Critical: memberDecisionsFor (main.ts) derived "local" only from enablementScopes,
+  // which post-retarget ignores a stored enabledOn "local" — so it never saw localMembers.
+  // switchMemberDecisions (the SyncCenterView host method backing the "· N device-scoped" count
+  // and the "⌂ this device keeps its own on/off state" rows) is a direct consumer, so a plugin
+  // pinned via addSwitchExceptions silently vanished from that reader even though the sibling
+  // memberLocalIdsFor masked it correctly. This must see the member with scope "local".
+  it("switchMemberDecisions reflects a plugin pinned to 'this device'", async () => {
+    const plugin = await (async () => {
+      const p = makeSwitchPlugin();
+      await p.loadSettings();
+      return p;
+    })();
+
+    await plugin.addSwitchExceptions("community-plugins", ["remotely-save"]);
+
+    const decisions = plugin.syncCenterHost().switchMemberDecisions("community-plugins");
+    expect(decisions).toContainEqual({ id: "remotely-save", scope: "local" });
+  });
+
+  // Final-review Important: pinning "this device" via the menu must clear a stale device-class
+  // enabledOn, else "Desktop only → This device → Everywhere" silently resolves back to desktop.
+  it("pinning 'this device' clears a prior device-class enabledOn", async () => {
+    const plugin = await (async () => {
+      const p = makeSwitchPlugin();
+      await p.loadSettings();
+      return p;
+    })();
+    plugin.settings.items["community:remotely-save"] = { enabled: true, companions: [], enabledOn: "desktop" } as unknown as (typeof plugin.settings.items)[string];
+
+    await plugin.addSwitchExceptions("community-plugins", ["remotely-save"]);
+
+    expect(plugin.settings.localMembers).toContain("community:remotely-save");
+    expect(plugin.settings.items["community:remotely-save"]?.enabledOn).toBeUndefined();
+  });
+});
+
 const SNIPPET_MANIFEST = JSON.stringify({
   version: 1,
   groups: [{ name: "enabled-css-snippets", path: "{configDir}/enabled-css-snippets.json", type: "file", devices: "all" }],
@@ -1741,5 +1831,122 @@ describe("applyImport — pull is pure store transport", () => {
     await applyImport(ctx, pending, []);
     expect(await readGroups(ctx)).toEqual(before); // sync list untouched
     expect(await io.exists("cs/store/configdir/plugins/new/data.json")).toBe(true); // store file written
+  });
+});
+
+// Fix B: capture (and status comparison) must strip a group's `local`-scoped fields using the
+// UNION of the local rule and the store contract's rule for that group name — an un-adopted
+// intermediate device must not leak its own device-local values (e.g. userIgnoreFilters)
+// downstream just because its own copy of the group has no (or a narrower) local rule.
+describe("store-contract-authoritative local strip (Fix B)", () => {
+  const CONTRACT_SELF_COPY = JSON.stringify({ schemaVersion: 2, items: {}, customGroups: [] });
+  const CONTRACT_GROUP: SyncGroup = {
+    name: "plugin-demo",
+    path: "{configDir}/plugins/demo/data.json",
+    type: "file",
+    devices: "all",
+    mode: "fields",
+    fields: [{ pattern: "userIgnoreFilters", scope: "local", encrypted: false }],
+  };
+
+  function setupWithContract(): { io: MemFS; plugins: FakePlugins; ctx: CoreContext } {
+    const base = setup();
+    base.ctx.storeListGroups = (json) => (json === CONTRACT_SELF_COPY ? [CONTRACT_GROUP] : []);
+    base.io.seed({ "cs/store/configdir/plugins/config-sync/data.json": CONTRACT_SELF_COPY });
+    return base;
+  }
+
+  const FIELDS_MODE_MANIFEST = JSON.stringify({
+    version: 1,
+    groups: [
+      {
+        name: "plugin-demo",
+        path: "{configDir}/plugins/demo/data.json",
+        type: "file",
+        devices: "all",
+        mode: "fields",
+        fields: [{ pattern: "*Token*", scope: "local", encrypted: false }],
+      },
+    ],
+  });
+
+  const PLAIN_MODE_MANIFEST = JSON.stringify({
+    version: 1,
+    groups: [{ name: "plugin-demo", path: "{configDir}/plugins/demo/data.json", type: "file", devices: "all" }],
+  });
+
+  const DEMO_CONTENT = JSON.stringify({ vikaToken: "secret", theme: "x", userIgnoreFilters: ["a", "b"] });
+
+  it("fields-mode local group: capture strips the contract-local field the local rule does not cover", async () => {
+    const { io, ctx } = setupWithContract();
+    await seedGroups(ctx, FIELDS_MODE_MANIFEST);
+    io.seed({ ".obs/plugins/demo/data.json": DEMO_CONTENT });
+    await capture(ctx, ["plugin-demo"]);
+    const stored = JSON.parse(await io.read("cs/store/configdir/plugins/demo/data.json")) as Record<string, unknown>;
+    expect(stored).not.toHaveProperty("userIgnoreFilters"); // contract-local, stripped despite local rule silence
+    expect(stored).not.toHaveProperty("vikaToken"); // still stripped by the local rule itself
+    expect(stored.theme).toBe("x");
+  });
+
+  it("plain-mode local group: capture still strips the contract-local field (promotion works)", async () => {
+    const { io, ctx } = setupWithContract();
+    await seedGroups(ctx, PLAIN_MODE_MANIFEST);
+    io.seed({ ".obs/plugins/demo/data.json": DEMO_CONTENT });
+    await capture(ctx, ["plugin-demo"]);
+    const stored = JSON.parse(await io.read("cs/store/configdir/plugins/demo/data.json")) as Record<string, unknown>;
+    expect(stored).not.toHaveProperty("userIgnoreFilters");
+    expect(stored.theme).toBe("x");
+    expect(stored.vikaToken).toBe("secret"); // plain-mode local group has no rule stripping this
+  });
+
+  it("a captured, contract-stripped group compares in-sync (no phantom diff)", async () => {
+    const { io, ctx } = setupWithContract();
+    await seedGroups(ctx, FIELDS_MODE_MANIFEST);
+    io.seed({ ".obs/plugins/demo/data.json": DEMO_CONTENT });
+    await capture(ctx, ["plugin-demo"]);
+    const manifest = await loadManifest(ctx);
+    const { statuses } = await statusForGroups(ctx, groupsForDevice(manifest, "desktop"), emptyLedger());
+    expect(statuses.find((s) => s.group === "plugin-demo")?.state).toBe("in-sync");
+  });
+
+  it("no store contract (empty map): capture output is byte-identical to today", async () => {
+    const { io, ctx } = setup(); // no storeListGroups, no self store copy — today's behavior
+    await seedGroups(ctx, FIELDS_MODE_MANIFEST);
+    io.seed({ ".obs/plugins/demo/data.json": DEMO_CONTENT });
+    await capture(ctx, ["plugin-demo"]);
+    const stored = JSON.parse(await io.read("cs/store/configdir/plugins/demo/data.json")) as Record<string, unknown>;
+    expect(stored).not.toHaveProperty("vikaToken"); // local rule still applies
+    expect(stored.userIgnoreFilters).toEqual(["a", "b"]); // no contract — not stripped, as today
+    expect(stored.theme).toBe("x");
+  });
+
+  // Review Important: an explicit local "all" rule for a contract-local pattern must not win by
+  // dedup-skip — the contract has to OVERRIDE it, per spec: "In the window where a device's own
+  // rule says 'sync field X' but the store contract says 'local', capture will strip it."
+  const COLLISION_MANIFEST = JSON.stringify({
+    version: 1,
+    groups: [
+      {
+        name: "plugin-demo",
+        path: "{configDir}/plugins/demo/data.json",
+        type: "file",
+        devices: "all",
+        mode: "fields",
+        fields: [{ pattern: "userIgnoreFilters", scope: "all", encrypted: false }],
+      },
+    ],
+  });
+
+  it("contract-local overrides a colliding explicit local 'all' rule for the same pattern (no leak, no phantom diff)", async () => {
+    const { io, ctx } = setupWithContract();
+    await seedGroups(ctx, COLLISION_MANIFEST);
+    io.seed({ ".obs/plugins/demo/data.json": DEMO_CONTENT });
+    await capture(ctx, ["plugin-demo"]);
+    const stored = JSON.parse(await io.read("cs/store/configdir/plugins/demo/data.json")) as Record<string, unknown>;
+    expect(stored).not.toHaveProperty("userIgnoreFilters"); // contract-local wins over the local "all" rule
+    expect(stored.theme).toBe("x");
+    const manifest = await loadManifest(ctx);
+    const { statuses } = await statusForGroups(ctx, groupsForDevice(manifest, "desktop"), emptyLedger());
+    expect(statuses.find((s) => s.group === "plugin-demo")?.state).toBe("in-sync"); // invariant 1 — no phantom diff
   });
 });

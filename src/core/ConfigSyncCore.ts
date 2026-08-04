@@ -71,6 +71,28 @@ export function overlayGroup(ctx: CoreContext, group: SyncGroup, jsons: (string 
   return { ...group, mode: "fields", fields: [...(group.fields ?? []), ...extra] };
 }
 
+// Store-contract-authoritative `local` strip (Fix B): a group's `local`-scoped fields must be
+// stripped using the STORE CONTRACT's rule for that group name, which OVERRIDES any existing
+// same-pattern local rule — otherwise a device whose own copy of the group has an explicit
+// non-local rule for that pattern (e.g. `scope: "all"`) would publish its own device-local
+// values into the store, which then flow downstream. Every contract-local pattern is therefore
+// forced to `scope: "local"` whether or not the group already has a rule for it, promoting a
+// plain-mode group to "fields" so the strip actually applies. Mirrors overlayGroup's own guard:
+// a FileRule-encrypted group owns whole-file encryption and is never rewritten to "fields" here
+// either.
+export function withContractLocals(group: SyncGroup, contractLocalPatterns: string[]): SyncGroup {
+  if (contractLocalPatterns.length === 0) return group;
+  if (group.fileRule !== undefined) return group;
+  const contractSet = new Set(contractLocalPatterns);
+  const existing = group.fields ?? [];
+  const existingPatterns = new Set(existing.map((f) => f.pattern));
+  const rewritten = existing.map((f) => (contractSet.has(f.pattern) ? { ...f, scope: "local" as const } : f));
+  const added: FieldRule[] = contractLocalPatterns
+    .filter((p) => !existingPatterns.has(p))
+    .map((p) => ({ pattern: p, scope: "local", encrypted: false }));
+  return { ...group, mode: "fields", fields: [...rewritten, ...added] };
+}
+
 export function lockPath(ctx: CoreContext): string {
   return `${ctx.rootPath}/store.lock.json`;
 }
@@ -275,6 +297,10 @@ export async function capture(ctx: CoreContext, names?: string[], onProgress?: P
   const toProcess = manifest.groups.filter((g) => selected === null || selected.has(g.name));
   const lock: StoreLock = { capturedAt: ctx.now(), groups: {} };
   const results: GroupResult[] = [];
+  // Computed ONCE for the whole run (never per group) — the store contract's `local` field
+  // patterns, unioned into each group before it reaches captureGroup (Fix B, see
+  // withContractLocals/readStoreContractLocals above).
+  const contractLocals = await readStoreContractLocals(ctx);
   let done = 0;
   for (const group of manifest.groups) {
     if (selected !== null && !selected.has(group.name)) {
@@ -283,7 +309,7 @@ export async function capture(ctx: CoreContext, names?: string[], onProgress?: P
       continue;
     }
     onProgress?.(done, toProcess.length, group.name);
-    const result = await captureGroup(ctx, group);
+    const result = await captureGroup(ctx, withContractLocals(group, contractLocals.get(group.name) ?? []));
     done++;
     const pluginId = pluginIdForGroup(group);
     if (pluginId !== null) {
@@ -795,6 +821,28 @@ export async function remoteGroupsFrom(ctx: CoreContext, reader: ExternalStoreRe
     return parseSyncManifest(await reader.readFile(LEGACY_MANIFEST_REL)).groups; // compat, deprecated format
   }
   return [];
+}
+
+// Reads the LOCAL store's own self copy (this device's last-pulled/pushed contract, not a
+// remote) and returns, per group name, its `local`-scoped field patterns — the union input for
+// withContractLocals. Mirrors remoteGroupsFrom's schema-v2 compile path above, but reads via
+// ctx.io instead of an ExternalStoreReader. Empty map when there is no self store copy yet, or
+// no ctx.storeListGroups hook (bare test contexts) — both preserve today's behavior exactly.
+export async function readStoreContractLocals(ctx: CoreContext): Promise<Map<string, string[]>> {
+  const map = new Map<string, string[]>();
+  const path = `${ctx.rootPath}/${SELF_STORE_DATA_REL}`;
+  if (!(await ctx.io.exists(path)) || ctx.storeListGroups === undefined) return map;
+  // A corrupt/unreadable store copy must never block capture or status — mirrors loadLock's own
+  // try/catch degrade-to-empty stance (capture wraps loadLock the same way, above).
+  try {
+    const groups = ctx.storeListGroups(await ctx.io.read(path));
+    for (const g of groups) {
+      map.set(g.name, (g.fields ?? []).filter((f) => f.scope === "local").map((f) => f.pattern));
+    }
+  } catch {
+    return new Map();
+  }
+  return map;
 }
 
 export interface PendingPull {

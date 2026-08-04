@@ -342,6 +342,7 @@ export function selfPresetRules(): FieldRule[] {
   return [
     { pattern: "rootPath", scope: "local", encrypted: false, locked: true },
     { pattern: "remotes", scope: "local", encrypted: false, locked: true },
+    { pattern: "localMembers", scope: "local", encrypted: false, locked: true },
   ];
 }
 

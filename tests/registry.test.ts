@@ -280,6 +280,27 @@ describe("enablementScopes — per-element scope from enabledOn", () => {
     });
     expect(Object.keys(enablementScopes(defs, s, "core-plugins.json"))).toEqual([]);
   });
+
+  // task-2 retarget: the explicit "this device" choice now lives in settings.localMembers, never
+  // in ItemConfig.enabledOn — a stored "local" is a pre-retarget artifact and must be ignored
+  // (read back as "all"), while the disabled-card structural "local" is untouched.
+  it("ignores a stored enabledOn 'local' but still forces 'local' for a disabled card", () => {
+    const env: RegistryEnv = {
+      ...EMPTY_ENV,
+      plugins: [
+        { id: "a", name: "A" },
+        { id: "b", name: "B" },
+      ],
+    };
+    const defs = buildItemDefs(env);
+    const s = settings({
+      "community:a": on({ enabledOn: "local" }),
+      "community:b": emptyItemConfig(), // disabled
+    });
+    const scopes = enablementScopes(defs, s, "community-plugins.json");
+    expect(scopes["a"]).toBe("all"); // explicit choice now ignored
+    expect(scopes["b"]).toBe("local"); // disabled card stays local
+  });
 });
 
 describe("compileItems — companion path collisions", () => {

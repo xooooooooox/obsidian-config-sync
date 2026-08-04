@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { applyTransform, captureTransform, contentUnchanged, scanSensitive, groupNeedsPassphrase, isWholeFileEncrypted } from "../src/core/modes";
 import { isFieldEnvelope, parseFileEnvelope } from "../src/core/crypto";
+import { groupForItem, SELF_GROUP_NAME } from "../src/core/catalog";
 import { SyncGroup } from "../src/core/types";
 
 describe("scanSensitive", () => {
@@ -104,5 +105,14 @@ describe("captureTransform / applyTransform round-trip", () => {
     await expect(captureTransform(g, src, null, "desktop")).rejects.toThrowError(
       "passphrase not set on this device — Settings → General"
     );
+  });
+
+  it("self item strips localMembers on capture and restores it on apply", async () => {
+    const g = groupForItem(SELF_GROUP_NAME, "{configDir}/plugins/config-sync/data.json", "file", null);
+    const local = JSON.stringify({ schemaVersion: 2, remotes: [], items: {}, localMembers: ["community:remotely-save"] });
+    const stored = await captureTransform(g, local, null, "desktop", null);
+    expect((JSON.parse(stored.content) as Record<string, unknown>).localMembers).toBeUndefined();
+    const applied = await applyTransform(g, stored.content, local, null, "desktop", null);
+    expect((JSON.parse(applied) as Record<string, unknown>).localMembers).toEqual(["community:remotely-save"]);
   });
 });

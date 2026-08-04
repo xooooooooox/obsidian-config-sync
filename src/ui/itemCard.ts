@@ -69,7 +69,7 @@ export function countEncrypted(cfg: ItemConfig): number {
   return n;
 }
 
-export function computeBadges(def: ItemDef, cfg: ItemConfig): Badge[] {
+export function computeBadges(def: ItemDef, cfg: ItemConfig, isThisDevice: boolean): Badge[] {
   const badges: Badge[] = [];
   // On/off-only badge first, innate property (settingsFile state on the def)
   if (def.settingsFile !== undefined && def.settingsFile.defaultPath === null) {
@@ -84,8 +84,14 @@ export function computeBadges(def: ItemDef, cfg: ItemConfig): Badge[] {
   if (def.desktopOnly === true) {
     badges.push({ text: "desktop-only plugin", cls: "config-sync-card-badge-plat", icon: "monitor" });
   }
-  if (def.enablement !== undefined && cfg.enabledOn !== undefined && cfg.enabledOn !== "all") {
-    badges.push({ text: ON_BADGE_TEXT[cfg.enabledOn], cls: ON_BADGE_CLASS[cfg.enabledOn] });
+  // "this device" is the device-local localMembers set (never a stored enabledOn:"local");
+  // desktop/mobile still ride enabledOn.
+  if (def.enablement !== undefined) {
+    if (isThisDevice) {
+      badges.push({ text: ON_BADGE_TEXT.local, cls: ON_BADGE_CLASS.local });
+    } else if (cfg.enabledOn !== undefined && cfg.enabledOn !== "all" && cfg.enabledOn !== "local") {
+      badges.push({ text: ON_BADGE_TEXT[cfg.enabledOn], cls: ON_BADGE_CLASS[cfg.enabledOn] });
+    }
   }
   const scoped = countDeviceScoped(cfg);
   if (scoped > 0) badges.push({ text: `${scoped} device-scoped`, cls: "config-sync-card-badge-count" });

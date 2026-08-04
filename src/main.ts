@@ -58,7 +58,7 @@ import {
   parentCardLabel,
   RegistryEnv,
 } from "./core/registry";
-import { isLegacySettings, mergeLegacyAppSliceItems, SCHEMA_UPGRADE_NOTICE } from "./core/settingsMigration";
+import { drainEnabledOnLocal, isLegacySettings, mergeLegacyAppSliceItems, SCHEMA_UPGRADE_NOTICE } from "./core/settingsMigration";
 import { applySwitchList, captureSwitchList, localRealPath, parseSwitchList, readLocalSwitchList, subtractForceOff, SWITCH_LIST_GROUPS, switchDivergence, SwitchList, writeLocalSwitchList } from "./core/switchList";
 import { applyTransform, captureTransform, isWholeFileEncrypted, scanSensitive, SensitiveScan } from "./core/modes";
 import { PkmMode, PkmProbe, resolveEffectiveMode, resolveRootPath } from "./core/pkm";
@@ -99,6 +99,7 @@ interface ConfigSyncSettings {
   customGroups: CustomGroupConfig[];
   bratPluginIndex: BratIndex; // plugin id -> "owner/repo"; derived from BRAT's synced list, synced too
   runHistory: RunHistorySettings; // local-only record of past runs; never synced
+  localMembers: string[]; // item ids (community:<id> / core:<id>) device-local-only; never synced
 }
 
 interface RunHistorySettings {
@@ -125,6 +126,7 @@ const DEFAULT_SETTINGS: ConfigSyncSettings = {
   customGroups: [],
   bratPluginIndex: {},
   runHistory: { enabled: true, path: "", maxCount: 50, maxDays: 30 },
+  localMembers: [],
 };
 
 // config-sync's own registry item id (registry.ts: community plugin ids are prefixed "community:")
@@ -617,29 +619,9 @@ export default class ConfigSyncPlugin extends Plugin {
           return null;
         }
       },
-      addSwitchExceptions: async (name, ids) => {
-        // Schema v2 (spec §6): per-element enablement scope now lives on each plugin's own
-        // ItemConfig.enabledOn, not a group-keyed memberLocal map — pin every named id to "local"
-        // ("this device manages its own on/off") on its item.
-        const carrier = name === "community-plugins" ? "community-plugins.json" : name === "core-plugins" ? "core-plugins.json" : null;
-        if (carrier === null) return; // e.g. enabled-css-snippets: governed by its own perItem map, not this mechanism
-        const prefix = carrier === "core-plugins.json" ? "core:" : "community:";
-        const nextItems = { ...this.settings.items };
-        for (const id of ids) {
-          const itemId = `${prefix}${id}`;
-          nextItems[itemId] = { ...(nextItems[itemId] ?? emptyItemConfig()), enabledOn: "local" };
-        }
-        this.settings.items = nextItems;
-        await this.saveSettings();
-        void this.refreshLocalStatus();
-      },
-      setMemberEnabledOn: async (carrier, elementId, scope) => {
-        // Same field the settings card's "Enabled on" writes; masking covers not-installed
-        // plugins since the 2026-07-27 enablementScopes fix.
-        const itemId = `${carrier === "core-plugins" ? "core" : "community"}:${elementId}`;
-        this.settings.items = { ...this.settings.items, [itemId]: itemConfigWithEnabledOn(this.settings.items[itemId], scope) };
-        await this.saveSettings();
-      },
+      addSwitchExceptions: (name, ids) => this.addSwitchExceptions(name, ids),
+      setMemberEnabledOn: (carrier, elementId, scope) => this.setMemberEnabledOn(carrier, elementId, scope),
+      clearMemberLocal: (carrier, elementId) => this.clearMemberLocal(carrier, elementId),
       adoptConfiguration: async () => {
         try {
           // config-sync's own registry item (registry.ts builds one for every installed plugin,
@@ -1108,14 +1090,101 @@ export default class ConfigSyncPlugin extends Plugin {
     return out;
   }
 
+  // Base decisions from enablementScopes, OVERLAID with settings.localMembers for this group's
+  // carrier as explicit "this device" (task-2 retarget: localMembers wins over any base scope
+  // for that id — an explicit "this device" choice always beats a device-class rule the writer
+  // path left behind). Every this-device reader (switchMemberDecisions' · N device-scoped count,
+  // the ⌂ explanation rows, and memberLocalIdsFor below) goes through this so they can't drift
+  // apart the way memberDecisionsFor alone did pre-fix (it only saw the structural
+  // disabled-card "local", never localMembers).
   private memberDecisionsFor(group: string): MemberDecision[] {
-    return memberDecisionsFromScopes(this.enablementScopesFor(group));
+    const base = memberDecisionsFromScopes(this.enablementScopesFor(group));
+    const carrier = this.carrierFor(group);
+    const prefix = carrier === "core-plugins.json" ? "core:" : carrier === "community-plugins.json" ? "community:" : null;
+    if (prefix === null) return base;
+    const fromLocalMembers = this.settings.localMembers.filter((id) => id.startsWith(prefix)).map((id) => id.slice(prefix.length));
+    if (fromLocalMembers.length === 0) return base;
+    const decisions = new Map(base.map((d) => [d.id, d] as const));
+    for (const id of fromLocalMembers) decisions.set(id, { id, scope: "local" });
+    return [...decisions.values()].sort((a, b) => a.id.localeCompare(b.id));
   }
 
+  // This-device ids for a switch-list group: memberDecisionsFor already carries the
+  // settings.localMembers union (task-2 retarget), so this is just the "local" projection.
   private memberLocalIdsFor(group: string): string[] {
     return this.memberDecisionsFor(group)
       .filter((d) => d.scope === "local")
       .map((d) => d.id);
+  }
+
+  // Shared add/remove for the explicit "this device" set (task-2 retarget) — every write path
+  // that sets or clears "this device decides for itself" goes through this so the settings-card
+  // chip (setMemberLocal, called by SettingTab's renderEnabledOnZone) and the where-it-runs menu
+  // (addSwitchExceptions/setMemberEnabledOn/clearMemberLocal) can never drift apart. In-memory
+  // only — callers persist with their own saveSettings() call.
+  private setLocalMember(itemId: string, on: boolean): void {
+    const set = new Set(this.settings.localMembers);
+    if (on) set.add(itemId);
+    else set.delete(itemId);
+    this.settings.localMembers = [...set];
+  }
+
+  // "this device" and a device-class scope are mutually exclusive. The where-it-runs menu's pin
+  // ("this device") and "Everywhere" reset both go through localMembers only, so they must also
+  // drop any stale items[id].enabledOn — otherwise "Desktop only → This device → Everywhere" would
+  // silently resolve back to desktop. (The settings-card chip and setMemberEnabledOn manage
+  // enabledOn directly, so they don't call this.)
+  private clearMemberEnabledOn(itemId: string): void {
+    const cfg = this.settings.items[itemId];
+    if (cfg?.enabledOn !== undefined) {
+      this.settings.items = { ...this.settings.items, [itemId]: { ...cfg, enabledOn: undefined } };
+    }
+  }
+
+  // SettingsHost-facing wrapper (SettingTab's "Enabled on" chip): single item, persists itself.
+  async setMemberLocal(itemId: string, on: boolean): Promise<void> {
+    this.setLocalMember(itemId, on);
+    await this.saveSettings();
+  }
+
+  // The where-it-runs menu's "This device decides for itself" entry (spec 2026-07-28 §4) — and
+  // KeepOnDeviceModal's multi-id "keep extra on this device" batch. Schema v2 (task-2 retarget):
+  // this no longer writes ItemConfig.enabledOn = "local"; it adds every named id to
+  // settings.localMembers instead (never enablementScopes' business — that field is now ignored).
+  async addSwitchExceptions(name: string, ids: string[]): Promise<void> {
+    const carrier = this.carrierFor(name);
+    if (carrier === null) return; // e.g. enabled-css-snippets: governed by its own perItem map, not this mechanism
+    const prefix = carrier === "core-plugins.json" ? "core:" : "community:";
+    for (const id of ids) {
+      this.setLocalMember(`${prefix}${id}`, true);
+      this.clearMemberEnabledOn(`${prefix}${id}`);
+    }
+    await this.saveSettings();
+    void this.refreshLocalStatus();
+  }
+
+  // The where-it-runs menu's "Desktop only"/"Mobile only" entries; same field the settings
+  // card's "Enabled on" writes for those two scopes. Masking covers not-installed plugins since
+  // the 2026-07-27 enablementScopes fix. A device-class rule always overrides a prior "this
+  // device" choice, so it clears the id from localMembers too (task-2 retarget).
+  async setMemberEnabledOn(carrier: string, elementId: string, scope: "desktop" | "mobile"): Promise<void> {
+    const itemId = `${carrier === "core-plugins" ? "core" : "community"}:${elementId}`;
+    this.setLocalMember(itemId, false);
+    this.settings.items = { ...this.settings.items, [itemId]: itemConfigWithEnabledOn(this.settings.items[itemId], scope) };
+    await this.saveSettings();
+  }
+
+  // The where-it-runs menu's "Everywhere" entry: clears a prior "this device" choice
+  // (localMembers) so the member goes back to following the group's normal capture/apply flow.
+  // "Everywhere" itself carries no rule to write (unchanged) — task-2 retarget only adds this
+  // clear, needed now that "this device" no longer round-trips through the single enabledOn
+  // field the other three menu entries already overwrite.
+  async clearMemberLocal(carrier: string, elementId: string): Promise<void> {
+    const itemId = `${carrier === "core-plugins" ? "core" : "community"}:${elementId}`;
+    this.setLocalMember(itemId, false);
+    this.clearMemberEnabledOn(itemId);
+    await this.saveSettings();
+    void this.refreshLocalStatus();
   }
 
   // The runtime mask per switch group = This-device ids (memberLocal) ∪ ids class-scoped away
@@ -1497,6 +1566,12 @@ export default class ConfigSyncPlugin extends Plugin {
     // that just loaded. `data` may still carry the pre-merge `appJson` key even though it's no
     // longer part of ConfigSyncSettings — Object.assign copied it onto this.settings above.
     if (mergeLegacyAppSliceItems(this.settings)) await this.saveSettings();
+    // Task 3 (spec 2026-08-04-per-device-scope-local-containment-design.md): drain any leftover
+    // enabledOn:"local" (pre-retarget artifact) into localMembers on every load — including after
+    // reloadSettings() re-reads a just-adopted foreign data.json (adoptConfiguration/applyItems
+    // both call loadSettings() through reloadSettings()), so a freshly-adopted "local" is drained
+    // rather than re-captured on the next save.
+    if (drainEnabledOnLocal(this.settings)) await this.saveSettings();
   }
 
   async saveSettings(): Promise<void> {

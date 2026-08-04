@@ -307,6 +307,14 @@ export function parentCardLabel(groupName: string, defs: ItemDef[], settings: Co
 // string-array files, so they cannot go through the generic capturePerItemArray/PerItemScopes
 // mechanism the way a plain array key like enabledCssSnippets does — the existing switch-list
 // masking machinery, driven by this map, is the correct home for per-element enable scope).
+// A stored enabledOn of "local" is a pre-retarget artifact (spec: the explicit "this device
+// decides for itself" choice now lives in settings.localMembers, never in ItemConfig.enabledOn —
+// see main.ts's setMemberLocal/memberLocalIdsFor) — ignored here, same as unset ("all").
+function explicitScope(enabledOn: RuleScope | undefined): RuleScope {
+  const scope = enabledOn ?? "all";
+  return scope === "local" ? "all" : scope;
+}
+
 export function enablementScopes(defs: ItemDef[], settings: CompileSettings, carrier: "core-plugins.json" | "community-plugins.json"): Record<string, RuleScope> {
   const out: Record<string, RuleScope> = {};
   const covered = new Set<string>();
@@ -314,7 +322,7 @@ export function enablementScopes(defs: ItemDef[], settings: CompileSettings, car
     if (def.enablement?.carrier !== carrier) continue;
     covered.add(def.id);
     const cfg = configFor(settings, def.id);
-    out[def.enablement.element] = cfg.enabled ? (cfg.enabledOn ?? "all") : "local";
+    out[def.enablement.element] = cfg.enabled ? explicitScope(cfg.enabledOn) : "local";
   }
   // Item configs with no local def: the plugin isn't installed on this device, but its element
   // still lives in the store's switch list, so an adopted enabledOn / disabled-card decision must
@@ -323,7 +331,7 @@ export function enablementScopes(defs: ItemDef[], settings: CompileSettings, car
   const prefix = carrier === "core-plugins.json" ? "core:" : "community:";
   for (const [id, cfg] of Object.entries(settings.items)) {
     if (covered.has(id) || !id.startsWith(prefix)) continue;
-    out[id.slice(prefix.length)] = cfg.enabled ? (cfg.enabledOn ?? "all") : "local";
+    out[id.slice(prefix.length)] = cfg.enabled ? explicitScope(cfg.enabledOn) : "local";
   }
   return out;
 }

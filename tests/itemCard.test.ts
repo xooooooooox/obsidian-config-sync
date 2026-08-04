@@ -83,7 +83,7 @@ function cfg(overrides: Partial<ItemConfig> = {}): ItemConfig {
 describe("computeBadges", () => {
   it("state-only def gets the on/off-only badge first, with tooltip", () => {
     const def: ItemDef = { id: "core:bases", label: "Bases", description: "", section: "core", settingsFile: { defaultPath: null } };
-    const badges = computeBadges(def, { enabled: true, companions: [] });
+    const badges = computeBadges(def, { enabled: true, companions: [] }, false);
     expect(badges[0]).toEqual({
       text: "on/off only",
       cls: "config-sync-card-badge-state",
@@ -93,34 +93,40 @@ describe("computeBadges", () => {
 
   it("a def with a settings file gets no on/off-only badge", () => {
     const def: ItemDef = { id: "core:backlinks", label: "Backlinks", description: "", section: "core", settingsFile: { defaultPath: "{configDir}/backlink.json" } };
-    expect(computeBadges(def, { enabled: true, companions: [] }).some((b) => b.text === "on/off only")).toBe(false);
+    expect(computeBadges(def, { enabled: true, companions: [] }, false).some((b) => b.text === "on/off only")).toBe(false);
   });
 
   it("no badges for a plain off/default card", () => {
-    expect(computeBadges(APP_DEF, cfg())).toEqual([]);
+    expect(computeBadges(APP_DEF, cfg(), false)).toEqual([]);
   });
 
   it("enabledOn default (\"all\"/undefined) never shows an on: badge, even with enablement", () => {
-    expect(computeBadges(COMMUNITY_DEF, cfg({ enabled: true, enabledOn: "all" }))).toEqual([]);
-    expect(computeBadges(COMMUNITY_DEF, cfg({ enabled: true }))).toEqual([]);
+    expect(computeBadges(COMMUNITY_DEF, cfg({ enabled: true, enabledOn: "all" }), false)).toEqual([]);
+    expect(computeBadges(COMMUNITY_DEF, cfg({ enabled: true }), false)).toEqual([]);
   });
 
   it("desktop-only def prepends the innate grey chip ahead of every config badge (round-8 spec §2)", () => {
     const dOnly: ItemDef = { ...COMMUNITY_DEF, desktopOnly: true };
-    expect(computeBadges(dOnly, cfg())).toEqual([{ text: "desktop-only plugin", cls: "config-sync-card-badge-plat", icon: "monitor" }]);
-    expect(computeBadges(dOnly, cfg({ enabledOn: "desktop" }))).toEqual([
+    expect(computeBadges(dOnly, cfg(), false)).toEqual([{ text: "desktop-only plugin", cls: "config-sync-card-badge-plat", icon: "monitor" }]);
+    expect(computeBadges(dOnly, cfg({ enabledOn: "desktop" }), false)).toEqual([
       { text: "desktop-only plugin", cls: "config-sync-card-badge-plat", icon: "monitor" },
       { text: "on: desktop", cls: "config-sync-card-badge-desktop" },
     ]);
   });
 
   it("enabledOn non-default shows the matching on: badge — only when the def has an enablement", () => {
-    expect(computeBadges(COMMUNITY_DEF, cfg({ enabledOn: "desktop" }))).toEqual([{ text: "on: desktop", cls: "config-sync-card-badge-desktop" }]);
-    expect(computeBadges(COMMUNITY_DEF, cfg({ enabledOn: "mobile" }))).toEqual([{ text: "on: mobile", cls: "config-sync-card-badge-mobile" }]);
-    expect(computeBadges(COMMUNITY_DEF, cfg({ enabledOn: "local" }))).toEqual([{ text: "on: this device", cls: "config-sync-card-badge-local" }]);
+    expect(computeBadges(COMMUNITY_DEF, cfg({ enabledOn: "desktop" }), false)).toEqual([{ text: "on: desktop", cls: "config-sync-card-badge-desktop" }]);
+    expect(computeBadges(COMMUNITY_DEF, cfg({ enabledOn: "mobile" }), false)).toEqual([{ text: "on: mobile", cls: "config-sync-card-badge-mobile" }]);
+    // enabledOn:"local" is no longer honored — "this device" comes from the isThisDevice flag (see below)
+    expect(computeBadges(COMMUNITY_DEF, cfg({ enabledOn: "local" }), false)).toEqual([]);
     // no-enablement card (app): the same enabledOn value produces NO badge — the projection
     // doesn't exist for this card at all.
-    expect(computeBadges(APP_DEF, cfg({ enabledOn: "desktop" }))).toEqual([]);
+    expect(computeBadges(APP_DEF, cfg({ enabledOn: "desktop" }), false)).toEqual([]);
+  });
+
+  it("shows 'on: this device' from the isThisDevice flag, not from a stored enabledOn", () => {
+    expect(computeBadges(COMMUNITY_DEF, cfg(), true)).toEqual([{ text: "on: this device", cls: "config-sync-card-badge-local" }]);
+    expect(computeBadges(COMMUNITY_DEF, cfg(), false)).toEqual([]);
   });
 
   it("counts device-scoped fields, per-item elements, and the fileRule scope together", () => {
@@ -141,7 +147,7 @@ describe("computeBadges", () => {
     expect(countEncrypted(fieldsEncrypted)).toBe(1);
     const fileEncrypted = cfg({ settingsFile: { mode: "plain", rules: {}, perItem: {}, fileRule: { scope: "all", encrypted: true } } });
     expect(countEncrypted(fileEncrypted)).toBe(1);
-    expect(computeBadges(HOTKEYS_DEF, fileEncrypted)).toEqual([{ text: "1 encrypted", cls: "config-sync-card-badge-count" }]);
+    expect(computeBadges(HOTKEYS_DEF, fileEncrypted, false)).toEqual([{ text: "1 encrypted", cls: "config-sync-card-badge-count" }]);
   });
 
   it("badge order is on: -> device-scoped -> encrypted, omitting zero counts", () => {
@@ -149,7 +155,7 @@ describe("computeBadges", () => {
       enabledOn: "desktop",
       settingsFile: { mode: "fields", rules: { a: { scope: "mobile", encrypted: true } }, perItem: {} },
     });
-    expect(computeBadges(COMMUNITY_DEF, c)).toEqual([
+    expect(computeBadges(COMMUNITY_DEF, c, false)).toEqual([
       { text: "on: desktop", cls: "config-sync-card-badge-desktop" },
       { text: "1 device-scoped", cls: "config-sync-card-badge-count" },
       { text: "1 encrypted", cls: "config-sync-card-badge-count" },
