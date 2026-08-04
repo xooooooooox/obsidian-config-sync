@@ -79,11 +79,11 @@ An autocomplete dropdown opens as soon as the box is focused, suggesting keys th
 
 #### Deciding where a plugin belongs
 
-When a plugin is switched on on one side only, its row explains the consequence and a "where it runs" menu sets Desktop only / Mobile only / this-device / everywhere on the spot (impossible options are hidden).
+When a plugins on/off list differs between this device and the store, the item leads with a plain-language summary — *"N plugins are on for your other devices but off this computer — Apply turns them on."* and/or its Capture counterpart — instead of a per-plugin flood. A collapsible **Set a per-plugin rule** list (searchable) holds the divergent plugins, each ending in the same cycling scope icon Settings uses (All devices → Desktop only → Mobile only → This device; desktop-only plugins skip the Mobile stop). When the split runs both ways, a caution notes that a bulk Apply or Capture resolves every plugin one way, and the rule list groups its rows by direction — **Off this computer · N** / **On this computer only · N** — so pinning a plugin to This device preserves it through a bulk action. Plugins that already carry a rule sit in an amber **N scoped to specific devices** section at the bottom. The CSS-snippets on/off list gets the same summary in snippet wording; where each snippet runs is set on the Appearance card in Settings.
 
 #### Leftovers
 
-Stop syncing an item at any time from its card's sync toggle — optionally deleting its store copy. Store files left behind with no matching item surface as **Leftover** for one-click cleanup.
+Stop syncing an item at any time from its card's sync toggle — optionally deleting its store copy. Store files left behind with no matching item surface as **Leftover** for one-click cleanup. Only files for items you removed from your sync selection qualify: a core plugin that's merely switched off on this device keeps its store settings attached to its card (a normal To-apply row), never in Leftover.
 
 ### Availability sections and the install engine
 
@@ -112,7 +112,7 @@ A plugin ahead of the store's recorded version shows a quiet metadata line inste
 Every row across **Obsidian**, **Core plugins**, **Community plugins** and **Beta** is a card: name, badges (a grey `desktop-only plugin` chip when the plugin can't run on mobile; `on: desktop` / `on: mobile` / `on: this device` when a plugin's enabled state isn't the default; counts of device-scoped and encrypted rules), a sync toggle, and a chevron that opens its drawer.
 
 - The **Obsidian** tab has three cards: **App settings** (the whole `app.json` — editing, new-note and link behavior, and other general options), **Appearance** (theme, fonts and CSS snippets) and **Hotkeys** (your custom keyboard shortcuts).
-- **Core** and **Community** plugins are listed in full: a core plugin with no settings file yet is a state-only card (just its **Enabled on** zone) until it writes one.
+- **Core** and **Community** plugins are listed in full: a core plugin gets a full card even before it has written its settings file here — the file's path is known from the plugin itself, so its store copy stays attached wherever the file exists.
 - The **Search all settings…** box spans General, all picker tabs, Advanced and Remotes, and accepts `scope:` (general/obsidian/core/community/advanced/remotes) and `type:` (file/folder) qualifiers with autocomplete alongside plain text.
 - The **Beta** tab tracks community plugins installed through [BRAT](https://github.com/TfTHacker/obsidian42-brat) — same card, same three drawer zones — so their configs sync like any other plugin.
 - Each section lists its cards alphabetically; sensitive-looking keys (tokens, secrets) are highlighted inside a card's File preview so you see them before enabling syncing.

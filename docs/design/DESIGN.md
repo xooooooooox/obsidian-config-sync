@@ -103,13 +103,13 @@ locked/cyan.
 double as the self-pane title's capture/coldstart states, with `alert-triangle` both and
 `settings` default — see §2.4) · tabs: `settings`,
 `gem`, `toy-brick`, `puzzle`, `flask-conical` (BratIcon preferred when registered),
-`wrench`, `git-branch` · `monitor` / `smartphone` — the "where it runs" menu's Desktop only/Mobile
-only items, the per-member decision note rows (`config-sync-lddetail-ic`), and the row-level
-desktop-only-plugin badge (`config-sync-card-badge-plat`, itemCard.ts) · `globe` — the "where it
-runs" menu's Everywhere item · `airplay` — `SCOPE_ICONS` "This device" stop, rendered by every
-drawer scope-cycle (`renderScopeCycle`, itemCard.ts) and by the "where it runs" menu's "This
-device decides for itself" item (icons-only menu — a text `⌂` rendered visibly smaller than
-its SVG neighbors) · `settings-2` — the sidebar Config Sync
+`wrench`, `git-branch` · `monitor` / `smartphone` — `SCOPE_ICONS`' Desktop only/Mobile only
+stops (every scope-cycle) and the row-level
+desktop-only-plugin badge (`config-sync-card-badge-plat`, itemCard.ts) · `airplay` —
+`SCOPE_ICONS` "This device" stop; the whole cycle renders through the one shared
+`renderScopeCycle` (scopeCycle.ts; the model — `SCOPE_ICONS`/`nextScope`/`scopeCycleTooltip`
+— stays in itemCard.ts), used by every Settings drawer scope cell and the Sync Center's
+per-plugin rule and scoped-members rows · `settings-2` — the sidebar Config Sync
 self-entry tile, the compact switcher's self entry, and the self pane's title-row Settings
 button · `ban` — the drawer's Stop-syncing footer action · `monitor-smartphone` — the
 scope-cycle "All devices" stop · `arrow-left-right` — the Sync Center leaf/tab icon ·
@@ -127,9 +127,8 @@ qualifier-autocomplete value rows (`check`, qualifierSearch.ts). Everywhere else
 remain text. Chevrons `▸ ▾ ▴`. Actions `⤓` install, `⏻` enable. Report chips `+ ~ −`.
 Warnings `⚠ ✗`. Conflict modal `＋ ＝`. `⌂` is the vocabulary's local/device-exception
 glyph, used wherever a decision is pinned to one device — the conflict modal is one case
-(`＋ ＝ ⌂`), but it also appears in local-decision detail rows and the "⌂ Keep N extra…"
-button. Not in the "where it runs" menu: its items are Lucide-iconed, so the local stop
-uses `airplay` there (§2.1). Self-pane
+(`＋ ＝ ⌂`). Scope-cycle controls render their local stop as Lucide `airplay` instead
+(§2.1). Self-pane
 title icon (`config-sync-self-title-ic`) is Lucide (the self pane is a hero surface):
 `arrow-down-to-line` coldstart · `arrow-up-from-line` capture — the ACTION_ICON pair —
 plus `alert-triangle` both · `settings` default. Removal glyphs `⊘` stop-sync · `⌫`
@@ -212,14 +211,17 @@ noted):
   (`-fieldrow/-ftag/-act-btn`), remotes forms + `-test-strip`, search (`-hit/-scopetag`),
   passphrase `-ppset/-ppbadge`. `config-sync-section-sub` — one subtitle per tab, above the
   Sync all row ("Each plugin syncs its settings and on/off state." for Core, "…its files,
-  settings and on/off state." elsewhere), replacing the old per-row boilerplate description
-  (the `on/off only` badge for state-only cards is documented under Row, below).
-- **Member guidance** `config-sync-memberblock/-memberrow/-memberrow-btn` — inside a
-  community/core switch-list group's divergence detail, one row per element the pending
-  Capture/Apply would flip, worded in device language (`renderMemberBlock`); each row's
-  `where it runs ▾` button opens a `Menu` (`openWhereItRunsMenu`) offering Desktop only /
-  Mobile only / This device decides for itself (a local exception) / Everywhere (no
-  rule — leaves the pending action as-is), each with its §2.1 Lucide icon.
+  settings and on/off state." elsewhere), replacing the old per-row boilerplate description.
+- **Member guidance** (定稿 2026-08-04/05) — inside a switch-list group's divergence detail:
+  `config-sync-member-summary/-summary-line/-summary-caption` — directional summary lines
+  (apply first, each led by its §2.1 action icon) plus the two-sided caution;
+  `config-sync-disclosure(-cx/-body)` collapsibles — "Set a per-plugin rule" and, always last
+  and store-absent-safe, the amber "N scoped to specific devices"; the rule list
+  `config-sync-rule-search/-rule-list/-rule-ghdr/-rule-row/-rule-mid` — direction group
+  headers ("Off this computer · N" / "On this computer only · N") only when the split runs
+  both ways, every row ending in the shared scope-cycle; and the amber `config-sync-lddetail`
+  capture-publish note. The snippets on/off list renders the summary only (snippet wording) —
+  per-snippet devices live on the Appearance card.
 - **Modals**: pull-conflict `config-sync-cm-*` + `diffView.ts` (shared diff panel:
   Unified/Split toggle desktop-only, **Collapse/Full toggle both platforms** folding
   unchanged runs into `-cm-dgap` "⋯ N unchanged lines ⋯" rows); exclude-extras
@@ -244,13 +246,12 @@ noted):
   container row, `kind: "app-view"`/`"appearance-domain"` special-casing, the aggregate "Enabled
   community plugins"/"Enabled core plugins" rows) with ONE row + drawer renderer for every synced
   item (`SettingTab.ts`'s `renderItemCard`, driven by `registry.ts`'s `ItemDef`). No kind
-  branches remain: an Obsidian option group, a core plugin, a community/beta plugin and a
-  state-only plugin (no settings file yet) all render through the same function.
+  branches remain: an Obsidian option group, a core plugin and a community/beta plugin all
+  render through the same function — a core plugin whose settings file hasn't been written
+  here still gets the full card, since its path is synthesized from the plugin id.
   - **Row** `config-sync-item-wrap` — chevron, name, badges (`config-sync-card-badge*`; order:
-    dashed `config-sync-card-badge-state` `on/off only` chip (state-only core plugin — its def
-    has a `settingsFile` with `defaultPath: null`, no file written on this device yet; tooltip
-    "No settings file on this device yet — only the on/off state syncs.") → grey `desktop-only
-    plugin` chip (manifest `isDesktopOnly`, monitor icon via `-badge-plat/-badge-ic`)
+    grey `desktop-only plugin` chip (manifest `isDesktopOnly`, monitor icon via
+    `-badge-plat/-badge-ic`)
     → enablement scope when non-default → `N device-scoped` → `N encrypted`; a zero count never
     renders), sync toggle. No mode chip and no other row content — mode is a derived, drawer-only
     state (`itemCard.ts`'s `deriveMode`, see Drawer ② below), never a header control — the same

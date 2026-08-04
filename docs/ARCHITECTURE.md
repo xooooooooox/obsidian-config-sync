@@ -249,8 +249,12 @@ functions.
   still renders the legacy per-`SyncGroup` rule form, unrelated to the card renderer.
 - `itemCard.ts` — pure render-model helpers for the card renderer (badges, zone presence, the
   Fields/Companion-folders row models, path/companion validation) so the card's logic is
-  unit-testable without touching the DOM; `SettingTab.ts`'s renderers are the only consumer that
-  turns these models into elements.
+  unit-testable without touching the DOM; `SettingTab.ts`'s renderers turn these models into
+  elements, and `scopeCycle.ts` reuses the scope-cycle model (`SCOPE_ICONS`/`nextScope`/
+  `scopeCycleTooltip`).
+- `scopeCycle.ts` — the shared click-to-cycle scope control (`renderScopeCycle`): one glyph that
+  IS the state, a click advances it. Every Settings drawer scope cell and the Sync Center's
+  per-plugin rule and scoped-members rows render through this one function.
 - `actionIcons.ts` — the single source for the per-action Lucide icons + color classes
   (Capture/Apply/Push/Pull) reused across the panel, buttons, badges and History.
 - `statusBar.ts` — pure segment model (`statusBarSegments`, `statusBarAriaLabel`) + a thin DOM
@@ -264,10 +268,13 @@ functions.
   selfState, statuses, dismissed)` is the pure predicate behind the Sync Center's cold-start
   banner: true while the plugin's own settings are still pending adoption (self state `coldstart`/
   `adopt`/`both`) and at least one row is `never-synced`, unless dismissed. It also carries the
-  switch-list member-guidance models: `memberChangeRows` turns a switch group's divergence into
-  one row per element the pending action would flip, worded in device language; `memberDecisionsFromScopes`/
-  `memberDecisionText` turn a group's per-member rule scopes into the note rows the Sync Center
-  renders under each switch group's detail.
+  switch-list member-guidance models: `switchSummaryLines` turns a switch group's divergence into
+  directional summary lines (apply first; "plugin"/"snippet" wording), with `switchBothWaysCaption`
+  as the two-sided caution; `ruleGroups` shapes the per-plugin rule list (one unlabeled group when
+  the divergence is one-sided, two direction-labeled groups — store side first — when it runs both
+  ways); `memberScopeWrite` maps a scope-cycle stop to the host write that realizes it; and
+  `memberDecisionsFromScopes` turns per-member rule scopes into the "scoped to specific devices"
+  list.
 - `reportContent.ts` — shared run-report rendering (the Sync Center strip and History detail).
 - `diffView.ts` — unified-diff rendering; `jsonView.ts` — read-only `data.json` viewer with keys
   colored by `{scope, encrypted}` rule state (per-element coloring too, for a `perItem` array);
