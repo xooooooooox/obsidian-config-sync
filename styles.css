@@ -1334,7 +1334,6 @@ button.config-sync-add-row, button.config-sync-add-row:hover { background: none;
 .config-sync-ldname { font-weight: 500; }
 .config-sync-ldhint { color: var(--text-faint); font-size: var(--font-ui-smaller); }
 
-.config-sync-ldnote { color: var(--color-orange); font-size: var(--font-ui-smaller); margin-left: var(--size-4-1); }
 .config-sync-lddetail { color: var(--color-orange); font-family: var(--font-monospace); font-size: var(--font-ui-smaller); padding: 1px 0; }
 
 /* ── Passphrase status badge (定稿 feedback-trio) ── */
@@ -1371,23 +1370,13 @@ button.config-sync-add-row, button.config-sync-add-row:hover { background: none;
 .config-sync-ppset .setting-item-control { flex-wrap: wrap; justify-content: flex-end; row-gap: var(--size-2-1); }
 .config-sync-ppbadge { white-space: nowrap; }
 
-/* Bidirectional switch-list divergence (定稿 2026-07-17): amber-edged summary of what each
-   direction destroys, plus the keep-on-device shortcut button underneath. */
-.config-sync-divergence {
-  border-left: 3px solid var(--color-orange);
-  background: var(--background-secondary);
-  border-radius: 0 6px 6px 0;
-  padding: var(--size-4-1) var(--size-4-2);
-  margin: var(--size-4-1) 0;
-  font-size: var(--font-ui-smaller);
-}
-.config-sync-divergence-line { color: var(--text-muted); }
-.config-sync-divergence-line::first-letter { color: var(--color-orange); }
-
 /* Switch-list summary + per-plugin-rule disclosures (round-6 定稿, replaces the per-member
    flood + popover menu): a one-line summary of the pending direction, then two collapsible
    disclosures sharing the scope-cycle icon (.config-sync-scopeicon, defined above). */
 .config-sync-member-summary { color: var(--text-muted); font-size: var(--font-ui-smaller); padding: 2px 0; }
+.config-sync-summary-line { color: var(--text-normal); font-size: var(--font-ui-smaller); padding: 1px 0; }
+.config-sync-summary-caption { color: var(--text-muted); font-size: var(--font-ui-smaller); padding: 4px 0 2px; }
+.config-sync-rule-ghdr { display: flex; align-items: center; gap: var(--size-4-1); padding: 6px 0 2px; font-size: var(--font-ui-smaller); font-weight: var(--font-semibold); letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-faint); }
 
 .config-sync-disclosure { cursor: pointer; color: var(--text-muted); font-size: var(--font-ui-smaller); padding: 3px 0; user-select: none; }
 .config-sync-disclosure:hover { color: var(--text-normal); }

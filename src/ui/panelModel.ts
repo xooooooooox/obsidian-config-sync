@@ -269,11 +269,29 @@ export function memberScopeWrite(scope: RuleScope): MemberScopeWrite {
   return { kind: "clear" };
 }
 
-// The one-sided divergent member set the per-plugin rule list offers. Both-sided divergence is
-// owned by the red both-ways box, so this returns [] there.
-export function pendingScopeMembers(d: { captureRemoves: string[]; applyDisables: string[] }): string[] {
-  if (d.captureRemoves.length > 0 && d.applyDisables.length > 0) return [];
-  return d.captureRemoves.length > 0 ? d.captureRemoves : d.applyDisables;
+// Direction groups for the per-plugin rule list. One-sided → a single unlabeled group (the
+// summary line above already states the direction); two-sided → two labeled groups, store side
+// first (matching the summary's apply-first order), so no row needs a per-row direction tag.
+export interface RuleGroup {
+  dir: Direction;
+  label: string | null;
+  ids: string[];
+}
+
+export function ruleGroups(
+  d: { captureRemoves: string[]; applyDisables: string[] },
+  device: "desktop" | "mobile"
+): RuleGroup[] {
+  const here = device === "mobile" ? "this phone" : "this computer";
+  if (d.captureRemoves.length > 0 && d.applyDisables.length > 0) {
+    return [
+      { dir: "apply", label: `Off ${here} · ${d.captureRemoves.length}`, ids: d.captureRemoves },
+      { dir: "capture", label: `On ${here} only · ${d.applyDisables.length}`, ids: d.applyDisables },
+    ];
+  }
+  if (d.captureRemoves.length > 0) return [{ dir: "apply", label: null, ids: d.captureRemoves }];
+  if (d.applyDisables.length > 0) return [{ dir: "capture", label: null, ids: d.applyDisables }];
+  return [];
 }
 
 // Current scope of a switch-list member: its device rule if it has one, else "all" (no rule).
@@ -281,25 +299,50 @@ export function memberCurrentScope(decisions: MemberDecision[], id: string): Rul
   return decisions.find((m) => m.id === id)?.scope ?? "all";
 }
 
-// Bulk summary that replaces the per-member flood. One-sided cases only; both-sided → null (the
-// red both-ways box states that case). `here` is device-aware.
-export function switchSummaryLine(
+export interface SummaryLine {
+  dir: Direction;
+  text: string;
+}
+
+// Directional summary lines that replace the per-member flood. One-sided → one line; both-sided
+// → both, apply line first (Apply is the primary action on a never-synced item). `here` is
+// device-aware; `noun` is the member kind the list carries (plugin lists vs the CSS-snippet
+// list). Replaces the old single-line switchSummaryLine, which bailed to null on both-ways.
+export function switchSummaryLines(
   d: { captureRemoves: string[]; applyDisables: string[] },
-  device: "desktop" | "mobile"
-): string | null {
+  device: "desktop" | "mobile",
+  noun: "plugin" | "snippet"
+): SummaryLine[] {
   const here = device === "mobile" ? "this phone" : "this computer";
-  if (d.captureRemoves.length > 0 && d.applyDisables.length > 0) return null;
+  const out: SummaryLine[] = [];
   if (d.captureRemoves.length > 0) {
     const n = d.captureRemoves.length;
-    return n === 1
-      ? `1 plugin is on for your other devices but off ${here} — Apply turns it on.`
-      : `${n} plugins are on for your other devices but off ${here} — Apply turns them on.`;
+    out.push({
+      dir: "apply",
+      text:
+        n === 1
+          ? `1 ${noun} is on for your other devices but off ${here} — Apply turns it on.`
+          : `${n} ${noun}s are on for your other devices but off ${here} — Apply turns them on.`,
+    });
   }
   if (d.applyDisables.length > 0) {
     const n = d.applyDisables.length;
-    return n === 1
-      ? `1 plugin is on ${here} but off on your other devices — Capture shares it.`
-      : `${n} plugins are on ${here} but off on your other devices — Capture shares them.`;
+    out.push({
+      dir: "capture",
+      text:
+        n === 1
+          ? `1 ${noun} is on ${here} but off on your other devices — Capture shares it.`
+          : `${n} ${noun}s are on ${here} but off on your other devices — Capture shares them.`,
+    });
   }
-  return null;
+  return out;
+}
+
+// Shown only when the divergence is two-sided — a bulk Apply/Capture is not a no-op there.
+// The snippet variant points at the Appearance card because per-snippet device scope lives
+// there (no per-snippet rule list in the Sync Center).
+export function switchBothWaysCaption(noun: "plugin" | "snippet"): string {
+  return noun === "snippet"
+    ? "Bulk Apply or Capture resolves every snippet one way. Pin per-snippet devices on the Appearance card in Settings."
+    : "Bulk Apply or Capture resolves every plugin one way. Pin the ones that differ on purpose below.";
 }

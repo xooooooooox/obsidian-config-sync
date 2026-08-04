@@ -19,10 +19,11 @@ import {
   memberCurrentScope,
   memberScopeWrite,
   MEMBER_PUBLISH_NOTE,
+  RuleGroup,
+  ruleGroups,
   moreFilesText,
   nosettingsLineText,
   PanelFilter,
-  pendingScopeMembers,
   policyOptions,
   presentedState,
   runProgressLabel,
@@ -32,7 +33,8 @@ import {
   sectionForItem,
   showColdStartBanner,
   stageableRow,
-  switchSummaryLine,
+  switchSummaryLines,
+  switchBothWaysCaption,
   versionLine,
   visibleUnderFilter,
   Direction,
@@ -1574,10 +1576,6 @@ export class SyncCenterView extends ItemView {
       });
       drawFieldsBadge(badge);
     }
-    const ldCount = this.host.switchMemberDecisions(group.name).length;
-    if (ldCount > 0) {
-      row.createSpan({ cls: "config-sync-ldnote", text: `· ${ldCount} device-scoped` });
-    }
     const chosen = this.policy.get(group.name);
     if (this.selected.has(group.name) && chosen !== undefined) {
       const opt = policyOptions(this.availOf(group.name)).find((o) => o.action === chosen);
@@ -1767,53 +1765,34 @@ export class SyncCenterView extends ItemView {
     this.renderCappedChanges(detail, r, status.changes);
   }
 
-  // Bidirectional divergence summary (定稿 2026-07-17): only the red warning box above is gated
-  // on both directions destroying the other side's state — the summary line + disclosures below
-  // render for any one-sided difference too.
+  // ③ order: summary + caption + per-plugin rules on top, "N scoped to specific devices" (and the
+  // capture publish note) at the bottom. Child holders are created synchronously in final order so
+  // the async divergence fill can never reorder them. ② the both-ways state now renders the same
+  // two-line summary + unified per-plugin rules instead of a red box + Keep-on-device modal.
   private renderSwitchDivergence(detail: HTMLElement, r: StatusRow): void {
     const holder = detail.createDiv();
-    // Scoped disclosure + publish note render synchronously (they only need
-    // switchMemberDecisions), independent of switchDivergenceFor's async result — that call
-    // resolves null when the store hasn't been captured yet, which must not hide these.
+    const topHolder = holder.createDiv(); // summary + caption + rules (async — needs the divergence)
+    const scopedHolder = holder.createDiv(); // publish note + "N scoped to specific devices" — always last
+    // The scoped disclosure + publish note only need switchMemberDecisions / self-state, so they
+    // render synchronously — independent of switchDivergenceFor, which resolves null before the
+    // store is captured and must not hide them (2.15.0 null-safety, preserved).
     if (MEMBER_GUIDE_GROUPS.has(r.group.name)) {
-      this.renderScopedDisclosure(holder, r);
       const decisions = this.host.switchMemberDecisions(r.group.name);
       if (decisions.length > 0 && this.selfInfo !== null && (this.selfInfo.state === "capture" || this.selfInfo.state === "both")) {
-        holder.createDiv({ cls: "config-sync-lddetail", text: MEMBER_PUBLISH_NOTE });
+        scopedHolder.createDiv({ cls: "config-sync-lddetail", text: MEMBER_PUBLISH_NOTE });
       }
+      this.renderScopedDisclosure(scopedHolder, r);
     }
     void this.host.switchDivergenceFor(r.group.name).then((d) => {
-      if (!holder.isConnected || d === null) return;
-      if (d.captureRemoves.length > 0 && d.applyDisables.length > 0) {
-        const box = holder.createDiv({ cls: "config-sync-divergence" });
-        box.createDiv({ text: "This device and the store diverge both ways — either direction overwrites the other:" });
-        const capLine = box.createDiv({ cls: "config-sync-divergence-line" });
-        renderActionIcon(capLine, "capture").addClass(ACTION_COLOR_CLASS.capture);
-        capLine.appendText(` Capture would turn ${d.captureRemoves.length} off on your other devices: ${d.captureRemoves.join(", ")}`);
-        const applyLine = box.createDiv({ cls: "config-sync-divergence-line" });
-        renderActionIcon(applyLine, "apply").addClass(ACTION_COLOR_CLASS.apply);
-        applyLine.appendText(` Apply turns off ${d.applyDisables.length} on this device — keep them on this device first: ${d.applyDisables.join(", ")}`);
-        const btn = holder.createEl("button", {
-          cls: "config-sync-seg-btn",
-          text: `⌂ Keep ${d.applyDisables.length} extra${d.applyDisables.length === 1 ? "" : "s"} on this device…`,
-        });
-        btn.addEventListener("click", (e) => {
-          e.stopPropagation();
-          new KeepOnDeviceModal(this.app, this.host.displayName(r.group.name, r.group.label), d.applyDisables, async (ids) => {
-            if (ids.length === 0) return;
-            await this.host.addSwitchExceptions(r.group.name, ids);
-            await this.reload();
-          }).open();
-        });
-      }
-      if (MEMBER_GUIDE_GROUPS.has(r.group.name)) {
-        this.renderMemberSummary(holder, r, d);
-        const members = pendingScopeMembers(d);
-        if (members.length > 0) {
-          this.renderDisclosure(holder, `${r.group.name}::rules`, "Set a per-plugin rule", false, (panel) =>
-            this.renderPerPluginRules(panel, r, members)
-          );
-        }
+      if (!topHolder.isConnected || d === null) return;
+      const noun = MEMBER_GUIDE_GROUPS.has(r.group.name) ? ("plugin" as const) : ("snippet" as const);
+      this.renderMemberSummary(topHolder, d, noun);
+      if (!MEMBER_GUIDE_GROUPS.has(r.group.name)) return;
+      const groups = ruleGroups(d, Platform.isMobile ? "mobile" : "desktop");
+      if (groups.length > 0) {
+        this.renderDisclosure(topHolder, `${r.group.name}::rules`, "Set a per-plugin rule", false, (panel) =>
+          this.renderPerPluginRules(panel, r, groups)
+        );
       }
     });
   }
@@ -1823,9 +1802,18 @@ export class SyncCenterView extends ItemView {
     return desktopOnly ? DESKTOP_ONLY_ENABLED_OPTIONS : FIELD_SCOPE_OPTIONS;
   }
 
-  private renderMemberSummary(holder: HTMLElement, r: StatusRow, d: { captureRemoves: string[]; applyDisables: string[] }): void {
-    const text = switchSummaryLine(d, Platform.isMobile ? "mobile" : "desktop");
-    if (text !== null) holder.createDiv({ cls: "config-sync-member-summary", text });
+  private renderMemberSummary(holder: HTMLElement, d: { captureRemoves: string[]; applyDisables: string[] }, noun: "plugin" | "snippet"): void {
+    const lines = switchSummaryLines(d, Platform.isMobile ? "mobile" : "desktop", noun);
+    if (lines.length === 0) return;
+    const box = holder.createDiv({ cls: "config-sync-member-summary" });
+    for (const ln of lines) {
+      const row = box.createDiv({ cls: "config-sync-summary-line" });
+      renderActionIcon(row, ln.dir).addClass(ACTION_COLOR_CLASS[ln.dir]);
+      row.appendText(` ${ln.text}`);
+    }
+    if (d.captureRemoves.length > 0 && d.applyDisables.length > 0) {
+      box.createDiv({ cls: "config-sync-summary-caption", text: switchBothWaysCaption(noun) });
+    }
   }
 
   private renderDisclosure(holder: HTMLElement, key: string, title: string, amber: boolean, body: (el: HTMLElement) => void): void {
@@ -1844,7 +1832,10 @@ export class SyncCenterView extends ItemView {
     });
   }
 
-  private renderPerPluginRules(holder: HTMLElement, r: StatusRow, members: string[]): void {
+  // A mixed (two-sided) list splits into direction groups with a small header each instead of a
+  // per-row tag; one-sided lists arrive as a single unlabeled group (live-test 定稿 2026-08-05).
+  // A search-filtered-empty group hides its header too.
+  private renderPerPluginRules(holder: HTMLElement, r: StatusRow, groups: RuleGroup[]): void {
     const group = r.group.name;
     const decisions = this.host.switchMemberDecisions(group);
     const query = this.ruleSearch.get(group) ?? "";
@@ -1853,17 +1844,25 @@ export class SyncCenterView extends ItemView {
     const list = holder.createDiv({ cls: "config-sync-rule-list" });
     const paint = (q: string): void => {
       list.empty();
-      for (const id of members) {
-        if (q !== "" && !id.toLowerCase().includes(q.toLowerCase())) continue;
-        const row = list.createDiv({ cls: "config-sync-rule-row" });
-        row.createSpan({ cls: "config-sync-rule-mid", text: id });
-        const cell = row.createSpan();
-        renderScopeCycle(cell, {
-          scope: memberCurrentScope(decisions, id),
-          options: this.scopeOptionsFor(id),
-          disabled: false,
-          onChange: (v) => void this.writeMemberScope(group, id, v),
-        });
+      for (const g of groups) {
+        const ids = g.ids.filter((id) => q === "" || id.toLowerCase().includes(q.toLowerCase()));
+        if (ids.length === 0) continue;
+        if (g.label !== null) {
+          const hdr = list.createDiv({ cls: "config-sync-rule-ghdr" });
+          renderActionIcon(hdr, g.dir).addClass(ACTION_COLOR_CLASS[g.dir]);
+          hdr.appendText(` ${g.label}`);
+        }
+        for (const id of ids) {
+          const row = list.createDiv({ cls: "config-sync-rule-row" });
+          row.createSpan({ cls: "config-sync-rule-mid", text: id });
+          const cell = row.createSpan();
+          renderScopeCycle(cell, {
+            scope: memberCurrentScope(decisions, id),
+            options: this.scopeOptionsFor(id),
+            disabled: false,
+            onChange: (v) => void this.writeMemberScope(group, id, v),
+          });
+        }
       }
     };
     paint(query);
@@ -2551,41 +2550,3 @@ class StopSyncingModal extends Modal {
   }
 }
 
-class KeepOnDeviceModal extends Modal {
-  private checks = new Map<string, boolean>();
-
-  constructor(app: App, private listLabel: string, private ids: string[], private onConfirm: (ids: string[]) => Promise<void>) {
-    super(app);
-    for (const id of ids) this.checks.set(id, true);
-  }
-
-  onOpen(): void {
-    this.titleEl.setText("Keep on this device only");
-    this.contentEl.createDiv({
-      cls: "config-sync-expand-note",
-      text: `${this.listLabel}: items kept on this device manage their own on/off state — they don't follow your other devices, and your other devices don't follow them.`,
-    });
-    const list = this.contentEl.createDiv();
-    for (const id of this.ids) {
-      const row = list.createDiv({ cls: "config-sync-exclude-row" });
-      const cb = row.createEl("input", { type: "checkbox" });
-      cb.checked = true;
-      cb.addEventListener("change", () => this.checks.set(id, cb.checked));
-      row.createSpan({ text: id });
-    }
-    const bar = this.contentEl.createDiv({ cls: "config-sync-modal-buttons" });
-    new ButtonComponent(bar).setButtonText("Cancel").onClick(() => this.close());
-    new ButtonComponent(bar)
-      .setButtonText("Keep on this device")
-      .setCta()
-      .onClick(() => {
-        const picked = this.ids.filter((id) => this.checks.get(id) === true);
-        this.close();
-        void this.onConfirm(picked);
-      });
-  }
-
-  onClose(): void {
-    this.contentEl.empty();
-  }
-}

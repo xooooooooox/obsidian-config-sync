@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { capFileEntries, insyncLineText, statusBarStatuses, moreFilesText, visibleUnderFilter, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, footerSummary, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, versionLine, runProgressLabel, showColdStartBanner, memberDecisionsFromScopes, memberDecisionText, switchSummaryLine, memberScopeWrite, pendingScopeMembers, memberCurrentScope } from "../src/ui/panelModel";
+import { capFileEntries, insyncLineText, statusBarStatuses, moreFilesText, visibleUnderFilter, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, footerSummary, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, versionLine, runProgressLabel, showColdStartBanner, memberDecisionsFromScopes, memberDecisionText, switchSummaryLines, switchBothWaysCaption, ruleGroups, memberScopeWrite, memberCurrentScope } from "../src/ui/panelModel";
 import { GroupState, GroupStatus } from "../src/core/status";
 import { Availability } from "../src/core/availability";
 
@@ -323,15 +323,27 @@ describe("memberScopeWrite", () => {
   });
 });
 
-describe("pendingScopeMembers", () => {
-  it("returns the apply-direction set when only the store is ahead", () => {
-    expect(pendingScopeMembers({ captureRemoves: ["b", "a"], applyDisables: [] })).toEqual(["b", "a"]);
+describe("ruleGroups", () => {
+  it("one-sided store-ahead → a single unlabeled apply group", () => {
+    expect(ruleGroups({ captureRemoves: ["b", "a"], applyDisables: [] }, "desktop"))
+      .toEqual([{ dir: "apply", label: null, ids: ["b", "a"] }]);
   });
-  it("returns the capture-direction set when only this device is ahead", () => {
-    expect(pendingScopeMembers({ captureRemoves: [], applyDisables: ["x"] })).toEqual(["x"]);
+  it("one-sided device-ahead → a single unlabeled capture group", () => {
+    expect(ruleGroups({ captureRemoves: [], applyDisables: ["x"] }, "mobile"))
+      .toEqual([{ dir: "capture", label: null, ids: ["x"] }]);
   });
-  it("returns [] when both sides diverge (the red box owns that case)", () => {
-    expect(pendingScopeMembers({ captureRemoves: ["a"], applyDisables: ["b"] })).toEqual([]);
+  it("both ways → two labeled groups, store side first, desktop wording with counts", () => {
+    expect(ruleGroups({ captureRemoves: ["a", "b"], applyDisables: ["c"] }, "desktop")).toEqual([
+      { dir: "apply", label: "Off this computer · 2", ids: ["a", "b"] },
+      { dir: "capture", label: "On this computer only · 1", ids: ["c"] },
+    ]);
+  });
+  it("both ways, mobile wording", () => {
+    expect(ruleGroups({ captureRemoves: ["a"], applyDisables: ["b"] }, "mobile").map((g) => g.label))
+      .toEqual(["Off this phone · 1", "On this phone only · 1"]);
+  });
+  it("neither → no groups", () => {
+    expect(ruleGroups({ captureRemoves: [], applyDisables: [] }, "desktop")).toEqual([]);
   });
 });
 
@@ -346,20 +358,39 @@ describe("memberCurrentScope", () => {
   });
 });
 
-describe("switchSummaryLine", () => {
+describe("switchSummaryLines", () => {
   it("apply direction, plural, desktop wording", () => {
-    expect(switchSummaryLine({ captureRemoves: ["a", "b"], applyDisables: [] }, "desktop"))
-      .toBe("2 plugins are on for your other devices but off this computer — Apply turns them on.");
+    expect(switchSummaryLines({ captureRemoves: ["a", "b"], applyDisables: [] }, "desktop", "plugin"))
+      .toEqual([{ dir: "apply", text: "2 plugins are on for your other devices but off this computer — Apply turns them on." }]);
   });
   it("apply direction, singular, mobile wording", () => {
-    expect(switchSummaryLine({ captureRemoves: ["a"], applyDisables: [] }, "mobile"))
-      .toBe("1 plugin is on for your other devices but off this phone — Apply turns it on.");
+    expect(switchSummaryLines({ captureRemoves: ["a"], applyDisables: [] }, "mobile", "plugin"))
+      .toEqual([{ dir: "apply", text: "1 plugin is on for your other devices but off this phone — Apply turns it on." }]);
   });
   it("capture direction, plural", () => {
-    expect(switchSummaryLine({ captureRemoves: [], applyDisables: ["a", "b"] }, "desktop"))
-      .toBe("2 plugins are on this computer but off on your other devices — Capture shares them.");
+    expect(switchSummaryLines({ captureRemoves: [], applyDisables: ["a", "b"] }, "desktop", "plugin"))
+      .toEqual([{ dir: "capture", text: "2 plugins are on this computer but off on your other devices — Capture shares them." }]);
   });
-  it("returns null when both sides diverge", () => {
-    expect(switchSummaryLine({ captureRemoves: ["a"], applyDisables: ["b"] }, "desktop")).toBeNull();
+  it("both ways → two lines, apply first", () => {
+    expect(switchSummaryLines({ captureRemoves: ["a"], applyDisables: ["b"] }, "desktop", "plugin")).toEqual([
+      { dir: "apply", text: "1 plugin is on for your other devices but off this computer — Apply turns it on." },
+      { dir: "capture", text: "1 plugin is on this computer but off on your other devices — Capture shares it." },
+    ]);
+  });
+  it("neither → no lines", () => {
+    expect(switchSummaryLines({ captureRemoves: [], applyDisables: [] }, "desktop", "plugin")).toEqual([]);
+  });
+  it("snippet noun, plural apply + singular capture, both ways", () => {
+    expect(switchSummaryLines({ captureRemoves: ["a", "b"], applyDisables: ["c"] }, "desktop", "snippet")).toEqual([
+      { dir: "apply", text: "2 snippets are on for your other devices but off this computer — Apply turns them on." },
+      { dir: "capture", text: "1 snippet is on this computer but off on your other devices — Capture shares it." },
+    ]);
+  });
+});
+
+describe("switchBothWaysCaption", () => {
+  it("plugin variant points below, snippet variant points at the Appearance card", () => {
+    expect(switchBothWaysCaption("plugin")).toBe("Bulk Apply or Capture resolves every plugin one way. Pin the ones that differ on purpose below.");
+    expect(switchBothWaysCaption("snippet")).toBe("Bulk Apply or Capture resolves every snippet one way. Pin per-snippet devices on the Appearance card in Settings.");
   });
 });

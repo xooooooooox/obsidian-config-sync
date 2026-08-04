@@ -99,7 +99,7 @@ export function itemConfigWithEnabledOn(existing: ItemConfig | undefined, scope:
 export interface RegistryCoreEnv {
   id: string;
   name: string;
-  fileExists: boolean; // whether ${corePluginFile(id)} currently exists in this vault
+  fileExists: boolean; // runtime info only: whether ${corePluginFile(id)} exists now (no longer gates the settings path — ①)
 }
 
 export interface RegistryPluginEnv {
@@ -154,7 +154,7 @@ export function buildItemDefs(env: RegistryEnv): ItemDef[] {
     description: "",
     section: "core",
     enablement: { carrier: "core-plugins.json", element: c.id },
-    settingsFile: { defaultPath: c.fileExists ? `{configDir}/${corePluginFile(c.id)}` : null },
+    settingsFile: { defaultPath: `{configDir}/${corePluginFile(c.id)}` },
   }));
   core.sort(byLabel);
 

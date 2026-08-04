@@ -13,6 +13,7 @@ import {
   parentCardLabel,
   RegistryEnv,
 } from "../src/core/registry";
+import { leftoverStoreRels } from "../src/core/leftover";
 import { SyncGroup } from "../src/core/types";
 import { ManifestValidationError, validateSyncManifest } from "../src/core/manifest";
 
@@ -53,7 +54,7 @@ describe("buildItemDefs", () => {
     expect(graph?.section).toBe("core");
     expect(graph?.enablement).toEqual({ carrier: "core-plugins.json", element: "graph" });
     expect(graph?.settingsFile?.defaultPath).toBe("{configDir}/graph.json");
-    expect(zk?.settingsFile?.defaultPath).toBeNull(); // state-only: no settings file exists yet
+    expect(zk?.settingsFile?.defaultPath).toBe("{configDir}/zk-prefixer.json"); // ① known core keeps a path even when its file is absent
     expect(graph?.description).toBe("");
     expect(zk?.description).toBe("");
   });
@@ -188,11 +189,20 @@ describe("compileItems — plugin cards (dir/file group when enabled)", () => {
     expect(findGroup(groups, "plugin-dataview")).toBeUndefined();
   });
 
-  it("a core card with no settings file (state-only) compiles no group even when enabled", () => {
+  it("① a state-only core card still compiles a file group when enabled (attributable, not leftover)", () => {
     const env: RegistryEnv = { ...EMPTY_ENV, cores: [{ id: "zk-prefixer", name: "Unique note creator", fileExists: false }] };
     const defs = buildItemDefs(env);
     const groups = compileItems(defs, settings({ "core:zk-prefixer": on() }));
-    expect(findGroup(groups, "zk-prefixer")).toBeUndefined();
+    expect(findGroup(groups, "zk-prefixer")?.path).toBe("{configDir}/zk-prefixer.json");
+  });
+
+  it("① a file-absent but selected core plugin's store config is attributed, not leftover", () => {
+    const env: RegistryEnv = { ...EMPTY_ENV, cores: [{ id: "backlink", name: "Backlinks", fileExists: false }] };
+    const defs = buildItemDefs(env);
+    const selected = compileItems(defs, settings({ "core:backlink": on() }));
+    expect(leftoverStoreRels(["store/configdir/backlink.json"], selected)).toEqual([]);
+    const unselected = compileItems(defs, settings({}));
+    expect(leftoverStoreRels(["store/configdir/backlink.json"], unselected).map((l) => l.path)).toEqual(["configdir/backlink.json"]);
   });
 
   it("a core card with a settings file compiles a file group named by its bare id", () => {
