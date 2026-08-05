@@ -2,7 +2,7 @@ import { App, ButtonComponent, ExtraButtonComponent, ItemView, Menu, Modal, Plat
 import { ApplyItem, CaptureItem, orderInstallsCatalogFirst, ProgressFn, StateAction } from "../core/ConfigSyncCore";
 import { bucketCounts, GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry, RemoteDiffFile, remoteDirectionCounts } from "../core/status";
 import { CATEGORY_LABELS, findGroupByName, ItemCategory, SELF_GROUP_NAME, categoryForGroup } from "../core/catalog";
-import { FileChanges, GroupResult, Remote, RuleScope, SyncGroup } from "../core/types";
+import { FileChanges, GroupResult, hasChanges, MemberRule, MEMBER_RULES, Remote, RuleScope, SyncGroup } from "../core/types";
 import { Availability } from "../core/availability";
 import { REUSE_MAX_AGE_MS } from "../external/readerCache";
 import { isWholeFileEncrypted } from "../core/modes";
@@ -19,7 +19,7 @@ import {
   EnablementCarrier,
   enablementCarrierFor,
   fateLineText,
-  fatePillText,
+  fileEntryFor,
   footerSummary,
   insyncLineText,
   isEnableAction,
@@ -63,7 +63,7 @@ import { jsonSortedView } from "../core/merge";
 import { renderReportContent, renderReportPills } from "./reportContent";
 import { RunRecord, RunKind, RunStatus, worstStatus, formatRunTime, stopSyncDesc, deleteLeftoverDesc } from "../core/runHistory";
 import { ACTION_ICON, ACTION_COLOR_CLASS, renderActionIcon, renderActionCount, type SyncAction } from "./actionIcons";
-import { DESKTOP_ONLY_ENABLED_OPTIONS, FIELD_SCOPE_OPTIONS, SCOPE_ICONS, scopeCycleTooltip } from "./itemCard";
+import { DESKTOP_ONLY_ENABLED_OPTIONS, FIELD_SCOPE_OPTIONS, FILE_SCOPE_OPTIONS, SCOPE_ICONS, scopeCycleTooltip } from "./itemCard";
 import {
   QualifierAutocomplete,
   parseQuery,
@@ -119,6 +119,23 @@ const MEMBER_GUIDE_GROUPS = new Set(["community-plugins", "core-plugins"]);
 // The two on/off list carriers (task-4): "one object = one row" dissolves their own list row
 // into the Core/Community section header chip — they never appear as a row themselves.
 const CARRIER_GROUP_NAMES = new Set(["core-plugins", "community-plugins"]);
+
+// Runs-on menu labels (spec §4/§6, copy final) — the five MemberRule values unified from the
+// old per-plugin rules, member class scopes, and this-device pins.
+const RUNS_ON_LABELS: Record<MemberRule, string> = {
+  all: "Follows your devices",
+  desktop: "Computers only",
+  mobile: "Phones only",
+  "always-here": "Always on here",
+  "never-here": "Never on here",
+};
+
+// After-install menu labels (spec §4, copy final) — the fallback ladder's two real choices
+// (carrier NOT synced, row installs).
+const AFTER_INSTALL_LABELS: Record<"install-enable" | "install", string> = {
+  "install-enable": "Turn it on",
+  install: "Leave it off",
+};
 
 // Session-remembered UI state: which scopes have their ✓ / ○ trailing lines flattened open.
 const sessionUi = {
@@ -215,6 +232,20 @@ export interface SyncCenterHost {
   // core-plugins/community-plugins carrier) is itself a synced item — same field the Settings
   // tab's per-card sync toggle writes (ItemConfig.enabled).
   setItemSyncEnabled(itemId: string, enabled: boolean): Promise<void>;
+  // The Runs-on menu (spec §4/§6): read = the element's current unified rule (stored
+  // settings.memberRules wins; else derived losslessly from the legacy device-class scope /
+  // this-device pin, using `locallyOn` for the "local" fallback exactly as apply/capture time
+  // does) — write = stores the rule directly.
+  memberRuleFor(carrier: EnablementCarrier, elementId: string, locallyOn: boolean): MemberRule;
+  setMemberRule(carrier: EnablementCarrier, elementId: string, rule: MemberRule): Promise<void>;
+  // The Settings-sync menu: the same field the Settings tab's file-row scope control edits
+  // (ItemConfig.settingsFile.fileRule.scope — whole-file device scope; "local" is structurally
+  // excluded there, same as the existing control).
+  itemFileScope(itemId: string): Exclude<RuleScope, "local">;
+  setItemFileScope(itemId: string, scope: Exclude<RuleScope, "local">): Promise<void>;
+  // The More bridge (task 7 implements the scroll/expand target): deep-links into the Settings
+  // tab for this item's card.
+  openSettingsAt(itemId: string): void;
 }
 
 function relativeAge(ms: number): string {
@@ -232,24 +263,6 @@ function isoAge(iso: string | null): string {
   if (iso === null) return "never";
   const ms = Date.parse(iso);
   return Number.isNaN(ms) ? "unknown" : relativeAge(ms);
-}
-
-// Fields-mode badge (定稿方案 B 2026-07-17): three field lines with a small padlock at the
-// bottom-right corner — "some fields are locked". No Lucide icon carries this composite.
-function drawFieldsBadge(el: HTMLElement): void {
-  const svg = el.createSvg("svg", {
-    attr: {
-      viewBox: "0 0 24 24",
-      fill: "none",
-      stroke: "currentColor",
-      "stroke-width": "2",
-      "stroke-linecap": "round",
-      "stroke-linejoin": "round",
-    },
-  });
-  svg.createSvg("path", { attr: { d: "M3 5h18M3 11h9M3 17h7" } });
-  svg.createSvg("rect", { attr: { x: "14.5", y: "14.5", width: "8", height: "6.5", rx: "1.4", "stroke-width": "1.8" } });
-  svg.createSvg("path", { attr: { d: "M16.5 14.5v-2a2 2 0 0 1 4 0v2", "stroke-width": "1.8" } });
 }
 
 type RemoteCompareResult = { entries: RemoteDiffEntry[]; lockDiffers: boolean };
@@ -581,31 +594,91 @@ export class SyncCenterView extends ItemView {
     return stageableRow(this.presState(r), this.sectionOf(r.group.name));
   }
 
-  // Task-4 consumes Task 1's Fate model for select-all only — a minimal FateInput whose
-  // `direction` is null exactly when the row is already unstageable by today's rules, so
-  // Fate.stageable agrees with rowStageable by construction. The row's own sentence/chips are
-  // Task 5's job; this exists solely so select-all is driven through rowFate(), per the skeleton
-  // interface (`Consumes: rowFate/Fate`).
-  private fateFor(r: StatusRow): Fate {
-    const stageableNow = this.rowStageable(r);
-    const input: FateInput = {
-      direction: stageableNow ? this.effDir(r) : null,
-      conflict: false,
-      nothingYet: this.presState(r) === "no-settings",
-      installed: true,
-      hasUpdate: false,
-      carrierSynced: false,
-      storeListOn: null,
-      locallyOn: false,
-      memberRule: "all",
+  // The ItemDef/ItemConfig id for a row's compiled group name — inverse of registry.ts's
+  // legacyGroupName (community groups compile as "plugin-<id>" for their "community:<id>" item
+  // id; core groups compile 1:1 with their bare id for their "core:<id>" item id; the two
+  // carriers and every obsidian/custom group compile 1:1 with their item id already). Feeds the
+  // Settings-sync menu and the More bridge, both of which read/write `settings.items[id]`.
+  private itemIdFor(name: string): string {
+    if (name === "core-plugins" || name === "community-plugins") return name;
+    if (name.startsWith("plugin-")) return `community:${name.slice("plugin-".length)}`;
+    return categoryForGroup(name) === "core" ? `core:${name}` : name;
+  }
+
+  // The real FateInput derivation (Task 1's model, fully wired): `direction` reuses the existing
+  // section-aware `rowStageable` (an outdated/disabled/not-installed row can stage on its state
+  // action alone, even with no settings payload — the "installed, off here, store turns it on —
+  // no settings" case); `conflict` is the carry-forward fix (rowFate's own conflict branch
+  // overrides stageable/sentence/glyph regardless of the direction fed in, so a "differs" row
+  // always renders `⚠ Changed on both sides` and is unstageable here, independent of the old
+  // direction-toggle behavior). storeListOn/locallyOn/memberRule only exist for a carrier-synced
+  // plugin row — for every other row (obsidian/folder/self-excluded/carrier-unsynced) they stay
+  // at their "no enablement dimension" defaults, which `effectiveTurnsOn`/`buildChips` already
+  // treat as a no-op (see fateModel.ts).
+  private fateInputFor(r: StatusRow): FateInput {
+    const name = r.group.name;
+    const a = this.availOf(name);
+    const pres = this.presState(r);
+    const cat = this.scopeOf(name);
+    const isPlugin = cat === "core" || cat === "community" || cat === "beta";
+    const carrierSynced = isPlugin && this.carrierIsSynced(name);
+    let storeListOn: boolean | null = null;
+    let locallyOn = false;
+    let memberRule: MemberRule = "all";
+    if (carrierSynced) {
+      const carrier = enablementCarrierFor(name);
+      const element = this.carrierElementFor(name);
+      locallyOn = a.kind === "enabled";
+      const div = this.carrierDivergence.get(carrier);
+      // Best-effort default (divergence not loaded yet): assume the store agrees with local —
+      // the same "stays off"/"in sync" reading memberFate's undefined-divergence branch takes.
+      storeListOn = div === undefined ? locallyOn : locallyOn ? !div.applyDisables.includes(element) : div.captureRemoves.includes(element);
+      memberRule = this.host.memberRuleFor(carrier, element, locallyOn);
+    }
+    return {
+      direction: this.rowStageable(r) ? this.effDir(r) : null,
+      conflict: pres === "differs",
+      nothingYet: pres === "no-settings",
+      installed: a.kind !== "not-installed",
+      hasUpdate: a.anchor === "plugin" && a.drift === "behind",
+      carrierSynced,
+      storeListOn,
+      locallyOn,
+      memberRule,
       deviceClass: Platform.isMobile ? "mobile" : "desktop",
-      desktopOnly: false,
-      hasSettingsPayload: false,
-      special: null,
-      folderFileCount: null,
-      encrypted: false,
+      desktopOnly: a.desktopOnly,
+      hasSettingsPayload: pres !== "no-settings" && pres !== "in-sync" && pres !== "locked",
+      special: name === "appearance" ? "appearance" : null,
+      // Undefined `.changes` (a "not-captured"/"no-settings" GroupStatus never attaches one) has
+      // no synchronous file count available — falls back to null so the sentence degrades to the
+      // generic "applies/captures settings" instead of asserting a wrong "0 files".
+      folderFileCount: r.group.type === "dir" && r.status.changes !== undefined ? this.folderChangeCount(r.status.changes) : null,
+      encrypted: isWholeFileEncrypted(r.group),
     };
-    return rowFate(input);
+  }
+
+  private folderChangeCount(c: FileChanges): number {
+    return c.added.length + c.updated.length + c.deleted.length;
+  }
+
+  // "locked" (encrypted, no passphrase set) has no representation in spec §3's verb table —
+  // content comparison never even ran, so direction/conflict/nothingYet are all meaningless here.
+  // Bypasses rowFate for this one state and reuses this codebase's existing approved copy for it
+  // (stateIcon's "locked" tip, already shown elsewhere in this view) rather than letting it fall
+  // through to a misleading "In sync".
+  private fateWithInput(r: StatusRow): { fate: Fate; input: FateInput } {
+    const input = this.fateInputFor(r);
+    if (this.presState(r) === "locked") {
+      return {
+        input,
+        fate: { glyph: "—", sentence: "Encrypted — set the passphrase in settings to compare", chips: ["🔒 encrypted"], stageable: false, turnsOn: false },
+      };
+    }
+    return { input, fate: rowFate(input) };
+  }
+
+  private fateFor(r: StatusRow): Fate {
+    return this.fateWithInput(r).fate;
   }
 
   // All user-facing counts (header pills, sidebar badges, filter pills, switcher) must agree
@@ -1846,79 +1919,47 @@ export class SyncCenterView extends ItemView {
     el.appendText(parts.label);
   }
 
+  // The unified row (spec §3): `[checkbox] Name [chips…] <fate sentence> ▸`. One object, one row
+  // — the old policy/fate pills, mode badges' state coupling, and per-section stageability
+  // reasoning all collapse into `fate.chips`/`fate.sentence`/`fate.stageable`.
   private renderItemRow(card: HTMLElement, r: StatusRow): void {
     const { group } = r;
-    const pres = this.presState(r);
-    const inert = !this.rowStageable(r);
+    const { fate, input } = this.fateWithInput(r);
+    const inert = !fate.stageable;
     const row = card.createDiv({
-      cls: `config-sync-hub-row${inert ? " is-insync" : ""}${pres === "no-settings" ? " is-nosettings" : ""}`,
+      cls: `config-sync-hub-row${inert ? " is-insync" : ""}${fate.glyph === "⚠" ? " is-conflict" : ""}`,
       attr: { "aria-label": this.host.resolvedPath(group) },
     });
     const chev = row.createSpan({ cls: "config-sync-row-chevron", text: this.expandedItems.has(group.name) ? "▾" : "▸" });
     this.renderRuleName(row, group.name, group.label);
-    if (this.availOf(group.name).desktopOnly) row.createSpan({ cls: "config-sync-doto-pill", text: "desktop-only" });
-    if (group.mode === "encrypted") {
-      const badge = row.createSpan({
-        cls: "config-sync-mode-badge",
-        attr: { "aria-label": "Encrypted mode — the whole file is stored encrypted" },
-      });
-      setIcon(badge, "lock");
-    } else if (group.mode === "fields") {
-      const badge = row.createSpan({
-        cls: "config-sync-mode-badge",
-        attr: { "aria-label": "Fields mode — only sensitive fields are filtered/encrypted" },
-      });
-      drawFieldsBadge(badge);
-    }
-    if (this.sectionOf(group.name) === "disabled") {
-      // Carrier-synced fate pill (spec #5-B): shown only for a member the on/off apply will
-      // turn on — an off-everywhere or rule-masked member stays a quiet row.
-      const f = this.disabledRowFate(group.name);
-      if (f !== undefined && f.fate === "turns-on") row.createSpan({ cls: "config-sync-pill is-statenote", text: fatePillText(f.carrier) });
-    }
-    const chosen = this.policy.get(group.name);
-    if (this.selected.has(group.name) && chosen !== undefined) {
-      const opt = policyOptions(this.availOf(group.name)).find((o) => o.action === chosen);
-      if (opt !== undefined && opt.pill !== null) row.createSpan({ cls: "config-sync-pill is-statenote", text: opt.pill });
-    }
+    for (const chip of fate.chips) row.createSpan({ cls: "config-sync-fatechip", text: chip });
     row.createDiv({ cls: "config-sync-rule-spacer" });
+    const fateEl = row.createSpan({ cls: "config-sync-fate-text" });
+    fateEl.createSpan({ cls: "config-sync-fate-glyph", text: fate.glyph });
+    fateEl.appendText(` ${fate.sentence}`);
 
-    const icon = this.stateIcon(pres);
-    const stateEl = row.createSpan({ cls: `config-sync-state-icon ${icon.cls}`, attr: { "aria-label": icon.tip } });
-    // locked pairs the mode badge's lock with a key — "needs the passphrase"; actions show
-    // their own icon; the rest stay text glyphs.
-    this.paintStateIcon(stateEl, icon);
-    if (inert && this.searching() && !this.expandedItems.has(group.name)) {
-      // A grey hit must explain itself without a hover (定稿 search UX). Route the glyph through
-      // paintStateIcon so a locked row's 🔒 renders as the key-round icon, same as stateEl above,
-      // instead of splicing the raw emoji character into the note text.
-      const note = card.createDiv({ cls: "config-sync-inert-note" });
-      this.paintStateIcon(note.createSpan({ cls: `config-sync-state-icon ${icon.cls}` }), icon);
-      note.appendText(` ${icon.tip}`);
-    }
-
-    const dir = this.effDir(r);
-    const cb = row.createEl("input", { type: "checkbox" });
-    cb.addClass(dir === "capture" ? "is-capture" : "is-apply");
-    cb.disabled = inert;
-    cb.checked = this.selected.has(group.name);
-    cb.addEventListener("click", (e) => {
-      e.stopPropagation();
-      if (cb.checked) {
-        this.selected.add(group.name);
-        if (this.sectionOf(group.name) !== "main" && !this.policy.has(group.name)) {
-          this.policy.set(group.name, this.defaultPolicyFor(r));
+    if (!inert) {
+      const cb = row.createEl("input", { type: "checkbox" });
+      cb.addClass(this.effDir(r) === "capture" ? "is-capture" : "is-apply");
+      cb.checked = this.selected.has(group.name);
+      cb.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (cb.checked) {
+          this.selected.add(group.name);
+          if (this.sectionOf(group.name) !== "main" && !this.policy.has(group.name)) {
+            this.policy.set(group.name, this.defaultPolicyFor(r));
+          }
+        } else {
+          this.selected.delete(group.name);
+          this.policy.delete(group.name);
         }
-      } else {
-        this.selected.delete(group.name);
-        this.policy.delete(group.name);
-      }
-      this.render(this.renderGen);
-    });
+        this.render(this.renderGen);
+      });
+    }
 
     const detail = card.createDiv({ cls: "config-sync-report-files" });
     detail.hidden = !this.expandedItems.has(group.name);
-    this.renderItemDetail(detail, r);
+    this.renderUnifiedCard(detail, r, fate, input);
     // Stop syncing always closes the drawer as a quiet footer under a divider (round-9 定稿 A):
     // one placement for every removable row, clear of the file/diff rows a thumb aims for.
     if (this.canStopSyncing(group.name)) {
@@ -1929,6 +1970,243 @@ export class SyncCenterView extends ItemView {
       else this.expandedItems.add(group.name);
       detail.hidden = !detail.hidden;
       chev.setText(detail.hidden ? "▸" : "▾");
+    });
+  }
+
+  // The expanded card (spec §4): standardized rows in order, each omitted when N/A. Resolve
+  // (conflict rows) is Task 6's job — for now a conflict row is simply unstageable with the
+  // ⚠ sentence above, no Resolve control here.
+  private renderUnifiedCard(detail: HTMLElement, r: StatusRow, fate: Fate, input: FateInput): void {
+    if (r.status.message !== undefined) {
+      detail.createDiv({ cls: "config-sync-status-error", text: r.status.message });
+      return;
+    }
+    const name = r.group.name;
+    const dir = input.direction;
+    detail.createDiv({ cls: "config-sync-seg-label", text: dir === "apply" ? "On apply" : dir === "capture" ? "On capture" : "State" });
+    detail.createDiv({ cls: "config-sync-expand-note", text: this.stateClauseText(r, fate, input) });
+
+    if (dir !== null && r.status.changes !== undefined && hasChanges(r.status.changes)) {
+      detail.createDiv({ cls: "config-sync-seg-label", text: "Files" });
+      this.renderUnifiedFiles(detail, r, r.status.changes, dir, input.encrypted);
+    }
+
+    if (fate.stageable) {
+      if (input.carrierSynced) this.renderRunsOnRow(detail, name, input.memberRule);
+      else if (!input.installed) this.renderAfterInstallRow(detail, r);
+    }
+
+    // Custom (folder) groups have no ItemConfig at all — their device scope lives directly on
+    // the SyncGroup literal in settings.customGroups, edited on the Advanced tab, not through
+    // the per-item settingsFile.fileRule this menu writes; the More bridge below still reaches
+    // their own folder-rules editor.
+    if (this.scopeOf(name) !== "custom") this.renderSettingsSyncRow(detail, name);
+    this.renderMoreRow(detail, name);
+
+    if (name === "hotkeys") {
+      detail.createDiv({ cls: "config-sync-seg-label", text: "Note" });
+      detail.createDiv({ cls: "config-sync-expand-note", text: "Takes effect after an app reload" });
+    }
+  }
+
+  // The `On apply`/`On capture`/`State` row's text: the fate sentence, expanded with the
+  // specifics spec §4 calls out verbatim (install source, update versions, capture consequence).
+  private stateClauseText(r: StatusRow, fate: Fate, input: FateInput): string {
+    if (fate.glyph === "⚠") return "Changed on both sides.";
+    if (input.direction === null) return `${fate.sentence}.`;
+    let text = fate.sentence;
+    if (input.direction === "apply" && !input.installed) {
+      const source = this.scopeOf(r.group.name) === "beta" ? "via BRAT" : "from the community catalog";
+      text = text.replace(/^Installs/, `Installs ${source}`);
+    }
+    if (input.direction === "apply" && input.hasUpdate) {
+      const a = this.availOf(r.group.name);
+      text = text.replace(/^Updates/, `Updates ${a.localVersion ?? "current"} → ${a.storeVersion ?? "latest"}`);
+    }
+    if (input.direction === "capture") {
+      if (text === "Captures settings") text = "Shares your settings with your other devices";
+      else if (text === "Turned on here — shares it") text = "Turned on here — your other devices will turn it on the next time they apply";
+    }
+    return `${text}.`;
+  }
+
+  // Files row (spec §4/#8): direction-aware entries via fileEntryFor, reusing the same
+  // diffPair-backed inline expand renderCappedChanges already uses for "view" and "diff" alike
+  // (the "view" case is just a diff against an empty base — the same content diffPair already
+  // returns — mirroring the remote pane's "not in your store" content view).
+  private renderUnifiedFiles(detail: HTMLElement, r: StatusRow, changes: FileChanges, dir: Direction, encrypted: boolean): void {
+    const { shown, rest } = capFileEntries(changes, 10);
+    const renderEntry = (e: CappedEntry): void => {
+      const kind: "added" | "updated" | "deleted" = e.kind === "add" ? "added" : e.kind === "upd" ? "updated" : "deleted";
+      const pres = fileEntryFor({ kind, rel: e.name }, dir, encrypted);
+      const glyphText = pres.glyph === "del" ? "−" : pres.glyph === "·" ? "~" : pres.glyph;
+      const line = detail.createDiv({ cls: `is-${e.kind}${pres.glyph === "del" ? " config-sync-file-del" : ""}`, text: `${glyphText} ${pres.label}` });
+      if (pres.note !== null) {
+        line.createSpan({ cls: "config-sync-file-note", text: ` · ${pres.note}` });
+        return;
+      }
+      if (pres.affordance === "none") return;
+      const word = pres.affordance === "view" ? "view" : "diff";
+      line.addClass("config-sync-diffable");
+      const hint = line.createSpan({ cls: "config-sync-diffhint", text: ` · ${word} ▾` });
+      let panel: HTMLElement | null = null;
+      line.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        if (panel !== null) {
+          panel.remove();
+          panel = null;
+          hint.setText(` · ${word} ▾`);
+          return;
+        }
+        hint.setText(` · ${word} ▴`);
+        const p = createDiv({ cls: "config-sync-inline-diff" });
+        panel = p;
+        line.insertAdjacentElement("afterend", p);
+        void this.host.diffPair(r.group.name, e.name, dir).then((pair) => {
+          if (panel !== p) return;
+          if (pair === null) {
+            p.createDiv({ cls: "config-sync-expand-note", text: "no diff available" });
+            return;
+          }
+          const switchSorted = SWITCH_LIST_GROUPS.has(r.group.name);
+          let base = switchSorted ? switchListSortedView(pair.base) : pair.base;
+          let produced = switchSorted ? switchListSortedView(pair.produced) : pair.produced;
+          let jsonSorted = false;
+          if (!switchSorted && e.name.endsWith(".json")) {
+            const sb = jsonSortedView(pair.base);
+            const sp = jsonSortedView(pair.produced);
+            if (sb !== null && sp !== null) {
+              base = sb;
+              produced = sp;
+              jsonSorted = true;
+            }
+          }
+          if (base === produced && pair.base !== pair.produced) {
+            p.createDiv({ cls: "config-sync-expand-note", text: "Only key order / formatting differs." });
+            return;
+          }
+          const leftLabel = dir === "capture" ? "store" : pres.affordance === "view" ? "not on this device yet" : "this device";
+          const rightLabel = dir === "capture" ? "this device (what capture would write)" : "store (what apply would write)";
+          renderDiffPanel(p, base, produced, leftLabel, rightLabel, switchSorted || jsonSorted ? `${e.name} · sorted view` : e.name);
+        });
+      });
+    };
+    for (const e of shown) renderEntry(e);
+    if (rest.length > 0) {
+      const more = detail.createDiv({ cls: "config-sync-more-files", text: moreFilesText(rest.length) });
+      more.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        more.remove();
+        for (const entry of rest) renderEntry(entry);
+      });
+    }
+  }
+
+  // A generic "label: value-that-opens-a-menu" card row, shared by Runs on / Settings sync /
+  // After install.
+  private renderCardMenuRow(detail: HTMLElement, label: string, valueText: string, ariaLabel: string, buildMenu: () => Menu): void {
+    const row = detail.createDiv({ cls: "config-sync-card-fieldrow config-sync-cardrow" });
+    row.createSpan({ cls: "config-sync-explabel config-sync-explabel-inline", text: label });
+    const chip = row.createSpan({ cls: "config-sync-menuchip", text: valueText, attr: { role: "button", tabindex: "0", "aria-label": ariaLabel } });
+    const open = (x: number, y: number): void => {
+      buildMenu().showAtPosition({ x, y });
+    };
+    chip.addEventListener("click", (e) => {
+      e.stopPropagation();
+      open(e.clientX, e.clientY);
+    });
+    chip.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      e.preventDefault();
+      e.stopPropagation();
+      const rect = chip.getBoundingClientRect();
+      open(rect.left, rect.bottom);
+    });
+  }
+
+  // Runs on (spec §4/§6, plugins with a synced carrier only): unifies per-plugin rules, member
+  // class scopes, and this-device pins into one 5-option menu writing settings.memberRules
+  // directly.
+  private renderRunsOnRow(detail: HTMLElement, name: string, memberRule: MemberRule): void {
+    const carrier = enablementCarrierFor(name);
+    const elementId = this.carrierElementFor(name);
+    this.renderCardMenuRow(detail, "Runs on", RUNS_ON_LABELS[memberRule], "Choose where this plugin runs", () => {
+      const menu = new Menu();
+      for (const rule of MEMBER_RULES) {
+        menu.addItem((item) =>
+          item
+            .setTitle(RUNS_ON_LABELS[rule])
+            .setChecked(rule === memberRule)
+            .onClick(() => {
+              void this.host.setMemberRule(carrier, elementId, rule).then(() => this.notifyExternalChange());
+            })
+        );
+      }
+      return menu;
+    });
+  }
+
+  // After install (spec §4, fallback ladder — only when the carrier is NOT synced and the row
+  // installs): today's install-enable/install policy choice, alive only in the fallback grammar.
+  private renderAfterInstallRow(detail: HTMLElement, r: StatusRow): void {
+    const name = r.group.name;
+    const current: "install-enable" | "install" = this.policy.get(name) === "install" ? "install" : "install-enable";
+    this.renderCardMenuRow(detail, "After install", AFTER_INSTALL_LABELS[current], "Choose what happens right after installing", () => {
+      const menu = new Menu();
+      (["install-enable", "install"] as const).forEach((action) => {
+        menu.addItem((item) =>
+          item
+            .setTitle(AFTER_INSTALL_LABELS[action])
+            .setChecked(action === current)
+            .onClick(() => {
+              this.policy.set(name, action);
+              this.render(this.renderGen);
+            })
+        );
+      });
+      return menu;
+    });
+  }
+
+  // Settings sync (spec §4): item-level device scope — the same write target as the Settings
+  // tab's file-row scope control (ItemConfig.settingsFile.fileRule.scope).
+  private renderSettingsSyncRow(detail: HTMLElement, name: string): void {
+    const itemId = this.itemIdFor(name);
+    const scope = this.host.itemFileScope(itemId);
+    this.renderCardMenuRow(detail, "Settings sync", scopeMenuLabel(scope), "Choose which devices get this item's settings", () => {
+      const menu = new Menu();
+      for (const opt of FILE_SCOPE_OPTIONS) {
+        menu.addItem((item) =>
+          item
+            .setTitle(scopeMenuLabel(opt))
+            .setChecked(opt === scope)
+            .onClick(() => {
+              void this.host.setItemFileScope(itemId, opt).then(() => this.notifyExternalChange());
+            })
+        );
+      }
+      return menu;
+    });
+  }
+
+  // More bridge (spec §4): deep-links into the Settings tab for this item's card.
+  private renderMoreRow(detail: HTMLElement, name: string): void {
+    const isFolder = this.scopeOf(name) === "custom";
+    const line = detail.createDiv({
+      cls: "config-sync-more-files",
+      text: isFolder ? "Folder rules — opens Settings ▸" : "Per-key rules, locks & folders — opens Settings ▸",
+      attr: { role: "button", tabindex: "0" },
+    });
+    const open = (): void => this.host.openSettingsAt(this.itemIdFor(name));
+    line.addEventListener("click", (e) => {
+      e.stopPropagation();
+      open();
+    });
+    line.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      e.preventDefault();
+      e.stopPropagation();
+      open();
     });
   }
 

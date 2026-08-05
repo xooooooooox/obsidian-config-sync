@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { capFileEntries, insyncLineText, statusBarStatuses, moreFilesText, visibleUnderFilter, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, footerSummary, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, versionLine, runProgressLabel, showColdStartBanner, memberDecisionsFromScopes, memberDecisionText, switchSummaryLines, switchBothWaysCaption, ruleGroups, memberScopeWrite, memberCurrentScope, enablementCarrierFor, carrierIsSynced, memberFate, fatePillText, fateLineText, DISABLED_CARRIER_SYNCED_NOTE, isEnableAction, disabledInSyncNote, disabledNoSettingsNote, TYPE_SECTION_TITLES, typeSectionForRow, sectionCountLabel, unifiedFooterSummary } from "../src/ui/panelModel";
+import { capFileEntries, insyncLineText, statusBarStatuses, moreFilesText, visibleUnderFilter, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, footerSummary, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, versionLine, runProgressLabel, showColdStartBanner, memberDecisionsFromScopes, memberDecisionText, switchSummaryLines, switchBothWaysCaption, ruleGroups, memberScopeWrite, memberCurrentScope, enablementCarrierFor, carrierIsSynced, memberFate, fatePillText, fateLineText, DISABLED_CARRIER_SYNCED_NOTE, isEnableAction, disabledInSyncNote, disabledNoSettingsNote, TYPE_SECTION_TITLES, typeSectionForRow, sectionCountLabel, unifiedFooterSummary, fileEntryFor } from "../src/ui/panelModel";
 import { GroupState, GroupStatus } from "../src/core/status";
 import { Availability } from "../src/core/availability";
 
@@ -540,5 +540,48 @@ describe("unifiedFooterSummary", () => {
   });
   it("selected but nothing to categorize falls back to the bare total", () => {
     expect(unifiedFooterSummary({ applyN: 1, installs: 0, turnsOn: 0, settings: 0, captureN: 0 })).toBe("1 selected");
+  });
+});
+
+describe("fileEntryFor — spec §4 direction-aware file entries (ledger #8)", () => {
+  it("apply, raw 'deleted' (store-only): a brand-new file lands locally — + / view, nothing to diff against", () => {
+    const e = fileEntryFor({ kind: "deleted", rel: "data.json" }, "apply", false);
+    expect(e).toEqual({ glyph: "+", label: "data.json", affordance: "view", note: null });
+  });
+  it("apply, raw 'added' (local-only): apply removes it to match the store — del, no affordance", () => {
+    const e = fileEntryFor({ kind: "added", rel: "stale.json" }, "apply", false);
+    expect(e).toEqual({ glyph: "del", label: "stale.json", affordance: "none", note: null });
+  });
+  it("apply, raw 'updated' (both sides exist): both-sides — neutral glyph, diff", () => {
+    const e = fileEntryFor({ kind: "updated", rel: "data.json" }, "apply", false);
+    expect(e).toEqual({ glyph: "·", label: "data.json", affordance: "diff", note: null });
+  });
+  it("capture, raw 'added' (local-only, capture would add it to the store): capture-side — ↑ / diff", () => {
+    const e = fileEntryFor({ kind: "added", rel: "data.json" }, "capture", false);
+    expect(e).toEqual({ glyph: "↑", label: "data.json", affordance: "diff", note: null });
+  });
+  it("capture, raw 'updated': capture-side — ↑ / diff", () => {
+    const e = fileEntryFor({ kind: "updated", rel: "data.json" }, "capture", false);
+    expect(e).toEqual({ glyph: "↑", label: "data.json", affordance: "diff", note: null });
+  });
+  it("capture, raw 'deleted' (store-only, capture would remove it from the store): a real deletion — del, no affordance", () => {
+    const e = fileEntryFor({ kind: "deleted", rel: "gone.json" }, "capture", false);
+    expect(e).toEqual({ glyph: "del", label: "gone.json", affordance: "none", note: null });
+  });
+  it("encrypted apply-added: still + glyph, but no preview", () => {
+    const e = fileEntryFor({ kind: "deleted", rel: "secret.json" }, "apply", true);
+    expect(e).toEqual({ glyph: "+", label: "secret.json", affordance: "none", note: "changed — encrypted, no preview" });
+  });
+  it("encrypted apply-updated: neutral glyph, no preview", () => {
+    const e = fileEntryFor({ kind: "updated", rel: "secret.json" }, "apply", true);
+    expect(e).toEqual({ glyph: "·", label: "secret.json", affordance: "none", note: "changed — encrypted, no preview" });
+  });
+  it("encrypted capture-side: ↑ glyph, no preview", () => {
+    const e = fileEntryFor({ kind: "updated", rel: "secret.json" }, "capture", true);
+    expect(e).toEqual({ glyph: "↑", label: "secret.json", affordance: "none", note: "changed — encrypted, no preview" });
+  });
+  it("encrypted deletion (either direction): del strikethrough is unaffected by encryption — nothing to preview either way", () => {
+    expect(fileEntryFor({ kind: "added", rel: "secret.json" }, "apply", true)).toEqual({ glyph: "del", label: "secret.json", affordance: "none", note: null });
+    expect(fileEntryFor({ kind: "deleted", rel: "secret.json" }, "capture", true)).toEqual({ glyph: "del", label: "secret.json", affordance: "none", note: null });
   });
 });

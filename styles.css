@@ -589,6 +589,16 @@ body.is-mobile.config-sync-mobile-statusbar .status-bar {
 .config-sync-mode-badge svg { width: 12px; height: 12px; }
 .config-sync-doto-pill { font-size: var(--font-ui-smaller); line-height: 1.6; border-radius: 999px; padding: 1px 8px; margin-left: var(--size-4-2); color: var(--color-orange); border: 1px solid rgba(var(--color-orange-rgb), 0.45); white-space: nowrap; }
 
+/* Unified row (spec 2026-08-06-sync-center-unified-grammar-design.md §3): state/rule chips and
+   the fate sentence that replace the old policy pills and state-icon column. */
+.config-sync-fatechip { flex: none; font-size: var(--font-ui-smaller); line-height: 1.6; border-radius: 999px; padding: 1px 8px; background: var(--background-modifier-border); color: var(--text-muted); white-space: nowrap; }
+.config-sync-fate-text { flex: none; color: var(--text-muted); font-size: var(--font-ui-smaller); white-space: nowrap; }
+.config-sync-fate-glyph { margin-right: 2px; }
+.config-sync-hub-row.is-conflict .config-sync-fate-text { color: var(--color-orange); }
+.config-sync-hub-row.is-conflict .config-sync-fate-glyph { color: var(--color-orange); }
+.config-sync-file-del { text-decoration: line-through; color: var(--text-faint); }
+.config-sync-file-note { color: var(--text-faint); }
+
 /* custom-drawn checkboxes (same inputs, no native rendering) */
 .config-sync-hub-row input[type="checkbox"],
 .config-sync-mainbar input[type="checkbox"],
@@ -1071,6 +1081,11 @@ body.is-mobile .config-sync-strip-meta .config-sync-report-pills { margin-left: 
    remaining home of that list as a configurable item once its row dissolves into this chip. */
 .config-sync-carrierchip { border: 1px solid var(--background-modifier-border); border-radius: 999px; padding: 1px 8px; font-size: var(--font-ui-smaller); color: var(--text-muted); cursor: pointer; }
 .config-sync-carrierchip.is-synced { color: var(--color-green); border-color: rgba(var(--color-green-rgb), 0.4); }
+/* Expanded-card menu rows (spec §4): Runs on / Settings sync / After install — a label plus a
+   pill that opens an Obsidian Menu, same visual language as the carrier chip above. */
+.config-sync-cardrow { display: flex; align-items: center; justify-content: space-between; gap: var(--size-4-2); }
+.config-sync-menuchip { border: 1px solid var(--background-modifier-border); border-radius: 999px; padding: 1px 8px; font-size: var(--font-ui-smaller); color: var(--text-muted); cursor: pointer; white-space: nowrap; }
+.config-sync-menuchip:hover, .config-sync-menuchip:focus-visible { color: var(--text-normal); }
 /* Config Sync's pinned self row (Community section) — same row shape as a normal item, own fate
    text instead of a checkbox since it isn't staged through the normal apply/capture run. */
 .config-sync-hub-row.is-self { cursor: pointer; }

@@ -38,7 +38,7 @@ interface SecretStore {
 }
 import { BratIndex, parseBratRepoList, resolveBratIndex } from "./core/bratIndex";
 import { type CatalogSection, corePluginFile, displayLabelForGroup, findGroupByName, listBetaSections, listCoreSections, listDiscovered, listOptionSections, listPluginSections, SELF_GROUP_NAME, setCorePluginIds } from "./core/catalog";
-import { Availability, availabilityForGroup, desktopOnlyDrift, desktopOnlyPluginIds, scopedAwayMembers, memberForceOff, preferStoredMemberRule } from "./core/availability";
+import { Availability, availabilityForGroup, desktopOnlyDrift, desktopOnlyPluginIds, normalizeMemberRule, scopedAwayMembers, memberForceOff, preferStoredMemberRule } from "./core/availability";
 import { listFilesRecursive, isJunkPath, FileIO } from "./core/io";
 import { leftoverStoreRels, storeSelfCopyGroups, selfListGroups } from "./core/leftover";
 import { parseStoreLock, validateSyncManifest } from "./core/manifest";
@@ -55,6 +55,7 @@ import {
   ItemConfig,
   itemConfigWithEnabledOn,
   ItemDef,
+  ItemSettingsFile,
   compileItems,
   parentCardLabel,
   RegistryEnv,
@@ -70,7 +71,8 @@ import { selfPaneState } from "./core/selfPane";
 import { applyUpdates, Ledger, parseLedger, pruneLedger } from "./core/ledger";
 import { bucketCounts, checkRemote, diffRemote, GroupStatus, remoteDirectionCounts, RemoteCheck, remoteLockAhead, statusForGroups } from "./core/status";
 import { GroupResult, MemberRule, Remote, RibbonButtons, RuleScope, StoreLock, SyncGroup } from "./core/types";
-import { MemberDecision, memberDecisionsFromScopes, statusBarStatuses } from "./ui/panelModel";
+import { EnablementCarrier, MemberDecision, memberDecisionsFromScopes, statusBarStatuses } from "./ui/panelModel";
+import { defaultSettingsFile, deriveMode } from "./ui/itemCard";
 import { ConflictModal } from "./ui/ConflictModal";
 import { renderStatusBarItem, statusBarSegments } from "./ui/statusBar";
 import { SYNC_CENTER_VIEW_TYPE, SelfSyncInfo, SyncCenterHost, SyncCenterView } from "./ui/SyncCenterView";
@@ -199,6 +201,14 @@ interface AppInternal {
   updateFontFamily(): void;
   updateFontSize(): void;
   updateAccentColor(): void;
+}
+
+// app.setting's internal surface (the Settings modal manager) — not part of the public API.
+// The Sync Center's More bridge uses this today as an existing-affordance passthrough (opens
+// this plugin's own Settings tab); Task 7 extends openSettingsAt to scroll to/expand the
+// specific item's card once it lands there.
+interface AppWithSetting {
+  setting: { open(): void; openTabById(id: string): void };
 }
 
 export default class ConfigSyncPlugin extends Plugin {
@@ -657,6 +667,11 @@ export default class ConfigSyncPlugin extends Plugin {
       setMemberEnabledOn: (carrier, elementId, scope) => this.setMemberEnabledOn(carrier, elementId, scope),
       clearMemberLocal: (carrier, elementId) => this.clearMemberLocal(carrier, elementId),
       setItemSyncEnabled: (itemId, enabled) => this.setItemSyncEnabled(itemId, enabled),
+      memberRuleFor: (carrier, elementId, locallyOn) => this.memberRuleFor(carrier, elementId, locallyOn),
+      setMemberRule: (carrier, elementId, rule) => this.setMemberRule(carrier, elementId, rule),
+      itemFileScope: (itemId) => this.itemFileScope(itemId),
+      setItemFileScope: (itemId, scope) => this.setItemFileScope(itemId, scope),
+      openSettingsAt: (itemId) => this.openSettingsAt(itemId),
       adoptConfiguration: async () => {
         try {
           // config-sync's own registry item (registry.ts builds one for every installed plugin,
@@ -1218,6 +1233,59 @@ export default class ConfigSyncPlugin extends Plugin {
     const cfg = this.settings.items[itemId] ?? emptyItemConfig();
     this.settings.items = { ...this.settings.items, [itemId]: { ...cfg, enabled } };
     await this.saveSettings();
+  }
+
+  // Runs-on menu read (unified grammar task-5, spec §6): a genuinely stored rule always wins;
+  // absent one, derive losslessly from the legacy device-class scope (memberDecisionsFor, which
+  // already overlays settings.localMembers per the task-2 retarget) using the SAME
+  // normalizeMemberRule("local", …) mapping memberRuleForces applies at apply/capture time, so
+  // the menu's displayed value always agrees with what a run would actually do.
+  private memberRuleFor(carrier: EnablementCarrier, elementId: string, locallyOn: boolean): MemberRule {
+    const prefix = carrier === "core-plugins" ? "core:" : "community:";
+    const stored = this.settings.memberRules[`${prefix}${elementId}`];
+    if (stored !== undefined) return stored;
+    const scope = this.memberDecisionsFor(carrier).find((d) => d.id === elementId)?.scope;
+    if (scope === undefined) return "all";
+    return scope === "local" ? normalizeMemberRule("local", locallyOn) : scope;
+  }
+
+  // Runs-on menu write: stores the unified rule directly — task 2 already wired
+  // settings.memberRules into switchForceOn and the never-here half of switchForceOff, so no
+  // producer rework is needed here. Rides the self item's whole-document field sync unchanged
+  // (it carries no locked preset, unlike rootPath/remotes/localMembers — see selfPresetRules).
+  async setMemberRule(carrier: EnablementCarrier, elementId: string, rule: MemberRule): Promise<void> {
+    const prefix = carrier === "core-plugins" ? "core:" : "community:";
+    this.settings.memberRules = { ...this.settings.memberRules, [`${prefix}${elementId}`]: rule };
+    await this.saveSettings();
+  }
+
+  // Settings-sync menu read/write (unified grammar task-5): the same field the Settings tab's
+  // file-row scope control edits (ItemConfig.settingsFile.fileRule.scope). `mode` is re-derived
+  // on every write exactly as SettingTab's own withDerivedMode does, so a fileRule-only write
+  // here never desyncs it from the rules/perItem it's actually driven by.
+  private itemFileScope(itemId: string): Exclude<RuleScope, "local"> {
+    return this.settings.items[itemId]?.settingsFile?.fileRule?.scope ?? "all";
+  }
+
+  async setItemFileScope(itemId: string, scope: Exclude<RuleScope, "local">): Promise<void> {
+    const cfg = this.settings.items[itemId] ?? emptyItemConfig();
+    const sf = cfg.settingsFile ?? defaultSettingsFile();
+    const nextSf: ItemSettingsFile = { ...sf, fileRule: { ...(sf.fileRule ?? { scope: "all", encrypted: false }), scope } };
+    const mode = deriveMode(nextSf);
+    const finalSf: ItemSettingsFile = mode === "fields" ? { ...nextSf, mode, fileRule: undefined } : { ...nextSf, mode };
+    this.settings.items = { ...this.settings.items, [itemId]: { ...cfg, settingsFile: finalSf } };
+    await this.saveSettings();
+  }
+
+  // The More bridge's target item, kept for Task 7 to consume when it adds the scroll/expand
+  // behavior. For now this is an existing-affordance passthrough: it opens the plugin's own
+  // Settings tab (the same entry point Obsidian's plugin list gear icon uses).
+  private pendingSettingsDeepLink: string | null = null;
+  private openSettingsAt(itemId: string): void {
+    this.pendingSettingsDeepLink = itemId;
+    const app = this.app as unknown as AppWithSetting;
+    app.setting.open();
+    app.setting.openTabById(this.manifest.id);
   }
 
   // The where-it-runs menu's "This device decides for itself" entry (spec 2026-07-28 §4) — and

@@ -468,3 +468,46 @@ export function unifiedFooterSummary(sel: { applyN: number; installs: number; tu
   if (parts.length === 0) return `${total} selected`;
   return `${total} selected — ${parts.join(" · ")}`;
 }
+
+// ── Expanded-card file entries (spec §4, ledger #8) ─────────────────────────────────────────────
+// FileChanges (capFileEntries's source) is always computed from the CAPTURE side's perspective
+// (types.ts/status.ts): "added" = present locally, absent from the store; "deleted" = present in
+// the store, absent locally; "updated" = present on both sides, differs. Under capture direction
+// that perspective already IS the effective action. Under apply direction the target is local, so
+// added/deleted mirror each other: a store-only file ("deleted", capture-perspective) is really a
+// brand-new file landing locally (nothing to diff against — "view" the incoming content); a
+// local-only file ("added") is really removed once apply makes local match the store. This mirror
+// is the fix for ledger #8 (a not-installed plugin's incoming settings used to render as a
+// strikethrough deletion).
+
+export interface FileEntryPresentation {
+  glyph: "+" | "↑" | "del" | "·";
+  label: string;
+  affordance: "view" | "diff" | "none";
+  note: string | null;
+}
+
+export function fileEntryFor(
+  change: { kind: "added" | "updated" | "deleted"; rel: string },
+  effDir: "apply" | "capture",
+  encrypted: boolean
+): FileEntryPresentation {
+  const effectiveKind: "added" | "updated" | "deleted" =
+    effDir === "capture" ? change.kind : change.kind === "added" ? "deleted" : change.kind === "deleted" ? "added" : "updated";
+
+  // A real deletion never has content to preview — encryption is moot, and the "del" glyph
+  // drives the collapsed/expanded strikethrough regardless of direction (#8's other rule: "del"
+  // strikethrough only when the EFFECTIVE direction actually deletes, i.e. only here).
+  if (effectiveKind === "deleted") {
+    return { glyph: "del", label: change.rel, affordance: "none", note: null };
+  }
+
+  const ENCRYPTED_NOTE = "changed — encrypted, no preview";
+  if (effDir === "capture") {
+    return { glyph: "↑", label: change.rel, affordance: encrypted ? "none" : "diff", note: encrypted ? ENCRYPTED_NOTE : null };
+  }
+  // apply, content-bearing (added = brand-new to local, updated = both sides exist)
+  const glyph = effectiveKind === "added" ? "+" : "·";
+  const affordance = effectiveKind === "added" ? "view" : "diff";
+  return { glyph, label: change.rel, affordance: encrypted ? "none" : affordance, note: encrypted ? ENCRYPTED_NOTE : null };
+}
