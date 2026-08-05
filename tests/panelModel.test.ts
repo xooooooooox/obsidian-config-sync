@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { capFileEntries, insyncLineText, statusBarStatuses, moreFilesText, visibleUnderFilter, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, footerSummary, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, versionLine, runProgressLabel, showColdStartBanner, memberDecisionsFromScopes, memberDecisionText, switchSummaryLines, switchBothWaysCaption, ruleGroups, memberScopeWrite, memberCurrentScope, enablementCarrierFor, carrierIsSynced, memberFate, fatePillText, fateLineText, DISABLED_CARRIER_SYNCED_NOTE, isEnableAction, disabledInSyncNote, disabledNoSettingsNote } from "../src/ui/panelModel";
+import { capFileEntries, insyncLineText, statusBarStatuses, moreFilesText, visibleUnderFilter, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, footerSummary, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, versionLine, runProgressLabel, showColdStartBanner, memberDecisionsFromScopes, memberDecisionText, switchSummaryLines, switchBothWaysCaption, ruleGroups, memberScopeWrite, memberCurrentScope, enablementCarrierFor, carrierIsSynced, memberFate, fatePillText, fateLineText, DISABLED_CARRIER_SYNCED_NOTE, isEnableAction, disabledInSyncNote, disabledNoSettingsNote, TYPE_SECTION_TITLES, typeSectionForRow, sectionCountLabel, unifiedFooterSummary } from "../src/ui/panelModel";
 import { GroupState, GroupStatus } from "../src/core/status";
 import { Availability } from "../src/core/availability";
 
@@ -484,5 +484,61 @@ describe("disabledInSyncNote / disabledNoSettingsNote (fix round 1 #3 — verbat
     expect(disabledInSyncNote(false)).toBe("identical to the store — applying just turns the plugin on");
     expect(disabledNoSettingsNote(true)).toBe("no settings to sync yet");
     expect(disabledNoSettingsNote(false)).toBe("no settings to apply — enables the plugin only");
+  });
+});
+
+// ── Unified grammar view skeleton (task-4: type sections, pills, folds, footer) ─────────────
+
+describe("typeSectionForRow", () => {
+  it("obsidian/core/community pass straight through", () => {
+    expect(typeSectionForRow("obsidian")).toBe("obsidian");
+    expect(typeSectionForRow("core")).toBe("core");
+    expect(typeSectionForRow("community")).toBe("community");
+  });
+  it("beta folds into community; custom folds into folders", () => {
+    expect(typeSectionForRow("beta")).toBe("community");
+    expect(typeSectionForRow("custom")).toBe("folders");
+  });
+});
+
+describe("TYPE_SECTION_TITLES", () => {
+  it("copy-final titles for the four fixed sections", () => {
+    expect(TYPE_SECTION_TITLES).toEqual({
+      obsidian: "Obsidian",
+      core: "Core plugins",
+      community: "Community plugins",
+      folders: "Your folders",
+    });
+  });
+});
+
+describe("sectionCountLabel", () => {
+  it("unfiltered form: just the total", () => {
+    expect(sectionCountLabel(31, 31, false)).toBe("· 31");
+  });
+  it("filtered form: visible of total", () => {
+    expect(sectionCountLabel(31, 6, true)).toBe("· 6 of 31");
+  });
+});
+
+describe("unifiedFooterSummary", () => {
+  it("0 selected", () => {
+    expect(unifiedFooterSummary({ applyN: 0, installs: 0, turnsOn: 0, settings: 0, captureN: 0 })).toBe("Nothing selected");
+  });
+  it("apply only", () => {
+    expect(unifiedFooterSummary({ applyN: 5, installs: 2, turnsOn: 3, settings: 4, captureN: 0 })).toBe(
+      "5 selected — installs 2 · turns on 3 · settings 4"
+    );
+  });
+  it("mixed apply + capture", () => {
+    expect(unifiedFooterSummary({ applyN: 5, installs: 2, turnsOn: 3, settings: 4, captureN: 2 })).toBe(
+      "7 selected — installs 2 · turns on 3 · settings 4 · captures 2"
+    );
+  });
+  it("capture only", () => {
+    expect(unifiedFooterSummary({ applyN: 0, installs: 0, turnsOn: 0, settings: 0, captureN: 2 })).toBe("2 selected — captures 2");
+  });
+  it("selected but nothing to categorize falls back to the bare total", () => {
+    expect(unifiedFooterSummary({ applyN: 1, installs: 0, turnsOn: 0, settings: 0, captureN: 0 })).toBe("1 selected");
   });
 });

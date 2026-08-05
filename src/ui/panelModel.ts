@@ -2,6 +2,7 @@ import { GroupState, GroupStatus } from "../core/status";
 import { FileChanges, RuleScope } from "../core/types";
 import { Availability, VersionDrift } from "../core/availability";
 import { StateAction } from "../core/ConfigSyncCore";
+import { ItemCategory } from "../core/catalog";
 
 // Direction a checkable row acts in: capture pushes this device → store; apply pulls store → device.
 export type Direction = "capture" | "apply";
@@ -420,4 +421,50 @@ export function disabledInSyncNote(carrierSynced: boolean): string {
 
 export function disabledNoSettingsNote(carrierSynced: boolean): string {
   return carrierSynced ? "no settings to sync yet" : "no settings to apply — enables the plugin only";
+}
+
+// ── Unified grammar view skeleton (spec 2026-08-06-sync-center-unified-grammar-design.md §2) ──
+// Replaces the old main/outdated/disabled/not-installed/desktop-only dichotomy: every row lives
+// in exactly one of these four fixed sections, keyed off its scope — readiness state (outdated,
+// disabled, not installed…) becomes row-level fate instead of a separate section.
+
+export type TypeSection = "obsidian" | "core" | "community" | "folders";
+
+export const TYPE_SECTION_TITLES: Record<TypeSection, string> = {
+  obsidian: "Obsidian",
+  core: "Core plugins",
+  community: "Community plugins",
+  folders: "Your folders",
+};
+
+// Fixed display order (spec §2), alphabetical within each section separately (byLabel).
+export const TYPE_SECTION_ORDER: readonly TypeSection[] = ["obsidian", "core", "community", "folders"];
+
+// beta plugins sit in the Community section (parity with the settings Beta tab pinning them
+// alongside community plugins); custom groups (+ Add folder) are "Your folders".
+export function typeSectionForRow(defSection: ItemCategory | "beta"): TypeSection {
+  if (defSection === "beta") return "community";
+  if (defSection === "custom") return "folders";
+  return defSection;
+}
+
+// Section header count pill: "· 31" when nothing narrows the section, "· 6 of 31" once a state
+// filter or a search query hides some of its rows.
+export function sectionCountLabel(total: number, visible: number, filtered: boolean): string {
+  return filtered ? `· ${visible} of ${total}` : `· ${total}`;
+}
+
+// The action bar's staged-selection line (replaces the old 5-param footerSummary once the view
+// derives every count from Fate — spec §5). `applyN`/`captureN` are the two direction totals;
+// installs/turnsOn/settings are an apply-side breakdown (subsets of applyN, no "+").
+export function unifiedFooterSummary(sel: { applyN: number; installs: number; turnsOn: number; settings: number; captureN: number }): string {
+  const total = sel.applyN + sel.captureN;
+  if (total === 0) return "Nothing selected";
+  const parts: string[] = [];
+  if (sel.installs > 0) parts.push(`installs ${sel.installs}`);
+  if (sel.turnsOn > 0) parts.push(`turns on ${sel.turnsOn}`);
+  if (sel.settings > 0) parts.push(`settings ${sel.settings}`);
+  if (sel.captureN > 0) parts.push(`captures ${sel.captureN}`);
+  if (parts.length === 0) return `${total} selected`;
+  return `${total} selected — ${parts.join(" · ")}`;
 }
