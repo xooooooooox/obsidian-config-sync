@@ -10,12 +10,10 @@ export type Direction = "capture" | "apply";
 
 // Panel row filter. Buckets match core bucketCounts: capture = local-changed + not-captured,
 // apply = store-newer + differs, ok = in-sync.
-// "leftover" is a scope-level view (store orphans), not a row-state filter — the view renders
-// a dedicated section for it and never routes rows through visibleUnderFilter with it.
-export type PanelFilter = "all" | "capture" | "apply" | "ok" | "none" | "leftover";
+export type PanelFilter = "all" | "capture" | "apply" | "ok" | "none";
 
 export function visibleUnderFilter(state: GroupState, filter: PanelFilter): boolean {
-  if (filter === "all" || filter === "leftover") return true;
+  if (filter === "all") return true;
   if (state === "locked") return false;
   if (filter === "capture") return state === "local-changed" || state === "not-captured";
   if (filter === "apply") return state === "store-newer" || state === "differs" || state === "never-synced";
@@ -92,20 +90,6 @@ export function stageableRow(state: GroupState, section: SectionKind): boolean {
   if (section !== "main") return state !== "locked";
   return stageableState(state);
 }
-
-export const SECTION_TITLES: Record<Exclude<SectionKind, "main">, string> = {
-  outdated: "Outdated on this device",
-  disabled: "Disabled on this device",
-  "not-installed": "Not installed on this device",
-  "desktop-only": "Desktop-only",
-};
-
-export const SECTION_NOTES: Record<Exclude<SectionKind, "main">, string> = {
-  outdated: "Store settings were captured on a newer plugin version than this device runs — updating first is the safe path.",
-  disabled: "Settings sync either way — choose whether applying also turns the plugin on.",
-  "not-installed": "Settings sync either way — choose whether applying also installs the plugin (latest version, from the community catalog).",
-  "desktop-only": "In your config but can't run on this device — nothing to do here.",
-};
 
 // isMobile: a desktop-only plugin (author-declared) can't run on a phone — whether it's
 // not-installed or installed-but-disabled (Obsidian refuses to enable it there). Either way it's
@@ -200,39 +184,6 @@ export function isValidPolicy(a: Availability, action: StateAction): boolean {
   return policyOptions(a).some((o) => o.action === action);
 }
 
-export function versionLine(a: Availability): { text: string; tone: "gray" | "amber" } | null {
-  if (a.drift === null || a.localVersion === null || a.storeVersion === null) return null;
-  if (a.anchor === "app") {
-    return a.drift === "behind"
-      ? { text: `captured on Obsidian ${a.storeVersion} — this device runs ${a.localVersion}; update Obsidian if settings look off`, tone: "amber" }
-      : { text: `captured on Obsidian ${a.storeVersion} · this device runs ${a.localVersion}`, tone: "gray" };
-  }
-  if (a.drift === "ahead") {
-    return { text: `this device ${a.localVersion} · store ${a.storeVersion} — newer here; capturing will refresh the store`, tone: "gray" };
-  }
-  const suffix = a.kind === "disabled" ? " — settings were captured on a newer version" : "";
-  return { text: `this device ${a.localVersion} · store ${a.storeVersion}${suffix}`, tone: "gray" };
-}
-
-// "selected" wording (定稿 2026-07-17, replaces git-flavored "staged"); an empty selection
-// renders NOTHING — the idle state needs no label.
-// The lead number is the TOTAL staged across every section (matching the section heads and
-// the Apply button); the non-main sections are a composition breakdown — subsets of the
-// total, so no "+" (batch: footer consistency). `main` here is main-section staged rows.
-// `disabled` is every staged disabled row (feeds the total, spec #5-B fix round 2); a
-// carrier-synced or "Keep disabled" row stages settings-only and belongs in that total but not
-// in the "to enable" phrase, so `disabledEnableCount` — a real resolved enable only — drives
-// that qualifier separately.
-export function footerSummary(main: number, outdated: number, disabled: number, toInstall: number, disabledEnableCount: number): string {
-  const total = main + outdated + disabled + toInstall;
-  if (total === 0) return "";
-  const parts = [`${total} selected`];
-  if (outdated > 0) parts.push(`${outdated} to update`);
-  if (disabledEnableCount > 0) parts.push(`${disabledEnableCount} to enable`);
-  if (toInstall > 0) parts.push(`${toInstall} to install`);
-  return parts.join(" · ");
-}
-
 // The busy-button label during a capture/apply run — arrow-prefixed to match the idle
 // "↑ Capture N items" / "↓ Apply N items" buttons. Rendered from the view's activeRun state so a
 // mid-run rebuild shows live progress instead of the stale staged count.
@@ -241,8 +192,6 @@ export function runProgressLabel(verb: "Capturing" | "Applying", done: number, t
 }
 
 // ── In-place "where it runs" guidance (spec 2026-07-28 §4) ────────────────────────────────────
-
-export const MEMBER_PUBLISH_NOTE = "Your choices are saved on this device — capture Settings so your other devices pick them up.";
 
 export interface MemberDecision {
   id: string;
@@ -264,102 +213,6 @@ export function memberDecisionsFromScopes(scopes: Record<string, RuleScope>, str
     .sort((a, b) => a.id.localeCompare(b.id));
 }
 
-export function memberDecisionText(m: MemberDecision): string {
-  return m.scope === "local" ? `${m.id} — this device keeps its own on/off state` : `${m.id} — runs on ${m.scope} only`;
-}
-
-export type MemberScopeWrite =
-  | { kind: "enabledOn"; scope: "desktop" | "mobile" }
-  | { kind: "local" }
-  | { kind: "clear" };
-
-// Maps a scope-cycle target to the host write that realizes it (semantics unchanged from the old
-// where-it-runs menu): desktop/mobile → setMemberEnabledOn; this-device → addSwitchExceptions;
-// all → clearMemberLocal (which clears both a prior enabledOn and a prior this-device exception).
-export function memberScopeWrite(scope: RuleScope): MemberScopeWrite {
-  if (scope === "desktop" || scope === "mobile") return { kind: "enabledOn", scope };
-  if (scope === "local") return { kind: "local" };
-  return { kind: "clear" };
-}
-
-// Direction groups for the per-plugin rule list. One-sided → a single unlabeled group (the
-// summary line above already states the direction); two-sided → two labeled groups, store side
-// first (matching the summary's apply-first order), so no row needs a per-row direction tag.
-export interface RuleGroup {
-  dir: Direction;
-  label: string | null;
-  ids: string[];
-}
-
-export function ruleGroups(
-  d: { captureRemoves: string[]; applyDisables: string[] },
-  device: "desktop" | "mobile"
-): RuleGroup[] {
-  const here = device === "mobile" ? "this phone" : "this computer";
-  if (d.captureRemoves.length > 0 && d.applyDisables.length > 0) {
-    return [
-      { dir: "apply", label: `Off ${here} · ${d.captureRemoves.length}`, ids: d.captureRemoves },
-      { dir: "capture", label: `On ${here} only · ${d.applyDisables.length}`, ids: d.applyDisables },
-    ];
-  }
-  if (d.captureRemoves.length > 0) return [{ dir: "apply", label: null, ids: d.captureRemoves }];
-  if (d.applyDisables.length > 0) return [{ dir: "capture", label: null, ids: d.applyDisables }];
-  return [];
-}
-
-// Current scope of a switch-list member: its device rule if it has one, else "all" (no rule).
-export function memberCurrentScope(decisions: MemberDecision[], id: string): RuleScope {
-  return decisions.find((m) => m.id === id)?.scope ?? "all";
-}
-
-export interface SummaryLine {
-  dir: Direction;
-  text: string;
-}
-
-// Directional summary lines that replace the per-member flood. One-sided → one line; both-sided
-// → both, apply line first (Apply is the primary action on a never-synced item). `here` is
-// device-aware; `noun` is the member kind the list carries (plugin lists vs the CSS-snippet
-// list). Replaces the old single-line switchSummaryLine, which bailed to null on both-ways.
-export function switchSummaryLines(
-  d: { captureRemoves: string[]; applyDisables: string[] },
-  device: "desktop" | "mobile",
-  noun: "plugin" | "snippet"
-): SummaryLine[] {
-  const here = device === "mobile" ? "this phone" : "this computer";
-  const out: SummaryLine[] = [];
-  if (d.captureRemoves.length > 0) {
-    const n = d.captureRemoves.length;
-    out.push({
-      dir: "apply",
-      text:
-        n === 1
-          ? `1 ${noun} is on for your other devices but off ${here} — Apply turns it on.`
-          : `${n} ${noun}s are on for your other devices but off ${here} — Apply turns them on.`,
-    });
-  }
-  if (d.applyDisables.length > 0) {
-    const n = d.applyDisables.length;
-    out.push({
-      dir: "capture",
-      text:
-        n === 1
-          ? `1 ${noun} is on ${here} but off on your other devices — Capture shares it.`
-          : `${n} ${noun}s are on ${here} but off on your other devices — Capture shares them.`,
-    });
-  }
-  return out;
-}
-
-// Shown only when the divergence is two-sided — a bulk Apply/Capture is not a no-op there.
-// The snippet variant points at the Appearance card because per-snippet device scope lives
-// there (no per-snippet rule list in the Sync Center).
-export function switchBothWaysCaption(noun: "plugin" | "snippet"): string {
-  return noun === "snippet"
-    ? "Bulk Apply or Capture resolves every snippet one way. Pin per-snippet devices on the Appearance card in Settings."
-    : "Bulk Apply or Capture resolves every plugin one way. Pin the ones that differ on purpose below.";
-}
-
 // ── Enablement single entry (spec 2026-08-06-enablement-single-entry-design.md #5-B) ─────────
 
 export type EnablementCarrier = "core-plugins" | "community-plugins";
@@ -374,54 +227,6 @@ export function enablementCarrierFor(itemGroup: string): EnablementCarrier {
 // enablement outright, and the disabled item's own per-card policy never runs.
 export function carrierIsSynced(itemGroup: string, compiledGroupNames: readonly string[]): boolean {
   return compiledGroupNames.includes(enablementCarrierFor(itemGroup));
-}
-
-export type MemberFate = "turns-on" | "stays-off" | "rule";
-
-// Pure derivation from the carrier's existing divergence data: masked (a per-plugin rule or
-// This-device pin) always wins — it excludes the member from applySide already, but a fate
-// still needs to say WHY the member stays off rather than blaming "off everywhere".
-export function memberFate(element: string, applySide: readonly string[], masked: boolean): MemberFate {
-  if (masked) return "rule";
-  return applySide.includes(element) ? "turns-on" : "stays-off";
-}
-
-const ENABLEMENT_CARRIER_LABEL: Record<EnablementCarrier, string> = {
-  "core-plugins": "Core plugins on/off",
-  "community-plugins": "Community plugins on/off",
-};
-
-// Collapsed-row pill — turns-on members only (copy final, spec #5-B).
-export function fatePillText(carrier: EnablementCarrier): string {
-  return `⏻ turns on with ${ENABLEMENT_CARRIER_LABEL[carrier]}`;
-}
-
-// Expanded-card static line replacing the On-apply policy row (copy final, spec #5-B).
-export function fateLineText(carrier: EnablementCarrier, fate: MemberFate): string {
-  if (fate === "turns-on") return `enablement follows ${ENABLEMENT_CARRIER_LABEL[carrier]}`;
-  if (fate === "rule") return "follows its per-plugin rule";
-  return "stays off — off on your other devices too";
-}
-
-// Disabled-section note when the section holds at least one carrier-synced row (copy final,
-// spec #5-B); fallback contexts keep SECTION_NOTES.disabled.
-export const DISABLED_CARRIER_SYNCED_NOTE = "Settings sync either way — whether a plugin turns on follows the on/off card.";
-
-// The footer's "N to enable" must count only a REAL policy enable — a carrier-synced disabled
-// row always resolves to "none" (fix round 1 #1) and must never contribute to that count.
-export function isEnableAction(action: StateAction): boolean {
-  return action === "enable" || action === "update-enable";
-}
-
-// Fix round 1 #3 (verbatim copy): the pre-existing "applying just turns the plugin on" /
-// "enables the plugin only" notes lie once the carrier owns enablement — carrier-unsynced rows
-// keep the old note byte-identical.
-export function disabledInSyncNote(carrierSynced: boolean): string {
-  return carrierSynced ? "identical to the store — nothing to apply here" : "identical to the store — applying just turns the plugin on";
-}
-
-export function disabledNoSettingsNote(carrierSynced: boolean): string {
-  return carrierSynced ? "no settings to sync yet" : "no settings to apply — enables the plugin only";
 }
 
 // ── Unified grammar view skeleton (spec 2026-08-06-sync-center-unified-grammar-design.md §2) ──

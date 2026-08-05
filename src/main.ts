@@ -107,7 +107,8 @@ interface ConfigSyncSettings {
   // Task 2 (spec 2026-08-06-sync-center-unified-grammar-design.md §6): the Runs-on rule's real
   // stored home. Item id (community:<id> / core:<id>) -> its chosen MemberRule; a stored value
   // here always wins over legacy normalization (preferStoredMemberRule). Task 5's Runs-on menu is
-  // the only intended writer; not yet part of self-propagation.
+  // the only intended writer; rides the self item's whole-document self-propagation like `items`
+  // (no per-field handling needed — see selfPresetRules).
   memberRules: Record<string, MemberRule>;
 }
 

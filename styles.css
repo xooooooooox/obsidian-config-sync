@@ -587,7 +587,6 @@ body.is-mobile.config-sync-mobile-statusbar .status-bar {
 
 .config-sync-mode-badge { color: var(--text-faint); display: inline-flex; align-items: center; }
 .config-sync-mode-badge svg { width: 12px; height: 12px; }
-.config-sync-doto-pill { font-size: var(--font-ui-smaller); line-height: 1.6; border-radius: 999px; padding: 1px 8px; margin-left: var(--size-4-2); color: var(--color-orange); border: 1px solid rgba(var(--color-orange-rgb), 0.45); white-space: nowrap; }
 
 /* Unified row (spec 2026-08-06-sync-center-unified-grammar-design.md §3): state/rule chips and
    the fate sentence that replace the old policy pills and state-icon column. */
@@ -686,7 +685,6 @@ body.is-mobile.config-sync-mobile-statusbar .status-bar {
 }
 
 .config-sync-hub-row.is-insync { opacity: 0.55; }
-.config-sync-hub-row.is-nosettings .config-sync-rule-name { color: var(--text-muted); font-weight: 400; }
 .config-sync-actionbar { display: flex; gap: var(--size-4-2); justify-content: flex-end; margin-top: var(--size-4-3); }
 /* Direction-colored action buttons at every count (batch 4 ⑤): Capture is solid orange,
    Apply solid accent (mod-cta) — the remote Pull/Push primary language. High enough
@@ -1066,11 +1064,7 @@ body.is-mobile .config-sync-strip-meta .config-sync-report-pills { margin-left: 
 .config-sync-section-head input[type="checkbox"] { margin-left: auto; }
 .config-sync-section-hint + input[type="checkbox"] { margin-left: 0; }
 .config-sync-section.is-open { border-style: solid; }
-.config-sync-section.is-outdated { border-color: rgba(var(--color-pink-rgb), 0.45); }
-.config-sync-section.is-not-installed { border-color: rgba(var(--color-orange-rgb), 0.45); }
 .config-sync-section-head { display: flex; align-items: center; gap: 7px; cursor: pointer; }
-.config-sync-section.is-outdated .config-sync-section-title { color: var(--color-pink); }
-.config-sync-section.is-not-installed .config-sync-section-title { color: var(--color-orange); }
 .config-sync-section-title { font-weight: 600; }
 
 /* Unified grammar (task-4): the four fixed type sections — neutral frame, no drift-color
@@ -1097,10 +1091,7 @@ body.is-mobile .config-sync-strip-meta .config-sync-report-pills { margin-left: 
 .config-sync-section-head .config-sync-pill,
 .config-sync-section-hint { white-space: nowrap; flex: none; }
 .config-sync-section-note { color: var(--text-faint); font-style: italic; font-size: var(--font-ui-smaller); padding: 4px 0 2px 18px; }
-.config-sync-version-line { color: var(--text-faint); font-size: var(--font-ui-smaller); padding: 2px 0; }
-.config-sync-version-line.is-amber { color: var(--color-orange); }
 .config-sync-seg-label { color: var(--text-faint); font-size: 10px; margin-top: 4px; }
-.config-sync-seg-btn.is-policy.is-on { background: rgba(var(--color-cyan-rgb), 0.22); color: var(--color-cyan); }
 .config-sync-side-search { width: 100%; margin-bottom: 6px; }
 .config-sync-side-badge.is-neutral { background: var(--background-modifier-hover); color: var(--text-normal); }
 
@@ -1362,8 +1353,6 @@ button.config-sync-add-row, button.config-sync-add-row:hover { background: none;
 .config-sync-ldname { font-weight: 500; }
 .config-sync-ldhint { color: var(--text-faint); font-size: var(--font-ui-smaller); }
 
-.config-sync-lddetail { color: var(--color-orange); font-family: var(--font-monospace); font-size: var(--font-ui-smaller); padding: 1px 0; }
-
 /* ── Passphrase status badge (定稿 feedback-trio) ── */
 .config-sync-ppbadge {
   font-size: var(--font-ui-smaller);
@@ -1397,42 +1386,6 @@ button.config-sync-add-row, button.config-sync-add-row:hover { background: none;
 /* Passphrase row: badge must never overlap the wrapped description (ddd.png) */
 .config-sync-ppset .setting-item-control { flex-wrap: wrap; justify-content: flex-end; row-gap: var(--size-2-1); }
 .config-sync-ppbadge { white-space: nowrap; }
-
-/* Switch-list summary + per-plugin-rule disclosures (round-6 定稿, replaces the per-member
-   flood + popover menu): a one-line summary of the pending direction, then two collapsible
-   disclosures sharing the scope-cycle icon (.config-sync-scopeicon, defined above). */
-.config-sync-member-summary { color: var(--text-muted); font-size: var(--font-ui-smaller); padding: 2px 0; }
-.config-sync-summary-line { color: var(--text-normal); font-size: var(--font-ui-smaller); padding: 1px 0; }
-.config-sync-summary-caption { color: var(--text-muted); font-size: var(--font-ui-smaller); padding: 4px 0 2px; }
-.config-sync-rule-ghdr { display: flex; align-items: center; gap: var(--size-4-1); padding: 6px 0 2px; font-size: var(--font-ui-smaller); font-weight: var(--font-semibold); letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-faint); }
-
-.config-sync-disclosure { cursor: pointer; color: var(--text-muted); font-size: var(--font-ui-smaller); padding: 3px 0; user-select: none; }
-.config-sync-disclosure:hover { color: var(--text-normal); }
-.config-sync-disclosure.is-amber { color: var(--color-orange); }
-.config-sync-disclosure-cx { display: inline-block; width: 1em; }
-.config-sync-disclosure-body { padding: 2px 0 4px var(--size-4-3); }
-
-.config-sync-rule-search { width: 100%; background: var(--background-primary); border: 1px solid var(--background-modifier-border); border-radius: 6px; padding: 2px 8px; font-size: var(--font-ui-smaller); margin-bottom: var(--size-4-1); }
-.config-sync-rule-list { display: flex; flex-direction: column; }
-.config-sync-rule-row { display: flex; align-items: center; justify-content: space-between; gap: var(--size-4-2); padding: 3px 0; }
-.config-sync-rule-row + .config-sync-rule-row { border-top: 1px solid var(--background-modifier-border); }
-.config-sync-rule-mid { flex: 1; min-width: 0; font-size: var(--font-ui-small); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-/* Structural member rows (spec 2026-08-05-section-groups-and-member-menu-design.md §R3-A): the
-   scoped disclosure's read-only hint for a row whose "local" scope is just a disabled settings
-   card, not a rule the user wrote — the glyph itself dims via the existing .config-sync-dim
-   (defined above). */
-.config-sync-rule-hint { flex: none; color: var(--text-faint); font-style: italic; font-size: var(--font-ui-smaller); }
-
-/* Search context (定稿): the main card's labeled head while searching, and the inline
-   explanation under an inert (uncheckable) hit. */
-.config-sync-section-head.is-plain { cursor: default; padding: var(--size-4-1) 0; }
-.config-sync-inert-note {
-  color: var(--text-faint);
-  font-style: italic;
-  font-size: var(--font-ui-smaller);
-  padding: 0 var(--size-4-2) var(--size-4-1) calc(var(--size-4-2) + 20px);
-}
 
 /* Keep-on-device confirmation modal rows. */
 .config-sync-exclude-row {

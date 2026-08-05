@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { capFileEntries, insyncLineText, statusBarStatuses, moreFilesText, visibleUnderFilter, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, footerSummary, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, versionLine, runProgressLabel, showColdStartBanner, memberDecisionsFromScopes, memberDecisionText, switchSummaryLines, switchBothWaysCaption, ruleGroups, memberScopeWrite, memberCurrentScope, enablementCarrierFor, carrierIsSynced, memberFate, fatePillText, fateLineText, DISABLED_CARRIER_SYNCED_NOTE, isEnableAction, disabledInSyncNote, disabledNoSettingsNote, TYPE_SECTION_TITLES, typeSectionForRow, sectionCountLabel, unifiedFooterSummary, fileEntryFor, stagedPayload, StageableRow, effectiveFate } from "../src/ui/panelModel";
+import { capFileEntries, insyncLineText, statusBarStatuses, moreFilesText, visibleUnderFilter, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, runProgressLabel, showColdStartBanner, memberDecisionsFromScopes, enablementCarrierFor, carrierIsSynced, TYPE_SECTION_TITLES, typeSectionForRow, sectionCountLabel, unifiedFooterSummary, fileEntryFor, stagedPayload, StageableRow, effectiveFate } from "../src/ui/panelModel";
 import { GroupState, GroupStatus } from "../src/core/status";
 import { Availability } from "../src/core/availability";
 import { Fate, FateInput } from "../src/ui/fateModel";
@@ -215,39 +215,6 @@ describe("isValidPolicy", () => {
   });
 });
 
-describe("versionLine", () => {
-  it("writes drift metadata per anchor and direction", () => {
-    expect(versionLine(avail({ drift: "ahead", localVersion: "1.5.10", storeVersion: "1.4.2" }))).toEqual({
-      text: "this device 1.5.10 · store 1.4.2 — newer here; capturing will refresh the store", tone: "gray",
-    });
-    expect(versionLine(avail({ kind: "disabled", drift: "behind", localVersion: "1.5.3", storeVersion: "1.8.0" }))?.text).toBe(
-      "this device 1.5.3 · store 1.8.0 — settings were captured on a newer version"
-    );
-    expect(versionLine(avail({ anchor: "app", drift: "behind", localVersion: "1.8.7", storeVersion: "1.9.2" }))).toEqual({
-      text: "captured on Obsidian 1.9.2 — this device runs 1.8.7; update Obsidian if settings look off", tone: "amber",
-    });
-    expect(versionLine(avail({}))).toBeNull();
-  });
-});
-
-describe("footerSummary", () => {
-  it("leads with the total staged and lists non-main sections as a subset breakdown", () => {
-    // 3 main + 1 disabled + 2 install = 6 total selected; the 1 disabled row IS a real enable
-    expect(footerSummary(3, 0, 1, 2, 1)).toBe("6 selected · 1 to enable · 2 to install");
-    expect(footerSummary(4, 0, 0, 0, 0)).toBe("4 selected");
-    // all staged rows in one non-main section still count in the total (the 0-selected bug)
-    expect(footerSummary(0, 0, 0, 9, 0)).toBe("9 selected · 9 to install");
-    expect(footerSummary(1, 2, 0, 0, 0)).toBe("3 selected · 2 to update");
-    expect(footerSummary(0, 0, 0, 0, 0)).toBe("");
-  });
-  it("fix round 2: a staged disabled row that isn't a real enable (carrier-synced action:none, or Keep disabled) still counts toward the total but not toward 'to enable'", () => {
-    // 3 main + 1 disabled (settings-only, no enable) = 4 total selected; no 'to enable' phrase
-    expect(footerSummary(3, 0, 1, 0, 0)).toBe("4 selected");
-    // 2 disabled rows staged, only 1 of them resolves to a real enable
-    expect(footerSummary(0, 0, 2, 0, 1)).toBe("2 selected · 1 to enable");
-  });
-});
-
 describe("runProgressLabel", () => {
   it("arrow-prefixes the verb with done/total", () => {
     expect(runProgressLabel("Applying", 5, 72)).toBe("↓ Applying 5/72…");
@@ -306,18 +273,13 @@ describe("showColdStartBanner", () => {
   });
 });
 
-describe("memberDecisionsFromScopes / memberDecisionText", () => {
+describe("memberDecisionsFromScopes", () => {
   it("keeps only non-all scopes, sorted by id, structural false when no id is in structuralIds", () => {
     expect(memberDecisionsFromScopes({ b: "desktop", a: "local", c: "all", d: "mobile" }, new Set())).toEqual([
       { id: "a", scope: "local", structural: false },
       { id: "b", scope: "desktop", structural: false },
       { id: "d", scope: "mobile", structural: false },
     ]);
-  });
-  it("copy", () => {
-    expect(memberDecisionText({ id: "x", scope: "local", structural: true })).toBe("x — this device keeps its own on/off state");
-    expect(memberDecisionText({ id: "x", scope: "desktop", structural: false })).toBe("x — runs on desktop only");
-    expect(memberDecisionText({ id: "x", scope: "mobile", structural: false })).toBe("x — runs on mobile only");
   });
 });
 
@@ -345,87 +307,6 @@ describe("memberDecisionsFromScopes — structural derivation", () => {
   });
 });
 
-describe("memberScopeWrite", () => {
-  it("maps each scope to its host write", () => {
-    expect(memberScopeWrite("desktop")).toEqual({ kind: "enabledOn", scope: "desktop" });
-    expect(memberScopeWrite("mobile")).toEqual({ kind: "enabledOn", scope: "mobile" });
-    expect(memberScopeWrite("local")).toEqual({ kind: "local" });
-    expect(memberScopeWrite("all")).toEqual({ kind: "clear" });
-  });
-});
-
-describe("ruleGroups", () => {
-  it("one-sided store-ahead → a single unlabeled apply group", () => {
-    expect(ruleGroups({ captureRemoves: ["b", "a"], applyDisables: [] }, "desktop"))
-      .toEqual([{ dir: "apply", label: null, ids: ["b", "a"] }]);
-  });
-  it("one-sided device-ahead → a single unlabeled capture group", () => {
-    expect(ruleGroups({ captureRemoves: [], applyDisables: ["x"] }, "mobile"))
-      .toEqual([{ dir: "capture", label: null, ids: ["x"] }]);
-  });
-  it("both ways → two labeled groups, store side first, desktop wording with counts", () => {
-    expect(ruleGroups({ captureRemoves: ["a", "b"], applyDisables: ["c"] }, "desktop")).toEqual([
-      { dir: "apply", label: "Off this computer · 2", ids: ["a", "b"] },
-      { dir: "capture", label: "On this computer only · 1", ids: ["c"] },
-    ]);
-  });
-  it("both ways, mobile wording", () => {
-    expect(ruleGroups({ captureRemoves: ["a"], applyDisables: ["b"] }, "mobile").map((g) => g.label))
-      .toEqual(["Off this phone · 1", "On this phone only · 1"]);
-  });
-  it("neither → no groups", () => {
-    expect(ruleGroups({ captureRemoves: [], applyDisables: [] }, "desktop")).toEqual([]);
-  });
-});
-
-describe("memberCurrentScope", () => {
-  const decisions = [{ id: "git", scope: "desktop" as const, structural: false }, { id: "rs", scope: "local" as const, structural: false }];
-  it("reads a scoped member's scope", () => {
-    expect(memberCurrentScope(decisions, "git")).toBe("desktop");
-    expect(memberCurrentScope(decisions, "rs")).toBe("local");
-  });
-  it("defaults to all for an unscoped member", () => {
-    expect(memberCurrentScope(decisions, "dataview")).toBe("all");
-  });
-});
-
-describe("switchSummaryLines", () => {
-  it("apply direction, plural, desktop wording", () => {
-    expect(switchSummaryLines({ captureRemoves: ["a", "b"], applyDisables: [] }, "desktop", "plugin"))
-      .toEqual([{ dir: "apply", text: "2 plugins are on for your other devices but off this computer — Apply turns them on." }]);
-  });
-  it("apply direction, singular, mobile wording", () => {
-    expect(switchSummaryLines({ captureRemoves: ["a"], applyDisables: [] }, "mobile", "plugin"))
-      .toEqual([{ dir: "apply", text: "1 plugin is on for your other devices but off this phone — Apply turns it on." }]);
-  });
-  it("capture direction, plural", () => {
-    expect(switchSummaryLines({ captureRemoves: [], applyDisables: ["a", "b"] }, "desktop", "plugin"))
-      .toEqual([{ dir: "capture", text: "2 plugins are on this computer but off on your other devices — Capture shares them." }]);
-  });
-  it("both ways → two lines, apply first", () => {
-    expect(switchSummaryLines({ captureRemoves: ["a"], applyDisables: ["b"] }, "desktop", "plugin")).toEqual([
-      { dir: "apply", text: "1 plugin is on for your other devices but off this computer — Apply turns it on." },
-      { dir: "capture", text: "1 plugin is on this computer but off on your other devices — Capture shares it." },
-    ]);
-  });
-  it("neither → no lines", () => {
-    expect(switchSummaryLines({ captureRemoves: [], applyDisables: [] }, "desktop", "plugin")).toEqual([]);
-  });
-  it("snippet noun, plural apply + singular capture, both ways", () => {
-    expect(switchSummaryLines({ captureRemoves: ["a", "b"], applyDisables: ["c"] }, "desktop", "snippet")).toEqual([
-      { dir: "apply", text: "2 snippets are on for your other devices but off this computer — Apply turns them on." },
-      { dir: "capture", text: "1 snippet is on this computer but off on your other devices — Capture shares it." },
-    ]);
-  });
-});
-
-describe("switchBothWaysCaption", () => {
-  it("plugin variant points below, snippet variant points at the Appearance card", () => {
-    expect(switchBothWaysCaption("plugin")).toBe("Bulk Apply or Capture resolves every plugin one way. Pin the ones that differ on purpose below.");
-    expect(switchBothWaysCaption("snippet")).toBe("Bulk Apply or Capture resolves every snippet one way. Pin per-snippet devices on the Appearance card in Settings.");
-  });
-});
-
 describe("enablementCarrierFor / carrierIsSynced", () => {
   it("community items (plugin-<id>) carry via community-plugins; core items via core-plugins", () => {
     expect(enablementCarrierFor("plugin-zk-prefixer")).toBe("community-plugins");
@@ -436,55 +317,6 @@ describe("enablementCarrierFor / carrierIsSynced", () => {
     expect(carrierIsSynced("plugin-zk-prefixer", ["core-plugins", "hotkeys"])).toBe(false);
     expect(carrierIsSynced("file-explorer", ["core-plugins"])).toBe(true);
     expect(carrierIsSynced("file-explorer", [])).toBe(false);
-  });
-});
-
-describe("memberFate", () => {
-  it("masked wins even if the element happens to be in applySide", () => {
-    expect(memberFate("a", ["a"], true)).toBe("rule");
-  });
-  it("unmasked + in applySide → turns-on", () => {
-    expect(memberFate("a", ["a", "b"], false)).toBe("turns-on");
-  });
-  it("unmasked + absent from applySide → stays-off", () => {
-    expect(memberFate("a", ["b"], false)).toBe("stays-off");
-    expect(memberFate("a", [], false)).toBe("stays-off");
-  });
-});
-
-describe("fatePillText / fateLineText / DISABLED_CARRIER_SYNCED_NOTE", () => {
-  it("pill copy is carrier-worded, verbatim (spec #5-B)", () => {
-    expect(fatePillText("core-plugins")).toBe("⏻ turns on with Core plugins on/off");
-    expect(fatePillText("community-plugins")).toBe("⏻ turns on with Community plugins on/off");
-  });
-  it("line copy per fate, verbatim (spec #5-B)", () => {
-    expect(fateLineText("core-plugins", "turns-on")).toBe("enablement follows Core plugins on/off");
-    expect(fateLineText("community-plugins", "turns-on")).toBe("enablement follows Community plugins on/off");
-    expect(fateLineText("core-plugins", "stays-off")).toBe("stays off — off on your other devices too");
-    expect(fateLineText("core-plugins", "rule")).toBe("follows its per-plugin rule");
-  });
-  it("section note copy verbatim", () => {
-    expect(DISABLED_CARRIER_SYNCED_NOTE).toBe("Settings sync either way — whether a plugin turns on follows the on/off card.");
-  });
-});
-
-describe("isEnableAction (fix round 1 #1 — footer 'N to enable' counting predicate)", () => {
-  it("enable and update-enable are real enables; every other action is not", () => {
-    expect(isEnableAction("enable")).toBe(true);
-    expect(isEnableAction("update-enable")).toBe(true);
-    expect(isEnableAction("none")).toBe(false);
-    expect(isEnableAction("update")).toBe(false);
-    expect(isEnableAction("install")).toBe(false);
-    expect(isEnableAction("install-enable")).toBe(false);
-  });
-});
-
-describe("disabledInSyncNote / disabledNoSettingsNote (fix round 1 #3 — verbatim copy)", () => {
-  it("carrier-synced rows get the new copy; unsynced rows keep the old copy byte-identical", () => {
-    expect(disabledInSyncNote(true)).toBe("identical to the store — nothing to apply here");
-    expect(disabledInSyncNote(false)).toBe("identical to the store — applying just turns the plugin on");
-    expect(disabledNoSettingsNote(true)).toBe("no settings to sync yet");
-    expect(disabledNoSettingsNote(false)).toBe("no settings to apply — enables the plugin only");
   });
 });
 

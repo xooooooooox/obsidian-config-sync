@@ -14,32 +14,19 @@ import {
   carrierIsSynced,
   ConflictChoice,
   defaultPolicy,
-  DISABLED_CARRIER_SYNCED_NOTE,
-  disabledInSyncNote,
-  disabledNoSettingsNote,
   EnablementCarrier,
   enablementCarrierFor,
   effectiveFate,
-  fateLineText,
   fileEntryFor,
   insyncLineText,
   isValidPolicy,
   matchesSearch,
-  memberFate,
   MemberDecision,
-  memberCurrentScope,
-  memberScopeWrite,
-  MEMBER_PUBLISH_NOTE,
-  RuleGroup,
-  ruleGroups,
   moreFilesText,
   nosettingsLineText,
   PanelFilter,
-  policyOptions,
   presentedState,
   runProgressLabel,
-  SECTION_NOTES,
-  SECTION_TITLES,
   SectionKind,
   sectionForItem,
   sectionCountLabel,
@@ -47,14 +34,11 @@ import {
   stageableRow,
   StageableRow,
   stagedPayload,
-  switchSummaryLines,
-  switchBothWaysCaption,
   TypeSection,
   TYPE_SECTION_ORDER,
   TYPE_SECTION_TITLES,
   typeSectionForRow,
   unifiedFooterSummary,
-  versionLine,
   visibleUnderFilter,
   Direction,
   effectiveDirection,
@@ -66,7 +50,7 @@ import { jsonSortedView } from "../core/merge";
 import { renderReportContent, renderReportPills } from "./reportContent";
 import { RunRecord, RunKind, RunStatus, worstStatus, formatRunTime, stopSyncDesc, deleteLeftoverDesc } from "../core/runHistory";
 import { ACTION_ICON, ACTION_COLOR_CLASS, renderActionIcon, renderActionCount, type SyncAction } from "./actionIcons";
-import { DESKTOP_ONLY_ENABLED_OPTIONS, FIELD_SCOPE_OPTIONS, FILE_SCOPE_OPTIONS, SCOPE_ICONS, scopeCycleTooltip } from "./itemCard";
+import { FILE_SCOPE_OPTIONS } from "./itemCard";
 import {
   QualifierAutocomplete,
   parseQuery,
@@ -116,9 +100,6 @@ const STATUS_CLS: Record<RunStatus, string> = { ok: "is-ok", warning: "is-warn",
 // RunKind is wider than SyncAction (it also has "adopt"/"stop-sync"/"delete-leftover"), so
 // map explicitly rather than assigning rec.kind directly — undefined for the non-actions.
 const ACTION_CELL_MAP: Partial<Record<RunKind, SyncAction>> = { capture: "capture", apply: "apply", adopt: "apply", push: "push", pull: "pull" };
-// Member-decision guidance (spec 2026-07-28 §4) applies to the plugin switch lists only —
-// enabled-css-snippets has its own per-snippet scope + pin mechanism.
-const MEMBER_GUIDE_GROUPS = new Set(["community-plugins", "core-plugins"]);
 // The two on/off list carriers (task-4): "one object = one row" dissolves their own list row
 // into the Core/Community section header chip — they never appear as a row themselves.
 const CARRIER_GROUP_NAMES = new Set(["core-plugins", "community-plugins"]);
@@ -317,10 +298,7 @@ export class SyncCenterView extends ItemView {
   // row's presence here doubles as "this carrier is synced AND its data is readable".
   private carrierDivergence: Map<EnablementCarrier, { captureRemoves: string[]; applyDisables: string[]; masked: string[] }> = new Map();
   private policy = sessionStaging.policy;
-  private sectionOpen: Set<SectionKind> = new Set();
-  // Fold state for the four unified type sections (task-4) — separate from sectionOpen, which
-  // still belongs to the old outdated/disabled/not-installed/desktop-only renderers (kept, unused
-  // from renderMainRegion, until Task 8 deletes them).
+  // Fold state for the four unified type sections (task-4).
   private typeSectionOpen: Set<TypeSection> = new Set();
   private selected = sessionStaging.selected;
   private directionOverride = sessionStaging.directionOverride;
@@ -453,7 +431,6 @@ export class SyncCenterView extends ItemView {
     const leftovers = this.groups.length > 0 ? await this.host.listLeftoverStoreFiles() : [];
     if (gen !== this.renderGen) return;
     this.leftovers = leftovers;
-    if (this.filter === "leftover" && this.leftovers.length === 0) this.filter = "all"; // orphans all cleared
     // User state survives reloads; prune entries whose item vanished.
     const names = new Set(groups.map((g) => g.name));
     // Fetched once here (not per disabled row) — only the carriers that are themselves
@@ -531,33 +508,6 @@ export class SyncCenterView extends ItemView {
   // `plugin-<id>` prefix community groups compile to; core groups ARE the element id.
   private carrierElementFor(itemGroup: string): string {
     return itemGroup.startsWith("plugin-") ? itemGroup.slice("plugin-".length) : itemGroup;
-  }
-
-  // A disabled row's fate once its carrier is synced; undefined = fallback to the per-card
-  // policy ladder (carrier not synced, or its divergence data isn't readable yet).
-  private disabledRowFate(itemGroup: string): { carrier: EnablementCarrier; fate: ReturnType<typeof memberFate> } | undefined {
-    const carrier = enablementCarrierFor(itemGroup);
-    const d = this.carrierDivergence.get(carrier);
-    if (d === undefined) return undefined;
-    const element = this.carrierElementFor(itemGroup);
-    return { carrier, fate: memberFate(element, d.captureRemoves, d.masked.includes(element)) };
-  }
-
-  // The inverse of carrierElementFor: an on/off card member's own settings-card group name
-  // (spec #5b — one plugin, one name on both surfaces). `carrier` is r.group.name for a row
-  // in MEMBER_GUIDE_GROUPS, so it's always "core-plugins" or "community-plugins" here.
-  private memberGroupNameFor(carrier: string, id: string): string {
-    return carrier === "community-plugins" ? `plugin-${id}` : id;
-  }
-
-  // True when the member's OWN card has store settings pending (↓) — a faint pill nudges the
-  // user that there's more than the on/off decision below this row (spec #5-B). false (not a
-  // "no") for a member whose own card isn't a synced item at all — nothing to point at.
-  private memberHasPendingSettings(memberGroup: string): boolean {
-    const st = this.statuses.get(memberGroup);
-    if (st === undefined) return false;
-    const state = presentedState(st.state, this.availOf(memberGroup).drift);
-    return state === "never-synced" || state === "store-newer" || state === "differs";
   }
 
   // Composed display string for sorting and search — parent prefix groups companions directly
@@ -661,7 +611,7 @@ export class SyncCenterView extends ItemView {
       locallyOn = a.kind === "enabled";
       const div = this.carrierDivergence.get(carrier);
       // Best-effort default (divergence not loaded yet): assume the store agrees with local —
-      // the same "stays off"/"in sync" reading memberFate's undefined-divergence branch takes.
+      // the same "stays off"/"in sync" reading a synced-but-unloaded carrier settles on elsewhere.
       storeListOn = div === undefined ? locallyOn : locallyOn ? !div.applyDisables.includes(element) : div.captureRemoves.includes(element);
       memberRule = this.host.memberRuleFor(carrier, element, locallyOn);
     }
@@ -1563,10 +1513,9 @@ export class SyncCenterView extends ItemView {
           this.render(this.renderGen);
         });
       }
-      // The "leftover" store-orphans pill is dropped from this row (task-4): those files have no
-      // registry item, so they can't become a row in any type section. `PanelFilter.leftover` and
-      // its own full-area view (renderLeftoverSection) stay defined, unreachable from here, until
-      // Task 8's dissolution pass.
+      // The "leftover" store-orphans pill has no place in this row (task-4/8): those files have no
+      // registry item, so they can't become a row in any type section. `renderLeftoverSection`
+      // stays reachable unconditionally instead (below), so the orphans it manages never go dark.
     };
 
     // One flat row list per type section (task-4 skeleton) — replaces the old main list +
@@ -1575,6 +1524,11 @@ export class SyncCenterView extends ItemView {
     const renderSectionsBody = (): void => {
       sectionsHost.empty();
       for (const ts of TYPE_SECTION_ORDER) this.renderTypeSection(sectionsHost, ts, scoped);
+      // Store orphans (task-8 dissolution): unrelated to any type section — they have no
+      // registry item to compile a row for — so this renders unconditionally rather than through
+      // the (now-gone) "leftover" filter pill, only settling into the unfiltered/non-search view
+      // so it doesn't clutter a focused "To apply"/search pass.
+      if (this.leftovers.length > 0 && this.filter === "all" && !this.searching()) this.renderLeftoverSection(sectionsHost);
     };
 
     renderPills();
@@ -1736,69 +1690,6 @@ export class SyncCenterView extends ItemView {
     return scoped.filter((r) => visibleUnderFilter(this.presState(r), this.filter) && this.rowMatchesSearch(r));
   }
 
-  private renderListInto(listHost: HTMLElement, scoped: StatusRow[]): void {
-    listHost.empty();
-    if (this.filter === "leftover") {
-      this.renderLeftoverSection(listHost);
-      return;
-    }
-    const searching = this.search.trim() !== "";
-    const visible = this.visibleRows(scoped);
-    if (searching) {
-      // Search keeps context (定稿): the main card gets a labeled head with hit counts,
-      // mirroring the sections' "n of m".
-      const head = listHost.createDiv({ cls: "config-sync-section-head is-plain" });
-      head.createSpan({ cls: "config-sync-section-title", text: "All items" });
-      head.createSpan({ cls: "config-sync-pill is-neutral", text: `${visible.length} of ${scoped.length}` });
-    }
-    const card = listHost.createDiv({ cls: "config-sync-card" });
-    if (this.filter === "all" && !searching) {
-      const active = visible.filter((r) => this.presState(r) !== "in-sync" && this.presState(r) !== "no-settings");
-      const insync = visible.filter((r) => this.presState(r) === "in-sync");
-      const nosettings = visible.filter((r) => this.presState(r) === "no-settings");
-      this.renderRowList(card, active);
-      this.renderTrailingLine(card, insync, sessionUi.insyncOpen, (n, open) => insyncLineText(n, open));
-      this.renderTrailingLine(card, nosettings, sessionUi.nosettingsOpen, (n, open) => nosettingsLineText(n, open));
-    } else {
-      this.renderRowList(card, visible);
-    }
-  }
-
-  // All-items scope groups rows under scope headers (定稿 A); single-scope views stay flat — the
-  // scope itself is the title (定稿 B). Shared by renderRowList (main list + the three actionable
-  // extra sections, task-8) and renderInfoSection (the desktop-only info section).
-  private groupSectionsByType(): boolean {
-    return this.panelScope.kind === "device" && this.panelScope.cat === "all";
-  }
-
-  private renderRowList(card: HTMLElement, rows: StatusRow[]): void {
-    if (!this.groupSectionsByType()) {
-      for (const r of rows) this.renderItemRow(card, r);
-      return;
-    }
-    for (const cat of SCOPE_ORDER) {
-      const inCat = rows.filter((r) => this.scopeOf(r.group.name) === cat);
-      if (inCat.length === 0) continue;
-      card.createDiv({ cls: "config-sync-sect", text: SCOPE_LABELS[cat] });
-      for (const r of inCat) this.renderItemRow(card, r);
-    }
-  }
-
-  // ✓ / ○ rows fold into one dim line per scope; searching bypasses the fold entirely.
-  private renderTrailingLine(card: HTMLElement, rows: StatusRow[], openSet: Set<string>, text: (n: number, open: boolean) => string): void {
-    if (rows.length === 0) return;
-    const key = this.scopeKey();
-    const open = openSet.has(key);
-    const line = card.createDiv({ cls: "config-sync-unchanged", text: text(rows.length, open) });
-    line.addEventListener("click", (e) => {
-      e.stopPropagation();
-      if (open) openSet.delete(key);
-      else openSet.add(key);
-      this.render(this.renderGen);
-    });
-    if (open) for (const r of rows) this.renderItemRow(card, r);
-  }
-
   // Tri-state select-all over the currently visible checkable rows (scope + filter + search).
   // Fate.stageable (task-4) drives the skip — carrier rows are excluded outright since they no
   // longer render as list rows (task-4 dissolves them into the section header chip).
@@ -1841,101 +1732,6 @@ export class SyncCenterView extends ItemView {
       }
       this.render(this.renderGen);
     });
-  }
-
-  // A controls-free availability section: no select-all, no per-row checkbox/On-apply — just the
-  // items + a note. Used for "Desktop-only" (mobile): those plugins can't run here, so there is
-  // nothing to stage or apply; they're shown for awareness only.
-  private renderInfoSection(main: HTMLElement, kind: "desktop-only", rows: StatusRow[]): void {
-    if (rows.length === 0) return;
-    const matches = this.searching()
-      ? rows.filter((r) => this.rowMatchesSearch(r))
-      : rows;
-    if (this.searching() && matches.length === 0) return;
-    const open = this.searching() || this.sectionOpen.has(kind);
-    const fold = main.createDiv({ cls: `config-sync-section is-${kind}${open ? " is-open" : ""}` });
-    const head = fold.createDiv({ cls: "config-sync-section-head" });
-    head.createSpan({ cls: "config-sync-row-chevron", text: open ? "▾" : "▸" });
-    head.createSpan({ cls: "config-sync-section-title", text: SECTION_TITLES[kind] });
-    head.createSpan({ cls: "config-sync-pill is-neutral", text: `${matches.length}` });
-    head.addEventListener("click", () => {
-      if (this.sectionOpen.has(kind)) this.sectionOpen.delete(kind);
-      else this.sectionOpen.add(kind);
-      this.render(this.renderGen);
-    });
-    if (!open) return;
-    fold.createDiv({ cls: "config-sync-report-legend", text: SECTION_NOTES[kind] });
-    const renderStaticRow = (host: HTMLElement, r: StatusRow): void => {
-      const row = host.createDiv({ cls: "config-sync-row is-static" });
-      this.renderRuleName(row, r.group.name, r.group.label);
-      row.createSpan({ cls: "config-sync-doto-pill", text: "desktop-only" });
-    };
-    if (!this.groupSectionsByType()) {
-      for (const r of matches) renderStaticRow(fold, r);
-      return;
-    }
-    for (const cat of SCOPE_ORDER) {
-      const inCat = matches.filter((r) => this.scopeOf(r.group.name) === cat);
-      if (inCat.length === 0) continue;
-      fold.createDiv({ cls: "config-sync-sect", text: SCOPE_LABELS[cat] });
-      for (const r of inCat) renderStaticRow(fold, r);
-    }
-  }
-
-  private renderSection(main: HTMLElement, kind: Exclude<SectionKind, "main">, rows: StatusRow[]): void {
-    if (rows.length === 0) return;
-    const matches = this.searching()
-      ? rows.filter((r) => this.rowMatchesSearch(r))
-      : rows;
-    if (this.searching() && matches.length === 0) return;
-    const open = this.searching() || this.sectionOpen.has(kind);
-    const fold = main.createDiv({ cls: `config-sync-section is-${kind}${open ? " is-open" : ""}` });
-    const head = fold.createDiv({ cls: "config-sync-section-head" });
-    head.createSpan({ cls: "config-sync-row-chevron", text: open ? "▾" : "▸" });
-    head.createSpan({ cls: "config-sync-section-title", text: SECTION_TITLES[kind] });
-    const checkable = matches.filter((r) => this.rowStageable(r));
-    // Unified rule (spec 2026-07-17): every row in these sections carries an action payload —
-    // content-in-sync is the NORMAL case for update-only/enable-only/install-only rows, so the
-    // head counts rows, not content drift, and never shows a ✓ pill (a green check would
-    // mislabel a row that still needs an update/enable/install). Same semantics as the
-    // desktop-only info section.
-    const countText = this.searching() ? `${matches.length} of ${rows.length}` : `${rows.length}`;
-    head.createSpan({ cls: "config-sync-pill is-neutral", text: countText });
-    const staged = checkable.filter((r) => this.selected.has(r.group.name)).length;
-    if (staged > 0) head.createSpan({ cls: "config-sync-section-hint", text: `${staged} selected` });
-    const box = head.createEl("input", { type: "checkbox", attr: { "aria-label": "Select all in this section" } });
-    box.indeterminate = staged > 0 && staged < checkable.length;
-    box.checked = checkable.length > 0 && staged === checkable.length;
-    box.disabled = checkable.length === 0;
-    box.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const turnOn = checkable.some((r) => !this.selected.has(r.group.name));
-      for (const r of checkable) {
-        const name = r.group.name;
-        if (turnOn) {
-          this.selected.add(name);
-          if (!this.policy.has(name)) this.policy.set(name, this.defaultPolicyFor(r));
-        } else {
-          this.selected.delete(name);
-          this.policy.delete(name);
-        }
-      }
-      this.render(this.renderGen);
-    });
-    head.addEventListener("click", () => {
-      if (this.searching()) return; // force-open while searching; header click is a no-op
-      if (open) this.sectionOpen.delete(kind);
-      else this.sectionOpen.add(kind);
-      this.render(this.renderGen);
-    });
-    if (!open) return;
-    // Disabled-section note swaps to the carrier-synced wording (spec #5-B) once any row in
-    // the section has a synced carrier; other fallback rows in the same section still behave
-    // as today, so the single static note picks the wording that covers the section as a whole.
-    const note = kind === "disabled" && matches.some((r) => this.carrierIsSynced(r.group.name)) ? DISABLED_CARRIER_SYNCED_NOTE : SECTION_NOTES[kind];
-    fold.createDiv({ cls: "config-sync-section-note", text: note });
-    const card = fold.createDiv({ cls: "config-sync-card" });
-    this.renderRowList(card, matches);
   }
 
   // Two-tone group name: faint "Parent › " prefix for card-derived groups, plain label otherwise.
@@ -2358,311 +2154,6 @@ export class SyncCenterView extends ItemView {
     else el.setText(icon.glyph);
   }
 
-  private stateIcon(state: GroupState): { glyph: string; cls: string; tip: string; action?: SyncAction } {
-    switch (state) {
-      case "local-changed":
-        return { glyph: "↑", cls: "is-up", tip: "changed on this device (likely)", action: "capture" };
-      case "store-newer":
-        return { glyph: "↓", cls: "is-down", tip: "store is newer (likely)", action: "apply" };
-      case "never-synced":
-        return { glyph: "↓", cls: "is-down", tip: "not synced on this device yet — apply takes the store's settings", action: "apply" };
-      case "differs":
-        return { glyph: "≠", cls: "is-neq", tip: "changed on both sides since this device last synced — review the diff" };
-      case "not-captured":
-        return { glyph: "—", cls: "is-miss", tip: "not yet captured" };
-      case "no-settings":
-        return { glyph: "○", cls: "is-none", tip: "no settings yet — nothing on this device or in the store" };
-      case "locked":
-        return { glyph: "🔒", cls: "is-locked", tip: "encrypted — set the passphrase in settings to compare" };
-      case "in-sync":
-      default:
-        return { glyph: "✓", cls: "is-ok", tip: "in sync" };
-    }
-  }
-
-  // Expanded rows always show content: an error, a state note, or actions + the file diff.
-  private renderItemDetail(detail: HTMLElement, r: StatusRow): void {
-    const { status } = r;
-    if (SWITCH_LIST_GROUPS.has(r.group.name)) this.renderSwitchDivergence(detail, r);
-    if (status.message !== undefined) {
-      detail.createDiv({ cls: "config-sync-status-error", text: status.message });
-      return;
-    }
-    if (status.state === "in-sync") {
-      if (this.presState(r) === "local-changed") {
-        // Version-ahead with identical content: show the amber version line + why capture helps.
-        const line = versionLine(this.availOf(r.group.name));
-        if (line !== null) detail.createDiv({ cls: "config-sync-version-line is-amber", text: line.text });
-        detail.createDiv({ cls: "config-sync-expand-note", text: "no content changes — capturing refreshes the store version only" });
-        return;
-      }
-      const sec = this.sectionOf(r.group.name);
-      if (sec === "disabled") {
-        // Unified rule (spec 2026-07-17): settings synced, plugin off — enabling is the payload,
-        // UNLESS the carrier owns enablement (spec #5-B, fix round 1 #3) — then applying this
-        // row moves no settings and enables nothing.
-        detail.createDiv({ cls: "config-sync-expand-note", text: disabledInSyncNote(this.carrierIsSynced(r.group.name)) });
-        this.renderPolicySeg(detail, r, this.availOf(r.group.name), true);
-        return;
-      }
-      if (sec === "not-installed") {
-        detail.createDiv({ cls: "config-sync-expand-note", text: `identical to the store — applying installs ${this.installTargetText(r.group.name)}` });
-        this.renderPolicySeg(detail, r, this.availOf(r.group.name), true);
-        return;
-      }
-      if (sec === "outdated") {
-        // Update-only (spec 2026-07-17): settings match, the plugin is behind — the update
-        // action is the whole payload.
-        const line = versionLine(this.availOf(r.group.name));
-        if (line !== null) detail.createDiv({ cls: `config-sync-version-line${line.tone === "amber" ? " is-amber" : ""}`, text: line.text });
-        detail.createDiv({ cls: "config-sync-expand-note", text: "no content changes — updates the plugin only" });
-        this.renderPolicySeg(detail, r, this.availOf(r.group.name), true);
-        return;
-      }
-      const decisions = this.host.switchMemberDecisions(r.group.name);
-      detail.createDiv({
-        cls: "config-sync-expand-note",
-        text: decisions.length > 0 ? "in sync — this device's own plugins aren't compared" : "identical to the store",
-      });
-      return;
-    }
-    if (status.state === "no-settings") {
-      const section = this.sectionOf(r.group.name);
-      if (section === "not-installed") {
-        // Install-only apply: nothing to write, but the plugin itself can be installed.
-        detail.createDiv({ cls: "config-sync-expand-note", text: `no settings to apply — installs ${this.installTargetText(r.group.name)} only` });
-        this.renderPolicySeg(detail, r, this.availOf(r.group.name), true);
-        return;
-      }
-      if (section === "disabled") {
-        // Enable-only apply (定稿 2026-07-17), symmetric to install-only — UNLESS the carrier
-        // owns enablement (spec #5-B, fix round 1 #3): then there's truly nothing here yet.
-        detail.createDiv({ cls: "config-sync-expand-note", text: disabledNoSettingsNote(this.carrierIsSynced(r.group.name)) });
-        this.renderPolicySeg(detail, r, this.availOf(r.group.name), true);
-        return;
-      }
-      if (section === "outdated") {
-        detail.createDiv({ cls: "config-sync-expand-note", text: "no settings anywhere — updates the plugin only" });
-        this.renderPolicySeg(detail, r, this.availOf(r.group.name), true);
-        return;
-      }
-      detail.createDiv({
-        cls: "config-sync-expand-note",
-        text: "no settings yet on this device or in the store — appears under “To capture” once this item has settings",
-      });
-      return;
-    }
-    if (status.state === "not-captured") {
-      detail.createDiv({ cls: "config-sync-expand-note", text: "not captured yet — nothing in the store" });
-      // Disabled-section rows keep the enable choice even here (spec 2026-07-17): capturing
-      // Markmind-style local-only settings can also turn the plugin on.
-      if (this.sectionOf(r.group.name) === "disabled") this.renderPolicySeg(detail, r, this.availOf(r.group.name), false);
-      return;
-    }
-    if (status.state === "locked") {
-      detail.createDiv({
-        cls: "config-sync-expand-note",
-        text: "encrypted — set the passphrase in Settings → General to compare or apply",
-      });
-      return;
-    }
-    if (status.changes === undefined) return;
-    const a = this.availOf(r.group.name);
-    const line = versionLine(a);
-    if (line !== null) detail.createDiv({ cls: `config-sync-version-line${line.tone === "amber" ? " is-amber" : ""}`, text: line.text });
-    const section = this.sectionOf(r.group.name);
-    if (section === "not-installed") {
-      this.renderPolicySeg(detail, r, a, false); // apply-only: no direction toggle
-      this.renderCappedChanges(detail, r, status.changes);
-      return;
-    }
-    if (status.state === "never-synced") {
-      detail.createDiv({ cls: "config-sync-expand-note", text: "not synced on this device yet — review the diff, then apply (or switch direction to capture)" });
-    }
-    this.renderDirectionToggle(detail, r);
-    // The disabled section offers the enable ladder in BOTH directions (spec 2026-07-17):
-    // enabling has no ordering constraint against a capture, it just joins the run.
-    if (section === "disabled" || (section !== "main" && this.effDir(r) === "apply")) this.renderPolicySeg(detail, r, a, false);
-    this.renderCappedChanges(detail, r, status.changes);
-  }
-
-  // ③ order: summary + caption + per-plugin rules on top, "N scoped to specific devices" (and the
-  // capture publish note) at the bottom. Child holders are created synchronously in final order so
-  // the async divergence fill can never reorder them. ② the both-ways state now renders the same
-  // two-line summary + unified per-plugin rules instead of a red box + Keep-on-device modal.
-  private renderSwitchDivergence(detail: HTMLElement, r: StatusRow): void {
-    const holder = detail.createDiv();
-    const topHolder = holder.createDiv(); // summary + caption + rules (async — needs the divergence)
-    const scopedHolder = holder.createDiv(); // publish note + "N scoped to specific devices" — always last
-    // The scoped disclosure + publish note only need switchMemberDecisions / self-state, so they
-    // render synchronously — independent of switchDivergenceFor, which resolves null before the
-    // store is captured and must not hide them (2.15.0 null-safety, preserved).
-    if (MEMBER_GUIDE_GROUPS.has(r.group.name)) {
-      const decisions = this.host.switchMemberDecisions(r.group.name);
-      if (decisions.length > 0 && this.selfInfo !== null && (this.selfInfo.state === "capture" || this.selfInfo.state === "both")) {
-        scopedHolder.createDiv({ cls: "config-sync-lddetail", text: MEMBER_PUBLISH_NOTE });
-      }
-      this.renderScopedDisclosure(scopedHolder, r);
-    }
-    void this.host.switchDivergenceFor(r.group.name).then((d) => {
-      if (!topHolder.isConnected || d === null) return;
-      const noun = MEMBER_GUIDE_GROUPS.has(r.group.name) ? ("plugin" as const) : ("snippet" as const);
-      this.renderMemberSummary(topHolder, d, noun);
-      if (!MEMBER_GUIDE_GROUPS.has(r.group.name)) return;
-      const groups = ruleGroups(d, Platform.isMobile ? "mobile" : "desktop");
-      if (groups.length > 0) {
-        this.renderDisclosure(topHolder, `${r.group.name}::rules`, "Set a per-plugin rule", false, (panel) =>
-          this.renderPerPluginRules(panel, r, groups)
-        );
-      }
-    });
-  }
-
-  private scopeOptionsFor(id: string): readonly RuleScope[] {
-    const desktopOnly = this.host.isDesktopOnlyPlugin(id) ?? this.availOf(`plugin-${id}`).desktopOnly;
-    return desktopOnly ? DESKTOP_ONLY_ENABLED_OPTIONS : FIELD_SCOPE_OPTIONS;
-  }
-
-  // R4 direct menu (spec §R4-B): a glyph button that opens an Obsidian Menu with one item per
-  // scopeOptionsFor(id), current value checked, writing the chosen target once via
-  // writeMemberScope — replaces renderScopeCycle in the two member lists only (the intermediate
-  // stops the old cycle persisted were the source of the mid-gesture row-migration hazard).
-  private renderScopeMenuGlyph(cell: HTMLElement, group: string, id: string, scope: RuleScope): void {
-    const icon = cell.createSpan({ cls: `config-sync-scopeicon${scope !== "all" ? " is-set" : ""}` });
-    setIcon(icon, SCOPE_ICONS[scope]);
-    icon.setAttribute("aria-label", scopeCycleTooltip(scope));
-    icon.setAttribute("role", "button");
-    icon.setAttribute("tabindex", "0");
-    const buildMenu = (): Menu => {
-      const menu = new Menu();
-      for (const opt of this.scopeOptionsFor(id)) {
-        menu.addItem((item) =>
-          item
-            .setTitle(scopeMenuLabel(opt))
-            .setIcon(SCOPE_ICONS[opt])
-            .setChecked(opt === scope)
-            .onClick(() => void this.writeMemberScope(group, id, opt))
-        );
-      }
-      return menu;
-    };
-    icon.addEventListener("click", (e) => buildMenu().showAtMouseEvent(e));
-    icon.addEventListener("keydown", (e) => {
-      if (e.key !== "Enter" && e.key !== " ") return;
-      e.preventDefault();
-      const rect = icon.getBoundingClientRect();
-      buildMenu().showAtPosition({ x: rect.left, y: rect.bottom });
-    });
-  }
-
-  private renderMemberSummary(holder: HTMLElement, d: { captureRemoves: string[]; applyDisables: string[] }, noun: "plugin" | "snippet"): void {
-    const lines = switchSummaryLines(d, Platform.isMobile ? "mobile" : "desktop", noun);
-    if (lines.length === 0) return;
-    const box = holder.createDiv({ cls: "config-sync-member-summary" });
-    for (const ln of lines) {
-      const row = box.createDiv({ cls: "config-sync-summary-line" });
-      renderActionIcon(row, ln.dir).addClass(ACTION_COLOR_CLASS[ln.dir]);
-      row.appendText(` ${ln.text}`);
-    }
-    if (d.captureRemoves.length > 0 && d.applyDisables.length > 0) {
-      box.createDiv({ cls: "config-sync-summary-caption", text: switchBothWaysCaption(noun) });
-    }
-  }
-
-  private renderDisclosure(holder: HTMLElement, key: string, title: string, amber: boolean, body: (el: HTMLElement) => void): void {
-    const open = this.expandedDisclosures.has(key);
-    const head = holder.createDiv({ cls: `config-sync-disclosure${amber ? " is-amber" : ""}` });
-    head.createSpan({ cls: "config-sync-disclosure-cx", text: open ? "▾" : "▸" });
-    head.appendText(` ${title}`);
-    const panel = holder.createDiv({ cls: "config-sync-disclosure-body" });
-    panel.hidden = !open;
-    if (open) body(panel);
-    head.addEventListener("click", (e) => {
-      e.stopPropagation();
-      if (this.expandedDisclosures.has(key)) this.expandedDisclosures.delete(key);
-      else this.expandedDisclosures.add(key);
-      this.render(this.renderGen);
-    });
-  }
-
-  // A mixed (two-sided) list splits into direction groups with a small header each instead of a
-  // per-row tag; one-sided lists arrive as a single unlabeled group (live-test 定稿 2026-08-05).
-  // A search-filtered-empty group hides its header too.
-  private renderPerPluginRules(holder: HTMLElement, r: StatusRow, groups: RuleGroup[]): void {
-    const group = r.group.name;
-    const decisions = this.host.switchMemberDecisions(group);
-    const query = this.ruleSearch.get(group) ?? "";
-    const search = holder.createEl("input", { cls: "config-sync-rule-search", attr: { type: "text", placeholder: "Search a plugin to give it a rule…" } });
-    search.value = query;
-    const list = holder.createDiv({ cls: "config-sync-rule-list" });
-    const paint = (q: string): void => {
-      list.empty();
-      const ql = q.toLowerCase();
-      // Display name matches the section rows' (spec #5b) — raw id stays the search fallback so
-      // a query typed against either surface still finds the row.
-      const ids = (g: RuleGroup): string[] =>
-        g.ids.filter((id) => ql === "" || id.toLowerCase().includes(ql) || this.host.displayName(this.memberGroupNameFor(group, id)).toLowerCase().includes(ql));
-      for (const g of groups) {
-        const matched = ids(g);
-        if (matched.length === 0) continue;
-        if (g.label !== null) {
-          const hdr = list.createDiv({ cls: "config-sync-rule-ghdr" });
-          renderActionIcon(hdr, g.dir).addClass(ACTION_COLOR_CLASS[g.dir]);
-          hdr.appendText(` ${g.label}`);
-        }
-        for (const id of matched) {
-          const row = list.createDiv({ cls: "config-sync-rule-row" });
-          const memberGroup = this.memberGroupNameFor(group, id);
-          row.createSpan({ cls: "config-sync-rule-mid", text: this.host.displayName(memberGroup) });
-          if (this.memberHasPendingSettings(memberGroup)) row.createSpan({ cls: "config-sync-rule-hint", text: "has settings below" });
-          const cell = row.createSpan();
-          this.renderScopeMenuGlyph(cell, group, id, memberCurrentScope(decisions, id));
-        }
-      }
-    };
-    paint(query);
-    search.addEventListener("input", () => {
-      this.ruleSearch.set(group, search.value);
-      paint(search.value);
-    });
-  }
-
-  private renderScopedDisclosure(holder: HTMLElement, r: StatusRow): void {
-    const group = r.group.name;
-    const decisions = this.host.switchMemberDecisions(group);
-    if (decisions.length === 0) return;
-    this.renderDisclosure(holder, `${group}::scoped`, `${decisions.length} scoped to specific devices`, true, (panel) => {
-      for (const m of decisions) {
-        const row = panel.createDiv({ cls: "config-sync-rule-row" });
-        const memberGroup = this.memberGroupNameFor(group, m.id);
-        // Display name matches the section rows' (spec #5b); the structural-row hint below
-        // already explains "settings sync off", so it's not paired with "has settings below".
-        row.createSpan({ cls: "config-sync-rule-mid", text: this.host.displayName(memberGroup) });
-        // Structural rows (spec §R3-A): "local" solely because the settings-sync card is off, not
-        // a rule the user pinned. The scope glyph's write would be a permanent no-op (the row
-        // re-derives "local" regardless) and could silently delete an unrelated stored rule — so
-        // it renders read-only instead of offering a control that appears to work but doesn't.
-        if (m.structural) {
-          row.createSpan({ cls: "config-sync-rule-hint", text: "settings sync off — turn it on in Settings to set a rule" });
-          const icon = row.createSpan({ cls: "config-sync-scopeicon config-sync-dim", attr: { "aria-disabled": "true" } });
-          setIcon(icon, SCOPE_ICONS[m.scope]);
-          continue;
-        }
-        if (this.memberHasPendingSettings(memberGroup)) row.createSpan({ cls: "config-sync-rule-hint", text: "has settings below" });
-        const cell = row.createSpan();
-        this.renderScopeMenuGlyph(cell, group, m.id, m.scope);
-      }
-    });
-  }
-
-  private async writeMemberScope(group: string, id: string, scope: RuleScope): Promise<void> {
-    const w = memberScopeWrite(scope);
-    if (w.kind === "enabledOn") await this.host.setMemberEnabledOn(group, id, w.scope);
-    else if (w.kind === "local") await this.host.addSwitchExceptions(group, [id]);
-    else await this.host.clearMemberLocal(group, id);
-    await this.reload();
-  }
-
   // Structural groups (the self plugin, the on/off switch lists) are not "items" a user would
   // stop syncing — everything else can be removed from the tracked set.
   private canStopSyncing(name: string): boolean {
@@ -2734,146 +2225,6 @@ export class SyncCenterView extends ItemView {
     }).open();
   }
 
-  private renderPolicySeg(detail: HTMLElement, r: StatusRow, a: Availability, installOnly: boolean): void {
-    // Carrier-synced disabled row (spec #5-B): the on/off card owns enablement outright, so the
-    // per-card policy ladder is replaced by a static fate line — no ⏻ Enable / Keep disabled
-    // choice to make here anymore.
-    if (this.sectionOf(r.group.name) === "disabled") {
-      const f = this.disabledRowFate(r.group.name);
-      if (f !== undefined) {
-        detail.createDiv({ cls: "config-sync-expand-note", text: fateLineText(f.carrier, f.fate) });
-        return;
-      }
-      if (this.carrierIsSynced(r.group.name)) {
-        // Carrier synced but its divergence data isn't readable yet (never-captured window,
-        // fix round 1 #2) — writes already resolve to "none" regardless, so the ladder must
-        // never render clickable here either; state the model generically.
-        detail.createDiv({ cls: "config-sync-expand-note", text: fateLineText(enablementCarrierFor(r.group.name), "turns-on") });
-        return;
-      }
-    }
-    // Install-only rows have no settings payload: "Stage only" would apply nothing at all,
-    // so the ladder keeps just the install actions. Capture direction offers only the enable
-    // choices — install/update are apply-ordered actions.
-    const capturing = this.effDir(r) === "capture";
-    const options = policyOptions(a)
-      .filter((o) => !installOnly || o.action !== "none")
-      .filter((o) => !capturing || o.action === "enable" || o.action === "none");
-    if (options.length === 0) return;
-    const name = r.group.name;
-    detail.createDiv({ cls: "config-sync-seg-label", text: capturing ? "On capture" : "On apply" });
-    const segrow = detail.createDiv({ cls: "config-sync-segrow" });
-    const seg = segrow.createDiv({ cls: "config-sync-seg" });
-    const current = this.policy.get(name) ?? defaultPolicy(a);
-    for (const opt of options) {
-      const b = seg.createEl("button", {
-        cls: `config-sync-seg-btn is-policy${this.selected.has(name) && current === opt.action ? " is-on" : ""}`,
-        text: opt.label,
-      });
-      b.addEventListener("click", (e) => {
-        e.stopPropagation();
-        this.selected.add(name);
-        this.policy.set(name, opt.action);
-        this.render(this.renderGen);
-      });
-    }
-  }
-
-  // Staging, not execution: a segment checks the row in that direction; clicking the
-  // active segment unstages it. The footer buttons are the only execution points.
-  private renderDirectionToggle(detail: HTMLElement, r: StatusRow): void {
-    const name = r.group.name;
-    const staged = this.selected.has(name);
-    const dir = this.effDir(r);
-    const seg = detail.createDiv({ cls: "config-sync-seg" });
-    const segBtn = (d: Direction, label: string, aria: string): void => {
-      const on = staged && dir === d;
-      const b = seg.createEl("button", {
-        cls: `config-sync-seg-btn is-${d}${on ? " is-on" : ""}`,
-        attr: { "aria-label": aria },
-      });
-      renderActionIcon(b, d);
-      b.appendText(` ${label}`);
-      b.addEventListener("click", (e) => {
-        e.stopPropagation();
-        if (on) {
-          this.selected.delete(name);
-          this.directionOverride.delete(name);
-        } else {
-          this.selected.add(name);
-          this.directionOverride.set(name, d);
-        }
-        this.render(this.renderGen);
-      });
-    };
-    segBtn("capture", "Capture", "Capture this device's version");
-    segBtn("apply", "Apply store", "Apply the store's version (overwrites this device)");
-  }
-
-  private renderCappedChanges(detail: HTMLElement, r: StatusRow, changes: FileChanges): void {
-    const { shown, rest } = capFileEntries(changes, 10);
-    const renderEntry = (e: CappedEntry): void => {
-      const line = detail.createDiv({ cls: `is-${e.kind}`, text: `${e.kind === "add" ? "+" : e.kind === "upd" ? "~" : "−"} ${e.name}` });
-      if (e.kind === "del") return; // nothing to diff for a pending deletion
-      line.addClass("config-sync-diffable");
-      const hint = line.createSpan({ cls: "config-sync-diffhint", text: " · diff ▾" });
-      let panel: HTMLElement | null = null;
-      line.addEventListener("click", (ev) => {
-        ev.stopPropagation();
-        if (panel !== null) {
-          panel.remove();
-          panel = null;
-          hint.setText(" · diff ▾");
-          return;
-        }
-        hint.setText(" · diff ▴");
-        const p = createDiv({ cls: "config-sync-inline-diff" });
-        panel = p;
-        line.insertAdjacentElement("afterend", p);
-        void this.host.diffPair(r.group.name, e.name, this.effDir(r)).then((pair) => {
-          if (panel !== p) return; // closed while loading
-          if (pair === null) {
-            const text = isWholeFileEncrypted(r.group) ? "encrypted file" : "no diff available";
-            p.createDiv({ cls: "config-sync-expand-note", text });
-            return;
-          }
-          const dir = this.effDir(r);
-          const leftLabel = dir === "capture" ? "store" : "this device";
-          const rightLabel = dir === "capture" ? "this device (what capture would write)" : "store (what apply would write)";
-          // On/off lists compare as sets — sorted view keeps ordering/comma artifacts out.
-          // Other JSON files get key-order normalization for the same reason (spec 2026-07-27).
-          const switchSorted = SWITCH_LIST_GROUPS.has(r.group.name);
-          let base = switchSorted ? switchListSortedView(pair.base) : pair.base;
-          let produced = switchSorted ? switchListSortedView(pair.produced) : pair.produced;
-          let jsonSorted = false;
-          if (!switchSorted && e.name.endsWith(".json")) {
-            const sb = jsonSortedView(pair.base);
-            const sp = jsonSortedView(pair.produced);
-            if (sb !== null && sp !== null) {
-              base = sb;
-              produced = sp;
-              jsonSorted = true;
-            }
-          }
-          if (base === produced && pair.base !== pair.produced) {
-            p.createDiv({ cls: "config-sync-expand-note", text: "Only key order / formatting differs." });
-            return;
-          }
-          renderDiffPanel(p, base, produced, leftLabel, rightLabel, switchSorted || jsonSorted ? `${e.name} · sorted view` : e.name);
-        });
-      });
-    };
-    for (const e of shown) renderEntry(e);
-    if (rest.length > 0) {
-      const more = detail.createDiv({ cls: "config-sync-more-files", text: moreFilesText(rest.length) });
-      more.addEventListener("click", (e) => {
-        e.stopPropagation();
-        more.remove();
-        for (const entry of rest) renderEntry(entry);
-      });
-    }
-  }
-
   // Capture-direction disabled rows default to ⏻ Enable (spec 2026-07-17); everything else
   // takes the availability ladder's first action. A carrier-synced disabled row (spec #5-B)
   // never defaults to an enable — the on/off card is the single write path for it.
@@ -2883,18 +2234,6 @@ export class SyncCenterView extends ItemView {
       if (this.effDir(r) === "capture") return "enable";
     }
     return defaultPolicy(this.availOf(r.group.name));
-  }
-
-  // A disabled row's resolved action, direction-aware (spec #5-B): a carrier-synced row always
-  // resolves to "none" — capturePayload, applyPayload, and the footer's "N to enable" count all
-  // go through this single place so they can't drift apart (fix round 1 #1). Only the branch
-  // matching `r`'s own effDir is ever meaningful to a caller; the other is dead for that row.
-  private disabledRowAction(r: StatusRow): StateAction {
-    if (this.carrierIsSynced(r.group.name)) return "none";
-    if (this.effDir(r) === "capture") return this.policy.get(r.group.name) === "enable" ? "enable" : "none";
-    const a = this.availOf(r.group.name);
-    const stored = this.policy.get(r.group.name);
-    return stored !== undefined && isValidPolicy(a, stored) ? stored : defaultPolicy(a);
   }
 
   // The two carrier-unsynced fallback ladders' menu choice, folded into a single boolean
