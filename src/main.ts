@@ -38,7 +38,7 @@ interface SecretStore {
 }
 import { BratIndex, parseBratRepoList, resolveBratIndex } from "./core/bratIndex";
 import { type CatalogSection, corePluginFile, displayLabelForGroup, findGroupByName, listBetaSections, listCoreSections, listDiscovered, listOptionSections, listPluginSections, SELF_GROUP_NAME, setCorePluginIds } from "./core/catalog";
-import { Availability, availabilityForGroup, desktopOnlyDrift, desktopOnlyPluginIds, scopedAwayMembers, memberForceOff } from "./core/availability";
+import { Availability, availabilityForGroup, desktopOnlyDrift, desktopOnlyPluginIds, scopedAwayMembers, memberForceOff, normalizeMemberRule } from "./core/availability";
 import { listFilesRecursive, isJunkPath, FileIO } from "./core/io";
 import { leftoverStoreRels, storeSelfCopyGroups, selfListGroups } from "./core/leftover";
 import { parseStoreLock, validateSyncManifest } from "./core/manifest";
@@ -1282,6 +1282,30 @@ export default class ConfigSyncPlugin extends Plugin {
     return memberForceOff(this.memberScopesFor(group), this.memberLocalIdsFor(group), Platform.isMobile);
   }
 
+  // Live on/off signal for a "this device" pin — whichever the member's enablement carrier reads
+  // right now. normalizeMemberRule needs this to turn the legacy "local" scope (spec §6: the
+  // existing this-device pins) into a direction: always-here when the pin is currently on here,
+  // never-here when it's currently off here.
+  private locallyOnFor(carrier: "core-plugins.json" | "community-plugins.json", elementId: string): boolean {
+    return carrier === "core-plugins.json" ? this.pluginHost().isCorePluginEnabled(elementId) : this.pluginHost().isPluginEnabled(elementId);
+  }
+
+  // Mask table (Sync Center unified grammar, task 2): a "this device" pin normalizes to
+  // always-here or never-here depending on its current local state (normalizeMemberRule).
+  // always-here → exception + forceOn; never-here → exception + forceOff (both on top of the
+  // class-scope force-off memberForceOffIds already computes).
+  private memberRuleForceOn(group: string): string[] {
+    const carrier = this.carrierFor(group);
+    if (carrier === null) return [];
+    return this.memberLocalIdsFor(group).filter((id) => normalizeMemberRule("local", this.locallyOnFor(carrier, id)) === "always-here");
+  }
+
+  private memberRuleForceOff(group: string): string[] {
+    const carrier = this.carrierFor(group);
+    if (carrier === null) return [];
+    return this.memberLocalIdsFor(group).filter((id) => normalizeMemberRule("local", this.locallyOnFor(carrier, id)) === "never-here");
+  }
+
   private async coreContext(): Promise<CoreContext> {
     const rootPath = await resolveRootPath(this.settings.rootPath, this.settings.pkmMode, this.pkmProbe());
     if (rootPath === "" || rootPath.startsWith("/") || rootPath.split("/").includes("..")) {
@@ -1300,7 +1324,15 @@ export default class ConfigSyncPlugin extends Plugin {
       switchForceOff: (() => {
         const out: Record<string, string[]> = {};
         for (const name of SWITCH_LIST_GROUPS) {
-          const f = this.memberForceOffIds(name);
+          const f = [...new Set([...this.memberForceOffIds(name), ...this.memberRuleForceOff(name)])];
+          if (f.length > 0) out[name] = f;
+        }
+        return out;
+      })(),
+      switchForceOn: (() => {
+        const out: Record<string, string[]> = {};
+        for (const name of SWITCH_LIST_GROUPS) {
+          const f = this.memberRuleForceOn(name);
           if (f.length > 0) out[name] = f;
         }
         return out;

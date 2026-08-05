@@ -113,6 +113,29 @@ export function subtractForceOff(list: SwitchList, forceOff: string[]): SwitchLi
   return result;
 }
 
+// Add force-on ids to an applied list: the always-here counterpart to subtractForceOff (mask
+// table, Sync Center unified grammar task 2). Arrays: append ids missing from the list. Maps:
+// set the key true, adding it if absent. Idempotent — an already-on id is left as-is. Empty
+// force-on passes through unchanged.
+export function addForceOn(list: SwitchList, forceOn: string[]): SwitchList {
+  if (forceOn.length === 0) return list;
+  if (Array.isArray(list)) {
+    const on = new Set(list);
+    return [...list, ...forceOn.filter((id) => !on.has(id))];
+  }
+  const result: Record<string, boolean> = { ...list };
+  for (const id of forceOn) result[id] = true;
+  return result;
+}
+
+// Every id/key either side of a switch-list pair names, deduped, store first then local-only
+// additions — the candidate set a "Runs on" rule can apply to regardless of which side currently
+// carries a given member. A null side (unreadable/first-capture) contributes nothing.
+export function memberUniverse(store: SwitchList | null, local: SwitchList | null): string[] {
+  const idsOf = (l: SwitchList | null): string[] => (l === null ? [] : Array.isArray(l) ? l : Object.keys(l));
+  return [...new Set([...idsOf(store), ...idsOf(local)])];
+}
+
 /**
  * Capture: remove excepted ids from local before storing.
  * Arrays: remove excepted strings, preserve order.

@@ -1750,6 +1750,21 @@ describe("switch-list exceptions", () => {
       await apply(ctx, ["community-plugins"]);
       expect(JSON.parse(await io.read(".obs/community-plugins.json"))).toEqual(["a", "b"]);
     });
+
+    // Mask table (Sync Center unified grammar, task 2): always-here → exception + forceOn. The
+    // member is off locally AND off in the store list, yet an always-here rule still turns it on.
+    it("switchForceOn turns on an always-here member that is off locally and off in the store", async () => {
+      const { io, ctx } = setup();
+      ctx.switchExceptions["community-plugins"] = ["always-on"];
+      ctx.switchForceOn = { "community-plugins": ["always-on"] };
+      io.seed({
+        "cs/store/configdir/community-plugins.json": JSON.stringify(["a"]),
+        ".obs/community-plugins.json": JSON.stringify(["a"]),
+      });
+      await seedGroups(ctx, COMMUNITY_MANIFEST);
+      await apply(ctx, ["community-plugins"]);
+      expect(JSON.parse(await io.read(".obs/community-plugins.json"))).toEqual(["a", "always-on"]);
+    });
   });
 
   describe("status (community-plugins array)", () => {

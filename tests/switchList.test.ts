@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   SWITCH_LIST_GROUPS, readLocalSwitchList, writeLocalSwitchList, localRealPath, subtractForceOff,
+  addForceOn,
+  memberUniverse,
   parseSwitchList,
   captureSwitchList,
   applySwitchList,
@@ -79,6 +81,50 @@ describe("subtractForceOff on maps", () => {
   it("returns the list unchanged when forceOff is empty", () => {
     const m = { a: true };
     expect(subtractForceOff(m, [])).toBe(m);
+  });
+});
+
+describe("addForceOn on arrays", () => {
+  it("appends missing ids", () => {
+    expect(addForceOn(["a"], ["b", "c"])).toEqual(["a", "b", "c"]);
+  });
+  it("is idempotent when the id is already on", () => {
+    expect(addForceOn(["a", "b"], ["b"])).toEqual(["a", "b"]);
+  });
+  it("is identity for empty force-on", () => {
+    expect(addForceOn(["a", "b"], [])).toEqual(["a", "b"]);
+  });
+});
+
+describe("addForceOn on maps", () => {
+  it("sets ids to true, adding missing keys", () => {
+    expect(addForceOn({ a: true, b: false }, ["b", "c"])).toEqual({ a: true, b: true, c: true });
+  });
+  it("is idempotent when the key is already true", () => {
+    expect(addForceOn({ a: true }, ["a"])).toEqual({ a: true });
+  });
+  it("returns the map unchanged when forceOn is empty", () => {
+    const m = { a: true };
+    expect(addForceOn(m, [])).toBe(m);
+  });
+});
+
+describe("memberUniverse", () => {
+  it("unions ids from an array store and an array local, deduped", () => {
+    expect(memberUniverse(["a", "b"], ["b", "c"])).toEqual(["a", "b", "c"]);
+  });
+  it("unions keys from a map store and a map local", () => {
+    expect(memberUniverse({ a: true, b: false }, { b: true, c: false })).toEqual(["a", "b", "c"]);
+  });
+  it("handles mixed shapes (array store, map local)", () => {
+    expect(memberUniverse(["a"], { b: true })).toEqual(["a", "b"]);
+  });
+  it("treats a null side as contributing nothing", () => {
+    expect(memberUniverse(["a", "b"], null)).toEqual(["a", "b"]);
+    expect(memberUniverse(null, ["a", "b"])).toEqual(["a", "b"]);
+  });
+  it("returns [] when both sides are null", () => {
+    expect(memberUniverse(null, null)).toEqual([]);
   });
 });
 

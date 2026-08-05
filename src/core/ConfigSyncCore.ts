@@ -7,7 +7,7 @@ import { classifyMerge, MergeConflict, MergePlan } from "./merge";
 import { coreSettingsIds, SELF_GROUP_NAME } from "./catalog";
 import { isPlainObject, keyMatchesAny } from "./sanitize";
 import { readPerItemArray, scopeOf } from "./perItem";
-import { applySwitchList, captureSwitchList, localRealPath, parseSwitchList, readLocalSwitchList, subtractForceOff, SWITCH_LIST_GROUPS, SwitchList, switchListsEqual, writeLocalSwitchList } from "./switchList";
+import { addForceOn, applySwitchList, captureSwitchList, localRealPath, parseSwitchList, readLocalSwitchList, subtractForceOff, SWITCH_LIST_GROUPS, SwitchList, switchListsEqual, writeLocalSwitchList } from "./switchList";
 
 // `current` is the group NAME (the UI maps it to a display label); `phase` is a short live
 // phrase for the in-item step ("downloading via BRAT…", "writing settings…") — spec 2026-07-17.
@@ -46,7 +46,8 @@ export interface CoreContext {
   deviceClass: "desktop" | "mobile";
   groupsIO: GroupsIO;
   switchExceptions: Record<string, string[]>; // group name -> masked member ids (This-device ∪ scoped-away ∪ auto-derived)
-  switchForceOff?: Record<string, string[]>; // group name -> ids forced off on apply (user class scope on the wrong device class)
+  switchForceOff?: Record<string, string[]>; // group name -> ids forced off on apply (user class scope on the wrong device class, or a never-here rule)
+  switchForceOn?: Record<string, string[]>; // group name -> ids forced on on apply (an always-here rule; see normalizeMemberRule's mask table)
   fieldOverlay?: (group: SyncGroup, topKeys: string[]) => FieldRule[] | null; // runtime category rules (e.g. app.json view rows)
   // Compiles a self store copy's sync list. Schema v2 copies persist items+customGroups (no
   // compiled groups array), and only the plugin holds the registry defs needed to compile them
@@ -862,7 +863,8 @@ async function applyGroup(ctx: CoreContext, group: SyncGroup): Promise<GroupResu
       if (storeSwitchList !== null) {
         const localSwitchList = localContent !== null ? readLocalSwitchList(group.name, localContent) : null;
         const merged = applySwitchList(storeSwitchList, localSwitchList, exc);
-        const finalList = subtractForceOff(merged, ctx.switchForceOff?.[group.name] ?? []);
+        const afterOff = subtractForceOff(merged, ctx.switchForceOff?.[group.name] ?? []);
+        const finalList = addForceOn(afterOff, ctx.switchForceOn?.[group.name] ?? []);
         content = writeLocalSwitchList(group.name, finalList, localContent);
         // Name the plugins this write toggles (spec 2026-07-17): a store list lacking a
         // just-enabled plugin turns it off persistently — that must be visible in the report.

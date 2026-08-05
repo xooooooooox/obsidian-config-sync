@@ -1,6 +1,6 @@
 import { PluginHost, pluginIdForGroup } from "./ConfigSyncCore";
 import { coreSettingsIds } from "./catalog";
-import { StoreLock, SyncGroup } from "./types";
+import { MemberRule, RuleScope, StoreLock, SyncGroup } from "./types";
 
 export type AvailabilityKind = "enabled" | "disabled" | "not-installed";
 export type VersionDrift = "behind" | "ahead" | null; // local vs store: behind = local < store
@@ -101,6 +101,21 @@ export function desktopOnlyPluginIds(groups: SyncGroup[], plugins: PluginHost, l
     if (plugins.getInstalledPluginVersion(id) === null) ids.add(id);
   }
   return ids;
+}
+
+// Normalizes a stored RuleScope into a MemberRule (Sync Center unified grammar, task 2):
+// all/desktop/mobile pass through unchanged (both types share those three literals); a legacy
+// "local" scope — the pre-unification "this device decides for itself" value — resolves to a
+// direction using the member's current local on/off state, so old data keeps working under the
+// new always-here/never-here vocabulary without a stored-format migration.
+//
+// Mask derivation from the resulting MemberRule (documented once, here, for every apply-site
+// consumer): desktop/mobile on the matching device class → no mask (plain store membership); on
+// the other class → exception + forceOff (existing behavior, unchanged semantics); never-here →
+// exception + forceOff; always-here → exception + forceOn (new); all → nothing.
+export function normalizeMemberRule(scope: RuleScope, locallyOn: boolean): MemberRule {
+  if (scope !== "local") return scope;
+  return locallyOn ? "always-here" : "never-here";
 }
 
 // Member names whose shared scope excludes the current device class. Feeds the exception mask
