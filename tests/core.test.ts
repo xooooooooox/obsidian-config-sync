@@ -1918,6 +1918,37 @@ describe("partial-selection switch staging (Sync Center unified grammar, task 3)
       expect(r?.messages).toContain("turns off: local-only");
       expect(JSON.parse(await io.read(".obs/community-plugins.json"))).toEqual(["keep", "store-only"]);
     });
+
+    // Review fix (task 3): subtractForceOff/addForceOn used to run unconditionally, ignoring
+    // stagedMembers — a force-on/off mask could flip an UNSTAGED member's switch even with
+    // stagedMembers: []. Masks must now be scoped to stagedMembers when it is provided.
+    it("stagedMembers: [] leaves an active switchForceOn mask untouched (reviewer counterexample)", async () => {
+      const { io, ctx } = setup();
+      ctx.switchForceOn = { "community-plugins": ["always-on"] };
+      io.seed({
+        ".obs/community-plugins.json": JSON.stringify(["a"]),
+        "cs/store/configdir/community-plugins.json": JSON.stringify(["a"]),
+      });
+      await seedGroups(ctx, COMMUNITY_MANIFEST);
+      const results = await applyWithActions(ctx, [{ name: "community-plugins", action: "none", stagedMembers: [] }], async () => "9.9.9");
+      const r = results.find((x) => x.group === "community-plugins");
+      expect(r?.messages).toEqual([]); // zero switch flips, even though the mask is active
+      expect(JSON.parse(await io.read(".obs/community-plugins.json"))).toEqual(["a"]);
+    });
+
+    it("a member both staged AND force-on still flips (a staged member's Runs-on rule still applies)", async () => {
+      const { io, ctx } = setup();
+      ctx.switchForceOn = { "community-plugins": ["always-on"] };
+      io.seed({
+        ".obs/community-plugins.json": JSON.stringify(["a"]),
+        "cs/store/configdir/community-plugins.json": JSON.stringify(["a"]),
+      });
+      await seedGroups(ctx, COMMUNITY_MANIFEST);
+      const results = await applyWithActions(ctx, [{ name: "community-plugins", action: "none", stagedMembers: ["always-on"] }], async () => "9.9.9");
+      const r = results.find((x) => x.group === "community-plugins");
+      expect(r?.messages).toEqual(["turns on: always-on"]);
+      expect(JSON.parse(await io.read(".obs/community-plugins.json"))).toEqual(["a", "always-on"]);
+    });
   });
 
   describe("captureWithActions with CaptureItem.stagedMembers", () => {

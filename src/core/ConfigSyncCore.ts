@@ -191,6 +191,15 @@ function runExceptions(ctx: CoreContext, name: string, store: SwitchList | null,
   return [...new Set([...base, ...unstaged])];
 }
 
+// Restricts a force-on/off mask (Task 2's always-here/never-here table) to the run's staged
+// members: unrestricted when `stagedMembers` is undefined (today's whole-run mask behavior,
+// unchanged), otherwise only ids also named in `stagedMembers` — an unstaged member's switch
+// must never move, including via a force mask (fix to review finding on task 3: `stagedMembers:
+// []` must mean zero switch flips even when a force-on/off mask is active for the group).
+function scopedMask(mask: string[], stagedMembers?: string[]): string[] {
+  return stagedMembers === undefined ? mask : mask.filter((id) => stagedMembers.includes(id));
+}
+
 function serializeSwitchList(v: ReturnType<typeof captureSwitchList>): string {
   return JSON.stringify(v, null, 2) + "\n";
 }
@@ -894,8 +903,8 @@ async function applyGroup(ctx: CoreContext, group: SyncGroup, stagedMembers?: st
         const localSwitchList = localContent !== null ? readLocalSwitchList(group.name, localContent) : null;
         const runExc = runExceptions(ctx, group.name, storeSwitchList, localSwitchList, stagedMembers);
         const merged = applySwitchList(storeSwitchList, localSwitchList, runExc);
-        const afterOff = subtractForceOff(merged, ctx.switchForceOff?.[group.name] ?? []);
-        const finalList = addForceOn(afterOff, ctx.switchForceOn?.[group.name] ?? []);
+        const afterOff = subtractForceOff(merged, scopedMask(ctx.switchForceOff?.[group.name] ?? [], stagedMembers));
+        const finalList = addForceOn(afterOff, scopedMask(ctx.switchForceOn?.[group.name] ?? [], stagedMembers));
         content = writeLocalSwitchList(group.name, finalList, localContent);
         // Name the plugins this write toggles (spec 2026-07-17): a store list lacking a
         // just-enabled plugin turns it off persistently — that must be visible in the report.
