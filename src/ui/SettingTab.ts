@@ -120,6 +120,11 @@ export interface SettingsHost extends Plugin {
   // The registry's item defs (registry.ts's buildItemDefs, rebuilt by main.ts on every
   // recompile) — the unified-card renderer's only source of which cards exist.
   itemDefs(): ItemDef[];
+  // The Sync Center More bridge's pending target (main.ts's openSettingsAt), read-and-cleared:
+  // null on a normal Settings open, else the item id (registry `core:<id>`/`community:<id>`/bare
+  // obsidian id, or a custom/discovered folder's bare group name) whose card render() should
+  // expand and scroll to once, this open only.
+  consumePendingSettingsAnchor(): string | null;
   // Basenames (no extension) of .css files actually present under the vault's snippets/ folder —
   // feeds the Appearance card's snippets companion member rows (spec §4/§5).
   listSnippetFiles(): Promise<string[]>;
@@ -250,6 +255,10 @@ function toCandidate(d: RemoteDraft): unknown {
 }
 
 type PanelTab = "general" | "obsidian" | "core" | "plugins" | "beta" | "advanced" | "sources";
+
+// ItemSection -> the tab that renders it (registry.ts's "community" section shows under this
+// panel's "plugins" tab; every other section keeps its own name).
+const SECTION_TAB: Record<ItemSection, PanelTab> = { obsidian: "obsidian", core: "core", community: "plugins", beta: "beta" };
 
 const TABS: { id: PanelTab; label: string; icon: string; desktopOnly?: true }[] = [
   { id: "general", label: "General", icon: "settings" },
@@ -463,11 +472,36 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       this.sources = this.host.settings.remotes.map(toDraft);
       this.loaded = true;
     }
+    const anchor = this.consumeSettingsAnchor();
     this.renderSearchBox(containerEl);
     this.bodyEl = containerEl.createDiv({ cls: "config-sync-settings-body" });
     await this.renderBody(this.bodyEl, gen);
     if (gen !== this.renderGen) return;
     containerEl.scrollTop = scrollTop;
+    if (anchor !== null) containerEl.querySelector(`[data-search-anchor="${CSS.escape(anchor)}"]`)?.scrollIntoView({ block: "start" });
+  }
+
+  // The More bridge's other end (main.ts's openSettingsAt): reads-and-clears the pending item id,
+  // picks the tab that renders it, and pre-expands its card so the body below already renders it
+  // open — the caller then scrolls to the `data-search-anchor` this returns. Registry items
+  // (obsidian/core/plugins/beta tabs) are anything itemDefs() knows about, keyed `card:<id>` /
+  // `item-<id>` (renderItemCard, same scheme jumpTo's search-hit navigation uses). Everything
+  // itemDefs() doesn't know about — a custom rule or an adopted discovered file — is a folder,
+  // and a folder's device-scope config only ever renders in the Advanced tab under its bare group
+  // name (renderRuleCard/renderDiscoveredOnRow): the honest target for its "Folder rules" row,
+  // since that's the only place the config exists.
+  private consumeSettingsAnchor(): string | null {
+    const itemId = this.host.consumePendingSettingsAnchor();
+    if (itemId === null) return null;
+    const def = this.host.itemDefs().find((d) => d.id === itemId);
+    if (def !== undefined) {
+      this.activeTab = SECTION_TAB[def.section];
+      this.expanded.add(`card:${itemId}`);
+      return `item-${itemId}`;
+    }
+    this.activeTab = "advanced";
+    this.expanded.add(itemId);
+    return `advanced-rule-${itemId}`;
   }
 
   private async renderBody(bodyEl: HTMLElement, gen: number): Promise<void> {

@@ -204,9 +204,9 @@ interface AppInternal {
 }
 
 // app.setting's internal surface (the Settings modal manager) — not part of the public API.
-// The Sync Center's More bridge uses this today as an existing-affordance passthrough (opens
-// this plugin's own Settings tab); Task 7 extends openSettingsAt to scroll to/expand the
-// specific item's card once it lands there.
+// The Sync Center's More bridge uses this to open the plugin's own Settings tab (the same entry
+// point Obsidian's plugin list gear icon uses); SettingTab.render() then consumes
+// pendingSettingsDeepLink to scroll to/expand the specific item's card once it lands there.
 interface AppWithSetting {
   setting: { open(): void; openTabById(id: string): void };
 }
@@ -1295,15 +1295,23 @@ export default class ConfigSyncPlugin extends Plugin {
     await this.saveSettings();
   }
 
-  // The More bridge's target item, kept for Task 7 to consume when it adds the scroll/expand
-  // behavior. For now this is an existing-affordance passthrough: it opens the plugin's own
-  // Settings tab (the same entry point Obsidian's plugin list gear icon uses).
+  // The More bridge's target item — set here, consumed once by SettingTab.render() via
+  // consumePendingSettingsAnchor() below, which expands that item's card and scrolls to it.
   private pendingSettingsDeepLink: string | null = null;
   private openSettingsAt(itemId: string): void {
     this.pendingSettingsDeepLink = itemId;
     const app = this.app as unknown as AppWithSetting;
     app.setting.open();
     app.setting.openTabById(this.manifest.id);
+  }
+
+  // SettingsHost-facing read-and-clear: the settings tab calls this once per render() so a
+  // pending deep link is consumed exactly once, even though display() re-renders more than once
+  // per open (search, tab switches) — a second render() must never re-trigger the scroll/expand.
+  consumePendingSettingsAnchor(): string | null {
+    const id = this.pendingSettingsDeepLink;
+    this.pendingSettingsDeepLink = null;
+    return id;
   }
 
   // The where-it-runs menu's "This device decides for itself" entry (spec 2026-07-28 §4) — and
