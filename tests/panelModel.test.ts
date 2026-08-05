@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { capFileEntries, insyncLineText, statusBarStatuses, moreFilesText, visibleUnderFilter, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, footerSummary, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, versionLine, runProgressLabel, showColdStartBanner, memberDecisionsFromScopes, memberDecisionText, switchSummaryLines, switchBothWaysCaption, ruleGroups, memberScopeWrite, memberCurrentScope, enablementCarrierFor, carrierIsSynced, memberFate, fatePillText, fateLineText, DISABLED_CARRIER_SYNCED_NOTE, isEnableAction, disabledInSyncNote, disabledNoSettingsNote, TYPE_SECTION_TITLES, typeSectionForRow, sectionCountLabel, unifiedFooterSummary, fileEntryFor } from "../src/ui/panelModel";
+import { capFileEntries, insyncLineText, statusBarStatuses, moreFilesText, visibleUnderFilter, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, footerSummary, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, versionLine, runProgressLabel, showColdStartBanner, memberDecisionsFromScopes, memberDecisionText, switchSummaryLines, switchBothWaysCaption, ruleGroups, memberScopeWrite, memberCurrentScope, enablementCarrierFor, carrierIsSynced, memberFate, fatePillText, fateLineText, DISABLED_CARRIER_SYNCED_NOTE, isEnableAction, disabledInSyncNote, disabledNoSettingsNote, TYPE_SECTION_TITLES, typeSectionForRow, sectionCountLabel, unifiedFooterSummary, fileEntryFor, stagedPayload, StageableRow } from "../src/ui/panelModel";
 import { GroupState, GroupStatus } from "../src/core/status";
 import { Availability } from "../src/core/availability";
+import { Fate } from "../src/ui/fateModel";
 
 describe("visibleUnderFilter", () => {
   it("all shows every state", () => {
@@ -583,5 +584,125 @@ describe("fileEntryFor — spec §4 direction-aware file entries (ledger #8)", (
   it("encrypted deletion (either direction): del strikethrough is unaffected by encryption — nothing to preview either way", () => {
     expect(fileEntryFor({ kind: "added", rel: "secret.json" }, "apply", true)).toEqual({ glyph: "del", label: "secret.json", affordance: "none", note: null });
     expect(fileEntryFor({ kind: "deleted", rel: "secret.json" }, "capture", true)).toEqual({ glyph: "del", label: "secret.json", affordance: "none", note: null });
+  });
+});
+
+describe("stagedPayload — spec §5 unified staging (task 6)", () => {
+  const enabledAvail: Availability = { kind: "enabled", drift: null, localVersion: "1.0.0", storeVersion: null, anchor: "plugin", desktopOnly: false };
+  const notInstalledAvail: Availability = { kind: "not-installed", drift: null, localVersion: null, storeVersion: "1.0.0", anchor: "plugin", desktopOnly: false };
+  const behindAvail: Availability = { kind: "enabled", drift: "behind", localVersion: "1.0.0", storeVersion: "1.1.0", anchor: "plugin", desktopOnly: false };
+
+  const fate = (glyph: Fate["glyph"], turnsOn = false, stageable = true): Fate => ({ glyph, sentence: "x", chips: [], stageable, turnsOn });
+
+  const row = (over: Partial<StageableRow> & { id: string }): StageableRow => ({
+    id: over.id,
+    itemName: over.itemName ?? over.id,
+    fate: over.fate ?? fate("↓"),
+    selected: over.selected ?? true,
+    carrier: over.carrier ?? null,
+    elementId: over.elementId ?? null,
+    availability: over.availability === undefined ? enabledAvail : over.availability,
+    conflictChoice: over.conflictChoice ?? null,
+    conflict: over.conflict ?? false,
+  });
+
+  it("unselected rows are excluded from both sides", () => {
+    const { apply, capture } = stagedPayload([
+      row({ id: "a", fate: fate("↓"), selected: false }),
+      row({ id: "b", fate: fate("↑"), selected: false }),
+    ]);
+    expect(apply).toEqual([]);
+    expect(capture).toEqual([]);
+  });
+
+  it("mixed selection both directions: apply rows and capture rows land on their own side; in-sync rows never stage", () => {
+    const { apply, capture } = stagedPayload([
+      row({ id: "a", fate: fate("↓") }),
+      row({ id: "b", fate: fate("↑") }),
+      row({ id: "c", fate: fate("—") }),
+    ]);
+    expect(apply).toEqual([{ name: "a", action: "none" }]);
+    expect(capture).toEqual([{ name: "b", action: "none" }]);
+  });
+
+  it("conflict without a choice is excluded from both sides", () => {
+    const { apply, capture } = stagedPayload([row({ id: "a", fate: fate("⚠"), conflict: true, conflictChoice: null })]);
+    expect(apply).toEqual([]);
+    expect(capture).toEqual([]);
+  });
+
+  it("conflict resolved to apply joins apply; resolved to capture joins capture", () => {
+    const toApply = stagedPayload([row({ id: "a", fate: fate("⚠"), conflict: true, conflictChoice: "apply" })]);
+    expect(toApply.apply).toEqual([{ name: "a", action: "none" }]);
+    expect(toApply.capture).toEqual([]);
+
+    const toCapture = stagedPayload([row({ id: "a", fate: fate("⚠"), conflict: true, conflictChoice: "capture" })]);
+    expect(toCapture.capture).toEqual([{ name: "a", action: "none" }]);
+    expect(toCapture.apply).toEqual([]);
+  });
+
+  it("action derivation matrix: install/install-enable, update/update-enable, enable/none", () => {
+    const act = (a: Availability, turnsOn: boolean): string | undefined =>
+      stagedPayload([row({ id: "x", fate: fate("↓", turnsOn), availability: a })]).apply.find((i) => i.name === "x")?.action;
+    expect(act(notInstalledAvail, false)).toBe("install");
+    expect(act(notInstalledAvail, true)).toBe("install-enable");
+    expect(act(behindAvail, false)).toBe("update");
+    expect(act(behindAvail, true)).toBe("update-enable");
+    expect(act(enabledAvail, true)).toBe("enable");
+    expect(act(enabledAvail, false)).toBe("none");
+  });
+
+  it("null availability (no install/update dimension, e.g. a folder or Obsidian row) falls to enable/none per turnsOn", () => {
+    const act = (turnsOn: boolean): string | undefined =>
+      stagedPayload([row({ id: "x", fate: fate("↓", turnsOn), availability: null })]).apply.find((i) => i.name === "x")?.action;
+    expect(act(true)).toBe("enable");
+    expect(act(false)).toBe("none");
+  });
+
+  it("capture rows always carry action 'none' — capture never enables anything as a side effect", () => {
+    expect(stagedPayload([row({ id: "x", fate: fate("↑"), availability: notInstalledAvail })]).capture).toEqual([{ name: "x", action: "none" }]);
+  });
+
+  it("a turnsOn plugin row contributes its elementId to its carrier's stagedMembers, synthesizing the carrier's own ApplyItem", () => {
+    const { apply } = stagedPayload([row({ id: "plugin-dataview", fate: fate("↓", true), carrier: "community-plugins", elementId: "dataview" })]);
+    expect(apply.find((i) => i.name === "community-plugins")).toEqual({ name: "community-plugins", action: "none", stagedMembers: ["dataview"] });
+  });
+
+  it("members from both carriers are collected independently", () => {
+    const { apply } = stagedPayload([
+      row({ id: "plugin-a", fate: fate("↓", true), carrier: "community-plugins", elementId: "a" }),
+      row({ id: "core-x", fate: fate("↓", true), carrier: "core-plugins", elementId: "x" }),
+    ]);
+    expect(apply.find((i) => i.name === "community-plugins")?.stagedMembers).toEqual(["a"]);
+    expect(apply.find((i) => i.name === "core-plugins")?.stagedMembers).toEqual(["x"]);
+  });
+
+  it("a selected member row that does NOT turn on contributes nothing on apply, and no carrier item is synthesized", () => {
+    const { apply } = stagedPayload([row({ id: "plugin-a", fate: fate("↓", false), carrier: "community-plugins", elementId: "a" })]);
+    expect(apply).toEqual([{ name: "plugin-a", action: "none" }]);
+    expect(apply.find((i) => i.name === "community-plugins")).toBeUndefined();
+  });
+
+  it("capture always contributes a carrier member regardless of turnsOn (always false on that side)", () => {
+    const { capture } = stagedPayload([row({ id: "plugin-a", fate: fate("↑", false), carrier: "community-plugins", elementId: "a" })]);
+    expect(capture.find((i) => i.name === "community-plugins")?.stagedMembers).toEqual(["a"]);
+  });
+
+  it("the carrier's own row staged with no members contributed still carries an empty stagedMembers array", () => {
+    const { apply } = stagedPayload([row({ id: "core-plugins", fate: fate("↓", false) })]);
+    expect(apply).toEqual([{ name: "core-plugins", action: "none", stagedMembers: [] }]);
+  });
+
+  it("the carrier's own row staged AND member rows staged merge into one item with the full member list", () => {
+    const { apply } = stagedPayload([
+      row({ id: "core-plugins", fate: fate("↓", false) }),
+      row({ id: "core-x", fate: fate("↓", true), carrier: "core-plugins", elementId: "x" }),
+    ]);
+    expect(apply.filter((i) => i.name === "core-plugins")).toEqual([{ name: "core-plugins", action: "none", stagedMembers: ["x"] }]);
+  });
+
+  it("itemName (not id) is what lands in the payload", () => {
+    const { apply } = stagedPayload([row({ id: "row-key", itemName: "plugin-real-name", fate: fate("↓") })]);
+    expect(apply).toEqual([{ name: "plugin-real-name", action: "none" }]);
   });
 });

@@ -12,6 +12,7 @@ import {
   capFileEntries,
   CappedEntry,
   carrierIsSynced,
+  ConflictChoice,
   defaultPolicy,
   DISABLED_CARRIER_SYNCED_NOTE,
   disabledInSyncNote,
@@ -20,9 +21,7 @@ import {
   enablementCarrierFor,
   fateLineText,
   fileEntryFor,
-  footerSummary,
   insyncLineText,
-  isEnableAction,
   isValidPolicy,
   matchesSearch,
   memberFate,
@@ -45,12 +44,15 @@ import {
   sectionCountLabel,
   showColdStartBanner,
   stageableRow,
+  StageableRow,
+  stagedPayload,
   switchSummaryLines,
   switchBothWaysCaption,
   TypeSection,
   TYPE_SECTION_ORDER,
   TYPE_SECTION_TITLES,
   typeSectionForRow,
+  unifiedFooterSummary,
   versionLine,
   visibleUnderFilter,
   Direction,
@@ -311,6 +313,11 @@ export class SyncCenterView extends ItemView {
   private typeSectionOpen: Set<TypeSection> = new Set();
   private selected = sessionStaging.selected;
   private directionOverride = sessionStaging.directionOverride;
+  // Conflict resolutions (spec §4/§5, task 6): view-level, not session-level like the maps
+  // above — a conflict resolution is a live judgment call on the CURRENT divergence, not
+  // something that should survive a mobile tab-switch view recreation the way staged
+  // selections do. Resets outright after a successful run (renderActionBar's `run`).
+  private conflictChoice: Map<string, ConflictChoice> = new Map();
   private expandedItems: Set<string> = new Set();
   private renderGen = 0;
   private filter: PanelFilter = "all";
@@ -465,6 +472,13 @@ export class SyncCenterView extends ItemView {
     // moving it to a different section with a different policy ladder. Drop any stored policy
     // that no longer belongs to the current ladder so applyPayload() can't send a stale action.
     for (const [n, action] of [...this.policy]) if (!isValidPolicy(this.availOf(n), action)) this.policy.delete(n);
+    // A conflict resolution expires with the conflict itself — a row that stopped differing
+    // (resolved by this run, or by an external edit) drops its stale choice so a later,
+    // unrelated divergence on the same group can't silently inherit an old "your choice".
+    for (const [n] of [...this.conflictChoice]) {
+      const st = this.statuses.get(n);
+      if (!names.has(n) || st === undefined || presentedState(st.state, this.availOf(n).drift) !== "differs") this.conflictChoice.delete(n);
+    }
     // Default pre-check seeds once per Obsidian session, never on later refreshes or
     // view recreations (mobile recreates the view on tab switches).
     if (!sessionStaging.seeded) {
@@ -1929,10 +1943,13 @@ export class SyncCenterView extends ItemView {
   // reasoning all collapse into `fate.chips`/`fate.sentence`/`fate.stageable`.
   private renderItemRow(card: HTMLElement, r: StatusRow): void {
     const { group } = r;
-    const { fate, input } = this.fateWithInput(r);
+    const { fate: rawFate, input } = this.fateWithInput(r);
+    const isConflict = rawFate.glyph === "⚠";
+    const unresolvedConflict = isConflict && !this.conflictChoice.has(group.name);
+    const fate = this.displayFate(rawFate, input, group.name);
     const inert = !fate.stageable;
     const row = card.createDiv({
-      cls: `config-sync-hub-row${inert ? " is-insync" : ""}${fate.glyph === "⚠" ? " is-conflict" : ""}`,
+      cls: `config-sync-hub-row${inert ? " is-insync" : ""}${unresolvedConflict ? " is-conflict" : ""}`,
       attr: { "aria-label": this.host.resolvedPath(group) },
     });
     const chev = row.createSpan({ cls: "config-sync-row-chevron", text: this.expandedItems.has(group.name) ? "▾" : "▸" });
@@ -1945,7 +1962,7 @@ export class SyncCenterView extends ItemView {
 
     if (!inert) {
       const cb = row.createEl("input", { type: "checkbox" });
-      cb.addClass(this.effDir(r) === "capture" ? "is-capture" : "is-apply");
+      cb.addClass(fate.glyph === "↑" ? "is-capture" : "is-apply");
       cb.checked = this.selected.has(group.name);
       cb.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -1964,7 +1981,7 @@ export class SyncCenterView extends ItemView {
 
     const detail = card.createDiv({ cls: "config-sync-report-files" });
     detail.hidden = !this.expandedItems.has(group.name);
-    this.renderUnifiedCard(detail, r, fate, input);
+    this.renderUnifiedCard(detail, r, fate, input, isConflict);
     // Stop syncing always closes the drawer as a quiet footer under a divider (round-9 定稿 A):
     // one placement for every removable row, clear of the file/diff rows a thumb aims for.
     if (this.canStopSyncing(group.name)) {
@@ -1978,16 +1995,32 @@ export class SyncCenterView extends ItemView {
     });
   }
 
-  // The expanded card (spec §4): standardized rows in order, each omitted when N/A. Resolve
-  // (conflict rows) is Task 6's job — for now a conflict row is simply unstageable with the
-  // ⚠ sentence above, no Resolve control here.
-  private renderUnifiedCard(detail: HTMLElement, r: StatusRow, fate: Fate, input: FateInput): void {
+  // Presentation-only re-derivation for a resolved conflict (spec §4): once Resolve picks a
+  // side, the row reads exactly like a normal directed row — a real sentence/chips computed as
+  // if the conflict were simply that direction, plus the `your choice` chip — never the frozen
+  // "⚠ Changed on both sides". `stagedRows()` (the staging truth) keeps consuming the RAW
+  // conflict fate alongside `conflictChoice` separately; this is display-only and never fed
+  // back into the payload.
+  private displayFate(fate: Fate, input: FateInput, name: string): Fate {
+    if (fate.glyph !== "⚠") return fate;
+    const choice = this.conflictChoice.get(name);
+    if (choice === undefined) return fate;
+    const resolved = rowFate({ ...input, conflict: false, direction: choice });
+    return { ...resolved, chips: [...resolved.chips, "your choice"], stageable: true };
+  }
+
+  // The expanded card (spec §4): standardized rows in order, each omitted when N/A. `fate` is
+  // already the display (post-resolution) fate; `isConflict` names the row as a conflict
+  // regardless of resolution, so Resolve keeps rendering (letting a choice be changed) and the
+  // On-apply/On-capture header + Files stay keyed off the CHOSEN side rather than the old
+  // direction-toggle default.
+  private renderUnifiedCard(detail: HTMLElement, r: StatusRow, fate: Fate, input: FateInput, isConflict: boolean): void {
     if (r.status.message !== undefined) {
       detail.createDiv({ cls: "config-sync-status-error", text: r.status.message });
       return;
     }
     const name = r.group.name;
-    const dir = input.direction;
+    const dir = isConflict ? this.conflictChoice.get(name) ?? null : input.direction;
     detail.createDiv({ cls: "config-sync-seg-label", text: dir === "apply" ? "On apply" : dir === "capture" ? "On capture" : "State" });
     detail.createDiv({ cls: "config-sync-expand-note", text: this.stateClauseText(r, fate, input) });
 
@@ -1995,6 +2028,8 @@ export class SyncCenterView extends ItemView {
       detail.createDiv({ cls: "config-sync-seg-label", text: "Files" });
       this.renderUnifiedFiles(detail, r, r.status.changes, dir, input.encrypted);
     }
+
+    if (isConflict) this.renderResolveRow(detail, r);
 
     // Runs on is one of the two "always available" rule menus (spec §1/§4 — no stageable
     // qualifier, unlike After install's explicit "only ¬carrierSynced ∧ ¬installed"): a
@@ -2012,6 +2047,35 @@ export class SyncCenterView extends ItemView {
       detail.createDiv({ cls: "config-sync-seg-label", text: "Note" });
       detail.createDiv({ cls: "config-sync-expand-note", text: "Takes effect after an app reload" });
     }
+  }
+
+  // Resolve (spec §4, conflict rows only): segmented `Use theirs ↓` / `Keep mine ↑`. Clicking
+  // the already-active choice clears it (the same "click the active segment to unstage" idiom
+  // `renderDirectionToggle` already uses elsewhere) — Resolve doubles as this row's only
+  // staging affordance, since its checkbox stays hidden (`Fate.stageable` false) until chosen.
+  private renderResolveRow(detail: HTMLElement, r: StatusRow): void {
+    const name = r.group.name;
+    detail.createDiv({ cls: "config-sync-seg-label", text: "Resolve" });
+    const segrow = detail.createDiv({ cls: "config-sync-segrow" });
+    const seg = segrow.createDiv({ cls: "config-sync-seg" });
+    const current = this.conflictChoice.get(name);
+    const opt = (choice: ConflictChoice, label: string): void => {
+      const on = current === choice;
+      const b = seg.createEl("button", { cls: `config-sync-seg-btn is-${choice}${on ? " is-on" : ""}`, text: label });
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (on) {
+          this.conflictChoice.delete(name);
+          this.selected.delete(name);
+        } else {
+          this.conflictChoice.set(name, choice);
+          this.selected.add(name);
+        }
+        this.render(this.renderGen);
+      });
+    };
+    opt("apply", "Use theirs ↓");
+    opt("capture", "Keep mine ↑");
   }
 
   // The `On apply`/`On capture`/`State` row's text: the fate sentence, expanded with the
@@ -2785,26 +2849,45 @@ export class SyncCenterView extends ItemView {
     return stored !== undefined && isValidPolicy(a, stored) ? stored : defaultPolicy(a);
   }
 
+  // stagedPayload's input rows (spec §5, task 6): one entry per row currently in the list
+  // (carriers included — they're excluded from rendering, not from this set, since their own
+  // file can differ independently of any member — see stagedPayload's carrier-synthesis rule).
+  // `CARRIER_GROUP_NAMES` guards `carrier`/`elementId`: `fateInputFor` reads carrierSynced/true
+  // for a carrier's OWN row too (its group name resolves to itself under
+  // `enablementCarrierFor`/`carrierElementFor`), which would otherwise feed its own name back in
+  // as a bogus "member" of itself.
+  private stagedRows(): StageableRow[] {
+    return this.rows().map((r) => {
+      const { fate, input } = this.fateWithInput(r);
+      const name = r.group.name;
+      const isCarrierMember = input.carrierSynced && !CARRIER_GROUP_NAMES.has(name);
+      // The After-install fallback ladder (spec §4: carrier NOT synced, row installs) has no
+      // enablement-verb representation in the fate sentence at all (spec §3: "when the carrier
+      // is unsynced, enablement verbs never appear") — Fate.turnsOn is unconditionally false
+      // there. Its menu choice still has to reach the action matrix, so the PAYLOAD-facing
+      // turnsOn blends it in here; the row's rendered fate (renderItemRow/renderUnifiedCard)
+      // keeps using the untouched rowFate() output, so the displayed sentence is unaffected.
+      const afterInstallTurnsOn = !input.carrierSynced && !input.installed && this.policy.get(name) !== "install";
+      return {
+        id: name,
+        itemName: name,
+        fate: afterInstallTurnsOn ? { ...fate, turnsOn: true } : fate,
+        selected: this.selected.has(name),
+        carrier: isCarrierMember ? enablementCarrierFor(name) : null,
+        elementId: isCarrierMember ? this.carrierElementFor(name) : null,
+        availability: this.availOf(name),
+        conflictChoice: this.conflictChoice.get(name) ?? null,
+        conflict: fate.glyph === "⚠",
+      };
+    });
+  }
+
   private capturePayload(): CaptureItem[] {
-    return this.rows()
-      .filter((r) => this.selected.has(r.group.name) && this.rowStageable(r) && this.effDir(r) === "capture")
-      .map((r) => {
-        const action = this.sectionOf(r.group.name) === "disabled" ? this.disabledRowAction(r) : "none";
-        return { name: r.group.name, action: action === "enable" ? ("enable" as const) : ("none" as const) };
-      });
+    return stagedPayload(this.stagedRows()).capture;
   }
 
   private applyPayload(): ApplyItem[] {
-    const items = this.rows()
-      .filter((r) => this.selected.has(r.group.name) && this.rowStageable(r) && this.effDir(r) === "apply")
-      .map((r) => {
-        if (this.sectionOf(r.group.name) === "main") return { name: r.group.name, action: "none" as const };
-        if (this.sectionOf(r.group.name) === "disabled") return { name: r.group.name, action: this.disabledRowAction(r) };
-        const a = this.availOf(r.group.name);
-        const stored = this.policy.get(r.group.name);
-        const action = stored !== undefined && isValidPolicy(a, stored) ? stored : defaultPolicy(a);
-        return { name: r.group.name, action };
-      });
+    const items = stagedPayload(this.stagedRows()).apply;
     // Cold bootstrap can stage BRAT itself (a catalog install) alongside BRAT-managed plugins
     // (installed via installViaBrat, which needs BRAT already on disk) — catalog installs must
     // finish first in the same run. Reorders ONLY the install-carrying items; every other item
@@ -2823,26 +2906,48 @@ export class SyncCenterView extends ItemView {
     return items;
   }
 
+  // Footer breakdown (spec §5): counts derive straight from the rows' own Fate/FateInput, not
+  // from the (possibly carrier-synthesized) apply/capture item arrays — a synthesized carrier
+  // ApplyItem has no row of its own and must not inflate `applyN`. Mirrors stagedPayload's own
+  // selected/conflict-resolution gate so the footer total can never disagree with what a press
+  // of Apply/Capture would actually run.
+  private footerSelection(): { applyN: number; installs: number; turnsOn: number; settings: number; captureN: number } {
+    let applyN = 0;
+    let captureN = 0;
+    let installs = 0;
+    let turnsOn = 0;
+    let settings = 0;
+    for (const r of this.rows()) {
+      const name = r.group.name;
+      if (!this.selected.has(name)) continue;
+      const { fate, input } = this.fateWithInput(r);
+      const isConflict = fate.glyph === "⚠";
+      const choice = this.conflictChoice.get(name) ?? null;
+      if (isConflict && choice === null) continue;
+      const dir = isConflict ? choice : fate.glyph === "↓" ? "apply" : fate.glyph === "↑" ? "capture" : null;
+      if (dir === null) continue;
+      if (dir === "capture") {
+        captureN++;
+        continue;
+      }
+      applyN++;
+      if (!input.installed) installs++;
+      if (fate.turnsOn) turnsOn++;
+      if (input.hasSettingsPayload) settings++;
+    }
+    return { applyN, installs, turnsOn, settings, captureN };
+  }
+
   private renderActionBar(macro: HTMLElement): void {
     const bar = macro.createDiv({ cls: "config-sync-actionbar" });
-    const counted = (r: StatusRow): boolean => this.selected.has(r.group.name) && this.rowStageable(r);
-    const mainStaged = this.mainRows().filter(counted).length;
-    const outdatedStaged = this.rows().filter((r) => this.sectionOf(r.group.name) === "outdated" && counted(r)).length;
-    // disabledStaged feeds the TOTAL (every staged disabled row, action:"none" included — fix
-    // round 2, footerSummary's own contract: the lead number matches the section head/Apply
-    // button). disabledEnableCount is the "N to enable" qualifier ONLY — a real resolved enable
-    // (fix round 1 #1): a carrier-synced row (or a "Keep disabled" choice) must never appear here.
-    const disabledStaged = this.rows().filter((r) => this.sectionOf(r.group.name) === "disabled" && counted(r)).length;
-    const disabledEnableCount = this.rows().filter((r) => this.sectionOf(r.group.name) === "disabled" && counted(r) && isEnableAction(this.disabledRowAction(r))).length;
-    const installStaged = this.rows().filter((r) => this.sectionOf(r.group.name) === "not-installed" && counted(r)).length;
-    bar.createSpan({ cls: "config-sync-staged-count", text: footerSummary(mainStaged, outdatedStaged, disabledStaged, installStaged, disabledEnableCount) });
+    bar.createSpan({ cls: "config-sync-staged-count", text: unifiedFooterSummary(this.footerSelection()) });
     bar.createDiv({ cls: "config-sync-rule-spacer" });
     const capItems = this.capturePayload();
     const applyItems = this.applyPayload();
 
     const run = <T>(
       btn: ButtonComponent,
-      other: ButtonComponent,
+      other: ButtonComponent | null,
       verb: "Capturing" | "Applying",
       payload: T[],
       exec: (payload: T[], onProgress: ProgressFn) => Promise<GroupResult[] | null>
@@ -2850,7 +2955,7 @@ export class SyncCenterView extends ItemView {
       this.running = true;
       this.activeRun = { verb, done: 0, total: payload.length };
       btn.setDisabled(true);
-      other.setDisabled(true);
+      other?.setDisabled(true);
       const wrap = btn.buttonEl.parentElement; // the .config-sync-btnwrap span
       const barEl = wrap?.querySelector<HTMLElement>(".config-sync-progress") ?? null;
       const fill = barEl?.querySelector<HTMLElement>("div") ?? null;
@@ -2883,6 +2988,11 @@ export class SyncCenterView extends ItemView {
             if (fill !== null) fill.style.width = `${total === 0 ? 0 : Math.round((done / total) * 100)}%`;
           });
           this.setLastRun(verb === "Capturing" ? "capture" : "apply", null, results);
+          // Conflict resolutions are a per-run judgment call (spec §5/§4) — a successful run
+          // clears the whole map rather than pruning row-by-row, so a resolved-but-still-differing
+          // straggler (a partial failure elsewhere in the same run) re-asks rather than silently
+          // re-running last time's choice against a divergence that may have moved on.
+          this.conflictChoice.clear();
         } finally {
           if (slowTimer !== null) window.clearTimeout(slowTimer);
           statusEl.remove();
@@ -2903,30 +3013,37 @@ export class SyncCenterView extends ItemView {
       return { wrap, btn };
     };
 
-    const capW = mkWrapped();
-    if (this.activeRun?.verb === "Capturing") {
-      capW.btn.setButtonText(runProgressLabel("Capturing", this.activeRun.done, this.activeRun.total));
-      capW.btn.buttonEl.addClass("is-busy");
-    } else {
-      renderActionIcon(capW.btn.buttonEl, "capture");
-      capW.btn.buttonEl.appendText(` Capture ${capItems.length} item${capItems.length === 1 ? "" : "s"}`);
+    // Both buttons show only when both directions are staged (spec §5) — otherwise a lone
+    // staged side gets its own button, and an empty selection shows neither (the footer's
+    // "Nothing selected" already says so).
+    const capW = capItems.length > 0 || this.activeRun?.verb === "Capturing" ? mkWrapped() : null;
+    if (capW !== null) {
+      if (this.activeRun?.verb === "Capturing") {
+        capW.btn.setButtonText(runProgressLabel("Capturing", this.activeRun.done, this.activeRun.total));
+        capW.btn.buttonEl.addClass("is-busy");
+      } else {
+        renderActionIcon(capW.btn.buttonEl, "capture");
+        capW.btn.buttonEl.appendText(` Capture ${capItems.length} item${capItems.length === 1 ? "" : "s"}`);
+      }
+      capW.btn.buttonEl.addClass("config-sync-btn-capture");
+      capW.btn.setDisabled(this.running || capItems.length === 0);
     }
-    capW.btn.buttonEl.addClass("config-sync-btn-capture");
-    capW.btn.setDisabled(this.running || capItems.length === 0);
 
-    const applyW = mkWrapped();
-    applyW.btn.setCta();
-    if (this.activeRun?.verb === "Applying") {
-      applyW.btn.setButtonText(runProgressLabel("Applying", this.activeRun.done, this.activeRun.total));
-      applyW.btn.buttonEl.addClass("is-busy");
-    } else {
-      renderActionIcon(applyW.btn.buttonEl, "apply");
-      applyW.btn.buttonEl.appendText(` Apply ${applyItems.length} item${applyItems.length === 1 ? "" : "s"}`);
+    const applyW = applyItems.length > 0 || this.activeRun?.verb === "Applying" ? mkWrapped() : null;
+    if (applyW !== null) {
+      applyW.btn.setCta();
+      if (this.activeRun?.verb === "Applying") {
+        applyW.btn.setButtonText(runProgressLabel("Applying", this.activeRun.done, this.activeRun.total));
+        applyW.btn.buttonEl.addClass("is-busy");
+      } else {
+        renderActionIcon(applyW.btn.buttonEl, "apply");
+        applyW.btn.buttonEl.appendText(` Apply ${applyItems.length} item${applyItems.length === 1 ? "" : "s"}`);
+      }
+      applyW.btn.setDisabled(this.running || applyItems.length === 0);
     }
-    applyW.btn.setDisabled(this.running || applyItems.length === 0);
 
-    capW.btn.onClick(() => run(capW.btn, applyW.btn, "Capturing", this.capturePayload(), (n, p) => this.host.captureItems(n, p)));
-    applyW.btn.onClick(() => run(applyW.btn, capW.btn, "Applying", this.applyPayload(), (n, p) => this.host.applyItems(n, p)));
+    capW?.btn.onClick(() => run(capW.btn, applyW?.btn ?? null, "Capturing", this.capturePayload(), (n, p) => this.host.captureItems(n, p)));
+    applyW?.btn.onClick(() => run(applyW.btn, capW?.btn ?? null, "Applying", this.applyPayload(), (n, p) => this.host.applyItems(n, p)));
   }
 
   private renderRemoteMode(main: HTMLElement, remote: Remote): void {

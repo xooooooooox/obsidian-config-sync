@@ -1,8 +1,9 @@
 import { GroupState, GroupStatus } from "../core/status";
 import { FileChanges, RuleScope } from "../core/types";
 import { Availability, VersionDrift } from "../core/availability";
-import { StateAction } from "../core/ConfigSyncCore";
+import { ApplyItem, CaptureItem, StateAction } from "../core/ConfigSyncCore";
 import { ItemCategory } from "../core/catalog";
+import { Fate } from "./fateModel";
 
 // Direction a checkable row acts in: capture pushes this device → store; apply pulls store → device.
 export type Direction = "capture" | "apply";
@@ -510,4 +511,92 @@ export function fileEntryFor(
   const glyph = effectiveKind === "added" ? "+" : "·";
   const affordance = effectiveKind === "added" ? "view" : "diff";
   return { glyph, label: change.rel, affordance: encrypted ? "none" : affordance, note: encrypted ? ENCRYPTED_NOTE : null };
+}
+
+// ── Unified staging (spec §5, task 6) ───────────────────────────────────────────────────────────
+// Replaces the old policy/disabled ladders (defaultPolicy, disabledRowAction) for the unified
+// grammar: the run payload is derived straight from each row's checkbox + Fate, with the
+// two on/off carriers' member state collected separately from their own file-level entry.
+
+export type ConflictChoice = "apply" | "capture";
+
+export interface StageableRow {
+  id: string;
+  itemName: string;
+  fate: Fate;
+  selected: boolean;
+  carrier: EnablementCarrier | null;
+  elementId: string | null;
+  availability: Availability | null;
+  conflictChoice: ConflictChoice | null;
+  conflict: boolean;
+}
+
+// Row action matrix (replaces defaultPolicy for the unified grammar): a not-installed row
+// ignores hasUpdate entirely (there's nothing installed to be behind); an installed row behind
+// the store's captured version offers update; everything else is a plain enable/none. `turnsOn`
+// (Fate's own field) is the single switch deciding every "…-enable" suffix.
+function stagedAction(a: Availability | null, turnsOn: boolean): StateAction {
+  if (a !== null && a.kind === "not-installed") return turnsOn ? "install-enable" : "install";
+  if (a !== null && a.anchor === "plugin" && a.drift === "behind") return turnsOn ? "update-enable" : "update";
+  return turnsOn ? "enable" : "none";
+}
+
+// A row's run direction: a conflict resolves through the session choice (null = still
+// unresolved — the caller excludes it before this ever runs); every other row's fate glyph
+// already IS its direction (↓ apply, ↑ capture) — "—" (in sync / nothing yet) carries no
+// direction and never stages.
+function rowDirection(row: StageableRow): "apply" | "capture" | null {
+  if (row.conflict) return row.conflictChoice;
+  if (row.fate.glyph === "↓") return "apply";
+  if (row.fate.glyph === "↑") return "capture";
+  return null;
+}
+
+// stagedPayload(rows): pure derivation from the current checkbox/conflict-choice session state
+// to the two run payloads (spec §5). Unselected rows and unresolved conflicts are excluded —
+// never stageable. A plugin row with a synced carrier contributes its elementId to that
+// carrier's stagedMembers on the SAME side it runs on: apply only when its fate would actually
+// turn it on here (an id left out of stagedMembers keeps its current value, so a settings-only
+// apply can't accidentally move a member it never meant to touch); capture always (a capture
+// pushes local state as-is, on or off — there's no "turnsOn" concept on that side, the
+// partial-selection symmetry spec §5 calls for). The carrier's own item — reused from its own
+// row when that row is itself staged (the carrier file differs on its own), else synthesized —
+// always carries `stagedMembers` once it exists, even `[]`, so a run that stages only settings
+// (no member) can never fall back to the whole-list write.
+export function stagedPayload(rows: StageableRow[]): { apply: ApplyItem[]; capture: CaptureItem[] } {
+  const apply: ApplyItem[] = [];
+  const capture: CaptureItem[] = [];
+  const applyMembers: Record<EnablementCarrier, string[]> = { "core-plugins": [], "community-plugins": [] };
+  const captureMembers: Record<EnablementCarrier, string[]> = { "core-plugins": [], "community-plugins": [] };
+
+  for (const row of rows) {
+    if (!row.selected) continue;
+    if (row.conflict && row.conflictChoice === null) continue;
+    const dir = rowDirection(row);
+    if (dir === null) continue;
+
+    if (row.carrier !== null && row.elementId !== null) {
+      const contributes = dir === "apply" ? row.fate.turnsOn : true;
+      if (contributes) (dir === "apply" ? applyMembers : captureMembers)[row.carrier].push(row.elementId);
+    }
+
+    if (dir === "apply") apply.push({ name: row.itemName, action: stagedAction(row.availability, row.fate.turnsOn) });
+    else capture.push({ name: row.itemName, action: "none" });
+  }
+
+  for (const carrier of ["core-plugins", "community-plugins"] as const) {
+    const members = applyMembers[carrier];
+    const existing = apply.find((i) => i.name === carrier);
+    if (existing !== undefined) existing.stagedMembers = members;
+    else if (members.length > 0) apply.push({ name: carrier, action: "none", stagedMembers: members });
+  }
+  for (const carrier of ["core-plugins", "community-plugins"] as const) {
+    const members = captureMembers[carrier];
+    const existing = capture.find((i) => i.name === carrier);
+    if (existing !== undefined) existing.stagedMembers = members;
+    else if (members.length > 0) capture.push({ name: carrier, action: "none", stagedMembers: members });
+  }
+
+  return { apply, capture };
 }
