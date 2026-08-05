@@ -2,7 +2,7 @@ import { App, ButtonComponent, ExtraButtonComponent, ItemView, Menu, Modal, Plat
 import { ApplyItem, CaptureItem, orderInstallsCatalogFirst, ProgressFn, StateAction } from "../core/ConfigSyncCore";
 import { bucketCounts, GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry, RemoteDiffFile, remoteDirectionCounts } from "../core/status";
 import { CATEGORY_LABELS, findGroupByName, ItemCategory, SELF_GROUP_NAME, categoryForGroup } from "../core/catalog";
-import { FileChanges, GroupResult, hasChanges, MemberRule, MEMBER_RULES, Remote, RuleScope, SyncGroup } from "../core/types";
+import { DeviceClass, FileChanges, GroupResult, hasChanges, MemberRule, MEMBER_RULES, Remote, RuleScope, SyncGroup } from "../core/types";
 import { Availability } from "../core/availability";
 import { REUSE_MAX_AGE_MS } from "../external/readerCache";
 import { isWholeFileEncrypted } from "../core/modes";
@@ -243,6 +243,11 @@ export interface SyncCenterHost {
   // excluded there, same as the existing control).
   itemFileScope(itemId: string): Exclude<RuleScope, "local">;
   setItemFileScope(itemId: string, scope: Exclude<RuleScope, "local">): Promise<void>;
+  // The Settings-sync menu for a custom (folder) group: the same field the Advanced tab's
+  // "Devices" dropdown writes (SyncGroup.devices, settings.customGroups) — folders have no
+  // ItemConfig, so this is a structurally different field than itemFileScope above, same value
+  // set, same persistence path.
+  setCustomGroupDevices(name: string, devices: DeviceClass): Promise<void>;
   // The More bridge (task 7 implements the scroll/expand target): deep-links into the Settings
   // tab for this item's card.
   openSettingsAt(itemId: string): void;
@@ -1991,16 +1996,16 @@ export class SyncCenterView extends ItemView {
       this.renderUnifiedFiles(detail, r, r.status.changes, dir, input.encrypted);
     }
 
-    if (fate.stageable) {
-      if (input.carrierSynced) this.renderRunsOnRow(detail, name, input.memberRule);
-      else if (!input.installed) this.renderAfterInstallRow(detail, r);
-    }
+    // Runs on is one of the two "always available" rule menus (spec §1/§4 — no stageable
+    // qualifier, unlike After install's explicit "only ¬carrierSynced ∧ ¬installed"): a
+    // carrier-synced plugin needs it reachable from its steady in-sync state too, so an
+    // exception can be set BEFORE the row ever diverges. After install keeps the stageable
+    // guard — harmless there since an installable row is already stageable via
+    // stageableRow's non-main-section carve-out.
+    if (input.carrierSynced) this.renderRunsOnRow(detail, name, input.memberRule);
+    else if (fate.stageable && !input.installed) this.renderAfterInstallRow(detail, r);
 
-    // Custom (folder) groups have no ItemConfig at all — their device scope lives directly on
-    // the SyncGroup literal in settings.customGroups, edited on the Advanced tab, not through
-    // the per-item settingsFile.fileRule this menu writes; the More bridge below still reaches
-    // their own folder-rules editor.
-    if (this.scopeOf(name) !== "custom") this.renderSettingsSyncRow(detail, name);
+    this.renderSettingsSyncRow(detail, r);
     this.renderMoreRow(detail, name);
 
     if (name === "hotkeys") {
@@ -2169,8 +2174,31 @@ export class SyncCenterView extends ItemView {
   }
 
   // Settings sync (spec §4): item-level device scope — the same write target as the Settings
-  // tab's file-row scope control (ItemConfig.settingsFile.fileRule.scope).
-  private renderSettingsSyncRow(detail: HTMLElement, name: string): void {
+  // tab's file-row scope control (ItemConfig.settingsFile.fileRule.scope). Custom (folder)
+  // groups have no ItemConfig at all — their device scope lives directly on the SyncGroup
+  // literal's `devices` field instead (same 3-value set, same Advanced-tab "Devices" dropdown
+  // and settings.customGroups persistence path — two entrances to one stored value, same
+  // pattern as every other rule in this design).
+  private renderSettingsSyncRow(detail: HTMLElement, r: StatusRow): void {
+    const name = r.group.name;
+    if (this.scopeOf(name) === "custom") {
+      const scope = r.group.devices;
+      this.renderCardMenuRow(detail, "Settings sync", scopeMenuLabel(scope), "Choose which devices get this folder's settings", () => {
+        const menu = new Menu();
+        for (const opt of FILE_SCOPE_OPTIONS) {
+          menu.addItem((item) =>
+            item
+              .setTitle(scopeMenuLabel(opt))
+              .setChecked(opt === scope)
+              .onClick(() => {
+                void this.host.setCustomGroupDevices(name, opt).then(() => this.notifyExternalChange());
+              })
+          );
+        }
+        return menu;
+      });
+      return;
+    }
     const itemId = this.itemIdFor(name);
     const scope = this.host.itemFileScope(itemId);
     this.renderCardMenuRow(detail, "Settings sync", scopeMenuLabel(scope), "Choose which devices get this item's settings", () => {

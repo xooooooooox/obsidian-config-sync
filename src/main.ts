@@ -70,7 +70,7 @@ import { syncListDelta } from "./core/syncListDelta";
 import { selfPaneState } from "./core/selfPane";
 import { applyUpdates, Ledger, parseLedger, pruneLedger } from "./core/ledger";
 import { bucketCounts, checkRemote, diffRemote, GroupStatus, remoteDirectionCounts, RemoteCheck, remoteLockAhead, statusForGroups } from "./core/status";
-import { GroupResult, MemberRule, Remote, RibbonButtons, RuleScope, StoreLock, SyncGroup } from "./core/types";
+import { DeviceClass, GroupResult, MemberRule, Remote, RibbonButtons, RuleScope, StoreLock, SyncGroup } from "./core/types";
 import { EnablementCarrier, MemberDecision, memberDecisionsFromScopes, statusBarStatuses } from "./ui/panelModel";
 import { defaultSettingsFile, deriveMode } from "./ui/itemCard";
 import { ConflictModal } from "./ui/ConflictModal";
@@ -671,6 +671,7 @@ export default class ConfigSyncPlugin extends Plugin {
       setMemberRule: (carrier, elementId, rule) => this.setMemberRule(carrier, elementId, rule),
       itemFileScope: (itemId) => this.itemFileScope(itemId),
       setItemFileScope: (itemId, scope) => this.setItemFileScope(itemId, scope),
+      setCustomGroupDevices: (name, devices) => this.setCustomGroupDevices(name, devices),
       openSettingsAt: (itemId) => this.openSettingsAt(itemId),
       adoptConfiguration: async () => {
         try {
@@ -1274,6 +1275,23 @@ export default class ConfigSyncPlugin extends Plugin {
     const mode = deriveMode(nextSf);
     const finalSf: ItemSettingsFile = mode === "fields" ? { ...nextSf, mode, fileRule: undefined } : { ...nextSf, mode };
     this.settings.items = { ...this.settings.items, [itemId]: { ...cfg, settingsFile: finalSf } };
+    await this.saveSettings();
+  }
+
+  // Settings-sync menu for a custom (folder) group (unified grammar task-5 fix round 1): the
+  // SAME field and persistence path the Advanced tab's "Devices" dropdown writes
+  // (SettingTab.commitGroups → persistCustomGroups → settings.customGroups) — folders carry
+  // their device scope directly on the SyncGroup literal (`devices: DeviceClass`), not through
+  // an ItemConfig, so this is a separate write target from setItemFileScope above, not a variant
+  // of it. A no-op if the name isn't (or is no longer) a custom group.
+  async setCustomGroupDevices(name: string, devices: DeviceClass): Promise<void> {
+    const idx = this.settings.customGroups.findIndex((g) => g.name === name);
+    if (idx === -1) return;
+    const next = [...this.settings.customGroups];
+    const current = next[idx];
+    if (current === undefined) return;
+    next[idx] = { ...current, devices };
+    this.settings.customGroups = next;
     await this.saveSettings();
   }
 
