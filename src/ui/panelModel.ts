@@ -3,7 +3,7 @@ import { FileChanges, RuleScope } from "../core/types";
 import { Availability, VersionDrift } from "../core/availability";
 import { ApplyItem, CaptureItem, StateAction } from "../core/ConfigSyncCore";
 import { ItemCategory } from "../core/catalog";
-import { Fate } from "./fateModel";
+import { Fate, FateInput, rowFate } from "./fateModel";
 
 // Direction a checkable row acts in: capture pushes this device → store; apply pulls store → device.
 export type Direction = "capture" | "apply";
@@ -599,4 +599,24 @@ export function stagedPayload(rows: StageableRow[]): { apply: ApplyItem[]; captu
   }
 
   return { apply, capture };
+}
+
+// The single per-row fate derivation shared by every consumer that needs to know "what will
+// this row's run actually do" — staging (feeds stagedPayload via the caller's stagedRows()),
+// footer counts, and the resolved-conflict display all call this SAME function instead of each
+// re-deriving their own copy (review fix, task 6 round 2: a resolved conflict's displayed
+// "turns on" and its actual staged action must never be able to disagree, and the footer's
+// "turns on" count must never disagree with the payload's).
+//
+// Two independent adjustments, composable: (1) a resolved conflict (`conflictChoice` non-null on
+// a `⚠` fate) re-derives a REAL directed fate via `rowFate` itself — never the frozen
+// `turnsOn: false` the conflict branch always returns — so "Use theirs" on a plugin whose store
+// switch-list state would turn it on genuinely stages that. (2) `fallbackTurnsOn` folds in the
+// two carrier-unsynced fallback ladders' menu choice (After install / Enablement, spec §4) —
+// `Fate.turnsOn` is unconditionally `false` there by design (the sentence must stay free of
+// enablement verbs per spec §3), so the caller computes that choice separately and passes it
+// through here rather than `rowFate` ever seeing it.
+export function effectiveFate(fate: Fate, input: FateInput, conflictChoice: ConflictChoice | null, fallbackTurnsOn: boolean): Fate {
+  const resolved = fate.glyph === "⚠" && conflictChoice !== null ? rowFate({ ...input, conflict: false, direction: conflictChoice }) : fate;
+  return fallbackTurnsOn ? { ...resolved, turnsOn: true } : resolved;
 }

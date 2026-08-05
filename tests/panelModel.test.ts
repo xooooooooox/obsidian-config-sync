@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { capFileEntries, insyncLineText, statusBarStatuses, moreFilesText, visibleUnderFilter, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, footerSummary, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, versionLine, runProgressLabel, showColdStartBanner, memberDecisionsFromScopes, memberDecisionText, switchSummaryLines, switchBothWaysCaption, ruleGroups, memberScopeWrite, memberCurrentScope, enablementCarrierFor, carrierIsSynced, memberFate, fatePillText, fateLineText, DISABLED_CARRIER_SYNCED_NOTE, isEnableAction, disabledInSyncNote, disabledNoSettingsNote, TYPE_SECTION_TITLES, typeSectionForRow, sectionCountLabel, unifiedFooterSummary, fileEntryFor, stagedPayload, StageableRow } from "../src/ui/panelModel";
+import { capFileEntries, insyncLineText, statusBarStatuses, moreFilesText, visibleUnderFilter, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, footerSummary, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, versionLine, runProgressLabel, showColdStartBanner, memberDecisionsFromScopes, memberDecisionText, switchSummaryLines, switchBothWaysCaption, ruleGroups, memberScopeWrite, memberCurrentScope, enablementCarrierFor, carrierIsSynced, memberFate, fatePillText, fateLineText, DISABLED_CARRIER_SYNCED_NOTE, isEnableAction, disabledInSyncNote, disabledNoSettingsNote, TYPE_SECTION_TITLES, typeSectionForRow, sectionCountLabel, unifiedFooterSummary, fileEntryFor, stagedPayload, StageableRow, effectiveFate } from "../src/ui/panelModel";
 import { GroupState, GroupStatus } from "../src/core/status";
 import { Availability } from "../src/core/availability";
-import { Fate } from "../src/ui/fateModel";
+import { Fate, FateInput } from "../src/ui/fateModel";
 
 describe("visibleUnderFilter", () => {
   it("all shows every state", () => {
@@ -704,5 +704,110 @@ describe("stagedPayload — spec §5 unified staging (task 6)", () => {
   it("itemName (not id) is what lands in the payload", () => {
     const { apply } = stagedPayload([row({ id: "row-key", itemName: "plugin-real-name", fate: fate("↓") })]);
     expect(apply).toEqual([{ name: "plugin-real-name", action: "none" }]);
+  });
+
+  // Review fix #1 (task 6 round 2): a resolved conflict row must stage exactly what its real
+  // turnsOn says — stagedPayload itself already honors whatever `fate.turnsOn` it's given for a
+  // conflict row (it never re-derives it), so this pins that contract explicitly: a caller that
+  // feeds a conflict row a REAL (non-frozen) turnsOn value gets the full matrix + member
+  // contribution, exactly like a normal directed row would.
+  it("a resolved conflict row whose real fate turns it on stages the -enable action AND contributes its elementId (the exact missing case review fix #1 calls out)", () => {
+    const { apply } = stagedPayload([
+      row({
+        id: "plugin-x",
+        fate: { glyph: "⚠", sentence: "Changed on both sides", chips: [], stageable: false, turnsOn: true },
+        conflict: true,
+        conflictChoice: "apply",
+        carrier: "community-plugins",
+        elementId: "x",
+        availability: notInstalledAvail,
+      }),
+    ]);
+    expect(apply.find((i) => i.name === "plugin-x")).toEqual({ name: "plugin-x", action: "install-enable" });
+    expect(apply.find((i) => i.name === "community-plugins")).toEqual({ name: "community-plugins", action: "none", stagedMembers: ["x"] });
+  });
+
+  it("a resolved conflict row whose real fate does NOT turn it on stages the plain (non-enable) action and contributes nothing", () => {
+    const { apply } = stagedPayload([
+      row({
+        id: "plugin-x",
+        fate: { glyph: "⚠", sentence: "Changed on both sides", chips: [], stageable: false, turnsOn: false },
+        conflict: true,
+        conflictChoice: "apply",
+        carrier: "community-plugins",
+        elementId: "x",
+        availability: behindAvail,
+      }),
+    ]);
+    expect(apply.find((i) => i.name === "plugin-x")).toEqual({ name: "plugin-x", action: "update" });
+    expect(apply.find((i) => i.name === "community-plugins")).toBeUndefined();
+  });
+});
+
+describe("effectiveFate — single per-row derivation shared by staging/footer/display (task 6 round 2 fix)", () => {
+  const baseInput: FateInput = {
+    direction: "apply", conflict: false, nothingYet: false, installed: true,
+    hasUpdate: false, carrierSynced: true, storeListOn: null, locallyOn: false,
+    memberRule: "all", deviceClass: "desktop", desktopOnly: false,
+    hasSettingsPayload: true, special: null, folderFileCount: null, encrypted: false,
+  };
+  const plainFate: Fate = { glyph: "↓", sentence: "Applies settings", chips: [], stageable: true, turnsOn: false };
+  const conflictFate: Fate = { glyph: "⚠", sentence: "Changed on both sides", chips: [], stageable: false, turnsOn: false };
+
+  it("a normal (non-conflict) row with no fallback bridge passes through unchanged", () => {
+    expect(effectiveFate(plainFate, baseInput, null, false)).toEqual(plainFate);
+  });
+
+  it("an unresolved conflict (no choice) passes through unchanged — still the frozen ⚠ fate", () => {
+    expect(effectiveFate(conflictFate, baseInput, null, false)).toEqual(conflictFate);
+  });
+
+  it("a resolved conflict re-derives a REAL directed fate via rowFate — never the frozen turnsOn:false", () => {
+    // carrierSynced + storeListOn:true + locallyOn:false → a real apply would turn it on.
+    const input: FateInput = { ...baseInput, storeListOn: true, locallyOn: false };
+    const f = effectiveFate(conflictFate, input, "apply", false);
+    expect(f.glyph).toBe("↓");
+    expect(f.turnsOn).toBe(true);
+    expect(f.sentence).not.toBe("Changed on both sides");
+  });
+
+  it("a resolved conflict whose real fate would NOT turn it on stays turnsOn:false (no false promise either way)", () => {
+    const input: FateInput = { ...baseInput, storeListOn: false, locallyOn: false };
+    const f = effectiveFate(conflictFate, input, "apply", false);
+    expect(f.turnsOn).toBe(false);
+  });
+
+  it("fallbackTurnsOn forces turnsOn:true on a normal row without touching glyph/sentence", () => {
+    const f = effectiveFate(plainFate, baseInput, null, true);
+    expect(f.turnsOn).toBe(true);
+    expect(f.glyph).toBe(plainFate.glyph);
+    expect(f.sentence).toBe(plainFate.sentence);
+  });
+
+  it("fallbackTurnsOn composes on top of a resolved conflict's re-derived fate", () => {
+    const input: FateInput = { ...baseInput, storeListOn: false, locallyOn: false }; // real turnsOn would be false
+    const f = effectiveFate(conflictFate, input, "apply", true);
+    expect(f.turnsOn).toBe(true); // forced on despite the real derivation saying false
+    expect(f.glyph).toBe("↓");
+  });
+
+  // The exact end-to-end scenario review fix #1 calls out, wired through the real pipeline
+  // (effectiveFate's output feeding stagedPayload directly) rather than a hand-built turnsOn — a
+  // resolved conflict on a carrier-synced plugin whose store list wants it on stages
+  // install-enable/update-enable/enable per the matrix AND contributes its elementId, never the
+  // silent "none" the frozen conflict fate used to produce.
+  it("integration: a resolved conflict whose store list turns it on stages install-enable and contributes its elementId", () => {
+    const input: FateInput = { ...baseInput, installed: false, carrierSynced: true, storeListOn: true, locallyOn: false };
+    const resolved = effectiveFate(conflictFate, input, "apply", false);
+    const notInstalled: Availability = { kind: "not-installed", drift: null, localVersion: null, storeVersion: "1.0.0", anchor: "plugin", desktopOnly: false };
+    const { apply } = stagedPayload([
+      {
+        id: "plugin-x", itemName: "plugin-x", fate: resolved, selected: true,
+        carrier: "community-plugins", elementId: "x", availability: notInstalled,
+        conflictChoice: "apply", conflict: true,
+      },
+    ]);
+    expect(apply.find((i) => i.name === "plugin-x")).toEqual({ name: "plugin-x", action: "install-enable" });
+    expect(apply.find((i) => i.name === "community-plugins")).toEqual({ name: "community-plugins", action: "none", stagedMembers: ["x"] });
   });
 });

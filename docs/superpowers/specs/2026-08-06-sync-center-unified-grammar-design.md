@@ -109,6 +109,10 @@ Standardized rows, in order (omit when not applicable):
   this-device pins into one control (see §6 mapping).
 - `After install` (only when carrier NOT synced, row installs) — menu `Turn it on` /
   `Leave it off` (today's policy ladder, alive only in the fallback).
+- `Enablement` (only when carrier NOT synced ∧ plugin installed ∧ locally off) — same menu
+  `Turn it on` / `Leave it off`; restores the pre-C fallback enable path in the new grammar
+  (amendment 2026-08-06, from Task 6 review finding b). The fate sentence still carries no
+  enablement verbs when the carrier is unsynced — only the staged action changes.
 - `Settings sync` — item-level device-scope menu (`Everywhere` / `Computers only` /
   `Phones only` / `This computer only`), same write target as the Settings tab's file-row
   scope control.

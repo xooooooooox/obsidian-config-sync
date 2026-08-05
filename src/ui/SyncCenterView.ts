@@ -19,6 +19,7 @@ import {
   disabledNoSettingsNote,
   EnablementCarrier,
   enablementCarrierFor,
+  effectiveFate,
   fateLineText,
   fileEntryFor,
   insyncLineText,
@@ -137,6 +138,16 @@ const RUNS_ON_LABELS: Record<MemberRule, string> = {
 const AFTER_INSTALL_LABELS: Record<"install-enable" | "install", string> = {
   "install-enable": "Turn it on",
   install: "Leave it off",
+};
+
+// Enablement menu labels (review fix #3, task 6 round 2 — same copy as After install, different
+// StateAction domain): carrier NOT synced, row already installed but disabled. Stored under
+// "enable"/"none" rather than "install-enable"/"install" so a stored choice stays valid under
+// `isValidPolicy` for a disabled row's own ladder (`policyOptions`) and survives `reload()`'s
+// stale-policy pruning instead of being silently dropped on the next render.
+const ENABLEMENT_LABELS: Record<"enable" | "none", string> = {
+  enable: "Turn it on",
+  none: "Leave it off",
 };
 
 // Session-remembered UI state: which scopes have their ✓ / ○ trailing lines flattened open.
@@ -1995,17 +2006,18 @@ export class SyncCenterView extends ItemView {
     });
   }
 
-  // Presentation-only re-derivation for a resolved conflict (spec §4): once Resolve picks a
-  // side, the row reads exactly like a normal directed row — a real sentence/chips computed as
-  // if the conflict were simply that direction, plus the `your choice` chip — never the frozen
-  // "⚠ Changed on both sides". `stagedRows()` (the staging truth) keeps consuming the RAW
-  // conflict fate alongside `conflictChoice` separately; this is display-only and never fed
-  // back into the payload.
+  // Presentation-only wrapper around the shared `effectiveFate` derivation (panelModel.ts, task
+  // 6 round 2 fix): once Resolve picks a side, the row reads exactly like a normal directed row
+  // — a real sentence/chips computed as if the conflict were simply that direction (never the
+  // frozen "⚠ Changed on both sides"), plus the `your choice` chip. `fallbackTurnsOn` is
+  // deliberately NOT passed here (`false`) — the fate SENTENCE must stay free of enablement
+  // verbs for the carrier-unsynced fallback ladders (spec §3); `stagedRows()`/`footerSelection()`
+  // call the same `effectiveFate` WITH that bridge for the actual staging/counting truth, so the
+  // sentence and the run can only differ in that one spec-mandated place, never accidentally.
   private displayFate(fate: Fate, input: FateInput, name: string): Fate {
-    if (fate.glyph !== "⚠") return fate;
-    const choice = this.conflictChoice.get(name);
-    if (choice === undefined) return fate;
-    const resolved = rowFate({ ...input, conflict: false, direction: choice });
+    const choice = this.conflictChoice.get(name) ?? null;
+    const resolved = effectiveFate(fate, input, choice, false);
+    if (fate.glyph !== "⚠" || choice === null) return resolved;
     return { ...resolved, chips: [...resolved.chips, "your choice"], stageable: true };
   }
 
@@ -2036,9 +2048,18 @@ export class SyncCenterView extends ItemView {
     // carrier-synced plugin needs it reachable from its steady in-sync state too, so an
     // exception can be set BEFORE the row ever diverges. After install keeps the stageable
     // guard — harmless there since an installable row is already stageable via
-    // stageableRow's non-main-section carve-out.
+    // stageableRow's non-main-section carve-out. Enablement (review fix #3, task 6 round 2) is
+    // the third and last leaf of this same ladder: an installed-but-disabled row whose carrier
+    // ISN'T synced has no `Runs on` (nothing to route through) and no `After install` (already
+    // installed) — without it there is no enable path in the unified grammar at all, a real
+    // regression from pre-C's `disabledRowAction` default. Ungated by `fate.stageable`, matching
+    // `Runs on`'s own precedent (reachable from the row's steady state, not just mid-divergence).
     if (input.carrierSynced) this.renderRunsOnRow(detail, name, input.memberRule);
-    else if (fate.stageable && !input.installed) this.renderAfterInstallRow(detail, r);
+    else if (!input.installed) {
+      if (fate.stageable) this.renderAfterInstallRow(detail, r);
+    } else if (this.availOf(name).kind === "disabled") {
+      this.renderEnablementRow(detail, r);
+    }
 
     this.renderSettingsSyncRow(detail, r);
     this.renderMoreRow(detail, name);
@@ -2226,6 +2247,33 @@ export class SyncCenterView extends ItemView {
         menu.addItem((item) =>
           item
             .setTitle(AFTER_INSTALL_LABELS[action])
+            .setChecked(action === current)
+            .onClick(() => {
+              this.policy.set(name, action);
+              this.render(this.renderGen);
+            })
+        );
+      });
+      return menu;
+    });
+  }
+
+  // Enablement (review fix #3, task 6 round 2 — fallback ladder's third leaf): an installed but
+  // disabled plugin whose carrier ISN'T synced has no other enable path in the unified grammar
+  // (`Runs on` needs a synced carrier to route through; `After install` only fires for a
+  // not-yet-installed row). Same two options/copy as `After install`, written into the same
+  // `this.policy` slot but under the "enable"/"none" `StateAction` domain — the actual values a
+  // disabled row's own ladder (`policyOptions`) recognizes, so a stored choice survives
+  // `reload()`'s `isValidPolicy` pruning instead of being dropped on the very next render.
+  private renderEnablementRow(detail: HTMLElement, r: StatusRow): void {
+    const name = r.group.name;
+    const current: "enable" | "none" = this.policy.get(name) === "none" ? "none" : "enable";
+    this.renderCardMenuRow(detail, "Enablement", ENABLEMENT_LABELS[current], "Choose whether this plugin turns on", () => {
+      const menu = new Menu();
+      (["enable", "none"] as const).forEach((action) => {
+        menu.addItem((item) =>
+          item
+            .setTitle(ENABLEMENT_LABELS[action])
             .setChecked(action === current)
             .onClick(() => {
               this.policy.set(name, action);
@@ -2849,34 +2897,45 @@ export class SyncCenterView extends ItemView {
     return stored !== undefined && isValidPolicy(a, stored) ? stored : defaultPolicy(a);
   }
 
+  // The two carrier-unsynced fallback ladders' menu choice, folded into a single boolean
+  // (review fix #2/#3, task 6 round 2): `Fate.turnsOn` is unconditionally `false` whenever the
+  // carrier is unsynced (spec §3: "enablement verbs never appear" there), so neither ladder's
+  // choice can ever reach `effectiveFate` through the row's own fate — this is the ONE place
+  // that reads `this.policy` for that purpose, shared by `stagedRows()` (payload) and
+  // `footerSelection()` (counts) so they can't independently drift (the review's root-cause
+  // principle). Not installed → After install (`renderAfterInstallRow`, default on unless
+  // explicitly "install"); installed-but-disabled → Enablement (`renderEnablementRow`, default
+  // on unless explicitly "none"). Carrier-synced rows never reach either branch.
+  private fallbackTurnsOn(name: string, input: FateInput): boolean {
+    if (input.carrierSynced) return false;
+    if (!input.installed) return this.policy.get(name) !== "install";
+    return this.availOf(name).kind === "disabled" && this.policy.get(name) !== "none";
+  }
+
   // stagedPayload's input rows (spec §5, task 6): one entry per row currently in the list
   // (carriers included — they're excluded from rendering, not from this set, since their own
   // file can differ independently of any member — see stagedPayload's carrier-synthesis rule).
   // `CARRIER_GROUP_NAMES` guards `carrier`/`elementId`: `fateInputFor` reads carrierSynced/true
   // for a carrier's OWN row too (its group name resolves to itself under
   // `enablementCarrierFor`/`carrierElementFor`), which would otherwise feed its own name back in
-  // as a bogus "member" of itself.
+  // as a bogus "member" of itself. `fate` is the single shared `effectiveFate` derivation
+  // (panelModel.ts) — a resolved conflict's REAL turnsOn (never the frozen one) and the fallback
+  // ladders' choice both land here, exactly as `footerSelection()`/`displayFate()` see them.
   private stagedRows(): StageableRow[] {
     return this.rows().map((r) => {
       const { fate, input } = this.fateWithInput(r);
       const name = r.group.name;
       const isCarrierMember = input.carrierSynced && !CARRIER_GROUP_NAMES.has(name);
-      // The After-install fallback ladder (spec §4: carrier NOT synced, row installs) has no
-      // enablement-verb representation in the fate sentence at all (spec §3: "when the carrier
-      // is unsynced, enablement verbs never appear") — Fate.turnsOn is unconditionally false
-      // there. Its menu choice still has to reach the action matrix, so the PAYLOAD-facing
-      // turnsOn blends it in here; the row's rendered fate (renderItemRow/renderUnifiedCard)
-      // keeps using the untouched rowFate() output, so the displayed sentence is unaffected.
-      const afterInstallTurnsOn = !input.carrierSynced && !input.installed && this.policy.get(name) !== "install";
+      const choice = this.conflictChoice.get(name) ?? null;
       return {
         id: name,
         itemName: name,
-        fate: afterInstallTurnsOn ? { ...fate, turnsOn: true } : fate,
+        fate: effectiveFate(fate, input, choice, this.fallbackTurnsOn(name, input)),
         selected: this.selected.has(name),
         carrier: isCarrierMember ? enablementCarrierFor(name) : null,
         elementId: isCarrierMember ? this.carrierElementFor(name) : null,
         availability: this.availOf(name),
-        conflictChoice: this.conflictChoice.get(name) ?? null,
+        conflictChoice: choice,
         conflict: fate.glyph === "⚠",
       };
     });
@@ -2906,11 +2965,12 @@ export class SyncCenterView extends ItemView {
     return items;
   }
 
-  // Footer breakdown (spec §5): counts derive straight from the rows' own Fate/FateInput, not
-  // from the (possibly carrier-synthesized) apply/capture item arrays — a synthesized carrier
-  // ApplyItem has no row of its own and must not inflate `applyN`. Mirrors stagedPayload's own
-  // selected/conflict-resolution gate so the footer total can never disagree with what a press
-  // of Apply/Capture would actually run.
+  // Footer breakdown (spec §5): counts derive from the SAME `effectiveFate` per row that feeds
+  // `stagedRows()` (review fix #1/#2) — not an independent re-derivation — so the footer total
+  // can never disagree with what a press of Apply/Capture would actually run, for a resolved
+  // conflict's real turnsOn or a fallback-ladder "Turn it on" choice alike. Counts derive
+  // straight from the rows, not the (possibly carrier-synthesized) apply/capture item arrays: a
+  // synthesized carrier ApplyItem has no row of its own and must not inflate `applyN`.
   private footerSelection(): { applyN: number; installs: number; turnsOn: number; settings: number; captureN: number } {
     let applyN = 0;
     let captureN = 0;
@@ -2920,10 +2980,11 @@ export class SyncCenterView extends ItemView {
     for (const r of this.rows()) {
       const name = r.group.name;
       if (!this.selected.has(name)) continue;
-      const { fate, input } = this.fateWithInput(r);
-      const isConflict = fate.glyph === "⚠";
+      const { fate: rawFate, input } = this.fateWithInput(r);
+      const isConflict = rawFate.glyph === "⚠";
       const choice = this.conflictChoice.get(name) ?? null;
       if (isConflict && choice === null) continue;
+      const fate = effectiveFate(rawFate, input, choice, this.fallbackTurnsOn(name, input));
       const dir = isConflict ? choice : fate.glyph === "↓" ? "apply" : fate.glyph === "↑" ? "capture" : null;
       if (dir === null) continue;
       if (dir === "capture") {
