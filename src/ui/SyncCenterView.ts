@@ -534,11 +534,16 @@ export class SyncCenterView extends ItemView {
       const status = this.statuses.get(group.name);
       if (status !== undefined) out.push({ group, status });
     }
-    // The store manifest accretes in capture order; the view sorts deterministically —
-    // scope rank, then display name — so e.g. core items never interleave the Obsidian
-    // ones (batch 3 ④).
+    // The store manifest accretes in capture order; the view sorts deterministically — type
+    // section rank, then display name — so e.g. core items never interleave the Obsidian ones
+    // (batch 3 ④). Ranking by TYPE_SECTION_ORDER rather than raw SCOPE_ORDER merges beta into
+    // the same rank as community (task-4 review fix): the brief's "alphabetical within" a type
+    // section means ONE merged alphabetical list, not a community block followed by a beta
+    // block — scopeOf/typeSectionForRow already agree that beta belongs in Community.
     out.sort((a, b) => {
-      const rank = SCOPE_ORDER.indexOf(this.scopeOf(a.group.name)) - SCOPE_ORDER.indexOf(this.scopeOf(b.group.name));
+      const rank =
+        TYPE_SECTION_ORDER.indexOf(typeSectionForRow(this.scopeOf(a.group.name))) -
+        TYPE_SECTION_ORDER.indexOf(typeSectionForRow(this.scopeOf(b.group.name)));
       if (rank !== 0) return rank;
       return this.fullName(a.group.name, a.group.label).localeCompare(this.fullName(b.group.name, b.group.label));
     });
