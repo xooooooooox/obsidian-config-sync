@@ -656,6 +656,7 @@ export default class ConfigSyncPlugin extends Plugin {
       addSwitchExceptions: (name, ids) => this.addSwitchExceptions(name, ids),
       setMemberEnabledOn: (carrier, elementId, scope) => this.setMemberEnabledOn(carrier, elementId, scope),
       clearMemberLocal: (carrier, elementId) => this.clearMemberLocal(carrier, elementId),
+      setItemSyncEnabled: (itemId, enabled) => this.setItemSyncEnabled(itemId, enabled),
       adoptConfiguration: async () => {
         try {
           // config-sync's own registry item (registry.ts builds one for every installed plugin,
@@ -1208,6 +1209,14 @@ export default class ConfigSyncPlugin extends Plugin {
   // SettingsHost-facing wrapper (SettingTab's "Enabled on" chip): single item, persists itself.
   async setMemberLocal(itemId: string, on: boolean): Promise<void> {
     this.setLocalMember(itemId, on);
+    await this.saveSettings();
+  }
+
+  // Sync Center header chip (unified grammar task-4): same write as the Settings tab's per-card
+  // sync toggle (SettingTab.renderItemCard) — ItemConfig.enabled, keyed by item id.
+  async setItemSyncEnabled(itemId: string, enabled: boolean): Promise<void> {
+    const cfg = this.settings.items[itemId] ?? emptyItemConfig();
+    this.settings.items = { ...this.settings.items, [itemId]: { ...cfg, enabled } };
     await this.saveSettings();
   }
 

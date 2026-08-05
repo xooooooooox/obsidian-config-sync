@@ -42,15 +42,21 @@ import {
   SECTION_TITLES,
   SectionKind,
   sectionForItem,
+  sectionCountLabel,
   showColdStartBanner,
   stageableRow,
   switchSummaryLines,
   switchBothWaysCaption,
+  TypeSection,
+  TYPE_SECTION_ORDER,
+  TYPE_SECTION_TITLES,
+  typeSectionForRow,
   versionLine,
   visibleUnderFilter,
   Direction,
   effectiveDirection,
 } from "./panelModel";
+import { Fate, FateInput, rowFate } from "./fateModel";
 import { renderDiffPanel } from "./diffView";
 import { SWITCH_LIST_GROUPS, switchListSortedView } from "../core/switchList";
 import { jsonSortedView } from "../core/merge";
@@ -110,6 +116,9 @@ const ACTION_CELL_MAP: Partial<Record<RunKind, SyncAction>> = { capture: "captur
 // Member-decision guidance (spec 2026-07-28 §4) applies to the plugin switch lists only —
 // enabled-css-snippets has its own per-snippet scope + pin mechanism.
 const MEMBER_GUIDE_GROUPS = new Set(["community-plugins", "core-plugins"]);
+// The two on/off list carriers (task-4): "one object = one row" dissolves their own list row
+// into the Core/Community section header chip — they never appear as a row themselves.
+const CARRIER_GROUP_NAMES = new Set(["core-plugins", "community-plugins"]);
 
 // Session-remembered UI state: which scopes have their ✓ / ○ trailing lines flattened open.
 const sessionUi = {
@@ -202,6 +211,10 @@ export interface SyncCenterHost {
   // Contents for an inline change diff: base = current state of the target side, produced =
   // what the pending action (capture/apply) would write. null = no diff available.
   diffPair(name: string, rel: string, dir: Direction): Promise<{ base: string; produced: string } | null>;
+  // The section header chip's write target (task-4): toggles whether an item (here, the
+  // core-plugins/community-plugins carrier) is itself a synced item — same field the Settings
+  // tab's per-card sync toggle writes (ItemConfig.enabled).
+  setItemSyncEnabled(itemId: string, enabled: boolean): Promise<void>;
 }
 
 function relativeAge(ms: number): string {
@@ -274,6 +287,10 @@ export class SyncCenterView extends ItemView {
   private carrierDivergence: Map<EnablementCarrier, { captureRemoves: string[]; applyDisables: string[]; masked: string[] }> = new Map();
   private policy = sessionStaging.policy;
   private sectionOpen: Set<SectionKind> = new Set();
+  // Fold state for the four unified type sections (task-4) — separate from sectionOpen, which
+  // still belongs to the old outdated/disabled/not-installed/desktop-only renderers (kept, unused
+  // from renderMainRegion, until Task 8 deletes them).
+  private typeSectionOpen: Set<TypeSection> = new Set();
   private selected = sessionStaging.selected;
   private directionOverride = sessionStaging.directionOverride;
   private expandedItems: Set<string> = new Set();
@@ -557,6 +574,33 @@ export class SyncCenterView extends ItemView {
   // update-available case is the pane advisory instead.)
   private rowStageable(r: StatusRow): boolean {
     return stageableRow(this.presState(r), this.sectionOf(r.group.name));
+  }
+
+  // Task-4 consumes Task 1's Fate model for select-all only — a minimal FateInput whose
+  // `direction` is null exactly when the row is already unstageable by today's rules, so
+  // Fate.stageable agrees with rowStageable by construction. The row's own sentence/chips are
+  // Task 5's job; this exists solely so select-all is driven through rowFate(), per the skeleton
+  // interface (`Consumes: rowFate/Fate`).
+  private fateFor(r: StatusRow): Fate {
+    const stageableNow = this.rowStageable(r);
+    const input: FateInput = {
+      direction: stageableNow ? this.effDir(r) : null,
+      conflict: false,
+      nothingYet: this.presState(r) === "no-settings",
+      installed: true,
+      hasUpdate: false,
+      carrierSynced: false,
+      storeListOn: null,
+      locallyOn: false,
+      memberRule: "all",
+      deviceClass: Platform.isMobile ? "mobile" : "desktop",
+      desktopOnly: false,
+      hasSettingsPayload: false,
+      special: null,
+      folderFileCount: null,
+      encrypted: false,
+    };
+    return rowFate(input);
   }
 
   // All user-facing counts (header pills, sidebar badges, filter pills, switcher) must agree
@@ -1364,12 +1408,9 @@ export class SyncCenterView extends ItemView {
     }
     this.renderResultStrip(main);
     const scoped = this.scopedRows();
-    const mainRows = scoped.filter((r) => this.sectionOf(r.group.name) === "main");
-    const sections: Record<Exclude<SectionKind, "main">, StatusRow[]> = { outdated: [], disabled: [], "not-installed": [], "desktop-only": [] };
-    for (const r of scoped) {
-      const s = this.sectionOf(r.group.name);
-      if (s !== "main") sections[s].push(r);
-    }
+    // The two on/off list carriers dissolve into their section's header chip (task-4) — never a
+    // row of their own — so every row-driven count (pills, select-all) excludes them up front.
+    const pillPool = scoped.filter((r) => !CARRIER_GROUP_NAMES.has(r.group.name));
     const bar = main.createDiv({ cls: "config-sync-mainbar" });
     const pillRow = bar.createDiv({ cls: "config-sync-fpillrow" });
     let searchEl: HTMLInputElement | null = null;
@@ -1383,7 +1424,6 @@ export class SyncCenterView extends ItemView {
       searchEl.value = this.search;
     }
     const selectAll = bar.createEl("input", { type: "checkbox", cls: "config-sync-selectall", attr: { "aria-label": "Select all visible items" } });
-    const listHost = main.createDiv();
     const sectionsHost = main.createDiv();
 
     // Pills recompute from the live search term. While searching, they count the MATCHED
@@ -1391,12 +1431,12 @@ export class SyncCenterView extends ItemView {
     const renderPills = (): void => {
       pillRow.empty();
       const pillRows = this.searching()
-        ? mainRows.filter((r) => this.rowMatchesSearch(r))
-        : mainRows;
+        ? pillPool.filter((r) => this.rowMatchesSearch(r))
+        : pillPool;
       const counts = this.presentedCounts(pillRows);
       // Mobile shows the short glyph form (定稿 B) — the panel's icon language (↑ ↓ ✓ ○) —
       // so all five pills always fit one line; desktop keeps the full labels.
-      const allLabel = this.searching() ? `All ${pillRows.length} / ${mainRows.length}` : `All ${mainRows.length}`;
+      const allLabel = this.searching() ? `All ${pillRows.length} / ${pillPool.length}` : `All ${pillPool.length}`;
       const defs: { key: PanelFilter; label: string; short: string; action?: SyncAction; count?: number }[] = [
         { key: "all", label: allLabel, short: allLabel },
         { key: "capture", label: `To capture ${counts.up}`, short: "", action: "capture", count: counts.up },
@@ -1415,50 +1455,173 @@ export class SyncCenterView extends ItemView {
           this.render(this.renderGen);
         });
       }
-      // Leftover store files: an amber pill in the All-items scope, only when there are any.
-      if (this.panelScope.kind === "device" && this.panelScope.cat === "all" && this.leftovers.length > 0) {
-        const pill = pillRow.createEl("button", { cls: `config-sync-fpill is-leftover${this.filter === "leftover" ? " is-active" : ""}` });
-        pill.createSpan({ cls: "config-sync-fpill-long", text: `Leftover ${this.leftovers.length}` });
-        pill.createSpan({ cls: "config-sync-fpill-short", text: `⌫ ${this.leftovers.length}` });
-        pill.addEventListener("click", () => {
-          this.filter = "leftover";
-          this.render(this.renderGen);
-        });
-      }
+      // The "leftover" store-orphans pill is dropped from this row (task-4): those files have no
+      // registry item, so they can't become a row in any type section. `PanelFilter.leftover` and
+      // its own full-area view (renderLeftoverSection) stay defined, unreachable from here, until
+      // Task 8's dissolution pass.
     };
-    const renderSections = (): void => {
+
+    // One flat row list per type section (task-4 skeleton) — replaces the old main list +
+    // separate outdated/disabled/not-installed/desktop-only sections. Row rendering itself is
+    // unchanged (Task 5 restyles it); this only decides which section a row lands in.
+    const renderSectionsBody = (): void => {
       sectionsHost.empty();
-      if (this.filter === "leftover") return; // the leftover view owns the whole main area
-      this.renderSection(sectionsHost, "outdated", sections.outdated);
-      this.renderSection(sectionsHost, "disabled", sections.disabled);
-      this.renderSection(sectionsHost, "not-installed", sections["not-installed"]);
-      this.renderInfoSection(sectionsHost, "desktop-only", sections["desktop-only"]);
+      for (const ts of TYPE_SECTION_ORDER) this.renderTypeSection(sectionsHost, ts, scoped);
     };
 
     renderPills();
-    this.renderListInto(listHost, mainRows);
-    this.wireGlobalSelectAll(selectAll, mainRows);
-    renderSections();
+    renderSectionsBody();
+    this.wireGlobalSelectAll(selectAll, pillPool);
 
     // The compact search co-renders everything except its own input element, so the soft
-    // keyboard stays open while pills, list, sections and select-all track the search.
+    // keyboard stays open while pills, sections and select-all track the search.
     if (searchEl !== null) {
       const input = searchEl;
       input.addEventListener("input", () => {
         const wasSearching = this.searching();
         this.search = input.value;
-        // Entering a search resets the direction filter: searching means "find this item",
-        // and a leftover ↑/↓/✓/○ filter would silently hide the matches.
+        // Entering a search resets the direction filter: searching means "find this item".
         if (!wasSearching && this.searching()) this.filter = "all";
         renderPills();
-        this.renderListInto(listHost, mainRows);
-        this.refreshGlobalSelectAll(selectAll, mainRows);
-        renderSections();
+        renderSectionsBody();
+        this.refreshGlobalSelectAll(selectAll, pillPool);
       });
       this.qac.attach(searchEl);
     }
 
     this.renderActionBar(main);
+  }
+
+  // One of the four fixed type sections (spec §2): a fold containing every row whose scope maps
+  // here via typeSectionForRow, alphabetical within (rows() already sorts by scope then name).
+  // The self item is pinned first in Community, outside the row/Fate machinery entirely.
+  private renderTypeSection(host: HTMLElement, ts: TypeSection, scoped: StatusRow[]): void {
+    const rows = scoped.filter((r) => !CARRIER_GROUP_NAMES.has(r.group.name) && typeSectionForRow(this.scopeOf(r.group.name)) === ts);
+    const matches = this.searching() ? rows.filter((r) => this.rowMatchesSearch(r)) : rows;
+    const visible = matches.filter((r) => visibleUnderFilter(this.presState(r), this.filter));
+    const showSelf = ts === "community" && this.selfInfo !== null && this.filter === "all" && !this.searching();
+    if (visible.length === 0 && !showSelf) return; // sections with nothing to show hide entirely
+    const filtered = this.filter !== "all" || this.searching();
+    const open = this.searching() || this.filter !== "all" || this.typeSectionOpen.has(ts);
+    const fold = host.createDiv({ cls: `config-sync-section is-typesection is-${ts}${open ? " is-open" : ""}` });
+    const head = fold.createDiv({ cls: "config-sync-section-head" });
+    head.createSpan({ cls: "config-sync-row-chevron", text: open ? "▾" : "▸" });
+    head.createSpan({ cls: "config-sync-section-title", text: TYPE_SECTION_TITLES[ts] });
+    head.createSpan({ cls: "config-sync-pill is-neutral", text: sectionCountLabel(rows.length, visible.length, filtered) });
+    if (ts === "core") this.renderCarrierChip(head, "core-plugins");
+    else if (ts === "community") this.renderCarrierChip(head, "community-plugins");
+    const checkable = visible.filter((r) => this.fateFor(r).stageable);
+    const staged = checkable.filter((r) => this.selected.has(r.group.name)).length;
+    if (staged > 0) head.createSpan({ cls: "config-sync-section-hint", text: `${staged} selected` });
+    const box = head.createEl("input", { type: "checkbox", attr: { "aria-label": `Select all in ${TYPE_SECTION_TITLES[ts]}` } });
+    box.indeterminate = staged > 0 && staged < checkable.length;
+    box.checked = checkable.length > 0 && staged === checkable.length;
+    box.disabled = checkable.length === 0;
+    box.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const turnOn = checkable.some((r) => !this.selected.has(r.group.name));
+      for (const r of checkable) {
+        const name = r.group.name;
+        if (turnOn) {
+          this.selected.add(name);
+          if (this.sectionOf(name) !== "main" && !this.policy.has(name)) this.policy.set(name, this.defaultPolicyFor(r));
+        } else {
+          this.selected.delete(name);
+          this.policy.delete(name);
+        }
+      }
+      this.render(this.renderGen);
+    });
+    head.addEventListener("click", () => {
+      if (this.typeSectionOpen.has(ts)) this.typeSectionOpen.delete(ts);
+      else this.typeSectionOpen.add(ts);
+      this.render(this.renderGen);
+    });
+    if (!open) return;
+    const card = fold.createDiv({ cls: "config-sync-card" });
+    if (showSelf) this.renderSelfRow(card);
+    if (this.filter === "all" && !this.searching()) {
+      // ✓ / ○ rows fold into their own trailing line, same shape as the old flat list (#10) —
+      // now aggregated per section instead of once for the whole pane.
+      const active = visible.filter((r) => this.presState(r) !== "in-sync" && this.presState(r) !== "no-settings");
+      const insync = visible.filter((r) => this.presState(r) === "in-sync");
+      const nosettings = visible.filter((r) => this.presState(r) === "no-settings");
+      for (const r of active) this.renderItemRow(card, r);
+      this.renderSectionTrailingLine(card, ts, insync, sessionUi.insyncOpen, (n, isOpen) => insyncLineText(n, isOpen));
+      this.renderSectionTrailingLine(card, ts, nosettings, sessionUi.nosettingsOpen, (n, isOpen) => nosettingsLineText(n, isOpen));
+    } else {
+      for (const r of visible) this.renderItemRow(card, r);
+    }
+  }
+
+  // Per-section variant of the old renderTrailingLine — keyed by section too, so expanding the
+  // ✓ fold in one section doesn't also expand it in another.
+  private renderSectionTrailingLine(card: HTMLElement, ts: TypeSection, rows: StatusRow[], openSet: Set<string>, text: (n: number, open: boolean) => string): void {
+    if (rows.length === 0) return;
+    const key = `${this.scopeKey()}::${ts}`;
+    const open = openSet.has(key);
+    const line = card.createDiv({ cls: "config-sync-unchanged", text: text(rows.length, open) });
+    line.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (open) openSet.delete(key);
+      else openSet.add(key);
+      this.render(this.renderGen);
+    });
+    if (open) for (const r of rows) this.renderItemRow(card, r);
+  }
+
+  // Config Sync's own row (spec §2): pinned first in Community, outside the checkbox/Fate
+  // machinery — it isn't staged through the normal apply/capture run (its own Adopt/Capture
+  // buttons in the expanded content do that). Expand reuses the existing self-pane content.
+  private renderSelfRow(card: HTMLElement): void {
+    if (this.selfInfo === null) return;
+    const expanded = this.expandedItems.has(SELF_GROUP_NAME);
+    const row = card.createDiv({ cls: "config-sync-hub-row is-self" });
+    const chev = row.createSpan({ cls: "config-sync-row-chevron", text: expanded ? "▾" : "▸" });
+    row.createSpan({ cls: "config-sync-rule-name", text: "Config Sync" });
+    row.createDiv({ cls: "config-sync-rule-spacer" });
+    row.createSpan({ cls: "config-sync-self-fate", text: "your Sync Center — manages itself" });
+    const detail = card.createDiv({ cls: "config-sync-report-files" });
+    detail.hidden = !expanded;
+    this.renderConfigSyncMode(detail);
+    row.addEventListener("click", () => {
+      if (this.expandedItems.has(SELF_GROUP_NAME)) this.expandedItems.delete(SELF_GROUP_NAME);
+      else this.expandedItems.add(SELF_GROUP_NAME);
+      detail.hidden = !detail.hidden;
+      chev.setText(detail.hidden ? "▸" : "▾");
+    });
+  }
+
+  // The Core/Community section header chip (spec §2): toggles whether the on/off list itself is a
+  // synced item — the only remaining home of that on/off card as a configurable item. Writes the
+  // same field the Settings tab's per-card sync toggle does (SyncCenterHost.setItemSyncEnabled).
+  private renderCarrierChip(head: HTMLElement, carrierId: EnablementCarrier): void {
+    const synced = this.groups.some((g) => g.name === carrierId);
+    const chip = head.createSpan({
+      cls: `config-sync-carrierchip${synced ? " is-synced" : ""}`,
+      text: synced ? "on/off synced ✓" : "on/off not synced",
+      attr: { role: "button", tabindex: "0" },
+    });
+    const openMenu = (x: number, y: number): void => {
+      const menu = new Menu();
+      menu.addItem((item) =>
+        item.setTitle(synced ? "Stop syncing on/off" : "Sync on/off").onClick(() => {
+          void this.host.setItemSyncEnabled(carrierId, !synced).then(() => this.notifyExternalChange());
+        })
+      );
+      menu.showAtPosition({ x, y });
+    };
+    chip.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openMenu(e.clientX, e.clientY);
+    });
+    chip.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      e.preventDefault();
+      e.stopPropagation();
+      const rect = chip.getBoundingClientRect();
+      openMenu(rect.left, rect.bottom);
+    });
   }
 
   private visibleRows(scoped: StatusRow[]): StatusRow[] {
@@ -1529,9 +1692,11 @@ export class SyncCenterView extends ItemView {
   }
 
   // Tri-state select-all over the currently visible checkable rows (scope + filter + search).
+  // Fate.stageable (task-4) drives the skip — carrier rows are excluded outright since they no
+  // longer render as list rows (task-4 dissolves them into the section header chip).
   private checkableRows(scoped: StatusRow[]): string[] {
     return this.visibleRows(scoped)
-      .filter((r) => this.rowStageable(r))
+      .filter((r) => !CARRIER_GROUP_NAMES.has(r.group.name) && this.fateFor(r).stageable)
       .map((r) => r.group.name);
   }
 
