@@ -9,6 +9,11 @@ export type SyncMode = "plain" | "fields" | "encrypted";
 export const RULE_SCOPES = ["all", "desktop", "mobile", "local"] as const;
 export type RuleScope = (typeof RULE_SCOPES)[number];
 
+// Per-device enablement rule for an on/off list member (Sync Center unified grammar). Distinct
+// from RuleScope: this governs whether a member turns on/off on this device, not sync scope.
+export const MEMBER_RULES = ["all", "desktop", "mobile", "always-here", "never-here"] as const;
+export type MemberRule = (typeof MEMBER_RULES)[number];
+
 // Per-item scopes for a string-array key (spec §3, D3): element value -> scope; an element with
 // no entry defaults to "all". Generalizes the switch-list / memberScopes mechanism to any
 // string-array key, not just community-plugins.json / core-plugins.json / enabledCssSnippets.
