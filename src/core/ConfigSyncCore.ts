@@ -7,7 +7,7 @@ import { classifyMerge, MergeConflict, MergePlan } from "./merge";
 import { coreSettingsIds, SELF_GROUP_NAME } from "./catalog";
 import { isPlainObject, keyMatchesAny } from "./sanitize";
 import { readPerItemArray, scopeOf } from "./perItem";
-import { addForceOn, applySwitchList, captureSwitchList, localRealPath, parseSwitchList, readLocalSwitchList, subtractForceOff, SWITCH_LIST_GROUPS, SwitchList, switchListsEqual, writeLocalSwitchList } from "./switchList";
+import { addForceOn, applySwitchList, captureSwitchList, localRealPath, memberUniverse, parseSwitchList, readLocalSwitchList, subtractForceOff, SWITCH_LIST_GROUPS, SwitchList, switchListsEqual, writeLocalSwitchList } from "./switchList";
 
 // `current` is the group NAME (the UI maps it to a display label); `phase` is a short live
 // phrase for the in-item step ("downloading via BRAT…", "writing settings…") — spec 2026-07-17.
@@ -177,6 +177,18 @@ export function groupForStoreRel(groups: SyncGroup[], rel: string): { name: stri
 
 function excFor(ctx: CoreContext, name: string): string[] {
   return SWITCH_LIST_GROUPS.has(name) ? (ctx.switchExceptions[name] ?? []) : [];
+}
+
+// Run-scoped exceptions for a partial-selection apply/capture (Sync Center unified grammar,
+// task 3): unstaged members join the configured exceptions for this run only —
+// excFor(ctx, name) ∪ (memberUniverse(store, local) − stagedMembers). `stagedMembers` undefined
+// means "no selection made" — today's whole-list behavior, byte-for-byte.
+function runExceptions(ctx: CoreContext, name: string, store: SwitchList | null, local: SwitchList | null, stagedMembers?: string[]): string[] {
+  const base = excFor(ctx, name);
+  if (stagedMembers === undefined) return base;
+  const staged = new Set(stagedMembers);
+  const unstaged = memberUniverse(store, local).filter((id) => !staged.has(id));
+  return [...new Set([...base, ...unstaged])];
 }
 
 function serializeSwitchList(v: ReturnType<typeof captureSwitchList>): string {
@@ -388,7 +400,12 @@ function requireGroup(manifest: SyncManifest, name: string): SyncGroup {
   return group;
 }
 
-export async function capture(ctx: CoreContext, names?: string[], onProgress?: ProgressFn): Promise<GroupResult[]> {
+export async function capture(
+  ctx: CoreContext,
+  names?: string[],
+  onProgress?: ProgressFn,
+  stagedMembersByName?: Record<string, string[] | undefined>
+): Promise<GroupResult[]> {
   const manifest = await loadManifest(ctx);
   // Capture is the lock's writer and its only healing path: a previous lock that is
   // missing, old-format, or corrupt must never block capture — it is rewritten below.
@@ -414,7 +431,7 @@ export async function capture(ctx: CoreContext, names?: string[], onProgress?: P
       continue;
     }
     onProgress?.(done, toProcess.length, group.name);
-    const result = await captureGroup(ctx, withContractLocals(group, contractLocals.get(group.name) ?? []));
+    const result = await captureGroup(ctx, withContractLocals(group, contractLocals.get(group.name) ?? []), stagedMembersByName?.[group.name]);
     done++;
     const pluginId = pluginIdForGroup(group);
     if (pluginId !== null) {
@@ -468,7 +485,7 @@ export async function capture(ctx: CoreContext, names?: string[], onProgress?: P
   return results;
 }
 
-async function captureGroup(ctx: CoreContext, group: SyncGroup): Promise<GroupResult> {
+async function captureGroup(ctx: CoreContext, group: SyncGroup, stagedMembers?: string[]): Promise<GroupResult> {
   const real = localRealPath(group.name, group.path, ctx.configDir);
   const store = `${storeDir(ctx)}/${groupStorePath(group.path)}`;
   const result = emptyResult(group.name, false);
@@ -488,7 +505,8 @@ async function captureGroup(ctx: CoreContext, group: SyncGroup): Promise<GroupRe
     if (localSwitchList !== null && (await ctx.io.exists(store))) {
       existingStoreList = parseSwitchList(await ctx.io.read(store));
     }
-    const captureInput = localSwitchList !== null ? serializeSwitchList(captureSwitchList(localSwitchList, existingStoreList, exc)) : plainLocalContent;
+    const runExc = localSwitchList !== null ? runExceptions(ctx, group.name, existingStoreList, localSwitchList, stagedMembers) : exc;
+    const captureInput = localSwitchList !== null ? serializeSwitchList(captureSwitchList(localSwitchList, existingStoreList, runExc)) : plainLocalContent;
     const sidecarPath = store + sidecarStoreSuffix(ctx.deviceClass);
     const existingSidecar = (await ctx.io.exists(sidecarPath)) ? await ctx.io.read(sidecarPath) : null;
     const effGroup = overlayGroup(ctx, group, [plainLocalContent]);
@@ -502,7 +520,7 @@ async function captureGroup(ctx: CoreContext, group: SyncGroup): Promise<GroupRe
     await writeClassified(ctx, store, t.content, basename(store), result, async (existing) => {
       if (localSwitchList !== null) {
         const existingSwitchList = parseSwitchList(existing);
-        if (existingSwitchList !== null) return switchListsEqual(localSwitchList, existingSwitchList, exc);
+        if (existingSwitchList !== null) return switchListsEqual(localSwitchList, existingSwitchList, runExc);
       }
       const unchanged = await contentUnchanged(effGroup, plainLocalContent, existing, ctx.passphrase, ctx.deviceClass, existingSidecar);
       if (!unchanged) return false;
@@ -568,6 +586,10 @@ export type StateAction = "none" | "enable" | "update" | "update-enable" | "inst
 export interface ApplyItem {
   name: string;
   action: StateAction;
+  // Partial-selection switch staging (Sync Center unified grammar, task 3): for a switch-list
+  // group, restricts which members this run touches — members not named here keep their local
+  // value. Absent = today's whole-list behavior.
+  stagedMembers?: string[];
 }
 
 // targetVersion pins the install to the version the store's settings were captured on; the
@@ -721,13 +743,22 @@ async function runStateAction(
 export interface CaptureItem {
   name: string;
   action: "enable" | "none";
+  // Partial-selection switch staging (Sync Center unified grammar, task 3): for a switch-list
+  // group, restricts which members this run touches — members not named here keep their store
+  // value. Absent = today's whole-list behavior.
+  stagedMembers?: string[];
 }
 
 export async function captureWithActions(ctx: CoreContext, items: CaptureItem[], onProgress?: ProgressFn): Promise<GroupResult[]> {
+  const stagedMembersByName: Record<string, string[] | undefined> = {};
+  for (const item of items) {
+    if (item.stagedMembers !== undefined) stagedMembersByName[item.name] = item.stagedMembers;
+  }
   const results = await capture(
     ctx,
     items.map((i) => i.name),
-    onProgress
+    onProgress,
+    stagedMembersByName
   );
   const manifest = await loadManifest(ctx);
   let done = 0;
@@ -792,7 +823,7 @@ export async function applyWithActions(
         // (install and/or enable) IS the payload; applyGroup would error on the missing data.
         const actionOnly = item.action !== "none" && !storeExists;
         if (!actionOnly) phase("writing settings…");
-        const r = actionOnly ? emptyResult(item.name, false) : await applyGroup(ctx, group);
+        const r = actionOnly ? emptyResult(item.name, false) : await applyGroup(ctx, group, item.stagedMembers);
         if (prelude.note !== null) r.stateNote = prelude.note;
         if (prelude.messages.length > 0) {
           r.messages.push(...prelude.messages);
@@ -833,7 +864,7 @@ export async function applyWithActions(
   return results;
 }
 
-async function applyGroup(ctx: CoreContext, group: SyncGroup): Promise<GroupResult> {
+async function applyGroup(ctx: CoreContext, group: SyncGroup, stagedMembers?: string[]): Promise<GroupResult> {
   const real = localRealPath(group.name, group.path, ctx.configDir);
   const store = `${storeDir(ctx)}/${groupStorePath(group.path)}`;
   const pluginId = pluginIdForGroup(group);
@@ -856,13 +887,13 @@ async function applyGroup(ctx: CoreContext, group: SyncGroup): Promise<GroupResu
     if (group.type === "file") {
       const storeContent = await ctx.io.read(store);
       const localContent = (await ctx.io.exists(real)) ? await ctx.io.read(real) : null;
-      const exc = excFor(ctx, group.name);
       const storeSwitchList = SWITCH_LIST_GROUPS.has(group.name) ? parseSwitchList(storeContent) : null;
       let content: string;
       let delta: { on: string[]; off: string[] } | null = null;
       if (storeSwitchList !== null) {
         const localSwitchList = localContent !== null ? readLocalSwitchList(group.name, localContent) : null;
-        const merged = applySwitchList(storeSwitchList, localSwitchList, exc);
+        const runExc = runExceptions(ctx, group.name, storeSwitchList, localSwitchList, stagedMembers);
+        const merged = applySwitchList(storeSwitchList, localSwitchList, runExc);
         const afterOff = subtractForceOff(merged, ctx.switchForceOff?.[group.name] ?? []);
         const finalList = addForceOn(afterOff, ctx.switchForceOn?.[group.name] ?? []);
         content = writeLocalSwitchList(group.name, finalList, localContent);

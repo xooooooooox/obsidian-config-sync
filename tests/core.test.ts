@@ -1874,6 +1874,89 @@ describe("switch-list exceptions", () => {
   });
 });
 
+describe("partial-selection switch staging (Sync Center unified grammar, task 3)", () => {
+  describe("applyWithActions with ApplyItem.stagedMembers", () => {
+    it("stages a subset — only staged members flip, delta message shrinks to them", async () => {
+      const { io, ctx } = setup();
+      io.seed({
+        ".obs/community-plugins.json": JSON.stringify(["keep"]),
+        "cs/store/configdir/community-plugins.json": JSON.stringify(["keep", "a", "b"]),
+      });
+      await seedGroups(ctx, COMMUNITY_MANIFEST);
+      const results = await applyWithActions(ctx, [{ name: "community-plugins", action: "none", stagedMembers: ["a"] }], async () => "9.9.9");
+      const r = results.find((x) => x.group === "community-plugins");
+      expect(r?.messages).toEqual(["turns on: a"]);
+      // "b" is unstaged — it keeps its local value (absent). Only "a" was staged, so it's the
+      // one non-excepted (store-synced) id; "keep" is unstaged, so it passes through from local.
+      expect(JSON.parse(await io.read(".obs/community-plugins.json"))).toEqual(["a", "keep"]);
+    });
+
+    it("stagedMembers: [] writes settings but touches no switches", async () => {
+      const { io, ctx } = setup();
+      io.seed({
+        ".obs/community-plugins.json": JSON.stringify(["keep"]),
+        "cs/store/configdir/community-plugins.json": JSON.stringify(["keep", "a"]),
+      });
+      await seedGroups(ctx, COMMUNITY_MANIFEST);
+      const results = await applyWithActions(ctx, [{ name: "community-plugins", action: "none", stagedMembers: [] }], async () => "9.9.9");
+      const r = results.find((x) => x.group === "community-plugins");
+      expect(r?.status).not.toBe("error");
+      expect(r?.messages).toEqual([]);
+      expect(JSON.parse(await io.read(".obs/community-plugins.json"))).toEqual(["keep"]);
+    });
+
+    it("stagedMembers undefined applies the whole list, byte-for-byte as today", async () => {
+      const { io, ctx } = setup();
+      io.seed({
+        ".obs/community-plugins.json": JSON.stringify(["keep", "local-only"]),
+        "cs/store/configdir/community-plugins.json": JSON.stringify(["keep", "store-only"]),
+      });
+      await seedGroups(ctx, COMMUNITY_MANIFEST);
+      const results = await applyWithActions(ctx, [{ name: "community-plugins", action: "none" }], async () => "9.9.9");
+      const r = results.find((x) => x.group === "community-plugins");
+      expect(r?.messages).toContain("turns on: store-only");
+      expect(r?.messages).toContain("turns off: local-only");
+      expect(JSON.parse(await io.read(".obs/community-plugins.json"))).toEqual(["keep", "store-only"]);
+    });
+  });
+
+  describe("captureWithActions with CaptureItem.stagedMembers", () => {
+    it("stages a subset — the store changes only for the staged id", async () => {
+      const { io, ctx } = setup();
+      io.seed({
+        "cs/store/configdir/community-plugins.json": JSON.stringify(["keep"]),
+        ".obs/community-plugins.json": JSON.stringify(["keep", "a", "b"]),
+      });
+      await seedGroups(ctx, COMMUNITY_MANIFEST);
+      await captureWithActions(ctx, [{ name: "community-plugins", action: "none", stagedMembers: ["a"] }]);
+      expect(JSON.parse(await io.read("cs/store/configdir/community-plugins.json"))).toEqual(["keep", "a"]);
+    });
+
+    it("stagedMembers: [] writes settings but leaves the store's member set untouched", async () => {
+      const { io, ctx } = setup();
+      io.seed({
+        "cs/store/configdir/community-plugins.json": JSON.stringify(["keep"]),
+        ".obs/community-plugins.json": JSON.stringify(["keep", "a"]),
+      });
+      await seedGroups(ctx, COMMUNITY_MANIFEST);
+      const results = await captureWithActions(ctx, [{ name: "community-plugins", action: "none", stagedMembers: [] }]);
+      expect(results.find((r) => r.group === "community-plugins")?.status).not.toBe("error");
+      expect(JSON.parse(await io.read("cs/store/configdir/community-plugins.json"))).toEqual(["keep"]);
+    });
+
+    it("stagedMembers undefined captures the whole list, byte-for-byte as today", async () => {
+      const { io, ctx } = setup();
+      io.seed({
+        "cs/store/configdir/community-plugins.json": JSON.stringify(["keep"]),
+        ".obs/community-plugins.json": JSON.stringify(["keep", "a", "b"]),
+      });
+      await seedGroups(ctx, COMMUNITY_MANIFEST);
+      await captureWithActions(ctx, [{ name: "community-plugins", action: "none" }]);
+      expect(JSON.parse(await io.read("cs/store/configdir/community-plugins.json"))).toEqual(["keep", "a", "b"]);
+    });
+  });
+});
+
 // task-2 retarget (spec 2026-08-04-per-device-scope-local-containment-design.md): the explicit
 // "this device decides for itself" choice now lives in settings.localMembers, never in
 // ItemConfig.enabledOn — main.ts has no existing test harness beyond
