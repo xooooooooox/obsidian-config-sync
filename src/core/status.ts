@@ -212,7 +212,9 @@ export async function checkRemote(localLock: StoreLock | null, reader: ExternalS
   } catch {
     return { state: "unknown", remoteCapturedAt: null };
   }
-  if (localLock === null) return { state: "unknown", remoteCapturedAt: remote.capturedAt };
+  // No local lock yet (bootstrap device) but the remote parsed fine: a pull would populate
+  // the store, so this is a known state, not "unknown" — reserve that for unreadable remotes.
+  if (localLock === null) return { state: "remote-newer", remoteCapturedAt: remote.capturedAt };
   const r = Date.parse(remote.capturedAt);
   const l = Date.parse(localLock.capturedAt);
   if (Number.isNaN(r) || Number.isNaN(l)) return { state: "unknown", remoteCapturedAt: remote.capturedAt };

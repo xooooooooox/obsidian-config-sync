@@ -172,14 +172,20 @@ export function buildItemDefs(env: RegistryEnv): ItemDef[] {
   return [...obsidian, ...core, ...communityAndBeta];
 }
 
-// Defs for parsing ANOTHER device's settings (the store's self copy, see leftover.ts's
-// storeSelfCopyGroups): the local registry plus a synthesized community def for every store item
-// id whose plugin isn't installed here. Without these, a store item for a not-yet-installed
-// plugin would silently drop out of the recompiled list — and its pulled-but-unadopted store
-// files would read as deletable leftover instead of pending data. Only community ids are
-// synthesizable from the id alone; core ids map to per-plugin settings files that corePluginFile
-// only knows for locally-known cores, and the three Obsidian cards exist in every registry.
-export function defsForForeignItems(defs: ItemDef[], itemIds: string[]): ItemDef[] {
+// Extends a defs list with a synthesized community/beta def for every id in itemIds whose plugin
+// has no installed def yet. Two callers need this: leftover.ts's storeSelfCopyGroups/
+// selfListGroups (parsing ANOTHER device's settings, where the id's plugin may never have run
+// here) and main.ts's recompile() (compiling THIS device's own settings.items, where a plugin the
+// user selected but hasn't installed yet — e.g. install-on-apply's pending target — has no
+// installed def either). Without these, such an item would silently drop out of the compiled
+// list: on the foreign-parse side its pulled-but-unadopted store files would read as deletable
+// leftover instead of pending data; on the local side install-on-apply would have no group to
+// pull the plugin's own settings into once it lands. Only community ids are synthesizable from
+// the id alone; core ids map to per-plugin settings files that corePluginFile only knows for
+// locally-known cores, and the three Obsidian cards exist in every registry. betaIds classifies a
+// synthesized def the same way buildItemDefs does for an installed one, so a BRAT-managed id
+// still reads as "beta" instead of falling back to "community".
+export function defsForForeignItems(defs: ItemDef[], itemIds: string[], betaIds: ReadonlySet<string>): ItemDef[] {
   const known = new Set(defs.map((d) => d.id));
   const extras: ItemDef[] = [];
   for (const id of itemIds) {
@@ -189,7 +195,7 @@ export function defsForForeignItems(defs: ItemDef[], itemIds: string[]): ItemDef
       id,
       label: pluginId,
       description: COMMUNITY_PLUGIN_DESCRIPTION,
-      section: "community",
+      section: betaIds.has(pluginId) ? "beta" : "community",
       enablement: { carrier: "community-plugins.json", element: pluginId },
       settingsFile: { defaultPath: `{configDir}/plugins/${pluginId}/data.json` },
     });
@@ -285,8 +291,8 @@ export interface GroupDisplayParts {
 // Parent card label for a card-derived group — an enabled companion (matched exactly the way
 // compileCompanions emits group names) or the enabled-css-snippets switch list (governed by the
 // Appearance card). null = standalone group. The Sync Center renders these as "Parent › Name";
-// the composed form is display-only and must never be persisted (backfillLabels stores
-// displayName's base label).
+// the composed form is display-only and must never be persisted (only the lock's own label field,
+// written at capture, carries a resolved display name for a not-installed group).
 export function parentCardLabel(groupName: string, defs: ItemDef[], settings: CompileSettings): string | null {
   // compileItems never emits this name under schema v2 (see the reserved-name note above) — the
   // branch covers v3-era store manifests, which can still carry the group at runtime (main.ts
@@ -315,14 +321,30 @@ function explicitScope(enabledOn: RuleScope | undefined): RuleScope {
   return scope === "local" ? "all" : scope;
 }
 
-export function enablementScopes(defs: ItemDef[], settings: CompileSettings, carrier: "core-plugins.json" | "community-plugins.json"): Record<string, RuleScope> {
-  const out: Record<string, RuleScope> = {};
+interface ElementScope {
+  element: string;
+  scope: RuleScope;
+  // Structural (task-8, spec 2026-08-05-section-groups-and-member-menu-design.md §R3-A): "local"
+  // solely because the card is off, with no explicit source (no stored enabledOn) — as opposed to
+  // a "local" a user actually pinned. Only meaningful when scope === "local"; false otherwise.
+  structural: boolean;
+}
+
+// Shared per-element walk behind enablementScopes/structuralLocalElements: same two passes (defs
+// whose carrier matches, then item configs with no local def), computed once so the two exported
+// projections can never drift apart.
+function elementScopes(defs: ItemDef[], settings: CompileSettings, carrier: "core-plugins.json" | "community-plugins.json"): ElementScope[] {
+  const out: ElementScope[] = [];
   const covered = new Set<string>();
   for (const def of defs) {
     if (def.enablement?.carrier !== carrier) continue;
     covered.add(def.id);
     const cfg = configFor(settings, def.id);
-    out[def.enablement.element] = cfg.enabled ? explicitScope(cfg.enabledOn) : "local";
+    out.push({
+      element: def.enablement.element,
+      scope: cfg.enabled ? explicitScope(cfg.enabledOn) : "local",
+      structural: !cfg.enabled && cfg.enabledOn === undefined,
+    });
   }
   // Item configs with no local def: the plugin isn't installed on this device, but its element
   // still lives in the store's switch list, so an adopted enabledOn / disabled-card decision must
@@ -331,8 +353,27 @@ export function enablementScopes(defs: ItemDef[], settings: CompileSettings, car
   const prefix = carrier === "core-plugins.json" ? "core:" : "community:";
   for (const [id, cfg] of Object.entries(settings.items)) {
     if (covered.has(id) || !id.startsWith(prefix)) continue;
-    out[id.slice(prefix.length)] = cfg.enabled ? explicitScope(cfg.enabledOn) : "local";
+    out.push({
+      element: id.slice(prefix.length),
+      scope: cfg.enabled ? explicitScope(cfg.enabledOn) : "local",
+      structural: !cfg.enabled && cfg.enabledOn === undefined,
+    });
   }
+  return out;
+}
+
+export function enablementScopes(defs: ItemDef[], settings: CompileSettings, carrier: "core-plugins.json" | "community-plugins.json"): Record<string, RuleScope> {
+  const out: Record<string, RuleScope> = {};
+  for (const e of elementScopes(defs, settings, carrier)) out[e.element] = e.scope;
+  return out;
+}
+
+// Elements whose enablementScopes "local" is structural (spec §R3-A) — a disabled card the user
+// never pinned or scoped, not a rule they wrote. The Sync Center's scoped-member disclosure reads
+// this to render those rows read-only instead of offering a scope control that silently no-ops.
+export function structuralLocalElements(defs: ItemDef[], settings: CompileSettings, carrier: "core-plugins.json" | "community-plugins.json"): Set<string> {
+  const out = new Set<string>();
+  for (const e of elementScopes(defs, settings, carrier)) if (e.structural) out.add(e.element);
   return out;
 }
 

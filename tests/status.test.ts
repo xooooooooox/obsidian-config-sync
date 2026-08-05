@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { CoreContext, capture, loadManifest, groupsForDevice, ExternalStoreReader, writeGroups } from "../src/core/ConfigSyncCore";
+import { CoreContext, capture, loadManifest, groupsForDevice, ExternalStoreReader, writeGroups, baseHasStaleLocalKeys, withContractLocals } from "../src/core/ConfigSyncCore";
 import { parseSyncManifest } from "../src/core/manifest";
 import { statusForGroups, checkRemote, diffRemote, bucketCounts, remoteLockAhead, remoteDirectionCounts, GroupStatus } from "../src/core/status";
 import { applyUpdates, emptyLedger, Ledger } from "../src/core/ledger";
 import { directionForState, stageableRow } from "../src/ui/panelModel";
+import { SyncGroup } from "../src/core/types";
 import { MemFS, FakePlugins, memGroupsIO } from "./memfs";
 
 const MANIFEST = JSON.stringify({
@@ -354,7 +355,9 @@ describe("checkRemote", () => {
     expect((await checkRemote(localLock, fakeReader(at("2026-07-09T00:00:00.000Z")))).state).toBe("remote-newer");
     expect((await checkRemote(localLock, fakeReader(at("2026-07-07T00:00:00.000Z")))).state).toBe("remote-older");
     expect((await checkRemote(localLock, fakeReader(at("2026-07-08T00:00:00.000Z")))).state).toBe("same");
-    expect((await checkRemote(null, fakeReader(at("2026-07-09T00:00:00.000Z")))).state).toBe("unknown");
+    // bootstrap device (no local lock yet) with a reachable, parseable remote → remote-newer,
+    // not "unknown": a pull would populate the store, so the state is known and truthful.
+    expect((await checkRemote(null, fakeReader(at("2026-07-09T00:00:00.000Z")))).state).toBe("remote-newer");
   });
   it("recognizes a new-format store (store/** + lock, no root config-sync.json)", async () => {
     const newFormat = {
@@ -442,5 +445,29 @@ describe("stale device-local key in the store base", () => {
   it("local-changed routes to a capturable row (the direction the fix depends on)", () => {
     expect(directionForState("local-changed")).toBe("capture");
     expect(stageableRow("local-changed", "main")).toBe(true);
+  });
+
+  const PER_ITEM_GROUP: SyncGroup = {
+    name: "plugin-demo",
+    path: "{configDir}/plugins/demo/data.json",
+    type: "file",
+    devices: "all",
+    mode: "fields",
+    fields: [{ pattern: "enabledCssSnippets", scope: "local", encrypted: false }],
+    perItem: { enabledCssSnippets: {} },
+  };
+
+  it("R1: a local rule overlapping a per-item key never flags the base stale", () => {
+    expect(baseHasStaleLocalKeys(PER_ITEM_GROUP, '{"enabledCssSnippets":["one.css"],"theme":"x"}')).toBe(false);
+  });
+
+  it("R1: a genuinely stale non-per-item local key still flags", () => {
+    const group: SyncGroup = { ...PER_ITEM_GROUP, fields: [{ pattern: "vikaToken", scope: "local", encrypted: false }], perItem: undefined };
+    expect(baseHasStaleLocalKeys(group, '{"vikaToken":"stale","theme":"x"}')).toBe(true);
+  });
+
+  it("R2: an encrypted-mode group is never demoted by contract locals", () => {
+    const g: SyncGroup = { name: "vim", path: "{configDir}/plugins/vim/data.json", type: "file", devices: "all", mode: "encrypted" };
+    expect(withContractLocals({ ...g, mode: "encrypted" }, ["vimMode"])).toEqual({ ...g, mode: "encrypted" });
   });
 });

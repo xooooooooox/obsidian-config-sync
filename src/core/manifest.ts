@@ -233,17 +233,22 @@ export function parseStoreLock(raw: string): StoreLock {
   if (!isPlainObject(parsed) || typeof parsed.capturedAt !== "string" || !isPlainObject(parsed.groups)) {
     throw new ManifestValidationError("store.lock.json must be {capturedAt: string, groups: object}");
   }
-  const groups: Record<string, { sourcePluginVersion?: string; sourceAppVersion?: string; desktopOnly?: boolean }> = {};
+  const groups: Record<string, { sourcePluginVersion?: string; sourceAppVersion?: string; desktopOnly?: boolean; label?: string }> = {};
   for (const [k, v] of Object.entries(parsed.groups)) {
     const plugin = isPlainObject(v) && typeof v.sourcePluginVersion === "string" ? v.sourcePluginVersion : undefined;
     const app = isPlainObject(v) && typeof v.sourceAppVersion === "string" ? v.sourceAppVersion : undefined;
     if (plugin === undefined && app === undefined) {
       throw new ManifestValidationError(`store.lock.json group "${k}" must have a string sourcePluginVersion or sourceAppVersion`);
     }
+    if (isPlainObject(v) && v.label !== undefined && typeof v.label !== "string") {
+      throw new ManifestValidationError(`store.lock.json group "${k}" has a "label" that isn't text`);
+    }
     groups[k] = {};
     if (plugin !== undefined) groups[k].sourcePluginVersion = plugin;
     if (app !== undefined) groups[k].sourceAppVersion = app;
     if (isPlainObject(v) && v.desktopOnly === true) groups[k].desktopOnly = true;
+    const label = isPlainObject(v) && typeof v.label === "string" ? v.label.trim() : "";
+    if (label !== "") groups[k].label = label;
   }
   return { capturedAt: parsed.capturedAt, groups };
 }

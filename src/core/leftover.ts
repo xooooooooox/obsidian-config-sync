@@ -10,9 +10,16 @@ export interface LeftoverFile {
 
 // The list-membership compile BOTH delta sides share (spec 2026-07-28 §2): items compiled WITH
 // synthesized defs for ids whose plugin isn't installed here, so an item this data.json carries
-// never drops out of membership just because its plugin is absent on this device.
-export function selfListGroups(defs: ItemDef[], items: Record<string, ItemConfig>, customGroups: CustomGroupConfig[]): SyncGroup[] {
-  return compileItems(defsForForeignItems(defs, Object.keys(items)), { items, customGroups });
+// never drops out of membership just because its plugin is absent on this device. betaIds comes
+// from the caller (main.ts's settings.bratPluginIndex) so a synthesized def classifies the same
+// way an installed one would.
+export function selfListGroups(
+  defs: ItemDef[],
+  items: Record<string, ItemConfig>,
+  customGroups: CustomGroupConfig[],
+  betaIds: ReadonlySet<string>
+): SyncGroup[] {
+  return compileItems(defsForForeignItems(defs, Object.keys(items), betaIds), { items, customGroups });
 }
 
 // The sync list carried inside the store's own config-sync copy
@@ -21,16 +28,17 @@ export function selfListGroups(defs: ItemDef[], items: Record<string, ItemConfig
 // `leftoverStoreRels` — pulled-but-unadopted data is pending, never deletable "leftover".
 // Schema v1 persisted the compiled `groups` list verbatim; schema v2 persists `items` +
 // `customGroups` instead, so the list must be recompiled (against the local defs, extended for
-// store items whose plugin isn't installed here — defsForForeignItems). Best-effort by contract:
-// malformed or uncompilable foreign content yields [] rather than breaking status/leftover views.
-export function storeSelfCopyGroups(json: string, defs: ItemDef[]): SyncGroup[] {
+// store items whose plugin isn't installed here — defsForForeignItems, via selfListGroups).
+// Best-effort by contract: malformed or uncompilable foreign content yields [] rather than
+// breaking status/leftover views.
+export function storeSelfCopyGroups(json: string, defs: ItemDef[], betaIds: ReadonlySet<string>): SyncGroup[] {
   try {
     const raw = JSON.parse(json) as { groups?: unknown; items?: unknown; customGroups?: unknown };
     if (Array.isArray(raw.groups)) return raw.groups as SyncGroup[];
     if (typeof raw.items !== "object" || raw.items === null) return [];
     const items = raw.items as Record<string, ItemConfig>;
     const customGroups = Array.isArray(raw.customGroups) ? (raw.customGroups as CustomGroupConfig[]) : [];
-    return selfListGroups(defs, items, customGroups);
+    return selfListGroups(defs, items, customGroups, betaIds);
   } catch {
     return [];
   }

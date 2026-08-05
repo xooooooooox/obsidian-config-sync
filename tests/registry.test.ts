@@ -5,6 +5,7 @@ import {
   CompileSettings,
   compileItems,
   CustomGroupConfig,
+  defsForForeignItems,
   emptyItemConfig,
   enablementScopes,
   groupOwners,
@@ -12,6 +13,7 @@ import {
   ItemConfig,
   parentCardLabel,
   RegistryEnv,
+  structuralLocalElements,
 } from "../src/core/registry";
 import { leftoverStoreRels } from "../src/core/leftover";
 import { SyncGroup } from "../src/core/types";
@@ -95,6 +97,27 @@ describe("buildItemDefs", () => {
     const commLabels = defs.filter((d) => d.section === "community").map((d) => d.label);
     expect(coreLabels).toEqual(["Backlinks", "Graph view"]);
     expect(commLabels).toEqual(["alpha", "Zebra"]);
+  });
+});
+
+describe("selected-but-uninstalled items compile locally", () => {
+  it("a selected community item with no installed plugin still compiles its group", () => {
+    const defs = defsForForeignItems(buildItemDefs(EMPTY_ENV), ["community:dataview"], new Set());
+    const groups = compileItems(defs, settings({ "community:dataview": on() }));
+    expect(groups.map((g) => g.name)).toContain("plugin-dataview");
+    expect(findGroup(groups, "plugin-dataview")?.path).toBe("{configDir}/plugins/dataview/data.json");
+  });
+
+  it("a synthesized def for a BRAT-indexed id is classified beta", () => {
+    const defs = defsForForeignItems(buildItemDefs(EMPTY_ENV), ["community:slides-rup"], new Set(["slides-rup"]));
+    expect(defs.find((d) => d.id === "community:slides-rup")?.section).toBe("beta");
+  });
+
+  it("an installed plugin's def is never duplicated", () => {
+    const env: RegistryEnv = { ...EMPTY_ENV, plugins: [{ id: "dataview", name: "Dataview" }] };
+    const installedDefs = buildItemDefs(env);
+    const defs = defsForForeignItems(installedDefs, ["community:dataview"], new Set());
+    expect(defs.filter((d) => d.id === "community:dataview")).toHaveLength(1);
   });
 });
 
@@ -310,6 +333,43 @@ describe("enablementScopes — per-element scope from enabledOn", () => {
     const scopes = enablementScopes(defs, s, "community-plugins.json");
     expect(scopes["a"]).toBe("all"); // explicit choice now ignored
     expect(scopes["b"]).toBe("local"); // disabled card stays local
+  });
+});
+
+// spec 2026-08-05-section-groups-and-member-menu-design.md §R3-A: a disabled card's "local" is
+// structural (no rule the user wrote); a stored enabledOn survives even though it's ignored for
+// the scope itself, so it must still exclude the element from the structural set.
+describe("structuralLocalElements — disabled-card 'local' vs an explicit enabledOn leftover", () => {
+  it("a disabled card with no stored enabledOn is structural", () => {
+    const env: RegistryEnv = { ...EMPTY_ENV, plugins: [{ id: "dataview", name: "Dataview" }] };
+    const defs = buildItemDefs(env);
+    const s = settings({ "community:dataview": emptyItemConfig() });
+    expect(structuralLocalElements(defs, s, "community-plugins.json")).toEqual(new Set(["dataview"]));
+  });
+
+  it("a disabled card that still carries a stored enabledOn is not structural, even though its scope is forced local", () => {
+    const env: RegistryEnv = { ...EMPTY_ENV, plugins: [{ id: "dataview", name: "Dataview" }] };
+    const defs = buildItemDefs(env);
+    const s = settings({ "community:dataview": { ...emptyItemConfig(), enabledOn: "desktop" } });
+    expect(enablementScopes(defs, s, "community-plugins.json")).toEqual({ dataview: "local" });
+    expect(structuralLocalElements(defs, s, "community-plugins.json")).toEqual(new Set());
+  });
+
+  it("an enabled card is never structural", () => {
+    const env: RegistryEnv = { ...EMPTY_ENV, plugins: [{ id: "dataview", name: "Dataview" }] };
+    const defs = buildItemDefs(env);
+    const s = settings({ "community:dataview": on() });
+    expect(structuralLocalElements(defs, s, "community-plugins.json")).toEqual(new Set());
+  });
+
+  it("covers not-installed item configs the same way as defs (fallback loop parity)", () => {
+    const env: RegistryEnv = { ...EMPTY_ENV, plugins: [{ id: "dataview", name: "Dataview" }] };
+    const defs = buildItemDefs(env);
+    const s = settings({
+      "community:dataview": on(),
+      "community:simpread": emptyItemConfig(), // not installed, card disabled → structural
+    });
+    expect(structuralLocalElements(defs, s, "community-plugins.json")).toEqual(new Set(["simpread"]));
   });
 });
 

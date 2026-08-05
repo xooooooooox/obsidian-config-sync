@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { CoreContext, capture, captureWithActions, loadManifest, groupsForDevice, apply, applyWithActions, planImport, applyImport, PendingPull, ExternalStoreReader, pushExternal, ExternalStoreWriter, pluginIdForGroup, readGroups, writeGroups, deviceExcludedPluginIds, isSelfStoreRel, remoteGroupsFrom } from "../src/core/ConfigSyncCore";
+import { CoreContext, capture, captureWithActions, loadManifest, groupsForDevice, apply, applyWithActions, planImport, applyImport, PendingPull, ExternalStoreReader, pushExternal, ExternalStoreWriter, pluginIdForGroup, orderInstallsCatalogFirst, readGroups, writeGroups, deviceExcludedPluginIds, isSelfStoreRel, remoteGroupsFrom, groupForStoreRel } from "../src/core/ConfigSyncCore";
 import { parseSyncManifest } from "../src/core/manifest";
-import { SyncGroup } from "../src/core/types";
+import { StoreLock, SyncGroup } from "../src/core/types";
 import { isFieldEnvelope, parseFileEnvelope } from "../src/core/crypto";
 import { statusForGroups, remoteLockAhead } from "../src/core/status";
 import { emptyLedger } from "../src/core/ledger";
@@ -87,6 +87,24 @@ describe("pluginIdForGroup", () => {
     expect(pluginIdForGroup({ name: "a", path: "{configDir}/plugins/cmdr/data.json", type: "file", devices: "all" })).toBe("cmdr");
     expect(pluginIdForGroup({ name: "b", path: "{configDir}/plugins/cmdr", type: "dir", devices: "all" })).toBe("cmdr");
     expect(pluginIdForGroup({ name: "c", path: "{configDir}/hotkeys.json", type: "file", devices: "all" })).toBe(null);
+  });
+});
+
+describe("orderInstallsCatalogFirst", () => {
+  it("moves BRAT-managed names last, preserving relative order within each class", () => {
+    const names = ["plugin-slides-rup", "plugin-obsidian42-brat", "plugin-dataview"];
+    const isBrat = (id: string): boolean => id === "slides-rup";
+    expect(orderInstallsCatalogFirst(names, isBrat)).toEqual(["plugin-obsidian42-brat", "plugin-dataview", "plugin-slides-rup"]);
+  });
+
+  it("is a no-op when nothing is BRAT-managed", () => {
+    const names = ["plugin-dataview", "plugin-obsidian42-brat"];
+    expect(orderInstallsCatalogFirst(names, () => false)).toEqual(names);
+  });
+
+  it("never treats non-plugin group names as BRAT-managed", () => {
+    const names = ["plugin-slides-rup", "hotkeys"];
+    expect(orderInstallsCatalogFirst(names, () => true)).toEqual(["hotkeys", "plugin-slides-rup"]);
   });
 });
 
@@ -468,6 +486,54 @@ describe("apply", () => {
   });
 });
 
+const APPEARANCE_MANIFEST = JSON.stringify({
+  version: 1,
+  groups: [
+    { name: "appearance", path: "{configDir}/appearance.json", type: "file", devices: "all" },
+    { name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all" },
+  ],
+});
+
+describe("appearance hot-apply post-pass (#7)", () => {
+  it("apply run writing an appearance-family file calls reloadAppearance once and clears needsAppReload on family results", async () => {
+    const { io, plugins, ctx } = setup();
+    await seedGroups(ctx, APPEARANCE_MANIFEST);
+    io.seed({ "cs/store/configdir/appearance.json": '{"cssTheme":"new"}', ".obs/appearance.json": '{"cssTheme":"old"}' });
+    const results = await apply(ctx, ["appearance"]);
+    expect(plugins.log.filter((l) => l === "reload-appearance")).toHaveLength(1);
+    expect(results[0]?.needsAppReload).toBe(false);
+  });
+
+  it("apply run touching no family group does not call reloadAppearance and leaves its reload flag unchanged", async () => {
+    const { io, plugins, ctx } = setup();
+    await seedGroups(ctx, APPEARANCE_MANIFEST);
+    io.seed({ "cs/store/configdir/hotkeys.json": '{"a":2}', ".obs/hotkeys.json": '{"a":1}' });
+    const results = await apply(ctx, ["hotkeys"]);
+    expect(plugins.log).not.toContain("reload-appearance");
+    expect(results[0]?.needsAppReload).toBe(true);
+  });
+
+  it("reloadAppearance throwing keeps needsAppReload true, escalates status, and carries the warn message", async () => {
+    const { io, plugins, ctx } = setup();
+    plugins.failAppearance = true;
+    await seedGroups(ctx, APPEARANCE_MANIFEST);
+    io.seed({ "cs/store/configdir/appearance.json": '{"cssTheme":"new"}', ".obs/appearance.json": '{"cssTheme":"old"}' });
+    const results = await apply(ctx, ["appearance"]);
+    expect(results[0]?.needsAppReload).toBe(true);
+    expect(results[0]?.status).toBe("warning");
+    expect(results[0]?.messages[0]).toContain("appearance hot-apply failed");
+  });
+
+  it("family group in the run but with zero files written/deleted does not call reloadAppearance", async () => {
+    const { io, plugins, ctx } = setup();
+    await seedGroups(ctx, APPEARANCE_MANIFEST);
+    io.seed({ "cs/store/configdir/appearance.json": '{"cssTheme":"same"}', ".obs/appearance.json": '{"cssTheme":"same"}' });
+    const results = await apply(ctx, ["appearance"]);
+    expect(results[0]?.filesWritten).toEqual([]);
+    expect(plugins.log).not.toContain("reload-appearance");
+  });
+});
+
 describe("applyWithActions", () => {
   const seedStore = async (io: MemFS, ctx: CoreContext): Promise<void> => {
     io.seed({
@@ -798,6 +864,82 @@ describe("self-update guard and switch-apply delta reporting", () => {
     const results = await apply(ctx, ["community-plugins"]);
     const msgs = results.find((r) => r.group === "community-plugins")?.messages ?? [];
     expect(msgs).toEqual([]); // excluded id keeps local state — nothing toggled
+  });
+});
+
+describe("switch-list apply switches the delta at runtime (spec B)", () => {
+  const COMMUNITY_MANIFEST = JSON.stringify({
+    version: 1,
+    groups: [{ name: "community-plugins", path: "{configDir}/community-plugins.json", type: "file", devices: "all" }],
+  });
+  const CORE_MANIFEST = JSON.stringify({
+    version: 1,
+    groups: [{ name: "core-plugins", path: "{configDir}/core-plugins.json", type: "file", devices: "all" }],
+  });
+
+  it("applying community-plugins switches the delta at runtime and needs no reload", async () => {
+    const { io, plugins, ctx } = setup();
+    plugins.enabled.add("b");
+    io.seed({
+      ".obs/community-plugins.json": '["keep","b"]',
+      "cs/store/configdir/community-plugins.json": '["keep","a"]',
+    });
+    await writeGroups(ctx, parseSyncManifest(COMMUNITY_MANIFEST).groups);
+    const results = await apply(ctx, ["community-plugins"]);
+    const r = results.find((x) => x.group === "community-plugins");
+    expect(plugins.log).toContain("enable:a");
+    expect(plugins.log).toContain("disable:b");
+    expect(r?.needsAppReload).toBe(false);
+  });
+
+  it("applying core-plugins uses the core enable/disable hooks", async () => {
+    const { io, plugins, ctx } = setup();
+    io.seed({
+      ".obs/core-plugins.json": JSON.stringify({ graph: true, backlink: false }),
+      "cs/store/configdir/core-plugins.json": JSON.stringify({ graph: false, backlink: true }),
+    });
+    await writeGroups(ctx, parseSyncManifest(CORE_MANIFEST).groups);
+    const results = await apply(ctx, ["core-plugins"]);
+    const r = results.find((x) => x.group === "core-plugins");
+    expect(plugins.log).toContain("enable-core:backlink");
+    expect(plugins.log).toContain("disable-core:graph");
+    expect(r?.needsAppReload).toBe(false);
+  });
+
+  it("config-sync is never runtime-disabled", async () => {
+    const { io, plugins, ctx } = setup();
+    io.seed({
+      ".obs/community-plugins.json": '["keep","config-sync"]',
+      "cs/store/configdir/community-plugins.json": '["keep"]',
+    });
+    await writeGroups(ctx, parseSyncManifest(COMMUNITY_MANIFEST).groups);
+    const results = await apply(ctx, ["community-plugins"]);
+    const r = results.find((x) => x.group === "community-plugins");
+    expect(plugins.log.some((l) => l.includes("config-sync"))).toBe(false);
+    expect(r?.messages).toContain("config-sync stays running until reload");
+  });
+
+  it("one failing enable does not stop the others", async () => {
+    const { io, plugins, ctx } = setup();
+    plugins.failIds.add("a");
+    io.seed({
+      ".obs/community-plugins.json": "[]",
+      "cs/store/configdir/community-plugins.json": '["a","b"]',
+    });
+    await writeGroups(ctx, parseSyncManifest(COMMUNITY_MANIFEST).groups);
+    const results = await apply(ctx, ["community-plugins"]);
+    const r = results.find((x) => x.group === "community-plugins");
+    expect(plugins.enabled.has("a")).toBe(false);
+    expect(plugins.enabled.has("b")).toBe(true);
+    expect((r?.messages ?? []).some((m) => m.includes("a"))).toBe(true);
+  });
+
+  it("an obsidian config group still flags needsAppReload", async () => {
+    const { io, ctx } = setup();
+    await seedStore(io, ctx);
+    io.seed({ ".obs/hotkeys.json": '{"a":1}' });
+    const results = await apply(ctx, ["hotkeys"]);
+    expect(results[0]?.needsAppReload).toBe(true);
   });
 });
 
@@ -1430,6 +1572,76 @@ describe("capture app-version recording", () => {
   });
 });
 
+// task-2 (spec 2026-08-05-install-runtime-audit-round §2): the lock is the label's carrier for
+// not-installed plugins, so capture must resolve and record it the same way the registry does —
+// runtime plugin/core name, never the raw id.
+describe("capture records a group label", () => {
+  it("records the installed plugin's runtime name for a plugin group", async () => {
+    const { io, plugins, ctx } = setup();
+    plugins.installed.set("demo", "1.2.3");
+    plugins.installedNames.set("demo", "Demo Plugin");
+    io.seed({ ".obs/plugins/demo/data.json": "{}" });
+    await seedGroups(ctx, MANIFEST);
+    await capture(ctx, ["plugin-demo"]);
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, unknown> };
+    expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.2.3", label: "Demo Plugin" });
+  });
+
+  it("records the core plugin's runtime name for a core-settings group", async () => {
+    const { io, ctx, plugins } = setup();
+    plugins.coreNames.set("daily-notes", "Daily notes"); // "daily-notes" is a CORE_ID_SEED member (catalog.ts)
+    io.seed({ ".obs/daily-notes.json": "{}" });
+    await seedGroups(
+      ctx,
+      JSON.stringify({ version: 1, groups: [{ name: "daily-notes", path: "{configDir}/daily-notes.json", type: "file", devices: "all" }] })
+    );
+    await capture(ctx, ["daily-notes"]);
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, unknown> };
+    expect(lock.groups["daily-notes"]).toEqual({ sourceAppVersion: "1.8.7", label: "Daily notes" });
+  });
+
+  it("omits the label for an Obsidian option group (no runtime name to resolve)", async () => {
+    const { io, ctx } = setup();
+    io.seed({ ".obs/hotkeys.json": "{}" });
+    await seedGroups(ctx, MANIFEST);
+    await capture(ctx, ["hotkeys"]);
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, unknown> };
+    expect(lock.groups["hotkeys"]).toEqual({ sourceAppVersion: "1.8.7" });
+  });
+
+  // I1 (final-review, 2026-08-05 round): pluginIdForGroup also resolves for a companion dir
+  // (group name = folder basename, not "plugin-<id>") and for custom rules on a plugin path.
+  // Only the canonical "plugin-<id>" group may carry the community label — otherwise
+  // displayLabelForGroup's storedLabel-fallback branch renders the companion as "Dataview › Dataview".
+  it("omits the label for a companion dir group on a plugin path (not the canonical plugin-<id> group)", async () => {
+    const { io, plugins, ctx } = setup();
+    plugins.installed.set("dataview", "0.5.0");
+    plugins.installedNames.set("dataview", "Dataview");
+    io.seed({ ".obs/plugins/dataview/cache.json": "{}" });
+    await seedGroups(
+      ctx,
+      JSON.stringify({ version: 1, groups: [{ name: "dataview", path: "{configDir}/plugins/dataview", type: "dir", devices: "all" }] })
+    );
+    await capture(ctx, ["dataview"]);
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, unknown> };
+    expect(lock.groups["dataview"]).toEqual({ sourcePluginVersion: "0.5.0" });
+  });
+
+  it("still records the label for the canonical plugin-<id> group", async () => {
+    const { io, plugins, ctx } = setup();
+    plugins.installed.set("dataview", "0.5.0");
+    plugins.installedNames.set("dataview", "Dataview");
+    io.seed({ ".obs/plugins/dataview/data.json": "{}" });
+    await seedGroups(
+      ctx,
+      JSON.stringify({ version: 1, groups: [{ name: "plugin-dataview", path: "{configDir}/plugins/dataview/data.json", type: "file", devices: "all" }] })
+    );
+    await capture(ctx, ["plugin-dataview"]);
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, unknown> };
+    expect(lock.groups["plugin-dataview"]).toEqual({ sourcePluginVersion: "0.5.0", label: "Dataview" });
+  });
+});
+
 const COMMUNITY_MANIFEST = JSON.stringify({
   version: 1,
   groups: [{ name: "community-plugins", path: "{configDir}/community-plugins.json", type: "file", devices: "all" }],
@@ -1715,7 +1927,43 @@ describe("ConfigSyncPlugin.addSwitchExceptions — 'this device' retarget onto l
     await plugin.addSwitchExceptions("community-plugins", ["remotely-save"]);
 
     const decisions = plugin.syncCenterHost().switchMemberDecisions("community-plugins");
-    expect(decisions).toContainEqual({ id: "remotely-save", scope: "local" });
+    // §R3-A truth table: a localMembers pin is itself the explicit source, so it's never
+    // structural even though the underlying card (unset here → disabled) would otherwise make its
+    // base "local" structural.
+    expect(decisions).toContainEqual({ id: "remotely-save", scope: "local", structural: false });
+  });
+
+  // §R3-A truth table, "card-on explicit local": pinning "this device" on an item whose card is
+  // ON (so enablementScopes' base scope for it is "all", not "local") still overlays to "local"
+  // and must still read structural: false — the localMembers entry is the explicit source
+  // regardless of the card's enabled state.
+  it("switchMemberDecisions reads structural: false for a 'this device' pin on an enabled card", async () => {
+    const plugin = await (async () => {
+      const p = makeSwitchPlugin();
+      await p.loadSettings();
+      return p;
+    })();
+    plugin.settings.items["community:remotely-save"] = { enabled: true, companions: [] } as unknown as (typeof plugin.settings.items)[string];
+
+    await plugin.addSwitchExceptions("community-plugins", ["remotely-save"]);
+
+    const decisions = plugin.syncCenterHost().switchMemberDecisions("community-plugins");
+    expect(decisions).toContainEqual({ id: "remotely-save", scope: "local", structural: false });
+  });
+
+  // §R3-A truth table, "card-off + no rule": the structural counterpart to the pin above — no
+  // localMembers entry, no enabledOn, just a disabled card. This is the row the read-only
+  // rendering exists for.
+  it("switchMemberDecisions reads structural: true for a disabled card with no explicit rule", async () => {
+    const plugin = await (async () => {
+      const p = makeSwitchPlugin();
+      await p.loadSettings();
+      return p;
+    })();
+    plugin.settings.items["community:dataview"] = { enabled: false, companions: [] } as unknown as (typeof plugin.settings.items)[string];
+
+    const decisions = plugin.syncCenterHost().switchMemberDecisions("community-plugins");
+    expect(decisions).toContainEqual({ id: "dataview", scope: "local", structural: true });
   });
 
   // Final-review Important: pinning "this device" via the menu must clear a stale device-class
@@ -1732,6 +1980,53 @@ describe("ConfigSyncPlugin.addSwitchExceptions — 'this device' retarget onto l
 
     expect(plugin.settings.localMembers).toContain("community:remotely-save");
     expect(plugin.settings.items["community:remotely-save"]?.enabledOn).toBeUndefined();
+  });
+});
+
+interface DisplayNamePluginSurface {
+  app: unknown;
+  lastLock: StoreLock | null;
+  displayName: (group: string, storedLabel?: string) => string;
+  displayParts: (group: string, storedLabel?: string) => { parent: string | null; label: string };
+}
+
+function makeDisplayNamePlugin(lastLock: StoreLock | null): DisplayNamePluginSurface {
+  const plugin = new ConfigSyncPlugin({} as never, {} as never);
+  const instance = plugin as unknown as DisplayNamePluginSurface;
+  instance.app = fakePluginApp(); // empty manifests/internalPlugins — runtime name resolution always misses
+  instance.lastLock = lastLock;
+  return instance;
+}
+
+// task-2 (spec 2026-08-05-install-runtime-audit-round §2): the resolver order is
+// runtime name -> stored (registry) label -> lock label -> id. Runtime always misses here
+// (fakePluginApp has no manifests), so these cases isolate stored-vs-lock-vs-id.
+describe("displayName / displayParts — lock label as the final fallback", () => {
+  const lock: StoreLock = { capturedAt: "t", groups: { "plugin-foo": { sourcePluginVersion: "1.0.0", label: "Foo Lock Label" } } };
+
+  it("falls back to the lock label when no stored label is passed", () => {
+    const plugin = makeDisplayNamePlugin(lock);
+    expect(plugin.displayName("plugin-foo")).toBe("Foo Lock Label");
+  });
+
+  it("prefers a stored (registry) label over the lock label", () => {
+    const plugin = makeDisplayNamePlugin(lock);
+    expect(plugin.displayName("plugin-foo", "Stored Label")).toBe("Stored Label");
+  });
+
+  it("falls back to the raw id when neither stored nor lock has a label", () => {
+    const plugin = makeDisplayNamePlugin({ capturedAt: "t", groups: {} });
+    expect(plugin.displayName("plugin-foo")).toBe("foo");
+  });
+
+  it("falls back to the raw id when no lock was ever loaded", () => {
+    const plugin = makeDisplayNamePlugin(null);
+    expect(plugin.displayName("plugin-foo")).toBe("foo");
+  });
+
+  it("displayParts carries the same lock fallback into its label field", () => {
+    const plugin = makeDisplayNamePlugin(lock);
+    expect(plugin.displayParts("plugin-foo").label).toBe("Foo Lock Label");
   });
 });
 
@@ -1948,5 +2243,18 @@ describe("store-contract-authoritative local strip (Fix B)", () => {
     const manifest = await loadManifest(ctx);
     const { statuses } = await statusForGroups(ctx, groupsForDevice(manifest, "desktop"), emptyLedger());
     expect(statuses.find((s) => s.group === "plugin-demo")?.state).toBe("in-sync"); // invariant 1 — no phantom diff
+  });
+});
+
+describe("groupForStoreRel — sidecar display label", () => {
+  const groups: SyncGroup[] = [
+    { name: "app", path: "{configDir}/app.json", type: "file", devices: "all" },
+  ];
+  it("the main file keeps its bare name", () => {
+    expect(groupForStoreRel(groups, "store/configdir/app.json")).toEqual({ name: "app", itemRel: "app.json" });
+  });
+  it("a device sidecar is labeled apart from the main file", () => {
+    expect(groupForStoreRel(groups, "store/configdir/app.json.__scopes__.desktop.json")).toEqual({ name: "app", itemRel: "app.json \u00b7 desktop values" });
+    expect(groupForStoreRel(groups, "store/configdir/app.json.__scopes__.mobile.json")).toEqual({ name: "app", itemRel: "app.json \u00b7 mobile values" });
   });
 });

@@ -7,7 +7,11 @@ import { ExternalStoreReader, ExternalStoreWriter } from "../core/ConfigSyncCore
 import { GitAuth } from "../core/types";
 
 const execFileP = promisify(execFile);
-const GIT_TIMEOUT_MS = 60_000;
+// Quick local/remote queries (status, add, commit, sparse-checkout, ls-remote) vs. transfer
+// operations (clone/fetch/checkout/push) that move objects over the network and can legitimately
+// run minutes on a large first sync — a flat 60s kills those before they finish.
+const QUICK_TIMEOUT_MS = 60_000;
+const TRANSFER_TIMEOUT_MS = 300_000;
 
 const EXTRA_PATH_DIRS = ["/usr/local/bin", "/opt/homebrew/bin"];
 
@@ -50,13 +54,13 @@ export function stripCredentialArgs(message: string): string {
   return message.split(`${TOKEN_CREDENTIAL_ARGS.join(" ")} `).join("");
 }
 
-async function git(cwd: string, args: string[], auth: GitAuth | null): Promise<string> {
+async function git(cwd: string, args: string[], auth: GitAuth | null, timeoutMs: number): Promise<string> {
   const fullArgs = auth === null ? args : [...TOKEN_CREDENTIAL_ARGS, ...args];
   try {
     const { stdout } = await execFileP("git", fullArgs, {
       cwd,
       maxBuffer: 50 * 1024 * 1024,
-      timeout: GIT_TIMEOUT_MS,
+      timeout: timeoutMs,
       // Fail fast on credential prompts; make helpers outside the GUI PATH reachable.
       env: gitEnv(process.env, process.platform, auth),
     });
@@ -66,7 +70,7 @@ async function git(cwd: string, args: string[], auth: GitAuth | null): Promise<s
     // execFile kills the child on timeout (killed=true); maxBuffer kills too but says so.
     const detail =
       err.killed === true && !err.message.includes("maxBuffer")
-        ? `timed out after ${GIT_TIMEOUT_MS / 1000}s`
+        ? `timed out after ${timeoutMs / 1000}s`
         : stripCredentialArgs(err.message);
     throw new Error(`git ${args.join(" ")} failed in ${cwd}: ${detail}`);
   }
@@ -85,7 +89,7 @@ export function classifyLsRemote(outcome: { stdout: string } | { error: Error })
 // ls-remote against a URL, so "." (the spawn's working dir) is fine.
 export async function gitLsRemote(remoteUrl: string, branch: string, auth: GitAuth | null): Promise<LsRemoteResult> {
   try {
-    const stdout = await git(".", ["ls-remote", "--heads", remoteUrl, branch], auth);
+    const stdout = await git(".", ["ls-remote", "--heads", remoteUrl, branch], auth, QUICK_TIMEOUT_MS);
     return classifyLsRemote({ stdout });
   } catch (e) {
     return classifyLsRemote({ error: e as Error });
@@ -100,8 +104,8 @@ export async function createGitReader(
 ): Promise<ExternalStoreReader> {
   const dir = await mkdtemp(nodePath.join(tmpdir(), "cs-read-"));
   try {
-    await git(dir, buildCloneArgs(branch, remoteUrl, subdir), auth);
-    if (subdir !== "") await git(dir, ["sparse-checkout", "set", subdir], auth);
+    await git(dir, buildCloneArgs(branch, remoteUrl, subdir), auth, TRANSFER_TIMEOUT_MS);
+    if (subdir !== "") await git(dir, ["sparse-checkout", "set", subdir], auth, QUICK_TIMEOUT_MS);
     const base = subdir === "" ? dir : nodePath.join(dir, subdir);
     const map = new Map<string, string>();
     try {
@@ -143,7 +147,9 @@ async function walkFs(absBase: string, rel: string, out: string[]): Promise<void
 // With a subdir, --sparse limits the working tree to that folder (set via sparse-checkout);
 // at repo root the whole tree is the store, so --sparse is omitted.
 export function buildCloneArgs(branch: string, remoteUrl: string, subdir: string): string[] {
-  const args = ["clone", "--depth=1", "--filter=blob:none"];
+  // core.autocrlf=false: without it, Windows-default autocrlf=true rewrites every checked-out
+  // file to CRLF, producing a false diff against the LF store (and writing CRLF back on push).
+  const args = ["-c", "core.autocrlf=false", "clone", "--depth=1", "--filter=blob:none"];
   if (subdir !== "") args.push("--sparse");
   args.push("--branch", branch, remoteUrl, ".");
   return args;
@@ -151,8 +157,8 @@ export function buildCloneArgs(branch: string, remoteUrl: string, subdir: string
 
 export async function createGitWriter(remoteUrl: string, branch: string, subdir: string, auth: GitAuth | null): Promise<ExternalStoreWriter> {
   const dir = await mkdtemp(nodePath.join(tmpdir(), "cs-push-"));
-  await git(dir, buildCloneArgs(branch, remoteUrl, subdir), auth);
-  if (subdir !== "") await git(dir, ["sparse-checkout", "set", subdir], auth);
+  await git(dir, buildCloneArgs(branch, remoteUrl, subdir), auth, TRANSFER_TIMEOUT_MS);
+  if (subdir !== "") await git(dir, ["sparse-checkout", "set", subdir], auth, QUICK_TIMEOUT_MS);
   const base = subdir === "" ? dir : nodePath.join(dir, subdir);
   return {
     async listFiles(): Promise<string[]> {
@@ -177,8 +183,8 @@ export async function createGitWriter(remoteUrl: string, branch: string, subdir:
       await unlink(nodePath.join(base, relPath)).catch(() => undefined);
     },
     async finalize(): Promise<void> {
-      await git(dir, ["add", "-A"], auth);
-      const status = await git(dir, ["status", "--porcelain"], auth);
+      await git(dir, ["add", "-A"], auth, QUICK_TIMEOUT_MS);
+      const status = await git(dir, ["status", "--porcelain"], auth, QUICK_TIMEOUT_MS);
       if (status.trim() === "") {
         await rm(dir, { recursive: true, force: true });
         return;
@@ -193,8 +199,8 @@ export async function createGitWriter(remoteUrl: string, branch: string, subdir:
           "commit",
           "-m",
           `config-sync push: ${stamp}`,
-        ], auth);
-        await git(dir, ["push", "origin", branch], auth);
+        ], auth, QUICK_TIMEOUT_MS);
+        await git(dir, ["push", "origin", branch], auth, TRANSFER_TIMEOUT_MS);
       } finally {
         await rm(dir, { recursive: true, force: true });
       }

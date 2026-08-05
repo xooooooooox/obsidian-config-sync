@@ -1,20 +1,31 @@
-import { App, ButtonComponent, ExtraButtonComponent, ItemView, Modal, Platform, WorkspaceLeaf, setIcon } from "obsidian";
-import { ApplyItem, CaptureItem, ProgressFn, StateAction } from "../core/ConfigSyncCore";
+import { App, ButtonComponent, ExtraButtonComponent, ItemView, Menu, Modal, Platform, WorkspaceLeaf, setIcon } from "obsidian";
+import { ApplyItem, CaptureItem, orderInstallsCatalogFirst, ProgressFn, StateAction } from "../core/ConfigSyncCore";
 import { bucketCounts, GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry, RemoteDiffFile, remoteDirectionCounts } from "../core/status";
 import { CATEGORY_LABELS, findGroupByName, ItemCategory, SELF_GROUP_NAME, categoryForGroup } from "../core/catalog";
 import { FileChanges, GroupResult, Remote, RuleScope, SyncGroup } from "../core/types";
 import { Availability } from "../core/availability";
+import { REUSE_MAX_AGE_MS } from "../external/readerCache";
 import { isWholeFileEncrypted } from "../core/modes";
 import { classifyRemoteFailure } from "../core/remoteFailure";
 import { GroupDisplayParts } from "../core/registry";
 import {
   capFileEntries,
   CappedEntry,
+  carrierIsSynced,
   defaultPolicy,
+  DISABLED_CARRIER_SYNCED_NOTE,
+  disabledInSyncNote,
+  disabledNoSettingsNote,
+  EnablementCarrier,
+  enablementCarrierFor,
+  fateLineText,
+  fatePillText,
   footerSummary,
   insyncLineText,
+  isEnableAction,
   isValidPolicy,
   matchesSearch,
+  memberFate,
   MemberDecision,
   memberCurrentScope,
   memberScopeWrite,
@@ -46,8 +57,7 @@ import { jsonSortedView } from "../core/merge";
 import { renderReportContent, renderReportPills } from "./reportContent";
 import { RunRecord, RunKind, RunStatus, worstStatus, formatRunTime, stopSyncDesc, deleteLeftoverDesc } from "../core/runHistory";
 import { ACTION_ICON, ACTION_COLOR_CLASS, renderActionIcon, renderActionCount, type SyncAction } from "./actionIcons";
-import { renderScopeCycle } from "./scopeCycle";
-import { DESKTOP_ONLY_ENABLED_OPTIONS, FIELD_SCOPE_OPTIONS } from "./itemCard";
+import { DESKTOP_ONLY_ENABLED_OPTIONS, FIELD_SCOPE_OPTIONS, SCOPE_ICONS, scopeCycleTooltip } from "./itemCard";
 import {
   QualifierAutocomplete,
   parseQuery,
@@ -83,6 +93,16 @@ const SYNC_QUALIFIER_KEYS = new Set(SYNC_QUALIFIER_SPECS.map((s) => s.key));
 // Sidebar scope order: Beta sits between Community and custom (batch 3 ③).
 const SCOPE_ORDER: (ItemCategory | "beta")[] = ["obsidian", "core", "community", "beta", "custom"];
 const SCOPE_LABELS: Record<ItemCategory | "beta", string> = { ...CATEGORY_LABELS, beta: "Beta" };
+
+// R4 direct menu (spec 2026-08-05-section-groups-and-member-menu-design.md §R4-B): the two member
+// lists' scope glyph opens a menu instead of cycling, so an abandoned gesture can never land on an
+// intermediate scope. Labels verbatim, device-aware for "local".
+function scopeMenuLabel(scope: RuleScope): string {
+  if (scope === "all") return "Everywhere";
+  if (scope === "desktop") return "Computers only";
+  if (scope === "mobile") return "Phones only";
+  return Platform.isMobile ? "This phone only" : "This computer only";
+}
 const STATUS_CLS: Record<RunStatus, string> = { ok: "is-ok", warning: "is-warn", error: "is-error" };
 // RunKind is wider than SyncAction (it also has "adopt"/"stop-sync"/"delete-leftover"), so
 // map explicitly rather than assigning rec.kind directly — undefined for the non-actions.
@@ -147,7 +167,11 @@ export interface SyncCenterHost {
   remoteCheck(name: string): { check: RemoteCheck; at: number } | undefined;
   refreshRemoteChecks(): Promise<void>;
   remoteRefreshProgress(): { total: number; done: number } | null;
-  deepDiff(remote: Remote, onPhase?: (phase: "fetch" | "compare") => void): Promise<{ entries: RemoteDiffEntry[]; lockDiffers: boolean }>;
+  // R9: identifies the reader-cache generation a compare was started against, so a re-render can
+  // tell "still the same remote refresh cycle" (re-attach to the in-flight compare) from "the
+  // remote changed or a refresh completed" (start a fresh one).
+  readerGeneration(): number;
+  deepDiff(remote: Remote, onPhase?: (phase: "fetch" | "compare") => void): Promise<RemoteCompareResult>;
   pullFrom(remote: Remote): Promise<GroupResult[] | null>;
   pushTo(remote: Remote): Promise<GroupResult[] | null>;
   adoptConfiguration(): Promise<GroupResult[] | null>;
@@ -167,8 +191,9 @@ export interface SyncCenterHost {
   deleteLeftoverStoreFiles(rels: string[]): Promise<void>;
   appendActionHistory(entry: { kind: RunKind; desc: string; changed: number; removed?: string[]; deletedFiles?: string[] }): Promise<void>;
   // Bidirectional divergence for a switch-list group (exceptions masked); null when either
-  // side is missing or unparseable.
-  switchDivergenceFor(name: string): Promise<{ captureRemoves: string[]; applyDisables: string[] } | null>;
+  // side is missing or unparseable. `masked` is the augmented exception set itself — the
+  // enablement fate derivation (#5-B) needs to tell "off everywhere" from "excluded by a rule".
+  switchDivergenceFor(name: string): Promise<{ captureRemoves: string[]; applyDisables: string[]; masked: string[] } | null>;
   addSwitchExceptions(name: string, ids: string[]): Promise<void>;
   setMemberEnabledOn(carrier: string, elementId: string, scope: "desktop" | "mobile"): Promise<void>;
   // The where-it-runs menu's "Everywhere" entry (task-2 retarget): clears a prior "this device"
@@ -214,6 +239,24 @@ function drawFieldsBadge(el: HTMLElement): void {
   svg.createSvg("path", { attr: { d: "M16.5 14.5v-2a2 2 0 0 1 4 0v2", "stroke-width": "1.8" } });
 }
 
+type RemoteCompareResult = { entries: RemoteDiffEntry[]; lockDiffers: boolean };
+
+// R9: one compare per (remote name, reader-cache generation) — see renderRemoteDetail.
+// `result` is populated once the compare settles successfully and the entry stays put (it is
+// NOT cleared on success) so every re-render while it's still the current key paints the cached
+// result instead of flashing "Fetching remote…" again. A rejection clears the entry outright (see
+// startRemoteCompare) so the next render retries fresh rather than replaying the error forever.
+// `ticker` is the currently-live elapsed-timer interval id, if any render has one running against
+// this entry — a re-render that attaches must clear it before starting its own.
+interface InflightCompare {
+  key: string;
+  promise: Promise<RemoteCompareResult>;
+  startedAt: number;
+  phase: "fetch" | "compare";
+  result: RemoteCompareResult | null;
+  ticker: number | null;
+}
+
 interface StatusRow {
   group: SyncGroup;
   status: GroupStatus;
@@ -225,6 +268,10 @@ export class SyncCenterView extends ItemView {
   private groups: SyncGroup[] = [];
   private statuses: Map<string, GroupStatus> = new Map();
   private availability: Map<string, Availability> = new Map();
+  // Enablement-carrier divergence (spec 2026-08-06-enablement-single-entry-design.md #5-B),
+  // fetched once per reload — only present for a carrier that's itself compiled, so a disabled
+  // row's presence here doubles as "this carrier is synced AND its data is readable".
+  private carrierDivergence: Map<EnablementCarrier, { captureRemoves: string[]; applyDisables: string[]; masked: string[] }> = new Map();
   private policy = sessionStaging.policy;
   private sectionOpen: Set<SectionKind> = new Set();
   private selected = sessionStaging.selected;
@@ -259,6 +306,8 @@ export class SyncCenterView extends ItemView {
   // the search input itself. Set on every full render().
   private mainEl: HTMLElement | null = null;
   private sideScopeEl: HTMLElement | null = null;
+  // R9: the remote pane's compare in flight, if any — see renderRemoteDetail.
+  private inflightCompare: InflightCompare | null = null;
 
   constructor(leaf: WorkspaceLeaf, private host: SyncCenterHost) {
     super(leaf);
@@ -354,6 +403,15 @@ export class SyncCenterView extends ItemView {
     if (this.filter === "leftover" && this.leftovers.length === 0) this.filter = "all"; // orphans all cleared
     // User state survives reloads; prune entries whose item vanished.
     const names = new Set(groups.map((g) => g.name));
+    // Fetched once here (not per disabled row) — only the carriers that are themselves
+    // compiled items are queried; a group not in `names` is left absent from the map.
+    this.carrierDivergence.clear();
+    for (const carrier of ["core-plugins", "community-plugins"] as const) {
+      if (!names.has(carrier)) continue;
+      const d = await this.host.switchDivergenceFor(carrier);
+      if (gen !== this.renderGen) return;
+      if (d !== null) this.carrierDivergence.set(carrier, d);
+    }
     for (const n of [...this.selected]) if (!names.has(n)) this.selected.delete(n);
     for (const n of [...this.directionOverride.keys()]) if (!names.has(n)) this.directionOverride.delete(n);
     // Staging expires with the state that motivated it: an item that became inert (e.g.
@@ -400,6 +458,46 @@ export class SyncCenterView extends ItemView {
 
   private sectionOf(name: string): SectionKind {
     return sectionForItem(this.availOf(name), Platform.isMobile);
+  }
+
+  private carrierIsSynced(itemGroup: string): boolean {
+    return carrierIsSynced(
+      itemGroup,
+      this.groups.map((g) => g.name)
+    );
+  }
+
+  // The switch-list element id for a disabled item's own group name — the inverse of the
+  // `plugin-<id>` prefix community groups compile to; core groups ARE the element id.
+  private carrierElementFor(itemGroup: string): string {
+    return itemGroup.startsWith("plugin-") ? itemGroup.slice("plugin-".length) : itemGroup;
+  }
+
+  // A disabled row's fate once its carrier is synced; undefined = fallback to the per-card
+  // policy ladder (carrier not synced, or its divergence data isn't readable yet).
+  private disabledRowFate(itemGroup: string): { carrier: EnablementCarrier; fate: ReturnType<typeof memberFate> } | undefined {
+    const carrier = enablementCarrierFor(itemGroup);
+    const d = this.carrierDivergence.get(carrier);
+    if (d === undefined) return undefined;
+    const element = this.carrierElementFor(itemGroup);
+    return { carrier, fate: memberFate(element, d.captureRemoves, d.masked.includes(element)) };
+  }
+
+  // The inverse of carrierElementFor: an on/off card member's own settings-card group name
+  // (spec #5b — one plugin, one name on both surfaces). `carrier` is r.group.name for a row
+  // in MEMBER_GUIDE_GROUPS, so it's always "core-plugins" or "community-plugins" here.
+  private memberGroupNameFor(carrier: string, id: string): string {
+    return carrier === "community-plugins" ? `plugin-${id}` : id;
+  }
+
+  // True when the member's OWN card has store settings pending (↓) — a faint pill nudges the
+  // user that there's more than the on/off decision below this row (spec #5-B). false (not a
+  // "no") for a member whose own card isn't a synced item at all — nothing to point at.
+  private memberHasPendingSettings(memberGroup: string): boolean {
+    const st = this.statuses.get(memberGroup);
+    if (st === undefined) return false;
+    const state = presentedState(st.state, this.availOf(memberGroup).drift);
+    return state === "never-synced" || state === "store-newer" || state === "differs";
   }
 
   // Composed display string for sorting and search — parent prefix groups companions directly
@@ -469,6 +567,7 @@ export class SyncCenterView extends ItemView {
 
   private render(gen: number): void {
     if (gen !== this.renderGen) return;
+    const scrollTop = this.contentEl.scrollTop;
     this.contentEl.empty();
     this.renderHeader();
     const shell = this.contentEl.createDiv({ cls: `config-sync-shell${this.compact ? " is-compact" : ""}` });
@@ -476,6 +575,7 @@ export class SyncCenterView extends ItemView {
     else this.renderSidebar(shell);
     this.mainEl = shell.createDiv({ cls: "config-sync-main" });
     this.renderMainRegion();
+    this.contentEl.scrollTop = scrollTop;
   }
 
   // Rebuilds only the main pane from the current panelScope. The sidebar search calls this (plus
@@ -485,7 +585,13 @@ export class SyncCenterView extends ItemView {
   private renderMainRegion(): void {
     const main = this.mainEl;
     if (main === null) return;
+    const scrollTop = this.contentEl.scrollTop;
     main.empty();
+    this.renderMainRegionBody(main);
+    this.contentEl.scrollTop = scrollTop;
+  }
+
+  private renderMainRegionBody(main: HTMLElement): void {
     if (this.panelScope.kind === "self") {
       this.renderConfigSyncMode(main);
       return;
@@ -1387,11 +1493,15 @@ export class SyncCenterView extends ItemView {
     }
   }
 
-  // All-items scope groups its rows under scope headers (定稿 A); single-scope views stay
-  // flat — the scope itself is the title (定稿 B).
+  // All-items scope groups rows under scope headers (定稿 A); single-scope views stay flat — the
+  // scope itself is the title (定稿 B). Shared by renderRowList (main list + the three actionable
+  // extra sections, task-8) and renderInfoSection (the desktop-only info section).
+  private groupSectionsByType(): boolean {
+    return this.panelScope.kind === "device" && this.panelScope.cat === "all";
+  }
+
   private renderRowList(card: HTMLElement, rows: StatusRow[]): void {
-    const grouped = this.panelScope.kind === "device" && this.panelScope.cat === "all";
-    if (!grouped) {
+    if (!this.groupSectionsByType()) {
       for (const r of rows) this.renderItemRow(card, r);
       return;
     }
@@ -1482,10 +1592,20 @@ export class SyncCenterView extends ItemView {
     });
     if (!open) return;
     fold.createDiv({ cls: "config-sync-report-legend", text: SECTION_NOTES[kind] });
-    for (const r of matches) {
-      const row = fold.createDiv({ cls: "config-sync-row is-static" });
+    const renderStaticRow = (host: HTMLElement, r: StatusRow): void => {
+      const row = host.createDiv({ cls: "config-sync-row is-static" });
       this.renderRuleName(row, r.group.name, r.group.label);
       row.createSpan({ cls: "config-sync-doto-pill", text: "desktop-only" });
+    };
+    if (!this.groupSectionsByType()) {
+      for (const r of matches) renderStaticRow(fold, r);
+      return;
+    }
+    for (const cat of SCOPE_ORDER) {
+      const inCat = matches.filter((r) => this.scopeOf(r.group.name) === cat);
+      if (inCat.length === 0) continue;
+      fold.createDiv({ cls: "config-sync-sect", text: SCOPE_LABELS[cat] });
+      for (const r of inCat) renderStaticRow(fold, r);
     }
   }
 
@@ -1536,9 +1656,13 @@ export class SyncCenterView extends ItemView {
       this.render(this.renderGen);
     });
     if (!open) return;
-    fold.createDiv({ cls: "config-sync-section-note", text: SECTION_NOTES[kind] });
+    // Disabled-section note swaps to the carrier-synced wording (spec #5-B) once any row in
+    // the section has a synced carrier; other fallback rows in the same section still behave
+    // as today, so the single static note picks the wording that covers the section as a whole.
+    const note = kind === "disabled" && matches.some((r) => this.carrierIsSynced(r.group.name)) ? DISABLED_CARRIER_SYNCED_NOTE : SECTION_NOTES[kind];
+    fold.createDiv({ cls: "config-sync-section-note", text: note });
     const card = fold.createDiv({ cls: "config-sync-card" });
-    for (const r of matches) this.renderItemRow(card, r);
+    this.renderRowList(card, matches);
   }
 
   // Two-tone group name: faint "Parent › " prefix for card-derived groups, plain label otherwise.
@@ -1575,6 +1699,12 @@ export class SyncCenterView extends ItemView {
         attr: { "aria-label": "Fields mode — only sensitive fields are filtered/encrypted" },
       });
       drawFieldsBadge(badge);
+    }
+    if (this.sectionOf(group.name) === "disabled") {
+      // Carrier-synced fate pill (spec #5-B): shown only for a member the on/off apply will
+      // turn on — an off-everywhere or rule-masked member stays a quiet row.
+      const f = this.disabledRowFate(group.name);
+      if (f !== undefined && f.fate === "turns-on") row.createSpan({ cls: "config-sync-pill is-statenote", text: fatePillText(f.carrier) });
     }
     const chosen = this.policy.get(group.name);
     if (this.selected.has(group.name) && chosen !== undefined) {
@@ -1680,8 +1810,10 @@ export class SyncCenterView extends ItemView {
       }
       const sec = this.sectionOf(r.group.name);
       if (sec === "disabled") {
-        // Unified rule (spec 2026-07-17): settings synced, plugin off — enabling is the payload.
-        detail.createDiv({ cls: "config-sync-expand-note", text: "identical to the store — applying just turns the plugin on" });
+        // Unified rule (spec 2026-07-17): settings synced, plugin off — enabling is the payload,
+        // UNLESS the carrier owns enablement (spec #5-B, fix round 1 #3) — then applying this
+        // row moves no settings and enables nothing.
+        detail.createDiv({ cls: "config-sync-expand-note", text: disabledInSyncNote(this.carrierIsSynced(r.group.name)) });
         this.renderPolicySeg(detail, r, this.availOf(r.group.name), true);
         return;
       }
@@ -1715,8 +1847,9 @@ export class SyncCenterView extends ItemView {
         return;
       }
       if (section === "disabled") {
-        // Enable-only apply (定稿 2026-07-17), symmetric to install-only.
-        detail.createDiv({ cls: "config-sync-expand-note", text: "no settings to apply — enables the plugin only" });
+        // Enable-only apply (定稿 2026-07-17), symmetric to install-only — UNLESS the carrier
+        // owns enablement (spec #5-B, fix round 1 #3): then there's truly nothing here yet.
+        detail.createDiv({ cls: "config-sync-expand-note", text: disabledNoSettingsNote(this.carrierIsSynced(r.group.name)) });
         this.renderPolicySeg(detail, r, this.availOf(r.group.name), true);
         return;
       }
@@ -1802,6 +1935,38 @@ export class SyncCenterView extends ItemView {
     return desktopOnly ? DESKTOP_ONLY_ENABLED_OPTIONS : FIELD_SCOPE_OPTIONS;
   }
 
+  // R4 direct menu (spec §R4-B): a glyph button that opens an Obsidian Menu with one item per
+  // scopeOptionsFor(id), current value checked, writing the chosen target once via
+  // writeMemberScope — replaces renderScopeCycle in the two member lists only (the intermediate
+  // stops the old cycle persisted were the source of the mid-gesture row-migration hazard).
+  private renderScopeMenuGlyph(cell: HTMLElement, group: string, id: string, scope: RuleScope): void {
+    const icon = cell.createSpan({ cls: `config-sync-scopeicon${scope !== "all" ? " is-set" : ""}` });
+    setIcon(icon, SCOPE_ICONS[scope]);
+    icon.setAttribute("aria-label", scopeCycleTooltip(scope));
+    icon.setAttribute("role", "button");
+    icon.setAttribute("tabindex", "0");
+    const buildMenu = (): Menu => {
+      const menu = new Menu();
+      for (const opt of this.scopeOptionsFor(id)) {
+        menu.addItem((item) =>
+          item
+            .setTitle(scopeMenuLabel(opt))
+            .setIcon(SCOPE_ICONS[opt])
+            .setChecked(opt === scope)
+            .onClick(() => void this.writeMemberScope(group, id, opt))
+        );
+      }
+      return menu;
+    };
+    icon.addEventListener("click", (e) => buildMenu().showAtMouseEvent(e));
+    icon.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      e.preventDefault();
+      const rect = icon.getBoundingClientRect();
+      buildMenu().showAtPosition({ x: rect.left, y: rect.bottom });
+    });
+  }
+
   private renderMemberSummary(holder: HTMLElement, d: { captureRemoves: string[]; applyDisables: string[] }, noun: "plugin" | "snippet"): void {
     const lines = switchSummaryLines(d, Platform.isMobile ? "mobile" : "desktop", noun);
     if (lines.length === 0) return;
@@ -1844,24 +2009,26 @@ export class SyncCenterView extends ItemView {
     const list = holder.createDiv({ cls: "config-sync-rule-list" });
     const paint = (q: string): void => {
       list.empty();
+      const ql = q.toLowerCase();
+      // Display name matches the section rows' (spec #5b) — raw id stays the search fallback so
+      // a query typed against either surface still finds the row.
+      const ids = (g: RuleGroup): string[] =>
+        g.ids.filter((id) => ql === "" || id.toLowerCase().includes(ql) || this.host.displayName(this.memberGroupNameFor(group, id)).toLowerCase().includes(ql));
       for (const g of groups) {
-        const ids = g.ids.filter((id) => q === "" || id.toLowerCase().includes(q.toLowerCase()));
-        if (ids.length === 0) continue;
+        const matched = ids(g);
+        if (matched.length === 0) continue;
         if (g.label !== null) {
           const hdr = list.createDiv({ cls: "config-sync-rule-ghdr" });
           renderActionIcon(hdr, g.dir).addClass(ACTION_COLOR_CLASS[g.dir]);
           hdr.appendText(` ${g.label}`);
         }
-        for (const id of ids) {
+        for (const id of matched) {
           const row = list.createDiv({ cls: "config-sync-rule-row" });
-          row.createSpan({ cls: "config-sync-rule-mid", text: id });
+          const memberGroup = this.memberGroupNameFor(group, id);
+          row.createSpan({ cls: "config-sync-rule-mid", text: this.host.displayName(memberGroup) });
+          if (this.memberHasPendingSettings(memberGroup)) row.createSpan({ cls: "config-sync-rule-hint", text: "has settings below" });
           const cell = row.createSpan();
-          renderScopeCycle(cell, {
-            scope: memberCurrentScope(decisions, id),
-            options: this.scopeOptionsFor(id),
-            disabled: false,
-            onChange: (v) => void this.writeMemberScope(group, id, v),
-          });
+          this.renderScopeMenuGlyph(cell, group, id, memberCurrentScope(decisions, id));
         }
       }
     };
@@ -1879,14 +2046,23 @@ export class SyncCenterView extends ItemView {
     this.renderDisclosure(holder, `${group}::scoped`, `${decisions.length} scoped to specific devices`, true, (panel) => {
       for (const m of decisions) {
         const row = panel.createDiv({ cls: "config-sync-rule-row" });
-        row.createSpan({ cls: "config-sync-rule-mid", text: m.id });
+        const memberGroup = this.memberGroupNameFor(group, m.id);
+        // Display name matches the section rows' (spec #5b); the structural-row hint below
+        // already explains "settings sync off", so it's not paired with "has settings below".
+        row.createSpan({ cls: "config-sync-rule-mid", text: this.host.displayName(memberGroup) });
+        // Structural rows (spec §R3-A): "local" solely because the settings-sync card is off, not
+        // a rule the user pinned. The scope glyph's write would be a permanent no-op (the row
+        // re-derives "local" regardless) and could silently delete an unrelated stored rule — so
+        // it renders read-only instead of offering a control that appears to work but doesn't.
+        if (m.structural) {
+          row.createSpan({ cls: "config-sync-rule-hint", text: "settings sync off — turn it on in Settings to set a rule" });
+          const icon = row.createSpan({ cls: "config-sync-scopeicon config-sync-dim", attr: { "aria-disabled": "true" } });
+          setIcon(icon, SCOPE_ICONS[m.scope]);
+          continue;
+        }
+        if (this.memberHasPendingSettings(memberGroup)) row.createSpan({ cls: "config-sync-rule-hint", text: "has settings below" });
         const cell = row.createSpan();
-        renderScopeCycle(cell, {
-          scope: m.scope,
-          options: this.scopeOptionsFor(m.id),
-          disabled: false,
-          onChange: (v) => void this.writeMemberScope(group, m.id, v),
-        });
+        this.renderScopeMenuGlyph(cell, group, m.id, m.scope);
       }
     });
   }
@@ -1971,6 +2147,23 @@ export class SyncCenterView extends ItemView {
   }
 
   private renderPolicySeg(detail: HTMLElement, r: StatusRow, a: Availability, installOnly: boolean): void {
+    // Carrier-synced disabled row (spec #5-B): the on/off card owns enablement outright, so the
+    // per-card policy ladder is replaced by a static fate line — no ⏻ Enable / Keep disabled
+    // choice to make here anymore.
+    if (this.sectionOf(r.group.name) === "disabled") {
+      const f = this.disabledRowFate(r.group.name);
+      if (f !== undefined) {
+        detail.createDiv({ cls: "config-sync-expand-note", text: fateLineText(f.carrier, f.fate) });
+        return;
+      }
+      if (this.carrierIsSynced(r.group.name)) {
+        // Carrier synced but its divergence data isn't readable yet (never-captured window,
+        // fix round 1 #2) — writes already resolve to "none" regardless, so the ladder must
+        // never render clickable here either; state the model generically.
+        detail.createDiv({ cls: "config-sync-expand-note", text: fateLineText(enablementCarrierFor(r.group.name), "turns-on") });
+        return;
+      }
+    }
     // Install-only rows have no settings payload: "Stage only" would apply nothing at all,
     // so the ladder keeps just the install actions. Capture direction offers only the enable
     // choices — install/update are apply-ordered actions.
@@ -2094,32 +2287,64 @@ export class SyncCenterView extends ItemView {
   }
 
   // Capture-direction disabled rows default to ⏻ Enable (spec 2026-07-17); everything else
-  // takes the availability ladder's first action.
+  // takes the availability ladder's first action. A carrier-synced disabled row (spec #5-B)
+  // never defaults to an enable — the on/off card is the single write path for it.
   private defaultPolicyFor(r: StatusRow): StateAction {
-    if (this.sectionOf(r.group.name) === "disabled" && this.effDir(r) === "capture") return "enable";
+    if (this.sectionOf(r.group.name) === "disabled") {
+      if (this.carrierIsSynced(r.group.name)) return "none";
+      if (this.effDir(r) === "capture") return "enable";
+    }
     return defaultPolicy(this.availOf(r.group.name));
+  }
+
+  // A disabled row's resolved action, direction-aware (spec #5-B): a carrier-synced row always
+  // resolves to "none" — capturePayload, applyPayload, and the footer's "N to enable" count all
+  // go through this single place so they can't drift apart (fix round 1 #1). Only the branch
+  // matching `r`'s own effDir is ever meaningful to a caller; the other is dead for that row.
+  private disabledRowAction(r: StatusRow): StateAction {
+    if (this.carrierIsSynced(r.group.name)) return "none";
+    if (this.effDir(r) === "capture") return this.policy.get(r.group.name) === "enable" ? "enable" : "none";
+    const a = this.availOf(r.group.name);
+    const stored = this.policy.get(r.group.name);
+    return stored !== undefined && isValidPolicy(a, stored) ? stored : defaultPolicy(a);
   }
 
   private capturePayload(): CaptureItem[] {
     return this.rows()
       .filter((r) => this.selected.has(r.group.name) && this.rowStageable(r) && this.effDir(r) === "capture")
       .map((r) => {
-        const enable =
-          this.sectionOf(r.group.name) === "disabled" && this.policy.get(r.group.name) === "enable";
-        return { name: r.group.name, action: enable ? ("enable" as const) : ("none" as const) };
+        const action = this.sectionOf(r.group.name) === "disabled" ? this.disabledRowAction(r) : "none";
+        return { name: r.group.name, action: action === "enable" ? ("enable" as const) : ("none" as const) };
       });
   }
 
   private applyPayload(): ApplyItem[] {
-    return this.rows()
+    const items = this.rows()
       .filter((r) => this.selected.has(r.group.name) && this.rowStageable(r) && this.effDir(r) === "apply")
       .map((r) => {
         if (this.sectionOf(r.group.name) === "main") return { name: r.group.name, action: "none" as const };
+        if (this.sectionOf(r.group.name) === "disabled") return { name: r.group.name, action: this.disabledRowAction(r) };
         const a = this.availOf(r.group.name);
         const stored = this.policy.get(r.group.name);
         const action = stored !== undefined && isValidPolicy(a, stored) ? stored : defaultPolicy(a);
         return { name: r.group.name, action };
       });
+    // Cold bootstrap can stage BRAT itself (a catalog install) alongside BRAT-managed plugins
+    // (installed via installViaBrat, which needs BRAT already on disk) — catalog installs must
+    // finish first in the same run. Reorders ONLY the install-carrying items; every other item
+    // (enable, update, none) keeps its original slot.
+    const installActions = new Set<StateAction>(["install", "install-enable"]);
+    const slots = items.map((item, i) => ({ item, i })).filter(({ item }) => installActions.has(item.action));
+    if (slots.length > 1) {
+      const ordered = orderInstallsCatalogFirst(slots.map(({ item }) => item.name), (id) => this.betaIds.has(id));
+      const byName = new Map(slots.map(({ item }) => [item.name, item]));
+      slots.forEach(({ i }, k) => {
+        const name = ordered[k];
+        const next = name === undefined ? undefined : byName.get(name);
+        if (next !== undefined) items[i] = next;
+      });
+    }
+    return items;
   }
 
   private renderActionBar(macro: HTMLElement): void {
@@ -2127,9 +2352,14 @@ export class SyncCenterView extends ItemView {
     const counted = (r: StatusRow): boolean => this.selected.has(r.group.name) && this.rowStageable(r);
     const mainStaged = this.mainRows().filter(counted).length;
     const outdatedStaged = this.rows().filter((r) => this.sectionOf(r.group.name) === "outdated" && counted(r)).length;
+    // disabledStaged feeds the TOTAL (every staged disabled row, action:"none" included — fix
+    // round 2, footerSummary's own contract: the lead number matches the section head/Apply
+    // button). disabledEnableCount is the "N to enable" qualifier ONLY — a real resolved enable
+    // (fix round 1 #1): a carrier-synced row (or a "Keep disabled" choice) must never appear here.
     const disabledStaged = this.rows().filter((r) => this.sectionOf(r.group.name) === "disabled" && counted(r)).length;
+    const disabledEnableCount = this.rows().filter((r) => this.sectionOf(r.group.name) === "disabled" && counted(r) && isEnableAction(this.disabledRowAction(r))).length;
     const installStaged = this.rows().filter((r) => this.sectionOf(r.group.name) === "not-installed" && counted(r)).length;
-    bar.createSpan({ cls: "config-sync-staged-count", text: footerSummary(mainStaged, outdatedStaged, disabledStaged, installStaged) });
+    bar.createSpan({ cls: "config-sync-staged-count", text: footerSummary(mainStaged, outdatedStaged, disabledStaged, installStaged, disabledEnableCount) });
     bar.createDiv({ cls: "config-sync-rule-spacer" });
     const capItems = this.capturePayload();
     const applyItems = this.applyPayload();
@@ -2258,35 +2488,71 @@ export class SyncCenterView extends ItemView {
     }
   }
 
+  // R9: a per-remote progress notify during refreshRemoteChecks triggers a full re-render, which
+  // used to call this.host.deepDiff again every time — abandoning the in-flight clone (whose git
+  // subprocess runs on regardless) and resetting the elapsed indicator to 0.0s. Re-render now
+  // re-attaches to the SAME compare (keyed by remote name + reader-cache generation) instead of
+  // restarting it; a new generation (refresh completed, remote edited) naturally starts a fresh one.
+  // A compare that already settled successfully stays cached on the entry (startRemoteCompare)
+  // so a re-render while OTHER remotes are still being checked paints the stored result directly
+  // instead of flashing the progress UI and re-comparing again.
   private async renderRemoteDetail(detail: HTMLElement, remote: Remote, check: RemoteCheck | undefined): Promise<void> {
     detail.empty();
     const gen = this.renderGen;
+    const key = `${remote.name}:${this.host.readerGeneration()}`;
+    let reattach = this.inflightCompare !== null && this.inflightCompare.key === key ? this.inflightCompare : null;
+
+    if (reattach !== null && reattach.result !== null) {
+      if (Date.now() - reattach.startedAt <= REUSE_MAX_AGE_MS) {
+        this.paintRemoteCompareResult(detail, remote, check, reattach.result);
+        return;
+      }
+      // R6: a same-generation cached result older than REUSE_MAX_AGE_MS is stale — fall through
+      // to start a fresh compare (below) instead of serving it forever within the generation.
+      this.inflightCompare = null;
+      reattach = null;
+    }
+
     const box = detail.createDiv({ cls: "config-sync-remote-comparing" });
     box.createSpan({ cls: "config-sync-cmp-spinner" });
     box.createSpan({ cls: "config-sync-cmp-label", text: `Comparing with ${remote.name}` });
-    const elapsed = box.createSpan({ cls: "config-sync-cmp-elapsed", text: "0.0s" });
-    const phaseEl = detail.createDiv({ cls: "config-sync-cmp-phase", text: "Fetching remote…" });
+    const startedAt = reattach?.startedAt ?? Date.now();
+    const elapsed = box.createSpan({ cls: "config-sync-cmp-elapsed", text: `${((Date.now() - startedAt) / 1000).toFixed(1)}s` });
+    const phaseEl = detail.createDiv({
+      cls: "config-sync-cmp-phase",
+      text: (reattach?.phase ?? "fetch") === "fetch" ? "Fetching remote…" : "Comparing files…",
+    });
     detail.createDiv({ cls: "config-sync-cmp-bar" }).createDiv({ cls: "config-sync-cmp-bar-fill" });
-    const startedAt = Date.now();
+
+    // A prior render's ticker may still be live against this same entry (e.g. this render is a
+    // re-attach while the compare is still pending) — only one ticker may write into a live span.
+    if (reattach !== null && reattach.ticker !== null) {
+      window.clearInterval(reattach.ticker);
+      reattach.ticker = null;
+    }
     const ticker = window.setInterval(() => {
       elapsed.setText(`${((Date.now() - startedAt) / 1000).toFixed(1)}s`);
     }, 100);
     this.registerInterval(ticker); // safety net: cleared if the view unloads mid-compare
-    let entries: RemoteDiffEntry[];
-    let lockDiffers = false;
+
+    const onPhase = (phase: "fetch" | "compare"): void => {
+      // A sidebar panel switch reuses renderGen (only reload() increments it), so also check
+      // panelScope — otherwise a stale onPhase from a since-abandoned remote pane could
+      // setText a detached node.
+      if (gen !== this.renderGen || this.panelScope.kind !== "remote" || this.panelScope.name !== remote.name) return;
+      phaseEl.setText(phase === "fetch" ? "Fetching remote…" : "Comparing files…");
+    };
+    const active = reattach ?? this.startRemoteCompare(remote, key, startedAt, onPhase);
+    active.ticker = ticker;
+
+    let dd: RemoteCompareResult;
     try {
-      const dd = await this.host.deepDiff(remote, (phase) => {
-        // A sidebar panel switch reuses renderGen (only reload() increments it), so also check
-        // panelScope — otherwise a stale onPhase from a since-abandoned remote pane could
-        // setText a detached node.
-        if (gen !== this.renderGen || this.panelScope.kind !== "remote" || this.panelScope.name !== remote.name) return;
-        phaseEl.setText(phase === "fetch" ? "Fetching remote…" : "Comparing files…");
-      });
+      dd = await active.promise;
       window.clearInterval(ticker);
-      entries = dd.entries;
-      lockDiffers = dd.lockDiffers;
+      if (active.ticker === ticker) active.ticker = null;
     } catch (e) {
       window.clearInterval(ticker);
+      if (active.ticker === ticker) active.ticker = null;
       if (gen !== this.renderGen || this.panelScope.kind !== "remote" || this.panelScope.name !== remote.name) return;
       detail.empty();
       const raw = (e as Error).message;
@@ -2312,7 +2578,45 @@ export class SyncCenterView extends ItemView {
       return;
     }
     if (gen !== this.renderGen || this.panelScope.kind !== "remote" || this.panelScope.name !== remote.name) return;
+    this.paintRemoteCompareResult(detail, remote, check, dd);
+  }
+
+  // Starts exactly one deepDiff for (remote, key) and stores it on this.inflightCompare. On
+  // success the entry stays cached (result populated) for re-renders to reuse; on rejection the
+  // entry is dropped so the next render retries fresh rather than reusing a failed compare. Only
+  // superseded (already-replaced) entries are inert here — the `this.inflightCompare === entry`
+  // check is what makes both branches a no-op once a newer entry has taken over the field.
+  private startRemoteCompare(remote: Remote, key: string, startedAt: number, onPhase: (phase: "fetch" | "compare") => void): InflightCompare {
+    const entry: InflightCompare = {
+      key,
+      startedAt,
+      phase: "fetch",
+      result: null,
+      ticker: null,
+      promise: Promise.resolve({ entries: [], lockDiffers: false }), // placeholder, replaced synchronously below
+    };
+    entry.promise = this.host
+      .deepDiff(remote, (phase) => {
+        entry.phase = phase;
+        onPhase(phase);
+      })
+      .then(
+        (dd) => {
+          if (this.inflightCompare === entry) entry.result = dd;
+          return dd;
+        },
+        (e: unknown) => {
+          if (this.inflightCompare === entry) this.inflightCompare = null;
+          throw e;
+        }
+      );
+    this.inflightCompare = entry;
+    return entry;
+  }
+
+  private paintRemoteCompareResult(detail: HTMLElement, remote: Remote, check: RemoteCheck | undefined, dd: RemoteCompareResult): void {
     detail.empty();
+    const { entries, lockDiffers } = dd;
 
     const changed = entries.filter((e) => e.files.length > 0);
     for (const cat of SCOPE_ORDER) {

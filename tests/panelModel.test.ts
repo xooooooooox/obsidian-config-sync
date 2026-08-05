@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { capFileEntries, insyncLineText, statusBarStatuses, moreFilesText, visibleUnderFilter, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, footerSummary, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, versionLine, runProgressLabel, showColdStartBanner, memberDecisionsFromScopes, memberDecisionText, switchSummaryLines, switchBothWaysCaption, ruleGroups, memberScopeWrite, memberCurrentScope } from "../src/ui/panelModel";
+import { capFileEntries, insyncLineText, statusBarStatuses, moreFilesText, visibleUnderFilter, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, footerSummary, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, versionLine, runProgressLabel, showColdStartBanner, memberDecisionsFromScopes, memberDecisionText, switchSummaryLines, switchBothWaysCaption, ruleGroups, memberScopeWrite, memberCurrentScope, enablementCarrierFor, carrierIsSynced, memberFate, fatePillText, fateLineText, DISABLED_CARRIER_SYNCED_NOTE, isEnableAction, disabledInSyncNote, disabledNoSettingsNote } from "../src/ui/panelModel";
 import { GroupState, GroupStatus } from "../src/core/status";
 import { Availability } from "../src/core/availability";
 
@@ -231,13 +231,19 @@ describe("versionLine", () => {
 
 describe("footerSummary", () => {
   it("leads with the total staged and lists non-main sections as a subset breakdown", () => {
-    // 3 main + 1 disabled + 2 install = 6 total selected
-    expect(footerSummary(3, 0, 1, 2)).toBe("6 selected · 1 to enable · 2 to install");
-    expect(footerSummary(4, 0, 0, 0)).toBe("4 selected");
+    // 3 main + 1 disabled + 2 install = 6 total selected; the 1 disabled row IS a real enable
+    expect(footerSummary(3, 0, 1, 2, 1)).toBe("6 selected · 1 to enable · 2 to install");
+    expect(footerSummary(4, 0, 0, 0, 0)).toBe("4 selected");
     // all staged rows in one non-main section still count in the total (the 0-selected bug)
-    expect(footerSummary(0, 0, 0, 9)).toBe("9 selected · 9 to install");
-    expect(footerSummary(1, 2, 0, 0)).toBe("3 selected · 2 to update");
-    expect(footerSummary(0, 0, 0, 0)).toBe("");
+    expect(footerSummary(0, 0, 0, 9, 0)).toBe("9 selected · 9 to install");
+    expect(footerSummary(1, 2, 0, 0, 0)).toBe("3 selected · 2 to update");
+    expect(footerSummary(0, 0, 0, 0, 0)).toBe("");
+  });
+  it("fix round 2: a staged disabled row that isn't a real enable (carrier-synced action:none, or Keep disabled) still counts toward the total but not toward 'to enable'", () => {
+    // 3 main + 1 disabled (settings-only, no enable) = 4 total selected; no 'to enable' phrase
+    expect(footerSummary(3, 0, 1, 0, 0)).toBe("4 selected");
+    // 2 disabled rows staged, only 1 of them resolves to a real enable
+    expect(footerSummary(0, 0, 2, 0, 1)).toBe("2 selected · 1 to enable");
   });
 });
 
@@ -300,17 +306,41 @@ describe("showColdStartBanner", () => {
 });
 
 describe("memberDecisionsFromScopes / memberDecisionText", () => {
-  it("keeps only non-all scopes, sorted by id", () => {
-    expect(memberDecisionsFromScopes({ b: "desktop", a: "local", c: "all", d: "mobile" })).toEqual([
-      { id: "a", scope: "local" },
-      { id: "b", scope: "desktop" },
-      { id: "d", scope: "mobile" },
+  it("keeps only non-all scopes, sorted by id, structural false when no id is in structuralIds", () => {
+    expect(memberDecisionsFromScopes({ b: "desktop", a: "local", c: "all", d: "mobile" }, new Set())).toEqual([
+      { id: "a", scope: "local", structural: false },
+      { id: "b", scope: "desktop", structural: false },
+      { id: "d", scope: "mobile", structural: false },
     ]);
   });
   it("copy", () => {
-    expect(memberDecisionText({ id: "x", scope: "local" })).toBe("x — this device keeps its own on/off state");
-    expect(memberDecisionText({ id: "x", scope: "desktop" })).toBe("x — runs on desktop only");
-    expect(memberDecisionText({ id: "x", scope: "mobile" })).toBe("x — runs on mobile only");
+    expect(memberDecisionText({ id: "x", scope: "local", structural: true })).toBe("x — this device keeps its own on/off state");
+    expect(memberDecisionText({ id: "x", scope: "desktop", structural: false })).toBe("x — runs on desktop only");
+    expect(memberDecisionText({ id: "x", scope: "mobile", structural: false })).toBe("x — runs on mobile only");
+  });
+});
+
+// R3-A structural derivation truth table (spec 2026-08-05-section-groups-and-member-menu-design.md
+// §R3-A): structural is true only for a "local" scope with no explicit source — the pure layer
+// (memberDecisionsFromScopes) derives it from the scope map plus the structuralIds the host passes
+// in (registry.ts's structuralLocalElements), never from a pre-computed boolean per decision. The
+// localMembers-pin and card-on-explicit-local rows of the full truth table are host wiring (the
+// overlay in main.ts's memberDecisionsFor) — covered in tests/core.test.ts.
+describe("memberDecisionsFromScopes — structural derivation", () => {
+  it("card-off with no rule at all → structural true", () => {
+    expect(memberDecisionsFromScopes({ dataview: "local" }, new Set(["dataview"]))).toEqual([
+      { id: "dataview", scope: "local", structural: true },
+    ]);
+  });
+  it("a local scope not carried in structuralIds (e.g. an explicit localMembers pin the host excludes) → structural false", () => {
+    expect(memberDecisionsFromScopes({ "remotely-save": "local" }, new Set())).toEqual([
+      { id: "remotely-save", scope: "local", structural: false },
+    ]);
+  });
+  it("an enabledOn device-class rule → scope isn't local, structural false regardless of structuralIds", () => {
+    expect(memberDecisionsFromScopes({ "obsidian-git": "desktop" }, new Set(["obsidian-git"]))).toEqual([
+      { id: "obsidian-git", scope: "desktop", structural: false },
+    ]);
   });
 });
 
@@ -348,7 +378,7 @@ describe("ruleGroups", () => {
 });
 
 describe("memberCurrentScope", () => {
-  const decisions = [{ id: "git", scope: "desktop" as const }, { id: "rs", scope: "local" as const }];
+  const decisions = [{ id: "git", scope: "desktop" as const, structural: false }, { id: "rs", scope: "local" as const, structural: false }];
   it("reads a scoped member's scope", () => {
     expect(memberCurrentScope(decisions, "git")).toBe("desktop");
     expect(memberCurrentScope(decisions, "rs")).toBe("local");
@@ -392,5 +422,67 @@ describe("switchBothWaysCaption", () => {
   it("plugin variant points below, snippet variant points at the Appearance card", () => {
     expect(switchBothWaysCaption("plugin")).toBe("Bulk Apply or Capture resolves every plugin one way. Pin the ones that differ on purpose below.");
     expect(switchBothWaysCaption("snippet")).toBe("Bulk Apply or Capture resolves every snippet one way. Pin per-snippet devices on the Appearance card in Settings.");
+  });
+});
+
+describe("enablementCarrierFor / carrierIsSynced", () => {
+  it("community items (plugin-<id>) carry via community-plugins; core items via core-plugins", () => {
+    expect(enablementCarrierFor("plugin-zk-prefixer")).toBe("community-plugins");
+    expect(enablementCarrierFor("file-explorer")).toBe("core-plugins");
+  });
+  it("carrierIsSynced checks the carrier's own group name against the compiled set", () => {
+    expect(carrierIsSynced("plugin-zk-prefixer", ["community-plugins", "hotkeys"])).toBe(true);
+    expect(carrierIsSynced("plugin-zk-prefixer", ["core-plugins", "hotkeys"])).toBe(false);
+    expect(carrierIsSynced("file-explorer", ["core-plugins"])).toBe(true);
+    expect(carrierIsSynced("file-explorer", [])).toBe(false);
+  });
+});
+
+describe("memberFate", () => {
+  it("masked wins even if the element happens to be in applySide", () => {
+    expect(memberFate("a", ["a"], true)).toBe("rule");
+  });
+  it("unmasked + in applySide → turns-on", () => {
+    expect(memberFate("a", ["a", "b"], false)).toBe("turns-on");
+  });
+  it("unmasked + absent from applySide → stays-off", () => {
+    expect(memberFate("a", ["b"], false)).toBe("stays-off");
+    expect(memberFate("a", [], false)).toBe("stays-off");
+  });
+});
+
+describe("fatePillText / fateLineText / DISABLED_CARRIER_SYNCED_NOTE", () => {
+  it("pill copy is carrier-worded, verbatim (spec #5-B)", () => {
+    expect(fatePillText("core-plugins")).toBe("⏻ turns on with Core plugins on/off");
+    expect(fatePillText("community-plugins")).toBe("⏻ turns on with Community plugins on/off");
+  });
+  it("line copy per fate, verbatim (spec #5-B)", () => {
+    expect(fateLineText("core-plugins", "turns-on")).toBe("enablement follows Core plugins on/off");
+    expect(fateLineText("community-plugins", "turns-on")).toBe("enablement follows Community plugins on/off");
+    expect(fateLineText("core-plugins", "stays-off")).toBe("stays off — off on your other devices too");
+    expect(fateLineText("core-plugins", "rule")).toBe("follows its per-plugin rule");
+  });
+  it("section note copy verbatim", () => {
+    expect(DISABLED_CARRIER_SYNCED_NOTE).toBe("Settings sync either way — whether a plugin turns on follows the on/off card.");
+  });
+});
+
+describe("isEnableAction (fix round 1 #1 — footer 'N to enable' counting predicate)", () => {
+  it("enable and update-enable are real enables; every other action is not", () => {
+    expect(isEnableAction("enable")).toBe(true);
+    expect(isEnableAction("update-enable")).toBe(true);
+    expect(isEnableAction("none")).toBe(false);
+    expect(isEnableAction("update")).toBe(false);
+    expect(isEnableAction("install")).toBe(false);
+    expect(isEnableAction("install-enable")).toBe(false);
+  });
+});
+
+describe("disabledInSyncNote / disabledNoSettingsNote (fix round 1 #3 — verbatim copy)", () => {
+  it("carrier-synced rows get the new copy; unsynced rows keep the old copy byte-identical", () => {
+    expect(disabledInSyncNote(true)).toBe("identical to the store — nothing to apply here");
+    expect(disabledInSyncNote(false)).toBe("identical to the store — applying just turns the plugin on");
+    expect(disabledNoSettingsNote(true)).toBe("no settings to sync yet");
+    expect(disabledNoSettingsNote(false)).toBe("no settings to apply — enables the plugin only");
   });
 });

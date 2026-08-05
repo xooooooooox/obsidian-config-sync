@@ -109,7 +109,7 @@ function otherClass(cls: "desktop" | "mobile"): "desktop" | "mobile" {
 // defensive belt-and-suspenders exclusion for any group built outside manifest validation, e.g.
 // directly in tests). Without this, a perItem key could be dropped by the other-class partition
 // or the "local" strip before its per-item merge ever runs.
-function excludingPerItem(group: SyncGroup, patterns: string[]): string[] {
+export function excludingPerItem(group: SyncGroup, patterns: string[]): string[] {
   const perItemKeys = group.perItem !== undefined ? Object.keys(group.perItem) : [];
   if (perItemKeys.length === 0) return patterns;
   return patterns.filter((p) => !perItemKeys.some((k) => keyMatchesAny(k, [p])));

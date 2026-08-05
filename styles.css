@@ -1390,6 +1390,12 @@ button.config-sync-add-row, button.config-sync-add-row:hover { background: none;
 .config-sync-rule-row + .config-sync-rule-row { border-top: 1px solid var(--background-modifier-border); }
 .config-sync-rule-mid { flex: 1; min-width: 0; font-size: var(--font-ui-small); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* Structural member rows (spec 2026-08-05-section-groups-and-member-menu-design.md §R3-A): the
+   scoped disclosure's read-only hint for a row whose "local" scope is just a disabled settings
+   card, not a rule the user wrote — the glyph itself dims via the existing .config-sync-dim
+   (defined above). */
+.config-sync-rule-hint { flex: none; color: var(--text-faint); font-style: italic; font-size: var(--font-ui-smaller); }
+
 /* Search context (定稿): the main card's labeled head while searching, and the inline
    explanation under an inert (uncheckable) hit. */
 .config-sync-section-head.is-plain { cursor: default; padding: var(--size-4-1) 0; }

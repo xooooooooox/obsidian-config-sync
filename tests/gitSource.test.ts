@@ -20,12 +20,12 @@ describe("classifyLsRemote", () => {
 describe("buildCloneArgs", () => {
   it("omits --sparse when the store is at repo root (subdir empty)", () => {
     expect(buildCloneArgs("main", "git@h:me/c.git", "")).toEqual([
-      "clone", "--depth=1", "--filter=blob:none", "--branch", "main", "git@h:me/c.git", ".",
+      "-c", "core.autocrlf=false", "clone", "--depth=1", "--filter=blob:none", "--branch", "main", "git@h:me/c.git", ".",
     ]);
   });
   it("adds --sparse when a subdir is given", () => {
     expect(buildCloneArgs("main", "git@h:me/c.git", "0-Extra/config-sync")).toEqual([
-      "clone", "--depth=1", "--filter=blob:none", "--sparse", "--branch", "main", "git@h:me/c.git", ".",
+      "-c", "core.autocrlf=false", "clone", "--depth=1", "--filter=blob:none", "--sparse", "--branch", "main", "git@h:me/c.git", ".",
     ]);
   });
 });

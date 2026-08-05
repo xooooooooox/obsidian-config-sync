@@ -47,6 +47,7 @@ import {
   buildItemDefs,
   CompileError,
   CustomGroupConfig,
+  defsForForeignItems,
   emptyItemConfig,
   enablementScopes,
   groupOwners,
@@ -57,6 +58,7 @@ import {
   compileItems,
   parentCardLabel,
   RegistryEnv,
+  structuralLocalElements,
 } from "./core/registry";
 import { drainEnabledOnLocal, isLegacySettings, mergeLegacyAppSliceItems, SCHEMA_UPGRADE_NOTICE } from "./core/settingsMigration";
 import { applySwitchList, captureSwitchList, localRealPath, parseSwitchList, readLocalSwitchList, subtractForceOff, SWITCH_LIST_GROUPS, switchDivergence, SwitchList, writeLocalSwitchList } from "./core/switchList";
@@ -164,7 +166,33 @@ interface BratInstance {
 
 // app.internalPlugins is not part of the public API; this is the community-standard access path for core plugins.
 interface InternalPluginsRegistry {
-  plugins: Record<string, { enabled: boolean; instance?: { id: string; name: string }; enable(): Promise<void> }>;
+  plugins: Record<string, { enabled: boolean; instance?: { id: string; name: string }; enable(): Promise<void>; disable(): Promise<void> }>;
+}
+
+// app.vault's internal config loader; not part of the public API. setupConfig() rebuilds `config`
+// as a fresh object from app.json + appearance.json (deleted keys handled) — the deterministic
+// replacement for "reload the app" (spec 2026-08-06-batch2-scroll-and-appearance-hotapply-design.md).
+interface VaultInternal {
+  config: { cssTheme?: string; enabledCssSnippets?: string[] };
+  setupConfig(): Promise<void>;
+}
+
+// app.customCss's internal surface: the in-memory enabled-snippets Set nothing else reconciles
+// from config, plus the snippet/theme appliers that read it.
+interface CustomCssInternal {
+  enabledSnippets: Set<string>;
+  readSnippets(): Promise<void>;
+  loadSnippets(): Promise<void>;
+  setTheme(cssTheme: string): void;
+}
+
+// app's internal appearance appliers; not part of the public API.
+interface AppInternal {
+  customCss: CustomCssInternal;
+  updateTheme(): void;
+  updateFontFamily(): void;
+  updateFontSize(): void;
+  updateAccentColor(): void;
 }
 
 export default class ConfigSyncPlugin extends Plugin {
@@ -196,6 +224,9 @@ export default class ConfigSyncPlugin extends Plugin {
   localStatuses: GroupStatus[] | null = null;
   private presentedStatuses: GroupStatus[] | null = null;
   private lastGroups: SyncGroup[] | null = null;
+  // The most recently loaded store.lock.json — the last-resort source for a not-installed
+  // group's display name (see displayName/displayParts).
+  private lastLock: StoreLock | null = null;
   // Compiled engine state (spec §6): the sync list is DERIVED from settings.items, never stored
   // directly. Recomputed on load and after every settings save (see saveSettings/recompile).
   private registryDefs: ItemDef[] = [];
@@ -205,10 +236,14 @@ export default class ConfigSyncPlugin extends Plugin {
   private remoteAutoCheckStartupTimer: number | null = null;
   // Per-refresh reader cache (#3): a compare (deepDiff) reuses the reader refreshRemoteChecks
   // already built for the same remote in this generation, instead of cloning the store again.
-  private readerCache = new ReaderCache<ExternalStoreReader>();
+  private readerCache = new ReaderCache<ExternalStoreReader>(() => Date.now());
   // Live progress for a global refresh (#3/#4b, option 2): non-null only while refreshRemoteChecks
   // is running, so the Sync Center can paint a working state before the first clone completes.
   private remoteRefreshProgress: { total: number; done: number } | null = null;
+  // R10: two overlapping refreshes shared one remoteRefreshProgress (done could pass total, and
+  // the first finisher nulled progress out from under the still-running second). A second call
+  // while one is in flight returns the SAME promise instead of starting a parallel run.
+  private remoteRefreshRun: Promise<void> | null = null;
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -264,7 +299,10 @@ export default class ConfigSyncPlugin extends Plugin {
   // groups in place — a bad edit must never silently wipe out the working sync list.
   private async recompile(): Promise<void> {
     const env = await this.registryEnv();
-    this.registryDefs = buildItemDefs(env);
+    // defsForForeignItems, not a bare buildItemDefs: settings.items can carry a selected-but-
+    // uninstalled plugin (e.g. install-on-apply's pending target), which env.plugins doesn't see
+    // yet — without the synthesized def that item would have no group to compile into.
+    this.registryDefs = defsForForeignItems(buildItemDefs(env), Object.keys(this.settings.items), env.betaIds);
     // Defense-in-depth (final-review fix): captured explicitly so "keep the last-good compiled
     // list on failure" is provable rather than incidental (mid-session this already happened by
     // omission — the catch branch never reassigned this.compiledGroups — but that's fragile to a
@@ -344,7 +382,6 @@ export default class ConfigSyncPlugin extends Plugin {
         },
         Platform.isMobile
       );
-      await this.backfillLabels(ctx);
     } catch (e) {
       console.error("Config Sync: status refresh failed", e);
     }
@@ -352,27 +389,15 @@ export default class ConfigSyncPlugin extends Plugin {
     this.notifySyncCenter();
   }
 
-  // Fills in any missing display-name label using runtime plugin/core names, and persists the
-  // manifest only if at least one label was added. Never throws into the caller.
-  private async backfillLabels(ctx: CoreContext): Promise<void> {
-    try {
-      const groups = await readGroups(ctx);
-      let changed = false;
-      for (const g of groups) {
-        if (g.label !== undefined) continue;
-        const resolved = this.displayName(g.name, g.label);
-        if (resolved !== g.name && resolved !== g.name.replace(/^plugin-/, "")) {
-          g.label = resolved;
-          changed = true;
-        }
-      }
-      if (changed) await writeGroups(ctx, groups);
-    } catch (e) {
-      console.error("Config Sync: label backfill skipped", e);
-    }
+  async refreshRemoteChecks(): Promise<void> {
+    if (this.remoteRefreshRun !== null) return this.remoteRefreshRun;
+    this.remoteRefreshRun = this.doRefreshRemoteChecks().finally(() => {
+      this.remoteRefreshRun = null;
+    });
+    return this.remoteRefreshRun;
   }
 
-  async refreshRemoteChecks(): Promise<void> {
+  private async doRefreshRemoteChecks(): Promise<void> {
     if (!Platform.isDesktop) return;
     // Exactly one bump per refresh (#3): every reader createReader builds in the loop below is
     // cached under this generation, so a same-cycle deepDiff({ reuse: true }) can reuse it
@@ -479,6 +504,7 @@ export default class ConfigSyncPlugin extends Plugin {
         } catch {
           lock = null;
         }
+        this.lastLock = lock;
         const availability: Record<string, Availability> = {};
         for (const g of groups) availability[g.name] = availabilityForGroup(g, this.pluginHost(), lock);
         // Keep the status bar's snapshot in step with THIS compute (it used to be refreshed
@@ -493,14 +519,15 @@ export default class ConfigSyncPlugin extends Plugin {
         // Membership truth (delta / coldstart / itemCount) uses the same compile as the store
         // side (selfListGroups): items whose plugin isn't installed here stay members instead of
         // ghosting into delta.added forever (2026-07-28 phone find).
+        const betaIds = new Set(Object.keys(this.settings.bratPluginIndex));
         let localList: SyncGroup[];
         try {
-          localList = selfListGroups(this.registryDefs, this.settings.items, this.settings.customGroups);
+          localList = selfListGroups(this.registryDefs, this.settings.items, this.settings.customGroups, betaIds);
         } catch {
           localList = this.compiledGroups; // best-effort fallback for any failure; in practice CompileError, which recompile() already surfaced as a Notice
         }
         const selfCopy = `${ctx.rootPath}/store/configdir/plugins/config-sync/data.json`;
-        const storeGroups = (await ctx.io.exists(selfCopy)) ? storeSelfCopyGroups(await ctx.io.read(selfCopy), this.registryDefs) : [];
+        const storeGroups = (await ctx.io.exists(selfCopy)) ? storeSelfCopyGroups(await ctx.io.read(selfCopy), this.registryDefs, betaIds) : [];
         const delta = syncListDelta(localList, storeGroups);
         let capturedAt: string | null = null;
         const lockPath = `${ctx.rootPath}/store.lock.json`;
@@ -537,8 +564,8 @@ export default class ConfigSyncPlugin extends Plugin {
       coldStartDismissed: () => this.coldStartDismissed(),
       setColdStartDismissed: (v) => this.setColdStartDismissed(v),
       resolvedPath: (g) => g.path.replace("{configDir}", this.app.vault.configDir),
-      displayName: (g) => this.displayName(g, this.lastGroups?.find((x) => x.name === g)?.label),
-      displayParts: (g) => this.displayParts(g, this.lastGroups?.find((x) => x.name === g)?.label),
+      displayName: (g) => this.displayName(g, this.lastGroups?.find((x) => x.name === g)?.label ?? this.lastLock?.groups[g]?.label),
+      displayParts: (g) => this.displayParts(g, this.lastGroups?.find((x) => x.name === g)?.label ?? this.lastLock?.groups[g]?.label),
       diffPair: async (name, rel, dir) => {
         try {
           const group = this.compiledGroups.find((g) => g.name === name);
@@ -614,7 +641,8 @@ export default class ConfigSyncPlugin extends Plugin {
           const local = readLocalSwitchList(name, await ctx.io.read(real));
           const stored = parseSwitchList(await ctx.io.read(store));
           if (local === null || stored === null) return null;
-          return switchDivergence(local, stored, ctx.switchExceptions[name] ?? []);
+          const masked = ctx.switchExceptions[name] ?? [];
+          return { ...switchDivergence(local, stored, masked), masked };
         } catch {
           return null;
         }
@@ -678,6 +706,7 @@ export default class ConfigSyncPlugin extends Plugin {
       remoteCheck: (name) => this.remoteChecks.get(name),
       refreshRemoteChecks: () => this.refreshRemoteChecks(),
       remoteRefreshProgress: () => this.remoteRefreshProgress,
+      readerGeneration: () => this.readerCache.generation(),
       deepDiff: async (remote, onPhase) => {
         const ctx = await this.coreContext();
         onPhase?.("fetch");
@@ -870,7 +899,29 @@ export default class ConfigSyncPlugin extends Plugin {
         if (p === undefined) throw new Error(`core plugin "${id}" does not exist in this Obsidian build`);
         await p.enable();
       },
+      disableCorePlugin: async (id) => {
+        const p = this.internalPlugins().plugins[id];
+        if (p === undefined) throw new Error(`core plugin "${id}" does not exist in this Obsidian build`);
+        await p.disable();
+      },
       reloadPluginManifests: () => this.pluginRegistry().loadManifests(),
+      reloadAppearance: async () => {
+        // Deterministic replacement for "reload the app" — verified sequence (design doc
+        // 2026-08-06-batch2-scroll-and-appearance-hotapply-design.md): re-read the config files,
+        // reconcile customCss's in-memory Set from it, rescan snippet files, then run the
+        // explicit appliers (vault.trigger("config-changed") does not run them).
+        const av = this.app.vault as unknown as VaultInternal;
+        const a = this.app as unknown as AppInternal;
+        await av.setupConfig();
+        a.customCss.enabledSnippets = new Set(av.config.enabledCssSnippets ?? []);
+        await a.customCss.readSnippets();
+        await a.customCss.loadSnippets();
+        a.customCss.setTheme(av.config.cssTheme ?? "");
+        a.updateTheme();
+        a.updateFontFamily();
+        a.updateFontSize();
+        a.updateAccentColor();
+      },
     };
   }
 
@@ -1031,7 +1082,7 @@ export default class ConfigSyncPlugin extends Plugin {
   }
 
   displayName(group: string, storedLabel?: string): string {
-    return displayLabelForGroup(group, this.pluginHost(), storedLabel);
+    return displayLabelForGroup(group, this.pluginHost(), storedLabel ?? this.lastLock?.groups[group]?.label);
   }
 
   displayParts(group: string, storedLabel?: string): GroupDisplayParts {
@@ -1082,6 +1133,11 @@ export default class ConfigSyncPlugin extends Plugin {
     return carrier === null ? {} : enablementScopes(this.registryDefs, this.settings, carrier);
   }
 
+  private structuralLocalElementsFor(group: string): Set<string> {
+    const carrier = this.carrierFor(group);
+    return carrier === null ? new Set<string>() : structuralLocalElements(this.registryDefs, this.settings, carrier);
+  }
+
   private memberScopesFor(group: string): Record<string, "desktop" | "mobile"> {
     const out: Record<string, "desktop" | "mobile"> = {};
     for (const [id, scope] of Object.entries(this.enablementScopesFor(group))) {
@@ -1098,14 +1154,16 @@ export default class ConfigSyncPlugin extends Plugin {
   // apart the way memberDecisionsFor alone did pre-fix (it only saw the structural
   // disabled-card "local", never localMembers).
   private memberDecisionsFor(group: string): MemberDecision[] {
-    const base = memberDecisionsFromScopes(this.enablementScopesFor(group));
+    const base = memberDecisionsFromScopes(this.enablementScopesFor(group), this.structuralLocalElementsFor(group));
     const carrier = this.carrierFor(group);
     const prefix = carrier === "core-plugins.json" ? "core:" : carrier === "community-plugins.json" ? "community:" : null;
     if (prefix === null) return base;
     const fromLocalMembers = this.settings.localMembers.filter((id) => id.startsWith(prefix)).map((id) => id.slice(prefix.length));
     if (fromLocalMembers.length === 0) return base;
     const decisions = new Map(base.map((d) => [d.id, d] as const));
-    for (const id of fromLocalMembers) decisions.set(id, { id, scope: "local" });
+    // An explicit localMembers pin is itself the "explicit source" — never structural, regardless
+    // of the card's enabled state it overrides.
+    for (const id of fromLocalMembers) decisions.set(id, { id, scope: "local", structural: false });
     return [...decisions.values()].sort((a, b) => a.id.localeCompare(b.id));
   }
 
@@ -1263,7 +1321,7 @@ export default class ConfigSyncPlugin extends Plugin {
       },
       // Schema v2 self copies carry items+customGroups, not a compiled groups array — core needs
       // the plugin's registry defs to compile them (storeSelfCopyGroups' contract).
-      storeListGroups: (json) => storeSelfCopyGroups(json, this.registryDefs),
+      storeListGroups: (json) => storeSelfCopyGroups(json, this.registryDefs, new Set(Object.keys(this.settings.bratPluginIndex))),
       now: () => new Date().toISOString(),
     };
   }
@@ -1388,7 +1446,9 @@ export default class ConfigSyncPlugin extends Plugin {
     // leftover — union the local list with the store self-copy's list so a pull can't leave
     // just-arrived data looking like deletable junk.
     const selfCopy = `${ctx.rootPath}/store/configdir/plugins/config-sync/data.json`;
-    const storeGroups = (await ctx.io.exists(selfCopy)) ? storeSelfCopyGroups(await ctx.io.read(selfCopy), this.registryDefs) : [];
+    const storeGroups = (await ctx.io.exists(selfCopy))
+      ? storeSelfCopyGroups(await ctx.io.read(selfCopy), this.registryDefs, new Set(Object.keys(this.settings.bratPluginIndex)))
+      : [];
     const out: { rel: string; name: string; path: string; size: number }[] = [];
     for (const lf of leftoverStoreRels(rels, [...this.compiledGroups, ...storeGroups])) {
       const st = await this.app.vault.adapter.stat(`${ctx.rootPath}/${lf.rel}`);

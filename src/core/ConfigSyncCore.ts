@@ -2,9 +2,9 @@ import { FileIO, ensureParentDir, isJunkPath, listFilesRecursive, pruneEmptyDirs
 import { FieldRule, GroupResult, hasChanges, StoreLock, SyncGroup, SyncManifest } from "./types";
 import { basename, groupStorePath, relativeTo, resolveGroupByStoreRel, sidecarStoreSuffix } from "./pathing";
 import { parseStoreLock, parseSyncManifest, validateSyncManifest } from "./manifest";
-import { applyTransform, captureTransform, classPatterns, contentUnchanged, stripPatterns } from "./modes";
+import { applyTransform, captureTransform, classPatterns, contentUnchanged, excludingPerItem, stripPatterns } from "./modes";
 import { classifyMerge, MergeConflict, MergePlan } from "./merge";
-import { SELF_GROUP_NAME } from "./catalog";
+import { coreSettingsIds, SELF_GROUP_NAME } from "./catalog";
 import { isPlainObject, keyMatchesAny } from "./sanitize";
 import { readPerItemArray, scopeOf } from "./perItem";
 import { applySwitchList, captureSwitchList, localRealPath, parseSwitchList, readLocalSwitchList, subtractForceOff, SWITCH_LIST_GROUPS, SwitchList, switchListsEqual, writeLocalSwitchList } from "./switchList";
@@ -25,7 +25,11 @@ export interface PluginHost {
   getAppVersion(): string;
   isCorePluginEnabled(id: string): boolean;
   enableCorePlugin(id: string): Promise<void>;
+  disableCorePlugin(id: string): Promise<void>;
   reloadPluginManifests(): Promise<void>;
+  // Re-reads app.json/appearance.json into memory and re-applies the appearance family (theme,
+  // snippets, accent/font) to the running app — the deterministic replacement for "reload the app".
+  reloadAppearance(): Promise<void>;
 }
 
 export interface GroupsIO {
@@ -79,10 +83,11 @@ export function overlayGroup(ctx: CoreContext, group: SyncGroup, jsons: (string 
 // forced to `scope: "local"` whether or not the group already has a rule for it, promoting a
 // plain-mode group to "fields" so the strip actually applies. Mirrors overlayGroup's own guard:
 // a FileRule-encrypted group owns whole-file encryption and is never rewritten to "fields" here
-// either.
+// either — and neither is a mode:"encrypted" group, which owns whole-file encryption the same
+// way FileRule does and must never be demoted to plaintext fields mode.
 export function withContractLocals(group: SyncGroup, contractLocalPatterns: string[]): SyncGroup {
   if (contractLocalPatterns.length === 0) return group;
-  if (group.fileRule !== undefined) return group;
+  if (group.fileRule !== undefined || group.mode === "encrypted") return group;
   const contractSet = new Set(contractLocalPatterns);
   const existing = group.fields ?? [];
   const existingPatterns = new Set(existing.map((f) => f.pattern));
@@ -160,7 +165,13 @@ export function groupForStoreRel(groups: SyncGroup[], rel: string): { name: stri
   if (g === undefined) return { name: "", itemRel: rel }; // store metadata / unmatched
   const sp = groupStorePath(g.path);
   const inner = rel.slice("store/".length);
-  return { name: g.name, itemRel: g.type === "file" ? basename(sp) : inner.slice(sp.length + 1) };
+  if (g.type !== "file") return { name: g.name, itemRel: inner.slice(sp.length + 1) };
+  // A per-device sidecar shares its group's main file name — label it apart, or the remote
+  // pane and pull reports show two identical "app.json" rows with no way to tell which one
+  // carries the device-scoped values.
+  const m = inner.slice(sp.length).match(/^\.__scopes__\.(desktop|mobile)\.json$/);
+  const label = basename(sp);
+  return { name: g.name, itemRel: m === null ? label : `${label} · ${m[1]} values` };
 }
 
 function excFor(ctx: CoreContext, name: string): string[] {
@@ -185,18 +196,87 @@ function refreshLockDesktopOnly(
   return plugins.isDesktopOnly(pluginId) ? { ...rest, desktopOnly: true } : rest;
 }
 
-// The enabled-set delta an on/off-list apply writes, as report lines ("turns on: a, b").
-function switchDeltaMessages(before: SwitchList | null, after: SwitchList): string[] {
+// The enabled-set delta an on/off-list apply computes (before-list vs final-list of enabled ids).
+function switchDelta(before: SwitchList | null, after: SwitchList): { on: string[]; off: string[] } {
   const enabledIds = (l: SwitchList | null): Set<string> =>
     l === null ? new Set<string>() : new Set(Array.isArray(l) ? l : Object.keys(l).filter((k) => l[k] === true));
   const prev = enabledIds(before);
   const next = enabledIds(after);
-  const on = [...next].filter((id) => !prev.has(id)).sort();
-  const off = [...prev].filter((id) => !next.has(id)).sort();
+  return {
+    on: [...next].filter((id) => !prev.has(id)).sort(),
+    off: [...prev].filter((id) => !next.has(id)).sort(),
+  };
+}
+
+// switchDelta as report lines ("turns on: a, b").
+function switchDeltaMessages(delta: { on: string[]; off: string[] }): string[] {
   const lines: string[] = [];
-  if (on.length > 0) lines.push(`turns on: ${on.join(", ")}`);
-  if (off.length > 0) lines.push(`turns off: ${off.join(", ")}`);
+  if (delta.on.length > 0) lines.push(`turns on: ${delta.on.join(", ")}`);
+  if (delta.off.length > 0) lines.push(`turns off: ${delta.off.join(", ")}`);
   return lines;
+}
+
+// Switch-list groups whose delta is applied to the running app immediately after their carrier
+// file write (spec 2026-08-05-onoff-apply-runtime-design.md): core and community plugins. The
+// third switch-list carrier, "enabled-css-snippets", has no per-id runtime hook — it hot-applies
+// through the appearance-family pass below instead (spec
+// 2026-08-06-batch2-scroll-and-appearance-hotapply-design.md).
+const RUNTIME_SWITCH_GROUPS: ReadonlySet<string> = new Set(["core-plugins", "community-plugins"]);
+
+// The appearance card's own file group, its two companion dir groups, and the snippet
+// switch-list carrier that writes into appearance.json — the file set reloadAppearance()
+// re-applies in one pass (spec 2026-08-06-batch2-scroll-and-appearance-hotapply-design.md).
+const APPEARANCE_FAMILY: ReadonlySet<string> = new Set(["appearance", "themes", "snippets", "enabled-css-snippets"]);
+
+// Shared post-pass for apply()/applyWithActions(): if this run wrote or deleted any
+// appearance-family file, hot-applies the appearance family to the running app once for the
+// whole run instead of leaving every family result flagging needsAppReload. Honest on failure —
+// no silent fallback, and needsAppReload stays true so the reload banner still fires.
+async function hotApplyAppearanceFamily(ctx: CoreContext, results: GroupResult[]): Promise<void> {
+  const family = results.filter((r) => APPEARANCE_FAMILY.has(r.group) && (r.filesWritten.length > 0 || r.filesDeleted.length > 0));
+  if (family.length === 0) return;
+  try {
+    await ctx.plugins.reloadAppearance();
+    for (const r of family) r.needsAppReload = false;
+  } catch (e) {
+    const message = (e as Error).message;
+    for (const r of family) {
+      r.messages.push(`appearance hot-apply failed — reload the app to see the applied appearance: ${message}`);
+      if (r.status === "ok") r.status = "warning";
+    }
+  }
+}
+
+// Applies a switch-list delta to the running app: core ids via enable/disableCorePlugin,
+// community ids via the non-persistent enable/disablePlugin (the carrier file is already
+// written — the AndSave variants would rewrite it). Self-protection: config-sync is never
+// runtime-disabled mid-apply (see applyGroup's cycle guard for the same reasoning). Per-id
+// failures (including an unknown core id) are isolated — a warn message is recorded and the
+// remaining ids still switch.
+async function applyRuntimeSwitchDelta(ctx: CoreContext, groupName: string, delta: { on: string[]; off: string[] }, result: GroupResult): Promise<void> {
+  const isCore = groupName === "core-plugins";
+  const warn = (message: string): void => {
+    result.messages.push(message);
+    if (result.status === "ok") result.status = "warning";
+  };
+  for (const id of delta.on) {
+    try {
+      await (isCore ? ctx.plugins.enableCorePlugin(id) : ctx.plugins.enablePlugin(id));
+    } catch (e) {
+      warn((e as Error).message);
+    }
+  }
+  for (const id of delta.off) {
+    if (!isCore && id === "config-sync") {
+      warn("config-sync stays running until reload");
+      continue;
+    }
+    try {
+      await (isCore ? ctx.plugins.disableCorePlugin(id) : ctx.plugins.disablePlugin(id));
+    } catch (e) {
+      warn((e as Error).message);
+    }
+  }
 }
 
 function emptyResult(group: string, needsAppReload: boolean): GroupResult {
@@ -281,11 +361,13 @@ function baseHasStalePerItemElements(effGroup: SyncGroup, existing: string): boo
 // re-scoped field), so a base written before the field became local can still carry that key after
 // contentUnchanged reports equal. The store must never hold a device-local value, so this forces
 // the rewrite that captureTransform's strip has already removed the key from. A per-item key is
-// never a scope:"local" field (it lives in group.perItem, not group.fields), so stripPatterns
-// never overlaps the per-item guard's responsibility. No-op when the group has no local patterns,
-// or the existing content isn't a parseable JSON object.
+// governed exclusively by the perItem machinery (capturePerItemArray/applyPerItemArray), never by
+// this top-level guard, even when a stray FieldRule pattern also happens to match its key name —
+// so stripPatterns is filtered through the same excludingPerItem exclusion the strip paths use,
+// or a legitimate perItem key would permanently flag the base as stale (round-2026-08-05 fix). No-op
+// when the group has no local patterns, or the existing content isn't a parseable JSON object.
 export function baseHasStaleLocalKeys(effGroup: SyncGroup, existing: string): boolean {
-  const patterns = stripPatterns(effGroup);
+  const patterns = excludingPerItem(effGroup, stripPatterns(effGroup));
   if (patterns.length === 0) return false;
   let parsed: unknown;
   try {
@@ -338,9 +420,15 @@ export async function capture(ctx: CoreContext, names?: string[], onProgress?: P
       if (result.status !== "error") {
         const version = ctx.plugins.getInstalledPluginVersion(pluginId);
         if (version !== null) {
-          lock.groups[group.name] = ctx.plugins.isDesktopOnly(pluginId)
+          // Only the canonical "plugin-<id>" group is the community label's home — a companion
+          // dir (path `{configDir}/plugins/<id>`, group name = folder basename) or a custom rule
+          // scoped to a plugin path also resolves a pluginId here but must never carry the label,
+          // or displayLabelForGroup's storedLabel-?? -name fallback renders it as "Name › Name".
+          const label = group.name === `plugin-${pluginId}` ? ctx.plugins.getInstalledPluginName(pluginId) : null;
+          const entry = ctx.plugins.isDesktopOnly(pluginId)
             ? { sourcePluginVersion: version, desktopOnly: true }
             : { sourcePluginVersion: version };
+          lock.groups[group.name] = label !== null ? { ...entry, label } : entry;
           // Version-only refresh: content is byte-identical but the store recorded an older
           // version (local > store drift). captureGroup produces no file change, so without this
           // the run report reads "no changes" even though the store's recorded version changed.
@@ -357,7 +445,11 @@ export async function capture(ctx: CoreContext, names?: string[], onProgress?: P
         if (prev !== undefined) lock.groups[group.name] = refreshLockDesktopOnly(prev, group, ctx.plugins); // errored capture keeps the last known version
       }
     } else if (result.status !== "error") {
-      lock.groups[group.name] = { sourceAppVersion: ctx.plugins.getAppVersion() };
+      // Only core-plugin groups (daily-notes, templates, …) resolve to a runtime name — Obsidian
+      // cards (app/appearance/hotkeys…) and switch-list carriers have none to record.
+      const label = coreSettingsIds().has(group.name) ? ctx.plugins.getCorePluginName(group.name) : null;
+      const entry = { sourceAppVersion: ctx.plugins.getAppVersion() };
+      lock.groups[group.name] = label !== null ? { ...entry, label } : entry;
     }
     results.push(result);
   }
@@ -466,6 +558,7 @@ export async function apply(ctx: CoreContext, groupNames: string[], onProgress?:
     results.push(await applyGroup(ctx, requireGroup(manifest, name)));
     done++;
   }
+  await hotApplyAppearanceFamily(ctx, results);
   return results;
 }
 
@@ -654,6 +747,16 @@ export async function captureWithActions(ctx: CoreContext, items: CaptureItem[],
   return results;
 }
 
+// Cold-bootstrap ordering (spec C §3): a staged batch can contain BRAT itself (a catalog
+// install) alongside BRAT-managed plugins (installed via installViaBrat, which requires BRAT to
+// already be on disk). Community plugin group names are "plugin-<id>" (pluginIdForGroup's
+// convention); a name outside it never carries a BRAT-delegated install, so it always sorts into
+// the catalog-first bucket. Stable: each bucket preserves the input's relative order.
+export function orderInstallsCatalogFirst(names: string[], isBrat: (pluginId: string) => boolean): string[] {
+  const bratManaged = (name: string): boolean => name.startsWith("plugin-") && isBrat(name.slice("plugin-".length));
+  return [...names.filter((n) => !bratManaged(n)), ...names.filter((n) => bratManaged(n))];
+}
+
 export async function applyWithActions(
   ctx: CoreContext,
   items: ApplyItem[],
@@ -725,6 +828,7 @@ export async function applyWithActions(
     }
     done++;
   }
+  await hotApplyAppearanceFamily(ctx, results);
   return results;
 }
 
@@ -754,6 +858,7 @@ async function applyGroup(ctx: CoreContext, group: SyncGroup): Promise<GroupResu
       const exc = excFor(ctx, group.name);
       const storeSwitchList = SWITCH_LIST_GROUPS.has(group.name) ? parseSwitchList(storeContent) : null;
       let content: string;
+      let delta: { on: string[]; off: string[] } | null = null;
       if (storeSwitchList !== null) {
         const localSwitchList = localContent !== null ? readLocalSwitchList(group.name, localContent) : null;
         const merged = applySwitchList(storeSwitchList, localSwitchList, exc);
@@ -761,7 +866,8 @@ async function applyGroup(ctx: CoreContext, group: SyncGroup): Promise<GroupResu
         content = writeLocalSwitchList(group.name, finalList, localContent);
         // Name the plugins this write toggles (spec 2026-07-17): a store list lacking a
         // just-enabled plugin turns it off persistently — that must be visible in the report.
-        for (const line of switchDeltaMessages(localSwitchList, finalList)) result.messages.push(line);
+        delta = switchDelta(localSwitchList, finalList);
+        for (const line of switchDeltaMessages(delta)) result.messages.push(line);
       } else {
         const sidecarPath = store + sidecarStoreSuffix(ctx.deviceClass);
         const existingSidecar = (await ctx.io.exists(sidecarPath)) ? await ctx.io.read(sidecarPath) : null;
@@ -769,6 +875,13 @@ async function applyGroup(ctx: CoreContext, group: SyncGroup): Promise<GroupResu
         content = await applyTransform(effGroup, storeContent, localContent, ctx.passphrase, ctx.deviceClass, existingSidecar);
       }
       await writeClassified(ctx, real, content, basename(real), result);
+      // Runtime switching happens AFTER the carrier file write lands (same ordering rationale
+      // as StatePrelude.finish above): an enabling plugin reads its data.json on load, so the
+      // applied state must already be on disk before the delta is switched at runtime.
+      if (delta !== null && RUNTIME_SWITCH_GROUPS.has(group.name)) {
+        result.needsAppReload = false;
+        await applyRuntimeSwitchDelta(ctx, group.name, delta, result);
+      }
     } else {
       const storeFiles = await listFilesRecursive(ctx.io, store);
       const rels = storeFiles.map((f) => relativeTo(store, f));

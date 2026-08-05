@@ -48,12 +48,13 @@ describe("leftoverStoreRels", () => {
 });
 
 const NO_DEFS: ItemDef[] = [];
+const NO_BETA_IDS: ReadonlySet<string> = new Set();
 
 describe("storeSelfCopyGroups", () => {
   it("parses the schema-v1 groups array and tolerates malformed json", () => {
-    expect(storeSelfCopyGroups('{"groups":[{"name":"x","path":"p","type":"file","devices":"all"}]}', NO_DEFS).map((g) => g.name)).toEqual(["x"]);
-    expect(storeSelfCopyGroups("not json", NO_DEFS)).toEqual([]);
-    expect(storeSelfCopyGroups('{"noGroups":true}', NO_DEFS)).toEqual([]);
+    expect(storeSelfCopyGroups('{"groups":[{"name":"x","path":"p","type":"file","devices":"all"}]}', NO_DEFS, NO_BETA_IDS).map((g) => g.name)).toEqual(["x"]);
+    expect(storeSelfCopyGroups("not json", NO_DEFS, NO_BETA_IDS)).toEqual([]);
+    expect(storeSelfCopyGroups('{"noGroups":true}', NO_DEFS, NO_BETA_IDS)).toEqual([]);
   });
 
   // Schema v2 no longer persists the compiled `groups` list — the store copy carries
@@ -69,7 +70,7 @@ describe("storeSelfCopyGroups", () => {
         items: { "community:demo": { enabled: true, companions: [] } },
         customGroups: [{ name: "my-rule", path: "docs/x.md", type: "file", devices: "all" }],
       });
-      const names = storeSelfCopyGroups(json, defs)
+      const names = storeSelfCopyGroups(json, defs, NO_BETA_IDS)
         .map((g) => g.name)
         .sort();
       expect(names).toEqual(["community-plugins", "my-rule", "plugin-demo"]);
@@ -84,7 +85,7 @@ describe("storeSelfCopyGroups", () => {
           },
         },
       });
-      const groups = storeSelfCopyGroups(json, defs);
+      const groups = storeSelfCopyGroups(json, defs, NO_BETA_IDS);
       const byName = new Map(groups.map((g) => [g.name, g]));
       expect([...byName.keys()].sort()).toEqual(["community-plugins", "foreign", "plugin-foreign"]);
       expect(byName.get("plugin-foreign")?.path).toBe("{configDir}/plugins/foreign/data.json");
@@ -101,7 +102,7 @@ describe("storeSelfCopyGroups", () => {
           { name: "dup", path: "b.md", type: "file", devices: "all" },
         ],
       });
-      expect(storeSelfCopyGroups(json, defs)).toEqual([]);
+      expect(storeSelfCopyGroups(json, defs, NO_BETA_IDS)).toEqual([]);
     });
   });
 });
@@ -119,20 +120,20 @@ describe("selfListGroups (delta ghost regression, spec 2026-07-28 §2)", () => {
   };
 
   it("keeps items whose plugin has no local def", () => {
-    const names = selfListGroups(defs, items, []).map((g) => g.name);
+    const names = selfListGroups(defs, items, [], NO_BETA_IDS).map((g) => g.name);
     expect(names).toContain("plugin-omnisearch");
     expect(names).toContain("plugin-obsidian-git");
   });
 
   it("identical items on both sides produce an empty delta", () => {
-    const local = selfListGroups(defs, items, []);
-    const store = selfListGroups(defs, items, []);
+    const local = selfListGroups(defs, items, [], NO_BETA_IDS);
+    const store = selfListGroups(defs, items, [], NO_BETA_IDS);
     expect(syncListDelta(local, store)).toEqual({ added: [], removed: [] });
   });
 
   it("a store-only item still reports added", () => {
-    const local = selfListGroups(defs, items, []);
-    const store = selfListGroups(defs, { ...items, "community:newone": { enabled: true, companions: [] } }, []);
+    const local = selfListGroups(defs, items, [], NO_BETA_IDS);
+    const store = selfListGroups(defs, { ...items, "community:newone": { enabled: true, companions: [] } }, [], NO_BETA_IDS);
     expect(syncListDelta(local, store).added).toContain("plugin-newone");
   });
 });

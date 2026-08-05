@@ -8,11 +8,19 @@ export function remoteReaderKey(remote: Remote): string {
     : `git:${remote.name}:${remote.url}:${remote.branch}:${remote.subdir ?? ""}`;
 }
 
+// A same-generation hit older than this is treated as a miss: with auto-check off (or within
+// its refresh window) a generation can live for hours, and serving a days-old clone as "remote
+// matches" is worse than the extra clone a fresh read costs.
+export const REUSE_MAX_AGE_MS = 300_000;
+
 // Generation-scoped reader cache. A cached entry is reusable only while its generation matches
-// the cache's current generation; bumping the generation invalidates every entry logically.
+// the cache's current generation AND it isn't older than REUSE_MAX_AGE_MS; bumping the
+// generation invalidates every entry logically.
 export class ReaderCache<T> {
   private gen = 0;
-  private entries = new Map<string, { value: T; gen: number }>();
+  private entries = new Map<string, { value: T; gen: number; at: number }>();
+
+  constructor(private readonly now: () => number) {}
 
   generation(): number {
     return this.gen;
@@ -22,14 +30,16 @@ export class ReaderCache<T> {
     this.gen++;
   }
 
-  // Returns the cached value only if it was stored in the current generation; else undefined.
+  // Returns the cached value only if it was stored in the current generation and within
+  // REUSE_MAX_AGE_MS of now; else undefined.
   getReusable(key: string): T | undefined {
     const hit = this.entries.get(key);
-    return hit !== undefined && hit.gen === this.gen ? hit.value : undefined;
+    if (hit === undefined || hit.gen !== this.gen) return undefined;
+    return this.now() - hit.at <= REUSE_MAX_AGE_MS ? hit.value : undefined;
   }
 
   store(key: string, value: T): void {
-    this.entries.set(key, { value, gen: this.gen });
+    this.entries.set(key, { value, gen: this.gen, at: this.now() });
   }
 
   clear(): void {

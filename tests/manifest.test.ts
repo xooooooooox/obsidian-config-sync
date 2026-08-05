@@ -281,6 +281,28 @@ describe("parseStoreLock widened schema", () => {
     expect(lock.groups["b"]).toEqual({ sourcePluginVersion: "2.0.0" });
     expect(lock.groups["c"]).toEqual({ sourcePluginVersion: "3.0.0" });
   });
+
+  it("round-trips a group label; omits it when absent or blank", () => {
+    const lock = parseStoreLock(
+      JSON.stringify({
+        capturedAt: "2026-01-01T00:00:00Z",
+        groups: {
+          a: { sourcePluginVersion: "1.0.0", label: "BRAT" },
+          b: { sourcePluginVersion: "2.0.0", label: "   " },
+          c: { sourcePluginVersion: "3.0.0" },
+        },
+      })
+    );
+    expect(lock.groups["a"]).toEqual({ sourcePluginVersion: "1.0.0", label: "BRAT" });
+    expect(lock.groups["b"]).toEqual({ sourcePluginVersion: "2.0.0" });
+    expect(lock.groups["c"]).toEqual({ sourcePluginVersion: "3.0.0" });
+  });
+
+  it("rejects a non-string label", () => {
+    expect(() =>
+      parseStoreLock(JSON.stringify({ capturedAt: "t", groups: { a: { sourcePluginVersion: "1.0.0", label: 42 } } }))
+    ).toThrow('store.lock.json group "a" has a "label" that isn\'t text');
+  });
 });
 
 describe("group name validation allows uppercase", () => {

@@ -217,12 +217,16 @@ export function versionLine(a: Availability): { text: string; tone: "gray" | "am
 // The lead number is the TOTAL staged across every section (matching the section heads and
 // the Apply button); the non-main sections are a composition breakdown — subsets of the
 // total, so no "+" (batch: footer consistency). `main` here is main-section staged rows.
-export function footerSummary(main: number, outdated: number, disabled: number, toInstall: number): string {
+// `disabled` is every staged disabled row (feeds the total, spec #5-B fix round 2); a
+// carrier-synced or "Keep disabled" row stages settings-only and belongs in that total but not
+// in the "to enable" phrase, so `disabledEnableCount` — a real resolved enable only — drives
+// that qualifier separately.
+export function footerSummary(main: number, outdated: number, disabled: number, toInstall: number, disabledEnableCount: number): string {
   const total = main + outdated + disabled + toInstall;
   if (total === 0) return "";
   const parts = [`${total} selected`];
   if (outdated > 0) parts.push(`${outdated} to update`);
-  if (disabled > 0) parts.push(`${disabled} to enable`);
+  if (disabledEnableCount > 0) parts.push(`${disabledEnableCount} to enable`);
   if (toInstall > 0) parts.push(`${toInstall} to install`);
   return parts.join(" · ");
 }
@@ -241,13 +245,20 @@ export const MEMBER_PUBLISH_NOTE = "Your choices are saved on this device — ca
 export interface MemberDecision {
   id: string;
   scope: "local" | "desktop" | "mobile";
+  // Structural (spec 2026-08-05-section-groups-and-member-menu-design.md §R3-A): true iff the
+  // "local" scope exists solely because the item's settings-sync card is off — not a rule the
+  // user pinned (no localMembers entry, no enabledOn). Always false for desktop/mobile scopes.
+  structural: boolean;
 }
 
 // Every per-member decision worth a note row: ⌂ local exceptions plus device-class rules.
-export function memberDecisionsFromScopes(scopes: Record<string, RuleScope>): MemberDecision[] {
+// `structuralIds` names elements whose "local" scope is structural (registry.ts's
+// structuralLocalElements) — the derivation into MemberDecision.structural happens here, in the
+// pure layer, rather than being handed down as a pre-computed per-decision flag.
+export function memberDecisionsFromScopes(scopes: Record<string, RuleScope>, structuralIds: ReadonlySet<string>): MemberDecision[] {
   return Object.entries(scopes)
     .filter((e): e is [string, "local" | "desktop" | "mobile"] => e[1] !== "all")
-    .map(([id, scope]) => ({ id, scope }))
+    .map(([id, scope]) => ({ id, scope, structural: scope === "local" && structuralIds.has(id) }))
     .sort((a, b) => a.id.localeCompare(b.id));
 }
 
@@ -345,4 +356,68 @@ export function switchBothWaysCaption(noun: "plugin" | "snippet"): string {
   return noun === "snippet"
     ? "Bulk Apply or Capture resolves every snippet one way. Pin per-snippet devices on the Appearance card in Settings."
     : "Bulk Apply or Capture resolves every plugin one way. Pin the ones that differ on purpose below.";
+}
+
+// ── Enablement single entry (spec 2026-08-06-enablement-single-entry-design.md #5-B) ─────────
+
+export type EnablementCarrier = "core-plugins" | "community-plugins";
+
+// The switch-list group that carries a plugin's on/off state: community items compile as
+// `plugin-<id>`; core items ARE their carrier ladder's element id (no prefix).
+export function enablementCarrierFor(itemGroup: string): EnablementCarrier {
+  return itemGroup.startsWith("plugin-") ? "community-plugins" : "core-plugins";
+}
+
+// True when that carrier is itself a synced (compiled) item — the on/off card then owns
+// enablement outright, and the disabled item's own per-card policy never runs.
+export function carrierIsSynced(itemGroup: string, compiledGroupNames: readonly string[]): boolean {
+  return compiledGroupNames.includes(enablementCarrierFor(itemGroup));
+}
+
+export type MemberFate = "turns-on" | "stays-off" | "rule";
+
+// Pure derivation from the carrier's existing divergence data: masked (a per-plugin rule or
+// This-device pin) always wins — it excludes the member from applySide already, but a fate
+// still needs to say WHY the member stays off rather than blaming "off everywhere".
+export function memberFate(element: string, applySide: readonly string[], masked: boolean): MemberFate {
+  if (masked) return "rule";
+  return applySide.includes(element) ? "turns-on" : "stays-off";
+}
+
+const ENABLEMENT_CARRIER_LABEL: Record<EnablementCarrier, string> = {
+  "core-plugins": "Core plugins on/off",
+  "community-plugins": "Community plugins on/off",
+};
+
+// Collapsed-row pill — turns-on members only (copy final, spec #5-B).
+export function fatePillText(carrier: EnablementCarrier): string {
+  return `⏻ turns on with ${ENABLEMENT_CARRIER_LABEL[carrier]}`;
+}
+
+// Expanded-card static line replacing the On-apply policy row (copy final, spec #5-B).
+export function fateLineText(carrier: EnablementCarrier, fate: MemberFate): string {
+  if (fate === "turns-on") return `enablement follows ${ENABLEMENT_CARRIER_LABEL[carrier]}`;
+  if (fate === "rule") return "follows its per-plugin rule";
+  return "stays off — off on your other devices too";
+}
+
+// Disabled-section note when the section holds at least one carrier-synced row (copy final,
+// spec #5-B); fallback contexts keep SECTION_NOTES.disabled.
+export const DISABLED_CARRIER_SYNCED_NOTE = "Settings sync either way — whether a plugin turns on follows the on/off card.";
+
+// The footer's "N to enable" must count only a REAL policy enable — a carrier-synced disabled
+// row always resolves to "none" (fix round 1 #1) and must never contribute to that count.
+export function isEnableAction(action: StateAction): boolean {
+  return action === "enable" || action === "update-enable";
+}
+
+// Fix round 1 #3 (verbatim copy): the pre-existing "applying just turns the plugin on" /
+// "enables the plugin only" notes lie once the carrier owns enablement — carrier-unsynced rows
+// keep the old note byte-identical.
+export function disabledInSyncNote(carrierSynced: boolean): string {
+  return carrierSynced ? "identical to the store — nothing to apply here" : "identical to the store — applying just turns the plugin on";
+}
+
+export function disabledNoSettingsNote(carrierSynced: boolean): string {
+  return carrierSynced ? "no settings to sync yet" : "no settings to apply — enables the plugin only";
 }

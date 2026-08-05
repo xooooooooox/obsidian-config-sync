@@ -86,7 +86,7 @@ describe("createGitReader", () => {
   });
 
   it("fails with a contextual error for an unreachable remote", async () => {
-    await expect(createGitReader("/no/such/repo", "main", "x", null)).rejects.toThrow("git clone");
+    await expect(createGitReader("/no/such/repo", "main", "x", null)).rejects.toThrow("git -c core.autocrlf=false clone");
   });
 
   // Local file remotes never consult a credential helper, so this proves git accepts the

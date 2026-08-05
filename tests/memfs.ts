@@ -117,6 +117,9 @@ export class FakePlugins {
   coreEnabled = new Set<string>();
   desktopOnlyIds = new Set<string>();
   log: string[] = [];
+  // Ids that throw on the next enable/disable/enable-core/disable-core call (runtime-switch
+  // failure injection — one stubborn plugin must not abort the rest of a switch-list apply).
+  failIds = new Set<string>();
 
   getInstalledPluginVersion(id: string): string | null {
     return this.installed.get(id) ?? null;
@@ -128,10 +131,12 @@ export class FakePlugins {
     return this.enabled.has(id);
   }
   async disablePlugin(id: string): Promise<void> {
+    if (this.failIds.has(id)) throw new Error(`fake disable failed: ${id}`);
     this.enabled.delete(id);
     this.log.push(`disable:${id}`);
   }
   async enablePlugin(id: string): Promise<void> {
+    if (this.failIds.has(id)) throw new Error(`fake enable failed: ${id}`);
     this.enabled.add(id);
     this.log.push(`enable:${id}`);
   }
@@ -157,10 +162,21 @@ export class FakePlugins {
     return this.coreEnabled.has(id);
   }
   async enableCorePlugin(id: string): Promise<void> {
+    if (this.failIds.has(id)) throw new Error(`fake enable failed: ${id}`);
     this.coreEnabled.add(id);
     this.log.push(`enable-core:${id}`);
   }
+  async disableCorePlugin(id: string): Promise<void> {
+    if (this.failIds.has(id)) throw new Error(`fake disable failed: ${id}`);
+    this.coreEnabled.delete(id);
+    this.log.push(`disable-core:${id}`);
+  }
   async reloadPluginManifests(): Promise<void> {
     this.log.push("reload-manifests");
+  }
+  failAppearance = false; // when true, reloadAppearance throws (hot-apply failure injection)
+  async reloadAppearance(): Promise<void> {
+    if (this.failAppearance) throw new Error("fake appearance reload failed");
+    this.log.push("reload-appearance");
   }
 }
