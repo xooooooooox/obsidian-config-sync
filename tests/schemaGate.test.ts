@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { drainEnabledOnLocal, isLegacySettings, mergeLegacyAppSliceItems, SCHEMA_UPGRADE_NOTICE } from "../src/core/settingsMigration";
+import { drainEnabledOnLocal, isLegacySettings, mergeLegacyAppSliceItems, sanitizeMemberRules, SCHEMA_UPGRADE_NOTICE } from "../src/core/settingsMigration";
+import type { MemberRule } from "../src/core/types";
 import { emptyItemConfig, ItemConfig } from "../src/core/registry";
 
 // spec 2026-07-25-unified-card-design.md §6, D13: blocking upgrade — no data migration, no
@@ -147,5 +148,20 @@ describe("drainEnabledOnLocal", () => {
     expect(s.localMembers).toEqual(["community:a"]);
     expect(s.items["community:a"]!.enabledOn).toBeUndefined();
     expect(drainEnabledOnLocal(s)).toBe(false); // idempotent
+  });
+});
+
+describe("sanitizeMemberRules (task 2, single-source against MEMBER_RULES)", () => {
+  it("keeps every valid MemberRule value untouched", () => {
+    const s = { memberRules: { "community:a": "always-here", "core:b": "desktop" } as Record<string, MemberRule> };
+    expect(sanitizeMemberRules(s)).toBe(false);
+    expect(s.memberRules).toEqual({ "community:a": "always-here", "core:b": "desktop" });
+  });
+
+  it("drops an entry whose value isn't a real MemberRule (malformed/foreign data.json)", () => {
+    const s = { memberRules: { "community:a": "local", "community:b": "always-here" } as unknown as Record<string, MemberRule> };
+    expect(sanitizeMemberRules(s)).toBe(true);
+    expect(s.memberRules).toEqual({ "community:b": "always-here" });
+    expect(sanitizeMemberRules(s)).toBe(false); // idempotent
   });
 });

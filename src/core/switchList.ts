@@ -136,6 +136,16 @@ export function memberUniverse(store: SwitchList | null, local: SwitchList | nul
   return [...new Set([...idsOf(store), ...idsOf(local)])];
 }
 
+// Whether an id/key is ON in a SwitchList — array presence / map truthy value, the exact reading
+// applySwitchList's own exception pass-through relies on for a masked id (task-2 fix: mask
+// producers must derive "locally on" from this PERSISTED content, never from a live runtime
+// query, which can diverge — see normalizeMemberRule's callers in main.ts). A null list
+// (unreadable/absent local file) counts as off.
+export function switchListMemberOn(list: SwitchList | null, id: string): boolean {
+  if (list === null) return false;
+  return Array.isArray(list) ? list.includes(id) : list[id] === true;
+}
+
 /**
  * Capture: remove excepted ids from local before storing.
  * Arrays: remove excepted strings, preserve order.

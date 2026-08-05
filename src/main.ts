@@ -38,7 +38,7 @@ interface SecretStore {
 }
 import { BratIndex, parseBratRepoList, resolveBratIndex } from "./core/bratIndex";
 import { type CatalogSection, corePluginFile, displayLabelForGroup, findGroupByName, listBetaSections, listCoreSections, listDiscovered, listOptionSections, listPluginSections, SELF_GROUP_NAME, setCorePluginIds } from "./core/catalog";
-import { Availability, availabilityForGroup, desktopOnlyDrift, desktopOnlyPluginIds, scopedAwayMembers, memberForceOff, normalizeMemberRule } from "./core/availability";
+import { Availability, availabilityForGroup, desktopOnlyDrift, desktopOnlyPluginIds, scopedAwayMembers, memberForceOff, preferStoredMemberRule } from "./core/availability";
 import { listFilesRecursive, isJunkPath, FileIO } from "./core/io";
 import { leftoverStoreRels, storeSelfCopyGroups, selfListGroups } from "./core/leftover";
 import { parseStoreLock, validateSyncManifest } from "./core/manifest";
@@ -60,8 +60,8 @@ import {
   RegistryEnv,
   structuralLocalElements,
 } from "./core/registry";
-import { drainEnabledOnLocal, isLegacySettings, mergeLegacyAppSliceItems, SCHEMA_UPGRADE_NOTICE } from "./core/settingsMigration";
-import { applySwitchList, captureSwitchList, localRealPath, parseSwitchList, readLocalSwitchList, subtractForceOff, SWITCH_LIST_GROUPS, switchDivergence, SwitchList, writeLocalSwitchList } from "./core/switchList";
+import { drainEnabledOnLocal, isLegacySettings, mergeLegacyAppSliceItems, sanitizeMemberRules, SCHEMA_UPGRADE_NOTICE } from "./core/settingsMigration";
+import { applySwitchList, captureSwitchList, localRealPath, parseSwitchList, readLocalSwitchList, subtractForceOff, SWITCH_LIST_GROUPS, switchDivergence, SwitchList, switchListMemberOn, writeLocalSwitchList } from "./core/switchList";
 import { applyTransform, captureTransform, isWholeFileEncrypted, scanSensitive, SensitiveScan } from "./core/modes";
 import { PkmMode, PkmProbe, resolveEffectiveMode, resolveRootPath } from "./core/pkm";
 import { pluginRuntimeEnabled } from "./core/pluginState";
@@ -69,7 +69,7 @@ import { syncListDelta } from "./core/syncListDelta";
 import { selfPaneState } from "./core/selfPane";
 import { applyUpdates, Ledger, parseLedger, pruneLedger } from "./core/ledger";
 import { bucketCounts, checkRemote, diffRemote, GroupStatus, remoteDirectionCounts, RemoteCheck, remoteLockAhead, statusForGroups } from "./core/status";
-import { GroupResult, Remote, RibbonButtons, RuleScope, StoreLock, SyncGroup } from "./core/types";
+import { GroupResult, MemberRule, Remote, RibbonButtons, RuleScope, StoreLock, SyncGroup } from "./core/types";
 import { MemberDecision, memberDecisionsFromScopes, statusBarStatuses } from "./ui/panelModel";
 import { ConflictModal } from "./ui/ConflictModal";
 import { renderStatusBarItem, statusBarSegments } from "./ui/statusBar";
@@ -102,6 +102,11 @@ interface ConfigSyncSettings {
   bratPluginIndex: BratIndex; // plugin id -> "owner/repo"; derived from BRAT's synced list, synced too
   runHistory: RunHistorySettings; // local-only record of past runs; never synced
   localMembers: string[]; // item ids (community:<id> / core:<id>) device-local-only; never synced
+  // Task 2 (spec 2026-08-06-sync-center-unified-grammar-design.md §6): the Runs-on rule's real
+  // stored home. Item id (community:<id> / core:<id>) -> its chosen MemberRule; a stored value
+  // here always wins over legacy normalization (preferStoredMemberRule). Task 5's Runs-on menu is
+  // the only intended writer; not yet part of self-propagation.
+  memberRules: Record<string, MemberRule>;
 }
 
 interface RunHistorySettings {
@@ -129,6 +134,7 @@ const DEFAULT_SETTINGS: ConfigSyncSettings = {
   bratPluginIndex: {},
   runHistory: { enabled: true, path: "", maxCount: 50, maxDays: 30 },
   localMembers: [],
+  memberRules: {},
 };
 
 // config-sync's own registry item id (registry.ts: community plugin ids are prefixed "community:")
@@ -1282,28 +1288,48 @@ export default class ConfigSyncPlugin extends Plugin {
     return memberForceOff(this.memberScopesFor(group), this.memberLocalIdsFor(group), Platform.isMobile);
   }
 
-  // Live on/off signal for a "this device" pin — whichever the member's enablement carrier reads
-  // right now. normalizeMemberRule needs this to turn the legacy "local" scope (spec §6: the
-  // existing this-device pins) into a direction: always-here when the pin is currently on here,
-  // never-here when it's currently off here.
-  private locallyOnFor(carrier: "core-plugins.json" | "community-plugins.json", elementId: string): boolean {
-    return carrier === "core-plugins.json" ? this.pluginHost().isCorePluginEnabled(elementId) : this.pluginHost().isPluginEnabled(elementId);
+  // A group's PERSISTED local switch-list content — the same file applySwitchList's exception
+  // pass-through reads (task-2 fix #1: never a live PluginHost query, which can diverge from what
+  // is actually on disk; see normalizeMemberRule's comment). Absent group/file/unparseable → null,
+  // treated as "off" by switchListMemberOn.
+  private async localSwitchListFor(name: string): Promise<SwitchList | null> {
+    const group = findGroupByName(this.compiledGroups, name);
+    if (group === undefined) return null;
+    const io = this.configIO();
+    const real = localRealPath(name, group.path, this.app.vault.configDir);
+    if (!(await io.exists(real))) return null;
+    return readLocalSwitchList(name, await io.read(real));
   }
 
-  // Mask table (Sync Center unified grammar, task 2): a "this device" pin normalizes to
-  // always-here or never-here depending on its current local state (normalizeMemberRule).
-  // always-here → exception + forceOn; never-here → exception + forceOff (both on top of the
+  // This carrier's slice of settings.memberRules (task 2's stored home for the Runs-on rule),
+  // de-prefixed to bare element ids.
+  private memberRulesFor(carrier: "core-plugins.json" | "community-plugins.json"): Record<string, MemberRule> {
+    const prefix = carrier === "core-plugins.json" ? "core:" : "community:";
+    const out: Record<string, MemberRule> = {};
+    for (const [id, rule] of Object.entries(this.settings.memberRules)) {
+      if (id.startsWith(prefix)) out[id.slice(prefix.length)] = rule;
+    }
+    return out;
+  }
+
+  // Mask table (Sync Center unified grammar, task 2): every id with either a stored MemberRule or
+  // a legacy "this device" pin resolves via preferStoredMemberRule (stored wins; otherwise
+  // normalizeMemberRule against the group's PERSISTED local content, task-2 fix #1) into
+  // always-here → exception + forceOn, or never-here → exception + forceOff (both on top of the
   // class-scope force-off memberForceOffIds already computes).
-  private memberRuleForceOn(group: string): string[] {
+  private memberRuleForces(group: string, persisted: SwitchList | null): { forceOn: string[]; forceOff: string[] } {
     const carrier = this.carrierFor(group);
-    if (carrier === null) return [];
-    return this.memberLocalIdsFor(group).filter((id) => normalizeMemberRule("local", this.locallyOnFor(carrier, id)) === "always-here");
-  }
-
-  private memberRuleForceOff(group: string): string[] {
-    const carrier = this.carrierFor(group);
-    if (carrier === null) return [];
-    return this.memberLocalIdsFor(group).filter((id) => normalizeMemberRule("local", this.locallyOnFor(carrier, id)) === "never-here");
+    if (carrier === null) return { forceOn: [], forceOff: [] };
+    const stored = this.memberRulesFor(carrier);
+    const ids = new Set([...this.memberLocalIdsFor(group), ...Object.keys(stored)]);
+    const forceOn: string[] = [];
+    const forceOff: string[] = [];
+    for (const id of ids) {
+      const rule = preferStoredMemberRule(stored[id], switchListMemberOn(persisted, id));
+      if (rule === "always-here") forceOn.push(id);
+      else if (rule === "never-here") forceOff.push(id);
+    }
+    return { forceOn, forceOff };
   }
 
   private async coreContext(): Promise<CoreContext> {
@@ -1313,6 +1339,10 @@ export default class ConfigSyncPlugin extends Plugin {
     }
     this.lastResolvedRoot = rootPath;
     const switchExceptions = await this.augmentedSwitchExceptions(rootPath);
+    const ruleForces: Record<string, { forceOn: string[]; forceOff: string[] }> = {};
+    for (const name of SWITCH_LIST_GROUPS) {
+      ruleForces[name] = this.carrierFor(name) === null ? { forceOn: [], forceOff: [] } : this.memberRuleForces(name, await this.localSwitchListFor(name));
+    }
     return {
       io: this.configIO(),
       configDir: this.app.vault.configDir,
@@ -1324,7 +1354,7 @@ export default class ConfigSyncPlugin extends Plugin {
       switchForceOff: (() => {
         const out: Record<string, string[]> = {};
         for (const name of SWITCH_LIST_GROUPS) {
-          const f = [...new Set([...this.memberForceOffIds(name), ...this.memberRuleForceOff(name)])];
+          const f = [...new Set([...this.memberForceOffIds(name), ...(ruleForces[name]?.forceOff ?? [])])];
           if (f.length > 0) out[name] = f;
         }
         return out;
@@ -1332,7 +1362,7 @@ export default class ConfigSyncPlugin extends Plugin {
       switchForceOn: (() => {
         const out: Record<string, string[]> = {};
         for (const name of SWITCH_LIST_GROUPS) {
-          const f = this.memberRuleForceOn(name);
+          const f = ruleForces[name]?.forceOn ?? [];
           if (f.length > 0) out[name] = f;
         }
         return out;
@@ -1664,6 +1694,10 @@ export default class ConfigSyncPlugin extends Plugin {
     // both call loadSettings() through reloadSettings()), so a freshly-adopted "local" is drained
     // rather than re-captured on the next save.
     if (drainEnabledOnLocal(this.settings)) await this.saveSettings();
+    // Task 2 (spec 2026-08-06-sync-center-unified-grammar-design.md §6): drop any memberRules
+    // entry a foreign/older build could never have written validly — malformed data.json, or a
+    // future MemberRule this build doesn't know yet.
+    if (sanitizeMemberRules(this.settings)) await this.saveSettings();
   }
 
   async saveSettings(): Promise<void> {

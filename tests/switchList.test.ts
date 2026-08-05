@@ -3,6 +3,7 @@ import {
   SWITCH_LIST_GROUPS, readLocalSwitchList, writeLocalSwitchList, localRealPath, subtractForceOff,
   addForceOn,
   memberUniverse,
+  switchListMemberOn,
   parseSwitchList,
   captureSwitchList,
   applySwitchList,
@@ -125,6 +126,21 @@ describe("memberUniverse", () => {
   });
   it("returns [] when both sides are null", () => {
     expect(memberUniverse(null, null)).toEqual([]);
+  });
+});
+
+describe("switchListMemberOn", () => {
+  it("array: true only when the id is present", () => {
+    expect(switchListMemberOn(["a", "b"], "a")).toBe(true);
+    expect(switchListMemberOn(["a", "b"], "c")).toBe(false);
+  });
+  it("map: true only when the key is exactly true", () => {
+    expect(switchListMemberOn({ a: true, b: false }, "a")).toBe(true);
+    expect(switchListMemberOn({ a: true, b: false }, "b")).toBe(false);
+    expect(switchListMemberOn({ a: true }, "c")).toBe(false);
+  });
+  it("a null list (unreadable/absent local file) counts as off", () => {
+    expect(switchListMemberOn(null, "a")).toBe(false);
   });
 });
 

@@ -12,7 +12,7 @@
  *   `mergeLegacyAppSliceItems` below, which still runs on data.json that already passed the gate.
  */
 import { ItemConfig, ItemFieldRule } from "./registry";
-import { PerItemScopes } from "./types";
+import { MEMBER_RULES, MemberRule, PerItemScopes } from "./types";
 
 export const SCHEMA_UPGRADE_NOTICE = "Config Sync: this update reset your sync setup — open Settings to choose what to sync again.";
 
@@ -84,5 +84,23 @@ export function drainEnabledOnLocal(settings: { items: Record<string, ItemConfig
     changed = true;
   }
   if (changed) settings.localMembers = [...members];
+  return changed;
+}
+
+// Task 2 (spec 2026-08-06-sync-center-unified-grammar-design.md §6): memberRules' stored home
+// for always-here/never-here (and, going forward, all/desktop/mobile once task 5's Runs-on menu
+// writes them directly) — drops any entry whose value isn't a real MemberRule. Single-source
+// against MEMBER_RULES (types.ts) so this can never list a literal the mask pipeline doesn't also
+// accept; a raw data.json is untyped at the JS boundary despite ConfigSyncSettings' compile-time
+// type, so this actually runs at every load, not just once.
+export function sanitizeMemberRules(settings: { memberRules: Record<string, MemberRule> }): boolean {
+  const known = new Set<string>(MEMBER_RULES);
+  let changed = false;
+  const out: Record<string, MemberRule> = {};
+  for (const [id, value] of Object.entries(settings.memberRules)) {
+    if (known.has(value)) out[id] = value;
+    else changed = true;
+  }
+  if (changed) settings.memberRules = out;
   return changed;
 }

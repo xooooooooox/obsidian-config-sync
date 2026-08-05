@@ -1998,6 +1998,101 @@ describe("ConfigSyncPlugin.addSwitchExceptions — 'this device' retarget onto l
   });
 });
 
+interface MemberRulePluginSurface {
+  app: unknown;
+  loadData: () => Promise<unknown>;
+  saveData: (d: unknown) => Promise<void>;
+  loadSettings: () => Promise<void>;
+  addSwitchExceptions: (name: string, ids: string[]) => Promise<void>;
+  settings: {
+    rootPath: string;
+    localMembers: string[];
+    memberRules: Record<string, string>;
+    items: Record<string, { enabled: boolean; companions: unknown[] }>;
+  };
+  coreContext: () => Promise<{ switchForceOff: Record<string, string[]>; switchForceOn: Record<string, string[]> }>;
+}
+
+// task-2 fix #1/#2: a real ConfigSyncPlugin instance, community-plugins.json backed by a real
+// MemFS (so localSwitchListFor reads actual persisted content, not a stub), with a configurable
+// LIVE enabled-plugins set distinct from that persisted content — the exact divergence
+// pluginState.ts documents (a non-persistent enablePlugin can leave a plugin loaded without it
+// being in the persisted enabled set).
+function makeMemberRulePlugin(io: MemFS, liveEnabled: string[]): MemberRulePluginSurface {
+  const plugin = new ConfigSyncPlugin({} as never, {} as never);
+  const instance = plugin as unknown as MemberRulePluginSurface;
+  instance.app = {
+    vault: { adapter: io, configDir: "config-dir", on: () => ({}) },
+    internalPlugins: { plugins: {} },
+    plugins: { manifests: {}, enabledPlugins: new Set<string>(liveEnabled), plugins: {} },
+    workspace: { getLeavesOfType: () => [] },
+    loadLocalStorage: () => null,
+  };
+  instance.loadData = async () => ({ schemaVersion: 2, items: {}, remotes: [], bratPluginIndex: {} });
+  instance.saveData = async () => {};
+  return instance;
+}
+
+describe("mask producers read the PERSISTED switch-list file, not live PluginHost state (task-2 fix #1)", () => {
+  it("a live-enabled but not-persisted 'this device' pin is treated as off (never-here → forceOff, not forceOn)", async () => {
+    const io = new MemFS();
+    io.seed({ "config-dir/community-plugins.json": JSON.stringify(["other-plugin"]) }); // "remotely-save" absent
+    const plugin = makeMemberRulePlugin(io, ["remotely-save"]); // LIVE: reports enabled
+    await plugin.loadSettings();
+    plugin.settings.rootPath = "cs"; // skip PKM auto-detection, irrelevant here
+    plugin.settings.items["community:remotely-save"] = { enabled: true, companions: [] };
+    await plugin.addSwitchExceptions("community-plugins", ["remotely-save"]); // legacy "this device" pin
+
+    const ctx = await plugin.coreContext();
+    expect(ctx.switchForceOff["community-plugins"] ?? []).toContain("remotely-save");
+    expect(ctx.switchForceOn["community-plugins"] ?? []).not.toContain("remotely-save");
+  });
+
+  it("a live-enabled AND persisted 'this device' pin resolves to on (always-here → forceOn)", async () => {
+    const io = new MemFS();
+    io.seed({ "config-dir/community-plugins.json": JSON.stringify(["remotely-save"]) }); // persisted ON
+    const plugin = makeMemberRulePlugin(io, ["remotely-save"]);
+    await plugin.loadSettings();
+    plugin.settings.rootPath = "cs";
+    plugin.settings.items["community:remotely-save"] = { enabled: true, companions: [] };
+    await plugin.addSwitchExceptions("community-plugins", ["remotely-save"]);
+
+    const ctx = await plugin.coreContext();
+    expect(ctx.switchForceOn["community-plugins"] ?? []).toContain("remotely-save");
+    expect(ctx.switchForceOff["community-plugins"] ?? []).not.toContain("remotely-save");
+  });
+});
+
+describe("settings.memberRules (task-2 fix #2: a stored MemberRule wins over legacy normalization)", () => {
+  it("a stored always-here rule forces on even though the plugin is off both live and persisted", async () => {
+    const io = new MemFS();
+    io.seed({ "config-dir/community-plugins.json": JSON.stringify([]) }); // off, persisted
+    const plugin = makeMemberRulePlugin(io, []); // off, live
+    await plugin.loadSettings();
+    plugin.settings.rootPath = "cs";
+    plugin.settings.items["community:remotely-save"] = { enabled: true, companions: [] };
+    plugin.settings.memberRules["community:remotely-save"] = "always-here"; // no localMembers pin at all
+
+    const ctx = await plugin.coreContext();
+    expect(ctx.switchForceOn["community-plugins"] ?? []).toContain("remotely-save");
+  });
+
+  it("a stored never-here rule forces off even though a legacy 'this device' pin is on persisted", async () => {
+    const io = new MemFS();
+    io.seed({ "config-dir/community-plugins.json": JSON.stringify(["remotely-save"]) }); // on, persisted
+    const plugin = makeMemberRulePlugin(io, ["remotely-save"]); // on, live
+    await plugin.loadSettings();
+    plugin.settings.rootPath = "cs";
+    plugin.settings.items["community:remotely-save"] = { enabled: true, companions: [] };
+    await plugin.addSwitchExceptions("community-plugins", ["remotely-save"]); // legacy pin would normalize to always-here
+    plugin.settings.memberRules["community:remotely-save"] = "never-here"; // stored rule overrides it
+
+    const ctx = await plugin.coreContext();
+    expect(ctx.switchForceOff["community-plugins"] ?? []).toContain("remotely-save");
+    expect(ctx.switchForceOn["community-plugins"] ?? []).not.toContain("remotely-save");
+  });
+});
+
 interface DisplayNamePluginSurface {
   app: unknown;
   lastLock: StoreLock | null;
