@@ -528,6 +528,7 @@ body.is-phone .config-sync-fkey {
 .config-sync-chip.is-del { background: rgba(var(--color-red-rgb), 0.15); color: var(--color-red); }
 .config-sync-report-files { font-family: var(--font-monospace); font-size: var(--font-ui-smaller); margin: 0 0 var(--size-4-2) var(--size-4-4); }
 .config-sync-report-files .is-add { color: var(--color-green); }
+.config-sync-report-files .is-up { color: var(--color-orange); }
 .config-sync-report-files .is-upd { color: var(--color-blue); }
 .config-sync-report-files .is-del { color: var(--color-red); text-decoration: line-through; }
 .config-sync-unchanged { color: var(--text-muted); font-size: var(--font-ui-smaller); margin-top: var(--size-4-2); cursor: pointer; }
@@ -1070,16 +1071,39 @@ body.is-mobile .config-sync-strip-meta .config-sync-report-pills { margin-left: 
 /* Unified grammar (task-4): the four fixed type sections — neutral frame, no drift-color
    borrowed from the old outdated/not-installed sections above. */
 .config-sync-section.is-typesection { border-color: var(--background-modifier-border); }
-.config-sync-section.is-typesection .config-sync-section-title { color: var(--text-normal); }
+/* Ledger C-#1: restore the pre-C header identity (uppercase, letter-spaced, small, muted) so a
+   section header reads unmistakably as a header even with its trailing badge covered — the
+   collapsible fold itself was already real (typeSectionOpen), only the typography regressed when
+   task-4 built these headers from row markup. The disclosure triangle scales down alongside it. */
+.config-sync-section.is-typesection .config-sync-section-title {
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+  font-weight: var(--font-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.config-sync-section.is-typesection .config-sync-section-head .config-sync-row-chevron { font-size: var(--font-ui-smaller); }
 /* Core/Community section header chip: the on/off list's own sync-membership toggle — the only
    remaining home of that list as a configurable item once its row dissolves into this chip. */
 .config-sync-carrierchip { border: 1px solid var(--background-modifier-border); border-radius: 999px; padding: 1px 8px; font-size: var(--font-ui-smaller); color: var(--text-muted); cursor: pointer; }
 .config-sync-carrierchip.is-synced { color: var(--color-green); border-color: rgba(var(--color-green-rgb), 0.4); }
-/* Expanded-card menu rows (spec §4): Runs on / Settings sync / After install — a label plus a
-   pill that opens an Obsidian Menu, same visual language as the carrier chip above. */
-.config-sync-cardrow { display: flex; align-items: center; justify-content: space-between; gap: var(--size-4-2); }
-.config-sync-menuchip { border: 1px solid var(--background-modifier-border); border-radius: 999px; padding: 1px 8px; font-size: var(--font-ui-smaller); color: var(--text-muted); cursor: pointer; white-space: nowrap; }
-.config-sync-menuchip:hover, .config-sync-menuchip:focus-visible { color: var(--text-normal); }
+/* Expanded-card rows (spec §4, ledger C-#2): every row is a fixed-width muted label with its
+   value IMMEDIATELY adjacent — never spread edge-to-edge with the value floating far right. */
+.config-sync-cardrow { display: flex; align-items: flex-start; gap: var(--size-4-2); }
+.config-sync-cardrow > .config-sync-explabel-inline { flex: 0 0 92px; padding-top: 1px; }
+.config-sync-cardval { flex: 1; min-width: 0; }
+/* Runs on (ledger C-#3) stays a textual menu — five options exceed the device-icon vocabulary —
+   but its trigger now harmonizes with the card's icon controls: the same small radius as
+   .config-sync-scopeicon/.config-sync-lock and the same `--background-modifier-hover` hover
+   surface those icon controls use (e.g. .config-sync-card-pathbtn:hover), not a standalone pill
+   chip. */
+.config-sync-menuchip { border: 1px solid var(--background-modifier-border); border-radius: var(--radius-s); padding: 1px 8px; font-size: var(--font-ui-smaller); color: var(--text-muted); cursor: pointer; white-space: nowrap; }
+.config-sync-menuchip:hover, .config-sync-menuchip:focus-visible { color: var(--text-normal); background: var(--background-modifier-hover); }
+/* The expanded card itself (ledger C-#2): bordered, left-indented under the row's name column
+   (chevron 16px + its 4px margin ≈ 20px) and offset one notch from the section behind it, so the
+   card reads as one contained unit — row hairlines (.config-sync-card-fieldrow's border-bottom)
+   stay inside this box instead of reading as full-pane rules. */
+.config-sync-itemcard { margin-left: var(--size-4-5); border: 1px solid var(--background-modifier-border); border-radius: var(--radius-s); background: var(--background-secondary); padding: var(--size-4-2) var(--size-4-3); }
 /* Config Sync's pinned self row (Community section) — same row shape as a normal item, own fate
    text instead of a checkbox since it isn't staged through the normal apply/capture run. */
 .config-sync-hub-row.is-self { cursor: pointer; }
@@ -1091,7 +1115,6 @@ body.is-mobile .config-sync-strip-meta .config-sync-report-pills { margin-left: 
 .config-sync-section-head .config-sync-pill,
 .config-sync-section-hint { white-space: nowrap; flex: none; }
 .config-sync-section-note { color: var(--text-faint); font-style: italic; font-size: var(--font-ui-smaller); padding: 4px 0 2px 18px; }
-.config-sync-seg-label { color: var(--text-faint); font-size: 10px; margin-top: 4px; }
 .config-sync-side-search { width: 100%; margin-bottom: 6px; }
 .config-sync-side-badge.is-neutral { background: var(--background-modifier-hover); color: var(--text-normal); }
 

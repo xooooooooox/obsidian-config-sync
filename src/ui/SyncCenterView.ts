@@ -51,6 +51,7 @@ import { renderReportContent, renderReportPills } from "./reportContent";
 import { RunRecord, RunKind, RunStatus, worstStatus, formatRunTime, stopSyncDesc, deleteLeftoverDesc } from "../core/runHistory";
 import { ACTION_ICON, ACTION_COLOR_CLASS, renderActionIcon, renderActionCount, type SyncAction } from "./actionIcons";
 import { FILE_SCOPE_OPTIONS } from "./itemCard";
+import { renderScopeCycle } from "./scopeCycle";
 import {
   QualifierAutocomplete,
   parseQuery,
@@ -87,15 +88,6 @@ const SYNC_QUALIFIER_KEYS = new Set(SYNC_QUALIFIER_SPECS.map((s) => s.key));
 const SCOPE_ORDER: (ItemCategory | "beta")[] = ["obsidian", "core", "community", "beta", "custom"];
 const SCOPE_LABELS: Record<ItemCategory | "beta", string> = { ...CATEGORY_LABELS, beta: "Beta" };
 
-// R4 direct menu (spec 2026-08-05-section-groups-and-member-menu-design.md §R4-B): the two member
-// lists' scope glyph opens a menu instead of cycling, so an abandoned gesture can never land on an
-// intermediate scope. Labels verbatim, device-aware for "local".
-function scopeMenuLabel(scope: RuleScope): string {
-  if (scope === "all") return "Everywhere";
-  if (scope === "desktop") return "Computers only";
-  if (scope === "mobile") return "Phones only";
-  return Platform.isMobile ? "This phone only" : "This computer only";
-}
 const STATUS_CLS: Record<RunStatus, string> = { ok: "is-ok", warning: "is-warn", error: "is-error" };
 // RunKind is wider than SyncAction (it also has "adopt"/"stop-sync"/"delete-leftover"), so
 // map explicitly rather than assigning rec.kind directly — undefined for the non-actions.
@@ -1786,7 +1778,7 @@ export class SyncCenterView extends ItemView {
       });
     }
 
-    const detail = card.createDiv({ cls: "config-sync-report-files" });
+    const detail = card.createDiv({ cls: "config-sync-report-files config-sync-itemcard" });
     detail.hidden = !this.expandedItems.has(group.name);
     this.renderUnifiedCard(detail, r, fate, input, isConflict);
     // Stop syncing always closes the drawer as a quiet footer under a divider (round-9 定稿 A):
@@ -1829,12 +1821,13 @@ export class SyncCenterView extends ItemView {
     }
     const name = r.group.name;
     const dir = isConflict ? this.conflictChoice.get(name) ?? null : input.direction;
-    detail.createDiv({ cls: "config-sync-seg-label", text: dir === "apply" ? "On apply" : dir === "capture" ? "On capture" : "State" });
-    detail.createDiv({ cls: "config-sync-expand-note", text: this.stateClauseText(r, fate, input) });
+    this.renderCardKeyRow(detail, dir === "apply" ? "On apply" : dir === "capture" ? "On capture" : "State", (value) => {
+      value.createDiv({ cls: "config-sync-expand-note", text: this.stateClauseText(r, fate, input) });
+    });
 
-    if (dir !== null && r.status.changes !== undefined && hasChanges(r.status.changes)) {
-      detail.createDiv({ cls: "config-sync-seg-label", text: "Files" });
-      this.renderUnifiedFiles(detail, r, r.status.changes, dir, input.encrypted);
+    const changes = r.status.changes;
+    if (dir !== null && changes !== undefined && hasChanges(changes)) {
+      this.renderCardKeyRow(detail, "Files", (value) => this.renderUnifiedFiles(value, r, changes, dir, input.encrypted));
     }
 
     if (isConflict) this.renderResolveRow(detail, r);
@@ -1861,9 +1854,19 @@ export class SyncCenterView extends ItemView {
     this.renderMoreRow(detail, name);
 
     if (name === "hotkeys") {
-      detail.createDiv({ cls: "config-sync-seg-label", text: "Note" });
-      detail.createDiv({ cls: "config-sync-expand-note", text: "Takes effect after an app reload" });
+      this.renderCardKeyRow(detail, "Note", (value) => {
+        value.createDiv({ cls: "config-sync-expand-note", text: "Takes effect after an app reload" });
+      });
     }
+  }
+
+  // One row inside the expanded card (spec §4, ledger C-#2): a fixed-width muted label with its
+  // value immediately adjacent, shared by every card row (On apply/Files/Runs on/Settings
+  // sync/More/Note/Resolve) — never a label on its own line with the value spread underneath.
+  private renderCardKeyRow(detail: HTMLElement, label: string, build: (value: HTMLElement) => void): void {
+    const row = detail.createDiv({ cls: "config-sync-card-fieldrow config-sync-cardrow" });
+    row.createSpan({ cls: "config-sync-explabel config-sync-explabel-inline", text: label });
+    build(row.createDiv({ cls: "config-sync-cardval" }));
   }
 
   // Resolve (spec §4, conflict rows only): segmented `Use theirs ↓` / `Keep mine ↑`. Clicking
@@ -1872,27 +1875,28 @@ export class SyncCenterView extends ItemView {
   // staging affordance, since its checkbox stays hidden (`Fate.stageable` false) until chosen.
   private renderResolveRow(detail: HTMLElement, r: StatusRow): void {
     const name = r.group.name;
-    detail.createDiv({ cls: "config-sync-seg-label", text: "Resolve" });
-    const segrow = detail.createDiv({ cls: "config-sync-segrow" });
-    const seg = segrow.createDiv({ cls: "config-sync-seg" });
-    const current = this.conflictChoice.get(name);
-    const opt = (choice: ConflictChoice, label: string): void => {
-      const on = current === choice;
-      const b = seg.createEl("button", { cls: `config-sync-seg-btn is-${choice}${on ? " is-on" : ""}`, text: label });
-      b.addEventListener("click", (e) => {
-        e.stopPropagation();
-        if (on) {
-          this.conflictChoice.delete(name);
-          this.selected.delete(name);
-        } else {
-          this.conflictChoice.set(name, choice);
-          this.selected.add(name);
-        }
-        this.render(this.renderGen);
-      });
-    };
-    opt("apply", "Use theirs ↓");
-    opt("capture", "Keep mine ↑");
+    this.renderCardKeyRow(detail, "Resolve", (value) => {
+      const segrow = value.createDiv({ cls: "config-sync-segrow" });
+      const seg = segrow.createDiv({ cls: "config-sync-seg" });
+      const current = this.conflictChoice.get(name);
+      const opt = (choice: ConflictChoice, label: string): void => {
+        const on = current === choice;
+        const b = seg.createEl("button", { cls: `config-sync-seg-btn is-${choice}${on ? " is-on" : ""}`, text: label });
+        b.addEventListener("click", (e) => {
+          e.stopPropagation();
+          if (on) {
+            this.conflictChoice.delete(name);
+            this.selected.delete(name);
+          } else {
+            this.conflictChoice.set(name, choice);
+            this.selected.add(name);
+          }
+          this.render(this.renderGen);
+        });
+      };
+      opt("apply", "Use theirs ↓");
+      opt("capture", "Keep mine ↑");
+    });
   }
 
   // The `On apply`/`On capture`/`State` row's text: the fate sentence, expanded with the
@@ -1926,7 +1930,11 @@ export class SyncCenterView extends ItemView {
       const kind: "added" | "updated" | "deleted" = e.kind === "add" ? "added" : e.kind === "upd" ? "updated" : "deleted";
       const pres = fileEntryFor({ kind, rel: e.name }, dir, encrypted);
       const glyphText = pres.glyph === "del" ? "−" : pres.glyph === "·" ? "~" : pres.glyph;
-      const line = detail.createDiv({ cls: `is-${e.kind}${pres.glyph === "del" ? " config-sync-file-del" : ""}`, text: `${glyphText} ${pres.label}` });
+      // Styling follows the PRESENTATION glyph, never the raw capture-perspective `e.kind` — under
+      // apply direction add/delete mirror each other (fileEntryFor's doc comment above), so keying
+      // the class off `e.kind` let a "+" entry inherit "is-del"'s strikethrough (ledger C-#4).
+      const glyphCls = pres.glyph === "+" ? "is-add" : pres.glyph === "↑" ? "is-up" : pres.glyph === "del" ? "is-del" : "is-upd";
+      const line = detail.createDiv({ cls: `${glyphCls}${pres.glyph === "del" ? " config-sync-file-del" : ""}`, text: `${glyphText} ${pres.label}` });
       if (pres.note !== null) {
         line.createSpan({ cls: "config-sync-file-note", text: ` · ${pres.note}` });
         return;
@@ -1988,25 +1996,25 @@ export class SyncCenterView extends ItemView {
     }
   }
 
-  // A generic "label: value-that-opens-a-menu" card row, shared by Runs on / Settings sync /
-  // After install.
+  // A generic "label: value-that-opens-a-menu" card row, shared by Runs on / After install /
+  // Enablement.
   private renderCardMenuRow(detail: HTMLElement, label: string, valueText: string, ariaLabel: string, buildMenu: () => Menu): void {
-    const row = detail.createDiv({ cls: "config-sync-card-fieldrow config-sync-cardrow" });
-    row.createSpan({ cls: "config-sync-explabel config-sync-explabel-inline", text: label });
-    const chip = row.createSpan({ cls: "config-sync-menuchip", text: valueText, attr: { role: "button", tabindex: "0", "aria-label": ariaLabel } });
-    const open = (x: number, y: number): void => {
-      buildMenu().showAtPosition({ x, y });
-    };
-    chip.addEventListener("click", (e) => {
-      e.stopPropagation();
-      open(e.clientX, e.clientY);
-    });
-    chip.addEventListener("keydown", (e) => {
-      if (e.key !== "Enter" && e.key !== " ") return;
-      e.preventDefault();
-      e.stopPropagation();
-      const rect = chip.getBoundingClientRect();
-      open(rect.left, rect.bottom);
+    this.renderCardKeyRow(detail, label, (value) => {
+      const chip = value.createSpan({ cls: "config-sync-menuchip", text: valueText, attr: { role: "button", tabindex: "0", "aria-label": ariaLabel } });
+      const open = (x: number, y: number): void => {
+        buildMenu().showAtPosition({ x, y });
+      };
+      chip.addEventListener("click", (e) => {
+        e.stopPropagation();
+        open(e.clientX, e.clientY);
+      });
+      chip.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        e.preventDefault();
+        e.stopPropagation();
+        const rect = chip.getBoundingClientRect();
+        open(rect.left, rect.bottom);
+      });
     });
   }
 
@@ -2081,68 +2089,54 @@ export class SyncCenterView extends ItemView {
     });
   }
 
-  // Settings sync (spec §4): item-level device scope — the same write target as the Settings
-  // tab's file-row scope control (ItemConfig.settingsFile.fileRule.scope). Custom (folder)
-  // groups have no ItemConfig at all — their device scope lives directly on the SyncGroup
-  // literal's `devices` field instead (same 3-value set, same Advanced-tab "Devices" dropdown
-  // and settings.customGroups persistence path — two entrances to one stored value, same
-  // pattern as every other rule in this design).
+  // Settings sync (spec §4, ledger C-#3): item-level device scope, rendered with the SAME icon
+  // control the Settings tab's file-row scope uses (renderScopeCycle) — one control language for
+  // one stored value, replacing this card's own bordered-text menu. Write targets are unchanged:
+  // ItemConfig.settingsFile.fileRule.scope for a compiled item, SyncGroup.devices (custom/folder
+  // groups have no ItemConfig) for a folder — same two entrances as before, only the control
+  // itself changed.
   private renderSettingsSyncRow(detail: HTMLElement, r: StatusRow): void {
     const name = r.group.name;
-    if (this.scopeOf(name) === "custom") {
-      const scope = r.group.devices;
-      this.renderCardMenuRow(detail, "Settings sync", scopeMenuLabel(scope), "Choose which devices get this folder's settings", () => {
-        const menu = new Menu();
-        for (const opt of FILE_SCOPE_OPTIONS) {
-          menu.addItem((item) =>
-            item
-              .setTitle(scopeMenuLabel(opt))
-              .setChecked(opt === scope)
-              .onClick(() => {
-                void this.host.setCustomGroupDevices(name, opt).then(() => this.notifyExternalChange());
-              })
-          );
-        }
-        return menu;
-      });
-      return;
-    }
-    const itemId = this.itemIdFor(name);
-    const scope = this.host.itemFileScope(itemId);
-    this.renderCardMenuRow(detail, "Settings sync", scopeMenuLabel(scope), "Choose which devices get this item's settings", () => {
-      const menu = new Menu();
-      for (const opt of FILE_SCOPE_OPTIONS) {
-        menu.addItem((item) =>
-          item
-            .setTitle(scopeMenuLabel(opt))
-            .setChecked(opt === scope)
-            .onClick(() => {
-              void this.host.setItemFileScope(itemId, opt).then(() => this.notifyExternalChange());
-            })
-        );
+    this.renderCardKeyRow(detail, "Settings sync", (value) => {
+      if (this.scopeOf(name) === "custom") {
+        renderScopeCycle(value, {
+          scope: r.group.devices,
+          options: FILE_SCOPE_OPTIONS,
+          disabled: false,
+          onChange: (v) => void this.host.setCustomGroupDevices(name, v).then(() => this.notifyExternalChange()),
+        });
+        return;
       }
-      return menu;
+      const itemId = this.itemIdFor(name);
+      renderScopeCycle(value, {
+        scope: this.host.itemFileScope(itemId),
+        options: FILE_SCOPE_OPTIONS,
+        disabled: false,
+        onChange: (v) => void this.host.setItemFileScope(itemId, v).then(() => this.notifyExternalChange()),
+      });
     });
   }
 
   // More bridge (spec §4): deep-links into the Settings tab for this item's card.
   private renderMoreRow(detail: HTMLElement, name: string): void {
     const isFolder = this.scopeOf(name) === "custom";
-    const line = detail.createDiv({
-      cls: "config-sync-more-files",
-      text: isFolder ? "Folder rules — opens Settings ▸" : "Per-key rules, locks & folders — opens Settings ▸",
-      attr: { role: "button", tabindex: "0" },
-    });
-    const open = (): void => this.host.openSettingsAt(this.itemIdFor(name));
-    line.addEventListener("click", (e) => {
-      e.stopPropagation();
-      open();
-    });
-    line.addEventListener("keydown", (e) => {
-      if (e.key !== "Enter" && e.key !== " ") return;
-      e.preventDefault();
-      e.stopPropagation();
-      open();
+    this.renderCardKeyRow(detail, "More", (value) => {
+      const line = value.createDiv({
+        cls: "config-sync-more-files",
+        text: isFolder ? "Folder rules — opens Settings ▸" : "Per-key rules, locks & folders — opens Settings ▸",
+        attr: { role: "button", tabindex: "0" },
+      });
+      const open = (): void => this.host.openSettingsAt(this.itemIdFor(name));
+      line.addEventListener("click", (e) => {
+        e.stopPropagation();
+        open();
+      });
+      line.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        e.preventDefault();
+        e.stopPropagation();
+        open();
+      });
     });
   }
 
