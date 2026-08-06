@@ -25,6 +25,7 @@ import {
   FIELD_SCOPE_OPTIONS,
   FILE_SCOPE_OPTIONS,
   COMPANION_SCOPE_OPTIONS,
+  RUNS_ON_ICONS,
   SCOPE_ICONS,
   scopeCycleTooltip,
   sectionAllEnabled,
@@ -475,6 +476,22 @@ describe("nextScope / scope icon cycle (round-6 定稿: Commander-style scope co
   it("maps every scope to a distinct lucide icon", () => {
     expect(SCOPE_ICONS).toEqual({ all: "monitor-smartphone", desktop: "monitor", mobile: "smartphone", local: "airplay" });
     expect(new Set(Object.values(SCOPE_ICONS)).size).toBe(4);
+  });
+
+  // Sync Center card "Runs on" row (spec 2026-08-06-c-livetest-batch2-design.md §2, ledger C-#10):
+  // extends the SCOPE_ICONS vocabulary to MemberRule's five stops.
+  it("maps every member rule to a distinct lucide icon, sharing the all/desktop/mobile glyphs with SCOPE_ICONS", () => {
+    expect(RUNS_ON_ICONS).toEqual({
+      all: "monitor-smartphone",
+      desktop: "monitor",
+      mobile: "smartphone",
+      "always-here": "power",
+      "never-here": "power-off",
+    });
+    expect(new Set(Object.values(RUNS_ON_ICONS)).size).toBe(5);
+    expect(RUNS_ON_ICONS.all).toBe(SCOPE_ICONS.all);
+    expect(RUNS_ON_ICONS.desktop).toBe(SCOPE_ICONS.desktop);
+    expect(RUNS_ON_ICONS.mobile).toBe(SCOPE_ICONS.mobile);
   });
 
   it("tooltip names the current scope", () => {

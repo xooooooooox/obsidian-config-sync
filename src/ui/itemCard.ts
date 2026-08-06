@@ -13,7 +13,7 @@
 import { GROUP_NAME_RE } from "../core/manifest";
 import { basename } from "../core/pathing";
 import { emptyItemConfig, ItemConfig, ItemDef, ItemFieldRule, ItemSettingsFile } from "../core/registry";
-import { DeviceClass, PerItemScopes, RuleScope } from "../core/types";
+import { DeviceClass, MemberRule, PerItemScopes, RuleScope } from "../core/types";
 
 // ── Row badges (spec §4, D2) ────────────────────────────────────────────────────────────────
 // Row = name + badges + sync toggle + chevron, NOTHING else. Badge order: enablement-scope
@@ -392,6 +392,18 @@ export const SCOPE_ICONS: Record<RuleScope, string> = {
   desktop: "monitor",
   mobile: "smartphone",
   local: "airplay",
+};
+
+// Sync Center card "Runs on" row (spec 2026-08-06-c-livetest-batch2-design.md §2, ledger C-#10):
+// extends the same icon vocabulary to MemberRule's five stops — "all" mirrors SCOPE_ICONS' idle
+// glyph, "always-here"/"never-here" get their own (unused elsewhere — verified via `git grep -n
+// '"power'` across src/, 2026-08-06) since they have no RuleScope counterpart.
+export const RUNS_ON_ICONS: Record<MemberRule, string> = {
+  all: "monitor-smartphone",
+  desktop: "monitor",
+  mobile: "smartphone",
+  "always-here": "power",
+  "never-here": "power-off",
 };
 
 export function nextScope<T extends RuleScope>(current: T, options: readonly T[]): T {

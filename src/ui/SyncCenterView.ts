@@ -50,8 +50,9 @@ import { jsonSortedView } from "../core/merge";
 import { renderReportContent, renderReportPills } from "./reportContent";
 import { RunRecord, RunKind, RunStatus, worstStatus, formatRunTime, stopSyncDesc, deleteLeftoverDesc } from "../core/runHistory";
 import { ACTION_ICON, ACTION_COLOR_CLASS, renderActionIcon, renderActionCount, type SyncAction } from "./actionIcons";
-import { FILE_SCOPE_OPTIONS } from "./itemCard";
-import { renderScopeCycle } from "./scopeCycle";
+// SCOPE_LABELS aliased: this file already declares its own SCOPE_LABELS (sidebar category
+// labels, see below) for an unrelated domain.
+import { FILE_SCOPE_OPTIONS, RUNS_ON_ICONS, SCOPE_ICONS, SCOPE_LABELS as RULE_SCOPE_LABELS, scopeCycleTooltip } from "./itemCard";
 import {
   QualifierAutocomplete,
   parseQuery,
@@ -2040,40 +2041,64 @@ export class SyncCenterView extends ItemView {
     }
   }
 
-  // A generic "label: value-that-opens-a-menu" card row, shared by Runs on / After install /
-  // Enablement.
+  // Click/keydown → open an Obsidian Menu at the trigger's position, shared by every card
+  // rule-control trigger (icon or text) so a menu opens the same way regardless of trigger kind.
+  private wireMenuTrigger(trigger: HTMLElement, buildMenu: () => Menu): void {
+    trigger.setAttribute("role", "button");
+    trigger.setAttribute("tabindex", "0");
+    const open = (x: number, y: number): void => {
+      buildMenu().showAtPosition({ x, y });
+    };
+    trigger.addEventListener("click", (e) => {
+      e.stopPropagation();
+      open(e.clientX, e.clientY);
+    });
+    trigger.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      e.preventDefault();
+      e.stopPropagation();
+      const rect = trigger.getBoundingClientRect();
+      open(rect.left, rect.bottom);
+    });
+  }
+
+  // A generic "label: value-that-opens-a-menu" card row, shared by After install / Enablement —
+  // the two textual triggers left once Settings sync/Runs on moved onto the icon idiom below.
   private renderCardMenuRow(detail: HTMLElement, label: string, valueText: string, ariaLabel: string, buildMenu: () => Menu): void {
     this.renderCardKeyRow(detail, label, (value) => {
-      const chip = value.createSpan({ cls: "config-sync-menuchip", text: valueText, attr: { role: "button", tabindex: "0", "aria-label": ariaLabel } });
-      const open = (x: number, y: number): void => {
-        buildMenu().showAtPosition({ x, y });
-      };
-      chip.addEventListener("click", (e) => {
-        e.stopPropagation();
-        open(e.clientX, e.clientY);
-      });
-      chip.addEventListener("keydown", (e) => {
-        if (e.key !== "Enter" && e.key !== " ") return;
-        e.preventDefault();
-        e.stopPropagation();
-        const rect = chip.getBoundingClientRect();
-        open(rect.left, rect.bottom);
-      });
+      const chip = value.createSpan({ cls: "config-sync-menuchip config-sync-card-trigger", text: valueText, attr: { "aria-label": ariaLabel } });
+      this.wireMenuTrigger(chip, buildMenu);
+    });
+  }
+
+  // Icon trigger + Obsidian Menu (spec 2026-08-06-c-livetest-batch2-design.md §2, ledger
+  // C-#7/C-#10): shared by Settings sync and Runs on — the glyph IS the state (SCOPE_ICONS-family
+  // vocabulary, same is-set accent language as renderScopeCycle's Settings-drawer idiom), but a
+  // click opens a menu of the row's options instead of cycling straight to the next one. Click
+  // target is the icon box only (`.config-sync-card-trigger` content-sizes it — C-#7's whole-row
+  // hit area was the base `.config-sync-scopeicon` class stretching to fill the row).
+  private renderCardIconMenuRow(detail: HTMLElement, label: string, icon: string, isSet: boolean, ariaLabel: string, buildMenu: () => Menu): void {
+    this.renderCardKeyRow(detail, label, (value) => {
+      const trigger = value.createSpan({ cls: `config-sync-scopeicon config-sync-card-trigger${isSet ? " is-set" : ""}`, attr: { "aria-label": ariaLabel } });
+      setIcon(trigger, icon);
+      this.wireMenuTrigger(trigger, buildMenu);
     });
   }
 
   // Runs on (spec §4/§6, plugins with a synced carrier only): unifies per-plugin rules, member
   // class scopes, and this-device pins into one 5-option menu writing settings.memberRules
-  // directly.
+  // directly. Icon vocabulary from RUNS_ON_ICONS (itemCard.ts, beside SCOPE_ICONS) — "all" renders
+  // dim like SCOPE_ICONS' idle stop, the other four accented.
   private renderRunsOnRow(detail: HTMLElement, name: string, memberRule: MemberRule): void {
     const carrier = enablementCarrierFor(name);
     const elementId = this.carrierElementFor(name);
-    this.renderCardMenuRow(detail, "Runs on", RUNS_ON_LABELS[memberRule], "Choose where this plugin runs", () => {
+    this.renderCardIconMenuRow(detail, "Runs on", RUNS_ON_ICONS[memberRule], memberRule !== "all", RUNS_ON_LABELS[memberRule], () => {
       const menu = new Menu();
       for (const rule of MEMBER_RULES) {
         menu.addItem((item) =>
           item
             .setTitle(RUNS_ON_LABELS[rule])
+            .setIcon(RUNS_ON_ICONS[rule])
             .setChecked(rule === memberRule)
             .onClick(() => {
               void this.host.setMemberRule(carrier, elementId, rule).then(() => this.notifyExternalChange());
@@ -2133,32 +2158,43 @@ export class SyncCenterView extends ItemView {
     });
   }
 
-  // Settings sync (spec §4, ledger C-#3): item-level device scope, rendered with the SAME icon
-  // control the Settings tab's file-row scope uses (renderScopeCycle) — one control language for
-  // one stored value, replacing this card's own bordered-text menu. Write targets are unchanged:
+  // Settings sync (spec §4, ledger C-#3/C-#7/C-#10): item-level device scope, rendered with the
+  // SAME icon vocabulary the Settings tab's file-row scope uses (SCOPE_ICONS) — one control
+  // language for one stored value — but a card click opens a menu of the scope options rather
+  // than cycling straight to the next one (renderScopeCycle's direct-cycle idiom is a C-#7 hazard
+  // once the icon isn't confined to a labeled grid column). Write targets are unchanged:
   // ItemConfig.settingsFile.fileRule.scope for a compiled item, SyncGroup.devices (custom/folder
   // groups have no ItemConfig) for a folder — same two entrances as before, only the control
-  // itself changed.
+  // itself changed. The Settings tab's own drawer cycle control (renderScopeCycle) is untouched.
   private renderSettingsSyncRow(detail: HTMLElement, r: StatusRow): void {
     const name = r.group.name;
-    this.renderCardKeyRow(detail, "Settings sync", (value) => {
-      if (this.scopeOf(name) === "custom") {
-        renderScopeCycle(value, {
-          scope: r.group.devices,
-          options: FILE_SCOPE_OPTIONS,
-          disabled: false,
-          onChange: (v) => void this.host.setCustomGroupDevices(name, v).then(() => this.notifyExternalChange()),
-        });
-        return;
+    const buildMenu = (scope: Exclude<RuleScope, "local">, write: (v: Exclude<RuleScope, "local">) => Promise<void>): Menu => {
+      const menu = new Menu();
+      for (const opt of FILE_SCOPE_OPTIONS) {
+        menu.addItem((item) =>
+          item
+            .setTitle(RULE_SCOPE_LABELS[opt])
+            .setIcon(SCOPE_ICONS[opt])
+            .setChecked(opt === scope)
+            .onClick(() => {
+              void write(opt).then(() => this.notifyExternalChange());
+            })
+        );
       }
-      const itemId = this.itemIdFor(name);
-      renderScopeCycle(value, {
-        scope: this.host.itemFileScope(itemId),
-        options: FILE_SCOPE_OPTIONS,
-        disabled: false,
-        onChange: (v) => void this.host.setItemFileScope(itemId, v).then(() => this.notifyExternalChange()),
-      });
-    });
+      return menu;
+    };
+    if (this.scopeOf(name) === "custom") {
+      const scope = r.group.devices;
+      this.renderCardIconMenuRow(detail, "Settings sync", SCOPE_ICONS[scope], scope !== "all", scopeCycleTooltip(scope), () =>
+        buildMenu(scope, (v) => this.host.setCustomGroupDevices(name, v))
+      );
+      return;
+    }
+    const itemId = this.itemIdFor(name);
+    const scope = this.host.itemFileScope(itemId);
+    this.renderCardIconMenuRow(detail, "Settings sync", SCOPE_ICONS[scope], scope !== "all", scopeCycleTooltip(scope), () =>
+      buildMenu(scope, (v) => this.host.setItemFileScope(itemId, v))
+    );
   }
 
   // More bridge (spec §4): deep-links into the Settings tab for this item's card.
