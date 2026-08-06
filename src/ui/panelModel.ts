@@ -1,8 +1,9 @@
-import { GroupState, GroupStatus } from "../core/status";
+import { GroupState, GroupStatus, OTHER_STORE_FILES_GROUP, RemoteDiffEntry } from "../core/status";
 import { FileChanges, RuleScope } from "../core/types";
 import { Availability, VersionDrift } from "../core/availability";
 import { ApplyItem, CaptureItem, StateAction } from "../core/ConfigSyncCore";
 import { ItemCategory } from "../core/catalog";
+import { memberUniverse, parseSwitchList, switchListMemberOn } from "../core/switchList";
 import { Fate, FateInput, rowFate } from "./fateModel";
 
 // Direction a checkable row acts in: capture pushes this device → store; apply pulls store → device.
@@ -258,6 +259,75 @@ export function typeSectionForRow(defSection: ItemCategory | "beta"): TypeSectio
 // filter or a search query hides some of its rows.
 export function sectionCountLabel(total: number, visible: number, filtered: boolean): string {
   return filtered ? `· ${visible} of ${total}` : `· ${total}`;
+}
+
+// ── Remote pane C-grammar model (2026-08-07-c-livetest-batch4 task 1) ──────────────────────────
+// Buckets a remote's raw file diff into the same four TYPE_SECTION_ORDER sections the main list
+// uses: the two switch-list carriers never appear as an ordinary row (their delta is an on/off
+// summary, not a file to diff), everything else sorts into the section its category maps to.
+
+export interface RemoteSectionModel {
+  section: TypeSection;
+  onOff: RemoteDiffEntry | null;
+  entries: RemoteDiffEntry[];
+}
+
+export function remoteSections(
+  entries: RemoteDiffEntry[],
+  categoryOf: (group: string) => ItemCategory | "beta",
+  displayNameOf: (group: string) => string
+): RemoteSectionModel[] {
+  const onOffBySection: Partial<Record<TypeSection, RemoteDiffEntry>> = {};
+  const rowsBySection = new Map<TypeSection, RemoteDiffEntry[]>();
+  for (const e of entries) {
+    if (e.group === "core-plugins") {
+      onOffBySection.core = e;
+      continue;
+    }
+    if (e.group === "community-plugins") {
+      onOffBySection.community = e;
+      continue;
+    }
+    const section = typeSectionForRow(categoryOf(e.group));
+    const rows = rowsBySection.get(section) ?? [];
+    rows.push(e);
+    rowsBySection.set(section, rows);
+  }
+  // (other store files) is unattributed metadata, not a real folder — it sorts last within Your
+  // folders regardless of display name so a genuine delta is never buried under it.
+  const byDisplayName = (a: RemoteDiffEntry, b: RemoteDiffEntry): number => {
+    if (a.group === OTHER_STORE_FILES_GROUP) return b.group === OTHER_STORE_FILES_GROUP ? 0 : 1;
+    if (b.group === OTHER_STORE_FILES_GROUP) return -1;
+    return displayNameOf(a.group).localeCompare(displayNameOf(b.group));
+  };
+  return TYPE_SECTION_ORDER.flatMap((section): RemoteSectionModel[] => {
+    const onOff = onOffBySection[section] ?? null;
+    const sectionEntries = (rowsBySection.get(section) ?? []).sort(byDisplayName);
+    if (onOff === null && sectionEntries.length === 0) return [];
+    return [{ section, onOff, entries: sectionEntries }];
+  });
+}
+
+// A carrier's on/off delta between the local store and a remote, as a plain set diff over
+// membership — reuses parseSwitchList's shape handling so community-plugins.json (array) and
+// core-plugins.json (map) both work, and degrades an unparseable/absent side to "nothing on"
+// rather than throwing (a remote file that failed to fetch must still render, not crash the pane).
+export function onOffFlips(local: string | null, remote: string | null): { onAtRemote: string[]; offAtRemote: string[] } {
+  const localList = local === null ? null : parseSwitchList(local);
+  const remoteList = remote === null ? null : parseSwitchList(remote);
+  const onAtRemote: string[] = [];
+  const offAtRemote: string[] = [];
+  for (const id of memberUniverse(localList, remoteList)) {
+    const onLocal = switchListMemberOn(localList, id);
+    const onRemote = switchListMemberOn(remoteList, id);
+    if (onRemote && !onLocal) onAtRemote.push(id);
+    else if (onLocal && !onRemote) offAtRemote.push(id);
+  }
+  return { onAtRemote: onAtRemote.sort(), offAtRemote: offAtRemote.sort() };
+}
+
+export function onOffLineText(n: number, open: boolean): string {
+  return `On/off list · differs for ${n} plugin${n === 1 ? "" : "s"} ${open ? "▾" : "▸"}`;
 }
 
 // The action bar's staged-selection line (replaces the old 5-param footerSummary once the view

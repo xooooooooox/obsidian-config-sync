@@ -628,4 +628,29 @@ describe("parentCardLabel", () => {
     });
     expect(parentCardLabel("scripts", defs, s)).toBe("Dataview");
   });
+
+  // presetCompanions basename fallback (c-livetest batch4 task 1): themes/snippets still read as
+  // "Appearance" even when the user never touched that companion — display-only, so it applies
+  // whether or not the appearance card itself is enabled.
+  it("empty settings.items → themes/snippets fall back to the appearance def's label", () => {
+    const s = settings({});
+    expect(parentCardLabel("themes", defs, s)).toBe("Appearance");
+    expect(parentCardLabel("snippets", defs, s)).toBe("Appearance");
+  });
+
+  it("a configured enabled companion with the same basename on another item still wins over the fallback", () => {
+    const s = settings({
+      "community:dataview": on({ companions: [{ path: "elsewhere/themes", scope: "all", enabled: true }] }),
+    });
+    expect(parentCardLabel("themes", defs, s)).toBe("Dataview");
+  });
+
+  it("disabled appearance card with no configured companions still gets the preset fallback (state does not gate it)", () => {
+    const s = settings({ appearance: { enabled: false, companions: [] } });
+    expect(parentCardLabel("themes", defs, s)).toBe("Appearance");
+  });
+
+  it("a non-companion group name still returns null", () => {
+    expect(parentCardLabel("random-group", defs, settings({}))).toBeNull();
+  });
 });

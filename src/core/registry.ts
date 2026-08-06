@@ -303,6 +303,23 @@ export function parentCardLabel(groupName: string, defs: ItemDef[], settings: Co
     if (!cfg.enabled) continue;
     if (cfg.companions.some((c) => c.enabled && basename(c.path) === groupName)) return def.label;
   }
+  return presetCompanionFallback(groupName, defs, settings);
+}
+
+// Preset-companion basename fallback (2026-08-07-c-livetest-batch4 task 1, remote pane): a def's
+// static presetCompanions (e.g. appearance's themes/snippets) still resolve to their card label
+// even when the user has never configured that companion at all — display-only, so it applies
+// regardless of the card's or companion's enabled state. Only fires once the def's OWN companions
+// have nothing configured under this basename, so an actually-configured entry (enabled or not)
+// keeps its existing null/loop-match behavior untouched.
+function presetCompanionFallback(groupName: string, defs: ItemDef[], settings: CompileSettings): string | null {
+  for (const def of defs) {
+    if (def.presetCompanions === undefined) continue;
+    if (!def.presetCompanions.some((p) => basename(p.path) === groupName)) continue;
+    const cfg = configFor(settings, def.id);
+    if (cfg.companions.some((c) => basename(c.path) === groupName)) continue; // already configured — no fallback
+    return def.label;
+  }
   return null;
 }
 
