@@ -206,10 +206,12 @@ interface AppInternal {
 
 // app.setting's internal surface (the Settings modal manager) — not part of the public API.
 // The Sync Center's More bridge uses this to open the plugin's own Settings tab (the same entry
-// point Obsidian's plugin list gear icon uses); SettingTab.render() then consumes
+// point Obsidian's plugin list gear icon uses); SettingTab.display() then consumes
 // pendingSettingsDeepLink to scroll to/expand the specific item's card once it lands there.
+// activeTab is read by openSettingsAt to avoid re-opening a tab open() already activated (root
+// cause of C-#11 — see there).
 interface AppWithSetting {
-  setting: { open(): void; openTabById(id: string): void };
+  setting: { open(): void; openTabById(id: string): void; activeTab: { id: string } | null };
 }
 
 export default class ConfigSyncPlugin extends Plugin {
@@ -1296,19 +1298,31 @@ export default class ConfigSyncPlugin extends Plugin {
     await this.saveSettings();
   }
 
-  // The More bridge's target item — set here, consumed once by SettingTab.render() via
+  // The More bridge's target item — set here, consumed once by SettingTab.display() via
   // consumePendingSettingsAnchor() below, which expands that item's card and scrolls to it.
   private pendingSettingsDeepLink: string | null = null;
   private openSettingsAt(itemId: string): void {
     this.pendingSettingsDeepLink = itemId;
     const app = this.app as unknown as AppWithSetting;
+    // ROOT CAUSE (C-#11, live-traced via console instrumentation on a real build): open() itself
+    // re-opens whatever tab was last active — when that's already this plugin's tab (the common
+    // case once Settings has been opened here even once), open()'s internal openTabById() already
+    // fires SettingTab.display(). openTabById() has no "already active" guard (traced in
+    // Obsidian's own compiled Setting class), so the unconditional explicit call below used to
+    // re-run display() a second time, resetting activeTab/expanded back to defaults right after
+    // the first display() had consumed pendingSettingsDeepLink and applied them — a live-confirmed
+    // double render (renderGen incremented twice per open), not a "consume never fires" bug.
+    // Call it again only when open() didn't already land us on our own tab — but open() is a
+    // no-op while the modal is already showing (no tab change at all), so also force it when we
+    // were already active *before* open() ran, or a repeat More click while Settings is already
+    // open on our own tab would never re-render to pick up the new pendingSettingsDeepLink.
+    const alreadyActive = app.setting.activeTab?.id === this.manifest.id;
     app.setting.open();
-    app.setting.openTabById(this.manifest.id);
+    if (alreadyActive || app.setting.activeTab?.id !== this.manifest.id) app.setting.openTabById(this.manifest.id);
   }
 
-  // SettingsHost-facing read-and-clear: the settings tab calls this once per render() so a
-  // pending deep link is consumed exactly once, even though display() re-renders more than once
-  // per open (search, tab switches) — a second render() must never re-trigger the scroll/expand.
+  // SettingsHost-facing read-and-clear: the settings tab calls this once per display() so a
+  // pending deep link is consumed exactly once per Settings open.
   consumePendingSettingsAnchor(): string | null {
     const id = this.pendingSettingsDeepLink;
     this.pendingSettingsDeepLink = null;
