@@ -46,6 +46,14 @@ describe("rowFate — spec §3 verb table", () => {
     const f = rowFate({ ...base, direction: "capture", hasSettingsPayload: false, storeListOn: false, locallyOn: true });
     expect(f.sentence).toBe("Turned on here — shares it");
   });
+  it("capture: Appearance", () => {
+    const f = rowFate({ ...base, direction: "capture", special: "appearance" });
+    expect(f.sentence).toBe("Captures theme & snippets");
+  });
+  it("capture: folder", () => {
+    const f = rowFate({ ...base, direction: "capture", folderFileCount: 2 });
+    expect(f.sentence).toBe("Captures 2 files");
+  });
   it("conflict", () => {
     const f = rowFate({ ...base, conflict: true });
     expect(f.glyph).toBe("⚠");

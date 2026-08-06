@@ -55,12 +55,14 @@ function capitalize(s: string): string {
 }
 
 function settingsVerb(i: FateInput, capturedTurnsOn: boolean): string | null {
-  if (i.special === "appearance") return "applies theme & snippets — live";
-  if (i.folderFileCount !== null) return `applies ${i.folderFileCount} files`;
   if (i.direction === "capture") {
     if (capturedTurnsOn) return "turned on here — shares it";
+    if (i.special === "appearance") return "captures theme & snippets";
+    if (i.folderFileCount !== null) return `captures ${i.folderFileCount} files`;
     return i.hasSettingsPayload ? "captures settings" : null;
   }
+  if (i.special === "appearance") return "applies theme & snippets — live";
+  if (i.folderFileCount !== null) return `applies ${i.folderFileCount} files`;
   return i.hasSettingsPayload ? "applies settings" : null;
 }
 

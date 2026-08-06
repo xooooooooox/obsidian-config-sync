@@ -387,7 +387,12 @@ export function stagedPayload(rows: StageableRow[]): { apply: ApplyItem[]; captu
     }
 
     if (dir === "apply") apply.push({ name: row.itemName, action: stagedAction(row.availability, row.fate.turnsOn) });
-    else capture.push({ name: row.itemName, action: "none" });
+    // Capture never enables as a side effect of its plain settings/member push (there's no
+    // "turnsOn" concept on that side by default — rowFate always hands capture rows turnsOn:
+    // false) — EXCEPT the Enablement fallback row's explicit "Turn it on" choice, which
+    // `effectiveFate`/`fallbackTurnsOn` fold into `row.fate.turnsOn` the same way they do for
+    // apply (spec 2026-08-06 §4 Enablement amendment: restores the pre-C capture-side enable).
+    else capture.push({ name: row.itemName, action: row.fate.turnsOn ? "enable" : "none" });
   }
 
   for (const carrier of ["core-plugins", "community-plugins"] as const) {

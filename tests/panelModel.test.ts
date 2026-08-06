@@ -491,8 +491,17 @@ describe("stagedPayload — spec §5 unified staging (task 6)", () => {
     expect(act(false)).toBe("none");
   });
 
-  it("capture rows always carry action 'none' — capture never enables anything as a side effect", () => {
+  it("capture rows carry action 'none' by default — capture never enables anything as a side effect of a plain settings/member push", () => {
     expect(stagedPayload([row({ id: "x", fate: fate("↑"), availability: notInstalledAvail })]).capture).toEqual([{ name: "x", action: "none" }]);
+  });
+
+  // I-2 fix (2026-08-06 final review): the Enablement fallback row's "Turn it on" choice folds
+  // into the row's own fate.turnsOn via effectiveFate/fallbackTurnsOn (SyncCenterView.ts) — the
+  // SAME bridge apply already uses, no parallel derivation — so a capture-direction row staged
+  // with turnsOn:true must deliver CaptureItem action "enable", restoring the pre-C
+  // disabledRowAction capture-side enable path the §4 amendment names.
+  it("a capture row whose fate says turnsOn (the Enablement fallback's 'Turn it on' choice) carries action 'enable'", () => {
+    expect(stagedPayload([row({ id: "x", fate: fate("↑", true), availability: notInstalledAvail })]).capture).toEqual([{ name: "x", action: "enable" }]);
   });
 
   it("a turnsOn plugin row contributes its elementId to its carrier's stagedMembers, synthesizing the carrier's own ApplyItem", () => {
