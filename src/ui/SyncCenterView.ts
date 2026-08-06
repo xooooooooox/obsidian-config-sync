@@ -1771,15 +1771,21 @@ export class SyncCenterView extends ItemView {
     const unresolvedConflict = isConflict && !this.conflictChoice.has(group.name);
     const fate = this.displayFate(rawFate, input, group.name);
     const inert = !fate.stageable;
+    const expanded = this.expandedItems.has(group.name);
     const row = card.createDiv({
       cls: `config-sync-hub-row${inert ? " is-insync" : ""}${unresolvedConflict ? " is-conflict" : ""}`,
       attr: { "aria-label": this.host.resolvedPath(group) },
     });
-    const chev = row.createSpan({ cls: "config-sync-row-chevron", text: this.expandedItems.has(group.name) ? "▾" : "▸" });
+    const chev = row.createSpan({ cls: "config-sync-row-chevron", text: expanded ? "▾" : "▸" });
     this.renderRuleName(row, group.name, group.label);
     for (const chip of fate.chips) row.createSpan({ cls: "config-sync-fatechip", text: chip });
     row.createDiv({ cls: "config-sync-rule-spacer" });
+    // Ledger C-#9: the fate sentence/glyph repeats the card's own "On apply"/"On capture" clause
+    // once expanded, so it hides while the drawer is open (checkbox and chips stay); the click
+    // handler below flips `hidden` alongside the chevron/drawer so it tracks expand/collapse
+    // without a full re-render.
     const fateEl = row.createSpan({ cls: "config-sync-fate-text" });
+    fateEl.hidden = expanded;
     fateEl.createSpan({ cls: "config-sync-fate-glyph", text: fate.glyph });
     fateEl.appendText(` ${fate.sentence}`);
 
@@ -1803,7 +1809,7 @@ export class SyncCenterView extends ItemView {
     }
 
     const detail = card.createDiv({ cls: "config-sync-report-files config-sync-itemcard" });
-    detail.hidden = !this.expandedItems.has(group.name);
+    detail.hidden = !expanded;
     this.renderUnifiedCard(detail, r, fate, input, isConflict);
     // Stop syncing always closes the drawer as a quiet footer under a divider (round-9 定稿 A):
     // one placement for every removable row, clear of the file/diff rows a thumb aims for.
@@ -1815,6 +1821,7 @@ export class SyncCenterView extends ItemView {
       else this.expandedItems.add(group.name);
       detail.hidden = !detail.hidden;
       chev.setText(detail.hidden ? "▸" : "▾");
+      fateEl.hidden = !detail.hidden;
     });
   }
 
@@ -1844,17 +1851,24 @@ export class SyncCenterView extends ItemView {
       return;
     }
     const name = r.group.name;
+    // Own wrapper for the field rows (ledger C-#5 root cause): `.config-sync-card-fieldrow`'s
+    // `:last-of-type` border-removal matches by TAG, not class — with the Stop-syncing footer
+    // appended as a further `<div>` sibling of the rows in `detail`, the true last row stopped
+    // qualifying as last-of-type and kept its `border-bottom`, stacking with the footer's own
+    // `border-top` into an empty hairline-bounded band. Rows live in their own `fields` div so
+    // `:last-of-type` only ever sees other field rows, and the footer sits outside it entirely.
+    const fields = detail.createDiv({ cls: "config-sync-card-fields" });
     const dir = isConflict ? this.conflictChoice.get(name) ?? null : input.direction;
-    this.renderCardKeyRow(detail, dir === "apply" ? "On apply" : dir === "capture" ? "On capture" : "State", (value) => {
+    this.renderCardKeyRow(fields, dir === "apply" ? "On apply" : dir === "capture" ? "On capture" : "State", (value) => {
       value.createDiv({ cls: "config-sync-expand-note", text: this.stateClauseText(r, fate, input) });
     });
 
     const changes = r.status.changes;
     if (dir !== null && changes !== undefined && hasChanges(changes)) {
-      this.renderCardKeyRow(detail, "Files", (value) => this.renderUnifiedFiles(value, r, changes, dir, input.encrypted));
+      this.renderCardKeyRow(fields, "Files", (value) => this.renderUnifiedFiles(value, r, changes, dir, input.encrypted));
     }
 
-    if (isConflict) this.renderResolveRow(detail, r);
+    if (isConflict) this.renderResolveRow(fields, r);
 
     // Runs on is one of the two "always available" rule menus (spec §1/§4 — no stageable
     // qualifier, unlike After install's explicit "only ¬carrierSynced ∧ ¬installed"): a
@@ -1867,18 +1881,18 @@ export class SyncCenterView extends ItemView {
     // installed) — without it there is no enable path in the unified grammar at all, a real
     // regression from pre-C's `disabledRowAction` default. Ungated by `fate.stageable`, matching
     // `Runs on`'s own precedent (reachable from the row's steady state, not just mid-divergence).
-    if (input.carrierSynced) this.renderRunsOnRow(detail, name, input.memberRule);
+    if (input.carrierSynced) this.renderRunsOnRow(fields, name, input.memberRule);
     else if (!input.installed) {
-      if (fate.stageable) this.renderAfterInstallRow(detail, r);
+      if (fate.stageable) this.renderAfterInstallRow(fields, r);
     } else if (this.availOf(name).kind === "disabled") {
-      this.renderEnablementRow(detail, r);
+      this.renderEnablementRow(fields, r);
     }
 
-    this.renderSettingsSyncRow(detail, r);
-    this.renderMoreRow(detail, name);
+    this.renderSettingsSyncRow(fields, r);
+    this.renderMoreRow(fields, name);
 
     if (name === "hotkeys") {
-      this.renderCardKeyRow(detail, "Note", (value) => {
+      this.renderCardKeyRow(fields, "Note", (value) => {
         value.createDiv({ cls: "config-sync-expand-note", text: "Takes effect after an app reload" });
       });
     }
@@ -1887,10 +1901,16 @@ export class SyncCenterView extends ItemView {
   // One row inside the expanded card (spec §4, ledger C-#2): a fixed-width muted label with its
   // value immediately adjacent, shared by every card row (On apply/Files/Runs on/Settings
   // sync/More/Note/Resolve) — never a label on its own line with the value spread underneath.
+  // Built off-DOM first (ledger C-#5): if `build` leaves the value empty, the row is dropped
+  // entirely — no separator, no height — rather than appended and pruned; Task 2's rule-control
+  // triggers render through this same helper, so an N/A control must vanish the same way.
   private renderCardKeyRow(detail: HTMLElement, label: string, build: (value: HTMLElement) => void): void {
-    const row = detail.createDiv({ cls: "config-sync-card-fieldrow config-sync-cardrow" });
+    const row = createDiv({ cls: "config-sync-card-fieldrow config-sync-cardrow" });
     row.createSpan({ cls: "config-sync-explabel config-sync-explabel-inline", text: label });
-    build(row.createDiv({ cls: "config-sync-cardval" }));
+    const value = row.createDiv({ cls: "config-sync-cardval" });
+    build(value);
+    if (value.childNodes.length === 0) return;
+    detail.appendChild(row);
   }
 
   // Resolve (spec §4, conflict rows only): segmented `Use theirs ↓` / `Keep mine ↑`. Clicking

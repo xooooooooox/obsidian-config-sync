@@ -1088,16 +1088,22 @@ body.is-mobile .config-sync-strip-meta .config-sync-report-pills { margin-left: 
 .config-sync-carrierchip { border: 1px solid var(--background-modifier-border); border-radius: 999px; padding: 1px 8px; font-size: var(--font-ui-smaller); color: var(--text-muted); cursor: pointer; }
 .config-sync-carrierchip.is-synced { color: var(--color-green); border-color: rgba(var(--color-green-rgb), 0.4); }
 /* Expanded-card rows (spec §4, ledger C-#2): every row is a fixed-width muted label with its
-   value IMMEDIATELY adjacent — never spread edge-to-edge with the value floating far right. */
+   value IMMEDIATELY adjacent — never spread edge-to-edge with the value floating far right. Key
+   column (ledger C-#6): nowrap + sized to the longest key ("After install") so a key never wraps
+   to a second line; value (ledger C-#6/C-#8): starts right after the key and sizes to whatever
+   width remains (`min-width: 0`, no fixed narrow width) so its content never truncates while the
+   row still has room. */
 .config-sync-cardrow { display: flex; align-items: flex-start; gap: var(--size-4-2); }
-.config-sync-cardrow > .config-sync-explabel-inline { flex: 0 0 92px; padding-top: 1px; }
+.config-sync-cardrow > .config-sync-explabel-inline { flex: 0 0 15ch; white-space: nowrap; padding-top: 1px; }
 .config-sync-cardval { flex: 1; min-width: 0; }
 /* Runs on (ledger C-#3) stays a textual menu — five options exceed the device-icon vocabulary —
    but its trigger now harmonizes with the card's icon controls: the same small radius as
    .config-sync-scopeicon/.config-sync-lock and the same `--background-modifier-hover` hover
    surface those icon controls use (e.g. .config-sync-card-pathbtn:hover), not a standalone pill
-   chip. */
-.config-sync-menuchip { border: 1px solid var(--background-modifier-border); border-radius: var(--radius-s); padding: 1px 8px; font-size: var(--font-ui-smaller); color: var(--text-muted); cursor: pointer; white-space: nowrap; }
+   chip. Ellipsis (ledger C-#8) is a last resort for a genuinely narrow viewport, never a first
+   resort while `.config-sync-cardval` still has room — `max-width: 100%` only caps it at the
+   value cell's own (already generous, C-#6) width. */
+.config-sync-menuchip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; border: 1px solid var(--background-modifier-border); border-radius: var(--radius-s); padding: 1px 8px; font-size: var(--font-ui-smaller); color: var(--text-muted); cursor: pointer; white-space: nowrap; }
 .config-sync-menuchip:hover, .config-sync-menuchip:focus-visible { color: var(--text-normal); background: var(--background-modifier-hover); }
 /* The expanded card itself (ledger C-#2): bordered, left-indented under the row's name column
    (chevron 16px + its 4px margin ≈ 20px) and offset one notch from the section behind it, so the
