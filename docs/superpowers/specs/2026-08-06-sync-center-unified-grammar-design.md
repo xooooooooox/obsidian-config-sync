@@ -113,9 +113,11 @@ Standardized rows, in order (omit when not applicable):
   `Turn it on` / `Leave it off`; restores the pre-C fallback enable path in the new grammar
   (amendment 2026-08-06, from Task 6 review finding b). The fate sentence still carries no
   enablement verbs when the carrier is unsynced — only the staged action changes.
-- `Settings sync` — item-level device-scope menu (`Everywhere` / `Computers only` /
-  `Phones only` / `This computer only`), same write target as the Settings tab's file-row
-  scope control.
+- `Settings sync` — item-level device-scope menu mirroring the Settings tab's file-level
+  scope cycle exactly: three stops (`All devices` / `Desktop only` / `Mobile only`), same
+  glyphs, same write target. File-level scope excludes `This device` by design (D9 — the
+  validator rejects it); only KEY-level rules carry a this-device stop (amendment
+  2026-08-07, live-test C-#12 investigation).
 - `More` — `Per-key rules, locks & folders — opens Settings ▸` (folders:
   `Folder rules — opens Settings ▸`): deep link opening the plugin's Settings tab scrolled
   to that item's card, expanded.

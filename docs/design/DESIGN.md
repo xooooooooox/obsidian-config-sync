@@ -226,8 +226,12 @@ noted):
   sync ▸` / `N with nothing to sync yet ▸`, expandable in place. Switching into a filter
   pill or a search hit auto-expands every section once, on that transition only, so a
   manual re-collapse during the rest of that filtered/search session still sticks. Group
-  headers `config-sync-sect` (uppercase + hairline) — used in the run-report breakdown and
-  remote diff. On narrow phones a section head keeps its pills and the "N selected" hint on
+  headers `config-sync-sect` (uppercase + hairline) — used in the run-report breakdown.
+  The remote pane groups its diff entries with the same type-section head family as the
+  main list, in a static variant (`is-static`: no chevron, no collapse, no checkbox, no
+  carrier chip, default cursor); carrier divergence there renders as a pinned
+  `On/off list · differs for N plugins ▸` line (`config-sync-remote-onoff`) whose
+  expansion shows the per-plugin flips (`config-sync-remote-fliplist`) and the file diff. On narrow phones a section head keeps its pills and the "N selected" hint on
   one line (`white-space: nowrap; flex: none`) — the title is the only element allowed to
   wrap.
 - **Expanded card (Sync Center row)** `config-sync-itemcard` — bordered, left-indented under
