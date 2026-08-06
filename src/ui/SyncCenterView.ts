@@ -24,8 +24,11 @@ import {
   MemberDecision,
   moreFilesText,
   nosettingsLineText,
+  onOffFlips,
+  onOffLineText,
   PanelFilter,
   presentedState,
+  remoteSections,
   runProgressLabel,
   SectionKind,
   sectionForItem,
@@ -2686,11 +2689,20 @@ export class SyncCenterView extends ItemView {
     const { entries, lockDiffers } = dd;
 
     const changed = entries.filter((e) => e.files.length > 0);
-    for (const cat of SCOPE_ORDER) {
-      const inCat = changed.filter((e) => this.scopeOf(e.group) === cat);
-      if (inCat.length === 0) continue;
-      detail.createDiv({ cls: "config-sync-sect", text: SCOPE_LABELS[cat] });
-      for (const e of inCat) this.renderRemoteDiffEntry(detail, e, remote.name);
+    // Mirrors the main list's four fixed type sections (spec 2026-08-07-c-livetest-batch4 task 2)
+    // instead of the old flat SCOPE_ORDER/config-sync-sect breakdown — same section vocabulary,
+    // same on/off-carrier extraction, so a remote diff and the item list never disagree on where
+    // a plugin lives.
+    for (const sec of remoteSections(changed, (g) => this.scopeOf(g), (g) => this.fullName(g, findGroupByName(this.groups, g)?.label))) {
+      const n = sec.entries.length + (sec.onOff !== null ? 1 : 0);
+      // No chevron/checkbox/carrier-chip/click handler here: this header is read-only summary,
+      // never a control — a dead affordance is the ledger C-#1 bug this task must not repeat.
+      const fold = detail.createDiv({ cls: `config-sync-section is-typesection is-open is-static is-${sec.section}` });
+      const head = fold.createDiv({ cls: "config-sync-section-head" });
+      head.createSpan({ cls: "config-sync-section-title", text: TYPE_SECTION_TITLES[sec.section] });
+      head.createSpan({ cls: "config-sync-pill is-neutral", text: sectionCountLabel(n, n, false) });
+      if (sec.onOff !== null) this.renderRemoteOnOff(fold, sec.onOff, remote.name);
+      for (const e of sec.entries) this.renderRemoteDiffEntry(fold, e, remote.name);
     }
 
     const state = check?.state ?? "unknown";
@@ -2757,6 +2769,52 @@ export class SyncCenterView extends ItemView {
     // lockDiffers alone still gives Pull something to do (refresh the newer version info),
     // so it keeps the buttons live even when every file's contents match.
     this.renderRemoteButtons(detail, remote, pullAligned, entries.length === 0 && !lockDiffers);
+  }
+
+  // The pinned on/off line (spec task 2 §3): a section's core-plugins/community-plugins entry
+  // never renders as an ordinary row — its file diff IS a member on/off delta, so this is the
+  // only place that delta shows. Sums onOffFlips over every file the carrier entry carries
+  // (normally exactly one) rather than assuming a single file, per the brief.
+  private renderRemoteOnOff(host: HTMLElement, e: RemoteDiffEntry, remoteName: string): void {
+    const onAtRemote: string[] = [];
+    const offAtRemote: string[] = [];
+    for (const f of e.files) {
+      const flips = onOffFlips(f.local, f.remote);
+      onAtRemote.push(...flips.onAtRemote);
+      offAtRemote.push(...flips.offAtRemote);
+    }
+    onAtRemote.sort();
+    offAtRemote.sort();
+    const n = onAtRemote.length + offAtRemote.length;
+    const line = host.createDiv({ cls: "config-sync-remote-onoff" });
+    let open = false;
+    line.setText(onOffLineText(n, open));
+    const fold = host.createDiv({ cls: "config-sync-remote-fliplist" });
+    fold.hide();
+    let built = false;
+    line.addEventListener("click", () => {
+      open = !open;
+      line.setText(onOffLineText(n, open));
+      if (!open) {
+        fold.hide();
+        return;
+      }
+      if (!built) {
+        if (onAtRemote.length > 0) {
+          const row = fold.createDiv();
+          row.appendText(`on at ${remoteName}: `);
+          row.createSpan({ cls: "config-sync-remote-flip-value", text: onAtRemote.join(", ") });
+        }
+        if (offAtRemote.length > 0) {
+          const row = fold.createDiv();
+          row.appendText(`off at ${remoteName}: `);
+          row.createSpan({ cls: "config-sync-remote-flip-value", text: offAtRemote.join(", ") });
+        }
+        this.renderRemoteFileRows(fold, e, remoteName);
+        built = true;
+      }
+      fold.show();
+    });
   }
 
   private renderRemoteDiffEntry(detail: HTMLElement, e: RemoteDiffEntry, remoteName: string): void {

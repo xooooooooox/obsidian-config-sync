@@ -1083,6 +1083,10 @@ body.is-mobile .config-sync-strip-meta .config-sync-report-pills { margin-left: 
   letter-spacing: 0.06em;
 }
 .config-sync-section.is-typesection .config-sync-section-head .config-sync-row-chevron { font-size: var(--font-ui-smaller); }
+/* Remote pane's mirrored type sections (spec 2026-08-07-c-livetest-batch4 task 2): same header
+   family, but the header is read-only summary, not a control — no collapse to toggle, so it drops
+   the shared header's pointer cursor rather than growing a second header class. */
+.config-sync-section.is-static .config-sync-section-head { cursor: default; }
 /* Core/Community section header chip: the on/off list's own sync-membership toggle — the only
    remaining home of that list as a configurable item once its row dissolves into this chip. */
 .config-sync-carrierchip { border: 1px solid var(--background-modifier-border); border-radius: 999px; padding: 1px 8px; font-size: var(--font-ui-smaller); color: var(--text-muted); cursor: pointer; }
@@ -1683,6 +1687,25 @@ body.is-mobile .config-sync-report-files { font-size: var(--font-ui-small); }
   color: var(--text-muted);
   font-size: var(--font-ui-smaller);
   margin-top: 4px;
+}
+/* Pinned on/off line (task 2 §3): same line treatment as .config-sync-unchanged's trailing folds,
+   with the diff-hint accent (.config-sync-diffhint's color) instead of --text-muted — it toggles a
+   diff-flavored detail, not a plain in-sync tally. */
+.config-sync-remote-onoff {
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+  margin-top: var(--size-4-2);
+  cursor: pointer;
+}
+.config-sync-remote-fliplist {
+  margin: 2px 0 8px 22px;
+  padding-left: 10px;
+  border-left: 2px solid var(--background-modifier-border);
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+.config-sync-remote-fliplist .config-sync-remote-flip-value {
+  color: var(--text-normal);
 }
 .config-sync-remote-selfnote {
   color: var(--text-faint);
