@@ -851,6 +851,7 @@ export class SyncCenterView extends ItemView {
         const acts = block.createDiv({ cls: "config-sync-self-acts" });
         const review = acts.createEl("button", { cls: "mod-cta", text: "Review what to apply" });
         review.addEventListener("click", () => {
+          this.expandAllTypeSections();
           this.filter = "apply";
           this.panelScope = { kind: "device", cat: "all" };
           this.render(this.renderGen);
@@ -979,7 +980,10 @@ export class SyncCenterView extends ItemView {
     searchEl.addEventListener("input", () => {
       const wasSearching = this.searching();
       this.search = searchEl.value;
-      if (!wasSearching && this.searching()) this.filter = "all"; // searching means "find this item"
+      if (!wasSearching && this.searching()) {
+        this.filter = "all"; // searching means "find this item"
+        this.expandAllTypeSections(); // transition into search: expand once so hits are discoverable
+      }
       // Co-render everything the query affects except the input itself: the sidebar hit badges and
       // the whole main pane (pills, list, sections all read this.search).
       if (this.sideScopeEl !== null) {
@@ -1501,6 +1505,9 @@ export class SyncCenterView extends ItemView {
         if (d.action !== undefined) renderActionCount(shortEl, d.action, d.count ?? 0);
         else shortEl.setText(d.short);
         pill.addEventListener("click", () => {
+          // Transition into a non-"all" filter: expand every section once so the pill's hits are
+          // discoverable (spec'd auto-expand-on-activation, not a per-render override).
+          if (d.key !== this.filter && d.key !== "all") this.expandAllTypeSections();
           this.filter = d.key;
           this.render(this.renderGen);
         });
@@ -1535,7 +1542,10 @@ export class SyncCenterView extends ItemView {
         const wasSearching = this.searching();
         this.search = input.value;
         // Entering a search resets the direction filter: searching means "find this item".
-        if (!wasSearching && this.searching()) this.filter = "all";
+        if (!wasSearching && this.searching()) {
+          this.filter = "all";
+          this.expandAllTypeSections(); // transition into search: expand once so hits are discoverable
+        }
         renderPills();
         renderSectionsBody();
         this.refreshGlobalSelectAll(selectAll, pillPool);
@@ -1544,6 +1554,14 @@ export class SyncCenterView extends ItemView {
     }
 
     this.renderActionBar(main);
+  }
+
+  // Ledger C-#1 review fix: entering a filtered/search view auto-expands every section ONCE, on
+  // the filter/search state TRANSITION (called from the pill-click/search-input handlers below,
+  // never from render itself) — so a filtered hit is discoverable without the section header
+  // click losing its effect for the rest of that filtered/search session.
+  private expandAllTypeSections(): void {
+    for (const ts of TYPE_SECTION_ORDER) this.typeSectionOpen.add(ts);
   }
 
   // One of the four fixed type sections (spec §2): a fold containing every row whose scope maps
@@ -1556,7 +1574,13 @@ export class SyncCenterView extends ItemView {
     const showSelf = ts === "community" && this.selfInfo !== null && this.filter === "all" && !this.searching();
     if (visible.length === 0 && !showSelf) return; // sections with nothing to show hide entirely
     const filtered = this.filter !== "all" || this.searching();
-    const open = this.searching() || this.filter !== "all" || this.typeSectionOpen.has(ts);
+    // Ledger C-#1 review fix: `open` reads ONLY typeSectionOpen — a filter/search no longer forces
+    // every section open on every render (that made the header click's toggle invisible the
+    // moment any filter pill or search was active, reproducing the "decorative triangle" report).
+    // Filtered hits stay discoverable instead via expandAllTypeSections(), called once on the
+    // filter/search TRANSITION (see the pill/search-input handlers below), not on every render —
+    // so a manual collapse inside an already-filtered view sticks.
+    const open = this.typeSectionOpen.has(ts);
     const fold = host.createDiv({ cls: `config-sync-section is-typesection is-${ts}${open ? " is-open" : ""}` });
     const head = fold.createDiv({ cls: "config-sync-section-head" });
     head.createSpan({ cls: "config-sync-row-chevron", text: open ? "▾" : "▸" });
