@@ -267,14 +267,12 @@ noted):
   cycle `renderScopeCycle` idiom (a click advances straight to the next option) — the two
   surfaces share the icon vocabulary, never the interaction, and both write the same stored
   value.
-- **Runs-on rule (per-plugin enablement)** — the switch-list divergence detail's summary
-  lines, `Set a per-plugin rule` disclosure and direction-grouped rule list (定稿
-  2026-08-04/05) are superseded by the unified grammar (2026-08-06): one rule, set from a
-  synced plugin's own row via `Runs on` (above) instead of a separate disclosure. A
-  carrier's own sync membership — whether the Core/Community on/off list is itself a synced
-  item — lives on the section header's `on/off synced` chip (Type sections above), the only
-  remaining place that fact is edited. The snippets on/off list keeps its own member devices
-  on the Appearance card (Companion folders, Unified card below), unchanged.
+- **Runs-on rule (per-plugin enablement)** — one rule per plugin, set from that plugin's own
+  row via its `Runs on` icon+menu control (Expanded card / Rule controls above). A carrier's
+  own sync membership — whether the Core/Community on/off list is itself a synced item — is
+  edited from the section header's `on/off synced` chip (Type sections above). The snippets
+  on/off list keeps its own member devices on the Appearance card (Companion folders,
+  Unified card below).
 - **Remote** `config-sync-remote-btn` is-pull/is-push (solid cyan/pink when primary,
   dimmed otherwise); diff entries reuse report rows + chips.
 - **Reports** `config-sync-report-*`, chips, `-strip` result strip — outcome-toned: green
