@@ -13,7 +13,16 @@ Resolves ledger issues #5 (dual-surface residue), #8, #9, #10, #11
 - **One object = one row.** A plugin/settings item/folder appears exactly once in the main
   list. The on/off carrier cards, the "Disabled on this device" and "Not installed on this
   device" sections, per-row policy segments, fate pills, and the "has settings below" pill
-  (#9) all dissolve into row state.
+  (#9) all dissolve into row state. **An object includes its companions** (amendment
+  2026-08-07, C-#15 companion-dissolve batch): a parent item plus every companion group
+  its item owns — Appearance's `themes`/`snippets` presets, or any item's Settings-drawer
+  `+ Add folder` companions — is one object, dissolving into the parent's row/entry in
+  both panes; companion groups never render their own row. Custom `+ Add folder` groups
+  and the legacy `enabled-css-snippets` switch list are not companions and stay their own
+  objects. The sole exception is an orphan companion (its parent group not compiled
+  locally), which keeps its own row — honest degradation, the one place the `Parent ›
+  Name` breadcrumb still appears inside the object grammar (it otherwise survives only in
+  Settings drawers and run reports).
 - **Row = checkbox · display name · state chips · fate sentence · disclosure.** Nothing else.
 - **Checkbox has one meaning everywhere:** include this row in the next Apply/Capture run.
   Selection never changes what would happen — only whether it happens. Section select-all
@@ -85,7 +94,12 @@ hidden checkbox.
 
 Verbs join with ` · `; first letter capitalized. `Runs on` exceptions re-derive the
 sentence (e.g. `Never on here` removes `turns on`, adds the rule chip). When the carrier is
-unsynced, enablement verbs never appear (§5).
+unsynced, enablement verbs never appear (§5). A non-folder object whose companions
+contribute file changes joins the folder verb after the settings verb (amendment
+2026-08-07, C-#15 companion-dissolve batch): `↓ Applies settings · applies N files` /
+`↑ Captures settings · captures N files`; a plain folder object (no parent settings
+payload) keeps the `apply: folder` / `capture: folder` rows above unchanged, and
+Appearance's override row always wins over the join.
 
 ## 4. Expanded card
 

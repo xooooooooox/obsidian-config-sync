@@ -176,7 +176,8 @@ noted):
   `-side-self-pill` reusing `selfStatePill`), echoing the header self-chip. **Switcher**
   `config-sync-switcher` — compact replacement.
 - **Rows** `config-sync-hub-row` — the unified grammar's one-object-one-row shape (spec
-  `2026-08-06-sync-center-unified-grammar-design.md` §1/§3): chevron, name (`-rule-name`),
+  `2026-08-06-sync-center-unified-grammar-design.md` §1/§3, extended to companion families
+  by `2026-08-07-c-livetest-batch5-companion-dissolve.md`): chevron, name (`-rule-name`),
   fate chips (`config-sync-fatechip`, rendered only when a fact deviates from default —
   `not installed here` · `desktop only` · `stays off` · `off here — your rule` / `on here —
   your rule` · `🔒 encrypted` · a folder path chip · `your choice` once a conflict is
@@ -188,11 +189,26 @@ noted):
   accent apply, §1.1) like every other checkbox, and hidden entirely on inert rows
   (in-sync / nothing-yet / unresolved conflict). Expanding the row (ledger C-#9) hides the
   fate sentence/glyph — the card's own `On apply`/`On capture`/`State` row becomes the
-  single statement while open; chips and the checkbox stay. Names truncate on mobile. A
-  card-derived group — a companion folder or the `enabled-css-snippets` switch list —
-  renders its name two-tone: a faint `Parent › ` prefix (`-rule-parent` + `-rule-parentsep`,
-  `--text-faint`) ahead of the plain label (`renderRuleName`, `SyncCenterView.ts`), so it
-  reads and sorts under its host card; a standalone group renders just the label, unchanged.
+  single statement while open; chips and the checkbox stay. Names truncate on mobile.
+  **The object is the family:** a parent item plus every companion group it owns
+  (Appearance's `themes`/`snippets` presets, or any item's Settings-drawer `+ Add folder`
+  companions) collapses into the parent's row — one row per family, never one per
+  companion. When companions contribute file changes the fate sentence joins the parent's
+  settings verb with the folder verb (`Applies settings · applies N files` / `Captures
+  settings · captures N files`, the same ` · ` join as the install/turn-on sequence);
+  Appearance's override sentence (`Applies theme & snippets — live` / `Captures theme &
+  snippets`) still replaces the joined pair outright, unchanged. A conflict on any member,
+  or actionable members split across both directions, renders the family `⚠ Changed on
+  both sides` and reuses the existing Resolve grammar (`Use theirs ↓` / `Keep mine ↑`) at
+  family level — no new controls. Custom `+ Add folder` groups are not companions and stay
+  their own object, as does the legacy `enabled-css-snippets` switch list (out of scope,
+  unchanged); both keep the two-tone `Parent › ` breadcrumb (`-rule-parent` +
+  `-rule-parentsep`, `--text-faint`, `renderRuleName`, `SyncCenterView.ts`) ahead of the
+  plain label. Inside the object grammar itself the breadcrumb survives in exactly one
+  place: an orphan companion (its parent group not compiled locally) falls back to its own
+  standalone row, breadcrumb included, as honest degradation — every other companion
+  dissolves and is never its own row. (The breadcrumb also survives, outside the object
+  grammar, in Settings drawers and run reports — unchanged.)
   The pinned Config Sync self row (`.is-self`, Community section) is the one exception: no
   checkbox (it isn't staged through Apply/Capture), its own fate text reads `your Sync
   Center — manages itself`.
@@ -231,7 +247,12 @@ noted):
   main list, in a static variant (`is-static`: no chevron, no collapse, no checkbox, no
   carrier chip, default cursor); carrier divergence there renders as a pinned
   `On/off list · differs for N plugins ▸` line (`config-sync-remote-onoff`) whose
-  expansion shows the per-plugin flips (`config-sync-remote-fliplist`) and the file diff. On narrow phones a section head keeps its pills and the "N selected" hint on
+  expansion shows the per-plugin flips (`config-sync-remote-fliplist`) and the file diff.
+  Companion families fold the same way here: companion diff entries merge into their
+  parent's entry, each file re-pathed under a `<companion>/` prefix (e.g. `themes/Blue
+  Topaz.theme.css`) and chip counts summed — one entry per family; a companion whose
+  parent isn't known locally falls back to its own standalone entry (honest degradation,
+  same rule as the carrier label fallback). On narrow phones a section head keeps its pills and the "N selected" hint on
   one line (`white-space: nowrap; flex: none`) — the title is the only element allowed to
   wrap.
 - **Expanded card (Sync Center row)** `config-sync-itemcard` — bordered, left-indented under
