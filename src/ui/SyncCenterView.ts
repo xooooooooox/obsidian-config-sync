@@ -17,11 +17,16 @@ import {
   EnablementCarrier,
   enablementCarrierFor,
   effectiveFate,
+  FamilyMember,
+  FamilyRollup,
+  familyRollup,
   fileEntryFor,
+  foldCompanionEntries,
   insyncLineText,
   isValidPolicy,
   matchesSearch,
   MemberDecision,
+  mergeFamilyChanges,
   moreFilesText,
   nosettingsLineText,
   onOffFlips,
@@ -176,6 +181,9 @@ export interface SyncCenterHost {
   resolvedPath(group: SyncGroup): string;
   displayName(group: string, storedLabel?: string): string;
   displayParts(group: string, storedLabel?: string): GroupDisplayParts;
+  // The parent GROUP name for a companion group (c-livetest batch5 task 2, spec §1) — null for a
+  // non-companion, a custom group, or the legacy enabled-css-snippets switch list (out of scope).
+  companionParentOf(group: string): string | null;
   captureItems(items: CaptureItem[], onProgress?: ProgressFn): Promise<GroupResult[] | null>;
   applyItems(items: ApplyItem[], onProgress?: ProgressFn): Promise<GroupResult[] | null>;
   reloadApp(): void;
@@ -513,9 +521,89 @@ export class SyncCenterView extends ItemView {
     return p.parent === null ? p.label : `${p.parent} › ${p.label}`;
   }
 
-  private rows(): StatusRow[] {
+  // One representative compiled group per family (spec §1 "one object"): the parent, or an
+  // orphan companion whose parent isn't itself compiled here — e.g. the item's own settings file
+  // is device-scoped off this device while the companion isn't (honest degradation: a family can
+  // only fold into a parent that actually exists).
+  private familyGroups(): SyncGroup[] {
+    const names = new Set(this.groups.map((g) => g.name));
+    return this.groups.filter((g) => {
+      const parent = this.host.companionParentOf(g.name);
+      return parent === null || !names.has(parent);
+    });
+  }
+
+  // A family's companion StatusRows for `parentName` (spec §1): groupOwners' def-level
+  // presetCompanions plus any item's configured companions, restricted to ones currently
+  // compiled and statused. Empty for a standalone row (custom folder, no-companion item) —
+  // familyRollup's single-member truth-table guarantee then makes every consumer below
+  // byte-identical to pre-family behavior.
+  private familyCompanions(parentName: string): StatusRow[] {
     const out: StatusRow[] = [];
     for (const group of this.groups) {
+      if (this.host.companionParentOf(group.name) !== parentName) continue;
+      const status = this.statuses.get(group.name);
+      if (status !== undefined) out.push({ group, status });
+    }
+    return out;
+  }
+
+  // A dir-type member's file count for the rollup (spec §2's "companion file changes (summed
+  // count N)"): 0 for a file-type member (its own settings payload is a separate verb component
+  // — see fateInputFor's hasSettingsPayload) and for a dir member with no diff computed yet.
+  private memberFileCount(r: StatusRow): number {
+    return r.group.type === "dir" && r.status.changes !== undefined ? this.folderChangeCount(r.status.changes) : 0;
+  }
+
+  // The family rollup for a row (itself + its companions) — shared by fateInputFor (fate/
+  // direction/conflict), familyState (counts/filters/visibility), stagedRows' companion fan-out,
+  // and renderUnifiedFiles' merged Files section.
+  private familyRollupFor(r: StatusRow): FamilyRollup {
+    const companions = this.familyCompanions(r.group.name);
+    const members: FamilyMember[] = [
+      { name: r.group.name, state: this.presState(r), fileCount: this.memberFileCount(r) },
+      ...companions.map((c): FamilyMember => ({ name: c.group.name, state: this.presState(c), fileCount: this.memberFileCount(c) })),
+    ];
+    return familyRollup(members);
+  }
+
+  // The family's Files section (spec §4): parent changes plus every companion's, each companion's
+  // paths prefixed with its own group name so `themes/Foo.css` reads as a path under the family
+  // rather than colliding with the parent's own files. A member with no changes attached is
+  // skipped (mergeFamilyChanges only ever sees members that HAVE a `changes` set).
+  private familyChanges(r: StatusRow): FileChanges {
+    const parts: { prefix: string | null; changes: FileChanges }[] = [];
+    if (r.status.changes !== undefined) parts.push({ prefix: null, changes: r.status.changes });
+    for (const c of this.familyCompanions(r.group.name)) {
+      if (c.status.changes !== undefined) parts.push({ prefix: c.group.name, changes: c.status.changes });
+    }
+    return mergeFamilyChanges(parts);
+  }
+
+  // Recovers a familyChanges() entry's true (group, path): mergeFamilyChanges only rewrites the
+  // DISPLAY path (`"<companionGroup>/" + rel`) — the diff/view affordance must still target the
+  // companion's own store location, never the parent's (and vice versa for a parent-owned entry).
+  private fileOwner(r: StatusRow, mergedRel: string): { group: string; rel: string } {
+    for (const c of this.familyCompanions(r.group.name)) {
+      const prefix = `${c.group.name}/`;
+      if (mergedRel.startsWith(prefix)) return { group: c.group.name, rel: mergedRel.slice(prefix.length) };
+    }
+    return { group: r.group.name, rel: mergedRel };
+  }
+
+  // The state a row's FAMILY presents as (spec §2). Every count/filter/visibility consumer that
+  // used to read presState(r) directly now reads this instead, so a family whose only actionable
+  // content lives in a companion (parent itself in-sync) still counts/filters/shows as
+  // directional, never silently as "in sync" — while presState(r) itself stays available for the
+  // handful of call sites that genuinely need the row's OWN member state (the "locked" bypass,
+  // the default-policy suggestion).
+  private familyState(r: StatusRow): GroupState {
+    return this.familyRollupFor(r).state;
+  }
+
+  private rows(): StatusRow[] {
+    const out: StatusRow[] = [];
+    for (const group of this.familyGroups()) {
       // config-sync manages itself in its own sidebar destination (renderConfigSyncMode), so it
       // never appears in the item list, scopes, filter pills, or footer totals — all of which
       // derive from this row set.
@@ -563,13 +651,6 @@ export class SyncCenterView extends ItemView {
     return presentedState(r.status.state, this.availOf(r.group.name).drift);
   }
 
-  // Section-aware stageability: action-only rows (install-only / enable-only / update-only)
-  // stage in their sections. (The self group never reaches here — rows() excludes it; its
-  // update-available case is the pane advisory instead.)
-  private rowStageable(r: StatusRow): boolean {
-    return stageableRow(this.presState(r), this.sectionOf(r.group.name));
-  }
-
   // The ItemDef/ItemConfig id for a row's compiled group name — inverse of registry.ts's
   // legacyGroupName (community groups compile as "plugin-<id>" for their "community:<id>" item
   // id; core groups compile 1:1 with their bare id for their "core:<id>" item id; the two
@@ -581,20 +662,22 @@ export class SyncCenterView extends ItemView {
     return categoryForGroup(name) === "core" ? `core:${name}` : name;
   }
 
-  // The real FateInput derivation (Task 1's model, fully wired): `direction` reuses the existing
-  // section-aware `rowStageable` (an outdated/disabled/not-installed row can stage on its state
-  // action alone, even with no settings payload — the "installed, off here, store turns it on —
-  // no settings" case); `conflict` is the carry-forward fix (rowFate's own conflict branch
-  // overrides stageable/sentence/glyph regardless of the direction fed in, so a "differs" row
-  // always renders `⚠ Changed on both sides` and is unstageable here, independent of the old
-  // direction-toggle behavior). storeListOn/locallyOn/memberRule only exist for a carrier-synced
-  // plugin row — for every other row (obsidian/folder/self-excluded/carrier-unsynced) they stay
-  // at their "no enablement dimension" defaults, which `effectiveTurnsOn`/`buildChips` already
-  // treat as a no-op (see fateModel.ts).
+  // The real FateInput derivation (Task 1's model, fully wired; family-rolled-up c-livetest
+  // batch5 task 2): `pres` is the FAMILY's rollup state (parent + companions) — it, not the row's
+  // own presState, now drives direction/conflict/nothingYet/stageability, via the same
+  // stageableRow/effectiveDirection chains a plain row always used (familyRollup's single-member
+  // guarantee makes a companion-less row byte-identical to before). `parentPres` stays the row's
+  // OWN state — `hasSettingsPayload` (the settings verb) is specifically about the PARENT's own
+  // settings file, never a companion's, which folderFileCount below covers separately (spec §2:
+  // "parent settings payload changed → settings verb; companion file changes → folder verb
+  // joins"). storeListOn/locallyOn/memberRule only exist for a carrier-synced plugin row — for
+  // every other row (obsidian/folder/self-excluded/carrier-unsynced) they stay at their "no
+  // enablement dimension" defaults, which `effectiveTurnsOn`/`buildChips` already treat as a
+  // no-op (see fateModel.ts).
   private fateInputFor(r: StatusRow): FateInput {
     const name = r.group.name;
     const a = this.availOf(name);
-    const pres = this.presState(r);
+    const parentPres = this.presState(r);
     const cat = this.scopeOf(name);
     const isPlugin = cat === "core" || cat === "community" || cat === "beta";
     const carrierSynced = isPlugin && this.carrierIsSynced(name);
@@ -611,8 +694,12 @@ export class SyncCenterView extends ItemView {
       storeListOn = div === undefined ? locallyOn : locallyOn ? !div.applyDisables.includes(element) : div.captureRemoves.includes(element);
       memberRule = this.host.memberRuleFor(carrier, element, locallyOn);
     }
+    const rollup = this.familyRollupFor(r);
+    const pres = rollup.state;
+    const direction = stageableRow(pres, this.sectionOf(name)) ? effectiveDirection(pres, this.directionOverride.get(name)) : null;
+    const rollupFiles = direction === "apply" ? rollup.applyFiles : direction === "capture" ? rollup.captureFiles : 0;
     return {
-      direction: this.rowStageable(r) ? this.effDir(r) : null,
+      direction,
       conflict: pres === "differs",
       nothingYet: pres === "no-settings",
       installed: a.kind !== "not-installed",
@@ -623,15 +710,27 @@ export class SyncCenterView extends ItemView {
       memberRule,
       deviceClass: Platform.isMobile ? "mobile" : "desktop",
       desktopOnly: a.desktopOnly,
-      hasSettingsPayload: pres !== "no-settings" && pres !== "in-sync" && pres !== "locked",
+      hasSettingsPayload: parentPres !== "no-settings" && parentPres !== "in-sync" && parentPres !== "locked",
       // "folder": a real dir-type group — its own files ARE the settings payload, so
-      // fateModel's join must not also compose a separate "applies settings" (c-livetest
-      // batch5 task 1's special:"folder" REPLACE case; family companions land here in task 2).
+      // fateModel's join must not also compose a separate "applies settings" (special:"folder"
+      // REPLACE case). A dir-type row never owns companions itself (compileCompanions doesn't
+      // nest), so its own folderFileCount stays the pre-family per-row computation, untouched.
       special: name === "appearance" ? "appearance" : r.group.type === "dir" ? "folder" : null,
-      // Undefined `.changes` (a "not-captured"/"no-settings" GroupStatus never attaches one) has
-      // no synchronous file count available — falls back to null so the sentence degrades to the
-      // generic "applies/captures settings" instead of asserting a wrong "0 files".
-      folderFileCount: r.group.type === "dir" && r.status.changes !== undefined ? this.folderChangeCount(r.status.changes) : null,
+      folderFileCount:
+        r.group.type === "dir"
+          ? // Undefined `.changes` (a "not-captured"/"no-settings" GroupStatus never attaches
+            // one) has no synchronous file count available — falls back to null so the sentence
+            // degrades to the generic "applies/captures settings" instead of asserting a wrong
+            // "0 files".
+            r.status.changes !== undefined
+            ? this.folderChangeCount(r.status.changes)
+            : null
+          : // Non-folder parent: the family's companion files in the EFFECTIVE direction, joined
+            // after the settings verb — null (no join) rather than a false "…0 files" when the
+            // sum is zero.
+            rollupFiles > 0
+            ? rollupFiles
+            : null,
       encrypted: isWholeFileEncrypted(r.group),
     };
   }
@@ -661,9 +760,10 @@ export class SyncCenterView extends ItemView {
   }
 
   // All user-facing counts (header pills, sidebar badges, filter pills, switcher) must agree
-  // with what the filters actually show — i.e. count PRESENTED states, not raw ones.
+  // with what the filters actually show — i.e. count PRESENTED FAMILY states (spec §2: "count
+  // families, never members"), not each row's own raw state.
   private presentedCounts(rows: StatusRow[]): ReturnType<typeof bucketCounts> {
-    return bucketCounts(rows.map((r) => ({ ...r.status, state: this.presState(r) })));
+    return bucketCounts(rows.map((r) => ({ ...r.status, state: this.familyState(r) })));
   }
 
   private render(gen: number): void {
@@ -1427,18 +1527,24 @@ export class SyncCenterView extends ItemView {
     return {
       type: (r) => syncTypeValue(r.group),
       scope: (r) => this.scopeOf(r.group.name),
-      action: (r) => syncActionValue(this.presState(r)),
+      action: (r) => syncActionValue(this.familyState(r)),
       mode: (r) => syncModeValue(r.group),
       device: (r) => r.group.devices,
     };
   }
 
+  // A family row matches search on the parent's own name/label OR any companion's (spec §1's
+  // dissolved companions must stay findable by their own name even though they no longer render
+  // their own row).
+  private familySearchText(r: StatusRow): string {
+    const parts = [this.fullName(r.group.name, r.group.label), r.group.name];
+    for (const c of this.familyCompanions(r.group.name)) parts.push(this.fullName(c.group.name, c.group.label), c.group.name);
+    return parts.join(" ");
+  }
+
   private rowMatchesSearch(r: StatusRow): boolean {
     const parsed = parseQuery(this.search, SYNC_QUALIFIER_KEYS);
-    return (
-      matchesQualifiers(r, parsed.qualifiers, this.syncResolvers()) &&
-      matchesSearch(`${this.fullName(r.group.name, r.group.label)} ${r.group.name}`, parsed.text)
-    );
+    return matchesQualifiers(r, parsed.qualifiers, this.syncResolvers()) && matchesSearch(this.familySearchText(r), parsed.text);
   }
 
   private scopedRows(): StatusRow[] {
@@ -1577,7 +1683,7 @@ export class SyncCenterView extends ItemView {
   private renderTypeSection(host: HTMLElement, ts: TypeSection, scoped: StatusRow[]): void {
     const rows = scoped.filter((r) => !CARRIER_GROUP_NAMES.has(r.group.name) && typeSectionForRow(this.scopeOf(r.group.name)) === ts);
     const matches = this.searching() ? rows.filter((r) => this.rowMatchesSearch(r)) : rows;
-    const visible = matches.filter((r) => visibleUnderFilter(this.presState(r), this.filter));
+    const visible = matches.filter((r) => visibleUnderFilter(this.familyState(r), this.filter));
     const showSelf = ts === "community" && this.selfInfo !== null && this.filter === "all" && !this.searching();
     if (visible.length === 0 && !showSelf) return; // sections with nothing to show hide entirely
     const filtered = this.filter !== "all" || this.searching();
@@ -1628,9 +1734,9 @@ export class SyncCenterView extends ItemView {
     if (this.filter === "all" && !this.searching()) {
       // ✓ / ○ rows fold into their own trailing line, same shape as the old flat list (#10) —
       // now aggregated per section instead of once for the whole pane.
-      const active = visible.filter((r) => this.presState(r) !== "in-sync" && this.presState(r) !== "no-settings");
-      const insync = visible.filter((r) => this.presState(r) === "in-sync");
-      const nosettings = visible.filter((r) => this.presState(r) === "no-settings");
+      const active = visible.filter((r) => this.familyState(r) !== "in-sync" && this.familyState(r) !== "no-settings");
+      const insync = visible.filter((r) => this.familyState(r) === "in-sync");
+      const nosettings = visible.filter((r) => this.familyState(r) === "no-settings");
       for (const r of active) this.renderItemRow(card, r);
       this.renderSectionTrailingLine(card, ts, insync, sessionUi.insyncOpen, (n, isOpen) => insyncLineText(n, isOpen));
       this.renderSectionTrailingLine(card, ts, nosettings, sessionUi.nosettingsOpen, (n, isOpen) => nosettingsLineText(n, isOpen));
@@ -1710,7 +1816,7 @@ export class SyncCenterView extends ItemView {
   }
 
   private visibleRows(scoped: StatusRow[]): StatusRow[] {
-    return scoped.filter((r) => visibleUnderFilter(this.presState(r), this.filter) && this.rowMatchesSearch(r));
+    return scoped.filter((r) => visibleUnderFilter(this.familyState(r), this.filter) && this.rowMatchesSearch(r));
   }
 
   // Tri-state select-all over the currently visible checkable rows (scope + filter + search).
@@ -1870,8 +1976,8 @@ export class SyncCenterView extends ItemView {
       value.createDiv({ cls: "config-sync-expand-note", text: this.stateClauseText(r, fate, input) });
     });
 
-    const changes = r.status.changes;
-    if (dir !== null && changes !== undefined && hasChanges(changes)) {
+    const changes = this.familyChanges(r);
+    if (dir !== null && hasChanges(changes)) {
       this.renderCardKeyRow(fields, "Files", (value) => this.renderUnifiedFiles(value, r, changes, dir, input.encrypted));
     }
 
@@ -2007,13 +2113,14 @@ export class SyncCenterView extends ItemView {
         const p = createDiv({ cls: "config-sync-inline-diff" });
         panel = p;
         line.insertAdjacentElement("afterend", p);
-        void this.host.diffPair(r.group.name, e.name, dir).then((pair) => {
+        const owner = this.fileOwner(r, e.name);
+        void this.host.diffPair(owner.group, owner.rel, dir).then((pair) => {
           if (panel !== p) return;
           if (pair === null) {
             p.createDiv({ cls: "config-sync-expand-note", text: "no diff available" });
             return;
           }
-          const switchSorted = SWITCH_LIST_GROUPS.has(r.group.name);
+          const switchSorted = SWITCH_LIST_GROUPS.has(owner.group);
           let base = switchSorted ? switchListSortedView(pair.base) : pair.base;
           let produced = switchSorted ? switchListSortedView(pair.produced) : pair.produced;
           let jsonSorted = false;
@@ -2346,6 +2453,10 @@ export class SyncCenterView extends ItemView {
       const name = r.group.name;
       const isCarrierMember = input.carrierSynced && !CARRIER_GROUP_NAMES.has(name);
       const choice = this.conflictChoice.get(name) ?? null;
+      // The row's companion groups actionable in each direction (rollup's applyMembers/
+      // captureMembers, parent name excluded — it's `itemName` already): stagedPayload fans these
+      // out as plain `{ name, action: "none" }` entries on whichever side the row itself runs on.
+      const rollup = this.familyRollupFor(r);
       return {
         id: name,
         itemName: name,
@@ -2356,9 +2467,10 @@ export class SyncCenterView extends ItemView {
         availability: this.availOf(name),
         conflictChoice: choice,
         conflict: fate.glyph === "⚠",
-        // Placeholder until the family wiring lands (c-livetest batch5 task 2): every row is its
-        // own family of one until stagedRows fills this from the rollup's per-direction lists.
-        companionNames: { apply: [], capture: [] },
+        companionNames: {
+          apply: rollup.applyMembers.filter((n) => n !== name),
+          capture: rollup.captureMembers.filter((n) => n !== name),
+        },
       };
     });
   }
@@ -2694,7 +2806,12 @@ export class SyncCenterView extends ItemView {
     detail.empty();
     const { entries, lockDiffers } = dd;
 
-    const changed = entries.filter((e) => e.files.length > 0);
+    // Companion entries fold into their parent's BEFORE sectioning (spec §5): the remote pane
+    // shows the same one-entry-per-family grammar the main list's rows() does — everything else
+    // from batch 4 (sections, on/off extraction, the "N more items match" summary below) runs
+    // unchanged over the folded set.
+    const folded = foldCompanionEntries(entries, (g) => this.host.companionParentOf(g));
+    const changed = folded.filter((e) => e.files.length > 0);
     // Mirrors the main list's four fixed type sections (spec 2026-08-07-c-livetest-batch4 task 2)
     // instead of the old flat SCOPE_ORDER/config-sync-sect breakdown — same section vocabulary,
     // same on/off-carrier extraction, so a remote diff and the item list never disagree on where
@@ -2717,7 +2834,7 @@ export class SyncCenterView extends ItemView {
     // "N more items match" line: groups present in this device's list minus the entries that differ
     // (excludes the "" store-metadata pseudo-entry and any remote-only groups from the count).
     const changedNames = new Set(changed.map((e) => e.group));
-    const matchNames = this.groups
+    const matchNames = this.familyGroups()
       // The excluded self item was never compared — it is neither changed nor matched, and
       // listing it two lines above the "stays out of this remote" note would contradict it.
       .filter((g) => !changedNames.has(g.name) && !(remote.excludeSelf === true && g.name === SELF_GROUP_NAME))

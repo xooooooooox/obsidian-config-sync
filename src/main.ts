@@ -57,6 +57,7 @@ import {
   ItemDef,
   ItemSettingsFile,
   compileItems,
+  legacyGroupName,
   parentCardLabel,
   RegistryEnv,
   structuralLocalElements,
@@ -585,6 +586,7 @@ export default class ConfigSyncPlugin extends Plugin {
       resolvedPath: (g) => g.path.replace("{configDir}", this.app.vault.configDir),
       displayName: (g) => this.displayName(g, this.lastGroups?.find((x) => x.name === g)?.label ?? this.lastLock?.groups[g]?.label),
       displayParts: (g) => this.displayParts(g, this.lastGroups?.find((x) => x.name === g)?.label ?? this.lastLock?.groups[g]?.label),
+      companionParentOf: (g) => this.companionParentOf(g),
       diffPair: async (name, rel, dir) => {
         try {
           const group = this.compiledGroups.find((g) => g.name === name);
@@ -1116,6 +1118,16 @@ export default class ConfigSyncPlugin extends Plugin {
       parent: parentCardLabel(group, this.registryDefs, this.settings),
       label: this.displayName(group, storedLabel),
     };
+  }
+
+  // The Sync Center host resolver (c-livetest batch5 task 2, spec §1): the parent GROUP name for
+  // a companion group, so the view can fold a family into one row/entry — null for a non-companion,
+  // a custom group, or `enabled-css-snippets` (none of which groupOwners ever attributes to a
+  // def-level companionPath, so the out-of-scope cases fall out of this check for free).
+  companionParentOf(group: string): string | null {
+    const owner = groupOwners(this.registryDefs, this.settings.customGroups)[group]?.[0];
+    if (owner === undefined || owner.custom === true || owner.companionPath === undefined) return null;
+    return legacyGroupName(owner.itemId);
   }
 
   // The plugin's own data.json must not be written through the raw adapter: Obsidian watches

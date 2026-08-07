@@ -205,7 +205,10 @@ export function defsForForeignItems(defs: ItemDef[], itemIds: string[], betaIds:
 
 // ── Compile ──────────────────────────────────────────────────────────────────────────────────
 
-function legacyGroupName(id: string): string {
+// Exported for the Sync Center host's companionParentOf (c-livetest batch5 task 2): a companion
+// group's parent presents as the ITEM's own compiled group name, which only this function knows
+// how to derive from the owning ItemDef's id.
+export function legacyGroupName(id: string): string {
   if (id.startsWith("core:")) return id.slice("core:".length);
   if (id.startsWith("community:")) return `plugin-${id.slice("community:".length)}`;
   return id; // obsidian cards: appearance / hotkeys keep their reserved name as-is
