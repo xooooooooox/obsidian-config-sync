@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { capFileEntries, insyncLineText, statusBarStatuses, moreFilesText, visibleUnderFilter, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, runProgressLabel, showColdStartBanner, memberDecisionsFromScopes, enablementCarrierFor, carrierIsSynced, TYPE_SECTION_TITLES, typeSectionForRow, sectionCountLabel, unifiedFooterSummary, fileEntryFor, stagedPayload, StageableRow, effectiveFate, remoteSections, onOffFlips, onOffLineText } from "../src/ui/panelModel";
-import { GroupState, GroupStatus, OTHER_STORE_FILES_GROUP, RemoteDiffEntry } from "../src/core/status";
+import { capFileEntries, insyncLineText, statusBarStatuses, moreFilesText, visibleUnderFilter, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, runProgressLabel, showColdStartBanner, memberDecisionsFromScopes, enablementCarrierFor, carrierIsSynced, TYPE_SECTION_TITLES, typeSectionForRow, sectionCountLabel, unifiedFooterSummary, fileEntryFor, stagedPayload, StageableRow, effectiveFate, remoteSections, onOffFlips, onOffLineText, familyRollup, FamilyMember, mergeFamilyChanges, foldCompanionEntries } from "../src/ui/panelModel";
+import { GroupState, GroupStatus, OTHER_STORE_FILES_GROUP, RemoteDiffEntry, RemoteDiffFile } from "../src/core/status";
+import { FileChanges } from "../src/core/types";
 import { Availability } from "../src/core/availability";
 import { Fate, FateInput } from "../src/ui/fateModel";
 import { ItemCategory } from "../src/core/catalog";
@@ -475,6 +476,136 @@ describe("onOffLineText", () => {
   });
 });
 
+// ── Family rollup (c-livetest batch5 task 1) ────────────────────────────────────────────────────
+
+describe("familyRollup — companion groups dissolve into their parent's state", () => {
+  const m = (name: string, state: GroupState, fileCount = 0): FamilyMember => ({ name, state, fileCount });
+
+  it("all in sync → in-sync, nothing actionable", () => {
+    const r = familyRollup([m("parent", "in-sync"), m("themes", "in-sync"), m("snippets", "in-sync")]);
+    expect(r).toEqual({ state: "in-sync", applyMembers: [], captureMembers: [], applyFiles: 0, captureFiles: 0 });
+  });
+
+  it("in-sync + nothing-yet → in-sync (not no-settings — one member DOES have settled content)", () => {
+    const r = familyRollup([m("parent", "in-sync"), m("themes", "no-settings")]);
+    expect(r.state).toBe("in-sync");
+  });
+
+  it("every member no-settings → no-settings", () => {
+    const r = familyRollup([m("parent", "no-settings"), m("themes", "no-settings")]);
+    expect(r.state).toBe("no-settings");
+  });
+
+  it("settings-only: parent wants capture, companions carry no files", () => {
+    const r = familyRollup([m("parent", "local-changed"), m("themes", "in-sync"), m("snippets", "no-settings")]);
+    expect(r).toEqual({ state: "local-changed", applyMembers: [], captureMembers: ["parent"], applyFiles: 0, captureFiles: 0 });
+  });
+
+  it("files-only: parent settled, a companion contributes files", () => {
+    const r = familyRollup([m("parent", "in-sync"), m("themes", "store-newer", 5)]);
+    expect(r).toEqual({ state: "store-newer", applyMembers: ["themes"], captureMembers: [], applyFiles: 5, captureFiles: 0 });
+  });
+
+  it("both-direction mix (an apply member + a capture member, neither itself 'differs') → differs", () => {
+    const r = familyRollup([m("parent", "local-changed"), m("themes", "store-newer", 3)]);
+    expect(r.state).toBe("differs");
+    expect(r.applyMembers).toEqual(["themes"]);
+    expect(r.captureMembers).toEqual(["parent"]);
+    expect(r.applyFiles).toBe(3);
+  });
+
+  it("a member itself 'differs' forces the family to differs — that member counts into neither list (unstageable conflict, not a direction)", () => {
+    const r = familyRollup([m("parent", "in-sync"), m("themes", "differs", 2)]);
+    expect(r.state).toBe("differs");
+    expect(r.applyMembers).toEqual([]);
+    expect(r.captureMembers).toEqual([]);
+    expect(r.applyFiles).toBe(0);
+  });
+
+  it("empty companions ≡ the parent's own state — no companion-less row's rollup drifts from its real state", () => {
+    expect(familyRollup([m("parent", "store-newer", 4)])).toEqual({
+      state: "store-newer", applyMembers: ["parent"], captureMembers: [], applyFiles: 4, captureFiles: 0,
+    });
+    expect(familyRollup([m("parent", "never-synced")]).state).toBe("never-synced");
+    expect(familyRollup([m("parent", "local-changed")]).state).toBe("local-changed");
+    expect(familyRollup([m("parent", "not-captured")]).state).toBe("not-captured");
+    expect(familyRollup([m("parent", "no-settings")]).state).toBe("no-settings");
+  });
+
+  it("a locked member is neutral — contributes to neither direction", () => {
+    const r = familyRollup([m("parent", "local-changed"), m("themes", "locked")]);
+    expect(r.captureMembers).toEqual(["parent"]);
+    expect(r.state).toBe("local-changed");
+  });
+});
+
+describe("mergeFamilyChanges — spec §4 Files card concat", () => {
+  const changes = (added: string[], updated: string[], deleted: string[]): FileChanges => ({ added, updated, deleted });
+
+  it("parent (null prefix) paths are unchanged", () => {
+    const r = mergeFamilyChanges([{ prefix: null, changes: changes(["a.json"], [], []) }]);
+    expect(r).toEqual({ added: ["a.json"], updated: [], deleted: [] });
+  });
+
+  it("a companion's paths get '<prefix>/' prepended", () => {
+    const r = mergeFamilyChanges([{ prefix: "themes", changes: changes(["Foo.css"], [], []) }]);
+    expect(r).toEqual({ added: ["themes/Foo.css"], updated: [], deleted: [] });
+  });
+
+  it("parent + companions concatenate across all three kinds", () => {
+    const r = mergeFamilyChanges([
+      { prefix: null, changes: changes(["app.json"], ["b.json"], []) },
+      { prefix: "themes", changes: changes([], ["Foo.css"], ["Bar.css"]) },
+      { prefix: "snippets", changes: changes(["baz.css"], [], []) },
+    ]);
+    expect(r).toEqual({
+      added: ["app.json", "snippets/baz.css"],
+      updated: ["b.json", "themes/Foo.css"],
+      deleted: ["themes/Bar.css"],
+    });
+  });
+});
+
+describe("foldCompanionEntries — remote pane companions merge into their parent", () => {
+  const file = (itemRel: string): RemoteDiffFile => ({ itemRel, kind: "updated", local: "a", remote: "b" });
+  const entry = (group: string, files: RemoteDiffFile[] = []): RemoteDiffEntry => ({ group, files });
+  const appearanceParentOf = (g: string): string | null => (g.startsWith("appearance-") ? "appearance" : null);
+
+  it("non-companions pass through untouched", () => {
+    const entries = [entry("app", [file("data.json")])];
+    expect(foldCompanionEntries(entries, () => null)).toEqual(entries);
+  });
+
+  it("merges a companion into its existing parent entry, prefixing itemRel with the companion group", () => {
+    const entries = [entry("appearance", [file("app.css")]), entry("appearance-themes", [file("Foo.css")])];
+    const result = foldCompanionEntries(entries, appearanceParentOf);
+    expect(result).toEqual([entry("appearance", [file("app.css"), { ...file("Foo.css"), itemRel: "appearance-themes/Foo.css" }])]);
+  });
+
+  it("creates a missing parent entry when only the companion appears in the diff", () => {
+    const entries = [entry("appearance-themes", [file("Foo.css")])];
+    const result = foldCompanionEntries(entries, appearanceParentOf);
+    expect(result).toEqual([entry("appearance", [{ ...file("Foo.css"), itemRel: "appearance-themes/Foo.css" }])]);
+  });
+
+  it("order is stable: first-seen position wins for the merged family", () => {
+    const entries = [entry("app"), entry("appearance-themes", [file("Foo.css")]), entry("core-plugins")];
+    const result = foldCompanionEntries(entries, appearanceParentOf);
+    expect(result.map((e) => e.group)).toEqual(["app", "appearance", "core-plugins"]);
+  });
+
+  it("multiple companions of the same parent all merge in, each under its own prefix (chip-count aggregation implied by the concat)", () => {
+    const entries = [entry("appearance-themes", [file("Foo.css")]), entry("appearance-snippets", [file("Bar.css")])];
+    const result = foldCompanionEntries(entries, appearanceParentOf);
+    expect(result).toEqual([
+      entry("appearance", [
+        { ...file("Foo.css"), itemRel: "appearance-themes/Foo.css" },
+        { ...file("Bar.css"), itemRel: "appearance-snippets/Bar.css" },
+      ]),
+    ]);
+  });
+});
+
 describe("fileEntryFor — spec §4 direction-aware file entries (ledger #8)", () => {
   it("apply, raw 'deleted' (store-only): a brand-new file lands locally — + / view, nothing to diff against", () => {
     const e = fileEntryFor({ kind: "deleted", rel: "data.json" }, "apply", false);
@@ -535,6 +666,7 @@ describe("stagedPayload — spec §5 unified staging (task 6)", () => {
     availability: over.availability === undefined ? enabledAvail : over.availability,
     conflictChoice: over.conflictChoice ?? null,
     conflict: over.conflict ?? false,
+    companionNames: over.companionNames ?? { apply: [], capture: [] },
   });
 
   it("unselected rows are excluded from both sides", () => {
@@ -682,6 +814,55 @@ describe("stagedPayload — spec §5 unified staging (task 6)", () => {
     expect(apply.find((i) => i.name === "plugin-x")).toEqual({ name: "plugin-x", action: "update" });
     expect(apply.find((i) => i.name === "community-plugins")).toBeUndefined();
   });
+
+  // ── Companion fan-out (c-livetest batch5 task 1) ────────────────────────────────────────────
+  describe("companion fan-out", () => {
+    it("an apply-direction row stages its apply-side companions as plain entries, after itself", () => {
+      const { apply } = stagedPayload([
+        row({ id: "appearance", fate: fate("↓"), companionNames: { apply: ["appearance-themes", "appearance-snippets"], capture: [] } }),
+      ]);
+      expect(apply).toEqual([
+        { name: "appearance", action: "none" },
+        { name: "appearance-themes", action: "none" },
+        { name: "appearance-snippets", action: "none" },
+      ]);
+    });
+
+    it("a capture-direction row stages its capture-side companions", () => {
+      const { capture } = stagedPayload([row({ id: "appearance", fate: fate("↑"), companionNames: { apply: [], capture: ["appearance-themes"] } })]);
+      expect(capture).toEqual([
+        { name: "appearance", action: "none" },
+        { name: "appearance-themes", action: "none" },
+      ]);
+    });
+
+    it("a row with no companions fans out nothing (current single-row behavior unchanged)", () => {
+      const { apply } = stagedPayload([row({ id: "x", fate: fate("↓") })]);
+      expect(apply).toEqual([{ name: "x", action: "none" }]);
+    });
+
+    it("dedups a companion name already pushed to that side", () => {
+      const { apply } = stagedPayload([
+        row({ id: "a", fate: fate("↓"), companionNames: { apply: ["shared"], capture: [] } }),
+        row({ id: "b", fate: fate("↓"), companionNames: { apply: ["shared"], capture: [] } }),
+      ]);
+      expect(apply.filter((i) => i.name === "shared")).toHaveLength(1);
+    });
+
+    it("only the row's effective (conflict-resolved) direction's companions stage", () => {
+      const { apply, capture } = stagedPayload([
+        row({
+          id: "appearance",
+          fate: { glyph: "⚠", sentence: "Changed on both sides", chips: [], stageable: false, turnsOn: false },
+          conflict: true,
+          conflictChoice: "apply",
+          companionNames: { apply: ["appearance-themes"], capture: ["appearance-snippets"] },
+        }),
+      ]);
+      expect(apply.map((i) => i.name)).toEqual(["appearance", "appearance-themes"]);
+      expect(capture).toEqual([]);
+    });
+  });
 });
 
 describe("effectiveFate — single per-row derivation shared by staging/footer/display (task 6 round 2 fix)", () => {
@@ -744,7 +925,7 @@ describe("effectiveFate — single per-row derivation shared by staging/footer/d
       {
         id: "plugin-x", itemName: "plugin-x", fate: resolved, selected: true,
         carrier: "community-plugins", elementId: "x", availability: notInstalled,
-        conflictChoice: "apply", conflict: true,
+        conflictChoice: "apply", conflict: true, companionNames: { apply: [], capture: [] },
       },
     ]);
     expect(apply.find((i) => i.name === "plugin-x")).toEqual({ name: "plugin-x", action: "install-enable" });

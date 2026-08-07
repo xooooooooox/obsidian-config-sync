@@ -624,7 +624,10 @@ export class SyncCenterView extends ItemView {
       deviceClass: Platform.isMobile ? "mobile" : "desktop",
       desktopOnly: a.desktopOnly,
       hasSettingsPayload: pres !== "no-settings" && pres !== "in-sync" && pres !== "locked",
-      special: name === "appearance" ? "appearance" : null,
+      // "folder": a real dir-type group — its own files ARE the settings payload, so
+      // fateModel's join must not also compose a separate "applies settings" (c-livetest
+      // batch5 task 1's special:"folder" REPLACE case; family companions land here in task 2).
+      special: name === "appearance" ? "appearance" : r.group.type === "dir" ? "folder" : null,
       // Undefined `.changes` (a "not-captured"/"no-settings" GroupStatus never attaches one) has
       // no synchronous file count available — falls back to null so the sentence degrades to the
       // generic "applies/captures settings" instead of asserting a wrong "0 files".
@@ -2353,6 +2356,9 @@ export class SyncCenterView extends ItemView {
         availability: this.availOf(name),
         conflictChoice: choice,
         conflict: fate.glyph === "⚠",
+        // Placeholder until the family wiring lands (c-livetest batch5 task 2): every row is its
+        // own family of one until stagedRows fills this from the rollup's per-direction lists.
+        companionNames: { apply: [], capture: [] },
       };
     });
   }

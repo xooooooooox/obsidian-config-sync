@@ -330,6 +330,123 @@ export function onOffLineText(n: number, open: boolean): string {
   return `On/off list · differs for ${n} plugin${n === 1 ? "" : "s"} ${open ? "▾" : "▸"}`;
 }
 
+// ── Family rollup (spec 2026-08-07-c-livetest-batch5 task 1) ───────────────────────────────────
+// A "family" is a parent object plus its companion groups (e.g. Appearance's themes/snippets
+// dirs) — principle #1's "one object = one row" means the family presents through ONE state,
+// derived here, rather than each companion surfacing its own row.
+
+export interface FamilyMember {
+  name: string;
+  state: GroupState;
+  fileCount: number;
+}
+
+export interface FamilyRollup {
+  state: GroupState;
+  applyMembers: string[];
+  captureMembers: string[];
+  applyFiles: number;
+  captureFiles: number;
+}
+
+function isApplyDirectionState(state: GroupState): boolean {
+  return state === "store-newer" || state === "never-synced";
+}
+
+function isCaptureDirectionState(state: GroupState): boolean {
+  return state === "local-changed" || state === "not-captured";
+}
+
+// Any member `differs` forces the whole family into conflict (reuses the existing conflict
+// grammar — no new controls). Otherwise a family with members pulling BOTH ways is itself a
+// conflict, even though no single member is individually `differs` (e.g. the parent wants to
+// apply while a companion wants to capture). One-direction families adopt the FIRST
+// direction-contributing member's own literal state (the parent, when it is itself directional,
+// since callers pass it first) — this keeps a companion-less family's rollup byte-identical to
+// that member's own state, never inventing a different literal value.
+export function familyRollup(members: FamilyMember[]): FamilyRollup {
+  const applyMembers: string[] = [];
+  const captureMembers: string[] = [];
+  let applyFiles = 0;
+  let captureFiles = 0;
+  let anyDiffers = false;
+  let applyState: GroupState | null = null;
+  let captureState: GroupState | null = null;
+
+  for (const m of members) {
+    if (m.state === "differs") {
+      anyDiffers = true;
+      continue;
+    }
+    if (isApplyDirectionState(m.state)) {
+      applyMembers.push(m.name);
+      applyFiles += m.fileCount;
+      if (applyState === null) applyState = m.state;
+      continue;
+    }
+    if (isCaptureDirectionState(m.state)) {
+      captureMembers.push(m.name);
+      captureFiles += m.fileCount;
+      if (captureState === null) captureState = m.state;
+    }
+    // in-sync / no-settings / locked members: neutral — neither list, no file count.
+  }
+
+  if (anyDiffers || (applyMembers.length > 0 && captureMembers.length > 0)) {
+    return { state: "differs", applyMembers, captureMembers, applyFiles, captureFiles };
+  }
+  if (applyState !== null) return { state: applyState, applyMembers, captureMembers, applyFiles, captureFiles };
+  if (captureState !== null) return { state: captureState, applyMembers, captureMembers, applyFiles, captureFiles };
+  const allNoSettings = members.length > 0 && members.every((m) => m.state === "no-settings");
+  return { state: allNoSettings ? "no-settings" : "in-sync", applyMembers, captureMembers, applyFiles, captureFiles };
+}
+
+// Concatenates a family's members' file changes into one set for the expanded card (spec §4
+// "Files"), rewriting each companion's paths relative to the family so `themes/Foo.css` reads
+// as a path under the parent rather than a bare `Foo.css` that collides with the parent's own
+// files. The parent itself passes `prefix: null` — its paths are already correct as-is.
+export function mergeFamilyChanges(parts: { prefix: string | null; changes: FileChanges }[]): FileChanges {
+  const added: string[] = [];
+  const updated: string[] = [];
+  const deleted: string[] = [];
+  for (const { prefix, changes } of parts) {
+    const withPrefix = (rel: string): string => (prefix === null ? rel : `${prefix}/${rel}`);
+    added.push(...changes.added.map(withPrefix));
+    updated.push(...changes.updated.map(withPrefix));
+    deleted.push(...changes.deleted.map(withPrefix));
+  }
+  return { added, updated, deleted };
+}
+
+// Folds a remote diff's companion entries into their parent's entry (spec §7 remote pane stays
+// unchanged in shape — only companions dissolve), so the remote pane shows the same one-row-per-
+// family grammar as the main list. `parentOf` returns null for non-companions (they pass
+// through untouched). Order is first-seen: a family's position in the result is wherever its
+// parent entry OR its first companion appears first in `entries`.
+export function foldCompanionEntries(entries: RemoteDiffEntry[], parentOf: (group: string) => string | null): RemoteDiffEntry[] {
+  const result: RemoteDiffEntry[] = [];
+  const byGroup = new Map<string, RemoteDiffEntry>();
+  const entryFor = (group: string): RemoteDiffEntry => {
+    let e = byGroup.get(group);
+    if (e === undefined) {
+      e = { group, files: [] };
+      byGroup.set(group, e);
+      result.push(e);
+    }
+    return e;
+  };
+  for (const e of entries) {
+    const parent = parentOf(e.group);
+    if (parent === null) {
+      entryFor(e.group).files.push(...e.files);
+      continue;
+    }
+    const target = entryFor(parent);
+    target.files.push(...e.files.map((f) => ({ ...f, itemRel: `${e.group}/${f.itemRel}` })));
+  }
+  return result;
+}
+
 // The action bar's staged-selection line (replaces the old 5-param footerSummary once the view
 // derives every count from Fate — spec §5). `applyN`/`captureN` are the two direction totals;
 // installs/turnsOn/settings are an apply-side breakdown (subsets of applyN, no "+").
@@ -405,6 +522,10 @@ export interface StageableRow {
   availability: Availability | null;
   conflictChoice: ConflictChoice | null;
   conflict: boolean;
+  // Names of the row's companion groups actionable in each direction (family rollup's
+  // applyMembers/captureMembers, parent name excluded — it's `itemName`). Empty for a row with
+  // no companions, which reduces stagedPayload's fan-out below to a no-op.
+  companionNames: { apply: string[]; capture: string[] };
 }
 
 // Row action matrix (replaces defaultPolicy for the unified grammar): a not-installed row
@@ -456,13 +577,26 @@ export function stagedPayload(rows: StageableRow[]): { apply: ApplyItem[]; captu
       if (contributes) (dir === "apply" ? applyMembers : captureMembers)[row.carrier].push(row.elementId);
     }
 
-    if (dir === "apply") apply.push({ name: row.itemName, action: stagedAction(row.availability, row.fate.turnsOn) });
-    // Capture never enables as a side effect of its plain settings/member push (there's no
-    // "turnsOn" concept on that side by default — rowFate always hands capture rows turnsOn:
-    // false) — EXCEPT the Enablement fallback row's explicit "Turn it on" choice, which
-    // `effectiveFate`/`fallbackTurnsOn` fold into `row.fate.turnsOn` the same way they do for
-    // apply (spec 2026-08-06 §4 Enablement amendment: restores the pre-C capture-side enable).
-    else capture.push({ name: row.itemName, action: row.fate.turnsOn ? "enable" : "none" });
+    // Companion fan-out: a staged family row also stages its actionable companions, as plain
+    // `{ name, action: "none" }` entries — the companion's own content is the payload, there is
+    // no install/update/enable dimension for it. Deduped against anything already pushed to this
+    // side (a companion staged twice would otherwise double up in a multi-row run).
+    if (dir === "apply") {
+      apply.push({ name: row.itemName, action: stagedAction(row.availability, row.fate.turnsOn) });
+      for (const name of row.companionNames.apply) {
+        if (!apply.some((i) => i.name === name)) apply.push({ name, action: "none" });
+      }
+    } else {
+      // Capture never enables as a side effect of its plain settings/member push (there's no
+      // "turnsOn" concept on that side by default — rowFate always hands capture rows turnsOn:
+      // false) — EXCEPT the Enablement fallback row's explicit "Turn it on" choice, which
+      // `effectiveFate`/`fallbackTurnsOn` fold into `row.fate.turnsOn` the same way they do for
+      // apply (spec 2026-08-06 §4 Enablement amendment: restores the pre-C capture-side enable).
+      capture.push({ name: row.itemName, action: row.fate.turnsOn ? "enable" : "none" });
+      for (const name of row.companionNames.capture) {
+        if (!capture.some((i) => i.name === name)) capture.push({ name, action: "none" });
+      }
+    }
   }
 
   for (const carrier of ["core-plugins", "community-plugins"] as const) {

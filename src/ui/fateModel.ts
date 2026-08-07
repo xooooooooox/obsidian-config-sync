@@ -13,8 +13,14 @@ export interface FateInput {
   deviceClass: "desktop" | "mobile";
   desktopOnly: boolean;
   hasSettingsPayload: boolean;           // this run writes settings files
-  special: "appearance" | null;
-  folderFileCount: number | null;        // non-null → folder row ("Applies N files")
+  special: "appearance" | "folder" | null; // "folder": a dir-type row — its own files ARE the
+                                            // payload, folderFileCount REPLACES the settings verb
+                                            // (never joins); non-null AND non-folder rows with a
+                                            // nonzero folderFileCount are a family whose companion
+                                            // dir(s) contribute files alongside the row's own
+                                            // settings — join, don't replace (c-livetest batch5)
+  folderFileCount: number | null;        // non-null → contributes "…N files" (replace for a
+                                          // folder row, join for any other row with companions)
   encrypted: boolean;
 }
 
@@ -54,16 +60,28 @@ function capitalize(s: string): string {
   return s.length === 0 ? s : s.charAt(0).toUpperCase() + s.slice(1);
 }
 
+// Family file-verb join (c-livetest batch5 task 1): a non-folder, non-appearance row whose
+// companion(s) contribute files gets the folder verb APPENDED after its own settings verb (or
+// alone when it has none) — distinct from a real folder row, which REPLACES the settings verb
+// outright (unchanged behavior, `special: "folder"`).
+function joinFolderVerb(settingsPart: string | null, folderVerb: string): string {
+  return settingsPart === null ? folderVerb : `${settingsPart} · ${folderVerb}`;
+}
+
 function settingsVerb(i: FateInput, capturedTurnsOn: boolean): string | null {
   if (i.direction === "capture") {
     if (capturedTurnsOn) return "turned on here — shares it";
     if (i.special === "appearance") return "captures theme & snippets";
-    if (i.folderFileCount !== null) return `captures ${i.folderFileCount} files`;
-    return i.hasSettingsPayload ? "captures settings" : null;
+    if (i.special === "folder") return i.folderFileCount !== null ? `captures ${i.folderFileCount} files` : null;
+    const settingsPart = i.hasSettingsPayload ? "captures settings" : null;
+    if (i.folderFileCount !== null && i.folderFileCount > 0) return joinFolderVerb(settingsPart, `captures ${i.folderFileCount} files`);
+    return settingsPart;
   }
   if (i.special === "appearance") return "applies theme & snippets — live";
-  if (i.folderFileCount !== null) return `applies ${i.folderFileCount} files`;
-  return i.hasSettingsPayload ? "applies settings" : null;
+  if (i.special === "folder") return i.folderFileCount !== null ? `applies ${i.folderFileCount} files` : null;
+  const settingsPart = i.hasSettingsPayload ? "applies settings" : null;
+  if (i.folderFileCount !== null && i.folderFileCount > 0) return joinFolderVerb(settingsPart, `applies ${i.folderFileCount} files`);
+  return settingsPart;
 }
 
 export function rowFate(i: FateInput): Fate {

@@ -34,7 +34,7 @@ describe("rowFate — spec §3 verb table", () => {
     expect(f.sentence).toBe("Applies theme & snippets — live");
   });
   it("folder", () => {
-    const f = rowFate({ ...base, folderFileCount: 2 });
+    const f = rowFate({ ...base, special: "folder", folderFileCount: 2 });
     expect(f.sentence).toBe("Applies 2 files");
   });
   it("capture settings", () => {
@@ -51,7 +51,7 @@ describe("rowFate — spec §3 verb table", () => {
     expect(f.sentence).toBe("Captures theme & snippets");
   });
   it("capture: folder", () => {
-    const f = rowFate({ ...base, direction: "capture", folderFileCount: 2 });
+    const f = rowFate({ ...base, direction: "capture", special: "folder", folderFileCount: 2 });
     expect(f.sentence).toBe("Captures 2 files");
   });
   it("conflict", () => {
@@ -87,5 +87,42 @@ describe("rowFate — Runs on re-derivation", () => {
     const f = rowFate({ ...base, installed: false, storeListOn: true, carrierSynced: false });
     expect(f.sentence).toBe("Installs · applies settings");
     expect(f.sentence).not.toContain("turns on");
+  });
+});
+
+// c-livetest batch5 task 1: a family whose companion(s) contribute files joins the folder verb
+// after the row's own settings verb, instead of the folder row's REPLACE behavior above.
+describe("rowFate — family file-verb join (c-livetest batch5)", () => {
+  it("settings + files: join, settings verb first", () => {
+    const f = rowFate({ ...base, folderFileCount: 3 });
+    expect(f.sentence).toBe("Applies settings · applies 3 files");
+  });
+  it("files-only (no settings payload): folder verb alone, no dangling separator", () => {
+    const f = rowFate({ ...base, hasSettingsPayload: false, folderFileCount: 3 });
+    expect(f.sentence).toBe("Applies 3 files");
+  });
+  it("capture side: settings + files join", () => {
+    const f = rowFate({ ...base, direction: "capture", folderFileCount: 3 });
+    expect(f.sentence).toBe("Captures settings · captures 3 files");
+  });
+  it("capture side, files-only", () => {
+    const f = rowFate({ ...base, direction: "capture", hasSettingsPayload: false, folderFileCount: 3 });
+    expect(f.sentence).toBe("Captures 3 files");
+  });
+  it("zero folderFileCount never joins (no companions actionable this direction)", () => {
+    const f = rowFate({ ...base, folderFileCount: 0 });
+    expect(f.sentence).toBe("Applies settings");
+  });
+  it("folder-type row (special: 'folder') keeps its byte-identical replace sentence even with hasSettingsPayload true", () => {
+    const f = rowFate({ ...base, special: "folder", folderFileCount: 3 });
+    expect(f.sentence).toBe("Applies 3 files");
+  });
+  it("appearance special keeps its byte-identical sentence even with a nonzero folderFileCount", () => {
+    const f = rowFate({ ...base, special: "appearance", folderFileCount: 3 });
+    expect(f.sentence).toBe("Applies theme & snippets — live");
+  });
+  it("joins alongside install + turns on", () => {
+    const f = rowFate({ ...base, installed: false, storeListOn: true, folderFileCount: 2 });
+    expect(f.sentence).toBe("Installs · turns on · applies settings · applies 2 files");
   });
 });
