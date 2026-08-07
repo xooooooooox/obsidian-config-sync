@@ -21,13 +21,14 @@ import {
   OPTION_LABELS,
   optionReservedName,
   reservedNames,
+  resolveHostStoredLabel,
   SELF_GROUP_NAME,
   selfPresetRules,
   setCorePluginIds,
   splitLocation,
   toggleSection,
 } from "../src/core/catalog";
-import { SyncGroup } from "../src/core/types";
+import { StoreLock, SyncGroup } from "../src/core/types";
 import { FakePlugins, MemFS } from "./memfs";
 
 function optionFs(): MemFS {
@@ -489,6 +490,31 @@ describe("displayLabelForGroup label priority", () => {
   });
   it("falls back to the raw id when neither resolves", () => {
     expect(displayLabelForGroup("plugin-obsidian42-brat", noPlugins)).toBe("obsidian42-brat");
+  });
+});
+
+// Regression for the C-#14 live-verify find: main.ts's syncCenterHost() wired displayName/
+// displayParts as `(g) => this.displayName(g, ...)` — declaring only the `group` parameter, so
+// every caller's explicit storedLabel argument (the view passes one at half a dozen call sites)
+// was silently discarded. TypeScript never flagged it because an implementation is allowed to
+// ignore a caller-supplied argument for a parameter it doesn't declare. This exercises the exact
+// priority chain the host wiring now delegates to, so a future re-introduction of the arity bug
+// (or a wrong priority order) fails here instead of only being catchable on a real device.
+describe("resolveHostStoredLabel (host wiring priority, C-#14)", () => {
+  const group: SyncGroup = { name: "plugin-dataview", path: "{configDir}/plugins/dataview/data.json", type: "file", devices: "all", label: "from lastGroups" };
+  const lock: StoreLock = { capturedAt: "2026-08-08T00:00:00.000Z", groups: { "plugin-dataview": { label: "from lastLock" } } };
+
+  it("prefers the caller's explicit override over both snapshots", () => {
+    expect(resolveHostStoredLabel("plugin-dataview", "Dataview", [group], lock)).toBe("Dataview");
+  });
+  it("falls back to the live SyncGroup snapshot when no explicit override is given", () => {
+    expect(resolveHostStoredLabel("plugin-dataview", undefined, [group], lock)).toBe("from lastGroups");
+  });
+  it("falls back to the last-loaded lock's label when neither an override nor a live group carries one", () => {
+    expect(resolveHostStoredLabel("plugin-dataview", undefined, null, lock)).toBe("from lastLock");
+  });
+  it("returns undefined when nothing resolves", () => {
+    expect(resolveHostStoredLabel("plugin-dataview", undefined, null, null)).toBeUndefined();
   });
 });
 

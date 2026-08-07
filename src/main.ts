@@ -39,7 +39,7 @@ interface SecretStore {
   setSecret(id: string, secret: string): void;
 }
 import { BratIndex, parseBratRepoList, resolveBratIndex } from "./core/bratIndex";
-import { type CatalogSection, corePluginFile, displayLabelForGroup, findGroupByName, listBetaSections, listCoreSections, listDiscovered, listOptionSections, listPluginSections, SELF_GROUP_NAME, setCorePluginIds } from "./core/catalog";
+import { type CatalogSection, corePluginFile, displayLabelForGroup, findGroupByName, listBetaSections, listCoreSections, listDiscovered, listOptionSections, listPluginSections, resolveHostStoredLabel, SELF_GROUP_NAME, setCorePluginIds } from "./core/catalog";
 import { Availability, availabilityForGroup, desktopOnlyDrift, desktopOnlyPluginIds, normalizeMemberRule, scopedAwayMembers, memberForceOff, preferStoredMemberRule } from "./core/availability";
 import { listFilesRecursive, isJunkPath, FileIO } from "./core/io";
 import { leftoverStoreRels, storeSelfCopyGroups, selfListGroups } from "./core/leftover";
@@ -603,8 +603,8 @@ export default class ConfigSyncPlugin extends Plugin {
       coldStartDismissed: () => this.coldStartDismissed(),
       setColdStartDismissed: (v) => this.setColdStartDismissed(v),
       resolvedPath: (g) => g.path.replace("{configDir}", this.app.vault.configDir),
-      displayName: (g) => this.displayName(g, this.lastGroups?.find((x) => x.name === g)?.label ?? this.lastLock?.groups[g]?.label),
-      displayParts: (g) => this.displayParts(g, this.lastGroups?.find((x) => x.name === g)?.label ?? this.lastLock?.groups[g]?.label),
+      displayName: (g, storedLabel) => this.displayName(g, resolveHostStoredLabel(g, storedLabel, this.lastGroups, this.lastLock)),
+      displayParts: (g, storedLabel) => this.displayParts(g, resolveHostStoredLabel(g, storedLabel, this.lastGroups, this.lastLock)),
       localLockLabel: (g) => this.lastLock?.groups[g]?.label,
       companionParentOf: (g) => this.companionParentOf(g),
       diffPair: async (name, rel, dir) => {

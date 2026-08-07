@@ -1,6 +1,6 @@
 import { PluginHost } from "./ConfigSyncCore";
 import { FileIO } from "./io";
-import { FieldRule, SyncGroup } from "./types";
+import { FieldRule, StoreLock, SyncGroup } from "./types";
 
 export interface CatalogItem {
   name: string;
@@ -460,4 +460,14 @@ export function displayLabelForGroup(name: string, plugins: PluginHost, storedLa
   if (name === "core-plugins") return "Core plugins on/off";
   if (name === "enabled-css-snippets") return "CSS snippets on/off";
   return storedLabel ?? name;
+}
+
+// The Sync Center host wiring (main.ts syncCenterHost()) composes a caller's explicit override
+// with two snapshot fallbacks before calling displayLabelForGroup — kept here, pure and directly
+// testable, after the host wrapper itself silently dropped every caller's explicit override for
+// months (it declared only the `(group)` parameter, so TypeScript never flagged the discarded
+// second argument; C-#14 live-verify). Priority: caller's explicit override, then the
+// last-computed live SyncGroup list, then the last-loaded local lock's own label.
+export function resolveHostStoredLabel(group: string, explicit: string | undefined, lastGroups: SyncGroup[] | null, lastLock: StoreLock | null): string | undefined {
+  return explicit ?? lastGroups?.find((g) => g.name === group)?.label ?? lastLock?.groups[group]?.label;
 }
