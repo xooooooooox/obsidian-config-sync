@@ -1124,10 +1124,22 @@ export default class ConfigSyncPlugin extends Plugin {
   // a companion group, so the view can fold a family into one row/entry — null for a non-companion,
   // a custom group, or `enabled-css-snippets` (none of which groupOwners ever attributes to a
   // def-level companionPath, so the out-of-scope cases fall out of this check for free).
+  // groupOwners only knows STATIC def-level presetCompanions; spec §1's family also includes "any
+  // item's configured companions" (the Settings drawer's "+ Add folder", any item, not just the
+  // ones with a preset) — those live in settings.items, not the registry, so a group groupOwners
+  // doesn't recognize falls through to a scan there. Mirrors compileCompanions' own filter
+  // (registry.ts:283: only `enabled` companions ever compile into a group) so this only resolves
+  // basenames that actually exist as a compiled group. Preset mapping keeps priority (checked
+  // first); a name collision between the two sources is impossible at compile time
+  // (companionNameConflict guards it), so the first match is always the only match.
   companionParentOf(group: string): string | null {
     const owner = groupOwners(this.registryDefs, this.settings.customGroups)[group]?.[0];
-    if (owner === undefined || owner.custom === true || owner.companionPath === undefined) return null;
-    return legacyGroupName(owner.itemId);
+    if (owner !== undefined) return owner.custom === true || owner.companionPath === undefined ? null : legacyGroupName(owner.itemId);
+    for (const [itemId, cfg] of Object.entries(this.settings.items)) {
+      const hit = cfg.companions.find((c) => c.enabled && basename(c.path) === group);
+      if (hit !== undefined) return legacyGroupName(itemId);
+    }
+    return null;
   }
 
   // The plugin's own data.json must not be written through the raw adapter: Obsidian watches
