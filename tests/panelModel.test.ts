@@ -537,6 +537,23 @@ describe("familyRollup — companion groups dissolve into their parent's state",
     expect(r.captureMembers).toEqual(["parent"]);
     expect(r.state).toBe("local-changed");
   });
+
+  // Review fix (IMPORTANT): a solo neutral member must roll up to ITS OWN state, not a
+  // special-cased guess — "locked" has no no-settings/in-sync special case to fall into.
+  it("solo locked parent (no companions) → locked, not in-sync", () => {
+    expect(familyRollup([m("parent", "locked")]).state).toBe("locked");
+  });
+
+  it("solo no-settings parent (no companions) → no-settings", () => {
+    expect(familyRollup([m("parent", "no-settings")]).state).toBe("no-settings");
+  });
+
+  it("a locked parent with a directional companion still goes directional — neutral fallback only applies when NOTHING is directional", () => {
+    const r = familyRollup([m("parent", "locked"), m("themes", "store-newer", 2)]);
+    expect(r.state).toBe("store-newer");
+    expect(r.applyMembers).toEqual(["themes"]);
+    expect(r.applyFiles).toBe(2);
+  });
 });
 
 describe("mergeFamilyChanges — spec §4 Files card concat", () => {

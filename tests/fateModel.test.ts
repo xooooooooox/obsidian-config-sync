@@ -125,4 +125,16 @@ describe("rowFate — family file-verb join (c-livetest batch5)", () => {
     const f = rowFate({ ...base, installed: false, storeListOn: true, folderFileCount: 2 });
     expect(f.sentence).toBe("Installs · turns on · applies settings · applies 2 files");
   });
+
+  // Review fix (CRITICAL): a folder row in a state with no `changes` attached (e.g.
+  // "not-captured" — groupStatus never attaches one there) has folderFileCount:null, not 0. The
+  // special:"folder" branch must fall through to the generic settings verb, never render empty.
+  it("folder row with folderFileCount:null falls through to the generic settings verb (capture)", () => {
+    const f = rowFate({ ...base, direction: "capture", special: "folder", folderFileCount: null, hasSettingsPayload: true });
+    expect(f.sentence).toBe("Captures settings");
+  });
+  it("folder row with folderFileCount:null falls through to the generic settings verb (apply)", () => {
+    const f = rowFate({ ...base, special: "folder", folderFileCount: null, hasSettingsPayload: true });
+    expect(f.sentence).toBe("Applies settings");
+  });
 });

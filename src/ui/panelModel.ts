@@ -397,8 +397,13 @@ export function familyRollup(members: FamilyMember[]): FamilyRollup {
   }
   if (applyState !== null) return { state: applyState, applyMembers, captureMembers, applyFiles, captureFiles };
   if (captureState !== null) return { state: captureState, applyMembers, captureMembers, applyFiles, captureFiles };
-  const allNoSettings = members.length > 0 && members.every((m) => m.state === "no-settings");
-  return { state: allNoSettings ? "no-settings" : "in-sync", applyMembers, captureMembers, applyFiles, captureFiles };
+  // No directional or differs member: every member here is neutral (in-sync/no-settings/locked —
+  // the only states isApplyDirectionState/isCaptureDirectionState/"differs" don't already claim).
+  // Adopt the PARENT's (first member's) own state rather than a special-cased "in-sync"/
+  // "no-settings" guess — preserves current behavior for EVERY neutral state, including "locked",
+  // without inventing a rule the parent's real state doesn't already answer.
+  const neutralState = members[0]?.state ?? "in-sync";
+  return { state: neutralState, applyMembers, captureMembers, applyFiles, captureFiles };
 }
 
 // Concatenates a family's members' file changes into one set for the expanded card (spec §4

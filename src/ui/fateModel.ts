@@ -72,15 +72,22 @@ function settingsVerb(i: FateInput, capturedTurnsOn: boolean): string | null {
   if (i.direction === "capture") {
     if (capturedTurnsOn) return "turned on here — shares it";
     if (i.special === "appearance") return "captures theme & snippets";
-    if (i.special === "folder") return i.folderFileCount !== null ? `captures ${i.folderFileCount} files` : null;
+    // A folder row with no changes attached (e.g. "not-captured" — groupStatus never attaches
+    // `changes` there) has folderFileCount:null, NOT a file count of zero: it must fall through
+    // to the generic settings verb below exactly as a non-folder row would, never render empty.
+    if (i.special === "folder" && i.folderFileCount !== null) return `captures ${i.folderFileCount} files`;
     const settingsPart = i.hasSettingsPayload ? "captures settings" : null;
-    if (i.folderFileCount !== null && i.folderFileCount > 0) return joinFolderVerb(settingsPart, `captures ${i.folderFileCount} files`);
+    if (i.special !== "folder" && i.folderFileCount !== null && i.folderFileCount > 0) {
+      return joinFolderVerb(settingsPart, `captures ${i.folderFileCount} files`);
+    }
     return settingsPart;
   }
   if (i.special === "appearance") return "applies theme & snippets — live";
-  if (i.special === "folder") return i.folderFileCount !== null ? `applies ${i.folderFileCount} files` : null;
+  if (i.special === "folder" && i.folderFileCount !== null) return `applies ${i.folderFileCount} files`;
   const settingsPart = i.hasSettingsPayload ? "applies settings" : null;
-  if (i.folderFileCount !== null && i.folderFileCount > 0) return joinFolderVerb(settingsPart, `applies ${i.folderFileCount} files`);
+  if (i.special !== "folder" && i.folderFileCount !== null && i.folderFileCount > 0) {
+    return joinFolderVerb(settingsPart, `applies ${i.folderFileCount} files`);
+  }
   return settingsPart;
 }
 
