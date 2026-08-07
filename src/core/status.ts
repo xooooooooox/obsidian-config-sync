@@ -3,6 +3,7 @@ import { isJunkPath, listFilesRecursive } from "./io";
 import { basename, groupStorePath, relativeTo, sidecarStoreSuffix } from "./pathing";
 import { FileChanges, hasChanges, StoreLock, SyncGroup } from "./types";
 import { parseStoreLock } from "./manifest";
+import { isPlainObject } from "./sanitize";
 import { contentUnchanged, groupNeedsPassphrase } from "./modes";
 import { parseFileEnvelope } from "./crypto";
 import { localRealPath, parseSwitchList, readLocalSwitchList, SWITCH_LIST_GROUPS, switchListsEqual } from "./switchList";
@@ -248,6 +249,23 @@ export function remoteLockAhead(localRaw: string | null, remoteRaw: string | nul
     if (mine === undefined || JSON.stringify(mine) !== JSON.stringify(entry)) return true;
   }
   return false;
+}
+
+// Group name -> label for every remote lock entry carrying a string label (Sync Center remote
+// pane, spec 2026-08-08-c-livetest-batch6): deliberately tolerant of anything short of a real
+// parsed store.lock.json — an absent, malformed, or half-written remote lock must never break
+// the compare, so this returns {} instead of throwing. Callers own the JSON.parse of the raw
+// remote file (this takes the already-parsed value, hence `unknown` — see parseStoreLock's own
+// `parsed: unknown` for the same reasoning), so a parse failure never reaches here at all.
+export function remoteLockLabels(lockJson: unknown): Record<string, string> {
+  if (!isPlainObject(lockJson) || !isPlainObject(lockJson.groups)) return {};
+  const labels: Record<string, string> = {};
+  for (const [name, entry] of Object.entries(lockJson.groups)) {
+    if (isPlainObject(entry) && typeof entry.label === "string" && entry.label.trim() !== "") {
+      labels[name] = entry.label;
+    }
+  }
+  return labels;
 }
 
 export interface RemoteDiffFile {

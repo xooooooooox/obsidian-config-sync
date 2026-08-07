@@ -401,6 +401,34 @@ export function baseHasStaleLocalKeys(effGroup: SyncGroup, existing: string): bo
   return Object.keys(parsed).some((k) => keyMatchesAny(k, patterns));
 }
 
+// Refreshes every locally-resolvable lock entry's label in place (2026-08-08-c-livetest-batch6
+// task-1) — capture only resolves a label for the groups it actually processes (:454/:477
+// above), so an entry born on an older lock, or carried forward untouched by a partial-selection
+// run, stays label-less forever without a dedicated heal. Called at the tail of every capture run
+// and once at startup (main.ts). Never touches capturedAt or entries this vault can't resolve
+// (an uninstalled plugin, an orphaned/dropped group) — returns whether anything changed, so a
+// caller with nothing to do skips the write.
+export function backfillLockLabels(groups: SyncGroup[], plugins: PluginHost, lock: StoreLock): boolean {
+  let changed = false;
+  for (const group of groups) {
+    const entry = lock.groups[group.name];
+    if (entry === undefined) continue;
+    const pluginId = pluginIdForGroup(group);
+    // Same restriction as the capture-time resolver above: only the canonical "plugin-<id>"
+    // group carries the community label, never a companion dir or a custom rule on a plugin path.
+    const label =
+      pluginId !== null && group.name === `plugin-${pluginId}`
+        ? plugins.getInstalledPluginName(pluginId)
+        : coreSettingsIds().has(group.name)
+          ? plugins.getCorePluginName(group.name)
+          : null;
+    if (label === null || entry.label === label) continue;
+    lock.groups[group.name] = { ...entry, label };
+    changed = true;
+  }
+  return changed;
+}
+
 function requireGroup(manifest: SyncManifest, name: string): SyncGroup {
   const group = manifest.groups.find((g) => g.name === name);
   if (group === undefined) {
@@ -489,6 +517,9 @@ export async function capture(
   for (const [name, entry] of Object.entries(previous?.groups ?? {})) {
     if (!registryNames.has(name)) lock.groups[name] = entry;
   }
+  // Tail heal (see backfillLockLabels doc comment): catches every locally-resolvable entry this
+  // run didn't itself capture a label for, carried-forward or otherwise.
+  backfillLockLabels(manifest.groups, ctx.plugins, lock);
   await ensureParentDir(ctx.io, lockPath(ctx));
   await ctx.io.write(lockPath(ctx), JSON.stringify(lock, null, 2) + "\n");
   return results;

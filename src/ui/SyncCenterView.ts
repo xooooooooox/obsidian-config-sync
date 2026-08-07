@@ -268,7 +268,10 @@ function isoAge(iso: string | null): string {
   return Number.isNaN(ms) ? "unknown" : relativeAge(ms);
 }
 
-type RemoteCompareResult = { entries: RemoteDiffEntry[]; lockDiffers: boolean };
+// remoteLabels (batch6 task-1): group name -> label from the remote store.lock.json, for the
+// remote pane to show a real plugin name instead of a raw group id (Task 2's rendering job) —
+// empty on an absent/malformed remote lock, never a reason for the compare itself to fail.
+type RemoteCompareResult = { entries: RemoteDiffEntry[]; lockDiffers: boolean; remoteLabels: Record<string, string> };
 
 // R9: one compare per (remote name, reader-cache generation) — see renderRemoteDetail.
 // `result` is populated once the compare settles successfully and the entry stays put (it is
@@ -2781,7 +2784,7 @@ export class SyncCenterView extends ItemView {
       phase: "fetch",
       result: null,
       ticker: null,
-      promise: Promise.resolve({ entries: [], lockDiffers: false }), // placeholder, replaced synchronously below
+      promise: Promise.resolve({ entries: [], lockDiffers: false, remoteLabels: {} }), // placeholder, replaced synchronously below
     };
     entry.promise = this.host
       .deepDiff(remote, (phase) => {

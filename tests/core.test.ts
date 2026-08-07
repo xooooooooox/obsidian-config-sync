@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CoreContext, capture, captureWithActions, loadManifest, groupsForDevice, apply, applyWithActions, planImport, applyImport, PendingPull, ExternalStoreReader, pushExternal, ExternalStoreWriter, pluginIdForGroup, orderInstallsCatalogFirst, readGroups, writeGroups, deviceExcludedPluginIds, isSelfStoreRel, remoteGroupsFrom, groupForStoreRel } from "../src/core/ConfigSyncCore";
+import { CoreContext, capture, captureWithActions, loadManifest, groupsForDevice, apply, applyWithActions, planImport, applyImport, PendingPull, ExternalStoreReader, pushExternal, ExternalStoreWriter, pluginIdForGroup, orderInstallsCatalogFirst, readGroups, writeGroups, deviceExcludedPluginIds, isSelfStoreRel, remoteGroupsFrom, groupForStoreRel, backfillLockLabels } from "../src/core/ConfigSyncCore";
 import { parseSyncManifest } from "../src/core/manifest";
 import { StoreLock, SyncGroup } from "../src/core/types";
 import { isFieldEnvelope, parseFileEnvelope } from "../src/core/crypto";
@@ -1639,6 +1639,101 @@ describe("capture records a group label", () => {
     await capture(ctx, ["plugin-dataview"]);
     const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, unknown> };
     expect(lock.groups["plugin-dataview"]).toEqual({ sourcePluginVersion: "0.5.0", label: "Dataview" });
+  });
+});
+
+// batch6 task-1 (spec 2026-08-08-c-livetest-batch6-remote-labels.md): a group entry born before
+// capture started resolving labels (or from an all-in-sync run that never touched it) stays
+// label-less forever without a dedicated heal — backfillLockLabels is that heal, run at the tail
+// of every capture and once at startup (main.ts) so the remote pane always has a name to show.
+describe("backfillLockLabels", () => {
+  const PLUGIN_DEMO_GROUP: SyncGroup = { name: "plugin-demo", path: "{configDir}/plugins/demo/data.json", type: "file", devices: "all" };
+  const PLUGIN_FOO_GROUP: SyncGroup = { name: "plugin-foo", path: "{configDir}/plugins/foo/data.json", type: "file", devices: "all" };
+  // "daily-notes" is a CORE_ID_SEED member (catalog.ts) — resolvable without any special setup.
+  const CORE_GROUP: SyncGroup = { name: "daily-notes", path: "{configDir}/daily-notes.json", type: "file", devices: "all" };
+
+  it("fills in labels for label-less resolvable community and core entries", () => {
+    const { plugins } = setup();
+    plugins.installedNames.set("demo", "Demo Plugin");
+    plugins.coreNames.set("daily-notes", "Daily notes");
+    const lock: StoreLock = {
+      capturedAt: "2026-01-01T00:00:00.000Z",
+      groups: { "plugin-demo": { sourcePluginVersion: "1.0.0" }, "daily-notes": { sourceAppVersion: "1.8.7" } },
+    };
+    const changed = backfillLockLabels([PLUGIN_DEMO_GROUP, CORE_GROUP], plugins, lock);
+    expect(changed).toBe(true);
+    expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.0.0", label: "Demo Plugin" });
+    expect(lock.groups["daily-notes"]).toEqual({ sourceAppVersion: "1.8.7", label: "Daily notes" });
+  });
+
+  it("leaves a not-installed community entry untouched", () => {
+    const { plugins } = setup(); // plugins.installedNames has nothing for "foo" — not installed
+    const lock: StoreLock = { capturedAt: "2026-01-01T00:00:00.000Z", groups: { "plugin-foo": { sourcePluginVersion: "1.0.0" } } };
+    const changed = backfillLockLabels([PLUGIN_FOO_GROUP], plugins, lock);
+    expect(changed).toBe(false);
+    expect(lock.groups["plugin-foo"]).toEqual({ sourcePluginVersion: "1.0.0" });
+  });
+
+  it("refreshes a stale label", () => {
+    const { plugins } = setup();
+    plugins.installedNames.set("demo", "Renamed Plugin");
+    const lock: StoreLock = {
+      capturedAt: "2026-01-01T00:00:00.000Z",
+      groups: { "plugin-demo": { sourcePluginVersion: "1.0.0", label: "Demo Plugin" } },
+    };
+    const changed = backfillLockLabels([PLUGIN_DEMO_GROUP], plugins, lock);
+    expect(changed).toBe(true);
+    expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.0.0", label: "Renamed Plugin" });
+  });
+
+  it("reports no change (and leaves the lock untouched) when every label is already current", () => {
+    const { plugins } = setup();
+    plugins.installedNames.set("demo", "Demo Plugin");
+    const lock: StoreLock = {
+      capturedAt: "2026-01-01T00:00:00.000Z",
+      groups: { "plugin-demo": { sourcePluginVersion: "1.0.0", label: "Demo Plugin" } },
+    };
+    const changed = backfillLockLabels([PLUGIN_DEMO_GROUP], plugins, lock);
+    expect(changed).toBe(false);
+    expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.0.0", label: "Demo Plugin" });
+  });
+
+  it("never touches capturedAt", () => {
+    const { plugins } = setup();
+    plugins.installedNames.set("demo", "Demo Plugin");
+    const lock: StoreLock = { capturedAt: "2026-01-01T00:00:00.000Z", groups: { "plugin-demo": { sourcePluginVersion: "1.0.0" } } };
+    backfillLockLabels([PLUGIN_DEMO_GROUP], plugins, lock);
+    expect(lock.capturedAt).toBe("2026-01-01T00:00:00.000Z");
+  });
+
+  it("does not resolve a label for an entry with no matching local group (orphaned/dropped)", () => {
+    const { plugins } = setup();
+    plugins.installedNames.set("demo", "Demo Plugin");
+    const lock: StoreLock = { capturedAt: "2026-01-01T00:00:00.000Z", groups: { "plugin-demo": { sourcePluginVersion: "1.0.0" } } };
+    const changed = backfillLockLabels([], plugins, lock); // manifest no longer declares plugin-demo
+    expect(changed).toBe(false);
+    expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.0.0" });
+  });
+});
+
+describe("capture backfills carried-forward entries' labels at the tail of the run", () => {
+  it("heals a label-less carried-forward entry even though this run didn't select it", async () => {
+    const { io, plugins, ctx } = setup();
+    plugins.installed.set("demo", "1.2.3");
+    io.seed({ ".obs/hotkeys.json": "{}", ".obs/plugins/demo/data.json": "{}" });
+    await seedGroups(ctx, MANIFEST);
+    // First capture predates label resolution (simulated): write a lock entry with no label.
+    await capture(ctx);
+    await io.write(
+      "cs/store.lock.json",
+      JSON.stringify({ capturedAt: "2026-07-08T00:00:00.000Z", groups: { "plugin-demo": { sourcePluginVersion: "1.2.3" } } }, null, 2) + "\n"
+    );
+    // The plugin only becomes resolvable NOW — a real capture run must still heal it, even
+    // though this run only selects "hotkeys" and never touches plugin-demo directly.
+    plugins.installedNames.set("demo", "Demo Plugin");
+    await capture(ctx, ["hotkeys"]);
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, unknown> };
+    expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.2.3", label: "Demo Plugin" });
   });
 });
 

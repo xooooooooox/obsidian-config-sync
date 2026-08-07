@@ -10,11 +10,13 @@ import {
   planImport,
   ProgressFn,
   applyWithActions,
+  backfillLockLabels,
   captureWithActions, CaptureItem,
   deviceExcludedPluginIds,
   groupsForDevice,
   loadLock,
   loadManifest,
+  lockPath,
   pushExternal,
   readGroups,
   writeGroups,
@@ -70,7 +72,7 @@ import { pluginRuntimeEnabled } from "./core/pluginState";
 import { syncListDelta } from "./core/syncListDelta";
 import { selfPaneState } from "./core/selfPane";
 import { applyUpdates, Ledger, parseLedger, pruneLedger } from "./core/ledger";
-import { bucketCounts, checkRemote, diffRemote, GroupStatus, remoteDirectionCounts, RemoteCheck, remoteLockAhead, statusForGroups } from "./core/status";
+import { bucketCounts, checkRemote, diffRemote, GroupStatus, remoteDirectionCounts, RemoteCheck, remoteLockAhead, remoteLockLabels, statusForGroups } from "./core/status";
 import { DeviceClass, GroupResult, MemberRule, Remote, RibbonButtons, RuleScope, StoreLock, SyncGroup } from "./core/types";
 import { EnablementCarrier, MemberDecision, memberDecisionsFromScopes, statusBarStatuses } from "./ui/panelModel";
 import { defaultSettingsFile, deriveMode } from "./ui/itemCard";
@@ -264,6 +266,10 @@ export default class ConfigSyncPlugin extends Plugin {
   // the first finisher nulled progress out from under the still-running second). A second call
   // while one is in flight returns the SAME promise instead of starting a parallel run.
   private remoteRefreshRun: Promise<void> | null = null;
+  // Startup lock-label heal (backfillLockLabels) runs once per plugin load, not on every
+  // refreshLocalStatus — refreshLocalStatus fires on a timer, on layout ready, and after nearly
+  // every write, so gating on this flag is what keeps the heal to a single attempt per load.
+  private lockLabelsHealed = false;
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -394,6 +400,19 @@ export default class ConfigSyncPlugin extends Plugin {
         lock = null;
       }
       const host = this.pluginHost();
+      // Startup heal (backfillLockLabels, spec 2026-08-08-c-livetest-batch6-remote-labels.md):
+      // a fresh device with no local store yet is a no-op (lock === null) — the flag still
+      // flips so a later pull's lock never gets a second heal attempt bolted onto this same load.
+      if (!this.lockLabelsHealed) {
+        this.lockLabelsHealed = true;
+        if (lock !== null && backfillLockLabels(manifest.groups, host, lock)) {
+          try {
+            await ctx.io.write(lockPath(ctx), JSON.stringify(lock, null, 2) + "\n");
+          } catch (e) {
+            console.error("Config Sync: lock label heal failed to persist", e);
+          }
+        }
+      }
       this.presentedStatuses = statusBarStatuses(
         this.localStatuses,
         (name) => {
@@ -744,14 +763,25 @@ export default class ConfigSyncPlugin extends Plugin {
         // A lock-only delta (version-refresh capture on the other side) is real pull payload
         // even when every store file matches — surface it so the hint isn't contradictory.
         let lockDiffers = false;
+        let remoteLabels: Record<string, string> = {};
         try {
           const remoteLock = (await reader.listFiles()).includes("store.lock.json") ? await reader.readFile("store.lock.json") : null;
           const localLock = (await ctx.io.exists(`${ctx.rootPath}/store.lock.json`)) ? await ctx.io.read(`${ctx.rootPath}/store.lock.json`) : null;
           lockDiffers = remoteLockAhead(localLock, remoteLock, remote.excludeSelf === true ? [SELF_GROUP_NAME] : []);
+          // Parsed separately from remoteLockAhead's own (tolerant) parse above — a malformed
+          // remote lock must still leave lockDiffers at whatever remoteLockAhead just decided,
+          // not get reset by a JSON.parse throw here.
+          if (remoteLock !== null) {
+            try {
+              remoteLabels = remoteLockLabels(JSON.parse(remoteLock));
+            } catch {
+              remoteLabels = {};
+            }
+          }
         } catch {
           lockDiffers = false;
         }
-        return { entries, lockDiffers };
+        return { entries, lockDiffers, remoteLabels };
       },
       pullFrom: async (remote) => {
         try {
