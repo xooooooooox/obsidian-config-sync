@@ -2807,7 +2807,11 @@ export class SyncCenterView extends ItemView {
 
   private paintRemoteCompareResult(detail: HTMLElement, remote: Remote, check: RemoteCheck | undefined, dd: RemoteCompareResult): void {
     detail.empty();
-    const { entries, lockDiffers } = dd;
+    const { entries, lockDiffers, remoteLabels } = dd;
+    // Ledger C-#14: local stored label wins (it's what capture/backfill already resolved for
+    // this device); the remote's own lock label only fills in for entries this device has never
+    // captured a label for (e.g. remote-only groups, or a stale/never-healed local lock).
+    const storedLabel = (g: string): string | undefined => findGroupByName(this.groups, g)?.label ?? remoteLabels[g];
 
     // Companion entries fold into their parent's BEFORE sectioning (spec §5): the remote pane
     // shows the same one-entry-per-family grammar the main list's rows() does — everything else
@@ -2819,7 +2823,7 @@ export class SyncCenterView extends ItemView {
     // instead of the old flat SCOPE_ORDER/config-sync-sect breakdown — same section vocabulary,
     // same on/off-carrier extraction, so a remote diff and the item list never disagree on where
     // a plugin lives.
-    for (const sec of remoteSections(changed, (g) => this.scopeOf(g), (g) => this.fullName(g, findGroupByName(this.groups, g)?.label))) {
+    for (const sec of remoteSections(changed, (g) => this.scopeOf(g), (g) => this.fullName(g, storedLabel(g)))) {
       const n = sec.entries.length + (sec.onOff !== null ? 1 : 0);
       // No chevron/checkbox/carrier-chip/click handler here: this header is read-only summary,
       // never a control — a dead affordance is the ledger C-#1 bug this task must not repeat.
@@ -2828,7 +2832,7 @@ export class SyncCenterView extends ItemView {
       head.createSpan({ cls: "config-sync-section-title", text: TYPE_SECTION_TITLES[sec.section] });
       head.createSpan({ cls: "config-sync-pill is-neutral", text: sectionCountLabel(n, n, false) });
       if (sec.onOff !== null) this.renderRemoteOnOff(fold, sec.onOff, remote.name);
-      for (const e of sec.entries) this.renderRemoteDiffEntry(fold, e, remote.name);
+      for (const e of sec.entries) this.renderRemoteDiffEntry(fold, e, remote.name, storedLabel(e.group));
     }
 
     const state = check?.state ?? "unknown";
@@ -2943,10 +2947,10 @@ export class SyncCenterView extends ItemView {
     });
   }
 
-  private renderRemoteDiffEntry(detail: HTMLElement, e: RemoteDiffEntry, remoteName: string): void {
+  private renderRemoteDiffEntry(detail: HTMLElement, e: RemoteDiffEntry, remoteName: string, storedLabel?: string): void {
     const row = detail.createDiv({ cls: "config-sync-report-row config-sync-remote-row" });
     const chev = row.createSpan({ cls: "config-sync-cm-chev", text: "▸" });
-    this.renderRuleName(row, e.group, findGroupByName(this.groups, e.group)?.label);
+    this.renderRuleName(row, e.group, storedLabel);
     row.createDiv({ cls: "config-sync-rule-spacer" });
     const counts = { added: 0, updated: 0, deleted: 0 };
     for (const f of e.files) counts[f.kind]++;
