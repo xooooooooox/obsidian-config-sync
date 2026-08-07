@@ -181,6 +181,11 @@ export interface SyncCenterHost {
   resolvedPath(group: SyncGroup): string;
   displayName(group: string, storedLabel?: string): string;
   displayParts(group: string, storedLabel?: string): GroupDisplayParts;
+  // This device's own (possibly backfill-healed) local lock label for a group — the same
+  // `lastLock?.groups[group]?.label` expression displayName/displayParts already fall back to
+  // when no override is passed. Exposed so a caller building its own priority chain (remote pane,
+  // C-#14) can slot the local lock in ahead of a remote's label without bypassing it.
+  localLockLabel(group: string): string | undefined;
   // The parent GROUP name for a companion group (c-livetest batch5 task 2, spec §1) — null for a
   // non-companion, a custom group, or the legacy enabled-css-snippets switch list (out of scope).
   companionParentOf(group: string): string | null;
@@ -2808,10 +2813,12 @@ export class SyncCenterView extends ItemView {
   private paintRemoteCompareResult(detail: HTMLElement, remote: Remote, check: RemoteCheck | undefined, dd: RemoteCompareResult): void {
     detail.empty();
     const { entries, lockDiffers, remoteLabels } = dd;
-    // Ledger C-#14: local stored label wins (it's what capture/backfill already resolved for
-    // this device); the remote's own lock label only fills in for entries this device has never
-    // captured a label for (e.g. remote-only groups, or a stale/never-healed local lock).
-    const storedLabel = (g: string): string | undefined => findGroupByName(this.groups, g)?.label ?? remoteLabels[g];
+    // Ledger C-#14: local resolution wins throughout — the view's own in-memory group label
+    // first, then this device's own (possibly backfill-healed) local lock label, matching
+    // displayName's own fallback order — and only then the remote's lock label, for entries this
+    // device has never captured a label for at all (e.g. remote-only groups).
+    const storedLabel = (g: string): string | undefined =>
+      findGroupByName(this.groups, g)?.label ?? this.host.localLockLabel(g) ?? remoteLabels[g];
 
     // Companion entries fold into their parent's BEFORE sectioning (spec §5): the remote pane
     // shows the same one-entry-per-family grammar the main list's rows() does — everything else

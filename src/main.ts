@@ -605,6 +605,7 @@ export default class ConfigSyncPlugin extends Plugin {
       resolvedPath: (g) => g.path.replace("{configDir}", this.app.vault.configDir),
       displayName: (g) => this.displayName(g, this.lastGroups?.find((x) => x.name === g)?.label ?? this.lastLock?.groups[g]?.label),
       displayParts: (g) => this.displayParts(g, this.lastGroups?.find((x) => x.name === g)?.label ?? this.lastLock?.groups[g]?.label),
+      localLockLabel: (g) => this.lastLock?.groups[g]?.label,
       companionParentOf: (g) => this.companionParentOf(g),
       diffPair: async (name, rel, dir) => {
         try {
