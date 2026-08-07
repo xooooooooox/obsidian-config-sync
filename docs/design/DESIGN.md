@@ -201,10 +201,12 @@ noted):
   or actionable members split across both directions, renders the family `⚠ Changed on
   both sides` and reuses the existing Resolve grammar (`Use theirs ↓` / `Keep mine ↑`) at
   family level — no new controls. Custom `+ Add folder` groups are not companions and stay
-  their own object, as does the legacy `enabled-css-snippets` switch list (out of scope,
-  unchanged); both keep the two-tone `Parent › ` breadcrumb (`-rule-parent` +
-  `-rule-parentsep`, `--text-faint`, `renderRuleName`, `SyncCenterView.ts`) ahead of the
-  plain label. Inside the object grammar itself the breadcrumb survives in exactly one
+  their own object, rendering a plain label with no breadcrumb (`parentCardLabel`,
+  `registry.ts`, never consults `settings.customGroups`). The legacy `enabled-css-snippets`
+  switch list is likewise out of scope, unchanged — it keeps the two-tone `Parent › `
+  breadcrumb (`-rule-parent` + `-rule-parentsep`, `--text-faint`, `renderRuleName`,
+  `SyncCenterView.ts`) ahead of the plain label, the same as any real companion. Inside the
+  object grammar itself the breadcrumb survives in exactly one
   place: an orphan companion (its parent group not compiled locally) falls back to its own
   standalone row, breadcrumb included, as honest degradation — every other companion
   dissolves and is never its own row. (The breadcrumb also survives, outside the object
