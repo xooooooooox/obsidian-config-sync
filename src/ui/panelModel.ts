@@ -36,6 +36,25 @@ export function fateBucket(fate: Fate, nothingYet: boolean): FateBucket {
 // NOT produced by fateBucket itself.
 export type RowBucket = FateBucket | "locked";
 
+// Pre-C-#23 fallback for a row whose OWN state is "locked" (review fix): fateWithInput's display
+// bypass unconditionally returns a non-stageable "—" fate for ANY locked row — including one whose
+// FAMILY rolled up to a DIRECTIONAL companion's state (a locked parent's own state is neutral to
+// familyRollup, so a directional companion, e.g. a plain settings dir with real changes, still
+// pulls the family's rollup off "locked"). Feeding that bypass fate to fateBucket would silently
+// vanish such a family into "ok" (config-reachable: any item with companions set to Encrypted mode
+// with no passphrase). Locked has no fate-based reading at all, so its bucket is derived here
+// instead, straight from the family's raw GroupState via the OLD (pre-task) state→bucket
+// vocabulary — reproducing EXACTLY where familyState(r) used to land it: a directional companion
+// state buckets the family as such; the neutral fallback (no directional companion — the rollup
+// stays "locked", true whenever the row is a solo locked item or every companion is itself
+// neutral) keeps the family's own "locked" placement.
+export function legacyLockedFamilyBucket(familyState: GroupState): RowBucket {
+  if (familyState === "local-changed" || familyState === "not-captured") return "capture";
+  if (familyState === "store-newer" || familyState === "never-synced") return "apply";
+  if (familyState === "differs") return "conflict";
+  return "locked";
+}
+
 // Filter-pill visibility (spec §1.3): a conflict-bucket row stays visible under the "apply" filter
 // — its current placement, preserved (today a `differs` GroupState is already included there)
 // — rather than growing a dedicated "conflict" filter pill. "locked" is visible only under "all",

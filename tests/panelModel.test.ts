@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { capFileEntries, insyncLineText, statusBarStatuses, moreFilesText, visibleUnderFilter, fateBucket, fateBucketCounts, partitionSection, RowBucket, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, runProgressLabel, showColdStartBanner, memberDecisionsFromScopes, enablementCarrierFor, carrierIsSynced, TYPE_SECTION_TITLES, typeSectionForRow, sectionCountLabel, unifiedFooterSummary, fileEntryFor, stagedPayload, StageableRow, effectiveFate, remoteSections, onOffFlips, onOffLineText, onOffNarrationLines, familyRollup, FamilyMember, mergeFamilyChanges, foldCompanionEntries } from "../src/ui/panelModel";
+import { capFileEntries, insyncLineText, statusBarStatuses, moreFilesText, visibleUnderFilter, fateBucket, fateBucketCounts, partitionSection, legacyLockedFamilyBucket, RowBucket, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, runProgressLabel, showColdStartBanner, memberDecisionsFromScopes, enablementCarrierFor, carrierIsSynced, TYPE_SECTION_TITLES, typeSectionForRow, sectionCountLabel, unifiedFooterSummary, fileEntryFor, stagedPayload, StageableRow, effectiveFate, remoteSections, onOffFlips, onOffLineText, onOffNarrationLines, familyRollup, FamilyMember, mergeFamilyChanges, foldCompanionEntries } from "../src/ui/panelModel";
 import { GroupState, GroupStatus, OTHER_STORE_FILES_GROUP, RemoteDiffEntry, RemoteDiffFile } from "../src/core/status";
 import { FileChanges } from "../src/core/types";
 import { Availability } from "../src/core/availability";
@@ -110,6 +110,31 @@ describe("partitionSection — active/insync/nosettings partition (ledger C-#23)
   it("ok folds into insync; none folds into nosettings", () => {
     expect(partitionSection("ok")).toBe("insync");
     expect(partitionSection("none")).toBe("nosettings");
+  });
+});
+
+describe("legacyLockedFamilyBucket — a locked row's bucket, reproducing pre-task familyState placement (review fix)", () => {
+  it("a locked parent with a DIRECTIONAL (apply) companion buckets apply, not 'ok' — the regression", () => {
+    // familyRollup treats a locked member as neutral, so a directional companion (e.g. a plain
+    // settings dir with real changes) pulls the family's rollup off "locked" onto its own state.
+    // fateWithInput's display bypass would still hand fateBucket a non-stageable "—" fate for the
+    // row itself — feeding THAT to fateBucket silently vanishes the family into "ok". The fix
+    // reads the family's raw state instead, never fate, for a locked row.
+    expect(legacyLockedFamilyBucket("store-newer")).toBe("apply");
+    expect(legacyLockedFamilyBucket("never-synced")).toBe("apply");
+  });
+
+  it("a locked parent with a DIRECTIONAL (capture) companion buckets capture", () => {
+    expect(legacyLockedFamilyBucket("local-changed")).toBe("capture");
+    expect(legacyLockedFamilyBucket("not-captured")).toBe("capture");
+  });
+
+  it("a locked parent whose companions pull both ways (family differs) buckets conflict", () => {
+    expect(legacyLockedFamilyBucket("differs")).toBe("conflict");
+  });
+
+  it("a solo locked family (no directional companion — rollup stays 'locked') keeps its pre-task placement", () => {
+    expect(legacyLockedFamilyBucket("locked")).toBe("locked");
   });
 });
 

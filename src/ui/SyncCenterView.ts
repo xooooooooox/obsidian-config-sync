@@ -26,6 +26,7 @@ import {
   foldCompanionEntries,
   insyncLineText,
   isValidPolicy,
+  legacyLockedFamilyBucket,
   matchesSearch,
   MemberDecision,
   mergeFamilyChanges,
@@ -614,25 +615,30 @@ export class SyncCenterView extends ItemView {
   }
 
   // The state a row's FAMILY presents as (spec §2). Ledger C-#23: every count/filter/partition/
-  // fold consumer now reads `rowBucket` (below) instead — this is left as the one thing a bucket
-  // can't derive on its own: whether the family is "locked" (see rowBucket's comment for why that
-  // stays a raw-state check). presState(r) itself stays available separately for the handful of
-  // call sites that genuinely need the row's OWN member state (fateWithInput's locked bypass, the
-  // default-policy suggestion).
+  // fold consumer now reads `rowBucket` (below) instead — this is left as (1) the pre-task
+  // fallback `rowBucket` uses when the row's OWN state is "locked" (see its comment) and (2) the
+  // handful of call sites that genuinely need a row's OWN member state (fateWithInput's locked
+  // bypass, the default-policy suggestion) go through presState(r) directly, not this rollup.
   private familyState(r: StatusRow): GroupState {
     return this.familyRollupFor(r).state;
   }
 
   // The single per-row bucket derivation every count/filter/partition/fold consumer reads (ledger
   // C-#23, spec §1): a `↓ Turns on` row can no longer land in the "no settings yet" fold its raw
-  // GroupState might suggest — its bucket comes from the SAME fate it renders with. "locked"
-  // (encrypted, no passphrase set) never runs content comparison, so it has no fate-based reading;
-  // it keeps its own pre-existing placement instead — checked against the FAMILY state (not the
-  // row's own presState) because that rollup is what actually fed today's placement (a locked
-  // parent with a directional companion already rolled up to that companion's state, not "locked",
-  // before this task — preserved as-is, not this task's concern to change).
+  // GroupState might suggest — its bucket comes from the SAME fate it renders with.
+  //
+  // "locked" (encrypted, no passphrase set) never runs content comparison, so it has no fate-based
+  // reading at all — checked against the row's OWN presState (matching fateWithInput's own locked
+  // bypass below, NOT touched by this fix) rather than the family rollup, because familyRollup
+  // treats a locked member as neutral: a locked PARENT with a DIRECTIONAL companion (e.g. an
+  // Encrypted-mode item with no passphrase, alongside a plain companion dir with real changes)
+  // rolls up to the companion's directional state, not "locked" — so `fateWithInput(r)`'s
+  // unconditional "—"/non-stageable bypass fate would otherwise fateBucket to "ok" and the whole
+  // family would silently vanish from counts/filters/the active partition (review fix; config-
+  // reachable by any user). `legacyLockedFamilyBucket` reproduces exactly where familyState(r)
+  // landed this pre-task, from the family's raw state, never from fate.
   private rowBucket(r: StatusRow): RowBucket {
-    if (this.familyState(r) === "locked") return "locked";
+    if (this.presState(r) === "locked") return legacyLockedFamilyBucket(this.familyState(r));
     const { fate, input } = this.fateWithInput(r);
     return fateBucket(fate, input.nothingYet);
   }
