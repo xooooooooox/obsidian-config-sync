@@ -566,20 +566,23 @@ export default class ConfigSyncPlugin extends Plugin {
           localList = this.compiledGroups; // best-effort fallback for any failure; in practice CompileError, which recompile() already surfaced as a Notice
         }
         const selfCopy = `${ctx.rootPath}/store/configdir/plugins/config-sync/data.json`;
-        const storeGroups = (await ctx.io.exists(selfCopy)) ? storeSelfCopyGroups(await ctx.io.read(selfCopy), this.registryDefs, betaIds) : [];
+        const selfCopyExists = await ctx.io.exists(selfCopy);
+        const storeGroups = selfCopyExists ? storeSelfCopyGroups(await ctx.io.read(selfCopy), this.registryDefs, betaIds) : [];
         const delta = syncListDelta(localList, storeGroups);
         let capturedAt: string | null = null;
         const lockPath = `${ctx.rootPath}/store.lock.json`;
-        if (await ctx.io.exists(lockPath)) {
+        const lockExists = await ctx.io.exists(lockPath);
+        if (lockExists) {
           try {
             capturedAt = parseStoreLock(await ctx.io.read(lockPath)).capturedAt;
           } catch {
             capturedAt = null; // an unreadable lock must not break the pane
           }
         }
-        if (localList.length === 0) return { state: "coldstart", delta, itemCount: storeGroups.length, capturedAt, contentChanged: false, versionRefresh: null, updateAvailable: null, flagsRefresh: null };
+        const storePresent = lockExists || selfCopyExists;
+        if (localList.length === 0) return { state: "coldstart", delta, itemCount: storeGroups.length, capturedAt, storePresent, contentChanged: false, versionRefresh: null, updateAvailable: null, flagsRefresh: null };
         const selfGroup = this.compiledGroups.find((g) => g.name === SELF_GROUP_NAME);
-        if (selfGroup === undefined) return { state: "insync", delta, itemCount: localList.length, capturedAt, contentChanged: false, versionRefresh: null, updateAvailable: null, flagsRefresh: null };
+        if (selfGroup === undefined) return { state: "insync", delta, itemCount: localList.length, capturedAt, storePresent, contentChanged: false, versionRefresh: null, updateAvailable: null, flagsRefresh: null };
         const selfLedger = this.loadBaselines();
         const { statuses: selfStatuses, updates: selfUpdates } = await statusForGroups(ctx, [selfGroup], selfLedger);
         const [st] = selfStatuses;
@@ -598,7 +601,7 @@ export default class ConfigSyncPlugin extends Plugin {
           decided.versionRefresh && av.localVersion !== null && av.storeVersion !== null ? { local: av.localVersion, store: av.storeVersion } : null;
         const updateAvailable =
           decided.versionBehind && av.localVersion !== null && av.storeVersion !== null ? { local: av.localVersion, store: av.storeVersion } : null;
-        return { state: decided.state, delta, itemCount: localList.length, capturedAt, contentChanged: decided.contentChanged, versionRefresh, updateAvailable, flagsRefresh: flagsRefreshCount > 0 ? flagsRefreshCount : null };
+        return { state: decided.state, delta, itemCount: localList.length, capturedAt, storePresent, contentChanged: decided.contentChanged, versionRefresh, updateAvailable, flagsRefresh: flagsRefreshCount > 0 ? flagsRefreshCount : null };
       },
       coldStartDismissed: () => this.coldStartDismissed(),
       setColdStartDismissed: (v) => this.setColdStartDismissed(v),

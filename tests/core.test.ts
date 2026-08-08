@@ -9,6 +9,7 @@ import { isChanged } from "../src/core/runHistory";
 import { MemFS, FakePlugins, memGroupsIO } from "./memfs";
 import ConfigSyncPlugin from "../src/main";
 import { MemberDecision } from "../src/ui/panelModel";
+import { SelfSyncInfo } from "../src/ui/SyncCenterView";
 
 export const MANIFEST = JSON.stringify({
   version: 1,
@@ -2575,5 +2576,70 @@ describe("groupForStoreRel — sidecar display label", () => {
   it("a device sidecar is labeled apart from the main file", () => {
     expect(groupForStoreRel(groups, "store/configdir/app.json.__scopes__.desktop.json")).toEqual({ name: "app", itemRel: "app.json \u00b7 desktop values" });
     expect(groupForStoreRel(groups, "store/configdir/app.json.__scopes__.mobile.json")).toEqual({ name: "app", itemRel: "app.json \u00b7 mobile values" });
+  });
+});
+
+interface SelfStatusPluginSurface {
+  app: unknown;
+  loadData: () => Promise<unknown>;
+  saveData: (d: unknown) => Promise<void>;
+  loadSettings: () => Promise<void>;
+  settings: { rootPath: string };
+  syncCenterHost: () => { selfStatus: () => Promise<SelfSyncInfo> };
+}
+
+// C-#19 (spec 2026-08-08-c-livetest-batch9 \u00a71): storePresent must reflect the store lock OR the
+// store's self-copy, never itemCount \u2014 a device with no compiled local list (settings.items
+// stays {} here, same as makeSwitchPlugin's stub loadData) always takes selfStatus's coldstart
+// early return, so these cases isolate storePresent's own derivation.
+function makeSelfStatusPlugin(io: MemFS): SelfStatusPluginSurface {
+  const plugin = new ConfigSyncPlugin({} as never, {} as never);
+  const instance = plugin as unknown as SelfStatusPluginSurface;
+  instance.app = {
+    vault: { adapter: io, configDir: "config-dir", on: () => ({}) },
+    internalPlugins: { plugins: {} },
+    plugins: { manifests: {}, enabledPlugins: new Set<string>(), plugins: {} },
+    workspace: { getLeavesOfType: () => [] },
+    loadLocalStorage: () => null,
+  };
+  instance.loadData = async () => ({ schemaVersion: 2, items: {}, remotes: [], bratPluginIndex: {} });
+  instance.saveData = async () => {};
+  return instance;
+}
+
+describe("selfStatus.storePresent (C-#19)", () => {
+  it("lock only \u2192 storePresent true", async () => {
+    const io = new MemFS();
+    io.seed({ "cs/store.lock.json": JSON.stringify({ capturedAt: "2026-08-01T00:00:00.000Z", groups: {} }) });
+    const plugin = makeSelfStatusPlugin(io);
+    await plugin.loadSettings();
+    plugin.settings.rootPath = "cs";
+
+    const info = await plugin.syncCenterHost().selfStatus();
+    expect(info.state).toBe("coldstart");
+    expect(info.storePresent).toBe(true);
+  });
+
+  it("self-copy only \u2192 storePresent true", async () => {
+    const io = new MemFS();
+    io.seed({ "cs/store/configdir/plugins/config-sync/data.json": JSON.stringify({ items: {}, customGroups: [] }) });
+    const plugin = makeSelfStatusPlugin(io);
+    await plugin.loadSettings();
+    plugin.settings.rootPath = "cs";
+
+    const info = await plugin.syncCenterHost().selfStatus();
+    expect(info.state).toBe("coldstart");
+    expect(info.storePresent).toBe(true);
+  });
+
+  it("neither \u2192 storePresent false", async () => {
+    const io = new MemFS();
+    const plugin = makeSelfStatusPlugin(io);
+    await plugin.loadSettings();
+    plugin.settings.rootPath = "cs";
+
+    const info = await plugin.syncCenterHost().selfStatus();
+    expect(info.state).toBe("coldstart");
+    expect(info.storePresent).toBe(false);
   });
 });

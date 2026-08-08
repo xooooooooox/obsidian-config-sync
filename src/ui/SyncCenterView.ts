@@ -168,6 +168,7 @@ export interface SelfSyncInfo {
   delta: { added: string[]; removed: string[] };
   itemCount: number; // store item count on coldstart, else local list size
   capturedAt: string | null;
+  storePresent: boolean; // store.lock.json OR the store's self-copy exists — NOT inferred from itemCount
   contentChanged: boolean; // config-sync's own data.json differs beyond the list → pane shows a diff
   versionRefresh: { local: string; store: string } | null; // content in-sync but plugin version ahead
   updateAvailable: { local: string; store: string } | null; // plugin version behind the store's captured version — advisory only
@@ -938,6 +939,34 @@ export class SyncCenterView extends ItemView {
     }
 
     if (info.state === "coldstart") {
+      if (!info.storePresent) {
+        // C-#19: a never-pulled fresh device has no store to adopt from yet — no "Found a
+        // configuration" claim, no Adopt, no Capture caution (spec 2026-08-08-c-livetest-batch9 §1).
+        pane.createDiv({ cls: "config-sync-self-sub", text: "This is a new device — it has no sync list yet." });
+        const block = pane.createDiv({ cls: "config-sync-self-block" });
+        block.createDiv({ cls: "config-sync-self-block-h", text: "No store on this device yet" });
+        const first = this.host.remotes()[0];
+        if (first !== undefined) {
+          const name = first.name;
+          block.createDiv({
+            cls: "config-sync-self-block-s",
+            text: `Pull from ${name} first — that brings the store to this device; then adopt its configuration.`,
+          });
+          const acts = block.createDiv({ cls: "config-sync-self-acts" });
+          const open = acts.createEl("button", { cls: "mod-cta", text: `Open ${name}` });
+          open.addEventListener("click", () => {
+            this.panelScope = { kind: "remote", name };
+            this.switcherOpen = false;
+            this.render(this.renderGen);
+          });
+        } else {
+          block.createDiv({
+            cls: "config-sync-self-block-s",
+            text: "The store arrives with your regular vault sync, or add a remote in Settings and Pull.",
+          });
+        }
+        return;
+      }
       pane.createDiv({ cls: "config-sync-self-sub", text: "This is a new device — it has no sync list yet. The store holds a configuration you can adopt to set it up." });
       const block = pane.createDiv({ cls: "config-sync-self-block is-act" });
       const when = info.capturedAt === null ? "" : ` · captured ${isoAge(info.capturedAt)}`;
