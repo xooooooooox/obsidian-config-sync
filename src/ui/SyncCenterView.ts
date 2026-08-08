@@ -322,6 +322,12 @@ export class SyncCenterView extends ItemView {
   // selections do. Resets outright after a successful run (renderActionBar's `run`).
   private conflictChoice: Map<string, ConflictChoice> = new Map();
   private expandedItems: Set<string> = new Set();
+  // Remote pane fold state (spec §2, C-#21): survives repaints (periodic check, notify) the way
+  // expandedItems/typeSectionOpen do for the main list — a repaint rebuilds the pane fresh, so
+  // without this the on/off line, object-row folds, and open inline diffs would collapse on every
+  // tick. Keys: `{remoteName}::{group}` (row fold), `{remoteName}::{group}::onoff` (on/off line),
+  // `{remoteName}::{group}::{itemRel}` (inline diff). Never persisted to disk; never pruned.
+  private remoteFoldsOpen: Set<string> = new Set();
   private renderGen = 0;
   private filter: PanelFilter = "all";
   private panelScope: { kind: "device"; cat: ItemCategory | "beta" | "all" } | { kind: "remote"; name: string } | { kind: "history" } | { kind: "self" } = { kind: "device", cat: "all" };
@@ -2957,45 +2963,54 @@ export class SyncCenterView extends ItemView {
     onAtRemote.sort();
     offAtRemote.sort();
     const n = onAtRemote.length + offAtRemote.length;
+    const key = `${remoteName}::${e.group}::onoff`;
     const line = host.createDiv({ cls: "config-sync-remote-onoff" });
-    let open = false;
-    line.setText(onOffLineText(n, open));
     const fold = host.createDiv({ cls: "config-sync-remote-fliplist" });
-    fold.hide();
-    let built = false;
+    // Content is always rebuilt from the CURRENT compare result (spec §2) — no cached-`built`
+    // divergence between a fresh render that opens because the key persisted and a click that
+    // opens it live; both paths call this.
+    const buildFold = (): void => {
+      fold.empty();
+      // Element id → group name by carrier (spec §2): community carrier ids compile to
+      // `plugin-<id>` groups; core carrier ids ARE the group name — then the same
+      // storedLabel → displayParts chain the section's own rows resolve names through, so
+      // narration names never disagree with a row's display name.
+      const displayOf = (elementId: string): string => {
+        const group = e.group === "community-plugins" ? `plugin-${elementId}` : elementId;
+        return this.host.displayParts(group, storedLabel(group)).label;
+      };
+      const narration = onOffNarrationLines(onAtRemote, offAtRemote, remoteOnCount, localOnCount, displayOf, remoteName);
+      for (const l of [narration.on, narration.off]) {
+        if (l === null) continue;
+        const row = fold.createDiv();
+        row.appendText(l.prefix);
+        row.createSpan({ cls: "config-sync-remote-flip-value", text: l.value });
+      }
+      this.renderRemoteFileRows(fold, e, remoteName);
+    };
+    let open = this.remoteFoldsOpen.has(key);
+    line.setText(onOffLineText(n, open));
+    if (open) buildFold();
+    else fold.hide();
     line.addEventListener("click", () => {
       open = !open;
       line.setText(onOffLineText(n, open));
       if (!open) {
         fold.hide();
+        this.remoteFoldsOpen.delete(key);
         return;
       }
-      if (!built) {
-        // Element id → group name by carrier (spec §2): community carrier ids compile to
-        // `plugin-<id>` groups; core carrier ids ARE the group name — then the same
-        // storedLabel → displayParts chain the section's own rows resolve names through, so
-        // narration names never disagree with a row's display name.
-        const displayOf = (elementId: string): string => {
-          const group = e.group === "community-plugins" ? `plugin-${elementId}` : elementId;
-          return this.host.displayParts(group, storedLabel(group)).label;
-        };
-        const narration = onOffNarrationLines(onAtRemote, offAtRemote, remoteOnCount, localOnCount, displayOf, remoteName);
-        for (const l of [narration.on, narration.off]) {
-          if (l === null) continue;
-          const row = fold.createDiv();
-          row.appendText(l.prefix);
-          row.createSpan({ cls: "config-sync-remote-flip-value", text: l.value });
-        }
-        this.renderRemoteFileRows(fold, e, remoteName);
-        built = true;
-      }
+      buildFold();
       fold.show();
+      this.remoteFoldsOpen.add(key);
     });
   }
 
   private renderRemoteDiffEntry(detail: HTMLElement, e: RemoteDiffEntry, remoteName: string, storedLabel?: string): void {
+    const key = `${remoteName}::${e.group}`;
+    const isOpen = this.remoteFoldsOpen.has(key);
     const row = detail.createDiv({ cls: "config-sync-report-row config-sync-remote-row" });
-    const chev = row.createSpan({ cls: "config-sync-cm-chev", text: "▸" });
+    const chev = row.createSpan({ cls: "config-sync-cm-chev", text: isOpen ? "▾" : "▸" });
     this.renderRuleName(row, e.group, storedLabel);
     row.createDiv({ cls: "config-sync-rule-spacer" });
     const counts = { added: 0, updated: 0, deleted: 0 };
@@ -3004,21 +3019,23 @@ export class SyncCenterView extends ItemView {
     if (counts.updated > 0) row.createSpan({ cls: "config-sync-chip is-upd", text: `~${counts.updated}` });
     if (counts.deleted > 0) row.createSpan({ cls: "config-sync-chip is-del", text: `−${counts.deleted}` });
     const fold = detail.createDiv({ cls: "config-sync-remote-files" });
-    fold.hide();
-    let built = false;
+    // Content is always rebuilt from the CURRENT compare result (spec §2) — a fresh render that
+    // opens because the key persisted renders the same content a click would build live.
+    if (isOpen) this.renderRemoteFileRows(fold, e, remoteName);
+    else fold.hide();
     row.addEventListener("click", () => {
       const open = fold.isShown();
       if (open) {
         fold.hide();
         chev.setText("▸");
+        this.remoteFoldsOpen.delete(key);
         return;
       }
-      if (!built) {
-        this.renderRemoteFileRows(fold, e, remoteName);
-        built = true;
-      }
+      fold.empty();
+      this.renderRemoteFileRows(fold, e, remoteName);
       fold.show();
       chev.setText("▾");
+      this.remoteFoldsOpen.add(key);
     });
   }
 
@@ -3032,14 +3049,25 @@ export class SyncCenterView extends ItemView {
       const line = fold.createDiv({ cls: `config-sync-remote-frow ${cls} config-sync-diffable` });
       line.createSpan({ cls: "config-sync-remote-fglyph", text: f.kind === "added" ? "+" : f.kind === "updated" ? "~" : "−" });
       line.createSpan({ cls: "config-sync-remote-fname", text: f.itemRel });
-      const hint = line.createSpan({ cls: "config-sync-diffhint", text: " · diff ▾" });
+      const key = `${remoteName}::${e.group}::${f.itemRel}`;
+      const isOpen = this.remoteFoldsOpen.has(key);
+      const hint = line.createSpan({ cls: "config-sync-diffhint", text: isOpen ? " · diff ▴" : " · diff ▾" });
       let panel: HTMLElement | null = null;
+      // Content is always rebuilt from the CURRENT compare result (spec §2) — a fresh render
+      // that opens because the key persisted renders the same panel a click would build live.
+      if (isOpen) {
+        const p = createDiv({ cls: "config-sync-inline-diff" });
+        panel = p;
+        line.insertAdjacentElement("afterend", p);
+        this.renderRemoteFileDiff(p, e.group, f, remoteName);
+      }
       line.addEventListener("click", (ev) => {
         ev.stopPropagation();
         if (panel !== null) {
           panel.remove();
           panel = null;
           hint.setText(" · diff ▾");
+          this.remoteFoldsOpen.delete(key);
           return;
         }
         hint.setText(" · diff ▴");
@@ -3047,6 +3075,7 @@ export class SyncCenterView extends ItemView {
         panel = p;
         line.insertAdjacentElement("afterend", p);
         this.renderRemoteFileDiff(p, e.group, f, remoteName);
+        this.remoteFoldsOpen.add(key);
       });
     }
   }
