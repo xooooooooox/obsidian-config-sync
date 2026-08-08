@@ -255,10 +255,10 @@ export function typeSectionForRow(defSection: ItemCategory | "beta"): TypeSectio
   return defSection;
 }
 
-// Section header count pill: "· 31" when nothing narrows the section, "· 6 of 31" once a state
+// Section header count pill: "31" when nothing narrows the section, "6 of 31" once a state
 // filter or a search query hides some of its rows.
 export function sectionCountLabel(total: number, visible: number, filtered: boolean): string {
-  return filtered ? `· ${visible} of ${total}` : `· ${total}`;
+  return filtered ? `${visible} of ${total}` : `${total}`;
 }
 
 // ── Remote pane C-grammar model (2026-08-07-c-livetest-batch4 task 1) ──────────────────────────

@@ -27,7 +27,7 @@ cards all stay exactly as they are.
   does it — `typeSectionForRow(scopeOf(group))` (beta merges into Community, custom is
   Your folders; see SyncCenterView.ts:531).
 - Header markup/typography = the main list's section head family
-  (`config-sync-section-head` + `config-sync-section-title` + neutral count pill `· N`,
+  (`config-sync-section-head` + `config-sync-section-title` + neutral count pill `N`,
   N = that section's entry count). NO disclosure chevron, NO collapse, NO checkbox, NO
   carrier chip in the remote pane — a triangle that does nothing is exactly ledger C-#1's
   decorative-affordance failure. If the shared head classes carry hover/cursor affordances,

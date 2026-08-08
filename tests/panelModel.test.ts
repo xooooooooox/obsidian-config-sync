@@ -349,10 +349,10 @@ describe("TYPE_SECTION_TITLES", () => {
 
 describe("sectionCountLabel", () => {
   it("unfiltered form: just the total", () => {
-    expect(sectionCountLabel(31, 31, false)).toBe("· 31");
+    expect(sectionCountLabel(31, 31, false)).toBe("31");
   });
   it("filtered form: visible of total", () => {
-    expect(sectionCountLabel(31, 6, true)).toBe("· 6 of 31");
+    expect(sectionCountLabel(31, 6, true)).toBe("6 of 31");
   });
 });
 
