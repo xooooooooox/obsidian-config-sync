@@ -351,7 +351,13 @@ export function selfPresetRules(): FieldRule[] {
 // Matching is pattern-only, deliberately scope/encrypted-blind: a user rule like {rootPath, all,
 // encrypted:true} is replaced by the locked local-scope preset — device-local fields must never
 // leave the device, even encrypted, so the conflicting rule is intentionally overridden (silently).
-function mergePresetFields(existing: FieldRule[]): FieldRule[] {
+// THE single shared implementation (C-#31): registry.ts's withSelfPresets — the compile path that
+// feeds both adoptConfiguration's apply and the self item's status/diff compare — calls this same
+// function instead of reimplementing the merge, so a field is excluded from adopt if and only if
+// it is excluded from compare. Every top-level settings field NOT covered by selfPresetRules()
+// (e.g. bratPluginIndex, memberRules, items, customGroups) is therefore imported by adopt exactly
+// when it participates in the compare — never silently dropped by one side only.
+export function mergePresetFields(existing: FieldRule[]): FieldRule[] {
   const presets = selfPresetRules();
   const presetPatterns = new Set(presets.map((p) => p.pattern));
   const rest = existing.filter((f) => !presetPatterns.has(f.pattern));

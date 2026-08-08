@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CoreContext, capture, captureWithActions, loadManifest, groupsForDevice, apply, applyWithActions, planImport, applyImport, PendingPull, ExternalStoreReader, pushExternal, ExternalStoreWriter, pluginIdForGroup, orderInstallsCatalogFirst, readGroups, writeGroups, deviceExcludedPluginIds, isSelfStoreRel, remoteGroupsFrom, groupForStoreRel, backfillLockLabels } from "../src/core/ConfigSyncCore";
 import { parseSyncManifest } from "../src/core/manifest";
+import { SELF_GROUP_NAME, selfPresetRules } from "../src/core/catalog";
 import { StoreLock, SyncGroup } from "../src/core/types";
 import { isFieldEnvelope, parseFileEnvelope } from "../src/core/crypto";
 import { statusForGroups, remoteLockAhead } from "../src/core/status";
@@ -484,6 +485,66 @@ describe("apply", () => {
     const results = await apply(ctx, ["secrets"]);
     expect(results[0]?.status).toBe("ok");
     expect(await io.read(".obs/secrets.json")).toBe('{"token":"x"}');
+  });
+});
+
+// C-#31: adoptConfiguration (main.ts) applies the self group ("plugin-config-sync") through this
+// same apply() — the exact path an "Adopt configuration" run takes. This is the §2 adopt truth
+// table: a store self-copy carrying bratPluginIndex/memberRules/items/customGroups (every kind of
+// top-level field the self item can carry, none of them preset-excluded) plus its own trio values,
+// applied over a local copy with DIFFERENT trio values — every synced field must come out equal to
+// the store, and the trio must come out equal to the PRE-adopt local values, untouched.
+describe("apply — self group field completeness (adopt truth table, C-#31)", () => {
+  const SELF_PATH = "{configDir}/plugins/config-sync/data.json";
+  const STORE_SELF_REL = "cs/store/configdir/plugins/config-sync/data.json";
+  const LOCAL_SELF_REL = ".obs/plugins/config-sync/data.json";
+
+  async function seedSelfGroup(ctx: CoreContext): Promise<void> {
+    await writeGroups(ctx, [
+      { name: SELF_GROUP_NAME, path: SELF_PATH, type: "file", devices: "all", mode: "fields", fields: selfPresetRules() },
+    ]);
+  }
+
+  it("adopt imports every synced field (bratPluginIndex included) and leaves the device-local trio untouched", async () => {
+    const { io, ctx } = setup();
+    await seedSelfGroup(ctx);
+    const store = {
+      schemaVersion: 2,
+      items: { "community:dataview": { enabled: true, companions: [] } },
+      customGroups: [{ name: "my-rule", path: "notes/custom.json", type: "file", devices: "all" }],
+      remotes: [{ name: "store-remote" }],
+      rootPath: "store-root",
+      localMembers: ["store-member"],
+      bratPluginIndex: { "my-text-tools": "owner/my-text-tools", "slides-rup": "owner/slides-rup" },
+      memberRules: { "community:table-editor-obsidian": "desktop" },
+    };
+    const local = {
+      schemaVersion: 2,
+      items: {},
+      customGroups: [],
+      remotes: [],
+      rootPath: "local-root",
+      localMembers: ["local-member"],
+      bratPluginIndex: {},
+      memberRules: {},
+    };
+    io.seed({ [STORE_SELF_REL]: JSON.stringify(store), [LOCAL_SELF_REL]: JSON.stringify(local) });
+
+    const results = await apply(ctx, [SELF_GROUP_NAME]);
+    expect(results[0]?.status).toBe("ok");
+    const after = JSON.parse(await io.read(LOCAL_SELF_REL)) as Record<string, unknown>;
+
+    // Every field the self compare tracks (i.e. everything selfPresetRules() does not name)
+    // adopts the store's value.
+    expect(after.items).toEqual(store.items);
+    expect(after.customGroups).toEqual(store.customGroups);
+    expect(after.bratPluginIndex).toEqual(store.bratPluginIndex);
+    expect(after.memberRules).toEqual(store.memberRules);
+    // The device-local trio (selfPresetRules' exclusion set) stays exactly as it was locally —
+    // never overwritten by the store's copy.
+    expect(after.rootPath).toBe(local.rootPath);
+    expect(after.remotes).toEqual(local.remotes);
+    expect(after.localMembers).toEqual(local.localMembers);
   });
 });
 

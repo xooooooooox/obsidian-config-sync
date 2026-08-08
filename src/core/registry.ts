@@ -12,7 +12,7 @@
  * `fileRule.scope` is elevated to the compiled group's top-level `devices` class (the
  * "scope→devices class" compilation deferred from Task 2), uniformly.
  */
-import { corePluginFile, SELF_GROUP_NAME, selfPresetRules } from "./catalog";
+import { corePluginFile, mergePresetFields, SELF_GROUP_NAME } from "./catalog";
 import { basename, groupStorePath } from "./pathing";
 import { SWITCH_LIST_GROUPS } from "./switchList";
 import { DeviceClass, FieldRule, FileRule, PerItemScopes, RuleScope, SyncGroup } from "./types";
@@ -241,11 +241,14 @@ function claimPath(seen: Map<string, string>, itemId: string, path: string): voi
 
 // Compiles one item's own single-file settingsFile into a SyncGroup — every registry item
 // (the three Obsidian cards, every core/community/beta plugin file) goes through this one path.
-// Merges config-sync's own locked local-only presets (rootPath, remotes — see catalog.ts's
-// selfPresetRules) into a compiled group for the self item, no matter what the user configured:
-// these fields must NEVER leave the device, even under a future UI bug or a hand-edited
-// data.json. Mirrors catalog.ts's mergePresetFields (kept in sync with selfPresetRules there
-// rather than duplicated) — presets first, then any other configured rule not already covered.
+// Merges config-sync's own locked local-only presets (rootPath, remotes, localMembers — see
+// catalog.ts's selfPresetRules) into a compiled group for the self item, no matter what the user
+// configured: these fields must NEVER leave the device, even under a future UI bug or a
+// hand-edited data.json. Delegates to catalog.ts's mergePresetFields — the ONE shared
+// implementation (C-#31) — rather than reimplementing the preset+rest merge here: this is the
+// compile path that feeds both adoptConfiguration's apply and the self item's status/diff
+// compare, so keeping it a single function call (not a second hand-maintained merge) guarantees
+// a field can never be excluded from one but not the other.
 // Forcing "fields" mode also clears any Plain-branch `fileRule` the incoming group might carry
 // (e.g. a hand-edited data.json with the self item still on settingsFile.mode "plain" plus a
 // fileRule): manifest.ts rejects "fields" mode combined with a fileRule, and since compileItems
@@ -253,10 +256,7 @@ function claimPath(seen: Map<string, string>, itemId: string, path: string): voi
 // compiledGroups update, not just this one.
 function withSelfPresets(group: SyncGroup): SyncGroup {
   if (group.name !== SELF_GROUP_NAME) return group;
-  const presets = selfPresetRules();
-  const presetPatterns = new Set(presets.map((p) => p.pattern));
-  const rest = (group.fields ?? []).filter((f) => !presetPatterns.has(f.pattern));
-  return { ...group, mode: "fields", fields: [...presets, ...rest], fileRule: undefined };
+  return { ...group, mode: "fields", fields: mergePresetFields(group.fields ?? []), fileRule: undefined };
 }
 
 function compileSingleFile(id: string, def: ItemDef, cfg: ItemConfig): SyncGroup | null {
