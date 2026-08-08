@@ -1,4 +1,4 @@
-import { GroupState, GroupStatus, OTHER_STORE_FILES_GROUP, RemoteDiffEntry } from "../core/status";
+import { BucketCounts, GroupState, GroupStatus, OTHER_STORE_FILES_GROUP, RemoteDiffEntry } from "../core/status";
 import { FileChanges, RuleScope } from "../core/types";
 import { Availability, VersionDrift } from "../core/availability";
 import { ApplyItem, CaptureItem, StateAction } from "../core/ConfigSyncCore";
@@ -13,13 +13,69 @@ export type Direction = "capture" | "apply";
 // apply = store-newer + differs, ok = in-sync.
 export type PanelFilter = "all" | "capture" | "apply" | "ok" | "none";
 
-export function visibleUnderFilter(state: GroupState, filter: PanelFilter): boolean {
+// ── Fate-derived buckets (spec 2026-08-08-c-livetest-batch10 §1, ledger C-#23) ──────────────────
+// The single per-row bucket derivation: every count/filter/partition/fold consumer reads THIS
+// instead of re-deriving from raw GroupState (familyState), so a `↓ Turns on` row (stageable apply,
+// sitting on a no-settings/in-sync GroupState) counts/filters/folds as "apply" — the same bucket
+// its rendered sentence implies — never falls through to whatever its raw state happens to say.
+// `nothingYet` is the same FateInput field already computed for the row's own sentence — no new
+// state is introduced.
+export type FateBucket = "conflict" | "apply" | "capture" | "ok" | "none";
+
+export function fateBucket(fate: Fate, nothingYet: boolean): FateBucket {
+  if (fate.glyph === "⚠") return "conflict";
+  if (fate.stageable && fate.glyph === "↓") return "apply";
+  if (fate.stageable && fate.glyph === "↑") return "capture";
+  if (nothingYet) return "none";
+  return "ok";
+}
+
+// "locked" (encrypted, no passphrase set) never runs content comparison, so it has no fate-based
+// reading — fateBucket's own contract stays fate-only, five values. "locked" is a sixth, orthogonal
+// placement callers add for that one genuine GroupState case (SyncCenterView's rowBucket) — it is
+// NOT produced by fateBucket itself.
+export type RowBucket = FateBucket | "locked";
+
+// Filter-pill visibility (spec §1.3): a conflict-bucket row stays visible under the "apply" filter
+// — its current placement, preserved (today a `differs` GroupState is already included there)
+// — rather than growing a dedicated "conflict" filter pill. "locked" is visible only under "all",
+// also today's placement (content comparison never ran for it, so no specific filter can claim it).
+export function visibleUnderFilter(bucket: RowBucket, filter: PanelFilter): boolean {
   if (filter === "all") return true;
-  if (state === "locked") return false;
-  if (filter === "capture") return state === "local-changed" || state === "not-captured";
-  if (filter === "apply") return state === "store-newer" || state === "differs" || state === "never-synced";
-  if (filter === "none") return state === "no-settings";
-  return state === "in-sync";
+  if (bucket === "locked") return false;
+  if (filter === "capture") return bucket === "capture";
+  if (filter === "apply") return bucket === "apply" || bucket === "conflict";
+  if (filter === "none") return bucket === "none";
+  return bucket === "ok";
+}
+
+// Filter-pill counts (spec §1.2): the apply pill counts the apply bucket AND conflict (its current
+// placement, preserved — a `differs` GroupState already counts under the "down"/To-apply pill
+// today); the capture pill counts capture; "In sync" = ok; "No settings yet" = none plus locked
+// (also today's placement — bucketCounts already groups raw "locked" under `none`).
+export function fateBucketCounts(buckets: RowBucket[]): BucketCounts {
+  let up = 0;
+  let down = 0;
+  let ok = 0;
+  let none = 0;
+  for (const b of buckets) {
+    if (b === "capture") up++;
+    else if (b === "apply" || b === "conflict") down++;
+    else if (b === "ok") ok++;
+    else none++; // "none" | "locked"
+  }
+  return { up, down, ok, none };
+}
+
+// Section partition (spec §1.1): active = conflict|apply|capture (plus locked — today's placement,
+// preserved: a locked row is currently neither in-sync nor no-settings, so it renders active,
+// unfolded); the folds hold ONLY ok/none.
+export type PartitionSection = "active" | "insync" | "nosettings";
+
+export function partitionSection(bucket: RowBucket): PartitionSection {
+  if (bucket === "ok") return "insync";
+  if (bucket === "none") return "nosettings";
+  return "active"; // conflict | apply | capture | locked
 }
 
 export interface CappedEntry {

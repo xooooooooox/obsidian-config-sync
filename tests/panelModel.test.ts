@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { capFileEntries, insyncLineText, statusBarStatuses, moreFilesText, visibleUnderFilter, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, runProgressLabel, showColdStartBanner, memberDecisionsFromScopes, enablementCarrierFor, carrierIsSynced, TYPE_SECTION_TITLES, typeSectionForRow, sectionCountLabel, unifiedFooterSummary, fileEntryFor, stagedPayload, StageableRow, effectiveFate, remoteSections, onOffFlips, onOffLineText, onOffNarrationLines, familyRollup, FamilyMember, mergeFamilyChanges, foldCompanionEntries } from "../src/ui/panelModel";
+import { capFileEntries, insyncLineText, statusBarStatuses, moreFilesText, visibleUnderFilter, fateBucket, fateBucketCounts, partitionSection, RowBucket, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, runProgressLabel, showColdStartBanner, memberDecisionsFromScopes, enablementCarrierFor, carrierIsSynced, TYPE_SECTION_TITLES, typeSectionForRow, sectionCountLabel, unifiedFooterSummary, fileEntryFor, stagedPayload, StageableRow, effectiveFate, remoteSections, onOffFlips, onOffLineText, onOffNarrationLines, familyRollup, FamilyMember, mergeFamilyChanges, foldCompanionEntries } from "../src/ui/panelModel";
 import { GroupState, GroupStatus, OTHER_STORE_FILES_GROUP, RemoteDiffEntry, RemoteDiffFile } from "../src/core/status";
 import { FileChanges } from "../src/core/types";
 import { Availability } from "../src/core/availability";
@@ -7,39 +7,38 @@ import { Fate, FateInput } from "../src/ui/fateModel";
 import { ItemCategory } from "../src/core/catalog";
 
 describe("visibleUnderFilter", () => {
-  it("all shows every state", () => {
-    const states: GroupState[] = ["in-sync", "local-changed", "store-newer", "differs", "not-captured"];
-    for (const s of states) expect(visibleUnderFilter(s, "all")).toBe(true);
+  it("all shows every bucket", () => {
+    const buckets: RowBucket[] = ["conflict", "apply", "capture", "ok", "none", "locked"];
+    for (const b of buckets) expect(visibleUnderFilter(b, "all")).toBe(true);
   });
 
-  it("capture shows local-changed and not-captured only", () => {
-    expect(visibleUnderFilter("local-changed", "capture")).toBe(true);
-    expect(visibleUnderFilter("not-captured", "capture")).toBe(true);
-    expect(visibleUnderFilter("store-newer", "capture")).toBe(false);
-    expect(visibleUnderFilter("differs", "capture")).toBe(false);
-    expect(visibleUnderFilter("in-sync", "capture")).toBe(false);
+  it("capture shows the capture bucket only", () => {
+    expect(visibleUnderFilter("capture", "capture")).toBe(true);
+    expect(visibleUnderFilter("apply", "capture")).toBe(false);
+    expect(visibleUnderFilter("conflict", "capture")).toBe(false);
+    expect(visibleUnderFilter("ok", "capture")).toBe(false);
   });
 
-  it("apply shows store-newer and differs only", () => {
-    expect(visibleUnderFilter("store-newer", "apply")).toBe(true);
-    expect(visibleUnderFilter("differs", "apply")).toBe(true);
-    expect(visibleUnderFilter("local-changed", "apply")).toBe(false);
-    expect(visibleUnderFilter("in-sync", "apply")).toBe(false);
+  it("apply shows the apply bucket AND conflict (today's placement, preserved)", () => {
+    expect(visibleUnderFilter("apply", "apply")).toBe(true);
+    expect(visibleUnderFilter("conflict", "apply")).toBe(true);
+    expect(visibleUnderFilter("capture", "apply")).toBe(false);
+    expect(visibleUnderFilter("ok", "apply")).toBe(false);
   });
 
-  it("ok shows in-sync only", () => {
-    expect(visibleUnderFilter("in-sync", "ok")).toBe(true);
-    expect(visibleUnderFilter("local-changed", "ok")).toBe(false);
+  it("ok shows the ok bucket only", () => {
+    expect(visibleUnderFilter("ok", "ok")).toBe(true);
+    expect(visibleUnderFilter("capture", "ok")).toBe(false);
   });
 
-  it("none shows no-settings only; capture and ok exclude it; all includes it", () => {
-    expect(visibleUnderFilter("no-settings", "none")).toBe(true);
-    expect(visibleUnderFilter("in-sync", "none")).toBe(false);
-    expect(visibleUnderFilter("local-changed", "none")).toBe(false);
-    expect(visibleUnderFilter("no-settings", "capture")).toBe(false);
-    expect(visibleUnderFilter("no-settings", "apply")).toBe(false);
-    expect(visibleUnderFilter("no-settings", "ok")).toBe(false);
-    expect(visibleUnderFilter("no-settings", "all")).toBe(true);
+  it("none shows the none bucket only; capture and ok exclude it; all includes it", () => {
+    expect(visibleUnderFilter("none", "none")).toBe(true);
+    expect(visibleUnderFilter("ok", "none")).toBe(false);
+    expect(visibleUnderFilter("capture", "none")).toBe(false);
+    expect(visibleUnderFilter("none", "capture")).toBe(false);
+    expect(visibleUnderFilter("none", "apply")).toBe(false);
+    expect(visibleUnderFilter("none", "ok")).toBe(false);
+    expect(visibleUnderFilter("none", "all")).toBe(true);
   });
 
   it("locked shows only under all; capture/apply/ok/none exclude it", () => {
@@ -50,11 +49,67 @@ describe("visibleUnderFilter", () => {
     expect(visibleUnderFilter("locked", "none")).toBe(false);
   });
 
-  it("never-synced rows are visible under the apply filter, default apply, stageable", () => {
-    expect(visibleUnderFilter("never-synced", "apply")).toBe(true);
-    expect(visibleUnderFilter("never-synced", "capture")).toBe(false);
+  it("never-synced rows: raw-state defaults still resolve apply/stageable (unrelated to bucket)", () => {
     expect(directionForState("never-synced")).toBe("apply");
     expect(stageableState("never-synced")).toBe(true);
+  });
+});
+
+// A minimal Fate fixture — only glyph/stageable drive fateBucket, everything else is filler.
+function fate(glyph: Fate["glyph"], stageable: boolean): Fate {
+  return { glyph, sentence: "", chips: [], stageable, turnsOn: false };
+}
+
+describe("fateBucket — spec §1 truth table (ledger C-#23)", () => {
+  it("⚠ conflict, regardless of nothingYet", () => {
+    expect(fateBucket(fate("⚠", false), false)).toBe("conflict");
+    expect(fateBucket(fate("⚠", false), true)).toBe("conflict");
+  });
+
+  it("stageable ↓ → apply, even when the row sits on a no-settings/in-sync state (nothingYet true)", () => {
+    expect(fateBucket(fate("↓", true), true)).toBe("apply");
+    expect(fateBucket(fate("↓", true), false)).toBe("apply");
+  });
+
+  it("stageable ↑ → capture", () => {
+    expect(fateBucket(fate("↑", true), false)).toBe("capture");
+    expect(fateBucket(fate("↑", true), true)).toBe("capture");
+  });
+
+  it("non-stageable, nothingYet → none", () => {
+    expect(fateBucket(fate("—", false), true)).toBe("none");
+  });
+
+  it("non-stageable, not nothingYet → ok", () => {
+    expect(fateBucket(fate("—", false), false)).toBe("ok");
+  });
+});
+
+describe("fateBucketCounts — counts parity on a mixed row set (ledger C-#23)", () => {
+  it("conflict counts under the apply/'down' pill (today's placement, preserved); locked counts under 'none'", () => {
+    const buckets: RowBucket[] = ["capture", "capture", "apply", "conflict", "ok", "none", "locked"];
+    expect(fateBucketCounts(buckets)).toEqual({ up: 2, down: 2, ok: 1, none: 2 });
+  });
+
+  it("an enable-only ↓ row on a no-settings state counts under 'down' (apply), never 'none'", () => {
+    const enableOnlyBucket = fateBucket(fate("↓", true), true); // ↓ Turns on, nothingYet: true
+    expect(enableOnlyBucket).toBe("apply");
+    expect(fateBucketCounts([enableOnlyBucket])).toEqual({ up: 0, down: 1, ok: 0, none: 0 });
+  });
+
+  it("empty set counts all zero", () => {
+    expect(fateBucketCounts([])).toEqual({ up: 0, down: 0, ok: 0, none: 0 });
+  });
+});
+
+describe("partitionSection — active/insync/nosettings partition (ledger C-#23)", () => {
+  it("conflict, apply, capture, and locked are all active", () => {
+    for (const b of ["conflict", "apply", "capture", "locked"] as const) expect(partitionSection(b)).toBe("active");
+  });
+
+  it("ok folds into insync; none folds into nosettings", () => {
+    expect(partitionSection("ok")).toBe("insync");
+    expect(partitionSection("none")).toBe("nosettings");
   });
 });
 

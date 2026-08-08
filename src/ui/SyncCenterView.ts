@@ -1,6 +1,6 @@
 import { App, ButtonComponent, ExtraButtonComponent, ItemView, Menu, Modal, Platform, WorkspaceLeaf, setIcon } from "obsidian";
 import { ApplyItem, CaptureItem, orderInstallsCatalogFirst, ProgressFn, StateAction } from "../core/ConfigSyncCore";
-import { bucketCounts, GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry, RemoteDiffFile, remoteDirectionCounts } from "../core/status";
+import { BucketCounts, GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry, RemoteDiffFile, remoteDirectionCounts } from "../core/status";
 import { CATEGORY_LABELS, findGroupByName, ItemCategory, SELF_GROUP_NAME, categoryForGroup } from "../core/catalog";
 import { DeviceClass, FileChanges, GroupResult, hasChanges, MemberRule, MEMBER_RULES, Remote, RuleScope, SyncGroup } from "../core/types";
 import { Availability } from "../core/availability";
@@ -20,6 +20,8 @@ import {
   FamilyMember,
   FamilyRollup,
   familyRollup,
+  fateBucket,
+  fateBucketCounts,
   fileEntryFor,
   foldCompanionEntries,
   insyncLineText,
@@ -33,8 +35,10 @@ import {
   onOffLineText,
   onOffNarrationLines,
   PanelFilter,
+  partitionSection,
   presentedState,
   remoteSections,
+  RowBucket,
   runProgressLabel,
   SectionKind,
   sectionForItem,
@@ -77,10 +81,12 @@ export function syncTypeValue(g: SyncGroup): "file" | "folder" {
 export function syncModeValue(g: SyncGroup): string {
   return g.mode ?? "plain";
 }
-// The row's PanelFilter bucket, mirroring the state-filter pills. locked → null (no bucket).
-export function syncActionValue(state: GroupState): "capture" | "apply" | "ok" | "none" | null {
+// The row's PanelFilter bucket, mirroring the state-filter pills (ledger C-#23: fate-derived, not
+// raw GroupState — a conflict-bucket row resolves to "apply", its current placement). locked →
+// null (no bucket, unchanged).
+export function syncActionValue(bucket: RowBucket): "capture" | "apply" | "ok" | "none" | null {
   for (const f of ["capture", "apply", "ok", "none"] as const) {
-    if (visibleUnderFilter(state, f)) return f;
+    if (visibleUnderFilter(bucket, f)) return f;
   }
   return null;
 }
@@ -607,14 +613,28 @@ export class SyncCenterView extends ItemView {
     return { group: r.group.name, rel: mergedRel };
   }
 
-  // The state a row's FAMILY presents as (spec §2). Every count/filter/visibility consumer that
-  // used to read presState(r) directly now reads this instead, so a family whose only actionable
-  // content lives in a companion (parent itself in-sync) still counts/filters/shows as
-  // directional, never silently as "in sync" — while presState(r) itself stays available for the
-  // handful of call sites that genuinely need the row's OWN member state (the "locked" bypass,
-  // the default-policy suggestion).
+  // The state a row's FAMILY presents as (spec §2). Ledger C-#23: every count/filter/partition/
+  // fold consumer now reads `rowBucket` (below) instead — this is left as the one thing a bucket
+  // can't derive on its own: whether the family is "locked" (see rowBucket's comment for why that
+  // stays a raw-state check). presState(r) itself stays available separately for the handful of
+  // call sites that genuinely need the row's OWN member state (fateWithInput's locked bypass, the
+  // default-policy suggestion).
   private familyState(r: StatusRow): GroupState {
     return this.familyRollupFor(r).state;
+  }
+
+  // The single per-row bucket derivation every count/filter/partition/fold consumer reads (ledger
+  // C-#23, spec §1): a `↓ Turns on` row can no longer land in the "no settings yet" fold its raw
+  // GroupState might suggest — its bucket comes from the SAME fate it renders with. "locked"
+  // (encrypted, no passphrase set) never runs content comparison, so it has no fate-based reading;
+  // it keeps its own pre-existing placement instead — checked against the FAMILY state (not the
+  // row's own presState) because that rollup is what actually fed today's placement (a locked
+  // parent with a directional companion already rolled up to that companion's state, not "locked",
+  // before this task — preserved as-is, not this task's concern to change).
+  private rowBucket(r: StatusRow): RowBucket {
+    if (this.familyState(r) === "locked") return "locked";
+    const { fate, input } = this.fateWithInput(r);
+    return fateBucket(fate, input.nothingYet);
   }
 
   private rows(): StatusRow[] {
@@ -776,10 +796,10 @@ export class SyncCenterView extends ItemView {
   }
 
   // All user-facing counts (header pills, sidebar badges, filter pills, switcher) must agree
-  // with what the filters actually show — i.e. count PRESENTED FAMILY states (spec §2: "count
-  // families, never members"), not each row's own raw state.
-  private presentedCounts(rows: StatusRow[]): ReturnType<typeof bucketCounts> {
-    return bucketCounts(rows.map((r) => ({ ...r.status, state: this.familyState(r) })));
+  // with what the filters actually show — i.e. count each row's BUCKET (ledger C-#23, spec §1),
+  // not its raw family/member state.
+  private presentedCounts(rows: StatusRow[]): BucketCounts {
+    return fateBucketCounts(rows.map((r) => this.rowBucket(r)));
   }
 
   private render(gen: number): void {
@@ -1571,7 +1591,7 @@ export class SyncCenterView extends ItemView {
     return {
       type: (r) => syncTypeValue(r.group),
       scope: (r) => this.scopeOf(r.group.name),
-      action: (r) => syncActionValue(this.familyState(r)),
+      action: (r) => syncActionValue(this.rowBucket(r)),
       mode: (r) => syncModeValue(r.group),
       device: (r) => r.group.devices,
     };
@@ -1727,7 +1747,7 @@ export class SyncCenterView extends ItemView {
   private renderTypeSection(host: HTMLElement, ts: TypeSection, scoped: StatusRow[]): void {
     const rows = scoped.filter((r) => !CARRIER_GROUP_NAMES.has(r.group.name) && typeSectionForRow(this.scopeOf(r.group.name)) === ts);
     const matches = this.searching() ? rows.filter((r) => this.rowMatchesSearch(r)) : rows;
-    const visible = matches.filter((r) => visibleUnderFilter(this.familyState(r), this.filter));
+    const visible = matches.filter((r) => visibleUnderFilter(this.rowBucket(r), this.filter));
     const showSelf = ts === "community" && this.selfInfo !== null && this.filter === "all" && !this.searching();
     if (visible.length === 0 && !showSelf) return; // sections with nothing to show hide entirely
     const filtered = this.filter !== "all" || this.searching();
@@ -1777,10 +1797,13 @@ export class SyncCenterView extends ItemView {
     if (showSelf) this.renderSelfRow(card);
     if (this.filter === "all" && !this.searching()) {
       // ✓ / ○ rows fold into their own trailing line, same shape as the old flat list (#10) —
-      // now aggregated per section instead of once for the whole pane.
-      const active = visible.filter((r) => this.familyState(r) !== "in-sync" && this.familyState(r) !== "no-settings");
-      const insync = visible.filter((r) => this.familyState(r) === "in-sync");
-      const nosettings = visible.filter((r) => this.familyState(r) === "no-settings");
+      // now aggregated per section instead of once for the whole pane. Ledger C-#23 (spec §1):
+      // partitioned by BUCKET, not raw state — active = conflict|apply|capture (plus locked, its
+      // current placement, preserved); the folds hold ONLY ok/none.
+      const bucketed = visible.map((r) => ({ r, section: partitionSection(this.rowBucket(r)) }));
+      const active = bucketed.filter((x) => x.section === "active").map((x) => x.r);
+      const insync = bucketed.filter((x) => x.section === "insync").map((x) => x.r);
+      const nosettings = bucketed.filter((x) => x.section === "nosettings").map((x) => x.r);
       for (const r of active) this.renderItemRow(card, r);
       this.renderSectionTrailingLine(card, ts, insync, sessionUi.insyncOpen, (n, isOpen) => insyncLineText(n, isOpen));
       this.renderSectionTrailingLine(card, ts, nosettings, sessionUi.nosettingsOpen, (n, isOpen) => nosettingsLineText(n, isOpen));
@@ -1860,7 +1883,7 @@ export class SyncCenterView extends ItemView {
   }
 
   private visibleRows(scoped: StatusRow[]): StatusRow[] {
-    return scoped.filter((r) => visibleUnderFilter(this.familyState(r), this.filter) && this.rowMatchesSearch(r));
+    return scoped.filter((r) => visibleUnderFilter(this.rowBucket(r), this.filter) && this.rowMatchesSearch(r));
   }
 
   // Tri-state select-all over the currently visible checkable rows (scope + filter + search).
