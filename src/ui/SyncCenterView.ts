@@ -308,6 +308,17 @@ interface StatusRow {
   status: GroupStatus;
 }
 
+// One derivation per row per render cycle (ledger C-#22, spec §2): rollup, fate input, fate and
+// bucket computed together once per group name — every consumer (familyRollupFor, familyState,
+// fateWithInput, fateFor, rowBucket) reads the same cached entry instead of re-deriving. Cache
+// lives on the view (see rowDerivationCache) and is cleared at the top of render()/reload().
+interface RowDerivation {
+  rollup: FamilyRollup;
+  input: FateInput;
+  fate: Fate;
+  bucket: RowBucket;
+}
+
 export const SYNC_CENTER_VIEW_TYPE = "config-sync-center";
 
 export class SyncCenterView extends ItemView {
@@ -318,6 +329,9 @@ export class SyncCenterView extends ItemView {
   // fetched once per reload — only present for a carrier that's itself compiled, so a disabled
   // row's presence here doubles as "this carrier is synced AND its data is readable".
   private carrierDivergence: Map<EnablementCarrier, { captureRemoves: string[]; applyDisables: string[]; masked: string[] }> = new Map();
+  // ledger C-#22: per-render-cycle memo for rowBucket/familyRollupFor/familyState/fateWithInput/
+  // fateFor — see deriveRow(). Cleared at the top of render()/reload().
+  private rowDerivationCache: Map<string, RowDerivation> = new Map();
   private policy = sessionStaging.policy;
   // Fold state for the four unified type sections (task-4).
   private typeSectionOpen: Set<TypeSection> = new Set();
@@ -434,6 +448,10 @@ export class SyncCenterView extends ItemView {
 
   private async reload(): Promise<void> {
     const gen = ++this.renderGen;
+    // ledger C-#22: a reload always means new data — drop the row derivation memo up front so no
+    // interaction landing mid-reload (before the closing render() call) can read a bucket/fate
+    // computed against the groups/statuses this reload is about to replace.
+    this.rowDerivationCache.clear();
     const { groups, statuses, availability } = await this.host.computeStatuses();
     if (gen !== this.renderGen) return;
     this.groups = groups;
@@ -573,15 +591,21 @@ export class SyncCenterView extends ItemView {
 
   // A dir-type member's file count for the rollup (spec §2's "companion file changes (summed
   // count N)"): 0 for a file-type member (its own settings payload is a separate verb component
-  // — see fateInputFor's hasSettingsPayload) and for a dir member with no diff computed yet.
+  // — see computeFateInput's hasSettingsPayload) and for a dir member with no diff computed yet.
   private memberFileCount(r: StatusRow): number {
     return r.group.type === "dir" && r.status.changes !== undefined ? this.folderChangeCount(r.status.changes) : 0;
   }
 
-  // The family rollup for a row (itself + its companions) — shared by fateInputFor (fate/
+  // The family rollup for a row (itself + its companions) — shared by computeFateInput (fate/
   // direction/conflict), familyState (counts/filters/visibility), stagedRows' companion fan-out,
-  // and renderUnifiedFiles' merged Files section.
+  // and renderUnifiedFiles' merged Files section. Memoized via deriveRow (ledger C-#22).
   private familyRollupFor(r: StatusRow): FamilyRollup {
+    return this.deriveRow(r).rollup;
+  }
+
+  // The uncached rollup computation — called exactly once per row per render cycle, from
+  // deriveRow(), which caches the result. Never call this directly outside deriveRow.
+  private computeFamilyRollup(r: StatusRow): FamilyRollup {
     const companions = this.familyCompanions(r.group.name);
     const members: FamilyMember[] = [
       { name: r.group.name, state: this.presState(r), fileCount: this.memberFileCount(r) },
@@ -625,22 +649,41 @@ export class SyncCenterView extends ItemView {
 
   // The single per-row bucket derivation every count/filter/partition/fold consumer reads (ledger
   // C-#23, spec §1): a `↓ Turns on` row can no longer land in the "no settings yet" fold its raw
-  // GroupState might suggest — its bucket comes from the SAME fate it renders with.
+  // GroupState might suggest — its bucket comes from the SAME fate it renders with. Memoized via
+  // deriveRow (ledger C-#22) — see there for the locked-bucket bypass reasoning.
+  private rowBucket(r: StatusRow): RowBucket {
+    return this.deriveRow(r).bucket;
+  }
+
+  // The single derivation pass for a row (ledger C-#22, spec §2): computes the rollup, fate
+  // input, fate and bucket together, once, and caches by group name for the rest of the render
+  // cycle — familyRollupFor/familyState/fateWithInput/fateFor/rowBucket all read this cache
+  // instead of re-deriving. Cache is cleared at the top of render()/reload() (see
+  // rowDerivationCache).
   //
   // "locked" (encrypted, no passphrase set) never runs content comparison, so it has no fate-based
-  // reading at all — checked against the row's OWN presState (matching fateWithInput's own locked
-  // bypass below, NOT touched by this fix) rather than the family rollup, because familyRollup
-  // treats a locked member as neutral: a locked PARENT with a DIRECTIONAL companion (e.g. an
-  // Encrypted-mode item with no passphrase, alongside a plain companion dir with real changes)
-  // rolls up to the companion's directional state, not "locked" — so `fateWithInput(r)`'s
-  // unconditional "—"/non-stageable bypass fate would otherwise fateBucket to "ok" and the whole
-  // family would silently vanish from counts/filters/the active partition (review fix; config-
-  // reachable by any user). `legacyLockedFamilyBucket` reproduces exactly where familyState(r)
-  // landed this pre-task, from the family's raw state, never from fate.
-  private rowBucket(r: StatusRow): RowBucket {
-    if (this.presState(r) === "locked") return legacyLockedFamilyBucket(this.familyState(r));
-    const { fate, input } = this.fateWithInput(r);
-    return fateBucket(fate, input.nothingYet);
+  // reading at all — bucketed off the row's OWN presState (matching this same locked check, not
+  // the family rollup) rather than the family rollup, because familyRollup treats a locked member
+  // as neutral: a locked PARENT with a DIRECTIONAL companion (e.g. an Encrypted-mode item with no
+  // passphrase, alongside a plain companion dir with real changes) rolls up to the companion's
+  // directional state, not "locked" — so an unconditional "—"/non-stageable bypass fate would
+  // otherwise fateBucket to "ok" and the whole family would silently vanish from counts/filters/
+  // the active partition (review fix; config-reachable by any user). `legacyLockedFamilyBucket`
+  // reproduces exactly where familyState(r) landed pre-task, from the family's raw state, never
+  // from fate.
+  private deriveRow(r: StatusRow): RowDerivation {
+    const cached = this.rowDerivationCache.get(r.group.name);
+    if (cached !== undefined) return cached;
+    const rollup = this.computeFamilyRollup(r);
+    const input = this.computeFateInput(r, rollup);
+    const locked = this.presState(r) === "locked";
+    const fate: Fate = locked
+      ? { glyph: "—", sentence: "Encrypted — set the passphrase in settings to compare", chips: ["🔒 encrypted"], stageable: false, turnsOn: false }
+      : rowFate(input);
+    const bucket: RowBucket = locked ? legacyLockedFamilyBucket(rollup.state) : fateBucket(fate, input.nothingYet);
+    const derived: RowDerivation = { rollup, input, fate, bucket };
+    this.rowDerivationCache.set(r.group.name, derived);
+    return derived;
   }
 
   private rows(): StatusRow[] {
@@ -715,8 +758,10 @@ export class SyncCenterView extends ItemView {
   // joins"). storeListOn/locallyOn/memberRule only exist for a carrier-synced plugin row — for
   // every other row (obsidian/folder/self-excluded/carrier-unsynced) they stay at their "no
   // enablement dimension" defaults, which `effectiveTurnsOn`/`buildChips` already treat as a
-  // no-op (see fateModel.ts).
-  private fateInputFor(r: StatusRow): FateInput {
+  // no-op (see fateModel.ts). Called exactly once per row per render cycle, from deriveRow()
+  // (ledger C-#22), which already has the rollup computed — takes it as a parameter rather than
+  // recomputing it.
+  private computeFateInput(r: StatusRow, rollup: FamilyRollup): FateInput {
     const name = r.group.name;
     const a = this.availOf(name);
     const parentPres = this.presState(r);
@@ -736,7 +781,6 @@ export class SyncCenterView extends ItemView {
       storeListOn = div === undefined ? locallyOn : locallyOn ? !div.applyDisables.includes(element) : div.captureRemoves.includes(element);
       memberRule = this.host.memberRuleFor(carrier, element, locallyOn);
     }
-    const rollup = this.familyRollupFor(r);
     const pres = rollup.state;
     const direction = stageableRow(pres, this.sectionOf(name)) ? effectiveDirection(pres, this.directionOverride.get(name)) : null;
     const rollupFiles = direction === "apply" ? rollup.applyFiles : direction === "capture" ? rollup.captureFiles : 0;
@@ -785,20 +829,14 @@ export class SyncCenterView extends ItemView {
   // content comparison never even ran, so direction/conflict/nothingYet are all meaningless here.
   // Bypasses rowFate for this one state and reuses this codebase's existing approved copy for it
   // (stateIcon's "locked" tip, already shown elsewhere in this view) rather than letting it fall
-  // through to a misleading "In sync".
+  // through to a misleading "In sync". Memoized via deriveRow (ledger C-#22).
   private fateWithInput(r: StatusRow): { fate: Fate; input: FateInput } {
-    const input = this.fateInputFor(r);
-    if (this.presState(r) === "locked") {
-      return {
-        input,
-        fate: { glyph: "—", sentence: "Encrypted — set the passphrase in settings to compare", chips: ["🔒 encrypted"], stageable: false, turnsOn: false },
-      };
-    }
-    return { input, fate: rowFate(input) };
+    const { fate, input } = this.deriveRow(r);
+    return { fate, input };
   }
 
   private fateFor(r: StatusRow): Fate {
-    return this.fateWithInput(r).fate;
+    return this.deriveRow(r).fate;
   }
 
   // All user-facing counts (header pills, sidebar badges, filter pills, switcher) must agree
@@ -810,6 +848,10 @@ export class SyncCenterView extends ItemView {
 
   private render(gen: number): void {
     if (gen !== this.renderGen) return;
+    // ledger C-#22: a fresh render cycle — any staging state a render-triggering handler just
+    // changed (direction override, conflict choice, selection, filter, search…) must be read
+    // fresh, not off derivations cached for the PREVIOUS cycle's state.
+    this.rowDerivationCache.clear();
     const scrollTop = this.contentEl.scrollTop;
     this.contentEl.empty();
     this.renderHeader();
@@ -1766,7 +1808,7 @@ export class SyncCenterView extends ItemView {
     const open = this.typeSectionOpen.has(ts);
     const fold = host.createDiv({ cls: `config-sync-section is-typesection is-${ts}${open ? " is-open" : ""}` });
     const head = fold.createDiv({ cls: "config-sync-section-head" });
-    head.createSpan({ cls: "config-sync-row-chevron", text: open ? "▾" : "▸" });
+    const chevron = head.createSpan({ cls: "config-sync-row-chevron", text: open ? "▾" : "▸" });
     head.createSpan({ cls: "config-sync-section-title", text: TYPE_SECTION_TITLES[ts] });
     head.createSpan({ cls: "config-sync-pill is-neutral", text: sectionCountLabel(rows.length, visible.length, filtered) });
     if (ts === "core") this.renderCarrierChip(head, "core-plugins");
@@ -1793,12 +1835,32 @@ export class SyncCenterView extends ItemView {
       }
       this.render(this.renderGen);
     });
+    // Ledger C-#22: collapse/expand flips the DOM in place — `is-open` class, chevron glyph, and
+    // the card itself (built just-in-time / torn down on close) — never a full this.render().
+    // Mirrors the C-#9 row-expand precedent (fateEl.hidden flip, no render). `visible`/`showSelf`
+    // are frozen from this render cycle, which is correct: only the fold's own open/closed state
+    // changes here, never the underlying data.
+    let card: HTMLElement | null = open ? this.buildTypeSectionCard(fold, ts, visible, showSelf) : null;
     head.addEventListener("click", () => {
-      if (this.typeSectionOpen.has(ts)) this.typeSectionOpen.delete(ts);
-      else this.typeSectionOpen.add(ts);
-      this.render(this.renderGen);
+      if (this.typeSectionOpen.has(ts)) {
+        this.typeSectionOpen.delete(ts);
+        fold.removeClass("is-open");
+        chevron.setText("▸");
+        card?.remove();
+        card = null;
+      } else {
+        this.typeSectionOpen.add(ts);
+        fold.addClass("is-open");
+        chevron.setText("▾");
+        card = this.buildTypeSectionCard(fold, ts, visible, showSelf);
+      }
     });
-    if (!open) return;
+  }
+
+  // A type section's card contents (spec §2): extracted from renderTypeSection (ledger C-#22) so
+  // the section-head toggle can build/remove just this one section's card in place instead of a
+  // full render().
+  private buildTypeSectionCard(fold: HTMLElement, ts: TypeSection, visible: StatusRow[], showSelf: boolean): HTMLElement {
     const card = fold.createDiv({ cls: "config-sync-card" });
     if (showSelf) this.renderSelfRow(card);
     if (this.filter === "all" && !this.searching()) {
@@ -1816,22 +1878,53 @@ export class SyncCenterView extends ItemView {
     } else {
       for (const r of visible) this.renderItemRow(card, r);
     }
+    return card;
   }
 
   // Per-section variant of the old renderTrailingLine — keyed by section too, so expanding the
-  // ✓ fold in one section doesn't also expand it in another.
+  // ✓ fold in one section doesn't also expand it in another. Ledger C-#22: toggling the fold
+  // flips the line text and builds/removes just its own rows in place, right after the line —
+  // never a full this.render().
   private renderSectionTrailingLine(card: HTMLElement, ts: TypeSection, rows: StatusRow[], openSet: Set<string>, text: (n: number, open: boolean) => string): void {
     if (rows.length === 0) return;
     const key = `${this.scopeKey()}::${ts}`;
-    const open = openSet.has(key);
+    let open = openSet.has(key);
     const line = card.createDiv({ cls: "config-sync-unchanged", text: text(rows.length, open) });
+    let rowEls: HTMLElement[] = open ? this.buildTrailingRows(card, line, rows) : [];
     line.addEventListener("click", (e) => {
       e.stopPropagation();
-      if (open) openSet.delete(key);
-      else openSet.add(key);
-      this.render(this.renderGen);
+      open = !open;
+      if (open) {
+        openSet.add(key);
+        rowEls = this.buildTrailingRows(card, line, rows);
+      } else {
+        openSet.delete(key);
+        for (const el of rowEls) el.remove();
+        rowEls = [];
+      }
+      line.setText(text(rows.length, open));
     });
-    if (open) for (const r of rows) this.renderItemRow(card, r);
+  }
+
+  // Builds an open trailing fold's rows, inserted directly after `anchor` (the fold's own line)
+  // so they land in the right place regardless of what else already sits in `card` — needed
+  // because reopening a fold in place (ledger C-#22) can't rely on append-at-the-end the way the
+  // very first build could. `renderItemRow` may append more than one child per row (the row
+  // itself plus its detail drawer) — every child it adds gets moved, in order.
+  private buildTrailingRows(card: HTMLElement, anchor: HTMLElement, rows: StatusRow[]): HTMLElement[] {
+    const built: HTMLElement[] = [];
+    let after = anchor;
+    for (const r of rows) {
+      const before = card.children.length;
+      this.renderItemRow(card, r);
+      for (const child of Array.from(card.children).slice(before)) {
+        const el = child as HTMLElement;
+        after.after(el);
+        after = el;
+        built.push(el);
+      }
+    }
+    return built;
   }
 
   // Config Sync's own row (spec §2): pinned first in Community, outside the checkbox/Fate
@@ -2514,7 +2607,7 @@ export class SyncCenterView extends ItemView {
   // stagedPayload's input rows (spec §5, task 6): one entry per row currently in the list
   // (carriers included — they're excluded from rendering, not from this set, since their own
   // file can differ independently of any member — see stagedPayload's carrier-synthesis rule).
-  // `CARRIER_GROUP_NAMES` guards `carrier`/`elementId`: `fateInputFor` reads carrierSynced/true
+  // `CARRIER_GROUP_NAMES` guards `carrier`/`elementId`: `computeFateInput` reads carrierSynced/true
   // for a carrier's OWN row too (its group name resolves to itself under
   // `enablementCarrierFor`/`carrierElementFor`), which would otherwise feed its own name back in
   // as a bogus "member" of itself. `fate` is the single shared `effectiveFate` derivation
