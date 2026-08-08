@@ -4,6 +4,7 @@ import {
   addForceOn,
   memberUniverse,
   switchListMemberOn,
+  switchListOnCount,
   parseSwitchList,
   captureSwitchList,
   applySwitchList,
@@ -141,6 +142,18 @@ describe("switchListMemberOn", () => {
   });
   it("a null list (unreadable/absent local file) counts as off", () => {
     expect(switchListMemberOn(null, "a")).toBe(false);
+  });
+});
+
+describe("switchListOnCount", () => {
+  it("array: every element counts as on", () => {
+    expect(switchListOnCount(["a", "b", "c"])).toBe(3);
+  });
+  it("map: only true-valued keys count", () => {
+    expect(switchListOnCount({ a: true, b: false, c: true })).toBe(2);
+  });
+  it("a null list counts as 0", () => {
+    expect(switchListOnCount(null)).toBe(0);
   });
 });
 

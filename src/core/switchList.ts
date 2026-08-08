@@ -146,6 +146,15 @@ export function switchListMemberOn(list: SwitchList | null, id: string): boolean
   return Array.isArray(list) ? list.includes(id) : list[id] === true;
 }
 
+// Total ON-member count of a SwitchList (2026-08-08-c-livetest-batch8): array length (every
+// element is on) or the number of true-valued map keys. A null list counts as 0, matching
+// switchListMemberOn's null handling — the on/off narration's "whole list flipped" case relies on
+// this being the same on-reading switchListMemberOn uses, not a raw member count.
+export function switchListOnCount(list: SwitchList | null): number {
+  if (list === null) return 0;
+  return Array.isArray(list) ? list.length : Object.values(list).filter((v) => v).length;
+}
+
 /**
  * Capture: remove excepted ids from local before storing.
  * Arrays: remove excepted strings, preserve order.

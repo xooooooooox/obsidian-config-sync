@@ -31,6 +31,7 @@ import {
   nosettingsLineText,
   onOffFlips,
   onOffLineText,
+  onOffNarrationLines,
   PanelFilter,
   presentedState,
   remoteSections,
@@ -2838,7 +2839,7 @@ export class SyncCenterView extends ItemView {
       const head = fold.createDiv({ cls: "config-sync-section-head" });
       head.createSpan({ cls: "config-sync-section-title", text: TYPE_SECTION_TITLES[sec.section] });
       head.createSpan({ cls: "config-sync-pill is-neutral", text: sectionCountLabel(n, n, false) });
-      if (sec.onOff !== null) this.renderRemoteOnOff(fold, sec.onOff, remote.name);
+      if (sec.onOff !== null) this.renderRemoteOnOff(fold, sec.onOff, remote.name, storedLabel);
       for (const e of sec.entries) this.renderRemoteDiffEntry(fold, e, remote.name, storedLabel(e.group));
     }
 
@@ -2912,13 +2913,17 @@ export class SyncCenterView extends ItemView {
   // never renders as an ordinary row — its file diff IS a member on/off delta, so this is the
   // only place that delta shows. Sums onOffFlips over every file the carrier entry carries
   // (normally exactly one) rather than assuming a single file, per the brief.
-  private renderRemoteOnOff(host: HTMLElement, e: RemoteDiffEntry, remoteName: string): void {
+  private renderRemoteOnOff(host: HTMLElement, e: RemoteDiffEntry, remoteName: string, storedLabel: (g: string) => string | undefined): void {
     const onAtRemote: string[] = [];
     const offAtRemote: string[] = [];
+    let remoteOnCount = 0;
+    let localOnCount = 0;
     for (const f of e.files) {
       const flips = onOffFlips(f.local, f.remote);
       onAtRemote.push(...flips.onAtRemote);
       offAtRemote.push(...flips.offAtRemote);
+      remoteOnCount += flips.remoteOnCount;
+      localOnCount += flips.localOnCount;
     }
     onAtRemote.sort();
     offAtRemote.sort();
@@ -2937,15 +2942,20 @@ export class SyncCenterView extends ItemView {
         return;
       }
       if (!built) {
-        if (onAtRemote.length > 0) {
+        // Element id → group name by carrier (spec §2): community carrier ids compile to
+        // `plugin-<id>` groups; core carrier ids ARE the group name — then the same
+        // storedLabel → displayParts chain the section's own rows resolve names through, so
+        // narration names never disagree with a row's display name.
+        const displayOf = (elementId: string): string => {
+          const group = e.group === "community-plugins" ? `plugin-${elementId}` : elementId;
+          return this.host.displayParts(group, storedLabel(group)).label;
+        };
+        const narration = onOffNarrationLines(onAtRemote, offAtRemote, remoteOnCount, localOnCount, displayOf, remoteName);
+        for (const l of [narration.on, narration.off]) {
+          if (l === null) continue;
           const row = fold.createDiv();
-          row.appendText(`on at ${remoteName}: `);
-          row.createSpan({ cls: "config-sync-remote-flip-value", text: onAtRemote.join(", ") });
-        }
-        if (offAtRemote.length > 0) {
-          const row = fold.createDiv();
-          row.appendText(`off at ${remoteName}: `);
-          row.createSpan({ cls: "config-sync-remote-flip-value", text: offAtRemote.join(", ") });
+          row.appendText(l.prefix);
+          row.createSpan({ cls: "config-sync-remote-flip-value", text: l.value });
         }
         this.renderRemoteFileRows(fold, e, remoteName);
         built = true;

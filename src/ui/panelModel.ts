@@ -3,7 +3,7 @@ import { FileChanges, RuleScope } from "../core/types";
 import { Availability, VersionDrift } from "../core/availability";
 import { ApplyItem, CaptureItem, StateAction } from "../core/ConfigSyncCore";
 import { ItemCategory } from "../core/catalog";
-import { memberUniverse, parseSwitchList, switchListMemberOn } from "../core/switchList";
+import { memberUniverse, parseSwitchList, switchListMemberOn, switchListOnCount } from "../core/switchList";
 import { Fate, FateInput, rowFate } from "./fateModel";
 
 // Direction a checkable row acts in: capture pushes this device → store; apply pulls store → device.
@@ -312,7 +312,18 @@ export function remoteSections(
 // membership — reuses parseSwitchList's shape handling so community-plugins.json (array) and
 // core-plugins.json (map) both work, and degrades an unparseable/absent side to "nothing on"
 // rather than throwing (a remote file that failed to fetch must still render, not crash the pane).
-export function onOffFlips(local: string | null, remote: string | null): { onAtRemote: string[]; offAtRemote: string[] } {
+// remoteOnCount/localOnCount are the per-side SOURCE on-set sizes the batch-8 narration needs
+// (spec §1): onAtRemote's source is the remote list's total on-member count, offAtRemote's is the
+// store (local) list's — extended onto this return rather than re-parsing in a sibling function,
+// since both lists are already parsed here.
+export interface OnOffFlipsResult {
+  onAtRemote: string[];
+  offAtRemote: string[];
+  remoteOnCount: number;
+  localOnCount: number;
+}
+
+export function onOffFlips(local: string | null, remote: string | null): OnOffFlipsResult {
   const localList = local === null ? null : parseSwitchList(local);
   const remoteList = remote === null ? null : parseSwitchList(remote);
   const onAtRemote: string[] = [];
@@ -323,11 +334,64 @@ export function onOffFlips(local: string | null, remote: string | null): { onAtR
     if (onRemote && !onLocal) onAtRemote.push(id);
     else if (onLocal && !onRemote) offAtRemote.push(id);
   }
-  return { onAtRemote: onAtRemote.sort(), offAtRemote: offAtRemote.sort() };
+  return {
+    onAtRemote: onAtRemote.sort(),
+    offAtRemote: offAtRemote.sort(),
+    remoteOnCount: switchListOnCount(remoteList),
+    localOnCount: switchListOnCount(localList),
+  };
 }
 
 export function onOffLineText(n: number, open: boolean): string {
   return `On/off list · differs for ${n} plugin${n === 1 ? "" : "s"} ${open ? "▾" : "▸"}`;
+}
+
+// Cap on display names shown per side before collapsing to "and N more" (spec
+// 2026-08-08-c-livetest-batch8 §1).
+const ONOFF_NARRATION_CAP = 5;
+
+export interface OnOffNarrationLine {
+  prefix: string; // e.g. "on at kickstart: " — plain narration text
+  value: string; // e.g. "its entire list — 74 plugins" / "A, B, C, D, E, and 69 more" — the emphasized part
+}
+
+// One side's expanded narration (spec §1): a side's flip count equalling its source on-set size
+// means every on-member flipped — the whole-list case (covers the fresh/empty-other-side wall of
+// ids) — otherwise up to ONOFF_NARRATION_CAP display names, sorted, then "and N more" once
+// truncated. An empty side yields no line (unchanged: still omitted entirely).
+function onOffSideLine(
+  ids: string[],
+  sourceOnCount: number,
+  prefix: string,
+  wholeListPhrase: string,
+  displayOf: (elementId: string) => string
+): OnOffNarrationLine | null {
+  if (ids.length === 0) return null;
+  if (ids.length === sourceOnCount) {
+    return { prefix, value: `${wholeListPhrase} — ${ids.length} plugin${ids.length === 1 ? "" : "s"}` };
+  }
+  const names = [...ids.map(displayOf)].sort((a, b) => a.localeCompare(b));
+  if (names.length <= ONOFF_NARRATION_CAP) return { prefix, value: names.join(", ") };
+  const shown = names.slice(0, ONOFF_NARRATION_CAP);
+  return { prefix, value: `${shown.join(", ")}, and ${names.length - ONOFF_NARRATION_CAP} more` };
+}
+
+// Ready-to-render expanded on/off narration lines (spec 2026-08-08-c-livetest-batch8 §3):
+// `displayOf` resolves a flip's element id to its display name through the pane's own
+// group-name → storedLabel → displayParts chain (§2), so narration names never disagree with row
+// names. Either side is null when its flip list is empty.
+export function onOffNarrationLines(
+  onAtRemote: string[],
+  offAtRemote: string[],
+  remoteOnCount: number,
+  localOnCount: number,
+  displayOf: (elementId: string) => string,
+  remoteName: string
+): { on: OnOffNarrationLine | null; off: OnOffNarrationLine | null } {
+  return {
+    on: onOffSideLine(onAtRemote, remoteOnCount, `on at ${remoteName}: `, "its entire list", displayOf),
+    off: onOffSideLine(offAtRemote, localOnCount, `off at ${remoteName}: `, "everything in your store's list", displayOf),
+  };
 }
 
 // ── Family rollup (spec 2026-08-07-c-livetest-batch5 task 1) ───────────────────────────────────

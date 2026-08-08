@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { capFileEntries, insyncLineText, statusBarStatuses, moreFilesText, visibleUnderFilter, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, runProgressLabel, showColdStartBanner, memberDecisionsFromScopes, enablementCarrierFor, carrierIsSynced, TYPE_SECTION_TITLES, typeSectionForRow, sectionCountLabel, unifiedFooterSummary, fileEntryFor, stagedPayload, StageableRow, effectiveFate, remoteSections, onOffFlips, onOffLineText, familyRollup, FamilyMember, mergeFamilyChanges, foldCompanionEntries } from "../src/ui/panelModel";
+import { capFileEntries, insyncLineText, statusBarStatuses, moreFilesText, visibleUnderFilter, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, runProgressLabel, showColdStartBanner, memberDecisionsFromScopes, enablementCarrierFor, carrierIsSynced, TYPE_SECTION_TITLES, typeSectionForRow, sectionCountLabel, unifiedFooterSummary, fileEntryFor, stagedPayload, StageableRow, effectiveFate, remoteSections, onOffFlips, onOffLineText, onOffNarrationLines, familyRollup, FamilyMember, mergeFamilyChanges, foldCompanionEntries } from "../src/ui/panelModel";
 import { GroupState, GroupStatus, OTHER_STORE_FILES_GROUP, RemoteDiffEntry, RemoteDiffFile } from "../src/core/status";
 import { FileChanges } from "../src/core/types";
 import { Availability } from "../src/core/availability";
@@ -438,32 +438,84 @@ describe("remoteSections", () => {
 
 describe("onOffFlips", () => {
   it("community-plugins.json string-array format: on-at-remote / off-at-remote sets", () => {
-    expect(onOffFlips('["a"]', '["a","b"]')).toEqual({ onAtRemote: ["b"], offAtRemote: [] });
+    expect(onOffFlips('["a"]', '["a","b"]')).toEqual({ onAtRemote: ["b"], offAtRemote: [], remoteOnCount: 2, localOnCount: 1 });
   });
 
   it("core-plugins.json map format: on-at-remote / off-at-remote sets", () => {
-    expect(onOffFlips('{"a":true,"b":false}', '{"a":false,"b":true}')).toEqual({ onAtRemote: ["b"], offAtRemote: ["a"] });
+    expect(onOffFlips('{"a":true,"b":false}', '{"a":false,"b":true}')).toEqual({ onAtRemote: ["b"], offAtRemote: ["a"], remoteOnCount: 1, localOnCount: 1 });
   });
 
   it("null local → every remote-on plugin lands in onAtRemote", () => {
-    expect(onOffFlips(null, '["x","y"]')).toEqual({ onAtRemote: ["x", "y"], offAtRemote: [] });
+    expect(onOffFlips(null, '["x","y"]')).toEqual({ onAtRemote: ["x", "y"], offAtRemote: [], remoteOnCount: 2, localOnCount: 0 });
   });
 
   it("null remote → every store-on plugin lands in offAtRemote", () => {
-    expect(onOffFlips('["x","y"]', null)).toEqual({ onAtRemote: [], offAtRemote: ["x", "y"] });
+    expect(onOffFlips('["x","y"]', null)).toEqual({ onAtRemote: [], offAtRemote: ["x", "y"], remoteOnCount: 0, localOnCount: 2 });
   });
 
   it("overlapping membership in different order → both lists empty", () => {
-    expect(onOffFlips('["a","b"]', '["b","a"]')).toEqual({ onAtRemote: [], offAtRemote: [] });
+    expect(onOffFlips('["a","b"]', '["b","a"]')).toEqual({ onAtRemote: [], offAtRemote: [], remoteOnCount: 2, localOnCount: 2 });
   });
 
   it("outputs are sorted", () => {
-    expect(onOffFlips(null, '["z","a","m"]')).toEqual({ onAtRemote: ["a", "m", "z"], offAtRemote: [] });
+    expect(onOffFlips(null, '["z","a","m"]')).toEqual({ onAtRemote: ["a", "m", "z"], offAtRemote: [], remoteOnCount: 3, localOnCount: 0 });
   });
 
   it("an unparseable side degrades to an empty list instead of throwing", () => {
     expect(() => onOffFlips("not json", '["x"]')).not.toThrow();
-    expect(onOffFlips("not json", '["x"]')).toEqual({ onAtRemote: ["x"], offAtRemote: [] });
+    expect(onOffFlips("not json", '["x"]')).toEqual({ onAtRemote: ["x"], offAtRemote: [], remoteOnCount: 1, localOnCount: 0 });
+  });
+});
+
+describe("onOffNarrationLines", () => {
+  const idDisplay = (id: string): string => id;
+
+  it("whole-list on-side: flip count equals the remote source size", () => {
+    const result = onOffNarrationLines(["a", "b"], [], 2, 0, idDisplay, "kickstart");
+    expect(result.on).toEqual({ prefix: "on at kickstart: ", value: "its entire list — 2 plugins" });
+    expect(result.off).toBeNull();
+  });
+
+  it("whole-list off-side: flip count equals the store source size", () => {
+    const result = onOffNarrationLines([], ["a", "b", "c"], 0, 3, idDisplay, "kickstart");
+    expect(result.off).toEqual({ prefix: "off at kickstart: ", value: "everything in your store's list — 3 plugins" });
+    expect(result.on).toBeNull();
+  });
+
+  it("whole-list on both sides simultaneously", () => {
+    const result = onOffNarrationLines(["a"], ["b", "c"], 1, 2, idDisplay, "kickstart");
+    expect(result.on).toEqual({ prefix: "on at kickstart: ", value: "its entire list — 1 plugin" });
+    expect(result.off).toEqual({ prefix: "off at kickstart: ", value: "everything in your store's list — 2 plugins" });
+  });
+
+  it("capped case: more than 5 names truncates to 5 plus a count of the rest", () => {
+    const ids = ["g1", "g2", "g3", "g4", "g5", "g6", "g7"];
+    // sourceOnCount (100) far exceeds the flip count so this is NOT the whole-list case.
+    const result = onOffNarrationLines(ids, [], 100, 0, idDisplay, "kickstart");
+    expect(result.on).toEqual({ prefix: "on at kickstart: ", value: "g1, g2, g3, g4, g5, and 2 more" });
+  });
+
+  it("≤5 flips lists all of them, no truncation", () => {
+    const ids = ["g1", "g2", "g3"];
+    const result = onOffNarrationLines(ids, [], 100, 0, idDisplay, "kickstart");
+    expect(result.on).toEqual({ prefix: "on at kickstart: ", value: "g1, g2, g3" });
+  });
+
+  it("empty side is omitted entirely", () => {
+    const result = onOffNarrationLines([], [], 0, 0, idDisplay, "kickstart");
+    expect(result.on).toBeNull();
+    expect(result.off).toBeNull();
+  });
+
+  it("sorts by display name, not by element id", () => {
+    const displayOf = (id: string): string => ({ id1: "Zebra", id2: "Apple" })[id] ?? id;
+    const result = onOffNarrationLines(["id1", "id2"], [], 100, 0, displayOf, "kickstart");
+    expect(result.on).toEqual({ prefix: "on at kickstart: ", value: "Apple, Zebra" });
+  });
+
+  it("id fallback: an unresolved display name falls back to the raw element id", () => {
+    const result = onOffNarrationLines(["raw-id"], [], 100, 0, idDisplay, "kickstart");
+    expect(result.on).toEqual({ prefix: "on at kickstart: ", value: "raw-id" });
   });
 });
 
