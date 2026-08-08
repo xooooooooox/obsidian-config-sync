@@ -3,7 +3,7 @@ import { capFileEntries, insyncLineText, statusBarStatuses, moreFilesText, visib
 import { GroupState, GroupStatus, OTHER_STORE_FILES_GROUP, RemoteDiffEntry, RemoteDiffFile } from "../src/core/status";
 import { FileChanges } from "../src/core/types";
 import { Availability } from "../src/core/availability";
-import { Fate, FateInput } from "../src/ui/fateModel";
+import { Fate, FateInput, rowFate } from "../src/ui/fateModel";
 import { ItemCategory } from "../src/core/catalog";
 
 describe("visibleUnderFilter", () => {
@@ -82,6 +82,22 @@ describe("fateBucket — spec §1 truth table (ledger C-#23)", () => {
 
   it("non-stageable, not nothingYet → ok", () => {
     expect(fateBucket(fate("—", false), false)).toBe("ok");
+  });
+
+  // C-#24: a rule-excluded row's real rowFate output (never a hand-built Fate fixture) still
+  // buckets "ok" — inert, unstageable, inside the in-sync fold — the wording lied, not the
+  // inertness (spec §1 "Bucket").
+  it("excludedHere row (real rowFate output) buckets ok, not none", () => {
+    const excludedInput: FateInput = {
+      direction: null, conflict: false, nothingYet: false, installed: true,
+      hasUpdate: false, carrierSynced: false, storeListOn: null, locallyOn: false,
+      memberRule: "all", deviceClass: "desktop", desktopOnly: false, excludedHere: true,
+      hasSettingsPayload: true, special: null, folderFileCount: null, encrypted: false,
+    };
+    const excludedFate = rowFate(excludedInput);
+    expect(excludedFate.sentence).toBe("Not synced on this device");
+    expect(excludedFate.stageable).toBe(false);
+    expect(fateBucket(excludedFate, excludedInput.nothingYet)).toBe("ok");
   });
 });
 
@@ -1018,7 +1034,7 @@ describe("effectiveFate — single per-row derivation shared by staging/footer/d
   const baseInput: FateInput = {
     direction: "apply", conflict: false, nothingYet: false, installed: true,
     hasUpdate: false, carrierSynced: true, storeListOn: null, locallyOn: false,
-    memberRule: "all", deviceClass: "desktop", desktopOnly: false,
+    memberRule: "all", deviceClass: "desktop", desktopOnly: false, excludedHere: false,
     hasSettingsPayload: true, special: null, folderFileCount: null, encrypted: false,
   };
   const plainFate: Fate = { glyph: "↓", sentence: "Applies settings", chips: [], stageable: true, turnsOn: false };

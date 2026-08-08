@@ -765,6 +765,7 @@ export class SyncCenterView extends ItemView {
     const name = r.group.name;
     const a = this.availOf(name);
     const parentPres = this.presState(r);
+    const deviceClass: "desktop" | "mobile" = Platform.isMobile ? "mobile" : "desktop";
     const cat = this.scopeOf(name);
     const isPlugin = cat === "core" || cat === "community" || cat === "beta";
     const carrierSynced = isPlugin && this.carrierIsSynced(name);
@@ -794,8 +795,14 @@ export class SyncCenterView extends ItemView {
       storeListOn,
       locallyOn,
       memberRule,
-      deviceClass: Platform.isMobile ? "mobile" : "desktop",
+      deviceClass,
       desktopOnly: a.desktopOnly,
+      // C-#24: THIS row's own compiled group (not the family rollup) is scoped away from this
+      // device's class by the item's Settings-sync file rule — the same layer desktopOnly reads
+      // its fact from (`a`/`r.group`), never the store. rowFate only surfaces it when the family
+      // presentation is otherwise neutral (direction null) — a directional/conflict member always
+      // wins, so a still-syncing companion is never masked.
+      excludedHere: r.group.devices !== "all" && r.group.devices !== deviceClass,
       hasSettingsPayload: parentPres !== "no-settings" && parentPres !== "in-sync" && parentPres !== "locked",
       // "folder": a real dir-type group — its own files ARE the settings payload, so
       // fateModel's join must not also compose a separate "applies settings" (special:"folder"
@@ -2226,7 +2233,11 @@ export class SyncCenterView extends ItemView {
   // specifics spec §4 calls out verbatim (install source, update versions, capture consequence).
   private stateClauseText(r: StatusRow, fate: Fate, input: FateInput): string {
     if (fate.glyph === "⚠") return "Changed on both sides.";
-    if (input.direction === null) return `${fate.sentence}.`;
+    if (input.direction === null) {
+      // C-#24: the card's STATE clause spells out WHY, not just the row's terse sentence.
+      if (input.excludedHere) return "Not synced on this device — your Settings sync rule excludes it.";
+      return `${fate.sentence}.`;
+    }
     let text = fate.sentence;
     if (input.direction === "apply" && !input.installed) {
       const source = this.scopeOf(r.group.name) === "beta" ? "via BRAT" : "from the community catalog";

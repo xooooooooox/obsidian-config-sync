@@ -12,6 +12,11 @@ export interface FateInput {
   memberRule: MemberRule;
   deviceClass: "desktop" | "mobile";
   desktopOnly: boolean;
+  excludedHere: boolean;                 // this row's own compiled group is scoped away from
+                                          // deviceClass by the item's Settings-sync file rule
+                                          // (C-#24) — never a store fact, just this device's rule;
+                                          // only read when direction is null (a directional/
+                                          // conflict family member always wins)
   hasSettingsPayload: boolean;           // this run writes settings files
   special: "appearance" | "folder" | null; // "folder": a dir-type row — its own files ARE the
                                             // payload, folderFileCount REPLACES the settings verb
@@ -47,6 +52,7 @@ function buildChips(i: FateInput): string[] {
   const chips: string[] = [];
   if (i.direction === "apply" && !i.installed) chips.push("not installed here");
   if (i.desktopOnly) chips.push("desktop only");
+  if (i.direction === null && i.excludedHere) chips.push("your rule");
   if (i.carrierSynced && i.storeListOn === false && i.memberRule !== "always-here" && !i.locallyOn) {
     chips.push("stays off");
   }
@@ -99,7 +105,9 @@ export function rowFate(i: FateInput): Fate {
   }
 
   if (i.direction === null) {
-    const sentence = i.nothingYet ? "Nothing to sync yet" : "In sync";
+    // C-#24: a rule-excluded item never masquerades as "In sync" — only when the family has no
+    // directional/conflict member of its own (checked above) does the exclusion get to speak.
+    const sentence = i.excludedHere ? "Not synced on this device" : i.nothingYet ? "Nothing to sync yet" : "In sync";
     return { glyph: "—", sentence, chips, stageable: false, turnsOn: false };
   }
 

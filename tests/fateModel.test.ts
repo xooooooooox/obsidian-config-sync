@@ -4,7 +4,7 @@ import { rowFate, FateInput } from "../src/ui/fateModel";
 const base: FateInput = {
   direction: "apply", conflict: false, nothingYet: false, installed: true,
   hasUpdate: false, carrierSynced: true, storeListOn: null, locallyOn: false,
-  memberRule: "all", deviceClass: "desktop", desktopOnly: false,
+  memberRule: "all", deviceClass: "desktop", desktopOnly: false, excludedHere: false,
   hasSettingsPayload: true, special: null, folderFileCount: null, encrypted: false,
 };
 
@@ -64,6 +64,38 @@ describe("rowFate — spec §3 verb table", () => {
     expect(rowFate({ ...base, direction: null }).sentence).toBe("In sync");
     expect(rowFate({ ...base, direction: null, nothingYet: true }).sentence).toBe("Nothing to sync yet");
     expect(rowFate({ ...base, direction: null }).stageable).toBe(false);
+  });
+});
+
+// C-#24: a rule-excluded item tells the truth instead of masquerading as "In sync".
+describe("rowFate — excludedHere (C-#24)", () => {
+  it("neutral + excludedHere: honest sentence, unstageable, dash glyph, your-rule chip", () => {
+    const f = rowFate({ ...base, direction: null, excludedHere: true });
+    expect(f.sentence).toBe("Not synced on this device");
+    expect(f.glyph).toBe("—");
+    expect(f.stageable).toBe(false);
+    expect(f.turnsOn).toBe(false);
+    expect(f.chips).toContain("your rule");
+  });
+  it("excludedHere wins over nothingYet — the rule is why, not incidental emptiness", () => {
+    const f = rowFate({ ...base, direction: null, excludedHere: true, nothingYet: true });
+    expect(f.sentence).toBe("Not synced on this device");
+  });
+  it("a directional family member keeps its directional sentence — excludedHere is ignored", () => {
+    const f = rowFate({ ...base, direction: "apply", excludedHere: true });
+    expect(f.sentence).not.toBe("Not synced on this device");
+    expect(f.sentence).toBe("Applies settings");
+    expect(f.chips).not.toContain("your rule");
+  });
+  it("a conflicted family keeps its conflict sentence — excludedHere is ignored", () => {
+    const f = rowFate({ ...base, conflict: true, excludedHere: true });
+    expect(f.sentence).toBe("Changed on both sides");
+    expect(f.chips).not.toContain("your rule");
+  });
+  it("excludedHere false is byte-identical to the pre-existing sentences (in sync / nothing yet)", () => {
+    expect(rowFate({ ...base, direction: null, excludedHere: false }).sentence).toBe("In sync");
+    expect(rowFate({ ...base, direction: null, excludedHere: false, nothingYet: true }).sentence).toBe("Nothing to sync yet");
+    expect(rowFate({ ...base, direction: null, excludedHere: false }).chips).not.toContain("your rule");
   });
 });
 

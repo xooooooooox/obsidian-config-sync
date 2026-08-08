@@ -532,7 +532,16 @@ export default class ConfigSyncPlugin extends Plugin {
         const manifest = await loadManifest(ctx);
         const device = Platform.isMobile ? ("mobile" as const) : ("desktop" as const);
         const groups = groupsForDevice(manifest, device);
-        this.lastGroups = groups;
+        // C-#24 root cause: groupsForDevice drops a scope-mismatched group before it ever reaches
+        // statusForGroups — comparing its content across device classes would be meaningless (the
+        // store copy may belong to a different device's rule entirely), so it correctly never runs
+        // capture/apply/status for these. But that same drop used to make the item invisible in the
+        // Sync Center, not merely mislabeled — no row, no availability entry, nothing for the fate
+        // layer to read. These groups still get a row here: a synthetic, never-comparison-run
+        // "in-sync" status so computeFateInput's excludedHere (SyncCenterView.ts) can author the
+        // honest sentence instead of the row vanishing.
+        const excludedGroups = manifest.groups.filter((g) => g.devices !== "all" && g.devices !== device);
+        this.lastGroups = [...groups, ...excludedGroups];
         const ledger = this.loadBaselines();
         const { statuses, updates } = await statusForGroups(ctx, groups, ledger);
         this.localStatuses = statuses;
@@ -546,12 +555,16 @@ export default class ConfigSyncPlugin extends Plugin {
         this.lastLock = lock;
         const availability: Record<string, Availability> = {};
         for (const g of groups) availability[g.name] = availabilityForGroup(g, this.pluginHost(), lock);
+        for (const g of excludedGroups) availability[g.name] = availabilityForGroup(g, this.pluginHost(), lock);
         // Keep the status bar's snapshot in step with THIS compute (it used to be refreshed
         // only by refreshLocalStatus), and count with the center's own lens — main-section
-        // rows only (statusBarStatuses) — so the bar can never disagree with the pills.
+        // rows only (statusBarStatuses) — so the bar can never disagree with the pills. Excluded
+        // groups stay out of this count (always-neutral, never up/down either way) — unrelated
+        // surface, out of C-#24's scope.
         this.presentedStatuses = statusBarStatuses(statuses, (name) => availability[name], Platform.isMobile);
         this.updateStatusIndicators();
-        return { groups, statuses, availability };
+        const excludedStatuses: GroupStatus[] = excludedGroups.map((g) => ({ group: g.name, state: "in-sync" }));
+        return { groups: [...groups, ...excludedGroups], statuses: [...statuses, ...excludedStatuses], availability };
       },
       selfStatus: async (): Promise<SelfSyncInfo> => {
         const ctx = await this.coreContext();
