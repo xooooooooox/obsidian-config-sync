@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import ConfigSyncPlugin from "../src/main";
 import { GroupStatus } from "../src/core/status";
-import { SyncGroup } from "../src/core/types";
+import { SyncGroup, RuleScope } from "../src/core/types";
 import { Availability } from "../src/core/availability";
+import { groupExcludedHere } from "../src/ui/panelModel";
 
 // C-#24 root cause (ledger .superpowers/sdd/2026-08-06-c-livetest/issues.md): groupsForDevice
 // (ConfigSyncCore.ts:138-140) drops a scope-mismatched group before statusForGroups ever runs —
@@ -87,5 +88,35 @@ describe("SyncCenterHost.computeStatuses — a device-scope-excluded item still 
     expect(hotkeysGroup?.devices).toBe("all");
     // never-synced, not the synthetic "in-sync" excluded groups get — a real comparison ran.
     expect(statuses.find((s) => s.group === "hotkeys")?.state).toBe("no-settings");
+  });
+
+  // C-#24 fix round 2: the real Settings-sync menu write path (setItemFileScope), driven end to
+  // end through saveSettings' own recompile — never a hand-built settings shape — feeding the
+  // resulting compiled group straight into groupExcludedHere, the same call computeFateInput makes.
+  it("the real setItemFileScope('hotkeys','mobile') write path compiles a group groupExcludedHere reads true", async () => {
+    const plugin = new ConfigSyncPlugin({} as never, {} as never);
+    const instance = plugin as unknown as {
+      app: unknown;
+      loadData: () => Promise<unknown>;
+      saveData: (d: unknown) => Promise<void>;
+      loadSettings: () => Promise<void>;
+      recompile: () => Promise<void>;
+      setItemFileScope: (itemId: string, scope: Exclude<RuleScope, "local">) => Promise<void>;
+      syncCenterHost: () => {
+        computeStatuses: () => Promise<{ groups: SyncGroup[]; statuses: GroupStatus[]; availability: Record<string, Availability> }>;
+      };
+    };
+    instance.app = fakeApp();
+    instance.loadData = async () => baseData({ hotkeys: { enabled: true, settingsFile: { mode: "plain", rules: {}, perItem: {} }, companions: [] } });
+    instance.saveData = async () => {};
+    await instance.loadSettings();
+    await instance.recompile();
+
+    await instance.setItemFileScope("hotkeys", "mobile");
+
+    const { groups } = await instance.syncCenterHost().computeStatuses();
+    const hotkeysGroup = groups.find((g) => g.name === "hotkeys");
+    expect(hotkeysGroup).toBeDefined();
+    expect(groupExcludedHere(hotkeysGroup!, "desktop")).toBe(true);
   });
 });

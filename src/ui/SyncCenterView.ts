@@ -24,6 +24,7 @@ import {
   fateBucketCounts,
   fileEntryFor,
   foldCompanionEntries,
+  groupExcludedHere,
   insyncLineText,
   isValidPolicy,
   legacyLockedFamilyBucket,
@@ -799,10 +800,12 @@ export class SyncCenterView extends ItemView {
       desktopOnly: a.desktopOnly,
       // C-#24: THIS row's own compiled group (not the family rollup) is scoped away from this
       // device's class by the item's Settings-sync file rule — the same layer desktopOnly reads
-      // its fact from (`a`/`r.group`), never the store. rowFate only surfaces it when the family
-      // presentation is otherwise neutral (direction null) — a directional/conflict member always
-      // wins, so a still-syncing companion is never masked.
-      excludedHere: r.group.devices !== "all" && r.group.devices !== deviceClass,
+      // its fact from (`a`/`r.group`), never the store; groupExcludedHere (panelModel.ts) checks
+      // both the group-level devices class AND a Plain file's own fileRule.scope, since the two
+      // can disagree in practice. rowFate only surfaces it when the family presentation is
+      // otherwise neutral (direction null) — a directional/conflict member always wins, so a
+      // still-syncing companion is never masked.
+      excludedHere: groupExcludedHere(r.group, deviceClass),
       hasSettingsPayload: parentPres !== "no-settings" && parentPres !== "in-sync" && parentPres !== "locked",
       // "folder": a real dir-type group — its own files ARE the settings payload, so
       // fateModel's join must not also compose a separate "applies settings" (special:"folder"

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { capFileEntries, insyncLineText, statusBarStatuses, moreFilesText, visibleUnderFilter, fateBucket, fateBucketCounts, partitionSection, legacyLockedFamilyBucket, RowBucket, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, runProgressLabel, showColdStartBanner, memberDecisionsFromScopes, enablementCarrierFor, carrierIsSynced, TYPE_SECTION_TITLES, typeSectionForRow, sectionCountLabel, unifiedFooterSummary, fileEntryFor, stagedPayload, StageableRow, effectiveFate, remoteSections, onOffFlips, onOffLineText, onOffNarrationLines, familyRollup, FamilyMember, mergeFamilyChanges, foldCompanionEntries } from "../src/ui/panelModel";
+import { capFileEntries, insyncLineText, statusBarStatuses, moreFilesText, visibleUnderFilter, fateBucket, fateBucketCounts, partitionSection, legacyLockedFamilyBucket, RowBucket, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, runProgressLabel, showColdStartBanner, memberDecisionsFromScopes, enablementCarrierFor, carrierIsSynced, TYPE_SECTION_TITLES, typeSectionForRow, sectionCountLabel, unifiedFooterSummary, fileEntryFor, stagedPayload, StageableRow, effectiveFate, remoteSections, onOffFlips, onOffLineText, onOffNarrationLines, familyRollup, FamilyMember, mergeFamilyChanges, foldCompanionEntries, groupExcludedHere } from "../src/ui/panelModel";
 import { GroupState, GroupStatus, OTHER_STORE_FILES_GROUP, RemoteDiffEntry, RemoteDiffFile } from "../src/core/status";
-import { FileChanges } from "../src/core/types";
+import { FileChanges, SyncGroup } from "../src/core/types";
 import { Availability } from "../src/core/availability";
 import { Fate, FateInput, rowFate } from "../src/ui/fateModel";
 import { ItemCategory } from "../src/core/catalog";
@@ -52,6 +52,39 @@ describe("visibleUnderFilter", () => {
   it("never-synced rows: raw-state defaults still resolve apply/stageable (unrelated to bucket)", () => {
     expect(directionForState("never-synced")).toBe("apply");
     expect(stageableState("never-synced")).toBe(true);
+  });
+});
+
+// C-#24 fix round 2: live verification found the group-level `devices` axis alone (the original
+// fix) misses the case where a group's own `devices` stays "all" while its Plain-mode
+// `fileRule.scope` carries the real exclusion — the exact reported scenario (Settings-sync menu
+// write on Hotkeys). groupExcludedHere reads BOTH axes independently.
+describe("groupExcludedHere — C-#24 fix round 2 (devices AND fileRule.scope, independently)", () => {
+  const group = (overrides: Partial<SyncGroup>): SyncGroup => ({ name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all", ...overrides });
+
+  it("devices mismatch alone (no fileRule) → true — the original axis, unregressed", () => {
+    expect(groupExcludedHere(group({ devices: "mobile" }), "desktop")).toBe(true);
+  });
+
+  it("devices: all + fileRule.scope: mobile on desktop → true — the reported live scenario", () => {
+    expect(groupExcludedHere(group({ devices: "all", fileRule: { scope: "mobile", encrypted: false } }), "desktop")).toBe(true);
+  });
+
+  it("fileRule.scope: desktop on desktop → false — this device's own class, not excluded", () => {
+    expect(groupExcludedHere(group({ devices: "all", fileRule: { scope: "desktop", encrypted: false } }), "desktop")).toBe(false);
+  });
+
+  it("fileRule.scope: all → false", () => {
+    expect(groupExcludedHere(group({ devices: "all", fileRule: { scope: "all", encrypted: false } }), "desktop")).toBe(false);
+  });
+
+  it("fileRule absent, devices: all → false — byte-identical to before this fix", () => {
+    expect(groupExcludedHere(group({ devices: "all" }), "desktop")).toBe(false);
+  });
+
+  it("symmetric on a mobile device: fileRule.scope: desktop excludes; scope: mobile does not", () => {
+    expect(groupExcludedHere(group({ devices: "all", fileRule: { scope: "desktop", encrypted: false } }), "mobile")).toBe(true);
+    expect(groupExcludedHere(group({ devices: "all", fileRule: { scope: "mobile", encrypted: false } }), "mobile")).toBe(false);
   });
 });
 

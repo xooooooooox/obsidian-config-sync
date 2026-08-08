@@ -1,5 +1,5 @@
 import { BucketCounts, GroupState, GroupStatus, OTHER_STORE_FILES_GROUP, RemoteDiffEntry } from "../core/status";
-import { FileChanges, RuleScope } from "../core/types";
+import { FileChanges, RuleScope, SyncGroup } from "../core/types";
 import { Availability, VersionDrift } from "../core/availability";
 import { ApplyItem, CaptureItem, StateAction } from "../core/ConfigSyncCore";
 import { ItemCategory } from "../core/catalog";
@@ -165,6 +165,23 @@ export function stageableRow(state: GroupState, section: SectionKind): boolean {
   if (section === "desktop-only") return false; // informational only — can't run here, nothing to stage
   if (section !== "main") return state !== "locked";
   return stageableState(state);
+}
+
+// C-#24: a row's own compiled group can carry the device-scope fact in TWO independent places —
+// live evidence found both live in the store: (a) the group-level `devices` class (custom
+// groups/companions; groupsForDevice's own exclusion axis — a genuinely different group never
+// even reaches this device's status pass), and (b) a Plain-mode settings-file's own
+// `fileRule.scope` (the Settings-sync menu's write target, `setItemFileScope`) — normally
+// elevated onto `devices` at compile time (registry.ts's compileSingleFile), but the two can
+// still disagree in practice (e.g. a pre-existing/migrated group whose top-level `devices` never
+// picked up a later fileRule-only write). Checking both, independently, is the only reading that
+// can't miss either axis. `fileRule.scope` excludes "local" by construction (D9), so any
+// non-"all" value is a real DeviceClass to compare against.
+export function groupExcludedHere(group: SyncGroup, deviceClass: "desktop" | "mobile"): boolean {
+  const devicesExcluded = group.devices !== "all" && group.devices !== deviceClass;
+  const fileRuleScope = group.fileRule?.scope;
+  const fileRuleExcluded = fileRuleScope !== undefined && fileRuleScope !== "all" && fileRuleScope !== deviceClass;
+  return devicesExcluded || fileRuleExcluded;
 }
 
 // isMobile: a desktop-only plugin (author-declared) can't run on a phone — whether it's
