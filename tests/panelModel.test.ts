@@ -88,33 +88,34 @@ describe("groupExcludedHere — C-#24 fix round 2 (devices AND fileRule.scope, i
   });
 });
 
-// A minimal Fate fixture — only glyph/stageable drive fateBucket, everything else is filler.
-function fate(glyph: Fate["glyph"], stageable: boolean): Fate {
-  return { glyph, sentence: "", chips: [], stageable, turnsOn: false };
+// A minimal Fate fixture — only glyph/stageable/nothingYet drive fateBucket, everything else is
+// filler. `nothingYet` defaults false (a plain directional/conflict/in-sync fixture never is it).
+function fate(glyph: Fate["glyph"], stageable: boolean, nothingYet = false): Fate {
+  return { glyph, sentence: "", chips: [], stageable, turnsOn: false, nothingYet };
 }
 
 describe("fateBucket — spec §1 truth table (ledger C-#23)", () => {
   it("⚠ conflict, regardless of nothingYet", () => {
-    expect(fateBucket(fate("⚠", false), false)).toBe("conflict");
-    expect(fateBucket(fate("⚠", false), true)).toBe("conflict");
+    expect(fateBucket(fate("⚠", false, false))).toBe("conflict");
+    expect(fateBucket(fate("⚠", false, true))).toBe("conflict");
   });
 
   it("stageable ↓ → apply, even when the row sits on a no-settings/in-sync state (nothingYet true)", () => {
-    expect(fateBucket(fate("↓", true), true)).toBe("apply");
-    expect(fateBucket(fate("↓", true), false)).toBe("apply");
+    expect(fateBucket(fate("↓", true, true))).toBe("apply");
+    expect(fateBucket(fate("↓", true, false))).toBe("apply");
   });
 
   it("stageable ↑ → capture", () => {
-    expect(fateBucket(fate("↑", true), false)).toBe("capture");
-    expect(fateBucket(fate("↑", true), true)).toBe("capture");
+    expect(fateBucket(fate("↑", true, false))).toBe("capture");
+    expect(fateBucket(fate("↑", true, true))).toBe("capture");
   });
 
   it("non-stageable, nothingYet → none", () => {
-    expect(fateBucket(fate("—", false), true)).toBe("none");
+    expect(fateBucket(fate("—", false, true))).toBe("none");
   });
 
   it("non-stageable, not nothingYet → ok", () => {
-    expect(fateBucket(fate("—", false), false)).toBe("ok");
+    expect(fateBucket(fate("—", false, false))).toBe("ok");
   });
 
   // C-#24: a rule-excluded row's real rowFate output (never a hand-built Fate fixture) still
@@ -130,7 +131,26 @@ describe("fateBucket — spec §1 truth table (ledger C-#23)", () => {
     const excludedFate = rowFate(excludedInput);
     expect(excludedFate.sentence).toBe("Not synced on this device");
     expect(excludedFate.stageable).toBe(false);
-    expect(fateBucket(excludedFate, excludedInput.nothingYet)).toBe("ok");
+    expect(excludedFate.nothingYet).toBe(false);
+    expect(fateBucket(excludedFate)).toBe("ok");
+  });
+
+  // C-#28 hardening (review round 2): fateBucket reads the Fate's OWN nothingYet verdict, never
+  // an external/caller-computed flag — a degraded apply fate buckets "none" even when a caller's
+  // separate `pres === "no-settings"` guess would have said otherwise.
+  it("a degraded apply fate (empty verb set) buckets none via its own nothingYet field", () => {
+    const degradedInput: FateInput = {
+      direction: "apply", conflict: false, nothingYet: false, installed: true,
+      hasUpdate: false, carrierSynced: true, storeListOn: false, locallyOn: false,
+      memberRule: "all", deviceClass: "desktop", desktopOnly: false, excludedHere: false,
+      hasSettingsPayload: false, special: null, folderFileCount: null, encrypted: false,
+    };
+    const degradedFate = rowFate(degradedInput);
+    expect(degradedFate.sentence).toBe("No settings yet");
+    expect(degradedFate.nothingYet).toBe(true);
+    // Note: the INPUT's own nothingYet is false here — fateBucket still reads "none" because it
+    // trusts the Fate's own verdict, not this (deliberately wrong) caller flag.
+    expect(fateBucket(degradedFate)).toBe("none");
   });
 });
 
@@ -141,7 +161,7 @@ describe("fateBucketCounts — counts parity on a mixed row set (ledger C-#23)",
   });
 
   it("an enable-only ↓ row on a no-settings state counts under 'down' (apply), never 'none'", () => {
-    const enableOnlyBucket = fateBucket(fate("↓", true), true); // ↓ Turns on, nothingYet: true
+    const enableOnlyBucket = fateBucket(fate("↓", true, true)); // ↓ Turns on, nothingYet: true
     expect(enableOnlyBucket).toBe("apply");
     expect(fateBucketCounts([enableOnlyBucket])).toEqual({ up: 0, down: 1, ok: 0, none: 0 });
   });
@@ -852,7 +872,7 @@ describe("stagedPayload — spec §5 unified staging (task 6)", () => {
   const notInstalledAvail: Availability = { kind: "not-installed", drift: null, localVersion: null, storeVersion: "1.0.0", anchor: "plugin", desktopOnly: false };
   const behindAvail: Availability = { kind: "enabled", drift: "behind", localVersion: "1.0.0", storeVersion: "1.1.0", anchor: "plugin", desktopOnly: false };
 
-  const fate = (glyph: Fate["glyph"], turnsOn = false, stageable = true): Fate => ({ glyph, sentence: "x", chips: [], stageable, turnsOn });
+  const fate = (glyph: Fate["glyph"], turnsOn = false, stageable = true): Fate => ({ glyph, sentence: "x", chips: [], stageable, turnsOn, nothingYet: false });
 
   const row = (over: Partial<StageableRow> & { id: string }): StageableRow => ({
     id: over.id,
@@ -985,7 +1005,7 @@ describe("stagedPayload — spec §5 unified staging (task 6)", () => {
     const { apply } = stagedPayload([
       row({
         id: "plugin-x",
-        fate: { glyph: "⚠", sentence: "Changed on both sides", chips: [], stageable: false, turnsOn: true },
+        fate: { glyph: "⚠", sentence: "Changed on both sides", chips: [], stageable: false, turnsOn: true, nothingYet: false },
         conflict: true,
         conflictChoice: "apply",
         carrier: "community-plugins",
@@ -1001,7 +1021,7 @@ describe("stagedPayload — spec §5 unified staging (task 6)", () => {
     const { apply } = stagedPayload([
       row({
         id: "plugin-x",
-        fate: { glyph: "⚠", sentence: "Changed on both sides", chips: [], stageable: false, turnsOn: false },
+        fate: { glyph: "⚠", sentence: "Changed on both sides", chips: [], stageable: false, turnsOn: false, nothingYet: false },
         conflict: true,
         conflictChoice: "apply",
         carrier: "community-plugins",
@@ -1051,7 +1071,7 @@ describe("stagedPayload — spec §5 unified staging (task 6)", () => {
       const { apply, capture } = stagedPayload([
         row({
           id: "appearance",
-          fate: { glyph: "⚠", sentence: "Changed on both sides", chips: [], stageable: false, turnsOn: false },
+          fate: { glyph: "⚠", sentence: "Changed on both sides", chips: [], stageable: false, turnsOn: false, nothingYet: false },
           conflict: true,
           conflictChoice: "apply",
           companionNames: { apply: ["appearance-themes"], capture: ["appearance-snippets"] },
@@ -1070,8 +1090,8 @@ describe("effectiveFate — single per-row derivation shared by staging/footer/d
     memberRule: "all", deviceClass: "desktop", desktopOnly: false, excludedHere: false,
     hasSettingsPayload: true, special: null, folderFileCount: null, encrypted: false,
   };
-  const plainFate: Fate = { glyph: "↓", sentence: "Applies settings", chips: [], stageable: true, turnsOn: false };
-  const conflictFate: Fate = { glyph: "⚠", sentence: "Changed on both sides", chips: [], stageable: false, turnsOn: false };
+  const plainFate: Fate = { glyph: "↓", sentence: "Applies settings", chips: [], stageable: true, turnsOn: false, nothingYet: false };
+  const conflictFate: Fate = { glyph: "⚠", sentence: "Changed on both sides", chips: [], stageable: false, turnsOn: false, nothingYet: false };
 
   it("a normal (non-conflict) row with no fallback bridge passes through unchanged", () => {
     expect(effectiveFate(plainFate, baseInput, null, false)).toEqual(plainFate);

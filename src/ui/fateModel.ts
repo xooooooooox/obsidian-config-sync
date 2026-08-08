@@ -35,6 +35,11 @@ export interface Fate {
   chips: string[];    // ordered, copy-final
   stageable: boolean; // false → dimmed row, hidden checkbox, skipped by select-all
   turnsOn: boolean;   // the run will switch it on here (drives stagedMembers + footer)
+  // C-#28 hardening: true exactly when this Fate IS the nothing-yet presentation (direct, or
+  // degraded from an empty-verb direction) — the single source of truth bucket derivation reads
+  // (fateBucket), rather than a caller's separately-computed `nothingYet` guess that can
+  // disagree with what rowFate actually decided.
+  nothingYet: boolean;
 }
 
 function effectiveTurnsOn(i: FateInput): boolean {
@@ -100,26 +105,33 @@ function settingsVerb(i: FateInput, capturedTurnsOn: boolean): string | null {
 // C-#29: cause-voice copy — nothing has ever been saved, on either side.
 export const NOTHING_YET_SENTENCE = "No settings yet";
 
-// C-#28: a fate can never carry a direction with an empty verb set — the direction becomes
+// C-#28: an APPLY direction can never carry an empty verb set — the direction becomes
 // unrepresentable and degrades to the nothing-yet presentation instead (bare glyph, no
 // sentence, yet still "stageable"). Chips are unaffected — they describe facts about the row
-// (e.g. `stays off`) independent of whether this run actually has anything to do.
+// (e.g. `stays off`) independent of whether this run actually has anything to do. Apply-only
+// (controller ruling, review round 2): a capture-directional rollup only ever exists because a
+// member is genuinely local-changed/not-captured; local-changed members always carry a visible
+// file count already, so the only empty-verb capture shape is a `not-captured` companion whose
+// count is structurally invisible (status.ts never attaches `changes` there) — real capturable
+// work, not nothing-yet. Apply direction has no such invisible-count member, so an empty apply
+// verb set genuinely means there's nothing to do.
 function nothingYetFate(chips: string[]): Fate {
-  return { glyph: "—", sentence: NOTHING_YET_SENTENCE, chips, stageable: false, turnsOn: false };
+  return { glyph: "—", sentence: NOTHING_YET_SENTENCE, chips, stageable: false, turnsOn: false, nothingYet: true };
 }
 
 export function rowFate(i: FateInput): Fate {
   const chips = buildChips(i);
 
   if (i.conflict) {
-    return { glyph: "⚠", sentence: "Changed on both sides", chips, stageable: false, turnsOn: false };
+    return { glyph: "⚠", sentence: "Changed on both sides", chips, stageable: false, turnsOn: false, nothingYet: false };
   }
 
   if (i.direction === null) {
     // C-#24: a rule-excluded item never masquerades as "In sync" — only when the family has no
     // directional/conflict member of its own (checked above) does the exclusion get to speak.
-    const sentence = i.excludedHere ? "Not synced on this device" : i.nothingYet ? NOTHING_YET_SENTENCE : "In sync";
-    return { glyph: "—", sentence, chips, stageable: false, turnsOn: false };
+    if (i.excludedHere) return { glyph: "—", sentence: "Not synced on this device", chips, stageable: false, turnsOn: false, nothingYet: false };
+    if (i.nothingYet) return nothingYetFate(chips);
+    return { glyph: "—", sentence: "In sync", chips, stageable: false, turnsOn: false, nothingYet: false };
   }
 
   const stageable = true;
@@ -127,9 +139,11 @@ export function rowFate(i: FateInput): Fate {
   if (i.direction === "capture") {
     const capturedTurnsOn = i.carrierSynced && i.storeListOn === false && i.locallyOn;
     const verb = settingsVerb(i, capturedTurnsOn);
-    if (verb === null) return nothingYetFate(chips);
-    const sentence = capitalize(verb);
-    return { glyph: "↑", sentence, chips, stageable, turnsOn: false };
+    // C-#28 controller ruling: an empty capture verb set is real, invisible-count work (a
+    // `not-captured` companion — see nothingYetFate's comment) — never degrades. Generic,
+    // count-free copy: specific counts already render through settingsVerb above.
+    const sentence = capitalize(verb ?? "captures files");
+    return { glyph: "↑", sentence, chips, stageable, turnsOn: false, nothingYet: false };
   }
 
   const turnsOn = effectiveTurnsOn(i);
@@ -141,5 +155,5 @@ export function rowFate(i: FateInput): Fate {
   if (verb !== null) segments.push(verb);
   if (segments.length === 0) return nothingYetFate(chips);
   const sentence = capitalize(segments.join(" · "));
-  return { glyph: "↓", sentence, chips, stageable, turnsOn };
+  return { glyph: "↓", sentence, chips, stageable, turnsOn, nothingYet: false };
 }

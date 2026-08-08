@@ -88,9 +88,10 @@ hidden checkbox.
 | capture: turned on here (carrier delta) | `↑ Turned on here — shares it` |
 | capture: Appearance | `↑ Captures theme & snippets` |
 | capture: folder | `↑ Captures N files` |
+| capture: empty verb set (a `not-captured` companion — its file count is structurally invisible, never zero; C-#28) | `↑ Captures files` (generic, no count) |
 | both changed | `⚠ Changed on both sides` |
 | identical | `— In sync` |
-| no store data & no local settings (also: a derived direction whose verb set is empty — degrades here, C-#28) | `— No settings yet` |
+| no store data & no local settings, OR an apply direction whose verb set is empty (C-#28 — apply-only; capture never degrades, row above) | `— No settings yet` |
 
 Verbs join with ` · `; first letter capitalized. `Runs on` exceptions re-derive the
 sentence (e.g. `Never on here` removes `turns on`, adds the rule chip). When the carrier is

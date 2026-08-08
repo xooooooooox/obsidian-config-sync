@@ -67,26 +67,24 @@ describe("rowFate — spec §3 verb table", () => {
   });
 });
 
-// C-#28: a derived fate may never carry a direction with an empty verb set — it degrades to the
-// nothing-yet presentation instead of rendering a bare glyph with no sentence.
-describe("rowFate — empty-verb degradation (C-#28)", () => {
+// C-#28: a derived APPLY direction may never carry an empty verb set — it degrades to the
+// nothing-yet presentation instead of rendering a bare glyph with no sentence. Capture is
+// deliberately NOT symmetric (controller ruling, review round 2): a capture-directional rollup
+// only exists because some member is genuinely local-changed/not-captured, and the only
+// empty-verb capture shape is a `not-captured` member whose file count is structurally invisible
+// (status.ts never attaches `changes` there) — real capturable work, not nothing-yet.
+describe("rowFate — empty-verb degradation (C-#28, apply-only)", () => {
   it("apply, empty verb set (the live 5-row scenario: installed, stays off, no settings, no update) degrades to nothing-yet", () => {
     const f = rowFate({ ...base, hasSettingsPayload: false, storeListOn: false });
     expect(f.glyph).toBe("—");
     expect(f.sentence).toBe("No settings yet");
     expect(f.stageable).toBe(false);
     expect(f.turnsOn).toBe(false);
+    expect(f.nothingYet).toBe(true);
   });
   it("apply, empty verb set still carries its chips unaffected (stays off)", () => {
     const f = rowFate({ ...base, hasSettingsPayload: false, storeListOn: false });
     expect(f.chips).toContain("stays off");
-  });
-  it("capture, empty verb set (no settings payload, no folder files, no carrier turn-on) degrades to nothing-yet", () => {
-    const f = rowFate({ ...base, direction: "capture", hasSettingsPayload: false, storeListOn: null });
-    expect(f.glyph).toBe("—");
-    expect(f.sentence).toBe("No settings yet");
-    expect(f.stageable).toBe(false);
-    expect(f.turnsOn).toBe(false);
   });
 
   // Guard: the degradation fires ONLY on a genuinely empty verb set — every path that already
@@ -116,6 +114,25 @@ describe("rowFate — empty-verb degradation (C-#28)", () => {
     const f = rowFate({ ...base, installed: false, storeListOn: true });
     expect(f.sentence).toBe("Installs · turns on · applies settings");
     expect(f.stageable).toBe(true);
+  });
+});
+
+// C-#28 controller ruling (review round 2): capture never degrades — an empty capture verb set
+// (no settings payload, no visible folder files, no carrier turn-on) is real, invisible-count
+// work, so it renders a generic count-free verb instead.
+describe("rowFate — capture empty verb set stays directional (C-#28 ruling)", () => {
+  it("capture, empty verb set: generic 'Captures files', stageable, no degradation", () => {
+    const f = rowFate({ ...base, direction: "capture", hasSettingsPayload: false, storeListOn: null });
+    expect(f.glyph).toBe("↑");
+    expect(f.sentence).toBe("Captures files");
+    expect(f.stageable).toBe(true);
+    expect(f.turnsOn).toBe(false);
+    expect(f.nothingYet).toBe(false);
+  });
+  it("a real (non-empty) capture verb never falls back to the generic copy", () => {
+    const f = rowFate({ ...base, direction: "capture" });
+    expect(f.sentence).toBe("Captures settings");
+    expect(f.sentence).not.toBe("Captures files");
   });
 });
 

@@ -683,9 +683,9 @@ export class SyncCenterView extends ItemView {
     const input = this.computeFateInput(r, rollup);
     const locked = this.presState(r) === "locked";
     const fate: Fate = locked
-      ? { glyph: "—", sentence: "Encrypted — set the passphrase in settings to compare", chips: ["🔒 encrypted"], stageable: false, turnsOn: false }
+      ? { glyph: "—", sentence: "Encrypted — set the passphrase in settings to compare", chips: ["🔒 encrypted"], stageable: false, turnsOn: false, nothingYet: false }
       : rowFate(input);
-    const bucket: RowBucket = locked ? legacyLockedFamilyBucket(rollup.state) : fateBucket(fate, input.nothingYet);
+    const bucket: RowBucket = locked ? legacyLockedFamilyBucket(rollup.state) : fateBucket(fate);
     const derived: RowDerivation = { rollup, input, fate, bucket };
     this.rowDerivationCache.set(r.group.name, derived);
     return derived;

@@ -18,15 +18,17 @@ export type PanelFilter = "all" | "capture" | "apply" | "ok" | "none";
 // instead of re-deriving from raw GroupState (familyState), so a `↓ Turns on` row (stageable apply,
 // sitting on a no-settings/in-sync GroupState) counts/filters/folds as "apply" — the same bucket
 // its rendered sentence implies — never falls through to whatever its raw state happens to say.
-// `nothingYet` is the same FateInput field already computed for the row's own sentence — no new
-// state is introduced.
+// `fate.nothingYet` (C-#28 hardening, review round 2) is rowFate's OWN verdict — covers both the
+// direct nothing-yet presentation and one degraded from an empty-verb apply direction — never a
+// caller-recomputed guess (e.g. a family-rollup `pres === "no-settings"` check) that can disagree
+// with what rowFate actually decided.
 export type FateBucket = "conflict" | "apply" | "capture" | "ok" | "none";
 
-export function fateBucket(fate: Fate, nothingYet: boolean): FateBucket {
+export function fateBucket(fate: Fate): FateBucket {
   if (fate.glyph === "⚠") return "conflict";
   if (fate.stageable && fate.glyph === "↓") return "apply";
   if (fate.stageable && fate.glyph === "↑") return "capture";
-  if (nothingYet) return "none";
+  if (fate.nothingYet) return "none";
   return "ok";
 }
 
