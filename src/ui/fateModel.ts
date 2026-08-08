@@ -97,6 +97,17 @@ function settingsVerb(i: FateInput, capturedTurnsOn: boolean): string | null {
   return settingsPart;
 }
 
+// C-#29: cause-voice copy — nothing has ever been saved, on either side.
+export const NOTHING_YET_SENTENCE = "No settings yet";
+
+// C-#28: a fate can never carry a direction with an empty verb set — the direction becomes
+// unrepresentable and degrades to the nothing-yet presentation instead (bare glyph, no
+// sentence, yet still "stageable"). Chips are unaffected — they describe facts about the row
+// (e.g. `stays off`) independent of whether this run actually has anything to do.
+function nothingYetFate(chips: string[]): Fate {
+  return { glyph: "—", sentence: NOTHING_YET_SENTENCE, chips, stageable: false, turnsOn: false };
+}
+
 export function rowFate(i: FateInput): Fate {
   const chips = buildChips(i);
 
@@ -107,7 +118,7 @@ export function rowFate(i: FateInput): Fate {
   if (i.direction === null) {
     // C-#24: a rule-excluded item never masquerades as "In sync" — only when the family has no
     // directional/conflict member of its own (checked above) does the exclusion get to speak.
-    const sentence = i.excludedHere ? "Not synced on this device" : i.nothingYet ? "Nothing to sync yet" : "In sync";
+    const sentence = i.excludedHere ? "Not synced on this device" : i.nothingYet ? NOTHING_YET_SENTENCE : "In sync";
     return { glyph: "—", sentence, chips, stageable: false, turnsOn: false };
   }
 
@@ -116,7 +127,8 @@ export function rowFate(i: FateInput): Fate {
   if (i.direction === "capture") {
     const capturedTurnsOn = i.carrierSynced && i.storeListOn === false && i.locallyOn;
     const verb = settingsVerb(i, capturedTurnsOn);
-    const sentence = capitalize(verb ?? "");
+    if (verb === null) return nothingYetFate(chips);
+    const sentence = capitalize(verb);
     return { glyph: "↑", sentence, chips, stageable, turnsOn: false };
   }
 
@@ -127,6 +139,7 @@ export function rowFate(i: FateInput): Fate {
   if (turnsOn) segments.push("turns on");
   const verb = settingsVerb(i, false);
   if (verb !== null) segments.push(verb);
+  if (segments.length === 0) return nothingYetFate(chips);
   const sentence = capitalize(segments.join(" · "));
   return { glyph: "↓", sentence, chips, stageable, turnsOn };
 }

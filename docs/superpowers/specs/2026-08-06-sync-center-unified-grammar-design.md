@@ -90,7 +90,7 @@ hidden checkbox.
 | capture: folder | `↑ Captures N files` |
 | both changed | `⚠ Changed on both sides` |
 | identical | `— In sync` |
-| no store data & no local settings | `— Nothing to sync yet` |
+| no store data & no local settings (also: a derived direction whose verb set is empty — degrades here, C-#28) | `— No settings yet` |
 
 Verbs join with ` · `; first letter capitalized. `Runs on` exceptions re-derive the
 sentence (e.g. `Never on here` removes `turns on`, adds the rule chip). When the carrier is

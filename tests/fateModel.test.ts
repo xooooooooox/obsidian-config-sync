@@ -62,8 +62,60 @@ describe("rowFate — spec §3 verb table", () => {
   });
   it("in sync / nothing yet", () => {
     expect(rowFate({ ...base, direction: null }).sentence).toBe("In sync");
-    expect(rowFate({ ...base, direction: null, nothingYet: true }).sentence).toBe("Nothing to sync yet");
+    expect(rowFate({ ...base, direction: null, nothingYet: true }).sentence).toBe("No settings yet");
     expect(rowFate({ ...base, direction: null }).stageable).toBe(false);
+  });
+});
+
+// C-#28: a derived fate may never carry a direction with an empty verb set — it degrades to the
+// nothing-yet presentation instead of rendering a bare glyph with no sentence.
+describe("rowFate — empty-verb degradation (C-#28)", () => {
+  it("apply, empty verb set (the live 5-row scenario: installed, stays off, no settings, no update) degrades to nothing-yet", () => {
+    const f = rowFate({ ...base, hasSettingsPayload: false, storeListOn: false });
+    expect(f.glyph).toBe("—");
+    expect(f.sentence).toBe("No settings yet");
+    expect(f.stageable).toBe(false);
+    expect(f.turnsOn).toBe(false);
+  });
+  it("apply, empty verb set still carries its chips unaffected (stays off)", () => {
+    const f = rowFate({ ...base, hasSettingsPayload: false, storeListOn: false });
+    expect(f.chips).toContain("stays off");
+  });
+  it("capture, empty verb set (no settings payload, no folder files, no carrier turn-on) degrades to nothing-yet", () => {
+    const f = rowFate({ ...base, direction: "capture", hasSettingsPayload: false, storeListOn: null });
+    expect(f.glyph).toBe("—");
+    expect(f.sentence).toBe("No settings yet");
+    expect(f.stageable).toBe(false);
+    expect(f.turnsOn).toBe(false);
+  });
+
+  // Guard: the degradation fires ONLY on a genuinely empty verb set — every path that already
+  // produces a non-empty sentence stays byte-identical (existing fate tests above are the fence;
+  // these pin the same guarantee explicitly against this rule).
+  it("never fires on appearance special (verb always non-null)", () => {
+    const f = rowFate({ ...base, hasSettingsPayload: false, special: "appearance" });
+    expect(f.sentence).toBe("Applies theme & snippets — live");
+    expect(f.stageable).toBe(true);
+  });
+  it("never fires on a folder row with a file count (verb always non-null)", () => {
+    const f = rowFate({ ...base, hasSettingsPayload: false, special: "folder", folderFileCount: 2 });
+    expect(f.sentence).toBe("Applies 2 files");
+    expect(f.stageable).toBe(true);
+  });
+  it("never fires when turning on is the only verb", () => {
+    const f = rowFate({ ...base, hasSettingsPayload: false, storeListOn: true });
+    expect(f.sentence).toBe("Turns on");
+    expect(f.stageable).toBe(true);
+  });
+  it("never fires on a settings-only apply", () => {
+    const f = rowFate({ ...base });
+    expect(f.sentence).toBe("Applies settings");
+    expect(f.stageable).toBe(true);
+  });
+  it("never fires on an install chain", () => {
+    const f = rowFate({ ...base, installed: false, storeListOn: true });
+    expect(f.sentence).toBe("Installs · turns on · applies settings");
+    expect(f.stageable).toBe(true);
   });
 });
 
@@ -94,7 +146,7 @@ describe("rowFate — excludedHere (C-#24)", () => {
   });
   it("excludedHere false is byte-identical to the pre-existing sentences (in sync / nothing yet)", () => {
     expect(rowFate({ ...base, direction: null, excludedHere: false }).sentence).toBe("In sync");
-    expect(rowFate({ ...base, direction: null, excludedHere: false, nothingYet: true }).sentence).toBe("Nothing to sync yet");
+    expect(rowFate({ ...base, direction: null, excludedHere: false, nothingYet: true }).sentence).toBe("No settings yet");
     expect(rowFate({ ...base, direction: null, excludedHere: false }).chips).not.toContain("your rule");
   });
 });

@@ -58,7 +58,7 @@ import {
   Direction,
   effectiveDirection,
 } from "./panelModel";
-import { Fate, FateInput, rowFate } from "./fateModel";
+import { Fate, FateInput, NOTHING_YET_SENTENCE, rowFate } from "./fateModel";
 import { renderDiffPanel } from "./diffView";
 import { SWITCH_LIST_GROUPS, switchListSortedView } from "../core/switchList";
 import { jsonSortedView } from "../core/merge";
@@ -2244,6 +2244,9 @@ export class SyncCenterView extends ItemView {
   // specifics spec §4 calls out verbatim (install source, update versions, capture consequence).
   private stateClauseText(r: StatusRow, fate: Fate, input: FateInput): string {
     if (fate.glyph === "⚠") return "Changed on both sides.";
+    // C-#28/29: the nothing-yet presentation (direct or degraded from an empty-verb direction —
+    // fateModel.ts's rowFate) speaks in cause voice, not just its terse row sentence + period.
+    if (fate.sentence === NOTHING_YET_SENTENCE) return "No saved settings anywhere yet — neither this device nor the store has any.";
     if (input.direction === null) {
       // C-#24: the card's STATE clause spells out WHY, not just the row's terse sentence.
       if (input.excludedHere) return "Not synced on this device — your Settings sync rule excludes it.";
