@@ -75,7 +75,7 @@ import { applyUpdates, Ledger, parseLedger, pruneLedger } from "./core/ledger";
 import { bucketCounts, checkRemote, diffRemote, GroupStatus, remoteDirectionCounts, RemoteCheck, remoteLockAhead, remoteLockLabels, statusForGroups } from "./core/status";
 import { DeviceClass, GroupResult, MemberRule, Remote, RibbonButtons, RuleScope, StoreLock, SyncGroup } from "./core/types";
 import { EnablementCarrier, MemberDecision, memberDecisionsFromScopes, statusBarStatuses } from "./ui/panelModel";
-import { defaultSettingsFile, deriveMode } from "./ui/itemCard";
+import { defaultSettingsFile, deriveMode, fileRuleLegalForMode, pruneSettingsFile } from "./ui/itemCard";
 import { ConflictModal } from "./ui/ConflictModal";
 import { renderStatusBarItem, statusBarSegments } from "./ui/statusBar";
 import { SYNC_CENTER_VIEW_TYPE, SelfSyncInfo, SyncCenterHost, SyncCenterView } from "./ui/SyncCenterView";
@@ -711,6 +711,7 @@ export default class ConfigSyncPlugin extends Plugin {
       memberRuleFor: (carrier, elementId, locallyOn) => this.memberRuleFor(carrier, elementId, locallyOn),
       setMemberRule: (carrier, elementId, rule) => this.setMemberRule(carrier, elementId, rule),
       itemFileScope: (itemId) => this.itemFileScope(itemId),
+      itemFileScopeMenuLegal: (itemId) => this.itemFileScopeMenuLegal(itemId),
       setItemFileScope: (itemId, scope) => this.setItemFileScope(itemId, scope),
       setCustomGroupDevices: (name, devices) => this.setCustomGroupDevices(name, devices),
       openSettingsAt: (itemId) => this.openSettingsAt(itemId),
@@ -1342,13 +1343,27 @@ export default class ConfigSyncPlugin extends Plugin {
     return this.settings.items[itemId]?.settingsFile?.fileRule?.scope ?? "all";
   }
 
+  // C-#25: the SAME legality test setItemFileScope's guard throws on below — the Sync Center row
+  // calls this to decide whether to offer the menu at all, so "offered" and "accepted" can never
+  // disagree.
+  private itemFileScopeMenuLegal(itemId: string): boolean {
+    const sf = this.settings.items[itemId]?.settingsFile ?? defaultSettingsFile();
+    return fileRuleLegalForMode(deriveMode(sf));
+  }
+
   async setItemFileScope(itemId: string, scope: Exclude<RuleScope, "local">): Promise<void> {
     const cfg = this.settings.items[itemId] ?? emptyItemConfig();
     const sf = cfg.settingsFile ?? defaultSettingsFile();
-    const nextSf: ItemSettingsFile = { ...sf, fileRule: { ...(sf.fileRule ?? { scope: "all", encrypted: false }), scope } };
-    const mode = deriveMode(nextSf);
-    const finalSf: ItemSettingsFile = mode === "fields" ? { ...nextSf, mode, fileRule: undefined } : { ...nextSf, mode };
-    this.settings.items = { ...this.settings.items, [itemId]: { ...cfg, settingsFile: finalSf } };
+    const mode = deriveMode(sf);
+    // C-#25 root cause: writing a fileRule on a fields-mode item used to resolve mode:"fields"
+    // below and silently strip the very fileRule this call just wrote — the item's card now never
+    // offers this menu (see itemFileScopeMenuLegal above), so reaching here with an illegal mode
+    // means a caller ignored that and must be told loudly, not have its write vanish.
+    if (!fileRuleLegalForMode(mode)) {
+      throw new Error(`setItemFileScope: "${itemId}" is in "${mode}" mode — a whole-file scope write is illegal there (manifest.ts's fileRule validator only allows plain-mode file groups)`);
+    }
+    const nextSf: ItemSettingsFile = { ...sf, mode, fileRule: { ...(sf.fileRule ?? { scope: "all", encrypted: false }), scope } };
+    this.settings.items = { ...this.settings.items, [itemId]: { ...cfg, settingsFile: pruneSettingsFile(nextSf) } };
     await this.saveSettings();
   }
 

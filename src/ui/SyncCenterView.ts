@@ -67,7 +67,7 @@ import { RunRecord, RunKind, RunStatus, worstStatus, formatRunTime, stopSyncDesc
 import { ACTION_ICON, ACTION_COLOR_CLASS, renderActionIcon, renderActionCount, type SyncAction } from "./actionIcons";
 // SCOPE_LABELS aliased: this file already declares its own SCOPE_LABELS (sidebar category
 // labels, see below) for an unrelated domain.
-import { FILE_SCOPE_OPTIONS, RUNS_ON_ICONS, SCOPE_ICONS, SCOPE_LABELS as RULE_SCOPE_LABELS, scopeCycleTooltip } from "./itemCard";
+import { FILE_SCOPE_MENU_UNAVAILABLE_TEXT, FILE_SCOPE_OPTIONS, RUNS_ON_ICONS, SCOPE_ICONS, SCOPE_LABELS as RULE_SCOPE_LABELS, scopeCycleTooltip } from "./itemCard";
 import {
   QualifierAutocomplete,
   parseQuery,
@@ -255,6 +255,10 @@ export interface SyncCenterHost {
   // (ItemConfig.settingsFile.fileRule.scope — whole-file device scope; "local" is structurally
   // excluded there, same as the existing control).
   itemFileScope(itemId: string): Exclude<RuleScope, "local">;
+  // C-#25: whether the item's current mode makes a whole-file fileRule write legal (mirrors
+  // manifest.ts's validator via itemCard.ts's fileRuleLegalForMode) — false for a fields-mode
+  // item, whose Settings-sync row must not offer a menu that setItemFileScope would then throw on.
+  itemFileScopeMenuLegal(itemId: string): boolean;
   setItemFileScope(itemId: string, scope: Exclude<RuleScope, "local">): Promise<void>;
   // The Settings-sync menu for a custom (folder) group: the same field the Advanced tab's
   // "Devices" dropdown writes (SyncGroup.devices, settings.customGroups) — folders have no
@@ -1826,25 +1830,29 @@ export class SyncCenterView extends ItemView {
     const checkable = visible.filter((r) => this.fateFor(r).stageable);
     const staged = checkable.filter((r) => this.selected.has(r.group.name)).length;
     if (staged > 0) head.createSpan({ cls: "config-sync-section-hint", text: `${staged} selected` });
-    const box = head.createEl("input", { type: "checkbox", attr: { "aria-label": `Select all in ${TYPE_SECTION_TITLES[ts]}` } });
-    box.indeterminate = staged > 0 && staged < checkable.length;
-    box.checked = checkable.length > 0 && staged === checkable.length;
-    box.disabled = checkable.length === 0;
-    box.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const turnOn = checkable.some((r) => !this.selected.has(r.group.name));
-      for (const r of checkable) {
-        const name = r.group.name;
-        if (turnOn) {
-          this.selected.add(name);
-          if (this.sectionOf(name) !== "main" && !this.policy.has(name)) this.policy.set(name, this.defaultPolicyFor(r));
-        } else {
-          this.selected.delete(name);
-          this.policy.delete(name);
+    // C-#27: nothing to stage in this section (e.g. pre-adopt Community, only the self row) means
+    // no select-all affordance at all, not a disabled one — a control with nothing it could ever
+    // do is not a state, it's dead weight.
+    if (checkable.length > 0) {
+      const box = head.createEl("input", { type: "checkbox", attr: { "aria-label": `Select all in ${TYPE_SECTION_TITLES[ts]}` } });
+      box.indeterminate = staged > 0 && staged < checkable.length;
+      box.checked = staged === checkable.length;
+      box.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const turnOn = checkable.some((r) => !this.selected.has(r.group.name));
+        for (const r of checkable) {
+          const name = r.group.name;
+          if (turnOn) {
+            this.selected.add(name);
+            if (this.sectionOf(name) !== "main" && !this.policy.has(name)) this.policy.set(name, this.defaultPolicyFor(r));
+          } else {
+            this.selected.delete(name);
+            this.policy.delete(name);
+          }
         }
-      }
-      this.render(this.renderGen);
-    });
+        this.render(this.renderGen);
+      });
+    }
     // Ledger C-#22: collapse/expand flips the DOM in place — `is-open` class, chevron glyph, and
     // the card itself (built just-in-time / torn down on close) — never a full this.render().
     // Mirrors the C-#9 row-expand precedent (fateEl.hidden flip, no render). `visible`/`showSelf`
@@ -2484,6 +2492,14 @@ export class SyncCenterView extends ItemView {
       return;
     }
     const itemId = this.itemIdFor(name);
+    // C-#25: a fields-mode item has no legal whole-file fileRule to write (setItemFileScope
+    // throws on it) — the row must not offer a menu whose choice would just be discarded.
+    if (!this.host.itemFileScopeMenuLegal(itemId)) {
+      this.renderCardKeyRow(detail, "Settings sync", (value) => {
+        value.createDiv({ cls: "config-sync-expand-note", text: FILE_SCOPE_MENU_UNAVAILABLE_TEXT });
+      });
+      return;
+    }
     const scope = this.host.itemFileScope(itemId);
     this.renderCardIconMenuRow(detail, "Settings sync", SCOPE_ICONS[scope], scope !== "all", scopeCycleTooltip(scope), () =>
       buildMenu(scope, (v) => this.host.setItemFileScope(itemId, v))

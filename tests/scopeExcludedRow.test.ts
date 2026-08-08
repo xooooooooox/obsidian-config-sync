@@ -120,3 +120,73 @@ describe("SyncCenterHost.computeStatuses — a device-scope-excluded item still 
     expect(groupExcludedHere(hotkeysGroup!, "desktop")).toBe(true);
   });
 });
+
+// C-#25/C-#26 (docs/superpowers/specs/2026-08-09-c-livetest-batch12-fields-honesty.md): the live
+// repro was setItemFileScope resolving without error on a fields-mode item while persisting
+// nothing (deriveMode stripped the just-written fileRule at the old main.ts:1350) — the item's
+// card no longer offers that menu at all (SyncCenterView's renderSettingsSyncRow), but the API
+// itself must also refuse the write outright rather than silently no-op for any other caller.
+describe("setItemFileScope — fields-mode guard (C-#25) + write-back pruning (C-#26)", () => {
+  type Harness = {
+    app: unknown;
+    settings: { items: Record<string, { settingsFile?: { fileRule?: { scope: string; encrypted: boolean } } }> };
+    loadData: () => Promise<unknown>;
+    saveData: (d: unknown) => Promise<void>;
+    loadSettings: () => Promise<void>;
+    recompile: () => Promise<void>;
+    setItemFileScope: (itemId: string, scope: Exclude<RuleScope, "local">) => Promise<void>;
+  };
+
+  function harness(items: Record<string, unknown>): Harness {
+    const plugin = new ConfigSyncPlugin({} as never, {} as never);
+    const instance = plugin as unknown as Harness;
+    instance.app = fakeApp();
+    instance.loadData = async () => baseData(items);
+    instance.saveData = async () => {};
+    return instance;
+  }
+
+  it("throws (never silently no-ops) writing to a fields-mode item", async () => {
+    const instance = harness({ hotkeys: { enabled: true, settingsFile: { mode: "fields", rules: { a: { scope: "all", encrypted: false } }, perItem: {} }, companions: [] } });
+    await instance.loadSettings();
+    await instance.recompile();
+
+    await expect(instance.setItemFileScope("hotkeys", "desktop")).rejects.toThrow();
+    // the field-rule content is untouched — the rejected write left no trace
+    expect(instance.settings.items["hotkeys"]?.settingsFile?.fileRule).toBeUndefined();
+  });
+
+  it("plain-mode item: the write succeeds", async () => {
+    const instance = harness({ hotkeys: { enabled: true, settingsFile: { mode: "plain", rules: {}, perItem: {} }, companions: [] } });
+    await instance.loadSettings();
+    await instance.recompile();
+
+    await instance.setItemFileScope("hotkeys", "desktop");
+
+    expect(instance.settings.items["hotkeys"]?.settingsFile?.fileRule).toEqual({ scope: "desktop", encrypted: false });
+  });
+
+  it("desktop -> all round-trip prunes the fileRule and the settingsFile entirely (byte-clean)", async () => {
+    const instance = harness({ hotkeys: { enabled: true, settingsFile: { mode: "plain", rules: {}, perItem: {} }, companions: [] } });
+    await instance.loadSettings();
+    await instance.recompile();
+
+    await instance.setItemFileScope("hotkeys", "desktop");
+    expect(instance.settings.items["hotkeys"]?.settingsFile?.fileRule).toEqual({ scope: "desktop", encrypted: false });
+
+    await instance.setItemFileScope("hotkeys", "all");
+    expect(instance.settings.items["hotkeys"]?.settingsFile).toBeUndefined();
+  });
+
+  it("an encrypted fileRule survives a scope write instead of being pruned", async () => {
+    const instance = harness({
+      hotkeys: { enabled: true, settingsFile: { mode: "plain", rules: {}, perItem: {}, fileRule: { scope: "desktop", encrypted: true } }, companions: [] },
+    });
+    await instance.loadSettings();
+    await instance.recompile();
+
+    await instance.setItemFileScope("hotkeys", "all");
+
+    expect(instance.settings.items["hotkeys"]?.settingsFile?.fileRule).toEqual({ scope: "all", encrypted: true });
+  });
+});
