@@ -58,7 +58,7 @@ import {
   Direction,
   effectiveDirection,
 } from "./panelModel";
-import { Fate, FateInput, NOTHING_YET_SENTENCE, rowFate } from "./fateModel";
+import { Fate, FateInput, NOTHING_YET_SENTENCE, rowFate, versionAheadClause } from "./fateModel";
 import { renderDiffPanel } from "./diffView";
 import { SWITCH_LIST_GROUPS, switchListSortedView } from "../core/switchList";
 import { jsonSortedView } from "../core/merge";
@@ -756,20 +756,20 @@ export class SyncCenterView extends ItemView {
   // batch5 task 2): `pres` is the FAMILY's rollup state (parent + companions) — it, not the row's
   // own presState, now drives direction/conflict/nothingYet/stageability, via the same
   // stageableRow/effectiveDirection chains a plain row always used (familyRollup's single-member
-  // guarantee makes a companion-less row byte-identical to before). `parentPres` stays the row's
-  // OWN state — `hasSettingsPayload` (the settings verb) is specifically about the PARENT's own
-  // settings file, never a companion's, which folderFileCount below covers separately (spec §2:
-  // "parent settings payload changed → settings verb; companion file changes → folder verb
-  // joins"). storeListOn/locallyOn/memberRule only exist for a carrier-synced plugin row — for
-  // every other row (obsidian/folder/self-excluded/carrier-unsynced) they stay at their "no
-  // enablement dimension" defaults, which `effectiveTurnsOn`/`buildChips` already treat as a
-  // no-op (see fateModel.ts). Called exactly once per row per render cycle, from deriveRow()
-  // (ledger C-#22), which already has the rollup computed — takes it as a parameter rather than
-  // recomputing it.
+  // guarantee makes a companion-less row byte-identical to before). `hasSettingsPayload` (the
+  // settings verb) reads the row's own RAW `r.status.state` (C-#37), not the version-ahead-
+  // relabeled presState — a raw-in-sync/drift-ahead row genuinely writes no settings file, only
+  // `versionAhead` below explains its capture; folderFileCount covers a companion's own file
+  // changes separately (spec §2: "parent settings payload changed → settings verb; companion file
+  // changes → folder verb joins"). storeListOn/locallyOn/memberRule only exist for a
+  // carrier-synced plugin row — for every other row (obsidian/folder/self-excluded/
+  // carrier-unsynced) they stay at their "no enablement dimension" defaults, which
+  // `effectiveTurnsOn`/`buildChips` already treat as a no-op (see fateModel.ts). Called exactly
+  // once per row per render cycle, from deriveRow() (ledger C-#22), which already has the rollup
+  // computed — takes it as a parameter rather than recomputing it.
   private computeFateInput(r: StatusRow, rollup: FamilyRollup): FateInput {
     const name = r.group.name;
     const a = this.availOf(name);
-    const parentPres = this.presState(r);
     const deviceClass: "desktop" | "mobile" = Platform.isMobile ? "mobile" : "desktop";
     const cat = this.scopeOf(name);
     const isPlugin = cat === "core" || cat === "community" || cat === "beta";
@@ -796,6 +796,13 @@ export class SyncCenterView extends ItemView {
       nothingYet: pres === "no-settings",
       installed: a.kind !== "not-installed",
       hasUpdate: a.anchor === "plugin" && a.drift === "behind",
+      // C-#37: driftFor (availability.ts) only ever returns "ahead" once both versions are
+      // non-null — mirrored via the && chain below (not a defensive fallback) rather than
+      // asserted, since TS can't infer that guarantee from `a.drift` alone.
+      versionAhead:
+        a.anchor === "plugin" && a.drift === "ahead" && a.localVersion !== null && a.storeVersion !== null
+          ? { installed: a.localVersion, stored: a.storeVersion }
+          : null,
       carrierSynced,
       storeListOn,
       locallyOn,
@@ -810,7 +817,7 @@ export class SyncCenterView extends ItemView {
       // otherwise neutral (direction null) — a directional/conflict member always wins, so a
       // still-syncing companion is never masked.
       excludedHere: groupExcludedHere(r.group, deviceClass),
-      hasSettingsPayload: parentPres !== "no-settings" && parentPres !== "in-sync" && parentPres !== "locked",
+      hasSettingsPayload: r.status.state !== "no-settings" && r.status.state !== "in-sync" && r.status.state !== "locked",
       // "folder": a real dir-type group — its own files ARE the settings payload, so
       // fateModel's join must not also compose a separate "applies settings" (special:"folder"
       // REPLACE case). A dir-type row never owns companions itself (compileCompanions doesn't
@@ -2269,7 +2276,11 @@ export class SyncCenterView extends ItemView {
       text = text.replace(/^Updates/, `Updates ${a.localVersion ?? "current"} → ${a.storeVersion ?? "latest"}`);
     }
     if (input.direction === "capture") {
-      if (text === "Captures settings") text = "Shares your settings with your other devices";
+      // C-#37: version-ahead branches off the fact (input.versionAhead), never the new joined
+      // sentence strings — every other capture row falls through to the existing two clauses
+      // untouched.
+      if (input.versionAhead !== null) text = versionAheadClause(input, input.versionAhead);
+      else if (text === "Captures settings") text = "Shares your settings with your other devices";
       else if (text === "Turned on here — shares it") text = "Turned on here — your other devices will turn it on the next time they apply";
     }
     return `${text}.`;

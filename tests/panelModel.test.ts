@@ -126,7 +126,7 @@ describe("fateBucket — spec §1 truth table (ledger C-#23)", () => {
       direction: null, conflict: false, nothingYet: false, installed: true,
       hasUpdate: false, carrierSynced: false, storeListOn: null, locallyOn: false,
       memberRule: "all", deviceClass: "desktop", desktopOnly: false, excludedHere: true,
-      hasSettingsPayload: true, special: null, folderFileCount: null, encrypted: false,
+      hasSettingsPayload: true, versionAhead: null, special: null, folderFileCount: null, encrypted: false,
     };
     const excludedFate = rowFate(excludedInput);
     expect(excludedFate.sentence).toBe("Not synced on this device");
@@ -143,7 +143,7 @@ describe("fateBucket — spec §1 truth table (ledger C-#23)", () => {
       direction: "apply", conflict: false, nothingYet: false, installed: true,
       hasUpdate: false, carrierSynced: true, storeListOn: false, locallyOn: false,
       memberRule: "all", deviceClass: "desktop", desktopOnly: false, excludedHere: false,
-      hasSettingsPayload: false, special: null, folderFileCount: null, encrypted: false,
+      hasSettingsPayload: false, versionAhead: null, special: null, folderFileCount: null, encrypted: false,
     };
     const degradedFate = rowFate(degradedInput);
     expect(degradedFate.sentence).toBe("No settings yet");
@@ -1088,7 +1088,7 @@ describe("effectiveFate — single per-row derivation shared by staging/footer/d
     direction: "apply", conflict: false, nothingYet: false, installed: true,
     hasUpdate: false, carrierSynced: true, storeListOn: null, locallyOn: false,
     memberRule: "all", deviceClass: "desktop", desktopOnly: false, excludedHere: false,
-    hasSettingsPayload: true, special: null, folderFileCount: null, encrypted: false,
+    hasSettingsPayload: true, versionAhead: null, special: null, folderFileCount: null, encrypted: false,
   };
   const plainFate: Fate = { glyph: "↓", sentence: "Applies settings", chips: [], stageable: true, turnsOn: false, nothingYet: false };
   const conflictFate: Fate = { glyph: "⚠", sentence: "Changed on both sides", chips: [], stageable: false, turnsOn: false, nothingYet: false };

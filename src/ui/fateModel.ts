@@ -18,6 +18,10 @@ export interface FateInput {
                                           // only read when direction is null (a directional/
                                           // conflict family member always wins)
   hasSettingsPayload: boolean;           // this run writes settings files
+  versionAhead: { installed: string; stored: string } | null; // C-#37: installed plugin version
+                                          // is newer than the store's recorded version (drift
+                                          // "ahead") — capture's real work here is recording the
+                                          // newer version, independent of hasSettingsPayload
   special: "appearance" | "folder" | null; // "folder": a dir-type row — its own files ARE the
                                             // payload, folderFileCount REPLACES the settings verb
                                             // (never joins); non-null AND non-folder rows with a
@@ -71,6 +75,12 @@ function capitalize(s: string): string {
   return s.length === 0 ? s : s.charAt(0).toUpperCase() + s.slice(1);
 }
 
+// C-#37: shared between rowFate's capture branch (the row sentence) and versionAheadClause below
+// (the card clause) so the two can never disagree about which capture case a row is in.
+function capturedTurnsOn(i: FateInput): boolean {
+  return i.carrierSynced && i.storeListOn === false && i.locallyOn;
+}
+
 // Family file-verb join (c-livetest batch5 task 1): a non-folder, non-appearance row whose
 // companion(s) contribute files gets the folder verb APPENDED after its own settings verb (or
 // alone when it has none) — distinct from a real folder row, which REPLACES the settings verb
@@ -79,9 +89,9 @@ function joinFolderVerb(settingsPart: string | null, folderVerb: string): string
   return settingsPart === null ? folderVerb : `${settingsPart} · ${folderVerb}`;
 }
 
-function settingsVerb(i: FateInput, capturedTurnsOn: boolean): string | null {
+function settingsVerb(i: FateInput, turnedOn: boolean): string | null {
   if (i.direction === "capture") {
-    if (capturedTurnsOn) return "turned on here — shares it";
+    if (turnedOn) return "turned on here — shares it";
     if (i.special === "appearance") return "captures theme & snippets";
     // A folder row with no changes attached (e.g. "not-captured" — groupStatus never attaches
     // `changes` there) has folderFileCount:null, NOT a file count of zero: it must fall through
@@ -137,12 +147,16 @@ export function rowFate(i: FateInput): Fate {
   const stageable = true;
 
   if (i.direction === "capture") {
-    const capturedTurnsOn = i.carrierSynced && i.storeListOn === false && i.locallyOn;
-    const verb = settingsVerb(i, capturedTurnsOn);
+    const turnedOn = capturedTurnsOn(i);
+    const verb = settingsVerb(i, turnedOn);
+    // C-#37: version-ahead's own segment joins after whatever verb chain above produced (·
+    // grammar), never replaces it — a pure version-ahead row (verb null) renders it alone.
+    const versionVerb = i.versionAhead !== null ? `records version ${i.versionAhead.installed}` : null;
+    const joined = versionVerb === null ? verb : verb === null ? versionVerb : `${verb} · ${versionVerb}`;
     // C-#28 controller ruling: an empty capture verb set is real, invisible-count work (a
     // `not-captured` companion — see nothingYetFate's comment) — never degrades. Generic,
     // count-free copy: specific counts already render through settingsVerb above.
-    const sentence = capitalize(verb ?? "captures files");
+    const sentence = capitalize(joined ?? "captures files");
     return { glyph: "↑", sentence, chips, stageable, turnsOn: false, nothingYet: false };
   }
 
@@ -156,4 +170,18 @@ export function rowFate(i: FateInput): Fate {
   if (segments.length === 0) return nothingYetFate(chips);
   const sentence = capitalize(segments.join(" · "));
   return { glyph: "↓", sentence, chips, stageable, turnsOn, nothingYet: false };
+}
+
+// C-#37: the three version-ahead on-capture card clauses (spec §3, copy final) — keyed off
+// `input.versionAhead` (caller narrows it non-null before calling) plus the same flags
+// settingsVerb's capture branch reads, never by matching the row sentence strings, so every
+// non-version-ahead row's clause stays byte-identical.
+export function versionAheadClause(input: FateInput, versionAhead: { installed: string; stored: string }): string {
+  if (capturedTurnsOn(input)) {
+    return `Turned on here — your other devices will turn it on the next time they apply. Also records the newer ${versionAhead.installed} so they can update`;
+  }
+  if (input.hasSettingsPayload) {
+    return `Shares your settings with your other devices — and records the newer ${versionAhead.installed} so they can update`;
+  }
+  return `Installed ${versionAhead.installed} is newer than the store's ${versionAhead.stored} — capture records it so your other devices can update`;
 }

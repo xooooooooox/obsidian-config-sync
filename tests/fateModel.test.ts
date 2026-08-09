@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { rowFate, FateInput } from "../src/ui/fateModel";
+import { rowFate, versionAheadClause, FateInput } from "../src/ui/fateModel";
 
 const base: FateInput = {
   direction: "apply", conflict: false, nothingYet: false, installed: true,
   hasUpdate: false, carrierSynced: true, storeListOn: null, locallyOn: false,
   memberRule: "all", deviceClass: "desktop", desktopOnly: false, excludedHere: false,
-  hasSettingsPayload: true, special: null, folderFileCount: null, encrypted: false,
+  hasSettingsPayload: true, versionAhead: null, special: null, folderFileCount: null, encrypted: false,
 };
 
 describe("rowFate — spec §3 verb table", () => {
@@ -237,5 +237,59 @@ describe("rowFate — family file-verb join (c-livetest batch5)", () => {
   it("folder row with folderFileCount:null falls through to the generic settings verb (apply)", () => {
     const f = rowFate({ ...base, special: "folder", folderFileCount: null, hasSettingsPayload: true });
     expect(f.sentence).toBe("Applies settings");
+  });
+});
+
+// C-#37: files in-sync both sides but installed plugin version newer than the store's — a
+// raw-in-sync row that presentedState relabels to-capture, whose only real work is recording the
+// newer version. versionAhead joins after whatever verb chain the row already has (spec §2).
+describe("rowFate — version-ahead capture (C-#37)", () => {
+  const ahead = { installed: "2.2.3", stored: "2.2.2" };
+
+  it("pure version-ahead: no settings payload, no other verb — records version alone", () => {
+    const f = rowFate({ ...base, direction: "capture", hasSettingsPayload: false, versionAhead: ahead });
+    expect(f.glyph).toBe("↑");
+    expect(f.sentence).toBe("Records version 2.2.3");
+    expect(f.stageable).toBe(true);
+    expect(f.nothingYet).toBe(false);
+  });
+  it("settings + version: joins after the settings verb", () => {
+    const f = rowFate({ ...base, direction: "capture", hasSettingsPayload: true, versionAhead: { installed: "2.1.0", stored: "2.0.9" } });
+    expect(f.sentence).toBe("Captures settings · records version 2.1.0");
+  });
+  it("turned-on + version: joins after the turned-on verb", () => {
+    const f = rowFate({ ...base, direction: "capture", hasSettingsPayload: false, storeListOn: false, locallyOn: true, versionAhead: ahead });
+    expect(f.sentence).toBe("Turned on here — shares it · records version 2.2.3");
+  });
+  it("versionAhead: null keeps every existing capture sentence byte-identical (fence)", () => {
+    expect(rowFate({ ...base, direction: "capture" }).sentence).toBe("Captures settings");
+    expect(rowFate({ ...base, direction: "capture", hasSettingsPayload: false, storeListOn: false, locallyOn: true }).sentence).toBe("Turned on here — shares it");
+  });
+});
+
+// C-#37: the card's on-capture clause — same three cases as the sentence above, asserted through
+// the exported pure helper stateClauseText delegates to (spec §4).
+describe("versionAheadClause — card on-capture clauses (C-#37, spec §3)", () => {
+  const ahead = { installed: "2.2.3", stored: "2.2.2" };
+
+  it("pure version-ahead", () => {
+    const input: FateInput = { ...base, direction: "capture", hasSettingsPayload: false, versionAhead: ahead };
+    expect(versionAheadClause(input, ahead)).toBe(
+      "Installed 2.2.3 is newer than the store's 2.2.2 — capture records it so your other devices can update",
+    );
+  });
+  it("settings + version", () => {
+    const input: FateInput = { ...base, direction: "capture", hasSettingsPayload: true, versionAhead: ahead };
+    expect(versionAheadClause(input, ahead)).toBe(
+      "Shares your settings with your other devices — and records the newer 2.2.3 so they can update",
+    );
+  });
+  it("turned-on + version", () => {
+    const input: FateInput = {
+      ...base, direction: "capture", hasSettingsPayload: false, storeListOn: false, locallyOn: true, versionAhead: ahead,
+    };
+    expect(versionAheadClause(input, ahead)).toBe(
+      "Turned on here — your other devices will turn it on the next time they apply. Also records the newer 2.2.3 so they can update",
+    );
   });
 });
