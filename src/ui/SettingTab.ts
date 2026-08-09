@@ -861,7 +861,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   }
 
   // Zone ② path row = the grid's first row (spec 2026-07-26-card-visual-refresh-design.md §2/§3):
-  // path | scope ▾ | 🔒 | ✎. Locked (dim, disabled) whenever the card has any per-key rule —
+  // path | scope ▾ | lock icon | ✎. Locked (dim, disabled) whenever the card has any per-key rule —
   // per-key state owns scope/encrypt then, not the whole-file row (spec §3.1). fileRule read/write
   // below is moved VERBATIM from the old Plain-mode row (same normalization, only the shape moved).
   private renderSettingsFilePathRow(row: HTMLElement, errorEl: HTMLElement, def: ItemDef, cfg: ItemConfig, wrap: HTMLElement): void {
@@ -1279,7 +1279,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         pre.createSpan({ text: m[1] });
         const kspan = pre.createSpan({ cls: `config-sync-json-key ${jsonKeyClass(kc)}`, text: `"${key}"` });
         // An encrypted rule marks its key with the same lucide lock the rest of the panel uses
-        // (round-7 spec §2 — the old " 🔒" emoji suffix is gone).
+        // (round-7 spec §2 — the old emoji suffix is gone).
         if (kc.state.encrypted) setIcon(kspan.createSpan({ cls: "config-sync-json-lock" }), "lock");
         if (kc.state.scope === "none") {
           kspan.addEventListener("click", () => {

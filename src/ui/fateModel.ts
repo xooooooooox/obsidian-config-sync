@@ -67,7 +67,7 @@ function buildChips(i: FateInput): string[] {
   }
   if (i.memberRule === "never-here") chips.push("off here — your rule");
   else if (i.memberRule === "always-here") chips.push("on here — your rule");
-  if (i.encrypted) chips.push("🔒 encrypted");
+  if (i.encrypted) chips.push("encrypted");
   return chips;
 }
 

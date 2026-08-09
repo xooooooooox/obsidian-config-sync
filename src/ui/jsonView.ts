@@ -2,7 +2,7 @@ import { FieldRule, PerItemScopes, RuleScope } from "../core/types";
 import { keyMatchesAny } from "../core/sanitize";
 
 // Orthogonal classification (D1/D10): scope drives color, encrypted is an independent flag that
-// adds a 🔒 suffix on top of whatever scope color applies. "none" = no rule for this key.
+// adds a lock icon suffix on top of whatever scope color applies. "none" = no rule for this key.
 export interface KeyState { scope: RuleScope | "none"; encrypted: boolean }
 export interface KeyClass { key: string; state: KeyState; detected: boolean }
 

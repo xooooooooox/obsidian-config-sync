@@ -608,6 +608,8 @@ body.is-mobile.config-sync-mobile-statusbar .status-bar {
 /* Unified row (spec 2026-08-06-sync-center-unified-grammar-design.md §3): state/rule chips and
    the fate sentence that replace the old policy pills and state-icon column. */
 .config-sync-fatechip { flex: none; font-size: var(--font-ui-smaller); line-height: 1.6; border-radius: 999px; padding: 1px 8px; background: var(--background-modifier-border); color: var(--text-muted); white-space: nowrap; }
+.config-sync-fatechip.is-encrypted { display: inline-flex; align-items: center; gap: 4px; }
+.config-sync-fatechip-ic svg { width: 11px; height: 11px; display: block; }
 .config-sync-fate-text { flex: none; color: var(--text-muted); font-size: var(--font-ui-smaller); white-space: nowrap; }
 .config-sync-fate-glyph { margin-right: 2px; }
 .config-sync-hub-row.is-conflict .config-sync-fate-text { color: var(--color-orange); }

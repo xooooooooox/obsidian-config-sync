@@ -683,7 +683,7 @@ export class SyncCenterView extends ItemView {
     const input = this.computeFateInput(r, rollup);
     const locked = this.presState(r) === "locked";
     const fate: Fate = locked
-      ? { glyph: "—", sentence: "Encrypted — set the passphrase in settings to compare", chips: ["🔒 encrypted"], stageable: false, turnsOn: false, nothingYet: false }
+      ? { glyph: "—", sentence: "Encrypted — set the passphrase in settings to compare", chips: ["encrypted"], stageable: false, turnsOn: false, nothingYet: false }
       : rowFate(input);
     const bucket: RowBucket = locked ? legacyLockedFamilyBucket(rollup.state) : fateBucket(fate);
     const derived: RowDerivation = { rollup, input, fate, bucket };
@@ -2089,7 +2089,12 @@ export class SyncCenterView extends ItemView {
     });
     const chev = row.createSpan({ cls: "config-sync-row-chevron", text: expanded ? "▾" : "▸" });
     this.renderRuleName(row, group.name, group.label);
-    for (const chip of fate.chips) row.createSpan({ cls: "config-sync-fatechip", text: chip });
+    for (const chip of fate.chips) {
+      const isEncrypted = chip === "encrypted";
+      const chipEl = row.createSpan({ cls: `config-sync-fatechip${isEncrypted ? " is-encrypted" : ""}` });
+      if (isEncrypted) setIcon(chipEl.createSpan({ cls: "config-sync-fatechip-ic" }), "lock");
+      chipEl.appendText(chip);
+    }
     row.createDiv({ cls: "config-sync-rule-spacer" });
     // Ledger C-#9: the fate sentence/glyph repeats the card's own "On apply"/"On capture" clause
     // once expanded, so it hides while the drawer is open (checkbox and chips stay); the click
