@@ -169,25 +169,53 @@ function buildNote(encrypted: string[], stripped: string[], classOnly: string | 
   return parts.length > 0 ? parts.join(" · ") : null;
 }
 
+// A field envelope is a fresh salt/IV every encryption (crypto.ts), so byte-comparing envelopes
+// never tells "unchanged" — fieldUnchanged's mac-based check does. Reusing the OLD envelope
+// byte-for-byte when the plaintext hasn't moved is what keeps the store (and the capture-preview
+// diff, which calls captureTransform the same way — see main.ts's diffPair) from showing every
+// encrypted field as replaced on every capture (C-#36).
+async function reuseOrEncryptField(passphrase: string, plaintext: unknown, storeFieldValue: unknown): Promise<string> {
+  const serialized = JSON.stringify(plaintext);
+  if (isFieldEnvelope(storeFieldValue) && (await fieldUnchanged(passphrase, storeFieldValue, serialized))) {
+    return storeFieldValue;
+  }
+  return encryptField(passphrase, serialized);
+}
+
+// Best-effort JSON parse for prior store content used only to look up old envelopes to reuse —
+// unparseable/missing content just means "nothing to reuse", never an error (capture must still
+// succeed and fresh-encrypt).
+function tryParseJson(content: string | null | undefined): unknown {
+  if (content === null || content === undefined) return undefined;
+  try {
+    return JSON.parse(content) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
 async function encryptFields(
   value: unknown,
   patterns: string[],
   passphrase: string,
-  matched: Set<string>
+  matched: Set<string>,
+  storeValue: unknown
 ): Promise<unknown> {
   if (Array.isArray(value)) {
+    const storeArr = Array.isArray(storeValue) ? storeValue : [];
     const out: unknown[] = [];
-    for (const v of value) out.push(await encryptFields(v, patterns, passphrase, matched));
+    for (let i = 0; i < value.length; i++) out.push(await encryptFields(value[i], patterns, passphrase, matched, storeArr[i]));
     return out;
   }
   if (isPlainObject(value)) {
+    const storeObj = isPlainObject(storeValue) ? storeValue : {};
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value)) {
       if (keyMatchesAny(k, patterns)) {
         matched.add(k);
-        out[k] = await encryptField(passphrase, JSON.stringify(v));
+        out[k] = await reuseOrEncryptField(passphrase, v, storeObj[k]);
       } else {
-        out[k] = await encryptFields(v, patterns, passphrase, matched);
+        out[k] = await encryptFields(v, patterns, passphrase, matched, storeObj[k]);
       }
     }
     return out;
@@ -243,12 +271,18 @@ export async function captureTransform(
   content: string,
   passphrase: string | null,
   deviceClass: "desktop" | "mobile",
-  // Prior store content — needed ONLY for perItem keys (§3, D3): unlike class-scoped fields
-  // (which land in a per-device __scopes__ sidecar and never need the other device's prior
-  // value), a per-item array is one shared list, so capturing it must preserve the other
-  // device's already-captured elements. Every other capture path ignores this parameter.
-  // Optional so existing callers (none of which route perItem groups yet) are unaffected.
-  storeContent?: string | null
+  // Prior store content — used for perItem keys (§3, D3: capturing a shared array must preserve
+  // the other device's already-captured elements) AND, since C-#36, to look up an encrypted
+  // FIELD's existing envelope so an unchanged plaintext reuses it byte-for-byte instead of
+  // re-encrypting with a fresh salt/IV (fieldUnchanged's mac is the deterministic "same
+  // plaintext" check — see reuseOrEncryptField). Optional so plain/whole-file-encrypted callers
+  // (which never need it) are unaffected.
+  storeContent?: string | null,
+  // Prior __scopes__ sidecar content for THIS device class — same C-#36 envelope-reuse lookup,
+  // but for class-scoped (desktop/mobile) + encrypted:true fields, whose store copy lives in the
+  // sidecar rather than the main store body. Optional; omitted callers just always re-encrypt
+  // these fields fresh (correct default — no prior sidecar to reuse from).
+  priorOwnScopeContent?: string | null
 ): Promise<{ content: string; note: string | null; ownScope: string | null }> {
   if (group.mode === undefined || group.mode === "plain") {
     if (group.fileRule?.encrypted === true) {
@@ -288,15 +322,21 @@ export async function captureTransform(
   strippedKeyNames(parsedBase, strip, stripped, new Set());
   const afterStrip = strip.length > 0 ? sanitizeJson(parsedBase, strip) : parsedBase;
   const matched = new Set<string>();
-  const afterEncrypt = allEncrypt.length > 0 ? await encryptFields(afterStrip, allEncrypt, pw, matched) : afterStrip;
+  // parsedBase's shape (post class-partition, post strip) mirrors what the PRIOR capture wrote to
+  // the store — own/other-class keys already excluded there too — so looking up envelopes to
+  // reuse by matching key name against the prior store's parsed content lines up directly.
+  const priorStoreParsed = tryParseJson(storeContent);
+  const afterEncrypt = allEncrypt.length > 0 ? await encryptFields(afterStrip, allEncrypt, pw, matched, priorStoreParsed) : afterStrip;
   // desktop/mobile + encrypted:true (D1 new combo): encrypt the own-class values BEFORE they
   // land in the sidecar — ciphertext goes into __scopes__, never plaintext.
   const ownEncrypt = excludingPerItem(group, classEncryptPatterns(group, deviceClass));
   let outScope = scopeObj;
   if (scopeObj !== null && ownEncrypt.length > 0) {
+    const priorScopeParsed = tryParseJson(priorOwnScopeContent);
+    const priorScopeObj = isPlainObject(priorScopeParsed) ? priorScopeParsed : {};
     const enc: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(scopeObj)) {
-      enc[k] = keyMatchesAny(k, ownEncrypt) ? await encryptField(pw, JSON.stringify(v)) : v;
+      enc[k] = keyMatchesAny(k, ownEncrypt) ? await reuseOrEncryptField(pw, v, priorScopeObj[k]) : v;
     }
     outScope = enc;
   }

@@ -385,6 +385,47 @@ describe("capture", () => {
     const again = await capture(ctx);
     expect(again[0]?.filesWritten).toEqual([]); // unchanged local content — nothing rewritten
   });
+
+  // C-#36: an encrypted FIELD whose plaintext didn't change must reuse its existing store envelope
+  // byte-for-byte, even when the group's file is rewritten because a DIFFERENT, unrelated field
+  // changed — mirrors the live BRAT bug (token fields' plaintexts identical both sides; the real
+  // change was pluginSubListFrozenVersion, but every capture re-encrypted the tokens anyway).
+  it("captures fields-mode encrypted keys as envelopes; re-capture with an unrelated plain-field change reuses the untouched envelope", async () => {
+    const FIELDS_MANIFEST = JSON.stringify({
+      version: 1,
+      groups: [
+        {
+          name: "beta",
+          path: "{configDir}/plugins/brat/data.json",
+          type: "file",
+          devices: "all",
+          mode: "fields",
+          fields: [{ pattern: "token", scope: "all", encrypted: true }],
+        },
+      ],
+    });
+    const { io, ctx } = setup();
+    ctx.passphrase = "pw";
+    io.seed({ ".obs/plugins/brat/data.json": JSON.stringify({ token: "ghp_secret", frozenVersion: 1 }) });
+    await seedGroups(ctx, FIELDS_MANIFEST);
+    await capture(ctx);
+    const stored1 = JSON.parse(await io.read("cs/store/configdir/plugins/brat/data.json")) as Record<string, unknown>;
+    expect(isFieldEnvelope(stored1["token"])).toBe(true);
+
+    // Only the unrelated plain field changes — the token's plaintext is identical.
+    await io.write(".obs/plugins/brat/data.json", JSON.stringify({ token: "ghp_secret", frozenVersion: 2 }));
+    const again = await capture(ctx);
+    expect(again[0]?.filesWritten).not.toEqual([]); // the file DID change (frozenVersion) — rewritten
+    const stored2 = JSON.parse(await io.read("cs/store/configdir/plugins/brat/data.json")) as Record<string, unknown>;
+    expect(stored2["token"]).toBe(stored1["token"]); // envelope reused byte-for-byte, not re-encrypted
+    expect(stored2["frozenVersion"]).toBe(2);
+
+    // A genuine token change DOES produce a new envelope.
+    await io.write(".obs/plugins/brat/data.json", JSON.stringify({ token: "ghp_rotated", frozenVersion: 2 }));
+    await capture(ctx);
+    const stored3 = JSON.parse(await io.read("cs/store/configdir/plugins/brat/data.json")) as Record<string, unknown>;
+    expect(stored3["token"]).not.toBe(stored2["token"]);
+  });
 });
 
 export async function seedStore(io: MemFS, ctx: CoreContext): Promise<void> {

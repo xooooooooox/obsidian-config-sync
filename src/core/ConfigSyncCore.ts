@@ -628,12 +628,13 @@ async function captureGroup(ctx: CoreContext, group: SyncGroup, stagedMembers?: 
     const sidecarPath = store + sidecarStoreSuffix(ctx.deviceClass);
     const existingSidecar = (await ctx.io.exists(sidecarPath)) ? await ctx.io.read(sidecarPath) : null;
     const effGroup = overlayGroup(ctx, group, [plainLocalContent]);
-    // Prior store content for perItem keys (spec §3, D3): capturing a per-item array must
-    // preserve the other device's already-captured elements, which requires the OLD store copy —
-    // never needed for non-perItem groups, but harmless to read either way (see captureTransform's
+    // Prior store content: needed for perItem keys (spec §3, D3 — capturing a per-item array must
+    // preserve the other device's already-captured elements) and, since C-#36, so captureTransform
+    // can reuse an unchanged encrypted field's existing envelope instead of re-encrypting it —
+    // never needed for groups with neither, but harmless to read either way (see captureTransform's
     // storeContent doc comment; a switch-list group's real store read already happened above).
     const priorStoreContent = localSwitchList === null && (await ctx.io.exists(store)) ? await ctx.io.read(store) : null;
-    const t = await captureTransform(effGroup, captureInput, ctx.passphrase, ctx.deviceClass, priorStoreContent);
+    const t = await captureTransform(effGroup, captureInput, ctx.passphrase, ctx.deviceClass, priorStoreContent, existingSidecar);
     if (t.note !== null) result.messages.push(t.note);
     await writeClassified(ctx, store, t.content, basename(store), result, async (existing) => {
       if (localSwitchList !== null) {
