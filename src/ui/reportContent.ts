@@ -48,7 +48,7 @@ export interface StripHeader {
 }
 
 // Run-strip header derivation (spec 2026-08-09-c-livetest-batch16 §2, C-#35): any genuine
-// failure renders "⚠ Applied with N issue(s)" in issue tone; otherwise any success-side note
+// failure renders "✗ Applied with N issue(s)" in issue tone; otherwise any success-side note
 // renders "Applied · N note(s)" in success tone; a run with neither is today's plain clean strip.
 export function stripHeader(results: GroupResult[]): StripHeader {
   const issues = results.filter((r) => resultLevel(r) === "error").length;

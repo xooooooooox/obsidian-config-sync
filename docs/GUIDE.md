@@ -73,7 +73,7 @@ The header chip opens the **Config Sync** pane, where the plugin's own configura
 Capture, Apply, Pull and Push each finish by rendering a result strip **pinned to the top of the Sync Center**:
 
 - A collapsible summary (changed/unchanged counts, per-item detail on demand) rather than a popup dialog, so it stays visible while you scroll a long list and doesn't interrupt further ticking.
-- Its tone separates a clean run (green) from one with warnings-only notes (green frame, amber note count — e.g. a captured plugin version that's no longer downloadable, so the latest stable was installed instead) from one with real failures (`⚠ Applied with N issue(s)`, expanded by default).
+- Its tone separates a clean run (green) from one with warnings-only notes (green frame, amber note count — e.g. a captured plugin version that's no longer downloadable, so the latest stable was installed instead) from one with real failures (`✗ Applied with N issue(s)`, expanded by default).
 
 Every run is also recorded in a browsable, clearable **History**: a sidebar entry opens a table of past runs (a card list on narrow/mobile screens, so it reads top-to-bottom with no horizontal scroll), each expandable to its per-item detail.
 

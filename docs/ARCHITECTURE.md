@@ -299,9 +299,10 @@ functions.
   Fields/Companion-folders row models, path/companion validation) so the card's logic is
   unit-testable without touching the DOM; `SettingTab.ts`'s renderers turn these models into
   elements, and `scopeCycle.ts` reuses the scope-cycle model (`SCOPE_ICONS`/`nextScope`/
-  `scopeCycleTooltip`). Also hosts `RUNS_ON_ICONS`/`RUNS_ON_LABELS` for `MemberRule`'s five
-  stops (`follows`/`desktop`/`mobile`/`always-here`/`never-here`), the icon vocabulary behind the
-  Sync Center card's `Runs on` menu.
+  `scopeCycleTooltip`). Also exports `RUNS_ON_ICONS` for `MemberRule`'s five stops (`follows`/
+  `desktop`/`mobile`/`always-here`/`never-here`), the icon vocabulary behind the Sync Center
+  card's `Runs on` menu; the matching `RUNS_ON_LABELS` copy is a module-local const in
+  `SyncCenterView.ts` (not exported from `itemCard.ts`).
 - `scopeCycle.ts` — the shared click-to-cycle scope control (`renderScopeCycle`): one glyph that
   IS the state, a click advances it. Every Settings drawer scope cell renders through this one
   function. The Sync Center card's `Runs on`/`Settings sync` rows share the same glyph
@@ -341,7 +342,7 @@ functions.
   plugin's on/off carrier isn't itself synced — the only context where a standalone
   outdated/disabled/not-installed section concept still applies.
 - `reportContent.ts` — shared run-report rendering (the Sync Center strip and History detail);
-  a strip's header reads any error as `⚠ Applied with N issue(s)` (errored groups only),
+  a strip's header reads any error as `✗ Applied with N issue(s)` (errored groups only),
   warnings-only as `Applied · N note(s)` on a success-toned frame, and a clean run as plain
   success — so a captured plugin version falling back to the latest stable reads as a note, never
   an error.

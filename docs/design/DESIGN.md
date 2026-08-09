@@ -336,10 +336,12 @@ noted):
   "Review settings →" routes to the self pane; dismissal (Lucide `x`) is device-local and
   resets when self returns to insync. Adopt itself still lives in the self pane, never in the
   banner.
-- **Leftover store files** — an amber `is-leftover` filter pill in the All-items scope (short
-  form `⌫ N`), opening an always-open amber `config-sync-section.is-leftover` of `-oflow`
-  rows (name / mono path / size / a Delete text action), with "Delete all" in the head —
-  both destructive text actions render per §1.1 (idle muted, red on hover). Removal kinds in
+- **Leftover store files** — no filter pill (store orphans have no registry item, so they can
+  never become a row in any type section): whenever the store has orphans, the always-open amber
+  `config-sync-section.is-leftover` renders unconditionally under the unfiltered `All` pill
+  (hidden while a filter or search narrows the view) — `-oflow` rows (name / mono path / size / a
+  Delete text action), with "Delete all" in the head — both destructive text actions render per
+  §1.1 (idle muted, red on hover). Removal kinds in
   History render `⊘` (stop-sync) and `⌫` (delete-leftover), muted.
 - **Unified card** (定稿 mockup artifact `v7-final-panorama`, 2026-07-25, plus the icon/
   progressive-disclosure pass in artifact `239c8393-cd61-4faa-95aa-e49f1804b446`, 2026-07-26; specs
