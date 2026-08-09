@@ -17,8 +17,8 @@
 - **逐键的正交规则** —— 每个键都带有一个 `{scope, encrypted}` 二元组（`All devices` / `Desktop only` / `Mobile only` / `This device`），字符串数组类型的键还可以让每个元素拥有自己的 scope。（[详情](docs/GUIDE.md#field-rules--sensitive-settings)）
 - **凭证安全** —— `This device` 键永远不会离开本机，按设备设置的密码短语则为需要传输的内容加密。
 - **明确的 Apply** —— 在你勾选条目并按下 Apply 之前，设备上不会有任何变化；每次运行都会留在贴顶结果条与可浏览的 **History** 中可见。
-- **随时可见状态的 Sync Center** —— 逐条目状态徽标、归一化的 JSON 差异、一个 *this device* 状态胶囊，以及每一类待办动作的总数。（[导览](docs/GUIDE.md#the-sync-center)）
-- **安装引擎** —— 本设备上版本落后、被禁用或未安装的插件可以在 Apply 过程中一并更新、启用或安装，并锁定到 capture 时的版本。（[规则](docs/GUIDE.md#availability-sections-and-the-install-engine)）
+- **随时可见状态的 Sync Center** —— 每一行都会用大白话说清自己的命运（*开启 · 安装 · 应用设置*）、归一化的 JSON 差异、一个 *this device* 状态胶囊，以及每一类待办动作的总数。（[导览](docs/GUIDE.md#the-sync-center)）
+- **安装引擎** —— 本设备上版本落后、被禁用或未安装的插件可以在 Apply 过程中一并更新、启用或安装，并锁定到 capture 时的版本。（[规则](docs/GUIDE.md#availability-facts-and-the-install-engine)）
 - **Remotes（桌面端）** —— 针对 git 仓库或另一个 vault 执行 pull/push，并提供逐文件差异预览。（[详情](docs/GUIDE.md#transport)）
 - **随处可搜索** —— 两个搜索框都支持带自动补全的 `key:value` 限定符，可与纯文本自由组合。
 - **状态栏** —— ↑ capture / ↓ apply 加上每个 remote 各自的 ⇡ push / ⇣ pull 计数一目了然；点击即可打开 Sync Center。
