@@ -605,15 +605,22 @@ body.is-mobile.config-sync-mobile-statusbar .status-bar {
 .config-sync-mode-badge { color: var(--text-faint); display: inline-flex; align-items: center; }
 .config-sync-mode-badge svg { width: 12px; height: 12px; }
 
-/* Unified row (spec 2026-08-06-sync-center-unified-grammar-design.md §3): state/rule chips and
-   the fate sentence that replace the old policy pills and state-icon column. */
-.config-sync-fatechip { flex: none; font-size: var(--font-ui-smaller); line-height: 1.6; border-radius: 999px; padding: 1px 8px; background: var(--background-modifier-border); color: var(--text-muted); white-space: nowrap; }
-.config-sync-fatechip.is-encrypted { display: inline-flex; align-items: center; gap: 4px; }
+/* Unified row (spec 2026-08-06-sync-center-unified-grammar-design.md §3; icons generalized to
+   every chip by C-#40, spec 2026-08-09-c-livetest-batch20-chips-and-containment.md §1): state/
+   rule chips and the fate sentence that replace the old policy pills and state-icon column. */
+.config-sync-fatechip { flex: none; display: inline-flex; align-items: center; gap: 4px; font-size: var(--font-ui-smaller); line-height: 1.6; border-radius: 999px; padding: 1px 8px; background: var(--background-modifier-border); color: var(--text-muted); white-space: nowrap; }
 .config-sync-fatechip-ic svg { width: 11px; height: 11px; display: block; }
-.config-sync-fate-text { flex: none; color: var(--text-muted); font-size: var(--font-ui-smaller); white-space: nowrap; }
-.config-sync-fate-glyph { margin-right: 2px; }
-.config-sync-hub-row.is-conflict .config-sync-fate-text { color: var(--color-orange); }
-.config-sync-hub-row.is-conflict .config-sync-fate-glyph { color: var(--color-orange); }
+/* Containment axiom §0.2: a chip GROUP degrades to icon-only + tooltip together on true measured
+   overflow (chipOverflowObserver, SyncCenterView.ts) — never a mix of full and icon-only chips
+   on one row. */
+.config-sync-chips-compact .config-sync-fatechip-label { display: none; }
+/* Containment axiom §0.3: the fate sentence is the ONLY sacrificial element — the glyph
+   (`flex: none`) always renders in full; only the sentence span shrinks/ellipsizes, down to
+   nothing (the bare glyph) rather than ever eating into the glyph itself. */
+.config-sync-fate-wrap { display: inline-flex; align-items: baseline; flex: 0 1 auto; min-width: 0; color: var(--text-muted); font-size: var(--font-ui-smaller); white-space: nowrap; }
+.config-sync-fate-glyph { flex: none; margin-right: 2px; }
+.config-sync-fate-text { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.config-sync-hub-row.is-conflict .config-sync-fate-wrap { color: var(--color-orange); }
 .config-sync-file-del { text-decoration: line-through; color: var(--text-faint); }
 .config-sync-file-note { color: var(--text-faint); }
 
@@ -1086,7 +1093,8 @@ body.is-mobile .config-sync-strip-meta .config-sync-report-pills { margin-left: 
 .config-sync-section-hint + input[type="checkbox"] { margin-left: 0; }
 .config-sync-section.is-open { border-style: solid; }
 .config-sync-section-head { display: flex; align-items: center; gap: 7px; cursor: pointer; }
-.config-sync-section-title { font-weight: 600; }
+/* Containment axiom §0.1: section titles are never truncated or wrapped, on any platform. */
+.config-sync-section-title { font-weight: 600; white-space: nowrap; }
 
 /* Unified grammar (task-4): the four fixed type sections — neutral frame, no drift-color
    borrowed from the old outdated/not-installed sections above. */
@@ -1109,8 +1117,11 @@ body.is-mobile .config-sync-strip-meta .config-sync-report-pills { margin-left: 
 .config-sync-section.is-static .config-sync-section-head { cursor: default; }
 /* Core/Community section header chip: the on/off list's own sync-membership toggle — the only
    remaining home of that list as a configurable item once its row dissolves into this chip. */
-.config-sync-carrierchip { border: 1px solid var(--background-modifier-border); border-radius: 999px; padding: 1px 8px; font-size: var(--font-ui-smaller); color: var(--text-muted); cursor: pointer; }
+.config-sync-carrierchip { border: 1px solid var(--background-modifier-border); border-radius: 999px; padding: 1px 8px; font-size: var(--font-ui-smaller); color: var(--text-muted); cursor: pointer; white-space: nowrap; }
 .config-sync-carrierchip.is-synced { color: var(--color-green); border-color: rgba(var(--color-green-rgb), 0.4); }
+/* C-#41: the carrier chip's mobile home — an indented second head line, full text, under the
+   title (spec §2). Desktop keeps the chip inline in `.config-sync-section-head`, untouched. */
+body.is-mobile .config-sync-section-meta { margin-left: var(--size-4-5); }
 /* Expanded-card rows (spec §4, ledger C-#2): every row is a fixed-width muted label with its
    value IMMEDIATELY adjacent — never spread edge-to-edge with the value floating far right. Key
    column (ledger C-#6): nowrap + sized to the longest key ("After install") so a key never wraps
@@ -1537,15 +1548,11 @@ body.is-mobile .config-sync-ppset .setting-item-control input {
   box-sizing: border-box;
 }
 
-/* ③ Long names truncate on one line instead of pushing the checkbox out of its column. */
-body.is-mobile .config-sync-hub-row .config-sync-rule-name {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-body.is-mobile .config-sync-hub-row .config-sync-rule-spacer { display: none; }
+/* ③ Long names REMOVED (containment axiom §0.1, spec 2026-08-09-c-livetest-batch20 — names/
+   titles are never truncated or ellipsized on any platform): `.config-sync-rule-name` reverts to
+   its base `flex: none` (styles.css:583), and the row-spacer's base `flex: 1` (styles.css:135)
+   pushes the sentence/checkbox to the right on line 1 exactly like desktop — no mobile override
+   needed for either. */
 
 /* ④ Checkboxes: compact 24px box (Obsidian's mobile default renders as a giant block).
    A transparent-padding hit-area trick doesn't survive Obsidian's own checkbox styling
@@ -1620,6 +1627,35 @@ body.is-mobile .config-sync-report-files .config-sync-seg-btn {
   padding: 4px 12px;
 }
 body.is-mobile .config-sync-report-files { font-size: var(--font-ui-small); }
+
+/* ── Mobile chip structure (C-#41, spec 2026-08-09-c-livetest-batch20) ──
+   Row two-line structure: 0–1 chip renders inline on line 1 exactly like desktop; 2+ chips move
+   to their own indented line 2 (JS branch, SyncCenterView.ts renderItemRow) so the row itself
+   never grows past one line. Never a third line — the whole chip group degrades to icon-only +
+   tooltip together (same chipOverflowObserver/`.config-sync-chips-compact` mechanism as desktop,
+   applied to this line instead of the row) rather than wrapping. The pair reads as ONE row: line
+   1 (`.config-sync-hub-row`) hands its own trailing hairline off to line 2 when a meta line
+   follows it, so the two lines aren't split by a border between them. */
+body.is-mobile .config-sync-hub-row:has(+ .config-sync-row-chipmeta) { border-bottom: none; }
+body.is-mobile .config-sync-row-chipmeta {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+  margin-left: var(--size-4-5);
+  padding-bottom: var(--size-4-2);
+  border-bottom: 1px solid var(--background-modifier-border);
+  overflow: hidden;
+  white-space: nowrap;
+}
+/* The truly-last row/meta line in a card never carries a trailing hairline against the card's
+   own bottom edge (review fix, C-#5 precedent): `:last-of-type` can't express this — every row's
+   `detail` drawer div immediately follows it, so no row/meta div is ever literally the last div
+   among card's children. `markLastRow` (SyncCenterView.ts) marks it explicitly instead, on every
+   DOM change that could move what's last. */
+body.is-mobile .config-sync-row-last.config-sync-hub-row,
+body.is-mobile .config-sync-row-last.config-sync-row-chipmeta {
+  border-bottom: none;
+}
 
 /* Qualifier-search autocomplete dropdown */
 .config-sync-search-wrap {

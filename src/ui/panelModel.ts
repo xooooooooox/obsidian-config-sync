@@ -355,6 +355,12 @@ export function sectionCountLabel(total: number, visible: number, filtered: bool
   return filtered ? `${visible} of ${total}` : `${total}`;
 }
 
+// Mobile section head (C-#41 spec §2): the same fact, compacted to `n/m` — unfiltered renders
+// identically on both platforms since there is nothing to compact.
+export function mobileSectionCountLabel(total: number, visible: number, filtered: boolean): string {
+  return sectionCountLabel(total, visible, filtered).replace(" of ", "/");
+}
+
 // ── Remote pane C-grammar model (2026-08-07-c-livetest-batch4 task 1) ──────────────────────────
 // Buckets a remote's raw file diff into the same four TYPE_SECTION_ORDER sections the main list
 // uses: the two switch-list carriers never appear as an ordinary row (their delta is an on/off

@@ -118,7 +118,11 @@ vocabulary with `power`/`power-off` for `RUNS_ON_ICONS`'s `always-here`/`never-h
 self-entry tile, the compact switcher's self entry, and the self pane's title-row Settings
 button · `ban` — the drawer's Stop-syncing footer action · `monitor-smartphone` — the
 scope-cycle "All devices" stop · `arrow-left-right` — the Sync Center leaf/tab icon ·
-`chevron-right` — qualifier-autocomplete key rows (value rows use `check`, §2.4).
+`chevron-right` — qualifier-autocomplete key rows (value rows use `check`, §2.4) · fate chips
+(`config-sync-fatechip`, `FATE_CHIP_ICON` in `fateChipIcons.ts` — every chip renders icon + text,
+generalized from the `encrypted`/`lock` special case): `circle-dashed` not installed here ·
+`monitor` desktop only · `sliders-horizontal` your rule / off here — your rule / on here — your
+rule · `power` stays off · `lock` encrypted · `check` your choice.
 
 ### 2.4 Glyph language (text, reused everywhere)
 
@@ -180,16 +184,24 @@ noted):
   by `2026-08-07-c-livetest-batch5-companion-dissolve.md`): chevron, name (`-rule-name`),
   fate chips (`config-sync-fatechip`, rendered only when a fact deviates from default —
   `not installed here` · `desktop only` · `stays off` · `off here — your rule` / `on here —
-  your rule` · `🔒 encrypted` · a folder path chip · `your choice` once a conflict is
-  resolved), a spacer, then the fate sentence (`config-sync-fate-text`: direction glyph +
-  verbs describing everything the run will do to this row — the full verb table lives in
-  the spec, not duplicated here), and last the checkbox. **The checkbox has one meaning
-  everywhere:** include this row in the next Apply/Capture run; selection never changes
-  what would happen, only whether it happens. It is direction-colored (orange capture /
-  accent apply, §1.1) like every other checkbox, and hidden entirely on inert rows
-  (in-sync / nothing-yet / unresolved conflict). Expanding the row (ledger C-#9) hides the
-  fate sentence/glyph — the card's own `On apply`/`On capture`/`State` row becomes the
-  single statement while open; chips and the checkbox stay. Names truncate on mobile.
+  your rule` · `encrypted` · a folder path chip · `your choice` once a conflict is
+  resolved; every chip renders icon + text, §2.3), a spacer, then the fate sentence
+  (`config-sync-fate-text`: direction glyph + verbs describing everything the run will do to
+  this row — the full verb table lives in the spec, not duplicated here), and last the
+  checkbox. **The checkbox has one meaning everywhere:** include this row in the next
+  Apply/Capture run; selection never changes what would happen, only whether it happens. It
+  is direction-colored (orange capture / accent apply, §1.1) like every other checkbox, and
+  hidden entirely on inert rows (in-sync / nothing-yet / unresolved conflict). Expanding the
+  row (ledger C-#9) hides the fate sentence/glyph — the card's own `On apply`/`On
+  capture`/`State` row becomes the single statement while open; chips and the checkbox stay.
+  **Containment (spec 2026-08-09-c-livetest-batch20-chips-and-containment.md §0, global,
+  every platform):** names and section titles never truncate or ellipsize; chips never wrap
+  or clip — a row's chip GROUP degrades together to icon-only + tooltip once it overflows,
+  never a mix of full and icon-only chips; the fate sentence is the only sacrificial
+  element, ellipsizing first and giving way to the bare direction glyph at minimum —
+  chevron, checkbox, and count pill never shrink. On mobile a row with 2+ chips moves them
+  to their own indented second line under the name/sentence line (never a third line) so
+  the row itself stays one line either way.
   **The object is the family:** a parent item plus every companion group it owns
   (Appearance's `themes`/`snippets` presets, or any item's Settings-drawer `+ Add folder`
   companions) collapses into the parent's row — one row per family, never one per
@@ -238,7 +250,11 @@ noted):
   header toggles collapse. A trailing count pill reads `N of M` under a filter; Core/Community
   carry a header chip `on/off synced ✓` / `on/off not synced` — the only remaining home of
   the on/off carrier as a configurable item, edited via a small popover (`Sync on/off` /
-  `Stop syncing on/off`). Section select-all/clear targets actionable visible rows only —
+  `Stop syncing on/off`). On mobile (spec 2026-08-09-c-livetest-batch20 §2) the head stays
+  one line — count pill compacts `N of M` to `N/M`, the per-section "N selected" hint drops
+  (the section checkbox's checked/indeterminate state and the global footer already carry
+  it) — and the carrier chip moves to its own indented second head line, full text, under
+  the title; desktop keeps all three inline, unchanged. Section select-all/clear targets actionable visible rows only —
   excludes the self row, in-sync, nothing-yet, and unresolved-conflict rows. Per-section
   trailing fold lines (`config-sync-unchanged`) aggregate only their own section's `N in
   sync ▸` / `N with nothing to sync yet ▸`, expandable in place. Switching into a filter
