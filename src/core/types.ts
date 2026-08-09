@@ -61,7 +61,13 @@ export interface SyncManifest {
 
 export interface StoreLock {
   capturedAt: string;
-  groups: Record<string, { sourcePluginVersion?: string; sourceAppVersion?: string; desktopOnly?: boolean; label?: string }>;
+  // memberLabels (2026-08-09-c-livetest-batch15): id → display name, only on the two carrier
+  // entries (core-plugins, community-plugins) — names for on/off-list members that have no lock
+  // entry of their own (never individually synced). Absent = today's shape, fully back-compatible.
+  groups: Record<
+    string,
+    { sourcePluginVersion?: string; sourceAppVersion?: string; desktopOnly?: boolean; label?: string; memberLabels?: Record<string, string> }
+  >;
 }
 
 export interface FileChanges {

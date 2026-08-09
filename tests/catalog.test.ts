@@ -518,6 +518,52 @@ describe("resolveHostStoredLabel (host wiring priority, C-#14)", () => {
   });
 });
 
+// 2026-08-09-c-livetest-batch15 (spec 2026-08-09-c-livetest-batch15-member-labels.md): a pure
+// on/off-list member (no own lock entry — never individually synced) falls through one more step,
+// to its carrier's memberLabels[id] — same chain function, same priority order, id fallback still
+// left to the caller (displayLabelForGroup).
+describe("resolveHostStoredLabel — carrier memberLabels fallback (batch15)", () => {
+  it("falls through to the community carrier's memberLabels for a plugin-<id> group with no entry of its own", () => {
+    const lock: StoreLock = {
+      capturedAt: "t",
+      groups: { "community-plugins": { sourceAppVersion: "1.8.7", memberLabels: { completr: "Completr" } } },
+    };
+    expect(resolveHostStoredLabel("plugin-completr", undefined, null, lock)).toBe("Completr");
+  });
+
+  it("falls through to the core carrier's memberLabels for a bare core-settings id with no entry of its own", () => {
+    const lock: StoreLock = {
+      capturedAt: "t",
+      groups: { "core-plugins": { sourceAppVersion: "1.8.7", memberLabels: { "daily-notes": "Daily notes" } } },
+    };
+    expect(resolveHostStoredLabel("daily-notes", undefined, null, lock)).toBe("Daily notes");
+  });
+
+  it("prefers the member's own lock entry label over the carrier's memberLabels", () => {
+    const lock: StoreLock = {
+      capturedAt: "t",
+      groups: {
+        "plugin-completr": { sourcePluginVersion: "1.0.0", label: "Completr (own entry)" },
+        "community-plugins": { sourceAppVersion: "1.8.7", memberLabels: { completr: "Completr (carrier)" } },
+      },
+    };
+    expect(resolveHostStoredLabel("plugin-completr", undefined, null, lock)).toBe("Completr (own entry)");
+  });
+
+  it("returns undefined (not the bare id) when neither the member nor its carrier resolves", () => {
+    const lock: StoreLock = { capturedAt: "t", groups: { "community-plugins": { sourceAppVersion: "1.8.7" } } };
+    expect(resolveHostStoredLabel("plugin-unknown", undefined, null, lock)).toBeUndefined();
+  });
+
+  it("does not apply the carrier fallback to a group that is neither plugin-<id> nor a core-settings id", () => {
+    const lock: StoreLock = {
+      capturedAt: "t",
+      groups: { "community-plugins": { sourceAppVersion: "1.8.7", memberLabels: { hotkeys: "should never surface here" } } },
+    };
+    expect(resolveHostStoredLabel("hotkeys", undefined, null, lock)).toBeUndefined();
+  });
+});
+
 describe("groupForItem", () => {
   it("records a label when given", () => {
     expect(groupForItem("plugin-x", "{configDir}/plugins/x/data.json", "file", null, "Xtension").label).toBe("Xtension");

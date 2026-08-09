@@ -305,6 +305,47 @@ describe("parseStoreLock widened schema", () => {
   });
 });
 
+// 2026-08-09-c-livetest-batch15 (spec 2026-08-09-c-livetest-batch15-member-labels.md): the two
+// carrier entries additionally carry memberLabels (id → display name) — validated/preserved the
+// same way the single-label field above is, and fully back-compatible in both directions.
+describe("parseStoreLock memberLabels", () => {
+  it("round-trips a carrier's memberLabels; drops blank/empty-string values", () => {
+    const lock = parseStoreLock(
+      JSON.stringify({
+        capturedAt: "t",
+        groups: {
+          "community-plugins": { sourceAppVersion: "1.8.7", memberLabels: { dataview: "Dataview", blank: "   ", ghost: "" } },
+        },
+      })
+    );
+    expect(lock.groups["community-plugins"]).toEqual({ sourceAppVersion: "1.8.7", memberLabels: { dataview: "Dataview" } });
+  });
+
+  it("omits memberLabels entirely when the map normalizes to empty", () => {
+    const lock = parseStoreLock(
+      JSON.stringify({ capturedAt: "t", groups: { "community-plugins": { sourceAppVersion: "1.8.7", memberLabels: { blank: "   " } } } })
+    );
+    expect(lock.groups["community-plugins"]).toEqual({ sourceAppVersion: "1.8.7" });
+  });
+
+  it("a legacy lock with no memberLabels field at all still parses (back-compat)", () => {
+    const lock = parseStoreLock(JSON.stringify({ capturedAt: "t", groups: { "community-plugins": { sourceAppVersion: "1.8.7" } } }));
+    expect(lock.groups["community-plugins"]).toEqual({ sourceAppVersion: "1.8.7" });
+  });
+
+  it("rejects a non-object memberLabels", () => {
+    expect(() =>
+      parseStoreLock(JSON.stringify({ capturedAt: "t", groups: { a: { sourcePluginVersion: "1.0.0", memberLabels: "nope" } } }))
+    ).toThrow('store.lock.json group "a" has a "memberLabels" that isn\'t a map of id to text');
+  });
+
+  it("rejects a memberLabels entry whose value isn't a string", () => {
+    expect(() =>
+      parseStoreLock(JSON.stringify({ capturedAt: "t", groups: { a: { sourcePluginVersion: "1.0.0", memberLabels: { x: 42 } } } }))
+    ).toThrow('store.lock.json group "a" has a "memberLabels" that isn\'t a map of id to text');
+  });
+});
+
 describe("group name validation allows uppercase", () => {
   const mk = (name: string) => JSON.stringify({ version: 1, groups: [{ name, path: "{configDir}/x.json", type: "file", devices: "all" }] });
   it("accepts a mixed-case plugin id", () => {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CoreContext, capture, captureWithActions, loadManifest, groupsForDevice, apply, applyWithActions, planImport, applyImport, PendingPull, ExternalStoreReader, pushExternal, ExternalStoreWriter, pluginIdForGroup, orderInstallsCatalogFirst, readGroups, writeGroups, deviceExcludedPluginIds, isSelfStoreRel, remoteGroupsFrom, groupForStoreRel, backfillLockLabels } from "../src/core/ConfigSyncCore";
 import { parseSyncManifest } from "../src/core/manifest";
+import { SwitchList } from "../src/core/switchList";
 import { SELF_GROUP_NAME, selfPresetRules } from "../src/core/catalog";
 import { StoreLock, SyncGroup } from "../src/core/types";
 import { isFieldEnvelope, parseFileEnvelope } from "../src/core/crypto";
@@ -1704,10 +1705,49 @@ describe("capture records a group label", () => {
   });
 });
 
+// 2026-08-09-c-livetest-batch15 (spec 2026-08-09-c-livetest-batch15-member-labels.md): capture's
+// own tail heal call (backfillLockLabels, wired with the store content this run just wrote) is
+// the writer for a captured carrier's memberLabels — COMMUNITY_MANIFEST/CORE_MANIFEST are defined
+// further down this file (switch-list exceptions describe block) but usable here: vitest runs
+// `it` bodies only after the whole module has finished evaluating.
+describe("capture records carrier memberLabels", () => {
+  it("records memberLabels for every resolvable id in the community carrier's resulting store list", async () => {
+    const { io, plugins, ctx } = setup();
+    plugins.installedNames.set("dataview", "Dataview");
+    plugins.installedNames.set("templater", "Templater");
+    io.seed({ ".obs/community-plugins.json": JSON.stringify(["dataview", "templater", "not-installed-anywhere"]) });
+    await seedGroups(ctx, COMMUNITY_MANIFEST);
+    await capture(ctx, ["community-plugins"]);
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, unknown> };
+    expect(lock.groups["community-plugins"]).toEqual({
+      sourceAppVersion: "1.8.7",
+      memberLabels: { dataview: "Dataview", templater: "Templater" },
+    });
+  });
+
+  it("records memberLabels for every resolvable id in the core carrier's resulting store list (map shape)", async () => {
+    const { io, plugins, ctx } = setup();
+    plugins.coreNames.set("daily-notes", "Daily notes");
+    io.seed({ ".obs/core-plugins.json": JSON.stringify({ "daily-notes": true, graph: false }) });
+    await seedGroups(ctx, CORE_MANIFEST);
+    await capture(ctx, ["core-plugins"]);
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, unknown> };
+    expect(lock.groups["core-plugins"]).toEqual({ sourceAppVersion: "1.8.7", memberLabels: { "daily-notes": "Daily notes" } });
+  });
+});
+
 // batch6 task-1 (spec 2026-08-08-c-livetest-batch6-remote-labels.md): a group entry born before
 // capture started resolving labels (or from an all-in-sync run that never touched it) stays
 // label-less forever without a dedicated heal — backfillLockLabels is that heal, run at the tail
 // of every capture and once at startup (main.ts) so the remote pane always has a name to show.
+//
+// carrierLists (batch15 signature addition) is irrelevant to these single-label cases — both
+// carriers null means "nothing to heal there", so behavior is byte-identical to the pre-batch15 calls.
+const NO_CARRIER_LISTS: Record<"core-plugins" | "community-plugins", SwitchList | null> = {
+  "core-plugins": null,
+  "community-plugins": null,
+};
+
 describe("backfillLockLabels", () => {
   const PLUGIN_DEMO_GROUP: SyncGroup = { name: "plugin-demo", path: "{configDir}/plugins/demo/data.json", type: "file", devices: "all" };
   const PLUGIN_FOO_GROUP: SyncGroup = { name: "plugin-foo", path: "{configDir}/plugins/foo/data.json", type: "file", devices: "all" };
@@ -1722,7 +1762,7 @@ describe("backfillLockLabels", () => {
       capturedAt: "2026-01-01T00:00:00.000Z",
       groups: { "plugin-demo": { sourcePluginVersion: "1.0.0" }, "daily-notes": { sourceAppVersion: "1.8.7" } },
     };
-    const changed = backfillLockLabels([PLUGIN_DEMO_GROUP, CORE_GROUP], plugins, lock);
+    const changed = backfillLockLabels([PLUGIN_DEMO_GROUP, CORE_GROUP], plugins, lock, NO_CARRIER_LISTS);
     expect(changed).toBe(true);
     expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.0.0", label: "Demo Plugin" });
     expect(lock.groups["daily-notes"]).toEqual({ sourceAppVersion: "1.8.7", label: "Daily notes" });
@@ -1731,7 +1771,7 @@ describe("backfillLockLabels", () => {
   it("leaves a not-installed community entry untouched", () => {
     const { plugins } = setup(); // plugins.installedNames has nothing for "foo" — not installed
     const lock: StoreLock = { capturedAt: "2026-01-01T00:00:00.000Z", groups: { "plugin-foo": { sourcePluginVersion: "1.0.0" } } };
-    const changed = backfillLockLabels([PLUGIN_FOO_GROUP], plugins, lock);
+    const changed = backfillLockLabels([PLUGIN_FOO_GROUP], plugins, lock, NO_CARRIER_LISTS);
     expect(changed).toBe(false);
     expect(lock.groups["plugin-foo"]).toEqual({ sourcePluginVersion: "1.0.0" });
   });
@@ -1743,7 +1783,7 @@ describe("backfillLockLabels", () => {
       capturedAt: "2026-01-01T00:00:00.000Z",
       groups: { "plugin-demo": { sourcePluginVersion: "1.0.0", label: "Demo Plugin" } },
     };
-    const changed = backfillLockLabels([PLUGIN_DEMO_GROUP], plugins, lock);
+    const changed = backfillLockLabels([PLUGIN_DEMO_GROUP], plugins, lock, NO_CARRIER_LISTS);
     expect(changed).toBe(true);
     expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.0.0", label: "Renamed Plugin" });
   });
@@ -1755,7 +1795,7 @@ describe("backfillLockLabels", () => {
       capturedAt: "2026-01-01T00:00:00.000Z",
       groups: { "plugin-demo": { sourcePluginVersion: "1.0.0", label: "Demo Plugin" } },
     };
-    const changed = backfillLockLabels([PLUGIN_DEMO_GROUP], plugins, lock);
+    const changed = backfillLockLabels([PLUGIN_DEMO_GROUP], plugins, lock, NO_CARRIER_LISTS);
     expect(changed).toBe(false);
     expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.0.0", label: "Demo Plugin" });
   });
@@ -1764,7 +1804,7 @@ describe("backfillLockLabels", () => {
     const { plugins } = setup();
     plugins.installedNames.set("demo", "Demo Plugin");
     const lock: StoreLock = { capturedAt: "2026-01-01T00:00:00.000Z", groups: { "plugin-demo": { sourcePluginVersion: "1.0.0" } } };
-    backfillLockLabels([PLUGIN_DEMO_GROUP], plugins, lock);
+    backfillLockLabels([PLUGIN_DEMO_GROUP], plugins, lock, NO_CARRIER_LISTS);
     expect(lock.capturedAt).toBe("2026-01-01T00:00:00.000Z");
   });
 
@@ -1772,9 +1812,79 @@ describe("backfillLockLabels", () => {
     const { plugins } = setup();
     plugins.installedNames.set("demo", "Demo Plugin");
     const lock: StoreLock = { capturedAt: "2026-01-01T00:00:00.000Z", groups: { "plugin-demo": { sourcePluginVersion: "1.0.0" } } };
-    const changed = backfillLockLabels([], plugins, lock); // manifest no longer declares plugin-demo
+    const changed = backfillLockLabels([], plugins, lock, NO_CARRIER_LISTS); // manifest no longer declares plugin-demo
     expect(changed).toBe(false);
     expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.0.0" });
+  });
+});
+
+// 2026-08-09-c-livetest-batch15 (spec 2026-08-09-c-livetest-batch15-member-labels.md): the two
+// carrier lock entries (core-plugins, community-plugins) additionally carry memberLabels — a name
+// for every CURRENT store-list member this device can resolve, healed the same way the single
+// label above is (write-only-on-change, capturedAt untouched).
+describe("backfillLockLabels memberLabels", () => {
+  it("fills in memberLabels for every resolvable id in the community carrier's current store list", () => {
+    const { plugins } = setup();
+    plugins.installedNames.set("dataview", "Dataview");
+    plugins.installedNames.set("templater", "Templater");
+    const lock: StoreLock = { capturedAt: "t", groups: { "community-plugins": { sourceAppVersion: "1.8.7" } } };
+    const changed = backfillLockLabels([], plugins, lock, { "core-plugins": null, "community-plugins": ["dataview", "templater", "unresolvable"] });
+    expect(changed).toBe(true);
+    expect(lock.groups["community-plugins"]).toEqual({
+      sourceAppVersion: "1.8.7",
+      memberLabels: { dataview: "Dataview", templater: "Templater" },
+    });
+  });
+
+  it("fills in memberLabels for every resolvable id in the core carrier's current store list (map shape)", () => {
+    const { plugins } = setup();
+    plugins.coreNames.set("daily-notes", "Daily notes");
+    const lock: StoreLock = { capturedAt: "t", groups: { "core-plugins": { sourceAppVersion: "1.8.7" } } };
+    const changed = backfillLockLabels(
+      [],
+      plugins,
+      lock,
+      { "core-plugins": { "daily-notes": true, "not-a-core-id": false }, "community-plugins": null }
+    );
+    expect(changed).toBe(true);
+    expect(lock.groups["core-plugins"]).toEqual({ sourceAppVersion: "1.8.7", memberLabels: { "daily-notes": "Daily notes" } });
+  });
+
+  it("leaves an unresolvable-only store list without a memberLabels field (no change)", () => {
+    const { plugins } = setup(); // nothing installed
+    const lock: StoreLock = { capturedAt: "t", groups: { "community-plugins": { sourceAppVersion: "1.8.7" } } };
+    const changed = backfillLockLabels([], plugins, lock, { "core-plugins": null, "community-plugins": ["unresolvable"] });
+    expect(changed).toBe(false);
+    expect(lock.groups["community-plugins"]).toEqual({ sourceAppVersion: "1.8.7" });
+  });
+
+  it("reports no change when memberLabels are already current", () => {
+    const { plugins } = setup();
+    plugins.installedNames.set("dataview", "Dataview");
+    const lock: StoreLock = {
+      capturedAt: "t",
+      groups: { "community-plugins": { sourceAppVersion: "1.8.7", memberLabels: { dataview: "Dataview" } } },
+    };
+    const changed = backfillLockLabels([], plugins, lock, { "core-plugins": null, "community-plugins": ["dataview"] });
+    expect(changed).toBe(false);
+    expect(lock.groups["community-plugins"]).toEqual({ sourceAppVersion: "1.8.7", memberLabels: { dataview: "Dataview" } });
+  });
+
+  it("skips a carrier with no lock entry of its own", () => {
+    const { plugins } = setup();
+    plugins.installedNames.set("dataview", "Dataview");
+    const lock: StoreLock = { capturedAt: "t", groups: {} };
+    const changed = backfillLockLabels([], plugins, lock, { "core-plugins": null, "community-plugins": ["dataview"] });
+    expect(changed).toBe(false);
+    expect(lock.groups["community-plugins"]).toBeUndefined();
+  });
+
+  it("never touches capturedAt when only memberLabels change", () => {
+    const { plugins } = setup();
+    plugins.installedNames.set("dataview", "Dataview");
+    const lock: StoreLock = { capturedAt: "2026-01-01T00:00:00.000Z", groups: { "community-plugins": { sourceAppVersion: "1.8.7" } } };
+    backfillLockLabels([], plugins, lock, { "core-plugins": null, "community-plugins": ["dataview"] });
+    expect(lock.capturedAt).toBe("2026-01-01T00:00:00.000Z");
   });
 });
 

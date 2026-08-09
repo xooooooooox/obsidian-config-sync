@@ -223,6 +223,27 @@ function parseGroup(g: unknown, index: number): SyncGroup {
   return group;
 }
 
+// Validates + normalizes a carrier lock entry's memberLabels (2026-08-09-c-livetest-batch15):
+// every value must be text, same strictness as the sibling "label" field below; empty/whitespace
+// values are dropped, so an all-empty map normalizes to absent (undefined), matching how a
+// trimmed-empty "label" is dropped rather than stored. `raw` undefined (the field's absent
+// entirely, today's shape) is the normal, non-throwing case — every existing lock still parses.
+function parseMemberLabels(raw: unknown, groupName: string): Record<string, string> | undefined {
+  if (raw === undefined) return undefined;
+  if (!isPlainObject(raw)) {
+    throw new ManifestValidationError(`store.lock.json group "${groupName}" has a "memberLabels" that isn't a map of id to text`);
+  }
+  const memberLabels: Record<string, string> = {};
+  for (const [id, val] of Object.entries(raw)) {
+    if (typeof val !== "string") {
+      throw new ManifestValidationError(`store.lock.json group "${groupName}" has a "memberLabels" that isn't a map of id to text`);
+    }
+    const trimmed = val.trim();
+    if (trimmed !== "") memberLabels[id] = trimmed;
+  }
+  return Object.keys(memberLabels).length > 0 ? memberLabels : undefined;
+}
+
 export function parseStoreLock(raw: string): StoreLock {
   let parsed: unknown;
   try {
@@ -233,7 +254,7 @@ export function parseStoreLock(raw: string): StoreLock {
   if (!isPlainObject(parsed) || typeof parsed.capturedAt !== "string" || !isPlainObject(parsed.groups)) {
     throw new ManifestValidationError("store.lock.json must be {capturedAt: string, groups: object}");
   }
-  const groups: Record<string, { sourcePluginVersion?: string; sourceAppVersion?: string; desktopOnly?: boolean; label?: string }> = {};
+  const groups: StoreLock["groups"] = {};
   for (const [k, v] of Object.entries(parsed.groups)) {
     const plugin = isPlainObject(v) && typeof v.sourcePluginVersion === "string" ? v.sourcePluginVersion : undefined;
     const app = isPlainObject(v) && typeof v.sourceAppVersion === "string" ? v.sourceAppVersion : undefined;
@@ -243,12 +264,14 @@ export function parseStoreLock(raw: string): StoreLock {
     if (isPlainObject(v) && v.label !== undefined && typeof v.label !== "string") {
       throw new ManifestValidationError(`store.lock.json group "${k}" has a "label" that isn't text`);
     }
+    const memberLabels = parseMemberLabels(isPlainObject(v) ? v.memberLabels : undefined, k);
     groups[k] = {};
     if (plugin !== undefined) groups[k].sourcePluginVersion = plugin;
     if (app !== undefined) groups[k].sourceAppVersion = app;
     if (isPlainObject(v) && v.desktopOnly === true) groups[k].desktopOnly = true;
     const label = isPlainObject(v) && typeof v.label === "string" ? v.label.trim() : "";
     if (label !== "") groups[k].label = label;
+    if (memberLabels !== undefined) groups[k].memberLabels = memberLabels;
   }
   return { capturedAt: parsed.capturedAt, groups };
 }

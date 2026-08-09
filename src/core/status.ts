@@ -259,10 +259,24 @@ export function remoteLockAhead(localRaw: string | null, remoteRaw: string | nul
 // `parsed: unknown` for the same reasoning), so a parse failure never reaches here at all.
 export function remoteLockLabels(lockJson: unknown): Record<string, string> {
   if (!isPlainObject(lockJson) || !isPlainObject(lockJson.groups)) return {};
+  const groups = lockJson.groups;
   const labels: Record<string, string> = {};
-  for (const [name, entry] of Object.entries(lockJson.groups)) {
+  for (const [name, entry] of Object.entries(groups)) {
     if (isPlainObject(entry) && typeof entry.label === "string" && entry.label.trim() !== "") {
       labels[name] = entry.label;
+    }
+  }
+  // Carrier memberLabels fallback (2026-08-09-c-livetest-batch15, same chain position as
+  // resolveHostStoredLabel's local one: after own-entry labels above, before the id fallback):
+  // a remote-only on/off member with no group entry of its own still gets a name from its
+  // carrier's memberLabels — never overwrites a name already resolved from the member's own entry.
+  const memberKeyPrefix: Record<"community-plugins" | "core-plugins", string> = { "community-plugins": "plugin-", "core-plugins": "" };
+  for (const carrier of ["community-plugins", "core-plugins"] as const) {
+    const carrierEntry = groups[carrier];
+    if (!isPlainObject(carrierEntry) || !isPlainObject(carrierEntry.memberLabels)) continue;
+    for (const [id, label] of Object.entries(carrierEntry.memberLabels)) {
+      const key = `${memberKeyPrefix[carrier]}${id}`;
+      if (typeof label === "string" && label.trim() !== "" && labels[key] === undefined) labels[key] = label;
     }
   }
   return labels;

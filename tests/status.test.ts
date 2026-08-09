@@ -506,3 +506,43 @@ describe("remoteLockLabels", () => {
     expect(remoteLockLabels(lockJson)).toEqual({});
   });
 });
+
+// 2026-08-09-c-livetest-batch15 (spec 2026-08-09-c-livetest-batch15-member-labels.md): a
+// remote-only on/off member with no group entry of its own gets a name from its carrier's
+// memberLabels — same chain position as resolveHostStoredLabel's local one (after own-entry
+// labels, before the id fallback).
+describe("remoteLockLabels — carrier memberLabels fallback (batch15)", () => {
+  it("adds a plugin-<id> entry from the community carrier's memberLabels", () => {
+    const lockJson = {
+      capturedAt: "t",
+      groups: { "community-plugins": { sourceAppVersion: "1.8.7", memberLabels: { completr: "Completr", dataview: "Dataview" } } },
+    };
+    expect(remoteLockLabels(lockJson)).toEqual({ "plugin-completr": "Completr", "plugin-dataview": "Dataview" });
+  });
+
+  it("adds a bare-id entry from the core carrier's memberLabels (no plugin- prefix)", () => {
+    const lockJson = {
+      capturedAt: "t",
+      groups: { "core-plugins": { sourceAppVersion: "1.8.7", memberLabels: { "daily-notes": "Daily notes" } } },
+    };
+    expect(remoteLockLabels(lockJson)).toEqual({ "daily-notes": "Daily notes" });
+  });
+
+  it("never overwrites a name already resolved from the member's own entry", () => {
+    const lockJson = {
+      capturedAt: "t",
+      groups: {
+        "plugin-completr": { sourcePluginVersion: "1.0.0", label: "Completr (own entry)" },
+        "community-plugins": { sourceAppVersion: "1.8.7", memberLabels: { completr: "Completr (carrier)" } },
+      },
+    };
+    expect(remoteLockLabels(lockJson)).toEqual({ "plugin-completr": "Completr (own entry)" });
+  });
+
+  it("ignores a non-object or empty-string memberLabels entry", () => {
+    expect(remoteLockLabels({ capturedAt: "t", groups: { "community-plugins": { sourceAppVersion: "1.8.7", memberLabels: "nope" } } })).toEqual({});
+    expect(
+      remoteLockLabels({ capturedAt: "t", groups: { "community-plugins": { sourceAppVersion: "1.8.7", memberLabels: { x: "   " } } } })
+    ).toEqual({});
+  });
+});

@@ -245,6 +245,30 @@ function switchDeltaMessages(delta: { on: string[]; off: string[] }): string[] {
 // 2026-08-06-batch2-scroll-and-appearance-hotapply-design.md).
 const RUNTIME_SWITCH_GROUPS: ReadonlySet<string> = new Set(["core-plugins", "community-plugins"]);
 
+// Every locally-resolvable name for a carrier's CURRENT store-list members (2026-08-09-c-livetest-
+// batch15): community ids resolve through the installed-plugin manifest, core ids through the
+// internal-plugin instance — same two lookups the single-label resolvers above/below already use,
+// applied per member instead of to the carrier group itself. An unresolvable id (not installed on
+// this device) is simply absent, never a bare-id placeholder — the honest fallback lives entirely
+// in the display chain (catalog.ts/status.ts), not here. Shared by capture's own carrier write and
+// backfillLockLabels' heal below — one computation, two triggers.
+function carrierMemberLabels(carrier: "core-plugins" | "community-plugins", list: SwitchList | null, plugins: PluginHost): Record<string, string> {
+  if (list === null) return {};
+  const ids = Array.isArray(list) ? list : Object.keys(list);
+  const labels: Record<string, string> = {};
+  for (const id of ids) {
+    const name = carrier === "community-plugins" ? plugins.getInstalledPluginName(id) : plugins.getCorePluginName(id);
+    if (name !== null) labels[id] = name;
+  }
+  return labels;
+}
+
+function memberLabelsEqual(existing: Record<string, string> | undefined, next: Record<string, string>): boolean {
+  const existingKeys = existing === undefined ? [] : Object.keys(existing);
+  const nextKeys = Object.keys(next);
+  return existingKeys.length === nextKeys.length && existingKeys.every((k) => existing?.[k] === next[k]);
+}
+
 // The appearance card's own file group, its two companion dir groups, and the snippet
 // switch-list carrier that writes into appearance.json — the file set reloadAppearance()
 // re-applies in one pass (spec 2026-08-06-batch2-scroll-and-appearance-hotapply-design.md).
@@ -408,7 +432,16 @@ export function baseHasStaleLocalKeys(effGroup: SyncGroup, existing: string): bo
 // and once at startup (main.ts). Never touches capturedAt or entries this vault can't resolve
 // (an uninstalled plugin, an orphaned/dropped group) — returns whether anything changed, so a
 // caller with nothing to do skips the write.
-export function backfillLockLabels(groups: SyncGroup[], plugins: PluginHost, lock: StoreLock): boolean {
+// carrierLists: the CURRENT store content for the two carriers (post any write this same run
+// already made), pre-read by the caller so this function itself stays synchronous/IO-free and
+// directly unit-testable (see tests/core.test.ts) — readCarrierSwitchLists below is the shared
+// reader both call sites (main.ts startup, capture's own tail call) use to build it.
+export function backfillLockLabels(
+  groups: SyncGroup[],
+  plugins: PluginHost,
+  lock: StoreLock,
+  carrierLists: Record<"core-plugins" | "community-plugins", SwitchList | null>
+): boolean {
   let changed = false;
   for (const group of groups) {
     const entry = lock.groups[group.name];
@@ -426,7 +459,35 @@ export function backfillLockLabels(groups: SyncGroup[], plugins: PluginHost, loc
     lock.groups[group.name] = { ...entry, label };
     changed = true;
   }
+  // memberLabels heal (2026-08-09-c-livetest-batch15): recomputed fresh from the current store
+  // list every call, same write-only-on-change guarantee as the label loop above — a newly
+  // installed member's name heals in and an uninstalled one drops out.
+  for (const carrier of ["core-plugins", "community-plugins"] as const) {
+    const entry = lock.groups[carrier];
+    if (entry === undefined) continue;
+    const memberLabels = carrierMemberLabels(carrier, carrierLists[carrier], plugins);
+    if (Object.keys(memberLabels).length === 0 || memberLabelsEqual(entry.memberLabels, memberLabels)) continue;
+    lock.groups[carrier] = { ...entry, memberLabels };
+    changed = true;
+  }
   return changed;
+}
+
+// Shared reader for backfillLockLabels' carrierLists param: the store file each carrier's OWN
+// registered group would read (skipped — null — when that carrier isn't a group on this device
+// at all, e.g. the on/off card is off; a group present but never captured has no store file yet,
+// same null result).
+export async function readCarrierSwitchLists(
+  ctx: CoreContext,
+  groups: SyncGroup[]
+): Promise<Record<"core-plugins" | "community-plugins", SwitchList | null>> {
+  const read = async (name: "core-plugins" | "community-plugins"): Promise<SwitchList | null> => {
+    const group = groups.find((g) => g.name === name);
+    if (group === undefined) return null;
+    const store = `${storeDir(ctx)}/${groupStorePath(group.path)}`;
+    return (await ctx.io.exists(store)) ? parseSwitchList(await ctx.io.read(store)) : null;
+  };
+  return { "core-plugins": await read("core-plugins"), "community-plugins": await read("community-plugins") };
 }
 
 function requireGroup(manifest: SyncManifest, name: string): SyncGroup {
@@ -518,8 +579,10 @@ export async function capture(
     if (!registryNames.has(name)) lock.groups[name] = entry;
   }
   // Tail heal (see backfillLockLabels doc comment): catches every locally-resolvable entry this
-  // run didn't itself capture a label for, carried-forward or otherwise.
-  backfillLockLabels(manifest.groups, ctx.plugins, lock);
+  // run didn't itself capture a label for, carried-forward or otherwise — including a carrier's
+  // own memberLabels, which this same call writes fresh from the store content this run just
+  // produced (or carried forward untouched), satisfying the "written at capture" side too.
+  backfillLockLabels(manifest.groups, ctx.plugins, lock, await readCarrierSwitchLists(ctx, manifest.groups));
   await ensureParentDir(ctx.io, lockPath(ctx));
   await ctx.io.write(lockPath(ctx), JSON.stringify(lock, null, 2) + "\n");
   return results;

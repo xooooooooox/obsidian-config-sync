@@ -18,6 +18,7 @@ import {
   loadManifest,
   lockPath,
   pushExternal,
+  readCarrierSwitchLists,
   readGroups,
   writeGroups,
 } from "./core/ConfigSyncCore";
@@ -405,7 +406,7 @@ export default class ConfigSyncPlugin extends Plugin {
       // flips so a later pull's lock never gets a second heal attempt bolted onto this same load.
       if (!this.lockLabelsHealed) {
         this.lockLabelsHealed = true;
-        if (lock !== null && backfillLockLabels(manifest.groups, host, lock)) {
+        if (lock !== null && backfillLockLabels(manifest.groups, host, lock, await readCarrierSwitchLists(ctx, manifest.groups))) {
           try {
             await ctx.io.write(lockPath(ctx), JSON.stringify(lock, null, 2) + "\n");
           } catch (e) {
@@ -1158,7 +1159,12 @@ export default class ConfigSyncPlugin extends Plugin {
   }
 
   displayName(group: string, storedLabel?: string): string {
-    return displayLabelForGroup(group, this.pluginHost(), storedLabel ?? this.lastLock?.groups[group]?.label);
+    // Routes every caller (direct or via the Sync Center host's resolveHostStoredLabel
+    // pre-resolve) through the SAME chain — including its carrier-memberLabels fallback
+    // (2026-08-09-c-livetest-batch15) — so a bare `this.displayName(name)` call (e.g.
+    // ConflictModal's name resolver) never falls back to the id where the wrapped path would
+    // have found a name. Idempotent when storedLabel already arrived resolved.
+    return displayLabelForGroup(group, this.pluginHost(), resolveHostStoredLabel(group, storedLabel, this.lastGroups, this.lastLock));
   }
 
   displayParts(group: string, storedLabel?: string): GroupDisplayParts {

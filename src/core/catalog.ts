@@ -474,6 +474,26 @@ export function displayLabelForGroup(name: string, plugins: PluginHost, storedLa
 // months (it declared only the `(group)` parameter, so TypeScript never flagged the discarded
 // second argument; C-#14 live-verify). Priority: caller's explicit override, then the
 // last-computed live SyncGroup list, then the last-loaded local lock's own label.
+//
+// A `plugin-<id>` / core-settings-id group with none of the above (2026-08-09-c-livetest-batch15:
+// a pure on/off-list member, never individually synced, so it has no lock entry of its own) falls
+// through one more step to its carrier's memberLabels[id] before returning undefined — the caller
+// (displayLabelForGroup) supplies the final bare-id fallback, so this function itself never
+// returns the id.
 export function resolveHostStoredLabel(group: string, explicit: string | undefined, lastGroups: SyncGroup[] | null, lastLock: StoreLock | null): string | undefined {
-  return explicit ?? lastGroups?.find((g) => g.name === group)?.label ?? lastLock?.groups[group]?.label;
+  const own = explicit ?? lastGroups?.find((g) => g.name === group)?.label ?? lastLock?.groups[group]?.label;
+  if (own !== undefined) return own;
+  const key = carrierMemberKey(group);
+  return key === null ? undefined : lastLock?.groups[key.carrier]?.memberLabels?.[key.id];
+}
+
+// group -> {carrier, id} for the memberLabels fallback above: community items compile as
+// `plugin-<id>` under the community-plugins carrier; a bare core-settings id IS its own core-
+// plugins carrier element (mirrors panelModel.ts's enablementCarrierFor split — kept local here
+// instead of imported, since catalog.ts is core and enablementCarrierFor lives in the ui layer;
+// the two must never drift on this split).
+function carrierMemberKey(group: string): { carrier: "community-plugins" | "core-plugins"; id: string } | null {
+  if (group.startsWith("plugin-")) return { carrier: "community-plugins", id: group.slice("plugin-".length) };
+  if (coreSettingsIds().has(group)) return { carrier: "core-plugins", id: group };
+  return null;
 }
