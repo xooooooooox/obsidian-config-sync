@@ -245,20 +245,32 @@ function switchDeltaMessages(delta: { on: string[]; off: string[] }): string[] {
 // 2026-08-06-batch2-scroll-and-appearance-hotapply-design.md).
 const RUNTIME_SWITCH_GROUPS: ReadonlySet<string> = new Set(["core-plugins", "community-plugins"]);
 
-// Every locally-resolvable name for a carrier's CURRENT store-list members (2026-08-09-c-livetest-
-// batch15): community ids resolve through the installed-plugin manifest, core ids through the
-// internal-plugin instance — same two lookups the single-label resolvers above/below already use,
-// applied per member instead of to the carrier group itself. An unresolvable id (not installed on
-// this device) is simply absent, never a bare-id placeholder — the honest fallback lives entirely
-// in the display chain (catalog.ts/status.ts), not here. Shared by capture's own carrier write and
-// backfillLockLabels' heal below — one computation, two triggers.
-function carrierMemberLabels(carrier: "core-plugins" | "community-plugins", list: SwitchList | null, plugins: PluginHost): Record<string, string> {
+// A carrier's memberLabels for its CURRENT store-list members, MERGED additively with what was
+// already known (review fix, 2026-08-09-c-livetest-batch15): community ids resolve through the
+// installed-plugin manifest, core ids through the internal-plugin instance — same two lookups the
+// single-label resolvers above/below already use — but "can't resolve locally" must never erase a
+// name this device previously learned (from its own earlier capture, from a heal on ANOTHER
+// device, or from a pull) for a member it simply doesn't have installed. Per id: the freshly
+// resolved local name wins when available (so a rename heals in); otherwise the EXISTING entry's
+// name for that id survives; only when neither exists is the id absent. An id no longer in the
+// current store list is dropped (it's not a member anymore). Without this merge, two devices with
+// different plugin sets would each overwrite the other's names with their own narrower subset on
+// every heal — a perpetual lock-drift nag, and the "ids only where unresolvable ANYWHERE" spec
+// criterion silently regressing to "unresolvable on the LAST device to heal". Shared by capture's
+// own carrier write and backfillLockLabels' heal below — one computation, two triggers.
+function carrierMemberLabels(
+  carrier: "core-plugins" | "community-plugins",
+  list: SwitchList | null,
+  plugins: PluginHost,
+  existing: Record<string, string> | undefined
+): Record<string, string> {
   if (list === null) return {};
   const ids = Array.isArray(list) ? list : Object.keys(list);
   const labels: Record<string, string> = {};
   for (const id of ids) {
-    const name = carrier === "community-plugins" ? plugins.getInstalledPluginName(id) : plugins.getCorePluginName(id);
-    if (name !== null) labels[id] = name;
+    const resolved = carrier === "community-plugins" ? plugins.getInstalledPluginName(id) : plugins.getCorePluginName(id);
+    const name = resolved ?? existing?.[id];
+    if (name !== undefined) labels[id] = name;
   }
   return labels;
 }
@@ -459,13 +471,16 @@ export function backfillLockLabels(
     lock.groups[group.name] = { ...entry, label };
     changed = true;
   }
-  // memberLabels heal (2026-08-09-c-livetest-batch15): recomputed fresh from the current store
-  // list every call, same write-only-on-change guarantee as the label loop above — a newly
-  // installed member's name heals in and an uninstalled one drops out.
+  // memberLabels heal (2026-08-09-c-livetest-batch15): MERGED with the existing map every call
+  // (carrierMemberLabels' own doc comment) — same write-only-on-change guarantee as the label
+  // loop above, but a name this device can't resolve locally is carried forward from the
+  // existing entry rather than dropped, so a heal on one device never erases a name only another
+  // device could resolve. A newly installed member's name still refreshes; an id no longer in the
+  // current store list is still dropped.
   for (const carrier of ["core-plugins", "community-plugins"] as const) {
     const entry = lock.groups[carrier];
     if (entry === undefined) continue;
-    const memberLabels = carrierMemberLabels(carrier, carrierLists[carrier], plugins);
+    const memberLabels = carrierMemberLabels(carrier, carrierLists[carrier], plugins, entry.memberLabels);
     if (Object.keys(memberLabels).length === 0 || memberLabelsEqual(entry.memberLabels, memberLabels)) continue;
     lock.groups[carrier] = { ...entry, memberLabels };
     changed = true;

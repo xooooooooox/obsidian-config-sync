@@ -1886,6 +1886,79 @@ describe("backfillLockLabels memberLabels", () => {
     backfillLockLabels([], plugins, lock, { "core-plugins": null, "community-plugins": ["dataview"] });
     expect(lock.capturedAt).toBe("2026-01-01T00:00:00.000Z");
   });
+
+  // Review round 2 fix (2026-08-09-c-livetest-batch15): the heal must MERGE additively — a name
+  // this device can't resolve locally must survive from the existing map, never get erased just
+  // because this device's own plugin set is narrower. Reviewer's exact empirical repro: seeded
+  // {completr, dataview}, a device with only dataview installed used to heal the map down to
+  // {dataview} — completr's name was gone.
+  it("superset preservation: a name unresolvable on THIS device survives the heal (reviewer repro)", () => {
+    const { plugins } = setup();
+    plugins.installedNames.set("dataview", "Dataview"); // "completr" is NOT installed here
+    const lock: StoreLock = {
+      capturedAt: "t",
+      groups: { "community-plugins": { sourceAppVersion: "1.8.7", memberLabels: { completr: "Completr", dataview: "Dataview" } } },
+    };
+    const changed = backfillLockLabels([], plugins, lock, { "core-plugins": null, "community-plugins": ["completr", "dataview"] });
+    expect(changed).toBe(false); // already converged — merge is a no-op
+    expect(lock.groups["community-plugins"]).toEqual({
+      sourceAppVersion: "1.8.7",
+      memberLabels: { completr: "Completr", dataview: "Dataview" },
+    });
+  });
+
+  it("drops an id no longer in the current store list, even though its existing name was known", () => {
+    const { plugins } = setup();
+    plugins.installedNames.set("dataview", "Dataview");
+    const lock: StoreLock = {
+      capturedAt: "t",
+      groups: { "community-plugins": { sourceAppVersion: "1.8.7", memberLabels: { completr: "Completr", dataview: "Dataview" } } },
+    };
+    // "completr" no longer appears in the store list (uninstalled/removed everywhere) — dropped.
+    const changed = backfillLockLabels([], plugins, lock, { "core-plugins": null, "community-plugins": ["dataview"] });
+    expect(changed).toBe(true);
+    expect(lock.groups["community-plugins"]).toEqual({ sourceAppVersion: "1.8.7", memberLabels: { dataview: "Dataview" } });
+  });
+
+  it("local resolution refreshes a stale existing name for an id this device CAN resolve", () => {
+    const { plugins } = setup();
+    plugins.installedNames.set("dataview", "Dataview (renamed)");
+    const lock: StoreLock = {
+      capturedAt: "t",
+      groups: { "community-plugins": { sourceAppVersion: "1.8.7", memberLabels: { dataview: "Dataview (stale)" } } },
+    };
+    const changed = backfillLockLabels([], plugins, lock, { "core-plugins": null, "community-plugins": ["dataview"] });
+    expect(changed).toBe(true);
+    expect(lock.groups["community-plugins"]).toEqual({ sourceAppVersion: "1.8.7", memberLabels: { dataview: "Dataview (renamed)" } });
+  });
+
+  it("two-device convergence: kickstart's heal (both installed) then llm's heal (only dataview installed) leave the map unchanged", () => {
+    const store: SwitchList = ["completr", "dataview"];
+    const lock: StoreLock = { capturedAt: "t", groups: { "community-plugins": { sourceAppVersion: "1.8.7" } } };
+
+    const kickstart = new FakePlugins();
+    kickstart.installedNames.set("completr", "Completr");
+    kickstart.installedNames.set("dataview", "Dataview");
+    backfillLockLabels([], kickstart, lock, { "core-plugins": null, "community-plugins": store });
+    expect(lock.groups["community-plugins"]?.memberLabels).toEqual({ completr: "Completr", dataview: "Dataview" });
+
+    const beforeLlmHeal = { ...lock.groups["community-plugins"]?.memberLabels };
+    const llm = new FakePlugins();
+    llm.installedNames.set("dataview", "Dataview"); // llm never had completr installed
+    const changed = backfillLockLabels([], llm, lock, { "core-plugins": null, "community-plugins": store });
+    expect(changed).toBe(false); // no-op: llm's merge carries completr's name forward unchanged
+    expect(lock.groups["community-plugins"]?.memberLabels).toEqual(beforeLlmHeal);
+  });
+
+  it("write-only-on-change still holds when the merge is a genuine no-op", () => {
+    const { plugins } = setup();
+    plugins.installedNames.set("dataview", "Dataview");
+    const entry = { sourceAppVersion: "1.8.7", memberLabels: { completr: "Completr", dataview: "Dataview" } };
+    const lock: StoreLock = { capturedAt: "t", groups: { "community-plugins": entry } };
+    backfillLockLabels([], plugins, lock, { "core-plugins": null, "community-plugins": ["completr", "dataview"] });
+    // Same object identity — no rewrite happened, not just an equal-by-value replacement.
+    expect(lock.groups["community-plugins"]).toBe(entry);
+  });
 });
 
 describe("capture backfills carried-forward entries' labels at the tail of the run", () => {
