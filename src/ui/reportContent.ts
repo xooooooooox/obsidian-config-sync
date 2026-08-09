@@ -20,12 +20,51 @@ export function changedOf(results: GroupResult[]): { changed: GroupResult[]; unc
   return { changed, unchanged: results.filter((r) => !changed.includes(r)) };
 }
 
+// Severity split (spec 2026-08-09-c-livetest-batch16 §2, C-#35): GroupResult.status alone
+// can't tell a genuine failure from a benign success-side note — both today land on
+// "warning" (e.g. "⚠ install failed" and the version-fallback note are both status
+// "warning"; core.test.ts pins that mapping, so it stays as-is). The stateNote's own kind
+// carries the real signal: "warn" means the action itself didn't fully succeed (an issue),
+// while "ok" (or no note) alongside messages means an FYI on an otherwise-successful group
+// (a note). This is presentation-only — it never touches GroupResult.status.
+export type ResultLevel = "error" | "warning" | "ok";
+
+export function resultLevel(r: GroupResult): ResultLevel {
+  if (r.status === "error" || r.stateNote?.kind === "warn") return "error";
+  if (r.status === "warning") return "warning";
+  return "ok";
+}
+
+const MESSAGE_LEVEL_CLS: Record<ResultLevel, string> = {
+  error: "config-sync-status-error",
+  warning: "config-sync-status-warn",
+  ok: "config-sync-status-note",
+};
+
+export interface StripHeader {
+  issues: number; // resultLevel "error" groups — the only tally that flips the strip to issue tone
+  notes: number; // resultLevel "warning" groups — success-side FYI notes (e.g. the version fallback)
+  tone: "issue" | "note" | "clean";
+}
+
+// Run-strip header derivation (spec 2026-08-09-c-livetest-batch16 §2, C-#35): any genuine
+// failure renders "⚠ Applied with N issue(s)" in issue tone; otherwise any success-side note
+// renders "Applied · N note(s)" in success tone; a run with neither is today's plain clean strip.
+export function stripHeader(results: GroupResult[]): StripHeader {
+  const issues = results.filter((r) => resultLevel(r) === "error").length;
+  const notes = results.filter((r) => resultLevel(r) === "warning").length;
+  const tone = issues > 0 ? "issue" : notes > 0 ? "note" : "clean";
+  return { issues, notes, tone };
+}
+
 export function renderReportPills(host: HTMLElement, results: GroupResult[]): void {
   const { changed, unchanged } = changedOf(results);
   // Failures must be visible without expanding details (real-vault finding 2026-07-17: a
-  // failed update read as "nothing happened" because only counts showed).
-  const errors = results.filter((r) => r.status === "error").length;
-  const warnings = results.filter((r) => r.status === "warning").length;
+  // failed update read as "nothing happened" because only counts showed). Counted by
+  // resultLevel (not raw status) so a genuine failure lands in the ✗ bucket even though its
+  // GroupResult.status is "warning" — see resultLevel's doc comment.
+  const errors = results.filter((r) => resultLevel(r) === "error").length;
+  const warnings = results.filter((r) => resultLevel(r) === "warning").length;
   const pills = host.createSpan({ cls: "config-sync-report-pills" });
   pills.createSpan({ cls: "config-sync-pill is-neutral", text: `${changed.length} changed` });
   if (errors > 0) pills.createSpan({ cls: "config-sync-pill is-error", text: `✗ ${errors}` });
@@ -90,7 +129,8 @@ function renderResultRow(block: HTMLElement, r: GroupResult, label: string): voi
   chip("del", "is-del", "−", r.changes.deleted.length);
   const detail = block.createDiv({ cls: "config-sync-report-files" });
   detail.hidden = !isError;
-  for (const m of r.messages) detail.createDiv({ cls: "config-sync-status-error", text: `• ${m}` });
+  const messageCls = MESSAGE_LEVEL_CLS[resultLevel(r)];
+  for (const m of r.messages) detail.createDiv({ cls: messageCls, text: `• ${m}` });
   for (const f of r.changes.added) detail.createDiv({ cls: "is-add", text: `+ ${f}` });
   for (const f of r.changes.updated) detail.createDiv({ cls: "is-upd", text: `~ ${f}` });
   for (const f of r.changes.deleted) detail.createDiv({ cls: "is-del", text: `− ${f}` });

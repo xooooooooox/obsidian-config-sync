@@ -667,6 +667,23 @@ describe("applyWithActions", () => {
     expect(plugins.log).toContain("enable-persist:demo");
     expect(plugins.enabled.has("demo")).toBe(true);
   });
+  // Regression (live evidence 2026-08-09, C-#35): the fallback line was pushed once via the
+  // prelude's own `messages` and again via `finish`'s success return — applyWithActions pushes
+  // both unconditionally, so it rendered twice.
+  it("install-enable with a version fallback reports the note exactly once, as a success note (not an issue)", async () => {
+    const { io, plugins, ctx } = setup();
+    await seedStore(io, ctx);
+    io.seed({ "cs/store.lock.json": JSON.stringify({ capturedAt: "t", groups: { "plugin-demo": { sourcePluginVersion: "2.2.2" } } }) });
+    const results = await applyWithActions(ctx, [{ name: "plugin-demo", action: "install-enable" }], async (id) => {
+      plugins.installed.set(id, "2.2.3");
+      return "2.2.3";
+    });
+    const fallbackLines = (results[0]?.messages ?? []).filter((m) => m.includes("no longer downloadable"));
+    expect(fallbackLines).toEqual(["the captured version 2.2.2 is no longer downloadable — installed 2.2.3 instead"]);
+    expect(results[0]?.stateNote).toEqual({ kind: "ok", text: "⤓ installed & enabled 2.2.3" });
+    expect(results[0]?.status).toBe("warning"); // a note on a successful install, never promoted to "error"
+    expect(plugins.enabled.has("demo")).toBe(true);
+  });
   it("install-only apply (no settings in the store) installs and enables without writing files", async () => {
     const { io, plugins, ctx } = setup();
     await seedGroups(ctx, MANIFEST); // group registered, but nothing captured for it
@@ -1036,6 +1053,24 @@ describe("switch-list apply switches the delta at runtime (spec B)", () => {
     expect(plugins.enabled.has("a")).toBe(false);
     expect(plugins.enabled.has("b")).toBe(true);
     expect((r?.messages ?? []).some((m) => m.includes("a"))).toBe(true);
+  });
+
+  // Regression (controller ruling, C-#35 follow-up): applyGroup pre-sets needsAppReload false
+  // right before the runtime switch runs (the switch itself is normally the reload), so a
+  // per-id failure leaves the written file and the running app disagreeing — that must
+  // restore needsAppReload to true (mirrors hotApplyAppearanceFamily's honest-on-failure
+  // behavior) or the Reload CTA never surfaces for a real drift.
+  it("a failing runtime switch restores needsAppReload so the Reload CTA surfaces the drift", async () => {
+    const { io, plugins, ctx } = setup();
+    plugins.failIds.add("a");
+    io.seed({
+      ".obs/community-plugins.json": "[]",
+      "cs/store/configdir/community-plugins.json": '["a","b"]',
+    });
+    await writeGroups(ctx, parseSyncManifest(COMMUNITY_MANIFEST).groups);
+    const results = await apply(ctx, ["community-plugins"]);
+    const r = results.find((x) => x.group === "community-plugins");
+    expect(r?.needsAppReload).toBe(true);
   });
 
   it("an obsidian config group still flags needsAppReload", async () => {

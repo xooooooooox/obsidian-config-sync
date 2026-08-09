@@ -62,7 +62,7 @@ import { Fate, FateInput, NOTHING_YET_SENTENCE, rowFate } from "./fateModel";
 import { renderDiffPanel } from "./diffView";
 import { SWITCH_LIST_GROUPS, switchListSortedView } from "../core/switchList";
 import { jsonSortedView } from "../core/merge";
-import { renderReportContent, renderReportPills } from "./reportContent";
+import { renderReportContent, renderReportPills, stripHeader } from "./reportContent";
 import { RunRecord, RunKind, RunStatus, worstStatus, formatRunTime, stopSyncDesc, deleteLeftoverDesc } from "../core/runHistory";
 import { ACTION_ICON, ACTION_COLOR_CLASS, renderActionIcon, renderActionCount, type SyncAction } from "./actionIcons";
 // SCOPE_LABELS aliased: this file already declares its own SCOPE_LABELS (sidebar category
@@ -1460,17 +1460,24 @@ export class SyncCenterView extends ItemView {
   private renderResultStrip(main: HTMLElement): void {
     const run = this.lastRun;
     if (run === null) return;
-    const status = worstStatus(run.results);
-    const cls = status === "error" ? " is-error" : status === "warning" ? " is-warn" : "";
+    // Severity split (spec 2026-08-09-c-livetest-batch16 §2, C-#35): only a genuine failure
+    // (tone "issue") flips the strip to issue tone; a benign success-side note (e.g. the
+    // version-fallback line) stays success-framed with its own amber count instead of reading
+    // as a failure. See reportContent.stripHeader/resultLevel's doc comments for the mapping.
+    const { issues, notes, tone } = stripHeader(run.results);
+    const cls = tone === "issue" ? " is-error" : "";
     // Sticky dock: an opaque backing pins the strip to the top of the scroll viewport so the
     // outcome stays visible even when the user is scrolled to the bottom of a long list.
     const dock = main.createDiv({ cls: "config-sync-strip-dock" });
     const strip = dock.createDiv({ cls: `config-sync-strip${cls}` });
     const head = strip.createDiv({ cls: "config-sync-strip-head" });
-    head.createSpan({ cls: "config-sync-strip-check", text: this.statusIcon(status) });
-    const issues = run.results.filter((r) => r.status !== "ok").length;
-    const title = this.runTitle(run.kind, run.remote) + (issues > 0 ? ` with ${issues} issue${issues === 1 ? "" : "s"}` : "");
-    head.createSpan({ cls: "config-sync-strip-title", text: title });
+    head.createSpan({ cls: "config-sync-strip-check", text: tone === "issue" ? "✗" : "✓" });
+    head.createSpan({ cls: "config-sync-strip-title", text: this.runTitle(run.kind, run.remote) });
+    if (tone === "issue") {
+      head.createSpan({ cls: "config-sync-strip-title", text: ` with ${issues} issue${issues === 1 ? "" : "s"}` });
+    } else if (tone === "note") {
+      head.createSpan({ cls: "config-sync-strip-notecount", text: ` · ${notes} note${notes === 1 ? "" : "s"}` });
+    }
     const meta = head.createDiv({ cls: "config-sync-strip-meta" });
     renderReportPills(meta, run.results);
     const toggle = meta.createSpan({ cls: "config-sync-strip-toggle", text: run.expanded ? "details ▾" : "details ▸" });

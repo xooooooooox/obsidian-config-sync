@@ -443,6 +443,22 @@ body.is-phone .config-sync-fkey {
   margin: 0 0 var(--size-4-1) var(--size-4-3);
 }
 
+/* Message-line severity (spec 2026-08-09-c-livetest-batch16 §2, C-#35): a group's messages
+   share its resultLevel — a genuine failure's guidance stays red, a success-side note (e.g.
+   the version-fallback line) is amber, and a purely informational line (e.g. "installed the
+   plugin only") is neutral. */
+.config-sync-status-warn {
+  color: var(--text-warning);
+  font-size: var(--font-ui-smaller);
+  margin: 0 0 var(--size-4-1) var(--size-4-3);
+}
+
+.config-sync-status-note {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  margin: 0 0 var(--size-4-1) var(--size-4-3);
+}
+
 .config-sync-remote-comparing { display: flex; align-items: center; gap: 8px; font-size: var(--font-ui-small); color: var(--text-muted); }
 .config-sync-cmp-elapsed { margin-left: auto; color: var(--text-faint); font-variant-numeric: tabular-nums; }
 .config-sync-cmp-phase { font-size: var(--font-ui-smaller); color: var(--text-muted); margin: 6px 0; }
@@ -1030,15 +1046,17 @@ body.is-mobile .config-sync-coldstart-actions { margin-left: auto; }
 .config-sync-strip-dock { position: sticky; top: 0; z-index: 5; background: var(--background-primary); padding-bottom: var(--size-4-2); border-bottom: 1px solid var(--background-modifier-border); margin-bottom: var(--size-4-2); }
 .config-sync-strip-dock .config-sync-strip { margin-bottom: 0; }
 .config-sync-strip { border: 1px solid rgba(var(--color-green-rgb), 0.35); background: rgba(var(--color-green-rgb), 0.07); border-radius: 8px; padding: 8px 12px; margin-bottom: 8px; }
-/* Outcome tone (batch: honest run reports) — the strip is green only when the run is clean. */
-.config-sync-strip.is-warn { border-color: rgba(var(--color-orange-rgb), 0.5); background: rgba(var(--color-orange-rgb), 0.09); }
+/* Outcome tone (spec 2026-08-09-c-livetest-batch16 §2, C-#35): the strip is red only when the
+   run has a genuine issue (resultLevel "error") — a success-with-notes run (e.g. the
+   version-fallback note) keeps the green success frame and gets its own amber note count
+   instead (.config-sync-strip-notecount). */
 .config-sync-strip.is-error { border-color: rgba(var(--color-red-rgb), 0.5); background: rgba(var(--color-red-rgb), 0.09); }
-.config-sync-strip.is-warn .config-sync-strip-check { color: var(--color-orange); }
 .config-sync-strip.is-error .config-sync-strip-check { color: var(--color-red); }
 .config-sync-strip-head { display: flex; align-items: center; gap: var(--size-4-2); }
 .config-sync-strip-meta { display: contents; }
 .config-sync-strip-check { color: var(--color-green); }
 .config-sync-strip-title { font-weight: 600; }
+.config-sync-strip-notecount { font-weight: 600; color: var(--text-warning); }
 .config-sync-strip-toggle { color: var(--interactive-accent); cursor: pointer; font-size: var(--font-ui-smaller); }
 .config-sync-strip-close { margin-left: auto; color: var(--text-faint); cursor: pointer; display: inline-flex; align-items: center; }
 .config-sync-strip-close svg { width: 14px; height: 14px; }

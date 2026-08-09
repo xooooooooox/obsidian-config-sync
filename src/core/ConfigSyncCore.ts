@@ -316,6 +316,11 @@ async function applyRuntimeSwitchDelta(ctx: CoreContext, groupName: string, delt
   const warn = (message: string): void => {
     result.messages.push(message);
     if (result.status === "ok") result.status = "warning";
+    // A failed runtime switch leaves the on-disk carrier and the running app disagreeing —
+    // applyGroup already set needsAppReload false before this call (the common case: the
+    // switch itself is the reload), so restore it here (mirrors hotApplyAppearanceFamily's
+    // honest-on-failure behavior) or the Reload CTA never surfaces for a real drift.
+    result.needsAppReload = true;
   };
   for (const id of delta.on) {
     try {
@@ -844,7 +849,10 @@ async function runStateAction(
           throw new Error(`Obsidian did not enable "${pluginId}" — enable it manually in Community plugins`);
         }
         const text = isUpdate ? `⤓ updated to ${version} & enabled` : `⤓ installed & enabled ${version}`;
-        return { note: { kind: "ok", text }, messages: fallbackMsgs };
+        // fallbackMsgs was already reported via the object above's `messages` field — applyWithActions
+        // pushes that unconditionally before finish ever runs (skipConfig-false path), so repeating it
+        // here would render the fallback line twice (live evidence 2026-08-09, C-#35).
+        return { note: { kind: "ok", text }, messages: [] };
       } catch (e) {
         const verb = isUpdate ? "updated" : "installed";
         return {
