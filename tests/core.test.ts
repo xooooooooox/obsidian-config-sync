@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { CoreContext, capture, captureWithActions, loadManifest, groupsForDevice, apply, applyWithActions, planImport, applyImport, PendingPull, ExternalStoreReader, pushExternal, ExternalStoreWriter, pluginIdForGroup, orderInstallsCatalogFirst, readGroups, writeGroups, deviceExcludedPluginIds, isSelfStoreRel, remoteGroupsFrom, groupForStoreRel } from "../src/core/ConfigSyncCore";
+import { CoreContext, capture, captureWithActions, loadManifest, groupsForDevice, apply, applyWithActions, planImport, applyImport, PendingPull, ExternalStoreReader, pushExternal, ExternalStoreWriter, pluginIdForGroup, orderInstallsCatalogFirst, readGroups, writeGroups, deviceExcludedPluginIds, isSelfStoreRel, remoteGroupsFrom, groupForStoreRel, backfillLockLabels } from "../src/core/ConfigSyncCore";
 import { parseSyncManifest } from "../src/core/manifest";
+import { SwitchList } from "../src/core/switchList";
+import { SELF_GROUP_NAME, selfPresetRules } from "../src/core/catalog";
 import { StoreLock, SyncGroup } from "../src/core/types";
 import { isFieldEnvelope, parseFileEnvelope } from "../src/core/crypto";
 import { statusForGroups, remoteLockAhead } from "../src/core/status";
@@ -9,6 +11,7 @@ import { isChanged } from "../src/core/runHistory";
 import { MemFS, FakePlugins, memGroupsIO } from "./memfs";
 import ConfigSyncPlugin from "../src/main";
 import { MemberDecision } from "../src/ui/panelModel";
+import { SelfSyncInfo } from "../src/ui/SyncCenterView";
 
 export const MANIFEST = JSON.stringify({
   version: 1,
@@ -382,6 +385,47 @@ describe("capture", () => {
     const again = await capture(ctx);
     expect(again[0]?.filesWritten).toEqual([]); // unchanged local content — nothing rewritten
   });
+
+  // C-#36: an encrypted FIELD whose plaintext didn't change must reuse its existing store envelope
+  // byte-for-byte, even when the group's file is rewritten because a DIFFERENT, unrelated field
+  // changed — mirrors the live BRAT bug (token fields' plaintexts identical both sides; the real
+  // change was pluginSubListFrozenVersion, but every capture re-encrypted the tokens anyway).
+  it("captures fields-mode encrypted keys as envelopes; re-capture with an unrelated plain-field change reuses the untouched envelope", async () => {
+    const FIELDS_MANIFEST = JSON.stringify({
+      version: 1,
+      groups: [
+        {
+          name: "beta",
+          path: "{configDir}/plugins/brat/data.json",
+          type: "file",
+          devices: "all",
+          mode: "fields",
+          fields: [{ pattern: "token", scope: "all", encrypted: true }],
+        },
+      ],
+    });
+    const { io, ctx } = setup();
+    ctx.passphrase = "pw";
+    io.seed({ ".obs/plugins/brat/data.json": JSON.stringify({ token: "ghp_secret", frozenVersion: 1 }) });
+    await seedGroups(ctx, FIELDS_MANIFEST);
+    await capture(ctx);
+    const stored1 = JSON.parse(await io.read("cs/store/configdir/plugins/brat/data.json")) as Record<string, unknown>;
+    expect(isFieldEnvelope(stored1["token"])).toBe(true);
+
+    // Only the unrelated plain field changes — the token's plaintext is identical.
+    await io.write(".obs/plugins/brat/data.json", JSON.stringify({ token: "ghp_secret", frozenVersion: 2 }));
+    const again = await capture(ctx);
+    expect(again[0]?.filesWritten).not.toEqual([]); // the file DID change (frozenVersion) — rewritten
+    const stored2 = JSON.parse(await io.read("cs/store/configdir/plugins/brat/data.json")) as Record<string, unknown>;
+    expect(stored2["token"]).toBe(stored1["token"]); // envelope reused byte-for-byte, not re-encrypted
+    expect(stored2["frozenVersion"]).toBe(2);
+
+    // A genuine token change DOES produce a new envelope.
+    await io.write(".obs/plugins/brat/data.json", JSON.stringify({ token: "ghp_rotated", frozenVersion: 2 }));
+    await capture(ctx);
+    const stored3 = JSON.parse(await io.read("cs/store/configdir/plugins/brat/data.json")) as Record<string, unknown>;
+    expect(stored3["token"]).not.toBe(stored2["token"]);
+  });
 });
 
 export async function seedStore(io: MemFS, ctx: CoreContext): Promise<void> {
@@ -486,6 +530,66 @@ describe("apply", () => {
   });
 });
 
+// C-#31: adoptConfiguration (main.ts) applies the self group ("plugin-config-sync") through this
+// same apply() — the exact path an "Adopt configuration" run takes. This is the §2 adopt truth
+// table: a store self-copy carrying bratPluginIndex/memberRules/items/customGroups (every kind of
+// top-level field the self item can carry, none of them preset-excluded) plus its own trio values,
+// applied over a local copy with DIFFERENT trio values — every synced field must come out equal to
+// the store, and the trio must come out equal to the PRE-adopt local values, untouched.
+describe("apply — self group field completeness (adopt truth table, C-#31)", () => {
+  const SELF_PATH = "{configDir}/plugins/config-sync/data.json";
+  const STORE_SELF_REL = "cs/store/configdir/plugins/config-sync/data.json";
+  const LOCAL_SELF_REL = ".obs/plugins/config-sync/data.json";
+
+  async function seedSelfGroup(ctx: CoreContext): Promise<void> {
+    await writeGroups(ctx, [
+      { name: SELF_GROUP_NAME, path: SELF_PATH, type: "file", devices: "all", mode: "fields", fields: selfPresetRules() },
+    ]);
+  }
+
+  it("adopt imports every synced field (bratPluginIndex included) and leaves the device-local trio untouched", async () => {
+    const { io, ctx } = setup();
+    await seedSelfGroup(ctx);
+    const store = {
+      schemaVersion: 2,
+      items: { "community:dataview": { enabled: true, companions: [] } },
+      customGroups: [{ name: "my-rule", path: "notes/custom.json", type: "file", devices: "all" }],
+      remotes: [{ name: "store-remote" }],
+      rootPath: "store-root",
+      localMembers: ["store-member"],
+      bratPluginIndex: { "my-text-tools": "owner/my-text-tools", "slides-rup": "owner/slides-rup" },
+      memberRules: { "community:table-editor-obsidian": "desktop" },
+    };
+    const local = {
+      schemaVersion: 2,
+      items: {},
+      customGroups: [],
+      remotes: [],
+      rootPath: "local-root",
+      localMembers: ["local-member"],
+      bratPluginIndex: {},
+      memberRules: {},
+    };
+    io.seed({ [STORE_SELF_REL]: JSON.stringify(store), [LOCAL_SELF_REL]: JSON.stringify(local) });
+
+    const results = await apply(ctx, [SELF_GROUP_NAME]);
+    expect(results[0]?.status).toBe("ok");
+    const after = JSON.parse(await io.read(LOCAL_SELF_REL)) as Record<string, unknown>;
+
+    // Every field the self compare tracks (i.e. everything selfPresetRules() does not name)
+    // adopts the store's value.
+    expect(after.items).toEqual(store.items);
+    expect(after.customGroups).toEqual(store.customGroups);
+    expect(after.bratPluginIndex).toEqual(store.bratPluginIndex);
+    expect(after.memberRules).toEqual(store.memberRules);
+    // The device-local trio (selfPresetRules' exclusion set) stays exactly as it was locally —
+    // never overwritten by the store's copy.
+    expect(after.rootPath).toBe(local.rootPath);
+    expect(after.remotes).toEqual(local.remotes);
+    expect(after.localMembers).toEqual(local.localMembers);
+  });
+});
+
 const APPEARANCE_MANIFEST = JSON.stringify({
   version: 1,
   groups: [
@@ -561,6 +665,23 @@ describe("applyWithActions", () => {
     expect(results[0]?.stateNote).toEqual({ kind: "ok", text: "⤓ installed & enabled 2.5.0" });
     expect(plugins.log).toContain("reload-manifests");
     expect(plugins.log).toContain("enable-persist:demo");
+    expect(plugins.enabled.has("demo")).toBe(true);
+  });
+  // Regression (live evidence 2026-08-09, C-#35): the fallback line was pushed once via the
+  // prelude's own `messages` and again via `finish`'s success return — applyWithActions pushes
+  // both unconditionally, so it rendered twice.
+  it("install-enable with a version fallback reports the note exactly once, as a success note (not an issue)", async () => {
+    const { io, plugins, ctx } = setup();
+    await seedStore(io, ctx);
+    io.seed({ "cs/store.lock.json": JSON.stringify({ capturedAt: "t", groups: { "plugin-demo": { sourcePluginVersion: "2.2.2" } } }) });
+    const results = await applyWithActions(ctx, [{ name: "plugin-demo", action: "install-enable" }], async (id) => {
+      plugins.installed.set(id, "2.2.3");
+      return "2.2.3";
+    });
+    const fallbackLines = (results[0]?.messages ?? []).filter((m) => m.includes("no longer downloadable"));
+    expect(fallbackLines).toEqual(["the captured version 2.2.2 is no longer downloadable — installed 2.2.3 instead"]);
+    expect(results[0]?.stateNote).toEqual({ kind: "ok", text: "⤓ installed & enabled 2.2.3" });
+    expect(results[0]?.status).toBe("warning"); // a note on a successful install, never promoted to "error"
     expect(plugins.enabled.has("demo")).toBe(true);
   });
   it("install-only apply (no settings in the store) installs and enables without writing files", async () => {
@@ -932,6 +1053,24 @@ describe("switch-list apply switches the delta at runtime (spec B)", () => {
     expect(plugins.enabled.has("a")).toBe(false);
     expect(plugins.enabled.has("b")).toBe(true);
     expect((r?.messages ?? []).some((m) => m.includes("a"))).toBe(true);
+  });
+
+  // Regression (controller ruling, C-#35 follow-up): applyGroup pre-sets needsAppReload false
+  // right before the runtime switch runs (the switch itself is normally the reload), so a
+  // per-id failure leaves the written file and the running app disagreeing — that must
+  // restore needsAppReload to true (mirrors hotApplyAppearanceFamily's honest-on-failure
+  // behavior) or the Reload CTA never surfaces for a real drift.
+  it("a failing runtime switch restores needsAppReload so the Reload CTA surfaces the drift", async () => {
+    const { io, plugins, ctx } = setup();
+    plugins.failIds.add("a");
+    io.seed({
+      ".obs/community-plugins.json": "[]",
+      "cs/store/configdir/community-plugins.json": '["a","b"]',
+    });
+    await writeGroups(ctx, parseSyncManifest(COMMUNITY_MANIFEST).groups);
+    const results = await apply(ctx, ["community-plugins"]);
+    const r = results.find((x) => x.group === "community-plugins");
+    expect(r?.needsAppReload).toBe(true);
   });
 
   it("an obsidian config group still flags needsAppReload", async () => {
@@ -1642,6 +1781,283 @@ describe("capture records a group label", () => {
   });
 });
 
+// 2026-08-09-c-livetest-batch15 (spec 2026-08-09-c-livetest-batch15-member-labels.md): capture's
+// own tail heal call (backfillLockLabels, wired with the store content this run just wrote) is
+// the writer for a captured carrier's memberLabels — COMMUNITY_MANIFEST/CORE_MANIFEST are defined
+// further down this file (switch-list exceptions describe block) but usable here: vitest runs
+// `it` bodies only after the whole module has finished evaluating.
+describe("capture records carrier memberLabels", () => {
+  it("records memberLabels for every resolvable id in the community carrier's resulting store list", async () => {
+    const { io, plugins, ctx } = setup();
+    plugins.installedNames.set("dataview", "Dataview");
+    plugins.installedNames.set("templater", "Templater");
+    io.seed({ ".obs/community-plugins.json": JSON.stringify(["dataview", "templater", "not-installed-anywhere"]) });
+    await seedGroups(ctx, COMMUNITY_MANIFEST);
+    await capture(ctx, ["community-plugins"]);
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, unknown> };
+    expect(lock.groups["community-plugins"]).toEqual({
+      sourceAppVersion: "1.8.7",
+      memberLabels: { dataview: "Dataview", templater: "Templater" },
+    });
+  });
+
+  it("records memberLabels for every resolvable id in the core carrier's resulting store list (map shape)", async () => {
+    const { io, plugins, ctx } = setup();
+    plugins.coreNames.set("daily-notes", "Daily notes");
+    io.seed({ ".obs/core-plugins.json": JSON.stringify({ "daily-notes": true, graph: false }) });
+    await seedGroups(ctx, CORE_MANIFEST);
+    await capture(ctx, ["core-plugins"]);
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, unknown> };
+    expect(lock.groups["core-plugins"]).toEqual({ sourceAppVersion: "1.8.7", memberLabels: { "daily-notes": "Daily notes" } });
+  });
+});
+
+// batch6 task-1 (spec 2026-08-08-c-livetest-batch6-remote-labels.md): a group entry born before
+// capture started resolving labels (or from an all-in-sync run that never touched it) stays
+// label-less forever without a dedicated heal — backfillLockLabels is that heal, run at the tail
+// of every capture and once at startup (main.ts) so the remote pane always has a name to show.
+//
+// carrierLists (batch15 signature addition) is irrelevant to these single-label cases — both
+// carriers null means "nothing to heal there", so behavior is byte-identical to the pre-batch15 calls.
+const NO_CARRIER_LISTS: Record<"core-plugins" | "community-plugins", SwitchList | null> = {
+  "core-plugins": null,
+  "community-plugins": null,
+};
+
+describe("backfillLockLabels", () => {
+  const PLUGIN_DEMO_GROUP: SyncGroup = { name: "plugin-demo", path: "{configDir}/plugins/demo/data.json", type: "file", devices: "all" };
+  const PLUGIN_FOO_GROUP: SyncGroup = { name: "plugin-foo", path: "{configDir}/plugins/foo/data.json", type: "file", devices: "all" };
+  // "daily-notes" is a CORE_ID_SEED member (catalog.ts) — resolvable without any special setup.
+  const CORE_GROUP: SyncGroup = { name: "daily-notes", path: "{configDir}/daily-notes.json", type: "file", devices: "all" };
+
+  it("fills in labels for label-less resolvable community and core entries", () => {
+    const { plugins } = setup();
+    plugins.installedNames.set("demo", "Demo Plugin");
+    plugins.coreNames.set("daily-notes", "Daily notes");
+    const lock: StoreLock = {
+      capturedAt: "2026-01-01T00:00:00.000Z",
+      groups: { "plugin-demo": { sourcePluginVersion: "1.0.0" }, "daily-notes": { sourceAppVersion: "1.8.7" } },
+    };
+    const changed = backfillLockLabels([PLUGIN_DEMO_GROUP, CORE_GROUP], plugins, lock, NO_CARRIER_LISTS);
+    expect(changed).toBe(true);
+    expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.0.0", label: "Demo Plugin" });
+    expect(lock.groups["daily-notes"]).toEqual({ sourceAppVersion: "1.8.7", label: "Daily notes" });
+  });
+
+  it("leaves a not-installed community entry untouched", () => {
+    const { plugins } = setup(); // plugins.installedNames has nothing for "foo" — not installed
+    const lock: StoreLock = { capturedAt: "2026-01-01T00:00:00.000Z", groups: { "plugin-foo": { sourcePluginVersion: "1.0.0" } } };
+    const changed = backfillLockLabels([PLUGIN_FOO_GROUP], plugins, lock, NO_CARRIER_LISTS);
+    expect(changed).toBe(false);
+    expect(lock.groups["plugin-foo"]).toEqual({ sourcePluginVersion: "1.0.0" });
+  });
+
+  it("refreshes a stale label", () => {
+    const { plugins } = setup();
+    plugins.installedNames.set("demo", "Renamed Plugin");
+    const lock: StoreLock = {
+      capturedAt: "2026-01-01T00:00:00.000Z",
+      groups: { "plugin-demo": { sourcePluginVersion: "1.0.0", label: "Demo Plugin" } },
+    };
+    const changed = backfillLockLabels([PLUGIN_DEMO_GROUP], plugins, lock, NO_CARRIER_LISTS);
+    expect(changed).toBe(true);
+    expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.0.0", label: "Renamed Plugin" });
+  });
+
+  it("reports no change (and leaves the lock untouched) when every label is already current", () => {
+    const { plugins } = setup();
+    plugins.installedNames.set("demo", "Demo Plugin");
+    const lock: StoreLock = {
+      capturedAt: "2026-01-01T00:00:00.000Z",
+      groups: { "plugin-demo": { sourcePluginVersion: "1.0.0", label: "Demo Plugin" } },
+    };
+    const changed = backfillLockLabels([PLUGIN_DEMO_GROUP], plugins, lock, NO_CARRIER_LISTS);
+    expect(changed).toBe(false);
+    expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.0.0", label: "Demo Plugin" });
+  });
+
+  it("never touches capturedAt", () => {
+    const { plugins } = setup();
+    plugins.installedNames.set("demo", "Demo Plugin");
+    const lock: StoreLock = { capturedAt: "2026-01-01T00:00:00.000Z", groups: { "plugin-demo": { sourcePluginVersion: "1.0.0" } } };
+    backfillLockLabels([PLUGIN_DEMO_GROUP], plugins, lock, NO_CARRIER_LISTS);
+    expect(lock.capturedAt).toBe("2026-01-01T00:00:00.000Z");
+  });
+
+  it("does not resolve a label for an entry with no matching local group (orphaned/dropped)", () => {
+    const { plugins } = setup();
+    plugins.installedNames.set("demo", "Demo Plugin");
+    const lock: StoreLock = { capturedAt: "2026-01-01T00:00:00.000Z", groups: { "plugin-demo": { sourcePluginVersion: "1.0.0" } } };
+    const changed = backfillLockLabels([], plugins, lock, NO_CARRIER_LISTS); // manifest no longer declares plugin-demo
+    expect(changed).toBe(false);
+    expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.0.0" });
+  });
+});
+
+// 2026-08-09-c-livetest-batch15 (spec 2026-08-09-c-livetest-batch15-member-labels.md): the two
+// carrier lock entries (core-plugins, community-plugins) additionally carry memberLabels — a name
+// for every CURRENT store-list member this device can resolve, healed the same way the single
+// label above is (write-only-on-change, capturedAt untouched).
+describe("backfillLockLabels memberLabels", () => {
+  it("fills in memberLabels for every resolvable id in the community carrier's current store list", () => {
+    const { plugins } = setup();
+    plugins.installedNames.set("dataview", "Dataview");
+    plugins.installedNames.set("templater", "Templater");
+    const lock: StoreLock = { capturedAt: "t", groups: { "community-plugins": { sourceAppVersion: "1.8.7" } } };
+    const changed = backfillLockLabels([], plugins, lock, { "core-plugins": null, "community-plugins": ["dataview", "templater", "unresolvable"] });
+    expect(changed).toBe(true);
+    expect(lock.groups["community-plugins"]).toEqual({
+      sourceAppVersion: "1.8.7",
+      memberLabels: { dataview: "Dataview", templater: "Templater" },
+    });
+  });
+
+  it("fills in memberLabels for every resolvable id in the core carrier's current store list (map shape)", () => {
+    const { plugins } = setup();
+    plugins.coreNames.set("daily-notes", "Daily notes");
+    const lock: StoreLock = { capturedAt: "t", groups: { "core-plugins": { sourceAppVersion: "1.8.7" } } };
+    const changed = backfillLockLabels(
+      [],
+      plugins,
+      lock,
+      { "core-plugins": { "daily-notes": true, "not-a-core-id": false }, "community-plugins": null }
+    );
+    expect(changed).toBe(true);
+    expect(lock.groups["core-plugins"]).toEqual({ sourceAppVersion: "1.8.7", memberLabels: { "daily-notes": "Daily notes" } });
+  });
+
+  it("leaves an unresolvable-only store list without a memberLabels field (no change)", () => {
+    const { plugins } = setup(); // nothing installed
+    const lock: StoreLock = { capturedAt: "t", groups: { "community-plugins": { sourceAppVersion: "1.8.7" } } };
+    const changed = backfillLockLabels([], plugins, lock, { "core-plugins": null, "community-plugins": ["unresolvable"] });
+    expect(changed).toBe(false);
+    expect(lock.groups["community-plugins"]).toEqual({ sourceAppVersion: "1.8.7" });
+  });
+
+  it("reports no change when memberLabels are already current", () => {
+    const { plugins } = setup();
+    plugins.installedNames.set("dataview", "Dataview");
+    const lock: StoreLock = {
+      capturedAt: "t",
+      groups: { "community-plugins": { sourceAppVersion: "1.8.7", memberLabels: { dataview: "Dataview" } } },
+    };
+    const changed = backfillLockLabels([], plugins, lock, { "core-plugins": null, "community-plugins": ["dataview"] });
+    expect(changed).toBe(false);
+    expect(lock.groups["community-plugins"]).toEqual({ sourceAppVersion: "1.8.7", memberLabels: { dataview: "Dataview" } });
+  });
+
+  it("skips a carrier with no lock entry of its own", () => {
+    const { plugins } = setup();
+    plugins.installedNames.set("dataview", "Dataview");
+    const lock: StoreLock = { capturedAt: "t", groups: {} };
+    const changed = backfillLockLabels([], plugins, lock, { "core-plugins": null, "community-plugins": ["dataview"] });
+    expect(changed).toBe(false);
+    expect(lock.groups["community-plugins"]).toBeUndefined();
+  });
+
+  it("never touches capturedAt when only memberLabels change", () => {
+    const { plugins } = setup();
+    plugins.installedNames.set("dataview", "Dataview");
+    const lock: StoreLock = { capturedAt: "2026-01-01T00:00:00.000Z", groups: { "community-plugins": { sourceAppVersion: "1.8.7" } } };
+    backfillLockLabels([], plugins, lock, { "core-plugins": null, "community-plugins": ["dataview"] });
+    expect(lock.capturedAt).toBe("2026-01-01T00:00:00.000Z");
+  });
+
+  // Review round 2 fix (2026-08-09-c-livetest-batch15): the heal must MERGE additively — a name
+  // this device can't resolve locally must survive from the existing map, never get erased just
+  // because this device's own plugin set is narrower. Reviewer's exact empirical repro: seeded
+  // {completr, dataview}, a device with only dataview installed used to heal the map down to
+  // {dataview} — completr's name was gone.
+  it("superset preservation: a name unresolvable on THIS device survives the heal (reviewer repro)", () => {
+    const { plugins } = setup();
+    plugins.installedNames.set("dataview", "Dataview"); // "completr" is NOT installed here
+    const lock: StoreLock = {
+      capturedAt: "t",
+      groups: { "community-plugins": { sourceAppVersion: "1.8.7", memberLabels: { completr: "Completr", dataview: "Dataview" } } },
+    };
+    const changed = backfillLockLabels([], plugins, lock, { "core-plugins": null, "community-plugins": ["completr", "dataview"] });
+    expect(changed).toBe(false); // already converged — merge is a no-op
+    expect(lock.groups["community-plugins"]).toEqual({
+      sourceAppVersion: "1.8.7",
+      memberLabels: { completr: "Completr", dataview: "Dataview" },
+    });
+  });
+
+  it("drops an id no longer in the current store list, even though its existing name was known", () => {
+    const { plugins } = setup();
+    plugins.installedNames.set("dataview", "Dataview");
+    const lock: StoreLock = {
+      capturedAt: "t",
+      groups: { "community-plugins": { sourceAppVersion: "1.8.7", memberLabels: { completr: "Completr", dataview: "Dataview" } } },
+    };
+    // "completr" no longer appears in the store list (uninstalled/removed everywhere) — dropped.
+    const changed = backfillLockLabels([], plugins, lock, { "core-plugins": null, "community-plugins": ["dataview"] });
+    expect(changed).toBe(true);
+    expect(lock.groups["community-plugins"]).toEqual({ sourceAppVersion: "1.8.7", memberLabels: { dataview: "Dataview" } });
+  });
+
+  it("local resolution refreshes a stale existing name for an id this device CAN resolve", () => {
+    const { plugins } = setup();
+    plugins.installedNames.set("dataview", "Dataview (renamed)");
+    const lock: StoreLock = {
+      capturedAt: "t",
+      groups: { "community-plugins": { sourceAppVersion: "1.8.7", memberLabels: { dataview: "Dataview (stale)" } } },
+    };
+    const changed = backfillLockLabels([], plugins, lock, { "core-plugins": null, "community-plugins": ["dataview"] });
+    expect(changed).toBe(true);
+    expect(lock.groups["community-plugins"]).toEqual({ sourceAppVersion: "1.8.7", memberLabels: { dataview: "Dataview (renamed)" } });
+  });
+
+  it("two-device convergence: kickstart's heal (both installed) then llm's heal (only dataview installed) leave the map unchanged", () => {
+    const store: SwitchList = ["completr", "dataview"];
+    const lock: StoreLock = { capturedAt: "t", groups: { "community-plugins": { sourceAppVersion: "1.8.7" } } };
+
+    const kickstart = new FakePlugins();
+    kickstart.installedNames.set("completr", "Completr");
+    kickstart.installedNames.set("dataview", "Dataview");
+    backfillLockLabels([], kickstart, lock, { "core-plugins": null, "community-plugins": store });
+    expect(lock.groups["community-plugins"]?.memberLabels).toEqual({ completr: "Completr", dataview: "Dataview" });
+
+    const beforeLlmHeal = { ...lock.groups["community-plugins"]?.memberLabels };
+    const llm = new FakePlugins();
+    llm.installedNames.set("dataview", "Dataview"); // llm never had completr installed
+    const changed = backfillLockLabels([], llm, lock, { "core-plugins": null, "community-plugins": store });
+    expect(changed).toBe(false); // no-op: llm's merge carries completr's name forward unchanged
+    expect(lock.groups["community-plugins"]?.memberLabels).toEqual(beforeLlmHeal);
+  });
+
+  it("write-only-on-change still holds when the merge is a genuine no-op", () => {
+    const { plugins } = setup();
+    plugins.installedNames.set("dataview", "Dataview");
+    const entry = { sourceAppVersion: "1.8.7", memberLabels: { completr: "Completr", dataview: "Dataview" } };
+    const lock: StoreLock = { capturedAt: "t", groups: { "community-plugins": entry } };
+    backfillLockLabels([], plugins, lock, { "core-plugins": null, "community-plugins": ["completr", "dataview"] });
+    // Same object identity — no rewrite happened, not just an equal-by-value replacement.
+    expect(lock.groups["community-plugins"]).toBe(entry);
+  });
+});
+
+describe("capture backfills carried-forward entries' labels at the tail of the run", () => {
+  it("heals a label-less carried-forward entry even though this run didn't select it", async () => {
+    const { io, plugins, ctx } = setup();
+    plugins.installed.set("demo", "1.2.3");
+    io.seed({ ".obs/hotkeys.json": "{}", ".obs/plugins/demo/data.json": "{}" });
+    await seedGroups(ctx, MANIFEST);
+    // First capture predates label resolution (simulated): write a lock entry with no label.
+    await capture(ctx);
+    await io.write(
+      "cs/store.lock.json",
+      JSON.stringify({ capturedAt: "2026-07-08T00:00:00.000Z", groups: { "plugin-demo": { sourcePluginVersion: "1.2.3" } } }, null, 2) + "\n"
+    );
+    // The plugin only becomes resolvable NOW — a real capture run must still heal it, even
+    // though this run only selects "hotkeys" and never touches plugin-demo directly.
+    plugins.installedNames.set("demo", "Demo Plugin");
+    await capture(ctx, ["hotkeys"]);
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, unknown> };
+    expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.2.3", label: "Demo Plugin" });
+  });
+});
+
 const COMMUNITY_MANIFEST = JSON.stringify({
   version: 1,
   groups: [{ name: "community-plugins", path: "{configDir}/community-plugins.json", type: "file", devices: "all" }],
@@ -1750,6 +2166,21 @@ describe("switch-list exceptions", () => {
       await apply(ctx, ["community-plugins"]);
       expect(JSON.parse(await io.read(".obs/community-plugins.json"))).toEqual(["a", "b"]);
     });
+
+    // Mask table (Sync Center unified grammar, task 2): always-here → exception + forceOn. The
+    // member is off locally AND off in the store list, yet an always-here rule still turns it on.
+    it("switchForceOn turns on an always-here member that is off locally and off in the store", async () => {
+      const { io, ctx } = setup();
+      ctx.switchExceptions["community-plugins"] = ["always-on"];
+      ctx.switchForceOn = { "community-plugins": ["always-on"] };
+      io.seed({
+        "cs/store/configdir/community-plugins.json": JSON.stringify(["a"]),
+        ".obs/community-plugins.json": JSON.stringify(["a"]),
+      });
+      await seedGroups(ctx, COMMUNITY_MANIFEST);
+      await apply(ctx, ["community-plugins"]);
+      expect(JSON.parse(await io.read(".obs/community-plugins.json"))).toEqual(["a", "always-on"]);
+    });
   });
 
   describe("status (community-plugins array)", () => {
@@ -1855,6 +2286,120 @@ describe("switch-list exceptions", () => {
       const manifest = await loadManifest(ctx);
       const { statuses } = await statusForGroups(ctx, groupsForDevice(manifest, "desktop"), emptyLedger());
       expect(statuses[0]?.state).not.toBe("in-sync");
+    });
+  });
+});
+
+describe("partial-selection switch staging (Sync Center unified grammar, task 3)", () => {
+  describe("applyWithActions with ApplyItem.stagedMembers", () => {
+    it("stages a subset — only staged members flip, delta message shrinks to them", async () => {
+      const { io, ctx } = setup();
+      io.seed({
+        ".obs/community-plugins.json": JSON.stringify(["keep"]),
+        "cs/store/configdir/community-plugins.json": JSON.stringify(["keep", "a", "b"]),
+      });
+      await seedGroups(ctx, COMMUNITY_MANIFEST);
+      const results = await applyWithActions(ctx, [{ name: "community-plugins", action: "none", stagedMembers: ["a"] }], async () => "9.9.9");
+      const r = results.find((x) => x.group === "community-plugins");
+      expect(r?.messages).toEqual(["turns on: a"]);
+      // "b" is unstaged — it keeps its local value (absent). Only "a" was staged, so it's the
+      // one non-excepted (store-synced) id; "keep" is unstaged, so it passes through from local.
+      expect(JSON.parse(await io.read(".obs/community-plugins.json"))).toEqual(["a", "keep"]);
+    });
+
+    it("stagedMembers: [] writes settings but touches no switches", async () => {
+      const { io, ctx } = setup();
+      io.seed({
+        ".obs/community-plugins.json": JSON.stringify(["keep"]),
+        "cs/store/configdir/community-plugins.json": JSON.stringify(["keep", "a"]),
+      });
+      await seedGroups(ctx, COMMUNITY_MANIFEST);
+      const results = await applyWithActions(ctx, [{ name: "community-plugins", action: "none", stagedMembers: [] }], async () => "9.9.9");
+      const r = results.find((x) => x.group === "community-plugins");
+      expect(r?.status).not.toBe("error");
+      expect(r?.messages).toEqual([]);
+      expect(JSON.parse(await io.read(".obs/community-plugins.json"))).toEqual(["keep"]);
+    });
+
+    it("stagedMembers undefined applies the whole list, byte-for-byte as today", async () => {
+      const { io, ctx } = setup();
+      io.seed({
+        ".obs/community-plugins.json": JSON.stringify(["keep", "local-only"]),
+        "cs/store/configdir/community-plugins.json": JSON.stringify(["keep", "store-only"]),
+      });
+      await seedGroups(ctx, COMMUNITY_MANIFEST);
+      const results = await applyWithActions(ctx, [{ name: "community-plugins", action: "none" }], async () => "9.9.9");
+      const r = results.find((x) => x.group === "community-plugins");
+      expect(r?.messages).toContain("turns on: store-only");
+      expect(r?.messages).toContain("turns off: local-only");
+      expect(JSON.parse(await io.read(".obs/community-plugins.json"))).toEqual(["keep", "store-only"]);
+    });
+
+    // Review fix (task 3): subtractForceOff/addForceOn used to run unconditionally, ignoring
+    // stagedMembers — a force-on/off mask could flip an UNSTAGED member's switch even with
+    // stagedMembers: []. Masks must now be scoped to stagedMembers when it is provided.
+    it("stagedMembers: [] leaves an active switchForceOn mask untouched (reviewer counterexample)", async () => {
+      const { io, ctx } = setup();
+      ctx.switchForceOn = { "community-plugins": ["always-on"] };
+      io.seed({
+        ".obs/community-plugins.json": JSON.stringify(["a"]),
+        "cs/store/configdir/community-plugins.json": JSON.stringify(["a"]),
+      });
+      await seedGroups(ctx, COMMUNITY_MANIFEST);
+      const results = await applyWithActions(ctx, [{ name: "community-plugins", action: "none", stagedMembers: [] }], async () => "9.9.9");
+      const r = results.find((x) => x.group === "community-plugins");
+      expect(r?.messages).toEqual([]); // zero switch flips, even though the mask is active
+      expect(JSON.parse(await io.read(".obs/community-plugins.json"))).toEqual(["a"]);
+    });
+
+    it("a member both staged AND force-on still flips (a staged member's Runs-on rule still applies)", async () => {
+      const { io, ctx } = setup();
+      ctx.switchForceOn = { "community-plugins": ["always-on"] };
+      io.seed({
+        ".obs/community-plugins.json": JSON.stringify(["a"]),
+        "cs/store/configdir/community-plugins.json": JSON.stringify(["a"]),
+      });
+      await seedGroups(ctx, COMMUNITY_MANIFEST);
+      const results = await applyWithActions(ctx, [{ name: "community-plugins", action: "none", stagedMembers: ["always-on"] }], async () => "9.9.9");
+      const r = results.find((x) => x.group === "community-plugins");
+      expect(r?.messages).toEqual(["turns on: always-on"]);
+      expect(JSON.parse(await io.read(".obs/community-plugins.json"))).toEqual(["a", "always-on"]);
+    });
+  });
+
+  describe("captureWithActions with CaptureItem.stagedMembers", () => {
+    it("stages a subset — the store changes only for the staged id", async () => {
+      const { io, ctx } = setup();
+      io.seed({
+        "cs/store/configdir/community-plugins.json": JSON.stringify(["keep"]),
+        ".obs/community-plugins.json": JSON.stringify(["keep", "a", "b"]),
+      });
+      await seedGroups(ctx, COMMUNITY_MANIFEST);
+      await captureWithActions(ctx, [{ name: "community-plugins", action: "none", stagedMembers: ["a"] }]);
+      expect(JSON.parse(await io.read("cs/store/configdir/community-plugins.json"))).toEqual(["keep", "a"]);
+    });
+
+    it("stagedMembers: [] writes settings but leaves the store's member set untouched", async () => {
+      const { io, ctx } = setup();
+      io.seed({
+        "cs/store/configdir/community-plugins.json": JSON.stringify(["keep"]),
+        ".obs/community-plugins.json": JSON.stringify(["keep", "a"]),
+      });
+      await seedGroups(ctx, COMMUNITY_MANIFEST);
+      const results = await captureWithActions(ctx, [{ name: "community-plugins", action: "none", stagedMembers: [] }]);
+      expect(results.find((r) => r.group === "community-plugins")?.status).not.toBe("error");
+      expect(JSON.parse(await io.read("cs/store/configdir/community-plugins.json"))).toEqual(["keep"]);
+    });
+
+    it("stagedMembers undefined captures the whole list, byte-for-byte as today", async () => {
+      const { io, ctx } = setup();
+      io.seed({
+        "cs/store/configdir/community-plugins.json": JSON.stringify(["keep"]),
+        ".obs/community-plugins.json": JSON.stringify(["keep", "a", "b"]),
+      });
+      await seedGroups(ctx, COMMUNITY_MANIFEST);
+      await captureWithActions(ctx, [{ name: "community-plugins", action: "none" }]);
+      expect(JSON.parse(await io.read("cs/store/configdir/community-plugins.json"))).toEqual(["keep", "a", "b"]);
     });
   });
 });
@@ -1980,6 +2525,101 @@ describe("ConfigSyncPlugin.addSwitchExceptions — 'this device' retarget onto l
 
     expect(plugin.settings.localMembers).toContain("community:remotely-save");
     expect(plugin.settings.items["community:remotely-save"]?.enabledOn).toBeUndefined();
+  });
+});
+
+interface MemberRulePluginSurface {
+  app: unknown;
+  loadData: () => Promise<unknown>;
+  saveData: (d: unknown) => Promise<void>;
+  loadSettings: () => Promise<void>;
+  addSwitchExceptions: (name: string, ids: string[]) => Promise<void>;
+  settings: {
+    rootPath: string;
+    localMembers: string[];
+    memberRules: Record<string, string>;
+    items: Record<string, { enabled: boolean; companions: unknown[] }>;
+  };
+  coreContext: () => Promise<{ switchForceOff: Record<string, string[]>; switchForceOn: Record<string, string[]> }>;
+}
+
+// task-2 fix #1/#2: a real ConfigSyncPlugin instance, community-plugins.json backed by a real
+// MemFS (so localSwitchListFor reads actual persisted content, not a stub), with a configurable
+// LIVE enabled-plugins set distinct from that persisted content — the exact divergence
+// pluginState.ts documents (a non-persistent enablePlugin can leave a plugin loaded without it
+// being in the persisted enabled set).
+function makeMemberRulePlugin(io: MemFS, liveEnabled: string[]): MemberRulePluginSurface {
+  const plugin = new ConfigSyncPlugin({} as never, {} as never);
+  const instance = plugin as unknown as MemberRulePluginSurface;
+  instance.app = {
+    vault: { adapter: io, configDir: "config-dir", on: () => ({}) },
+    internalPlugins: { plugins: {} },
+    plugins: { manifests: {}, enabledPlugins: new Set<string>(liveEnabled), plugins: {} },
+    workspace: { getLeavesOfType: () => [] },
+    loadLocalStorage: () => null,
+  };
+  instance.loadData = async () => ({ schemaVersion: 2, items: {}, remotes: [], bratPluginIndex: {} });
+  instance.saveData = async () => {};
+  return instance;
+}
+
+describe("mask producers read the PERSISTED switch-list file, not live PluginHost state (task-2 fix #1)", () => {
+  it("a live-enabled but not-persisted 'this device' pin is treated as off (never-here → forceOff, not forceOn)", async () => {
+    const io = new MemFS();
+    io.seed({ "config-dir/community-plugins.json": JSON.stringify(["other-plugin"]) }); // "remotely-save" absent
+    const plugin = makeMemberRulePlugin(io, ["remotely-save"]); // LIVE: reports enabled
+    await plugin.loadSettings();
+    plugin.settings.rootPath = "cs"; // skip PKM auto-detection, irrelevant here
+    plugin.settings.items["community:remotely-save"] = { enabled: true, companions: [] };
+    await plugin.addSwitchExceptions("community-plugins", ["remotely-save"]); // legacy "this device" pin
+
+    const ctx = await plugin.coreContext();
+    expect(ctx.switchForceOff["community-plugins"] ?? []).toContain("remotely-save");
+    expect(ctx.switchForceOn["community-plugins"] ?? []).not.toContain("remotely-save");
+  });
+
+  it("a live-enabled AND persisted 'this device' pin resolves to on (always-here → forceOn)", async () => {
+    const io = new MemFS();
+    io.seed({ "config-dir/community-plugins.json": JSON.stringify(["remotely-save"]) }); // persisted ON
+    const plugin = makeMemberRulePlugin(io, ["remotely-save"]);
+    await plugin.loadSettings();
+    plugin.settings.rootPath = "cs";
+    plugin.settings.items["community:remotely-save"] = { enabled: true, companions: [] };
+    await plugin.addSwitchExceptions("community-plugins", ["remotely-save"]);
+
+    const ctx = await plugin.coreContext();
+    expect(ctx.switchForceOn["community-plugins"] ?? []).toContain("remotely-save");
+    expect(ctx.switchForceOff["community-plugins"] ?? []).not.toContain("remotely-save");
+  });
+});
+
+describe("settings.memberRules (task-2 fix #2: a stored MemberRule wins over legacy normalization)", () => {
+  it("a stored always-here rule forces on even though the plugin is off both live and persisted", async () => {
+    const io = new MemFS();
+    io.seed({ "config-dir/community-plugins.json": JSON.stringify([]) }); // off, persisted
+    const plugin = makeMemberRulePlugin(io, []); // off, live
+    await plugin.loadSettings();
+    plugin.settings.rootPath = "cs";
+    plugin.settings.items["community:remotely-save"] = { enabled: true, companions: [] };
+    plugin.settings.memberRules["community:remotely-save"] = "always-here"; // no localMembers pin at all
+
+    const ctx = await plugin.coreContext();
+    expect(ctx.switchForceOn["community-plugins"] ?? []).toContain("remotely-save");
+  });
+
+  it("a stored never-here rule forces off even though a legacy 'this device' pin is on persisted", async () => {
+    const io = new MemFS();
+    io.seed({ "config-dir/community-plugins.json": JSON.stringify(["remotely-save"]) }); // on, persisted
+    const plugin = makeMemberRulePlugin(io, ["remotely-save"]); // on, live
+    await plugin.loadSettings();
+    plugin.settings.rootPath = "cs";
+    plugin.settings.items["community:remotely-save"] = { enabled: true, companions: [] };
+    await plugin.addSwitchExceptions("community-plugins", ["remotely-save"]); // legacy pin would normalize to always-here
+    plugin.settings.memberRules["community:remotely-save"] = "never-here"; // stored rule overrides it
+
+    const ctx = await plugin.coreContext();
+    expect(ctx.switchForceOff["community-plugins"] ?? []).toContain("remotely-save");
+    expect(ctx.switchForceOn["community-plugins"] ?? []).not.toContain("remotely-save");
   });
 });
 
@@ -2256,5 +2896,70 @@ describe("groupForStoreRel — sidecar display label", () => {
   it("a device sidecar is labeled apart from the main file", () => {
     expect(groupForStoreRel(groups, "store/configdir/app.json.__scopes__.desktop.json")).toEqual({ name: "app", itemRel: "app.json \u00b7 desktop values" });
     expect(groupForStoreRel(groups, "store/configdir/app.json.__scopes__.mobile.json")).toEqual({ name: "app", itemRel: "app.json \u00b7 mobile values" });
+  });
+});
+
+interface SelfStatusPluginSurface {
+  app: unknown;
+  loadData: () => Promise<unknown>;
+  saveData: (d: unknown) => Promise<void>;
+  loadSettings: () => Promise<void>;
+  settings: { rootPath: string };
+  syncCenterHost: () => { selfStatus: () => Promise<SelfSyncInfo> };
+}
+
+// C-#19 (spec 2026-08-08-c-livetest-batch9 \u00a71): storePresent must reflect the store lock OR the
+// store's self-copy, never itemCount \u2014 a device with no compiled local list (settings.items
+// stays {} here, same as makeSwitchPlugin's stub loadData) always takes selfStatus's coldstart
+// early return, so these cases isolate storePresent's own derivation.
+function makeSelfStatusPlugin(io: MemFS): SelfStatusPluginSurface {
+  const plugin = new ConfigSyncPlugin({} as never, {} as never);
+  const instance = plugin as unknown as SelfStatusPluginSurface;
+  instance.app = {
+    vault: { adapter: io, configDir: "config-dir", on: () => ({}) },
+    internalPlugins: { plugins: {} },
+    plugins: { manifests: {}, enabledPlugins: new Set<string>(), plugins: {} },
+    workspace: { getLeavesOfType: () => [] },
+    loadLocalStorage: () => null,
+  };
+  instance.loadData = async () => ({ schemaVersion: 2, items: {}, remotes: [], bratPluginIndex: {} });
+  instance.saveData = async () => {};
+  return instance;
+}
+
+describe("selfStatus.storePresent (C-#19)", () => {
+  it("lock only \u2192 storePresent true", async () => {
+    const io = new MemFS();
+    io.seed({ "cs/store.lock.json": JSON.stringify({ capturedAt: "2026-08-01T00:00:00.000Z", groups: {} }) });
+    const plugin = makeSelfStatusPlugin(io);
+    await plugin.loadSettings();
+    plugin.settings.rootPath = "cs";
+
+    const info = await plugin.syncCenterHost().selfStatus();
+    expect(info.state).toBe("coldstart");
+    expect(info.storePresent).toBe(true);
+  });
+
+  it("self-copy only \u2192 storePresent true", async () => {
+    const io = new MemFS();
+    io.seed({ "cs/store/configdir/plugins/config-sync/data.json": JSON.stringify({ items: {}, customGroups: [] }) });
+    const plugin = makeSelfStatusPlugin(io);
+    await plugin.loadSettings();
+    plugin.settings.rootPath = "cs";
+
+    const info = await plugin.syncCenterHost().selfStatus();
+    expect(info.state).toBe("coldstart");
+    expect(info.storePresent).toBe(true);
+  });
+
+  it("neither \u2192 storePresent false", async () => {
+    const io = new MemFS();
+    const plugin = makeSelfStatusPlugin(io);
+    await plugin.loadSettings();
+    plugin.settings.rootPath = "cs";
+
+    const info = await plugin.syncCenterHost().selfStatus();
+    expect(info.state).toBe("coldstart");
+    expect(info.storePresent).toBe(false);
   });
 });

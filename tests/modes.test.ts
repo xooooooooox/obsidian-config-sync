@@ -116,3 +116,101 @@ describe("captureTransform / applyTransform round-trip", () => {
     expect((JSON.parse(applied) as Record<string, unknown>).localMembers).toEqual(["community:remotely-save"]);
   });
 });
+
+// C-#36: an encrypted field whose plaintext hasn't changed must reuse its existing store envelope
+// byte-for-byte (fieldUnchanged's mac decides "unchanged") — every encryption otherwise draws a
+// fresh salt/IV (crypto.ts), so re-encrypting an unchanged field makes it masquerade as a change.
+// captureTransform is the single function both the real capture write (ConfigSyncCore.ts) and the
+// Sync Center's capture-preview diff (main.ts's diffPair) call the same way, so fixing it here
+// fixes both — this suite is the byte-identical proof for that shared path.
+describe("captureTransform: unchanged encrypted fields keep their envelopes (C-#36)", () => {
+  const group = (over: object): SyncGroup =>
+    ({ name: "g", path: "{configDir}/x.json", type: "file", devices: "all", ...over }) as unknown as SyncGroup;
+
+  it("scope:all + encrypted field: two captures over unchanged content are byte-identical (no envelope churn)", async () => {
+    const g = group({
+      mode: "fields",
+      fields: [
+        { pattern: "token", scope: "all", encrypted: true },
+        { pattern: "apiKey", scope: "all", encrypted: true },
+      ],
+    });
+    const src = JSON.stringify({ token: "t1", apiKey: "k1", plain: "v1" });
+    const cap1 = await captureTransform(g, src, "pw", "desktop");
+    const cap2 = await captureTransform(g, src, "pw", "desktop", cap1.content);
+    expect(cap2.content).toBe(cap1.content); // byte-identical: both envelopes reused, not re-encrypted
+  });
+
+  it("changing one plaintext re-encrypts only that field's envelope; the other's stays byte-identical", async () => {
+    const g = group({
+      mode: "fields",
+      fields: [
+        { pattern: "token", scope: "all", encrypted: true },
+        { pattern: "apiKey", scope: "all", encrypted: true },
+      ],
+    });
+    const src = JSON.stringify({ token: "t1", apiKey: "k1", plain: "v1" });
+    const cap1 = await captureTransform(g, src, "pw", "desktop");
+    // Only "plain" (unrelated, unencrypted) changes — mirrors the live BRAT bug: the real diff
+    // was pluginSubListFrozenVersion, not the encrypted token fields.
+    const changed = JSON.stringify({ token: "t1", apiKey: "k1", plain: "v2" });
+    const cap2 = await captureTransform(g, changed, "pw", "desktop", cap1.content);
+    const stored1 = JSON.parse(cap1.content) as Record<string, unknown>;
+    const stored2 = JSON.parse(cap2.content) as Record<string, unknown>;
+    expect(stored2["token"]).toBe(stored1["token"]); // envelope byte-identical, not just plaintext-equal
+    expect(stored2["apiKey"]).toBe(stored1["apiKey"]);
+    expect(stored2["plain"]).toBe("v2");
+    const applied = await applyTransform(g, cap2.content, changed, "pw", "desktop", null);
+    expect(JSON.parse(applied)).toEqual(JSON.parse(changed));
+  });
+
+  it("a changed encrypted plaintext produces exactly one new envelope for that field", async () => {
+    const g = group({
+      mode: "fields",
+      fields: [
+        { pattern: "token", scope: "all", encrypted: true },
+        { pattern: "apiKey", scope: "all", encrypted: true },
+      ],
+    });
+    const src = JSON.stringify({ token: "t1", apiKey: "k1" });
+    const cap1 = await captureTransform(g, src, "pw", "desktop");
+    const changed = JSON.stringify({ token: "t2", apiKey: "k1" });
+    const cap2 = await captureTransform(g, changed, "pw", "desktop", cap1.content);
+    const stored1 = JSON.parse(cap1.content) as Record<string, unknown>;
+    const stored2 = JSON.parse(cap2.content) as Record<string, unknown>;
+    expect(stored2["token"]).not.toBe(stored1["token"]); // plaintext changed: new envelope
+    expect(stored2["apiKey"]).toBe(stored1["apiKey"]); // untouched: reused
+    const applied = await applyTransform(g, cap2.content, changed, "pw", "desktop", null);
+    expect(JSON.parse(applied)).toEqual(JSON.parse(changed));
+  });
+
+  it("with no prior store content, always encrypts fresh (nothing to reuse — first capture)", async () => {
+    const g = group({ mode: "fields", fields: [{ pattern: "token", scope: "all", encrypted: true }] });
+    const src = JSON.stringify({ token: "t1" });
+    const cap = await captureTransform(g, src, "pw", "desktop", null);
+    expect(isFieldEnvelope((JSON.parse(cap.content) as Record<string, unknown>)["token"])).toBe(true);
+  });
+
+  it("class-scoped (desktop/mobile) + encrypted field: unchanged reuses the sidecar's envelope", async () => {
+    const g = group({ mode: "fields", fields: [{ pattern: "secret", scope: "desktop", encrypted: true }] });
+    const src = JSON.stringify({ secret: "s1", plain: "v1" });
+    const cap1 = await captureTransform(g, src, "pw", "desktop");
+    expect(cap1.ownScope).not.toBeNull();
+    const changed = JSON.stringify({ secret: "s1", plain: "v2" });
+    const cap2 = await captureTransform(g, changed, "pw", "desktop", cap1.content, cap1.ownScope);
+    const scope1 = JSON.parse(cap1.ownScope as string) as Record<string, unknown>;
+    const scope2 = JSON.parse(cap2.ownScope as string) as Record<string, unknown>;
+    expect(scope2["secret"]).toBe(scope1["secret"]); // sidecar envelope reused byte-for-byte
+  });
+
+  it("class-scoped + encrypted field: a changed plaintext gets a new sidecar envelope", async () => {
+    const g = group({ mode: "fields", fields: [{ pattern: "secret", scope: "desktop", encrypted: true }] });
+    const src = JSON.stringify({ secret: "s1" });
+    const cap1 = await captureTransform(g, src, "pw", "desktop");
+    const changed = JSON.stringify({ secret: "s2" });
+    const cap2 = await captureTransform(g, changed, "pw", "desktop", cap1.content, cap1.ownScope);
+    const scope1 = JSON.parse(cap1.ownScope as string) as Record<string, unknown>;
+    const scope2 = JSON.parse(cap2.ownScope as string) as Record<string, unknown>;
+    expect(scope2["secret"]).not.toBe(scope1["secret"]);
+  });
+});

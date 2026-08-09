@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { availabilityForGroup, compareVersions, desktopOnlyDrift, desktopOnlyPluginIds, scopedAwayMembers, memberForceOff, snippetOrphans } from "../src/core/availability";
+import { availabilityForGroup, compareVersions, desktopOnlyDrift, desktopOnlyPluginIds, scopedAwayMembers, memberForceOff, snippetOrphans, normalizeMemberRule, preferStoredMemberRule } from "../src/core/availability";
 import { FakePlugins } from "./memfs";
 import { StoreLock, SyncGroup } from "../src/core/types";
 
@@ -155,6 +155,32 @@ describe("scopedAwayMembers / memberForceOff", () => {
   });
   it("local ids win over a travelling scope — never forced off", () => {
     expect(memberForceOff({ a: "mobile", b: "mobile" }, ["b"], false)).toEqual(["a"]);
+  });
+});
+
+describe("normalizeMemberRule", () => {
+  it("passes all/desktop/mobile through unchanged", () => {
+    expect(normalizeMemberRule("all", true)).toBe("all");
+    expect(normalizeMemberRule("all", false)).toBe("all");
+    expect(normalizeMemberRule("desktop", true)).toBe("desktop");
+    expect(normalizeMemberRule("mobile", false)).toBe("mobile");
+  });
+  it("maps 'local' to always-here when currently on locally", () => {
+    expect(normalizeMemberRule("local", true)).toBe("always-here");
+  });
+  it("maps 'local' to never-here when currently off locally", () => {
+    expect(normalizeMemberRule("local", false)).toBe("never-here");
+  });
+});
+
+describe("preferStoredMemberRule (task-2 fix #2: a stored rule wins over local-state re-derivation)", () => {
+  it("a stored rule wins outright, regardless of the persisted on/off state", () => {
+    expect(preferStoredMemberRule("always-here", false)).toBe("always-here");
+    expect(preferStoredMemberRule("never-here", true)).toBe("never-here");
+  });
+  it("falls back to normalizeMemberRule('local', ...) when nothing is stored", () => {
+    expect(preferStoredMemberRule(undefined, true)).toBe("always-here");
+    expect(preferStoredMemberRule(undefined, false)).toBe("never-here");
   });
 });
 

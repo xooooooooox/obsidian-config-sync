@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CoreContext, capture, loadManifest, groupsForDevice, ExternalStoreReader, writeGroups, baseHasStaleLocalKeys, withContractLocals } from "../src/core/ConfigSyncCore";
 import { parseSyncManifest } from "../src/core/manifest";
-import { statusForGroups, checkRemote, diffRemote, bucketCounts, remoteLockAhead, remoteDirectionCounts, GroupStatus } from "../src/core/status";
+import { statusForGroups, checkRemote, diffRemote, bucketCounts, remoteLockAhead, remoteDirectionCounts, remoteLockLabels, GroupStatus } from "../src/core/status";
 import { applyUpdates, emptyLedger, Ledger } from "../src/core/ledger";
 import { directionForState, stageableRow } from "../src/ui/panelModel";
 import { SyncGroup } from "../src/core/types";
@@ -469,5 +469,80 @@ describe("stale device-local key in the store base", () => {
   it("R2: an encrypted-mode group is never demoted by contract locals", () => {
     const g: SyncGroup = { name: "vim", path: "{configDir}/plugins/vim/data.json", type: "file", devices: "all", mode: "encrypted" };
     expect(withContractLocals({ ...g, mode: "encrypted" }, ["vimMode"])).toEqual({ ...g, mode: "encrypted" });
+  });
+});
+
+// batch6 task-1 (spec 2026-08-08-c-livetest-batch6-remote-labels.md): the remote pane's plugin
+// names come from the remote store.lock.json's own label fields — remoteLockLabels is the pure
+// extraction step, deliberately tolerant of anything short of a real parsed store.lock.json
+// (deepDiff's remote read must never throw over this).
+describe("remoteLockLabels", () => {
+  it("collects every group's string label", () => {
+    const lockJson = {
+      capturedAt: "t",
+      groups: {
+        "plugin-dataview": { sourcePluginVersion: "0.5.0", label: "Dataview" },
+        "daily-notes": { sourceAppVersion: "1.8.7", label: "Daily notes" },
+      },
+    };
+    expect(remoteLockLabels(lockJson)).toEqual({ "plugin-dataview": "Dataview", "daily-notes": "Daily notes" });
+  });
+
+  it("omits an entry with no label field", () => {
+    const lockJson = { capturedAt: "t", groups: { hotkeys: { sourceAppVersion: "1.8.7" } } };
+    expect(remoteLockLabels(lockJson)).toEqual({});
+  });
+
+  it("returns {} for a malformed lock (not an object, or groups missing/not-an-object)", () => {
+    expect(remoteLockLabels(null)).toEqual({});
+    expect(remoteLockLabels("not json")).toEqual({});
+    expect(remoteLockLabels([])).toEqual({});
+    expect(remoteLockLabels({ capturedAt: "t" })).toEqual({});
+    expect(remoteLockLabels({ capturedAt: "t", groups: "nope" })).toEqual({});
+  });
+
+  it("skips a group entry whose label isn't a string", () => {
+    const lockJson = { capturedAt: "t", groups: { "plugin-demo": { sourcePluginVersion: "1.0.0", label: 42 } } };
+    expect(remoteLockLabels(lockJson)).toEqual({});
+  });
+});
+
+// 2026-08-09-c-livetest-batch15 (spec 2026-08-09-c-livetest-batch15-member-labels.md): a
+// remote-only on/off member with no group entry of its own gets a name from its carrier's
+// memberLabels — same chain position as resolveHostStoredLabel's local one (after own-entry
+// labels, before the id fallback).
+describe("remoteLockLabels — carrier memberLabels fallback (batch15)", () => {
+  it("adds a plugin-<id> entry from the community carrier's memberLabels", () => {
+    const lockJson = {
+      capturedAt: "t",
+      groups: { "community-plugins": { sourceAppVersion: "1.8.7", memberLabels: { completr: "Completr", dataview: "Dataview" } } },
+    };
+    expect(remoteLockLabels(lockJson)).toEqual({ "plugin-completr": "Completr", "plugin-dataview": "Dataview" });
+  });
+
+  it("adds a bare-id entry from the core carrier's memberLabels (no plugin- prefix)", () => {
+    const lockJson = {
+      capturedAt: "t",
+      groups: { "core-plugins": { sourceAppVersion: "1.8.7", memberLabels: { "daily-notes": "Daily notes" } } },
+    };
+    expect(remoteLockLabels(lockJson)).toEqual({ "daily-notes": "Daily notes" });
+  });
+
+  it("never overwrites a name already resolved from the member's own entry", () => {
+    const lockJson = {
+      capturedAt: "t",
+      groups: {
+        "plugin-completr": { sourcePluginVersion: "1.0.0", label: "Completr (own entry)" },
+        "community-plugins": { sourceAppVersion: "1.8.7", memberLabels: { completr: "Completr (carrier)" } },
+      },
+    };
+    expect(remoteLockLabels(lockJson)).toEqual({ "plugin-completr": "Completr (own entry)" });
+  });
+
+  it("ignores a non-object or empty-string memberLabels entry", () => {
+    expect(remoteLockLabels({ capturedAt: "t", groups: { "community-plugins": { sourceAppVersion: "1.8.7", memberLabels: "nope" } } })).toEqual({});
+    expect(
+      remoteLockLabels({ capturedAt: "t", groups: { "community-plugins": { sourceAppVersion: "1.8.7", memberLabels: { x: "   " } } } })
+    ).toEqual({});
   });
 });

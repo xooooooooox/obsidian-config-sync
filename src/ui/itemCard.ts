@@ -13,7 +13,7 @@
 import { GROUP_NAME_RE } from "../core/manifest";
 import { basename } from "../core/pathing";
 import { emptyItemConfig, ItemConfig, ItemDef, ItemFieldRule, ItemSettingsFile } from "../core/registry";
-import { DeviceClass, PerItemScopes, RuleScope } from "../core/types";
+import { DeviceClass, MemberRule, PerItemScopes, RuleScope, SyncMode } from "../core/types";
 
 // ── Row badges (spec §4, D2) ────────────────────────────────────────────────────────────────
 // Row = name + badges + sync toggle + chevron, NOTHING else. Badge order: enablement-scope
@@ -146,6 +146,17 @@ export function hasKeyRules(cfg: ItemConfig): boolean {
   return cfg.settingsFile !== undefined && deriveMode(cfg.settingsFile) === "fields";
 }
 
+// Whole-file fileRule legality (C-#25) — mirrors manifest.ts's parseGroup validator EXACTLY
+// (manifest.ts:165-169): a fileRule is only legal on a "plain" (or absent, which defaults to
+// plain) mode group, never "fields" or "encrypted". Every registry item compiles to type:"file"
+// (registry.ts's compileSingleFile), so type is never the deciding factor here — mode always is.
+// The Sync Center's Settings-sync menu (only rendered when this is true) and setItemFileScope's
+// write guard (throws when it's false) both gate on this one function so neither can drift from
+// what the validator would actually accept.
+export function fileRuleLegalForMode(mode: SyncMode | undefined): boolean {
+  return mode === undefined || mode === "plain";
+}
+
 // ── Fields zone row models (spec §4, D6) ────────────────────────────────────────────────────
 
 export const DEFAULT_FIELD_RULE: ItemFieldRule = { scope: "all", encrypted: false };
@@ -232,6 +243,26 @@ export function buildPerItemElementRows(elements: string[], scopes: PerItemScope
 
 export function defaultSettingsFile(): ItemSettingsFile {
   return { mode: "plain", rules: {}, perItem: {} };
+}
+
+// C-#26: prunes semantic defaults off a settingsFile so a scope round-trip (e.g. desktop → all)
+// leaves data.json byte-identical to before the round started, instead of the write-back residue
+// that hit the user on 2026-08-09. Two independent prunes, applied in order: a fileRule of exactly
+// {scope:"all", encrypted:false} carries no information (it's what an absent fileRule already
+// means) and is dropped; if the settingsFile is then left deep-equal to defaultSettingsFile() —
+// plain mode, no fileRule, empty rules/perItem, no customPath — the whole key is dropped too, so
+// the field never persists just to say "nothing is customized". Any real content (encrypted:true,
+// a rule, a perItem entry, a non-plain mode, a customPath) always survives untouched.
+export function pruneSettingsFile(sf: ItemSettingsFile): ItemSettingsFile | undefined {
+  const fileRule = sf.fileRule?.scope === "all" && sf.fileRule.encrypted === false ? undefined : sf.fileRule;
+  const pruned: ItemSettingsFile = { ...sf, fileRule };
+  const isDefault =
+    pruned.mode === "plain" &&
+    pruned.fileRule === undefined &&
+    pruned.customPath === undefined &&
+    Object.keys(pruned.rules).length === 0 &&
+    Object.keys(pruned.perItem).length === 0;
+  return isDefault ? undefined : pruned;
 }
 
 // ── Appearance specifics (spec §4/§5) ───────────────────────────────────────────────────────
@@ -379,6 +410,10 @@ export const SCOPE_LABELS: Record<RuleScope, string> = {
 };
 
 export const FILE_SCOPE_OPTIONS: Exclude<RuleScope, "local">[] = ["all", "desktop", "mobile"];
+// C-#25: what the Sync Center's Settings-sync row shows instead of a menu when
+// fileRuleLegalForMode is false — vocabulary matches the More row's "Per-key rules, locks &
+// folders" (spec §1) rather than inventing a second phrase for the same idea.
+export const FILE_SCOPE_MENU_UNAVAILABLE_TEXT = "Per-key rules decide — see More";
 export const FIELD_SCOPE_OPTIONS: RuleScope[] = ["all", "desktop", "mobile", "local"];
 // ENABLED ON cycle for a manifest-desktop-only plugin: mobile can never install it, so that
 // stop is meaningless — the cycle runs all → desktop → local (round-8 spec §2).
@@ -392,6 +427,18 @@ export const SCOPE_ICONS: Record<RuleScope, string> = {
   desktop: "monitor",
   mobile: "smartphone",
   local: "airplay",
+};
+
+// Sync Center card "Runs on" row (spec 2026-08-06-c-livetest-batch2-design.md §2, ledger C-#10):
+// extends the same icon vocabulary to MemberRule's five stops — "all" mirrors SCOPE_ICONS' idle
+// glyph, "always-here"/"never-here" get their own (unused elsewhere — verified via `git grep -n
+// '"power'` across src/, 2026-08-06) since they have no RuleScope counterpart.
+export const RUNS_ON_ICONS: Record<MemberRule, string> = {
+  all: "monitor-smartphone",
+  desktop: "monitor",
+  mobile: "smartphone",
+  "always-here": "power",
+  "never-here": "power-off",
 };
 
 export function nextScope<T extends RuleScope>(current: T, options: readonly T[]): T {

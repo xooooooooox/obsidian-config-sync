@@ -7,7 +7,7 @@ import { classifyMerge, MergeConflict, MergePlan } from "./merge";
 import { coreSettingsIds, SELF_GROUP_NAME } from "./catalog";
 import { isPlainObject, keyMatchesAny } from "./sanitize";
 import { readPerItemArray, scopeOf } from "./perItem";
-import { applySwitchList, captureSwitchList, localRealPath, parseSwitchList, readLocalSwitchList, subtractForceOff, SWITCH_LIST_GROUPS, SwitchList, switchListsEqual, writeLocalSwitchList } from "./switchList";
+import { addForceOn, applySwitchList, captureSwitchList, localRealPath, memberUniverse, parseSwitchList, readLocalSwitchList, subtractForceOff, SWITCH_LIST_GROUPS, SwitchList, switchListsEqual, writeLocalSwitchList } from "./switchList";
 
 // `current` is the group NAME (the UI maps it to a display label); `phase` is a short live
 // phrase for the in-item step ("downloading via BRAT…", "writing settings…") — spec 2026-07-17.
@@ -46,7 +46,8 @@ export interface CoreContext {
   deviceClass: "desktop" | "mobile";
   groupsIO: GroupsIO;
   switchExceptions: Record<string, string[]>; // group name -> masked member ids (This-device ∪ scoped-away ∪ auto-derived)
-  switchForceOff?: Record<string, string[]>; // group name -> ids forced off on apply (user class scope on the wrong device class)
+  switchForceOff?: Record<string, string[]>; // group name -> ids forced off on apply (user class scope on the wrong device class, or a never-here rule)
+  switchForceOn?: Record<string, string[]>; // group name -> ids forced on on apply (an always-here rule; see normalizeMemberRule's mask table)
   fieldOverlay?: (group: SyncGroup, topKeys: string[]) => FieldRule[] | null; // runtime category rules (e.g. app.json view rows)
   // Compiles a self store copy's sync list. Schema v2 copies persist items+customGroups (no
   // compiled groups array), and only the plugin holds the registry defs needed to compile them
@@ -178,6 +179,27 @@ function excFor(ctx: CoreContext, name: string): string[] {
   return SWITCH_LIST_GROUPS.has(name) ? (ctx.switchExceptions[name] ?? []) : [];
 }
 
+// Run-scoped exceptions for a partial-selection apply/capture (Sync Center unified grammar,
+// task 3): unstaged members join the configured exceptions for this run only —
+// excFor(ctx, name) ∪ (memberUniverse(store, local) − stagedMembers). `stagedMembers` undefined
+// means "no selection made" — today's whole-list behavior, byte-for-byte.
+function runExceptions(ctx: CoreContext, name: string, store: SwitchList | null, local: SwitchList | null, stagedMembers?: string[]): string[] {
+  const base = excFor(ctx, name);
+  if (stagedMembers === undefined) return base;
+  const staged = new Set(stagedMembers);
+  const unstaged = memberUniverse(store, local).filter((id) => !staged.has(id));
+  return [...new Set([...base, ...unstaged])];
+}
+
+// Restricts a force-on/off mask (Task 2's always-here/never-here table) to the run's staged
+// members: unrestricted when `stagedMembers` is undefined (today's whole-run mask behavior,
+// unchanged), otherwise only ids also named in `stagedMembers` — an unstaged member's switch
+// must never move, including via a force mask (fix to review finding on task 3: `stagedMembers:
+// []` must mean zero switch flips even when a force-on/off mask is active for the group).
+function scopedMask(mask: string[], stagedMembers?: string[]): string[] {
+  return stagedMembers === undefined ? mask : mask.filter((id) => stagedMembers.includes(id));
+}
+
 function serializeSwitchList(v: ReturnType<typeof captureSwitchList>): string {
   return JSON.stringify(v, null, 2) + "\n";
 }
@@ -223,6 +245,42 @@ function switchDeltaMessages(delta: { on: string[]; off: string[] }): string[] {
 // 2026-08-06-batch2-scroll-and-appearance-hotapply-design.md).
 const RUNTIME_SWITCH_GROUPS: ReadonlySet<string> = new Set(["core-plugins", "community-plugins"]);
 
+// A carrier's memberLabels for its CURRENT store-list members, MERGED additively with what was
+// already known (review fix, 2026-08-09-c-livetest-batch15): community ids resolve through the
+// installed-plugin manifest, core ids through the internal-plugin instance — same two lookups the
+// single-label resolvers above/below already use — but "can't resolve locally" must never erase a
+// name this device previously learned (from its own earlier capture, from a heal on ANOTHER
+// device, or from a pull) for a member it simply doesn't have installed. Per id: the freshly
+// resolved local name wins when available (so a rename heals in); otherwise the EXISTING entry's
+// name for that id survives; only when neither exists is the id absent. An id no longer in the
+// current store list is dropped (it's not a member anymore). Without this merge, two devices with
+// different plugin sets would each overwrite the other's names with their own narrower subset on
+// every heal — a perpetual lock-drift nag, and the "ids only where unresolvable ANYWHERE" spec
+// criterion silently regressing to "unresolvable on the LAST device to heal". Shared by capture's
+// own carrier write and backfillLockLabels' heal below — one computation, two triggers.
+function carrierMemberLabels(
+  carrier: "core-plugins" | "community-plugins",
+  list: SwitchList | null,
+  plugins: PluginHost,
+  existing: Record<string, string> | undefined
+): Record<string, string> {
+  if (list === null) return {};
+  const ids = Array.isArray(list) ? list : Object.keys(list);
+  const labels: Record<string, string> = {};
+  for (const id of ids) {
+    const resolved = carrier === "community-plugins" ? plugins.getInstalledPluginName(id) : plugins.getCorePluginName(id);
+    const name = resolved ?? existing?.[id];
+    if (name !== undefined) labels[id] = name;
+  }
+  return labels;
+}
+
+function memberLabelsEqual(existing: Record<string, string> | undefined, next: Record<string, string>): boolean {
+  const existingKeys = existing === undefined ? [] : Object.keys(existing);
+  const nextKeys = Object.keys(next);
+  return existingKeys.length === nextKeys.length && existingKeys.every((k) => existing?.[k] === next[k]);
+}
+
 // The appearance card's own file group, its two companion dir groups, and the snippet
 // switch-list carrier that writes into appearance.json — the file set reloadAppearance()
 // re-applies in one pass (spec 2026-08-06-batch2-scroll-and-appearance-hotapply-design.md).
@@ -258,6 +316,11 @@ async function applyRuntimeSwitchDelta(ctx: CoreContext, groupName: string, delt
   const warn = (message: string): void => {
     result.messages.push(message);
     if (result.status === "ok") result.status = "warning";
+    // A failed runtime switch leaves the on-disk carrier and the running app disagreeing —
+    // applyGroup already set needsAppReload false before this call (the common case: the
+    // switch itself is the reload), so restore it here (mirrors hotApplyAppearanceFamily's
+    // honest-on-failure behavior) or the Reload CTA never surfaces for a real drift.
+    result.needsAppReload = true;
   };
   for (const id of delta.on) {
     try {
@@ -379,6 +442,74 @@ export function baseHasStaleLocalKeys(effGroup: SyncGroup, existing: string): bo
   return Object.keys(parsed).some((k) => keyMatchesAny(k, patterns));
 }
 
+// Refreshes every locally-resolvable lock entry's label in place (2026-08-08-c-livetest-batch6
+// task-1) — capture only resolves a label for the groups it actually processes (:454/:477
+// above), so an entry born on an older lock, or carried forward untouched by a partial-selection
+// run, stays label-less forever without a dedicated heal. Called at the tail of every capture run
+// and once at startup (main.ts). Never touches capturedAt or entries this vault can't resolve
+// (an uninstalled plugin, an orphaned/dropped group) — returns whether anything changed, so a
+// caller with nothing to do skips the write.
+// carrierLists: the CURRENT store content for the two carriers (post any write this same run
+// already made), pre-read by the caller so this function itself stays synchronous/IO-free and
+// directly unit-testable (see tests/core.test.ts) — readCarrierSwitchLists below is the shared
+// reader both call sites (main.ts startup, capture's own tail call) use to build it.
+export function backfillLockLabels(
+  groups: SyncGroup[],
+  plugins: PluginHost,
+  lock: StoreLock,
+  carrierLists: Record<"core-plugins" | "community-plugins", SwitchList | null>
+): boolean {
+  let changed = false;
+  for (const group of groups) {
+    const entry = lock.groups[group.name];
+    if (entry === undefined) continue;
+    const pluginId = pluginIdForGroup(group);
+    // Same restriction as the capture-time resolver above: only the canonical "plugin-<id>"
+    // group carries the community label, never a companion dir or a custom rule on a plugin path.
+    const label =
+      pluginId !== null && group.name === `plugin-${pluginId}`
+        ? plugins.getInstalledPluginName(pluginId)
+        : coreSettingsIds().has(group.name)
+          ? plugins.getCorePluginName(group.name)
+          : null;
+    if (label === null || entry.label === label) continue;
+    lock.groups[group.name] = { ...entry, label };
+    changed = true;
+  }
+  // memberLabels heal (2026-08-09-c-livetest-batch15): MERGED with the existing map every call
+  // (carrierMemberLabels' own doc comment) — same write-only-on-change guarantee as the label
+  // loop above, but a name this device can't resolve locally is carried forward from the
+  // existing entry rather than dropped, so a heal on one device never erases a name only another
+  // device could resolve. A newly installed member's name still refreshes; an id no longer in the
+  // current store list is still dropped.
+  for (const carrier of ["core-plugins", "community-plugins"] as const) {
+    const entry = lock.groups[carrier];
+    if (entry === undefined) continue;
+    const memberLabels = carrierMemberLabels(carrier, carrierLists[carrier], plugins, entry.memberLabels);
+    if (Object.keys(memberLabels).length === 0 || memberLabelsEqual(entry.memberLabels, memberLabels)) continue;
+    lock.groups[carrier] = { ...entry, memberLabels };
+    changed = true;
+  }
+  return changed;
+}
+
+// Shared reader for backfillLockLabels' carrierLists param: the store file each carrier's OWN
+// registered group would read (skipped — null — when that carrier isn't a group on this device
+// at all, e.g. the on/off card is off; a group present but never captured has no store file yet,
+// same null result).
+export async function readCarrierSwitchLists(
+  ctx: CoreContext,
+  groups: SyncGroup[]
+): Promise<Record<"core-plugins" | "community-plugins", SwitchList | null>> {
+  const read = async (name: "core-plugins" | "community-plugins"): Promise<SwitchList | null> => {
+    const group = groups.find((g) => g.name === name);
+    if (group === undefined) return null;
+    const store = `${storeDir(ctx)}/${groupStorePath(group.path)}`;
+    return (await ctx.io.exists(store)) ? parseSwitchList(await ctx.io.read(store)) : null;
+  };
+  return { "core-plugins": await read("core-plugins"), "community-plugins": await read("community-plugins") };
+}
+
 function requireGroup(manifest: SyncManifest, name: string): SyncGroup {
   const group = manifest.groups.find((g) => g.name === name);
   if (group === undefined) {
@@ -387,7 +518,12 @@ function requireGroup(manifest: SyncManifest, name: string): SyncGroup {
   return group;
 }
 
-export async function capture(ctx: CoreContext, names?: string[], onProgress?: ProgressFn): Promise<GroupResult[]> {
+export async function capture(
+  ctx: CoreContext,
+  names?: string[],
+  onProgress?: ProgressFn,
+  stagedMembersByName?: Record<string, string[] | undefined>
+): Promise<GroupResult[]> {
   const manifest = await loadManifest(ctx);
   // Capture is the lock's writer and its only healing path: a previous lock that is
   // missing, old-format, or corrupt must never block capture — it is rewritten below.
@@ -413,7 +549,7 @@ export async function capture(ctx: CoreContext, names?: string[], onProgress?: P
       continue;
     }
     onProgress?.(done, toProcess.length, group.name);
-    const result = await captureGroup(ctx, withContractLocals(group, contractLocals.get(group.name) ?? []));
+    const result = await captureGroup(ctx, withContractLocals(group, contractLocals.get(group.name) ?? []), stagedMembersByName?.[group.name]);
     done++;
     const pluginId = pluginIdForGroup(group);
     if (pluginId !== null) {
@@ -462,12 +598,17 @@ export async function capture(ctx: CoreContext, names?: string[], onProgress?: P
   for (const [name, entry] of Object.entries(previous?.groups ?? {})) {
     if (!registryNames.has(name)) lock.groups[name] = entry;
   }
+  // Tail heal (see backfillLockLabels doc comment): catches every locally-resolvable entry this
+  // run didn't itself capture a label for, carried-forward or otherwise — including a carrier's
+  // own memberLabels, which this same call writes fresh from the store content this run just
+  // produced (or carried forward untouched), satisfying the "written at capture" side too.
+  backfillLockLabels(manifest.groups, ctx.plugins, lock, await readCarrierSwitchLists(ctx, manifest.groups));
   await ensureParentDir(ctx.io, lockPath(ctx));
   await ctx.io.write(lockPath(ctx), JSON.stringify(lock, null, 2) + "\n");
   return results;
 }
 
-async function captureGroup(ctx: CoreContext, group: SyncGroup): Promise<GroupResult> {
+async function captureGroup(ctx: CoreContext, group: SyncGroup, stagedMembers?: string[]): Promise<GroupResult> {
   const real = localRealPath(group.name, group.path, ctx.configDir);
   const store = `${storeDir(ctx)}/${groupStorePath(group.path)}`;
   const result = emptyResult(group.name, false);
@@ -487,21 +628,23 @@ async function captureGroup(ctx: CoreContext, group: SyncGroup): Promise<GroupRe
     if (localSwitchList !== null && (await ctx.io.exists(store))) {
       existingStoreList = parseSwitchList(await ctx.io.read(store));
     }
-    const captureInput = localSwitchList !== null ? serializeSwitchList(captureSwitchList(localSwitchList, existingStoreList, exc)) : plainLocalContent;
+    const runExc = localSwitchList !== null ? runExceptions(ctx, group.name, existingStoreList, localSwitchList, stagedMembers) : exc;
+    const captureInput = localSwitchList !== null ? serializeSwitchList(captureSwitchList(localSwitchList, existingStoreList, runExc)) : plainLocalContent;
     const sidecarPath = store + sidecarStoreSuffix(ctx.deviceClass);
     const existingSidecar = (await ctx.io.exists(sidecarPath)) ? await ctx.io.read(sidecarPath) : null;
     const effGroup = overlayGroup(ctx, group, [plainLocalContent]);
-    // Prior store content for perItem keys (spec §3, D3): capturing a per-item array must
-    // preserve the other device's already-captured elements, which requires the OLD store copy —
-    // never needed for non-perItem groups, but harmless to read either way (see captureTransform's
+    // Prior store content: needed for perItem keys (spec §3, D3 — capturing a per-item array must
+    // preserve the other device's already-captured elements) and, since C-#36, so captureTransform
+    // can reuse an unchanged encrypted field's existing envelope instead of re-encrypting it —
+    // never needed for groups with neither, but harmless to read either way (see captureTransform's
     // storeContent doc comment; a switch-list group's real store read already happened above).
     const priorStoreContent = localSwitchList === null && (await ctx.io.exists(store)) ? await ctx.io.read(store) : null;
-    const t = await captureTransform(effGroup, captureInput, ctx.passphrase, ctx.deviceClass, priorStoreContent);
+    const t = await captureTransform(effGroup, captureInput, ctx.passphrase, ctx.deviceClass, priorStoreContent, existingSidecar);
     if (t.note !== null) result.messages.push(t.note);
     await writeClassified(ctx, store, t.content, basename(store), result, async (existing) => {
       if (localSwitchList !== null) {
         const existingSwitchList = parseSwitchList(existing);
-        if (existingSwitchList !== null) return switchListsEqual(localSwitchList, existingSwitchList, exc);
+        if (existingSwitchList !== null) return switchListsEqual(localSwitchList, existingSwitchList, runExc);
       }
       const unchanged = await contentUnchanged(effGroup, plainLocalContent, existing, ctx.passphrase, ctx.deviceClass, existingSidecar);
       if (!unchanged) return false;
@@ -567,6 +710,10 @@ export type StateAction = "none" | "enable" | "update" | "update-enable" | "inst
 export interface ApplyItem {
   name: string;
   action: StateAction;
+  // Partial-selection switch staging (Sync Center unified grammar, task 3): for a switch-list
+  // group, restricts which members this run touches — members not named here keep their local
+  // value. Absent = today's whole-list behavior.
+  stagedMembers?: string[];
 }
 
 // targetVersion pins the install to the version the store's settings were captured on; the
@@ -702,7 +849,10 @@ async function runStateAction(
           throw new Error(`Obsidian did not enable "${pluginId}" — enable it manually in Community plugins`);
         }
         const text = isUpdate ? `⤓ updated to ${version} & enabled` : `⤓ installed & enabled ${version}`;
-        return { note: { kind: "ok", text }, messages: fallbackMsgs };
+        // fallbackMsgs was already reported via the object above's `messages` field — applyWithActions
+        // pushes that unconditionally before finish ever runs (skipConfig-false path), so repeating it
+        // here would render the fallback line twice (live evidence 2026-08-09, C-#35).
+        return { note: { kind: "ok", text }, messages: [] };
       } catch (e) {
         const verb = isUpdate ? "updated" : "installed";
         return {
@@ -720,13 +870,22 @@ async function runStateAction(
 export interface CaptureItem {
   name: string;
   action: "enable" | "none";
+  // Partial-selection switch staging (Sync Center unified grammar, task 3): for a switch-list
+  // group, restricts which members this run touches — members not named here keep their store
+  // value. Absent = today's whole-list behavior.
+  stagedMembers?: string[];
 }
 
 export async function captureWithActions(ctx: CoreContext, items: CaptureItem[], onProgress?: ProgressFn): Promise<GroupResult[]> {
+  const stagedMembersByName: Record<string, string[] | undefined> = {};
+  for (const item of items) {
+    if (item.stagedMembers !== undefined) stagedMembersByName[item.name] = item.stagedMembers;
+  }
   const results = await capture(
     ctx,
     items.map((i) => i.name),
-    onProgress
+    onProgress,
+    stagedMembersByName
   );
   const manifest = await loadManifest(ctx);
   let done = 0;
@@ -791,7 +950,7 @@ export async function applyWithActions(
         // (install and/or enable) IS the payload; applyGroup would error on the missing data.
         const actionOnly = item.action !== "none" && !storeExists;
         if (!actionOnly) phase("writing settings…");
-        const r = actionOnly ? emptyResult(item.name, false) : await applyGroup(ctx, group);
+        const r = actionOnly ? emptyResult(item.name, false) : await applyGroup(ctx, group, item.stagedMembers);
         if (prelude.note !== null) r.stateNote = prelude.note;
         if (prelude.messages.length > 0) {
           r.messages.push(...prelude.messages);
@@ -832,7 +991,7 @@ export async function applyWithActions(
   return results;
 }
 
-async function applyGroup(ctx: CoreContext, group: SyncGroup): Promise<GroupResult> {
+async function applyGroup(ctx: CoreContext, group: SyncGroup, stagedMembers?: string[]): Promise<GroupResult> {
   const real = localRealPath(group.name, group.path, ctx.configDir);
   const store = `${storeDir(ctx)}/${groupStorePath(group.path)}`;
   const pluginId = pluginIdForGroup(group);
@@ -855,14 +1014,15 @@ async function applyGroup(ctx: CoreContext, group: SyncGroup): Promise<GroupResu
     if (group.type === "file") {
       const storeContent = await ctx.io.read(store);
       const localContent = (await ctx.io.exists(real)) ? await ctx.io.read(real) : null;
-      const exc = excFor(ctx, group.name);
       const storeSwitchList = SWITCH_LIST_GROUPS.has(group.name) ? parseSwitchList(storeContent) : null;
       let content: string;
       let delta: { on: string[]; off: string[] } | null = null;
       if (storeSwitchList !== null) {
         const localSwitchList = localContent !== null ? readLocalSwitchList(group.name, localContent) : null;
-        const merged = applySwitchList(storeSwitchList, localSwitchList, exc);
-        const finalList = subtractForceOff(merged, ctx.switchForceOff?.[group.name] ?? []);
+        const runExc = runExceptions(ctx, group.name, storeSwitchList, localSwitchList, stagedMembers);
+        const merged = applySwitchList(storeSwitchList, localSwitchList, runExc);
+        const afterOff = subtractForceOff(merged, scopedMask(ctx.switchForceOff?.[group.name] ?? [], stagedMembers));
+        const finalList = addForceOn(afterOff, scopedMask(ctx.switchForceOn?.[group.name] ?? [], stagedMembers));
         content = writeLocalSwitchList(group.name, finalList, localContent);
         // Name the plugins this write toggles (spec 2026-07-17): a store list lacking a
         // just-enabled plugin turns it off persistently — that must be visible in the report.

@@ -13,7 +13,16 @@ Resolves ledger issues #5 (dual-surface residue), #8, #9, #10, #11
 - **One object = one row.** A plugin/settings item/folder appears exactly once in the main
   list. The on/off carrier cards, the "Disabled on this device" and "Not installed on this
   device" sections, per-row policy segments, fate pills, and the "has settings below" pill
-  (#9) all dissolve into row state.
+  (#9) all dissolve into row state. **An object includes its companions** (amendment
+  2026-08-07, C-#15 companion-dissolve batch): a parent item plus every companion group
+  its item owns — Appearance's `themes`/`snippets` presets, or any item's Settings-drawer
+  `+ Add folder` companions — is one object, dissolving into the parent's row/entry in
+  both panes; companion groups never render their own row. Custom `+ Add folder` groups
+  and the legacy `enabled-css-snippets` switch list are not companions and stay their own
+  objects. The sole exception is an orphan companion (its parent group not compiled
+  locally), which keeps its own row — honest degradation, the one place the `Parent ›
+  Name` breadcrumb still appears inside the object grammar (it otherwise survives only in
+  Settings drawers and run reports).
 - **Row = checkbox · display name · state chips · fate sentence · disclosure.** Nothing else.
 - **Checkbox has one meaning everywhere:** include this row in the next Apply/Capture run.
   Selection never changes what would happen — only whether it happens. Section select-all
@@ -79,13 +88,19 @@ hidden checkbox.
 | capture: turned on here (carrier delta) | `↑ Turned on here — shares it` |
 | capture: Appearance | `↑ Captures theme & snippets` |
 | capture: folder | `↑ Captures N files` |
+| capture: empty verb set (a `not-captured` companion — its file count is structurally invisible, never zero; C-#28) | `↑ Captures files` (generic, no count) |
 | both changed | `⚠ Changed on both sides` |
 | identical | `— In sync` |
-| no store data & no local settings | `— Nothing to sync yet` |
+| no store data & no local settings, OR an apply direction whose verb set is empty (C-#28 — apply-only; capture never degrades, row above) | `— No settings yet` |
 
 Verbs join with ` · `; first letter capitalized. `Runs on` exceptions re-derive the
 sentence (e.g. `Never on here` removes `turns on`, adds the rule chip). When the carrier is
-unsynced, enablement verbs never appear (§5).
+unsynced, enablement verbs never appear (§5). A non-folder object whose companions
+contribute file changes joins the folder verb after the settings verb (amendment
+2026-08-07, C-#15 companion-dissolve batch): `↓ Applies settings · applies N files` /
+`↑ Captures settings · captures N files`; a plain folder object (no parent settings
+payload) keeps the `apply: folder` / `capture: folder` rows above unchanged, and
+Appearance's override row always wins over the join.
 
 ## 4. Expanded card
 
@@ -109,9 +124,15 @@ Standardized rows, in order (omit when not applicable):
   this-device pins into one control (see §6 mapping).
 - `After install` (only when carrier NOT synced, row installs) — menu `Turn it on` /
   `Leave it off` (today's policy ladder, alive only in the fallback).
-- `Settings sync` — item-level device-scope menu (`Everywhere` / `Computers only` /
-  `Phones only` / `This computer only`), same write target as the Settings tab's file-row
-  scope control.
+- `Enablement` (only when carrier NOT synced ∧ plugin installed ∧ locally off) — same menu
+  `Turn it on` / `Leave it off`; restores the pre-C fallback enable path in the new grammar
+  (amendment 2026-08-06, from Task 6 review finding b). The fate sentence still carries no
+  enablement verbs when the carrier is unsynced — only the staged action changes.
+- `Settings sync` — item-level device-scope menu mirroring the Settings tab's file-level
+  scope cycle exactly: three stops (`All devices` / `Desktop only` / `Mobile only`), same
+  glyphs, same write target. File-level scope excludes `This device` by design (D9 — the
+  validator rejects it); only KEY-level rules carry a this-device stop (amendment
+  2026-08-07, live-test C-#12 investigation).
 - `More` — `Per-key rules, locks & folders — opens Settings ▸` (folders:
   `Folder rules — opens Settings ▸`): deep link opening the plugin's Settings tab scrolled
   to that item's card, expanded.

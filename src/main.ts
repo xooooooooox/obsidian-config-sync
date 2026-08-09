@@ -10,12 +10,15 @@ import {
   planImport,
   ProgressFn,
   applyWithActions,
+  backfillLockLabels,
   captureWithActions, CaptureItem,
   deviceExcludedPluginIds,
   groupsForDevice,
   loadLock,
   loadManifest,
+  lockPath,
   pushExternal,
+  readCarrierSwitchLists,
   readGroups,
   writeGroups,
 } from "./core/ConfigSyncCore";
@@ -37,8 +40,8 @@ interface SecretStore {
   setSecret(id: string, secret: string): void;
 }
 import { BratIndex, parseBratRepoList, resolveBratIndex } from "./core/bratIndex";
-import { type CatalogSection, corePluginFile, displayLabelForGroup, findGroupByName, listBetaSections, listCoreSections, listDiscovered, listOptionSections, listPluginSections, SELF_GROUP_NAME, setCorePluginIds } from "./core/catalog";
-import { Availability, availabilityForGroup, desktopOnlyDrift, desktopOnlyPluginIds, scopedAwayMembers, memberForceOff } from "./core/availability";
+import { type CatalogSection, corePluginFile, displayLabelForGroup, findGroupByName, listBetaSections, listCoreSections, listDiscovered, listOptionSections, listPluginSections, resolveHostStoredLabel, SELF_GROUP_NAME, setCorePluginIds } from "./core/catalog";
+import { Availability, availabilityForGroup, desktopOnlyDrift, desktopOnlyPluginIds, normalizeMemberRule, scopedAwayMembers, memberForceOff, preferStoredMemberRule } from "./core/availability";
 import { listFilesRecursive, isJunkPath, FileIO } from "./core/io";
 import { leftoverStoreRels, storeSelfCopyGroups, selfListGroups } from "./core/leftover";
 import { parseStoreLock, validateSyncManifest } from "./core/manifest";
@@ -55,22 +58,25 @@ import {
   ItemConfig,
   itemConfigWithEnabledOn,
   ItemDef,
+  ItemSettingsFile,
   compileItems,
+  legacyGroupName,
   parentCardLabel,
   RegistryEnv,
   structuralLocalElements,
 } from "./core/registry";
-import { drainEnabledOnLocal, isLegacySettings, mergeLegacyAppSliceItems, SCHEMA_UPGRADE_NOTICE } from "./core/settingsMigration";
-import { applySwitchList, captureSwitchList, localRealPath, parseSwitchList, readLocalSwitchList, subtractForceOff, SWITCH_LIST_GROUPS, switchDivergence, SwitchList, writeLocalSwitchList } from "./core/switchList";
+import { drainEnabledOnLocal, isLegacySettings, mergeLegacyAppSliceItems, sanitizeMemberRules, SCHEMA_UPGRADE_NOTICE } from "./core/settingsMigration";
+import { applySwitchList, captureSwitchList, localRealPath, parseSwitchList, readLocalSwitchList, subtractForceOff, SWITCH_LIST_GROUPS, switchDivergence, SwitchList, switchListMemberOn, writeLocalSwitchList } from "./core/switchList";
 import { applyTransform, captureTransform, isWholeFileEncrypted, scanSensitive, SensitiveScan } from "./core/modes";
 import { PkmMode, PkmProbe, resolveEffectiveMode, resolveRootPath } from "./core/pkm";
 import { pluginRuntimeEnabled } from "./core/pluginState";
 import { syncListDelta } from "./core/syncListDelta";
 import { selfPaneState } from "./core/selfPane";
 import { applyUpdates, Ledger, parseLedger, pruneLedger } from "./core/ledger";
-import { bucketCounts, checkRemote, diffRemote, GroupStatus, remoteDirectionCounts, RemoteCheck, remoteLockAhead, statusForGroups } from "./core/status";
-import { GroupResult, Remote, RibbonButtons, RuleScope, StoreLock, SyncGroup } from "./core/types";
-import { MemberDecision, memberDecisionsFromScopes, statusBarStatuses } from "./ui/panelModel";
+import { bucketCounts, checkRemote, diffRemote, GroupStatus, remoteDirectionCounts, RemoteCheck, remoteLockAhead, remoteLockLabels, statusForGroups } from "./core/status";
+import { DeviceClass, GroupResult, MemberRule, Remote, RibbonButtons, RuleScope, StoreLock, SyncGroup } from "./core/types";
+import { EnablementCarrier, MemberDecision, memberDecisionsFromScopes, statusBarStatuses } from "./ui/panelModel";
+import { defaultSettingsFile, deriveMode, fileRuleLegalForMode, pruneSettingsFile } from "./ui/itemCard";
 import { ConflictModal } from "./ui/ConflictModal";
 import { renderStatusBarItem, statusBarSegments } from "./ui/statusBar";
 import { SYNC_CENTER_VIEW_TYPE, SelfSyncInfo, SyncCenterHost, SyncCenterView } from "./ui/SyncCenterView";
@@ -102,6 +108,12 @@ interface ConfigSyncSettings {
   bratPluginIndex: BratIndex; // plugin id -> "owner/repo"; derived from BRAT's synced list, synced too
   runHistory: RunHistorySettings; // local-only record of past runs; never synced
   localMembers: string[]; // item ids (community:<id> / core:<id>) device-local-only; never synced
+  // Task 2 (spec 2026-08-06-sync-center-unified-grammar-design.md §6): the Runs-on rule's real
+  // stored home. Item id (community:<id> / core:<id>) -> its chosen MemberRule; a stored value
+  // here always wins over legacy normalization (preferStoredMemberRule). Task 5's Runs-on menu is
+  // the only intended writer; rides the self item's whole-document self-propagation like `items`
+  // (no per-field handling needed — see selfPresetRules).
+  memberRules: Record<string, MemberRule>;
 }
 
 interface RunHistorySettings {
@@ -129,6 +141,7 @@ const DEFAULT_SETTINGS: ConfigSyncSettings = {
   bratPluginIndex: {},
   runHistory: { enabled: true, path: "", maxCount: 50, maxDays: 30 },
   localMembers: [],
+  memberRules: {},
 };
 
 // config-sync's own registry item id (registry.ts: community plugin ids are prefixed "community:")
@@ -195,6 +208,16 @@ interface AppInternal {
   updateAccentColor(): void;
 }
 
+// app.setting's internal surface (the Settings modal manager) — not part of the public API.
+// The Sync Center's More bridge uses this to open the plugin's own Settings tab (the same entry
+// point Obsidian's plugin list gear icon uses); SettingTab.display() then consumes
+// pendingSettingsDeepLink to scroll to/expand the specific item's card once it lands there.
+// activeTab is read by openSettingsAt to avoid re-opening a tab open() already activated (root
+// cause of C-#11 — see there).
+interface AppWithSetting {
+  setting: { open(): void; openTabById(id: string): void; activeTab: { id: string } | null };
+}
+
 export default class ConfigSyncPlugin extends Plugin {
   settings: ConfigSyncSettings = DEFAULT_SETTINGS;
   private individualRibbons: HTMLElement[] = [];
@@ -244,6 +267,10 @@ export default class ConfigSyncPlugin extends Plugin {
   // the first finisher nulled progress out from under the still-running second). A second call
   // while one is in flight returns the SAME promise instead of starting a parallel run.
   private remoteRefreshRun: Promise<void> | null = null;
+  // Startup lock-label heal (backfillLockLabels) runs once per plugin load, not on every
+  // refreshLocalStatus — refreshLocalStatus fires on a timer, on layout ready, and after nearly
+  // every write, so gating on this flag is what keeps the heal to a single attempt per load.
+  private lockLabelsHealed = false;
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -374,6 +401,19 @@ export default class ConfigSyncPlugin extends Plugin {
         lock = null;
       }
       const host = this.pluginHost();
+      // Startup heal (backfillLockLabels, spec 2026-08-08-c-livetest-batch6-remote-labels.md):
+      // a fresh device with no local store yet is a no-op (lock === null) — the flag still
+      // flips so a later pull's lock never gets a second heal attempt bolted onto this same load.
+      if (!this.lockLabelsHealed) {
+        this.lockLabelsHealed = true;
+        if (lock !== null && backfillLockLabels(manifest.groups, host, lock, await readCarrierSwitchLists(ctx, manifest.groups))) {
+          try {
+            await ctx.io.write(lockPath(ctx), JSON.stringify(lock, null, 2) + "\n");
+          } catch (e) {
+            console.error("Config Sync: lock label heal failed to persist", e);
+          }
+        }
+      }
       this.presentedStatuses = statusBarStatuses(
         this.localStatuses,
         (name) => {
@@ -493,7 +533,16 @@ export default class ConfigSyncPlugin extends Plugin {
         const manifest = await loadManifest(ctx);
         const device = Platform.isMobile ? ("mobile" as const) : ("desktop" as const);
         const groups = groupsForDevice(manifest, device);
-        this.lastGroups = groups;
+        // C-#24 root cause: groupsForDevice drops a scope-mismatched group before it ever reaches
+        // statusForGroups — comparing its content across device classes would be meaningless (the
+        // store copy may belong to a different device's rule entirely), so it correctly never runs
+        // capture/apply/status for these. But that same drop used to make the item invisible in the
+        // Sync Center, not merely mislabeled — no row, no availability entry, nothing for the fate
+        // layer to read. These groups still get a row here: a synthetic, never-comparison-run
+        // "in-sync" status so computeFateInput's excludedHere (SyncCenterView.ts) can author the
+        // honest sentence instead of the row vanishing.
+        const excludedGroups = manifest.groups.filter((g) => g.devices !== "all" && g.devices !== device);
+        this.lastGroups = [...groups, ...excludedGroups];
         const ledger = this.loadBaselines();
         const { statuses, updates } = await statusForGroups(ctx, groups, ledger);
         this.localStatuses = statuses;
@@ -507,12 +556,16 @@ export default class ConfigSyncPlugin extends Plugin {
         this.lastLock = lock;
         const availability: Record<string, Availability> = {};
         for (const g of groups) availability[g.name] = availabilityForGroup(g, this.pluginHost(), lock);
+        for (const g of excludedGroups) availability[g.name] = availabilityForGroup(g, this.pluginHost(), lock);
         // Keep the status bar's snapshot in step with THIS compute (it used to be refreshed
         // only by refreshLocalStatus), and count with the center's own lens — main-section
-        // rows only (statusBarStatuses) — so the bar can never disagree with the pills.
+        // rows only (statusBarStatuses) — so the bar can never disagree with the pills. Excluded
+        // groups stay out of this count (always-neutral, never up/down either way) — unrelated
+        // surface, out of C-#24's scope.
         this.presentedStatuses = statusBarStatuses(statuses, (name) => availability[name], Platform.isMobile);
         this.updateStatusIndicators();
-        return { groups, statuses, availability };
+        const excludedStatuses: GroupStatus[] = excludedGroups.map((g) => ({ group: g.name, state: "in-sync" }));
+        return { groups: [...groups, ...excludedGroups], statuses: [...statuses, ...excludedStatuses], availability };
       },
       selfStatus: async (): Promise<SelfSyncInfo> => {
         const ctx = await this.coreContext();
@@ -527,20 +580,23 @@ export default class ConfigSyncPlugin extends Plugin {
           localList = this.compiledGroups; // best-effort fallback for any failure; in practice CompileError, which recompile() already surfaced as a Notice
         }
         const selfCopy = `${ctx.rootPath}/store/configdir/plugins/config-sync/data.json`;
-        const storeGroups = (await ctx.io.exists(selfCopy)) ? storeSelfCopyGroups(await ctx.io.read(selfCopy), this.registryDefs, betaIds) : [];
+        const selfCopyExists = await ctx.io.exists(selfCopy);
+        const storeGroups = selfCopyExists ? storeSelfCopyGroups(await ctx.io.read(selfCopy), this.registryDefs, betaIds) : [];
         const delta = syncListDelta(localList, storeGroups);
         let capturedAt: string | null = null;
         const lockPath = `${ctx.rootPath}/store.lock.json`;
-        if (await ctx.io.exists(lockPath)) {
+        const lockExists = await ctx.io.exists(lockPath);
+        if (lockExists) {
           try {
             capturedAt = parseStoreLock(await ctx.io.read(lockPath)).capturedAt;
           } catch {
             capturedAt = null; // an unreadable lock must not break the pane
           }
         }
-        if (localList.length === 0) return { state: "coldstart", delta, itemCount: storeGroups.length, capturedAt, contentChanged: false, versionRefresh: null, updateAvailable: null, flagsRefresh: null };
+        const storePresent = lockExists || selfCopyExists;
+        if (localList.length === 0) return { state: "coldstart", delta, itemCount: storeGroups.length, capturedAt, storePresent, contentChanged: false, versionRefresh: null, updateAvailable: null, flagsRefresh: null };
         const selfGroup = this.compiledGroups.find((g) => g.name === SELF_GROUP_NAME);
-        if (selfGroup === undefined) return { state: "insync", delta, itemCount: localList.length, capturedAt, contentChanged: false, versionRefresh: null, updateAvailable: null, flagsRefresh: null };
+        if (selfGroup === undefined) return { state: "insync", delta, itemCount: localList.length, capturedAt, storePresent, contentChanged: false, versionRefresh: null, updateAvailable: null, flagsRefresh: null };
         const selfLedger = this.loadBaselines();
         const { statuses: selfStatuses, updates: selfUpdates } = await statusForGroups(ctx, [selfGroup], selfLedger);
         const [st] = selfStatuses;
@@ -559,13 +615,15 @@ export default class ConfigSyncPlugin extends Plugin {
           decided.versionRefresh && av.localVersion !== null && av.storeVersion !== null ? { local: av.localVersion, store: av.storeVersion } : null;
         const updateAvailable =
           decided.versionBehind && av.localVersion !== null && av.storeVersion !== null ? { local: av.localVersion, store: av.storeVersion } : null;
-        return { state: decided.state, delta, itemCount: localList.length, capturedAt, contentChanged: decided.contentChanged, versionRefresh, updateAvailable, flagsRefresh: flagsRefreshCount > 0 ? flagsRefreshCount : null };
+        return { state: decided.state, delta, itemCount: localList.length, capturedAt, storePresent, contentChanged: decided.contentChanged, versionRefresh, updateAvailable, flagsRefresh: flagsRefreshCount > 0 ? flagsRefreshCount : null };
       },
       coldStartDismissed: () => this.coldStartDismissed(),
       setColdStartDismissed: (v) => this.setColdStartDismissed(v),
       resolvedPath: (g) => g.path.replace("{configDir}", this.app.vault.configDir),
-      displayName: (g) => this.displayName(g, this.lastGroups?.find((x) => x.name === g)?.label ?? this.lastLock?.groups[g]?.label),
-      displayParts: (g) => this.displayParts(g, this.lastGroups?.find((x) => x.name === g)?.label ?? this.lastLock?.groups[g]?.label),
+      displayName: (g, storedLabel) => this.displayName(g, resolveHostStoredLabel(g, storedLabel, this.lastGroups, this.lastLock)),
+      displayParts: (g, storedLabel) => this.displayParts(g, resolveHostStoredLabel(g, storedLabel, this.lastGroups, this.lastLock)),
+      localLockLabel: (g) => this.lastLock?.groups[g]?.label,
+      companionParentOf: (g) => this.companionParentOf(g),
       diffPair: async (name, rel, dir) => {
         try {
           const group = this.compiledGroups.find((g) => g.name === name);
@@ -650,6 +708,14 @@ export default class ConfigSyncPlugin extends Plugin {
       addSwitchExceptions: (name, ids) => this.addSwitchExceptions(name, ids),
       setMemberEnabledOn: (carrier, elementId, scope) => this.setMemberEnabledOn(carrier, elementId, scope),
       clearMemberLocal: (carrier, elementId) => this.clearMemberLocal(carrier, elementId),
+      setItemSyncEnabled: (itemId, enabled) => this.setItemSyncEnabled(itemId, enabled),
+      memberRuleFor: (carrier, elementId, locallyOn) => this.memberRuleFor(carrier, elementId, locallyOn),
+      setMemberRule: (carrier, elementId, rule) => this.setMemberRule(carrier, elementId, rule),
+      itemFileScope: (itemId) => this.itemFileScope(itemId),
+      itemFileScopeMenuLegal: (itemId) => this.itemFileScopeMenuLegal(itemId),
+      setItemFileScope: (itemId, scope) => this.setItemFileScope(itemId, scope),
+      setCustomGroupDevices: (name, devices) => this.setCustomGroupDevices(name, devices),
+      openSettingsAt: (itemId) => this.openSettingsAt(itemId),
       adoptConfiguration: async () => {
         try {
           // config-sync's own registry item (registry.ts builds one for every installed plugin,
@@ -716,14 +782,25 @@ export default class ConfigSyncPlugin extends Plugin {
         // A lock-only delta (version-refresh capture on the other side) is real pull payload
         // even when every store file matches — surface it so the hint isn't contradictory.
         let lockDiffers = false;
+        let remoteLabels: Record<string, string> = {};
         try {
           const remoteLock = (await reader.listFiles()).includes("store.lock.json") ? await reader.readFile("store.lock.json") : null;
           const localLock = (await ctx.io.exists(`${ctx.rootPath}/store.lock.json`)) ? await ctx.io.read(`${ctx.rootPath}/store.lock.json`) : null;
           lockDiffers = remoteLockAhead(localLock, remoteLock, remote.excludeSelf === true ? [SELF_GROUP_NAME] : []);
+          // Parsed separately from remoteLockAhead's own (tolerant) parse above — a malformed
+          // remote lock must still leave lockDiffers at whatever remoteLockAhead just decided,
+          // not get reset by a JSON.parse throw here.
+          if (remoteLock !== null) {
+            try {
+              remoteLabels = remoteLockLabels(JSON.parse(remoteLock));
+            } catch {
+              remoteLabels = {};
+            }
+          }
         } catch {
           lockDiffers = false;
         }
-        return { entries, lockDiffers };
+        return { entries, lockDiffers, remoteLabels };
       },
       pullFrom: async (remote) => {
         try {
@@ -1082,7 +1159,12 @@ export default class ConfigSyncPlugin extends Plugin {
   }
 
   displayName(group: string, storedLabel?: string): string {
-    return displayLabelForGroup(group, this.pluginHost(), storedLabel ?? this.lastLock?.groups[group]?.label);
+    // Routes every caller (direct or via the Sync Center host's resolveHostStoredLabel
+    // pre-resolve) through the SAME chain — including its carrier-memberLabels fallback
+    // (2026-08-09-c-livetest-batch15) — so a bare `this.displayName(name)` call (e.g.
+    // ConflictModal's name resolver) never falls back to the id where the wrapped path would
+    // have found a name. Idempotent when storedLabel already arrived resolved.
+    return displayLabelForGroup(group, this.pluginHost(), resolveHostStoredLabel(group, storedLabel, this.lastGroups, this.lastLock));
   }
 
   displayParts(group: string, storedLabel?: string): GroupDisplayParts {
@@ -1090,6 +1172,28 @@ export default class ConfigSyncPlugin extends Plugin {
       parent: parentCardLabel(group, this.registryDefs, this.settings),
       label: this.displayName(group, storedLabel),
     };
+  }
+
+  // The Sync Center host resolver (c-livetest batch5 task 2, spec §1): the parent GROUP name for
+  // a companion group, so the view can fold a family into one row/entry — null for a non-companion,
+  // a custom group, or `enabled-css-snippets` (none of which groupOwners ever attributes to a
+  // def-level companionPath, so the out-of-scope cases fall out of this check for free).
+  // groupOwners only knows STATIC def-level presetCompanions; spec §1's family also includes "any
+  // item's configured companions" (the Settings drawer's "+ Add folder", any item, not just the
+  // ones with a preset) — those live in settings.items, not the registry, so a group groupOwners
+  // doesn't recognize falls through to a scan there. Mirrors compileCompanions' own filter
+  // (registry.ts:283: only `enabled` companions ever compile into a group) so this only resolves
+  // basenames that actually exist as a compiled group. Preset mapping keeps priority (checked
+  // first); a name collision between the two sources is impossible at compile time
+  // (companionNameConflict guards it), so the first match is always the only match.
+  companionParentOf(group: string): string | null {
+    const owner = groupOwners(this.registryDefs, this.settings.customGroups)[group]?.[0];
+    if (owner !== undefined) return owner.custom === true || owner.companionPath === undefined ? null : legacyGroupName(owner.itemId);
+    for (const [itemId, cfg] of Object.entries(this.settings.items)) {
+      const hit = cfg.companions.find((c) => c.enabled && basename(c.path) === group);
+      if (hit !== undefined) return legacyGroupName(itemId);
+    }
+    return null;
   }
 
   // The plugin's own data.json must not be written through the raw adapter: Obsidian watches
@@ -1205,6 +1309,118 @@ export default class ConfigSyncPlugin extends Plugin {
     await this.saveSettings();
   }
 
+  // Sync Center header chip (unified grammar task-4): same write as the Settings tab's per-card
+  // sync toggle (SettingTab.renderItemCard) — ItemConfig.enabled, keyed by item id.
+  async setItemSyncEnabled(itemId: string, enabled: boolean): Promise<void> {
+    const cfg = this.settings.items[itemId] ?? emptyItemConfig();
+    this.settings.items = { ...this.settings.items, [itemId]: { ...cfg, enabled } };
+    await this.saveSettings();
+  }
+
+  // Runs-on menu read (unified grammar task-5, spec §6): a genuinely stored rule always wins;
+  // absent one, derive losslessly from the legacy device-class scope (memberDecisionsFor, which
+  // already overlays settings.localMembers per the task-2 retarget) using the SAME
+  // normalizeMemberRule("local", …) mapping memberRuleForces applies at apply/capture time, so
+  // the menu's displayed value always agrees with what a run would actually do.
+  private memberRuleFor(carrier: EnablementCarrier, elementId: string, locallyOn: boolean): MemberRule {
+    const prefix = carrier === "core-plugins" ? "core:" : "community:";
+    const stored = this.settings.memberRules[`${prefix}${elementId}`];
+    if (stored !== undefined) return stored;
+    const scope = this.memberDecisionsFor(carrier).find((d) => d.id === elementId)?.scope;
+    if (scope === undefined) return "all";
+    return scope === "local" ? normalizeMemberRule("local", locallyOn) : scope;
+  }
+
+  // Runs-on menu write: stores the unified rule directly — task 2 already wired
+  // settings.memberRules into switchForceOn and the never-here half of switchForceOff, so no
+  // producer rework is needed here. Rides the self item's whole-document field sync unchanged
+  // (it carries no locked preset, unlike rootPath/remotes/localMembers — see selfPresetRules).
+  async setMemberRule(carrier: EnablementCarrier, elementId: string, rule: MemberRule): Promise<void> {
+    const prefix = carrier === "core-plugins" ? "core:" : "community:";
+    this.settings.memberRules = { ...this.settings.memberRules, [`${prefix}${elementId}`]: rule };
+    await this.saveSettings();
+  }
+
+  // Settings-sync menu read/write (unified grammar task-5): the same field the Settings tab's
+  // file-row scope control edits (ItemConfig.settingsFile.fileRule.scope). `mode` is re-derived
+  // on every write exactly as SettingTab's own withDerivedMode does, so a fileRule-only write
+  // here never desyncs it from the rules/perItem it's actually driven by.
+  private itemFileScope(itemId: string): Exclude<RuleScope, "local"> {
+    return this.settings.items[itemId]?.settingsFile?.fileRule?.scope ?? "all";
+  }
+
+  // C-#25: the SAME legality test setItemFileScope's guard throws on below — the Sync Center row
+  // calls this to decide whether to offer the menu at all, so "offered" and "accepted" can never
+  // disagree.
+  private itemFileScopeMenuLegal(itemId: string): boolean {
+    const sf = this.settings.items[itemId]?.settingsFile ?? defaultSettingsFile();
+    return fileRuleLegalForMode(deriveMode(sf));
+  }
+
+  async setItemFileScope(itemId: string, scope: Exclude<RuleScope, "local">): Promise<void> {
+    const cfg = this.settings.items[itemId] ?? emptyItemConfig();
+    const sf = cfg.settingsFile ?? defaultSettingsFile();
+    const mode = deriveMode(sf);
+    // C-#25 root cause: writing a fileRule on a fields-mode item used to resolve mode:"fields"
+    // below and silently strip the very fileRule this call just wrote — the item's card now never
+    // offers this menu (see itemFileScopeMenuLegal above), so reaching here with an illegal mode
+    // means a caller ignored that and must be told loudly, not have its write vanish.
+    if (!fileRuleLegalForMode(mode)) {
+      throw new Error(`setItemFileScope: "${itemId}" is in "${mode}" mode — a whole-file scope write is illegal there (manifest.ts's fileRule validator only allows plain-mode file groups)`);
+    }
+    const nextSf: ItemSettingsFile = { ...sf, mode, fileRule: { ...(sf.fileRule ?? { scope: "all", encrypted: false }), scope } };
+    this.settings.items = { ...this.settings.items, [itemId]: { ...cfg, settingsFile: pruneSettingsFile(nextSf) } };
+    await this.saveSettings();
+  }
+
+  // Settings-sync menu for a custom (folder) group (unified grammar task-5 fix round 1): the
+  // SAME field and persistence path the Advanced tab's "Devices" dropdown writes
+  // (SettingTab.commitGroups → persistCustomGroups → settings.customGroups) — folders carry
+  // their device scope directly on the SyncGroup literal (`devices: DeviceClass`), not through
+  // an ItemConfig, so this is a separate write target from setItemFileScope above, not a variant
+  // of it. A no-op if the name isn't (or is no longer) a custom group.
+  async setCustomGroupDevices(name: string, devices: DeviceClass): Promise<void> {
+    const idx = this.settings.customGroups.findIndex((g) => g.name === name);
+    if (idx === -1) return;
+    const next = [...this.settings.customGroups];
+    const current = next[idx];
+    if (current === undefined) return;
+    next[idx] = { ...current, devices };
+    this.settings.customGroups = next;
+    await this.saveSettings();
+  }
+
+  // The More bridge's target item — set here, consumed once by SettingTab.display() via
+  // consumePendingSettingsAnchor() below, which expands that item's card and scrolls to it.
+  private pendingSettingsDeepLink: string | null = null;
+  private openSettingsAt(itemId: string): void {
+    this.pendingSettingsDeepLink = itemId;
+    const app = this.app as unknown as AppWithSetting;
+    // ROOT CAUSE (C-#11, live-traced via console instrumentation on a real build): open() itself
+    // re-opens whatever tab was last active — when that's already this plugin's tab (the common
+    // case once Settings has been opened here even once), open()'s internal openTabById() already
+    // fires SettingTab.display(). openTabById() has no "already active" guard (traced in
+    // Obsidian's own compiled Setting class), so the unconditional explicit call below used to
+    // re-run display() a second time, resetting activeTab/expanded back to defaults right after
+    // the first display() had consumed pendingSettingsDeepLink and applied them — a live-confirmed
+    // double render (renderGen incremented twice per open), not a "consume never fires" bug.
+    // Call it again only when open() didn't already land us on our own tab — but open() is a
+    // no-op while the modal is already showing (no tab change at all), so also force it when we
+    // were already active *before* open() ran, or a repeat More click while Settings is already
+    // open on our own tab would never re-render to pick up the new pendingSettingsDeepLink.
+    const alreadyActive = app.setting.activeTab?.id === this.manifest.id;
+    app.setting.open();
+    if (alreadyActive || app.setting.activeTab?.id !== this.manifest.id) app.setting.openTabById(this.manifest.id);
+  }
+
+  // SettingsHost-facing read-and-clear: the settings tab calls this once per display() so a
+  // pending deep link is consumed exactly once per Settings open.
+  consumePendingSettingsAnchor(): string | null {
+    const id = this.pendingSettingsDeepLink;
+    this.pendingSettingsDeepLink = null;
+    return id;
+  }
+
   // The where-it-runs menu's "This device decides for itself" entry (spec 2026-07-28 §4) — and
   // KeepOnDeviceModal's multi-id "keep extra on this device" batch. Schema v2 (task-2 retarget):
   // this no longer writes ItemConfig.enabledOn = "local"; it adds every named id to
@@ -1282,6 +1498,50 @@ export default class ConfigSyncPlugin extends Plugin {
     return memberForceOff(this.memberScopesFor(group), this.memberLocalIdsFor(group), Platform.isMobile);
   }
 
+  // A group's PERSISTED local switch-list content — the same file applySwitchList's exception
+  // pass-through reads (task-2 fix #1: never a live PluginHost query, which can diverge from what
+  // is actually on disk; see normalizeMemberRule's comment). Absent group/file/unparseable → null,
+  // treated as "off" by switchListMemberOn.
+  private async localSwitchListFor(name: string): Promise<SwitchList | null> {
+    const group = findGroupByName(this.compiledGroups, name);
+    if (group === undefined) return null;
+    const io = this.configIO();
+    const real = localRealPath(name, group.path, this.app.vault.configDir);
+    if (!(await io.exists(real))) return null;
+    return readLocalSwitchList(name, await io.read(real));
+  }
+
+  // This carrier's slice of settings.memberRules (task 2's stored home for the Runs-on rule),
+  // de-prefixed to bare element ids.
+  private memberRulesFor(carrier: "core-plugins.json" | "community-plugins.json"): Record<string, MemberRule> {
+    const prefix = carrier === "core-plugins.json" ? "core:" : "community:";
+    const out: Record<string, MemberRule> = {};
+    for (const [id, rule] of Object.entries(this.settings.memberRules)) {
+      if (id.startsWith(prefix)) out[id.slice(prefix.length)] = rule;
+    }
+    return out;
+  }
+
+  // Mask table (Sync Center unified grammar, task 2): every id with either a stored MemberRule or
+  // a legacy "this device" pin resolves via preferStoredMemberRule (stored wins; otherwise
+  // normalizeMemberRule against the group's PERSISTED local content, task-2 fix #1) into
+  // always-here → exception + forceOn, or never-here → exception + forceOff (both on top of the
+  // class-scope force-off memberForceOffIds already computes).
+  private memberRuleForces(group: string, persisted: SwitchList | null): { forceOn: string[]; forceOff: string[] } {
+    const carrier = this.carrierFor(group);
+    if (carrier === null) return { forceOn: [], forceOff: [] };
+    const stored = this.memberRulesFor(carrier);
+    const ids = new Set([...this.memberLocalIdsFor(group), ...Object.keys(stored)]);
+    const forceOn: string[] = [];
+    const forceOff: string[] = [];
+    for (const id of ids) {
+      const rule = preferStoredMemberRule(stored[id], switchListMemberOn(persisted, id));
+      if (rule === "always-here") forceOn.push(id);
+      else if (rule === "never-here") forceOff.push(id);
+    }
+    return { forceOn, forceOff };
+  }
+
   private async coreContext(): Promise<CoreContext> {
     const rootPath = await resolveRootPath(this.settings.rootPath, this.settings.pkmMode, this.pkmProbe());
     if (rootPath === "" || rootPath.startsWith("/") || rootPath.split("/").includes("..")) {
@@ -1289,6 +1549,10 @@ export default class ConfigSyncPlugin extends Plugin {
     }
     this.lastResolvedRoot = rootPath;
     const switchExceptions = await this.augmentedSwitchExceptions(rootPath);
+    const ruleForces: Record<string, { forceOn: string[]; forceOff: string[] }> = {};
+    for (const name of SWITCH_LIST_GROUPS) {
+      ruleForces[name] = this.carrierFor(name) === null ? { forceOn: [], forceOff: [] } : this.memberRuleForces(name, await this.localSwitchListFor(name));
+    }
     return {
       io: this.configIO(),
       configDir: this.app.vault.configDir,
@@ -1300,7 +1564,15 @@ export default class ConfigSyncPlugin extends Plugin {
       switchForceOff: (() => {
         const out: Record<string, string[]> = {};
         for (const name of SWITCH_LIST_GROUPS) {
-          const f = this.memberForceOffIds(name);
+          const f = [...new Set([...this.memberForceOffIds(name), ...(ruleForces[name]?.forceOff ?? [])])];
+          if (f.length > 0) out[name] = f;
+        }
+        return out;
+      })(),
+      switchForceOn: (() => {
+        const out: Record<string, string[]> = {};
+        for (const name of SWITCH_LIST_GROUPS) {
+          const f = ruleForces[name]?.forceOn ?? [];
           if (f.length > 0) out[name] = f;
         }
         return out;
@@ -1632,6 +1904,10 @@ export default class ConfigSyncPlugin extends Plugin {
     // both call loadSettings() through reloadSettings()), so a freshly-adopted "local" is drained
     // rather than re-captured on the next save.
     if (drainEnabledOnLocal(this.settings)) await this.saveSettings();
+    // Task 2 (spec 2026-08-06-sync-center-unified-grammar-design.md §6): drop any memberRules
+    // entry a foreign/older build could never have written validly — malformed data.json, or a
+    // future MemberRule this build doesn't know yet.
+    if (sanitizeMemberRules(this.settings)) await this.saveSettings();
   }
 
   async saveSettings(): Promise<void> {

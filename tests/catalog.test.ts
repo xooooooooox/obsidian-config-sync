@@ -21,13 +21,14 @@ import {
   OPTION_LABELS,
   optionReservedName,
   reservedNames,
+  resolveHostStoredLabel,
   SELF_GROUP_NAME,
   selfPresetRules,
   setCorePluginIds,
   splitLocation,
   toggleSection,
 } from "../src/core/catalog";
-import { SyncGroup } from "../src/core/types";
+import { StoreLock, SyncGroup } from "../src/core/types";
 import { FakePlugins, MemFS } from "./memfs";
 
 function optionFs(): MemFS {
@@ -489,6 +490,77 @@ describe("displayLabelForGroup label priority", () => {
   });
   it("falls back to the raw id when neither resolves", () => {
     expect(displayLabelForGroup("plugin-obsidian42-brat", noPlugins)).toBe("obsidian42-brat");
+  });
+});
+
+// Regression for the C-#14 live-verify find: main.ts's syncCenterHost() wired displayName/
+// displayParts as `(g) => this.displayName(g, ...)` — declaring only the `group` parameter, so
+// every caller's explicit storedLabel argument (the view passes one at half a dozen call sites)
+// was silently discarded. TypeScript never flagged it because an implementation is allowed to
+// ignore a caller-supplied argument for a parameter it doesn't declare. This exercises the exact
+// priority chain the host wiring now delegates to, so a future re-introduction of the arity bug
+// (or a wrong priority order) fails here instead of only being catchable on a real device.
+describe("resolveHostStoredLabel (host wiring priority, C-#14)", () => {
+  const group: SyncGroup = { name: "plugin-dataview", path: "{configDir}/plugins/dataview/data.json", type: "file", devices: "all", label: "from lastGroups" };
+  const lock: StoreLock = { capturedAt: "2026-08-08T00:00:00.000Z", groups: { "plugin-dataview": { label: "from lastLock" } } };
+
+  it("prefers the caller's explicit override over both snapshots", () => {
+    expect(resolveHostStoredLabel("plugin-dataview", "Dataview", [group], lock)).toBe("Dataview");
+  });
+  it("falls back to the live SyncGroup snapshot when no explicit override is given", () => {
+    expect(resolveHostStoredLabel("plugin-dataview", undefined, [group], lock)).toBe("from lastGroups");
+  });
+  it("falls back to the last-loaded lock's label when neither an override nor a live group carries one", () => {
+    expect(resolveHostStoredLabel("plugin-dataview", undefined, null, lock)).toBe("from lastLock");
+  });
+  it("returns undefined when nothing resolves", () => {
+    expect(resolveHostStoredLabel("plugin-dataview", undefined, null, null)).toBeUndefined();
+  });
+});
+
+// 2026-08-09-c-livetest-batch15 (spec 2026-08-09-c-livetest-batch15-member-labels.md): a pure
+// on/off-list member (no own lock entry — never individually synced) falls through one more step,
+// to its carrier's memberLabels[id] — same chain function, same priority order, id fallback still
+// left to the caller (displayLabelForGroup).
+describe("resolveHostStoredLabel — carrier memberLabels fallback (batch15)", () => {
+  it("falls through to the community carrier's memberLabels for a plugin-<id> group with no entry of its own", () => {
+    const lock: StoreLock = {
+      capturedAt: "t",
+      groups: { "community-plugins": { sourceAppVersion: "1.8.7", memberLabels: { completr: "Completr" } } },
+    };
+    expect(resolveHostStoredLabel("plugin-completr", undefined, null, lock)).toBe("Completr");
+  });
+
+  it("falls through to the core carrier's memberLabels for a bare core-settings id with no entry of its own", () => {
+    const lock: StoreLock = {
+      capturedAt: "t",
+      groups: { "core-plugins": { sourceAppVersion: "1.8.7", memberLabels: { "daily-notes": "Daily notes" } } },
+    };
+    expect(resolveHostStoredLabel("daily-notes", undefined, null, lock)).toBe("Daily notes");
+  });
+
+  it("prefers the member's own lock entry label over the carrier's memberLabels", () => {
+    const lock: StoreLock = {
+      capturedAt: "t",
+      groups: {
+        "plugin-completr": { sourcePluginVersion: "1.0.0", label: "Completr (own entry)" },
+        "community-plugins": { sourceAppVersion: "1.8.7", memberLabels: { completr: "Completr (carrier)" } },
+      },
+    };
+    expect(resolveHostStoredLabel("plugin-completr", undefined, null, lock)).toBe("Completr (own entry)");
+  });
+
+  it("returns undefined (not the bare id) when neither the member nor its carrier resolves", () => {
+    const lock: StoreLock = { capturedAt: "t", groups: { "community-plugins": { sourceAppVersion: "1.8.7" } } };
+    expect(resolveHostStoredLabel("plugin-unknown", undefined, null, lock)).toBeUndefined();
+  });
+
+  it("does not apply the carrier fallback to a group that is neither plugin-<id> nor a core-settings id", () => {
+    const lock: StoreLock = {
+      capturedAt: "t",
+      groups: { "community-plugins": { sourceAppVersion: "1.8.7", memberLabels: { hotkeys: "should never surface here" } } },
+    };
+    expect(resolveHostStoredLabel("hotkeys", undefined, null, lock)).toBeUndefined();
   });
 });
 

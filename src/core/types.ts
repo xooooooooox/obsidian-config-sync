@@ -9,6 +9,11 @@ export type SyncMode = "plain" | "fields" | "encrypted";
 export const RULE_SCOPES = ["all", "desktop", "mobile", "local"] as const;
 export type RuleScope = (typeof RULE_SCOPES)[number];
 
+// Per-device enablement rule for an on/off list member (Sync Center unified grammar). Distinct
+// from RuleScope: this governs whether a member turns on/off on this device, not sync scope.
+export const MEMBER_RULES = ["all", "desktop", "mobile", "always-here", "never-here"] as const;
+export type MemberRule = (typeof MEMBER_RULES)[number];
+
 // Per-item scopes for a string-array key (spec §3, D3): element value -> scope; an element with
 // no entry defaults to "all". Generalizes the switch-list / memberScopes mechanism to any
 // string-array key, not just community-plugins.json / core-plugins.json / enabledCssSnippets.
@@ -56,7 +61,13 @@ export interface SyncManifest {
 
 export interface StoreLock {
   capturedAt: string;
-  groups: Record<string, { sourcePluginVersion?: string; sourceAppVersion?: string; desktopOnly?: boolean; label?: string }>;
+  // memberLabels (2026-08-09-c-livetest-batch15): id → display name, only on the two carrier
+  // entries (core-plugins, community-plugins) — names for on/off-list members that have no lock
+  // entry of their own (never individually synced). Absent = today's shape, fully back-compatible.
+  groups: Record<
+    string,
+    { sourcePluginVersion?: string; sourceAppVersion?: string; desktopOnly?: boolean; label?: string; memberLabels?: Record<string, string> }
+  >;
 }
 
 export interface FileChanges {

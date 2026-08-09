@@ -18,6 +18,7 @@ import {
 import { leftoverStoreRels } from "../src/core/leftover";
 import { SyncGroup } from "../src/core/types";
 import { ManifestValidationError, validateSyncManifest } from "../src/core/manifest";
+import { mergePresetFields, selfPresetRules } from "../src/core/catalog";
 
 // spec 2026-07-25-unified-card-design.md §1/§3/§5/§6; task-4-brief.md compile rules.
 
@@ -473,6 +474,47 @@ describe("compileItems — self item protection (withSelfPresets)", () => {
     // this one.
     expect(() => validateSyncManifest({ version: 1, groups })).not.toThrow();
   });
+
+  // C-#31 one-list invariant: withSelfPresets (this file) must derive the self group's fields
+  // through catalog.ts's mergePresetFields — the SAME function the self item's other
+  // preset-merge call sites (ensureSelfPresets/groupForItem) use — never a second, independently
+  // maintained copy of the preset+rest merge. If a future edit reimplemented the merge here
+  // instead of delegating, this test would catch the drift the moment the two outputs disagree.
+  it("compiles the self group's fields via catalog.ts's shared mergePresetFields — not a second hand-maintained merge", () => {
+    const env: RegistryEnv = { ...EMPTY_ENV, plugins: [{ id: "config-sync", name: "Config Sync" }] };
+    const defs = buildItemDefs(env);
+    // A "rest" rule (anything not covered by selfPresetRules()) — proves the delegation holds
+    // for arbitrary caller-configured rules too, not just the empty-rules case.
+    const s = settings({
+      "community:config-sync": on({
+        settingsFile: { mode: "fields", rules: { someCustomKey: { scope: "desktop", encrypted: false } }, perItem: {} },
+      }),
+    });
+    const compiledFields = findGroup(compileItems(defs, s), "plugin-config-sync")!.fields!;
+    expect(compiledFields).toEqual(mergePresetFields([{ pattern: "someCustomKey", scope: "desktop", encrypted: false }]));
+  });
+
+  // C-#31 one-list invariant, part 2: the compiled self group's exclusion set (locked, scope
+  // "local" fields — what adopt preserves from local instead of importing from the store, and
+  // what the self compare treats as never-a-difference) is EXACTLY selfPresetRules()'s pattern
+  // set, regardless of what other rules the item carries. A future settings field (e.g. the next
+  // bratPluginIndex) is therefore imported by adopt and tracked by compare together, by
+  // construction — it can never land only in one of the two lists.
+  it("the self group's adopt/compare exclusion set is exactly selfPresetRules() — walking the shared constant", () => {
+    const env: RegistryEnv = { ...EMPTY_ENV, plugins: [{ id: "config-sync", name: "Config Sync" }] };
+    const defs = buildItemDefs(env);
+    const s = settings({
+      "community:config-sync": on({
+        settingsFile: { mode: "fields", rules: { anotherKey: { scope: "mobile", encrypted: false } }, perItem: {} },
+      }),
+    });
+    const compiledFields = findGroup(compileItems(defs, s), "plugin-config-sync")!.fields!;
+    const exclusionSet = new Set(compiledFields.filter((f) => f.locked === true && f.scope === "local").map((f) => f.pattern));
+    expect(exclusionSet).toEqual(new Set(selfPresetRules().map((f) => f.pattern)));
+    // Nothing else in the compiled fields is locked/local-scoped — "anotherKey" (the rest rule)
+    // stays a plain mobile-scoped rule, not swept into the exclusion set.
+    expect(compiledFields.filter((f) => f.locked === true)).toHaveLength(selfPresetRules().length);
+  });
 });
 
 describe("groupOwners — compiled group name -> owning item(s), for durable stop-syncing", () => {
@@ -627,5 +669,30 @@ describe("parentCardLabel", () => {
       "community:dataview": on({ companions: [{ path: "scripts-folder/scripts", scope: "all", enabled: true }] }),
     });
     expect(parentCardLabel("scripts", defs, s)).toBe("Dataview");
+  });
+
+  // presetCompanions basename fallback (c-livetest batch4 task 1): themes/snippets still read as
+  // "Appearance" even when the user never touched that companion — display-only, so it applies
+  // whether or not the appearance card itself is enabled.
+  it("empty settings.items → themes/snippets fall back to the appearance def's label", () => {
+    const s = settings({});
+    expect(parentCardLabel("themes", defs, s)).toBe("Appearance");
+    expect(parentCardLabel("snippets", defs, s)).toBe("Appearance");
+  });
+
+  it("a configured enabled companion with the same basename on another item still wins over the fallback", () => {
+    const s = settings({
+      "community:dataview": on({ companions: [{ path: "elsewhere/themes", scope: "all", enabled: true }] }),
+    });
+    expect(parentCardLabel("themes", defs, s)).toBe("Dataview");
+  });
+
+  it("disabled appearance card with no configured companions still gets the preset fallback (state does not gate it)", () => {
+    const s = settings({ appearance: { enabled: false, companions: [] } });
+    expect(parentCardLabel("themes", defs, s)).toBe("Appearance");
+  });
+
+  it("a non-companion group name still returns null", () => {
+    expect(parentCardLabel("random-group", defs, settings({}))).toBeNull();
   });
 });

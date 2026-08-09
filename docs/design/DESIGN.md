@@ -24,9 +24,9 @@ One color per meaning, everywhere (0.27.9 audit). Alpha fills always use
 | Active / selected | `--interactive-accent` | active filter pill, active settings tab underline, active sidebar scope, seg `.is-on`, search-jump highlight, search scope tag |
 | In sync / success | `--color-green` | ✓ state icon, pills, result strip frame, test-strip ok, diff insertions, passphrase set badge, remote token-status stored |
 | Pull (remote → store) | `--color-cyan` | pull state icon, Pull button (solid primary), status-bar segment, encrypt-related accents (see below) |
-| Push (store → remote) | `--color-pink` | push state icon, Push button (solid primary), outdated-section frame, status-bar segment |
+| Push (store → remote) | `--color-pink` | push state icon, Push button (solid primary), status-bar segment |
 | Locked / encrypted-at-rest | `--color-cyan` | key state icon, statenote pills, policy seg on-state (json keys mark encryption with a colorless `lock` suffix — scope alone drives key color since the D1 split) |
-| Warning / caution | `--color-orange` | ⚠ pills, detect/device badges, not-installed section frame, amber version lines, local-decision rows, unresolved conflicts, remote token-status awaiting this device's token |
+| Warning / caution | `--color-orange` | ⚠ pills, detect/device badges, amber version lines, unresolved conflicts, remote token-status awaiting this device's token, the leftover-section frame, orphan-row hint |
 | Error / destructive | `--color-red` | ✗ pills, test-strip error, diff deletions, strip-action on-state |
 | File changes (reports/diffs) | add `--color-green` · update `--color-blue` · delete `--color-red` | chips `+N ~N −N`, report file lines, conflict-modal marks — a *file-change* semantic, distinct from directions |
 | Neutral text ramp | `--text-normal` → `--text-muted` → `--text-faint` | content → secondary labels → hints/chevrons/idle |
@@ -108,8 +108,13 @@ stops (every scope-cycle) and the row-level
 desktop-only-plugin badge (`config-sync-card-badge-plat`, itemCard.ts) · `airplay` —
 `SCOPE_ICONS` "This device" stop; the whole cycle renders through the one shared
 `renderScopeCycle` (scopeCycle.ts; the model — `SCOPE_ICONS`/`nextScope`/`scopeCycleTooltip`
-— stays in itemCard.ts), used by every Settings drawer scope cell and the Sync Center's
-per-plugin rule and scoped-members rows · `settings-2` — the sidebar Config Sync
+— stays in itemCard.ts), used by every Settings drawer scope cell — a direct-cycle click
+there advances straight to the next option. The Sync Center card's `Settings sync`/`Runs on`
+rows (§4 Rule controls) share the same glyph vocabulary through an icon-trigger-plus-menu
+variant instead — click opens an Obsidian `Menu` rather than cycling; `Runs on` extends the
+vocabulary with `power`/`power-off` for `RUNS_ON_ICONS`'s `always-here`/`never-here` stops
+(`MemberRule`, itemCard.ts — no `RuleScope` counterpart, so these two are unused elsewhere)
+· `settings-2` — the sidebar Config Sync
 self-entry tile, the compact switcher's self entry, and the self pane's title-row Settings
 button · `ban` — the drawer's Stop-syncing footer action · `monitor-smartphone` — the
 scope-cycle "All devices" stop · `arrow-left-right` — the Sync Center leaf/tab icon ·
@@ -142,9 +147,11 @@ than invent synonyms.
 - All user-facing copy is written from the user/product perspective, never the
   implementation's.
 - Forbidden implementation vocabulary in copy: scope, carrier, mask, self group, ledger,
-  shared list, compiled, registry, delta, schema. Use device narrative ("on for your other
-  devices", "off on this phone") and consequence narrative ("Apply would turn it on here
-  too") instead.
+  shared list, compiled, registry, delta, schema, fleet, switch list, sidecar. The Sync
+  Center's unified grammar (2026-08-06) binds all copy to three nouns only — `this device` /
+  `your other devices` / `the store` — no invented synonyms for any of them. Use device
+  narrative ("on for your other devices", "off on this phone") and consequence narrative
+  ("Apply would turn it on here too") instead.
 - Anchor to established product terms: Apply, Capture, the store, Sync Center, "your other
   devices". Don't invent synonyms.
 - Controls state their click consequence; recommended options give their reason ("matches
@@ -168,25 +175,131 @@ noted):
   `config-sync-side-self` (`-side-self-ic` icon tile, `-side-self-title`/`-side-self-sub`,
   `-side-self-pill` reusing `selfStatePill`), echoing the header self-chip. **Switcher**
   `config-sync-switcher` — compact replacement.
-- **Rows** `config-sync-hub-row` — chevron, name (`-rule-name`), optional mode badge /
-  excluded note / statenote pill, state icon, checkbox. Names truncate on mobile. A card-derived
-  group — a companion folder or the `enabled-css-snippets` switch list — renders its name
-  two-tone: a faint `Parent › ` prefix (`-rule-parent` + `-rule-parentsep`, `--text-faint`) ahead
-  of the plain label (`renderRuleName`, `SyncCenterView.ts`), so it reads and sorts under its
-  host card; a standalone group renders just the label, unchanged.
+- **Rows** `config-sync-hub-row` — the unified grammar's one-object-one-row shape (spec
+  `2026-08-06-sync-center-unified-grammar-design.md` §1/§3, extended to companion families
+  by `2026-08-07-c-livetest-batch5-companion-dissolve.md`): chevron, name (`-rule-name`),
+  fate chips (`config-sync-fatechip`, rendered only when a fact deviates from default —
+  `not installed here` · `desktop only` · `stays off` · `off here — your rule` / `on here —
+  your rule` · `🔒 encrypted` · a folder path chip · `your choice` once a conflict is
+  resolved), a spacer, then the fate sentence (`config-sync-fate-text`: direction glyph +
+  verbs describing everything the run will do to this row — the full verb table lives in
+  the spec, not duplicated here), and last the checkbox. **The checkbox has one meaning
+  everywhere:** include this row in the next Apply/Capture run; selection never changes
+  what would happen, only whether it happens. It is direction-colored (orange capture /
+  accent apply, §1.1) like every other checkbox, and hidden entirely on inert rows
+  (in-sync / nothing-yet / unresolved conflict). Expanding the row (ledger C-#9) hides the
+  fate sentence/glyph — the card's own `On apply`/`On capture`/`State` row becomes the
+  single statement while open; chips and the checkbox stay. Names truncate on mobile.
+  **The object is the family:** a parent item plus every companion group it owns
+  (Appearance's `themes`/`snippets` presets, or any item's Settings-drawer `+ Add folder`
+  companions) collapses into the parent's row — one row per family, never one per
+  companion. When companions contribute file changes the fate sentence joins the parent's
+  settings verb with the folder verb (`Applies settings · applies N files` / `Captures
+  settings · captures N files`, the same ` · ` join as the install/turn-on sequence);
+  Appearance's override sentence (`Applies theme & snippets — live` / `Captures theme &
+  snippets`) still replaces the joined pair outright, unchanged. A conflict on any member,
+  or actionable members split across both directions, renders the family `⚠ Changed on
+  both sides` and reuses the existing Resolve grammar (`Use theirs ↓` / `Keep mine ↑`) at
+  family level — no new controls. Custom `+ Add folder` groups are not companions and stay
+  their own object, rendering a plain label with no breadcrumb (`parentCardLabel`,
+  `registry.ts`, never consults `settings.customGroups`). The legacy `enabled-css-snippets`
+  switch list is likewise out of scope, unchanged — it keeps the two-tone `Parent › `
+  breadcrumb (`-rule-parent` + `-rule-parentsep`, `--text-faint`, `renderRuleName`,
+  `SyncCenterView.ts`) ahead of the plain label, the same as any real companion. Inside the
+  object grammar itself the breadcrumb survives in exactly one
+  place: an orphan companion (its parent group not compiled locally) falls back to its own
+  standalone row, breadcrumb included, as honest degradation — every other companion
+  dissolves and is never its own row. (The breadcrumb also survives, outside the object
+  grammar, in Settings drawers and run reports — unchanged.)
+  The pinned Config Sync self row (`.is-self`, Community section) is the one exception: no
+  checkbox (it isn't staged through Apply/Capture), its own fate text reads `your Sync
+  Center — manages itself`.
 - **Checkboxes** — custom-drawn inputs (hub-row/mainbar/section-head): direction-colored
   when a row (orange capture / accent apply), bright grey (`--text-normal`) for
   select-alls (they carry no direction); idle select-all hides (`-selectall-idle`).
 - **Action bar** `config-sync-actionbar` — staged count + solid direction buttons
   (`-btn-capture` orange; Apply = `mod-cta`); 0-item = same color at 0.5 opacity; btnwrap
   hosts the 2px progress bar + shimmer; `-runline` is the live status line.
-- **Cards & sections** `config-sync-card`; availability sections `config-sync-section`
-  (dashed frame: pink outdated · orange not-installed · orange leftover; disabled and
-  desktop-only keep the neutral border deliberately), nested card unframed; group
-  headers `config-sync-sect` (uppercase + hairline) — used in All-items grouping and
-  remote diff. On narrow phones a section head keeps its pills and the "N selected" hint
-  on one line (`white-space: nowrap; flex: none`) — the title is the only element allowed
-  to wrap.
+- **Type sections** `config-sync-card`; the list is four fixed sections
+  (`config-sync-section.is-typesection`), fixed order, alphabetical within: `Obsidian` ·
+  `Core plugins` · `Community plugins` (the Config Sync self row pinned first) · `Your
+  folders`. The old availability sections — on/off carrier cards in the main list,
+  Disabled-on-this-device, Not-installed-on-this-device, per-row policy segments — have all
+  dissolved into row state (chips + fate sentence, Rows above); only the store-orphan
+  **Leftover** section (below) still keeps a colored dashed frame. A type section's own
+  frame stays neutral — dashed when collapsed, solid when open — no drift-color borrowed
+  from the old outdated/not-installed sections; nested card unframed so section rows share
+  the main card's checkbox column. **Real collapse:** clicking the header
+  (`config-sync-section-head`) toggles the section, remembered per section for the view
+  instance's lifetime (survives re-renders, resets on view close); restored pre-C header
+  typography (uppercase, letter-spaced, `--font-ui-smaller`, `--text-faint`, unmistakable as
+  a header even with its trailing badge covered), disclosure triangle (▾ open / ▸ collapsed)
+  scaled to the header size; a checkbox click on the header stages, anywhere else on the
+  header toggles collapse. A trailing count pill reads `N of M` under a filter; Core/Community
+  carry a header chip `on/off synced ✓` / `on/off not synced` — the only remaining home of
+  the on/off carrier as a configurable item, edited via a small popover (`Sync on/off` /
+  `Stop syncing on/off`). Section select-all/clear targets actionable visible rows only —
+  excludes the self row, in-sync, nothing-yet, and unresolved-conflict rows. Per-section
+  trailing fold lines (`config-sync-unchanged`) aggregate only their own section's `N in
+  sync ▸` / `N with nothing to sync yet ▸`, expandable in place. Switching into a filter
+  pill or a search hit auto-expands every section once, on that transition only, so a
+  manual re-collapse during the rest of that filtered/search session still sticks. Group
+  headers `config-sync-sect` (uppercase + hairline) — used in the run-report breakdown.
+  The remote pane groups its diff entries with the same type-section head family as the
+  main list, in a static variant (`is-static`: no chevron, no collapse, no checkbox, no
+  carrier chip, default cursor); carrier divergence there renders as a pinned
+  `On/off list · differs for N plugins ▸` line (`config-sync-remote-onoff`) whose
+  expansion shows the per-plugin flips (`config-sync-remote-fliplist`) and the file diff.
+  Companion families fold the same way here: companion diff entries merge into their
+  parent's entry, each file re-pathed under a `<companion>/` prefix (e.g. `themes/Blue
+  Topaz.theme.css`) and chip counts summed — one entry per family; a companion whose
+  parent isn't known locally falls back to its own standalone entry (honest degradation,
+  same rule as the carrier label fallback). On narrow phones a section head keeps its pills and the "N selected" hint on
+  one line (`white-space: nowrap; flex: none`) — the title is the only element allowed to
+  wrap.
+- **Expanded card (Sync Center row)** `config-sync-itemcard` — bordered, left-indented under
+  the row's name column and offset one notch from the section behind it, so it reads as one
+  contained unit; row hairlines (`config-sync-card-fieldrow`) stay inside this box, never
+  full-pane rules. Every row (`renderCardKeyRow`) is a fixed-width muted small-caps key
+  immediately followed by its value — the key column is `flex: 0 0 15ch`, sized to the
+  longest key (`After install`) so a key never wraps; the value cell takes the rest
+  (`min-width: 0`, no fixed narrow width — ellipsis is a last resort, never a first one,
+  while the row still has room). A row that builds no value renders nothing at all: no
+  separator, no reserved height (ledger C-#5) — built off-DOM first, appended only once
+  non-empty. Standardized row set, in this order, each omitted when not applicable: `On
+  apply` / `On capture` / `State` (the fate sentence expanded to a full clause — install
+  source, update versions, capture consequence) · `Files` (direction-aware entries, `+` /
+  `↑` / deletion, `view ▸` / `diff ▸`) · `Resolve` (conflict rows only — segmented `Use
+  theirs ↓` / `Keep mine ↑`) · `Runs on` (plugins whose carrier is synced) / `After install`
+  (carrier not synced, row installs) / `Enablement` (carrier not synced, plugin installed
+  but locally off — the fallback ladder's third leaf) · `Settings sync` (item-level device
+  scope) · `More` (deep-link into the Settings tab, scrolled to this item's own card) ·
+  `Note` (honest runtime notes, e.g. Hotkeys' "Takes effect after an app reload"). While the
+  card is open, the collapsed row's own fate sentence/glyph hides (ledger C-#9, Rows above)
+  — the card's `On apply`/`On capture`/`State` row is the single statement; checkbox and
+  chips stay.
+- **Rule controls** — two idioms sharing one icon vocabulary. In the Sync Center card,
+  `Runs on` and `Settings sync` render as an icon trigger (`config-sync-scopeicon
+  config-sync-card-trigger`, content-sized to its glyph box only — a full-row hit area was
+  the ledger C-#7 bug) that opens an Obsidian `Menu` of the options on click: the glyph IS
+  the state, the menu click is the one explicit choice (killing the silent-cycle hazard);
+  each menu item shows the option's glyph + label copy, current one checked; `aria-label`
+  names the current state, the `renderScopeCycle` precedent. `Settings sync` reuses
+  `SCOPE_ICONS` (three options — no `This device`, matching the settings-file scope
+  precedent below); `Runs on` extends the same vocabulary with `RUNS_ON_ICONS` (itemCard.ts)
+  for `MemberRule`'s five stops (§2.3). `After install`/`Enablement` keep textual triggers
+  (`config-sync-menuchip config-sync-card-trigger` — no glyph vocabulary for them) restyled
+  to the same trigger-box family so the card reads as one control language regardless of
+  trigger kind. The Settings tab's own drawer scope cell is untouched: it keeps the direct-
+  cycle `renderScopeCycle` idiom (a click advances straight to the next option) — the two
+  surfaces share the icon vocabulary, never the interaction, and both write the same stored
+  value.
+- **Runs-on rule (per-plugin enablement)** — one rule per plugin, set from that plugin's own
+  row via its `Runs on` icon+menu control (Expanded card / Rule controls above). A carrier's
+  own sync membership — whether the Core/Community on/off list is itself a synced item — is
+  edited from the section header's `on/off synced` chip (Type sections above). The snippets
+  on/off list keeps its own member devices on the Appearance card (Companion folders,
+  Unified card below).
 - **Remote** `config-sync-remote-btn` is-pull/is-push (solid cyan/pink when primary,
   dimmed otherwise); diff entries reuse report rows + chips.
 - **Reports** `config-sync-report-*`, chips, `-strip` result strip — outcome-toned: green
@@ -212,16 +325,6 @@ noted):
   passphrase `-ppset/-ppbadge`. `config-sync-section-sub` — one subtitle per tab, above the
   Sync all row ("Each plugin syncs its settings and on/off state." for Core, "…its files,
   settings and on/off state." elsewhere), replacing the old per-row boilerplate description.
-- **Member guidance** (定稿 2026-08-04/05) — inside a switch-list group's divergence detail:
-  `config-sync-member-summary/-summary-line/-summary-caption` — directional summary lines
-  (apply first, each led by its §2.1 action icon) plus the two-sided caution;
-  `config-sync-disclosure(-cx/-body)` collapsibles — "Set a per-plugin rule" and, always last
-  and store-absent-safe, the amber "N scoped to specific devices"; the rule list
-  `config-sync-rule-search/-rule-list/-rule-ghdr/-rule-row/-rule-mid` — direction group
-  headers ("Off this computer · N" / "On this computer only · N") only when the split runs
-  both ways, every row ending in the shared scope-cycle; and the amber `config-sync-lddetail`
-  capture-publish note. The snippets on/off list renders the summary only (snippet wording) —
-  per-snippet devices live on the Appearance card.
 - **Modals**: pull-conflict `config-sync-cm-*` + `diffView.ts` (shared diff panel:
   Unified/Split toggle desktop-only, **Collapse/Full toggle both platforms** folding
   unchanged runs into `-cm-dgap` "⋯ N unchanged lines ⋯" rows); exclude-extras
@@ -233,10 +336,12 @@ noted):
   "Review settings →" routes to the self pane; dismissal (Lucide `x`) is device-local and
   resets when self returns to insync. Adopt itself still lives in the self pane, never in the
   banner.
-- **Leftover store files** — an amber `is-leftover` filter pill in the All-items scope (short
-  form `⌫ N`), opening an always-open amber `config-sync-section.is-leftover` of `-oflow`
-  rows (name / mono path / size / a Delete text action), with "Delete all" in the head —
-  both destructive text actions render per §1.1 (idle muted, red on hover). Removal kinds in
+- **Leftover store files** — no filter pill (store orphans have no registry item, so they can
+  never become a row in any type section): whenever the store has orphans, the always-open amber
+  `config-sync-section.is-leftover` renders unconditionally under the unfiltered `All` pill
+  (hidden while a filter or search narrows the view) — `-oflow` rows (name / mono path / size / a
+  Delete text action), with "Delete all" in the head — both destructive text actions render per
+  §1.1 (idle muted, red on hover). Removal kinds in
   History render `⊘` (stop-sync) and `⌫` (delete-leftover), muted.
 - **Unified card** (定稿 mockup artifact `v7-final-panorama`, 2026-07-25, plus the icon/
   progressive-disclosure pass in artifact `239c8393-cd61-4faa-95aa-e49f1804b446`, 2026-07-26; specs

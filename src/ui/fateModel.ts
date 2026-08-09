@@ -1,0 +1,159 @@
+import type { MemberRule } from "../core/types";
+
+export interface FateInput {
+  direction: "apply" | "capture" | null; // null → in sync / nothing yet
+  conflict: boolean;                     // both sides changed
+  nothingYet: boolean;                   // no store data & no local settings
+  installed: boolean;                    // plugin present locally (true for non-plugins)
+  hasUpdate: boolean;                    // store has newer plugin version
+  carrierSynced: boolean;                // the on/off list is a synced item
+  storeListOn: boolean | null;           // null → no enablement dimension (obsidian/folder/self)
+  locallyOn: boolean;
+  memberRule: MemberRule;
+  deviceClass: "desktop" | "mobile";
+  desktopOnly: boolean;
+  excludedHere: boolean;                 // this row's own compiled group is scoped away from
+                                          // deviceClass by the item's Settings-sync file rule
+                                          // (C-#24) — never a store fact, just this device's rule;
+                                          // only read when direction is null (a directional/
+                                          // conflict family member always wins)
+  hasSettingsPayload: boolean;           // this run writes settings files
+  special: "appearance" | "folder" | null; // "folder": a dir-type row — its own files ARE the
+                                            // payload, folderFileCount REPLACES the settings verb
+                                            // (never joins); non-null AND non-folder rows with a
+                                            // nonzero folderFileCount are a family whose companion
+                                            // dir(s) contribute files alongside the row's own
+                                            // settings — join, don't replace (c-livetest batch5)
+  folderFileCount: number | null;        // non-null → contributes "…N files" (replace for a
+                                          // folder row, join for any other row with companions)
+  encrypted: boolean;
+}
+
+export interface Fate {
+  glyph: "↓" | "↑" | "—" | "⚠";
+  sentence: string;   // text only, no glyph
+  chips: string[];    // ordered, copy-final
+  stageable: boolean; // false → dimmed row, hidden checkbox, skipped by select-all
+  turnsOn: boolean;   // the run will switch it on here (drives stagedMembers + footer)
+  // C-#28 hardening: true exactly when this Fate IS the nothing-yet presentation (direct, or
+  // degraded from an empty-verb direction) — the single source of truth bucket derivation reads
+  // (fateBucket), rather than a caller's separately-computed `nothingYet` guess that can
+  // disagree with what rowFate actually decided.
+  nothingYet: boolean;
+}
+
+function effectiveTurnsOn(i: FateInput): boolean {
+  if (!i.carrierSynced || i.storeListOn === null) return false;
+  switch (i.memberRule) {
+    case "never-here": return false;
+    case "always-here": return !i.locallyOn;
+    case "desktop": return i.deviceClass === "desktop" && i.storeListOn && !i.locallyOn;
+    case "mobile": return i.deviceClass === "mobile" && i.storeListOn && !i.locallyOn;
+    case "all": return i.storeListOn && !i.locallyOn;
+  }
+}
+
+function buildChips(i: FateInput): string[] {
+  const chips: string[] = [];
+  if (i.direction === "apply" && !i.installed) chips.push("not installed here");
+  if (i.desktopOnly) chips.push("desktop only");
+  if (i.direction === null && i.excludedHere) chips.push("your rule");
+  if (i.carrierSynced && i.storeListOn === false && i.memberRule !== "always-here" && !i.locallyOn) {
+    chips.push("stays off");
+  }
+  if (i.memberRule === "never-here") chips.push("off here — your rule");
+  else if (i.memberRule === "always-here") chips.push("on here — your rule");
+  if (i.encrypted) chips.push("🔒 encrypted");
+  return chips;
+}
+
+function capitalize(s: string): string {
+  return s.length === 0 ? s : s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+// Family file-verb join (c-livetest batch5 task 1): a non-folder, non-appearance row whose
+// companion(s) contribute files gets the folder verb APPENDED after its own settings verb (or
+// alone when it has none) — distinct from a real folder row, which REPLACES the settings verb
+// outright (unchanged behavior, `special: "folder"`).
+function joinFolderVerb(settingsPart: string | null, folderVerb: string): string {
+  return settingsPart === null ? folderVerb : `${settingsPart} · ${folderVerb}`;
+}
+
+function settingsVerb(i: FateInput, capturedTurnsOn: boolean): string | null {
+  if (i.direction === "capture") {
+    if (capturedTurnsOn) return "turned on here — shares it";
+    if (i.special === "appearance") return "captures theme & snippets";
+    // A folder row with no changes attached (e.g. "not-captured" — groupStatus never attaches
+    // `changes` there) has folderFileCount:null, NOT a file count of zero: it must fall through
+    // to the generic settings verb below exactly as a non-folder row would, never render empty.
+    if (i.special === "folder" && i.folderFileCount !== null) return `captures ${i.folderFileCount} files`;
+    const settingsPart = i.hasSettingsPayload ? "captures settings" : null;
+    if (i.special !== "folder" && i.folderFileCount !== null && i.folderFileCount > 0) {
+      return joinFolderVerb(settingsPart, `captures ${i.folderFileCount} files`);
+    }
+    return settingsPart;
+  }
+  if (i.special === "appearance") return "applies theme & snippets — live";
+  if (i.special === "folder" && i.folderFileCount !== null) return `applies ${i.folderFileCount} files`;
+  const settingsPart = i.hasSettingsPayload ? "applies settings" : null;
+  if (i.special !== "folder" && i.folderFileCount !== null && i.folderFileCount > 0) {
+    return joinFolderVerb(settingsPart, `applies ${i.folderFileCount} files`);
+  }
+  return settingsPart;
+}
+
+// C-#29: cause-voice copy — nothing has ever been saved, on either side.
+export const NOTHING_YET_SENTENCE = "No settings yet";
+
+// C-#28: an APPLY direction can never carry an empty verb set — the direction becomes
+// unrepresentable and degrades to the nothing-yet presentation instead (bare glyph, no
+// sentence, yet still "stageable"). Chips are unaffected — they describe facts about the row
+// (e.g. `stays off`) independent of whether this run actually has anything to do. Apply-only
+// (controller ruling, review round 2): a capture-directional rollup only ever exists because a
+// member is genuinely local-changed/not-captured; local-changed members always carry a visible
+// file count already, so the only empty-verb capture shape is a `not-captured` companion whose
+// count is structurally invisible (status.ts never attaches `changes` there) — real capturable
+// work, not nothing-yet. Apply direction has no such invisible-count member, so an empty apply
+// verb set genuinely means there's nothing to do.
+function nothingYetFate(chips: string[]): Fate {
+  return { glyph: "—", sentence: NOTHING_YET_SENTENCE, chips, stageable: false, turnsOn: false, nothingYet: true };
+}
+
+export function rowFate(i: FateInput): Fate {
+  const chips = buildChips(i);
+
+  if (i.conflict) {
+    return { glyph: "⚠", sentence: "Changed on both sides", chips, stageable: false, turnsOn: false, nothingYet: false };
+  }
+
+  if (i.direction === null) {
+    // C-#24: a rule-excluded item never masquerades as "In sync" — only when the family has no
+    // directional/conflict member of its own (checked above) does the exclusion get to speak.
+    if (i.excludedHere) return { glyph: "—", sentence: "Not synced on this device", chips, stageable: false, turnsOn: false, nothingYet: false };
+    if (i.nothingYet) return nothingYetFate(chips);
+    return { glyph: "—", sentence: "In sync", chips, stageable: false, turnsOn: false, nothingYet: false };
+  }
+
+  const stageable = true;
+
+  if (i.direction === "capture") {
+    const capturedTurnsOn = i.carrierSynced && i.storeListOn === false && i.locallyOn;
+    const verb = settingsVerb(i, capturedTurnsOn);
+    // C-#28 controller ruling: an empty capture verb set is real, invisible-count work (a
+    // `not-captured` companion — see nothingYetFate's comment) — never degrades. Generic,
+    // count-free copy: specific counts already render through settingsVerb above.
+    const sentence = capitalize(verb ?? "captures files");
+    return { glyph: "↑", sentence, chips, stageable, turnsOn: false, nothingYet: false };
+  }
+
+  const turnsOn = effectiveTurnsOn(i);
+  const segments: string[] = [];
+  if (!i.installed) segments.push("installs");
+  else if (i.hasUpdate) segments.push("updates");
+  if (turnsOn) segments.push("turns on");
+  const verb = settingsVerb(i, false);
+  if (verb !== null) segments.push(verb);
+  if (segments.length === 0) return nothingYetFate(chips);
+  const sentence = capitalize(segments.join(" · "));
+  return { glyph: "↓", sentence, chips, stageable, turnsOn, nothingYet: false };
+}

@@ -15,16 +15,21 @@ import {
   encryptToggleDisabled,
   ENABLED_CSS_SNIPPETS_KEY,
   ENABLED_ON_LABEL,
+  defaultSettingsFile,
+  fileRuleLegalForMode,
+  FILE_SCOPE_MENU_UNAVAILABLE_TEXT,
   hasEnablementZone,
   hasKeyRules,
   memberCountLabel,
   nextScope,
   PREVIEW_LEGEND_ENTRIES,
+  pruneSettingsFile,
   DESKTOP_ONLY_ALL_NOTE,
   DESKTOP_ONLY_ENABLED_OPTIONS,
   FIELD_SCOPE_OPTIONS,
   FILE_SCOPE_OPTIONS,
   COMPANION_SCOPE_OPTIONS,
+  RUNS_ON_ICONS,
   SCOPE_ICONS,
   scopeCycleTooltip,
   sectionAllEnabled,
@@ -193,6 +198,78 @@ describe("deriveMode / hasKeyRules (spec 2026-07-26-card-visual-refresh-design.m
     expect(deriveMode({ ...empty, rules: { a: { scope: "desktop", encrypted: false } } })).toBe("fields");
     expect(deriveMode({ ...empty, perItem: { arr: { x: "desktop" } } })).toBe("fields");
     expect(hasKeyRules(cfg())).toBe(false);
+  });
+});
+
+// C-#25: mirrors manifest.ts's parseGroup fileRule validator (type:"file" plain-mode groups
+// only) — every registry item already compiles to type:"file", so mode is the only surviving
+// gate the Sync Center row and setItemFileScope's guard both need to agree on.
+describe("fileRuleLegalForMode (C-#25 — mirrors manifest.ts's fileRule validator)", () => {
+  it("plain (or absent, which defaults to plain) is legal; fields and encrypted are not", () => {
+    expect(fileRuleLegalForMode(undefined)).toBe(true);
+    expect(fileRuleLegalForMode("plain")).toBe(true);
+    expect(fileRuleLegalForMode("fields")).toBe(false);
+    expect(fileRuleLegalForMode("encrypted")).toBe(false);
+  });
+});
+
+// C-#25 copy contract: the Sync Center row shows this instead of a menu when the helper above is
+// false — pinned here so a future edit to either string can't drift them apart silently.
+describe("FILE_SCOPE_MENU_UNAVAILABLE_TEXT", () => {
+  it("matches the copy-contract-exact string", () => {
+    expect(FILE_SCOPE_MENU_UNAVAILABLE_TEXT).toBe("Per-key rules decide — see More");
+  });
+});
+
+// C-#26: prune truth table — the exact residue that hit the user on 2026-08-09 (a stray
+// fileRule:{scope:"all",encrypted:false} or an all-default settingsFile surviving a write-back)
+// cannot recur.
+describe("pruneSettingsFile (C-#26)", () => {
+  it("an all-default settingsFile prunes to undefined", () => {
+    expect(pruneSettingsFile(defaultSettingsFile())).toBeUndefined();
+  });
+
+  it("a fileRule of exactly {scope:'all', encrypted:false} is stripped, pruning the rest to undefined too", () => {
+    const sf: ItemSettingsFile = { mode: "plain", rules: {}, perItem: {}, fileRule: { scope: "all", encrypted: false } };
+    expect(pruneSettingsFile(sf)).toBeUndefined();
+  });
+
+  it("encrypted:true survives even at scope 'all'", () => {
+    const sf: ItemSettingsFile = { mode: "plain", rules: {}, perItem: {}, fileRule: { scope: "all", encrypted: true } };
+    expect(pruneSettingsFile(sf)).toEqual(sf);
+  });
+
+  it("a non-default scope (e.g. 'desktop') survives", () => {
+    const sf: ItemSettingsFile = { mode: "plain", rules: {}, perItem: {}, fileRule: { scope: "desktop", encrypted: false } };
+    expect(pruneSettingsFile(sf)).toEqual(sf);
+  });
+
+  it("rules content survives regardless of fileRule/mode", () => {
+    const sf: ItemSettingsFile = { mode: "fields", rules: { a: { scope: "desktop", encrypted: false } }, perItem: {} };
+    expect(pruneSettingsFile(sf)).toEqual(sf);
+  });
+
+  it("perItem content survives", () => {
+    const sf: ItemSettingsFile = { mode: "fields", rules: {}, perItem: { arr: { x: "desktop" } } };
+    expect(pruneSettingsFile(sf)).toEqual(sf);
+  });
+
+  it("a non-plain mode survives even with otherwise-empty rules/perItem", () => {
+    const sf: ItemSettingsFile = { mode: "fields", rules: {}, perItem: {} };
+    expect(pruneSettingsFile(sf)).toEqual(sf);
+  });
+
+  it("a committed customPath survives an otherwise-default file", () => {
+    const sf: ItemSettingsFile = { mode: "plain", rules: {}, perItem: {}, customPath: "custom.json" };
+    expect(pruneSettingsFile(sf)).toEqual(sf);
+  });
+
+  it("round-trip: desktop -> all lands back on undefined, the same as the pre-existing default (byte-clean)", () => {
+    const original = defaultSettingsFile(); // what an absent settingsFile field derives as
+    const afterDesktop = pruneSettingsFile({ ...original, fileRule: { scope: "desktop", encrypted: false } });
+    expect(afterDesktop).toEqual({ mode: "plain", rules: {}, perItem: {}, fileRule: { scope: "desktop", encrypted: false } });
+    const afterAll = pruneSettingsFile({ ...(afterDesktop as ItemSettingsFile), fileRule: { scope: "all", encrypted: false } });
+    expect(afterAll).toBeUndefined();
   });
 });
 
@@ -475,6 +552,22 @@ describe("nextScope / scope icon cycle (round-6 定稿: Commander-style scope co
   it("maps every scope to a distinct lucide icon", () => {
     expect(SCOPE_ICONS).toEqual({ all: "monitor-smartphone", desktop: "monitor", mobile: "smartphone", local: "airplay" });
     expect(new Set(Object.values(SCOPE_ICONS)).size).toBe(4);
+  });
+
+  // Sync Center card "Runs on" row (spec 2026-08-06-c-livetest-batch2-design.md §2, ledger C-#10):
+  // extends the SCOPE_ICONS vocabulary to MemberRule's five stops.
+  it("maps every member rule to a distinct lucide icon, sharing the all/desktop/mobile glyphs with SCOPE_ICONS", () => {
+    expect(RUNS_ON_ICONS).toEqual({
+      all: "monitor-smartphone",
+      desktop: "monitor",
+      mobile: "smartphone",
+      "always-here": "power",
+      "never-here": "power-off",
+    });
+    expect(new Set(Object.values(RUNS_ON_ICONS)).size).toBe(5);
+    expect(RUNS_ON_ICONS.all).toBe(SCOPE_ICONS.all);
+    expect(RUNS_ON_ICONS.desktop).toBe(SCOPE_ICONS.desktop);
+    expect(RUNS_ON_ICONS.mobile).toBe(SCOPE_ICONS.mobile);
   });
 
   it("tooltip names the current scope", () => {

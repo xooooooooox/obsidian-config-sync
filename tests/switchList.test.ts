@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   SWITCH_LIST_GROUPS, readLocalSwitchList, writeLocalSwitchList, localRealPath, subtractForceOff,
+  addForceOn,
+  memberUniverse,
+  switchListMemberOn,
+  switchListOnCount,
   parseSwitchList,
   captureSwitchList,
   applySwitchList,
@@ -79,6 +83,77 @@ describe("subtractForceOff on maps", () => {
   it("returns the list unchanged when forceOff is empty", () => {
     const m = { a: true };
     expect(subtractForceOff(m, [])).toBe(m);
+  });
+});
+
+describe("addForceOn on arrays", () => {
+  it("appends missing ids", () => {
+    expect(addForceOn(["a"], ["b", "c"])).toEqual(["a", "b", "c"]);
+  });
+  it("is idempotent when the id is already on", () => {
+    expect(addForceOn(["a", "b"], ["b"])).toEqual(["a", "b"]);
+  });
+  it("is identity for empty force-on", () => {
+    expect(addForceOn(["a", "b"], [])).toEqual(["a", "b"]);
+  });
+});
+
+describe("addForceOn on maps", () => {
+  it("sets ids to true, adding missing keys", () => {
+    expect(addForceOn({ a: true, b: false }, ["b", "c"])).toEqual({ a: true, b: true, c: true });
+  });
+  it("is idempotent when the key is already true", () => {
+    expect(addForceOn({ a: true }, ["a"])).toEqual({ a: true });
+  });
+  it("returns the map unchanged when forceOn is empty", () => {
+    const m = { a: true };
+    expect(addForceOn(m, [])).toBe(m);
+  });
+});
+
+describe("memberUniverse", () => {
+  it("unions ids from an array store and an array local, deduped", () => {
+    expect(memberUniverse(["a", "b"], ["b", "c"])).toEqual(["a", "b", "c"]);
+  });
+  it("unions keys from a map store and a map local", () => {
+    expect(memberUniverse({ a: true, b: false }, { b: true, c: false })).toEqual(["a", "b", "c"]);
+  });
+  it("handles mixed shapes (array store, map local)", () => {
+    expect(memberUniverse(["a"], { b: true })).toEqual(["a", "b"]);
+  });
+  it("treats a null side as contributing nothing", () => {
+    expect(memberUniverse(["a", "b"], null)).toEqual(["a", "b"]);
+    expect(memberUniverse(null, ["a", "b"])).toEqual(["a", "b"]);
+  });
+  it("returns [] when both sides are null", () => {
+    expect(memberUniverse(null, null)).toEqual([]);
+  });
+});
+
+describe("switchListMemberOn", () => {
+  it("array: true only when the id is present", () => {
+    expect(switchListMemberOn(["a", "b"], "a")).toBe(true);
+    expect(switchListMemberOn(["a", "b"], "c")).toBe(false);
+  });
+  it("map: true only when the key is exactly true", () => {
+    expect(switchListMemberOn({ a: true, b: false }, "a")).toBe(true);
+    expect(switchListMemberOn({ a: true, b: false }, "b")).toBe(false);
+    expect(switchListMemberOn({ a: true }, "c")).toBe(false);
+  });
+  it("a null list (unreadable/absent local file) counts as off", () => {
+    expect(switchListMemberOn(null, "a")).toBe(false);
+  });
+});
+
+describe("switchListOnCount", () => {
+  it("array: every element counts as on", () => {
+    expect(switchListOnCount(["a", "b", "c"])).toBe(3);
+  });
+  it("map: only true-valued keys count", () => {
+    expect(switchListOnCount({ a: true, b: false, c: true })).toBe(2);
+  });
+  it("a null list counts as 0", () => {
+    expect(switchListOnCount(null)).toBe(0);
   });
 });
 

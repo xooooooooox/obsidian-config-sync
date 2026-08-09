@@ -1,6 +1,6 @@
 import { PluginHost, pluginIdForGroup } from "./ConfigSyncCore";
 import { coreSettingsIds } from "./catalog";
-import { StoreLock, SyncGroup } from "./types";
+import { MemberRule, RuleScope, StoreLock, SyncGroup } from "./types";
 
 export type AvailabilityKind = "enabled" | "disabled" | "not-installed";
 export type VersionDrift = "behind" | "ahead" | null; // local vs store: behind = local < store
@@ -101,6 +101,34 @@ export function desktopOnlyPluginIds(groups: SyncGroup[], plugins: PluginHost, l
     if (plugins.getInstalledPluginVersion(id) === null) ids.add(id);
   }
   return ids;
+}
+
+// Normalizes a stored RuleScope into a MemberRule (Sync Center unified grammar, task 2):
+// all/desktop/mobile pass through unchanged (both types share those three literals); a legacy
+// "local" scope — the pre-unification "this device decides for itself" value — resolves to a
+// direction using the member's current PERSISTED local on/off state (the same on-disk switch-list
+// content applySwitchList's exception pass-through reads — NEVER a live PluginHost query, which
+// can diverge: a non-persistent enablePlugin, used by config-sync's own apply cycle and the IOTO
+// ecosystem, loads a plugin without adding it to the persisted enabled set — see pluginState.ts),
+// so old data keeps working under the new always-here/never-here vocabulary without a
+// stored-format migration.
+//
+// Mask derivation from the resulting MemberRule (documented once, here, for every apply-site
+// consumer): desktop/mobile on the matching device class → no mask (plain store membership); on
+// the other class → exception + forceOff (existing behavior, unchanged semantics); never-here →
+// exception + forceOff; always-here → exception + forceOn (new); all → nothing.
+export function normalizeMemberRule(scope: RuleScope, locallyOn: boolean): MemberRule {
+  if (scope !== "local") return scope;
+  return locallyOn ? "always-here" : "never-here";
+}
+
+// A genuinely stored MemberRule (the Runs-on menu, task 5, writing directly) always wins over
+// re-deriving direction from local state — once a value is stored, mask producers stop
+// re-normalizing it on every read. Absent a stored value, falls back to normalizeMemberRule
+// against the legacy "this device" pin — old data (localMembers, no stored rule yet) keeps
+// working exactly as before this fell back to a real stored home.
+export function preferStoredMemberRule(stored: MemberRule | undefined, persistedLocallyOn: boolean): MemberRule {
+  return stored ?? normalizeMemberRule("local", persistedLocallyOn);
 }
 
 // Member names whose shared scope excludes the current device class. Feeds the exception mask

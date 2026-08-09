@@ -17,8 +17,8 @@ Selective, on-demand sync of Obsidian settings — hotkeys, CSS snippets, themes
 - **Orthogonal field rules** — every key carries a `{scope, encrypted}` pair (`All devices` / `Desktop only` / `Mobile only` / `This device`), and string-array keys can scope each element on its own. ([details](docs/GUIDE.md#field-rules--sensitive-settings))
 - **Credential-safe** — `This device` keys never leave the machine, and a per-device passphrase encrypts what should travel.
 - **Explicit Apply** — nothing changes a device until you tick items and press Apply; every run stays visible in the pinned result strip and a browsable **History**.
-- **A Sync Center that knows the state** — per-item state badges, normalized JSON diffs, a *this device* status chip and totals for every pending action. ([tour](docs/GUIDE.md#the-sync-center))
-- **Install engine** — plugins that are outdated, disabled or missing on this device can be updated, enabled or installed during Apply, pinned to the captured version. ([rules](docs/GUIDE.md#availability-sections-and-the-install-engine))
+- **A Sync Center that knows the state** — every row spells out its own fate in plain language (*turns on · installs · applies settings*), normalized JSON diffs, a *this device* status chip and totals for every pending action. ([tour](docs/GUIDE.md#the-sync-center))
+- **Install engine** — plugins that are outdated, disabled or missing on this device can be updated, enabled or installed during Apply, pinned to the captured version. ([rules](docs/GUIDE.md#availability-facts-and-the-install-engine))
 - **Remotes (desktop)** — pull/push the store against a git repo or another vault, with per-file diff previews. ([details](docs/GUIDE.md#transport))
 - **Search everywhere** — both search boxes accept `key:value` qualifiers with autocomplete, combined freely with plain text.
 - **Status bar** — ↑ capture / ↓ apply plus per-remote ⇡ push / ⇣ pull counts at a glance; click opens the Sync Center.

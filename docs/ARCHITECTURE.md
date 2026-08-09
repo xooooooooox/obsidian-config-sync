@@ -66,7 +66,26 @@ functions.
   card, compiles as one ordinary single-file group like any other (`registry.ts`'s
   `compileSingleFile`). Kept as a seam for a future runtime-only rule source). `overlayGroup`
   early-returns for any group that carries a `fileRule` (even `encrypted: false`), so a future
-  fieldOverlay consumer can't silently bypass whole-file encryption.
+  fieldOverlay consumer can't silently bypass whole-file encryption. `backfillLockLabels(groups,
+  plugins, lock, carrierLists)` heals the local `store.lock.json`'s `label` field for every entry
+  this device can resolve a display name for (installed community plugin manifest name / core
+  plugin name), plus `memberLabels` on the two carrier entries (`core-plugins`/`community-plugins`
+  — id → name for every list member this device can resolve); the carrier heal MERGES additively
+  against the CURRENT store list per id (a freshly-resolved name wins, otherwise the existing
+  entry's name survives, an id no longer listed is dropped) so no device's heal can erase a name
+  only some OTHER device could resolve. Runs at the tail of every capture and once on startup when
+  something resolvable is stale; write-only-on-change, `capturedAt` never touched (a heal is not a
+  capture). `hotApplyAppearanceFamily(ctx, results)` runs at the end of both `apply()` and
+  `applyWithActions()`: when a run wrote/deleted a file in the appearance family (`appearance`,
+  `themes`, `snippets`, `enabled-css-snippets`), it calls the injected `PluginHost.reloadAppearance()`
+  once — re-reading `app.json`/`appearance.json` into memory and re-applying the theme/snippets to
+  the running app — so those items land live instead of needing an app reload; success clears
+  `needsAppReload` on the family's results, a thrown failure keeps it set and pushes an honest warn
+  note (no silent fallback). Whole-file/field encryption reuses the existing store envelope
+  byte-for-byte when `fileUnchanged`/`fieldUnchanged` (crypto.ts) say the plaintext hasn't actually
+  changed — captured twice over unchanged content is byte-stable output, and only a genuinely
+  changed value produces a fresh envelope; the capture-preview diff goes through the same path, so
+  it never shows an unchanged encrypted field as touched.
 - `core/types.ts` — shared types: `SyncGroup`, `SyncManifest`, `StoreLock`, `GroupResult`,
   `FileChanges`/`hasChanges`, `Remote`, `SyncMode`. The rule model is orthogonal (spec
   2026-07-25-unified-card-design.md §2, D1): `RULE_SCOPES = ["all", "desktop", "mobile", "local"]`
@@ -146,7 +165,10 @@ functions.
   `local-changed` regardless of the ledger, so the Sync Center offers a capture — which purges the
   base — and the next scan finds it clean and reads `in-sync` again. `statusForGroups` is IO-free with respect to the ledger — it
   takes the parsed `Ledger` and returns `{ statuses, updates }`; `main.ts` owns loading and
-  persisting it (see Connector below).
+  persisting it (see Connector below). `remoteLockLabels(remoteLockJson)` extracts each group's
+  `label` (and, for the two carrier groups, `memberLabels`) out of a remote's `store.lock.json`
+  into a plain map on the compare result — malformed/absent input degrades to an empty map, never
+  an error — feeding the display-name chain below.
 - `core/ledger.ts` — the device-local sync-baseline ledger behind that direction logic. After
   every group whose comparison reports `in-sync`, `statusForGroups` emits a fresh `{store, local,
   at}` fingerprint (SHA-256 hex via `crypto.subtle`); switch-list groups (`SWITCH_LIST_GROUPS`)
@@ -178,7 +200,14 @@ functions.
   `core`/`community`/`custom`/…) for the `scope:` qualifier and leftover grouping; the switch-list
   enablement-carrier groups `community-plugins`/`core-plugins` are pinned to `community`/`core`
   (the same way `enabled-css-snippets` is pinned to `obsidian`) instead of falling through to
-  `custom`.
+  `custom`. `resolveHostStoredLabel`/`displayLabelForGroup` are the shared display-name chain every
+  caller (row naming, remote-pane naming/sort, on/off-list narration, progress toasts) routes
+  through, in priority order: the local manifest/custom-rule label → this device's own
+  `store.lock.json` label → the group's own carrier's `memberLabels[id]` (for a
+  `plugin-<id>`/core group with no lock-entry label of its own) → the def-name/bare-id fallback.
+  The remote pane's `remoteLockLabels` (status.ts above) slots in as one more step, after this
+  device's own label and before the carrier fallback, so a remote's label can never shadow this
+  device's own.
 - `core/leftover.ts` — `leftoverStoreRels`: store files with no matching group (cleanup surface).
   `selfListGroups` is the list-membership compile the self pane's delta/coldstart/`itemCount`
   now share with the store side (`storeSelfCopyGroups` calls it too): items compiled with
@@ -238,23 +267,48 @@ functions.
 
 **UI** (`src/ui/`)
 - `SyncCenterView.ts` — the hub: the header status bar (self "this device" chip + push/pull
-  totals), the self pane, status list, filters/search, availability sections, the sticky
-  result strip, run History, the Remotes block, and Capture/Apply/Pull/Push actions.
+  totals), the self pane (coldstart/adopt), the four fixed type sections (`renderTypeSection`,
+  one object = one row, companion families dissolved into their parent's row), the unified card
+  renderer (`renderUnifiedCard` — On apply/On capture/State, Files, Resolve, Runs on/After
+  install/Enablement, Settings sync, More, Note), filters/search, the Leftover section, the
+  sticky result strip, run History, the Remotes block (which renders the remote pane's diffs
+  through the same type-section/family grammar as the main list), and Capture/Apply/Pull/Push
+  actions. Row content is memoized once per render (`deriveRow`) so the section partition,
+  filter-pill counts and row painting all read the same computed `Fate`/`FateInput` instead of
+  re-deriving it per consumer.
+- `fateModel.ts` — the fate-sentence engine: `rowFate(FateInput): Fate` is the pure function
+  behind every row's verdict (spec `2026-08-06-sync-center-unified-grammar-design.md` §3's verb
+  table) — glyph (`↓`/`↑`/`—`/`⚠`), sentence, chips (`not installed here`/`desktop only`/
+  `stays off`/`off here — your rule`/`on here — your rule`/`🔒 encrypted`/`your rule`),
+  `stageable` and `turnsOn`. A direction whose assembled verb set comes out empty (nothing this
+  run would actually change) degrades to the `nothingYet` presentation (`NOTHING_YET_SENTENCE`
+  = "No settings yet") rather than staying a bare, action-less glyph — "a direction with no
+  verbs" is unrepresentable by construction, not filtered out downstream. `effectiveFate`
+  (panelModel.ts) layers a Resolve choice or a fallback-ladder enablement bridge on top without
+  re-deriving the base fate.
 - `SettingTab.ts` — the settings tab (General / Obsidian / Core plugins / Community plugins /
   Beta / Advanced / Remotes). `renderRegistryCards`/`renderItemCard`/`renderCardExpansion` are the
   ONE renderer for every `ItemDef` across the Obsidian/Core/Community/Beta tabs (`itemDefs()`
   filtered by section) — there is no per-kind branch left; a plugin's own card carries its
   enablement zone, so the old "Enabled community plugins"/"Enabled core plugins" aggregate rows
-  and their dedicated Device-scope drawer are gone. Advanced (custom rules / discovered files)
+  and their dedicated Device-scope drawer are gone. A card's `data-search-anchor` is also the
+  target of the Sync Center card's `More` deep link (same scroll-and-highlight path the search
+  bar itself uses — one anchoring mechanism, not two). Advanced (custom rules / discovered files)
   still renders the legacy per-`SyncGroup` rule form, unrelated to the card renderer.
 - `itemCard.ts` — pure render-model helpers for the card renderer (badges, zone presence, the
   Fields/Companion-folders row models, path/companion validation) so the card's logic is
   unit-testable without touching the DOM; `SettingTab.ts`'s renderers turn these models into
   elements, and `scopeCycle.ts` reuses the scope-cycle model (`SCOPE_ICONS`/`nextScope`/
-  `scopeCycleTooltip`).
+  `scopeCycleTooltip`). Also exports `RUNS_ON_ICONS` for `MemberRule`'s five stops (`follows`/
+  `desktop`/`mobile`/`always-here`/`never-here`), the icon vocabulary behind the Sync Center
+  card's `Runs on` menu; the matching `RUNS_ON_LABELS` copy is a module-local const in
+  `SyncCenterView.ts` (not exported from `itemCard.ts`).
 - `scopeCycle.ts` — the shared click-to-cycle scope control (`renderScopeCycle`): one glyph that
-  IS the state, a click advances it. Every Settings drawer scope cell and the Sync Center's
-  per-plugin rule and scoped-members rows render through this one function.
+  IS the state, a click advances it. Every Settings drawer scope cell renders through this one
+  function. The Sync Center card's `Runs on`/`Settings sync` rows share the same glyph
+  vocabulary through a different idiom instead — an icon trigger that opens an Obsidian `Menu`
+  of the options rather than cycling in place (`renderCardIconMenuRow`, SyncCenterView.ts) — so
+  the two surfaces read as one control language without sharing the click interaction.
 - `actionIcons.ts` — the single source for the per-action Lucide icons + color classes
   (Capture/Apply/Push/Pull) reused across the panel, buttons, badges and History.
 - `statusBar.ts` — pure segment model (`statusBarSegments`, `statusBarAriaLabel`) + a thin DOM
@@ -262,20 +316,36 @@ functions.
   presented bucket counts, ⇡/⇣ from `remoteDirectionCounts`).
 - `qualifierSearch.ts` — the `key:value` search shared by both search boxes: pure `parseQuery` /
   `matchesQualifiers` / `suggest` / `applySuggestion`, plus the `QualifierAutocomplete` DOM widget.
-- `panelModel.ts` — the pure view-model deciding what state each Sync Center row presents under
-  the filters (unrelated to the settings-tab card renderer above); `never-synced` rows filter under
-  `apply` and default-direction to apply, same as `store-newer`/`differs`. `showColdStartBanner(
-  selfState, statuses, dismissed)` is the pure predicate behind the Sync Center's cold-start
-  banner: true while the plugin's own settings are still pending adoption (self state `coldstart`/
-  `adopt`/`both`) and at least one row is `never-synced`, unless dismissed. It also carries the
-  switch-list member-guidance models: `switchSummaryLines` turns a switch group's divergence into
-  directional summary lines (apply first; "plugin"/"snippet" wording), with `switchBothWaysCaption`
-  as the two-sided caution; `ruleGroups` shapes the per-plugin rule list (one unlabeled group when
-  the divergence is one-sided, two direction-labeled groups — store side first — when it runs both
-  ways); `memberScopeWrite` maps a scope-cycle stop to the host write that realizes it; and
-  `memberDecisionsFromScopes` turns per-member rule scopes into the "scoped to specific devices"
-  list.
-- `reportContent.ts` — shared run-report rendering (the Sync Center strip and History detail).
+- `panelModel.ts` — the pure view-model layer over `fateModel.ts`, unrelated to the settings-tab
+  card renderer above. `fateBucket(fate)`/`fateBucketCounts` derive the one `RowBucket`
+  (`conflict`/`apply`/`capture`/`ok`/`none`) every consumer — section partition (active vs. the
+  in-sync/no-settings folds), filter-pill counts, filter visibility, sidebar badges — reads, so a
+  row can never disagree with itself across those surfaces. `TYPE_SECTION_ORDER`/
+  `TYPE_SECTION_TITLES`/`typeSectionForRow` fix the four sections (Obsidian/Core plugins/
+  Community plugins/Your folders — beta folds into Community, custom groups into Your folders);
+  `sectionCountLabel` renders a section head's trailing `N` / `N of M`. `familyRollup` derives one
+  family's fate from its parent + companion `GroupState`s (settings/folder verbs join, an
+  Appearance override replaces them, any per-file conflict or split-direction membership becomes
+  `⚠`); `mergeFamilyChanges`/`fileEntryFor` back the card's direction-aware Files rows.
+  `remoteSections`/`foldCompanionEntries` bucket a remote's raw file diff into the same four type
+  sections and fold companion diff entries into their parent, mirroring the main list in the
+  remote pane; `onOffFlips`/`onOffNarrationLines` derive the pinned `On/off list` line's flip
+  counts and capped/whole-list narration for a diverged `core-plugins`/`community-plugins`
+  carrier. `showColdStartBanner(selfState, statuses, dismissed)` is the pure predicate behind the
+  cold-start guidance banner (true while the plugin's own settings are pending adoption and at
+  least one row still needs its first sync, unless dismissed) — separate from the self pane's own
+  coldstart/adopt state, which speaks through `SelfSyncInfo.storePresent` instead (no store yet →
+  pull-first guidance; a store present → the Adopt guide). `stagedPayload`/`effectiveFate` turn
+  the checked, resolved rows into the actual apply/capture item lists and the Resolve-aware
+  display fate. Older section-based helpers (`policyOptions`, `sectionForItem`,
+  `stageableRow`) remain as the fallback ladder's plumbing for `After install`/`Enablement` when a
+  plugin's on/off carrier isn't itself synced — the only context where a standalone
+  outdated/disabled/not-installed section concept still applies.
+- `reportContent.ts` — shared run-report rendering (the Sync Center strip and History detail);
+  a strip's header reads any error as `✗ Applied with N issue(s)` (errored groups only),
+  warnings-only as `Applied · N note(s)` on a success-toned frame, and a clean run as plain
+  success — so a captured plugin version falling back to the latest stable reads as a note, never
+  an error.
 - `diffView.ts` — unified-diff rendering; `jsonView.ts` — read-only `data.json` viewer with keys
   colored by `{scope, encrypted}` rule state (per-element coloring too, for a `perItem` array);
   `itemCard.ts`'s `PREVIEW_LEGEND_ENTRIES` drives the purple detected-key highlight in the File
@@ -402,6 +472,14 @@ Changes must preserve these:
 - **Schema v2 is a hard gate, not a migration.** `isLegacySettings` (any `data.json` without
   `schemaVersion: 2`) blocks with a `Notice` and starts from `DEFAULT_SETTINGS` — there is no
   field-by-field migration from the v1/v3-era `groups`/`memberScopes`/`memberLocal`/`appJsonTabs`.
+- **A direction with an empty verb set is unrepresentable.** `fateModel.ts`'s `rowFate` degrades
+  any apply/capture direction that would otherwise render with zero verbs into the nothing-yet
+  presentation (unstageable, `— No settings yet`) rather than a bare, action-less glyph — every
+  bucket/filter/select-all consumer reads the same degraded fate, so none can disagree.
+- **Unchanged encrypted content reuses its existing envelope.** Capture only re-encrypts a field
+  or whole file whose plaintext actually changed (`fieldUnchanged`/`fileUnchanged`, crypto.ts);
+  repeated captures over unchanged content are byte-stable, and the capture-preview diff goes
+  through the same check, so it never shows an untouched credential as changed.
 
 ## Data model
 
@@ -442,7 +520,11 @@ Changes must preserve these:
     borrowed `showInlineTitle` rule too), `settingsFile.mode` falls back to the old `appJson.mode`
     (default `fields`) — then the merged shape is saved once.
 - **`store.lock.json`** — capture metadata: `capturedAt` + per-group `sourcePluginVersion` (plugin
-  items) or `sourceAppVersion` (Obsidian/core items).
+  items) or `sourceAppVersion` (Obsidian/core items), plus an optional `label` (this device's
+  best-resolved display name for the group) and, on the two carrier entries only, an optional
+  `memberLabels: Record<string, string>` (element id → display name for the on/off list's
+  members) — both healed in place by `backfillLockLabels`, both absent in a legacy lock (fully
+  back-compatible).
 - **`store/`** — the mirrored content: `configdir/…` (device-independent mirror of the config
   dir) plus vault-root dotfiles with the leading dot stripped. A file group with `desktop`/
   `mobile` field rules also carries a same-class sidecar next to its store copy —
@@ -470,7 +552,7 @@ Changes must preserve these:
 
 - **Unit tests** — `vitest` over the pure core (in-memory `FileIO` + fake `PluginHost`);
   `npm test`.
-- **Lint** — `npx eslint .`, held at a **57-warning baseline / 0 errors** (two "BRAT"
+- **Lint** — `npx eslint .`, held at a **58-warning ceiling / 0 errors** (two "BRAT"
   sentence-case false positives are kept without `eslint-disable`; product terms like
   "Sync Center" pass via the sentence-case rule's `ignoreWords` in `eslint.config.mts` —
   never via inline disables, per repo convention).

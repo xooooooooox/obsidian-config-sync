@@ -12,7 +12,7 @@
  * `fileRule.scope` is elevated to the compiled group's top-level `devices` class (the
  * "scope→devices class" compilation deferred from Task 2), uniformly.
  */
-import { corePluginFile, SELF_GROUP_NAME, selfPresetRules } from "./catalog";
+import { corePluginFile, mergePresetFields, SELF_GROUP_NAME } from "./catalog";
 import { basename, groupStorePath } from "./pathing";
 import { SWITCH_LIST_GROUPS } from "./switchList";
 import { DeviceClass, FieldRule, FileRule, PerItemScopes, RuleScope, SyncGroup } from "./types";
@@ -205,7 +205,10 @@ export function defsForForeignItems(defs: ItemDef[], itemIds: string[], betaIds:
 
 // ── Compile ──────────────────────────────────────────────────────────────────────────────────
 
-function legacyGroupName(id: string): string {
+// Exported for the Sync Center host's companionParentOf (c-livetest batch5 task 2): a companion
+// group's parent presents as the ITEM's own compiled group name, which only this function knows
+// how to derive from the owning ItemDef's id.
+export function legacyGroupName(id: string): string {
   if (id.startsWith("core:")) return id.slice("core:".length);
   if (id.startsWith("community:")) return `plugin-${id.slice("community:".length)}`;
   return id; // obsidian cards: appearance / hotkeys keep their reserved name as-is
@@ -238,11 +241,14 @@ function claimPath(seen: Map<string, string>, itemId: string, path: string): voi
 
 // Compiles one item's own single-file settingsFile into a SyncGroup — every registry item
 // (the three Obsidian cards, every core/community/beta plugin file) goes through this one path.
-// Merges config-sync's own locked local-only presets (rootPath, remotes — see catalog.ts's
-// selfPresetRules) into a compiled group for the self item, no matter what the user configured:
-// these fields must NEVER leave the device, even under a future UI bug or a hand-edited
-// data.json. Mirrors catalog.ts's mergePresetFields (kept in sync with selfPresetRules there
-// rather than duplicated) — presets first, then any other configured rule not already covered.
+// Merges config-sync's own locked local-only presets (rootPath, remotes, localMembers — see
+// catalog.ts's selfPresetRules) into a compiled group for the self item, no matter what the user
+// configured: these fields must NEVER leave the device, even under a future UI bug or a
+// hand-edited data.json. Delegates to catalog.ts's mergePresetFields — the ONE shared
+// implementation (C-#31) — rather than reimplementing the preset+rest merge here: this is the
+// compile path that feeds both adoptConfiguration's apply and the self item's status/diff
+// compare, so keeping it a single function call (not a second hand-maintained merge) guarantees
+// a field can never be excluded from one but not the other.
 // Forcing "fields" mode also clears any Plain-branch `fileRule` the incoming group might carry
 // (e.g. a hand-edited data.json with the self item still on settingsFile.mode "plain" plus a
 // fileRule): manifest.ts rejects "fields" mode combined with a fileRule, and since compileItems
@@ -250,10 +256,7 @@ function claimPath(seen: Map<string, string>, itemId: string, path: string): voi
 // compiledGroups update, not just this one.
 function withSelfPresets(group: SyncGroup): SyncGroup {
   if (group.name !== SELF_GROUP_NAME) return group;
-  const presets = selfPresetRules();
-  const presetPatterns = new Set(presets.map((p) => p.pattern));
-  const rest = (group.fields ?? []).filter((f) => !presetPatterns.has(f.pattern));
-  return { ...group, mode: "fields", fields: [...presets, ...rest], fileRule: undefined };
+  return { ...group, mode: "fields", fields: mergePresetFields(group.fields ?? []), fileRule: undefined };
 }
 
 function compileSingleFile(id: string, def: ItemDef, cfg: ItemConfig): SyncGroup | null {
@@ -302,6 +305,23 @@ export function parentCardLabel(groupName: string, defs: ItemDef[], settings: Co
     const cfg = configFor(settings, def.id);
     if (!cfg.enabled) continue;
     if (cfg.companions.some((c) => c.enabled && basename(c.path) === groupName)) return def.label;
+  }
+  return presetCompanionFallback(groupName, defs, settings);
+}
+
+// Preset-companion basename fallback (2026-08-07-c-livetest-batch4 task 1, remote pane): a def's
+// static presetCompanions (e.g. appearance's themes/snippets) still resolve to their card label
+// even when the user has never configured that companion at all — display-only, so it applies
+// regardless of the card's or companion's enabled state. Only fires once the def's OWN companions
+// have nothing configured under this basename, so an actually-configured entry (enabled or not)
+// keeps its existing null/loop-match behavior untouched.
+function presetCompanionFallback(groupName: string, defs: ItemDef[], settings: CompileSettings): string | null {
+  for (const def of defs) {
+    if (def.presetCompanions === undefined) continue;
+    if (!def.presetCompanions.some((p) => basename(p.path) === groupName)) continue;
+    const cfg = configFor(settings, def.id);
+    if (cfg.companions.some((c) => basename(c.path) === groupName)) continue; // already configured — no fallback
+    return def.label;
   }
   return null;
 }

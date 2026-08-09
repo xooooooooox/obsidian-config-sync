@@ -1,6 +1,6 @@
 import { PluginHost } from "./ConfigSyncCore";
 import { FileIO } from "./io";
-import { FieldRule, SyncGroup } from "./types";
+import { FieldRule, StoreLock, SyncGroup } from "./types";
 
 export interface CatalogItem {
   name: string;
@@ -351,7 +351,13 @@ export function selfPresetRules(): FieldRule[] {
 // Matching is pattern-only, deliberately scope/encrypted-blind: a user rule like {rootPath, all,
 // encrypted:true} is replaced by the locked local-scope preset — device-local fields must never
 // leave the device, even encrypted, so the conflicting rule is intentionally overridden (silently).
-function mergePresetFields(existing: FieldRule[]): FieldRule[] {
+// THE single shared implementation (C-#31): registry.ts's withSelfPresets — the compile path that
+// feeds both adoptConfiguration's apply and the self item's status/diff compare — calls this same
+// function instead of reimplementing the merge, so a field is excluded from adopt if and only if
+// it is excluded from compare. Every top-level settings field NOT covered by selfPresetRules()
+// (e.g. bratPluginIndex, memberRules, items, customGroups) is therefore imported by adopt exactly
+// when it participates in the compare — never silently dropped by one side only.
+export function mergePresetFields(existing: FieldRule[]): FieldRule[] {
   const presets = selfPresetRules();
   const presetPatterns = new Set(presets.map((p) => p.pattern));
   const rest = existing.filter((f) => !presetPatterns.has(f.pattern));
@@ -460,4 +466,34 @@ export function displayLabelForGroup(name: string, plugins: PluginHost, storedLa
   if (name === "core-plugins") return "Core plugins on/off";
   if (name === "enabled-css-snippets") return "CSS snippets on/off";
   return storedLabel ?? name;
+}
+
+// The Sync Center host wiring (main.ts syncCenterHost()) composes a caller's explicit override
+// with two snapshot fallbacks before calling displayLabelForGroup — kept here, pure and directly
+// testable, after the host wrapper itself silently dropped every caller's explicit override for
+// months (it declared only the `(group)` parameter, so TypeScript never flagged the discarded
+// second argument; C-#14 live-verify). Priority: caller's explicit override, then the
+// last-computed live SyncGroup list, then the last-loaded local lock's own label.
+//
+// A `plugin-<id>` / core-settings-id group with none of the above (2026-08-09-c-livetest-batch15:
+// a pure on/off-list member, never individually synced, so it has no lock entry of its own) falls
+// through one more step to its carrier's memberLabels[id] before returning undefined — the caller
+// (displayLabelForGroup) supplies the final bare-id fallback, so this function itself never
+// returns the id.
+export function resolveHostStoredLabel(group: string, explicit: string | undefined, lastGroups: SyncGroup[] | null, lastLock: StoreLock | null): string | undefined {
+  const own = explicit ?? lastGroups?.find((g) => g.name === group)?.label ?? lastLock?.groups[group]?.label;
+  if (own !== undefined) return own;
+  const key = carrierMemberKey(group);
+  return key === null ? undefined : lastLock?.groups[key.carrier]?.memberLabels?.[key.id];
+}
+
+// group -> {carrier, id} for the memberLabels fallback above: community items compile as
+// `plugin-<id>` under the community-plugins carrier; a bare core-settings id IS its own core-
+// plugins carrier element (mirrors panelModel.ts's enablementCarrierFor split — kept local here
+// instead of imported, since catalog.ts is core and enablementCarrierFor lives in the ui layer;
+// the two must never drift on this split).
+function carrierMemberKey(group: string): { carrier: "community-plugins" | "core-plugins"; id: string } | null {
+  if (group.startsWith("plugin-")) return { carrier: "community-plugins", id: group.slice("plugin-".length) };
+  if (coreSettingsIds().has(group)) return { carrier: "core-plugins", id: group };
+  return null;
 }

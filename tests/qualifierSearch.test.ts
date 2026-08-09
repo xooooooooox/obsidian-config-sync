@@ -129,13 +129,12 @@ describe("sync resolver values", () => {
     expect(syncModeValue({ mode: "fields" } as never)).toBe("fields");
     expect(syncModeValue({ mode: "encrypted" } as never)).toBe("encrypted");
   });
-  it("action: state → PanelFilter bucket, locked → null", () => {
-    expect(syncActionValue("local-changed")).toBe("capture");
-    expect(syncActionValue("not-captured")).toBe("capture");
-    expect(syncActionValue("store-newer")).toBe("apply");
-    expect(syncActionValue("differs")).toBe("apply");
-    expect(syncActionValue("in-sync")).toBe("ok");
-    expect(syncActionValue("no-settings")).toBe("none");
+  it("action: fate bucket → PanelFilter bucket, locked → null (ledger C-#23: bucket-driven, not raw state)", () => {
+    expect(syncActionValue("capture")).toBe("capture");
+    expect(syncActionValue("apply")).toBe("apply");
+    expect(syncActionValue("conflict")).toBe("apply"); // conflict's current placement, preserved
+    expect(syncActionValue("ok")).toBe("ok");
+    expect(syncActionValue("none")).toBe("none");
     expect(syncActionValue("locked")).toBeNull();
   });
 });

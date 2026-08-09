@@ -120,6 +120,11 @@ export interface SettingsHost extends Plugin {
   // The registry's item defs (registry.ts's buildItemDefs, rebuilt by main.ts on every
   // recompile) — the unified-card renderer's only source of which cards exist.
   itemDefs(): ItemDef[];
+  // The Sync Center More bridge's pending target (main.ts's openSettingsAt), read-and-cleared:
+  // null on a normal Settings open, else the item id (registry `core:<id>`/`community:<id>`/bare
+  // obsidian id, or a custom/discovered folder's bare group name) whose card render() should
+  // expand and scroll to once, this open only.
+  consumePendingSettingsAnchor(): string | null;
   // Basenames (no extension) of .css files actually present under the vault's snippets/ folder —
   // feeds the Appearance card's snippets companion member rows (spec §4/§5).
   listSnippetFiles(): Promise<string[]>;
@@ -250,6 +255,10 @@ function toCandidate(d: RemoteDraft): unknown {
 }
 
 type PanelTab = "general" | "obsidian" | "core" | "plugins" | "beta" | "advanced" | "sources";
+
+// ItemSection -> the tab that renders it (registry.ts's "community" section shows under this
+// panel's "plugins" tab; every other section keeps its own name).
+const SECTION_TAB: Record<ItemSection, PanelTab> = { obsidian: "obsidian", core: "core", community: "plugins", beta: "beta" };
 
 const TABS: { id: PanelTab; label: string; icon: string; desktopOnly?: true }[] = [
   { id: "general", label: "General", icon: "settings" },
@@ -423,7 +432,14 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     this.search = "";
     this.searchScope = "all";
     this.expanded.clear();
-    void this.rerender(0);
+    // The More bridge's pending anchor (main.ts's openSettingsAt): consumeSettingsAnchor already
+    // set activeTab/expanded above if one was pending, so the render below opens on the right
+    // card — then delegate to the SAME scroll+highlight jumpTo() uses (highlightAnchor), so More
+    // and search-bar jumps land identically. One anchoring mechanism in this file.
+    const anchor = this.consumeSettingsAnchor();
+    void this.rerender(0).then(() => {
+      if (anchor !== null) this.highlightAnchor(anchor);
+    });
   }
 
   hide(): void {
@@ -468,6 +484,30 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     await this.renderBody(this.bodyEl, gen);
     if (gen !== this.renderGen) return;
     containerEl.scrollTop = scrollTop;
+  }
+
+  // The More bridge's other end (main.ts's openSettingsAt): reads-and-clears the pending item id,
+  // picks the tab that renders it, and pre-expands its card so the render display() kicks off
+  // right after already opens it expanded. Registry items (obsidian/core/plugins/beta tabs) are
+  // anything itemDefs() knows about, keyed `card:<id>` / `item-<id>` (renderItemCard, same scheme
+  // jumpTo's search-hit navigation uses). Everything itemDefs() doesn't know about — a custom
+  // rule or an adopted discovered file — is a folder, and a folder's device-scope config only
+  // ever renders in the Advanced tab under its bare group name (renderRuleCard/
+  // renderDiscoveredOnRow): the honest target for its "Folder rules" row, since that's the only
+  // place the config exists. Returned anchorId feeds highlightAnchor once display()'s render
+  // settles — the caller never scrolls itself.
+  private consumeSettingsAnchor(): string | null {
+    const itemId = this.host.consumePendingSettingsAnchor();
+    if (itemId === null) return null;
+    const def = this.host.itemDefs().find((d) => d.id === itemId);
+    if (def !== undefined) {
+      this.activeTab = SECTION_TAB[def.section];
+      this.expanded.add(`card:${itemId}`);
+      return `item-${itemId}`;
+    }
+    this.activeTab = "advanced";
+    this.expanded.add(itemId);
+    return `advanced-rule-${itemId}`;
   }
 
   private async renderBody(bodyEl: HTMLElement, gen: number): Promise<void> {
@@ -2011,12 +2051,20 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       // its drawer under `card:${def.id}` — strip the prefix to derive it, one source of truth.
       if (hit.kind === "item" && hit.anchorId.startsWith("item-")) this.expanded.add(`card:${hit.anchorId.slice("item-".length)}`);
       await this.rerender(0);
-      const target = this.containerEl.querySelector(`[data-search-anchor="${CSS.escape(hit.anchorId)}"]`);
-      if (target === null) return;
-      target.scrollIntoView({ block: "center" });
-      target.addClass("config-sync-search-highlight");
-      window.setTimeout(() => target.removeClass("config-sync-search-highlight"), 1800);
+      this.highlightAnchor(hit.anchorId);
     })();
+  }
+
+  // The one card-anchoring mechanism in this file: scrolls a rendered `data-search-anchor`
+  // target into view and flashes the search bar's highlight. Used by jumpTo (search-hit clicks)
+  // and by display() (the More bridge's pending anchor, C-#11) — both land identically. Callers
+  // must have already applied whatever state change (activeTab/expanded) and awaited a render.
+  private highlightAnchor(anchorId: string): void {
+    const target = this.containerEl.querySelector(`[data-search-anchor="${CSS.escape(anchorId)}"]`);
+    if (target === null) return;
+    target.scrollIntoView({ block: "center" });
+    target.addClass("config-sync-search-highlight");
+    window.setTimeout(() => target.removeClass("config-sync-search-highlight"), 1800);
   }
 
   private anchor(setting: Setting, anchorId: string): Setting {
