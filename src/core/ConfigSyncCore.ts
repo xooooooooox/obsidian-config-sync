@@ -453,14 +453,20 @@ export function baseHasStaleLocalKeys(effGroup: SyncGroup, existing: string): bo
 // already made), pre-read by the caller so this function itself stays synchronous/IO-free and
 // directly unit-testable (see tests/core.test.ts) — readCarrierSwitchLists below is the shared
 // reader both call sites (main.ts startup, capture's own tail call) use to build it.
+// excluded (C-#45, spec 2026-08-10-c-livetest-batch22-device-optout.md §4): group names THIS
+// device has opted out of — the heal must not resurrect/write their lock entry either, exactly
+// like it must not re-capture their content. Optional/defaults to none so every pre-existing
+// caller (including every direct backfillLockLabels test) is unaffected.
 export function backfillLockLabels(
   groups: SyncGroup[],
   plugins: PluginHost,
   lock: StoreLock,
-  carrierLists: Record<"core-plugins" | "community-plugins", SwitchList | null>
+  carrierLists: Record<"core-plugins" | "community-plugins", SwitchList | null>,
+  excluded?: ReadonlySet<string>
 ): boolean {
   let changed = false;
   for (const group of groups) {
+    if (excluded?.has(group.name) === true) continue;
     const entry = lock.groups[group.name];
     if (entry === undefined) continue;
     const pluginId = pluginIdForGroup(group);
@@ -522,7 +528,10 @@ export async function capture(
   ctx: CoreContext,
   names?: string[],
   onProgress?: ProgressFn,
-  stagedMembersByName?: Record<string, string[] | undefined>
+  stagedMembersByName?: Record<string, string[] | undefined>,
+  // C-#45 (spec §4): forwarded verbatim to the tail heal below — see backfillLockLabels' own
+  // `excluded` doc comment. Optional/defaults to none; every pre-existing caller is unaffected.
+  optedOutForHeal?: ReadonlySet<string>
 ): Promise<GroupResult[]> {
   const manifest = await loadManifest(ctx);
   // Capture is the lock's writer and its only healing path: a previous lock that is
@@ -602,7 +611,7 @@ export async function capture(
   // run didn't itself capture a label for, carried-forward or otherwise — including a carrier's
   // own memberLabels, which this same call writes fresh from the store content this run just
   // produced (or carried forward untouched), satisfying the "written at capture" side too.
-  backfillLockLabels(manifest.groups, ctx.plugins, lock, await readCarrierSwitchLists(ctx, manifest.groups));
+  backfillLockLabels(manifest.groups, ctx.plugins, lock, await readCarrierSwitchLists(ctx, manifest.groups), optedOutForHeal);
   await ensureParentDir(ctx.io, lockPath(ctx));
   await ctx.io.write(lockPath(ctx), JSON.stringify(lock, null, 2) + "\n");
   return results;
@@ -876,7 +885,23 @@ export interface CaptureItem {
   stagedMembers?: string[];
 }
 
-export async function captureWithActions(ctx: CoreContext, items: CaptureItem[], onProgress?: ProgressFn): Promise<GroupResult[]> {
+// Runner-level payload guard (C-#45, spec 2026-08-10-c-livetest-batch22-device-optout.md §4): an
+// opted-out group cannot enter a capture/apply payload, even given a stale selection — called at
+// the host boundary (main.ts) before a CaptureItem[]/ApplyItem[] ever reaches captureWithActions/
+// applyWithActions, so this is enforcement below the UI's own stageable:false, not a duplicate of
+// it. Pure and generic over both item shapes (they share only `name`).
+export function excludeOptedOutItems<T extends { name: string }>(items: T[], optedOut: ReadonlySet<string>): T[] {
+  return items.filter((i) => !optedOut.has(i.name));
+}
+
+export async function captureWithActions(
+  ctx: CoreContext,
+  items: CaptureItem[],
+  onProgress?: ProgressFn,
+  // C-#45 (spec §4): forwarded verbatim to capture()'s own tail-heal guard. Optional/defaults to
+  // none; every pre-existing caller is unaffected.
+  optedOutForHeal?: ReadonlySet<string>
+): Promise<GroupResult[]> {
   const stagedMembersByName: Record<string, string[] | undefined> = {};
   for (const item of items) {
     if (item.stagedMembers !== undefined) stagedMembersByName[item.name] = item.stagedMembers;
@@ -885,7 +910,8 @@ export async function captureWithActions(ctx: CoreContext, items: CaptureItem[],
     ctx,
     items.map((i) => i.name),
     onProgress,
-    stagedMembersByName
+    stagedMembersByName,
+    optedOutForHeal
   );
   const manifest = await loadManifest(ctx);
   let done = 0;

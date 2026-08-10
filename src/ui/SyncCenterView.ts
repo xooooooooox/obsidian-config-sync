@@ -1,6 +1,6 @@
 import { App, ButtonComponent, ExtraButtonComponent, ItemView, Menu, Modal, Platform, WorkspaceLeaf, setIcon, setTooltip } from "obsidian";
 import { ApplyItem, CaptureItem, orderInstallsCatalogFirst, ProgressFn, StateAction } from "../core/ConfigSyncCore";
-import { BucketCounts, GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry, RemoteDiffFile, remoteDirectionCounts } from "../core/status";
+import { GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry, RemoteDiffFile, remoteDirectionCounts } from "../core/status";
 import { CATEGORY_LABELS, findGroupByName, ItemCategory, SELF_GROUP_NAME, categoryForGroup } from "../core/catalog";
 import { DeviceClass, FileChanges, GroupResult, hasChanges, MemberRule, MEMBER_RULES, Remote, RuleScope, SyncGroup } from "../core/types";
 import { Availability } from "../core/availability";
@@ -20,8 +20,10 @@ import {
   FamilyMember,
   FamilyRollup,
   familyRollup,
+  excludedLineText,
   fateBucket,
   fateBucketCounts,
+  FateBucketCounts,
   fileEntryFor,
   foldCompanionEntries,
   groupExcludedHere,
@@ -67,6 +69,7 @@ import { renderReportContent, renderReportPills, stripHeader } from "./reportCon
 import { RunRecord, RunKind, RunStatus, worstStatus, formatRunTime, stopSyncDesc, deleteLeftoverDesc } from "../core/runHistory";
 import { ACTION_ICON, ACTION_COLOR_CLASS, renderActionIcon, renderActionCount, type SyncAction } from "./actionIcons";
 import { FATE_CHIP_ICON } from "./fateChipIcons";
+import { renderFoldIcon, type FoldKind } from "./foldIcons";
 // SCOPE_LABELS aliased: this file already declares its own SCOPE_LABELS (sidebar category
 // labels, see below) for an unrelated domain.
 import { FILE_SCOPE_MENU_UNAVAILABLE_TEXT, FILE_SCOPE_OPTIONS, RUNS_ON_ICONS, SCOPE_ICONS, SCOPE_LABELS as RULE_SCOPE_LABELS, scopeCycleTooltip } from "./itemCard";
@@ -115,6 +118,10 @@ const ACTION_CELL_MAP: Partial<Record<RunKind, SyncAction>> = { capture: "captur
 // The two on/off list carriers (task-4): "one object = one row" dissolves their own list row
 // into the Core/Community section header chip — they never appear as a row themselves.
 const CARRIER_GROUP_NAMES = new Set(["core-plugins", "community-plugins"]);
+// C-#48 (search perf spec §3): trailing debounce for the search input's heavy re-render — long
+// enough to coalesce a fast typist's whole burst into one render, short enough to still read as
+// live filtering once typing pauses.
+const SEARCH_DEBOUNCE_MS = 130;
 
 // C-#39 noise floor (report fix-round-3, live-verification fix): `scrollWidth` vs `clientWidth`
 // on a genuinely non-overflowing flex row was observed live producing a phantom ≤4px delta from
@@ -151,9 +158,10 @@ const ENABLEMENT_LABELS: Record<"enable" | "none", string> = {
   none: "Leave it off",
 };
 
-// Session-remembered UI state: which scopes have their ✓ / ○ trailing lines flattened open.
+// Session-remembered UI state: which scopes have their ✓ / ⊘ / ○ trailing lines flattened open.
 const sessionUi = {
   insyncOpen: new Set<string>(),
+  excludedOpen: new Set<string>(), // C-#45 §7 (fix-round 4)
   nosettingsOpen: new Set<string>(),
 };
 
@@ -235,6 +243,10 @@ export interface SyncCenterHost {
   appendRunHistory(kind: RunKind, remote: string | null, results: GroupResult[]): Promise<void>;
   clearRunHistory(): Promise<void>;
   stopSyncing(groupName: string, deleteStore: boolean): Promise<string[]>; // deleted store paths (display form)
+  // The Stop-syncing menu's per-device layer (C-#45, spec §1/§3): read = has THIS device opted
+  // this group out; write = set/clear THIS device's own opt-out (never another device's).
+  deviceOptedOut(groupName: string): boolean;
+  setDeviceOptOut(groupName: string, on: boolean): Promise<void>;
   storeFileCount(groupName: string): Promise<number>;
   listLeftoverStoreFiles(): Promise<{ rel: string; name: string; path: string; size: number }[]>;
   deleteLeftoverStoreFiles(rels: string[]): Promise<void>;
@@ -347,6 +359,16 @@ export class SyncCenterView extends ItemView {
   // ledger C-#22: per-render-cycle memo for rowBucket/familyRollupFor/familyState/fateWithInput/
   // fateFor — see deriveRow(). Cleared at the top of render()/reload().
   private rowDerivationCache: Map<string, RowDerivation> = new Map();
+  // C-#48 (search perf, spec 2026-08-10-c-livetest-batch23-search-perf.md §2/§3): the sidebar
+  // search re-derives every row's searchable text and the whole sorted row list on EVERY
+  // keystroke — live-measured as the dominant cost (a keystroke's `familySearchText` calls alone
+  // walked `host.companionParentOf` tens of thousands of times, since `familyCompanions` rescans
+  // the entire group list per row per call). Neither depends on the query text or on filter/
+  // staging state — only on `this.groups` — so both memoize for the render cycle, same idiom and
+  // same clear points as `rowDerivationCache` (render()/reload()): a search session's later
+  // keystrokes hit a warm cache instead of repeating the O(rows × groups) scan.
+  private searchTextCache: Map<string, string> = new Map();
+  private rowsCache: StatusRow[] | null = null;
   private policy = sessionStaging.policy;
   // Fold state for the four unified type sections (task-4).
   private typeSectionOpen: Set<TypeSection> = new Set();
@@ -393,6 +415,13 @@ export class SyncCenterView extends ItemView {
   // the search input itself. Set on every full render().
   private mainEl: HTMLElement | null = null;
   private sideScopeEl: HTMLElement | null = null;
+  // C-#48 (search perf, spec §3 "instant field, deferred work"): the search input's own value is
+  // always native/instant; the heavy re-render (sidebar badges + the whole main pane) is debounced
+  // behind this single timer so a fast typist never pays for every intermediate keystroke — only
+  // the query it settles on. One timer shared by the sidebar and compact-mainbar search inputs
+  // (never both live at once — `renderSidebar`/`renderItemMode`'s compact branch are mutually
+  // exclusive per render). Cancelled in onClose so a closed view can't fire a stale render.
+  private searchDebounceTimer: number | null = null;
   // R9: the remote pane's compare in flight, if any — see renderRemoteDetail.
   private inflightCompare: InflightCompare | null = null;
   // C-#39 (spec §3, axiom §0.2): measures true per-row/per-line overflow (scrollWidth >
@@ -460,6 +489,10 @@ export class SyncCenterView extends ItemView {
 
   async onClose(): Promise<void> {
     this.qac.destroy(); // release the widget's document-level listener if the view closes mid-dropdown
+    if (this.searchDebounceTimer !== null) {
+      window.clearTimeout(this.searchDebounceTimer);
+      this.searchDebounceTimer = null; // C-#48 fix-round-2 (nit): match the clear+null idiom used everywhere else
+    }
     this.contentEl.empty();
   }
 
@@ -492,8 +525,14 @@ export class SyncCenterView extends ItemView {
     const gen = ++this.renderGen;
     // ledger C-#22: a reload always means new data — drop the row derivation memo up front so no
     // interaction landing mid-reload (before the closing render() call) can read a bucket/fate
-    // computed against the groups/statuses this reload is about to replace.
+    // computed against the groups/statuses this reload is about to replace. C-#48: the search-text
+    // and rows() memos are equally stale once the group list is about to change. (A pending
+    // debounced search re-render is handled too — see renderMainRegion()'s own cancel, fix-round-2:
+    // reload() always ends in render() → renderMainRegion(), so that single cancel point covers
+    // this path already; no separate copy needed here.)
     this.rowDerivationCache.clear();
+    this.searchTextCache.clear();
+    this.rowsCache = null;
     const { groups, statuses, availability } = await this.host.computeStatuses();
     if (gen !== this.renderGen) return;
     this.groups = groups;
@@ -720,7 +759,7 @@ export class SyncCenterView extends ItemView {
     const input = this.computeFateInput(r, rollup);
     const locked = this.presState(r) === "locked";
     const fate: Fate = locked
-      ? { glyph: "—", sentence: "Encrypted — set the passphrase in settings to compare", chips: ["encrypted"], stageable: false, turnsOn: false, nothingYet: false }
+      ? { glyph: "—", sentence: "Encrypted — set the passphrase in settings to compare", chips: ["encrypted"], stageable: false, turnsOn: false, nothingYet: false, excluded: false }
       : rowFate(input);
     const bucket: RowBucket = locked ? legacyLockedFamilyBucket(rollup.state) : fateBucket(fate);
     const derived: RowDerivation = { rollup, input, fate, bucket };
@@ -728,7 +767,15 @@ export class SyncCenterView extends ItemView {
     return derived;
   }
 
+  // C-#48 (search perf spec §2/§3): memoized per render cycle (cleared alongside
+  // rowDerivationCache — see render()/reload()). Every sidebar scope entry and both scoped-rows
+  // paths called this fresh on every call — up to ~15 rebuilds of the same sorted array per
+  // keystroke, each re-sorting with a `fullName`/localeCompare comparator and re-scanning
+  // `familyGroups()`'s own `host.companionParentOf` pass. The result depends only on
+  // `this.groups`/`this.statuses`, never on filter/search/staging, so one build per cycle is
+  // always correct.
   private rows(): StatusRow[] {
+    if (this.rowsCache !== null) return this.rowsCache;
     const out: StatusRow[] = [];
     for (const group of this.familyGroups()) {
       // config-sync manages itself in its own sidebar destination (renderConfigSyncMode), so it
@@ -751,6 +798,7 @@ export class SyncCenterView extends ItemView {
       if (rank !== 0) return rank;
       return this.fullName(a.group.name, a.group.label).localeCompare(this.fullName(b.group.name, b.group.label));
     });
+    this.rowsCache = out;
     return out;
   }
 
@@ -825,7 +873,20 @@ export class SyncCenterView extends ItemView {
       memberRule = this.host.memberRuleFor(carrier, element, locallyOn);
     }
     const pres = rollup.state;
-    const direction = stageableRow(pres, this.sectionOf(name)) ? effectiveDirection(pres, this.directionOverride.get(name)) : null;
+    const optedOutHere = this.host.deviceOptedOut(name);
+    // C-#45 fix-round 2 (root cause of the live kickstart failure — Remotely Save stayed
+    // "Installs" in To apply after "On this device"): forcing direction null HERE, not just
+    // rowFate's own output, is what makes every OTHER direction-reading consumer agree — the
+    // card's On-apply/On-capture header + Files visibility (renderUnifiedCard's `dir`) and
+    // stateClauseText's clause branch both read `input.direction` directly, not `fate.glyph`, so
+    // patching rowFate alone left them still deriving the row's real, still-derivable direction
+    // from the availability ladder/rollup — a not-installed plugin has an "apply" direction
+    // independent of this device's opt-out. Mirrors how groupExcludedHere's class exclusion
+    // already arrives with direction:null BY CONSTRUCTION (the synthetic in-sync status
+    // computeStatuses synthesizes upstream) — opt-out has no such synthetic status (the real
+    // comparison genuinely runs, C-#45 spec §4), so it's forced null here instead.
+    const rawDirection = stageableRow(pres, this.sectionOf(name)) ? effectiveDirection(pres, this.directionOverride.get(name)) : null;
+    const direction = optedOutHere ? null : rawDirection;
     const rollupFiles = direction === "apply" ? rollup.applyFiles : direction === "capture" ? rollup.captureFiles : 0;
     return {
       direction,
@@ -854,6 +915,12 @@ export class SyncCenterView extends ItemView {
       // otherwise neutral (direction null) — a directional/conflict member always wins, so a
       // still-syncing companion is never masked.
       excludedHere: groupExcludedHere(r.group, deviceClass),
+      // C-#45: THIS row's own group, opted out on THIS device via the Stop-syncing menu — a
+      // DIFFERENT fact/cause from excludedHere (a per-device choice, not a class rule) AND a
+      // DIFFERENT precedence (unconditional, not direction-null-gated — see `direction` above and
+      // rowFate's own fix-round-2 comment); rowFate renders the two identically once either wins
+      // (glyph/sentence/chip/stageable); only the card clause (stateClauseText) tells them apart.
+      optedOutHere,
       hasSettingsPayload: r.status.state !== "no-settings" && r.status.state !== "in-sync" && r.status.state !== "locked",
       // "folder": a real dir-type group — its own files ARE the settings payload, so
       // fateModel's join must not also compose a separate "applies settings" (special:"folder"
@@ -900,7 +967,7 @@ export class SyncCenterView extends ItemView {
   // All user-facing counts (header pills, sidebar badges, filter pills, switcher) must agree
   // with what the filters actually show — i.e. count each row's BUCKET (ledger C-#23, spec §1),
   // not its raw family/member state.
-  private presentedCounts(rows: StatusRow[]): BucketCounts {
+  private presentedCounts(rows: StatusRow[]): FateBucketCounts {
     return fateBucketCounts(rows.map((r) => this.rowBucket(r)));
   }
 
@@ -908,8 +975,16 @@ export class SyncCenterView extends ItemView {
     if (gen !== this.renderGen) return;
     // ledger C-#22: a fresh render cycle — any staging state a render-triggering handler just
     // changed (direction override, conflict choice, selection, filter, search…) must be read
-    // fresh, not off derivations cached for the PREVIOUS cycle's state.
+    // fresh, not off derivations cached for the PREVIOUS cycle's state. C-#48: the search-text/
+    // rows() memos don't depend on that staging state, only on `this.groups` — clearing them here
+    // too is cheap insurance (one full render, not one per keystroke) against anything upstream of
+    // render() replacing `this.groups` without going through reload()'s own clear. (A pending
+    // debounced search re-render is handled too — see renderMainRegion()'s own cancel, fix-round-2:
+    // render() always calls renderMainRegion() below, so that single cancel point covers this path
+    // already; no separate copy needed here.)
     this.rowDerivationCache.clear();
+    this.searchTextCache.clear();
+    this.rowsCache = null;
     const scrollTop = this.contentEl.scrollTop;
     this.contentEl.empty();
     this.renderHeader();
@@ -921,11 +996,43 @@ export class SyncCenterView extends ItemView {
     this.contentEl.scrollTop = scrollTop;
   }
 
+  // C-#48 (search perf spec §3): coalesces a burst of keystrokes into one trailing re-render —
+  // `run` always closes over live view state (`this.search` etc.), never a value captured at
+  // schedule time, so whichever keystroke is LAST when the timer fires is the one that renders;
+  // an earlier, still-pending timer is cancelled outright rather than left to also fire.
+  private debounceSearchRender(run: () => void): void {
+    if (this.searchDebounceTimer !== null) window.clearTimeout(this.searchDebounceTimer);
+    this.searchDebounceTimer = window.setTimeout(() => {
+      this.searchDebounceTimer = null;
+      run();
+    }, SEARCH_DEBOUNCE_MS);
+  }
+
   // Rebuilds only the main pane from the current panelScope. The sidebar search calls this (plus
   // an in-place sidebar scope-list refresh) on each keystroke instead of render(), so the search
   // input and its autocomplete are never torn down mid-type — which used to blink the dropdown
   // once per keystroke.
+  //
+  // C-#48 fix-round-2 (review): a pending debounced search re-render (see debounceSearchRender)
+  // must never survive past THIS rebuild, no matter which of this method's callers triggered it —
+  // fix-round-1 cancelled the timer at the top of render()/reload() instead, but two direct
+  // callers (the cold-start banner's "Review settings →"/dismiss handlers, renderItemMode) bypass
+  // both: they call renderMainRegion() straight, without going through render()/reload() first. A
+  // realistic sequence — type in the compact search box (timer armed) then, within the debounce
+  // window, tap the banner (first-run-on-a-phone territory, both visible together) — left the OLD
+  // timer to fire ~130ms later into DOM this call already replaced (main.empty() below), running
+  // the compact path's stale renderPills/renderSectionsBody/refreshGlobalSelectAll closure against
+  // detached elements. Cancelling HERE, at the top of the one method every caller (render(),
+  // reload() via render(), the debounce's own trailing call, and both banner handlers) funnels
+  // through, is the single choke point — render()/reload() no longer carry their own copy of this
+  // (removed, single source of truth: one cancel to keep in sync, not three). Idempotent: by the
+  // time the debounce's OWN trailing call reaches here, `debounceSearchRender` has already nulled
+  // the field itself, so this is a harmless no-op on that path.
   private renderMainRegion(): void {
+    if (this.searchDebounceTimer !== null) {
+      window.clearTimeout(this.searchDebounceTimer);
+      this.searchDebounceTimer = null;
+    }
     const main = this.mainEl;
     if (main === null) return;
     const scrollTop = this.contentEl.scrollTop;
@@ -1261,18 +1368,22 @@ export class SyncCenterView extends ItemView {
     this.renderScopeEntries(this.sideScopeEl);
     searchEl.addEventListener("input", () => {
       const wasSearching = this.searching();
-      this.search = searchEl.value;
+      this.search = searchEl.value; // the field itself is native/instant — never waits on the render below
       if (!wasSearching && this.searching()) {
         this.filter = "all"; // searching means "find this item"
         this.expandAllTypeSections(); // transition into search: expand once so hits are discoverable
       }
-      // Co-render everything the query affects except the input itself: the sidebar hit badges and
-      // the whole main pane (pills, list, sections all read this.search).
-      if (this.sideScopeEl !== null) {
-        this.sideScopeEl.empty();
-        this.renderScopeEntries(this.sideScopeEl);
-      }
-      this.renderMainRegion();
+      // C-#48 (search perf spec §3): the heavy part — sidebar hit badges + the whole main pane
+      // (pills, list, sections all read this.search) — is debounced so a fast typist's in-between
+      // keystrokes never pay for a render; `debounceSearchRender` always reads live `this.search`
+      // when it fires, so the LAST keystroke in a burst is the one that settles, never a stale one.
+      this.debounceSearchRender(() => {
+        if (this.sideScopeEl !== null) {
+          this.sideScopeEl.empty();
+          this.renderScopeEntries(this.sideScopeEl);
+        }
+        this.renderMainRegion();
+      });
     });
   }
 
@@ -1297,6 +1408,7 @@ export class SyncCenterView extends ItemView {
         if (c.up > 0) renderActionCount(item.createSpan({ cls: "config-sync-side-badge is-up" }), "capture", c.up);
         if (c.down > 0) renderActionCount(item.createSpan({ cls: "config-sync-side-badge is-down" }), "apply", c.down);
         if (c.ok > 0) item.createSpan({ cls: "config-sync-side-badge is-ok", text: `✓${c.ok}` });
+        if (c.excluded > 0) item.createSpan({ cls: "config-sync-side-badge is-excluded", text: `⊘${c.excluded}` }); // C-#45 §7
         if (c.none > 0) item.createSpan({ cls: "config-sync-side-badge is-none", text: `○${c.none}` });
       }
       item.addEventListener("click", () => {
@@ -1376,6 +1488,7 @@ export class SyncCenterView extends ItemView {
       if (c.up > 0) renderActionCount(sw.createSpan({ cls: "config-sync-side-badge is-up" }), "capture", c.up);
       if (c.down > 0) renderActionCount(sw.createSpan({ cls: "config-sync-side-badge is-down" }), "apply", c.down);
       if (c.ok > 0) sw.createSpan({ cls: "config-sync-side-badge is-ok", text: `✓${c.ok}` });
+      if (c.excluded > 0) sw.createSpan({ cls: "config-sync-side-badge is-excluded", text: `⊘${c.excluded}` }); // C-#45 §7
       if (c.none > 0) sw.createSpan({ cls: "config-sync-side-badge is-none", text: `○${c.none}` });
     } else if (this.panelScope.kind === "history") {
       sw.createSpan({ text: "History" });
@@ -1424,7 +1537,7 @@ export class SyncCenterView extends ItemView {
     const head = this.contentEl.createDiv({ cls: "config-sync-center-head" });
     this.renderSelfChip(head);
     if (this.selfInfo !== null) head.createSpan({ cls: "config-sync-head-divider" });
-    const { up, down, ok, none } = this.presentedCounts(this.mainRows());
+    const { up, down, ok, excluded, none } = this.presentedCounts(this.mainRows());
     const remoteStates = this.host.remotes().map((r) => this.host.remoteCheck(r.name)?.check.state ?? "unknown");
     const { push, pull } = remoteDirectionCounts(remoteStates);
     const pills = head.createSpan({ cls: "config-sync-report-pills" });
@@ -1457,6 +1570,17 @@ export class SyncCenterView extends ItemView {
       text: `✓ ${ok}`,
       attr: { "aria-label": `${ok} item${ok === 1 ? "" : "s"} in sync` },
     });
+    // C-#45 §7 (fix-round 4): mirrors the ok/none pills' own shape — unconditional-count vs.
+    // N=0-suppressed is inconsistent between ok (always shown) and none (suppressed) even today;
+    // `excluded` follows `none`'s precedent (suppressed at 0), matching the spec's explicit
+    // empty-state rule for the FILTER pill, applied consistently here too.
+    if (excluded > 0) {
+      pills.createSpan({
+        cls: "config-sync-pill is-excluded",
+        text: `⊘ ${excluded}`,
+        attr: { "aria-label": `${excluded} item${excluded === 1 ? "" : "s"} not synced on this device` },
+      });
+    }
     if (none > 0) {
       pills.createSpan({
         cls: "config-sync-pill is-none",
@@ -1718,10 +1842,23 @@ export class SyncCenterView extends ItemView {
   // A family row matches search on the parent's own name/label OR any companion's (spec §1's
   // dissolved companions must stay findable by their own name even though they no longer render
   // their own row).
+  //
+  // C-#48 (search perf spec §2/§3): memoized per render cycle, keyed by group name (cleared
+  // alongside rowDerivationCache — see render()/reload()) — live-measured as the dominant
+  // per-keystroke cost. This text depends only on the row's own group/label and its companions,
+  // never on the query, so recomputing it on every one of a keystroke's several full-row-list
+  // passes (sidebar per-scope badges, filter pills, each type section) was pure waste: each call
+  // re-walks `familyCompanions`, which itself rescans every compiled group via
+  // `host.companionParentOf` — on a 100+ row vault that's tens of thousands of redundant calls
+  // for a single keystroke.
   private familySearchText(r: StatusRow): string {
+    const cached = this.searchTextCache.get(r.group.name);
+    if (cached !== undefined) return cached;
     const parts = [this.fullName(r.group.name, r.group.label), r.group.name];
     for (const c of this.familyCompanions(r.group.name)) parts.push(this.fullName(c.group.name, c.group.label), c.group.name);
-    return parts.join(" ");
+    const text = parts.join(" ");
+    this.searchTextCache.set(r.group.name, text);
+    return text;
   }
 
   private rowMatchesSearch(r: StatusRow): boolean {
@@ -1791,6 +1928,11 @@ export class SyncCenterView extends ItemView {
         { key: "capture", label: `To capture ${counts.up}`, short: "", action: "capture", count: counts.up },
         { key: "apply", label: `To apply ${counts.down}`, short: "", action: "apply", count: counts.down },
         { key: "ok", label: `In sync ${counts.ok}`, short: `✓ ${counts.ok}` },
+        // C-#45 §7 (fix-round 4, mockup option A): "Not synced here" — deliberately not "Skipped"
+        // (that word is already run-event vocabulary, `⚠ update skipped` ConfigSyncCore.ts, and
+        // this is a standing state, not a run outcome). Empty state: N=0 renders neither this pill
+        // nor the matching fold (spec's explicit rule, matching ✓/○'s fold-suppression precedent).
+        ...(counts.excluded > 0 ? [{ key: "excluded" as const, label: `Not synced here ${counts.excluded}`, short: `⊘ ${counts.excluded}` }] : []),
         { key: "none", label: `No settings yet ${counts.none}`, short: `○ ${counts.none}` },
       ];
       for (const d of defs) {
@@ -1835,15 +1977,19 @@ export class SyncCenterView extends ItemView {
       const input = searchEl;
       input.addEventListener("input", () => {
         const wasSearching = this.searching();
-        this.search = input.value;
+        this.search = input.value; // the field itself is native/instant — never waits on the render below
         // Entering a search resets the direction filter: searching means "find this item".
         if (!wasSearching && this.searching()) {
           this.filter = "all";
           this.expandAllTypeSections(); // transition into search: expand once so hits are discoverable
         }
-        renderPills();
-        renderSectionsBody();
-        this.refreshGlobalSelectAll(selectAll, pillPool);
+        // C-#48 (search perf spec §3): same trailing debounce as the desktop sidebar search — this
+        // is the mobile/narrow-pane path, at least as latency-sensitive as desktop.
+        this.debounceSearchRender(() => {
+          renderPills();
+          renderSectionsBody();
+          this.refreshGlobalSelectAll(selectAll, pillPool);
+        });
       });
       this.qac.attach(searchEl);
     }
@@ -1944,85 +2090,106 @@ export class SyncCenterView extends ItemView {
     });
   }
 
-  // A type section's card contents (spec §2): extracted from renderTypeSection (ledger C-#22) so
-  // the section-head toggle can build/remove just this one section's card in place instead of a
-  // full render().
+  // A type section's body (spec §2): extracted from renderTypeSection (ledger C-#22) so the
+  // section-head toggle can build/remove just this one section's body in place instead of a full
+  // render(). Returns a `display: contents` wrapper (same idiom as .config-sync-item-wrap) so the
+  // whole body — the active-rows card plus every fold line and its own opened card — collapses
+  // and removes as one unit, while its children still sit directly on the section's own ground
+  // (spec §3: fold lines are never nested inside the filled card).
   private buildTypeSectionCard(fold: HTMLElement, ts: TypeSection, visible: StatusRow[], showSelf: boolean): HTMLElement {
-    const card = fold.createDiv({ cls: "config-sync-card" });
-    if (showSelf) this.renderSelfRow(card);
+    const body = fold.createDiv({ cls: "config-sync-section-body" });
     if (this.filter === "all" && !this.searching()) {
-      // ✓ / ○ rows fold into their own trailing line, same shape as the old flat list (#10) —
-      // now aggregated per section instead of once for the whole pane. Ledger C-#23 (spec §1):
-      // partitioned by BUCKET, not raw state — active = conflict|apply|capture (plus locked, its
-      // current placement, preserved); the folds hold ONLY ok/none.
+      // ✓ / ⊘ / ○ rows fold into their own trailing line, same shape as the old flat list (#10) —
+      // now aggregated per section instead of once for the whole pane. Ledger C-#23 (spec §1;
+      // C-#45 §7 adds excluded, fix-round 4): partitioned by BUCKET, not raw state — active =
+      // conflict|apply|capture (plus locked, its current placement, preserved); the folds hold
+      // ok/excluded/none. Fold order ✓ → ⊘ → ○ (spec §7: "from nothing-to-do, to my own rule, to
+      // no data yet") — rows within each fold stay name-sorted since `visible` already is.
       const bucketed = visible.map((r) => ({ r, section: partitionSection(this.rowBucket(r)) }));
       const active = bucketed.filter((x) => x.section === "active").map((x) => x.r);
       const insync = bucketed.filter((x) => x.section === "insync").map((x) => x.r);
+      const excluded = bucketed.filter((x) => x.section === "excluded").map((x) => x.r);
       const nosettings = bucketed.filter((x) => x.section === "nosettings").map((x) => x.r);
-      for (const r of active) this.renderItemRow(card, r);
-      this.renderSectionTrailingLine(card, ts, insync, sessionUi.insyncOpen, (n, isOpen) => insyncLineText(n, isOpen));
-      this.renderSectionTrailingLine(card, ts, nosettings, sessionUi.nosettingsOpen, (n, isOpen) => nosettingsLineText(n, isOpen));
+      // C-#50 (spec §3): the filled card wraps rows only — it renders exactly when the section
+      // has real rows (the self row or an active row); a section whose visible content is fold
+      // lines alone shows head + fold lines with no filled block (mockup §3).
+      if (showSelf || active.length > 0) {
+        const card = body.createDiv({ cls: "config-sync-card" });
+        if (showSelf) this.renderSelfRow(card);
+        for (const r of active) this.renderItemRow(card, r);
+        this.markLastRow(card);
+      }
+      this.renderSectionTrailingLine(body, ts, insync, sessionUi.insyncOpen, "insync", insyncLineText);
+      this.renderSectionTrailingLine(body, ts, excluded, sessionUi.excludedOpen, "excluded", excludedLineText);
+      this.renderSectionTrailingLine(body, ts, nosettings, sessionUi.nosettingsOpen, "nosettings", nosettingsLineText);
     } else {
+      // showSelf is only ever true alongside filter === "all" && !searching() (renderTypeSection's
+      // own gate) — i.e. always the branch above — so this path never needs the self row.
+      const card = body.createDiv({ cls: "config-sync-card" });
       for (const r of visible) this.renderItemRow(card, r);
+      this.markLastRow(card);
     }
-    this.markLastRow(card);
     // First-layout evaluation for the fold-open path (report fix-round-2): opening a section is
     // DOM-only (ledger C-#22, no full render), so the rows built just now need their own explicit
     // pass — `contentEl`'s resize observer only fires on an actual pane resize, not on new rows
     // appearing inside its existing box.
     this.refreshChipOverflow();
-    return card;
+    return body;
   }
 
   // Per-section variant of the old renderTrailingLine — keyed by section too, so expanding the
   // ✓ fold in one section doesn't also expand it in another. Ledger C-#22: toggling the fold
-  // flips the line text and builds/removes just its own rows in place, right after the line —
-  // never a full this.render().
-  private renderSectionTrailingLine(card: HTMLElement, ts: TypeSection, rows: StatusRow[], openSet: Set<string>, text: (n: number, open: boolean) => string): void {
+  // flips the line and builds/removes just its own rows in place — never a full this.render().
+  // C-#50 (spec §2/§3): the line composes the SAME leading `.config-sync-row-chevron` the list
+  // rows use, plus a fixed-size Lucide fold icon (foldIcons.ts), around `text`'s now-plain-text
+  // label — no glyph prefix, no trailing triangle baked into the string. An opened fold's rows get
+  // their OWN filled card, inserted right after the line (never the active-rows card) — the
+  // invariant "filled block = rows" holds for every fold, in every state (mockup §4).
+  private renderSectionTrailingLine(
+    parent: HTMLElement,
+    ts: TypeSection,
+    rows: StatusRow[],
+    openSet: Set<string>,
+    kind: FoldKind,
+    text: (n: number) => string
+  ): void {
     if (rows.length === 0) return;
     const key = `${this.scopeKey()}::${ts}`;
     let open = openSet.has(key);
-    const line = card.createDiv({ cls: "config-sync-unchanged", text: text(rows.length, open) });
-    let rowEls: HTMLElement[] = open ? this.buildTrailingRows(card, line, rows) : [];
+    const line = parent.createDiv({ cls: "config-sync-unchanged" });
+    const chevron = line.createSpan({ cls: "config-sync-row-chevron", text: open ? "▾" : "▸" });
+    renderFoldIcon(line, kind);
+    const label = line.createSpan({ cls: "config-sync-fold-label", text: text(rows.length) });
+    let foldCard: HTMLElement | null = open ? this.buildFoldCard(parent, line, rows) : null;
     line.addEventListener("click", (e) => {
       e.stopPropagation();
       open = !open;
+      chevron.setText(open ? "▾" : "▸");
+      label.setText(text(rows.length));
       if (open) {
         openSet.add(key);
-        rowEls = this.buildTrailingRows(card, line, rows);
+        foldCard = this.buildFoldCard(parent, line, rows);
         // First-layout evaluation (report fix-round-2): same reasoning as buildTypeSectionCard's
         // own call — new rows appearing in place need an explicit pass, not a wait on a
         // container resize that isn't coming.
         this.refreshChipOverflow();
       } else {
         openSet.delete(key);
-        for (const el of rowEls) el.remove();
-        rowEls = [];
+        foldCard?.remove();
+        foldCard = null;
       }
-      this.markLastRow(card); // opening/closing a fold can change which row is visually last
-      line.setText(text(rows.length, open));
     });
   }
 
-  // Builds an open trailing fold's rows, inserted directly after `anchor` (the fold's own line)
-  // so they land in the right place regardless of what else already sits in `card` — needed
-  // because reopening a fold in place (ledger C-#22) can't rely on append-at-the-end the way the
-  // very first build could. `renderItemRow` may append more than one child per row (the row
-  // itself plus its detail drawer) — every child it adds gets moved, in order.
-  private buildTrailingRows(card: HTMLElement, anchor: HTMLElement, rows: StatusRow[]): HTMLElement[] {
-    const built: HTMLElement[] = [];
-    let after = anchor;
-    for (const r of rows) {
-      const before = card.children.length;
-      this.renderItemRow(card, r);
-      for (const child of Array.from(card.children).slice(before)) {
-        const el = child as HTMLElement;
-        after.after(el);
-        after = el;
-        built.push(el);
-      }
-    }
-    return built;
+  // Builds an open trailing fold's OWN filled card (spec §3, mockup §4), inserted directly after
+  // `line`. Unlike the pre-task shared-card version, `renderItemRow` writes straight into this
+  // fresh, empty card — no anchor-shuffling needed, since nothing else ever shares it.
+  private buildFoldCard(parent: HTMLElement, line: HTMLElement, rows: StatusRow[]): HTMLElement {
+    const card = parent.createDiv({ cls: "config-sync-card" });
+    line.after(card);
+    for (const r of rows) this.renderItemRow(card, r);
+    this.markLastRow(card);
+    return card;
   }
 
   // Config Sync's own row (spec §2): pinned first in Community, outside the checkbox/Fate
@@ -2438,8 +2605,10 @@ export class SyncCenterView extends ItemView {
     // fateModel.ts's rowFate) speaks in cause voice, not just its terse row sentence + period.
     if (fate.sentence === NOTHING_YET_SENTENCE) return "No saved settings anywhere yet — neither this device nor the store has any.";
     if (input.direction === null) {
-      // C-#24: the card's STATE clause spells out WHY, not just the row's terse sentence.
+      // C-#24/C-#45: the card's STATE clause spells out WHY, not just the row's terse sentence —
+      // and the two exclusion causes read differently even though the row above them is identical.
       if (input.excludedHere) return "Not synced on this device — your Settings sync rule excludes it.";
+      if (input.optedOutHere === true) return "Not synced on this device — you turned it off here. Your other devices keep syncing it.";
       return `${fate.sentence}.`;
     }
     let text = fate.sentence;
@@ -2744,10 +2913,25 @@ export class SyncCenterView extends ItemView {
     const btn = container.createSpan({ cls: "config-sync-stopsync" });
     setIcon(btn.createSpan({ cls: "config-sync-stopsync-ic" }), "ban");
     btn.createSpan({ text: "Stop syncing" });
-    btn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      void this.openStopSyncing(r);
-    });
+    this.wireMenuTrigger(btn, () => this.buildStopSyncingMenu(r));
+  }
+
+  // The Stop-syncing footer's scope menu (C-#45, mock-final "A" — spec §3): the footer stays ONE
+  // quiet button (same placement/icon/text); a click now opens a menu instead of the modal
+  // directly. "On this device"/"Sync on this device again" write the per-device rule instantly —
+  // no modal, reversible in place — then re-render; "Everywhere…" opens the EXISTING
+  // StopSyncingModal, zero changes to it or its own tests.
+  private buildStopSyncingMenu(r: StatusRow): Menu {
+    const name = r.group.name;
+    const optedOut = this.host.deviceOptedOut(name);
+    const menu = new Menu();
+    menu.addItem((item) =>
+      item.setTitle(optedOut ? "Sync on this device again" : "On this device").onClick(() => {
+        void this.host.setDeviceOptOut(name, !optedOut).then(() => this.reload());
+      })
+    );
+    menu.addItem((item) => item.setTitle("Everywhere…").onClick(() => void this.openStopSyncing(r)));
+    return menu;
   }
 
   private formatBytes(n: number): string {
@@ -3356,6 +3540,17 @@ export class SyncCenterView extends ItemView {
   }
 
   private renderRemoteDiffEntry(detail: HTMLElement, e: RemoteDiffEntry, remoteName: string, storedLabel?: string): void {
+    // C-#45 (spec §2): honest, never pretend the item doesn't exist — an item THIS device has
+    // opted out of gets the same excluded presentation here it gets in the main list, no fold
+    // (there is nothing to diff into: this device never reads or writes it either direction).
+    if (this.host.deviceOptedOut(e.group)) {
+      const row = detail.createDiv({ cls: "config-sync-report-row config-sync-remote-row" });
+      this.renderRuleName(row, e.group, storedLabel);
+      row.createDiv({ cls: "config-sync-rule-spacer" });
+      row.createSpan({ cls: "config-sync-fate-text", text: "Not synced on this device" });
+      this.renderFateChip(row, "your rule");
+      return;
+    }
     const key = `${remoteName}::${e.group}`;
     const isOpen = this.remoteFoldsOpen.has(key);
     const row = detail.createDiv({ cls: "config-sync-report-row config-sync-remote-row" });

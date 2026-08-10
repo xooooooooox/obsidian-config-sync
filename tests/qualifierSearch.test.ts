@@ -136,6 +136,10 @@ describe("sync resolver values", () => {
     expect(syncActionValue("ok")).toBe("ok");
     expect(syncActionValue("none")).toBe("none");
     expect(syncActionValue("locked")).toBeNull();
+    // C-#45 §7 (fix-round 4): "excluded" is a new bucket outside this function's fixed
+    // capture/apply/ok/none vocabulary (the `action:` qualifier's own value set, GUIDE.md,
+    // is unchanged by §7) — same non-match treatment as "locked", not a regression.
+    expect(syncActionValue("excluded")).toBeNull();
   });
 });
 

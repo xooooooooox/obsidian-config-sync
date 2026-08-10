@@ -165,3 +165,8 @@ describe("sanitizeMemberRules (task 2, single-source against MEMBER_RULES)", () 
     expect(sanitizeMemberRules(s)).toBe(false); // idempotent
   });
 });
+
+// C-#45 fix-round 1 (reviewer-caught CRITICAL): the per-device item opt-out rule's device
+// identity moved OUT of settings entirely, into localStorage (main.ts's deviceId() method,
+// tested via tests/deviceOptOut.test.ts's real-plugin harness) — there is no settings-level
+// migration for it any more; settingsMigration.ts has nothing to own here.

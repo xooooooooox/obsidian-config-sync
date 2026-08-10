@@ -11,7 +11,7 @@ export type Direction = "capture" | "apply";
 
 // Panel row filter. Buckets match core bucketCounts: capture = local-changed + not-captured,
 // apply = store-newer + differs, ok = in-sync.
-export type PanelFilter = "all" | "capture" | "apply" | "ok" | "none";
+export type PanelFilter = "all" | "capture" | "apply" | "ok" | "excluded" | "none";
 
 // ── Fate-derived buckets (spec 2026-08-08-c-livetest-batch10 §1, ledger C-#23) ──────────────────
 // The single per-row bucket derivation: every count/filter/partition/fold consumer reads THIS
@@ -22,12 +22,21 @@ export type PanelFilter = "all" | "capture" | "apply" | "ok" | "none";
 // direct nothing-yet presentation and one degraded from an empty-verb apply direction — never a
 // caller-recomputed guess (e.g. a family-rollup `pres === "no-settings"` check) that can disagree
 // with what rowFate actually decided.
-export type FateBucket = "conflict" | "apply" | "capture" | "ok" | "none";
+export type FateBucket = "conflict" | "apply" | "capture" | "excluded" | "ok" | "none";
 
+// C-#45 §7 (fix-round 4, mockup option A, user 定稿): a fifth bucket for a row a device-scope or
+// device-opt-out rule keeps this device from touching — was silently counted "ok" (`✓ N items in
+// sync`), which lies to the user who just turned an item off here. Returned for BOTH exclusion
+// causes (optedOutHere and C-#24 class exclusion — same user-rule family, same placement) via
+// `fate.excluded` (fateModel.ts's own field, mirroring `nothingYet`'s precedent — the minimal
+// honest way for this function to know the cause without re-deriving it from FateInput, which it
+// never receives). Positioned after the stageable checks (conflict/apply/capture always win — a
+// still-syncing/conflicted family member outranks either exclusion cause) and before nothingYet.
 export function fateBucket(fate: Fate): FateBucket {
   if (fate.glyph === "⚠") return "conflict";
   if (fate.stageable && fate.glyph === "↓") return "apply";
   if (fate.stageable && fate.glyph === "↑") return "capture";
+  if (fate.excluded) return "excluded";
   if (fate.nothingYet) return "none";
   return "ok";
 }
@@ -67,34 +76,49 @@ export function visibleUnderFilter(bucket: RowBucket, filter: PanelFilter): bool
   if (filter === "capture") return bucket === "capture";
   if (filter === "apply") return bucket === "apply" || bucket === "conflict";
   if (filter === "none") return bucket === "none";
+  if (filter === "excluded") return bucket === "excluded";
   return bucket === "ok";
+}
+
+// C-#45 §7: a dedicated `FateBucketCounts` (extends the core `BucketCounts` shape rather than
+// widening it) — `excluded` is a UI-presentation count, not a run-status one, so it stays out of
+// `core/status.ts`'s `BucketCounts`/`bucketCounts` (the raw comparison-based counter other,
+// non-UI code paths also use).
+export interface FateBucketCounts extends BucketCounts {
+  excluded: number;
 }
 
 // Filter-pill counts (spec §1.2): the apply pill counts the apply bucket AND conflict (its current
 // placement, preserved — a `differs` GroupState already counts under the "down"/To-apply pill
-// today); the capture pill counts capture; "In sync" = ok; "No settings yet" = none plus locked
-// (also today's placement — bucketCounts already groups raw "locked" under `none`).
-export function fateBucketCounts(buckets: RowBucket[]): BucketCounts {
+// today); the capture pill counts capture; "In sync" = ok; "Not synced here" = excluded (§7);
+// "No settings yet" = none plus locked (also today's placement — bucketCounts already groups raw
+// "locked" under `none`).
+export function fateBucketCounts(buckets: RowBucket[]): FateBucketCounts {
   let up = 0;
   let down = 0;
   let ok = 0;
   let none = 0;
+  let excluded = 0;
   for (const b of buckets) {
     if (b === "capture") up++;
     else if (b === "apply" || b === "conflict") down++;
     else if (b === "ok") ok++;
+    else if (b === "excluded") excluded++;
     else none++; // "none" | "locked"
   }
-  return { up, down, ok, none };
+  return { up, down, ok, none, excluded };
 }
 
-// Section partition (spec §1.1): active = conflict|apply|capture (plus locked — today's placement,
-// preserved: a locked row is currently neither in-sync nor no-settings, so it renders active,
-// unfolded); the folds hold ONLY ok/none.
-export type PartitionSection = "active" | "insync" | "nosettings";
+// Section partition (spec §1.1; §7 adds "excluded"): active = conflict|apply|capture (plus locked
+// — today's placement, preserved: a locked row is currently neither in-sync nor no-settings, so
+// it renders active, unfolded); the folds hold ok/excluded/none — excluded gets its OWN fold
+// (§7), never merged into "insync" (the whole point: a user who just opted an item out must not
+// still read it inside "✓ N items in sync").
+export type PartitionSection = "active" | "insync" | "excluded" | "nosettings";
 
 export function partitionSection(bucket: RowBucket): PartitionSection {
   if (bucket === "ok") return "insync";
+  if (bucket === "excluded") return "excluded";
   if (bucket === "none") return "nosettings";
   return "active"; // conflict | apply | capture | locked
 }
@@ -115,8 +139,20 @@ export function capFileEntries(changes: FileChanges, limit: number): { shown: Ca
   return { shown: all.slice(0, limit), rest: all.slice(limit) };
 }
 
-export function insyncLineText(n: number, open: boolean): string {
-  return `✓ ${n} item${n === 1 ? "" : "s"} in sync ${open ? "▾" : "▸"}`;
+// C-#50 (spec 2026-08-10-c-livetest-batch24-fold-family.md §2): plain text, no glyph prefix, no
+// trailing triangle — the renderer composes the leading `.config-sync-row-chevron` (▸/▾) and the
+// fixed-size Lucide fold icon (foldIcons.ts) around this label. Counts/pluralisation wording stay
+// byte-identical to the pre-task copy.
+export function insyncLineText(n: number): string {
+  return `${n} item${n === 1 ? "" : "s"} in sync`;
+}
+
+// C-#45 §7 (fix-round 4): the excluded fold's own trailing line — same shape idiom as
+// insyncLineText/nosettingsLineText, copy 定稿 verbatim-consistent with the row sentence ("Not
+// synced on this device") so the pill → fold → row wording maps at zero cost. C-#50: plain text
+// now (see insyncLineText's comment above).
+export function excludedLineText(n: number): string {
+  return `${n} item${n === 1 ? "" : "s"} not synced on this device`;
 }
 
 export function moreFilesText(n: number): string {
@@ -153,8 +189,9 @@ export function matchesSearch(name: string, query: string): boolean {
   return q === "" || name.toLowerCase().includes(q);
 }
 
-export function nosettingsLineText(n: number, open: boolean): string {
-  return `○ ${n} item${n === 1 ? "" : "s"} with no settings yet ${open ? "▾" : "▸"}`;
+// C-#50: plain text (see insyncLineText's comment above).
+export function nosettingsLineText(n: number): string {
+  return `${n} item${n === 1 ? "" : "s"} with no settings yet`;
 }
 
 export type SectionKind = "main" | "outdated" | "disabled" | "not-installed" | "desktop-only";

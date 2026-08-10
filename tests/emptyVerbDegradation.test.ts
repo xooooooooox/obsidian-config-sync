@@ -30,6 +30,7 @@ function harness(opts: {
   const host = {
     companionParentOf: opts.companionParentOf ?? (() => null),
     memberRuleFor: opts.memberRuleFor ?? (() => "all"),
+    deviceOptedOut: () => false,
   };
   const view = new SyncCenterView({} as never, host as never);
   const instance = view as unknown as Harness;

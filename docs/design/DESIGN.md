@@ -32,9 +32,11 @@ One color per meaning, everywhere (0.27.9 audit). Alpha fills always use
 | Neutral text ramp | `--text-normal` → `--text-muted` → `--text-faint` | content → secondary labels → hints/chevrons/idle |
 | Text on colored fills | `--text-on-accent` (accent fills) · `--background-primary` (orange/cyan/pink fills) | see Findings #4 |
 | Field rule: desktop/mobile only (json key) | `--color-blue` (desktop) · `--color-orange` (mobile) | json-preview key highlighting only, reusing existing tokens for a new per-key-scope semantic — no new variable |
-| Detected, unruled (json key) | `--color-purple` | json-preview key highlighting only (`config-sync-json-detected`) — the only live use of purple |
+| Detected, unruled (json key) | `--color-purple` | json-preview key highlighting only (`config-sync-json-detected`) |
+| Device-rule exclusion (C-#45 §7, "not synced here") | `--color-purple` | the `excluded` fate bucket's filter pill/sidebar badges/header pill — a row a class rule (C-#24) or a per-device opt-out keeps THIS device from touching; the section fold itself stays unstyled text like the ✓/○ folds it sits beside (spec §7: "same rendering style") |
 
-`--color-purple`'s prior role (a second apply/selection color) was removed 0.27.9; it now has exactly the one use above and stays banned for anything else.
+`--color-purple`'s prior role (a second apply/selection color) was removed 0.27.9; it now has
+exactly the two sanctioned uses above (both 定稿'd individually) and stays banned for anything else.
 
 Textual notes use `--text-warning`/`--text-error`; fills, borders, and icons use
 `--color-orange`/`--color-red`. Destructive text actions render red on hover (idle muted),
@@ -87,6 +89,12 @@ apply `arrow-down-to-line`/accent, push `cloud-upload`/pink, pull `cloud-downloa
 `—` miss/faint · `○` no-settings/faint · `✓` ok/green · `?` unknown · **key** (`key-round`)
 locked/cyan.
 
+C-#50: the Sync Center's trailing-fold summary lines (`✓ N items in sync` / `⊘ N not synced on
+this device` / `○ N with no settings yet`) are a DIFFERENT vocabulary from this text-glyph state
+column — canvas-metrics found the text glyphs optically unequal across themes (font-fallback ink
+weight), so those three states moved to fixed-size 12px Lucide instead (§2.3). This state column
+itself is untouched.
+
 ### 2.2 Mode badges (`.config-sync-mode-badge`, 12px, `--text-faint`)
 
 - encrypted → Lucide `lock`; tooltip "Encrypted mode — the whole file is stored encrypted".
@@ -116,13 +124,21 @@ vocabulary with `power`/`power-off` for `RUNS_ON_ICONS`'s `always-here`/`never-h
 (`MemberRule`, itemCard.ts — no `RuleScope` counterpart, so these two are unused elsewhere)
 · `settings-2` — the sidebar Config Sync
 self-entry tile, the compact switcher's self entry, and the self pane's title-row Settings
-button · `ban` — the drawer's Stop-syncing footer action · `monitor-smartphone` — the
+button · `ban` — the drawer's Stop-syncing footer action; click opens an Obsidian `Menu`
+(same icon-trigger-plus-menu variant as `Settings sync`/`Runs on` above) offering **On this
+device**/**Sync on this device again** vs. **Everywhere…**, not a direct action (C-#45) ·
+`monitor-smartphone` — the
 scope-cycle "All devices" stop · `arrow-left-right` — the Sync Center leaf/tab icon ·
 `chevron-right` — qualifier-autocomplete key rows (value rows use `check`, §2.4) · fate chips
 (`config-sync-fatechip`, `FATE_CHIP_ICON` in `fateChipIcons.ts` — every chip renders icon + text,
 generalized from the `encrypted`/`lock` special case): `circle-dashed` not installed here ·
 `monitor` desktop only · `sliders-horizontal` your rule / off here — your rule / on here — your
-rule · `power` stays off · `lock` encrypted · `check` your choice.
+rule · `power` stays off · `lock` encrypted · `check` your choice · trailing-fold states
+(`config-sync-fold-ic`, `FOLD_ICON` in `foldIcons.ts`, C-#50): `check`/green in sync ·
+`circle-slash`/muted not synced on this device · `circle`/muted no settings yet — action vs.
+state: `ban` stays reserved for the Stop-syncing ACTION above; the "not synced on this device"
+STATE uses `circle-slash` instead, so an icon never means both a thing you can click and a thing
+that already happened.
 
 ### 2.4 Glyph language (text, reused everywhere)
 
@@ -243,12 +259,21 @@ noted):
   dissolved into row state (chips + fate sentence, Rows above); only the store-orphan
   **Leftover** section (below) still keeps a colored dashed frame. A type section's own
   frame stays neutral — dashed when collapsed, solid when open — no drift-color borrowed
-  from the old outdated/not-installed sections; nested card unframed so section rows share
-  the main card's checkbox column. **Real collapse:** clicking the header
-  (`config-sync-section-head`) toggles the section, remembered per section for the view
+  from the old outdated/not-installed sections. **Body fill (C-#47):** the nested card stays
+  unframed (`border: none`, `padding: 0` — same checkbox column as the main card, batch-3 ①)
+  but regains its `--background-secondary` fill + `--radius-m` corners when open — pre-C, the
+  main list itself was one such filled card with no section wrapper at all; the C rework
+  turned every category into a section and stripped the nested card's own fill along with its
+  frame, leaving rows bare on the panel background with nothing for the header to sit
+  against. A collapsed section builds no card at all, so it has no fill either — nothing to
+  suppress, the dashed empty frame already reads as closed. **Real collapse:** clicking the
+  header (`config-sync-section-head`) toggles the section, remembered per section for the view
   instance's lifetime (survives re-renders, resets on view close); restored pre-C header
-  typography (uppercase, letter-spaced, `--font-ui-smaller`, `--text-faint`, unmistakable as
-  a header even with its trailing badge covered), disclosure triangle (▾ open / ▸ collapsed)
+  typography (uppercase, letter-spaced, `--font-ui-smaller`, `--text-muted` — C-#47 lifted it
+  off `--text-faint`, now that the head sits on the section's bare margin above the filled
+  body rather than a flat, single-tone box; unmistakable as a header even with its trailing
+  badge covered), `padding-bottom: var(--size-4-2)` separates the head from the body by
+  material contrast alone (no hairline), disclosure triangle (▾ open / ▸ collapsed)
   scaled to the header size; a checkbox click on the header stages, anywhere else on the
   header toggles collapse. A trailing count pill reads `N of M` under a filter; Core/Community
   carry a header chip `on/off synced ✓` / `on/off not synced` — the only remaining home of
@@ -269,7 +294,14 @@ noted):
   headers `config-sync-sect` (uppercase + hairline) — used in the run-report breakdown.
   The remote pane groups its diff entries with the same type-section head family as the
   main list, in a static variant (`is-static`: no chevron, no collapse, no checkbox, no
-  carrier chip, default cursor); carrier divergence there renders as a pinned
+  carrier chip, default cursor). Head and entry rows are direct children here (no nested
+  card the way the collapsible type sections have), so C-#47's body fill does not reach it —
+  filling the whole static box (head included) would be a different visual pattern from main
+  sections (head outside the fill there), an asymmetry the §8 mockup never covered and was
+  never live-verified; remote panes stay exactly as they were before §8. Matching the real
+  head-outside/body-filled pattern needs a body wrapper element around the entry rows (a
+  `.ts` DOM change) — deliberately deferred, not this round's to make. Carrier divergence
+  there renders as a pinned
   `On/off list · differs for N plugins ▸` line (`config-sync-remote-onoff`) whose
   expansion shows the per-plugin flips (`config-sync-remote-fliplist`) and the file diff.
   Companion families fold the same way here: companion diff entries merge into their
@@ -282,7 +314,11 @@ noted):
 - **Expanded card (Sync Center row)** `config-sync-itemcard` — bordered, left-indented under
   the row's name column and offset one notch from the section behind it, so it reads as one
   contained unit; row hairlines (`config-sync-card-fieldrow`) stay inside this box, never
-  full-pane rules. Every row (`renderCardKeyRow`) is a fixed-width muted small-caps key
+  full-pane rules. Filled (`--background-secondary` + border + `--radius-s`) on its own; inside a
+  section (now that the section body itself is filled, C-#47) the drawer drops a level instead —
+  border + radius stay, background drops to none, so the hierarchy reads unambiguously box >
+  filled section body > outlined drawer, never two equal-weight filled blocks stacked. Every row
+  (`renderCardKeyRow`) is a fixed-width muted small-caps key
   immediately followed by its value — the key column is `flex: 0 0 15ch`, sized to the
   longest key (`After install`) so a key never wraps; the value cell takes the rest
   (`min-width: 0`, no fixed narrow width — ellipsis is a last resort, never a first one,
@@ -369,7 +405,10 @@ noted):
   `config-sync-section.is-leftover` renders unconditionally under the unfiltered `All` pill
   (hidden while a filter or search narrows the view) — `-oflow` rows (name / mono path / size / a
   Delete text action), with "Delete all" in the head — both destructive text actions render per
-  §1.1 (idle muted, red on hover). Removal kinds in
+  §1.1 (idle muted, red on hover). Its frame/title stay amber (state ≠ category, C rework rule);
+  its nested card picks up the same C-#47 body fill as any other section, unaffected by the
+  color accent (the fill lives on the card, the accent lives on the section's own border/title).
+  Removal kinds in
   History render `⊘` (stop-sync) and `⌫` (delete-leftover), muted.
 - **Unified card** (定稿 mockup artifact `v7-final-panorama`, 2026-07-25, plus the icon/
   progressive-disclosure pass in artifact `239c8393-cd61-4faa-95aa-e49f1804b446`, 2026-07-26; specs

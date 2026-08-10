@@ -168,6 +168,117 @@ describe("rowFate — excludedHere (C-#24)", () => {
   });
 });
 
+// C-#45 (spec 2026-08-10-c-livetest-batch22-device-optout.md §2): a DIFFERENT cause (a per-device
+// choice, not a class rule) but the IDENTICAL row treatment as excludedHere — same glyph/sentence/
+// chip/stageable; only the card clause (SyncCenterView.ts's stateClauseText) tells them apart.
+// C-#45 fix-round 2 (live failure, kickstart real-use-case): Remotely Save stayed "Installs" in
+// To apply after "On this device" — root cause, rowFate only consulted excludedHere/optedOutHere
+// inside its direction===null branch (C-#24's family-member-wins precedence), but a not-installed
+// plugin derives a REAL "apply" direction from the availability ladder independent of the opt-out
+// fact, so that branch was unreachable for this row; the fact was threaded into FateInput but
+// could never win. Fix: optedOutHere is now checked UNCONDITIONALLY, before conflict/direction —
+// spec §1 "renders inert" has no family-member-wins exception, unlike excludedHere's C-#24 gate,
+// which stays exactly as it was (see the "class exclusion" tests below). The tests below this
+// comment REPLACE the fix-round-1 versions, which hand-built every case with `direction: null` —
+// exactly the shape that masked this bug (the coordinator's own diagnosis).
+describe("rowFate — optedOutHere (C-#45 fix-round 2: unconditional, not direction-null-gated)", () => {
+  it("neutral + optedOutHere: same honest sentence, unstageable, dash glyph, your-rule chip as excludedHere", () => {
+    const f = rowFate({ ...base, direction: null, optedOutHere: true });
+    expect(f.sentence).toBe("Not synced on this device");
+    expect(f.glyph).toBe("—");
+    expect(f.stageable).toBe(false);
+    expect(f.turnsOn).toBe(false);
+    expect(f.chips).toContain("your rule");
+  });
+  it("optedOutHere wins over nothingYet — the rule is why, not incidental emptiness", () => {
+    const f = rowFate({ ...base, direction: null, optedOutHere: true, nothingYet: true });
+    expect(f.sentence).toBe("Not synced on this device");
+  });
+  // THE EXACT LIVE SHAPE (kickstart, Remotely Save): installed:false + a real "apply" direction
+  // derived from the availability ladder (the plugin isn't installed here, so a plain apply row
+  // would normally read "Installs") + optedOutHere:true. Truth-table case per the coordinator's
+  // explicit ask.
+  it("direction-derivable input (installed:false, apply ladder) + optedOutHere:true → inert excluded fate, not 'Installs' (live-failure repro)", () => {
+    const f = rowFate({ ...base, direction: "apply", installed: false, optedOutHere: true });
+    expect(f.sentence).toBe("Not synced on this device");
+    expect(f.sentence).not.toContain("Installs");
+    expect(f.glyph).toBe("—");
+    expect(f.stageable).toBe(false);
+    expect(f.chips).toContain("your rule");
+    expect(f.chips).not.toContain("not installed here"); // a run-consequence chip — meaningless for an inert row
+  });
+  it("a directional family member does NOT override optedOutHere — opt-out has no family-member-wins exception (spec §1, unlike excludedHere)", () => {
+    const f = rowFate({ ...base, direction: "apply", optedOutHere: true });
+    expect(f.sentence).toBe("Not synced on this device");
+    expect(f.chips).toContain("your rule");
+  });
+  it("a conflicted family does NOT override optedOutHere either — opt-out wins over conflict too", () => {
+    const f = rowFate({ ...base, conflict: true, optedOutHere: true });
+    expect(f.sentence).toBe("Not synced on this device");
+    expect(f.glyph).toBe("—");
+    expect(f.chips).toContain("your rule");
+  });
+  it("a capture-directional row does NOT override optedOutHere", () => {
+    const f = rowFate({ ...base, direction: "capture", optedOutHere: true });
+    expect(f.sentence).toBe("Not synced on this device");
+    expect(f.glyph).toBe("—");
+  });
+  it("optedOutHere absent (the default for every pre-existing FateInput literal) is byte-identical to false", () => {
+    expect(rowFate({ ...base, direction: null }).sentence).toBe("In sync");
+    expect(rowFate({ ...base, direction: null }).chips).not.toContain("your rule");
+    expect(rowFate({ ...base, direction: "apply" }).sentence).toBe("Applies settings");
+  });
+  it("both facts true at once still render the identical row (cause is a card-clause-only distinction)", () => {
+    const f = rowFate({ ...base, direction: null, excludedHere: true, optedOutHere: true });
+    expect(f.sentence).toBe("Not synced on this device");
+    expect(f.chips).toContain("your rule");
+  });
+});
+
+// C-#45 fix-round 3 (live-verified on kickstart, second residue after fix-round 2): the opted-out
+// row rendered ["your rule", "off here — your rule", "encrypted"] against the mockup's single
+// `your rule` (+ intrinsic facts) — a Runs-on ENABLEMENT rule is a run-consequence fact, moot
+// while the whole item is ignored on this device, and duplicated the `your rule` attribution.
+describe("rowFate — optedOutHere suppresses the Runs-on enablement-rule chips (C-#45 fix-round 3)", () => {
+  it("never-here's chip is suppressed when opted out — only your rule remains", () => {
+    const f = rowFate({ ...base, direction: null, optedOutHere: true, memberRule: "never-here" });
+    expect(f.chips).toContain("your rule");
+    expect(f.chips).not.toContain("off here — your rule");
+  });
+  it("always-here's chip is suppressed when opted out — only your rule remains", () => {
+    const f = rowFate({ ...base, direction: null, optedOutHere: true, memberRule: "always-here" });
+    expect(f.chips).toContain("your rule");
+    expect(f.chips).not.toContain("on here — your rule");
+  });
+  it("NOT opted out: the enablement-rule chip is unaffected (regression guard — only opt-out suppresses it)", () => {
+    const f = rowFate({ ...base, memberRule: "never-here" });
+    expect(f.chips).toContain("off here — your rule");
+  });
+  it("intrinsic-fact chips (encrypted, desktop only) survive opt-out — only run-consequence chips are suppressed", () => {
+    const f = rowFate({ ...base, direction: null, optedOutHere: true, memberRule: "never-here", encrypted: true, desktopOnly: true });
+    expect(f.chips).toEqual(["desktop only", "your rule", "encrypted"]); // exact set + order the mockup shows
+  });
+});
+
+// Class exclusion (C-#24, excludedHere) keeps its EXISTING direction-null-only precedence
+// byte-identical — these are the same assertions the fix-round-1 optedOutHere tests used to make
+// (now proven wrong for opt-out), reattached to excludedHere where they remain correct: a
+// genuinely still-syncing family member legitimately outranks a class-scope mismatch on a
+// DIFFERENT row of the same family, so excludedHere must still lose to a real direction/conflict.
+describe("rowFate — excludedHere keeps C-#24's family-member-wins precedence (fix-round-2 regression guard)", () => {
+  it("a directional family member keeps its directional sentence — excludedHere is ignored (unchanged)", () => {
+    const f = rowFate({ ...base, direction: "apply", excludedHere: true });
+    expect(f.sentence).not.toBe("Not synced on this device");
+    expect(f.sentence).toBe("Applies settings");
+    expect(f.chips).not.toContain("your rule");
+  });
+  it("a conflicted family keeps its conflict sentence — excludedHere is ignored (unchanged)", () => {
+    const f = rowFate({ ...base, conflict: true, excludedHere: true });
+    expect(f.sentence).toBe("Changed on both sides");
+    expect(f.chips).not.toContain("your rule");
+  });
+});
+
 describe("rowFate — Runs on re-derivation", () => {
   it("never-here removes turns on, adds rule chip", () => {
     const f = rowFate({ ...base, storeListOn: true, memberRule: "never-here" });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CoreContext, capture, captureWithActions, loadManifest, groupsForDevice, apply, applyWithActions, planImport, applyImport, PendingPull, ExternalStoreReader, pushExternal, ExternalStoreWriter, pluginIdForGroup, orderInstallsCatalogFirst, readGroups, writeGroups, deviceExcludedPluginIds, isSelfStoreRel, remoteGroupsFrom, groupForStoreRel, backfillLockLabels } from "../src/core/ConfigSyncCore";
+import { CoreContext, capture, captureWithActions, loadManifest, groupsForDevice, apply, applyWithActions, planImport, applyImport, PendingPull, ExternalStoreReader, pushExternal, ExternalStoreWriter, pluginIdForGroup, orderInstallsCatalogFirst, readGroups, writeGroups, deviceExcludedPluginIds, isSelfStoreRel, remoteGroupsFrom, groupForStoreRel, backfillLockLabels, excludeOptedOutItems } from "../src/core/ConfigSyncCore";
 import { parseSyncManifest } from "../src/core/manifest";
 import { SwitchList } from "../src/core/switchList";
 import { SELF_GROUP_NAME, selfPresetRules } from "../src/core/catalog";
@@ -1894,6 +1894,81 @@ describe("backfillLockLabels", () => {
   });
 });
 
+// C-#45 (spec 2026-08-10-c-livetest-batch22-device-optout.md §4): the tail heal must not
+// resurrect/write a lock entry for a group THIS device has opted out of, even when it's otherwise
+// perfectly resolvable — `excluded` is a bare extra skip check ahead of the existing entry lookup.
+describe("backfillLockLabels — excluded (C-#45)", () => {
+  const PLUGIN_DEMO_GROUP: SyncGroup = { name: "plugin-demo", path: "{configDir}/plugins/demo/data.json", type: "file", devices: "all" };
+
+  it("skips a label-less resolvable entry that is in the excluded set", () => {
+    const { plugins } = setup();
+    plugins.installedNames.set("demo", "Demo Plugin");
+    const lock: StoreLock = { capturedAt: "2026-01-01T00:00:00.000Z", groups: { "plugin-demo": { sourcePluginVersion: "1.0.0" } } };
+    const changed = backfillLockLabels([PLUGIN_DEMO_GROUP], plugins, lock, NO_CARRIER_LISTS, new Set(["plugin-demo"]));
+    expect(changed).toBe(false);
+    expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.0.0" }); // no label written
+  });
+
+  it("an omitted excluded set heals exactly as before (backward compatible)", () => {
+    const { plugins } = setup();
+    plugins.installedNames.set("demo", "Demo Plugin");
+    const lock: StoreLock = { capturedAt: "2026-01-01T00:00:00.000Z", groups: { "plugin-demo": { sourcePluginVersion: "1.0.0" } } };
+    const changed = backfillLockLabels([PLUGIN_DEMO_GROUP], plugins, lock, NO_CARRIER_LISTS);
+    expect(changed).toBe(true);
+    expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.0.0", label: "Demo Plugin" });
+  });
+
+  it("excluding an unrelated name leaves this group's heal unaffected", () => {
+    const { plugins } = setup();
+    plugins.installedNames.set("demo", "Demo Plugin");
+    const lock: StoreLock = { capturedAt: "2026-01-01T00:00:00.000Z", groups: { "plugin-demo": { sourcePluginVersion: "1.0.0" } } };
+    const changed = backfillLockLabels([PLUGIN_DEMO_GROUP], plugins, lock, NO_CARRIER_LISTS, new Set(["plugin-other"]));
+    expect(changed).toBe(true);
+    expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.0.0", label: "Demo Plugin" });
+  });
+});
+
+// C-#45 (spec §4): runner-level payload guard — the pure filter main.ts's captureItems/applyItems
+// call before a CaptureItem[]/ApplyItem[] ever reaches captureWithActions/applyWithActions.
+describe("excludeOptedOutItems (C-#45)", () => {
+  it("drops an item whose name is in the opted-out set", () => {
+    const items = [{ name: "a" }, { name: "b" }, { name: "c" }];
+    expect(excludeOptedOutItems(items, new Set(["b"]))).toEqual([{ name: "a" }, { name: "c" }]);
+  });
+
+  it("an empty opted-out set is a no-op", () => {
+    const items = [{ name: "a" }, { name: "b" }];
+    expect(excludeOptedOutItems(items, new Set())).toEqual(items);
+  });
+
+  it("works over ApplyItem/CaptureItem-shaped objects (extra fields pass through untouched)", () => {
+    const items = [
+      { name: "a", action: "none" as const },
+      { name: "b", action: "enable" as const },
+    ];
+    expect(excludeOptedOutItems(items, new Set(["b"]))).toEqual([{ name: "a", action: "none" }]);
+  });
+});
+
+// C-#45 (spec §4): capture()'s own tail-heal call threads optedOutForHeal straight into
+// backfillLockLabels — an end-to-end proof the two unit-tested pieces above actually wire together.
+describe("capture — optedOutForHeal threads through to the tail heal (C-#45)", () => {
+  it("an opted-out group's stale/label-less lock entry is carried forward but never healed", async () => {
+    const { io, plugins, ctx } = setup();
+    plugins.installedNames.set("demo", "Demo Plugin");
+    io.seed({
+      "cs/store.lock.json": JSON.stringify({ capturedAt: "2026-01-01T00:00:00.000Z", groups: { "plugin-demo": { sourcePluginVersion: "1.0.0" } } }),
+    });
+    await seedGroups(ctx, MANIFEST);
+    // Simulate the host-level payload filter (main.ts's captureItems): "plugin-demo" is opted out,
+    // so it's never in `names` — capture() carries its lock entry forward unchanged (existing
+    // partial-selection behavior), and the tail heal must not resolve its label either.
+    await capture(ctx, ["hotkeys"], undefined, undefined, new Set(["plugin-demo"]));
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, { sourcePluginVersion?: string; label?: string }> };
+    expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.0.0" }); // no label written
+  });
+});
+
 // 2026-08-09-c-livetest-batch15 (spec 2026-08-09-c-livetest-batch15-member-labels.md): the two
 // carrier lock entries (core-plugins, community-plugins) additionally carry memberLabels — a name
 // for every CURRENT store-list member this device can resolve, healed the same way the single
@@ -2557,6 +2632,10 @@ function makeMemberRulePlugin(io: MemFS, liveEnabled: string[]): MemberRulePlugi
     plugins: { manifests: {}, enabledPlugins: new Set<string>(liveEnabled), plugins: {} },
     workspace: { getLeavesOfType: () => [] },
     loadLocalStorage: () => null,
+    // saveLocalStorage (C-#45): refreshLocalStatus now reads/writes deviceId() (main.ts) via
+    // localStorage — a stub here, same as loadLocalStorage above, keeps refreshLocalStatus's
+    // background call quiet instead of an unrelated caught-and-logged TypeError.
+    saveLocalStorage: () => {},
   };
   instance.loadData = async () => ({ schemaVersion: 2, items: {}, remotes: [], bratPluginIndex: {} });
   instance.saveData = async () => {};

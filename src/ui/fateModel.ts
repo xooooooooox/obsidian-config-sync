@@ -17,6 +17,21 @@ export interface FateInput {
                                           // (C-#24) — never a store fact, just this device's rule;
                                           // only read when direction is null (a directional/
                                           // conflict family member always wins)
+  optedOutHere?: boolean;                 // C-#45: THIS device opted this row's own group out via
+                                          // the Stop-syncing menu's "On this device" — a DIFFERENT
+                                          // cause from excludedHere (a per-device choice, not a
+                                          // class rule) AND a DIFFERENT precedence: checked
+                                          // unconditionally, BEFORE conflict/direction (spec §1
+                                          // "renders inert" has no family-member-wins exception,
+                                          // unlike excludedHere's direction-null-only C-#24 gate —
+                                          // fix-round 2, a not-installed plugin derives a real
+                                          // "apply" direction independent of this fact, so gating
+                                          // it the same way as excludedHere made it unreachable).
+                                          // Same row treatment as excludedHere once it wins: glyph/
+                                          // sentence/chip/stageable identical, only the card CLAUSE
+                                          // differentiates (stateClauseText, SyncCenterView.ts).
+                                          // Optional so every pre-existing FateInput literal in
+                                          // this suite stays byte-identical.
   hasSettingsPayload: boolean;           // this run writes settings files
   versionAhead: { installed: string; stored: string } | null; // C-#37: installed plugin version
                                           // is newer than the store's recorded version (drift
@@ -44,6 +59,12 @@ export interface Fate {
   // (fateBucket), rather than a caller's separately-computed `nothingYet` guess that can
   // disagree with what rowFate actually decided.
   nothingYet: boolean;
+  // C-#45 §7 (fix-round 4): true exactly when this Fate IS the excluded presentation — either
+  // cause (optedOutHere OR C-#24 excludedHere), same "own fate field" precedent as nothingYet
+  // above, and for the same reason: fateBucket must know the row is excluded WITHOUT re-deriving
+  // the fact from FateInput (which it never receives — only a Fate), and without re-testing
+  // sentence text (fragile, and the two excluded-cause sentences are already identical by design).
+  excluded: boolean;
 }
 
 function effectiveTurnsOn(i: FateInput): boolean {
@@ -59,14 +80,29 @@ function effectiveTurnsOn(i: FateInput): boolean {
 
 function buildChips(i: FateInput): string[] {
   const chips: string[] = [];
-  if (i.direction === "apply" && !i.installed) chips.push("not installed here");
+  // C-#45 fix-round 2: an opted-out row is inert regardless of any derivable direction (spec §1 —
+  // stronger than C-#24, no direction-null gating) — root cause of the live failure (kickstart,
+  // Remotely Save): a not-installed plugin derives a real "apply" direction from the availability
+  // ladder independent of the opt-out fact, so `not installed here`/`stays off` (both describe
+  // what a RUN would do) leaked through even though the row is now forced to never run. Suppressed
+  // here the same way excludedHere's direction:null already made them unreachable for that cause.
+  // Fix-round 3 (live-verified on kickstart): the Runs-on ENABLEMENT-rule chips (`off here —
+  // your rule`/`on here — your rule`) are ALSO run-consequence facts — a Runs-on rule is moot
+  // while the whole item is ignored on this device, and showing it next to `your rule` reads as
+  // duplicate/conflicting attribution (the mock-final opted-out row shows only `your rule` +
+  // intrinsic facts). `desktop only`/`encrypted` stay unconditional — intrinsic item facts, not
+  // run consequences, consistent with how a C-#24 class-excluded row already renders them.
+  const inert = i.optedOutHere === true;
+  if (!inert && i.direction === "apply" && !i.installed) chips.push("not installed here");
   if (i.desktopOnly) chips.push("desktop only");
-  if (i.direction === null && i.excludedHere) chips.push("your rule");
-  if (i.carrierSynced && i.storeListOn === false && i.memberRule !== "always-here" && !i.locallyOn) {
+  if ((i.direction === null && i.excludedHere) || inert) chips.push("your rule");
+  if (!inert && i.carrierSynced && i.storeListOn === false && i.memberRule !== "always-here" && !i.locallyOn) {
     chips.push("stays off");
   }
-  if (i.memberRule === "never-here") chips.push("off here — your rule");
-  else if (i.memberRule === "always-here") chips.push("on here — your rule");
+  if (!inert) {
+    if (i.memberRule === "never-here") chips.push("off here — your rule");
+    else if (i.memberRule === "always-here") chips.push("on here — your rule");
+  }
   if (i.encrypted) chips.push("encrypted");
   return chips;
 }
@@ -126,22 +162,40 @@ export const NOTHING_YET_SENTENCE = "No settings yet";
 // work, not nothing-yet. Apply direction has no such invisible-count member, so an empty apply
 // verb set genuinely means there's nothing to do.
 function nothingYetFate(chips: string[]): Fate {
-  return { glyph: "—", sentence: NOTHING_YET_SENTENCE, chips, stageable: false, turnsOn: false, nothingYet: true };
+  return { glyph: "—", sentence: NOTHING_YET_SENTENCE, chips, stageable: false, turnsOn: false, nothingYet: true, excluded: false };
 }
 
 export function rowFate(i: FateInput): Fate {
   const chips = buildChips(i);
 
+  // C-#45 fix-round 2 (root cause of the live kickstart failure — Remotely Save stayed "Installs"
+  // in To apply after "On this device"): opt-out is STRONGER than C-#24 class exclusion (spec §1
+  // "renders inert" is unconditional) — an opted-out row is inert regardless of any derivable
+  // direction or conflict, so this runs BEFORE the conflict/directional branches below, not gated
+  // on direction===null the way excludedHere is. A not-installed plugin (or any row whose family
+  // derives a real direction from the availability ladder/companion changes independent of the
+  // opt-out fact) would otherwise never reach the direction===null branch that used to be the only
+  // place this fact was read — the fact was threaded into FateInput but could never win.
+  // excludedHere (class rule) is UNCHANGED below — it keeps its existing C-#24 direction-null-only
+  // precedence byte-identical, since a genuinely still-syncing family member legitimately outranks
+  // a class-scope mismatch on a DIFFERENT row of the same family; opt-out has no such family-wins
+  // debate (spec §1 is unconditional for this row's own group).
+  if (i.optedOutHere === true) {
+    return { glyph: "—", sentence: "Not synced on this device", chips, stageable: false, turnsOn: false, nothingYet: false, excluded: true };
+  }
+
   if (i.conflict) {
-    return { glyph: "⚠", sentence: "Changed on both sides", chips, stageable: false, turnsOn: false, nothingYet: false };
+    return { glyph: "⚠", sentence: "Changed on both sides", chips, stageable: false, turnsOn: false, nothingYet: false, excluded: false };
   }
 
   if (i.direction === null) {
     // C-#24: a rule-excluded item never masquerades as "In sync" — only when the family has no
     // directional/conflict member of its own (checked above) does the exclusion get to speak.
-    if (i.excludedHere) return { glyph: "—", sentence: "Not synced on this device", chips, stageable: false, turnsOn: false, nothingYet: false };
+    if (i.excludedHere) {
+      return { glyph: "—", sentence: "Not synced on this device", chips, stageable: false, turnsOn: false, nothingYet: false, excluded: true };
+    }
     if (i.nothingYet) return nothingYetFate(chips);
-    return { glyph: "—", sentence: "In sync", chips, stageable: false, turnsOn: false, nothingYet: false };
+    return { glyph: "—", sentence: "In sync", chips, stageable: false, turnsOn: false, nothingYet: false, excluded: false };
   }
 
   const stageable = true;
@@ -157,7 +211,7 @@ export function rowFate(i: FateInput): Fate {
     // `not-captured` companion — see nothingYetFate's comment) — never degrades. Generic,
     // count-free copy: specific counts already render through settingsVerb above.
     const sentence = capitalize(joined ?? "captures files");
-    return { glyph: "↑", sentence, chips, stageable, turnsOn: false, nothingYet: false };
+    return { glyph: "↑", sentence, chips, stageable, turnsOn: false, nothingYet: false, excluded: false };
   }
 
   const turnsOn = effectiveTurnsOn(i);
@@ -169,7 +223,7 @@ export function rowFate(i: FateInput): Fate {
   if (verb !== null) segments.push(verb);
   if (segments.length === 0) return nothingYetFate(chips);
   const sentence = capitalize(segments.join(" · "));
-  return { glyph: "↓", sentence, chips, stageable, turnsOn, nothingYet: false };
+  return { glyph: "↓", sentence, chips, stageable, turnsOn, nothingYet: false, excluded: false };
 }
 
 // C-#37: the three version-ahead on-capture card clauses (spec §3, copy final) — keyed off

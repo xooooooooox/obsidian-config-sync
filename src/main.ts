@@ -13,6 +13,7 @@ import {
   backfillLockLabels,
   captureWithActions, CaptureItem,
   deviceExcludedPluginIds,
+  excludeOptedOutItems,
   groupsForDevice,
   loadLock,
   loadManifest,
@@ -114,6 +115,13 @@ interface ConfigSyncSettings {
   // the only intended writer; rides the self item's whole-document self-propagation like `items`
   // (no per-field handling needed — see selfPresetRules).
   memberRules: Record<string, MemberRule>;
+  // The Stop-syncing menu's "On this device" rule (§1/§3): group name -> device ids that have
+  // opted THIS item out on their device. Fleet-shared (not stripped) so every device's own entry
+  // rides the self item's whole-document propagation like `items`/`memberRules`; a device only
+  // ever reads/writes its OWN id inside a given array — other devices' ids pass through untouched.
+  // The id itself is NOT a settings field (see the deviceId() method) — settings.deviceOptOuts is
+  // the fleet-shared half only, keyed by a value that lives entirely outside data.json.
+  deviceOptOuts: Record<string, string[]>;
 }
 
 interface RunHistorySettings {
@@ -142,6 +150,7 @@ const DEFAULT_SETTINGS: ConfigSyncSettings = {
   runHistory: { enabled: true, path: "", maxCount: 50, maxDays: 30 },
   localMembers: [],
   memberRules: {},
+  deviceOptOuts: {},
 };
 
 // config-sync's own registry item id (registry.ts: community plugin ids are prefixed "community:")
@@ -387,7 +396,11 @@ export default class ConfigSyncPlugin extends Plugin {
       const ctx = await this.coreContext();
       const manifest = await loadManifest(ctx);
       const device = Platform.isMobile ? ("mobile" as const) : ("desktop" as const);
-      const scoped = groupsForDevice(manifest, device);
+      // C-#45: an opted-out group never runs a real comparison on this device (spec §4) — dropped
+      // the same way groupsForDevice's own device-class filter already drops a scope-mismatched
+      // group, before status/ledger/the ribbon count ever see it.
+      const optedOut = this.deviceOptedOutGroupNames();
+      const scoped = groupsForDevice(manifest, device).filter((g) => !optedOut.has(g.name));
       const ledger = this.loadBaselines();
       const { statuses, updates } = await statusForGroups(ctx, scoped, ledger);
       this.localStatuses = statuses;
@@ -404,9 +417,11 @@ export default class ConfigSyncPlugin extends Plugin {
       // Startup heal (backfillLockLabels, spec 2026-08-08-c-livetest-batch6-remote-labels.md):
       // a fresh device with no local store yet is a no-op (lock === null) — the flag still
       // flips so a later pull's lock never gets a second heal attempt bolted onto this same load.
+      // `optedOut` (C-#45 spec §4): the heal must not resurrect/write a lock entry this device
+      // deliberately never captures.
       if (!this.lockLabelsHealed) {
         this.lockLabelsHealed = true;
-        if (lock !== null && backfillLockLabels(manifest.groups, host, lock, await readCarrierSwitchLists(ctx, manifest.groups))) {
+        if (lock !== null && backfillLockLabels(manifest.groups, host, lock, await readCarrierSwitchLists(ctx, manifest.groups), optedOut)) {
           try {
             await ctx.io.write(lockPath(ctx), JSON.stringify(lock, null, 2) + "\n");
           } catch (e) {
@@ -532,7 +547,7 @@ export default class ConfigSyncPlugin extends Plugin {
         const ctx = await this.coreContext();
         const manifest = await loadManifest(ctx);
         const device = Platform.isMobile ? ("mobile" as const) : ("desktop" as const);
-        const groups = groupsForDevice(manifest, device);
+        const groupsForThisClass = groupsForDevice(manifest, device);
         // C-#24 root cause: groupsForDevice drops a scope-mismatched group before it ever reaches
         // statusForGroups — comparing its content across device classes would be meaningless (the
         // store copy may belong to a different device's rule entirely), so it correctly never runs
@@ -542,7 +557,16 @@ export default class ConfigSyncPlugin extends Plugin {
         // "in-sync" status so computeFateInput's excludedHere (SyncCenterView.ts) can author the
         // honest sentence instead of the row vanishing.
         const excludedGroups = manifest.groups.filter((g) => g.devices !== "all" && g.devices !== device);
-        this.lastGroups = [...groups, ...excludedGroups];
+        // C-#45 (spec 2026-08-10-c-livetest-batch22-device-optout.md §4): a device-opted-out group
+        // IS this device's class (groupsForDevice never drops it) — a run must still skip it, so
+        // it's split out of the real run set the SAME way excludedGroups is, and gets the SAME
+        // synthetic-neutral-status treatment (batch-11 precedent) so rowFate's excluded branch
+        // (optedOutHere) can speak instead of a real — and here, meaningless, since this device
+        // never captures/applies it — comparison running.
+        const optedOutNames = this.deviceOptedOutGroupNames();
+        const groups = groupsForThisClass.filter((g) => !optedOutNames.has(g.name));
+        const optedOutGroups = groupsForThisClass.filter((g) => optedOutNames.has(g.name));
+        this.lastGroups = [...groups, ...excludedGroups, ...optedOutGroups];
         const ledger = this.loadBaselines();
         const { statuses, updates } = await statusForGroups(ctx, groups, ledger);
         this.localStatuses = statuses;
@@ -557,15 +581,21 @@ export default class ConfigSyncPlugin extends Plugin {
         const availability: Record<string, Availability> = {};
         for (const g of groups) availability[g.name] = availabilityForGroup(g, this.pluginHost(), lock);
         for (const g of excludedGroups) availability[g.name] = availabilityForGroup(g, this.pluginHost(), lock);
+        for (const g of optedOutGroups) availability[g.name] = availabilityForGroup(g, this.pluginHost(), lock);
         // Keep the status bar's snapshot in step with THIS compute (it used to be refreshed
         // only by refreshLocalStatus), and count with the center's own lens — main-section
         // rows only (statusBarStatuses) — so the bar can never disagree with the pills. Excluded
-        // groups stay out of this count (always-neutral, never up/down either way) — unrelated
-        // surface, out of C-#24's scope.
+        // groups (class rule AND device opt-out) stay out of this count (always-neutral, never
+        // up/down either way) — unrelated surface, out of C-#24's scope.
         this.presentedStatuses = statusBarStatuses(statuses, (name) => availability[name], Platform.isMobile);
         this.updateStatusIndicators();
         const excludedStatuses: GroupStatus[] = excludedGroups.map((g) => ({ group: g.name, state: "in-sync" }));
-        return { groups: [...groups, ...excludedGroups], statuses: [...statuses, ...excludedStatuses], availability };
+        const optedOutStatuses: GroupStatus[] = optedOutGroups.map((g) => ({ group: g.name, state: "in-sync" }));
+        return {
+          groups: [...groups, ...excludedGroups, ...optedOutGroups],
+          statuses: [...statuses, ...excludedStatuses, ...optedOutStatuses],
+          availability,
+        };
       },
       selfStatus: async (): Promise<SelfSyncInfo> => {
         const ctx = await this.coreContext();
@@ -683,6 +713,8 @@ export default class ConfigSyncPlugin extends Plugin {
       appendRunHistory: (kind, remote, results) => this.appendRunHistory(kind, remote, results),
       clearRunHistory: () => this.clearRunHistory(),
       stopSyncing: (groupName, deleteStore) => this.stopSyncing(groupName, deleteStore),
+      deviceOptedOut: (groupName) => this.isDeviceOptedOut(groupName),
+      setDeviceOptOut: (groupName, on) => this.setDeviceOptOut(groupName, on),
       storeFileCount: (groupName) => this.storeFileCount(groupName),
       listLeftoverStoreFiles: () => this.listLeftoverStoreFiles(),
       deleteLeftoverStoreFiles: (rels) => this.deleteLeftoverStoreFiles(rels),
@@ -740,7 +772,12 @@ export default class ConfigSyncPlugin extends Plugin {
       captureItems: async (items: CaptureItem[], onProgress?: ProgressFn) => {
         try {
           const ctx = await this.coreContext();
-          const results = await captureWithActions(ctx, items, onProgress);
+          // C-#45 (spec §4): runner-level guard, not just the UI's own stageable:false — an
+          // opted-out group cannot enter a capture payload even if a stale selection sneaks one
+          // in, and the tail heal (backfillLockLabels, threaded through here) must not write its
+          // lock entry either.
+          const optedOut = this.deviceOptedOutGroupNames();
+          const results = await captureWithActions(ctx, excludeOptedOutItems(items, optedOut), onProgress, optedOut);
           // Background: the panel reloads and rescans anyway — blocking here just pins the
           // progress bar at N/N through a second full scan.
           void this.refreshLocalStatus();
@@ -753,7 +790,9 @@ export default class ConfigSyncPlugin extends Plugin {
       applyItems: async (items: ApplyItem[], onProgress?: ProgressFn) => {
         try {
           const ctx = await this.coreContext();
-          const results = await applyWithActions(ctx, items, this.installPlugin(), onProgress);
+          // C-#45 (spec §4): same runner-level guard as captureItems — apply never installs/
+          // writes an opted-out group even given a stale selection.
+          const results = await applyWithActions(ctx, excludeOptedOutItems(items, this.deviceOptedOutGroupNames()), this.installPlugin(), onProgress);
           if (results.some((r) => r.group === SELF_GROUP_NAME && r.status !== "error")) {
             // The apply just rewrote this plugin's own settings file on disk — reload and
             // recompile before refreshing status so the running plugin picks up the new
@@ -956,6 +995,27 @@ export default class ConfigSyncPlugin extends Plugin {
 
   private setColdStartDismissed(v: boolean): void {
     this.app.saveLocalStorage("config-sync-coldstart-dismissed", v ? "1" : null);
+  }
+
+  // The Stop-syncing menu's "On this device" rule (C-#45, spec §1) is fleet-shared but keyed by
+  // device identity — this is that identity. MUST live in localStorage, never data.json: data.json
+  // travels wholesale (git-tracked vaults, remotely-save, manual copies), and a value trusted from
+  // an inherited data.json would let a bootstrapped machine silently claim the source machine's
+  // identity, corrupting deviceOptOuts attribution (fix-round 1, reviewer-caught CRITICAL — the
+  // settings-field version this replaced had exactly that hole). localStorage is per-vault,
+  // per-device, invisible to vault-wide sync (ledger.ts's own header comment; same primitive as
+  // `passphrase`/`loadBaselines`/`coldStartDismissed` above) — a wholesale copy leaves it empty on
+  // the new machine, so it generates and persists its own id there instead; the collision class is
+  // structurally closed, not merely mitigated. Deliberately NOT globalThis.crypto.randomUUID():
+  // this id is an opaque local label, never a secret or a security boundary, so
+  // Date.now()+Math.random() is ample entropy for distinguishing a user's own handful of devices,
+  // and avoids a new obsidianmd/no-global-this lint warning.
+  private deviceId(): string {
+    const existing: unknown = this.app.loadLocalStorage("config-sync-device-id");
+    if (typeof existing === "string" && existing !== "") return existing;
+    const fresh = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    this.app.saveLocalStorage("config-sync-device-id", fresh);
+    return fresh;
   }
 
   private pluginHost(): PluginHost {
@@ -1387,6 +1447,43 @@ export default class ConfigSyncPlugin extends Plugin {
     if (current === undefined) return;
     next[idx] = { ...current, devices };
     this.settings.customGroups = next;
+    await this.saveSettings();
+  }
+
+  // The Stop-syncing menu's "On this device"/"Sync on this device again" read (C-#45, spec §1/§3):
+  // true iff THIS device's own id (deviceId(), localStorage — never data.json) is in the group's
+  // opt-out array — never any other device's.
+  private isDeviceOptedOut(groupName: string): boolean {
+    return (this.settings.deviceOptOuts[groupName] ?? []).includes(this.deviceId());
+  }
+
+  // Every group name THIS device has opted out of — the guard set for the run/heal seams
+  // (captureItems/applyItems payload filtering, backfillLockLabels' tail heal, computeStatuses'
+  // synthetic-status treatment; C-#45 spec §4).
+  private deviceOptedOutGroupNames(): Set<string> {
+    const id = this.deviceId();
+    const out = new Set<string>();
+    for (const [name, ids] of Object.entries(this.settings.deviceOptOuts)) {
+      if (ids.includes(id)) out.add(name);
+    }
+    return out;
+  }
+
+  // The Stop-syncing menu's "On this device"/"Sync on this device again" write: adds/removes
+  // THIS device's own id from the group's opt-out array — never another device's, which is why
+  // this reads the existing array first rather than replacing it. C-#26 prune discipline: clearing
+  // the last id for a group drops that group's key entirely, and an empty map after that drops
+  // nothing further (already the zero value) — round-trip leaves data.json byte-identical to
+  // before the first opt-out.
+  async setDeviceOptOut(groupName: string, on: boolean): Promise<void> {
+    const id = this.deviceId();
+    const ids = new Set(this.settings.deviceOptOuts[groupName] ?? []);
+    if (on) ids.add(id);
+    else ids.delete(id);
+    const next = { ...this.settings.deviceOptOuts };
+    if (ids.size > 0) next[groupName] = [...ids];
+    else delete next[groupName];
+    this.settings.deviceOptOuts = next;
     await this.saveSettings();
   }
 
@@ -1890,8 +1987,19 @@ export default class ConfigSyncPlugin extends Plugin {
       return;
     }
     // Quick commands moved to the Ribbon Organizer plugin in 1.7.0; drop the stale key so the
-    // next save cleans data.json.
-    if (data !== null) delete data.quickCommands;
+    // next save cleans data.json. C-#45 fix-round 1: an earlier build of the device-opt-out
+    // feature (never released/committed) briefly stored the device identity as a settings field
+    // (`deviceId`) — a reviewer-caught CRITICAL, since data.json travels wholesale (git-tracked
+    // vaults, remotely-save, manual copies) and a value trusted from an inherited data.json would
+    // let a bootstrapped machine silently claim the source machine's identity. The identity now
+    // lives only in localStorage (see the deviceId() method below); dropping a stray leftover key
+    // here is ignore-and-prune, not migrate — the field never shipped to a real user (no release,
+    // no commit), so there is nothing meaningful to carry forward, only a local/dev-testing
+    // artifact to sweep off the next save.
+    if (data !== null) {
+      delete data.quickCommands;
+      delete data.deviceId;
+    }
     this.settings = Object.assign({}, DEFAULT_SETTINGS, data as Partial<ConfigSyncSettings> | null);
     // v2 shape revision (spec 2026-07-26-ui-feedback-round2-design.md §2.3): merge legacy
     // editor/files-links/other + appJson into items.app before anything compiles the settings

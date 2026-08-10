@@ -275,16 +275,26 @@ functions.
   through the same type-section/family grammar as the main list), and Capture/Apply/Pull/Push
   actions. Row content is memoized once per render (`deriveRow`) so the section partition,
   filter-pill counts and row painting all read the same computed `Fate`/`FateInput` instead of
-  re-deriving it per consumer.
+  re-deriving it per consumer. The card footer's single `⊘ Stop syncing` button (`renderStopSyncing`)
+  opens a Menu (`buildStopSyncingMenu`, C-#45) rather than the confirm modal directly — **On this
+  device** writes `deviceOptOuts` in place and re-renders, **Everywhere…** opens the unchanged
+  `StopSyncingModal`.
 - `fateModel.ts` — the fate-sentence engine: `rowFate(FateInput): Fate` is the pure function
   behind every row's verdict (spec `2026-08-06-sync-center-unified-grammar-design.md` §3's verb
   table) — glyph (`↓`/`↑`/`—`/`⚠`), sentence, chips (`not installed here`/`desktop only`/
-  `stays off`/`off here — your rule`/`on here — your rule`/`🔒 encrypted`/`your rule`),
-  `stageable` and `turnsOn`. A direction whose assembled verb set comes out empty (nothing this
-  run would actually change) degrades to the `nothingYet` presentation (`NOTHING_YET_SENTENCE`
-  = "No settings yet") rather than staying a bare, action-less glyph — "a direction with no
-  verbs" is unrepresentable by construction, not filtered out downstream. `effectiveFate`
-  (panelModel.ts) layers a Resolve choice or a fallback-ladder enablement bridge on top without
+  `stays off`/`off here — your rule`/`on here — your rule`/`🔒 encrypted`/`your rule` — the last
+  four are suppressed on an excluded row, C-#45 fix-rounds 2-3: run-consequence facts are moot
+  once the item is ignored on this device; `desktop only`/`encrypted` stay, intrinsic facts),
+  `stageable`, `turnsOn`, and `excluded` (C-#45 §7 — true for either exclusion cause,
+  `optedOutHere` OR `excludedHere`; `panelModel.ts`'s `fateBucket` reads this field directly
+  rather than re-deriving the cause). `optedOutHere` is checked UNCONDITIONALLY, before
+  conflict/direction (fix-round 2 — spec §1's "renders inert" has no family-member-wins
+  exception); `excludedHere` keeps its original C-#24 direction-null-only precedence. A direction
+  whose assembled verb set comes out empty (nothing this run would actually change) degrades to
+  the `nothingYet` presentation (`NOTHING_YET_SENTENCE` = "No settings yet") rather than staying a
+  bare, action-less glyph — "a direction with no verbs" is unrepresentable by construction, not
+  filtered out downstream. `effectiveFate` (panelModel.ts) layers a Resolve choice or a
+  fallback-ladder enablement bridge on top without
   re-deriving the base fate.
 - `SettingTab.ts` — the settings tab (General / Obsidian / Core plugins / Community plugins /
   Beta / Advanced / Remotes). `renderRegistryCards`/`renderItemCard`/`renderCardExpansion` are the
@@ -318,9 +328,11 @@ functions.
   `matchesQualifiers` / `suggest` / `applySuggestion`, plus the `QualifierAutocomplete` DOM widget.
 - `panelModel.ts` — the pure view-model layer over `fateModel.ts`, unrelated to the settings-tab
   card renderer above. `fateBucket(fate)`/`fateBucketCounts` derive the one `RowBucket`
-  (`conflict`/`apply`/`capture`/`ok`/`none`) every consumer — section partition (active vs. the
-  in-sync/no-settings folds), filter-pill counts, filter visibility, sidebar badges — reads, so a
-  row can never disagree with itself across those surfaces. `TYPE_SECTION_ORDER`/
+  (`conflict`/`apply`/`capture`/`excluded`/`ok`/`none` — `excluded` added C-#45 §7, read off
+  `Fate.excluded`, positioned after the stageable checks and before `nothingYet`) every consumer —
+  section partition (active vs. the in-sync/excluded/no-settings folds), filter-pill counts,
+  filter visibility, sidebar badges, header pills — reads, so a row can never disagree with itself
+  across those surfaces. `TYPE_SECTION_ORDER`/
   `TYPE_SECTION_TITLES`/`typeSectionForRow` fix the four sections (Obsidian/Core plugins/
   Community plugins/Your folders — beta folds into Community, custom groups into Your folders);
   `sectionCountLabel` renders a section head's trailing `N` / `N of M`. `familyRollup` derives one
@@ -413,7 +425,15 @@ functions.
   carries the vault, and the baseline is exactly the fact a vault-wide sync must not carry — what
   THIS device last saw in sync. `coldStartDismissed`/`setColdStartDismissed` persist the cold-start
   banner's dismissal the same way, under `config-sync-coldstart-dismissed`, cleared whenever self
-  state settles back to `insync` so a future genuine cold start shows the banner again.
+  state settles back to `insync` so a future genuine cold start shows the banner again. `deviceId()`
+  (C-#45, spec `2026-08-10-c-livetest-batch22-device-optout.md` §1) is the same primitive again,
+  under `config-sync-device-id`: read-generate-persist in one call (not a separate `ensure*` step
+  at load, since there is nothing to migrate into) — the KEY the fleet-shared `deviceOptOuts`
+  settings field (Data model below) is keyed by MUST be a value a wholesale `data.json` copy
+  (git-tracked vault, remotely-save, manual copy) cannot carry along, or a bootstrapped machine
+  would silently inherit the source machine's identity and corrupt attribution — `localStorage`
+  structurally can't travel that way, where a `selfPresetRules` strip on a settings field only
+  ever promises "not on THIS device's own next capture," not "immune to an inbound copy."
 
 **Brand assets**
 - `assets/` — brand SVGs: `icon.svg` (24×24, `currentColor`, iconize-importable), `logo.svg`
@@ -448,6 +468,20 @@ Changes must preserve these:
   that group (`withContractLocals` + `readStoreContractLocals`, applied identically to both sides so
   they can't desync) — an un-adopted device can't publish device-local values downstream; a contract
   `local` overrides a colliding local rule and promotes a plain-mode group to fields.
+- **A per-device CHOICE can be fleet-shared without being device-local, as long as it's keyed by
+  device identity — and that identity must live OUTSIDE data.json, not merely be strip-marked
+  inside it.** `deviceOptOuts` (C-#45) travels with the self item like any other shared field —
+  the safety property isn't "never leaves the device" (that's `localMembers`'s job), it's "a
+  device only ever acts on its OWN key". An earlier version of this feature (never released) kept
+  the key itself, `deviceId`, as a `selfPresetRules`-stripped settings field — a reviewer-caught
+  CRITICAL: data.json travels **wholesale** outside this plugin's own field-strip machinery
+  entirely (git-tracked vaults, remotely-save, a manual copy), and that code trusted any
+  non-empty inherited value, so a bootstrapped machine silently claimed the source machine's
+  identity and corrupted `deviceOptOuts` attribution. `deviceId` (`main.ts`'s `deviceId()` method)
+  now lives in **localStorage** — the same "per-vault, per-device, invisible to vault-wide sync"
+  primitive `passphrase`/`loadBaselines`/`coldStartDismissed` already use — which a wholesale copy
+  necessarily leaves empty on the new machine, closing the collision class structurally rather
+  than mitigating it.
 - **Enabled = loaded OR persisted** (`pluginRuntimeEnabled`). Reading `enabledPlugins` alone
   misclassifies a running-but-unpersisted plugin as disabled.
 - **Self-apply never disables/reloads Config Sync.** Applying a plugin's settings cycles it
@@ -504,6 +538,19 @@ Changes must preserve these:
     the user pinned to **This device**. A locked `selfPresetRules` local strip keeps it out of the
     shared self store copy (like `remotes`/`rootPath`), so the choice never travels and a pull can't
     erase it; `enabledOn` no longer carries `"local"`.
+  - `memberRules: Record<string, MemberRule>` — the Runs-on menu's stored rule (`all`/`desktop`/
+    `mobile`/`always-here`/`never-here`) per plugin item id; fleet-shared (not stripped), applied
+    identically on every device that pulls it — `always-here`/`never-here` force a member on/off
+    regardless of the shared switch-list content, they are not keyed by a specific device.
+  - `deviceOptOuts: Record<string, string[]>` — the Stop-syncing menu's **On this device** rule
+    (spec `2026-08-10-c-livetest-batch22-device-optout.md`): group name → device ids that opted
+    that group out. Fleet-shared (not stripped) so every device's own entry rides the self item's
+    propagation like `items`/`memberRules`, but — unlike `memberRules` — each device only ever
+    reads/writes its OWN id in a given array; other devices' ids pass through untouched. A group in
+    this map is excluded from THIS device's runs (capture/apply payload assembly and the capture
+    lock-label heal both skip it) while its row stays visible, rendering exactly like a
+    devices-class-excluded row (`groupExcludedHere`/C-#24) — same glyph/sentence/chip, a distinct
+    card clause (`FateInput.optedOutHere`, `fateModel.ts`/`SyncCenterView.ts`'s `stateClauseText`).
   - `customGroups: CustomGroupConfig[]` (= `SyncGroup[]`) — freeform Advanced-tab rules ("Custom
     rules" and adopted "Discovered files") with no owning registry item; compiled by
     `compileCustomGroups` (see `core/registry.ts` above) alongside the registry-driven groups.
