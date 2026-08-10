@@ -1888,10 +1888,12 @@ export class SyncCenterView extends ItemView {
         ? mobileSectionCountLabel(rows.length, visible.length, filtered)
         : sectionCountLabel(rows.length, visible.length, filtered),
     });
-    // Core/Community's carrier chip: inline in the head on desktop (unchanged); on mobile it
-    // drops to its own indented second line below instead, so the head stays one line.
+    // Core/Community's carrier chip: inline in the head on every platform (batch-21 spec §2,
+    // revising batch-20's mobile second-line drop) — desktop keeps the full-text pill,
+    // renderCarrierChip itself switches to an icon-only form on mobile so the head still fits
+    // on one line without a dedicated meta line.
     const carrierId: EnablementCarrier | null = ts === "core" ? "core-plugins" : ts === "community" ? "community-plugins" : null;
-    if (carrierId !== null && !Platform.isMobile) this.renderCarrierChip(head, carrierId);
+    if (carrierId !== null) this.renderCarrierChip(head, carrierId);
     const checkable = visible.filter((r) => this.fateFor(r).stageable);
     const staged = checkable.filter((r) => this.selected.has(r.group.name)).length;
     // The checked/indeterminate select-all checkbox plus the global footer already carry this
@@ -1919,13 +1921,6 @@ export class SyncCenterView extends ItemView {
         }
         this.render(this.renderGen);
       });
-    }
-    // C-#41 (spec §2): the carrier chip's mobile home — its own indented second line under the
-    // head, full text, one for every render (not gated on `open`) since it's part of the head,
-    // not the collapsible card.
-    if (carrierId !== null && Platform.isMobile) {
-      const metaLine = fold.createDiv({ cls: "config-sync-section-meta" });
-      this.renderCarrierChip(metaLine, carrierId);
     }
     // Ledger C-#22: collapse/expand flips the DOM in place — `is-open` class, chevron glyph, and
     // the card itself (built just-in-time / torn down on close) — never a full this.render().
@@ -2055,13 +2050,26 @@ export class SyncCenterView extends ItemView {
   // The Core/Community section header chip (spec §2): toggles whether the on/off list itself is a
   // synced item — the only remaining home of that on/off card as a configurable item. Writes the
   // same field the Settings tab's per-card sync toggle does (SyncCenterHost.setItemSyncEnabled).
+  // Batch-21 (spec §2, option A): desktop keeps the full-text pill, byte-identical to before —
+  // the mobile branch below is additive only. Mobile swaps the text for a bare Lucide toggle
+  // glyph (`toggle-right` synced/green, `toggle-left` not-synced/muted) so the section head stays
+  // one line; the click/keydown → Menu wiring and the full copy (now carried as tooltip +
+  // aria-label rather than inline text) are otherwise identical to the desktop chip.
   private renderCarrierChip(head: HTMLElement, carrierId: EnablementCarrier): void {
     const synced = this.groups.some((g) => g.name === carrierId);
-    const chip = head.createSpan({
-      cls: `config-sync-carrierchip${synced ? " is-synced" : ""}`,
-      text: synced ? "on/off synced ✓" : "on/off not synced",
-      attr: { role: "button", tabindex: "0" },
-    });
+    const tooltip = synced ? "on/off synced ✓" : "on/off not synced";
+    const chip = Platform.isMobile
+      ? head.createSpan({ cls: `config-sync-carrierchip is-icon${synced ? " is-synced" : ""}`, attr: { role: "button", tabindex: "0" } })
+      : head.createSpan({
+          cls: `config-sync-carrierchip${synced ? " is-synced" : ""}`,
+          text: tooltip,
+          attr: { role: "button", tabindex: "0" },
+        });
+    if (Platform.isMobile) {
+      setIcon(chip, synced ? "toggle-right" : "toggle-left");
+      setTooltip(chip, tooltip);
+      chip.setAttr("aria-label", tooltip);
+    }
     const openMenu = (x: number, y: number): void => {
       const menu = new Menu();
       menu.addItem((item) =>
@@ -2226,11 +2234,13 @@ export class SyncCenterView extends ItemView {
     });
     const chev = row.createSpan({ cls: "config-sync-row-chevron", text: expanded ? "▾" : "▸" });
     this.renderRuleName(row, group.name, group.label);
-    // C-#41 (spec §2, mobile only): 2+ chips push to their own indented meta line under the row
-    // (built below, after the row's own children) so the row itself stays one line; 0–1 chip
-    // renders inline exactly like desktop. Desktop always takes this inline branch — Platform
-    // .isMobile is false — so the row's DOM here is untouched by the mobile work.
-    const mobileMetaChips = Platform.isMobile && fate.chips.length >= 2;
+    // C-#43/#44 (batch-21 spec §1, revising batch-20's ≥2 threshold): ANY chip-bearing row (1+
+    // chips) pushes its chips to their own indented meta line under the row (built below, after
+    // the row's own children) — the constant mobile row skeleton is always chevron + name +
+    // spacer + sentence + checkbox on line 1, chips (if any) on line 2, never mixed. Chipless
+    // rows render nothing here and stay single-line. Desktop always takes the inline branch below
+    // — Platform.isMobile is false — so the row's DOM here is untouched by the mobile work.
+    const mobileMetaChips = Platform.isMobile && fate.chips.length >= 1;
     if (!mobileMetaChips) for (const chip of fate.chips) this.renderFateChip(row, chip);
     row.createDiv({ cls: "config-sync-rule-spacer" });
     // Ledger C-#9: the fate sentence/glyph repeats the card's own "On apply"/"On capture" clause
@@ -2263,8 +2273,8 @@ export class SyncCenterView extends ItemView {
       });
     }
 
-    // C-#41 (spec §2, mobile only): the indented second line the 2+-chip branch above deferred to
-    // — a sibling of `row`, landing right after it and before the drawer so it reads as the row's
+    // C-#43/#44 (batch-21 spec §1, mobile only): the indented second line the 1+-chip branch above
+    // deferred to — a sibling of `row`, landing right after it and before the drawer so it reads as the row's
     // own line 2. Never a third line (axiom §0.2/§3): the whole group degrades to icon-only +
     // tooltip together, same mechanism as the desktop narrow-pane case below. Overflow evaluation
     // is NOT registered per-row here (report fix-round-2) — `refreshChipOverflow` walks every

@@ -199,9 +199,12 @@ noted):
   or clip — a row's chip GROUP degrades together to icon-only + tooltip once it overflows,
   never a mix of full and icon-only chips; the fate sentence is the only sacrificial
   element, ellipsizing first and giving way to the bare direction glyph at minimum —
-  chevron, checkbox, and count pill never shrink. On mobile a row with 2+ chips moves them
-  to their own indented second line under the name/sentence line (never a third line) so
-  the row itself stays one line either way.
+  chevron, checkbox, and count pill never shrink. **Mobile row skeleton (batch-21, revising
+  batch-20's ≥2 rule):** line 1 is always exactly chevron + name + spacer + sentence +
+  checkbox; ANY chip-bearing row (1+ chips) moves its chips to their own indented second line
+  under it (never a third line — the whole chip group degrades to icon-only + tooltip
+  together instead) so line 1 never carries chips and chipless rows stay single-line either
+  way.
   **The object is the family:** a parent item plus every companion group it owns
   (Appearance's `themes`/`snippets` presets, or any item's Settings-drawer `+ Add folder`
   companions) collapses into the parent's row — one row per family, never one per
@@ -250,11 +253,14 @@ noted):
   header toggles collapse. A trailing count pill reads `N of M` under a filter; Core/Community
   carry a header chip `on/off synced ✓` / `on/off not synced` — the only remaining home of
   the on/off carrier as a configurable item, edited via a small popover (`Sync on/off` /
-  `Stop syncing on/off`). On mobile (spec 2026-08-09-c-livetest-batch20 §2) the head stays
-  one line — count pill compacts `N of M` to `N/M`, the per-section "N selected" hint drops
-  (the section checkbox's checked/indeterminate state and the global footer already carry
-  it) — and the carrier chip moves to its own indented second head line, full text, under
-  the title; desktop keeps all three inline, unchanged. Section select-all/clear targets actionable visible rows only —
+  `Stop syncing on/off`). On mobile the head stays one line — count pill compacts `N of M`
+  to `N/M`, the per-section "N selected" hint drops (the section checkbox's checked/
+  indeterminate state and the global footer already carry it). **Carrier chip (batch-21
+  spec §2, option A — revises batch-20's second-line drop):** the chip stays inline in the
+  head on every platform; on mobile it swaps its full-text pill for a bare Lucide toggle
+  glyph (`toggle-right` synced/green, `toggle-left` not-synced/muted, `renderCarrierChip`)
+  carrying the same full copy as tooltip + `aria-label` instead of inline text — same click/
+  keydown → `Menu` wiring, same popover. Desktop keeps the full-text pill, unchanged. Section select-all/clear targets actionable visible rows only —
   excludes the self row, in-sync, nothing-yet, and unresolved-conflict rows. Per-section
   trailing fold lines (`config-sync-unchanged`) aggregate only their own section's `N in
   sync ▸` / `N with nothing to sync yet ▸`, expandable in place. Switching into a filter
@@ -282,7 +288,13 @@ noted):
   (`min-width: 0`, no fixed narrow width — ellipsis is a last resort, never a first one,
   while the row still has room). A row that builds no value renders nothing at all: no
   separator, no reserved height (ledger C-#5) — built off-DOM first, appended only once
-  non-empty. Standardized row set, in this order, each omitted when not applicable: `On
+  non-empty. **Mobile stacking (batch-21 spec §3, C-#43/#44):** each fieldrow's label and
+  value stack vertically instead — label on its own line (same muted small-caps style) above
+  a full-width value — CSS-only (`flex-direction: column`, the label span and value div are
+  already siblings), fixing the narrow-viewport clipping this batch closes. Resolve's
+  segmented control spans the full stacked value width on mobile, 50/50 (`flex: 1` per
+  button, centered text) instead of content-sized, so neither option clips at 375px. Desktop
+  keeps the fixed-label-column layout above, unchanged. Standardized row set, in this order, each omitted when not applicable: `On
   apply` / `On capture` / `State` (the fate sentence expanded to a full clause — install
   source, update versions, capture consequence) · `Files` (direction-aware entries, `+` /
   `↑` / deletion, `view ▸` / `diff ▸`) · `Resolve` (conflict rows only — segmented `Use

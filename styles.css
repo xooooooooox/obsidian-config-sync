@@ -1119,9 +1119,25 @@ body.is-mobile .config-sync-strip-meta .config-sync-report-pills { margin-left: 
    remaining home of that list as a configurable item once its row dissolves into this chip. */
 .config-sync-carrierchip { border: 1px solid var(--background-modifier-border); border-radius: 999px; padding: 1px 8px; font-size: var(--font-ui-smaller); color: var(--text-muted); cursor: pointer; white-space: nowrap; }
 .config-sync-carrierchip.is-synced { color: var(--color-green); border-color: rgba(var(--color-green-rgb), 0.4); }
-/* C-#41: the carrier chip's mobile home — an indented second head line, full text, under the
-   title (spec §2). Desktop keeps the chip inline in `.config-sync-section-head`, untouched. */
-body.is-mobile .config-sync-section-meta { margin-left: var(--size-4-5); }
+/* C-#44 (batch-21 spec §2, option A — revises C-#41's second-line drop): the carrier chip's
+   mobile form is a bare icon-only control (`toggle-right`/`toggle-left`, JS renderCarrierChip)
+   living INLINE on the section head, same as desktop's pill — no dedicated meta line anymore.
+   Border/pill chrome drops for the icon form; color language (muted / green when synced) carries
+   over from the base rule above. */
+body.is-mobile .config-sync-carrierchip.is-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  border: none;
+  border-radius: var(--radius-s);
+  padding: 3px 4px;
+  color: var(--text-muted);
+}
+body.is-mobile .config-sync-carrierchip.is-icon:hover,
+body.is-mobile .config-sync-carrierchip.is-icon:focus-visible { background: var(--background-modifier-hover); }
+body.is-mobile .config-sync-carrierchip.is-icon.is-synced { color: var(--color-green); }
+body.is-mobile .config-sync-carrierchip.is-icon svg { width: 16px; height: 16px; }
 /* Expanded-card rows (spec §4, ledger C-#2): every row is a fixed-width muted label with its
    value IMMEDIATELY adjacent — never spread edge-to-edge with the value floating far right. Key
    column (ledger C-#6): nowrap + sized to the longest key ("After install") so a key never wraps
@@ -1131,6 +1147,14 @@ body.is-mobile .config-sync-section-meta { margin-left: var(--size-4-5); }
 .config-sync-cardrow { display: flex; align-items: flex-start; gap: var(--size-4-2); }
 .config-sync-cardrow > .config-sync-explabel-inline { flex: 0 0 15ch; white-space: nowrap; padding-top: 1px; }
 .config-sync-cardval { flex: 1; min-width: 0; }
+/* C-#43/#44 (batch-21 spec §3): expanded-card fieldrows stack vertically on mobile — label on
+   its own line (same muted uppercase style, untouched) above a full-width value, replacing
+   desktop's fixed 15ch label column that clipped Resolve's segmented control on narrow phones.
+   DOM already has label span + value div as siblings (renderCardKeyRow) — CSS-only, per spec
+   §3's preference: flip the flex axis, drop the fixed label width, let the value stretch full
+   width. Desktop's side-by-side rule above is untouched. */
+body.is-mobile .config-sync-cardrow { flex-direction: column; align-items: stretch; gap: var(--size-4-2); }
+body.is-mobile .config-sync-cardrow > .config-sync-explabel-inline { flex: none; padding-top: 0; }
 /* After install / Enablement (ledger C-#10) are the two rule controls left on a textual menu —
    their fallback options have no glyph vocabulary to lean on. Ellipsis (ledger C-#8) is a last
    resort for a genuinely narrow viewport, never a first resort while `.config-sync-cardval` still
@@ -1622,27 +1646,46 @@ body.is-mobile .config-sync-center-head > :last-child { margin-left: auto; }
   font-size: var(--font-ui-smaller);
   padding: 2px 10px;
 }
+/* C-#43 (batch-21 spec §3): Resolve's `.config-sync-seg` is this rule's only consumer — mobile
+   spans it the full stacked card-value width, 50/50 split (`flex: 1` per button, centered text),
+   touch padding bumped to ~8px vertical, so neither "Use theirs"/"Keep mine" clips at 375px (the
+   real-phone report this batch fixes). Desktop's content-sized inline-flex pair is untouched. */
+body.is-mobile .config-sync-report-files .config-sync-seg { display: flex; width: 100%; }
 body.is-mobile .config-sync-report-files .config-sync-seg-btn {
+  flex: 1;
   min-height: 32px;
-  padding: 4px 12px;
+  padding: var(--size-4-2) var(--size-4-1);
+  text-align: center;
 }
 body.is-mobile .config-sync-report-files { font-size: var(--font-ui-small); }
 
-/* ── Mobile chip structure (C-#41, spec 2026-08-09-c-livetest-batch20) ──
-   Row two-line structure: 0–1 chip renders inline on line 1 exactly like desktop; 2+ chips move
-   to their own indented line 2 (JS branch, SyncCenterView.ts renderItemRow) so the row itself
-   never grows past one line. Never a third line — the whole chip group degrades to icon-only +
+/* ── Mobile chip structure (C-#43/#44, batch-21 spec §1/§4 — revises C-#41/batch-20) ──
+   Constant row skeleton: line 1 is always chevron + name + spacer + sentence + checkbox; ANY
+   chip-bearing row (1+ chips, revised from batch-20's 2+) moves its chips to their own indented
+   line 2 (JS branch, SyncCenterView.ts renderItemRow) so line 1 never carries chips. Chipless
+   rows stay single-line. Never a third line — the whole chip group degrades to icon-only +
    tooltip together (same chipOverflowObserver/`.config-sync-chips-compact` mechanism as desktop,
    applied to this line instead of the row) rather than wrapping. The pair reads as ONE row: line
    1 (`.config-sync-hub-row`) hands its own trailing hairline off to line 2 when a meta line
-   follows it, so the two lines aren't split by a border between them. */
-body.is-mobile .config-sync-hub-row:has(+ .config-sync-row-chipmeta) { border-bottom: none; }
+   follows it, so the two lines aren't split by a border between them.
+   Spacing (spec §4, design intent in px, mapped to nearest `--size-*` token — no exact-px token
+   exists for either target): row-group rhythm 22px → 24px (`2×var(--size-4-3)`, this rule's own
+   top/bottom padding on a chipless row, or the top padding of the row that FOLLOWS a chipmeta
+   line); chip meta line's own gap under ITS row 7px → 6px (`var(--size-2-3)`, the `:has()` rule
+   below — higher specificity than the general row padding, so it wins on that one row's bottom
+   only); chipmeta's own trailing gap before the next row bumped to `var(--size-4-3)` (12px) to
+   complete that 24px rhythm; 20px left inset unchanged (`var(--size-4-5)`, already exact). */
+body.is-mobile .config-sync-hub-row { padding: var(--size-4-3) 0; }
+body.is-mobile .config-sync-hub-row:has(+ .config-sync-row-chipmeta) {
+  padding-bottom: var(--size-2-3);
+  border-bottom: none;
+}
 body.is-mobile .config-sync-row-chipmeta {
   display: flex;
   align-items: center;
   gap: var(--size-4-2);
   margin-left: var(--size-4-5);
-  padding-bottom: var(--size-4-2);
+  padding-bottom: var(--size-4-3);
   border-bottom: 1px solid var(--background-modifier-border);
   overflow: hidden;
   white-space: nowrap;
