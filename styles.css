@@ -604,6 +604,12 @@ body.is-mobile.config-sync-mobile-statusbar .status-bar {
 .config-sync-side-badge .config-sync-action-icon,
 .config-sync-pill .config-sync-action-icon,
 .config-sync-fpill-short .config-sync-action-icon { margin-right: 2px; }
+/* C-#50 follow-up: the ok/excluded/none filter pills' short (mobile/compact) form reuses
+   .config-sync-fold-ic (foldIcons.ts's renderFoldCount) instead of a text glyph — same inline
+   vertical-align/spacing treatment .config-sync-fpill-short already gives .config-sync-action-icon
+   above, so both icon families sit on the same baseline in this row. The base .config-sync-fold-ic
+   rule (used by the trailing-fold lines, already flex-aligned there) is untouched. */
+.config-sync-fpill-short .config-sync-fold-ic { margin-right: 2px; vertical-align: -0.12em; }
 .config-sync-action-icon.is-up { color: var(--color-orange); }
 .config-sync-action-icon.is-down { color: var(--interactive-accent); }
 .config-sync-action-icon.is-push { color: var(--color-pink); }

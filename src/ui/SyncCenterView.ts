@@ -69,7 +69,7 @@ import { renderReportContent, renderReportPills, stripHeader } from "./reportCon
 import { RunRecord, RunKind, RunStatus, worstStatus, formatRunTime, stopSyncDesc, deleteLeftoverDesc } from "../core/runHistory";
 import { ACTION_ICON, ACTION_COLOR_CLASS, renderActionIcon, renderActionCount, type SyncAction } from "./actionIcons";
 import { FATE_CHIP_ICON } from "./fateChipIcons";
-import { renderFoldIcon, type FoldKind } from "./foldIcons";
+import { renderFoldIcon, renderFoldCount, type FoldKind } from "./foldIcons";
 // SCOPE_LABELS aliased: this file already declares its own SCOPE_LABELS (sidebar category
 // labels, see below) for an unrelated domain.
 import { FILE_SCOPE_MENU_UNAVAILABLE_TEXT, FILE_SCOPE_OPTIONS, RUNS_ON_ICONS, SCOPE_ICONS, SCOPE_LABELS as RULE_SCOPE_LABELS, scopeCycleTooltip } from "./itemCard";
@@ -1921,25 +1921,32 @@ export class SyncCenterView extends ItemView {
         : pillPool;
       const counts = this.presentedCounts(pillRows);
       // Mobile shows the short glyph form (定稿 B) — the panel's icon language (↑ ↓ ✓ ○) —
-      // so all five pills always fit one line; desktop keeps the full labels.
+      // so all five pills always fit one line; desktop keeps the full labels. C-#50 follow-up: the
+      // ok/excluded/none short forms render the same fixed-size Lucide icon the fold lines use
+      // (foldIcons.ts) instead of a text glyph — this was the one place the three glyphs sat side
+      // by side, so the pre-task optical mismatch survived here after the fold lines themselves
+      // were fixed.
       const allLabel = this.searching() ? `All ${pillRows.length} / ${pillPool.length}` : `All ${pillPool.length}`;
-      const defs: { key: PanelFilter; label: string; short: string; action?: SyncAction; count?: number }[] = [
+      const defs: { key: PanelFilter; label: string; short: string; action?: SyncAction; foldKind?: FoldKind; count?: number }[] = [
         { key: "all", label: allLabel, short: allLabel },
         { key: "capture", label: `To capture ${counts.up}`, short: "", action: "capture", count: counts.up },
         { key: "apply", label: `To apply ${counts.down}`, short: "", action: "apply", count: counts.down },
-        { key: "ok", label: `In sync ${counts.ok}`, short: `✓ ${counts.ok}` },
+        { key: "ok", label: `In sync ${counts.ok}`, short: "", foldKind: "insync", count: counts.ok },
         // C-#45 §7 (fix-round 4, mockup option A): "Not synced here" — deliberately not "Skipped"
         // (that word is already run-event vocabulary, `⚠ update skipped` ConfigSyncCore.ts, and
         // this is a standing state, not a run outcome). Empty state: N=0 renders neither this pill
         // nor the matching fold (spec's explicit rule, matching ✓/○'s fold-suppression precedent).
-        ...(counts.excluded > 0 ? [{ key: "excluded" as const, label: `Not synced here ${counts.excluded}`, short: `⊘ ${counts.excluded}` }] : []),
-        { key: "none", label: `No settings yet ${counts.none}`, short: `○ ${counts.none}` },
+        ...(counts.excluded > 0
+          ? [{ key: "excluded" as const, label: `Not synced here ${counts.excluded}`, short: "", foldKind: "excluded" as const, count: counts.excluded }]
+          : []),
+        { key: "none", label: `No settings yet ${counts.none}`, short: "", foldKind: "nosettings", count: counts.none },
       ];
       for (const d of defs) {
         const pill = pillRow.createEl("button", { cls: `config-sync-fpill${this.filter === d.key ? " is-active" : ""}`, attr: { "aria-label": d.label } });
         pill.createSpan({ cls: "config-sync-fpill-long", text: d.label });
         const shortEl = pill.createSpan({ cls: "config-sync-fpill-short" });
         if (d.action !== undefined) renderActionCount(shortEl, d.action, d.count ?? 0);
+        else if (d.foldKind !== undefined) renderFoldCount(shortEl, d.foldKind, d.count ?? 0);
         else shortEl.setText(d.short);
         pill.addEventListener("click", () => {
           // Transition into a non-"all" filter: expand every section once so the pill's hits are

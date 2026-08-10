@@ -32,3 +32,13 @@ export function renderFoldIcon(parent: HTMLElement, kind: FoldKind): HTMLSpanEle
   setIcon(span, FOLD_ICON[kind]);
   return span;
 }
+
+// Appends the fold icon followed by `count` — the filter pills' short (mobile/compact) form for
+// the ok/excluded/none pills (C-#50 follow-up: the same optical mismatch the fold lines had,
+// surviving in the one place these three glyphs sat side by side). Unlike renderActionCount
+// (actionIcons.ts), the count is ALWAYS appended, never suppressed at 0 — the pre-existing short
+// text (`✓ ${n}` etc.) never omitted a zero either, and that must stay byte-for-byte.
+export function renderFoldCount(parent: HTMLElement, kind: FoldKind, count: number): void {
+  renderFoldIcon(parent, kind);
+  parent.appendText(String(count));
+}
