@@ -206,6 +206,15 @@ export interface SyncCenterHost {
   selfStatus(): Promise<SelfSyncInfo>;
   coldStartDismissed(): boolean;
   setColdStartDismissed(v: boolean): void;
+  // Non-null when this device's data.json was written by a newer Config Sync (spec
+  // 2026-08-11-data-model-hardening.md §4.1): the plugin refuses every write while it is set, and
+  // the panel says so instead of quietly offering runs that would be refused one by one.
+  schemaStop(): { found: number } | null;
+  // The same predicate the settings tab asks, and asking IS the refusal (the notice fires on the
+  // user's gesture). §4.2b: a flow that will be refused refuses BEFORE it opens — a modal that
+  // takes a decision from the user and only then declines is the same defect as a pull that lets
+  // them resolve conflicts it was never going to apply.
+  settingsWritable(): boolean;
   resolvedPath(group: SyncGroup): string;
   displayName(group: string, storedLabel?: string): string;
   displayParts(group: string, storedLabel?: string): GroupDisplayParts;
@@ -242,14 +251,17 @@ export interface SyncCenterHost {
   loadRunHistory(): Promise<RunRecord[]>;
   appendRunHistory(kind: RunKind, remote: string | null, results: GroupResult[]): Promise<void>;
   clearRunHistory(): Promise<void>;
-  stopSyncing(groupName: string, deleteStore: boolean): Promise<string[]>; // deleted store paths (display form)
+  // Deleted store paths (display form), or `null` when the action was refused — the same signal
+  // the runs use (see setLastRun). `[]` means "it ran and deleted nothing", which is a real
+  // outcome the caller records in the run history, so a refusal must not share that value (§4.2b).
+  stopSyncing(groupName: string, deleteStore: boolean): Promise<string[] | null>;
   // The Stop-syncing menu's per-device layer (C-#45, spec §1/§3): read = has THIS device opted
   // this group out; write = set/clear THIS device's own opt-out (never another device's).
   deviceOptedOut(groupName: string): boolean;
   setDeviceOptOut(groupName: string, on: boolean): Promise<void>;
   storeFileCount(groupName: string): Promise<number>;
   listLeftoverStoreFiles(): Promise<{ rel: string; name: string; path: string; size: number }[]>;
-  deleteLeftoverStoreFiles(rels: string[]): Promise<void>;
+  deleteLeftoverStoreFiles(rels: string[]): Promise<string[] | null>; // deleted rels, or null when refused (§4.2b)
   appendActionHistory(entry: { kind: RunKind; desc: string; changed: number; removed?: string[]; deletedFiles?: string[] }): Promise<void>;
   // Bidirectional divergence for a switch-list group (exceptions masked); null when either
   // side is missing or unparseable. `masked` is the augmented exception set itself — the
@@ -1874,7 +1886,20 @@ export class SyncCenterView extends ItemView {
   }
 
   private renderItemMode(main: HTMLElement): void {
-    if (this.selfInfo !== null && showColdStartBanner(this.selfInfo.state, [...this.statuses.values()], this.host.coldStartDismissed())) {
+    // §4.1 refusal, in the cold-start banner's own structure with no primary action: there is
+    // nothing to click here, and no dismiss either — this is a standing condition the user can
+    // only clear by updating Config Sync, not a nudge to be waved away. It takes the banner slot
+    // outright: while it holds, "this device hasn't synced yet" is not the story to tell.
+    // The wording is §4.1's final copy — the same sentence `SCHEMA_FUTURE_NOTICE`
+    // (core/settingsMigration.ts) carries into every refused write; the split below is only the
+    // bold-lead presentation the cold-start banner already uses, so the two must stay identical.
+    const schemaStop = this.host.schemaStop();
+    if (schemaStop !== null) {
+      const banner = main.createDiv({ cls: "config-sync-coldstart-banner" });
+      const txt = banner.createDiv({ cls: "config-sync-coldstart-text" });
+      txt.createSpan({ cls: "config-sync-coldstart-head", text: "These settings were written by a newer Config Sync. " });
+      txt.createSpan({ text: "Update Config Sync on this device to open them. Nothing has been changed." });
+    } else if (this.selfInfo !== null && showColdStartBanner(this.selfInfo.state, [...this.statuses.values()], this.host.coldStartDismissed())) {
       const banner = main.createDiv({ cls: "config-sync-coldstart-banner" });
       const txt = banner.createDiv({ cls: "config-sync-coldstart-text" });
       txt.createSpan({ cls: "config-sync-coldstart-head", text: "This device hasn't synced with the store yet. " });
@@ -2949,11 +2974,12 @@ export class SyncCenterView extends ItemView {
 
   private async deleteLeftovers(rels: string[]): Promise<void> {
     const paths = this.leftovers.filter((l) => rels.includes(l.rel)).map((l) => l.path);
-    await this.host.deleteLeftoverStoreFiles(rels);
+    const deleted = await this.host.deleteLeftoverStoreFiles(rels);
+    if (deleted === null) return; // refused (§4.2b) — no history entry, and nothing to re-read
     await this.host.appendActionHistory({
       kind: "delete-leftover",
-      desc: deleteLeftoverDesc(rels.length),
-      changed: rels.length,
+      desc: deleteLeftoverDesc(deleted.length),
+      changed: deleted.length,
       deletedFiles: paths,
     });
     await this.reload();
@@ -2980,10 +3006,14 @@ export class SyncCenterView extends ItemView {
   }
 
   private async openStopSyncing(r: StatusRow): Promise<void> {
+    // §4.2b: refuse before the modal opens, not after the user has decided in it. `stopSyncing`
+    // still refuses on its own — this is the courtesy, that is the guarantee.
+    if (!this.host.settingsWritable()) return;
     const label = this.host.displayName(r.group.name, r.group.label);
     const count = await this.host.storeFileCount(r.group.name);
     new StopSyncingModal(this.app, label, count, async (deleteStore) => {
       const deleted = await this.host.stopSyncing(r.group.name, deleteStore);
+      if (deleted === null) return; // refused (§4.2b) — the group is still synced, so nothing is recorded or deselected
       await this.host.appendActionHistory({
         kind: "stop-sync",
         desc: stopSyncDesc(label, deleted.length),

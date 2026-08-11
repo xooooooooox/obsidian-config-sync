@@ -20,6 +20,7 @@
 - **随时可见状态的 Sync Center** —— 每一行都会用大白话说清自己的命运（*开启 · 安装 · 应用设置*）、归一化的 JSON 差异、一个 *this device* 状态胶囊，以及每一类待办动作的总数。（[导览](docs/GUIDE.md#the-sync-center)）
 - **安装引擎** —— 本设备上版本落后、被禁用或未安装的插件可以在 Apply 过程中一并更新、启用或安装，并锁定到 capture 时的版本。（[规则](docs/GUIDE.md#availability-facts-and-the-install-engine)）
 - **Remotes（桌面端）** —— 针对 git 仓库或另一个 vault 执行 pull/push，并提供逐文件差异预览。（[详情](docs/GUIDE.md#transport)）
+- **可以一台一台地更新** —— 由更新版本的 Config Sync 写下的设置或 store 会被明确拒绝并给出提示，绝不会被重置或覆盖；而某台设备自己的选择（它把哪些条目排除在同步之外）就留在那台设备上，pull 抹不掉它。（[详情](docs/GUIDE.md#transport)）
 - **随处可搜索** —— 两个搜索框都支持带自动补全的 `key:value` 限定符，可与纯文本自由组合。
 - **状态栏** —— ↑ capture / ↓ apply 加上每个 remote 各自的 ⇡ push / ⇣ pull 计数一目了然；点击即可打开 Sync Center。
 - **移动端友好** —— capture、apply 与 Sync Center 在手机上均可正常工作；store 本身就是普通的 vault 内容，因此任何笔记同步工具都能携带它。

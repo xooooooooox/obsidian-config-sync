@@ -57,7 +57,13 @@ export interface ItemCompanion {
 export interface ItemConfig {
   enabled: boolean;
   settingsFile?: ItemSettingsFile;
-  companions: ItemCompanion[];
+  // Optional since spec 2026-08-11-data-model-hardening.md §5.2, READERS ONLY: an empty list is
+  // what "no companion folders" already means, and almost every real entry is exactly that (107 of
+  // 108 in a live vault), so every read below is `?? []` and an absent key is legal. Writing the
+  // empty array CONTINUES for now — removing a field is a two-phase change, and a build that
+  // reads `cfg.companions` unguarded is still out there; phase 2 stops writing it once a tolerant
+  // build is the fleet's floor.
+  companions?: ItemCompanion[];
   enabledOn?: RuleScope;
 }
 
@@ -83,15 +89,29 @@ export class CompileError extends Error {
   }
 }
 
+// Still returns `companions: []`, deliberately: this is the base every new entry is built from
+// (the settings tab's `itemConfig`, `itemConfigWithEnabledOn`, adopt's self-item enable,
+// `stopSyncing`), and §5.2 phase 1 must persist the shape an older build can read — an item
+// enabled for the FIRST time after this release included, or the compatibility this phasing buys
+// leaks away through the newest entries. Phase 2 drops it from every construction site at once.
 export function emptyItemConfig(): ItemConfig {
   return { enabled: false, companions: [] };
+}
+
+// The base every WRITE of an existing entry starts from. `items[id] ?? emptyItemConfig()` is not
+// enough on its own: a stored entry that already lacks `companions` (a hand edit, or a document
+// from the future build that stops writing it) would spread straight back out still missing the
+// key, and this build must never persist an entry an older one cannot read (§5.2 phase 1). Reads
+// don't need this — they are all `?? []`. Pure; the stored value always wins.
+export function itemConfigForWrite(existing: ItemConfig | undefined): ItemConfig {
+  return existing === undefined ? emptyItemConfig() : { ...emptyItemConfig(), ...existing };
 }
 
 // The exact write the in-place "where it runs" menu performs (spec 2026-07-28 §4): keep the
 // card's existing config, force the card on (a rule on a disabled card would read back as
 // "local"), pin enabledOn.
 export function itemConfigWithEnabledOn(existing: ItemConfig | undefined, scope: "desktop" | "mobile"): ItemConfig {
-  return { ...(existing ?? emptyItemConfig()), enabled: true, enabledOn: scope };
+  return { ...itemConfigForWrite(existing), enabled: true, enabledOn: scope };
 }
 
 // ── Registry construction ───────────────────────────────────────────────────────────────────
@@ -283,7 +303,7 @@ function compileSingleFile(id: string, def: ItemDef, cfg: ItemConfig): SyncGroup
 
 function compileCompanions(itemId: string, cfg: ItemConfig): SyncGroup[] {
   if (!cfg.enabled) return []; // card off → its file AND its companions exit sync together
-  return cfg.companions.filter((c) => c.enabled).map((c) => ({ name: basename(c.path), path: c.path, type: "dir", devices: c.scope }));
+  return (cfg.companions ?? []).filter((c) => c.enabled).map((c) => ({ name: basename(c.path), path: c.path, type: "dir", devices: c.scope }));
 }
 
 export interface GroupDisplayParts {
@@ -304,7 +324,7 @@ export function parentCardLabel(groupName: string, defs: ItemDef[], settings: Co
   for (const def of defs) {
     const cfg = configFor(settings, def.id);
     if (!cfg.enabled) continue;
-    if (cfg.companions.some((c) => c.enabled && basename(c.path) === groupName)) return def.label;
+    if ((cfg.companions ?? []).some((c) => c.enabled && basename(c.path) === groupName)) return def.label;
   }
   return presetCompanionFallback(groupName, defs, settings);
 }
@@ -320,7 +340,7 @@ function presetCompanionFallback(groupName: string, defs: ItemDef[], settings: C
     if (def.presetCompanions === undefined) continue;
     if (!def.presetCompanions.some((p) => basename(p.path) === groupName)) continue;
     const cfg = configFor(settings, def.id);
-    if (cfg.companions.some((c) => basename(c.path) === groupName)) continue; // already configured — no fallback
+    if ((cfg.companions ?? []).some((c) => basename(c.path) === groupName)) continue; // already configured — no fallback
     return def.label;
   }
   return null;
@@ -513,7 +533,7 @@ export function companionConflict(path: string, defs: ItemDef[], settings: Compi
     for (const preset of def.presetCompanions ?? []) {
       if (groupStorePath(preset.path).toLowerCase() === key) return def.label;
     }
-    for (const companion of cfg.companions) {
+    for (const companion of cfg.companions ?? []) {
       if (groupStorePath(companion.path).toLowerCase() === key) return def.label;
     }
   }
@@ -542,7 +562,7 @@ export function companionNameConflict(
   const names = reservedCustomGroupNames(defs);
   for (const def of defs) {
     const cfg = configFor(settings, def.id);
-    for (const c of cfg.companions) {
+    for (const c of cfg.companions ?? []) {
       if (excludeCompanion !== null && excludeCompanion.itemId === def.id && excludeCompanion.path === c.path) continue;
       names.add(basename(c.path));
     }

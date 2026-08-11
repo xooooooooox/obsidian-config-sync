@@ -1,8 +1,10 @@
 import { FileIO, ensureParentDir, isJunkPath, listFilesRecursive, pruneEmptyDirsUnder } from "./io";
-import { FieldRule, GroupResult, hasChanges, StoreLock, SyncGroup, SyncManifest } from "./types";
+import { FieldRule, GroupResult, hasChanges, StoreLock, StoreLockEntry, SyncGroup, SyncManifest } from "./types";
 import { basename, groupStorePath, relativeTo, resolveGroupByStoreRel, sidecarStoreSuffix } from "./pathing";
-import { parseStoreLock, parseSyncManifest, validateSyncManifest } from "./manifest";
-import { applyTransform, captureTransform, classPatterns, contentUnchanged, excludingPerItem, stripPatterns } from "./modes";
+import { assertStoreLockVersionUnderstood, derivedLockCapturedAt, lockEntryTail, lockLineage, lockTail, lockWatermark, parseStoreLock, parseSyncManifest, storeLockVersion, STORE_LOCK_HASH_PREFIX, STORE_LOCK_VERSION, validateSyncManifest } from "./manifest";
+import { isFutureSchemaDocument, SCHEMA_FUTURE_APPLY_MESSAGE } from "./settingsMigration";
+import { applyTransform, captureTransform, classPatterns, contentUnchanged, excludingPerItem, groupNeedsPassphrase, isWholeFileEncrypted, stripPatterns } from "./modes";
+import { hashDirSide, hashFileSide, sha256Hex } from "./ledger";
 import { classifyMerge, MergeConflict, MergePlan } from "./merge";
 import { coreSettingsIds, SELF_GROUP_NAME } from "./catalog";
 import { isPlainObject, keyMatchesAny } from "./sanitize";
@@ -464,6 +466,18 @@ export function backfillLockLabels(
   carrierLists: Record<"core-plugins" | "community-plugins", SwitchList | null>,
   excluded?: ReadonlySet<string>
 ): boolean {
+  // §4.3, and the fourth lock writer (round-4 review N1): the heal's caller rewrites the whole
+  // file from this object, so a lock from a newer build must not be mutated here at all. The gate
+  // lives on the MUTATION rather than on the caller because the two callers differ: main.ts's
+  // startup heal writes only when this returns true, so refusing the mutation refuses that write;
+  // capture discards the boolean and writes unconditionally, and is safe instead because capture
+  // gates the local lock itself before it touches anything (see its own §4.3 check). Startup is
+  // the case that needs this one — it runs with no user action behind it and, unlike the §4.2
+  // case, with a data.json this build reads perfectly, so `schemaStop` is null and round 1's guard
+  // says nothing. Deliberately NOT left to §3.1's carrying parser to make the round trip lossless:
+  // that would rest the invariant on the parser instead of on the gate, which is the argument
+  // §3.1 exists to make.
+  if (storeLockVersion(lock) > STORE_LOCK_VERSION) return false;
   let changed = false;
   for (const group of groups) {
     if (excluded?.has(group.name) === true) continue;
@@ -534,17 +548,43 @@ export async function capture(
   optedOutForHeal?: ReadonlySet<string>
 ): Promise<GroupResult[]> {
   const manifest = await loadManifest(ctx);
+  // §4.3, the STORE side of the gate (task-3 review I3): the local store lives inside the vault,
+  // and the vault is synced by other tools (git, Remotely Save, a file-sync service) — so a newer
+  // build on ANOTHER device can put a v3 lock into this store with no pull ever happening. Capture
+  // is about to replace that lock wholesale; refused here, before the first group is written, or
+  // `version: 2` would silently discard whatever v3 recorded. Read once and reused below.
+  const lockRaw = (await ctx.io.exists(lockPath(ctx))) ? await ctx.io.read(lockPath(ctx)) : null;
+  assertStoreLockVersionUnderstood(lockRaw);
   // Capture is the lock's writer and its only healing path: a previous lock that is
-  // missing, old-format, or corrupt must never block capture — it is rewritten below.
+  // missing, old-format, or corrupt must never block capture — it is rewritten below. (A lock
+  // from the FUTURE is the one exception, and it threw above: unreadable is not the same as
+  // "readable, and newer than us".)
   let previous: StoreLock | null = null;
   try {
-    previous = await loadLock(ctx);
+    previous = lockRaw === null ? null : parseStoreLock(lockRaw);
   } catch {
     previous = null;
   }
   const selected = names === undefined ? null : new Set(names);
   const toProcess = manifest.groups.filter((g) => selected === null || selected.has(g.name));
-  const lock: StoreLock = { capturedAt: ctx.now(), groups: {} };
+  const groups: StoreLock["groups"] = {};
+  // A captured group's entry (§6): this build's own fields, computed fresh, laid over the part of
+  // the previous entry this build does not write. The rebuild used to be a bare literal, which
+  // stripped every field a NEWER build had recorded and republished the loss to the fleet on the
+  // next push — task-2 finding I-1, and the reason §3.1's carrying parser alone is theatre. The
+  // known fields are still REPLACED rather than merged: dropping `desktopOnly` when a plugin stops
+  // being desktop-only, or `label` when it can no longer be resolved, is deliberate. `hash` is
+  // omitted (never blanked) when captureGroup could not fingerprint the group's store copy.
+  //
+  // Key ORDER matches what parseStoreLock re-emits — known fields, then the v2 pair, then the tail.
+  // That is the whole point of the parser's fixed order (see its own comment): the lock is a file in
+  // a vault that other tools sync and version, so a capture and a parse-then-write of the same entry
+  // must produce the same bytes or every round trip churns the vault's history.
+  const capturedEntry = (name: string, own: StoreLockEntry, hash: string | null): StoreLockEntry => {
+    const entry: StoreLockEntry = { ...own, capturedAt: ctx.now() };
+    if (hash !== null) entry.hash = hash;
+    return { ...entry, ...lockEntryTail(previous?.groups[name]) };
+  };
   const results: GroupResult[] = [];
   // Computed ONCE for the whole run (never per group) — the store contract's `local` field
   // patterns, unioned into each group before it reaches captureGroup (Fix B, see
@@ -554,11 +594,11 @@ export async function capture(
   for (const group of manifest.groups) {
     if (selected !== null && !selected.has(group.name)) {
       const prev = previous?.groups[group.name];
-      if (prev !== undefined) lock.groups[group.name] = refreshLockDesktopOnly(prev, group, ctx.plugins); // not captured this run — carry forward
+      if (prev !== undefined) groups[group.name] = refreshLockDesktopOnly(prev, group, ctx.plugins); // not captured this run — carry forward
       continue;
     }
     onProgress?.(done, toProcess.length, group.name);
-    const result = await captureGroup(ctx, withContractLocals(group, contractLocals.get(group.name) ?? []), stagedMembersByName?.[group.name]);
+    const { result, storeHash } = await captureGroup(ctx, withContractLocals(group, contractLocals.get(group.name) ?? []), stagedMembersByName?.[group.name]);
     done++;
     const pluginId = pluginIdForGroup(group);
     if (pluginId !== null) {
@@ -573,7 +613,7 @@ export async function capture(
           const entry = ctx.plugins.isDesktopOnly(pluginId)
             ? { sourcePluginVersion: version, desktopOnly: true }
             : { sourcePluginVersion: version };
-          lock.groups[group.name] = label !== null ? { ...entry, label } : entry;
+          groups[group.name] = capturedEntry(group.name, label !== null ? { ...entry, label } : entry, storeHash);
           // Version-only refresh: content is byte-identical but the store recorded an older
           // version (local > store drift). captureGroup produces no file change, so without this
           // the run report reads "no changes" even though the store's recorded version changed.
@@ -587,14 +627,14 @@ export async function capture(
         }
       } else {
         const prev = previous?.groups[group.name];
-        if (prev !== undefined) lock.groups[group.name] = refreshLockDesktopOnly(prev, group, ctx.plugins); // errored capture keeps the last known version
+        if (prev !== undefined) groups[group.name] = refreshLockDesktopOnly(prev, group, ctx.plugins); // errored capture keeps the last known version
       }
     } else if (result.status !== "error") {
       // Only core-plugin groups (daily-notes, templates, …) resolve to a runtime name — Obsidian
       // cards (app/appearance/hotkeys…) and switch-list carriers have none to record.
       const label = coreSettingsIds().has(group.name) ? ctx.plugins.getCorePluginName(group.name) : null;
       const entry = { sourceAppVersion: ctx.plugins.getAppVersion() };
-      lock.groups[group.name] = label !== null ? { ...entry, label } : entry;
+      groups[group.name] = capturedEntry(group.name, label !== null ? { ...entry, label } : entry, storeHash);
     }
     results.push(result);
   }
@@ -605,8 +645,31 @@ export async function capture(
   // dropped (e.g. plugin uninstalled) by the loop above.
   const registryNames = new Set(manifest.groups.map((g) => g.name));
   for (const [name, entry] of Object.entries(previous?.groups ?? {})) {
-    if (!registryNames.has(name)) lock.groups[name] = entry;
+    if (!registryNames.has(name)) groups[name] = entry;
   }
+  // §6: the top-level stamp is DERIVED from the entries now, not from the clock — it says how fresh
+  // this store's content is, and a capture that touched two items must not claim the rest were
+  // captured with them. A full capture still lands on ctx.now(), because every entry carries it.
+  const capturedAt = derivedLockCapturedAt(groups, [], ctx.now());
+  // Field order follows parseStoreLock's, for the same byte-stability reason as the entries above:
+  // the parser emits `capturedAt`, `groups`, then the carried tail — and `version`/`syncedWatermark`
+  // ride that tail (they are read through narrowing helpers, never validated in).
+  const lock: StoreLock = {
+    // §6: the top-level stamp is DERIVED from the entries now, not taken from the clock.
+    capturedAt,
+    groups,
+    // §4.3: every lock this build writes declares its format version, so a build that gains a new
+    // lock field can tell "written before that field existed" from "written by something newer".
+    version: STORE_LOCK_VERSION,
+    // Lineage, not freshness: only a pull moves the watermark (§6). A capture that bumped it would
+    // tell every other device "I have seen a state newer than yours" on the strength of a purely
+    // local change, which is the false "the store has newer settings" this release is removing. A
+    // store that has never pulled starts its own lineage at its own capture time.
+    syncedWatermark: previous !== null ? lockWatermark(previous) : capturedAt,
+    // The lock's own unknown TOP-LEVEL keys (§6, task-2 finding I-1): capture rewrites the whole
+    // file, so without this a field a newer build recorded at the top level is stripped here.
+    ...lockTail(previous),
+  };
   // Tail heal (see backfillLockLabels doc comment): catches every locally-resolvable entry this
   // run didn't itself capture a label for, carried-forward or otherwise — including a carrier's
   // own memberLabels, which this same call writes fresh from the store content this run just
@@ -617,14 +680,81 @@ export async function capture(
   return results;
 }
 
-async function captureGroup(ctx: CoreContext, group: SyncGroup, stagedMembers?: string[]): Promise<GroupResult> {
+// A group's store copy is a stable fingerprint only when two devices holding the SAME settings put
+// the same bytes in the store. Encryption breaks that by design — every envelope carries its own
+// salt and nonce, so two devices that captured identical plaintext hold different ciphertext — and a
+// hash that always differs is worse than no hash at all: it would report every encrypted item as a
+// permanent difference. Those groups publish `capturedAt` alone and are dated, not fingerprinted
+// (spec §6: leave the value absent rather than emit one that cannot match).
+function storeContentIsHashable(group: SyncGroup): boolean {
+  return !groupNeedsPassphrase(group) && !isWholeFileEncrypted(group);
+}
+
+const DEVICE_CLASSES = ["desktop", "mobile"] as const;
+
+// One file group's WHOLE store copy: the base file and the per-device-class sidecars beside it.
+// A sidecar is store content like any other — it holds a class's shared values, it travels with the
+// store, and it genuinely changes — so a hash that saw only the base would let two stores differing
+// only in a sidecar read as identical (review N2). That is a false NEGATIVE, and the comparison now
+// trusts an equal hash outright, so it would silently withhold a pull the user should have been
+// offered. It is stable across devices for the same reason the base is: a device writes only its OWN
+// class's sidecar, but the store holds both and both travel, so two devices whose stores agree hash
+// the same files. Per-file hashing is ledger.ts's canonical one (switch lists as sets, everything
+// else as bytes), so "equal" keeps meaning what "in-sync" already means here.
+async function fileStoreCopyHash(groupName: string, base: string, sidecars: Record<"desktop" | "mobile", string | null>): Promise<string> {
+  const parts = [await hashFileSide(groupName, base, "store")];
+  for (const cls of DEVICE_CLASSES) {
+    const content = sidecars[cls];
+    if (content !== null) parts.push(`${sidecarStoreSuffix(cls)}\n${await sha256Hex(content)}`);
+  }
+  return STORE_LOCK_HASH_PREFIX + (await sha256Hex(parts.join("\n")));
+}
+
+// The same hash gathered from the store on DISK. A pull has to use this one: the merged state it
+// produces exists nowhere but on disk. Capture gathers from the content it just wrote instead — it
+// is the author, and its own bytes are what ANOTHER device's capture of the same settings would
+// produce, which a historical formatting difference on disk would not be. The hashing rule is shared,
+// so the two can only disagree where the disk genuinely differs — and that direction is safe: it
+// surfaces a pull, it never hides one. null = not fingerprintable (ciphertext) or nothing there.
+async function storeCopyHashOnDisk(ctx: CoreContext, group: SyncGroup): Promise<string | null> {
+  if (!storeContentIsHashable(group)) return null;
+  const store = `${storeDir(ctx)}/${groupStorePath(group.path)}`;
+  if (group.type === "file") {
+    if (!(await ctx.io.exists(store))) return null;
+    const sidecars: Record<"desktop" | "mobile", string | null> = { desktop: null, mobile: null };
+    for (const cls of DEVICE_CLASSES) {
+      const p = store + sidecarStoreSuffix(cls);
+      if (await ctx.io.exists(p)) sidecars[cls] = await ctx.io.read(p);
+    }
+    return fileStoreCopyHash(group.name, await ctx.io.read(store), sidecars);
+  }
+  if (!(await ctx.io.exists(store))) return null;
+  const files = (await listFilesRecursive(ctx.io, store)).filter((f) => !isJunkPath(f));
+  if (files.length === 0) return null;
+  const entries: { rel: string; content: string }[] = [];
+  for (const f of files) entries.push({ rel: relativeTo(store, f), content: await ctx.io.read(f) });
+  return STORE_LOCK_HASH_PREFIX + (await hashDirSide(entries));
+}
+
+// `storeHash`: the canonical hash of the store content this run produced, computed from what
+// captureGroup already holds rather than by reading the store back (see storeCopyHashOnDisk for why
+// the author's own bytes are the better source). When a write is skipped because nothing changed,
+// this hashes the content capture WOULD have written, which is the canonical form of what is already
+// there — and canonical is the point, since the value only ever meets another DEVICE's hash of the
+// same settings. null = not fingerprintable (ciphertext, see storeContentIsHashable) or nothing was
+// written this run.
+async function captureGroup(
+  ctx: CoreContext,
+  group: SyncGroup,
+  stagedMembers?: string[]
+): Promise<{ result: GroupResult; storeHash: string | null }> {
   const real = localRealPath(group.name, group.path, ctx.configDir);
   const store = `${storeDir(ctx)}/${groupStorePath(group.path)}`;
   const result = emptyResult(group.name, false);
   if (!(await ctx.io.exists(real))) {
     result.status = "error";
     result.messages.push(`nothing to capture yet: ${real} does not exist in this vault`);
-    return result;
+    return { result, storeHash: null };
   }
   if (group.type === "file") {
     const plainLocalContent = await ctx.io.read(real);
@@ -669,10 +799,28 @@ async function captureGroup(ctx: CoreContext, group: SyncGroup, stagedMembers?: 
         result.changes.deleted.push(basename(sidecarPath));
       }
     }
-    return result;
+    // Base AND both sidecars (see fileStoreCopyHash). The own-class one is what this run just wrote —
+    // `t.ownScope` null means it was deleted, i.e. absent; the other class's is read as it stands,
+    // which is exactly what the store holds and what another device would hash.
+    let storeHash: string | null = null;
+    if (storeContentIsHashable(effGroup)) {
+      const sidecars: Record<"desktop" | "mobile", string | null> = { desktop: null, mobile: null };
+      for (const cls of DEVICE_CLASSES) {
+        if (SWITCH_LIST_GROUPS.has(group.name)) break; // switch lists never carry sidecars (see the write above)
+        if (cls === ctx.deviceClass) {
+          sidecars[cls] = t.ownScope;
+          continue;
+        }
+        const p = store + sidecarStoreSuffix(cls);
+        if (await ctx.io.exists(p)) sidecars[cls] = await ctx.io.read(p);
+      }
+      storeHash = await fileStoreCopyHash(group.name, t.content, sidecars);
+    }
+    return { result, storeHash };
   }
   const sourceFiles = await listFilesRecursive(ctx.io, real);
   const sourceRels = sourceFiles.map((f) => relativeTo(real, f)).filter((rel) => !isJunkPath(rel));
+  const storeEntries: { rel: string; content: string }[] = [];
   for (const rel of sourceRels) {
     const target = `${store}/${rel}`;
     const plainLocalContent = await ctx.io.read(`${real}/${rel}`);
@@ -683,6 +831,7 @@ async function captureGroup(ctx: CoreContext, group: SyncGroup, stagedMembers?: 
       );
     } else {
       await writeClassified(ctx, target, plainLocalContent, rel, result);
+      storeEntries.push({ rel, content: plainLocalContent });
     }
   }
   if (await ctx.io.exists(store)) {
@@ -697,7 +846,10 @@ async function captureGroup(ctx: CoreContext, group: SyncGroup, stagedMembers?: 
     }
     await pruneEmptyDirsUnder(ctx.io, store);
   }
-  return result;
+  // The pruning above leaves the store holding exactly `sourceRels`, so the entries collected in the
+  // loop ARE the store's content — no read-back needed.
+  const storeHash = storeContentIsHashable(group) ? STORE_LOCK_HASH_PREFIX + (await hashDirSide(storeEntries)) : null;
+  return { result, storeHash };
 }
 
 export async function apply(ctx: CoreContext, groupNames: string[], onProgress?: ProgressFn): Promise<GroupResult[]> {
@@ -1028,6 +1180,18 @@ async function applyGroup(ctx: CoreContext, group: SyncGroup, stagedMembers?: st
     result.messages.push(`store has no data for this group (expected at ${store}) — capture it from the source vault first`);
     return result;
   }
+  // Version gate, BEFORE the write (spec 2026-08-11-data-model-hardening.md §4.2, invariant II.3).
+  // Adopt/self-apply writes the store's data.json onto this device and only then reloads, so a
+  // check on the reload side arrives after the local document is already gone — this one runs
+  // while the local file is still intact and simply fails the item, with the local file
+  // byte-identical. Only the self item carries a schemaVersion; other items in the same run are
+  // unaffected (applyWithActions isolates per item).
+  if (group.name === SELF_GROUP_NAME && group.type === "file" && isFutureSchemaDocument(await ctx.io.read(store))) {
+    result.status = "error";
+    result.needsAppReload = false;
+    result.messages.push(SCHEMA_FUTURE_APPLY_MESSAGE);
+    return result;
+  }
   // Disabling a plugin while we rewrite its data.json stops it clobbering the applied file,
   // then we re-enable it to load fresh. NEVER do this for config-sync itself: disabling the
   // running plugin mid-apply reloads it and wipes the Sync Center. The self group's data.json
@@ -1178,6 +1342,18 @@ export async function planImport(ctx: CoreContext, reader: ExternalStoreReader, 
   const files = await reader.listFiles();
   const remoteGroups = await remoteGroupsFrom(ctx, reader, files);
   const remoteLockRaw = files.includes(LOCK_REL) ? await reader.readFile(LOCK_REL) : null;
+  // §4.3: refused here, before a single remote file is read into a plan — a store whose lock comes
+  // from a newer build is never merged into (and, at the end of applyImport, written back over)
+  // by this one. Nothing has been written at this point, so the local store is untouched.
+  assertStoreLockVersionUnderstood(remoteLockRaw);
+  // The LOCAL lock too, which a newer build can leave in this vault through ordinary vault sync
+  // with no pull involved. Planning writes nothing, so this is not the guarantee — applyImport's
+  // own check is — but it is what makes the refusal arrive BEFORE the user is asked to adjudicate
+  // conflicts. Letting someone resolve a merge and only then saying the operation was never
+  // possible is the same defect as inviting a pull that will be refused. The writer deliberately
+  // re-reads rather than being handed these bytes: it must check what it is about to replace, not
+  // what the planner happened to see.
+  assertStoreLockVersionUnderstood((await ctx.io.exists(lockPath(ctx))) ? await ctx.io.read(lockPath(ctx)) : null);
 
   const remoteFileMap = new Map<string, string>();
   for (const rel of files) {
@@ -1208,6 +1384,18 @@ export async function applyImport(
   choices: ("local" | "remote")[]
 ): Promise<GroupResult[]> {
   const { plan, remoteGroups, remoteLockRaw } = pending;
+  // §4.3 on the writer itself: planImport already refused a newer REMOTE, but applyImport is the
+  // half that writes, and the gate belongs on the write rather than on the caller's discipline.
+  assertStoreLockVersionUnderstood(remoteLockRaw);
+  // And on the lock this merge is about to REPLACE — the local one (task-3 review I3). A v3 lock
+  // reaches this store through ordinary vault sync, with no pull involved, so "the remote is old
+  // enough" says nothing about what is already here. planImport refuses this too, so the user is
+  // never asked to resolve conflicts for a pull that cannot happen — but the planner is a
+  // courtesy and this is the guarantee: a check that lived only on the courtesy path would quietly
+  // stop covering the next caller that reaches applyImport directly. Read before the first file is
+  // written; the parse below reuses it, so the merge sees exactly the bytes this gate checked.
+  const localLockRaw = (await ctx.io.exists(lockPath(ctx))) ? await ctx.io.read(lockPath(ctx)) : null;
+  assertStoreLockVersionUnderstood(localLockRaw);
   // Pull is pure store transport: it resolves file conflicts only. Definition (sync-list)
   // conflicts and remote-only group additions are no longer applied by Pull — the local sync
   // list converges through adopting the config-sync self item, not through a pull side-write.
@@ -1243,7 +1431,9 @@ export async function applyImport(
   // in the store here and become adoptable via the config-sync pane.
   const groups = await readGroups(ctx);
 
-  const localLock = await loadLock(ctx);
+  // Parsed from the same bytes the version gate above read — no second read, and no window in
+  // which the file could differ from what was checked.
+  const localLock = localLockRaw !== null ? parseStoreLock(localLockRaw) : null;
   const remoteLock = remoteLockRaw !== null ? parseStoreLock(remoteLockRaw) : null;
   if (localLock !== null || remoteLock !== null) {
     const mergedGroups: StoreLock["groups"] = { ...(localLock?.groups ?? {}) };
@@ -1259,16 +1449,72 @@ export async function applyImport(
         if (c !== undefined) localWonNames.add(c.name);
       }
     }
+    const adoptedNames = new Set<string>();
     if (remoteLock !== null) {
       for (const [name, entry] of Object.entries(remoteLock.groups)) {
         if (pending.excludeSelf && name === SELF_GROUP_NAME) continue;
         if (localWonNames.has(name)) continue;
-        mergedGroups[name] = entry;
+        // The remote's entry wins every field it HAS — the content is now the remote's, so its
+        // versions, capture time and hash describe it. But a key only OUR entry carried is not the
+        // remote's to delete: dropping it is the same loss as the top-level strip, one level down,
+        // and keeping it is convergence-safe because the comparison only ever weighs keys present on
+        // BOTH sides. (`lockEntryTail` excludes everything this build writes itself, so a stale
+        // local `hash` can never survive underneath the adopted entry.)
+        const carried = lockEntryTail(localLock?.groups[name]);
+        for (const key of Object.keys(entry)) delete carried[key];
+        mergedGroups[name] = { ...entry, ...carried };
+        adoptedNames.add(name);
       }
     }
+    // A pull that WROTE a group's files changed that group's store content, and an entry we did not
+    // take from the remote — a group the user kept as "local" whose remote-only files still landed,
+    // or one the remote's lock never described — would otherwise keep describing what was there
+    // before. That is the one real counterexample to "only a capture changes store content, and a
+    // capture re-dates what it captured" (review N1), and the items-first comparison now leans on
+    // that claim: an equal hash is believed outright, so a stamp that outran its content is exactly
+    // the thing that must not exist. Entries ADOPTED from the remote are deliberately left alone —
+    // they describe bytes we copied verbatim, and rewriting them is what would break the convergence
+    // a pull exists to produce.
+    const groupByName = new Map([...remoteGroups, ...groups].map((g) => [g.name, g] as const));
+    for (const [name, r] of byName) {
+      const existing = mergedGroups[name];
+      if (!hasChanges(r.changes) || existing === undefined || adoptedNames.has(name)) continue;
+      const group = groupByName.get(name);
+      if (group === undefined) continue;
+      const hash = await storeCopyHashOnDisk(ctx, group);
+      const restamped: StoreLockEntry = { ...existing, capturedAt: ctx.now() };
+      if (hash === null) delete restamped.hash;
+      else restamped.hash = hash;
+      mergedGroups[name] = restamped;
+    }
+    // Field order follows parseStoreLock's (see capture's own note): capturedAt, groups, then the
+    // carried tail, with version/syncedWatermark riding that tail.
     const merged: StoreLock = {
-      capturedAt: remoteLock?.capturedAt ?? localLock?.capturedAt ?? ctx.now(),
+      // `capturedAt` describes THIS store's content: derived from the merged entries, floored at the
+      // value it already had, because a pull is additive — it never removes content, so the store it
+      // produces can never be older than the one it started from.
+      capturedAt: derivedLockCapturedAt(
+        mergedGroups,
+        [localLock?.capturedAt],
+        localLock?.capturedAt ?? remoteLock?.capturedAt ?? ctx.now()
+      ),
       groups: mergedGroups,
+      // Same rule as capture (§4.3): this build wrote this file, so it declares the format this
+      // build writes — whichever version the two merged sides carried. Both are ≤ 2 by the time we
+      // get here; a newer remote was refused above.
+      version: STORE_LOCK_VERSION,
+      // The pull is the ONLY writer that moves the watermark, and moving it is what makes
+      // remoteLockAhead settle to false afterwards (§6). It records the remote's LINEAGE, not its
+      // bare watermark: a remote that captured after its own last pull stands at its `capturedAt`,
+      // and aligning to anything less would leave us permanently behind a state we just adopted.
+      syncedWatermark: remoteLock !== null ? lockLineage(remoteLock) : localLock !== null ? lockWatermark(localLock) : ctx.now(),
+      // Unknown TOP-LEVEL keys, from both sides (§6, task-2 finding I-1). The local lock's own keys
+      // win a collision — we cannot merge two values whose meaning we do not know, and the file we
+      // are writing is this store's — but a key only the remote carries is adopted rather than
+      // dropped: pull-then-push through this build would otherwise strip a newer build's top-level
+      // field from the remote, which is the very loss (S10) this release exists to stop.
+      ...lockTail(remoteLock),
+      ...lockTail(localLock),
     };
     await ctx.io.write(lockPath(ctx), JSON.stringify(merged, null, 2) + "\n");
   }
@@ -1316,6 +1562,9 @@ export async function pushExternal(ctx: CoreContext, writer: ExternalStoreWriter
     return r;
   };
   const remoteFiles = new Set((await writer.listFiles()).filter((r) => !isLegacyManifestRel(r)));
+  // §4.3, push side: refused before the first writeFile — pushing this build's store over a remote
+  // written by a newer one would overwrite a shape we cannot read with one it cannot read back.
+  if (remoteFiles.has(LOCK_REL)) assertStoreLockVersionUnderstood(await writer.readFile(LOCK_REL));
   for (const rel of pushableRels) {
     const { name, itemRel } = groupForStoreRel(manifest.groups, rel);
     const content = await ctx.io.read(`${ctx.rootPath}/${rel}`);

@@ -20,6 +20,7 @@ Selective, on-demand sync of Obsidian settings — hotkeys, CSS snippets, themes
 - **A Sync Center that knows the state** — every row spells out its own fate in plain language (*turns on · installs · applies settings*), normalized JSON diffs, a *this device* status chip and totals for every pending action. ([tour](docs/GUIDE.md#the-sync-center))
 - **Install engine** — plugins that are outdated, disabled or missing on this device can be updated, enabled or installed during Apply, pinned to the captured version. ([rules](docs/GUIDE.md#availability-facts-and-the-install-engine))
 - **Remotes (desktop)** — pull/push the store against a git repo or another vault, with per-file diff previews. ([details](docs/GUIDE.md#transport))
+- **Safe to update one device at a time** — settings or a store written by a newer Config Sync are refused with a plain message, never reset or overwritten, and a device's own choices (what it opted out of syncing) stay on that device where a pull can't erase them. ([details](docs/GUIDE.md#transport))
 - **Search everywhere** — both search boxes accept `key:value` qualifiers with autocomplete, combined freely with plain text.
 - **Status bar** — ↑ capture / ↓ apply plus per-remote ⇡ push / ⇣ pull counts at a glance; click opens the Sync Center.
 - **Mobile-friendly** — capture, apply and the Sync Center work on phones; the store is plain vault content, so any note sync carries it.

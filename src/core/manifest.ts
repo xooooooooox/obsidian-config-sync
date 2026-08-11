@@ -1,4 +1,4 @@
-import { DeviceClass, FieldRule, FileRule, PerItemScopes, Remote, RULE_SCOPES, StoreLock, SyncGroup, SyncManifest, SyncMode } from "./types";
+import { DeviceClass, FieldRule, FileRule, PerItemScopes, Remote, RULE_SCOPES, StoreLock, StoreLockEntry, SyncGroup, SyncManifest, SyncMode } from "./types";
 import { groupStorePath } from "./pathing";
 import { isPlainObject, keyMatchesAny } from "./sanitize";
 import { FileIO } from "./io";
@@ -244,6 +244,48 @@ function parseMemberLabels(raw: unknown, groupName: string): Record<string, stri
   return Object.keys(memberLabels).length > 0 ? memberLabels : undefined;
 }
 
+const KNOWN_LOCK_ENTRY_KEYS = ["sourcePluginVersion", "sourceAppVersion", "desktopOnly", "label", "memberLabels"] as const;
+
+// Validate-and-carry, not rebuild-from-a-whitelist (spec 2026-08-11-data-model-hardening.md §3.1,
+// invariant II.1). The named fields are validated and normalized exactly as before — same
+// messages, same rejections, same dropping of a blank label / a false desktopOnly / a non-string
+// version — and every other key of the entry rides through untouched. A rebuild was never just a
+// local loss: the pull path writes the PARSED lock back (ConfigSyncCore's merge at the end of the
+// pull flow), so one pull by an older device stripped a newer device's fields and pushed the loss
+// on to the whole fleet. That is the reason the lock format could not evolve at all.
+function parseStoreLockEntry(raw: unknown, groupName: string): StoreLockEntry {
+  // A non-object entry keeps failing on the version rule below, with the message it always had.
+  const src = isPlainObject(raw) ? raw : {};
+  const plugin = typeof src.sourcePluginVersion === "string" ? src.sourcePluginVersion : undefined;
+  const app = typeof src.sourceAppVersion === "string" ? src.sourceAppVersion : undefined;
+  if (plugin === undefined && app === undefined) {
+    throw new ManifestValidationError(`store.lock.json group "${groupName}" must have a string sourcePluginVersion or sourceAppVersion`);
+  }
+  if (src.label !== undefined && typeof src.label !== "string") {
+    throw new ManifestValidationError(`store.lock.json group "${groupName}" has a "label" that isn't text`);
+  }
+  const memberLabels = parseMemberLabels(src.memberLabels, groupName);
+  const label = typeof src.label === "string" ? src.label.trim() : "";
+  // The known fields keep BOTH their normalized value and their fixed order: a non-string version,
+  // desktopOnly:false and a blank label stay dropped. The fixed ORDER no longer carries the
+  // correctness argument it was introduced with — §6 made status.ts's remoteLockAhead compare
+  // entries key by key instead of with JSON.stringify, so a mere reordering (refreshLockDesktopOnly
+  // moves desktopOnly to the end) can no longer read as "the remote is ahead". It is kept because
+  // the lock is a FILE inside a vault that other tools sync and version: two devices that re-emit
+  // the same entry must produce the same bytes, or every parse-and-write churns the vault's history
+  // and the raw-text fallback below (unparseable locks) sees a difference that isn't one.
+  // Carrying is additive on top of normalization, never a replacement for it.
+  const known: StoreLockEntry = {};
+  if (plugin !== undefined) known.sourcePluginVersion = plugin;
+  if (app !== undefined) known.sourceAppVersion = app;
+  if (src.desktopOnly === true) known.desktopOnly = true;
+  if (label !== "") known.label = label;
+  if (memberLabels !== undefined) known.memberLabels = memberLabels;
+  const carried: Record<string, unknown> = { ...src };
+  for (const key of KNOWN_LOCK_ENTRY_KEYS) delete carried[key];
+  return { ...known, ...carried };
+}
+
 export function parseStoreLock(raw: string): StoreLock {
   let parsed: unknown;
   try {
@@ -256,24 +298,163 @@ export function parseStoreLock(raw: string): StoreLock {
   }
   const groups: StoreLock["groups"] = {};
   for (const [k, v] of Object.entries(parsed.groups)) {
-    const plugin = isPlainObject(v) && typeof v.sourcePluginVersion === "string" ? v.sourcePluginVersion : undefined;
-    const app = isPlainObject(v) && typeof v.sourceAppVersion === "string" ? v.sourceAppVersion : undefined;
-    if (plugin === undefined && app === undefined) {
-      throw new ManifestValidationError(`store.lock.json group "${k}" must have a string sourcePluginVersion or sourceAppVersion`);
-    }
-    if (isPlainObject(v) && v.label !== undefined && typeof v.label !== "string") {
-      throw new ManifestValidationError(`store.lock.json group "${k}" has a "label" that isn't text`);
-    }
-    const memberLabels = parseMemberLabels(isPlainObject(v) ? v.memberLabels : undefined, k);
-    groups[k] = {};
-    if (plugin !== undefined) groups[k].sourcePluginVersion = plugin;
-    if (app !== undefined) groups[k].sourceAppVersion = app;
-    if (isPlainObject(v) && v.desktopOnly === true) groups[k].desktopOnly = true;
-    const label = isPlainObject(v) && typeof v.label === "string" ? v.label.trim() : "";
-    if (label !== "") groups[k].label = label;
-    if (memberLabels !== undefined) groups[k].memberLabels = memberLabels;
+    groups[k] = parseStoreLockEntry(v, k);
   }
-  return { capturedAt: parsed.capturedAt, groups };
+  // Unknown TOP-LEVEL keys are carried by the same rule, after the two known ones. Shallow by
+  // design — a deep clone would have to guess at shapes it does not know.
+  const carried: Record<string, unknown> = { ...parsed };
+  delete carried.capturedAt;
+  delete carried.groups;
+  return { capturedAt: parsed.capturedAt, groups, ...carried };
+}
+
+// The store lock's format version this build writes (spec 2026-08-11-data-model-hardening.md
+// §4.3). Absent on disk = 1, today's shape.
+export const STORE_LOCK_VERSION = 2;
+
+// §4.3 copy: what pull and push say when the store at the other end declares a version this build
+// cannot write.
+export const STORE_LOCK_FUTURE_MESSAGE = "The store was written by a newer Config Sync. Update Config Sync on this device before syncing.";
+
+// A lock's declared format version. `version` reaches us through parseStoreLock's carried tail
+// (§3.1), so it is literally whatever the file held: a value that isn't a number is not evidence
+// of a newer format — and refusing to sync over a typo would strand a whole fleet — so it reads as
+// today's shape instead.
+export function storeLockVersion(lock: StoreLock): number {
+  return typeof lock.version === "number" ? lock.version : 1;
+}
+
+// The v2 payload (§6) reaches a reader exactly the way `version` does — through the carried tail,
+// never through validation — so every read narrows the raw value here instead of trusting the
+// declared type. Deliberate, and the same argument as storeLockVersion's: a value this build cannot
+// make sense of must ride through untouched (invariant II.1) rather than be dropped by a
+// normalising parse, and a build that cannot read it must not act on it either. Empty string counts
+// as absent: it dates nothing and fingerprints nothing.
+function lockText(v: unknown): string | undefined {
+  return typeof v === "string" && v !== "" ? v : undefined;
+}
+
+// The lineage watermark AS RECORDED: the remote state this store was last aligned to. A v1 lock has
+// no watermark of its own — its single `capturedAt` carried that meaning too — so it answers with
+// `capturedAt`. Used by the writers; comparison goes through lockLineage below.
+export function lockWatermark(lock: StoreLock): string {
+  return lockText(lock.syncedWatermark) ?? lock.capturedAt;
+}
+
+// The lineage point a lock actually stands at: the newest state it has SEEN, whether by pulling it
+// (`syncedWatermark`) or by producing it here (`capturedAt`). Never older than its own `capturedAt`
+// — and THAT is what makes two locks from different builds comparable at all.
+//
+// Getting this wrong was a live regression. `syncedWatermark` alone is not the same quantity as a v1
+// lock's `capturedAt`: an updated device's watermark stops moving on capture (lineage belongs to the
+// pull), while a v1 device's stands in for both and tracks whatever it last pulled — which is OUR
+// `capturedAt`. So an older device that pulled from us and pushed back read as "newer" against a
+// watermark we had deliberately left behind, with zero content difference, in exactly the mixed
+// fleet §6 exists to keep quiet. Taking the later of the two puts both sides on the same scale.
+export function lockLineage(lock: StoreLock): string {
+  const watermark = lockWatermark(lock);
+  const w = Date.parse(watermark);
+  const c = Date.parse(lock.capturedAt);
+  if (Number.isNaN(w)) return Number.isNaN(c) ? watermark : lock.capturedAt;
+  if (Number.isNaN(c)) return watermark;
+  return c > w ? lock.capturedAt : watermark;
+}
+
+// The `hash` field's documented shape (§6): the algorithm names itself, so a later build can change
+// it without every reader having to guess from the digest's length. Comparison is plain string
+// equality either way — the prefix rides along on both sides.
+export const STORE_LOCK_HASH_PREFIX = "sha256:";
+
+export function lockEntryCapturedAt(entry: StoreLockEntry): string | undefined {
+  return lockText(entry.capturedAt);
+}
+
+export function lockEntryHash(entry: StoreLockEntry): string | undefined {
+  return lockText(entry.hash);
+}
+
+// The top-level `capturedAt` a v2 writer stamps: the newest moment any item in THIS store was
+// captured. `floors` are values the result may never fall below — a pull passes the lock it is
+// replacing, because a pull is additive and the store it produces can never be older than the one
+// it started from. Unparseable dates are ignored rather than rejected (locks in the wild carry
+// hand-written stamps, and the tests seed "T"); `fallback` answers when nothing at all is datable,
+// so the field is never absent.
+export function derivedLockCapturedAt(
+  groups: Record<string, StoreLockEntry>,
+  floors: (string | undefined)[],
+  fallback: string
+): string {
+  let best: string | undefined;
+  let bestMs = Number.NEGATIVE_INFINITY;
+  const consider = (v: string | undefined): void => {
+    if (v === undefined) return;
+    const ms = Date.parse(v);
+    if (Number.isNaN(ms) || ms <= bestMs) return;
+    best = v;
+    bestMs = ms;
+  };
+  for (const entry of Object.values(groups)) consider(lockEntryCapturedAt(entry));
+  for (const floor of floors) consider(floor);
+  return best ?? fallback;
+}
+
+// Every entry field this build writes for itself. Wider than KNOWN_LOCK_ENTRY_KEYS on purpose: the
+// PARSER normalises only the v1 five (the v2 pair rides the tail, above), but a WRITER that rebuilds
+// an entry from its own computed values must also clear the v2 pair underneath the rebuild, or a
+// `hash` it deliberately omitted this run would survive from the previous lock and fingerprint
+// content that no longer exists.
+const WRITTEN_LOCK_ENTRY_KEYS = [...KNOWN_LOCK_ENTRY_KEYS, "capturedAt", "hash"] as const;
+
+// The part of a lock entry this build does NOT write — carried onto a rebuilt entry so a field a
+// newer build recorded survives our capture instead of being stripped and published as a loss to
+// the whole fleet (§6, task-2 finding I-1: without this, §3.1's carrying parser is theatre, because
+// the writers rebuild from fresh literals).
+export function lockEntryTail(entry: StoreLockEntry | undefined): Record<string, unknown> {
+  if (entry === undefined) return {};
+  const tail: Record<string, unknown> = { ...entry };
+  for (const key of WRITTEN_LOCK_ENTRY_KEYS) delete tail[key];
+  return tail;
+}
+
+const WRITTEN_LOCK_KEYS = ["version", "syncedWatermark", "capturedAt", "groups"] as const;
+
+// The same carry, one level up: the lock's own unknown TOP-LEVEL keys.
+export function lockTail(lock: StoreLock | null): Record<string, unknown> {
+  if (lock === null) return {};
+  const tail: Record<string, unknown> = { ...lock };
+  for (const key of WRITTEN_LOCK_KEYS) delete tail[key];
+  return tail;
+}
+
+// The version a lock DOCUMENT declares, read straight off the JSON — never through parseStoreLock.
+// "Is this shape valid for v1?" and "was this written by a newer build?" are different questions and
+// must not share an answer: parseStoreLock still enforces the v1 entry rule (a string
+// sourcePluginVersion or sourceAppVersion), so any v3 that restructures the entry throws there — and
+// §6's own "Out of scope" note names exactly such a restructure (the source/innate/display
+// partition) as the deferred v3 change. Asking the version through the parser therefore meant the
+// gate could not survive the very change it exists to protect against (final-review C1): the parse
+// threw, the refusal was skipped, and capture rewrote v3's bookkeeping as `version: 2` and pushed
+// the loss to the fleet. Anything that is not JSON at all, or declares no numeric `version`, reads
+// as today's shape — refusing to sync over a typo would strand a whole fleet.
+export function declaredStoreLockVersion(raw: string | null): number {
+  if (raw === null) return 1;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return 1;
+  }
+  return isPlainObject(parsed) && typeof parsed.version === "number" ? parsed.version : 1;
+}
+
+// The §4.3 gate, run by capture and the pull merge against the LOCAL store's lock, and by pull and
+// push against the one at the other end. A version from the future is a refusal, NOT the `unknown`
+// state checkRemote reports for a lock it merely cannot read: an unparseable lock keeps today's
+// behaviour (capture rewrites it, pull merges around it), while a newer version means the file has a
+// shape we would silently downgrade by writing our own back over it. Takes the raw text — the caller
+// has it in hand, and the version is read without validating anything (see above).
+export function assertStoreLockVersionUnderstood(raw: string | null): void {
+  if (declaredStoreLockVersion(raw) > STORE_LOCK_VERSION) throw new Error(STORE_LOCK_FUTURE_MESSAGE);
 }
 
 export async function migrateLegacyManifest(

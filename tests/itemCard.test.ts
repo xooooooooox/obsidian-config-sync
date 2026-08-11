@@ -455,6 +455,14 @@ describe("buildCompanionRows", () => {
   it("a def with no preset companions and an empty config produces no rows — renderCompanionZone still renders the Add-folder entry unconditionally on this empty-array path (spec §5, task-3-brief.md Step 2/4)", () => {
     expect(buildCompanionRows(APP_DEF, cfg())).toEqual([]);
   });
+
+  it("an absent companions key reads exactly like an empty list — presets still synthesize their rows (§5.2)", () => {
+    expect(buildCompanionRows(APPEARANCE_DEF, { enabled: true })).toEqual(buildCompanionRows(APPEARANCE_DEF, { enabled: true, companions: [] }));
+    expect(buildCompanionRows(APPEARANCE_DEF, { enabled: true })).toEqual([
+      { path: "{configDir}/themes", scope: "all", enabled: false, isPreset: true },
+      { path: "{configDir}/snippets", scope: "all", enabled: false, isPreset: true },
+    ]);
+  });
 });
 
 describe("zone ① Enabled on (spec §4/§10, D4 — core/community/beta plugin tabs, task-6-brief.md)", () => {
@@ -493,7 +501,10 @@ describe("Sync all (spec §4/§5/§10, D11 — one master row per Core/Community
   it("applySyncAll(on) turns every def in the list on, preserving each cfg's other fields", () => {
     const items = { [CORE_WITH_FILE_DEF.id]: cfg({ enabled: false, enabledOn: "desktop" }) };
     const next = applySyncAll(CORE_DEFS, items, true);
-    expect(next[CORE_STATE_ONLY_DEF.id]).toEqual(cfg({ enabled: true }));
+    // Literal, not cfg(): comparing against a shape built from emptyItemConfig() would move both
+    // sides together if a later change stripped `companions` from the write path, so the §5.2
+    // phase-1 guarantee (a newly created entry stays readable by an older build) would go unnoticed.
+    expect(next[CORE_STATE_ONLY_DEF.id]).toEqual({ enabled: true, companions: [] });
     expect(next[CORE_WITH_FILE_DEF.id]).toEqual(cfg({ enabled: true, enabledOn: "desktop" })); // enabledOn untouched
   });
 

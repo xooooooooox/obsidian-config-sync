@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { availabilityForGroup, compareVersions, desktopOnlyDrift, desktopOnlyPluginIds, scopedAwayMembers, memberForceOff, snippetOrphans, normalizeMemberRule, preferStoredMemberRule } from "../src/core/availability";
+import { asMemberRule, availabilityForGroup, compareVersions, desktopOnlyDrift, desktopOnlyPluginIds, scopedAwayMembers, memberForceOff, snippetOrphans, normalizeMemberRule, preferStoredMemberRule } from "../src/core/availability";
 import { FakePlugins } from "./memfs";
-import { StoreLock, SyncGroup } from "../src/core/types";
+import { MEMBER_RULES, StoreLock, SyncGroup } from "../src/core/types";
 
 const pluginGroup: SyncGroup = { name: "plugin-demo", path: "{configDir}/plugins/demo/data.json", type: "file", devices: "all" };
 const coreGroup: SyncGroup = { name: "daily-notes", path: "{configDir}/daily-notes.json", type: "file", devices: "all" };
@@ -181,6 +181,25 @@ describe("preferStoredMemberRule (task-2 fix #2: a stored rule wins over local-s
   it("falls back to normalizeMemberRule('local', ...) when nothing is stored", () => {
     expect(preferStoredMemberRule(undefined, true)).toBe("always-here");
     expect(preferStoredMemberRule(undefined, false)).toBe("never-here");
+  });
+});
+
+// spec 2026-08-11-data-model-hardening.md §3.2 (invariant II.2): settings.memberRules is typed at
+// compile time but raw data.json at runtime, so a value written by a NEWER build reaches these
+// readers. It is ignored HERE, at the point of use — the load path no longer rewrites storage to
+// drop it, because that deletion travelled to every other device on the next capture.
+describe("asMemberRule (an unrecognised value is ignored where it is consumed)", () => {
+  it("accepts every real MemberRule and nothing else", () => {
+    for (const rule of MEMBER_RULES) expect(asMemberRule(rule)).toBe(rule);
+    expect(asMemberRule("local")).toBeUndefined(); // a RuleScope, not a MemberRule
+    expect(asMemberRule("here-on-tuesdays")).toBeUndefined(); // a rule from a future build
+    expect(asMemberRule(undefined)).toBeUndefined();
+    expect(asMemberRule(42)).toBeUndefined();
+  });
+
+  it("preferStoredMemberRule treats an unrecognised stored value as no stored rule", () => {
+    expect(preferStoredMemberRule("here-on-tuesdays", true)).toBe("always-here");
+    expect(preferStoredMemberRule("here-on-tuesdays", false)).toBe("never-here");
   });
 });
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CoreContext, capture, captureWithActions, loadManifest, groupsForDevice, apply, applyWithActions, planImport, applyImport, PendingPull, ExternalStoreReader, pushExternal, ExternalStoreWriter, pluginIdForGroup, orderInstallsCatalogFirst, readGroups, writeGroups, deviceExcludedPluginIds, isSelfStoreRel, remoteGroupsFrom, groupForStoreRel, backfillLockLabels, excludeOptedOutItems } from "../src/core/ConfigSyncCore";
-import { parseSyncManifest } from "../src/core/manifest";
+import { parseStoreLock, parseSyncManifest } from "../src/core/manifest";
 import { SwitchList } from "../src/core/switchList";
 import { SELF_GROUP_NAME, selfPresetRules } from "../src/core/catalog";
 import { StoreLock, SyncGroup } from "../src/core/types";
@@ -44,6 +44,16 @@ export function setup(): { io: MemFS; plugins: FakePlugins; ctx: CoreContext } {
 async function seedGroups(ctx: CoreContext, manifestJson: string): Promise<void> {
   await writeGroups(ctx, parseSyncManifest(manifestJson).groups);
 }
+
+// spec 2026-08-11-data-model-hardening.md §6: every entry capture writes now also carries its own
+// capturedAt and a hash of its store copy. The assertions below are about the KNOWN fields, so they
+// wrap the expected entry rather than restate two values none of them is testing. The v2 payload
+// itself is asserted directly in the "store.lock.json v2 payload" describe block.
+const capturedEntry = (entry: Record<string, unknown>): Record<string, unknown> => ({
+  ...entry,
+  capturedAt: expect.any(String),
+  hash: expect.any(String),
+});
 
 describe("loadManifest", () => {
   it("returns an empty group list when no groups are configured", async () => {
@@ -133,12 +143,18 @@ describe("capture", () => {
     expect(JSON.parse(await io.read("cs/store/configdir/plugins/demo/data.json"))).toEqual({ theme: "x" });
     const lock = JSON.parse(await io.read("cs/store.lock.json")) as { capturedAt: string; groups: Record<string, unknown> };
     expect(lock).toEqual({
+      // spec 2026-08-11-data-model-hardening.md §4.3: every lock this build writes declares its
+      // format version (absent = 1, today's shape). Refusal behaviour lives in tests/versionGates.
+      version: 2,
+      // §6: a store that has never pulled starts its own lineage at its own capture time, and the
+      // top-level stamp is max(groups[*].capturedAt) — for a whole-store capture, ctx.now().
+      syncedWatermark: "2026-07-08T00:00:00.000Z",
       capturedAt: "2026-07-08T00:00:00.000Z",
       groups: {
-        hotkeys: { sourceAppVersion: "1.8.7" },
-        snippets: { sourceAppVersion: "1.8.7" },
-        vimrc: { sourceAppVersion: "1.8.7" },
-        "plugin-demo": { sourcePluginVersion: "1.2.3" },
+        hotkeys: capturedEntry({ sourceAppVersion: "1.8.7" }),
+        snippets: capturedEntry({ sourceAppVersion: "1.8.7" }),
+        vimrc: capturedEntry({ sourceAppVersion: "1.8.7" }),
+        "plugin-demo": capturedEntry({ sourcePluginVersion: "1.2.3" }),
       },
     });
   });
@@ -195,7 +211,7 @@ describe("capture", () => {
     const results = await capture(ctx);
     expect(results.find((r) => r.group === "plugin-demo")?.status).toBe("error");
     const lock = JSON.parse(await io.read("cs/store.lock.json")) as { capturedAt: string; groups: Record<string, { sourcePluginVersion: string }> };
-    expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.2.3" });
+    expect(lock.groups["plugin-demo"]).toEqual(capturedEntry({ sourcePluginVersion: "1.2.3" })); // carried whole, v2 payload included
   });
 
   it("does not invent lock entries for errored groups that never had one", async () => {
@@ -229,7 +245,7 @@ describe("capture", () => {
     expect(results.every((r) => r.status === "ok")).toBe(true);
     const lock = JSON.parse(await io.read("cs/store.lock.json")) as { capturedAt: string; groups: Record<string, { sourcePluginVersion: string }> };
     expect(lock.capturedAt).toBe("2026-07-08T00:00:00.000Z");
-    expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.2.3" }); // current version, not the stale 9.9.9 — success always re-stamps
+    expect(lock.groups["plugin-demo"]).toEqual(capturedEntry({ sourcePluginVersion: "1.2.3" })); // current version, not the stale 9.9.9 — success always re-stamps
   });
 
   it("a version-only capture (content identical, store version older) is recorded as a change", async () => {
@@ -248,7 +264,7 @@ describe("capture", () => {
     expect(r?.stateNote?.text).toContain("1.2.3");
     expect(isChanged(r!)).toBe(true); // the store version refresh must count in the run report
     const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, { sourcePluginVersion: string }> };
-    expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.2.3" });
+    expect(lock.groups["plugin-demo"]).toEqual(capturedEntry({ sourcePluginVersion: "1.2.3" }));
   });
 
   it("records desktopOnly in the lock for a desktop-only plugin", async () => {
@@ -259,7 +275,7 @@ describe("capture", () => {
     await seedGroups(ctx, MANIFEST);
     await capture(ctx);
     const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, { sourcePluginVersion?: string; desktopOnly?: boolean }> };
-    expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.2.3", desktopOnly: true });
+    expect(lock.groups["plugin-demo"]).toEqual(capturedEntry({ sourcePluginVersion: "1.2.3", desktopOnly: true }));
     expect(lock.groups["hotkeys"]?.desktopOnly).toBeUndefined(); // app-anchored: never flagged
   });
 
@@ -364,7 +380,7 @@ describe("capture", () => {
     expect(await io.read("cs/store/configdir/hotkeys.json")).toBe('{"a":2}');
     expect(await io.read("cs/store/configdir/plugins/demo/data.json")).toBe("{}\n"); // untouched (unchanged since first capture's sanitized write)
     const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, { sourcePluginVersion: string }> };
-    expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.2.3" }); // carried, not restamped
+    expect(lock.groups["plugin-demo"]).toEqual(capturedEntry({ sourcePluginVersion: "1.2.3" })); // carried, not restamped
   });
 
   it("captures an encrypted-mode group as an envelope, and re-capture writes nothing when unchanged", async () => {
@@ -1402,8 +1418,8 @@ describe("planImport / applyImport", () => {
       });
       await capture(ctx);
       const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, Record<string, unknown>> };
-      expect(lock.groups["plugin-foreign"]).toEqual({ sourcePluginVersion: "0.5.25" }); // carried forward
-      expect(lock.groups["hotkeys"]).toEqual({ sourceAppVersion: plugins.getAppVersion() }); // fresh registry entry wins over 0.0.9
+      expect(lock.groups["plugin-foreign"]).toEqual({ sourcePluginVersion: "0.5.25" }); // carried forward, untouched — no v2 payload invented for an item this run never captured
+      expect(lock.groups["hotkeys"]).toEqual(capturedEntry({ sourceAppVersion: plugins.getAppVersion() })); // fresh registry entry wins over 0.0.9
     });
 
     it("capture still drops the entry of a registry group whose plugin is uninstalled (carry-forward is for foreign names only)", async () => {
@@ -1490,6 +1506,123 @@ describe("planImport / applyImport", () => {
       await applyImport(ctx, pending, ["local"]);
       const after = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, { sourceAppVersion?: string }> };
       expect(after.groups.hotkeys?.sourceAppVersion).toBe("LOCAL");
+    });
+
+    // spec 2026-08-11-data-model-hardening.md §6, the pull half of the writers' carry. The merge
+    // builds the lock from a fresh literal, so without this it strips the top-level keys §3.1's
+    // parser just went to the trouble of keeping — and then pushes the loss back to the remote.
+    describe("the v2 payload survives a pull", () => {
+      const localLock = {
+        version: 2,
+        syncedWatermark: "2026-07-30T07:00:00.000Z",
+        capturedAt: "2026-07-30T08:00:00.000Z",
+        localOnlyTail: { mine: true },
+        groups: {
+          hotkeys: { sourceAppVersion: "1.0.0", capturedAt: "2026-07-30T08:00:00.000Z", hash: "h1", entryTailOnlyHere: "keep me" },
+        },
+      };
+      const remoteLock = {
+        version: 2,
+        syncedWatermark: "2026-07-30T09:00:00.000Z",
+        capturedAt: "2026-07-30T09:00:00.000Z",
+        remoteOnlyTail: { theirs: true },
+        groups: { hotkeys: { sourceAppVersion: "2.0.0", capturedAt: "2026-07-30T09:00:00.000Z", hash: "h2", futureField: [1, 2] } },
+      };
+
+      const pull = async (local: object, remote: object): Promise<{ io: MemFS; raw: string }> => {
+        const { io, ctx } = setup();
+        await writeGroups(ctx, [HOTKEYS_GROUP]);
+        io.seed({ "cs/store/configdir/hotkeys.json": '{"a":1}', "cs/store.lock.json": JSON.stringify(local) });
+        const pending = await planImport(
+          ctx,
+          fakeReader({ "store/configdir/hotkeys.json": '{"a":1}', "store.lock.json": JSON.stringify(remote) }),
+          { excludeSelf: false }
+        );
+        await applyImport(ctx, pending, []);
+        return { io, raw: await io.read("cs/store.lock.json") };
+      };
+
+      it("carries both sides' unknown keys, stamps version 2, and converges the hint", async () => {
+        const { raw } = await pull(localLock, remoteLock);
+        const merged = JSON.parse(raw) as StoreLock;
+        expect(merged.version).toBe(2); // a SUCCESSFUL pull declares the format too, not only capture
+        expect(merged["localOnlyTail"]).toEqual({ mine: true }); // ours survives the rebuild…
+        expect(merged["remoteOnlyTail"]).toEqual({ theirs: true }); // …and theirs is adopted, not dropped on the way back out
+        const hotkeys = merged.groups["hotkeys"];
+        expect(hotkeys?.["futureField"]).toEqual([1, 2]);
+        // The adopted entry wins every field it HAS — the content is the remote's now…
+        expect(hotkeys?.sourceAppVersion).toBe("2.0.0");
+        expect(hotkeys?.hash).toBe("h2");
+        // …but a key only OUR entry carried is not the remote's to delete. Keeping it is
+        // convergence-safe, since only keys present on BOTH sides are ever weighed.
+        expect(hotkeys?.["entryTailOnlyHere"]).toBe("keep me");
+        // The pull is the only writer that moves the lineage, and moving it is what settles the hint.
+        expect(merged.syncedWatermark).toBe("2026-07-30T09:00:00.000Z");
+        expect(remoteLockAhead(raw, JSON.stringify(remoteLock), [])).toBe(false);
+        expect(JSON.stringify(parseStoreLock(raw), null, 2) + "\n").toBe(raw); // same byte-stable order capture writes
+      });
+
+      it("recomputes capturedAt from the merged items and never moves it backwards", async () => {
+        const olderRemote = {
+          ...remoteLock,
+          syncedWatermark: "2026-07-30T06:00:00.000Z",
+          capturedAt: "2026-07-30T06:00:00.000Z",
+          groups: { hotkeys: { sourceAppVersion: "0.9.0", capturedAt: "2026-07-30T06:00:00.000Z", hash: "h0" } },
+        };
+        const { raw } = await pull(localLock, olderRemote);
+        const merged = JSON.parse(raw) as StoreLock;
+        // The remote's whole-store stamp is never copied over it (that conflation is what §6 split),
+        // and a pull is additive — the store it produces cannot be older than the one it started from.
+        expect(merged.capturedAt).toBe("2026-07-30T08:00:00.000Z");
+      });
+
+      it("re-dates and re-fingerprints a locally-kept group whose remote-only files still landed", async () => {
+        // The one counterexample to "only a capture changes store content, and a capture re-dates
+        // what it captured": the user keeps `one.css` local, so the entry is NOT adopted from the
+        // remote — but `two.css` lands anyway, and the entry would otherwise keep describing a store
+        // copy that no longer exists. Items-first believes an equal hash outright, so a stamp that
+        // outran its content is exactly what must not survive here.
+        const { io, ctx } = setup();
+        await writeGroups(ctx, [SNIPPETS_GROUP]);
+        io.seed({
+          "cs/store/configdir/snippets/one.css": "local",
+          "cs/store.lock.json": JSON.stringify({
+            version: 2,
+            syncedWatermark: "2026-07-30T07:00:00.000Z",
+            capturedAt: "2026-07-30T07:00:00.000Z",
+            groups: { snippets: { sourceAppVersion: "1.0.0", capturedAt: "2026-07-30T07:00:00.000Z", hash: "sha256:stale" } },
+          }),
+        });
+        const remote = {
+          "store/configdir/snippets/one.css": "remote", // conflicts — kept local below
+          "store/configdir/snippets/two.css": "extra", // remote-only — lands regardless
+          "store.lock.json": JSON.stringify({
+            version: 2,
+            syncedWatermark: "2026-07-30T09:00:00.000Z",
+            capturedAt: "2026-07-30T09:00:00.000Z",
+            groups: { snippets: { sourceAppVersion: "2.0.0", capturedAt: "2026-07-30T09:00:00.000Z", hash: "sha256:theirs" } },
+          }),
+        };
+        const pending = await planImport(ctx, fakeReader(remote), { excludeSelf: false });
+        expect(pending.plan.conflicts.filter((c) => c.kind === "file").length).toBe(1);
+        await applyImport(ctx, pending, ["local"]);
+
+        expect(await io.read("cs/store/configdir/snippets/one.css")).toBe("local"); // the user's choice stands
+        expect(await io.read("cs/store/configdir/snippets/two.css")).toBe("extra"); // …and the store still changed
+        const entry = (JSON.parse(await io.read("cs/store.lock.json")) as StoreLock).groups["snippets"];
+        expect(entry?.sourceAppVersion).toBe("1.0.0"); // still the local lineage, not adopted
+        expect(entry?.capturedAt).toBe("2026-07-08T00:00:00.000Z"); // ctx.now() — the store moved
+        expect(entry?.hash).not.toBe("sha256:stale");
+        expect(entry?.hash).not.toBe("sha256:theirs"); // it is neither side's copy now
+        expect(entry?.hash).toMatch(/^sha256:[0-9a-f]{64}$/);
+      });
+
+      it("a v1 remote still converges: its capturedAt is the lineage it has", async () => {
+        const v1Remote = { capturedAt: "2026-07-30T09:00:00.000Z", groups: { hotkeys: { sourceAppVersion: "2.0.0" } } };
+        const { raw } = await pull(localLock, v1Remote);
+        expect((JSON.parse(raw) as StoreLock).syncedWatermark).toBe("2026-07-30T09:00:00.000Z");
+        expect(remoteLockAhead(raw, JSON.stringify(v1Remote), [])).toBe(false);
+      });
     });
   });
 });
@@ -1695,6 +1828,132 @@ describe("readGroups / writeGroups", () => {
   });
 });
 
+// spec 2026-08-11-data-model-hardening.md §6. Two halves: the payload capture writes, and the CARRY
+// — §3.1 taught the parser to keep unknown keys, but capture rebuilds the whole lock and each
+// captured entry from its own values, so without the carry here that parser work is theatre and the
+// format still cannot evolve (task-2 finding I-1).
+describe("store.lock.json v2 payload — capture", () => {
+  const TWO_GROUPS = JSON.stringify({
+    version: 1,
+    groups: [
+      { name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all" },
+      { name: "snippets", path: "{configDir}/snippets", type: "dir", devices: "all" },
+    ],
+  });
+  const PREVIOUS = JSON.stringify({
+    version: 2,
+    syncedWatermark: "2026-07-01T00:00:00.000Z",
+    capturedAt: "2026-07-01T00:00:00.000Z",
+    fleetNotes: { from: "a newer build" }, // an unknown TOP-LEVEL key
+    groups: { hotkeys: { sourceAppVersion: "1.0.0", perMemberFreshness: { x: 1 } } }, // an unknown ENTRY key
+  });
+
+  it("stamps version, watermark and per-item provenance, and carries what it does not write", async () => {
+    const { io, ctx } = setup();
+    io.seed({ ".obs/hotkeys.json": '{"a":1}', ".obs/snippets/one.css": "one", "cs/store.lock.json": PREVIOUS });
+    await seedGroups(ctx, TWO_GROUPS);
+    await capture(ctx);
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as StoreLock;
+    expect(lock.version).toBe(2);
+    // Lineage belongs to the pull: a capture must not claim to have seen a state it has not seen.
+    expect(lock.syncedWatermark).toBe("2026-07-01T00:00:00.000Z");
+    expect(lock.capturedAt).toBe("2026-07-08T00:00:00.000Z"); // max(groups[*].capturedAt)
+    expect(lock["fleetNotes"]).toEqual({ from: "a newer build" });
+    const hotkeys = lock.groups["hotkeys"];
+    expect(hotkeys?.["perMemberFreshness"]).toEqual({ x: 1 }); // the rebuilt entry kept the tail…
+    expect(hotkeys?.sourceAppVersion).toBe("1.8.7"); // …and the known field is still REPLACED, not merged
+    expect(hotkeys?.capturedAt).toBe("2026-07-08T00:00:00.000Z");
+    expect(hotkeys?.hash).toMatch(/^sha256:[0-9a-f]{64}$/); // §6's documented shape — the algorithm names itself
+  });
+
+  it("writes the key order parseStoreLock re-emits, so a round trip is byte-stable", async () => {
+    // The parser's fixed order is kept for byte stability — the lock is a file inside a vault that
+    // other tools sync and version. That argument only holds if the WRITERS agree with it.
+    const { io, ctx } = setup();
+    io.seed({ ".obs/hotkeys.json": '{"a":1}', ".obs/snippets/one.css": "one", "cs/store.lock.json": PREVIOUS });
+    await seedGroups(ctx, TWO_GROUPS);
+    await capture(ctx);
+    const written = await io.read("cs/store.lock.json");
+    expect(JSON.stringify(parseStoreLock(written), null, 2) + "\n").toBe(written);
+  });
+
+  it("the hash follows the item's store content, not the run", async () => {
+    const { io, ctx } = setup();
+    io.seed({ ".obs/hotkeys.json": '{"a":1}' });
+    await seedGroups(ctx, JSON.stringify({ version: 1, groups: [{ name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all" }] }));
+    await capture(ctx);
+    const first = (JSON.parse(await io.read("cs/store.lock.json")) as StoreLock).groups["hotkeys"]?.hash;
+    await capture(ctx);
+    expect((JSON.parse(await io.read("cs/store.lock.json")) as StoreLock).groups["hotkeys"]?.hash).toBe(first);
+    await io.write(".obs/hotkeys.json", '{"a":2}');
+    await capture(ctx);
+    expect((JSON.parse(await io.read("cs/store.lock.json")) as StoreLock).groups["hotkeys"]?.hash).not.toBe(first);
+  });
+
+  it("the hash covers the per-device-class sidecars, not just the base file", async () => {
+    // A sidecar is store content: it holds a class's shared values and travels like any other file.
+    // A hash blind to it would let two stores differing ONLY in a sidecar read as identical, and the
+    // items-first comparison believes an equal hash outright — so the pull would never be offered.
+    const SCOPED = JSON.stringify({
+      version: 1,
+      groups: [
+        {
+          name: "plugin-demo",
+          path: "{configDir}/plugins/demo/data.json",
+          type: "file",
+          devices: "all",
+          mode: "fields",
+          fields: [{ pattern: "desktopKey", scope: "desktop", encrypted: false }],
+        },
+      ],
+    });
+    const { io, plugins, ctx } = setup();
+    plugins.installed.set("demo", "1.2.3");
+    io.seed({ ".obs/plugins/demo/data.json": JSON.stringify({ shared: 1, desktopKey: "a" }) });
+    await seedGroups(ctx, SCOPED);
+    await capture(ctx);
+    const base = await io.read("cs/store/configdir/plugins/demo/data.json");
+    const first = (JSON.parse(await io.read("cs/store.lock.json")) as StoreLock).groups["plugin-demo"]?.hash;
+
+    // Only the desktop-scoped value moves: the base file stays byte-identical, the sidecar does not.
+    await io.write(".obs/plugins/demo/data.json", JSON.stringify({ shared: 1, desktopKey: "b" }));
+    await capture(ctx);
+    expect(await io.read("cs/store/configdir/plugins/demo/data.json")).toBe(base);
+    expect(await io.read("cs/store/configdir/plugins/demo/data.json.__scopes__.desktop.json")).toContain("b");
+    expect((JSON.parse(await io.read("cs/store.lock.json")) as StoreLock).groups["plugin-demo"]?.hash).not.toBe(first);
+  });
+
+  it("leaves the hash absent for an item whose store copy is ciphertext", async () => {
+    const { io, ctx } = setup();
+    ctx.passphrase = "pw";
+    io.seed({ ".obs/secrets.json": '{"token":"x"}' });
+    await seedGroups(
+      ctx,
+      JSON.stringify({ version: 1, groups: [{ name: "secrets", path: "{configDir}/secrets.json", type: "file", devices: "all", mode: "encrypted" }] })
+    );
+    await capture(ctx);
+    const entry = (JSON.parse(await io.read("cs/store.lock.json")) as StoreLock).groups["secrets"];
+    // Every envelope carries its own salt and nonce, so two devices holding the SAME settings hold
+    // different ciphertext. A hash that can never match is worse than none: the item is dated instead.
+    expect(entry?.hash).toBeUndefined();
+    expect(entry?.capturedAt).toBe("2026-07-08T00:00:00.000Z");
+  });
+
+  it("a partial capture dates only the items it touched, and the store stamp follows them", async () => {
+    const { io, ctx } = setup();
+    io.seed({ ".obs/hotkeys.json": '{"a":1}', ".obs/snippets/one.css": "one" });
+    await seedGroups(ctx, TWO_GROUPS);
+    await capture(ctx);
+    const later: CoreContext = { ...ctx, now: () => "2026-07-09T00:00:00.000Z" };
+    await io.write(".obs/hotkeys.json", '{"a":2}');
+    await capture(later, ["hotkeys"]);
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as StoreLock;
+    expect(lock.groups["hotkeys"]?.capturedAt).toBe("2026-07-09T00:00:00.000Z");
+    expect(lock.groups["snippets"]?.capturedAt).toBe("2026-07-08T00:00:00.000Z"); // untouched, and not re-dated
+    expect(lock.capturedAt).toBe("2026-07-09T00:00:00.000Z"); // the newest item's stamp
+  });
+});
+
 describe("capture app-version recording", () => {
   it("records sourceAppVersion for non-plugin groups and sourcePluginVersion for plugin groups", async () => {
     const { io, plugins, ctx } = setup();
@@ -1706,8 +1965,8 @@ describe("capture app-version recording", () => {
     await seedGroups(ctx, MANIFEST);
     await capture(ctx, ["hotkeys", "plugin-demo"]);
     const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, unknown> };
-    expect(lock.groups["hotkeys"]).toEqual({ sourceAppVersion: "1.8.7" });
-    expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.2.3" });
+    expect(lock.groups["hotkeys"]).toEqual(capturedEntry({ sourceAppVersion: "1.8.7" }));
+    expect(lock.groups["plugin-demo"]).toEqual(capturedEntry({ sourcePluginVersion: "1.2.3" }));
   });
 });
 
@@ -1723,7 +1982,7 @@ describe("capture records a group label", () => {
     await seedGroups(ctx, MANIFEST);
     await capture(ctx, ["plugin-demo"]);
     const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, unknown> };
-    expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.2.3", label: "Demo Plugin" });
+    expect(lock.groups["plugin-demo"]).toEqual(capturedEntry({ sourcePluginVersion: "1.2.3", label: "Demo Plugin" }));
   });
 
   it("records the core plugin's runtime name for a core-settings group", async () => {
@@ -1736,7 +1995,7 @@ describe("capture records a group label", () => {
     );
     await capture(ctx, ["daily-notes"]);
     const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, unknown> };
-    expect(lock.groups["daily-notes"]).toEqual({ sourceAppVersion: "1.8.7", label: "Daily notes" });
+    expect(lock.groups["daily-notes"]).toEqual(capturedEntry({ sourceAppVersion: "1.8.7", label: "Daily notes" }));
   });
 
   it("omits the label for an Obsidian option group (no runtime name to resolve)", async () => {
@@ -1745,7 +2004,7 @@ describe("capture records a group label", () => {
     await seedGroups(ctx, MANIFEST);
     await capture(ctx, ["hotkeys"]);
     const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, unknown> };
-    expect(lock.groups["hotkeys"]).toEqual({ sourceAppVersion: "1.8.7" });
+    expect(lock.groups["hotkeys"]).toEqual(capturedEntry({ sourceAppVersion: "1.8.7" }));
   });
 
   // I1 (final-review, 2026-08-05 round): pluginIdForGroup also resolves for a companion dir
@@ -1763,7 +2022,7 @@ describe("capture records a group label", () => {
     );
     await capture(ctx, ["dataview"]);
     const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, unknown> };
-    expect(lock.groups["dataview"]).toEqual({ sourcePluginVersion: "0.5.0" });
+    expect(lock.groups["dataview"]).toEqual(capturedEntry({ sourcePluginVersion: "0.5.0" }));
   });
 
   it("still records the label for the canonical plugin-<id> group", async () => {
@@ -1777,7 +2036,7 @@ describe("capture records a group label", () => {
     );
     await capture(ctx, ["plugin-dataview"]);
     const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, unknown> };
-    expect(lock.groups["plugin-dataview"]).toEqual({ sourcePluginVersion: "0.5.0", label: "Dataview" });
+    expect(lock.groups["plugin-dataview"]).toEqual(capturedEntry({ sourcePluginVersion: "0.5.0", label: "Dataview" }));
   });
 });
 
@@ -1795,10 +2054,9 @@ describe("capture records carrier memberLabels", () => {
     await seedGroups(ctx, COMMUNITY_MANIFEST);
     await capture(ctx, ["community-plugins"]);
     const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, unknown> };
-    expect(lock.groups["community-plugins"]).toEqual({
-      sourceAppVersion: "1.8.7",
-      memberLabels: { dataview: "Dataview", templater: "Templater" },
-    });
+    expect(lock.groups["community-plugins"]).toEqual(
+      capturedEntry({ sourceAppVersion: "1.8.7", memberLabels: { dataview: "Dataview", templater: "Templater" } })
+    );
   });
 
   it("records memberLabels for every resolvable id in the core carrier's resulting store list (map shape)", async () => {
@@ -1808,7 +2066,7 @@ describe("capture records carrier memberLabels", () => {
     await seedGroups(ctx, CORE_MANIFEST);
     await capture(ctx, ["core-plugins"]);
     const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, unknown> };
-    expect(lock.groups["core-plugins"]).toEqual({ sourceAppVersion: "1.8.7", memberLabels: { "daily-notes": "Daily notes" } });
+    expect(lock.groups["core-plugins"]).toEqual(capturedEntry({ sourceAppVersion: "1.8.7", memberLabels: { "daily-notes": "Daily notes" } }));
   });
 });
 
@@ -2163,9 +2421,13 @@ describe("pull lock adoption for identical groups (version-refresh chain)", () =
     const pending = await planImport(ctx, reader, { excludeSelf: false });
     expect(pending.plan.conflicts).toEqual([]);
     await applyImport(ctx, pending, []);
-    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { capturedAt: string; groups: Record<string, { sourceAppVersion?: string }> };
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { capturedAt: string; syncedWatermark: string; groups: Record<string, { sourceAppVersion?: string }> };
     expect(lock.groups["hotkeys"]?.sourceAppVersion).toBe("2.0.0"); // adopted despite zero file writes
-    expect(lock.capturedAt).toBe("newer");
+    // spec §6 split the one field that used to carry both meanings: the remote's lineage lands on
+    // syncedWatermark (which is what makes remoteLockAhead settle), while capturedAt keeps
+    // describing this store's own content and is never overwritten with the remote's stamp.
+    expect(lock.syncedWatermark).toBe("newer");
+    expect(lock.capturedAt).toBe("old");
   });
 
   it("locally-kept groups keep their local lock entries", async () => {

@@ -5,6 +5,11 @@ import {
   validateSyncManifest,
   validateRemotes,
   ManifestValidationError,
+  derivedLockCapturedAt,
+  lockEntryTail,
+  lockLineage,
+  lockTail,
+  lockWatermark,
 } from "../src/core/manifest";
 
 function manifestWith(groups: unknown[]): string {
@@ -343,6 +348,137 @@ describe("parseStoreLock memberLabels", () => {
     expect(() =>
       parseStoreLock(JSON.stringify({ capturedAt: "t", groups: { a: { sourcePluginVersion: "1.0.0", memberLabels: { x: 42 } } } }))
     ).toThrow('store.lock.json group "a" has a "memberLabels" that isn\'t a map of id to text');
+  });
+});
+
+// spec 2026-08-11-data-model-hardening.md §3.1 (invariant II.1): the parse validates the fields it
+// knows and CARRIES everything else. The whitelist rebuild this replaced was not a local loss — the
+// pull path writes the parsed lock back, so an older device stripped a newer device's fields and
+// pushed the loss on to the fleet, which is why the lock format could never evolve.
+describe("parseStoreLock carries unknown keys (unknown ⇒ preserve)", () => {
+  const RAW = {
+    capturedAt: "2026-08-11T00:00:00.000Z",
+    version: 3, // a top-level field a newer build writes
+    fleetNotes: { any: ["shape", 1, null] },
+    groups: {
+      "plugin-dataview": {
+        sourcePluginVersion: "0.5.0",
+        label: "Dataview",
+        hash: "sha256:abc", // an entry field a newer build writes
+        perMemberFreshness: { dataview: "2026-08-11T00:00:00.000Z" },
+      },
+    },
+  };
+
+  it("round-trips unknown top-level and unknown entry keys through parse → JSON.stringify", () => {
+    const lock = parseStoreLock(JSON.stringify(RAW));
+    expect(lock["version"]).toBe(3);
+    expect(lock["fleetNotes"]).toEqual({ any: ["shape", 1, null] });
+    const entry = lock.groups["plugin-dataview"];
+    expect(entry?.["hash"]).toBe("sha256:abc");
+    expect(entry?.["perMemberFreshness"]).toEqual({ dataview: "2026-08-11T00:00:00.000Z" });
+    // and the whole document survives serialization, not just the in-memory object.
+    expect(JSON.parse(JSON.stringify(lock))).toEqual(RAW);
+  });
+
+  it("still normalizes the fields it knows around the carried ones", () => {
+    const lock = parseStoreLock(
+      JSON.stringify({
+        capturedAt: "t",
+        groups: { a: { sourcePluginVersion: "1.0.0", sourceAppVersion: 7, desktopOnly: false, label: "  ", memberLabels: { x: " " }, keepMe: 1 } },
+      })
+    );
+    // a non-string version, desktopOnly:false, a blank label and an all-blank memberLabels map are
+    // dropped exactly as the whitelist rebuild dropped them — carrying must not smuggle them back.
+    expect(lock.groups["a"]).toEqual({ sourcePluginVersion: "1.0.0", keepMe: 1 });
+  });
+
+  // The known fields come back in a FIXED order however the document happened to write them, and
+  // the carried tail lands AFTER that block — so two devices re-emitting the same entry produce the
+  // same bytes and the lock file stops churning the vault's history on every parse-and-write.
+  // (§6 retired the correctness half of this argument: remoteLockAhead no longer stringifies.)
+  // The shuffle covers the tail as well as the known block, which is what the claim is about.
+  it("emits the known fields in a fixed order, with the carried tail after them", () => {
+    const shuffled = parseStoreLock(
+      JSON.stringify({ capturedAt: "t", groups: { a: { zTail: 1, label: "Demo", aTail: 2, desktopOnly: true, sourcePluginVersion: "1.0.0" } } })
+    );
+    const canonical = parseStoreLock(
+      JSON.stringify({ capturedAt: "t", groups: { a: { sourcePluginVersion: "1.0.0", desktopOnly: true, label: "Demo", zTail: 1, aTail: 2 } } })
+    );
+    expect(JSON.stringify(shuffled)).toBe(JSON.stringify(canonical));
+    // …and the block really is known-then-tail, not merely "the same either way".
+    expect(Object.keys(shuffled.groups["a"] ?? {})).toEqual(["sourcePluginVersion", "desktopOnly", "label", "zTail", "aTail"]);
+  });
+
+  it("rejects exactly what it rejected before, with the same messages", () => {
+    expect(() => parseStoreLock(JSON.stringify({ capturedAt: "t", groups: { a: { fromTheFuture: true } } }))).toThrow(
+      'store.lock.json group "a" must have a string sourcePluginVersion or sourceAppVersion'
+    );
+    expect(() => parseStoreLock(JSON.stringify({ capturedAt: "t", groups: { a: 5 } }))).toThrow(
+      'store.lock.json group "a" must have a string sourcePluginVersion or sourceAppVersion'
+    );
+    expect(() => parseStoreLock(JSON.stringify({ capturedAt: "t", groups: { a: { sourceAppVersion: "1.8.7", label: 42, keepMe: 1 } } }))).toThrow(
+      'store.lock.json group "a" has a "label" that isn\'t text'
+    );
+    expect(() => parseStoreLock(JSON.stringify({ groups: {} }))).toThrow("store.lock.json must be {capturedAt: string, groups: object}");
+  });
+});
+
+// spec 2026-08-11-data-model-hardening.md §6: the v2 payload's readers. All four narrow the raw
+// value rather than trusting the declared type, because the fields arrive through the carried tail
+// (§3.1) and are never validated on the way in.
+describe("store.lock v2 field readers", () => {
+  it("lockWatermark falls back to capturedAt for a v1 lock, which is the comparison v1 already made", () => {
+    expect(lockWatermark({ capturedAt: "2026-08-01T00:00:00.000Z", groups: {} })).toBe("2026-08-01T00:00:00.000Z");
+    expect(lockWatermark({ capturedAt: "2026-08-01T00:00:00.000Z", syncedWatermark: "2026-08-09T00:00:00.000Z", groups: {} })).toBe(
+      "2026-08-09T00:00:00.000Z"
+    );
+    // A malformed watermark is not evidence of anything — the v1 reading stands, and the value
+    // still rides through untouched. Built by parsing, because that is the only way such a document
+    // reaches a reader: the field is never validated on the way in.
+    const malformed = parseStoreLock(JSON.stringify({ capturedAt: "2026-08-01T00:00:00.000Z", syncedWatermark: 7, groups: {} }));
+    expect(lockWatermark(malformed)).toBe("2026-08-01T00:00:00.000Z");
+    expect(malformed["syncedWatermark"]).toBe(7);
+  });
+
+  it("lockLineage is never older than the lock's own capturedAt", () => {
+    // The scale locks from both builds are compared on. A v2 lock's watermark stops moving on
+    // capture; a v1 lock's single stamp does not. Taking the LATER of the two is what keeps a device
+    // that captured locally from reading as behind an older device that merely pulled from it.
+    expect(lockLineage({ syncedWatermark: "2026-08-01T00:00:00.000Z", capturedAt: "2026-08-09T00:00:00.000Z", groups: {} })).toBe(
+      "2026-08-09T00:00:00.000Z"
+    );
+    expect(lockLineage({ syncedWatermark: "2026-08-09T00:00:00.000Z", capturedAt: "2026-08-01T00:00:00.000Z", groups: {} })).toBe(
+      "2026-08-09T00:00:00.000Z"
+    );
+    // a v1 lock has only the one stamp, which is exactly what it always compared by
+    expect(lockLineage({ capturedAt: "2026-08-01T00:00:00.000Z", groups: {} })).toBe("2026-08-01T00:00:00.000Z");
+    // an undatable value never displaces a real one, in either slot
+    expect(lockLineage(parseStoreLock(JSON.stringify({ capturedAt: "T", syncedWatermark: "2026-08-01T00:00:00.000Z", groups: {} })))).toBe(
+      "2026-08-01T00:00:00.000Z"
+    );
+    expect(lockLineage({ capturedAt: "T", groups: {} })).toBe("T");
+  });
+
+  it("derivedLockCapturedAt takes the newest item stamp, never falls below a floor, and never returns nothing", () => {
+    const groups = {
+      a: { sourceAppVersion: "1.8.7", capturedAt: "2026-08-02T00:00:00.000Z" },
+      b: { sourceAppVersion: "1.8.7", capturedAt: "2026-08-05T00:00:00.000Z" },
+      c: { sourceAppVersion: "1.8.7" }, // pre-v2 entry: no stamp of its own, and that is not a difference
+    };
+    expect(derivedLockCapturedAt(groups, [], "now")).toBe("2026-08-05T00:00:00.000Z");
+    expect(derivedLockCapturedAt(groups, ["2026-08-09T00:00:00.000Z"], "now")).toBe("2026-08-09T00:00:00.000Z"); // floor wins
+    expect(derivedLockCapturedAt(groups, ["2026-08-01T00:00:00.000Z"], "now")).toBe("2026-08-05T00:00:00.000Z"); // older floor does not
+    expect(derivedLockCapturedAt({ a: { sourceAppVersion: "1.8.7" } }, ["not-a-date"], "now")).toBe("now"); // nothing datable
+  });
+
+  it("the tail helpers strip exactly the fields this build writes for itself", () => {
+    expect(
+      lockEntryTail({ sourcePluginVersion: "1.0.0", label: "Demo", capturedAt: "t", hash: "abc", fromTheFuture: { deep: [1] } })
+    ).toEqual({ fromTheFuture: { deep: [1] } });
+    expect(lockEntryTail(undefined)).toEqual({});
+    expect(lockTail({ version: 2, syncedWatermark: "w", capturedAt: "c", groups: {}, fleetNotes: 1 })).toEqual({ fleetNotes: 1 });
+    expect(lockTail(null)).toEqual({});
   });
 });
 

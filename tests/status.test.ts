@@ -4,7 +4,7 @@ import { parseSyncManifest } from "../src/core/manifest";
 import { statusForGroups, checkRemote, diffRemote, bucketCounts, remoteLockAhead, remoteDirectionCounts, remoteLockLabels, GroupStatus } from "../src/core/status";
 import { applyUpdates, emptyLedger, Ledger } from "../src/core/ledger";
 import { directionForState, stageableRow } from "../src/ui/panelModel";
-import { SyncGroup } from "../src/core/types";
+import { StoreLock, StoreLockEntry, SyncGroup } from "../src/core/types";
 import { MemFS, FakePlugins, memGroupsIO } from "./memfs";
 
 const MANIFEST = JSON.stringify({
@@ -346,27 +346,192 @@ describe("remoteLockAhead", () => {
   });
 });
 
+// spec 2026-08-11-data-model-hardening.md §6. The comparison is key by key, never JSON.stringify;
+// display fields do not count; a field only one side has does not count; the ITEMS answer first,
+// and the store-level stamp speaks only where they leave a gap.
+describe("remoteLockAhead against the v2 payload", () => {
+  const AT = "2026-08-11T10:00:00.000Z";
+  const LATER = "2026-08-11T11:00:00.000Z";
+  const v2 = (syncedWatermark: string, groups: Record<string, object>, capturedAt = AT): string =>
+    JSON.stringify({ version: 2, syncedWatermark, capturedAt, groups });
+
+  it("the store stamp cannot manufacture a difference the items deny", () => {
+    // Only where the items leave a GAP does the stamp get to speak. Here every entry is present and
+    // dated on both sides and they agree, so an hour-newer remote stamp is not a pull.
+    const entries = { a: { sourceAppVersion: "1.0", capturedAt: AT, hash: "sha256:h1" } };
+    expect(remoteLockAhead(v2(AT, entries), v2(LATER, entries, LATER), [])).toBe(false);
+    // With no entries at all there is nothing to deny it, and the stamp answers as it always did.
+    expect(remoteLockAhead(v2(AT, {}), v2(LATER, {}, LATER), [])).toBe(true);
+  });
+
+  it("a stamp no date parser can read does not count as dated", () => {
+    // "Dated on both sides" is what lets the items silence the store stamp. A non-empty value
+    // Date.parse cannot order by dates nothing — counting it would silence BOTH paths, on the
+    // strength of evidence that could not itself have spoken.
+    const local = v2(AT, { a: { sourceAppVersion: "1.0", capturedAt: "T" } });
+    const remote = v2(LATER, { a: { sourceAppVersion: "1.0", capturedAt: "T" } }, LATER);
+    expect(remoteLockAhead(local, remote, [])).toBe(true);
+    // …and a readable stamp on both sides really does silence it — that contrast is the point.
+    const dated = v2(AT, { a: { sourceAppVersion: "1.0", capturedAt: AT } });
+    const datedRemote = v2(LATER, { a: { sourceAppVersion: "1.0", capturedAt: AT } }, LATER);
+    expect(remoteLockAhead(dated, datedRemote, [])).toBe(false);
+  });
+
+  it("an older device's pull-and-push does not read as newer (the mixed-fleet regression)", () => {
+    // The live shape: this device captured at LATER, so its own lineage is LATER even though its
+    // watermark still points at the older state it last pulled (a capture never moves the
+    // watermark). A device on an older build then pulled from us — its build copies OUR capturedAt
+    // into its only stamp and strips version/watermark/per-item fields — and pushed back. Nothing
+    // about the content changed. Comparing our watermark against its stamp read "newer" and lit the
+    // hint permanently; comparing LINEAGE (the later of watermark and capturedAt) puts both sides on
+    // the same scale.
+    const local = v2("2026-08-11T08:00:00.000Z", { a: { sourceAppVersion: "1.0", capturedAt: LATER, hash: "sha256:h1" } }, LATER);
+    const olderDevice = JSON.stringify({ capturedAt: LATER, groups: { a: { sourceAppVersion: "1.0" } } });
+    expect(remoteLockAhead(local, olderDevice, [])).toBe(false);
+    // …and the older device genuinely capturing something later IS still a pull.
+    const afterItCaptured = JSON.stringify({ capturedAt: "2026-08-11T12:00:00.000Z", groups: { a: { sourceAppVersion: "1.0" } } });
+    expect(remoteLockAhead(local, afterItCaptured, [])).toBe(true);
+  });
+
+  it("a display-only change is not 'ahead'", () => {
+    const entry = { sourcePluginVersion: "1.0", capturedAt: AT, hash: "h1" };
+    const local = v2(AT, { "plugin-demo": { ...entry, label: "Demo", memberLabels: { x: "X" } } });
+    const remote = v2(AT, { "plugin-demo": { ...entry, label: "Demo Plugin (renamed)", memberLabels: { x: "X renamed" } } });
+    expect(remoteLockAhead(local, remote, [])).toBe(false);
+  });
+
+  it("key order never counts — neither in the known block nor in the carried tail", () => {
+    const local = v2(AT, { a: { sourceAppVersion: "1.0", hash: "h1", capturedAt: AT, fleet: { x: 1, y: 2 } } });
+    const remote = v2(AT, { a: { fleet: { y: 2, x: 1 }, capturedAt: AT, hash: "h1", sourceAppVersion: "1.0" } });
+    expect(remoteLockAhead(local, remote, [])).toBe(false);
+  });
+
+  it("a field the other side does not have is not a difference (the mixed-fleet rule)", () => {
+    // The un-updated device in the fleet strips version/capturedAt/hash every time it pulls; the
+    // next capture here writes them back. That churn must not read as "the store has newer settings".
+    const rich = v2(AT, { a: { sourceAppVersion: "1.0", capturedAt: AT, hash: "h1" } });
+    const stripped = JSON.stringify({ capturedAt: AT, groups: { a: { sourceAppVersion: "1.0" } } });
+    expect(remoteLockAhead(rich, stripped, [])).toBe(false);
+    expect(remoteLockAhead(stripped, rich, [])).toBe(false);
+    // …but a key BOTH sides carry, with different values, still is one.
+    const moved = v2(AT, { a: { sourceAppVersion: "1.0", capturedAt: LATER, hash: "h2" } });
+    expect(remoteLockAhead(rich, moved, [])).toBe(true);
+  });
+
+  it("a differing entry the LOCAL side captured later is not something a pull would improve", () => {
+    const local = v2(AT, { a: { sourceAppVersion: "2.0", capturedAt: LATER, hash: "h2" } });
+    const remote = v2(AT, { a: { sourceAppVersion: "1.0", capturedAt: AT, hash: "h1" } });
+    expect(remoteLockAhead(local, remote, [])).toBe(false);
+    expect(remoteLockAhead(remote, local, [])).toBe(true); // and the other way round it is
+  });
+
+  it("an absent hash is never a difference — an encrypted item is dated, not fingerprinted", () => {
+    // One side fingerprints the item, the other cannot (its store copy is ciphertext, or it is on an
+    // older build). The missing side is not evidence of anything: same capture time, same versions,
+    // not a pull — in EITHER direction. At BASE this was a difference, since the two entries did not
+    // stringify alike.
+    const hashed = v2(AT, { secrets: { sourceAppVersion: "1.0", capturedAt: AT, hash: "sha256:h1" } });
+    const unhashed = v2(AT, { secrets: { sourceAppVersion: "1.0", capturedAt: AT } });
+    expect(remoteLockAhead(hashed, unhashed, [])).toBe(false);
+    expect(remoteLockAhead(unhashed, hashed, [])).toBe(false);
+    // With no fingerprint on either side the capture time is all that is left to judge by, and it
+    // still judges — an absent hash costs precision, it does not silence the item.
+    const later = v2(AT, { secrets: { sourceAppVersion: "1.0", capturedAt: LATER } });
+    expect(remoteLockAhead(unhashed, later, [])).toBe(true);
+    expect(remoteLockAhead(later, unhashed, [])).toBe(false);
+  });
+});
+
+describe("checkRemote per-item resolution (v2)", () => {
+  const AT = "2026-08-11T10:00:00.000Z";
+  const EARLIER = "2026-08-11T09:00:00.000Z";
+  const LATER = "2026-08-11T11:00:00.000Z";
+  const item = (capturedAt: string, hash: string): StoreLockEntry => ({ sourceAppVersion: "1.0", capturedAt, hash });
+  const v2 = (capturedAt: string, groups: Record<string, StoreLockEntry>): StoreLock => ({
+    version: 2,
+    syncedWatermark: capturedAt,
+    capturedAt,
+    groups,
+  });
+  const remoteFiles = (lock: StoreLock): Record<string, string> => ({
+    "store.lock.json": JSON.stringify(lock),
+    "store/configdir/hotkeys.json": "{}",
+  });
+  const stateOf = async (local: StoreLock, remote: StoreLock, ignoreGroups: string[] = []): Promise<string> =>
+    (await checkRemote(local, fakeReader(remoteFiles(remote)), ignoreGroups)).state;
+
+  it("reads 'same' when both sides hold the same items, however the whole-store stamps compare", async () => {
+    // The remote's whole-store stamp is an hour ahead; every item in it is identical, so a pull
+    // would change nothing. Before §6 this reported "remote-newer" and invited a pointless pull.
+    const entries = { a: item(AT, "h1") };
+    expect(await stateOf(v2(AT, entries), v2(LATER, entries))).toBe("same");
+  });
+
+  it("reads the direction from the item that actually moved", async () => {
+    const local = v2(AT, { a: item(AT, "h1") });
+    expect(await stateOf(local, v2(AT, { a: item(LATER, "h2") }))).toBe("remote-newer");
+    expect(await stateOf(local, v2(LATER, { a: item(EARLIER, "h0") }))).toBe("remote-older");
+  });
+
+  it("an item only one side has still decides the direction", async () => {
+    const local = v2(AT, { a: item(AT, "h1") });
+    expect(await stateOf(local, v2(AT, { a: item(AT, "h1"), b: item(AT, "h2") }))).toBe("remote-newer");
+    expect(await stateOf(v2(AT, { a: item(AT, "h1"), b: item(AT, "h2") }), v2(AT, { a: item(AT, "h1") }))).toBe("remote-older");
+  });
+
+  it("either side at v1 falls back to today's whole-store comparison, exactly", async () => {
+    const v1 = (capturedAt: string): StoreLock => ({ capturedAt, groups: { a: { sourceAppVersion: "1.0" } } });
+    expect(await stateOf(v1(AT), v2(LATER, { a: item(AT, "h1") }))).toBe("remote-newer");
+    expect(await stateOf(v2(AT, { a: item(AT, "h1") }), v1(LATER))).toBe("remote-newer");
+  });
+
+  it("two stores ahead of each other in different items fall back rather than pick a side", async () => {
+    // Both directions at once has no RemoteState of its own — the whole-store stamps answer instead.
+    const local = v2(AT, { a: item(LATER, "h2"), b: item(AT, "h1") });
+    const crossed = v2(LATER, { a: item(AT, "h1"), b: item(LATER, "h2") });
+    expect(await stateOf(local, crossed)).toBe("remote-newer");
+  });
+
+  it("a lock version this build cannot read reports 'unknown', so the panel never invites a pull", async () => {
+    const local = v2(AT, { a: item(AT, "h1") });
+    const future: StoreLock = { version: 3, capturedAt: LATER, groups: { a: { sourceAppVersion: "1.0" } } };
+    const check = await checkRemote(local, fakeReader(remoteFiles(future)), []);
+    expect(check.state).toBe("unknown");
+    expect(check.remoteCapturedAt).toBe(LATER); // it parsed — saying WHEN is not inviting a pull
+  });
+
+  it("ignoreGroups keeps an excludeSelf remote's self entry from pinning a direction forever", async () => {
+    // A remote with `excludeSelf` never exchanges the self item, so the two sides' self entries
+    // diverge by design and no Pull can ever reconcile them. Without the ignore list the per-item
+    // path resolves a permanent arrow from exactly that entry.
+    const local = v2(AT, { a: item(AT, "h1"), "plugin-config-sync": item(AT, "mine") });
+    const remote = v2(AT, { a: item(AT, "h1"), "plugin-config-sync": item(LATER, "theirs") });
+    expect(await stateOf(local, remote)).toBe("remote-newer");
+    expect(await stateOf(local, remote, ["plugin-config-sync"])).toBe("same");
+  });
+});
+
 describe("checkRemote", () => {
   const localLock = { capturedAt: "2026-07-08T00:00:00.000Z", groups: {} };
   it("classifies all five states", async () => {
-    expect((await checkRemote(localLock, fakeReader({}))).state).toBe("no-store");
-    expect((await checkRemote(localLock, fakeReader({ "config-sync.json": "{}" }))).state).toBe("unknown");
+    expect((await checkRemote(localLock, fakeReader({}), [])).state).toBe("no-store");
+    expect((await checkRemote(localLock, fakeReader({ "config-sync.json": "{}" }), [])).state).toBe("unknown");
     const at = (t: string): Record<string, string> => ({ "config-sync.json": "{}", "store.lock.json": JSON.stringify({ capturedAt: t, groups: {} }) });
-    expect((await checkRemote(localLock, fakeReader(at("2026-07-09T00:00:00.000Z")))).state).toBe("remote-newer");
-    expect((await checkRemote(localLock, fakeReader(at("2026-07-07T00:00:00.000Z")))).state).toBe("remote-older");
-    expect((await checkRemote(localLock, fakeReader(at("2026-07-08T00:00:00.000Z")))).state).toBe("same");
+    expect((await checkRemote(localLock, fakeReader(at("2026-07-09T00:00:00.000Z")), [])).state).toBe("remote-newer");
+    expect((await checkRemote(localLock, fakeReader(at("2026-07-07T00:00:00.000Z")), [])).state).toBe("remote-older");
+    expect((await checkRemote(localLock, fakeReader(at("2026-07-08T00:00:00.000Z")), [])).state).toBe("same");
     // bootstrap device (no local lock yet) with a reachable, parseable remote → remote-newer,
     // not "unknown": a pull would populate the store, so the state is known and truthful.
-    expect((await checkRemote(null, fakeReader(at("2026-07-09T00:00:00.000Z")))).state).toBe("remote-newer");
+    expect((await checkRemote(null, fakeReader(at("2026-07-09T00:00:00.000Z")), [])).state).toBe("remote-newer");
   });
   it("recognizes a new-format store (store/** + lock, no root config-sync.json)", async () => {
     const newFormat = {
       "store.lock.json": JSON.stringify({ capturedAt: "2026-07-09T00:00:00.000Z", groups: {} }),
       "store/configdir/hotkeys.json": "{}",
     };
-    expect((await checkRemote(localLock, fakeReader(newFormat))).state).toBe("remote-newer");
+    expect((await checkRemote(localLock, fakeReader(newFormat), [])).state).toBe("remote-newer");
     // store files but no lock yet → present but unknown, NOT no-store
-    expect((await checkRemote(localLock, fakeReader({ "store/configdir/hotkeys.json": "{}" }))).state).toBe("unknown");
+    expect((await checkRemote(localLock, fakeReader({ "store/configdir/hotkeys.json": "{}" }), [])).state).toBe("unknown");
   });
 });
 

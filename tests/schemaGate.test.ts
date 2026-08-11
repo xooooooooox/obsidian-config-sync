@@ -1,34 +1,199 @@
 import { describe, expect, it } from "vitest";
-import { drainEnabledOnLocal, isLegacySettings, mergeLegacyAppSliceItems, sanitizeMemberRules, SCHEMA_UPGRADE_NOTICE } from "../src/core/settingsMigration";
-import type { MemberRule } from "../src/core/types";
+import { classifySettings, CURRENT_SCHEMA, deviceOptOutsFor, drainEnabledOnLocal, isFutureSchemaDocument, mergeLegacyAppSliceItems, SCHEMA_FUTURE_APPLY_MESSAGE, SCHEMA_FUTURE_NOTICE, SCHEMA_UPGRADE_NOTICE, withDefaults, withDeviceOptOut } from "../src/core/settingsMigration";
 import { emptyItemConfig, ItemConfig } from "../src/core/registry";
 
 // spec 2026-07-25-unified-card-design.md §6, D13: blocking upgrade — no data migration, no
 // compat window. A data.json without `schemaVersion: 2` (the old `groups`-based shape, or
 // anything unversioned) is legacy and must be blocked with this exact Notice text.
+//
+// spec 2026-08-11-data-model-hardening.md §4.1 (invariant II.3) splits a fourth answer out of that
+// same test: `isLegacySettings` was `schemaVersion !== 2`, so a document from a NEWER build took
+// the legacy path — notice, defaults in memory, the user's whole setup overwritten at the next
+// save. Since data.json travels between a user's devices wholesale, that made a staged upgrade
+// able to wipe a device that hadn't updated yet.
 
-describe("isLegacySettings", () => {
-  it("a fresh install (no data.json yet) is not legacy", () => {
-    expect(isLegacySettings(null)).toBe(false);
+describe("classifySettings", () => {
+  it("a fresh install (no data.json yet) is neither legacy nor a stop", () => {
+    expect(classifySettings(null)).toEqual({ kind: "fresh" });
   });
 
-  it("v2 settings load through unchanged", () => {
-    expect(isLegacySettings({ schemaVersion: 2, items: {}, appJson: { mode: "fields" } })).toBe(false);
+  it("this build's own schema loads through unchanged", () => {
+    expect(classifySettings({ schemaVersion: CURRENT_SCHEMA, items: {}, appJson: { mode: "fields" } })).toEqual({ kind: "ok" });
   });
 
-  it("the old groups-based v1 shape is blocked", () => {
-    expect(isLegacySettings({ groups: [], memberScopes: {}, memberLocal: {} })).toBe(true);
+  it("the old groups-based v1 shape is legacy", () => {
+    expect(classifySettings({ groups: [], memberScopes: {}, memberLocal: {} })).toEqual({ kind: "legacy" });
   });
 
-  it("any non-2 schemaVersion is blocked", () => {
-    expect(isLegacySettings({ schemaVersion: 1 })).toBe(true);
-    expect(isLegacySettings({})).toBe(true);
+  it("an older or unversioned schema is legacy", () => {
+    expect(classifySettings({ schemaVersion: 1 })).toEqual({ kind: "legacy" });
+    expect(classifySettings({})).toEqual({ kind: "legacy" });
+  });
+
+  it("a NEWER schema is its own answer — never legacy, and it carries the version it found", () => {
+    expect(classifySettings({ schemaVersion: 3, items: {} })).toEqual({ kind: "future", found: 3 });
+    expect(classifySettings({ schemaVersion: 99 })).toEqual({ kind: "future", found: 99 });
+  });
+
+  // A schemaVersion that isn't a number is not evidence of a newer build (a hand edit, a truncated
+  // write), so it keeps today's verdict exactly rather than stopping the plugin dead.
+  it("a non-numeric schemaVersion stays legacy", () => {
+    expect(classifySettings({ schemaVersion: "3" })).toEqual({ kind: "legacy" });
+    expect(classifySettings({ schemaVersion: null })).toEqual({ kind: "legacy" });
+  });
+});
+
+// §4.2's half of the same gate: the document about to be written onto this device, still as text.
+describe("isFutureSchemaDocument", () => {
+  it("is true only for a document declaring a schema newer than this build's", () => {
+    expect(isFutureSchemaDocument(JSON.stringify({ schemaVersion: 3, items: {} }))).toBe(true);
+    expect(isFutureSchemaDocument(JSON.stringify({ schemaVersion: CURRENT_SCHEMA, items: {} }))).toBe(false);
+    expect(isFutureSchemaDocument(JSON.stringify({ schemaVersion: 1 }))).toBe(false);
+  });
+
+  it("text that isn't a JSON object is not a newer document", () => {
+    expect(isFutureSchemaDocument("{ truncated")).toBe(false);
+    expect(isFutureSchemaDocument("[]")).toBe(false);
+    expect(isFutureSchemaDocument('"3"')).toBe(false);
+  });
+});
+
+// spec 2026-08-11-data-model-hardening.md §5.1 (S8): the shallow Object.assign this replaced
+// filled only the top level, so a field added inside runHistory/ribbonButtons was `undefined` on
+// any older document. Invariant II.1 binds it in the other direction: nothing the document carries
+// may be lost, known or not.
+describe("withDefaults", () => {
+  const defaults = {
+    schemaVersion: 2,
+    rootPath: "",
+    remotes: [] as string[],
+    ribbonButtons: { sync: false },
+    runHistory: { enabled: true, path: "", maxCount: 50, maxDays: 30 },
+    items: {} as Record<string, unknown>,
+  };
+
+  it("no document at all is the defaults", () => {
+    expect(withDefaults(defaults, null)).toEqual(defaults);
+  });
+
+  it("backfills a MISSING nested field while keeping the stored ones", () => {
+    const loaded = withDefaults(defaults, { schemaVersion: 2, runHistory: { enabled: false, maxCount: 5 } });
+    expect(loaded.runHistory).toEqual({ enabled: false, path: "", maxCount: 5, maxDays: 30 });
+  });
+
+  it("carries unknown keys through untouched, top-level and nested", () => {
+    const loaded = withDefaults(defaults, {
+      schemaVersion: 2,
+      fromAFutureVersion: { deep: [1, 2] },
+      runHistory: { enabled: false, alsoFromTheFuture: "keep me" },
+    }) as typeof defaults & { fromAFutureVersion: unknown; runHistory: { alsoFromTheFuture: string } };
+    expect(loaded.fromAFutureVersion).toEqual({ deep: [1, 2] });
+    expect(loaded.runHistory.alsoFromTheFuture).toBe("keep me");
+    expect(loaded.runHistory.maxDays).toBe(30); // and the default still filled in around it
+  });
+
+  it("a stored value always wins over the default, including an emptied array or map", () => {
+    const loaded = withDefaults(defaults, { schemaVersion: 2, rootPath: "vault/cs", remotes: [], items: { hotkeys: { enabled: true } } });
+    expect(loaded.rootPath).toBe("vault/cs");
+    expect(loaded.items).toEqual({ hotkeys: { enabled: true } });
+  });
+
+  it("never mutates the defaults it was given", () => {
+    withDefaults(defaults, { schemaVersion: 2, runHistory: { maxDays: 1 } });
+    expect(defaults.runHistory.maxDays).toBe(30);
+  });
+
+  it("hands out its OWN nested object even when the document had none — the settings tab edits it in place", () => {
+    const loaded = withDefaults(defaults, { schemaVersion: 2 });
+    expect(loaded.runHistory).not.toBe(defaults.runHistory);
+    loaded.runHistory.enabled = false;
+    expect(defaults.runHistory.enabled).toBe(true);
+  });
+
+  it("a nested value stored as a non-object is left exactly as found — this is a fill, not a validator", () => {
+    const loaded = withDefaults(defaults, { schemaVersion: 2, runHistory: "broken" }) as unknown as { runHistory: unknown };
+    expect(loaded.runHistory).toBe("broken");
+  });
+});
+
+// spec 2026-08-11-data-model-hardening.md §2 ruling: the pre-C-#52 map is CARRIED. These two are
+// the whole contract in pure form — read this device's groups out of it, and write this device's
+// id into it without ever disturbing another device's entry.
+describe("deviceOptOutsFor / withDeviceOptOut", () => {
+  it("reads only the groups whose array names this device", () => {
+    expect(deviceOptOutsFor({ hotkeys: ["d1", "d2"], appearance: ["d2"], themes: [] }, "d1")).toEqual(["hotkeys"]);
+  });
+
+  it("anything that isn't the old shape reads as nothing", () => {
+    expect(deviceOptOutsFor(undefined, "d1")).toEqual([]);
+    expect(deviceOptOutsFor(null, "d1")).toEqual([]);
+    expect(deviceOptOutsFor(["hotkeys"], "d1")).toEqual([]);
+    expect(deviceOptOutsFor({ hotkeys: "d1" }, "d1")).toEqual([]);
+  });
+
+  it("adds and removes only this device's id, and prunes the group only when it empties", () => {
+    expect(withDeviceOptOut({ hotkeys: ["d2"] }, "d1", "hotkeys", true)).toEqual({ hotkeys: ["d2", "d1"] });
+    expect(withDeviceOptOut({ hotkeys: ["d2", "d1"] }, "d1", "hotkeys", false)).toEqual({ hotkeys: ["d2"] });
+    expect(withDeviceOptOut({ hotkeys: ["d1"] }, "d1", "hotkeys", false)).toEqual({});
+    expect(withDeviceOptOut(undefined, "d1", "hotkeys", true)).toEqual({ hotkeys: ["d1"] });
+  });
+
+  it("is idempotent in both directions", () => {
+    expect(withDeviceOptOut({ hotkeys: ["d1"] }, "d1", "hotkeys", true)).toEqual({ hotkeys: ["d1"] });
+    expect(withDeviceOptOut({ appearance: ["d2"] }, "d1", "hotkeys", false)).toEqual({ appearance: ["d2"] });
+  });
+
+  it("never mutates the map it was given, nor the arrays inside it", () => {
+    const map = { hotkeys: ["d2"], appearance: ["d1"] };
+    const snapshot = JSON.parse(JSON.stringify(map)) as typeof map;
+    withDeviceOptOut(map, "d1", "hotkeys", true);
+    withDeviceOptOut(map, "d1", "appearance", false);
+    expect(map).toEqual(snapshot);
+  });
+
+  // Round-5 review M1. A group value that is not an array is a shape from a build we don't know:
+  // spreading a string would explode it into characters and filtering a number would throw — and a
+  // throw here lands AFTER localStorage was written, leaving the two stores disagreeing with no
+  // notice and no re-render. Carry it, and never throw.
+  it("leaves a group value that is not an array exactly as found, in both directions", () => {
+    for (const junk of ["d1", 7, null, { d1: true }]) {
+      expect(withDeviceOptOut({ hotkeys: junk }, "d1", "hotkeys", true)).toEqual({ hotkeys: junk });
+      expect(withDeviceOptOut({ hotkeys: junk }, "d1", "hotkeys", false)).toEqual({ hotkeys: junk });
+    }
+  });
+
+  it("a malformed group elsewhere never blocks this device's own entry", () => {
+    expect(withDeviceOptOut({ appearance: "broken" }, "d1", "hotkeys", true)).toEqual({ appearance: "broken", hotkeys: ["d1"] });
+  });
+
+  it("carries non-string elements inside an array it does edit", () => {
+    expect(withDeviceOptOut({ hotkeys: ["d2", 7] }, "d1", "hotkeys", true)).toEqual({ hotkeys: ["d2", 7, "d1"] });
+    expect(withDeviceOptOut({ hotkeys: ["d2", 7, "d1"] }, "d1", "hotkeys", false)).toEqual({ hotkeys: ["d2", 7] });
+  });
+
+  it("a value that isn't a map at all never throws — it yields this device's entry alone", () => {
+    expect(withDeviceOptOut("not a map", "d1", "hotkeys", true)).toEqual({ hotkeys: ["d1"] });
+    expect(withDeviceOptOut(["hotkeys"], "d1", "hotkeys", false)).toEqual({});
+    expect(withDeviceOptOut(null, "d1", "hotkeys", false)).toEqual({});
   });
 });
 
 describe("SCHEMA_UPGRADE_NOTICE", () => {
   it("is the character-exact Notice copy", () => {
     expect(SCHEMA_UPGRADE_NOTICE).toBe("Config Sync: this update reset your sync setup — open Settings to choose what to sync again.");
+  });
+});
+
+// §4.1/§4.2 final copy. Pinned character-exact for the same reason as the notice above: these are
+// the sentences the spec approved, and the UI vocabulary rule (`this device` / `your other
+// devices` / `the store`) lives in them.
+describe("the version-gate copy", () => {
+  it("§4.1 — what the Sync Center's banner and every refused write say", () => {
+    expect(SCHEMA_FUTURE_NOTICE).toBe("These settings were written by a newer Config Sync. Update Config Sync on this device to open them. Nothing has been changed.");
+  });
+
+  it("§4.2 — what the self item fails with when the store's document is newer", () => {
+    expect(SCHEMA_FUTURE_APPLY_MESSAGE).toBe("The store's Config Sync settings were written by a newer version. Update Config Sync on this device before applying them.");
   });
 });
 
@@ -94,7 +259,7 @@ describe("mergeLegacyAppSliceItems", () => {
     expect(mergeLegacyAppSliceItems(s)).toBe(true);
     expect(s.items.app).toEqual({
       enabled: true,
-      companions: [],
+      companions: [], // §5.2 phase 1 keeps WRITING the empty array — only readers went tolerant
       settingsFile: { mode: "fields", rules: { vimMode: { scope: "desktop", encrypted: false } }, perItem: {} },
     });
     expect(s.items.editor).toBeUndefined();
@@ -151,20 +316,13 @@ describe("drainEnabledOnLocal", () => {
   });
 });
 
-describe("sanitizeMemberRules (task 2, single-source against MEMBER_RULES)", () => {
-  it("keeps every valid MemberRule value untouched", () => {
-    const s = { memberRules: { "community:a": "always-here", "core:b": "desktop" } as Record<string, MemberRule> };
-    expect(sanitizeMemberRules(s)).toBe(false);
-    expect(s.memberRules).toEqual({ "community:a": "always-here", "core:b": "desktop" });
-  });
-
-  it("drops an entry whose value isn't a real MemberRule (malformed/foreign data.json)", () => {
-    const s = { memberRules: { "community:a": "local", "community:b": "always-here" } as unknown as Record<string, MemberRule> };
-    expect(sanitizeMemberRules(s)).toBe(true);
-    expect(s.memberRules).toEqual({ "community:b": "always-here" });
-    expect(sanitizeMemberRules(s)).toBe(false); // idempotent
-  });
-});
+// sanitizeMemberRules is gone (spec 2026-08-11-data-model-hardening.md §3.2, invariant II.2). It
+// dropped every memberRules value this build didn't recognise and saved immediately — so a rule
+// written by a NEWER build became a deletion this device published to the whole fleet on its next
+// capture. The contract it used to carry now lives in two places, and is tested there:
+// storage is untouched by a load (tests/mainReloadSettings.test.ts, driving the real load path),
+// and an unrecognised value is ignored where it is consumed (tests/availability.test.ts's
+// asMemberRule/preferStoredMemberRule, plus memberRuleFor/memberRulesFor in mainReloadSettings).
 
 // C-#45 fix-round 1 (reviewer-caught CRITICAL): the per-device item opt-out rule's device
 // identity moved OUT of settings entirely, into localStorage (main.ts's deviceId() method,

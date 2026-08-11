@@ -1,6 +1,6 @@
 import { PluginHost, pluginIdForGroup } from "./ConfigSyncCore";
 import { coreSettingsIds } from "./catalog";
-import { MemberRule, RuleScope, StoreLock, SyncGroup } from "./types";
+import { MEMBER_RULES, MemberRule, RuleScope, StoreLock, SyncGroup } from "./types";
 
 export type AvailabilityKind = "enabled" | "disabled" | "not-installed";
 export type VersionDrift = "behind" | "ahead" | null; // local vs store: behind = local < store
@@ -122,13 +122,22 @@ export function normalizeMemberRule(scope: RuleScope, locallyOn: boolean): Membe
   return locallyOn ? "always-here" : "never-here";
 }
 
+// The single narrowing point for a stored rule value (spec 2026-08-11-data-model-hardening.md
+// §3.2, invariant II.2): settings.memberRules is typed at compile time but its content is raw
+// data.json at runtime, so a value this build doesn't recognise — exactly what a NEWER build
+// writes — arrives here. It is ignored where it is used, and left untouched on disk: rewriting
+// storage to drop it would propagate the deletion to the whole fleet on the next capture.
+export function asMemberRule(value: unknown): MemberRule | undefined {
+  return (MEMBER_RULES as readonly unknown[]).includes(value) ? (value as MemberRule) : undefined;
+}
+
 // A genuinely stored MemberRule (the Runs-on menu, task 5, writing directly) always wins over
 // re-deriving direction from local state — once a value is stored, mask producers stop
-// re-normalizing it on every read. Absent a stored value, falls back to normalizeMemberRule
-// against the legacy "this device" pin — old data (localMembers, no stored rule yet) keeps
-// working exactly as before this fell back to a real stored home.
-export function preferStoredMemberRule(stored: MemberRule | undefined, persistedLocallyOn: boolean): MemberRule {
-  return stored ?? normalizeMemberRule("local", persistedLocallyOn);
+// re-normalizing it on every read. Absent a recognised stored value, falls back to
+// normalizeMemberRule against the legacy "this device" pin — old data (localMembers, no stored
+// rule yet) keeps working exactly as before this fell back to a real stored home.
+export function preferStoredMemberRule(stored: unknown, persistedLocallyOn: boolean): MemberRule {
+  return asMemberRule(stored) ?? normalizeMemberRule("local", persistedLocallyOn);
 }
 
 // Member names whose shared scope excludes the current device class. Feeds the exception mask

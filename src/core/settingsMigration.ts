@@ -1,26 +1,154 @@
 /**
- * Load-shape concerns for the v2 settings schema. Two distinct things live here:
+ * Load-shape concerns for the v2 settings schema. Three distinct things live here:
  *
- * - The schema v2 blocking gate (spec 2026-07-25-unified-card-design.md §6, D13): the
- *   unified-card settings shape (`schemaVersion: 2`, `items`) has no migration path from any
- *   earlier shape — a v1 (or unversioned) data.json is never rewritten field-by-field; the plugin
- *   just starts fresh with defaults and asks the user to reconfigure. The old per-field
- *   migrations this module used to hold (switchExceptions → memberLocal, snippetScopes →
- *   memberScopes) are gone: schema v1 has no such fields at all, so there is nothing left to
- *   migrate from it.
+ * - The default fill every load starts from (`withDefaults`, spec
+ *   2026-08-11-data-model-hardening.md §5.1) — the stored document merged onto DEFAULT_SETTINGS,
+ *   nested defaults included, unknown fields kept.
+ * - The schema classifier (`classifySettings`) and the two version gates it feeds. Backwards
+ *   (spec 2026-07-25-unified-card-design.md §6, D13): the unified-card settings shape
+ *   (`schemaVersion: 2`, `items`) has no migration path from any earlier shape — a v1 (or
+ *   unversioned) data.json is never rewritten field-by-field; the plugin just starts fresh with
+ *   defaults and asks the user to reconfigure. The old per-field migrations this module used to
+ *   hold (switchExceptions → memberLocal, snippetScopes → memberScopes) are gone: schema v1 has no
+ *   such fields at all, so there is nothing left to migrate from it. Forwards (spec
+ *   2026-08-11-data-model-hardening.md §4.1/§4.2, invariant II.3): a document from a NEWER build is
+ *   refused, at load and again before an incoming one is written over the local file — never
+ *   downgraded, never reset, never overwritten.
  * - A v2-internal shape revision (spec 2026-07-26-ui-feedback-round2-design.md §2.3):
  *   `mergeLegacyAppSliceItems` below, which still runs on data.json that already passed the gate.
  */
 import { ItemConfig, ItemFieldRule } from "./registry";
-import { MEMBER_RULES, MemberRule, PerItemScopes } from "./types";
+import { PerItemScopes } from "./types";
+
+// The settings schema THIS build reads and writes. Named once, here: the classifier below, the
+// pre-write guard the apply path runs on an incoming document, and DEFAULT_SETTINGS' own
+// schemaVersion all mean the same number, and a future bump must move exactly one literal.
+export const CURRENT_SCHEMA = 2;
 
 export const SCHEMA_UPGRADE_NOTICE = "Config Sync: this update reset your sync setup — open Settings to choose what to sync again.";
 
-// `null` (no data.json yet — a fresh install) is NOT legacy: there is nothing to reconfigure,
-// just a brand-new default settings object.
-export function isLegacySettings(data: Record<string, unknown> | null): boolean {
-  if (data === null) return false;
-  return data.schemaVersion !== 2;
+// §4.1 copy (spec 2026-08-11-data-model-hardening.md), shown wherever a write is refused while the
+// stop state holds — the Sync Center's banner and every mutating entry point's notice.
+export const SCHEMA_FUTURE_NOTICE =
+  "These settings were written by a newer Config Sync. Update Config Sync on this device to open them. Nothing has been changed.";
+
+// §4.2 copy: the run-result message the self item fails with when the document about to be applied
+// onto this device declares a newer schema. Reported through the existing run-result path.
+export const SCHEMA_FUTURE_APPLY_MESSAGE =
+  "The store's Config Sync settings were written by a newer version. Update Config Sync on this device before applying them.";
+
+// What a data.json turned out to be (spec 2026-08-11-data-model-hardening.md §4.1, invariant
+// II.3). `fresh` = no data.json yet, which is NOT legacy: there is nothing to reconfigure, just a
+// brand-new default settings object.
+export type SettingsLoad =
+  | { kind: "fresh" }
+  | { kind: "ok" }
+  | { kind: "legacy" }
+  | { kind: "future"; found: number };
+
+// The classifier that replaced `isLegacySettings` (schemaVersion !== 2). That test sent a document
+// from a NEWER build down the legacy branch — notice, defaults in memory, and the user's whole
+// setup overwritten at the next save — so a staged upgrade could wipe a not-yet-updated device
+// through whole-document propagation. `future` is now its own answer and never resets anything.
+// A schemaVersion that isn't a number (a hand edit, a truncated write) is not evidence of a newer
+// build and keeps today's verdict exactly: legacy, reset, reconfigure.
+export function classifySettings(data: Record<string, unknown> | null): SettingsLoad {
+  if (data === null) return { kind: "fresh" };
+  const found = data.schemaVersion;
+  if (found === CURRENT_SCHEMA) return { kind: "ok" };
+  if (typeof found === "number" && found > CURRENT_SCHEMA) return { kind: "future", found };
+  return { kind: "legacy" };
+}
+
+// The pre-write half of the same gate (§4.2): does this settings DOCUMENT — a store copy about to
+// be written onto this device — come from a newer build? Routed through classifySettings so the
+// two gates cannot drift apart. Text that isn't a JSON object answers false: it is not evidence of
+// a newer build, and the apply path's existing behaviour for unreadable store content stands.
+export function isFutureSchemaDocument(raw: string): boolean {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return false;
+  }
+  if (!isPlainObject(parsed)) return false;
+  return classifySettings(parsed).kind === "future";
+}
+
+// The settings fields whose DEFAULT has fields of its own (spec 2026-08-11 §5.1). Everything else
+// in DEFAULT_SETTINGS is either a scalar or a user-owned map/array whose default is empty — there
+// is nothing a recursion could contribute to those, and merging into a user's map would resurrect
+// entries they removed.
+const NESTED_DEFAULT_KEYS = ["runHistory", "ribbonButtons"] as const;
+
+// The load-time default fill (spec 2026-08-11-data-model-hardening.md §5.1). The shallow
+// `Object.assign({}, DEFAULT_SETTINGS, data)` this replaces reached only the top level, so a field
+// added INSIDE runHistory/ribbonButtons in a later version read back as `undefined` on any older
+// document — including one adopted from a device still on that build (S8). Unknown keys, top-level
+// and nested, are carried through untouched (invariant II.1): the stored value always wins, the
+// default only fills what the document does not mention. A nested value that isn't an object at
+// all is left exactly as stored, same as before — this is a default fill, not a validator.
+export function withDefaults<T extends object>(defaults: T, data: Record<string, unknown> | null): T {
+  const merged: Record<string, unknown> = { ...defaults, ...(data ?? {}) };
+  for (const key of NESTED_DEFAULT_KEYS) {
+    const base = (defaults as Record<string, unknown>)[key];
+    if (!isPlainObject(base)) continue;
+    const stored = merged[key];
+    // A fresh object even when the document said nothing: these are edited IN PLACE by the
+    // settings tab (`settings.runHistory.enabled = v`), and handing out DEFAULT_SETTINGS' own
+    // object would let the next toggle rewrite the defaults for the rest of the session.
+    merged[key] = isPlainObject(stored) ? { ...base, ...stored } : stored === base ? { ...base } : stored;
+  }
+  return merged as T;
+}
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+// ── The carried `deviceOptOuts` map (spec 2026-08-11-data-model-hardening.md §2 ruling) ────────
+// The pre-C-#52 fleet-shared shape: group name -> the device ids that opted that group out. This
+// build reads its own opt-out from localStorage instead, but the FIELD stays in the document,
+// because removing a field is two-phase (the same argument §5.2 makes for `companions`): a
+// document written without it, adopted by a device still on 2.20.0, takes that device's own
+// opt-out with it — C-#52's failure, inflicted by C-#52's fix. So the map is carried, other
+// devices' entries are never touched, and this device's own entry is kept truthful.
+
+// This device's groups inside a carried map — the migration's input. Anything that isn't the old
+// shape (a hand edit, a future build's replacement) contributes nothing and is left alone.
+export function deviceOptOutsFor(map: unknown, deviceId: string): string[] {
+  if (!isPlainObject(map)) return [];
+  return Object.entries(map)
+    .filter(([, ids]) => Array.isArray(ids) && ids.includes(deviceId))
+    .map(([name]) => name);
+}
+
+// This device's entry in a carried map, updated to match what localStorage now says. Pure: the
+// input map and every array inside it are left untouched, and only THIS device's id is ever added
+// or removed — another device's entry survives a round trip through us byte-for-byte, including
+// one whose device id we have no evidence still exists. Removing the last id drops the group's
+// key, the same prune discipline the pre-C-#52 writer had (C-#26).
+//
+// `unknown` in, `unknown` values out, narrowed here the way asMemberRule narrows a stored rule
+// (§3.2): `Record<string, string[]>` is a compile-time claim about a runtime document written by
+// builds we don't know. A group value that is NOT an array is left exactly as found — spreading a
+// string would explode it into characters and `.filter` on a number would throw, and a throw here
+// would land between the two stores this write updates. Total by construction: no input shape can
+// make it fail, so the caller can order its writes for safety rather than around exceptions.
+export function withDeviceOptOut(map: unknown, deviceId: string, groupName: string, on: boolean): Record<string, unknown> {
+  const next: Record<string, unknown> = isPlainObject(map) ? { ...map } : {};
+  const current = next[groupName];
+  // Absent is the one non-array we may replace: there is nothing there to preserve.
+  if (current !== undefined && !Array.isArray(current)) return next;
+  const ids: unknown[] = current ?? [];
+  if (on) {
+    if (!ids.includes(deviceId)) next[groupName] = [...ids, deviceId];
+    return next;
+  }
+  const remaining = ids.filter((id) => id !== deviceId);
+  if (remaining.length > 0) next[groupName] = remaining;
+  else delete next[groupName];
+  return next;
 }
 
 // v2 shape revision (spec 2026-07-26-ui-feedback-round2-design.md §2.3): the three app.json
@@ -61,6 +189,9 @@ export function mergeLegacyAppSliceItems(settings: {
   }
   settings.items["app"] = {
     enabled,
+    // Still written even though the field is optional now: §5.2 is a two-phase change and this is
+    // phase one — a document without the key makes an un-updated device throw where it reads
+    // companions unguarded, so writing stops only once a tolerant build is the fleet's floor.
     companions: [],
     settingsFile: { mode: settings.appJson?.mode ?? "fields", rules, perItem },
   };
@@ -87,20 +218,9 @@ export function drainEnabledOnLocal(settings: { items: Record<string, ItemConfig
   return changed;
 }
 
-// Task 2 (spec 2026-08-06-sync-center-unified-grammar-design.md §6): memberRules' stored home
-// for always-here/never-here (and, going forward, all/desktop/mobile once task 5's Runs-on menu
-// writes them directly) — drops any entry whose value isn't a real MemberRule. Single-source
-// against MEMBER_RULES (types.ts) so this can never list a literal the mask pipeline doesn't also
-// accept; a raw data.json is untyped at the JS boundary despite ConfigSyncSettings' compile-time
-// type, so this actually runs at every load, not just once.
-export function sanitizeMemberRules(settings: { memberRules: Record<string, MemberRule> }): boolean {
-  const known = new Set<string>(MEMBER_RULES);
-  let changed = false;
-  const out: Record<string, MemberRule> = {};
-  for (const [id, value] of Object.entries(settings.memberRules)) {
-    if (known.has(value)) out[id] = value;
-    else changed = true;
-  }
-  if (changed) settings.memberRules = out;
-  return changed;
-}
+// memberRules has no sanitizer any more (spec 2026-08-11-data-model-hardening.md §3.2, invariant
+// II.2). Dropping every value this build doesn't recognise — which is precisely what a newer build
+// writes — and saving immediately made the load path destroy the future's data and publish the
+// deletion to the fleet on the next capture. An unrecognised value is now ignored at the point of
+// use (availability.ts's asMemberRule, read by main.ts's memberRuleFor/memberRulesFor) and storage
+// is never rewritten for it.

@@ -45,16 +45,20 @@ export class TextComponent {}
 export class ToggleComponent {}
 // Captures the message every `new Notice(...)` call was constructed with — `lastMessage` lets a
 // test observe the (otherwise fire-and-forget) UI notice a production code path raised, e.g.
-// main.ts's recompile() failure Notice (final-review MUST-FIX defense-in-depth seam test). Not
-// reset automatically between tests — a test that cares should read it right after triggering the
-// call it's asserting on (and may clear it first if a prior call in the same test would confuse
-// the assertion).
+// main.ts's recompile() failure Notice (final-review MUST-FIX defense-in-depth seam test).
+// `messages` is the same capture kept as a log, for the two assertions `lastMessage` cannot make:
+// that a notice fired EXACTLY once, and that one did not fire at all (spec
+// 2026-08-11-data-model-hardening.md §4.2b's startup notice). Neither is reset automatically
+// between tests — a test that cares should read it right after triggering the call it's asserting
+// on (and may clear it first if a prior call in the same test would confuse the assertion).
 export class Notice {
   static lastMessage: string | undefined;
+  static messages: string[] = [];
   message: string;
   constructor(message: string, _timeout?: number) {
     this.message = message;
     Notice.lastMessage = message;
+    Notice.messages.push(message);
   }
 }
 export const Platform = { isMobile: false, isDesktop: true, isDesktopApp: true, isMobileApp: false };

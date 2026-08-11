@@ -24,7 +24,8 @@ import {
   SELF_GROUP_NAME,
   splitLocation,
 } from "../core/catalog";
-import { CompileError, companionConflict, companionNameConflict, compileItems, CustomGroupConfig, emptyItemConfig, ItemConfig, ItemDef, ItemFieldRule, ItemSection, ItemSettingsFile } from "../core/registry";
+import { CompileError, companionConflict, companionNameConflict, compileItems, CustomGroupConfig, emptyItemConfig, itemConfigForWrite, ItemConfig, ItemDef, ItemFieldRule, ItemSection, ItemSettingsFile } from "../core/registry";
+import { SCHEMA_FUTURE_NOTICE } from "../core/settingsMigration";
 import { FolderSelectModal } from "./FolderSelectModal";
 import { confirmPresetPathChange } from "./ConfirmModal";
 import { commitDraft } from "./commitGroups";
@@ -111,6 +112,12 @@ export interface SettingsHost extends Plugin {
     localMembers: string[];
   };
   saveSettings(): Promise<void>;
+  // False while this device's data.json was written by a newer Config Sync (spec
+  // 2026-08-11-data-model-hardening.md §4.2b). Every writer in this file is mutate-then-save, and
+  // `saveSettings` refuses too late to undo the mutation — so the write must be refused BEFORE it
+  // touches `settings`, or memory diverges from disk with no recompile. Asking also tells the
+  // user why (the refusal notice fires here, on their gesture).
+  settingsWritable(): boolean;
   // The "Enabled on" chip's "This device" write (task-2 retarget): adds/removes itemId from
   // settings.localMembers — never writes ItemConfig.enabledOn = "local" again. Persists itself.
   setMemberLocal(itemId: string, on: boolean): Promise<void>;
@@ -642,8 +649,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     return this.host.settings.localMembers.includes(id);
   }
 
+  // Every settings-tab write funnels through here, so this is where the write base is normalized
+  // (itemConfigForWrite, §5.2 phase 1) — the mutators themselves only ever spread what they get.
   private async updateItem(id: string, mutator: (cfg: ItemConfig) => ItemConfig): Promise<void> {
-    const next = mutator(this.itemConfig(id));
+    if (!this.host.settingsWritable()) return; // §4.2b — refuse before the mutation, not after
+    const next = mutator(itemConfigForWrite(this.host.settings.items[id]));
     this.host.settings.items = { ...this.host.settings.items, [id]: next };
     await this.host.saveSettings();
   }
@@ -703,6 +713,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       const head = new Setting(host).setName(SYNC_ALL_LABEL).setDesc(SYNC_ALL_HINT).setHeading();
       head.addToggle((t) =>
         t.setValue(sectionAllEnabled(defs, this.host.settings.items)).onChange(async (v) => {
+          if (!this.host.settingsWritable()) return; // §4.2b
           this.host.settings.items = applySyncAll(defs, this.host.settings.items, v);
           await this.host.saveSettings();
           for (const { wrap, def } of this.cardHosts) this.renderItemCard(wrap, def);
@@ -1010,6 +1021,13 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     if (conflict !== null) {
       errorEl.setText(companionConflictError(conflict));
       errorEl.show();
+      return;
+    }
+    // §4.2b: refuse before the warning modal opens — `updateItem` below would refuse anyway, but
+    // only after the user had weighed a preset change they were never going to be allowed to make.
+    if (!this.host.settingsWritable()) {
+      this.customPathEditing.delete(editKey);
+      this.renderItemCard(wrap, def); // same restore path Cancel takes: the edit did not happen
       return;
     }
     // Every registry item's settingsFile carries a preset default path (task-7-brief.md), so
@@ -1443,9 +1461,10 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const updateCompanion = (mutator: (c: { path: string; scope: DeviceClass; enabled: boolean }) => { path: string; scope: DeviceClass; enabled: boolean }): void => {
       void (async () => {
         await this.updateItem(def.id, (c) => {
-          const existing = c.companions.find((x) => x.path === row.path);
+          const configured = c.companions ?? [];
+          const existing = configured.find((x) => x.path === row.path);
           const next = mutator(existing ?? { path: row.path, scope: row.scope, enabled: row.enabled });
-          const companions = existing !== undefined ? c.companions.map((x) => (x.path === row.path ? next : x)) : [...c.companions, next];
+          const companions = existing !== undefined ? configured.map((x) => (x.path === row.path ? next : x)) : [...configured, next];
           return { ...c, companions };
         });
         // No re-render: the control the user just touched already shows the new value, and no
@@ -1476,7 +1495,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     if (!row.isPreset) {
       const removeBtn = new ExtraButtonComponent(actionCell).setIcon("x").setTooltip("Remove folder").onClick(() => {
         void (async () => {
-          await this.updateItem(def.id, (c) => ({ ...c, companions: c.companions.filter((x) => x.path !== row.path) }));
+          await this.updateItem(def.id, (c) => ({ ...c, companions: (c.companions ?? []).filter((x) => x.path !== row.path) }));
           this.renderItemCard(wrap, def);
         })();
       });
@@ -1542,6 +1561,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         // user-added folder has no preset identity to move away from, so its own ✎ (now offered
         // on every companion row, spec 2026-07-26-card-visual-refresh-design.md §4 Step 2) commits
         // straight away.
+        // §4.2b: refuse before the warning modal opens (see the settings-file path row above).
+        if (!this.host.settingsWritable()) {
+          cancel(); // the same restore path Cancel takes — the edit did not happen
+          return;
+        }
         if (row.isPreset) {
           const confirmed = await confirmPresetPathChange(this.app, def.label);
           if (!confirmed) {
@@ -1550,7 +1574,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
           }
         }
         await this.updateItem(def.id, (c) => {
-          const withoutOld = c.companions.filter((x) => x.path !== row.path);
+          const withoutOld = (c.companions ?? []).filter((x) => x.path !== row.path);
           return { ...c, companions: [...withoutOld, { path: validation.path, scope: row.scope, enabled: row.enabled }] };
         });
         this.companionPathEditing.delete(editKey);
@@ -1655,7 +1679,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         return;
       }
       void (async () => {
-        await this.updateItem(def.id, (c) => ({ ...c, companions: [...c.companions, { path: validation.path, scope: "all", enabled: true }] }));
+        await this.updateItem(def.id, (c) => ({ ...c, companions: [...(c.companions ?? []), { path: validation.path, scope: "all", enabled: true }] }));
         this.addingCompanion.delete(key);
         this.renderItemCard(wrap, def);
       })();
@@ -2096,6 +2120,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         .addOption("default", "Default")
         .setValue(this.host.settings.pkmMode)
         .onChange(async (v) => {
+          if (!this.host.settingsWritable()) return; // §4.2b
           this.host.settings.pkmMode = v as PkmMode;
           await this.host.saveSettings();
           this.loaded = false;
@@ -2122,6 +2147,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
           new Notice(`Config Sync: invalid data folder "${trimmed}" — must be a vault-relative path`);
           return;
         }
+        if (!this.host.settingsWritable()) return; // §4.2b
         this.host.settings.rootPath = trimmed;
         await this.host.saveSettings();
       });
@@ -2141,6 +2167,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       "general-status-in-menu"
     ).addToggle((t) =>
       t.setValue(this.host.settings.statusInMenu).onChange(async (v) => {
+        if (!this.host.settingsWritable()) return; // §4.2b
         this.host.settings.statusInMenu = v;
         await this.host.saveSettings();
       })
@@ -2153,6 +2180,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       "general-remote-auto-check"
     ).addToggle((t) =>
       t.setValue(this.host.settings.remoteAutoCheck).onChange(async (v) => {
+        if (!this.host.settingsWritable()) return; // §4.2b
         this.host.settings.remoteAutoCheck = v;
         await this.host.saveSettings();
       })
@@ -2165,6 +2193,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       "general-local-periodic-check"
     ).addToggle((t) =>
       t.setValue(this.host.settings.localPeriodicCheck).onChange(async (v) => {
+        if (!this.host.settingsWritable()) return; // §4.2b
         this.host.settings.localPeriodicCheck = v;
         await this.host.saveSettings();
       })
@@ -2176,6 +2205,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const heading = this.generalSetting("general-run-history");
     this.anchor(new Setting(containerEl).setName(heading.name).setDesc(heading.desc).setHeading(), "general-run-history").addToggle((t) =>
       t.setValue(s.enabled).onChange(async (v) => {
+        if (!this.host.settingsWritable()) return; // §4.2b
         s.enabled = v;
         await this.host.saveSettings();
       })
@@ -2186,6 +2216,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         .setPlaceholder("{configDir}/plugins/config-sync/run-history.json")
         .setValue(s.path)
         .onChange(async (v) => {
+          if (!this.host.settingsWritable()) return; // §4.2b
           s.path = v.trim();
           await this.host.saveSettings();
         })
@@ -2193,6 +2224,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const count = this.generalSetting("general-run-history-count");
     this.anchor(new Setting(containerEl).setName(count.name).setDesc(count.desc), "general-run-history-count").addText((t) =>
       t.setValue(String(s.maxCount)).onChange(async (v) => {
+        if (!this.host.settingsWritable()) return; // §4.2b
         const n = Number.parseInt(v, 10);
         s.maxCount = Number.isFinite(n) && n >= 0 ? n : 0;
         await this.host.saveSettings();
@@ -2201,6 +2233,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const days = this.generalSetting("general-run-history-days");
     this.anchor(new Setting(containerEl).setName(days.name).setDesc(days.desc), "general-run-history-days").addText((t) =>
       t.setValue(String(s.maxDays)).onChange(async (v) => {
+        if (!this.host.settingsWritable()) return; // §4.2b
         const n = Number.parseInt(v, 10);
         s.maxDays = Number.isFinite(n) && n >= 0 ? n : 0;
         await this.host.saveSettings();
@@ -2229,6 +2262,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       const s = new Setting(containerEl).setName(d.label);
       s.addToggle((t) =>
         t.setValue(this.host.settings.ribbonButtons[d.key]).onChange(async (v) => {
+          if (!this.host.settingsWritable()) return; // §4.2b
           this.host.settings.ribbonButtons[d.key] = v;
           await this.host.saveSettings();
           this.host.refreshRibbons();
@@ -2243,6 +2277,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       const def = this.generalSetting(anchorId);
       this.anchor(new Setting(containerEl).setName(def.name).setDesc(def.desc), anchorId).addToggle((t) =>
         t.setValue(get()).onChange(async (v) => {
+          if (!this.host.settingsWritable()) return; // §4.2b — covers all four status-bar toggles
           set(v);
           await this.host.saveSettings();
           after();
@@ -2361,6 +2396,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   // compileItems always runs) so a name/path collision surfaces as the existing inline row error
   // via commitDraft's throw→catch, instead of only a passive Notice from the next recompile.
   private async persistCustomGroups(fullDraft: SyncGroup[]): Promise<void> {
+    // §4.2b — before the customGroups assignment below. THROWN, not returned (round-4 review N3):
+    // commitDraft already keeps the caller's draft whenever this write fails, so raising the
+    // refusal here is what stops a refused edit from staying visible in the Advanced tab until
+    // Settings is reopened. It also surfaces in the tab's existing inline error slot.
+    if (!this.host.settingsWritable()) throw new Error(SCHEMA_FUTURE_NOTICE);
     const reserved = reservedNames(this.host.installedPluginIds());
     const nextCustomGroups: CustomGroupConfig[] = fullDraft.filter((g) => g.name.trim() !== "" && !this.isManagedGroup(g, reserved));
     try {
@@ -2488,7 +2528,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       this.refresh();
     });
     if (this.saveErrorFor === group.name) {
-      listEl.createDiv({ cls: "config-sync-save-error mod-warning", text: `Couldn't save this change — ${this.groupsErrorMsg}. The change was reverted.` });
+      // The trailing "The change was reverted." is gone (§4.2b copy ruling): the §4.1 refusal this
+      // now also carries already ends with "Nothing has been changed," which says it better, and
+      // the sentence it was appended to could arrive with or without its own full stop — hence one
+      // normalised join instead of two literals colliding into "…changed.. The change was…".
+      listEl.createDiv({ cls: "config-sync-save-error mod-warning", text: `Couldn't save this change — ${this.groupsErrorMsg.replace(/\.$/, "")}.` });
     }
     if (isOpen) this.renderRuleForm(listEl, group, "custom");
   }
@@ -2533,17 +2577,25 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         .addOption("vault", "Vault root")
         .setValue(loc.location)
         .onChange((v) => {
+          // §4.2b/P4: a failed commit pins its message to THIS row, which only paints on a render —
+          // so a handler that never refreshes is silent, and with the notice window a refused
+          // keystroke could otherwise produce no feedback at all. Refresh on failure only: on
+          // success these three deliberately stay put so the field keeps focus while typing.
           void this.commitGroups((draft) => {
             const g = draft.find((x) => x.name === currentName);
             if (g !== undefined) g.path = joinLocation(v as "config" | "vault", splitLocation(g.path).rel);
-          }, currentName);
+          }, currentName).then((ok) => {
+            if (!ok) this.refresh();
+          });
         });
       const pathC = new TextComponent(field(line1, "Path"));
       pathC.setPlaceholder("relative path").setValue(loc.rel).onChange((v) => {
         void this.commitGroups((draft) => {
           const g = draft.find((x) => x.name === currentName);
           if (g !== undefined) g.path = joinLocation(splitLocation(g.path).location, v.trim());
-        }, currentName);
+        }, currentName).then((ok) => {
+          if (!ok) this.refresh(); // §4.2b/P4 — see the Location dropdown above
+        });
       });
     }
 
@@ -2585,7 +2637,9 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         if (g === undefined) return;
         if (d !== "") g.description = d;
         else delete g.description;
-      }, currentName);
+      }, currentName).then((ok) => {
+        if (!ok) this.refresh(); // §4.2b/P4 — see the Location dropdown above
+      });
     });
     if (group.mode === "fields") {
       this.renderFieldsEditor(panel.createDiv(), group, () => this.refresh());
@@ -2648,6 +2702,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     this.sourcesErrorEl.setText(this.sourcesErrorMsg);
     const addBtn = containerEl.createEl("button", { cls: "config-sync-add-row", text: "+ Add remote" });
     addBtn.addEventListener("click", () => {
+      if (!this.host.settingsWritable()) return; // §4.2b/N3: no half-built remote that can never be saved
       this.sources.push({ name: "", type: "vault", storePath: "", url: "", branch: "", subdir: "", excludeSelf: false, tokenId: "", username: "" });
       this.expanded.add("remote:");
       this.refresh();
@@ -2671,6 +2726,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       .setIcon("trash")
       .setTooltip("Delete remote")
       .onClick(async () => {
+        // §4.2b/N3: `this.sources` is what the panel renders, so splicing it on a refused gesture
+        // would show the remote as deleted until Settings is reopened — the UI claiming something
+        // that did not happen. Refuse before the draft moves. (The Advanced tab gets the same
+        // property from commitDraft, which keeps its draft whenever the write fails.)
+        if (!this.host.settingsWritable()) return;
         this.sources.splice(index, 1);
         this.expanded.delete(key);
         await this.saveRemotes();
@@ -2693,7 +2753,12 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       .addOption("vault", "Another vault")
       .addOption("git", "Git repository")
       .setValue(draft.type)
+      // §4.2b/N3: every handler in this form is `draft.x = …; saveRemotes()`, and `this.sources`
+      // IS what the panel renders — so a refused gesture must be refused BEFORE the draft moves,
+      // or the panel shows an edit that was never saved (the name field below is the plainest
+      // case: it renames the row header for a save that never happened).
       .onChange(async (v) => {
+        if (!this.host.settingsWritable()) return;
         draft.type = v as RemoteDraft["type"];
         await this.saveRemotes();
         this.refresh();
@@ -2702,6 +2767,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     this.markRequired(nameField);
     const nameC = new TextComponent(nameField);
     nameC.setPlaceholder("name").setValue(draft.name).onChange((v) => {
+      if (!this.host.settingsWritable()) return; // §4.2b/N3
       this.expanded.delete(`remote:${draft.name}`);
       draft.name = v.trim();
       this.expanded.add(`remote:${draft.name}`);
@@ -2716,6 +2782,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       this.markRequired(pathField);
       const pathC = new TextComponent(pathField);
       pathC.setPlaceholder("/path/to/other-vault/…/config-sync").setValue(draft.storePath).onChange((v) => {
+        if (!this.host.settingsWritable()) return; // §4.2b/N3
         draft.storePath = v.trim();
         void this.saveRemotes();
       });
@@ -2734,6 +2801,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       const urlField = field(line2, "URL");
       this.markRequired(urlField);
       new TextComponent(urlField).setPlaceholder("git@host:me/config.git").setValue(draft.url).onChange((v) => {
+        if (!this.host.settingsWritable()) return; // §4.2b/N3
         draft.url = v.trim();
         clearStrip();
         void this.saveRemotes();
@@ -2741,11 +2809,13 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       const branchField = field(line2, "Branch");
       this.markRequired(branchField);
       new TextComponent(branchField).setPlaceholder("main").setValue(draft.branch).onChange((v) => {
+        if (!this.host.settingsWritable()) return; // §4.2b/N3
         draft.branch = v.trim();
         clearStrip();
         void this.saveRemotes();
       });
       new TextComponent(field(line2, "Store folder in repo")).setPlaceholder("empty = repo root").setValue(draft.subdir).onChange((v) => {
+        if (!this.host.settingsWritable()) return; // §4.2b/N3
         draft.subdir = v.trim();
         void this.saveRemotes();
       });
@@ -2762,6 +2832,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         .setPlaceholder("token")
         .setValue(draft.username)
         .onChange((v) => {
+          if (!this.host.settingsWritable()) return; // §4.2b/N3
           draft.username = v.trim();
           void this.saveRemotes();
         });
@@ -2782,6 +2853,10 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       paintTokenStatus();
       // The picker reports null when the user unlinks, which the typings spell as string.
       tokenC.onChange((name: string | null) => {
+        if (!this.host.settingsWritable()) {
+          tokenC.setValue(draft.tokenId); // §4.2b/N3: put the picker back — the link never happened
+          return;
+        }
         if (name === PASSPHRASE_SECRET_ID) {
           new Notice("Config Sync's own vault passphrase is stored under that name — pick or create a different secret for this remote.");
           tokenC.setValue(draft.tokenId);
@@ -2834,12 +2909,17 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     selfText.createDiv({ cls: "config-sync-remote-selfname", text: "Keep Config Sync's own settings out of this remote" });
     selfText.createDiv({ cls: "config-sync-remote-selfdesc", text: "For a vault that keeps its own setup: Pull and Push skip Config Sync's settings, and the comparison stops reporting them." });
     new ToggleComponent(selfLine).setValue(draft.excludeSelf).onChange((v) => {
+      if (!this.host.settingsWritable()) return; // §4.2b/N3
       draft.excludeSelf = v;
       void this.saveRemotes();
     });
   }
 
   private async browseStorePath(draft: RemoteDraft): Promise<void> {
+    // §4.2b: a flow that will be refused refuses before it opens. This one opens the OS folder
+    // picker and then, sometimes, a second modal to choose among the stores it found — the most
+    // expensive "and then we declined" in the plugin.
+    if (!this.host.settingsWritable()) return;
     try {
       const { pickFolder } = await import("../external/pickFolder");
       const picked = await pickFolder();
@@ -2866,6 +2946,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   }
 
   private async saveRemotes(): Promise<void> {
+    if (!this.host.settingsWritable()) return; // §4.2b
     try {
       this.host.settings.remotes = validateRemotes(this.sources.map(toCandidate));
       await this.host.saveSettings();

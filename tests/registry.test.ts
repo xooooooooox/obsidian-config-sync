@@ -610,7 +610,11 @@ describe("compileItems — settings.customGroups (spec §6 addition)", () => {
 
 describe("itemConfigWithEnabledOn", () => {
   it("creates an enabled config from nothing", () => {
+    // companions: [] on a brand-new entry is §5.2 phase 1 — an older build reads it unguarded.
     expect(itemConfigWithEnabledOn(undefined, "desktop")).toEqual({ enabled: true, companions: [], enabledOn: "desktop" });
+  });
+  it("puts the key back when the existing config arrived without it", () => {
+    expect(itemConfigWithEnabledOn({ enabled: false }, "mobile")).toEqual({ enabled: true, companions: [], enabledOn: "mobile" });
   });
   it("preserves existing fields and forces enabled", () => {
     const existing: ItemConfig = { enabled: false, companions: [{ path: "x", enabled: true, scope: "all" }], settingsFile: { mode: "plain", rules: {}, perItem: {} } };

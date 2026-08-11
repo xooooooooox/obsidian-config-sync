@@ -1,8 +1,8 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://raw.githubusercontent.com/xooooooooox/obsidian-config-sync/main/schema/config-sync.schema.json",
-  "title": "Config Sync groups file",
-  "description": "Defines which config groups obsidian-config-sync publishes/applies. Lives at <data folder>/config-sync.json inside the vault.",
+  "title": "Config Sync groups file (legacy, pre-schema-v2)",
+  "description": "The hand-edited groups file at <data folder>/config-sync.json. Config Sync no longer WRITES this file — since settings schema v2 the sync list is compiled from the plugin's own data.json (`items` + `customGroups`) — but `validateSyncManifest` still reads and validates one, so a vault that predates v2, or a rule set kept by hand, is described here. This schema mirrors that validator; the validator is the authority.",
   "type": "object",
   "required": ["version", "groups"],
   "properties": {
@@ -22,25 +22,80 @@
           "description": { "type": "string", "minLength": 1, "description": "Human-readable label for this group, shown in the settings panel" },
           "mode": {
             "enum": ["plain", "fields", "encrypted"],
-            "description": "Sync mode. Absent = \"plain\". \"fields\" (file groups only) applies per-field rules; \"encrypted\" encrypts the whole file."
+            "description": "Sync mode. Absent = \"plain\". \"fields\" (file groups only) applies per-key rules; \"encrypted\" encrypts the whole file."
           },
           "fields": {
             "type": "array",
-            "items": {
+            "description": "Per-key rules. Only valid with \"mode\": \"fields\".",
+            "items": { "$ref": "#/definitions/fieldRule" }
+          },
+          "fileRule": {
+            "$ref": "#/definitions/fileRule",
+            "description": "Whole-file rule for a Plain single-file group. Never valid with \"mode\": \"fields\" or \"encrypted\"."
+          },
+          "perItem": {
+            "type": "object",
+            "description": "Per-element scopes for string-array keys: key name -> { element value -> scope }. Only valid with \"mode\": \"fields\"; a key listed here can never also be encrypted.",
+            "additionalProperties": {
               "type": "object",
-              "required": ["pattern", "action"],
-              "additionalProperties": false,
-              "properties": {
-                "pattern": { "type": "string", "minLength": 1, "description": "Key-name glob pattern (* wildcard)" },
-                "action": { "enum": ["strip", "encrypt"] },
-                "locked": { "type": "boolean", "description": "Preset rule injected by the plugin; cannot be removed in the UI." }
-              }
-            },
-            "description": "Per-field rules. Only valid with \"mode\": \"fields\"."
+              "additionalProperties": { "$ref": "#/definitions/scope" }
+            }
           },
           "label": { "type": "string", "minLength": 1, "description": "Display name recorded when the item is enabled or captured; shown even where the plugin isn't installed." },
           "origin": { "const": "discovered", "description": "Set by the plugin for rules created from the Discovered-files section; name and path are fixed by the file." }
-        }
+        },
+        "allOf": [
+          {
+            "if": { "properties": { "mode": { "const": "fields" } }, "required": ["mode"] },
+            "then": {},
+            "else": {
+              "not": { "required": ["perItem"] },
+              "description": "\"perItem\" needs \"mode\": \"fields\" — otherwise the per-element scopes never take effect."
+            }
+          },
+          {
+            "if": { "properties": { "mode": { "enum": ["fields", "encrypted"] } }, "required": ["mode"] },
+            "then": {
+              "not": { "required": ["fileRule"] },
+              "description": "A whole-file rule belongs to a Plain group; \"fields\"/\"encrypted\" carry their own rules."
+            }
+          }
+        ]
+      }
+    }
+  },
+  "definitions": {
+    "scope": {
+      "enum": ["all", "desktop", "mobile", "local"],
+      "description": "Where the value is shared: every device, one device class (each class keeping its own value in a __scopes__ sidecar), or \"local\" — never leaves this device and never enters the store."
+    },
+    "fieldRule": {
+      "type": "object",
+      "required": ["pattern", "scope", "encrypted"],
+      "additionalProperties": false,
+      "description": "Scope and encryption are independent axes, not one action enum. (Before schema v2 this was {\"pattern\", \"action\": \"strip\"|\"encrypt\"}; that shape is no longer accepted.)",
+      "properties": {
+        "pattern": { "type": "string", "minLength": 1, "description": "Key-name glob pattern (* wildcard)" },
+        "scope": { "$ref": "#/definitions/scope" },
+        "encrypted": { "type": "boolean" },
+        "locked": { "type": "boolean", "description": "Preset rule injected by the plugin; cannot be removed in the UI." }
+      },
+      "not": {
+        "properties": { "scope": { "const": "local" }, "encrypted": { "const": true } },
+        "required": ["scope", "encrypted"],
+        "description": "A value that never leaves this device has nothing to encrypt for transit."
+      }
+    },
+    "fileRule": {
+      "type": "object",
+      "required": ["scope", "encrypted"],
+      "additionalProperties": false,
+      "properties": {
+        "scope": {
+          "enum": ["all", "desktop", "mobile"],
+          "description": "No \"local\": a Plain file that should not travel is expressed by the group's own sync toggle."
+        },
+        "encrypted": { "type": "boolean" }
       }
     }
   }

@@ -12,7 +12,7 @@
  */
 import { GROUP_NAME_RE } from "../core/manifest";
 import { basename } from "../core/pathing";
-import { emptyItemConfig, ItemConfig, ItemDef, ItemFieldRule, ItemSettingsFile } from "../core/registry";
+import { emptyItemConfig, itemConfigForWrite, ItemConfig, ItemDef, ItemFieldRule, ItemSettingsFile } from "../core/registry";
 import { DeviceClass, MemberRule, PerItemScopes, RuleScope, SyncMode } from "../core/types";
 
 // ── Row badges (spec §4, D2) ────────────────────────────────────────────────────────────────
@@ -322,14 +322,15 @@ export interface CompanionRowModel {
 // has ever toggled one, cfg.companions has no entry for it yet, so a preset with no matching
 // entry gets a synthesized OFF/all-devices default row rather than being missing entirely.
 export function buildCompanionRows(def: ItemDef, cfg: ItemConfig): CompanionRowModel[] {
-  const byPath = new Map(cfg.companions.map((c) => [c.path, c]));
+  const configured = cfg.companions ?? [];
+  const byPath = new Map(configured.map((c) => [c.path, c]));
   const presetDefs = def.presetCompanions ?? [];
   const presetPaths = new Set(presetDefs.map((p) => p.path));
   const presetRows: CompanionRowModel[] = presetDefs.map((p) => {
     const existing = byPath.get(p.path);
     return existing !== undefined ? { ...existing, isPreset: true } : { path: p.path, scope: "all", enabled: false, isPreset: true };
   });
-  const userRows: CompanionRowModel[] = cfg.companions.filter((c) => !presetPaths.has(c.path)).map((c) => ({ ...c, isPreset: false }));
+  const userRows: CompanionRowModel[] = configured.filter((c) => !presetPaths.has(c.path)).map((c) => ({ ...c, isPreset: false }));
   return [...presetRows, ...userRows];
 }
 
@@ -508,8 +509,7 @@ export function sectionAllEnabled(defs: ItemDef[], items: Record<string, ItemCon
 export function applySyncAll(defs: ItemDef[], items: Record<string, ItemConfig>, on: boolean): Record<string, ItemConfig> {
   const next = { ...items };
   for (const d of defs) {
-    const cfg = next[d.id] ?? emptyItemConfig();
-    next[d.id] = { ...cfg, enabled: on };
+    next[d.id] = { ...itemConfigForWrite(next[d.id]), enabled: on };
   }
   return next;
 }

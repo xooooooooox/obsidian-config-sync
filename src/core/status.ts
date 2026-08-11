@@ -1,8 +1,8 @@
 import { baseHasStaleLocalKeys, CoreContext, ExternalStoreReader, groupForStoreRel, isSelfStoreRel, loadManifest, overlayGroup, readStoreContractLocals, remoteGroupsFrom, storeDir, withContractLocals } from "./ConfigSyncCore";
 import { isJunkPath, listFilesRecursive } from "./io";
 import { basename, groupStorePath, relativeTo, sidecarStoreSuffix } from "./pathing";
-import { FileChanges, hasChanges, StoreLock, SyncGroup } from "./types";
-import { parseStoreLock } from "./manifest";
+import { FileChanges, hasChanges, StoreLock, StoreLockEntry, SyncGroup } from "./types";
+import { lockEntryCapturedAt, lockEntryHash, lockLineage, parseStoreLock, storeLockVersion, STORE_LOCK_VERSION } from "./manifest";
 import { isPlainObject } from "./sanitize";
 import { contentUnchanged, groupNeedsPassphrase } from "./modes";
 import { parseFileEnvelope } from "./crypto";
@@ -200,7 +200,16 @@ export interface RemoteCheck {
   remoteCapturedAt: string | null;
 }
 
-export async function checkRemote(localLock: StoreLock | null, reader: ExternalStoreReader): Promise<RemoteCheck> {
+// `ignoreGroups` names lock entries that never count, exactly as in remoteLockAhead — callers pass
+// `[SELF_GROUP_NAME]` for a remote with `excludeSelf`. It is REQUIRED, not defaulted: the per-item
+// path below resolves a direction from every entry it sees, so a forgotten argument would read the
+// self entry of a remote that deliberately never exchanges it and pin an arrow no Pull could ever
+// clear. The whole-store fallback has no per-entry granularity and is unaffected either way.
+export async function checkRemote(
+  localLock: StoreLock | null,
+  reader: ExternalStoreReader,
+  ignoreGroups: string[]
+): Promise<RemoteCheck> {
   const files = await reader.listFiles();
   // Store presence: new-format stores hold only store/** + store.lock.json (no root manifest);
   // a root config-sync.json still marks a legacy-format store.
@@ -213,9 +222,17 @@ export async function checkRemote(localLock: StoreLock | null, reader: ExternalS
   } catch {
     return { state: "unknown", remoteCapturedAt: null };
   }
+  // A remote this build cannot read must not look ACTIONABLE (spec §6, task-3 concern 6). §4.3
+  // refuses the pull itself, but a refusal the user only meets after accepting an invitation is a
+  // worse surface than never being invited: "unknown" already means "this remote cannot be
+  // compared", which is exactly true here. No new RemoteState, no UI change. The capture stamp is
+  // still reported — it parsed, and saying WHEN is not the same as inviting a pull.
+  if (storeLockVersion(remote) > STORE_LOCK_VERSION) return { state: "unknown", remoteCapturedAt: remote.capturedAt };
   // No local lock yet (bootstrap device) but the remote parsed fine: a pull would populate
   // the store, so this is a known state, not "unknown" — reserve that for unreadable remotes.
   if (localLock === null) return { state: "remote-newer", remoteCapturedAt: remote.capturedAt };
+  const perItem = perItemRemoteState(localLock, remote, ignoreGroups);
+  if (perItem !== null) return { state: perItem, remoteCapturedAt: remote.capturedAt };
   const r = Date.parse(remote.capturedAt);
   const l = Date.parse(localLock.capturedAt);
   if (Number.isNaN(r) || Number.isNaN(l)) return { state: "unknown", remoteCapturedAt: remote.capturedAt };
@@ -223,12 +240,49 @@ export async function checkRemote(localLock: StoreLock | null, reader: ExternalS
   return { state, remoteCapturedAt: remote.capturedAt };
 }
 
+// Entry fields that are never a DIFFERENCE. `label`/`memberLabels` are display: a plugin renamed on
+// one device must not read as "the store has newer settings" (finding S6). `capturedAt` is
+// freshness, not content — it orders two differing entries below instead of being one more thing
+// that differs, or every capture would make every other device look behind.
+const NON_CONTENT_LOCK_ENTRY_KEYS = new Set(["label", "memberLabels", "capturedAt"]);
+
+// Deep equality that does not care about key order. Written out rather than done with
+// JSON.stringify because the carried tail (§3.1) can hold anything a newer build wrote, and two
+// devices that emit the same object in a different order hold the same value — stringifying would
+// turn that into a permanent phantom "the remote is ahead".
+function lockValuesEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((v, i) => lockValuesEqual(v, b[i]));
+  }
+  if (isPlainObject(a) && isPlainObject(b)) {
+    const keys = Object.keys(a);
+    return keys.length === Object.keys(b).length && keys.every((k) => k in b && lockValuesEqual(a[k], b[k]));
+  }
+  return false;
+}
+
+// Do these two entries describe the same store content? Only keys present on BOTH sides count
+// (spec §6, the mixed-fleet rule): an un-updated device strips `version`/`capturedAt`/`hash` every
+// time it pulls, and the next capture here writes them back — comparing keys only one side has
+// would surface that churn as a false "the store has newer settings" until the last device is
+// updated. A key on both sides with different values is a difference, exactly as before.
+function lockEntriesEquivalent(mine: StoreLockEntry, theirs: StoreLockEntry): boolean {
+  for (const [key, value] of Object.entries(theirs)) {
+    if (NON_CONTENT_LOCK_ENTRY_KEYS.has(key)) continue;
+    if (!(key in mine)) continue;
+    if (!lockValuesEqual(mine[key], value)) return false;
+  }
+  return true;
+}
+
 // "Remote has newer version info" — semantic, not byte, comparison of the two store locks
 // (2026-07-17: byte compare kept the hint alive forever, since a merged local lock keeps
-// local-only entries and its own formatting). True when the remote captured later, or when a
-// remote group entry is missing/different locally. Local-only entries and a locally-newer
-// capturedAt never count — a pull would not change them. ignoreGroups names lock entries that
-// never count (the self group when the remote excludes it).
+// local-only entries and its own formatting). True when a remote group entry is missing locally, or
+// when one differs and the remote's copy is the fresher of the two, or — only where the entries
+// cannot settle it — when the remote's lineage is newer. Local-only entries and a locally-newer
+// lineage never count: a pull would not change them. ignoreGroups names lock entries that never
+// count (the self group when the remote excludes it).
 export function remoteLockAhead(localRaw: string | null, remoteRaw: string | null, ignoreGroups: string[]): boolean {
   if (remoteRaw === null) return false;
   if (localRaw === null) return true;
@@ -240,15 +294,88 @@ export function remoteLockAhead(localRaw: string | null, remoteRaw: string | nul
   } catch {
     return localRaw !== remoteRaw;
   }
-  const l = Date.parse(local.capturedAt);
-  const r = Date.parse(remote.capturedAt);
-  if (!Number.isNaN(l) && !Number.isNaN(r) && r > l) return true;
+  // The ITEMS answer first. A remote entry we do not have at all, or one that differs and was
+  // captured later there than here, is a pull worth offering; anything the entries can settle, they
+  // settle. (Before §6 there was no per-item date, so every difference had to read as "ahead" —
+  // which is why a purely local capture used to light the hint up on every other device.)
+  let compared = 0;
+  let dated = 0;
   for (const [name, entry] of Object.entries(remote.groups)) {
     if (ignoreGroups.includes(name)) continue;
     const mine = local.groups[name];
-    if (mine === undefined || JSON.stringify(mine) !== JSON.stringify(entry)) return true;
+    if (mine === undefined) return true;
+    const freshness = itemFreshness(mine, entry);
+    if (freshness === "newer" || freshness === "undatable") return true;
+    compared++;
+    // ORDERABLE on both sides, not merely present (review N3). A stamp `Date.parse` cannot read
+    // dates nothing, and counting it would silence the timestamp path below on the strength of
+    // evidence that could not itself have spoken. Absent and unreadable are the same fact here.
+    if (entryTime(mine) !== null && entryTime(entry) !== null) dated++;
   }
-  return false;
+  // Every remote entry was present here AND dated on both sides: the per-item evidence is complete,
+  // and it says no. The store-level stamp must not then manufacture a difference the items
+  // themselves deny — that is the mixed-fleet rule (§6) applied one level up, and it is the whole
+  // reason this comparison is key-by-key instead of one timestamp. The stamp only gets to speak
+  // where the items leave a gap: no entries at all, or one carried forward from a build that never
+  // dated it.
+  if (compared > 0 && dated === compared) return false;
+  const l = Date.parse(lockLineage(local));
+  const r = Date.parse(lockLineage(remote));
+  return !Number.isNaN(l) && !Number.isNaN(r) && r > l;
+}
+
+// One item's freshness relative to the remote's copy of it. "undatable" = the two differ with no
+// way to order them; "absent" = neither side recorded anything comparable. Both send the whole
+// comparison back to the store-level timestamp rather than guessing.
+type ItemFreshness = "equal" | "newer" | "older" | "undatable" | "absent";
+
+// An entry's capture time as something we can ORDER by, or null. A non-empty stamp no date parser
+// can read is not a date; it is treated as absent everywhere rather than as present-and-useless.
+function entryTime(entry: StoreLockEntry): number | null {
+  const ms = Date.parse(lockEntryCapturedAt(entry) ?? "");
+  return Number.isNaN(ms) ? null : ms;
+}
+
+function itemFreshness(mine: StoreLockEntry | undefined, theirs: StoreLockEntry | undefined): ItemFreshness {
+  if (mine === undefined && theirs === undefined) return "absent";
+  if (mine === undefined) return "newer"; // only the remote has this item — a pull would bring it
+  if (theirs === undefined) return "older"; // only we have it — a push would carry it
+  const sameContent = lockEntriesEquivalent(mine, theirs);
+  const l = entryTime(mine);
+  const r = entryTime(theirs);
+  if (l === null || r === null) return sameContent ? "equal" : "undatable";
+  // A hash on BOTH sides settles it outright: the store copies are identical, so it does not matter
+  // which device captured them later. Without one — an encrypted item, whose ciphertext differs
+  // between devices holding the same settings and so is never fingerprinted — the capture time is
+  // all there is, and a later capture is the fresher copy.
+  const bothHashed = lockEntryHash(mine) !== undefined && lockEntryHash(theirs) !== undefined;
+  if (sameContent && (bothHashed || l === r)) return "equal";
+  return r > l ? "newer" : r < l ? "older" : "undatable";
+}
+
+// Per-item resolution for checkRemote (§6): when BOTH locks carry the v2 payload, the state comes
+// from the entries rather than from one whole-store timestamp — so a store that is merely older in
+// wall-clock terms but holds the same items reads as "same". `ignoreGroups` drops entries that never
+// count — without it a remote with `excludeSelf` would resolve a direction from the one entry the
+// two sides deliberately never exchange, and no Pull could ever clear it. null = not decidable this
+// way (either side still at v1, no entries left to compare, an undatable difference, or the two
+// stores are ahead of each other in different items, which RemoteState has no word for); the caller
+// then does exactly what it did before. Reads only the two locks already in hand — no extra file
+// reads, as before.
+function perItemRemoteState(local: StoreLock, remote: StoreLock, ignoreGroups: string[]): RemoteState | null {
+  if (storeLockVersion(local) < STORE_LOCK_VERSION || storeLockVersion(remote) < STORE_LOCK_VERSION) return null;
+  const names = [...new Set([...Object.keys(local.groups), ...Object.keys(remote.groups)])].filter((n) => !ignoreGroups.includes(n));
+  if (names.length === 0) return null;
+  let newer = false;
+  let older = false;
+  for (const name of names) {
+    const freshness = itemFreshness(local.groups[name], remote.groups[name]);
+    if (freshness === "undatable") return null;
+    if (freshness === "newer") newer = true;
+    else if (freshness === "older") older = true;
+  }
+  if (newer && older) return null;
+  return newer ? "remote-newer" : older ? "remote-older" : "same";
 }
 
 // Group name -> label for every remote lock entry carrying a string label (Sync Center remote
