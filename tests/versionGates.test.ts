@@ -103,7 +103,7 @@ function makePlugin(io: MemFS, data: unknown): { instance: StopSurface; saveCoun
   return { instance, saveCount: () => saves, local: (key) => store.get(key) };
 }
 
-const OK_DOCUMENT = { schemaVersion: 3, rootPath: "cs", items: itemsIn({ community: { demo: { enabled: true } } }), remotes: [], bratIndex: {} };
+const OK_DOCUMENT = { schemaVersion: 3, rootPath: "cs", items: itemsIn({ community: { demo: { synced: true } } }), remotes: [], bratIndex: {} };
 
 // A document from the future, carrying shapes this build has no idea what to do with. Any
 // `saveSettings()` on it would be an overwrite of a document this build does not own — exactly
@@ -112,7 +112,7 @@ function futureDocument(): unknown {
   return {
     schemaVersion: 4,
     rootPath: "cs",
-    items: itemsIn({ community: { demo: { enabled: true, runsOn: { device: "here-on-tuesdays" } as never } } }),
+    items: itemsIn({ community: { demo: { synced: true, runsOn: { device: "here-on-tuesdays" } as never } } }),
     remotes: [],
     bratIndex: {},
     somethingOnlyTheFutureKnows: { keep: true },
@@ -132,7 +132,7 @@ describe("§4.1 — a data.json from a newer build is never reset and never over
     // Not reset to defaults either: the document's own values are what's in memory, unknown
     // fields included, so nothing this build might still write could flatten it.
     expect(instance.settings.rootPath).toBe("cs");
-    expect(instance.settings.items.community["demo"]).toEqual({ enabled: true, runsOn: { device: "here-on-tuesdays" } });
+    expect(instance.settings.items.community["demo"]).toEqual({ synced: true, runsOn: { device: "here-on-tuesdays" } });
   });
 
   // §4.2b: a device that has silently stopped syncing is the failure this release exists to
@@ -293,7 +293,7 @@ describe("§4.1 — a data.json from a newer build is never reset and never over
 
     const okIo = new MemFS();
     okIo.seed(seed);
-    const ok = makePlugin(okIo, { schemaVersion: 3, rootPath: "cs", items: itemsIn({ community: { demo: { enabled: true } } }), remotes: [], bratIndex: {} });
+    const ok = makePlugin(okIo, { schemaVersion: 3, rootPath: "cs", items: itemsIn({ community: { demo: { synced: true } } }), remotes: [], bratIndex: {} });
     await ok.instance.loadSettings();
     await ok.instance.recompile();
     await ok.instance.refreshLocalStatus();
@@ -411,13 +411,13 @@ describe("§4.1 — a data.json from a newer build is never reset and never over
     await instance.loadSettings();
 
     expect(instance.settingsWritable()).toBe(true);
-    expect(instance.settings.items.community["demo"]?.enabled).toBe(true);
+    expect(instance.settings.items.community["demo"]?.synced).toBe(true);
     await instance.setItemSyncEnabled("community/demo", false);
 
     // The entry stays and records the "off" — see registry.ts's withItem: in the enablement
     // sections an entry's presence is this device's capture mask. The before/after pair is what
     // proves the write happened rather than being refused.
-    expect(instance.settings.items.community["demo"]).toEqual({ enabled: false });
+    expect(instance.settings.items.community["demo"]).toEqual({ synced: false });
   });
 
   it("pull and push refuse before a remote is even opened", async () => {
@@ -466,7 +466,7 @@ function guardCtx(io: MemFS): CoreContext {
 }
 
 describe("§4.2 — the guard runs before the write, not after it", () => {
-  const LOCAL_SELF = JSON.stringify({ schemaVersion: 3, items: itemsIn({ obsidian: { hotkeys: { enabled: true } } }) }, null, 2);
+  const LOCAL_SELF = JSON.stringify({ schemaVersion: 3, items: itemsIn({ obsidian: { hotkeys: { synced: true } } }) }, null, 2);
 
   async function runAdopt(storeSelf: string): Promise<{ io: MemFS; results: GroupResult[] }> {
     const io = new MemFS();
@@ -507,7 +507,7 @@ describe("§4.2 — the guard runs before the write, not after it", () => {
   });
 
   it("a store document this build understands still applies exactly as before", async () => {
-    const incoming = JSON.stringify({ schemaVersion: 3, items: itemsIn({ obsidian: { appearance: { enabled: true } } }) });
+    const incoming = JSON.stringify({ schemaVersion: 3, items: itemsIn({ obsidian: { appearance: { synced: true } } }) });
     const { io, results } = await runAdopt(incoming);
 
     expect(results.find((r) => r.group === SELF_GROUP_NAME)?.status).toBe("ok");

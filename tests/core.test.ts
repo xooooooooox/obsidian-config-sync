@@ -570,7 +570,7 @@ describe("apply — self group field completeness (adopt truth table, C-#31)", (
     await seedSelfGroup(ctx);
     const store = {
       schemaVersion: 3,
-      items: itemsIn({ community: { dataview: { enabled: true } }, custom: { "my-rule": { enabled: true, type: "file", path: "notes/custom.json" } } }),
+      items: itemsIn({ community: { dataview: { synced: true } }, custom: { "my-rule": { synced: true, type: "file", path: "notes/custom.json" } } }),
       remotes: [{ name: "store-remote" }],
       rootPath: "store-root",
       thisDeviceItems: ["community/store-member"],
@@ -2906,7 +2906,7 @@ describe("ConfigSyncPlugin.addSwitchExceptions — 'this device' pins onto thisD
       await p.loadSettings();
       return p;
     })();
-    plugin.settings.items = withItem(plugin.settings.items, "community", "remotely-save", { enabled: true });
+    plugin.settings.items = withItem(plugin.settings.items, "community", "remotely-save", { synced: true });
 
     await plugin.addSwitchExceptions("community-plugins", ["remotely-save"]);
 
@@ -2926,7 +2926,7 @@ describe("ConfigSyncPlugin.addSwitchExceptions — 'this device' pins onto thisD
     // fixture to seed the map directly, on the grounds that the write would prune the entry; the
     // prune was the defect (review C1), and bypassing the write here is what stopped this test from
     // catching it. A test that covers a write path must keep covering the write path.
-    plugin.settings.items = withItem(plugin.settings.items, "community", "dataview", { enabled: false });
+    plugin.settings.items = withItem(plugin.settings.items, "community", "dataview", { synced: false });
 
     const decisions = plugin.syncCenterHost().switchMemberDecisions("community-plugins");
     expect(decisions).toContainEqual({ id: "dataview", sharing: THIS_DEVICE, structural: true });
@@ -2936,7 +2936,7 @@ describe("ConfigSyncPlugin.addSwitchExceptions — 'this device' pins onto thisD
   // community-plugins.json and not installed here is protected by exactly one thing: its stored
   // entry, which `elementSharings`' second pass turns into a this-device mask so capture passes the
   // id through untouched. Choosing "Runs on → Everywhere" for it clears the rule and used to leave
-  // `{enabled:false}`, which a prune then deleted — mask gone, and the next capture would drop the
+  // `{synced:false}`, which a prune then deleted — mask gone, and the next capture would drop the
   // plugin from the shared list for every other device. The entry must survive the gesture.
   it("clearing a Runs-on rule for a not-installed plugin keeps its capture mask (final-review C1)", async () => {
     const plugin = await (async () => {
@@ -2946,14 +2946,14 @@ describe("ConfigSyncPlugin.addSwitchExceptions — 'this device' pins onto thisD
     })();
     // adopted from another device: the card is off here, the rule pins it to computers
     plugin.settings.items = withItem(plugin.settings.items, "community", "not-installed-here", {
-      enabled: false,
+      synced: false,
       runsOn: { device: "desktop" },
     });
 
     await plugin.clearMemberLocal("community-plugins", "not-installed-here");
 
     // the entry survives — its presence IS the mask
-    expect(plugin.settings.items.community["not-installed-here"]).toEqual({ enabled: false });
+    expect(plugin.settings.items.community["not-installed-here"]).toEqual({ synced: false });
     // …and the mask is still what the capture path reads
     const decisions = plugin.syncCenterHost().switchMemberDecisions("community-plugins");
     expect(decisions).toContainEqual({ id: "not-installed-here", sharing: THIS_DEVICE, structural: true });
@@ -2967,7 +2967,7 @@ describe("ConfigSyncPlugin.addSwitchExceptions — 'this device' pins onto thisD
       await p.loadSettings();
       return p;
     })();
-    plugin.settings.items = withItem(plugin.settings.items, "community", "remotely-save", { enabled: true, runsOn: { device: "desktop" } });
+    plugin.settings.items = withItem(plugin.settings.items, "community", "remotely-save", { synced: true, runsOn: { device: "desktop" } });
 
     await plugin.addSwitchExceptions("community-plugins", ["remotely-save"]);
 
@@ -2984,7 +2984,7 @@ describe("ConfigSyncPlugin.addSwitchExceptions — 'this device' pins onto thisD
       return p;
     })();
     plugin.settings.items = withItem(plugin.settings.items, "community", "remotely-save", {
-      enabled: true,
+      synced: true,
       runsOn: { device: "desktop", force: { state: "on", where: "everywhere" } },
     });
 
@@ -3030,7 +3030,7 @@ describe("a BRAT-managed plugin's this-device pin is the same identity as any ot
     instance.loadData = async () => ({
       schemaVersion: 3,
       rootPath: "cs",
-      items: withItem(emptyItemMap(), "community", "slides-rup", { enabled: true }),
+      items: withItem(emptyItemMap(), "community", "slides-rup", { synced: true }),
       remotes: [],
       bratIndex: { "slides-rup": "owner/slides-rup" },
     });
@@ -3109,7 +3109,7 @@ describe("mask producers read the PERSISTED switch-list file, not live PluginHos
     const plugin = makeMemberRulePlugin(io, ["remotely-save"]); // LIVE: reports enabled
     await plugin.loadSettings();
     plugin.settings.rootPath = "cs"; // skip PKM auto-detection, irrelevant here
-    plugin.settings.items = withItem(plugin.settings.items, "community", "remotely-save", { enabled: true });
+    plugin.settings.items = withItem(plugin.settings.items, "community", "remotely-save", { synced: true });
     await plugin.addSwitchExceptions("community-plugins", ["remotely-save"]); // legacy "this device" pin
 
     const ctx = await plugin.coreContext();
@@ -3123,7 +3123,7 @@ describe("mask producers read the PERSISTED switch-list file, not live PluginHos
     const plugin = makeMemberRulePlugin(io, ["remotely-save"]);
     await plugin.loadSettings();
     plugin.settings.rootPath = "cs";
-    plugin.settings.items = withItem(plugin.settings.items, "community", "remotely-save", { enabled: true });
+    plugin.settings.items = withItem(plugin.settings.items, "community", "remotely-save", { synced: true });
     await plugin.addSwitchExceptions("community-plugins", ["remotely-save"]);
 
     const ctx = await plugin.coreContext();
@@ -3139,9 +3139,9 @@ describe("Item.runsOn (task-2 fix #2: a stored rule wins over a pin's re-derivat
     const plugin = makeMemberRulePlugin(io, []); // off, live
     await plugin.loadSettings();
     plugin.settings.rootPath = "cs";
-    plugin.settings.items = withItem(plugin.settings.items, "community", "remotely-save", { enabled: true });
+    plugin.settings.items = withItem(plugin.settings.items, "community", "remotely-save", { synced: true });
     plugin.settings.items = withItem(plugin.settings.items, "community", "remotely-save", {
-      enabled: true,
+      synced: true,
       runsOn: { device: "all", force: { state: "on", where: "everywhere" } },
     }); // no this-device pin at all
 
@@ -3155,10 +3155,10 @@ describe("Item.runsOn (task-2 fix #2: a stored rule wins over a pin's re-derivat
     const plugin = makeMemberRulePlugin(io, ["remotely-save"]); // on, live
     await plugin.loadSettings();
     plugin.settings.rootPath = "cs";
-    plugin.settings.items = withItem(plugin.settings.items, "community", "remotely-save", { enabled: true });
+    plugin.settings.items = withItem(plugin.settings.items, "community", "remotely-save", { synced: true });
     await plugin.addSwitchExceptions("community-plugins", ["remotely-save"]); // a bare pin would resolve to force-on
     plugin.settings.items = withItem(plugin.settings.items, "community", "remotely-save", {
-      enabled: true,
+      synced: true,
       runsOn: { device: "all", force: { state: "off", where: "everywhere" } },
     }); // stored rule overrides it
 

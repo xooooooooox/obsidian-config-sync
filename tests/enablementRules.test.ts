@@ -57,7 +57,7 @@ describe("enablementRules", () => {
     const items = itemsIn({
       obsidian: {
         "core-plugins": {
-          enabled: true,
+          synced: true,
           settingsFile: { mode: "plain", rules: {}, perElement: { "": { "daily-notes": { kind: "from-the-future" } as never } } },
         },
       },

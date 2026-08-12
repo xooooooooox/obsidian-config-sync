@@ -40,19 +40,19 @@ function compiled(): { defs: ItemDef[]; groups: SyncGroup[] } {
   const groups = compileItems(defs, {
     items: itemsIn({
       obsidian: {
-        app: { enabled: true },
-        appearance: { enabled: true, companions: [{ path: "{configDir}/themes", device: "all", enabled: true }] },
-        hotkeys: { enabled: true },
+        app: { synced: true },
+        appearance: { synced: true, companions: [{ path: "{configDir}/themes", device: "all", enabled: true }] },
+        hotkeys: { synced: true },
       },
-      core: { "daily-notes": { enabled: true } },
+      core: { "daily-notes": { synced: true } },
       community: {
         // The same BASENAME on two different cards — a shape the flat group-name space could not
         // even express (compileCompanions names both groups "logs"), and the reason a companion is
         // keyed under its owner. Asserted below, not merely described.
-        dataview: { enabled: true, companions: [{ path: "vault/dataview/logs", device: "all", enabled: true }] },
-        completr: { enabled: true, companions: [{ path: "vault/completr/logs", device: "all", enabled: true }] },
+        dataview: { synced: true, companions: [{ path: "vault/dataview/logs", device: "all", enabled: true }] },
+        completr: { synced: true, companions: [{ path: "vault/completr/logs", device: "all", enabled: true }] },
       },
-      custom: { "my-rule": { enabled: true, type: "file", path: "notes/custom.json" } },
+      custom: { "my-rule": { synced: true, type: "file", path: "notes/custom.json" } },
     }),
   });
   return { defs, groups };
@@ -69,16 +69,16 @@ function compiledLegal(): SyncGroup[] {
   return compileItems(buildItemDefs(ENV), {
     items: itemsIn({
       obsidian: {
-        app: { enabled: true },
-        appearance: { enabled: true, companions: [{ path: "{configDir}/themes", device: "all", enabled: true }] },
-        hotkeys: { enabled: true },
+        app: { synced: true },
+        appearance: { synced: true, companions: [{ path: "{configDir}/themes", device: "all", enabled: true }] },
+        hotkeys: { synced: true },
       },
-      core: { "daily-notes": { enabled: true } },
+      core: { "daily-notes": { synced: true } },
       community: {
-        dataview: { enabled: true, companions: [{ path: "vault/dataview/logs", device: "all", enabled: true }] },
-        completr: { enabled: true, companions: [{ path: "vault/completr/notes", device: "all", enabled: true }] },
+        dataview: { synced: true, companions: [{ path: "vault/dataview/logs", device: "all", enabled: true }] },
+        completr: { synced: true, companions: [{ path: "vault/completr/notes", device: "all", enabled: true }] },
       },
-      custom: { "my-rule": { enabled: true, type: "file", path: "notes/custom.json" } },
+      custom: { "my-rule": { synced: true, type: "file", path: "notes/custom.json" } },
     }),
   });
 }

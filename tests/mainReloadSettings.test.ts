@@ -74,7 +74,7 @@ describe("ConfigSyncPlugin.reloadSettings — loadSettings() must be followed by
 
     // Simulate a self-group apply rewriting this plugin's own data.json externally (the scenario
     // in adoptConfiguration/applyItems): the self item is now enabled.
-    data = baseData({ community: { "config-sync": { enabled: true } } });
+    data = baseData({ community: { "config-sync": { synced: true } } });
 
     // loadSettings() alone must NOT update compiledGroups — this is exactly the bug: the sync
     // list stays stale until an unrelated saveSettings() or a restart.
@@ -102,7 +102,7 @@ describe("ConfigSyncPlugin.recompile — keeps last-good compiledGroups on a mid
     };
     instance.app = fakeApp();
 
-    let data = baseData({ obsidian: { hotkeys: { enabled: true } } });
+    let data = baseData({ obsidian: { hotkeys: { synced: true } } });
     instance.loadData = async () => data;
     await instance.reloadSettings();
     const lastGood = instance.compiledGroups.map((g) => g.name);
@@ -112,8 +112,8 @@ describe("ConfigSyncPlugin.recompile — keeps last-good compiledGroups on a mid
     // with hotkeys' default path — compileItems must throw a CompileError.
     data = baseData({
       obsidian: {
-        hotkeys: { enabled: true },
-        appearance: { enabled: true, path: "{configDir}/hotkeys.json" },
+        hotkeys: { synced: true },
+        appearance: { synced: true, path: "{configDir}/hotkeys.json" },
       },
     });
     NoticeSpy.lastMessage = undefined;
@@ -180,8 +180,8 @@ describe("ConfigSyncPlugin.loadSettings/saveSettings — nested defaults and an 
     const { instance, saved } = makeLoadSavePlugin(
       baseData({
         obsidian: {
-          hotkeys: { enabled: true },
-          appearance: { enabled: true, companions: [{ path: "{configDir}/themes", device: "all", enabled: true }] },
+          hotkeys: { synced: true },
+          appearance: { synced: true, companions: [{ path: "{configDir}/themes", device: "all", enabled: true }] },
         },
       })
     );
@@ -190,12 +190,12 @@ describe("ConfigSyncPlugin.loadSettings/saveSettings — nested defaults and an 
     await instance.saveSettings();
 
     const items = saved()?.items as ItemMap;
-    expect(items.obsidian.hotkeys).toEqual({ enabled: true });
+    expect(items.obsidian.hotkeys).toEqual({ synced: true });
     expect(items.obsidian.appearance?.companions).toEqual([{ path: "{configDir}/themes", device: "all", enabled: true }]);
   });
 
   it("an item with no companions key at all loads and compiles exactly like one with an empty list", async () => {
-    const { instance } = makeLoadSavePlugin(baseData({ obsidian: { hotkeys: { enabled: true } } }));
+    const { instance } = makeLoadSavePlugin(baseData({ obsidian: { hotkeys: { synced: true } } }));
     const compiled = instance as unknown as { recompile: () => Promise<boolean>; compiledGroups: { name: string }[] };
 
     await instance.loadSettings();
@@ -231,7 +231,7 @@ describe("ConfigSyncPlugin.loadSettings — an unrecognised runsOn survives and 
     instance.app = fakeApp();
     instance.loadData = async () => ({
       schemaVersion: 3,
-      items: itemsIn({ community: { futurist: { enabled: true, runsOn: FUTURE } as unknown as Item, known: { enabled: true, runsOn: KNOWN } as unknown as Item } }),
+      items: itemsIn({ community: { futurist: { synced: true, runsOn: FUTURE } as unknown as Item, known: { synced: true, runsOn: KNOWN } as unknown as Item } }),
       remotes: [],
       bratIndex: {},
     });
@@ -321,7 +321,7 @@ describe("the baseline re-key runs only when the compile it keys against succeed
   it("recompile answers false when a custom rule cannot compile, and the ledger is left retryable", async () => {
     const local = new Map([[BASELINES, V1_LEDGER]]);
     const instance = makePlugin(
-      { schemaVersion: 3, items: itemsIn({ custom: { "bad name!": { enabled: true, type: "file", path: "notes/x.json" } } }), remotes: [], bratIndex: {} },
+      { schemaVersion: 3, items: itemsIn({ custom: { "bad name!": { synced: true, type: "file", path: "notes/x.json" } } }), remotes: [], bratIndex: {} },
       local
     );
 
@@ -339,7 +339,7 @@ describe("the baseline re-key runs only when the compile it keys against succeed
   it("no baseline write survives a failed compile, whichever writer asks", async () => {
     const local = new Map([[BASELINES, V1_LEDGER]]);
     const instance = makePlugin(
-      { schemaVersion: 3, items: itemsIn({ custom: { "bad name!": { enabled: true, type: "file", path: "notes/x.json" } } }), remotes: [], bratIndex: {} },
+      { schemaVersion: 3, items: itemsIn({ custom: { "bad name!": { synced: true, type: "file", path: "notes/x.json" } } }), remotes: [], bratIndex: {} },
       local
     );
     await instance.loadSettings();
@@ -357,7 +357,7 @@ describe("the baseline re-key runs only when the compile it keys against succeed
   // a shape whose own reader would answer empty.
   it("declines to persist a ledger that is not the version this build writes", async () => {
     const local = new Map([[BASELINES, V1_LEDGER]]);
-    const instance = makePlugin({ schemaVersion: 3, items: itemsIn({ obsidian: { hotkeys: { enabled: true } } }), remotes: [], bratIndex: {} }, local);
+    const instance = makePlugin({ schemaVersion: 3, items: itemsIn({ obsidian: { hotkeys: { synced: true } } }), remotes: [], bratIndex: {} }, local);
     await instance.loadSettings();
     expect(await instance.recompile()).toBe(true); // the compile is fine — it is the LEDGER that is not ours
 
@@ -371,7 +371,7 @@ describe("the baseline re-key runs only when the compile it keys against succeed
   it("recompile answers true on a good document, and the re-key then runs once", async () => {
     const local = new Map([[BASELINES, V1_LEDGER]]);
     const instance = makePlugin(
-      { schemaVersion: 3, items: itemsIn({ obsidian: { appearance: { enabled: true, companions: [{ path: "{configDir}/themes", device: "all", enabled: true }] } } }), remotes: [], bratIndex: {} },
+      { schemaVersion: 3, items: itemsIn({ obsidian: { appearance: { synced: true, companions: [{ path: "{configDir}/themes", device: "all", enabled: true }] } } }), remotes: [], bratIndex: {} },
       local
     );
 

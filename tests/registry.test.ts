@@ -45,7 +45,7 @@ function customSection(groups: SyncGroup[]): Record<string, Item> {
 }
 
 function on(overrides: Partial<Item> = {}): Item {
-  return { ...emptyItem(), enabled: true, ...overrides };
+  return { ...emptyItem(), synced: true, ...overrides };
 }
 
 function findGroup(groups: SyncGroup[], name: string): SyncGroup | undefined {
@@ -161,7 +161,7 @@ describe("item identity never carries the beta classification (spec §7b)", () =
 
   it("a beta item is read out of the community section — one key, whichever way BRAT's list moves", () => {
     const s = settings({ community: { "slides-rup": on() } });
-    expect(itemFor(s.items, beta).enabled).toBe(true);
+    expect(itemFor(s.items, beta).synced).toBe(true);
     // ...and the same item, once BRAT drops it, is the same entry under the same key.
     const asCommunity = buildItemDefs({ ...env, betaIds: new Set() }).find((d) => d.id === "slides-rup") as ItemDef;
     expect(defRef(asCommunity)).toBe(defRef(beta));
@@ -210,7 +210,7 @@ describe("item identity never carries the beta classification (spec §7b)", () =
 describe("compileItems — app card", () => {
   it("compiles the app card as an ordinary single-file group named 'app'", () => {
     const defs = buildItemDefs({ cores: [], plugins: [], betaIds: new Set() });
-    const groups = compileItems(defs, settings({ obsidian: { app: { enabled: true, settingsFile: { mode: "fields", rules: { vimMode: { sharing: perClass("desktop"), encrypted: false } }, perElement: {} } } } }));
+    const groups = compileItems(defs, settings({ obsidian: { app: { synced: true, settingsFile: { mode: "fields", rules: { vimMode: { sharing: perClass("desktop"), encrypted: false } }, perElement: {} } } } }));
     const app = groups.find((g) => g.name === "app");
     expect(app).toMatchObject({ path: "{configDir}/app.json", type: "file", mode: "fields" });
     expect(app?.fields).toEqual([{ pattern: "vimMode", sharing: perClass("desktop"), encrypted: false }]);
@@ -268,7 +268,7 @@ describe("compileItems — appearance card", () => {
     const s = settings({
       obsidian: {
         appearance: {
-          enabled: false,
+          synced: false,
           companions: [{ path: "{configDir}/themes", device: "all", enabled: true }],
           settingsFile: { mode: "fields", rules: { cssTheme: { sharing: EVERYWHERE, encrypted: false } }, perElement: {} },
         },
@@ -693,13 +693,13 @@ describe("compileItems — the custom section (spec §2/§6)", () => {
   // carry has to be deliberate on both sides.
   it("compiles an unknown field on a custom item straight through onto its group", () => {
     const defs = buildItemDefs(EMPTY_ENV);
-    const item: Item = { enabled: true, type: "file", path: "notes/x.json", writtenByANewerBuild: { keep: true } } as Item;
+    const item: Item = { synced: true, type: "file", path: "notes/x.json", writtenByANewerBuild: { keep: true } } as Item;
     const compiled = findGroup(compileItems(defs, { items: itemsIn({ custom: { "my-rule": item } }) }), "my-rule");
     expect((compiled as unknown as { writtenByANewerBuild: unknown }).writtenByANewerBuild).toEqual({ keep: true });
   });
 
   it("customItemFromGroup restores the tail off the STORED item — the draft has already been through the whitelist parse", () => {
-    const stored: Item = { enabled: true, type: "file", path: "notes/x.json", writtenByANewerBuild: { keep: true } } as Item;
+    const stored: Item = { synced: true, type: "file", path: "notes/x.json", writtenByANewerBuild: { keep: true } } as Item;
     // What the Advanced tab actually holds: validateSyncManifest rebuilt it from known keys only.
     const draft: SyncGroup = { name: "my-rule", path: "notes/moved.json", type: "file", devices: "mobile" };
     const next = customItemFromGroup(draft, stored);
@@ -716,7 +716,7 @@ describe("compileItems — the custom section (spec §2/§6)", () => {
   // to the validator and the engine.
   it("an item-level field a newer build named `mode` never lands on the compiled group as its mode", () => {
     const defs = buildItemDefs(EMPTY_ENV);
-    const item: Item = { enabled: true, type: "file", path: "notes/x.json", mode: "something-else" } as unknown as Item;
+    const item: Item = { synced: true, type: "file", path: "notes/x.json", mode: "something-else" } as unknown as Item;
     const compiled = findGroup(compileItems(defs, { items: itemsIn({ custom: { "my-rule": item } }) }), "my-rule");
     expect(compiled?.mode).toBeUndefined();
     // ...and the item itself still has it — the durable side never loses anything.
@@ -729,7 +729,7 @@ describe("compileItems — the custom section (spec §2/§6)", () => {
   });
 
   it("a draft that DID keep an unknown field carries it too, and the draft wins", () => {
-    const stored: Item = { enabled: true, type: "file", path: "notes/x.json", fromTheFuture: "old" } as Item;
+    const stored: Item = { synced: true, type: "file", path: "notes/x.json", fromTheFuture: "old" } as Item;
     const draft = { name: "my-rule", path: "notes/x.json", type: "file", devices: "all", fromTheFuture: "new" } as unknown as SyncGroup;
     expect((customItemFromGroup(draft, stored) as unknown as { fromTheFuture: string }).fromTheFuture).toBe("new");
   });
@@ -747,28 +747,28 @@ describe("compileItems — the custom section (spec §2/§6)", () => {
 // item, where itemWithDevice is the Sync Center's menu write, which forces the item on.
 describe("withRunsOnDevice — the device axis alone", () => {
   it("writes the device class without enabling the item", () => {
-    expect(withRunsOnDevice({ enabled: false }, "mobile")).toEqual({ enabled: false, runsOn: { device: "mobile" } });
+    expect(withRunsOnDevice({ synced: false }, "mobile")).toEqual({ synced: false, runsOn: { device: "mobile" } });
   });
 
   it("keeps a force rule while the device axis moves — the two axes answer different questions", () => {
-    const item: Item = { enabled: true, runsOn: { device: "desktop", force: { state: "off", where: "everywhere" } } };
+    const item: Item = { synced: true, runsOn: { device: "desktop", force: { state: "off", where: "everywhere" } } };
     expect(withRunsOnDevice(item, "mobile").runsOn).toEqual({ device: "mobile", force: { state: "off", where: "everywhere" } });
   });
 
   it("drops runsOn entirely when it would say nothing at all — a round trip leaves data.json as it found it (C-#26)", () => {
-    const pinned = withRunsOnDevice({ enabled: true }, "desktop");
+    const pinned = withRunsOnDevice({ synced: true }, "desktop");
     expect(pinned.runsOn).toEqual({ device: "desktop" });
-    expect(withRunsOnDevice(pinned, "all")).toEqual({ enabled: true });
+    expect(withRunsOnDevice(pinned, "all")).toEqual({ synced: true });
     expect(withRunsOnDevice(pinned, "all")).not.toHaveProperty("runsOn");
   });
 
   it("keeps a lone force rule when the device axis goes back to all", () => {
-    const item: Item = { enabled: true, runsOn: { device: "desktop", force: { state: "on", where: "everywhere" } } };
+    const item: Item = { synced: true, runsOn: { device: "desktop", force: { state: "on", where: "everywhere" } } };
     expect(withRunsOnDevice(item, "all").runsOn).toEqual({ device: "all", force: { state: "on", where: "everywhere" } });
   });
 
   it("leaves every other field alone, and does not mutate its input", () => {
-    const item: Item = { enabled: true, companions: [{ path: "x", device: "all", enabled: true }] };
+    const item: Item = { synced: true, companions: [{ path: "x", device: "all", enabled: true }] };
     const snapshot = structuredClone(item);
     expect(withRunsOnDevice(item, "desktop").companions).toEqual(item.companions);
     expect(item).toEqual(snapshot);
@@ -777,18 +777,18 @@ describe("withRunsOnDevice — the device axis alone", () => {
 
 describe("itemWithDevice", () => {
   it("creates an enabled item from nothing", () => {
-    expect(itemWithDevice(undefined, "desktop")).toEqual({ enabled: true, runsOn: { device: "desktop" } });
+    expect(itemWithDevice(undefined, "desktop")).toEqual({ synced: true, runsOn: { device: "desktop" } });
   });
   it("preserves existing fields and forces enabled", () => {
-    const existing: Item = { enabled: false, companions: [{ path: "x", enabled: true, device: "all" }], settingsFile: { mode: "plain", rules: {}, perElement: {} } };
+    const existing: Item = { synced: false, companions: [{ path: "x", enabled: true, device: "all" }], settingsFile: { mode: "plain", rules: {}, perElement: {} } };
     const out = itemWithDevice(existing, "mobile");
     expect(out.runsOn).toEqual({ device: "mobile" });
-    expect(out.enabled).toBe(true);
+    expect(out.synced).toBe(true);
     expect(out.companions).toEqual(existing.companions);
     expect(out.settingsFile).toEqual(existing.settingsFile);
   });
   it("keeps a force rule while changing the device axis — the two axes are orthogonal", () => {
-    const existing: Item = { enabled: true, runsOn: { device: "all", force: { state: "on", where: "everywhere" } } };
+    const existing: Item = { synced: true, runsOn: { device: "all", force: { state: "on", where: "everywhere" } } };
     expect(itemWithDevice(existing, "desktop").runsOn).toEqual({ device: "desktop", force: { state: "on", where: "everywhere" } });
   });
 });
@@ -819,7 +819,7 @@ describe("parentCardLabel", () => {
   });
 
   it("returns null when the card is disabled", () => {
-    const s = settings({ obsidian: { appearance: { enabled: false, companions: [{ path: "{configDir}/themes", device: "all", enabled: true }] } } });
+    const s = settings({ obsidian: { appearance: { synced: false, companions: [{ path: "{configDir}/themes", device: "all", enabled: true }] } } });
     expect(parentCardLabel("themes", defs, s)).toBeNull();
   });
 
@@ -853,7 +853,7 @@ describe("parentCardLabel", () => {
   });
 
   it("disabled appearance card with no configured companions still gets the preset fallback (state does not gate it)", () => {
-    const s = settings({ obsidian: { appearance: { enabled: false, companions: [] } } });
+    const s = settings({ obsidian: { appearance: { synced: false, companions: [] } } });
     expect(parentCardLabel("themes", defs, s)).toBe("Appearance");
   });
 
@@ -866,24 +866,24 @@ describe("parentCardLabel", () => {
 //
 // `itemEarnsDef` is 2.21.0's condition ("is there an entry?") minus exactly one shape: an entry
 // whose only content is a Runs-on rule, which at 2.21.0 lived in a side table with no entry at all.
-// Everything else earns a def, `{enabled:false}` included — that is how a card turned off is turned
+// Everything else earns a def, `{synced:false}` included — that is how a card turned off is turned
 // back on (NEW-I1), and its presence in the map is the capture mask for an on/off-list element
 // whose plugin is not installed here (C1). The write path prunes nothing; there is no second
 // mechanism to keep in step with this one.
 describe("itemEarnsDef — 2.21.0's condition minus the rule-only entry", () => {
   const CASES: Item[] = [
-    { enabled: false },
-    { enabled: true },
-    { enabled: false, runsOn: { device: "desktop" } },
-    { enabled: false, runsOn: { device: "all", force: { state: "off", where: "everywhere" } } },
-    { enabled: true, runsOn: { device: "mobile" } },
-    { enabled: false, companions: [{ path: "a/b", device: "all", enabled: true }] },
-    { enabled: false, settingsFile: { mode: "plain", rules: {}, perElement: {} } },
-    { enabled: false, path: "x/y.json" },
-    { enabled: false, description: "kept" },
-    { enabled: false, label: "kept" },
-    { enabled: false, origin: "discovered" },
-    { enabled: false, fromANewerBuild: { keep: true } } as unknown as Item,
+    { synced: false },
+    { synced: true },
+    { synced: false, runsOn: { device: "desktop" } },
+    { synced: false, runsOn: { device: "all", force: { state: "off", where: "everywhere" } } },
+    { synced: true, runsOn: { device: "mobile" } },
+    { synced: false, companions: [{ path: "a/b", device: "all", enabled: true }] },
+    { synced: false, settingsFile: { mode: "plain", rules: {}, perElement: {} } },
+    { synced: false, path: "x/y.json" },
+    { synced: false, description: "kept" },
+    { synced: false, label: "kept" },
+    { synced: false, origin: "discovered" },
+    { synced: false, fromANewerBuild: { keep: true } } as unknown as Item,
   ];
 
   // Producer vs producer: the ONLY shapes this build declines are the ones 2.21.0 never had an
@@ -891,38 +891,38 @@ describe("itemEarnsDef — 2.21.0's condition minus the rule-only entry", () => 
   it("declines exactly the rule-only entries, and nothing else", () => {
     const declined = CASES.filter((i) => !itemEarnsDef(i));
     expect(declined).toEqual([
-      { enabled: false, runsOn: { device: "desktop" } },
-      { enabled: false, runsOn: { device: "all", force: { state: "off", where: "everywhere" } } },
+      { synced: false, runsOn: { device: "desktop" } },
+      { synced: false, runsOn: { device: "all", force: { state: "off", where: "everywhere" } } },
     ]);
   });
 
   it("a card that was turned off keeps its def, so it can be turned back on", () => {
-    expect(itemEarnsDef({ enabled: false })).toBe(true);
+    expect(itemEarnsDef({ synced: false })).toBe(true);
     expect(itemEarnsDef(emptyItem())).toBe(true);
   });
 
   it("a rule alongside real configuration is not a rule-only entry", () => {
-    expect(itemEarnsDef({ enabled: false, runsOn: { device: "mobile" }, description: "x" })).toBe(true);
+    expect(itemEarnsDef({ synced: false, runsOn: { device: "mobile" }, description: "x" })).toBe(true);
   });
 });
 
 // The presence of an entry is this device's capture mask for that element (registry.ts's
 // elementSharings, second pass), so a write must never decide an entry has nothing to say. An
-// earlier round pruned `{enabled:false}` here by analogy with the C-#26 field prunes; the analogy
+// earlier round pruned `{synced:false}` here by analogy with the C-#26 field prunes; the analogy
 // was false — those drop a FIELD whose absence and default agree, this dropped the entry whose
 // existence IS the decision — and the result was final-review C1.
 describe("withItem — never removes an entry", () => {
   it("stores an off entry rather than pruning it, because its presence is the mask", () => {
-    const items = itemsIn({ community: { demo: { enabled: true } } });
-    const next = withItem(items, "community", "demo", { enabled: false });
-    expect(next.community["demo"]).toEqual({ enabled: false });
+    const items = itemsIn({ community: { demo: { synced: true } } });
+    const next = withItem(items, "community", "demo", { synced: false });
+    expect(next.community["demo"]).toEqual({ synced: false });
   });
 
   it("keeps an entry that carries a rule, and leaves the other sections alone", () => {
-    const items = itemsIn({ community: { demo: { enabled: true } }, obsidian: { hotkeys: { enabled: true } } });
-    const next = withItem(items, "community", "demo", { enabled: false, runsOn: { device: "desktop" } });
-    expect(next.community["demo"]).toEqual({ enabled: false, runsOn: { device: "desktop" } });
-    expect(next.obsidian["hotkeys"]).toEqual({ enabled: true });
+    const items = itemsIn({ community: { demo: { synced: true } }, obsidian: { hotkeys: { synced: true } } });
+    const next = withItem(items, "community", "demo", { synced: false, runsOn: { device: "desktop" } });
+    expect(next.community["demo"]).toEqual({ synced: false, runsOn: { device: "desktop" } });
+    expect(next.obsidian["hotkeys"]).toEqual({ synced: true });
   });
 
   // The two halves of the pair, on one map: an off card keeps its def AND its entry, while the
@@ -930,14 +930,14 @@ describe("withItem — never removes an entry", () => {
   it("an off card keeps both its entry and its def; a rule-only entry keeps only its entry", () => {
     const env: RegistryEnv = { cores: [], plugins: [], betaIds: new Set() };
     const items = withItem(
-      withItem(itemsIn({}), "community", "was-a-card", { enabled: false }),
+      withItem(itemsIn({}), "community", "was-a-card", { synced: false }),
       "community",
       "rule-only",
-      { enabled: false, runsOn: { device: "desktop" } }
+      { synced: false, runsOn: { device: "desktop" } }
     );
     const ids = defsForForeignItems(buildItemDefs(env), items, new Set()).map((d) => d.id);
-    expect(items.community["was-a-card"]).toEqual({ enabled: false });
-    expect(items.community["rule-only"]).toEqual({ enabled: false, runsOn: { device: "desktop" } });
+    expect(items.community["was-a-card"]).toEqual({ synced: false });
+    expect(items.community["rule-only"]).toEqual({ synced: false, runsOn: { device: "desktop" } });
     expect(ids).toContain("was-a-card");
     expect(ids).not.toContain("rule-only");
   });

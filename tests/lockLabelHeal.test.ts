@@ -44,7 +44,7 @@ function makeHealPlugin(io: MemFS): HealPluginSurface {
   };
   instance.loadData = async () => ({
     schemaVersion: 3,
-    items: itemsIn({ community: { demo: { enabled: true } } }),
+    items: itemsIn({ community: { demo: { synced: true } } }),
     remotes: [],
     bratIndex: {},
   });

@@ -295,7 +295,7 @@ export interface SyncCenterHost {
   diffPair(name: string, rel: string, dir: Direction): Promise<{ base: string; produced: string } | null>;
   // The section header chip's write target (task-4): toggles whether an item (here, the
   // core-plugins/community-plugins carrier) is itself a synced item — same field the Settings
-  // tab's per-card sync toggle writes (Item.enabled).
+  // tab's per-card sync toggle writes (Item.synced).
   setItemSyncEnabled(ref: ItemRef, enabled: boolean): Promise<void>;
   // The Runs-on menu (spec §4/§6): read = the element's current rule (a stored Item.runsOn wins;
   // else derived losslessly from the this-device pin, using `locallyOn` exactly as apply/capture
@@ -2323,7 +2323,7 @@ export class SyncCenterView extends ItemView {
         item.setTitle(synced ? "Stop syncing on/off" : "Sync on/off").onClick(() => {
           // The carrier is a compiled group, not an item of its own — it exists exactly when some
           // item in its section is synced (registry.ts's anyEnabledInList), so there is no
-          // Item.enabled to flip here and itemRefForGroup answers null. Same outcome as the v2
+          // Item.synced to flip here and itemRefForGroup answers null. Same outcome as the v2
           // write this replaces, which stored an entry no def claimed and nothing ever compiled.
           const ref = this.host.itemRefForGroup(carrierId);
           if (ref === null) return;

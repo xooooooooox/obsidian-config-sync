@@ -68,12 +68,12 @@ export function ruledElementIds(items: ItemMap, list: RuleListId): string[] {
 //
 // withItem's own doc comment refuses to ever remove an entry — that rule protects a core/community
 // PLUGIN's presence, which is a capture mask this function never touches (a rule home is always
-// "obsidian"). Here an item that has cooled all the way down to bare `{enabled:false}` — nothing a
+// "obsidian"). Here an item that has cooled all the way down to bare `{synced:false}` — nothing a
 // user set, nothing this write left behind — carries no more information than having no entry at
 // all, so it is dropped rather than kept as a husk: that is what makes the round trip byte-identical
 // instead of leaving a stray entry the next capture would have to explain.
 function isBareItem(item: Item): boolean {
-  return !item.enabled && Object.keys(item).length === 1;
+  return !item.synced && Object.keys(item).length === 1;
 }
 
 export function withEnablementRule(items: ItemMap, list: RuleListId, elementId: string, sharing: Sharing): ItemMap {

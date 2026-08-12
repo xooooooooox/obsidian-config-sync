@@ -135,9 +135,9 @@ describe("withDefaults — the item map", () => {
   const defaults = { schemaVersion: 3, items: emptyItemMap(), rootPath: "" };
 
   it("fills a section the document never had", () => {
-    const out = withDefaults(defaults, { items: { community: { dataview: { enabled: true } } } });
+    const out = withDefaults(defaults, { items: { community: { dataview: { synced: true } } } });
     expect(Object.keys(out.items).sort()).toEqual(["community", "core", "custom", "obsidian"]);
-    expect(out.items.community).toEqual({ dataview: { enabled: true } });
+    expect(out.items.community).toEqual({ dataview: { synced: true } });
     expect(out.items.custom).toEqual({});
   });
 
@@ -147,7 +147,7 @@ describe("withDefaults — the item map", () => {
     expect(out.items.custom).not.toBe(defaults.items.custom);
     // ...and a second load is independent of the first.
     const other = withDefaults(defaults, null);
-    other.items.custom["my-rule"] = { enabled: true };
+    other.items.custom["my-rule"] = { synced: true };
     expect(out.items.custom).toEqual({});
     expect(defaults.items.custom).toEqual({});
   });

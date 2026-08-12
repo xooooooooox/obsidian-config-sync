@@ -93,7 +93,7 @@ function cfg(overrides: Partial<Item> = {}): Item {
 describe("computeBadges", () => {
   it("state-only def gets the on/off-only badge first, with tooltip", () => {
     const def: ItemDef = { id: "bases", groupName: "bases", label: "Bases", description: "", section: "core", settingsFile: { defaultPath: null } };
-    const badges = computeBadges(def, { enabled: true }, false);
+    const badges = computeBadges(def, { synced: true }, false);
     expect(badges[0]).toEqual({
       text: "on/off only",
       cls: "config-sync-card-badge-state",
@@ -103,7 +103,7 @@ describe("computeBadges", () => {
 
   it("a def with a settings file gets no on/off-only badge", () => {
     const def: ItemDef = { id: "backlinks", groupName: "backlinks", label: "Backlinks", description: "", section: "core", settingsFile: { defaultPath: "{configDir}/backlink.json" } };
-    expect(computeBadges(def, { enabled: true }, false).some((b) => b.text === "on/off only")).toBe(false);
+    expect(computeBadges(def, { synced: true }, false).some((b) => b.text === "on/off only")).toBe(false);
   });
 
   it("no badges for a plain off/default card", () => {
@@ -111,8 +111,8 @@ describe("computeBadges", () => {
   });
 
   it("a runsOn device of \"all\" (or none at all) never shows an on: badge, even with enablement", () => {
-    expect(computeBadges(COMMUNITY_DEF, cfg({ enabled: true, runsOn: { device: "all" } }), false)).toEqual([]);
-    expect(computeBadges(COMMUNITY_DEF, cfg({ enabled: true }), false)).toEqual([]);
+    expect(computeBadges(COMMUNITY_DEF, cfg({ synced: true, runsOn: { device: "all" } }), false)).toEqual([]);
+    expect(computeBadges(COMMUNITY_DEF, cfg({ synced: true }), false)).toEqual([]);
   });
 
   it("desktop-only def prepends the innate grey chip ahead of every config badge (round-8 spec §2)", () => {
@@ -456,8 +456,8 @@ describe("buildCompanionRows", () => {
   });
 
   it("an absent companions key reads exactly like an empty list — presets still synthesize their rows (§5.2)", () => {
-    expect(buildCompanionRows(APPEARANCE_DEF, { enabled: true })).toEqual(buildCompanionRows(APPEARANCE_DEF, { enabled: true, companions: [] }));
-    expect(buildCompanionRows(APPEARANCE_DEF, { enabled: true })).toEqual([
+    expect(buildCompanionRows(APPEARANCE_DEF, { synced: true })).toEqual(buildCompanionRows(APPEARANCE_DEF, { synced: true, companions: [] }));
+    expect(buildCompanionRows(APPEARANCE_DEF, { synced: true })).toEqual([
       { path: "{configDir}/themes", device: "all", enabled: false, isPreset: true },
       { path: "{configDir}/snippets", device: "all", enabled: false, isPreset: true },
     ]);
@@ -488,20 +488,20 @@ describe("Sync all (spec §4/§5/§10, D11 — one master row per Core/Community
   it("sectionAllEnabled is false when the section is empty, when some cards are off, true only when every card is on", () => {
     expect(sectionAllEnabled([], itemsIn({}))).toBe(false);
     expect(sectionAllEnabled(CORE_DEFS, itemsIn({}))).toBe(false); // no items entries at all → both default to off
-    expect(sectionAllEnabled(CORE_DEFS, itemsIn({ core: { [CORE_STATE_ONLY_DEF.id]: cfg({ enabled: true }) } }))).toBe(false); // one on, one missing/off
+    expect(sectionAllEnabled(CORE_DEFS, itemsIn({ core: { [CORE_STATE_ONLY_DEF.id]: cfg({ synced: true }) } }))).toBe(false); // one on, one missing/off
     expect(
       sectionAllEnabled(
         CORE_DEFS,
-        itemsIn({ core: { [CORE_STATE_ONLY_DEF.id]: cfg({ enabled: true }), [CORE_WITH_FILE_DEF.id]: cfg({ enabled: true }) } })
+        itemsIn({ core: { [CORE_STATE_ONLY_DEF.id]: cfg({ synced: true }), [CORE_WITH_FILE_DEF.id]: cfg({ synced: true }) } })
       )
     ).toBe(true);
   });
 
   it("applySyncAll(on) turns every def in the list on, preserving each item's other fields", () => {
-    const items = itemsIn({ core: { [CORE_WITH_FILE_DEF.id]: cfg({ enabled: false, runsOn: { device: "desktop" } }) } });
+    const items = itemsIn({ core: { [CORE_WITH_FILE_DEF.id]: cfg({ synced: false, runsOn: { device: "desktop" } }) } });
     const next = applySyncAll(CORE_DEFS, items, true);
-    expect(next.core[CORE_STATE_ONLY_DEF.id]).toEqual({ enabled: true });
-    expect(next.core[CORE_WITH_FILE_DEF.id]).toEqual(cfg({ enabled: true, runsOn: { device: "desktop" } })); // the rule is untouched
+    expect(next.core[CORE_STATE_ONLY_DEF.id]).toEqual({ synced: true });
+    expect(next.core[CORE_WITH_FILE_DEF.id]).toEqual(cfg({ synced: true, runsOn: { device: "desktop" } })); // the rule is untouched
   });
 
   // Every entry SURVIVES being turned off. In the enablement sections an entry's presence is this
@@ -510,15 +510,15 @@ describe("Sync all (spec §4/§5/§10, D11 — one master row per Core/Community
   // nothing.
   it("applySyncAll(off) turns every def in the list off — no kind-exclusion, every def in the section participates", () => {
     const items = itemsIn({
-      core: { [CORE_STATE_ONLY_DEF.id]: cfg({ enabled: true }), [CORE_WITH_FILE_DEF.id]: cfg({ enabled: true, runsOn: { device: "desktop" } }) },
+      core: { [CORE_STATE_ONLY_DEF.id]: cfg({ synced: true }), [CORE_WITH_FILE_DEF.id]: cfg({ synced: true, runsOn: { device: "desktop" } }) },
     });
     const next = applySyncAll(CORE_DEFS, items, false);
-    expect(next.core[CORE_STATE_ONLY_DEF.id]).toEqual({ enabled: false });
-    expect(next.core[CORE_WITH_FILE_DEF.id]).toEqual(cfg({ enabled: false, runsOn: { device: "desktop" } })); // the rule is untouched
+    expect(next.core[CORE_STATE_ONLY_DEF.id]).toEqual({ synced: false });
+    expect(next.core[CORE_WITH_FILE_DEF.id]).toEqual(cfg({ synced: false, runsOn: { device: "desktop" } })); // the rule is untouched
   });
 
   it("does not mutate the input items map", () => {
-    const items = itemsIn({ core: { [CORE_WITH_FILE_DEF.id]: cfg({ enabled: false }) } });
+    const items = itemsIn({ core: { [CORE_WITH_FILE_DEF.id]: cfg({ synced: false }) } });
     const snapshot = structuredClone(items);
     applySyncAll(CORE_DEFS, items, true);
     expect(items).toEqual(snapshot);

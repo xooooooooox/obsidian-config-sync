@@ -134,7 +134,11 @@ export interface ItemCompanion {
 // no longer a second data shape (v2's `customGroups: SyncGroup[]`) — it is an item whose `path` and
 // `type`, which a registry item derives from its def, are simply required.
 export interface Item {
-  enabled: boolean;
+  // Is this item synced at all? Renamed from `enabled` (spec §3.2): that word meant two different
+  // things one line apart — "this item is synced" and "this plugin is turned on" — and the second
+  // meaning is not stored here at all (it lives in Obsidian's own on/off lists, and config-sync
+  // only masks them). One word, one meaning.
+  synced: boolean;
   // Only meaningful for a custom item, where it is required; a registry item's type is always
   // "file" (its settings file) and is left absent.
   type?: "file" | "folder";
@@ -208,7 +212,7 @@ export function itemFor(items: ItemMap, def: ItemDef): Item {
 // it through untouched — if and only if `items[section][id]` exists. Delete the entry and the mask
 // goes with it, and the next capture removes that plugin from the shared list for every device.
 //
-// So `{enabled: false}` is NOT residue, however much it looks like it. It is what an absent entry
+// So `{synced: false}` is NOT residue, however much it looks like it. It is what an absent entry
 // is not, in the one place that matters most. An earlier fix here pruned it on write, reasoning by
 // analogy with `withRunsOnDevice`/`pruneSettingsFile` (C-#26, "a round trip leaves data.json as it
 // found it") — the analogy was false, because those prune a FIELD whose absence and default agree,
@@ -219,14 +223,14 @@ export function itemFor(items: ItemMap, def: ItemDef): Item {
 // the document from the member ROW in the Sync Center, not from a card, and at 2.21.0 it lived in a
 // side table with no `items` entry at all — so giving it a card would put a plugin this device does
 // not have into the Community tab, which is what review I1 caught. Every other shape earns one,
-// `{enabled:false}` included: that is how a card the user turned off is turned back ON, and taking
+// `{synced:false}` included: that is how a card the user turned off is turned back ON, and taking
 // it away is the door review NEW-I1 caught. Both are closed here, at the one predicate, rather than
 // by a second mechanism on the write path — see this release's own rule about a relationship whose
 // two sides move apart.
 export function itemEarnsDef(item: Item): boolean {
-  if (item.enabled) return true;
+  if (item.synced) return true;
   const keys = Object.keys(item);
-  return !keys.includes("runsOn") || keys.some((k) => k !== "enabled" && k !== "runsOn");
+  return !keys.includes("runsOn") || keys.some((k) => k !== "synced" && k !== "runsOn");
 }
 
 // Pure: returns a new map with one item replaced, both levels copied. It never removes an entry —
@@ -252,7 +256,7 @@ export class CompileError extends Error {
 }
 
 export function emptyItem(): Item {
-  return { enabled: false };
+  return { synced: false };
 }
 
 // The device axis of an item's Runs-on rule, written without disturbing the force axis (they
@@ -271,7 +275,7 @@ export function withRunsOnDevice(item: Item, device: DeviceClass): Item {
 // this-device), pin the device class.
 export function itemWithDevice(existing: Item | undefined, device: "desktop" | "mobile"): Item {
   const base = existing ?? emptyItem();
-  return { ...base, enabled: true, runsOn: { ...(base.runsOn ?? { device }), device } };
+  return { ...base, synced: true, runsOn: { ...(base.runsOn ?? { device }), device } };
 }
 
 // ── Registry construction ───────────────────────────────────────────────────────────────────
@@ -381,8 +385,8 @@ export function buildItemDefs(env: RegistryEnv): ItemDef[] {
 // via SettingTab.renderRegistryCards — for a plugin this device does not have.
 //
 // `itemEarnsDef` is therefore 2.21.0's condition MINUS exactly that one shape, and nothing else: a
-// rule-only entry earns no def; every other entry, `{enabled:false}` included, earns one just as it
-// did before. The first attempt at this excluded `{enabled:false}` too and had to close the
+// rule-only entry earns no def; every other entry, `{synced:false}` included, earns one just as it
+// did before. The first attempt at this excluded `{synced:false}` too and had to close the
 // resulting door with a prune on the write path — which deleted the entry whose presence is the
 // capture mask (review C1). One predicate, no second mechanism.
 export function defsForForeignItems(defs: ItemDef[], items: ItemMap, betaIds: ReadonlySet<string>): ItemDef[] {
@@ -464,7 +468,7 @@ function sharingClassOrAll(sharing: Sharing): DeviceClass {
 
 function compileSingleFile(def: ItemDef, item: Item): SyncGroup | null {
   const defaultPath = def.settingsFile?.defaultPath ?? null;
-  if (!item.enabled || defaultPath === null) return null; // off, or state-only (no file to sync yet)
+  if (!item.synced || defaultPath === null) return null; // off, or state-only (no file to sync yet)
   const path = item.path ?? defaultPath;
   const mode = item.settingsFile?.mode ?? "plain";
   // `ref` is the item's identity and the key of the lock, the baselines and the opt-out list (spec
@@ -496,7 +500,7 @@ function compileSingleFile(def: ItemDef, item: Item): SyncGroup | null {
 // companionNameConflict forbids a clash. The two are minted side by side here so the name a group
 // compiles to and the key its baseline lands under can never be derived from different rules.
 function compileCompanions(def: ItemDef, item: Item): SyncGroup[] {
-  if (!item.enabled) return []; // card off → its file AND its companions exit sync together
+  if (!item.synced) return []; // card off → its file AND its companions exit sync together
   const owner = defRef(def);
   return (item.companions ?? [])
     .filter((c) => c.enabled)
@@ -519,7 +523,7 @@ export function parentCardLabel(groupName: string, defs: ItemDef[], settings: Co
   if (groupName === "enabled-css-snippets") return defs.find((d) => d.section === "obsidian" && d.id === "appearance")?.label ?? "Appearance";
   for (const def of defs) {
     const item = itemFor(settings.items, def);
-    if (!item.enabled) continue;
+    if (!item.synced) continue;
     if ((item.companions ?? []).some((c) => c.enabled && basename(c.path) === groupName)) return def.label;
   }
   return presetCompanionFallback(groupName, defs, settings);
@@ -576,8 +580,8 @@ function elementSharings(defs: ItemDef[], settings: CompileSettings, list: Enabl
     const item = itemFor(settings.items, def);
     out.push({
       element: def.enablement.element,
-      sharing: item.enabled ? deviceSharing(item.runsOn?.device ?? "all") : THIS_DEVICE,
-      structural: !item.enabled && item.runsOn === undefined,
+      sharing: item.synced ? deviceSharing(item.runsOn?.device ?? "all") : THIS_DEVICE,
+      structural: !item.synced && item.runsOn === undefined,
     });
   }
   // Stored items with no local def: the plugin isn't installed on this device, but its element
@@ -589,8 +593,8 @@ function elementSharings(defs: ItemDef[], settings: CompileSettings, list: Enabl
     if (covered.has(id)) continue;
     out.push({
       element: id,
-      sharing: item.enabled ? deviceSharing(item.runsOn?.device ?? "all") : THIS_DEVICE,
-      structural: !item.enabled && item.runsOn === undefined,
+      sharing: item.synced ? deviceSharing(item.runsOn?.device ?? "all") : THIS_DEVICE,
+      structural: !item.synced && item.runsOn === undefined,
     });
   }
   return out;
@@ -612,7 +616,7 @@ export function structuralLocalElements(defs: ItemDef[], settings: CompileSettin
 }
 
 function anyEnabledInList(defs: ItemDef[], settings: CompileSettings, list: EnablementList): boolean {
-  return defs.some((d) => d.enablement?.list === list && itemFor(settings.items, d).enabled);
+  return defs.some((d) => d.enablement?.list === list && itemFor(settings.items, d).synced);
 }
 
 // Every group name the registry itself can ever produce plus the three switch-list names
@@ -657,7 +661,7 @@ function compileCustomItems(items: ItemMap, defs: ItemDef[], seenPaths: Map<stri
     if (reserved.has(name)) throw new CompileError(`"${name}" is a reserved name — rename this custom rule.`);
     if (seenNames.has(name)) throw new CompileError(`two custom rules are both named "${name}" — rename one of them.`);
     seenNames.add(name);
-    if (!item.enabled) continue;
+    if (!item.synced) continue;
     const path = item.path ?? "";
     claimPath(seenPaths, itemRef("custom", name), path); // never `custom/${name}` — one minter, same as defRef above
     groups.push(customGroup(name, item, path));
@@ -671,7 +675,7 @@ function compileCustomItems(items: ItemMap, defs: ItemDef[], seenPaths: Map<stri
 // round trip (item -> compiled group -> Advanced-tab draft -> item) would strip the future's data
 // and publish the loss to the fleet on the next capture, which is exactly what v2's `{...cg}`
 // spread happened to avoid.
-const WRITTEN_ITEM_KEYS = ["enabled", "type", "path", "settingsFile", "companions", "runsOn", "elements", "description", "label", "origin"] as const;
+const WRITTEN_ITEM_KEYS = ["synced", "type", "path", "settingsFile", "companions", "runsOn", "elements", "description", "label", "origin"] as const;
 
 export function itemTail(item: Item | undefined): Record<string, unknown> {
   if (item === undefined) return {};
@@ -739,7 +743,7 @@ function customGroup(name: string, item: Item, path: string): SyncGroup {
 // storage is what makes the round trip lossless (2.21.0 invariant II.1); the draft's own tail is
 // layered on top for the case where it did survive.
 export function customItemFromGroup(g: SyncGroup, existing?: Item): Item {
-  const item: Item = { ...itemTail(existing), ...withoutKeys(customGroupTail(g), WRITTEN_ITEM_KEYS), enabled: true, type: g.type, path: g.path };
+  const item: Item = { ...itemTail(existing), ...withoutKeys(customGroupTail(g), WRITTEN_ITEM_KEYS), synced: true, type: g.type, path: g.path };
   if (g.devices !== "all") item.runsOn = { device: g.devices };
   // Same rule as customGroup's, in the other direction (review M5): the group's own mode is stored
   // verbatim, so no value of SyncMode can be lost by an enumeration that forgot it. An absent mode

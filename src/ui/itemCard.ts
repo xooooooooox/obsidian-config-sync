@@ -499,18 +499,18 @@ export const PREVIEW_LEGEND_ENTRIES: PreviewLegendEntry[] = [
 ];
 
 // ── Sync all (spec §4/§5/§10, D11) — one master row per Core/Community/Beta section: toggles
-// every card's Item.enabled in that section; its own value is derived (all-enabled), never
+// every card's Item.synced in that section; its own value is derived (all-enabled), never
 // stored separately. No kind-exclusion: every def in the section participates, unlike the old
 // per-catalog-section "list"/allowSyncAll split this replaces.
 
 export function sectionAllEnabled(defs: ItemDef[], items: ItemMap): boolean {
-  return defs.length > 0 && defs.every((d) => itemFor(items, d).enabled);
+  return defs.length > 0 && defs.every((d) => itemFor(items, d).synced);
 }
 
 export function applySyncAll(defs: ItemDef[], items: ItemMap, on: boolean): ItemMap {
   let next = items;
   for (const d of defs) {
-    next = withItem(next, d.section, d.id, { ...(itemFor(next, d) ?? emptyItem()), enabled: on });
+    next = withItem(next, d.section, d.id, { ...(itemFor(next, d) ?? emptyItem()), synced: on });
   }
   return next;
 }

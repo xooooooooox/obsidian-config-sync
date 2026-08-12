@@ -819,8 +819,8 @@ export default class ConfigSyncPlugin extends Plugin {
           // itself included) compiles to the same legacy group name (SELF_GROUP_NAME) the self-
           // propagation apply below expects — enable it so compileItems actually emits that group.
           const selfItem = itemAt(this.settings.items, SELF_ITEM_SECTION, SELF_ITEM_ID);
-          if (selfItem?.enabled !== true) {
-            this.settings.items = withItem(this.settings.items, SELF_ITEM_SECTION, SELF_ITEM_ID, { ...(selfItem ?? emptyItem()), enabled: true });
+          if (selfItem?.synced !== true) {
+            this.settings.items = withItem(this.settings.items, SELF_ITEM_SECTION, SELF_ITEM_ID, { ...(selfItem ?? emptyItem()), synced: true });
             await this.saveSettings(); // recompiles — compiledGroups now carries SELF_GROUP_NAME
           }
           const ctx = await this.coreContext();
@@ -1594,13 +1594,13 @@ export default class ConfigSyncPlugin extends Plugin {
   }
 
   // Sync Center header chip (unified grammar task-4): same write as the Settings tab's per-card
-  // sync toggle (SettingTab.renderItemCard) — Item.enabled, keyed by the item's ref.
+  // sync toggle (SettingTab.renderItemCard) — Item.synced, keyed by the item's ref.
   async setItemSyncEnabled(ref: ItemRef, enabled: boolean): Promise<void> {
     if (this.schemaStopped()) return; // §4.2b
     const parsed = parseItemRef(ref);
     if (parsed === null) return;
     const item = itemAt(this.settings.items, parsed.section, parsed.id) ?? emptyItem();
-    this.settings.items = withItem(this.settings.items, parsed.section, parsed.id, { ...item, enabled });
+    this.settings.items = withItem(this.settings.items, parsed.section, parsed.id, { ...item, synced: enabled });
     await this.saveSettings();
   }
 
@@ -2025,7 +2025,7 @@ export default class ConfigSyncPlugin extends Plugin {
         }
       }
     }
-    // Durable: flip the owning item(s)' enabled flag (or, for a companion group, just that one
+    // Durable: flip the owning item(s)' synced flag (or, for a companion group, just that one
     // companion entry's enabled flag) in settings.items — or, for a custom group (Advanced tab
     // "Custom rules"/"Discovered files"), remove its items.custom entry entirely, since removing
     // the rule is what the Advanced tab means by stopping it — and save. saveSettings persists and recompiles, so the
@@ -2048,7 +2048,7 @@ export default class ConfigSyncPlugin extends Plugin {
           owner.id,
           owner.companionPath !== undefined
             ? { ...item, companions: (item.companions ?? []).map((c) => (c.path === owner.companionPath ? { ...c, enabled: false } : c)) }
-            : { ...item, enabled: false }
+            : { ...item, synced: false }
         );
       }
       this.settings.items = nextItems;

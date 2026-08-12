@@ -270,6 +270,14 @@ function itemFrom(cfg: unknown, memberRule: unknown): unknown {
   if (!isPlainObject(cfg)) return cfg; // left exactly as found — see this module's rule 1
   const item: Doc = { ...cfg };
 
+  // v2's `enabled` is v3's `synced` (spec 2026-08-12-enablement-two-layers-design.md §3.2) — same
+  // field, renamed key, so this is a KEY rename, not a value change (mirrors `customPath` → `path`
+  // below).
+  if ("enabled" in item) {
+    item.synced = item.enabled;
+    delete item.enabled;
+  }
+
   const enabledOn = item.enabledOn;
   delete item.enabledOn;
   const runsOn = runsOnFrom(enabledOn, memberRule);
@@ -420,7 +428,7 @@ export function migrateV2Settings(data: Doc): V2Migration {
     // applies to an unrecognised `enabledOn` in runsOnFrom.
     if (runsOn === undefined) continue;
     const { section, id } = v2ItemLocation(v2Id);
-    items[section][id] = { enabled: false, runsOn };
+    items[section][id] = { synced: false, runsOn };
   }
   for (const [name, item] of customItemsFrom(doc.customGroups)) items.custom[name] = item;
 

@@ -115,7 +115,7 @@ describe("migrateV2Settings — §5 identity rows", () => {
 
   it("a beta plugin migrates into items.community, exactly where its v2 key put it (§7b)", () => {
     const map = items();
-    expect(map.community["my-beta-plugin"]?.enabled).toBe(true);
+    expect(map.community["my-beta-plugin"]?.synced).toBe(true);
     expect((map as unknown as Record<string, unknown>).beta).toBeUndefined();
     // the ref producer agrees: a beta id is a community identity, never a `beta/…` one
     expect(v2ItemRef("community:my-beta-plugin")).toBe("community/my-beta-plugin");
@@ -125,7 +125,7 @@ describe("migrateV2Settings — §5 identity rows", () => {
     const doc = migrated();
     expect(doc.thisDeviceItems).toEqual(["community/my-beta-plugin", "core/backlink"]);
     expect(doc.localMembers).toBeUndefined();
-    expect(items().core["backlink"]).toEqual({ enabled: true });
+    expect(items().core["backlink"]).toEqual({ synced: true });
   });
 
   // Fix round 2, review NEW-I2 — the same harm class as reading a v2 store copy as nothing, on the
@@ -187,7 +187,7 @@ describe("migrateV2Settings — §5 value rows", () => {
       { path: "{configDir}/themes", device: "all", enabled: true },
       { path: "{configDir}/snippets", device: "desktop", enabled: false },
     ]);
-    expect(items().obsidian["hotkeys"]).toEqual({ enabled: false });
+    expect(items().obsidian["hotkeys"]).toEqual({ synced: false });
   });
 });
 
@@ -208,8 +208,8 @@ describe("migrateV2Settings — runsOn preserves what the system DID, not what t
 
   it("a memberRule with no items entry of its own still lands — v2 read that side table independently", () => {
     // …on an item that is off, which is what the absent entry already meant.
-    expect(items().community["templater"]?.enabled).toBe(false);
-    expect(items().community["excalidraw"]).toEqual({ enabled: false, runsOn: { device: "mobile" } });
+    expect(items().community["templater"]?.synced).toBe(false);
+    expect(items().community["excalidraw"]).toEqual({ synced: false, runsOn: { device: "mobile" } });
   });
 
   // Deliberate drop, not parity: v2 ignored an unrecognised value at the point of use and left it
@@ -239,14 +239,14 @@ describe("migrateV2Settings — runsOn preserves what the system DID, not what t
   it("a rule that says nothing at all leaves no runsOn key behind", () => {
     expect(runsOnFrom(undefined, undefined)).toBeUndefined();
     expect(runsOnFrom("all", "all")).toBeUndefined();
-    expect(items().community["config-sync"]).toEqual({ enabled: true });
+    expect(items().community["config-sync"]).toEqual({ synced: true });
   });
 });
 
 describe("migrateV2Settings — customGroups become items.custom (§5)", () => {
   it("type dir becomes folder, devices becomes runsOn.device, description survives", () => {
     expect(items().custom["vaultcss"]).toMatchObject({
-      enabled: true,
+      synced: true,
       type: "folder",
       path: "css",
       runsOn: { device: "desktop" },
@@ -255,7 +255,7 @@ describe("migrateV2Settings — customGroups become items.custom (§5)", () => {
   });
 
   it("a discovered file keeps its origin", () => {
-    expect(items().custom["found-file"]).toMatchObject({ enabled: true, type: "file", origin: "discovered" });
+    expect(items().custom["found-file"]).toMatchObject({ synced: true, type: "file", origin: "discovered" });
   });
 
   it("field rules and perItem inside a custom rule get the same value mapping", () => {
@@ -448,7 +448,7 @@ describe("mergeLegacyAppSliceItems", () => {
     const map = doc.items as ItemMap;
     expect(Object.keys(map.obsidian)).toEqual(["app"]);
     expect(map.obsidian["app"]).toEqual({
-      enabled: true,
+      synced: true,
       settingsFile: { mode: "fields", rules: { spellcheck: { sharing: THIS_DEVICE, encrypted: false } }, perElement: {} },
     });
     expect(doc.appJson).toBeUndefined();
@@ -583,12 +583,12 @@ describe("a materialised orphan rule stays invisible until its plugin is install
   // The narrowing must not touch what synthesis exists FOR: an enabled item whose plugin is not
   // installed here still gets its def, or its pulled files read as deletable leftover.
   it("an enabled item with no installed def still gets one", () => {
-    const items = itemsIn({ community: { pendingInstall: { enabled: true } } });
+    const items = itemsIn({ community: { pendingInstall: { synced: true } } });
     expect(defsForForeignItems(buildItemDefs(ENV), items, new Set()).some((d) => d.id === "pendingInstall")).toBe(true);
   });
 
   it("so does a disabled item that carries configuration of its own", () => {
-    const items = itemsIn({ community: { configured: { enabled: false, companions: [{ path: "a/b", device: "all", enabled: true }] } } });
+    const items = itemsIn({ community: { configured: { synced: false, companions: [{ path: "a/b", device: "all", enabled: true }] } } });
     expect(defsForForeignItems(buildItemDefs(ENV), items, new Set()).some((d) => d.id === "configured")).toBe(true);
   });
 });

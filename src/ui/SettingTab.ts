@@ -858,8 +858,8 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     row.nameEl.prepend(chevron);
     for (const badge of computeBadges(def, item, this.isThisDevice(def))) this.renderBadge(row.nameEl, badge);
     row.addToggle((t) =>
-      t.setValue(item.enabled).onChange(async (v) => {
-        await this.updateItem(def, (c) => ({ ...c, enabled: v }));
+      t.setValue(item.synced).onChange(async (v) => {
+        await this.updateItem(def, (c) => ({ ...c, synced: v }));
         this.refreshCardBadges(wrap, def);
         for (const rebuild of this.syncAllRebuilds) rebuild();
       })

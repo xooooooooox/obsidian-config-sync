@@ -112,7 +112,7 @@ function optOutList(local: (key: string) => string | undefined): string[] {
 
 describe("setDeviceOptOut / deviceOptedOut — round-trip + C-#26 prune discipline (C-#45, §2 storage)", () => {
   it("set true persists into localStorage — the authority no pull or adopt can overwrite", async () => {
-    const { instance, saved, local } = makePlugin({ hotkeys: { enabled: true } }, {}, "d1");
+    const { instance, saved, local } = makePlugin({ hotkeys: { synced: true } }, {}, "d1");
     await instance.loadSettings();
     await instance.recompile();
     expect(instance.syncCenterHost().deviceOptedOut("hotkeys")).toBe(false);
@@ -128,7 +128,7 @@ describe("setDeviceOptOut / deviceOptedOut — round-trip + C-#26 prune discipli
   });
 
   it("with no seeded localStorage id, the opt-out still lands — it is keyed by nothing but this device's own store", async () => {
-    const { instance, local } = makePlugin({ hotkeys: { enabled: true } });
+    const { instance, local } = makePlugin({ hotkeys: { synced: true } });
     await instance.loadSettings();
     await instance.recompile();
 
@@ -138,7 +138,7 @@ describe("setDeviceOptOut / deviceOptedOut — round-trip + C-#26 prune discipli
   });
 
   it("set true then false round-trips byte-clean — the last name removed drops the key entirely", async () => {
-    const { instance, local } = makePlugin({ hotkeys: { enabled: true } }, {}, "d1");
+    const { instance, local } = makePlugin({ hotkeys: { synced: true } }, {}, "d1");
     await instance.loadSettings();
     await instance.recompile();
 
@@ -151,7 +151,7 @@ describe("setDeviceOptOut / deviceOptedOut — round-trip + C-#26 prune discipli
   });
 
   it("clearing when never set is a no-op (still no stored list)", async () => {
-    const { instance, local } = makePlugin({ hotkeys: { enabled: true } }, {}, "d1");
+    const { instance, local } = makePlugin({ hotkeys: { synced: true } }, {}, "d1");
     await instance.loadSettings();
     await instance.recompile();
 
@@ -160,7 +160,7 @@ describe("setDeviceOptOut / deviceOptedOut — round-trip + C-#26 prune discipli
   });
 
   it("a set on a DIFFERENT group never touches an existing one", async () => {
-    const { instance, local } = makePlugin({ hotkeys: { enabled: true }, appearance: { enabled: true } }, {}, "d1", {
+    const { instance, local } = makePlugin({ hotkeys: { synced: true }, appearance: { synced: true } }, {}, "d1", {
       [OPTOUTS_KEY]: JSON.stringify(["obsidian/hotkeys"]),
     });
     await instance.loadSettings();
@@ -175,7 +175,7 @@ describe("setDeviceOptOut / deviceOptedOut — round-trip + C-#26 prune discipli
   // the compile — the conversion asks the compiler what each name's ref is). Idempotent BY SHAPE:
   // a name has no "/" and a ref always does, so a second run cannot re-key what has already moved.
   it("re-keys a list still written in group names, once, and leaves an already-moved list alone", async () => {
-    const { instance, local } = makePlugin({ hotkeys: { enabled: true } }, {}, "d1", { [OPTOUTS_KEY]: JSON.stringify(["hotkeys"]) });
+    const { instance, local } = makePlugin({ hotkeys: { synced: true } }, {}, "d1", { [OPTOUTS_KEY]: JSON.stringify(["hotkeys"]) });
     await instance.loadSettings();
     await instance.recompile();
     instance.rekeyDeviceStores();
@@ -189,7 +189,7 @@ describe("setDeviceOptOut / deviceOptedOut — round-trip + C-#26 prune discipli
 
   it("a garbage stored value reads as no opt-out at all, and the next write replaces it", async () => {
     // Hand-edited, truncated, or written by something else entirely: the device must still sync.
-    const { instance, local } = makePlugin({ hotkeys: { enabled: true } }, {}, "d1", { [OPTOUTS_KEY]: "{not json" });
+    const { instance, local } = makePlugin({ hotkeys: { synced: true } }, {}, "d1", { [OPTOUTS_KEY]: "{not json" });
     await instance.loadSettings();
     await instance.recompile();
 
@@ -206,7 +206,7 @@ describe("setDeviceOptOut / deviceOptedOut — round-trip + C-#26 prune discipli
       [JSON.stringify(["obsidian/hotkeys", 7, null]), ["obsidian/hotkeys"]],
     ];
     for (const [stored, expected] of cases) {
-      const { instance, local } = makePlugin({ hotkeys: { enabled: true } }, {}, "d1", { [OPTOUTS_KEY]: stored });
+      const { instance, local } = makePlugin({ hotkeys: { synced: true } }, {}, "d1", { [OPTOUTS_KEY]: stored });
       await instance.loadSettings();
       await instance.recompile();
       expect(instance.syncCenterHost().deviceOptedOut("hotkeys")).toBe(expected.includes("obsidian/hotkeys"));
@@ -224,7 +224,7 @@ describe("setDeviceOptOut / deviceOptedOut — round-trip + C-#26 prune discipli
 
 describe("SyncCenterHost.computeStatuses — a device-opted-out item still gets a row (C-#45)", () => {
   it("hotkeys opted out on THIS device: still present, synthetic neutral status, deviceOptedOut true", async () => {
-    const { instance } = makePlugin({ hotkeys: { enabled: true } }, {}, "d1", { [OPTOUTS_KEY]: JSON.stringify(["obsidian/hotkeys"]) });
+    const { instance } = makePlugin({ hotkeys: { synced: true } }, {}, "d1", { [OPTOUTS_KEY]: JSON.stringify(["obsidian/hotkeys"]) });
     await instance.loadSettings();
     await instance.recompile();
 
@@ -239,7 +239,7 @@ describe("SyncCenterHost.computeStatuses — a device-opted-out item still gets 
   it("hotkeys opted out on a DIFFERENT device: this device runs a real comparison, unaffected", async () => {
     // Post-§2 that is simply "this device has no opt-out": another device's choice lives in ITS
     // localStorage and can no longer reach this document at all.
-    const { instance } = makePlugin({ hotkeys: { enabled: true } }, {}, "d1");
+    const { instance } = makePlugin({ hotkeys: { synced: true } }, {}, "d1");
     await instance.loadSettings();
     await instance.recompile();
 
@@ -251,7 +251,7 @@ describe("SyncCenterHost.computeStatuses — a device-opted-out item still gets 
   });
 
   it("a non-opted-out item is completely unaffected — real comparison still runs", async () => {
-    const { instance } = makePlugin({ hotkeys: { enabled: true, companions: [] } }, {}, "d1");
+    const { instance } = makePlugin({ hotkeys: { synced: true, companions: [] } }, {}, "d1");
     await instance.loadSettings();
     await instance.recompile();
 
@@ -280,7 +280,7 @@ interface IoSurface {
 
 // The demo plugin's own item, in the community section — `plugin-demo` is its compiled group.
 function ioBaseData(): unknown {
-  return baseData({}, { items: itemsIn({ community: { demo: { enabled: true } } }) });
+  return baseData({}, { items: itemsIn({ community: { demo: { synced: true } } }) });
 }
 
 function makeIoPlugin(io: MemFS): IoSurface {

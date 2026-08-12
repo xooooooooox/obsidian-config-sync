@@ -69,8 +69,8 @@ describe("storeSelfCopyGroups", () => {
     it("recompiles every section, custom items included, into the store's group list", () => {
       const json = JSON.stringify({
         items: itemsIn({
-          community: { demo: { enabled: true } },
-          custom: { "my-rule": { enabled: true, type: "file", path: "docs/x.md" } },
+          community: { demo: { synced: true } },
+          custom: { "my-rule": { synced: true, type: "file", path: "docs/x.md" } },
         }),
       });
       const names = storeSelfCopyGroups(json, defs, NO_BETA_IDS)
@@ -82,7 +82,7 @@ describe("storeSelfCopyGroups", () => {
     it("synthesizes a community def for a store item whose plugin is not installed locally", () => {
       const json = JSON.stringify({
         items: itemsIn({
-          community: { foreign: { enabled: true, companions: [{ path: "{configDir}/plugins/foreign", device: "all", enabled: true }] } },
+          community: { foreign: { synced: true, companions: [{ path: "{configDir}/plugins/foreign", device: "all", enabled: true }] } },
         }),
       });
       const groups = storeSelfCopyGroups(json, defs, NO_BETA_IDS);
@@ -95,7 +95,7 @@ describe("storeSelfCopyGroups", () => {
 
     it("returns [] when the compile fails instead of breaking status", () => {
       // a custom item whose name shadows a reserved registry name → CompileError in compileItems
-      const json = JSON.stringify({ items: itemsIn({ custom: { hotkeys: { enabled: true, type: "file", path: "a.md" } } }) });
+      const json = JSON.stringify({ items: itemsIn({ custom: { hotkeys: { synced: true, type: "file", path: "a.md" } } }) });
       expect(storeSelfCopyGroups(json, defs, NO_BETA_IDS)).toEqual([]);
     });
   });
@@ -154,9 +154,9 @@ describe("selfListGroups (delta ghost regression, spec 2026-07-28 §2)", () => {
   });
   const items = itemsIn({
     community: {
-      omnisearch: { enabled: true },
+      omnisearch: { synced: true },
       // obsidian-git is NOT installed on this device (no def) but IS in the local items:
-      "obsidian-git": { enabled: true, runsOn: { device: "desktop" } },
+      "obsidian-git": { synced: true, runsOn: { device: "desktop" } },
     },
   });
 
@@ -174,7 +174,7 @@ describe("selfListGroups (delta ghost regression, spec 2026-07-28 §2)", () => {
 
   it("a store-only item still reports added", () => {
     const local = selfListGroups(defs, items, NO_BETA_IDS);
-    const store = selfListGroups(defs, { ...items, community: { ...items.community, newone: { enabled: true } } }, NO_BETA_IDS);
+    const store = selfListGroups(defs, { ...items, community: { ...items.community, newone: { synced: true } } }, NO_BETA_IDS);
     expect(syncListDelta(local, store).added).toContain("plugin-newone");
   });
 });
@@ -184,13 +184,13 @@ describe("selfListGroups (delta ghost regression, spec 2026-07-28 §2)", () => {
 // would then act on a reading we invented.
 describe("storeSelfCopyGroups — a self copy from a newer build", () => {
   it("compiles nothing for a document whose schemaVersion is from the future", () => {
-    const future = JSON.stringify({ schemaVersion: 99, items: { obsidian: { hotkeys: { enabled: true } } } });
+    const future = JSON.stringify({ schemaVersion: 99, items: { obsidian: { hotkeys: { synced: true } } } });
     const env: RegistryEnv = { cores: [], plugins: [], betaIds: new Set() };
     expect(storeSelfCopyGroups(future, buildItemDefs(env), new Set())).toEqual([]);
   });
 
   it("still compiles a document this build understands", () => {
-    const ours = JSON.stringify({ schemaVersion: 3, items: { obsidian: { hotkeys: { enabled: true } }, core: {}, community: {}, custom: {} } });
+    const ours = JSON.stringify({ schemaVersion: 3, items: { obsidian: { hotkeys: { synced: true } }, core: {}, community: {}, custom: {} } });
     const env: RegistryEnv = { cores: [], plugins: [], betaIds: new Set() };
     expect(storeSelfCopyGroups(ours, buildItemDefs(env), new Set()).map((g) => g.name)).toEqual(["hotkeys"]);
   });
