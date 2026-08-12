@@ -33,6 +33,19 @@ export function enablementListFile(list: EnablementList): string {
   return spec.localFile;
 }
 
+// The `perElement` key a list's rules live under (spec §3.3). A field list is indexed by its JSON
+// key name (appearance's `enabledCssSnippets`); a whole-file list has no key name to index, so the
+// reserved key "" means "this file itself is the list".
+//
+// THE one producer of that string. Every compare, lookup and write goes through it, and the tests
+// assert it against SWITCH_LISTS rather than against a literal — a derived key with two authors is
+// the drift this release exists to end (spec §9 lesson 2/3).
+export function perElementKeyFor(list: string): string {
+  const spec = SWITCH_LISTS[list];
+  if (spec === undefined) throw new Error(`switch list "${list}" has no spec — SWITCH_LISTS and the caller disagree about "${list}"`);
+  return spec.field ?? "";
+}
+
 // Whether a group's CONTENT has switch-list shape (a string array or a boolean map inside a named
 // file), which is this table's business — distinct from "is this group an enablement carrier?",
 // which is the registry's (isEnablementList). `enabled-css-snippets` is the difference: its shape

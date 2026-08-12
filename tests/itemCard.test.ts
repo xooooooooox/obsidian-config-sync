@@ -10,12 +10,10 @@ import {
   computeBadges,
   countClassPinned,
   countEncrypted,
-  deriveMode,
   encryptDisabledForSharing,
   encryptToggleDisabled,
   ENABLED_CSS_SNIPPETS_KEY,
   ENABLED_ON_LABEL,
-  defaultSettingsFile,
   fileRuleLegalForMode,
   FILE_SHARING_MENU_UNAVAILABLE_TEXT,
   hasEnablementZone,
@@ -23,7 +21,6 @@ import {
   memberCountLabel,
   nextSharing,
   PREVIEW_LEGEND_ENTRIES,
-  pruneSettingsFile,
   DESKTOP_ONLY_ALL_NOTE,
   DESKTOP_ONLY_ENABLED_OPTIONS,
   FIELD_SHARING_OPTIONS,
@@ -41,7 +38,7 @@ import {
   SYNC_ALL_HINT,
   SYNC_ALL_LABEL,
 } from "../src/ui/itemCard";
-import { emptyItem, Item, ItemDef, ItemSettingsFile } from "../src/core/registry";
+import { defaultSettingsFile, deriveMode, emptyItem, Item, ItemDef, ItemSettingsFile, pruneSettingsFile } from "../src/core/registry";
 import { itemsIn } from "./items";
 import { EVERYWHERE, perClass, THIS_DEVICE } from "../src/core/types";
 

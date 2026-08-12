@@ -91,6 +91,39 @@ export interface ItemSettingsFile {
   perElement: Record<string, PerElementSharing>;
 }
 
+// Derived mode (spec 2026-07-26-card-visual-refresh-design.md §3): the stored mode is written by
+// the UI, never chosen by the user — any per-key customization makes the card per-key ("fields");
+// none makes it whole-file ("plain").
+//
+// The reserved perElement key "" (switchList.ts's perElementKeyFor) is excluded ON PURPOSE (spec
+// §3.3): it means "this whole file is the list", which is the very definition of a whole-file
+// group. Counting it would compile core-plugins.json as a fields-mode group and send a boolean map
+// down perElement.ts's string-array path, which cannot read it.
+export function deriveMode(sf: ItemSettingsFile): "plain" | "fields" {
+  return Object.keys(sf.rules).length > 0 || Object.keys(sf.perElement).some((k) => k !== "") ? "fields" : "plain";
+}
+
+export function defaultSettingsFile(): ItemSettingsFile {
+  return { mode: "plain", rules: {}, perElement: {} };
+}
+
+// C-#26: prunes semantic defaults off a settingsFile so a sharing round-trip (e.g. desktop →
+// everywhere) leaves data.json byte-identical to before the round started, instead of the
+// write-back residue that hit the user on 2026-08-09. Two independent prunes, applied in order: a
+// fileRule of exactly {sharing: everywhere, encrypted:false} carries no information (it's what an
+// absent fileRule already means) and is dropped; if the settingsFile is then left deep-equal to
+// defaultSettingsFile() — plain mode, no fileRule, empty rules/perElement — the whole key is
+// dropped too, so the field never persists just to say "nothing is customized". Any real content
+// (encrypted:true, a rule, a perElement entry, a non-plain mode) always survives untouched. The
+// item's own `path` is NOT part of this: it lives on the Item since v3, not inside settingsFile.
+export function pruneSettingsFile(sf: ItemSettingsFile): ItemSettingsFile | undefined {
+  const fileRule = sf.fileRule !== undefined && sf.fileRule.sharing.kind === "everywhere" && !sf.fileRule.encrypted ? undefined : sf.fileRule;
+  const pruned: ItemSettingsFile = { ...sf, fileRule };
+  const isDefault =
+    pruned.mode === "plain" && pruned.fileRule === undefined && Object.keys(pruned.rules).length === 0 && Object.keys(pruned.perElement).length === 0;
+  return isDefault ? undefined : pruned;
+}
+
 export interface ItemCompanion {
   path: string;
   device: DeviceClass;

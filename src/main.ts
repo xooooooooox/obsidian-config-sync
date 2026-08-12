@@ -53,7 +53,9 @@ import { basename, groupRealPath, groupStorePath, sidecarStoreSuffix } from "./c
 import {
   buildItemDefs,
   CompileError,
+  defaultSettingsFile,
   defsForForeignItems,
+  deriveMode,
   emptyItem,
   emptyItemMap,
   ENABLEMENT_LISTS,
@@ -72,6 +74,7 @@ import {
   itemWithDevice,
   compileItems,
   parentCardLabel,
+  pruneSettingsFile,
   RegistryEnv,
   structuralLocalElements,
   withItem,
@@ -89,7 +92,7 @@ import { applyUpdates, baselineRefs, Ledger, LEDGER_VERSION, parseLedger, pruneL
 import { bucketCounts, checkRemote, diffRemote, GroupStatus, remoteDirectionCounts, RemoteCheck, remoteLockAhead, remoteLockLabels, statusForGroups } from "./core/status";
 import { asRunsOn, DeviceClass, EVERYWHERE, FileSharing, GroupResult, itemRef, ItemRef, parseItemRef, Remote, RibbonButtons, RunsOn, Sharing, sharingClass, StorageSection, StoreLock, SyncGroup, THIS_DEVICE } from "./core/types";
 import { MemberDecision, memberDecisionsFromSharing, statusBarStatuses } from "./ui/panelModel";
-import { defaultSettingsFile, deriveMode, fileRuleLegalForMode, pruneSettingsFile } from "./ui/itemCard";
+import { fileRuleLegalForMode } from "./ui/itemCard";
 import { ConflictModal } from "./ui/ConflictModal";
 import { renderStatusBarItem, statusBarSegments } from "./ui/statusBar";
 import { SYNC_CENTER_VIEW_TYPE, SelfSyncInfo, SyncCenterHost, SyncCenterView } from "./ui/SyncCenterView";
