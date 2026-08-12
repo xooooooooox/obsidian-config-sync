@@ -5,7 +5,7 @@ import { MemFS, FakePlugins, memGroupsIO } from "./memfs";
 import { applyImport, applyWithActions, capture, CoreContext, PendingPull, planImport, pushExternal, ExternalStoreReader, ExternalStoreWriter, STORE_LOCK_MISSING_MESSAGE, writeGroups } from "../src/core/ConfigSyncCore";
 import { checkRemote } from "../src/core/status";
 import { declaredStoreLockVersion, lockEntry, parseSyncManifest, parseStoreLock, storeLockVersion, STORE_LOCK_FUTURE_MESSAGE, STORE_LOCK_VERSION } from "../src/core/manifest";
-import { SCHEMA_FUTURE_APPLY_MESSAGE, SCHEMA_FUTURE_NOTICE, SCHEMA_UPGRADE_NOTICE } from "../src/core/settingsMigration";
+import { CURRENT_SCHEMA, SCHEMA_FUTURE_APPLY_MESSAGE, SCHEMA_FUTURE_NOTICE, SCHEMA_UPGRADE_NOTICE } from "../src/core/settingsMigration";
 import { SELF_GROUP_NAME } from "../src/core/catalog";
 import { SyncCenterView } from "../src/ui/SyncCenterView";
 import { ConfigSyncSettingTab } from "../src/ui/SettingTab";
@@ -103,14 +103,14 @@ function makePlugin(io: MemFS, data: unknown): { instance: StopSurface; saveCoun
   return { instance, saveCount: () => saves, local: (key) => store.get(key) };
 }
 
-const OK_DOCUMENT = { schemaVersion: 3, rootPath: "cs", items: itemsIn({ community: { demo: { synced: true } } }), remotes: [], bratIndex: {} };
+const OK_DOCUMENT = { schemaVersion: 4, rootPath: "cs", items: itemsIn({ community: { demo: { synced: true } } }), remotes: [] };
 
 // A document from the future, carrying shapes this build has no idea what to do with. Any
 // `saveSettings()` on it would be an overwrite of a document this build does not own — exactly
 // what the stop state exists to prevent.
 function futureDocument(): unknown {
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     rootPath: "cs",
     items: itemsIn({ community: { demo: { synced: true, futureRule: { device: "here-on-tuesdays" } } as unknown as Item } }),
     remotes: [],
@@ -128,7 +128,7 @@ describe("§4.1 — a data.json from a newer build is never reset and never over
     await instance.loadSettings();
 
     expect(saveCount()).toBe(0);
-    expect(instance.syncCenterHost().schemaStop()).toEqual({ found: 4 });
+    expect(instance.syncCenterHost().schemaStop()).toEqual({ found: CURRENT_SCHEMA + 1 });
     // Not reset to defaults either: the document's own values are what's in memory, unknown
     // fields included, so nothing this build might still write could flatten it.
     expect(instance.settings.rootPath).toBe("cs");
@@ -166,7 +166,7 @@ describe("§4.1 — a data.json from a newer build is never reset and never over
 
   it("a document this build understands raises no stop notice at all", async () => {
     NoticeSpy.messages = [];
-    const ok = makePlugin(new MemFS(), { schemaVersion: 3, items: itemsIn({}), remotes: [], bratIndex: {} });
+    const ok = makePlugin(new MemFS(), { schemaVersion: 4, items: itemsIn({}), remotes: [] });
     await ok.instance.loadSettings();
     const fresh = makePlugin(new MemFS(), null);
     await fresh.instance.loadSettings();
@@ -182,7 +182,7 @@ describe("§4.1 — a data.json from a newer build is never reset and never over
     await instance.loadSettings();
     expect(instance.syncCenterHost().schemaStop()).not.toBeNull();
 
-    instance.loadData = async () => ({ schemaVersion: 3, items: itemsIn({}), remotes: [], bratIndex: {} });
+    instance.loadData = async () => ({ schemaVersion: 4, items: itemsIn({}), remotes: [] });
     await instance.loadSettings();
 
     expect(instance.syncCenterHost().schemaStop()).toBeNull();
@@ -293,7 +293,7 @@ describe("§4.1 — a data.json from a newer build is never reset and never over
 
     const okIo = new MemFS();
     okIo.seed(seed);
-    const ok = makePlugin(okIo, { schemaVersion: 3, rootPath: "cs", items: itemsIn({ community: { demo: { synced: true } } }), remotes: [], bratIndex: {} });
+    const ok = makePlugin(okIo, { schemaVersion: 4, rootPath: "cs", items: itemsIn({ community: { demo: { synced: true } } }), remotes: [] });
     await ok.instance.loadSettings();
     await ok.instance.recompile();
     await ok.instance.refreshLocalStatus();
@@ -466,7 +466,7 @@ function guardCtx(io: MemFS): CoreContext {
 }
 
 describe("§4.2 — the guard runs before the write, not after it", () => {
-  const LOCAL_SELF = JSON.stringify({ schemaVersion: 3, items: itemsIn({ obsidian: { hotkeys: { synced: true } } }) }, null, 2);
+  const LOCAL_SELF = JSON.stringify({ schemaVersion: 4, items: itemsIn({ obsidian: { hotkeys: { synced: true } } }) }, null, 2);
 
   async function runAdopt(storeSelf: string): Promise<{ io: MemFS; results: GroupResult[] }> {
     const io = new MemFS();
@@ -490,7 +490,7 @@ describe("§4.2 — the guard runs before the write, not after it", () => {
   }
 
   it("fails the self item with the §4.2 message and leaves the local document byte-identical", async () => {
-    const { io, results } = await runAdopt(JSON.stringify({ schemaVersion: 4, items: {} }));
+    const { io, results } = await runAdopt(JSON.stringify({ schemaVersion: 5, items: {} }));
 
     const self = results.find((r) => r.group === SELF_GROUP_NAME);
     expect(self?.status).toBe("error");
@@ -500,14 +500,14 @@ describe("§4.2 — the guard runs before the write, not after it", () => {
   });
 
   it("other items in the same run are unaffected", async () => {
-    const { io, results } = await runAdopt(JSON.stringify({ schemaVersion: 4, items: {} }));
+    const { io, results } = await runAdopt(JSON.stringify({ schemaVersion: 5, items: {} }));
 
     expect(results.find((r) => r.group === "hotkeys")?.status).toBe("ok");
     expect(await io.read("config-dir/hotkeys.json")).toBe('{"store":1}');
   });
 
   it("a store document this build understands still applies exactly as before", async () => {
-    const incoming = JSON.stringify({ schemaVersion: 3, items: itemsIn({ obsidian: { appearance: { synced: true } } }) });
+    const incoming = JSON.stringify({ schemaVersion: 4, items: itemsIn({ obsidian: { appearance: { synced: true } } }) });
     const { io, results } = await runAdopt(incoming);
 
     expect(results.find((r) => r.group === SELF_GROUP_NAME)?.status).toBe("ok");

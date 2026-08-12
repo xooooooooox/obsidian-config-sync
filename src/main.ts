@@ -80,7 +80,8 @@ import { DEVICE_ELEMENTS_KEY, DeviceElements, DeviceElementState, deviceElementI
 import { decideEnablement, EnablementDecision } from "./core/enablementDecision";
 import { classifySettings, CURRENT_SCHEMA, SCHEMA_FUTURE_NOTICE, SCHEMA_UPGRADE_NOTICE, withDefaults } from "./core/settingsMigration";
 import { deviceOptOutsFor, migrateV2Settings } from "./core/v2Migration";
-import { applySwitchList, captureSwitchList, EnablementList, isSwitchListGroup, localRealPath, parseSwitchList, readLocalSwitchList, subtractForceOff, switchDivergence, SwitchList, switchListMemberOn, writeLocalSwitchList } from "./core/switchList";
+import { migrateV4Settings } from "./core/v4Migration";
+import { applySwitchList, captureSwitchList, EnablementList, enablementListFile, isSwitchListGroup, localRealPath, parseSwitchList, readLocalSwitchList, subtractForceOff, switchDivergence, SwitchList, switchListMemberOn, writeLocalSwitchList } from "./core/switchList";
 import { applyTransform, captureTransform, isWholeFileEncrypted, scanSensitive, SensitiveScan } from "./core/modes";
 import { PkmMode, PkmProbe, resolveEffectiveMode, resolveRootPath } from "./core/pkm";
 import { pluginRuntimeEnabled } from "./core/pluginState";
@@ -96,7 +97,7 @@ import { renderStatusBarItem, statusBarSegments } from "./ui/statusBar";
 import { SYNC_CENTER_VIEW_TYPE, SelfSyncInfo, SyncCenterHost, SyncCenterView } from "./ui/SyncCenterView";
 import { ConfigSyncSettingTab } from "./ui/SettingTab";
 
-// Settings schema v3 (spec 2026-08-11-v3-one-vocabulary-design.md §2). The sync list is not a
+// Settings schema v4 (spec 2026-08-12-enablement-two-layers-design.md §3.1). The sync list is not a
 // stored SyncGroup[] — it is COMPILED (registry.ts's compileItems) from `items` on every
 // load/save. Structure carries the taxonomy: `items` nests by section, and `custom` is one of
 // those sections rather than a second data shape. The literal type is deliberate: it is the one
@@ -104,7 +105,7 @@ import { ConfigSyncSettingTab } from "./ui/SettingTab";
 // settingsMigration.ts's CURRENT_SCHEMA (which DEFAULT_SETTINGS below reads, so the two can never
 // disagree about what this build writes).
 interface ConfigSyncSettings {
-  schemaVersion: 3;
+  schemaVersion: 4;
 
   // Transport wiring — the locked-local preset (catalog.ts's selfPresetRules); never travels.
   pkmMode: PkmMode;
@@ -1578,6 +1579,38 @@ export default class ConfigSyncPlugin extends Plugin {
     this.saveDeviceElements(withDeviceElement(this.deviceElements(), list, elementId, state));
   }
 
+  // The LOCAL half of `thisDeviceItems`' migration (spec §4). The fleet half (a `this-device` rule)
+  // preserves who decides; this half preserves WHAT was decided. Both are needed because a v3
+  // this-device pin did not merely mask its element — it FORCED it (availability.ts's now-retired
+  // forcedRunsOn, against the persisted list). Writing the rule alone would turn a force into a
+  // pass-through, and the first apply after the migration could then move a switch the user had
+  // pinned. With the freeze, the three list files are byte-identical before and after.
+  //
+  // Idempotent, which is what makes the localStorage-before-saveData ordering in loadSettings safe:
+  // an element that already has an exception is left alone, and one that does not is recorded with
+  // the state it is ALREADY in, so running the whole migration twice writes the same table.
+  private async freezeThisDeviceElements(freeze: { list: EnablementList; elementId: string }[]): Promise<void> {
+    if (freeze.length === 0) return;
+    let table = this.deviceElements();
+    for (const { list, elementId } of freeze) {
+      if (deviceElementState(table, list, elementId) !== null) continue;
+      const persisted = await this.readListFileDirect(list);
+      table = withDeviceElement(table, list, elementId, switchListMemberOn(persisted, elementId) ? "on" : "off");
+    }
+    this.saveDeviceElements(table);
+  }
+
+  // The list-file read the migration needs, BEFORE anything is compiled: `localSwitchListFor` goes
+  // through `compiledGroups`, which does not exist yet at load time. The filename comes from the
+  // same producer the compiler would have used (switchList.ts's enablementListFile), so the two
+  // reads can never disagree about which file a list lives in.
+  private async readListFileDirect(list: EnablementList): Promise<SwitchList | null> {
+    const io = this.configIO();
+    const real = `${this.app.vault.configDir}/${enablementListFile(list)}`;
+    if (!(await io.exists(real))) return null;
+    return readLocalSwitchList(list, await io.read(real));
+  }
+
   // Sync Center header chip (unified grammar task-4): same write as the Settings tab's per-card
   // sync toggle (SettingTab.renderItemCard) — Item.synced, keyed by the item's ref.
   async setItemSyncEnabled(ref: ItemRef, enabled: boolean): Promise<void> {
@@ -2150,18 +2183,26 @@ export default class ConfigSyncPlugin extends Plugin {
     }
     if (load.kind === "migrate") {
       // `data ?? {}` only to satisfy the compiler: classifySettings answers "fresh" for a null
-      // document, so "migrate" always comes with one. migrateV2Settings is total either way — it
-      // returns any non-v2 document untouched — so this can never take a different branch by
-      // accident the way a `data !== null` guard falling through to `legacy` would.
-      const { document, carriedDeviceOptOuts } = migrateV2Settings(data ?? {});
-      this.settings = withDefaults(DEFAULT_SETTINGS, document);
+      // document, so "migrate" always comes with one. Both migrations are total either way — each
+      // returns a document of any other version untouched — so this can never take a different
+      // branch by accident the way a `data !== null` guard falling through to `legacy` would.
+      //
+      // The CHAIN is the point (spec §4): migrateV2Settings answers with a v3 document, which
+      // migrateV4Settings then takes the rest of the way, so a device that skipped 2.22.0 entirely
+      // still lands on v4 in this one load. A document that is already v3 simply starts at the
+      // second step, and carries no v2 opt-out map to absorb.
+      const v3 = load.from === 2 ? migrateV2Settings(data ?? {}) : { document: data ?? {}, carriedDeviceOptOuts: undefined };
+      const v4 = migrateV4Settings(v3.document);
+      this.settings = withDefaults(DEFAULT_SETTINGS, v4.document);
       // localStorage FIRST, the document second. The two stores are written back to back and a
       // crash between them has to leave a state the next load recovers from: with this order that
-      // state is "still a v2 document, opt-outs already absorbed", which migrates again cleanly
-      // (the absorb is a union, so it is idempotent). The other order would leave a v3 document
-      // whose opt-out map is gone and never reached localStorage — an unrecoverable loss of the
-      // user's "don't sync this here" choices.
-      this.absorbCarriedDeviceOptOuts(carriedDeviceOptOuts);
+      // state is "still a v2/v3 document, opt-outs already absorbed and exceptions already frozen",
+      // which migrates again cleanly — the absorb is a union, and the freeze writes the element's
+      // CURRENT state, which the run that wrote it did not change, so both are idempotent. The
+      // other order would leave a v4 document whose opt-out map and whose this-device pins are gone
+      // and never reached localStorage — an unrecoverable loss of the user's own choices.
+      this.absorbCarriedDeviceOptOuts(v3.carriedDeviceOptOuts);
+      await this.freezeThisDeviceElements(v4.freeze);
       // saveData, not saveSettings(): the migration saves ONCE, and recompiling here would be a
       // second compile before onload's own (loadSettings is always followed by a recompile — see
       // onload and reloadSettings). No Notice either: the setup is intact, so there is nothing to

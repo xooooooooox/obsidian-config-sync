@@ -129,15 +129,16 @@ describe("storeSelfCopyGroups", () => {
       localMembers: [],
     });
 
-    // task 5 / task 9 boundary: migrateV2Settings does not yet seed items.obsidian["core-plugins"
-    // /"community-plugins"].synced — that backfill is task 9's (see registry.ts's ENABLEMENT_LISTS
-    // compile-loop retirement and its own comment). Until it lands, a v2 self copy's carriers
-    // compile to nothing here, same as any other v2 document read on this branch.
+    // The two carriers are in this list BECAUSE the read runs the whole chain (v2 → v3 → v4): the
+    // v4 step's rule 6 seeds `items.obsidian["core-plugins"/"community-plugins"].synced` from
+    // whether the section had a synced item, which is exactly what the retired `anyEnabledInList`
+    // compile loop used to answer. Without it a foreign copy's on/off lists read as not synced at
+    // all, and the self pane would report them as this device's own additions.
     it("recompiles the flat v2 item map and its customGroups into the store's group list", () => {
       const names = storeSelfCopyGroups(v2Copy, defs, NO_BETA_IDS)
         .map((g) => g.name)
         .sort();
-      expect(names).toEqual(["appearance", "graph", "my-rule", "plugin-demo", "plugin-foreign"].sort());
+      expect(names).toEqual(["appearance", "graph", "my-rule", "plugin-demo", "plugin-foreign", "core-plugins", "community-plugins"].sort());
     });
 
     it("attributes a not-installed plugin's pulled files as pending, not as deletable leftover", () => {

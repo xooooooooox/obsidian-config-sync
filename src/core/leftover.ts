@@ -3,6 +3,7 @@ import { groupForStoreRel } from "./ConfigSyncCore";
 import { compileItems, defsForForeignItems, ItemDef, ItemMap } from "./registry";
 import { classifySettings } from "./settingsMigration";
 import { migrateV2Settings } from "./v2Migration";
+import { migrateV4Settings } from "./v4Migration";
 
 export interface LeftoverFile {
   rel: string; // store-root-relative, e.g. "store/configdir/plugins/x/data.json"
@@ -51,9 +52,13 @@ export function storeSelfCopyGroups(json: string, defs: ItemDef[], betaIds: Read
     if (classifySettings(parsed as Record<string, unknown>).kind === "future") return [];
     const raw = parsed as { groups?: unknown; items?: unknown };
     if (Array.isArray(raw.groups)) return raw.groups as SyncGroup[];
-    // Identity for a v3 document — migrateV2Settings only rewrites a `schemaVersion: 2` one, so
-    // this is the same single gate the load path uses rather than a second opinion about versions.
-    const items = migrateV2Settings(parsed as Record<string, unknown>).document.items;
+    // The SAME chain the load path runs (main.ts's loadSettings), not a second opinion about
+    // versions: each step rewrites only the version it owns, so a v4 copy passes through both
+    // untouched. The v3 step is what makes a store copy written by 2.22.0 readable at all — that
+    // build spelled an item's sync flag `enabled`, which nothing here reads any more, so without it
+    // a foreign v3 self copy would compile to nothing and the self pane would report every item as
+    // added.
+    const items = migrateV4Settings(migrateV2Settings(parsed as Record<string, unknown>).document).document.items;
     if (typeof items !== "object" || items === null) return [];
     return selfListGroups(defs, items as ItemMap, betaIds);
   } catch {

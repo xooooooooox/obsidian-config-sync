@@ -3,6 +3,7 @@ import { Notice } from "obsidian";
 import ConfigSyncPlugin from "../src/main";
 
 import { Item, ItemMap } from "../src/core/registry";
+import { bratRepoIndex } from "../src/core/bratIndex";
 import { Ledger, LEDGER_VERSION } from "../src/core/ledger";
 import { itemsIn } from "./items";
 import { perElementKeyFor } from "../src/core/switchList";
@@ -50,9 +51,9 @@ function fakeApp(local: Map<string, string> = new Map()): unknown {
   };
 }
 
-// A v3 document with the named sections filled; the rest come out empty.
+// A v4 document with the named sections filled; the rest come out empty.
 function baseData(partial: Partial<Record<"obsidian" | "core" | "community" | "custom", Record<string, Item>>> = {}): unknown {
-  return { schemaVersion: 3, items: itemsIn(partial), remotes: [], bratIndex: {} };
+  return { schemaVersion: 4, items: itemsIn(partial), remotes: [] };
 }
 
 describe("ConfigSyncPlugin.reloadSettings — loadSettings() must be followed by recompile()", () => {
@@ -157,10 +158,9 @@ describe("ConfigSyncPlugin.loadSettings/saveSettings — nested defaults and an 
 
   it("fills a nested default an older document never had, and carries its unknown keys through the save", async () => {
     const { instance, saved } = makeLoadSavePlugin({
-      schemaVersion: 3,
+      schemaVersion: 4,
       items: itemsIn({}),
       remotes: [],
-      bratIndex: {},
       runHistory: { enabled: false, path: "", maxCount: 5 }, // written before maxDays existed
       writtenByANewerBuild: { keep: true },
     });
@@ -247,15 +247,19 @@ describe("ConfigSyncPlugin.loadSettings — an unrecognised enablement rule surv
     const instance = plugin as unknown as RuleSurface;
     instance.app = fakeApp();
     const stored = { futurist: { kind: "on-tuesdays" }, known: perClass("desktop") };
-    instance.loadData = async () => ({ schemaVersion: 3, rootPath: "cs", items: carrierWithRules(stored), remotes: [] });
+    instance.loadData = async () => ({ schemaVersion: 4, rootPath: "cs", items: carrierWithRules(stored), remotes: [] });
     let saveCallCount = 0;
     instance.saveData = async () => {
       saveCallCount += 1;
     };
 
-    // No recompile(): manifest.ts's perElement validator rejects a sharing shape it does not know,
-    // which is a SEPARATE seam from the two readers under test here (and one the migration task
-    // owns) — this test is about loadSettings and the readers, not about compile validation.
+    // No recompile(): this fixture hand-writes `mode: "fields"` on the carrier, and manifest.ts's
+    // perElement validator rejects a sharing shape it does not know. That seam is CLOSED rather
+    // than owned by task 9: a carrier's mode is DERIVED (registry.ts's deriveMode, which excludes
+    // the reserved key by construction), so a rule written by the one writer — or by the v4
+    // migration — leaves the carrier Plain, and compileSingleFile only copies `perElement` onto a
+    // group in "fields" mode. An unknown rule therefore never reaches the validator at all. This
+    // test is about loadSettings and the readers, not about compile validation.
     await instance.loadSettings();
 
     // storage is left exactly as found — the whole point: nothing to propagate as a deletion.
@@ -283,7 +287,7 @@ describe("ConfigSyncPlugin.refreshBratIndex — a device with no BRAT repo list 
     saveData: (d: unknown) => Promise<void>;
     loadSettings: () => Promise<void>;
     refreshBratIndex: () => Promise<{ resolved: number; total: number }>;
-    settings: { bratIndex: Record<string, string> };
+    settings: { items: ItemMap };
   }
 
   it("keeps the index it cannot verify and never calls saveData", async () => {
@@ -291,7 +295,13 @@ describe("ConfigSyncPlugin.refreshBratIndex — a device with no BRAT repo list 
     const instance = plugin as unknown as BratSurface;
     instance.app = fakeApp(); // no live BRAT instance, and adapter.exists() is false → repos is []
     const index = { "my-beta-plugin": "owner/my-beta-plugin" };
-    instance.loadData = async () => ({ schemaVersion: 3, items: itemsIn({}), remotes: [], bratIndex: index });
+    // The index lives ON the plugins it describes since 2026-08-12-enablement-two-layers §3.2 —
+    // `bratRepoIndex(items)` is the reader, and the top-level map is what the v4 migration folds in.
+    instance.loadData = async () => ({
+      schemaVersion: 4,
+      items: itemsIn({ community: { "my-beta-plugin": { synced: true, bratRepo: index["my-beta-plugin"] } } }),
+      remotes: [],
+    });
     let saveCallCount = 0;
     instance.saveData = async () => {
       saveCallCount += 1;
@@ -300,7 +310,7 @@ describe("ConfigSyncPlugin.refreshBratIndex — a device with no BRAT repo list 
     await instance.loadSettings();
     const stats = await instance.refreshBratIndex();
 
-    expect(instance.settings.bratIndex).toEqual(index);
+    expect(bratRepoIndex(instance.settings.items)).toEqual(index);
     expect(saveCallCount).toBe(0);
     expect(stats).toEqual({ resolved: 0, total: 0 });
   });
@@ -339,7 +349,7 @@ describe("the baseline re-key runs only when the compile it keys against succeed
   it("recompile answers false when a custom rule cannot compile, and the ledger is left retryable", async () => {
     const local = new Map([[BASELINES, V1_LEDGER]]);
     const instance = makePlugin(
-      { schemaVersion: 3, items: itemsIn({ custom: { "bad name!": { synced: true, type: "file", path: "notes/x.json" } } }), remotes: [], bratIndex: {} },
+      { schemaVersion: 4, items: itemsIn({ custom: { "bad name!": { synced: true, type: "file", path: "notes/x.json" } } }), remotes: [] },
       local
     );
 
@@ -357,7 +367,7 @@ describe("the baseline re-key runs only when the compile it keys against succeed
   it("no baseline write survives a failed compile, whichever writer asks", async () => {
     const local = new Map([[BASELINES, V1_LEDGER]]);
     const instance = makePlugin(
-      { schemaVersion: 3, items: itemsIn({ custom: { "bad name!": { synced: true, type: "file", path: "notes/x.json" } } }), remotes: [], bratIndex: {} },
+      { schemaVersion: 4, items: itemsIn({ custom: { "bad name!": { synced: true, type: "file", path: "notes/x.json" } } }), remotes: [] },
       local
     );
     await instance.loadSettings();
@@ -375,7 +385,7 @@ describe("the baseline re-key runs only when the compile it keys against succeed
   // a shape whose own reader would answer empty.
   it("declines to persist a ledger that is not the version this build writes", async () => {
     const local = new Map([[BASELINES, V1_LEDGER]]);
-    const instance = makePlugin({ schemaVersion: 3, items: itemsIn({ obsidian: { hotkeys: { synced: true } } }), remotes: [], bratIndex: {} }, local);
+    const instance = makePlugin({ schemaVersion: 4, items: itemsIn({ obsidian: { hotkeys: { synced: true } } }), remotes: [] }, local);
     await instance.loadSettings();
     expect(await instance.recompile()).toBe(true); // the compile is fine — it is the LEDGER that is not ours
 
@@ -389,7 +399,7 @@ describe("the baseline re-key runs only when the compile it keys against succeed
   it("recompile answers true on a good document, and the re-key then runs once", async () => {
     const local = new Map([[BASELINES, V1_LEDGER]]);
     const instance = makePlugin(
-      { schemaVersion: 3, items: itemsIn({ obsidian: { appearance: { synced: true, companions: [{ path: "{configDir}/themes", device: "all", enabled: true }] } } }), remotes: [], bratIndex: {} },
+      { schemaVersion: 4, items: itemsIn({ obsidian: { appearance: { synced: true, companions: [{ path: "{configDir}/themes", device: "all", enabled: true }] } } }), remotes: [] },
       local
     );
 

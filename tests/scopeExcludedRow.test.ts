@@ -38,7 +38,7 @@ function fakeApp(): unknown {
 // A v3 document with just the obsidian section filled — the rest of the sections come from
 // DEFAULT_SETTINGS' own empty maps.
 function baseData(obsidian: Record<string, unknown>): unknown {
-  return { schemaVersion: 3, items: itemsIn({ obsidian: obsidian as Record<string, Item> }), remotes: [], bratIndex: {} };
+  return { schemaVersion: 4, items: itemsIn({ obsidian: obsidian as Record<string, Item> }), remotes: [] };
 }
 
 describe("SyncCenterHost.computeStatuses — a device-scope-excluded item still gets a row (C-#24)", () => {

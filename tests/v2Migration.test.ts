@@ -9,6 +9,7 @@ import { validateSyncManifest } from "../src/core/manifest";
 import { Ledger, rekeyLedger } from "../src/core/ledger";
 import { lockRefFor } from "../src/core/itemKeys";
 import { EVERYWHERE, perClass, THIS_DEVICE } from "../src/core/types";
+import { perElementKeyFor } from "../src/core/switchList";
 
 // The v2 → v3 migration (spec 2026-08-11-v3-one-vocabulary-design.md §5, §7b, §9). One fixture
 // carries every row of §5's table, so a change that breaks one row breaks a named assertion rather
@@ -699,11 +700,19 @@ interface LoadSurface {
   loadData: () => Promise<unknown>;
   saveData: (d: unknown) => Promise<void>;
   loadSettings: () => Promise<void>;
-  settings: { schemaVersion: number; items: ItemMap; thisDeviceItems: string[]; bratIndex: Record<string, string> };
+  settings: { schemaVersion: number; items: ItemMap; thisDeviceItems?: unknown; bratIndex?: unknown };
+}
+
+// The rules a carrier ended up holding, read through the SAME producer the runtime reads with.
+function rulesOn(items: ItemMap, list: "core-plugins" | "community-plugins"): Record<string, unknown> {
+  return (items.obsidian[list]?.settingsFile?.perElement ?? {})[perElementKeyFor(list)] ?? {};
 }
 
 describe("ConfigSyncPlugin.loadSettings — a v2 document migrates, saves once, and says nothing", () => {
-  it("migrates in memory, writes the v3 document exactly once, and raises no reset notice", async () => {
+  // The CHAIN (spec 2026-08-12-enablement-two-layers §4): a 2.20.0 device that skipped 2.22.0 goes
+  // v2 → v3 → v4 in this one load, so the v3 fields this fixture is full of (`runsOn`,
+  // `thisDeviceItems`, `bratIndex`) exist only in memory between the two steps and never reach disk.
+  it("migrates in memory, writes the v4 document exactly once, and raises no reset notice", async () => {
     const plugin = new ConfigSyncPlugin({} as never, {} as never);
     const instance = plugin as unknown as LoadSurface;
     instance.app = fakeApp({ "config-sync-device-id": "dev-1" });
@@ -716,13 +725,18 @@ describe("ConfigSyncPlugin.loadSettings — a v2 document migrates, saves once, 
 
     await instance.loadSettings();
 
-    expect(instance.settings.schemaVersion).toBe(3);
-    expect(runsOnOf(instance.settings.items.community["dataview"])).toEqual({ device: "desktop" });
-    expect(instance.settings.thisDeviceItems).toEqual(["community/my-beta-plugin", "core/backlink"]);
-    expect(instance.settings.bratIndex).toEqual({ "my-beta-plugin": "owner/my-beta-plugin" });
+    expect(instance.settings.schemaVersion).toBe(4);
+    // v2's `memberRules: desktop` for dataview arrived as a v3 `runsOn` and left as a carrier rule.
+    expect(rulesOn(instance.settings.items, "community-plugins")["dataview"]).toEqual(perClass("desktop"));
+    // v2's `localMembers` arrived as `thisDeviceItems` and left as this-device rules.
+    expect(rulesOn(instance.settings.items, "community-plugins")["my-beta-plugin"]).toEqual(THIS_DEVICE);
+    expect(rulesOn(instance.settings.items, "core-plugins")["backlink"]).toEqual(THIS_DEVICE);
+    expect(instance.settings.thisDeviceItems).toBeUndefined();
+    expect(instance.settings.bratIndex).toBeUndefined();
+    expect(instance.settings.items.community["my-beta-plugin"]?.bratRepo).toBe("owner/my-beta-plugin");
     expect(saved.length).toBe(1);
     const written = saved[0] as Record<string, unknown>;
-    expect(written.schemaVersion).toBe(3);
+    expect(written.schemaVersion).toBe(4);
     // what the migration carried must reach DISK, not just memory
     expect(written.somethingFromTheFuture).toEqual(NEWER_BUILD);
     expect(written.memberRules).toBeUndefined();

@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import ConfigSyncPlugin from "../src/main";
-import { MemFS } from "./memfs";
+import { FakePlugins, MemFS } from "./memfs";
 import { itemsIn } from "./items";
 import { Item, ItemMap } from "../src/core/registry";
 import { EVERYWHERE, perClass, Sharing, THIS_DEVICE } from "../src/core/types";
 import { perElementKeyFor } from "../src/core/switchList";
 import { DEVICE_ELEMENTS_KEY } from "../src/core/deviceElements";
+import { applyWithActions, capture, CoreContext } from "../src/core/ConfigSyncCore";
 
 // The runtime cutover (spec 2026-08-12-enablement-two-layers-design.md §5): what a run actually
 // does is ONE decision per element over a stored fleet rule and this device's own exception, and
@@ -94,7 +95,7 @@ async function makePlugin(opts: {
     workspace: { getLeavesOfType: () => [] },
     ...ls.api,
   };
-  instance.loadData = async () => ({ schemaVersion: 3, rootPath: "cs", items: items(opts.rules ?? {}), remotes: [] });
+  instance.loadData = async () => ({ schemaVersion: 4, rootPath: "cs", items: items(opts.rules ?? {}), remotes: [] });
   instance.saveData = async () => {};
   await instance.loadSettings();
   await instance.recompile();
@@ -211,5 +212,175 @@ describe("the runtime mask reads one rule layer and one local layer (spec §5)",
     expect(local(DEVICE_ELEMENTS_KEY)).toBeUndefined();
     const ctx = await plugin.coreContext();
     expect(ctx.switchExceptions[LIST] ?? []).not.toContain(ELEMENT);
+  });
+});
+
+// ── The migration's acceptance criteria (spec §9) ──────────────────────────────────────────────
+//
+// Criterion 1 is the only HARD behavioural assertion the v3 → v4 migration makes: not a switch
+// moves. It is asserted at the only place that can prove it — the BYTES of the on/off list files,
+// before the migration and after a full capture + apply cycle on the migrated document.
+//
+// The two plugin lists are the ones the migration writes rules for; `enabled-css-snippets` has no
+// v3 field to migrate (its perElement rules already live on appearance under the same key), so its
+// carry is asserted structurally in the last test below rather than through a third file whose
+// unrelated appearance fields would dominate the comparison.
+
+const V3_LOCAL_COMMUNITY = JSON.stringify(["dataview", "obsidian-git", "some-unsynced", "remotely-save"], null, 2) + "\n";
+const V3_LOCAL_CORE = JSON.stringify({ graph: true, "daily-notes": false }, null, 2) + "\n";
+const STORE_COMMUNITY = "cs/store/configdir/community-plugins.json";
+const STORE_CORE = "cs/store/configdir/core-plugins.json";
+const LOCAL_CORE = "config-dir/core-plugins.json";
+
+// A v3 document with one of every shape §4 has a row for, plus the shape it has no row for: an
+// entry that is simply not synced (`some-unsynced`), whose element v3 masked structurally.
+function v3Document(): Record<string, unknown> {
+  return {
+    schemaVersion: 3,
+    rootPath: "cs",
+    remotes: [],
+    thisDeviceItems: ["community/remotely-save"],
+    items: {
+      obsidian: {
+        appearance: {
+          enabled: true,
+          companions: [{ path: "{configDir}/themes", device: "all", enabled: true }],
+          settingsFile: { mode: "fields", rules: {}, perElement: { [perElementKeyFor("enabled-css-snippets")]: { "mobile.css": THIS_DEVICE } } },
+        },
+      },
+      core: { graph: { enabled: true }, "daily-notes": { enabled: false } },
+      community: {
+        dataview: { enabled: true },
+        "obsidian-git": { enabled: true, runsOn: { device: "desktop" } },
+        "some-unsynced": { enabled: false },
+        "remotely-save": { enabled: true },
+      },
+      custom: {},
+    },
+  };
+}
+
+interface MigrationSurface {
+  app: unknown;
+  loadData: () => Promise<unknown>;
+  saveData: (d: unknown) => Promise<void>;
+  loadSettings: () => Promise<void>;
+  recompile: () => Promise<boolean>;
+  settings: { items: ItemMap };
+  coreContext: () => Promise<CoreContext>;
+}
+
+async function migratedPlugin(io: MemFS): Promise<{ plugin: MigrationSurface; saved: () => Record<string, unknown> | null; local: (k: string) => string | undefined }> {
+  const ls = makeLocalStorage({});
+  const instance = new ConfigSyncPlugin({} as never, {} as never) as unknown as MigrationSurface;
+  instance.app = {
+    vault: { adapter: io, configDir: "config-dir", on: () => ({}) },
+    internalPlugins: { plugins: {} },
+    plugins: { manifests: {}, enabledPlugins: new Set<string>(), plugins: {} },
+    workspace: { getLeavesOfType: () => [] },
+    ...ls.api,
+  };
+  instance.loadData = async () => v3Document();
+  let saved: Record<string, unknown> | null = null;
+  instance.saveData = async (d) => {
+    saved = JSON.parse(JSON.stringify(d)) as Record<string, unknown>;
+  };
+  await instance.loadSettings();
+  await instance.recompile();
+  return { plugin: instance, saved: () => saved, local: (k) => ls.store.get(k) };
+}
+
+function seededMigrationIO(): MemFS {
+  const io = new MemFS();
+  io.seed({
+    [LOCAL_FILE]: V3_LOCAL_COMMUNITY,
+    [LOCAL_CORE]: V3_LOCAL_CORE,
+    // The store the fleet already agreed on. `some-unsynced` is IN it — that is what makes the
+    // pass-through assertion below mean something: an element this device never synced must be
+    // neither added nor removed by this device's capture.
+    [STORE_COMMUNITY]: JSON.stringify(["dataview", "obsidian-git", "some-unsynced"], null, 2) + "\n",
+    [STORE_CORE]: JSON.stringify({ graph: true }, null, 2) + "\n",
+  });
+  return io;
+}
+
+describe("the v3 → v4 migration moves no switch (spec §9 criterion 1)", () => {
+  it("leaves the on/off list files byte-identical across a full capture + apply cycle", async () => {
+    const io = seededMigrationIO();
+    const before = { community: io.files.get(LOCAL_FILE), core: io.files.get(LOCAL_CORE) };
+    const { plugin } = await migratedPlugin(io);
+
+    // The plugin host is swapped for the fake one: applying an on/off list turns plugins on and off
+    // through it, and this test is about the FILES, not about Obsidian's runtime switching.
+    const ctx: CoreContext = { ...(await plugin.coreContext()), plugins: new FakePlugins() };
+    await capture(ctx);
+    await applyWithActions(
+      ctx,
+      [
+        { name: "community-plugins", action: "none" },
+        { name: "core-plugins", action: "none" },
+      ],
+      async () => "1.0.0"
+    );
+
+    expect(io.files.get(LOCAL_FILE)).toBe(before.community);
+    expect(io.files.get(LOCAL_CORE)).toBe(before.core);
+  });
+
+  // The F1 half, at the seam that pays for it: an entry that was not synced keeps its element out
+  // of this device's business entirely — capture may neither add it to the shared list nor drop it
+  // from one, exactly as v3's structural this-device did.
+  it("an unsynced entry's element passes through capture untouched, in the store and out of it", async () => {
+    const io = seededMigrationIO();
+    const { plugin } = await migratedPlugin(io);
+    const ctx: CoreContext = { ...(await plugin.coreContext()), plugins: new FakePlugins() };
+
+    expect(ctx.switchExceptions["community-plugins"]).toContain("some-unsynced");
+    await capture(ctx);
+
+    // still in the store (this device did not remove what it never synced)…
+    expect(JSON.parse(io.files.get(STORE_COMMUNITY) ?? "[]")).toContain("some-unsynced");
+    // …and the pinned one is still out of it (this device did not publish its own pin).
+    expect(JSON.parse(io.files.get(STORE_COMMUNITY) ?? "[]")).not.toContain("remotely-save");
+  });
+
+  it("freezes the pin's local half into the exception table, at the state it was already in", async () => {
+    const io = seededMigrationIO();
+    const { plugin, local } = await migratedPlugin(io);
+
+    expect(JSON.parse(local(DEVICE_ELEMENTS_KEY) ?? "{}")).toEqual({ "community-plugins": { "remotely-save": "on" } });
+    expect(plugin.settings.items.obsidian["community-plugins"]?.settingsFile?.perElement[perElementKeyFor("community-plugins")]).toEqual({
+      "obsidian-git": perClass("desktop"),
+      "some-unsynced": THIS_DEVICE,
+      "remotely-save": THIS_DEVICE,
+    });
+  });
+
+  // §9 criterion 2: the retired fields are gone from what reaches DISK — the leak window
+  // `thisDeviceItems` opened (a this-device datum in a document that travels) closes here, not
+  // merely in memory.
+  it("the saved document carries none of the retired fields (criterion 2)", async () => {
+    const { plugin, saved } = await migratedPlugin(seededMigrationIO());
+    const document = saved();
+    expect(document).not.toBeNull();
+    const text = JSON.stringify(document);
+    for (const dead of ["runsOn", "thisDeviceItems", "bratIndex"]) expect(text).not.toContain(dead);
+    expect(document?.schemaVersion).toBe(4);
+
+    // `enabled` is asserted at the ITEM level rather than by a regex over the whole document,
+    // because two legitimate `enabled` fields remain and must: a companion's own on/off
+    // (ItemCompanion.enabled) and the local run-history preference. The walk says exactly what §3.2
+    // retired — an ITEM's `enabled`, now `synced` — without pretending the others are gone.
+    for (const byId of Object.values(document?.items as Record<string, Record<string, Record<string, unknown>>>)) {
+      for (const [id, item] of Object.entries(byId)) {
+        expect(`${id}: ${JSON.stringify("enabled" in item)}`).toBe(`${id}: false`);
+        expect("elements" in item).toBe(false);
+      }
+    }
+    expect(plugin.settings.items.obsidian["appearance"]?.companions?.[0]?.enabled).toBe(true);
+    // The snippet list's rules were already stored in exactly this place and are carried verbatim.
+    expect(plugin.settings.items.obsidian["appearance"]?.settingsFile?.perElement[perElementKeyFor("enabled-css-snippets")]).toEqual({
+      "mobile.css": THIS_DEVICE,
+    });
   });
 });
