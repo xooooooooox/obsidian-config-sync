@@ -8,9 +8,9 @@ import {
   isFieldEnvelope,
   parseFileEnvelope,
 } from "./crypto";
-import { capturePerItemArray, applyPerItemArray, perItemArrayUnchanged, readPerItemArray } from "./perItem";
+import { capturePerElementArray, applyPerElementArray, perElementArrayUnchanged, readPerElementArray } from "./perElement";
 import { isPlainObject, keyMatchesAny, mergePreservingSanitized, sanitizeJson } from "./sanitize";
-import { SyncGroup } from "./types";
+import { sharingClass, SyncGroup } from "./types";
 
 export const SENSITIVE_KEY_PATTERNS = ["apikey", "api_key", "token", "secret", "password", "credential", "auth", "cookie", "email"];
 
@@ -74,45 +74,45 @@ export function isWholeFileEncrypted(group: SyncGroup): boolean {
   return group.mode === "encrypted" || group.fileRule?.encrypted === true;
 }
 
-// scope "local" (This device) — dropped from the store, apply preserves the local value.
+// sharing this-device — dropped from the store, apply preserves the local value.
 export function stripPatterns(group: SyncGroup): string[] {
   if (group.mode !== "fields" || group.fields === undefined) return [];
-  return group.fields.filter((f) => f.scope === "local").map((f) => f.pattern);
+  return group.fields.filter((f) => f.sharing.kind === "this-device").map((f) => f.pattern);
 }
 
-// scope "all" + encrypted:true — ciphertext lands in the common base (old "encrypt" action).
+// sharing everywhere + encrypted:true — ciphertext lands in the common base (old "encrypt" action).
 function allEncryptPatterns(group: SyncGroup): string[] {
   if (group.mode !== "fields" || group.fields === undefined) return [];
-  return group.fields.filter((f) => f.scope === "all" && f.encrypted).map((f) => f.pattern);
+  return group.fields.filter((f) => f.sharing.kind === "everywhere" && f.encrypted).map((f) => f.pattern);
 }
 
-// Every field scoped to a device class, regardless of encrypted — used to partition which
+// Every field pinned to a device class, regardless of encrypted — used to partition which
 // top-level keys move to that class's sidecar.
 export function classPatterns(group: SyncGroup, cls: "desktop" | "mobile"): string[] {
   if (group.mode !== "fields" || group.fields === undefined) return [];
-  return group.fields.filter((f) => f.scope === cls).map((f) => f.pattern);
+  return group.fields.filter((f) => sharingClass(f.sharing) === cls).map((f) => f.pattern);
 }
 
 // Subset of classPatterns(group, cls) that must be encrypted before landing in the sidecar.
 function classEncryptPatterns(group: SyncGroup, cls: "desktop" | "mobile"): string[] {
   if (group.mode !== "fields" || group.fields === undefined) return [];
-  return group.fields.filter((f) => f.scope === cls && f.encrypted).map((f) => f.pattern);
+  return group.fields.filter((f) => sharingClass(f.sharing) === cls && f.encrypted).map((f) => f.pattern);
 }
 
 function otherClass(cls: "desktop" | "mobile"): "desktop" | "mobile" {
   return cls === "desktop" ? "mobile" : "desktop";
 }
 
-// A perItem key is governed exclusively by capturePerItemArray/applyPerItemArray (per-element
-// scope), never by the class/strip/encrypt machinery below — even if a stray FieldRule pattern
-// also happens to match it (manifest.ts only rejects the encrypted:true combination; this is a
-// defensive belt-and-suspenders exclusion for any group built outside manifest validation, e.g.
-// directly in tests). Without this, a perItem key could be dropped by the other-class partition
-// or the "local" strip before its per-item merge ever runs.
-export function excludingPerItem(group: SyncGroup, patterns: string[]): string[] {
-  const perItemKeys = group.perItem !== undefined ? Object.keys(group.perItem) : [];
-  if (perItemKeys.length === 0) return patterns;
-  return patterns.filter((p) => !perItemKeys.some((k) => keyMatchesAny(k, [p])));
+// A perElement key is governed exclusively by capturePerElementArray/applyPerElementArray, never
+// by the class/strip/encrypt machinery below — even if a stray FieldRule pattern also happens to
+// match it (manifest.ts only rejects the encrypted:true combination; this is a defensive
+// belt-and-suspenders exclusion for any group built outside manifest validation, e.g. directly in
+// tests). Without this, a perElement key could be dropped by the other-class partition or the
+// this-device strip before its per-element merge ever runs.
+export function excludingPerElement(group: SyncGroup, patterns: string[]): string[] {
+  const perElementKeys = group.perElement !== undefined ? Object.keys(group.perElement) : [];
+  if (perElementKeys.length === 0) return patterns;
+  return patterns.filter((p) => !perElementKeys.some((k) => keyMatchesAny(k, [p])));
 }
 
 // Class rules are TOP-LEVEL ONLY (spec §2.1): partition and preservation act on root object
@@ -298,12 +298,12 @@ export async function captureTransform(
   // fields
   const pw = requirePassphrase(group, passphrase);
   const parsed = JSON.parse(content) as unknown;
-  const strip = excludingPerItem(group, stripPatterns(group));
-  const allEncrypt = excludingPerItem(group, allEncryptPatterns(group));
+  const strip = excludingPerElement(group, stripPatterns(group));
+  const allEncrypt = excludingPerElement(group, allEncryptPatterns(group));
   // Partition BEFORE strip/encrypt: own-class keys go to the sidecar, other-class keys are
   // dropped from this device's base entirely (they belong to the other device's sidecar).
-  const own = excludingPerItem(group, classPatterns(group, deviceClass));
-  const other = excludingPerItem(group, classPatterns(group, otherClass(deviceClass)));
+  const own = excludingPerElement(group, classPatterns(group, deviceClass));
+  const other = excludingPerElement(group, classPatterns(group, otherClass(deviceClass)));
   let scopeObj: Record<string, unknown> | null = own.length > 0 ? {} : null;
   let parsedBase = parsed;
   if ((own.length > 0 || other.length > 0) && isPlainObject(parsed)) {
@@ -329,7 +329,7 @@ export async function captureTransform(
   const afterEncrypt = allEncrypt.length > 0 ? await encryptFields(afterStrip, allEncrypt, pw, matched, priorStoreParsed) : afterStrip;
   // desktop/mobile + encrypted:true (D1 new combo): encrypt the own-class values BEFORE they
   // land in the sidecar — ciphertext goes into __scopes__, never plaintext.
-  const ownEncrypt = excludingPerItem(group, classEncryptPatterns(group, deviceClass));
+  const ownEncrypt = excludingPerElement(group, classEncryptPatterns(group, deviceClass));
   let outScope = scopeObj;
   if (scopeObj !== null && ownEncrypt.length > 0) {
     const priorScopeParsed = tryParseJson(priorOwnScopeContent);
@@ -352,15 +352,15 @@ export async function captureTransform(
   // Per-item keys (§3, D3): merge local's all/own-class elements with the prior store's
   // other-class elements, one key at a time. Reads local values from the pristine `parsed`
   // (never from afterEncrypt/parsedBase, which the class partition above never touches for
-  // these keys anyway thanks to excludingPerItem, but the raw source is the clearest contract).
+  // these keys anyway thanks to excludingPerElement, but the raw source is the clearest contract).
   let finalContent = afterEncrypt;
-  if (group.perItem !== undefined && Object.keys(group.perItem).length > 0 && isPlainObject(finalContent)) {
+  if (group.perElement !== undefined && Object.keys(group.perElement).length > 0 && isPlainObject(finalContent)) {
     const storeParsed: unknown = storeContent !== null && storeContent !== undefined ? JSON.parse(storeContent) : null;
     const out: Record<string, unknown> = { ...finalContent };
-    for (const [key, scopes] of Object.entries(group.perItem)) {
-      const localArr = readPerItemArray(parsed, group.name, key, "capture");
-      const storeArr = storeParsed === null ? [] : readPerItemArray(storeParsed, group.name, key, "capture");
-      out[key] = capturePerItemArray(localArr, storeArr, scopes, deviceClass);
+    for (const [key, scopes] of Object.entries(group.perElement)) {
+      const localArr = readPerElementArray(parsed, group.name, key, "capture");
+      const storeArr = storeParsed === null ? [] : readPerElementArray(storeParsed, group.name, key, "capture");
+      out[key] = capturePerElementArray(localArr, storeArr, scopes, deviceClass);
     }
     finalContent = out;
   }
@@ -400,9 +400,9 @@ export async function applyTransform(
     incoming = { ...incoming, ...(overlay as Record<string, unknown>) };
   }
   const localParsed: unknown = localContent !== null ? (JSON.parse(localContent) as unknown) : null;
-  const strip = excludingPerItem(group, stripPatterns(group));
-  const own = excludingPerItem(group, classPatterns(group, deviceClass));
-  const other = excludingPerItem(group, classPatterns(group, otherClass(deviceClass)));
+  const strip = excludingPerElement(group, stripPatterns(group));
+  const own = excludingPerElement(group, classPatterns(group, deviceClass));
+  const other = excludingPerElement(group, classPatterns(group, otherClass(deviceClass)));
   // Other-class keys never belong on this device; own-class keys are preserved from local ONLY
   // when there is no sidecar to supply the authoritative value (degradation path).
   const classPreserve = [...other, ...(ownScopeContent === null ? own : [])];
@@ -410,19 +410,19 @@ export async function applyTransform(
   // (the store never carries "local" elements — capture drops them — so this is the only path
   // that keeps them). Reads the store side from `incoming` (post-decrypt; irrelevant here since
   // perItem keys are never encrypted) and the local side from the raw local document.
-  const applyPerItem = (base: unknown, localDoc: unknown): unknown => {
-    if (group.perItem === undefined || Object.keys(group.perItem).length === 0 || !isPlainObject(base)) return base;
+  const applyPerElement = (base: unknown, localDoc: unknown): unknown => {
+    if (group.perElement === undefined || Object.keys(group.perElement).length === 0 || !isPlainObject(base)) return base;
     const out: Record<string, unknown> = { ...base };
-    for (const [key, scopes] of Object.entries(group.perItem)) {
-      const storeArr = readPerItemArray(incoming, group.name, key, "apply");
-      const localArr = localDoc === null ? [] : readPerItemArray(localDoc, group.name, key, "apply");
-      out[key] = applyPerItemArray(storeArr, localArr, scopes, deviceClass);
+    for (const [key, scopes] of Object.entries(group.perElement)) {
+      const storeArr = readPerElementArray(incoming, group.name, key, "apply");
+      const localArr = localDoc === null ? [] : readPerElementArray(localDoc, group.name, key, "apply");
+      out[key] = applyPerElementArray(storeArr, localArr, scopes, deviceClass);
     }
     return out;
   };
   if (localContent === null) {
     const dropped = dropTopLevel(incoming, classPreserve);
-    return JSON.stringify(applyPerItem(dropped, null), null, 2) + "\n";
+    return JSON.stringify(applyPerElement(dropped, null), null, 2) + "\n";
   }
   const local = localParsed;
   const merged = strip.length > 0 ? mergePreservingSanitized(local, incoming, strip) : incoming;
@@ -439,7 +439,7 @@ export async function applyTransform(
     }
     out = o;
   }
-  return JSON.stringify(applyPerItem(out, local), null, 2) + "\n";
+  return JSON.stringify(applyPerElement(out, local), null, 2) + "\n";
 }
 
 export async function contentUnchanged(
@@ -471,8 +471,8 @@ export async function contentUnchanged(
   }
   // fields
   const pw = requirePassphrase(group, passphrase);
-  const own = excludingPerItem(group, classPatterns(group, deviceClass));
-  const other = excludingPerItem(group, classPatterns(group, otherClass(deviceClass)));
+  const own = excludingPerElement(group, classPatterns(group, deviceClass));
+  const other = excludingPerElement(group, classPatterns(group, otherClass(deviceClass)));
   // Symmetric with applyTransform's classPreserve: other-class keys are always ignored; own-class
   // keys are ignored too UNLESS a sidecar is present to overlay the authoritative value.
   const classIgnore = [...other, ...(ownScopeContent === null ? own : [])];
@@ -481,23 +481,23 @@ export async function contentUnchanged(
     storeParsed = { ...storeParsed, ...(JSON.parse(ownScopeContent) as Record<string, unknown>) };
   }
   let localParsed = JSON.parse(localContent) as unknown;
-  const strip = excludingPerItem(group, stripPatterns(group));
+  const strip = excludingPerElement(group, stripPatterns(group));
   // Per-item keys (§3, D3): a per-item array is a membership list, not a positionally-ordered
-  // array — compare it via perItemArrayUnchanged (masks out this device's own blind spots: the
+  // array — compare it via perElementArrayUnchanged (masks out this device's own blind spots: the
   // other class's elements and "local"-scoped elements, symmetrically on both sides) instead of
   // fieldsUnchanged's strict same-length/same-order array check, then drop the key from the
   // generic comparison below so it isn't checked twice.
-  const perItemKeys = group.perItem !== undefined ? Object.keys(group.perItem) : [];
-  for (const [key, scopes] of Object.entries(group.perItem ?? {})) {
-    const localArr = readPerItemArray(localParsed, group.name, key, "compare");
-    const storeArr = readPerItemArray(storeParsed, group.name, key, "compare");
-    if (!perItemArrayUnchanged(localArr, storeArr, scopes, deviceClass)) return false;
+  const perElementKeys = group.perElement !== undefined ? Object.keys(group.perElement) : [];
+  for (const [key, scopes] of Object.entries(group.perElement ?? {})) {
+    const localArr = readPerElementArray(localParsed, group.name, key, "compare");
+    const storeArr = readPerElementArray(storeParsed, group.name, key, "compare");
+    if (!perElementArrayUnchanged(localArr, storeArr, scopes, deviceClass)) return false;
   }
   // Strip both sides symmetrically: apply keeps the local value for stripped keys, so a store
   // copy that still carries a stripped key (captured before the rule existed) is not a real diff.
   // Without this, the key-count guard in fieldsUnchanged flags a to-apply that applying is a no-op for.
-  localParsed = dropTopLevel(strip.length > 0 ? sanitizeJson(localParsed, strip) : localParsed, [...classIgnore, ...perItemKeys]);
-  storeParsed = dropTopLevel(strip.length > 0 ? sanitizeJson(storeParsed, strip) : storeParsed, [...classIgnore, ...perItemKeys]);
+  localParsed = dropTopLevel(strip.length > 0 ? sanitizeJson(localParsed, strip) : localParsed, [...classIgnore, ...perElementKeys]);
+  storeParsed = dropTopLevel(strip.length > 0 ? sanitizeJson(storeParsed, strip) : storeParsed, [...classIgnore, ...perElementKeys]);
   return fieldsUnchanged(localParsed, storeParsed, pw, group.name);
 }
 

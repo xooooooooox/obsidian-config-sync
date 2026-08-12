@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  SWITCH_LIST_GROUPS, readLocalSwitchList, writeLocalSwitchList, localRealPath, subtractForceOff,
+  isSwitchListGroup, readLocalSwitchList, writeLocalSwitchList, localRealPath, subtractForceOff,
   addForceOn,
   memberUniverse,
   switchListMemberOn,
@@ -14,12 +14,12 @@ import {
   type SwitchList,
 } from "../src/core/switchList";
 
-describe("SWITCH_LIST_GROUPS (now derived from SWITCH_LISTS)", () => {
+describe("isSwitchListGroup (now derived from SWITCH_LISTS)", () => {
   it("has community-plugins, core-plugins, enabled-css-snippets", () => {
-    expect(SWITCH_LIST_GROUPS.has("community-plugins")).toBe(true);
-    expect(SWITCH_LIST_GROUPS.has("core-plugins")).toBe(true);
-    expect(SWITCH_LIST_GROUPS.has("enabled-css-snippets")).toBe(true);
-    expect(SWITCH_LIST_GROUPS.size).toBe(3);
+    expect(isSwitchListGroup("community-plugins")).toBe(true);
+    expect(isSwitchListGroup("core-plugins")).toBe(true);
+    expect(isSwitchListGroup("enabled-css-snippets")).toBe(true);
+    expect(isSwitchListGroup("nope")).toBe(false);
   });
 });
 

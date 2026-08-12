@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { applyTransform, captureTransform, contentUnchanged, PassphraseNeededError } from "../src/core/modes";
 import { isFileEnvelope, parseFileEnvelope } from "../src/core/crypto";
 import { validateSyncManifest, ManifestValidationError } from "../src/core/manifest";
-import { SyncGroup } from "../src/core/types";
+import { SyncGroup, EVERYWHERE, THIS_DEVICE, perClass } from "../src/core/types";
 import { apply, capture, CoreContext, overlayGroup } from "../src/core/ConfigSyncCore";
 import { parseSyncManifest } from "../src/core/manifest";
 import { MemFS, FakePlugins, memGroupsIO } from "./memfs";
@@ -19,7 +19,7 @@ const PLAIN_ENCRYPTED_GROUP: SyncGroup = {
   path: "{configDir}/secrets.json",
   type: "file",
   devices: "all",
-  fileRule: { scope: "all", encrypted: true },
+  fileRule: { sharing: EVERYWHERE, encrypted: true },
 };
 
 const CONTENT = JSON.stringify({ token: "sekret-value", nested: { a: [1, 2, 3] } }, null, 2) + "\n";
@@ -56,7 +56,7 @@ describe("captureTransform — Plain + FileRule", () => {
   });
 
   it("fileRule.encrypted:false is a no-op (not enveloped)", async () => {
-    const notEncrypted: SyncGroup = { ...PLAIN_ENCRYPTED_GROUP, fileRule: { scope: "all", encrypted: false } };
+    const notEncrypted: SyncGroup = { ...PLAIN_ENCRYPTED_GROUP, fileRule: { sharing: EVERYWHERE, encrypted: false } };
     const t = await captureTransform(notEncrypted, CONTENT, null, "desktop");
     expect(t.content).toBe(CONTENT);
     expect(t.note).toBeNull();
@@ -130,7 +130,7 @@ describe("Plain + FileRule — full capture/apply round trip through ConfigSyncC
 
   const FILE_RULE_MANIFEST = JSON.stringify({
     version: 1,
-    groups: [{ name: "secrets", path: "{configDir}/secrets.json", type: "file", devices: "all", fileRule: { scope: "all", encrypted: true } }],
+    groups: [{ name: "secrets", path: "{configDir}/secrets.json", type: "file", devices: "all", fileRule: { sharing: EVERYWHERE, encrypted: true } }],
   });
 
   it("capture stores an envelope and reports the 'encrypted file' label; re-capture writes nothing when unchanged", async () => {
@@ -179,7 +179,7 @@ describe("overlayGroup — FileRule (regression, Task 2 review Finding 2)", () =
   }
 
   it("leaves a fileRule group untouched even when the overlay would add fields", () => {
-    const ctx = ctxWithOverlay(() => [{ pattern: "x", scope: "all", encrypted: false }]);
+    const ctx = ctxWithOverlay(() => [{ pattern: "x", sharing: EVERYWHERE, encrypted: false }]);
     const result = overlayGroup(ctx, PLAIN_ENCRYPTED_GROUP, [CONTENT]);
     expect(result).toEqual(PLAIN_ENCRYPTED_GROUP);
     expect(result.mode).not.toBe("fields");
@@ -187,7 +187,7 @@ describe("overlayGroup — FileRule (regression, Task 2 review Finding 2)", () =
 
   it("still overlays fields normally for a group with no fileRule", () => {
     const plain: SyncGroup = { name: "app", path: "{configDir}/app.json", type: "file", devices: "all" };
-    const ctx = ctxWithOverlay(() => [{ pattern: "x", scope: "all", encrypted: false }]);
+    const ctx = ctxWithOverlay(() => [{ pattern: "x", sharing: EVERYWHERE, encrypted: false }]);
     const result = overlayGroup(ctx, plain, [CONTENT]);
     expect(result.mode).toBe("fields");
   });
@@ -198,19 +198,19 @@ describe("manifest validation — fileRule", () => {
     return { name: "secrets", path: "{configDir}/secrets.json", type: "file", devices: "all", fileRule, ...extra };
   }
 
-  it.each(["all", "desktop", "mobile"])("accepts scope %s with encrypted true/false", (scope) => {
+  it.each([EVERYWHERE, perClass("desktop"), perClass("mobile")])("accepts %o sharing with encrypted true/false", (sharing) => {
     for (const encrypted of [true, false]) {
-      const m = validateSyncManifest({ version: 1, groups: [groupWith({ scope, encrypted })] });
-      expect(m.groups[0]?.fileRule).toEqual({ scope, encrypted });
+      const m = validateSyncManifest({ version: 1, groups: [groupWith({ sharing, encrypted })] });
+      expect(m.groups[0]?.fileRule).toEqual({ sharing, encrypted });
     }
   });
 
-  it('rejects scope "local" (D9: no local at file level)', () => {
-    expect(() => validateSyncManifest({ version: 1, groups: [groupWith({ scope: "local", encrypted: true })] })).toThrow(
+  it("rejects a this-device sharing (D9: no this-device at file level)", () => {
+    expect(() => validateSyncManifest({ version: 1, groups: [groupWith({ sharing: THIS_DEVICE, encrypted: true })] })).toThrow(
       ManifestValidationError
     );
-    expect(() => validateSyncManifest({ version: 1, groups: [groupWith({ scope: "local", encrypted: true })] })).toThrow(
-      /fileRule\.scope.*local/
+    expect(() => validateSyncManifest({ version: 1, groups: [groupWith({ sharing: THIS_DEVICE, encrypted: true })] })).toThrow(
+      /fileRule\.sharing.*this-device/
     );
   });
 
@@ -221,13 +221,13 @@ describe("manifest validation — fileRule", () => {
   });
 
   it("rejects a non-boolean encrypted", () => {
-    expect(() => validateSyncManifest({ version: 1, groups: [groupWith({ scope: "all", encrypted: "yes" })] })).toThrow(
+    expect(() => validateSyncManifest({ version: 1, groups: [groupWith({ sharing: EVERYWHERE, encrypted: "yes" })] })).toThrow(
       ManifestValidationError
     );
   });
 
   it('rejects fileRule on a "dir" group (companion folders stay plaintext — YAGNI)', () => {
-    const dirGroup = { name: "snippets", path: "{configDir}/snippets", type: "dir", devices: "all", fileRule: { scope: "all", encrypted: true } };
+    const dirGroup = { name: "snippets", path: "{configDir}/snippets", type: "folder", devices: "all", fileRule: { sharing: EVERYWHERE, encrypted: true } };
     expect(() => validateSyncManifest({ version: 1, groups: [dirGroup] })).toThrow(ManifestValidationError);
     expect(() => validateSyncManifest({ version: 1, groups: [dirGroup] })).toThrow(/fileRule/);
   });
@@ -239,15 +239,15 @@ describe("manifest validation — fileRule", () => {
       type: "file",
       devices: "all",
       mode: "fields",
-      fields: [{ pattern: "x", scope: "all", encrypted: false }],
-      fileRule: { scope: "all", encrypted: true },
+      fields: [{ pattern: "x", sharing: EVERYWHERE, encrypted: false }],
+      fileRule: { sharing: EVERYWHERE, encrypted: true },
     };
     expect(() => validateSyncManifest({ version: 1, groups: [g] })).toThrow(ManifestValidationError);
     expect(() => validateSyncManifest({ version: 1, groups: [g] })).toThrow(/fileRule/);
   });
 
   it('rejects fileRule combined with mode:"encrypted"', () => {
-    const g = { name: "secrets", path: "{configDir}/secrets.json", type: "file", devices: "all", mode: "encrypted", fileRule: { scope: "all", encrypted: true } };
+    const g = { name: "secrets", path: "{configDir}/secrets.json", type: "file", devices: "all", mode: "encrypted", fileRule: { sharing: EVERYWHERE, encrypted: true } };
     expect(() => validateSyncManifest({ version: 1, groups: [g] })).toThrow(ManifestValidationError);
   });
 

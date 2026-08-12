@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import ConfigSyncPlugin from "../src/main";
+import { customItemFromGroup, Item, ItemMap } from "../src/core/registry";
+import { SyncGroup } from "../src/core/types";
+import { itemsIn } from "./items";
 
 // Task-8 concern fix: the Advanced tab's "Custom rules"/"Discovered files" used to write through
 // a session-only groupsIO path — a custom rule or an adopted discovered file survived within the
 // current session but was lost on the next Obsidian restart/plugin reload, since nothing in
-// settings.items recorded it. settings.customGroups (registry.ts's compileItems, main.ts's
-// stopSyncing) is their durable home now.
+// settings.items recorded it. The `custom` SECTION of settings.items (registry.ts's compileItems,
+// main.ts's stopSyncing) is their durable home now.
 //
 // main.ts has no existing test harness beyond tests/mainReloadSettings.test.ts's pattern (Plugin
 // is stubbed to an empty class by tests/mock-obsidian.ts — no test drives Obsidian's own runtime).
@@ -19,21 +22,19 @@ function fakeApp(): unknown {
       on: () => ({}),
     },
     internalPlugins: { plugins: {} },
-    plugins: { manifests: {}, enabledPlugins: new Set<string>() },
+    plugins: { manifests: {}, enabledPlugins: new Set<string>(), plugins: {} },
     workspace: { getLeavesOfType: () => [] },
+    loadLocalStorage: () => null,
+    saveLocalStorage: () => {},
   };
 }
 
-interface CustomGroupData {
-  name: string;
-  path: string;
-  type: "file" | "dir";
-  devices: "all" | "desktop" | "mobile";
-  origin?: "discovered";
+function customSection(groups: SyncGroup[]): Record<string, Item> {
+  return Object.fromEntries(groups.map((g) => [g.name, customItemFromGroup(g)]));
 }
 
-function baseData(customGroups: CustomGroupData[]): unknown {
-  return { schemaVersion: 2, items: {}, appJson: { mode: "fields" }, remotes: [], bratPluginIndex: {}, customGroups };
+function baseData(groups: SyncGroup[]): unknown {
+  return { schemaVersion: 3, items: itemsIn({ custom: customSection(groups) }), remotes: [], bratIndex: {} };
 }
 
 interface PluginTestSurface {
@@ -41,17 +42,17 @@ interface PluginTestSurface {
   loadData: () => Promise<unknown>;
   saveData: (d: unknown) => Promise<void>;
   loadSettings: () => Promise<void>;
-  recompile: () => Promise<void>;
+  recompile: () => Promise<boolean>;
   stopSyncing: (groupName: string, deleteStore: boolean) => Promise<string[] | null>; // null = refused (spec 2026-08-11 §4.2b)
-  settings: { customGroups: CustomGroupData[] };
+  settings: { items: ItemMap };
   compiledGroups: { name: string }[];
 }
 
-function makePlugin(customGroups: CustomGroupData[]): { instance: PluginTestSurface; saved: () => unknown } {
+function makePlugin(groups: SyncGroup[]): { instance: PluginTestSurface; saved: () => unknown } {
   const plugin = new ConfigSyncPlugin({} as never, {} as never);
   const instance = plugin as unknown as PluginTestSurface;
   instance.app = fakeApp();
-  instance.loadData = async () => baseData(customGroups);
+  instance.loadData = async () => baseData(groups);
   let saved: unknown = null;
   instance.saveData = async (d: unknown) => {
     saved = d;
@@ -59,14 +60,18 @@ function makePlugin(customGroups: CustomGroupData[]): { instance: PluginTestSurf
   return { instance, saved: () => saved };
 }
 
-describe("settings.customGroups — settings round-trip (add -> serialize shape -> compile)", () => {
-  it("a customGroups entry loaded from data.json round-trips into compiledGroups", async () => {
-    const { instance } = makePlugin([{ name: "my-rule", path: "notes/custom.json", type: "file", devices: "all" }]);
+function savedCustomNames(saved: unknown): string[] {
+  return Object.keys((saved as { items?: ItemMap } | null)?.items?.custom ?? {});
+}
+
+describe("items.custom — settings round-trip (add -> serialize shape -> compile)", () => {
+  it("a custom item loaded from data.json round-trips into compiledGroups", async () => {
+    const group: SyncGroup = { name: "my-rule", path: "notes/custom.json", type: "file", devices: "all" };
+    const { instance } = makePlugin([group]);
     await instance.loadSettings();
     await instance.recompile();
-    expect(instance.settings.customGroups).toEqual([{ name: "my-rule", path: "notes/custom.json", type: "file", devices: "all" }]);
-    const compiled = instance.compiledGroups.find((g) => g.name === "my-rule");
-    expect(compiled).toBeDefined();
+    expect(instance.settings.items.custom).toEqual(customSection([group]));
+    expect(instance.compiledGroups.find((g) => g.name === "my-rule")).toBeDefined();
   });
 
   it("a discovered-file adoption (origin: \"discovered\") round-trips the same way", async () => {
@@ -77,8 +82,8 @@ describe("settings.customGroups — settings round-trip (add -> serialize shape 
   });
 });
 
-describe("stopSyncing — custom-group removal is durable (settings.customGroups), not session-only", () => {
-  it("removes the custom group from settings.customGroups and persists it via saveData", async () => {
+describe("stopSyncing — custom-item removal is durable (items.custom), not session-only", () => {
+  it("removes the custom item from items.custom and persists it via saveData", async () => {
     const { instance, saved } = makePlugin([{ name: "my-rule", path: "notes/custom.json", type: "file", devices: "all" }]);
     await instance.loadSettings();
     await instance.recompile();
@@ -87,15 +92,15 @@ describe("stopSyncing — custom-group removal is durable (settings.customGroups
     await instance.stopSyncing("my-rule", false);
 
     // In-memory settings no longer carry the removed rule...
-    expect(instance.settings.customGroups).toEqual([]);
+    expect(instance.settings.items.custom).toEqual({});
     // ...and the removal was actually persisted (saveData called with the updated settings), not
     // just held in memory for the rest of the session (the original defect).
-    expect((saved() as { customGroups: CustomGroupData[] } | null)?.customGroups).toEqual([]);
+    expect(savedCustomNames(saved())).toEqual([]);
     // ...and the recompile that follows saveSettings() drops it from the compiled list too.
     expect(instance.compiledGroups.map((g) => g.name)).not.toContain("my-rule");
   });
 
-  it("leaves a different custom group's entry untouched", async () => {
+  it("leaves a different custom item's entry untouched", async () => {
     const { instance, saved } = makePlugin([
       { name: "keep-me", path: "notes/keep.json", type: "file", devices: "all" },
       { name: "drop-me", path: "notes/drop.json", type: "file", devices: "all" },
@@ -105,7 +110,7 @@ describe("stopSyncing — custom-group removal is durable (settings.customGroups
 
     await instance.stopSyncing("drop-me", false);
 
-    expect(instance.settings.customGroups.map((g) => g.name)).toEqual(["keep-me"]);
-    expect((saved() as { customGroups: CustomGroupData[] } | null)?.customGroups.map((g) => g.name)).toEqual(["keep-me"]);
+    expect(Object.keys(instance.settings.items.custom)).toEqual(["keep-me"]);
+    expect(savedCustomNames(saved())).toEqual(["keep-me"]);
   });
 });

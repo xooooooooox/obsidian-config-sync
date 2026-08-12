@@ -1,18 +1,20 @@
 import { describe, expect, it } from "vitest";
 import { CoreContext, capture, loadManifest, groupsForDevice, ExternalStoreReader, writeGroups, baseHasStaleLocalKeys, withContractLocals } from "../src/core/ConfigSyncCore";
-import { parseSyncManifest } from "../src/core/manifest";
+import { parseSyncManifest, STORE_LOCK_VERSION } from "../src/core/manifest";
+import { lockByName } from "./lock";
+import { lockRefFor } from "../src/core/itemKeys";
 import { statusForGroups, checkRemote, diffRemote, bucketCounts, remoteLockAhead, remoteDirectionCounts, remoteLockLabels, GroupStatus } from "../src/core/status";
 import { applyUpdates, emptyLedger, Ledger } from "../src/core/ledger";
 import { directionForState, stageableRow } from "../src/ui/panelModel";
-import { StoreLock, StoreLockEntry, SyncGroup } from "../src/core/types";
+import { StoreLock, StoreLockEntry, SyncGroup, THIS_DEVICE } from "../src/core/types";
 import { MemFS, FakePlugins, memGroupsIO } from "./memfs";
 
 const MANIFEST = JSON.stringify({
   version: 1,
   groups: [
     { name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all" },
-    { name: "snippets", path: "{configDir}/snippets", type: "dir", devices: "all" },
-    { name: "plugin-demo", path: "{configDir}/plugins/demo/data.json", type: "file", devices: "all", mode: "fields", fields: [{ pattern: "*Token*", scope: "local", encrypted: false }] },
+    { name: "snippets", path: "{configDir}/snippets", type: "folder", devices: "all" },
+    { name: "plugin-demo", path: "{configDir}/plugins/demo/data.json", type: "file", devices: "all", mode: "fields", fields: [{ pattern: "*Token*", sharing: THIS_DEVICE, encrypted: false }] },
   ],
 });
 
@@ -62,8 +64,10 @@ describe("statusForGroups", () => {
     const { ctx } = await seededAndCaptured();
     const { statuses, updates } = await statusAndUpdates(ctx);
     expect(statuses.every((s) => s.state === "in-sync")).toBe(true);
-    expect(Object.keys(updates).sort()).toEqual(["hotkeys", "plugin-demo", "snippets"]);
-    expect(updates["hotkeys"]).not.toBeNull();
+    // The updates are keyed by the ITEM, not the compiled group name (spec §4) — the same key the
+    // lock uses, because they are one key space.
+    expect(Object.keys(updates).sort()).toEqual(["community/demo", "legacy/snippets", "obsidian/hotkeys"]);
+    expect(updates["obsidian/hotkeys"]).not.toBeNull();
   });
 
   it("reports local-changed when only the local side moved off the baseline", async () => {
@@ -244,12 +248,12 @@ describe("diffRemote", () => {
     const remoteSelf = JSON.stringify({
       groups: [
         { name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all" },
-        { name: "snippets", path: "{configDir}/snippets", type: "dir", devices: "all" },
+        { name: "snippets", path: "{configDir}/snippets", type: "folder", devices: "all" },
         { name: "plugin-config-sync", path: "{configDir}/plugins/config-sync/data.json", type: "file", devices: "all" },
       ],
     });
     const remote: Record<string, string> = {
-      "store.lock.json": JSON.stringify({ capturedAt: "2026-07-09T00:00:00.000Z", groups: {} }),
+      "store.lock.json": JSON.stringify({ capturedAt: "2026-07-09T00:00:00.000Z", items: {} }),
       "store/configdir/hotkeys.json": '{"a":1}',
       "store/configdir/snippets/one.css": "one",
       "store/configdir/plugins/config-sync/data.json": remoteSelf,
@@ -283,7 +287,7 @@ describe("diffRemote", () => {
     const { io, ctx } = await seededAndCaptured();
     const remote: Record<string, string> = {
       "config-sync.json": '{"version":1,"groups":[]}', // differs from local manifest
-      "store.lock.json": JSON.stringify({ capturedAt: "2026-07-09T00:00:00.000Z", groups: {} }), // differs from local lock
+      "store.lock.json": JSON.stringify({ capturedAt: "2026-07-09T00:00:00.000Z", items: {} }), // differs from local lock
       "store/configdir/hotkeys.json": '{"a":1}',
       "store/configdir/snippets/one.css": "one",
       "store/configdir/plugins/demo/data.json": await io.read("cs/store/configdir/plugins/demo/data.json"),
@@ -312,20 +316,23 @@ describe("diffRemote", () => {
 });
 
 describe("remoteLockAhead", () => {
+  // A v1-shaped lock, keyed by group name — what a 2.21.0 device writes, and still the input this
+  // comparison has to read during the transition (spec §3). parseStoreLock converts both sides
+  // through the same producer, so the comparison sees one vocabulary whatever wrote the files.
   const lock = (capturedAt: string, groups: Record<string, object>) => JSON.stringify({ capturedAt, groups });
   it("false when the local lock semantically covers the remote one (post-pull state)", () => {
-    const remote = lock("2026-07-17T10:00:00.000Z", { a: { sourcePluginVersion: "1.0" } });
+    const remote = lock("2026-07-17T10:00:00.000Z", { a: { source: { kind: "plugin", version: "1.0" } } });
     // local adopted remote's time+entries but also has a local-only group and different formatting
-    const local = JSON.stringify({ capturedAt: "2026-07-17T10:00:00.000Z", groups: { a: { sourcePluginVersion: "1.0" }, localOnly: { sourceAppVersion: "1.8.7" } } }, null, 2);
+    const local = JSON.stringify({ capturedAt: "2026-07-17T10:00:00.000Z", groups: { a: { source: { kind: "plugin", version: "1.0" } }, localOnly: { source: { kind: "app", version: "1.8.7" } } } }, null, 2);
     expect(remoteLockAhead(local, remote, [])).toBe(false);
   });
   it("true when the remote captured later", () => {
     expect(remoteLockAhead(lock("2026-07-17T10:00:00.000Z", {}), lock("2026-07-17T11:00:00.000Z", {}), [])).toBe(true);
   });
   it("true when a remote group entry is missing or different locally", () => {
-    const local = lock("2026-07-17T10:00:00.000Z", { a: { sourcePluginVersion: "1.0" } });
-    expect(remoteLockAhead(local, lock("2026-07-17T10:00:00.000Z", { a: { sourcePluginVersion: "2.0" } }), [])).toBe(true);
-    expect(remoteLockAhead(local, lock("2026-07-17T10:00:00.000Z", { b: { sourcePluginVersion: "1.0" } }), [])).toBe(true);
+    const local = lock("2026-07-17T10:00:00.000Z", { a: { source: { kind: "plugin", version: "1.0" } } });
+    expect(remoteLockAhead(local, lock("2026-07-17T10:00:00.000Z", { a: { source: { kind: "plugin", version: "2.0" } } }), [])).toBe(true);
+    expect(remoteLockAhead(local, lock("2026-07-17T10:00:00.000Z", { b: { source: { kind: "plugin", version: "1.0" } } }), [])).toBe(true);
   });
   it("false when the local lock is simply newer (push side, not pull)", () => {
     expect(remoteLockAhead(lock("2026-07-17T12:00:00.000Z", {}), lock("2026-07-17T10:00:00.000Z", {}), [])).toBe(false);
@@ -337,12 +344,12 @@ describe("remoteLockAhead", () => {
   });
 
   it("ignoreGroups suppresses a difference from the named group only", () => {
-    const local = lock("2026-07-17T10:00:00.000Z", { "plugin-config-sync": { sourcePluginVersion: "1.0" } });
-    const selfDiff = lock("2026-07-17T10:00:00.000Z", { "plugin-config-sync": { sourcePluginVersion: "2.0" } });
+    const local = lock("2026-07-17T10:00:00.000Z", { "plugin-config-sync": { source: { kind: "plugin", version: "1.0" } } });
+    const selfDiff = lock("2026-07-17T10:00:00.000Z", { "plugin-config-sync": { source: { kind: "plugin", version: "2.0" } } });
     expect(remoteLockAhead(local, selfDiff, [])).toBe(true);
-    expect(remoteLockAhead(local, selfDiff, ["plugin-config-sync"])).toBe(false);
-    const otherDiff = lock("2026-07-17T10:00:00.000Z", { "plugin-config-sync": { sourcePluginVersion: "2.0" }, a: { sourcePluginVersion: "1.0" } });
-    expect(remoteLockAhead(local, otherDiff, ["plugin-config-sync"])).toBe(true);
+    expect(remoteLockAhead(local, selfDiff, ["community/config-sync"])).toBe(false);
+    const otherDiff = lock("2026-07-17T10:00:00.000Z", { "plugin-config-sync": { source: { kind: "plugin", version: "2.0" } }, a: { source: { kind: "plugin", version: "1.0" } } });
+    expect(remoteLockAhead(local, otherDiff, ["community/config-sync"])).toBe(true);
   });
 });
 
@@ -352,13 +359,15 @@ describe("remoteLockAhead", () => {
 describe("remoteLockAhead against the v2 payload", () => {
   const AT = "2026-08-11T10:00:00.000Z";
   const LATER = "2026-08-11T11:00:00.000Z";
-  const v2 = (syncedWatermark: string, groups: Record<string, object>, capturedAt = AT): string =>
-    JSON.stringify({ version: 2, syncedWatermark, capturedAt, groups });
+  // The per-item comparison only engages when BOTH sides declare the version this build writes, so
+  // these fixtures are v3 documents: the items map, keyed by ref.
+  const v2 = (syncedWatermark: string, byName: Record<string, StoreLockEntry>, capturedAt = AT): string =>
+    JSON.stringify({ version: STORE_LOCK_VERSION, syncedWatermark, ...lockByName(capturedAt, byName) });
 
   it("the store stamp cannot manufacture a difference the items deny", () => {
     // Only where the items leave a GAP does the stamp get to speak. Here every entry is present and
     // dated on both sides and they agree, so an hour-newer remote stamp is not a pull.
-    const entries = { a: { sourceAppVersion: "1.0", capturedAt: AT, hash: "sha256:h1" } };
+    const entries: Record<string, StoreLockEntry> = { a: { source: { kind: "app", version: "1.0" }, capturedAt: AT, hash: "sha256:h1" } };
     expect(remoteLockAhead(v2(AT, entries), v2(LATER, entries, LATER), [])).toBe(false);
     // With no entries at all there is nothing to deny it, and the stamp answers as it always did.
     expect(remoteLockAhead(v2(AT, {}), v2(LATER, {}, LATER), [])).toBe(true);
@@ -368,12 +377,12 @@ describe("remoteLockAhead against the v2 payload", () => {
     // "Dated on both sides" is what lets the items silence the store stamp. A non-empty value
     // Date.parse cannot order by dates nothing — counting it would silence BOTH paths, on the
     // strength of evidence that could not itself have spoken.
-    const local = v2(AT, { a: { sourceAppVersion: "1.0", capturedAt: "T" } });
-    const remote = v2(LATER, { a: { sourceAppVersion: "1.0", capturedAt: "T" } }, LATER);
+    const local = v2(AT, { a: { source: { kind: "app", version: "1.0" }, capturedAt: "T" } });
+    const remote = v2(LATER, { a: { source: { kind: "app", version: "1.0" }, capturedAt: "T" } }, LATER);
     expect(remoteLockAhead(local, remote, [])).toBe(true);
     // …and a readable stamp on both sides really does silence it — that contrast is the point.
-    const dated = v2(AT, { a: { sourceAppVersion: "1.0", capturedAt: AT } });
-    const datedRemote = v2(LATER, { a: { sourceAppVersion: "1.0", capturedAt: AT } }, LATER);
+    const dated = v2(AT, { a: { source: { kind: "app", version: "1.0" }, capturedAt: AT } });
+    const datedRemote = v2(LATER, { a: { source: { kind: "app", version: "1.0" }, capturedAt: AT } }, LATER);
     expect(remoteLockAhead(dated, datedRemote, [])).toBe(false);
   });
 
@@ -385,42 +394,42 @@ describe("remoteLockAhead against the v2 payload", () => {
     // about the content changed. Comparing our watermark against its stamp read "newer" and lit the
     // hint permanently; comparing LINEAGE (the later of watermark and capturedAt) puts both sides on
     // the same scale.
-    const local = v2("2026-08-11T08:00:00.000Z", { a: { sourceAppVersion: "1.0", capturedAt: LATER, hash: "sha256:h1" } }, LATER);
-    const olderDevice = JSON.stringify({ capturedAt: LATER, groups: { a: { sourceAppVersion: "1.0" } } });
+    const local = v2("2026-08-11T08:00:00.000Z", { a: { source: { kind: "app", version: "1.0" }, capturedAt: LATER, hash: "sha256:h1" } }, LATER);
+    const olderDevice = JSON.stringify({ capturedAt: LATER, groups: { a: { source: { kind: "app", version: "1.0" } } } });
     expect(remoteLockAhead(local, olderDevice, [])).toBe(false);
     // …and the older device genuinely capturing something later IS still a pull.
-    const afterItCaptured = JSON.stringify({ capturedAt: "2026-08-11T12:00:00.000Z", groups: { a: { sourceAppVersion: "1.0" } } });
+    const afterItCaptured = JSON.stringify({ capturedAt: "2026-08-11T12:00:00.000Z", groups: { a: { source: { kind: "app", version: "1.0" } } } });
     expect(remoteLockAhead(local, afterItCaptured, [])).toBe(true);
   });
 
   it("a display-only change is not 'ahead'", () => {
-    const entry = { sourcePluginVersion: "1.0", capturedAt: AT, hash: "h1" };
-    const local = v2(AT, { "plugin-demo": { ...entry, label: "Demo", memberLabels: { x: "X" } } });
-    const remote = v2(AT, { "plugin-demo": { ...entry, label: "Demo Plugin (renamed)", memberLabels: { x: "X renamed" } } });
+    const entry: StoreLockEntry = { source: { kind: "plugin", version: "1.0" }, capturedAt: AT, hash: "h1" };
+    const local = v2(AT, { "plugin-demo": { ...entry, display: { label: "Demo", elements: { x: "X" } } } });
+    const remote = v2(AT, { "plugin-demo": { ...entry, display: { label: "Demo Plugin (renamed)", elements: { x: "X renamed" } } } });
     expect(remoteLockAhead(local, remote, [])).toBe(false);
   });
 
   it("key order never counts — neither in the known block nor in the carried tail", () => {
-    const local = v2(AT, { a: { sourceAppVersion: "1.0", hash: "h1", capturedAt: AT, fleet: { x: 1, y: 2 } } });
-    const remote = v2(AT, { a: { fleet: { y: 2, x: 1 }, capturedAt: AT, hash: "h1", sourceAppVersion: "1.0" } });
+    const local = v2(AT, { a: { source: { kind: "app", version: "1.0" }, hash: "h1", capturedAt: AT, fleet: { x: 1, y: 2 } } });
+    const remote = v2(AT, { a: { fleet: { y: 2, x: 1 }, capturedAt: AT, hash: "h1", source: { kind: "app", version: "1.0" } } });
     expect(remoteLockAhead(local, remote, [])).toBe(false);
   });
 
   it("a field the other side does not have is not a difference (the mixed-fleet rule)", () => {
     // The un-updated device in the fleet strips version/capturedAt/hash every time it pulls; the
     // next capture here writes them back. That churn must not read as "the store has newer settings".
-    const rich = v2(AT, { a: { sourceAppVersion: "1.0", capturedAt: AT, hash: "h1" } });
-    const stripped = JSON.stringify({ capturedAt: AT, groups: { a: { sourceAppVersion: "1.0" } } });
+    const rich = v2(AT, { a: { source: { kind: "app", version: "1.0" }, capturedAt: AT, hash: "h1" } });
+    const stripped = JSON.stringify({ capturedAt: AT, groups: { a: { source: { kind: "app", version: "1.0" } } } });
     expect(remoteLockAhead(rich, stripped, [])).toBe(false);
     expect(remoteLockAhead(stripped, rich, [])).toBe(false);
     // …but a key BOTH sides carry, with different values, still is one.
-    const moved = v2(AT, { a: { sourceAppVersion: "1.0", capturedAt: LATER, hash: "h2" } });
+    const moved = v2(AT, { a: { source: { kind: "app", version: "1.0" }, capturedAt: LATER, hash: "h2" } });
     expect(remoteLockAhead(rich, moved, [])).toBe(true);
   });
 
   it("a differing entry the LOCAL side captured later is not something a pull would improve", () => {
-    const local = v2(AT, { a: { sourceAppVersion: "2.0", capturedAt: LATER, hash: "h2" } });
-    const remote = v2(AT, { a: { sourceAppVersion: "1.0", capturedAt: AT, hash: "h1" } });
+    const local = v2(AT, { a: { source: { kind: "app", version: "2.0" }, capturedAt: LATER, hash: "h2" } });
+    const remote = v2(AT, { a: { source: { kind: "app", version: "1.0" }, capturedAt: AT, hash: "h1" } });
     expect(remoteLockAhead(local, remote, [])).toBe(false);
     expect(remoteLockAhead(remote, local, [])).toBe(true); // and the other way round it is
   });
@@ -430,13 +439,13 @@ describe("remoteLockAhead against the v2 payload", () => {
     // older build). The missing side is not evidence of anything: same capture time, same versions,
     // not a pull — in EITHER direction. At BASE this was a difference, since the two entries did not
     // stringify alike.
-    const hashed = v2(AT, { secrets: { sourceAppVersion: "1.0", capturedAt: AT, hash: "sha256:h1" } });
-    const unhashed = v2(AT, { secrets: { sourceAppVersion: "1.0", capturedAt: AT } });
+    const hashed = v2(AT, { secrets: { source: { kind: "app", version: "1.0" }, capturedAt: AT, hash: "sha256:h1" } });
+    const unhashed = v2(AT, { secrets: { source: { kind: "app", version: "1.0" }, capturedAt: AT } });
     expect(remoteLockAhead(hashed, unhashed, [])).toBe(false);
     expect(remoteLockAhead(unhashed, hashed, [])).toBe(false);
     // With no fingerprint on either side the capture time is all that is left to judge by, and it
     // still judges — an absent hash costs precision, it does not silence the item.
-    const later = v2(AT, { secrets: { sourceAppVersion: "1.0", capturedAt: LATER } });
+    const later = v2(AT, { secrets: { source: { kind: "app", version: "1.0" }, capturedAt: LATER } });
     expect(remoteLockAhead(unhashed, later, [])).toBe(true);
     expect(remoteLockAhead(later, unhashed, [])).toBe(false);
   });
@@ -446,24 +455,23 @@ describe("checkRemote per-item resolution (v2)", () => {
   const AT = "2026-08-11T10:00:00.000Z";
   const EARLIER = "2026-08-11T09:00:00.000Z";
   const LATER = "2026-08-11T11:00:00.000Z";
-  const item = (capturedAt: string, hash: string): StoreLockEntry => ({ sourceAppVersion: "1.0", capturedAt, hash });
-  const v2 = (capturedAt: string, groups: Record<string, StoreLockEntry>): StoreLock => ({
-    version: 2,
+  const item = (capturedAt: string, hash: string): StoreLockEntry => ({ source: { kind: "app", version: "1.0" }, capturedAt, hash });
+  const v2 = (capturedAt: string, byName: Record<string, StoreLockEntry>): StoreLock => ({
+    version: STORE_LOCK_VERSION,
     syncedWatermark: capturedAt,
-    capturedAt,
-    groups,
+    ...lockByName(capturedAt, byName),
   });
   const remoteFiles = (lock: StoreLock): Record<string, string> => ({
     "store.lock.json": JSON.stringify(lock),
     "store/configdir/hotkeys.json": "{}",
   });
-  const stateOf = async (local: StoreLock, remote: StoreLock, ignoreGroups: string[] = []): Promise<string> =>
-    (await checkRemote(local, fakeReader(remoteFiles(remote)), ignoreGroups)).state;
+  const stateOf = async (local: StoreLock, remote: StoreLock, ignoreRefs: string[] = []): Promise<string> =>
+    (await checkRemote(local, fakeReader(remoteFiles(remote)), ignoreRefs)).state;
 
   it("reads 'same' when both sides hold the same items, however the whole-store stamps compare", async () => {
     // The remote's whole-store stamp is an hour ahead; every item in it is identical, so a pull
     // would change nothing. Before §6 this reported "remote-newer" and invited a pointless pull.
-    const entries = { a: item(AT, "h1") };
+    const entries: Record<string, StoreLockEntry> = { a: item(AT, "h1") };
     expect(await stateOf(v2(AT, entries), v2(LATER, entries))).toBe("same");
   });
 
@@ -479,8 +487,23 @@ describe("checkRemote per-item resolution (v2)", () => {
     expect(await stateOf(v2(AT, { a: item(AT, "h1"), b: item(AT, "h2") }), v2(AT, { a: item(AT, "h1") }))).toBe("remote-older");
   });
 
+  // Task-3 review I1: the gate asks whether the PAYLOAD is there, not what the version number says.
+  // A 2.21.0 peer writes `version: 2` and stamps every entry — excluding it would blank the per-item
+  // path for the whole transition window and bring back the phantom "the store has newer settings"
+  // §6 removed.
+  it("a 2.21.0 peer (version 2, but every entry stamped) is still resolved per item", async () => {
+    const older: StoreLock = {
+      version: 2,
+      syncedWatermark: AT,
+      ...lockByName(AT, { hotkeys: item(AT, "h1") }),
+    };
+    const mine: StoreLock = { version: STORE_LOCK_VERSION, syncedWatermark: LATER, ...lockByName(LATER, { hotkeys: item(AT, "h1") }) };
+    // Same item, same hash, same stamp — the whole-store stamps differ by an hour and must not speak.
+    expect(await stateOf(mine, older)).toBe("same");
+  });
+
   it("either side at v1 falls back to today's whole-store comparison, exactly", async () => {
-    const v1 = (capturedAt: string): StoreLock => ({ capturedAt, groups: { a: { sourceAppVersion: "1.0" } } });
+    const v1 = (capturedAt: string): StoreLock => ({ capturedAt, items: { obsidian: { a: { source: { kind: "app", version: "1.0" } } } } });
     expect(await stateOf(v1(AT), v2(LATER, { a: item(AT, "h1") }))).toBe("remote-newer");
     expect(await stateOf(v2(AT, { a: item(AT, "h1") }), v1(LATER))).toBe("remote-newer");
   });
@@ -494,7 +517,7 @@ describe("checkRemote per-item resolution (v2)", () => {
 
   it("a lock version this build cannot read reports 'unknown', so the panel never invites a pull", async () => {
     const local = v2(AT, { a: item(AT, "h1") });
-    const future: StoreLock = { version: 3, capturedAt: LATER, groups: { a: { sourceAppVersion: "1.0" } } };
+    const future: StoreLock = { version: STORE_LOCK_VERSION + 1, capturedAt: LATER, items: { obsidian: { a: { source: { kind: "app", version: "1.0" } } } } };
     const check = await checkRemote(local, fakeReader(remoteFiles(future)), []);
     expect(check.state).toBe("unknown");
     expect(check.remoteCapturedAt).toBe(LATER); // it parsed — saying WHEN is not inviting a pull
@@ -507,16 +530,16 @@ describe("checkRemote per-item resolution (v2)", () => {
     const local = v2(AT, { a: item(AT, "h1"), "plugin-config-sync": item(AT, "mine") });
     const remote = v2(AT, { a: item(AT, "h1"), "plugin-config-sync": item(LATER, "theirs") });
     expect(await stateOf(local, remote)).toBe("remote-newer");
-    expect(await stateOf(local, remote, ["plugin-config-sync"])).toBe("same");
+    expect(await stateOf(local, remote, ["community/config-sync"])).toBe("same");
   });
 });
 
 describe("checkRemote", () => {
-  const localLock = { capturedAt: "2026-07-08T00:00:00.000Z", groups: {} };
+  const localLock = { capturedAt: "2026-07-08T00:00:00.000Z", items: {} };
   it("classifies all five states", async () => {
     expect((await checkRemote(localLock, fakeReader({}), [])).state).toBe("no-store");
     expect((await checkRemote(localLock, fakeReader({ "config-sync.json": "{}" }), [])).state).toBe("unknown");
-    const at = (t: string): Record<string, string> => ({ "config-sync.json": "{}", "store.lock.json": JSON.stringify({ capturedAt: t, groups: {} }) });
+    const at = (t: string): Record<string, string> => ({ "config-sync.json": "{}", "store.lock.json": JSON.stringify({ capturedAt: t, items: {} }) });
     expect((await checkRemote(localLock, fakeReader(at("2026-07-09T00:00:00.000Z")), [])).state).toBe("remote-newer");
     expect((await checkRemote(localLock, fakeReader(at("2026-07-07T00:00:00.000Z")), [])).state).toBe("remote-older");
     expect((await checkRemote(localLock, fakeReader(at("2026-07-08T00:00:00.000Z")), [])).state).toBe("same");
@@ -526,7 +549,7 @@ describe("checkRemote", () => {
   });
   it("recognizes a new-format store (store/** + lock, no root config-sync.json)", async () => {
     const newFormat = {
-      "store.lock.json": JSON.stringify({ capturedAt: "2026-07-09T00:00:00.000Z", groups: {} }),
+      "store.lock.json": JSON.stringify({ capturedAt: "2026-07-09T00:00:00.000Z", items: {} }),
       "store/configdir/hotkeys.json": "{}",
     };
     expect((await checkRemote(localLock, fakeReader(newFormat), [])).state).toBe("remote-newer");
@@ -618,8 +641,8 @@ describe("stale device-local key in the store base", () => {
     type: "file",
     devices: "all",
     mode: "fields",
-    fields: [{ pattern: "enabledCssSnippets", scope: "local", encrypted: false }],
-    perItem: { enabledCssSnippets: {} },
+    fields: [{ pattern: "enabledCssSnippets", sharing: THIS_DEVICE, encrypted: false }],
+    perElement: { enabledCssSnippets: {} },
   };
 
   it("R1: a local rule overlapping a per-item key never flags the base stale", () => {
@@ -627,7 +650,7 @@ describe("stale device-local key in the store base", () => {
   });
 
   it("R1: a genuinely stale non-per-item local key still flags", () => {
-    const group: SyncGroup = { ...PER_ITEM_GROUP, fields: [{ pattern: "vikaToken", scope: "local", encrypted: false }], perItem: undefined };
+    const group: SyncGroup = { ...PER_ITEM_GROUP, fields: [{ pattern: "vikaToken", sharing: THIS_DEVICE, encrypted: false }], perElement: undefined };
     expect(baseHasStaleLocalKeys(group, '{"vikaToken":"stale","theme":"x"}')).toBe(true);
   });
 
@@ -646,29 +669,29 @@ describe("remoteLockLabels", () => {
     const lockJson = {
       capturedAt: "t",
       groups: {
-        "plugin-dataview": { sourcePluginVersion: "0.5.0", label: "Dataview" },
-        "daily-notes": { sourceAppVersion: "1.8.7", label: "Daily notes" },
+        "plugin-dataview": { source: { kind: "plugin", version: "0.5.0" }, label: "Dataview" },
+        "daily-notes": { source: { kind: "app", version: "1.8.7" }, label: "Daily notes" },
       },
     };
-    expect(remoteLockLabels(lockJson)).toEqual({ "plugin-dataview": "Dataview", "daily-notes": "Daily notes" });
+    expect(remoteLockLabels(lockJson, lockRefFor([]))).toEqual({ "community/dataview": "Dataview", "core/daily-notes": "Daily notes" });
   });
 
   it("omits an entry with no label field", () => {
-    const lockJson = { capturedAt: "t", groups: { hotkeys: { sourceAppVersion: "1.8.7" } } };
-    expect(remoteLockLabels(lockJson)).toEqual({});
+    const lockJson = { capturedAt: "t", groups: { hotkeys: { source: { kind: "app", version: "1.8.7" } } } };
+    expect(remoteLockLabels(lockJson, lockRefFor([]))).toEqual({});
   });
 
   it("returns {} for a malformed lock (not an object, or groups missing/not-an-object)", () => {
-    expect(remoteLockLabels(null)).toEqual({});
-    expect(remoteLockLabels("not json")).toEqual({});
-    expect(remoteLockLabels([])).toEqual({});
-    expect(remoteLockLabels({ capturedAt: "t" })).toEqual({});
-    expect(remoteLockLabels({ capturedAt: "t", groups: "nope" })).toEqual({});
+    expect(remoteLockLabels(null, lockRefFor([]))).toEqual({});
+    expect(remoteLockLabels("not json", lockRefFor([]))).toEqual({});
+    expect(remoteLockLabels([], lockRefFor([]))).toEqual({});
+    expect(remoteLockLabels({ capturedAt: "t" }, lockRefFor([]))).toEqual({});
+    expect(remoteLockLabels({ capturedAt: "t", groups: "nope" }, lockRefFor([]))).toEqual({});
   });
 
   it("skips a group entry whose label isn't a string", () => {
-    const lockJson = { capturedAt: "t", groups: { "plugin-demo": { sourcePluginVersion: "1.0.0", label: 42 } } };
-    expect(remoteLockLabels(lockJson)).toEqual({});
+    const lockJson = { capturedAt: "t", groups: { "plugin-demo": { source: { kind: "plugin", version: "1.0.0" }, label: 42 } } };
+    expect(remoteLockLabels(lockJson, lockRefFor([]))).toEqual({});
   });
 });
 
@@ -680,9 +703,9 @@ describe("remoteLockLabels — carrier memberLabels fallback (batch15)", () => {
   it("adds a plugin-<id> entry from the community carrier's memberLabels", () => {
     const lockJson = {
       capturedAt: "t",
-      groups: { "community-plugins": { sourceAppVersion: "1.8.7", memberLabels: { completr: "Completr", dataview: "Dataview" } } },
+      groups: { "community-plugins": { source: { kind: "app", version: "1.8.7" }, memberLabels: { completr: "Completr", dataview: "Dataview" } } },
     };
-    expect(remoteLockLabels(lockJson)).toEqual({ "plugin-completr": "Completr", "plugin-dataview": "Dataview" });
+    expect(remoteLockLabels(lockJson, lockRefFor([]))).toEqual({ "community/completr": "Completr", "community/dataview": "Dataview" });
   });
 
   it("adds a bare-id entry from the core carrier's memberLabels (no plugin- prefix)", () => {
@@ -690,24 +713,24 @@ describe("remoteLockLabels — carrier memberLabels fallback (batch15)", () => {
       capturedAt: "t",
       groups: { "core-plugins": { sourceAppVersion: "1.8.7", memberLabels: { "daily-notes": "Daily notes" } } },
     };
-    expect(remoteLockLabels(lockJson)).toEqual({ "daily-notes": "Daily notes" });
+    expect(remoteLockLabels(lockJson, lockRefFor([]))).toEqual({ "core/daily-notes": "Daily notes" });
   });
 
   it("never overwrites a name already resolved from the member's own entry", () => {
     const lockJson = {
       capturedAt: "t",
       groups: {
-        "plugin-completr": { sourcePluginVersion: "1.0.0", label: "Completr (own entry)" },
-        "community-plugins": { sourceAppVersion: "1.8.7", memberLabels: { completr: "Completr (carrier)" } },
+        "plugin-completr": { source: { kind: "plugin", version: "1.0.0" }, label: "Completr (own entry)" },
+        "community-plugins": { source: { kind: "app", version: "1.8.7" }, memberLabels: { completr: "Completr (carrier)" } },
       },
     };
-    expect(remoteLockLabels(lockJson)).toEqual({ "plugin-completr": "Completr (own entry)" });
+    expect(remoteLockLabels(lockJson, lockRefFor([]))).toEqual({ "community/completr": "Completr (own entry)" });
   });
 
   it("ignores a non-object or empty-string memberLabels entry", () => {
-    expect(remoteLockLabels({ capturedAt: "t", groups: { "community-plugins": { sourceAppVersion: "1.8.7", memberLabels: "nope" } } })).toEqual({});
+    expect(remoteLockLabels({ capturedAt: "t", groups: { "community-plugins": { source: { kind: "app", version: "1.8.7" }, memberLabels: "nope" } } }, lockRefFor([]))).toEqual({});
     expect(
-      remoteLockLabels({ capturedAt: "t", groups: { "community-plugins": { sourceAppVersion: "1.8.7", memberLabels: { x: "   " } } } })
+      remoteLockLabels({ capturedAt: "t", groups: { "community-plugins": { source: { kind: "app", version: "1.8.7" }, memberLabels: { x: "   " } } } }, lockRefFor([]))
     ).toEqual({});
   });
 });

@@ -1,33 +1,73 @@
 import { describe, expect, it } from "vitest";
 import {
-  ABSENT_HASH, applyUpdates, emptyLedger, hashDirSide, hashFileSide,
-  Ledger, parseLedger, pruneLedger, sha256Hex,
+  ABSENT_HASH, applyUpdates, baselineRefs, emptyLedger, hashDirSide, hashFileSide,
+  Ledger, LEDGER_VERSION, parseLedger, pruneLedger, rekeyLedger, sha256Hex,
 } from "../src/core/ledger";
+import { SyncGroup } from "../src/core/types";
 
 const ENTRY = { store: "s1", local: "l1", at: "2026-07-27T00:00:00.000Z" };
 
 describe("parseLedger", () => {
-  it("returns empty on null/garbage/wrong version", () => {
+  it("returns empty on null/garbage/a version from the future", () => {
     expect(parseLedger(null)).toEqual(emptyLedger());
     expect(parseLedger("not json")).toEqual(emptyLedger());
-    expect(parseLedger(JSON.stringify({ version: 2, groups: {} }))).toEqual(emptyLedger());
+    expect(parseLedger(JSON.stringify({ version: 9, items: {} }))).toEqual(emptyLedger());
   });
-  it("round-trips a valid ledger from its JSON string and drops malformed entries", () => {
-    const raw = JSON.stringify({ version: 1, groups: { a: ENTRY, bad: { store: 5 } } });
-    expect(parseLedger(raw)).toEqual({ version: 1, groups: { a: ENTRY } });
+  it("round-trips a v2 ledger from its JSON string and drops malformed entries", () => {
+    const raw = JSON.stringify({ version: LEDGER_VERSION, items: { "community/a": ENTRY, bad: { store: 5 } } });
+    expect(parseLedger(raw)).toEqual({ version: LEDGER_VERSION, items: { "community/a": ENTRY } });
+  });
+  // A v1 ledger is READ, not re-keyed: the conversion needs the compiled sync list, which does not
+  // exist at parse time (spec §4). The version it reports is what tells rekeyLedger there is work.
+  it("reads a v1 ledger's group-name keys unchanged, and says it is v1", () => {
+    const raw = JSON.stringify({ version: 1, groups: { "plugin-a": ENTRY, bad: { store: 5 } } });
+    expect(parseLedger(raw)).toEqual({ version: 1, items: { "plugin-a": ENTRY } });
+  });
+});
+
+describe("rekeyLedger (spec §4 — the baselines move with the lock)", () => {
+  const toRef = (name: string): string => (name.startsWith("plugin-") ? `community/${name.slice("plugin-".length)}` : `legacy/${name}`);
+
+  it("moves every v1 key through the producer and stamps the new version", () => {
+    const v1: Ledger = { version: 1, items: { "plugin-a": ENTRY } };
+    expect(rekeyLedger(v1, toRef)).toEqual({ version: LEDGER_VERSION, items: { "community/a": ENTRY } });
+  });
+  it("is a no-op on a ledger that has already moved — the same object, not a copy", () => {
+    const v2: Ledger = { version: LEDGER_VERSION, items: { "community/a": ENTRY } };
+    expect(rekeyLedger(v2, toRef)).toBe(v2);
+  });
+  // The §4 ruling: a migration with no undo is not allowed to delete. An entry nothing claims keeps
+  // its content under a section no reader can resolve — inert, but never dropped, because a missing
+  // baseline reads as never-synced and defaults to APPLY.
+  it("keeps an entry nothing claims, under a key no reader can resolve", () => {
+    const v1: Ledger = { version: 1, items: { "plugin-a": ENTRY, "who-knows": ENTRY } };
+    const moved = rekeyLedger(v1, toRef);
+    expect(moved.items["legacy/who-knows"]).toEqual(ENTRY);
+    expect(Object.keys(moved.items).length).toBe(2); // nothing lost
   });
 });
 
 describe("applyUpdates / pruneLedger", () => {
   it("adds, replaces, and drops entries without mutating the input", () => {
-    const base: Ledger = { version: 1, groups: { a: ENTRY } };
-    const next = applyUpdates(base, { b: ENTRY, a: null });
-    expect(next.groups).toEqual({ b: ENTRY });
-    expect(base.groups).toEqual({ a: ENTRY }); // pure
+    const base: Ledger = { version: LEDGER_VERSION, items: { "community/a": ENTRY } };
+    const next = applyUpdates(base, { "community/b": ENTRY, "community/a": null });
+    expect(next.items).toEqual({ "community/b": ENTRY });
+    expect(base.items).toEqual({ "community/a": ENTRY }); // pure
   });
   it("prunes entries not in keep", () => {
-    const base: Ledger = { version: 1, groups: { a: ENTRY, b: ENTRY } };
-    expect(pruneLedger(base, new Set(["a"])).groups).toEqual({ a: ENTRY });
+    const base: Ledger = { version: LEDGER_VERSION, items: { "community/a": ENTRY, "community/b": ENTRY } };
+    expect(pruneLedger(base, new Set(["community/a"])).items).toEqual({ "community/a": ENTRY });
+  });
+  // The prune is what eventually clears an unresolvable entry the re-key preserved: the migration
+  // never deletes, and the prune answers the question it cannot — is this still synced HERE?
+  it("baselineRefs is the keep-set: the refs of the groups this device syncs, and only those", () => {
+    const groups: SyncGroup[] = [
+      { name: "plugin-a", ref: "community/a", path: "{configDir}/plugins/a/data.json", type: "file", devices: "all" },
+      { name: "loose", path: "{configDir}/loose.json", type: "file", devices: "all" },
+    ];
+    expect(baselineRefs(groups)).toEqual(new Set(["community/a"]));
+    const base: Ledger = { version: LEDGER_VERSION, items: { "community/a": ENTRY, "legacy/who-knows": ENTRY } };
+    expect(Object.keys(pruneLedger(base, baselineRefs(groups)).items)).toEqual(["community/a"]);
   });
 });
 

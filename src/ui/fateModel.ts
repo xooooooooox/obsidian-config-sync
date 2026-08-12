@@ -1,4 +1,4 @@
-import type { MemberRule } from "../core/types";
+import type { RunsOn } from "../core/types";
 
 export interface FateInput {
   direction: "apply" | "capture" | null; // null → in sync / nothing yet
@@ -9,7 +9,7 @@ export interface FateInput {
   carrierSynced: boolean;                // the on/off list is a synced item
   storeListOn: boolean | null;           // null → no enablement dimension (obsidian/folder/self)
   locallyOn: boolean;
-  memberRule: MemberRule;
+  runsOn: RunsOn;
   deviceClass: "desktop" | "mobile";
   desktopOnly: boolean;
   excludedHere: boolean;                 // this row's own compiled group is scoped away from
@@ -37,7 +37,7 @@ export interface FateInput {
                                           // is newer than the store's recorded version (drift
                                           // "ahead") — capture's real work here is recording the
                                           // newer version, independent of hasSettingsPayload
-  special: "appearance" | "folder" | null; // "folder": a dir-type row — its own files ARE the
+  special: "appearance" | "folder" | null; // "folder": a folder-type row — its own files ARE the
                                             // payload, folderFileCount REPLACES the settings verb
                                             // (never joins); non-null AND non-folder rows with a
                                             // nonzero folderFileCount are a family whose companion
@@ -69,13 +69,11 @@ export interface Fate {
 
 function effectiveTurnsOn(i: FateInput): boolean {
   if (!i.carrierSynced || i.storeListOn === null) return false;
-  switch (i.memberRule) {
-    case "never-here": return false;
-    case "always-here": return !i.locallyOn;
-    case "desktop": return i.deviceClass === "desktop" && i.storeListOn && !i.locallyOn;
-    case "mobile": return i.deviceClass === "mobile" && i.storeListOn && !i.locallyOn;
-    case "all": return i.storeListOn && !i.locallyOn;
-  }
+  // A force rule decides outright; otherwise a class rule must match this device, and the store's
+  // own on-state decides. Exactly the five readings the flat rule enum had.
+  if (i.runsOn.force !== undefined) return i.runsOn.force.state === "on" && !i.locallyOn;
+  if (i.runsOn.device !== "all" && i.runsOn.device !== i.deviceClass) return false;
+  return i.storeListOn && !i.locallyOn;
 }
 
 function buildChips(i: FateInput): string[] {
@@ -96,12 +94,12 @@ function buildChips(i: FateInput): string[] {
   if (!inert && i.direction === "apply" && !i.installed) chips.push("not installed here");
   if (i.desktopOnly) chips.push("desktop only");
   if ((i.direction === null && i.excludedHere) || inert) chips.push("your rule");
-  if (!inert && i.carrierSynced && i.storeListOn === false && i.memberRule !== "always-here" && !i.locallyOn) {
+  if (!inert && i.carrierSynced && i.storeListOn === false && i.runsOn.force?.state !== "on" && !i.locallyOn) {
     chips.push("stays off");
   }
   if (!inert) {
-    if (i.memberRule === "never-here") chips.push("off here — your rule");
-    else if (i.memberRule === "always-here") chips.push("on here — your rule");
+    if (i.runsOn.force?.state === "off") chips.push("off here — your rule");
+    else if (i.runsOn.force?.state === "on") chips.push("on here — your rule");
   }
   if (i.encrypted) chips.push("encrypted");
   return chips;

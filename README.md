@@ -9,19 +9,24 @@
 
 Selective, on-demand sync of Obsidian settings — hotkeys, CSS snippets, themes, plugin configs — across devices and vaults. The data rides your existing note sync (remotely-save, Obsidian Sync, iCloud…) by default, or config-sync's own git / vault remotes. Nothing ever lands on a device without an explicit **Apply** from the Sync Center.
 
+> [!IMPORTANT]
+> **Update every device before any of them captures or pulls again.**
+> This release moves the settings and the store to a new format, and the move is one way. A device still on **2.21.0** meets the new format, refuses it with a plain message and changes nothing. A device on **2.20.0 or earlier resets its Config Sync settings to defaults** — that one cannot be fixed afterwards. Update Config Sync everywhere first, then carry on as usual.
+> Three things also behave differently afterwards: see [Updating from 2.21.0 and earlier](docs/GUIDE.md#updating-from-2210-and-earlier).
+
 ![Sync Center](docs/assets/sync-panel.png)
 
 ## Features
 
 - **One card per item** — every synced thing (an Obsidian option group, a core or community plugin, a snippet) is one row with an expandable drawer holding its rules; a plugin's on/off state lives on its own card. ([details](docs/GUIDE.md#settings))
-- **Orthogonal field rules** — every key carries a `{scope, encrypted}` pair (`All devices` / `Desktop only` / `Mobile only` / `This device`), and string-array keys can scope each element on its own. ([details](docs/GUIDE.md#field-rules--sensitive-settings))
+- **Orthogonal field rules** — every key carries a `{sharing, encrypted}` pair (`All devices` / `Desktop only` / `Mobile only` / `This device`), and string-array keys can give each element its own sharing rule. ([details](docs/GUIDE.md#field-rules--sensitive-settings))
 - **Credential-safe** — `This device` keys never leave the machine, and a per-device passphrase encrypts what should travel.
 - **Explicit Apply** — nothing changes a device until you tick items and press Apply; every run stays visible in the pinned result strip and a browsable **History**.
 - **A Sync Center that knows the state** — every row spells out its own fate in plain language (*turns on · installs · applies settings*), normalized JSON diffs, a *this device* status chip and totals for every pending action. ([tour](docs/GUIDE.md#the-sync-center))
 - **Install engine** — plugins that are outdated, disabled or missing on this device can be updated, enabled or installed during Apply, pinned to the captured version. ([rules](docs/GUIDE.md#availability-facts-and-the-install-engine))
 - **Remotes (desktop)** — pull/push the store against a git repo or another vault, with per-file diff previews. ([details](docs/GUIDE.md#transport))
-- **Safe to update one device at a time** — settings or a store written by a newer Config Sync are refused with a plain message, never reset or overwritten, and a device's own choices (what it opted out of syncing) stay on that device where a pull can't erase them. ([details](docs/GUIDE.md#transport))
-- **Search everywhere** — both search boxes accept `key:value` qualifiers with autocomplete, combined freely with plain text.
+- **Safe to update one device at a time** — settings or a store written by a newer Config Sync are refused with a plain message, never reset or overwritten, and a device's own choices (what it opted out of syncing) stay on that device where a pull can't erase them. That protection starts at 2.21.0; see the notice above before updating from anything older. ([details](docs/GUIDE.md#transport))
+- **Search everywhere** — both search boxes accept `key:value` qualifiers with autocomplete (`section:`, `type:`, `action:`, `mode:`, `device:`), combined freely with plain text.
 - **Status bar** — ↑ capture / ↓ apply plus per-remote ⇡ push / ⇣ pull counts at a glance; click opens the Sync Center.
 - **Mobile-friendly** — capture, apply and the Sync Center work on phones; the store is plain vault content, so any note sync carries it.
 
@@ -43,7 +48,7 @@ Beta builds: via [BRAT](https://github.com/TfTHacker/obsidian42-brat), add `xooo
 
 Two planes, kept separate.
 
-- **Local plane** — **Capture** copies every enabled item's settings files and companion folders into the store, applying each field's `{scope, encrypted}` rule; **Apply** lands the items you tick into this device's config dir. Direction (↑ capture, ↓ apply) comes from a per-device sync baseline, not file times, so the Sync Center can tell which side actually moved.
+- **Local plane** — **Capture** copies every enabled item's settings files and companion folders into the store, applying each field's `{sharing, encrypted}` rule; **Apply** lands the items you tick into this device's config dir. Direction (↑ capture, ↓ apply) comes from a per-device sync baseline, not file times, so the Sync Center can tell which side actually moved.
 - **Transport plane** — by default the store is plain vault content and rides your note sync; a fresh device discovers an arriving store on its own and offers an **Adopt** guide. Optionally (desktop), Pull/Push move the store against a git repo or another vault from the Sync Center's Remotes block.
 
 The full tour — Sync Center anatomy, field rules, encryption, the install engine, remotes, walkthroughs — lives in the **[user guide](docs/GUIDE.md)**.

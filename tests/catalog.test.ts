@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { resolveHostStoredLabel } from "../src/core/lockLabels";
+import { lockRefFor } from "../src/core/itemKeys";
 import {
   appearancePresetRules,
   CatalogItem,
-  categoryForGroup,
+  sectionForGroup,
   corePluginFile,
   CORE_ID_SEED,
   defaultGroupForName,
@@ -21,14 +23,13 @@ import {
   OPTION_LABELS,
   optionReservedName,
   reservedNames,
-  resolveHostStoredLabel,
   SELF_GROUP_NAME,
   selfPresetRules,
   setCorePluginIds,
   splitLocation,
   toggleSection,
 } from "../src/core/catalog";
-import { StoreLock, SyncGroup } from "../src/core/types";
+import { StoreLock, SyncGroup, EVERYWHERE, THIS_DEVICE } from "../src/core/types";
 import { FakePlugins, MemFS } from "./memfs";
 
 function optionFs(): MemFS {
@@ -97,7 +98,7 @@ describe("listOptionSections", () => {
     });
     expect(items.some((i) => i.name === "app-view-general")).toBe(false);
     expect(items.some((i) => i.name === "appearance-domain")).toBe(false);
-    expect(categoryForGroup("app")).toBe("obsidian");
+    expect(sectionForGroup("app")).toBe("obsidian");
   });
 
   it("routes app to notPresent when app.json is absent from the vault", async () => {
@@ -156,10 +157,10 @@ describe("setCorePluginIds injection", () => {
   afterEach(() => setCorePluginIds(CORE_ID_SEED)); // restore seed so test order is independent
 
   it("recognizes an injected non-seed core id in pure judgments", () => {
-    expect(categoryForGroup("switcher")).toBe("custom"); // not in seed yet
+    expect(sectionForGroup("switcher")).toBe("custom"); // not in seed yet
     expect(expectedPathForName("switcher")).toBe(null);
     setCorePluginIds(["switcher"]);
-    expect(categoryForGroup("switcher")).toBe("core");
+    expect(sectionForGroup("switcher")).toBe("core");
     expect(expectedPathForName("switcher")).toBe("{configDir}/switcher.json");
     expect(reservedNames([]).has("switcher")).toBe(true);
   });
@@ -323,7 +324,7 @@ describe("name and path helpers", () => {
     expect(names.has("nope")).toBe(false);
   });
 
-  it("no longer reserves 'core-plugins'/'community-plugins' — the aggregate rows are gone (spec §7 item 1); those compiled group names are excluded from Advanced/search via SWITCH_LIST_GROUPS instead", () => {
+  it("no longer reserves 'core-plugins'/'community-plugins' — the aggregate rows are gone (spec §7 item 1); those compiled group names are excluded from Advanced/search via isSwitchListGroup instead", () => {
     const names = reservedNames(["dataview"]);
     expect(names.has("core-plugins")).toBe(false);
     expect(names.has("community-plugins")).toBe(false);
@@ -357,7 +358,7 @@ describe("defaultGroupForName", () => {
     expect(defaultGroupForName("snippets")).toEqual({
       name: "snippets",
       path: "{configDir}/snippets",
-      type: "dir",
+      type: "folder",
       devices: "all",
       description: "Your CSS snippets.",
     });
@@ -438,23 +439,23 @@ describe("section copy (action-oriented)", () => {
   });
 });
 
-describe("categoryForGroup", () => {
+describe("sectionForGroup", () => {
   it("categorizes group names", () => {
-    expect(categoryForGroup("themes")).toBe("obsidian");
-    expect(categoryForGroup("daily-notes")).toBe("core");
-    expect(categoryForGroup("plugin-dataview")).toBe("community");
-    expect(categoryForGroup("my-vimrc")).toBe("custom");
+    expect(sectionForGroup("themes")).toBe("obsidian");
+    expect(sectionForGroup("daily-notes")).toBe("core");
+    expect(sectionForGroup("plugin-dataview")).toBe("community");
+    expect(sectionForGroup("my-vimrc")).toBe("custom");
   });
 
   it("categorizes the synthetic enabled-css-snippets switch list as Obsidian", () => {
     // It is derived from appearance.json and surfaces under the Obsidian settings tab, so the
     // Sync Center scope must match — not fall through to Custom.
-    expect(categoryForGroup("enabled-css-snippets")).toBe("obsidian");
+    expect(sectionForGroup("enabled-css-snippets")).toBe("obsidian");
   });
 
   it("switch-list carrier groups land in their real categories, not custom", () => {
-    expect(categoryForGroup("community-plugins")).toBe("community");
-    expect(categoryForGroup("core-plugins")).toBe("core");
+    expect(sectionForGroup("community-plugins")).toBe("community");
+    expect(sectionForGroup("core-plugins")).toBe("core");
   });
 });
 
@@ -500,21 +501,25 @@ describe("displayLabelForGroup label priority", () => {
 // ignore a caller-supplied argument for a parameter it doesn't declare. This exercises the exact
 // priority chain the host wiring now delegates to, so a future re-introduction of the arity bug
 // (or a wrong priority order) fails here instead of only being catchable on a real device.
+// The host's single ref producer, with no compiled list behind it (these fixtures describe names,
+// not a compile) — the same function main.ts binds to compiledGroups.
+const refOf = lockRefFor([]);
+
 describe("resolveHostStoredLabel (host wiring priority, C-#14)", () => {
   const group: SyncGroup = { name: "plugin-dataview", path: "{configDir}/plugins/dataview/data.json", type: "file", devices: "all", label: "from lastGroups" };
-  const lock: StoreLock = { capturedAt: "2026-08-08T00:00:00.000Z", groups: { "plugin-dataview": { label: "from lastLock" } } };
+  const lock: StoreLock = { capturedAt: "2026-08-08T00:00:00.000Z", items: { community: { dataview: { display: { label: "from lastLock" } } } } };
 
   it("prefers the caller's explicit override over both snapshots", () => {
-    expect(resolveHostStoredLabel("plugin-dataview", "Dataview", [group], lock)).toBe("Dataview");
+    expect(resolveHostStoredLabel("plugin-dataview", "Dataview", [group], lock, refOf)).toBe("Dataview");
   });
   it("falls back to the live SyncGroup snapshot when no explicit override is given", () => {
-    expect(resolveHostStoredLabel("plugin-dataview", undefined, [group], lock)).toBe("from lastGroups");
+    expect(resolveHostStoredLabel("plugin-dataview", undefined, [group], lock, refOf)).toBe("from lastGroups");
   });
   it("falls back to the last-loaded lock's label when neither an override nor a live group carries one", () => {
-    expect(resolveHostStoredLabel("plugin-dataview", undefined, null, lock)).toBe("from lastLock");
+    expect(resolveHostStoredLabel("plugin-dataview", undefined, null, lock, refOf)).toBe("from lastLock");
   });
   it("returns undefined when nothing resolves", () => {
-    expect(resolveHostStoredLabel("plugin-dataview", undefined, null, null)).toBeUndefined();
+    expect(resolveHostStoredLabel("plugin-dataview", undefined, null, null, refOf)).toBeUndefined();
   });
 });
 
@@ -526,41 +531,41 @@ describe("resolveHostStoredLabel — carrier memberLabels fallback (batch15)", (
   it("falls through to the community carrier's memberLabels for a plugin-<id> group with no entry of its own", () => {
     const lock: StoreLock = {
       capturedAt: "t",
-      groups: { "community-plugins": { sourceAppVersion: "1.8.7", memberLabels: { completr: "Completr" } } },
+      items: { obsidian: { "community-plugins": { source: { kind: "app", version: "1.8.7" }, display: { elements: { completr: "Completr" } } } } },
     };
-    expect(resolveHostStoredLabel("plugin-completr", undefined, null, lock)).toBe("Completr");
+    expect(resolveHostStoredLabel("plugin-completr", undefined, null, lock, refOf)).toBe("Completr");
   });
 
   it("falls through to the core carrier's memberLabels for a bare core-settings id with no entry of its own", () => {
     const lock: StoreLock = {
       capturedAt: "t",
-      groups: { "core-plugins": { sourceAppVersion: "1.8.7", memberLabels: { "daily-notes": "Daily notes" } } },
+      items: { obsidian: { "core-plugins": { source: { kind: "app", version: "1.8.7" }, display: { elements: { "daily-notes": "Daily notes" } } } } },
     };
-    expect(resolveHostStoredLabel("daily-notes", undefined, null, lock)).toBe("Daily notes");
+    expect(resolveHostStoredLabel("daily-notes", undefined, null, lock, refOf)).toBe("Daily notes");
   });
 
   it("prefers the member's own lock entry label over the carrier's memberLabels", () => {
     const lock: StoreLock = {
       capturedAt: "t",
-      groups: {
-        "plugin-completr": { sourcePluginVersion: "1.0.0", label: "Completr (own entry)" },
-        "community-plugins": { sourceAppVersion: "1.8.7", memberLabels: { completr: "Completr (carrier)" } },
+      items: {
+        community: { completr: { source: { kind: "plugin", version: "1.0.0" }, display: { label: "Completr (own entry)" } } },
+        obsidian: { "community-plugins": { source: { kind: "app", version: "1.8.7" }, display: { elements: { completr: "Completr (carrier)" } } } },
       },
     };
-    expect(resolveHostStoredLabel("plugin-completr", undefined, null, lock)).toBe("Completr (own entry)");
+    expect(resolveHostStoredLabel("plugin-completr", undefined, null, lock, refOf)).toBe("Completr (own entry)");
   });
 
   it("returns undefined (not the bare id) when neither the member nor its carrier resolves", () => {
-    const lock: StoreLock = { capturedAt: "t", groups: { "community-plugins": { sourceAppVersion: "1.8.7" } } };
-    expect(resolveHostStoredLabel("plugin-unknown", undefined, null, lock)).toBeUndefined();
+    const lock: StoreLock = { capturedAt: "t", items: { obsidian: { "community-plugins": { source: { kind: "app", version: "1.8.7" } } } } };
+    expect(resolveHostStoredLabel("plugin-unknown", undefined, null, lock, refOf)).toBeUndefined();
   });
 
   it("does not apply the carrier fallback to a group that is neither plugin-<id> nor a core-settings id", () => {
     const lock: StoreLock = {
       capturedAt: "t",
-      groups: { "community-plugins": { sourceAppVersion: "1.8.7", memberLabels: { hotkeys: "should never surface here" } } },
+      items: { obsidian: { "community-plugins": { source: { kind: "app", version: "1.8.7" }, display: { elements: { hotkeys: "should never surface here" } } } } },
     };
-    expect(resolveHostStoredLabel("hotkeys", undefined, null, lock)).toBeUndefined();
+    expect(resolveHostStoredLabel("hotkeys", undefined, null, lock, refOf)).toBeUndefined();
   });
 });
 
@@ -575,9 +580,9 @@ describe("groupForItem", () => {
     expect(g.mode).toBe("fields");
     expect(g.fields).toEqual(selfPresetRules());
     expect(g.fields).toEqual([
-      { pattern: "rootPath", scope: "local", encrypted: false, locked: true },
-      { pattern: "remotes", scope: "local", encrypted: false, locked: true },
-      { pattern: "localMembers", scope: "local", encrypted: false, locked: true },
+      { pattern: "rootPath", sharing: THIS_DEVICE, encrypted: false, locked: true },
+      { pattern: "remotes", sharing: THIS_DEVICE, encrypted: false, locked: true },
+      { pattern: "thisDeviceItems", sharing: THIS_DEVICE, encrypted: false, locked: true },
     ]);
   });
 
@@ -589,14 +594,14 @@ describe("groupForItem", () => {
 });
 
 describe("selfPresetRules", () => {
-  it("only the genuinely device-local top-level settings — schema v2 has no memberScopes/memberLocal fields", () => {
-    expect(selfPresetRules().map((r) => r.pattern)).toEqual(["rootPath", "remotes", "localMembers"]);
+  it("only the transport wiring — the fields that describe THIS device's connection to the store", () => {
+    expect(selfPresetRules().map((r) => r.pattern)).toEqual(["rootPath", "remotes", "thisDeviceItems"]);
   });
 });
 
 describe("appearancePresetRules", () => {
   it("has exactly one locked strip rule for enabledCssSnippets", () => {
-    expect(appearancePresetRules()).toEqual([{ pattern: "enabledCssSnippets", scope: "local", encrypted: false, locked: true }]);
+    expect(appearancePresetRules()).toEqual([{ pattern: "enabledCssSnippets", sharing: THIS_DEVICE, encrypted: false, locked: true }]);
   });
 });
 
@@ -618,9 +623,9 @@ describe("ensureSelfPresets", () => {
         devices: "all",
         mode: "fields",
         fields: [
-          { pattern: "rootPath", scope: "local", encrypted: false, locked: true },
-          { pattern: "remotes", scope: "local", encrypted: false, locked: true },
-          { pattern: "localMembers", scope: "local", encrypted: false, locked: true },
+          { pattern: "rootPath", sharing: THIS_DEVICE, encrypted: false, locked: true },
+          { pattern: "remotes", sharing: THIS_DEVICE, encrypted: false, locked: true },
+          { pattern: "thisDeviceItems", sharing: THIS_DEVICE, encrypted: false, locked: true },
         ],
       },
     ];
@@ -638,12 +643,12 @@ describe("ensureSelfPresets", () => {
         type: "file",
         devices: "all",
         mode: "fields",
-        fields: [{ pattern: "rootPath", scope: "local", encrypted: false }],
+        fields: [{ pattern: "rootPath", sharing: THIS_DEVICE, encrypted: false }],
       },
     ];
     const out = ensureSelfPresets(groups);
     const self = out.find((g) => g.name === SELF_GROUP_NAME);
-    expect(self?.fields?.filter((f) => f.pattern === "rootPath")).toEqual([{ pattern: "rootPath", scope: "local", encrypted: false, locked: true }]);
+    expect(self?.fields?.filter((f) => f.pattern === "rootPath")).toEqual([{ pattern: "rootPath", sharing: THIS_DEVICE, encrypted: false, locked: true }]);
     expect(self?.fields).toEqual(selfPresetRules());
   });
 
@@ -655,12 +660,12 @@ describe("ensureSelfPresets", () => {
         type: "file",
         devices: "all",
         mode: "fields",
-        fields: [{ pattern: "myToken", scope: "all", encrypted: true }],
+        fields: [{ pattern: "myToken", sharing: EVERYWHERE, encrypted: true }],
       },
     ];
     const out = ensureSelfPresets(groups);
     const self = out.find((g) => g.name === SELF_GROUP_NAME);
-    expect(self?.fields).toEqual([...selfPresetRules(), { pattern: "myToken", scope: "all", encrypted: true }]);
+    expect(self?.fields).toEqual([...selfPresetRules(), { pattern: "myToken", sharing: EVERYWHERE, encrypted: true }]);
   });
 
   it("is idempotent: double-apply equals single-apply", () => {
@@ -695,7 +700,7 @@ describe("appearance strip when snippet list is active", () => {
     const out = ensureAppearancePresets([{ ...appearance }, { ...snippet }]);
     const app = out.find((g) => g.name === "appearance")!;
     expect(app.mode).toBe("fields");
-    expect(app.fields).toContainEqual({ pattern: "enabledCssSnippets", scope: "local", encrypted: false, locked: true });
+    expect(app.fields).toContainEqual({ pattern: "enabledCssSnippets", sharing: THIS_DEVICE, encrypted: false, locked: true });
   });
   it("leaves appearance untouched when the snippet group is absent", () => {
     const out = ensureAppearancePresets([{ ...appearance }]);

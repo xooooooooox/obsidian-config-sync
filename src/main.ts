@@ -41,61 +41,81 @@ interface SecretStore {
   setSecret(id: string, secret: string): void;
 }
 import { BratIndex, parseBratRepoList, resolveBratIndex } from "./core/bratIndex";
-import { type CatalogSection, corePluginFile, displayLabelForGroup, findGroupByName, listBetaSections, listCoreSections, listDiscovered, listOptionSections, listPluginSections, resolveHostStoredLabel, SELF_GROUP_NAME, setCorePluginIds } from "./core/catalog";
-import { asMemberRule, Availability, availabilityForGroup, desktopOnlyDrift, desktopOnlyPluginIds, normalizeMemberRule, scopedAwayMembers, memberForceOff, preferStoredMemberRule } from "./core/availability";
+import { type CatalogSection, corePluginFile, displayLabelForGroup, findGroupByName, listBetaSections, listCoreSections, listDiscovered, listOptionSections, listPluginSections, SELF_GROUP_NAME, SELF_ITEM_ID, SELF_ITEM_REF, SELF_ITEM_SECTION, setCorePluginIds } from "./core/catalog";
+import { Availability, availabilityForGroup, desktopOnlyDrift, desktopOnlyPluginIds, forcedRunsOn, membersExcludedByClass, memberForceOff, preferStoredRunsOn } from "./core/availability";
 import { listFilesRecursive, isJunkPath, FileIO } from "./core/io";
 import { leftoverStoreRels, storeSelfCopyGroups, selfListGroups } from "./core/leftover";
 import { parseStoreLock, STORE_LOCK_FUTURE_MESSAGE, validateSyncManifest } from "./core/manifest";
+import { lockRefFor, rekeyRefList } from "./core/itemKeys";
+import { lockStoredLabel, resolveHostStoredLabel } from "./core/lockLabels";
 import { basename, groupRealPath, groupStorePath, sidecarStoreSuffix } from "./core/pathing";
 import {
   buildItemDefs,
   CompileError,
-  CustomGroupConfig,
   defsForForeignItems,
-  enablementScopes,
+  emptyItem,
+  emptyItemMap,
+  ENABLEMENT_LISTS,
+  enablementSharing,
   groupOwners,
   GroupDisplayParts,
-  ItemConfig,
-  itemConfigForWrite,
-  itemConfigWithEnabledOn,
+  defForRef,
+  defRef,
+  isEnablementList,
+  Item,
+  itemAt,
   ItemDef,
+  itemForGroupName,
+  ItemMap,
   ItemSettingsFile,
+  itemWithDevice,
   compileItems,
-  legacyGroupName,
   parentCardLabel,
   RegistryEnv,
   structuralLocalElements,
+  withItem,
+  withoutItem,
 } from "./core/registry";
-import { classifySettings, CURRENT_SCHEMA, deviceOptOutsFor, drainEnabledOnLocal, mergeLegacyAppSliceItems, SCHEMA_FUTURE_NOTICE, SCHEMA_UPGRADE_NOTICE, withDefaults, withDeviceOptOut } from "./core/settingsMigration";
-import { applySwitchList, captureSwitchList, localRealPath, parseSwitchList, readLocalSwitchList, subtractForceOff, SWITCH_LIST_GROUPS, switchDivergence, SwitchList, switchListMemberOn, writeLocalSwitchList } from "./core/switchList";
+import { classifySettings, CURRENT_SCHEMA, SCHEMA_FUTURE_NOTICE, SCHEMA_UPGRADE_NOTICE, withDefaults } from "./core/settingsMigration";
+import { deviceOptOutsFor, migrateV2Settings } from "./core/v2Migration";
+import { applySwitchList, captureSwitchList, EnablementList, isSwitchListGroup, localRealPath, parseSwitchList, readLocalSwitchList, subtractForceOff, switchDivergence, SwitchList, switchListMemberOn, writeLocalSwitchList } from "./core/switchList";
 import { applyTransform, captureTransform, isWholeFileEncrypted, scanSensitive, SensitiveScan } from "./core/modes";
 import { PkmMode, PkmProbe, resolveEffectiveMode, resolveRootPath } from "./core/pkm";
 import { pluginRuntimeEnabled } from "./core/pluginState";
 import { syncListDelta } from "./core/syncListDelta";
 import { selfPaneState } from "./core/selfPane";
-import { applyUpdates, Ledger, parseLedger, pruneLedger } from "./core/ledger";
+import { applyUpdates, baselineRefs, Ledger, LEDGER_VERSION, parseLedger, pruneLedger, rekeyLedger } from "./core/ledger";
 import { bucketCounts, checkRemote, diffRemote, GroupStatus, remoteDirectionCounts, RemoteCheck, remoteLockAhead, remoteLockLabels, statusForGroups } from "./core/status";
-import { DeviceClass, GroupResult, MemberRule, Remote, RibbonButtons, RuleScope, StoreLock, SyncGroup } from "./core/types";
-import { EnablementCarrier, MemberDecision, memberDecisionsFromScopes, statusBarStatuses } from "./ui/panelModel";
+import { asRunsOn, DeviceClass, EVERYWHERE, FileSharing, GroupResult, itemRef, ItemRef, parseItemRef, Remote, RibbonButtons, RunsOn, Sharing, sharingClass, StorageSection, StoreLock, SyncGroup, THIS_DEVICE } from "./core/types";
+import { MemberDecision, memberDecisionsFromSharing, statusBarStatuses } from "./ui/panelModel";
 import { defaultSettingsFile, deriveMode, fileRuleLegalForMode, pruneSettingsFile } from "./ui/itemCard";
 import { ConflictModal } from "./ui/ConflictModal";
 import { renderStatusBarItem, statusBarSegments } from "./ui/statusBar";
 import { SYNC_CENTER_VIEW_TYPE, SelfSyncInfo, SyncCenterHost, SyncCenterView } from "./ui/SyncCenterView";
 import { ConfigSyncSettingTab } from "./ui/SettingTab";
 
-// Settings schema v2 (spec 2026-07-25-unified-card-design.md §6, D13): the sync list is no
-// longer a stored SyncGroup[] — it is COMPILED (registry.ts's compileItems) from `items` on every
-// load/save. `groups`/`memberScopes`/`memberLocal`/`appJsonTabs` (v1/v3-era) are gone entirely;
-// there is no migration path from them — settingsMigration.ts's load gate blocks any data.json
-// that isn't already schemaVersion 2. The literal type is deliberate: it is the one place a schema
-// bump must be acknowledged in the type system, and it must move together with
+// Settings schema v3 (spec 2026-08-11-v3-one-vocabulary-design.md §2). The sync list is not a
+// stored SyncGroup[] — it is COMPILED (registry.ts's compileItems) from `items` on every
+// load/save. Structure carries the taxonomy: `items` nests by section, and `custom` is one of
+// those sections rather than a second data shape. The literal type is deliberate: it is the one
+// place a schema bump must be acknowledged in the type system, and it must move together with
 // settingsMigration.ts's CURRENT_SCHEMA (which DEFAULT_SETTINGS below reads, so the two can never
 // disagree about what this build writes).
 interface ConfigSyncSettings {
-  schemaVersion: 2;
+  schemaVersion: 3;
+
+  // Transport wiring — the locked-local preset (catalog.ts's selfPresetRules); never travels.
   pkmMode: PkmMode;
   rootPath: string; // "" = follow the PKM mode default
   remotes: Remote[];
+  // Items this device decides for itself (was localMembers). ItemRefs, because a flat list needs
+  // the one-string form of what the document nests.
+  thisDeviceItems: ItemRef[];
+
+  // The sync contract.
+  items: ItemMap;
+
+  // Preferences.
   ribbonButtons: RibbonButtons;
   statusInMenu: boolean;
   statusBarItem: boolean; // master toggle for the status-bar item
@@ -104,32 +124,8 @@ interface ConfigSyncSettings {
   mobileStatusBar: boolean; // force-show Obsidian's status bar on phones (CSS class only)
   remoteAutoCheck: boolean;
   localPeriodicCheck: boolean;
-  items: Record<string, ItemConfig>; // item id (registry.ts) -> its own config; compiled to SyncGroup[] on load
-  // Advanced tab "Custom rules"/"Discovered files" (spec §6 addition): these have no ItemDef, so
-  // they're stored as their own SyncGroup literals rather than an ItemConfig — compileItems
-  // (registry.ts) appends them to the compiled list on every load/save, same as everything else.
-  customGroups: CustomGroupConfig[];
-  bratPluginIndex: BratIndex; // plugin id -> "owner/repo"; derived from BRAT's synced list, synced too
+  bratIndex: BratIndex; // plugin id -> "owner/repo"; derived from BRAT's synced list, synced too
   runHistory: RunHistorySettings; // local-only record of past runs; never synced
-  localMembers: string[]; // item ids (community:<id> / core:<id>) device-local-only; never synced
-  // Task 2 (spec 2026-08-06-sync-center-unified-grammar-design.md §6): the Runs-on rule's real
-  // stored home. Item id (community:<id> / core:<id>) -> its chosen MemberRule; a stored value
-  // here always wins over legacy normalization (preferStoredMemberRule). Task 5's Runs-on menu is
-  // the only intended writer; rides the self item's whole-document self-propagation like `items`
-  // (no per-field handling needed — see selfPresetRules).
-  memberRules: Record<string, MemberRule>;
-  // CARRIED, not owned (spec 2026-08-11-data-model-hardening.md §2 ruling, C-#52). The
-  // Stop-syncing menu's "On this device" rule USED to live here — group name -> the device ids
-  // that opted out — and rode the self item's whole-document propagation, which is exactly how a
-  // pull + adopt erased a device's own choice. This build reads its opt-out from localStorage
-  // (deviceOptOutGroups() below) and that is the authority. The field stays for the fleet, not for
-  // us: a document written without it, adopted by a device still on the old build, takes that
-  // device's opt-out with it. Optional and absent from DEFAULT_SETTINGS — a document that never
-  // had it only gets it if THIS device opts something out. Phase 2 (once a localStorage-reading
-  // build is the fleet's floor) removes it. The values are `unknown`, not `string[]`: this map
-  // comes from a document other builds write, so it gets no more trust than any other carried
-  // field — narrowing happens where it is read and written (deviceOptOutsFor/withDeviceOptOut).
-  deviceOptOuts?: Record<string, unknown>;
 }
 
 interface RunHistorySettings {
@@ -152,12 +148,10 @@ const DEFAULT_SETTINGS: ConfigSyncSettings = {
   mobileStatusBar: false,
   remoteAutoCheck: true,
   localPeriodicCheck: true,
-  items: {},
-  customGroups: [],
-  bratPluginIndex: {},
+  items: emptyItemMap(),
+  bratIndex: {},
   runHistory: { enabled: true, path: "", maxCount: 50, maxDays: 30 },
-  localMembers: [],
-  memberRules: {},
+  thisDeviceItems: [],
 };
 
 // How long the §4.1 refusal notice stays ON SCREEN — and, for exactly that long, how long the same
@@ -166,10 +160,6 @@ const DEFAULT_SETTINGS: ConfigSyncSettings = {
 // once, while a gesture made after it has faded gets its own answer; the refusal itself is never
 // suppressed, only the repeat of the message.
 const REFUSAL_NOTICE_MS = 10000;
-
-// config-sync's own registry item id (registry.ts: community plugin ids are prefixed "community:")
-// — used by the self-propagation adopt flow to enable syncing config-sync's own settings.
-const SELF_ITEM_ID = "community:config-sync";
 
 // app.plugins is not part of the public API; this is the community-standard access path.
 interface CommunityPluginRegistry {
@@ -242,7 +232,11 @@ interface AppWithSetting {
 }
 
 export default class ConfigSyncPlugin extends Plugin {
-  settings: ConfigSyncSettings = DEFAULT_SETTINGS;
+  // withDefaults, not DEFAULT_SETTINGS itself: this value is live from construction until the
+  // first loadSettings, and handing out the module constant would let anything that writes before
+  // then rewrite the defaults for the rest of the session. Same hazard the nested fill closes one
+  // layer down — this is the layer above it.
+  settings: ConfigSyncSettings = withDefaults(DEFAULT_SETTINGS, null);
   private individualRibbons: HTMLElement[] = [];
   private mainRibbonEl: HTMLElement | null = null;
   private statusBarEl: HTMLElement | null = null;
@@ -305,12 +299,17 @@ export default class ConfigSyncPlugin extends Plugin {
   // nothing here — it neither resets the document nor writes over it, and every mutating entry
   // point refuses. Cleared by the next load that finds a document this build understands.
   private schemaStop: { found: number } | null = null;
+  // Whether the last compile produced `compiledGroups` from the document, rather than leaving the
+  // previous list (or none) in place after a CompileError. Read by saveBaselines — see its note.
+  // Starts false: nothing has compiled yet at construction, and a baseline written before the first
+  // compile would be keyed against nothing.
+  private compileSucceeded = false;
 
   async onload(): Promise<void> {
     await this.loadSettings();
     this.migratePassphraseToKeychain();
     setCorePluginIds(this.coreRuntime().map((c) => c.id));
-    await this.recompile();
+    if (await this.recompile()) this.rekeyDeviceStores();
     this.addSettingTab(new ConfigSyncSettingTab(this.app, this));
     this.registerView(SYNC_CENTER_VIEW_TYPE, (leaf) => new SyncCenterView(leaf, this.syncCenterHost()));
     this.mainRibbonEl = this.addRibbonIcon("refresh-cw", "Config Sync", (evt) => void this.openSyncMenu(evt));
@@ -358,12 +357,17 @@ export default class ConfigSyncPlugin extends Plugin {
   // Called on load and after every settings save (see saveSettings) so compiledGroups never goes
   // stale. A path-collision CompileError is surfaced as a Notice and leaves the PREVIOUS compiled
   // groups in place — a bad edit must never silently wipe out the working sync list.
-  private async recompile(): Promise<void> {
+  // Returns whether the compile SUCCEEDED — not a courtesy, a precondition (final-review I1). The
+  // §4 re-key keys every baseline against `compiledGroups`, and a failed compile leaves that list
+  // empty (or last-good), so the re-key would resolve nothing and file every companion and custom
+  // rule under `legacy/…` — then stamp the ledger's new version, so it is never retried. One bad
+  // custom rule name is enough to get there, and the user sees only a generic Notice.
+  private async recompile(): Promise<boolean> {
     const env = await this.registryEnv();
     // defsForForeignItems, not a bare buildItemDefs: settings.items can carry a selected-but-
     // uninstalled plugin (e.g. install-on-apply's pending target), which env.plugins doesn't see
     // yet — without the synthesized def that item would have no group to compile into.
-    this.registryDefs = defsForForeignItems(buildItemDefs(env), Object.keys(this.settings.items), env.betaIds);
+    this.registryDefs = defsForForeignItems(buildItemDefs(env), this.settings.items, env.betaIds);
     // Defense-in-depth (final-review fix): captured explicitly so "keep the last-good compiled
     // list on failure" is provable rather than incidental (mid-session this already happened by
     // omission — the catch branch never reassigned this.compiledGroups — but that's fragile to a
@@ -372,21 +376,25 @@ export default class ConfigSyncPlugin extends Plugin {
     // the Notice below (naming the offending group/item via e.message) is what has to make that
     // failure actionable instead.
     const lastGoodGroups = this.compiledGroups;
+    this.compileSucceeded = false;
     try {
       const compiled = compileItems(this.registryDefs, this.settings);
       // Safety net: compileItems is expected to always emit well-formed groups, but validating
       // here (the same check every hand-written config-sync.json goes through) catches a
       // registry bug before it reaches the capture/apply engine instead of failing obscurely.
       this.compiledGroups = validateSyncManifest({ version: 1, groups: compiled }).groups;
+      this.compileSucceeded = true;
+      return true;
     } catch (e) {
       this.compiledGroups = lastGoodGroups;
       const reason = e instanceof Error ? e.message : String(e);
       if (e instanceof CompileError) {
         new Notice(`Config Sync: ${reason}`, 10000);
-        return;
+        return false;
       }
       console.error("Config Sync: compiled sync groups failed validation", e);
       new Notice(`Config Sync: your sync setup has an invalid rule (${reason}) — fix it under Settings → Advanced.`, 10000);
+      return false;
     }
   }
 
@@ -396,7 +404,7 @@ export default class ConfigSyncPlugin extends Plugin {
     const cores = await Promise.all(
       this.coreRuntime().map(async (c) => ({ id: c.id, name: c.name, fileExists: await io.exists(`${configDir}/${corePluginFile(c.id)}`) }))
     );
-    const betaIds = new Set(Object.keys(this.settings.bratPluginIndex));
+    const betaIds = new Set(Object.keys(this.settings.bratIndex));
     return { cores, plugins: this.pluginRuntime().map((p) => ({ id: p.id, name: p.name, desktopOnly: p.desktopOnly })), betaIds };
   }
 
@@ -424,12 +432,12 @@ export default class ConfigSyncPlugin extends Plugin {
       // C-#45: an opted-out group never runs a real comparison on this device (spec §4) — dropped
       // the same way groupsForDevice's own device-class filter already drops a scope-mismatched
       // group, before status/ledger/the ribbon count ever see it.
-      const optedOut = this.deviceOptedOutGroupNames();
-      const scoped = groupsForDevice(manifest, device).filter((g) => !optedOut.has(g.name));
+      const optedOut = this.deviceOptedOutRefs();
+      const scoped = groupsForDevice(manifest, device).filter((g) => g.ref === undefined || !optedOut.has(g.ref));
       const ledger = this.loadBaselines();
       const { statuses, updates } = await statusForGroups(ctx, scoped, ledger);
       this.localStatuses = statuses;
-      this.saveBaselines(pruneLedger(applyUpdates(ledger, updates), new Set(scoped.map((g) => g.name))));
+      this.saveBaselines(pruneLedger(applyUpdates(ledger, updates), baselineRefs(scoped)));
       // Presented buckets for the ribbon dot: version-ahead in-sync items count as to-capture,
       // matching the panel (0.23.4/0.23.5) — no crypto cost, just a lock read.
       let lock: StoreLock | null = null;
@@ -507,8 +515,8 @@ export default class ConfigSyncPlugin extends Plugin {
         // The same ignore list `remoteLockAhead` gets for this remote: one that never exchanges the
         // self item must not have its direction decided by the self lock entry — the two sides
         // diverge there by design, and no Pull could ever clear the arrow.
-        const ignore = remote.excludeSelf === true ? [SELF_GROUP_NAME] : [];
-        this.remoteChecks.set(remote.name, { check: await checkRemote(localLock, reader, ignore), at: Date.now() });
+        const ignore = remote.excludeSelf === true ? [SELF_ITEM_REF] : [];
+        this.remoteChecks.set(remote.name, { check: await checkRemote(localLock, reader, ignore, this.compiledGroups), at: Date.now() });
       } catch (e) {
         this.remoteChecks.set(remote.name, { check: { state: "unknown", remoteCapturedAt: null }, at: Date.now() });
         console.error(`Config Sync: remote check failed for ${remote.name}`, e);
@@ -602,14 +610,15 @@ export default class ConfigSyncPlugin extends Plugin {
         // synthetic-neutral-status treatment (batch-11 precedent) so rowFate's excluded branch
         // (optedOutHere) can speak instead of a real — and here, meaningless, since this device
         // never captures/applies it — comparison running.
-        const optedOutNames = this.deviceOptedOutGroupNames();
-        const groups = groupsForThisClass.filter((g) => !optedOutNames.has(g.name));
-        const optedOutGroups = groupsForThisClass.filter((g) => optedOutNames.has(g.name));
+        const optedOutRefs = this.deviceOptedOutRefs();
+        const isOptedOut = (g: SyncGroup): boolean => g.ref !== undefined && optedOutRefs.has(g.ref);
+        const groups = groupsForThisClass.filter((g) => !isOptedOut(g));
+        const optedOutGroups = groupsForThisClass.filter(isOptedOut);
         this.lastGroups = [...groups, ...excludedGroups, ...optedOutGroups];
         const ledger = this.loadBaselines();
         const { statuses, updates } = await statusForGroups(ctx, groups, ledger);
         this.localStatuses = statuses;
-        this.saveBaselines(pruneLedger(applyUpdates(ledger, updates), new Set(groups.map((g) => g.name))));
+        this.saveBaselines(pruneLedger(applyUpdates(ledger, updates), baselineRefs(groups)));
         let lock: StoreLock | null = null;
         try {
           lock = await loadLock(ctx);
@@ -641,10 +650,10 @@ export default class ConfigSyncPlugin extends Plugin {
         // Membership truth (delta / coldstart / itemCount) uses the same compile as the store
         // side (selfListGroups): items whose plugin isn't installed here stay members instead of
         // ghosting into delta.added forever (2026-07-28 phone find).
-        const betaIds = new Set(Object.keys(this.settings.bratPluginIndex));
+        const betaIds = new Set(Object.keys(this.settings.bratIndex));
         let localList: SyncGroup[];
         try {
-          localList = selfListGroups(this.registryDefs, this.settings.items, this.settings.customGroups, betaIds);
+          localList = selfListGroups(this.registryDefs, this.settings.items, betaIds);
         } catch {
           localList = this.compiledGroups; // best-effort fallback for any failure; in practice CompileError, which recompile() already surfaced as a Notice
         }
@@ -657,7 +666,7 @@ export default class ConfigSyncPlugin extends Plugin {
         const lockExists = await ctx.io.exists(lockPath);
         if (lockExists) {
           try {
-            capturedAt = parseStoreLock(await ctx.io.read(lockPath)).capturedAt;
+            capturedAt = parseStoreLock(await ctx.io.read(lockPath), this.compiledGroups).capturedAt;
           } catch {
             capturedAt = null; // an unreadable lock must not break the pane
           }
@@ -689,9 +698,9 @@ export default class ConfigSyncPlugin extends Plugin {
       coldStartDismissed: () => this.coldStartDismissed(),
       setColdStartDismissed: (v) => this.setColdStartDismissed(v),
       resolvedPath: (g) => g.path.replace("{configDir}", this.app.vault.configDir),
-      displayName: (g, storedLabel) => this.displayName(g, resolveHostStoredLabel(g, storedLabel, this.lastGroups, this.lastLock)),
-      displayParts: (g, storedLabel) => this.displayParts(g, resolveHostStoredLabel(g, storedLabel, this.lastGroups, this.lastLock)),
-      localLockLabel: (g) => this.lastLock?.groups[g]?.label,
+      displayName: (g, storedLabel) => this.displayName(g, resolveHostStoredLabel(g, storedLabel, this.lastGroups, this.lastLock, (n) => this.groupRef(n))),
+      displayParts: (g, storedLabel) => this.displayParts(g, resolveHostStoredLabel(g, storedLabel, this.lastGroups, this.lastLock, (n) => this.groupRef(n))),
+      localLockLabel: (g) => lockStoredLabel(this.lastLock, this.groupRef(g)),
       companionParentOf: (g) => this.companionParentOf(g),
       diffPair: async (name, rel, dir) => {
         try {
@@ -706,12 +715,12 @@ export default class ConfigSyncPlugin extends Plugin {
           const local = (await io.exists(localPath)) ? await io.read(localPath) : null;
           const store = (await io.exists(storePath)) ? await io.read(storePath) : null;
           const serialize = (v: SwitchList): string => JSON.stringify(v, null, 2) + "\n";
-          const exc = SWITCH_LIST_GROUPS.has(name) ? ((await this.augmentedSwitchExceptions(rootPath))[name] ?? []) : [];
+          const exc = isSwitchListGroup(name) ? ((await this.augmentedSwitchExceptions(rootPath))[name] ?? []) : [];
           const cls: "desktop" | "mobile" = Platform.isMobile ? "mobile" : "desktop";
           if (dir === "capture") {
             let produced = local ?? "";
             if (group.type === "file" && local !== null) {
-              if (SWITCH_LIST_GROUPS.has(name)) {
+              if (isSwitchListGroup(name)) {
                 const l = readLocalSwitchList(name, local);
                 if (l !== null) produced = serialize(captureSwitchList(l, store !== null ? parseSwitchList(store) : null, exc));
               } else if (group.mode === "fields") {
@@ -722,12 +731,12 @@ export default class ConfigSyncPlugin extends Plugin {
           }
           let produced = store ?? "";
           if (group.type === "file" && store !== null) {
-            if (SWITCH_LIST_GROUPS.has(name)) {
+            if (isSwitchListGroup(name)) {
               const st = parseSwitchList(store);
               if (st !== null) {
                 const localList = local !== null ? readLocalSwitchList(name, local) : null;
                 const merged = applySwitchList(st, localList, exc);
-                const fo = SWITCH_LIST_GROUPS.has(name) ? this.memberForceOffIds(name) : [];
+                const fo = this.memberForceOffIds(name);
                 produced = writeLocalSwitchList(name, subtractForceOff(merged, fo), local);
               }
             } else if (group.mode === "fields") {
@@ -741,12 +750,12 @@ export default class ConfigSyncPlugin extends Plugin {
           return null; // e.g. passphrase needed for field encryption — no diff available
         }
       },
-      switchMemberDecisions: (name) => (SWITCH_LIST_GROUPS.has(name) ? this.memberDecisionsFor(name) : []),
+      switchMemberDecisions: (name) => (isSwitchListGroup(name) ? this.memberDecisionsFor(name) : []),
       isDesktopOnlyPlugin: (id) => {
         const manifest = this.pluginRegistry().manifests[id];
         return manifest === undefined ? null : manifest.isDesktopOnly === true;
       },
-      betaIds: () => new Set(Object.keys(this.settings.bratPluginIndex)),
+      betaIds: () => new Set(Object.keys(this.settings.bratIndex)),
       runHistoryEnabled: () => this.settings.runHistory.enabled,
       loadRunHistory: () => this.loadRunHistory(),
       appendRunHistory: (kind, remote, results) => this.appendRunHistory(kind, remote, results),
@@ -759,7 +768,7 @@ export default class ConfigSyncPlugin extends Plugin {
       deleteLeftoverStoreFiles: (rels) => this.deleteLeftoverStoreFiles(rels),
       appendActionHistory: (entry) => this.appendActionHistory(entry),
       switchDivergenceFor: async (name) => {
-        if (!SWITCH_LIST_GROUPS.has(name)) return null;
+        if (!isSwitchListGroup(name)) return null;
         const group = findGroupByName(this.compiledGroups, name);
         if (group === undefined) return null;
         try {
@@ -777,16 +786,17 @@ export default class ConfigSyncPlugin extends Plugin {
         }
       },
       addSwitchExceptions: (name, ids) => this.addSwitchExceptions(name, ids),
-      setMemberEnabledOn: (carrier, elementId, scope) => this.setMemberEnabledOn(carrier, elementId, scope),
-      clearMemberLocal: (carrier, elementId) => this.clearMemberLocal(carrier, elementId),
-      setItemSyncEnabled: (itemId, enabled) => this.setItemSyncEnabled(itemId, enabled),
-      memberRuleFor: (carrier, elementId, locallyOn) => this.memberRuleFor(carrier, elementId, locallyOn),
-      setMemberRule: (carrier, elementId, rule) => this.setMemberRule(carrier, elementId, rule),
-      itemFileScope: (itemId) => this.itemFileScope(itemId),
-      itemFileScopeMenuLegal: (itemId) => this.itemFileScopeMenuLegal(itemId),
-      setItemFileScope: (itemId, scope) => this.setItemFileScope(itemId, scope),
-      setCustomGroupDevices: (name, devices) => this.setCustomGroupDevices(name, devices),
-      openSettingsAt: (itemId) => this.openSettingsAt(itemId),
+      setMemberDevice: (list, elementId, device) => this.setMemberDevice(list, elementId, device),
+      clearMemberLocal: (list, elementId) => this.clearMemberLocal(list, elementId),
+      setItemSyncEnabled: (ref, enabled) => this.setItemSyncEnabled(ref, enabled),
+      runsOnFor: (list, elementId, locallyOn) => this.runsOnFor(list, elementId, locallyOn),
+      setRunsOn: (list, elementId, rule) => this.setRunsOn(list, elementId, rule),
+      itemFileSharing: (ref) => this.itemFileSharing(ref),
+      itemFileSharingMenuLegal: (ref) => this.itemFileSharingMenuLegal(ref),
+      setItemFileSharing: (ref, sharing) => this.setItemFileSharing(ref, sharing),
+      setCustomItemDevice: (name, device) => this.setCustomItemDevice(name, device),
+      openSettingsAt: (ref) => this.openSettingsAt(ref),
+      itemRefForGroup: (name) => this.itemRefForGroup(name),
       schemaStop: () => this.schemaStop,
       settingsWritable: () => this.settingsWritable(),
       adoptConfiguration: async () => {
@@ -797,8 +807,9 @@ export default class ConfigSyncPlugin extends Plugin {
           // config-sync's own registry item (registry.ts builds one for every installed plugin,
           // itself included) compiles to the same legacy group name (SELF_GROUP_NAME) the self-
           // propagation apply below expects — enable it so compileItems actually emits that group.
-          if (this.settings.items[SELF_ITEM_ID]?.enabled !== true) {
-            this.settings.items = { ...this.settings.items, [SELF_ITEM_ID]: { ...itemConfigForWrite(this.settings.items[SELF_ITEM_ID]), enabled: true } };
+          const selfItem = itemAt(this.settings.items, SELF_ITEM_SECTION, SELF_ITEM_ID);
+          if (selfItem?.enabled !== true) {
+            this.settings.items = withItem(this.settings.items, SELF_ITEM_SECTION, SELF_ITEM_ID, { ...(selfItem ?? emptyItem()), enabled: true });
             await this.saveSettings(); // recompiles — compiledGroups now carries SELF_GROUP_NAME
           }
           const ctx = await this.coreContext();
@@ -821,8 +832,8 @@ export default class ConfigSyncPlugin extends Plugin {
           // opted-out group cannot enter a capture payload even if a stale selection sneaks one
           // in, and the tail heal (backfillLockLabels, threaded through here) must not write its
           // lock entry either.
-          const optedOut = this.deviceOptedOutGroupNames();
-          const results = await captureWithActions(ctx, excludeOptedOutItems(items, optedOut), onProgress, optedOut);
+          const optedOut = this.deviceOptedOutRefs();
+          const results = await captureWithActions(ctx, excludeOptedOutItems(items, optedOut, (n) => this.groupRef(n)), onProgress, optedOut);
           // Background: the panel reloads and rescans anyway — blocking here just pins the
           // progress bar at N/N through a second full scan.
           void this.refreshLocalStatus();
@@ -838,7 +849,7 @@ export default class ConfigSyncPlugin extends Plugin {
           const ctx = await this.coreContext();
           // C-#45 (spec §4): same runner-level guard as captureItems — apply never installs/
           // writes an opted-out group even given a stale selection.
-          const results = await applyWithActions(ctx, excludeOptedOutItems(items, this.deviceOptedOutGroupNames()), this.installPlugin(), onProgress);
+          const results = await applyWithActions(ctx, excludeOptedOutItems(items, this.deviceOptedOutRefs(), (n) => this.groupRef(n)), this.installPlugin(), onProgress);
           if (results.some((r) => r.group === SELF_GROUP_NAME && r.status !== "error")) {
             // The apply just rewrote this plugin's own settings file on disk — reload and
             // recompile before refreshing status so the running plugin picks up the new
@@ -871,13 +882,13 @@ export default class ConfigSyncPlugin extends Plugin {
         try {
           const remoteLock = (await reader.listFiles()).includes("store.lock.json") ? await reader.readFile("store.lock.json") : null;
           const localLock = (await ctx.io.exists(`${ctx.rootPath}/store.lock.json`)) ? await ctx.io.read(`${ctx.rootPath}/store.lock.json`) : null;
-          lockDiffers = remoteLockAhead(localLock, remoteLock, remote.excludeSelf === true ? [SELF_GROUP_NAME] : []);
+          lockDiffers = remoteLockAhead(localLock, remoteLock, remote.excludeSelf === true ? [SELF_ITEM_REF] : [], this.compiledGroups);
           // Parsed separately from remoteLockAhead's own (tolerant) parse above — a malformed
           // remote lock must still leave lockDiffers at whatever remoteLockAhead just decided,
           // not get reset by a JSON.parse throw here.
           if (remoteLock !== null) {
             try {
-              remoteLabels = remoteLockLabels(JSON.parse(remoteLock));
+              remoteLabels = remoteLockLabels(JSON.parse(remoteLock), lockRefFor(this.compiledGroups));
             } catch {
               remoteLabels = {};
             }
@@ -1045,8 +1056,25 @@ export default class ConfigSyncPlugin extends Plugin {
   // status-path refusals: this runs on a timer with no user gesture behind it. The device's own
   // scratch preferences that read nothing from the document — the passphrase above, the cold-start
   // dismissal below, clearing the run history on request — are deliberately NOT refused.
+  //
+  // Two more preconditions, both from final-review N1, and both here rather than at the call sites
+  // because this is the ONE writer every baseline write goes through — the status refresh, the Sync
+  // Center's compute, the self pane and the §4 re-key alike. Gating the re-key alone left the status
+  // path free to do the same damage by a different road: with `compiledGroups` empty after a failed
+  // compile, its prune keeps nothing and persists an EMPTY ledger, and every item then reads as
+  // never-synced, whose default direction is APPLY — exactly what the re-key's gate was filed for.
+  //
+  // 1. The compile must have SUCCEEDED. A baseline is keyed by, and pruned against, the compiled
+  //    list; a list this build could not produce is not evidence about anything. (The pruning
+  //    itself predates this branch — what was new is that the empty list became reachable once the
+  //    re-key stopped running first.)
+  // 2. The ledger must be the version this build writes. A writer that does not understand the file
+  //    it is rewriting declines — the same rule as the store-lock gate and the label heal. That is
+  //    the half that makes the property hold no matter which writer runs first next time: a v1
+  //    ledger is left exactly as found, retryable, instead of being overwritten in a shape whose own
+  //    reader (`parseLedger`, which reads `groups` for a v1 document) would answer empty.
   private saveBaselines(ledger: Ledger): void {
-    if (this.schemaStop !== null) return;
+    if (this.schemaStop !== null || !this.compileSucceeded || ledger.version !== LEDGER_VERSION) return;
     this.app.saveLocalStorage("config-sync-baselines", JSON.stringify(ledger));
   }
 
@@ -1110,23 +1138,17 @@ export default class ConfigSyncPlugin extends Plugin {
     return names;
   }
 
-  private saveDeviceOptOutGroups(names: string[]): void {
-    // An empty list clears the key rather than storing "[]" — the same prune discipline the
-    // settings map followed (C-#26), so opting out and back in leaves the store as it was found.
-    this.app.saveLocalStorage("config-sync-device-optouts", names.length > 0 ? JSON.stringify(names) : null);
-    this.deviceOptOutsCache = [...names];
-  }
-
-  // The load-time half of the §2 move: this device's entries in the CARRIED map become entries in
-  // the localStorage list that now decides every read. A union, not a replacement, so a choice
-  // made here is never thrown away by adopting a document that predates it — and the field is
-  // left on the document (the §2 ruling), so this runs on every load rather than once. Writes
-  // nothing when there is nothing to add, which is the steady state once the fleet has updated:
-  // this device's own writes keep both sides in step, so the union has nothing left to do.
+  // The localStorage half of §5's `deviceOptOuts → dropped` row, run once by the v2 → v3 migration.
+  // v2 carried a fleet-shared map (group name -> the device ids that opted it out) purely so a
+  // device still on a build that read it would not lose its own entry; 2.21.0 moved the authority
+  // to localStorage and absorbed the map on every load. A device that jumps straight from 2.20.0
+  // to v3 has never run that absorb, so dropping the field without it would silently resume
+  // syncing items that device deliberately opted out of. A union, never a replacement: a choice
+  // made on this device is never thrown away by a map that predates it, which also makes running
+  // it twice a no-op. Writes nothing when there is nothing to add.
   private absorbCarriedDeviceOptOuts(carried: unknown): void {
-    // Nothing to absorb from an absent field, a non-map value, or an empty map — checked before
-    // deviceId(), which GENERATES and persists an id when the vault has none: a document with no
-    // opt-outs in it must not be what mints this device's identity.
+    // Checked before deviceId(), which GENERATES and persists an id when the vault has none: a
+    // document with no opt-outs in it must not be what mints this device's identity.
     if (typeof carried !== "object" || carried === null || Object.keys(carried).length === 0) return;
     const fromDocument = deviceOptOutsFor(carried, this.deviceId());
     if (fromDocument.length === 0) return;
@@ -1134,6 +1156,13 @@ export default class ConfigSyncPlugin extends Plugin {
     const before = names.size;
     for (const name of fromDocument) names.add(name);
     if (names.size !== before) this.saveDeviceOptOutGroups([...names]);
+  }
+
+  private saveDeviceOptOutGroups(names: string[]): void {
+    // An empty list clears the key rather than storing "[]" — the same prune discipline the
+    // settings map followed (C-#26), so opting out and back in leaves the store as it was found.
+    this.app.saveLocalStorage("config-sync-device-optouts", names.length > 0 ? JSON.stringify(names) : null);
+    this.deviceOptOutsCache = [...names];
   }
 
   private pluginHost(): PluginHost {
@@ -1201,8 +1230,8 @@ export default class ConfigSyncPlugin extends Plugin {
         // Installs run strictly sequentially, so a single field safely carries the active
         // item's phase callback into the retry closures (catalog download / BRAT).
         this.installPhase = onPhase;
-        if (this.settings.bratPluginIndex[id] === undefined) await this.refreshBratIndex();
-        const repo = this.settings.bratPluginIndex[id];
+        if (this.settings.bratIndex[id] === undefined) await this.refreshBratIndex();
+        const repo = this.settings.bratIndex[id];
         if (repo !== undefined) {
           // BRAT-managed plugins track their own beta channel — version-pinning applies to the
           // community-catalog path only (spec C).
@@ -1336,7 +1365,7 @@ export default class ConfigSyncPlugin extends Plugin {
     // method would save it, wiping a fleet-shared structure from the device that knows least about
     // it. The Beta tab's map-note reports what it can see either way (bratScanStatus, local-only).
     if (repos.length === 0) return { resolved: 0, total: 0 };
-    const next = await resolveBratIndex(this.settings.bratPluginIndex, repos, async (repo) => {
+    const next = await resolveBratIndex(this.settings.bratIndex, repos, async (repo) => {
       try {
         const res = await requestUrl({ url: `https://raw.githubusercontent.com/${repo}/HEAD/manifest.json`, throw: true });
         return res.text;
@@ -1348,20 +1377,38 @@ export default class ConfigSyncPlugin extends Plugin {
     // pruned the index against this device's repo list, and publishing that reading of a document
     // we cannot read is exactly what the stop state forbids. Silent (the Beta tab re-scans on its
     // own when it opens, with no user gesture behind it — a notice there would fire unprompted).
-    if (this.schemaStop === null && JSON.stringify(next) !== JSON.stringify(this.settings.bratPluginIndex)) {
-      this.settings.bratPluginIndex = next;
+    if (this.schemaStop === null && JSON.stringify(next) !== JSON.stringify(this.settings.bratIndex)) {
+      this.settings.bratIndex = next;
       await this.saveSettings();
     }
     return { resolved: Object.keys(next).length, total: repos.length };
   }
 
+  // A compiled group's item ref — THE way this shell asks the key space a question (spec §3/§4).
+  // A name nothing compiles resolves through the same legacy rules a v1/v2 lock read uses, so a
+  // display lookup and a lock read can never disagree about which entry they mean.
+  //
+  // Memoized against the compiled list's identity (task-3 review I4): `lockRefFor` BUILDS an index,
+  // and this is asked per row per render by isDeviceOptedOut and displayName. The same regression
+  // the Sync Center's own resolver was caught with — fixed there and left here, which is the third
+  // time on this branch that one half of a pair moved and the other did not.
+  private groupRefSource: SyncGroup[] | null = null;
+  private groupRefFor: (group: string) => string = lockRefFor([]);
+  private groupRef(group: string): string {
+    if (this.groupRefSource !== this.compiledGroups) {
+      this.groupRefSource = this.compiledGroups;
+      this.groupRefFor = lockRefFor(this.compiledGroups);
+    }
+    return this.groupRefFor(group);
+  }
+
   displayName(group: string, storedLabel?: string): string {
     // Routes every caller (direct or via the Sync Center host's resolveHostStoredLabel
-    // pre-resolve) through the SAME chain — including its carrier-memberLabels fallback
+    // pre-resolve) through the SAME chain — including its carrier element-name fallback
     // (2026-08-09-c-livetest-batch15) — so a bare `this.displayName(name)` call (e.g.
     // ConflictModal's name resolver) never falls back to the id where the wrapped path would
     // have found a name. Idempotent when storedLabel already arrived resolved.
-    return displayLabelForGroup(group, this.pluginHost(), resolveHostStoredLabel(group, storedLabel, this.lastGroups, this.lastLock));
+    return displayLabelForGroup(group, this.pluginHost(), resolveHostStoredLabel(group, storedLabel, this.lastGroups, this.lastLock, (n) => this.groupRef(n)));
   }
 
   displayParts(group: string, storedLabel?: string): GroupDisplayParts {
@@ -1384,11 +1431,16 @@ export default class ConfigSyncPlugin extends Plugin {
   // first); a name collision between the two sources is impossible at compile time
   // (companionNameConflict guards it), so the first match is always the only match.
   companionParentOf(group: string): string | null {
-    const owner = groupOwners(this.registryDefs, this.settings.customGroups)[group]?.[0];
-    if (owner !== undefined) return owner.custom === true || owner.companionPath === undefined ? null : legacyGroupName(owner.itemId);
-    for (const [itemId, cfg] of Object.entries(this.settings.items)) {
-      const hit = (cfg.companions ?? []).find((c) => c.enabled && basename(c.path) === group);
-      if (hit !== undefined) return legacyGroupName(itemId);
+    const owner = groupOwners(this.registryDefs, this.settings.items)[group]?.[0];
+    if (owner !== undefined) {
+      if (owner.section === "custom" || owner.companionPath === undefined) return null;
+      // defForRef, never `d.section === owner.section` — see SettingTab's consumeSettingsAnchor:
+      // an owner carries the STORED section and a beta plugin's def presents the other one.
+      return defForRef(this.registryDefs, itemRef(owner.section, owner.id))?.groupName ?? null;
+    }
+    for (const def of this.registryDefs) {
+      const item = itemAt(this.settings.items, def.section, def.id);
+      if ((item?.companions ?? []).some((c) => c.enabled && basename(c.path) === group)) return def.groupName;
     }
     return null;
   }
@@ -1419,191 +1471,222 @@ export default class ConfigSyncPlugin extends Plugin {
     };
   }
 
-  // Carrier name -> registry carrier file (spec §3/§4, D4/D5): the two real switch-list groups
-  // map onto their enablement carrier; anything else (e.g. enabled-css-snippets, a v3-era switch
-  // list superseded by a plain perItem key on the compiled "appearance" group — see registry.ts)
-  // has no items-backed carrier under schema v2.
-  private carrierFor(group: string): "core-plugins.json" | "community-plugins.json" | null {
-    if (group === "core-plugins") return "core-plugins.json";
-    if (group === "community-plugins") return "community-plugins.json";
-    return null;
+  // A group name -> the enablement list it IS, or null. The registry declares which lists exist
+  // (ENABLEMENT_LISTS); a group that is not one of them (e.g. enabled-css-snippets, governed by a
+  // plain perElement key on the compiled "appearance" group — see registry.ts) has no
+  // items-backed enablement at all.
+  private listFor(group: string): EnablementList | null {
+    return isEnablementList(group) ? group : null;
   }
 
-  private enablementScopesFor(group: string): Record<string, RuleScope> {
-    const carrier = this.carrierFor(group);
-    return carrier === null ? {} : enablementScopes(this.registryDefs, this.settings, carrier);
+  private enablementSharingFor(group: string): Record<string, Sharing> {
+    const list = this.listFor(group);
+    return list === null ? {} : enablementSharing(this.registryDefs, this.settings, list);
   }
 
   private structuralLocalElementsFor(group: string): Set<string> {
-    const carrier = this.carrierFor(group);
-    return carrier === null ? new Set<string>() : structuralLocalElements(this.registryDefs, this.settings, carrier);
+    const list = this.listFor(group);
+    return list === null ? new Set<string>() : structuralLocalElements(this.registryDefs, this.settings, list);
   }
 
-  private memberScopesFor(group: string): Record<string, "desktop" | "mobile"> {
+  // The per-class slice of the list's sharing map — the only part the capture/apply mask cares
+  // about (everywhere masks nothing; this-device is handled by memberLocalIdsFor).
+  private memberClassesFor(group: string): Record<string, "desktop" | "mobile"> {
     const out: Record<string, "desktop" | "mobile"> = {};
-    for (const [id, scope] of Object.entries(this.enablementScopesFor(group))) {
-      if (scope === "desktop" || scope === "mobile") out[id] = scope;
+    for (const [id, sharing] of Object.entries(this.enablementSharingFor(group))) {
+      const cls = sharingClass(sharing);
+      if (cls !== null) out[id] = cls;
     }
     return out;
   }
 
-  // Base decisions from enablementScopes, OVERLAID with settings.localMembers for this group's
-  // carrier as explicit "this device" (task-2 retarget: localMembers wins over any base scope
-  // for that id — an explicit "this device" choice always beats a device-class rule the writer
-  // path left behind). Every this-device reader (switchMemberDecisions' · N device-scoped count,
-  // the ⌂ explanation rows, and memberLocalIdsFor below) goes through this so they can't drift
-  // apart the way memberDecisionsFor alone did pre-fix (it only saw the structural
-  // disabled-card "local", never localMembers).
+  // The stored section an enablement list's elements are items of. StorageSection, not Section:
+  // a beta plugin's element lives in `community` like every other community plugin (spec §7b).
+  private sectionForList(list: EnablementList): StorageSection {
+    return list === "core-plugins" ? "core" : "community";
+  }
+
+  // This device's pinned ids for one enablement list, de-refed to bare element ids.
+  private thisDeviceIdsIn(section: StorageSection): string[] {
+    const out: string[] = [];
+    for (const ref of this.settings.thisDeviceItems) {
+      const parsed = parseItemRef(ref);
+      if (parsed !== null && parsed.section === section) out.push(parsed.id);
+    }
+    return out;
+  }
+
+  // Base decisions from enablementSharing, OVERLAID with settings.thisDeviceItems for this
+  // group's list as an explicit this-device pin (a pin wins over any base sharing for that id —
+  // an explicit "this device decides" choice always beats a device-class rule the writer path
+  // left behind). Every this-device reader (switchMemberDecisions' · N device-scoped count, the ⌂
+  // explanation rows, and memberLocalIdsFor below) goes through this so they can't drift apart
+  // the way memberDecisionsFor alone did pre-fix (it only saw the structural disabled-card
+  // this-device, never the pins).
   private memberDecisionsFor(group: string): MemberDecision[] {
-    const base = memberDecisionsFromScopes(this.enablementScopesFor(group), this.structuralLocalElementsFor(group));
-    const carrier = this.carrierFor(group);
-    const prefix = carrier === "core-plugins.json" ? "core:" : carrier === "community-plugins.json" ? "community:" : null;
-    if (prefix === null) return base;
-    const fromLocalMembers = this.settings.localMembers.filter((id) => id.startsWith(prefix)).map((id) => id.slice(prefix.length));
-    if (fromLocalMembers.length === 0) return base;
+    const base = memberDecisionsFromSharing(this.enablementSharingFor(group), this.structuralLocalElementsFor(group));
+    const list = this.listFor(group);
+    if (list === null) return base;
+    const pinned = this.thisDeviceIdsIn(this.sectionForList(list));
+    if (pinned.length === 0) return base;
     const decisions = new Map(base.map((d) => [d.id, d] as const));
-    // An explicit localMembers pin is itself the "explicit source" — never structural, regardless
-    // of the card's enabled state it overrides.
-    for (const id of fromLocalMembers) decisions.set(id, { id, scope: "local", structural: false });
+    // An explicit pin is itself the "explicit source" — never structural, regardless of the
+    // card's enabled state it overrides.
+    for (const id of pinned) decisions.set(id, { id, sharing: THIS_DEVICE, structural: false });
     return [...decisions.values()].sort((a, b) => a.id.localeCompare(b.id));
   }
 
   // This-device ids for a switch-list group: memberDecisionsFor already carries the
-  // settings.localMembers union (task-2 retarget), so this is just the "local" projection.
+  // settings.thisDeviceItems union, so this is just the this-device projection.
   private memberLocalIdsFor(group: string): string[] {
     return this.memberDecisionsFor(group)
-      .filter((d) => d.scope === "local")
+      .filter((d) => d.sharing.kind === "this-device")
       .map((d) => d.id);
   }
 
-  // Shared add/remove for the explicit "this device" set (task-2 retarget) — every write path
-  // that sets or clears "this device decides for itself" goes through this so the settings-card
-  // chip (setMemberLocal, called by SettingTab's renderEnabledOnZone) and the where-it-runs menu
-  // (addSwitchExceptions/setMemberEnabledOn/clearMemberLocal) can never drift apart. In-memory
-  // only — callers persist with their own saveSettings() call.
-  private setLocalMember(itemId: string, on: boolean): void {
-    const set = new Set(this.settings.localMembers);
-    if (on) set.add(itemId);
-    else set.delete(itemId);
-    this.settings.localMembers = [...set];
+  // Shared add/remove for the explicit this-device set — every write path that sets or clears
+  // "this device decides for itself" goes through this so the settings-card chip (setMemberLocal,
+  // called by SettingTab's renderEnabledOnZone) and the where-it-runs menu
+  // (addSwitchExceptions/setMemberDevice/clearMemberLocal) can never drift apart. In-memory only —
+  // callers persist with their own saveSettings() call.
+  private setLocalMember(ref: ItemRef, on: boolean): void {
+    const set = new Set(this.settings.thisDeviceItems);
+    if (on) set.add(ref);
+    else set.delete(ref);
+    this.settings.thisDeviceItems = [...set];
   }
 
-  // "this device" and a device-class scope are mutually exclusive. The where-it-runs menu's pin
-  // ("this device") and "Everywhere" reset both go through localMembers only, so they must also
-  // drop any stale items[id].enabledOn — otherwise "Desktop only → This device → Everywhere" would
-  // silently resolve back to desktop. (The settings-card chip and setMemberEnabledOn manage
-  // enabledOn directly, so they don't call this.)
-  private clearMemberEnabledOn(itemId: string): void {
-    const cfg = this.settings.items[itemId];
-    if (cfg?.enabledOn !== undefined) {
-      this.settings.items = { ...this.settings.items, [itemId]: { ...itemConfigForWrite(cfg), enabledOn: undefined } };
-    }
+  // A this-device pin and a device-class rule are mutually exclusive. The where-it-runs menu's pin
+  // and its "Everywhere" reset both go through thisDeviceItems, so they must also drop any stale
+  // runsOn.device — otherwise "Desktop only → This device → Everywhere" would silently resolve
+  // back to desktop. Only the DEVICE axis is cleared: a force rule is the other axis and answers a
+  // different question, exactly as the two v2 fields this merged did. A runsOn left saying nothing
+  // at all is dropped entirely, so the round trip leaves data.json as it found it (C-#26).
+  private clearMemberDevice(section: StorageSection, id: string): void {
+    const item = itemAt(this.settings.items, section, id);
+    const runsOn = item?.runsOn;
+    if (item === undefined || runsOn === undefined || runsOn.device === "all") return;
+    const next: Item = { ...item };
+    if (runsOn.force === undefined) delete next.runsOn;
+    else next.runsOn = { device: "all", force: runsOn.force };
+    this.settings.items = withItem(this.settings.items, section, id, next);
   }
 
   // SettingsHost-facing wrapper (SettingTab's "Enabled on" chip): single item, persists itself.
-  async setMemberLocal(itemId: string, on: boolean): Promise<void> {
+  // Takes the ref the caller already holds (registry.ts's defRef) rather than a section+id pair,
+  // so a card's PRESENTED section can never become the pin's identity.
+  async setMemberLocal(ref: ItemRef, on: boolean): Promise<void> {
     if (this.schemaStopped()) return; // §4.2b: refuse BEFORE mutating — see settingsWritable()
-    this.setLocalMember(itemId, on);
+    this.setLocalMember(ref, on);
     await this.saveSettings();
   }
 
   // Sync Center header chip (unified grammar task-4): same write as the Settings tab's per-card
-  // sync toggle (SettingTab.renderItemCard) — ItemConfig.enabled, keyed by item id.
-  async setItemSyncEnabled(itemId: string, enabled: boolean): Promise<void> {
+  // sync toggle (SettingTab.renderItemCard) — Item.enabled, keyed by the item's ref.
+  async setItemSyncEnabled(ref: ItemRef, enabled: boolean): Promise<void> {
     if (this.schemaStopped()) return; // §4.2b
-    const cfg = itemConfigForWrite(this.settings.items[itemId]);
-    this.settings.items = { ...this.settings.items, [itemId]: { ...cfg, enabled } };
+    const parsed = parseItemRef(ref);
+    if (parsed === null) return;
+    const item = itemAt(this.settings.items, parsed.section, parsed.id) ?? emptyItem();
+    this.settings.items = withItem(this.settings.items, parsed.section, parsed.id, { ...item, enabled });
     await this.saveSettings();
   }
 
   // Runs-on menu read (unified grammar task-5, spec §6): a genuinely stored rule always wins;
-  // absent one, derive losslessly from the legacy device-class scope (memberDecisionsFor, which
-  // already overlays settings.localMembers per the task-2 retarget) using the SAME
-  // normalizeMemberRule("local", …) mapping memberRuleForces applies at apply/capture time, so
-  // the menu's displayed value always agrees with what a run would actually do.
-  private memberRuleFor(carrier: EnablementCarrier, elementId: string, locallyOn: boolean): MemberRule {
-    const prefix = carrier === "core-plugins" ? "core:" : "community:";
-    // asMemberRule, not a bare read: a value this build doesn't know (a newer build's rule) is
-    // ignored here rather than shown/applied, and stays on disk untouched (§3.2).
-    const stored = asMemberRule(this.settings.memberRules[`${prefix}${elementId}`]);
+  // absent one, derive losslessly from this device's pin / the disabled-card structural
+  // this-device (memberDecisionsFor) using the SAME forcedRunsOn mapping runsOnForces applies at
+  // apply/capture time, so the menu's displayed value always agrees with what a run would do.
+  private runsOnFor(list: EnablementList, elementId: string, locallyOn: boolean): RunsOn {
+    const stored = this.storedRunsOn(this.sectionForList(list), elementId);
     if (stored !== undefined) return stored;
-    const scope = this.memberDecisionsFor(carrier).find((d) => d.id === elementId)?.scope;
-    if (scope === undefined) return "all";
-    return scope === "local" ? normalizeMemberRule("local", locallyOn) : scope;
+    const sharing = this.memberDecisionsFor(list).find((d) => d.id === elementId)?.sharing;
+    if (sharing === undefined) return { device: "all" };
+    if (sharing.kind === "this-device") return forcedRunsOn(locallyOn);
+    return { device: sharing.class };
   }
 
-  // Runs-on menu write: stores the unified rule directly — task 2 already wired
-  // settings.memberRules into switchForceOn and the never-here half of switchForceOff, so no
-  // producer rework is needed here. Rides the self item's whole-document field sync unchanged
-  // (it carries no locked preset, unlike rootPath/remotes/localMembers — see selfPresetRules).
-  async setMemberRule(carrier: EnablementCarrier, elementId: string, rule: MemberRule): Promise<void> {
+  // asRunsOn, not a bare read: a rule shape this build doesn't know (a newer build's) is ignored
+  // here rather than shown/applied, and stays on disk untouched (2.21.0 invariant II.2).
+  private storedRunsOn(section: StorageSection, id: string): RunsOn | undefined {
+    return asRunsOn(itemAt(this.settings.items, section, id)?.runsOn);
+  }
+
+  // Runs-on menu write: stores the rule on the item it governs. Rides the self item's
+  // whole-document field sync unchanged (it carries no locked preset, unlike
+  // rootPath/remotes/thisDeviceItems — see selfPresetRules).
+  async setRunsOn(list: EnablementList, elementId: string, rule: RunsOn): Promise<void> {
     if (this.schemaStopped()) return; // §4.2b
-    const prefix = carrier === "core-plugins" ? "core:" : "community:";
-    this.settings.memberRules = { ...this.settings.memberRules, [`${prefix}${elementId}`]: rule };
+    const section = this.sectionForList(list);
+    const item = itemAt(this.settings.items, section, elementId) ?? emptyItem();
+    this.settings.items = withItem(this.settings.items, section, elementId, { ...item, runsOn: rule });
     await this.saveSettings();
   }
 
   // Settings-sync menu read/write (unified grammar task-5): the same field the Settings tab's
-  // file-row scope control edits (ItemConfig.settingsFile.fileRule.scope). `mode` is re-derived
+  // file-row sharing control edits (Item.settingsFile.fileRule.sharing). `mode` is re-derived
   // on every write exactly as SettingTab's own withDerivedMode does, so a fileRule-only write
-  // here never desyncs it from the rules/perItem it's actually driven by.
-  private itemFileScope(itemId: string): Exclude<RuleScope, "local"> {
-    return this.settings.items[itemId]?.settingsFile?.fileRule?.scope ?? "all";
+  // here never desyncs it from the rules/perElement it's actually driven by.
+  private itemFileSharing(ref: ItemRef): FileSharing {
+    const parsed = parseItemRef(ref);
+    if (parsed === null) return EVERYWHERE;
+    return itemAt(this.settings.items, parsed.section, parsed.id)?.settingsFile?.fileRule?.sharing ?? EVERYWHERE;
   }
 
-  // C-#25: the SAME legality test setItemFileScope's guard throws on below — the Sync Center row
+
+  // C-#25: the SAME legality test setItemFileSharing's guard throws on below — the Sync Center row
   // calls this to decide whether to offer the menu at all, so "offered" and "accepted" can never
   // disagree.
-  private itemFileScopeMenuLegal(itemId: string): boolean {
-    const sf = this.settings.items[itemId]?.settingsFile ?? defaultSettingsFile();
+  private itemFileSharingMenuLegal(ref: ItemRef): boolean {
+    const parsed = parseItemRef(ref);
+    if (parsed === null) return false;
+    const sf = itemAt(this.settings.items, parsed.section, parsed.id)?.settingsFile ?? defaultSettingsFile();
     return fileRuleLegalForMode(deriveMode(sf));
   }
 
-  async setItemFileScope(itemId: string, scope: Exclude<RuleScope, "local">): Promise<void> {
+  async setItemFileSharing(ref: ItemRef, sharing: FileSharing): Promise<void> {
     if (this.schemaStopped()) return; // §4.2b
-    const cfg = itemConfigForWrite(this.settings.items[itemId]);
-    const sf = cfg.settingsFile ?? defaultSettingsFile();
+    const parsed = parseItemRef(ref);
+    if (parsed === null) return;
+    const item = itemAt(this.settings.items, parsed.section, parsed.id) ?? emptyItem();
+    const sf = item.settingsFile ?? defaultSettingsFile();
     const mode = deriveMode(sf);
     // C-#25 root cause: writing a fileRule on a fields-mode item used to resolve mode:"fields"
     // below and silently strip the very fileRule this call just wrote — the item's card now never
-    // offers this menu (see itemFileScopeMenuLegal above), so reaching here with an illegal mode
+    // offers this menu (see itemFileSharingMenuLegal above), so reaching here with an illegal mode
     // means a caller ignored that and must be told loudly, not have its write vanish.
     if (!fileRuleLegalForMode(mode)) {
-      throw new Error(`setItemFileScope: "${itemId}" is in "${mode}" mode — a whole-file scope write is illegal there (manifest.ts's fileRule validator only allows plain-mode file groups)`);
+      throw new Error(`setItemFileSharing: "${ref}" is in "${mode}" mode — a whole-file sharing write is illegal there (manifest.ts's fileRule validator only allows plain-mode file groups)`);
     }
-    const nextSf: ItemSettingsFile = { ...sf, mode, fileRule: { ...(sf.fileRule ?? { scope: "all", encrypted: false }), scope } };
-    this.settings.items = { ...this.settings.items, [itemId]: { ...cfg, settingsFile: pruneSettingsFile(nextSf) } };
+    const nextSf: ItemSettingsFile = { ...sf, mode, fileRule: { ...(sf.fileRule ?? { sharing: EVERYWHERE, encrypted: false }), sharing } };
+    this.settings.items = withItem(this.settings.items, parsed.section, parsed.id, { ...item, settingsFile: pruneSettingsFile(nextSf) });
     await this.saveSettings();
   }
 
-  // Settings-sync menu for a custom (folder) group (unified grammar task-5 fix round 1): the
-  // SAME field and persistence path the Advanced tab's "Devices" dropdown writes
-  // (SettingTab.commitGroups → persistCustomGroups → settings.customGroups) — folders carry
-  // their device scope directly on the SyncGroup literal (`devices: DeviceClass`), not through
-  // an ItemConfig, so this is a separate write target from setItemFileScope above, not a variant
-  // of it. A no-op if the name isn't (or is no longer) a custom group.
-  async setCustomGroupDevices(name: string, devices: DeviceClass): Promise<void> {
+  // Settings-sync menu for a custom (folder) item (unified grammar task-5 fix round 1): the SAME
+  // field and persistence path the Advanced tab's "Devices" dropdown writes
+  // (SettingTab.commitGroups → persistCustomItems) — a custom item's device class lives on its
+  // own runsOn, not in a settings file, so this is a separate write target from
+  // setItemFileSharing above. A no-op if the name isn't (or is no longer) a custom item.
+  async setCustomItemDevice(name: string, device: DeviceClass): Promise<void> {
     if (this.schemaStopped()) return; // §4.2b
-    const idx = this.settings.customGroups.findIndex((g) => g.name === name);
-    if (idx === -1) return;
-    const next = [...this.settings.customGroups];
-    const current = next[idx];
-    if (current === undefined) return;
-    next[idx] = { ...current, devices };
-    this.settings.customGroups = next;
+    const item = itemAt(this.settings.items, "custom", name);
+    if (item === undefined) return;
+    this.settings.items = withItem(this.settings.items, "custom", name, { ...item, runsOn: { ...(item.runsOn ?? { device }), device } });
     await this.saveSettings();
   }
 
   // The Stop-syncing menu's "On this device"/"Sync on this device again" read (C-#45, spec §1/§3):
   // true iff this group is in THIS device's own opt-out list (localStorage — never data.json).
   private isDeviceOptedOut(groupName: string): boolean {
-    return this.deviceOptOutGroups().includes(groupName);
+    return this.deviceOptOutGroups().includes(this.groupRef(groupName));
   }
 
-  // Every group name THIS device has opted out of — the guard set for the run/heal seams
+  // Every item ref THIS device has opted out of — the guard set for the run/heal seams
   // (captureItems/applyItems payload filtering, backfillLockLabels' tail heal, computeStatuses'
-  // synthetic-status treatment; C-#45 spec §4).
-  private deviceOptedOutGroupNames(): Set<string> {
+  // synthetic-status treatment; C-#45 spec §4). Refs since v3 (spec §4): the opt-out list moved with
+  // the lock and the baselines, because they are one key space and a half-moved one resolves
+  // nothing.
+  private deviceOptedOutRefs(): Set<string> {
     return new Set(this.deviceOptOutGroups());
   }
 
@@ -1613,36 +1696,27 @@ export default class ConfigSyncPlugin extends Plugin {
   // the document's carried map is then brought in step for THIS device's id alone, so a device
   // still on the old build (which reads that map and nothing else) is never told something false
   // about us. Other devices' entries are never touched; see withDeviceOptOut.
+  // One store, one gesture. The fleet-shared `deviceOptOuts` map this used to keep in step is
+  // gone from the document (spec §5, C-#54 phase 2): it only ever existed so a device still on a
+  // build that read that map would not lose its own entry when it adopted ours, and no such build
+  // can read a v3 document at all — the version gate refuses it and says so. localStorage is the
+  // authority, and now the only one.
   async setDeviceOptOut(groupName: string, on: boolean): Promise<void> {
-    // §4.2b (review I1): the localStorage half is DERIVED from the document we cannot read (the
-    // group name comes from `compiledGroups`) and decides what every future run skips, and the
-    // document half is a settings write like any other. The same menu's "Everywhere…" is refused,
-    // so these must agree — and refusing here, before either store is touched, is what keeps the
-    // two halves from diverging when `saveSettings` would refuse the second one anyway.
+    // §4.2b (review I1): the opt-out list is DERIVED from the document we cannot read (the group
+    // name comes from `compiledGroups`) and decides what every future run skips.
     if (this.schemaStopped()) return;
-    const names = new Set(this.deviceOptOutGroups());
-    if (on) names.add(groupName);
-    else names.delete(groupName);
-    // Both new values computed BEFORE either store is touched (round-5 review M1): withDeviceOptOut
-    // is total, but ordering it this way is what makes "the two stores never disagree because
-    // something threw between them" a property of the code rather than of one function's current
-    // implementation.
-    const carried = withDeviceOptOut(this.settings.deviceOptOuts, this.deviceId(), groupName, on);
-    this.saveDeviceOptOutGroups([...names]);
-    // Never INVENTS the legacy field: a document that has none stays clean unless this device
-    // actually has an opt-out to publish. Once the field exists it stays, even emptied — dropping
-    // it is the one-phase removal the ruling forbids.
-    if (this.settings.deviceOptOuts !== undefined || Object.keys(carried).length > 0) {
-      this.settings.deviceOptOuts = carried;
-    }
-    await this.saveSettings();
+    const ref = this.groupRef(groupName);
+    const refs = new Set(this.deviceOptOutGroups());
+    if (on) refs.add(ref);
+    else refs.delete(ref);
+    this.saveDeviceOptOutGroups([...refs]);
   }
 
   // The More bridge's target item — set here, consumed once by SettingTab.display() via
   // consumePendingSettingsAnchor() below, which expands that item's card and scrolls to it.
-  private pendingSettingsDeepLink: string | null = null;
-  private openSettingsAt(itemId: string): void {
-    this.pendingSettingsDeepLink = itemId;
+  private pendingSettingsDeepLink: ItemRef | null = null;
+  private openSettingsAt(ref: ItemRef): void {
+    this.pendingSettingsDeepLink = ref;
     const app = this.app as unknown as AppWithSetting;
     // ROOT CAUSE (C-#11, live-traced via console instrumentation on a real build): open() itself
     // re-opens whatever tab was last active — when that's already this plugin's tab (the common
@@ -1663,57 +1737,66 @@ export default class ConfigSyncPlugin extends Plugin {
 
   // SettingsHost-facing read-and-clear: the settings tab calls this once per display() so a
   // pending deep link is consumed exactly once per Settings open.
-  consumePendingSettingsAnchor(): string | null {
-    const id = this.pendingSettingsDeepLink;
+  consumePendingSettingsAnchor(): ItemRef | null {
+    const ref = this.pendingSettingsDeepLink;
     this.pendingSettingsDeepLink = null;
-    return id;
+    return ref;
+  }
+
+  // The item a compiled group belongs to, as the one-string ref localStorage and the Sync Center
+  // host both speak — a registry LOOKUP (registry.ts's itemForGroupName), never a parse of the
+  // group name. null for a companion group, an enablement carrier, or a name no def claims; a
+  // custom item's group name IS its id.
+  itemRefForGroup(name: string): ItemRef | null {
+    const def = itemForGroupName(this.registryDefs, name);
+    if (def !== null) return defRef(def);
+    return itemAt(this.settings.items, "custom", name) !== undefined ? itemRef("custom", name) : null;
   }
 
   // The where-it-runs menu's "This device decides for itself" entry (spec 2026-07-28 §4) — and
   // KeepOnDeviceModal's multi-id "keep extra on this device" batch. Schema v2 (task-2 retarget):
-  // this no longer writes ItemConfig.enabledOn = "local"; it adds every named id to
-  // settings.localMembers instead (never enablementScopes' business — that field is now ignored).
+  // this adds every named id's ref to settings.thisDeviceItems and clears the item's device
+  // rule; a this-device pin is never a value inside runsOn.
   async addSwitchExceptions(name: string, ids: string[]): Promise<void> {
     if (this.schemaStopped()) return; // §4.2b
-    const carrier = this.carrierFor(name);
-    if (carrier === null) return; // e.g. enabled-css-snippets: governed by its own perItem map, not this mechanism
-    const prefix = carrier === "core-plugins.json" ? "core:" : "community:";
+    const list = this.listFor(name);
+    if (list === null) return; // e.g. enabled-css-snippets: governed by its own perElement map, not this mechanism
+    const section = this.sectionForList(list);
     for (const id of ids) {
-      this.setLocalMember(`${prefix}${id}`, true);
-      this.clearMemberEnabledOn(`${prefix}${id}`);
+      this.setLocalMember(itemRef(section, id), true);
+      this.clearMemberDevice(section, id);
     }
     await this.saveSettings();
     void this.refreshLocalStatus();
   }
 
   // The where-it-runs menu's "Desktop only"/"Mobile only" entries; same field the settings
-  // card's "Enabled on" writes for those two scopes. Masking covers not-installed plugins since
-  // the 2026-07-27 enablementScopes fix. A device-class rule always overrides a prior "this
-  // device" choice, so it clears the id from localMembers too (task-2 retarget).
-  async setMemberEnabledOn(carrier: string, elementId: string, scope: "desktop" | "mobile"): Promise<void> {
+  // card's "Enabled on" writes for those two classes. Masking covers not-installed plugins since
+  // the 2026-07-27 enablement fix. A device-class rule always overrides a prior this-device
+  // choice, so it clears the id from thisDeviceItems too.
+  async setMemberDevice(list: EnablementList, elementId: string, device: "desktop" | "mobile"): Promise<void> {
     if (this.schemaStopped()) return; // §4.2b
-    const itemId = `${carrier === "core-plugins" ? "core" : "community"}:${elementId}`;
-    this.setLocalMember(itemId, false);
-    this.settings.items = { ...this.settings.items, [itemId]: itemConfigWithEnabledOn(this.settings.items[itemId], scope) };
+    const section = this.sectionForList(list);
+    this.setLocalMember(itemRef(section, elementId), false);
+    this.settings.items = withItem(this.settings.items, section, elementId, itemWithDevice(itemAt(this.settings.items, section, elementId), device));
     await this.saveSettings();
   }
 
-  // The where-it-runs menu's "Everywhere" entry: clears a prior "this device" choice
-  // (localMembers) so the member goes back to following the group's normal capture/apply flow.
-  // "Everywhere" itself carries no rule to write (unchanged) — task-2 retarget only adds this
-  // clear, needed now that "this device" no longer round-trips through the single enabledOn
-  // field the other three menu entries already overwrite.
-  async clearMemberLocal(carrier: string, elementId: string): Promise<void> {
+  // The where-it-runs menu's "Everywhere" entry: clears a prior this-device pin so the member goes
+  // back to following the group's normal capture/apply flow, and drops the device axis of any
+  // stored rule — needed because the pin does not round-trip through the same field the other
+  // three menu entries overwrite.
+  async clearMemberLocal(list: EnablementList, elementId: string): Promise<void> {
     if (this.schemaStopped()) return; // §4.2b
-    const itemId = `${carrier === "core-plugins" ? "core" : "community"}:${elementId}`;
-    this.setLocalMember(itemId, false);
-    this.clearMemberEnabledOn(itemId);
+    const section = this.sectionForList(list);
+    this.setLocalMember(itemRef(section, elementId), false);
+    this.clearMemberDevice(section, elementId);
     await this.saveSettings();
     void this.refreshLocalStatus();
   }
 
   // The runtime mask per switch group = This-device ids (memberLocal) ∪ ids class-scoped away
-  // from this device (memberScopes) ∪ auto-derived exclusions (community-plugins only:
+  // from this device (memberClassesFor) ∪ auto-derived exclusions (community-plugins only:
   // desktop-only manifest ids on mobile, plus plugin groups with a non-matching devices class).
   // Masked ids pass through at capture, keep local state on apply, and are hidden from in-sync
   // comparison. The persisted settings are left untouched.
@@ -1734,24 +1817,24 @@ export default class ConfigSyncPlugin extends Plugin {
       for (const id of desktopOnlyPluginIds(this.compiledGroups, this.pluginHost(), lock)) derived.add(id);
     }
     const out: Record<string, string[]> = {};
-    for (const name of SWITCH_LIST_GROUPS) {
-      const scoped = scopedAwayMembers(this.memberScopesFor(name), Platform.isMobile);
+    for (const name of ENABLEMENT_LISTS) {
+      const classExcluded = membersExcludedByClass(this.memberClassesFor(name), Platform.isMobile);
       const auto = name === "community-plugins" ? derived : new Set<string>();
-      const mask = [...new Set([...this.memberLocalIdsFor(name), ...scoped, ...auto])];
+      const mask = [...new Set([...this.memberLocalIdsFor(name), ...classExcluded, ...auto])];
       if (mask.length > 0) out[name] = mask;
     }
     return out;
   }
 
-  // Force-off = user class scopes enforced on the wrong device class, minus This-device ids
+  // Force-off = user class rules enforced on the wrong device class, minus this-device ids
   // (local wins). Auto-derived exclusions are never forced off — they keep local state.
   private memberForceOffIds(group: string): string[] {
-    return memberForceOff(this.memberScopesFor(group), this.memberLocalIdsFor(group), Platform.isMobile);
+    return memberForceOff(this.memberClassesFor(group), this.memberLocalIdsFor(group), Platform.isMobile);
   }
 
   // A group's PERSISTED local switch-list content — the same file applySwitchList's exception
   // pass-through reads (task-2 fix #1: never a live PluginHost query, which can diverge from what
-  // is actually on disk; see normalizeMemberRule's comment). Absent group/file/unparseable → null,
+  // is actually on disk; see availability.ts's forcedRunsOn comment). Absent group/file/unparseable → null,
   // treated as "off" by switchListMemberOn.
   private async localSwitchListFor(name: string): Promise<SwitchList | null> {
     const group = findGroupByName(this.compiledGroups, name);
@@ -1762,37 +1845,35 @@ export default class ConfigSyncPlugin extends Plugin {
     return readLocalSwitchList(name, await io.read(real));
   }
 
-  // This carrier's slice of settings.memberRules (task 2's stored home for the Runs-on rule),
-  // de-prefixed to bare element ids. An entry whose value this build doesn't recognise is dropped
-  // FROM THE READ only (§3.2): it must not reach the mask below at all — landing there as "no
-  // stored rule" would make the id a legacy this-device pin and force its switch either way, which
-  // is a decision an unknown rule never asked for.
-  private memberRulesFor(carrier: "core-plugins.json" | "community-plugins.json"): Record<string, MemberRule> {
-    const prefix = carrier === "core-plugins.json" ? "core:" : "community:";
-    const out: Record<string, MemberRule> = {};
-    for (const [id, rule] of Object.entries(this.settings.memberRules)) {
-      const known = asMemberRule(rule);
-      if (id.startsWith(prefix) && known !== undefined) out[id.slice(prefix.length)] = known;
+  // This list's stored Runs-on rules, keyed by bare element id. An entry whose shape this build
+  // doesn't recognise is dropped FROM THE READ only (invariant II.2): it must not reach the mask
+  // below at all — landing there as "no stored rule" would make the id a bare this-device pin and
+  // force its switch either way, which is a decision an unknown rule never asked for.
+  private storedRunsOnFor(list: EnablementList): Record<string, RunsOn> {
+    const out: Record<string, RunsOn> = {};
+    for (const [id, item] of Object.entries(this.settings.items[this.sectionForList(list)] ?? {})) {
+      const known = asRunsOn(item.runsOn);
+      if (known !== undefined) out[id] = known;
     }
     return out;
   }
 
-  // Mask table (Sync Center unified grammar, task 2): every id with either a stored MemberRule or
-  // a legacy "this device" pin resolves via preferStoredMemberRule (stored wins; otherwise
-  // normalizeMemberRule against the group's PERSISTED local content, task-2 fix #1) into
-  // always-here → exception + forceOn, or never-here → exception + forceOff (both on top of the
-  // class-scope force-off memberForceOffIds already computes).
-  private memberRuleForces(group: string, persisted: SwitchList | null): { forceOn: string[]; forceOff: string[] } {
-    const carrier = this.carrierFor(group);
-    if (carrier === null) return { forceOn: [], forceOff: [] };
-    const stored = this.memberRulesFor(carrier);
+  // Mask table (Sync Center unified grammar, task 2): every id with either a stored rule or a
+  // this-device pin resolves via preferStoredRunsOn (stored wins; otherwise forcedRunsOn against
+  // the group's PERSISTED local content, task-2 fix #1) into force on → exception + forceOn, or
+  // force off → exception + forceOff (both on top of the class force-off memberForceOffIds
+  // already computes).
+  private runsOnForces(group: string, persisted: SwitchList | null): { forceOn: string[]; forceOff: string[] } {
+    const list = this.listFor(group);
+    if (list === null) return { forceOn: [], forceOff: [] };
+    const stored = this.storedRunsOnFor(list);
     const ids = new Set([...this.memberLocalIdsFor(group), ...Object.keys(stored)]);
     const forceOn: string[] = [];
     const forceOff: string[] = [];
     for (const id of ids) {
-      const rule = preferStoredMemberRule(stored[id], switchListMemberOn(persisted, id));
-      if (rule === "always-here") forceOn.push(id);
-      else if (rule === "never-here") forceOff.push(id);
+      const rule = preferStoredRunsOn(stored[id], switchListMemberOn(persisted, id));
+      if (rule.force?.state === "on") forceOn.push(id);
+      else if (rule.force?.state === "off") forceOff.push(id);
     }
     return { forceOn, forceOff };
   }
@@ -1805,8 +1886,8 @@ export default class ConfigSyncPlugin extends Plugin {
     this.lastResolvedRoot = rootPath;
     const switchExceptions = await this.augmentedSwitchExceptions(rootPath);
     const ruleForces: Record<string, { forceOn: string[]; forceOff: string[] }> = {};
-    for (const name of SWITCH_LIST_GROUPS) {
-      ruleForces[name] = this.carrierFor(name) === null ? { forceOn: [], forceOff: [] } : this.memberRuleForces(name, await this.localSwitchListFor(name));
+    for (const name of ENABLEMENT_LISTS) {
+      ruleForces[name] = this.runsOnForces(name, await this.localSwitchListFor(name));
     }
     return {
       io: this.configIO(),
@@ -1818,7 +1899,7 @@ export default class ConfigSyncPlugin extends Plugin {
       switchExceptions,
       switchForceOff: (() => {
         const out: Record<string, string[]> = {};
-        for (const name of SWITCH_LIST_GROUPS) {
+        for (const name of ENABLEMENT_LISTS) {
           const f = [...new Set([...this.memberForceOffIds(name), ...(ruleForces[name]?.forceOff ?? [])])];
           if (f.length > 0) out[name] = f;
         }
@@ -1826,7 +1907,7 @@ export default class ConfigSyncPlugin extends Plugin {
       })(),
       switchForceOn: (() => {
         const out: Record<string, string[]> = {};
-        for (const name of SWITCH_LIST_GROUPS) {
+        for (const name of ENABLEMENT_LISTS) {
           const f = ruleForces[name]?.forceOn ?? [];
           if (f.length > 0) out[name] = f;
         }
@@ -1837,8 +1918,8 @@ export default class ConfigSyncPlugin extends Plugin {
       // (appTabRules/appTabsNonDefault, src/core/appTabs.ts) is superseded and removed.
       groupsIO: {
         read: async () => this.compiledGroups,
-        // Under schema v2 the sync list is DERIVED from settings.items/settings.customGroups, not
-        // stored directly, so a raw group-list write has no durable home. The only remaining caller
+        // The sync list is DERIVED from settings.items, not stored directly, so a raw group-list
+        // write has no durable home. The only remaining caller
         // is stopSyncing's fallback for a group with no known owner (the hidden aggregate carrier
         // groups) — kept in memory for the rest of the session, never a source of data loss, just
         // non-persistence across a reload.
@@ -1846,9 +1927,9 @@ export default class ConfigSyncPlugin extends Plugin {
           this.compiledGroups = groups;
         },
       },
-      // Schema v2 self copies carry items+customGroups, not a compiled groups array — core needs
-      // the plugin's registry defs to compile them (storeSelfCopyGroups' contract).
-      storeListGroups: (json) => storeSelfCopyGroups(json, this.registryDefs, new Set(Object.keys(this.settings.bratPluginIndex))),
+      // v3 self copies carry `items` (custom items included), not a compiled groups array — core
+      // needs the plugin's registry defs to compile them (storeSelfCopyGroups' contract).
+      storeListGroups: (json) => storeSelfCopyGroups(json, this.registryDefs, new Set(Object.keys(this.settings.bratIndex))),
       now: () => new Date().toISOString(),
     };
   }
@@ -1923,7 +2004,7 @@ export default class ConfigSyncPlugin extends Plugin {
       const abs = this.groupStoreAbs(ctx, group);
       if (await ctx.io.exists(abs)) {
         const rel = `store/${groupStorePath(group.path)}`;
-        if (group.type === "dir") {
+        if (group.type === "folder") {
           deleted = (await listFilesRecursive(ctx.io, abs)).filter((f) => !isJunkPath(f)).map((f) => f.slice(ctx.rootPath.length + 1).slice("store/".length));
           await ctx.io.rmdir(abs, true);
         } else {
@@ -1934,29 +2015,31 @@ export default class ConfigSyncPlugin extends Plugin {
     }
     // Durable: flip the owning item(s)' enabled flag (or, for a companion group, just that one
     // companion entry's enabled flag) in settings.items — or, for a custom group (Advanced tab
-    // "Custom rules"/"Discovered files"), remove its settings.customGroups entry entirely, since
-    // it has no "enabled" flag to flip — and save. saveSettings persists and recompiles, so the
+    // "Custom rules"/"Discovered files"), remove its items.custom entry entirely, since removing
+    // the rule is what the Advanced tab means by stopping it — and save. saveSettings persists and recompiles, so the
     // group stays gone across the next settings save instead of being resurrected by an
     // in-memory-only groupsIO write (see coreContext()'s groupsIO comment). Any group name with no
     // known owner (e.g. a future/unrecognized group) falls back to the old in-memory write rather
     // than silently doing nothing.
-    const owners = groupOwners(this.registryDefs, this.settings.customGroups)[groupName];
+    const owners = groupOwners(this.registryDefs, this.settings.items)[groupName];
     if (owners !== undefined && owners.length > 0) {
-      const nextItems = { ...this.settings.items };
-      let nextCustomGroups = this.settings.customGroups;
+      let nextItems = this.settings.items;
       for (const owner of owners) {
-        if (owner.custom === true) {
-          nextCustomGroups = nextCustomGroups.filter((g) => g.name !== groupName);
+        if (owner.section === "custom") {
+          nextItems = withoutItem(nextItems, "custom", owner.id);
           continue;
         }
-        const cfg = itemConfigForWrite(nextItems[owner.itemId]);
-        nextItems[owner.itemId] =
+        const item = itemAt(nextItems, owner.section, owner.id) ?? emptyItem();
+        nextItems = withItem(
+          nextItems,
+          owner.section,
+          owner.id,
           owner.companionPath !== undefined
-            ? { ...cfg, companions: (cfg.companions ?? []).map((c) => (c.path === owner.companionPath ? { ...c, enabled: false } : c)) }
-            : { ...cfg, enabled: false };
+            ? { ...item, companions: (item.companions ?? []).map((c) => (c.path === owner.companionPath ? { ...c, enabled: false } : c)) }
+            : { ...item, enabled: false }
+        );
       }
       this.settings.items = nextItems;
-      this.settings.customGroups = nextCustomGroups;
       await this.saveSettings();
     } else {
       await this.writeGroupsFile(this.compiledGroups.filter((g) => g.name !== groupName));
@@ -1970,7 +2053,7 @@ export default class ConfigSyncPlugin extends Plugin {
     const ctx = await this.coreContext();
     const abs = this.groupStoreAbs(ctx, group);
     if (!(await ctx.io.exists(abs))) return 0;
-    if (group.type === "dir") return (await listFilesRecursive(ctx.io, abs)).filter((f) => !isJunkPath(f)).length;
+    if (group.type === "folder") return (await listFilesRecursive(ctx.io, abs)).filter((f) => !isJunkPath(f)).length;
     return 1;
   }
 
@@ -1984,7 +2067,7 @@ export default class ConfigSyncPlugin extends Plugin {
     // just-arrived data looking like deletable junk.
     const selfCopy = `${ctx.rootPath}/store/configdir/plugins/config-sync/data.json`;
     const storeGroups = (await ctx.io.exists(selfCopy))
-      ? storeSelfCopyGroups(await ctx.io.read(selfCopy), this.registryDefs, new Set(Object.keys(this.settings.bratPluginIndex)))
+      ? storeSelfCopyGroups(await ctx.io.read(selfCopy), this.registryDefs, new Set(Object.keys(this.settings.bratIndex)))
       : [];
     const out: { rel: string; name: string; path: string; size: number }[] = [];
     for (const lf of leftoverStoreRels(rels, [...this.compiledGroups, ...storeGroups])) {
@@ -2028,17 +2111,17 @@ export default class ConfigSyncPlugin extends Plugin {
   }
 
   async listPluginSections(groups: SyncGroup[]): Promise<CatalogSection[]> {
-    return listPluginSections(this.pluginRuntime(), groups, new Set(Object.keys(this.settings.bratPluginIndex)));
+    return listPluginSections(this.pluginRuntime(), groups, new Set(Object.keys(this.settings.bratIndex)));
   }
 
   async listBetaSections(groups: SyncGroup[]): Promise<CatalogSection[]> {
-    return listBetaSections(this.pluginRuntime(), groups, this.settings.bratPluginIndex);
+    return listBetaSections(this.pluginRuntime(), groups, this.settings.bratIndex);
   }
 
   // Local-only status for the Beta tab's map-note (no network): index size vs BRAT's list.
   async bratScanStatus(): Promise<{ resolved: number; total: number }> {
     const repos = await this.bratRepos();
-    const resolved = Object.values(this.settings.bratPluginIndex).filter((r) => repos.includes(r)).length;
+    const resolved = Object.values(this.settings.bratIndex).filter((r) => repos.includes(r)).length;
     return { resolved, total: repos.length };
   }
 
@@ -2072,9 +2155,9 @@ export default class ConfigSyncPlugin extends Plugin {
   }
 
   // Immediate child file/folder names of a companion path — plain (non-mapKey) companion member
-  // listing (spec §4 "成员行"; task-7-brief.md). No per-member scope: an arbitrary "dir" SyncGroup
-  // has no per-file carry-scope mechanism today (only the three named switch lists in
-  // SWITCH_LIST_GROUPS do), so this is informational-only, unlike listSnippetFiles above.
+  // listing (spec §4 "成员行"; task-7-brief.md). No per-member sharing: an arbitrary folder group
+  // has no per-file sharing mechanism today (only the three named switch lists in
+  // SWITCH_LISTS do), so this is informational-only, unlike listSnippetFiles above.
   async listCompanionFiles(path: string): Promise<string[]> {
     const io = this.app.vault.adapter;
     const real = groupRealPath(path, this.app.vault.configDir);
@@ -2126,7 +2209,7 @@ export default class ConfigSyncPlugin extends Plugin {
   async detectSensitive(group: SyncGroup): Promise<SensitiveScan> {
     const io = this.app.vault.adapter;
     const real = localRealPath(group.name, group.path, this.app.vault.configDir);
-    const dirExists = group.type === "dir" && (await io.exists(real));
+    const dirExists = group.type === "folder" && (await io.exists(real));
     const files = group.type === "file" ? [real] : dirExists ? await listFilesRecursive(io, real) : [];
     const keys = new Set<string>();
     let blob = false;
@@ -2155,13 +2238,14 @@ export default class ConfigSyncPlugin extends Plugin {
   }
 
   // The load-time version gate (classifySettings, spec 2026-08-11-data-model-hardening.md §4.1).
-  // `legacy` — a data.json without schemaVersion 2 (the old groups-based shape, or anything
-  // unversioned) is never migrated field-by-field: the plugin starts fresh with defaults and asks
-  // the user to reconfigure. `future` is the case this gate was split out for: the old
-  // `schemaVersion !== 2` test sent a document from a NEWER build down that same reset branch, and
-  // since data.json travels between a user's devices wholesale, one updated device could wipe the
-  // setup of every device that hadn't updated yet. A fresh install (no data.json yet) is neither;
-  // it just gets the defaults silently.
+  // `migrate` — a v2 document is brought forward field by field (spec 2026-08-11-v3-one-vocabulary
+  // §5) and saved once, silently: nothing was reset, so nothing is announced. `legacy` — a v1 or
+  // unversioned document has no field a v3 shape could be reconstructed from, so the plugin starts
+  // fresh with defaults and asks the user to reconfigure. `future` is the case this gate was split
+  // out for: the old `schemaVersion !== CURRENT` test sent a document from a NEWER build down that
+  // same reset branch, and since data.json travels between a user's devices wholesale, one updated
+  // device could wipe the setup of every device that hadn't updated yet. A fresh install (no
+  // data.json yet) is none of them; it just gets the defaults silently.
   async loadSettings(): Promise<void> {
     const data = (await this.loadData()) as Record<string, unknown> | null;
     const load = classifySettings(data);
@@ -2183,14 +2267,6 @@ export default class ConfigSyncPlugin extends Plugin {
       return;
     }
     this.schemaStop = null;
-    if (load.kind === "legacy") {
-      new Notice(SCHEMA_UPGRADE_NOTICE, 10000);
-      // withDefaults, not a `{ ...DEFAULT_SETTINGS }` spread: that shares DEFAULT_SETTINGS' own
-      // nested objects (runHistory/ribbonButtons) by reference, and the settings tab edits them in
-      // place — one toggle after a reset would rewrite the defaults for the rest of the session.
-      this.settings = withDefaults(DEFAULT_SETTINGS, null);
-      return;
-    }
     // Quick commands moved to the Ribbon Organizer plugin in 1.7.0; drop the stale key so the
     // next save cleans data.json. C-#45 fix-round 1: an earlier build of the device-opt-out
     // feature (never released/committed) briefly stored the device identity as a settings field
@@ -2201,36 +2277,50 @@ export default class ConfigSyncPlugin extends Plugin {
     // here is ignore-and-prune, not migrate — the field never shipped to a real user (no release,
     // no commit), so there is nothing meaningful to carry forward, only a local/dev-testing
     // artifact to sweep off the next save.
+    //
+    // Ahead of the migrate branch, not after it (fix round 1, review M6): a v2 document is the one
+    // most likely to still carry both, and the migration SAVES — so leaving the sweep downstream
+    // would deliberately write a stray `deviceId` back to disk for one cycle. It is skipped for a
+    // `future` document (which returned above) because this build owns nothing there.
     if (data !== null) {
       delete data.quickCommands;
       delete data.deviceId;
     }
-    // The "On this device" opt-out moved to localStorage (spec 2026-08-11-data-model-hardening.md
-    // §2, C-#52): read this device's entries out of the document into the store that now decides
-    // every read. Deliberately NOT the ignore-and-prune shape the two keys above use — the field
-    // is left exactly where it is (the §2 ruling: deleting it is a one-phase field removal, and a
-    // device still on the old build would lose its own opt-out to our document). Nothing is
-    // written to data.json here, so there is no save and no drift; this device's own writes are
-    // what keep the carried map in step from now on (setDeviceOptOut).
-    if (data !== null) this.absorbCarriedDeviceOptOuts(data.deviceOptOuts);
+    if (load.kind === "migrate") {
+      // `data ?? {}` only to satisfy the compiler: classifySettings answers "fresh" for a null
+      // document, so "migrate" always comes with one. migrateV2Settings is total either way — it
+      // returns any non-v2 document untouched — so this can never take a different branch by
+      // accident the way a `data !== null` guard falling through to `legacy` would.
+      const { document, carriedDeviceOptOuts } = migrateV2Settings(data ?? {});
+      this.settings = withDefaults(DEFAULT_SETTINGS, document);
+      // localStorage FIRST, the document second. The two stores are written back to back and a
+      // crash between them has to leave a state the next load recovers from: with this order that
+      // state is "still a v2 document, opt-outs already absorbed", which migrates again cleanly
+      // (the absorb is a union, so it is idempotent). The other order would leave a v3 document
+      // whose opt-out map is gone and never reached localStorage — an unrecoverable loss of the
+      // user's "don't sync this here" choices.
+      this.absorbCarriedDeviceOptOuts(carriedDeviceOptOuts);
+      // saveData, not saveSettings(): the migration saves ONCE, and recompiling here would be a
+      // second compile before onload's own (loadSettings is always followed by a recompile — see
+      // onload and reloadSettings). No Notice either: the setup is intact, so there is nothing to
+      // tell the user.
+      await this.saveData(this.settings);
+      return;
+    }
+    if (load.kind === "legacy") {
+      new Notice(SCHEMA_UPGRADE_NOTICE, 10000);
+      // withDefaults, not a `{ ...DEFAULT_SETTINGS }` spread: that shares DEFAULT_SETTINGS' own
+      // nested objects (runHistory/ribbonButtons) by reference, and the settings tab edits them in
+      // place — one toggle after a reset would rewrite the defaults for the rest of the session.
+      this.settings = withDefaults(DEFAULT_SETTINGS, null);
+      return;
+    }
     this.settings = withDefaults(DEFAULT_SETTINGS, data);
-    // v2 shape revision (spec 2026-07-26-ui-feedback-round2-design.md §2.3): merge legacy
-    // editor/files-links/other + appJson into items.app before anything compiles the settings
-    // that just loaded. `data` may still carry the pre-merge `appJson` key even though it's no
-    // longer part of ConfigSyncSettings — withDefaults carries unknown fields through, so it is
-    // sitting on this.settings above for this to find (and delete).
-    if (mergeLegacyAppSliceItems(this.settings)) await this.saveSettings();
-    // Task 3 (spec 2026-08-04-per-device-scope-local-containment-design.md): drain any leftover
-    // enabledOn:"local" (pre-retarget artifact) into localMembers on every load — including after
-    // reloadSettings() re-reads a just-adopted foreign data.json (adoptConfiguration/applyItems
-    // both call loadSettings() through reloadSettings()), so a freshly-adopted "local" is drained
-    // rather than re-captured on the next save.
-    if (drainEnabledOnLocal(this.settings)) await this.saveSettings();
-    // memberRules is deliberately NOT sanitized here (spec 2026-08-11-data-model-hardening.md
-    // §3.2, invariant II.2): the load path used to drop every value this build doesn't know and
-    // save immediately, which turned a NEWER build's rule into a deletion this device then pushed
-    // to the whole fleet. An unrecognised value is ignored where it is consumed instead
-    // (availability.ts's asMemberRule) and stays on disk exactly as written.
+    // `runsOn` is deliberately NOT sanitized here (spec 2026-08-11-data-model-hardening.md §3.2,
+    // invariant II.2): the load path used to drop every value this build doesn't know and save
+    // immediately, which turned a NEWER build's rule into a deletion this device then pushed to
+    // the whole fleet. An unrecognised value is ignored where it is consumed instead (types.ts's
+    // asRunsOn) and stays on disk exactly as written.
   }
 
   // The answer every mutating entry point gives while the §4.1 stop state holds: true means the
@@ -2279,6 +2369,35 @@ export default class ConfigSyncPlugin extends Plugin {
   // compiledGroups stale until the next unrelated saveSettings() or a restart.
   private async reloadSettings(): Promise<void> {
     await this.loadSettings();
-    await this.recompile();
+    if (await this.recompile()) this.rekeyDeviceStores();
+  }
+
+  /**
+   * The §4 re-key of this device's own two stores — the baselines and the opt-out list — from
+   * compiled group names to item refs. Runs after every compile, not only after the v2 → v3 document
+   * migration, and both halves are idempotent (the ledger by its own version, the opt-out list by
+   * the shape of its entries), so a crash between the two writes finishes on the next load rather
+   * than leaving one store in each vocabulary.
+   *
+   * AFTER a SUCCESSFUL compile, deliberately: the conversion asks the compiler what each name's ref
+   * is (itemKeys.ts's lockRefFor), so it can only run once compiledGroups is both present and
+   * trustworthy — see recompile's return value, and its callers, which is where that precondition is
+   * enforced. Nothing is dropped (see rekeyLedger) and nothing is written while the §4.2b stop state
+   * holds, because both stores describe a document this build has declared it cannot read.
+   *
+   * The ledger's version is stamped by the same call that does the work, so there is no window in
+   * which the flag says "moved" and the keys disagree; the opt-out list needs no flag at all,
+   * because its entries say for themselves whether they have moved (rekeyRefList). What made the
+   * stamp dangerous was never its timing but its INPUT, which is why the guard is on the compile.
+   */
+  private rekeyDeviceStores(): void {
+    if (this.schemaStop !== null) return;
+    const toRef = lockRefFor(this.compiledGroups);
+    const ledger = this.loadBaselines();
+    const movedLedger = rekeyLedger(ledger, toRef);
+    if (movedLedger !== ledger) this.saveBaselines(movedLedger);
+    const optOuts = this.deviceOptOutGroups();
+    const movedOptOuts = rekeyRefList(optOuts, toRef);
+    if (movedOptOuts.length !== optOuts.length || movedOptOuts.some((r, i) => r !== optOuts[i])) this.saveDeviceOptOutGroups(movedOptOuts);
   }
 }

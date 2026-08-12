@@ -1,12 +1,13 @@
 import { baseHasStaleLocalKeys, CoreContext, ExternalStoreReader, groupForStoreRel, isSelfStoreRel, loadManifest, overlayGroup, readStoreContractLocals, remoteGroupsFrom, storeDir, withContractLocals } from "./ConfigSyncCore";
 import { isJunkPath, listFilesRecursive } from "./io";
 import { basename, groupStorePath, relativeTo, sidecarStoreSuffix } from "./pathing";
-import { FileChanges, hasChanges, StoreLock, StoreLockEntry, SyncGroup } from "./types";
-import { lockEntryCapturedAt, lockEntryHash, lockLineage, parseStoreLock, storeLockVersion, STORE_LOCK_VERSION } from "./manifest";
+import { FileChanges, hasChanges, itemRef, StoreLock, StoreLockEntry, SyncGroup } from "./types";
+import { carrierRef, joinRef } from "./itemKeys";
+import { lockEntry, lockEntryCapturedAt, lockEntryHash, lockEntryList, lockLineage, parseStoreLock, storeLockVersion, STORE_LOCK_VERSION } from "./manifest";
 import { isPlainObject } from "./sanitize";
 import { contentUnchanged, groupNeedsPassphrase } from "./modes";
 import { parseFileEnvelope } from "./crypto";
-import { localRealPath, parseSwitchList, readLocalSwitchList, SWITCH_LIST_GROUPS, switchListsEqual } from "./switchList";
+import { localRealPath, parseSwitchList, readLocalSwitchList, isSwitchListGroup, switchListsEqual } from "./switchList";
 import { ABSENT_HASH, BaselineEntry, hashDirSide, hashFileSide, Ledger, LedgerUpdates } from "./ledger";
 
 export type GroupState = "in-sync" | "local-changed" | "store-newer" | "differs" | "not-captured" | "never-synced" | "no-settings" | "locked";
@@ -34,9 +35,12 @@ export async function statusForGroups(
   for (const group of groups) {
     try {
       const effGroup = withContractLocals(group, contractLocals.get(group.name) ?? []);
-      const r = await groupStatus(ctx, effGroup, ledger.groups[group.name]);
+      // Keyed by the item's ref, not by the group name (spec §4): the baselines, the lock and the
+      // opt-out list are ONE key space. A group with no ref has no identity to hold a baseline by,
+      // so it compares without one — which is what it always did before it had an entry at all.
+      const r = await groupStatus(ctx, effGroup, group.ref === undefined ? undefined : ledger.items[group.ref]);
       statuses.push(r.status);
-      if (r.update !== undefined) updates[group.name] = r.update;
+      if (r.update !== undefined && group.ref !== undefined) updates[group.ref] = r.update;
     } catch (e) {
       statuses.push({ group: group.name, state: "differs", message: (e as Error).message });
     }
@@ -97,12 +101,12 @@ async function compareFile(ctx: CoreContext, group: SyncGroup, real: string, sto
   }
   const liveContent = await ctx.io.read(real);
   const localHash = await hashFileSide(group.name, liveContent, "local");
-  const exc = SWITCH_LIST_GROUPS.has(group.name) ? ctx.switchExceptions[group.name] ?? [] : [];
+  const exc = isSwitchListGroup(group.name) ? ctx.switchExceptions[group.name] ?? [] : [];
   // Switch lists ALWAYS compare as sets — exceptions or not. The old `exc.length > 0` guard
   // made exception-free devices fall through to byte comparison, where local enable-order vs
   // store-stable order reads as a permanent phantom "To capture" (real-vault find 2026-07-17).
   const switchEqual =
-    SWITCH_LIST_GROUPS.has(group.name) ? switchListEqualOrNull(group.name, liveContent, storeContent, exc) : null;
+    isSwitchListGroup(group.name) ? switchListEqualOrNull(group.name, liveContent, storeContent, exc) : null;
   const sidecar = store + sidecarStoreSuffix(ctx.deviceClass);
   const ownScope = (await ctx.io.exists(sidecar)) ? await ctx.io.read(sidecar) : null;
   const effGroup = overlayGroup(ctx, group, [liveContent, storeContent, ownScope]);
@@ -200,15 +204,19 @@ export interface RemoteCheck {
   remoteCapturedAt: string | null;
 }
 
-// `ignoreGroups` names lock entries that never count, exactly as in remoteLockAhead — callers pass
-// `[SELF_GROUP_NAME]` for a remote with `excludeSelf`. It is REQUIRED, not defaulted: the per-item
+// `ignoreRefs` names lock entries that never count, exactly as in remoteLockAhead — callers pass
+// `[SELF_ITEM_REF]` for a remote with `excludeSelf`. It is REQUIRED, not defaulted: the per-item
 // path below resolves a direction from every entry it sees, so a forgotten argument would read the
 // self entry of a remote that deliberately never exchanges it and pin an arrow no Pull could ever
 // clear. The whole-store fallback has no per-entry granularity and is unaffected either way.
+// `groups` re-keys a remote still on the v1/v2 lock format against what THIS device compiles — a
+// remote written by a 2.21.0 device is the normal state during the transition, and an entry keyed
+// differently on the two sides would read as an item we do not have, i.e. a pull that never settles.
 export async function checkRemote(
   localLock: StoreLock | null,
   reader: ExternalStoreReader,
-  ignoreGroups: string[]
+  ignoreRefs: string[],
+  groups?: readonly SyncGroup[]
 ): Promise<RemoteCheck> {
   const files = await reader.listFiles();
   // Store presence: new-format stores hold only store/** + store.lock.json (no root manifest);
@@ -218,7 +226,7 @@ export async function checkRemote(
   if (!files.includes("store.lock.json")) return { state: "unknown", remoteCapturedAt: null };
   let remote: StoreLock;
   try {
-    remote = parseStoreLock(await reader.readFile("store.lock.json"));
+    remote = parseStoreLock(await reader.readFile("store.lock.json"), groups);
   } catch {
     return { state: "unknown", remoteCapturedAt: null };
   }
@@ -231,7 +239,7 @@ export async function checkRemote(
   // No local lock yet (bootstrap device) but the remote parsed fine: a pull would populate
   // the store, so this is a known state, not "unknown" — reserve that for unreadable remotes.
   if (localLock === null) return { state: "remote-newer", remoteCapturedAt: remote.capturedAt };
-  const perItem = perItemRemoteState(localLock, remote, ignoreGroups);
+  const perItem = perItemRemoteState(localLock, remote, ignoreRefs);
   if (perItem !== null) return { state: perItem, remoteCapturedAt: remote.capturedAt };
   const r = Date.parse(remote.capturedAt);
   const l = Date.parse(localLock.capturedAt);
@@ -240,11 +248,13 @@ export async function checkRemote(
   return { state, remoteCapturedAt: remote.capturedAt };
 }
 
-// Entry fields that are never a DIFFERENCE. `label`/`memberLabels` are display: a plugin renamed on
-// one device must not read as "the store has newer settings" (finding S6). `capturedAt` is
-// freshness, not content — it orders two differing entries below instead of being one more thing
-// that differs, or every capture would make every other device look behind.
-const NON_CONTENT_LOCK_ENTRY_KEYS = new Set(["label", "memberLabels", "capturedAt"]);
+// Entry fields that are never a DIFFERENCE. `display` is names: a plugin renamed on one device must
+// not read as "the store has newer settings" (finding S6) — and since v3 puts the label and the
+// carrier's element names in one partition, saying so is one key instead of a list that has to grow
+// with every display field. `capturedAt` is freshness, not content — it orders two differing entries
+// below instead of being one more thing that differs, or every capture would make every other device
+// look behind.
+const NON_CONTENT_LOCK_ENTRY_KEYS = new Set(["display", "capturedAt"]);
 
 // Deep equality that does not care about key order. Written out rather than done with
 // JSON.stringify because the carried tail (§3.1) can hold anything a newer build wrote, and two
@@ -281,16 +291,16 @@ function lockEntriesEquivalent(mine: StoreLockEntry, theirs: StoreLockEntry): bo
 // local-only entries and its own formatting). True when a remote group entry is missing locally, or
 // when one differs and the remote's copy is the fresher of the two, or — only where the entries
 // cannot settle it — when the remote's lineage is newer. Local-only entries and a locally-newer
-// lineage never count: a pull would not change them. ignoreGroups names lock entries that never
+// lineage never count: a pull would not change them. ignoreRefs names lock entries that never
 // count (the self group when the remote excludes it).
-export function remoteLockAhead(localRaw: string | null, remoteRaw: string | null, ignoreGroups: string[]): boolean {
+export function remoteLockAhead(localRaw: string | null, remoteRaw: string | null, ignoreRefs: string[], groups?: readonly SyncGroup[]): boolean {
   if (remoteRaw === null) return false;
   if (localRaw === null) return true;
   let local: StoreLock;
   let remote: StoreLock;
   try {
-    local = parseStoreLock(localRaw);
-    remote = parseStoreLock(remoteRaw);
+    local = parseStoreLock(localRaw, groups);
+    remote = parseStoreLock(remoteRaw, groups);
   } catch {
     return localRaw !== remoteRaw;
   }
@@ -300,9 +310,9 @@ export function remoteLockAhead(localRaw: string | null, remoteRaw: string | nul
   // which is why a purely local capture used to light the hint up on every other device.)
   let compared = 0;
   let dated = 0;
-  for (const [name, entry] of Object.entries(remote.groups)) {
-    if (ignoreGroups.includes(name)) continue;
-    const mine = local.groups[name];
+  for (const [ref, entry] of lockEntryList(remote.items)) {
+    if (ignoreRefs.includes(ref)) continue;
+    const mine = lockEntry(local, ref);
     if (mine === undefined) return true;
     const freshness = itemFreshness(mine, entry);
     if (freshness === "newer" || freshness === "undatable") return true;
@@ -328,6 +338,16 @@ export function remoteLockAhead(localRaw: string | null, remoteRaw: string | nul
 // way to order them; "absent" = neither side recorded anything comparable. Both send the whole
 // comparison back to the store-level timestamp rather than guessing.
 type ItemFreshness = "equal" | "newer" | "older" | "undatable" | "absent";
+
+// Does this lock carry the per-item evidence the comparison below needs (§6)? Asked of the PAYLOAD,
+// never of the version number (task-3 review I1). The gate used to read `storeLockVersion(…) <
+// STORE_LOCK_VERSION`, which silently became "< 3" the moment the lock format moved — excluding
+// every 2.21.0 peer for the whole transition window, even though those peers do stamp each entry,
+// and reinstating exactly the phantom "the store has newer settings" §6 removed. A version
+// comparison is a proxy for a capability; it goes stale as soon as the number moves.
+function hasPerItemPayload(lock: StoreLock): boolean {
+  return lockEntryList(lock.items).some(([, entry]) => lockEntryCapturedAt(entry) !== undefined);
+}
 
 // An entry's capture time as something we can ORDER by, or null. A non-empty stamp no date parser
 // can read is not a date; it is treated as absent everywhere rather than as present-and-useless.
@@ -355,21 +375,21 @@ function itemFreshness(mine: StoreLockEntry | undefined, theirs: StoreLockEntry 
 
 // Per-item resolution for checkRemote (§6): when BOTH locks carry the v2 payload, the state comes
 // from the entries rather than from one whole-store timestamp — so a store that is merely older in
-// wall-clock terms but holds the same items reads as "same". `ignoreGroups` drops entries that never
+// wall-clock terms but holds the same items reads as "same". `ignoreRefs` drops entries that never
 // count — without it a remote with `excludeSelf` would resolve a direction from the one entry the
 // two sides deliberately never exchange, and no Pull could ever clear it. null = not decidable this
 // way (either side still at v1, no entries left to compare, an undatable difference, or the two
 // stores are ahead of each other in different items, which RemoteState has no word for); the caller
 // then does exactly what it did before. Reads only the two locks already in hand — no extra file
 // reads, as before.
-function perItemRemoteState(local: StoreLock, remote: StoreLock, ignoreGroups: string[]): RemoteState | null {
-  if (storeLockVersion(local) < STORE_LOCK_VERSION || storeLockVersion(remote) < STORE_LOCK_VERSION) return null;
-  const names = [...new Set([...Object.keys(local.groups), ...Object.keys(remote.groups)])].filter((n) => !ignoreGroups.includes(n));
-  if (names.length === 0) return null;
+function perItemRemoteState(local: StoreLock, remote: StoreLock, ignoreRefs: string[]): RemoteState | null {
+  if (!hasPerItemPayload(local) || !hasPerItemPayload(remote)) return null;
+  const refs = [...new Set([...lockEntryList(local.items), ...lockEntryList(remote.items)].map(([ref]) => ref))].filter((r) => !ignoreRefs.includes(r));
+  if (refs.length === 0) return null;
   let newer = false;
   let older = false;
-  for (const name of names) {
-    const freshness = itemFreshness(local.groups[name], remote.groups[name]);
+  for (const ref of refs) {
+    const freshness = itemFreshness(lockEntry(local, ref), lockEntry(remote, ref));
     if (freshness === "undatable") return null;
     if (freshness === "newer") newer = true;
     else if (freshness === "older") older = true;
@@ -378,33 +398,46 @@ function perItemRemoteState(local: StoreLock, remote: StoreLock, ignoreGroups: s
   return newer ? "remote-newer" : older ? "remote-older" : "same";
 }
 
-// Group name -> label for every remote lock entry carrying a string label (Sync Center remote
-// pane, spec 2026-08-08-c-livetest-batch6): deliberately tolerant of anything short of a real
-// parsed store.lock.json — an absent, malformed, or half-written remote lock must never break
-// the compare, so this returns {} instead of throwing. Callers own the JSON.parse of the raw
-// remote file (this takes the already-parsed value, hence `unknown` — see parseStoreLock's own
-// `parsed: unknown` for the same reasoning), so a parse failure never reaches here at all.
-export function remoteLockLabels(lockJson: unknown): Record<string, string> {
-  if (!isPlainObject(lockJson) || !isPlainObject(lockJson.groups)) return {};
-  const groups = lockJson.groups;
+// Item ref -> label for every remote lock entry carrying one (Sync Center remote pane, spec
+// 2026-08-08-c-livetest-batch6): deliberately tolerant of anything short of a real parsed
+// store.lock.json — an absent, malformed, or half-written remote lock must never break the compare,
+// so this returns {} instead of throwing. Callers own the JSON.parse of the raw remote file (this
+// takes the already-parsed value, hence `unknown` — see parseStoreLock's own `parsed: unknown` for
+// the same reasoning), so a parse failure never reaches here at all.
+//
+// Keyed by REF, both shapes: a v3 lock is already keyed that way, and a v1/v2 one is converted
+// through `toRef` — itemKeys.ts's lockRefFor, the same single producer the lock read itself uses, so
+// a label and the entry it belongs to can never end up under two different keys.
+export function remoteLockLabels(lockJson: unknown, toRef: (name: string) => string): Record<string, string> {
+  if (!isPlainObject(lockJson)) return {};
+  const v3 = isPlainObject(lockJson.items);
   const labels: Record<string, string> = {};
-  for (const [name, entry] of Object.entries(groups)) {
-    if (isPlainObject(entry) && typeof entry.label === "string" && entry.label.trim() !== "") {
-      labels[name] = entry.label;
+  const put = (ref: string, label: unknown): void => {
+    if (typeof label === "string" && label.trim() !== "" && labels[ref] === undefined) labels[ref] = label;
+  };
+  // [ref, entry] pairs, from either shape. A v3 lock's two levels are joined back up; a v1/v2 one's
+  // flat names go through the converter.
+  const entries: [string, Record<string, unknown>][] = [];
+  if (v3) {
+    for (const [section, bucket] of Object.entries(lockJson.items as Record<string, unknown>)) {
+      if (!isPlainObject(bucket)) continue;
+      for (const [id, entry] of Object.entries(bucket)) if (isPlainObject(entry)) entries.push([joinRef(section, id), entry]);
     }
+  } else if (isPlainObject(lockJson.groups)) {
+    for (const [name, entry] of Object.entries(lockJson.groups)) if (isPlainObject(entry)) entries.push([toRef(name), entry]);
   }
-  // Carrier memberLabels fallback (2026-08-09-c-livetest-batch15, same chain position as
-  // resolveHostStoredLabel's local one: after own-entry labels above, before the id fallback):
-  // a remote-only on/off member with no group entry of its own still gets a name from its
-  // carrier's memberLabels — never overwrites a name already resolved from the member's own entry.
-  const memberKeyPrefix: Record<"community-plugins" | "core-plugins", string> = { "community-plugins": "plugin-", "core-plugins": "" };
-  for (const carrier of ["community-plugins", "core-plugins"] as const) {
-    const carrierEntry = groups[carrier];
-    if (!isPlainObject(carrierEntry) || !isPlainObject(carrierEntry.memberLabels)) continue;
-    for (const [id, label] of Object.entries(carrierEntry.memberLabels)) {
-      const key = `${memberKeyPrefix[carrier]}${id}`;
-      if (typeof label === "string" && label.trim() !== "" && labels[key] === undefined) labels[key] = label;
-    }
+  const labelOf = (entry: Record<string, unknown>): unknown => (v3 ? (isPlainObject(entry.display) ? entry.display.label : undefined) : entry.label);
+  const elementsOf = (entry: Record<string, unknown>): unknown => (v3 ? (isPlainObject(entry.display) ? entry.display.elements : undefined) : entry.memberLabels);
+  for (const [ref, entry] of entries) put(ref, labelOf(entry));
+  // Carrier element-name fallback (2026-08-09-c-livetest-batch15, same chain position as
+  // resolveHostStoredLabel's local one: after own-entry labels above, before the id fallback): a
+  // remote-only on/off element with no entry of its own still gets a name from its carrier — never
+  // overwriting a name already resolved from the element's own entry (put's own guard).
+  for (const [carrier, section] of [["community-plugins", "community"], ["core-plugins", "core"]] as const) {
+    const entry = entries.find(([ref]) => ref === carrierRef(carrier))?.[1];
+    const elements = entry === undefined ? undefined : elementsOf(entry);
+    if (!isPlainObject(elements)) continue;
+    for (const [id, label] of Object.entries(elements)) put(itemRef(section, id), label);
   }
   return labels;
 }
@@ -455,7 +488,7 @@ export async function diffRemote(ctx: CoreContext, reader: ExternalStoreReader, 
     if (remoteContent === localContent) return true;
     // Switch-list store copies are order-insensitive: each device captures in its own
     // store-stable order, so equal membership in a different order is not a difference.
-    if (!SWITCH_LIST_GROUPS.has(name)) return false;
+    if (!isSwitchListGroup(name)) return false;
     const a = parseSwitchList(remoteContent);
     const b = parseSwitchList(localContent);
     return a !== null && b !== null && switchListsEqual(a, b, []);

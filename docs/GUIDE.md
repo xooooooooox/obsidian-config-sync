@@ -2,6 +2,7 @@
 
 Every behavior in one place; the [README](../README.md) is the 5-minute version.
 
+- [Updating from 2.21.0 and earlier](#updating-from-2210-and-earlier)
 - [Concepts](#concepts)
 - [The Sync Center](#the-sync-center)
 - [Settings](#settings)
@@ -10,14 +11,36 @@ Every behavior in one place; the [README](../README.md) is the 5-minute version.
 - [Status bar & ribbon](#status-bar--ribbon)
 - [Walkthroughs](#walkthroughs)
 
+## Updating from 2.21.0 and earlier
+
+**Update Config Sync on every device before any of them captures or pulls again.** This release changes the format of both the plugin's own settings and `store.lock.json`, and the change is one way: once a device has written the new format, there is no going back to the old one.
+
+- A device on **2.21.0** that meets the new format refuses it, says so plainly, and changes nothing. Update it and it carries on where it left off.
+- A device on **2.20.0 or earlier** has no such check. It **resets its Config Sync settings to defaults** — every rule, every custom rule, every card you had ticked. Nothing recovers that afterwards, which is why the order matters: update the device before it ever sees the new format.
+
+The conversion itself asks nothing of you. The first device to run this version converts its own settings in place on load: your rules, your custom rules, your Beta list and this device's sync baselines all come across, and no item flips to "never synced". Take your usual vault backup first anyway — the conversion cannot be undone.
+
+### What behaves differently afterwards
+
+Three deliberate changes, each of which you may notice:
+
+- **Runs on now decides where an item syncs, not just what the menu says.** A plugin's `Computers only` / `Phones only` choice used to be read by that menu and by nothing else — capture and apply followed a separate, invisible setting, so the two could disagree. They are one field now, and the choice masks capture and apply too. Your items keep doing exactly what they were already doing; it is the menu that starts telling the truth about it.
+- **A community plugin you have only given a Runs-on rule, and never switched on here, has no card in Settings** until the plugin is installed on this device. It had no card before this release either — that rule used to live in a list of its own, apart from the plugin's card — so nothing changed hands and nothing was removed: the plugin is still in the store, your other devices still sync it, and it still has a row in the Sync Center, which is where you set the rule in the first place. Install it here and the card appears with the rule already on it.
+  Switching a card **off** normally keeps it, so you can switch it back on. This one shape is the exception, and it cuts both ways — both intended. Switch **off** a plugin that isn't installed here and carries a Runs-on rule, and the rule is the only thing it has here any more, so its card goes with it. Clear that rule and the opposite happens: a card **appears** for a plugin you don't have installed, because an off card on its own is a choice this device remembers, and a Runs-on rule on its own is not. Its store copy, its Sync Center row and your other devices are unaffected either way, and installing the plugin here always brings the card back.
+- **A display name in a store written by an older version stays stale until the next capture or pull.** Config Sync used to quietly repair out-of-date item names in `store.lock.json` at startup. It no longer writes to a store in the old format at all — a cosmetic fix is not worth rewriting a file your other devices may still be reading, and the rewrite could strand them. The first capture or pull brings both the format and the names up to date.
+
+### `scope:` is gone from both search boxes
+
+Both search boxes used to accept a `scope:` qualifier, and it meant a different thing in each. It is `section:` in both now, and there is no alias: typing `scope:core` searches for those words as plain text instead of filtering, so a search that stops working is telling you it changed. See [Search & qualifiers](#search--qualifiers).
+
 ## Concepts
 
 Two planes, kept separate: a **local plane** (this device's live config ↔ the store) and a **transport plane** (how the store travels between devices — see [Transport](#transport)).
 
 **Local plane:**
 
-- **Capture** copies every enabled item's settings file and companion folders into `<data folder>/store/`, applying each field's `{scope, encrypted}` rule (or the whole-file rule, for items with no per-key rules), skips OS junk files, and records source plugin versions (or the Obsidian app version, for Obsidian/core items) in `store.lock.json`. Only changed files are rewritten; the Sync Center's Capture button captures just what you've ticked.
-- **Apply** picks items and lands them into this device's config dir (whatever its name) — there's no confirmation dialog; ticking and pressing Apply executes directly. For a community plugin that's outdated, disabled or not installed on this device, Apply can also update, enable or install it first (see [Availability facts and the install engine](#availability-facts-and-the-install-engine)). This-device-scoped fields and encrypted content resolve per the item's rules; a `This device` field keeps its local value untouched.
+- **Capture** copies every enabled item's settings file and companion folders into `<data folder>/store/`, applying each field's `{sharing, encrypted}` rule (or the whole-file rule, for items with no per-key rules), skips OS junk files, and records source plugin versions (or the Obsidian app version, for Obsidian/core items) in `store.lock.json`. Only changed files are rewritten; the Sync Center's Capture button captures just what you've ticked.
+- **Apply** picks items and lands them into this device's config dir (whatever its name) — there's no confirmation dialog; ticking and pressing Apply executes directly. For a community plugin that's outdated, disabled or not installed on this device, Apply can also update, enable or install it first (see [Availability facts and the install engine](#availability-facts-and-the-install-engine)). `This device` fields and encrypted content resolve per the item's rules; a `This device` field keeps its local value untouched.
 - The **Sync Center** compares live config against the store per item; direction (↑ to capture, ↓ to apply) comes from a per-device sync baseline, not file times — each time this device sees an item in sync, it remembers a fingerprint of both sides, so a later difference can tell which side actually moved. Every row states its own verdict as a plain-language **fate sentence** (`↓ Installs · turns on · applies settings`, `↑ Captures settings`, `— In sync`…) instead of a bare status glyph — see [The Sync Center](#the-sync-center) for the full grammar. An item with no baseline on this device yet (a fresh install, or one pending its first sync since upgrading) defaults to apply; one that changed on both sides since this device's last sync reads `⚠ Changed on both sides` and stays unstageable until you resolve it. Remote freshness is still checked automatically.
 
 **On-disk store layout:**
@@ -32,9 +55,9 @@ Two planes, kept separate: a **local plane** (this device's live config ↔ the 
     └── <dotless files>      # vault-root dotfiles, leading dot stripped
 ```
 
-What syncs, and each field's `{scope, encrypted}` rule, is configured entirely through **Settings → Config Sync**'s cards (stored in the plugin's own settings, `schemaVersion: 2`) and, for anything a card doesn't cover, the **Advanced → Custom rules** editor in the same tab. OS junk (`.DS_Store`, `Thumbs.db`, `desktop.ini`) is never captured. See [Field rules & sensitive settings](#field-rules--sensitive-settings) for per-item rules and passphrase-protected encryption.
+What syncs, and each field's `{sharing, encrypted}` rule, is configured entirely through **Settings → Config Sync**'s cards (stored in the plugin's own settings, `schemaVersion: 3`) and, for anything a card doesn't cover, the **Advanced → Custom rules** editor in the same tab. OS junk (`.DS_Store`, `Thumbs.db`, `desktop.ini`) is never captured. See [Field rules & sensitive settings](#field-rules--sensitive-settings) for per-item rules and passphrase-protected encryption.
 
-The store format and settings schema are `schemaVersion: 2`; installs older than that have no migration path — upgrade every device together, then re-tick what to sync before capturing or applying again.
+The settings schema is `schemaVersion: 3` and `store.lock.json` is `version: 3`. A document or store from 2.x is converted on load, once, in place; see [Updating from 2.21.0 and earlier](#updating-from-2210-and-earlier) for what that means for your other devices.
 
 ## The Sync Center
 
@@ -48,7 +71,7 @@ Open the **Sync Center** any time for the full picture; its header is its own st
 - In-sync, excluded, and no-settings rows sit dimmed with the checkbox hidden, folded behind a trailing line per section, in this order: `✓ N items in sync ▸`, `⊘ N items not synced on this device ▸`, `○ N items with no settings yet ▸` — click to expand in place.
 - The checkbox means one thing everywhere: include this row in the next run. It never changes what would happen, only whether it happens — so a section's own select-all is always safe, and it skips the self row, in-sync/excluded/no-settings rows and any unresolved conflict.
 - The filter pills — **All**, **To capture**, **To apply**, **In sync**, **Not synced here**, **No settings yet** — narrow every section by the same fate; they hide rows, they never move them between sections. **Not synced here** (and its matching fold/badges) only appears once at least one item is excluded — an empty bucket shows nothing, same as **In sync**/**No settings yet**.
-- A rule that keeps an item off this device's class (e.g. Hotkeys scoped `Desktop only` while you're on a phone) reads `— Not synced on this device` with a `your rule` chip, instead of a misleading `In sync` — and counts under **Not synced here**, not **In sync**. An item you opted THIS device out of (below) reads the identical row and counts the same way — the card's **State** clause is what tells the two causes apart.
+- A rule that keeps an item off this device's class (e.g. Hotkeys set to `Desktop only` while you're on a phone) reads `— Not synced on this device` with a `your rule` chip, instead of a misleading `In sync` — and counts under **Not synced here**, not **In sync**. An item you opted THIS device out of (below) reads the identical row and counts the same way — the card's **State** clause is what tells the two causes apart.
 - JSON diffs render with keys in a normalized order, so a pure key-order/formatting difference is called out instead of showing as noise.
 
 #### The expanded card
@@ -58,9 +81,9 @@ Click a row's name to expand it into a card, in order (each row omitted when it 
 - **On apply** / **On capture** / **State** — the fate sentence spelled out as a full clause: install source (`from the community catalog` / `via BRAT`), update versions (`Updates 2.14.0 → 2.15.1`), what capturing publishes (`Shares your settings with your other devices`).
 - **Files** — direction-aware entries: incoming additions as `+ file` with `view ▸`/`diff ▸`, outgoing changes as `↑ file · diff ▸`, encrypted content as `changed — encrypted, no preview`.
 - **Resolve** (conflicts only) — `Use theirs ↓` / `Keep mine ↑`; the row stays unstageable until you pick one, then reads as a normal directed row plus a `your choice` chip.
-- **Runs on** (plugins, while the Core/Community on/off list itself is a synced item) — one menu unifying every way to say where a plugin turns on: `Follows your devices` (default) / `Computers only` / `Phones only` / `Always on here` / `Never on here`.
+- **Runs on** (plugins, while the Core/Community on/off list itself is a synced item) — one menu unifying every way to say where a plugin turns on: `Follows your devices` (default) / `Computers only` / `Phones only` / `Always on here` / `Never on here`. `Computers only` / `Phones only` decide where the item syncs as well as where it turns on — one field, one meaning. Up to 2.21.0 that choice was read by this menu alone; see [Updating from 2.21.0 and earlier](#updating-from-2210-and-earlier).
 - **After install** / **Enablement** — the fallback when the on/off list ISN'T itself synced (a section header's `on/off synced ✓` / `on/off not synced` chip toggles that, via a small popover — `Sync on/off` / `Stop syncing on/off`): `Turn it on` or `Leave it off`, offered for a plugin this run installs, or one that's already installed but off.
-- **Settings sync** — the item's own file-level device scope, the same three-stop control (`All devices` / `Desktop only` / `Mobile only`) as its Settings-tab card. A fields-mode item has no whole-file rule to move, so it reads `Per-key rules decide — see More` instead of offering a menu that would persist nothing.
+- **Settings sync** — the item's own file-level sharing rule, the same three-stop control (`All devices` / `Desktop only` / `Mobile only`) as its Settings-tab card. A fields-mode item has no whole-file rule to move, so it reads `Per-key rules decide — see More` instead of offering a menu that would persist nothing.
 - **More** — a deep link that opens Settings scrolled to, and highlighting, this item's own card, for per-key rules, locks and companion folders.
 - **Note** — an honest runtime aside, e.g. Hotkeys' `Takes effect after an app reload`.
 
@@ -79,21 +102,23 @@ Every run is also recorded in a browsable, clearable **History**: a sidebar entr
 
 #### Search & qualifiers
 
-The **Filter by name…** search box lives in the Sync Center's sidebar and searches globally across every scope at once (Obsidian, Core plugins, Community plugins, Beta, Custom). Beyond plain text it accepts `key:value` qualifiers, combined together and with free text:
+The **Filter by name…** search box lives in the Sync Center's sidebar and searches globally across every section at once (Obsidian, Core plugins, Community plugins, Beta, Custom). Beyond plain text it accepts `key:value` qualifiers, combined together and with free text:
 
 | Qualifier | Values |
 |---|---|
 | `type:` | file / folder |
-| `scope:` | obsidian / core / community / beta / custom |
+| `section:` | obsidian / core / community / beta / custom |
 | `action:` | capture / apply / ok / none |
 | `mode:` | plain / fields / encrypted |
 | `device:` | all / desktop / mobile |
 
-An autocomplete dropdown opens as soon as the box is focused, suggesting keys then values. The sidebar shows a hit count per scope, and sections with a match auto-expand to show just the hits.
+An autocomplete dropdown opens as soon as the box is focused, suggesting keys then values. The sidebar shows a hit count per section, and sections with a match auto-expand to show just the hits.
+
+**Retired syntax:** `scope:` was this box's word for `section:` up to 2.21.0, and the settings panel's word for its own areas. It is not accepted any more, in either box, and there is no alias — a typed `scope:community` is treated as plain text and finds the items whose names contain those words, which is usually nothing. Retype it as `section:community`.
 
 #### Leftovers
 
-A card's quiet `⊘ Stop syncing` footer button opens a menu with two scopes: **On this device** applies instantly (no modal, reversible in place) — this device stops installing/applying/capturing the item while your other devices keep syncing it as normal (its row here now reads `— Not synced on this device`, with the card explaining `you turned it off here`); **Everywhere…** opens the existing confirm dialog, optionally deleting its store copy, and removes it from every device's sync list.
+A card's quiet `⊘ Stop syncing` footer button opens a menu with two reaches: **On this device** applies instantly (no modal, reversible in place) — this device stops installing/applying/capturing the item while your other devices keep syncing it as normal (its row here now reads `— Not synced on this device`, with the card explaining `you turned it off here`); **Everywhere…** opens the existing confirm dialog, optionally deleting its store copy, and removes it from every device's sync list.
 
 **On this device** is stored on the device itself, not in Config Sync's own settings, so it never travels: a Pull and Adopt from another device can no longer wipe the choice you made here, and each device's list is its own. It also means the choice does not follow you — reinstalling Obsidian, or setting the vault up again on a new machine, starts with nothing opted out. Store files left behind by an Everywhere removal with no matching item surface in their own **Leftover** section for one-click cleanup — an item merely switched off on this device (whether via **On this device** or a core plugin's own toggle) keeps its store settings attached to its card, never in Leftover.
 
@@ -116,19 +141,20 @@ Every row across **Obsidian**, **Core plugins**, **Community plugins** and **Bet
 
 - The **Obsidian** tab has three cards: **App settings** (the whole `app.json` — editing, new-note and link behavior, and other general options), **Appearance** (theme, fonts and CSS snippets) and **Hotkeys** (your custom keyboard shortcuts).
 - **Core** and **Community** plugins are listed in full: a core plugin gets a full card even before it has written its settings file here — the file's path is known from the plugin itself, so its store copy stays attached wherever the file exists.
-- The **Search all settings…** box spans General, all picker tabs, Advanced and Remotes, and accepts `scope:` (general/obsidian/core/community/advanced/remotes) and `type:` (file/folder) qualifiers with autocomplete alongside plain text.
+- A community plugin your other devices sync but that isn't installed here still gets a card, as soon as it carries anything of its own on this device — switched on, switched off, a settings rule, a companion folder. The one shape that earns no card is a **Runs-on rule and nothing else**: that rule is set from the plugin's row in the Sync Center rather than from a card, so it doesn't summon one, and switching such a card off makes it disappear (see [Updating from 2.21.0 and earlier](#updating-from-2210-and-earlier)). It keeps its store copy and its Sync Center row either way, and installing the plugin here always gives it a card.
+- The **Search all settings…** box spans General, all picker tabs, Advanced and Remotes, and accepts `section:` (general/obsidian/core/community/advanced/remotes) and `type:` (file/folder) qualifiers with autocomplete alongside plain text. `section:` names a settings AREA here, so its list is the Sync Center's plus the areas that hold no items; custom rules and discovered files live on the Advanced tab, so `section:advanced` is what finds them. The old `scope:` is not accepted — see [Retired syntax](#search--qualifiers).
 - The **Beta** tab tracks community plugins installed through [BRAT](https://github.com/TfTHacker/obsidian42-brat) — same card, same three drawer zones — so their configs sync like any other plugin.
 - Each section lists its cards alphabetically; sensitive-looking keys (tokens, secrets) are highlighted inside a card's File preview so you see them before enabling syncing.
 
-A card's drawer has up to three zones, and every scope control in them is the same cycling icon: the glyph shows the current scope (a monitor+phone pair = `All devices`, a monitor = `Desktop only`, a phone = `Mobile only`, an airplay mark = `This device`), a click advances to the next value, and the default sits dimmed while anything narrower lights up in the accent color.
+A card's drawer has up to three zones, and every sharing control in them is the same cycling icon: the glyph shows the current rule (a monitor+phone pair = `All devices`, a monitor = `Desktop only`, a phone = `Mobile only`, an airplay mark = `This device`), a click advances to the next value, and the default sits dimmed while anything narrower lights up in the accent color.
 
 #### Enabled on
 
-A plugin's on/off state lives on its own card, in its **Enabled on** zone. Plugin cards only: one cycling scope icon for which devices turn the plugin itself on; it reads and writes the same enabled-plugins list Obsidian maintains.
+A plugin's on/off state lives on its own card, in its **Enabled on** zone. Plugin cards only: one cycling sharing icon for which devices turn the plugin itself on; it reads and writes the same enabled-plugins list Obsidian maintains.
 
 #### Settings file
 
-Starts as one path row: the file's path, a scope icon (no `This device` here) and a lock toggle that encrypts the whole file. The path text itself is the edit entry point:
+Starts as one path row: the file's path, a sharing icon (no `This device` here) and a lock toggle that encrypts the whole file. The path text itself is the edit entry point:
 
 - Click it to edit in place (Enter commits, Esc cancels).
 - While editing a committed custom path, a quiet **Reset to default** action restores the built-in default.
@@ -137,20 +163,20 @@ Below the path row, a collapsed **File preview** (`▸ File preview`) expands in
 
 The moment a card has any per-key rule, it switches to per-key mode:
 
-- The path row's own scope/lock dim (each ruled key now governs itself).
-- A row appears per configured key with its own scope icon, a lock toggle (greyed out at `This device`) and a ✕ to remove the rule.
-- A string-array key's rule adds a **Per-item scopes** toggle so each element gets its own scope icon instead of one rule for the whole key.
+- The path row's own sharing/lock dim (each ruled key now governs itself).
+- A row appears per configured key with its own sharing icon, a lock toggle (greyed out at `This device`) and a ✕ to remove the rule.
+- A string-array key's rule adds a **Per-item device rules** toggle so each element gets its own sharing icon instead of one rule for the whole key.
 - Removing the last rule reverts the card to whole-file mode.
 
 #### Companion folders
 
 Lists any vault-relative folder that travels with the item — Appearance ships `themes/` and `snippets/` as presets, and every card's drawer ends with a quiet **+ Add folder** row to add any other path (duplicates and paths already claimed by another item are rejected).
 
-- Each folder row has a scope icon and a sync toggle (plus a ✕ on any folder you added yourself), and clicking the folder's name opens its path for editing.
-- A folder's member list is collapsed behind a `· N files`/`· N themes` count — click to expand it.
-- Opening `snippets/` lists each file as its own row with a scope icon: the file itself always syncs, and the icon only decides which devices turn it on.
-- A member whose file has been deleted but still holds a device choice stays listed — struck through, marked `file deleted` — until you press **Forget**, which clears the choice (the next capture then removes it from the store); the folder's member count only counts files that still exist.
-- Any other companion folder syncs as a whole, so its members list for information only, without a per-file scope.
+- Each folder row has a sharing icon and a sync toggle (plus a ✕ on any folder you added yourself), and clicking the folder's name opens its path for editing.
+- A folder's file list is collapsed behind a `· N files`/`· N themes` count — click to expand it.
+- Opening `snippets/` lists each file as its own row with a sharing icon: the file itself always syncs, and the icon only decides which devices turn it on.
+- A file that has been deleted but still holds a device choice stays listed — struck through, marked `file deleted` — until you press **Forget**, which clears the choice (the next capture then removes it from the store); the folder's count only counts files that still exist.
+- Any other companion folder syncs as a whole, so its files are listed for information only, without a per-file sharing rule.
 
 #### Advanced
 
@@ -162,11 +188,11 @@ Desktop only. Add a **git repository** (URL, branch, optional folder) or **anoth
 
 ## Field rules & sensitive settings
 
-Every field or file rule is a `{scope, encrypted}` pair, set per key (or per file, when the item has no per-key rules) from a card's Settings file zone.
+Every field or file rule is a `{sharing, encrypted}` pair, set per key (or per file, when the item has no per-key rules) from a card's Settings file zone.
 
-- **Scope** — `All devices` keeps the key shared and identical everywhere; `Desktop only`/`Mobile only` keep it shared but let each device class hold its own value, in a `__scopes__` sidecar next to the file's store copy (e.g. `app.json`'s `userIgnoreFilters`, per-device search-ignore patterns, is commonly set `Desktop only`); `This device` (per-key rules only, not the whole-file rule) keeps a key out of the store entirely and never leaves this machine — Apply preserves the local value.
+- **Sharing** — `All devices` keeps the key shared and identical everywhere; `Desktop only`/`Mobile only` keep it shared but let each device class hold its own value, in a `__scopes__` sidecar next to the file's store copy (that filename is a stored path, unchanged since 1.x, so existing stores keep working — e.g. `app.json`'s `userIgnoreFilters`, per-device search-ignore patterns, is commonly set `Desktop only`); `This device` (per-key rules only, not the whole-file rule) keeps a key out of the store entirely and never leaves this machine — Apply preserves the local value.
 - **Encrypt** — stores the value (or, for the whole-file rule, the whole file) as an encrypted envelope and decrypts it on Apply, so credentials can travel safely; a value that hasn't actually changed keeps its existing envelope, so an unrelated edit never makes it look changed in a diff. Greyed out at `This device`, since a value that never leaves the device has nothing to encrypt for transit.
-- **Per-item scopes** — a string-array key (a plugin's enabled elements, a CSS-snippets list, `userIgnoreFilters`…) can turn on per-element scopes instead of one rule for the whole key, so each entry travels or stays local independently.
+- **Per-item device rules** — a string-array key (a plugin's enabled elements, a CSS-snippets list, `userIgnoreFilters`…) can give each element its own sharing rule instead of one rule for the whole key, so each entry travels or stays local independently.
 
 #### Passphrase & keychain
 
@@ -207,7 +233,7 @@ How the store travels between devices, beyond this device's own Capture/Apply (s
 - The Sync Center's Remotes block auto-checks whether a git or vault remote was captured after your local store.
 - Expand a remote for a Pull/Push preview: the same four sections as the main list group its entries (companion families folded together the same way), a divergent Core/Community on/off list surfaces as one pinned `On/off list · differs for N plugins ▸` line naming which plugins flip on which side (capped at five names, or `its entire list — N plugins` on a fresh device), and each file entry expands into content diffs — the summary separates what Pull would bring from files that exist only in your store (Pull never removes files).
 
-**Mixed versions** — updating every device at once is not required, and the store's own settings travel wholesale, so Config Sync refuses anything it would have to guess at rather than resetting it.
+**Mixed versions** — from 2.21.0 onward, updating every device at once is not required: the store's own settings travel wholesale, so Config Sync refuses anything it would have to guess at rather than resetting it. Updating *to* this version is the exception, because 2.20.0 and earlier have no such refusal — see [Updating from 2.21.0 and earlier](#updating-from-2210-and-earlier).
 
 - If this device's own Config Sync settings were written by a **newer** version of the plugin, Config Sync stops here and says so as soon as the vault opens: `These settings were written by a newer Config Sync`. The Sync Center repeats it at the top of the item list, nothing on disk is changed, and everything that would write — Capture, Apply, Pull, Push, Stop syncing (both "On this device" and "Everywhere"), the leftover cleanup, the settings screens — declines until you update this device. A declined action changes nothing and is not written to the run history either. What still works: reading, comparing, and this device's own scratch preferences (the passphrase, dismissing a banner, clearing the run history). Nothing is lost: the file is exactly as the newer version left it.
 - Same rule for content arriving from elsewhere: applying the store's Config Sync settings when they came from a newer version fails that one item (the rest of the run is unaffected).
@@ -217,7 +243,7 @@ How the store travels between devices, beyond this device's own Capture/Apply (s
 
 - Nothing breaks in either direction. A device on an older build reads the store fine; it simply doesn't understand the newer bookkeeping and drops it when it writes the store back. The next Capture from an updated device writes it again. That coming and going is not itself compared — bookkeeping only one side records is skipped rather than counted as a change.
 - Freshness gets more precise as devices update. Once both ends of a comparison are on this version, the Remotes block weighs the store **item by item** rather than by one whole-store timestamp: a purely cosmetic change (a plugin renamed on one device) stops reading as something to Pull, and a store that is merely older in clock terms while holding the same items can read as up to date. Two cases keep the older, coarser reading. An item whose store copy is encrypted can't be fingerprinted — every device encrypts to different bytes — so it is judged by when it was captured; capture it on one device and the others will still offer a Pull, even though the settings are identical. And when two stores are each ahead of the other in different items, the whole-store timestamps decide, exactly as before.
-- **On this device** is now remembered on the device itself, so a Pull or an Adopt can no longer erase it — that is the bug this version fixes. The old fleet-wide list stays in your settings file all the same, because the devices you haven't updated yet still read it and would lose their own choice if it vanished. This device keeps its own entry in that list up to date and never touches another device's. One consequence while the fleet is mixed: if you turn the choice back ON here and an older device then re-publishes the old list still naming this one, the choice can come back after a Pull + Adopt — this version errs toward keeping a choice rather than losing one. It settles once every device is updated.
+- **On this device** is remembered on the device itself, so a Pull or an Adopt cannot erase it. The fleet-wide copy that older versions also kept in your settings file is gone as of this version: it existed only so that a device too old to refuse a newer file would still find its own choice there, and every device that can read this file is new enough to refuse instead. Your own choices are untouched by the removal — they were already stored here, and the conversion reads the old list one last time before dropping it.
 
 ## Status bar & ribbon
 
@@ -230,11 +256,11 @@ How the store travels between devices, beyond this device's own Capture/Apply (s
 1. Settings → Config Sync → under *Obsidian*, tick **Hotkeys** and **Appearance** (its card covers the settings file plus the `themes/` and `snippets/` companion folders).
 2. Open **Sync Center** from the ribbon menu and press **Capture N items**.
 3. On each other device, once your note sync has delivered the data folder: open **Sync Center** and press **Apply N items**.
-4. Open the Appearance card's `snippets/` companion folder to give any snippet its own scope: `All devices` (synced everywhere) / `Desktop only` / `Mobile only` (shared, travels, and is enforced on the other device class) / `This device` (keeps its own on/off here, never synced). A plugin's **Enabled on** zone works the same way for which devices turn it on (a desktop-only plugin's cycle skips the mobile stop).
+4. Open the Appearance card's `snippets/` companion folder to give any snippet its own sharing rule: `All devices` (synced everywhere) / `Desktop only` / `Mobile only` (shared, travels, and is enforced on the other device class) / `This device` (keeps its own on/off here, never synced). A plugin's **Enabled on** zone works the same way for which devices turn it on (a desktop-only plugin's cycle skips the mobile stop).
 
 **Sync a plugin's settings but keep credentials out of the store**
 1. Under *Community plugins*, open the plugin's card.
-2. In its **File preview**, click each credential key to add a rule, set its scope to `This device` (or turn on its lock if you want it to travel).
+2. In its **File preview**, click each credential key to add a rule, set its sharing to `This device` (or turn on its lock if you want it to travel).
 3. Capture. This-device credentials never enter the store; each device keeps its locally entered values across applies.
 
 **IOTO vault, from zero**

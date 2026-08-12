@@ -20,7 +20,26 @@ export const SWITCH_LISTS: Record<string, SwitchListSpec> = {
   "enabled-css-snippets": { localFile: "appearance.json", field: "enabledCssSnippets" },
 };
 
-export const SWITCH_LIST_GROUPS: ReadonlySet<string> = new Set(Object.keys(SWITCH_LISTS));
+// An on/off list an ITEM's enablement can ride (spec §5, "retired outright"): the identity is the
+// list, and its filename is derived from that identity HERE and nowhere else — v2 spelled the
+// filename into every def (`enablement.carrier: "core-plugins.json"`) and then compared strings
+// against it in half a dozen places. Which lists exist as carriers is the registry's declaration
+// (registry.ts's ENABLEMENT_LISTS); what file one lives in is this table's.
+export type EnablementList = "core-plugins" | "community-plugins";
+
+export function enablementListFile(list: EnablementList): string {
+  const spec = SWITCH_LISTS[list];
+  if (spec === undefined) throw new Error(`switch list "${list}" has no spec — SWITCH_LISTS and EnablementList disagree`);
+  return spec.localFile;
+}
+
+// Whether a group's CONTENT has switch-list shape (a string array or a boolean map inside a named
+// file), which is this table's business — distinct from "is this group an enablement carrier?",
+// which is the registry's (isEnablementList). `enabled-css-snippets` is the difference: its shape
+// lives here, but no item's enablement rides it.
+export function isSwitchListGroup(name: string): boolean {
+  return Object.prototype.hasOwnProperty.call(SWITCH_LISTS, name);
+}
 
 export type SwitchList = string[] | Record<string, boolean>;
 
@@ -139,7 +158,7 @@ export function memberUniverse(store: SwitchList | null, local: SwitchList | nul
 // Whether an id/key is ON in a SwitchList — array presence / map truthy value, the exact reading
 // applySwitchList's own exception pass-through relies on for a masked id (task-2 fix: mask
 // producers must derive "locally on" from this PERSISTED content, never from a live runtime
-// query, which can diverge — see normalizeMemberRule's callers in main.ts). A null list
+// query, which can diverge — see availability.ts's forcedRunsOn and its callers). A null list
 // (unreadable/absent local file) counts as off.
 export function switchListMemberOn(list: SwitchList | null, id: string): boolean {
   if (list === null) return false;

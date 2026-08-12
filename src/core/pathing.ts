@@ -51,7 +51,7 @@ export function resolveGroupByStoreRel(groups: SyncGroup[], rel: string): SyncGr
   for (const g of groups) {
     const sp = groupStorePath(g.path);
     if (g.type === "file" && (inner === sp || inner.startsWith(sp + ".__scopes__."))) return g;
-    if (g.type === "dir" && inner.startsWith(sp + "/")) return g;
+    if (g.type === "folder" && inner.startsWith(sp + "/")) return g;
   }
   return undefined;
 }

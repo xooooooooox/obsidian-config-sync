@@ -13,21 +13,24 @@ import {
   companionNameConflict,
   CompileSettings,
   compileItems,
-  emptyItemConfig,
-  ItemConfig,
+  defRef,
+  emptyItem,
+  Item,
   ItemDef,
   RegistryEnv,
 } from "../src/core/registry";
 import { leftoverStoreRels } from "../src/core/leftover";
+import { Section } from "../src/core/types";
+import { itemsIn } from "./items";
 
 // spec docs/superpowers/specs/2026-07-25-unified-card-design.md §4/§8, D7/D8; task-7-brief.md.
 
-function settings(items: Record<string, ItemConfig>): CompileSettings {
-  return { items, customGroups: [] };
+function settings(partial: Partial<Record<Section, Record<string, Item>>> = {}): CompileSettings {
+  return { items: itemsIn(partial) };
 }
 
-function on(overrides: Partial<ItemConfig> = {}): ItemConfig {
-  return { ...emptyItemConfig(), enabled: true, ...overrides };
+function on(overrides: Partial<Item> = {}): Item {
+  return { ...emptyItem(), enabled: true, ...overrides };
 }
 
 const EMPTY_ENV: RegistryEnv = { cores: [], plugins: [], betaIds: new Set() };
@@ -106,21 +109,21 @@ describe("validateCompanionBasename (final-review MUST-FIX 1 — UI-level: refus
 
 describe("companionNameConflict (final-review MUST-FIX 1 — UI-level: refuses the add BEFORE persist)", () => {
   const defs = buildItemDefs(ENV);
-  const dataview = defs.find((d) => d.id === "community:dataview") as ItemDef;
+  const dataview = defs.find((d) => d.section === "community" && d.id === "dataview") as ItemDef;
 
   it("rejects a basename that collides with a reserved registry group name", () => {
     expect(companionNameConflict("assets/hotkeys", defs, settings({}), null)).toBe("hotkeys");
   });
 
   it("rejects a basename that collides with a DIFFERENT item's already-configured companion, even though the full paths differ", () => {
-    const cfg = { [dataview.id]: on({ companions: [{ path: "a/logs", scope: "all", enabled: true }] }) };
-    expect(companionNameConflict("b/logs", defs, settings(cfg), null)).toBe("logs");
+    const cfg = itemsIn({ community: { [dataview.id]: on({ companions: [{ path: "a/logs", device: "all", enabled: true }] }) } });
+    expect(companionNameConflict("b/logs", defs, { items: cfg }, null)).toBe("logs");
   });
 
   it("excludes the entry being edited — renaming a path while keeping the same basename does not self-collide", () => {
-    const cfg = { [dataview.id]: on({ companions: [{ path: "a/logs", scope: "all", enabled: true }] }) };
-    const s = settings(cfg);
-    expect(companionNameConflict("other/logs", defs, s, { itemId: dataview.id, path: "a/logs" })).toBeNull();
+    const cfg = itemsIn({ community: { [dataview.id]: on({ companions: [{ path: "a/logs", device: "all", enabled: true }] }) } });
+    const s = { items: cfg };
+    expect(companionNameConflict("other/logs", defs, s, { ref: defRef(dataview), path: "a/logs" })).toBeNull();
   });
 
   it("a genuinely free basename returns null", () => {
@@ -145,8 +148,8 @@ describe("companionConflict", () => {
   const appearance = defs.find((d) => d.id === "appearance") as ItemDef;
   const app = defs.find((d) => d.id === "app") as ItemDef;
   const hotkeys = defs.find((d) => d.id === "hotkeys") as ItemDef;
-  const graph = defs.find((d) => d.id === "core:graph") as ItemDef;
-  const dataview = defs.find((d) => d.id === "community:dataview") as ItemDef;
+  const graph = defs.find((d) => d.section === "core" && d.id === "graph") as ItemDef;
+  const dataview = defs.find((d) => d.section === "community" && d.id === "dataview") as ItemDef;
 
   it("returns null for a genuinely free path", () => {
     expect(companionConflict("attachments", defs, settings({}))).toBeNull();
@@ -159,10 +162,10 @@ describe("companionConflict", () => {
   });
 
   it("rejects a path already claimed via another item's CUSTOM settings-file path", () => {
-    const cfg = { [hotkeys.id]: on({ settingsFile: { mode: "plain", rules: {}, perItem: {}, customPath: "notes/hotkeys-custom.json" } }) };
-    expect(companionConflict("notes/hotkeys-custom.json", defs, settings(cfg))).toBe(hotkeys.label);
+    const cfg = itemsIn({ obsidian: { [hotkeys.id]: on({ path: "notes/hotkeys-custom.json" }) } });
+    expect(companionConflict("notes/hotkeys-custom.json", defs, { items: cfg })).toBe(hotkeys.label);
     // the vacated registry default is free again once a custom path is set
-    expect(companionConflict("{configDir}/hotkeys.json", defs, settings(cfg))).toBeNull();
+    expect(companionConflict("{configDir}/hotkeys.json", defs, { items: cfg })).toBeNull();
   });
 
   it("rejects a path already one of an item's PRESET companions (themes/, snippets/), toggled or not", () => {
@@ -171,8 +174,8 @@ describe("companionConflict", () => {
   });
 
   it("rejects a path already a USER-added companion of some item", () => {
-    const cfg = { [app.id]: on({ companions: [{ path: "notes/extra", scope: "all", enabled: true }] }) };
-    expect(companionConflict("notes/extra", defs, settings(cfg))).toBe(app.label);
+    const cfg = itemsIn({ obsidian: { [app.id]: on({ companions: [{ path: "notes/extra", device: "all", enabled: true }] }) } });
+    expect(companionConflict("notes/extra", defs, { items: cfg })).toBe(app.label);
   });
 
   it("rejects the app.json path via the app card's own settings file, regardless of {configDir} form", () => {
@@ -182,8 +185,8 @@ describe("companionConflict", () => {
   it("self-card dedupe: adding a companion path the SAME item already owns (preset or user) is still a conflict", () => {
     // themes/ is appearance's own preset — re-"adding" it collides with itself, not some other item
     expect(companionConflict("{configDir}/themes", defs, settings({}))).toBe(appearance.label);
-    const cfg = { [appearance.id]: on({ companions: [{ path: "notes/mine", scope: "all", enabled: true }] }) };
-    expect(companionConflict("notes/mine", defs, settings(cfg))).toBe(appearance.label);
+    const cfg = itemsIn({ obsidian: { [appearance.id]: on({ companions: [{ path: "notes/mine", device: "all", enabled: true }] }) } });
+    expect(companionConflict("notes/mine", defs, { items: cfg })).toBe(appearance.label);
   });
 
   it("a path claimed via a companion is still reported even when a DIFFERENT item's own default would also match it — some real offending label, never null", () => {
@@ -191,8 +194,8 @@ describe("companionConflict", () => {
     // is double-claimed (app's companion AND hotkeys' default settings file), so any
     // non-null, correctly-labelled answer is right — this pins that companionConflict does not
     // silently miss the collision just because two different carriers both claim it.
-    const cfg = { [app.id]: on({ companions: [{ path: "{configDir}/hotkeys.json", scope: "all", enabled: true }] }) };
-    const result = companionConflict("{configDir}/hotkeys.json", defs, settings(cfg));
+    const cfg = itemsIn({ obsidian: { [app.id]: on({ companions: [{ path: "{configDir}/hotkeys.json", device: "all", enabled: true }] }) } });
+    const result = companionConflict("{configDir}/hotkeys.json", defs, { items: cfg });
     expect([app.label, hotkeys.label]).toContain(result);
   });
 
@@ -217,13 +220,13 @@ describe("companionConflict", () => {
 describe("custom settings-file path changes the compiled group's path (D7) without touching the old store rel", () => {
   it("compileItems emits the new path only; the old default path is not claimed anymore", () => {
     const defs = buildItemDefs(EMPTY_ENV);
-    const before = compileItems(defs, settings({ hotkeys: on() }));
+    const before = compileItems(defs, settings({ obsidian: { hotkeys: on() } }));
     const beforeGroup = before.find((g) => g.name === "hotkeys");
     expect(beforeGroup?.path).toBe("{configDir}/hotkeys.json");
 
     const after = compileItems(
       defs,
-      settings({ hotkeys: on({ settingsFile: { mode: "plain", rules: {}, perItem: {}, customPath: "notes/my-hotkeys.json" } }) })
+      settings({ obsidian: { hotkeys: on({ path: "notes/my-hotkeys.json" }) } })
     );
     const afterGroup = after.find((g) => g.name === "hotkeys");
     expect(afterGroup?.path).toBe("notes/my-hotkeys.json");
@@ -234,9 +237,7 @@ describe("custom settings-file path changes the compiled group's path (D7) witho
     // duplicated it).
     const stillFree = compileItems(
       defs,
-      settings({
-        hotkeys: on({ settingsFile: { mode: "plain", rules: {}, perItem: {}, customPath: "notes/my-hotkeys.json" } }),
-      })
+      settings({ obsidian: { hotkeys: on({ path: "notes/my-hotkeys.json" }) } })
     );
     expect(stillFree.filter((g) => g.path === "{configDir}/hotkeys.json")).toHaveLength(0);
   });
@@ -244,13 +245,13 @@ describe("custom settings-file path changes the compiled group's path (D7) witho
   it("leftover pickup: once compiledGroups reflect the new path, the old store rel shows up as leftover (leftover.ts, no migration)", () => {
     const defs = buildItemDefs(EMPTY_ENV);
     const oldRel = "store/configdir/hotkeys.json";
-    const compiledBefore = compileItems(defs, settings({ hotkeys: on() }));
+    const compiledBefore = compileItems(defs, settings({ obsidian: { hotkeys: on() } }));
     // Before the change, the old rel is attributed to the hotkeys group — not leftover.
     expect(leftoverStoreRels([oldRel], compiledBefore)).toEqual([]);
 
     const compiledAfter = compileItems(
       defs,
-      settings({ hotkeys: on({ settingsFile: { mode: "plain", rules: {}, perItem: {}, customPath: "notes/my-hotkeys.json" } }) })
+      settings({ obsidian: { hotkeys: on({ path: "notes/my-hotkeys.json" }) } })
     );
     // After the change, compiledGroups no longer contain any group at the old store path — the
     // existing leftover-detection flow (main.ts's listLeftoverStoreFiles, unioned with the store's

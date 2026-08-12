@@ -3,13 +3,15 @@ import { Notice } from "obsidian";
 import ConfigSyncPlugin from "../src/main";
 import { MemFS, FakePlugins, memGroupsIO } from "./memfs";
 import { applyImport, applyWithActions, capture, CoreContext, PendingPull, planImport, pushExternal, ExternalStoreReader, ExternalStoreWriter, writeGroups } from "../src/core/ConfigSyncCore";
-import { declaredStoreLockVersion, parseSyncManifest, parseStoreLock, storeLockVersion, STORE_LOCK_FUTURE_MESSAGE, STORE_LOCK_VERSION } from "../src/core/manifest";
+import { declaredStoreLockVersion, lockEntry, parseSyncManifest, parseStoreLock, storeLockVersion, STORE_LOCK_FUTURE_MESSAGE, STORE_LOCK_VERSION } from "../src/core/manifest";
 import { SCHEMA_FUTURE_APPLY_MESSAGE, SCHEMA_FUTURE_NOTICE, SCHEMA_UPGRADE_NOTICE } from "../src/core/settingsMigration";
 import { SELF_GROUP_NAME } from "../src/core/catalog";
 import { SyncCenterView } from "../src/ui/SyncCenterView";
 import { ConfigSyncSettingTab } from "../src/ui/SettingTab";
 import { GroupResult, Remote, SyncGroup } from "../src/core/types";
 import { CaptureItem, ApplyItem } from "../src/core/ConfigSyncCore";
+import { itemsIn } from "./items";
+import { ItemMap } from "../src/core/registry";
 
 // spec 2026-08-11-data-model-hardening.md §4 (invariant II.3): a document or store written by a
 // NEWER build is refused with a clear message — never downgraded, never reset, never overwritten.
@@ -46,11 +48,11 @@ interface StopSurface {
   saveData: (d: unknown) => Promise<void>;
   loadSettings: () => Promise<void>;
   saveSettings: () => Promise<void>;
-  recompile: () => Promise<void>;
+  recompile: () => Promise<boolean>;
   refreshLocalStatus: () => Promise<void>;
   settingsWritable: () => boolean;
   setItemSyncEnabled: (itemId: string, enabled: boolean) => Promise<void>;
-  settings: { rootPath: string; items: Record<string, unknown> };
+  settings: { rootPath: string; items: ItemMap };
   syncCenterHost: () => {
     schemaStop: () => { found: number } | null;
     captureItems: (items: CaptureItem[]) => Promise<GroupResult[] | null>;
@@ -100,24 +102,18 @@ function makePlugin(io: MemFS, data: unknown): { instance: StopSurface; saveCoun
   return { instance, saveCount: () => saves, local: (key) => store.get(key) };
 }
 
-const OK_DOCUMENT = { schemaVersion: 2, rootPath: "cs", items: { "community:demo": { enabled: true, companions: [] } }, remotes: [], bratPluginIndex: {} };
+const OK_DOCUMENT = { schemaVersion: 3, rootPath: "cs", items: itemsIn({ community: { demo: { enabled: true } } }), remotes: [], bratIndex: {} };
 
-// A document from the future that ALSO carries every shape the load path would normally rewrite
-// and save immediately: the pre-C-#52 deviceOptOuts map, a pre-merge appJson slice, and a
-// pre-retarget enabledOn:"local". Each of those is a `saveSettings()` on a document this build
-// does not own — exactly the overwrite the stop state exists to prevent.
+// A document from the future, carrying shapes this build has no idea what to do with. Any
+// `saveSettings()` on it would be an overwrite of a document this build does not own — exactly
+// what the stop state exists to prevent.
 function futureDocument(): unknown {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     rootPath: "cs",
-    items: {
-      "community:demo": { enabled: true, companions: [], enabledOn: "local" },
-      editor: { enabled: true, companions: [] },
-    },
-    appJson: { mode: "plain" },
-    deviceOptOuts: { hotkeys: ["d1"] },
+    items: itemsIn({ community: { demo: { enabled: true, runsOn: { device: "here-on-tuesdays" } as never } } }),
     remotes: [],
-    bratPluginIndex: {},
+    bratIndex: {},
     somethingOnlyTheFutureKnows: { keep: true },
   };
 }
@@ -131,11 +127,11 @@ describe("§4.1 — a data.json from a newer build is never reset and never over
     await instance.loadSettings();
 
     expect(saveCount()).toBe(0);
-    expect(instance.syncCenterHost().schemaStop()).toEqual({ found: 3 });
+    expect(instance.syncCenterHost().schemaStop()).toEqual({ found: 4 });
     // Not reset to defaults either: the document's own values are what's in memory, unknown
     // fields included, so nothing this build might still write could flatten it.
     expect(instance.settings.rootPath).toBe("cs");
-    expect(instance.settings.items["community:demo"]).toEqual({ enabled: true, companions: [], enabledOn: "local" });
+    expect(instance.settings.items.community["demo"]).toEqual({ enabled: true, runsOn: { device: "here-on-tuesdays" } });
   });
 
   // §4.2b: a device that has silently stopped syncing is the failure this release exists to
@@ -169,7 +165,7 @@ describe("§4.1 — a data.json from a newer build is never reset and never over
 
   it("a document this build understands raises no stop notice at all", async () => {
     NoticeSpy.messages = [];
-    const ok = makePlugin(new MemFS(), { schemaVersion: 2, items: {}, remotes: [], bratPluginIndex: {} });
+    const ok = makePlugin(new MemFS(), { schemaVersion: 3, items: itemsIn({}), remotes: [], bratIndex: {} });
     await ok.instance.loadSettings();
     const fresh = makePlugin(new MemFS(), null);
     await fresh.instance.loadSettings();
@@ -185,7 +181,7 @@ describe("§4.1 — a data.json from a newer build is never reset and never over
     await instance.loadSettings();
     expect(instance.syncCenterHost().schemaStop()).not.toBeNull();
 
-    instance.loadData = async () => ({ schemaVersion: 2, items: {}, remotes: [], bratPluginIndex: {} });
+    instance.loadData = async () => ({ schemaVersion: 3, items: itemsIn({}), remotes: [], bratIndex: {} });
     await instance.loadSettings();
 
     expect(instance.syncCenterHost().schemaStop()).toBeNull();
@@ -280,7 +276,10 @@ describe("§4.1 — a data.json from a newer build is never reset and never over
   // The `ok` case below is what proves the refusal is doing the work: the same heal, same lock,
   // same missing label, and it lands.
   it("the startup lock-label heal writes nothing while stopped — and still heals when it isn't", async () => {
-    const lock = JSON.stringify({ capturedAt: "2026-08-01T00:00:00.000Z", groups: { "plugin-demo": { sourcePluginVersion: "1.0.0" } } }, null, 2);
+    // In THIS build's format: the heal refuses a lock in any other (see lockLabelHeal.test.ts), so a
+    // v1/v2 fixture here would pass for the wrong reason — nothing written because nothing is ever
+    // written, rather than because the stop state held.
+    const lock = JSON.stringify({ version: 3, capturedAt: "2026-08-01T00:00:00.000Z", items: { community: { demo: { source: { kind: "plugin", version: "1.0.0" } } } } }, null, 2);
     const seed = { "cs/store.lock.json": lock, "cs/store/configdir/plugins/demo/data.json": "{}" };
 
     const stoppedIo = new MemFS();
@@ -293,11 +292,11 @@ describe("§4.1 — a data.json from a newer build is never reset and never over
 
     const okIo = new MemFS();
     okIo.seed(seed);
-    const ok = makePlugin(okIo, { schemaVersion: 2, rootPath: "cs", items: { "community:demo": { enabled: true, companions: [] } }, remotes: [], bratPluginIndex: {} });
+    const ok = makePlugin(okIo, { schemaVersion: 3, rootPath: "cs", items: itemsIn({ community: { demo: { enabled: true } } }), remotes: [], bratIndex: {} });
     await ok.instance.loadSettings();
     await ok.instance.recompile();
     await ok.instance.refreshLocalStatus();
-    expect(parseStoreLock(await okIo.read("cs/store.lock.json")).groups["plugin-demo"]?.label).toBe("Demo Plugin");
+    expect(lockEntry(parseStoreLock(await okIo.read("cs/store.lock.json")), "community/demo")?.display?.label).toBe("Demo Plugin");
   });
 
   // Review I1: the opt-out moved to localStorage in §2, which took it out from behind
@@ -401,7 +400,7 @@ describe("§4.1 — a data.json from a newer build is never reset and never over
     const before = JSON.stringify(instance.settings.items);
 
     expect(instance.settingsWritable()).toBe(false);
-    await instance.setItemSyncEnabled("community:demo", false);
+    await instance.setItemSyncEnabled("community/demo", false);
 
     expect(JSON.stringify(instance.settings.items)).toBe(before);
   });
@@ -411,9 +410,13 @@ describe("§4.1 — a data.json from a newer build is never reset and never over
     await instance.loadSettings();
 
     expect(instance.settingsWritable()).toBe(true);
-    await instance.setItemSyncEnabled("community:demo", false);
+    expect(instance.settings.items.community["demo"]?.enabled).toBe(true);
+    await instance.setItemSyncEnabled("community/demo", false);
 
-    expect((instance.settings.items["community:demo"] as { enabled: boolean }).enabled).toBe(false);
+    // The entry stays and records the "off" — see registry.ts's withItem: in the enablement
+    // sections an entry's presence is this device's capture mask. The before/after pair is what
+    // proves the write happened rather than being refused.
+    expect(instance.settings.items.community["demo"]).toEqual({ enabled: false });
   });
 
   it("pull and push refuse before a remote is even opened", async () => {
@@ -462,7 +465,7 @@ function guardCtx(io: MemFS): CoreContext {
 }
 
 describe("§4.2 — the guard runs before the write, not after it", () => {
-  const LOCAL_SELF = JSON.stringify({ schemaVersion: 2, items: { hotkeys: { enabled: true, companions: [] } } }, null, 2);
+  const LOCAL_SELF = JSON.stringify({ schemaVersion: 3, items: itemsIn({ obsidian: { hotkeys: { enabled: true } } }) }, null, 2);
 
   async function runAdopt(storeSelf: string): Promise<{ io: MemFS; results: GroupResult[] }> {
     const io = new MemFS();
@@ -486,7 +489,7 @@ describe("§4.2 — the guard runs before the write, not after it", () => {
   }
 
   it("fails the self item with the §4.2 message and leaves the local document byte-identical", async () => {
-    const { io, results } = await runAdopt(JSON.stringify({ schemaVersion: 3, items: {} }));
+    const { io, results } = await runAdopt(JSON.stringify({ schemaVersion: 4, items: {} }));
 
     const self = results.find((r) => r.group === SELF_GROUP_NAME);
     expect(self?.status).toBe("error");
@@ -496,14 +499,14 @@ describe("§4.2 — the guard runs before the write, not after it", () => {
   });
 
   it("other items in the same run are unaffected", async () => {
-    const { io, results } = await runAdopt(JSON.stringify({ schemaVersion: 3, items: {} }));
+    const { io, results } = await runAdopt(JSON.stringify({ schemaVersion: 4, items: {} }));
 
     expect(results.find((r) => r.group === "hotkeys")?.status).toBe("ok");
     expect(await io.read("config-dir/hotkeys.json")).toBe('{"store":1}');
   });
 
   it("a store document this build understands still applies exactly as before", async () => {
-    const incoming = JSON.stringify({ schemaVersion: 2, items: { appearance: { enabled: true, companions: [] } } });
+    const incoming = JSON.stringify({ schemaVersion: 3, items: itemsIn({ obsidian: { appearance: { enabled: true } } }) });
     const { io, results } = await runAdopt(incoming);
 
     expect(results.find((r) => r.group === SELF_GROUP_NAME)?.status).toBe("ok");
@@ -556,22 +559,26 @@ function fakeWriter(initial: Record<string, string>): { writer: ExternalStoreWri
   };
 }
 
+// A lock in the shape a 2.21.0 device writes — the transition window's normal store, and still the
+// "today's shape" side of every gate below.
 const V1_LOCK = JSON.stringify({ capturedAt: "2026-08-01T00:00:00.000Z", groups: { hotkeys: { sourceAppVersion: "1.8.7" } } });
-const V3_LOCK = JSON.stringify({ version: 3, capturedAt: "2026-08-01T00:00:00.000Z", groups: { hotkeys: { sourceAppVersion: "1.8.7" } } });
+// "From the future" is version 4 now that this build writes 3 (spec §3). The gate is unchanged; the
+// number it refuses moved with the format, which is the whole point of declaring one.
+const V4_LOCK = JSON.stringify({ version: 4, capturedAt: "2026-08-01T00:00:00.000Z", items: { obsidian: { hotkeys: { source: { kind: "app", version: "1.8.7" } } } } });
 
 describe("§4.3 — the store lock's version", () => {
   it("absent means 1: today's locks parse and read exactly as they always did", () => {
     const lock = parseStoreLock(V1_LOCK);
     expect(storeLockVersion(lock)).toBe(1);
     expect(lock.capturedAt).toBe("2026-08-01T00:00:00.000Z");
-    expect(lock.groups.hotkeys).toEqual({ sourceAppVersion: "1.8.7" });
+    expect(lockEntry(lock, "obsidian/hotkeys")).toEqual({ source: { kind: "app", version: "1.8.7" } }); // converted in memory, not on disk
   });
 
   // A version that isn't a number is not evidence of a newer format, and refusing to sync over a
   // typo would strand a whole fleet — so it degrades to today's shape instead of throwing.
   it("a non-numeric version degrades to 1 rather than throwing", () => {
-    expect(storeLockVersion(parseStoreLock(JSON.stringify({ version: "3", capturedAt: "t", groups: {} })))).toBe(1);
-    expect(parseStoreLock(JSON.stringify({ version: "3", capturedAt: "t", groups: {} })).version).toBe("3"); // and it is carried, not dropped (§3.1)
+    expect(storeLockVersion(parseStoreLock(JSON.stringify({ version: "4", capturedAt: "t", items: {} })))).toBe(1);
+    expect(parseStoreLock(JSON.stringify({ version: "4", capturedAt: "t", items: {} })).version).toBe("4"); // and it is carried, not dropped (§3.1)
   });
 
   it("capture writes this build's version", async () => {
@@ -590,7 +597,7 @@ describe("§4.3 — the store lock's version", () => {
     io.seed({ "cs/store.lock.json": V1_LOCK, "cs/store/configdir/hotkeys.json": '{"mine":1}' });
     const ctx = guardCtx(io);
 
-    await expect(planImport(ctx, fakeReader({ "store.lock.json": V3_LOCK, "store/configdir/hotkeys.json": '{"theirs":1}' }), { excludeSelf: false })).rejects.toThrow(
+    await expect(planImport(ctx, fakeReader({ "store.lock.json": V4_LOCK, "store/configdir/hotkeys.json": '{"theirs":1}' }), { excludeSelf: false })).rejects.toThrow(
       STORE_LOCK_FUTURE_MESSAGE
     );
     expect(await io.read("cs/store.lock.json")).toBe(V1_LOCK);
@@ -601,7 +608,7 @@ describe("§4.3 — the store lock's version", () => {
     const io = new MemFS();
     io.seed({ "cs/store.lock.json": V1_LOCK, "cs/store/configdir/hotkeys.json": '{"mine":1}' });
     const ctx = guardCtx(io);
-    const fw = fakeWriter({ "store.lock.json": V3_LOCK, "store/configdir/hotkeys.json": '{"theirs":1}' });
+    const fw = fakeWriter({ "store.lock.json": V4_LOCK, "store/configdir/hotkeys.json": '{"theirs":1}' });
 
     await expect(pushExternal(ctx, fw.writer, { excludeSelf: false })).rejects.toThrow(STORE_LOCK_FUTURE_MESSAGE);
 
@@ -611,16 +618,16 @@ describe("§4.3 — the store lock's version", () => {
 
   // Review I3: no pull, no remote — the v3 lock is simply THERE, put in this vault by another
   // device's newer build through git / Remotely Save / a file-sync service. Capture is about to
-  // replace it with `version: 2`, which would discard whatever v3 recorded.
+  // replace it with `version: 3`, which would discard whatever v4 recorded.
   it("capture refuses a LOCAL lock from a newer build and leaves it byte-identical", async () => {
     const io = new MemFS();
-    io.seed({ "config-dir/hotkeys.json": '{"a":1}', "cs/store.lock.json": V3_LOCK });
+    io.seed({ "config-dir/hotkeys.json": '{"a":1}', "cs/store.lock.json": V4_LOCK });
     const ctx = guardCtx(io);
     await writeGroups(ctx, parseSyncManifest(JSON.stringify({ version: 1, groups: [{ name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all" }] })).groups);
 
     await expect(capture(ctx)).rejects.toThrow(STORE_LOCK_FUTURE_MESSAGE);
 
-    expect(await io.read("cs/store.lock.json")).toBe(V3_LOCK);
+    expect(await io.read("cs/store.lock.json")).toBe(V4_LOCK);
     // and it refused before the first group was mirrored, not just before the lock write
     expect(await io.exists("cs/store/configdir/hotkeys.json")).toBe(false);
   });
@@ -640,11 +647,11 @@ describe("§4.3 — the store lock's version", () => {
     expect(planned.plan.conflicts.filter((c) => c.kind === "file")).toHaveLength(1);
 
     const io = new MemFS();
-    io.seed({ ...store, "cs/store.lock.json": V3_LOCK });
+    io.seed({ ...store, "cs/store.lock.json": V4_LOCK });
 
     await expect(planImport(guardCtx(io), fakeReader(remote), { excludeSelf: false })).rejects.toThrow(STORE_LOCK_FUTURE_MESSAGE);
 
-    expect(await io.read("cs/store.lock.json")).toBe(V3_LOCK);
+    expect(await io.read("cs/store.lock.json")).toBe(V4_LOCK);
     expect(await io.read("cs/store/configdir/hotkeys.json")).toBe('{"mine":1}');
   });
 
@@ -652,7 +659,7 @@ describe("§4.3 — the store lock's version", () => {
   // the v3 lock landed, or built without planImport at all — is still refused.
   it("and the pull merge refuses it too, for a caller that never planned", async () => {
     const io = new MemFS();
-    io.seed({ "cs/store.lock.json": V3_LOCK });
+    io.seed({ "cs/store.lock.json": V4_LOCK });
     const pending: PendingPull = {
       plan: {
         auto: {
@@ -671,7 +678,7 @@ describe("§4.3 — the store lock's version", () => {
 
     await expect(applyImport(guardCtx(io), pending, [])).rejects.toThrow(STORE_LOCK_FUTURE_MESSAGE);
 
-    expect(await io.read("cs/store.lock.json")).toBe(V3_LOCK);
+    expect(await io.read("cs/store.lock.json")).toBe(V4_LOCK);
     expect(await io.exists("cs/store/configdir/hotkeys.json")).toBe(false);
   });
 
@@ -683,16 +690,16 @@ describe("§4.3 — the store lock's version", () => {
   // §6's own "Out of scope" note defers to v3, which is why those two fields were kept flat. Asking
   // the version off a raw JSON.parse is what separates "invalid for v1" from "newer than us".
   describe("a v3 lock this build cannot even parse", () => {
-    const V3_PARTITIONED = JSON.stringify({
-      version: 3,
+    const V4_RESTRUCTURED = JSON.stringify({
+      version: 4,
       capturedAt: "2026-08-01T00:00:00.000Z",
-      groups: { hotkeys: { source: { appVersion: "1.8.7" }, display: { label: "Hotkeys" } } },
+      items: { obsidian: { hotkeys: { origin: { app: "1.8.7" }, display: { label: "Hotkeys" } } } },
     });
     const HOTKEYS_ONLY = JSON.stringify({ version: 1, groups: [{ name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all" }] });
 
     it("is genuinely unparseable, and genuinely declares 3 — the two questions have different answers", () => {
-      expect(() => parseStoreLock(V3_PARTITIONED)).toThrow('store.lock.json group "hotkeys" must have a string sourcePluginVersion or sourceAppVersion');
-      expect(declaredStoreLockVersion(V3_PARTITIONED)).toBe(3);
+      expect(() => parseStoreLock(V4_RESTRUCTURED)).toThrow('store.lock.json item "obsidian/hotkeys" must have a "source"');
+      expect(declaredStoreLockVersion(V4_RESTRUCTURED)).toBe(4);
       // …while something that is not a lock at all still reads as today's shape, so a corrupt file
       // keeps the tolerant behaviour it has always had rather than stranding the fleet.
       expect(declaredStoreLockVersion("not json at all")).toBe(1);
@@ -700,36 +707,36 @@ describe("§4.3 — the store lock's version", () => {
       expect(declaredStoreLockVersion(V1_LOCK)).toBe(1);
     });
 
-    it("capture refuses it instead of rewriting v3's bookkeeping as version 2", async () => {
+    it("capture refuses it instead of rewriting a newer build's bookkeeping as version 3", async () => {
       const io = new MemFS();
-      io.seed({ "config-dir/hotkeys.json": '{"a":1}', "cs/store.lock.json": V3_PARTITIONED });
+      io.seed({ "config-dir/hotkeys.json": '{"a":1}', "cs/store.lock.json": V4_RESTRUCTURED });
       const ctx = guardCtx(io);
       await writeGroups(ctx, parseSyncManifest(HOTKEYS_ONLY).groups);
 
       await expect(capture(ctx)).rejects.toThrow(STORE_LOCK_FUTURE_MESSAGE);
 
-      expect(await io.read("cs/store.lock.json")).toBe(V3_PARTITIONED);
+      expect(await io.read("cs/store.lock.json")).toBe(V4_RESTRUCTURED);
       expect(await io.exists("cs/store/configdir/hotkeys.json")).toBe(false);
     });
 
     it("pull refuses it at both ends — as the remote's lock, and as the local one it would replace", async () => {
-      const remoteFiles = { "store.lock.json": V3_PARTITIONED, "store/configdir/hotkeys.json": '{"theirs":1}' };
+      const remoteFiles = { "store.lock.json": V4_RESTRUCTURED, "store/configdir/hotkeys.json": '{"theirs":1}' };
       const io = new MemFS();
       io.seed({ "cs/store.lock.json": V1_LOCK, "cs/store/configdir/hotkeys.json": '{"mine":1}' });
       await expect(planImport(guardCtx(io), fakeReader(remoteFiles), { excludeSelf: false })).rejects.toThrow(STORE_LOCK_FUTURE_MESSAGE);
       expect(await io.read("cs/store/configdir/hotkeys.json")).toBe('{"mine":1}');
 
       const localIo = new MemFS();
-      localIo.seed({ "cs/store.lock.json": V3_PARTITIONED, "cs/store/configdir/hotkeys.json": '{"mine":1}' });
+      localIo.seed({ "cs/store.lock.json": V4_RESTRUCTURED, "cs/store/configdir/hotkeys.json": '{"mine":1}' });
       await expect(
         planImport(guardCtx(localIo), fakeReader({ "store.lock.json": V1_LOCK, "store/configdir/hotkeys.json": '{"theirs":1}' }), { excludeSelf: false })
       ).rejects.toThrow(STORE_LOCK_FUTURE_MESSAGE);
-      expect(await localIo.read("cs/store.lock.json")).toBe(V3_PARTITIONED);
+      expect(await localIo.read("cs/store.lock.json")).toBe(V4_RESTRUCTURED);
     });
 
     it("the pull merge refuses it too, for a caller that never planned", async () => {
       const io = new MemFS();
-      io.seed({ "cs/store.lock.json": V3_PARTITIONED });
+      io.seed({ "cs/store.lock.json": V4_RESTRUCTURED });
       const pending: PendingPull = {
         plan: {
           auto: {
@@ -748,38 +755,40 @@ describe("§4.3 — the store lock's version", () => {
 
       await expect(applyImport(guardCtx(io), pending, [])).rejects.toThrow(STORE_LOCK_FUTURE_MESSAGE);
 
-      expect(await io.read("cs/store.lock.json")).toBe(V3_PARTITIONED);
+      expect(await io.read("cs/store.lock.json")).toBe(V4_RESTRUCTURED);
       expect(await io.exists("cs/store/configdir/hotkeys.json")).toBe(false);
     });
 
     it("push refuses it before the first file is written — store.lock.json is in the pushed set", async () => {
       const io = new MemFS();
       io.seed({ "cs/store.lock.json": V1_LOCK, "cs/store/configdir/hotkeys.json": '{"mine":1}' });
-      const fw = fakeWriter({ "store.lock.json": V3_PARTITIONED, "store/configdir/hotkeys.json": '{"theirs":1}' });
+      const fw = fakeWriter({ "store.lock.json": V4_RESTRUCTURED, "store/configdir/hotkeys.json": '{"theirs":1}' });
 
       await expect(pushExternal(guardCtx(io), fw.writer, { excludeSelf: false })).rejects.toThrow(STORE_LOCK_FUTURE_MESSAGE);
 
       expect(fw.writeLog).toEqual([]);
-      expect(fw.files["store.lock.json"]).toBe(V3_PARTITIONED);
+      expect(fw.files["store.lock.json"]).toBe(V4_RESTRUCTURED);
     });
   });
 
   // Round-4 review N1: the startup label heal is the FOURTH writer of this file, and the case is
   // worse than the others — data.json here is a perfectly readable v2, so `schemaStop` is null and
   // the stop state's guard says nothing, and the write fires at startup with no user action at
-  // all. The pairing that proves it: `refreshLocalStatus` over the same lock at v1 (see the heal
-  // test above) does write the healed label.
-  it("the startup label heal refuses a v3 lock and leaves it byte-identical", async () => {
-    const v3Lock = JSON.stringify({ version: 3, capturedAt: "2026-08-01T00:00:00.000Z", groups: { "plugin-demo": { sourcePluginVersion: "1.0.0" } } }, null, 2);
+  // all. The pairing that proves it: `refreshLocalStatus` over a lock in THIS build's own format
+  // (the heal test above, at version 3) does write the healed label. A v1/v2 lock would not be that
+  // pairing — task-3's C1 ruling stopped the heal upgrading a format, so those are left
+  // byte-identical too, for a different reason (lockLabelHeal.test.ts holds that case).
+  it("the startup label heal refuses a lock from a newer build and leaves it byte-identical", async () => {
+    const v4Lock = JSON.stringify({ version: 4, capturedAt: "2026-08-01T00:00:00.000Z", items: { community: { demo: { source: { kind: "plugin", version: "1.0.0" } } } } }, null, 2);
     const io = new MemFS();
-    io.seed({ "cs/store.lock.json": v3Lock, "cs/store/configdir/plugins/demo/data.json": "{}" });
+    io.seed({ "cs/store.lock.json": v4Lock, "cs/store/configdir/plugins/demo/data.json": "{}" });
     const { instance } = makePlugin(io, OK_DOCUMENT); // NOT stopped — this build reads the document fine
 
     await instance.loadSettings();
     await instance.recompile();
     await instance.refreshLocalStatus();
 
-    expect(await io.read("cs/store.lock.json")).toBe(v3Lock);
+    expect(await io.read("cs/store.lock.json")).toBe(v4Lock);
   });
 
   it("a remote lock with no version at all still pulls and pushes as today", async () => {
@@ -847,7 +856,7 @@ describe("the Advanced tab's draft", () => {
     let saves = 0;
     const host = {
       settingsWritable: () => writable,
-      settings: { items: {}, customGroups: [] as SyncGroup[] },
+      settings: { items: itemsIn({}) },
       saveSettings: async () => {
         saves += 1;
       },

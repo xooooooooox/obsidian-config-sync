@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { commitDraft } from "../src/ui/commitGroups";
 import { SELF_GROUP_NAME, selfPresetRules } from "../src/core/catalog";
-import { SyncGroup } from "../src/core/types";
-import { setMemberScope } from "../src/ui/SettingTab";
+import { SyncGroup, THIS_DEVICE } from "../src/core/types";
+import { ConfigSyncSettingTab, setMemberDeviceClass } from "../src/ui/SettingTab";
+import { compileItems, customItemFromGroup, Item, ItemMap } from "../src/core/registry";
+import { itemsIn } from "./items";
 
 const base: SyncGroup[] = [{ name: "a", path: "{configDir}/a.json", type: "file", devices: "all" }];
 
@@ -28,7 +30,7 @@ describe("commitDraft", () => {
       withSelfNoPresets,
       (d) => {
         const g = d.find((x) => x.name === SELF_GROUP_NAME);
-        if (g !== undefined) g.fields = [{ pattern: "rootPath", scope: "local", encrypted: false }]; // user tries to strip the preset unlocked
+        if (g !== undefined) g.fields = [{ pattern: "rootPath", sharing: THIS_DEVICE, encrypted: false }]; // user tries to strip the preset unlocked
       },
       async (g) => {
         written = g;
@@ -41,9 +43,93 @@ describe("commitDraft", () => {
   });
 });
 
-describe("setMemberScope", () => {
+describe("setMemberDeviceClass", () => {
   it("stores non-all and deletes on all", () => {
-    expect(setMemberScope({}, "a-mobile", "mobile")).toEqual({ "a-mobile": "mobile" });
-    expect(setMemberScope({ "a-mobile": "mobile" }, "a-mobile", "all")).toEqual({});
+    expect(setMemberDeviceClass({}, "a-mobile", "mobile")).toEqual({ "a-mobile": "mobile" });
+    expect(setMemberDeviceClass({ "a-mobile": "mobile" }, "a-mobile", "all")).toEqual({});
+  });
+});
+
+
+// Fix round 2: the custom section's unknown-field carry reads the tail off the STORED item, and a
+// RENAME changes the map key while leaving the item's identity in the store alone — so a lookup by
+// name alone would silently drop every field a newer build wrote the moment a user renamed a rule.
+// Driven through the real persist path (persistCustomItems), not the pure converter, because the
+// name→path fallback lives in the tab.
+describe("persistCustomItems — the carry survives a rename (2.21.0 invariant II.1)", () => {
+  const STORED: Item = { ...customItemFromGroup({ name: "old-name", path: "notes/x.json", type: "file", devices: "all" }), writtenByANewerBuild: { keep: true } } as Item;
+
+  interface PersistTab {
+    persistCustomItems: (draft: SyncGroup[]) => Promise<void>;
+  }
+
+  function tabWith(): { tab: PersistTab; items: () => ItemMap } {
+    const host = {
+      settingsWritable: () => true,
+      settings: { items: itemsIn({ custom: { "old-name": STORED } }) },
+      saveSettings: async () => {},
+      installedPluginIds: () => [],
+      itemDefs: () => [],
+    };
+    const tab = new ConfigSyncSettingTab({} as never, host as never);
+    return { tab: tab as unknown as PersistTab, items: () => host.settings.items };
+  }
+
+  it("a rename keeps the tail, matched by the path the rename did not touch", async () => {
+    const { tab, items } = tabWith();
+
+    await tab.persistCustomItems([{ name: "new-name", path: "notes/x.json", type: "file", devices: "all" }]);
+
+    const renamed = items().custom["new-name"];
+    expect(renamed).toBeDefined();
+    expect(items().custom["old-name"]).toBeUndefined();
+    expect((renamed as unknown as { writtenByANewerBuild: unknown }).writtenByANewerBuild).toEqual({ keep: true });
+  });
+
+  it("an edit that keeps the name keeps the tail too — the name lookup still leads", async () => {
+    const { tab, items } = tabWith();
+
+    await tab.persistCustomItems([{ name: "old-name", path: "notes/moved.json", type: "file", devices: "all" }]);
+
+    const edited = items().custom["old-name"];
+    expect(edited?.path).toBe("notes/moved.json");
+    expect((edited as unknown as { writtenByANewerBuild: unknown }).writtenByANewerBuild).toEqual({ keep: true });
+  });
+
+  // The honest limit, pinned so it is a known gap rather than a surprise: rename AND re-path in one
+  // commit leaves nothing to match on. The Advanced tab commits per field, so it takes two writes
+  // to get here, and the first one carries the tail forward under the new key.
+  it("a rename AND a re-path in the same commit is the one case with nothing left to match on", async () => {
+    const { tab, items } = tabWith();
+
+    await tab.persistCustomItems([{ name: "new-name", path: "notes/elsewhere.json", type: "file", devices: "all" }]);
+
+    expect(items().custom["new-name"]).toBeDefined();
+    expect(items().custom["new-name"]).not.toHaveProperty("writtenByANewerBuild");
+  });
+});
+
+// The path the encrypted-mode defect actually manifested on (review M7). A custom rule is the only
+// item that CHOOSES its mode — the Advanced tab's Mode dropdown offers Plain/Fields/Encrypt on
+// every one — and the item ↔ group conversion used to enumerate only "fields", so editing any
+// other field of an encrypted rule silently rewrote it to Plain and the next capture wrote that
+// file into the store as PLAINTEXT. Driven through the real persist path, then back out through
+// the compile path, because the loss needed both halves to show.
+describe("persistCustomItems — an Encrypt-mode custom rule survives an unrelated edit", () => {
+  it("keeps mode:'encrypted' through the item round trip and back into the compiled group", async () => {
+    const host = {
+      settingsWritable: () => true,
+      settings: { items: itemsIn({ custom: { secrets: customItemFromGroup({ name: "secrets", path: "notes/s.json", type: "file", devices: "all", mode: "encrypted" }) } }) },
+      saveSettings: async () => {},
+      installedPluginIds: () => [],
+      itemDefs: () => [],
+    };
+    const tab = new ConfigSyncSettingTab({} as never, host as never) as unknown as { persistCustomItems: (draft: SyncGroup[]) => Promise<void> };
+
+    // an edit to something else entirely — the description — exactly as the tab commits it
+    await tab.persistCustomItems([{ name: "secrets", path: "notes/s.json", type: "file", devices: "all", mode: "encrypted", description: "keys" }]);
+
+    expect(host.settings.items.custom["secrets"]?.settingsFile?.mode).toBe("encrypted");
+    expect(compileItems([], { items: host.settings.items }).find((g) => g.name === "secrets")?.mode).toBe("encrypted");
   });
 });

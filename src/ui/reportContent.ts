@@ -1,9 +1,9 @@
 import { Setting } from "obsidian";
-import { GroupResult } from "../core/types";
+import { GroupResult, StorageSection } from "../core/types";
 import { isChanged } from "../core/runHistory";
-import { CATEGORY_LABELS, ItemCategory, categoryForGroup } from "../core/catalog";
+import { SECTION_LABELS, sectionForGroup } from "../core/catalog";
 
-export const REPORT_CATEGORY_ORDER: ItemCategory[] = ["obsidian", "core", "community", "custom"];
+export const REPORT_CATEGORY_ORDER: StorageSection[] = ["obsidian", "core", "community", "custom"];
 
 export function chipTooltip(kind: "add" | "upd" | "del", n: number): string {
   const verb = kind === "add" ? "added" : kind === "upd" ? "updated" : "deleted";
@@ -76,10 +76,10 @@ export function renderReportContent(container: HTMLElement, results: GroupResult
   const { changed, unchanged } = changedOf(results);
   container.createDiv({ cls: "config-sync-report-legend", text: "+ added · ~ updated · − deleted (files)" });
   for (const cat of REPORT_CATEGORY_ORDER) {
-    const inCat = changed.filter((r) => r.group !== "" && categoryForGroup(r.group) === cat);
+    const inCat = changed.filter((r) => r.group !== "" && sectionForGroup(r.group) === cat);
     if (inCat.length === 0) continue;
     const sect = container.createDiv({ cls: "config-sync-sect" });
-    sect.createSpan({ text: CATEGORY_LABELS[cat] });
+    sect.createSpan({ text: SECTION_LABELS[cat] });
     sect.createSpan({ cls: "config-sync-pill is-neutral config-sync-sect-count", text: `${inCat.length}` });
     const block = container.createDiv({ cls: "config-sync-card" });
     for (const r of inCat) renderResultRow(block, r, opts.labelFor(r.group));

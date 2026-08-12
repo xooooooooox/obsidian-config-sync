@@ -1,25 +1,30 @@
 import { describe, expect, it } from "vitest";
+import { withRef } from "./lock";
+import { StoreLockEntry } from "../src/core/types";
+import { lockEntry, STORE_LOCK_VERSION } from "../src/core/manifest";
 import { CoreContext, capture, captureWithActions, loadManifest, groupsForDevice, apply, applyWithActions, planImport, applyImport, PendingPull, ExternalStoreReader, pushExternal, ExternalStoreWriter, pluginIdForGroup, orderInstallsCatalogFirst, readGroups, writeGroups, deviceExcludedPluginIds, isSelfStoreRel, remoteGroupsFrom, groupForStoreRel, backfillLockLabels, excludeOptedOutItems } from "../src/core/ConfigSyncCore";
 import { parseStoreLock, parseSyncManifest } from "../src/core/manifest";
 import { SwitchList } from "../src/core/switchList";
 import { SELF_GROUP_NAME, selfPresetRules } from "../src/core/catalog";
-import { StoreLock, SyncGroup } from "../src/core/types";
+import { StoreLock, SyncGroup, EVERYWHERE, THIS_DEVICE, perClass } from "../src/core/types";
 import { isFieldEnvelope, parseFileEnvelope } from "../src/core/crypto";
 import { statusForGroups, remoteLockAhead } from "../src/core/status";
 import { emptyLedger } from "../src/core/ledger";
 import { isChanged } from "../src/core/runHistory";
 import { MemFS, FakePlugins, memGroupsIO } from "./memfs";
 import ConfigSyncPlugin from "../src/main";
+import { defRef, emptyItemMap, ItemMap, withItem } from "../src/core/registry";
 import { MemberDecision } from "../src/ui/panelModel";
 import { SelfSyncInfo } from "../src/ui/SyncCenterView";
+import { itemsIn } from "./items";
 
 export const MANIFEST = JSON.stringify({
   version: 1,
   groups: [
     { name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all" },
-    { name: "snippets", path: "{configDir}/snippets", type: "dir", devices: "all" },
+    { name: "snippets", path: "{configDir}/snippets", type: "folder", devices: "all" },
     { name: "vimrc", path: ".obsidian.vimrc", type: "file", devices: "desktop" },
-    { name: "plugin-demo", path: "{configDir}/plugins/demo/data.json", type: "file", devices: "all", mode: "fields", fields: [{ pattern: "*Token*", scope: "local", encrypted: false }] },
+    { name: "plugin-demo", path: "{configDir}/plugins/demo/data.json", type: "file", devices: "all", mode: "fields", fields: [{ pattern: "*Token*", sharing: THIS_DEVICE, encrypted: false }] },
   ],
 });
 
@@ -77,7 +82,7 @@ describe("deviceExcludedPluginIds", () => {
     type: "file",
     devices,
   });
-  const appGroup: SyncGroup = { name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "desktop" };
+  const appGroup: SyncGroup = withRef({ name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "desktop" });
   const groups = [pg("vim-toggle", "desktop"), pg("mobile-only-thing", "mobile"), pg("dataview", "all"), appGroup];
 
   it("on mobile, names plugins whose group is scoped to desktop", () => {
@@ -98,7 +103,7 @@ describe("deviceExcludedPluginIds", () => {
 describe("pluginIdForGroup", () => {
   it("extracts the id from data.json paths and whole-plugin-dir paths", () => {
     expect(pluginIdForGroup({ name: "a", path: "{configDir}/plugins/cmdr/data.json", type: "file", devices: "all" })).toBe("cmdr");
-    expect(pluginIdForGroup({ name: "b", path: "{configDir}/plugins/cmdr", type: "dir", devices: "all" })).toBe("cmdr");
+    expect(pluginIdForGroup({ name: "b", path: "{configDir}/plugins/cmdr", type: "folder", devices: "all" })).toBe("cmdr");
     expect(pluginIdForGroup({ name: "c", path: "{configDir}/hotkeys.json", type: "file", devices: "all" })).toBe(null);
   });
 });
@@ -107,7 +112,9 @@ describe("orderInstallsCatalogFirst", () => {
   it("moves BRAT-managed names last, preserving relative order within each class", () => {
     const names = ["plugin-slides-rup", "plugin-obsidian42-brat", "plugin-dataview"];
     const isBrat = (id: string): boolean => id === "slides-rup";
-    expect(orderInstallsCatalogFirst(names, isBrat)).toEqual(["plugin-obsidian42-brat", "plugin-dataview", "plugin-slides-rup"]);
+    // The predicate is asked per staged NAME: the caller holds the identity, so nothing here reads
+    // a plugin id back out of a group name (spec §5).
+    expect(orderInstallsCatalogFirst(names, (n) => n.startsWith("plugin-") && isBrat(n.slice("plugin-".length)))).toEqual(["plugin-obsidian42-brat", "plugin-dataview", "plugin-slides-rup"]);
   });
 
   it("is a no-op when nothing is BRAT-managed", () => {
@@ -117,7 +124,7 @@ describe("orderInstallsCatalogFirst", () => {
 
   it("never treats non-plugin group names as BRAT-managed", () => {
     const names = ["plugin-slides-rup", "hotkeys"];
-    expect(orderInstallsCatalogFirst(names, () => true)).toEqual(["hotkeys", "plugin-slides-rup"]);
+    expect(orderInstallsCatalogFirst(names, (n) => n.startsWith("plugin-"))).toEqual(["hotkeys", "plugin-slides-rup"]);
   });
 });
 
@@ -141,21 +148,16 @@ describe("capture", () => {
     expect(await io.exists("cs/store/configdir/snippets/stale.css")).toBe(false);
     expect(await io.read("cs/store/configdir/snippets/sub/two.css")).toBe("two");
     expect(JSON.parse(await io.read("cs/store/configdir/plugins/demo/data.json"))).toEqual({ theme: "x" });
-    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { capturedAt: string; groups: Record<string, unknown> };
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { capturedAt: string; items: Record<string, Record<string, unknown>> };
     expect(lock).toEqual({
       // spec 2026-08-11-data-model-hardening.md §4.3: every lock this build writes declares its
       // format version (absent = 1, today's shape). Refusal behaviour lives in tests/versionGates.
-      version: 2,
+      version: 3,
       // §6: a store that has never pulled starts its own lineage at its own capture time, and the
       // top-level stamp is max(groups[*].capturedAt) — for a whole-store capture, ctx.now().
       syncedWatermark: "2026-07-08T00:00:00.000Z",
       capturedAt: "2026-07-08T00:00:00.000Z",
-      groups: {
-        hotkeys: capturedEntry({ sourceAppVersion: "1.8.7" }),
-        snippets: capturedEntry({ sourceAppVersion: "1.8.7" }),
-        vimrc: capturedEntry({ sourceAppVersion: "1.8.7" }),
-        "plugin-demo": capturedEntry({ sourcePluginVersion: "1.2.3" }),
-      },
+      items: {"obsidian": {"hotkeys": capturedEntry({ source: { kind: "app", version: "1.8.7" } })},"legacy": {"snippets": capturedEntry({ source: { kind: "app", version: "1.8.7" } }),"vimrc": capturedEntry({ source: { kind: "app", version: "1.8.7" } })},"community": {"demo": capturedEntry({ source: { kind: "plugin", version: "1.2.3" } })}},
     });
   });
 
@@ -175,8 +177,8 @@ describe("capture", () => {
     expect(status["hotkeys"]).toBe("ok");
     expect(results.find((r) => r.group === "snippets")?.messages[0]).toContain("nothing to capture yet");
     expect(await io.read("cs/store/configdir/hotkeys.json")).toBe('{"a":1}');
-    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, unknown> };
-    expect(lock.groups["plugin-demo"]).toBeDefined();
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { items: Record<string, Record<string, unknown>> };
+    expect(lock.items["community"]?.["demo"]).toBeDefined();
     expect(await io.exists("cs/store/configdir/snippets")).toBe(false);
   });
 
@@ -192,8 +194,8 @@ describe("capture", () => {
     await seedGroups(ctx, MANIFEST);
     const results = await capture(ctx);
     expect(results.find((r) => r.group === "plugin-demo")?.status).toBe("error");
-    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, unknown> };
-    expect(lock.groups["plugin-demo"]).toBeUndefined();
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { items: Record<string, Record<string, unknown>> };
+    expect(lock.items["community"]?.["demo"]).toBeUndefined();
   });
 
   it("carries forward the version stamp for a group that errors this capture", async () => {
@@ -210,8 +212,8 @@ describe("capture", () => {
     await io.remove(".obs/plugins/demo/data.json");
     const results = await capture(ctx);
     expect(results.find((r) => r.group === "plugin-demo")?.status).toBe("error");
-    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { capturedAt: string; groups: Record<string, { sourcePluginVersion: string }> };
-    expect(lock.groups["plugin-demo"]).toEqual(capturedEntry({ sourcePluginVersion: "1.2.3" })); // carried whole, v2 payload included
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { capturedAt: string; items: Record<string, Record<string, StoreLockEntry>> };
+    expect(lock.items["community"]?.["demo"]).toEqual(capturedEntry({ source: { kind: "plugin", version: "1.2.3" } })); // carried whole, v2 payload included
   });
 
   it("does not invent lock entries for errored groups that never had one", async () => {
@@ -226,8 +228,8 @@ describe("capture", () => {
     await seedGroups(ctx, MANIFEST);
     const results = await capture(ctx);
     expect(results.find((r) => r.group === "plugin-demo")?.status).toBe("error");
-    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, unknown> };
-    expect(lock.groups["plugin-demo"]).toBeUndefined();
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { items: Record<string, Record<string, unknown>> };
+    expect(lock.items["community"]?.["demo"]).toBeUndefined();
   });
 
   it("rebuilds an old-format lock on capture instead of failing", async () => {
@@ -243,16 +245,16 @@ describe("capture", () => {
     await seedGroups(ctx, MANIFEST);
     const results = await capture(ctx);
     expect(results.every((r) => r.status === "ok")).toBe(true);
-    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { capturedAt: string; groups: Record<string, { sourcePluginVersion: string }> };
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { capturedAt: string; items: Record<string, Record<string, StoreLockEntry>> };
     expect(lock.capturedAt).toBe("2026-07-08T00:00:00.000Z");
-    expect(lock.groups["plugin-demo"]).toEqual(capturedEntry({ sourcePluginVersion: "1.2.3" })); // current version, not the stale 9.9.9 — success always re-stamps
+    expect(lock.items["community"]?.["demo"]).toEqual(capturedEntry({ source: { kind: "plugin", version: "1.2.3" } })); // current version, not the stale 9.9.9 — success always re-stamps
   });
 
   it("a version-only capture (content identical, store version older) is recorded as a change", async () => {
     const { io, plugins, ctx } = setup();
     plugins.installed.set("demo", "1.2.3");
     io.seed({
-      "cs/store.lock.json": JSON.stringify({ capturedAt: "old", groups: { "plugin-demo": { sourcePluginVersion: "1.2.0" } } }),
+      "cs/store.lock.json": JSON.stringify({ capturedAt: "old", items: { "community": {"demo": { source: { kind: "plugin", version: "1.2.0" } }} } }),
       "cs/store/configdir/plugins/demo/data.json": '{"theme":"x"}',
       ".obs/plugins/demo/data.json": '{"theme":"x"}', // byte-identical to the store — no file change
     });
@@ -263,8 +265,8 @@ describe("capture", () => {
     expect(r?.stateNote?.text).toContain("1.2.0");
     expect(r?.stateNote?.text).toContain("1.2.3");
     expect(isChanged(r!)).toBe(true); // the store version refresh must count in the run report
-    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, { sourcePluginVersion: string }> };
-    expect(lock.groups["plugin-demo"]).toEqual(capturedEntry({ sourcePluginVersion: "1.2.3" }));
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { items: Record<string, Record<string, StoreLockEntry>> };
+    expect(lock.items["community"]?.["demo"]).toEqual(capturedEntry({ source: { kind: "plugin", version: "1.2.3" } }));
   });
 
   it("records desktopOnly in the lock for a desktop-only plugin", async () => {
@@ -274,9 +276,9 @@ describe("capture", () => {
     io.seed({ ".obs/plugins/demo/data.json": "{}", ".obs/hotkeys.json": "{}", ".obs/snippets/one.css": "x" });
     await seedGroups(ctx, MANIFEST);
     await capture(ctx);
-    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, { sourcePluginVersion?: string; desktopOnly?: boolean }> };
-    expect(lock.groups["plugin-demo"]).toEqual(capturedEntry({ sourcePluginVersion: "1.2.3", desktopOnly: true }));
-    expect(lock.groups["hotkeys"]?.desktopOnly).toBeUndefined(); // app-anchored: never flagged
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { items: Record<string, Record<string, StoreLockEntry>> };
+    expect(lock.items["community"]?.["demo"]).toEqual(capturedEntry({ source: { kind: "plugin", version: "1.2.3" }, innate: { desktopOnly: true } }));
+    expect(lock.items["obsidian"]?.["hotkeys"]?.desktopOnly).toBeUndefined(); // app-anchored: never flagged
   });
 
   it("backfills desktopOnly onto a carried-forward installed desktop-only plugin", async () => {
@@ -287,12 +289,12 @@ describe("capture", () => {
       ".obs/plugins/demo/data.json": "{}",
       ".obs/hotkeys.json": "{}",
       ".obs/snippets/one.css": "x",
-      "cs/store.lock.json": JSON.stringify({ capturedAt: "t", groups: { "plugin-demo": { sourcePluginVersion: "1.2.3" }, hotkeys: { sourceAppVersion: "1.0.0" } } }),
+      "cs/store.lock.json": JSON.stringify({ capturedAt: "t", items: { "community": {"demo": { source: { kind: "plugin", version: "1.2.3" } }}, "obsidian": {"hotkeys": { source: { kind: "app", version: "1.0.0" } }} } }),
     });
     await seedGroups(ctx, MANIFEST);
     await capture(ctx, ["hotkeys"]);
-    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, { sourcePluginVersion?: string; desktopOnly?: boolean }> };
-    expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.2.3", desktopOnly: true });
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { items: Record<string, Record<string, StoreLockEntry>> };
+    expect(lock.items["community"]?.["demo"]).toEqual({ source: { kind: "plugin", version: "1.2.3" }, innate: { desktopOnly: true } });
   });
 
   it("clears a stale desktopOnly on carry-forward when the plugin is no longer desktop-only", async () => {
@@ -302,12 +304,12 @@ describe("capture", () => {
       ".obs/plugins/demo/data.json": "{}",
       ".obs/hotkeys.json": "{}",
       ".obs/snippets/one.css": "x",
-      "cs/store.lock.json": JSON.stringify({ capturedAt: "t", groups: { "plugin-demo": { sourcePluginVersion: "1.2.3", desktopOnly: true }, hotkeys: { sourceAppVersion: "1.0.0" } } }),
+      "cs/store.lock.json": JSON.stringify({ capturedAt: "t", items: { "community": {"demo": { source: { kind: "plugin", version: "1.2.3" }, innate: { desktopOnly: true } }}, "obsidian": {"hotkeys": { source: { kind: "app", version: "1.0.0" } }} } }),
     });
     await seedGroups(ctx, MANIFEST);
     await capture(ctx, ["hotkeys"]);
-    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, { sourcePluginVersion?: string; desktopOnly?: boolean }> };
-    expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.2.3" });
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { items: Record<string, Record<string, StoreLockEntry>> };
+    expect(lock.items["community"]?.["demo"]).toEqual({ source: { kind: "plugin", version: "1.2.3" } });
   });
 
   it("leaves a carried-forward entry untouched when the plugin is not installed here", async () => {
@@ -315,12 +317,12 @@ describe("capture", () => {
     io.seed({
       ".obs/hotkeys.json": "{}",
       ".obs/snippets/one.css": "x",
-      "cs/store.lock.json": JSON.stringify({ capturedAt: "t", groups: { "plugin-demo": { sourcePluginVersion: "1.2.3", desktopOnly: true }, hotkeys: { sourceAppVersion: "1.0.0" } } }),
+      "cs/store.lock.json": JSON.stringify({ capturedAt: "t", items: { "community": {"demo": { source: { kind: "plugin", version: "1.2.3" }, innate: { desktopOnly: true } }}, "obsidian": {"hotkeys": { source: { kind: "app", version: "1.0.0" } }} } }),
     });
     await seedGroups(ctx, MANIFEST);
     await capture(ctx, ["hotkeys"]);
-    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, { sourcePluginVersion?: string; desktopOnly?: boolean }> };
-    expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.2.3", desktopOnly: true });
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { items: Record<string, Record<string, StoreLockEntry>> };
+    expect(lock.items["community"]?.["demo"]).toEqual({ source: { kind: "plugin", version: "1.2.3" }, innate: { desktopOnly: true } });
   });
 
   it("skips OS junk when capturing dirs and cleans junk already in the store", async () => {
@@ -379,8 +381,8 @@ describe("capture", () => {
     expect(results.map((r) => r.group)).toEqual(["hotkeys"]);
     expect(await io.read("cs/store/configdir/hotkeys.json")).toBe('{"a":2}');
     expect(await io.read("cs/store/configdir/plugins/demo/data.json")).toBe("{}\n"); // untouched (unchanged since first capture's sanitized write)
-    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, { sourcePluginVersion: string }> };
-    expect(lock.groups["plugin-demo"]).toEqual(capturedEntry({ sourcePluginVersion: "1.2.3" })); // carried, not restamped
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { items: Record<string, Record<string, StoreLockEntry>> };
+    expect(lock.items["community"]?.["demo"]).toEqual(capturedEntry({ source: { kind: "plugin", version: "1.2.3" } })); // carried, not restamped
   });
 
   it("captures an encrypted-mode group as an envelope, and re-capture writes nothing when unchanged", async () => {
@@ -416,7 +418,7 @@ describe("capture", () => {
           type: "file",
           devices: "all",
           mode: "fields",
-          fields: [{ pattern: "token", scope: "all", encrypted: true }],
+          fields: [{ pattern: "token", sharing: EVERYWHERE, encrypted: true }],
         },
       ],
     });
@@ -448,7 +450,7 @@ export async function seedStore(io: MemFS, ctx: CoreContext): Promise<void> {
   io.seed({
     "cs/store.lock.json": JSON.stringify({
       capturedAt: "t",
-      groups: { "plugin-demo": { sourcePluginVersion: "1.2.3" } },
+      items: { "community": {"demo": { source: { kind: "plugin", version: "1.2.3" } }} },
     }),
     "cs/store/configdir/hotkeys.json": '{"a":2}',
     "cs/store/configdir/snippets/one.css": "one-v2",
@@ -548,7 +550,7 @@ describe("apply", () => {
 
 // C-#31: adoptConfiguration (main.ts) applies the self group ("plugin-config-sync") through this
 // same apply() — the exact path an "Adopt configuration" run takes. This is the §2 adopt truth
-// table: a store self-copy carrying bratPluginIndex/memberRules/items/customGroups (every kind of
+// table: a store self-copy carrying bratIndex/memberRules/items/customGroups (every kind of
 // top-level field the self item can carry, none of them preset-excluded) plus its own trio values,
 // applied over a local copy with DIFFERENT trio values — every synced field must come out equal to
 // the store, and the trio must come out equal to the PRE-adopt local values, untouched.
@@ -563,28 +565,24 @@ describe("apply — self group field completeness (adopt truth table, C-#31)", (
     ]);
   }
 
-  it("adopt imports every synced field (bratPluginIndex included) and leaves the device-local trio untouched", async () => {
+  it("adopt imports every synced field (bratIndex included) and leaves the device-local trio untouched", async () => {
     const { io, ctx } = setup();
     await seedSelfGroup(ctx);
     const store = {
-      schemaVersion: 2,
-      items: { "community:dataview": { enabled: true, companions: [] } },
-      customGroups: [{ name: "my-rule", path: "notes/custom.json", type: "file", devices: "all" }],
+      schemaVersion: 3,
+      items: itemsIn({ community: { dataview: { enabled: true } }, custom: { "my-rule": { enabled: true, type: "file", path: "notes/custom.json" } } }),
       remotes: [{ name: "store-remote" }],
       rootPath: "store-root",
-      localMembers: ["store-member"],
-      bratPluginIndex: { "my-text-tools": "owner/my-text-tools", "slides-rup": "owner/slides-rup" },
-      memberRules: { "community:table-editor-obsidian": "desktop" },
+      thisDeviceItems: ["community/store-member"],
+      bratIndex: { "my-text-tools": "owner/my-text-tools", "slides-rup": "owner/slides-rup" },
     };
     const local = {
-      schemaVersion: 2,
-      items: {},
-      customGroups: [],
+      schemaVersion: 3,
+      items: itemsIn({}),
       remotes: [],
       rootPath: "local-root",
-      localMembers: ["local-member"],
-      bratPluginIndex: {},
-      memberRules: {},
+      thisDeviceItems: ["community/local-member"],
+      bratIndex: {},
     };
     io.seed({ [STORE_SELF_REL]: JSON.stringify(store), [LOCAL_SELF_REL]: JSON.stringify(local) });
 
@@ -593,16 +591,14 @@ describe("apply — self group field completeness (adopt truth table, C-#31)", (
     const after = JSON.parse(await io.read(LOCAL_SELF_REL)) as Record<string, unknown>;
 
     // Every field the self compare tracks (i.e. everything selfPresetRules() does not name)
-    // adopts the store's value.
+    // adopts the store's value — the whole nested item store, custom items included.
     expect(after.items).toEqual(store.items);
-    expect(after.customGroups).toEqual(store.customGroups);
-    expect(after.bratPluginIndex).toEqual(store.bratPluginIndex);
-    expect(after.memberRules).toEqual(store.memberRules);
+    expect(after.bratIndex).toEqual(store.bratIndex);
     // The device-local trio (selfPresetRules' exclusion set) stays exactly as it was locally —
     // never overwritten by the store's copy.
     expect(after.rootPath).toBe(local.rootPath);
     expect(after.remotes).toEqual(local.remotes);
-    expect(after.localMembers).toEqual(local.localMembers);
+    expect(after.thisDeviceItems).toEqual(local.thisDeviceItems);
   });
 });
 
@@ -689,7 +685,7 @@ describe("applyWithActions", () => {
   it("install-enable with a version fallback reports the note exactly once, as a success note (not an issue)", async () => {
     const { io, plugins, ctx } = setup();
     await seedStore(io, ctx);
-    io.seed({ "cs/store.lock.json": JSON.stringify({ capturedAt: "t", groups: { "plugin-demo": { sourcePluginVersion: "2.2.2" } } }) });
+    io.seed({ "cs/store.lock.json": JSON.stringify({ capturedAt: "t", items: { "community": {"demo": { source: { kind: "plugin", version: "2.2.2" } }} } }) });
     const results = await applyWithActions(ctx, [{ name: "plugin-demo", action: "install-enable" }], async (id) => {
       plugins.installed.set(id, "2.2.3");
       return "2.2.3";
@@ -916,8 +912,8 @@ function fakeReader(files: Record<string, string>): ExternalStoreReader {
   };
 }
 
-const HOTKEYS_GROUP: SyncGroup = { name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all" };
-const SNIPPETS_GROUP: SyncGroup = { name: "snippets", path: "{configDir}/snippets", type: "dir", devices: "all" };
+const HOTKEYS_GROUP: SyncGroup = withRef({ name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all" });
+const SNIPPETS_GROUP: SyncGroup = withRef({ name: "snippets", path: "{configDir}/snippets", type: "folder", devices: "all" });
 
 // Remote groups source (planImport precedence #1): store/plugin-config-sync's own store copy
 // (store/configdir/plugins/config-sync/data.json), parsed as {groups: [...]}. Building the raw
@@ -1199,7 +1195,7 @@ describe("planImport / applyImport", () => {
 
   it("reordered switch-list membership pulls conflict-free (real-vault repro 2026-07-17)", async () => {
     const { io, ctx } = setup();
-    const SWITCH_GROUP: SyncGroup = { name: "community-plugins", path: "{configDir}/community-plugins.json", type: "file", devices: "all" };
+    const SWITCH_GROUP: SyncGroup = withRef({ name: "community-plugins", path: "{configDir}/community-plugins.json", type: "file", devices: "all" });
     await writeGroups(ctx, [SWITCH_GROUP]);
     io.seed({ "cs/store/configdir/community-plugins.json": '["obsidian-image-toolkit","ioto-tasks-center","config-sync"]' });
     const remote = {
@@ -1326,12 +1322,12 @@ describe("planImport / applyImport", () => {
     const { io, ctx } = setup();
     await writeGroups(ctx, [HOTKEYS_GROUP]);
     io.seed({
-      "cs/store.lock.json": JSON.stringify({ capturedAt: "2026-07-01T00:00:00.000Z", groups: { "plugin-config-sync": { sourcePluginVersion: "1.0.0" } } }),
+      "cs/store.lock.json": JSON.stringify({ capturedAt: "2026-07-01T00:00:00.000Z", items: { "community": {"config-sync": { source: { kind: "plugin", version: "1.0.0" } }} } }),
       "cs/store/configdir/plugins/config-sync/data.json": '{"groups":[],"mine":true}',
       "cs/store/configdir/plugins/config-sync/data.json.__scopes__.desktop.json": '{"mine":true}',
     });
     const remote = {
-      "store.lock.json": JSON.stringify({ capturedAt: "2026-07-02T00:00:00.000Z", groups: { "plugin-config-sync": { sourcePluginVersion: "9.9.9" }, hotkeys: { sourceAppVersion: "1.9.0" } } }),
+      "store.lock.json": JSON.stringify({ capturedAt: "2026-07-02T00:00:00.000Z", items: { "community": {"config-sync": { source: { kind: "plugin", version: "9.9.9" } }}, "obsidian": {"hotkeys": { source: { kind: "app", version: "1.9.0" } }} } }),
       "store/configdir/plugins/config-sync/data.json": selfDataJson([HOTKEYS_GROUP]),
       "store/configdir/hotkeys.json": '{"a":1}',
     };
@@ -1344,8 +1340,8 @@ describe("planImport / applyImport", () => {
     expect(await io.read("cs/store/configdir/plugins/config-sync/data.json")).toBe('{"groups":[],"mine":true}');
     expect(await io.read("cs/store/configdir/plugins/config-sync/data.json.__scopes__.desktop.json")).toBe('{"mine":true}');
     expect(await io.read("cs/store/configdir/hotkeys.json")).toBe('{"a":1}'); // the rest of the pull still lands
-    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, { sourcePluginVersion?: string }> };
-    expect(lock.groups["plugin-config-sync"]?.sourcePluginVersion).toBe("1.0.0"); // local self lineage survives
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { items: Record<string, Record<string, StoreLockEntry>> };
+    expect(lock.items["community"]?.["config-sync"]?.source?.version).toBe("1.0.0"); // local self lineage survives
   });
 
   describe("store.lock.json merge", () => {
@@ -1355,20 +1351,20 @@ describe("planImport / applyImport", () => {
       io.seed({
         "cs/store/configdir/hotkeys.json": '{"a":"local"}',
         "cs/store/configdir/snippets/one.css": "local-only",
-        "cs/store.lock.json": JSON.stringify({ capturedAt: "local-time", groups: { hotkeys: { sourceAppVersion: "1.0.0" }, snippets: { sourceAppVersion: "1.0.0" } } }),
+        "cs/store.lock.json": JSON.stringify({ capturedAt: "local-time", items: { "obsidian": {"hotkeys": { source: { kind: "app", version: "1.0.0" } }}, "legacy": {"snippets": { source: { kind: "app", version: "1.0.0" } }} } }),
       });
       const remote = {
         "store/configdir/plugins/config-sync/data.json": selfDataJson([HOTKEYS_GROUP]),
         "store/configdir/hotkeys.json": '{"a":"remote"}',
-        "store.lock.json": JSON.stringify({ capturedAt: "remote-time", groups: { hotkeys: { sourceAppVersion: "2.0.0" } } }),
+        "store.lock.json": JSON.stringify({ capturedAt: "remote-time", items: { "obsidian": {"hotkeys": { source: { kind: "app", version: "2.0.0" } }} } }),
       };
 
       const pending = await planImport(ctx, fakeReader(remote), { excludeSelf: false });
       await applyImport(ctx, pending, ["remote"]);
 
-      const lock = JSON.parse(await io.read("cs/store.lock.json")) as { capturedAt: string; groups: Record<string, unknown> };
-      expect(lock.groups["hotkeys"]).toEqual({ sourceAppVersion: "2.0.0" }); // taken from remote
-      expect(lock.groups["snippets"]).toEqual({ sourceAppVersion: "1.0.0" }); // kept local
+      const lock = JSON.parse(await io.read("cs/store.lock.json")) as { capturedAt: string; items: Record<string, Record<string, unknown>> };
+      expect(lock.items["obsidian"]?.["hotkeys"]).toEqual({ source: { kind: "app", version: "2.0.0" } }); // taken from remote
+      expect(lock.items["legacy"]?.["snippets"]).toEqual({ source: { kind: "app", version: "1.0.0" } }); // kept local
     });
 
     it("writes nothing when neither side has a lock", async () => {
@@ -1383,14 +1379,14 @@ describe("planImport / applyImport", () => {
     it("pull adopts the remote lock entry for an identical store file whose group exists only in the remote contract", async () => {
       const io = new MemFS();
       const plugins = new FakePlugins();
-      const FOREIGN: SyncGroup = { name: "plugin-foreign", path: "{configDir}/plugins/foreign/data.json", type: "file", devices: "all" };
+      const FOREIGN: SyncGroup = withRef({ name: "plugin-foreign", path: "{configDir}/plugins/foreign/data.json", type: "file", devices: "all" });
       const ctx: CoreContext = { io, configDir: ".obs", rootPath: "cs", plugins, passphrase: null, deviceClass: "desktop", groupsIO: memGroupsIO(), now: () => "2026-07-30T00:00:00.000Z", switchExceptions: {}, storeListGroups: () => [FOREIGN] };
       await writeGroups(ctx, [HOTKEYS_GROUP]);
-      const remoteLock = JSON.stringify({ capturedAt: "2026-07-30T09:00:00.000Z", groups: { hotkeys: { sourceAppVersion: "1.6.0" }, "plugin-foreign": { sourcePluginVersion: "0.5.25" } } }, null, 2) + "\n";
+      const remoteLock = JSON.stringify({ capturedAt: "2026-07-30T09:00:00.000Z", items: { "obsidian": {"hotkeys": { source: { kind: "app", version: "1.6.0" } }}, "community": {"foreign": { source: { kind: "plugin", version: "0.5.25" } }} } }, null, 2) + "\n";
       io.seed({
         "cs/store/configdir/hotkeys.json": '{"a":1}',
         "cs/store/configdir/plugins/foreign/data.json": '{"x":1}',
-        "cs/store.lock.json": JSON.stringify({ capturedAt: "2026-07-30T08:00:00.000Z", groups: { hotkeys: { sourceAppVersion: "1.6.0" } } }, null, 2) + "\n",
+        "cs/store.lock.json": JSON.stringify({ capturedAt: "2026-07-30T08:00:00.000Z", items: { "obsidian": {"hotkeys": { source: { kind: "app", version: "1.6.0" } }} } }, null, 2) + "\n",
       });
       const remote = {
         "store/configdir/hotkeys.json": '{"a":1}',
@@ -1402,8 +1398,8 @@ describe("planImport / applyImport", () => {
       expect(pending.plan.conflicts.filter((c) => c.kind === "file")).toEqual([]);
       await applyImport(ctx, pending, []);
       const mergedRaw = await io.read("cs/store.lock.json");
-      const merged = JSON.parse(mergedRaw) as { capturedAt: string; groups: Record<string, unknown> };
-      expect(merged.groups["plugin-foreign"]).toEqual({ sourcePluginVersion: "0.5.25" }); // adopted across
+      const merged = JSON.parse(mergedRaw) as { capturedAt: string; items: Record<string, Record<string, unknown>> };
+      expect(merged.items["community"]?.["foreign"]).toEqual({ source: { kind: "plugin", version: "0.5.25" } }); // adopted across
       expect(remoteLockAhead(mergedRaw, remoteLock, [])).toBe(false); // the hint clears
     });
 
@@ -1414,12 +1410,12 @@ describe("planImport / applyImport", () => {
       await writeGroups(ctx, [HOTKEYS_GROUP]);
       io.seed({
         ".obs/hotkeys.json": '{"a":1}',
-        "cs/store.lock.json": JSON.stringify({ capturedAt: "2026-07-30T09:00:00.000Z", groups: { hotkeys: { sourceAppVersion: "0.0.9" }, "plugin-foreign": { sourcePluginVersion: "0.5.25" } } }, null, 2) + "\n",
+        "cs/store.lock.json": JSON.stringify({ capturedAt: "2026-07-30T09:00:00.000Z", items: { "obsidian": {"hotkeys": { source: { kind: "app", version: "0.0.9" } }}, "community": {"foreign": { source: { kind: "plugin", version: "0.5.25" } }} } }, null, 2) + "\n",
       });
       await capture(ctx);
-      const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, Record<string, unknown>> };
-      expect(lock.groups["plugin-foreign"]).toEqual({ sourcePluginVersion: "0.5.25" }); // carried forward, untouched — no v2 payload invented for an item this run never captured
-      expect(lock.groups["hotkeys"]).toEqual(capturedEntry({ sourceAppVersion: plugins.getAppVersion() })); // fresh registry entry wins over 0.0.9
+      const lock = JSON.parse(await io.read("cs/store.lock.json")) as { items: Record<string, Record<string, Record<string, unknown>>> };
+      expect(lock.items["community"]?.["foreign"]).toEqual({ source: { kind: "plugin", version: "0.5.25" } }); // carried forward, untouched — no v2 payload invented for an item this run never captured
+      expect(lock.items["obsidian"]?.["hotkeys"]).toEqual(capturedEntry({ source: { kind: "app", version: plugins.getAppVersion() } })); // fresh registry entry wins over 0.0.9
     });
 
     it("capture still drops the entry of a registry group whose plugin is uninstalled (carry-forward is for foreign names only)", async () => {
@@ -1429,11 +1425,11 @@ describe("planImport / applyImport", () => {
       await writeGroups(ctx, [{ name: "plugin-demo", path: "{configDir}/plugins/demo/data.json", type: "file", devices: "all" }]);
       io.seed({
         ".obs/plugins/demo/data.json": '{"a":1}',
-        "cs/store.lock.json": JSON.stringify({ capturedAt: "2026-07-30T09:00:00.000Z", groups: { "plugin-demo": { sourcePluginVersion: "1.0.0" } } }, null, 2) + "\n",
+        "cs/store.lock.json": JSON.stringify({ capturedAt: "2026-07-30T09:00:00.000Z", items: { "community": {"demo": { source: { kind: "plugin", version: "1.0.0" } }} } }, null, 2) + "\n",
       });
       await capture(ctx);
-      const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, Record<string, unknown>> };
-      expect(lock.groups["plugin-demo"]).toBeUndefined(); // registry name: the no-version drop stands, never resurrected
+      const lock = JSON.parse(await io.read("cs/store.lock.json")) as { items: Record<string, Record<string, Record<string, unknown>>> };
+      expect(lock.items["community"]?.["demo"]).toBeUndefined(); // registry name: the no-version drop stands, never resurrected
     });
 
     it("pull converges the 'newer version info' hint for a store-only remote lock entry (repro)", async () => {
@@ -1442,11 +1438,11 @@ describe("planImport / applyImport", () => {
       io.seed({
         "cs/store/configdir/plugins/config-sync/data.json": selfDataJson([HOTKEYS_GROUP]),
         "cs/store/configdir/hotkeys.json": '{"a":1}',
-        "cs/store.lock.json": JSON.stringify({ capturedAt: "T", groups: { hotkeys: { sourceAppVersion: "1.0.0" } } }),
+        "cs/store.lock.json": JSON.stringify({ capturedAt: "T", items: { "obsidian": {"hotkeys": { source: { kind: "app", version: "1.0.0" } }} } }),
       });
       const remoteLock = {
         capturedAt: "T",
-        groups: { hotkeys: { sourceAppVersion: "1.0.0" }, "other-contract": { sourcePluginVersion: "3.1.0" } },
+        items: { "obsidian": {"hotkeys": { source: { kind: "app", version: "1.0.0" } }}, "legacy": {"other-contract": { source: { kind: "plugin", version: "3.1.0" } }} },
       };
       const remote = {
         "store/configdir/plugins/config-sync/data.json": selfDataJson([HOTKEYS_GROUP]),
@@ -1470,11 +1466,11 @@ describe("planImport / applyImport", () => {
       await writeGroups(ctx, [HOTKEYS_GROUP]);
       io.seed({
         "cs/store/configdir/hotkeys.json": '{"a":1}',
-        "cs/store.lock.json": JSON.stringify({ capturedAt: "T", groups: { hotkeys: { sourceAppVersion: "1.0.0" } } }),
+        "cs/store.lock.json": JSON.stringify({ capturedAt: "T", items: { "obsidian": {"hotkeys": { source: { kind: "app", version: "1.0.0" } }} } }),
       });
       const remoteLock = {
         capturedAt: "T",
-        groups: { hotkeys: { sourceAppVersion: "1.0.0" }, "plugin-config-sync": { sourcePluginVersion: "2.13.2" } },
+        items: { "obsidian": {"hotkeys": { source: { kind: "app", version: "1.0.0" } }}, "community": {"config-sync": { source: { kind: "plugin", version: "2.13.2" } }} },
       };
       const remote = {
         "store/configdir/hotkeys.json": '{"a":1}',
@@ -1483,9 +1479,9 @@ describe("planImport / applyImport", () => {
       const pending = await planImport(ctx, fakeReader(remote), { excludeSelf: true });
       await applyImport(ctx, pending, []);
       const after = await io.read("cs/store.lock.json");
-      expect(remoteLockAhead(after, JSON.stringify(remoteLock), ["plugin-config-sync"])).toBe(false);
-      const afterLock = JSON.parse(after) as { groups: Record<string, unknown> };
-      expect(afterLock.groups["plugin-config-sync"]).toBeUndefined();
+      expect(remoteLockAhead(after, JSON.stringify(remoteLock), ["community/config-sync"])).toBe(false);
+      const afterLock = JSON.parse(after) as { items: Record<string, Record<string, unknown>> };
+      expect(afterLock.items["community"]?.["config-sync"]).toBeUndefined();
     });
 
     it("a file conflict resolved 'local' keeps the local lock lineage (not overwritten by remote)", async () => {
@@ -1493,9 +1489,9 @@ describe("planImport / applyImport", () => {
       await writeGroups(ctx, [HOTKEYS_GROUP]);
       io.seed({
         "cs/store/configdir/hotkeys.json": '{"a":1}',
-        "cs/store.lock.json": JSON.stringify({ capturedAt: "T", groups: { hotkeys: { sourceAppVersion: "LOCAL" } } }),
+        "cs/store.lock.json": JSON.stringify({ capturedAt: "T", items: { "obsidian": {"hotkeys": { source: { kind: "app", version: "LOCAL" } }} } }),
       });
-      const remoteLock = { capturedAt: "T", groups: { hotkeys: { sourceAppVersion: "REMOTE" } } };
+      const remoteLock = { capturedAt: "T", items: { "obsidian": {"hotkeys": { source: { kind: "app", version: "REMOTE" } }} } };
       const remote = {
         "store/configdir/hotkeys.json": '{"b":2}',
         "store.lock.json": JSON.stringify(remoteLock),
@@ -1504,8 +1500,8 @@ describe("planImport / applyImport", () => {
       const conflicts = pending.plan.conflicts.filter((c) => c.kind === "file");
       expect(conflicts.length).toBe(1);
       await applyImport(ctx, pending, ["local"]);
-      const after = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, { sourceAppVersion?: string }> };
-      expect(after.groups.hotkeys?.sourceAppVersion).toBe("LOCAL");
+      const after = JSON.parse(await io.read("cs/store.lock.json")) as { items: Record<string, Record<string, StoreLockEntry>> };
+      expect(after.items["obsidian"]?.["hotkeys"]?.source?.version).toBe("LOCAL");
     });
 
     // spec 2026-08-11-data-model-hardening.md §6, the pull half of the writers' carry. The merge
@@ -1513,20 +1509,20 @@ describe("planImport / applyImport", () => {
     // parser just went to the trouble of keeping — and then pushes the loss back to the remote.
     describe("the v2 payload survives a pull", () => {
       const localLock = {
-        version: 2,
+        version: 3,
         syncedWatermark: "2026-07-30T07:00:00.000Z",
         capturedAt: "2026-07-30T08:00:00.000Z",
         localOnlyTail: { mine: true },
         groups: {
-          hotkeys: { sourceAppVersion: "1.0.0", capturedAt: "2026-07-30T08:00:00.000Z", hash: "h1", entryTailOnlyHere: "keep me" },
+          hotkeys: { source: { kind: "app", version: "1.0.0" }, capturedAt: "2026-07-30T08:00:00.000Z", hash: "h1", entryTailOnlyHere: "keep me" },
         },
       };
       const remoteLock = {
-        version: 2,
+        version: 3,
         syncedWatermark: "2026-07-30T09:00:00.000Z",
         capturedAt: "2026-07-30T09:00:00.000Z",
         remoteOnlyTail: { theirs: true },
-        groups: { hotkeys: { sourceAppVersion: "2.0.0", capturedAt: "2026-07-30T09:00:00.000Z", hash: "h2", futureField: [1, 2] } },
+        items: { "obsidian": {"hotkeys": { source: { kind: "app", version: "2.0.0" }, capturedAt: "2026-07-30T09:00:00.000Z", hash: "h2", futureField: [1, 2] }} },
       };
 
       const pull = async (local: object, remote: object): Promise<{ io: MemFS; raw: string }> => {
@@ -1542,16 +1538,16 @@ describe("planImport / applyImport", () => {
         return { io, raw: await io.read("cs/store.lock.json") };
       };
 
-      it("carries both sides' unknown keys, stamps version 2, and converges the hint", async () => {
+      it("carries both sides' unknown keys, stamps the current version, and converges the hint", async () => {
         const { raw } = await pull(localLock, remoteLock);
         const merged = JSON.parse(raw) as StoreLock;
-        expect(merged.version).toBe(2); // a SUCCESSFUL pull declares the format too, not only capture
+        expect(merged.version).toBe(3); // a SUCCESSFUL pull declares the format too, not only capture
         expect(merged["localOnlyTail"]).toEqual({ mine: true }); // ours survives the rebuild…
         expect(merged["remoteOnlyTail"]).toEqual({ theirs: true }); // …and theirs is adopted, not dropped on the way back out
-        const hotkeys = merged.groups["hotkeys"];
+        const hotkeys = merged.items["obsidian"]?.["hotkeys"];
         expect(hotkeys?.["futureField"]).toEqual([1, 2]);
         // The adopted entry wins every field it HAS — the content is the remote's now…
-        expect(hotkeys?.sourceAppVersion).toBe("2.0.0");
+        expect(hotkeys?.source?.version).toBe("2.0.0");
         expect(hotkeys?.hash).toBe("h2");
         // …but a key only OUR entry carried is not the remote's to delete. Keeping it is
         // convergence-safe, since only keys present on BOTH sides are ever weighed.
@@ -1567,7 +1563,7 @@ describe("planImport / applyImport", () => {
           ...remoteLock,
           syncedWatermark: "2026-07-30T06:00:00.000Z",
           capturedAt: "2026-07-30T06:00:00.000Z",
-          groups: { hotkeys: { sourceAppVersion: "0.9.0", capturedAt: "2026-07-30T06:00:00.000Z", hash: "h0" } },
+          items: { "obsidian": {"hotkeys": { source: { kind: "app", version: "0.9.0" }, capturedAt: "2026-07-30T06:00:00.000Z", hash: "h0" }} },
         };
         const { raw } = await pull(localLock, olderRemote);
         const merged = JSON.parse(raw) as StoreLock;
@@ -1587,20 +1583,20 @@ describe("planImport / applyImport", () => {
         io.seed({
           "cs/store/configdir/snippets/one.css": "local",
           "cs/store.lock.json": JSON.stringify({
-            version: 2,
+            version: 3,
             syncedWatermark: "2026-07-30T07:00:00.000Z",
             capturedAt: "2026-07-30T07:00:00.000Z",
-            groups: { snippets: { sourceAppVersion: "1.0.0", capturedAt: "2026-07-30T07:00:00.000Z", hash: "sha256:stale" } },
+            items: { "legacy": {"snippets": { source: { kind: "app", version: "1.0.0" }, capturedAt: "2026-07-30T07:00:00.000Z", hash: "sha256:stale" }} },
           }),
         });
         const remote = {
           "store/configdir/snippets/one.css": "remote", // conflicts — kept local below
           "store/configdir/snippets/two.css": "extra", // remote-only — lands regardless
           "store.lock.json": JSON.stringify({
-            version: 2,
+            version: 3,
             syncedWatermark: "2026-07-30T09:00:00.000Z",
             capturedAt: "2026-07-30T09:00:00.000Z",
-            groups: { snippets: { sourceAppVersion: "2.0.0", capturedAt: "2026-07-30T09:00:00.000Z", hash: "sha256:theirs" } },
+            items: { "legacy": {"snippets": { source: { kind: "app", version: "2.0.0" }, capturedAt: "2026-07-30T09:00:00.000Z", hash: "sha256:theirs" }} },
           }),
         };
         const pending = await planImport(ctx, fakeReader(remote), { excludeSelf: false });
@@ -1609,8 +1605,8 @@ describe("planImport / applyImport", () => {
 
         expect(await io.read("cs/store/configdir/snippets/one.css")).toBe("local"); // the user's choice stands
         expect(await io.read("cs/store/configdir/snippets/two.css")).toBe("extra"); // …and the store still changed
-        const entry = (JSON.parse(await io.read("cs/store.lock.json")) as StoreLock).groups["snippets"];
-        expect(entry?.sourceAppVersion).toBe("1.0.0"); // still the local lineage, not adopted
+        const entry = lockEntry(JSON.parse(await io.read("cs/store.lock.json")) as StoreLock, "legacy/snippets");
+        expect(entry?.source?.version).toBe("1.0.0"); // still the local lineage, not adopted
         expect(entry?.capturedAt).toBe("2026-07-08T00:00:00.000Z"); // ctx.now() — the store moved
         expect(entry?.hash).not.toBe("sha256:stale");
         expect(entry?.hash).not.toBe("sha256:theirs"); // it is neither side's copy now
@@ -1618,7 +1614,7 @@ describe("planImport / applyImport", () => {
       });
 
       it("a v1 remote still converges: its capturedAt is the lineage it has", async () => {
-        const v1Remote = { capturedAt: "2026-07-30T09:00:00.000Z", groups: { hotkeys: { sourceAppVersion: "2.0.0" } } };
+        const v1Remote = { capturedAt: "2026-07-30T09:00:00.000Z", items: { "obsidian": {"hotkeys": { source: { kind: "app", version: "2.0.0" } }} } };
         const { raw } = await pull(localLock, v1Remote);
         expect((JSON.parse(raw) as StoreLock).syncedWatermark).toBe("2026-07-30T09:00:00.000Z");
         expect(remoteLockAhead(raw, JSON.stringify(v1Remote), [])).toBe(false);
@@ -1804,7 +1800,7 @@ describe("readGroups / writeGroups", () => {
   it("rejects invalid group lists without touching existing groups", async () => {
     const { ctx } = setup();
     await writeGroups(ctx, [{ name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all" }]);
-    const bad = [{ name: "rs", path: "{configDir}/plugins/remotely-save/data.json", type: "dir" as const, devices: "all" as const, mode: "fields" as const, fields: [{ pattern: "*Token*", scope: "local" as const, encrypted: false }] }];
+    const bad = [{ name: "rs", path: "{configDir}/plugins/remotely-save/data.json", type: "folder" as const, devices: "all" as const, mode: "fields" as const, fields: [{ pattern: "*Token*", sharing: THIS_DEVICE, encrypted: false }] }];
     await expect(writeGroups(ctx, bad)).rejects.toThrow("file groups");
     expect((await readGroups(ctx)).map((g) => g.name)).toEqual(["hotkeys"]);
   });
@@ -1821,7 +1817,7 @@ describe("readGroups / writeGroups", () => {
   it("readGroups/writeGroups round-trip through ctx.groupsIO (no manifest file involved)", async () => {
     const { ctx } = setup();
     expect(await readGroups(ctx)).toEqual([]);
-    const g: SyncGroup = { name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all" };
+    const g: SyncGroup = withRef({ name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all" });
     await writeGroups(ctx, [g]);
     expect(await readGroups(ctx)).toEqual([g]);
     expect(await ctx.io.exists(`${ctx.rootPath}/config-sync.json`)).toBe(false); // no file written
@@ -1837,7 +1833,7 @@ describe("store.lock.json v2 payload — capture", () => {
     version: 1,
     groups: [
       { name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all" },
-      { name: "snippets", path: "{configDir}/snippets", type: "dir", devices: "all" },
+      { name: "snippets", path: "{configDir}/snippets", type: "folder", devices: "all" },
     ],
   });
   const PREVIOUS = JSON.stringify({
@@ -1845,7 +1841,7 @@ describe("store.lock.json v2 payload — capture", () => {
     syncedWatermark: "2026-07-01T00:00:00.000Z",
     capturedAt: "2026-07-01T00:00:00.000Z",
     fleetNotes: { from: "a newer build" }, // an unknown TOP-LEVEL key
-    groups: { hotkeys: { sourceAppVersion: "1.0.0", perMemberFreshness: { x: 1 } } }, // an unknown ENTRY key
+    items: { "obsidian": {"hotkeys": { source: { kind: "app", version: "1.0.0" }, perMemberFreshness: { x: 1 } }} }, // an unknown ENTRY key
   });
 
   it("stamps version, watermark and per-item provenance, and carries what it does not write", async () => {
@@ -1854,14 +1850,14 @@ describe("store.lock.json v2 payload — capture", () => {
     await seedGroups(ctx, TWO_GROUPS);
     await capture(ctx);
     const lock = JSON.parse(await io.read("cs/store.lock.json")) as StoreLock;
-    expect(lock.version).toBe(2);
+    expect(lock.version).toBe(3);
     // Lineage belongs to the pull: a capture must not claim to have seen a state it has not seen.
     expect(lock.syncedWatermark).toBe("2026-07-01T00:00:00.000Z");
     expect(lock.capturedAt).toBe("2026-07-08T00:00:00.000Z"); // max(groups[*].capturedAt)
     expect(lock["fleetNotes"]).toEqual({ from: "a newer build" });
-    const hotkeys = lock.groups["hotkeys"];
+    const hotkeys = lock.items["obsidian"]?.["hotkeys"];
     expect(hotkeys?.["perMemberFreshness"]).toEqual({ x: 1 }); // the rebuilt entry kept the tail…
-    expect(hotkeys?.sourceAppVersion).toBe("1.8.7"); // …and the known field is still REPLACED, not merged
+    expect(hotkeys?.source).toEqual({ kind: "app", version: "1.8.7" }); // …and the known field is still REPLACED, not merged
     expect(hotkeys?.capturedAt).toBe("2026-07-08T00:00:00.000Z");
     expect(hotkeys?.hash).toMatch(/^sha256:[0-9a-f]{64}$/); // §6's documented shape — the algorithm names itself
   });
@@ -1882,12 +1878,12 @@ describe("store.lock.json v2 payload — capture", () => {
     io.seed({ ".obs/hotkeys.json": '{"a":1}' });
     await seedGroups(ctx, JSON.stringify({ version: 1, groups: [{ name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all" }] }));
     await capture(ctx);
-    const first = (JSON.parse(await io.read("cs/store.lock.json")) as StoreLock).groups["hotkeys"]?.hash;
+    const first = lockEntry(JSON.parse(await io.read("cs/store.lock.json")) as StoreLock, "obsidian/hotkeys")?.hash;
     await capture(ctx);
-    expect((JSON.parse(await io.read("cs/store.lock.json")) as StoreLock).groups["hotkeys"]?.hash).toBe(first);
+    expect(lockEntry(JSON.parse(await io.read("cs/store.lock.json")) as StoreLock, "obsidian/hotkeys")?.hash).toBe(first);
     await io.write(".obs/hotkeys.json", '{"a":2}');
     await capture(ctx);
-    expect((JSON.parse(await io.read("cs/store.lock.json")) as StoreLock).groups["hotkeys"]?.hash).not.toBe(first);
+    expect(lockEntry(JSON.parse(await io.read("cs/store.lock.json")) as StoreLock, "obsidian/hotkeys")?.hash).not.toBe(first);
   });
 
   it("the hash covers the per-device-class sidecars, not just the base file", async () => {
@@ -1903,7 +1899,7 @@ describe("store.lock.json v2 payload — capture", () => {
           type: "file",
           devices: "all",
           mode: "fields",
-          fields: [{ pattern: "desktopKey", scope: "desktop", encrypted: false }],
+          fields: [{ pattern: "desktopKey", sharing: perClass("desktop"), encrypted: false }],
         },
       ],
     });
@@ -1913,14 +1909,14 @@ describe("store.lock.json v2 payload — capture", () => {
     await seedGroups(ctx, SCOPED);
     await capture(ctx);
     const base = await io.read("cs/store/configdir/plugins/demo/data.json");
-    const first = (JSON.parse(await io.read("cs/store.lock.json")) as StoreLock).groups["plugin-demo"]?.hash;
+    const first = lockEntry(JSON.parse(await io.read("cs/store.lock.json")) as StoreLock, "community/demo")?.hash;
 
     // Only the desktop-scoped value moves: the base file stays byte-identical, the sidecar does not.
     await io.write(".obs/plugins/demo/data.json", JSON.stringify({ shared: 1, desktopKey: "b" }));
     await capture(ctx);
     expect(await io.read("cs/store/configdir/plugins/demo/data.json")).toBe(base);
     expect(await io.read("cs/store/configdir/plugins/demo/data.json.__scopes__.desktop.json")).toContain("b");
-    expect((JSON.parse(await io.read("cs/store.lock.json")) as StoreLock).groups["plugin-demo"]?.hash).not.toBe(first);
+    expect(lockEntry(JSON.parse(await io.read("cs/store.lock.json")) as StoreLock, "community/demo")?.hash).not.toBe(first);
   });
 
   it("leaves the hash absent for an item whose store copy is ciphertext", async () => {
@@ -1932,7 +1928,7 @@ describe("store.lock.json v2 payload — capture", () => {
       JSON.stringify({ version: 1, groups: [{ name: "secrets", path: "{configDir}/secrets.json", type: "file", devices: "all", mode: "encrypted" }] })
     );
     await capture(ctx);
-    const entry = (JSON.parse(await io.read("cs/store.lock.json")) as StoreLock).groups["secrets"];
+    const entry = lockEntry(JSON.parse(await io.read("cs/store.lock.json")) as StoreLock, "legacy/secrets");
     // Every envelope carries its own salt and nonce, so two devices holding the SAME settings hold
     // different ciphertext. A hash that can never match is worse than none: the item is dated instead.
     expect(entry?.hash).toBeUndefined();
@@ -1948,8 +1944,8 @@ describe("store.lock.json v2 payload — capture", () => {
     await io.write(".obs/hotkeys.json", '{"a":2}');
     await capture(later, ["hotkeys"]);
     const lock = JSON.parse(await io.read("cs/store.lock.json")) as StoreLock;
-    expect(lock.groups["hotkeys"]?.capturedAt).toBe("2026-07-09T00:00:00.000Z");
-    expect(lock.groups["snippets"]?.capturedAt).toBe("2026-07-08T00:00:00.000Z"); // untouched, and not re-dated
+    expect(lock.items["obsidian"]?.["hotkeys"]?.capturedAt).toBe("2026-07-09T00:00:00.000Z");
+    expect(lock.items["legacy"]?.["snippets"]?.capturedAt).toBe("2026-07-08T00:00:00.000Z"); // untouched, and not re-dated
     expect(lock.capturedAt).toBe("2026-07-09T00:00:00.000Z"); // the newest item's stamp
   });
 });
@@ -1964,9 +1960,9 @@ describe("capture app-version recording", () => {
     });
     await seedGroups(ctx, MANIFEST);
     await capture(ctx, ["hotkeys", "plugin-demo"]);
-    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, unknown> };
-    expect(lock.groups["hotkeys"]).toEqual(capturedEntry({ sourceAppVersion: "1.8.7" }));
-    expect(lock.groups["plugin-demo"]).toEqual(capturedEntry({ sourcePluginVersion: "1.2.3" }));
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { items: Record<string, Record<string, unknown>> };
+    expect(lock.items["obsidian"]?.["hotkeys"]).toEqual(capturedEntry({ source: { kind: "app", version: "1.8.7" } }));
+    expect(lock.items["community"]?.["demo"]).toEqual(capturedEntry({ source: { kind: "plugin", version: "1.2.3" } }));
   });
 });
 
@@ -1981,8 +1977,8 @@ describe("capture records a group label", () => {
     io.seed({ ".obs/plugins/demo/data.json": "{}" });
     await seedGroups(ctx, MANIFEST);
     await capture(ctx, ["plugin-demo"]);
-    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, unknown> };
-    expect(lock.groups["plugin-demo"]).toEqual(capturedEntry({ sourcePluginVersion: "1.2.3", label: "Demo Plugin" }));
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { items: Record<string, Record<string, unknown>> };
+    expect(lock.items["community"]?.["demo"]).toEqual(capturedEntry({ source: { kind: "plugin", version: "1.2.3" }, display: { label: "Demo Plugin" } }));
   });
 
   it("records the core plugin's runtime name for a core-settings group", async () => {
@@ -1994,8 +1990,8 @@ describe("capture records a group label", () => {
       JSON.stringify({ version: 1, groups: [{ name: "daily-notes", path: "{configDir}/daily-notes.json", type: "file", devices: "all" }] })
     );
     await capture(ctx, ["daily-notes"]);
-    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, unknown> };
-    expect(lock.groups["daily-notes"]).toEqual(capturedEntry({ sourceAppVersion: "1.8.7", label: "Daily notes" }));
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { items: Record<string, Record<string, unknown>> };
+    expect(lock.items["core"]?.["daily-notes"]).toEqual(capturedEntry({ source: { kind: "app", version: "1.8.7" }, display: { label: "Daily notes" } }));
   });
 
   it("omits the label for an Obsidian option group (no runtime name to resolve)", async () => {
@@ -2003,8 +1999,8 @@ describe("capture records a group label", () => {
     io.seed({ ".obs/hotkeys.json": "{}" });
     await seedGroups(ctx, MANIFEST);
     await capture(ctx, ["hotkeys"]);
-    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, unknown> };
-    expect(lock.groups["hotkeys"]).toEqual(capturedEntry({ sourceAppVersion: "1.8.7" }));
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { items: Record<string, Record<string, unknown>> };
+    expect(lock.items["obsidian"]?.["hotkeys"]).toEqual(capturedEntry({ source: { kind: "app", version: "1.8.7" } }));
   });
 
   // I1 (final-review, 2026-08-05 round): pluginIdForGroup also resolves for a companion dir
@@ -2018,11 +2014,11 @@ describe("capture records a group label", () => {
     io.seed({ ".obs/plugins/dataview/cache.json": "{}" });
     await seedGroups(
       ctx,
-      JSON.stringify({ version: 1, groups: [{ name: "dataview", path: "{configDir}/plugins/dataview", type: "dir", devices: "all" }] })
+      JSON.stringify({ version: 1, groups: [{ name: "dataview", path: "{configDir}/plugins/dataview", type: "folder", devices: "all" }] })
     );
     await capture(ctx, ["dataview"]);
-    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, unknown> };
-    expect(lock.groups["dataview"]).toEqual(capturedEntry({ sourcePluginVersion: "0.5.0" }));
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { items: Record<string, Record<string, unknown>> };
+    expect(lock.items["legacy"]?.["dataview"]).toEqual(capturedEntry({ source: { kind: "plugin", version: "0.5.0" } }));
   });
 
   it("still records the label for the canonical plugin-<id> group", async () => {
@@ -2035,8 +2031,8 @@ describe("capture records a group label", () => {
       JSON.stringify({ version: 1, groups: [{ name: "plugin-dataview", path: "{configDir}/plugins/dataview/data.json", type: "file", devices: "all" }] })
     );
     await capture(ctx, ["plugin-dataview"]);
-    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, unknown> };
-    expect(lock.groups["plugin-dataview"]).toEqual(capturedEntry({ sourcePluginVersion: "0.5.0", label: "Dataview" }));
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { items: Record<string, Record<string, unknown>> };
+    expect(lock.items["community"]?.["dataview"]).toEqual(capturedEntry({ source: { kind: "plugin", version: "0.5.0" }, display: { label: "Dataview" } }));
   });
 });
 
@@ -2053,9 +2049,9 @@ describe("capture records carrier memberLabels", () => {
     io.seed({ ".obs/community-plugins.json": JSON.stringify(["dataview", "templater", "not-installed-anywhere"]) });
     await seedGroups(ctx, COMMUNITY_MANIFEST);
     await capture(ctx, ["community-plugins"]);
-    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, unknown> };
-    expect(lock.groups["community-plugins"]).toEqual(
-      capturedEntry({ sourceAppVersion: "1.8.7", memberLabels: { dataview: "Dataview", templater: "Templater" } })
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { items: Record<string, Record<string, unknown>> };
+    expect(lock.items["obsidian"]?.["community-plugins"]).toEqual(
+      capturedEntry({ source: { kind: "app", version: "1.8.7" }, display: { elements: { dataview: "Dataview", templater: "Templater" } } })
     );
   });
 
@@ -2065,8 +2061,8 @@ describe("capture records carrier memberLabels", () => {
     io.seed({ ".obs/core-plugins.json": JSON.stringify({ "daily-notes": true, graph: false }) });
     await seedGroups(ctx, CORE_MANIFEST);
     await capture(ctx, ["core-plugins"]);
-    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, unknown> };
-    expect(lock.groups["core-plugins"]).toEqual(capturedEntry({ sourceAppVersion: "1.8.7", memberLabels: { "daily-notes": "Daily notes" } }));
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { items: Record<string, Record<string, unknown>> };
+    expect(lock.items["obsidian"]?.["core-plugins"]).toEqual(capturedEntry({ source: { kind: "app", version: "1.8.7" }, display: { elements: { "daily-notes": "Daily notes" } } }));
   });
 });
 
@@ -2083,61 +2079,72 @@ const NO_CARRIER_LISTS: Record<"core-plugins" | "community-plugins", SwitchList 
 };
 
 describe("backfillLockLabels", () => {
-  const PLUGIN_DEMO_GROUP: SyncGroup = { name: "plugin-demo", path: "{configDir}/plugins/demo/data.json", type: "file", devices: "all" };
-  const PLUGIN_FOO_GROUP: SyncGroup = { name: "plugin-foo", path: "{configDir}/plugins/foo/data.json", type: "file", devices: "all" };
+  const PLUGIN_DEMO_GROUP: SyncGroup = withRef({ name: "plugin-demo", path: "{configDir}/plugins/demo/data.json", type: "file", devices: "all" });
+  const PLUGIN_FOO_GROUP: SyncGroup = withRef({ name: "plugin-foo", path: "{configDir}/plugins/foo/data.json", type: "file", devices: "all" });
   // "daily-notes" is a CORE_ID_SEED member (catalog.ts) — resolvable without any special setup.
-  const CORE_GROUP: SyncGroup = { name: "daily-notes", path: "{configDir}/daily-notes.json", type: "file", devices: "all" };
+  const CORE_GROUP: SyncGroup = withRef({ name: "daily-notes", path: "{configDir}/daily-notes.json", type: "file", devices: "all" });
 
   it("fills in labels for label-less resolvable community and core entries", () => {
     const { plugins } = setup();
     plugins.installedNames.set("demo", "Demo Plugin");
     plugins.coreNames.set("daily-notes", "Daily notes");
     const lock: StoreLock = {
+      version: STORE_LOCK_VERSION,
       capturedAt: "2026-01-01T00:00:00.000Z",
-      groups: { "plugin-demo": { sourcePluginVersion: "1.0.0" }, "daily-notes": { sourceAppVersion: "1.8.7" } },
+      items: { "community": {"demo": { source: { kind: "plugin", version: "1.0.0" } }}, "core": {"daily-notes": { source: { kind: "app", version: "1.8.7" } }} },
     };
     const changed = backfillLockLabels([PLUGIN_DEMO_GROUP, CORE_GROUP], plugins, lock, NO_CARRIER_LISTS);
     expect(changed).toBe(true);
-    expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.0.0", label: "Demo Plugin" });
-    expect(lock.groups["daily-notes"]).toEqual({ sourceAppVersion: "1.8.7", label: "Daily notes" });
+    expect(lock.items["community"]?.["demo"]).toEqual({ source: { kind: "plugin", version: "1.0.0" }, display: { label: "Demo Plugin" } });
+    expect(lock.items["core"]?.["daily-notes"]).toEqual({ source: { kind: "app", version: "1.8.7" }, display: { label: "Daily notes" } });
   });
 
   it("leaves a not-installed community entry untouched", () => {
     const { plugins } = setup(); // plugins.installedNames has nothing for "foo" — not installed
-    const lock: StoreLock = { capturedAt: "2026-01-01T00:00:00.000Z", groups: { "plugin-foo": { sourcePluginVersion: "1.0.0" } } };
+    const lock: StoreLock = {
+      version: STORE_LOCK_VERSION,
+      capturedAt: "2026-01-01T00:00:00.000Z",
+      items: { "community": {"foo": { source: { kind: "plugin", version: "1.0.0" } }} },
+    };
     const changed = backfillLockLabels([PLUGIN_FOO_GROUP], plugins, lock, NO_CARRIER_LISTS);
     expect(changed).toBe(false);
-    expect(lock.groups["plugin-foo"]).toEqual({ sourcePluginVersion: "1.0.0" });
+    expect(lock.items["community"]?.["foo"]).toEqual({ source: { kind: "plugin", version: "1.0.0" } });
   });
 
   it("refreshes a stale label", () => {
     const { plugins } = setup();
     plugins.installedNames.set("demo", "Renamed Plugin");
     const lock: StoreLock = {
+      version: STORE_LOCK_VERSION,
       capturedAt: "2026-01-01T00:00:00.000Z",
-      groups: { "plugin-demo": { sourcePluginVersion: "1.0.0", label: "Demo Plugin" } },
+      items: { "community": {"demo": { source: { kind: "plugin", version: "1.0.0" }, display: { label: "Demo Plugin" } }} },
     };
     const changed = backfillLockLabels([PLUGIN_DEMO_GROUP], plugins, lock, NO_CARRIER_LISTS);
     expect(changed).toBe(true);
-    expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.0.0", label: "Renamed Plugin" });
+    expect(lock.items["community"]?.["demo"]).toEqual({ source: { kind: "plugin", version: "1.0.0" }, display: { label: "Renamed Plugin" } });
   });
 
   it("reports no change (and leaves the lock untouched) when every label is already current", () => {
     const { plugins } = setup();
     plugins.installedNames.set("demo", "Demo Plugin");
     const lock: StoreLock = {
+      version: STORE_LOCK_VERSION,
       capturedAt: "2026-01-01T00:00:00.000Z",
-      groups: { "plugin-demo": { sourcePluginVersion: "1.0.0", label: "Demo Plugin" } },
+      items: { "community": {"demo": { source: { kind: "plugin", version: "1.0.0" }, display: { label: "Demo Plugin" } }} },
     };
     const changed = backfillLockLabels([PLUGIN_DEMO_GROUP], plugins, lock, NO_CARRIER_LISTS);
     expect(changed).toBe(false);
-    expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.0.0", label: "Demo Plugin" });
+    expect(lock.items["community"]?.["demo"]).toEqual({ source: { kind: "plugin", version: "1.0.0" }, display: { label: "Demo Plugin" } });
   });
 
   it("never touches capturedAt", () => {
     const { plugins } = setup();
     plugins.installedNames.set("demo", "Demo Plugin");
-    const lock: StoreLock = { capturedAt: "2026-01-01T00:00:00.000Z", groups: { "plugin-demo": { sourcePluginVersion: "1.0.0" } } };
+    const lock: StoreLock = {
+      version: STORE_LOCK_VERSION,
+      capturedAt: "2026-01-01T00:00:00.000Z",
+      items: { "community": {"demo": { source: { kind: "plugin", version: "1.0.0" } }} },
+    };
     backfillLockLabels([PLUGIN_DEMO_GROUP], plugins, lock, NO_CARRIER_LISTS);
     expect(lock.capturedAt).toBe("2026-01-01T00:00:00.000Z");
   });
@@ -2145,10 +2152,14 @@ describe("backfillLockLabels", () => {
   it("does not resolve a label for an entry with no matching local group (orphaned/dropped)", () => {
     const { plugins } = setup();
     plugins.installedNames.set("demo", "Demo Plugin");
-    const lock: StoreLock = { capturedAt: "2026-01-01T00:00:00.000Z", groups: { "plugin-demo": { sourcePluginVersion: "1.0.0" } } };
+    const lock: StoreLock = {
+      version: STORE_LOCK_VERSION,
+      capturedAt: "2026-01-01T00:00:00.000Z",
+      items: { "community": {"demo": { source: { kind: "plugin", version: "1.0.0" } }} },
+    };
     const changed = backfillLockLabels([], plugins, lock, NO_CARRIER_LISTS); // manifest no longer declares plugin-demo
     expect(changed).toBe(false);
-    expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.0.0" });
+    expect(lock.items["community"]?.["demo"]).toEqual({ source: { kind: "plugin", version: "1.0.0" } });
   });
 });
 
@@ -2156,33 +2167,45 @@ describe("backfillLockLabels", () => {
 // resurrect/write a lock entry for a group THIS device has opted out of, even when it's otherwise
 // perfectly resolvable — `excluded` is a bare extra skip check ahead of the existing entry lookup.
 describe("backfillLockLabels — excluded (C-#45)", () => {
-  const PLUGIN_DEMO_GROUP: SyncGroup = { name: "plugin-demo", path: "{configDir}/plugins/demo/data.json", type: "file", devices: "all" };
+  const PLUGIN_DEMO_GROUP: SyncGroup = withRef({ name: "plugin-demo", path: "{configDir}/plugins/demo/data.json", type: "file", devices: "all" });
 
   it("skips a label-less resolvable entry that is in the excluded set", () => {
     const { plugins } = setup();
     plugins.installedNames.set("demo", "Demo Plugin");
-    const lock: StoreLock = { capturedAt: "2026-01-01T00:00:00.000Z", groups: { "plugin-demo": { sourcePluginVersion: "1.0.0" } } };
-    const changed = backfillLockLabels([PLUGIN_DEMO_GROUP], plugins, lock, NO_CARRIER_LISTS, new Set(["plugin-demo"]));
+    const lock: StoreLock = {
+      version: STORE_LOCK_VERSION,
+      capturedAt: "2026-01-01T00:00:00.000Z",
+      items: { "community": {"demo": { source: { kind: "plugin", version: "1.0.0" } }} },
+    };
+    const changed = backfillLockLabels([PLUGIN_DEMO_GROUP], plugins, lock, NO_CARRIER_LISTS, new Set(["community/demo"]));
     expect(changed).toBe(false);
-    expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.0.0" }); // no label written
+    expect(lock.items["community"]?.["demo"]).toEqual({ source: { kind: "plugin", version: "1.0.0" } }); // no label written
   });
 
   it("an omitted excluded set heals exactly as before (backward compatible)", () => {
     const { plugins } = setup();
     plugins.installedNames.set("demo", "Demo Plugin");
-    const lock: StoreLock = { capturedAt: "2026-01-01T00:00:00.000Z", groups: { "plugin-demo": { sourcePluginVersion: "1.0.0" } } };
+    const lock: StoreLock = {
+      version: STORE_LOCK_VERSION,
+      capturedAt: "2026-01-01T00:00:00.000Z",
+      items: { "community": {"demo": { source: { kind: "plugin", version: "1.0.0" } }} },
+    };
     const changed = backfillLockLabels([PLUGIN_DEMO_GROUP], plugins, lock, NO_CARRIER_LISTS);
     expect(changed).toBe(true);
-    expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.0.0", label: "Demo Plugin" });
+    expect(lock.items["community"]?.["demo"]).toEqual({ source: { kind: "plugin", version: "1.0.0" }, display: { label: "Demo Plugin" } });
   });
 
   it("excluding an unrelated name leaves this group's heal unaffected", () => {
     const { plugins } = setup();
     plugins.installedNames.set("demo", "Demo Plugin");
-    const lock: StoreLock = { capturedAt: "2026-01-01T00:00:00.000Z", groups: { "plugin-demo": { sourcePluginVersion: "1.0.0" } } };
+    const lock: StoreLock = {
+      version: STORE_LOCK_VERSION,
+      capturedAt: "2026-01-01T00:00:00.000Z",
+      items: { "community": {"demo": { source: { kind: "plugin", version: "1.0.0" } }} },
+    };
     const changed = backfillLockLabels([PLUGIN_DEMO_GROUP], plugins, lock, NO_CARRIER_LISTS, new Set(["plugin-other"]));
     expect(changed).toBe(true);
-    expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.0.0", label: "Demo Plugin" });
+    expect(lock.items["community"]?.["demo"]).toEqual({ source: { kind: "plugin", version: "1.0.0" }, display: { label: "Demo Plugin" } });
   });
 });
 
@@ -2191,12 +2214,12 @@ describe("backfillLockLabels — excluded (C-#45)", () => {
 describe("excludeOptedOutItems (C-#45)", () => {
   it("drops an item whose name is in the opted-out set", () => {
     const items = [{ name: "a" }, { name: "b" }, { name: "c" }];
-    expect(excludeOptedOutItems(items, new Set(["b"]))).toEqual([{ name: "a" }, { name: "c" }]);
+    expect(excludeOptedOutItems(items, new Set(["b"]), (n) => n)).toEqual([{ name: "a" }, { name: "c" }]);
   });
 
   it("an empty opted-out set is a no-op", () => {
     const items = [{ name: "a" }, { name: "b" }];
-    expect(excludeOptedOutItems(items, new Set())).toEqual(items);
+    expect(excludeOptedOutItems(items, new Set(), (n) => n)).toEqual(items);
   });
 
   it("works over ApplyItem/CaptureItem-shaped objects (extra fields pass through untouched)", () => {
@@ -2204,7 +2227,7 @@ describe("excludeOptedOutItems (C-#45)", () => {
       { name: "a", action: "none" as const },
       { name: "b", action: "enable" as const },
     ];
-    expect(excludeOptedOutItems(items, new Set(["b"]))).toEqual([{ name: "a", action: "none" }]);
+    expect(excludeOptedOutItems(items, new Set(["b"]), (n) => n)).toEqual([{ name: "a", action: "none" }]);
   });
 });
 
@@ -2215,15 +2238,15 @@ describe("capture — optedOutForHeal threads through to the tail heal (C-#45)",
     const { io, plugins, ctx } = setup();
     plugins.installedNames.set("demo", "Demo Plugin");
     io.seed({
-      "cs/store.lock.json": JSON.stringify({ capturedAt: "2026-01-01T00:00:00.000Z", groups: { "plugin-demo": { sourcePluginVersion: "1.0.0" } } }),
+      "cs/store.lock.json": JSON.stringify({ capturedAt: "2026-01-01T00:00:00.000Z", items: { "community": {"demo": { source: { kind: "plugin", version: "1.0.0" } }} } }),
     });
     await seedGroups(ctx, MANIFEST);
     // Simulate the host-level payload filter (main.ts's captureItems): "plugin-demo" is opted out,
     // so it's never in `names` — capture() carries its lock entry forward unchanged (existing
     // partial-selection behavior), and the tail heal must not resolve its label either.
-    await capture(ctx, ["hotkeys"], undefined, undefined, new Set(["plugin-demo"]));
-    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, { sourcePluginVersion?: string; label?: string }> };
-    expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.0.0" }); // no label written
+    await capture(ctx, ["hotkeys"], undefined, undefined, new Set(["community/demo"]));
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { items: Record<string, Record<string, StoreLockEntry>> };
+    expect(lock.items["community"]?.["demo"]).toEqual({ source: { kind: "plugin", version: "1.0.0" } }); // no label written
   });
 });
 
@@ -2236,19 +2259,27 @@ describe("backfillLockLabels memberLabels", () => {
     const { plugins } = setup();
     plugins.installedNames.set("dataview", "Dataview");
     plugins.installedNames.set("templater", "Templater");
-    const lock: StoreLock = { capturedAt: "t", groups: { "community-plugins": { sourceAppVersion: "1.8.7" } } };
+    const lock: StoreLock = {
+      version: STORE_LOCK_VERSION,
+      capturedAt: "t",
+      items: { "obsidian": {"community-plugins": { source: { kind: "app", version: "1.8.7" } }} },
+    };
     const changed = backfillLockLabels([], plugins, lock, { "core-plugins": null, "community-plugins": ["dataview", "templater", "unresolvable"] });
     expect(changed).toBe(true);
-    expect(lock.groups["community-plugins"]).toEqual({
-      sourceAppVersion: "1.8.7",
-      memberLabels: { dataview: "Dataview", templater: "Templater" },
+    expect(lock.items["obsidian"]?.["community-plugins"]).toEqual({
+      source: { kind: "app", version: "1.8.7" },
+      display: { elements: { dataview: "Dataview", templater: "Templater" } },
     });
   });
 
   it("fills in memberLabels for every resolvable id in the core carrier's current store list (map shape)", () => {
     const { plugins } = setup();
     plugins.coreNames.set("daily-notes", "Daily notes");
-    const lock: StoreLock = { capturedAt: "t", groups: { "core-plugins": { sourceAppVersion: "1.8.7" } } };
+    const lock: StoreLock = {
+      version: STORE_LOCK_VERSION,
+      capturedAt: "t",
+      items: { "obsidian": {"core-plugins": { source: { kind: "app", version: "1.8.7" } }} },
+    };
     const changed = backfillLockLabels(
       [],
       plugins,
@@ -2256,42 +2287,55 @@ describe("backfillLockLabels memberLabels", () => {
       { "core-plugins": { "daily-notes": true, "not-a-core-id": false }, "community-plugins": null }
     );
     expect(changed).toBe(true);
-    expect(lock.groups["core-plugins"]).toEqual({ sourceAppVersion: "1.8.7", memberLabels: { "daily-notes": "Daily notes" } });
+    expect(lock.items["obsidian"]?.["core-plugins"]).toEqual({ source: { kind: "app", version: "1.8.7" }, display: { elements: { "daily-notes": "Daily notes" } } });
   });
 
   it("leaves an unresolvable-only store list without a memberLabels field (no change)", () => {
     const { plugins } = setup(); // nothing installed
-    const lock: StoreLock = { capturedAt: "t", groups: { "community-plugins": { sourceAppVersion: "1.8.7" } } };
+    const lock: StoreLock = {
+      version: STORE_LOCK_VERSION,
+      capturedAt: "t",
+      items: { "obsidian": {"community-plugins": { source: { kind: "app", version: "1.8.7" } }} },
+    };
     const changed = backfillLockLabels([], plugins, lock, { "core-plugins": null, "community-plugins": ["unresolvable"] });
     expect(changed).toBe(false);
-    expect(lock.groups["community-plugins"]).toEqual({ sourceAppVersion: "1.8.7" });
+    expect(lock.items["obsidian"]?.["community-plugins"]).toEqual({ source: { kind: "app", version: "1.8.7" } });
   });
 
   it("reports no change when memberLabels are already current", () => {
     const { plugins } = setup();
     plugins.installedNames.set("dataview", "Dataview");
     const lock: StoreLock = {
+      version: STORE_LOCK_VERSION,
       capturedAt: "t",
-      groups: { "community-plugins": { sourceAppVersion: "1.8.7", memberLabels: { dataview: "Dataview" } } },
+      items: { "obsidian": {"community-plugins": { source: { kind: "app", version: "1.8.7" }, display: { elements: { dataview: "Dataview" } } }} },
     };
     const changed = backfillLockLabels([], plugins, lock, { "core-plugins": null, "community-plugins": ["dataview"] });
     expect(changed).toBe(false);
-    expect(lock.groups["community-plugins"]).toEqual({ sourceAppVersion: "1.8.7", memberLabels: { dataview: "Dataview" } });
+    expect(lock.items["obsidian"]?.["community-plugins"]).toEqual({ source: { kind: "app", version: "1.8.7" }, display: { elements: { dataview: "Dataview" } } });
   });
 
   it("skips a carrier with no lock entry of its own", () => {
     const { plugins } = setup();
     plugins.installedNames.set("dataview", "Dataview");
-    const lock: StoreLock = { capturedAt: "t", groups: {} };
+    const lock: StoreLock = {
+      version: STORE_LOCK_VERSION,
+      capturedAt: "t",
+      items: {},
+    };
     const changed = backfillLockLabels([], plugins, lock, { "core-plugins": null, "community-plugins": ["dataview"] });
     expect(changed).toBe(false);
-    expect(lock.groups["community-plugins"]).toBeUndefined();
+    expect(lock.items["obsidian"]?.["community-plugins"]).toBeUndefined();
   });
 
   it("never touches capturedAt when only memberLabels change", () => {
     const { plugins } = setup();
     plugins.installedNames.set("dataview", "Dataview");
-    const lock: StoreLock = { capturedAt: "2026-01-01T00:00:00.000Z", groups: { "community-plugins": { sourceAppVersion: "1.8.7" } } };
+    const lock: StoreLock = {
+      version: STORE_LOCK_VERSION,
+      capturedAt: "2026-01-01T00:00:00.000Z",
+      items: { "obsidian": {"community-plugins": { source: { kind: "app", version: "1.8.7" } }} },
+    };
     backfillLockLabels([], plugins, lock, { "core-plugins": null, "community-plugins": ["dataview"] });
     expect(lock.capturedAt).toBe("2026-01-01T00:00:00.000Z");
   });
@@ -2305,14 +2349,15 @@ describe("backfillLockLabels memberLabels", () => {
     const { plugins } = setup();
     plugins.installedNames.set("dataview", "Dataview"); // "completr" is NOT installed here
     const lock: StoreLock = {
+      version: STORE_LOCK_VERSION,
       capturedAt: "t",
-      groups: { "community-plugins": { sourceAppVersion: "1.8.7", memberLabels: { completr: "Completr", dataview: "Dataview" } } },
+      items: { "obsidian": {"community-plugins": { source: { kind: "app", version: "1.8.7" }, display: { elements: { completr: "Completr", dataview: "Dataview" } } }} },
     };
     const changed = backfillLockLabels([], plugins, lock, { "core-plugins": null, "community-plugins": ["completr", "dataview"] });
     expect(changed).toBe(false); // already converged — merge is a no-op
-    expect(lock.groups["community-plugins"]).toEqual({
-      sourceAppVersion: "1.8.7",
-      memberLabels: { completr: "Completr", dataview: "Dataview" },
+    expect(lock.items["obsidian"]?.["community-plugins"]).toEqual({
+      source: { kind: "app", version: "1.8.7" },
+      display: { elements: { completr: "Completr", dataview: "Dataview" } },
     });
   });
 
@@ -2320,53 +2365,63 @@ describe("backfillLockLabels memberLabels", () => {
     const { plugins } = setup();
     plugins.installedNames.set("dataview", "Dataview");
     const lock: StoreLock = {
+      version: STORE_LOCK_VERSION,
       capturedAt: "t",
-      groups: { "community-plugins": { sourceAppVersion: "1.8.7", memberLabels: { completr: "Completr", dataview: "Dataview" } } },
+      items: { "obsidian": {"community-plugins": { source: { kind: "app", version: "1.8.7" }, display: { elements: { completr: "Completr", dataview: "Dataview" } } }} },
     };
     // "completr" no longer appears in the store list (uninstalled/removed everywhere) — dropped.
     const changed = backfillLockLabels([], plugins, lock, { "core-plugins": null, "community-plugins": ["dataview"] });
     expect(changed).toBe(true);
-    expect(lock.groups["community-plugins"]).toEqual({ sourceAppVersion: "1.8.7", memberLabels: { dataview: "Dataview" } });
+    expect(lock.items["obsidian"]?.["community-plugins"]).toEqual({ source: { kind: "app", version: "1.8.7" }, display: { elements: { dataview: "Dataview" } } });
   });
 
   it("local resolution refreshes a stale existing name for an id this device CAN resolve", () => {
     const { plugins } = setup();
     plugins.installedNames.set("dataview", "Dataview (renamed)");
     const lock: StoreLock = {
+      version: STORE_LOCK_VERSION,
       capturedAt: "t",
-      groups: { "community-plugins": { sourceAppVersion: "1.8.7", memberLabels: { dataview: "Dataview (stale)" } } },
+      items: { "obsidian": {"community-plugins": { source: { kind: "app", version: "1.8.7" }, display: { elements: { dataview: "Dataview (stale)" } } }} },
     };
     const changed = backfillLockLabels([], plugins, lock, { "core-plugins": null, "community-plugins": ["dataview"] });
     expect(changed).toBe(true);
-    expect(lock.groups["community-plugins"]).toEqual({ sourceAppVersion: "1.8.7", memberLabels: { dataview: "Dataview (renamed)" } });
+    expect(lock.items["obsidian"]?.["community-plugins"]).toEqual({ source: { kind: "app", version: "1.8.7" }, display: { elements: { dataview: "Dataview (renamed)" } } });
   });
 
   it("two-device convergence: kickstart's heal (both installed) then llm's heal (only dataview installed) leave the map unchanged", () => {
     const store: SwitchList = ["completr", "dataview"];
-    const lock: StoreLock = { capturedAt: "t", groups: { "community-plugins": { sourceAppVersion: "1.8.7" } } };
+    const lock: StoreLock = {
+      version: STORE_LOCK_VERSION,
+      capturedAt: "t",
+      items: { "obsidian": {"community-plugins": { source: { kind: "app", version: "1.8.7" } }} },
+    };
 
     const kickstart = new FakePlugins();
     kickstart.installedNames.set("completr", "Completr");
     kickstart.installedNames.set("dataview", "Dataview");
     backfillLockLabels([], kickstart, lock, { "core-plugins": null, "community-plugins": store });
-    expect(lock.groups["community-plugins"]?.memberLabels).toEqual({ completr: "Completr", dataview: "Dataview" });
+    expect(lock.items["obsidian"]?.["community-plugins"]?.display?.elements).toEqual({ completr: "Completr", dataview: "Dataview" });
 
-    const beforeLlmHeal = { ...lock.groups["community-plugins"]?.memberLabels };
+    const beforeLlmHeal = { ...lock.items["obsidian"]?.["community-plugins"]?.display?.elements };
     const llm = new FakePlugins();
     llm.installedNames.set("dataview", "Dataview"); // llm never had completr installed
     const changed = backfillLockLabels([], llm, lock, { "core-plugins": null, "community-plugins": store });
     expect(changed).toBe(false); // no-op: llm's merge carries completr's name forward unchanged
-    expect(lock.groups["community-plugins"]?.memberLabels).toEqual(beforeLlmHeal);
+    expect(lock.items["obsidian"]?.["community-plugins"]?.display?.elements).toEqual(beforeLlmHeal);
   });
 
   it("write-only-on-change still holds when the merge is a genuine no-op", () => {
     const { plugins } = setup();
     plugins.installedNames.set("dataview", "Dataview");
-    const entry = { sourceAppVersion: "1.8.7", memberLabels: { completr: "Completr", dataview: "Dataview" } };
-    const lock: StoreLock = { capturedAt: "t", groups: { "community-plugins": entry } };
+    const entry: StoreLockEntry = { source: { kind: "app", version: "1.8.7" }, display: { elements: { completr: "Completr", dataview: "Dataview" } } };
+    const lock: StoreLock = {
+      version: STORE_LOCK_VERSION,
+      capturedAt: "t",
+      items: { "obsidian": {"community-plugins": entry} },
+    };
     backfillLockLabels([], plugins, lock, { "core-plugins": null, "community-plugins": ["completr", "dataview"] });
     // Same object identity — no rewrite happened, not just an equal-by-value replacement.
-    expect(lock.groups["community-plugins"]).toBe(entry);
+    expect(lock.items["obsidian"]?.["community-plugins"]).toBe(entry);
   });
 });
 
@@ -2380,14 +2435,14 @@ describe("capture backfills carried-forward entries' labels at the tail of the r
     await capture(ctx);
     await io.write(
       "cs/store.lock.json",
-      JSON.stringify({ capturedAt: "2026-07-08T00:00:00.000Z", groups: { "plugin-demo": { sourcePluginVersion: "1.2.3" } } }, null, 2) + "\n"
+      JSON.stringify({ capturedAt: "2026-07-08T00:00:00.000Z", items: { "community": {"demo": { source: { kind: "plugin", version: "1.2.3" } }} } }, null, 2) + "\n"
     );
     // The plugin only becomes resolvable NOW — a real capture run must still heal it, even
     // though this run only selects "hotkeys" and never touches plugin-demo directly.
     plugins.installedNames.set("demo", "Demo Plugin");
     await capture(ctx, ["hotkeys"]);
-    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, unknown> };
-    expect(lock.groups["plugin-demo"]).toEqual({ sourcePluginVersion: "1.2.3", label: "Demo Plugin" });
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { items: Record<string, Record<string, unknown>> };
+    expect(lock.items["community"]?.["demo"]).toEqual({ source: { kind: "plugin", version: "1.2.3" }, display: { label: "Demo Plugin" } });
   });
 });
 
@@ -2407,12 +2462,12 @@ describe("pull lock adoption for identical groups (version-refresh chain)", () =
     io.seed({
       ".obs/hotkeys.json": '{"a":2}',
       "cs/store/configdir/hotkeys.json": '{"a":2}',
-      "cs/store.lock.json": JSON.stringify({ capturedAt: "old", groups: { hotkeys: { sourceAppVersion: "1.0.0" } } }),
+      "cs/store.lock.json": JSON.stringify({ capturedAt: "old", items: { "obsidian": {"hotkeys": { source: { kind: "app", version: "1.0.0" } }} } }),
     });
     await seedGroups(ctx, JSON.stringify({ version: 1, groups: [{ name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all" }] }));
     const remoteFiles: Record<string, string> = {
       "store/configdir/hotkeys.json": '{"a":2}', // identical content
-      "store.lock.json": JSON.stringify({ capturedAt: "newer", groups: { hotkeys: { sourceAppVersion: "2.0.0" } } }),
+      "store.lock.json": JSON.stringify({ capturedAt: "newer", items: { "obsidian": {"hotkeys": { source: { kind: "app", version: "2.0.0" } }} } }),
     };
     const reader: ExternalStoreReader = {
       listFiles: async () => Object.keys(remoteFiles),
@@ -2421,8 +2476,8 @@ describe("pull lock adoption for identical groups (version-refresh chain)", () =
     const pending = await planImport(ctx, reader, { excludeSelf: false });
     expect(pending.plan.conflicts).toEqual([]);
     await applyImport(ctx, pending, []);
-    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { capturedAt: string; syncedWatermark: string; groups: Record<string, { sourceAppVersion?: string }> };
-    expect(lock.groups["hotkeys"]?.sourceAppVersion).toBe("2.0.0"); // adopted despite zero file writes
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { capturedAt: string; syncedWatermark: string; items: Record<string, Record<string, StoreLockEntry>> };
+    expect(lock.items["obsidian"]?.["hotkeys"]?.source?.version).toBe("2.0.0"); // adopted despite zero file writes
     // spec §6 split the one field that used to carry both meanings: the remote's lineage lands on
     // syncedWatermark (which is what makes remoteLockAhead settle), while capturedAt keeps
     // describing this store's own content and is never overwritten with the remote's stamp.
@@ -2435,19 +2490,19 @@ describe("pull lock adoption for identical groups (version-refresh chain)", () =
     io.seed({
       ".obs/hotkeys.json": '{"a":2}',
       "cs/store/configdir/hotkeys.json": '{"local":"only"}', // differs → conflict
-      "cs/store.lock.json": JSON.stringify({ capturedAt: "old", groups: { hotkeys: { sourceAppVersion: "1.0.0" } } }),
+      "cs/store.lock.json": JSON.stringify({ capturedAt: "old", items: { "obsidian": {"hotkeys": { source: { kind: "app", version: "1.0.0" } }} } }),
     });
     await seedGroups(ctx, JSON.stringify({ version: 1, groups: [{ name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all" }] }));
     const remoteFiles: Record<string, string> = {
       "store/configdir/hotkeys.json": '{"remote":"side"}',
-      "store.lock.json": JSON.stringify({ capturedAt: "newer", groups: { hotkeys: { sourceAppVersion: "2.0.0" } } }),
+      "store.lock.json": JSON.stringify({ capturedAt: "newer", items: { "obsidian": {"hotkeys": { source: { kind: "app", version: "2.0.0" } }} } }),
     };
     const reader: ExternalStoreReader = { listFiles: async () => Object.keys(remoteFiles), readFile: async (rel) => remoteFiles[rel]! };
     const pending = await planImport(ctx, reader, { excludeSelf: false });
     expect(pending.plan.conflicts.length).toBe(1);
     await applyImport(ctx, pending, ["local"]); // keep local content
-    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { groups: Record<string, { sourceAppVersion?: string }> };
-    expect(lock.groups["hotkeys"]?.sourceAppVersion).toBe("1.0.0"); // content stayed local → lock stays local
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { items: Record<string, Record<string, StoreLockEntry>> };
+    expect(lock.items["obsidian"]?.["hotkeys"]?.source?.version).toBe("1.0.0"); // content stayed local → lock stays local
   });
 });
 
@@ -2743,7 +2798,7 @@ describe("partial-selection switch staging (Sync Center unified grammar, task 3)
 
 // task-2 retarget (spec 2026-08-04-per-device-scope-local-containment-design.md): the explicit
 // "this device decides for itself" choice now lives in settings.localMembers, never in
-// ItemConfig.enabledOn — main.ts has no existing test harness beyond
+// Item.enabledOn — main.ts has no existing test harness beyond
 // tests/mainReloadSettings.test.ts's pattern (Plugin is stubbed to an empty class by
 // tests/mock-obsidian.ts). This drives a real ConfigSyncPlugin instance via bracket access to
 // bypass TypeScript's `private` (compile-time-only), same as customGroups.test.ts.
@@ -2766,7 +2821,8 @@ interface SwitchExceptionsPluginSurface {
   saveData: (d: unknown) => Promise<void>;
   loadSettings: () => Promise<void>;
   addSwitchExceptions: (name: string, ids: string[]) => Promise<void>;
-  settings: { localMembers: string[]; items: Record<string, { enabledOn?: string }> };
+  clearMemberLocal: (list: "core-plugins" | "community-plugins", elementId: string) => Promise<void>;
+  settings: { thisDeviceItems: string[]; items: ItemMap };
   syncCenterHost: () => { switchMemberDecisions: (name: string) => MemberDecision[] };
 }
 
@@ -2774,13 +2830,13 @@ function makeSwitchPlugin(): SwitchExceptionsPluginSurface {
   const plugin = new ConfigSyncPlugin({} as never, {} as never);
   const instance = plugin as unknown as SwitchExceptionsPluginSurface;
   instance.app = fakePluginApp();
-  instance.loadData = async () => ({ schemaVersion: 2, items: {}, remotes: [], bratPluginIndex: {} });
+  instance.loadData = async () => ({ schemaVersion: 3, items: emptyItemMap(), remotes: [], bratIndex: {} });
   instance.saveData = async () => {};
   return instance;
 }
 
-describe("ConfigSyncPlugin.addSwitchExceptions — 'this device' retarget onto localMembers", () => {
-  it("choosing 'this device' records the member in localMembers and masks it", async () => {
+describe("ConfigSyncPlugin.addSwitchExceptions — 'this device' pins onto thisDeviceItems", () => {
+  it("choosing 'this device' records the member's ref in thisDeviceItems and masks it", async () => {
     const plugin = await (async () => {
       const p = makeSwitchPlugin();
       await p.loadSettings();
@@ -2789,16 +2845,15 @@ describe("ConfigSyncPlugin.addSwitchExceptions — 'this device' retarget onto l
 
     await plugin.addSwitchExceptions("community-plugins", ["remotely-save"]);
 
-    expect(plugin.settings.localMembers).toContain("community:remotely-save");
-    expect(plugin.settings.items["community:remotely-save"]?.enabledOn).toBeUndefined();
+    expect(plugin.settings.thisDeviceItems).toContain("community/remotely-save");
+    expect(plugin.settings.items.community["remotely-save"]?.runsOn).toBeUndefined();
   });
 
-  // Review Critical: memberDecisionsFor (main.ts) derived "local" only from enablementScopes,
-  // which post-retarget ignores a stored enabledOn "local" — so it never saw localMembers.
-  // switchMemberDecisions (the SyncCenterView host method backing the "· N device-scoped" count
-  // and the "⌂ this device keeps its own on/off state" rows) is a direct consumer, so a plugin
-  // pinned via addSwitchExceptions silently vanished from that reader even though the sibling
-  // memberLocalIdsFor masked it correctly. This must see the member with scope "local".
+  // Review Critical: memberDecisionsFor (main.ts) derived this-device only from enablementSharing,
+  // so it never saw the pin set. switchMemberDecisions (the SyncCenterView host method backing
+  // the "· N device-scoped" count and the "⌂ this device keeps its own on/off state" rows) is a
+  // direct consumer, so a plugin pinned via addSwitchExceptions silently vanished from that
+  // reader even though the sibling memberLocalIdsFor masked it correctly.
   it("switchMemberDecisions reflects a plugin pinned to 'this device'", async () => {
     const plugin = await (async () => {
       const p = makeSwitchPlugin();
@@ -2809,59 +2864,181 @@ describe("ConfigSyncPlugin.addSwitchExceptions — 'this device' retarget onto l
     await plugin.addSwitchExceptions("community-plugins", ["remotely-save"]);
 
     const decisions = plugin.syncCenterHost().switchMemberDecisions("community-plugins");
-    // §R3-A truth table: a localMembers pin is itself the explicit source, so it's never
-    // structural even though the underlying card (unset here → disabled) would otherwise make its
-    // base "local" structural.
-    expect(decisions).toContainEqual({ id: "remotely-save", scope: "local", structural: false });
+    // §R3-A truth table: a pin is itself the explicit source, so it's never structural even
+    // though the underlying card (unset here → disabled) would otherwise make its base
+    // this-device structural.
+    expect(decisions).toContainEqual({ id: "remotely-save", sharing: THIS_DEVICE, structural: false });
   });
 
-  // §R3-A truth table, "card-on explicit local": pinning "this device" on an item whose card is
-  // ON (so enablementScopes' base scope for it is "all", not "local") still overlays to "local"
-  // and must still read structural: false — the localMembers entry is the explicit source
-  // regardless of the card's enabled state.
+  // §R3-A truth table, "card-on explicit pin": pinning "this device" on an item whose card is ON
+  // (so enablementSharing's base for it is everywhere, not this-device) still overlays to
+  // this-device and must still read structural: false — the pin is the explicit source regardless
+  // of the card's enabled state.
   it("switchMemberDecisions reads structural: false for a 'this device' pin on an enabled card", async () => {
     const plugin = await (async () => {
       const p = makeSwitchPlugin();
       await p.loadSettings();
       return p;
     })();
-    plugin.settings.items["community:remotely-save"] = { enabled: true, companions: [] } as unknown as (typeof plugin.settings.items)[string];
+    plugin.settings.items = withItem(plugin.settings.items, "community", "remotely-save", { enabled: true });
 
     await plugin.addSwitchExceptions("community-plugins", ["remotely-save"]);
 
     const decisions = plugin.syncCenterHost().switchMemberDecisions("community-plugins");
-    expect(decisions).toContainEqual({ id: "remotely-save", scope: "local", structural: false });
+    expect(decisions).toContainEqual({ id: "remotely-save", sharing: THIS_DEVICE, structural: false });
   });
 
   // §R3-A truth table, "card-off + no rule": the structural counterpart to the pin above — no
-  // localMembers entry, no enabledOn, just a disabled card. This is the row the read-only
-  // rendering exists for.
+  // pin, no runsOn, just a disabled card. This is the row the read-only rendering exists for.
   it("switchMemberDecisions reads structural: true for a disabled card with no explicit rule", async () => {
     const plugin = await (async () => {
       const p = makeSwitchPlugin();
       await p.loadSettings();
       return p;
     })();
-    plugin.settings.items["community:dataview"] = { enabled: false, companions: [] } as unknown as (typeof plugin.settings.items)[string];
+    // THROUGH withItem, deliberately — the production write path. An earlier round changed this
+    // fixture to seed the map directly, on the grounds that the write would prune the entry; the
+    // prune was the defect (review C1), and bypassing the write here is what stopped this test from
+    // catching it. A test that covers a write path must keep covering the write path.
+    plugin.settings.items = withItem(plugin.settings.items, "community", "dataview", { enabled: false });
 
     const decisions = plugin.syncCenterHost().switchMemberDecisions("community-plugins");
-    expect(decisions).toContainEqual({ id: "dataview", scope: "local", structural: true });
+    expect(decisions).toContainEqual({ id: "dataview", sharing: THIS_DEVICE, structural: true });
   });
 
-  // Final-review Important: pinning "this device" via the menu must clear a stale device-class
-  // enabledOn, else "Desktop only → This device → Everywhere" silently resolves back to desktop.
-  it("pinning 'this device' clears a prior device-class enabledOn", async () => {
+  // Final-review C1, driven as the user gesture that opened it. A plugin enabled in the STORE's
+  // community-plugins.json and not installed here is protected by exactly one thing: its stored
+  // entry, which `elementSharings`' second pass turns into a this-device mask so capture passes the
+  // id through untouched. Choosing "Runs on → Everywhere" for it clears the rule and used to leave
+  // `{enabled:false}`, which a prune then deleted — mask gone, and the next capture would drop the
+  // plugin from the shared list for every other device. The entry must survive the gesture.
+  it("clearing a Runs-on rule for a not-installed plugin keeps its capture mask (final-review C1)", async () => {
     const plugin = await (async () => {
       const p = makeSwitchPlugin();
       await p.loadSettings();
       return p;
     })();
-    plugin.settings.items["community:remotely-save"] = { enabled: true, companions: [], enabledOn: "desktop" } as unknown as (typeof plugin.settings.items)[string];
+    // adopted from another device: the card is off here, the rule pins it to computers
+    plugin.settings.items = withItem(plugin.settings.items, "community", "not-installed-here", {
+      enabled: false,
+      runsOn: { device: "desktop" },
+    });
+
+    await plugin.clearMemberLocal("community-plugins", "not-installed-here");
+
+    // the entry survives — its presence IS the mask
+    expect(plugin.settings.items.community["not-installed-here"]).toEqual({ enabled: false });
+    // …and the mask is still what the capture path reads
+    const decisions = plugin.syncCenterHost().switchMemberDecisions("community-plugins");
+    expect(decisions).toContainEqual({ id: "not-installed-here", sharing: THIS_DEVICE, structural: true });
+  });
+
+  // Final-review Important: pinning "this device" via the menu must clear a stale device-class
+  // rule, else "Desktop only → This device → Everywhere" silently resolves back to desktop.
+  it("pinning 'this device' clears a prior device-class rule", async () => {
+    const plugin = await (async () => {
+      const p = makeSwitchPlugin();
+      await p.loadSettings();
+      return p;
+    })();
+    plugin.settings.items = withItem(plugin.settings.items, "community", "remotely-save", { enabled: true, runsOn: { device: "desktop" } });
 
     await plugin.addSwitchExceptions("community-plugins", ["remotely-save"]);
 
-    expect(plugin.settings.localMembers).toContain("community:remotely-save");
-    expect(plugin.settings.items["community:remotely-save"]?.enabledOn).toBeUndefined();
+    expect(plugin.settings.thisDeviceItems).toContain("community/remotely-save");
+    expect(plugin.settings.items.community["remotely-save"]?.runsOn).toBeUndefined();
+  });
+
+  // The two axes are orthogonal (spec §2): a pin clears the DEVICE axis only, so a force rule
+  // written from the Sync Center's Runs-on menu survives it.
+  it("pinning 'this device' leaves a force rule alone — only the device axis is cleared", async () => {
+    const plugin = await (async () => {
+      const p = makeSwitchPlugin();
+      await p.loadSettings();
+      return p;
+    })();
+    plugin.settings.items = withItem(plugin.settings.items, "community", "remotely-save", {
+      enabled: true,
+      runsOn: { device: "desktop", force: { state: "on", where: "everywhere" } },
+    });
+
+    await plugin.addSwitchExceptions("community-plugins", ["remotely-save"]);
+
+    expect(plugin.settings.items.community["remotely-save"]?.runsOn).toEqual({ device: "all", force: { state: "on", where: "everywhere" } });
+  });
+});
+
+// C1 (fix round 1): the settings card writes a "this device" pin from the def it is rendering, and
+// a BRAT-managed plugin's def PRESENTS as `beta`. If that classification reached the pin's
+// identity, the chip and the badge would show the pin while every mask reader — all of which
+// resolve the `community` section — never saw it, and the plugin's on/off state would travel to
+// the fleet anyway. This drives the real plugin end to end: pin, then read both the chip's own
+// source and the runtime mask.
+describe("a BRAT-managed plugin's this-device pin is the same identity as any other plugin's (spec §7b)", () => {
+  interface BetaPinSurface {
+    app: unknown;
+    loadData: () => Promise<unknown>;
+    saveData: (d: unknown) => Promise<void>;
+    loadSettings: () => Promise<void>;
+    recompile: () => Promise<boolean>;
+    settings: { rootPath: string; thisDeviceItems: string[]; items: ItemMap };
+    itemDefs: () => { section: string; id: string }[];
+    setMemberLocal: (ref: string, on: boolean) => Promise<void>;
+    coreContext: () => Promise<{ switchExceptions: Record<string, string[]> }>;
+    syncCenterHost: () => { switchMemberDecisions: (name: string) => MemberDecision[] };
+  }
+
+  async function betaPlugin(): Promise<BetaPinSurface> {
+    const io = new MemFS();
+    io.seed({ "config-dir/community-plugins.json": JSON.stringify(["slides-rup"]) });
+    const plugin = new ConfigSyncPlugin({} as never, {} as never);
+    const instance = plugin as unknown as BetaPinSurface;
+    instance.app = {
+      vault: { adapter: io, configDir: "config-dir", on: () => ({}) },
+      internalPlugins: { plugins: {} },
+      plugins: { manifests: { "slides-rup": { id: "slides-rup", name: "SlidesRup", version: "1.0.0" } }, enabledPlugins: new Set(["slides-rup"]), plugins: {} },
+      workspace: { getLeavesOfType: () => [] },
+      loadLocalStorage: () => null,
+      saveLocalStorage: () => {},
+    };
+    instance.loadData = async () => ({
+      schemaVersion: 3,
+      rootPath: "cs",
+      items: withItem(emptyItemMap(), "community", "slides-rup", { enabled: true }),
+      remotes: [],
+      bratIndex: { "slides-rup": "owner/slides-rup" },
+    });
+    instance.saveData = async () => {};
+    await instance.loadSettings();
+    await instance.recompile();
+    return instance;
+  }
+
+  it("the def presents as beta, and the pin it writes is community/<id>", async () => {
+    const plugin = await betaPlugin();
+    const def = plugin.itemDefs().find((d) => d.id === "slides-rup");
+    expect(def?.section).toBe("beta");
+
+    await plugin.setMemberLocal(defRef(def as never), true);
+
+    expect(plugin.settings.thisDeviceItems).toEqual(["community/slides-rup"]);
+  });
+
+  it("...and the mask sees it, so the chip and the run cannot disagree", async () => {
+    const plugin = await betaPlugin();
+    const def = plugin.itemDefs().find((d) => d.id === "slides-rup");
+
+    await plugin.setMemberLocal(defRef(def as never), true);
+
+    // The chip's own source.
+    expect(plugin.syncCenterHost().switchMemberDecisions("community-plugins")).toContainEqual({
+      id: "slides-rup",
+      sharing: THIS_DEVICE,
+      structural: false,
+    });
+    // The runtime mask a capture/apply actually runs with.
+    const ctx = await plugin.coreContext();
+    expect(ctx.switchExceptions["community-plugins"] ?? []).toContain("slides-rup");
   });
 });
 
@@ -2871,12 +3048,7 @@ interface MemberRulePluginSurface {
   saveData: (d: unknown) => Promise<void>;
   loadSettings: () => Promise<void>;
   addSwitchExceptions: (name: string, ids: string[]) => Promise<void>;
-  settings: {
-    rootPath: string;
-    localMembers: string[];
-    memberRules: Record<string, string>;
-    items: Record<string, { enabled: boolean; companions: unknown[] }>;
-  };
+  settings: { rootPath: string; thisDeviceItems: string[]; items: ItemMap };
   coreContext: () => Promise<{ switchForceOff: Record<string, string[]>; switchForceOn: Record<string, string[]> }>;
 }
 
@@ -2899,7 +3071,7 @@ function makeMemberRulePlugin(io: MemFS, liveEnabled: string[]): MemberRulePlugi
     // background call quiet instead of an unrelated caught-and-logged TypeError.
     saveLocalStorage: () => {},
   };
-  instance.loadData = async () => ({ schemaVersion: 2, items: {}, remotes: [], bratPluginIndex: {} });
+  instance.loadData = async () => ({ schemaVersion: 3, items: emptyItemMap(), remotes: [], bratIndex: {} });
   instance.saveData = async () => {};
   return instance;
 }
@@ -2911,7 +3083,7 @@ describe("mask producers read the PERSISTED switch-list file, not live PluginHos
     const plugin = makeMemberRulePlugin(io, ["remotely-save"]); // LIVE: reports enabled
     await plugin.loadSettings();
     plugin.settings.rootPath = "cs"; // skip PKM auto-detection, irrelevant here
-    plugin.settings.items["community:remotely-save"] = { enabled: true, companions: [] };
+    plugin.settings.items = withItem(plugin.settings.items, "community", "remotely-save", { enabled: true });
     await plugin.addSwitchExceptions("community-plugins", ["remotely-save"]); // legacy "this device" pin
 
     const ctx = await plugin.coreContext();
@@ -2925,7 +3097,7 @@ describe("mask producers read the PERSISTED switch-list file, not live PluginHos
     const plugin = makeMemberRulePlugin(io, ["remotely-save"]);
     await plugin.loadSettings();
     plugin.settings.rootPath = "cs";
-    plugin.settings.items["community:remotely-save"] = { enabled: true, companions: [] };
+    plugin.settings.items = withItem(plugin.settings.items, "community", "remotely-save", { enabled: true });
     await plugin.addSwitchExceptions("community-plugins", ["remotely-save"]);
 
     const ctx = await plugin.coreContext();
@@ -2934,29 +3106,35 @@ describe("mask producers read the PERSISTED switch-list file, not live PluginHos
   });
 });
 
-describe("settings.memberRules (task-2 fix #2: a stored MemberRule wins over legacy normalization)", () => {
-  it("a stored always-here rule forces on even though the plugin is off both live and persisted", async () => {
+describe("Item.runsOn (task-2 fix #2: a stored rule wins over a pin's re-derivation)", () => {
+  it("a stored force-on rule forces on even though the plugin is off both live and persisted", async () => {
     const io = new MemFS();
     io.seed({ "config-dir/community-plugins.json": JSON.stringify([]) }); // off, persisted
     const plugin = makeMemberRulePlugin(io, []); // off, live
     await plugin.loadSettings();
     plugin.settings.rootPath = "cs";
-    plugin.settings.items["community:remotely-save"] = { enabled: true, companions: [] };
-    plugin.settings.memberRules["community:remotely-save"] = "always-here"; // no localMembers pin at all
+    plugin.settings.items = withItem(plugin.settings.items, "community", "remotely-save", { enabled: true });
+    plugin.settings.items = withItem(plugin.settings.items, "community", "remotely-save", {
+      enabled: true,
+      runsOn: { device: "all", force: { state: "on", where: "everywhere" } },
+    }); // no this-device pin at all
 
     const ctx = await plugin.coreContext();
     expect(ctx.switchForceOn["community-plugins"] ?? []).toContain("remotely-save");
   });
 
-  it("a stored never-here rule forces off even though a legacy 'this device' pin is on persisted", async () => {
+  it("a stored force-off rule forces off even though a 'this device' pin is on persisted", async () => {
     const io = new MemFS();
     io.seed({ "config-dir/community-plugins.json": JSON.stringify(["remotely-save"]) }); // on, persisted
     const plugin = makeMemberRulePlugin(io, ["remotely-save"]); // on, live
     await plugin.loadSettings();
     plugin.settings.rootPath = "cs";
-    plugin.settings.items["community:remotely-save"] = { enabled: true, companions: [] };
-    await plugin.addSwitchExceptions("community-plugins", ["remotely-save"]); // legacy pin would normalize to always-here
-    plugin.settings.memberRules["community:remotely-save"] = "never-here"; // stored rule overrides it
+    plugin.settings.items = withItem(plugin.settings.items, "community", "remotely-save", { enabled: true });
+    await plugin.addSwitchExceptions("community-plugins", ["remotely-save"]); // a bare pin would resolve to force-on
+    plugin.settings.items = withItem(plugin.settings.items, "community", "remotely-save", {
+      enabled: true,
+      runsOn: { device: "all", force: { state: "off", where: "everywhere" } },
+    }); // stored rule overrides it
 
     const ctx = await plugin.coreContext();
     expect(ctx.switchForceOff["community-plugins"] ?? []).toContain("remotely-save");
@@ -2983,7 +3161,11 @@ function makeDisplayNamePlugin(lastLock: StoreLock | null): DisplayNamePluginSur
 // runtime name -> stored (registry) label -> lock label -> id. Runtime always misses here
 // (fakePluginApp has no manifests), so these cases isolate stored-vs-lock-vs-id.
 describe("displayName / displayParts — lock label as the final fallback", () => {
-  const lock: StoreLock = { capturedAt: "t", groups: { "plugin-foo": { sourcePluginVersion: "1.0.0", label: "Foo Lock Label" } } };
+  const lock: StoreLock = {
+    version: STORE_LOCK_VERSION,
+    capturedAt: "t",
+    items: { "community": {"foo": { source: { kind: "plugin", version: "1.0.0" }, display: { label: "Foo Lock Label" } }} },
+  };
 
   it("falls back to the lock label when no stored label is passed", () => {
     const plugin = makeDisplayNamePlugin(lock);
@@ -2996,7 +3178,7 @@ describe("displayName / displayParts — lock label as the final fallback", () =
   });
 
   it("falls back to the raw id when neither stored nor lock has a label", () => {
-    const plugin = makeDisplayNamePlugin({ capturedAt: "t", groups: {} });
+    const plugin = makeDisplayNamePlugin({ capturedAt: "t", items: {} });
     expect(plugin.displayName("plugin-foo")).toBe("foo");
   });
 
@@ -3065,7 +3247,7 @@ describe("enabled-css-snippets switch list (field-aware local, plain store)", ()
 });
 
 describe("remoteGroupsFrom (schema v2 self copy)", () => {
-  const DEMO_GROUP: SyncGroup = { name: "plugin-demo", path: "{configDir}/plugins/demo/data.json", type: "file", devices: "all" };
+  const DEMO_GROUP: SyncGroup = withRef({ name: "plugin-demo", path: "{configDir}/plugins/demo/data.json", type: "file", devices: "all" });
   const v2SelfCopy = JSON.stringify({ schemaVersion: 2, items: { "community:demo": { enabled: true } }, customGroups: [] });
   const files = { "store/configdir/plugins/config-sync/data.json": v2SelfCopy };
 
@@ -3122,7 +3304,7 @@ describe("store-contract-authoritative local strip (Fix B)", () => {
     type: "file",
     devices: "all",
     mode: "fields",
-    fields: [{ pattern: "userIgnoreFilters", scope: "local", encrypted: false }],
+    fields: [{ pattern: "userIgnoreFilters", sharing: THIS_DEVICE, encrypted: false }],
   };
 
   function setupWithContract(): { io: MemFS; plugins: FakePlugins; ctx: CoreContext } {
@@ -3141,7 +3323,7 @@ describe("store-contract-authoritative local strip (Fix B)", () => {
         type: "file",
         devices: "all",
         mode: "fields",
-        fields: [{ pattern: "*Token*", scope: "local", encrypted: false }],
+        fields: [{ pattern: "*Token*", sharing: THIS_DEVICE, encrypted: false }],
       },
     ],
   });
@@ -3208,7 +3390,7 @@ describe("store-contract-authoritative local strip (Fix B)", () => {
         type: "file",
         devices: "all",
         mode: "fields",
-        fields: [{ pattern: "userIgnoreFilters", scope: "all", encrypted: false }],
+        fields: [{ pattern: "userIgnoreFilters", sharing: EVERYWHERE, encrypted: false }],
       },
     ],
   });
@@ -3263,7 +3445,7 @@ function makeSelfStatusPlugin(io: MemFS): SelfStatusPluginSurface {
     workspace: { getLeavesOfType: () => [] },
     loadLocalStorage: () => null,
   };
-  instance.loadData = async () => ({ schemaVersion: 2, items: {}, remotes: [], bratPluginIndex: {} });
+  instance.loadData = async () => ({ schemaVersion: 2, items: {}, remotes: [], bratIndex: {} });
   instance.saveData = async () => {};
   return instance;
 }

@@ -4,7 +4,7 @@ import { rowFate, versionAheadClause, FateInput } from "../src/ui/fateModel";
 const base: FateInput = {
   direction: "apply", conflict: false, nothingYet: false, installed: true,
   hasUpdate: false, carrierSynced: true, storeListOn: null, locallyOn: false,
-  memberRule: "all", deviceClass: "desktop", desktopOnly: false, excludedHere: false,
+  runsOn: { device: "all" }, deviceClass: "desktop", desktopOnly: false, excludedHere: false,
   hasSettingsPayload: true, versionAhead: null, special: null, folderFileCount: null, encrypted: false,
 };
 
@@ -241,21 +241,21 @@ describe("rowFate — optedOutHere (C-#45 fix-round 2: unconditional, not direct
 // while the whole item is ignored on this device, and duplicated the `your rule` attribution.
 describe("rowFate — optedOutHere suppresses the Runs-on enablement-rule chips (C-#45 fix-round 3)", () => {
   it("never-here's chip is suppressed when opted out — only your rule remains", () => {
-    const f = rowFate({ ...base, direction: null, optedOutHere: true, memberRule: "never-here" });
+    const f = rowFate({ ...base, direction: null, optedOutHere: true, runsOn: { device: "all", force: { state: "off", where: "everywhere" } } });
     expect(f.chips).toContain("your rule");
     expect(f.chips).not.toContain("off here — your rule");
   });
   it("always-here's chip is suppressed when opted out — only your rule remains", () => {
-    const f = rowFate({ ...base, direction: null, optedOutHere: true, memberRule: "always-here" });
+    const f = rowFate({ ...base, direction: null, optedOutHere: true, runsOn: { device: "all", force: { state: "on", where: "everywhere" } } });
     expect(f.chips).toContain("your rule");
     expect(f.chips).not.toContain("on here — your rule");
   });
   it("NOT opted out: the enablement-rule chip is unaffected (regression guard — only opt-out suppresses it)", () => {
-    const f = rowFate({ ...base, memberRule: "never-here" });
+    const f = rowFate({ ...base, runsOn: { device: "all", force: { state: "off", where: "everywhere" } } });
     expect(f.chips).toContain("off here — your rule");
   });
   it("intrinsic-fact chips (encrypted, desktop only) survive opt-out — only run-consequence chips are suppressed", () => {
-    const f = rowFate({ ...base, direction: null, optedOutHere: true, memberRule: "never-here", encrypted: true, desktopOnly: true });
+    const f = rowFate({ ...base, direction: null, optedOutHere: true, runsOn: { device: "all", force: { state: "off", where: "everywhere" } }, encrypted: true, desktopOnly: true });
     expect(f.chips).toEqual(["desktop only", "your rule", "encrypted"]); // exact set + order the mockup shows
   });
 });
@@ -281,18 +281,18 @@ describe("rowFate — excludedHere keeps C-#24's family-member-wins precedence (
 
 describe("rowFate — Runs on re-derivation", () => {
   it("never-here removes turns on, adds rule chip", () => {
-    const f = rowFate({ ...base, storeListOn: true, memberRule: "never-here" });
+    const f = rowFate({ ...base, storeListOn: true, runsOn: { device: "all", force: { state: "off", where: "everywhere" } } });
     expect(f.sentence).toBe("Applies settings");
     expect(f.chips).toContain("off here — your rule");
     expect(f.turnsOn).toBe(false);
   });
   it("always-here on a store-off plugin adds turns on + rule chip", () => {
-    const f = rowFate({ ...base, storeListOn: false, memberRule: "always-here" });
+    const f = rowFate({ ...base, storeListOn: false, runsOn: { device: "all", force: { state: "on", where: "everywhere" } } });
     expect(f.sentence).toBe("Turns on · applies settings");
     expect(f.chips).toContain("on here — your rule");
   });
   it("class rule suppresses turn-on on the wrong class", () => {
-    const f = rowFate({ ...base, storeListOn: true, memberRule: "mobile", deviceClass: "desktop" });
+    const f = rowFate({ ...base, storeListOn: true, runsOn: { device: "mobile" }, deviceClass: "desktop" });
     expect(f.turnsOn).toBe(false);
   });
   it("carrier unsynced suppresses enablement verbs entirely", () => {

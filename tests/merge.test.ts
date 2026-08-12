@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { classifyMerge, jsonSortedView } from "../src/core/merge";
-import { SyncGroup } from "../src/core/types";
+import { SyncGroup, THIS_DEVICE } from "../src/core/types";
 
 // {configDir}-relative file group → store rel "store/configdir/<name>.json" (groupStorePath
 // rewrites the {configDir} prefix to the literal "configdir" segment; see src/core/pathing.ts).
@@ -14,7 +14,7 @@ function storeRel(name: string): string {
 
 // A plain (non-configDir) directory group, so store rels nest under "store/<name>/...".
 function dirGroup(name: string, overrides: Partial<SyncGroup> = {}): SyncGroup {
-  return { name, path: name, type: "dir", devices: "all", ...overrides };
+  return { name, path: name, type: "folder", devices: "all", ...overrides };
 }
 
 describe("classifyMerge", () => {
@@ -113,15 +113,15 @@ describe("classifyMerge", () => {
       devices: "all",
       mode: "fields",
       fields: [
-        { pattern: "rootPath", scope: "local", encrypted: false, locked: true },
-        { pattern: "remotes", scope: "local", encrypted: false, locked: true },
+        { pattern: "rootPath", sharing: THIS_DEVICE, encrypted: false, locked: true },
+        { pattern: "remotes", sharing: THIS_DEVICE, encrypted: false, locked: true },
       ],
     };
     const remote: SyncGroup = {
       devices: "all",
       fields: [
-        { locked: true, scope: "local", encrypted: false, pattern: "rootPath" },
-        { scope: "local", encrypted: false, locked: true, pattern: "remotes" },
+        { locked: true, sharing: THIS_DEVICE, encrypted: false, pattern: "rootPath" },
+        { sharing: THIS_DEVICE, encrypted: false, locked: true, pattern: "remotes" },
       ],
       mode: "fields",
       name: "plugin-config-sync",

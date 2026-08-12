@@ -21,17 +21,17 @@ One color per meaning, everywhere (0.27.9 audit). Alpha fills always use
 |---|---|---|
 | Capture / ↑ direction | `--color-orange` | state icons, pills, sidebar badges, checkbox `.is-capture` fill, seg buttons, Capture button (solid), capture progress bar, ribbon dot, status-bar segment |
 | Apply / ↓ direction | `--interactive-accent` | same family as capture; Apply button is `mod-cta`; apply progress bar, runline dot, status-bar segment |
-| Active / selected | `--interactive-accent` | active filter pill, active settings tab underline, active sidebar scope, seg `.is-on`, search-jump highlight, search scope tag |
+| Active / selected | `--interactive-accent` | active filter pill, active settings tab underline, active sidebar section, seg `.is-on`, search-jump highlight, search section tag |
 | In sync / success | `--color-green` | ✓ state icon, pills, result strip frame, test-strip ok, diff insertions, passphrase set badge, remote token-status stored |
 | Pull (remote → store) | `--color-cyan` | pull state icon, Pull button (solid primary), status-bar segment, encrypt-related accents (see below) |
 | Push (store → remote) | `--color-pink` | push state icon, Push button (solid primary), status-bar segment |
-| Locked / encrypted-at-rest | `--color-cyan` | key state icon, statenote pills, policy seg on-state (json keys mark encryption with a colorless `lock` suffix — scope alone drives key color since the D1 split) |
+| Locked / encrypted-at-rest | `--color-cyan` | key state icon, statenote pills, policy seg on-state (json keys mark encryption with a colorless `lock` suffix — sharing alone drives key color since the D1 split) |
 | Warning / caution | `--color-orange` | ⚠ pills, detect/device badges, amber version lines, unresolved conflicts, remote token-status awaiting this device's token, the leftover-section frame, orphan-row hint |
 | Error / destructive | `--color-red` | ✗ pills, test-strip error, diff deletions, strip-action on-state |
 | File changes (reports/diffs) | add `--color-green` · update `--color-blue` · delete `--color-red` | chips `+N ~N −N`, report file lines, conflict-modal marks — a *file-change* semantic, distinct from directions |
 | Neutral text ramp | `--text-normal` → `--text-muted` → `--text-faint` | content → secondary labels → hints/chevrons/idle |
 | Text on colored fills | `--text-on-accent` (accent fills) · `--background-primary` (orange/cyan/pink fills) | see Findings #4 |
-| Field rule: desktop/mobile only (json key) | `--color-blue` (desktop) · `--color-orange` (mobile) | json-preview key highlighting only, reusing existing tokens for a new per-key-scope semantic — no new variable |
+| Field rule: desktop/mobile only (json key) | `--color-blue` (desktop) · `--color-orange` (mobile) | json-preview key highlighting only, reusing existing tokens for a new per-key-sharing semantic — no new variable |
 | Detected, unruled (json key) | `--color-purple` | json-preview key highlighting only (`config-sync-json-detected`) |
 | Device-rule exclusion (C-#45 §7, "not synced here") | `--color-purple` | the `excluded` fate bucket's filter pill/sidebar badges/header pill — a row a class rule (C-#24) or a per-device opt-out keeps THIS device from touching; the section fold itself stays unstyled text like the ✓/○ folds it sits beside (spec §7: "same rendering style") |
 
@@ -111,12 +111,12 @@ itself is untouched.
 double as the self-pane title's capture/coldstart states, with `alert-triangle` both and
 `settings` default — see §2.4) · tabs: `settings`,
 `gem`, `toy-brick`, `puzzle`, `flask-conical` (BratIcon preferred when registered),
-`wrench`, `git-branch` · `monitor` / `smartphone` — `SCOPE_ICONS`' Desktop only/Mobile only
-stops (every scope-cycle) and the row-level
+`wrench`, `git-branch` · `monitor` / `smartphone` — `sharingIcon`'s Desktop only/Mobile only
+stops (every sharing cycle) and the row-level
 desktop-only-plugin badge (`config-sync-card-badge-plat`, itemCard.ts) · `airplay` —
-`SCOPE_ICONS` "This device" stop; the whole cycle renders through the one shared
-`renderScopeCycle` (scopeCycle.ts; the model — `SCOPE_ICONS`/`nextScope`/`scopeCycleTooltip`
-— stays in itemCard.ts), used by every Settings drawer scope cell — a direct-cycle click
+`sharingIcon` "This device" stop; the whole cycle renders through the one shared
+`renderSharingCycle` (sharingCycle.ts; the model — `sharingIcon`/`nextSharing`/`sharingCycleTooltip`
+— stays in itemCard.ts), used by every Settings drawer sharing cell — a direct-cycle click
 there advances straight to the next option. The Sync Center card's `Settings sync`/`Runs on`
 rows (§4 Rule controls) share the same glyph vocabulary through an icon-trigger-plus-menu
 variant instead — click opens an Obsidian `Menu` rather than cycling; `Runs on` extends the
@@ -128,7 +128,7 @@ button · `ban` — the drawer's Stop-syncing footer action; click opens an Obsi
 (same icon-trigger-plus-menu variant as `Settings sync`/`Runs on` above) offering **On this
 device**/**Sync on this device again** vs. **Everywhere…**, not a direct action (C-#45) ·
 `monitor-smartphone` — the
-scope-cycle "All devices" stop · `arrow-left-right` — the Sync Center leaf/tab icon ·
+sharing-cycle "All devices" stop · `arrow-left-right` — the Sync Center leaf/tab icon ·
 `chevron-right` — qualifier-autocomplete key rows (value rows use `check`, §2.4) · fate chips
 (`config-sync-fatechip`, `FATE_CHIP_ICON` in `fateChipIcons.ts` — every chip renders icon + text,
 generalized from the `encrypted`/`lock` special case): `circle-dashed` not installed here ·
@@ -172,6 +172,15 @@ than invent synonyms.
   `your other devices` / `the store` — no invented synonyms for any of them. Use device
   narrative ("on for your other devices", "off on this phone") and consequence narrative
   ("Apply would turn it on here too") instead.
+- **One concept, one word** (spec `2026-08-11-v3-one-vocabulary-design.md` §1). `scope` was
+  forbidden in copy above and is now retired from the code as well, because it meant three
+  different things — the settings area, the item family, and the sharing rule — depending on
+  where you stood. The words, everywhere: **section** (which family an item belongs to;
+  `obsidian` · `core` · `community` · `beta` · `custom`) · **sharing** (who shares a value) ·
+  **device** (which devices something runs on) · **mode** (how a file is handled) ·
+  **element** (one entry of an on/off list) · **action** (what an item needs right now) ·
+  **type** (`file` · `folder`, never `dir`). Both search bars type `section:`; there is no
+  alias for the retired `scope:`. A synonym for any of these is a defect, not a style choice.
 - Anchor to established product terms: Apply, Capture, the store, Sync Center, "your other
   devices". Don't invent synonyms.
 - Controls state their click consequence; recommended options give their reason ("matches
@@ -189,8 +198,8 @@ noted):
 
 - **Pills** `config-sync-pill` (is-up/down/ok/none/neutral/warn/error/statenote) — counts and
   states; never interactive. **Filter pills** `config-sync-fpill` in `-fpillrow` — buttons;
-  long/short label spans; mobile = glyph form, one line. Shared with settings search scopes.
-- **Sidebar** `config-sync-side-item/-side-badge/-side-head` — scopes with tiny count
+  long/short label spans; mobile = glyph form, one line. Shared with the settings search's section pills.
+- **Sidebar** `config-sync-side-item/-side-badge/-side-head` — sections with tiny count
   badges; active = accent tint. The Config Sync self layer leads as a distinct hero card
   `config-sync-side-self` (`-side-self-ic` icon tile, `-side-self-title`/`-side-self-sub`,
   `-side-self-pill` reusing `selfStatePill`), echoing the header self-chip. **Switcher**
@@ -233,7 +242,7 @@ noted):
   both sides` and reuses the existing Resolve grammar (`Use theirs ↓` / `Keep mine ↑`) at
   family level — no new controls. Custom `+ Add folder` groups are not companions and stay
   their own object, rendering a plain label with no breadcrumb (`parentCardLabel`,
-  `registry.ts`, never consults `settings.customGroups`). The legacy `enabled-css-snippets`
+  `registry.ts`, never consults `settings.items.custom`). The legacy `enabled-css-snippets`
   switch list is likewise out of scope, unchanged — it keeps the two-tone `Parent › `
   breadcrumb (`-rule-parent` + `-rule-parentsep`, `--text-faint`, `renderRuleName`,
   `SyncCenterView.ts`) ahead of the plain label, the same as any real companion. Inside the
@@ -336,26 +345,25 @@ noted):
   `↑` / deletion, `view ▸` / `diff ▸`) · `Resolve` (conflict rows only — segmented `Use
   theirs ↓` / `Keep mine ↑`) · `Runs on` (plugins whose carrier is synced) / `After install`
   (carrier not synced, row installs) / `Enablement` (carrier not synced, plugin installed
-  but locally off — the fallback ladder's third leaf) · `Settings sync` (item-level device
-  scope) · `More` (deep-link into the Settings tab, scrolled to this item's own card) ·
+  but locally off — the fallback ladder's third leaf) · `Settings sync` (the item's own file-level sharing rule) · `More` (deep-link into the Settings tab, scrolled to this item's own card) ·
   `Note` (honest runtime notes, e.g. Hotkeys' "Takes effect after an app reload"). While the
   card is open, the collapsed row's own fate sentence/glyph hides (ledger C-#9, Rows above)
   — the card's `On apply`/`On capture`/`State` row is the single statement; checkbox and
   chips stay.
 - **Rule controls** — two idioms sharing one icon vocabulary. In the Sync Center card,
-  `Runs on` and `Settings sync` render as an icon trigger (`config-sync-scopeicon
+  `Runs on` and `Settings sync` render as an icon trigger (`config-sync-sharingicon
   config-sync-card-trigger`, content-sized to its glyph box only — a full-row hit area was
   the ledger C-#7 bug) that opens an Obsidian `Menu` of the options on click: the glyph IS
   the state, the menu click is the one explicit choice (killing the silent-cycle hazard);
   each menu item shows the option's glyph + label copy, current one checked; `aria-label`
-  names the current state, the `renderScopeCycle` precedent. `Settings sync` reuses
-  `SCOPE_ICONS` (three options — no `This device`, matching the settings-file scope
+  names the current state, the `renderSharingCycle` precedent. `Settings sync` reuses
+  `sharingIcon` (three options — no `This device`, matching the settings-file sharing
   precedent below); `Runs on` extends the same vocabulary with `RUNS_ON_ICONS` (itemCard.ts)
-  for `MemberRule`'s five stops (§2.3). `After install`/`Enablement` keep textual triggers
+  for the Runs-on rule's five stops (§2.3). `After install`/`Enablement` keep textual triggers
   (`config-sync-menuchip config-sync-card-trigger` — no glyph vocabulary for them) restyled
   to the same trigger-box family so the card reads as one control language regardless of
-  trigger kind. The Settings tab's own drawer scope cell is untouched: it keeps the direct-
-  cycle `renderScopeCycle` idiom (a click advances straight to the next option) — the two
+  trigger kind. The Settings tab's own drawer sharing cell is untouched: it keeps the direct-
+  cycle `renderSharingCycle` idiom (a click advances straight to the next option) — the two
   surfaces share the icon vocabulary, never the interaction, and both write the same stored
   value.
 - **Runs-on rule (per-plugin enablement)** — one rule per plugin, set from that plugin's own
@@ -385,7 +393,7 @@ noted):
 - **Qualifier autocomplete** `config-sync-qac/-qac-opt` (is-sel)/`-qac-ic/-qac-txt/-qac-desc` — the `key:value` search dropdown under both search boxes, anchored by `config-sync-search-wrap`; opens on focus (an empty box lists every key), key→value suggestions, keyboard-navigable. Logic in `src/ui/qualifierSearch.ts`.
 - **Settings tab** (`src/ui/SettingTab.ts`): `config-sync-tabs/-tab` (phone hides inactive
   labels — the pattern the mobile filter pills echo), rows/expand/form-*, fields editor
-  (`-fieldrow/-ftag/-act-btn`), remotes forms + `-test-strip`, search (`-hit/-scopetag`),
+  (`-fieldrow/-ftag/-act-btn`), remotes forms + `-test-strip`, search (`-hit/-sectiontag`),
   passphrase `-ppset/-ppbadge`. `config-sync-section-sub` — one subtitle per tab, above the
   Sync all row ("Each plugin syncs its settings and on/off state." for Core, "…its files,
   settings and on/off state." elsewhere), replacing the old per-row boilerplate description.
@@ -424,32 +432,32 @@ noted):
   - **Row** `config-sync-item-wrap` — chevron, name, badges (`config-sync-card-badge*`; order:
     grey `desktop-only plugin` chip (manifest `isDesktopOnly`, monitor icon via
     `-badge-plat/-badge-ic`)
-    → enablement scope when non-default → `N device-scoped` → `N encrypted`; a zero count never
+    → the Runs-on chip when non-default → `N device-scoped` → `N encrypted`; a zero count never
     renders), sync toggle. No mode chip and no other row content — mode is a derived, drawer-only
     state (`itemCard.ts`'s `deriveMode`, see Drawer ② below), never a header control — the same
     terse rows-are-lists-nothing-else rule the Sync Center already follows.
   - **Drawer** `config-sync-item-exp`, up to three zones, every row across all three built on one
-    4-column grid (`config-sync-grid`: content `1fr` | scope `var(--cs-scope-w, 28px)` | state
+    4-column grid (`config-sync-grid`: content `1fr` | sharing `var(--cs-scope-w, 28px)` | state
     `28px` | action `28px`; action-column icons are `config-sync-ghost`, faint 0.25 idle, full on
     the row's `:hover`/`:focus-within` or `.is-active`, so the grid stays quiet until touched).
-    Every scope control in a drawer is one Commander-style cycling icon
-    (`config-sync-scopeicon`, `renderScopeCycle`): the glyph IS the state (`SCOPE_ICONS`:
+    Every sharing control in a drawer is one Commander-style cycling icon
+    (`config-sync-sharingicon`, `renderSharingCycle`): the glyph IS the state (`sharingIcon`:
     monitor+smartphone = All devices, monitor = Desktop only, smartphone = Mobile only,
     airplay = This device), a click advances to the next value in that row's own option list
-    (`nextScope`, wrapping), tooltip `Where it syncs (currently: …)`; the `all` default sits dim
-    (0.45) and any narrower scope renders `.is-set` (accent, full opacity). ① and ②
+    (`nextSharing`, wrapping), tooltip `Where it syncs (currently: …)`; the `all` default sits dim
+    (0.45) and any narrower sharing renders `.is-set` (accent, full opacity). ① and ②
     render only when they apply, ③ Companion folders always renders (down to just its quiet
     `+ Add folder` row, `config-sync-add-row-quiet`, when a card has no folders yet):
-    ① **Enabled on** (plugin cards only) — one 4-option scope icon: Desktop/Mobile/All read & write
-    `ItemConfig.enabledOn` directly, but the **This device** stop reads & writes the device-local
-    `localMembers` set instead (a stored `enabledOn:"local"` is never written, so the choice stays
-    out of the shared self store copy and can't leak or be erased by a pull). A desktop-only plugin's cycle skips the
+    ① **Enabled on** (plugin cards only) — one 4-option sharing icon: Desktop/Mobile/All read & write
+    the item's own `runsOn.device` directly, but the **This device** stop reads & writes the
+    device-local `thisDeviceItems` set instead (this-device is not representable in `runsOn`, so the
+    choice stays out of the shared self store copy and can't leak or be erased by a pull). A desktop-only plugin's cycle skips the
     mobile stop (`DESKTOP_ONLY_ENABLED_OPTIONS`), and its `all` stop's tooltip appends
     `DESKTOP_ONLY_ALL_NOTE` ("mobile is excluded automatically" — the runtime auto-mask, not this
     setting, is what keeps mobile untouched).
     ② **Settings file** — mode is derived, never chosen: no per-key rule anywhere (`rules` and
-    `perItem` both empty) is whole-file state, any rule is per-key state. The grid's first row
-    (`config-sync-card-sfhead`) is always the path row: path code, a 3-option scope icon (no
+    `perElement` both empty) is whole-file state, any rule is per-key state. The grid's first row
+    (`config-sync-card-sfhead`) is always the path row: path code, a 3-option sharing icon (no
     `This device`) and a lock icon toggle (`config-sync-lock`, `.is-on` when encrypted) that
     encrypts the whole file. The path text itself is the edit entry point
     (`config-sync-card-pathbtn`, hover = dotted underline + soft backdrop; `.is-custom` accent
@@ -458,20 +466,20 @@ noted):
     own Escape handling would close the settings window otherwise), and a committed custom path
     shows a quiet `Reset to default` text action (`config-sync-reset-link`, registered on
     mousedown so the input's blur-commit can't tear it out first) inside the edit row. In
-    whole-file state the path row's scope/lock are live; in per-key state they render
+    whole-file state the path row's sharing/lock are live; in per-key state they render
     `config-sync-dim` and disabled (tooltip "Per-key rules are active — remove them to control
     the whole file again"), and a rule row (`config-sync-card-rulerow`) appears per configured
     key — never every key in the file, only ones with a rule; browsing the rest is File
-    preview's job (below) — each with its own scope icon, a lock toggle (disabled at `This device`
-    or while `Per-item scopes` is on) and a ✕ (`Remove rule`) that deletes it; a string-array
-    key adds a `Per-item scopes` toggle (`config-sync-card-peritem`) — flip it on and each
+    preview's job (below) — each with its own sharing icon, a lock toggle (disabled at `This device`
+    or while `Per-item device rules` is on) and a ✕ (`Remove rule`) that deletes it; a string-array
+    key adds a `Per-item device rules` toggle (`config-sync-card-perelement`) — flip it on and each
     element gets its own row (`config-sync-card-elrow`) instead of one rule for the whole key.
     Removing the last rule flips the card back to whole-file state. Below the rule rows, a
     collapsed disclosure (`config-sync-card-disclosure`, `▸ File preview` / `▾ File preview`)
     expands into the read-only `data.json` preview (`jsonView.ts`) — collapsed by default, so a
     card with no rules never reads its file at all — keys colored by rule, a color-dot legend (`config-sync-legend-dot`, round-7 定稿 B)
     underneath, a lucide `lock` (`config-sync-json-lock`) marks an encrypted key,
-    `--color-purple` = detected-but-unruled, faint = plain; a `perItem` array colors each
+    `--color-purple` = detected-but-unruled, faint = plain; a `perElement` array colors each
     element the same way. Click a key to add a rule for it directly (promotes the card to
     per-key state).
     ③ **Companion folders** — preset (`themes/`, `snippets/`) and user-added vault-relative
@@ -481,14 +489,14 @@ noted):
     row to expand its member list, while the folder name itself (same `config-sync-card-pathbtn`
     affordance, click/keydown stopPropagation so it never doubles as the member toggle) opens the
     Save/Cancel path-edit row (autofocused; Escape cancels via the same keymap `Scope` as the
-    settings-file path row); scope icon + sync toggle in their own columns; the action column
+    settings-file path row); sharing icon + sync toggle in their own columns; the action column
     holds only a ✕ (`Remove folder`) on a user-added row (a preset is only ever relocated via
     the warning-gated path edit, never removed outright). A trailing quiet `+ Add folder` row
     (`config-sync-add-row-quiet`, no longer a full-width button) closes every card (a card with
     zero rows renders no `Companion folders` header, just the Add-folder row). Opening
-    `snippets/` lists members (`config-sync-card-snippetmembers`), each its own scope icon — it
+    `snippets/` lists members (`config-sync-card-snippetmembers`), each its own sharing icon — it
     writes `enabledCssSnippets` AND decides whether the file itself travels — the only companion
-    whose members carry a scope control; a plain (unmapped) folder's members list for
+    whose members carry a sharing control; a plain (unmapped) folder's members list for
     information only (`ItemDef.presetCompanions` has no per-member carry mechanism today — a
     future engine iteration, not this one). A member whose file has been deleted but still holds a
     device choice is an orphan row (`is-orphan`): its name renders struck faint
@@ -496,7 +504,7 @@ noted):
     follows it (`config-sync-orphan-forget`'s **Forget** button sits at the right edge of the
     content cell — inside `config-sync-orphancell`, never in the 28px action column, which a
     text button cannot fit; the action column stays empty). Forget clears the
-    choice (scope → `all`) and rebuilds the member zone in place — the scope icon itself stays
+    choice (sharing → everywhere) and rebuilds the member zone in place — the sharing icon itself stays
     interactive, since keeping the choice is a valid response to a transient absence (mid-sync).
     The member count (`config-sync-card-membercount`) counts real files only. While any orphan row
     is present, a warning-toned hint (`config-sync-ldhint config-sync-orphanhint`, `--text-warning`)
@@ -561,6 +569,6 @@ Each item ships only after a user decision. None change behavior silently.
    accent text these diverge. Candidate: `--text-on-accent` everywhere.
 5. **Nine border-radius tiers** (3/5/6/8/9px + s/m + 999 + 50%): candidate collapse to
    `--radius-s`/`--radius-m`/999/50% + checkbox 3px/6px. Visual churn — low priority.
-6. **`.config-sync-fpill` double duty** (panel filter pills + settings search scope pills):
+6. **`.config-sync-fpill` double duty** (panel filter pills + settings search section pills):
    intentional sharing, but a settings-side tweak can silently restyle the panel. Candidate:
    document as shared (this doc) or split the class.

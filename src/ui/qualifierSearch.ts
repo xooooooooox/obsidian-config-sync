@@ -65,10 +65,13 @@ export interface QualifierValue {
   description?: string;
 }
 
+// `values` is readonly so a host can declare its spec list `as const` and derive its qualifier KEY
+// union from it — which is what makes a spec key with no resolver a compile error instead of a
+// qualifier that parses, autocompletes and then silently filters nothing.
 export interface QualifierSpec {
   key: string;
   description?: string;
-  values: QualifierValue[];
+  values: readonly QualifierValue[];
 }
 
 export interface Suggestion {

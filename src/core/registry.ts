@@ -1,85 +1,214 @@
 /**
  * Item registry + compile-to-groups (spec 2026-07-25-unified-card-design.md,
- * docs/superpowers/specs/2026-07-26-ui-feedback-round2-design.md §2). A single flat registry of
+ * docs/superpowers/specs/2026-07-26-ui-feedback-round2-design.md §2, and
+ * docs/superpowers/specs/2026-08-11-v3-one-vocabulary-design.md §1/§2). A single flat registry of
  * ItemDefs (one per card: the three Obsidian cards, every core plugin, every installed
- * community/beta plugin) plus a v2 settings shape (`ConfigSyncSettings.items: Record<string,
- * ItemConfig>`) that stores each card's own configuration. `compileItems` is the ONLY place that
- * turns (defs, settings) into the `SyncGroup[]` the existing capture/apply engine
+ * community/beta plugin) plus the v3 settings shape (`ConfigSyncSettings.items: Record<Section,
+ * Record<ItemId, Item>>`) that stores each card's own configuration. `compileItems` is the ONLY
+ * place that turns (defs, settings) into the `SyncGroup[]` the existing capture/apply engine
  * (ConfigSyncCore.ts) already knows how to run — everything downstream of compile is untouched.
+ *
+ * Structure carries the taxonomy since v3: an item's section is where it LIVES in the document,
+ * not a prefix parsed out of its key, so a core and a community plugin may legitimately share an
+ * id. Nothing flattens the two levels back into one map on the way through.
  *
  * Every registry item, including the "app" card (app.json), compiles through the same
  * `compileSingleFile` path — there is no shared/merged carrier: a single-file item's Plain-mode
- * `fileRule.scope` is elevated to the compiled group's top-level `devices` class (the
- * "scope→devices class" compilation deferred from Task 2), uniformly.
+ * `fileRule.sharing` is elevated to the compiled group's top-level `devices` class (the
+ * "sharing→devices class" compilation deferred from Task 2), uniformly.
  */
-import { corePluginFile, mergePresetFields, SELF_GROUP_NAME } from "./catalog";
+import { communityGroupName, corePluginFile, mergePresetFields, SELF_GROUP_NAME } from "./catalog";
+import { GROUP_NAME_RE } from "./manifest";
 import { basename, groupStorePath } from "./pathing";
-import { SWITCH_LIST_GROUPS } from "./switchList";
-import { DeviceClass, FieldRule, FileRule, PerItemScopes, RuleScope, SyncGroup } from "./types";
+import { carrierRef, companionRef } from "./itemKeys";
+import { EnablementList, enablementListFile, SWITCH_LISTS } from "./switchList";
+import {
+  DeviceClass,
+  EVERYWHERE,
+  FieldRule,
+  FileRule,
+  ItemId,
+  itemRef,
+  ItemRef,
+  PerElementSharing,
+  perClass,
+  RunsOn,
+  Section,
+  Sharing,
+  StorageSection,
+  SyncGroup,
+  SyncMode,
+  THIS_DEVICE,
+} from "./types";
 
-export type ItemSection = "obsidian" | "core" | "community" | "beta";
+// The registry's declaration of which items are carriers (spec §5, "retired outright"): the two
+// on/off lists an item's enablement can ride. This replaces switchList.ts's hardcoded group-name
+// set as the answer to "is this group an enablement carrier?" — the registry knows, because every
+// def that has an enablement names its list here.
+export const ENABLEMENT_LISTS: readonly EnablementList[] = ["core-plugins", "community-plugins"];
+
+export function isEnablementList(name: string): name is EnablementList {
+  return (ENABLEMENT_LISTS as readonly string[]).includes(name);
+}
 
 export interface ItemDef {
-  id: string;
+  // Identity is structural (§1/§2): section says which family, id is bare inside it. Two ids may
+  // collide across sections — that is the point of nesting.
+  section: Section;
+  id: ItemId;
+  // The name this item's settings file compiles to. Written here, at construction, rather than
+  // derived by a `legacyGroupName(id)` parser: the group name is the store lock's and the
+  // baselines' key, so it is LINEAGE — a community item's group stays `plugin-<id>` until the lock
+  // is re-keyed to an ItemRef. Nothing reads meaning back OUT of it; consumers take section/id.
+  groupName: string;
   label: string;
   description: string;
-  section: ItemSection;
-  enablement?: { carrier: "core-plugins.json" | "community-plugins.json"; element: string };
+  enablement?: { list: EnablementList; element: string };
   settingsFile?: { defaultPath: string | null };
   presetCompanions?: { path: string; mapKey?: string }[];
   // The plugin manifest's isDesktopOnly (community/beta only, set only when true) — an innate
-  // property (the plugin cannot install on mobile), distinct from the user's enabledOn choice.
+  // property (the plugin cannot install on mobile), distinct from the user's runsOn choice.
   // Drives the neutral "desktop-only plugin" card badge and trims "mobile" out of the ENABLED ON
-  // scope cycle (round-8 spec §2).
+  // cycle (round-8 spec §2).
   desktopOnly?: boolean;
 }
 
-// The map KEY is the key-name pattern (see task-4-brief.md's ItemConfig.settingsFile.rules —
-// Record<string, FieldRule>): a bare {scope, encrypted, locked?} per key, deliberately without
-// FieldRule's own `pattern` field so there is exactly one source of truth for which key a rule
-// governs (the map key), not two that could disagree.
+// The map KEY is the key-name pattern: a bare {sharing, encrypted, locked?} per key, deliberately
+// without FieldRule's own `pattern` field so there is exactly one source of truth for which key a
+// rule governs (the map key), not two that could disagree.
 export type ItemFieldRule = Omit<FieldRule, "pattern">;
 
 export interface ItemSettingsFile {
-  customPath?: string;
-  mode: "plain" | "fields";
+  // A registry item is only ever "plain" or "fields" — its mode is DERIVED from whether it has any
+  // per-key rules (itemCard.ts's deriveMode), never chosen. "encrypted" exists here for `custom`
+  // items alone, which do choose it: the Advanced tab's Mode dropdown offers Plain/Fields/Encrypt
+  // on every custom rule, and v2 stored that choice on the SyncGroup literal a custom rule used to
+  // be. Narrowing it away here would turn a user's encrypted rule into a plaintext one at the next
+  // capture, which is a data change, not a shape change (see customGroup/customItemFromGroup).
+  mode: SyncMode;
   fileRule?: FileRule;
   rules: Record<string, ItemFieldRule>;
-  perItem: Record<string, PerItemScopes>;
+  perElement: Record<string, PerElementSharing>;
 }
 
 export interface ItemCompanion {
   path: string;
-  scope: DeviceClass;
+  device: DeviceClass;
   enabled: boolean;
 }
 
-export interface ItemConfig {
+// One item's stored configuration (spec §2). The same shape for every section: a `custom` item is
+// no longer a second data shape (v2's `customGroups: SyncGroup[]`) — it is an item whose `path` and
+// `type`, which a registry item derives from its def, are simply required.
+export interface Item {
   enabled: boolean;
+  // Only meaningful for a custom item, where it is required; a registry item's type is always
+  // "file" (its settings file) and is left absent.
+  type?: "file" | "folder";
+  // Set only when it differs from the item's default path (v2's `settingsFile.customPath`);
+  // required for a custom item, which has no def to derive one from.
+  path?: string;
   settingsFile?: ItemSettingsFile;
-  // Optional since spec 2026-08-11-data-model-hardening.md §5.2, READERS ONLY: an empty list is
-  // what "no companion folders" already means, and almost every real entry is exactly that (107 of
-  // 108 in a live vault), so every read below is `?? []` and an absent key is legal. Writing the
-  // empty array CONTINUES for now — removing a field is a two-phase change, and a build that
-  // reads `cfg.companions` unguarded is still out there; phase 2 stops writing it once a tolerant
-  // build is the fleet's floor.
   companions?: ItemCompanion[];
-  enabledOn?: RuleScope;
+  // The Runs-on rule (§2): was v2's `memberRules[itemId]` PLUS `enabledOn`, two fields that
+  // answered overlapping questions and could disagree. `device` is the class axis; `force` pins
+  // the entry's state outright.
+  runsOn?: RunsOn;
+  // On/off-list entries that are NOT items of their own — snippet files under the snippets folder
+  // are the motivating case (§2). A rule lives on the thing it governs, and these things have no
+  // item, so they live on their owning folder item. Declared here as their home; nothing writes it
+  // yet (v2 had no such rules to carry forward, and inventing them would be a behaviour change).
+  elements?: Record<string, RunsOn>;
+  // Custom items only — kept from the v2 SyncGroup literal (spec §5).
+  description?: string;
+  label?: string;
+  origin?: "discovered";
 }
 
-// A freeform Advanced-tab rule (spec §6 addition) — "Custom rules" and "Discovered files" (an
-// adopted discovered file is just a customGroups entry with origin:"discovered"). Has no ItemDef
-// of its own, so it round-trips as the exact SyncGroup literal the Advanced tab's form already
-// edits (name/path/type/devices/mode/fields/fileRule/perItem/description/origin) — a parallel
-// shape would just be SyncGroup with the serial numbers filed off, which the Advanced tab's UI
-// doesn't need or surface anything beyond.
-export type CustomGroupConfig = SyncGroup;
+// The document's item store: stored section -> id -> item. Two levels, never flattened, and never
+// a `beta` key — see StorageSection.
+export type ItemMap = Record<StorageSection, Record<ItemId, Item>>;
 
-// The shape compileItems needs out of ConfigSyncSettings — spelled out structurally (rather than
-// imported from main.ts) so this module never depends on the plugin's top-level settings type.
-export interface CompileSettings {
-  items: Record<string, ItemConfig>;
-  customGroups: CustomGroupConfig[];
+export function emptyItemMap(): ItemMap {
+  return { obsidian: {}, core: {}, community: {}, custom: {} };
+}
+
+// THE bridge from the presented section to the stored one (spec §7b) — the only place `beta`
+// becomes `community`, and the only way to obtain a StorageSection from a Section. Everything that
+// keys storage (the accessors below, `defRef`, `groupOwners`) goes through it, so a beta item can
+// never acquire an identity of its own.
+export function storageSection(section: Section): StorageSection {
+  return section === "beta" ? "community" : section;
+}
+
+// An item def's identity as the one-string ref localStorage and the hosts speak. The single
+// def → ref conversion: a caller that reached for `itemRef(def.section, …)` would not compile,
+// because `def.section` may be `beta`.
+export function defRef(def: ItemDef): ItemRef {
+  return itemRef(storageSection(def.section), def.id);
+}
+
+// THE matching counterpart of defRef, and the reason it exists (fix round 2, NEW-I1): closing a
+// leak by construction protects MINTING, not MATCHING. `itemRef` cannot be handed a `beta`, but
+// nothing stopped a comparison like `def.section === parsed.section` — where the left side is the
+// PRESENTED section ("beta") and the right the stored one ("community") — from silently never
+// matching. A def and a ref are only ever compared through this function, so both sides of the
+// comparison go through `storageSection` exactly once, the same way both sides of a construction
+// do.
+export function defForRef(defs: ItemDef[], ref: ItemRef): ItemDef | undefined {
+  return defs.find((d) => defRef(d) === ref);
+}
+
+export function itemAt(items: ItemMap, section: Section, id: ItemId): Item | undefined {
+  return items[storageSection(section)]?.[id];
+}
+
+export function itemFor(items: ItemMap, def: ItemDef): Item {
+  return itemAt(items, def.section, def.id) ?? emptyItem();
+}
+
+// ── What a stored entry is worth ────────────────────────────────────────────────────────────────
+//
+// AN ENTRY'S PRESENCE IS LOAD-BEARING, and this comment exists because a previous round of this
+// release forgot it. `elementSharings`' second pass keys on presence ALONE: an id that is in the
+// store's on/off list but has no def here (the plugin is not installed) is masked — capture passes
+// it through untouched — if and only if `items[section][id]` exists. Delete the entry and the mask
+// goes with it, and the next capture removes that plugin from the shared list for every device.
+//
+// So `{enabled: false}` is NOT residue, however much it looks like it. It is what an absent entry
+// is not, in the one place that matters most. An earlier fix here pruned it on write, reasoning by
+// analogy with `withRunsOnDevice`/`pruneSettingsFile` (C-#26, "a round trip leaves data.json as it
+// found it") — the analogy was false, because those prune a FIELD whose absence and default agree,
+// while this would prune the entry whose existence IS the decision.
+//
+// `itemEarnsDef` — should this entry get a synthesized def, i.e. a card for a plugin that is not
+// installed here? Everything except an entry whose ONLY content is a Runs-on rule. A rule reaches
+// the document from the member ROW in the Sync Center, not from a card, and at 2.21.0 it lived in a
+// side table with no `items` entry at all — so giving it a card would put a plugin this device does
+// not have into the Community tab, which is what review I1 caught. Every other shape earns one,
+// `{enabled:false}` included: that is how a card the user turned off is turned back ON, and taking
+// it away is the door review NEW-I1 caught. Both are closed here, at the one predicate, rather than
+// by a second mechanism on the write path — see this release's own rule about a relationship whose
+// two sides move apart.
+export function itemEarnsDef(item: Item): boolean {
+  if (item.enabled) return true;
+  const keys = Object.keys(item);
+  return !keys.includes("runsOn") || keys.some((k) => k !== "enabled" && k !== "runsOn");
+}
+
+// Pure: returns a new map with one item replaced, both levels copied. It never removes an entry —
+// see the note above: in `core`/`community` an entry's mere presence is this device's capture mask
+// for that on/off-list element, so a write is not free to decide the entry has nothing to say.
+export function withItem(items: ItemMap, section: Section, id: ItemId, item: Item): ItemMap {
+  const store = storageSection(section);
+  return { ...items, [store]: { ...(items[store] ?? {}), [id]: item } };
+}
+
+export function withoutItem(items: ItemMap, section: Section, id: ItemId): ItemMap {
+  const store = storageSection(section);
+  const next = { ...(items[store] ?? {}) };
+  delete next[id];
+  return { ...items, [store]: next };
 }
 
 export class CompileError extends Error {
@@ -89,29 +218,27 @@ export class CompileError extends Error {
   }
 }
 
-// Still returns `companions: []`, deliberately: this is the base every new entry is built from
-// (the settings tab's `itemConfig`, `itemConfigWithEnabledOn`, adopt's self-item enable,
-// `stopSyncing`), and §5.2 phase 1 must persist the shape an older build can read — an item
-// enabled for the FIRST time after this release included, or the compatibility this phasing buys
-// leaks away through the newest entries. Phase 2 drops it from every construction site at once.
-export function emptyItemConfig(): ItemConfig {
-  return { enabled: false, companions: [] };
+export function emptyItem(): Item {
+  return { enabled: false };
 }
 
-// The base every WRITE of an existing entry starts from. `items[id] ?? emptyItemConfig()` is not
-// enough on its own: a stored entry that already lacks `companions` (a hand edit, or a document
-// from the future build that stops writing it) would spread straight back out still missing the
-// key, and this build must never persist an entry an older one cannot read (§5.2 phase 1). Reads
-// don't need this — they are all `?? []`. Pure; the stored value always wins.
-export function itemConfigForWrite(existing: ItemConfig | undefined): ItemConfig {
-  return existing === undefined ? emptyItemConfig() : { ...emptyItemConfig(), ...existing };
+// The device axis of an item's Runs-on rule, written without disturbing the force axis (they
+// answer different questions — spec §2). A rule left saying nothing at all is dropped entirely, so
+// a round trip through the control leaves data.json as it found it (C-#26). Pure.
+export function withRunsOnDevice(item: Item, device: DeviceClass): Item {
+  const force = item.runsOn?.force;
+  const next: Item = { ...item };
+  if (device === "all" && force === undefined) delete next.runsOn;
+  else next.runsOn = force === undefined ? { device } : { device, force };
+  return next;
 }
 
 // The exact write the in-place "where it runs" menu performs (spec 2026-07-28 §4): keep the
-// card's existing config, force the card on (a rule on a disabled card would read back as
-// "local"), pin enabledOn.
-export function itemConfigWithEnabledOn(existing: ItemConfig | undefined, scope: "desktop" | "mobile"): ItemConfig {
-  return { ...itemConfigForWrite(existing), enabled: true, enabledOn: scope };
+// item's existing config, force the item on (a rule on a disabled item would read back as
+// this-device), pin the device class.
+export function itemWithDevice(existing: Item | undefined, device: "desktop" | "mobile"): Item {
+  const base = existing ?? emptyItem();
+  return { ...base, enabled: true, runsOn: { ...(base.runsOn ?? { device }), device } };
 }
 
 // ── Registry construction ───────────────────────────────────────────────────────────────────
@@ -137,12 +264,14 @@ export interface RegistryEnv {
 const OBSIDIAN_CARD_DEFS: readonly Omit<ItemDef, "section">[] = [
   {
     id: "app",
+    groupName: "app",
     label: "App settings",
     description: "Editing, new-note and link behavior, and other general options.",
     settingsFile: { defaultPath: "{configDir}/app.json" },
   },
   {
     id: "appearance",
+    groupName: "appearance",
     label: "Appearance",
     description: "Theme, fonts and CSS snippets.",
     settingsFile: { defaultPath: "{configDir}/appearance.json" },
@@ -150,6 +279,7 @@ const OBSIDIAN_CARD_DEFS: readonly Omit<ItemDef, "section">[] = [
   },
   {
     id: "hotkeys",
+    groupName: "hotkeys",
     label: "Hotkeys",
     description: "Your custom keyboard shortcuts.",
     settingsFile: { defaultPath: "{configDir}/hotkeys.json" },
@@ -169,21 +299,23 @@ export function buildItemDefs(env: RegistryEnv): ItemDef[] {
   const obsidian: ItemDef[] = OBSIDIAN_CARD_DEFS.map((d) => ({ ...d, section: "obsidian" }));
 
   const core: ItemDef[] = env.cores.map((c) => ({
-    id: `core:${c.id}`,
+    section: "core",
+    id: c.id,
+    groupName: c.id,
     label: c.name,
     description: "",
-    section: "core",
-    enablement: { carrier: "core-plugins.json", element: c.id },
+    enablement: { list: "core-plugins", element: c.id },
     settingsFile: { defaultPath: `{configDir}/${corePluginFile(c.id)}` },
   }));
   core.sort(byLabel);
 
   const communityAndBeta: ItemDef[] = env.plugins.map((p) => ({
-    id: `community:${p.id}`, // beta reuses the community id form (spec §1)
+    section: env.betaIds.has(p.id) ? "beta" : "community",
+    id: p.id,
+    groupName: communityGroupName(p.id),
     label: p.name,
     description: COMMUNITY_PLUGIN_DESCRIPTION,
-    section: env.betaIds.has(p.id) ? "beta" : "community",
-    enablement: { carrier: "community-plugins.json", element: p.id },
+    enablement: { list: "community-plugins", element: p.id },
     settingsFile: { defaultPath: `{configDir}/plugins/${p.id}/data.json` },
     ...(p.desktopOnly ? { desktopOnly: true } : {}),
   }));
@@ -192,8 +324,8 @@ export function buildItemDefs(env: RegistryEnv): ItemDef[] {
   return [...obsidian, ...core, ...communityAndBeta];
 }
 
-// Extends a defs list with a synthesized community/beta def for every id in itemIds whose plugin
-// has no installed def yet. Two callers need this: leftover.ts's storeSelfCopyGroups/
+// Extends a defs list with a synthesized community/beta def for every stored community item whose
+// plugin has no installed def yet. Two callers need this: leftover.ts's storeSelfCopyGroups/
 // selfListGroups (parsing ANOTHER device's settings, where the id's plugin may never have run
 // here) and main.ts's recompile() (compiling THIS device's own settings.items, where a plugin the
 // user selected but hasn't installed yet — e.g. install-on-apply's pending target — has no
@@ -205,19 +337,34 @@ export function buildItemDefs(env: RegistryEnv): ItemDef[] {
 // locally-known cores, and the three Obsidian cards exist in every registry. betaIds classifies a
 // synthesized def the same way buildItemDefs does for an installed one, so a BRAT-managed id
 // still reads as "beta" instead of falling back to "community".
-export function defsForForeignItems(defs: ItemDef[], itemIds: string[], betaIds: ReadonlySet<string>): ItemDef[] {
-  const known = new Set(defs.map((d) => d.id));
+//
+// WHICH stored items qualify (review I1, narrowed again by review C1). 2.21.0 asked only "is there
+// an entry in `items`?" — its signature was literally
+// `defsForForeignItems(defs, Object.keys(settings.items), …)`, with no other condition. That test
+// stopped being faithful when the v2 → v3 migration started creating entries nobody enabled: v2's
+// `memberRules` was a side table read independently of `items`, so a Runs-on rule set from the Sync
+// Center on a plugin NOT installed here had a rule and NO item, and now has both (v2Migration.ts).
+// Left as "any entry", every such rule would grow a CARD in the Community/Beta tab — one per def,
+// via SettingTab.renderRegistryCards — for a plugin this device does not have.
+//
+// `itemEarnsDef` is therefore 2.21.0's condition MINUS exactly that one shape, and nothing else: a
+// rule-only entry earns no def; every other entry, `{enabled:false}` included, earns one just as it
+// did before. The first attempt at this excluded `{enabled:false}` too and had to close the
+// resulting door with a prune on the write path — which deleted the entry whose presence is the
+// capture mask (review C1). One predicate, no second mechanism.
+export function defsForForeignItems(defs: ItemDef[], items: ItemMap, betaIds: ReadonlySet<string>): ItemDef[] {
+  const known = new Set(defs.filter((d) => storageSection(d.section) === "community").map((d) => d.id));
   const extras: ItemDef[] = [];
-  for (const id of itemIds) {
-    if (known.has(id) || !id.startsWith("community:")) continue;
-    const pluginId = id.slice("community:".length);
+  for (const [id, item] of Object.entries(items.community ?? {})) {
+    if (known.has(id) || !itemEarnsDef(item)) continue;
     extras.push({
+      section: betaIds.has(id) ? "beta" : "community",
       id,
-      label: pluginId,
+      groupName: communityGroupName(id),
+      label: id,
       description: COMMUNITY_PLUGIN_DESCRIPTION,
-      section: betaIds.has(pluginId) ? "beta" : "community",
-      enablement: { carrier: "community-plugins.json", element: pluginId },
-      settingsFile: { defaultPath: `{configDir}/plugins/${pluginId}/data.json` },
+      enablement: { list: "community-plugins", element: id },
+      settingsFile: { defaultPath: `{configDir}/plugins/${id}/data.json` },
     });
   }
   return extras.length === 0 ? defs : [...defs, ...extras];
@@ -225,43 +372,36 @@ export function defsForForeignItems(defs: ItemDef[], itemIds: string[], betaIds:
 
 // ── Compile ──────────────────────────────────────────────────────────────────────────────────
 
-// Exported for the Sync Center host's companionParentOf (c-livetest batch5 task 2): a companion
-// group's parent presents as the ITEM's own compiled group name, which only this function knows
-// how to derive from the owning ItemDef's id.
-export function legacyGroupName(id: string): string {
-  if (id.startsWith("core:")) return id.slice("core:".length);
-  if (id.startsWith("community:")) return `plugin-${id.slice("community:".length)}`;
-  return id; // obsidian cards: appearance / hotkeys keep their reserved name as-is
-}
-
-function configFor(settings: CompileSettings, id: string): ItemConfig {
-  return settings.items[id] ?? emptyItemConfig();
+// The shape compileItems needs out of ConfigSyncSettings — spelled out structurally (rather than
+// imported from main.ts) so this module never depends on the plugin's top-level settings type.
+export interface CompileSettings {
+  items: ItemMap;
 }
 
 function fieldsFromRules(rules: Record<string, ItemFieldRule>): FieldRule[] {
   return Object.entries(rules).map(([pattern, rule]) => ({ pattern, ...rule }));
 }
 
-function perItemFromMap(perItem: Record<string, PerItemScopes>): Record<string, PerItemScopes> | undefined {
-  const entries = Object.entries(perItem);
+function perElementFromMap(perElement: Record<string, PerElementSharing>): Record<string, PerElementSharing> | undefined {
+  const entries = Object.entries(perElement);
   return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }
 
 // Registers a group's real path against the collision map — throws a CompileError naming both
 // items when two different items' carriers land on the same store location (spec §8, D8: "查重
 // + 与已有 item 路径冲突即拒绝").
-function claimPath(seen: Map<string, string>, itemId: string, path: string): void {
+function claimPath(seen: Map<string, string>, owner: string, path: string): void {
   const key = groupStorePath(path);
-  const owner = seen.get(key);
-  if (owner !== undefined && owner !== itemId) {
-    throw new CompileError(`"${itemId}" and "${owner}" both sync "${path}" — give one of them a different path.`);
+  const existing = seen.get(key);
+  if (existing !== undefined && existing !== owner) {
+    throw new CompileError(`"${owner}" and "${existing}" both sync "${path}" — give one of them a different path.`);
   }
-  seen.set(key, itemId);
+  seen.set(key, owner);
 }
 
 // Compiles one item's own single-file settingsFile into a SyncGroup — every registry item
 // (the three Obsidian cards, every core/community/beta plugin file) goes through this one path.
-// Merges config-sync's own locked local-only presets (rootPath, remotes, localMembers — see
+// Merges config-sync's own locked local-only presets (rootPath, remotes, thisDeviceItems — see
 // catalog.ts's selfPresetRules) into a compiled group for the self item, no matter what the user
 // configured: these fields must NEVER leave the device, even under a future UI bug or a
 // hand-edited data.json. Delegates to catalog.ts's mergePresetFields — the ONE shared
@@ -279,31 +419,55 @@ function withSelfPresets(group: SyncGroup): SyncGroup {
   return { ...group, mode: "fields", fields: mergePresetFields(group.fields ?? []), fileRule: undefined };
 }
 
-function compileSingleFile(id: string, def: ItemDef, cfg: ItemConfig): SyncGroup | null {
+// A file-level rule's sharing IS the compiled group's devices class (FileSharing excludes
+// this-device by construction — D9 — so this is always a valid DeviceClass).
+function devicesForFileRule(rule: FileRule): DeviceClass {
+  return sharingClassOrAll(rule.sharing);
+}
+
+function sharingClassOrAll(sharing: Sharing): DeviceClass {
+  return sharing.kind === "per-class" ? sharing.class : "all";
+}
+
+function compileSingleFile(def: ItemDef, item: Item): SyncGroup | null {
   const defaultPath = def.settingsFile?.defaultPath ?? null;
-  if (!cfg.enabled || defaultPath === null) return null; // off, or state-only (no file to sync yet)
-  const path = cfg.settingsFile?.customPath ?? defaultPath;
-  const mode = cfg.settingsFile?.mode ?? "plain";
-  const group: SyncGroup = { name: legacyGroupName(id), path, type: "file", devices: "all" };
+  if (!item.enabled || defaultPath === null) return null; // off, or state-only (no file to sync yet)
+  const path = item.path ?? defaultPath;
+  const mode = item.settingsFile?.mode ?? "plain";
+  // `ref` is the item's identity and the key of the lock, the baselines and the opt-out list (spec
+  // §3/§4); `name` stays the store-path label and the manifest's uniqueness rule. Minted HERE, at
+  // the one place that knows both — a consumer that derived it from the name would be a second
+  // producer, which is the drift task 1 paid for twice.
+  const group: SyncGroup = { name: def.groupName, ref: defRef(def), path, type: "file", devices: "all" };
+  // Carried, not enumerated — the same rule customGroup follows (review M5). A registry item's mode
+  // is DERIVED (itemCard.ts's deriveMode), so only "plain"/"fields" are reachable through the UI.
+  // For a hand-edited document that says something else, the outcome depends on what it says: a
+  // value outside SyncMode reaches validateSyncManifest and is refused loudly, while "encrypted" is
+  // ACCEPTED there and simply compiles as an encrypted group. Either way the document is honoured
+  // instead of being quietly rewritten to plain, which is what the enumeration used to do.
+  if (mode !== "plain") group.mode = mode;
   if (mode === "fields") {
-    group.mode = "fields";
-    const fields = fieldsFromRules(cfg.settingsFile?.rules ?? {});
+    const fields = fieldsFromRules(item.settingsFile?.rules ?? {});
     if (fields.length > 0) group.fields = fields;
-    const perItem = perItemFromMap(cfg.settingsFile?.perItem ?? {});
-    if (perItem !== undefined) group.perItem = perItem;
-  } else if (cfg.settingsFile?.fileRule !== undefined) {
-    // Task-2-deferred compilation: a Plain file-level rule's scope IS the group's devices class
-    // (fileRule.scope excludes "local" by construction — D9 — so this is always a valid
-    // DeviceClass); fileRule.encrypted still governs whole-file encryption independently.
-    group.fileRule = cfg.settingsFile.fileRule;
-    group.devices = cfg.settingsFile.fileRule.scope;
+    const perElement = perElementFromMap(item.settingsFile?.perElement ?? {});
+    if (perElement !== undefined) group.perElement = perElement;
+  } else if (mode === "plain" && item.settingsFile?.fileRule !== undefined) {
+    group.fileRule = item.settingsFile.fileRule;
+    group.devices = devicesForFileRule(item.settingsFile.fileRule);
   }
   return withSelfPresets(group);
 }
 
-function compileCompanions(itemId: string, cfg: ItemConfig): SyncGroup[] {
-  if (!cfg.enabled) return []; // card off → its file AND its companions exit sync together
-  return (cfg.companions ?? []).filter((c) => c.enabled).map((c) => ({ name: basename(c.path), path: c.path, type: "dir", devices: c.scope }));
+// A companion's key is its OWNER's, plus its own basename (itemKeys.ts's companionRef explains
+// why): a companion has no identity of its own, and its group name is unique only because
+// companionNameConflict forbids a clash. The two are minted side by side here so the name a group
+// compiles to and the key its baseline lands under can never be derived from different rules.
+function compileCompanions(def: ItemDef, item: Item): SyncGroup[] {
+  if (!item.enabled) return []; // card off → its file AND its companions exit sync together
+  const owner = defRef(def);
+  return (item.companions ?? [])
+    .filter((c) => c.enabled)
+    .map((c) => ({ name: basename(c.path), ref: companionRef(owner, c.path), path: c.path, type: "folder" as const, devices: c.device }));
 }
 
 export interface GroupDisplayParts {
@@ -317,14 +481,13 @@ export interface GroupDisplayParts {
 // the composed form is display-only and must never be persisted (only the lock's own label field,
 // written at capture, carries a resolved display name for a not-installed group).
 export function parentCardLabel(groupName: string, defs: ItemDef[], settings: CompileSettings): string | null {
-  // compileItems never emits this name under schema v2 (see the reserved-name note above) — the
-  // branch covers v3-era store manifests, which can still carry the group at runtime (main.ts
-  // special-cases it the same way).
-  if (groupName === "enabled-css-snippets") return defs.find((d) => d.id === "appearance")?.label ?? "Appearance";
+  // compileItems never emits this name (see the reserved-name note above) — the branch covers a
+  // store manifest, which can still carry the group at runtime (main.ts special-cases it too).
+  if (groupName === "enabled-css-snippets") return defs.find((d) => d.section === "obsidian" && d.id === "appearance")?.label ?? "Appearance";
   for (const def of defs) {
-    const cfg = configFor(settings, def.id);
-    if (!cfg.enabled) continue;
-    if ((cfg.companions ?? []).some((c) => c.enabled && basename(c.path) === groupName)) return def.label;
+    const item = itemFor(settings.items, def);
+    if (!item.enabled) continue;
+    if ((item.companions ?? []).some((c) => c.enabled && basename(c.path) === groupName)) return def.label;
   }
   return presetCompanionFallback(groupName, defs, settings);
 }
@@ -339,120 +502,227 @@ function presetCompanionFallback(groupName: string, defs: ItemDef[], settings: C
   for (const def of defs) {
     if (def.presetCompanions === undefined) continue;
     if (!def.presetCompanions.some((p) => basename(p.path) === groupName)) continue;
-    const cfg = configFor(settings, def.id);
-    if ((cfg.companions ?? []).some((c) => basename(c.path) === groupName)) continue; // already configured — no fallback
+    const item = itemFor(settings.items, def);
+    if ((item.companions ?? []).some((c) => basename(c.path) === groupName)) continue; // already configured — no fallback
     return def.label;
   }
   return null;
 }
 
-// Per-element scope for a plugin's enablement (spec §3/§4, D4/D5): "enabledOn" default "all";
-// a disabled card forces its element to "local" ("each device manages its own", never inherits
-// another device's enabled state). Exported for main.ts to fold into the switch-list engine's
-// runtime member-exception derivation (core-plugins.json/community-plugins.json are NOT
-// string-array files, so they cannot go through the generic capturePerItemArray/PerItemScopes
-// mechanism the way a plain array key like enabledCssSnippets does — the existing switch-list
-// masking machinery, driven by this map, is the correct home for per-element enable scope).
-// A stored enabledOn of "local" is a pre-retarget artifact (spec: the explicit "this device
-// decides for itself" choice now lives in settings.localMembers, never in ItemConfig.enabledOn —
-// see main.ts's setMemberLocal/memberLocalIdsFor) — ignored here, same as unset ("all").
-function explicitScope(enabledOn: RuleScope | undefined): RuleScope {
-  const scope = enabledOn ?? "all";
-  return scope === "local" ? "all" : scope;
+// Per-element sharing for a plugin's enablement (spec §3/§4, D4/D5): the item's own
+// `runsOn.device`, defaulting to everywhere; a disabled card forces its element to this-device
+// ("each device manages its own", never inherits another device's enabled state). Exported for
+// main.ts to fold into the switch-list engine's runtime member-exception derivation
+// (core-plugins.json/community-plugins.json are NOT string-array files, so they cannot go through
+// the generic capturePerElementArray/PerElementSharing mechanism the way a plain array key like
+// enabledCssSnippets does — the existing switch-list masking machinery, driven by this map, is the
+// correct home for per-element enable sharing).
+function deviceSharing(device: DeviceClass): Sharing {
+  return device === "all" ? EVERYWHERE : perClass(device);
 }
 
-interface ElementScope {
+interface ElementSharing {
   element: string;
-  scope: RuleScope;
-  // Structural (task-8, spec 2026-08-05-section-groups-and-member-menu-design.md §R3-A): "local"
-  // solely because the card is off, with no explicit source (no stored enabledOn) — as opposed to
-  // a "local" a user actually pinned. Only meaningful when scope === "local"; false otherwise.
+  sharing: Sharing;
+  // Structural (task-8, spec 2026-08-05-section-groups-and-member-menu-design.md §R3-A):
+  // this-device solely because the card is off, with no explicit source (no stored runsOn) — as
+  // opposed to a this-device a user actually pinned. Only meaningful when the sharing IS
+  // this-device; false otherwise.
   structural: boolean;
 }
 
-// Shared per-element walk behind enablementScopes/structuralLocalElements: same two passes (defs
-// whose carrier matches, then item configs with no local def), computed once so the two exported
+// Shared per-element walk behind enablementSharing/structuralLocalElements: same two passes (defs
+// whose list matches, then stored items with no local def), computed once so the two exported
 // projections can never drift apart.
-function elementScopes(defs: ItemDef[], settings: CompileSettings, carrier: "core-plugins.json" | "community-plugins.json"): ElementScope[] {
-  const out: ElementScope[] = [];
+function elementSharings(defs: ItemDef[], settings: CompileSettings, list: EnablementList): ElementSharing[] {
+  const out: ElementSharing[] = [];
   const covered = new Set<string>();
   for (const def of defs) {
-    if (def.enablement?.carrier !== carrier) continue;
+    if (def.enablement?.list !== list) continue;
     covered.add(def.id);
-    const cfg = configFor(settings, def.id);
+    const item = itemFor(settings.items, def);
     out.push({
       element: def.enablement.element,
-      scope: cfg.enabled ? explicitScope(cfg.enabledOn) : "local",
-      structural: !cfg.enabled && cfg.enabledOn === undefined,
+      sharing: item.enabled ? deviceSharing(item.runsOn?.device ?? "all") : THIS_DEVICE,
+      structural: !item.enabled && item.runsOn === undefined,
     });
   }
-  // Item configs with no local def: the plugin isn't installed on this device, but its element
-  // still lives in the store's switch list, so an adopted enabledOn / disabled-card decision must
-  // keep masking here (2026-07-27 mobile find: an adopted "desktop" scope for a not-installed
-  // plugin was dead config). The element id derives from the item id alone — no def needed.
-  const prefix = carrier === "core-plugins.json" ? "core:" : "community:";
-  for (const [id, cfg] of Object.entries(settings.items)) {
-    if (covered.has(id) || !id.startsWith(prefix)) continue;
+  // Stored items with no local def: the plugin isn't installed on this device, but its element
+  // still lives in the store's switch list, so an adopted rule / disabled-card decision must keep
+  // masking here (2026-07-27 mobile find: an adopted "desktop" rule for a not-installed plugin was
+  // dead config). The element id IS the item id — no def needed.
+  const section: StorageSection = list === "core-plugins" ? "core" : "community";
+  for (const [id, item] of Object.entries(settings.items[section] ?? {})) {
+    if (covered.has(id)) continue;
     out.push({
-      element: id.slice(prefix.length),
-      scope: cfg.enabled ? explicitScope(cfg.enabledOn) : "local",
-      structural: !cfg.enabled && cfg.enabledOn === undefined,
+      element: id,
+      sharing: item.enabled ? deviceSharing(item.runsOn?.device ?? "all") : THIS_DEVICE,
+      structural: !item.enabled && item.runsOn === undefined,
     });
   }
   return out;
 }
 
-export function enablementScopes(defs: ItemDef[], settings: CompileSettings, carrier: "core-plugins.json" | "community-plugins.json"): Record<string, RuleScope> {
-  const out: Record<string, RuleScope> = {};
-  for (const e of elementScopes(defs, settings, carrier)) out[e.element] = e.scope;
+export function enablementSharing(defs: ItemDef[], settings: CompileSettings, list: EnablementList): Record<string, Sharing> {
+  const out: Record<string, Sharing> = {};
+  for (const e of elementSharings(defs, settings, list)) out[e.element] = e.sharing;
   return out;
 }
 
-// Elements whose enablementScopes "local" is structural (spec §R3-A) — a disabled card the user
-// never pinned or scoped, not a rule they wrote. The Sync Center's scoped-member disclosure reads
-// this to render those rows read-only instead of offering a scope control that silently no-ops.
-export function structuralLocalElements(defs: ItemDef[], settings: CompileSettings, carrier: "core-plugins.json" | "community-plugins.json"): Set<string> {
+// Elements whose enablementSharing this-device is structural (spec §R3-A) — a disabled card the
+// user never pinned or scoped, not a rule they wrote. The Sync Center's scoped-member disclosure
+// reads this to render those rows read-only instead of offering a control that silently no-ops.
+export function structuralLocalElements(defs: ItemDef[], settings: CompileSettings, list: EnablementList): Set<string> {
   const out = new Set<string>();
-  for (const e of elementScopes(defs, settings, carrier)) if (e.structural) out.add(e.element);
+  for (const e of elementSharings(defs, settings, list)) if (e.structural) out.add(e.element);
   return out;
 }
 
-function anyEnabledInCarrier(defs: ItemDef[], settings: CompileSettings, carrier: "core-plugins.json" | "community-plugins.json"): boolean {
-  return defs.some((d) => d.enablement?.carrier === carrier && configFor(settings, d.id).enabled);
+function anyEnabledInList(defs: ItemDef[], settings: CompileSettings, list: EnablementList): boolean {
+  return defs.some((d) => d.enablement?.list === list && itemFor(settings.items, d).enabled);
 }
 
-// Every group name the registry itself can ever produce plus the three switch-list carrier names
-// (SWITCH_LIST_GROUPS: "community-plugins"/"core-plugins" are the conditional enablement groups
-// compileItems emits below; "enabled-css-snippets" never is its own group but is still reserved so
-// a custom rule can't shadow the vocabulary a user already associates with it). A custom rule's
-// name must be its own, unambiguous identity.
+// Every group name the registry itself can ever produce plus the three switch-list names
+// ("community-plugins"/"core-plugins" are the conditional enablement groups compileItems emits
+// below; "enabled-css-snippets" never is its own group but is still reserved so a custom rule
+// can't shadow the vocabulary a user already associates with it). A custom rule's name must be its
+// own, unambiguous identity.
 function reservedCustomGroupNames(defs: ItemDef[]): Set<string> {
-  return new Set<string>([...Object.keys(groupOwners(defs, [])), ...SWITCH_LIST_GROUPS]);
+  return new Set<string>([...Object.keys(groupOwners(defs, emptyItemMap())), ...Object.keys(SWITCH_LISTS)]);
 }
 
-// Compiles settings.customGroups (spec §6 addition, task-8 concern fix) into the same SyncGroup[]
+// Compiles the `custom` section (spec §6 addition, task-8 concern fix) into the same SyncGroup[]
 // the registry-derived cards produce — the Advanced tab's "Custom rules"/"Discovered files" no
 // longer have to fend for themselves with a session-only groupsIO write. Path claims go through
 // the SAME claimPath accounting compileItems already runs for every registry item (collision with
-// a registry item OR another custom group throws), and a name that shadows a reserved/registry
-// name is rejected outright — the same "no silent gaps" contract compileItems applies everywhere
-// else. A blank name (the Advanced tab's in-memory-only "+ Add rule" placeholder — see
-// commitGroups.ts's culprit-blank filter) is skipped rather than rejected: it never reaches
-// settings in the first place, so this is defense in depth, not a real code path.
-function compileCustomGroups(customGroups: CustomGroupConfig[], defs: ItemDef[], seenPaths: Map<string, string>): SyncGroup[] {
+// a registry item OR another custom item throws), and a name that shadows a reserved/registry name
+// is rejected outright — the same "no silent gaps" contract compileItems applies everywhere else.
+// A blank name (the Advanced tab's in-memory-only "+ Add rule" placeholder — see commitGroups.ts's
+// culprit-blank filter) is skipped rather than rejected: it never reaches settings in the first
+// place, so this is defense in depth, not a real code path.
+// ORDER: `Object.entries` yields integer-like keys first, ascending, before the rest in insertion
+// order — so a custom rule whose NAME is all digits ("2024") compiles ahead of the others, where
+// v2's `customGroups` array kept authored order. GROUP_NAME_RE permits such a name, so this is
+// reachable; it moves a row in the Advanced tab's list and nothing else (order carries no meaning
+// for capture/apply, and every collision check is order-independent). Accepted rather than papered
+// over with a sort, which would change the order of the common case too; a stored order field is a
+// shape change no user has asked for.
+function compileCustomItems(items: ItemMap, defs: ItemDef[], seenPaths: Map<string, string>): SyncGroup[] {
   const reserved = reservedCustomGroupNames(defs);
   const seenNames = new Set<string>();
   const groups: SyncGroup[] = [];
-  for (const cg of customGroups) {
-    const name = cg.name.trim();
+  for (const [rawName, item] of Object.entries(items.custom ?? {})) {
+    const name = rawName.trim();
     if (name === "") continue;
+    // Checked HERE, not left to validateSyncManifest downstream (task-3 review M4): a compile error
+    // names the offending rule in the Notice the user actually sees, where the validator's failure
+    // arrives as a generic "your sync setup has an invalid rule" with no culprit — and it now also
+    // decides which key the item takes, so a name that cannot be one must fail before it mints one.
+    if (!GROUP_NAME_RE.test(name)) {
+      throw new CompileError(`"${name}" is not a valid custom rule name — use only letters, digits, "-" or "_", starting with a letter or digit.`);
+    }
     if (reserved.has(name)) throw new CompileError(`"${name}" is a reserved name — rename this custom rule.`);
     if (seenNames.has(name)) throw new CompileError(`two custom rules are both named "${name}" — rename one of them.`);
     seenNames.add(name);
-    claimPath(seenPaths, `custom:${name}`, cg.path);
-    groups.push({ ...cg, name });
+    if (!item.enabled) continue;
+    const path = item.path ?? "";
+    claimPath(seenPaths, itemRef("custom", name), path); // never `custom/${name}` — one minter, same as defRef above
+    groups.push(customGroup(name, item, path));
   }
   return groups;
+}
+
+// Every field of an Item this build writes for itself. Anything else on a stored item is a field a
+// NEWER build recorded, and it rides through untouched (2.21.0 §3.1, invariant II.1) — the same
+// discipline manifest.ts's lockEntryTail applies to a lock entry. Without it, the custom section's
+// round trip (item -> compiled group -> Advanced-tab draft -> item) would strip the future's data
+// and publish the loss to the fleet on the next capture, which is exactly what v2's `{...cg}`
+// spread happened to avoid.
+const WRITTEN_ITEM_KEYS = ["enabled", "type", "path", "settingsFile", "companions", "runsOn", "elements", "description", "label", "origin"] as const;
+
+export function itemTail(item: Item | undefined): Record<string, unknown> {
+  if (item === undefined) return {};
+  const tail: Record<string, unknown> = { ...item };
+  for (const key of WRITTEN_ITEM_KEYS) delete tail[key];
+  return tail;
+}
+
+// The same, one shape over: the SyncGroup fields a custom item round-trips through.
+const WRITTEN_CUSTOM_GROUP_KEYS = ["name", "ref", "path", "type", "devices", "mode", "fields", "fileRule", "perElement", "description", "label", "origin"] as const;
+
+function customGroupTail(group: SyncGroup): Record<string, unknown> {
+  const tail: Record<string, unknown> = { ...group };
+  for (const key of WRITTEN_CUSTOM_GROUP_KEYS) delete tail[key];
+  return tail;
+}
+
+// A tail crossing the Item/SyncGroup boundary must not land on a field the DESTINATION shape
+// already owns (fix round 2): the two shapes share names — `mode`, `fields`, `fileRule`,
+// `perElement` are SyncGroup fields today and could become Item fields tomorrow — so an unfiltered
+// spread would let a value written for one be read as the other. Dropping the collision is the
+// safe half of the trade and it only ever happens on the DERIVED side: the compiled group is
+// rebuilt from the item on every load, while the item itself keeps every key it arrived with.
+function withoutKeys(tail: Record<string, unknown>, owned: readonly string[]): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...tail };
+  for (const key of owned) delete out[key];
+  return out;
+}
+
+// A custom item's compiled group. `path`/`type` are the item's own (required there); `devices`
+// comes from its runsOn — v2's SyncGroup literal carried `devices` directly, and the migration
+// lands it in `runsOn.device` (spec §5). The item's carried tail leads, so a field this build does
+// not know rides out to every consumer of the compiled list exactly as v2's `{...cg}` did.
+function customGroup(name: string, item: Item, path: string): SyncGroup {
+  const carried = withoutKeys(itemTail(item), WRITTEN_CUSTOM_GROUP_KEYS) as Partial<SyncGroup>;
+  const group: SyncGroup = { ...carried, name, ref: itemRef("custom", name), path, type: item.type ?? "folder", devices: item.runsOn?.device ?? "all" };
+  // The mode is CARRIED, not enumerated (fix round 1, review M5). A ternary chain over SyncMode is
+  // how "encrypted" was silently rewritten to "plain" in the first place, and a fourth value would
+  // regress the same way; passing the stored value through means only the per-mode PAYLOAD needs a
+  // branch, and a mode this build has never heard of reaches the validator to be refused loudly
+  // rather than being quietly downgraded.
+  const mode = item.settingsFile?.mode ?? "plain";
+  if (mode !== "plain") group.mode = mode;
+  if (mode === "fields") {
+    const fields = fieldsFromRules(item.settingsFile?.rules ?? {});
+    if (fields.length > 0) group.fields = fields;
+    const perElement = perElementFromMap(item.settingsFile?.perElement ?? {});
+    if (perElement !== undefined) group.perElement = perElement;
+  } else if (mode === "plain" && item.settingsFile?.fileRule !== undefined) {
+    group.fileRule = item.settingsFile.fileRule;
+  }
+  if (item.description !== undefined) group.description = item.description;
+  if (item.label !== undefined) group.label = item.label;
+  if (item.origin !== undefined) group.origin = item.origin;
+  return group;
+}
+
+// The inverse of customGroup, for the Advanced tab, which edits custom rules as SyncGroup drafts
+// (its form has always spoken that shape) and persists them as items. Pure; the name is the map
+// key, so it is not carried inside the item.
+//
+// `existing` is the item this draft replaces, and it is where the carried tail really comes from:
+// the draft has been through manifest.ts's parseGroup, which rebuilds a group from a whitelist, so
+// a field a newer build wrote is already gone by the time the tab sees it. Reading the tail off
+// storage is what makes the round trip lossless (2.21.0 invariant II.1); the draft's own tail is
+// layered on top for the case where it did survive.
+export function customItemFromGroup(g: SyncGroup, existing?: Item): Item {
+  const item: Item = { ...itemTail(existing), ...withoutKeys(customGroupTail(g), WRITTEN_ITEM_KEYS), enabled: true, type: g.type, path: g.path };
+  if (g.devices !== "all") item.runsOn = { device: g.devices };
+  // Same rule as customGroup's, in the other direction (review M5): the group's own mode is stored
+  // verbatim, so no value of SyncMode can be lost by an enumeration that forgot it. An absent mode
+  // means plain, which is the only reading a group without one ever had.
+  if ((g.mode !== undefined && g.mode !== "plain") || g.fileRule !== undefined) {
+    item.settingsFile = {
+      mode: g.mode ?? "plain",
+      ...(g.fileRule !== undefined ? { fileRule: g.fileRule } : {}),
+      rules: Object.fromEntries((g.fields ?? []).map(({ pattern, ...rule }) => [pattern, rule])),
+      perElement: g.perElement ?? {},
+    };
+  }
+  if (g.description !== undefined) item.description = g.description;
+  if (g.label !== undefined) item.label = g.label;
+  if (g.origin !== undefined) item.origin = g.origin;
+  return item;
 }
 
 export function compileItems(defs: ItemDef[], settings: CompileSettings): SyncGroup[] {
@@ -460,50 +730,46 @@ export function compileItems(defs: ItemDef[], settings: CompileSettings): SyncGr
   const seenPaths = new Map<string, string>();
 
   for (const def of defs) {
-    const cfg = configFor(settings, def.id);
-    const group = compileSingleFile(def.id, def, cfg);
+    const item = itemFor(settings.items, def);
+    const owner = defRef(def); // never `${def.section}/…` — a presented section is not an identity
+    const group = compileSingleFile(def, item);
     if (group !== null) {
-      claimPath(seenPaths, def.id, group.path);
+      claimPath(seenPaths, owner, group.path);
       groups.push(group);
     }
-    for (const g of compileCompanions(def.id, cfg)) {
-      claimPath(seenPaths, def.id, g.path);
+    for (const g of compileCompanions(def, item)) {
+      claimPath(seenPaths, owner, g.path);
       groups.push(g);
     }
   }
 
-  if (anyEnabledInCarrier(defs, settings, "core-plugins.json")) {
-    const g: SyncGroup = { name: "core-plugins", path: "{configDir}/core-plugins.json", type: "file", devices: "all" };
-    claimPath(seenPaths, "core-plugins", g.path);
-    groups.push(g);
-  }
-  if (anyEnabledInCarrier(defs, settings, "community-plugins.json")) {
-    const g: SyncGroup = { name: "community-plugins", path: "{configDir}/community-plugins.json", type: "file", devices: "all" };
-    claimPath(seenPaths, "community-plugins", g.path);
+  for (const list of ENABLEMENT_LISTS) {
+    if (!anyEnabledInList(defs, settings, list)) continue;
+    // A carrier IS an item (itemKeys.ts's carrierRef): it has a store copy, a capture time, a hash
+    // and its elements' names, so it holds a lock entry and a baseline like any other.
+    const g: SyncGroup = { name: list, ref: carrierRef(list), path: `{configDir}/${enablementListFile(list)}`, type: "file", devices: "all" };
+    claimPath(seenPaths, list, g.path);
     groups.push(g);
   }
 
-  groups.push(...compileCustomGroups(settings.customGroups, defs, seenPaths));
+  groups.push(...compileCustomItems(settings.items, defs, seenPaths));
 
   return groups;
 }
 
 // ── Group -> owning item(s), for durable "stop syncing" ────────────────────────────────────────
 
-// Which ItemConfig(s) to flip when a user asks to stop syncing a compiled group by name — used by
+// Which item(s) to flip when a user asks to stop syncing a compiled group by name — used by
 // main.ts's stopSyncing so the effect survives the next recompile (settings.items is the only
 // durable source of truth; compiledGroups itself is derived and gets rebuilt on every save).
 // Structural (defs only, independent of settings/enablement): every group name compileItems can
 // ever produce has exactly one entry here.
 export interface GroupOwner {
-  itemId: string;
-  // Set only for a companion (dir) group: disable that one companion entry, not the whole card —
-  // e.g. stopping "themes" must not also stop appearance.json or "snippets".
+  section: StorageSection;
+  id: ItemId;
+  // Set only for a companion (folder) group: disable that one companion entry, not the whole card
+  // — e.g. stopping "themes" must not also stop appearance.json or "snippets".
   companionPath?: string;
-  // Set only for a custom group (Advanced tab "Custom rules"/"Discovered files" — itemId is the
-  // synthetic "custom:<name>" id): unlike a registry item there is no "enabled" flag to flip, so
-  // main.ts's stopSyncing must REMOVE the matching entry from settings.customGroups instead.
-  custom?: true;
 }
 
 // ── Companion / custom-path collision check (spec §4/§8, D7/D8, task-7-brief.md) ───────────────
@@ -527,13 +793,13 @@ export function companionConflict(path: string, defs: ItemDef[], settings: Compi
     .replace(/\/+$/, "");
   const key = groupStorePath(normalized).toLowerCase();
   for (const def of defs) {
-    const cfg = configFor(settings, def.id);
-    const sfPath = cfg.settingsFile?.customPath ?? def.settingsFile?.defaultPath ?? null;
+    const item = itemFor(settings.items, def);
+    const sfPath = item.path ?? def.settingsFile?.defaultPath ?? null;
     if (sfPath !== null && groupStorePath(sfPath).toLowerCase() === key) return def.label;
     for (const preset of def.presetCompanions ?? []) {
       if (groupStorePath(preset.path).toLowerCase() === key) return def.label;
     }
-    for (const companion of cfg.companions ?? []) {
+    for (const companion of item.companions ?? []) {
       if (groupStorePath(companion.path).toLowerCase() === key) return def.label;
     }
   }
@@ -547,42 +813,49 @@ export function companionConflict(path: string, defs: ItemDef[], settings: Compi
 // bad shape is already sitting in settings.items (recompile()'s safety net — by which point a bad
 // persisted shape has already zeroed out compiledGroups on the next launch). Checked against the
 // same universe reservedCustomGroupNames already reserves (every registry item's own group name,
-// every DEF-level preset companion name, and the switch-list hidden carrier names) PLUS every
-// item's ACTUAL configured companions and every settings.customGroups entry — the full set of
-// names compileItems can ever really produce. `excludeCompanion` lets an edit exclude its own
-// pre-edit entry (renaming a path while keeping the same basename must never self-collide with the
-// very entry being renamed).
+// every DEF-level preset companion name, and the switch-list names) PLUS every item's ACTUAL
+// configured companions and every custom item — the full set of names compileItems can ever really
+// produce. `excludeCompanion` lets an edit exclude its own pre-edit entry (renaming a path while
+// keeping the same basename must never self-collide with the very entry being renamed).
 export function companionNameConflict(
   path: string,
   defs: ItemDef[],
   settings: CompileSettings,
-  excludeCompanion: { itemId: string; path: string } | null
+  excludeCompanion: { ref: ItemRef; path: string } | null
 ): string | null {
   const name = basename(path);
   const names = reservedCustomGroupNames(defs);
   for (const def of defs) {
-    const cfg = configFor(settings, def.id);
-    for (const c of cfg.companions ?? []) {
-      if (excludeCompanion !== null && excludeCompanion.itemId === def.id && excludeCompanion.path === c.path) continue;
+    const item = itemFor(settings.items, def);
+    for (const c of item.companions ?? []) {
+      if (excludeCompanion !== null && excludeCompanion.ref === defRef(def) && excludeCompanion.path === c.path) continue;
       names.add(basename(c.path));
     }
   }
-  for (const cg of settings.customGroups) {
-    const trimmed = cg.name.trim();
+  for (const customName of Object.keys(settings.items.custom ?? {})) {
+    const trimmed = customName.trim();
     if (trimmed !== "") names.add(trimmed);
   }
   return names.has(name) ? name : null;
 }
 
-export function groupOwners(defs: ItemDef[], customGroups: CustomGroupConfig[]): Record<string, GroupOwner[]> {
+export function groupOwners(defs: ItemDef[], items: ItemMap): Record<string, GroupOwner[]> {
   const out: Record<string, GroupOwner[]> = {};
   for (const def of defs) {
-    if (def.settingsFile !== undefined) out[legacyGroupName(def.id)] = [{ itemId: def.id }];
-    for (const c of def.presetCompanions ?? []) out[basename(c.path)] = [{ itemId: def.id, companionPath: c.path }];
+    const section = storageSection(def.section);
+    if (def.settingsFile !== undefined) out[def.groupName] = [{ section, id: def.id }];
+    for (const c of def.presetCompanions ?? []) out[basename(c.path)] = [{ section, id: def.id, companionPath: c.path }];
   }
-  for (const cg of customGroups) {
-    const name = cg.name.trim();
-    if (name !== "") out[name] = [{ itemId: `custom:${name}`, custom: true }];
+  for (const customName of Object.keys(items.custom ?? {})) {
+    const name = customName.trim();
+    if (name !== "") out[name] = [{ section: "custom", id: customName }];
   }
   return out;
+}
+
+// The item a compiled group belongs to — a LOOKUP over the registry, not a parse of the name
+// (spec §5: `itemIdFor` and the `plugin-` prefix retire as parsers). Returns null for a companion
+// group, a name no def claims, or the two enablement carriers, which are not items.
+export function itemForGroupName(defs: ItemDef[], name: string): ItemDef | null {
+  return defs.find((d) => d.settingsFile !== undefined && d.groupName === name) ?? null;
 }

@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { capFileEntries, insyncLineText, excludedLineText, statusBarStatuses, moreFilesText, visibleUnderFilter, fateBucket, fateBucketCounts, partitionSection, legacyLockedFamilyBucket, RowBucket, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, runProgressLabel, showColdStartBanner, memberDecisionsFromScopes, enablementCarrierFor, carrierIsSynced, TYPE_SECTION_TITLES, typeSectionForRow, sectionCountLabel, mobileSectionCountLabel, unifiedFooterSummary, fileEntryFor, stagedPayload, StageableRow, effectiveFate, remoteSections, onOffFlips, onOffLineText, onOffNarrationLines, familyRollup, FamilyMember, mergeFamilyChanges, foldCompanionEntries, groupExcludedHere } from "../src/ui/panelModel";
+import { capFileEntries, insyncLineText, excludedLineText, statusBarStatuses, moreFilesText, visibleUnderFilter, fateBucket, fateBucketCounts, partitionSection, legacyLockedFamilyBucket, RowBucket, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, runProgressLabel, showColdStartBanner, memberDecisionsFromSharing, enablementCarrierFor, carrierIsSynced, TYPE_SECTION_TITLES, typeSectionForRow, sectionCountLabel, mobileSectionCountLabel, unifiedFooterSummary, fileEntryFor, stagedPayload, StageableRow, effectiveFate, remoteSections, onOffFlips, onOffLineText, onOffNarrationLines, familyRollup, FamilyMember, mergeFamilyChanges, foldCompanionEntries, groupExcludedHere } from "../src/ui/panelModel";
 import { GroupState, GroupStatus, OTHER_STORE_FILES_GROUP, RemoteDiffEntry, RemoteDiffFile } from "../src/core/status";
-import { FileChanges, SyncGroup } from "../src/core/types";
+import { FileChanges, SyncGroup, EVERYWHERE, THIS_DEVICE, perClass, StorageSection } from "../src/core/types";
 import { Availability } from "../src/core/availability";
 import { Fate, FateInput, rowFate } from "../src/ui/fateModel";
-import { ItemCategory } from "../src/core/catalog";
+
 
 describe("visibleUnderFilter", () => {
   it("all shows every bucket", () => {
@@ -57,34 +57,34 @@ describe("visibleUnderFilter", () => {
 
 // C-#24 fix round 2: live verification found the group-level `devices` axis alone (the original
 // fix) misses the case where a group's own `devices` stays "all" while its Plain-mode
-// `fileRule.scope` carries the real exclusion — the exact reported scenario (Settings-sync menu
+// `fileRule.sharing` carries the real exclusion — the exact reported scenario (Settings-sync menu
 // write on Hotkeys). groupExcludedHere reads BOTH axes independently.
-describe("groupExcludedHere — C-#24 fix round 2 (devices AND fileRule.scope, independently)", () => {
+describe("groupExcludedHere — C-#24 fix round 2 (devices AND fileRule.sharing, independently)", () => {
   const group = (overrides: Partial<SyncGroup>): SyncGroup => ({ name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all", ...overrides });
 
   it("devices mismatch alone (no fileRule) → true — the original axis, unregressed", () => {
     expect(groupExcludedHere(group({ devices: "mobile" }), "desktop")).toBe(true);
   });
 
-  it("devices: all + fileRule.scope: mobile on desktop → true — the reported live scenario", () => {
-    expect(groupExcludedHere(group({ devices: "all", fileRule: { scope: "mobile", encrypted: false } }), "desktop")).toBe(true);
+  it("devices: all + fileRule.sharing: mobile on desktop → true — the reported live scenario", () => {
+    expect(groupExcludedHere(group({ devices: "all", fileRule: { sharing: perClass("mobile"), encrypted: false } }), "desktop")).toBe(true);
   });
 
-  it("fileRule.scope: desktop on desktop → false — this device's own class, not excluded", () => {
-    expect(groupExcludedHere(group({ devices: "all", fileRule: { scope: "desktop", encrypted: false } }), "desktop")).toBe(false);
+  it("fileRule.sharing: desktop on desktop → false — this device's own class, not excluded", () => {
+    expect(groupExcludedHere(group({ devices: "all", fileRule: { sharing: perClass("desktop"), encrypted: false } }), "desktop")).toBe(false);
   });
 
-  it("fileRule.scope: all → false", () => {
-    expect(groupExcludedHere(group({ devices: "all", fileRule: { scope: "all", encrypted: false } }), "desktop")).toBe(false);
+  it("fileRule.sharing: all → false", () => {
+    expect(groupExcludedHere(group({ devices: "all", fileRule: { sharing: EVERYWHERE, encrypted: false } }), "desktop")).toBe(false);
   });
 
   it("fileRule absent, devices: all → false — byte-identical to before this fix", () => {
     expect(groupExcludedHere(group({ devices: "all" }), "desktop")).toBe(false);
   });
 
-  it("symmetric on a mobile device: fileRule.scope: desktop excludes; scope: mobile does not", () => {
-    expect(groupExcludedHere(group({ devices: "all", fileRule: { scope: "desktop", encrypted: false } }), "mobile")).toBe(true);
-    expect(groupExcludedHere(group({ devices: "all", fileRule: { scope: "mobile", encrypted: false } }), "mobile")).toBe(false);
+  it("symmetric on a mobile device: fileRule.sharing desktop excludes; mobile does not", () => {
+    expect(groupExcludedHere(group({ devices: "all", fileRule: { sharing: perClass("desktop"), encrypted: false } }), "mobile")).toBe(true);
+    expect(groupExcludedHere(group({ devices: "all", fileRule: { sharing: perClass("mobile"), encrypted: false } }), "mobile")).toBe(false);
   });
 });
 
@@ -141,7 +141,7 @@ describe("fateBucket — spec §1 truth table (ledger C-#23; §7 adds excluded, 
     const excludedInput: FateInput = {
       direction: null, conflict: false, nothingYet: false, installed: true,
       hasUpdate: false, carrierSynced: false, storeListOn: null, locallyOn: false,
-      memberRule: "all", deviceClass: "desktop", desktopOnly: false, excludedHere: true,
+      runsOn: { device: "all" }, deviceClass: "desktop", desktopOnly: false, excludedHere: true,
       hasSettingsPayload: true, versionAhead: null, special: null, folderFileCount: null, encrypted: false,
     };
     const excludedFate = rowFate(excludedInput);
@@ -158,7 +158,7 @@ describe("fateBucket — spec §1 truth table (ledger C-#23; §7 adds excluded, 
     const optedOutInput: FateInput = {
       direction: "apply", conflict: false, nothingYet: false, installed: false,
       hasUpdate: false, carrierSynced: false, storeListOn: null, locallyOn: false,
-      memberRule: "all", deviceClass: "desktop", desktopOnly: false, excludedHere: false, optedOutHere: true,
+      runsOn: { device: "all" }, deviceClass: "desktop", desktopOnly: false, excludedHere: false, optedOutHere: true,
       hasSettingsPayload: true, versionAhead: null, special: null, folderFileCount: null, encrypted: false,
     };
     const optedOutFate = rowFate(optedOutInput);
@@ -174,7 +174,7 @@ describe("fateBucket — spec §1 truth table (ledger C-#23; §7 adds excluded, 
     const degradedInput: FateInput = {
       direction: "apply", conflict: false, nothingYet: false, installed: true,
       hasUpdate: false, carrierSynced: true, storeListOn: false, locallyOn: false,
-      memberRule: "all", deviceClass: "desktop", desktopOnly: false, excludedHere: false,
+      runsOn: { device: "all" }, deviceClass: "desktop", desktopOnly: false, excludedHere: false,
       hasSettingsPayload: false, versionAhead: null, special: null, folderFileCount: null, encrypted: false,
     };
     const degradedFate = rowFate(degradedInput);
@@ -470,50 +470,52 @@ describe("showColdStartBanner", () => {
   });
 });
 
-describe("memberDecisionsFromScopes", () => {
-  it("keeps only non-all scopes, sorted by id, structural false when no id is in structuralIds", () => {
-    expect(memberDecisionsFromScopes({ b: "desktop", a: "local", c: "all", d: "mobile" }, new Set())).toEqual([
-      { id: "a", scope: "local", structural: false },
-      { id: "b", scope: "desktop", structural: false },
-      { id: "d", scope: "mobile", structural: false },
+describe("memberDecisionsFromSharing", () => {
+  it("keeps only non-everywhere sharings, sorted by id, structural false when no id is in structuralIds", () => {
+    expect(memberDecisionsFromSharing({ b: perClass("desktop"), a: THIS_DEVICE, c: EVERYWHERE, d: perClass("mobile") }, new Set())).toEqual([
+      { id: "a", sharing: THIS_DEVICE, structural: false },
+      { id: "b", sharing: perClass("desktop"), structural: false },
+      { id: "d", sharing: perClass("mobile"), structural: false },
     ]);
   });
 });
 
 // R3-A structural derivation truth table (spec 2026-08-05-section-groups-and-member-menu-design.md
-// §R3-A): structural is true only for a "local" scope with no explicit source — the pure layer
-// (memberDecisionsFromScopes) derives it from the scope map plus the structuralIds the host passes
+// §R3-A): structural is true only for a this-device sharing with no explicit source — the pure layer
+// (memberDecisionsFromSharing) derives it from the sharing map plus the structuralIds the host passes
 // in (registry.ts's structuralLocalElements), never from a pre-computed boolean per decision. The
-// localMembers-pin and card-on-explicit-local rows of the full truth table are host wiring (the
+// this-device-pin and card-on-explicit rows of the full truth table are host wiring (the
 // overlay in main.ts's memberDecisionsFor) — covered in tests/core.test.ts.
-describe("memberDecisionsFromScopes — structural derivation", () => {
+describe("memberDecisionsFromSharing — structural derivation", () => {
   it("card-off with no rule at all → structural true", () => {
-    expect(memberDecisionsFromScopes({ dataview: "local" }, new Set(["dataview"]))).toEqual([
-      { id: "dataview", scope: "local", structural: true },
+    expect(memberDecisionsFromSharing({ dataview: THIS_DEVICE }, new Set(["dataview"]))).toEqual([
+      { id: "dataview", sharing: THIS_DEVICE, structural: true },
     ]);
   });
-  it("a local scope not carried in structuralIds (e.g. an explicit localMembers pin the host excludes) → structural false", () => {
-    expect(memberDecisionsFromScopes({ "remotely-save": "local" }, new Set())).toEqual([
-      { id: "remotely-save", scope: "local", structural: false },
+  it("a this-device sharing not carried in structuralIds (e.g. an explicit pin the host excludes) → structural false", () => {
+    expect(memberDecisionsFromSharing({ "remotely-save": THIS_DEVICE }, new Set())).toEqual([
+      { id: "remotely-save", sharing: THIS_DEVICE, structural: false },
     ]);
   });
-  it("an enabledOn device-class rule → scope isn't local, structural false regardless of structuralIds", () => {
-    expect(memberDecisionsFromScopes({ "obsidian-git": "desktop" }, new Set(["obsidian-git"]))).toEqual([
-      { id: "obsidian-git", scope: "desktop", structural: false },
+  it("a device-class rule → not this-device, structural false regardless of structuralIds", () => {
+    expect(memberDecisionsFromSharing({ "obsidian-git": perClass("desktop") }, new Set(["obsidian-git"]))).toEqual([
+      { id: "obsidian-git", sharing: perClass("desktop"), structural: false },
     ]);
   });
 });
 
 describe("enablementCarrierFor / carrierIsSynced", () => {
-  it("community items (plugin-<id>) carry via community-plugins; core items via core-plugins", () => {
-    expect(enablementCarrierFor("plugin-zk-prefixer")).toBe("community-plugins");
-    expect(enablementCarrierFor("file-explorer")).toBe("core-plugins");
+  it("community items carry via community-plugins; core items via core-plugins", () => {
+    // The input is the item's REF, not its group name: which list an item's enablement rides is a
+    // fact about the item's section (spec §5), so nothing reads a prefix back out of a name.
+    expect(enablementCarrierFor("community/zk-prefixer")).toBe("community-plugins");
+    expect(enablementCarrierFor("core/file-explorer")).toBe("core-plugins");
   });
-  it("carrierIsSynced checks the carrier's own group name against the compiled set", () => {
-    expect(carrierIsSynced("plugin-zk-prefixer", ["community-plugins", "hotkeys"])).toBe(true);
-    expect(carrierIsSynced("plugin-zk-prefixer", ["core-plugins", "hotkeys"])).toBe(false);
-    expect(carrierIsSynced("file-explorer", ["core-plugins"])).toBe(true);
-    expect(carrierIsSynced("file-explorer", [])).toBe(false);
+  it("carrierIsSynced checks the carrier's own REF against the compiled set", () => {
+    expect(carrierIsSynced("community/zk-prefixer", ["obsidian/community-plugins", "obsidian/hotkeys"])).toBe(true);
+    expect(carrierIsSynced("community/zk-prefixer", ["obsidian/core-plugins", "obsidian/hotkeys"])).toBe(false);
+    expect(carrierIsSynced("core/file-explorer", ["obsidian/core-plugins"])).toBe(true);
+    expect(carrierIsSynced("core/file-explorer", [])).toBe(false);
   });
 });
 
@@ -589,7 +591,7 @@ describe("remoteSections", () => {
 
   it("carriers (core-plugins, community-plugins) are extracted to their sections' onOff, never entries", () => {
     const entries = [entry("core-plugins"), entry("community-plugins"), entry("app")];
-    const categoryOf = (g: string): ItemCategory | "beta" => (g === "app" ? "obsidian" : "core");
+    const categoryOf = (g: string): StorageSection | "beta" => (g === "app" ? "obsidian" : "core");
     const result = remoteSections(entries, categoryOf, (g) => g);
     const core = result.find((s) => s.section === "core");
     const community = result.find((s) => s.section === "community");
@@ -624,7 +626,7 @@ describe("remoteSections", () => {
 
   it("result is ordered by TYPE_SECTION_ORDER", () => {
     const entries = [entry("my-folder"), entry("app"), entry("plugin-x"), entry("core-plugins")];
-    const categoryOf = (g: string): ItemCategory | "beta" => {
+    const categoryOf = (g: string): StorageSection | "beta" => {
       if (g === "app") return "obsidian";
       if (g === "plugin-x") return "community";
       return "custom";
@@ -1161,7 +1163,7 @@ describe("effectiveFate — single per-row derivation shared by staging/footer/d
   const baseInput: FateInput = {
     direction: "apply", conflict: false, nothingYet: false, installed: true,
     hasUpdate: false, carrierSynced: true, storeListOn: null, locallyOn: false,
-    memberRule: "all", deviceClass: "desktop", desktopOnly: false, excludedHere: false,
+    runsOn: { device: "all" }, deviceClass: "desktop", desktopOnly: false, excludedHere: false,
     hasSettingsPayload: true, versionAhead: null, special: null, folderFileCount: null, encrypted: false,
   };
   const plainFate: Fate = { glyph: "↓", sentence: "Applies settings", chips: [], stageable: true, turnsOn: false, nothingYet: false, excluded: false };

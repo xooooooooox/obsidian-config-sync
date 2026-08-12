@@ -57,7 +57,7 @@
   font-style: italic;
 }
 
-.config-sync-scope-pills {
+.config-sync-section-pills {
   display: flex;
   gap: var(--size-4-1);
   flex-wrap: wrap;
@@ -95,7 +95,7 @@
   margin-top: var(--size-2-1);
 }
 
-.config-sync-scopetag {
+.config-sync-sectiontag {
   font-size: var(--font-ui-smaller);
   border-radius: 999px;
   padding: 1px 8px;
@@ -798,9 +798,9 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 .config-sync-shell { display: grid; grid-template-columns: minmax(150px, 22%) minmax(0, 1fr); gap: var(--size-4-3); }
 
 .config-sync-side { display: flex; flex-direction: column; gap: 3px; }
-/* Scope list container: rebuilt in place on each search keystroke (hit-count badges), so it
+/* Section list container: rebuilt in place on each search keystroke (hit-count badges), so it
    carries the sidebar's own column layout while the search input above it stays put. */
-.config-sync-side-scope { display: flex; flex-direction: column; gap: 3px; }
+.config-sync-side-section { display: flex; flex-direction: column; gap: 3px; }
 
 .config-sync-side-head { font-size: var(--font-ui-smaller); text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); padding: var(--size-4-1) 4px; display: flex; align-items: center; gap: var(--size-4-1); }
 
@@ -1218,7 +1218,7 @@ body.is-mobile .config-sync-cardrow > .config-sync-explabel-inline { flex: none;
 /* Card rule-control triggers (spec 2026-08-06-c-livetest-batch2-design.md §2, ledger C-#7/C-#10):
    one visual family for all four card controls — Settings sync / Runs on (icon, extending the
    Settings-drawer's SCOPE_ICONS/renderScopeCycle vocabulary to a menu instead of a direct cycle)
-   and After install / Enablement (text, above). Icon triggers reuse .config-sync-scopeicon's
+   and After install / Enablement (text, above). Icon triggers reuse .config-sync-sharingicon's
    color/opacity/is-set language, but unlike the Settings-drawer's fixed-width grid cell it's
    borrowed from, the card has no such cell — the base class's `display: flex` used to stretch the
    icon across the row's full remaining width, and that silent full-row hit area is what let a
@@ -1227,8 +1227,8 @@ body.is-mobile .config-sync-cardrow > .config-sync-explabel-inline { flex: none;
    border (no glyph to lean on) but share the icon's padding/hover surface so a row reads as one
    family regardless of trigger kind. */
 .config-sync-card-trigger { border-radius: var(--radius-s); }
-.config-sync-scopeicon.config-sync-card-trigger { display: inline-flex; align-items: center; justify-content: center; width: fit-content; padding: 3px 4px; }
-.config-sync-scopeicon.config-sync-card-trigger:hover, .config-sync-scopeicon.config-sync-card-trigger:focus-visible { background: var(--background-modifier-hover); }
+.config-sync-sharingicon.config-sync-card-trigger { display: inline-flex; align-items: center; justify-content: center; width: fit-content; padding: 3px 4px; }
+.config-sync-sharingicon.config-sync-card-trigger:hover, .config-sync-sharingicon.config-sync-card-trigger:focus-visible { background: var(--background-modifier-hover); }
 .config-sync-menuchip.config-sync-card-trigger { padding: 3px 8px; }
 /* The expanded card itself (ledger C-#2): bordered, left-indented under the row's name column
    (chevron 16px + its 4px margin ≈ 20px) and offset one notch from the section behind it, so the
@@ -1274,7 +1274,7 @@ body.is-mobile .config-sync-cardrow > .config-sync-explabel-inline { flex: none;
 .config-sync-json-val { color: var(--text-muted); }
 .config-sync-json-num { color: var(--color-green); }
 .config-sync-json-legend { color: var(--text-muted); font-size: var(--font-ui-smaller); margin-top: var(--size-2-2); }
-/* Legend 定稿 B (round-7 spec §2): color dots + neutral words, scope classes shared with the
+/* Legend 定稿 B (round-7 spec §2): color dots + neutral words, sharing classes shared with the
    key spans above so the palette can't drift. */
 .config-sync-legend-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 4px; }
 .config-sync-legend-dot.config-sync-json-desktop { background: var(--color-blue); }
@@ -1284,7 +1284,7 @@ body.is-mobile .config-sync-cardrow > .config-sync-explabel-inline { flex: none;
 .config-sync-legend-lock { display: inline-block; margin-right: 4px; }
 .config-sync-json-lock { display: inline-block; margin-left: 4px; }
 .config-sync-legend-lock svg, .config-sync-json-lock svg { width: 11px; height: 11px; vertical-align: -1px; }
-/* Per-item array element coloring (spec D10 "逐项数组按元素着色") — same scope palette as the
+/* Per-item array element coloring (spec D10 "逐项数组按元素着色") — same sharing palette as the
    key classes above, applied to a plain (non-pill) span since an element is a whole line, not a
    key token. */
 .config-sync-json-el.config-sync-json-desktop { color: var(--color-blue); }
@@ -1294,7 +1294,7 @@ body.is-mobile .config-sync-cardrow > .config-sync-explabel-inline { flex: none;
 .config-sync-card-badge { margin-left: var(--size-4-2); font-size: var(--font-ui-smaller); border-radius: 9px; padding: 1px 8px; }
 .config-sync-card-badge-desktop { color: var(--color-blue); background: rgba(var(--color-blue-rgb), 0.12); }
 .config-sync-card-badge-mobile { color: var(--color-orange); background: rgba(var(--color-orange-rgb), 0.12); }
-/* on: this device (spec §4 row badges: blue/amber/PINK) — red stays reserved for the field-scope
+/* on: this device (spec §4 row badges: blue/amber/PINK) — red stays reserved for the field-sharing
    "this device" preview color (.config-sync-json-strip above); don't reuse it here (FINDING 3). */
 .config-sync-card-badge-local { color: var(--color-pink); background: rgba(var(--color-pink-rgb), 0.12); }
 .config-sync-card-badge-count { color: var(--color-cyan); background: rgba(var(--color-cyan-rgb), 0.12); }
@@ -1349,16 +1349,19 @@ body.is-mobile .config-sync-cardrow > .config-sync-explabel-inline { flex: none;
 .config-sync-card-fieldrow:last-of-type { border-bottom: none; }
 .config-sync-card-rulerow { padding: var(--size-4-1) 0; border-bottom: 1px solid var(--background-modifier-border); font-size: var(--font-ui-smaller); }
 .config-sync-card-rulerow:last-of-type { border-bottom: none; }
-/* Commander-style scope icon (round-6 定稿): the glyph IS the state — the "all" default sits
-   quiet (dim, echoing the idle ghost rail), any narrower scope shows accented at full opacity. */
-.config-sync-scopeicon { display: flex; align-items: center; justify-content: center; color: var(--text-muted); cursor: pointer; opacity: 0.45; transition: opacity 0.12s; border-radius: var(--radius-s); }
-.config-sync-scopeicon:hover, .config-sync-scopeicon:focus-visible { opacity: 1; }
-.config-sync-scopeicon.is-set { opacity: 1; color: var(--interactive-accent); }
-/* Key + (array keys) the Per-item toggle share the grid's content column on ONE line — as a
-   fifth direct grid child the toggle auto-placed onto a wrapped second row (round-5 feedback). */
+/* Commander-style sharing icon (round-6 定稿): the glyph IS the state — the "everywhere" default
+   sits quiet (dim, echoing the idle ghost rail), any narrower sharing shows accented at full
+   opacity. */
+.config-sync-sharingicon { display: flex; align-items: center; justify-content: center; color: var(--text-muted); cursor: pointer; opacity: 0.45; transition: opacity 0.12s; border-radius: var(--radius-s); }
+.config-sync-sharingicon:hover, .config-sync-sharingicon:focus-visible { opacity: 1; }
+.config-sync-sharingicon.is-set { opacity: 1; color: var(--interactive-accent); }
+/* Key + (array keys) the Per-item device rules toggle share the grid's content column on ONE line —
+   as a fifth direct grid child the toggle auto-placed onto a wrapped second row (round-5 feedback).
+   The wrapper and its label are one pair and are named as one: a half-renamed pair leaves the next
+   reader unable to tell which word is current. */
 .config-sync-card-rulecontent { display: flex; align-items: center; gap: var(--size-4-2); min-width: 0; }
-.config-sync-card-peritem { display: inline-flex; align-items: center; }
-.config-sync-card-peritem-label { font-size: var(--font-ui-smaller); color: var(--text-faint); margin-left: var(--size-2-1); }
+.config-sync-card-perelement { display: inline-flex; align-items: center; }
+.config-sync-card-perelement-label { font-size: var(--font-ui-smaller); color: var(--text-faint); margin-left: var(--size-2-1); }
 .config-sync-card-elrow { padding: var(--size-4-1) 0 var(--size-4-1) var(--size-4-6); font-size: var(--font-ui-smaller); }
 .config-sync-card-elname { font-family: var(--font-monospace); color: var(--text-muted); }
 
@@ -1679,7 +1682,7 @@ body.is-mobile .config-sync-mainbar .config-sync-search-wrap {
   min-width: 0;
 }
 
-/* ③ The scope switcher matches the pills' height instead of undercutting them. */
+/* ③ The section switcher matches the pills' height instead of undercutting them. */
 body.is-mobile .config-sync-switcher {
   min-height: 44px;
   font-size: var(--font-ui-small);
