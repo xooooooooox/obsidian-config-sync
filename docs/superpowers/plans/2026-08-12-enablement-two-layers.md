@@ -49,7 +49,7 @@ Every task's requirements implicitly include this section.
 - Retirement means DELETION, not a reader left with no callers.
 - One datum, one write function, one read function. One derived key, one producer. Tests assert producer-vs-producer, never against a hand-written literal.
 - Commit per task on the feature branch. **No Claude/AI attribution in any commit message** (`Claude-Session:`, `Co-Authored-By: Claude`, `🤖 Generated with Claude Code` — none of them). Never push.
-- After every task: `npm test` (baseline 1535 passing) and `npm run build` must both be clean. `npm run lint` baseline is 0 errors / 57 warnings — never higher.
+- After every task: `npm test` (baseline 1535 passing) and `npm run build` must both be clean. `npm run lint` baseline is **0 errors / 58 warnings** (measured at BASE `351c4da`) — never higher.
 - Comments in this codebase explain WHY, at the density of the surrounding file. Match it.
 
 **Two decisions this plan makes that the spec did not spell out** (both flagged to the user; implement as written):
@@ -828,6 +828,8 @@ npm run build && npm run lint
 git add -A
 git commit -m "feat(registry): the on/off lists are items, with the ref they already had"
 ```
+
+**Do not test-deploy the branch between this task and Task 9.** From this commit until the migration lands, a v3 document has no `items.obsidian["core-plugins"].synced`, so the two lists stop compiling and on/off state stops syncing. That is the exact gap Task 9 rule 6 closes; on a real vault it would look like a regression and, worse, a capture in that window would record it.
 
 ---
 
@@ -1879,7 +1881,7 @@ it("Item.synced has exactly one writer, and it is not in the Sync Center", () =>
 });
 ```
 
-Then delete `setItemSyncEnabled` from `SyncCenterHost` in `SyncCenterView.ts` (keep the method on the plugin — the settings card calls it).
+Then delete `setItemSyncEnabled` from `SyncCenterHost` — **and from `main.ts`**. The carrier chip was its ONLY caller: the settings card's own toggle writes the same field through `updateItem` (`SettingTab.ts:860-866`), which is that file's single funnel and carries the §4.2b guard. Leaving the method behind would be exactly the "retired reader with no callers" this release refuses. Spec §9 criterion 6 is then true in its strongest form: the string does not exist outside the card's own write.
 
 - [ ] **Step 4: Verify + commit**
 
@@ -1935,9 +1937,36 @@ The element list is the union of installed defs for that list and every element 
 
 Counts come from `ruledElementIds(items, list).filter(class rules)` and `deviceElementIds(table, list)`.
 
-- [ ] **Step 4: The card head keeps the only `Item.synced` writer**
+- [ ] **Step 4: The card head becomes the destructive action's only home**
 
-Unchanged (`SettingTab.ts:860-866`) — verify it is still the only call site of `setItemSyncEnabled`/`{...c, synced: v}` in the repo, and that `StopSyncingModal` is reachable from the card (spec §6.2). If it is not, wire the card's toggle-to-off path through it; if `openStopSyncing` ends up with no caller, delete it.
+The Sync Center footer's `Everywhere…` entry is gone (Task 10), and spec §6.2 gives that gesture exactly one home: the card that configures the item, with its confirmation. Today the card's toggle flips `synced` silently, so this step is what completes the move — the modal is not merely still reachable, it is now the only way through.
+
+`SettingTab.ts:860-866` becomes:
+
+```ts
+    row.addToggle((t) =>
+      t.setValue(item.synced).onChange(async (v) => {
+        // Turning an item OFF removes it from every device's contract and can delete its store
+        // copy — the one destructive gesture on this card, and since the Sync Center's footer
+        // retired (spec §6.2) its only home. The confirmation is the SAME modal that footer opened;
+        // nothing about StopSyncingModal changes, only who calls it.
+        if (!v && this.host.canStopSyncing(def)) {
+          t.setValue(true); // the modal owns the outcome — the toggle follows it, not the click
+          this.openStopSyncing(def);
+          return;
+        }
+        await this.updateItem(def, (c) => ({ ...c, synced: v }));
+        this.refreshCardBadges(wrap, def);
+        for (const rebuild of this.syncAllRebuilds) rebuild();
+      })
+    );
+```
+
+This needs three things on `SettingsHost`, moved from `SyncCenterHost` rather than duplicated: `stopSyncing(groupName, deleteStore)`, `storeFileCount(groupName)` and `displayName(group)` (already there). `openStopSyncing` moves from `SyncCenterView` into `SettingTab` with its body unchanged; delete it and its `canStopSyncing` guard from the view. Turning an item back ON keeps the plain path — restoring sync destroys nothing.
+
+An item with no store copy yet (`storeFileCount === 0`) still goes through the modal: spec §6.2 says the gesture has one home, not "one home when it happens to be expensive", and the modal already renders that case.
+
+Verify at the end of this task: `{ ...c, synced:` appears exactly once in the repo.
 
 - [ ] **Step 5: Verify + commit**
 
