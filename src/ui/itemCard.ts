@@ -122,10 +122,15 @@ export function hasEnablementZone(def: ItemDef): boolean {
 }
 
 // Zone ① copy (spec 2026-08-12-enablement-two-layers-design.md §6.5). Same name, same values, same
-// data as the Sync Center's row of that name. No hint constant any more: the row is two segments
-// and each one carries its own aria-label, so a single sentence over both would describe neither.
-// Only rendered for a def where hasEnablementZone(def) is true.
+// data as the Sync Center's row of that name. Only rendered for a def where hasEnablementZone(def)
+// is true.
+//
+// The hint is the FLEET segment's aria-label, joined with that segment's current label. It names the
+// question the four rule values answer, which is NOT the one `sharingCycleTooltip` asks ("Where it
+// syncs") — the fleet segment shares that control's gesture, not its vocabulary. The local segment
+// carries its own label and never borrows this one.
 export const DEFAULT_ENABLED_ON_LABEL = "Default enabled on";
+export const DEFAULT_ENABLED_ON_HINT = "Which devices turn this plugin on";
 
 export type SettingsFileZoneKind = "none" | "state-only" | "settings";
 

@@ -50,3 +50,42 @@ export function enablementRowModel(input: { rule: Sharing; exception: DeviceElem
   const on = input.exception === "on";
   return { fleet, local: { icon: on ? "power" : "power-off", label: on ? ON_HERE_LABEL : OFF_HERE_LABEL }, localIsException: true };
 }
+
+// One local-segment menu, as DATA, for both entrances (spec §6.6). The two surfaces turn it into an
+// Obsidian `Menu`; neither decides what is IN it, because they disagreed the moment they each
+// decided separately — the Sync Center offered `Follows the default` under `Each device decides`,
+// where there is no shared answer to follow.
+export interface LocalMenuItem {
+  title: string;
+  icon: string | null; // the follow entry has none, for the same reason its segment has none
+  checked: boolean;
+  action: () => void;
+}
+
+export interface LocalMenuHandlers {
+  follow: () => void;
+  setState: (state: DeviceElementState) => void;
+}
+
+export function buildLocalMenu(rule: Sharing, exception: DeviceElementState | null, handlers: LocalMenuHandlers): LocalMenuItem[] {
+  const items: LocalMenuItem[] = [];
+  // Offered only when there IS a default to follow: with a `this-device` rule every device's own
+  // state is the answer (spec §6.5 case 3), so following would be following nothing.
+  if (rule.kind !== "this-device") {
+    items.push({ title: FOLLOWS_LABEL, icon: null, checked: exception === null, action: handlers.follow });
+  }
+  items.push({ title: ON_HERE_LABEL, icon: "power", checked: exception === "on", action: () => handlers.setState("on") });
+  items.push({ title: OFF_HERE_LABEL, icon: "power-off", checked: exception === "off", action: () => handlers.setState("off") });
+  return items;
+}
+
+// Landing the FLEET segment on `Each device decides` while this device has no exception yet leaves
+// the row with nothing true to say: it renders `Follows the default` beside a menu that (per
+// buildLocalMenu) no longer offers that state — a label the user cannot re-select, describing a
+// default that does not exist. Spec §6.5 answers it — the moment the element leaves the shared
+// answer its exception is seeded with EXACTLY what it is right now (host.leaveToThisDevice), so the
+// displayed state is the plugin's real one and "switching to an exception keeps the status quo"
+// holds by construction. Both entrances ask this question here, so neither can forget it.
+export function ruleLandingNeedsSeed(rule: Sharing, exception: DeviceElementState | null): boolean {
+  return rule.kind === "this-device" && exception === null;
+}

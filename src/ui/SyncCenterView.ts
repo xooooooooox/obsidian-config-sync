@@ -7,14 +7,13 @@ import { DeviceClass, EVERYWHERE, FileChanges, FileSharing, GroupResult, hasChan
 import { DeviceElementState } from "../core/deviceElements";
 import { RuleListId } from "../core/enablementRules";
 import {
+  buildLocalMenu,
   enablementRowModel,
-  FOLLOWS_LABEL,
-  OFF_HERE_LABEL,
-  ON_HERE_LABEL,
   RowSegment,
   RULE_OPTIONS,
   ruleIcon,
   ruleLabel,
+  ruleLandingNeedsSeed,
 } from "./enablementRow";
 import { Availability } from "../core/availability";
 import { REUSE_MAX_AGE_MS } from "../external/readerCache";
@@ -2888,7 +2887,11 @@ export class SyncCenterView extends ItemView {
         isSet: input.ruleSharing.kind !== "everywhere",
         menu: () => this.ruleMenu(list, elementId, input.ruleSharing),
       },
-      { seg: model.local, isException: model.localIsException, menu: () => this.localMenu(list, elementId, input.localException) }
+      {
+        seg: model.local,
+        isException: model.localIsException,
+        menu: () => this.localMenu(list, elementId, input.ruleSharing, input.localException),
+      }
     );
   }
 
@@ -2900,17 +2903,34 @@ export class SyncCenterView extends ItemView {
           .setTitle(ruleLabel(rule))
           .setIcon(ruleIcon(rule))
           .setChecked(sharingEquals(rule, current))
-          .onClick(() => void this.host.setEnablementRule(list, elementId, rule).then(() => this.notifyExternalChange()))
+          .onClick(() => void this.setRuleWithLanding(list, elementId, rule).then(() => this.notifyExternalChange()))
       );
     }
     return menu;
   }
 
-  private localMenu(list: EnablementList, elementId: string, current: "on" | "off" | null): Menu {
+  // The fleet write, plus §6.5 case 3's landing seed — the same pair the Settings card's cycle does
+  // (SettingTab.setRuleWithLanding), asking the same producer (ruleLandingNeedsSeed), so landing on
+  // `Each device decides` behaves identically at both entrances (§6.6).
+  private async setRuleWithLanding(list: RuleListId, elementId: string, rule: Sharing): Promise<void> {
+    await this.host.setEnablementRule(list, elementId, rule);
+    if (ruleLandingNeedsSeed(rule, this.host.deviceElementFor(list, elementId))) await this.host.leaveToThisDevice(list, elementId);
+  }
+
+  // The entry list is buildLocalMenu's (enablementRow.ts), not this file's — the Settings card's row
+  // asks the same producer, so the two entrances cannot offer different choices (§6.6). `Follows the
+  // default` is absent under `Each device decides`: there is no shared answer to follow.
+  private localMenu(list: EnablementList, elementId: string, rule: Sharing, current: "on" | "off" | null): Menu {
     const menu = new Menu();
-    menu.addItem((i) => i.setTitle(FOLLOWS_LABEL).setChecked(current === null).onClick(() => void this.host.followTheDefault(list, elementId).then(() => this.reload())));
-    menu.addItem((i) => i.setTitle(ON_HERE_LABEL).setIcon("power").setChecked(current === "on").onClick(() => void this.host.setDeviceElement(list, elementId, "on").then(() => this.reload())));
-    menu.addItem((i) => i.setTitle(OFF_HERE_LABEL).setIcon("power-off").setChecked(current === "off").onClick(() => void this.host.setDeviceElement(list, elementId, "off").then(() => this.reload())));
+    for (const entry of buildLocalMenu(rule, current, {
+      follow: () => void this.host.followTheDefault(list, elementId).then(() => this.reload()),
+      setState: (state) => void this.host.setDeviceElement(list, elementId, state).then(() => this.reload()),
+    })) {
+      menu.addItem((i) => {
+        i.setTitle(entry.title).setChecked(entry.checked).onClick(entry.action);
+        if (entry.icon !== null) i.setIcon(entry.icon);
+      });
+    }
     return menu;
   }
 

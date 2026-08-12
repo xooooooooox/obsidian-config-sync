@@ -1244,6 +1244,13 @@ body.is-mobile .config-sync-cardrow > .config-sync-explabel-inline { flex: none;
 .config-sync-tworow-ic { display: inline-flex; align-items: center; }
 .config-sync-tworow-ic .svg-icon { width: var(--icon-s); height: var(--icon-s); }
 .config-sync-tworow-vline { flex: 0 0 auto; width: 1px; align-self: stretch; min-height: 1em; background: var(--background-modifier-border); }
+/* The settings card's fleet segment is renderSharingCycle carrying a label (its `labelFor` hook), so
+   it must read as the same segment shape the Sync Center paints by hand: content-sized box, glyph +
+   text, same padding. The base .config-sync-sharingicon is a fixed-width grid cell everywhere else,
+   which is why this narrows it only inside the row. */
+.config-sync-sharingicon-label { margin-left: 4px; font-size: var(--font-ui-smaller); white-space: nowrap; }
+.config-sync-tworow .config-sync-sharingicon { width: fit-content; padding: 3px 6px; }
+.config-sync-tworow .config-sync-sharingicon:hover, .config-sync-tworow .config-sync-sharingicon:focus-visible { background: var(--background-modifier-hover); }
 /* The expanded card itself (ledger C-#2): bordered, left-indented under the row's name column
    (chevron 16px + its 4px margin ≈ 20px) and offset one notch from the section behind it, so the
    card reads as one contained unit — row hairlines (.config-sync-card-fieldrow's border-bottom)

@@ -72,7 +72,7 @@ import { classifyJsonKeys, classifyPerElementLines, jsonElementClass, jsonKeyCla
 import { renderSharingCycle } from "./sharingCycle";
 import { DeviceElementState } from "../core/deviceElements";
 import { RuleListId } from "../core/enablementRules";
-import { enablementRowModel, FOLLOWS_LABEL, OFF_HERE_LABEL, ON_HERE_LABEL, RULE_OPTIONS } from "./enablementRow";
+import { buildLocalMenu, enablementRowModel, ruleIcon, ruleLabel, ruleLandingNeedsSeed, RULE_OPTIONS } from "./enablementRow";
 import {
   applyPerElementToggle,
   applySyncAll,
@@ -85,6 +85,7 @@ import {
   companionConflictError,
   companionNameConflictError,
   computeBadges,
+  DEFAULT_ENABLED_ON_HINT,
   DEFAULT_ENABLED_ON_LABEL,
   DEFAULT_FIELD_RULE,
   DESKTOP_ONLY_ALL_NOTE,
@@ -931,6 +932,14 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     this.renderCompanionZone(companionHost, def, item, wrap);
   }
 
+  // The fleet write, plus §6.5 case 3's landing seed. Same body as the Sync Center's rule menu
+  // (SyncCenterView.setRuleWithLanding), asking the same producer (ruleLandingNeedsSeed), so landing
+  // on `Each device decides` behaves identically whichever entrance the user came through.
+  private async setRuleWithLanding(list: RuleListId, elementId: string, rule: Sharing): Promise<void> {
+    await this.host.setEnablementRule(list, elementId, rule);
+    if (ruleLandingNeedsSeed(rule, this.host.deviceElementFor(list, elementId))) await this.host.leaveToThisDevice(list, elementId);
+  }
+
   // Zone ① `Default enabled on` (spec §6.5) — core/community/beta plugin cards only. Same name,
   // same values, same data as the Sync Center's row of that name: this used to be a 4-stop cycle
   // whose first three stops wrote `runsOn.device` and whose fourth wrote `thisDeviceItems`, i.e.
@@ -955,13 +964,17 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         this.refreshCardBadges(wrap, def);
       };
       // Fleet segment: the cycle idiom the card already teaches (renderSharingCycle), over the four
-      // rule values. A desktop-only plugin still drops the mobile stop — mobile can never install it.
+      // rule values — with the enablement vocabulary passed in, because the same `Sharing` union
+      // answers a different question here (see renderSharingCycle's own note). A desktop-only plugin
+      // still drops the mobile stop: mobile can never install it.
       renderSharingCycle(cell.createDiv(), {
         sharing: rule,
         options: def.desktopOnly === true ? RULE_OPTIONS.filter((o) => o.kind !== "per-class" || o.class !== "mobile") : RULE_OPTIONS,
         disabled: false,
-        ...(def.desktopOnly === true && rule.kind === "everywhere" ? { note: DESKTOP_ONLY_ALL_NOTE } : {}),
-        onChange: (v) => void this.host.setEnablementRule(list, elementId, v).then(after),
+        iconFor: ruleIcon,
+        labelFor: ruleLabel,
+        ariaLabel: `${DEFAULT_ENABLED_ON_HINT} — ${ruleLabel(rule)}${def.desktopOnly === true && rule.kind === "everywhere" ? ` (${DESKTOP_ONLY_ALL_NOTE})` : ""}`,
+        onChange: (v) => void this.setRuleWithLanding(list, elementId, v).then(after),
       });
       cell.createSpan({ cls: "config-sync-tworow-vline" });
       // Local segment. A class rule that this device does not match has nothing true to show as a
@@ -976,13 +989,17 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       local.createSpan({ text: model.local.label });
       const openLocalMenu = (x: number, y: number): void => {
         const menu = new Menu();
-        // "Follows the default" is absent when there is no shared answer to follow (spec §6.5,
-        // case 3): with `Each device decides`, every device's own state IS the answer.
-        if (rule.kind !== "this-device") {
-          menu.addItem((i) => i.setTitle(FOLLOWS_LABEL).setChecked(exception === null).onClick(() => void this.host.followTheDefault(list, elementId).then(after)));
+        // The entry list is buildLocalMenu's (enablementRow.ts), not this file's — the Sync Center's
+        // row asks the same producer, so the two entrances cannot offer different choices (§6.6).
+        for (const entry of buildLocalMenu(rule, exception, {
+          follow: () => void this.host.followTheDefault(list, elementId).then(after),
+          setState: (state) => void this.host.setDeviceElement(list, elementId, state).then(after),
+        })) {
+          menu.addItem((i) => {
+            i.setTitle(entry.title).setChecked(entry.checked).onClick(entry.action);
+            if (entry.icon !== null) i.setIcon(entry.icon);
+          });
         }
-        menu.addItem((i) => i.setTitle(ON_HERE_LABEL).setIcon("power").setChecked(exception === "on").onClick(() => void this.host.setDeviceElement(list, elementId, "on").then(after)));
-        menu.addItem((i) => i.setTitle(OFF_HERE_LABEL).setIcon("power-off").setChecked(exception === "off").onClick(() => void this.host.setDeviceElement(list, elementId, "off").then(after)));
         menu.showAtPosition({ x, y });
       };
       local.addEventListener("click", (e) => {
