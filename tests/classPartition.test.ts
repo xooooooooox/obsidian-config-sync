@@ -1,15 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { applyTransform, captureTransform, contentUnchanged } from "../src/core/modes";
-import { SyncGroup } from "../src/core/types";
+import { SyncGroup, EVERYWHERE, THIS_DEVICE, perClass } from "../src/core/types";
 
 const group: SyncGroup = {
   name: "app", path: "{configDir}/app.json", type: "file", devices: "all",
   mode: "fields",
   fields: [
-    { pattern: "userIgnoreFilters", scope: "desktop", encrypted: false },
-    { pattern: "mobileToolbarCommands", scope: "mobile", encrypted: false },
-    { pattern: "vimMode", scope: "local", encrypted: false },
-    { pattern: "promptDelete", scope: "all", encrypted: false },
+    { pattern: "userIgnoreFilters", sharing: perClass("desktop"), encrypted: false },
+    { pattern: "mobileToolbarCommands", sharing: perClass("mobile"), encrypted: false },
+    { pattern: "vimMode", sharing: THIS_DEVICE, encrypted: false },
+    { pattern: "promptDelete", sharing: EVERYWHERE, encrypted: false },
   ],
 };
 const local = JSON.stringify({
@@ -29,7 +29,7 @@ describe("class partition", () => {
     expect(JSON.parse(t.content)).not.toHaveProperty("userIgnoreFilters");
   });
   it("ownScope is null when the group has no own-class patterns", async () => {
-    const g: SyncGroup = { ...group, fields: [{ pattern: "vimMode", scope: "local", encrypted: false }] };
+    const g: SyncGroup = { ...group, fields: [{ pattern: "vimMode", sharing: THIS_DEVICE, encrypted: false }] };
     const t = await captureTransform(g, local, null, "desktop");
     expect(t.ownScope).toBeNull();
   });

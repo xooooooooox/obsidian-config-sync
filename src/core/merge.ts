@@ -1,6 +1,6 @@
 import { SyncGroup } from "./types";
 import { resolveGroupByStoreRel } from "./pathing";
-import { parseSwitchList, SWITCH_LIST_GROUPS, switchListsEqual } from "./switchList";
+import { parseSwitchList, isSwitchListGroup, switchListsEqual } from "./switchList";
 
 export type MergeConflict =
   | { kind: "definition"; name: string; local: SyncGroup; remote: SyncGroup }
@@ -73,7 +73,7 @@ function byRel<T extends { rel: string }>(a: T, b: T): number {
 // sets (no exceptions — store copies are full lists); everything else stays byte-equal.
 function contentsMatch(localGroups: SyncGroup[], remoteGroups: SyncGroup[], rel: string, local: string, remote: string): boolean {
   if (local === remote) return true;
-  if (!SWITCH_LIST_GROUPS.has(owningGroupName(localGroups, remoteGroups, rel))) return false;
+  if (!isSwitchListGroup(owningGroupName(localGroups, remoteGroups, rel))) return false;
   const a = parseSwitchList(local);
   const b = parseSwitchList(remote);
   return a !== null && b !== null && switchListsEqual(a, b, []);

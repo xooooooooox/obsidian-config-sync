@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { applyTransform, captureTransform, contentUnchanged, scanSensitive, groupNeedsPassphrase, isWholeFileEncrypted } from "../src/core/modes";
 import { isFieldEnvelope, parseFileEnvelope } from "../src/core/crypto";
 import { groupForItem, SELF_GROUP_NAME } from "../src/core/catalog";
-import { SyncGroup } from "../src/core/types";
+import { SyncGroup, EVERYWHERE, THIS_DEVICE, perClass } from "../src/core/types";
 
 describe("scanSensitive", () => {
   it("finds sensitive-looking keys recursively, case-insensitive", () => {
@@ -30,8 +30,8 @@ describe("groupNeedsPassphrase", () => {
   const base = { name: "g", path: "{configDir}/x.json", type: "file", devices: "all" } as unknown as SyncGroup;
   it("true for encrypted mode and for fields with an encrypt action", () => {
     expect(groupNeedsPassphrase({ ...base, mode: "encrypted" })).toBe(true);
-    expect(groupNeedsPassphrase({ ...base, mode: "fields", fields: [{ pattern: "a", scope: "all", encrypted: true }] })).toBe(true);
-    expect(groupNeedsPassphrase({ ...base, mode: "fields", fields: [{ pattern: "a", scope: "local", encrypted: false }] })).toBe(false);
+    expect(groupNeedsPassphrase({ ...base, mode: "fields", fields: [{ pattern: "a", sharing: EVERYWHERE, encrypted: true }] })).toBe(true);
+    expect(groupNeedsPassphrase({ ...base, mode: "fields", fields: [{ pattern: "a", sharing: THIS_DEVICE, encrypted: false }] })).toBe(false);
     expect(groupNeedsPassphrase(base)).toBe(false);
   });
 });
@@ -45,14 +45,14 @@ describe("isWholeFileEncrypted", () => {
     expect(isWholeFileEncrypted({ ...base, mode: "encrypted" })).toBe(true);
   });
   it("true for a Plain group with fileRule.encrypted:true", () => {
-    expect(isWholeFileEncrypted({ ...base, fileRule: { scope: "all", encrypted: true } })).toBe(true);
+    expect(isWholeFileEncrypted({ ...base, fileRule: { sharing: EVERYWHERE, encrypted: true } })).toBe(true);
   });
   it("false for a Plain group with fileRule.encrypted:false", () => {
-    expect(isWholeFileEncrypted({ ...base, fileRule: { scope: "all", encrypted: false } })).toBe(false);
+    expect(isWholeFileEncrypted({ ...base, fileRule: { sharing: EVERYWHERE, encrypted: false } })).toBe(false);
   });
   it("false for a plain group with no fileRule, and for mode:\"fields\"", () => {
     expect(isWholeFileEncrypted(base)).toBe(false);
-    expect(isWholeFileEncrypted({ ...base, mode: "fields", fields: [{ pattern: "a", scope: "all", encrypted: true }] })).toBe(false);
+    expect(isWholeFileEncrypted({ ...base, mode: "fields", fields: [{ pattern: "a", sharing: EVERYWHERE, encrypted: true }] })).toBe(false);
   });
 });
 
@@ -63,8 +63,8 @@ describe("captureTransform / applyTransform round-trip", () => {
 
   it("fields mode strips and encrypts, and apply restores the exact original", async () => {
     const g = group({ mode: "fields", fields: [
-      { pattern: "updateAPIKey", scope: "all", encrypted: true },
-      { pattern: "userEmail", scope: "local", encrypted: false },
+      { pattern: "updateAPIKey", sharing: EVERYWHERE, encrypted: true },
+      { pattern: "userEmail", sharing: THIS_DEVICE, encrypted: false },
     ]});
     const cap = await captureTransform(g, src, "pw", "desktop");
     expect(cap.note).toBe("encrypted updateAPIKey · stripped userEmail");
@@ -82,7 +82,7 @@ describe("captureTransform / applyTransform round-trip", () => {
   it("fields mode: a store copy that still holds a stripped key compares equal (apply keeps local)", async () => {
     // The store was captured before the strip rule existed, so it retains the stripped key.
     // Apply keeps the local value for stripped keys, so this is effectively in sync — not a diff.
-    const g = group({ mode: "fields", fields: [{ pattern: "enabledCssSnippets", scope: "local", encrypted: false }] });
+    const g = group({ mode: "fields", fields: [{ pattern: "enabledCssSnippets", sharing: THIS_DEVICE, encrypted: false }] });
     const local = JSON.stringify({ theme: "dark", enabledCssSnippets: ["a", "b"] }, null, 2);
     const staleStore = JSON.stringify({ theme: "dark", enabledCssSnippets: ["x"] }, null, 2);
     expect(await contentUnchanged(g, local, staleStore, "pw", "desktop", null)).toBe(true);
@@ -107,13 +107,13 @@ describe("captureTransform / applyTransform round-trip", () => {
     );
   });
 
-  it("self item strips localMembers on capture and restores it on apply", async () => {
+  it("self item strips thisDeviceItems on capture and restores it on apply", async () => {
     const g = groupForItem(SELF_GROUP_NAME, "{configDir}/plugins/config-sync/data.json", "file", null);
-    const local = JSON.stringify({ schemaVersion: 2, remotes: [], items: {}, localMembers: ["community:remotely-save"] });
+    const local = JSON.stringify({ schemaVersion: 3, remotes: [], items: {}, thisDeviceItems: ["community/remotely-save"] });
     const stored = await captureTransform(g, local, null, "desktop", null);
-    expect((JSON.parse(stored.content) as Record<string, unknown>).localMembers).toBeUndefined();
+    expect((JSON.parse(stored.content) as Record<string, unknown>).thisDeviceItems).toBeUndefined();
     const applied = await applyTransform(g, stored.content, local, null, "desktop", null);
-    expect((JSON.parse(applied) as Record<string, unknown>).localMembers).toEqual(["community:remotely-save"]);
+    expect((JSON.parse(applied) as Record<string, unknown>).thisDeviceItems).toEqual(["community/remotely-save"]);
   });
 });
 
@@ -131,8 +131,8 @@ describe("captureTransform: unchanged encrypted fields keep their envelopes (C-#
     const g = group({
       mode: "fields",
       fields: [
-        { pattern: "token", scope: "all", encrypted: true },
-        { pattern: "apiKey", scope: "all", encrypted: true },
+        { pattern: "token", sharing: EVERYWHERE, encrypted: true },
+        { pattern: "apiKey", sharing: EVERYWHERE, encrypted: true },
       ],
     });
     const src = JSON.stringify({ token: "t1", apiKey: "k1", plain: "v1" });
@@ -145,8 +145,8 @@ describe("captureTransform: unchanged encrypted fields keep their envelopes (C-#
     const g = group({
       mode: "fields",
       fields: [
-        { pattern: "token", scope: "all", encrypted: true },
-        { pattern: "apiKey", scope: "all", encrypted: true },
+        { pattern: "token", sharing: EVERYWHERE, encrypted: true },
+        { pattern: "apiKey", sharing: EVERYWHERE, encrypted: true },
       ],
     });
     const src = JSON.stringify({ token: "t1", apiKey: "k1", plain: "v1" });
@@ -168,8 +168,8 @@ describe("captureTransform: unchanged encrypted fields keep their envelopes (C-#
     const g = group({
       mode: "fields",
       fields: [
-        { pattern: "token", scope: "all", encrypted: true },
-        { pattern: "apiKey", scope: "all", encrypted: true },
+        { pattern: "token", sharing: EVERYWHERE, encrypted: true },
+        { pattern: "apiKey", sharing: EVERYWHERE, encrypted: true },
       ],
     });
     const src = JSON.stringify({ token: "t1", apiKey: "k1" });
@@ -185,14 +185,14 @@ describe("captureTransform: unchanged encrypted fields keep their envelopes (C-#
   });
 
   it("with no prior store content, always encrypts fresh (nothing to reuse — first capture)", async () => {
-    const g = group({ mode: "fields", fields: [{ pattern: "token", scope: "all", encrypted: true }] });
+    const g = group({ mode: "fields", fields: [{ pattern: "token", sharing: EVERYWHERE, encrypted: true }] });
     const src = JSON.stringify({ token: "t1" });
     const cap = await captureTransform(g, src, "pw", "desktop", null);
     expect(isFieldEnvelope((JSON.parse(cap.content) as Record<string, unknown>)["token"])).toBe(true);
   });
 
   it("class-scoped (desktop/mobile) + encrypted field: unchanged reuses the sidecar's envelope", async () => {
-    const g = group({ mode: "fields", fields: [{ pattern: "secret", scope: "desktop", encrypted: true }] });
+    const g = group({ mode: "fields", fields: [{ pattern: "secret", sharing: perClass("desktop"), encrypted: true }] });
     const src = JSON.stringify({ secret: "s1", plain: "v1" });
     const cap1 = await captureTransform(g, src, "pw", "desktop");
     expect(cap1.ownScope).not.toBeNull();
@@ -204,7 +204,7 @@ describe("captureTransform: unchanged encrypted fields keep their envelopes (C-#
   });
 
   it("class-scoped + encrypted field: a changed plaintext gets a new sidecar envelope", async () => {
-    const g = group({ mode: "fields", fields: [{ pattern: "secret", scope: "desktop", encrypted: true }] });
+    const g = group({ mode: "fields", fields: [{ pattern: "secret", sharing: perClass("desktop"), encrypted: true }] });
     const src = JSON.stringify({ secret: "s1" });
     const cap1 = await captureTransform(g, src, "pw", "desktop");
     const changed = JSON.stringify({ secret: "s2" });

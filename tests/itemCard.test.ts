@@ -1,50 +1,55 @@
 import { describe, expect, it } from "vitest";
 import {
-  applyPerItemToggle,
+  applyPerElementToggle,
   applySyncAll,
   buildCompanionRows,
-  buildPerItemElementRows,
+  buildPerElementRows,
   buildRuleRows,
   buildSnippetMemberRows,
-  withSnippetScope,
+  withSnippetSharing,
   computeBadges,
-  countDeviceScoped,
+  countClassPinned,
   countEncrypted,
   deriveMode,
-  encryptDisabledForScope,
+  encryptDisabledForSharing,
   encryptToggleDisabled,
   ENABLED_CSS_SNIPPETS_KEY,
   ENABLED_ON_LABEL,
   defaultSettingsFile,
   fileRuleLegalForMode,
-  FILE_SCOPE_MENU_UNAVAILABLE_TEXT,
+  FILE_SHARING_MENU_UNAVAILABLE_TEXT,
   hasEnablementZone,
   hasKeyRules,
   memberCountLabel,
-  nextScope,
+  nextSharing,
   PREVIEW_LEGEND_ENTRIES,
   pruneSettingsFile,
   DESKTOP_ONLY_ALL_NOTE,
   DESKTOP_ONLY_ENABLED_OPTIONS,
-  FIELD_SCOPE_OPTIONS,
-  FILE_SCOPE_OPTIONS,
-  COMPANION_SCOPE_OPTIONS,
-  RUNS_ON_ICONS,
-  SCOPE_ICONS,
-  scopeCycleTooltip,
+  FIELD_SHARING_OPTIONS,
+  FILE_SHARING_OPTIONS,
+  COMPANION_DEVICE_OPTIONS,
+  RUNS_ON_OPTIONS,
+  runsOnIcon,
+  runsOnLabel,
+  sharingIcon,
+  sharingLabel,
+  sharingCycleTooltip,
   sectionAllEnabled,
   settingsFileZoneKind,
   stateOnlyHint,
   SYNC_ALL_HINT,
   SYNC_ALL_LABEL,
 } from "../src/ui/itemCard";
-import { emptyItemConfig, ItemConfig, ItemDef, ItemSettingsFile } from "../src/core/registry";
+import { emptyItem, Item, ItemDef, ItemSettingsFile } from "../src/core/registry";
+import { itemsIn } from "./items";
+import { EVERYWHERE, perClass, THIS_DEVICE } from "../src/core/types";
 
 // spec docs/superpowers/specs/2026-07-25-unified-card-design.md §4/§5/§10; task-5-brief.md;
 // docs/superpowers/specs/2026-07-26-ui-feedback-round2-design.md §2 (app-slice mechanism removed).
 
 function def(overrides: Partial<ItemDef> = {}): ItemDef {
-  return { id: "app", label: "App settings", description: "d", section: "obsidian", ...overrides };
+  return { id: "app", groupName: "app", label: "App settings", description: "d", section: "obsidian", ...overrides };
 }
 
 const APP_DEF: ItemDef = def({
@@ -60,35 +65,38 @@ const APPEARANCE_DEF: ItemDef = def({
 });
 const HOTKEYS_DEF: ItemDef = def({ id: "hotkeys", label: "Hotkeys", settingsFile: { defaultPath: "{configDir}/hotkeys.json" } });
 const CORE_STATE_ONLY_DEF: ItemDef = def({
-  id: "core:zk-prefixer",
+  id: "zk-prefixer",
+  groupName: "zk-prefixer",
   label: "Unique note creator",
   section: "core",
-  enablement: { carrier: "core-plugins.json", element: "zk-prefixer" },
+  enablement: { list: "core-plugins", element: "zk-prefixer" },
   settingsFile: { defaultPath: null },
 });
 const CORE_WITH_FILE_DEF: ItemDef = def({
-  id: "core:graph",
+  id: "graph",
+  groupName: "graph",
   label: "Graph view",
   section: "core",
-  enablement: { carrier: "core-plugins.json", element: "graph" },
+  enablement: { list: "core-plugins", element: "graph" },
   settingsFile: { defaultPath: "{configDir}/graph.json" },
 });
 const COMMUNITY_DEF: ItemDef = def({
-  id: "community:dataview",
+  id: "dataview",
+  groupName: "plugin-dataview",
   label: "Dataview",
   section: "community",
-  enablement: { carrier: "community-plugins.json", element: "dataview" },
+  enablement: { list: "community-plugins", element: "dataview" },
   settingsFile: { defaultPath: "{configDir}/plugins/dataview/data.json" },
 });
 
-function cfg(overrides: Partial<ItemConfig> = {}): ItemConfig {
-  return { ...emptyItemConfig(), ...overrides };
+function cfg(overrides: Partial<Item> = {}): Item {
+  return { ...emptyItem(), ...overrides };
 }
 
 describe("computeBadges", () => {
   it("state-only def gets the on/off-only badge first, with tooltip", () => {
-    const def: ItemDef = { id: "core:bases", label: "Bases", description: "", section: "core", settingsFile: { defaultPath: null } };
-    const badges = computeBadges(def, { enabled: true, companions: [] }, false);
+    const def: ItemDef = { id: "bases", groupName: "bases", label: "Bases", description: "", section: "core", settingsFile: { defaultPath: null } };
+    const badges = computeBadges(def, { enabled: true }, false);
     expect(badges[0]).toEqual({
       text: "on/off only",
       cls: "config-sync-card-badge-state",
@@ -97,68 +105,67 @@ describe("computeBadges", () => {
   });
 
   it("a def with a settings file gets no on/off-only badge", () => {
-    const def: ItemDef = { id: "core:backlinks", label: "Backlinks", description: "", section: "core", settingsFile: { defaultPath: "{configDir}/backlink.json" } };
-    expect(computeBadges(def, { enabled: true, companions: [] }, false).some((b) => b.text === "on/off only")).toBe(false);
+    const def: ItemDef = { id: "backlinks", groupName: "backlinks", label: "Backlinks", description: "", section: "core", settingsFile: { defaultPath: "{configDir}/backlink.json" } };
+    expect(computeBadges(def, { enabled: true }, false).some((b) => b.text === "on/off only")).toBe(false);
   });
 
   it("no badges for a plain off/default card", () => {
     expect(computeBadges(APP_DEF, cfg(), false)).toEqual([]);
   });
 
-  it("enabledOn default (\"all\"/undefined) never shows an on: badge, even with enablement", () => {
-    expect(computeBadges(COMMUNITY_DEF, cfg({ enabled: true, enabledOn: "all" }), false)).toEqual([]);
+  it("a runsOn device of \"all\" (or none at all) never shows an on: badge, even with enablement", () => {
+    expect(computeBadges(COMMUNITY_DEF, cfg({ enabled: true, runsOn: { device: "all" } }), false)).toEqual([]);
     expect(computeBadges(COMMUNITY_DEF, cfg({ enabled: true }), false)).toEqual([]);
   });
 
   it("desktop-only def prepends the innate grey chip ahead of every config badge (round-8 spec §2)", () => {
     const dOnly: ItemDef = { ...COMMUNITY_DEF, desktopOnly: true };
     expect(computeBadges(dOnly, cfg(), false)).toEqual([{ text: "desktop-only plugin", cls: "config-sync-card-badge-plat", icon: "monitor" }]);
-    expect(computeBadges(dOnly, cfg({ enabledOn: "desktop" }), false)).toEqual([
+    expect(computeBadges(dOnly, cfg({ runsOn: { device: "desktop" } }), false)).toEqual([
       { text: "desktop-only plugin", cls: "config-sync-card-badge-plat", icon: "monitor" },
       { text: "on: desktop", cls: "config-sync-card-badge-desktop" },
     ]);
   });
 
   it("enabledOn non-default shows the matching on: badge — only when the def has an enablement", () => {
-    expect(computeBadges(COMMUNITY_DEF, cfg({ enabledOn: "desktop" }), false)).toEqual([{ text: "on: desktop", cls: "config-sync-card-badge-desktop" }]);
-    expect(computeBadges(COMMUNITY_DEF, cfg({ enabledOn: "mobile" }), false)).toEqual([{ text: "on: mobile", cls: "config-sync-card-badge-mobile" }]);
+    expect(computeBadges(COMMUNITY_DEF, cfg({ runsOn: { device: "desktop" } }), false)).toEqual([{ text: "on: desktop", cls: "config-sync-card-badge-desktop" }]);
+    expect(computeBadges(COMMUNITY_DEF, cfg({ runsOn: { device: "mobile" } }), false)).toEqual([{ text: "on: mobile", cls: "config-sync-card-badge-mobile" }]);
     // enabledOn:"local" is no longer honored — "this device" comes from the isThisDevice flag (see below)
-    expect(computeBadges(COMMUNITY_DEF, cfg({ enabledOn: "local" }), false)).toEqual([]);
-    // no-enablement card (app): the same enabledOn value produces NO badge — the projection
-    // doesn't exist for this card at all.
-    expect(computeBadges(APP_DEF, cfg({ enabledOn: "desktop" }), false)).toEqual([]);
+    // no-enablement card (app): the same rule produces NO badge — the projection doesn't exist
+    // for this card at all.
+    expect(computeBadges(APP_DEF, cfg({ runsOn: { device: "desktop" } }), false)).toEqual([]);
   });
 
-  it("shows 'on: this device' from the isThisDevice flag, not from a stored enabledOn", () => {
+  it("shows 'on: this device' from the isThisDevice flag, not from a stored rule", () => {
     expect(computeBadges(COMMUNITY_DEF, cfg(), true)).toEqual([{ text: "on: this device", cls: "config-sync-card-badge-local" }]);
     expect(computeBadges(COMMUNITY_DEF, cfg(), false)).toEqual([]);
   });
 
-  it("counts device-scoped fields, per-item elements, and the fileRule scope together", () => {
+  it("counts device-scoped fields, per-element entries, and the fileRule together", () => {
     const c = cfg({
       settingsFile: {
         mode: "fields",
-        rules: { a: { scope: "desktop", encrypted: false }, b: { scope: "mobile", encrypted: false }, c: { scope: "all", encrypted: false } },
-        perItem: { arr: { x: "desktop", y: "mobile", z: "all" } },
+        rules: { a: { sharing: perClass("desktop"), encrypted: false }, b: { sharing: perClass("mobile"), encrypted: false }, c: { sharing: EVERYWHERE, encrypted: false } },
+        perElement: { arr: { x: perClass("desktop"), y: perClass("mobile"), z: EVERYWHERE } },
       },
     });
-    expect(countDeviceScoped(c)).toBe(4); // a, b, arr.x, arr.y
-    const withFileRule = cfg({ settingsFile: { mode: "plain", rules: {}, perItem: {}, fileRule: { scope: "desktop", encrypted: false } } });
-    expect(countDeviceScoped(withFileRule)).toBe(1);
+    expect(countClassPinned(c)).toBe(4); // a, b, arr.x, arr.y
+    const withFileRule = cfg({ settingsFile: { mode: "plain", rules: {}, perElement: {}, fileRule: { sharing: perClass("desktop"), encrypted: false } } });
+    expect(countClassPinned(withFileRule)).toBe(1);
   });
 
   it("counts encrypted fields AND a fileRule-encrypted whole file into the SAME 'N encrypted' badge (no separate lock badge string)", () => {
-    const fieldsEncrypted = cfg({ settingsFile: { mode: "fields", rules: { a: { scope: "all", encrypted: true }, b: { scope: "all", encrypted: false } }, perItem: {} } });
+    const fieldsEncrypted = cfg({ settingsFile: { mode: "fields", rules: { a: { sharing: EVERYWHERE, encrypted: true }, b: { sharing: EVERYWHERE, encrypted: false } }, perElement: {} } });
     expect(countEncrypted(fieldsEncrypted)).toBe(1);
-    const fileEncrypted = cfg({ settingsFile: { mode: "plain", rules: {}, perItem: {}, fileRule: { scope: "all", encrypted: true } } });
+    const fileEncrypted = cfg({ settingsFile: { mode: "plain", rules: {}, perElement: {}, fileRule: { sharing: EVERYWHERE, encrypted: true } } });
     expect(countEncrypted(fileEncrypted)).toBe(1);
     expect(computeBadges(HOTKEYS_DEF, fileEncrypted, false)).toEqual([{ text: "1 encrypted", cls: "config-sync-card-badge-count" }]);
   });
 
   it("badge order is on: -> device-scoped -> encrypted, omitting zero counts", () => {
     const c = cfg({
-      enabledOn: "desktop",
-      settingsFile: { mode: "fields", rules: { a: { scope: "mobile", encrypted: true } }, perItem: {} },
+      runsOn: { device: "desktop" },
+      settingsFile: { mode: "fields", rules: { a: { sharing: perClass("mobile"), encrypted: true } }, perElement: {} },
     });
     expect(computeBadges(COMMUNITY_DEF, c, false)).toEqual([
       { text: "on: desktop", cls: "config-sync-card-badge-desktop" },
@@ -193,10 +200,10 @@ describe("zone presence", () => {
 // their role.
 describe("deriveMode / hasKeyRules (spec 2026-07-26-card-visual-refresh-design.md §3)", () => {
   it("empty rules+perItem derives plain; any rule or perItem derives fields", () => {
-    const empty: ItemSettingsFile = { mode: "plain", rules: {}, perItem: {} };
+    const empty: ItemSettingsFile = { mode: "plain", rules: {}, perElement: {} };
     expect(deriveMode(empty)).toBe("plain");
-    expect(deriveMode({ ...empty, rules: { a: { scope: "desktop", encrypted: false } } })).toBe("fields");
-    expect(deriveMode({ ...empty, perItem: { arr: { x: "desktop" } } })).toBe("fields");
+    expect(deriveMode({ ...empty, rules: { a: { sharing: perClass("desktop"), encrypted: false } } })).toBe("fields");
+    expect(deriveMode({ ...empty, perElement: { arr: { x: perClass("desktop") } } })).toBe("fields");
     expect(hasKeyRules(cfg())).toBe(false);
   });
 });
@@ -215,14 +222,14 @@ describe("fileRuleLegalForMode (C-#25 — mirrors manifest.ts's fileRule validat
 
 // C-#25 copy contract: the Sync Center row shows this instead of a menu when the helper above is
 // false — pinned here so a future edit to either string can't drift them apart silently.
-describe("FILE_SCOPE_MENU_UNAVAILABLE_TEXT", () => {
+describe("FILE_SHARING_MENU_UNAVAILABLE_TEXT", () => {
   it("matches the copy-contract-exact string", () => {
-    expect(FILE_SCOPE_MENU_UNAVAILABLE_TEXT).toBe("Per-key rules decide — see More");
+    expect(FILE_SHARING_MENU_UNAVAILABLE_TEXT).toBe("Per-key rules decide — see More");
   });
 });
 
 // C-#26: prune truth table — the exact residue that hit the user on 2026-08-09 (a stray
-// fileRule:{scope:"all",encrypted:false} or an all-default settingsFile surviving a write-back)
+// fileRule:{sharing: EVERYWHERE,encrypted:false} or an all-default settingsFile surviving a write-back)
 // cannot recur.
 describe("pruneSettingsFile (C-#26)", () => {
   it("an all-default settingsFile prunes to undefined", () => {
@@ -230,83 +237,78 @@ describe("pruneSettingsFile (C-#26)", () => {
   });
 
   it("a fileRule of exactly {scope:'all', encrypted:false} is stripped, pruning the rest to undefined too", () => {
-    const sf: ItemSettingsFile = { mode: "plain", rules: {}, perItem: {}, fileRule: { scope: "all", encrypted: false } };
+    const sf: ItemSettingsFile = { mode: "plain", rules: {}, perElement: {}, fileRule: { sharing: EVERYWHERE, encrypted: false } };
     expect(pruneSettingsFile(sf)).toBeUndefined();
   });
 
   it("encrypted:true survives even at scope 'all'", () => {
-    const sf: ItemSettingsFile = { mode: "plain", rules: {}, perItem: {}, fileRule: { scope: "all", encrypted: true } };
+    const sf: ItemSettingsFile = { mode: "plain", rules: {}, perElement: {}, fileRule: { sharing: EVERYWHERE, encrypted: true } };
     expect(pruneSettingsFile(sf)).toEqual(sf);
   });
 
   it("a non-default scope (e.g. 'desktop') survives", () => {
-    const sf: ItemSettingsFile = { mode: "plain", rules: {}, perItem: {}, fileRule: { scope: "desktop", encrypted: false } };
+    const sf: ItemSettingsFile = { mode: "plain", rules: {}, perElement: {}, fileRule: { sharing: perClass("desktop"), encrypted: false } };
     expect(pruneSettingsFile(sf)).toEqual(sf);
   });
 
   it("rules content survives regardless of fileRule/mode", () => {
-    const sf: ItemSettingsFile = { mode: "fields", rules: { a: { scope: "desktop", encrypted: false } }, perItem: {} };
+    const sf: ItemSettingsFile = { mode: "fields", rules: { a: { sharing: perClass("desktop"), encrypted: false } }, perElement: {} };
     expect(pruneSettingsFile(sf)).toEqual(sf);
   });
 
   it("perItem content survives", () => {
-    const sf: ItemSettingsFile = { mode: "fields", rules: {}, perItem: { arr: { x: "desktop" } } };
+    const sf: ItemSettingsFile = { mode: "fields", rules: {}, perElement: { arr: { x: perClass("desktop") } } };
     expect(pruneSettingsFile(sf)).toEqual(sf);
   });
 
   it("a non-plain mode survives even with otherwise-empty rules/perItem", () => {
-    const sf: ItemSettingsFile = { mode: "fields", rules: {}, perItem: {} };
-    expect(pruneSettingsFile(sf)).toEqual(sf);
-  });
-
-  it("a committed customPath survives an otherwise-default file", () => {
-    const sf: ItemSettingsFile = { mode: "plain", rules: {}, perItem: {}, customPath: "custom.json" };
+    const sf: ItemSettingsFile = { mode: "fields", rules: {}, perElement: {} };
     expect(pruneSettingsFile(sf)).toEqual(sf);
   });
 
   it("round-trip: desktop -> all lands back on undefined, the same as the pre-existing default (byte-clean)", () => {
     const original = defaultSettingsFile(); // what an absent settingsFile field derives as
-    const afterDesktop = pruneSettingsFile({ ...original, fileRule: { scope: "desktop", encrypted: false } });
-    expect(afterDesktop).toEqual({ mode: "plain", rules: {}, perItem: {}, fileRule: { scope: "desktop", encrypted: false } });
-    const afterAll = pruneSettingsFile({ ...(afterDesktop as ItemSettingsFile), fileRule: { scope: "all", encrypted: false } });
+    const afterDesktop = pruneSettingsFile({ ...original, fileRule: { sharing: perClass("desktop"), encrypted: false } });
+    expect(afterDesktop).toEqual({ mode: "plain", rules: {}, perElement: {}, fileRule: { sharing: perClass("desktop"), encrypted: false } });
+    const afterAll = pruneSettingsFile({ ...(afterDesktop as ItemSettingsFile), fileRule: { sharing: EVERYWHERE, encrypted: false } });
     expect(afterAll).toBeUndefined();
   });
 });
 
-describe("encryptDisabledForScope", () => {
-  it("is true only for local (This device)", () => {
-    expect(encryptDisabledForScope("local")).toBe(true);
-    expect(encryptDisabledForScope("all")).toBe(false);
-    expect(encryptDisabledForScope("desktop")).toBe(false);
-    expect(encryptDisabledForScope("mobile")).toBe(false);
+describe("encryptDisabledForSharing", () => {
+  it("is true only for this-device", () => {
+    expect(encryptDisabledForSharing(THIS_DEVICE)).toBe(true);
+    expect(encryptDisabledForSharing(EVERYWHERE)).toBe(false);
+    expect(encryptDisabledForSharing(perClass("desktop"))).toBe(false);
+    expect(encryptDisabledForSharing(perClass("mobile"))).toBe(false);
   });
 });
 
 describe("buildRuleRows (spec 2026-07-26-card-visual-refresh-design.md §3 — the only rule-row model; supersedes the deleted buildFieldRows)", () => {
   it("lists ONLY configured keys, not every live-doc key", () => {
-    const c = cfg({ settingsFile: { mode: "fields", rules: { ruled: { scope: "desktop", encrypted: false } }, perItem: {} } });
+    const c = cfg({ settingsFile: { mode: "fields", rules: { ruled: { sharing: perClass("desktop"), encrypted: false } }, perElement: {} } });
     const rows = buildRuleRows(HOTKEYS_DEF, c, { ruled: 1, unruled: 2 });
     expect(rows.map((r) => r.key)).toEqual(["ruled"]);
   });
 
   it("includes perItem-only keys and marks isArray from the live doc", () => {
-    const c = cfg({ settingsFile: { mode: "fields", rules: {}, perItem: { list: { a: "desktop" } } } });
+    const c = cfg({ settingsFile: { mode: "fields", rules: {}, perElement: { list: { a: perClass("desktop") } } } });
     const rows = buildRuleRows(HOTKEYS_DEF, c, { list: ["a"] });
-    expect(rows).toEqual([expect.objectContaining({ key: "list", isArray: true, perItemEnabled: true })]);
+    expect(rows).toEqual([expect.objectContaining({ key: "list", isArray: true, perElementEnabled: true })]);
   });
 
   it("a key not present in the live doc defaults isArray to false", () => {
-    const c = cfg({ settingsFile: { mode: "fields", rules: { gone: { scope: "all", encrypted: false } }, perItem: {} } });
+    const c = cfg({ settingsFile: { mode: "fields", rules: { gone: { sharing: EVERYWHERE, encrypted: false } }, perElement: {} } });
     const rows = buildRuleRows(HOTKEYS_DEF, c, {});
-    expect(rows).toEqual([{ key: "gone", isArray: false, rule: { scope: "all", encrypted: false }, perItemEnabled: false }]);
+    expect(rows).toEqual([{ key: "gone", isArray: false, rule: { sharing: EVERYWHERE, encrypted: false }, perElementEnabled: false }]);
   });
 
   it("rules-key order first, then perItem-only keys, no duplicates for a key present in both", () => {
     const c = cfg({
       settingsFile: {
         mode: "fields",
-        rules: { a: { scope: "desktop", encrypted: false }, b: { scope: "all", encrypted: false } },
-        perItem: { b: { x: "mobile" }, c: { y: "all" } },
+        rules: { a: { sharing: perClass("desktop"), encrypted: false }, b: { sharing: EVERYWHERE, encrypted: false } },
+        perElement: { b: { x: perClass("mobile") }, c: { y: EVERYWHERE } },
       },
     });
     const rows = buildRuleRows(HOTKEYS_DEF, c, { a: 1, b: ["x"], c: ["y"] });
@@ -318,13 +320,13 @@ describe("buildRuleRows (spec 2026-07-26-card-visual-refresh-design.md §3 — t
   });
 
   it("a ruled key with a non-string-array value gets isArray false", () => {
-    const c = cfg({ settingsFile: { mode: "fields", rules: { items: { scope: "all", encrypted: false } }, perItem: {} } });
+    const c = cfg({ settingsFile: { mode: "fields", rules: { items: { sharing: EVERYWHERE, encrypted: false } }, perElement: {} } });
     const rows = buildRuleRows(HOTKEYS_DEF, c, { items: [{ a: 1 }] });
     expect(rows).toEqual([expect.objectContaining({ key: "items", isArray: false })]);
   });
 
   it("appearance pointer-row logic: enabledCssSnippets is excluded from rule rows (like buildFieldRows)", () => {
-    const c = cfg({ settingsFile: { mode: "fields", rules: {}, perItem: { enabledCssSnippets: { x: "desktop" } } } });
+    const c = cfg({ settingsFile: { mode: "fields", rules: {}, perElement: { enabledCssSnippets: { x: perClass("desktop") } } } });
     const rows = buildRuleRows(APPEARANCE_DEF, c, { cssTheme: "dark", enabledCssSnippets: ["a.css"] });
     expect(rows.map((r) => r.key)).toEqual([]);
     expect(rows.some((r) => r.key === ENABLED_CSS_SNIPPETS_KEY)).toBe(false);
@@ -339,81 +341,81 @@ describe("memberCountLabel", () => {
   });
 });
 
-describe("applyPerItemToggle / encryptToggleDisabled (final-review MUST-FIX 2 — Encrypt and Per-item scopes are mutually exclusive per rule)", () => {
+describe("applyPerElementToggle / encryptToggleDisabled (final-review MUST-FIX 2 — Encrypt and Per-item scopes are mutually exclusive per rule)", () => {
   it("enabling Per-item on an already-encrypted key clears encrypted in the SAME write", () => {
-    const sf: ItemSettingsFile = { mode: "fields", rules: { userIgnoreFilters: { scope: "all", encrypted: true } }, perItem: {} };
-    const next = applyPerItemToggle(sf, "userIgnoreFilters", true);
-    expect(next.rules.userIgnoreFilters).toEqual({ scope: "all", encrypted: false });
-    expect(next.perItem.userIgnoreFilters).toEqual({});
+    const sf: ItemSettingsFile = { mode: "fields", rules: { userIgnoreFilters: { sharing: EVERYWHERE, encrypted: true } }, perElement: {} };
+    const next = applyPerElementToggle(sf, "userIgnoreFilters", true);
+    expect(next.rules.userIgnoreFilters).toEqual({ sharing: EVERYWHERE, encrypted: false });
+    expect(next.perElement.userIgnoreFilters).toEqual({});
   });
 
   it("enabling Per-item on a non-encrypted key leaves its scope untouched", () => {
-    const sf: ItemSettingsFile = { mode: "fields", rules: { userIgnoreFilters: { scope: "desktop", encrypted: false } }, perItem: {} };
-    const next = applyPerItemToggle(sf, "userIgnoreFilters", true);
-    expect(next.rules.userIgnoreFilters).toEqual({ scope: "desktop", encrypted: false });
+    const sf: ItemSettingsFile = { mode: "fields", rules: { userIgnoreFilters: { sharing: perClass("desktop"), encrypted: false } }, perElement: {} };
+    const next = applyPerElementToggle(sf, "userIgnoreFilters", true);
+    expect(next.rules.userIgnoreFilters).toEqual({ sharing: perClass("desktop"), encrypted: false });
   });
 
   it("enabling Per-item on a key with no rule yet seeds the inert default (not encrypted)", () => {
-    const sf: ItemSettingsFile = { mode: "fields", rules: {}, perItem: {} };
-    const next = applyPerItemToggle(sf, "someKey", true);
-    expect(next.rules.someKey).toEqual({ scope: "all", encrypted: false });
-    expect(next.perItem.someKey).toEqual({});
+    const sf: ItemSettingsFile = { mode: "fields", rules: {}, perElement: {} };
+    const next = applyPerElementToggle(sf, "someKey", true);
+    expect(next.rules.someKey).toEqual({ sharing: EVERYWHERE, encrypted: false });
+    expect(next.perElement.someKey).toEqual({});
   });
 
   it("disabling Per-item removes the perItem entry, leaving the rule (incl. its encrypted flag) untouched", () => {
-    const sf: ItemSettingsFile = { mode: "fields", rules: { a: { scope: "all", encrypted: false } }, perItem: { a: { x: "desktop" } } };
-    const next = applyPerItemToggle(sf, "a", false);
-    expect(next.perItem).not.toHaveProperty("a");
-    expect(next.rules.a).toEqual({ scope: "all", encrypted: false });
+    const sf: ItemSettingsFile = { mode: "fields", rules: { a: { sharing: EVERYWHERE, encrypted: false } }, perElement: { a: { x: perClass("desktop") } } };
+    const next = applyPerElementToggle(sf, "a", false);
+    expect(next.perElement).not.toHaveProperty("a");
+    expect(next.rules.a).toEqual({ sharing: EVERYWHERE, encrypted: false });
   });
 
-  it("encryptToggleDisabled: disabled for local scope OR when per-item is enabled", () => {
-    expect(encryptToggleDisabled("all", false)).toBe(false);
-    expect(encryptToggleDisabled("local", false)).toBe(true);
-    expect(encryptToggleDisabled("all", true)).toBe(true);
-    expect(encryptToggleDisabled("local", true)).toBe(true);
+  it("encryptToggleDisabled: disabled for this-device sharing OR when per-element is enabled", () => {
+    expect(encryptToggleDisabled(EVERYWHERE, false)).toBe(false);
+    expect(encryptToggleDisabled(THIS_DEVICE, false)).toBe(true);
+    expect(encryptToggleDisabled(EVERYWHERE, true)).toBe(true);
+    expect(encryptToggleDisabled(THIS_DEVICE, true)).toBe(true);
   });
 });
 
-describe("buildPerItemElementRows", () => {
-  it("defaults an unscoped element to 'all'", () => {
-    expect(buildPerItemElementRows(["a", "b"], { a: "desktop" })).toEqual([
-      { element: "a", scope: "desktop" },
-      { element: "b", scope: "all" },
+describe("buildPerElementRows", () => {
+  it("defaults an unruled element to everywhere", () => {
+    expect(buildPerElementRows(["a", "b"], { a: perClass("desktop") })).toEqual([
+      { element: "a", sharing: perClass("desktop") },
+      { element: "b", sharing: EVERYWHERE },
     ]);
   });
 });
 
 describe("buildSnippetMemberRows", () => {
   it("unions files on disk with names already scoped, sorted", () => {
-    const rows = buildSnippetMemberRows(["b.css", "a.css"], { "c.css": "mobile" });
+    const rows = buildSnippetMemberRows(["b.css", "a.css"], { "c.css": perClass("mobile") });
     expect(rows).toEqual([
-      { name: "a.css", scope: "all", fileExists: true },
-      { name: "b.css", scope: "all", fileExists: true },
-      { name: "c.css", scope: "mobile", fileExists: false },
+      { name: "a.css", sharing: EVERYWHERE, fileExists: true },
+      { name: "b.css", sharing: EVERYWHERE, fileExists: true },
+      { name: "c.css", sharing: perClass("mobile"), fileExists: false },
     ]);
   });
 
-  it("marks scope-only names as orphans", () => {
-    const rows = buildSnippetMemberRows(["a.css"], { "gone.css": "mobile" });
+  it("marks rule-only names as orphans", () => {
+    const rows = buildSnippetMemberRows(["a.css"], { "gone.css": perClass("mobile") });
     expect(rows).toEqual([
-      { name: "a.css", scope: "all", fileExists: true },
-      { name: "gone.css", scope: "mobile", fileExists: false },
+      { name: "a.css", sharing: EVERYWHERE, fileExists: true },
+      { name: "gone.css", sharing: perClass("mobile"), fileExists: false },
     ]);
   });
 });
 
-describe("withSnippetScope (final-review blocker: clearing the last scoped snippet must not leave an empty enabledCssSnippets map behind)", () => {
-  it("setting a non-'all' scope adds the entry", () => {
-    const sf: ItemSettingsFile = { mode: "plain", rules: {}, perItem: {} };
-    const next = withSnippetScope(sf, "a.css", "desktop");
-    expect(next.perItem[ENABLED_CSS_SNIPPETS_KEY]).toEqual({ "a.css": "desktop" });
+describe("withSnippetSharing (final-review blocker: clearing the last scoped snippet must not leave an empty enabledCssSnippets map behind)", () => {
+  it("setting a non-everywhere sharing adds the entry", () => {
+    const sf: ItemSettingsFile = { mode: "plain", rules: {}, perElement: {} };
+    const next = withSnippetSharing(sf, "a.css", perClass("desktop"));
+    expect(next.perElement[ENABLED_CSS_SNIPPETS_KEY]).toEqual({ "a.css": perClass("desktop") });
   });
 
-  it("clearing the only entry back to 'all' removes the ENABLED_CSS_SNIPPETS_KEY entirely, not just its contents", () => {
-    const sf: ItemSettingsFile = { mode: "fields", rules: {}, perItem: { [ENABLED_CSS_SNIPPETS_KEY]: { "a.css": "desktop" } } };
-    const next = withSnippetScope(sf, "a.css", "all");
-    expect(next.perItem).not.toHaveProperty(ENABLED_CSS_SNIPPETS_KEY);
+  it("clearing the only entry back to everywhere removes the ENABLED_CSS_SNIPPETS_KEY entirely, not just its contents", () => {
+    const sf: ItemSettingsFile = { mode: "fields", rules: {}, perElement: { [ENABLED_CSS_SNIPPETS_KEY]: { "a.css": perClass("desktop") } } };
+    const next = withSnippetSharing(sf, "a.css", EVERYWHERE);
+    expect(next.perElement).not.toHaveProperty(ENABLED_CSS_SNIPPETS_KEY);
     expect(deriveMode(next)).toBe("plain");
   });
 
@@ -421,17 +423,17 @@ describe("withSnippetScope (final-review blocker: clearing the last scoped snipp
     const sf: ItemSettingsFile = {
       mode: "fields",
       rules: {},
-      perItem: { [ENABLED_CSS_SNIPPETS_KEY]: { "a.css": "desktop", "b.css": "mobile" } },
+      perElement: { [ENABLED_CSS_SNIPPETS_KEY]: { "a.css": perClass("desktop"), "b.css": perClass("mobile") } },
     };
-    const next = withSnippetScope(sf, "a.css", "all");
-    expect(next.perItem[ENABLED_CSS_SNIPPETS_KEY]).toEqual({ "b.css": "mobile" });
+    const next = withSnippetSharing(sf, "a.css", EVERYWHERE);
+    expect(next.perElement[ENABLED_CSS_SNIPPETS_KEY]).toEqual({ "b.css": perClass("mobile") });
   });
 
   it("does not mutate the input settings file or its nested maps", () => {
-    const sf: ItemSettingsFile = { mode: "fields", rules: {}, perItem: { [ENABLED_CSS_SNIPPETS_KEY]: { "a.css": "desktop" } } };
+    const sf: ItemSettingsFile = { mode: "fields", rules: {}, perElement: { [ENABLED_CSS_SNIPPETS_KEY]: { "a.css": perClass("desktop") } } };
     const snapshot = JSON.parse(JSON.stringify(sf)) as ItemSettingsFile;
-    withSnippetScope(sf, "a.css", "all");
-    withSnippetScope(sf, "b.css", "mobile");
+    withSnippetSharing(sf, "a.css", EVERYWHERE);
+    withSnippetSharing(sf, "b.css", perClass("mobile"));
     expect(sf).toEqual(snapshot);
   });
 });
@@ -440,15 +442,15 @@ describe("buildCompanionRows", () => {
   it("synthesizes an OFF/all-devices row for a preset never toggled yet, flags user-added rows", () => {
     const c = cfg({
       companions: [
-        { path: "{configDir}/themes", scope: "all", enabled: true },
-        { path: "{configDir}/my-extra", scope: "desktop", enabled: false },
+        { path: "{configDir}/themes", device: "all", enabled: true },
+        { path: "{configDir}/my-extra", device: "desktop", enabled: false },
       ],
     });
     const rows = buildCompanionRows(APPEARANCE_DEF, c);
     expect(rows).toEqual([
-      { path: "{configDir}/themes", scope: "all", enabled: true, isPreset: true },
-      { path: "{configDir}/snippets", scope: "all", enabled: false, isPreset: true }, // never toggled — synthesized default
-      { path: "{configDir}/my-extra", scope: "desktop", enabled: false, isPreset: false },
+      { path: "{configDir}/themes", device: "all", enabled: true, isPreset: true },
+      { path: "{configDir}/snippets", device: "all", enabled: false, isPreset: true }, // never toggled — synthesized default
+      { path: "{configDir}/my-extra", device: "desktop", enabled: false, isPreset: false },
     ]);
   });
 
@@ -459,8 +461,8 @@ describe("buildCompanionRows", () => {
   it("an absent companions key reads exactly like an empty list — presets still synthesize their rows (§5.2)", () => {
     expect(buildCompanionRows(APPEARANCE_DEF, { enabled: true })).toEqual(buildCompanionRows(APPEARANCE_DEF, { enabled: true, companions: [] }));
     expect(buildCompanionRows(APPEARANCE_DEF, { enabled: true })).toEqual([
-      { path: "{configDir}/themes", scope: "all", enabled: false, isPreset: true },
-      { path: "{configDir}/snippets", scope: "all", enabled: false, isPreset: true },
+      { path: "{configDir}/themes", device: "all", enabled: false, isPreset: true },
+      { path: "{configDir}/snippets", device: "all", enabled: false, isPreset: true },
     ]);
   });
 });
@@ -487,124 +489,129 @@ describe("Sync all (spec §4/§5/§10, D11 — one master row per Core/Community
   });
 
   it("sectionAllEnabled is false when the section is empty, when some cards are off, true only when every card is on", () => {
-    expect(sectionAllEnabled([], {})).toBe(false);
-    expect(sectionAllEnabled(CORE_DEFS, {})).toBe(false); // no items entries at all → both default to off
-    expect(sectionAllEnabled(CORE_DEFS, { [CORE_STATE_ONLY_DEF.id]: cfg({ enabled: true }) })).toBe(false); // one on, one missing/off
+    expect(sectionAllEnabled([], itemsIn({}))).toBe(false);
+    expect(sectionAllEnabled(CORE_DEFS, itemsIn({}))).toBe(false); // no items entries at all → both default to off
+    expect(sectionAllEnabled(CORE_DEFS, itemsIn({ core: { [CORE_STATE_ONLY_DEF.id]: cfg({ enabled: true }) } }))).toBe(false); // one on, one missing/off
     expect(
-      sectionAllEnabled(CORE_DEFS, {
-        [CORE_STATE_ONLY_DEF.id]: cfg({ enabled: true }),
-        [CORE_WITH_FILE_DEF.id]: cfg({ enabled: true }),
-      })
+      sectionAllEnabled(
+        CORE_DEFS,
+        itemsIn({ core: { [CORE_STATE_ONLY_DEF.id]: cfg({ enabled: true }), [CORE_WITH_FILE_DEF.id]: cfg({ enabled: true }) } })
+      )
     ).toBe(true);
   });
 
-  it("applySyncAll(on) turns every def in the list on, preserving each cfg's other fields", () => {
-    const items = { [CORE_WITH_FILE_DEF.id]: cfg({ enabled: false, enabledOn: "desktop" }) };
+  it("applySyncAll(on) turns every def in the list on, preserving each item's other fields", () => {
+    const items = itemsIn({ core: { [CORE_WITH_FILE_DEF.id]: cfg({ enabled: false, runsOn: { device: "desktop" } }) } });
     const next = applySyncAll(CORE_DEFS, items, true);
-    // Literal, not cfg(): comparing against a shape built from emptyItemConfig() would move both
-    // sides together if a later change stripped `companions` from the write path, so the §5.2
-    // phase-1 guarantee (a newly created entry stays readable by an older build) would go unnoticed.
-    expect(next[CORE_STATE_ONLY_DEF.id]).toEqual({ enabled: true, companions: [] });
-    expect(next[CORE_WITH_FILE_DEF.id]).toEqual(cfg({ enabled: true, enabledOn: "desktop" })); // enabledOn untouched
+    expect(next.core[CORE_STATE_ONLY_DEF.id]).toEqual({ enabled: true });
+    expect(next.core[CORE_WITH_FILE_DEF.id]).toEqual(cfg({ enabled: true, runsOn: { device: "desktop" } })); // the rule is untouched
   });
 
+  // Every entry SURVIVES being turned off. In the enablement sections an entry's presence is this
+  // device's capture mask for that element (registry.ts's elementSharings' second pass), so "off"
+  // has to be recorded rather than pruned — final-review C1, and the reason withItem removes
+  // nothing.
   it("applySyncAll(off) turns every def in the list off — no kind-exclusion, every def in the section participates", () => {
-    const items = {
-      [CORE_STATE_ONLY_DEF.id]: cfg({ enabled: true }),
-      [CORE_WITH_FILE_DEF.id]: cfg({ enabled: true }),
-    };
+    const items = itemsIn({
+      core: { [CORE_STATE_ONLY_DEF.id]: cfg({ enabled: true }), [CORE_WITH_FILE_DEF.id]: cfg({ enabled: true, runsOn: { device: "desktop" } }) },
+    });
     const next = applySyncAll(CORE_DEFS, items, false);
-    expect(next[CORE_STATE_ONLY_DEF.id]?.enabled).toBe(false);
-    expect(next[CORE_WITH_FILE_DEF.id]?.enabled).toBe(false);
+    expect(next.core[CORE_STATE_ONLY_DEF.id]).toEqual({ enabled: false });
+    expect(next.core[CORE_WITH_FILE_DEF.id]).toEqual(cfg({ enabled: false, runsOn: { device: "desktop" } })); // the rule is untouched
   });
 
   it("does not mutate the input items map", () => {
-    const items = { [CORE_WITH_FILE_DEF.id]: cfg({ enabled: false }) };
+    const items = itemsIn({ core: { [CORE_WITH_FILE_DEF.id]: cfg({ enabled: false }) } });
     const snapshot = structuredClone(items);
     applySyncAll(CORE_DEFS, items, true);
     expect(items).toEqual(snapshot);
   });
 });
 
-describe("nextScope / scope icon cycle (round-6 定稿: Commander-style scope control)", () => {
-  it("cycles field scopes all → desktop → mobile → local → all", () => {
-    expect(nextScope("all", FIELD_SCOPE_OPTIONS)).toBe("desktop");
-    expect(nextScope("desktop", FIELD_SCOPE_OPTIONS)).toBe("mobile");
-    expect(nextScope("mobile", FIELD_SCOPE_OPTIONS)).toBe("local");
-    expect(nextScope("local", FIELD_SCOPE_OPTIONS)).toBe("all");
+describe("nextSharing / sharing icon cycle (round-6 定稿: Commander-style sharing control)", () => {
+  const DESKTOP = perClass("desktop");
+  const MOBILE = perClass("mobile");
+
+  it("cycles field sharing everywhere → desktop → mobile → this-device → everywhere", () => {
+    expect(nextSharing(EVERYWHERE, FIELD_SHARING_OPTIONS)).toEqual(DESKTOP);
+    expect(nextSharing(DESKTOP, FIELD_SHARING_OPTIONS)).toEqual(MOBILE);
+    expect(nextSharing(MOBILE, FIELD_SHARING_OPTIONS)).toEqual(THIS_DEVICE);
+    expect(nextSharing(THIS_DEVICE, FIELD_SHARING_OPTIONS)).toEqual(EVERYWHERE);
   });
 
-  it("cycles file scopes without local: all → desktop → mobile → all", () => {
-    expect(nextScope("all", FILE_SCOPE_OPTIONS)).toBe("desktop");
-    expect(nextScope("desktop", FILE_SCOPE_OPTIONS)).toBe("mobile");
-    expect(nextScope("mobile", FILE_SCOPE_OPTIONS)).toBe("all");
+  it("cycles file sharing without this-device: everywhere → desktop → mobile → everywhere", () => {
+    expect(nextSharing(EVERYWHERE, FILE_SHARING_OPTIONS)).toEqual(DESKTOP);
+    expect(nextSharing(DESKTOP, FILE_SHARING_OPTIONS)).toEqual(MOBILE);
+    expect(nextSharing(MOBILE, FILE_SHARING_OPTIONS)).toEqual(EVERYWHERE);
   });
 
-  it("cycles companion scopes without local: all → desktop → mobile → all", () => {
-    expect(nextScope("all", COMPANION_SCOPE_OPTIONS)).toBe("desktop");
-    expect(nextScope("mobile", COMPANION_SCOPE_OPTIONS)).toBe("all");
+  it("companion device options are the three classes, this-device excluded", () => {
+    expect(COMPANION_DEVICE_OPTIONS).toEqual(["all", "desktop", "mobile"]);
   });
 
-  it("desktop-only ENABLED ON cycle skips mobile: all → desktop → local → all", () => {
-    expect(DESKTOP_ONLY_ENABLED_OPTIONS).toEqual(["all", "desktop", "local"]);
-    expect(nextScope("all", DESKTOP_ONLY_ENABLED_OPTIONS)).toBe("desktop");
-    expect(nextScope("desktop", DESKTOP_ONLY_ENABLED_OPTIONS)).toBe("local");
-    expect(nextScope("local", DESKTOP_ONLY_ENABLED_OPTIONS)).toBe("all");
+  it("desktop-only ENABLED ON cycle skips mobile: everywhere → desktop → this-device → everywhere", () => {
+    expect(DESKTOP_ONLY_ENABLED_OPTIONS).toEqual([EVERYWHERE, DESKTOP, THIS_DEVICE]);
+    expect(nextSharing(EVERYWHERE, DESKTOP_ONLY_ENABLED_OPTIONS)).toEqual(DESKTOP);
+    expect(nextSharing(DESKTOP, DESKTOP_ONLY_ENABLED_OPTIONS)).toEqual(THIS_DEVICE);
+    expect(nextSharing(THIS_DEVICE, DESKTOP_ONLY_ENABLED_OPTIONS)).toEqual(EVERYWHERE);
   });
 
   it("stale stored value missing from the options resumes at the next offered canonical stop (round-8 spec §2)", () => {
-    // enabledOn:"mobile" left behind on a plugin that later became desktop-only → local, not "all"
-    expect(nextScope("mobile", DESKTOP_ONLY_ENABLED_OPTIONS)).toBe("local");
-    // options without local either: mobile wraps past local to all
-    expect(nextScope("mobile", ["all", "desktop"])).toBe("all");
-    expect(nextScope("local", FILE_SCOPE_OPTIONS)).toBe("all");
+    // a mobile rule left behind on a plugin that later became desktop-only → this-device, not everywhere
+    expect(nextSharing(MOBILE, DESKTOP_ONLY_ENABLED_OPTIONS)).toEqual(THIS_DEVICE);
+    // options without this-device either: mobile wraps past it to everywhere
+    expect(nextSharing(MOBILE, [EVERYWHERE, DESKTOP])).toEqual(EVERYWHERE);
+    expect(nextSharing(THIS_DEVICE, FILE_SHARING_OPTIONS)).toEqual(EVERYWHERE);
   });
 
-  it("maps every scope to a distinct lucide icon", () => {
-    expect(SCOPE_ICONS).toEqual({ all: "monitor-smartphone", desktop: "monitor", mobile: "smartphone", local: "airplay" });
-    expect(new Set(Object.values(SCOPE_ICONS)).size).toBe(4);
+  it("maps every sharing to a distinct lucide icon", () => {
+    const icons = [EVERYWHERE, DESKTOP, MOBILE, THIS_DEVICE].map(sharingIcon);
+    expect(icons).toEqual(["monitor-smartphone", "monitor", "smartphone", "airplay"]);
+    expect(new Set(icons).size).toBe(4);
   });
 
   // Sync Center card "Runs on" row (spec 2026-08-06-c-livetest-batch2-design.md §2, ledger C-#10):
-  // extends the SCOPE_ICONS vocabulary to MemberRule's five stops.
-  it("maps every member rule to a distinct lucide icon, sharing the all/desktop/mobile glyphs with SCOPE_ICONS", () => {
-    expect(RUNS_ON_ICONS).toEqual({
-      all: "monitor-smartphone",
-      desktop: "monitor",
-      mobile: "smartphone",
-      "always-here": "power",
-      "never-here": "power-off",
-    });
-    expect(new Set(Object.values(RUNS_ON_ICONS)).size).toBe(5);
-    expect(RUNS_ON_ICONS.all).toBe(SCOPE_ICONS.all);
-    expect(RUNS_ON_ICONS.desktop).toBe(SCOPE_ICONS.desktop);
-    expect(RUNS_ON_ICONS.mobile).toBe(SCOPE_ICONS.mobile);
+  // extends the sharing icon vocabulary to the rule's five stops.
+  it("maps every Runs-on stop to a distinct lucide icon, sharing three glyphs with the sharing cycle", () => {
+    expect(RUNS_ON_OPTIONS.map(runsOnIcon)).toEqual(["monitor-smartphone", "monitor", "smartphone", "power", "power-off"]);
+    expect(new Set(RUNS_ON_OPTIONS.map(runsOnIcon)).size).toBe(5);
+    expect(runsOnIcon({ device: "all" })).toBe(sharingIcon(EVERYWHERE));
+    expect(runsOnIcon({ device: "desktop" })).toBe(sharingIcon(DESKTOP));
+    expect(runsOnIcon({ device: "mobile" })).toBe(sharingIcon(MOBILE));
   });
 
-  it("tooltip names the current scope", () => {
-    expect(scopeCycleTooltip("all")).toBe("Where it syncs (currently: All devices)");
-    expect(scopeCycleTooltip("local")).toBe("Where it syncs (currently: This device)");
+  it("Runs-on labels are copy-contract exact and unchanged from the five values this union replaces", () => {
+    expect(RUNS_ON_OPTIONS.map(runsOnLabel)).toEqual(["Follows your devices", "Computers only", "Phones only", "Always on here", "Never on here"]);
   });
 
-  it("tooltip appends the desktop-only note to the all stop", () => {
-    expect(scopeCycleTooltip("all", DESKTOP_ONLY_ALL_NOTE)).toBe("Where it syncs (currently: All devices — mobile is excluded automatically)");
+  it("sharing labels are copy-contract exact", () => {
+    expect([EVERYWHERE, DESKTOP, MOBILE, THIS_DEVICE].map(sharingLabel)).toEqual(["All devices", "Desktop only", "Mobile only", "This device"]);
+  });
+
+  it("tooltip names the current sharing", () => {
+    expect(sharingCycleTooltip(EVERYWHERE)).toBe("Where it syncs (currently: All devices)");
+    expect(sharingCycleTooltip(THIS_DEVICE)).toBe("Where it syncs (currently: This device)");
+  });
+
+  it("tooltip appends the desktop-only note to the everywhere stop", () => {
+    expect(sharingCycleTooltip(EVERYWHERE, DESKTOP_ONLY_ALL_NOTE)).toBe("Where it syncs (currently: All devices — mobile is excluded automatically)");
   });
 });
 
 describe("PREVIEW_LEGEND_ENTRIES (round-7 spec §2, 定稿 B: color dots + neutral words, no emoji)", () => {
-  it("lists the three scope dots (preview key classes), then lock, then the hint", () => {
+  it("lists the three sharing dots (preview key classes), then lock, then the hint", () => {
     expect(PREVIEW_LEGEND_ENTRIES).toEqual([
-      { kind: "scope", cls: "config-sync-json-desktop", text: "desktop only" },
-      { kind: "scope", cls: "config-sync-json-mobile", text: "mobile only" },
-      { kind: "scope", cls: "config-sync-json-strip", text: "this device" },
+      { kind: "sharing", cls: "config-sync-json-desktop", text: "desktop only" },
+      { kind: "sharing", cls: "config-sync-json-mobile", text: "mobile only" },
+      { kind: "sharing", cls: "config-sync-json-strip", text: "this device" },
       { kind: "lock", cls: null, text: "encrypted" },
       { kind: "hint", cls: null, text: "click a key to add a rule" },
     ]);
   });
 
-  it("carries a color class exactly on scope entries and no emoji anywhere", () => {
+  it("carries a color class exactly on sharing entries and no emoji anywhere", () => {
     for (const e of PREVIEW_LEGEND_ENTRIES) {
-      expect(e.cls !== null).toBe(e.kind === "scope");
+      expect(e.cls !== null).toBe(e.kind === "sharing");
       expect(/[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}]/u.test(e.text)).toBe(false);
     }
   });

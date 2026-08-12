@@ -1,56 +1,57 @@
-import { FieldRule, PerItemScopes, RuleScope } from "../core/types";
+import { EVERYWHERE, FieldRule, PerElementSharing, Sharing, sharingClass } from "../core/types";
 import { keyMatchesAny } from "../core/sanitize";
 
-// Orthogonal classification (D1/D10): scope drives color, encrypted is an independent flag that
-// adds a lock icon suffix on top of whatever scope color applies. "none" = no rule for this key.
-export interface KeyState { scope: RuleScope | "none"; encrypted: boolean }
+// Orthogonal classification (D1/D10): sharing drives color, encrypted is an independent flag that
+// adds a lock icon suffix on top of whatever sharing color applies. null = no rule for this key.
+export interface KeyState { sharing: Sharing | null; encrypted: boolean }
 export interface KeyClass { key: string; state: KeyState; detected: boolean }
 
 // Classifies each top-level object key by its rule/detection state for the read-only viewer.
-// An explicit {scope:"all", encrypted:false} rule is an inert override (owned by the app drawer)
-// — it classifies the same as "no rule" here, same as before the scope/encrypted split.
+// An explicit {sharing: everywhere, encrypted:false} rule is an inert override (owned by the app
+// drawer) — it classifies the same as "no rule" here.
 export function classifyJsonKeys(raw: string, fields: FieldRule[], detectedKeys: string[]): KeyClass[] {
   let parsed: unknown;
   try { parsed = JSON.parse(raw); } catch { return []; }
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return [];
   return Object.keys(parsed).map((key) => {
-    const rule = fields.find((f) => keyMatchesAny(key, [f.pattern]) && !(f.scope === "all" && !f.encrypted));
-    const state: KeyState = rule !== undefined ? { scope: rule.scope, encrypted: rule.encrypted } : { scope: "none", encrypted: false };
-    return { key, state, detected: state.scope === "none" && detectedKeys.includes(key) };
+    const rule = fields.find((f) => keyMatchesAny(key, [f.pattern]) && !(f.sharing.kind === "everywhere" && !f.encrypted));
+    const state: KeyState = rule !== undefined ? { sharing: rule.sharing, encrypted: rule.encrypted } : { sharing: null, encrypted: false };
+    return { key, state, detected: state.sharing === null && detectedKeys.includes(key) };
   });
 }
 
-// CSS class for a key's color: scope alone drives color (blue=desktop / amber=mobile / red=this
-// device); "all" and "none" get no color. Reuses the existing config-sync-json-* classes.
+// CSS class for a key's color: sharing alone drives color (blue=desktop / amber=mobile / red=this
+// device); everywhere and no-rule get no color. Reuses the existing config-sync-json-* classes.
 export function jsonKeyClass(kc: KeyClass): string {
-  if (kc.state.scope === "desktop") return "config-sync-json-desktop";
-  if (kc.state.scope === "mobile") return "config-sync-json-mobile";
-  if (kc.state.scope === "local") return "config-sync-json-strip";
+  const cls = kc.state.sharing === null ? null : sharingClass(kc.state.sharing);
+  if (cls === "desktop") return "config-sync-json-desktop";
+  if (cls === "mobile") return "config-sync-json-mobile";
+  if (kc.state.sharing?.kind === "this-device") return "config-sync-json-strip";
   return kc.detected ? "config-sync-json-detected" : "config-sync-json-none";
 }
 
 // ── Per-item array element coloring (spec D10 "逐项数组按元素着色") ─────────────────────────
-// classifyJsonKeys only classifies top-level key LINES; a string-array key with "Per-item
-// scopes" enabled (D3 — top-level string-array keys only) also needs each ELEMENT line colored
-// by that element's own scope. `raw` is the pretty-printed `JSON.stringify(doc, null, 2)` text
+// classifyJsonKeys only classifies top-level key LINES; a string-array key with per-element
+// rules enabled (D3 — top-level string-array keys only) also needs each ELEMENT line colored
+// by that element's own sharing. `raw` is the pretty-printed `JSON.stringify(doc, null, 2)` text
 // the preview already renders line-by-line, so classification is keyed by line index (0-based,
 // matching `raw.split("\n")`) for a trivial O(1) lookup while the renderer walks the same lines.
-export interface PerItemElementLine {
+export interface PerElementLine {
   key: string;
   value: string;
-  scope: RuleScope;
+  sharing: Sharing;
 }
 
 interface Frame {
-  // The top-level key that owns this frame's array, IF this frame is a per-item-enabled
+  // The top-level key that owns this frame's array, IF this frame is a per-element-enabled
   // top-level array (elements get colored) — null for every other container (nested
-  // objects/arrays, or a top-level array whose key has no perItem entry): its contents are
+  // objects/arrays, or a top-level array whose key has no perElement entry): its contents are
   // walked only to keep bracket depth correct, never colored.
-  perItemKey: string | null;
+  perElementKey: string | null;
 }
 
-export function classifyPerItemLines(raw: string, perItem: Record<string, PerItemScopes>): Map<number, PerItemElementLine> {
-  const out = new Map<number, PerItemElementLine>();
+export function classifyPerElementLines(raw: string, perElement: Record<string, PerElementSharing>): Map<number, PerElementLine> {
+  const out = new Map<number, PerElementLine>();
   const lines = raw.split("\n");
   const stack: Frame[] = [];
   const KEY_LINE_RE = /^"([^"]+)":\s*(.*)$/;
@@ -65,8 +66,8 @@ export function classifyPerItemLines(raw: string, perItem: Record<string, PerIte
       if (keyMatch === null) continue;
       const key = keyMatch[1]!;
       const rest = keyMatch[2] ?? "";
-      if (rest === "[") stack.push({ perItemKey: key in perItem ? key : null });
-      else if (rest === "{") stack.push({ perItemKey: null });
+      if (rest === "[") stack.push({ perElementKey: key in perElement ? key : null });
+      else if (rest === "{") stack.push({ perElementKey: null });
       continue;
     }
     if (CLOSE_LINE_RE.test(trimmed)) {
@@ -74,12 +75,12 @@ export function classifyPerItemLines(raw: string, perItem: Record<string, PerIte
       continue;
     }
     const top = stack[stack.length - 1]!;
-    if (top.perItemKey !== null && stack.length === 1) {
+    if (top.perElementKey !== null && stack.length === 1) {
       const withoutComma = trimmed.endsWith(",") ? trimmed.slice(0, -1) : trimmed;
       if (withoutComma.startsWith('"') && withoutComma.endsWith('"')) {
         try {
           const value = JSON.parse(withoutComma) as string;
-          out.set(i, { key: top.perItemKey, value, scope: perItem[top.perItemKey]?.[value] ?? "all" });
+          out.set(i, { key: top.perElementKey, value, sharing: perElement[top.perElementKey]?.[value] ?? EVERYWHERE });
           continue;
         } catch {
           // not a well-formed quoted string on this line — fall through to generic depth
@@ -93,17 +94,18 @@ export function classifyPerItemLines(raw: string, perItem: Record<string, PerIte
     // an inert leaf at this depth.
     const nestedKeyMatch = KEY_LINE_RE.exec(trimmed);
     const openRest = nestedKeyMatch !== null ? (nestedKeyMatch[2] ?? "") : trimmed;
-    if (openRest === "[" || openRest === "{") stack.push({ perItemKey: null });
+    if (openRest === "[" || openRest === "{") stack.push({ perElementKey: null });
   }
   return out;
 }
 
-// CSS class for a per-item array element's color: same scope->color mapping as jsonKeyClass,
-// minus the "detected"/"none" faint styling (elements have no detection concept) — "all" gets no
-// color (default text).
-export function jsonElementClass(state: PerItemElementLine): string | null {
-  if (state.scope === "desktop") return "config-sync-json-desktop";
-  if (state.scope === "mobile") return "config-sync-json-mobile";
-  if (state.scope === "local") return "config-sync-json-strip";
+// CSS class for a per-element array element's color: same sharing->color mapping as jsonKeyClass,
+// minus the "detected"/"none" faint styling (elements have no detection concept) — everywhere gets
+// no color (default text).
+export function jsonElementClass(state: PerElementLine): string | null {
+  const cls = sharingClass(state.sharing);
+  if (cls === "desktop") return "config-sync-json-desktop";
+  if (cls === "mobile") return "config-sync-json-mobile";
+  if (state.sharing.kind === "this-device") return "config-sync-json-strip";
   return null;
 }

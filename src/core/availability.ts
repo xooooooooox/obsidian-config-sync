@@ -1,6 +1,7 @@
 import { PluginHost, pluginIdForGroup } from "./ConfigSyncCore";
-import { coreSettingsIds } from "./catalog";
-import { MEMBER_RULES, MemberRule, RuleScope, StoreLock, SyncGroup } from "./types";
+import { refItemId } from "./itemKeys";
+import { lockDesktopOnly, lockEntry, lockEntryList, lockSourceVersion } from "./manifest";
+import { RunsOn, StoreLock, SyncGroup } from "./types";
 
 export type AvailabilityKind = "enabled" | "disabled" | "not-installed";
 export type VersionDrift = "behind" | "ahead" | null; // local vs store: behind = local < store
@@ -40,10 +41,11 @@ function driftFor(local: string | null, store: string | null): VersionDrift {
 }
 
 export function availabilityForGroup(group: SyncGroup, plugins: PluginHost, lock: StoreLock | null): Availability {
+  const entry = lockEntry(lock, group.ref);
   const pluginId = pluginIdForGroup(group);
   if (pluginId !== null) {
     const localVersion = plugins.getInstalledPluginVersion(pluginId);
-    const storeVersion = lock?.groups[group.name]?.sourcePluginVersion ?? null;
+    const storeVersion = lockSourceVersion(entry, "plugin");
     const kind: AvailabilityKind =
       localVersion === null ? "not-installed" : plugins.isPluginEnabled(pluginId) ? "enabled" : "disabled";
     return {
@@ -52,13 +54,15 @@ export function availabilityForGroup(group: SyncGroup, plugins: PluginHost, lock
       localVersion,
       storeVersion,
       anchor: "plugin",
-      desktopOnly: localVersion !== null ? plugins.isDesktopOnly(pluginId) : lock?.groups[group.name]?.desktopOnly === true,
+      desktopOnly: localVersion !== null ? plugins.isDesktopOnly(pluginId) : lockDesktopOnly(entry),
     };
   }
   const localVersion = plugins.getAppVersion();
-  const storeVersion = lock?.groups[group.name]?.sourceAppVersion ?? null;
-  const isCore = coreSettingsIds().has(group.name);
-  const kind: AvailabilityKind = isCore && !plugins.isCorePluginEnabled(group.name) ? "disabled" : "enabled";
+  const storeVersion = lockSourceVersion(entry, "app");
+  // A LOOKUP on the group's own ref (spec §5): "is this a core plugin's settings file?" is what the
+  // item's section says, not what a bare name happens to match in the runtime core-id list.
+  const core = refItemId(group.ref ?? "");
+  const kind: AvailabilityKind = core?.section === "core" && !plugins.isCorePluginEnabled(core.id) ? "disabled" : "enabled";
   return { kind, drift: driftFor(localVersion, storeVersion), localVersion, storeVersion, anchor: "app", desktopOnly: false };
 }
 
@@ -72,9 +76,9 @@ export function desktopOnlyDrift(groups: SyncGroup[], plugins: PluginHost, lock:
     const id = pluginIdForGroup(g);
     if (id === null) continue; // app-anchored
     if (plugins.getInstalledPluginVersion(id) === null) continue; // not installed here
-    const entry = lock?.groups[g.name];
-    if (entry?.sourcePluginVersion === undefined) continue; // no entry to refresh
-    if (plugins.isDesktopOnly(id) !== (entry.desktopOnly === true)) n++;
+    const entry = lockEntry(lock, g.ref);
+    if (lockSourceVersion(entry, "plugin") === null) continue; // no entry to refresh
+    if (plugins.isDesktopOnly(id) !== lockDesktopOnly(entry)) n++;
   }
   return n;
 }
@@ -95,65 +99,57 @@ export function desktopOnlyPluginIds(groups: SyncGroup[], plugins: PluginHost, l
   // in the store's switch list and must stay masked (2026-07-27 mobile find: "simpread" kept
   // reappearing in every mobile diff). Manifest stays first: installed plugins are judged by
   // their manifest above, so a stale lock flag alone never masks one.
-  for (const [name, entry] of Object.entries(lock?.groups ?? {})) {
-    if (entry?.desktopOnly !== true || !name.startsWith("plugin-")) continue;
-    const id = name.slice("plugin-".length);
-    if (plugins.getInstalledPluginVersion(id) === null) ids.add(id);
+  // No parse left to do: the lock is keyed by item ref since v3 (spec §3), so a community item's
+  // plugin id IS the id half of its key. A companion or a carrier is excluded by refItemId, which
+  // answers only for a two-segment key.
+  for (const [ref, entry] of lockEntryList(lock?.items ?? {})) {
+    const owner = refItemId(ref);
+    if (!lockDesktopOnly(entry) || owner?.section !== "community") continue;
+    if (plugins.getInstalledPluginVersion(owner.id) === null) ids.add(owner.id);
   }
   return ids;
 }
 
-// Normalizes a stored RuleScope into a MemberRule (Sync Center unified grammar, task 2):
-// all/desktop/mobile pass through unchanged (both types share those three literals); a legacy
-// "local" scope — the pre-unification "this device decides for itself" value — resolves to a
-// direction using the member's current PERSISTED local on/off state (the same on-disk switch-list
-// content applySwitchList's exception pass-through reads — NEVER a live PluginHost query, which
-// can diverge: a non-persistent enablePlugin, used by config-sync's own apply cycle and the IOTO
-// ecosystem, loads a plugin without adding it to the persisted enabled set — see pluginState.ts),
-// so old data keeps working under the new always-here/never-here vocabulary without a
-// stored-format migration.
+// The RunsOn a this-device pin resolves to (Sync Center unified grammar, task 2): a pin says "this
+// device decides for itself", and what it has decided is read from the member's current PERSISTED
+// local on/off state — the same on-disk switch-list content applySwitchList's exception
+// pass-through reads, NEVER a live PluginHost query, which can diverge (a non-persistent
+// enablePlugin, used by config-sync's own apply cycle and the IOTO ecosystem, loads a plugin
+// without adding it to the persisted enabled set — see pluginState.ts).
 //
-// Mask derivation from the resulting MemberRule (documented once, here, for every apply-site
-// consumer): desktop/mobile on the matching device class → no mask (plain store membership); on
-// the other class → exception + forceOff (existing behavior, unchanged semantics); never-here →
-// exception + forceOff; always-here → exception + forceOn (new); all → nothing.
-export function normalizeMemberRule(scope: RuleScope, locallyOn: boolean): MemberRule {
-  if (scope !== "local") return scope;
-  return locallyOn ? "always-here" : "never-here";
+// `where: "everywhere"` preserves today's behaviour exactly: a "here" rule is fleet-wide in effect
+// whatever the copy says (C-#46), and whether it SHOULD be is explicitly out of scope (spec §8).
+//
+// Mask derivation from the resulting RunsOn (documented once, here, for every apply-site
+// consumer): device desktop/mobile on the matching class → no mask (plain store membership); on
+// the other class → exception + forceOff; force off → exception + forceOff; force on → exception +
+// forceOn; device all with no force → nothing.
+export function forcedRunsOn(locallyOn: boolean): RunsOn {
+  return { device: "all", force: { state: locallyOn ? "on" : "off", where: "everywhere" } };
 }
 
-// The single narrowing point for a stored rule value (spec 2026-08-11-data-model-hardening.md
-// §3.2, invariant II.2): settings.memberRules is typed at compile time but its content is raw
-// data.json at runtime, so a value this build doesn't recognise — exactly what a NEWER build
-// writes — arrives here. It is ignored where it is used, and left untouched on disk: rewriting
-// storage to drop it would propagate the deletion to the whole fleet on the next capture.
-export function asMemberRule(value: unknown): MemberRule | undefined {
-  return (MEMBER_RULES as readonly unknown[]).includes(value) ? (value as MemberRule) : undefined;
+// A genuinely stored RunsOn (the Runs-on menu writing directly) always wins over re-deriving a
+// direction from local state — once a value is stored, mask producers stop re-normalizing it on
+// every read. Absent one, falls back to the this-device pin's reading, so a pin with no rule of
+// its own keeps working exactly as it did before the rule had a stored home.
+export function preferStoredRunsOn(stored: RunsOn | undefined, persistedLocallyOn: boolean): RunsOn {
+  return stored ?? forcedRunsOn(persistedLocallyOn);
 }
 
-// A genuinely stored MemberRule (the Runs-on menu, task 5, writing directly) always wins over
-// re-deriving direction from local state — once a value is stored, mask producers stop
-// re-normalizing it on every read. Absent a recognised stored value, falls back to
-// normalizeMemberRule against the legacy "this device" pin — old data (localMembers, no stored
-// rule yet) keeps working exactly as before this fell back to a real stored home.
-export function preferStoredMemberRule(stored: unknown, persistedLocallyOn: boolean): MemberRule {
-  return asMemberRule(stored) ?? normalizeMemberRule("local", persistedLocallyOn);
-}
-
-// Member names whose shared scope excludes the current device class. Feeds the exception mask
+// Member names whose device class excludes the current one. Feeds the exception mask
 // (capture pass-through + compare masking) exactly like desktopOnlyPluginIds does for plugins.
-export function scopedAwayMembers(scopes: Record<string, "desktop" | "mobile">, isMobile: boolean): Set<string> {
+export function membersExcludedByClass(classes: Record<string, "desktop" | "mobile">, isMobile: boolean): Set<string> {
   const want = isMobile ? "mobile" : "desktop";
   const out = new Set<string>();
-  for (const [name, scope] of Object.entries(scopes)) if (scope !== want) out.add(name);
+  for (const [name, cls] of Object.entries(classes)) if (cls !== want) out.add(name);
   return out;
 }
 
-// The apply must force OFF members scoped away from this device — scope-away minus This-device
-// ids, since an explicit local decision (local > scope) must keep the machine's own on/off.
-export function memberForceOff(scopes: Record<string, "desktop" | "mobile">, localIds: string[], isMobile: boolean): string[] {
+// The apply must force OFF members pinned away from this device — class-away minus this-device
+// ids, since an explicit this-device decision must keep the machine's own on/off.
+export function memberForceOff(classes: Record<string, "desktop" | "mobile">, localIds: string[], isMobile: boolean): string[] {
   const localSet = new Set(localIds);
-  return [...scopedAwayMembers(scopes, isMobile)].filter((id) => !localSet.has(id));
+  return [...membersExcludedByClass(classes, isMobile)].filter((id) => !localSet.has(id));
 }
 
 // Enabled snippet names (local list or store list) whose .css file exists neither locally nor

@@ -25,9 +25,12 @@ describe("migrateLegacyManifest", () => {
     const result = await migrateLegacyManifest(io, "cs", existing, NOW);
 
     expect(result.migrated).toBe(true);
+    // The parsed legacy rule carries the ref parseGroup gives a group with no compiler behind it
+    // (spec §3/§4): `hotkeys` is one of the three Obsidian cards, so it resolves; the caller's own
+    // literal is passed through untouched, ref-less, exactly as handed in.
     expect(result.groups).toEqual([
       { name: "shared", path: "{configDir}/shared-existing.json", type: "file", devices: "all" },
-      { name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all" },
+      { name: "hotkeys", ref: "obsidian/hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all" },
     ]);
 
     // original path gone

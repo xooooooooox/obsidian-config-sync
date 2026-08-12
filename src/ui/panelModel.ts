@@ -1,9 +1,9 @@
 import { BucketCounts, GroupState, GroupStatus, OTHER_STORE_FILES_GROUP, RemoteDiffEntry } from "../core/status";
-import { FileChanges, RuleScope, SyncGroup } from "../core/types";
+import { FileChanges, Sharing, sharingClass, StorageSection, SyncGroup } from "../core/types";
 import { Availability, VersionDrift } from "../core/availability";
+import { carrierRef, refItemId } from "../core/itemKeys";
 import { ApplyItem, CaptureItem, StateAction } from "../core/ConfigSyncCore";
-import { ItemCategory } from "../core/catalog";
-import { memberUniverse, parseSwitchList, switchListMemberOn, switchListOnCount } from "../core/switchList";
+import { EnablementList, memberUniverse, parseSwitchList, switchListMemberOn, switchListOnCount } from "../core/switchList";
 import { Fate, FateInput, rowFate } from "./fateModel";
 
 // Direction a checkable row acts in: capture pushes this device → store; apply pulls store → device.
@@ -210,17 +210,16 @@ export function stageableRow(state: GroupState, section: SectionKind): boolean {
 // live evidence found both live in the store: (a) the group-level `devices` class (custom
 // groups/companions; groupsForDevice's own exclusion axis — a genuinely different group never
 // even reaches this device's status pass), and (b) a Plain-mode settings-file's own
-// `fileRule.scope` (the Settings-sync menu's write target, `setItemFileScope`) — normally
+// `fileRule.sharing` (the Settings-sync menu's write target, `setItemFileSharing`) — normally
 // elevated onto `devices` at compile time (registry.ts's compileSingleFile), but the two can
 // still disagree in practice (e.g. a pre-existing/migrated group whose top-level `devices` never
 // picked up a later fileRule-only write). Checking both, independently, is the only reading that
-// can't miss either axis. `fileRule.scope` excludes "local" by construction (D9), so any
-// non-"all" value is a real DeviceClass to compare against.
+// can't miss either axis. FileSharing excludes this-device by construction (D9), so a per-class
+// value is always a real DeviceClass to compare against.
 export function groupExcludedHere(group: SyncGroup, deviceClass: "desktop" | "mobile"): boolean {
   const devicesExcluded = group.devices !== "all" && group.devices !== deviceClass;
-  const fileRuleScope = group.fileRule?.scope;
-  const fileRuleExcluded = fileRuleScope !== undefined && fileRuleScope !== "all" && fileRuleScope !== deviceClass;
-  return devicesExcluded || fileRuleExcluded;
+  const fileRuleClass = group.fileRule === undefined ? null : sharingClass(group.fileRule.sharing);
+  return devicesExcluded || (fileRuleClass !== null && fileRuleClass !== deviceClass);
 }
 
 // isMobile: a desktop-only plugin (author-declared) can't run on a phone — whether it's
@@ -327,38 +326,43 @@ export function runProgressLabel(verb: "Capturing" | "Applying", done: number, t
 
 export interface MemberDecision {
   id: string;
-  scope: "local" | "desktop" | "mobile";
+  // Never "everywhere" — an everywhere member has no decision worth a note row.
+  sharing: Exclude<Sharing, { kind: "everywhere" }>;
   // Structural (spec 2026-08-05-section-groups-and-member-menu-design.md §R3-A): true iff the
-  // "local" scope exists solely because the item's settings-sync card is off — not a rule the
-  // user pinned (no localMembers entry, no enabledOn). Always false for desktop/mobile scopes.
+  // this-device reading exists solely because the item's settings-sync card is off — not a rule
+  // the user pinned (no thisDeviceItems entry, no runsOn). Always false for a per-class sharing.
   structural: boolean;
 }
 
-// Every per-member decision worth a note row: ⌂ local exceptions plus device-class rules.
-// `structuralIds` names elements whose "local" scope is structural (registry.ts's
+// Every per-member decision worth a note row: ⌂ this-device exceptions plus device-class rules.
+// `structuralIds` names elements whose this-device reading is structural (registry.ts's
 // structuralLocalElements) — the derivation into MemberDecision.structural happens here, in the
 // pure layer, rather than being handed down as a pre-computed per-decision flag.
-export function memberDecisionsFromScopes(scopes: Record<string, RuleScope>, structuralIds: ReadonlySet<string>): MemberDecision[] {
-  return Object.entries(scopes)
-    .filter((e): e is [string, "local" | "desktop" | "mobile"] => e[1] !== "all")
-    .map(([id, scope]) => ({ id, scope, structural: scope === "local" && structuralIds.has(id) }))
+export function memberDecisionsFromSharing(sharings: Record<string, Sharing>, structuralIds: ReadonlySet<string>): MemberDecision[] {
+  return Object.entries(sharings)
+    .filter((e): e is [string, Exclude<Sharing, { kind: "everywhere" }>] => e[1].kind !== "everywhere")
+    .map(([id, sharing]) => ({ id, sharing, structural: sharing.kind === "this-device" && structuralIds.has(id) }))
     .sort((a, b) => a.id.localeCompare(b.id));
 }
 
 // ── Enablement single entry (spec 2026-08-06-enablement-single-entry-design.md #5-B) ─────────
 
-export type EnablementCarrier = "core-plugins" | "community-plugins";
-
-// The switch-list group that carries a plugin's on/off state: community items compile as
-// `plugin-<id>`; core items ARE their carrier ladder's element id (no prefix).
-export function enablementCarrierFor(itemGroup: string): EnablementCarrier {
-  return itemGroup.startsWith("plugin-") ? "community-plugins" : "core-plugins";
+// The on/off list an item's enablement rides, from the item's own REF (spec §5): a community item
+// rides the community list, everything else the core one. Takes the ref rather than the group name
+// because the section is a fact about the item, not something to be read back out of its name — the
+// caller resolves it once (SyncCenterView's rowRef) and hands it here.
+export function enablementCarrierFor(itemRef: string): EnablementList {
+  return refItemId(itemRef)?.section === "community" ? "community-plugins" : "core-plugins";
 }
 
 // True when that carrier is itself a synced (compiled) item — the on/off card then owns
 // enablement outright, and the disabled item's own per-card policy never runs.
-export function carrierIsSynced(itemGroup: string, compiledGroupNames: readonly string[]): boolean {
-  return compiledGroupNames.includes(enablementCarrierFor(itemGroup));
+// Refs on both sides (task-3 review M6): the carrier's own ref against the refs of the compiled
+// groups. The previous form compared a LIST id against compiled group NAMES — true only because a
+// carrier's group name happens to equal its list id, which is a coincidence of the compiler's
+// choice, not a fact either side states.
+export function carrierIsSynced(itemRef: string, compiledRefs: readonly (string | undefined)[]): boolean {
+  return compiledRefs.includes(carrierRef(enablementCarrierFor(itemRef)));
 }
 
 // ── Unified grammar view skeleton (spec 2026-08-06-sync-center-unified-grammar-design.md §2) ──
@@ -380,7 +384,7 @@ export const TYPE_SECTION_ORDER: readonly TypeSection[] = ["obsidian", "core", "
 
 // beta plugins sit in the Community section (parity with the settings Beta tab pinning them
 // alongside community plugins); custom groups (+ Add folder) are "Your folders".
-export function typeSectionForRow(defSection: ItemCategory | "beta"): TypeSection {
+export function typeSectionForRow(defSection: StorageSection | "beta"): TypeSection {
   if (defSection === "beta") return "community";
   if (defSection === "custom") return "folders";
   return defSection;
@@ -411,7 +415,7 @@ export interface RemoteSectionModel {
 
 export function remoteSections(
   entries: RemoteDiffEntry[],
-  categoryOf: (group: string) => ItemCategory | "beta",
+  categoryOf: (group: string) => StorageSection | "beta",
   displayNameOf: (group: string) => string
 ): RemoteSectionModel[] {
   const onOffBySection: Partial<Record<TypeSection, RemoteDiffEntry>> = {};
@@ -723,7 +727,7 @@ export interface StageableRow {
   itemName: string;
   fate: Fate;
   selected: boolean;
-  carrier: EnablementCarrier | null;
+  carrier: EnablementList | null;
   elementId: string | null;
   availability: Availability | null;
   conflictChoice: ConflictChoice | null;
@@ -769,8 +773,8 @@ function rowDirection(row: StageableRow): "apply" | "capture" | null {
 export function stagedPayload(rows: StageableRow[]): { apply: ApplyItem[]; capture: CaptureItem[] } {
   const apply: ApplyItem[] = [];
   const capture: CaptureItem[] = [];
-  const applyMembers: Record<EnablementCarrier, string[]> = { "core-plugins": [], "community-plugins": [] };
-  const captureMembers: Record<EnablementCarrier, string[]> = { "core-plugins": [], "community-plugins": [] };
+  const applyMembers: Record<EnablementList, string[]> = { "core-plugins": [], "community-plugins": [] };
+  const captureMembers: Record<EnablementList, string[]> = { "core-plugins": [], "community-plugins": [] };
 
   for (const row of rows) {
     if (!row.selected) continue;

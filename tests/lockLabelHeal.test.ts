@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import ConfigSyncPlugin from "../src/main";
 import { MemFS } from "./memfs";
+import { itemsIn } from "./items";
 
 // batch6 task-1 (spec 2026-08-08-c-livetest-batch6-remote-labels.md): startup heal wiring —
 // backfillLockLabels itself is unit-tested in tests/core.test.ts; this covers the main.ts call
@@ -25,7 +26,7 @@ interface HealPluginSurface {
   loadData: () => Promise<unknown>;
   saveData: (d: unknown) => Promise<void>;
   loadSettings: () => Promise<void>;
-  recompile: () => Promise<void>;
+  recompile: () => Promise<boolean>;
   refreshLocalStatus: () => Promise<void>;
   settings: { rootPath: string };
 }
@@ -42,10 +43,10 @@ function makeHealPlugin(io: MemFS): HealPluginSurface {
     saveLocalStorage: () => {},
   };
   instance.loadData = async () => ({
-    schemaVersion: 2,
-    items: { "community:demo": { enabled: true, companions: [] } },
+    schemaVersion: 3,
+    items: itemsIn({ community: { demo: { enabled: true } } }),
     remotes: [],
-    bratPluginIndex: {},
+    bratIndex: {},
   });
   instance.saveData = async () => {};
   return instance;
@@ -65,14 +66,15 @@ describe("startup lock-label heal (main.ts refreshLocalStatus wiring)", () => {
     io.seed({
       "config-dir/plugins/demo/data.json": "{}",
       "cs/store/configdir/plugins/demo/data.json": "{}",
-      "cs/store.lock.json": JSON.stringify({ capturedAt: "2026-01-01T00:00:00.000Z", groups: { "plugin-demo": { sourcePluginVersion: "1.0.0" } } }),
+      "cs/store.lock.json": JSON.stringify({ version: 3, capturedAt: "2026-01-01T00:00:00.000Z", items: { community: { demo: { source: { kind: "plugin", version: "1.0.0" } } } } }),
     });
     const plugin = await readyPlugin(io);
 
     await plugin.refreshLocalStatus();
 
-    const healed = JSON.parse(await io.read("cs/store.lock.json")) as { capturedAt: string; groups: Record<string, { label?: string }> };
-    expect(healed.groups["plugin-demo"]?.label).toBe("Demo Plugin");
+    // The heal lands on the item's ref, and the label lands in the display partition (spec §3).
+    const healed = JSON.parse(await io.read("cs/store.lock.json")) as { capturedAt: string; items: Record<string, Record<string, { display?: { label?: string } }>> };
+    expect(healed.items["community"]?.["demo"]?.display?.label).toBe("Demo Plugin");
     expect(healed.capturedAt).toBe("2026-01-01T00:00:00.000Z"); // never touched
     expect(io.lockWrites).toBe(1);
   });
@@ -82,7 +84,7 @@ describe("startup lock-label heal (main.ts refreshLocalStatus wiring)", () => {
     io.seed({
       "config-dir/plugins/demo/data.json": "{}",
       "cs/store/configdir/plugins/demo/data.json": "{}",
-      "cs/store.lock.json": JSON.stringify({ capturedAt: "2026-01-01T00:00:00.000Z", groups: { "plugin-demo": { sourcePluginVersion: "1.0.0" } } }),
+      "cs/store.lock.json": JSON.stringify({ version: 3, capturedAt: "2026-01-01T00:00:00.000Z", items: { community: { demo: { source: { kind: "plugin", version: "1.0.0" } } } } }),
     });
     const plugin = await readyPlugin(io);
 
@@ -94,6 +96,36 @@ describe("startup lock-label heal (main.ts refreshLocalStatus wiring)", () => {
     expect(io.lockWrites).toBe(1); // no second heal write
     expect(await io.read("cs/store.lock.json")).toBe(afterFirst);
   });
+
+  // Task-3 review C1, and the reason this file exists at all: the heal is the FOURTH writer of this
+  // file, it fires at startup with no user action behind it, and what it writes looks cosmetic — the
+  // exact profile of a writer nobody counts. It must never change the lock's FORMAT.
+  //
+  // parseStoreLock converts a v1/v2 file to the v3 shape in memory, so writing that object back
+  // would leave `items` on disk under the old `version`: a 2.21.0 peer would not refuse it (the
+  // number is not from the future), could not parse it (it needs `groups`), would treat it as
+  // corrupt, and its next capture would rewrite the whole lock flat — destroying the v3 bookkeeping,
+  // `legacy/` entries and all. A format upgrade is earned by a capture or a pull, never by fixing a
+  // display name.
+  for (const [label, raw] of [
+    ["v1 (no version)", JSON.stringify({ capturedAt: "2026-01-01T00:00:00.000Z", groups: { "plugin-demo": { sourcePluginVersion: "1.0.0" } } })],
+    ["v2 (a 2.21.0 peer's store — the transition window's normal case)", JSON.stringify({ version: 2, capturedAt: "2026-01-01T00:00:00.000Z", groups: { "plugin-demo": { sourcePluginVersion: "1.0.0" } } })],
+  ] as const) {
+    it(`leaves a ${label} lock byte-identical — the heal never upgrades the format`, async () => {
+      const io = new CountingIO();
+      io.seed({
+        "config-dir/plugins/demo/data.json": "{}",
+        "cs/store/configdir/plugins/demo/data.json": "{}",
+        "cs/store.lock.json": raw,
+      });
+      const plugin = await readyPlugin(io);
+
+      await plugin.refreshLocalStatus();
+
+      expect(io.lockWrites).toBe(0);
+      expect(await io.read("cs/store.lock.json")).toBe(raw); // the stale label stays stale; the store stays readable
+    });
+  }
 
   it("is a no-op on a fresh device with no local store.lock.json yet", async () => {
     const io = new CountingIO(); // no store.lock.json seeded at all

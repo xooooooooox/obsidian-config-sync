@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import ConfigSyncPlugin from "../src/main";
 import { GroupStatus } from "../src/core/status";
-import { SyncGroup, RuleScope } from "../src/core/types";
+import { FileSharing, ItemRef, SyncGroup, EVERYWHERE, perClass } from "../src/core/types";
 import { Availability } from "../src/core/availability";
 import { groupExcludedHere } from "../src/ui/panelModel";
+import { Item } from "../src/core/registry";
+import { itemsIn } from "./items";
 
 // C-#24 root cause (ledger .superpowers/sdd/2026-08-06-c-livetest/issues.md): groupsForDevice
 // (ConfigSyncCore.ts:138-140) drops a scope-mismatched group before statusForGroups ever runs —
@@ -33,8 +35,10 @@ function fakeApp(): unknown {
   };
 }
 
-function baseData(items: Record<string, unknown>): unknown {
-  return { schemaVersion: 2, items, remotes: [], bratPluginIndex: {} };
+// A v3 document with just the obsidian section filled — the rest of the sections come from
+// DEFAULT_SETTINGS' own empty maps.
+function baseData(obsidian: Record<string, unknown>): unknown {
+  return { schemaVersion: 3, items: itemsIn({ obsidian: obsidian as Record<string, Item> }), remotes: [], bratIndex: {} };
 }
 
 describe("SyncCenterHost.computeStatuses — a device-scope-excluded item still gets a row (C-#24)", () => {
@@ -44,7 +48,7 @@ describe("SyncCenterHost.computeStatuses — a device-scope-excluded item still 
       app: unknown;
       loadData: () => Promise<unknown>;
       loadSettings: () => Promise<void>;
-      recompile: () => Promise<void>;
+      recompile: () => Promise<boolean>;
       syncCenterHost: () => {
         computeStatuses: () => Promise<{ groups: SyncGroup[]; statuses: GroupStatus[]; availability: Record<string, Availability> }>;
       };
@@ -52,7 +56,7 @@ describe("SyncCenterHost.computeStatuses — a device-scope-excluded item still 
     instance.app = fakeApp();
     instance.loadData = async () =>
       baseData({
-        hotkeys: { enabled: true, settingsFile: { fileRule: { scope: "mobile", encrypted: false }, mode: "plain", rules: {}, perItem: {} }, companions: [] },
+        hotkeys: { enabled: true, settingsFile: { fileRule: { sharing: perClass("mobile"), encrypted: false }, mode: "plain", rules: {}, perElement: {} }, companions: [] },
       });
     await instance.loadSettings();
     await instance.recompile();
@@ -72,13 +76,13 @@ describe("SyncCenterHost.computeStatuses — a device-scope-excluded item still 
       app: unknown;
       loadData: () => Promise<unknown>;
       loadSettings: () => Promise<void>;
-      recompile: () => Promise<void>;
+      recompile: () => Promise<boolean>;
       syncCenterHost: () => {
         computeStatuses: () => Promise<{ groups: SyncGroup[]; statuses: GroupStatus[]; availability: Record<string, Availability> }>;
       };
     };
     instance.app = fakeApp();
-    instance.loadData = async () => baseData({ hotkeys: { enabled: true, settingsFile: { mode: "plain", rules: {}, perItem: {} }, companions: [] } });
+    instance.loadData = async () => baseData({ hotkeys: { enabled: true, settingsFile: { mode: "plain", rules: {}, perElement: {} }, companions: [] } });
     await instance.loadSettings();
     await instance.recompile();
 
@@ -90,29 +94,29 @@ describe("SyncCenterHost.computeStatuses — a device-scope-excluded item still 
     expect(statuses.find((s) => s.group === "hotkeys")?.state).toBe("no-settings");
   });
 
-  // C-#24 fix round 2: the real Settings-sync menu write path (setItemFileScope), driven end to
+  // C-#24 fix round 2: the real Settings-sync menu write path (setItemFileSharing), driven end to
   // end through saveSettings' own recompile — never a hand-built settings shape — feeding the
   // resulting compiled group straight into groupExcludedHere, the same call computeFateInput makes.
-  it("the real setItemFileScope('hotkeys','mobile') write path compiles a group groupExcludedHere reads true", async () => {
+  it("the real setItemFileSharing('hotkeys','mobile') write path compiles a group groupExcludedHere reads true", async () => {
     const plugin = new ConfigSyncPlugin({} as never, {} as never);
     const instance = plugin as unknown as {
       app: unknown;
       loadData: () => Promise<unknown>;
       saveData: (d: unknown) => Promise<void>;
       loadSettings: () => Promise<void>;
-      recompile: () => Promise<void>;
-      setItemFileScope: (itemId: string, scope: Exclude<RuleScope, "local">) => Promise<void>;
+      recompile: () => Promise<boolean>;
+      setItemFileSharing: (ref: ItemRef, sharing: FileSharing) => Promise<void>;
       syncCenterHost: () => {
         computeStatuses: () => Promise<{ groups: SyncGroup[]; statuses: GroupStatus[]; availability: Record<string, Availability> }>;
       };
     };
     instance.app = fakeApp();
-    instance.loadData = async () => baseData({ hotkeys: { enabled: true, settingsFile: { mode: "plain", rules: {}, perItem: {} }, companions: [] } });
+    instance.loadData = async () => baseData({ hotkeys: { enabled: true, settingsFile: { mode: "plain", rules: {}, perElement: {} }, companions: [] } });
     instance.saveData = async () => {};
     await instance.loadSettings();
     await instance.recompile();
 
-    await instance.setItemFileScope("hotkeys", "mobile");
+    await instance.setItemFileSharing("obsidian/hotkeys", perClass("mobile"));
 
     const { groups } = await instance.syncCenterHost().computeStatuses();
     const hotkeysGroup = groups.find((g) => g.name === "hotkeys");
@@ -122,19 +126,19 @@ describe("SyncCenterHost.computeStatuses — a device-scope-excluded item still 
 });
 
 // C-#25/C-#26 (docs/superpowers/specs/2026-08-09-c-livetest-batch12-fields-honesty.md): the live
-// repro was setItemFileScope resolving without error on a fields-mode item while persisting
+// repro was setItemFileSharing resolving without error on a fields-mode item while persisting
 // nothing (deriveMode stripped the just-written fileRule at the old main.ts:1350) — the item's
 // card no longer offers that menu at all (SyncCenterView's renderSettingsSyncRow), but the API
 // itself must also refuse the write outright rather than silently no-op for any other caller.
-describe("setItemFileScope — fields-mode guard (C-#25) + write-back pruning (C-#26)", () => {
+describe("setItemFileSharing — fields-mode guard (C-#25) + write-back pruning (C-#26)", () => {
   type Harness = {
     app: unknown;
-    settings: { items: Record<string, { settingsFile?: { fileRule?: { scope: string; encrypted: boolean } } }> };
+    settings: { items: { obsidian: Record<string, { settingsFile?: { fileRule?: { sharing: FileSharing; encrypted: boolean } } }> } };
     loadData: () => Promise<unknown>;
     saveData: (d: unknown) => Promise<void>;
     loadSettings: () => Promise<void>;
-    recompile: () => Promise<void>;
-    setItemFileScope: (itemId: string, scope: Exclude<RuleScope, "local">) => Promise<void>;
+    recompile: () => Promise<boolean>;
+    setItemFileSharing: (ref: ItemRef, sharing: FileSharing) => Promise<void>;
   };
 
   function harness(items: Record<string, unknown>): Harness {
@@ -147,46 +151,46 @@ describe("setItemFileScope — fields-mode guard (C-#25) + write-back pruning (C
   }
 
   it("throws (never silently no-ops) writing to a fields-mode item", async () => {
-    const instance = harness({ hotkeys: { enabled: true, settingsFile: { mode: "fields", rules: { a: { scope: "all", encrypted: false } }, perItem: {} }, companions: [] } });
+    const instance = harness({ hotkeys: { enabled: true, settingsFile: { mode: "fields", rules: { a: { sharing: EVERYWHERE, encrypted: false } }, perElement: {} }, companions: [] } });
     await instance.loadSettings();
     await instance.recompile();
 
-    await expect(instance.setItemFileScope("hotkeys", "desktop")).rejects.toThrow();
+    await expect(instance.setItemFileSharing("obsidian/hotkeys", perClass("desktop"))).rejects.toThrow();
     // the field-rule content is untouched — the rejected write left no trace
-    expect(instance.settings.items["hotkeys"]?.settingsFile?.fileRule).toBeUndefined();
+    expect(instance.settings.items.obsidian["hotkeys"]?.settingsFile?.fileRule).toBeUndefined();
   });
 
   it("plain-mode item: the write succeeds", async () => {
-    const instance = harness({ hotkeys: { enabled: true, settingsFile: { mode: "plain", rules: {}, perItem: {} }, companions: [] } });
+    const instance = harness({ hotkeys: { enabled: true, settingsFile: { mode: "plain", rules: {}, perElement: {} }, companions: [] } });
     await instance.loadSettings();
     await instance.recompile();
 
-    await instance.setItemFileScope("hotkeys", "desktop");
+    await instance.setItemFileSharing("obsidian/hotkeys", perClass("desktop"));
 
-    expect(instance.settings.items["hotkeys"]?.settingsFile?.fileRule).toEqual({ scope: "desktop", encrypted: false });
+    expect(instance.settings.items.obsidian["hotkeys"]?.settingsFile?.fileRule).toEqual({ sharing: perClass("desktop"), encrypted: false });
   });
 
   it("desktop -> all round-trip prunes the fileRule and the settingsFile entirely (byte-clean)", async () => {
-    const instance = harness({ hotkeys: { enabled: true, settingsFile: { mode: "plain", rules: {}, perItem: {} }, companions: [] } });
+    const instance = harness({ hotkeys: { enabled: true, settingsFile: { mode: "plain", rules: {}, perElement: {} }, companions: [] } });
     await instance.loadSettings();
     await instance.recompile();
 
-    await instance.setItemFileScope("hotkeys", "desktop");
-    expect(instance.settings.items["hotkeys"]?.settingsFile?.fileRule).toEqual({ scope: "desktop", encrypted: false });
+    await instance.setItemFileSharing("obsidian/hotkeys", perClass("desktop"));
+    expect(instance.settings.items.obsidian["hotkeys"]?.settingsFile?.fileRule).toEqual({ sharing: perClass("desktop"), encrypted: false });
 
-    await instance.setItemFileScope("hotkeys", "all");
-    expect(instance.settings.items["hotkeys"]?.settingsFile).toBeUndefined();
+    await instance.setItemFileSharing("obsidian/hotkeys", EVERYWHERE);
+    expect(instance.settings.items.obsidian["hotkeys"]?.settingsFile).toBeUndefined();
   });
 
   it("an encrypted fileRule survives a scope write instead of being pruned", async () => {
     const instance = harness({
-      hotkeys: { enabled: true, settingsFile: { mode: "plain", rules: {}, perItem: {}, fileRule: { scope: "desktop", encrypted: true } }, companions: [] },
+      hotkeys: { enabled: true, settingsFile: { mode: "plain", rules: {}, perElement: {}, fileRule: { sharing: perClass("desktop"), encrypted: true } }, companions: [] },
     });
     await instance.loadSettings();
     await instance.recompile();
 
-    await instance.setItemFileScope("hotkeys", "all");
+    await instance.setItemFileSharing("obsidian/hotkeys", EVERYWHERE);
 
-    expect(instance.settings.items["hotkeys"]?.settingsFile?.fileRule).toEqual({ scope: "all", encrypted: true });
+    expect(instance.settings.items.obsidian["hotkeys"]?.settingsFile?.fileRule).toEqual({ sharing: EVERYWHERE, encrypted: true });
   });
 });

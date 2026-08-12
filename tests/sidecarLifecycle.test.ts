@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { capture, CoreContext } from "../src/core/ConfigSyncCore";
-import { SyncGroup } from "../src/core/types";
+import { SyncGroup, THIS_DEVICE, perClass } from "../src/core/types";
 import { MemFS, FakePlugins, memGroupsIO } from "./memfs";
 
 // Regression for the capture base-hygiene bug (2026-07-25): a fresh class rule on a fields-mode
@@ -15,7 +15,7 @@ describe("capture sidecar lifecycle: base-hygiene for class keys", () => {
     type: "file",
     devices: "all",
     mode: "fields",
-    fields: [{ pattern: "userIgnoreFilters", scope: "desktop", encrypted: false }],
+    fields: [{ pattern: "userIgnoreFilters", sharing: perClass("desktop"), encrypted: false }],
   };
 
   function setup(): { io: MemFS; ctx: CoreContext } {
@@ -98,7 +98,7 @@ describe("capture base-hygiene for top-level local keys", () => {
     type: "file",
     devices: "all",
     mode: "fields",
-    fields: [{ pattern: "userIgnoreFilters", scope: "local", encrypted: false }],
+    fields: [{ pattern: "userIgnoreFilters", sharing: THIS_DEVICE, encrypted: false }],
   };
 
   function setup(): { io: MemFS; ctx: CoreContext } {

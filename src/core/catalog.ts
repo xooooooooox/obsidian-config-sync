@@ -1,13 +1,13 @@
 import { PluginHost } from "./ConfigSyncCore";
 import { FileIO } from "./io";
-import { FieldRule, StoreLock, SyncGroup } from "./types";
+import { FieldRule, itemRef, ItemRef, StorageSection, SyncGroup, THIS_DEVICE } from "./types";
 
 export interface CatalogItem {
   name: string;
   label: string;
   description: string | null;
   path: string;
-  type: "file" | "dir";
+  type: "file" | "folder";
   exists: boolean;
   disabledReason: string | null;
   cautionReason: string | null;
@@ -24,12 +24,12 @@ export interface CatalogSection {
 const HIDDEN_FILES = new Set(["core-plugins-migration.json"]);
 const HIDDEN_DIRS = new Set(["plugins", "config-sync-backup"]); // config-sync's own working dirs — never syncable
 
-export const OPTION_LABELS: Record<string, { label: string; description: string; type: "file" | "dir" }> = {
+export const OPTION_LABELS: Record<string, { label: string; description: string; type: "file" | "folder" }> = {
   "app.json": { label: "App settings", description: "Editing, new-note and link behavior, and other general options.", type: "file" },
   "appearance.json": { label: "Appearance", description: "Theme choice, fonts and interface appearance.", type: "file" },
   "hotkeys.json": { label: "Hotkeys", description: "Your custom keyboard shortcuts.", type: "file" },
-  themes: { label: "Themes", description: "Installed theme files.", type: "dir" },
-  snippets: { label: "CSS snippets", description: "Your CSS snippets.", type: "dir" },
+  themes: { label: "Themes", description: "Installed theme files.", type: "folder" },
+  snippets: { label: "CSS snippets", description: "Your CSS snippets.", type: "folder" },
 };
 
 // The ONLY core plugin whose settings file is not `${id}.json`.
@@ -69,17 +69,43 @@ export function optionReservedName(file: string): string {
   return file.endsWith(".json") ? file.slice(0, -".json".length) : file;
 }
 
+// THE one place the `plugin-` group-name prefix is written (registry.ts's buildItemDefs and the
+// two catalog listings below all call it). It is lineage, not taxonomy: the item's section already
+// says "community", and the prefix survives only because the group name is the store lock's and
+// the baselines' key until spec §3 re-keys them (task 3).
+export function communityGroupName(pluginId: string): string {
+  return `plugin-${pluginId}`;
+}
+
 export function reservedNames(pluginIds: string[]): Set<string> {
   const names = new Set<string>();
   for (const file of Object.keys(OPTION_LABELS)) names.add(optionReservedName(file));
   for (const id of coreSettingsIds()) names.add(id);
-  for (const id of pluginIds) names.add(`plugin-${id}`);
+  for (const id of pluginIds) names.add(communityGroupName(id));
   return names;
 }
 
+// The `plugin-` prefix survives in this file, in five name-reading helpers: expectedPathForName,
+// defaultGroupForName, pluginGroupItems, sectionForGroup and displayLabelForGroup.
+//
+// Task 3 closed every parse whose reason was "the lock is keyed by a name, so there is no ref to
+// look up" — the lock, the baselines and the opt-out list all speak ItemRefs now, and with them
+// went the parses in ConfigSyncCore (capture's label resolver, backfillLockLabels,
+// orderInstallsCatalogFirst), availability.ts (desktopOnlyPluginIds), this file's own
+// carrierMemberKey, SettingTab's isManagedGroup and the Sync Center's carrierElementFor /
+// itemSectionOf / enablementCarrierFor.
+//
+// These five are NOT that case, and no task on this branch closes them — task 4 owns the search
+// vocabulary and the docs, not this module's shape, so saying "a later task" would be a promise
+// nobody has made. What keeps them: they are asked by NAME by the settings catalog (a picker row,
+// a discovered file, a store-only group with no item anywhere), this module is `core` and must not
+// depend on the registry (registry.ts imports catalog.ts, so the arrow points one way only), and
+// they answer for names the registry never produces. Closing them means giving the settings
+// catalog the same row identity the Sync Center now has — a real change of shape, worth its own
+// design rather than a rider on a re-key.
 export function expectedPathForName(name: string): string | null {
   for (const [file, meta] of Object.entries(OPTION_LABELS)) {
-    if (optionReservedName(file) === name) return `{configDir}/${meta.type === "dir" ? name : file}`;
+    if (optionReservedName(file) === name) return `{configDir}/${meta.type === "folder" ? name : file}`;
   }
   if (name.startsWith("plugin-")) return `{configDir}/plugins/${name.slice("plugin-".length)}/data.json`;
   if (coreSettingsIds().has(name)) return `{configDir}/${corePluginFile(name)}`;
@@ -91,7 +117,7 @@ export function defaultGroupForName(name: string): SyncGroup | null {
     if (optionReservedName(file) === name) {
       return {
         name,
-        path: `{configDir}/${meta.type === "dir" ? name : file}`,
+        path: `{configDir}/${meta.type === "folder" ? name : file}`,
         type: meta.type,
         devices: "all",
         description: meta.description,
@@ -169,7 +195,7 @@ export async function listOptionSections(io: FileIO, configDir: string, _groups:
   for (const [file, meta] of Object.entries(OPTION_LABELS)) {
     if (SWITCH_LISTS.has(file)) continue; // switch lists live in Core/Community tabs
     covered.add(file);
-    const isDir = meta.type === "dir";
+    const isDir = meta.type === "folder";
     const present = isDir ? dirs.has(file) : files.has(file);
     const item: CatalogItem = {
       name: optionReservedName(file),
@@ -192,7 +218,7 @@ export async function listOptionSections(io: FileIO, configDir: string, _groups:
   }
   for (const b of [...dirs].sort()) {
     if (covered.has(b) || HIDDEN_DIRS.has(b)) continue;
-    available.push({ name: b, label: `${b}/`, description: null, path: `{configDir}/${b}`, type: "dir", exists: true, disabledReason: null, cautionReason: null });
+    available.push({ name: b, label: `${b}/`, description: null, path: `{configDir}/${b}`, type: "folder", exists: true, disabledReason: null, cautionReason: null });
     covered.add(b);
   }
 
@@ -273,7 +299,7 @@ export async function listPluginSections(
   for (const p of [...plugins].sort((a, b) => a.name.localeCompare(b.name))) {
     if (betaIds.has(p.id)) continue; // BRAT-managed → Beta tab
     const item: CatalogItem = {
-      name: `plugin-${p.id}`,
+      name: communityGroupName(p.id),
       label: p.name,
       description: `Settings of ${p.id}.`,
       path: `{configDir}/plugins/${p.id}/data.json`,
@@ -311,7 +337,7 @@ export async function listBetaSections(
   for (const p of [...plugins].sort((a, b) => a.name.localeCompare(b.name))) {
     if (index[p.id] === undefined) continue;
     const item: CatalogItem = {
-      name: `plugin-${p.id}`,
+      name: communityGroupName(p.id),
       label: p.name,
       description: describe(p.id),
       path: `{configDir}/plugins/${p.id}/data.json`,
@@ -331,18 +357,23 @@ export async function listBetaSections(
   ];
 }
 
-// The plugin's own sync item — its store copy carries the whole sync contract, so it ships
-// locked strip presets for the device-local fields (Part 2 — self-propagation).
+// The plugin's own sync item. Its IDENTITY is the item ref below — config-sync is a community
+// plugin like any other, and the registry builds its def from the running Obsidian's plugin list.
+// SELF_GROUP_NAME is that def's compiled group name, which is also the store path key and the
+// lock key, so it stays exactly what v2 produced.
+export const SELF_ITEM_SECTION = "community" as const;
+export const SELF_ITEM_ID = "config-sync";
+export const SELF_ITEM_REF: ItemRef = itemRef(SELF_ITEM_SECTION, SELF_ITEM_ID);
 export const SELF_GROUP_NAME = "plugin-config-sync";
 
-// Schema v2 (spec §6) has no memberScopes/memberLocal/switchExceptions settings fields any
-// more — per-item scope now lives inside `items`, which travels as part of the whole shared
-// sync contract. Only the genuinely device-local top-level fields stay local-only.
+// The self item's store copy carries the whole sync contract, so it ships locked strip presets for
+// the transport wiring — the fields that describe THIS device's connection to the store and must
+// never travel (spec §2). Everything else in the document is the shared contract and does travel.
 export function selfPresetRules(): FieldRule[] {
   return [
-    { pattern: "rootPath", scope: "local", encrypted: false, locked: true },
-    { pattern: "remotes", scope: "local", encrypted: false, locked: true },
-    { pattern: "localMembers", scope: "local", encrypted: false, locked: true },
+    { pattern: "rootPath", sharing: THIS_DEVICE, encrypted: false, locked: true },
+    { pattern: "remotes", sharing: THIS_DEVICE, encrypted: false, locked: true },
+    { pattern: "thisDeviceItems", sharing: THIS_DEVICE, encrypted: false, locked: true },
   ];
 }
 
@@ -355,8 +386,8 @@ export function selfPresetRules(): FieldRule[] {
 // feeds both adoptConfiguration's apply and the self item's status/diff compare — calls this same
 // function instead of reimplementing the merge, so a field is excluded from adopt if and only if
 // it is excluded from compare. Every top-level settings field NOT covered by selfPresetRules()
-// (e.g. bratPluginIndex, memberRules, items, customGroups) is therefore imported by adopt exactly
-// when it participates in the compare — never silently dropped by one side only.
+// (e.g. bratIndex, items) is therefore imported by adopt exactly when it participates in the
+// compare — never silently dropped by one side only.
 export function mergePresetFields(existing: FieldRule[]): FieldRule[] {
   const presets = selfPresetRules();
   const presetPatterns = new Set(presets.map((p) => p.pattern));
@@ -364,7 +395,7 @@ export function mergePresetFields(existing: FieldRule[]): FieldRule[] {
   return [...presets, ...rest];
 }
 
-export function groupForItem(name: string, path: string, type: "file" | "dir", description: string | null, label?: string): SyncGroup {
+export function groupForItem(name: string, path: string, type: "file" | "folder", description: string | null, label?: string): SyncGroup {
   const group: SyncGroup = { name, path, type, devices: "all" };
   if (description !== null) group.description = description;
   if (label !== undefined && label.trim() !== "") group.label = label.trim();
@@ -386,7 +417,7 @@ export function ensureSelfPresets(groups: SyncGroup[]): SyncGroup[] {
 }
 
 export function appearancePresetRules(): FieldRule[] {
-  return [{ pattern: "enabledCssSnippets", scope: "local", encrypted: false, locked: true }];
+  return [{ pattern: "enabledCssSnippets", sharing: THIS_DEVICE, encrypted: false, locked: true }];
 }
 
 // When the enabled-css-snippets switch list is active, the appearance group (reserved name
@@ -426,16 +457,15 @@ export function joinLocation(location: "config" | "vault", rel: string): string 
   return location === "config" ? `{configDir}/${rel}` : rel;
 }
 
-export type ItemCategory = "obsidian" | "core" | "community" | "custom";
 
-export const CATEGORY_LABELS: Record<ItemCategory, string> = {
+export const SECTION_LABELS: Record<StorageSection, string> = {
   obsidian: "Obsidian",
   core: "Core plugins",
   community: "Community plugins",
   custom: "Custom",
 };
 
-export function categoryForGroup(name: string): ItemCategory {
+export function sectionForGroup(name: string): StorageSection {
   // The enabled-css-snippets switch list is synthesized from appearance.json (see
   // listOptionSections) rather than being an OPTION_LABELS entry, so it has no reserved-name
   // match below. It still belongs to the Obsidian settings tab — pin it there explicitly so the
@@ -477,23 +507,9 @@ export function displayLabelForGroup(name: string, plugins: PluginHost, storedLa
 //
 // A `plugin-<id>` / core-settings-id group with none of the above (2026-08-09-c-livetest-batch15:
 // a pure on/off-list member, never individually synced, so it has no lock entry of its own) falls
-// through one more step to its carrier's memberLabels[id] before returning undefined — the caller
+// through one more step to its carrier's element name for that id before returning undefined — the caller
 // (displayLabelForGroup) supplies the final bare-id fallback, so this function itself never
 // returns the id.
-export function resolveHostStoredLabel(group: string, explicit: string | undefined, lastGroups: SyncGroup[] | null, lastLock: StoreLock | null): string | undefined {
-  const own = explicit ?? lastGroups?.find((g) => g.name === group)?.label ?? lastLock?.groups[group]?.label;
-  if (own !== undefined) return own;
-  const key = carrierMemberKey(group);
-  return key === null ? undefined : lastLock?.groups[key.carrier]?.memberLabels?.[key.id];
-}
-
-// group -> {carrier, id} for the memberLabels fallback above: community items compile as
-// `plugin-<id>` under the community-plugins carrier; a bare core-settings id IS its own core-
-// plugins carrier element (mirrors panelModel.ts's enablementCarrierFor split — kept local here
-// instead of imported, since catalog.ts is core and enablementCarrierFor lives in the ui layer;
-// the two must never drift on this split).
-function carrierMemberKey(group: string): { carrier: "community-plugins" | "core-plugins"; id: string } | null {
-  if (group.startsWith("plugin-")) return { carrier: "community-plugins", id: group.slice("plugin-".length) };
-  if (coreSettingsIds().has(group)) return { carrier: "core-plugins", id: group };
-  return null;
-}
+// resolveHostStoredLabel used to live here; it moved to lockLabels.ts when the lock became keyed by
+// item ref, because reading a v3 entry needs manifest.ts's accessors and this module sits below
+// them. displayLabelForGroup above is the other half of that chain and stays here.

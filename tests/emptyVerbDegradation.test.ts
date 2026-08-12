@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { withRef } from "./lock";
 import { SyncCenterView } from "../src/ui/SyncCenterView";
 import { SyncGroup } from "../src/core/types";
 import { GroupStatus } from "../src/core/status";
@@ -29,8 +30,11 @@ function harness(opts: {
 }): Harness {
   const host = {
     companionParentOf: opts.companionParentOf ?? (() => null),
-    memberRuleFor: opts.memberRuleFor ?? (() => "all"),
+    runsOnFor: opts.memberRuleFor ?? (() => "all"),
     deviceOptedOut: () => false,
+    // No registry behind these harnesses: the view falls back to the same legacy rules a v1/v2
+    // lock read uses, which is exactly what a store-only row gets in production.
+    itemRefForGroup: () => null,
   };
   const view = new SyncCenterView({} as never, host as never);
   const instance = view as unknown as Harness;
@@ -41,11 +45,11 @@ function harness(opts: {
 }
 
 function fileGroup(name: string): SyncGroup {
-  return { name, path: name, type: "file", devices: "all" };
+  return withRef({ name, path: name, type: "file", devices: "all" });
 }
 
 function dirGroup(name: string): SyncGroup {
-  return { name, path: name, type: "dir", devices: "all" };
+  return { name, path: name, type: "folder", devices: "all" };
 }
 
 describe("deriveRow — empty-verb degradation, integration (C-#28, review round 2)", () => {

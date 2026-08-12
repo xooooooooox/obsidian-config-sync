@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { capturePerItemArray, applyPerItemArray } from "../src/core/perItem";
+import { capturePerElementArray, applyPerElementArray } from "../src/core/perElement";
 import { captureTransform, applyTransform, contentUnchanged } from "../src/core/modes";
 import { validateSyncManifest, ManifestValidationError } from "../src/core/manifest";
-import { PerItemScopes, SyncGroup } from "../src/core/types";
+import { PerElementSharing, perClass, SyncGroup, EVERYWHERE, THIS_DEVICE } from "../src/core/types";
 import { capture, CoreContext, writeGroups } from "../src/core/ConfigSyncCore";
 import { MemFS, FakePlugins, memGroupsIO } from "./memfs";
 
@@ -11,20 +11,20 @@ import { MemFS, FakePlugins, memGroupsIO } from "./memfs";
 // order) ++ store[scope=otherClass(c)] (store order), deduped first-occurrence-wins.
 // apply(c) = store[scope∈{all,c}] (store order) ++ local[scope=local] (local order), deduped.
 
-describe("capturePerItemArray", () => {
+describe("capturePerElementArray", () => {
   it.each(["desktop", "mobile"] as const)("%s: all/own/other/local elements land per formula, stale local-scoped store element dropped", (cls) => {
     const other = cls === "desktop" ? "mobile" : "desktop";
-    const scopes: PerItemScopes = {
-      "own-item": cls,
-      "other-item": other,
-      "local-item": "local",
-      "other-store-item": other,
-      "stale-local-item": "local",
+    const scopes: PerElementSharing = {
+      "own-item": perClass(cls),
+      "other-item": perClass(other),
+      "local-item": THIS_DEVICE,
+      "other-store-item": perClass(other),
+      "stale-local-item": THIS_DEVICE,
     };
     const local = ["all-item", "own-item", "other-item", "local-item"];
     const store = ["all-item", "other-store-item", "stale-local-item"];
 
-    const result = capturePerItemArray(local, store, scopes, cls);
+    const result = capturePerElementArray(local, store, scopes, cls);
 
     // fromLocal: all-item (default "all"), own-item (scope=cls) — local order.
     // fromStore: other-store-item (scope=other) — store order. other-item/local-item/
@@ -33,29 +33,29 @@ describe("capturePerItemArray", () => {
   });
 
   it("dedupes local duplicates, first occurrence wins", () => {
-    const result = capturePerItemArray(["x", "x", "y"], [], {}, "desktop");
+    const result = capturePerElementArray(["x", "x", "y"], [], {}, "desktop");
     expect(result).toEqual(["x", "y"]);
   });
 
   it("first capture (empty store) includes only local all/own elements", () => {
-    const scopes: PerItemScopes = { "mobile-only": "mobile" };
-    const result = capturePerItemArray(["shared", "mobile-only"], [], scopes, "desktop");
+    const scopes: PerElementSharing = { "mobile-only": perClass("mobile") };
+    const result = capturePerElementArray(["shared", "mobile-only"], [], scopes, "desktop");
     expect(result).toEqual(["shared"]);
   });
 });
 
-describe("applyPerItemArray", () => {
+describe("applyPerElementArray", () => {
   it.each(["desktop", "mobile"] as const)("%s: store all/own elements plus local-only local-scoped elements", (cls) => {
     const other = cls === "desktop" ? "mobile" : "desktop";
-    const scopes: PerItemScopes = {
-      "own-item": cls,
-      "other-item": other,
-      "local-thing": "local",
+    const scopes: PerElementSharing = {
+      "own-item": perClass(cls),
+      "other-item": perClass(other),
+      "local-thing": THIS_DEVICE,
     };
     const store = ["all-item", "own-item", "other-item"];
     const local = ["local-thing", "all-item"];
 
-    const result = applyPerItemArray(store, local, scopes, cls);
+    const result = applyPerElementArray(store, local, scopes, cls);
 
     // fromStore: all-item, own-item (other-item excluded — wrong scope). fromLocal: local-thing
     // (all-item excluded — its scope is "all", not "local").
@@ -63,13 +63,13 @@ describe("applyPerItemArray", () => {
   });
 
   it("dedupes, first occurrence wins", () => {
-    const result = applyPerItemArray(["x", "x"], ["y"], {}, "desktop");
+    const result = applyPerElementArray(["x", "x"], ["y"], {}, "desktop");
     expect(result).toEqual(["x"]);
   });
 
   it("no local file yet: result is store's all/own elements only", () => {
-    const scopes: PerItemScopes = { "mobile-only": "mobile" };
-    const result = applyPerItemArray(["shared", "mobile-only"], [], scopes, "desktop");
+    const scopes: PerElementSharing = { "mobile-only": perClass("mobile") };
+    const result = applyPerElementArray(["shared", "mobile-only"], [], scopes, "desktop");
     expect(result).toEqual(["shared"]);
   });
 });
@@ -77,17 +77,17 @@ describe("applyPerItemArray", () => {
 describe("capture ∘ apply ∘ capture idempotence", () => {
   it.each(["desktop", "mobile"] as const)("%s: a second capture/apply cycle reproduces the same store array", (cls) => {
     const other = cls === "desktop" ? "mobile" : "desktop";
-    const scopes: PerItemScopes = {
-      "own-item": cls,
-      "other-item": other,
-      "local-item": "local",
+    const scopes: PerElementSharing = {
+      "own-item": perClass(cls),
+      "other-item": perClass(other),
+      "local-item": THIS_DEVICE,
     };
     const local = ["all-item", "own-item", "local-item"];
     const store = ["all-item", "other-item"];
 
-    const store1 = capturePerItemArray(local, store, scopes, cls);
-    const local2 = applyPerItemArray(store1, local, scopes, cls);
-    const store2 = capturePerItemArray(local2, store1, scopes, cls);
+    const store1 = capturePerElementArray(local, store, scopes, cls);
+    const local2 = applyPerElementArray(store1, local, scopes, cls);
+    const store2 = capturePerElementArray(local2, store1, scopes, cls);
 
     expect(store2).toEqual(store1);
   });
@@ -95,7 +95,7 @@ describe("capture ∘ apply ∘ capture idempotence", () => {
 
 // --- Wiring: fields-mode captureTransform/applyTransform/contentUnchanged -------------------
 
-function fieldsGroup(perItem: Record<string, PerItemScopes>, extraFields: SyncGroup["fields"] = []): SyncGroup {
+function fieldsGroup(perElement: Record<string, PerElementSharing>, extraFields: SyncGroup["fields"] = []): SyncGroup {
   return {
     name: "app",
     path: "{configDir}/app.json",
@@ -103,13 +103,13 @@ function fieldsGroup(perItem: Record<string, PerItemScopes>, extraFields: SyncGr
     devices: "all",
     mode: "fields",
     fields: extraFields,
-    perItem,
+    perElement,
   };
 }
 
 describe("captureTransform — perItem wiring", () => {
   it("merges local all/own elements with prior store's other-class elements for the listed key", async () => {
-    const group = fieldsGroup({ tags: { "mobile-tag": "mobile" } });
+    const group = fieldsGroup({ tags: { "mobile-tag": perClass("mobile") } });
     const local = JSON.stringify({ tags: ["shared-tag"], other: "unrelated" });
     const store = JSON.stringify({ tags: ["mobile-tag"], other: "stale" });
     const t = await captureTransform(group, local, null, "desktop", store);
@@ -119,7 +119,7 @@ describe("captureTransform — perItem wiring", () => {
   });
 
   it("first capture (no prior store) drops other-class elements", async () => {
-    const group = fieldsGroup({ tags: { "mobile-tag": "mobile" } });
+    const group = fieldsGroup({ tags: { "mobile-tag": perClass("mobile") } });
     const local = JSON.stringify({ tags: ["shared-tag", "mobile-tag"] });
     const t = await captureTransform(group, local, null, "desktop", null);
     const parsed = JSON.parse(t.content) as { tags: string[] };
@@ -145,13 +145,13 @@ describe("applyTransform — perItem wiring", () => {
     const local = JSON.stringify({ tags: ["local-only-tag"], other: "from-local" });
     // "local-only-tag" needs an explicit "local" scope entry — an absent entry defaults to
     // "all" and would not survive apply unless the store also carried it.
-    const group = fieldsGroup({ tags: { "mobile-tag": "mobile", "local-only-tag": "local" } });
+    const group = fieldsGroup({ tags: { "mobile-tag": perClass("mobile"), "local-only-tag": THIS_DEVICE } });
     const out = JSON.parse(await applyTransform(group, store, local, null, "desktop", null)) as { tags: string[] };
     expect(out.tags).toEqual(["shared-tag", "local-only-tag"]);
   });
 
   it("no local file yet: result is store's all/own elements only", async () => {
-    const group = fieldsGroup({ tags: { "mobile-tag": "mobile" } });
+    const group = fieldsGroup({ tags: { "mobile-tag": perClass("mobile") } });
     const store = JSON.stringify({ tags: ["shared-tag", "mobile-tag"] });
     const out = JSON.parse(await applyTransform(group, store, null, null, "desktop", null)) as { tags: string[] };
     expect(out.tags).toEqual(["shared-tag"]);
@@ -160,21 +160,21 @@ describe("applyTransform — perItem wiring", () => {
 
 describe("contentUnchanged — perItem symmetry", () => {
   it("ignores an other-class element present in store but absent locally", async () => {
-    const group = fieldsGroup({ tags: { "mobile-tag": "mobile" } });
+    const group = fieldsGroup({ tags: { "mobile-tag": perClass("mobile") } });
     const local = JSON.stringify({ tags: ["shared-tag"] });
     const store = JSON.stringify({ tags: ["shared-tag", "mobile-tag"] });
     expect(await contentUnchanged(group, local, store, null, "desktop", null)).toBe(true);
   });
 
   it("still detects a real difference in the all/own portion", async () => {
-    const group = fieldsGroup({ tags: { "mobile-tag": "mobile" } });
+    const group = fieldsGroup({ tags: { "mobile-tag": perClass("mobile") } });
     const local = JSON.stringify({ tags: ["shared-tag"] });
     const store = JSON.stringify({ tags: ["shared-tag", "another-shared-tag", "mobile-tag"] });
     expect(await contentUnchanged(group, local, store, null, "desktop", null)).toBe(false);
   });
 
   it("mobile device symmetrically ignores desktop-only elements", async () => {
-    const group = fieldsGroup({ tags: { "desktop-tag": "desktop" } });
+    const group = fieldsGroup({ tags: { "desktop-tag": perClass("desktop") } });
     const local = JSON.stringify({ tags: ["shared-tag"] });
     const store = JSON.stringify({ tags: ["shared-tag", "desktop-tag"] });
     expect(await contentUnchanged(group, local, store, null, "mobile", null)).toBe(true);
@@ -189,9 +189,9 @@ describe("manifest validation — perItem", () => {
   it("accepts a valid perItem map alongside mode:fields", () => {
     const m = validateSyncManifest({
       version: 1,
-      groups: [{ ...BASE, mode: "fields", fields: [], perItem: { tags: { "mobile-tag": "mobile" } } }],
+      groups: [{ ...BASE, mode: "fields", fields: [], perElement: { tags: { "mobile-tag": perClass("mobile") } } }],
     });
-    expect(m.groups[0]?.perItem).toEqual({ tags: { "mobile-tag": "mobile" } });
+    expect(m.groups[0]?.perElement).toEqual({ tags: { "mobile-tag": perClass("mobile") } });
   });
 
   it("rejects perItem on a key that also has encrypted:true in its field rule", () => {
@@ -202,8 +202,8 @@ describe("manifest validation — perItem", () => {
           {
             ...BASE,
             mode: "fields",
-            fields: [{ pattern: "tags", scope: "all", encrypted: true }],
-            perItem: { tags: { "mobile-tag": "mobile" } },
+            fields: [{ pattern: "tags", sharing: EVERYWHERE, encrypted: true }],
+            perElement: { tags: { "mobile-tag": perClass("mobile") } },
           },
         ],
       })
@@ -214,7 +214,7 @@ describe("manifest validation — perItem", () => {
     expect(() =>
       validateSyncManifest({
         version: 1,
-        groups: [{ ...BASE, mode: "fields", fields: [], perItem: { tags: { "mobile-tag": "tablet" } } }],
+        groups: [{ ...BASE, mode: "fields", fields: [], perElement: { tags: { "mobile-tag": "tablet" } } }],
       })
     ).toThrow(ManifestValidationError);
   });
@@ -223,7 +223,7 @@ describe("manifest validation — perItem", () => {
     expect(() =>
       validateSyncManifest({
         version: 1,
-        groups: [{ ...BASE, perItem: { tags: { "mobile-tag": "mobile" } } }],
+        groups: [{ ...BASE, perElement: { tags: { "mobile-tag": perClass("mobile") } } }],
       })
     ).toThrow(ManifestValidationError);
   });
@@ -232,7 +232,7 @@ describe("manifest validation — perItem", () => {
     expect(() =>
       validateSyncManifest({
         version: 1,
-        groups: [{ ...BASE, mode: "fields", fields: [], perItem: { tags: ["not", "a", "map"] } }],
+        groups: [{ ...BASE, mode: "fields", fields: [], perElement: { tags: ["not", "a", "map"] } }],
       })
     ).toThrow(ManifestValidationError);
   });
@@ -251,7 +251,7 @@ describe("perItem capture through ConfigSyncCore — storeContent threading", ()
     devices: "all",
     mode: "fields",
     fields: [],
-    perItem: { list: { "desktop-item": "desktop", "mobile-item": "mobile" } },
+    perElement: { list: { "desktop-item": perClass("desktop"), "mobile-item": perClass("mobile") } },
   };
 
   function setup(deviceClass: "desktop" | "mobile"): { io: MemFS; ctx: CoreContext } {
@@ -296,11 +296,11 @@ describe("perItem capture through ConfigSyncCore — storeContent threading", ()
 });
 
 // Third extension of the baseHasStaleClassKeys/baseHasStaleDisabledSliceKeys base-hygiene
-// mechanism (smoke finding): perItemArrayUnchanged symmetrically ignores "local"-scoped elements
+// mechanism (smoke finding): perElementArrayUnchanged symmetrically ignores "local"-scoped elements
 // on both sides, so contentUnchanged can report "no change" while the store base still carries an
 // element that was re-scoped to "local" — capture would then skip the rewrite forever, and the
-// stale element keeps shipping to other devices. Live repro: appearance group, perItem:
-// {enabledCssSnippets: {"kanban-block-editor": "local"}}, base still has the snippet after
+// stale element keeps shipping to other devices. Live repro: appearance group, perElement:
+// {enabledCssSnippets: {"kanban-block-editor": THIS_DEVICE}}, base still has the snippet after
 // multiple captures.
 describe("capture base-hygiene: stale local-scoped per-item elements", () => {
   const GROUP: SyncGroup = {
@@ -310,7 +310,7 @@ describe("capture base-hygiene: stale local-scoped per-item elements", () => {
     devices: "all",
     mode: "fields",
     fields: [],
-    perItem: { list: { "local-item": "local", "mobile-item": "mobile" } },
+    perElement: { list: { "local-item": THIS_DEVICE, "mobile-item": perClass("mobile") } },
   };
 
   function setup(): { io: MemFS; ctx: CoreContext } {
@@ -383,7 +383,7 @@ describe("capture base-hygiene: stale local-scoped per-item elements", () => {
     // User re-scopes local-item back to "all" (drops its perItem entry) and re-enables it locally
     // — per-item elements live locally, so this is how it "returns": the next capture picks it
     // back up from the local file, not from the (already-purged) store.
-    ctx.groupsIO = memGroupsIO([{ ...GROUP, perItem: { list: { "mobile-item": "mobile" } } }]);
+    ctx.groupsIO = memGroupsIO([{ ...GROUP, perElement: { list: { "mobile-item": perClass("mobile") } } }]);
     await io.write(".obs/prefs.json", JSON.stringify({ list: ["shared-item", "local-item"] }));
 
     const results = await capture(ctx, ["prefs"]);

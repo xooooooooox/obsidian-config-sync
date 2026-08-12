@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import { Notice } from "obsidian";
 import ConfigSyncPlugin from "../src/main";
 
+import { Item, ItemMap } from "../src/core/registry";
+import { Ledger, LEDGER_VERSION } from "../src/core/ledger";
+import { itemsIn } from "./items";
+
 // The real "obsidian" package's Notice type (which tsc's build gate type-checks against, unlike
 // vitest's aliased tests/mock-obsidian.ts) has no `lastMessage` — this cast reaches the mock's
 // test-only static capture without lying about the real API surface anywhere else.
@@ -19,8 +23,16 @@ const NoticeSpy = Notice as unknown as { lastMessage: string | undefined };
 // access to bypass TypeScript's `private` (a compile-time-only restriction) — it is a real
 // regression test, not a mock of the behavior under test: reverting reloadSettings() back to
 // loadSettings()-only during development made it fail (see fix-round-1 report).
-function fakeApp(): unknown {
+function fakeApp(local: Map<string, string> = new Map()): unknown {
   return {
+    // reloadSettings() re-keys this device's own two localStorage stores after the compile (spec
+    // §4) — a fake App without them would fail on the read, not on anything this file is about.
+    // Stateful so the re-key can be OBSERVED, not merely tolerated (see the compile-gate test).
+    loadLocalStorage: (key: string) => local.get(key) ?? null,
+    saveLocalStorage: (key: string, value: unknown) => {
+      if (value === null || value === undefined) local.delete(key);
+      else local.set(key, value as string);
+    },
     vault: {
       adapter: { exists: async () => false },
       configDir: "config-dir", // deliberately not ".obsidian" — obsidianmd/hardcoded-config-path; the value is irrelevant here (no core/community plugin paths are touched)
@@ -36,8 +48,9 @@ function fakeApp(): unknown {
   };
 }
 
-function baseData(items: Record<string, unknown>): unknown {
-  return { schemaVersion: 2, items, remotes: [], bratPluginIndex: {} };
+// A v3 document with the named sections filled; the rest come out empty.
+function baseData(partial: Partial<Record<"obsidian" | "core" | "community" | "custom", Record<string, Item>>> = {}): unknown {
+  return { schemaVersion: 3, items: itemsIn(partial), remotes: [], bratIndex: {} };
 }
 
 describe("ConfigSyncPlugin.reloadSettings — loadSettings() must be followed by recompile()", () => {
@@ -47,7 +60,7 @@ describe("ConfigSyncPlugin.reloadSettings — loadSettings() must be followed by
       app: unknown;
       loadData: () => Promise<unknown>;
       loadSettings: () => Promise<void>;
-      recompile: () => Promise<void>;
+      recompile: () => Promise<boolean>;
       reloadSettings: () => Promise<void>;
       compiledGroups: { name: string }[];
     };
@@ -61,7 +74,7 @@ describe("ConfigSyncPlugin.reloadSettings — loadSettings() must be followed by
 
     // Simulate a self-group apply rewriting this plugin's own data.json externally (the scenario
     // in adoptConfiguration/applyItems): the self item is now enabled.
-    data = baseData({ "community:config-sync": { enabled: true, companions: [] } });
+    data = baseData({ community: { "config-sync": { enabled: true } } });
 
     // loadSettings() alone must NOT update compiledGroups — this is exactly the bug: the sync
     // list stays stale until an unrelated saveSettings() or a restart.
@@ -89,7 +102,7 @@ describe("ConfigSyncPlugin.recompile — keeps last-good compiledGroups on a mid
     };
     instance.app = fakeApp();
 
-    let data = baseData({ hotkeys: { enabled: true, companions: [] } });
+    let data = baseData({ obsidian: { hotkeys: { enabled: true } } });
     instance.loadData = async () => data;
     await instance.reloadSettings();
     const lastGood = instance.compiledGroups.map((g) => g.name);
@@ -98,11 +111,9 @@ describe("ConfigSyncPlugin.recompile — keeps last-good compiledGroups on a mid
     // Simulate a hand-edited (or a future UI bug's) data.json: appearance's custom path collides
     // with hotkeys' default path — compileItems must throw a CompileError.
     data = baseData({
-      hotkeys: { enabled: true, companions: [] },
-      appearance: {
-        enabled: true,
-        companions: [],
-        settingsFile: { mode: "plain", rules: {}, perItem: {}, customPath: "{configDir}/hotkeys.json" },
+      obsidian: {
+        hotkeys: { enabled: true },
+        appearance: { enabled: true, path: "{configDir}/hotkeys.json" },
       },
     });
     NoticeSpy.lastMessage = undefined;
@@ -117,82 +128,17 @@ describe("ConfigSyncPlugin.recompile — keeps last-good compiledGroups on a mid
   });
 });
 
-// mergeLegacyAppSliceItems (settingsMigration.ts) is unit-tested directly, but its wiring into
-// ConfigSyncPlugin.loadSettings() (`if (mergeLegacyAppSliceItems(this.settings)) await
-// this.saveSettings();`) had no test driving the real load path — this exercises loadSettings()
-// on a fixture data.json that still carries the pre-merge legacy shape (a v2-internal shape
-// revision, not the schema v1→v2 gate covered above) and asserts the merge actually lands and is
-// persisted exactly once, the same idiom tests/customGroups.test.ts (~lines 42-91) uses for
-// stubbing saveData on the fake plugin.
-function legacyAppSliceData(): unknown {
-  return {
-    schemaVersion: 2,
-    items: {
-      editor: {
-        enabled: true,
-        companions: [],
-        settingsFile: { mode: "fields", rules: { foldHeading: { scope: "all", encrypted: false } }, perItem: {} },
-      },
-    },
-    appJson: { mode: "plain" },
-    remotes: [],
-    bratPluginIndex: {},
-  };
-}
-
-describe("ConfigSyncPlugin.loadSettings — mergeLegacyAppSliceItems wiring (end-to-end)", () => {
-  it("merges legacy items.editor + appJson into items.app and persists the merge via saveData exactly once", async () => {
-    const plugin = new ConfigSyncPlugin({} as never, {} as never);
-    const instance = plugin as unknown as {
-      app: unknown;
-      loadData: () => Promise<unknown>;
-      saveData: (d: unknown) => Promise<void>;
-      loadSettings: () => Promise<void>;
-      settings: {
-        items: Record<
-          string,
-          {
-            enabled: boolean;
-            settingsFile?: { mode: string; rules: Record<string, unknown>; perItem: Record<string, unknown> };
-          }
-        >;
-        appJson?: unknown;
-      };
-    };
-    instance.app = fakeApp();
-    instance.loadData = async () => legacyAppSliceData();
-    let saveCallCount = 0;
-    instance.saveData = async () => {
-      saveCallCount += 1;
-    };
-
-    await instance.loadSettings();
-
-    const appItem = instance.settings.items["app"];
-    expect(appItem).toBeDefined();
-    expect(appItem?.settingsFile?.rules["foldHeading"]).toEqual({ scope: "all", encrypted: false });
-    expect(appItem?.settingsFile?.mode).toBe("plain");
-    // legacy keys are gone, not just shadowed by the merged "app" item.
-    expect(instance.settings.items["editor"]).toBeUndefined();
-    expect(instance.settings.appJson).toBeUndefined();
-    // the merge is persisted through the real saveSettings() -> saveData() path exactly once —
-    // not left in memory only, and not saved more than once.
-    expect(saveCallCount).toBe(1);
-  });
-});
-
-// spec 2026-08-11-data-model-hardening.md §5.1/§5.2, driven through the real load→save path: an
-// older document must come back with the nested defaults filled in, everything it carried (known
-// or not) still on it — and its `companions: []` still on it too, since §5.2 phase 1 changed only
-// what this build READS.
-describe("ConfigSyncPlugin.loadSettings/saveSettings — nested defaults and companions tolerance", () => {
+// spec 2026-08-11-data-model-hardening.md §5.1, driven through the real load→save path: an older
+// document must come back with the nested defaults filled in and everything it carried (known or
+// not) still on it.
+describe("ConfigSyncPlugin.loadSettings/saveSettings — nested defaults and an absent companions key", () => {
   interface LoadSaveSurface {
     app: unknown;
     loadData: () => Promise<unknown>;
     saveData: (d: unknown) => Promise<void>;
     loadSettings: () => Promise<void>;
     saveSettings: () => Promise<void>;
-    settings: { runHistory: { maxDays: number; enabled: boolean }; items: Record<string, { enabled: boolean; companions?: unknown[] }> };
+    settings: { runHistory: { maxDays: number; enabled: boolean }; items: ItemMap };
   }
 
   function makeLoadSavePlugin(data: unknown): { instance: LoadSaveSurface; saved: () => Record<string, unknown> | null } {
@@ -209,10 +155,10 @@ describe("ConfigSyncPlugin.loadSettings/saveSettings — nested defaults and com
 
   it("fills a nested default an older document never had, and carries its unknown keys through the save", async () => {
     const { instance, saved } = makeLoadSavePlugin({
-      schemaVersion: 2,
-      items: {},
+      schemaVersion: 3,
+      items: itemsIn({}),
       remotes: [],
-      bratPluginIndex: {},
+      bratIndex: {},
       runHistory: { enabled: false, path: "", maxCount: 5 }, // written before maxDays existed
       writtenByANewerBuild: { keep: true },
     });
@@ -226,30 +172,31 @@ describe("ConfigSyncPlugin.loadSettings/saveSettings — nested defaults and com
     expect((saved()?.runHistory as { maxDays: number }).maxDays).toBe(30);
   });
 
-  // Removing a field is a TWO-PHASE change and this release is phase one. A build that still
-  // reads `cfg.companions` unguarded (compileCompanions / parentCardLabel / buildCompanionRows at
-  // 2.20.0) throws on a document without the key, so dropping it here would destroy an un-updated
-  // device with something it cannot read — the very thing invariant II exists to prevent. Phase 2
-  // stops writing it once a tolerant build is the fleet's floor.
-  it("still writes an item's empty companions list, byte-for-byte as today", async () => {
+  // C-#54 phase 2 (spec 2026-08-11-v3-one-vocabulary-design.md §5): `companions: []` is no longer
+  // written. It only ever persisted so a build that read `cfg.companions` unguarded could still
+  // read our document, and no such build can read a v3 document at all — the version gate refuses
+  // it. An absent key already means "no companion folders" everywhere it is read.
+  it("does not write an empty companions list for an item that has no companion folders", async () => {
     const { instance, saved } = makeLoadSavePlugin(
       baseData({
-        hotkeys: { enabled: true, companions: [] }, // what every older document looks like
-        appearance: { enabled: true, companions: [{ path: "{configDir}/themes", scope: "all", enabled: true }] },
+        obsidian: {
+          hotkeys: { enabled: true },
+          appearance: { enabled: true, companions: [{ path: "{configDir}/themes", device: "all", enabled: true }] },
+        },
       })
     );
 
     await instance.loadSettings();
     await instance.saveSettings();
 
-    const items = saved()?.items as Record<string, Record<string, unknown>>;
-    expect(items.hotkeys).toEqual({ enabled: true, companions: [] });
-    expect(items.appearance?.companions).toEqual([{ path: "{configDir}/themes", scope: "all", enabled: true }]);
+    const items = saved()?.items as ItemMap;
+    expect(items.obsidian.hotkeys).toEqual({ enabled: true });
+    expect(items.obsidian.appearance?.companions).toEqual([{ path: "{configDir}/themes", device: "all", enabled: true }]);
   });
 
   it("an item with no companions key at all loads and compiles exactly like one with an empty list", async () => {
-    const { instance } = makeLoadSavePlugin(baseData({ hotkeys: { enabled: true } }));
-    const compiled = instance as unknown as { recompile: () => Promise<void>; compiledGroups: { name: string }[] };
+    const { instance } = makeLoadSavePlugin(baseData({ obsidian: { hotkeys: { enabled: true } } }));
+    const compiled = instance as unknown as { recompile: () => Promise<boolean>; compiledGroups: { name: string }[] };
 
     await instance.loadSettings();
     await compiled.recompile();
@@ -257,91 +204,36 @@ describe("ConfigSyncPlugin.loadSettings/saveSettings — nested defaults and com
     expect(compiled.compiledGroups.map((g) => g.name)).toEqual(["hotkeys"]);
   });
 
-  // THE phase-1 invariant, end to end: an entry this build creates from scratch must be readable
-  // by a build that doesn't tolerate an absent `companions`. This is the case a lean
-  // emptyItemConfig() leaks through — if someone re-prunes the write side later, this fails first.
-  it("enabling an item for the FIRST time persists companions: [] — a brand-new entry stays readable by an older build", async () => {
-    const { instance, saved } = makeLoadSavePlugin(baseData({}));
-    const host = instance as unknown as { setItemSyncEnabled: (id: string, on: boolean) => Promise<void> };
-
-    await instance.loadSettings();
-    await host.setItemSyncEnabled("community:demo", true);
-
-    const items = saved()?.items as Record<string, Record<string, unknown>>;
-    expect(items["community:demo"]).toEqual({ enabled: true, companions: [] });
-  });
-
-  // Same guarantee for an entry that ARRIVED without the key (a hand edit, or a document from the
-  // phase-2 build that stops writing it): the first write here heals it rather than passing the
-  // unreadable shape on.
-  it("a write to an entry that arrived without the key puts it back", async () => {
-    const { instance, saved } = makeLoadSavePlugin(baseData({ hotkeys: { enabled: false } }));
-    const host = instance as unknown as { setItemSyncEnabled: (id: string, on: boolean) => Promise<void> };
-
-    await instance.loadSettings();
-    await host.setItemSyncEnabled("hotkeys", true);
-
-    const items = saved()?.items as Record<string, Record<string, unknown>>;
-    expect(items.hotkeys).toEqual({ enabled: true, companions: [] });
-  });
 });
 
-// Task 3 (spec 2026-08-04-per-device-scope-local-containment-design.md): drainEnabledOnLocal
-// (settingsMigration.ts) is unit-tested directly, but its wiring into loadSettings() (`if
-// (drainEnabledOnLocal(this.settings)) await this.saveSettings();`) had no test driving the real
-// load path — same idiom as the mergeLegacyAppSliceItems wiring test above.
-describe("ConfigSyncPlugin.loadSettings — drainEnabledOnLocal wiring (end-to-end)", () => {
-  it("drains a stored enabledOn:'local' into localMembers and persists the drain via saveData exactly once", async () => {
-    const plugin = new ConfigSyncPlugin({} as never, {} as never);
-    const instance = plugin as unknown as {
-      app: unknown;
-      loadData: () => Promise<unknown>;
-      saveData: (d: unknown) => Promise<void>;
-      loadSettings: () => Promise<void>;
-      settings: { items: Record<string, { enabled: boolean; enabledOn?: string }>; localMembers: string[] };
-    };
-    instance.app = fakeApp();
-    instance.loadData = async () => baseData({ "community:config-sync": { enabled: true, enabledOn: "local", companions: [] } });
-    let saveCallCount = 0;
-    instance.saveData = async () => {
-      saveCallCount += 1;
-    };
-
-    await instance.loadSettings();
-
-    expect(instance.settings.localMembers).toEqual(["community:config-sync"]);
-    expect(instance.settings.items["community:config-sync"]?.enabledOn).toBeUndefined();
-    // persisted through the real saveSettings() -> saveData() path exactly once.
-    expect(saveCallCount).toBe(1);
-  });
-});
-
-// spec 2026-08-11-data-model-hardening.md §3.2 (invariant II.2), replacing sanitizeMemberRules'
-// unit tests: the load path used to drop every memberRules value this build doesn't recognise and
-// save immediately, so a rule written by a NEWER build became a deletion this device pushed to the
-// whole fleet on its next capture. The value must now survive the load untouched, trigger no save,
-// and simply be ignored by the two readers.
-describe("ConfigSyncPlugin.loadSettings — an unrecognised memberRules value survives and is ignored", () => {
-  interface MemberRulesSurface {
+// spec 2026-08-11-data-model-hardening.md §3.2 (invariant II.2): the load path used to drop every
+// stored rule value this build doesn't recognise and save immediately, so a rule written by a
+// NEWER build became a deletion this device pushed to the whole fleet on its next capture. The
+// value must now survive the load untouched, trigger no save, and simply be ignored by the two
+// readers.
+describe("ConfigSyncPlugin.loadSettings — an unrecognised runsOn survives and is ignored", () => {
+  interface RunsOnSurface {
     app: unknown;
     loadData: () => Promise<unknown>;
     saveData: (d: unknown) => Promise<void>;
     loadSettings: () => Promise<void>;
-    settings: { memberRules: Record<string, string> };
-    memberRuleFor: (carrier: "core-plugins" | "community-plugins", elementId: string, locallyOn: boolean) => string;
-    memberRulesFor: (carrier: "core-plugins.json" | "community-plugins.json") => Record<string, string>;
+    settings: { items: ItemMap };
+    runsOnFor: (list: "core-plugins" | "community-plugins", elementId: string, locallyOn: boolean) => unknown;
+    storedRunsOnFor: (list: "core-plugins" | "community-plugins") => Record<string, unknown>;
   }
+
+  const KNOWN = { device: "all", force: { state: "on", where: "everywhere" } };
+  const FUTURE = { device: "all", force: { state: "on-tuesdays", where: "everywhere" } };
 
   it("loads it unchanged with NO save, and neither reader acts on it", async () => {
     const plugin = new ConfigSyncPlugin({} as never, {} as never);
-    const instance = plugin as unknown as MemberRulesSurface;
+    const instance = plugin as unknown as RunsOnSurface;
     instance.app = fakeApp();
     instance.loadData = async () => ({
-      schemaVersion: 2,
-      items: {},
+      schemaVersion: 3,
+      items: itemsIn({ community: { futurist: { enabled: true, runsOn: FUTURE } as unknown as Item, known: { enabled: true, runsOn: KNOWN } as unknown as Item } }),
       remotes: [],
-      bratPluginIndex: {},
-      memberRules: { "community:futurist": "here-on-tuesdays", "community:known": "always-here" },
+      bratIndex: {},
     });
     let saveCallCount = 0;
     instance.saveData = async () => {
@@ -351,18 +243,18 @@ describe("ConfigSyncPlugin.loadSettings — an unrecognised memberRules value su
     await instance.loadSettings();
 
     // storage is left exactly as found — the whole point: nothing to propagate as a deletion.
-    expect(instance.settings.memberRules).toEqual({ "community:futurist": "here-on-tuesdays", "community:known": "always-here" });
+    expect(instance.settings.items.community["futurist"]?.runsOn).toEqual(FUTURE);
     expect(saveCallCount).toBe(0);
 
     // ignored at the point of use: the menu falls back to its default instead of showing it, and
     // the apply mask never sees the id at all — an unknown rule must not become a forced on/off.
-    expect(instance.memberRuleFor("community-plugins", "futurist", true)).toBe("all");
-    expect(instance.memberRuleFor("community-plugins", "known", false)).toBe("always-here");
-    expect(instance.memberRulesFor("community-plugins.json")).toEqual({ known: "always-here" });
+    expect(instance.runsOnFor("community-plugins", "futurist", true)).toEqual({ device: "all" });
+    expect(instance.runsOnFor("community-plugins", "known", false)).toEqual(KNOWN);
+    expect(instance.storedRunsOnFor("community-plugins")).toEqual({ known: KNOWN });
   });
 });
 
-// spec 2026-08-11-data-model-hardening.md §3.3 (invariant II.4): bratPluginIndex is a REPLICATED
+// spec 2026-08-11-data-model-hardening.md §3.3 (invariant II.4): bratIndex is a REPLICATED
 // index — a device without BRAT still needs it to install beta plugins. resolveBratIndex prunes
 // against THIS device's repo list, so on a device with no list at all the refresh used to save an
 // emptied index: a fleet-shared structure wiped by the device that knows least about it.
@@ -373,7 +265,7 @@ describe("ConfigSyncPlugin.refreshBratIndex — a device with no BRAT repo list 
     saveData: (d: unknown) => Promise<void>;
     loadSettings: () => Promise<void>;
     refreshBratIndex: () => Promise<{ resolved: number; total: number }>;
-    settings: { bratPluginIndex: Record<string, string> };
+    settings: { bratIndex: Record<string, string> };
   }
 
   it("keeps the index it cannot verify and never calls saveData", async () => {
@@ -381,7 +273,7 @@ describe("ConfigSyncPlugin.refreshBratIndex — a device with no BRAT repo list 
     const instance = plugin as unknown as BratSurface;
     instance.app = fakeApp(); // no live BRAT instance, and adapter.exists() is false → repos is []
     const index = { "my-beta-plugin": "owner/my-beta-plugin" };
-    instance.loadData = async () => ({ schemaVersion: 2, items: {}, remotes: [], bratPluginIndex: index });
+    instance.loadData = async () => ({ schemaVersion: 3, items: itemsIn({}), remotes: [], bratIndex: index });
     let saveCallCount = 0;
     instance.saveData = async () => {
       saveCallCount += 1;
@@ -390,40 +282,108 @@ describe("ConfigSyncPlugin.refreshBratIndex — a device with no BRAT repo list 
     await instance.loadSettings();
     const stats = await instance.refreshBratIndex();
 
-    expect(instance.settings.bratPluginIndex).toEqual(index);
+    expect(instance.settings.bratIndex).toEqual(index);
     expect(saveCallCount).toBe(0);
     expect(stats).toEqual({ resolved: 0, total: 0 });
   });
 });
 
-// A self-apply (adoptConfiguration/applyItems, main.ts ~625-670) rewrites this plugin's own
-// data.json externally and then calls the private reloadSettings() = loadSettings() + recompile()
-// to pick it up. reloadSettings() has no logic of its own beyond that delegation, so wiring the
-// drain into loadSettings() already covers the adopt path — this end-to-end test proves a
-// freshly-adopted foreign enabledOn:"local" is drained on the very next reloadSettings(), rather
-// than round-tripping back out to the shared contract on the next save.
-describe("ConfigSyncPlugin.reloadSettings — drains a freshly-adopted enabledOn:'local' (adopt path)", () => {
-  it("drains the id adopted from a foreign data.json instead of re-capturing it", async () => {
-    const plugin = new ConfigSyncPlugin({} as never, {} as never);
-    const instance = plugin as unknown as {
-      app: unknown;
-      loadData: () => Promise<unknown>;
-      saveData: (d: unknown) => Promise<void>;
-      reloadSettings: () => Promise<void>;
-      settings: { items: Record<string, { enabled: boolean; enabledOn?: string }>; localMembers: string[] };
-    };
-    instance.app = fakeApp();
-    instance.loadData = async () => baseData({});
-    instance.saveData = async () => {};
-    await instance.reloadSettings();
-    expect(instance.settings.localMembers).toEqual([]);
+// Final-review I1. The §4 re-key keys every baseline against `compiledGroups`, so it must not run
+// when the compile that produced that list FAILED: `lockRefFor([])` has no rule for a companion or a
+// custom rule, so each of those baselines would land under `legacy/…` — and `rekeyLedger` would then
+// stamp the ledger's new version, so the mistake is never retried. Every one of them would read as
+// never-synced, whose default direction is APPLY. One illegal custom rule name is enough to get
+// there, and all the user sees is a generic Notice.
+describe("the baseline re-key runs only when the compile it keys against succeeded", () => {
+  const BASELINES = "config-sync-baselines";
+  const V1_LEDGER = JSON.stringify({ version: 1, groups: { themes: { store: "s", local: "l", at: "2026-08-11T00:00:00.000Z" } } });
 
-    // Simulate applyWithActions rewriting this plugin's own data.json externally after an adopt —
-    // the foreign contract's enabledOn:"local" lands on disk exactly as the old form wrote it.
-    instance.loadData = async () => baseData({ "community:config-sync": { enabled: true, enabledOn: "local", companions: [] } });
+  interface Surface {
+    app: unknown;
+    loadData: () => Promise<unknown>;
+    saveData: (d: unknown) => Promise<void>;
+    loadSettings: () => Promise<void>;
+    recompile: () => Promise<boolean>;
+    reloadSettings: () => Promise<void>;
+    saveBaselines: (ledger: Ledger) => void;
+    syncCenterHost: () => { computeStatuses: () => Promise<unknown> };
+    compiledGroups: { name: string }[];
+  }
+
+  const makePlugin = (data: unknown, local: Map<string, string>): Surface => {
+    const instance = new ConfigSyncPlugin({} as never, {} as never) as unknown as Surface;
+    instance.app = fakeApp(local);
+    instance.loadData = async () => data;
+    instance.saveData = async () => undefined;
+    return instance;
+  };
+
+  it("recompile answers false when a custom rule cannot compile, and the ledger is left retryable", async () => {
+    const local = new Map([[BASELINES, V1_LEDGER]]);
+    const instance = makePlugin(
+      { schemaVersion: 3, items: itemsIn({ custom: { "bad name!": { enabled: true, type: "file", path: "notes/x.json" } } }), remotes: [], bratIndex: {} },
+      local
+    );
+
+    await instance.loadSettings();
+    expect(await instance.recompile()).toBe(false);
+
+    await instance.reloadSettings(); // the real seam: the caller gates the re-key on that answer
+    expect(local.get(BASELINES)).toBe(V1_LEDGER); // untouched — still v1, still name-keyed, still retryable
+  });
+
+  // Final-review N1: the re-key was not the only writer that keys against `compiledGroups`. The
+  // status path prunes the ledger against it too, so a failed compile made it persist an EMPTY one —
+  // reaching I1's end state by a different road. Both preconditions now sit on saveBaselines, the
+  // ONE writer every baseline write goes through.
+  it("no baseline write survives a failed compile, whichever writer asks", async () => {
+    const local = new Map([[BASELINES, V1_LEDGER]]);
+    const instance = makePlugin(
+      { schemaVersion: 3, items: itemsIn({ custom: { "bad name!": { enabled: true, type: "file", path: "notes/x.json" } } }), remotes: [], bratIndex: {} },
+      local
+    );
+    await instance.loadSettings();
+    expect(await instance.recompile()).toBe(false);
+
+    // The status path's own write — pruning against an empty compiled list, which keeps nothing.
+    await instance.syncCenterHost().computeStatuses();
+
+    expect(local.get(BASELINES)).toBe(V1_LEDGER); // not emptied, not re-shaped: exactly as found
+  });
+
+  // The second half, and the one that holds regardless of which writer runs first next time: a
+  // writer that does not understand the file it is rewriting declines. A v1 ledger reached by any
+  // path — including one where the re-key has not run yet — is left alone rather than overwritten in
+  // a shape whose own reader would answer empty.
+  it("declines to persist a ledger that is not the version this build writes", async () => {
+    const local = new Map([[BASELINES, V1_LEDGER]]);
+    const instance = makePlugin({ schemaVersion: 3, items: itemsIn({ obsidian: { hotkeys: { enabled: true } } }), remotes: [], bratIndex: {} }, local);
+    await instance.loadSettings();
+    expect(await instance.recompile()).toBe(true); // the compile is fine — it is the LEDGER that is not ours
+
+    instance.saveBaselines({ version: 1, items: { themes: { store: "s", local: "l", at: "t" } } });
+    expect(local.get(BASELINES)).toBe(V1_LEDGER);
+
+    instance.saveBaselines({ version: LEDGER_VERSION, items: {} }); // …and the current version still writes
+    expect(local.get(BASELINES)).toBe(JSON.stringify({ version: LEDGER_VERSION, items: {} }));
+  });
+
+  it("recompile answers true on a good document, and the re-key then runs once", async () => {
+    const local = new Map([[BASELINES, V1_LEDGER]]);
+    const instance = makePlugin(
+      { schemaVersion: 3, items: itemsIn({ obsidian: { appearance: { enabled: true, companions: [{ path: "{configDir}/themes", device: "all", enabled: true }] } } }), remotes: [], bratIndex: {} },
+      local
+    );
+
+    await instance.loadSettings();
+    expect(await instance.recompile()).toBe(true);
     await instance.reloadSettings();
 
-    expect(instance.settings.localMembers).toEqual(["community:config-sync"]);
-    expect(instance.settings.items["community:config-sync"]?.enabledOn).toBeUndefined();
+    const moved = JSON.parse(local.get(BASELINES) ?? "{}") as { version: number; items: Record<string, unknown> };
+    expect(moved.version).toBe(2);
+    // The companion resolved through the COMPILER, which is the whole reason the gate exists: the
+    // closed legacy rules have no answer for a companion, so a failed compile would have filed this
+    // under `legacy/themes` and stamped it permanent.
+    expect(Object.keys(moved.items)).toEqual(["obsidian/appearance/themes"]);
   });
 });

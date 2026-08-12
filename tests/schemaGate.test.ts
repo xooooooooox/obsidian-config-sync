@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { classifySettings, CURRENT_SCHEMA, deviceOptOutsFor, drainEnabledOnLocal, isFutureSchemaDocument, mergeLegacyAppSliceItems, SCHEMA_FUTURE_APPLY_MESSAGE, SCHEMA_FUTURE_NOTICE, SCHEMA_UPGRADE_NOTICE, withDefaults, withDeviceOptOut } from "../src/core/settingsMigration";
-import { emptyItemConfig, ItemConfig } from "../src/core/registry";
+import { classifySettings, CURRENT_SCHEMA, isFutureSchemaDocument, MIGRATABLE_SCHEMA, SCHEMA_FUTURE_APPLY_MESSAGE, SCHEMA_FUTURE_NOTICE, SCHEMA_UPGRADE_NOTICE, withDefaults } from "../src/core/settingsMigration";
+import { emptyItemMap } from "../src/core/registry";
 
-// spec 2026-07-25-unified-card-design.md §6, D13: blocking upgrade — no data migration, no
-// compat window. A data.json without `schemaVersion: 2` (the old `groups`-based shape, or
-// anything unversioned) is legacy and must be blocked with this exact Notice text.
+// A data.json older than `schemaVersion: 3` and not migratable (v1, unversioned) is classified
+// legacy and blocked with this exact Notice text. A v2 document takes the migration branch instead
+// — see tests/v2Migration.test.ts.
 //
-// spec 2026-08-11-data-model-hardening.md §4.1 (invariant II.3) splits a fourth answer out of that
-// same test: `isLegacySettings` was `schemaVersion !== 2`, so a document from a NEWER build took
+// spec 2026-08-11-data-model-hardening.md §4.1 (invariant II.3) splits a fourth answer out of the
+// same test: `isLegacySettings` was `schemaVersion !== CURRENT`, so a document from a NEWER build took
 // the legacy path — notice, defaults in memory, the user's whole setup overwritten at the next
 // save. Since data.json travels between a user's devices wholesale, that made a staged upgrade
 // able to wipe a device that hadn't updated yet.
@@ -30,8 +30,16 @@ describe("classifySettings", () => {
     expect(classifySettings({})).toEqual({ kind: "legacy" });
   });
 
+  // v2 is the one version with a way forward (spec 2026-08-11-v3-one-vocabulary-design.md §5/§6):
+  // it is neither reset nor refused, it is migrated. v1 has no field a v3 shape could be
+  // reconstructed from and keeps the reset branch above.
+  it("a v2 document is migrated, not reset", () => {
+    expect(classifySettings({ schemaVersion: MIGRATABLE_SCHEMA })).toEqual({ kind: "migrate" });
+    expect(MIGRATABLE_SCHEMA).toBe(CURRENT_SCHEMA - 1);
+  });
+
   it("a NEWER schema is its own answer — never legacy, and it carries the version it found", () => {
-    expect(classifySettings({ schemaVersion: 3, items: {} })).toEqual({ kind: "future", found: 3 });
+    expect(classifySettings({ schemaVersion: 4, items: {} })).toEqual({ kind: "future", found: 4 });
     expect(classifySettings({ schemaVersion: 99 })).toEqual({ kind: "future", found: 99 });
   });
 
@@ -46,7 +54,7 @@ describe("classifySettings", () => {
 // §4.2's half of the same gate: the document about to be written onto this device, still as text.
 describe("isFutureSchemaDocument", () => {
   it("is true only for a document declaring a schema newer than this build's", () => {
-    expect(isFutureSchemaDocument(JSON.stringify({ schemaVersion: 3, items: {} }))).toBe(true);
+    expect(isFutureSchemaDocument(JSON.stringify({ schemaVersion: 4, items: {} }))).toBe(true);
     expect(isFutureSchemaDocument(JSON.stringify({ schemaVersion: CURRENT_SCHEMA, items: {} }))).toBe(false);
     expect(isFutureSchemaDocument(JSON.stringify({ schemaVersion: 1 }))).toBe(false);
   });
@@ -119,62 +127,34 @@ describe("withDefaults", () => {
 // spec 2026-08-11-data-model-hardening.md §2 ruling: the pre-C-#52 map is CARRIED. These two are
 // the whole contract in pure form — read this device's groups out of it, and write this device's
 // id into it without ever disturbing another device's entry.
-describe("deviceOptOutsFor / withDeviceOptOut", () => {
-  it("reads only the groups whose array names this device", () => {
-    expect(deviceOptOutsFor({ hotkeys: ["d1", "d2"], appearance: ["d2"], themes: [] }, "d1")).toEqual(["hotkeys"]);
+// `items` is a NESTED default (fix round 1): a document that never had a section must come back
+// with it, and the map must never be handed out as DEFAULT_SETTINGS' own object — every section is
+// written through registry.ts's withItem/withoutItem, and a shared mutable default is a bug
+// waiting for its first in-place write.
+describe("withDefaults — the item map", () => {
+  const defaults = { schemaVersion: 3, items: emptyItemMap(), rootPath: "" };
+
+  it("fills a section the document never had", () => {
+    const out = withDefaults(defaults, { items: { community: { dataview: { enabled: true } } } });
+    expect(Object.keys(out.items).sort()).toEqual(["community", "core", "custom", "obsidian"]);
+    expect(out.items.community).toEqual({ dataview: { enabled: true } });
+    expect(out.items.custom).toEqual({});
   });
 
-  it("anything that isn't the old shape reads as nothing", () => {
-    expect(deviceOptOutsFor(undefined, "d1")).toEqual([]);
-    expect(deviceOptOutsFor(null, "d1")).toEqual([]);
-    expect(deviceOptOutsFor(["hotkeys"], "d1")).toEqual([]);
-    expect(deviceOptOutsFor({ hotkeys: "d1" }, "d1")).toEqual([]);
+  it("never shares the default's own map, at either level", () => {
+    const out = withDefaults(defaults, null);
+    expect(out.items).not.toBe(defaults.items);
+    expect(out.items.custom).not.toBe(defaults.items.custom);
+    // ...and a second load is independent of the first.
+    const other = withDefaults(defaults, null);
+    other.items.custom["my-rule"] = { enabled: true };
+    expect(out.items.custom).toEqual({});
+    expect(defaults.items.custom).toEqual({});
   });
 
-  it("adds and removes only this device's id, and prunes the group only when it empties", () => {
-    expect(withDeviceOptOut({ hotkeys: ["d2"] }, "d1", "hotkeys", true)).toEqual({ hotkeys: ["d2", "d1"] });
-    expect(withDeviceOptOut({ hotkeys: ["d2", "d1"] }, "d1", "hotkeys", false)).toEqual({ hotkeys: ["d2"] });
-    expect(withDeviceOptOut({ hotkeys: ["d1"] }, "d1", "hotkeys", false)).toEqual({});
-    expect(withDeviceOptOut(undefined, "d1", "hotkeys", true)).toEqual({ hotkeys: ["d1"] });
-  });
-
-  it("is idempotent in both directions", () => {
-    expect(withDeviceOptOut({ hotkeys: ["d1"] }, "d1", "hotkeys", true)).toEqual({ hotkeys: ["d1"] });
-    expect(withDeviceOptOut({ appearance: ["d2"] }, "d1", "hotkeys", false)).toEqual({ appearance: ["d2"] });
-  });
-
-  it("never mutates the map it was given, nor the arrays inside it", () => {
-    const map = { hotkeys: ["d2"], appearance: ["d1"] };
-    const snapshot = JSON.parse(JSON.stringify(map)) as typeof map;
-    withDeviceOptOut(map, "d1", "hotkeys", true);
-    withDeviceOptOut(map, "d1", "appearance", false);
-    expect(map).toEqual(snapshot);
-  });
-
-  // Round-5 review M1. A group value that is not an array is a shape from a build we don't know:
-  // spreading a string would explode it into characters and filtering a number would throw — and a
-  // throw here lands AFTER localStorage was written, leaving the two stores disagreeing with no
-  // notice and no re-render. Carry it, and never throw.
-  it("leaves a group value that is not an array exactly as found, in both directions", () => {
-    for (const junk of ["d1", 7, null, { d1: true }]) {
-      expect(withDeviceOptOut({ hotkeys: junk }, "d1", "hotkeys", true)).toEqual({ hotkeys: junk });
-      expect(withDeviceOptOut({ hotkeys: junk }, "d1", "hotkeys", false)).toEqual({ hotkeys: junk });
-    }
-  });
-
-  it("a malformed group elsewhere never blocks this device's own entry", () => {
-    expect(withDeviceOptOut({ appearance: "broken" }, "d1", "hotkeys", true)).toEqual({ appearance: "broken", hotkeys: ["d1"] });
-  });
-
-  it("carries non-string elements inside an array it does edit", () => {
-    expect(withDeviceOptOut({ hotkeys: ["d2", 7] }, "d1", "hotkeys", true)).toEqual({ hotkeys: ["d2", 7, "d1"] });
-    expect(withDeviceOptOut({ hotkeys: ["d2", 7, "d1"] }, "d1", "hotkeys", false)).toEqual({ hotkeys: ["d2", 7] });
-  });
-
-  it("a value that isn't a map at all never throws — it yields this device's entry alone", () => {
-    expect(withDeviceOptOut("not a map", "d1", "hotkeys", true)).toEqual({ hotkeys: ["d1"] });
-    expect(withDeviceOptOut(["hotkeys"], "d1", "hotkeys", false)).toEqual({});
-    expect(withDeviceOptOut(null, "d1", "hotkeys", false)).toEqual({});
+  it("carries a section only a NEWER build knows about", () => {
+    const out = withDefaults(defaults, { items: { somethingNew: { x: { enabled: true } } } });
+    expect((out.items as Record<string, unknown>).somethingNew).toEqual({ x: { enabled: true } });
   });
 });
 
@@ -194,125 +174,6 @@ describe("the version-gate copy", () => {
 
   it("§4.2 — what the self item fails with when the store's document is newer", () => {
     expect(SCHEMA_FUTURE_APPLY_MESSAGE).toBe("The store's Config Sync settings were written by a newer version. Update Config Sync on this device before applying them.");
-  });
-});
-
-// spec 2026-07-26-ui-feedback-round2-design.md §2.3: a v2-internal shape revision, not the
-// blocking gate above — the three app.json slice cards (editor/files-links/other) plus the
-// top-level appJson mode merge into a single items.app, and appearance gives up the one app.json
-// key it ever borrowed (showInlineTitle).
-function cfg(overrides: Partial<ItemConfig> = {}): ItemConfig {
-  return { ...emptyItemConfig(), ...overrides };
-}
-
-describe("mergeLegacyAppSliceItems", () => {
-  it("merges legacy editor/files-links/other + appJson.mode into items.app, idempotently", () => {
-    const s: { items: Record<string, ItemConfig>; appJson?: { mode: "plain" | "fields" } } = {
-      items: {
-        editor: cfg({ enabled: true, settingsFile: { mode: "plain", rules: { vimMode: { scope: "desktop", encrypted: false } }, perItem: {} } }),
-        "files-links": cfg({
-          enabled: false,
-          settingsFile: { mode: "plain", rules: { userIgnoreFilters: { scope: "desktop", encrypted: false } }, perItem: { userIgnoreFilters: { a: "all" } } },
-        }),
-        other: cfg({ enabled: false }),
-        appearance: cfg({
-          enabled: true,
-          settingsFile: { mode: "plain", rules: { showInlineTitle: { scope: "all", encrypted: false }, cssTheme: { scope: "all", encrypted: false } }, perItem: {} },
-        }),
-      },
-      appJson: { mode: "fields" },
-    };
-
-    expect(mergeLegacyAppSliceItems(s)).toBe(true);
-    expect(s.items.app).toMatchObject({ enabled: true, settingsFile: { mode: "fields" } });
-    expect(s.items.app!.settingsFile?.rules).toEqual({
-      vimMode: { scope: "desktop", encrypted: false },
-      userIgnoreFilters: { scope: "desktop", encrypted: false },
-      showInlineTitle: { scope: "all", encrypted: false },
-    });
-    expect(s.items.app!.settingsFile?.perItem).toEqual({ userIgnoreFilters: { a: "all" } });
-    expect(s.items.appearance!.settingsFile?.rules).toEqual({ cssTheme: { scope: "all", encrypted: false } });
-    expect(s.items.editor).toBeUndefined();
-    expect(s.appJson).toBeUndefined();
-    expect(mergeLegacyAppSliceItems(s)).toBe(false); // idempotent
-  });
-
-  it("handles a partial legacy shape with only appJson present (no legacy item ids)", () => {
-    const s: { items: Record<string, ItemConfig>; appJson?: { mode: "plain" | "fields" } } = {
-      items: {},
-      appJson: { mode: "plain" },
-    };
-
-    expect(mergeLegacyAppSliceItems(s)).toBe(true);
-    expect(s.items.app).toEqual({ enabled: false, companions: [], settingsFile: { mode: "plain", rules: {}, perItem: {} } });
-    expect(s.appJson).toBeUndefined();
-    expect(mergeLegacyAppSliceItems(s)).toBe(false); // idempotent
-  });
-
-  it("handles a partial legacy shape with only some of the three item ids present", () => {
-    const s: { items: Record<string, ItemConfig>; appJson?: { mode: "plain" | "fields" } } = {
-      items: {
-        editor: cfg({ enabled: true, settingsFile: { mode: "plain", rules: { vimMode: { scope: "desktop", encrypted: false } }, perItem: {} } }),
-      },
-    };
-
-    expect(mergeLegacyAppSliceItems(s)).toBe(true);
-    expect(s.items.app).toEqual({
-      enabled: true,
-      companions: [], // §5.2 phase 1 keeps WRITING the empty array — only readers went tolerant
-      settingsFile: { mode: "fields", rules: { vimMode: { scope: "desktop", encrypted: false } }, perItem: {} },
-    });
-    expect(s.items.editor).toBeUndefined();
-    expect(mergeLegacyAppSliceItems(s)).toBe(false); // idempotent
-  });
-
-  it("is a no-op when there is nothing legacy to merge", () => {
-    const s: { items: Record<string, ItemConfig>; appJson?: { mode: "plain" | "fields" } } = {
-      items: { app: cfg({ enabled: true, settingsFile: { mode: "fields", rules: {}, perItem: {} } }) },
-    };
-
-    expect(mergeLegacyAppSliceItems(s)).toBe(false);
-  });
-});
-
-// Task 3 (spec 2026-08-04-per-device-scope-local-containment-design.md): a stored
-// `enabledOn: "local"` is a pre-retarget artifact — Task 2 already makes enablementScopes ignore
-// it, so this is drain-only cleanup that moves every such id into localMembers and deletes the key.
-function drainSettings(items: Record<string, ItemConfig>, localMembers: string[]): { items: Record<string, ItemConfig>; localMembers: string[] } {
-  return { items, localMembers };
-}
-
-describe("drainEnabledOnLocal", () => {
-  it("moves each enabledOn 'local' into localMembers and deletes the key, idempotently", () => {
-    const s = drainSettings(
-      {
-        "community:a": cfg({ enabled: true, enabledOn: "local" }),
-        "community:b": cfg({ enabled: true, enabledOn: "desktop" }),
-      },
-      []
-    );
-
-    expect(drainEnabledOnLocal(s)).toBe(true);
-    expect(s.localMembers).toEqual(["community:a"]);
-    expect(s.items["community:a"]!.enabledOn).toBeUndefined();
-    expect(s.items["community:b"]!.enabledOn).toBe("desktop");
-    expect(drainEnabledOnLocal(s)).toBe(false); // idempotent
-  });
-
-  it("is a no-op (returns false) when nothing is enabledOn 'local'", () => {
-    const s = drainSettings({ "community:a": cfg({ enabled: true }) }, ["community:a"]);
-
-    expect(drainEnabledOnLocal(s)).toBe(false);
-    expect(s.localMembers).toEqual(["community:a"]);
-  });
-
-  it("does not duplicate an id already in localMembers", () => {
-    const s = drainSettings({ "community:a": cfg({ enabled: true, enabledOn: "local" }) }, ["community:a"]);
-
-    expect(drainEnabledOnLocal(s)).toBe(true);
-    expect(s.localMembers).toEqual(["community:a"]);
-    expect(s.items["community:a"]!.enabledOn).toBeUndefined();
-    expect(drainEnabledOnLocal(s)).toBe(false); // idempotent
   });
 });
 

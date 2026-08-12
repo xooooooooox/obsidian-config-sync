@@ -8,11 +8,11 @@ import { GroupStatus } from "../src/core/status";
 // live Sync Center, temporary performance.now() wrappers around the real methods — see the task
 // report, not shipped here) attributed the overwhelming majority of that to `familySearchText`
 // re-deriving every row's searchable text from scratch on every one of a keystroke's several
-// full-row-list passes (sidebar per-scope badges, filter pills, each type section): each call
+// full-row-list passes (sidebar per-section badges, filter pills, each type section): each call
 // rescans `familyCompanions`, which itself walks the WHOLE group list through
 // `host.companionParentOf` — on a 100+ row vault, tens of thousands of redundant calls per
 // keystroke. `rows()` (the sorted row list) showed the same pattern at smaller scale — rebuilt and
-// re-sorted from scratch on every sidebar scope entry.
+// re-sorted from scratch on every sidebar section entry.
 //
 // These tests drive the REAL private familySearchText/rows/debounceSearchRender via the same
 // harness idiom as tests/emptyVerbDegradation.test.ts (a minimal fake host, bracket access to
@@ -53,6 +53,9 @@ function harness(opts: { groups: SyncGroup[]; statuses: Record<string, GroupStat
       return { parent: null, label: storedLabel ?? group };
     },
     deviceOptedOut: () => false,
+    // No registry behind these harnesses: the view falls back to the same legacy rules a v1/v2
+    // lock read uses, which is exactly what a store-only row gets in production.
+    itemRefForGroup: () => null,
   };
   const view = new SyncCenterView({} as never, host as never);
   const instance = view as unknown as Harness;

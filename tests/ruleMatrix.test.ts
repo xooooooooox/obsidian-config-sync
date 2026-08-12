@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { applyTransform, captureTransform, contentUnchanged } from "../src/core/modes";
 import { decryptField, isFieldEnvelope } from "../src/core/crypto";
 import { validateSyncManifest, ManifestValidationError } from "../src/core/manifest";
-import { SyncGroup } from "../src/core/types";
+import { SyncGroup, EVERYWHERE, THIS_DEVICE, perClass } from "../src/core/types";
 
 // Orthogonal rule model (spec 2026-07-25-unified-card-design.md §2, D1): one test per
 // {scope, encrypted} matrix cell — capture placement, encrypted-cell ciphertext, and apply
@@ -17,13 +17,13 @@ const GROUP: SyncGroup = {
   devices: "all",
   mode: "fields",
   fields: [
-    { pattern: "keyAll", scope: "all", encrypted: false },
-    { pattern: "keyAllEnc", scope: "all", encrypted: true },
-    { pattern: "keyDesktop", scope: "desktop", encrypted: false },
-    { pattern: "keyDesktopEnc", scope: "desktop", encrypted: true },
-    { pattern: "keyMobile", scope: "mobile", encrypted: false },
-    { pattern: "keyMobileEnc", scope: "mobile", encrypted: true },
-    { pattern: "keyLocal", scope: "local", encrypted: false },
+    { pattern: "keyAll", sharing: EVERYWHERE, encrypted: false },
+    { pattern: "keyAllEnc", sharing: EVERYWHERE, encrypted: true },
+    { pattern: "keyDesktop", sharing: perClass("desktop"), encrypted: false },
+    { pattern: "keyDesktopEnc", sharing: perClass("desktop"), encrypted: true },
+    { pattern: "keyMobile", sharing: perClass("mobile"), encrypted: false },
+    { pattern: "keyMobileEnc", sharing: perClass("mobile"), encrypted: true },
+    { pattern: "keyLocal", sharing: THIS_DEVICE, encrypted: false },
   ],
 };
 
@@ -177,22 +177,22 @@ describe("rule matrix — manifest validation", () => {
 
   it("accepts all 7 legal scope×encrypted combinations", () => {
     const fields = [
-      { pattern: "a", scope: "all", encrypted: false },
-      { pattern: "b", scope: "all", encrypted: true },
-      { pattern: "c", scope: "desktop", encrypted: false },
-      { pattern: "d", scope: "desktop", encrypted: true },
-      { pattern: "e", scope: "mobile", encrypted: false },
-      { pattern: "f", scope: "mobile", encrypted: true },
-      { pattern: "g", scope: "local", encrypted: false },
+      { pattern: "a", sharing: EVERYWHERE, encrypted: false },
+      { pattern: "b", sharing: EVERYWHERE, encrypted: true },
+      { pattern: "c", sharing: perClass("desktop"), encrypted: false },
+      { pattern: "d", sharing: perClass("desktop"), encrypted: true },
+      { pattern: "e", sharing: perClass("mobile"), encrypted: false },
+      { pattern: "f", sharing: perClass("mobile"), encrypted: true },
+      { pattern: "g", sharing: THIS_DEVICE, encrypted: false },
     ];
     const m = validateSyncManifest({ version: 1, groups: [{ ...BASE, mode: "fields", fields }] });
     expect(m.groups[0]?.fields).toEqual(fields);
   });
 
-  it("rejects scope=local combined with encrypted=true, naming the key and both fields", () => {
-    const fields = [{ pattern: "myKey", scope: "local", encrypted: true }];
+  it("rejects a this-device sharing combined with encrypted=true, naming the key and both fields", () => {
+    const fields = [{ pattern: "myKey", sharing: THIS_DEVICE, encrypted: true }];
     expect(() => validateSyncManifest({ version: 1, groups: [{ ...BASE, mode: "fields", fields }] })).toThrow(
-      /myKey.*"scope": "local".*"encrypted": true/
+      /myKey.*"this-device".*"encrypted": true/
     );
   });
 
