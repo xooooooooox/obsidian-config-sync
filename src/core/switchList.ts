@@ -171,7 +171,7 @@ export function memberUniverse(store: SwitchList | null, local: SwitchList | nul
 // Whether an id/key is ON in a SwitchList — array presence / map truthy value, the exact reading
 // applySwitchList's own exception pass-through relies on for a masked id (task-2 fix: mask
 // producers must derive "locally on" from this PERSISTED content, never from a live runtime
-// query, which can diverge — see availability.ts's forcedRunsOn and its callers). A null list
+// query, which can diverge — see main.ts's leaveToThisDevice, its only caller). A null list
 // (unreadable/absent local file) counts as off.
 export function switchListMemberOn(list: SwitchList | null, id: string): boolean {
   if (list === null) return false;

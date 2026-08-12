@@ -10,7 +10,10 @@ export const FATE_CHIP_ICON: Record<string, string> = {
   "your rule": "sliders-horizontal",
   "off here — your rule": "sliders-horizontal",
   "on here — your rule": "sliders-horizontal",
-  "stays off": "power",
+  // `power-off`, not `power` (spec 2026-08-12-enablement-two-layers-design.md §7): `power` now
+  // means "this device has an exception and it is ON" in the two-segment enablement row, so a chip
+  // that says the row stays OFF cannot keep the same glyph — one form, one meaning.
+  "stays off": "power-off",
   encrypted: "lock",
   "your choice": "check",
 };

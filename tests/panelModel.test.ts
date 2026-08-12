@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { capFileEntries, insyncLineText, excludedLineText, statusBarStatuses, moreFilesText, visibleUnderFilter, fateBucket, fateBucketCounts, partitionSection, legacyLockedFamilyBucket, RowBucket, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, runProgressLabel, showColdStartBanner, memberDecisionsFromSharing, enablementCarrierFor, carrierIsSynced, TYPE_SECTION_TITLES, typeSectionForRow, sectionCountLabel, mobileSectionCountLabel, unifiedFooterSummary, fileEntryFor, stagedPayload, StageableRow, effectiveFate, remoteSections, onOffFlips, onOffLineText, onOffNarrationLines, familyRollup, FamilyMember, mergeFamilyChanges, foldCompanionEntries, groupExcludedHere } from "../src/ui/panelModel";
+import { capFileEntries, insyncLineText, excludedLineText, statusBarStatuses, moreFilesText, visibleUnderFilter, fateBucket, fateBucketCounts, partitionSection, legacyLockedFamilyBucket, RowBucket, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, runProgressLabel, showColdStartBanner, enablementCarrierFor, carrierIsSynced, TYPE_SECTION_TITLES, typeSectionForRow, sectionCountLabel, mobileSectionCountLabel, unifiedFooterSummary, fileEntryFor, stagedPayload, StageableRow, effectiveFate, remoteSections, onOffFlips, onOffLineText, onOffNarrationLines, familyRollup, FamilyMember, mergeFamilyChanges, foldCompanionEntries, groupExcludedHere } from "../src/ui/panelModel";
 import { GroupState, GroupStatus, OTHER_STORE_FILES_GROUP, RemoteDiffEntry, RemoteDiffFile } from "../src/core/status";
-import { FileChanges, SyncGroup, EVERYWHERE, THIS_DEVICE, perClass, StorageSection } from "../src/core/types";
+import { FileChanges, SyncGroup, EVERYWHERE, perClass, StorageSection } from "../src/core/types";
 import { Availability } from "../src/core/availability";
 import { Fate, FateInput, rowFate } from "../src/ui/fateModel";
 
@@ -141,7 +141,7 @@ describe("fateBucket — spec §1 truth table (ledger C-#23; §7 adds excluded, 
     const excludedInput: FateInput = {
       direction: null, conflict: false, nothingYet: false, installed: true,
       hasUpdate: false, carrierSynced: false, storeListOn: null, locallyOn: false,
-      runsOn: { device: "all" }, deviceClass: "desktop", desktopOnly: false, excludedHere: true,
+      ruleSharing: EVERYWHERE, localException: null, deviceClass: "desktop", desktopOnly: false, excludedHere: true,
       hasSettingsPayload: true, versionAhead: null, special: null, folderFileCount: null, encrypted: false,
     };
     const excludedFate = rowFate(excludedInput);
@@ -158,7 +158,7 @@ describe("fateBucket — spec §1 truth table (ledger C-#23; §7 adds excluded, 
     const optedOutInput: FateInput = {
       direction: "apply", conflict: false, nothingYet: false, installed: false,
       hasUpdate: false, carrierSynced: false, storeListOn: null, locallyOn: false,
-      runsOn: { device: "all" }, deviceClass: "desktop", desktopOnly: false, excludedHere: false, optedOutHere: true,
+      ruleSharing: EVERYWHERE, localException: null, deviceClass: "desktop", desktopOnly: false, excludedHere: false, optedOutHere: true,
       hasSettingsPayload: true, versionAhead: null, special: null, folderFileCount: null, encrypted: false,
     };
     const optedOutFate = rowFate(optedOutInput);
@@ -174,7 +174,7 @@ describe("fateBucket — spec §1 truth table (ledger C-#23; §7 adds excluded, 
     const degradedInput: FateInput = {
       direction: "apply", conflict: false, nothingYet: false, installed: true,
       hasUpdate: false, carrierSynced: true, storeListOn: false, locallyOn: false,
-      runsOn: { device: "all" }, deviceClass: "desktop", desktopOnly: false, excludedHere: false,
+      ruleSharing: EVERYWHERE, localException: null, deviceClass: "desktop", desktopOnly: false, excludedHere: false,
       hasSettingsPayload: false, versionAhead: null, special: null, folderFileCount: null, encrypted: false,
     };
     const degradedFate = rowFate(degradedInput);
@@ -470,39 +470,10 @@ describe("showColdStartBanner", () => {
   });
 });
 
-describe("memberDecisionsFromSharing", () => {
-  it("keeps only non-everywhere sharings, sorted by id, structural false when no id is in structuralIds", () => {
-    expect(memberDecisionsFromSharing({ b: perClass("desktop"), a: THIS_DEVICE, c: EVERYWHERE, d: perClass("mobile") }, new Set())).toEqual([
-      { id: "a", sharing: THIS_DEVICE, structural: false },
-      { id: "b", sharing: perClass("desktop"), structural: false },
-      { id: "d", sharing: perClass("mobile"), structural: false },
-    ]);
-  });
-});
-
-// R3-A structural derivation truth table (spec 2026-08-05-section-groups-and-member-menu-design.md
-// §R3-A): structural is true only for a this-device sharing with no explicit source — the pure layer
-// (memberDecisionsFromSharing) derives it from the sharing map plus the structuralIds the host passes
-// in (registry.ts's structuralLocalElements), never from a pre-computed boolean per decision. The
-// this-device-pin and card-on-explicit rows of the full truth table are host wiring (the
-// overlay in main.ts's memberDecisionsFor) — covered in tests/core.test.ts.
-describe("memberDecisionsFromSharing — structural derivation", () => {
-  it("card-off with no rule at all → structural true", () => {
-    expect(memberDecisionsFromSharing({ dataview: THIS_DEVICE }, new Set(["dataview"]))).toEqual([
-      { id: "dataview", sharing: THIS_DEVICE, structural: true },
-    ]);
-  });
-  it("a this-device sharing not carried in structuralIds (e.g. an explicit pin the host excludes) → structural false", () => {
-    expect(memberDecisionsFromSharing({ "remotely-save": THIS_DEVICE }, new Set())).toEqual([
-      { id: "remotely-save", sharing: THIS_DEVICE, structural: false },
-    ]);
-  });
-  it("a device-class rule → not this-device, structural false regardless of structuralIds", () => {
-    expect(memberDecisionsFromSharing({ "obsidian-git": perClass("desktop") }, new Set(["obsidian-git"]))).toEqual([
-      { id: "obsidian-git", sharing: perClass("desktop"), structural: false },
-    ]);
-  });
-});
+// memberDecisionsFromSharing / MemberDecision retired with the two-layer cutover
+// (2026-08-12-enablement-two-layers-design.md §5): "what has this element decided" is no longer a
+// projection of the item's own runsOn plus a structural card state — it is decideEnablement over a
+// stored rule and this device's own exception (tests/enablementDecision.test.ts).
 
 describe("enablementCarrierFor / carrierIsSynced", () => {
   it("community items carry via community-plugins; core items via core-plugins", () => {
@@ -1163,7 +1134,7 @@ describe("effectiveFate — single per-row derivation shared by staging/footer/d
   const baseInput: FateInput = {
     direction: "apply", conflict: false, nothingYet: false, installed: true,
     hasUpdate: false, carrierSynced: true, storeListOn: null, locallyOn: false,
-    runsOn: { device: "all" }, deviceClass: "desktop", desktopOnly: false, excludedHere: false,
+    ruleSharing: EVERYWHERE, localException: null, deviceClass: "desktop", desktopOnly: false, excludedHere: false,
     hasSettingsPayload: true, versionAhead: null, special: null, folderFileCount: null, encrypted: false,
   };
   const plainFate: Fate = { glyph: "↓", sentence: "Applies settings", chips: [], stageable: true, turnsOn: false, nothingYet: false, excluded: false };

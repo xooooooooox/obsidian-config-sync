@@ -24,21 +24,18 @@ import { companionRef } from "./itemKeys";
 import { EnablementList, SWITCH_LISTS } from "./switchList";
 import {
   DeviceClass,
-  EVERYWHERE,
   FieldRule,
   FileRule,
   ItemId,
   itemRef,
   ItemRef,
   PerElementSharing,
-  perClass,
   RunsOn,
   Section,
   Sharing,
   StorageSection,
   SyncGroup,
   SyncMode,
-  THIS_DEVICE,
 } from "./types";
 
 // The registry's declaration of which items are carriers (spec §5, "retired outright"): the two
@@ -212,10 +209,10 @@ export function itemFor(items: ItemMap, def: ItemDef): Item {
 // ── What a stored entry is worth ────────────────────────────────────────────────────────────────
 //
 // AN ENTRY'S PRESENCE IS LOAD-BEARING, and this comment exists because a previous round of this
-// release forgot it. `elementSharings`' second pass keys on presence ALONE: an id that is in the
-// store's on/off list but has no def here (the plugin is not installed) is masked — capture passes
-// it through untouched — if and only if `items[section][id]` exists. Delete the entry and the mask
-// goes with it, and the next capture removes that plugin from the shared list for every device.
+// release forgot it. An id that is in the store's on/off list but has no def here (the plugin is
+// not installed) still needs its entry: the item is what a rule, a lock label and a baseline are
+// keyed by. Delete the entry and those go with it, and the next capture can remove that plugin from
+// the shared list for every device.
 //
 // So `{synced: false}` is NOT residue, however much it looks like it. It is what an absent entry
 // is not, in the one place that matters most. An earlier fix here pruned it on write, reasoning by
@@ -570,74 +567,12 @@ function presetCompanionFallback(groupName: string, defs: ItemDef[], settings: C
   return null;
 }
 
-// Per-element sharing for a plugin's enablement (spec §3/§4, D4/D5): the item's own
-// `runsOn.device`, defaulting to everywhere; a disabled card forces its element to this-device
-// ("each device manages its own", never inherits another device's enabled state). Exported for
-// main.ts to fold into the switch-list engine's runtime member-exception derivation
-// (core-plugins.json/community-plugins.json are NOT string-array files, so they cannot go through
-// the generic capturePerElementArray/PerElementSharing mechanism the way a plain array key like
-// enabledCssSnippets does — the existing switch-list masking machinery, driven by this map, is the
-// correct home for per-element enable sharing).
-function deviceSharing(device: DeviceClass): Sharing {
-  return device === "all" ? EVERYWHERE : perClass(device);
-}
-
-interface ElementSharing {
-  element: string;
-  sharing: Sharing;
-  // Structural (task-8, spec 2026-08-05-section-groups-and-member-menu-design.md §R3-A):
-  // this-device solely because the card is off, with no explicit source (no stored runsOn) — as
-  // opposed to a this-device a user actually pinned. Only meaningful when the sharing IS
-  // this-device; false otherwise.
-  structural: boolean;
-}
-
-// Shared per-element walk behind enablementSharing/structuralLocalElements: same two passes (defs
-// whose list matches, then stored items with no local def), computed once so the two exported
-// projections can never drift apart.
-function elementSharings(defs: ItemDef[], settings: CompileSettings, list: EnablementList): ElementSharing[] {
-  const out: ElementSharing[] = [];
-  const covered = new Set<string>();
-  for (const def of defs) {
-    if (def.enablement?.list !== list) continue;
-    covered.add(def.id);
-    const item = itemFor(settings.items, def);
-    out.push({
-      element: def.enablement.element,
-      sharing: item.synced ? deviceSharing(item.runsOn?.device ?? "all") : THIS_DEVICE,
-      structural: !item.synced && item.runsOn === undefined,
-    });
-  }
-  // Stored items with no local def: the plugin isn't installed on this device, but its element
-  // still lives in the store's switch list, so an adopted rule / disabled-card decision must keep
-  // masking here (2026-07-27 mobile find: an adopted "desktop" rule for a not-installed plugin was
-  // dead config). The element id IS the item id — no def needed.
-  const section: StorageSection = list === "core-plugins" ? "core" : "community";
-  for (const [id, item] of Object.entries(settings.items[section] ?? {})) {
-    if (covered.has(id)) continue;
-    out.push({
-      element: id,
-      sharing: item.synced ? deviceSharing(item.runsOn?.device ?? "all") : THIS_DEVICE,
-      structural: !item.synced && item.runsOn === undefined,
-    });
-  }
-  return out;
-}
-
-export function enablementSharing(defs: ItemDef[], settings: CompileSettings, list: EnablementList): Record<string, Sharing> {
-  const out: Record<string, Sharing> = {};
-  for (const e of elementSharings(defs, settings, list)) out[e.element] = e.sharing;
-  return out;
-}
-
-// Elements whose enablementSharing this-device is structural (spec §R3-A) — a disabled card the
-// user never pinned or scoped, not a rule they wrote. The Sync Center's scoped-member disclosure
-// reads this to render those rows read-only instead of offering a control that silently no-ops.
-export function structuralLocalElements(defs: ItemDef[], settings: CompileSettings, list: EnablementList): Set<string> {
-  const out = new Set<string>();
-  for (const e of elementSharings(defs, settings, list)) if (e.structural) out.add(e.element);
-  return out;
-}
+// Per-element enablement sharing used to be DERIVED here, from each item's own `runsOn.device`
+// plus a disabled card's implicit this-device (`enablementSharing` / `structuralLocalElements` /
+// `elementSharings` / `deviceSharing`). It is stored, not derived, since
+// 2026-08-12-enablement-two-layers: the rule lives on the carrier item's `perElement` map
+// (enablementRules.ts) and is read from there, so a rule is a thing the user wrote rather than a
+// side effect of whether a card happens to be switched on.
 
 // Every group name the registry itself can ever produce plus the three switch-list names.
 // "community-plugins"/"core-plugins" are already in the first set (task 5: they are ordinary

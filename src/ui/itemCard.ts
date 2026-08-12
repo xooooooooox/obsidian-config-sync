@@ -12,14 +12,13 @@
  */
 import { GROUP_NAME_RE } from "../core/manifest";
 import { basename } from "../core/pathing";
+import { DeviceElementState } from "../core/deviceElements";
 import { deriveMode, emptyItem, Item, ItemDef, ItemFieldRule, ItemMap, itemFor, ItemSettingsFile, withItem } from "../core/registry";
 import {
   DeviceClass,
   EVERYWHERE,
   PerElementSharing,
   perClass,
-  RunsOn,
-  runsOnEquals,
   Sharing,
   sharingClass,
   sharingEquals,
@@ -77,7 +76,12 @@ export function countEncrypted(item: Item): number {
   return n;
 }
 
-export function computeBadges(def: ItemDef, item: Item, isThisDevice: boolean): Badge[] {
+// `enablement` is the card's two enablement layers (spec §5), or null for a def that has no
+// enablement projection at all: the fleet rule from the carrier item (enablementRules.ts) and this
+// device's own exception (deviceElements.ts). It replaces the `isThisDevice` boolean AND the
+// `item.runsOn.device` read this used to do — both of those were the retired one-field model, and
+// a badge derived from a field no run reads any more would be a claim about nothing.
+export function computeBadges(def: ItemDef, item: Item, enablement: { rule: Sharing; exception: DeviceElementState | null } | null): Badge[] {
   const badges: Badge[] = [];
   // On/off-only badge first, innate property (settingsFile state on the def)
   if (def.settingsFile !== undefined && def.settingsFile.defaultPath === null) {
@@ -92,14 +96,14 @@ export function computeBadges(def: ItemDef, item: Item, isThisDevice: boolean): 
   if (def.desktopOnly === true) {
     badges.push({ text: "desktop-only plugin", cls: "config-sync-card-badge-plat", icon: "monitor" });
   }
-  // "this device" is the device-local thisDeviceItems set; desktop/mobile ride the item's runsOn.
-  if (def.enablement !== undefined) {
-    const device = item.runsOn?.device;
-    if (isThisDevice) {
-      badges.push({ text: ON_BADGE_TEXT.local, cls: ON_BADGE_CLASS.local });
-    } else if (device === "desktop" || device === "mobile") {
-      badges.push({ text: ON_BADGE_TEXT[device], cls: ON_BADGE_CLASS[device] });
-    }
+  // An exception outranks the rule here for the same reason it does at run time (spec §5
+  // precedence 1): what this device actually does is the truer thing to say about it. A
+  // `this-device` RULE ("Each device decides") sets no class and is not itself an exception, so it
+  // earns no badge — the card's own row is where that answer lives.
+  if (def.enablement !== undefined && enablement !== null) {
+    const cls = sharingClass(enablement.rule);
+    if (enablement.exception !== null) badges.push({ text: ON_BADGE_TEXT.local, cls: ON_BADGE_CLASS.local });
+    else if (cls !== null) badges.push({ text: ON_BADGE_TEXT[cls], cls: ON_BADGE_CLASS[cls] });
   }
   const classPinned = countClassPinned(item);
   if (classPinned > 0) badges.push({ text: `${classPinned} device-scoped`, cls: "config-sync-card-badge-count" });
@@ -117,11 +121,11 @@ export function hasEnablementZone(def: ItemDef): boolean {
   return def.enablement !== undefined;
 }
 
-// Zone ① copy (spec §4/§10, D2/D4; 2026-07-26 round-3 revision: one row — label left, sharing
-// dropdown right; the hint moved into the dropdown's tooltip and dropped the carrier filename,
-// dev detail in a user-facing panel). Only rendered for a def where hasEnablementZone(def) is true.
-export const ENABLED_ON_LABEL = "Enabled on";
-export const ENABLED_ON_HINT = "Which devices turn this plugin on";
+// Zone ① copy (spec 2026-08-12-enablement-two-layers-design.md §6.5). Same name, same values, same
+// data as the Sync Center's row of that name. No hint constant any more: the row is two segments
+// and each one carries its own aria-label, so a single sentence over both would describe neither.
+// Only rendered for a def where hasEnablementZone(def) is true.
+export const DEFAULT_ENABLED_ON_LABEL = "Default enabled on";
 
 export type SettingsFileZoneKind = "none" | "state-only" | "settings";
 
@@ -394,9 +398,6 @@ export const FILE_SHARING_OPTIONS: Sharing[] = [EVERYWHERE, perClass("desktop"),
 // folders" (spec §1) rather than inventing a second phrase for the same idea.
 export const FILE_SHARING_MENU_UNAVAILABLE_TEXT = "Per-key rules decide — see More";
 export const FIELD_SHARING_OPTIONS: Sharing[] = [EVERYWHERE, perClass("desktop"), perClass("mobile"), THIS_DEVICE];
-// ENABLED ON cycle for a manifest-desktop-only plugin: mobile can never install it, so that
-// stop is meaningless — the cycle runs everywhere → desktop → this device (round-8 spec §2).
-export const DESKTOP_ONLY_ENABLED_OPTIONS: Sharing[] = [EVERYWHERE, perClass("desktop"), THIS_DEVICE];
 export const COMPANION_DEVICE_OPTIONS: DeviceClass[] = ["all", "desktop", "mobile"];
 
 // Sharing renders as a Commander-style clickable icon (round-6 定稿): the icon IS the state, a
@@ -405,42 +406,6 @@ export function sharingIcon(sharing: Sharing): string {
   if (sharing.kind === "everywhere") return "monitor-smartphone";
   if (sharing.kind === "this-device") return "airplay";
   return sharing.class === "desktop" ? "monitor" : "smartphone";
-}
-
-// Sync Center card "Runs on" row (spec 2026-08-06-c-livetest-batch2-design.md §2, ledger C-#10):
-// the five stops the menu offers, in menu order. They are RunsOn VALUES now, not a flat enum —
-// the two force stops keep the device axis at "all" and pin the state instead, and their `where`
-// stays "everywhere", which is what today's rules do in effect (C-#46; spec §8 keeps that
-// question out of this release). "all" mirrors the idle glyph, the two force stops get their own
-// (unused elsewhere — verified via `git grep -n '"power'` across src/, 2026-08-06).
-export const RUNS_ON_OPTIONS: readonly RunsOn[] = [
-  { device: "all" },
-  { device: "desktop" },
-  { device: "mobile" },
-  { device: "all", force: { state: "on", where: "everywhere" } },
-  { device: "all", force: { state: "off", where: "everywhere" } },
-];
-
-export function runsOnIcon(rule: RunsOn): string {
-  if (rule.force !== undefined) return rule.force.state === "on" ? "power" : "power-off";
-  if (rule.device === "desktop") return "monitor";
-  if (rule.device === "mobile") return "smartphone";
-  return "monitor-smartphone";
-}
-
-// Runs-on menu labels (spec §4/§6, copy final) — the wording is unchanged from the five values
-// this union replaces; only the shape behind it moved.
-export function runsOnLabel(rule: RunsOn): string {
-  if (rule.force !== undefined) return rule.force.state === "on" ? "Always on here" : "Never on here";
-  if (rule.device === "desktop") return "Computers only";
-  if (rule.device === "mobile") return "Phones only";
-  return "Follows your devices";
-}
-
-// A rule is at its default stop when it neither pins a class nor forces a state — the "is-set"
-// accent and the menu's checkmark both read this.
-export function runsOnIsDefault(rule: RunsOn): boolean {
-  return runsOnEquals(rule, { device: "all" });
 }
 
 export function nextSharing(current: Sharing, options: readonly Sharing[]): Sharing {

@@ -43,7 +43,7 @@ interface SecretStore {
 }
 import { bratRepoIndex, parseBratRepoList, resolveBratIndex, withBratRepos } from "./core/bratIndex";
 import { type CatalogSection, corePluginFile, displayLabelForGroup, findGroupByName, listBetaSections, listCoreSections, listDiscovered, listOptionSections, listPluginSections, SELF_GROUP_NAME, SELF_ITEM_ID, SELF_ITEM_REF, SELF_ITEM_SECTION, setCorePluginIds } from "./core/catalog";
-import { Availability, availabilityForGroup, desktopOnlyDrift, desktopOnlyPluginIds, forcedRunsOn, membersExcludedByClass, memberForceOff, preferStoredRunsOn } from "./core/availability";
+import { Availability, availabilityForGroup, desktopOnlyDrift, desktopOnlyPluginIds } from "./core/availability";
 import { listFilesRecursive, isJunkPath, FileIO } from "./core/io";
 import { leftoverStoreRels, storeSelfCopyGroups, selfListGroups } from "./core/leftover";
 import { parseStoreLock, STORE_LOCK_FUTURE_MESSAGE, validateSyncManifest } from "./core/manifest";
@@ -59,27 +59,25 @@ import {
   emptyItem,
   emptyItemMap,
   ENABLEMENT_LISTS,
-  enablementSharing,
   groupOwners,
   GroupDisplayParts,
   defForRef,
   defRef,
-  isEnablementList,
-  Item,
   itemAt,
   ItemDef,
   itemForGroupName,
   ItemMap,
   ItemSettingsFile,
-  itemWithDevice,
   compileItems,
   parentCardLabel,
   pruneSettingsFile,
   RegistryEnv,
-  structuralLocalElements,
   withItem,
   withoutItem,
 } from "./core/registry";
+import { enablementRuleFor, enablementRules, RuleListId, withEnablementRule } from "./core/enablementRules";
+import { DEVICE_ELEMENTS_KEY, DeviceElements, DeviceElementState, deviceElementIds, deviceElementState, parseDeviceElements, withDeviceElement } from "./core/deviceElements";
+import { decideEnablement, EnablementDecision } from "./core/enablementDecision";
 import { classifySettings, CURRENT_SCHEMA, SCHEMA_FUTURE_NOTICE, SCHEMA_UPGRADE_NOTICE, withDefaults } from "./core/settingsMigration";
 import { deviceOptOutsFor, migrateV2Settings } from "./core/v2Migration";
 import { applySwitchList, captureSwitchList, EnablementList, isSwitchListGroup, localRealPath, parseSwitchList, readLocalSwitchList, subtractForceOff, switchDivergence, SwitchList, switchListMemberOn, writeLocalSwitchList } from "./core/switchList";
@@ -90,8 +88,8 @@ import { syncListDelta } from "./core/syncListDelta";
 import { selfPaneState } from "./core/selfPane";
 import { applyUpdates, baselineRefs, Ledger, LEDGER_VERSION, parseLedger, pruneLedger, rekeyLedger } from "./core/ledger";
 import { bucketCounts, checkRemote, diffRemote, GroupStatus, remoteDirectionCounts, RemoteCheck, remoteLockAhead, remoteLockLabels, statusForGroups } from "./core/status";
-import { asRunsOn, DeviceClass, EVERYWHERE, FileSharing, GroupResult, itemRef, ItemRef, parseItemRef, Remote, RibbonButtons, RunsOn, Sharing, sharingClass, StorageSection, StoreLock, SyncGroup, THIS_DEVICE } from "./core/types";
-import { MemberDecision, memberDecisionsFromSharing, statusBarStatuses } from "./ui/panelModel";
+import { DeviceClass, EVERYWHERE, FileSharing, GroupResult, itemRef, ItemRef, parseItemRef, Remote, RibbonButtons, Sharing, StoreLock, SyncGroup } from "./core/types";
+import { statusBarStatuses } from "./ui/panelModel";
 import { fileRuleLegalForMode } from "./ui/itemCard";
 import { ConflictModal } from "./ui/ConflictModal";
 import { renderStatusBarItem, statusBarSegments } from "./ui/statusBar";
@@ -724,7 +722,10 @@ export default class ConfigSyncPlugin extends Plugin {
           const local = (await io.exists(localPath)) ? await io.read(localPath) : null;
           const store = (await io.exists(storePath)) ? await io.read(storePath) : null;
           const serialize = (v: SwitchList): string => JSON.stringify(v, null, 2) + "\n";
-          const exc = isSwitchListGroup(name) ? ((await this.augmentedSwitchExceptions(rootPath))[name] ?? []) : [];
+          // The same one derivation the run itself uses, so a preview can never show what a run
+          // would not do.
+          const decisions = this.decisionsByList();
+          const exc = isSwitchListGroup(name) ? ((await this.augmentedSwitchExceptions(rootPath, decisions))[name] ?? []) : [];
           const cls: "desktop" | "mobile" = Platform.isMobile ? "mobile" : "desktop";
           if (dir === "capture") {
             let produced = local ?? "";
@@ -745,7 +746,7 @@ export default class ConfigSyncPlugin extends Plugin {
               if (st !== null) {
                 const localList = local !== null ? readLocalSwitchList(name, local) : null;
                 const merged = applySwitchList(st, localList, exc);
-                const fo = this.memberForceOffIds(name);
+                const fo = this.forcedFrom(decisions, "off")[name] ?? [];
                 produced = writeLocalSwitchList(name, subtractForceOff(merged, fo), local);
               }
             } else if (group.mode === "fields") {
@@ -759,7 +760,6 @@ export default class ConfigSyncPlugin extends Plugin {
           return null; // e.g. passphrase needed for field encryption — no diff available
         }
       },
-      switchMemberDecisions: (name) => (isSwitchListGroup(name) ? this.memberDecisionsFor(name) : []),
       isDesktopOnlyPlugin: (id) => {
         const manifest = this.pluginRegistry().manifests[id];
         return manifest === undefined ? null : manifest.isDesktopOnly === true;
@@ -794,12 +794,13 @@ export default class ConfigSyncPlugin extends Plugin {
           return null;
         }
       },
-      addSwitchExceptions: (name, ids) => this.addSwitchExceptions(name, ids),
-      setMemberDevice: (list, elementId, device) => this.setMemberDevice(list, elementId, device),
-      clearMemberLocal: (list, elementId) => this.clearMemberLocal(list, elementId),
       setItemSyncEnabled: (ref, enabled) => this.setItemSyncEnabled(ref, enabled),
-      runsOnFor: (list, elementId, locallyOn) => this.runsOnFor(list, elementId, locallyOn),
-      setRunsOn: (list, elementId, rule) => this.setRunsOn(list, elementId, rule),
+      enablementRuleFor: (list, elementId) => this.enablementRuleFor(list, elementId),
+      setEnablementRule: (list, elementId, sharing) => this.setEnablementRule(list, elementId, sharing),
+      deviceElementFor: (list, elementId) => this.deviceElementFor(list, elementId),
+      leaveToThisDevice: (list, elementId) => this.leaveToThisDevice(list, elementId),
+      followTheDefault: (list, elementId) => this.followTheDefault(list, elementId),
+      setDeviceElement: (list, elementId, state) => this.setDeviceElement(list, elementId, state),
       itemFileSharing: (ref) => this.itemFileSharing(ref),
       itemFileSharingMenuLegal: (ref) => this.itemFileSharingMenuLegal(ref),
       setItemFileSharing: (ref, sharing) => this.setItemFileSharing(ref, sharing),
@@ -1482,114 +1483,104 @@ export default class ConfigSyncPlugin extends Plugin {
     };
   }
 
-  // A group name -> the enablement list it IS, or null. The registry declares which lists exist
-  // (ENABLEMENT_LISTS); a group that is not one of them (e.g. enabled-css-snippets, governed by a
-  // plain perElement key on the compiled "appearance" group — see registry.ts) has no
-  // items-backed enablement at all.
-  private listFor(group: string): EnablementList | null {
-    return isEnablementList(group) ? group : null;
+  // ── The two enablement layers (spec 2026-08-12-enablement-two-layers-design.md §5) ─────────
+  //
+  // The fleet rule lives on the carrier item (enablementRules.ts); this device's own exception
+  // lives in localStorage (deviceElements.ts); decideEnablement (enablementDecision.ts) is the one
+  // place the two are combined. Everything downstream — the capture/apply mask, the two force
+  // sets, every UI row — projects off that one decision, because the four independent derivations
+  // this replaced are exactly how "a local choice survives a pull" came to be true in one of them
+  // and false in another (C-#52).
+
+  // The device-element table, parsed at most once per load (same discipline as deviceOptOutsCache
+  // — this is read per element per render).
+  private deviceElementsCache: DeviceElements | null = null;
+
+  private deviceElements(): DeviceElements {
+    if (this.deviceElementsCache === null) this.deviceElementsCache = parseDeviceElements(this.app.loadLocalStorage(DEVICE_ELEMENTS_KEY));
+    return this.deviceElementsCache;
   }
 
-  private enablementSharingFor(group: string): Record<string, Sharing> {
-    const list = this.listFor(group);
-    return list === null ? {} : enablementSharing(this.registryDefs, this.settings, list);
+  private saveDeviceElements(next: DeviceElements): void {
+    this.deviceElementsCache = next;
+    // An empty table clears the key rather than storing "{}" — the same prune discipline the
+    // opt-out list and the settings map follow (C-#26).
+    this.app.saveLocalStorage(DEVICE_ELEMENTS_KEY, Object.keys(next).length === 0 ? null : JSON.stringify(next));
   }
 
-  private structuralLocalElementsFor(group: string): Set<string> {
-    const list = this.listFor(group);
-    return list === null ? new Set<string>() : structuralLocalElements(this.registryDefs, this.settings, list);
-  }
-
-  // The per-class slice of the list's sharing map — the only part the capture/apply mask cares
-  // about (everywhere masks nothing; this-device is handled by memberLocalIdsFor).
-  private memberClassesFor(group: string): Record<string, "desktop" | "mobile"> {
-    const out: Record<string, "desktop" | "mobile"> = {};
-    for (const [id, sharing] of Object.entries(this.enablementSharingFor(group))) {
-      const cls = sharingClass(sharing);
-      if (cls !== null) out[id] = cls;
+  // Every element of a list that has anything to decide: a fleet rule, a local exception, or an
+  // auto-derived exclusion the caller adds. One walk, one decision per element.
+  private enablementDecisions(list: EnablementList): Map<string, EnablementDecision> {
+    const rules = enablementRules(this.settings.items, list);
+    const table = this.deviceElements();
+    const deviceClass: "desktop" | "mobile" = Platform.isMobile ? "mobile" : "desktop";
+    const out = new Map<string, EnablementDecision>();
+    for (const id of new Set([...Object.keys(rules), ...deviceElementIds(table, list)])) {
+      out.set(id, decideEnablement({ rule: rules[id] ?? EVERYWHERE, exception: deviceElementState(table, list, id), deviceClass }));
     }
     return out;
   }
 
-  // The stored section an enablement list's elements are items of. StorageSection, not Section:
-  // a beta plugin's element lives in `community` like every other community plugin (spec §7b).
-  private sectionForList(list: EnablementList): StorageSection {
-    return list === "core-plugins" ? "core" : "community";
+  // One walk per run for every list, so the mask and the two force sets are three projections of
+  // ONE map rather than three derivations that can disagree.
+  private decisionsByList(): Map<EnablementList, Map<string, EnablementDecision>> {
+    return new Map(ENABLEMENT_LISTS.map((list) => [list, this.enablementDecisions(list)] as const));
   }
 
-  // This device's pinned ids for one enablement list, de-refed to bare element ids.
-  private thisDeviceIdsIn(section: StorageSection): string[] {
-    const out: string[] = [];
-    for (const ref of this.settings.thisDeviceItems) {
-      const parsed = parseItemRef(ref);
-      if (parsed !== null && parsed.section === section) out.push(parsed.id);
+  private forcedFrom(decisions: Map<EnablementList, Map<string, EnablementDecision>>, want: "on" | "off"): Record<string, string[]> {
+    const out: Record<string, string[]> = {};
+    for (const [list, map] of decisions) {
+      const ids = [...map].filter(([, d]) => d.force === want).map(([id]) => id);
+      if (ids.length > 0) out[list] = ids;
     }
     return out;
   }
 
-  // Base decisions from enablementSharing, OVERLAID with settings.thisDeviceItems for this
-  // group's list as an explicit this-device pin (a pin wins over any base sharing for that id —
-  // an explicit "this device decides" choice always beats a device-class rule the writer path
-  // left behind). Every this-device reader (switchMemberDecisions' · N device-scoped count, the ⌂
-  // explanation rows, and memberLocalIdsFor below) goes through this so they can't drift apart
-  // the way memberDecisionsFor alone did pre-fix (it only saw the structural disabled-card
-  // this-device, never the pins).
-  private memberDecisionsFor(group: string): MemberDecision[] {
-    const base = memberDecisionsFromSharing(this.enablementSharingFor(group), this.structuralLocalElementsFor(group));
-    const list = this.listFor(group);
-    if (list === null) return base;
-    const pinned = this.thisDeviceIdsIn(this.sectionForList(list));
-    if (pinned.length === 0) return base;
-    const decisions = new Map(base.map((d) => [d.id, d] as const));
-    // An explicit pin is itself the "explicit source" — never structural, regardless of the
-    // card's enabled state it overrides.
-    for (const id of pinned) decisions.set(id, { id, sharing: THIS_DEVICE, structural: false });
-    return [...decisions.values()].sort((a, b) => a.id.localeCompare(b.id));
+  // The fleet rule for one element of one list — read and write, the only pair (spec §6.6).
+  enablementRuleFor(list: RuleListId, elementId: string): Sharing {
+    return enablementRuleFor(this.settings.items, list, elementId);
   }
 
-  // This-device ids for a switch-list group: memberDecisionsFor already carries the
-  // settings.thisDeviceItems union, so this is just the this-device projection.
-  private memberLocalIdsFor(group: string): string[] {
-    return this.memberDecisionsFor(group)
-      .filter((d) => d.sharing.kind === "this-device")
-      .map((d) => d.id);
-  }
-
-  // Shared add/remove for the explicit this-device set — every write path that sets or clears
-  // "this device decides for itself" goes through this so the settings-card chip (setMemberLocal,
-  // called by SettingTab's renderEnabledOnZone) and the where-it-runs menu
-  // (addSwitchExceptions/setMemberDevice/clearMemberLocal) can never drift apart. In-memory only —
-  // callers persist with their own saveSettings() call.
-  private setLocalMember(ref: ItemRef, on: boolean): void {
-    const set = new Set(this.settings.thisDeviceItems);
-    if (on) set.add(ref);
-    else set.delete(ref);
-    this.settings.thisDeviceItems = [...set];
-  }
-
-  // A this-device pin and a device-class rule are mutually exclusive. The where-it-runs menu's pin
-  // and its "Everywhere" reset both go through thisDeviceItems, so they must also drop any stale
-  // runsOn.device — otherwise "Desktop only → This device → Everywhere" would silently resolve
-  // back to desktop. Only the DEVICE axis is cleared: a force rule is the other axis and answers a
-  // different question, exactly as the two v2 fields this merged did. A runsOn left saying nothing
-  // at all is dropped entirely, so the round trip leaves data.json as it found it (C-#26).
-  private clearMemberDevice(section: StorageSection, id: string): void {
-    const item = itemAt(this.settings.items, section, id);
-    const runsOn = item?.runsOn;
-    if (item === undefined || runsOn === undefined || runsOn.device === "all") return;
-    const next: Item = { ...item };
-    if (runsOn.force === undefined) delete next.runsOn;
-    else next.runsOn = { device: "all", force: runsOn.force };
-    this.settings.items = withItem(this.settings.items, section, id, next);
-  }
-
-  // SettingsHost-facing wrapper (SettingTab's "Enabled on" chip): single item, persists itself.
-  // Takes the ref the caller already holds (registry.ts's defRef) rather than a section+id pair,
-  // so a card's PRESENTED section can never become the pin's identity.
-  async setMemberLocal(ref: ItemRef, on: boolean): Promise<void> {
-    if (this.schemaStopped()) return; // §4.2b: refuse BEFORE mutating — see settingsWritable()
-    this.setLocalMember(ref, on);
+  async setEnablementRule(list: RuleListId, elementId: string, sharing: Sharing): Promise<void> {
+    if (this.schemaStopped()) return; // §4.2b: refuse BEFORE mutating
+    this.settings.items = withEnablementRule(this.settings.items, list, elementId, sharing);
     await this.saveSettings();
+  }
+
+  // This device's own exception for that element: null = follows the rule.
+  deviceElementFor(list: RuleListId, elementId: string): DeviceElementState | null {
+    return deviceElementState(this.deviceElements(), list, elementId);
+  }
+
+  // "Leave it to me" keeps EXACTLY what is on this device right now (spec §6.5). The state is read
+  // from the PERSISTED list file — the same content applySwitchList's pass-through reads — never
+  // from a live plugin query, which can diverge from disk (a non-persistent enablePlugin, which
+  // config-sync's own apply cycle and the IOTO ecosystem both use).
+  async leaveToThisDevice(list: RuleListId, elementId: string): Promise<void> {
+    if (this.schemaStopped()) return;
+    const persisted = await this.localSwitchListFor(list);
+    this.writeDeviceElement(list, elementId, switchListMemberOn(persisted, elementId) ? "on" : "off");
+    void this.refreshLocalStatus();
+  }
+
+  // Put it back under the shared answer.
+  async followTheDefault(list: RuleListId, elementId: string): Promise<void> {
+    if (this.schemaStopped()) return;
+    this.writeDeviceElement(list, elementId, null);
+    void this.refreshLocalStatus();
+  }
+
+  // Flip an existing exception.
+  async setDeviceElement(list: RuleListId, elementId: string, state: DeviceElementState): Promise<void> {
+    if (this.schemaStopped()) return;
+    this.writeDeviceElement(list, elementId, state);
+    void this.refreshLocalStatus();
+  }
+
+  // ONE writer for the exception table (spec §6.6) — the three methods above differ only in the
+  // value they hand it.
+  private writeDeviceElement(list: RuleListId, elementId: string, state: DeviceElementState | null): void {
+    this.saveDeviceElements(withDeviceElement(this.deviceElements(), list, elementId, state));
   }
 
   // Sync Center header chip (unified grammar task-4): same write as the Settings tab's per-card
@@ -1600,36 +1591,6 @@ export default class ConfigSyncPlugin extends Plugin {
     if (parsed === null) return;
     const item = itemAt(this.settings.items, parsed.section, parsed.id) ?? emptyItem();
     this.settings.items = withItem(this.settings.items, parsed.section, parsed.id, { ...item, synced: enabled });
-    await this.saveSettings();
-  }
-
-  // Runs-on menu read (unified grammar task-5, spec §6): a genuinely stored rule always wins;
-  // absent one, derive losslessly from this device's pin / the disabled-card structural
-  // this-device (memberDecisionsFor) using the SAME forcedRunsOn mapping runsOnForces applies at
-  // apply/capture time, so the menu's displayed value always agrees with what a run would do.
-  private runsOnFor(list: EnablementList, elementId: string, locallyOn: boolean): RunsOn {
-    const stored = this.storedRunsOn(this.sectionForList(list), elementId);
-    if (stored !== undefined) return stored;
-    const sharing = this.memberDecisionsFor(list).find((d) => d.id === elementId)?.sharing;
-    if (sharing === undefined) return { device: "all" };
-    if (sharing.kind === "this-device") return forcedRunsOn(locallyOn);
-    return { device: sharing.class };
-  }
-
-  // asRunsOn, not a bare read: a rule shape this build doesn't know (a newer build's) is ignored
-  // here rather than shown/applied, and stays on disk untouched (2.21.0 invariant II.2).
-  private storedRunsOn(section: StorageSection, id: string): RunsOn | undefined {
-    return asRunsOn(itemAt(this.settings.items, section, id)?.runsOn);
-  }
-
-  // Runs-on menu write: stores the rule on the item it governs. Rides the self item's
-  // whole-document field sync unchanged (it carries no locked preset, unlike
-  // rootPath/remotes/thisDeviceItems — see selfPresetRules).
-  async setRunsOn(list: EnablementList, elementId: string, rule: RunsOn): Promise<void> {
-    if (this.schemaStopped()) return; // §4.2b
-    const section = this.sectionForList(list);
-    const item = itemAt(this.settings.items, section, elementId) ?? emptyItem();
-    this.settings.items = withItem(this.settings.items, section, elementId, { ...item, runsOn: rule });
     await this.saveSettings();
   }
 
@@ -1765,54 +1726,15 @@ export default class ConfigSyncPlugin extends Plugin {
     return itemAt(this.settings.items, "custom", name) !== undefined ? itemRef("custom", name) : null;
   }
 
-  // The where-it-runs menu's "This device decides for itself" entry (spec 2026-07-28 §4) — and
-  // KeepOnDeviceModal's multi-id "keep extra on this device" batch. Schema v2 (task-2 retarget):
-  // this adds every named id's ref to settings.thisDeviceItems and clears the item's device
-  // rule; a this-device pin is never a value inside runsOn.
-  async addSwitchExceptions(name: string, ids: string[]): Promise<void> {
-    if (this.schemaStopped()) return; // §4.2b
-    const list = this.listFor(name);
-    if (list === null) return; // e.g. enabled-css-snippets: governed by its own perElement map, not this mechanism
-    const section = this.sectionForList(list);
-    for (const id of ids) {
-      this.setLocalMember(itemRef(section, id), true);
-      this.clearMemberDevice(section, id);
-    }
-    await this.saveSettings();
-    void this.refreshLocalStatus();
-  }
-
-  // The where-it-runs menu's "Desktop only"/"Mobile only" entries; same field the settings
-  // card's "Enabled on" writes for those two classes. Masking covers not-installed plugins since
-  // the 2026-07-27 enablement fix. A device-class rule always overrides a prior this-device
-  // choice, so it clears the id from thisDeviceItems too.
-  async setMemberDevice(list: EnablementList, elementId: string, device: "desktop" | "mobile"): Promise<void> {
-    if (this.schemaStopped()) return; // §4.2b
-    const section = this.sectionForList(list);
-    this.setLocalMember(itemRef(section, elementId), false);
-    this.settings.items = withItem(this.settings.items, section, elementId, itemWithDevice(itemAt(this.settings.items, section, elementId), device));
-    await this.saveSettings();
-  }
-
-  // The where-it-runs menu's "Everywhere" entry: clears a prior this-device pin so the member goes
-  // back to following the group's normal capture/apply flow, and drops the device axis of any
-  // stored rule — needed because the pin does not round-trip through the same field the other
-  // three menu entries overwrite.
-  async clearMemberLocal(list: EnablementList, elementId: string): Promise<void> {
-    if (this.schemaStopped()) return; // §4.2b
-    const section = this.sectionForList(list);
-    this.setLocalMember(itemRef(section, elementId), false);
-    this.clearMemberDevice(section, elementId);
-    await this.saveSettings();
-    void this.refreshLocalStatus();
-  }
-
-  // The runtime mask per switch group = This-device ids (memberLocal) ∪ ids class-scoped away
-  // from this device (memberClassesFor) ∪ auto-derived exclusions (community-plugins only:
-  // desktop-only manifest ids on mobile, plus plugin groups with a non-matching devices class).
-  // Masked ids pass through at capture, keep local state on apply, and are hidden from in-sync
-  // comparison. The persisted settings are left untouched.
-  private async augmentedSwitchExceptions(rootPath: string): Promise<Record<string, string[]>> {
+  // The runtime mask per switch group = every element decideEnablement masked (a local exception,
+  // an each-device-decides rule, or a class rule this device does not match) ∪ auto-derived
+  // exclusions (community-plugins only: desktop-only manifest ids on mobile, plus plugin groups
+  // with a non-matching devices class). Masked ids pass through at capture, keep local state on
+  // apply, and are hidden from in-sync comparison. The persisted settings are left untouched.
+  private async augmentedSwitchExceptions(
+    rootPath: string,
+    decisions: Map<EnablementList, Map<string, EnablementDecision>>
+  ): Promise<Record<string, string[]>> {
     const device: "desktop" | "mobile" = Platform.isMobile ? "mobile" : "desktop";
     const derived = deviceExcludedPluginIds(this.compiledGroups, device);
     if (Platform.isMobile) {
@@ -1830,23 +1752,17 @@ export default class ConfigSyncPlugin extends Plugin {
     }
     const out: Record<string, string[]> = {};
     for (const name of ENABLEMENT_LISTS) {
-      const classExcluded = membersExcludedByClass(this.memberClassesFor(name), Platform.isMobile);
+      const ruled = [...(decisions.get(name) ?? new Map<string, EnablementDecision>())].filter(([, d]) => d.masked).map(([id]) => id);
       const auto = name === "community-plugins" ? derived : new Set<string>();
-      const mask = [...new Set([...this.memberLocalIdsFor(name), ...classExcluded, ...auto])];
+      const mask = [...new Set([...ruled, ...auto])];
       if (mask.length > 0) out[name] = mask;
     }
     return out;
   }
 
-  // Force-off = user class rules enforced on the wrong device class, minus this-device ids
-  // (local wins). Auto-derived exclusions are never forced off — they keep local state.
-  private memberForceOffIds(group: string): string[] {
-    return memberForceOff(this.memberClassesFor(group), this.memberLocalIdsFor(group), Platform.isMobile);
-  }
-
   // A group's PERSISTED local switch-list content — the same file applySwitchList's exception
   // pass-through reads (task-2 fix #1: never a live PluginHost query, which can diverge from what
-  // is actually on disk; see availability.ts's forcedRunsOn comment). Absent group/file/unparseable → null,
+  // is actually on disk — the divergence pluginState.ts documents). Absent group/file/unparseable → null,
   // treated as "off" by switchListMemberOn.
   private async localSwitchListFor(name: string): Promise<SwitchList | null> {
     const group = findGroupByName(this.compiledGroups, name);
@@ -1857,50 +1773,15 @@ export default class ConfigSyncPlugin extends Plugin {
     return readLocalSwitchList(name, await io.read(real));
   }
 
-  // This list's stored Runs-on rules, keyed by bare element id. An entry whose shape this build
-  // doesn't recognise is dropped FROM THE READ only (invariant II.2): it must not reach the mask
-  // below at all — landing there as "no stored rule" would make the id a bare this-device pin and
-  // force its switch either way, which is a decision an unknown rule never asked for.
-  private storedRunsOnFor(list: EnablementList): Record<string, RunsOn> {
-    const out: Record<string, RunsOn> = {};
-    for (const [id, item] of Object.entries(this.settings.items[this.sectionForList(list)] ?? {})) {
-      const known = asRunsOn(item.runsOn);
-      if (known !== undefined) out[id] = known;
-    }
-    return out;
-  }
-
-  // Mask table (Sync Center unified grammar, task 2): every id with either a stored rule or a
-  // this-device pin resolves via preferStoredRunsOn (stored wins; otherwise forcedRunsOn against
-  // the group's PERSISTED local content, task-2 fix #1) into force on → exception + forceOn, or
-  // force off → exception + forceOff (both on top of the class force-off memberForceOffIds
-  // already computes).
-  private runsOnForces(group: string, persisted: SwitchList | null): { forceOn: string[]; forceOff: string[] } {
-    const list = this.listFor(group);
-    if (list === null) return { forceOn: [], forceOff: [] };
-    const stored = this.storedRunsOnFor(list);
-    const ids = new Set([...this.memberLocalIdsFor(group), ...Object.keys(stored)]);
-    const forceOn: string[] = [];
-    const forceOff: string[] = [];
-    for (const id of ids) {
-      const rule = preferStoredRunsOn(stored[id], switchListMemberOn(persisted, id));
-      if (rule.force?.state === "on") forceOn.push(id);
-      else if (rule.force?.state === "off") forceOff.push(id);
-    }
-    return { forceOn, forceOff };
-  }
-
   private async coreContext(): Promise<CoreContext> {
     const rootPath = await resolveRootPath(this.settings.rootPath, this.settings.pkmMode, this.pkmProbe());
     if (rootPath === "" || rootPath.startsWith("/") || rootPath.split("/").includes("..")) {
       throw new Error(`Config Sync: invalid data folder "${rootPath}" — set a vault-relative path in settings`);
     }
     this.lastResolvedRoot = rootPath;
-    const switchExceptions = await this.augmentedSwitchExceptions(rootPath);
-    const ruleForces: Record<string, { forceOn: string[]; forceOff: string[] }> = {};
-    for (const name of ENABLEMENT_LISTS) {
-      ruleForces[name] = this.runsOnForces(name, await this.localSwitchListFor(name));
-    }
+    // ONE decision per element per run; the mask and both force sets are projections of it. The
+    // three used to be three independent derivations, which is how they came to disagree.
+    const decisions = this.decisionsByList();
     return {
       io: this.configIO(),
       configDir: this.app.vault.configDir,
@@ -1908,23 +1789,9 @@ export default class ConfigSyncPlugin extends Plugin {
       plugins: this.pluginHost(),
       passphrase: this.passphrase(),
       deviceClass: Platform.isMobile ? "mobile" : "desktop",
-      switchExceptions,
-      switchForceOff: (() => {
-        const out: Record<string, string[]> = {};
-        for (const name of ENABLEMENT_LISTS) {
-          const f = [...new Set([...this.memberForceOffIds(name), ...(ruleForces[name]?.forceOff ?? [])])];
-          if (f.length > 0) out[name] = f;
-        }
-        return out;
-      })(),
-      switchForceOn: (() => {
-        const out: Record<string, string[]> = {};
-        for (const name of ENABLEMENT_LISTS) {
-          const f = ruleForces[name]?.forceOn ?? [];
-          if (f.length > 0) out[name] = f;
-        }
-        return out;
-      })(),
+      switchExceptions: await this.augmentedSwitchExceptions(rootPath, decisions),
+      switchForceOff: this.forcedFrom(decisions, "off"),
+      switchForceOn: this.forcedFrom(decisions, "on"),
       // No fieldOverlay: compileItems (registry.ts) already merges every app-slice card's rules
       // into the compiled "app" group at settings-compile time — the v3-era runtime overlay
       // (appTabRules/appTabsNonDefault, src/core/appTabs.ts) is superseded and removed.

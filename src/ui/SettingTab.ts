@@ -1,5 +1,5 @@
 import { refItemId } from "../core/itemKeys";
-import { App, ButtonComponent, DropdownComponent, ExtraButtonComponent, Notice, Platform, Plugin, PluginSettingTab, Scope, SearchComponent, SecretComponent, Setting, setIcon, setTooltip, TextComponent, ToggleComponent } from "obsidian";
+import { App, ButtonComponent, DropdownComponent, ExtraButtonComponent, Menu, Notice, Platform, Plugin, PluginSettingTab, Scope, SearchComponent, SecretComponent, Setting, setIcon, setTooltip, TextComponent, ToggleComponent } from "obsidian";
 import {
   QualifierAutocomplete,
   parseQuery,
@@ -62,7 +62,6 @@ import {
   ItemMap,
   itemFor,
   ItemSettingsFile,
-  withRunsOnDevice,
   withItem,
 } from "../core/registry";
 import { SCHEMA_FUTURE_NOTICE } from "../core/settingsMigration";
@@ -71,6 +70,9 @@ import { confirmPresetPathChange } from "./ConfirmModal";
 import { commitDraft } from "./commitGroups";
 import { classifyJsonKeys, classifyPerElementLines, jsonElementClass, jsonKeyClass, KeyClass } from "./jsonView";
 import { renderSharingCycle } from "./sharingCycle";
+import { DeviceElementState } from "../core/deviceElements";
+import { RuleListId } from "../core/enablementRules";
+import { enablementRowModel, FOLLOWS_LABEL, OFF_HERE_LABEL, ON_HERE_LABEL, RULE_OPTIONS } from "./enablementRow";
 import {
   applyPerElementToggle,
   applySyncAll,
@@ -83,12 +85,10 @@ import {
   companionConflictError,
   companionNameConflictError,
   computeBadges,
+  DEFAULT_ENABLED_ON_LABEL,
   DEFAULT_FIELD_RULE,
   DESKTOP_ONLY_ALL_NOTE,
-  DESKTOP_ONLY_ENABLED_OPTIONS,
-  ENABLED_ON_HINT,
   ENABLED_CSS_SNIPPETS_KEY,
-  ENABLED_ON_LABEL,
   encryptToggleDisabled,
   ENCRYPT_DISABLED_PERITEM_HINT,
   FIELD_SHARING_OPTIONS,
@@ -142,9 +142,6 @@ export interface SettingsHost extends Plugin {
     // Every section, custom items included: the Advanced tab's "Custom rules"/"Discovered files"
     // are items.custom entries, read/written through the same durable contract.
     items: ItemMap;
-    // Explicit "this device decides for itself" item refs — read-only here, written only through
-    // setMemberLocal below.
-    thisDeviceItems: ItemRef[];
   };
   saveSettings(): Promise<void>;
   // False while this device's data.json was written by a newer Config Sync (spec
@@ -153,9 +150,16 @@ export interface SettingsHost extends Plugin {
   // touches `settings`, or memory diverges from disk with no recompile. Asking also tells the
   // user why (the refusal notice fires here, on their gesture).
   settingsWritable(): boolean;
-  // The "Enabled on" chip's "This device" write: adds/removes the item's ref from
-  // settings.thisDeviceItems. Persists itself.
-  setMemberLocal(ref: ItemRef, on: boolean): Promise<void>;
+  // The two enablement layers (spec §6.6), one read/write pair each — the SAME pair the Sync
+  // Center's row of the same name calls, so the three entrances cannot drift apart. `RuleListId`,
+  // not `EnablementList`: the snippet rows need the third list.
+  enablementRuleFor(list: RuleListId, elementId: string): Sharing;
+  setEnablementRule(list: RuleListId, elementId: string, sharing: Sharing): Promise<void>;
+  deviceElementFor(list: RuleListId, elementId: string): DeviceElementState | null;
+  // Take the element out of the shared answer, keeping EXACTLY what it is right now (spec §6.5).
+  leaveToThisDevice(list: RuleListId, elementId: string): Promise<void>;
+  followTheDefault(list: RuleListId, elementId: string): Promise<void>;
+  setDeviceElement(list: RuleListId, elementId: string, state: DeviceElementState): Promise<void>;
   // Drops the per-refresh reader cache (#3): call after settings.remotes changes so a stale
   // reader for an edited/removed remote's old URL/branch/subdir/storePath is never reused.
   clearReaderCache(): void;
@@ -757,8 +761,16 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     return itemFor(this.host.settings.items, def);
   }
 
-  private isThisDevice(def: ItemDef): boolean {
-    return this.host.settings.thisDeviceItems.includes(defRef(def));
+  // The card's two enablement layers, for the badges and the `Default enabled on` row — null for a
+  // def with no enablement projection at all (an Obsidian/custom card), so a badge is never derived
+  // from a list this item does not live in.
+  private enablementOf(def: ItemDef): { rule: Sharing; exception: DeviceElementState | null } | null {
+    const enablement = def.enablement;
+    if (enablement === undefined) return null;
+    return {
+      rule: this.host.enablementRuleFor(enablement.list, enablement.element),
+      exception: this.host.deviceElementFor(enablement.list, enablement.element),
+    };
   }
 
   // Every settings-tab write funnels through here — the mutators themselves only ever spread what
@@ -856,7 +868,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       syncExpansion();
     });
     row.nameEl.prepend(chevron);
-    for (const badge of computeBadges(def, item, this.isThisDevice(def))) this.renderBadge(row.nameEl, badge);
+    for (const badge of computeBadges(def, item, this.enablementOf(def))) this.renderBadge(row.nameEl, badge);
     row.addToggle((t) =>
       t.setValue(item.synced).onChange(async (v) => {
         await this.updateItem(def, (c) => ({ ...c, synced: v }));
@@ -867,13 +879,13 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     syncExpansion();
   }
 
-  // In-place header badge refresh — value-only config changes (sharing, encrypt, runsOn)
+  // In-place header badge refresh — value-only config changes (sharing, encrypt, enablement)
   // update the count badges without rebuilding the card, so the panel never visibly jumps.
   private refreshCardBadges(wrap: HTMLElement, def: ItemDef): void {
     const nameEl = wrap.querySelector(":scope > .setting-item > .setting-item-info > .setting-item-name");
     if (!(nameEl instanceof HTMLElement)) return;
     for (const b of Array.from(nameEl.querySelectorAll(".config-sync-card-badge"))) b.remove();
-    for (const badge of computeBadges(def, this.itemOf(def), this.isThisDevice(def))) this.renderBadge(nameEl, badge);
+    for (const badge of computeBadges(def, this.itemOf(def), this.enablementOf(def))) this.renderBadge(nameEl, badge);
   }
 
   private renderBadge(nameEl: HTMLElement, badge: Badge): void {
@@ -910,7 +922,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private renderCardExpansion(parent: HTMLElement, wrap: HTMLElement, def: ItemDef): void {
     const exp = parent.createDiv({ cls: "config-sync-item-exp" });
     const item = this.itemOf(def);
-    if (hasEnablementZone(def)) this.renderEnabledOnZone(exp, def, wrap);
+    if (hasEnablementZone(def)) this.renderDefaultEnabledOnRow(exp, def, wrap);
     this.renderSettingsFileZone(exp, def, item, wrap);
     // companionHost is its own stable container (mirrors zone ②'s bodyHost) so a member-list
     // expand/collapse can refresh just zone ③ (refreshCompanionZone) without rebuilding the whole
@@ -919,43 +931,72 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     this.renderCompanionZone(companionHost, def, item, wrap);
   }
 
-  // Zone ① "Enabled on" (spec §4/§10, D4 — core/community/beta plugin cards only): a 4-stop
-  // chip. everywhere/desktop/mobile read/write the item's own runsOn.device through
-  // updateItem/saveSettings (registry.ts's enablementSharing / main.ts's switch-list masking read
-  // that field at compile time); "This device" instead reads/writes host.settings.thisDeviceItems
-  // through host.setMemberLocal and never lands in runsOn.
+  // Zone ① `Default enabled on` (spec §6.5) — core/community/beta plugin cards only. Same name,
+  // same values, same data as the Sync Center's row of that name: this used to be a 4-stop cycle
+  // whose first three stops wrote `runsOn.device` and whose fourth wrote `thisDeviceItems`, i.e.
+  // one control with two destinations. Now it is two controls, one per layer, each with one writer.
   // Grid row (spec 2026-07-26-card-visual-refresh-design.md §2.1/§4 Step 1): label in the content
-  // column, the cycle in the sharing column, last two columns empty.
-  private renderEnabledOnZone(exp: HTMLElement, def: ItemDef, wrap: HTMLElement): void {
+  // column, both segments in the sharing column, last two columns empty.
+  private renderDefaultEnabledOnRow(exp: HTMLElement, def: ItemDef, wrap: HTMLElement): void {
+    const enablement = def.enablement;
+    if (enablement === undefined) return;
+    const list = enablement.list;
+    const elementId = enablement.element;
     const row = exp.createDiv({ cls: "config-sync-grid config-sync-card-fieldrow" });
-    row.createDiv({ cls: "config-sync-explabel config-sync-explabel-inline", text: ENABLED_ON_LABEL });
-    const sharingCell = row.createDiv();
-    sharingCell.setAttribute("aria-label", ENABLED_ON_HINT);
-    // Nothing else refreshes this row after a write (badges don't rebuild it), so the icon
-    // rebuilds itself from the freshly-saved config after each advance.
-    const buildSharing = (): void => {
-      sharingCell.empty();
-      const device = this.itemOf(def).runsOn?.device ?? "all";
-      const current: Sharing = this.isThisDevice(def) ? THIS_DEVICE : device === "all" ? EVERYWHERE : perClass(device);
-      renderSharingCycle(sharingCell, {
-        sharing: current,
-        options: def.desktopOnly === true ? DESKTOP_ONLY_ENABLED_OPTIONS : FIELD_SHARING_OPTIONS,
+    row.createDiv({ cls: "config-sync-explabel config-sync-explabel-inline", text: DEFAULT_ENABLED_ON_LABEL });
+    const cell = row.createDiv({ cls: "config-sync-tworow" });
+    const build = (): void => {
+      cell.empty();
+      const rule = this.host.enablementRuleFor(list, elementId);
+      const exception = this.host.deviceElementFor(list, elementId);
+      const model = enablementRowModel({ rule, exception });
+      const after = (): void => {
+        build();
+        this.refreshCardBadges(wrap, def);
+      };
+      // Fleet segment: the cycle idiom the card already teaches (renderSharingCycle), over the four
+      // rule values. A desktop-only plugin still drops the mobile stop — mobile can never install it.
+      renderSharingCycle(cell.createDiv(), {
+        sharing: rule,
+        options: def.desktopOnly === true ? RULE_OPTIONS.filter((o) => o.kind !== "per-class" || o.class !== "mobile") : RULE_OPTIONS,
         disabled: false,
-        ...(def.desktopOnly === true && current.kind === "everywhere" ? { note: DESKTOP_ONLY_ALL_NOTE } : {}),
-        onChange: (v) => {
-          void (async () => {
-            await this.host.setMemberLocal(defRef(def), v.kind === "this-device");
-            const cls = sharingClass(v);
-            // A this-device pin and an "everywhere" stop both mean "no class rule here"; only the
-            // device axis is touched, so a force rule set from the Sync Center survives.
-            await this.updateItem(def, (c) => withRunsOnDevice(c, cls ?? "all"));
-            this.refreshCardBadges(wrap, def);
-            buildSharing();
-          })();
-        },
+        ...(def.desktopOnly === true && rule.kind === "everywhere" ? { note: DESKTOP_ONLY_ALL_NOTE } : {}),
+        onChange: (v) => void this.host.setEnablementRule(list, elementId, v).then(after),
+      });
+      cell.createSpan({ cls: "config-sync-tworow-vline" });
+      // Local segment. A class rule that this device does not match has nothing true to show as a
+      // local state, so it shows the default sentence — but the menu stays live, because an
+      // exception outranks a class rule (spec §5 precedence 1) and a row that cannot be excepted
+      // would be a dead end.
+      const local = cell.createSpan({
+        cls: `config-sync-tworow-seg is-local${model.localIsException ? " is-set" : ""}`,
+        attr: { role: "button", tabindex: "0", "aria-label": model.local.label },
+      });
+      if (model.local.icon !== null) setIcon(local.createSpan({ cls: "config-sync-tworow-ic" }), model.local.icon);
+      local.createSpan({ text: model.local.label });
+      const openLocalMenu = (x: number, y: number): void => {
+        const menu = new Menu();
+        // "Follows the default" is absent when there is no shared answer to follow (spec §6.5,
+        // case 3): with `Each device decides`, every device's own state IS the answer.
+        if (rule.kind !== "this-device") {
+          menu.addItem((i) => i.setTitle(FOLLOWS_LABEL).setChecked(exception === null).onClick(() => void this.host.followTheDefault(list, elementId).then(after)));
+        }
+        menu.addItem((i) => i.setTitle(ON_HERE_LABEL).setIcon("power").setChecked(exception === "on").onClick(() => void this.host.setDeviceElement(list, elementId, "on").then(after)));
+        menu.addItem((i) => i.setTitle(OFF_HERE_LABEL).setIcon("power-off").setChecked(exception === "off").onClick(() => void this.host.setDeviceElement(list, elementId, "off").then(after)));
+        menu.showAtPosition({ x, y });
+      };
+      local.addEventListener("click", (e) => {
+        e.stopPropagation();
+        openLocalMenu(e.clientX, e.clientY);
+      });
+      local.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        e.preventDefault();
+        const r = local.getBoundingClientRect();
+        openLocalMenu(r.left, r.bottom);
       });
     };
-    buildSharing();
+    build();
     row.createDiv(); // state column — empty
     row.createDiv(); // action column — empty
   }

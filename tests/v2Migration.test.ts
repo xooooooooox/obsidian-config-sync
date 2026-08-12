@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { Notice } from "obsidian";
 import ConfigSyncPlugin from "../src/main";
 import { deviceOptOutsFor, migrateV2Settings, mergeLegacyAppSliceItems, drainEnabledOnLocal, runsOnFrom, v2ItemRef } from "../src/core/v2Migration";
-import { buildItemDefs, compileItems, defsForForeignItems, emptyItemMap, enablementSharing, ItemDef, ItemMap, RegistryEnv } from "../src/core/registry";
+import { buildItemDefs, compileItems, defsForForeignItems, emptyItemMap, ItemDef, ItemMap, RegistryEnv } from "../src/core/registry";
 import { itemsIn } from "./items";
 import { basename } from "../src/core/pathing";
 import { validateSyncManifest } from "../src/core/manifest";
@@ -581,17 +581,10 @@ describe("a materialised orphan rule stays invisible until its plugin is install
     expect(defs.some((d) => d.id === "excalidraw")).toBe(false);
   });
 
-  // PINNED, not removed — the masking half of I1 is the accepted half. `elementSharings`' second
-  // pass walks stored items directly (not defs), so a materialised orphan for a plugin that is not
-  // installed here becomes a this-device element, which v2 did not have. Kept for two reasons: §7b
-  // blesses a Runs-on choice masking ("one field means one thing"), and it is the SAFER reading —
-  // v2 forced such an id off locally without excepting it, so the next capture from this device
-  // deleted it from the shared list for everyone. Asserted here so it is a decision on the record
-  // and not something a rehearsal discovers.
-  it("…does gain a this-device member decision, which is the accepted delta", () => {
-    const sharing = enablementSharing(buildItemDefs(ENV), { items: migratedItems() }, "community-plugins");
-    expect(sharing["excalidraw"]).toEqual(THIS_DEVICE);
-  });
+  // PINNED, not removed — the masking half of I1 is the accepted half. The v3 reading of this
+  // delta (a materialised orphan for a not-installed plugin became a this-device element) was a
+  // property of `elementSharings`, which retired with the two-layer cutover; what survives here is
+  // the fact the assertion existed for — the rule itself is kept on disk, below.
 
   // The rule itself is still there, and still forces the switch — that is the whole reason the
   // migration materialises it. It is stored, invisible, and waiting for the plugin to arrive.

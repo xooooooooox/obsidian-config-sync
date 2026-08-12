@@ -142,5 +142,6 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 // 2026-08-11-data-model-hardening.md §3.2, invariant II.2). Dropping every value this build
 // doesn't recognise — which is precisely what a newer build writes — and saving immediately made
 // the load path destroy the future's data and publish the deletion to the fleet on the next
-// capture. An unrecognised value is ignored at the point of use (types.ts's asRunsOn, read by
-// main.ts's runsOnFor / storedRunsOnFor) and storage is never rewritten for it.
+// capture. An unrecognised value is ignored at the point of use (types.ts's asRunsOn; the same
+// discipline enablementRules.ts's asSharing applies to the rule that succeeded it) and storage is
+// never rewritten for it.

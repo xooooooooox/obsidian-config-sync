@@ -27,7 +27,10 @@ describe("FATE_CHIP_ICON — chip→icon map completeness (C-#40)", () => {
       "your rule": "sliders-horizontal",
       "off here — your rule": "sliders-horizontal",
       "on here — your rule": "sliders-horizontal",
-      "stays off": "power",
+      // `power` was re-pointed at the local-exception ON state by
+      // 2026-08-12-enablement-two-layers-design.md §7 — a chip that says the row stays off must
+      // not share it.
+      "stays off": "power-off",
       encrypted: "lock",
       "your choice": "check",
     });

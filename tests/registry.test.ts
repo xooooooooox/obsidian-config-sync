@@ -10,7 +10,6 @@ import {
   defsForForeignItems,
   emptyItem,
   emptyItemMap,
-  enablementSharing,
   itemEarnsDef,
   groupOwners,
   itemWithDevice,
@@ -23,7 +22,6 @@ import {
   storageSection,
   withItem,
   RegistryEnv,
-  structuralLocalElements,
 } from "../src/core/registry";
 import { itemsIn } from "./items";
 import { leftoverStoreRels } from "../src/core/leftover";
@@ -174,7 +172,6 @@ describe("item identity never carries the beta classification (spec §7b)", () =
     const items = withItem(emptyItemMap(), beta.section, beta.id, on());
     expect(Object.keys(items.community)).toEqual(["slides-rup"]);
     expect(groupOwners(defs, items)["plugin-slides-rup"]).toEqual([{ section: "community", id: "slides-rup" }]);
-    expect(enablementSharing(defs, { items }, "community-plugins")).toEqual({ "slides-rup": EVERYWHERE });
   });
 
   it("parseItemRef refuses a beta ref outright — it was never a legal identity", () => {
@@ -400,100 +397,10 @@ describe("the on/off lists as items", () => {
   });
 });
 
-describe("enablementSharing — per-element sharing from the item's runsOn", () => {
-  it("defaults to everywhere, reflects an explicit device rule, and forces this-device for a disabled card", () => {
-    const env: RegistryEnv = {
-      ...EMPTY_ENV,
-      cores: [
-        { id: "graph", name: "Graph view", fileExists: true },
-        { id: "canvas", name: "Canvas", fileExists: true },
-        { id: "backlink", name: "Backlinks", fileExists: true },
-      ],
-    };
-    const defs = buildItemDefs(env);
-    const s = settings({
-      core: {
-        graph: on(), // no runsOn set → everywhere
-        canvas: on({ runsOn: { device: "desktop" } }),
-        backlink: emptyItem(), // disabled
-      },
-    });
-    expect(enablementSharing(defs, s, "core-plugins")).toEqual({ graph: EVERYWHERE, canvas: perClass("desktop"), backlink: THIS_DEVICE });
-  });
-
-  it("only includes elements whose list matches", () => {
-    const env: RegistryEnv = {
-      ...EMPTY_ENV,
-      cores: [{ id: "graph", name: "Graph view", fileExists: true }],
-      plugins: [{ id: "dataview", name: "Dataview" }],
-    };
-    const defs = buildItemDefs(env);
-    const s = settings({ core: { graph: on() }, community: { dataview: on() } });
-    expect(Object.keys(enablementSharing(defs, s, "core-plugins"))).toEqual(["graph"]);
-    expect(Object.keys(enablementSharing(defs, s, "community-plugins"))).toEqual(["dataview"]);
-  });
-
-  // The 2026-07-27 mobile find: an adopted rule for a plugin NOT installed on this device has no
-  // local def, so a defs-only scan dropped it — the rule was dead config and the element stayed
-  // unmasked ("obsidian-git" kept showing in every mobile diff after adopt).
-  it("covers stored items with no local def: their element id IS the item id", () => {
-    const env: RegistryEnv = { ...EMPTY_ENV, plugins: [{ id: "dataview", name: "Dataview" }] };
-    const defs = buildItemDefs(env);
-    const s = settings({
-      community: {
-        dataview: on(),
-        "obsidian-git": on({ runsOn: { device: "desktop" } }), // not installed here
-        simpread: emptyItem(), // not installed, card disabled → this device
-      },
-      obsidian: { app: on() }, // no enablement list — must not leak in
-    });
-    expect(enablementSharing(defs, s, "community-plugins")).toEqual({
-      dataview: EVERYWHERE,
-      "obsidian-git": perClass("desktop"),
-      simpread: THIS_DEVICE,
-    });
-    expect(Object.keys(enablementSharing(defs, s, "core-plugins"))).toEqual([]);
-  });
-});
-
-// spec 2026-08-05-section-groups-and-member-menu-design.md §R3-A: a disabled card's this-device
-// reading is structural (no rule the user wrote); a stored runsOn excludes the element from the
-// structural set even though the disabled card still forces this-device.
-describe("structuralLocalElements — disabled-card this-device vs a stored rule", () => {
-  it("a disabled card with no stored rule is structural", () => {
-    const env: RegistryEnv = { ...EMPTY_ENV, plugins: [{ id: "dataview", name: "Dataview" }] };
-    const defs = buildItemDefs(env);
-    const s = settings({ community: { dataview: emptyItem() } });
-    expect(structuralLocalElements(defs, s, "community-plugins")).toEqual(new Set(["dataview"]));
-  });
-
-  it("a disabled card that still carries a stored rule is not structural, even though its sharing is forced this-device", () => {
-    const env: RegistryEnv = { ...EMPTY_ENV, plugins: [{ id: "dataview", name: "Dataview" }] };
-    const defs = buildItemDefs(env);
-    const s = settings({ community: { dataview: { ...emptyItem(), runsOn: { device: "desktop" } } } });
-    expect(enablementSharing(defs, s, "community-plugins")).toEqual({ dataview: THIS_DEVICE });
-    expect(structuralLocalElements(defs, s, "community-plugins")).toEqual(new Set());
-  });
-
-  it("an enabled card is never structural", () => {
-    const env: RegistryEnv = { ...EMPTY_ENV, plugins: [{ id: "dataview", name: "Dataview" }] };
-    const defs = buildItemDefs(env);
-    const s = settings({ community: { dataview: on() } });
-    expect(structuralLocalElements(defs, s, "community-plugins")).toEqual(new Set());
-  });
-
-  it("covers not-installed items the same way as defs (fallback loop parity)", () => {
-    const env: RegistryEnv = { ...EMPTY_ENV, plugins: [{ id: "dataview", name: "Dataview" }] };
-    const defs = buildItemDefs(env);
-    const s = settings({
-      community: {
-        dataview: on(),
-        simpread: emptyItem(), // not installed, card disabled → structural
-      },
-    });
-    expect(structuralLocalElements(defs, s, "community-plugins")).toEqual(new Set(["simpread"]));
-  });
-});
+// enablementSharing / structuralLocalElements / elementSharings / deviceSharing retired with the
+// two-layer cutover (2026-08-12-enablement-two-layers-design.md §5): a per-element rule is STORED
+// on the carrier item (enablementRules.ts, tests/enablementRules.test.ts) instead of derived from
+// each item's own runsOn plus whether its card happens to be switched on.
 
 describe("compileItems — companion path collisions", () => {
   it("throws a CompileError when two DIFFERENT items' carriers land on the same store path", () => {

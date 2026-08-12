@@ -1230,6 +1230,20 @@ body.is-mobile .config-sync-cardrow > .config-sync-explabel-inline { flex: none;
 .config-sync-sharingicon.config-sync-card-trigger { display: inline-flex; align-items: center; justify-content: center; width: fit-content; padding: 3px 4px; }
 .config-sync-sharingicon.config-sync-card-trigger:hover, .config-sync-sharingicon.config-sync-card-trigger:focus-visible { background: var(--background-modifier-hover); }
 .config-sync-menuchip.config-sync-card-trigger { padding: 3px 8px; }
+/* The two-segment enablement row (spec 2026-08-12-enablement-two-layers-design.md §6.1):
+   `fleet segment | divider | local segment`, one shape shared by the Sync Center's row and the
+   settings card's. Each segment is its own menu trigger and carries the .is-set accent language the
+   icon triggers above already teach. The local segment renders NO glyph while it follows the
+   default — a default has nothing to say — so its box must stay legible as text alone. Task 10
+   refines the visual pass; this is the structural minimum. */
+.config-sync-tworow { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.config-sync-tworow-seg { display: inline-flex; align-items: center; gap: 4px; border-radius: var(--radius-s); padding: 3px 6px; font-size: var(--font-ui-smaller); color: var(--text-muted); cursor: pointer; white-space: nowrap; }
+.config-sync-tworow-seg:hover, .config-sync-tworow-seg:focus-visible { color: var(--text-normal); background: var(--background-modifier-hover); }
+.config-sync-tworow-seg.is-set { color: var(--interactive-accent); }
+.config-sync-tworow-seg.is-local.is-set { color: var(--color-purple); }
+.config-sync-tworow-ic { display: inline-flex; align-items: center; }
+.config-sync-tworow-ic .svg-icon { width: var(--icon-s); height: var(--icon-s); }
+.config-sync-tworow-vline { flex: 0 0 auto; width: 1px; align-self: stretch; min-height: 1em; background: var(--background-modifier-border); }
 /* The expanded card itself (ledger C-#2): bordered, left-indented under the row's name column
    (chevron 16px + its 4px margin ≈ 20px) and offset one notch from the section behind it, so the
    card reads as one contained unit — row hairlines (.config-sync-card-fieldrow's border-bottom)

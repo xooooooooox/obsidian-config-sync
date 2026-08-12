@@ -5,6 +5,8 @@ import ConfigSyncPlugin from "../src/main";
 import { Item, ItemMap } from "../src/core/registry";
 import { Ledger, LEDGER_VERSION } from "../src/core/ledger";
 import { itemsIn } from "./items";
+import { perElementKeyFor } from "../src/core/switchList";
+import { EVERYWHERE, perClass } from "../src/core/types";
 
 // The real "obsidian" package's Notice type (which tsc's build gate type-checks against, unlike
 // vitest's aliased tests/mock-obsidian.ts) has no `lastMessage` — this cast reaches the mock's
@@ -209,48 +211,64 @@ describe("ConfigSyncPlugin.loadSettings/saveSettings — nested defaults and an 
 // spec 2026-08-11-data-model-hardening.md §3.2 (invariant II.2): the load path used to drop every
 // stored rule value this build doesn't recognise and save immediately, so a rule written by a
 // NEWER build became a deletion this device pushed to the whole fleet on its next capture. The
-// value must now survive the load untouched, trigger no save, and simply be ignored by the two
-// readers.
-describe("ConfigSyncPlugin.loadSettings — an unrecognised runsOn survives and is ignored", () => {
-  interface RunsOnSurface {
+// value must now survive the load untouched, trigger no save, and simply be ignored at the point
+// of use.
+//
+// The rule itself moved with the two-layer cutover (2026-08-12-enablement-two-layers-design.md
+// §3.3): it lives on the carrier item's `perElement` map, and `asSharing` (enablementRules.ts) is
+// what drops an unreadable one FROM THE READ. Both halves are asserted here through the real
+// plugin — the surviving bytes, and the two readers that must not act on them.
+describe("ConfigSyncPlugin.loadSettings — an unrecognised enablement rule survives and is ignored", () => {
+  interface RuleSurface {
     app: unknown;
     loadData: () => Promise<unknown>;
     saveData: (d: unknown) => Promise<void>;
     loadSettings: () => Promise<void>;
-    settings: { items: ItemMap };
-    runsOnFor: (list: "core-plugins" | "community-plugins", elementId: string, locallyOn: boolean) => unknown;
-    storedRunsOnFor: (list: "core-plugins" | "community-plugins") => Record<string, unknown>;
+    settings: { rootPath: string; items: ItemMap };
+    enablementRuleFor: (list: string, elementId: string) => unknown;
+    coreContext: () => Promise<{ switchExceptions: Record<string, string[]>; switchForceOff: Record<string, string[]> }>;
   }
 
-  const KNOWN = { device: "all", force: { state: "on", where: "everywhere" } };
-  const FUTURE = { device: "all", force: { state: "on-tuesdays", where: "everywhere" } };
+  // The reserved key "" is perElementKeyFor("community-plugins") — asserted against the producer,
+  // never spelled as a literal (spec §9 lesson 2).
+  const carrierWithRules = (rules: Record<string, unknown>): ItemMap =>
+    itemsIn({
+      obsidian: {
+        "community-plugins": {
+          synced: true,
+          settingsFile: { mode: "fields", rules: {}, perElement: { [perElementKeyFor("community-plugins")]: rules } },
+        } as unknown as Item,
+      },
+      community: { futurist: { synced: true }, known: { synced: true } },
+    });
 
   it("loads it unchanged with NO save, and neither reader acts on it", async () => {
     const plugin = new ConfigSyncPlugin({} as never, {} as never);
-    const instance = plugin as unknown as RunsOnSurface;
+    const instance = plugin as unknown as RuleSurface;
     instance.app = fakeApp();
-    instance.loadData = async () => ({
-      schemaVersion: 3,
-      items: itemsIn({ community: { futurist: { synced: true, runsOn: FUTURE } as unknown as Item, known: { synced: true, runsOn: KNOWN } as unknown as Item } }),
-      remotes: [],
-      bratIndex: {},
-    });
+    const stored = { futurist: { kind: "on-tuesdays" }, known: perClass("desktop") };
+    instance.loadData = async () => ({ schemaVersion: 3, rootPath: "cs", items: carrierWithRules(stored), remotes: [] });
     let saveCallCount = 0;
     instance.saveData = async () => {
       saveCallCount += 1;
     };
 
+    // No recompile(): manifest.ts's perElement validator rejects a sharing shape it does not know,
+    // which is a SEPARATE seam from the two readers under test here (and one the migration task
+    // owns) — this test is about loadSettings and the readers, not about compile validation.
     await instance.loadSettings();
 
     // storage is left exactly as found — the whole point: nothing to propagate as a deletion.
-    expect(instance.settings.items.community["futurist"]?.runsOn).toEqual(FUTURE);
+    expect(instance.settings.items.obsidian["community-plugins"]?.settingsFile?.perElement[perElementKeyFor("community-plugins")]).toEqual(stored);
     expect(saveCallCount).toBe(0);
 
-    // ignored at the point of use: the menu falls back to its default instead of showing it, and
-    // the apply mask never sees the id at all — an unknown rule must not become a forced on/off.
-    expect(instance.runsOnFor("community-plugins", "futurist", true)).toEqual({ device: "all" });
-    expect(instance.runsOnFor("community-plugins", "known", false)).toEqual(KNOWN);
-    expect(instance.storedRunsOnFor("community-plugins")).toEqual({ known: KNOWN });
+    // ignored at the point of use: the row falls back to the default instead of showing it…
+    expect(instance.enablementRuleFor("community-plugins", "futurist")).toEqual(EVERYWHERE);
+    expect(instance.enablementRuleFor("community-plugins", "known")).toEqual(perClass("desktop"));
+    // …and the mask never sees the id at all — an unknown rule must not become a forced on/off.
+    const ctx = await instance.coreContext();
+    expect(ctx.switchExceptions["community-plugins"] ?? []).not.toContain("futurist");
+    expect(ctx.switchForceOff["community-plugins"] ?? []).not.toContain("futurist");
   });
 });
 

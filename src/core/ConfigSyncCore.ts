@@ -48,9 +48,9 @@ export interface CoreContext {
   passphrase: string | null;
   deviceClass: "desktop" | "mobile";
   groupsIO: GroupsIO;
-  switchExceptions: Record<string, string[]>; // group name -> masked member ids (This-device ∪ scoped-away ∪ auto-derived)
-  switchForceOff?: Record<string, string[]>; // group name -> ids forced off on apply (user class scope on the wrong device class, or a never-here rule)
-  switchForceOn?: Record<string, string[]>; // group name -> ids forced on on apply (an always-here rule; see availability.ts's forcedRunsOn mask table)
+  switchExceptions: Record<string, string[]>; // group name -> masked member ids (decideEnablement's `masked` ∪ auto-derived)
+  switchForceOff?: Record<string, string[]>; // group name -> ids forced off on apply (a class rule on the wrong device class, or this device's own "Off here" exception)
+  switchForceOn?: Record<string, string[]>; // group name -> ids forced on on apply (this device's own "On here" exception; see enablementDecision.ts)
   fieldOverlay?: (group: SyncGroup, topKeys: string[]) => FieldRule[] | null; // runtime category rules (e.g. app.json view rows)
   // Compiles a self store copy's sync list. v3 copies persist `items` (custom section included; no
   // compiled groups array), and only the plugin holds the registry defs needed to compile them

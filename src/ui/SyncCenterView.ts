@@ -3,7 +3,19 @@ import { ApplyItem, CaptureItem, orderInstallsCatalogFirst, ProgressFn, StateAct
 import { lockRefFor, refItemId } from "../core/itemKeys";
 import { GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry, RemoteDiffFile, remoteDirectionCounts } from "../core/status";
 import { SECTION_LABELS, findGroupByName, SELF_GROUP_NAME, sectionForGroup, communityGroupName } from "../core/catalog";
-import { DeviceClass, EVERYWHERE, FileChanges, FileSharing, GroupResult, hasChanges, ItemRef, perClass, Remote, RunsOn, runsOnEquals, sharingEquals, SyncGroup, StorageSection } from "../core/types";
+import { DeviceClass, EVERYWHERE, FileChanges, FileSharing, GroupResult, hasChanges, ItemRef, perClass, Remote, Sharing, sharingEquals, SyncGroup, StorageSection } from "../core/types";
+import { DeviceElementState } from "../core/deviceElements";
+import { RuleListId } from "../core/enablementRules";
+import {
+  enablementRowModel,
+  FOLLOWS_LABEL,
+  OFF_HERE_LABEL,
+  ON_HERE_LABEL,
+  RowSegment,
+  RULE_OPTIONS,
+  ruleIcon,
+  ruleLabel,
+} from "./enablementRow";
 import { Availability } from "../core/availability";
 import { REUSE_MAX_AGE_MS } from "../external/readerCache";
 import { isWholeFileEncrypted } from "../core/modes";
@@ -31,7 +43,6 @@ import {
   isValidPolicy,
   legacyLockedFamilyBucket,
   matchesSearch,
-  MemberDecision,
   mergeFamilyChanges,
   moreFilesText,
   nosettingsLineText,
@@ -75,10 +86,6 @@ import { renderFoldIcon, renderFoldCount, type FoldKind } from "./foldIcons";
 import {
   FILE_SHARING_MENU_UNAVAILABLE_TEXT,
   FILE_SHARING_OPTIONS,
-  RUNS_ON_OPTIONS,
-  runsOnIcon,
-  runsOnIsDefault,
-  runsOnLabel,
   sharingCycleTooltip,
   sharingIcon,
   sharingLabel,
@@ -259,7 +266,6 @@ export interface SyncCenterHost {
   pullFrom(remote: Remote): Promise<GroupResult[] | null>;
   pushTo(remote: Remote): Promise<GroupResult[] | null>;
   adoptConfiguration(): Promise<GroupResult[] | null>;
-  switchMemberDecisions(name: string): MemberDecision[]; // [] for non-switch-list groups
   // The installed plugin's manifest desktop-only flag — the source of truth regardless of
   // whether the member's own settings-file sync is enabled (the availability map only covers
   // that subset). null = unknown (not installed on this device), not "false".
@@ -285,11 +291,6 @@ export interface SyncCenterHost {
   // side is missing or unparseable. `masked` is the augmented exception set itself — the
   // enablement fate derivation (#5-B) needs to tell "off everywhere" from "excluded by a rule".
   switchDivergenceFor(name: string): Promise<{ captureRemoves: string[]; applyDisables: string[]; masked: string[] } | null>;
-  addSwitchExceptions(name: string, ids: string[]): Promise<void>;
-  setMemberDevice(list: EnablementList, elementId: string, device: "desktop" | "mobile"): Promise<void>;
-  // The where-it-runs menu's "Everywhere" entry: clears a prior this-device choice from
-  // settings.thisDeviceItems so the member follows the group's normal flow again.
-  clearMemberLocal(list: EnablementList, elementId: string): Promise<void>;
   // Contents for an inline change diff: base = current state of the target side, produced =
   // what the pending action (capture/apply) would write. null = no diff available.
   diffPair(name: string, rel: string, dir: Direction): Promise<{ base: string; produced: string } | null>;
@@ -297,11 +298,19 @@ export interface SyncCenterHost {
   // core-plugins/community-plugins carrier) is itself a synced item — same field the Settings
   // tab's per-card sync toggle writes (Item.synced).
   setItemSyncEnabled(ref: ItemRef, enabled: boolean): Promise<void>;
-  // The Runs-on menu (spec §4/§6): read = the element's current rule (a stored Item.runsOn wins;
-  // else derived losslessly from the this-device pin, using `locallyOn` exactly as apply/capture
-  // time does) — write = stores the rule directly.
-  runsOnFor(list: EnablementList, elementId: string, locallyOn: boolean): RunsOn;
-  setRunsOn(list: EnablementList, elementId: string, rule: RunsOn): Promise<void>;
+  // The two enablement layers (spec §6.6), one read/write pair each — the SAME pair the Settings
+  // panel's card rows call, so the three entrances cannot drift apart.
+  // The fleet rule for one element of one list.
+  enablementRuleFor(list: RuleListId, elementId: string): Sharing;
+  setEnablementRule(list: RuleListId, elementId: string, sharing: Sharing): Promise<void>;
+  // This device's own exception for that element: null = follows the rule.
+  deviceElementFor(list: RuleListId, elementId: string): DeviceElementState | null;
+  // Take the element out of the shared answer, keeping EXACTLY what it is right now (spec §6.5).
+  leaveToThisDevice(list: RuleListId, elementId: string): Promise<void>;
+  // Put it back under the shared answer.
+  followTheDefault(list: RuleListId, elementId: string): Promise<void>;
+  // Flip an existing exception.
+  setDeviceElement(list: RuleListId, elementId: string, state: DeviceElementState): Promise<void>;
   // The Settings-sync menu: the same field the Settings tab's file-row sharing control edits
   // (Item.settingsFile.fileRule.sharing — this-device is structurally excluded there).
   itemFileSharing(ref: ItemRef): FileSharing;
@@ -903,7 +912,7 @@ export class SyncCenterView extends ItemView {
   // relabeled presState — a raw-in-sync/drift-ahead row genuinely writes no settings file, only
   // `versionAhead` below explains its capture; folderFileCount covers a companion's own file
   // changes separately (spec §2: "parent settings payload changed → settings verb; companion file
-  // changes → folder verb joins"). storeListOn/locallyOn/runsOn only exist for a
+  // changes → folder verb joins"). storeListOn/locallyOn/ruleSharing/localException only exist for a
   // carrier-synced plugin row — for every other row (obsidian/folder/self-excluded/
   // carrier-unsynced) they stay at their "no enablement dimension" defaults, which
   // `effectiveTurnsOn`/`buildChips` already treat as a no-op (see fateModel.ts). Called exactly
@@ -918,7 +927,8 @@ export class SyncCenterView extends ItemView {
     const carrierSynced = isPlugin && this.carrierIsSynced(name);
     let storeListOn: boolean | null = null;
     let locallyOn = false;
-    let runsOn: RunsOn = { device: "all" };
+    let ruleSharing: Sharing = EVERYWHERE;
+    let localException: "on" | "off" | null = null;
     if (carrierSynced) {
       const carrier = enablementCarrierFor(this.rowRef(name));
       const element = this.carrierElementFor(name);
@@ -927,7 +937,8 @@ export class SyncCenterView extends ItemView {
       // Best-effort default (divergence not loaded yet): assume the store agrees with local —
       // the same "stays off"/"in sync" reading a synced-but-unloaded carrier settles on elsewhere.
       storeListOn = div === undefined ? locallyOn : locallyOn ? !div.applyDisables.includes(element) : div.captureRemoves.includes(element);
-      runsOn = this.host.runsOnFor(carrier, element, locallyOn);
+      ruleSharing = this.host.enablementRuleFor(carrier, element);
+      localException = this.host.deviceElementFor(carrier, element);
     }
     const pres = rollup.state;
     const optedOutHere = this.host.deviceOptedOut(name);
@@ -961,7 +972,8 @@ export class SyncCenterView extends ItemView {
       carrierSynced,
       storeListOn,
       locallyOn,
-      runsOn,
+      ruleSharing,
+      localException,
       deviceClass,
       desktopOnly: a.desktopOnly,
       // C-#24: THIS row's own compiled group (not the family rollup) is scoped away from this
@@ -2621,7 +2633,7 @@ export class SyncCenterView extends ItemView {
     // installed) — without it there is no enable path in the unified grammar at all, a real
     // regression from pre-C's `disabledRowAction` default. Ungated by `fate.stageable`, matching
     // `Runs on`'s own precedent (reachable from the row's steady state, not just mid-divergence).
-    if (input.carrierSynced) this.renderRunsOnRow(fields, name, input.runsOn);
+    if (input.carrierSynced) this.renderDefaultEnabledOnRow(fields, name, input);
     else if (!input.installed) {
       if (fate.stageable) this.renderAfterInstallRow(fields, r);
     } else if (this.availOf(name).kind === "disabled") {
@@ -2838,28 +2850,68 @@ export class SyncCenterView extends ItemView {
     });
   }
 
-  // Runs on (spec §4/§6, plugins with a synced carrier only): unifies per-plugin rules, member
-  // device classes, and this-device pins into one 5-option menu writing the item's own runsOn
-  // directly. Icon vocabulary from runsOnIcon (itemCard.ts, beside sharingIcon) — "all" renders
-  // dim like sharingIcon's idle stop, the other four accented.
-  private renderRunsOnRow(detail: HTMLElement, name: string, runsOn: RunsOn): void {
+  // The two-segment row (spec §6.1): fleet answer on the left of the divider, this device's own
+  // exception on the right. Both segments open a menu; the local one renders wordmark-only while it
+  // follows, because a default has nothing to say.
+  private renderTwoSegmentRow(
+    detail: HTMLElement,
+    label: string,
+    fleet: { seg: RowSegment; isSet: boolean; menu: () => Menu },
+    local: { seg: RowSegment; isException: boolean; menu: () => Menu } | null
+  ): void {
+    this.renderCardKeyRow(detail, label, (value) => {
+      const row = value.createDiv({ cls: "config-sync-tworow" });
+      const paint = (host: HTMLElement, seg: RowSegment, cls: string, menu: () => Menu): void => {
+        const el = host.createSpan({ cls, attr: { "aria-label": seg.label } });
+        if (seg.icon !== null) setIcon(el.createSpan({ cls: "config-sync-tworow-ic" }), seg.icon);
+        el.createSpan({ text: seg.label });
+        this.wireMenuTrigger(el, menu);
+      };
+      paint(row, fleet.seg, `config-sync-tworow-seg${fleet.isSet ? " is-set" : ""}`, fleet.menu);
+      if (local === null) return;
+      row.createSpan({ cls: "config-sync-tworow-vline" });
+      paint(row, local.seg, `config-sync-tworow-seg is-local${local.isException ? " is-set" : ""}`, local.menu);
+    });
+  }
+
+  // Default enabled on (spec §6.2) — only for a plugin row whose carrier is synced: with no shared
+  // list there is no default to state.
+  private renderDefaultEnabledOnRow(detail: HTMLElement, name: string, input: FateInput): void {
     const list = enablementCarrierFor(this.rowRef(name));
     const elementId = this.carrierElementFor(name);
-    this.renderCardIconMenuRow(detail, "Runs on", runsOnIcon(runsOn), !runsOnIsDefault(runsOn), runsOnLabel(runsOn), () => {
-      const menu = new Menu();
-      for (const rule of RUNS_ON_OPTIONS) {
-        menu.addItem((item) =>
-          item
-            .setTitle(runsOnLabel(rule))
-            .setIcon(runsOnIcon(rule))
-            .setChecked(runsOnEquals(rule, runsOn))
-            .onClick(() => {
-              void this.host.setRunsOn(list, elementId, rule).then(() => this.notifyExternalChange());
-            })
-        );
-      }
-      return menu;
-    });
+    const model = enablementRowModel({ rule: input.ruleSharing, exception: input.localException });
+    this.renderTwoSegmentRow(
+      detail,
+      "Default enabled on",
+      {
+        seg: model.fleet,
+        isSet: input.ruleSharing.kind !== "everywhere",
+        menu: () => this.ruleMenu(list, elementId, input.ruleSharing),
+      },
+      { seg: model.local, isException: model.localIsException, menu: () => this.localMenu(list, elementId, input.localException) }
+    );
+  }
+
+  private ruleMenu(list: EnablementList, elementId: string, current: Sharing): Menu {
+    const menu = new Menu();
+    for (const rule of RULE_OPTIONS) {
+      menu.addItem((item) =>
+        item
+          .setTitle(ruleLabel(rule))
+          .setIcon(ruleIcon(rule))
+          .setChecked(sharingEquals(rule, current))
+          .onClick(() => void this.host.setEnablementRule(list, elementId, rule).then(() => this.notifyExternalChange()))
+      );
+    }
+    return menu;
+  }
+
+  private localMenu(list: EnablementList, elementId: string, current: "on" | "off" | null): Menu {
+    const menu = new Menu();
+    menu.addItem((i) => i.setTitle(FOLLOWS_LABEL).setChecked(current === null).onClick(() => void this.host.followTheDefault(list, elementId).then(() => this.reload())));
+    menu.addItem((i) => i.setTitle(ON_HERE_LABEL).setIcon("power").setChecked(current === "on").onClick(() => void this.host.setDeviceElement(list, elementId, "on").then(() => this.reload())));
+    menu.addItem((i) => i.setTitle(OFF_HERE_LABEL).setIcon("power-off").setChecked(current === "off").onClick(() => void this.host.setDeviceElement(list, elementId, "off").then(() => this.reload())));
+    return menu;
   }
 
   // After install (spec §4, fallback ladder — only when the carrier is NOT synced and the row
