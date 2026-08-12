@@ -2,60 +2,86 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://raw.githubusercontent.com/xooooooooox/obsidian-config-sync/main/schema/store-lock.schema.json",
   "title": "Config Sync store lock",
-  "description": "store.lock.json at the store root: provenance and freshness of the store's CONTENT. Written by Config Sync, never by hand — this schema documents the format for other tools and for future versions of the plugin itself. UNKNOWN PROPERTIES ARE VALID EVERYWHERE AND MUST BE PRESERVED: a lock travels between devices that may run different plugin versions, and a reader that drops what it does not recognise destroys a newer writer's bookkeeping (see docs/ARCHITECTURE.md, invariant II).",
+  "description": "store.lock.json at the store root: provenance and freshness of the store's CONTENT. Written by Config Sync, never by hand — this schema documents the format for other tools and for future versions of the plugin itself, and the plugin's own parser, not this file, is the authority. UNKNOWN PROPERTIES ARE VALID EVERYWHERE AND MUST BE PRESERVED: a lock travels between devices that may run different plugin versions, and a reader that drops what it does not recognise destroys a newer writer's bookkeeping (docs/ARCHITECTURE.md, invariant II).",
   "type": "object",
-  "required": ["capturedAt", "groups"],
+  "required": ["capturedAt", "items"],
   "additionalProperties": true,
   "properties": {
     "version": {
       "type": "integer",
       "minimum": 1,
-      "description": "The lock's own format version. Absent = 1 (the shape before per-item freshness). The plugin writes 2. A version HIGHER than the reader understands is refused, not normalised: capture, pull and push all decline rather than overwrite bookkeeping they cannot read. A refusal gate must read this field off the raw text, before parsing — a future version that restructures an entry makes a v1-shaped parse throw, and a gate downstream of that parse never runs."
+      "description": "The lock's own format version. Absent = 1 and 2 = a flat `groups` map keyed by group name (2 added per-item freshness); 3 = the `items` map described here. A version HIGHER than the reader understands is refused, not normalised: capture, pull and push decline rather than overwrite bookkeeping they cannot read. A refusal gate must read this field off the RAW text before parsing — a future version that restructures an entry makes a v3-shaped parse throw, and a gate downstream of that parse never runs."
     },
     "syncedWatermark": {
       "type": "string",
       "format": "date-time",
-      "description": "The lineage watermark: how far this store has followed the remote it pulls from. Only a pull moves it, and it takes the remote's lineage rather than the remote's bare watermark. Absent = a v1 lock, whose capturedAt answers for it. Kept separate from capturedAt because one field cannot mean both \"when this store was captured\" and \"how far it has followed someone else\"."
+      "description": "The lineage watermark: how far this store has followed the remote it pulls from. Only a pull moves it, and it takes the remote's lineage rather than the remote's bare watermark. Kept separate from capturedAt because one field cannot mean both \"when this store was captured\" and \"how far it has followed someone else\"."
     },
     "capturedAt": {
       "type": "string",
       "format": "date-time",
-      "description": "When this store's content was last captured. Since v2 it is DERIVED — max(groups[*].capturedAt) — and a pull never rewrites it, so it always describes this store's own content."
+      "description": "When this store's content was last captured. DERIVED — the latest of the entries' own capturedAt — and never rewritten by a pull, so it always describes this store's own content."
     },
-    "groups": {
+    "items": {
       "type": "object",
-      "description": "One entry per group present in the store, keyed by group name.",
-      "additionalProperties": { "$ref": "#/definitions/entry" }
+      "description": "Section -> key -> entry. The four sections a reader will meet are `obsidian`, `core`, `community` and `custom`; the map is deliberately not closed, because the plugin also files an entry it cannot place under a section of its own so that the entry survives without becoming resolvable. The KEY is the rest of the item's reference: an item id (`dataview`), a carrier id (`core-plugins`, `community-plugins` — filed under `obsidian`, because the file a carrier carries is one of Obsidian's own), or `<owner id>/<basename>` for a companion folder, which keeps the slash INSIDE the key rather than adding a nesting level.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": { "$ref": "#/definitions/entry" }
+      }
     }
   },
   "definitions": {
     "entry": {
       "type": "object",
       "additionalProperties": true,
-      "description": "At least one of sourcePluginVersion / sourceAppVersion is required — a v1 reader rejects an entry with neither, which is why both stay flat here instead of moving under a nested object.",
-      "anyOf": [{ "required": ["sourcePluginVersion"] }, { "required": ["sourceAppVersion"] }],
       "properties": {
-        "sourcePluginVersion": { "type": "string", "description": "Version of the plugin this item's settings were captured from (plugin items)." },
-        "sourceAppVersion": { "type": "string", "description": "Obsidian version this item was captured on (Obsidian/core items)." },
+        "source": {
+          "type": "object",
+          "required": ["kind", "version"],
+          "additionalProperties": true,
+          "description": "Whose software produced the content this entry describes. NOT derivable from the section: the kind follows the item's PATH, not its family — a custom rule or a companion folder that points inside `plugins/<id>` records that plugin's version, while everything else records Obsidian's. It is stored rather than inferred because a device reading someone else's lock may hold no item for that entry at all, and then the path it would infer from does not exist.",
+          "properties": {
+            "kind": {
+              "enum": ["app", "plugin"],
+              "description": "`plugin` = `version` is the plugin's own version; `app` = it is Obsidian's."
+            },
+            "version": { "type": "string", "minLength": 1 }
+          }
+        },
         "capturedAt": {
           "type": "string",
           "format": "date-time",
-          "description": "When THIS item was captured. Absent on an entry no v2 build has captured yet — absence is not a difference. It orders two sides once a real difference is found; it is never itself a difference, or two devices holding identical content captured at different moments would look out of sync."
+          "description": "When THIS item was captured. Absent on an entry no per-item-freshness build has captured yet, and absence is never a difference — entries gain it one capture at a time, so a lock mid-transition legitimately carries both shapes. It orders two sides once a real difference is found; it is never itself a difference, or two devices holding identical content captured at different moments would look out of sync."
         },
         "hash": {
           "type": "string",
           "pattern": "^sha256:[0-9a-f]{64}$",
-          "description": "Fingerprint of this item's WHOLE store copy — the base file plus its __scopes__ sidecars, or every file under a dir group's store path. The prefix names the algorithm so it can change later without a reader guessing. Absent for an encrypted item: its envelopes carry their own salt and nonce, so two devices holding identical settings hold different bytes, and a fingerprint would report a difference that is not one."
+          "description": "Fingerprint of this item's WHOLE store copy — the base file plus its `__scopes__` sidecars, or every file under a folder item's store path. The prefix names the algorithm so it can change later without a reader guessing. Absent for an encrypted item: its envelopes carry their own salt and nonce, so two devices holding identical settings hold different bytes, and a fingerprint would report a difference that is not one."
         },
-        "desktopOnly": {
-          "const": true,
-          "description": "Set only when the plugin's own manifest says it cannot install on mobile — an innate property of the plugin, not a user choice, and only ever written as true (absent means false)."
-        },
-        "label": { "type": "string", "description": "This device's best-resolved display name for the group. Display only — never a difference when two locks are compared." },
-        "memberLabels": {
+        "innate": {
           "type": "object",
-          "additionalProperties": { "type": "string" },
-          "description": "Element id -> display name, only on the two carrier entries (core-plugins, community-plugins), for on/off-list members that have no lock entry of their own. Display only, like label."
+          "additionalProperties": true,
+          "description": "Properties of the software itself, not of anyone's choice — recorded so a device that does not have the plugin installed can still describe it.",
+          "properties": {
+            "desktopOnly": {
+              "const": true,
+              "description": "The plugin's manifest says it cannot install on mobile. Only ever written as true; absent means false."
+            }
+          }
+        },
+        "display": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Names for showing, resolved by whichever device captured last. Display only — never a difference when two locks are compared, so a device that resolves a nicer name does not make every other device think the store moved.",
+          "properties": {
+            "label": { "type": "string", "minLength": 1 },
+            "elements": {
+              "type": "object",
+              "additionalProperties": { "type": "string" },
+              "description": "Element id -> display name, on the two carrier entries, for on/off-list members that have no entry of their own."
+            }
+          }
         }
       }
     }
