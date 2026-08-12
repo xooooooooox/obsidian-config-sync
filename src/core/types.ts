@@ -17,7 +17,8 @@ export const STORAGE_SECTIONS = ["obsidian", "core", "community", "custom"] as c
 export type StorageSection = (typeof STORAGE_SECTIONS)[number];
 
 // The PRESENTED section list (spec §7b): `beta` is not a family, it is an install source (BRAT),
-// derived at runtime from `bratIndex`. It is a search value, a settings tab and a card badge — it
+// derived at runtime from each community item's own `bratRepo` field (bratIndex.ts's
+// `bratRepoIndex`). It is a search value, a settings tab and a card badge — it
 // is never a storage key, because an item that changed section (and therefore its identity) the
 // day BRAT adopted it would be churn no benefit justifies. A beta plugin stores under `community`,
 // exactly where its v2 key put it. registry.ts's `storageSection` is the ONE bridge between the

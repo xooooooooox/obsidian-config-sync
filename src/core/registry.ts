@@ -145,6 +145,11 @@ export interface Item {
   // Set only when it differs from the item's default path (v2's `settingsFile.customPath`);
   // required for a custom item, which has no def to derive one from.
   path?: string;
+  // The BRAT repo this plugin was installed from ("owner/repo"), when BRAT manages it (spec §3.2).
+  // Was a top-level `bratIndex` map — a SECOND list of plugin ids beside `items.community`, which
+  // is one list too many: the two drift the moment a plugin is removed from one and not the other.
+  // A property of a plugin lives on that plugin.
+  bratRepo?: string;
   settingsFile?: ItemSettingsFile;
   companions?: ItemCompanion[];
   // The Runs-on rule (§2): was v2's `memberRules[itemId]` PLUS `enabledOn`, two fields that
@@ -690,7 +695,7 @@ function compileCustomItems(items: ItemMap, defs: ItemDef[], seenPaths: Map<stri
 // round trip (item -> compiled group -> Advanced-tab draft -> item) would strip the future's data
 // and publish the loss to the fleet on the next capture, which is exactly what v2's `{...cg}`
 // spread happened to avoid.
-const WRITTEN_ITEM_KEYS = ["synced", "type", "path", "settingsFile", "companions", "runsOn", "elements", "description", "label", "origin"] as const;
+const WRITTEN_ITEM_KEYS = ["synced", "type", "path", "bratRepo", "settingsFile", "companions", "runsOn", "elements", "description", "label", "origin"] as const;
 
 export function itemTail(item: Item | undefined): Record<string, unknown> {
   if (item === undefined) return {};

@@ -41,7 +41,7 @@ interface SecretStore {
   getSecret(id: string): string | null;
   setSecret(id: string, secret: string): void;
 }
-import { BratIndex, parseBratRepoList, resolveBratIndex } from "./core/bratIndex";
+import { bratRepoIndex, parseBratRepoList, resolveBratIndex, withBratRepos } from "./core/bratIndex";
 import { type CatalogSection, corePluginFile, displayLabelForGroup, findGroupByName, listBetaSections, listCoreSections, listDiscovered, listOptionSections, listPluginSections, SELF_GROUP_NAME, SELF_ITEM_ID, SELF_ITEM_REF, SELF_ITEM_SECTION, setCorePluginIds } from "./core/catalog";
 import { Availability, availabilityForGroup, desktopOnlyDrift, desktopOnlyPluginIds, forcedRunsOn, membersExcludedByClass, memberForceOff, preferStoredRunsOn } from "./core/availability";
 import { listFilesRecursive, isJunkPath, FileIO } from "./core/io";
@@ -128,7 +128,6 @@ interface ConfigSyncSettings {
   mobileStatusBar: boolean; // force-show Obsidian's status bar on phones (CSS class only)
   remoteAutoCheck: boolean;
   localPeriodicCheck: boolean;
-  bratIndex: BratIndex; // plugin id -> "owner/repo"; derived from BRAT's synced list, synced too
   runHistory: RunHistorySettings; // local-only record of past runs; never synced
 }
 
@@ -153,7 +152,6 @@ const DEFAULT_SETTINGS: ConfigSyncSettings = {
   remoteAutoCheck: true,
   localPeriodicCheck: true,
   items: emptyItemMap(),
-  bratIndex: {},
   runHistory: { enabled: true, path: "", maxCount: 50, maxDays: 30 },
   thisDeviceItems: [],
 };
@@ -415,7 +413,7 @@ export default class ConfigSyncPlugin extends Plugin {
     const cores = await Promise.all(
       this.coreRuntime().map(async (c) => ({ id: c.id, name: c.name, fileExists: await io.exists(`${configDir}/${corePluginFile(c.id)}`) }))
     );
-    const betaIds = new Set(Object.keys(this.settings.bratIndex));
+    const betaIds = new Set(Object.keys(bratRepoIndex(this.settings.items)));
     return { cores, plugins: this.pluginRuntime().map((p) => ({ id: p.id, name: p.name, desktopOnly: p.desktopOnly })), betaIds };
   }
 
@@ -661,7 +659,7 @@ export default class ConfigSyncPlugin extends Plugin {
         // Membership truth (delta / coldstart / itemCount) uses the same compile as the store
         // side (selfListGroups): items whose plugin isn't installed here stay members instead of
         // ghosting into delta.added forever (2026-07-28 phone find).
-        const betaIds = new Set(Object.keys(this.settings.bratIndex));
+        const betaIds = new Set(Object.keys(bratRepoIndex(this.settings.items)));
         let localList: SyncGroup[];
         try {
           localList = selfListGroups(this.registryDefs, this.settings.items, betaIds);
@@ -766,7 +764,7 @@ export default class ConfigSyncPlugin extends Plugin {
         const manifest = this.pluginRegistry().manifests[id];
         return manifest === undefined ? null : manifest.isDesktopOnly === true;
       },
-      betaIds: () => new Set(Object.keys(this.settings.bratIndex)),
+      betaIds: () => new Set(Object.keys(bratRepoIndex(this.settings.items))),
       runHistoryEnabled: () => this.settings.runHistory.enabled,
       loadRunHistory: () => this.loadRunHistory(),
       appendRunHistory: (kind, remote, results) => this.appendRunHistory(kind, remote, results),
@@ -1242,8 +1240,8 @@ export default class ConfigSyncPlugin extends Plugin {
         // Installs run strictly sequentially, so a single field safely carries the active
         // item's phase callback into the retry closures (catalog download / BRAT).
         this.installPhase = onPhase;
-        if (this.settings.bratIndex[id] === undefined) await this.refreshBratIndex();
-        const repo = this.settings.bratIndex[id];
+        if (itemAt(this.settings.items, "community", id)?.bratRepo === undefined) await this.refreshBratIndex();
+        const repo = itemAt(this.settings.items, "community", id)?.bratRepo;
         if (repo !== undefined) {
           // BRAT-managed plugins track their own beta channel — version-pinning applies to the
           // community-catalog path only (spec C).
@@ -1377,7 +1375,8 @@ export default class ConfigSyncPlugin extends Plugin {
     // method would save it, wiping a fleet-shared structure from the device that knows least about
     // it. The Beta tab's map-note reports what it can see either way (bratScanStatus, local-only).
     if (repos.length === 0) return { resolved: 0, total: 0 };
-    const next = await resolveBratIndex(this.settings.bratIndex, repos, async (repo) => {
+    const current = bratRepoIndex(this.settings.items);
+    const next = await resolveBratIndex(current, repos, async (repo) => {
       try {
         const res = await requestUrl({ url: `https://raw.githubusercontent.com/${repo}/HEAD/manifest.json`, throw: true });
         return res.text;
@@ -1389,8 +1388,8 @@ export default class ConfigSyncPlugin extends Plugin {
     // pruned the index against this device's repo list, and publishing that reading of a document
     // we cannot read is exactly what the stop state forbids. Silent (the Beta tab re-scans on its
     // own when it opens, with no user gesture behind it — a notice there would fire unprompted).
-    if (this.schemaStop === null && JSON.stringify(next) !== JSON.stringify(this.settings.bratIndex)) {
-      this.settings.bratIndex = next;
+    if (this.schemaStop === null && JSON.stringify(next) !== JSON.stringify(current)) {
+      this.settings.items = withBratRepos(this.settings.items, next);
       await this.saveSettings();
     }
     return { resolved: Object.keys(next).length, total: repos.length };
@@ -1943,7 +1942,7 @@ export default class ConfigSyncPlugin extends Plugin {
       },
       // v3 self copies carry `items` (custom items included), not a compiled groups array — core
       // needs the plugin's registry defs to compile them (storeSelfCopyGroups' contract).
-      storeListGroups: (json) => storeSelfCopyGroups(json, this.registryDefs, new Set(Object.keys(this.settings.bratIndex))),
+      storeListGroups: (json) => storeSelfCopyGroups(json, this.registryDefs, new Set(Object.keys(bratRepoIndex(this.settings.items)))),
       now: () => new Date().toISOString(),
     };
   }
@@ -2081,7 +2080,7 @@ export default class ConfigSyncPlugin extends Plugin {
     // just-arrived data looking like deletable junk.
     const selfCopy = `${ctx.rootPath}/store/configdir/plugins/config-sync/data.json`;
     const storeGroups = (await ctx.io.exists(selfCopy))
-      ? storeSelfCopyGroups(await ctx.io.read(selfCopy), this.registryDefs, new Set(Object.keys(this.settings.bratIndex)))
+      ? storeSelfCopyGroups(await ctx.io.read(selfCopy), this.registryDefs, new Set(Object.keys(bratRepoIndex(this.settings.items))))
       : [];
     const out: { rel: string; name: string; path: string; size: number }[] = [];
     for (const lf of leftoverStoreRels(rels, [...this.compiledGroups, ...storeGroups])) {
@@ -2125,17 +2124,17 @@ export default class ConfigSyncPlugin extends Plugin {
   }
 
   async listPluginSections(groups: SyncGroup[]): Promise<CatalogSection[]> {
-    return listPluginSections(this.pluginRuntime(), groups, new Set(Object.keys(this.settings.bratIndex)));
+    return listPluginSections(this.pluginRuntime(), groups, new Set(Object.keys(bratRepoIndex(this.settings.items))));
   }
 
   async listBetaSections(groups: SyncGroup[]): Promise<CatalogSection[]> {
-    return listBetaSections(this.pluginRuntime(), groups, this.settings.bratIndex);
+    return listBetaSections(this.pluginRuntime(), groups, bratRepoIndex(this.settings.items));
   }
 
   // Local-only status for the Beta tab's map-note (no network): index size vs BRAT's list.
   async bratScanStatus(): Promise<{ resolved: number; total: number }> {
     const repos = await this.bratRepos();
-    const resolved = Object.values(this.settings.bratIndex).filter((r) => repos.includes(r)).length;
+    const resolved = Object.values(bratRepoIndex(this.settings.items)).filter((r) => repos.includes(r)).length;
     return { resolved, total: repos.length };
   }
 

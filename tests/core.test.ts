@@ -3030,9 +3030,8 @@ describe("a BRAT-managed plugin's this-device pin is the same identity as any ot
     instance.loadData = async () => ({
       schemaVersion: 3,
       rootPath: "cs",
-      items: withItem(emptyItemMap(), "community", "slides-rup", { synced: true }),
+      items: withItem(emptyItemMap(), "community", "slides-rup", { synced: true, bratRepo: "owner/slides-rup" }),
       remotes: [],
-      bratIndex: { "slides-rup": "owner/slides-rup" },
     });
     instance.saveData = async () => {};
     await instance.loadSettings();

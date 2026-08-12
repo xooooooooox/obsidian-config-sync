@@ -13,8 +13,8 @@ export interface LeftoverFile {
 // The list-membership compile BOTH delta sides share (spec 2026-07-28 §2): items compiled WITH
 // synthesized defs for ids whose plugin isn't installed here, so an item this data.json carries
 // never drops out of membership just because its plugin is absent on this device. betaIds comes
-// from the caller (main.ts's settings.bratIndex) so a synthesized def classifies the same
-// way an installed one would.
+// from the caller (main.ts's `bratRepoIndex(this.settings.items)`) so a synthesized def
+// classifies the same way an installed one would.
 export function selfListGroups(defs: ItemDef[], items: ItemMap, betaIds: ReadonlySet<string>): SyncGroup[] {
   return compileItems(defsForForeignItems(defs, items, betaIds), { items });
 }

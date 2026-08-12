@@ -614,9 +614,9 @@ describe("compileItems — self item protection (withSelfPresets)", () => {
   // C-#31 one-list invariant, part 2: the compiled self group's exclusion set (locked, scope
   // "local" fields — what adopt preserves from local instead of importing from the store, and
   // what the self compare treats as never-a-difference) is EXACTLY selfPresetRules()'s pattern
-  // set, regardless of what other rules the item carries. A future settings field (e.g. the next
-  // bratIndex) is therefore imported by adopt and tracked by compare together, by
-  // construction — it can never land only in one of the two lists.
+  // set, regardless of what other rules the item carries. A future settings field (e.g. a
+  // top-level map like the old bratIndex) is therefore imported by adopt and tracked by compare
+  // together, by construction — it can never land only in one of the two lists.
   it("the self group's adopt/compare exclusion set is exactly selfPresetRules() — walking the shared constant", () => {
     const env: RegistryEnv = { ...EMPTY_ENV, plugins: [{ id: "config-sync", name: "Config Sync" }] };
     const defs = buildItemDefs(env);

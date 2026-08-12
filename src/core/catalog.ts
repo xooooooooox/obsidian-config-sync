@@ -386,7 +386,7 @@ export function selfPresetRules(): FieldRule[] {
 // feeds both adoptConfiguration's apply and the self item's status/diff compare — calls this same
 // function instead of reimplementing the merge, so a field is excluded from adopt if and only if
 // it is excluded from compare. Every top-level settings field NOT covered by selfPresetRules()
-// (e.g. bratIndex, items) is therefore imported by adopt exactly when it participates in the
+// (e.g. items) is therefore imported by adopt exactly when it participates in the
 // compare — never silently dropped by one side only.
 export function mergePresetFields(existing: FieldRule[]): FieldRule[] {
   const presets = selfPresetRules();
