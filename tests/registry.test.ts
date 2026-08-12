@@ -30,6 +30,8 @@ import { leftoverStoreRels } from "../src/core/leftover";
 import { SyncGroup, EVERYWHERE, itemRef, parseItemRef, perClass, StorageSection, THIS_DEVICE } from "../src/core/types";
 import { ManifestValidationError, validateSyncManifest } from "../src/core/manifest";
 import { mergePresetFields, selfPresetRules } from "../src/core/catalog";
+import { carrierRef } from "../src/core/itemKeys";
+import { withEnablementRule } from "../src/core/enablementRules";
 
 // spec 2026-07-25-unified-card-design.md §1/§3/§5/§6; task-4-brief.md compile rules.
 
@@ -55,10 +57,10 @@ function findGroup(groups: SyncGroup[], name: string): SyncGroup | undefined {
 const EMPTY_ENV: RegistryEnv = { cores: [], plugins: [], betaIds: new Set() };
 
 describe("buildItemDefs", () => {
-  it("always includes the three Obsidian cards", () => {
+  it("always includes the five Obsidian cards — the three settings cards plus the two on/off lists (task 5)", () => {
     const defs = buildItemDefs(EMPTY_ENV);
     const obsidianIds = defs.filter((d) => d.section === "obsidian").map((d) => d.id).sort();
-    expect(obsidianIds).toEqual(["app", "appearance", "hotkeys"]);
+    expect(obsidianIds).toEqual(["app", "appearance", "community-plugins", "core-plugins", "hotkeys"]);
   });
 
   it("core defs cover the full runtime id list, including state-only (no settings file yet)", () => {
@@ -326,8 +328,13 @@ describe("compileItems — plugin cards (dir/file group when enabled)", () => {
   });
 });
 
-describe("compileItems — hidden enablement switch-list groups", () => {
-  it("exist iff at least one card in that section is enabled", () => {
+// Retired-behaviour update (task 5): these two used to assert `anyEnabledInList` — a carrier
+// compiled the moment ANY card in its section was synced. The carriers are ordinary items now
+// (see "the on/off lists as items" below), so a card underneath no longer drives its carrier's
+// compile on its own; only the carrier's OWN entry does. Kept here, retitled, because they still
+// pin something the new describe block doesn't: that a card being on is no longer SUFFICIENT.
+describe("compileItems — the two on/off lists as carriers", () => {
+  it("compile iff the carrier's own item is synced — a card in that section being on is no longer sufficient", () => {
     const env: RegistryEnv = {
       ...EMPTY_ENV,
       cores: [{ id: "graph", name: "Graph view", fileExists: true }],
@@ -336,18 +343,60 @@ describe("compileItems — hidden enablement switch-list groups", () => {
     const defs = buildItemDefs(env);
     expect(findGroup(compileItems(defs, settings({})), "core-plugins")).toBeUndefined();
     expect(findGroup(compileItems(defs, settings({})), "community-plugins")).toBeUndefined();
-    const withCore = compileItems(defs, settings({ core: { graph: on() } }));
+    const cardsOnCarriersOff = compileItems(defs, settings({ core: { graph: on() }, community: { dataview: on() } }));
+    expect(findGroup(cardsOnCarriersOff, "core-plugins")).toBeUndefined();
+    expect(findGroup(cardsOnCarriersOff, "community-plugins")).toBeUndefined();
+    const withCore = compileItems(defs, settings({ obsidian: { "core-plugins": on() } }));
     expect(findGroup(withCore, "core-plugins")).toBeDefined();
     expect(findGroup(withCore, "community-plugins")).toBeUndefined();
-    const withCommunity = compileItems(defs, settings({ community: { dataview: on() } }));
+    const withCommunity = compileItems(defs, settings({ obsidian: { "community-plugins": on() } }));
     expect(findGroup(withCommunity, "community-plugins")).toBeDefined();
   });
 
-  it("a beta card counts toward the community-plugins hidden group (same carrier file)", () => {
+  it("a beta card no longer triggers the community-plugins carrier by itself — only the carrier's own item does (same carrier file)", () => {
     const env: RegistryEnv = { ...EMPTY_ENV, plugins: [{ id: "slides-rup", name: "SlidesRup" }], betaIds: new Set(["slides-rup"]) };
     const defs = buildItemDefs(env);
-    const groups = compileItems(defs, settings({ community: { "slides-rup": on() } }));
-    expect(findGroup(groups, "community-plugins")).toBeDefined();
+    const betaOnCarrierOff = compileItems(defs, settings({ community: { "slides-rup": on() } }));
+    expect(findGroup(betaOnCarrierOff, "community-plugins")).toBeUndefined();
+    const betaOnCarrierOn = compileItems(defs, settings({ community: { "slides-rup": on() }, obsidian: { "community-plugins": on() } }));
+    expect(findGroup(betaOnCarrierOn, "community-plugins")).toBeDefined();
+  });
+});
+
+// spec §3.1/§3.3: the two on/off lists are ordinary registry items now — their own def, their own
+// card, their own entry in `items.obsidian`. Their ref was already `obsidian/<list>` (itemKeys.ts's
+// carrierRef, since v3), so nothing here re-keys anything; it only gives that ref a def and a
+// compile path through the ordinary single-file loop, retiring the special-case one.
+describe("the on/off lists as items", () => {
+  const env = { cores: [{ id: "daily-notes", name: "Daily notes", fileExists: true }], plugins: [{ id: "dataview", name: "Dataview" }], betaIds: new Set<string>() };
+
+  it("a carrier's def ref IS its carrier ref — the lock and the baselines keep their key", () => {
+    const defs = buildItemDefs(env);
+    for (const list of ["core-plugins", "community-plugins"] as const) {
+      const def = defs.find((d) => d.id === list);
+      expect(def?.section).toBe("obsidian");
+      expect(defRef(def!)).toBe(carrierRef(list));
+    }
+  });
+
+  it("a carrier compiles exactly when its own item is synced — not when some plugin in its section is", () => {
+    const defs = buildItemDefs(env);
+    const pluginOnly = compileItems(defs, { items: itemsIn({ community: { dataview: { synced: true } } }) });
+    expect(pluginOnly.map((g) => g.name)).not.toContain("community-plugins");
+
+    const carrierOn = compileItems(defs, { items: itemsIn({ obsidian: { "community-plugins": { synced: true } } }) });
+    const carrier = carrierOn.find((g) => g.name === "community-plugins");
+    expect(carrier).toMatchObject({ name: "community-plugins", ref: carrierRef("community-plugins"), path: "{configDir}/community-plugins.json", type: "file", devices: "all" });
+    expect(carrier?.mode).toBeUndefined();
+    expect(carrier?.perElement).toBeUndefined();
+  });
+
+  it("element rules never reach the compiled group — storage is uniform, application is not (spec §3.3)", () => {
+    const defs = buildItemDefs(env);
+    const items = withEnablementRule(itemsIn({ obsidian: { "core-plugins": { synced: true } } }), "core-plugins", "daily-notes", THIS_DEVICE);
+    const carrier = compileItems(defs, { items }).find((g) => g.name === "core-plugins");
+    expect(carrier?.perElement).toBeUndefined();
+    expect(carrier?.mode).toBeUndefined();
   });
 });
 

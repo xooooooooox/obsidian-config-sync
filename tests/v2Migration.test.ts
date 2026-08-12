@@ -617,6 +617,14 @@ describe("a materialised orphan rule stays invisible until its plugin is install
 // The end-to-end shape gate: whatever the migration produced has to survive the same validator
 // recompile() runs on every load, or the user's whole sync list would come back empty behind a
 // Notice. Asserted on the full §5 fixture, not a minimal one.
+//
+// task 5 / task 9 boundary: the two on/off lists are items now, and migrateV2Settings does not yet
+// seed items.obsidian["core-plugins"/"community-plugins"].synced for a v2 document — that backfill
+// is task 9's (registry.ts's retired ENABLEMENT_LISTS compile-loop said so explicitly). Until it
+// lands, a migrated v2 document's carriers compile to nothing, same as any other v2 read on this
+// branch; "core-plugins"/"community-plugins" are gone from the expected list below for that reason,
+// not because the migration dropped the plugins they carry (backlink/graph/dataview/etc. are all
+// still here).
 describe("the migrated document compiles into a manifest the engine accepts", () => {
   it("compiles and validates, with the same items the v2 document described", () => {
     const groups = compileItems(buildItemDefs(ENV), { items: migrateV2Settings(v2Document()).document.items as ItemMap });
@@ -631,8 +639,6 @@ describe("the migrated document compiles into a manifest the engine accepts", ()
         "plugin-dataview",
         "plugin-my-beta-plugin",
         "plugin-config-sync",
-        "core-plugins",
-        "community-plugins",
         "vaultcss",
         "secrets",
         "found-file",

@@ -20,8 +20,8 @@
 import { communityGroupName, corePluginFile, mergePresetFields, SELF_GROUP_NAME } from "./catalog";
 import { GROUP_NAME_RE } from "./manifest";
 import { basename, groupStorePath } from "./pathing";
-import { carrierRef, companionRef } from "./itemKeys";
-import { EnablementList, enablementListFile, SWITCH_LISTS } from "./switchList";
+import { companionRef } from "./itemKeys";
+import { EnablementList, SWITCH_LISTS } from "./switchList";
 import {
   DeviceClass,
   EVERYWHERE,
@@ -321,13 +321,32 @@ const OBSIDIAN_CARD_DEFS: readonly Omit<ItemDef, "section">[] = [
     description: "Your custom keyboard shortcuts.",
     settingsFile: { defaultPath: "{configDir}/hotkeys.json" },
   },
+  // The two on/off lists (spec §3.1). They were already items in every way that matters —
+  // itemKeys.ts's carrierRef has keyed their lock entry and their baseline under `obsidian/<list>`
+  // since v3, and the comment there ends "A carrier IS an item". The only things they lacked were a
+  // data.json entry and a card, which is what this def gives them. `defRef` mints the SAME string
+  // carrierRef does, so nothing is re-keyed and no baseline is orphaned.
+  {
+    id: "core-plugins",
+    groupName: "core-plugins",
+    label: "Core plugins",
+    description: "Which core plugins are turned on.",
+    settingsFile: { defaultPath: "{configDir}/core-plugins.json" },
+  },
+  {
+    id: "community-plugins",
+    groupName: "community-plugins",
+    label: "Community plugins",
+    description: "Which community plugins are turned on.",
+    settingsFile: { defaultPath: "{configDir}/community-plugins.json" },
+  },
 ] as const;
 
 const COMMUNITY_PLUGIN_DESCRIPTION = "";
 
 // Deterministic display order (spec §4): core and community/beta each sort by their own label,
 // independent of runtime scan order — the obsidian section keeps its fixed App settings/
-// Appearance/Hotkeys order from OBSIDIAN_CARD_DEFS.
+// Appearance/Hotkeys/Core plugins/Community plugins order from OBSIDIAN_CARD_DEFS.
 function byLabel(a: ItemDef, b: ItemDef): number {
   return a.label.localeCompare(b.label, "en", { sensitivity: "base" });
 }
@@ -615,15 +634,11 @@ export function structuralLocalElements(defs: ItemDef[], settings: CompileSettin
   return out;
 }
 
-function anyEnabledInList(defs: ItemDef[], settings: CompileSettings, list: EnablementList): boolean {
-  return defs.some((d) => d.enablement?.list === list && itemFor(settings.items, d).synced);
-}
-
-// Every group name the registry itself can ever produce plus the three switch-list names
-// ("community-plugins"/"core-plugins" are the conditional enablement groups compileItems emits
-// below; "enabled-css-snippets" never is its own group but is still reserved so a custom rule
-// can't shadow the vocabulary a user already associates with it). A custom rule's name must be its
-// own, unambiguous identity.
+// Every group name the registry itself can ever produce plus the three switch-list names.
+// "community-plugins"/"core-plugins" are already in the first set (task 5: they are ordinary
+// registry defs, so groupOwners already names them); "enabled-css-snippets" never is its own
+// group but is still reserved so a custom rule can't shadow the vocabulary a user already
+// associates with it. A custom rule's name must be its own, unambiguous identity.
 function reservedCustomGroupNames(defs: ItemDef[]): Set<string> {
   return new Set<string>([...Object.keys(groupOwners(defs, emptyItemMap())), ...Object.keys(SWITCH_LISTS)]);
 }
@@ -780,15 +795,6 @@ export function compileItems(defs: ItemDef[], settings: CompileSettings): SyncGr
     }
   }
 
-  for (const list of ENABLEMENT_LISTS) {
-    if (!anyEnabledInList(defs, settings, list)) continue;
-    // A carrier IS an item (itemKeys.ts's carrierRef): it has a store copy, a capture time, a hash
-    // and its elements' names, so it holds a lock entry and a baseline like any other.
-    const g: SyncGroup = { name: list, ref: carrierRef(list), path: `{configDir}/${enablementListFile(list)}`, type: "file", devices: "all" };
-    claimPath(seenPaths, list, g.path);
-    groups.push(g);
-  }
-
   groups.push(...compileCustomItems(settings.items, defs, seenPaths));
 
   return groups;
@@ -892,7 +898,8 @@ export function groupOwners(defs: ItemDef[], items: ItemMap): Record<string, Gro
 
 // The item a compiled group belongs to — a LOOKUP over the registry, not a parse of the name
 // (spec §5: `itemIdFor` and the `plugin-` prefix retire as parsers). Returns null for a companion
-// group, a name no def claims, or the two enablement carriers, which are not items.
+// group or a name no def claims. The two enablement carriers resolve here too, to their own def
+// (OBSIDIAN_CARD_DEFS above) — they are items now, not a special case.
 export function itemForGroupName(defs: ItemDef[], name: string): ItemDef | null {
   return defs.find((d) => d.settingsFile !== undefined && d.groupName === name) ?? null;
 }

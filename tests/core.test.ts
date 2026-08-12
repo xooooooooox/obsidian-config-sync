@@ -3109,6 +3109,10 @@ describe("mask producers read the PERSISTED switch-list file, not live PluginHos
     const plugin = makeMemberRulePlugin(io, ["remotely-save"]); // LIVE: reports enabled
     await plugin.loadSettings();
     plugin.settings.rootPath = "cs"; // skip PKM auto-detection, irrelevant here
+    // The carrier is an item now (task 5): its own entry must be synced for compileItems to emit
+    // a "community-plugins" group at all, which is what lets localSwitchListFor read the real
+    // persisted file below instead of finding no compiled group and reading nothing.
+    plugin.settings.items = withItem(plugin.settings.items, "obsidian", "community-plugins", { synced: true });
     plugin.settings.items = withItem(plugin.settings.items, "community", "remotely-save", { synced: true });
     await plugin.addSwitchExceptions("community-plugins", ["remotely-save"]); // legacy "this device" pin
 
@@ -3123,6 +3127,10 @@ describe("mask producers read the PERSISTED switch-list file, not live PluginHos
     const plugin = makeMemberRulePlugin(io, ["remotely-save"]);
     await plugin.loadSettings();
     plugin.settings.rootPath = "cs";
+    // Same as above: the carrier's own item must be synced for its group to compile, so this
+    // test's whole point — that a persisted-on pin is actually READ off disk — has something to
+    // read.
+    plugin.settings.items = withItem(plugin.settings.items, "obsidian", "community-plugins", { synced: true });
     plugin.settings.items = withItem(plugin.settings.items, "community", "remotely-save", { synced: true });
     await plugin.addSwitchExceptions("community-plugins", ["remotely-save"]);
 

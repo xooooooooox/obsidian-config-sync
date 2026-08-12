@@ -69,6 +69,9 @@ describe("storeSelfCopyGroups", () => {
     it("recompiles every section, custom items included, into the store's group list", () => {
       const json = JSON.stringify({
         items: itemsIn({
+          // The carrier is an item now (task 5): its own entry, not merely "some plugin in the
+          // section is synced", is what makes compileItems emit "community-plugins".
+          obsidian: { "community-plugins": { synced: true } },
           community: { demo: { synced: true } },
           custom: { "my-rule": { synced: true, type: "file", path: "docs/x.md" } },
         }),
@@ -82,6 +85,7 @@ describe("storeSelfCopyGroups", () => {
     it("synthesizes a community def for a store item whose plugin is not installed locally", () => {
       const json = JSON.stringify({
         items: itemsIn({
+          obsidian: { "community-plugins": { synced: true } },
           community: { foreign: { synced: true, companions: [{ path: "{configDir}/plugins/foreign", device: "all", enabled: true }] } },
         }),
       });
@@ -125,11 +129,15 @@ describe("storeSelfCopyGroups", () => {
       localMembers: [],
     });
 
+    // task 5 / task 9 boundary: migrateV2Settings does not yet seed items.obsidian["core-plugins"
+    // /"community-plugins"].synced — that backfill is task 9's (see registry.ts's ENABLEMENT_LISTS
+    // compile-loop retirement and its own comment). Until it lands, a v2 self copy's carriers
+    // compile to nothing here, same as any other v2 document read on this branch.
     it("recompiles the flat v2 item map and its customGroups into the store's group list", () => {
       const names = storeSelfCopyGroups(v2Copy, defs, NO_BETA_IDS)
         .map((g) => g.name)
         .sort();
-      expect(names).toEqual(["appearance", "community-plugins", "core-plugins", "graph", "my-rule", "plugin-demo", "plugin-foreign"].sort());
+      expect(names).toEqual(["appearance", "graph", "my-rule", "plugin-demo", "plugin-foreign"].sort());
     });
 
     it("attributes a not-installed plugin's pulled files as pending, not as deletable leftover", () => {

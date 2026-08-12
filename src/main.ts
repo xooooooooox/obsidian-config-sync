@@ -1757,8 +1757,9 @@ export default class ConfigSyncPlugin extends Plugin {
 
   // The item a compiled group belongs to, as the one-string ref localStorage and the Sync Center
   // host both speak — a registry LOOKUP (registry.ts's itemForGroupName), never a parse of the
-  // group name. null for a companion group, an enablement carrier, or a name no def claims; a
-  // custom item's group name IS its id.
+  // group name. null for a companion group or a name no def claims. An enablement carrier resolves
+  // here too, to its own def (task 5) — it is not a special case; a custom item's group name IS
+  // its id.
   itemRefForGroup(name: string): ItemRef | null {
     const def = itemForGroupName(this.registryDefs, name);
     if (def !== null) return defRef(def);
@@ -1931,10 +1932,11 @@ export default class ConfigSyncPlugin extends Plugin {
       groupsIO: {
         read: async () => this.compiledGroups,
         // The sync list is DERIVED from settings.items, not stored directly, so a raw group-list
-        // write has no durable home. The only remaining caller
-        // is stopSyncing's fallback for a group with no known owner (the hidden aggregate carrier
-        // groups) — kept in memory for the rest of the session, never a source of data loss, just
-        // non-persistence across a reload.
+        // write has no durable home. The only remaining caller is stopSyncing's fallback for a
+        // group with no known owner — every registry-produced group has one since task 5 gave the
+        // two carriers their own def, so this is reachable only for a name no def or custom entry
+        // claims at all (a future/unrecognized group) — kept in memory for the rest of the
+        // session, never a source of data loss, just non-persistence across a reload.
         write: async (groups) => {
           this.compiledGroups = groups;
         },
