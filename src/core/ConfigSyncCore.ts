@@ -1331,6 +1331,67 @@ function isLegacyManifestRel(rel: string): boolean {
   return rel === LEGACY_MANIFEST_REL || rel.startsWith(`${LEGACY_MANIFEST_REL}.migrated-`);
 }
 
+// §5 copy (spec 2026-08-12-loose-ends-design.md): what pull and push say when the far end holds
+// content but no lock. It names what was found and what is missing, and then BOTH ways a user
+// arrives here — a path pointing INTO the store instead of at the folder holding it, and a target
+// that is simply not empty yet (a new repository created with a README is the common one, and that
+// user's path is perfectly correct). A message that explains only the rarer cause sends the reader
+// after a problem they do not have, and teaches them to distrust the next message too.
+export const STORE_LOCK_MISSING_MESSAGE =
+  "This remote holds files but no store.lock.json, so Config Sync cannot tell whether it is a store. Point the remote at the folder that holds the store rather than inside it — or, if this is meant to be a new remote, clear what is already there first.";
+
+// The far end's own statement of what it is: the lock this build writes, or the legacy root manifest
+// that predates it. Either one names the folder, and this build READS both — remoteGroupsFrom parses
+// config-sync.json to this day, and migrateLegacyManifest still exists — so a legacy store is not a
+// folder whose bookkeeping we cannot see. It is one whose bookkeeping is older than the lock, which
+// is a different sentence and gets the legacy path it has always had.
+//
+// A `.migrated-` remnant is deliberately NOT one of these. Nothing reads it (remoteGroupsFrom parses
+// only config-sync.json; migrateLegacyManifest renames it precisely because it has been consumed),
+// so it cannot say what is here — and a declaration nobody reads is not a declaration.
+export function remoteDeclaresStore(files: readonly string[]): boolean {
+  return files.includes(LOCK_REL) || files.includes(LEGACY_MANIFEST_REL);
+}
+
+// Everything at the far end that a pull would COPY INTO this device's store: every rel except
+// bookkeeping — the lock, a legacy root manifest, its migrated remnants — and OS junk. Deliberately
+// the same exclusion list planImport's own payload loop uses, because that is what makes this
+// predicate mean something: there is no such thing as an innocent bystander file in a remote store,
+// so anything left over here is content this build would take.
+//
+// Junk is not content (isJunkPath): a .DS_Store the Finder dropped into the empty folder a user
+// just made for a first push says nothing about what is there, and refusing that push would be a
+// refusal with no cause.
+export function remoteStoreContentRels(files: readonly string[]): string[] {
+  return files.filter((rel) => rel !== LOCK_REL && !isLegacyManifestRel(rel) && !isJunkPath(rel));
+}
+
+// §5, in one sentence: refuse when there is content AND nothing here says what the content is.
+//
+// "There is nothing here yet" and "I cannot see the bookkeeping" are different statements, and until
+// this gate existed they produced the same behaviour — a directory full of store content with no
+// store.lock.json was read as a brand-new remote and pulled wholesale, silently. No lock means no
+// version, which means the version gate above never runs at all: it is only ever as strong as the
+// bookkeeping being FOUND.
+//
+// What it is NOT:
+//   · not a check that the far end is store-SHAPED. A remote pointed one level too deep, at the
+//     store folder itself, lists `configdir/…` and no `store/…` at all — a shape check would have
+//     waved through the very mistake that found this, and the worse mistype (a remote aimed at a
+//     vault ROOT, listing notes and `.obsidian/…`) would read as empty and then be MIRRORED over by
+//     the first push.
+//   · not a check on the bookkeeping's CONTENTS. A lock that is present but unreadable keeps the
+//     tolerant behaviour it has always had (see declaredStoreLockVersion — refusing to sync over a
+//     typo would strand a whole fleet). Presence is this gate's question; what the file SAYS is the
+//     version gate's.
+//
+// A genuinely empty remote — nothing declaring a store, no content — is untouched by this and stays
+// a first-push target, which is the common way a remote is set up in the first place.
+export function assertRemoteStoreDeclared(files: readonly string[]): void {
+  if (remoteDeclaresStore(files)) return;
+  if (remoteStoreContentRels(files).length > 0) throw new Error(STORE_LOCK_MISSING_MESSAGE);
+}
+
 export async function remoteGroupsFrom(ctx: CoreContext, reader: ExternalStoreReader, files: string[]): Promise<SyncGroup[]> {
   if (files.includes(SELF_STORE_DATA_REL)) {
     const raw = await reader.readFile(SELF_STORE_DATA_REL);
@@ -1372,12 +1433,20 @@ export interface PendingPull {
   plan: MergePlan;
   remoteGroups: SyncGroup[];
   remoteLockRaw: string | null;
+  // The far end's file listing as the planner saw it — carried for the same reason remoteLockRaw is:
+  // applyImport is the half that writes, and it re-runs both store gates on what it was handed
+  // rather than trusting that whoever built this plan ran them (see the §4.3 note there).
+  remoteFiles: string[];
   excludeSelf: boolean;
 }
 
 // Phase 1: read-only. Never writes anything.
 export async function planImport(ctx: CoreContext, reader: ExternalStoreReader, opts: { excludeSelf: boolean }): Promise<PendingPull> {
   const files = await reader.listFiles();
+  // §5: before a single remote file is read — content that nothing here identifies is refused, not
+  // adopted as a brand-new remote. Ahead of the version gate below because it is the condition under
+  // which that gate cannot run at all.
+  assertRemoteStoreDeclared(files);
   const remoteGroups = await remoteGroupsFrom(ctx, reader, files);
   const remoteLockRaw = files.includes(LOCK_REL) ? await reader.readFile(LOCK_REL) : null;
   // §4.3: refused here, before a single remote file is read into a plan — a store whose lock comes
@@ -1411,7 +1480,7 @@ export async function planImport(ctx: CoreContext, reader: ExternalStoreReader, 
   }
 
   const plan = classifyMerge(localGroups, localFileMap, remoteGroups, remoteFileMap);
-  return { plan, remoteGroups, remoteLockRaw, excludeSelf: opts.excludeSelf };
+  return { plan, remoteGroups, remoteLockRaw, remoteFiles: files, excludeSelf: opts.excludeSelf };
 }
 
 // Phase 2: writes the whole merge result — all auto-merged parts plus each conflict's chosen
@@ -1425,6 +1494,9 @@ export async function applyImport(
   // §4.3 on the writer itself: planImport already refused a newer REMOTE, but applyImport is the
   // half that writes, and the gate belongs on the write rather than on the caller's discipline.
   assertStoreLockVersionUnderstood(remoteLockRaw);
+  // §5, on the same footing: a plan built before the gate existed, or by a caller that never went
+  // through planImport, must not be the way content with no bookkeeping still lands in the store.
+  assertRemoteStoreDeclared(pending.remoteFiles);
   // And on the lock this merge is about to REPLACE — the local one (task-3 review I3). A v3 lock
   // reaches this store through ordinary vault sync, with no pull involved, so "the remote is old
   // enough" says nothing about what is already here. planImport refuses this too, so the user is
@@ -1607,7 +1679,13 @@ export async function pushExternal(ctx: CoreContext, writer: ExternalStoreWriter
     }
     return r;
   };
-  const remoteFiles = new Set((await writer.listFiles()).filter((r) => !isLegacyManifestRel(r)));
+  const remoteRels = await writer.listFiles();
+  // §5, push side: the far end holds content nothing there identifies, and push is the operation
+  // that would overwrite and mirror-delete it. Asked of the RAW listing, the same input the reader's
+  // own check sees — the legacy-manifest filter below is about what gets pushed, not about what is
+  // there, and here the legacy manifest is exactly the thing that must still count.
+  assertRemoteStoreDeclared(remoteRels);
+  const remoteFiles = new Set(remoteRels.filter((r) => !isLegacyManifestRel(r)));
   // §4.3, push side: refused before the first writeFile — pushing this build's store over a remote
   // written by a newer one would overwrite a shape we cannot read with one it cannot read back.
   if (remoteFiles.has(LOCK_REL)) assertStoreLockVersionUnderstood(await writer.readFile(LOCK_REL));

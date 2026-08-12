@@ -40,6 +40,7 @@ import {
   expectedPathForName,
   joinLocation,
   reservedNames,
+  sectionForGroup,
   SELF_GROUP_NAME,
   splitLocation,
 } from "../core/catalog";
@@ -411,6 +412,10 @@ interface SearchHit {
   desc: string;
   anchorId: string;
   item?: Pick<CatalogItem, "type">;
+  // The compiled group this hit stands for, when the hit's TAB is not also its family — the
+  // Advanced tab's rules and discovered files (§4). Read by settingSectionValue alone, to ask the
+  // Sync Center's own producer which family the item belongs to.
+  groupName?: string;
 }
 
 const SECTION_LABEL: Record<SearchHit["section"], string> = {
@@ -424,10 +429,21 @@ const SECTION_LABEL: Record<SearchHit["section"], string> = {
 };
 
 // --- Qualifier search vocabulary (SettingTab) ---
-export function settingSectionValue(section: SearchHit["section"]): string {
-  if (section === "plugins" || section === "beta") return "community";
-  if (section === "sources") return "remotes";
-  return section; // general | obsidian | core | advanced
+//
+// A hit answers with its settings AREA — this panel's own tabs — and, when the two differ, ALSO
+// with the family the item belongs to (§4). The family is not spelled out here: it comes from
+// `sectionForGroup`, the very function the Sync Center's `section:` resolver uses, so a custom rule
+// answers the same word in both search boxes by construction rather than by two authors happening
+// to type "custom" twice. Both answers are true of an Advanced-tab rule — it IS a custom item, and
+// it DOES live on that tab — which is why this returns a list rather than picking one.
+//
+// Only the hits whose tab is not their family carry a `groupName` (see SearchHit): a card hit's tab
+// IS its family, and asking `sectionForGroup` for a core plugin whose id this build has not been
+// told about would answer "custom" — a wrong second word for a hit that needs no second word.
+export function settingSectionValue(hit: Pick<SearchHit, "section" | "groupName">): string[] {
+  const area = hit.section === "plugins" || hit.section === "beta" ? "community" : hit.section === "sources" ? "remotes" : hit.section;
+  const family: string | null = hit.groupName === undefined ? null : sectionForGroup(hit.groupName);
+  return family === null || family === area ? [area] : [area, family];
 }
 export function settingTypeValue(hit: Pick<SearchHit, "item">): "file" | "folder" | null {
   if (hit.item === undefined) return null;
@@ -440,19 +456,27 @@ export function settingTypeValue(hit: Pick<SearchHit, "item">): "file" | "folder
 //
 // Here `section` names the settings AREA — this panel's own tabs — where the Sync Center's names an
 // item family. The overlap is deliberate (`obsidian`/`core`/`community` mean the same items in
-// both); the extras are the areas that hold no items at all: `general`, `remotes`, and `advanced`,
-// which is where custom rules and discovered files live in this panel.
+// both); the extras are the areas that hold no items at all: `general` and `remotes`, plus
+// `advanced`, which is where custom rules and discovered files live in this panel.
+//
+// `custom` is the one word that is a family here rather than an area (§4): it was answerable in the
+// Sync Center and not here, so the same word meant different things depending on which box you were
+// typing in — the exact defect the one-vocabulary release set out to remove. An Advanced-tab rule
+// now answers both words; `advanced` still means that tab, its own non-item settings included.
 //
 // Exported for the tests, which assert against the shipped list rather than restating it; `as const`
 // is what makes the resolver map below total over these keys (see SYNC_QUALIFIER_SPECS).
 export const SETTING_QUALIFIER_SPECS = [
-  { key: "section", description: "settings area", values: [{ value: "general" }, { value: "obsidian" }, { value: "core" }, { value: "community" }, { value: "advanced" }, { value: "remotes" }] },
+  { key: "section", description: "settings area", values: [{ value: "general" }, { value: "obsidian" }, { value: "core" }, { value: "community" }, { value: "advanced" }, { value: "custom" }, { value: "remotes" }] },
   { key: "type", description: "item kind", values: [{ value: "file", description: "single file" }, { value: "folder", description: "whole folder" }] },
 ] as const satisfies readonly QualifierSpec[];
 export type SettingQualifierKey = (typeof SETTING_QUALIFIER_SPECS)[number]["key"];
 export const SETTING_QUALIFIER_KEYS: ReadonlySet<string> = new Set(SETTING_QUALIFIER_SPECS.map((s) => s.key));
-const SETTING_QUALIFIER_RESOLVERS: Record<SettingQualifierKey, QualifierResolver<SearchHit>> = {
-  section: (h) => settingSectionValue(h.section),
+// Exported for the same reason the spec list is: the tests run their queries through the SHIPPED
+// resolver map, so "the panel answers `type:folder`" is asserted about the filter the panel really
+// runs rather than about a second copy of it written in the test.
+export const SETTING_QUALIFIER_RESOLVERS: Record<SettingQualifierKey, QualifierResolver<SearchHit>> = {
+  section: (h) => settingSectionValue(h),
   type: (h) => settingTypeValue(h),
 };
 
@@ -2055,7 +2079,12 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
           name: def.label,
           desc: [def.description, stateOnly ? "on/off only" : "", path ?? ""].filter((s) => s !== "").join(" "),
           anchorId: itemAnchorId(defRef(def)),
-          item: { type: "file" },
+          // §3: the type this item actually has, not a blanket "file". A registry item's own thing
+          // is its settings FILE (registry.ts's Item.type) — its companion folders are groups of
+          // their own, and no card hit stands for one. A state-only item has no file at all, so it
+          // answers NEITHER `type:` word: that is what an absent `item` means to settingTypeValue,
+          // and it is more honest than counting an on/off-only plugin as a file.
+          item: typeof path === "string" ? { type: "file" } : undefined,
         });
       }
     }
@@ -2068,6 +2097,10 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
           name: this.host.displayName(g.name, g.label),
           desc: splitLocation(g.path).rel,
           anchorId: `advanced-rule-${g.name}`,
+          // §3/§4: the group's own type — the same field the Sync Center's `type:` reads — and its
+          // name, so `section:` can ask which family it belongs to.
+          item: { type: g.type },
+          groupName: g.name,
         });
         continue;
       }
@@ -2081,6 +2114,8 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         name: this.host.displayName(g.name, g.label),
         desc: "Custom rule",
         anchorId: `advanced-rule-${g.name}`,
+        item: { type: g.type }, // §3: a rule pointing at a folder answers type:folder
+        groupName: g.name, // §4: …and section:custom, the family sectionForGroup gives it
       });
     }
     if (Platform.isDesktop) {

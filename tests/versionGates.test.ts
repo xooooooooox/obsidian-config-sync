@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { Notice } from "obsidian";
 import ConfigSyncPlugin from "../src/main";
 import { MemFS, FakePlugins, memGroupsIO } from "./memfs";
-import { applyImport, applyWithActions, capture, CoreContext, PendingPull, planImport, pushExternal, ExternalStoreReader, ExternalStoreWriter, writeGroups } from "../src/core/ConfigSyncCore";
+import { applyImport, applyWithActions, capture, CoreContext, PendingPull, planImport, pushExternal, ExternalStoreReader, ExternalStoreWriter, STORE_LOCK_MISSING_MESSAGE, writeGroups } from "../src/core/ConfigSyncCore";
+import { checkRemote } from "../src/core/status";
 import { declaredStoreLockVersion, lockEntry, parseSyncManifest, parseStoreLock, storeLockVersion, STORE_LOCK_FUTURE_MESSAGE, STORE_LOCK_VERSION } from "../src/core/manifest";
 import { SCHEMA_FUTURE_APPLY_MESSAGE, SCHEMA_FUTURE_NOTICE, SCHEMA_UPGRADE_NOTICE } from "../src/core/settingsMigration";
 import { SELF_GROUP_NAME } from "../src/core/catalog";
@@ -673,6 +674,7 @@ describe("§4.3 — the store lock's version", () => {
       },
       remoteGroups: [],
       remoteLockRaw: V1_LOCK,
+      remoteFiles: ["store.lock.json", "store/configdir/hotkeys.json"],
       excludeSelf: false,
     };
 
@@ -750,6 +752,7 @@ describe("§4.3 — the store lock's version", () => {
         },
         remoteGroups: [],
         remoteLockRaw: V1_LOCK,
+        remoteFiles: ["store.lock.json", "store/configdir/hotkeys.json"],
         excludeSelf: false,
       };
 
@@ -802,6 +805,178 @@ describe("§4.3 — the store lock's version", () => {
     const fw = fakeWriter({ "store.lock.json": V1_LOCK });
     await pushExternal(ctx, fw.writer, { excludeSelf: false });
     expect(fw.files["store/configdir/hotkeys.json"]).toBe('{"mine":1}');
+  });
+});
+
+// §5 (spec 2026-08-12-loose-ends-design.md). The version gate above is only ever as strong as the
+// lock being FOUND: no lock means no version, so none of it runs. Until now a directory full of
+// store content with no store.lock.json was read as a brand-new remote and pulled wholesale, in
+// silence — which is how a controller who pointed a remote one level too deep copied 94 files onto
+// a device without being asked anything.
+//
+// The two statements this separates are "there is nothing here yet" and "I cannot see the
+// bookkeeping". The first is a first-push target, and has to keep working — a new remote is set up
+// that way. The second is a refusal.
+describe("§5 — content at the far end with no lock", () => {
+  const LOCAL_STORE = { "cs/store.lock.json": V1_LOCK, "cs/store/configdir/hotkeys.json": '{"mine":1}' };
+  // The listing the mistake actually produces. A remote pointed AT the store folder rather than at
+  // the folder holding it lists the store's own contents — `configdir/…`, with no `store/` prefix
+  // anywhere and no lock. A predicate that asked "is this store-SHAPED?" would wave it straight
+  // through, which is why the gate asks whether there is anything here at all.
+  const ONE_LEVEL_TOO_DEEP = { "configdir/hotkeys.json": '{"theirs":1}', "configdir/plugins/demo/data.json": "{}" };
+  const LOCKLESS_STORE = { "store/configdir/hotkeys.json": '{"theirs":1}' };
+
+  it("pull refuses it, and the local store is untouched", async () => {
+    const io = new MemFS();
+    io.seed(LOCAL_STORE);
+
+    await expect(planImport(guardCtx(io), fakeReader(ONE_LEVEL_TOO_DEEP), { excludeSelf: false })).rejects.toThrow(STORE_LOCK_MISSING_MESSAGE);
+
+    expect(await io.read("cs/store.lock.json")).toBe(V1_LOCK);
+    expect(await io.read("cs/store/configdir/hotkeys.json")).toBe('{"mine":1}');
+    expect(await io.exists("cs/configdir/hotkeys.json")).toBe(false); // the 94 files never land
+  });
+
+  it("…and refuses a lockless store proper, laid out exactly as this build writes one", async () => {
+    const io = new MemFS();
+    io.seed(LOCAL_STORE);
+
+    await expect(planImport(guardCtx(io), fakeReader(LOCKLESS_STORE), { excludeSelf: false })).rejects.toThrow(STORE_LOCK_MISSING_MESSAGE);
+
+    expect(await io.read("cs/store/configdir/hotkeys.json")).toBe('{"mine":1}');
+  });
+
+  it("the pull merge refuses it too, for a caller that never planned", async () => {
+    const io = new MemFS();
+    io.seed(LOCAL_STORE);
+    const pending: PendingPull = {
+      plan: {
+        auto: {
+          addGroups: [],
+          writeFiles: [{ rel: "configdir/hotkeys.json", content: '{"theirs":1}', name: "" }],
+          keptLocalGroups: [],
+          keptLocalFiles: [],
+          identical: [],
+        },
+        conflicts: [],
+      },
+      remoteGroups: [],
+      remoteLockRaw: null,
+      remoteFiles: Object.keys(ONE_LEVEL_TOO_DEEP),
+      excludeSelf: false,
+    };
+
+    await expect(applyImport(guardCtx(io), pending, [])).rejects.toThrow(STORE_LOCK_MISSING_MESSAGE);
+
+    expect(await io.exists("cs/configdir/hotkeys.json")).toBe(false);
+  });
+
+  it("push refuses it before the first file is written", async () => {
+    const io = new MemFS();
+    io.seed(LOCAL_STORE);
+    const fw = fakeWriter(ONE_LEVEL_TOO_DEEP);
+
+    await expect(pushExternal(guardCtx(io), fw.writer, { excludeSelf: false })).rejects.toThrow(STORE_LOCK_MISSING_MESSAGE);
+
+    expect(fw.writeLog).toEqual([]);
+    expect(fw.files["configdir/hotkeys.json"]).toBe('{"theirs":1}'); // nor is anything of theirs deleted
+  });
+
+  // The other half, and the one that must not break: a remote nobody has pushed to yet.
+  it("an empty remote is still a first-push target — push writes the whole store to it", async () => {
+    const io = new MemFS();
+    io.seed(LOCAL_STORE);
+    const fw = fakeWriter({});
+
+    await pushExternal(guardCtx(io), fw.writer, { excludeSelf: false });
+
+    expect(fw.files["store/configdir/hotkeys.json"]).toBe('{"mine":1}');
+    expect(fw.files["store.lock.json"]).toBe(V1_LOCK);
+  });
+
+  it("…and pulling from one is a no-op, not a refusal", async () => {
+    const io = new MemFS();
+    io.seed(LOCAL_STORE);
+
+    const pending = await planImport(guardCtx(io), fakeReader({}), { excludeSelf: false });
+
+    expect(pending.plan.auto.writeFiles).toEqual([]);
+    expect(pending.plan.conflicts).toEqual([]);
+  });
+
+  // A legacy store is NOT the case this gate is for. Its root manifest says exactly what the folder
+  // is, and this build still reads it — `remoteGroupsFrom` parses it and `migrateLegacyManifest`
+  // still exists — so "no lock" here means "bookkeeping older than the lock", not "bookkeeping I
+  // cannot see". The refusal would have been unfixable for that user too: neither cause the message
+  // names is theirs, and "clear what is already there" would tell them to delete their own store.
+  //
+  // Verified, not assumed: the groups come out of the manifest and the store file lands.
+  it("a lockless LEGACY store is not refused — pull takes the path it has always had", async () => {
+    const io = new MemFS();
+    io.seed(LOCAL_STORE);
+    const legacyManifest = JSON.stringify({
+      version: 1,
+      groups: [{ name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all" }],
+    });
+    const remote = { "config-sync.json": legacyManifest, "store/configdir/hotkeys.json": '{"theirs":1}' };
+
+    const pending = await planImport(guardCtx(io), fakeReader(remote), { excludeSelf: false });
+
+    expect(pending.remoteGroups.map((g) => g.name)).toEqual(["hotkeys"]); // read out of the legacy manifest
+    await applyImport(guardCtx(io), pending, ["remote"]);
+    expect(await io.read("cs/store/configdir/hotkeys.json")).toBe('{"theirs":1}'); // and the pull lands
+  });
+
+  it("...and push to one proceeds too", async () => {
+    const io = new MemFS();
+    io.seed(LOCAL_STORE);
+
+    const legacy = fakeWriter({ "config-sync.json": "OLD-REMOTE", "store/configdir/hotkeys.json": '{"theirs":1}' });
+    await pushExternal(guardCtx(io), legacy.writer, { excludeSelf: false });
+    expect(legacy.files["store/configdir/hotkeys.json"]).toBe('{"mine":1}');
+    expect(legacy.files["config-sync.json"]).toBe("OLD-REMOTE"); // never written, never deleted
+  });
+
+  // A `.migrated-` remnant is not the same thing: nothing reads it, so it declares nothing. With
+  // content beside it and no other bookkeeping, that remote is refused like any other.
+  it("a migrated remnant is not a declaration — content beside one is still refused", async () => {
+    const io = new MemFS();
+    io.seed(LOCAL_STORE);
+    const remote = { "config-sync.json.migrated-2020-01-01T00-00-00": "leftover", ...LOCKLESS_STORE };
+
+    await expect(planImport(guardCtx(io), fakeReader(remote), { excludeSelf: false })).rejects.toThrow(STORE_LOCK_MISSING_MESSAGE);
+  });
+
+  it("an OS junk file alone still counts as empty", async () => {
+    const io = new MemFS();
+    io.seed(LOCAL_STORE);
+
+    const junk = fakeWriter({ ".DS_Store": " " });
+    await pushExternal(guardCtx(io), junk.writer, { excludeSelf: false });
+    expect(junk.files["store/configdir/hotkeys.json"]).toBe('{"mine":1}');
+  });
+
+  // The status the user sees has to agree with what the gesture will do, or they are invited into a
+  // refusal — the same rule §4.3 already follows for a lock from the future. checkRemote answers
+  // from the same predicate the gate does, so the two cannot drift apart.
+  it("the remote's reported state agrees with the refusal — uncomparable, never an empty remote", async () => {
+    expect((await checkRemote(null, fakeReader(ONE_LEVEL_TOO_DEEP), [])).state).toBe("unknown");
+    expect((await checkRemote(null, fakeReader(LOCKLESS_STORE), [])).state).toBe("unknown");
+    // A legacy store is not refused, but it is still uncomparable — there is no lock to weigh.
+    expect((await checkRemote(null, fakeReader({ "config-sync.json": "{}" }), [])).state).toBe("unknown");
+    // no-store is reserved for the one remote a first push is FOR: nothing here at all.
+    expect((await checkRemote(null, fakeReader({}), [])).state).toBe("no-store");
+  });
+
+  // The message is the only place either cause can be diagnosed from, and there are TWO of them: a
+  // path pointing into the store, and a target that is simply not empty yet — a new repository
+  // created with a README, whose path is perfectly correct. Naming only the first would send half
+  // the readers after a problem they do not have.
+  it("names what was found, what was missing, and both ways out", () => {
+    expect(STORE_LOCK_MISSING_MESSAGE).toContain("store.lock.json");
+    expect(STORE_LOCK_MISSING_MESSAGE).toContain("holds files");
+    expect(STORE_LOCK_MISSING_MESSAGE).toContain("folder that holds the store"); // the wrong-path cause
+    expect(STORE_LOCK_MISSING_MESSAGE).toContain("clear what is already there"); // the not-empty-yet cause
   });
 });
 

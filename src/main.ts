@@ -21,6 +21,7 @@ import {
   pushExternal,
   readCarrierSwitchLists,
   readGroups,
+  STORE_LOCK_MISSING_MESSAGE,
   writeGroups,
 } from "./core/ConfigSyncCore";
 import { createInstaller } from "./core/installer";
@@ -160,6 +161,13 @@ const DEFAULT_SETTINGS: ConfigSyncSettings = {
 // once, while a gesture made after it has faded gets its own answer; the refusal itself is never
 // suppressed, only the repeat of the message.
 const REFUSAL_NOTICE_MS = 10000;
+
+// Our own refusals about the store at the other end, as opposed to a transport failure: each one
+// already says what to do, so the pull/push notices append no generic "check the remote's URL"
+// advice on top of it.
+function isOwnStoreRefusal(message: string): boolean {
+  return message === STORE_LOCK_FUTURE_MESSAGE || message === STORE_LOCK_MISSING_MESSAGE;
+}
 
 // app.plugins is not part of the public API; this is the community-standard access path.
 interface CommunityPluginRegistry {
@@ -938,8 +946,9 @@ export default class ConfigSyncPlugin extends Plugin {
           // The §4.3 refusal already says what to do (update Config Sync) — appending the
           // check-your-URL advice would send the user after a problem they do not have. Same
           // reasoning as the no-token case, which is likewise our own refusal, not a transport
-          // failure.
-          const advice = classifyRemoteFailure(message) === "no-token" || message === STORE_LOCK_FUTURE_MESSAGE ? "" : " — check the remote's URL or path and try again.";
+          // failure, and as §5's, which says something more specific about the path than the
+          // generic advice could.
+          const advice = classifyRemoteFailure(message) === "no-token" || isOwnStoreRefusal(message) ? "" : " — check the remote's URL or path and try again.";
           new Notice(`Config Sync pull failed: ${message}${advice}`, 10000);
           return null;
         }
@@ -953,7 +962,7 @@ export default class ConfigSyncPlugin extends Plugin {
           return results;
         } catch (e) {
           const message = (e as Error).message;
-          const advice = classifyRemoteFailure(message) === "no-token" || message === STORE_LOCK_FUTURE_MESSAGE ? "" : " — check the remote's URL or path and try again."; // see pullFrom
+          const advice = classifyRemoteFailure(message) === "no-token" || isOwnStoreRefusal(message) ? "" : " — check the remote's URL or path and try again."; // see pullFrom
           new Notice(`Config Sync push failed: ${message}${advice}`, 10000);
           return null;
         }

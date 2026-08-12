@@ -180,7 +180,10 @@ than invent synonyms.
   **device** (which devices something runs on) · **mode** (how a file is handled) ·
   **element** (one entry of an on/off list) · **action** (what an item needs right now) ·
   **type** (`file` · `folder`, never `dir`). Both search bars type `section:`; there is no
-  alias for the retired `scope:`. A synonym for any of these is a defect, not a style choice.
+  alias for the retired `scope:`. A synonym for any of these is a defect, not a style choice —
+  and so is the same word ANSWERING differently in the two boxes: `section:custom` finds a
+  custom rule in either one, the settings panel adding its own area word (`advanced`) rather
+  than substituting it.
 - Anchor to established product terms: Apply, Capture, the store, Sync Center, "your other
   devices". Don't invent synonyms.
 - Controls state their click consequence; recommended options give their reason ("matches

@@ -1,4 +1,4 @@
-import { baseHasStaleLocalKeys, CoreContext, ExternalStoreReader, groupForStoreRel, isSelfStoreRel, loadManifest, overlayGroup, readStoreContractLocals, remoteGroupsFrom, storeDir, withContractLocals } from "./ConfigSyncCore";
+import { baseHasStaleLocalKeys, CoreContext, ExternalStoreReader, groupForStoreRel, isSelfStoreRel, loadManifest, overlayGroup, readStoreContractLocals, remoteDeclaresStore, remoteGroupsFrom, remoteStoreContentRels, storeDir, withContractLocals } from "./ConfigSyncCore";
 import { isJunkPath, listFilesRecursive } from "./io";
 import { basename, groupStorePath, relativeTo, sidecarStoreSuffix } from "./pathing";
 import { FileChanges, hasChanges, itemRef, StoreLock, StoreLockEntry, SyncGroup } from "./types";
@@ -219,11 +219,16 @@ export async function checkRemote(
   groups?: readonly SyncGroup[]
 ): Promise<RemoteCheck> {
   const files = await reader.listFiles();
-  // Store presence: new-format stores hold only store/** + store.lock.json (no root manifest);
-  // a root config-sync.json still marks a legacy-format store.
-  const hasStore = files.some((f) => f.startsWith("store/")) || files.includes("store.lock.json") || files.includes("config-sync.json");
-  if (!hasStore) return { state: "no-store", remoteCapturedAt: null };
-  if (!files.includes("store.lock.json")) return { state: "unknown", remoteCapturedAt: null };
+  // Store presence, asked as one question (§5). With no lock there is nothing to compare either way,
+  // so all that is left to decide is whether this remote is EMPTY — the first-push target, and the
+  // sole case that reports no-store — or merely uncomparable: content, or a legacy manifest
+  // declaring a store this build still pulls the old way. Both halves come from the same two
+  // producers the pull/push gate uses, so a remote that gate refuses can never read here as an empty
+  // one inviting the push it would then decline (the rule §4.3 already follows for a future lock).
+  if (!files.includes("store.lock.json")) {
+    const empty = !remoteDeclaresStore(files) && remoteStoreContentRels(files).length === 0;
+    return { state: empty ? "no-store" : "unknown", remoteCapturedAt: null };
+  }
   let remote: StoreLock;
   try {
     remote = parseStoreLock(await reader.readFile("store.lock.json"), groups);

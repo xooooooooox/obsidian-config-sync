@@ -435,8 +435,11 @@ functions.
   `as const` so `SettingQualifierKey` makes the resolver map total over them — a renamed key with no
   resolver is a compile error, not a qualifier that autocompletes and filters nothing. Here `section`
   names the settings AREA (`general` · `obsidian` · `core` · `community` · `advanced` · `remotes`),
-  where the Sync Center's names an item family; custom rules and discovered files are indexed under
-  `advanced`, which is the tab they live on.
+  where the Sync Center's names an item family, and an Advanced-tab hit answers BOTH: its area, plus
+  the family `sectionForGroup` gives it — the Sync Center's own producer, so `section:custom` cannot
+  mean one thing in one box and another in the other. Each hit's `type:` is the item's real kind:
+  a custom rule's compiled `SyncGroup.type` (which is what `syncTypeValue` reads on the other side),
+  a registry card's own settings FILE, and neither for a state-only item, which has no file at all.
 - `itemCard.ts` — pure render-model helpers for the card renderer (badges, zone presence, the
   Fields/Companion-folders row models, path/companion validation) so the card's logic is
   unit-testable without touching the DOM; `SettingTab.ts`'s renderers turn these models into
@@ -783,7 +786,30 @@ Changes must preserve these:
   `applyImport` stays the guarantee, re-reading the lock so it validates the bytes it is about to
   replace rather than the ones the planner happened to see. That refusal is not `checkRemote`'s `unknown` — an
   unreadable lock keeps today's tolerant behaviour, and a `version` that isn't a number reads as 1
-  rather than stranding a fleet on a typo. (The 1.x one-slot apply backup at `<configDir>/config-sync-backup` is gone with the removed
+  rather than stranding a fleet on a typo.
+  **A gate on a version is only as strong as the bookkeeping being FOUND**, which is what
+  `assertRemoteStoreDeclared` adds: no lock ⇒ no version ⇒ none of the above runs, and a remote
+  holding content with no `store.lock.json` used to be read as brand new and pulled wholesale, in
+  silence (a remote pointed one level too deep at the `store` folder is the realistic way there).
+  Pull, the pull merge and push all refuse it with `STORE_LOCK_MISSING_MESSAGE`. In one sentence:
+  **refuse when there is content AND nothing here says what the content is.** Two producers, both
+  shared with `checkRemote` so the status and the gesture can never disagree — `remoteDeclaresStore`
+  (the lock, or the legacy root `config-sync.json`) and `remoteStoreContentRels` (every rel a pull
+  would COPY: the listing minus bookkeeping, minus `.migrated-` remnants, minus OS junk).
+  Deliberately *not* a "does it look like a store" shape test. The mistyped path lists `configdir/…`
+  and no `store/…` at all, and the worse mistype — a remote aimed at a vault ROOT — lists notes and
+  `.obsidian/…`, which a shape test would call empty and push would then MIRROR, deleting the vault.
+  The breadth is the point: refusing a new repository that has a README in it is an inconvenience
+  with a message attached; the shape test's failure mode is silent destruction of whatever the user
+  actually pointed at. A LEGACY store is NOT the case the gate is for — its root manifest says what
+  the folder is and this build still reads it (`remoteGroupsFrom` parses it, `migrateLegacyManifest`
+  exists), so "no lock" there means "bookkeeping older than the lock" and the pull takes the legacy
+  path it always had; a `.migrated-` remnant declares nothing (nothing reads it), so content beside
+  one is refused like any other. Consequence to carry in release notes: a first push to a non-empty
+  target is refused where its files used to be mirror-deleted, so the copy names BOTH causes (wrong
+  folder / target not empty yet). `checkRemote` reserves `no-store` for a remote with nothing in it
+  at all — the first-push target — and answers `unknown` for anything present it cannot compare, so a
+  remote the gate refuses can never read as an invitation to the push it would then decline. (The 1.x one-slot apply backup at `<configDir>/config-sync-backup` is gone with the removed
   Revert feature; apply deletes a leftover copy.)
 - **The store is configDir-agnostic.** Paths use the literal `configdir` segment, so a vault on
   `.obsidian` and one on `.obsidian_apple` map to the same store.

@@ -912,6 +912,13 @@ function fakeReader(files: Record<string, string>): ExternalStoreReader {
   };
 }
 
+// A store's bookkeeping, in the shape every captured store carries one. Spread into the remote
+// fixtures below because §5 (spec 2026-08-12-loose-ends-design.md) refuses a remote that holds
+// content with no lock: these tests are about what a pull/push DOES with a store, so they have to
+// describe a store rather than the shape the gate now turns away — which
+// tests/versionGates.test.ts holds instead.
+const REMOTE_LOCK = { "store.lock.json": JSON.stringify({ capturedAt: "2026-07-30T00:00:00.000Z", items: {} }) };
+
 const HOTKEYS_GROUP: SyncGroup = withRef({ name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all" });
 const SNIPPETS_GROUP: SyncGroup = withRef({ name: "snippets", path: "{configDir}/snippets", type: "folder", devices: "all" });
 
@@ -1147,7 +1154,7 @@ describe("planImport / applyImport", () => {
     const { io, ctx } = setup();
     await writeGroups(ctx, [SNIPPETS_GROUP]);
     io.seed({ "cs/store/configdir/snippets/one.css": "local-only" });
-    const remote = { "store/configdir/plugins/config-sync/data.json": selfDataJson([]) };
+    const remote = { ...REMOTE_LOCK, "store/configdir/plugins/config-sync/data.json": selfDataJson([]) };
 
     const pending = await planImport(ctx, fakeReader(remote), { excludeSelf: false });
     expect(pending.plan.conflicts).toEqual([]);
@@ -1161,6 +1168,7 @@ describe("planImport / applyImport", () => {
   it("remote-only file lands in the store but its group is NOT imported into the sync list", async () => {
     const { ctx } = setup();
     const remote = {
+      ...REMOTE_LOCK,
       "store/configdir/plugins/config-sync/data.json": selfDataJson([HOTKEYS_GROUP]),
       "store/configdir/hotkeys.json": '{"a":1}',
     };
@@ -1180,6 +1188,7 @@ describe("planImport / applyImport", () => {
     await writeGroups(ctx, [HOTKEYS_GROUP]);
     io.seed({ "cs/store/configdir/hotkeys.json": '{"a":1}' });
     const remote = {
+      ...REMOTE_LOCK,
       "store/configdir/plugins/config-sync/data.json": selfDataJson([HOTKEYS_GROUP, SNIPPETS_GROUP]),
       "store/configdir/hotkeys.json": '{"a":1}', // identical
       "store/configdir/snippets/one.css": "one", // remote-only
@@ -1199,6 +1208,7 @@ describe("planImport / applyImport", () => {
     await writeGroups(ctx, [SWITCH_GROUP]);
     io.seed({ "cs/store/configdir/community-plugins.json": '["obsidian-image-toolkit","ioto-tasks-center","config-sync"]' });
     const remote = {
+      ...REMOTE_LOCK,
       "store/configdir/plugins/config-sync/data.json": selfDataJson([SWITCH_GROUP]),
       "store/configdir/community-plugins.json": '["ioto-tasks-center","config-sync","obsidian-image-toolkit"]', // same set, different order
     };
@@ -1217,6 +1227,7 @@ describe("planImport / applyImport", () => {
     await writeGroups(ctx, [HOTKEYS_GROUP]);
     io.seed({ "cs/store/configdir/hotkeys.json": '{"a":"local"}' });
     const remote = {
+      ...REMOTE_LOCK,
       "store/configdir/plugins/config-sync/data.json": selfDataJson([HOTKEYS_GROUP]),
       "store/configdir/hotkeys.json": '{"a":"remote"}',
     };
@@ -1236,6 +1247,7 @@ describe("planImport / applyImport", () => {
     await writeGroups(ctx, [HOTKEYS_GROUP]);
     io.seed({ "cs/store/configdir/hotkeys.json": '{"a":"local"}' });
     const remote = {
+      ...REMOTE_LOCK,
       "store/configdir/plugins/config-sync/data.json": selfDataJson([HOTKEYS_GROUP]),
       "store/configdir/hotkeys.json": '{"a":"remote"}',
     };
@@ -1252,7 +1264,7 @@ describe("planImport / applyImport", () => {
     const localHotkeys = { ...HOTKEYS_GROUP, devices: "desktop" as const };
     const remoteHotkeys = { ...HOTKEYS_GROUP, devices: "all" as const };
     await writeGroups(ctx, [localHotkeys]);
-    const remote = { "store/configdir/plugins/config-sync/data.json": selfDataJson([remoteHotkeys]) };
+    const remote = { ...REMOTE_LOCK, "store/configdir/plugins/config-sync/data.json": selfDataJson([remoteHotkeys]) };
 
     const pending = await planImport(ctx, fakeReader(remote), { excludeSelf: false });
     // planImport still surfaces the difference (the Config Sync pane uses it), but pull no longer
@@ -1269,6 +1281,7 @@ describe("planImport / applyImport", () => {
     io.seed({ "cs/store/configdir/hotkeys.json": '{"a":"local"}' });
     const before = new Map(io.files);
     const remote = {
+      ...REMOTE_LOCK,
       "store/configdir/plugins/config-sync/data.json": selfDataJson([HOTKEYS_GROUP, SNIPPETS_GROUP]),
       "store/configdir/hotkeys.json": '{"a":"remote"}',
       "store/configdir/snippets/one.css": "one",
@@ -1290,6 +1303,9 @@ describe("planImport / applyImport", () => {
 
   it("legacy compat: falls back to a root config-sync.json when no self store item is present", async () => {
     const { ctx } = setup();
+    // No lock, deliberately (and unchanged since before §5): the legacy root manifest IS this
+    // remote's bookkeeping, so the gate lets it through to the legacy path instead of refusing it
+    // as content nothing identifies.
     const remote = {
       "config-sync.json": MANIFEST,
       "store/configdir/hotkeys.json": '{"a":1}',
@@ -1367,11 +1383,14 @@ describe("planImport / applyImport", () => {
       expect(lock.items["legacy"]?.["snippets"]).toEqual({ source: { kind: "app", version: "1.0.0" } }); // kept local
     });
 
+    // §5 narrowed the shapes this can be asked about: a remote holding content with no lock is
+    // refused outright now, so the only lockless remote a pull ever reaches is an empty one — the
+    // first-push target. Neither side has a lock, and the merge still invents none.
     it("writes nothing when neither side has a lock", async () => {
       const { io, ctx } = setup();
       await writeGroups(ctx, [HOTKEYS_GROUP]);
-      const remote = { "store/configdir/plugins/config-sync/data.json": selfDataJson([HOTKEYS_GROUP]) };
-      const pending = await planImport(ctx, fakeReader(remote), { excludeSelf: false });
+      io.seed({ "cs/store/configdir/hotkeys.json": '{"a":1}' });
+      const pending = await planImport(ctx, fakeReader({}), { excludeSelf: false });
       await applyImport(ctx, pending, []);
       expect(await io.exists("cs/store.lock.json")).toBe(false);
     });
@@ -1670,7 +1689,9 @@ describe("pushExternal", () => {
       "cs/store/configdir/hotkeys.json": '{"a":9}',
     });
     await seedGroups(ctx, '{"version":1,"groups":[]}');
-    const fw = fakeWriter({ "store/gone.css": "stale" });
+    // The remote's own lock, byte-identical to the local one so the push skips it — a remote with
+    // content and no lock is a refusal now (§5), not a push target.
+    const fw = fakeWriter({ "store.lock.json": '{"capturedAt":"t","groups":{}}', "store/gone.css": "stale" });
     const results = await pushExternal(ctx, fw.writer, { excludeSelf: false });
     expect(results.every((r) => r.status === "ok")).toBe(true);
     expect(fw.files["store/configdir/hotkeys.json"]).toBe('{"a":9}');
@@ -1683,11 +1704,13 @@ describe("pushExternal", () => {
   it("skips writing identical files and reports per-item changes", async () => {
     const { io, ctx } = setup();
     io.seed({
+      "cs/store.lock.json": '{"capturedAt":"t","groups":{}}',
       "cs/store/configdir/hotkeys.json": '{"a":1}',
       "cs/store/configdir/snippets/one.css": "one",
     });
     await seedGroups(ctx, MANIFEST);
     const fw = fakeWriter({
+      "store.lock.json": '{"capturedAt":"t","groups":{}}', // the remote's bookkeeping, identical -> skipped (§5)
       "store/configdir/hotkeys.json": '{"a":1}', // identical to local -> must not be rewritten
     });
     const results = await pushExternal(ctx, fw.writer, { excludeSelf: false });
@@ -1748,7 +1771,10 @@ describe("pushExternal", () => {
       "cs/store/configdir/hotkeys.json": '{"a":1}',
     });
     await seedGroups(ctx, '{"version":1,"groups":[]}');
-    const fw = fakeWriter({ "store/configdir/plugins/config-sync/data.json": '{"theirs":true}' });
+    const fw = fakeWriter({
+      "store.lock.json": '{"capturedAt":"t","groups":{}}', // identical to local -> skipped (§5: a store, not a bare directory of files)
+      "store/configdir/plugins/config-sync/data.json": '{"theirs":true}',
+    });
     const results = await pushExternal(ctx, fw.writer, { excludeSelf: true });
     expect(fw.files["store/configdir/plugins/config-sync/data.json"]).toBe('{"theirs":true}'); // untouched both ways
     expect(fw.files["store/configdir/hotkeys.json"]).toBe('{"a":1}');
@@ -3283,7 +3309,10 @@ describe("applyImport — pull is pure store transport", () => {
         conflicts: [],
       },
       remoteGroups: [],
-      remoteLockRaw: null,
+      // A hand-built plan still has to describe a remote that could have produced it: a lock, and
+      // the listing it was read from (§5 — applyImport refuses content with no lock).
+      remoteLockRaw: '{"capturedAt":"t","groups":{}}',
+      remoteFiles: ["store.lock.json", "store/configdir/plugins/new/data.json"],
       excludeSelf: false,
     };
     await applyImport(ctx, pending, []);

@@ -538,6 +538,12 @@ describe("checkRemote", () => {
   const localLock = { capturedAt: "2026-07-08T00:00:00.000Z", items: {} };
   it("classifies all five states", async () => {
     expect((await checkRemote(localLock, fakeReader({}), [])).state).toBe("no-store");
+    // Content with no lock: uncomparable, and refused by pull and push (§5) — never reported as an
+    // empty remote inviting a first push.
+    expect((await checkRemote(localLock, fakeReader({ "store/configdir/hotkeys.json": "{}" }), [])).state).toBe("unknown");
+    // A legacy root manifest declares a store this build still reads (and still pulls), so it is not
+    // the empty remote a first push is for — just one with no lock to compare against. Unchanged
+    // from before §5.
     expect((await checkRemote(localLock, fakeReader({ "config-sync.json": "{}" }), [])).state).toBe("unknown");
     const at = (t: string): Record<string, string> => ({ "config-sync.json": "{}", "store.lock.json": JSON.stringify({ capturedAt: t, items: {} }) });
     expect((await checkRemote(localLock, fakeReader(at("2026-07-09T00:00:00.000Z")), [])).state).toBe("remote-newer");
