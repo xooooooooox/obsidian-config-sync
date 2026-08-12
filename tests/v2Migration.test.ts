@@ -159,6 +159,27 @@ describe("migrateV2Settings — §5 identity rows", () => {
   });
 });
 
+// Task-4 review finding: every item in v2Document() carries an explicit `enabled`, so the suite
+// never proved the OTHER direction — a v2 item that never had the key must not come out the other
+// side with a spurious `synced`. itemFrom's rename is `if ("enabled" in item) { … }`; an
+// unconditional `item.synced = item.enabled` would silently write `synced: undefined` here, which
+// `?.synced === undefined` cannot tell apart from a genuinely absent key — hence the `in` checks.
+describe("migrateV2Settings — a v2 item with no `enabled` key gains no `synced` key", () => {
+  it("does not manufacture synced (or leave enabled behind) on an item that never had it", () => {
+    const doc = migrateV2Settings({
+      schemaVersion: 2,
+      items: {
+        "core:templates": { settingsFile: { mode: "plain", rules: {}, perItem: {} } },
+      },
+    }).document;
+    const item = (doc.items as ItemMap).core["templates"] as unknown as Record<string, unknown>;
+    expect("synced" in item).toBe(false);
+    expect("enabled" in item).toBe(false);
+    // …and the rest of the item still migrated normally — the guard didn't just no-op the whole item.
+    expect(item.settingsFile).toEqual({ mode: "plain", rules: {}, perElement: {} });
+  });
+});
+
 describe("migrateV2Settings — §5 value rows", () => {
   it("a field rule's scope becomes a sharing, keeping encrypted and locked", () => {
     expect(items().obsidian["app"]?.settingsFile?.rules["*Token*"]).toEqual({ sharing: THIS_DEVICE, encrypted: false });
