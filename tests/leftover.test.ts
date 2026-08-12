@@ -164,7 +164,7 @@ describe("selfListGroups (delta ghost regression, spec 2026-07-28 §2)", () => {
     community: {
       omnisearch: { synced: true },
       // obsidian-git is NOT installed on this device (no def) but IS in the local items:
-      "obsidian-git": { synced: true, runsOn: { device: "desktop" } },
+      "obsidian-git": { synced: true },
     },
   });
 

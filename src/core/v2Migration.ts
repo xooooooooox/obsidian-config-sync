@@ -161,7 +161,7 @@ function deviceFrom(v: unknown): "all" | "desktop" | "mobile" | undefined {
  * pass in migrateV2Settings, which is the other place this decision shows.
  *
  * Returns undefined for a rule that says nothing at all, so the key is simply absent — the same
- * prune discipline registry.ts's withRunsOnDevice keeps (C-#26).
+ * never-write-a-no-op-value discipline this codebase applies throughout (C-#26).
  */
 export function runsOnFrom(enabledOn: unknown, memberRule: unknown): Doc | undefined {
   const device = deviceFrom(enabledOn) ?? deviceFrom(memberRule) ?? "all";

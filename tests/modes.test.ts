@@ -107,13 +107,13 @@ describe("captureTransform / applyTransform round-trip", () => {
     );
   });
 
-  it("self item strips thisDeviceItems on capture and restores it on apply", async () => {
+  it("self item strips rootPath on capture and restores it on apply", async () => {
     const g = groupForItem(SELF_GROUP_NAME, "{configDir}/plugins/config-sync/data.json", "file", null);
-    const local = JSON.stringify({ schemaVersion: 3, remotes: [], items: {}, thisDeviceItems: ["community/remotely-save"] });
+    const local = JSON.stringify({ schemaVersion: 3, remotes: [], items: {}, rootPath: "device-local-root" });
     const stored = await captureTransform(g, local, null, "desktop", null);
-    expect((JSON.parse(stored.content) as Record<string, unknown>).thisDeviceItems).toBeUndefined();
+    expect((JSON.parse(stored.content) as Record<string, unknown>).rootPath).toBeUndefined();
     const applied = await applyTransform(g, stored.content, local, null, "desktop", null);
-    expect((JSON.parse(applied) as Record<string, unknown>).thisDeviceItems).toEqual(["community/remotely-save"]);
+    expect((JSON.parse(applied) as Record<string, unknown>).rootPath).toEqual("device-local-root");
   });
 });
 

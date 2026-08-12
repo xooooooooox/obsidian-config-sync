@@ -12,7 +12,7 @@ import { ConfigSyncSettingTab } from "../src/ui/SettingTab";
 import { GroupResult, Remote, SyncGroup } from "../src/core/types";
 import { CaptureItem, ApplyItem } from "../src/core/ConfigSyncCore";
 import { itemsIn } from "./items";
-import { ItemMap } from "../src/core/registry";
+import { Item, ItemMap } from "../src/core/registry";
 
 // spec 2026-08-11-data-model-hardening.md §4 (invariant II.3): a document or store written by a
 // NEWER build is refused with a clear message — never downgraded, never reset, never overwritten.
@@ -112,7 +112,7 @@ function futureDocument(): unknown {
   return {
     schemaVersion: 4,
     rootPath: "cs",
-    items: itemsIn({ community: { demo: { synced: true, runsOn: { device: "here-on-tuesdays" } as never } } }),
+    items: itemsIn({ community: { demo: { synced: true, futureRule: { device: "here-on-tuesdays" } } as unknown as Item } }),
     remotes: [],
     bratIndex: {},
     somethingOnlyTheFutureKnows: { keep: true },
@@ -132,7 +132,7 @@ describe("§4.1 — a data.json from a newer build is never reset and never over
     // Not reset to defaults either: the document's own values are what's in memory, unknown
     // fields included, so nothing this build might still write could flatten it.
     expect(instance.settings.rootPath).toBe("cs");
-    expect(instance.settings.items.community["demo"]).toEqual({ synced: true, runsOn: { device: "here-on-tuesdays" } });
+    expect(instance.settings.items.community["demo"]).toEqual({ synced: true, futureRule: { device: "here-on-tuesdays" } });
   });
 
   // §4.2b: a device that has silently stopped syncing is the failure this release exists to

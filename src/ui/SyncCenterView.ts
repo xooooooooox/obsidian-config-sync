@@ -3,7 +3,7 @@ import { ApplyItem, CaptureItem, orderInstallsCatalogFirst, ProgressFn, StateAct
 import { lockRefFor, refItemId } from "../core/itemKeys";
 import { GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry, RemoteDiffFile, remoteDirectionCounts } from "../core/status";
 import { SECTION_LABELS, findGroupByName, SELF_GROUP_NAME, sectionForGroup, communityGroupName } from "../core/catalog";
-import { DeviceClass, EVERYWHERE, FileChanges, FileSharing, GroupResult, hasChanges, ItemRef, perClass, Remote, Sharing, sharingEquals, SyncGroup, StorageSection } from "../core/types";
+import { EVERYWHERE, FileChanges, FileSharing, GroupResult, hasChanges, ItemRef, Remote, Sharing, sharingEquals, SyncGroup, StorageSection } from "../core/types";
 import { DeviceElementState } from "../core/deviceElements";
 import { RuleListId } from "../core/enablementRules";
 import {
@@ -317,11 +317,11 @@ export interface SyncCenterHost {
   // manifest.ts's validator via itemCard.ts's fileRuleLegalForMode) — false for a fields-mode
   // item, whose Settings-sync row must not offer a menu setItemFileSharing would then throw on.
   itemFileSharingMenuLegal(ref: ItemRef): boolean;
+  // Also the write target for a custom (folder) item's device class since runsOn's retirement
+  // (2026-08-12-enablement-two-layers, task 8) — the same field the Advanced tab's "Devices"
+  // dropdown writes (SettingTab.commitGroups → persistCustomItems → customItemFromGroup), a
+  // folder simply has no other settings-file content to share the write with.
   setItemFileSharing(ref: ItemRef, sharing: FileSharing): Promise<void>;
-  // The Settings-sync menu for a custom (folder) item: its own runsOn.device, the same field the
-  // Advanced tab's "Devices" dropdown writes — structurally a different field from
-  // itemFileSharing above (a folder has no settings file), same value set, same persistence path.
-  setCustomItemDevice(name: string, device: DeviceClass): Promise<void>;
   // The More bridge (task 7 implements the scroll/expand target): deep-links into the Settings
   // tab for this item's card.
   openSettingsAt(ref: ItemRef): void;
@@ -2987,10 +2987,10 @@ export class SyncCenterView extends ItemView {
   // with the SAME icon vocabulary the Settings tab's file-row control uses (sharingIcon) — one
   // control language for one stored value — but a card click opens a menu of the sharing options
   // rather than cycling straight to the next one (renderSharingCycle's direct-cycle idiom is a C-#7 hazard
-  // once the icon isn't confined to a labeled grid column). Write targets are unchanged:
-  // Item.settingsFile.fileRule.sharing for a registry item, the custom item's own runsOn.device
-  // for a folder — same two entrances as before, only the control
-  // itself changed. The Settings tab's own drawer cycle control (renderSharingCycle) is untouched.
+  // once the icon isn't confined to a labeled grid column). Write target is Item.settingsFile.fileRule.sharing
+  // for every item, custom (folder) items included since runsOn's retirement
+  // (2026-08-12-enablement-two-layers, task 8) — one entrance, not two. The Settings tab's own
+  // drawer cycle control (renderSharingCycle) is untouched.
   private renderSettingsSyncRow(detail: HTMLElement, r: StatusRow): void {
     const name = r.group.name;
     const buildMenu = (current: FileSharing, write: (v: FileSharing) => Promise<void>): Menu => {
@@ -3014,14 +3014,6 @@ export class SyncCenterView extends ItemView {
         buildMenu(current, write)
       );
     };
-    if (this.itemSectionOf(name) === "custom") {
-      // A folder's device class IS its sharing here — the same three stops, written to the custom
-      // item's own runsOn instead of a settings file's fileRule.
-      const device = r.group.devices;
-      const current: FileSharing = device === "all" ? EVERYWHERE : perClass(device);
-      render(current, async (v) => this.host.setCustomItemDevice(name, v.kind === "everywhere" ? "all" : v.class));
-      return;
-    }
     const ref = this.itemRefFor(name);
     if (ref === null) return;
     // C-#25: a fields-mode item has no legal whole-file fileRule to write (setItemFileSharing

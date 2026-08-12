@@ -88,7 +88,7 @@ import { syncListDelta } from "./core/syncListDelta";
 import { selfPaneState } from "./core/selfPane";
 import { applyUpdates, baselineRefs, Ledger, LEDGER_VERSION, parseLedger, pruneLedger, rekeyLedger } from "./core/ledger";
 import { bucketCounts, checkRemote, diffRemote, GroupStatus, remoteDirectionCounts, RemoteCheck, remoteLockAhead, remoteLockLabels, statusForGroups } from "./core/status";
-import { DeviceClass, EVERYWHERE, FileSharing, GroupResult, itemRef, ItemRef, parseItemRef, Remote, RibbonButtons, Sharing, StoreLock, SyncGroup } from "./core/types";
+import { EVERYWHERE, FileSharing, GroupResult, itemRef, ItemRef, parseItemRef, Remote, RibbonButtons, Sharing, StoreLock, SyncGroup } from "./core/types";
 import { statusBarStatuses } from "./ui/panelModel";
 import { fileRuleLegalForMode } from "./ui/itemCard";
 import { ConflictModal } from "./ui/ConflictModal";
@@ -110,9 +110,6 @@ interface ConfigSyncSettings {
   pkmMode: PkmMode;
   rootPath: string; // "" = follow the PKM mode default
   remotes: Remote[];
-  // Items this device decides for itself (was localMembers). ItemRefs, because a flat list needs
-  // the one-string form of what the document nests.
-  thisDeviceItems: ItemRef[];
 
   // The sync contract.
   items: ItemMap;
@@ -151,7 +148,6 @@ const DEFAULT_SETTINGS: ConfigSyncSettings = {
   localPeriodicCheck: true,
   items: emptyItemMap(),
   runHistory: { enabled: true, path: "", maxCount: 50, maxDays: 30 },
-  thisDeviceItems: [],
 };
 
 // How long the §4.1 refusal notice stays ON SCREEN — and, for exactly that long, how long the same
@@ -804,7 +800,6 @@ export default class ConfigSyncPlugin extends Plugin {
       itemFileSharing: (ref) => this.itemFileSharing(ref),
       itemFileSharingMenuLegal: (ref) => this.itemFileSharingMenuLegal(ref),
       setItemFileSharing: (ref, sharing) => this.setItemFileSharing(ref, sharing),
-      setCustomItemDevice: (name, device) => this.setCustomItemDevice(name, device),
       openSettingsAt: (ref) => this.openSettingsAt(ref),
       itemRefForGroup: (name) => this.itemRefForGroup(name),
       schemaStop: () => this.schemaStop,
@@ -1634,19 +1629,6 @@ export default class ConfigSyncPlugin extends Plugin {
     await this.saveSettings();
   }
 
-  // Settings-sync menu for a custom (folder) item (unified grammar task-5 fix round 1): the SAME
-  // field and persistence path the Advanced tab's "Devices" dropdown writes
-  // (SettingTab.commitGroups → persistCustomItems) — a custom item's device class lives on its
-  // own runsOn, not in a settings file, so this is a separate write target from
-  // setItemFileSharing above. A no-op if the name isn't (or is no longer) a custom item.
-  async setCustomItemDevice(name: string, device: DeviceClass): Promise<void> {
-    if (this.schemaStopped()) return; // §4.2b
-    const item = itemAt(this.settings.items, "custom", name);
-    if (item === undefined) return;
-    this.settings.items = withItem(this.settings.items, "custom", name, { ...item, runsOn: { ...(item.runsOn ?? { device }), device } });
-    await this.saveSettings();
-  }
-
   // The Stop-syncing menu's "On this device"/"Sync on this device again" read (C-#45, spec §1/§3):
   // true iff this group is in THIS device's own opt-out list (localStorage — never data.json).
   private isDeviceOptedOut(groupName: string): boolean {
@@ -2196,11 +2178,14 @@ export default class ConfigSyncPlugin extends Plugin {
       return;
     }
     this.settings = withDefaults(DEFAULT_SETTINGS, data);
-    // `runsOn` is deliberately NOT sanitized here (spec 2026-08-11-data-model-hardening.md §3.2,
-    // invariant II.2): the load path used to drop every value this build doesn't know and save
-    // immediately, which turned a NEWER build's rule into a deletion this device then pushed to
-    // the whole fleet. An unrecognised value is ignored where it is consumed instead (types.ts's
-    // asRunsOn) and stays on disk exactly as written.
+    // A field this build doesn't recognise is deliberately NOT sanitized here (spec
+    // 2026-08-11-data-model-hardening.md §3.2, invariant II.2): the load path used to drop every
+    // such value and save immediately, which turned a NEWER build's data into a deletion this
+    // device then pushed to the whole fleet. This is what a v3 document's leftover `runsOn` rides
+    // through as, now that the field itself has retired (2026-08-12-enablement-two-layers, task 8)
+    // — unknown data in an item's carried tail (registry.ts's itemTail/WRITTEN_ITEM_KEYS), ignored
+    // where it is consumed and never rewritten out from under a newer build that might still read
+    // it.
   }
 
   // The answer every mutating entry point gives while the §4.1 stop state holds: true means the

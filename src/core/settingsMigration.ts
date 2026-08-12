@@ -138,10 +138,11 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 // `enabledOn`), which no longer exist in a document this build can read, so the v2 → v3 migration
 // is the only code that will ever run them again.
 //
-// v2's `memberRules` had no sanitizer and its successor (`Item.runsOn`) needs none either (spec
-// 2026-08-11-data-model-hardening.md §3.2, invariant II.2). Dropping every value this build
+// v2's `memberRules` had no sanitizer and its v3 successor (`Item.runsOn`) needed none either
+// (spec 2026-08-11-data-model-hardening.md §3.2, invariant II.2). Dropping every value this build
 // doesn't recognise — which is precisely what a newer build writes — and saving immediately made
 // the load path destroy the future's data and publish the deletion to the fleet on the next
-// capture. An unrecognised value is ignored at the point of use (types.ts's asRunsOn; the same
-// discipline enablementRules.ts's asSharing applies to the rule that succeeded it) and storage is
-// never rewritten for it.
+// capture. `runsOn` itself retired outright in 2026-08-12-enablement-two-layers (a rule now lives
+// on the carrier, not the plugin); the discipline lives on for every field this build still
+// doesn't recognise, ignored at the point of use (enablementRules.ts's asSharing is today's
+// example) and never rewritten out from under it.

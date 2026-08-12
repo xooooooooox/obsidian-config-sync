@@ -28,9 +28,11 @@ export type Section = (typeof SECTIONS)[number];
 
 export type ItemId = string;
 
-// The one-string form of (section, id) — for the two places that genuinely cannot nest:
-// localStorage keys and `thisDeviceItems`. INSIDE the document, section and id are already
-// structural; a compound key there would be a second, disagreeable source of truth.
+// The one-string form of (section, id) — for the places that genuinely cannot nest: localStorage
+// keys (main.ts's deviceOptOutGroups and friends). `thisDeviceItems` used to be another such flat
+// list; it retired outright with `runsOn` (2026-08-12-enablement-two-layers). INSIDE the document,
+// section and id are already structural; a compound key there would be a second, disagreeable
+// source of truth.
 //
 // Built from StorageSection, not Section, ON PURPOSE: a ref is an IDENTITY, and `beta` is a
 // classification. A `beta/<id>` ref would name an item no reader can find (every reader resolves
@@ -105,37 +107,6 @@ export function asSharing(v: unknown): Sharing | undefined {
 export function asFileSharing(v: unknown): FileSharing | undefined {
   const s = asSharing(v);
   return s === undefined || s.kind === "this-device" ? undefined : s;
-}
-
-// "how a device decides whether an on/off-list entry is on" (§2). Two orthogonal axes, not one
-// enum: `device` says which device classes the entry belongs to, `force` pins its state outright.
-// `force.where` is recorded but never read yet — the migration writes "everywhere" for every rule,
-// preserving today's fleet-wide behaviour (C-#46 is explicitly out of scope, spec §8); the field
-// exists so making that choice later is a change of value, not of shape.
-export interface RunsOn {
-  device: DeviceClass;
-  force?: { state: "on" | "off"; where: "everywhere" | "this-device" };
-}
-
-export function runsOnEquals(a: RunsOn, b: RunsOn): boolean {
-  if (a.device !== b.device) return false;
-  if (a.force === undefined || b.force === undefined) return a.force === b.force;
-  return a.force.state === b.force.state && a.force.where === b.force.where;
-}
-
-// Runtime narrowing, same rule as asSharing: an unrecognised device class or force shape is
-// ignored at the point of use, never rewritten on disk.
-export function asRunsOn(v: unknown): RunsOn | undefined {
-  if (typeof v !== "object" || v === null) return undefined;
-  const device = (v as { device?: unknown }).device;
-  if (device !== "all" && device !== "desktop" && device !== "mobile") return undefined;
-  const rawForce = (v as { force?: unknown }).force;
-  if (rawForce === undefined) return { device };
-  if (typeof rawForce !== "object" || rawForce === null) return undefined;
-  const state = (rawForce as { state?: unknown }).state;
-  const where = (rawForce as { where?: unknown }).where;
-  if ((state !== "on" && state !== "off") || (where !== "everywhere" && where !== "this-device")) return undefined;
-  return { device, force: { state, where } };
 }
 
 // Per-element sharing for a string-array key (spec §2's `perElement`): element value -> sharing; an

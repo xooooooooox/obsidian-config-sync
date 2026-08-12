@@ -56,10 +56,10 @@ export function bratRepoIndex(items: ItemMap): BratIndex {
 //
 // Never deletes an entry, only ever adds/updates through `withItem` (registry.ts) — an item that
 // loses its `bratRepo` and is left carrying only `{synced: false}` is NOT residue to prune. The
-// same reasoning `itemEarnsDef`'s comment gives for a plain disabled entry applies here unchanged:
-// its presence in `items.community` is this device's capture mask for that plugin's slot in the
-// community-plugins on/off list, and pruning it on write would be the exact C-#26-by-false-analogy
-// mistake registry.ts's `withItem` comment already warns against.
+// same reasoning registry.ts's `withItem` comment gives for a plain disabled entry applies here
+// unchanged: its presence in `items.community` is this device's capture mask for that plugin's
+// slot in the community-plugins on/off list, and pruning it on write would be the exact
+// C-#26-by-false-analogy mistake that comment already warns against.
 export function withBratRepos(items: ItemMap, index: BratIndex): ItemMap {
   let next = items;
   const ids = new Set([...Object.keys(items.community), ...Object.keys(index)]);

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import ConfigSyncPlugin from "../src/main";
-import { customItemFromGroup, Item, ItemMap } from "../src/core/registry";
-import { SyncGroup } from "../src/core/types";
+import { buildItemDefs, compileItems, customItemFromGroup, Item, ItemMap, RegistryEnv } from "../src/core/registry";
+import { perClass, SyncGroup } from "../src/core/types";
 import { itemsIn } from "./items";
 
 // Task-8 concern fix: the Advanced tab's "Custom rules"/"Discovered files" used to write through
@@ -112,5 +112,32 @@ describe("stopSyncing — custom-item removal is durable (items.custom), not ses
 
     expect(Object.keys(instance.settings.items.custom)).toEqual(["keep-me"]);
     expect(savedCustomNames(saved())).toEqual(["keep-me"]);
+  });
+});
+
+// A custom item's device class lives on its file rule now, not on a retired `runsOn`
+// (2026-08-12-enablement-two-layers, task 8) — the same field a registry item's Settings-sync
+// control writes. manifest.ts refuses a `fileRule` on a folder group, so a folder's class is
+// elevated into the compiled group's `devices` instead of emitted as a rule.
+describe("a custom folder item's device class survives item -> compiled group -> item (task 8)", () => {
+  const EMPTY_ENV: RegistryEnv = { cores: [], plugins: [], betaIds: new Set() };
+
+  it("round-trips unchanged, and the compiled group carries devices with no fileRule key", () => {
+    const item: Item = {
+      synced: true,
+      type: "folder",
+      path: "notes/stuff",
+      settingsFile: { mode: "plain", fileRule: { sharing: perClass("desktop"), encrypted: false }, rules: {}, perElement: {} },
+    };
+    const defs = buildItemDefs(EMPTY_ENV);
+    const groups = compileItems(defs, { items: itemsIn({ custom: { "my-folder": item } }) });
+    const compiled = groups.find((g) => g.name === "my-folder");
+
+    expect(compiled?.devices).toBe("desktop");
+    expect(compiled).not.toHaveProperty("fileRule");
+
+    // Producer vs producer, both directions: customGroup (reached only through compileItems) and
+    // its inverse customItemFromGroup agree with each other.
+    expect(customItemFromGroup(compiled as SyncGroup)).toEqual(item);
   });
 });

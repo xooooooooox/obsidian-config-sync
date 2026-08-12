@@ -10,11 +10,8 @@ import {
   defsForForeignItems,
   emptyItem,
   emptyItemMap,
-  itemEarnsDef,
   groupOwners,
-  itemWithDevice,
   Item,
-  withRunsOnDevice,
   ItemDef,
   ItemMap,
   itemFor,
@@ -661,7 +658,7 @@ describe("compileItems — the custom section (spec §2/§6)", () => {
     const next = customItemFromGroup(draft, stored);
     expect((next as unknown as { writtenByANewerBuild: unknown }).writtenByANewerBuild).toEqual({ keep: true });
     expect(next.path).toBe("notes/moved.json"); // the edit still wins over the stored value
-    expect(next.runsOn).toEqual({ device: "mobile" });
+    expect(next.settingsFile?.fileRule).toEqual({ sharing: perClass("mobile"), encrypted: false });
   });
 
   // Fix round 2: the tail crosses the Item/SyncGroup boundary, and the two shapes share field
@@ -690,64 +687,20 @@ describe("compileItems — the custom section (spec §2/§6)", () => {
     expect((customItemFromGroup(draft, stored) as unknown as { fromTheFuture: string }).fromTheFuture).toBe("new");
   });
 
-  it("carries a folder custom item's device class through runsOn", () => {
+  it("carries a folder custom item's device class through its file rule", () => {
     const defs = buildItemDefs(EMPTY_ENV);
     const group: SyncGroup = { name: "my-folder", path: "notes/stuff", type: "folder", devices: "mobile" };
-    expect(customItemFromGroup(group).runsOn).toEqual({ device: "mobile" });
+    const item = customItemFromGroup(group);
+    expect(item.settingsFile?.fileRule).toEqual({ sharing: perClass("mobile"), encrypted: false });
     expect(findGroup(compileItems(defs, withCustom([group])), "my-folder")).toEqual({ ...group, ref: "custom/my-folder" });
   });
 });
 
-// Round-1 leftover: `withRunsOnDevice` had no test of its own and is NOT `itemWithDevice` — it is
-// the settings card's "Enabled on" write, which touches only the device axis and never enables the
-// item, where itemWithDevice is the Sync Center's menu write, which forces the item on.
-describe("withRunsOnDevice — the device axis alone", () => {
-  it("writes the device class without enabling the item", () => {
-    expect(withRunsOnDevice({ synced: false }, "mobile")).toEqual({ synced: false, runsOn: { device: "mobile" } });
-  });
-
-  it("keeps a force rule while the device axis moves — the two axes answer different questions", () => {
-    const item: Item = { synced: true, runsOn: { device: "desktop", force: { state: "off", where: "everywhere" } } };
-    expect(withRunsOnDevice(item, "mobile").runsOn).toEqual({ device: "mobile", force: { state: "off", where: "everywhere" } });
-  });
-
-  it("drops runsOn entirely when it would say nothing at all — a round trip leaves data.json as it found it (C-#26)", () => {
-    const pinned = withRunsOnDevice({ synced: true }, "desktop");
-    expect(pinned.runsOn).toEqual({ device: "desktop" });
-    expect(withRunsOnDevice(pinned, "all")).toEqual({ synced: true });
-    expect(withRunsOnDevice(pinned, "all")).not.toHaveProperty("runsOn");
-  });
-
-  it("keeps a lone force rule when the device axis goes back to all", () => {
-    const item: Item = { synced: true, runsOn: { device: "desktop", force: { state: "on", where: "everywhere" } } };
-    expect(withRunsOnDevice(item, "all").runsOn).toEqual({ device: "all", force: { state: "on", where: "everywhere" } });
-  });
-
-  it("leaves every other field alone, and does not mutate its input", () => {
-    const item: Item = { synced: true, companions: [{ path: "x", device: "all", enabled: true }] };
-    const snapshot = structuredClone(item);
-    expect(withRunsOnDevice(item, "desktop").companions).toEqual(item.companions);
-    expect(item).toEqual(snapshot);
-  });
-});
-
-describe("itemWithDevice", () => {
-  it("creates an enabled item from nothing", () => {
-    expect(itemWithDevice(undefined, "desktop")).toEqual({ synced: true, runsOn: { device: "desktop" } });
-  });
-  it("preserves existing fields and forces enabled", () => {
-    const existing: Item = { synced: false, companions: [{ path: "x", enabled: true, device: "all" }], settingsFile: { mode: "plain", rules: {}, perElement: {} } };
-    const out = itemWithDevice(existing, "mobile");
-    expect(out.runsOn).toEqual({ device: "mobile" });
-    expect(out.synced).toBe(true);
-    expect(out.companions).toEqual(existing.companions);
-    expect(out.settingsFile).toEqual(existing.settingsFile);
-  });
-  it("keeps a force rule while changing the device axis — the two axes are orthogonal", () => {
-    const existing: Item = { synced: true, runsOn: { device: "all", force: { state: "on", where: "everywhere" } } };
-    expect(itemWithDevice(existing, "desktop").runsOn).toEqual({ device: "desktop", force: { state: "on", where: "everywhere" } });
-  });
-});
+// withRunsOnDevice / itemWithDevice retired with `runsOn` itself (2026-08-12-enablement-two-layers,
+// task 8): a custom item's device class is its file-level sharing now (customItemFromGroup, tested
+// above) — the same field and writer as every registry item's Settings-sync control — and the
+// on/off-list's own two layers (the settings card's former "Enabled on" cycle) are
+// enablementRules.ts/deviceElements.ts, covered by tests/enablementDecision.test.ts.
 
 describe("parentCardLabel", () => {
   const env: RegistryEnv = { ...EMPTY_ENV, plugins: [{ id: "dataview", name: "Dataview" }] };
@@ -818,55 +771,17 @@ describe("parentCardLabel", () => {
   });
 });
 
-// Final review C1 + review NEW-I1, together — they are one question with one answer.
-//
-// `itemEarnsDef` is 2.21.0's condition ("is there an entry?") minus exactly one shape: an entry
-// whose only content is a Runs-on rule, which at 2.21.0 lived in a side table with no entry at all.
-// Everything else earns a def, `{synced:false}` included — that is how a card turned off is turned
-// back on (NEW-I1), and its presence in the map is the capture mask for an on/off-list element
-// whose plugin is not installed here (C1). The write path prunes nothing; there is no second
-// mechanism to keep in step with this one.
-describe("itemEarnsDef — 2.21.0's condition minus the rule-only entry", () => {
-  const CASES: Item[] = [
-    { synced: false },
-    { synced: true },
-    { synced: false, runsOn: { device: "desktop" } },
-    { synced: false, runsOn: { device: "all", force: { state: "off", where: "everywhere" } } },
-    { synced: true, runsOn: { device: "mobile" } },
-    { synced: false, companions: [{ path: "a/b", device: "all", enabled: true }] },
-    { synced: false, settingsFile: { mode: "plain", rules: {}, perElement: {} } },
-    { synced: false, path: "x/y.json" },
-    { synced: false, description: "kept" },
-    { synced: false, label: "kept" },
-    { synced: false, origin: "discovered" },
-    { synced: false, fromANewerBuild: { keep: true } } as unknown as Item,
-  ];
+// itemEarnsDef (final review C1 + review NEW-I1's predicate) retired with `runsOn` itself
+// (2026-08-12-enablement-two-layers, task 8): its one exclusion was an entry whose only content was
+// a Runs-on rule, and that shape no longer exists — a rule now lives on the carrier item, not on
+// the plugin's own entry. defsForForeignItems' `known.has(id)` guard is the whole test again; see
+// its own comment in registry.ts.
 
-  // Producer vs producer: the ONLY shapes this build declines are the ones 2.21.0 never had an
-  // entry for. Stated as a property over every shape an item can take, not as a list of literals.
-  it("declines exactly the rule-only entries, and nothing else", () => {
-    const declined = CASES.filter((i) => !itemEarnsDef(i));
-    expect(declined).toEqual([
-      { synced: false, runsOn: { device: "desktop" } },
-      { synced: false, runsOn: { device: "all", force: { state: "off", where: "everywhere" } } },
-    ]);
-  });
-
-  it("a card that was turned off keeps its def, so it can be turned back on", () => {
-    expect(itemEarnsDef({ synced: false })).toBe(true);
-    expect(itemEarnsDef(emptyItem())).toBe(true);
-  });
-
-  it("a rule alongside real configuration is not a rule-only entry", () => {
-    expect(itemEarnsDef({ synced: false, runsOn: { device: "mobile" }, description: "x" })).toBe(true);
-  });
-});
-
-// The presence of an entry is this device's capture mask for that element (registry.ts's
-// elementSharings, second pass), so a write must never decide an entry has nothing to say. An
-// earlier round pruned `{synced:false}` here by analogy with the C-#26 field prunes; the analogy
-// was false — those drop a FIELD whose absence and default agree, this dropped the entry whose
-// existence IS the decision — and the result was final-review C1.
+// The presence of an entry is this device's capture mask for an on/off-list element, so a write
+// must never decide an entry has nothing to say. An earlier round pruned `{synced:false}` here by
+// analogy with the C-#26 field prunes; the analogy was false — those drop a FIELD whose absence and
+// default agree, this dropped the entry whose existence IS the decision — and the result was
+// final-review C1.
 describe("withItem — never removes an entry", () => {
   it("stores an off entry rather than pruning it, because its presence is the mask", () => {
     const items = itemsIn({ community: { demo: { synced: true } } });
@@ -874,27 +789,20 @@ describe("withItem — never removes an entry", () => {
     expect(next.community["demo"]).toEqual({ synced: false });
   });
 
-  it("keeps an entry that carries a rule, and leaves the other sections alone", () => {
+  it("keeps an entry that carries other configuration, and leaves the other sections alone", () => {
     const items = itemsIn({ community: { demo: { synced: true } }, obsidian: { hotkeys: { synced: true } } });
-    const next = withItem(items, "community", "demo", { synced: false, runsOn: { device: "desktop" } });
-    expect(next.community["demo"]).toEqual({ synced: false, runsOn: { device: "desktop" } });
+    const next = withItem(items, "community", "demo", { synced: false, description: "kept" });
+    expect(next.community["demo"]).toEqual({ synced: false, description: "kept" });
     expect(next.obsidian["hotkeys"]).toEqual({ synced: true });
   });
 
-  // The two halves of the pair, on one map: an off card keeps its def AND its entry, while the
-  // rule-only entry beside it keeps its entry and earns no def.
-  it("an off card keeps both its entry and its def; a rule-only entry keeps only its entry", () => {
+  // An off card keeps both its entry and its def, so it can be turned back on (review NEW-I1) — the
+  // half of itemEarnsDef's old distinction that survives its retirement.
+  it("an off card keeps both its entry and its def", () => {
     const env: RegistryEnv = { cores: [], plugins: [], betaIds: new Set() };
-    const items = withItem(
-      withItem(itemsIn({}), "community", "was-a-card", { synced: false }),
-      "community",
-      "rule-only",
-      { synced: false, runsOn: { device: "desktop" } }
-    );
+    const items = withItem(itemsIn({}), "community", "was-a-card", { synced: false });
     const ids = defsForForeignItems(buildItemDefs(env), items, new Set()).map((d) => d.id);
     expect(items.community["was-a-card"]).toEqual({ synced: false });
-    expect(items.community["rule-only"]).toEqual({ synced: false, runsOn: { device: "desktop" } });
     expect(ids).toContain("was-a-card");
-    expect(ids).not.toContain("rule-only");
   });
 });

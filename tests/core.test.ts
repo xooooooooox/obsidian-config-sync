@@ -571,7 +571,6 @@ describe("apply — self group field completeness (adopt truth table, C-#31)", (
       items: itemsIn({ community: { dataview: { synced: true } }, custom: { "my-rule": { synced: true, type: "file", path: "notes/custom.json" } } }),
       remotes: [{ name: "store-remote" }],
       rootPath: "store-root",
-      thisDeviceItems: ["community/store-member"],
       bratIndex: { "my-text-tools": "owner/my-text-tools", "slides-rup": "owner/slides-rup" },
     };
     const local = {
@@ -579,7 +578,6 @@ describe("apply — self group field completeness (adopt truth table, C-#31)", (
       items: itemsIn({}),
       remotes: [],
       rootPath: "local-root",
-      thisDeviceItems: ["community/local-member"],
       bratIndex: {},
     };
     io.seed({ [STORE_SELF_REL]: JSON.stringify(store), [LOCAL_SELF_REL]: JSON.stringify(local) });
@@ -592,11 +590,10 @@ describe("apply — self group field completeness (adopt truth table, C-#31)", (
     // adopts the store's value — the whole nested item store, custom items included.
     expect(after.items).toEqual(store.items);
     expect(after.bratIndex).toEqual(store.bratIndex);
-    // The device-local trio (selfPresetRules' exclusion set) stays exactly as it was locally —
+    // The device-local pair (selfPresetRules' exclusion set) stays exactly as it was locally —
     // never overwritten by the store's copy.
     expect(after.rootPath).toBe(local.rootPath);
     expect(after.remotes).toEqual(local.remotes);
-    expect(after.thisDeviceItems).toEqual(local.thisDeviceItems);
   });
 });
 

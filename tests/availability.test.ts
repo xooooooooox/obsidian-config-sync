@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { availabilityForGroup, compareVersions, desktopOnlyDrift, desktopOnlyPluginIds, snippetOrphans } from "../src/core/availability";
 import { FakePlugins } from "./memfs";
-import { asRunsOn, StoreLock, StoreLockEntry, SyncGroup } from "../src/core/types";
+import { StoreLock, StoreLockEntry, SyncGroup } from "../src/core/types";
 import { lockByName, withRef } from "./lock";
 
 const pluginGroup: SyncGroup = withRef({ name: "plugin-demo", path: "{configDir}/plugins/demo/data.json", type: "file", devices: "all" });
@@ -131,25 +131,9 @@ describe("desktopOnlyPluginIds", () => {
 // sets are now ONE decision per element (enablementDecision.ts, tests/enablementDecision.test.ts),
 // and the runtime projection off it is covered end to end by tests/enablementRuntime.test.ts.
 
-// spec 2026-08-11-data-model-hardening.md §3.2 (invariant II.2): an item's runsOn is typed at
-// compile time but raw data.json at runtime, so a shape written by a NEWER build reaches these
-// readers. It is ignored HERE, at the point of use — the load path no longer rewrites storage to
-// drop it, because that deletion travelled to every other device on the next capture.
-describe("asRunsOn (an unrecognised rule is ignored where it is consumed)", () => {
-  it("accepts every rule this build writes and nothing else", () => {
-    expect(asRunsOn({ device: "all" })).toEqual({ device: "all" });
-    expect(asRunsOn({ device: "desktop" })).toEqual({ device: "desktop" });
-    expect(asRunsOn({ device: "all", force: { state: "off", where: "this-device" } })).toEqual({
-      device: "all",
-      force: { state: "off", where: "this-device" },
-    });
-    expect(asRunsOn({ device: "tablet" })).toBeUndefined(); // a class from a future build
-    expect(asRunsOn({ device: "all", force: { state: "on-tuesdays", where: "everywhere" } })).toBeUndefined();
-    expect(asRunsOn("always-here")).toBeUndefined(); // the v2 flat value
-    expect(asRunsOn(undefined)).toBeUndefined();
-    expect(asRunsOn(42)).toBeUndefined();
-  });
-});
+// asRunsOn retired with `runsOn` itself (2026-08-12-enablement-two-layers, task 8) — the runtime
+// narrowing this described now applies to Sharing (asSharing/asFileSharing, types.ts), which is
+// what every rule reaches a reader through since the two-layer cutover.
 
 describe("snippetOrphans", () => {
   it("flags names enabled locally with no file anywhere", () => {

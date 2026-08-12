@@ -369,11 +369,16 @@ export const SELF_GROUP_NAME = "plugin-config-sync";
 // The self item's store copy carries the whole sync contract, so it ships locked strip presets for
 // the transport wiring — the fields that describe THIS device's connection to the store and must
 // never travel (spec §2). Everything else in the document is the shared contract and does travel.
+//
+// `thisDeviceItems` was a third preset here, stripping v3's local-semantics list the same way.
+// It retired outright with `runsOn` (2026-08-12-enablement-two-layers, task 8): a rule now lives on
+// the carrier item, and this device's own exception lives in localStorage (deviceElements.ts), so
+// there is no longer a document field to strip. The two that remain are purely the transport
+// wiring — the connection to the store itself, not anything the store's contract governs.
 export function selfPresetRules(): FieldRule[] {
   return [
     { pattern: "rootPath", sharing: THIS_DEVICE, encrypted: false, locked: true },
     { pattern: "remotes", sharing: THIS_DEVICE, encrypted: false, locked: true },
-    { pattern: "thisDeviceItems", sharing: THIS_DEVICE, encrypted: false, locked: true },
   ];
 }
 

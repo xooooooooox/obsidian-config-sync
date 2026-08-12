@@ -24,13 +24,14 @@ import { companionRef } from "./itemKeys";
 import { EnablementList, SWITCH_LISTS } from "./switchList";
 import {
   DeviceClass,
+  EVERYWHERE,
   FieldRule,
   FileRule,
   ItemId,
   itemRef,
   ItemRef,
+  perClass,
   PerElementSharing,
-  RunsOn,
   Section,
   Sharing,
   StorageSection,
@@ -64,7 +65,7 @@ export interface ItemDef {
   settingsFile?: { defaultPath: string | null };
   presetCompanions?: { path: string; mapKey?: string }[];
   // The plugin manifest's isDesktopOnly (community/beta only, set only when true) — an innate
-  // property (the plugin cannot install on mobile), distinct from the user's runsOn choice.
+  // property (the plugin cannot install on mobile), distinct from a user's own enablement choice.
   // Drives the neutral "desktop-only plugin" card badge and trims "mobile" out of the ENABLED ON
   // cycle (round-8 spec §2).
   desktopOnly?: boolean;
@@ -149,15 +150,6 @@ export interface Item {
   bratRepo?: string;
   settingsFile?: ItemSettingsFile;
   companions?: ItemCompanion[];
-  // The Runs-on rule (§2): was v2's `memberRules[itemId]` PLUS `enabledOn`, two fields that
-  // answered overlapping questions and could disagree. `device` is the class axis; `force` pins
-  // the entry's state outright.
-  runsOn?: RunsOn;
-  // On/off-list entries that are NOT items of their own — snippet files under the snippets folder
-  // are the motivating case (§2). A rule lives on the thing it governs, and these things have no
-  // item, so they live on their owning folder item. Declared here as their home; nothing writes it
-  // yet (v2 had no such rules to carry forward, and inventing them would be a behaviour change).
-  elements?: Record<string, RunsOn>;
   // Custom items only — kept from the v2 SyncGroup literal (spec §5).
   description?: string;
   label?: string;
@@ -216,28 +208,22 @@ export function itemFor(items: ItemMap, def: ItemDef): Item {
 //
 // So `{synced: false}` is NOT residue, however much it looks like it. It is what an absent entry
 // is not, in the one place that matters most. An earlier fix here pruned it on write, reasoning by
-// analogy with `withRunsOnDevice`/`pruneSettingsFile` (C-#26, "a round trip leaves data.json as it
-// found it") — the analogy was false, because those prune a FIELD whose absence and default agree,
-// while this would prune the entry whose existence IS the decision.
+// analogy with `pruneSettingsFile` (C-#26, "a round trip leaves data.json as it found it") — the
+// analogy was false, because that prunes a FIELD whose absence and default agree, while this would
+// prune the entry whose existence IS the decision.
 //
-// `itemEarnsDef` — should this entry get a synthesized def, i.e. a card for a plugin that is not
-// installed here? Everything except an entry whose ONLY content is a Runs-on rule. A rule reaches
-// the document from the member ROW in the Sync Center, not from a card, and at 2.21.0 it lived in a
-// side table with no `items` entry at all — so giving it a card would put a plugin this device does
-// not have into the Community tab, which is what review I1 caught. Every other shape earns one,
-// `{synced:false}` included: that is how a card the user turned off is turned back ON, and taking
-// it away is the door review NEW-I1 caught. Both are closed here, at the one predicate, rather than
-// by a second mechanism on the write path — see this release's own rule about a relationship whose
-// two sides move apart.
-export function itemEarnsDef(item: Item): boolean {
-  if (item.synced) return true;
-  const keys = Object.keys(item);
-  return !keys.includes("runsOn") || keys.some((k) => k !== "synced" && k !== "runsOn");
-}
-
+// `itemEarnsDef` (should this entry get a synthesized def, i.e. a card for a plugin that is not
+// installed here?) retired with `runsOn` (2026-08-12-enablement-two-layers, task 8): its one
+// exclusion was an entry whose ONLY content was a Runs-on rule, a shape that reached the document
+// from the member row in the Sync Center rather than from a card and so earned no card of its own
+// (review I1). A rule now lives on the CARRIER item (core-plugins/community-plugins), not on the
+// plugin's own entry, so that shape no longer exists — every entry earns a def, `{synced:false}`
+// included, which is how a card the user turned off is turned back ON (review NEW-I1). See
+// defsForForeignItems below, whose `known.has(id)` guard is now the whole test.
+//
 // Pure: returns a new map with one item replaced, both levels copied. It never removes an entry —
-// see the note above: in `core`/`community` an entry's mere presence is this device's capture mask
-// for that on/off-list element, so a write is not free to decide the entry has nothing to say.
+// in `core`/`community` an entry's mere presence is this device's capture mask for that on/off-list
+// element, so a write is not free to decide the entry has nothing to say.
 export function withItem(items: ItemMap, section: Section, id: ItemId, item: Item): ItemMap {
   const store = storageSection(section);
   return { ...items, [store]: { ...(items[store] ?? {}), [id]: item } };
@@ -259,25 +245,6 @@ export class CompileError extends Error {
 
 export function emptyItem(): Item {
   return { synced: false };
-}
-
-// The device axis of an item's Runs-on rule, written without disturbing the force axis (they
-// answer different questions — spec §2). A rule left saying nothing at all is dropped entirely, so
-// a round trip through the control leaves data.json as it found it (C-#26). Pure.
-export function withRunsOnDevice(item: Item, device: DeviceClass): Item {
-  const force = item.runsOn?.force;
-  const next: Item = { ...item };
-  if (device === "all" && force === undefined) delete next.runsOn;
-  else next.runsOn = force === undefined ? { device } : { device, force };
-  return next;
-}
-
-// The exact write the in-place "where it runs" menu performs (spec 2026-07-28 §4): keep the
-// item's existing config, force the item on (a rule on a disabled item would read back as
-// this-device), pin the device class.
-export function itemWithDevice(existing: Item | undefined, device: "desktop" | "mobile"): Item {
-  const base = existing ?? emptyItem();
-  return { ...base, synced: true, runsOn: { ...(base.runsOn ?? { device }), device } };
 }
 
 // ── Registry construction ───────────────────────────────────────────────────────────────────
@@ -396,25 +363,24 @@ export function buildItemDefs(env: RegistryEnv): ItemDef[] {
 // synthesized def the same way buildItemDefs does for an installed one, so a BRAT-managed id
 // still reads as "beta" instead of falling back to "community".
 //
-// WHICH stored items qualify (review I1, narrowed again by review C1). 2.21.0 asked only "is there
-// an entry in `items`?" — its signature was literally
-// `defsForForeignItems(defs, Object.keys(settings.items), …)`, with no other condition. That test
-// stopped being faithful when the v2 → v3 migration started creating entries nobody enabled: v2's
-// `memberRules` was a side table read independently of `items`, so a Runs-on rule set from the Sync
-// Center on a plugin NOT installed here had a rule and NO item, and now has both (v2Migration.ts).
-// Left as "any entry", every such rule would grow a CARD in the Community/Beta tab — one per def,
-// via SettingTab.renderRegistryCards — for a plugin this device does not have.
+// WHICH stored items qualify (review I1, narrowed again by review C1, and simplified again by
+// task 8 of 2026-08-12-enablement-two-layers). 2.21.0 asked only "is there an entry in `items`?"
+// — its signature was literally `defsForForeignItems(defs, Object.keys(settings.items), …)`, with
+// no other condition. That test stopped being faithful once v2's side-table `memberRules` could
+// produce an entry with a Runs-on rule and nothing else, for a plugin not installed here: left as
+// "any entry", every such rule would have grown a CARD in the Community/Beta tab — one per def, via
+// SettingTab.renderRegistryCards — for a plugin this device does not have. `itemEarnsDef` closed
+// that door for exactly that one shape (review I1/C1).
 //
-// `itemEarnsDef` is therefore 2.21.0's condition MINUS exactly that one shape, and nothing else: a
-// rule-only entry earns no def; every other entry, `{synced:false}` included, earns one just as it
-// did before. The first attempt at this excluded `{synced:false}` too and had to close the
-// resulting door with a prune on the write path — which deleted the entry whose presence is the
-// capture mask (review C1). One predicate, no second mechanism.
+// `runsOn` is retired now, and with it the shape that predicate existed to exclude: a rule lives on
+// the CARRIER item, not on the plugin's own entry, so an entry that reaches here for an uninstalled
+// id always means someone chose something about THIS item. `known.has(id)` is therefore the whole
+// test again — the same one 2.21.0 started with, this time for the right reason.
 export function defsForForeignItems(defs: ItemDef[], items: ItemMap, betaIds: ReadonlySet<string>): ItemDef[] {
   const known = new Set(defs.filter((d) => storageSection(d.section) === "community").map((d) => d.id));
   const extras: ItemDef[] = [];
-  for (const [id, item] of Object.entries(items.community ?? {})) {
-    if (known.has(id) || !itemEarnsDef(item)) continue;
+  for (const id of Object.keys(items.community ?? {})) {
+    if (known.has(id)) continue;
     extras.push({
       section: betaIds.has(id) ? "beta" : "community",
       id,
@@ -459,8 +425,8 @@ function claimPath(seen: Map<string, string>, owner: string, path: string): void
 
 // Compiles one item's own single-file settingsFile into a SyncGroup — every registry item
 // (the three Obsidian cards, every core/community/beta plugin file) goes through this one path.
-// Merges config-sync's own locked local-only presets (rootPath, remotes, thisDeviceItems — see
-// catalog.ts's selfPresetRules) into a compiled group for the self item, no matter what the user
+// Merges config-sync's own locked local-only presets (rootPath, remotes — see catalog.ts's
+// selfPresetRules) into a compiled group for the self item, no matter what the user
 // configured: these fields must NEVER leave the device, even under a future UI bug or a
 // hand-edited data.json. Delegates to catalog.ts's mergePresetFields — the ONE shared
 // implementation (C-#31) — rather than reimplementing the preset+rest merge here: this is the
@@ -630,7 +596,7 @@ function compileCustomItems(items: ItemMap, defs: ItemDef[], seenPaths: Map<stri
 // round trip (item -> compiled group -> Advanced-tab draft -> item) would strip the future's data
 // and publish the loss to the fleet on the next capture, which is exactly what v2's `{...cg}`
 // spread happened to avoid.
-const WRITTEN_ITEM_KEYS = ["synced", "type", "path", "bratRepo", "settingsFile", "companions", "runsOn", "elements", "description", "label", "origin"] as const;
+const WRITTEN_ITEM_KEYS = ["synced", "type", "path", "bratRepo", "settingsFile", "companions", "description", "label", "origin"] as const;
 
 export function itemTail(item: Item | undefined): Record<string, unknown> {
   if (item === undefined) return {};
@@ -660,13 +626,20 @@ function withoutKeys(tail: Record<string, unknown>, owned: readonly string[]): R
   return out;
 }
 
-// A custom item's compiled group. `path`/`type` are the item's own (required there); `devices`
-// comes from its runsOn — v2's SyncGroup literal carried `devices` directly, and the migration
-// lands it in `runsOn.device` (spec §5). The item's carried tail leads, so a field this build does
-// not know rides out to every consumer of the compiled list exactly as v2's `{...cg}` did.
+// A custom item's compiled group. `path`/`type` are the item's own (required there).
+//
+// A custom item's device class is its file-level sharing — the same field, the same menu and the
+// same writer as every registry item's `Settings sync` (spec plan note 1). It used to be
+// `runsOn.device`, a second expression of one idea, which is what this release exists to end.
+// manifest.ts refuses a `fileRule` on a folder group (whole-file encryption is a single-file
+// notion), so a folder's sharing is ELEVATED into `devices` and not emitted as a rule.
+//
+// The item's carried tail leads, so a field this build does not know rides out to every consumer
+// of the compiled list exactly as v2's `{...cg}` did.
 function customGroup(name: string, item: Item, path: string): SyncGroup {
   const carried = withoutKeys(itemTail(item), WRITTEN_CUSTOM_GROUP_KEYS) as Partial<SyncGroup>;
-  const group: SyncGroup = { ...carried, name, ref: itemRef("custom", name), path, type: item.type ?? "folder", devices: item.runsOn?.device ?? "all" };
+  const sharing = item.settingsFile?.fileRule?.sharing ?? EVERYWHERE;
+  const group: SyncGroup = { ...carried, name, ref: itemRef("custom", name), path, type: item.type ?? "folder", devices: sharingClassOrAll(sharing) };
   // The mode is CARRIED, not enumerated (fix round 1, review M5). A ternary chain over SyncMode is
   // how "encrypted" was silently rewritten to "plain" in the first place, and a fourth value would
   // regress the same way; passing the stored value through means only the per-mode PAYLOAD needs a
@@ -679,7 +652,7 @@ function customGroup(name: string, item: Item, path: string): SyncGroup {
     if (fields.length > 0) group.fields = fields;
     const perElement = perElementFromMap(item.settingsFile?.perElement ?? {});
     if (perElement !== undefined) group.perElement = perElement;
-  } else if (mode === "plain" && item.settingsFile?.fileRule !== undefined) {
+  } else if (mode === "plain" && item.settingsFile?.fileRule !== undefined && group.type === "file") {
     group.fileRule = item.settingsFile.fileRule;
   }
   if (item.description !== undefined) group.description = item.description;
@@ -699,14 +672,19 @@ function customGroup(name: string, item: Item, path: string): SyncGroup {
 // layered on top for the case where it did survive.
 export function customItemFromGroup(g: SyncGroup, existing?: Item): Item {
   const item: Item = { ...itemTail(existing), ...withoutKeys(customGroupTail(g), WRITTEN_ITEM_KEYS), synced: true, type: g.type, path: g.path };
-  if (g.devices !== "all") item.runsOn = { device: g.devices };
   // Same rule as customGroup's, in the other direction (review M5): the group's own mode is stored
   // verbatim, so no value of SyncMode can be lost by an enumeration that forgot it. An absent mode
   // means plain, which is the only reading a group without one ever had.
-  if ((g.mode !== undefined && g.mode !== "plain") || g.fileRule !== undefined) {
+  //
+  // The device class is the SAME field as a registry item's file-level sharing (customGroup's own
+  // comment) — a per-class `devices` compiles to a fileRule here exactly as it did in the other
+  // direction, merging any `encrypted` flag the group's own fileRule already carries (a file-type
+  // custom item can set both from the same menu vocabulary; a folder never has one to merge with).
+  if ((g.mode !== undefined && g.mode !== "plain") || g.fileRule !== undefined || g.devices !== "all") {
+    const fileRule: FileRule | undefined = g.devices !== "all" ? { sharing: perClass(g.devices), encrypted: g.fileRule?.encrypted ?? false } : g.fileRule;
     item.settingsFile = {
       mode: g.mode ?? "plain",
-      ...(g.fileRule !== undefined ? { fileRule: g.fileRule } : {}),
+      ...(fileRule !== undefined ? { fileRule } : {}),
       rules: Object.fromEntries((g.fields ?? []).map(({ pattern, ...rule }) => [pattern, rule])),
       perElement: g.perElement ?? {},
     };

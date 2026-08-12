@@ -507,23 +507,22 @@ describe("Sync all (spec §4/§5/§10, D11 — one master row per Core/Community
   });
 
   it("applySyncAll(on) turns every def in the list on, preserving each item's other fields", () => {
-    const items = itemsIn({ core: { [CORE_WITH_FILE_DEF.id]: cfg({ synced: false, runsOn: { device: "desktop" } }) } });
+    const items = itemsIn({ core: { [CORE_WITH_FILE_DEF.id]: cfg({ synced: false, description: "kept" }) } });
     const next = applySyncAll(CORE_DEFS, items, true);
     expect(next.core[CORE_STATE_ONLY_DEF.id]).toEqual({ synced: true });
-    expect(next.core[CORE_WITH_FILE_DEF.id]).toEqual(cfg({ synced: true, runsOn: { device: "desktop" } })); // the rule is untouched
+    expect(next.core[CORE_WITH_FILE_DEF.id]).toEqual(cfg({ synced: true, description: "kept" })); // the other field is untouched
   });
 
   // Every entry SURVIVES being turned off. In the enablement sections an entry's presence is this
-  // device's capture mask for that element (registry.ts's elementSharings' second pass), so "off"
-  // has to be recorded rather than pruned — final-review C1, and the reason withItem removes
-  // nothing.
+  // device's capture mask for that element, so "off" has to be recorded rather than pruned —
+  // final-review C1, and the reason withItem removes nothing.
   it("applySyncAll(off) turns every def in the list off — no kind-exclusion, every def in the section participates", () => {
     const items = itemsIn({
-      core: { [CORE_STATE_ONLY_DEF.id]: cfg({ synced: true }), [CORE_WITH_FILE_DEF.id]: cfg({ synced: true, runsOn: { device: "desktop" } }) },
+      core: { [CORE_STATE_ONLY_DEF.id]: cfg({ synced: true }), [CORE_WITH_FILE_DEF.id]: cfg({ synced: true, description: "kept" }) },
     });
     const next = applySyncAll(CORE_DEFS, items, false);
     expect(next.core[CORE_STATE_ONLY_DEF.id]).toEqual({ synced: false });
-    expect(next.core[CORE_WITH_FILE_DEF.id]).toEqual(cfg({ synced: false, runsOn: { device: "desktop" } })); // the rule is untouched
+    expect(next.core[CORE_WITH_FILE_DEF.id]).toEqual(cfg({ synced: false, description: "kept" })); // the other field is untouched
   });
 
   it("does not mutate the input items map", () => {
