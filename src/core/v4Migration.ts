@@ -19,20 +19,25 @@
  * v3 derived an element's sharing (registry.ts's retired `elementSharings`) as
  * `item.synced ? deviceSharing(item.runsOn?.device) : THIS_DEVICE` — so EVERY core/community entry
  * whose card was off masked its element: it never entered the store and was never resurrected from
- * it. Task 7 retired that derivation by spec (a rule is a thing the user wrote, not a thing a
- * disabled card implies), which means the migration is the only place left that can preserve it: an
- * entry that is not synced gets a stored `this-device` rule saying exactly what its absence used to
- * say. Without it, the first capture after a v4 load would publish every locally-enabled plugin the
- * user had never chosen to sync, to the whole fleet.
+ * it, and its `runsOn` was a label the mask never read. Task 7 retired that derivation by spec (a
+ * rule is a thing the user wrote, not a thing a disabled card implies), which means the migration is
+ * the only place left that can preserve it: an entry that is not synced gets a stored `this-device`
+ * rule saying exactly what its absence used to say — ahead of, and instead of, any class rule its
+ * own `runsOn` would otherwise have produced. Without it, the first capture after a v4 load would
+ * publish every locally-enabled plugin the user had never chosen to sync, to the whole fleet.
  *
  * Those structural rules do NOT join the freeze list, and that is a statement about v3, not a
  * shortcut. In v3 both a structural this-device and a pin reached `runsOnForces`, which resolved a
  * rule-less id through `forcedRunsOn(switchListMemberOn(persisted, id))` — a force computed FROM
- * the persisted local file, recomputed every run, and therefore provably a no-op on top of the
- * pass-through the mask already gave it. v4's `this-device` decision (enablementDecision.ts: masked,
- * force null) is that same no-op, expressed once. A pin is frozen anyway because §4 says a pin's
- * local half must be pinned down, and freezing it to the state that is already on disk changes
- * nothing at the moment of the migration either.
+ * the persisted local file and recomputed every run, which is the same answer v4's `this-device`
+ * decision (enablementDecision.ts: masked, force null) reaches by leaving the element alone. The
+ * two coincide for every list whose store and local sides have the SAME shape, which is every list
+ * a device writes for itself; they can differ where the shapes disagree (a local array against a
+ * store map, where applySwitchList's pass-through drops a locally-on excepted id that v3's
+ * addForceOn re-added). That asymmetry belongs to `this-device` itself, not to this migration — it
+ * is exactly what a rule written through the UI does today — so it is preserved, not compensated
+ * for. A pin is frozen anyway because §4 says a pin's local half must be pinned down, and freezing
+ * it to the state that is already on disk changes nothing at the moment of the migration either.
  */
 import { ruleHomeFor } from "./enablementRules";
 import { isPlainObject } from "./sanitize";
@@ -84,9 +89,12 @@ export function migrateV4Settings(input: Doc): V4Migration {
         continue;
       }
       const item: Doc = { ...raw };
-      // A KEY rename, not a value change: the stored value rides through verbatim, and every
-      // predicate below reads it exactly as v3's own readers did (`!item.synced`), so a hand-edited
-      // truthy value keeps meaning what it meant.
+      // A KEY rename, not a value change: the stored value rides through verbatim, the way
+      // v2Migration's own rename does. What reads it is ONE predicate, spelled `synced === true`
+      // (and its complement `!== true`) everywhere below — "synced" means the boolean this build
+      // writes, and nothing else. v3's readers asked `!item.synced`, which agrees for every boolean
+      // and disagrees for a hand-edited truthy non-boolean (`synced: 1`): that value reads as
+      // UNSYNCED here, which is the safe direction — it masks the element instead of publishing it.
       if ("enabled" in item) {
         item.synced = item.enabled;
         delete item.enabled;
@@ -98,12 +106,15 @@ export function migrateV4Settings(input: Doc): V4Migration {
         if (device !== null) setCustomDeviceSharing(item, device);
       } else if (section === "core" || section === "community") {
         const list = listFor(section);
-        // A stored device rule wins over the structural default (§4's own table maps
-        // `runsOn.device` unconditionally). v3 read an unsynced item's sharing as this-device even
-        // when it carried a `runsOn`, so this is the one place the migration deliberately follows
-        // what the MENU said over what the mask did — the spec's table, not an oversight.
-        if (device !== null) rules.push({ list, elementId: id, sharing: perClass(device) });
-        else if (item.synced !== true) rules.push({ list, elementId: id, sharing: THIS_DEVICE });
+        // ORDER MATTERS here, and it is v2Migration.ts's rule 2 again: preserve what the system DID,
+        // not what the menu SAID. An unsynced entry was masked as this-device in v3 whatever its
+        // `runsOn` claimed, so the structural rule is tested FIRST. Migrating such an entry as a
+        // class rule instead is the one shape where this migration would move a switch: on the
+        // other device class that rule masks AND forces off, and subtractForceOff would delete an
+        // element v3's pass-through never touched; on its own class it would make the element start
+        // following a list it has never participated in.
+        if (item.synced !== true) rules.push({ list, elementId: id, sharing: THIS_DEVICE });
+        else if (device !== null) rules.push({ list, elementId: id, sharing: perClass(device) });
       }
       next[id] = item;
     }
@@ -141,7 +152,9 @@ export function migrateV4Settings(input: Doc): V4Migration {
   // Rule 6 — the carriers' own `synced`. Until v4 a carrier compiled iff any item in its section was
   // synced (the retired anyEnabledInList); from v4 it compiles iff its own item says so. Without
   // this line, every user's on/off sync would silently stop on the first v4 load. An existing value
-  // wins: a hand-edited or newer document already said what it wanted.
+  // wins: a hand-edited or newer document already said what it wanted. `=== true` is the same one
+  // predicate the item walk above uses, complemented — the two must agree, or an entry could be
+  // structural AND count towards its carrier syncing.
   for (const section of ["core", "community"] as const) {
     const home = ruleHomeFor(listFor(section));
     const obsidian: Doc = isPlainObject(items[home.section]) ? { ...(items[home.section] as Doc) } : {};

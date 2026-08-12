@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { Platform } from "obsidian";
 import ConfigSyncPlugin from "../src/main";
 import { FakePlugins, MemFS } from "./memfs";
 import { itemsIn } from "./items";
@@ -226,14 +227,24 @@ describe("the runtime mask reads one rule layer and one local layer (spec §5)",
 // carry is asserted structurally in the last test below rather than through a third file whose
 // unrelated appearance fields would dominate the comparison.
 
-const V3_LOCAL_COMMUNITY = JSON.stringify(["dataview", "obsidian-git", "some-unsynced", "remotely-save"], null, 2) + "\n";
+// The local list a device of each class was ALREADY carrying under v3. They differ by exactly one
+// element and that difference is not a convenience: `obsidian-git` is synced with a desktop rule, so
+// v3's own `memberForceOff` kept it off every phone. A phone whose file still listed it would be a
+// fixture asserting that the migration undoes a v3 force, which is not what criterion 1 says.
+const V3_LOCAL_COMMUNITY: Record<"desktop" | "mobile", string> = {
+  desktop: JSON.stringify(["dataview", "obsidian-git", "some-unsynced", "unsynced-desktop", "remotely-save"], null, 2) + "\n",
+  mobile: JSON.stringify(["dataview", "some-unsynced", "unsynced-desktop", "remotely-save"], null, 2) + "\n",
+};
 const V3_LOCAL_CORE = JSON.stringify({ graph: true, "daily-notes": false }, null, 2) + "\n";
 const STORE_COMMUNITY = "cs/store/configdir/community-plugins.json";
 const STORE_CORE = "cs/store/configdir/core-plugins.json";
 const LOCAL_CORE = "config-dir/core-plugins.json";
 
-// A v3 document with one of every shape §4 has a row for, plus the shape it has no row for: an
-// entry that is simply not synced (`some-unsynced`), whose element v3 masked structurally.
+// A v3 document with one of every shape §4 has a row for, plus the two shapes it has no row for:
+// an entry that is simply not synced (`some-unsynced`), and one that is not synced but carries a
+// device rule anyway (`unsynced-desktop`). v3 masked BOTH structurally — an unsynced item's
+// `runsOn` was a label its mask never read — and migrating the second as a class rule is what would
+// delete it from a phone's list on the first apply.
 function v3Document(): Record<string, unknown> {
   return {
     schemaVersion: 3,
@@ -253,6 +264,7 @@ function v3Document(): Record<string, unknown> {
         dataview: { enabled: true },
         "obsidian-git": { enabled: true, runsOn: { device: "desktop" } },
         "some-unsynced": { enabled: false },
+        "unsynced-desktop": { enabled: false, runsOn: { device: "desktop" } },
         "remotely-save": { enabled: true },
       },
       custom: {},
@@ -290,10 +302,10 @@ async function migratedPlugin(io: MemFS): Promise<{ plugin: MigrationSurface; sa
   return { plugin: instance, saved: () => saved, local: (k) => ls.store.get(k) };
 }
 
-function seededMigrationIO(): MemFS {
+function seededMigrationIO(deviceClass: "desktop" | "mobile"): MemFS {
   const io = new MemFS();
   io.seed({
-    [LOCAL_FILE]: V3_LOCAL_COMMUNITY,
+    [LOCAL_FILE]: V3_LOCAL_COMMUNITY[deviceClass],
     [LOCAL_CORE]: V3_LOCAL_CORE,
     // The store the fleet already agreed on. `some-unsynced` is IN it — that is what makes the
     // pass-through assertion below mean something: an element this device never synced must be
@@ -304,9 +316,21 @@ function seededMigrationIO(): MemFS {
   return io;
 }
 
-describe("the v3 → v4 migration moves no switch (spec §9 criterion 1)", () => {
+// Both device classes, because the defect criterion 1 exists to catch is CLASS-DEPENDENT: a rule
+// this build writes for the wrong reason masks-and-follows here and masks-and-forces-off there, and
+// only the second one deletes a line from a file. `Platform` is the module-level object main.ts
+// reads (tests/mock-obsidian.ts), so flipping it flips what `coreContext()` computes.
+describe.each(["desktop", "mobile"] as const)("the v3 → v4 migration moves no switch on a %s (spec §9 criterion 1)", (deviceClass) => {
+  const wasMobile = Platform.isMobile;
+  beforeEach(() => {
+    Platform.isMobile = deviceClass === "mobile";
+  });
+  afterEach(() => {
+    Platform.isMobile = wasMobile;
+  });
+
   it("leaves the on/off list files byte-identical across a full capture + apply cycle", async () => {
-    const io = seededMigrationIO();
+    const io = seededMigrationIO(deviceClass);
     const before = { community: io.files.get(LOCAL_FILE), core: io.files.get(LOCAL_CORE) };
     const { plugin } = await migratedPlugin(io);
 
@@ -329,38 +353,47 @@ describe("the v3 → v4 migration moves no switch (spec §9 criterion 1)", () =>
 
   // The F1 half, at the seam that pays for it: an entry that was not synced keeps its element out
   // of this device's business entirely — capture may neither add it to the shared list nor drop it
-  // from one, exactly as v3's structural this-device did.
-  it("an unsynced entry's element passes through capture untouched, in the store and out of it", async () => {
-    const io = seededMigrationIO();
+  // from one, exactly as v3's structural this-device did. BOTH unsynced shapes are asserted: the
+  // bare one and the one carrying a dead `runsOn`.
+  it("an unsynced entry's element passes through capture untouched, dead runsOn or not", async () => {
+    const io = seededMigrationIO(deviceClass);
     const { plugin } = await migratedPlugin(io);
     const ctx: CoreContext = { ...(await plugin.coreContext()), plugins: new FakePlugins() };
 
     expect(ctx.switchExceptions["community-plugins"]).toContain("some-unsynced");
+    expect(ctx.switchExceptions["community-plugins"]).toContain("unsynced-desktop");
+    expect(ctx.switchForceOff?.["community-plugins"] ?? []).not.toContain("unsynced-desktop");
     await capture(ctx);
 
+    const stored = JSON.parse(io.files.get(STORE_COMMUNITY) ?? "[]") as string[];
     // still in the store (this device did not remove what it never synced)…
-    expect(JSON.parse(io.files.get(STORE_COMMUNITY) ?? "[]")).toContain("some-unsynced");
-    // …and the pinned one is still out of it (this device did not publish its own pin).
-    expect(JSON.parse(io.files.get(STORE_COMMUNITY) ?? "[]")).not.toContain("remotely-save");
+    expect(stored).toContain("some-unsynced");
+    // …and neither the pinned one nor the locally-on unsynced one was published by this device.
+    expect(stored).not.toContain("remotely-save");
+    expect(stored).not.toContain("unsynced-desktop");
   });
 
   it("freezes the pin's local half into the exception table, at the state it was already in", async () => {
-    const io = seededMigrationIO();
+    const io = seededMigrationIO(deviceClass);
     const { plugin, local } = await migratedPlugin(io);
 
     expect(JSON.parse(local(DEVICE_ELEMENTS_KEY) ?? "{}")).toEqual({ "community-plugins": { "remotely-save": "on" } });
     expect(plugin.settings.items.obsidian["community-plugins"]?.settingsFile?.perElement[perElementKeyFor("community-plugins")]).toEqual({
       "obsidian-git": perClass("desktop"),
       "some-unsynced": THIS_DEVICE,
+      "unsynced-desktop": THIS_DEVICE, // the dead runsOn did NOT become a class rule
       "remotely-save": THIS_DEVICE,
     });
   });
+});
+
+describe("the v3 → v4 migration moves no switch (spec §9 criterion 2)", () => {
 
   // §9 criterion 2: the retired fields are gone from what reaches DISK — the leak window
   // `thisDeviceItems` opened (a this-device datum in a document that travels) closes here, not
   // merely in memory.
   it("the saved document carries none of the retired fields (criterion 2)", async () => {
-    const { plugin, saved } = await migratedPlugin(seededMigrationIO());
+    const { plugin, saved } = await migratedPlugin(seededMigrationIO("desktop"));
     const document = saved();
     expect(document).not.toBeNull();
     const text = JSON.stringify(document);

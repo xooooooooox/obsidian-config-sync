@@ -152,6 +152,47 @@ describe("storeSelfCopyGroups", () => {
       const appearance = storeSelfCopyGroups(v2Copy, defs, NO_BETA_IDS).find((g) => g.name === "appearance");
       expect((appearance?.fields ?? []).filter((f) => f.sharing.kind === "this-device").map((f) => f.pattern)).toEqual(["cssTheme"]);
     });
+
+    // The SAME argument one version later, and the reason storeSelfCopyGroups runs the v4 step too:
+    // for the v4 transition window the store is written by devices on 2.22.0, and a genuine v3 copy
+    // spells an item's sync flag `enabled` and carries no carrier entries at all — two facts nothing
+    // in this build reads any more. Without the chain such a copy compiles to NOTHING, which is
+    // exactly the three failures the block comment above names.
+    it("reads a genuine 2.22.0 self copy: `enabled` items and no carrier entries", () => {
+      const v3Copy = JSON.stringify({
+        schemaVersion: 3,
+        items: {
+          obsidian: { appearance: { enabled: true } },
+          core: { graph: { enabled: true } },
+          community: { demo: { enabled: true }, foreign: { enabled: true } },
+          custom: {},
+        },
+      });
+
+      const names = storeSelfCopyGroups(v3Copy, defs, NO_BETA_IDS).map((g) => g.name);
+
+      // the plugin/core items, which read as nothing at all while `enabled` went unread…
+      expect(names).toContain("plugin-demo");
+      expect(names).toContain("plugin-foreign");
+      expect(names).toContain("graph");
+      expect(names).toContain("appearance");
+      // …and both carriers, which a v3 document has no entry for: rule 6 seeds them from whether the
+      // section had a synced item, exactly as the retired anyEnabledInList compile loop did.
+      expect(names).toContain("community-plugins");
+      expect(names).toContain("core-plugins");
+    });
+
+    it("…and seeds a carrier only when its own section had something synced", () => {
+      const noCore = JSON.stringify({
+        schemaVersion: 3,
+        items: { obsidian: {}, core: { graph: { enabled: false } }, community: { demo: { enabled: true } }, custom: {} },
+      });
+
+      const names = storeSelfCopyGroups(noCore, defs, NO_BETA_IDS).map((g) => g.name);
+
+      expect(names).toContain("community-plugins");
+      expect(names).not.toContain("core-plugins");
+    });
   });
 });
 

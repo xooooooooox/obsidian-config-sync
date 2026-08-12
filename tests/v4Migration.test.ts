@@ -106,15 +106,32 @@ describe("v3 → v4", () => {
     expect(freeze).toEqual([]);
   });
 
-  it("an entry with no synced key at all is unsynced — the reading v3's `!item.synced` gave it", () => {
+  it("an entry with no synced key at all is unsynced — one predicate, `synced === true`, decides", () => {
     const { document } = migrateV4Settings({ schemaVersion: 3, items: { community: { husk: { label: "Husk" } } } });
     expect(carrierRules(document, "community-plugins")).toEqual({ husk: THIS_DEVICE });
   });
 
-  it("a stored device rule wins over the structural default (§4's table maps runsOn.device unconditionally)", () => {
+  // The structural rule is tested BEFORE the device axis, because in v3 an unsynced item's `runsOn`
+  // was a label the mask never read (`item.synced ? deviceSharing(...) : THIS_DEVICE`). Writing the
+  // class rule instead is the one shape where the migration would move a switch: on the OTHER
+  // device class it masks AND forces off, and subtractForceOff deletes an element v3 passed through
+  // untouched; on its own class it makes the element start following the shared list.
+  it("an unsynced entry stays this-device even when it carries a device rule (what the system DID)", () => {
     const { document } = migrateV4Settings({
       schemaVersion: 3,
-      items: { community: { "obsidian-git": { enabled: false, runsOn: { device: "mobile" } } } },
+      items: {
+        community: { "obsidian-git": { enabled: false, runsOn: { device: "mobile" } } },
+        core: { graph: { synced: false, runsOn: { device: "desktop" } } },
+      },
+    });
+    expect(carrierRules(document, "community-plugins")).toEqual({ "obsidian-git": THIS_DEVICE });
+    expect(carrierRules(document, "core-plugins")).toEqual({ graph: THIS_DEVICE });
+  });
+
+  it("…while a SYNCED entry's device rule is migrated — `synced` alone tells the two apart", () => {
+    const { document } = migrateV4Settings({
+      schemaVersion: 3,
+      items: { community: { "obsidian-git": { enabled: true, runsOn: { device: "mobile" } } } },
     });
     expect(carrierRules(document, "community-plugins")).toEqual({ "obsidian-git": perClass("mobile") });
   });
