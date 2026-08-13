@@ -295,10 +295,6 @@ export interface SyncCenterHost {
   // Contents for an inline change diff: base = current state of the target side, produced =
   // what the pending action (capture/apply) would write. null = no diff available.
   diffPair(name: string, rel: string, dir: Direction): Promise<{ base: string; produced: string } | null>;
-  // The section header chip's write target (task-4): toggles whether an item (here, the
-  // core-plugins/community-plugins carrier) is itself a synced item — same field the Settings
-  // tab's per-card sync toggle writes (Item.synced).
-  setItemSyncEnabled(ref: ItemRef, enabled: boolean): Promise<void>;
   // The two enablement layers (spec §6.6), one read/write pair each — the SAME pair the Settings
   // panel's card rows call, so the three entrances cannot drift apart.
   // The fleet rule for one element of one list.
@@ -2307,55 +2303,28 @@ export class SyncCenterView extends ItemView {
     });
   }
 
-  // The Core/Community section header chip (spec §2): toggles whether the on/off list itself is a
-  // synced item — the only remaining home of that on/off card as a configurable item. Writes the
-  // same field the Settings tab's per-card sync toggle does (SyncCenterHost.setItemSyncEnabled).
-  // Batch-21 (spec §2, option A): desktop keeps the full-text pill, byte-identical to before —
-  // the mobile branch below is additive only. Mobile swaps the text for a bare Lucide toggle
-  // glyph (`toggle-right` synced/green, `toggle-left` not-synced/muted) so the section head stays
-  // one line; the click/keydown → Menu wiring and the full copy (now carried as tooltip +
-  // aria-label rather than inline text) are otherwise identical to the desktop chip.
+  // The Core/Community section header chip (spec §6.3). It used to WRITE `Item.synced`; it now only
+  // SHOWS it and jumps to where that value is configured. One datum, one writer — and the writer is
+  // the card's own toggle in the settings panel, beside the confirmation the change deserves.
+  //
+  // Same shape on both platforms. The mobile branch this replaces rendered a bare toggle glyph with
+  // the copy in a tooltip — on the one platform that has no hover to show it. A short word costs one
+  // line of nothing and reads everywhere.
   private renderCarrierChip(head: HTMLElement, carrierId: EnablementList): void {
     const synced = this.groups.some((g) => g.name === carrierId);
-    const tooltip = synced ? "on/off synced ✓" : "on/off not synced";
-    const chip = Platform.isMobile
-      ? head.createSpan({ cls: `config-sync-carrierchip is-icon${synced ? " is-synced" : ""}`, attr: { role: "button", tabindex: "0" } })
-      : head.createSpan({
-          cls: `config-sync-carrierchip${synced ? " is-synced" : ""}`,
-          text: tooltip,
-          attr: { role: "button", tabindex: "0" },
-        });
-    if (Platform.isMobile) {
-      setIcon(chip, synced ? "toggle-right" : "toggle-left");
-      setTooltip(chip, tooltip);
-      chip.setAttr("aria-label", tooltip);
-    }
-    const openMenu = (x: number, y: number): void => {
-      const menu = new Menu();
-      menu.addItem((item) =>
-        item.setTitle(synced ? "Stop syncing on/off" : "Sync on/off").onClick(() => {
-          // The carrier is a compiled group, not an item of its own — it exists exactly when some
-          // item in its section is synced (registry.ts's anyEnabledInList), so there is no
-          // Item.synced to flip here and itemRefForGroup answers null. Same outcome as the v2
-          // write this replaces, which stored an entry no def claimed and nothing ever compiled.
-          const ref = this.host.itemRefForGroup(carrierId);
-          if (ref === null) return;
-          void this.host.setItemSyncEnabled(ref, !synced).then(() => this.notifyExternalChange());
-        })
-      );
-      menu.showAtPosition({ x, y });
+    const tooltip = synced
+      ? "Which plugins are on is shared with your other devices — opens Settings"
+      : "Which plugins are on stays on this device — opens Settings";
+    const chip = head.createSpan({ cls: `config-sync-carrierchip${synced ? " is-synced" : ""}`, attr: { role: "button", tabindex: "0", "aria-label": tooltip } });
+    setIcon(chip.createSpan({ cls: "config-sync-carrierchip-ic" }), "settings-2");
+    chip.createSpan({ text: synced ? "synced" : "not synced" });
+    setTooltip(chip, tooltip);
+    const open = (): void => {
+      const ref = this.host.itemRefForGroup(carrierId);
+      if (ref !== null) this.host.openSettingsAt(ref);
     };
-    chip.addEventListener("click", (e) => {
-      e.stopPropagation();
-      openMenu(e.clientX, e.clientY);
-    });
-    chip.addEventListener("keydown", (e) => {
-      if (e.key !== "Enter" && e.key !== " ") return;
-      e.preventDefault();
-      e.stopPropagation();
-      const rect = chip.getBoundingClientRect();
-      openMenu(rect.left, rect.bottom);
-    });
+    chip.addEventListener("click", (e) => { e.stopPropagation(); open(); });
+    chip.addEventListener("keydown", (e) => { if (e.key !== "Enter" && e.key !== " ") return; e.preventDefault(); e.stopPropagation(); open(); });
   }
 
   private visibleRows(inSection: StatusRow[]): StatusRow[] {

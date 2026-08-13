@@ -791,7 +791,6 @@ export default class ConfigSyncPlugin extends Plugin {
           return null;
         }
       },
-      setItemSyncEnabled: (ref, enabled) => this.setItemSyncEnabled(ref, enabled),
       enablementRuleFor: (list, elementId) => this.enablementRuleFor(list, elementId),
       setEnablementRule: (list, elementId, sharing) => this.setEnablementRule(list, elementId, sharing),
       deviceElementFor: (list, elementId) => this.deviceElementFor(list, elementId),
@@ -1609,17 +1608,6 @@ export default class ConfigSyncPlugin extends Plugin {
     const real = `${this.app.vault.configDir}/${enablementListFile(list)}`;
     if (!(await io.exists(real))) return null;
     return readLocalSwitchList(list, await io.read(real));
-  }
-
-  // Sync Center header chip (unified grammar task-4): same write as the Settings tab's per-card
-  // sync toggle (SettingTab.renderItemCard) — Item.synced, keyed by the item's ref.
-  async setItemSyncEnabled(ref: ItemRef, enabled: boolean): Promise<void> {
-    if (this.schemaStopped()) return; // §4.2b
-    const parsed = parseItemRef(ref);
-    if (parsed === null) return;
-    const item = itemAt(this.settings.items, parsed.section, parsed.id) ?? emptyItem();
-    this.settings.items = withItem(this.settings.items, parsed.section, parsed.id, { ...item, synced: enabled });
-    await this.saveSettings();
   }
 
   // Settings-sync menu read/write (unified grammar task-5): the same field the Settings tab's

@@ -1152,29 +1152,12 @@ body.is-mobile .config-sync-strip-meta .config-sync-report-pills { margin-left: 
    needs a body wrapper element around the entry rows, which is a `.ts` DOM change — deliberately
    deferred (out of this CSS-only round's scope; owned by whichever batch next touches
    SyncCenterView.ts's remote-pane rendering). Remote panes stay exactly as they were before §8. */
-/* Core/Community section header chip: the on/off list's own sync-membership toggle — the only
-   remaining home of that list as a configurable item once its row dissolves into this chip. */
-.config-sync-carrierchip { border: 1px solid var(--background-modifier-border); border-radius: 999px; padding: 1px 8px; font-size: var(--font-ui-smaller); color: var(--text-muted); cursor: pointer; white-space: nowrap; }
+/* Core/Community section header chip (spec §6.3): a read-only shortcut to where the on/off list's
+   own sync membership is actually decided — the settings card's toggle, one write path. Same shape
+   on both platforms. */
+.config-sync-carrierchip { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--background-modifier-border); border-radius: 999px; padding: 1px 8px; font-size: var(--font-ui-smaller); color: var(--text-muted); cursor: pointer; white-space: nowrap; }
 .config-sync-carrierchip.is-synced { color: var(--color-green); border-color: rgba(var(--color-green-rgb), 0.4); }
-/* C-#44 (batch-21 spec §2, option A — revises C-#41's second-line drop): the carrier chip's
-   mobile form is a bare icon-only control (`toggle-right`/`toggle-left`, JS renderCarrierChip)
-   living INLINE on the section head, same as desktop's pill — no dedicated meta line anymore.
-   Border/pill chrome drops for the icon form; color language (muted / green when synced) carries
-   over from the base rule above. */
-body.is-mobile .config-sync-carrierchip.is-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: fit-content;
-  border: none;
-  border-radius: var(--radius-s);
-  padding: 3px 4px;
-  color: var(--text-muted);
-}
-body.is-mobile .config-sync-carrierchip.is-icon:hover,
-body.is-mobile .config-sync-carrierchip.is-icon:focus-visible { background: var(--background-modifier-hover); }
-body.is-mobile .config-sync-carrierchip.is-icon.is-synced { color: var(--color-green); }
-body.is-mobile .config-sync-carrierchip.is-icon svg { width: 16px; height: 16px; }
+.config-sync-carrierchip-ic svg { width: 13px; height: 13px; display: block; }
 /* Expanded-card rows (spec §4, ledger C-#2): every row is a fixed-width muted label with its
    value IMMEDIATELY adjacent — never spread edge-to-edge with the value floating far right. Key
    column (ledger C-#6): nowrap + sized to the longest key ("After install") so a key never wraps

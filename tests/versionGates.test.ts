@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Notice } from "obsidian";
+import { Notice, Platform } from "obsidian";
 import ConfigSyncPlugin from "../src/main";
 import { MemFS, FakePlugins, memGroupsIO } from "./memfs";
 import { applyImport, applyWithActions, capture, CoreContext, PendingPull, planImport, pushExternal, ExternalStoreReader, ExternalStoreWriter, STORE_LOCK_MISSING_MESSAGE, writeGroups } from "../src/core/ConfigSyncCore";
@@ -8,10 +8,11 @@ import { declaredStoreLockVersion, lockEntry, parseSyncManifest, parseStoreLock,
 import { CURRENT_SCHEMA, SCHEMA_FUTURE_APPLY_MESSAGE, SCHEMA_FUTURE_NOTICE, SCHEMA_UPGRADE_NOTICE } from "../src/core/settingsMigration";
 import { SELF_GROUP_NAME } from "../src/core/catalog";
 import { ConfigSyncSettingTab } from "../src/ui/SettingTab";
-import { GroupResult, Remote, SyncGroup } from "../src/core/types";
+import { EVERYWHERE, GroupResult, Remote, Sharing, SyncGroup } from "../src/core/types";
 import { CaptureItem, ApplyItem } from "../src/core/ConfigSyncCore";
 import { itemsIn } from "./items";
 import { Item, ItemMap } from "../src/core/registry";
+import { enablementRuleFor } from "../src/core/enablementRules";
 
 // spec 2026-08-11-data-model-hardening.md §4 (invariant II.3): a document or store written by a
 // NEWER build is refused with a clear message — never downgraded, never reset, never overwritten.
@@ -51,7 +52,7 @@ interface StopSurface {
   recompile: () => Promise<boolean>;
   refreshLocalStatus: () => Promise<void>;
   settingsWritable: () => boolean;
-  setItemSyncEnabled: (itemId: string, enabled: boolean) => Promise<void>;
+  setEnablementRule: (list: string, elementId: string, sharing: Sharing) => Promise<void>;
   settings: { rootPath: string; items: ItemMap };
   syncCenterHost: () => {
     schemaStop: () => { found: number } | null;
@@ -400,7 +401,7 @@ describe("§4.1 — a data.json from a newer build is never reset and never over
     const before = JSON.stringify(instance.settings.items);
 
     expect(instance.settingsWritable()).toBe(false);
-    await instance.setItemSyncEnabled("community/demo", false);
+    await instance.setEnablementRule("core-plugins", "demo", { kind: "this-device" });
 
     expect(JSON.stringify(instance.settings.items)).toBe(before);
   });
@@ -410,13 +411,11 @@ describe("§4.1 — a data.json from a newer build is never reset and never over
     await instance.loadSettings();
 
     expect(instance.settingsWritable()).toBe(true);
-    expect(instance.settings.items.community["demo"]?.synced).toBe(true);
-    await instance.setItemSyncEnabled("community/demo", false);
+    expect(enablementRuleFor(instance.settings.items, "core-plugins", "demo")).toEqual(EVERYWHERE);
+    await instance.setEnablementRule("core-plugins", "demo", { kind: "this-device" });
 
-    // The entry stays and records the "off" — see registry.ts's withItem: in the enablement
-    // sections an entry's presence is this device's capture mask. The before/after pair is what
-    // proves the write happened rather than being refused.
-    expect(instance.settings.items.community["demo"]).toEqual({ synced: false });
+    // The before/after pair is what proves the write happened rather than being refused.
+    expect(enablementRuleFor(instance.settings.items, "core-plugins", "demo")).toEqual({ kind: "this-device" });
   });
 
   it("pull and push refuse before a remote is even opened", async () => {
@@ -1027,5 +1026,29 @@ describe("the Advanced tab's draft", () => {
     expect(await tab.commit()).toBe(true);
     expect(tab.names()).toEqual([RULE.name, ADDED.name]);
     expect(tab.saved()).toBe(1);
+  });
+});
+
+// obsidianmd/no-nodejs-modules: fs must be reached through a Platform.isDesktop-guarded dynamic
+// import() — the same discipline main.ts's buildReader/createWriter follow — never a static import.
+async function readSourceFile(path: string): Promise<string> {
+  if (!Platform.isDesktop) throw new Error("source-string assertions run on desktop only");
+  const fs = await import("node:fs");
+  return fs.readFileSync(path, "utf8");
+}
+
+// spec §6.3 / §9 criterion 5-6: the Sync Center carrier chip retired its ONLY write path
+// (setItemSyncEnabled) — it now only reads Item.synced and jumps to the card that writes it
+// (SettingTab's updateItem). Proven at the string level, not just by absence of a call site: the
+// method itself no longer exists anywhere in the plugin.
+describe("Item.synced has exactly one writer, and it is not in the Sync Center", () => {
+  it("the string does not appear in the Sync Center view", async () => {
+    const view = await readSourceFile("src/ui/SyncCenterView.ts");
+    expect(view).not.toContain("setItemSyncEnabled");
+  });
+
+  it("nor anywhere in main.ts — full retirement, not just its caller", async () => {
+    const main = await readSourceFile("src/main.ts");
+    expect(main).not.toContain("setItemSyncEnabled");
   });
 });

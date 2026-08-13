@@ -15,6 +15,7 @@ import {
   ItemDef,
   ItemMap,
   itemFor,
+  itemForGroupName,
   parentCardLabel,
   storageSection,
   withItem,
@@ -369,6 +370,19 @@ describe("the on/off lists as items", () => {
     for (const list of ["core-plugins", "community-plugins"] as const) {
       const def = defs.find((d) => d.id === list);
       expect(def?.section).toBe("obsidian");
+      expect(defRef(def!)).toBe(carrierRef(list));
+    }
+  });
+
+  // Task 11 (spec §6.3): the Sync Center's carrier chip is a read-only shortcut now, and it must
+  // jump to the card whether or not the carrier is synced — a NOT-synced carrier has no compiled
+  // group, but the def exists regardless, and itemForGroupName is a DEF lookup (registry.ts), never
+  // a compiled-list lookup. An empty items map is the sharpest way to prove that.
+  it("resolves the carrier's ref from the def alone — an empty compiled list changes nothing", () => {
+    const defs = buildItemDefs(env);
+    for (const list of ["core-plugins", "community-plugins"] as const) {
+      const def = itemForGroupName(defs, list);
+      expect(def).not.toBeNull();
       expect(defRef(def!)).toBe(carrierRef(list));
     }
   });
