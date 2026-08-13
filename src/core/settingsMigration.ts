@@ -1,12 +1,13 @@
 /**
- * Load-shape concerns for the v3 settings schema. Two distinct things live here:
+ * Load-shape concerns for the v4 settings schema. Two distinct things live here:
  *
  * - The default fill every load starts from (`withDefaults`, spec
  *   2026-08-11-data-model-hardening.md §5.1) — the stored document merged onto DEFAULT_SETTINGS,
  *   nested defaults included, unknown fields kept.
  * - The schema classifier (`classifySettings`) and the three version gates it feeds. Backwards: a
- *   `schemaVersion: 2` document is MIGRATED (v2Migration.ts, spec §5) — once, on the load that
- *   finds it, saved once, behaving afterwards exactly as it did before. A v1 or unversioned
+ *   `schemaVersion: 2` or `3` document is MIGRATED (v2Migration.ts, then v4Migration.ts) — once, on
+ *   the load that finds it, saved once, behaving afterwards exactly as it did before, with v2
+ *   chaining through v3 in memory. A v1 or unversioned
  *   document keeps the legacy branch: the plugin starts fresh with defaults and asks the user to
  *   reconfigure, because schema v1 has no field a later shape could be reconstructed from.
  *   Forwards (spec 2026-08-11-data-model-hardening.md §4.1/§4.2, invariant II.3): a document from a
@@ -18,7 +19,7 @@
 // The settings schema THIS build reads and writes. Named once, here: the classifier below, the
 // pre-write guard the apply path runs on an incoming document, and DEFAULT_SETTINGS' own
 // schemaVersion all mean the same number, and a future bump must move exactly one literal.
-export const CURRENT_SCHEMA = 3;
+export const CURRENT_SCHEMA = 4;
 
 export const SCHEMA_UPGRADE_NOTICE = "Config Sync: this update reset your sync setup — open Settings to choose what to sync again.";
 
@@ -38,16 +39,19 @@ export const SCHEMA_FUTURE_APPLY_MESSAGE =
 export type SettingsLoad =
   | { kind: "fresh" }
   | { kind: "ok" }
-  // A v2 document: migrated field by field (v2Migration.ts), saved once, and never reset. It is the
-  // ONLY version with a migration path — v1 and unversioned documents keep the legacy branch below,
-  // because schema v1 has no field a v2/v3 shape could be reconstructed from.
-  | { kind: "migrate" }
+  // A v2 or v3 document: migrated field by field (v2Migration.ts, then v4Migration.ts), saved once,
+  // and never reset. `from` says which one, because a v2 document takes BOTH steps and a v3 one only
+  // the second. v1 and unversioned documents keep the legacy branch below, because schema v1 has no
+  // field a later shape could be reconstructed from.
+  | { kind: "migrate"; from: number }
   | { kind: "legacy" }
   | { kind: "future"; found: number };
 
-// The one version this build knows how to bring forward (spec §5/§6). Named next to
-// CURRENT_SCHEMA so the pair reads as the range this build accepts.
-export const MIGRATABLE_SCHEMA = 2;
+// The versions this build can bring forward, oldest first (spec §4). v2 chains through v3 on its way
+// here — migrateV2Settings produces a v3 document, which migrateV4Settings then takes the rest of
+// the way, so a 2.20.0 device that skipped every release in between still lands on v4 in one load.
+// Named next to CURRENT_SCHEMA so the pair reads as the range this build accepts.
+export const MIGRATABLE_SCHEMAS: readonly number[] = [2, 3];
 
 // The classifier that replaced `isLegacySettings` (schemaVersion !== CURRENT). That test sent a document
 // from a NEWER build down the legacy branch — notice, defaults in memory, and the user's whole
@@ -59,7 +63,7 @@ export function classifySettings(data: Record<string, unknown> | null): Settings
   if (data === null) return { kind: "fresh" };
   const found = data.schemaVersion;
   if (found === CURRENT_SCHEMA) return { kind: "ok" };
-  if (found === MIGRATABLE_SCHEMA) return { kind: "migrate" };
+  if (typeof found === "number" && MIGRATABLE_SCHEMAS.includes(found)) return { kind: "migrate", from: found };
   if (typeof found === "number" && found > CURRENT_SCHEMA) return { kind: "future", found };
   return { kind: "legacy" };
 }
@@ -138,9 +142,11 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 // `enabledOn`), which no longer exist in a document this build can read, so the v2 → v3 migration
 // is the only code that will ever run them again.
 //
-// v2's `memberRules` had no sanitizer and its successor (`Item.runsOn`) needs none either (spec
-// 2026-08-11-data-model-hardening.md §3.2, invariant II.2). Dropping every value this build
+// v2's `memberRules` had no sanitizer and its v3 successor (`Item.runsOn`) needed none either
+// (spec 2026-08-11-data-model-hardening.md §3.2, invariant II.2). Dropping every value this build
 // doesn't recognise — which is precisely what a newer build writes — and saving immediately made
 // the load path destroy the future's data and publish the deletion to the fleet on the next
-// capture. An unrecognised value is ignored at the point of use (types.ts's asRunsOn, read by
-// main.ts's runsOnFor / storedRunsOnFor) and storage is never rewritten for it.
+// capture. `runsOn` itself retired outright in 2026-08-12-enablement-two-layers (a rule now lives
+// on the carrier, not the plugin); the discipline lives on for every field this build still
+// doesn't recognise, ignored at the point of use (enablementRules.ts's asSharing is today's
+// example) and never rewritten out from under it.

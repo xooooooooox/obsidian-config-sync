@@ -40,19 +40,23 @@ function compiled(): { defs: ItemDef[]; groups: SyncGroup[] } {
   const groups = compileItems(defs, {
     items: itemsIn({
       obsidian: {
-        app: { enabled: true },
-        appearance: { enabled: true, companions: [{ path: "{configDir}/themes", device: "all", enabled: true }] },
-        hotkeys: { enabled: true },
+        app: { synced: true },
+        appearance: { synced: true, companions: [{ path: "{configDir}/themes", device: "all", enabled: true }] },
+        hotkeys: { synced: true },
+        // The two carriers are items now (task 5): their own entry, not a plugin being synced
+        // underneath, is what compiles core-plugins.json/community-plugins.json.
+        "core-plugins": { synced: true },
+        "community-plugins": { synced: true },
       },
-      core: { "daily-notes": { enabled: true } },
+      core: { "daily-notes": { synced: true } },
       community: {
         // The same BASENAME on two different cards — a shape the flat group-name space could not
         // even express (compileCompanions names both groups "logs"), and the reason a companion is
         // keyed under its owner. Asserted below, not merely described.
-        dataview: { enabled: true, companions: [{ path: "vault/dataview/logs", device: "all", enabled: true }] },
-        completr: { enabled: true, companions: [{ path: "vault/completr/logs", device: "all", enabled: true }] },
+        dataview: { synced: true, companions: [{ path: "vault/dataview/logs", device: "all", enabled: true }] },
+        completr: { synced: true, companions: [{ path: "vault/completr/logs", device: "all", enabled: true }] },
       },
-      custom: { "my-rule": { enabled: true, type: "file", path: "notes/custom.json" } },
+      custom: { "my-rule": { synced: true, type: "file", path: "notes/custom.json" } },
     }),
   });
   return { defs, groups };
@@ -69,16 +73,18 @@ function compiledLegal(): SyncGroup[] {
   return compileItems(buildItemDefs(ENV), {
     items: itemsIn({
       obsidian: {
-        app: { enabled: true },
-        appearance: { enabled: true, companions: [{ path: "{configDir}/themes", device: "all", enabled: true }] },
-        hotkeys: { enabled: true },
+        app: { synced: true },
+        appearance: { synced: true, companions: [{ path: "{configDir}/themes", device: "all", enabled: true }] },
+        hotkeys: { synced: true },
+        "core-plugins": { synced: true },
+        "community-plugins": { synced: true },
       },
-      core: { "daily-notes": { enabled: true } },
+      core: { "daily-notes": { synced: true } },
       community: {
-        dataview: { enabled: true, companions: [{ path: "vault/dataview/logs", device: "all", enabled: true }] },
-        completr: { enabled: true, companions: [{ path: "vault/completr/notes", device: "all", enabled: true }] },
+        dataview: { synced: true, companions: [{ path: "vault/dataview/logs", device: "all", enabled: true }] },
+        completr: { synced: true, companions: [{ path: "vault/completr/notes", device: "all", enabled: true }] },
       },
-      custom: { "my-rule": { enabled: true, type: "file", path: "notes/custom.json" } },
+      custom: { "my-rule": { synced: true, type: "file", path: "notes/custom.json" } },
     }),
   });
 }
@@ -161,12 +167,18 @@ describe("producer vs producer", () => {
     expect([...OBSIDIAN_CARD_IDS].sort()).toEqual([...fromRegistry].sort());
   });
 
-  // Why carriers are keyed under `obsidian`: that section's id space is closed and declared in code,
-  // so a carrier key cannot collide with an item. This is the collision-freedom argument itself,
-  // checked against both declarations instead of asserted in a comment.
-  it("no carrier id collides with an obsidian card id", () => {
+  // Why carriers are keyed under `obsidian`: that section's id space is closed and declared in
+  // code, so a carrier key cannot collide with an ITEM it doesn't already name. Task 5 changed the
+  // shape of this claim, not its truth: core-plugins/community-plugins now collide with an obsidian
+  // card id BY CONSTRUCTION, because they are that card's own id (defRef and carrierRef mint the
+  // same string). `enabled-css-snippets` is the control case — it carries no item (its rules live
+  // on appearance's own settingsFile.perElement, enablementRules.ts's ruleHomeFor), so it still
+  // collides with nothing.
+  it("a carrier id collides with an obsidian card id exactly when the carrier IS one; enabled-css-snippets never does", () => {
     const carriers = Object.keys(SWITCH_LISTS);
-    expect(carriers.filter((c) => (OBSIDIAN_CARD_IDS as readonly string[]).includes(c))).toEqual([]);
+    const collide = carriers.filter((c) => (OBSIDIAN_CARD_IDS as readonly string[]).includes(c));
+    expect(collide.sort()).toEqual(["community-plugins", "core-plugins"]);
+    expect((OBSIDIAN_CARD_IDS as readonly string[]).includes("enabled-css-snippets")).toBe(false);
     for (const c of carriers) expect(carrierRef(c)).toBe(`obsidian/${c}`);
   });
 });

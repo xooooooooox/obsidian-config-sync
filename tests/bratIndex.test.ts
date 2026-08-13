@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { resolveBratIndex, parseBratRepoList } from "../src/core/bratIndex";
+import { resolveBratIndex, parseBratRepoList, bratRepoIndex, withBratRepos } from "../src/core/bratIndex";
+import { itemsIn } from "./items";
 
 const fetcher =
   (manifests: Record<string, string | null>) =>
@@ -47,6 +48,24 @@ describe("resolveBratIndex", () => {
   it("ignores unparseable manifests", async () => {
     const index = await resolveBratIndex({}, ["a/broken"], fetcher({ "a/broken": "not json" }));
     expect(index).toEqual({});
+  });
+});
+
+describe("BRAT repos on the plugin they belong to", () => {
+  it("reads the index back out of the items map", () => {
+    const items = itemsIn({ community: { dataview: { synced: true }, "some-beta": { synced: true, bratRepo: "owner/some-beta" } } });
+    expect(bratRepoIndex(items)).toEqual({ "some-beta": "owner/some-beta" });
+  });
+
+  it("a resolved repo for a plugin with no entry creates a skeleton that is NOT synced", () => {
+    const next = withBratRepos(itemsIn({}), { "new-beta": "owner/new-beta" });
+    expect(next.community["new-beta"]).toEqual({ synced: false, bratRepo: "owner/new-beta" });
+  });
+
+  it("a repo that left BRAT's list clears the field without touching the rest of the item", () => {
+    const before = itemsIn({ community: { "some-beta": { synced: true, bratRepo: "owner/some-beta", path: "custom.json" } } });
+    const after = withBratRepos(before, {});
+    expect(after.community["some-beta"]).toEqual({ synced: true, path: "custom.json" });
   });
 });
 

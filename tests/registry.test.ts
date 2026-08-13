@@ -10,26 +10,24 @@ import {
   defsForForeignItems,
   emptyItem,
   emptyItemMap,
-  enablementSharing,
-  itemEarnsDef,
   groupOwners,
-  itemWithDevice,
   Item,
-  withRunsOnDevice,
   ItemDef,
   ItemMap,
   itemFor,
+  itemForGroupName,
   parentCardLabel,
   storageSection,
   withItem,
   RegistryEnv,
-  structuralLocalElements,
 } from "../src/core/registry";
 import { itemsIn } from "./items";
 import { leftoverStoreRels } from "../src/core/leftover";
 import { SyncGroup, EVERYWHERE, itemRef, parseItemRef, perClass, StorageSection, THIS_DEVICE } from "../src/core/types";
 import { ManifestValidationError, validateSyncManifest } from "../src/core/manifest";
 import { mergePresetFields, selfPresetRules } from "../src/core/catalog";
+import { carrierRef } from "../src/core/itemKeys";
+import { withEnablementRule } from "../src/core/enablementRules";
 
 // spec 2026-07-25-unified-card-design.md §1/§3/§5/§6; task-4-brief.md compile rules.
 
@@ -45,7 +43,7 @@ function customSection(groups: SyncGroup[]): Record<string, Item> {
 }
 
 function on(overrides: Partial<Item> = {}): Item {
-  return { ...emptyItem(), enabled: true, ...overrides };
+  return { ...emptyItem(), synced: true, ...overrides };
 }
 
 function findGroup(groups: SyncGroup[], name: string): SyncGroup | undefined {
@@ -55,10 +53,10 @@ function findGroup(groups: SyncGroup[], name: string): SyncGroup | undefined {
 const EMPTY_ENV: RegistryEnv = { cores: [], plugins: [], betaIds: new Set() };
 
 describe("buildItemDefs", () => {
-  it("always includes the three Obsidian cards", () => {
+  it("always includes the five Obsidian cards — the three settings cards plus the two on/off lists (task 5)", () => {
     const defs = buildItemDefs(EMPTY_ENV);
     const obsidianIds = defs.filter((d) => d.section === "obsidian").map((d) => d.id).sort();
-    expect(obsidianIds).toEqual(["app", "appearance", "hotkeys"]);
+    expect(obsidianIds).toEqual(["app", "appearance", "community-plugins", "core-plugins", "hotkeys"]);
   });
 
   it("core defs cover the full runtime id list, including state-only (no settings file yet)", () => {
@@ -161,7 +159,7 @@ describe("item identity never carries the beta classification (spec §7b)", () =
 
   it("a beta item is read out of the community section — one key, whichever way BRAT's list moves", () => {
     const s = settings({ community: { "slides-rup": on() } });
-    expect(itemFor(s.items, beta).enabled).toBe(true);
+    expect(itemFor(s.items, beta).synced).toBe(true);
     // ...and the same item, once BRAT drops it, is the same entry under the same key.
     const asCommunity = buildItemDefs({ ...env, betaIds: new Set() }).find((d) => d.id === "slides-rup") as ItemDef;
     expect(defRef(asCommunity)).toBe(defRef(beta));
@@ -172,7 +170,6 @@ describe("item identity never carries the beta classification (spec §7b)", () =
     const items = withItem(emptyItemMap(), beta.section, beta.id, on());
     expect(Object.keys(items.community)).toEqual(["slides-rup"]);
     expect(groupOwners(defs, items)["plugin-slides-rup"]).toEqual([{ section: "community", id: "slides-rup" }]);
-    expect(enablementSharing(defs, { items }, "community-plugins")).toEqual({ "slides-rup": EVERYWHERE });
   });
 
   it("parseItemRef refuses a beta ref outright — it was never a legal identity", () => {
@@ -210,7 +207,7 @@ describe("item identity never carries the beta classification (spec §7b)", () =
 describe("compileItems — app card", () => {
   it("compiles the app card as an ordinary single-file group named 'app'", () => {
     const defs = buildItemDefs({ cores: [], plugins: [], betaIds: new Set() });
-    const groups = compileItems(defs, settings({ obsidian: { app: { enabled: true, settingsFile: { mode: "fields", rules: { vimMode: { sharing: perClass("desktop"), encrypted: false } }, perElement: {} } } } }));
+    const groups = compileItems(defs, settings({ obsidian: { app: { synced: true, settingsFile: { mode: "fields", rules: { vimMode: { sharing: perClass("desktop"), encrypted: false } }, perElement: {} } } } }));
     const app = groups.find((g) => g.name === "app");
     expect(app).toMatchObject({ path: "{configDir}/app.json", type: "file", mode: "fields" });
     expect(app?.fields).toEqual([{ pattern: "vimMode", sharing: perClass("desktop"), encrypted: false }]);
@@ -268,7 +265,7 @@ describe("compileItems — appearance card", () => {
     const s = settings({
       obsidian: {
         appearance: {
-          enabled: false,
+          synced: false,
           companions: [{ path: "{configDir}/themes", device: "all", enabled: true }],
           settingsFile: { mode: "fields", rules: { cssTheme: { sharing: EVERYWHERE, encrypted: false } }, perElement: {} },
         },
@@ -326,8 +323,13 @@ describe("compileItems — plugin cards (dir/file group when enabled)", () => {
   });
 });
 
-describe("compileItems — hidden enablement switch-list groups", () => {
-  it("exist iff at least one card in that section is enabled", () => {
+// Retired-behaviour update (task 5): these two used to assert `anyEnabledInList` — a carrier
+// compiled the moment ANY card in its section was synced. The carriers are ordinary items now
+// (see "the on/off lists as items" below), so a card underneath no longer drives its carrier's
+// compile on its own; only the carrier's OWN entry does. Kept here, retitled, because they still
+// pin something the new describe block doesn't: that a card being on is no longer SUFFICIENT.
+describe("compileItems — the two on/off lists as carriers", () => {
+  it("compile iff the carrier's own item is synced — a card in that section being on is no longer sufficient", () => {
     const env: RegistryEnv = {
       ...EMPTY_ENV,
       cores: [{ id: "graph", name: "Graph view", fileExists: true }],
@@ -336,115 +338,132 @@ describe("compileItems — hidden enablement switch-list groups", () => {
     const defs = buildItemDefs(env);
     expect(findGroup(compileItems(defs, settings({})), "core-plugins")).toBeUndefined();
     expect(findGroup(compileItems(defs, settings({})), "community-plugins")).toBeUndefined();
-    const withCore = compileItems(defs, settings({ core: { graph: on() } }));
+    const cardsOnCarriersOff = compileItems(defs, settings({ core: { graph: on() }, community: { dataview: on() } }));
+    expect(findGroup(cardsOnCarriersOff, "core-plugins")).toBeUndefined();
+    expect(findGroup(cardsOnCarriersOff, "community-plugins")).toBeUndefined();
+    const withCore = compileItems(defs, settings({ obsidian: { "core-plugins": on() } }));
     expect(findGroup(withCore, "core-plugins")).toBeDefined();
     expect(findGroup(withCore, "community-plugins")).toBeUndefined();
-    const withCommunity = compileItems(defs, settings({ community: { dataview: on() } }));
+    const withCommunity = compileItems(defs, settings({ obsidian: { "community-plugins": on() } }));
     expect(findGroup(withCommunity, "community-plugins")).toBeDefined();
   });
 
-  it("a beta card counts toward the community-plugins hidden group (same carrier file)", () => {
+  it("a beta card no longer triggers the community-plugins carrier by itself — only the carrier's own item does (same carrier file)", () => {
     const env: RegistryEnv = { ...EMPTY_ENV, plugins: [{ id: "slides-rup", name: "SlidesRup" }], betaIds: new Set(["slides-rup"]) };
     const defs = buildItemDefs(env);
-    const groups = compileItems(defs, settings({ community: { "slides-rup": on() } }));
-    expect(findGroup(groups, "community-plugins")).toBeDefined();
+    const betaOnCarrierOff = compileItems(defs, settings({ community: { "slides-rup": on() } }));
+    expect(findGroup(betaOnCarrierOff, "community-plugins")).toBeUndefined();
+    const betaOnCarrierOn = compileItems(defs, settings({ community: { "slides-rup": on() }, obsidian: { "community-plugins": on() } }));
+    expect(findGroup(betaOnCarrierOn, "community-plugins")).toBeDefined();
   });
 });
 
-describe("enablementSharing — per-element sharing from the item's runsOn", () => {
-  it("defaults to everywhere, reflects an explicit device rule, and forces this-device for a disabled card", () => {
-    const env: RegistryEnv = {
-      ...EMPTY_ENV,
-      cores: [
-        { id: "graph", name: "Graph view", fileExists: true },
-        { id: "canvas", name: "Canvas", fileExists: true },
-        { id: "backlink", name: "Backlinks", fileExists: true },
-      ],
-    };
+// spec §3.1/§3.3: the two on/off lists are ordinary registry items now — their own def, their own
+// card, their own entry in `items.obsidian`. Their ref was already `obsidian/<list>` (itemKeys.ts's
+// carrierRef, since v3), so nothing here re-keys anything; it only gives that ref a def and a
+// compile path through the ordinary single-file loop, retiring the special-case one.
+describe("the on/off lists as items", () => {
+  const env = { cores: [{ id: "daily-notes", name: "Daily notes", fileExists: true }], plugins: [{ id: "dataview", name: "Dataview" }], betaIds: new Set<string>() };
+
+  it("a carrier's def ref IS its carrier ref — the lock and the baselines keep their key", () => {
     const defs = buildItemDefs(env);
-    const s = settings({
-      core: {
-        graph: on(), // no runsOn set → everywhere
-        canvas: on({ runsOn: { device: "desktop" } }),
-        backlink: emptyItem(), // disabled
-      },
-    });
-    expect(enablementSharing(defs, s, "core-plugins")).toEqual({ graph: EVERYWHERE, canvas: perClass("desktop"), backlink: THIS_DEVICE });
+    for (const list of ["core-plugins", "community-plugins"] as const) {
+      const def = defs.find((d) => d.id === list);
+      expect(def?.section).toBe("obsidian");
+      expect(defRef(def!)).toBe(carrierRef(list));
+    }
   });
 
-  it("only includes elements whose list matches", () => {
-    const env: RegistryEnv = {
-      ...EMPTY_ENV,
-      cores: [{ id: "graph", name: "Graph view", fileExists: true }],
-      plugins: [{ id: "dataview", name: "Dataview" }],
-    };
+  // Task 11 (spec §6.3): the Sync Center's carrier chip is a read-only shortcut now, and it must
+  // jump to the card whether or not the carrier is synced — a NOT-synced carrier has no compiled
+  // group, but the def exists regardless, and itemForGroupName is a DEF lookup (registry.ts), never
+  // a compiled-list lookup. An empty items map is the sharpest way to prove that.
+  it("resolves the carrier's ref from the def alone — an empty compiled list changes nothing", () => {
     const defs = buildItemDefs(env);
-    const s = settings({ core: { graph: on() }, community: { dataview: on() } });
-    expect(Object.keys(enablementSharing(defs, s, "core-plugins"))).toEqual(["graph"]);
-    expect(Object.keys(enablementSharing(defs, s, "community-plugins"))).toEqual(["dataview"]);
+    for (const list of ["core-plugins", "community-plugins"] as const) {
+      const def = itemForGroupName(defs, list);
+      expect(def).not.toBeNull();
+      expect(defRef(def!)).toBe(carrierRef(list));
+    }
   });
 
-  // The 2026-07-27 mobile find: an adopted rule for a plugin NOT installed on this device has no
-  // local def, so a defs-only scan dropped it — the rule was dead config and the element stayed
-  // unmasked ("obsidian-git" kept showing in every mobile diff after adopt).
-  it("covers stored items with no local def: their element id IS the item id", () => {
-    const env: RegistryEnv = { ...EMPTY_ENV, plugins: [{ id: "dataview", name: "Dataview" }] };
+  it("a carrier compiles exactly when its own item is synced — not when some plugin in its section is", () => {
     const defs = buildItemDefs(env);
-    const s = settings({
+    const pluginOnly = compileItems(defs, { items: itemsIn({ community: { dataview: { synced: true } } }) });
+    expect(pluginOnly.map((g) => g.name)).not.toContain("community-plugins");
+
+    const carrierOn = compileItems(defs, { items: itemsIn({ obsidian: { "community-plugins": { synced: true } } }) });
+    const carrier = carrierOn.find((g) => g.name === "community-plugins");
+    expect(carrier).toMatchObject({ name: "community-plugins", ref: carrierRef("community-plugins"), path: "{configDir}/community-plugins.json", type: "file", devices: "all" });
+    expect(carrier?.mode).toBeUndefined();
+    expect(carrier?.perElement).toBeUndefined();
+  });
+
+  it("element rules never reach the compiled group — storage is uniform, application is not (spec §3.3)", () => {
+    const defs = buildItemDefs(env);
+    const items = withEnablementRule(itemsIn({ obsidian: { "core-plugins": { synced: true } } }), "core-plugins", "daily-notes", THIS_DEVICE);
+    const carrier = compileItems(defs, { items }).find((g) => g.name === "core-plugins");
+    expect(carrier?.perElement).toBeUndefined();
+    expect(carrier?.mode).toBeUndefined();
+  });
+
+  // Final-review CRITICAL 1: the File preview's click-to-add (SettingTab.ts's addRuleForKey) used to
+  // let a click write `settingsFile.rules[<plugin id>]` straight onto a carrier — deriveMode then
+  // flips the item to "fields" mode (rules is no longer empty; that part is a genuine, correct field
+  // rule and IS expected to compile), and before this fix compileSingleFile also copied `perElement`
+  // onto the compiled group VERBATIM, including the reserved "" key the carrier's own element rules
+  // live under. Downstream, captureTransform read that "" key as a per-element ARRAY field and wrote
+  // `"": []` into core-plugins.json/community-plugins.json, corrupting the switch-list file (the next
+  // load's parseSwitchList returns null and the whole mechanism goes silently bypassed). The UI-level
+  // fix (this file's sibling, SettingTab.ts) now suppresses the click that produces the rules entry in
+  // the first place, but this test defends the registry.ts layer on its own: even a carrier item that
+  // ALREADY carries both (e.g. a vault saved before the UI fix shipped) must never let the reserved
+  // key reach the compiled group.
+  it("a carrier item carrying both a rules entry and reserved-key element rules never leaks the reserved key onto the compiled group (final-review CRITICAL 1)", () => {
+    const defs = buildItemDefs(env);
+    const withElementRule = withEnablementRule(itemsIn({ obsidian: { "core-plugins": { synced: true } } }), "core-plugins", "daily-notes", THIS_DEVICE);
+    const carrierItem = withElementRule.obsidian["core-plugins"]!;
+    const sf = carrierItem.settingsFile!; // holds perElement[""] = { "daily-notes": THIS_DEVICE } from withEnablementRule above
+    // Simulates exactly what addRuleForKey used to write on click: a rules entry keyed by a plugin
+    // id, on top of the reserved-key element rules already present.
+    const corrupted: Item = { ...carrierItem, settingsFile: { ...sf, mode: "fields", rules: { "some-plugin-id": { sharing: EVERYWHERE, encrypted: false } } } };
+    const items: ItemMap = { ...withElementRule, obsidian: { ...withElementRule.obsidian, "core-plugins": corrupted } };
+    const carrier = compileItems(defs, { items }).find((g) => g.name === "core-plugins");
+    // The rules entry is a genuine field rule and DOES compile — that part is correct, not the bug.
+    expect(carrier?.mode).toBe("fields");
+    expect(carrier?.fields).toEqual([{ pattern: "some-plugin-id", sharing: EVERYWHERE, encrypted: false }]);
+    // The reserved key must never reach the compiled group — this is the actual corruption this test
+    // guards against.
+    expect(carrier?.perElement).toBeUndefined();
+  });
+
+  // perElementFromMap-level (final-review CRITICAL 1 test ii): a real perElement key survives
+  // alongside the reserved "" key being dropped — proven through a fields-mode item's compiled group
+  // rather than calling the (unexported) function directly.
+  it("perElementFromMap drops only the reserved '' key — a real perElement key rides through untouched", () => {
+    const env2: RegistryEnv = { ...EMPTY_ENV, plugins: [{ id: "dataview", name: "Dataview" }] };
+    const defs = buildItemDefs(env2);
+    const items = itemsIn({
       community: {
-        dataview: on(),
-        "obsidian-git": on({ runsOn: { device: "desktop" } }), // not installed here
-        simpread: emptyItem(), // not installed, card disabled → this device
+        dataview: {
+          synced: true,
+          settingsFile: {
+            mode: "fields",
+            rules: { tags: { sharing: EVERYWHERE, encrypted: false } },
+            perElement: { "": { "some-element": THIS_DEVICE }, tags: { desktop: perClass("desktop") } },
+          },
+        },
       },
-      obsidian: { app: on() }, // no enablement list — must not leak in
     });
-    expect(enablementSharing(defs, s, "community-plugins")).toEqual({
-      dataview: EVERYWHERE,
-      "obsidian-git": perClass("desktop"),
-      simpread: THIS_DEVICE,
-    });
-    expect(Object.keys(enablementSharing(defs, s, "core-plugins"))).toEqual([]);
+    const group = compileItems(defs, { items }).find((g) => g.name === "plugin-dataview");
+    expect(group?.perElement).toEqual({ tags: { desktop: perClass("desktop") } });
   });
 });
 
-// spec 2026-08-05-section-groups-and-member-menu-design.md §R3-A: a disabled card's this-device
-// reading is structural (no rule the user wrote); a stored runsOn excludes the element from the
-// structural set even though the disabled card still forces this-device.
-describe("structuralLocalElements — disabled-card this-device vs a stored rule", () => {
-  it("a disabled card with no stored rule is structural", () => {
-    const env: RegistryEnv = { ...EMPTY_ENV, plugins: [{ id: "dataview", name: "Dataview" }] };
-    const defs = buildItemDefs(env);
-    const s = settings({ community: { dataview: emptyItem() } });
-    expect(structuralLocalElements(defs, s, "community-plugins")).toEqual(new Set(["dataview"]));
-  });
-
-  it("a disabled card that still carries a stored rule is not structural, even though its sharing is forced this-device", () => {
-    const env: RegistryEnv = { ...EMPTY_ENV, plugins: [{ id: "dataview", name: "Dataview" }] };
-    const defs = buildItemDefs(env);
-    const s = settings({ community: { dataview: { ...emptyItem(), runsOn: { device: "desktop" } } } });
-    expect(enablementSharing(defs, s, "community-plugins")).toEqual({ dataview: THIS_DEVICE });
-    expect(structuralLocalElements(defs, s, "community-plugins")).toEqual(new Set());
-  });
-
-  it("an enabled card is never structural", () => {
-    const env: RegistryEnv = { ...EMPTY_ENV, plugins: [{ id: "dataview", name: "Dataview" }] };
-    const defs = buildItemDefs(env);
-    const s = settings({ community: { dataview: on() } });
-    expect(structuralLocalElements(defs, s, "community-plugins")).toEqual(new Set());
-  });
-
-  it("covers not-installed items the same way as defs (fallback loop parity)", () => {
-    const env: RegistryEnv = { ...EMPTY_ENV, plugins: [{ id: "dataview", name: "Dataview" }] };
-    const defs = buildItemDefs(env);
-    const s = settings({
-      community: {
-        dataview: on(),
-        simpread: emptyItem(), // not installed, card disabled → structural
-      },
-    });
-    expect(structuralLocalElements(defs, s, "community-plugins")).toEqual(new Set(["simpread"]));
-  });
-});
+// enablementSharing / structuralLocalElements / elementSharings / deviceSharing retired with the
+// two-layer cutover (2026-08-12-enablement-two-layers-design.md §5): a per-element rule is STORED
+// on the carrier item (enablementRules.ts, tests/enablementRules.test.ts) instead of derived from
+// each item's own runsOn plus whether its card happens to be switched on.
 
 describe("compileItems — companion path collisions", () => {
   it("throws a CompileError when two DIFFERENT items' carriers land on the same store path", () => {
@@ -565,9 +584,9 @@ describe("compileItems — self item protection (withSelfPresets)", () => {
   // C-#31 one-list invariant, part 2: the compiled self group's exclusion set (locked, scope
   // "local" fields — what adopt preserves from local instead of importing from the store, and
   // what the self compare treats as never-a-difference) is EXACTLY selfPresetRules()'s pattern
-  // set, regardless of what other rules the item carries. A future settings field (e.g. the next
-  // bratIndex) is therefore imported by adopt and tracked by compare together, by
-  // construction — it can never land only in one of the two lists.
+  // set, regardless of what other rules the item carries. A future settings field (e.g. a
+  // top-level map like the old bratIndex) is therefore imported by adopt and tracked by compare
+  // together, by construction — it can never land only in one of the two lists.
   it("the self group's adopt/compare exclusion set is exactly selfPresetRules() — walking the shared constant", () => {
     const env: RegistryEnv = { ...EMPTY_ENV, plugins: [{ id: "config-sync", name: "Config Sync" }] };
     const defs = buildItemDefs(env);
@@ -693,19 +712,19 @@ describe("compileItems — the custom section (spec §2/§6)", () => {
   // carry has to be deliberate on both sides.
   it("compiles an unknown field on a custom item straight through onto its group", () => {
     const defs = buildItemDefs(EMPTY_ENV);
-    const item: Item = { enabled: true, type: "file", path: "notes/x.json", writtenByANewerBuild: { keep: true } } as Item;
+    const item: Item = { synced: true, type: "file", path: "notes/x.json", writtenByANewerBuild: { keep: true } } as Item;
     const compiled = findGroup(compileItems(defs, { items: itemsIn({ custom: { "my-rule": item } }) }), "my-rule");
     expect((compiled as unknown as { writtenByANewerBuild: unknown }).writtenByANewerBuild).toEqual({ keep: true });
   });
 
   it("customItemFromGroup restores the tail off the STORED item — the draft has already been through the whitelist parse", () => {
-    const stored: Item = { enabled: true, type: "file", path: "notes/x.json", writtenByANewerBuild: { keep: true } } as Item;
+    const stored: Item = { synced: true, type: "file", path: "notes/x.json", writtenByANewerBuild: { keep: true } } as Item;
     // What the Advanced tab actually holds: validateSyncManifest rebuilt it from known keys only.
     const draft: SyncGroup = { name: "my-rule", path: "notes/moved.json", type: "file", devices: "mobile" };
     const next = customItemFromGroup(draft, stored);
     expect((next as unknown as { writtenByANewerBuild: unknown }).writtenByANewerBuild).toEqual({ keep: true });
     expect(next.path).toBe("notes/moved.json"); // the edit still wins over the stored value
-    expect(next.runsOn).toEqual({ device: "mobile" });
+    expect(next.settingsFile?.fileRule).toEqual({ sharing: perClass("mobile"), encrypted: false });
   });
 
   // Fix round 2: the tail crosses the Item/SyncGroup boundary, and the two shapes share field
@@ -716,7 +735,7 @@ describe("compileItems — the custom section (spec §2/§6)", () => {
   // to the validator and the engine.
   it("an item-level field a newer build named `mode` never lands on the compiled group as its mode", () => {
     const defs = buildItemDefs(EMPTY_ENV);
-    const item: Item = { enabled: true, type: "file", path: "notes/x.json", mode: "something-else" } as unknown as Item;
+    const item: Item = { synced: true, type: "file", path: "notes/x.json", mode: "something-else" } as unknown as Item;
     const compiled = findGroup(compileItems(defs, { items: itemsIn({ custom: { "my-rule": item } }) }), "my-rule");
     expect(compiled?.mode).toBeUndefined();
     // ...and the item itself still has it — the durable side never loses anything.
@@ -729,69 +748,25 @@ describe("compileItems — the custom section (spec §2/§6)", () => {
   });
 
   it("a draft that DID keep an unknown field carries it too, and the draft wins", () => {
-    const stored: Item = { enabled: true, type: "file", path: "notes/x.json", fromTheFuture: "old" } as Item;
+    const stored: Item = { synced: true, type: "file", path: "notes/x.json", fromTheFuture: "old" } as Item;
     const draft = { name: "my-rule", path: "notes/x.json", type: "file", devices: "all", fromTheFuture: "new" } as unknown as SyncGroup;
     expect((customItemFromGroup(draft, stored) as unknown as { fromTheFuture: string }).fromTheFuture).toBe("new");
   });
 
-  it("carries a folder custom item's device class through runsOn", () => {
+  it("carries a folder custom item's device class through its file rule", () => {
     const defs = buildItemDefs(EMPTY_ENV);
     const group: SyncGroup = { name: "my-folder", path: "notes/stuff", type: "folder", devices: "mobile" };
-    expect(customItemFromGroup(group).runsOn).toEqual({ device: "mobile" });
+    const item = customItemFromGroup(group);
+    expect(item.settingsFile?.fileRule).toEqual({ sharing: perClass("mobile"), encrypted: false });
     expect(findGroup(compileItems(defs, withCustom([group])), "my-folder")).toEqual({ ...group, ref: "custom/my-folder" });
   });
 });
 
-// Round-1 leftover: `withRunsOnDevice` had no test of its own and is NOT `itemWithDevice` — it is
-// the settings card's "Enabled on" write, which touches only the device axis and never enables the
-// item, where itemWithDevice is the Sync Center's menu write, which forces the item on.
-describe("withRunsOnDevice — the device axis alone", () => {
-  it("writes the device class without enabling the item", () => {
-    expect(withRunsOnDevice({ enabled: false }, "mobile")).toEqual({ enabled: false, runsOn: { device: "mobile" } });
-  });
-
-  it("keeps a force rule while the device axis moves — the two axes answer different questions", () => {
-    const item: Item = { enabled: true, runsOn: { device: "desktop", force: { state: "off", where: "everywhere" } } };
-    expect(withRunsOnDevice(item, "mobile").runsOn).toEqual({ device: "mobile", force: { state: "off", where: "everywhere" } });
-  });
-
-  it("drops runsOn entirely when it would say nothing at all — a round trip leaves data.json as it found it (C-#26)", () => {
-    const pinned = withRunsOnDevice({ enabled: true }, "desktop");
-    expect(pinned.runsOn).toEqual({ device: "desktop" });
-    expect(withRunsOnDevice(pinned, "all")).toEqual({ enabled: true });
-    expect(withRunsOnDevice(pinned, "all")).not.toHaveProperty("runsOn");
-  });
-
-  it("keeps a lone force rule when the device axis goes back to all", () => {
-    const item: Item = { enabled: true, runsOn: { device: "desktop", force: { state: "on", where: "everywhere" } } };
-    expect(withRunsOnDevice(item, "all").runsOn).toEqual({ device: "all", force: { state: "on", where: "everywhere" } });
-  });
-
-  it("leaves every other field alone, and does not mutate its input", () => {
-    const item: Item = { enabled: true, companions: [{ path: "x", device: "all", enabled: true }] };
-    const snapshot = structuredClone(item);
-    expect(withRunsOnDevice(item, "desktop").companions).toEqual(item.companions);
-    expect(item).toEqual(snapshot);
-  });
-});
-
-describe("itemWithDevice", () => {
-  it("creates an enabled item from nothing", () => {
-    expect(itemWithDevice(undefined, "desktop")).toEqual({ enabled: true, runsOn: { device: "desktop" } });
-  });
-  it("preserves existing fields and forces enabled", () => {
-    const existing: Item = { enabled: false, companions: [{ path: "x", enabled: true, device: "all" }], settingsFile: { mode: "plain", rules: {}, perElement: {} } };
-    const out = itemWithDevice(existing, "mobile");
-    expect(out.runsOn).toEqual({ device: "mobile" });
-    expect(out.enabled).toBe(true);
-    expect(out.companions).toEqual(existing.companions);
-    expect(out.settingsFile).toEqual(existing.settingsFile);
-  });
-  it("keeps a force rule while changing the device axis — the two axes are orthogonal", () => {
-    const existing: Item = { enabled: true, runsOn: { device: "all", force: { state: "on", where: "everywhere" } } };
-    expect(itemWithDevice(existing, "desktop").runsOn).toEqual({ device: "desktop", force: { state: "on", where: "everywhere" } });
-  });
-});
+// withRunsOnDevice / itemWithDevice retired with `runsOn` itself (2026-08-12-enablement-two-layers,
+// task 8): a custom item's device class is its file-level sharing now (customItemFromGroup, tested
+// above) — the same field and writer as every registry item's Settings-sync control — and the
+// on/off-list's own two layers (the settings card's former "Enabled on" cycle) are
+// enablementRules.ts/deviceElements.ts, covered by tests/enablementDecision.test.ts.
 
 describe("parentCardLabel", () => {
   const env: RegistryEnv = { ...EMPTY_ENV, plugins: [{ id: "dataview", name: "Dataview" }] };
@@ -819,7 +794,7 @@ describe("parentCardLabel", () => {
   });
 
   it("returns null when the card is disabled", () => {
-    const s = settings({ obsidian: { appearance: { enabled: false, companions: [{ path: "{configDir}/themes", device: "all", enabled: true }] } } });
+    const s = settings({ obsidian: { appearance: { synced: false, companions: [{ path: "{configDir}/themes", device: "all", enabled: true }] } } });
     expect(parentCardLabel("themes", defs, s)).toBeNull();
   });
 
@@ -853,7 +828,7 @@ describe("parentCardLabel", () => {
   });
 
   it("disabled appearance card with no configured companions still gets the preset fallback (state does not gate it)", () => {
-    const s = settings({ obsidian: { appearance: { enabled: false, companions: [] } } });
+    const s = settings({ obsidian: { appearance: { synced: false, companions: [] } } });
     expect(parentCardLabel("themes", defs, s)).toBe("Appearance");
   });
 
@@ -862,83 +837,38 @@ describe("parentCardLabel", () => {
   });
 });
 
-// Final review C1 + review NEW-I1, together — they are one question with one answer.
-//
-// `itemEarnsDef` is 2.21.0's condition ("is there an entry?") minus exactly one shape: an entry
-// whose only content is a Runs-on rule, which at 2.21.0 lived in a side table with no entry at all.
-// Everything else earns a def, `{enabled:false}` included — that is how a card turned off is turned
-// back on (NEW-I1), and its presence in the map is the capture mask for an on/off-list element
-// whose plugin is not installed here (C1). The write path prunes nothing; there is no second
-// mechanism to keep in step with this one.
-describe("itemEarnsDef — 2.21.0's condition minus the rule-only entry", () => {
-  const CASES: Item[] = [
-    { enabled: false },
-    { enabled: true },
-    { enabled: false, runsOn: { device: "desktop" } },
-    { enabled: false, runsOn: { device: "all", force: { state: "off", where: "everywhere" } } },
-    { enabled: true, runsOn: { device: "mobile" } },
-    { enabled: false, companions: [{ path: "a/b", device: "all", enabled: true }] },
-    { enabled: false, settingsFile: { mode: "plain", rules: {}, perElement: {} } },
-    { enabled: false, path: "x/y.json" },
-    { enabled: false, description: "kept" },
-    { enabled: false, label: "kept" },
-    { enabled: false, origin: "discovered" },
-    { enabled: false, fromANewerBuild: { keep: true } } as unknown as Item,
-  ];
+// itemEarnsDef (final review C1 + review NEW-I1's predicate) retired with `runsOn` itself
+// (2026-08-12-enablement-two-layers, task 8): its one exclusion was an entry whose only content was
+// a Runs-on rule, and that shape no longer exists — a rule now lives on the carrier item, not on
+// the plugin's own entry. defsForForeignItems' `known.has(id)` guard is the whole test again; see
+// its own comment in registry.ts.
 
-  // Producer vs producer: the ONLY shapes this build declines are the ones 2.21.0 never had an
-  // entry for. Stated as a property over every shape an item can take, not as a list of literals.
-  it("declines exactly the rule-only entries, and nothing else", () => {
-    const declined = CASES.filter((i) => !itemEarnsDef(i));
-    expect(declined).toEqual([
-      { enabled: false, runsOn: { device: "desktop" } },
-      { enabled: false, runsOn: { device: "all", force: { state: "off", where: "everywhere" } } },
-    ]);
-  });
-
-  it("a card that was turned off keeps its def, so it can be turned back on", () => {
-    expect(itemEarnsDef({ enabled: false })).toBe(true);
-    expect(itemEarnsDef(emptyItem())).toBe(true);
-  });
-
-  it("a rule alongside real configuration is not a rule-only entry", () => {
-    expect(itemEarnsDef({ enabled: false, runsOn: { device: "mobile" }, description: "x" })).toBe(true);
-  });
-});
-
-// The presence of an entry is this device's capture mask for that element (registry.ts's
-// elementSharings, second pass), so a write must never decide an entry has nothing to say. An
-// earlier round pruned `{enabled:false}` here by analogy with the C-#26 field prunes; the analogy
-// was false — those drop a FIELD whose absence and default agree, this dropped the entry whose
-// existence IS the decision — and the result was final-review C1.
+// The presence of an entry is this device's capture mask for an on/off-list element, so a write
+// must never decide an entry has nothing to say. An earlier round pruned `{synced:false}` here by
+// analogy with the C-#26 field prunes; the analogy was false — those drop a FIELD whose absence and
+// default agree, this dropped the entry whose existence IS the decision — and the result was
+// final-review C1.
 describe("withItem — never removes an entry", () => {
   it("stores an off entry rather than pruning it, because its presence is the mask", () => {
-    const items = itemsIn({ community: { demo: { enabled: true } } });
-    const next = withItem(items, "community", "demo", { enabled: false });
-    expect(next.community["demo"]).toEqual({ enabled: false });
+    const items = itemsIn({ community: { demo: { synced: true } } });
+    const next = withItem(items, "community", "demo", { synced: false });
+    expect(next.community["demo"]).toEqual({ synced: false });
   });
 
-  it("keeps an entry that carries a rule, and leaves the other sections alone", () => {
-    const items = itemsIn({ community: { demo: { enabled: true } }, obsidian: { hotkeys: { enabled: true } } });
-    const next = withItem(items, "community", "demo", { enabled: false, runsOn: { device: "desktop" } });
-    expect(next.community["demo"]).toEqual({ enabled: false, runsOn: { device: "desktop" } });
-    expect(next.obsidian["hotkeys"]).toEqual({ enabled: true });
+  it("keeps an entry that carries other configuration, and leaves the other sections alone", () => {
+    const items = itemsIn({ community: { demo: { synced: true } }, obsidian: { hotkeys: { synced: true } } });
+    const next = withItem(items, "community", "demo", { synced: false, description: "kept" });
+    expect(next.community["demo"]).toEqual({ synced: false, description: "kept" });
+    expect(next.obsidian["hotkeys"]).toEqual({ synced: true });
   });
 
-  // The two halves of the pair, on one map: an off card keeps its def AND its entry, while the
-  // rule-only entry beside it keeps its entry and earns no def.
-  it("an off card keeps both its entry and its def; a rule-only entry keeps only its entry", () => {
+  // An off card keeps both its entry and its def, so it can be turned back on (review NEW-I1) — the
+  // half of itemEarnsDef's old distinction that survives its retirement.
+  it("an off card keeps both its entry and its def", () => {
     const env: RegistryEnv = { cores: [], plugins: [], betaIds: new Set() };
-    const items = withItem(
-      withItem(itemsIn({}), "community", "was-a-card", { enabled: false }),
-      "community",
-      "rule-only",
-      { enabled: false, runsOn: { device: "desktop" } }
-    );
+    const items = withItem(itemsIn({}), "community", "was-a-card", { synced: false });
     const ids = defsForForeignItems(buildItemDefs(env), items, new Set()).map((d) => d.id);
-    expect(items.community["was-a-card"]).toEqual({ enabled: false });
-    expect(items.community["rule-only"]).toEqual({ enabled: false, runsOn: { device: "desktop" } });
+    expect(items.community["was-a-card"]).toEqual({ synced: false });
     expect(ids).toContain("was-a-card");
-    expect(ids).not.toContain("rule-only");
   });
 });

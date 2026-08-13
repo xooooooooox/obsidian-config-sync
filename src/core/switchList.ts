@@ -33,6 +33,19 @@ export function enablementListFile(list: EnablementList): string {
   return spec.localFile;
 }
 
+// The `perElement` key a list's rules live under (spec §3.3). A field list is indexed by its JSON
+// key name (appearance's `enabledCssSnippets`); a whole-file list has no key name to index, so the
+// reserved key "" means "this file itself is the list".
+//
+// THE one producer of that string. Every compare, lookup and write goes through it, and the tests
+// assert it against SWITCH_LISTS rather than against a literal — a derived key with two authors is
+// the drift this release exists to end (spec §9 lesson 2/3).
+export function perElementKeyFor(list: string): string {
+  const spec = SWITCH_LISTS[list];
+  if (spec === undefined) throw new Error(`switch list "${list}" has no spec — SWITCH_LISTS and the caller disagree about "${list}"`);
+  return spec.field ?? "";
+}
+
 // Whether a group's CONTENT has switch-list shape (a string array or a boolean map inside a named
 // file), which is this table's business — distinct from "is this group an enablement carrier?",
 // which is the registry's (isEnablementList). `enabled-css-snippets` is the difference: its shape
@@ -158,7 +171,7 @@ export function memberUniverse(store: SwitchList | null, local: SwitchList | nul
 // Whether an id/key is ON in a SwitchList — array presence / map truthy value, the exact reading
 // applySwitchList's own exception pass-through relies on for a masked id (task-2 fix: mask
 // producers must derive "locally on" from this PERSISTED content, never from a live runtime
-// query, which can diverge — see availability.ts's forcedRunsOn and its callers). A null list
+// query, which can diverge — see main.ts's leaveToThisDevice, its only caller). A null list
 // (unreadable/absent local file) counts as off.
 export function switchListMemberOn(list: SwitchList | null, id: string): boolean {
   if (list === null) return false;

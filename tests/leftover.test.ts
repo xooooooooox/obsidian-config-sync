@@ -69,8 +69,11 @@ describe("storeSelfCopyGroups", () => {
     it("recompiles every section, custom items included, into the store's group list", () => {
       const json = JSON.stringify({
         items: itemsIn({
-          community: { demo: { enabled: true } },
-          custom: { "my-rule": { enabled: true, type: "file", path: "docs/x.md" } },
+          // The carrier is an item now (task 5): its own entry, not merely "some plugin in the
+          // section is synced", is what makes compileItems emit "community-plugins".
+          obsidian: { "community-plugins": { synced: true } },
+          community: { demo: { synced: true } },
+          custom: { "my-rule": { synced: true, type: "file", path: "docs/x.md" } },
         }),
       });
       const names = storeSelfCopyGroups(json, defs, NO_BETA_IDS)
@@ -82,7 +85,8 @@ describe("storeSelfCopyGroups", () => {
     it("synthesizes a community def for a store item whose plugin is not installed locally", () => {
       const json = JSON.stringify({
         items: itemsIn({
-          community: { foreign: { enabled: true, companions: [{ path: "{configDir}/plugins/foreign", device: "all", enabled: true }] } },
+          obsidian: { "community-plugins": { synced: true } },
+          community: { foreign: { synced: true, companions: [{ path: "{configDir}/plugins/foreign", device: "all", enabled: true }] } },
         }),
       });
       const groups = storeSelfCopyGroups(json, defs, NO_BETA_IDS);
@@ -95,7 +99,7 @@ describe("storeSelfCopyGroups", () => {
 
     it("returns [] when the compile fails instead of breaking status", () => {
       // a custom item whose name shadows a reserved registry name → CompileError in compileItems
-      const json = JSON.stringify({ items: itemsIn({ custom: { hotkeys: { enabled: true, type: "file", path: "a.md" } } }) });
+      const json = JSON.stringify({ items: itemsIn({ custom: { hotkeys: { synced: true, type: "file", path: "a.md" } } }) });
       expect(storeSelfCopyGroups(json, defs, NO_BETA_IDS)).toEqual([]);
     });
   });
@@ -125,11 +129,16 @@ describe("storeSelfCopyGroups", () => {
       localMembers: [],
     });
 
+    // The two carriers are in this list BECAUSE the read runs the whole chain (v2 → v3 → v4): the
+    // v4 step's rule 6 seeds `items.obsidian["core-plugins"/"community-plugins"].synced` from
+    // whether the section had a synced item, which is exactly what the retired `anyEnabledInList`
+    // compile loop used to answer. Without it a foreign copy's on/off lists read as not synced at
+    // all, and the self pane would report them as this device's own additions.
     it("recompiles the flat v2 item map and its customGroups into the store's group list", () => {
       const names = storeSelfCopyGroups(v2Copy, defs, NO_BETA_IDS)
         .map((g) => g.name)
         .sort();
-      expect(names).toEqual(["appearance", "community-plugins", "core-plugins", "graph", "my-rule", "plugin-demo", "plugin-foreign"].sort());
+      expect(names).toEqual(["appearance", "graph", "my-rule", "plugin-demo", "plugin-foreign", "core-plugins", "community-plugins"].sort());
     });
 
     it("attributes a not-installed plugin's pulled files as pending, not as deletable leftover", () => {
@@ -143,6 +152,47 @@ describe("storeSelfCopyGroups", () => {
       const appearance = storeSelfCopyGroups(v2Copy, defs, NO_BETA_IDS).find((g) => g.name === "appearance");
       expect((appearance?.fields ?? []).filter((f) => f.sharing.kind === "this-device").map((f) => f.pattern)).toEqual(["cssTheme"]);
     });
+
+    // The SAME argument one version later, and the reason storeSelfCopyGroups runs the v4 step too:
+    // for the v4 transition window the store is written by devices on 2.22.0, and a genuine v3 copy
+    // spells an item's sync flag `enabled` and carries no carrier entries at all — two facts nothing
+    // in this build reads any more. Without the chain such a copy compiles to NOTHING, which is
+    // exactly the three failures the block comment above names.
+    it("reads a genuine 2.22.0 self copy: `enabled` items and no carrier entries", () => {
+      const v3Copy = JSON.stringify({
+        schemaVersion: 3,
+        items: {
+          obsidian: { appearance: { enabled: true } },
+          core: { graph: { enabled: true } },
+          community: { demo: { enabled: true }, foreign: { enabled: true } },
+          custom: {},
+        },
+      });
+
+      const names = storeSelfCopyGroups(v3Copy, defs, NO_BETA_IDS).map((g) => g.name);
+
+      // the plugin/core items, which read as nothing at all while `enabled` went unread…
+      expect(names).toContain("plugin-demo");
+      expect(names).toContain("plugin-foreign");
+      expect(names).toContain("graph");
+      expect(names).toContain("appearance");
+      // …and both carriers, which a v3 document has no entry for: rule 6 seeds them from whether the
+      // section had a synced item, exactly as the retired anyEnabledInList compile loop did.
+      expect(names).toContain("community-plugins");
+      expect(names).toContain("core-plugins");
+    });
+
+    it("…and seeds a carrier only when its own section had something synced", () => {
+      const noCore = JSON.stringify({
+        schemaVersion: 3,
+        items: { obsidian: {}, core: { graph: { enabled: false } }, community: { demo: { enabled: true } }, custom: {} },
+      });
+
+      const names = storeSelfCopyGroups(noCore, defs, NO_BETA_IDS).map((g) => g.name);
+
+      expect(names).toContain("community-plugins");
+      expect(names).not.toContain("core-plugins");
+    });
   });
 });
 
@@ -154,9 +204,9 @@ describe("selfListGroups (delta ghost regression, spec 2026-07-28 §2)", () => {
   });
   const items = itemsIn({
     community: {
-      omnisearch: { enabled: true },
+      omnisearch: { synced: true },
       // obsidian-git is NOT installed on this device (no def) but IS in the local items:
-      "obsidian-git": { enabled: true, runsOn: { device: "desktop" } },
+      "obsidian-git": { synced: true },
     },
   });
 
@@ -174,7 +224,7 @@ describe("selfListGroups (delta ghost regression, spec 2026-07-28 §2)", () => {
 
   it("a store-only item still reports added", () => {
     const local = selfListGroups(defs, items, NO_BETA_IDS);
-    const store = selfListGroups(defs, { ...items, community: { ...items.community, newone: { enabled: true } } }, NO_BETA_IDS);
+    const store = selfListGroups(defs, { ...items, community: { ...items.community, newone: { synced: true } } }, NO_BETA_IDS);
     expect(syncListDelta(local, store).added).toContain("plugin-newone");
   });
 });
@@ -184,13 +234,13 @@ describe("selfListGroups (delta ghost regression, spec 2026-07-28 §2)", () => {
 // would then act on a reading we invented.
 describe("storeSelfCopyGroups — a self copy from a newer build", () => {
   it("compiles nothing for a document whose schemaVersion is from the future", () => {
-    const future = JSON.stringify({ schemaVersion: 99, items: { obsidian: { hotkeys: { enabled: true } } } });
+    const future = JSON.stringify({ schemaVersion: 99, items: { obsidian: { hotkeys: { synced: true } } } });
     const env: RegistryEnv = { cores: [], plugins: [], betaIds: new Set() };
     expect(storeSelfCopyGroups(future, buildItemDefs(env), new Set())).toEqual([]);
   });
 
   it("still compiles a document this build understands", () => {
-    const ours = JSON.stringify({ schemaVersion: 3, items: { obsidian: { hotkeys: { enabled: true } }, core: {}, community: {}, custom: {} } });
+    const ours = JSON.stringify({ schemaVersion: 3, items: { obsidian: { hotkeys: { synced: true } }, core: {}, community: {}, custom: {} } });
     const env: RegistryEnv = { cores: [], plugins: [], betaIds: new Set() };
     expect(storeSelfCopyGroups(ours, buildItemDefs(env), new Set()).map((g) => g.name)).toEqual(["hotkeys"]);
   });

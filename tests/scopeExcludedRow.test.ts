@@ -38,7 +38,7 @@ function fakeApp(): unknown {
 // A v3 document with just the obsidian section filled — the rest of the sections come from
 // DEFAULT_SETTINGS' own empty maps.
 function baseData(obsidian: Record<string, unknown>): unknown {
-  return { schemaVersion: 3, items: itemsIn({ obsidian: obsidian as Record<string, Item> }), remotes: [], bratIndex: {} };
+  return { schemaVersion: 4, items: itemsIn({ obsidian: obsidian as Record<string, Item> }), remotes: [] };
 }
 
 describe("SyncCenterHost.computeStatuses — a device-scope-excluded item still gets a row (C-#24)", () => {
@@ -56,7 +56,7 @@ describe("SyncCenterHost.computeStatuses — a device-scope-excluded item still 
     instance.app = fakeApp();
     instance.loadData = async () =>
       baseData({
-        hotkeys: { enabled: true, settingsFile: { fileRule: { sharing: perClass("mobile"), encrypted: false }, mode: "plain", rules: {}, perElement: {} }, companions: [] },
+        hotkeys: { synced: true, settingsFile: { fileRule: { sharing: perClass("mobile"), encrypted: false }, mode: "plain", rules: {}, perElement: {} }, companions: [] },
       });
     await instance.loadSettings();
     await instance.recompile();
@@ -82,7 +82,7 @@ describe("SyncCenterHost.computeStatuses — a device-scope-excluded item still 
       };
     };
     instance.app = fakeApp();
-    instance.loadData = async () => baseData({ hotkeys: { enabled: true, settingsFile: { mode: "plain", rules: {}, perElement: {} }, companions: [] } });
+    instance.loadData = async () => baseData({ hotkeys: { synced: true, settingsFile: { mode: "plain", rules: {}, perElement: {} }, companions: [] } });
     await instance.loadSettings();
     await instance.recompile();
 
@@ -111,7 +111,7 @@ describe("SyncCenterHost.computeStatuses — a device-scope-excluded item still 
       };
     };
     instance.app = fakeApp();
-    instance.loadData = async () => baseData({ hotkeys: { enabled: true, settingsFile: { mode: "plain", rules: {}, perElement: {} }, companions: [] } });
+    instance.loadData = async () => baseData({ hotkeys: { synced: true, settingsFile: { mode: "plain", rules: {}, perElement: {} }, companions: [] } });
     instance.saveData = async () => {};
     await instance.loadSettings();
     await instance.recompile();
@@ -151,7 +151,7 @@ describe("setItemFileSharing — fields-mode guard (C-#25) + write-back pruning 
   }
 
   it("throws (never silently no-ops) writing to a fields-mode item", async () => {
-    const instance = harness({ hotkeys: { enabled: true, settingsFile: { mode: "fields", rules: { a: { sharing: EVERYWHERE, encrypted: false } }, perElement: {} }, companions: [] } });
+    const instance = harness({ hotkeys: { synced: true, settingsFile: { mode: "fields", rules: { a: { sharing: EVERYWHERE, encrypted: false } }, perElement: {} }, companions: [] } });
     await instance.loadSettings();
     await instance.recompile();
 
@@ -161,7 +161,7 @@ describe("setItemFileSharing — fields-mode guard (C-#25) + write-back pruning 
   });
 
   it("plain-mode item: the write succeeds", async () => {
-    const instance = harness({ hotkeys: { enabled: true, settingsFile: { mode: "plain", rules: {}, perElement: {} }, companions: [] } });
+    const instance = harness({ hotkeys: { synced: true, settingsFile: { mode: "plain", rules: {}, perElement: {} }, companions: [] } });
     await instance.loadSettings();
     await instance.recompile();
 
@@ -171,7 +171,7 @@ describe("setItemFileSharing — fields-mode guard (C-#25) + write-back pruning 
   });
 
   it("desktop -> all round-trip prunes the fileRule and the settingsFile entirely (byte-clean)", async () => {
-    const instance = harness({ hotkeys: { enabled: true, settingsFile: { mode: "plain", rules: {}, perElement: {} }, companions: [] } });
+    const instance = harness({ hotkeys: { synced: true, settingsFile: { mode: "plain", rules: {}, perElement: {} }, companions: [] } });
     await instance.loadSettings();
     await instance.recompile();
 
@@ -184,7 +184,7 @@ describe("setItemFileSharing — fields-mode guard (C-#25) + write-back pruning 
 
   it("an encrypted fileRule survives a scope write instead of being pruned", async () => {
     const instance = harness({
-      hotkeys: { enabled: true, settingsFile: { mode: "plain", rules: {}, perElement: {}, fileRule: { sharing: perClass("desktop"), encrypted: true } }, companions: [] },
+      hotkeys: { synced: true, settingsFile: { mode: "plain", rules: {}, perElement: {}, fileRule: { sharing: perClass("desktop"), encrypted: true } }, companions: [] },
     });
     await instance.loadSettings();
     await instance.recompile();

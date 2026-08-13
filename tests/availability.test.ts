@@ -1,14 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { availabilityForGroup, compareVersions, desktopOnlyDrift, desktopOnlyPluginIds, forcedRunsOn, membersExcludedByClass, memberForceOff, snippetOrphans, preferStoredRunsOn } from "../src/core/availability";
+import { availabilityForGroup, compareVersions, desktopOnlyDrift, desktopOnlyPluginIds, snippetOrphans } from "../src/core/availability";
 import { FakePlugins } from "./memfs";
-import { asRunsOn, RunsOn, StoreLock, StoreLockEntry, SyncGroup } from "../src/core/types";
+import { StoreLock, StoreLockEntry, SyncGroup } from "../src/core/types";
 import { lockByName, withRef } from "./lock";
 
 const pluginGroup: SyncGroup = withRef({ name: "plugin-demo", path: "{configDir}/plugins/demo/data.json", type: "file", devices: "all" });
 const coreGroup: SyncGroup = withRef({ name: "daily-notes", path: "{configDir}/daily-notes.json", type: "file", devices: "all" });
 const obsGroup: SyncGroup = withRef({ name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all" });
 const lock = (byName: Record<string, StoreLockEntry>): StoreLock => lockByName("2026-01-01T00:00:00Z", byName);
-const scopes = { "a-mobile": "mobile", "a-desktop": "desktop" } as const;
 
 describe("compareVersions", () => {
   it("orders dotted numerics", () => {
@@ -127,91 +126,14 @@ describe("desktopOnlyPluginIds", () => {
   });
 });
 
-describe("membersExcludedByClass", () => {
-  it("on desktop, names mobile-scoped members", () => {
-    expect(membersExcludedByClass(scopes, false)).toEqual(new Set(["a-mobile"]));
-  });
-  it("on mobile, names desktop-scoped members", () => {
-    expect(membersExcludedByClass(scopes, true)).toEqual(new Set(["a-desktop"]));
-  });
-  it("empty scopes → empty set", () => {
-    expect(membersExcludedByClass({}, false)).toEqual(new Set());
-  });
-});
+// membersExcludedByClass / memberForceOff / forcedRunsOn / preferStoredRunsOn retired with the
+// two-layer cutover (2026-08-12-enablement-two-layers-design.md §5): the mask and the two force
+// sets are now ONE decision per element (enablementDecision.ts, tests/enablementDecision.test.ts),
+// and the runtime projection off it is covered end to end by tests/enablementRuntime.test.ts.
 
-describe("memberForceOff (localIds > scope)", () => {
-  it("force-offs scope-away members on desktop", () => {
-    expect(memberForceOff(scopes, [], false)).toEqual(["a-mobile"]);
-  });
-  it("a local scope-away member is NOT force-offed", () => {
-    expect(memberForceOff(scopes, ["a-mobile"], false)).toEqual([]);
-  });
-});
-
-describe("membersExcludedByClass / memberForceOff", () => {
-  it("returns members whose scope excludes this device class", () => {
-    const scopes: Record<string, "desktop" | "mobile"> = { a: "desktop", b: "mobile" };
-    expect(membersExcludedByClass(scopes, false)).toEqual(new Set(["b"]));
-    expect(membersExcludedByClass(scopes, true)).toEqual(new Set(["a"]));
-  });
-  it("local ids win over a travelling scope — never forced off", () => {
-    expect(memberForceOff({ a: "mobile", b: "mobile" }, ["b"], false)).toEqual(["a"]);
-  });
-});
-
-describe("forcedRunsOn (what a this-device pin resolves to)", () => {
-  const ON: RunsOn = { device: "all", force: { state: "on", where: "everywhere" } };
-  const OFF: RunsOn = { device: "all", force: { state: "off", where: "everywhere" } };
-
-  it("forces on when the member is currently on locally", () => {
-    expect(forcedRunsOn(true)).toEqual(ON);
-  });
-  it("forces off when the member is currently off locally", () => {
-    expect(forcedRunsOn(false)).toEqual(OFF);
-  });
-  // C-#46 / spec §8: a "here" rule is fleet-wide in effect, whatever the copy says — the migration
-  // preserves that reading and this release does not revisit it.
-  it("records where: everywhere, preserving today's fleet-wide behaviour", () => {
-    expect(forcedRunsOn(true).force?.where).toBe("everywhere");
-  });
-});
-
-describe("preferStoredRunsOn (task-2 fix #2: a stored rule wins over local-state re-derivation)", () => {
-  it("a stored rule wins outright, regardless of the persisted on/off state", () => {
-    expect(preferStoredRunsOn({ device: "all", force: { state: "on", where: "everywhere" } }, false).force?.state).toBe("on");
-    expect(preferStoredRunsOn({ device: "all", force: { state: "off", where: "everywhere" } }, true).force?.state).toBe("off");
-    expect(preferStoredRunsOn({ device: "desktop" }, true)).toEqual({ device: "desktop" });
-  });
-  it("falls back to forcedRunsOn when nothing is stored", () => {
-    expect(preferStoredRunsOn(undefined, true)).toEqual(forcedRunsOn(true));
-    expect(preferStoredRunsOn(undefined, false)).toEqual(forcedRunsOn(false));
-  });
-});
-
-// spec 2026-08-11-data-model-hardening.md §3.2 (invariant II.2): an item's runsOn is typed at
-// compile time but raw data.json at runtime, so a shape written by a NEWER build reaches these
-// readers. It is ignored HERE, at the point of use — the load path no longer rewrites storage to
-// drop it, because that deletion travelled to every other device on the next capture.
-describe("asRunsOn (an unrecognised rule is ignored where it is consumed)", () => {
-  it("accepts every rule this build writes and nothing else", () => {
-    expect(asRunsOn({ device: "all" })).toEqual({ device: "all" });
-    expect(asRunsOn({ device: "desktop" })).toEqual({ device: "desktop" });
-    expect(asRunsOn({ device: "all", force: { state: "off", where: "this-device" } })).toEqual({
-      device: "all",
-      force: { state: "off", where: "this-device" },
-    });
-    expect(asRunsOn({ device: "tablet" })).toBeUndefined(); // a class from a future build
-    expect(asRunsOn({ device: "all", force: { state: "on-tuesdays", where: "everywhere" } })).toBeUndefined();
-    expect(asRunsOn("always-here")).toBeUndefined(); // the v2 flat value
-    expect(asRunsOn(undefined)).toBeUndefined();
-    expect(asRunsOn(42)).toBeUndefined();
-  });
-
-  it("preferStoredRunsOn treats an unrecognised stored value as no stored rule", () => {
-    expect(preferStoredRunsOn(asRunsOn("here-on-tuesdays"), true)).toEqual(forcedRunsOn(true));
-    expect(preferStoredRunsOn(asRunsOn("here-on-tuesdays"), false)).toEqual(forcedRunsOn(false));
-  });
-});
+// asRunsOn retired with `runsOn` itself (2026-08-12-enablement-two-layers, task 8) — the runtime
+// narrowing this described now applies to Sharing (asSharing/asFileSharing, types.ts), which is
+// what every rule reaches a reader through since the two-layer cutover.
 
 describe("snippetOrphans", () => {
   it("flags names enabled locally with no file anywhere", () => {

@@ -30,7 +30,7 @@ function settings(partial: Partial<Record<Section, Record<string, Item>>> = {}):
 }
 
 function on(overrides: Partial<Item> = {}): Item {
-  return { ...emptyItem(), enabled: true, ...overrides };
+  return { ...emptyItem(), synced: true, ...overrides };
 }
 
 const EMPTY_ENV: RegistryEnv = { cores: [], plugins: [], betaIds: new Set() };

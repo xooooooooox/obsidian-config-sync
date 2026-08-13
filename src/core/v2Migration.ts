@@ -64,8 +64,10 @@ export function v2ItemLocation(v2Id: string): { section: StorageSection; id: Ite
   }
   // A bare id is one of the three Obsidian cards (app/appearance/hotkeys). Anything else bare —
   // e.g. the inert `core-plugins` key v2's carrier chip used to write, which no def claimed and
-  // nothing compiled — lands there too and stays just as inert: one rule, no special cases, and
-  // the user's document keeps every key it arrived with.
+  // nothing compiled — lands there too: one rule, no special cases, and the user's document keeps
+  // every key it arrived with. It no longer STAYS inert past this point, though: the v4 migration
+  // (v4Migration.ts rule 6) now actively neutralizes a `synced` value found there for the two
+  // carrier ids, because v3 never gave it meaning and a v4 build otherwise would.
   return { section: "obsidian", id: v2Id };
 }
 
@@ -161,7 +163,7 @@ function deviceFrom(v: unknown): "all" | "desktop" | "mobile" | undefined {
  * pass in migrateV2Settings, which is the other place this decision shows.
  *
  * Returns undefined for a rule that says nothing at all, so the key is simply absent — the same
- * prune discipline registry.ts's withRunsOnDevice keeps (C-#26).
+ * never-write-a-no-op-value discipline this codebase applies throughout (C-#26).
  */
 export function runsOnFrom(enabledOn: unknown, memberRule: unknown): Doc | undefined {
   const device = deviceFrom(enabledOn) ?? deviceFrom(memberRule) ?? "all";
@@ -269,6 +271,14 @@ export function deviceOptOutsFor(map: unknown, deviceId: string): string[] {
 function itemFrom(cfg: unknown, memberRule: unknown): unknown {
   if (!isPlainObject(cfg)) return cfg; // left exactly as found — see this module's rule 1
   const item: Doc = { ...cfg };
+
+  // v2's `enabled` is v3's `synced` (spec 2026-08-12-enablement-two-layers-design.md §3.2) — same
+  // field, renamed key, so this is a KEY rename, not a value change (mirrors `customPath` → `path`
+  // below).
+  if ("enabled" in item) {
+    item.synced = item.enabled;
+    delete item.enabled;
+  }
 
   const enabledOn = item.enabledOn;
   delete item.enabledOn;
@@ -420,7 +430,7 @@ export function migrateV2Settings(data: Doc): V2Migration {
     // applies to an unrecognised `enabledOn` in runsOnFrom.
     if (runsOn === undefined) continue;
     const { section, id } = v2ItemLocation(v2Id);
-    items[section][id] = { enabled: false, runsOn };
+    items[section][id] = { synced: false, runsOn };
   }
   for (const [name, item] of customItemsFrom(doc.customGroups)) items.custom[name] = item;
 

@@ -2,13 +2,14 @@ import { describe, expect, it } from "vitest";
 import { Notice } from "obsidian";
 import ConfigSyncPlugin from "../src/main";
 import { deviceOptOutsFor, migrateV2Settings, mergeLegacyAppSliceItems, drainEnabledOnLocal, runsOnFrom, v2ItemRef } from "../src/core/v2Migration";
-import { buildItemDefs, compileItems, defsForForeignItems, emptyItemMap, enablementSharing, ItemDef, ItemMap, RegistryEnv } from "../src/core/registry";
+import { buildItemDefs, compileItems, defsForForeignItems, emptyItemMap, ItemDef, ItemMap, RegistryEnv } from "../src/core/registry";
 import { itemsIn } from "./items";
 import { basename } from "../src/core/pathing";
 import { validateSyncManifest } from "../src/core/manifest";
 import { Ledger, rekeyLedger } from "../src/core/ledger";
 import { lockRefFor } from "../src/core/itemKeys";
 import { EVERYWHERE, perClass, THIS_DEVICE } from "../src/core/types";
+import { perElementKeyFor } from "../src/core/switchList";
 
 // The v2 → v3 migration (spec 2026-08-11-v3-one-vocabulary-design.md §5, §7b, §9). One fixture
 // carries every row of §5's table, so a change that breaks one row breaks a named assertion rather
@@ -105,6 +106,14 @@ function items(): ItemMap {
   return migrated().items as ItemMap;
 }
 
+// v2Migration.ts legitimately still WRITES `runsOn` into its v3-shaped output — a v3 document is
+// task 9's v4 migration's INPUT (the chain is v2 → v3 → v4), so the field is real output here even
+// though `Item` itself dropped it with runsOn's own retirement (2026-08-12-enablement-two-layers,
+// task 8). Read it structurally, off the raw migrated value, rather than through the Item type.
+function runsOnOf(item: unknown): unknown {
+  return (item as { runsOn?: unknown } | undefined)?.runsOn;
+}
+
 describe("migrateV2Settings — §5 identity rows", () => {
   it("splits the prefixed id into a section and a bare id; bare ids are obsidian", () => {
     const map = items();
@@ -115,7 +124,7 @@ describe("migrateV2Settings — §5 identity rows", () => {
 
   it("a beta plugin migrates into items.community, exactly where its v2 key put it (§7b)", () => {
     const map = items();
-    expect(map.community["my-beta-plugin"]?.enabled).toBe(true);
+    expect(map.community["my-beta-plugin"]?.synced).toBe(true);
     expect((map as unknown as Record<string, unknown>).beta).toBeUndefined();
     // the ref producer agrees: a beta id is a community identity, never a `beta/…` one
     expect(v2ItemRef("community:my-beta-plugin")).toBe("community/my-beta-plugin");
@@ -125,7 +134,7 @@ describe("migrateV2Settings — §5 identity rows", () => {
     const doc = migrated();
     expect(doc.thisDeviceItems).toEqual(["community/my-beta-plugin", "core/backlink"]);
     expect(doc.localMembers).toBeUndefined();
-    expect(items().core["backlink"]).toEqual({ enabled: true });
+    expect(items().core["backlink"]).toEqual({ synced: true });
   });
 
   // Fix round 2, review NEW-I2 — the same harm class as reading a v2 store copy as nothing, on the
@@ -159,6 +168,27 @@ describe("migrateV2Settings — §5 identity rows", () => {
   });
 });
 
+// Task-4 review finding: every item in v2Document() carries an explicit `enabled`, so the suite
+// never proved the OTHER direction — a v2 item that never had the key must not come out the other
+// side with a spurious `synced`. itemFrom's rename is `if ("enabled" in item) { … }`; an
+// unconditional `item.synced = item.enabled` would silently write `synced: undefined` here, which
+// `?.synced === undefined` cannot tell apart from a genuinely absent key — hence the `in` checks.
+describe("migrateV2Settings — a v2 item with no `enabled` key gains no `synced` key", () => {
+  it("does not manufacture synced (or leave enabled behind) on an item that never had it", () => {
+    const doc = migrateV2Settings({
+      schemaVersion: 2,
+      items: {
+        "core:templates": { settingsFile: { mode: "plain", rules: {}, perItem: {} } },
+      },
+    }).document;
+    const item = (doc.items as ItemMap).core["templates"] as unknown as Record<string, unknown>;
+    expect("synced" in item).toBe(false);
+    expect("enabled" in item).toBe(false);
+    // …and the rest of the item still migrated normally — the guard didn't just no-op the whole item.
+    expect(item.settingsFile).toEqual({ mode: "plain", rules: {}, perElement: {} });
+  });
+});
+
 describe("migrateV2Settings — §5 value rows", () => {
   it("a field rule's scope becomes a sharing, keeping encrypted and locked", () => {
     expect(items().obsidian["app"]?.settingsFile?.rules["*Token*"]).toEqual({ sharing: THIS_DEVICE, encrypted: false });
@@ -187,29 +217,29 @@ describe("migrateV2Settings — §5 value rows", () => {
       { path: "{configDir}/themes", device: "all", enabled: true },
       { path: "{configDir}/snippets", device: "desktop", enabled: false },
     ]);
-    expect(items().obsidian["hotkeys"]).toEqual({ enabled: false });
+    expect(items().obsidian["hotkeys"]).toEqual({ synced: false });
   });
 });
 
 // §7b's ruling, which is the one place the migration has to choose between two v2 fields.
 describe("migrateV2Settings — runsOn preserves what the system DID, not what the menu SAID (§7b)", () => {
   it("enabledOn wins over a disagreeing memberRules class value", () => {
-    expect(items().core["graph"]?.runsOn).toEqual({ device: "mobile" });
+    expect(runsOnOf(items().core["graph"])).toEqual({ device: "mobile" });
   });
 
   it("memberRules' class value is used when there is no enabledOn", () => {
-    expect(items().community["dataview"]?.runsOn).toEqual({ device: "desktop" });
+    expect(runsOnOf(items().community["dataview"])).toEqual({ device: "desktop" });
   });
 
   it("always-here / never-here become the force axis, fleet-wide (C-#46 out of scope, §8)", () => {
-    expect(items().community["templater"]?.runsOn).toEqual({ device: "all", force: { state: "on", where: "everywhere" } });
-    expect(items().core["daily-notes"]?.runsOn).toEqual({ device: "all", force: { state: "off", where: "everywhere" } });
+    expect(runsOnOf(items().community["templater"])).toEqual({ device: "all", force: { state: "on", where: "everywhere" } });
+    expect(runsOnOf(items().core["daily-notes"])).toEqual({ device: "all", force: { state: "off", where: "everywhere" } });
   });
 
   it("a memberRule with no items entry of its own still lands — v2 read that side table independently", () => {
     // …on an item that is off, which is what the absent entry already meant.
-    expect(items().community["templater"]?.enabled).toBe(false);
-    expect(items().community["excalidraw"]).toEqual({ enabled: false, runsOn: { device: "mobile" } });
+    expect(items().community["templater"]?.synced).toBe(false);
+    expect(items().community["excalidraw"]).toEqual({ synced: false, runsOn: { device: "mobile" } });
   });
 
   // Deliberate drop, not parity: v2 ignored an unrecognised value at the point of use and left it
@@ -239,23 +269,27 @@ describe("migrateV2Settings — runsOn preserves what the system DID, not what t
   it("a rule that says nothing at all leaves no runsOn key behind", () => {
     expect(runsOnFrom(undefined, undefined)).toBeUndefined();
     expect(runsOnFrom("all", "all")).toBeUndefined();
-    expect(items().community["config-sync"]).toEqual({ enabled: true });
+    expect(items().community["config-sync"]).toEqual({ synced: true });
   });
 });
 
 describe("migrateV2Settings — customGroups become items.custom (§5)", () => {
-  it("type dir becomes folder, devices becomes runsOn.device, description survives", () => {
+  // devices -> a file-level sharing rule (task 8, 2026-08-12-enablement-two-layers): customItemsFrom
+  // hands the v2 literal to customItemFromGroup, the SAME group -> item producer the Advanced tab
+  // persists through, so a migrated custom rule's device class lands exactly where a re-edited
+  // one's would.
+  it("type dir becomes folder, devices becomes a file-level sharing rule, description survives", () => {
     expect(items().custom["vaultcss"]).toMatchObject({
-      enabled: true,
+      synced: true,
       type: "folder",
       path: "css",
-      runsOn: { device: "desktop" },
+      settingsFile: { fileRule: { sharing: perClass("desktop"), encrypted: false } },
       description: "shared css",
     });
   });
 
   it("a discovered file keeps its origin", () => {
-    expect(items().custom["found-file"]).toMatchObject({ enabled: true, type: "file", origin: "discovered" });
+    expect(items().custom["found-file"]).toMatchObject({ synced: true, type: "file", origin: "discovered" });
   });
 
   it("field rules and perItem inside a custom rule get the same value mapping", () => {
@@ -448,7 +482,7 @@ describe("mergeLegacyAppSliceItems", () => {
     const map = doc.items as ItemMap;
     expect(Object.keys(map.obsidian)).toEqual(["app"]);
     expect(map.obsidian["app"]).toEqual({
-      enabled: true,
+      synced: true,
       settingsFile: { mode: "fields", rules: { spellcheck: { sharing: THIS_DEVICE, encrypted: false } }, perElement: {} },
     });
     expect(doc.appJson).toBeUndefined();
@@ -544,38 +578,24 @@ function neverSynced(keys: string[], ledger: Ledger): string[] {
   return keys.filter((key) => ledger.items[key] === undefined);
 }
 
-// Review I1. Keeping the user's orphan rule is right; letting it grow a CARD is not. Synthesis is
-// what decides that — SettingTab.renderRegistryCards renders one card per def — so the pin belongs
-// on defsForForeignItems and on the member-decision projection it feeds, driven by real migrated
-// settings rather than a hand-built item map.
-describe("a materialised orphan rule stays invisible until its plugin is installed (review I1)", () => {
+// Review I1's distinction — a materialised orphan rule (v2's memberRules entry with no items entry
+// of its own) is kept but stays invisible until its plugin is installed — retired along with
+// itemEarnsDef itself (2026-08-12-enablement-two-layers, task 8): there is no longer a rule-only
+// shape to exclude, because a rule now lives on the CARRIER item, not on the plugin's own entry, so
+// every migrated entry earns a def like any other (registry.ts's defsForForeignItems). What
+// survives from I1 is the fact the rule itself is preserved on disk regardless.
+describe("a materialised orphan rule (v2's memberRules with no items entry of its own)", () => {
   const migratedItems = (): ItemMap => migrateV2Settings(v2Document()).document.items as ItemMap;
 
-  it("grows no card: no def is synthesized for an item that is off and merely carries a rule", () => {
+  it("now earns a synthesized def too, along with every other entry", () => {
     const defs = defsForForeignItems(buildItemDefs(ENV), migratedItems(), new Set());
-    const synthesized = defs.filter((d) => !buildItemDefs(ENV).some((b) => b.id === d.id && b.section === d.section));
-    // excalidraw (class rule) and daily-notes/templater (force rules) are all materialised orphans;
-    // only templater has an installed def in ENV, and it gets that def from buildItemDefs, not here.
-    expect(synthesized.map((d) => d.id)).toEqual([]);
-    expect(defs.some((d) => d.id === "excalidraw")).toBe(false);
-  });
-
-  // PINNED, not removed — the masking half of I1 is the accepted half. `elementSharings`' second
-  // pass walks stored items directly (not defs), so a materialised orphan for a plugin that is not
-  // installed here becomes a this-device element, which v2 did not have. Kept for two reasons: §7b
-  // blesses a Runs-on choice masking ("one field means one thing"), and it is the SAFER reading —
-  // v2 forced such an id off locally without excepting it, so the next capture from this device
-  // deleted it from the shared list for everyone. Asserted here so it is a decision on the record
-  // and not something a rehearsal discovers.
-  it("…does gain a this-device member decision, which is the accepted delta", () => {
-    const sharing = enablementSharing(buildItemDefs(ENV), { items: migratedItems() }, "community-plugins");
-    expect(sharing["excalidraw"]).toEqual(THIS_DEVICE);
+    expect(defs.some((d) => d.id === "excalidraw")).toBe(true);
   });
 
   // The rule itself is still there, and still forces the switch — that is the whole reason the
-  // migration materialises it. It is stored, invisible, and waiting for the plugin to arrive.
-  it("but the rule is kept, and an installed plugin's card shows it", () => {
-    expect(migratedItems().community["excalidraw"]?.runsOn).toEqual({ device: "mobile" });
+  // migration materialises it.
+  it("the rule is kept, and an installed plugin's card shows it too", () => {
+    expect(runsOnOf(migratedItems().community["excalidraw"])).toEqual({ device: "mobile" });
     const withPlugin: RegistryEnv = { ...ENV, plugins: [...ENV.plugins, { id: "excalidraw", name: "Excalidraw" }] };
     expect(buildItemDefs(withPlugin).some((d) => d.id === "excalidraw")).toBe(true);
   });
@@ -583,12 +603,12 @@ describe("a materialised orphan rule stays invisible until its plugin is install
   // The narrowing must not touch what synthesis exists FOR: an enabled item whose plugin is not
   // installed here still gets its def, or its pulled files read as deletable leftover.
   it("an enabled item with no installed def still gets one", () => {
-    const items = itemsIn({ community: { pendingInstall: { enabled: true } } });
+    const items = itemsIn({ community: { pendingInstall: { synced: true } } });
     expect(defsForForeignItems(buildItemDefs(ENV), items, new Set()).some((d) => d.id === "pendingInstall")).toBe(true);
   });
 
   it("so does a disabled item that carries configuration of its own", () => {
-    const items = itemsIn({ community: { configured: { enabled: false, companions: [{ path: "a/b", device: "all", enabled: true }] } } });
+    const items = itemsIn({ community: { configured: { synced: false, companions: [{ path: "a/b", device: "all", enabled: true }] } } });
     expect(defsForForeignItems(buildItemDefs(ENV), items, new Set()).some((d) => d.id === "configured")).toBe(true);
   });
 });
@@ -596,6 +616,14 @@ describe("a materialised orphan rule stays invisible until its plugin is install
 // The end-to-end shape gate: whatever the migration produced has to survive the same validator
 // recompile() runs on every load, or the user's whole sync list would come back empty behind a
 // Notice. Asserted on the full §5 fixture, not a minimal one.
+//
+// task 5 / task 9 boundary: the two on/off lists are items now, and migrateV2Settings does not yet
+// seed items.obsidian["core-plugins"/"community-plugins"].synced for a v2 document — that backfill
+// is task 9's (registry.ts's retired ENABLEMENT_LISTS compile-loop said so explicitly). Until it
+// lands, a migrated v2 document's carriers compile to nothing, same as any other v2 read on this
+// branch; "core-plugins"/"community-plugins" are gone from the expected list below for that reason,
+// not because the migration dropped the plugins they carry (backlink/graph/dataview/etc. are all
+// still here).
 describe("the migrated document compiles into a manifest the engine accepts", () => {
   it("compiles and validates, with the same items the v2 document described", () => {
     const groups = compileItems(buildItemDefs(ENV), { items: migrateV2Settings(v2Document()).document.items as ItemMap });
@@ -610,8 +638,6 @@ describe("the migrated document compiles into a manifest the engine accepts", ()
         "plugin-dataview",
         "plugin-my-beta-plugin",
         "plugin-config-sync",
-        "core-plugins",
-        "community-plugins",
         "vaultcss",
         "secrets",
         "found-file",
@@ -674,11 +700,19 @@ interface LoadSurface {
   loadData: () => Promise<unknown>;
   saveData: (d: unknown) => Promise<void>;
   loadSettings: () => Promise<void>;
-  settings: { schemaVersion: number; items: ItemMap; thisDeviceItems: string[]; bratIndex: Record<string, string> };
+  settings: { schemaVersion: number; items: ItemMap; thisDeviceItems?: unknown; bratIndex?: unknown };
+}
+
+// The rules a carrier ended up holding, read through the SAME producer the runtime reads with.
+function rulesOn(items: ItemMap, list: "core-plugins" | "community-plugins"): Record<string, unknown> {
+  return (items.obsidian[list]?.settingsFile?.perElement ?? {})[perElementKeyFor(list)] ?? {};
 }
 
 describe("ConfigSyncPlugin.loadSettings — a v2 document migrates, saves once, and says nothing", () => {
-  it("migrates in memory, writes the v3 document exactly once, and raises no reset notice", async () => {
+  // The CHAIN (spec 2026-08-12-enablement-two-layers §4): a 2.20.0 device that skipped 2.22.0 goes
+  // v2 → v3 → v4 in this one load, so the v3 fields this fixture is full of (`runsOn`,
+  // `thisDeviceItems`, `bratIndex`) exist only in memory between the two steps and never reach disk.
+  it("migrates in memory, writes the v4 document exactly once, and raises no reset notice", async () => {
     const plugin = new ConfigSyncPlugin({} as never, {} as never);
     const instance = plugin as unknown as LoadSurface;
     instance.app = fakeApp({ "config-sync-device-id": "dev-1" });
@@ -691,13 +725,18 @@ describe("ConfigSyncPlugin.loadSettings — a v2 document migrates, saves once, 
 
     await instance.loadSettings();
 
-    expect(instance.settings.schemaVersion).toBe(3);
-    expect(instance.settings.items.community["dataview"]?.runsOn).toEqual({ device: "desktop" });
-    expect(instance.settings.thisDeviceItems).toEqual(["community/my-beta-plugin", "core/backlink"]);
-    expect(instance.settings.bratIndex).toEqual({ "my-beta-plugin": "owner/my-beta-plugin" });
+    expect(instance.settings.schemaVersion).toBe(4);
+    // v2's `memberRules: desktop` for dataview arrived as a v3 `runsOn` and left as a carrier rule.
+    expect(rulesOn(instance.settings.items, "community-plugins")["dataview"]).toEqual(perClass("desktop"));
+    // v2's `localMembers` arrived as `thisDeviceItems` and left as this-device rules.
+    expect(rulesOn(instance.settings.items, "community-plugins")["my-beta-plugin"]).toEqual(THIS_DEVICE);
+    expect(rulesOn(instance.settings.items, "core-plugins")["backlink"]).toEqual(THIS_DEVICE);
+    expect(instance.settings.thisDeviceItems).toBeUndefined();
+    expect(instance.settings.bratIndex).toBeUndefined();
+    expect(instance.settings.items.community["my-beta-plugin"]?.bratRepo).toBe("owner/my-beta-plugin");
     expect(saved.length).toBe(1);
     const written = saved[0] as Record<string, unknown>;
-    expect(written.schemaVersion).toBe(3);
+    expect(written.schemaVersion).toBe(4);
     // what the migration carried must reach DISK, not just memory
     expect(written.somethingFromTheFuture).toEqual(NEWER_BUILD);
     expect(written.memberRules).toBeUndefined();

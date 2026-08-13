@@ -1,5 +1,5 @@
 import { BucketCounts, GroupState, GroupStatus, OTHER_STORE_FILES_GROUP, RemoteDiffEntry } from "../core/status";
-import { FileChanges, Sharing, sharingClass, StorageSection, SyncGroup } from "../core/types";
+import { FileChanges, sharingClass, StorageSection, SyncGroup } from "../core/types";
 import { Availability, VersionDrift } from "../core/availability";
 import { carrierRef, refItemId } from "../core/itemKeys";
 import { ApplyItem, CaptureItem, StateAction } from "../core/ConfigSyncCore";
@@ -320,29 +320,6 @@ export function isValidPolicy(a: Availability, action: StateAction): boolean {
 // mid-run rebuild shows live progress instead of the stale staged count.
 export function runProgressLabel(verb: "Capturing" | "Applying", done: number, total: number): string {
   return `${verb === "Capturing" ? "↑" : "↓"} ${verb} ${done}/${total}…`;
-}
-
-// ── In-place "where it runs" guidance (spec 2026-07-28 §4) ────────────────────────────────────
-
-export interface MemberDecision {
-  id: string;
-  // Never "everywhere" — an everywhere member has no decision worth a note row.
-  sharing: Exclude<Sharing, { kind: "everywhere" }>;
-  // Structural (spec 2026-08-05-section-groups-and-member-menu-design.md §R3-A): true iff the
-  // this-device reading exists solely because the item's settings-sync card is off — not a rule
-  // the user pinned (no thisDeviceItems entry, no runsOn). Always false for a per-class sharing.
-  structural: boolean;
-}
-
-// Every per-member decision worth a note row: ⌂ this-device exceptions plus device-class rules.
-// `structuralIds` names elements whose this-device reading is structural (registry.ts's
-// structuralLocalElements) — the derivation into MemberDecision.structural happens here, in the
-// pure layer, rather than being handed down as a pre-computed per-decision flag.
-export function memberDecisionsFromSharing(sharings: Record<string, Sharing>, structuralIds: ReadonlySet<string>): MemberDecision[] {
-  return Object.entries(sharings)
-    .filter((e): e is [string, Exclude<Sharing, { kind: "everywhere" }>] => e[1].kind !== "everywhere")
-    .map(([id, sharing]) => ({ id, sharing, structural: sharing.kind === "this-device" && structuralIds.has(id) }))
-    .sort((a, b) => a.id.localeCompare(b.id));
 }
 
 // ── Enablement single entry (spec 2026-08-06-enablement-single-entry-design.md #5-B) ─────────

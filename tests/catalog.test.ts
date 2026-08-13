@@ -582,7 +582,6 @@ describe("groupForItem", () => {
     expect(g.fields).toEqual([
       { pattern: "rootPath", sharing: THIS_DEVICE, encrypted: false, locked: true },
       { pattern: "remotes", sharing: THIS_DEVICE, encrypted: false, locked: true },
-      { pattern: "thisDeviceItems", sharing: THIS_DEVICE, encrypted: false, locked: true },
     ]);
   });
 
@@ -594,8 +593,11 @@ describe("groupForItem", () => {
 });
 
 describe("selfPresetRules", () => {
+  // thisDeviceItems retired outright with runsOn (2026-08-12-enablement-two-layers, task 8): the
+  // two remaining presets are the transport wiring; the third was a local-semantics field that no
+  // longer exists.
   it("only the transport wiring — the fields that describe THIS device's connection to the store", () => {
-    expect(selfPresetRules().map((r) => r.pattern)).toEqual(["rootPath", "remotes", "thisDeviceItems"]);
+    expect(selfPresetRules().map((r) => r.pattern)).toEqual(["rootPath", "remotes"]);
   });
 });
 
@@ -625,14 +627,13 @@ describe("ensureSelfPresets", () => {
         fields: [
           { pattern: "rootPath", sharing: THIS_DEVICE, encrypted: false, locked: true },
           { pattern: "remotes", sharing: THIS_DEVICE, encrypted: false, locked: true },
-          { pattern: "thisDeviceItems", sharing: THIS_DEVICE, encrypted: false, locked: true },
         ],
       },
     ];
     const out = ensureSelfPresets(groups);
     const self = out.find((g) => g.name === SELF_GROUP_NAME);
     expect(self?.fields).toEqual(selfPresetRules());
-    expect(self?.fields).toHaveLength(3);
+    expect(self?.fields).toHaveLength(2);
   });
 
   it("normalizes an unlocked duplicate of a preset pattern to the locked preset", () => {

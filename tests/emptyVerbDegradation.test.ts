@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { withRef } from "./lock";
 import { SyncCenterView } from "../src/ui/SyncCenterView";
-import { SyncGroup } from "../src/core/types";
+import { EVERYWHERE, SyncGroup } from "../src/core/types";
 import { GroupStatus } from "../src/core/status";
 import { Availability } from "../src/core/availability";
 import { Fate } from "../src/ui/fateModel";
@@ -26,11 +26,13 @@ function harness(opts: {
   statuses: Record<string, GroupStatus>;
   availability?: Record<string, Availability>;
   companionParentOf?: (group: string) => string | null;
-  memberRuleFor?: () => string;
 }): Harness {
   const host = {
     companionParentOf: opts.companionParentOf ?? (() => null),
-    runsOnFor: opts.memberRuleFor ?? (() => "all"),
+    // The two enablement layers the row reads (spec §5): the harness has no registry behind it,
+    // so both answer their neutral value — no rule written, no exception here.
+    enablementRuleFor: () => EVERYWHERE,
+    deviceElementFor: () => null,
     deviceOptedOut: () => false,
     // No registry behind these harnesses: the view falls back to the same legacy rules a v1/v2
     // lock read uses, which is exactly what a store-only row gets in production.

@@ -1,17 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { Notice } from "obsidian";
+import { Notice, Platform } from "obsidian";
 import ConfigSyncPlugin from "../src/main";
 import { MemFS, FakePlugins, memGroupsIO } from "./memfs";
-import { applyImport, applyWithActions, capture, CoreContext, PendingPull, planImport, pushExternal, ExternalStoreReader, ExternalStoreWriter, writeGroups } from "../src/core/ConfigSyncCore";
+import { applyImport, applyWithActions, capture, CoreContext, PendingPull, planImport, pushExternal, ExternalStoreReader, ExternalStoreWriter, STORE_LOCK_MISSING_MESSAGE, writeGroups } from "../src/core/ConfigSyncCore";
+import { checkRemote } from "../src/core/status";
 import { declaredStoreLockVersion, lockEntry, parseSyncManifest, parseStoreLock, storeLockVersion, STORE_LOCK_FUTURE_MESSAGE, STORE_LOCK_VERSION } from "../src/core/manifest";
-import { SCHEMA_FUTURE_APPLY_MESSAGE, SCHEMA_FUTURE_NOTICE, SCHEMA_UPGRADE_NOTICE } from "../src/core/settingsMigration";
+import { CURRENT_SCHEMA, SCHEMA_FUTURE_APPLY_MESSAGE, SCHEMA_FUTURE_NOTICE, SCHEMA_UPGRADE_NOTICE } from "../src/core/settingsMigration";
 import { SELF_GROUP_NAME } from "../src/core/catalog";
-import { SyncCenterView } from "../src/ui/SyncCenterView";
 import { ConfigSyncSettingTab } from "../src/ui/SettingTab";
-import { GroupResult, Remote, SyncGroup } from "../src/core/types";
+import { EVERYWHERE, GroupResult, Remote, Sharing, SyncGroup } from "../src/core/types";
 import { CaptureItem, ApplyItem } from "../src/core/ConfigSyncCore";
 import { itemsIn } from "./items";
-import { ItemMap } from "../src/core/registry";
+import { Item, ItemDef, ItemMap } from "../src/core/registry";
+import { enablementRuleFor } from "../src/core/enablementRules";
 
 // spec 2026-08-11-data-model-hardening.md §4 (invariant II.3): a document or store written by a
 // NEWER build is refused with a clear message — never downgraded, never reset, never overwritten.
@@ -51,7 +52,13 @@ interface StopSurface {
   recompile: () => Promise<boolean>;
   refreshLocalStatus: () => Promise<void>;
   settingsWritable: () => boolean;
-  setItemSyncEnabled: (itemId: string, enabled: boolean) => Promise<void>;
+  setEnablementRule: (list: string, elementId: string, sharing: Sharing) => Promise<void>;
+  // Reached through the plugin itself, not through a host: `stopSyncing` moved off `SyncCenterHost`
+  // in task 12 (the footer that called it retired) and onto `SettingsHost`, which IS the plugin.
+  stopSyncing: (groupName: string, deleteStore: boolean) => Promise<string[] | null>;
+  storeFileCount: (groupName: string) => Promise<number>;
+  displayName: (group: string, storedLabel?: string) => string;
+  appendActionHistory: (entry: { kind: "stop-sync"; desc: string; changed: number }) => Promise<void>;
   settings: { rootPath: string; items: ItemMap };
   syncCenterHost: () => {
     schemaStop: () => { found: number } | null;
@@ -60,7 +67,6 @@ interface StopSurface {
     adoptConfiguration: () => Promise<GroupResult[] | null>;
     pullFrom: (remote: Remote) => Promise<GroupResult[] | null>;
     pushTo: (remote: Remote) => Promise<GroupResult[] | null>;
-    stopSyncing: (groupName: string, deleteStore: boolean) => Promise<string[] | null>;
     deleteLeftoverStoreFiles: (rels: string[]) => Promise<string[] | null>;
     appendActionHistory: (entry: { kind: "stop-sync"; desc: string; changed: number }) => Promise<void>;
     appendRunHistory: (kind: "capture", remote: string | null, results: GroupResult[]) => Promise<void>;
@@ -102,16 +108,16 @@ function makePlugin(io: MemFS, data: unknown): { instance: StopSurface; saveCoun
   return { instance, saveCount: () => saves, local: (key) => store.get(key) };
 }
 
-const OK_DOCUMENT = { schemaVersion: 3, rootPath: "cs", items: itemsIn({ community: { demo: { enabled: true } } }), remotes: [], bratIndex: {} };
+const OK_DOCUMENT = { schemaVersion: 4, rootPath: "cs", items: itemsIn({ community: { demo: { synced: true } } }), remotes: [] };
 
 // A document from the future, carrying shapes this build has no idea what to do with. Any
 // `saveSettings()` on it would be an overwrite of a document this build does not own — exactly
 // what the stop state exists to prevent.
 function futureDocument(): unknown {
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     rootPath: "cs",
-    items: itemsIn({ community: { demo: { enabled: true, runsOn: { device: "here-on-tuesdays" } as never } } }),
+    items: itemsIn({ community: { demo: { synced: true, futureRule: { device: "here-on-tuesdays" } } as unknown as Item } }),
     remotes: [],
     bratIndex: {},
     somethingOnlyTheFutureKnows: { keep: true },
@@ -127,11 +133,11 @@ describe("§4.1 — a data.json from a newer build is never reset and never over
     await instance.loadSettings();
 
     expect(saveCount()).toBe(0);
-    expect(instance.syncCenterHost().schemaStop()).toEqual({ found: 4 });
+    expect(instance.syncCenterHost().schemaStop()).toEqual({ found: CURRENT_SCHEMA + 1 });
     // Not reset to defaults either: the document's own values are what's in memory, unknown
     // fields included, so nothing this build might still write could flatten it.
     expect(instance.settings.rootPath).toBe("cs");
-    expect(instance.settings.items.community["demo"]).toEqual({ enabled: true, runsOn: { device: "here-on-tuesdays" } });
+    expect(instance.settings.items.community["demo"]).toEqual({ synced: true, futureRule: { device: "here-on-tuesdays" } });
   });
 
   // §4.2b: a device that has silently stopped syncing is the failure this release exists to
@@ -165,7 +171,7 @@ describe("§4.1 — a data.json from a newer build is never reset and never over
 
   it("a document this build understands raises no stop notice at all", async () => {
     NoticeSpy.messages = [];
-    const ok = makePlugin(new MemFS(), { schemaVersion: 3, items: itemsIn({}), remotes: [], bratIndex: {} });
+    const ok = makePlugin(new MemFS(), { schemaVersion: 4, items: itemsIn({}), remotes: [] });
     await ok.instance.loadSettings();
     const fresh = makePlugin(new MemFS(), null);
     await fresh.instance.loadSettings();
@@ -181,7 +187,7 @@ describe("§4.1 — a data.json from a newer build is never reset and never over
     await instance.loadSettings();
     expect(instance.syncCenterHost().schemaStop()).not.toBeNull();
 
-    instance.loadData = async () => ({ schemaVersion: 3, items: itemsIn({}), remotes: [], bratIndex: {} });
+    instance.loadData = async () => ({ schemaVersion: 4, items: itemsIn({}), remotes: [] });
     await instance.loadSettings();
 
     expect(instance.syncCenterHost().schemaStop()).toBeNull();
@@ -264,7 +270,7 @@ describe("§4.1 — a data.json from a newer build is never reset and never over
 
     // null, not [] — "[] deleted" is a legitimate outcome the caller records in the run history,
     // so the refusal has to be a value a caller cannot mistake for a successful run (§4.2b).
-    expect(await instance.syncCenterHost().stopSyncing("plugin-demo", true)).toBeNull();
+    expect(await instance.stopSyncing("plugin-demo", true)).toBeNull();
     expect(await instance.syncCenterHost().deleteLeftoverStoreFiles(["store/configdir/onlyANewerBuildKnowsThis.json"])).toBeNull();
 
     expect(await io.exists("cs/store/configdir/plugins/demo/data.json")).toBe(true);
@@ -292,7 +298,7 @@ describe("§4.1 — a data.json from a newer build is never reset and never over
 
     const okIo = new MemFS();
     okIo.seed(seed);
-    const ok = makePlugin(okIo, { schemaVersion: 3, rootPath: "cs", items: itemsIn({ community: { demo: { enabled: true } } }), remotes: [], bratIndex: {} });
+    const ok = makePlugin(okIo, { schemaVersion: 4, rootPath: "cs", items: itemsIn({ community: { demo: { synced: true } } }), remotes: [] });
     await ok.instance.loadSettings();
     await ok.instance.recompile();
     await ok.instance.refreshLocalStatus();
@@ -400,7 +406,7 @@ describe("§4.1 — a data.json from a newer build is never reset and never over
     const before = JSON.stringify(instance.settings.items);
 
     expect(instance.settingsWritable()).toBe(false);
-    await instance.setItemSyncEnabled("community/demo", false);
+    await instance.setEnablementRule("core-plugins", "demo", { kind: "this-device" });
 
     expect(JSON.stringify(instance.settings.items)).toBe(before);
   });
@@ -410,13 +416,11 @@ describe("§4.1 — a data.json from a newer build is never reset and never over
     await instance.loadSettings();
 
     expect(instance.settingsWritable()).toBe(true);
-    expect(instance.settings.items.community["demo"]?.enabled).toBe(true);
-    await instance.setItemSyncEnabled("community/demo", false);
+    expect(enablementRuleFor(instance.settings.items, "core-plugins", "demo")).toEqual(EVERYWHERE);
+    await instance.setEnablementRule("core-plugins", "demo", { kind: "this-device" });
 
-    // The entry stays and records the "off" — see registry.ts's withItem: in the enablement
-    // sections an entry's presence is this device's capture mask. The before/after pair is what
-    // proves the write happened rather than being refused.
-    expect(instance.settings.items.community["demo"]).toEqual({ enabled: false });
+    // The before/after pair is what proves the write happened rather than being refused.
+    expect(enablementRuleFor(instance.settings.items, "core-plugins", "demo")).toEqual({ kind: "this-device" });
   });
 
   it("pull and push refuse before a remote is even opened", async () => {
@@ -465,7 +469,7 @@ function guardCtx(io: MemFS): CoreContext {
 }
 
 describe("§4.2 — the guard runs before the write, not after it", () => {
-  const LOCAL_SELF = JSON.stringify({ schemaVersion: 3, items: itemsIn({ obsidian: { hotkeys: { enabled: true } } }) }, null, 2);
+  const LOCAL_SELF = JSON.stringify({ schemaVersion: 4, items: itemsIn({ obsidian: { hotkeys: { synced: true } } }) }, null, 2);
 
   async function runAdopt(storeSelf: string): Promise<{ io: MemFS; results: GroupResult[] }> {
     const io = new MemFS();
@@ -489,7 +493,7 @@ describe("§4.2 — the guard runs before the write, not after it", () => {
   }
 
   it("fails the self item with the §4.2 message and leaves the local document byte-identical", async () => {
-    const { io, results } = await runAdopt(JSON.stringify({ schemaVersion: 4, items: {} }));
+    const { io, results } = await runAdopt(JSON.stringify({ schemaVersion: 5, items: {} }));
 
     const self = results.find((r) => r.group === SELF_GROUP_NAME);
     expect(self?.status).toBe("error");
@@ -499,14 +503,14 @@ describe("§4.2 — the guard runs before the write, not after it", () => {
   });
 
   it("other items in the same run are unaffected", async () => {
-    const { io, results } = await runAdopt(JSON.stringify({ schemaVersion: 4, items: {} }));
+    const { io, results } = await runAdopt(JSON.stringify({ schemaVersion: 5, items: {} }));
 
     expect(results.find((r) => r.group === "hotkeys")?.status).toBe("ok");
     expect(await io.read("config-dir/hotkeys.json")).toBe('{"store":1}');
   });
 
   it("a store document this build understands still applies exactly as before", async () => {
-    const incoming = JSON.stringify({ schemaVersion: 3, items: itemsIn({ obsidian: { appearance: { enabled: true } } }) });
+    const incoming = JSON.stringify({ schemaVersion: 4, items: itemsIn({ obsidian: { appearance: { synced: true } } }) });
     const { io, results } = await runAdopt(incoming);
 
     expect(results.find((r) => r.group === SELF_GROUP_NAME)?.status).toBe("ok");
@@ -673,6 +677,7 @@ describe("§4.3 — the store lock's version", () => {
       },
       remoteGroups: [],
       remoteLockRaw: V1_LOCK,
+      remoteFiles: ["store.lock.json", "store/configdir/hotkeys.json"],
       excludeSelf: false,
     };
 
@@ -750,6 +755,7 @@ describe("§4.3 — the store lock's version", () => {
         },
         remoteGroups: [],
         remoteLockRaw: V1_LOCK,
+        remoteFiles: ["store.lock.json", "store/configdir/hotkeys.json"],
         excludeSelf: false,
       };
 
@@ -805,42 +811,295 @@ describe("§4.3 — the store lock's version", () => {
   });
 });
 
-// §4.2b, round-4 review N5: a flow that will be refused refuses BEFORE it opens. Taking a decision
-// from the user in a modal and only then declining is the same defect round 3 fixed for pull.
-// `SyncCenterHost` is an interface, so a fake carrying only what this path touches is enough — the
-// same idiom tests/emptyVerbDegradation.test.ts uses to drive the view's private methods.
-describe("Stop syncing → Everywhere…", () => {
-  function openStopSyncingWith(writable: boolean): { open: () => Promise<void>; counted: () => number } {
-    let counted = 0;
-    const host = {
-      settingsWritable: () => writable,
-      displayName: (n: string) => n,
-      // Fetched to size the modal's checkbox line — so it happens strictly BEFORE the modal opens,
-      // which makes "was it called" the honest probe for "did this flow start at all".
-      storeFileCount: async () => {
-        counted += 1;
-        return 0;
-      },
-      stopSyncing: async () => {
-        throw new Error("stopSyncing must never be reached from a refused flow");
-      },
-    };
-    const view = new SyncCenterView({} as never, host as never);
-    const row = { group: { name: "plugin-demo", path: "p", type: "file", devices: "all" }, status: { group: "plugin-demo", state: "in-sync" } };
-    const priv = view as unknown as { openStopSyncing: (r: unknown) => Promise<void> };
-    return { open: () => priv.openStopSyncing(row), counted: () => counted };
-  }
+// §5 (spec 2026-08-12-loose-ends-design.md). The version gate above is only ever as strong as the
+// lock being FOUND: no lock means no version, so none of it runs. Until now a directory full of
+// store content with no store.lock.json was read as a brand-new remote and pulled wholesale, in
+// silence — which is how a controller who pointed a remote one level too deep copied 94 files onto
+// a device without being asked anything.
+//
+// The two statements this separates are "there is nothing here yet" and "I cannot see the
+// bookkeeping". The first is a first-push target, and has to keep working — a new remote is set up
+// that way. The second is a refusal.
+describe("§5 — content at the far end with no lock", () => {
+  const LOCAL_STORE = { "cs/store.lock.json": V1_LOCK, "cs/store/configdir/hotkeys.json": '{"mine":1}' };
+  // The listing the mistake actually produces. A remote pointed AT the store folder rather than at
+  // the folder holding it lists the store's own contents — `configdir/…`, with no `store/` prefix
+  // anywhere and no lock. A predicate that asked "is this store-SHAPED?" would wave it straight
+  // through, which is why the gate asks whether there is anything here at all.
+  const ONE_LEVEL_TOO_DEEP = { "configdir/hotkeys.json": '{"theirs":1}', "configdir/plugins/demo/data.json": "{}" };
+  const LOCKLESS_STORE = { "store/configdir/hotkeys.json": '{"theirs":1}' };
 
-  it("never opens its modal while stopped", async () => {
-    const { open, counted } = openStopSyncingWith(false);
-    await open();
-    expect(counted()).toBe(0);
+  it("pull refuses it, and the local store is untouched", async () => {
+    const io = new MemFS();
+    io.seed(LOCAL_STORE);
+
+    await expect(planImport(guardCtx(io), fakeReader(ONE_LEVEL_TOO_DEEP), { excludeSelf: false })).rejects.toThrow(STORE_LOCK_MISSING_MESSAGE);
+
+    expect(await io.read("cs/store.lock.json")).toBe(V1_LOCK);
+    expect(await io.read("cs/store/configdir/hotkeys.json")).toBe('{"mine":1}');
+    expect(await io.exists("cs/configdir/hotkeys.json")).toBe(false); // the 94 files never land
   });
 
-  it("opens normally when the document is understood", async () => {
-    const { open, counted } = openStopSyncingWith(true);
-    await open();
-    expect(counted()).toBe(1);
+  it("…and refuses a lockless store proper, laid out exactly as this build writes one", async () => {
+    const io = new MemFS();
+    io.seed(LOCAL_STORE);
+
+    await expect(planImport(guardCtx(io), fakeReader(LOCKLESS_STORE), { excludeSelf: false })).rejects.toThrow(STORE_LOCK_MISSING_MESSAGE);
+
+    expect(await io.read("cs/store/configdir/hotkeys.json")).toBe('{"mine":1}');
+  });
+
+  it("the pull merge refuses it too, for a caller that never planned", async () => {
+    const io = new MemFS();
+    io.seed(LOCAL_STORE);
+    const pending: PendingPull = {
+      plan: {
+        auto: {
+          addGroups: [],
+          writeFiles: [{ rel: "configdir/hotkeys.json", content: '{"theirs":1}', name: "" }],
+          keptLocalGroups: [],
+          keptLocalFiles: [],
+          identical: [],
+        },
+        conflicts: [],
+      },
+      remoteGroups: [],
+      remoteLockRaw: null,
+      remoteFiles: Object.keys(ONE_LEVEL_TOO_DEEP),
+      excludeSelf: false,
+    };
+
+    await expect(applyImport(guardCtx(io), pending, [])).rejects.toThrow(STORE_LOCK_MISSING_MESSAGE);
+
+    expect(await io.exists("cs/configdir/hotkeys.json")).toBe(false);
+  });
+
+  it("push refuses it before the first file is written", async () => {
+    const io = new MemFS();
+    io.seed(LOCAL_STORE);
+    const fw = fakeWriter(ONE_LEVEL_TOO_DEEP);
+
+    await expect(pushExternal(guardCtx(io), fw.writer, { excludeSelf: false })).rejects.toThrow(STORE_LOCK_MISSING_MESSAGE);
+
+    expect(fw.writeLog).toEqual([]);
+    expect(fw.files["configdir/hotkeys.json"]).toBe('{"theirs":1}'); // nor is anything of theirs deleted
+  });
+
+  // The other half, and the one that must not break: a remote nobody has pushed to yet.
+  it("an empty remote is still a first-push target — push writes the whole store to it", async () => {
+    const io = new MemFS();
+    io.seed(LOCAL_STORE);
+    const fw = fakeWriter({});
+
+    await pushExternal(guardCtx(io), fw.writer, { excludeSelf: false });
+
+    expect(fw.files["store/configdir/hotkeys.json"]).toBe('{"mine":1}');
+    expect(fw.files["store.lock.json"]).toBe(V1_LOCK);
+  });
+
+  it("…and pulling from one is a no-op, not a refusal", async () => {
+    const io = new MemFS();
+    io.seed(LOCAL_STORE);
+
+    const pending = await planImport(guardCtx(io), fakeReader({}), { excludeSelf: false });
+
+    expect(pending.plan.auto.writeFiles).toEqual([]);
+    expect(pending.plan.conflicts).toEqual([]);
+  });
+
+  // A legacy store is NOT the case this gate is for. Its root manifest says exactly what the folder
+  // is, and this build still reads it — `remoteGroupsFrom` parses it and `migrateLegacyManifest`
+  // still exists — so "no lock" here means "bookkeeping older than the lock", not "bookkeeping I
+  // cannot see". The refusal would have been unfixable for that user too: neither cause the message
+  // names is theirs, and "clear what is already there" would tell them to delete their own store.
+  //
+  // Verified, not assumed: the groups come out of the manifest and the store file lands.
+  it("a lockless LEGACY store is not refused — pull takes the path it has always had", async () => {
+    const io = new MemFS();
+    io.seed(LOCAL_STORE);
+    const legacyManifest = JSON.stringify({
+      version: 1,
+      groups: [{ name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all" }],
+    });
+    const remote = { "config-sync.json": legacyManifest, "store/configdir/hotkeys.json": '{"theirs":1}' };
+
+    const pending = await planImport(guardCtx(io), fakeReader(remote), { excludeSelf: false });
+
+    expect(pending.remoteGroups.map((g) => g.name)).toEqual(["hotkeys"]); // read out of the legacy manifest
+    await applyImport(guardCtx(io), pending, ["remote"]);
+    expect(await io.read("cs/store/configdir/hotkeys.json")).toBe('{"theirs":1}'); // and the pull lands
+  });
+
+  it("...and push to one proceeds too", async () => {
+    const io = new MemFS();
+    io.seed(LOCAL_STORE);
+
+    const legacy = fakeWriter({ "config-sync.json": "OLD-REMOTE", "store/configdir/hotkeys.json": '{"theirs":1}' });
+    await pushExternal(guardCtx(io), legacy.writer, { excludeSelf: false });
+    expect(legacy.files["store/configdir/hotkeys.json"]).toBe('{"mine":1}');
+    expect(legacy.files["config-sync.json"]).toBe("OLD-REMOTE"); // never written, never deleted
+  });
+
+  // A `.migrated-` remnant is not the same thing: nothing reads it, so it declares nothing. With
+  // content beside it and no other bookkeeping, that remote is refused like any other.
+  it("a migrated remnant is not a declaration — content beside one is still refused", async () => {
+    const io = new MemFS();
+    io.seed(LOCAL_STORE);
+    const remote = { "config-sync.json.migrated-2020-01-01T00-00-00": "leftover", ...LOCKLESS_STORE };
+
+    await expect(planImport(guardCtx(io), fakeReader(remote), { excludeSelf: false })).rejects.toThrow(STORE_LOCK_MISSING_MESSAGE);
+  });
+
+  it("an OS junk file alone still counts as empty", async () => {
+    const io = new MemFS();
+    io.seed(LOCAL_STORE);
+
+    const junk = fakeWriter({ ".DS_Store": " " });
+    await pushExternal(guardCtx(io), junk.writer, { excludeSelf: false });
+    expect(junk.files["store/configdir/hotkeys.json"]).toBe('{"mine":1}');
+  });
+
+  // The status the user sees has to agree with what the gesture will do, or they are invited into a
+  // refusal — the same rule §4.3 already follows for a lock from the future. checkRemote answers
+  // from the same predicate the gate does, so the two cannot drift apart.
+  it("the remote's reported state agrees with the refusal — uncomparable, never an empty remote", async () => {
+    expect((await checkRemote(null, fakeReader(ONE_LEVEL_TOO_DEEP), [])).state).toBe("unknown");
+    expect((await checkRemote(null, fakeReader(LOCKLESS_STORE), [])).state).toBe("unknown");
+    // A legacy store is not refused, but it is still uncomparable — there is no lock to weigh.
+    expect((await checkRemote(null, fakeReader({ "config-sync.json": "{}" }), [])).state).toBe("unknown");
+    // no-store is reserved for the one remote a first push is FOR: nothing here at all.
+    expect((await checkRemote(null, fakeReader({}), [])).state).toBe("no-store");
+  });
+
+  // The message is the only place either cause can be diagnosed from, and there are TWO of them: a
+  // path pointing into the store, and a target that is simply not empty yet — a new repository
+  // created with a README, whose path is perfectly correct. Naming only the first would send half
+  // the readers after a problem they do not have.
+  it("names what was found, what was missing, and both ways out", () => {
+    expect(STORE_LOCK_MISSING_MESSAGE).toContain("store.lock.json");
+    expect(STORE_LOCK_MISSING_MESSAGE).toContain("holds files");
+    expect(STORE_LOCK_MISSING_MESSAGE).toContain("folder that holds the store"); // the wrong-path cause
+    expect(STORE_LOCK_MISSING_MESSAGE).toContain("clear what is already there"); // the not-empty-yet cause
+  });
+});
+
+// §4.2b, round-4 review N5's "a flow that will be refused refuses BEFORE it opens". The coverage
+// lived here against SyncCenterView.openStopSyncing until the Sync Center footer retired
+// (2026-08-12-enablement-two-layers task 10); the gesture's one home is now the settings-panel
+// card's own toggle (spec §6.2), so the guarantee is re-asserted at that call site.
+//
+// `storeFileCount` is the probe: `openStopSyncing` awaits it BEFORE it constructs the modal, so a
+// run that never asks for a count is a run that never opened one — and it never reached
+// `stopSyncing` either, which is the mutation the refusal exists to stop.
+describe("stop syncing refuses before the modal opens", () => {
+  const DEF: ItemDef = { section: "obsidian", id: "app", groupName: "app", label: "App settings", description: "" };
+
+  function tabWith(writable: boolean): { open: () => Promise<void>; counted: () => number; stopped: () => number } {
+    let counted = 0;
+    let stopped = 0;
+    const host = {
+      settingsWritable: () => writable,
+      settings: { items: itemsIn({}) },
+      installedPluginIds: () => [],
+      itemDefs: () => [DEF],
+      displayName: (group: string) => group,
+      storeFileCount: async () => {
+        counted += 1;
+        return 3;
+      },
+      stopSyncing: async () => {
+        stopped += 1;
+        return [];
+      },
+      appendActionHistory: async () => {},
+    };
+    const tab = new ConfigSyncSettingTab({} as never, host as never) as unknown as { openStopSyncing: (def: ItemDef, wrap: unknown) => Promise<void> };
+    return { open: () => tab.openStopSyncing(DEF, {}), counted: () => counted, stopped: () => stopped };
+  }
+
+  it("a stopped schema never opens the modal, and never mutates", async () => {
+    const tab = tabWith(false);
+
+    await tab.open();
+
+    expect(tab.counted()).toBe(0);
+    expect(tab.stopped()).toBe(0);
+  });
+
+  it("...and an allowed one gets as far as the modal, which then owns the outcome", async () => {
+    const tab = tabWith(true);
+
+    await tab.open();
+
+    expect(tab.counted()).toBe(1);
+    expect(tab.stopped()).toBe(0); // nothing is removed until the user confirms in the modal
+  });
+});
+
+// Config Sync's OWN card, which the registry builds like every other installed plugin's
+// (registry.ts's buildItemDefs — main.ts's adopt path spells out "itself included"). Its group name
+// IS `SELF_GROUP_NAME`, and the modal's delete-store checkbox defaults to checked, so routing this
+// one card through the confirmation would offer to delete the self copy that carries the sync
+// contract to every other device. The gesture has excluded the self item since it was designed
+// (2026-07-18-stop-syncing-design.md §A, "not the self item").
+//
+// Driven at the card head's real handler (`cardSyncedToggled`), not at a predicate: the defect this
+// closes was never a wrong rule, it was a caller that routed a case it should not have.
+describe("the card head's toggle and config-sync's own card", () => {
+  const SELF_DEF: ItemDef = { section: "community", id: "config-sync", groupName: SELF_GROUP_NAME, label: "Config Sync", description: "" };
+  const OTHER_DEF: ItemDef = { section: "community", id: "demo", groupName: "plugin-demo", label: "Demo Plugin", description: "" };
+
+  function tabFor(def: ItemDef): { toggleOff: () => Promise<void>; snapped: () => number; counted: () => number; synced: () => boolean | undefined } {
+    let snapped = 0;
+    let counted = 0;
+    const host = {
+      settingsWritable: () => true,
+      settings: { items: itemsIn({ community: { "config-sync": { synced: true }, demo: { synced: true } } }) },
+      saveSettings: async () => {},
+      installedPluginIds: () => [],
+      itemDefs: () => [SELF_DEF, OTHER_DEF],
+      displayName: (group: string) => group,
+      storeFileCount: async () => {
+        counted += 1;
+        return 4;
+      },
+      stopSyncing: async () => [],
+      appendActionHistory: async () => {},
+    };
+    const tab = new ConfigSyncSettingTab({} as never, host as never) as unknown as {
+      cardSyncedToggled: (d: ItemDef, wrap: unknown, v: boolean, snapBack: () => void) => Promise<void>;
+      refreshCardBadges: () => void;
+    };
+    // Stubbed for the same reason tests/settingsAnchor.test.ts stubs jumpTo's tail: repainting the
+    // badges needs a rendered card, and this suite has no DOM. The routing and the write under test
+    // both happen before it.
+    tab.refreshCardBadges = () => {};
+    return {
+      toggleOff: () => tab.cardSyncedToggled(def, {}, false, () => (snapped += 1)),
+      snapped: () => snapped,
+      counted: () => counted,
+      synced: () => host.settings.items.community?.[def.id]?.synced,
+    };
+  }
+
+  it("turning the self card off writes synced:false — no snap-back, no modal, nothing deleted", async () => {
+    const tab = tabFor(SELF_DEF);
+
+    await tab.toggleOff();
+
+    expect(tab.synced()).toBe(false);
+    expect(tab.snapped()).toBe(0); // the toggle keeps the user's click; there is no modal to defer to
+    expect(tab.counted()).toBe(0); // …and openStopSyncing never ran, so no store copy was ever sized up
+  });
+
+  it("...while every other card still defers to the modal, and writes nothing itself", async () => {
+    const tab = tabFor(OTHER_DEF);
+
+    await tab.toggleOff();
+
+    expect(tab.synced()).toBe(true); // untouched — the modal owns the outcome
+    expect(tab.snapped()).toBe(1);
+    expect(tab.counted()).toBe(1);
   });
 });
 
@@ -887,5 +1146,29 @@ describe("the Advanced tab's draft", () => {
     expect(await tab.commit()).toBe(true);
     expect(tab.names()).toEqual([RULE.name, ADDED.name]);
     expect(tab.saved()).toBe(1);
+  });
+});
+
+// obsidianmd/no-nodejs-modules: fs must be reached through a Platform.isDesktop-guarded dynamic
+// import() — the same discipline main.ts's buildReader/createWriter follow — never a static import.
+async function readSourceFile(path: string): Promise<string> {
+  if (!Platform.isDesktop) throw new Error("source-string assertions run on desktop only");
+  const fs = await import("node:fs");
+  return fs.readFileSync(path, "utf8");
+}
+
+// spec §6.3 / §9 criterion 5-6: the Sync Center carrier chip retired its ONLY write path
+// (setItemSyncEnabled) — it now only reads Item.synced and jumps to the card that writes it
+// (SettingTab's updateItem). Proven at the string level, not just by absence of a call site: the
+// method itself no longer exists anywhere in the plugin.
+describe("Item.synced has exactly one writer, and it is not in the Sync Center", () => {
+  it("the string does not appear in the Sync Center view", async () => {
+    const view = await readSourceFile("src/ui/SyncCenterView.ts");
+    expect(view).not.toContain("setItemSyncEnabled");
+  });
+
+  it("nor anywhere in main.ts — full retirement, not just its caller", async () => {
+    const main = await readSourceFile("src/main.ts");
+    expect(main).not.toContain("setItemSyncEnabled");
   });
 });

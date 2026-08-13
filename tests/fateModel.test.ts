@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { rowFate, versionAheadClause, FateInput } from "../src/ui/fateModel";
+import { EVERYWHERE, perClass } from "../src/core/types";
 
 const base: FateInput = {
   direction: "apply", conflict: false, nothingYet: false, installed: true,
   hasUpdate: false, carrierSynced: true, storeListOn: null, locallyOn: false,
-  runsOn: { device: "all" }, deviceClass: "desktop", desktopOnly: false, excludedHere: false,
+  ruleSharing: EVERYWHERE, localException: null, deviceClass: "desktop", desktopOnly: false, excludedHere: false,
   hasSettingsPayload: true, versionAhead: null, special: null, folderFileCount: null, encrypted: false,
 };
 
@@ -239,23 +240,23 @@ describe("rowFate — optedOutHere (C-#45 fix-round 2: unconditional, not direct
 // row rendered ["your rule", "off here — your rule", "encrypted"] against the mockup's single
 // `your rule` (+ intrinsic facts) — a Runs-on ENABLEMENT rule is a run-consequence fact, moot
 // while the whole item is ignored on this device, and duplicated the `your rule` attribution.
-describe("rowFate — optedOutHere suppresses the Runs-on enablement-rule chips (C-#45 fix-round 3)", () => {
+describe("rowFate — optedOutHere suppresses the local-exception chips (C-#45 fix-round 3)", () => {
   it("never-here's chip is suppressed when opted out — only your rule remains", () => {
-    const f = rowFate({ ...base, direction: null, optedOutHere: true, runsOn: { device: "all", force: { state: "off", where: "everywhere" } } });
+    const f = rowFate({ ...base, direction: null, optedOutHere: true, localException: "off" });
     expect(f.chips).toContain("your rule");
     expect(f.chips).not.toContain("off here — your rule");
   });
   it("always-here's chip is suppressed when opted out — only your rule remains", () => {
-    const f = rowFate({ ...base, direction: null, optedOutHere: true, runsOn: { device: "all", force: { state: "on", where: "everywhere" } } });
+    const f = rowFate({ ...base, direction: null, optedOutHere: true, localException: "on" });
     expect(f.chips).toContain("your rule");
     expect(f.chips).not.toContain("on here — your rule");
   });
   it("NOT opted out: the enablement-rule chip is unaffected (regression guard — only opt-out suppresses it)", () => {
-    const f = rowFate({ ...base, runsOn: { device: "all", force: { state: "off", where: "everywhere" } } });
+    const f = rowFate({ ...base, localException: "off" });
     expect(f.chips).toContain("off here — your rule");
   });
   it("intrinsic-fact chips (encrypted, desktop only) survive opt-out — only run-consequence chips are suppressed", () => {
-    const f = rowFate({ ...base, direction: null, optedOutHere: true, runsOn: { device: "all", force: { state: "off", where: "everywhere" } }, encrypted: true, desktopOnly: true });
+    const f = rowFate({ ...base, direction: null, optedOutHere: true, localException: "off", encrypted: true, desktopOnly: true });
     expect(f.chips).toEqual(["desktop only", "your rule", "encrypted"]); // exact set + order the mockup shows
   });
 });
@@ -279,20 +280,20 @@ describe("rowFate — excludedHere keeps C-#24's family-member-wins precedence (
   });
 });
 
-describe("rowFate — Runs on re-derivation", () => {
+describe("rowFate — the two enablement layers", () => {
   it("never-here removes turns on, adds rule chip", () => {
-    const f = rowFate({ ...base, storeListOn: true, runsOn: { device: "all", force: { state: "off", where: "everywhere" } } });
+    const f = rowFate({ ...base, storeListOn: true, localException: "off" });
     expect(f.sentence).toBe("Applies settings");
     expect(f.chips).toContain("off here — your rule");
     expect(f.turnsOn).toBe(false);
   });
   it("always-here on a store-off plugin adds turns on + rule chip", () => {
-    const f = rowFate({ ...base, storeListOn: false, runsOn: { device: "all", force: { state: "on", where: "everywhere" } } });
+    const f = rowFate({ ...base, storeListOn: false, localException: "on" });
     expect(f.sentence).toBe("Turns on · applies settings");
     expect(f.chips).toContain("on here — your rule");
   });
   it("class rule suppresses turn-on on the wrong class", () => {
-    const f = rowFate({ ...base, storeListOn: true, runsOn: { device: "mobile" }, deviceClass: "desktop" });
+    const f = rowFate({ ...base, storeListOn: true, ruleSharing: perClass("mobile"), deviceClass: "desktop" });
     expect(f.turnsOn).toBe(false);
   });
   it("carrier unsynced suppresses enablement verbs entirely", () => {

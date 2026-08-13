@@ -11,8 +11,8 @@ Selective, on-demand sync of Obsidian settings — hotkeys, CSS snippets, themes
 
 > [!IMPORTANT]
 > **Update every device before any of them captures or pulls again.**
-> This release moves the settings and the store to a new format, and the move is one way. A device still on **2.21.0** meets the new format, refuses it with a plain message and changes nothing. A device on **2.20.0 or earlier resets its Config Sync settings to defaults** — that one cannot be fixed afterwards. Update Config Sync everywhere first, then carry on as usual.
-> Three things also behave differently afterwards: see [Updating from 2.21.0 and earlier](docs/GUIDE.md#updating-from-2210-and-earlier).
+> This release moves the settings to a new format, and the move is one way. A device still on **2.21.0** or **2.22.0** meets the new format, refuses it with a plain message and changes nothing. A device on **2.20.0 or earlier resets its Config Sync settings to defaults** — that one cannot be fixed afterwards. Update Config Sync everywhere first, then carry on as usual.
+> A plugin nobody ever set a rule for now follows the shared on/off list, once that list itself is synced — so **the first sync after upgrading may turn some plugins on or off**, converging whatever differences had silently built up between your devices. See [Updating from 2.21.0 and earlier](docs/GUIDE.md#updating-from-2210-and-earlier).
 
 ![Sync Center](docs/assets/sync-panel.png)
 

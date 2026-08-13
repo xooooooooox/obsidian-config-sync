@@ -13,8 +13,6 @@ import { emptyLedger } from "../src/core/ledger";
 import { isChanged } from "../src/core/runHistory";
 import { MemFS, FakePlugins, memGroupsIO } from "./memfs";
 import ConfigSyncPlugin from "../src/main";
-import { defRef, emptyItemMap, ItemMap, withItem } from "../src/core/registry";
-import { MemberDecision } from "../src/ui/panelModel";
 import { SelfSyncInfo } from "../src/ui/SyncCenterView";
 import { itemsIn } from "./items";
 
@@ -570,10 +568,9 @@ describe("apply — self group field completeness (adopt truth table, C-#31)", (
     await seedSelfGroup(ctx);
     const store = {
       schemaVersion: 3,
-      items: itemsIn({ community: { dataview: { enabled: true } }, custom: { "my-rule": { enabled: true, type: "file", path: "notes/custom.json" } } }),
+      items: itemsIn({ community: { dataview: { synced: true } }, custom: { "my-rule": { synced: true, type: "file", path: "notes/custom.json" } } }),
       remotes: [{ name: "store-remote" }],
       rootPath: "store-root",
-      thisDeviceItems: ["community/store-member"],
       bratIndex: { "my-text-tools": "owner/my-text-tools", "slides-rup": "owner/slides-rup" },
     };
     const local = {
@@ -581,7 +578,6 @@ describe("apply — self group field completeness (adopt truth table, C-#31)", (
       items: itemsIn({}),
       remotes: [],
       rootPath: "local-root",
-      thisDeviceItems: ["community/local-member"],
       bratIndex: {},
     };
     io.seed({ [STORE_SELF_REL]: JSON.stringify(store), [LOCAL_SELF_REL]: JSON.stringify(local) });
@@ -594,11 +590,10 @@ describe("apply — self group field completeness (adopt truth table, C-#31)", (
     // adopts the store's value — the whole nested item store, custom items included.
     expect(after.items).toEqual(store.items);
     expect(after.bratIndex).toEqual(store.bratIndex);
-    // The device-local trio (selfPresetRules' exclusion set) stays exactly as it was locally —
+    // The device-local pair (selfPresetRules' exclusion set) stays exactly as it was locally —
     // never overwritten by the store's copy.
     expect(after.rootPath).toBe(local.rootPath);
     expect(after.remotes).toEqual(local.remotes);
-    expect(after.thisDeviceItems).toEqual(local.thisDeviceItems);
   });
 });
 
@@ -912,6 +907,13 @@ function fakeReader(files: Record<string, string>): ExternalStoreReader {
   };
 }
 
+// A store's bookkeeping, in the shape every captured store carries one. Spread into the remote
+// fixtures below because §5 (spec 2026-08-12-loose-ends-design.md) refuses a remote that holds
+// content with no lock: these tests are about what a pull/push DOES with a store, so they have to
+// describe a store rather than the shape the gate now turns away — which
+// tests/versionGates.test.ts holds instead.
+const REMOTE_LOCK = { "store.lock.json": JSON.stringify({ capturedAt: "2026-07-30T00:00:00.000Z", items: {} }) };
+
 const HOTKEYS_GROUP: SyncGroup = withRef({ name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all" });
 const SNIPPETS_GROUP: SyncGroup = withRef({ name: "snippets", path: "{configDir}/snippets", type: "folder", devices: "all" });
 
@@ -1147,7 +1149,7 @@ describe("planImport / applyImport", () => {
     const { io, ctx } = setup();
     await writeGroups(ctx, [SNIPPETS_GROUP]);
     io.seed({ "cs/store/configdir/snippets/one.css": "local-only" });
-    const remote = { "store/configdir/plugins/config-sync/data.json": selfDataJson([]) };
+    const remote = { ...REMOTE_LOCK, "store/configdir/plugins/config-sync/data.json": selfDataJson([]) };
 
     const pending = await planImport(ctx, fakeReader(remote), { excludeSelf: false });
     expect(pending.plan.conflicts).toEqual([]);
@@ -1161,6 +1163,7 @@ describe("planImport / applyImport", () => {
   it("remote-only file lands in the store but its group is NOT imported into the sync list", async () => {
     const { ctx } = setup();
     const remote = {
+      ...REMOTE_LOCK,
       "store/configdir/plugins/config-sync/data.json": selfDataJson([HOTKEYS_GROUP]),
       "store/configdir/hotkeys.json": '{"a":1}',
     };
@@ -1180,6 +1183,7 @@ describe("planImport / applyImport", () => {
     await writeGroups(ctx, [HOTKEYS_GROUP]);
     io.seed({ "cs/store/configdir/hotkeys.json": '{"a":1}' });
     const remote = {
+      ...REMOTE_LOCK,
       "store/configdir/plugins/config-sync/data.json": selfDataJson([HOTKEYS_GROUP, SNIPPETS_GROUP]),
       "store/configdir/hotkeys.json": '{"a":1}', // identical
       "store/configdir/snippets/one.css": "one", // remote-only
@@ -1199,6 +1203,7 @@ describe("planImport / applyImport", () => {
     await writeGroups(ctx, [SWITCH_GROUP]);
     io.seed({ "cs/store/configdir/community-plugins.json": '["obsidian-image-toolkit","ioto-tasks-center","config-sync"]' });
     const remote = {
+      ...REMOTE_LOCK,
       "store/configdir/plugins/config-sync/data.json": selfDataJson([SWITCH_GROUP]),
       "store/configdir/community-plugins.json": '["ioto-tasks-center","config-sync","obsidian-image-toolkit"]', // same set, different order
     };
@@ -1217,6 +1222,7 @@ describe("planImport / applyImport", () => {
     await writeGroups(ctx, [HOTKEYS_GROUP]);
     io.seed({ "cs/store/configdir/hotkeys.json": '{"a":"local"}' });
     const remote = {
+      ...REMOTE_LOCK,
       "store/configdir/plugins/config-sync/data.json": selfDataJson([HOTKEYS_GROUP]),
       "store/configdir/hotkeys.json": '{"a":"remote"}',
     };
@@ -1236,6 +1242,7 @@ describe("planImport / applyImport", () => {
     await writeGroups(ctx, [HOTKEYS_GROUP]);
     io.seed({ "cs/store/configdir/hotkeys.json": '{"a":"local"}' });
     const remote = {
+      ...REMOTE_LOCK,
       "store/configdir/plugins/config-sync/data.json": selfDataJson([HOTKEYS_GROUP]),
       "store/configdir/hotkeys.json": '{"a":"remote"}',
     };
@@ -1252,7 +1259,7 @@ describe("planImport / applyImport", () => {
     const localHotkeys = { ...HOTKEYS_GROUP, devices: "desktop" as const };
     const remoteHotkeys = { ...HOTKEYS_GROUP, devices: "all" as const };
     await writeGroups(ctx, [localHotkeys]);
-    const remote = { "store/configdir/plugins/config-sync/data.json": selfDataJson([remoteHotkeys]) };
+    const remote = { ...REMOTE_LOCK, "store/configdir/plugins/config-sync/data.json": selfDataJson([remoteHotkeys]) };
 
     const pending = await planImport(ctx, fakeReader(remote), { excludeSelf: false });
     // planImport still surfaces the difference (the Config Sync pane uses it), but pull no longer
@@ -1269,6 +1276,7 @@ describe("planImport / applyImport", () => {
     io.seed({ "cs/store/configdir/hotkeys.json": '{"a":"local"}' });
     const before = new Map(io.files);
     const remote = {
+      ...REMOTE_LOCK,
       "store/configdir/plugins/config-sync/data.json": selfDataJson([HOTKEYS_GROUP, SNIPPETS_GROUP]),
       "store/configdir/hotkeys.json": '{"a":"remote"}',
       "store/configdir/snippets/one.css": "one",
@@ -1290,6 +1298,9 @@ describe("planImport / applyImport", () => {
 
   it("legacy compat: falls back to a root config-sync.json when no self store item is present", async () => {
     const { ctx } = setup();
+    // No lock, deliberately (and unchanged since before §5): the legacy root manifest IS this
+    // remote's bookkeeping, so the gate lets it through to the legacy path instead of refusing it
+    // as content nothing identifies.
     const remote = {
       "config-sync.json": MANIFEST,
       "store/configdir/hotkeys.json": '{"a":1}',
@@ -1367,11 +1378,14 @@ describe("planImport / applyImport", () => {
       expect(lock.items["legacy"]?.["snippets"]).toEqual({ source: { kind: "app", version: "1.0.0" } }); // kept local
     });
 
+    // §5 narrowed the shapes this can be asked about: a remote holding content with no lock is
+    // refused outright now, so the only lockless remote a pull ever reaches is an empty one — the
+    // first-push target. Neither side has a lock, and the merge still invents none.
     it("writes nothing when neither side has a lock", async () => {
       const { io, ctx } = setup();
       await writeGroups(ctx, [HOTKEYS_GROUP]);
-      const remote = { "store/configdir/plugins/config-sync/data.json": selfDataJson([HOTKEYS_GROUP]) };
-      const pending = await planImport(ctx, fakeReader(remote), { excludeSelf: false });
+      io.seed({ "cs/store/configdir/hotkeys.json": '{"a":1}' });
+      const pending = await planImport(ctx, fakeReader({}), { excludeSelf: false });
       await applyImport(ctx, pending, []);
       expect(await io.exists("cs/store.lock.json")).toBe(false);
     });
@@ -1670,7 +1684,9 @@ describe("pushExternal", () => {
       "cs/store/configdir/hotkeys.json": '{"a":9}',
     });
     await seedGroups(ctx, '{"version":1,"groups":[]}');
-    const fw = fakeWriter({ "store/gone.css": "stale" });
+    // The remote's own lock, byte-identical to the local one so the push skips it — a remote with
+    // content and no lock is a refusal now (§5), not a push target.
+    const fw = fakeWriter({ "store.lock.json": '{"capturedAt":"t","groups":{}}', "store/gone.css": "stale" });
     const results = await pushExternal(ctx, fw.writer, { excludeSelf: false });
     expect(results.every((r) => r.status === "ok")).toBe(true);
     expect(fw.files["store/configdir/hotkeys.json"]).toBe('{"a":9}');
@@ -1683,11 +1699,13 @@ describe("pushExternal", () => {
   it("skips writing identical files and reports per-item changes", async () => {
     const { io, ctx } = setup();
     io.seed({
+      "cs/store.lock.json": '{"capturedAt":"t","groups":{}}',
       "cs/store/configdir/hotkeys.json": '{"a":1}',
       "cs/store/configdir/snippets/one.css": "one",
     });
     await seedGroups(ctx, MANIFEST);
     const fw = fakeWriter({
+      "store.lock.json": '{"capturedAt":"t","groups":{}}', // the remote's bookkeeping, identical -> skipped (§5)
       "store/configdir/hotkeys.json": '{"a":1}', // identical to local -> must not be rewritten
     });
     const results = await pushExternal(ctx, fw.writer, { excludeSelf: false });
@@ -1748,7 +1766,10 @@ describe("pushExternal", () => {
       "cs/store/configdir/hotkeys.json": '{"a":1}',
     });
     await seedGroups(ctx, '{"version":1,"groups":[]}');
-    const fw = fakeWriter({ "store/configdir/plugins/config-sync/data.json": '{"theirs":true}' });
+    const fw = fakeWriter({
+      "store.lock.json": '{"capturedAt":"t","groups":{}}', // identical to local -> skipped (§5: a store, not a bare directory of files)
+      "store/configdir/plugins/config-sync/data.json": '{"theirs":true}',
+    });
     const results = await pushExternal(ctx, fw.writer, { excludeSelf: true });
     expect(fw.files["store/configdir/plugins/config-sync/data.json"]).toBe('{"theirs":true}'); // untouched both ways
     expect(fw.files["store/configdir/hotkeys.json"]).toBe('{"a":1}');
@@ -2796,12 +2817,15 @@ describe("partial-selection switch staging (Sync Center unified grammar, task 3)
   });
 });
 
-// task-2 retarget (spec 2026-08-04-per-device-scope-local-containment-design.md): the explicit
-// "this device decides for itself" choice now lives in settings.localMembers, never in
-// Item.enabledOn — main.ts has no existing test harness beyond
-// tests/mainReloadSettings.test.ts's pattern (Plugin is stubbed to an empty class by
-// tests/mock-obsidian.ts). This drives a real ConfigSyncPlugin instance via bracket access to
-// bypass TypeScript's `private` (compile-time-only), same as customGroups.test.ts.
+// A real ConfigSyncPlugin instance driven through bracket access to bypass TypeScript's `private`
+// (compile-time-only), same as customGroups.test.ts — main.ts has no harness of its own (Plugin is
+// stubbed to an empty class by tests/mock-obsidian.ts).
+//
+// The switch-mask suites that used to live here — addSwitchExceptions' this-device pins,
+// switchMemberDecisions, the persisted-vs-live rule readings, and Item.runsOn's stored-rule
+// precedence — retired with the two-layer cutover (2026-08-12-enablement-two-layers-design.md §5).
+// Their successor is tests/enablementRuntime.test.ts, which asserts on the same coreContext()
+// outputs against the stored rule + this device's own exception.
 function fakePluginApp(): unknown {
   return {
     vault: {
@@ -2815,332 +2839,7 @@ function fakePluginApp(): unknown {
   };
 }
 
-interface SwitchExceptionsPluginSurface {
-  app: unknown;
-  loadData: () => Promise<unknown>;
-  saveData: (d: unknown) => Promise<void>;
-  loadSettings: () => Promise<void>;
-  addSwitchExceptions: (name: string, ids: string[]) => Promise<void>;
-  clearMemberLocal: (list: "core-plugins" | "community-plugins", elementId: string) => Promise<void>;
-  settings: { thisDeviceItems: string[]; items: ItemMap };
-  syncCenterHost: () => { switchMemberDecisions: (name: string) => MemberDecision[] };
-}
 
-function makeSwitchPlugin(): SwitchExceptionsPluginSurface {
-  const plugin = new ConfigSyncPlugin({} as never, {} as never);
-  const instance = plugin as unknown as SwitchExceptionsPluginSurface;
-  instance.app = fakePluginApp();
-  instance.loadData = async () => ({ schemaVersion: 3, items: emptyItemMap(), remotes: [], bratIndex: {} });
-  instance.saveData = async () => {};
-  return instance;
-}
-
-describe("ConfigSyncPlugin.addSwitchExceptions — 'this device' pins onto thisDeviceItems", () => {
-  it("choosing 'this device' records the member's ref in thisDeviceItems and masks it", async () => {
-    const plugin = await (async () => {
-      const p = makeSwitchPlugin();
-      await p.loadSettings();
-      return p;
-    })();
-
-    await plugin.addSwitchExceptions("community-plugins", ["remotely-save"]);
-
-    expect(plugin.settings.thisDeviceItems).toContain("community/remotely-save");
-    expect(plugin.settings.items.community["remotely-save"]?.runsOn).toBeUndefined();
-  });
-
-  // Review Critical: memberDecisionsFor (main.ts) derived this-device only from enablementSharing,
-  // so it never saw the pin set. switchMemberDecisions (the SyncCenterView host method backing
-  // the "· N device-scoped" count and the "⌂ this device keeps its own on/off state" rows) is a
-  // direct consumer, so a plugin pinned via addSwitchExceptions silently vanished from that
-  // reader even though the sibling memberLocalIdsFor masked it correctly.
-  it("switchMemberDecisions reflects a plugin pinned to 'this device'", async () => {
-    const plugin = await (async () => {
-      const p = makeSwitchPlugin();
-      await p.loadSettings();
-      return p;
-    })();
-
-    await plugin.addSwitchExceptions("community-plugins", ["remotely-save"]);
-
-    const decisions = plugin.syncCenterHost().switchMemberDecisions("community-plugins");
-    // §R3-A truth table: a pin is itself the explicit source, so it's never structural even
-    // though the underlying card (unset here → disabled) would otherwise make its base
-    // this-device structural.
-    expect(decisions).toContainEqual({ id: "remotely-save", sharing: THIS_DEVICE, structural: false });
-  });
-
-  // §R3-A truth table, "card-on explicit pin": pinning "this device" on an item whose card is ON
-  // (so enablementSharing's base for it is everywhere, not this-device) still overlays to
-  // this-device and must still read structural: false — the pin is the explicit source regardless
-  // of the card's enabled state.
-  it("switchMemberDecisions reads structural: false for a 'this device' pin on an enabled card", async () => {
-    const plugin = await (async () => {
-      const p = makeSwitchPlugin();
-      await p.loadSettings();
-      return p;
-    })();
-    plugin.settings.items = withItem(plugin.settings.items, "community", "remotely-save", { enabled: true });
-
-    await plugin.addSwitchExceptions("community-plugins", ["remotely-save"]);
-
-    const decisions = plugin.syncCenterHost().switchMemberDecisions("community-plugins");
-    expect(decisions).toContainEqual({ id: "remotely-save", sharing: THIS_DEVICE, structural: false });
-  });
-
-  // §R3-A truth table, "card-off + no rule": the structural counterpart to the pin above — no
-  // pin, no runsOn, just a disabled card. This is the row the read-only rendering exists for.
-  it("switchMemberDecisions reads structural: true for a disabled card with no explicit rule", async () => {
-    const plugin = await (async () => {
-      const p = makeSwitchPlugin();
-      await p.loadSettings();
-      return p;
-    })();
-    // THROUGH withItem, deliberately — the production write path. An earlier round changed this
-    // fixture to seed the map directly, on the grounds that the write would prune the entry; the
-    // prune was the defect (review C1), and bypassing the write here is what stopped this test from
-    // catching it. A test that covers a write path must keep covering the write path.
-    plugin.settings.items = withItem(plugin.settings.items, "community", "dataview", { enabled: false });
-
-    const decisions = plugin.syncCenterHost().switchMemberDecisions("community-plugins");
-    expect(decisions).toContainEqual({ id: "dataview", sharing: THIS_DEVICE, structural: true });
-  });
-
-  // Final-review C1, driven as the user gesture that opened it. A plugin enabled in the STORE's
-  // community-plugins.json and not installed here is protected by exactly one thing: its stored
-  // entry, which `elementSharings`' second pass turns into a this-device mask so capture passes the
-  // id through untouched. Choosing "Runs on → Everywhere" for it clears the rule and used to leave
-  // `{enabled:false}`, which a prune then deleted — mask gone, and the next capture would drop the
-  // plugin from the shared list for every other device. The entry must survive the gesture.
-  it("clearing a Runs-on rule for a not-installed plugin keeps its capture mask (final-review C1)", async () => {
-    const plugin = await (async () => {
-      const p = makeSwitchPlugin();
-      await p.loadSettings();
-      return p;
-    })();
-    // adopted from another device: the card is off here, the rule pins it to computers
-    plugin.settings.items = withItem(plugin.settings.items, "community", "not-installed-here", {
-      enabled: false,
-      runsOn: { device: "desktop" },
-    });
-
-    await plugin.clearMemberLocal("community-plugins", "not-installed-here");
-
-    // the entry survives — its presence IS the mask
-    expect(plugin.settings.items.community["not-installed-here"]).toEqual({ enabled: false });
-    // …and the mask is still what the capture path reads
-    const decisions = plugin.syncCenterHost().switchMemberDecisions("community-plugins");
-    expect(decisions).toContainEqual({ id: "not-installed-here", sharing: THIS_DEVICE, structural: true });
-  });
-
-  // Final-review Important: pinning "this device" via the menu must clear a stale device-class
-  // rule, else "Desktop only → This device → Everywhere" silently resolves back to desktop.
-  it("pinning 'this device' clears a prior device-class rule", async () => {
-    const plugin = await (async () => {
-      const p = makeSwitchPlugin();
-      await p.loadSettings();
-      return p;
-    })();
-    plugin.settings.items = withItem(plugin.settings.items, "community", "remotely-save", { enabled: true, runsOn: { device: "desktop" } });
-
-    await plugin.addSwitchExceptions("community-plugins", ["remotely-save"]);
-
-    expect(plugin.settings.thisDeviceItems).toContain("community/remotely-save");
-    expect(plugin.settings.items.community["remotely-save"]?.runsOn).toBeUndefined();
-  });
-
-  // The two axes are orthogonal (spec §2): a pin clears the DEVICE axis only, so a force rule
-  // written from the Sync Center's Runs-on menu survives it.
-  it("pinning 'this device' leaves a force rule alone — only the device axis is cleared", async () => {
-    const plugin = await (async () => {
-      const p = makeSwitchPlugin();
-      await p.loadSettings();
-      return p;
-    })();
-    plugin.settings.items = withItem(plugin.settings.items, "community", "remotely-save", {
-      enabled: true,
-      runsOn: { device: "desktop", force: { state: "on", where: "everywhere" } },
-    });
-
-    await plugin.addSwitchExceptions("community-plugins", ["remotely-save"]);
-
-    expect(plugin.settings.items.community["remotely-save"]?.runsOn).toEqual({ device: "all", force: { state: "on", where: "everywhere" } });
-  });
-});
-
-// C1 (fix round 1): the settings card writes a "this device" pin from the def it is rendering, and
-// a BRAT-managed plugin's def PRESENTS as `beta`. If that classification reached the pin's
-// identity, the chip and the badge would show the pin while every mask reader — all of which
-// resolve the `community` section — never saw it, and the plugin's on/off state would travel to
-// the fleet anyway. This drives the real plugin end to end: pin, then read both the chip's own
-// source and the runtime mask.
-describe("a BRAT-managed plugin's this-device pin is the same identity as any other plugin's (spec §7b)", () => {
-  interface BetaPinSurface {
-    app: unknown;
-    loadData: () => Promise<unknown>;
-    saveData: (d: unknown) => Promise<void>;
-    loadSettings: () => Promise<void>;
-    recompile: () => Promise<boolean>;
-    settings: { rootPath: string; thisDeviceItems: string[]; items: ItemMap };
-    itemDefs: () => { section: string; id: string }[];
-    setMemberLocal: (ref: string, on: boolean) => Promise<void>;
-    coreContext: () => Promise<{ switchExceptions: Record<string, string[]> }>;
-    syncCenterHost: () => { switchMemberDecisions: (name: string) => MemberDecision[] };
-  }
-
-  async function betaPlugin(): Promise<BetaPinSurface> {
-    const io = new MemFS();
-    io.seed({ "config-dir/community-plugins.json": JSON.stringify(["slides-rup"]) });
-    const plugin = new ConfigSyncPlugin({} as never, {} as never);
-    const instance = plugin as unknown as BetaPinSurface;
-    instance.app = {
-      vault: { adapter: io, configDir: "config-dir", on: () => ({}) },
-      internalPlugins: { plugins: {} },
-      plugins: { manifests: { "slides-rup": { id: "slides-rup", name: "SlidesRup", version: "1.0.0" } }, enabledPlugins: new Set(["slides-rup"]), plugins: {} },
-      workspace: { getLeavesOfType: () => [] },
-      loadLocalStorage: () => null,
-      saveLocalStorage: () => {},
-    };
-    instance.loadData = async () => ({
-      schemaVersion: 3,
-      rootPath: "cs",
-      items: withItem(emptyItemMap(), "community", "slides-rup", { enabled: true }),
-      remotes: [],
-      bratIndex: { "slides-rup": "owner/slides-rup" },
-    });
-    instance.saveData = async () => {};
-    await instance.loadSettings();
-    await instance.recompile();
-    return instance;
-  }
-
-  it("the def presents as beta, and the pin it writes is community/<id>", async () => {
-    const plugin = await betaPlugin();
-    const def = plugin.itemDefs().find((d) => d.id === "slides-rup");
-    expect(def?.section).toBe("beta");
-
-    await plugin.setMemberLocal(defRef(def as never), true);
-
-    expect(plugin.settings.thisDeviceItems).toEqual(["community/slides-rup"]);
-  });
-
-  it("...and the mask sees it, so the chip and the run cannot disagree", async () => {
-    const plugin = await betaPlugin();
-    const def = plugin.itemDefs().find((d) => d.id === "slides-rup");
-
-    await plugin.setMemberLocal(defRef(def as never), true);
-
-    // The chip's own source.
-    expect(plugin.syncCenterHost().switchMemberDecisions("community-plugins")).toContainEqual({
-      id: "slides-rup",
-      sharing: THIS_DEVICE,
-      structural: false,
-    });
-    // The runtime mask a capture/apply actually runs with.
-    const ctx = await plugin.coreContext();
-    expect(ctx.switchExceptions["community-plugins"] ?? []).toContain("slides-rup");
-  });
-});
-
-interface MemberRulePluginSurface {
-  app: unknown;
-  loadData: () => Promise<unknown>;
-  saveData: (d: unknown) => Promise<void>;
-  loadSettings: () => Promise<void>;
-  addSwitchExceptions: (name: string, ids: string[]) => Promise<void>;
-  settings: { rootPath: string; thisDeviceItems: string[]; items: ItemMap };
-  coreContext: () => Promise<{ switchForceOff: Record<string, string[]>; switchForceOn: Record<string, string[]> }>;
-}
-
-// task-2 fix #1/#2: a real ConfigSyncPlugin instance, community-plugins.json backed by a real
-// MemFS (so localSwitchListFor reads actual persisted content, not a stub), with a configurable
-// LIVE enabled-plugins set distinct from that persisted content — the exact divergence
-// pluginState.ts documents (a non-persistent enablePlugin can leave a plugin loaded without it
-// being in the persisted enabled set).
-function makeMemberRulePlugin(io: MemFS, liveEnabled: string[]): MemberRulePluginSurface {
-  const plugin = new ConfigSyncPlugin({} as never, {} as never);
-  const instance = plugin as unknown as MemberRulePluginSurface;
-  instance.app = {
-    vault: { adapter: io, configDir: "config-dir", on: () => ({}) },
-    internalPlugins: { plugins: {} },
-    plugins: { manifests: {}, enabledPlugins: new Set<string>(liveEnabled), plugins: {} },
-    workspace: { getLeavesOfType: () => [] },
-    loadLocalStorage: () => null,
-    // saveLocalStorage (C-#45): refreshLocalStatus now reads/writes deviceId() (main.ts) via
-    // localStorage — a stub here, same as loadLocalStorage above, keeps refreshLocalStatus's
-    // background call quiet instead of an unrelated caught-and-logged TypeError.
-    saveLocalStorage: () => {},
-  };
-  instance.loadData = async () => ({ schemaVersion: 3, items: emptyItemMap(), remotes: [], bratIndex: {} });
-  instance.saveData = async () => {};
-  return instance;
-}
-
-describe("mask producers read the PERSISTED switch-list file, not live PluginHost state (task-2 fix #1)", () => {
-  it("a live-enabled but not-persisted 'this device' pin is treated as off (never-here → forceOff, not forceOn)", async () => {
-    const io = new MemFS();
-    io.seed({ "config-dir/community-plugins.json": JSON.stringify(["other-plugin"]) }); // "remotely-save" absent
-    const plugin = makeMemberRulePlugin(io, ["remotely-save"]); // LIVE: reports enabled
-    await plugin.loadSettings();
-    plugin.settings.rootPath = "cs"; // skip PKM auto-detection, irrelevant here
-    plugin.settings.items = withItem(plugin.settings.items, "community", "remotely-save", { enabled: true });
-    await plugin.addSwitchExceptions("community-plugins", ["remotely-save"]); // legacy "this device" pin
-
-    const ctx = await plugin.coreContext();
-    expect(ctx.switchForceOff["community-plugins"] ?? []).toContain("remotely-save");
-    expect(ctx.switchForceOn["community-plugins"] ?? []).not.toContain("remotely-save");
-  });
-
-  it("a live-enabled AND persisted 'this device' pin resolves to on (always-here → forceOn)", async () => {
-    const io = new MemFS();
-    io.seed({ "config-dir/community-plugins.json": JSON.stringify(["remotely-save"]) }); // persisted ON
-    const plugin = makeMemberRulePlugin(io, ["remotely-save"]);
-    await plugin.loadSettings();
-    plugin.settings.rootPath = "cs";
-    plugin.settings.items = withItem(plugin.settings.items, "community", "remotely-save", { enabled: true });
-    await plugin.addSwitchExceptions("community-plugins", ["remotely-save"]);
-
-    const ctx = await plugin.coreContext();
-    expect(ctx.switchForceOn["community-plugins"] ?? []).toContain("remotely-save");
-    expect(ctx.switchForceOff["community-plugins"] ?? []).not.toContain("remotely-save");
-  });
-});
-
-describe("Item.runsOn (task-2 fix #2: a stored rule wins over a pin's re-derivation)", () => {
-  it("a stored force-on rule forces on even though the plugin is off both live and persisted", async () => {
-    const io = new MemFS();
-    io.seed({ "config-dir/community-plugins.json": JSON.stringify([]) }); // off, persisted
-    const plugin = makeMemberRulePlugin(io, []); // off, live
-    await plugin.loadSettings();
-    plugin.settings.rootPath = "cs";
-    plugin.settings.items = withItem(plugin.settings.items, "community", "remotely-save", { enabled: true });
-    plugin.settings.items = withItem(plugin.settings.items, "community", "remotely-save", {
-      enabled: true,
-      runsOn: { device: "all", force: { state: "on", where: "everywhere" } },
-    }); // no this-device pin at all
-
-    const ctx = await plugin.coreContext();
-    expect(ctx.switchForceOn["community-plugins"] ?? []).toContain("remotely-save");
-  });
-
-  it("a stored force-off rule forces off even though a 'this device' pin is on persisted", async () => {
-    const io = new MemFS();
-    io.seed({ "config-dir/community-plugins.json": JSON.stringify(["remotely-save"]) }); // on, persisted
-    const plugin = makeMemberRulePlugin(io, ["remotely-save"]); // on, live
-    await plugin.loadSettings();
-    plugin.settings.rootPath = "cs";
-    plugin.settings.items = withItem(plugin.settings.items, "community", "remotely-save", { enabled: true });
-    await plugin.addSwitchExceptions("community-plugins", ["remotely-save"]); // a bare pin would resolve to force-on
-    plugin.settings.items = withItem(plugin.settings.items, "community", "remotely-save", {
-      enabled: true,
-      runsOn: { device: "all", force: { state: "off", where: "everywhere" } },
-    }); // stored rule overrides it
-
-    const ctx = await plugin.coreContext();
-    expect(ctx.switchForceOff["community-plugins"] ?? []).toContain("remotely-save");
-    expect(ctx.switchForceOn["community-plugins"] ?? []).not.toContain("remotely-save");
-  });
-});
 
 interface DisplayNamePluginSurface {
   app: unknown;
@@ -3283,7 +2982,10 @@ describe("applyImport — pull is pure store transport", () => {
         conflicts: [],
       },
       remoteGroups: [],
-      remoteLockRaw: null,
+      // A hand-built plan still has to describe a remote that could have produced it: a lock, and
+      // the listing it was read from (§5 — applyImport refuses content with no lock).
+      remoteLockRaw: '{"capturedAt":"t","groups":{}}',
+      remoteFiles: ["store.lock.json", "store/configdir/plugins/new/data.json"],
       excludeSelf: false,
     };
     await applyImport(ctx, pending, []);

@@ -1,8 +1,12 @@
 // BRAT id→repo index (spec C1, 2026-07-17). BRAT's own settings hold only "owner/repo"
-// strings — the plugin id lives in each repo's manifest.json. The index caches that mapping in
-// config-sync's settings so classification (Beta tab) and precise installs work offline once
-// any device has resolved a repo. Resolution never runs during capture — only when the mapping
-// is actually consumed (Beta tab render, ↻ Re-scan, an install for an unmapped id).
+// strings — the plugin id lives in each repo's manifest.json. The mapping is cached on each
+// plugin's own item (`Item.bratRepo`, task 6 — was a top-level `bratIndex` map, a second list of
+// plugin ids that could drift from `items.community`) so classification (Beta tab) and precise
+// installs work offline once any device has resolved a repo. Resolution never runs during
+// capture — only when the mapping is actually consumed (Beta tab render, ↻ Re-scan, an install
+// for an unmapped id).
+
+import { Item, ItemMap, itemAt, withItem } from "./registry";
 
 export type BratIndex = Record<string, string>; // plugin id → "owner/repo"
 
@@ -33,6 +37,45 @@ export async function resolveBratIndex(current: BratIndex, repos: string[], fetc
     if (typeof parsed === "object" && parsed !== null && typeof (parsed as { id?: unknown }).id === "string") {
       next[(parsed as { id: string }).id] = repo;
     }
+  }
+  return next;
+}
+
+// The id -> repo view of the items map, for the resolver and for `betaIds`.
+export function bratRepoIndex(items: ItemMap): BratIndex {
+  const out: BratIndex = {};
+  for (const [id, item] of Object.entries(items.community)) {
+    if (item.bratRepo !== undefined) out[id] = item.bratRepo;
+  }
+  return out;
+}
+
+// The inverse write: every id in `index` gets its repo, every community item whose repo left the
+// index loses the field. An id with no item yet gets a `{synced: false}` skeleton — recording where
+// a plugin came from is not a decision to start syncing it.
+//
+// Never deletes an entry, only ever adds/updates through `withItem` (registry.ts) — an item that
+// loses its `bratRepo` and is left carrying only `{synced: false}` is NOT residue to prune. The
+// same reasoning registry.ts's `withItem` comment gives for a plain disabled entry applies here
+// unchanged: its presence in `items.community` is this device's capture mask for that plugin's
+// slot in the community-plugins on/off list, and pruning it on write would be the exact
+// C-#26-by-false-analogy mistake that comment already warns against.
+export function withBratRepos(items: ItemMap, index: BratIndex): ItemMap {
+  let next = items;
+  const ids = new Set([...Object.keys(items.community), ...Object.keys(index)]);
+  for (const id of ids) {
+    const existing = itemAt(next, "community", id);
+    const repo = index[id];
+    if (existing === undefined) {
+      if (repo === undefined) continue; // no item and nothing to record — nothing to do
+      next = withItem(next, "community", id, { synced: false, bratRepo: repo });
+      continue;
+    }
+    if (existing.bratRepo === repo) continue; // already agrees (both undefined counts as agreeing)
+    const updated: Item = { ...existing };
+    if (repo === undefined) delete updated.bratRepo;
+    else updated.bratRepo = repo;
+    next = withItem(next, "community", id, updated);
   }
   return next;
 }

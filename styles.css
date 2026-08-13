@@ -861,24 +861,8 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 .config-sync-hcard-pill.is-chg { background: var(--background-modifier-hover); color: var(--text-muted); }
 .config-sync-hcard-pill.is-iss { background: rgba(var(--color-orange-rgb), 0.14); color: var(--color-orange); }
 
-/* ── Stop syncing + store leftover ───────────────────────────────────────── */
+/* ── Store leftover ───────────────────────────────────────────────────────── */
 .config-sync-segrow { display: flex; align-items: center; gap: var(--size-4-2); }
-/* Quiet footer (round-9 定稿 A): always the drawer's last row, divider + spacing keep it clear
-   of the file/diff rows; muted text link that only turns red under the pointer. */
-.config-sync-stopsync-foot {
-  display: flex; margin-top: var(--size-4-3);
-  padding-top: var(--size-4-2); border-top: 1px solid var(--background-modifier-border);
-}
-.config-sync-stopsync {
-  margin-left: auto; display: inline-flex; align-items: center; gap: 5px;
-  color: var(--text-muted); font-size: var(--font-ui-smaller); cursor: pointer;
-  padding: 3px 2px;
-}
-.config-sync-stopsync:hover, .config-sync-stopsync:active { color: var(--color-red); }
-.config-sync-stopsync-ic { display: inline-flex; align-items: center; }
-.config-sync-stopsync svg { width: 14px; height: 14px; }
-.is-mobile .config-sync-stopsync-foot { margin-top: var(--size-4-4); }
-.is-mobile .config-sync-stopsync { padding: 6px 2px; }
 .config-sync-fpill.is-leftover { color: var(--color-orange); border-color: rgba(var(--color-orange-rgb), 0.5); }
 .config-sync-fpill.is-leftover.is-active { background: var(--color-orange); border-color: var(--color-orange); color: var(--background-primary); }
 .config-sync-section.is-leftover { border-color: rgba(var(--color-orange-rgb), 0.45); }
@@ -1168,29 +1152,12 @@ body.is-mobile .config-sync-strip-meta .config-sync-report-pills { margin-left: 
    needs a body wrapper element around the entry rows, which is a `.ts` DOM change — deliberately
    deferred (out of this CSS-only round's scope; owned by whichever batch next touches
    SyncCenterView.ts's remote-pane rendering). Remote panes stay exactly as they were before §8. */
-/* Core/Community section header chip: the on/off list's own sync-membership toggle — the only
-   remaining home of that list as a configurable item once its row dissolves into this chip. */
-.config-sync-carrierchip { border: 1px solid var(--background-modifier-border); border-radius: 999px; padding: 1px 8px; font-size: var(--font-ui-smaller); color: var(--text-muted); cursor: pointer; white-space: nowrap; }
+/* Core/Community section header chip (spec §6.3): a read-only shortcut to where the on/off list's
+   own sync membership is actually decided — the settings card's toggle, one write path. Same shape
+   on both platforms. */
+.config-sync-carrierchip { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--background-modifier-border); border-radius: 999px; padding: 1px 8px; font-size: var(--font-ui-smaller); color: var(--text-muted); cursor: pointer; white-space: nowrap; }
 .config-sync-carrierchip.is-synced { color: var(--color-green); border-color: rgba(var(--color-green-rgb), 0.4); }
-/* C-#44 (batch-21 spec §2, option A — revises C-#41's second-line drop): the carrier chip's
-   mobile form is a bare icon-only control (`toggle-right`/`toggle-left`, JS renderCarrierChip)
-   living INLINE on the section head, same as desktop's pill — no dedicated meta line anymore.
-   Border/pill chrome drops for the icon form; color language (muted / green when synced) carries
-   over from the base rule above. */
-body.is-mobile .config-sync-carrierchip.is-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: fit-content;
-  border: none;
-  border-radius: var(--radius-s);
-  padding: 3px 4px;
-  color: var(--text-muted);
-}
-body.is-mobile .config-sync-carrierchip.is-icon:hover,
-body.is-mobile .config-sync-carrierchip.is-icon:focus-visible { background: var(--background-modifier-hover); }
-body.is-mobile .config-sync-carrierchip.is-icon.is-synced { color: var(--color-green); }
-body.is-mobile .config-sync-carrierchip.is-icon svg { width: 16px; height: 16px; }
+.config-sync-carrierchip-ic svg { width: 13px; height: 13px; display: block; }
 /* Expanded-card rows (spec §4, ledger C-#2): every row is a fixed-width muted label with its
    value IMMEDIATELY adjacent — never spread edge-to-edge with the value floating far right. Key
    column (ledger C-#6): nowrap + sized to the longest key ("After install") so a key never wraps
@@ -1230,6 +1197,29 @@ body.is-mobile .config-sync-cardrow > .config-sync-explabel-inline { flex: none;
 .config-sync-sharingicon.config-sync-card-trigger { display: inline-flex; align-items: center; justify-content: center; width: fit-content; padding: 3px 4px; }
 .config-sync-sharingicon.config-sync-card-trigger:hover, .config-sync-sharingicon.config-sync-card-trigger:focus-visible { background: var(--background-modifier-hover); }
 .config-sync-menuchip.config-sync-card-trigger { padding: 3px 8px; }
+/* The two-segment enablement row (spec 2026-08-12-enablement-two-layers-design.md §6.1):
+   `fleet segment | divider | local segment`, one shape shared by the Sync Center's row and the
+   settings card's. Each segment is its own menu trigger and carries the .is-set accent language the
+   icon triggers above already teach. The local segment renders NO glyph while it follows the
+   default — a default has nothing to say — so its box must stay legible as text alone. Four fixed
+   grid tracks (task 10, final pass): every row in a card lines its icons and state words up on the
+   same two vertical rules, which a flex row (task 7's structural minimum) could not guarantee once
+   fleet-segment text varied in length row to row. */
+.config-sync-tworow { display: grid; grid-template-columns: minmax(0, 182px) 1px 1fr; align-items: center; gap: 0 14px; }
+.config-sync-tworow-seg { display: inline-flex; align-items: center; gap: 6px; border-radius: var(--radius-s); padding: 3px 6px; font-size: var(--font-ui-smaller); color: var(--text-muted); cursor: pointer; white-space: nowrap; }
+.config-sync-tworow-seg:hover, .config-sync-tworow-seg:focus-visible { color: var(--text-normal); background: var(--background-modifier-hover); }
+.config-sync-tworow-seg.is-set { color: var(--text-normal); }
+.config-sync-tworow-seg.is-local.is-set { color: var(--color-purple); }
+.config-sync-tworow-ic { display: inline-flex; align-items: center; }
+.config-sync-tworow-ic .svg-icon { width: var(--icon-s); height: var(--icon-s); }
+.config-sync-tworow-vline { width: 1px; align-self: stretch; background: var(--background-modifier-border); }
+/* The settings card's fleet segment is renderSharingCycle carrying a label (its `labelFor` hook), so
+   it must read as the same segment shape the Sync Center paints by hand: content-sized box, glyph +
+   text, same padding. The base .config-sync-sharingicon is a fixed-width grid cell everywhere else,
+   which is why this narrows it only inside the row. */
+.config-sync-sharingicon-label { margin-left: 4px; font-size: var(--font-ui-smaller); white-space: nowrap; }
+.config-sync-tworow .config-sync-sharingicon { width: fit-content; padding: 3px 6px; }
+.config-sync-tworow .config-sync-sharingicon:hover, .config-sync-tworow .config-sync-sharingicon:focus-visible { background: var(--background-modifier-hover); }
 /* The expanded card itself (ledger C-#2): bordered, left-indented under the row's name column
    (chevron 16px + its 4px margin ≈ 20px) and offset one notch from the section behind it, so the
    card reads as one contained unit — row hairlines (.config-sync-card-fieldrow's border-bottom)
@@ -1298,6 +1288,11 @@ body.is-mobile .config-sync-cardrow > .config-sync-explabel-inline { flex: none;
    "this device" preview color (.config-sync-json-strip above); don't reuse it here (FINDING 3). */
 .config-sync-card-badge-local { color: var(--color-pink); background: rgba(var(--color-pink-rgb), 0.12); }
 .config-sync-card-badge-count { color: var(--color-cyan); background: rgba(var(--color-cyan-rgb), 0.12); }
+/* A carrier card's local fact ("N left to me", spec 2026-08-12-enablement-two-layers-design.md
+   §6.4): purple, the color the two-segment row's local segment already wears when this device has
+   taken an element out of the shared answer (.config-sync-tworow-seg.is-local.is-set). The fleet
+   fact beside it keeps the count palette above — two facts, two colors, never one number. */
+.config-sync-card-badge-mine { color: var(--color-purple); background: rgba(var(--color-purple-rgb), 0.12); }
 /* Innate platform chip ("desktop-only plugin", round-8 spec §2): neutral grey,
    inline-flex only here so the embedded monitor icon aligns with the text. */
 .config-sync-card-badge-plat { color: var(--text-muted); background: var(--background-modifier-border); display: inline-flex; align-items: center; gap: 4px; vertical-align: -1px; }
@@ -1311,6 +1306,11 @@ body.is-mobile .config-sync-cardrow > .config-sync-explabel-inline { flex: none;
    Scope is a Commander-style cycling icon since round 6 (2026-07-27 定稿), so its column shrank
    from the old 120px dropdown width to match the other icon columns. */
 .config-sync-grid { display: grid; grid-template-columns: 1fr var(--cs-scope-w, 28px) 28px 28px; align-items: center; column-gap: var(--size-4-2); }
+/* …except when that column carries the two-segment enablement row (spec §6.1) instead of a single
+   cycling icon: the segment pair is glyph + word twice, which a 28px icon track cannot hold. One
+   rule, keyed on the row's own content, so every row that carries the control gets the track and
+   every row that doesn't keeps the icon rail. */
+.config-sync-grid:has(> .config-sync-tworow) { --cs-scope-w: auto; }
 /* Idle ghosts stay faintly visible (0.25) rather than fully hidden — an invisible reserved
    action column reads as a dead gutter at the card's right rail (round-5 feedback). */
 .config-sync-ghost { opacity: 0.25; transition: opacity 0.12s; }
@@ -1378,6 +1378,10 @@ body.is-mobile .config-sync-cardrow > .config-sync-explabel-inline { flex: none;
 .config-sync-card-membercount { color: var(--text-faint); }
 .config-sync-card-memberarrow { color: var(--text-muted); }
 .config-sync-card-snippetmembers { margin-left: var(--size-4-6); }
+/* The two carrier cards' element rows (spec §6.4) — the same rows the snippet member list draws,
+   one level up: they hang off the card's own drawer rather than off a companion folder, so they
+   carry the drawer's indent instead of the member list's. */
+.config-sync-card-carrierelements { margin-bottom: var(--size-4-1); }
 .config-sync-card-companiongrid.is-orphan .config-sync-ldname { color: var(--text-faint); text-decoration: line-through; }
 /* Content-cell flex wrapper for orphan rows: name + pill left, Forget pushed against the scope
    column — everything stays inside grid column 1 (the pill/button would break the 4-column

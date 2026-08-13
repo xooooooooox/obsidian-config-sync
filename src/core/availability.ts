@@ -1,7 +1,7 @@
 import { PluginHost, pluginIdForGroup } from "./ConfigSyncCore";
 import { refItemId } from "./itemKeys";
 import { lockDesktopOnly, lockEntry, lockEntryList, lockSourceVersion } from "./manifest";
-import { RunsOn, StoreLock, SyncGroup } from "./types";
+import { StoreLock, SyncGroup } from "./types";
 
 export type AvailabilityKind = "enabled" | "disabled" | "not-installed";
 export type VersionDrift = "behind" | "ahead" | null; // local vs store: behind = local < store
@@ -110,47 +110,13 @@ export function desktopOnlyPluginIds(groups: SyncGroup[], plugins: PluginHost, l
   return ids;
 }
 
-// The RunsOn a this-device pin resolves to (Sync Center unified grammar, task 2): a pin says "this
-// device decides for itself", and what it has decided is read from the member's current PERSISTED
-// local on/off state — the same on-disk switch-list content applySwitchList's exception
-// pass-through reads, NEVER a live PluginHost query, which can diverge (a non-persistent
-// enablePlugin, used by config-sync's own apply cycle and the IOTO ecosystem, loads a plugin
-// without adding it to the persisted enabled set — see pluginState.ts).
-//
-// `where: "everywhere"` preserves today's behaviour exactly: a "here" rule is fleet-wide in effect
-// whatever the copy says (C-#46), and whether it SHOULD be is explicitly out of scope (spec §8).
-//
-// Mask derivation from the resulting RunsOn (documented once, here, for every apply-site
-// consumer): device desktop/mobile on the matching class → no mask (plain store membership); on
-// the other class → exception + forceOff; force off → exception + forceOff; force on → exception +
-// forceOn; device all with no force → nothing.
-export function forcedRunsOn(locallyOn: boolean): RunsOn {
-  return { device: "all", force: { state: locallyOn ? "on" : "off", where: "everywhere" } };
-}
-
-// A genuinely stored RunsOn (the Runs-on menu writing directly) always wins over re-deriving a
-// direction from local state — once a value is stored, mask producers stop re-normalizing it on
-// every read. Absent one, falls back to the this-device pin's reading, so a pin with no rule of
-// its own keeps working exactly as it did before the rule had a stored home.
-export function preferStoredRunsOn(stored: RunsOn | undefined, persistedLocallyOn: boolean): RunsOn {
-  return stored ?? forcedRunsOn(persistedLocallyOn);
-}
-
-// Member names whose device class excludes the current one. Feeds the exception mask
-// (capture pass-through + compare masking) exactly like desktopOnlyPluginIds does for plugins.
-export function membersExcludedByClass(classes: Record<string, "desktop" | "mobile">, isMobile: boolean): Set<string> {
-  const want = isMobile ? "mobile" : "desktop";
-  const out = new Set<string>();
-  for (const [name, cls] of Object.entries(classes)) if (cls !== want) out.add(name);
-  return out;
-}
-
-// The apply must force OFF members pinned away from this device — class-away minus this-device
-// ids, since an explicit this-device decision must keep the machine's own on/off.
-export function memberForceOff(classes: Record<string, "desktop" | "mobile">, localIds: string[], isMobile: boolean): string[] {
-  const localSet = new Set(localIds);
-  return [...membersExcludedByClass(classes, isMobile)].filter((id) => !localSet.has(id));
-}
+// The per-element mask and the two force sets used to be derived here, from a `RunsOn` re-read on
+// every call (`forcedRunsOn` / `preferStoredRunsOn` / `membersExcludedByClass` / `memberForceOff`).
+// They are gone: enablementDecision.ts is now the ONE place a fleet rule and this device's own
+// exception are combined into a mask + a force, and main.ts projects all three runtime fields off
+// that single decision. What survives here is the DESKTOP-ONLY auto-derivation above
+// (desktopOnlyPluginIds), which is a manifest fact rather than a rule the user wrote, and joins the
+// mask alongside the decisions rather than through them.
 
 // Enabled snippet names (local list or store list) whose .css file exists neither locally nor
 // in the store's snippets dir — dead leftovers from deleted/renamed snippets. Checking the

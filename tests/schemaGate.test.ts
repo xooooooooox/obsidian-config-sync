@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifySettings, CURRENT_SCHEMA, isFutureSchemaDocument, MIGRATABLE_SCHEMA, SCHEMA_FUTURE_APPLY_MESSAGE, SCHEMA_FUTURE_NOTICE, SCHEMA_UPGRADE_NOTICE, withDefaults } from "../src/core/settingsMigration";
+import { classifySettings, CURRENT_SCHEMA, isFutureSchemaDocument, MIGRATABLE_SCHEMAS, SCHEMA_FUTURE_APPLY_MESSAGE, SCHEMA_FUTURE_NOTICE, SCHEMA_UPGRADE_NOTICE, withDefaults } from "../src/core/settingsMigration";
 import { emptyItemMap } from "../src/core/registry";
 
 // A data.json older than `schemaVersion: 3` and not migratable (v1, unversioned) is classified
@@ -30,16 +30,21 @@ describe("classifySettings", () => {
     expect(classifySettings({})).toEqual({ kind: "legacy" });
   });
 
-  // v2 is the one version with a way forward (spec 2026-08-11-v3-one-vocabulary-design.md §5/§6):
-  // it is neither reset nor refused, it is migrated. v1 has no field a v3 shape could be
-  // reconstructed from and keeps the reset branch above.
-  it("a v2 document is migrated, not reset", () => {
-    expect(classifySettings({ schemaVersion: MIGRATABLE_SCHEMA })).toEqual({ kind: "migrate" });
-    expect(MIGRATABLE_SCHEMA).toBe(CURRENT_SCHEMA - 1);
+  // v2 and v3 are the versions with a way forward (spec 2026-08-12-enablement-two-layers §4): they
+  // are neither reset nor refused, they are migrated, and a v2 document chains through v3 on the
+  // way. v1 has no field a later shape could be reconstructed from and keeps the reset branch above.
+  // The `from` is asserted because the load path branches on it — a v3 document must not be sent
+  // through the v2 migration, and a v2 one must not skip it.
+  it("a v2 or v3 document is migrated, not reset, and says which one it is", () => {
+    for (const found of MIGRATABLE_SCHEMAS) {
+      expect(classifySettings({ schemaVersion: found })).toEqual({ kind: "migrate", from: found });
+    }
+    expect(MIGRATABLE_SCHEMAS).toContain(CURRENT_SCHEMA - 1);
+    expect(MIGRATABLE_SCHEMAS).not.toContain(CURRENT_SCHEMA);
   });
 
   it("a NEWER schema is its own answer — never legacy, and it carries the version it found", () => {
-    expect(classifySettings({ schemaVersion: 4, items: {} })).toEqual({ kind: "future", found: 4 });
+    expect(classifySettings({ schemaVersion: CURRENT_SCHEMA + 1, items: {} })).toEqual({ kind: "future", found: CURRENT_SCHEMA + 1 });
     expect(classifySettings({ schemaVersion: 99 })).toEqual({ kind: "future", found: 99 });
   });
 
@@ -54,7 +59,7 @@ describe("classifySettings", () => {
 // §4.2's half of the same gate: the document about to be written onto this device, still as text.
 describe("isFutureSchemaDocument", () => {
   it("is true only for a document declaring a schema newer than this build's", () => {
-    expect(isFutureSchemaDocument(JSON.stringify({ schemaVersion: 4, items: {} }))).toBe(true);
+    expect(isFutureSchemaDocument(JSON.stringify({ schemaVersion: CURRENT_SCHEMA + 1, items: {} }))).toBe(true);
     expect(isFutureSchemaDocument(JSON.stringify({ schemaVersion: CURRENT_SCHEMA, items: {} }))).toBe(false);
     expect(isFutureSchemaDocument(JSON.stringify({ schemaVersion: 1 }))).toBe(false);
   });
@@ -135,9 +140,9 @@ describe("withDefaults — the item map", () => {
   const defaults = { schemaVersion: 3, items: emptyItemMap(), rootPath: "" };
 
   it("fills a section the document never had", () => {
-    const out = withDefaults(defaults, { items: { community: { dataview: { enabled: true } } } });
+    const out = withDefaults(defaults, { items: { community: { dataview: { synced: true } } } });
     expect(Object.keys(out.items).sort()).toEqual(["community", "core", "custom", "obsidian"]);
-    expect(out.items.community).toEqual({ dataview: { enabled: true } });
+    expect(out.items.community).toEqual({ dataview: { synced: true } });
     expect(out.items.custom).toEqual({});
   });
 
@@ -147,7 +152,7 @@ describe("withDefaults — the item map", () => {
     expect(out.items.custom).not.toBe(defaults.items.custom);
     // ...and a second load is independent of the first.
     const other = withDefaults(defaults, null);
-    other.items.custom["my-rule"] = { enabled: true };
+    other.items.custom["my-rule"] = { synced: true };
     expect(out.items.custom).toEqual({});
     expect(defaults.items.custom).toEqual({});
   });

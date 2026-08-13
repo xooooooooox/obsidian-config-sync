@@ -1,4 +1,4 @@
-import type { RunsOn } from "../core/types";
+import type { Sharing } from "../core/types";
 
 export interface FateInput {
   direction: "apply" | "capture" | null; // null → in sync / nothing yet
@@ -9,7 +9,10 @@ export interface FateInput {
   carrierSynced: boolean;                // the on/off list is a synced item
   storeListOn: boolean | null;           // null → no enablement dimension (obsidian/folder/self)
   locallyOn: boolean;
-  runsOn: RunsOn;
+  // Was `runsOn: RunsOn`. The fate of a row now reads the two layers the user actually set: the
+  // shared rule, and this device's own exception. `null` exception = follows the rule.
+  ruleSharing: Sharing;
+  localException: "on" | "off" | null;
   deviceClass: "desktop" | "mobile";
   desktopOnly: boolean;
   excludedHere: boolean;                 // this row's own compiled group is scoped away from
@@ -69,10 +72,11 @@ export interface Fate {
 
 function effectiveTurnsOn(i: FateInput): boolean {
   if (!i.carrierSynced || i.storeListOn === null) return false;
-  // A force rule decides outright; otherwise a class rule must match this device, and the store's
-  // own on-state decides. Exactly the five readings the flat rule enum had.
-  if (i.runsOn.force !== undefined) return i.runsOn.force.state === "on" && !i.locallyOn;
-  if (i.runsOn.device !== "all" && i.runsOn.device !== i.deviceClass) return false;
+  // A local exception decides outright — same precedence the run itself uses
+  // (enablementDecision.ts), so the sentence can never promise what the run will not do.
+  if (i.localException !== null) return i.localException === "on" && !i.locallyOn;
+  if (i.ruleSharing.kind === "this-device") return false;
+  if (i.ruleSharing.kind === "per-class" && i.ruleSharing.class !== i.deviceClass) return false;
   return i.storeListOn && !i.locallyOn;
 }
 
@@ -94,12 +98,12 @@ function buildChips(i: FateInput): string[] {
   if (!inert && i.direction === "apply" && !i.installed) chips.push("not installed here");
   if (i.desktopOnly) chips.push("desktop only");
   if ((i.direction === null && i.excludedHere) || inert) chips.push("your rule");
-  if (!inert && i.carrierSynced && i.storeListOn === false && i.runsOn.force?.state !== "on" && !i.locallyOn) {
+  if (!inert && i.carrierSynced && i.storeListOn === false && i.localException !== "on" && !i.locallyOn) {
     chips.push("stays off");
   }
   if (!inert) {
-    if (i.runsOn.force?.state === "off") chips.push("off here — your rule");
-    else if (i.runsOn.force?.state === "on") chips.push("on here — your rule");
+    if (i.localException === "off") chips.push("off here — your rule");
+    else if (i.localException === "on") chips.push("on here — your rule");
   }
   if (i.encrypted) chips.push("encrypted");
   return chips;

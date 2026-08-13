@@ -18,11 +18,14 @@
  *     It has a store copy, a capture time, a hash, and now the display names of its elements. It is
  *     keyed under `obsidian` because the file it carries is one of Obsidian's own config files,
  *     exactly like app.json — and because the `obsidian` section's id space is CLOSED and declared
- *     in code (registry.ts's OBSIDIAN_CARD_DEFS: app/appearance/hotkeys), so a carrier key cannot
- *     collide with an item by construction. Filing it under `core`/`community` (where the Sync
- *     Center SHOWS it) would put it in a runtime-injected id space (catalog.ts's setCorePluginIds)
- *     where collision is merely improbable. The tab it appears under is presentation — the same
- *     legitimate split between stored and presented vocabulary §7b already blesses for `beta`.
+ *     in code (registry.ts's OBSIDIAN_CARD_DEFS), a carrier key cannot collide with an item by
+ *     construction: core-plugins and community-plugins are two of that closed set's five ids, not
+ *     ids from a runtime-injected space that merely happens not to clash with it (task 5 gave the
+ *     two carriers their own def in that exact list, so `defRef` and `carrierRef` mint the SAME
+ *     string). Filing it under `core`/`community` (where the Sync Center SHOWS it) would put it in
+ *     a runtime-injected id space (catalog.ts's setCorePluginIds) where collision is merely
+ *     improbable. The tab it appears under is presentation — the same legitimate split between
+ *     stored and presented vocabulary §7b already blesses for `beta`.
  *
  * Collision-freedom, by construction rather than by luck: no item id ever contains a "/" (plugin
  * and core ids are Obsidian's, the three Obsidian card ids are literals, and a custom item's name
@@ -87,10 +90,18 @@ export function groupRefIndex(groups: readonly SyncGroup[]): ReadonlyMap<string,
   return index;
 }
 
-// The three Obsidian cards' ids (registry.ts's OBSIDIAN_CARD_DEFS). Named here because the legacy
-// converter runs where the registry is not available — a v2 lock is read on the status path, in a
-// remote check, and in bare test contexts. registry.ts asserts the two agree.
-export const OBSIDIAN_CARD_IDS = ["app", "appearance", "hotkeys"] as const;
+// The five Obsidian-section cards' ids (registry.ts's OBSIDIAN_CARD_DEFS): the three settings
+// cards plus the two on/off lists, which are `obsidian` items in their own right since task 5 (see
+// this module's own header — "a CARRIER IS an item"). Named here because the legacy converter runs
+// where the registry is not available — a v2 lock is read on the status path, in a remote check,
+// and in bare test contexts. registry.ts asserts the two agree.
+//
+// A v1/v2 lock's `core-plugins`/`community-plugins` group name already resolved to
+// `obsidian/<list>` before this list carried them — legacyRef's `isSwitchListGroup` branch above
+// catches both names first, since it runs before this one. Listing them here too does not change
+// that resolution; it makes this list agree with registry.ts's by construction rather than by
+// which branch happens to run first.
+export const OBSIDIAN_CARD_IDS = ["app", "appearance", "hotkeys", "core-plugins", "community-plugins"] as const;
 
 // The `plugin-` group-name prefix, in the ONE place it still has a reason to exist: reading a lock
 // a 2.21.0 device wrote. Everywhere else it retires with v3 (spec §5) — this is not taxonomy being
