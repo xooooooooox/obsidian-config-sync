@@ -114,31 +114,59 @@ double as the self-pane title's capture/coldstart states, with `alert-triangle` 
 `wrench`, `git-branch` · `monitor` / `smartphone` — `sharingIcon`'s Desktop only/Mobile only
 stops (every sharing cycle) and the row-level
 desktop-only-plugin badge (`config-sync-card-badge-plat`, itemCard.ts) · `airplay` —
-`sharingIcon` "This device" stop; the whole cycle renders through the one shared
+`sharingIcon` "This device" stop, used ONLY for a plain field/file rule's cycle (no local
+layer to speak for); the whole cycle renders through the one shared
 `renderSharingCycle` (sharingCycle.ts; the model — `sharingIcon`/`nextSharing`/`sharingCycleTooltip`
-— stays in itemCard.ts), used by every Settings drawer sharing cell — a direct-cycle click
-there advances straight to the next option. The Sync Center card's `Settings sync`/`Runs on`
-rows (§4 Rule controls) share the same glyph vocabulary through an icon-trigger-plus-menu
-variant instead — click opens an Obsidian `Menu` rather than cycling; `Runs on` extends the
-vocabulary with `power`/`power-off` for `RUNS_ON_ICONS`'s `always-here`/`never-here` stops
-(`MemberRule`, itemCard.ts — no `RuleScope` counterpart, so these two are unused elsewhere)
-· `settings-2` — the sidebar Config Sync
-self-entry tile, the compact switcher's self entry, and the self pane's title-row Settings
-button · `ban` — the drawer's Stop-syncing footer action; click opens an Obsidian `Menu`
-(same icon-trigger-plus-menu variant as `Settings sync`/`Runs on` above) offering **On this
-device**/**Sync on this device again** vs. **Everywhere…**, not a direct action (C-#45) ·
-`monitor-smartphone` — the
-sharing-cycle "All devices" stop · `arrow-left-right` — the Sync Center leaf/tab icon ·
+— stays in itemCard.ts), used by every Settings drawer sharing cell that has no local layer —
+a direct-cycle click there advances straight to the next option. `monitor-smartphone` — the
+sharing-cycle "All devices" stop.
+
+**The two-segment row** (spec `2026-08-12-enablement-two-layers-design.md` §6.1, `ui/enablementRow.ts`):
+`label | fleet segment | divider | local segment`, shared by a Sync Center row's `Default enabled
+on`/`Default settings sync`, a plugin card's `Default enabled on`, and a carrier card's element
+rows — replacing the old `Runs on`/`Settings sync` icon-trigger-plus-menu rows and their
+`RUNS_ON_ICONS` vocabulary outright. Fleet segment: `sharingIcon`'s icons for the three device
+stops, plus `users` for `Each device decides` (**never** `airplay` here — the value is about the
+fleet's arrangement, not this device, and `airplay` reads as screen mirroring to a reader who
+hasn't read the source). Local segment: **no icon** while following the default (a default has
+nothing to say) · `power` / `power-off` for an element-level local exception (**On here**/**Off
+here**) · `circle-slash` for a whole-file local opt-out (**Not synced here**, reused from the fold
+family below — same meaning, "not synced on this device," deliberately) — click on either segment
+opens an Obsidian `Menu` (never cycling; `ui/enablementRow.ts`'s `buildLocalMenu`/
+`buildFileLocalMenu` are its one producer each).
+
+`settings-2` — the sidebar Config Sync
+self-entry tile, the compact switcher's self entry, the self pane's title-row Settings
+button, the read-only carrier chip (§2.5 below), and the Sync Center card's `More` row — an
+icon-only deep link into the item's own Settings card (tooltip carries the sentence, no trailing
+`▸`; **never** `sliders-horizontal`, which already means `your rule` in the fate chips below) ·
+`arrow-left-right` — the Sync Center leaf/tab icon ·
 `chevron-right` — qualifier-autocomplete key rows (value rows use `check`, §2.4) · fate chips
 (`config-sync-fatechip`, `FATE_CHIP_ICON` in `fateChipIcons.ts` — every chip renders icon + text,
 generalized from the `encrypted`/`lock` special case): `circle-dashed` not installed here ·
 `monitor` desktop only · `sliders-horizontal` your rule / off here — your rule / on here — your
-rule · `power` stays off · `lock` encrypted · `check` your choice · trailing-fold states
+rule · `power-off` stays off (**not** `power` — `power` now means "this device turned it on" in
+the two-segment row's local segment, so a chip saying the row stays OFF cannot share it) · `lock`
+encrypted · `check` your choice · trailing-fold states
 (`config-sync-fold-ic`, `FOLD_ICON` in `foldIcons.ts`, C-#50): `check`/green in sync ·
-`circle-slash`/muted not synced on this device · `circle`/muted no settings yet — action vs.
-state: `ban` stays reserved for the Stop-syncing ACTION above; the "not synced on this device"
-STATE uses `circle-slash` instead, so an icon never means both a thing you can click and a thing
-that already happened.
+`circle-slash`/muted not synced on this device · `circle`/muted no settings yet.
+
+**`ban` is retired** — it was the Sync Center card footer's `⊘ Stop syncing` action icon
+(`renderStopSyncing`), and that footer is gone (spec `2026-08-12-enablement-two-layers-design.md`
+§6.2, §4 below): the whole-item destructive gesture now lives on the item's own Settings card,
+beside its sync toggle, and is reached from the Sync Center only through the `More` deep link
+above — never a second control drawn straight onto the row. `circle-slash` therefore has exactly
+one job left, the fold family's STATE glyph (and the local segment's whole-file opt-out,
+deliberately the same glyph and meaning) — an icon never means both a thing you can click and a
+thing that already happened.
+
+**Read-only carrier chip** — the Core/Community section header chip (`renderCarrierChip`,
+SyncCenterView.ts, spec §6.3) shows `settings-2` + `synced` or `not synced`, same shape on both
+platforms (no mobile icon-only fallback — a hover-only tooltip is useless on the one platform with
+no hover). It is a shortcut, never a control: click jumps to the carrier's own Settings card,
+where the sync toggle it used to BE now lives. Never the toggle glyphs
+(`toggle-right`/`toggle-left`, retired with it) — a toggle shape promises "click to flip," and
+this chip cannot.
 
 ### 2.4 Glyph language (text, reused everywhere)
 
@@ -288,16 +316,15 @@ noted):
   material contrast alone (no hairline), disclosure triangle (▾ open / ▸ collapsed)
   scaled to the header size; a checkbox click on the header stages, anywhere else on the
   header toggles collapse. A trailing count pill reads `N of M` under a filter; Core/Community
-  carry a header chip `on/off synced ✓` / `on/off not synced` — the only remaining home of
-  the on/off carrier as a configurable item, edited via a small popover (`Sync on/off` /
-  `Stop syncing on/off`). On mobile the head stays one line — count pill compacts `N of M`
+  carry a header chip (`renderCarrierChip`, spec §6.3) reading `settings-2` + `synced` /
+  `not synced` — **read-only since this release**: it used to be the on/off carrier's own
+  configurable toggle (a popover offering `Sync on/off` / `Stop syncing on/off`), and now only
+  jumps to the carrier's own Settings card, where that toggle lives (§2.5 above). Same shape on
+  every platform — no mobile-only icon fallback, and never the toggle glyphs
+  (`toggle-right`/`toggle-left`, retired with the write path they used to promise). On mobile the
+  head stays one line — count pill compacts `N of M`
   to `N/M`, the per-section "N selected" hint drops (the section checkbox's checked/
-  indeterminate state and the global footer already carry it). **Carrier chip (batch-21
-  spec §2, option A — revises batch-20's second-line drop):** the chip stays inline in the
-  head on every platform; on mobile it swaps its full-text pill for a bare Lucide toggle
-  glyph (`toggle-right` synced/green, `toggle-left` not-synced/muted, `renderCarrierChip`)
-  carrying the same full copy as tooltip + `aria-label` instead of inline text — same click/
-  keydown → `Menu` wiring, same popover. Desktop keeps the full-text pill, unchanged. Section select-all/clear targets actionable visible rows only —
+  indeterminate state and the global footer already carry it). Section select-all/clear targets actionable visible rows only —
   excludes the self row, in-sync, nothing-yet, and unresolved-conflict rows. Per-section
   trailing fold lines (`config-sync-unchanged`) aggregate only their own section's `N in
   sync ▸` / `N with nothing to sync yet ▸`, expandable in place. Switching into a filter
@@ -346,35 +373,44 @@ noted):
   apply` / `On capture` / `State` (the fate sentence expanded to a full clause — install
   source, update versions, capture consequence) · `Files` (direction-aware entries, `+` /
   `↑` / deletion, `view ▸` / `diff ▸`) · `Resolve` (conflict rows only — segmented `Use
-  theirs ↓` / `Keep mine ↑`) · `Runs on` (plugins whose carrier is synced) / `After install`
+  theirs ↓` / `Keep mine ↑`) · `Default enabled on` (plugins whose carrier is synced) / `After install`
   (carrier not synced, row installs) / `Enablement` (carrier not synced, plugin installed
-  but locally off — the fallback ladder's third leaf) · `Settings sync` (the item's own file-level sharing rule) · `More` (deep-link into the Settings tab, scrolled to this item's own card) ·
+  but locally off — the fallback ladder's third leaf) · `Default settings sync` (the item's own file-level sharing rule) · `More` (icon-only deep-link into the Settings tab, scrolled to this item's own card — the whole sentence moved into its tooltip, no trailing `▸`) ·
   `Note` (honest runtime notes, e.g. Hotkeys' "Takes effect after an app reload"). While the
   card is open, the collapsed row's own fate sentence/glyph hides (ledger C-#9, Rows above)
   — the card's `On apply`/`On capture`/`State` row is the single statement; checkbox and
-  chips stay.
-- **Rule controls** — two idioms sharing one icon vocabulary. In the Sync Center card,
-  `Runs on` and `Settings sync` render as an icon trigger (`config-sync-sharingicon
-  config-sync-card-trigger`, content-sized to its glyph box only — a full-row hit area was
-  the ledger C-#7 bug) that opens an Obsidian `Menu` of the options on click: the glyph IS
-  the state, the menu click is the one explicit choice (killing the silent-cycle hazard);
-  each menu item shows the option's glyph + label copy, current one checked; `aria-label`
-  names the current state, the `renderSharingCycle` precedent. `Settings sync` reuses
-  `sharingIcon` (three options — no `This device`, matching the settings-file sharing
-  precedent below); `Runs on` extends the same vocabulary with `RUNS_ON_ICONS` (itemCard.ts)
-  for the Runs-on rule's five stops (§2.3). `After install`/`Enablement` keep textual triggers
-  (`config-sync-menuchip config-sync-card-trigger` — no glyph vocabulary for them) restyled
-  to the same trigger-box family so the card reads as one control language regardless of
-  trigger kind. The Settings tab's own drawer sharing cell is untouched: it keeps the direct-
-  cycle `renderSharingCycle` idiom (a click advances straight to the next option) — the two
-  surfaces share the icon vocabulary, never the interaction, and both write the same stored
-  value.
-- **Runs-on rule (per-plugin enablement)** — one rule per plugin, set from that plugin's own
-  row via its `Runs on` icon+menu control (Expanded card / Rule controls above). A carrier's
-  own sync membership — whether the Core/Community on/off list is itself a synced item — is
-  edited from the section header's `on/off synced` chip (Type sections above). The snippets
-  on/off list keeps its own member devices on the Appearance card (Companion folders,
-  Unified card below).
+  chips stay. **The card footer's destructive `⊘ Stop syncing` button is gone** (spec §6.2):
+  stopping a whole item's sync now happens on its own Settings card, one gesture, one home —
+  reached from here only through `More`.
+- **Two-segment row** (`config-sync-tsrow`, spec §6.1, `ui/enablementRow.ts`) — replaces the old
+  icon-trigger-plus-menu `Runs on`/`Settings sync` rows (and their five-stop `RUNS_ON_ICONS`
+  vocabulary, §2.3) with one shape reused by three surfaces: a Sync Center row's `Default
+  enabled on`/`Default settings sync`, a plugin card's `Default enabled on`, and a carrier
+  card's element rows (Unified card below). Four fixed tracks — `label | fleet segment |
+  divider | local segment` — so every row on a card lands its icon and state word on the same
+  vertical line. Fleet segment: icon + text, click opens an Obsidian `Menu` of the four values
+  (`All devices` / `Desktop only` / `Mobile only` / `Each device decides`); icons are
+  `sharingIcon`'s (§2.3), `users` for `Each device decides`. Local segment: following the
+  default renders **no icon**, just a dim `Follows the default`; an exception renders its
+  accent icon (`power`/`power-off` for an element, `circle-slash` for a whole file) + state
+  word, click opens the local menu (`buildLocalMenu`/`buildFileLocalMenu`, §2.3). `After
+  install`/`Enablement` keep their own textual triggers (`config-sync-menuchip
+  config-sync-card-trigger` — no glyph vocabulary for them), restyled to the same trigger-box
+  family so the card reads as one control language regardless of trigger kind. The Settings
+  tab's plain field/file sharing cell is untouched where it has no local layer: it keeps the
+  direct-cycle `renderSharingCycle` idiom (a click advances straight to the next option).
+- **Enablement rule (per-plugin, per-element)** — one rule per list element (a plugin, a
+  snippet), stored on the CARRIER item that carries the list, set from any of the three
+  entrances above through the one pair of producers `ui/enablementRow.ts`/
+  `core/enablementRules.ts` share (spec §6.6) — never from the plugin's own settings-file
+  entry, which the rule no longer touches at all. This device's own exception for that element
+  (`config-sync-device-elements`, never inside `data.json`) is the same row's local segment,
+  everywhere the element appears. A carrier's own sync membership — whether the Core/Community
+  on/off list is itself a synced item — is edited from its own Settings card's sync toggle
+  (Unified card below), never from the Sync Center any more (the section header's chip is
+  read-only, Type sections above). The snippets on/off list keeps its own member devices on the
+  Appearance card (Companion folders, Unified card below) — same mechanism, same row shape,
+  fewer surfaces because it has no carrier card of its own.
 - **Remote** `config-sync-remote-btn` is-pull/is-push (solid cyan/pink when primary,
   dimmed otherwise); diff entries reuse report rows + chips.
 - **Reports** `config-sync-report-*`, chips, `-strip` result strip — outcome-toned: green
@@ -432,11 +468,17 @@ noted):
   branches remain: an Obsidian option group, a core plugin and a community/beta plugin all
   render through the same function — a core plugin whose settings file hasn't been written
   here still gets the full card, since its path is synthesized from the plugin id.
-  - **Row** `config-sync-item-wrap` — chevron, name, badges (`config-sync-card-badge*`; order:
-    grey `desktop-only plugin` chip (manifest `isDesktopOnly`, monitor icon via
-    `-badge-plat/-badge-ic`)
-    → the Runs-on chip when non-default → `N device-scoped` → `N encrypted`; a zero count never
-    renders), sync toggle. No mode chip and no other row content — mode is a derived, drawer-only
+  - **Row** `config-sync-item-wrap` — chevron, name, badges (`config-sync-card-badge*`, order per
+    `computeBadges` — itemCard.ts): `on/off only` (no settings file here yet) → grey
+    `desktop-only plugin` chip (manifest `isDesktopOnly`, monitor icon via `-badge-plat/-badge-ic`)
+    → the enablement badge when non-default (`on: desktop` / `on: mobile` / `on: this device` — a
+    local exception outranks the rule here, same precedence as at run time; `Each device decides`
+    with no exception yet earns no badge, since the row itself is the answer) → for the TWO carrier
+    cards, two counts in place of the ordinary `N device-scoped` badge (`carrierBadgeCounts`): fleet
+    `N device-scoped` (class rules only — `Each device decides` hands the element to every device,
+    so it is not "device-scoped") and local `N left to me` (this device's own exceptions, purple —
+    the two-segment row's local segment wears the same color when set) → `N encrypted`; a zero count
+    never renders), sync toggle. No mode chip and no other row content — mode is a derived, drawer-only
     state (`itemCard.ts`'s `deriveMode`, see Drawer ② below), never a header control — the same
     terse rows-are-lists-nothing-else rule the Sync Center already follows.
   - **Drawer** `config-sync-item-exp`, up to three zones, every row across all three built on one
@@ -451,13 +493,17 @@ noted):
     (0.45) and any narrower sharing renders `.is-set` (accent, full opacity). ① and ②
     render only when they apply, ③ Companion folders always renders (down to just its quiet
     `+ Add folder` row, `config-sync-add-row-quiet`, when a card has no folders yet):
-    ① **Enabled on** (plugin cards only) — one 4-option sharing icon: Desktop/Mobile/All read & write
-    the item's own `runsOn.device` directly, but the **This device** stop reads & writes the
-    device-local `thisDeviceItems` set instead (this-device is not representable in `runsOn`, so the
-    choice stays out of the shared self store copy and can't leak or be erased by a pull). A desktop-only plugin's cycle skips the
-    mobile stop (`DESKTOP_ONLY_ENABLED_OPTIONS`), and its `all` stop's tooltip appends
-    `DESKTOP_ONLY_ALL_NOTE` ("mobile is excluded automatically" — the runtime auto-mask, not this
-    setting, is what keeps mobile untouched).
+    ① **Default enabled on** (plugin cards whose def carries an `enablement` projection — spec §6.5)
+    — the two-segment row (`ui/enablementRow.ts`, above), not a cycling icon: the fleet segment
+    writes the carrier's `perElement` rule (`core/enablementRules.ts`, never this plugin's own
+    settings-file entry); the local segment writes this device's own exception
+    (`core/deviceElements.ts`, never inside `data.json`). Three shapes (spec §6.5): a class rule
+    (`Desktop only`/`Mobile only`) shows only `Follows the default` in the local segment — no
+    editable local state, since one would claim a device answer the sync itself decides; `All
+    devices` with a local exception set shows the purple `On here`/`Off here`, editable; `Each
+    device decides` shows the local state directly, no `Follows` option (there is no shared answer
+    to follow) — landing on it for the first time seeds the exception with the plugin's CURRENT
+    state (`ruleLandingNeedsSeed`), so switching to it never itself flips the switch.
     ② **Settings file** — mode is derived, never chosen: no per-key rule anywhere (`rules` and
     `perElement` both empty) is whole-file state, any rule is per-key state. The grid's first row
     (`config-sync-card-sfhead`) is always the path row: path code, a 3-option sharing icon (no
@@ -485,6 +531,15 @@ noted):
     `--color-purple` = detected-but-unruled, faint = plain; a `perElement` array colors each
     element the same way. Click a key to add a rule for it directly (promotes the card to
     per-key state).
+    Between ② and ③, the two carrier cards (`core-plugins`/`community-plugins`, spec §6.4) add one
+    more zone — `carrierListFor(def)` is what makes a card a carrier, and is the one place that
+    identity is decided: a section label `CARRIER_ELEMENTS_LABEL` = "Which devices turn each
+    plugin on", then one two-segment row per element (`buildCarrierElementRows` —every element
+    installed here, plus any element that carries a rule or a local exception even if it isn't,
+    since an uninstalled plugin's fleet choice still needs a card to live on), each row identical
+    in shape to zone ①'s single row above, sorted by label. The snippets on/off list has no card
+    of its own — same row shape, same producers, rendered inside the Appearance card's `snippets/`
+    companion folder (③ below) instead.
     ③ **Companion folders** — preset (`themes/`, `snippets/`) and user-added vault-relative
     folders, each on the same grid (`config-sync-card-companiongrid`): content column is the path
     plus a collapsed member count (`config-sync-card-membercount`: `· N themes` for the themes/

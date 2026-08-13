@@ -22,11 +22,10 @@ The conversion itself asks nothing of you. The first device to run this version 
 
 ### What behaves differently afterwards
 
-Three deliberate changes, each of which you may notice:
+Deliberate changes, each of which you may notice:
 
-- **Runs on now decides where an item syncs, not just what the menu says.** A plugin's `Computers only` / `Phones only` choice used to be read by that menu and by nothing else — capture and apply followed a separate, invisible setting, so the two could disagree. They are one field now, and the choice masks capture and apply too. Your items keep doing exactly what they were already doing; it is the menu that starts telling the truth about it.
-- **A community plugin you have only given a Runs-on rule, and never switched on here, has no card in Settings** until the plugin is installed on this device. It had no card before this release either — that rule used to live in a list of its own, apart from the plugin's card — so nothing changed hands and nothing was removed: the plugin is still in the store, your other devices still sync it, and it still has a row in the Sync Center, which is where you set the rule in the first place. Install it here and the card appears with the rule already on it.
-  Switching a card **off** normally keeps it, so you can switch it back on. This one shape is the exception, and it cuts both ways — both intended. Switch **off** a plugin that isn't installed here and carries a Runs-on rule, and the rule is the only thing it has here any more, so its card goes with it. Clear that rule and the opposite happens: a card **appears** for a plugin you don't have installed, because an off card on its own is a choice this device remembers, and a Runs-on rule on its own is not. Its store copy, its Sync Center row and your other devices are unaffected either way, and installing the plugin here always brings the card back.
+- **A plugin nobody ever set a rule for now follows the shared on/off list, once that list itself is synced.** Before this version, an item with no rule at all had nothing forcing it to reconcile with the fleet, so the same plugin could quietly end up on here and off there with nothing to notice or fix it. Enablement is one of two answers now, always — the shared list, or "each device decides" — so **the first sync after upgrading may turn some plugins on or off**, converging whatever differences had silently built up between your devices before now. After that first sync this stops being a surprise: **Default enabled on**, wherever you see it, is the actual, current answer, the same on every device, all the time.
+- **Every card earns its place now, with no exception.** A community plugin your other devices sync but that isn't installed here always gets a card, the moment it carries anything of its own on this device — switched on, switched off, a rule, a companion folder. Installing the plugin here always brings its card's settings with it.
 - **A display name in a store written by an older version stays stale until the next capture or pull.** Config Sync used to quietly repair out-of-date item names in `store.lock.json` at startup. It no longer writes to a store in the old format at all — a cosmetic fix is not worth rewriting a file your other devices may still be reading, and the rewrite could strand them. The first capture or pull brings both the format and the names up to date.
 
 ### `scope:` is gone from both search boxes
@@ -55,9 +54,9 @@ Two planes, kept separate: a **local plane** (this device's live config ↔ the 
     └── <dotless files>      # vault-root dotfiles, leading dot stripped
 ```
 
-What syncs, and each field's `{sharing, encrypted}` rule, is configured entirely through **Settings → Config Sync**'s cards (stored in the plugin's own settings, `schemaVersion: 3`) and, for anything a card doesn't cover, the **Advanced → Custom rules** editor in the same tab. OS junk (`.DS_Store`, `Thumbs.db`, `desktop.ini`) is never captured. See [Field rules & sensitive settings](#field-rules--sensitive-settings) for per-item rules and passphrase-protected encryption.
+What syncs, and each field's `{sharing, encrypted}` rule, is configured entirely through **Settings → Config Sync**'s cards (stored in the plugin's own settings, `schemaVersion: 4`) and, for anything a card doesn't cover, the **Advanced → Custom rules** editor in the same tab. OS junk (`.DS_Store`, `Thumbs.db`, `desktop.ini`) is never captured. See [Field rules & sensitive settings](#field-rules--sensitive-settings) for per-item rules and passphrase-protected encryption.
 
-The settings schema is `schemaVersion: 3` and `store.lock.json` is `version: 3`. A document or store from 2.x is converted on load, once, in place; see [Updating from 2.21.0 and earlier](#updating-from-2210-and-earlier) for what that means for your other devices.
+The settings schema is `schemaVersion: 4` and `store.lock.json` is `version: 3`. A document or store from an older version is converted on load, once, in place; see [Updating from 2.21.0 and earlier](#updating-from-2210-and-earlier) for what that means for your other devices.
 
 ## The Sync Center
 
@@ -81,11 +80,24 @@ Click a row's name to expand it into a card, in order (each row omitted when it 
 - **On apply** / **On capture** / **State** — the fate sentence spelled out as a full clause: install source (`from the community catalog` / `via BRAT`), update versions (`Updates 2.14.0 → 2.15.1`), what capturing publishes (`Shares your settings with your other devices`).
 - **Files** — direction-aware entries: incoming additions as `+ file` with `view ▸`/`diff ▸`, outgoing changes as `↑ file · diff ▸`, encrypted content as `changed — encrypted, no preview`.
 - **Resolve** (conflicts only) — `Use theirs ↓` / `Keep mine ↑`; the row stays unstageable until you pick one, then reads as a normal directed row plus a `your choice` chip.
-- **Runs on** (plugins, while the Core/Community on/off list itself is a synced item) — one menu unifying every way to say where a plugin turns on: `Follows your devices` (default) / `Computers only` / `Phones only` / `Always on here` / `Never on here`. `Computers only` / `Phones only` decide where the item syncs as well as where it turns on — one field, one meaning. Up to 2.21.0 that choice was read by this menu alone; see [Updating from 2.21.0 and earlier](#updating-from-2210-and-earlier).
-- **After install** / **Enablement** — the fallback when the on/off list ISN'T itself synced (a section header's `on/off synced ✓` / `on/off not synced` chip toggles that, via a small popover — `Sync on/off` / `Stop syncing on/off`): `Turn it on` or `Leave it off`, offered for a plugin this run installs, or one that's already installed but off.
-- **Settings sync** — the item's own file-level sharing rule, the same three-stop control (`All devices` / `Desktop only` / `Mobile only`) as its Settings-tab card. A fields-mode item has no whole-file rule to move, so it reads `Per-key rules decide — see More` instead of offering a menu that would persist nothing.
-- **More** — a deep link that opens Settings scrolled to, and highlighting, this item's own card, for per-key rules, locks and companion folders.
+- **Default enabled on** (plugins, while the Core/Community on/off list itself is a synced item) — two parts, side by side: the shared answer (`All devices` / `Desktop only` / `Mobile only` / `Each device decides`) and, beside it, this device's own state. Most of the time the second part just reads `Follows the default` — there's nothing to say, because this device does whatever the shared answer says. The moment you tell it to do something else here, that's when the second part gets a state of its own (`On here` / `Off here`) and a menu to change it. See [Each device decides, and this device's own exceptions](#each-device-decides-and-this-devices-own-exceptions) below for what that second part means and where else it shows up.
+- **After install** / **Enablement** — the fallback when the on/off list ISN'T itself synced (a section header's read-only `synced` / `not synced` chip shows that, and jumps to where it's set — the on/off list's own card in Settings, see below): `Turn it on` or `Leave it off`, offered for a plugin this run installs, or one that's already installed but off.
+- **Default settings sync** — the item's own file-level sharing rule, the same shared-answer-plus-this-device shape as above (`All devices` / `Desktop only` / `Mobile only`, and this device's own `Not synced here` when you've opted this one out). A fields-mode item has no whole-file rule to move, so it reads `Per-key rules decide — see More` instead of offering a menu that would persist nothing.
+- **More** — an icon-only deep link (hover it for what it opens) that opens Settings scrolled to, and highlighting, this item's own card, for per-key rules, locks, companion folders, and — for a whole item — stopping its sync entirely (see [Leftovers](#leftovers) below).
 - **Note** — an honest runtime aside, e.g. Hotkeys' `Takes effect after an app reload`.
+
+#### Each device decides, and this device's own exceptions
+
+Every plugin's on/off state answers to one of two shared rules, plus whatever this one device wants for itself:
+
+- **All devices** / **Desktop only** / **Mobile only** — a shared answer. Every device that matches follows it, unless it has told this one device otherwise (below).
+- **Each device decides** — there is no shared answer at all. What this device already has stays exactly as it is, and every other device keeps its own, independently. Nothing here ever tries to make them agree.
+
+Whatever the shared rule says, **this device can still say something different** — a plugin you always want on here regardless of what the rest of the fleet does, or one you'd rather leave off on just this machine. That's "leave it to me on this device," and it lives in one place, the same place everywhere the plugin's row appears — its own card, the on/off list's own card, the Sync Center row: right beside the shared answer, reading `Follows the default` until you say otherwise, then `On here` or `Off here` in purple once you have. It never travels: setting it here doesn't touch your other devices, and a Pull or an Apply from another device can't reset it out from under you.
+
+#### Which devices turn each plugin on
+
+The Core plugins and Community plugins on/off lists are cards of their own now, under the **Obsidian** tab in Settings, alongside App settings/Appearance/Hotkeys — not just a list of individual plugin cards. Each carries a badge for how many plugins have a shared rule set (`N device-scoped`) and how many this device has excepted for itself (`N left to me`), and its drawer lists **Which devices turn each plugin on** — one row per plugin, same shared-answer-plus-this-device shape as everywhere else, so you can see and change every plugin's rule from one place instead of hunting through individual cards.
 
 #### Header chip and the this-device pane
 
@@ -118,7 +130,10 @@ An autocomplete dropdown opens as soon as the box is focused, suggesting keys th
 
 #### Leftovers
 
-A card's quiet `⊘ Stop syncing` footer button opens a menu with two reaches: **On this device** applies instantly (no modal, reversible in place) — this device stops installing/applying/capturing the item while your other devices keep syncing it as normal (its row here now reads `— Not synced on this device`, with the card explaining `you turned it off here`); **Everywhere…** opens the existing confirm dialog, optionally deleting its store copy, and removes it from every device's sync list.
+Stopping a whole item's sync has two reaches, and each lives where the choice belongs:
+
+- **On this device** — the row's own **Default settings sync** (above), local segment: applies instantly (no modal, reversible in place), this device stops installing/applying/capturing the item while your other devices keep syncing it as normal (its row here now reads `— Not synced on this device`, with the card explaining `you turned it off here`).
+- **Everywhere…** — the item's own card in Settings, next to its sync toggle: opens a confirm dialog, optionally deleting its store copy, and removes it from every device's sync list. Reach it from the Sync Center through the row's **More** link.
 
 **On this device** is stored on the device itself, not in Config Sync's own settings, so it never travels: a Pull and Adopt from another device can no longer wipe the choice you made here, and each device's list is its own. It also means the choice does not follow you — reinstalling Obsidian, or setting the vault up again on a new machine, starts with nothing opted out. Store files left behind by an Everywhere removal with no matching item surface in their own **Leftover** section for one-click cleanup — an item merely switched off on this device (whether via **On this device** or a core plugin's own toggle) keeps its store settings attached to its card, never in Leftover.
 
@@ -127,7 +142,7 @@ A card's quiet `⊘ Stop syncing` footer button opens a menu with two reaches: *
 An item's row already carries the facts that once lived in their own sections: `not installed here`, `desktop only` and `stays off` chips, plus a fate sentence naming exactly what Apply would do — `↓ Installs · turns on · applies settings`, `↓ Updates · applies settings`, `↓ Turns on · applies settings`, or plain `↓ Applies settings` once nothing about the plugin's own state needs to change. Ticking the row stages all of it as one action; expand the card (above) for the specific choice:
 
 - **Outdated** — the `On apply` clause reads `Updates {local version} → {store version}`. Installs and updates fetch the plugin from the official community plugin catalog, **pinned to the version the store was captured on** (recorded in `store.lock.json`) so every device converges on the same version, falling back to the latest stable with a warning when that exact release is gone. A plugin ahead of the store's recorded version shows a quiet metadata line instead (capturing again refreshes the store).
-- **Disabled here / not installed here** — the **Runs on** menu (while the on/off list is synced) or the card's **After install** / **Enablement** menu (while it isn't) decides whether the plugin turns on; the checkbox alone decides whether its settings are part of this run. A plugin that isn't in the catalog is staged (its config written, ready for a manual install) with a note to that effect.
+- **Disabled here / not installed here** — the **Default enabled on** row (while the on/off list is synced) or the card's **After install** / **Enablement** menu (while it isn't) decides whether the plugin turns on; the checkbox alone decides whether its settings are part of this run. A plugin that isn't in the catalog is staged (its config written, ready for a manual install) with a note to that effect.
 - **Desktop-only on a phone** — informational chip only, nothing to stage.
 - A failed update leaves the existing config untouched (an old version is assumed unsafe to overwrite blindly); a failed install still stages the config, since an uninstalled plugin can't be harmed by it. **A single failure never aborts a bulk run** — the offending plugin becomes one error row in the result strip and the rest of the batch still runs.
 
@@ -139,18 +154,18 @@ Obsidian and core-plugin items are anchored to the Obsidian app version rather t
 
 Every row across **Obsidian**, **Core plugins**, **Community plugins** and **Beta** is a card: name, badges (a grey `desktop-only plugin` chip when the plugin can't run on mobile; `on: desktop` / `on: mobile` / `on: this device` when a plugin's enabled state isn't the default; counts of device-scoped and encrypted rules), a sync toggle, and a chevron that opens its drawer.
 
-- The **Obsidian** tab has three cards: **App settings** (the whole `app.json` — editing, new-note and link behavior, and other general options), **Appearance** (theme, fonts and CSS snippets) and **Hotkeys** (your custom keyboard shortcuts).
-- **Core** and **Community** plugins are listed in full: a core plugin gets a full card even before it has written its settings file here — the file's path is known from the plugin itself, so its store copy stays attached wherever the file exists.
-- A community plugin your other devices sync but that isn't installed here still gets a card, as soon as it carries anything of its own on this device — switched on, switched off, a settings rule, a companion folder. The one shape that earns no card is a **Runs-on rule and nothing else**: that rule is set from the plugin's row in the Sync Center rather than from a card, so it doesn't summon one, and switching such a card off makes it disappear (see [Updating from 2.21.0 and earlier](#updating-from-2210-and-earlier)). It keeps its store copy and its Sync Center row either way, and installing the plugin here always gives it a card.
+- The **Obsidian** tab has five cards: **App settings** (the whole `app.json` — editing, new-note and link behavior, and other general options), **Appearance** (theme, fonts and CSS snippets), **Hotkeys** (your custom keyboard shortcuts), and **Core plugins** / **Community plugins** — the two on/off lists themselves, each showing **Which devices turn each plugin on** (see [Each device decides, and this device's own exceptions](#each-device-decides-and-this-devices-own-exceptions)).
+- **Core** and **Community** plugins also get a full card of their own each, one per plugin: a core plugin's card exists even before it has written its settings file here — the file's path is known from the plugin itself, so its store copy stays attached wherever the file exists.
+- A community plugin your other devices sync but that isn't installed here always gets a card too, the moment it carries anything of its own on this device — switched on, switched off, a settings rule, a companion folder. It keeps its store copy and its Sync Center row either way, and installing the plugin here always brings the card's settings with it.
 - The **Search all settings…** box spans General, all picker tabs, Advanced and Remotes, and accepts `section:` (general/obsidian/core/community/advanced/custom/remotes) and `type:` (file/folder) qualifiers with autocomplete alongside plain text. `section:` names a settings AREA here, so its list is the Sync Center's plus the areas that hold no items; custom rules and discovered files live on the Advanced tab, so `section:advanced` finds them — and so does `section:custom`, the same word the Sync Center uses for them, since both are true of a custom rule. `type:` reads each item's real kind: a rule pointing at a folder answers `type:folder`, and an item that syncs only a plugin's on/off state answers neither. The old `scope:` is not accepted — see [Retired syntax](#search--qualifiers).
 - The **Beta** tab tracks community plugins installed through [BRAT](https://github.com/TfTHacker/obsidian42-brat) — same card, same three drawer zones — so their configs sync like any other plugin.
 - Each section lists its cards alphabetically; sensitive-looking keys (tokens, secrets) are highlighted inside a card's File preview so you see them before enabling syncing.
 
 A card's drawer has up to three zones, and every sharing control in them is the same cycling icon: the glyph shows the current rule (a monitor+phone pair = `All devices`, a monitor = `Desktop only`, a phone = `Mobile only`, an airplay mark = `This device`), a click advances to the next value, and the default sits dimmed while anything narrower lights up in the accent color.
 
-#### Enabled on
+#### Default enabled on
 
-A plugin's on/off state lives on its own card, in its **Enabled on** zone. Plugin cards only: one cycling sharing icon for which devices turn the plugin itself on; it reads and writes the same enabled-plugins list Obsidian maintains.
+A plugin's on/off state lives on its own card, in its **Default enabled on** zone — the same shared-answer-plus-this-device row described in [Each device decides, and this device's own exceptions](#each-device-decides-and-this-devices-own-exceptions), reading and writing the same enabled-plugins list Obsidian maintains. Plugin cards only, and only for a plugin whose on/off list is itself tracked.
 
 #### Settings file
 
@@ -213,7 +228,7 @@ A card's Settings file zone includes a read-only preview of the file, collapsed 
 - A lock icon marks encrypted, and other keys are colored by rule state: red = this device, blue = desktop only, amber = mobile only, plain keys faint.
 - Clicking a key adds it as a rule directly — the escape hatch for anything the built-in detection misses.
 
-Each card is badged with its own summary — `N device-scoped` and `N encrypted` counts, plus its **Enabled on** chip when non-default — and capture reports state exactly what was encrypted or stripped.
+Each card is badged with its own summary — `N device-scoped` and `N encrypted` counts, plus its enabled-on chip when non-default (`on: desktop` / `on: mobile` / `on: this device`) — and capture reports state exactly what was encrypted or stripped.
 
 Every plugin — including `remotely-save`, `ioto-update`, `slides-rup` and `config-sync` itself — is a normal item like any other (e.g. `remotely-save` can be whole-file encrypted; `ioto-update` works well with per-key rules).
 
@@ -257,7 +272,7 @@ How the store travels between devices, beyond this device's own Capture/Apply (s
 1. Settings → Config Sync → under *Obsidian*, tick **Hotkeys** and **Appearance** (its card covers the settings file plus the `themes/` and `snippets/` companion folders).
 2. Open **Sync Center** from the ribbon menu and press **Capture N items**.
 3. On each other device, once your note sync has delivered the data folder: open **Sync Center** and press **Apply N items**.
-4. Open the Appearance card's `snippets/` companion folder to give any snippet its own sharing rule: `All devices` (synced everywhere) / `Desktop only` / `Mobile only` (shared, travels, and is enforced on the other device class) / `This device` (keeps its own on/off here, never synced). A plugin's **Enabled on** zone works the same way for which devices turn it on (a desktop-only plugin's cycle skips the mobile stop).
+4. Open the Appearance card's `snippets/` companion folder to give any snippet its own enablement rule: `All devices` / `Desktop only` / `Mobile only` (shared, travels, and is enforced on the other device class) / `Each device decides` (no shared answer — each device keeps whatever it already has). A plugin's **Default enabled on** zone works the same way for which devices turn it on (a desktop-only plugin's menu skips the `Mobile only` stop).
 
 **Sync a plugin's settings but keep credentials out of the store**
 1. Under *Community plugins*, open the plugin's card.

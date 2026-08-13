@@ -112,11 +112,10 @@ functions.
     and `asSharing`/`asFileSharing` for narrowing a value read off a document.
   - `StorageSection` (`obsidian` · `core` · `community` · `custom`) vs `Section` (those plus `beta`)
     — the STORED four and the PRESENTED five. `beta` is an install source derived at runtime from
-    `bratIndex`, never a storage key; `registry.ts`'s `storageSection` is the one bridge between the
+    each community item's own `bratRepo` field (`core/bratIndex.ts`'s `bratRepoIndex`), never a
+    storage key; `registry.ts`'s `storageSection` is the one bridge between the
     two. `ItemRef = ${StorageSection}/${ItemId}` with `itemRef`/`parseItemRef` — built from
     `StorageSection` on purpose, so a classification can never leak into an identity.
-  - `RunsOn = { device: DeviceClass; force?: { state: "on"|"off"; where: "everywhere"|"this-device" } }`
-    — two orthogonal axes where v2 had one enum spread over `memberRules` + `enabledOn`.
   - `FieldRule = { pattern, sharing: Sharing, encrypted: boolean, locked? }` — sharing and encrypted
     combine freely (`this-device` + `encrypted: true` is the one illegal combination, rejected by
     `manifest.ts`). `FileRule = { sharing: FileSharing, encrypted: boolean }`, where `encrypted:
@@ -130,6 +129,38 @@ functions.
   sharing rule (this-device elements never enter the store; per-class elements go through the same
   partition as class field rules) while preserving the other device's already-captured elements,
   since the array is one shared list, not a per-device sidecar.
+- `core/enablementRules.ts` (spec `2026-08-12-enablement-two-layers-design.md` §3.3) — the fleet
+  layer of enablement: one `Sharing` per list element, stored on the item that CARRIES the list
+  (`ruleHomeFor` — the two plugin lists carry their own since this release; the snippet list is a
+  field of `appearance`, so `appearance` carries it) under `settingsFile.perElement[<key>]`, `key`
+  from `switchList.ts`'s `perElementKeyFor`, the derived key's one producer. `enablementRules`/
+  `enablementRuleFor` read, `withEnablementRule` writes (pure — an `everywhere` write CLEARS the
+  entry rather than storing the default, so a round trip through the control leaves `data.json`
+  byte-identical). Storage is uniform across the three lists; APPLICATION is not and must not be —
+  `community-plugins.json`/`enabled-css-snippets` are string arrays and go through `perElement.ts`,
+  while `core-plugins.json` is a `Record<string, boolean>` and goes through `switchList.ts`'s own id
+  masking — and that split lives at the runtime seam (`main.ts`), never here.
+- `core/deviceElements.ts` — the local layer: which on/off-list elements THIS device has taken out
+  of the shared answer, and what it decided for them. Lives in `localStorage`
+  (`config-sync-device-elements`) and nowhere else — the exact failure C-#52 paid for once already,
+  a datum true only of this device stored in a document that travels wholesale. Shaped like
+  `data.json`'s `perElement` (list id → element id → state) so a reader holds one mental model for
+  both layers; only the value differs, `"on" | "off"` rather than a `Sharing`. `parseDeviceElements`
+  tolerates any unreadable shape as "no exception here" (never a load failure, the same discipline
+  `deviceOptOutGroups` follows), and `deviceElementState`/`withDeviceElement` are the one reader and
+  one writer.
+- `core/enablementDecision.ts` — the precedence (spec §5): given a list element's fleet rule, this
+  device's own exception for it, and this device's class, what a run does. One function,
+  `decideEnablement`, first match wins — replacing four separate derivations
+  (`memberLocalIdsFor`/`memberForceOffIds`/`runsOnForces`/`preferStoredRunsOn`) that used to
+  disagree about whether a local choice survives a pull, which is exactly how C-#52 happened.
+  Outputs `{ masked, force }`: `masked` joins `switchExceptions` (capture passes it through
+  untouched, apply keeps this device's own state); `force` on top of that writes the state outright,
+  `null` meaning "leave whatever is on disk." A `this-device` rule with no exception masks WITHOUT
+  forcing — the element is this device's own business, and pass-through already says that; a force
+  there would be this build deciding something the user never said.
+- `core/v4Migration.ts` — the v3 → v4 migration (spec §4), the one piece of code that will ever read
+  a v3 `data.json` again; see the migration chain note in Data model below for what it does.
 - `core/itemKeys.ts` — the ONE key space (spec §3/§4). The store lock, the device-local baselines
   and the device-local opt-out list are all keyed by `ItemRef`, and the compiler is its only
   producer. `companionRef(owner, basename)` keys a companion under its owner
@@ -159,36 +190,35 @@ functions.
 - `core/registry.ts` — the item registry and its compiler, replacing the v3-era per-kind catalog
   rows (`app-view-*`, `appearance-domain`) with one flat list of `ItemDef` (task-4-brief.md, spec
   §1/§6; app.json merged to a single card per `2026-07-26-ui-feedback-round2-design.md` §2).
-  `buildItemDefs(env)` builds one `ItemDef` per card — the three Obsidian cards (`app` /
-  `appearance` / `hotkeys`, fixed order from `OBSIDIAN_CARD_DEFS`), every core plugin (including
-  ones with no settings file yet, sorted by label) and every installed community/beta plugin (also
-  sorted by label). An `ItemDef`'s identity is STRUCTURAL — `{ section, id }`, with `defRef(def)` /
+  `buildItemDefs(env)` builds one `ItemDef` per card — the five Obsidian cards (`app` /
+  `appearance` / `hotkeys` / `core-plugins` / `community-plugins`, fixed order from
+  `OBSIDIAN_CARD_DEFS`; the last two are the on/off-list carriers, ordinary items since this
+  release rather than a compile-time special case — see Data model below), every core plugin
+  (including ones with no settings file yet, sorted by label) and every installed community/beta
+  plugin (also sorted by label). An `ItemDef`'s identity is STRUCTURAL — `{ section, id }`, with `defRef(def)` /
   `defForRef(defs, ref)` as the ref's only minter and matcher — while `groupName` is carried as
   LINEAGE (a community item's compiled group is still named `plugin-<id>`; nothing reads meaning
   back out of it). `defsForForeignItems(defs, items, betaIds)` synthesizes a def for a stored
-  community item whose plugin isn't installed here, gated by **`itemEarnsDef`: 2.21.0's "is there an
-  entry?" MINUS exactly one shape — an entry whose only content is a Runs-on rule.** That rule
-  reaches the document from the Sync Center ROW, not from a card, and in v2 it lived in a side table
-  with no `items` entry at all, so giving it a card would put a plugin this device does not have into
-  the Community tab (review I1). Every other shape earns a def, **`{enabled:false}` included** —
-  that entry's mere presence is this device's capture mask for the on/off-list element, and it is
-  how a card the user turned off is turned back on. An earlier attempt excluded it too and had to
-  close the resulting one-way door with a prune on the write path, which deleted the very entry that
-  IS the mask (review C1). One predicate, no second mechanism, and no write-path prune. The
-  user-visible consequence of the one excluded shape runs in both directions and is disclosed in
-  GUIDE: switching OFF a not-installed plugin that carries a Runs-on rule removes its card, and
-  clearing that rule makes a card appear.
+  community item whose plugin isn't installed here — every entry in `items.community` earns one,
+  **`{synced:false}` included** — that entry's mere presence is this device's capture mask for the
+  on/off-list element, and it is how a card the user turned off is turned back on. **`itemEarnsDef`
+  — 2.21.0's "is there an entry?" MINUS one shape whose only content was a Runs-on rule — is retired
+  along with `Item.runsOn` itself** (spec `2026-08-12-enablement-two-layers-design.md` task 8): an
+  enablement rule now lives on the CARRIER item, never on the plugin's own entry, so the shape that
+  rule used to excuse from earning a card no longer exists — `defsForForeignItems`' `known.has(id)`
+  guard (does `items.community` have an entry at all) is now the whole test, and a not-installed
+  plugin's card tracks that entry directly with no exception.
   `compileItems(defs, settings)` is the ONLY place that turns `(ItemDef[], CompileSettings)`
   into the `SyncGroup[]` the capture/apply engine already knows how to run: every item —
   including "app" — compiles through the same `compileSingleFile` path (there is no shared/merged
-  carrier any more), plus one group per companion folder, one per `items.custom` entry, and — only
-  when at least one plugin element is enabled — the hidden `core-plugins`/`community-plugins`
-  enablement-carrier groups (no longer surfaced as their own rows; see Data model below).
-  `enablementSharing(defs, settings, list)` projects each plugin item's `runsOn` into the carrier's
-  per-element `Sharing` map, unioned with `thisDeviceItems`, which `main.ts` folds into the
-  switch-list engine's runtime element-exception derivation (`core-plugins.json` /
-  `community-plugins.json` are not string-array files, so they cannot go through `perElement.ts` the
-  way `enabledCssSnippets` does); `structuralLocalElements` covers the disabled-card case.
+  carrier any more), plus one group per companion folder, one per `items.custom` entry, and — now
+  ordinary registry defs of their own (task 5) — the `core-plugins`/`community-plugins`
+  enablement-carrier groups (see Data model below). Per-element enablement sharing used to be
+  DERIVED here, from each item's own `runsOn.device` plus a disabled card's implicit this-device
+  (`enablementSharing`/`structuralLocalElements`/`elementSharings`/`deviceSharing`, all retired). It
+  is STORED, not derived, since `2026-08-12-enablement-two-layers`: the rule lives on the carrier
+  item's `perElement` map (`core/enablementRules.ts`) and is read from there — a rule is a thing the
+  user wrote, never a side effect of whether a card happens to be switched on.
   `customItemFromGroup(g, existing)` / `itemTail(item)` convert between a custom item and the
   `SyncGroup` shape it compiles to, carrying every unknown field through. `groupOwners(defs, items)`
   maps every compiled group name back to the item(s) that own it, so "Stop syncing" a group by name
@@ -375,7 +405,11 @@ functions.
 **Install & discovery**
 - `core/installer.ts` — download a plugin from the community catalog, version-pinned via the
   root manifest + tagged release; `CatalogError`/`DownloadError`.
-- `core/bratIndex.ts` — the BRAT `id → repo` index (synced via `data.json`) for beta plugins.
+- `core/bratIndex.ts` — the BRAT `id → repo` index for beta plugins. `bratRepoIndex(items)` is a
+  VIEW over `items.community.*.bratRepo` (each plugin's own field, since this release — not a
+  top-level `bratIndex` map, which used to be a second id list beside `items.community` that could
+  drift from it), and `withBratRepos` writes the inverse: every resolved id gets its repo on its own
+  item, and an id with no item yet earns a `{synced: false}` skeleton rather than starting to sync.
 - `core/pkm.ts` — PKM mode (`auto`/`ioto`/`default`) and store-root discovery
   (`resolveRootPath`, `discoverStoreRoot`).
 - `core/async.ts` — portable `retry`/`isRetryableError`/`TimeoutError`/`HttpStatusError` (the
@@ -385,24 +419,29 @@ functions.
 - `SyncCenterView.ts` — the hub: the header status bar (self "this device" chip + push/pull
   totals), the self pane (coldstart/adopt), the four fixed type sections (`renderTypeSection`,
   one object = one row, companion families dissolved into their parent's row), the unified card
-  renderer (`renderUnifiedCard` — On apply/On capture/State, Files, Resolve, Runs on/After
-  install/Enablement, Settings sync, More, Note), filters/search, the Leftover section, the
-  sticky result strip, run History, the Remotes block (which renders the remote pane's diffs
-  through the same type-section/family grammar as the main list), and Capture/Apply/Pull/Push
-  actions. Row content is memoized once per render (`deriveRow`) so the section partition,
-  filter-pill counts and row painting all read the same computed `Fate`/`FateInput` instead of
-  re-deriving it per consumer. Its search bar's qualifiers are `SYNC_QUALIFIER_SPECS` (`type:` ·
-  `section:` · `action:` · `mode:` · `device:`), declared `as const` so `SyncQualifierKey` makes
-  `syncResolvers()` total over them; `section:` presents FIVE values while only four are stored —
+  renderer (`renderUnifiedCard` — On apply/On capture/State, Files, Resolve (if conflicted),
+  `Default enabled on`/After install/Enablement, `Default settings sync`, More, Note), filters/search,
+  the Leftover section, the sticky result strip, run History, the Remotes block (which renders the
+  remote pane's diffs through the same type-section/family grammar as the main list), and
+  Capture/Apply/Pull/Push actions. Row content is memoized once per render (`deriveRow`) so the
+  section partition, filter-pill counts and row painting all read the same computed `Fate`/`FateInput`
+  instead of re-deriving it per consumer. Its search bar's qualifiers are `SYNC_QUALIFIER_SPECS`
+  (`type:` · `section:` · `action:` · `mode:` · `device:`), declared `as const` so `SyncQualifierKey`
+  makes `syncResolvers()` total over them; `section:` presents FIVE values while only four are stored —
   `beta` is computed from the BRAT index at render time (see `types.ts`'s `Section` vs
   `StorageSection`), and this is the one place presented and stored vocabulary legitimately differ.
   `rowRef(name)` is the view's own ref resolver — the host's registry lookup for a compiled row, the
   closed legacy rules for a store-only one — memoized against the group list's identity, because it
-  is asked per row per render. The card footer's single `⊘ Stop syncing` button (`renderStopSyncing`)
-  opens a Menu (`buildStopSyncingMenu`, C-#45) rather than the confirm modal directly — **On this
-  device** writes this device's own opt-out list in localStorage (one store, one gesture: the
-  fleet-shared `deviceOptOuts` map it used to keep in step is gone, see the data model below) and
-  re-renders; **Everywhere…** opens the unchanged `StopSyncingModal`.
+  is asked per row per render. **The card footer's destructive `⊘ Stop syncing` button is gone**
+  (`renderStopSyncing`/`buildStopSyncingMenu`/`canStopSyncing` all retired, spec
+  `2026-08-12-enablement-two-layers-design.md` §6.2): the Sync Center now only changes rules and sets
+  local exceptions; `StopSyncingModal` — unchanged itself — is called from exactly one place, the
+  settings panel card's own toggle (`SettingTab.ts`), so the destructive gesture has one home, beside
+  the confirmation the change deserves. `Default settings sync`'s row still offers a device opt-out —
+  it moved INTO that row's local segment (`buildFileLocalMenu`, `ui/enablementRow.ts`) rather than
+  the footer menu it used to live in — and `MORE`'s icon-only deep link (`renderMoreRow`, never
+  `sliders-horizontal`: that glyph already means `your rule` in the fate chips) is the only remaining
+  path to Settings for stopping a whole item's sync.
 - `fateModel.ts` — the fate-sentence engine: `rowFate(FateInput): Fate` is the pure function
   behind every row's verdict (spec `2026-08-06-sync-center-unified-grammar-design.md` §3's verb
   table) — glyph (`↓`/`↑`/`—`/`⚠`), sentence, chips (`not installed here`/`desktop only`/
@@ -444,16 +483,26 @@ functions.
   Fields/Companion-folders row models, path/companion validation) so the card's logic is
   unit-testable without touching the DOM; `SettingTab.ts`'s renderers turn these models into
   elements, and `sharingCycle.ts` reuses the sharing-cycle model (`sharingIcon`/`nextSharing`/
-  `sharingCycleTooltip`). Also exports `RUNS_ON_ICONS` for the Runs-on menu's five stops (`follows`/
-  `desktop`/`mobile`/`always-here`/`never-here`), the icon vocabulary behind the Sync Center
-  card's `Runs on` menu; the matching `RUNS_ON_LABELS` copy is a module-local const in
-  `SyncCenterView.ts` (not exported from `itemCard.ts`).
+  `sharingCycleTooltip`). `sharingIcon`'s own vocabulary (`monitor-smartphone`/`monitor`/
+  `smartphone`/`airplay`) backs the fleet segment of the two-segment row below; the old five-stop
+  `RUNS_ON_ICONS`/`RUNS_ON_LABELS` (`follows`/`desktop`/`mobile`/`always-here`/`never-here`) are
+  retired along with `Item.runsOn` itself.
 - `sharingCycle.ts` (was `scopeCycle.ts`) — the shared click-to-cycle sharing control
   (`renderSharingCycle`): one glyph that IS the state, a click advances it. Every Settings drawer
-  sharing cell renders through this one function. The Sync Center card's `Runs on`/`Settings sync` rows share the same glyph
-  vocabulary through a different idiom instead — an icon trigger that opens an Obsidian `Menu`
-  of the options rather than cycling in place (`renderCardIconMenuRow`, SyncCenterView.ts) — so
-  the two surfaces read as one control language without sharing the click interaction.
+  sharing cell that has no local layer (a plain field rule) still renders through this one function.
+- `ui/enablementRow.ts` — the two-segment row's MODEL (spec §6.1: `label | fleet segment | divider |
+  local segment`), shared by three renderers — a Sync Center row's `Default enabled on`
+  (`renderTwoSegmentRow`, SyncCenterView.ts, replacing the old `Runs on` icon-trigger-plus-menu
+  control `renderCardIconMenuRow` used to draw), a plugin card's `Default enabled on`, and a
+  carrier card's element rows (SettingTab.ts) — so what each segment SAYS is decided once and the
+  renderers only paint it. `RULE_OPTIONS`/`ruleIcon`/`ruleLabel` are the fleet vocabulary
+  (`sharingIcon`'s icons, plus `users` for `Each device decides` — `airplay`, `sharingIcon`'s own
+  this-device glyph, would read as screen mirroring to a reader who has not read the source);
+  `buildLocalMenu`/`buildFileLocalMenu` are the one producer each for the local segment's menu (the
+  element-level exception menu and the whole-file opt-out menu are different data and get their own
+  two-entry/four-value producers rather than one four-value shape trying to serve both).
+  `enablementRowModel` composes a rule + an exception into what both segments say; the local segment
+  renders no icon while it follows the default (a default has nothing to say).
 - `actionIcons.ts` — the single source for the per-action Lucide icons + color classes
   (Capture/Apply/Push/Pull) reused across the panel, buttons, badges and History.
 - `statusBar.ts` — pure segment model (`statusBarSegments`, `statusBarAriaLabel`) + a thin DOM
@@ -545,17 +594,16 @@ functions.
   `reloadSettings()` (`loadSettings()` + `recompile()`) is used wherever something just rewrote
   `data.json` externally — e.g. a self-group apply or `adoptConfiguration` — so `compiledGroups`
   reflects it immediately instead of staying stale until the next unrelated save. For the
-  `core-plugins`/`community-plugins` switch groups, `main.ts` derives the runtime mask/force-off
-  pair `CoreContext` needs from `registry.ts`'s `enablementSharing` (never from a standalone
-  settings field — see Data model below): `switchExceptions[group]` = this-device element ids (from
-  `thisDeviceItems` ∪ disabled-card structural locals) ∪
-  per-class ids not matching this device ∪ auto-derived exclusions (community-plugins
-  only — desktop-only manifest ids on mobile, plus plugin groups whose `devices` class doesn't
-  match); `switchForceOff[group]` = the subset of those that must be force-removed from the applied
-  list. Auto-derived ids are mask-only and never appear in force-off, so they keep local state
-  instead of being forced off — an explicit `This device` rule, by contrast, is enforced on the
-  wrong device class. `switchExceptions` is NOT part of the `ItemRef` key space: it is in-memory,
-  per-run, keyed by the switch list's own identity, and never persisted.
+  `core-plugins`/`community-plugins` switch groups, `main.ts` computes ONE `EnablementDecision` per
+  list element per run (`decisionsByList`, `core/enablementDecision.ts` — never three independent
+  derivations that can disagree, which is how C-#52 happened) and projects it three ways for
+  `CoreContext`: `switchExceptions[group]` = every masked element ∪ auto-derived exclusions
+  (community-plugins only — desktop-only manifest ids on mobile, plus plugin groups whose `devices`
+  class doesn't match, `augmentedSwitchExceptions`); `switchForceOn`/`switchForceOff[group]` = the
+  subset each decision forces. Auto-derived ids are mask-only and never appear in force-off, so they
+  keep local state instead of being forced off — an explicit local exception or an unmatched
+  `per-class` rule, by contrast, IS forced. `switchExceptions` is NOT part of the `ItemRef` key
+  space: it is in-memory, per-run, keyed by the switch list's own identity, and never persisted.
   `enabled-css-snippets` is unaffected by any of this — its per-element sharing
   lives in the compiled "appearance" group's `perElement.enabledCssSnippets` map instead (see
   `core/perElement.ts` above).
@@ -665,8 +713,9 @@ Changes must preserve these:
   nested object is ignored for class partitioning; `strip`/`encrypt` are unaffected and keep
   their any-depth semantics.
 - **Device-local facts never enter the shared store; the store contract decides what is
-  device-local.** The explicit **This device** choice lives in `thisDeviceItems` (stripped from the
-  self store copy like `remotes`), never in the item's own `runsOn`. On capture and comparison a
+  device-local.** The explicit **Each device decides** choice for a list element lives in
+  `config-sync-device-elements` (localStorage, never inside `data.json` at all — see the Data model
+  and Enablement notes below), never in the carrier item's own `perElement` rule. On capture and comparison a
   group's this-device fields are stripped using the union of the local rule and the store contract's
   rule for that group (`withContractLocals` + `readStoreContractLocals`, applied identically to both
   sides so they can't desync) — an un-adopted device can't publish device-local values downstream; a
@@ -884,10 +933,25 @@ Four storage homes, one per clause of invariant I above, and a datum belongs to 
 
 | Home | What lives there | Why not elsewhere |
 |---|---|---|
-| **`localStorage`** (per vault, per device) | the device id, the sync baselines, the passphrase, the cold-start dismissal, the **On this device** opt-out list | true only of THIS device and defined by its identity; `data.json` travels wholesale, so a shared field keyed by device id is erased by one pull + adopt |
-| **`data.json`, locked-local preset** (`selfPresetRules`) | `rootPath`, `remotes` (with their `tokenId` names), `thisDeviceItems` | this vault's transport wiring — it is in the document, but stripped from the document's own store copy so it never reaches another device |
-| **`data.json`, ordinary fields** | `items` (nested by section, custom items included), `bratIndex`, PKM mode, run-history config, ribbon/status toggles | the fleet's shared sync contract: every device is meant to converge on it |
+| **`localStorage`** (per vault, per device) | the device id, the sync baselines, the passphrase, the cold-start dismissal, the **On this device** whole-file opt-out list (`config-sync-device-optouts`), the on/off-list local exception table (`config-sync-device-elements`) | true only of THIS device and defined by its identity; `data.json` travels wholesale, so a shared field keyed by device id is erased by one pull + adopt |
+| **`data.json`, locked-local preset** (`selfPresetRules`) | `rootPath`, `remotes` (with their `tokenId` names) | this vault's transport wiring — it is in the document, but stripped from the document's own store copy so it never reaches another device |
+| **`data.json`, ordinary fields** | `items` (nested by section, custom items included), PKM mode, run-history config, ribbon/status toggles | the fleet's shared sync contract: every device is meant to converge on it |
 | **`store.lock.json`** | per-item `source`, `innate`, `display`, `capturedAt`, `hash`; the store's own `version` and `syncedWatermark` | provenance and freshness of store CONTENT, which is a fact about the store, not about the settings that produced it |
+
+Enablement itself answers the same two questions — "does this travel, and at what grain?" — twice
+over (spec `2026-08-12-enablement-two-layers-design.md` §2):
+
+|  | **fleet** — shared default, travels via `data.json` | **local** — this device's exception, never travels |
+|---|---|---|
+| **whole file**<br>(an item's own settings file) | `settingsFile.fileRule.sharing` | `config-sync-device-optouts` (localStorage) |
+| **one element of a list**<br>(a plugin on/off) | the carrier item's `settingsFile.perElement[<key>]` (`core/enablementRules.ts`) | `config-sync-device-elements` (localStorage, `core/deviceElements.ts`) |
+
+A third thing — whether a plugin is on RIGHT NOW — is neither: it lives in Obsidian's own on/off-list
+files, config-sync never stores it, and only masks it at capture/apply time. `core/enablementDecision.ts`
+is the one place a fleet rule and a local exception are reconciled into that mask, first match wins:
+a local exception outranks the rule; an `each device decides` (`this-device`) rule masks without
+forcing (this device's own state stands); a `per-class` rule not matching this device's class masks
+and forces off; otherwise the element follows the shared list untouched.
 
 **The one key space** (spec §3/§4): the store lock, the device-local baselines and the device-local
 opt-out list are all keyed by `ItemRef` (`${section}/${id}`), minted only by the compiler
@@ -896,71 +960,87 @@ opt-out list are all keyed by `ItemRef` (`${section}/${id}`), minted only by the
 — a section deliberately outside `StorageSection`, so `parseItemRef` refuses it and no reader can
 resolve it. Dropping such an entry instead would read as never-synced, which defaults to APPLY.
 
-- **`data.json`** (`ConfigSyncSettings`, plugin settings, `schemaVersion: 3`) — what syncs and how,
+- **`data.json`** (`ConfigSyncSettings`, plugin settings, `schemaVersion: 4`) — what syncs and how,
   compiled to `SyncGroup[]` on every load/save; there is no separate hand-edited manifest file
   anymore (the old `config-sync.json` at `<store root>/` is legacy and only ever read to detect a
   pre-v2 install — see the schema-gate invariant above). **Structure carries the taxonomy**: an
   item's family and id are where it SITS, not a prefix parsed out of its key. Fields:
   - `items: Record<StorageSection, Record<ItemId, Item>>` — two levels, never flattened, never a
     `beta` key. Two ids may legitimately collide across sections (a core and a community plugin
-    sharing a name), which is the point of nesting. `Item = { enabled, type?, path?, settingsFile?,
-    companions?, runsOn?, elements?, description?, label?, origin? }`:
+    sharing a name), which is the point of nesting. `Item = { synced, type?, path?, bratRepo?,
+    settingsFile?, companions?, description?, label?, origin? }`:
+    - `synced` (renamed from `enabled`, spec `2026-08-12-enablement-two-layers-design.md` §3.2) —
+      is this item synced at all. The old name meant two different things one line apart — "this
+      item is synced" and "this plugin is turned on" — and the second meaning is not stored here at
+      all; it lives in Obsidian's own on/off-list files, and config-sync only masks them (see
+      Enablement below). One word, one meaning.
     - `type` / `path` are required on a `custom` item and absent on a registry item, which derives
       both from its def. `type` is `"file" | "folder"` — v2's `"dir"` is converted by the migration
       and is not a word this build writes or shows.
+    - `bratRepo?: string` — the BRAT repo this plugin was installed from (`"owner/repo"`), when
+      BRAT manages it. Was a top-level `bratIndex` map — a second list of plugin ids beside
+      `items.community`, drifting from it the moment a plugin left one list and not the other. A
+      property of a plugin now lives on that plugin (see `bratIndex` below).
     - `settingsFile = { mode: SyncMode, fileRule?: FileRule, rules: Record<string, ItemFieldRule>,
       perElement: Record<string, PerElementSharing> }` (`ItemFieldRule = Omit<FieldRule, "pattern">`
       — the map key IS the pattern, so there is exactly one source of truth for which key a rule
       governs). `mode` is the FULL `SyncMode`, `encrypted` included: a registry item's mode is
       derived from whether it has per-key rules, but a `custom` item chooses it, and narrowing the
       type would turn a user's whole-file-encrypted rule into a plaintext one at the next capture.
+      `perElement`'s reserved key `""` (`switchList.ts`'s `perElementKeyFor`, the derived key's one
+      producer) means "this whole file IS the list": `core-plugins.json`/`community-plugins.json`
+      have no JSON field to index a rule by, so their carrier item — `items.obsidian.core-plugins` /
+      `items.obsidian.community-plugins`, real items since this release, not a compile-time-only
+      artifact — stores its rules under `perElement[""]` instead. `enabled-css-snippets` keeps
+      indexing by its actual field name (`appearance.json`'s `enabledCssSnippets`), unchanged.
     - `companions?: { path, device: DeviceClass, enabled }[]` — preset (`themes/`, `snippets/`) plus
       user-added companion folders. Optional, and **no longer written empty**: v2 wrote
       `companions: []` at every construction site so that 2.20.0, which read the field unguarded,
       would not throw. That was phase 1 of a two-phase removal (ledger C-#54); the version gate is
       phase 2, and every site now omits it. The card-visibility cost this drop was once thought to
-      carry is **not** one: `itemEarnsDef` (above) turns on the Runs-on-rule-only shape, not on
-      whether the entry is empty, so `{enabled:false}` still earns its card with or without a
-      `companions: []` beside it. `{enabled: false}` is not residue however much it looks like it —
+      carry is **not** one: any entry in `items.community`/`items.core` earns its card (above), with
+      or without a `companions: []` beside it. `{synced: false}` is not residue however much it looks like it —
       it is what an absent entry is not, in the one place that matters most, and nothing on the
       write path prunes it.
-    - `runsOn?: { device, force? }` — the Runs-on menu's stored rule, replacing v2's top-level
-      `memberRules[id]` map PLUS `enabledOn`. **A rule lives on the thing it governs**: a plugin's
-      entry in `community-plugins.json` IS that item, so its rule is a property of the item, not a
-      side table keyed by id. Merging the two changes one behaviour deliberately (spec §7b) — in v2
-      a Runs-on class choice was read by the menu alone while capture/apply followed `enabledOn`, so
-      the two could disagree; one field now means one thing, and the choice masks capture and apply
-      too. The migration preserves what the system DID, not what the menu SAID:
-      `runsOn.device = enabledOn ?? memberRules' class ?? "all"`. `force` (from v2's
-      `always-here`/`never-here`) records `where: "everywhere"`, which is what those rules already
-      did in effect; C-#46's product question — whether a force should mean this device or the
-      fleet — is explicitly out of scope, and the field exists so answering it later is a change of
-      value, not of shape.
-    - `elements?: Record<ElementId, RunsOn>` — on/off-list entries that are NOT items of their own
-      (snippet files under the snippets folder), living on their owning folder item for the same
-      "a rule lives on the thing it governs" reason. Declared as their home; nothing writes it yet.
-  - `thisDeviceItems: ItemRef[]` (was `localMembers`) — device-local set of items the user pinned to
-    **This device**. A locked `selfPresetRules` strip keeps it out of the shared self store copy
-    (like `remotes`/`rootPath`), so the choice never travels and a pull can't erase it.
+  - **Enablement — two layers, one precedence** (spec `2026-08-12-enablement-two-layers-design.md`
+    §2/§5; see the 2×2 table above). The fleet layer is `Item.settingsFile.perElement` on the
+    carrier item, read and written through `core/enablementRules.ts` (`enablementRules`,
+    `enablementRuleFor`, `withEnablementRule`) — one reader, one writer; all three UI entrances (a
+    carrier card's element row, a plugin card's `Default enabled on`, a Sync Center row) go through
+    it. The local layer is `config-sync-device-elements` in localStorage, read and written through
+    `core/deviceElements.ts` (`parseDeviceElements`, `deviceElementState`, `withDeviceElement`) —
+    shaped like `perElement` (list id → element id → state) so both layers share one mental model,
+    but it never travels: a datum true only of this device, stored in a document that travels
+    wholesale, is a datum another device's pull will overwrite (C-#52). `core/enablementDecision.ts`'s
+    `decideEnablement` is the one place the two layers combine into a capture/apply mask (see the
+    precedence spelled out above the 2×2 table). **`Item.runsOn` and `Item.elements` are retired
+    outright** — not deprecated, not read as a fallback: a rule now lives on the carrier from the
+    moment it is written, never derived from a disabled card or a side table, and `core/v4Migration.ts`
+    below is the only code that will ever read a v3 `runsOn` again.
   - `deviceOptOuts` — **gone** (spec §5, C-#54 phase 2). See the Storage invariants section: the
     version gate replaces the carry, and the migration absorbs the map into localStorage once before
     deleting it. An item in the localStorage list is excluded
     from THIS device's runs (capture/apply payload assembly and the capture lock-label heal both
     skip it) while its row stays visible, rendering exactly like a devices-class-excluded row
     (`groupExcludedHere`/C-#24) — same glyph/sentence/chip, a distinct card clause
-    (`FateInput.optedOutHere`, `fateModel.ts`/`SyncCenterView.ts`'s `stateClauseText`).
+    (`FateInput.optedOutHere`, `fateModel.ts`/`SyncCenterView.ts`'s `stateClauseText`). This is the
+    WHOLE-FILE opt-out (`config-sync-device-optouts`, keyed by `ItemRef`) — a different table from
+    the per-ELEMENT exception table above (`config-sync-device-elements`, keyed by list id + element
+    id): the two answer the two rows of the 2×2 table, and neither reads the other's key space.
   - `customGroups` — **gone**: `custom` stopped being a second data shape (`SyncGroup[]` literals)
     and became a section whose items have the same `Item` shape as everything else. One consequence
     is accepted (spec §7b): `items.custom` is an object, so an all-digits rule name sorts to the top
     where v2's array kept authored order — order was checked and is not load-bearing.
-  - `bratIndex` (was `bratPluginIndex`), PKM mode, run-history config, remotes, ribbon/status-bar
-    toggles. `bratIndex` is a REPLICATED index, not a cache: a device with
-    no BRAT of its own still needs it to install beta plugins, so only a device that HAS a BRAT
-    repo list writes it (`refreshBratIndex` returns without saving on an empty list — its fill+prune
-    would otherwise let the device that knows least wipe the index for everyone, spec
-    `2026-08-11-data-model-hardening.md` §3.3). Everyone else reads. The guard stops at the EMPTY
-    list: a device with one repo still prunes the rest on write, which invariant II.4 says it should
-    not — see the note under Storage invariants above.
+  - `thisDeviceItems` and `bratIndex` — both **gone** (spec `2026-08-12-enablement-two-layers-design.md`
+    §3.2). `thisDeviceItems` was a field whose SEMANTICS were "this device" but whose STORAGE
+    traveled with every other device — the exact shape C-#52 paid for once already — and it split
+    across the two enablement layers above at the v3→v4 migration (see below). `bratIndex` was a
+    REPLICATED top-level map, not a cache — a device with no BRAT of its own still needed it to
+    install beta plugins, so only a device that HAD a BRAT repo list wrote it — and is now
+    `Item.bratRepo`, a property of the plugin it describes, on the plugin itself; a document with no
+    community plugins simply has no `bratRepo` fields to read, which is what "read from the item
+    that has one" already means.
+  - PKM mode, run-history config, remotes, ribbon/status-bar toggles — unchanged.
   - Written through Obsidian's `saveData` (never externally, to avoid a reload); `main.ts`'s
     `recompile()` recomputes `compiledGroups` from `items` after every save (see the
     Connector section above) — nothing here is itself a `SyncGroup[]`.
@@ -977,6 +1057,32 @@ resolve it. Dropping such an entry instead would read as never-synced, which def
     `appJson.mode`), and `drainEnabledOnLocal` turns a legacy `enabledOn: "local"` into a
     `thisDeviceItems` entry. They are deferred behaviour, not retired behaviour, and each has its
     own tests.
+  - **The migration chain is v2 → v3 → v4, run in memory on one load** (`classifySettings`'s
+    `{kind:"migrate", from}`, `MIGRATABLE_SCHEMAS = [2, 3]`): a document that skipped every release
+    in between still lands on v4 in one load, saved once. `v2Migration.ts` is unchanged by this
+    release — it still produces an intermediate v3-shaped document, `runsOn` included — and
+    `core/v4Migration.ts` then takes that document the rest of the way: `enabled` → `synced`;
+    `runsOn.device` becomes a `perClass` rule on the carrier, `runsOn.force` is dropped (all three
+    real vaults had zero of them at migration time); `bratIndex` folds into `Item.bratRepo`.
+    **`thisDeviceItems` migrates in two halves, and the second is not optional** (spec §4): a v3 pin
+    did not merely mask its element, it FORCED it, so the fleet half (a `this-device` rule on the
+    carrier, preserving WHO decides) and the local half (the pinned element's CURRENT state, frozen
+    into `config-sync-device-elements` by `main.ts`'s `freezeThisDeviceElements`, preserving WHAT was
+    decided) are both required — the rule alone would turn a force into a pass-through, and the
+    first apply after the migration could move a switch the user had pinned. The migration also
+    reconstructs the STRUCTURAL this-device rule v3 never wrote down: every core/community entry
+    whose card was off (`synced !== true`) gets a stored `this-device` rule ahead of any class rule
+    its `runsOn` would otherwise imply, because v3 masked such an entry unconditionally and never
+    recorded that as a rule — without it, the first capture after upgrading would publish every
+    locally-enabled plugin the user had never chosen to sync. Verified: the three list files
+    (`community-plugins.json`/`core-plugins.json`/`appearance.json`) are byte-identical before and
+    after the migration (`tests/enablementRuntime.test.ts`) — the one hard behavioral assertion it
+    makes. **One user-visible behavior does change on the far side of the upgrade, by design**: a
+    plugin nobody ever wrote a rule for now follows the shared on/off list once the list itself is
+    synced, where in v3 an item with no `runsOn` had nothing forcing it to reconcile with the fleet
+    at all — so the first sync after upgrading converges whatever switch differences had silently
+    accumulated between devices (some plugins may turn on or off). Disclosed in GUIDE and README,
+    not narrated further here.
 - **`store.lock.json`** — capture metadata, `version: 3`. Top level: `version` (the lock's own format
   version; absent = 1, this build writes `STORE_LOCK_VERSION` = 3 — see the Lock model invariant for
   what a higher one means), an optional `syncedWatermark` (the lineage, moved only by a pull;
@@ -1066,11 +1172,13 @@ resolve it. Dropping such an entry instead would read as never-synced, which def
 - **Release flow**: `npm version <x.y.z>` (bumps `manifest.json`/`versions.json`, commits, tags)
   → `git push --follow-tags` → CI builds a **draft** GitHub release with the three assets →
   hand-write the release notes → publish (the directory and BRAT only see published releases).
-- **The v3 release's notes must LEAD with "update every device first."** `schemaVersion: 3` and
-  `store.lock.json version: 3` are one-way: a device on 2.21.0 refuses the new format and changes
-  nothing, but one on **2.20.0 or earlier resets to defaults**, and that cannot be fixed
-  retroactively. The three deliberate behaviour differences belong in the same notes, not a
-  footnote — the Runs-on mask, the missing Settings card for a not-installed community plugin whose
-  only content here is a Runs-on rule (and the card that appears when that rule is cleared), and
-  the stale display name on a v1/v2 store. `docs/GUIDE.md`'s
+- **This (v4) release's notes must LEAD with "update every device first."** `schemaVersion: 4` is
+  one-way: a device on 2.21.0 or 2.22.0 refuses the new format and changes nothing, but one on
+  **2.20.0 or earlier resets to defaults**, and that cannot be fixed retroactively.
+  `store.lock.json version: 3` is untouched by this release — the enablement model lives entirely in
+  `data.json`, and nothing here gates on the lock's own format. The behaviour difference belongs in
+  the same notes, not a footnote — **a plugin nobody ever wrote an enablement rule for now follows
+  the shared on/off list once the list itself is synced**, so the first sync after upgrading
+  converges whatever switch differences had silently accumulated between devices (some plugins may
+  turn on or off). `docs/GUIDE.md`'s
   [Updating from 2.21.0 and earlier](GUIDE.md#updating-from-2210-and-earlier) is the long form.
