@@ -766,10 +766,8 @@ export default class ConfigSyncPlugin extends Plugin {
       loadRunHistory: () => this.loadRunHistory(),
       appendRunHistory: (kind, remote, results) => this.appendRunHistory(kind, remote, results),
       clearRunHistory: () => this.clearRunHistory(),
-      stopSyncing: (groupName, deleteStore) => this.stopSyncing(groupName, deleteStore),
       deviceOptedOut: (groupName) => this.isDeviceOptedOut(groupName),
       setDeviceOptOut: (groupName, on) => this.setDeviceOptOut(groupName, on),
-      storeFileCount: (groupName) => this.storeFileCount(groupName),
       listLeftoverStoreFiles: () => this.listLeftoverStoreFiles(),
       deleteLeftoverStoreFiles: (rels) => this.deleteLeftoverStoreFiles(rels),
       appendActionHistory: (entry) => this.appendActionHistory(entry),
@@ -1545,6 +1543,13 @@ export default class ConfigSyncPlugin extends Plugin {
   // This device's own exception for that element: null = follows the rule.
   deviceElementFor(list: RuleListId, elementId: string): DeviceElementState | null {
     return deviceElementState(this.deviceElements(), list, elementId);
+  }
+
+  // Every element of a list this device has an exception for — what a carrier card's `N left to me`
+  // badge counts and what its element list unions in (spec §6.4). The per-element read above cannot
+  // answer it: the table is localStorage, which only this file touches.
+  deviceElementIds(list: RuleListId): string[] {
+    return deviceElementIds(this.deviceElements(), list);
   }
 
   // "Leave it to me" keeps EXACTLY what is on this device right now (spec §6.5). The state is read

@@ -11,7 +11,7 @@ import { ConfigSyncSettingTab } from "../src/ui/SettingTab";
 import { EVERYWHERE, GroupResult, Remote, Sharing, SyncGroup } from "../src/core/types";
 import { CaptureItem, ApplyItem } from "../src/core/ConfigSyncCore";
 import { itemsIn } from "./items";
-import { Item, ItemMap } from "../src/core/registry";
+import { Item, ItemDef, ItemMap } from "../src/core/registry";
 import { enablementRuleFor } from "../src/core/enablementRules";
 
 // spec 2026-08-11-data-model-hardening.md §4 (invariant II.3): a document or store written by a
@@ -53,6 +53,12 @@ interface StopSurface {
   refreshLocalStatus: () => Promise<void>;
   settingsWritable: () => boolean;
   setEnablementRule: (list: string, elementId: string, sharing: Sharing) => Promise<void>;
+  // Reached through the plugin itself, not through a host: `stopSyncing` moved off `SyncCenterHost`
+  // in task 12 (the footer that called it retired) and onto `SettingsHost`, which IS the plugin.
+  stopSyncing: (groupName: string, deleteStore: boolean) => Promise<string[] | null>;
+  storeFileCount: (groupName: string) => Promise<number>;
+  displayName: (group: string, storedLabel?: string) => string;
+  appendActionHistory: (entry: { kind: "stop-sync"; desc: string; changed: number }) => Promise<void>;
   settings: { rootPath: string; items: ItemMap };
   syncCenterHost: () => {
     schemaStop: () => { found: number } | null;
@@ -61,7 +67,6 @@ interface StopSurface {
     adoptConfiguration: () => Promise<GroupResult[] | null>;
     pullFrom: (remote: Remote) => Promise<GroupResult[] | null>;
     pushTo: (remote: Remote) => Promise<GroupResult[] | null>;
-    stopSyncing: (groupName: string, deleteStore: boolean) => Promise<string[] | null>;
     deleteLeftoverStoreFiles: (rels: string[]) => Promise<string[] | null>;
     appendActionHistory: (entry: { kind: "stop-sync"; desc: string; changed: number }) => Promise<void>;
     appendRunHistory: (kind: "capture", remote: string | null, results: GroupResult[]) => Promise<void>;
@@ -265,7 +270,7 @@ describe("§4.1 — a data.json from a newer build is never reset and never over
 
     // null, not [] — "[] deleted" is a legitimate outcome the caller records in the run history,
     // so the refusal has to be a value a caller cannot mistake for a successful run (§4.2b).
-    expect(await instance.syncCenterHost().stopSyncing("plugin-demo", true)).toBeNull();
+    expect(await instance.stopSyncing("plugin-demo", true)).toBeNull();
     expect(await instance.syncCenterHost().deleteLeftoverStoreFiles(["store/configdir/onlyANewerBuildKnowsThis.json"])).toBeNull();
 
     expect(await io.exists("cs/store/configdir/plugins/demo/data.json")).toBe(true);
@@ -978,10 +983,58 @@ describe("§5 — content at the far end with no lock", () => {
   });
 });
 
-// §4.2b, round-4 review N5's "a flow that will be refused refuses BEFORE it opens" coverage lived
-// here against SyncCenterView.openStopSyncing — retired with the Sync Center footer (2026-08-12-
-// enablement-two-layers task 10). Task 12 moves the modal invocation itself to the settings-panel
-// card; this refuse-before-open guarantee needs an equivalent test at its new call site then.
+// §4.2b, round-4 review N5's "a flow that will be refused refuses BEFORE it opens". The coverage
+// lived here against SyncCenterView.openStopSyncing until the Sync Center footer retired
+// (2026-08-12-enablement-two-layers task 10); the gesture's one home is now the settings-panel
+// card's own toggle (spec §6.2), so the guarantee is re-asserted at that call site.
+//
+// `storeFileCount` is the probe: `openStopSyncing` awaits it BEFORE it constructs the modal, so a
+// run that never asks for a count is a run that never opened one — and it never reached
+// `stopSyncing` either, which is the mutation the refusal exists to stop.
+describe("stop syncing refuses before the modal opens", () => {
+  const DEF: ItemDef = { section: "obsidian", id: "app", groupName: "app", label: "App settings", description: "" };
+
+  function tabWith(writable: boolean): { open: () => Promise<void>; counted: () => number; stopped: () => number } {
+    let counted = 0;
+    let stopped = 0;
+    const host = {
+      settingsWritable: () => writable,
+      settings: { items: itemsIn({}) },
+      installedPluginIds: () => [],
+      itemDefs: () => [DEF],
+      displayName: (group: string) => group,
+      storeFileCount: async () => {
+        counted += 1;
+        return 3;
+      },
+      stopSyncing: async () => {
+        stopped += 1;
+        return [];
+      },
+      appendActionHistory: async () => {},
+    };
+    const tab = new ConfigSyncSettingTab({} as never, host as never) as unknown as { openStopSyncing: (def: ItemDef, wrap: unknown) => Promise<void> };
+    return { open: () => tab.openStopSyncing(DEF, {}), counted: () => counted, stopped: () => stopped };
+  }
+
+  it("a stopped schema never opens the modal, and never mutates", async () => {
+    const tab = tabWith(false);
+
+    await tab.open();
+
+    expect(tab.counted()).toBe(0);
+    expect(tab.stopped()).toBe(0);
+  });
+
+  it("...and an allowed one gets as far as the modal, which then owns the outcome", async () => {
+    const tab = tabWith(true);
+
+    await tab.open();
+
+    expect(tab.counted()).toBe(1);
+    expect(tab.stopped()).toBe(0); // nothing is removed until the user confirms in the modal
+  });
+});
 
 // §4.2b/N3, the settings tab's own drafts: a refused gesture must not move what the panel renders,
 // or the UI shows an edit that never happened. The Advanced tab gets this from ONE line —

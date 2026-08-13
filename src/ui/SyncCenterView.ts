@@ -276,15 +276,16 @@ export interface SyncCenterHost {
   loadRunHistory(): Promise<RunRecord[]>;
   appendRunHistory(kind: RunKind, remote: string | null, results: GroupResult[]): Promise<void>;
   clearRunHistory(): Promise<void>;
-  // Deleted store paths (display form), or `null` when the action was refused — the same signal
-  // the runs use (see setLastRun). `[]` means "it ran and deleted nothing", which is a real
-  // outcome the caller records in the run history, so a refusal must not share that value (§4.2b).
-  stopSyncing(groupName: string, deleteStore: boolean): Promise<string[] | null>;
+  // `stopSyncing`/`storeFileCount` are NOT here: the Stop-syncing footer that called them retired
+  // with §6.2's row contract, and the gesture's one home is now the settings-panel card's own
+  // toggle — so both moved to `SettingsHost` (SettingTab.ts) rather than lingering here with no
+  // caller. This view changes rules and sets local exceptions; stopping a whole item is a jump away
+  // through `MORE`.
+  //
   // The Stop-syncing menu's per-device layer (C-#45, spec §1/§3): read = has THIS device opted
   // this group out; write = set/clear THIS device's own opt-out (never another device's).
   deviceOptedOut(groupName: string): boolean;
   setDeviceOptOut(groupName: string, on: boolean): Promise<void>;
-  storeFileCount(groupName: string): Promise<number>;
   listLeftoverStoreFiles(): Promise<{ rel: string; name: string; path: string; size: number }[]>;
   deleteLeftoverStoreFiles(rels: string[]): Promise<string[] | null>; // deleted rels, or null when refused (§4.2b)
   appendActionHistory(entry: { kind: RunKind; desc: string; changed: number; removed?: string[]; deletedFiles?: string[] }): Promise<void>;

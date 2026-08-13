@@ -13,6 +13,7 @@
 import { GROUP_NAME_RE } from "../core/manifest";
 import { basename } from "../core/pathing";
 import { DeviceElementState } from "../core/deviceElements";
+import { enablementRules, RuleListId } from "../core/enablementRules";
 import { deriveMode, emptyItem, Item, ItemDef, ItemFieldRule, ItemMap, itemFor, ItemSettingsFile, withItem } from "../core/registry";
 import {
   DeviceClass,
@@ -46,6 +47,15 @@ const ON_BADGE_CLASS = {
   local: "config-sync-card-badge-local",
 } as const;
 
+// A carrier card's two badges (spec §6.4). Two facts, two colors: what the fleet agreed
+// (`N device-scoped`) and what this device kept for itself (`N left to me`). Mixing them into one
+// count is what made the old "N device-scoped" badge unreadable on a device that had its own
+// exceptions. The fleet half keeps the count palette every other card badge counts in; the local
+// half takes the purple the two-segment row's local segment already wears when it is set
+// (`.config-sync-tworow-seg.is-local.is-set`), so the color says "this device" in both places.
+const CARRIER_FLEET_BADGE_CLASS = "config-sync-card-badge-count";
+const CARRIER_LOCAL_BADGE_CLASS = "config-sync-card-badge-mine";
+
 // A fileRule-encrypted item (Plain mode, whole file encrypted) counts as one toward "N
 // encrypted" — there is no separate lock-badge string in the copy contract (spec §10's badge
 // list has only "N encrypted"), so the fileRule contributes to the same count instead of a
@@ -76,12 +86,73 @@ export function countEncrypted(item: Item): number {
   return n;
 }
 
+// ── The two on/off-list carrier cards (spec §6.4) ───────────────────────────────────────────
+
+// Which enablement list a card CARRIES, or null for a card that carries none. THE producer of
+// "this is a carrier card": the badges, the drawer's element section and its row list all ask it,
+// so a renamed id or a fourth list lands in exactly one place. A carrier's item id IS its list id —
+// the same string `ruleHomeFor` keys that list's rules by (enablementRules.ts).
+export function carrierListFor(def: ItemDef): RuleListId | null {
+  if (def.section !== "obsidian") return null;
+  return def.id === "core-plugins" || def.id === "community-plugins" ? def.id : null;
+}
+
+export interface CarrierCounts {
+  fleet: number;
+  local: number;
+}
+
+// `fleet` counts CLASS rules only, not every rule: `Each device decides` (`this-device`) hands the
+// element back to each device rather than scoping it to one kind of device, so counting it as
+// "device-scoped" would name something the rule does not do. `exceptionIds` comes from the caller
+// because the exception table is localStorage (deviceElements.ts) — no `Item` knows it.
+export function carrierBadgeCounts(items: ItemMap, list: RuleListId, exceptionIds: string[]): CarrierCounts {
+  const rules = enablementRules(items, list);
+  return { fleet: Object.values(rules).filter((s) => sharingClass(s) !== null).length, local: exceptionIds.length };
+}
+
+export const CARRIER_ELEMENTS_LABEL = "Which devices turn each plugin on";
+
+export interface CarrierElementRow {
+  elementId: string;
+  label: string;
+  desktopOnly: boolean;
+}
+
+// The carrier drawer's element list (spec §6.4): every element installed on this device, plus every
+// element that already carries a rule or a local exception — a plugin uninstalled here still has a
+// choice recorded for the fleet, and a row that vanished the moment it was uninstalled would leave
+// that choice unreachable from the only card that shows it. Sorted by what the reader sees (the
+// def's label where the element is installed, the raw id where it is not), never by id.
+export function buildCarrierElementRows(defs: ItemDef[], list: RuleListId, ruledIds: string[], exceptionIds: string[]): CarrierElementRow[] {
+  const installed = new Map<string, ItemDef>();
+  for (const def of defs) {
+    if (def.enablement?.list === list) installed.set(def.enablement.element, def);
+  }
+  const ids = new Set([...installed.keys(), ...ruledIds, ...exceptionIds]);
+  return [...ids]
+    .map((elementId) => {
+      const def = installed.get(elementId);
+      return { elementId, label: def?.label ?? elementId, desktopOnly: def?.desktopOnly === true };
+    })
+    .sort((a, b) => a.label.localeCompare(b.label, "en", { sensitivity: "base" }));
+}
+
 // `enablement` is the card's two enablement layers (spec §5), or null for a def that has no
 // enablement projection at all: the fleet rule from the carrier item (enablementRules.ts) and this
 // device's own exception (deviceElements.ts). It replaces the `isThisDevice` boolean AND the
 // `item.runsOn.device` read this used to do — both of those were the retired one-field model, and
 // a badge derived from a field no run reads any more would be a claim about nothing.
-export function computeBadges(def: ItemDef, item: Item, enablement: { rule: Sharing; exception: DeviceElementState | null } | null): Badge[] {
+//
+// `carrier` is the counts for a card that carries a list (carrierBadgeCounts), null for every other
+// card. It REPLACES this card's own `N device-scoped` badge rather than joining it: on a carrier
+// those two would be the same per-element class rules counted twice, under the same word.
+export function computeBadges(
+  def: ItemDef,
+  item: Item,
+  enablement: { rule: Sharing; exception: DeviceElementState | null } | null,
+  carrier: CarrierCounts | null
+): Badge[] {
   const badges: Badge[] = [];
   // On/off-only badge first, innate property (settingsFile state on the def)
   if (def.settingsFile !== undefined && def.settingsFile.defaultPath === null) {
@@ -105,8 +176,13 @@ export function computeBadges(def: ItemDef, item: Item, enablement: { rule: Shar
     if (enablement.exception !== null) badges.push({ text: ON_BADGE_TEXT.local, cls: ON_BADGE_CLASS.local });
     else if (cls !== null) badges.push({ text: ON_BADGE_TEXT[cls], cls: ON_BADGE_CLASS[cls] });
   }
-  const classPinned = countClassPinned(item);
-  if (classPinned > 0) badges.push({ text: `${classPinned} device-scoped`, cls: "config-sync-card-badge-count" });
+  if (carrier !== null) {
+    if (carrier.fleet > 0) badges.push({ text: `${carrier.fleet} device-scoped`, cls: CARRIER_FLEET_BADGE_CLASS });
+    if (carrier.local > 0) badges.push({ text: `${carrier.local} left to me`, cls: CARRIER_LOCAL_BADGE_CLASS });
+  } else {
+    const classPinned = countClassPinned(item);
+    if (classPinned > 0) badges.push({ text: `${classPinned} device-scoped`, cls: "config-sync-card-badge-count" });
+  }
   const encrypted = countEncrypted(item);
   if (encrypted > 0) badges.push({ text: `${encrypted} encrypted`, cls: "config-sync-card-badge-count" });
   return badges;
@@ -186,6 +262,17 @@ export interface FieldRowModel {
 // rows and File preview's click-to-add both exclude it.
 export const ENABLED_CSS_SNIPPETS_KEY = "enabledCssSnippets";
 
+// A perElement key that holds an ENABLEMENT LIST's rules is never an ordinary rule row: those rules
+// have rows of their own on the same card (the Appearance card's snippet members, a carrier card's
+// element rows — spec §6.4). The whole-file lists' reserved key is the empty string
+// (switchList.ts's perElementKeyFor), which registry.ts's deriveMode excludes for the same reason
+// and which has no key name to render at all — a nameless rule row with a ✕ beside it is not a
+// thing to show a user.
+function isEnablementRuleKey(def: ItemDef, key: string): boolean {
+  if (carrierListFor(def) !== null) return key === "";
+  return def.section === "obsidian" && def.id === "appearance" && key === ENABLED_CSS_SNIPPETS_KEY;
+}
+
 // Rule rows list ONLY configured keys (rules ∪ perItem) — browsing the file's full key set is the
 // File preview's job now (spec 2026-07-26-card-visual-refresh-design.md §3.1). Key order: rules
 // first (insertion order), then perItem-only keys. A key absent from liveDoc (settings file not
@@ -194,10 +281,7 @@ export const ENABLED_CSS_SNIPPETS_KEY = "enabledCssSnippets";
 export function buildRuleRows(def: ItemDef, item: Item, liveDoc: Record<string, unknown>): FieldRowModel[] {
   const sf = item.settingsFile;
   if (sf === undefined) return [];
-  const isAppearance = def.section === "obsidian" && def.id === "appearance";
-  const keys = [...Object.keys(sf.rules), ...Object.keys(sf.perElement).filter((k) => !(k in sf.rules))].filter(
-    (k) => !(isAppearance && k === ENABLED_CSS_SNIPPETS_KEY)
-  );
+  const keys = [...Object.keys(sf.rules), ...Object.keys(sf.perElement).filter((k) => !(k in sf.rules))].filter((k) => !isEnablementRuleKey(def, k));
   return keys.map((key) => ({
     key,
     isArray: isStringArrayValue(liveDoc[key]),
@@ -258,37 +342,30 @@ export const SNIPPET_MEMBER_HINT = "Files always sync — each snippet's choice 
 export const SNIPPET_ORPHAN_HINT =
   "A deleted file stays listed while it still has a device choice. Forget clears the choice — the next capture then removes the snippet from every device.";
 
+// The row carries no `sharing` of its own: since the member rows became element-rule rows (spec
+// §6.4) each one reads its rule through `enablementRuleFor`, the same reader the other two
+// entrances use, so a copy handed down through this model would be a second reader with a chance
+// to be stale.
 export interface SnippetMemberRow {
   name: string;
-  sharing: Sharing;
   fileExists: boolean;
 }
 
-// Union of files actually present under snippets/ and any name already given a sharing in
+// Union of files actually present under snippets/ and any name already given a rule in
 // perElement.enabledCssSnippets (so a ruled-but-since-deleted file doesn't just vanish from view —
 // fileExists: false marks those orphans for the pill/Forget affordance).
-export function buildSnippetMemberRows(fileNames: string[], perElement: PerElementSharing): SnippetMemberRow[] {
+export function buildSnippetMemberRows(fileNames: string[], rules: PerElementSharing): SnippetMemberRow[] {
   const files = new Set(fileNames);
-  const names = new Set([...fileNames, ...Object.keys(perElement)]);
-  return [...names].sort((a, b) => a.localeCompare(b)).map((name) => ({ name, sharing: perElement[name] ?? EVERYWHERE, fileExists: files.has(name) }));
+  const names = new Set([...fileNames, ...Object.keys(rules)]);
+  return [...names].sort((a, b) => a.localeCompare(b)).map((name) => ({ name, fileExists: files.has(name) }));
 }
 
-// Writes one snippet member's sharing into perElement[ENABLED_CSS_SNIPPETS_KEY] (final-review blocker:
-// the settings-tab dropdown's write path). An everywhere sharing clears that name's entry — and, when the
-// map is left empty, deletes the ENABLED_CSS_SNIPPETS_KEY entry from perItem entirely rather than
-// leaving `{}` behind: deriveMode counts the KEY's presence, not its contents, so a bare `{}` would
-// keep the card stuck in Fields mode forever with nothing to undo it (enabledCssSnippets is
-// excluded from rule rows — see ENABLED_CSS_SNIPPETS_KEY above — so there is no ✕ that could ever
-// remove a residual empty map). Pure — never mutates sf or its nested maps.
-export function withSnippetSharing(sf: ItemSettingsFile, name: string, sharing: Sharing): ItemSettingsFile {
-  const sharings = { ...(sf.perElement[ENABLED_CSS_SNIPPETS_KEY] ?? {}) };
-  if (sharing.kind === "everywhere") delete sharings[name];
-  else sharings[name] = sharing;
-  const perElement = { ...sf.perElement };
-  if (Object.keys(sharings).length === 0) delete perElement[ENABLED_CSS_SNIPPETS_KEY];
-  else perElement[ENABLED_CSS_SNIPPETS_KEY] = sharings;
-  return { ...sf, perElement };
-}
+// A snippet's rule is written by `withEnablementRule` (enablementRules.ts) like every other
+// element's, through the SAME `setEnablementRule` host method the two plugin lists use. The local
+// `withSnippetSharing` that used to do it here is retired: it was the generalization's ancestor, it
+// wrote the same map under the same key, and keeping both would have been two writers for one datum
+// (spec §6.6). Its empty-map pruning — the thing that kept a bare `{}` from pinning the card in
+// Fields mode forever — lives on in withEnablementRule, tested there.
 
 // ── Companion folders zone (spec §4, D8 — scaffold only; Task 7 wires add/remove/warnings) ──
 

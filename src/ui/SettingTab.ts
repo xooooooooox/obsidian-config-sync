@@ -17,6 +17,7 @@ import {
   itemRef,
   parseItemRef,
   perClass,
+  PerElementSharing,
   Remote,
   RibbonKey,
   Section,
@@ -62,6 +63,7 @@ import {
   ItemMap,
   itemFor,
   ItemSettingsFile,
+  isEnablementList,
   withItem,
 } from "../core/registry";
 import { SCHEMA_FUTURE_NOTICE } from "../core/settingsMigration";
@@ -71,16 +73,23 @@ import { commitDraft } from "./commitGroups";
 import { classifyJsonKeys, classifyPerElementLines, jsonElementClass, jsonKeyClass, KeyClass } from "./jsonView";
 import { renderSharingCycle } from "./sharingCycle";
 import { DeviceElementState } from "../core/deviceElements";
-import { RuleListId } from "../core/enablementRules";
-import { buildLocalMenu, enablementRowModel, ruleIcon, ruleLabel, ruleLandingNeedsSeed, RULE_OPTIONS } from "./enablementRow";
+import { enablementRules, RuleListId, ruledElementIds } from "../core/enablementRules";
+import { buildLocalMenu, enablementRowModel, EnablementRowModel, ruleIcon, ruleLabel, ruleLandingNeedsSeed, RULE_OPTIONS } from "./enablementRow";
+import { StopSyncingModal } from "./SyncCenterView";
+import { RunKind, stopSyncDesc } from "../core/runHistory";
 import {
   applyPerElementToggle,
   applySyncAll,
+  buildCarrierElementRows,
   buildCompanionRows,
   buildPerElementRows,
   Badge,
   buildRuleRows,
   buildSnippetMemberRows,
+  carrierBadgeCounts,
+  CarrierCounts,
+  carrierListFor,
+  CARRIER_ELEMENTS_LABEL,
   CompanionRowModel,
   companionConflictError,
   companionNameConflictError,
@@ -119,7 +128,6 @@ import {
   CUSTOM_PATH_LABEL,
   validateCompanionBasename,
   validateCompanionPath,
-  withSnippetSharing,
 } from "./itemCard";
 import { resolveGitToken } from "../external/gitToken";
 
@@ -161,6 +169,17 @@ export interface SettingsHost extends Plugin {
   leaveToThisDevice(list: RuleListId, elementId: string): Promise<void>;
   followTheDefault(list: RuleListId, elementId: string): Promise<void>;
   setDeviceElement(list: RuleListId, elementId: string, state: DeviceElementState): Promise<void>;
+  // Which elements of a list THIS device has taken out of the shared answer — the local half of a
+  // carrier card's badges and of its element list. `deviceElementFor` cannot answer it one element
+  // at a time: the table is localStorage (deviceElements.ts), and only main.ts reads that.
+  deviceElementIds(list: RuleListId): string[];
+  // The card head's destructive action (spec §6.2). These three moved here from `SyncCenterHost`
+  // with the gesture itself — the Sync Center's Stop-syncing footer retired in task 10, and the
+  // first two have had no caller there since. `appendActionHistory` stays on both hosts: the
+  // leftover-cleanup entry the view still records is the same run history.
+  stopSyncing(groupName: string, deleteStore: boolean): Promise<string[] | null>;
+  storeFileCount(groupName: string): Promise<number>;
+  appendActionHistory(entry: { kind: RunKind; desc: string; changed: number; removed?: string[]; deletedFiles?: string[] }): Promise<void>;
   // Drops the per-refresh reader cache (#3): call after settings.remotes changes so a stale
   // reader for an edited/removed remote's old URL/branch/subdir/storePath is never reused.
   clearReaderCache(): void;
@@ -242,6 +261,11 @@ export function refFromItemAnchor(anchorId: string): ItemRef | null {
   const parsed = parseItemRef(rest);
   return parsed === null ? null : itemRef(parsed.section, parsed.id);
 }
+
+// The snippets list id, spelled once (spec §6.6). Appearance's member rows are elements of
+// `enabled-css-snippets` exactly as a plugin row is an element of its plugin list — the same rule
+// store, the same writer, the same row.
+const SNIPPET_LIST: RuleListId = "enabled-css-snippets";
 
 const SENSITIVE_ENCRYPT_RE = /apikey|api_key|token|secret|password|credential/i;
 
@@ -539,6 +563,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   // containerEl.empty() + async rebuild visibly flashes and drops the panel mid-scroll.
   private syncAllRebuilds: (() => void)[] = []; // cleared each rerender
   private cardHosts: { wrap: HTMLElement; def: ItemDef }[] = []; // cleared each rerender
+  // Obsidian's ToggleComponent.setValue fires the component's own onChange when the value really
+  // changes, so the card head's snap-back (`t.setValue(true)` while the modal decides) would
+  // re-enter that handler with `true` and write `synced: true` to a card that never stopped being
+  // synced. This makes the snap-back what it looks like: a display correction, not a gesture.
+  private snappingBackToggle = false;
 
   constructor(app: App, private host: SettingsHost) {
     super(app, host);
@@ -774,6 +803,14 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     };
   }
 
+  // A carrier card's two badge counts (spec §6.4) — null for every card that carries no list, so a
+  // count is never derived for a card whose drawer has no elements to count.
+  private carrierCountsOf(def: ItemDef): CarrierCounts | null {
+    const list = carrierListFor(def);
+    if (list === null) return null;
+    return carrierBadgeCounts(this.host.settings.items, list, this.host.deviceElementIds(list));
+  }
+
   // Every settings-tab write funnels through here — the mutators themselves only ever spread what
   // they get, and the two-level map write is done in one place (registry.ts's withItem).
   private async updateItem(def: ItemDef, mutator: (item: Item) => Item): Promise<void> {
@@ -869,9 +906,24 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       syncExpansion();
     });
     row.nameEl.prepend(chevron);
-    for (const badge of computeBadges(def, item, this.enablementOf(def))) this.renderBadge(row.nameEl, badge);
+    for (const badge of computeBadges(def, item, this.enablementOf(def), this.carrierCountsOf(def))) this.renderBadge(row.nameEl, badge);
     row.addToggle((t) =>
       t.setValue(item.synced).onChange(async (v) => {
+        // Turning an item OFF removes it from every device's contract and can delete its store
+        // copy — the one destructive gesture on this card, and since the Sync Center's footer
+        // retired (spec §6.2) its only home. The confirmation is the SAME modal that footer opened;
+        // nothing about StopSyncingModal changes, only who calls it. Every card goes through it,
+        // the two carrier cards included: a carrier is an item, it has a store copy, and "one home
+        // for the gesture" does not mean "one home for the items we thought of first".
+        if (this.snappingBackToggle) return;
+        if (!v) {
+          this.snappingBackToggle = true;
+          t.setValue(true); // the modal owns the outcome — the toggle follows it, not the click
+          this.snappingBackToggle = false;
+          void this.openStopSyncing(def, wrap);
+          return;
+        }
+        // Turning it back ON keeps the plain path — restoring sync destroys nothing.
         await this.updateItem(def, (c) => ({ ...c, synced: v }));
         this.refreshCardBadges(wrap, def);
         for (const rebuild of this.syncAllRebuilds) rebuild();
@@ -880,13 +932,37 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     syncExpansion();
   }
 
+  // The card's destructive action (spec §6.2), body unchanged from the Sync Center footer's
+  // `openStopSyncing` that task 10 deleted — minus the two things only a view had (its selection
+  // set and its reload).
+  private async openStopSyncing(def: ItemDef, wrap: HTMLElement): Promise<void> {
+    // §4.2b: refuse before the modal opens, not after the user has decided in it. `stopSyncing`
+    // still refuses on its own — this is the courtesy, that is the guarantee.
+    if (!this.host.settingsWritable()) return;
+    const label = this.host.displayName(def.groupName, def.label);
+    const count = await this.host.storeFileCount(def.groupName);
+    new StopSyncingModal(this.app, label, count, async (deleteStore) => {
+      const deleted = await this.host.stopSyncing(def.groupName, deleteStore);
+      if (deleted === null) return; // refused (§4.2b) — the item is still synced, so nothing is recorded
+      await this.host.appendActionHistory({
+        kind: "stop-sync",
+        desc: stopSyncDesc(label, deleted.length),
+        changed: 1,
+        removed: [label],
+        deletedFiles: deleted.length > 0 ? deleted : undefined,
+      });
+      this.renderItemCard(wrap, def); // the toggle now reads the item stopSyncing actually wrote
+      for (const rebuild of this.syncAllRebuilds) rebuild();
+    }).open();
+  }
+
   // In-place header badge refresh — value-only config changes (sharing, encrypt, enablement)
   // update the count badges without rebuilding the card, so the panel never visibly jumps.
   private refreshCardBadges(wrap: HTMLElement, def: ItemDef): void {
     const nameEl = wrap.querySelector(":scope > .setting-item > .setting-item-info > .setting-item-name");
     if (!(nameEl instanceof HTMLElement)) return;
     for (const b of Array.from(nameEl.querySelectorAll(".config-sync-card-badge"))) b.remove();
-    for (const badge of computeBadges(def, this.itemOf(def), this.enablementOf(def))) this.renderBadge(nameEl, badge);
+    for (const badge of computeBadges(def, this.itemOf(def), this.enablementOf(def), this.carrierCountsOf(def))) this.renderBadge(nameEl, badge);
   }
 
   private renderBadge(nameEl: HTMLElement, badge: Badge): void {
@@ -925,6 +1001,8 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const item = this.itemOf(def);
     if (hasEnablementZone(def)) this.renderDefaultEnabledOnRow(exp, def, wrap);
     this.renderSettingsFileZone(exp, def, item, wrap);
+    const carrier = carrierListFor(def);
+    if (carrier !== null) this.renderCarrierElements(exp, def, carrier, wrap);
     // companionHost is its own stable container (mirrors zone ②'s bodyHost) so a member-list
     // expand/collapse can refresh just zone ③ (refreshCompanionZone) without rebuilding the whole
     // card — badges, the path row, and zone ②'s own disclosure state stay untouched.
@@ -938,6 +1016,58 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private async setRuleWithLanding(list: RuleListId, elementId: string, rule: Sharing): Promise<void> {
     await this.host.setEnablementRule(list, elementId, rule);
     if (ruleLandingNeedsSeed(rule, this.host.deviceElementFor(list, elementId))) await this.host.leaveToThisDevice(list, elementId);
+  }
+
+  // The two-segment row's LOCAL half (spec §6.1), painted once for both of this file's rows that
+  // have one: a plugin card's `Default enabled on` and a carrier card's element rows. It leads with
+  // the divider because the divider only exists when there IS a second segment.
+  //
+  // A class rule that this device does not match has nothing true to show as a local state, so it
+  // shows the default sentence — but the menu stays live, because an exception outranks a class
+  // rule (spec §5 precedence 1) and a row that cannot be excepted would be a dead end.
+  private renderLocalSegment(
+    cell: HTMLElement,
+    opts: {
+      list: RuleListId;
+      elementId: string;
+      rule: Sharing;
+      exception: DeviceElementState | null;
+      model: EnablementRowModel;
+      after: () => void;
+    }
+  ): void {
+    cell.createSpan({ cls: "config-sync-tworow-vline" });
+    const local = cell.createSpan({
+      cls: `config-sync-tworow-seg is-local${opts.model.localIsException ? " is-set" : ""}`,
+      attr: { role: "button", tabindex: "0", "aria-label": opts.model.local.label },
+    });
+    if (opts.model.local.icon !== null) setIcon(local.createSpan({ cls: "config-sync-tworow-ic" }), opts.model.local.icon);
+    local.createSpan({ text: opts.model.local.label });
+    const openLocalMenu = (x: number, y: number): void => {
+      const menu = new Menu();
+      // The entry list is buildLocalMenu's (enablementRow.ts), not this file's — the Sync Center's
+      // row asks the same producer, so the two entrances cannot offer different choices (§6.6).
+      for (const entry of buildLocalMenu(opts.rule, opts.exception, {
+        follow: () => void this.host.followTheDefault(opts.list, opts.elementId).then(opts.after),
+        setState: (state) => void this.host.setDeviceElement(opts.list, opts.elementId, state).then(opts.after),
+      })) {
+        menu.addItem((i) => {
+          i.setTitle(entry.title).setChecked(entry.checked).onClick(entry.action);
+          if (entry.icon !== null) i.setIcon(entry.icon);
+        });
+      }
+      menu.showAtPosition({ x, y });
+    };
+    local.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openLocalMenu(e.clientX, e.clientY);
+    });
+    local.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      e.preventDefault();
+      const r = local.getBoundingClientRect();
+      openLocalMenu(r.left, r.bottom);
+    });
   }
 
   // Zone ① `Default enabled on` (spec §6.5) — core/community/beta plugin cards only. Same name,
@@ -976,46 +1106,105 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         ariaLabel: `${DEFAULT_ENABLED_ON_HINT} — ${ruleLabel(rule)}${def.desktopOnly === true && rule.kind === "everywhere" ? ` (${DESKTOP_ONLY_ALL_NOTE})` : ""}`,
         onChange: (v) => void this.setRuleWithLanding(list, elementId, v).then(after),
       });
-      cell.createSpan({ cls: "config-sync-tworow-vline" });
-      // Local segment. A class rule that this device does not match has nothing true to show as a
-      // local state, so it shows the default sentence — but the menu stays live, because an
-      // exception outranks a class rule (spec §5 precedence 1) and a row that cannot be excepted
-      // would be a dead end.
-      const local = cell.createSpan({
-        cls: `config-sync-tworow-seg is-local${model.localIsException ? " is-set" : ""}`,
-        attr: { role: "button", tabindex: "0", "aria-label": model.local.label },
-      });
-      if (model.local.icon !== null) setIcon(local.createSpan({ cls: "config-sync-tworow-ic" }), model.local.icon);
-      local.createSpan({ text: model.local.label });
-      const openLocalMenu = (x: number, y: number): void => {
-        const menu = new Menu();
-        // The entry list is buildLocalMenu's (enablementRow.ts), not this file's — the Sync Center's
-        // row asks the same producer, so the two entrances cannot offer different choices (§6.6).
-        for (const entry of buildLocalMenu(rule, exception, {
-          follow: () => void this.host.followTheDefault(list, elementId).then(after),
-          setState: (state) => void this.host.setDeviceElement(list, elementId, state).then(after),
-        })) {
-          menu.addItem((i) => {
-            i.setTitle(entry.title).setChecked(entry.checked).onClick(entry.action);
-            if (entry.icon !== null) i.setIcon(entry.icon);
-          });
-        }
-        menu.showAtPosition({ x, y });
-      };
-      local.addEventListener("click", (e) => {
-        e.stopPropagation();
-        openLocalMenu(e.clientX, e.clientY);
-      });
-      local.addEventListener("keydown", (e) => {
-        if (e.key !== "Enter" && e.key !== " ") return;
-        e.preventDefault();
-        const r = local.getBoundingClientRect();
-        openLocalMenu(r.left, r.bottom);
-      });
+      this.renderLocalSegment(cell, { list, elementId, rule, exception, model, after });
     };
     build();
     row.createDiv(); // state column — empty
     row.createDiv(); // action column — empty
+  }
+
+  // ONE element-rule row (spec §6.4): a snippet under Appearance and a plugin under Core/Community
+  // plugins are the same thing — an element of an on/off list with a rule and a local exception —
+  // so they are the same row. Appearance's snippet rows are the older half of this; this is what
+  // makes the two new carrier cards reuse them instead of growing a second dialect.
+  //
+  // The LOCAL segment renders only for a list whose exceptions a run actually applies
+  // (registry.ts's isEnablementList — main.ts's enablementDecisions walks exactly those two lists,
+  // and perElement.ts reads rules alone). `enabled-css-snippets` has no such application path, so a
+  // snippet row would be offering a choice nothing would ever honour: it keeps the fleet segment
+  // alone, which is what snippet rows have always shown (task 7 carry F5). The host methods stay
+  // `RuleListId`-wide — the asymmetry is in what this row OFFERS, not in what the layer can store.
+  //
+  // Returns the row's CONTENT cell, so a caller with an affordance of its own (the snippets
+  // caller's `file deleted` pill and its Forget button) can put it inside — the grid is a fixed
+  // four-track shape, and anything appended to the row itself would claim a track.
+  private renderElementRuleRow(
+    host: HTMLElement,
+    opts: { def: ItemDef; wrap: HTMLElement; list: RuleListId; elementId: string; label: string; desktopOnly: boolean; orphan: boolean; onWritten: () => void }
+  ): HTMLElement {
+    const hasLocalLayer = isEnablementList(opts.list);
+    const row = host.createDiv({ cls: `config-sync-grid config-sync-card-companiongrid${opts.orphan ? " is-orphan" : ""}` });
+    // The pill and the Forget button must live INSIDE the content cell, or every later cell shifts
+    // one column over and the button wraps onto an implicit second grid row.
+    const contentCell = opts.orphan ? row.createDiv({ cls: "config-sync-orphancell" }) : row;
+    contentCell.createSpan({ cls: "config-sync-ldname", text: opts.label });
+    const cell = row.createDiv({ cls: "config-sync-tworow" });
+    const build = (): void => {
+      cell.empty();
+      const rule = this.host.enablementRuleFor(opts.list, opts.elementId);
+      const exception = hasLocalLayer ? this.host.deviceElementFor(opts.list, opts.elementId) : null;
+      const model = enablementRowModel({ rule, exception });
+      const after = (): void => {
+        build();
+        opts.onWritten();
+      };
+      // Fleet segment — the same control, vocabulary and desktop-only stop-drop the plugin card's
+      // `Default enabled on` uses above, because it is the same question about the same datum.
+      renderSharingCycle(cell.createDiv(), {
+        sharing: rule,
+        options: opts.desktopOnly ? RULE_OPTIONS.filter((o) => o.kind !== "per-class" || o.class !== "mobile") : RULE_OPTIONS,
+        disabled: false,
+        iconFor: ruleIcon,
+        labelFor: ruleLabel,
+        ariaLabel: `${DEFAULT_ENABLED_ON_HINT} — ${ruleLabel(rule)}${opts.desktopOnly && rule.kind === "everywhere" ? ` (${DESKTOP_ONLY_ALL_NOTE})` : ""}`,
+        onChange: (v) => void this.writeElementRule(opts.def, opts.wrap, opts.list, opts.elementId, v).then(after),
+      });
+      if (hasLocalLayer) this.renderLocalSegment(cell, { list: opts.list, elementId: opts.elementId, rule, exception, model, after });
+    };
+    build();
+    row.createDiv(); // state column — empty
+    row.createDiv(); // action column — empty
+    return contentCell;
+  }
+
+  // The fleet write from an element row, plus the two card-level consequences every write into this
+  // item's `perElement` map has. The first rule on a card (or the last one cleared) flips
+  // hasKeyRules, which (un)dims the path row's own sharing/lock controls (spec §3.1) — refreshed in
+  // place, because the full card re-render this used to do made the panel jump on 2 of every 4
+  // cycle clicks (round-7 bug 1). The File preview colors its elements from the same map.
+  //
+  // The rule home for the row's list IS the card the row is drawn in — snippets belong to
+  // Appearance, a carrier's elements to the carrier (enablementRules.ts's ruleHomeFor) — which is
+  // what lets one method serve both callers.
+  private async writeElementRule(def: ItemDef, wrap: HTMLElement, list: RuleListId, elementId: string, rule: Sharing): Promise<void> {
+    const hadKeyRules = hasKeyRules(this.itemOf(def));
+    // The landing seed (§6.5 case 3) exists to keep the LOCAL segment truthful, so it applies to
+    // exactly the lists that have one.
+    if (isEnablementList(list)) await this.setRuleWithLanding(list, elementId, rule);
+    else await this.host.setEnablementRule(list, elementId, rule);
+    if (hasKeyRules(this.itemOf(def)) !== hadKeyRules) this.refreshPathRow(wrap, def);
+    this.refreshCardBody(wrap, def);
+  }
+
+  // The two carrier cards' element drawer (spec §6.4): the list this card carries, one row per
+  // element, under one section title. No search box — spec §10 leaves that open, and Community's 73
+  // rows are a grouping decision this card is not the place to take unasked.
+  private renderCarrierElements(exp: HTMLElement, def: ItemDef, list: RuleListId, wrap: HTMLElement): void {
+    exp.createDiv({ cls: "config-sync-explabel", text: CARRIER_ELEMENTS_LABEL });
+    const listEl = exp.createDiv({ cls: "config-sync-card-carrierelements" });
+    const rows = buildCarrierElementRows(this.host.itemDefs(), list, ruledElementIds(this.host.settings.items, list), this.host.deviceElementIds(list));
+    for (const row of rows) {
+      this.renderElementRuleRow(listEl, {
+        def,
+        wrap,
+        list,
+        elementId: row.elementId,
+        label: row.label,
+        desktopOnly: row.desktopOnly,
+        orphan: false,
+        onWritten: () => this.refreshCardBadges(wrap, def),
+      });
+    }
   }
 
   private renderSettingsFileZone(exp: HTMLElement, def: ItemDef, item: Item, wrap: HTMLElement): void {
@@ -1537,9 +1726,8 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       if (mapKey === ENABLED_CSS_SNIPPETS_KEY) {
         void (async () => {
           const files = await this.host.listSnippetFiles();
-          const perElement = item.settingsFile?.perElement[ENABLED_CSS_SNIPPETS_KEY] ?? {};
           if (!membersHost.isConnected) return; // the drawer closed while the scan was in flight
-          this.renderSnippetMembers(membersHost, def, buildSnippetMemberRows(files, perElement), wrap, countEl, open);
+          this.renderSnippetMembers(membersHost, def, buildSnippetMemberRows(files, this.snippetRules()), wrap, countEl, open);
         })();
       } else {
         // Plain (non-mapKey) companion: list-only member names, no per-member scope chip — the
@@ -1868,75 +2056,46 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     input.inputEl.focus();
   }
 
+  // THE snippet rule map — read through enablementRules like every other list's, rather than
+  // reaching into appearance's `perElement` by hand (spec §6.6: one reader, one writer).
+  private snippetRules(): PerElementSharing {
+    return enablementRules(this.host.settings.items, SNIPPET_LIST);
+  }
+
   // Progressive disclosure (spec §4 Step 3): count always patches into countEl; member rows +
   // hint only render while `open`. Snippets are never the themes preset, so memberCountLabel's
-  // first argument is always false here.
+  // first argument is always false here. Each row is renderElementRuleRow's (spec §6.4) — the
+  // orphan pill and Forget stay here, because they are facts about a FILE, which is a thing only
+  // this list's elements have.
   private renderSnippetMembers(listEl: HTMLElement, def: ItemDef, rows: SnippetMemberRow[], wrap: HTMLElement, countEl: HTMLElement | null, open: boolean): void {
     countEl?.setText(memberCountLabel(false, rows.filter((r) => r.fileExists).length));
     if (!open || rows.length === 0) return;
     const wrapEl = listEl.createDiv({ cls: "config-sync-card-snippetmembers" });
     for (const row of rows) {
-      const r = wrapEl.createDiv({ cls: `config-sync-grid config-sync-card-companiongrid${row.fileExists ? "" : " is-orphan"}` });
-      // The grid is a fixed 4-column track (content | sharing | state | action) — the pill and the
-      // Forget button must live INSIDE the content cell, or every later cell shifts one column
-      // over and the button wraps onto an implicit second grid row.
-      const contentCell = row.fileExists ? r : r.createDiv({ cls: "config-sync-orphancell" });
-      contentCell.createSpan({ cls: "config-sync-ldname", text: row.name });
-      if (!row.fileExists) contentCell.createSpan({ cls: "config-sync-orphanpill", text: "file deleted" });
-      const sharingCell = r.createDiv();
-      let curSharing = row.sharing;
-      const buildSharing = (): void => {
-        sharingCell.empty();
-        renderSharingCycle(sharingCell, {
-          sharing: curSharing,
-          options: FIELD_SHARING_OPTIONS,
-          disabled: false,
-          onChange: (v) => {
-            void (async () => {
-              const hadKeyRules = hasKeyRules(this.itemOf(def));
-              await this.updateItem(def, (c) => ({
-                ...c,
-                settingsFile: withDerivedMode(withSnippetSharing(c.settingsFile ?? defaultSettingsFile(), row.name, v)),
-              }));
-              if (hasKeyRules(this.itemOf(def)) !== hadKeyRules) {
-                // The first ruled snippet (false -> true) or the last cleared one (true -> false,
-                // withSnippetSharing's empty-map pruning) flips hasKeyRules, which (un)dims the
-                // path row's own sharing/lock controls (spec §3.1) — refreshed in place (round-7
-                // spec §1; the full card re-render used before made the panel jump on 2 of every 4
-                // cycle clicks, round-7 bug 1).
-                this.refreshPathRow(wrap, def);
-              }
-              curSharing = v;
-              buildSharing(); // member rows live in the companion zone — nothing below rebuilds them
-              this.refreshCardBadges(wrap, def);
-              this.refreshCardBody(wrap, def); // per-element sharing colors the enabledCssSnippets elements in File preview (when expanded)
-            })();
-          },
-        });
-      };
-      buildSharing();
-      r.createDiv(); // state column — empty for a snippet member row
-      r.createDiv(); // action column — empty for a snippet member row (Forget lives in the content cell: a text button cannot fit the 28px track)
+      const contentCell = this.renderElementRuleRow(wrapEl, {
+        def,
+        wrap,
+        list: SNIPPET_LIST,
+        elementId: row.name,
+        label: row.name,
+        desktopOnly: false, // a .css file runs wherever the vault does
+        orphan: !row.fileExists,
+        onWritten: () => this.refreshCardBadges(wrap, def),
+      });
       if (!row.fileExists) {
+        contentCell.createSpan({ cls: "config-sync-orphanpill", text: "file deleted" });
         const forget = contentCell.createEl("button", { cls: "config-sync-orphan-forget", text: "Forget" });
         forget.addEventListener("click", () => {
           forget.disabled = true; // the rebuild below replaces the row — no re-enable path needed
           void (async () => {
-            const hadKeyRules = hasKeyRules(this.itemOf(def));
-            await this.updateItem(def, (c) => ({
-              ...c,
-              settingsFile: withDerivedMode(withSnippetSharing(c.settingsFile ?? defaultSettingsFile(), row.name, EVERYWHERE)),
-            }));
-            if (hasKeyRules(this.itemOf(def)) !== hadKeyRules) this.refreshPathRow(wrap, def);
-            // The row leaves the union — rebuild the member zone in place (fresh file list +
-            // fresh perElement), then the badge/body refreshes the sharing cycle already does.
+            await this.writeElementRule(def, wrap, SNIPPET_LIST, row.name, EVERYWHERE);
+            // The row leaves the union — rebuild the member zone in place (fresh file list + fresh
+            // rules), then refresh the badges the row's own writes would have.
             const files = await this.host.listSnippetFiles();
             if (!listEl.isConnected) return; // the drawer closed while the scan was in flight
-            const perElement = this.itemOf(def).settingsFile?.perElement[ENABLED_CSS_SNIPPETS_KEY] ?? {};
             listEl.empty();
-            this.renderSnippetMembers(listEl, def, buildSnippetMemberRows(files, perElement), wrap, countEl, open);
+            this.renderSnippetMembers(listEl, def, buildSnippetMemberRows(files, this.snippetRules()), wrap, countEl, open);
             this.refreshCardBadges(wrap, def);
-            this.refreshCardBody(wrap, def);
           })();
         });
       }

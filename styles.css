@@ -1288,6 +1288,11 @@ body.is-mobile .config-sync-cardrow > .config-sync-explabel-inline { flex: none;
    "this device" preview color (.config-sync-json-strip above); don't reuse it here (FINDING 3). */
 .config-sync-card-badge-local { color: var(--color-pink); background: rgba(var(--color-pink-rgb), 0.12); }
 .config-sync-card-badge-count { color: var(--color-cyan); background: rgba(var(--color-cyan-rgb), 0.12); }
+/* A carrier card's local fact ("N left to me", spec 2026-08-12-enablement-two-layers-design.md
+   §6.4): purple, the color the two-segment row's local segment already wears when this device has
+   taken an element out of the shared answer (.config-sync-tworow-seg.is-local.is-set). The fleet
+   fact beside it keeps the count palette above — two facts, two colors, never one number. */
+.config-sync-card-badge-mine { color: var(--color-purple); background: rgba(var(--color-purple-rgb), 0.12); }
 /* Innate platform chip ("desktop-only plugin", round-8 spec §2): neutral grey,
    inline-flex only here so the embedded monitor icon aligns with the text. */
 .config-sync-card-badge-plat { color: var(--text-muted); background: var(--background-modifier-border); display: inline-flex; align-items: center; gap: 4px; vertical-align: -1px; }
@@ -1301,6 +1306,11 @@ body.is-mobile .config-sync-cardrow > .config-sync-explabel-inline { flex: none;
    Scope is a Commander-style cycling icon since round 6 (2026-07-27 定稿), so its column shrank
    from the old 120px dropdown width to match the other icon columns. */
 .config-sync-grid { display: grid; grid-template-columns: 1fr var(--cs-scope-w, 28px) 28px 28px; align-items: center; column-gap: var(--size-4-2); }
+/* …except when that column carries the two-segment enablement row (spec §6.1) instead of a single
+   cycling icon: the segment pair is glyph + word twice, which a 28px icon track cannot hold. One
+   rule, keyed on the row's own content, so every row that carries the control gets the track and
+   every row that doesn't keeps the icon rail. */
+.config-sync-grid:has(> .config-sync-tworow) { --cs-scope-w: auto; }
 /* Idle ghosts stay faintly visible (0.25) rather than fully hidden — an invisible reserved
    action column reads as a dead gutter at the card's right rail (round-5 feedback). */
 .config-sync-ghost { opacity: 0.25; transition: opacity 0.12s; }
@@ -1368,6 +1378,10 @@ body.is-mobile .config-sync-cardrow > .config-sync-explabel-inline { flex: none;
 .config-sync-card-membercount { color: var(--text-faint); }
 .config-sync-card-memberarrow { color: var(--text-muted); }
 .config-sync-card-snippetmembers { margin-left: var(--size-4-6); }
+/* The two carrier cards' element rows (spec §6.4) — the same rows the snippet member list draws,
+   one level up: they hang off the card's own drawer rather than off a companion folder, so they
+   carry the drawer's indent instead of the member list's. */
+.config-sync-card-carrierelements { margin-bottom: var(--size-4-1); }
 .config-sync-card-companiongrid.is-orphan .config-sync-ldname { color: var(--text-faint); text-decoration: line-through; }
 /* Content-cell flex wrapper for orphan rows: name + pill left, Forget pushed against the scope
    column — everything stays inside grid column 1 (the pill/button would break the 4-column

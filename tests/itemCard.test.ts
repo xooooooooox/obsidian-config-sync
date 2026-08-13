@@ -5,8 +5,10 @@ import {
   buildCompanionRows,
   buildPerElementRows,
   buildRuleRows,
+  buildCarrierElementRows,
   buildSnippetMemberRows,
-  withSnippetSharing,
+  carrierBadgeCounts,
+  carrierListFor,
   computeBadges,
   countClassPinned,
   countEncrypted,
@@ -95,7 +97,7 @@ const FOLLOWS_ALL = RULE(EVERYWHERE);
 describe("computeBadges", () => {
   it("state-only def gets the on/off-only badge first, with tooltip", () => {
     const def: ItemDef = { id: "bases", groupName: "bases", label: "Bases", description: "", section: "core", settingsFile: { defaultPath: null } };
-    const badges = computeBadges(def, { synced: true }, null);
+    const badges = computeBadges(def, { synced: true }, null, null);
     expect(badges[0]).toEqual({
       text: "on/off only",
       cls: "config-sync-card-badge-state",
@@ -105,47 +107,47 @@ describe("computeBadges", () => {
 
   it("a def with a settings file gets no on/off-only badge", () => {
     const def: ItemDef = { id: "backlinks", groupName: "backlinks", label: "Backlinks", description: "", section: "core", settingsFile: { defaultPath: "{configDir}/backlink.json" } };
-    expect(computeBadges(def, { synced: true }, null).some((b) => b.text === "on/off only")).toBe(false);
+    expect(computeBadges(def, { synced: true }, null, null).some((b) => b.text === "on/off only")).toBe(false);
   });
 
   it("no badges for a plain off/default card", () => {
-    expect(computeBadges(APP_DEF, cfg(), null)).toEqual([]);
+    expect(computeBadges(APP_DEF, cfg(), null, null)).toEqual([]);
   });
 
   it("an All-devices rule with no exception never shows an on: badge, even with enablement", () => {
-    expect(computeBadges(COMMUNITY_DEF, cfg({ synced: true }), FOLLOWS_ALL)).toEqual([]);
-    expect(computeBadges(COMMUNITY_DEF, cfg({ synced: true }), null)).toEqual([]);
+    expect(computeBadges(COMMUNITY_DEF, cfg({ synced: true }), FOLLOWS_ALL, null)).toEqual([]);
+    expect(computeBadges(COMMUNITY_DEF, cfg({ synced: true }), null, null)).toEqual([]);
   });
 
   // "Each device decides" is a FLEET arrangement, not this device's own state — there is nothing
   // true to say about this machine until it actually takes an exception.
   it("an Each-device-decides rule with no exception shows no badge either", () => {
-    expect(computeBadges(COMMUNITY_DEF, cfg({ synced: true }), RULE(THIS_DEVICE))).toEqual([]);
+    expect(computeBadges(COMMUNITY_DEF, cfg({ synced: true }), RULE(THIS_DEVICE), null)).toEqual([]);
   });
 
   it("desktop-only def prepends the innate grey chip ahead of every config badge (round-8 spec §2)", () => {
     const dOnly: ItemDef = { ...COMMUNITY_DEF, desktopOnly: true };
-    expect(computeBadges(dOnly, cfg(), FOLLOWS_ALL)).toEqual([{ text: "desktop-only plugin", cls: "config-sync-card-badge-plat", icon: "monitor" }]);
-    expect(computeBadges(dOnly, cfg(), RULE(perClass("desktop")))).toEqual([
+    expect(computeBadges(dOnly, cfg(), FOLLOWS_ALL, null)).toEqual([{ text: "desktop-only plugin", cls: "config-sync-card-badge-plat", icon: "monitor" }]);
+    expect(computeBadges(dOnly, cfg(), RULE(perClass("desktop")), null)).toEqual([
       { text: "desktop-only plugin", cls: "config-sync-card-badge-plat", icon: "monitor" },
       { text: "on: desktop", cls: "config-sync-card-badge-desktop" },
     ]);
   });
 
   it("a class rule shows the matching on: badge — only when the def has an enablement", () => {
-    expect(computeBadges(COMMUNITY_DEF, cfg(), RULE(perClass("desktop")))).toEqual([{ text: "on: desktop", cls: "config-sync-card-badge-desktop" }]);
-    expect(computeBadges(COMMUNITY_DEF, cfg(), RULE(perClass("mobile")))).toEqual([{ text: "on: mobile", cls: "config-sync-card-badge-mobile" }]);
+    expect(computeBadges(COMMUNITY_DEF, cfg(), RULE(perClass("desktop")), null)).toEqual([{ text: "on: desktop", cls: "config-sync-card-badge-desktop" }]);
+    expect(computeBadges(COMMUNITY_DEF, cfg(), RULE(perClass("mobile")), null)).toEqual([{ text: "on: mobile", cls: "config-sync-card-badge-mobile" }]);
     // no-enablement card (app): the same input produces NO badge — the projection doesn't exist
     // for this card at all.
-    expect(computeBadges(APP_DEF, cfg(), RULE(perClass("desktop")))).toEqual([]);
+    expect(computeBadges(APP_DEF, cfg(), RULE(perClass("desktop")), null)).toEqual([]);
   });
 
   it("shows 'on: this device' from THIS DEVICE's exception, and it outranks the fleet rule", () => {
-    expect(computeBadges(COMMUNITY_DEF, cfg(), RULE(EVERYWHERE, "on"))).toEqual([{ text: "on: this device", cls: "config-sync-card-badge-local" }]);
-    expect(computeBadges(COMMUNITY_DEF, cfg(), RULE(EVERYWHERE, "off"))).toEqual([{ text: "on: this device", cls: "config-sync-card-badge-local" }]);
+    expect(computeBadges(COMMUNITY_DEF, cfg(), RULE(EVERYWHERE, "on"), null)).toEqual([{ text: "on: this device", cls: "config-sync-card-badge-local" }]);
+    expect(computeBadges(COMMUNITY_DEF, cfg(), RULE(EVERYWHERE, "off"), null)).toEqual([{ text: "on: this device", cls: "config-sync-card-badge-local" }]);
     // precedence 1: the class rule loses to the exception, exactly as decideEnablement decides
-    expect(computeBadges(COMMUNITY_DEF, cfg(), RULE(perClass("desktop"), "off"))).toEqual([{ text: "on: this device", cls: "config-sync-card-badge-local" }]);
-    expect(computeBadges(COMMUNITY_DEF, cfg(), FOLLOWS_ALL)).toEqual([]);
+    expect(computeBadges(COMMUNITY_DEF, cfg(), RULE(perClass("desktop"), "off"), null)).toEqual([{ text: "on: this device", cls: "config-sync-card-badge-local" }]);
+    expect(computeBadges(COMMUNITY_DEF, cfg(), FOLLOWS_ALL, null)).toEqual([]);
   });
 
   it("counts device-scoped fields, per-element entries, and the fileRule together", () => {
@@ -166,14 +168,14 @@ describe("computeBadges", () => {
     expect(countEncrypted(fieldsEncrypted)).toBe(1);
     const fileEncrypted = cfg({ settingsFile: { mode: "plain", rules: {}, perElement: {}, fileRule: { sharing: EVERYWHERE, encrypted: true } } });
     expect(countEncrypted(fileEncrypted)).toBe(1);
-    expect(computeBadges(HOTKEYS_DEF, fileEncrypted, null)).toEqual([{ text: "1 encrypted", cls: "config-sync-card-badge-count" }]);
+    expect(computeBadges(HOTKEYS_DEF, fileEncrypted, null, null)).toEqual([{ text: "1 encrypted", cls: "config-sync-card-badge-count" }]);
   });
 
   it("badge order is on: -> device-scoped -> encrypted, omitting zero counts", () => {
     const c = cfg({
       settingsFile: { mode: "fields", rules: { a: { sharing: perClass("mobile"), encrypted: true } }, perElement: {} },
     });
-    expect(computeBadges(COMMUNITY_DEF, c, RULE(perClass("desktop")))).toEqual([
+    expect(computeBadges(COMMUNITY_DEF, c, RULE(perClass("desktop")), null)).toEqual([
       { text: "on: desktop", cls: "config-sync-card-badge-desktop" },
       { text: "1 device-scoped", cls: "config-sync-card-badge-count" },
       { text: "1 encrypted", cls: "config-sync-card-badge-count" },
@@ -337,6 +339,22 @@ describe("buildRuleRows (spec 2026-07-26-card-visual-refresh-design.md §3 — t
     expect(rows.map((r) => r.key)).toEqual([]);
     expect(rows.some((r) => r.key === ENABLED_CSS_SNIPPETS_KEY)).toBe(false);
   });
+
+  // The same exclusion, for the other two cards that keep enablement rules in perElement: a whole-
+  // file list stores them under the reserved "" key (switchList.ts's perElementKeyFor), which has
+  // no key name to show and whose rules already have rows of their own in the carrier's drawer
+  // (spec §6.4). Before task 12 the first rule a user set on either list put a nameless row — with
+  // a ✕ — into the card's Settings-file zone.
+  it("a carrier card's reserved '' key is excluded from rule rows, and its real keys are not", () => {
+    const carrier: ItemDef = def({ id: "community-plugins", groupName: "community-plugins", label: "Community plugins" });
+    const c = cfg({ settingsFile: { mode: "plain", rules: {}, perElement: { "": { dataview: perClass("desktop") } } } });
+    expect(buildRuleRows(carrier, c, { dataview: true })).toEqual([]);
+
+    const alsoRuled = cfg({
+      settingsFile: { mode: "fields", rules: { someKey: { sharing: EVERYWHERE, encrypted: false } }, perElement: { "": { dataview: perClass("desktop") } } },
+    });
+    expect(buildRuleRows(carrier, alsoRuled, {}).map((r) => r.key)).toEqual(["someKey"]);
+  });
 });
 
 describe("memberCountLabel", () => {
@@ -396,51 +414,85 @@ describe("buildSnippetMemberRows", () => {
   it("unions files on disk with names already scoped, sorted", () => {
     const rows = buildSnippetMemberRows(["b.css", "a.css"], { "c.css": perClass("mobile") });
     expect(rows).toEqual([
-      { name: "a.css", sharing: EVERYWHERE, fileExists: true },
-      { name: "b.css", sharing: EVERYWHERE, fileExists: true },
-      { name: "c.css", sharing: perClass("mobile"), fileExists: false },
+      { name: "a.css", fileExists: true },
+      { name: "b.css", fileExists: true },
+      { name: "c.css", fileExists: false },
     ]);
   });
 
   it("marks rule-only names as orphans", () => {
     const rows = buildSnippetMemberRows(["a.css"], { "gone.css": perClass("mobile") });
     expect(rows).toEqual([
-      { name: "a.css", sharing: EVERYWHERE, fileExists: true },
-      { name: "gone.css", sharing: perClass("mobile"), fileExists: false },
+      { name: "a.css", fileExists: true },
+      { name: "gone.css", fileExists: false },
     ]);
   });
 });
 
-describe("withSnippetSharing (final-review blocker: clearing the last scoped snippet must not leave an empty enabledCssSnippets map behind)", () => {
-  it("setting a non-everywhere sharing adds the entry", () => {
-    const sf: ItemSettingsFile = { mode: "plain", rules: {}, perElement: {} };
-    const next = withSnippetSharing(sf, "a.css", perClass("desktop"));
-    expect(next.perElement[ENABLED_CSS_SNIPPETS_KEY]).toEqual({ "a.css": perClass("desktop") });
+// `withSnippetSharing` retired here (task 12): a snippet's rule is written by `withEnablementRule`
+// like every other element's, and this describe's subject — clearing the last scoped snippet must
+// not leave an empty enabledCssSnippets map behind — is asserted against that writer in
+// tests/enablementRules.test.ts, on the same key this one used.
+
+// The two carrier cards (spec §6.4). `carrierListFor` is THE producer of "this card carries a
+// list"; the badges, the drawer's section and its rows all ask it, so these assert the answer for
+// each of the five Obsidian cards rather than for the two that say yes.
+describe("carrierListFor", () => {
+  it("answers each list for the card that carries it, and null for every other card", () => {
+    expect(carrierListFor(def({ id: "core-plugins", groupName: "core-plugins", label: "Core plugins" }))).toBe("core-plugins");
+    expect(carrierListFor(def({ id: "community-plugins", groupName: "community-plugins", label: "Community plugins" }))).toBe("community-plugins");
+    expect(carrierListFor(APP_DEF)).toBeNull();
+    expect(carrierListFor(APPEARANCE_DEF)).toBeNull(); // it CARRIES the snippet rules, but under a field, not as a list card
+    expect(carrierListFor(HOTKEYS_DEF)).toBeNull();
   });
 
-  it("clearing the only entry back to everywhere removes the ENABLED_CSS_SNIPPETS_KEY entirely, not just its contents", () => {
-    const sf: ItemSettingsFile = { mode: "fields", rules: {}, perElement: { [ENABLED_CSS_SNIPPETS_KEY]: { "a.css": perClass("desktop") } } };
-    const next = withSnippetSharing(sf, "a.css", EVERYWHERE);
-    expect(next.perElement).not.toHaveProperty(ENABLED_CSS_SNIPPETS_KEY);
-    expect(deriveMode(next)).toBe("plain");
+  it("a plugin whose id happens to match a list id is not a carrier — only the Obsidian card is", () => {
+    expect(carrierListFor(def({ section: "community", id: "core-plugins", groupName: "plugin-core-plugins", label: "Impostor" }))).toBeNull();
+  });
+});
+
+describe("carrierBadgeCounts", () => {
+  const withRules = (rules: Record<string, Sharing>): ReturnType<typeof itemsIn> =>
+    itemsIn({ obsidian: { "community-plugins": { synced: true, settingsFile: { mode: "plain", rules: {}, perElement: { "": rules } } } } });
+
+  it("counts class rules for the fleet and this device's exceptions for the local half — never one number", () => {
+    const items = withRules({ dataview: perClass("desktop"), templater: perClass("mobile"), git: THIS_DEVICE });
+    expect(carrierBadgeCounts(items, "community-plugins", ["git", "omnisearch"])).toEqual({ fleet: 2, local: 2 });
   });
 
-  it("clearing one of several entries leaves the map (and the key) in place for the rest", () => {
-    const sf: ItemSettingsFile = {
-      mode: "fields",
-      rules: {},
-      perElement: { [ENABLED_CSS_SNIPPETS_KEY]: { "a.css": perClass("desktop"), "b.css": perClass("mobile") } },
-    };
-    const next = withSnippetSharing(sf, "a.css", EVERYWHERE);
-    expect(next.perElement[ENABLED_CSS_SNIPPETS_KEY]).toEqual({ "b.css": perClass("mobile") });
+  it("`Each device decides` is not device-scoped — it hands the element back, it does not scope it", () => {
+    expect(carrierBadgeCounts(withRules({ git: THIS_DEVICE }), "community-plugins", [])).toEqual({ fleet: 0, local: 0 });
   });
 
-  it("does not mutate the input settings file or its nested maps", () => {
-    const sf: ItemSettingsFile = { mode: "fields", rules: {}, perElement: { [ENABLED_CSS_SNIPPETS_KEY]: { "a.css": perClass("desktop") } } };
-    const snapshot = JSON.parse(JSON.stringify(sf)) as ItemSettingsFile;
-    withSnippetSharing(sf, "a.css", EVERYWHERE);
-    withSnippetSharing(sf, "b.css", perClass("mobile"));
-    expect(sf).toEqual(snapshot);
+  it("a list with nothing decided counts nothing (a badge never reads '0 …')", () => {
+    expect(carrierBadgeCounts(itemsIn({}), "core-plugins", [])).toEqual({ fleet: 0, local: 0 });
+  });
+});
+
+describe("buildCarrierElementRows", () => {
+  const DEFS: ItemDef[] = [
+    COMMUNITY_DEF, // Dataview
+    def({ section: "community", id: "templater", groupName: "plugin-templater", label: "Templater", enablement: { list: "community-plugins", element: "templater" } }),
+    def({ section: "community", id: "git", groupName: "plugin-git", label: "Obsidian Git", desktopOnly: true, enablement: { list: "community-plugins", element: "git" } }),
+    CORE_WITH_FILE_DEF, // Graph view, a DIFFERENT list
+  ];
+
+  it("lists this list's installed elements by display label, carrying the desktop-only flag", () => {
+    expect(buildCarrierElementRows(DEFS, "community-plugins", [], [])).toEqual([
+      { elementId: "dataview", label: "Dataview", desktopOnly: false },
+      { elementId: "git", label: "Obsidian Git", desktopOnly: true },
+      { elementId: "templater", label: "Templater", desktopOnly: false },
+    ]);
+  });
+
+  it("keeps an element that is no longer installed but still has a rule or an exception — under its raw id", () => {
+    const rows = buildCarrierElementRows(DEFS, "community-plugins", ["zz-uninstalled"], ["aa-gone"]);
+    expect(rows.map((r) => r.elementId)).toEqual(["aa-gone", "dataview", "git", "templater", "zz-uninstalled"]);
+    expect(rows[0]).toEqual({ elementId: "aa-gone", label: "aa-gone", desktopOnly: false });
+  });
+
+  it("an installed element that also has a rule appears once", () => {
+    expect(buildCarrierElementRows(DEFS, "community-plugins", ["dataview"], ["dataview"]).filter((r) => r.elementId === "dataview")).toHaveLength(1);
   });
 });
 
