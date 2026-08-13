@@ -13,9 +13,9 @@
 import { GROUP_NAME_RE } from "../core/manifest";
 import { basename } from "../core/pathing";
 import { DeviceElementState } from "../core/deviceElements";
-import { enablementRules, RuleListId } from "../core/enablementRules";
+import { enablementRules, ruleHomeFor, RuleListId } from "../core/enablementRules";
 import { perElementKeyFor } from "../core/switchList";
-import { deriveMode, emptyItem, Item, ItemDef, ItemFieldRule, ItemMap, itemFor, ItemSettingsFile, withItem } from "../core/registry";
+import { deriveMode, emptyItem, Item, ItemDef, ItemFieldRule, itemAt, ItemMap, itemFor, ItemSettingsFile, withItem } from "../core/registry";
 import {
   DeviceClass,
   EVERYWHERE,
@@ -57,11 +57,12 @@ const ON_BADGE_CLASS = {
 const CARRIER_FLEET_BADGE_CLASS = "config-sync-card-badge-count";
 const CARRIER_LOCAL_BADGE_CLASS = "config-sync-card-badge-mine";
 
-// A fileRule-encrypted item (Plain mode, whole file encrypted) counts as one toward "N
-// encrypted" — there is no separate lock-badge string in the copy contract (spec §10's badge
-// list has only "N encrypted"), so the fileRule contributes to the same count instead of a
-// second badge.
-export function countClassPinned(item: Item): number {
+// The fileRule/rules half of countClassPinned, split out so the carrier badge (carrierBadgeCounts
+// below) can count a carrier's OWN class pins without also walking `perElement` — on a carrier,
+// perElement IS the element rules carrierBadgeCounts already counts via enablementRules, so folding
+// countClassPinned's perElement loop in here too would double-count the same rules under one badge
+// (final-review IMPORTANT 3).
+function countFileAndRuleClassPinned(item: Item): number {
   const sf = item.settingsFile;
   if (sf === undefined) return 0;
   let n = 0;
@@ -69,6 +70,17 @@ export function countClassPinned(item: Item): number {
   for (const rule of Object.values(sf.rules)) {
     if (sharingClass(rule.sharing) !== null) n++;
   }
+  return n;
+}
+
+// A fileRule-encrypted item (Plain mode, whole file encrypted) counts as one toward "N
+// encrypted" — there is no separate lock-badge string in the copy contract (spec §10's badge
+// list has only "N encrypted"), so the fileRule contributes to the same count instead of a
+// second badge.
+export function countClassPinned(item: Item): number {
+  const sf = item.settingsFile;
+  if (sf === undefined) return 0;
+  let n = countFileAndRuleClassPinned(item);
   for (const sharings of Object.values(sf.perElement)) {
     for (const sharing of Object.values(sharings)) {
       if (sharingClass(sharing) !== null) n++;
@@ -107,9 +119,21 @@ export interface CarrierCounts {
 // element back to each device rather than scoping it to one kind of device, so counting it as
 // "device-scoped" would name something the rule does not do. `exceptionIds` comes from the caller
 // because the exception table is localStorage (deviceElements.ts) — no `Item` knows it.
+//
+// `fleet` also folds in the carrier's OWN class pins (final-review IMPORTANT 3): a carrier is an
+// item like any other, and its `fileRule.sharing` (settable from the Sync Center's Default settings
+// sync row — e.g. "Desktop only") or a class-pinned `rules` entry is just as much a "this many
+// devices" fact as its element rules are. Dropping them showed no badge at all for that state. Uses
+// `countFileAndRuleClassPinned`, not `countClassPinned`, on purpose: `countClassPinned`'s perElement
+// walk would count the SAME element rules `enablementRules` above already counts, under the same
+// badge.
 export function carrierBadgeCounts(items: ItemMap, list: RuleListId, exceptionIds: string[]): CarrierCounts {
   const rules = enablementRules(items, list);
-  return { fleet: Object.values(rules).filter((s) => sharingClass(s) !== null).length, local: exceptionIds.length };
+  const elementRules = Object.values(rules).filter((s) => sharingClass(s) !== null).length;
+  const home = ruleHomeFor(list);
+  const carrierItem = itemAt(items, home.section, home.id);
+  const ownPins = carrierItem !== undefined ? countFileAndRuleClassPinned(carrierItem) : 0;
+  return { fleet: elementRules + ownPins, local: exceptionIds.length };
 }
 
 export const CARRIER_ELEMENTS_LABEL = "Which devices turn each plugin on";

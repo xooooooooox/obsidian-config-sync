@@ -406,6 +406,58 @@ describe("the on/off lists as items", () => {
     expect(carrier?.perElement).toBeUndefined();
     expect(carrier?.mode).toBeUndefined();
   });
+
+  // Final-review CRITICAL 1: the File preview's click-to-add (SettingTab.ts's addRuleForKey) used to
+  // let a click write `settingsFile.rules[<plugin id>]` straight onto a carrier — deriveMode then
+  // flips the item to "fields" mode (rules is no longer empty; that part is a genuine, correct field
+  // rule and IS expected to compile), and before this fix compileSingleFile also copied `perElement`
+  // onto the compiled group VERBATIM, including the reserved "" key the carrier's own element rules
+  // live under. Downstream, captureTransform read that "" key as a per-element ARRAY field and wrote
+  // `"": []` into core-plugins.json/community-plugins.json, corrupting the switch-list file (the next
+  // load's parseSwitchList returns null and the whole mechanism goes silently bypassed). The UI-level
+  // fix (this file's sibling, SettingTab.ts) now suppresses the click that produces the rules entry in
+  // the first place, but this test defends the registry.ts layer on its own: even a carrier item that
+  // ALREADY carries both (e.g. a vault saved before the UI fix shipped) must never let the reserved
+  // key reach the compiled group.
+  it("a carrier item carrying both a rules entry and reserved-key element rules never leaks the reserved key onto the compiled group (final-review CRITICAL 1)", () => {
+    const defs = buildItemDefs(env);
+    const withElementRule = withEnablementRule(itemsIn({ obsidian: { "core-plugins": { synced: true } } }), "core-plugins", "daily-notes", THIS_DEVICE);
+    const carrierItem = withElementRule.obsidian["core-plugins"]!;
+    const sf = carrierItem.settingsFile!; // holds perElement[""] = { "daily-notes": THIS_DEVICE } from withEnablementRule above
+    // Simulates exactly what addRuleForKey used to write on click: a rules entry keyed by a plugin
+    // id, on top of the reserved-key element rules already present.
+    const corrupted: Item = { ...carrierItem, settingsFile: { ...sf, mode: "fields", rules: { "some-plugin-id": { sharing: EVERYWHERE, encrypted: false } } } };
+    const items: ItemMap = { ...withElementRule, obsidian: { ...withElementRule.obsidian, "core-plugins": corrupted } };
+    const carrier = compileItems(defs, { items }).find((g) => g.name === "core-plugins");
+    // The rules entry is a genuine field rule and DOES compile — that part is correct, not the bug.
+    expect(carrier?.mode).toBe("fields");
+    expect(carrier?.fields).toEqual([{ pattern: "some-plugin-id", sharing: EVERYWHERE, encrypted: false }]);
+    // The reserved key must never reach the compiled group — this is the actual corruption this test
+    // guards against.
+    expect(carrier?.perElement).toBeUndefined();
+  });
+
+  // perElementFromMap-level (final-review CRITICAL 1 test ii): a real perElement key survives
+  // alongside the reserved "" key being dropped — proven through a fields-mode item's compiled group
+  // rather than calling the (unexported) function directly.
+  it("perElementFromMap drops only the reserved '' key — a real perElement key rides through untouched", () => {
+    const env2: RegistryEnv = { ...EMPTY_ENV, plugins: [{ id: "dataview", name: "Dataview" }] };
+    const defs = buildItemDefs(env2);
+    const items = itemsIn({
+      community: {
+        dataview: {
+          synced: true,
+          settingsFile: {
+            mode: "fields",
+            rules: { tags: { sharing: EVERYWHERE, encrypted: false } },
+            perElement: { "": { "some-element": THIS_DEVICE }, tags: { desktop: perClass("desktop") } },
+          },
+        },
+      },
+    });
+    const group = compileItems(defs, { items }).find((g) => g.name === "plugin-dataview");
+    expect(group?.perElement).toEqual({ tags: { desktop: perClass("desktop") } });
+  });
 });
 
 // enablementSharing / structuralLocalElements / elementSharings / deviceSharing retired with the

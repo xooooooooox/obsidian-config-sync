@@ -64,8 +64,10 @@ export function v2ItemLocation(v2Id: string): { section: StorageSection; id: Ite
   }
   // A bare id is one of the three Obsidian cards (app/appearance/hotkeys). Anything else bare —
   // e.g. the inert `core-plugins` key v2's carrier chip used to write, which no def claimed and
-  // nothing compiled — lands there too and stays just as inert: one rule, no special cases, and
-  // the user's document keeps every key it arrived with.
+  // nothing compiled — lands there too: one rule, no special cases, and the user's document keeps
+  // every key it arrived with. It no longer STAYS inert past this point, though: the v4 migration
+  // (v4Migration.ts rule 6) now actively neutralizes a `synced` value found there for the two
+  // carrier ids, because v3 never gave it meaning and a v4 build otherwise would.
   return { section: "obsidian", id: v2Id };
 }
 

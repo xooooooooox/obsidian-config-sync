@@ -143,13 +143,37 @@ describe("v3 → v4", () => {
     expect(obsidian["core-plugins"]?.synced).toBe(false);
   });
 
-  it("a carrier that already says whether it syncs keeps its own answer", () => {
+  // Final-review IMPORTANT 2: a v3 document never wrote a carrier entry — v3's own compile decided a
+  // carrier's sync via the retired anyEnabledInList over the section, never by reading
+  // `items.obsidian["core-plugins"|"community-plugins"]`. A `synced`/`enabled` value already sitting
+  // there in a v3 doc is v2-chip residue (v2's old carrier chip wrote an inert bare-key entry that no
+  // v3 build ever gave behaviour to), not a value any build chose — so the section predicate now
+  // IGNORES it, in both directions, rather than "existing value wins".
+  it("a v2-chip carrier entry is neutralized when nothing in its section is synced — the predicate wins, not the residue", () => {
     const { document } = migrateV4Settings({
       schemaVersion: 3,
-      items: { obsidian: { "community-plugins": { synced: false } }, community: { dataview: { enabled: true } } },
+      items: { obsidian: { "core-plugins": { enabled: true } }, core: { graph: { enabled: false } } },
     });
     const obsidian = sectionOf(document, "obsidian");
-    expect(obsidian["community-plugins"]?.synced).toBe(false);
+    expect(obsidian["core-plugins"]?.synced).toBe(false);
+  });
+
+  it("a v2-chip carrier entry is overridden true when something in its section IS synced — the predicate wins either way", () => {
+    const { document } = migrateV4Settings({
+      schemaVersion: 3,
+      items: { obsidian: { "core-plugins": { enabled: true } }, core: { graph: { enabled: true } } },
+    });
+    const obsidian = sectionOf(document, "obsidian");
+    expect(obsidian["core-plugins"]?.synced).toBe(true);
+  });
+
+  it("an unknown field already on the carrier entry still rides through untouched — only `synced` is overwritten", () => {
+    const { document } = migrateV4Settings({
+      schemaVersion: 3,
+      items: { obsidian: { "community-plugins": { synced: false, futureField: "kept" } }, community: { dataview: { enabled: true } } },
+    });
+    const obsidian = sectionOf(document, "obsidian");
+    expect(obsidian["community-plugins"]).toMatchObject({ synced: true, futureField: "kept" });
   });
 
   it("bratIndex folds onto the plugins, creating an unsynced skeleton for an id with no entry", () => {

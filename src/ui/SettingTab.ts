@@ -1667,6 +1667,13 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
 
   private renderCardDataPreview(bodyEl: HTMLElement, def: ItemDef, item: Item, doc: Record<string, unknown>, wrap: HTMLElement): void {
     const pre = bodyEl.createEl("pre", { cls: "config-sync-json-pre" });
+    // A carrier card's element rows (the drawer, spec §6.4) ARE its rule surface — a per-key rule on
+    // a boolean plugin map has no meaning, and clicking one here used to write `sf.rules[<plugin id>]`
+    // (final-review CRITICAL 1), which flips the item into "fields" mode and corrupts the switch-list
+    // file on next capture (registry.ts's perElementFromMap now also refuses that key, belt-and-braces,
+    // but this is the affordance that invited the click in the first place). Suppressed entirely below:
+    // no click handler, and no "you could add a rule here" styling on an un-ruled key.
+    const isCarrier = carrierListFor(def) !== null;
     const detectedKeys = this.detections.get(def.id)?.keys ?? [];
     const rules: FieldRule[] = Object.entries(item.settingsFile?.rules ?? {}).map(([pattern, r]) => ({ pattern, ...r }));
     const raw = JSON.stringify(doc, null, 2);
@@ -1681,11 +1688,14 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       const kc = key !== undefined ? classByKey.get(key) : undefined;
       if (m !== null && key !== undefined && kc !== undefined) {
         pre.createSpan({ text: m[1] });
-        const kspan = pre.createSpan({ cls: `config-sync-json-key ${jsonKeyClass(kc)}`, text: `"${key}"` });
+        // No hint class (cursor-pointer / dotted-underline "detected") for an un-ruled key on a
+        // carrier card — there is nothing to click here (see isCarrier above).
+        const noRuleHint = isCarrier && kc.state.sharing === null;
+        const kspan = pre.createSpan({ cls: noRuleHint ? "config-sync-json-key" : `config-sync-json-key ${jsonKeyClass(kc)}`, text: `"${key}"` });
         // An encrypted rule marks its key with the same lucide lock the rest of the panel uses
         // (round-7 spec §2 — the old emoji suffix is gone).
         if (kc.state.encrypted) setIcon(kspan.createSpan({ cls: "config-sync-json-lock" }), "lock");
-        if (kc.state.sharing === null) {
+        if (kc.state.sharing === null && !isCarrier) {
           kspan.addEventListener("click", () => {
             void this.addRuleForKey(def, key).then(() => {
               // Adding a rule can flip hasKeyRules -> true, which dims the path row's own

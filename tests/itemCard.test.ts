@@ -479,6 +479,30 @@ describe("carrierBadgeCounts", () => {
   it("a list with nothing decided counts nothing (a badge never reads '0 …')", () => {
     expect(carrierBadgeCounts(itemsIn({}), "core-plugins", [])).toEqual({ fleet: 0, local: 0 });
   });
+
+  // Final-review IMPORTANT 3: the carrier's OWN class pins (fileRule.sharing — settable from the
+  // Sync Center's Default settings sync row — and any class-pinned `rules` entry) must join the
+  // element class rules in the SAME "N device-scoped" count, without double-counting: `perElement`
+  // holds the element rules already counted above, so folding in `countClassPinned` whole (which also
+  // walks `perElement`) would count them twice.
+  it("composes the carrier's own fileRule/rules class pins with its element class rules, without double-counting", () => {
+    const items = itemsIn({
+      obsidian: {
+        "core-plugins": {
+          synced: true,
+          settingsFile: {
+            mode: "plain",
+            rules: { "some-key": { sharing: perClass("mobile"), encrypted: false } },
+            perElement: { "": { "daily-notes": perClass("desktop"), graph: THIS_DEVICE } },
+            fileRule: { sharing: perClass("desktop"), encrypted: false },
+          },
+        },
+      },
+    });
+    // element class rules: daily-notes only (graph is this-device, not class-scoped) = 1
+    // carrier's own pins: fileRule (1) + rules["some-key"] (1) = 2
+    expect(carrierBadgeCounts(items, "core-plugins", [])).toEqual({ fleet: 3, local: 0 });
+  });
 });
 
 describe("buildCarrierElementRows", () => {

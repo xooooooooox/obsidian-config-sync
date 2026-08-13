@@ -151,18 +151,28 @@ export function migrateV4Settings(input: Doc): V4Migration {
 
   // Rule 6 — the carriers' own `synced`. Until v4 a carrier compiled iff any item in its section was
   // synced (the retired anyEnabledInList); from v4 it compiles iff its own item says so. Without
-  // this line, every user's on/off sync would silently stop on the first v4 load. An existing value
-  // wins: a hand-edited or newer document already said what it wanted. `=== true` is the same one
+  // this line, every user's on/off sync would silently stop on the first v4 load.
+  //
+  // The section predicate ALWAYS wins here, for the two carrier ids ONLY — never "existing value
+  // wins". No v3 build ever wrote a carrier entry to `items.obsidian`: v3's own compile decided a
+  // carrier's sync by the retired anyEnabledInList over the section, and never read
+  // `items.obsidian["core-plugins"|"community-plugins"]` at all. So a `synced` value already sitting
+  // there is not a value ANY v3 build chose — it is v2-chip residue: v2's old carrier chip wrote an
+  // inert `items["core-plugins"] = {enabled:true}` (a bare id, which v2ItemLocation's fallback lands
+  // in the `obsidian` section) that no v3 build ever gave behaviour to, and whose write was
+  // documented dead (v2Migration.ts's v2ItemLocation). Honouring it here would silently turn on
+  // fleet-wide list sync for every user who once clicked that dead chip. Same rule as v2Migration.ts's
+  // rule 2: preserve what the system DID, not what a dead write once said. `=== true` is the same one
   // predicate the item walk above uses, complemented — the two must agree, or an entry could be
-  // structural AND count towards its carrier syncing.
+  // structural AND count towards its carrier syncing. Any OTHER field already on the carrier entry (a
+  // key a newer build wrote) still rides through — `carrier` is a spread of the existing entry, and
+  // only `synced` is overwritten below.
   for (const section of ["core", "community"] as const) {
     const home = ruleHomeFor(listFor(section));
     const obsidian: Doc = isPlainObject(items[home.section]) ? { ...(items[home.section] as Doc) } : {};
     const carrier: Doc = isPlainObject(obsidian[home.id]) ? { ...(obsidian[home.id] as Doc) } : {};
-    if (!("synced" in carrier)) {
-      const byId = isPlainObject(items[section]) ? (items[section] as Doc) : {};
-      carrier.synced = Object.values(byId).some((i) => isPlainObject(i) && i.synced === true);
-    }
+    const byId = isPlainObject(items[section]) ? (items[section] as Doc) : {};
+    carrier.synced = Object.values(byId).some((i) => isPlainObject(i) && i.synced === true);
     obsidian[home.id] = carrier;
     items[home.section] = obsidian;
   }

@@ -2125,9 +2125,9 @@ export class SyncCenterView extends ItemView {
         : sectionCountLabel(rows.length, visible.length, filtered),
     });
     // Core/Community's carrier chip: inline in the head on every platform (batch-21 spec §2,
-    // revising batch-20's mobile second-line drop) — desktop keeps the full-text pill,
-    // renderCarrierChip itself switches to an icon-only form on mobile so the head still fits
-    // on one line without a dedicated meta line.
+    // revising batch-20's mobile second-line drop) — same full-text shape on desktop and mobile
+    // (renderCarrierChip's own doc comment), so the head still fits on one line without a
+    // dedicated meta line.
     const carrierId: EnablementList | null = ts === "core" ? "core-plugins" : ts === "community" ? "community-plugins" : null;
     if (carrierId !== null) this.renderCarrierChip(head, carrierId);
     const checkable = visible.filter((r) => this.fateFor(r).stageable);

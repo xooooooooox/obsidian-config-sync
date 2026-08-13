@@ -406,8 +406,16 @@ function fieldsFromRules(rules: Record<string, ItemFieldRule>): FieldRule[] {
   return Object.entries(rules).map(([pattern, rule]) => ({ pattern, ...rule }));
 }
 
+// The reserved "" key (switchList.ts's perElementKeyFor mints it for a whole-file switch list) never
+// belongs in a COMPILED group's perElement: that map is keyed by JSON field names, and "" names no
+// field a document could ever have. This is not re-deriving what "" means (that stays perElementKeyFor's
+// job alone) — it is refusing an impossible field name, on the same footing as any other value this
+// compile step cannot make sense of. Without this, a carrier item that also picked up a stray `rules`
+// entry (final-review CRITICAL 1: File preview click-to-add) flips into "fields" mode and copies its
+// element rules — stored under "" — onto the compiled group, which captureTransform then reads as a
+// per-element ARRAY key named "" and writes `"": []` into the switch-list file, silently corrupting it.
 function perElementFromMap(perElement: Record<string, PerElementSharing>): Record<string, PerElementSharing> | undefined {
-  const entries = Object.entries(perElement);
+  const entries = Object.entries(perElement).filter(([key]) => key !== "");
   return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }
 

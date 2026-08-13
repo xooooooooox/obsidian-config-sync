@@ -954,7 +954,7 @@ describe("§5 — content at the far end with no lock", () => {
     const io = new MemFS();
     io.seed(LOCAL_STORE);
 
-    const junk = fakeWriter({ ".DS_Store": " " });
+    const junk = fakeWriter({ ".DS_Store": " " });
     await pushExternal(guardCtx(io), junk.writer, { excludeSelf: false });
     expect(junk.files["store/configdir/hotkeys.json"]).toBe('{"mine":1}');
   });
