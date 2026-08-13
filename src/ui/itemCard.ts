@@ -14,6 +14,7 @@ import { GROUP_NAME_RE } from "../core/manifest";
 import { basename } from "../core/pathing";
 import { DeviceElementState } from "../core/deviceElements";
 import { enablementRules, RuleListId } from "../core/enablementRules";
+import { perElementKeyFor } from "../core/switchList";
 import { deriveMode, emptyItem, Item, ItemDef, ItemFieldRule, ItemMap, itemFor, ItemSettingsFile, withItem } from "../core/registry";
 import {
   DeviceClass,
@@ -257,20 +258,26 @@ export interface FieldRowModel {
   perElementEnabled: boolean;
 }
 
-// The Appearance card's enabledCssSnippets key is never an ordinary rule row — its per-element rule
-// lives in the dedicated snippets member rows under Companion folders instead (spec §4/§5); rule
-// rows and File preview's click-to-add both exclude it.
+// The `mapKey` on the Appearance card's snippets companion (registry.ts's presetCompanions) — which
+// folder's member list is the snippet list, so the card knows to draw element-rule rows under it
+// instead of plain filenames. NOT the key its rules are stored under: that is `perElementKeyFor`'s
+// answer (they are the same string today, and the rule-row exclusion below asks the producer, not
+// this). File preview's click-to-add still excludes it (spec §4/§5).
 export const ENABLED_CSS_SNIPPETS_KEY = "enabledCssSnippets";
 
 // A perElement key that holds an ENABLEMENT LIST's rules is never an ordinary rule row: those rules
 // have rows of their own on the same card (the Appearance card's snippet members, a carrier card's
-// element rows — spec §6.4). The whole-file lists' reserved key is the empty string
-// (switchList.ts's perElementKeyFor), which registry.ts's deriveMode excludes for the same reason
-// and which has no key name to render at all — a nameless rule row with a ✕ beside it is not a
-// thing to show a user.
+// element rows — spec §6.4), and a whole-file list's key has no name to render at all, so it would
+// come out as a nameless row with a ✕ beside it.
+//
+// WHICH key that is comes from `perElementKeyFor` and nowhere else (spec §3.3, §9 lesson 2/3) — the
+// same producer `ruleHomeFor` asks when it WRITES the rules. Spelling the whole-file key as `""`
+// here would be a second author for a derived key, which is the drift this release exists to end;
+// registry.ts's deriveMode still carries that literal, and it is the one place it is spelled.
 function isEnablementRuleKey(def: ItemDef, key: string): boolean {
-  if (carrierListFor(def) !== null) return key === "";
-  return def.section === "obsidian" && def.id === "appearance" && key === ENABLED_CSS_SNIPPETS_KEY;
+  const list = carrierListFor(def);
+  if (list !== null) return key === perElementKeyFor(list);
+  return def.section === "obsidian" && def.id === "appearance" && key === perElementKeyFor("enabled-css-snippets");
 }
 
 // Rule rows list ONLY configured keys (rules ∪ perItem) — browsing the file's full key set is the

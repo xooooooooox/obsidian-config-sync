@@ -564,9 +564,9 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private syncAllRebuilds: (() => void)[] = []; // cleared each rerender
   private cardHosts: { wrap: HTMLElement; def: ItemDef }[] = []; // cleared each rerender
   // Obsidian's ToggleComponent.setValue fires the component's own onChange when the value really
-  // changes, so the card head's snap-back (`t.setValue(true)` while the modal decides) would
-  // re-enter that handler with `true` and write `synced: true` to a card that never stopped being
-  // synced. This makes the snap-back what it looks like: a display correction, not a gesture.
+  // changes, so the card head's snap-back (`setValue(true)` while the modal decides) would re-enter
+  // that handler with `true` and write `synced: true` to a card that never stopped being synced.
+  // This makes the snap-back what it looks like: a display correction, not a gesture.
   private snappingBackToggle = false;
 
   constructor(app: App, private host: SettingsHost) {
@@ -909,27 +909,49 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     for (const badge of computeBadges(def, item, this.enablementOf(def), this.carrierCountsOf(def))) this.renderBadge(row.nameEl, badge);
     row.addToggle((t) =>
       t.setValue(item.synced).onChange(async (v) => {
-        // Turning an item OFF removes it from every device's contract and can delete its store
-        // copy — the one destructive gesture on this card, and since the Sync Center's footer
-        // retired (spec §6.2) its only home. The confirmation is the SAME modal that footer opened;
-        // nothing about StopSyncingModal changes, only who calls it. Every card goes through it,
-        // the two carrier cards included: a carrier is an item, it has a store copy, and "one home
-        // for the gesture" does not mean "one home for the items we thought of first".
         if (this.snappingBackToggle) return;
-        if (!v) {
+        await this.cardSyncedToggled(def, wrap, v, () => {
+          // Obsidian's ToggleComponent.setValue fires this same onChange when the value really
+          // changes, so the snap-back is fenced off from the handler it would otherwise re-enter.
           this.snappingBackToggle = true;
-          t.setValue(true); // the modal owns the outcome — the toggle follows it, not the click
+          t.setValue(true);
           this.snappingBackToggle = false;
-          void this.openStopSyncing(def, wrap);
-          return;
-        }
-        // Turning it back ON keeps the plain path — restoring sync destroys nothing.
-        await this.updateItem(def, (c) => ({ ...c, synced: v }));
-        this.refreshCardBadges(wrap, def);
-        for (const rebuild of this.syncAllRebuilds) rebuild();
+        });
       })
     );
     syncExpansion();
+  }
+
+  // What the card head's toggle DOES — a method rather than a closure so the routing below is
+  // reachable from a test without a live ToggleComponent (the snap-back is the only part that needs
+  // one, and it comes in as a callback).
+  //
+  // Turning an item OFF removes it from every device's contract and can delete its store copy — the
+  // one destructive gesture on this card, and since the Sync Center's footer retired (spec §6.2)
+  // its only home. The confirmation is the SAME modal that footer opened; nothing about
+  // StopSyncingModal changes, only who calls it. The two carrier cards go through it like any
+  // other: a carrier is an item, it has a store copy, and "one home for the gesture" does not mean
+  // "one home for the items we thought of first".
+  //
+  // EXCEPT config-sync's own card. The registry builds a def for every installed plugin, itself
+  // included (registry.ts's buildItemDefs; main.ts's adopt path says so in as many words), so the
+  // Community tab carries a Config Sync card with this same toggle — and the modal's delete-store
+  // checkbox defaults to CHECKED, which on this one item would delete the self copy that carries
+  // the sync contract to every other device. The gesture has excluded the self item since it was
+  // designed (2026-07-18-stop-syncing-design.md §A, "not the self item"); §6.2 moved the gesture's
+  // home, not its scope. So this card keeps the plain write it has always had: `synced` flips,
+  // nothing is deleted, and it is reversible in place.
+  //
+  // Turning any item back ON is the plain path too — restoring sync destroys nothing.
+  private async cardSyncedToggled(def: ItemDef, wrap: HTMLElement, v: boolean, snapBack: () => void): Promise<void> {
+    if (!v && def.groupName !== SELF_GROUP_NAME) {
+      snapBack(); // the modal owns the outcome — the toggle follows it, not the click
+      void this.openStopSyncing(def, wrap);
+      return;
+    }
+    await this.updateItem(def, (c) => ({ ...c, synced: v }));
+    this.refreshCardBadges(wrap, def);
+    for (const rebuild of this.syncAllRebuilds) rebuild();
   }
 
   // The card's destructive action (spec §6.2), body unchanged from the Sync Center footer's

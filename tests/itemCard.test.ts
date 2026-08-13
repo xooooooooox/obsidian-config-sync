@@ -14,7 +14,6 @@ import {
   countEncrypted,
   encryptDisabledForSharing,
   encryptToggleDisabled,
-  ENABLED_CSS_SNIPPETS_KEY,
   DEFAULT_ENABLED_ON_LABEL,
   fileRuleLegalForMode,
   FILE_SHARING_MENU_UNAVAILABLE_TEXT,
@@ -37,6 +36,7 @@ import {
   SYNC_ALL_LABEL,
 } from "../src/ui/itemCard";
 import { defaultSettingsFile, deriveMode, emptyItem, Item, ItemDef, ItemSettingsFile, pruneSettingsFile } from "../src/core/registry";
+import { perElementKeyFor } from "../src/core/switchList";
 import { itemsIn } from "./items";
 import { EVERYWHERE, perClass, Sharing, THIS_DEVICE } from "../src/core/types";
 
@@ -333,27 +333,39 @@ describe("buildRuleRows (spec 2026-07-26-card-visual-refresh-design.md §3 — t
     expect(rows).toEqual([expect.objectContaining({ key: "items", isArray: false })]);
   });
 
-  it("appearance pointer-row logic: enabledCssSnippets is excluded from rule rows (like buildFieldRows)", () => {
-    const c = cfg({ settingsFile: { mode: "fields", rules: {}, perElement: { enabledCssSnippets: { x: perClass("desktop") } } } });
-    const rows = buildRuleRows(APPEARANCE_DEF, c, { cssTheme: "dark", enabledCssSnippets: ["a.css"] });
+  // Producer versus producer (spec §9 lesson 3): the key an enablement list's rules live under is
+  // `perElementKeyFor`'s answer, so the exclusion is asserted against that producer — never against
+  // the literal `enabledCssSnippets`, and never against a bare `""`. A test pinned to a literal
+  // passes while the producer drifts, which is the exact failure this release exists to end.
+  it("appearance pointer-row logic: the snippet rules' key is excluded from rule rows (like buildFieldRows)", () => {
+    const key = perElementKeyFor("enabled-css-snippets");
+    const c = cfg({ settingsFile: { mode: "fields", rules: {}, perElement: { [key]: { x: perClass("desktop") } } } });
+    const rows = buildRuleRows(APPEARANCE_DEF, c, { cssTheme: "dark", [key]: ["a.css"] });
     expect(rows.map((r) => r.key)).toEqual([]);
-    expect(rows.some((r) => r.key === ENABLED_CSS_SNIPPETS_KEY)).toBe(false);
   });
 
-  // The same exclusion, for the other two cards that keep enablement rules in perElement: a whole-
-  // file list stores them under the reserved "" key (switchList.ts's perElementKeyFor), which has
-  // no key name to show and whose rules already have rows of their own in the carrier's drawer
-  // (spec §6.4). Before task 12 the first rule a user set on either list put a nameless row — with
-  // a ✕ — into the card's Settings-file zone.
-  it("a carrier card's reserved '' key is excluded from rule rows, and its real keys are not", () => {
+  // The same exclusion, for the other two cards that keep enablement rules in perElement. A whole-
+  // file list's key has no name to show, and its rules already have rows of their own in the
+  // carrier's drawer (spec §6.4) — before task 12 the first rule a user set on either list put a
+  // nameless row, with a ✕, into the card's Settings-file zone.
+  it("a carrier card's own rule key is excluded from rule rows, and its real keys are not", () => {
     const carrier: ItemDef = def({ id: "community-plugins", groupName: "community-plugins", label: "Community plugins" });
-    const c = cfg({ settingsFile: { mode: "plain", rules: {}, perElement: { "": { dataview: perClass("desktop") } } } });
+    const key = perElementKeyFor("community-plugins");
+    const c = cfg({ settingsFile: { mode: "plain", rules: {}, perElement: { [key]: { dataview: perClass("desktop") } } } });
     expect(buildRuleRows(carrier, c, { dataview: true })).toEqual([]);
 
     const alsoRuled = cfg({
-      settingsFile: { mode: "fields", rules: { someKey: { sharing: EVERYWHERE, encrypted: false } }, perElement: { "": { dataview: perClass("desktop") } } },
+      settingsFile: { mode: "fields", rules: { someKey: { sharing: EVERYWHERE, encrypted: false } }, perElement: { [key]: { dataview: perClass("desktop") } } },
     });
     expect(buildRuleRows(carrier, alsoRuled, {}).map((r) => r.key)).toEqual(["someKey"]);
+  });
+
+  // …and the exclusion is per CARD, not global: the snippet key on a card that does not carry that
+  // list is an ordinary rule row, exactly as it was before.
+  it("the same key on a card that carries no list is still an ordinary rule row", () => {
+    const key = perElementKeyFor("enabled-css-snippets");
+    const c = cfg({ settingsFile: { mode: "fields", rules: {}, perElement: { [key]: { x: perClass("desktop") } } } });
+    expect(buildRuleRows(HOTKEYS_DEF, c, { [key]: ["a.css"] }).map((r) => r.key)).toEqual([key]);
   });
 });
 

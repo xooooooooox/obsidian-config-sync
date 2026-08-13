@@ -1036,6 +1036,73 @@ describe("stop syncing refuses before the modal opens", () => {
   });
 });
 
+// Config Sync's OWN card, which the registry builds like every other installed plugin's
+// (registry.ts's buildItemDefs — main.ts's adopt path spells out "itself included"). Its group name
+// IS `SELF_GROUP_NAME`, and the modal's delete-store checkbox defaults to checked, so routing this
+// one card through the confirmation would offer to delete the self copy that carries the sync
+// contract to every other device. The gesture has excluded the self item since it was designed
+// (2026-07-18-stop-syncing-design.md §A, "not the self item").
+//
+// Driven at the card head's real handler (`cardSyncedToggled`), not at a predicate: the defect this
+// closes was never a wrong rule, it was a caller that routed a case it should not have.
+describe("the card head's toggle and config-sync's own card", () => {
+  const SELF_DEF: ItemDef = { section: "community", id: "config-sync", groupName: SELF_GROUP_NAME, label: "Config Sync", description: "" };
+  const OTHER_DEF: ItemDef = { section: "community", id: "demo", groupName: "plugin-demo", label: "Demo Plugin", description: "" };
+
+  function tabFor(def: ItemDef): { toggleOff: () => Promise<void>; snapped: () => number; counted: () => number; synced: () => boolean | undefined } {
+    let snapped = 0;
+    let counted = 0;
+    const host = {
+      settingsWritable: () => true,
+      settings: { items: itemsIn({ community: { "config-sync": { synced: true }, demo: { synced: true } } }) },
+      saveSettings: async () => {},
+      installedPluginIds: () => [],
+      itemDefs: () => [SELF_DEF, OTHER_DEF],
+      displayName: (group: string) => group,
+      storeFileCount: async () => {
+        counted += 1;
+        return 4;
+      },
+      stopSyncing: async () => [],
+      appendActionHistory: async () => {},
+    };
+    const tab = new ConfigSyncSettingTab({} as never, host as never) as unknown as {
+      cardSyncedToggled: (d: ItemDef, wrap: unknown, v: boolean, snapBack: () => void) => Promise<void>;
+      refreshCardBadges: () => void;
+    };
+    // Stubbed for the same reason tests/settingsAnchor.test.ts stubs jumpTo's tail: repainting the
+    // badges needs a rendered card, and this suite has no DOM. The routing and the write under test
+    // both happen before it.
+    tab.refreshCardBadges = () => {};
+    return {
+      toggleOff: () => tab.cardSyncedToggled(def, {}, false, () => (snapped += 1)),
+      snapped: () => snapped,
+      counted: () => counted,
+      synced: () => host.settings.items.community?.[def.id]?.synced,
+    };
+  }
+
+  it("turning the self card off writes synced:false — no snap-back, no modal, nothing deleted", async () => {
+    const tab = tabFor(SELF_DEF);
+
+    await tab.toggleOff();
+
+    expect(tab.synced()).toBe(false);
+    expect(tab.snapped()).toBe(0); // the toggle keeps the user's click; there is no modal to defer to
+    expect(tab.counted()).toBe(0); // …and openStopSyncing never ran, so no store copy was ever sized up
+  });
+
+  it("...while every other card still defers to the modal, and writes nothing itself", async () => {
+    const tab = tabFor(OTHER_DEF);
+
+    await tab.toggleOff();
+
+    expect(tab.synced()).toBe(true); // untouched — the modal owns the outcome
+    expect(tab.snapped()).toBe(1);
+    expect(tab.counted()).toBe(1);
+  });
+});
+
 // §4.2b/N3, the settings tab's own drafts: a refused gesture must not move what the panel renders,
 // or the UI shows an edit that never happened. The Advanced tab gets this from ONE line —
 // `persistCustomGroups` throws the refusal, and `commitDraft` already keeps the caller's draft
