@@ -13,7 +13,7 @@ Every behavior in one place; the [README](../README.md) is the 5-minute version.
 
 ## Updating from 2.21.0 and earlier
 
-**Update Config Sync on every device before any of them captures or pulls again.** This release changes the format of both the plugin's own settings and `store.lock.json`, and the change is one way: once a device has written the new format, there is no going back to the old one.
+**Update Config Sync on every device before any of them captures or pulls again.** This release changes the format of the plugin's own settings, and the change is one way: once a device has written the new format, there is no going back to the old one.
 
 - A device on **2.21.0** that meets the new format refuses it, says so plainly, and changes nothing. Update it and it carries on where it left off.
 - A device on **2.20.0 or earlier** has no such check. It **resets its Config Sync settings to defaults** — every rule, every custom rule, every card you had ticked. Nothing recovers that afterwards, which is why the order matters: update the device before it ever sees the new format.
