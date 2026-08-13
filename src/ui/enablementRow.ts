@@ -79,6 +79,25 @@ export function buildLocalMenu(rule: Sharing, exception: DeviceElementState | nu
   return items;
 }
 
+// The whole-FILE local menu (spec §6.2 `DEFAULT SETTINGS SYNC`, ledger C-#45/§6.6): a DIFFERENT
+// datum from buildLocalMenu's above — a device opt-out of the entire item, not one element of an
+// enablement list — so it gets its own two-entry producer rather than being folded into
+// buildLocalMenu's four-value shape. Always both entries: unlike the element menu there is no
+// `this-device` rule that would make `Follows the default` meaningless here.
+export const NOT_SYNCED_HERE_LABEL = "Not synced here";
+
+export interface FileLocalMenuHandlers {
+  follow: () => void;
+  optOut: () => void;
+}
+
+export function buildFileLocalMenu(optedOut: boolean, handlers: FileLocalMenuHandlers): LocalMenuItem[] {
+  return [
+    { title: FOLLOWS_LABEL, icon: null, checked: !optedOut, action: handlers.follow },
+    { title: NOT_SYNCED_HERE_LABEL, icon: "circle-slash", checked: optedOut, action: handlers.optOut },
+  ];
+}
+
 // Landing the FLEET segment on `Each device decides` while this device has no exception yet leaves
 // the row with nothing true to say: it renders `Follows the default` beside a menu that (per
 // buildLocalMenu) no longer offers that state — a label the user cannot re-select, describing a

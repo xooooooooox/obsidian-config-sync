@@ -861,24 +861,8 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 .config-sync-hcard-pill.is-chg { background: var(--background-modifier-hover); color: var(--text-muted); }
 .config-sync-hcard-pill.is-iss { background: rgba(var(--color-orange-rgb), 0.14); color: var(--color-orange); }
 
-/* ── Stop syncing + store leftover ───────────────────────────────────────── */
+/* ── Store leftover ───────────────────────────────────────────────────────── */
 .config-sync-segrow { display: flex; align-items: center; gap: var(--size-4-2); }
-/* Quiet footer (round-9 定稿 A): always the drawer's last row, divider + spacing keep it clear
-   of the file/diff rows; muted text link that only turns red under the pointer. */
-.config-sync-stopsync-foot {
-  display: flex; margin-top: var(--size-4-3);
-  padding-top: var(--size-4-2); border-top: 1px solid var(--background-modifier-border);
-}
-.config-sync-stopsync {
-  margin-left: auto; display: inline-flex; align-items: center; gap: 5px;
-  color: var(--text-muted); font-size: var(--font-ui-smaller); cursor: pointer;
-  padding: 3px 2px;
-}
-.config-sync-stopsync:hover, .config-sync-stopsync:active { color: var(--color-red); }
-.config-sync-stopsync-ic { display: inline-flex; align-items: center; }
-.config-sync-stopsync svg { width: 14px; height: 14px; }
-.is-mobile .config-sync-stopsync-foot { margin-top: var(--size-4-4); }
-.is-mobile .config-sync-stopsync { padding: 6px 2px; }
 .config-sync-fpill.is-leftover { color: var(--color-orange); border-color: rgba(var(--color-orange-rgb), 0.5); }
 .config-sync-fpill.is-leftover.is-active { background: var(--color-orange); border-color: var(--color-orange); color: var(--background-primary); }
 .config-sync-section.is-leftover { border-color: rgba(var(--color-orange-rgb), 0.45); }
@@ -1234,16 +1218,18 @@ body.is-mobile .config-sync-cardrow > .config-sync-explabel-inline { flex: none;
    `fleet segment | divider | local segment`, one shape shared by the Sync Center's row and the
    settings card's. Each segment is its own menu trigger and carries the .is-set accent language the
    icon triggers above already teach. The local segment renders NO glyph while it follows the
-   default — a default has nothing to say — so its box must stay legible as text alone. Task 10
-   refines the visual pass; this is the structural minimum. */
-.config-sync-tworow { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.config-sync-tworow-seg { display: inline-flex; align-items: center; gap: 4px; border-radius: var(--radius-s); padding: 3px 6px; font-size: var(--font-ui-smaller); color: var(--text-muted); cursor: pointer; white-space: nowrap; }
+   default — a default has nothing to say — so its box must stay legible as text alone. Four fixed
+   grid tracks (task 10, final pass): every row in a card lines its icons and state words up on the
+   same two vertical rules, which a flex row (task 7's structural minimum) could not guarantee once
+   fleet-segment text varied in length row to row. */
+.config-sync-tworow { display: grid; grid-template-columns: minmax(0, 182px) 1px 1fr; align-items: center; gap: 0 14px; }
+.config-sync-tworow-seg { display: inline-flex; align-items: center; gap: 6px; border-radius: var(--radius-s); padding: 3px 6px; font-size: var(--font-ui-smaller); color: var(--text-muted); cursor: pointer; white-space: nowrap; }
 .config-sync-tworow-seg:hover, .config-sync-tworow-seg:focus-visible { color: var(--text-normal); background: var(--background-modifier-hover); }
-.config-sync-tworow-seg.is-set { color: var(--interactive-accent); }
+.config-sync-tworow-seg.is-set { color: var(--text-normal); }
 .config-sync-tworow-seg.is-local.is-set { color: var(--color-purple); }
 .config-sync-tworow-ic { display: inline-flex; align-items: center; }
 .config-sync-tworow-ic .svg-icon { width: var(--icon-s); height: var(--icon-s); }
-.config-sync-tworow-vline { flex: 0 0 auto; width: 1px; align-self: stretch; min-height: 1em; background: var(--background-modifier-border); }
+.config-sync-tworow-vline { width: 1px; align-self: stretch; background: var(--background-modifier-border); }
 /* The settings card's fleet segment is renderSharingCycle carrying a label (its `labelFor` hook), so
    it must read as the same segment shape the Sync Center paints by hand: content-sized box, glyph +
    text, same padding. The base .config-sync-sharingicon is a fixed-width grid cell everywhere else,

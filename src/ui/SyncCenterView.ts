@@ -7,8 +7,11 @@ import { EVERYWHERE, FileChanges, FileSharing, GroupResult, hasChanges, ItemRef,
 import { DeviceElementState } from "../core/deviceElements";
 import { RuleListId } from "../core/enablementRules";
 import {
+  buildFileLocalMenu,
   buildLocalMenu,
   enablementRowModel,
+  FOLLOWS_LABEL,
+  NOT_SYNCED_HERE_LABEL,
   RowSegment,
   RULE_OPTIONS,
   ruleIcon,
@@ -76,7 +79,7 @@ import { renderDiffPanel } from "./diffView";
 import { EnablementList, isSwitchListGroup, switchListSortedView } from "../core/switchList";
 import { jsonSortedView } from "../core/merge";
 import { renderReportContent, renderReportPills, stripHeader } from "./reportContent";
-import { RunRecord, RunKind, RunStatus, worstStatus, formatRunTime, stopSyncDesc, deleteLeftoverDesc } from "../core/runHistory";
+import { RunRecord, RunKind, RunStatus, worstStatus, formatRunTime, deleteLeftoverDesc } from "../core/runHistory";
 import { ACTION_ICON, ACTION_COLOR_CLASS, renderActionIcon, renderActionCount, type SyncAction } from "./actionIcons";
 import { FATE_CHIP_ICON } from "./fateChipIcons";
 import { renderFoldIcon, renderFoldCount, type FoldKind } from "./foldIcons";
@@ -85,7 +88,6 @@ import { renderFoldIcon, renderFoldCount, type FoldKind } from "./foldIcons";
 import {
   FILE_SHARING_MENU_UNAVAILABLE_TEXT,
   FILE_SHARING_OPTIONS,
-  sharingCycleTooltip,
   sharingIcon,
   sharingLabel,
 } from "./itemCard";
@@ -2552,11 +2554,6 @@ export class SyncCenterView extends ItemView {
     const detail = card.createDiv({ cls: "config-sync-report-files config-sync-itemcard" });
     detail.hidden = !expanded;
     this.renderUnifiedCard(detail, r, fate, input, isConflict);
-    // Stop syncing always closes the drawer as a quiet footer under a divider (round-9 定稿 A):
-    // one placement for every removable row, clear of the file/diff rows a thumb aims for.
-    if (this.canStopSyncing(group.name)) {
-      this.renderStopSyncing(detail.createDiv({ cls: "config-sync-stopsync-foot" }), r);
-    }
     row.addEventListener("click", () => {
       if (this.expandedItems.has(group.name)) this.expandedItems.delete(group.name);
       else this.expandedItems.add(group.name);
@@ -2827,7 +2824,8 @@ export class SyncCenterView extends ItemView {
   }
 
   // A generic "label: value-that-opens-a-menu" card row, shared by After install / Enablement —
-  // the two textual triggers left once Settings sync/Runs on moved onto the icon idiom below.
+  // the two textual triggers left once Settings sync/Runs on moved onto the two-segment/icon
+  // idioms above.
   private renderCardMenuRow(detail: HTMLElement, label: string, valueText: string, ariaLabel: string, buildMenu: () => Menu): void {
     this.renderCardKeyRow(detail, label, (value) => {
       const chip = value.createSpan({ cls: "config-sync-menuchip config-sync-card-trigger", text: valueText, attr: { "aria-label": ariaLabel } });
@@ -2835,18 +2833,15 @@ export class SyncCenterView extends ItemView {
     });
   }
 
-  // Icon trigger + Obsidian Menu (spec 2026-08-06-c-livetest-batch2-design.md §2, ledger
-  // C-#7/C-#10): shared by Settings sync and Runs on — the glyph IS the state (sharingIcon-family
-  // vocabulary, same is-set accent language as renderSharingCycle's Settings-drawer idiom), but a
-  // click opens a menu of the row's options instead of cycling straight to the next one. Click
-  // target is the icon box only (`.config-sync-card-trigger` content-sizes it — C-#7's whole-row
-  // hit area was the base `.config-sync-sharingicon` class stretching to fill the row).
-  private renderCardIconMenuRow(detail: HTMLElement, label: string, icon: string, isSet: boolean, ariaLabel: string, buildMenu: () => Menu): void {
-    this.renderCardKeyRow(detail, label, (value) => {
-      const trigger = value.createSpan({ cls: `config-sync-sharingicon config-sync-card-trigger${isSet ? " is-set" : ""}`, attr: { "aria-label": ariaLabel } });
-      setIcon(trigger, icon);
-      this.wireMenuTrigger(trigger, buildMenu);
-    });
+  // One segment cell of a two-segment row: icon (when the segment has one) + wordmark, wired to
+  // its own menu. Factored out of renderTwoSegmentRow so `Default settings sync`'s fields-mode
+  // branch (a plain fleet NOTE, not a menu) can still paint a working local segment beside it
+  // without renderTwoSegmentRow having to accept a fleet that lies about opening a menu.
+  private paintTwoSegmentCell(host: HTMLElement, seg: RowSegment, cls: string, menu: () => Menu): void {
+    const el = host.createSpan({ cls, attr: { "aria-label": seg.label } });
+    if (seg.icon !== null) setIcon(el.createSpan({ cls: "config-sync-tworow-ic" }), seg.icon);
+    el.createSpan({ text: seg.label });
+    this.wireMenuTrigger(el, menu);
   }
 
   // The two-segment row (spec §6.1): fleet answer on the left of the divider, this device's own
@@ -2860,16 +2855,10 @@ export class SyncCenterView extends ItemView {
   ): void {
     this.renderCardKeyRow(detail, label, (value) => {
       const row = value.createDiv({ cls: "config-sync-tworow" });
-      const paint = (host: HTMLElement, seg: RowSegment, cls: string, menu: () => Menu): void => {
-        const el = host.createSpan({ cls, attr: { "aria-label": seg.label } });
-        if (seg.icon !== null) setIcon(el.createSpan({ cls: "config-sync-tworow-ic" }), seg.icon);
-        el.createSpan({ text: seg.label });
-        this.wireMenuTrigger(el, menu);
-      };
-      paint(row, fleet.seg, `config-sync-tworow-seg${fleet.isSet ? " is-set" : ""}`, fleet.menu);
+      this.paintTwoSegmentCell(row, fleet.seg, `config-sync-tworow-seg${fleet.isSet ? " is-set" : ""}`, fleet.menu);
       if (local === null) return;
       row.createSpan({ cls: "config-sync-tworow-vline" });
-      paint(row, local.seg, `config-sync-tworow-seg is-local${local.isException ? " is-set" : ""}`, local.menu);
+      this.paintTwoSegmentCell(row, local.seg, `config-sync-tworow-seg is-local${local.isException ? " is-set" : ""}`, local.menu);
     });
   }
 
@@ -2983,73 +2972,112 @@ export class SyncCenterView extends ItemView {
     });
   }
 
-  // Settings sync (spec §4, ledger C-#3/C-#7/C-#10): the item's own file-level sharing, rendered
-  // with the SAME icon vocabulary the Settings tab's file-row control uses (sharingIcon) — one
-  // control language for one stored value — but a card click opens a menu of the sharing options
-  // rather than cycling straight to the next one (renderSharingCycle's direct-cycle idiom is a C-#7 hazard
-  // once the icon isn't confined to a labeled grid column). Write target is Item.settingsFile.fileRule.sharing
-  // for every item, custom (folder) items included since runsOn's retirement
-  // (2026-08-12-enablement-two-layers, task 8) — one entrance, not two. The Settings tab's own
-  // drawer cycle control (renderSharingCycle) is untouched.
+  // Default settings sync (spec §6.1/§6.2, ledger C-#3/C-#7/C-#10): a two-segment row like `Default
+  // enabled on` — fleet segment is the item's own file-level sharing (SAME icon vocabulary the
+  // Settings tab's file-row control uses, sharingIcon; write target Item.settingsFile.fileRule.sharing
+  // for every item, custom (folder) items included since runsOn's retirement, 2026-08-12-enablement-
+  // two-layers task 8 — one entrance, not two); local segment is this device's own whole-file
+  // opt-out (§6.2's footer menu, second item, moved here). The Settings tab's own drawer cycle
+  // control (renderSharingCycle) is untouched.
   private renderSettingsSyncRow(detail: HTMLElement, r: StatusRow): void {
     const name = r.group.name;
-    const buildMenu = (current: FileSharing, write: (v: FileSharing) => Promise<void>): Menu => {
-      const menu = new Menu();
-      for (const opt of FILE_SHARING_OPTIONS) {
-        const sharing = opt as FileSharing;
-        menu.addItem((item) =>
-          item
-            .setTitle(sharingLabel(sharing))
-            .setIcon(sharingIcon(sharing))
-            .setChecked(sharingEquals(sharing, current))
-            .onClick(() => {
-              void write(sharing).then(() => this.notifyExternalChange());
-            })
-        );
-      }
-      return menu;
-    };
-    const render = (current: FileSharing, write: (v: FileSharing) => Promise<void>): void => {
-      this.renderCardIconMenuRow(detail, "Settings sync", sharingIcon(current), current.kind !== "everywhere", sharingCycleTooltip(current), () =>
-        buildMenu(current, write)
-      );
-    };
     const ref = this.itemRefFor(name);
     if (ref === null) return;
+    const optedOut = this.host.deviceOptedOut(name);
+    const localSeg: RowSegment = optedOut ? { icon: "circle-slash", label: NOT_SYNCED_HERE_LABEL } : { icon: null, label: FOLLOWS_LABEL };
+    const local = { seg: localSeg, isException: optedOut, menu: () => this.fileLocalMenu(name, optedOut) };
     // C-#25: a fields-mode item has no legal whole-file fileRule to write (setItemFileSharing
-    // throws on it) — the row must not offer a menu whose choice would just be discarded.
+    // throws on it) — the fleet side must not offer a menu whose choice would just be discarded,
+    // but the local segment (this device's own opt-out) is a different datum and still works.
     if (!this.host.itemFileSharingMenuLegal(ref)) {
-      this.renderCardKeyRow(detail, "Settings sync", (value) => {
-        value.createDiv({ cls: "config-sync-expand-note", text: FILE_SHARING_MENU_UNAVAILABLE_TEXT });
+      this.renderCardKeyRow(detail, "Default settings sync", (value) => {
+        const row = value.createDiv({ cls: "config-sync-tworow" });
+        row.createDiv({ cls: "config-sync-expand-note", text: FILE_SHARING_MENU_UNAVAILABLE_TEXT });
+        row.createSpan({ cls: "config-sync-tworow-vline" });
+        this.paintTwoSegmentCell(row, local.seg, `config-sync-tworow-seg is-local${local.isException ? " is-set" : ""}`, local.menu);
       });
       return;
     }
-    render(this.host.itemFileSharing(ref), (v) => this.host.setItemFileSharing(ref, v));
+    const current = this.host.itemFileSharing(ref);
+    this.renderTwoSegmentRow(
+      detail,
+      "Default settings sync",
+      {
+        seg: { icon: sharingIcon(current), label: sharingLabel(current) },
+        isSet: current.kind !== "everywhere",
+        menu: () => this.fileSharingMenu(ref, current),
+      },
+      local
+    );
   }
 
-  // More bridge (spec §4): deep-links into the Settings tab for this item's card.
-  private renderMoreRow(detail: HTMLElement, name: string): void {
-    const isFolder = this.itemSectionOf(name) === "custom";
-    this.renderCardKeyRow(detail, "More", (value) => {
-      const line = value.createDiv({
-        cls: "config-sync-more-files",
-        text: isFolder ? "Folder rules — opens Settings ▸" : "Per-key rules, locks & folders — opens Settings ▸",
-        attr: { role: "button", tabindex: "0" },
+  private fileSharingMenu(ref: ItemRef, current: FileSharing): Menu {
+    const menu = new Menu();
+    for (const opt of FILE_SHARING_OPTIONS) {
+      const sharing = opt as FileSharing;
+      menu.addItem((item) =>
+        item
+          .setTitle(sharingLabel(sharing))
+          .setIcon(sharingIcon(sharing))
+          .setChecked(sharingEquals(sharing, current))
+          .onClick(() => {
+            void this.host.setItemFileSharing(ref, sharing).then(() => this.notifyExternalChange());
+          })
+      );
+    }
+    return menu;
+  }
+
+  // The entry list is buildFileLocalMenu's (enablementRow.ts) — a DIFFERENT datum from
+  // buildLocalMenu's element-layer menu (localMenu, above): this is the whole-FILE device opt-out
+  // (spec §6.2), always offering both entries.
+  private fileLocalMenu(name: string, optedOut: boolean): Menu {
+    const menu = new Menu();
+    for (const entry of buildFileLocalMenu(optedOut, {
+      follow: () => void this.host.setDeviceOptOut(name, false).then(() => this.reload()),
+      optOut: () => void this.host.setDeviceOptOut(name, true).then(() => this.reload()),
+    })) {
+      menu.addItem((i) => {
+        i.setTitle(entry.title).setChecked(entry.checked).onClick(entry.action);
+        if (entry.icon !== null) i.setIcon(entry.icon);
       });
-      const open = (): void => {
-        const ref = this.itemRefFor(name);
-        if (ref !== null) this.host.openSettingsAt(ref);
-      };
-      line.addEventListener("click", (e) => {
+    }
+    return menu;
+  }
+
+  // Icon trigger + plain click (spec §6.2 `More`): unlike renderCardIconMenuRow's family, this
+  // row opens Settings directly rather than offering a menu — a sibling helper keeps that
+  // distinction honest instead of routing a single-item fake menu through wireMenuTrigger.
+  private renderCardIconActionRow(detail: HTMLElement, label: string, icon: string, isSet: boolean, ariaLabel: string, onActivate: () => void): void {
+    this.renderCardKeyRow(detail, label, (value) => {
+      const trigger = value.createSpan({
+        cls: `config-sync-sharingicon config-sync-card-trigger${isSet ? " is-set" : ""}`,
+        attr: { "aria-label": ariaLabel, role: "button", tabindex: "0" },
+      });
+      setIcon(trigger, icon);
+      const activate = (e: Event): void => {
         e.stopPropagation();
-        open();
-      });
-      line.addEventListener("keydown", (e) => {
+        onActivate();
+      };
+      trigger.addEventListener("click", activate);
+      trigger.addEventListener("keydown", (e) => {
         if (e.key !== "Enter" && e.key !== " ") return;
         e.preventDefault();
-        e.stopPropagation();
-        open();
+        activate(e);
       });
+    });
+  }
+
+  // More bridge (spec §6.2): icon-only deep link into the Settings tab for this item's card — the
+  // whole sentence now lives in the tooltip since there is no line of text left to hold it, and
+  // the trailing `▸` is gone with the text. Never `sliders-horizontal`: that glyph already means
+  // `your rule` in the fate chips (fateChipIcons.ts).
+  private renderMoreRow(detail: HTMLElement, name: string): void {
+    const isFolder = this.itemSectionOf(name) === "custom";
+    const tooltip = isFolder ? "Folder rules — opens Settings" : "Per-key rules, locks & folders — opens Settings";
+    this.renderCardIconActionRow(detail, "More", "settings-2", false, tooltip, () => {
+      const ref = this.itemRefFor(name);
+      if (ref !== null) this.host.openSettingsAt(ref);
     });
   }
 
@@ -3059,37 +3087,6 @@ export class SyncCenterView extends ItemView {
     if (icon.action !== undefined) setIcon(el, ACTION_ICON[icon.action]);
     else if (icon.cls === "is-locked") setIcon(el, "key-round");
     else el.setText(icon.glyph);
-  }
-
-  // Structural groups (the self plugin, the on/off switch lists) are not "items" a user would
-  // stop syncing — everything else can be removed from the tracked set.
-  private canStopSyncing(name: string): boolean {
-    return name !== SELF_GROUP_NAME && !isSwitchListGroup(name);
-  }
-
-  private renderStopSyncing(container: HTMLElement, r: StatusRow): void {
-    const btn = container.createSpan({ cls: "config-sync-stopsync" });
-    setIcon(btn.createSpan({ cls: "config-sync-stopsync-ic" }), "ban");
-    btn.createSpan({ text: "Stop syncing" });
-    this.wireMenuTrigger(btn, () => this.buildStopSyncingMenu(r));
-  }
-
-  // The Stop-syncing footer's scope menu (C-#45, mock-final "A" — spec §3): the footer stays ONE
-  // quiet button (same placement/icon/text); a click now opens a menu instead of the modal
-  // directly. "On this device"/"Sync on this device again" write the per-device rule instantly —
-  // no modal, reversible in place — then re-render; "Everywhere…" opens the EXISTING
-  // StopSyncingModal, zero changes to it or its own tests.
-  private buildStopSyncingMenu(r: StatusRow): Menu {
-    const name = r.group.name;
-    const optedOut = this.host.deviceOptedOut(name);
-    const menu = new Menu();
-    menu.addItem((item) =>
-      item.setTitle(optedOut ? "Sync on this device again" : "On this device").onClick(() => {
-        void this.host.setDeviceOptOut(name, !optedOut).then(() => this.reload());
-      })
-    );
-    menu.addItem((item) => item.setTitle("Everywhere…").onClick(() => void this.openStopSyncing(r)));
-    return menu;
   }
 
   private formatBytes(n: number): string {
@@ -3129,27 +3126,6 @@ export class SyncCenterView extends ItemView {
       const del = row.createSpan({ cls: "config-sync-ofdel", text: "Delete" });
       del.addEventListener("click", () => void this.deleteLeftovers([lf.rel]));
     }
-  }
-
-  private async openStopSyncing(r: StatusRow): Promise<void> {
-    // §4.2b: refuse before the modal opens, not after the user has decided in it. `stopSyncing`
-    // still refuses on its own — this is the courtesy, that is the guarantee.
-    if (!this.host.settingsWritable()) return;
-    const label = this.host.displayName(r.group.name, r.group.label);
-    const count = await this.host.storeFileCount(r.group.name);
-    new StopSyncingModal(this.app, label, count, async (deleteStore) => {
-      const deleted = await this.host.stopSyncing(r.group.name, deleteStore);
-      if (deleted === null) return; // refused (§4.2b) — the group is still synced, so nothing is recorded or deselected
-      await this.host.appendActionHistory({
-        kind: "stop-sync",
-        desc: stopSyncDesc(label, deleted.length),
-        changed: 1,
-        removed: [label],
-        deletedFiles: deleted.length > 0 ? deleted : undefined,
-      });
-      this.selected.delete(r.group.name);
-      await this.reload();
-    }).open();
   }
 
   // Capture-direction disabled rows default to ⏻ Enable (spec 2026-07-17); everything else
@@ -3857,7 +3833,10 @@ export class SyncCenterView extends ItemView {
 // Confirmation for the divergence shortcut: pre-checked list of this device's extra ids;
 // confirming adds the checked ones to the device-local exceptions.
 // Confirm removing an item from sync, offering to also delete its saved copy in the store.
-class StopSyncingModal extends Modal {
+// Exported (task 10): the Sync Center footer that used to open this modal retired with §6.2's
+// row contract — task 12 wires the settings-panel card's write entrance directly to it, so it
+// needs a caller outside this file. The modal itself, and its own tests, are untouched.
+export class StopSyncingModal extends Modal {
   private deleteStore: boolean;
 
   constructor(app: App, private label: string, private storeFiles: number, private onConfirm: (deleteStore: boolean) => Promise<void>) {

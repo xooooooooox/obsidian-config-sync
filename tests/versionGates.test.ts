@@ -7,7 +7,6 @@ import { checkRemote } from "../src/core/status";
 import { declaredStoreLockVersion, lockEntry, parseSyncManifest, parseStoreLock, storeLockVersion, STORE_LOCK_FUTURE_MESSAGE, STORE_LOCK_VERSION } from "../src/core/manifest";
 import { CURRENT_SCHEMA, SCHEMA_FUTURE_APPLY_MESSAGE, SCHEMA_FUTURE_NOTICE, SCHEMA_UPGRADE_NOTICE } from "../src/core/settingsMigration";
 import { SELF_GROUP_NAME } from "../src/core/catalog";
-import { SyncCenterView } from "../src/ui/SyncCenterView";
 import { ConfigSyncSettingTab } from "../src/ui/SettingTab";
 import { GroupResult, Remote, SyncGroup } from "../src/core/types";
 import { CaptureItem, ApplyItem } from "../src/core/ConfigSyncCore";
@@ -980,44 +979,10 @@ describe("§5 — content at the far end with no lock", () => {
   });
 });
 
-// §4.2b, round-4 review N5: a flow that will be refused refuses BEFORE it opens. Taking a decision
-// from the user in a modal and only then declining is the same defect round 3 fixed for pull.
-// `SyncCenterHost` is an interface, so a fake carrying only what this path touches is enough — the
-// same idiom tests/emptyVerbDegradation.test.ts uses to drive the view's private methods.
-describe("Stop syncing → Everywhere…", () => {
-  function openStopSyncingWith(writable: boolean): { open: () => Promise<void>; counted: () => number } {
-    let counted = 0;
-    const host = {
-      settingsWritable: () => writable,
-      displayName: (n: string) => n,
-      // Fetched to size the modal's checkbox line — so it happens strictly BEFORE the modal opens,
-      // which makes "was it called" the honest probe for "did this flow start at all".
-      storeFileCount: async () => {
-        counted += 1;
-        return 0;
-      },
-      stopSyncing: async () => {
-        throw new Error("stopSyncing must never be reached from a refused flow");
-      },
-    };
-    const view = new SyncCenterView({} as never, host as never);
-    const row = { group: { name: "plugin-demo", path: "p", type: "file", devices: "all" }, status: { group: "plugin-demo", state: "in-sync" } };
-    const priv = view as unknown as { openStopSyncing: (r: unknown) => Promise<void> };
-    return { open: () => priv.openStopSyncing(row), counted: () => counted };
-  }
-
-  it("never opens its modal while stopped", async () => {
-    const { open, counted } = openStopSyncingWith(false);
-    await open();
-    expect(counted()).toBe(0);
-  });
-
-  it("opens normally when the document is understood", async () => {
-    const { open, counted } = openStopSyncingWith(true);
-    await open();
-    expect(counted()).toBe(1);
-  });
-});
+// §4.2b, round-4 review N5's "a flow that will be refused refuses BEFORE it opens" coverage lived
+// here against SyncCenterView.openStopSyncing — retired with the Sync Center footer (2026-08-12-
+// enablement-two-layers task 10). Task 12 moves the modal invocation itself to the settings-panel
+// card; this refuse-before-open guarantee needs an equivalent test at its new call site then.
 
 // §4.2b/N3, the settings tab's own drafts: a refused gesture must not move what the panel renders,
 // or the UI shows an edit that never happened. The Advanced tab gets this from ONE line —
