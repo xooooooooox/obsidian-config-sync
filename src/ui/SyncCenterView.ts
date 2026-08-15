@@ -159,14 +159,6 @@ const CARRIER_GROUP_NAMES = new Set(["core-plugins", "community-plugins"]);
 // live filtering once typing pauses.
 const SEARCH_DEBOUNCE_MS = 130;
 
-// C-#39 noise floor (report fix-round-3, live-verification fix): `scrollWidth` vs `clientWidth`
-// on a genuinely non-overflowing flex row was observed live producing a phantom ≤4px delta from
-// subpixel/integer rounding (1017 vs 1013 on a chipless row) — not a real overflow. 8px (one
-// layout gap unit) clears that noise with margin while staying far under any real chip's width
-// (the live narrow-pane repro that DOES need compacting was a 92px gap), so it can't mask a
-// genuine overflow. See syncChipOverflow.
-const CHIP_OVERFLOW_EPSILON = 8;
-
 // After-install menu labels (spec §4, copy final) — the fallback ladder's two real choices
 // (carrier NOT synced, row installs).
 const AFTER_INSTALL_LABELS: Record<"install-enable" | "install", string> = {
@@ -468,17 +460,6 @@ export class SyncCenterView extends ItemView {
   private searchDebounceTimer: number | null = null;
   // R9: the remote pane's compare in flight, if any — see renderRemoteDetail.
   private inflightCompare: InflightCompare | null = null;
-  // C-#39 (spec §3, axiom §0.2): measures true per-row/per-line overflow (scrollWidth >
-  // clientWidth) once the fate sentence has nothing left to give, rather than a fixed pixel
-  // breakpoint — the trigger point depends on each row's own name length and chip count, not
-  // the pane width, so a global width guess (a container-query breakpoint shared by every row)
-  // would flip rows that don't need it and miss ones that do. Live-verification fix (report
-  // fix-round-2, root cause below `onOpen`/`refreshChipOverflow`): observes the stable, always-
-  // present `contentEl` for the view's whole lifetime — never per-row, never disconnected — and
-  // on a hit, re-walks every currently-rendered chip-bearing element instead of trusting
-  // per-target notifications, which per-row `.observe()`/`.disconnect()` churn (full renders,
-  // C-#22 in-place fold toggles) was silently dropping.
-  private chipOverflowObserver: ResizeObserver | null = null;
 
   constructor(leaf: WorkspaceLeaf, private host: SyncCenterHost) {
     super(leaf);
@@ -503,17 +484,6 @@ export class SyncCenterView extends ItemView {
     });
     ro.observe(this.contentEl);
     this.register(() => ro.disconnect());
-    // Root cause (report fix-round-2): per-row `.observe()`/`.disconnect()` across full renders
-    // and C-#22 in-place fold toggles is too many coordination points for individual-target
-    // ResizeObserver registrations to survive — live verification found every row's observation
-    // silently dead (no initial fire, no fire on a genuine 360px pane resize) despite correct
-    // DOM/CSS and a non-null observer. Mirrors this same file's `ro`/`evaluateCompact` above (a
-    // proven pattern already): ONE observer on `contentEl`, alive for the whole view lifetime,
-    // re-walking every rendered chip element on each callback instead of trusting per-target
-    // delivery.
-    this.chipOverflowObserver = new ResizeObserver(() => this.refreshChipOverflow());
-    this.chipOverflowObserver.observe(this.contentEl);
-    this.register(() => this.chipOverflowObserver?.disconnect());
     this.registerEvent(
       this.app.workspace.on("active-leaf-change", (leaf) => {
         if (leaf === this.leaf && !this.running) void this.reload();
@@ -542,11 +512,6 @@ export class SyncCenterView extends ItemView {
 
   onResize(): void {
     this.evaluateCompact();
-    // Belt-and-suspenders (report fix-round-2): Obsidian's own "the leaf was resized" hook,
-    // independent of whether the browser's ResizeObserver on `contentEl` also fires — a second,
-    // Obsidian-native trigger for the same re-walk so row-resize re-evaluation doesn't depend on
-    // DOM ResizeObserver delivery alone.
-    this.refreshChipOverflow();
   }
 
   private evaluateCompact(): void {
@@ -1112,11 +1077,6 @@ export class SyncCenterView extends ItemView {
     const scrollTop = this.contentEl.scrollTop;
     main.empty();
     this.renderMainRegionBody(main);
-    // First-layout evaluation (report fix-round-2): `contentEl` is scrollable with its own fixed
-    // box, so adding/removing rows never resizes it — the container ResizeObserver alone would
-    // never fire for freshly rendered rows. Called directly, deterministically, right after the
-    // DOM exists, rather than waiting on a browser-scheduled initial notification.
-    this.refreshChipOverflow();
     this.contentEl.scrollTop = scrollTop;
   }
 
@@ -2228,11 +2188,6 @@ export class SyncCenterView extends ItemView {
       for (const r of visible) this.renderItemRow(card, r);
       this.markLastRow(card);
     }
-    // First-layout evaluation for the fold-open path (report fix-round-2): opening a section is
-    // DOM-only (ledger C-#22, no full render), so the rows built just now need their own explicit
-    // pass — `contentEl`'s resize observer only fires on an actual pane resize, not on new rows
-    // appearing inside its existing box.
-    this.refreshChipOverflow();
     return body;
   }
 
@@ -2268,10 +2223,6 @@ export class SyncCenterView extends ItemView {
       if (open) {
         openSet.add(key);
         foldCard = this.buildFoldCard(parent, line, rows);
-        // First-layout evaluation (report fix-round-2): same reasoning as buildTypeSectionCard's
-        // own call — new rows appearing in place need an explicit pass, not a wait on a
-        // container resize that isn't coming.
-        this.refreshChipOverflow();
       } else {
         openSet.delete(key);
         foldCard?.remove();
@@ -2401,54 +2352,17 @@ export class SyncCenterView extends ItemView {
     el.appendText(parts.label);
   }
 
-  // C-#40 (spec §1): every fate chip renders icon + text, single source FATE_CHIP_ICON
-  // (fateChipIcons.ts) — the C-#38 `encrypted` special case generalized to all chips. An
-  // unmapped string (should never happen — chips are presentation) renders text-only. The
-  // tooltip carries the chip's full text so the icon-only degraded form (axiom §0.2, chip
-  // overflow) never loses the fact, only its inline spelling.
+  // C-#40 (spec §1) → 定稿轮 20 ④: every fate chip is icon-only now, single source
+  // FATE_CHIP_ICON (fateChipIcons.ts), the chip's full sentence living in the tooltip — the
+  // icon+tooltip row language everywhere else already speaks. An unmapped string (should never
+  // happen — chips are presentation) keeps a text label as the loud fallback.
   private renderFateChip(parent: HTMLElement, chip: string): HTMLSpanElement {
     const chipEl = parent.createSpan({ cls: "config-sync-fatechip" });
     const icon = FATE_CHIP_ICON[chip];
     if (icon !== undefined) setIcon(chipEl.createSpan({ cls: "config-sync-fatechip-ic" }), icon);
-    chipEl.createSpan({ cls: "config-sync-fatechip-label", text: chip });
+    else chipEl.createSpan({ cls: "config-sync-fatechip-label", text: chip });
     setTooltip(chipEl, chip);
     return chipEl;
-  }
-
-  // C-#39 (spec §3, axiom §0.2): `container`'s chip GROUP degrades to icon-only as a whole once
-  // it truly overflows — measured, not guessed (see chipOverflowObserver's field comment).
-  // Re-measures from the full form every time (never trusts the previous verdict) so a row that
-  // gained room back on a resize recovers full text instead of sticking compact.
-  //
-  // Live-verification fix (report fix-round-3): a chipless row (nothing to compact) was flapping
-  // `.config-sync-chips-compact` on at a wide pane with scrollWidth 1017 vs clientWidth 1013 —
-  // subpixel/integer rounding of `scrollWidth` produces phantom ≤4px deltas on a flex row that
-  // genuinely fits, unrelated to any chip. Genuine chip overflow is at minimum a whole chip's
-  // width (tens of px, not single digits) — the coordinator's own narrow-pane repro was 298 vs
-  // 206, a 92px gap. `CHIP_OVERFLOW_EPSILON` names that noise floor explicitly: this is
-  // threshold-tuning against a documented, observed rounding artifact, not masking a real
-  // overflow case. Rows/meta lines with no chip at all are skipped outright — nothing to
-  // compact, so no class churn (and no chance of this same rounding noise mis-firing on them).
-  private syncChipOverflow(container: HTMLElement): void {
-    if (container.querySelector(".config-sync-fatechip") === null) return;
-    container.removeClass("config-sync-chips-compact");
-    container.toggleClass("config-sync-chips-compact", container.scrollWidth > container.clientWidth + CHIP_OVERFLOW_EPSILON);
-  }
-
-  // Root cause (report fix-round-2, live verification): per-row `.observe()`/`.disconnect()`
-  // registrations were going dead across this view's many render/re-render paths (full render,
-  // C-#22 in-place section-fold and trailing-fold toggles) with no reliable single point that
-  // both re-observes every surviving row AND never wipes a registration nothing then restores —
-  // proven live: zero rows compacted on a genuinely overflowing narrow pane, and a manually-
-  // compacted row didn't even re-expand on a 360px widen, so the browser was never delivering
-  // ANY notification for these targets by the time of the probe. Replaced with the same pattern
-  // `ro`/`evaluateCompact` above already uses successfully: one persistent container observer,
-  // re-walk-and-remeasure on every hit — no per-target bookkeeping left to go stale. Called
-  // directly (not just from the observer) everywhere new rows can appear, since `contentEl` is a
-  // scrollable, fixed-box container whose own size doesn't change just because rows were added.
-  private refreshChipOverflow(): void {
-    const rows = this.contentEl.querySelectorAll<HTMLElement>(".config-sync-hub-row, .config-sync-row-chipmeta");
-    for (const el of Array.from(rows)) this.syncChipOverflow(el);
   }
 
   // C-#41 mobile chip-meta trailing hairline (review fix): `card`'s children interleave
@@ -2463,7 +2377,7 @@ export class SyncCenterView extends ItemView {
     if (!Platform.isMobile) return;
     const prev = card.querySelector<HTMLElement>(".config-sync-row-last");
     prev?.removeClass("config-sync-row-last");
-    const rows = card.querySelectorAll<HTMLElement>(".config-sync-hub-row, .config-sync-row-chipmeta");
+    const rows = card.querySelectorAll<HTMLElement>(".config-sync-hub-row");
     rows.item(rows.length - 1)?.addClass("config-sync-row-last");
   }
 
@@ -2478,21 +2392,20 @@ export class SyncCenterView extends ItemView {
     const fate = this.displayFate(rawFate, input, group.name);
     const inert = !fate.stageable;
     const expanded = this.expandedItems.has(group.name);
+    // No row-level aria-label (轮 21F): Obsidian renders aria-labels as hover tooltips, so the
+    // resolved path this used to carry popped on any blank stretch of the row.
     const row = card.createDiv({
       cls: `config-sync-hub-row${inert ? " is-insync" : ""}${unresolvedConflict ? " is-conflict" : ""}`,
-      attr: { "aria-label": this.host.resolvedPath(group) },
     });
     const chev = renderFoldChevron(row, expanded, null);
     this.renderRuleName(row, group.name, group.label);
-    // C-#43/#44 (batch-21 spec §1, revising batch-20's ≥2 threshold): ANY chip-bearing row (1+
-    // chips) pushes its chips to their own indented meta line under the row (built below, after
-    // the row's own children) — the constant mobile row skeleton is always chevron + name +
-    // spacer + sentence + checkbox on line 1, chips (if any) on line 2, never mixed. Chipless
-    // rows render nothing here and stay single-line. Desktop always takes the inline branch below
-    // — Platform.isMobile is false — so the row's DOM here is untouched by the mobile work.
-    const mobileMetaChips = Platform.isMobile && fate.chips.length >= 1;
-    if (!mobileMetaChips) for (const chip of fate.chips) this.renderFateChip(row, chip);
     row.createDiv({ cls: "config-sync-rule-spacer" });
+    // 定稿轮 20 ④: chips are icon-only and live on the row's RIGHT, one quiet cluster just
+    // before the fate/state column — not tags trailing the name. Display order is the model's
+    // own emit order (buildChips, deterministic) — never re-sorted here. Icon-only chips fit
+    // any width, so the mobile second-line (C-#43/#44) and the overflow-degrade machinery
+    // (C-#39 chipOverflowObserver et al.) retired with the labels.
+    for (const chip of fate.chips) this.renderFateChip(row, chip);
     // Ledger C-#9: the fate sentence/glyph repeats the card's own "On apply"/"On capture" clause
     // once expanded, so it hides while the drawer is open (checkbox and chips stay); the click
     // handler below flips `hidden` alongside the chevron/drawer so it tracks expand/collapse
@@ -2552,18 +2465,6 @@ export class SyncCenterView extends ItemView {
       this.renderFateSpacer(row);
     }
 
-    // C-#43/#44 (batch-21 spec §1, mobile only): the indented second line the 1+-chip branch above
-    // deferred to — a sibling of `row`, landing right after it and before the drawer so it reads as the row's
-    // own line 2. Never a third line (axiom §0.2/§3): the whole group degrades to icon-only +
-    // tooltip together, same mechanism as the desktop narrow-pane case below. Overflow evaluation
-    // is NOT registered per-row here (report fix-round-2) — `refreshChipOverflow` walks every
-    // `.config-sync-hub-row`/`.config-sync-row-chipmeta` in `contentEl` from its own choke points
-    // instead, so this row/meta just needs to exist in the DOM by the time that runs.
-    // Hoisted (not block-scoped) so the row's click handler below can re-measure it too — see
-    // that handler's comment.
-    const meta: HTMLElement | null = mobileMetaChips ? card.createDiv({ cls: "config-sync-row-chipmeta" }) : null;
-    if (meta !== null) for (const chip of fate.chips) this.renderFateChip(meta, chip);
-
     const detail = card.createDiv({ cls: "config-sync-report-files config-sync-itemcard" });
     detail.hidden = !expanded;
     this.renderUnifiedCard(detail, r, fate, input, isConflict);
@@ -2573,16 +2474,6 @@ export class SyncCenterView extends ItemView {
       detail.hidden = !detail.hidden;
       setFoldOpen(chev, !detail.hidden);
       fateWrap.hidden = !detail.hidden;
-      // Review fix: hiding/showing fateWrap changes how much of the row's own width its OTHER
-      // content (chips inline in the row, on desktop or a mobile 0–1-chip row) has to share — a
-      // row measured while expanded (fateWrap hidden, less content) can genuinely overflow again
-      // once it collapses back, with nothing else due to re-measure it until an unrelated resize/
-      // render. Re-check right here, on the live row, same idiom refreshChipOverflow uses. The
-      // chipmeta line (mobile 2+ chips) sits on its own line below and isn't affected by fateWrap,
-      // but it's re-measured too for the same "never trust a stale verdict" reason the rest of
-      // this mechanism already follows.
-      this.syncChipOverflow(row);
-      if (meta !== null) this.syncChipOverflow(meta);
     });
   }
 

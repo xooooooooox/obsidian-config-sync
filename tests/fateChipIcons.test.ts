@@ -114,6 +114,12 @@ describe("glyph registry — one glyph, one meaning (icon-collision guard)", () 
     { glyph: "chevron-right", producer: "foldChevron (external, hardcoded)", home: "renderFoldChevron — FOLD family disclosure rotate" },
     { glyph: "chevrons-up-down", producer: "SyncCenterView/SettingTab (external, hardcoded)", home: "PICKER family — two-segment rows + the switcher" },
     { glyph: "eye", producer: "SettingTab (external, hardcoded)", home: "SETTINGS FILE row — File preview trigger" },
+    // 定稿轮 19 (DESIGN.md §2.3): the per-item icon toggle, the menu-borne destructive verb, and
+    // the File preview's top action line — hardcoded in SettingTab.ts, registered here so a
+    // future reuse for a different meaning fails loudly.
+    { glyph: "list-checks", producer: "SettingTab (external, hardcoded)", home: "rule row — Per-item device rules icon toggle" },
+    { glyph: "trash", producer: "SettingTab (external, hardcoded)", home: "scope menus — Remove rule / Remove folder (19d)" },
+    { glyph: "plus", producer: "SettingTab (external, hardcoded)", home: "File preview hint line — click a key to add a rule" },
   ];
 
   // The local segment's `follows` glyph (round-9 ②, DESIGN.md icon table): `corner-down-right` is

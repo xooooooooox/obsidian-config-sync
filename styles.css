@@ -659,15 +659,13 @@ body.is-mobile.config-sync-mobile-statusbar .status-bar {
 .config-sync-mode-badge { color: var(--text-faint); display: inline-flex; align-items: center; }
 .config-sync-mode-badge svg { width: 12px; height: 12px; }
 
-/* Unified row (spec 2026-08-06-sync-center-unified-grammar-design.md §3; icons generalized to
-   every chip by C-#40, spec 2026-08-09-c-livetest-batch20-chips-and-containment.md §1): state/
-   rule chips and the fate sentence that replace the old policy pills and state-icon column. */
-.config-sync-fatechip { flex: none; display: inline-flex; align-items: center; gap: 4px; font-size: var(--font-ui-smaller); line-height: 1.6; border-radius: 999px; padding: 1px 8px; background: var(--background-modifier-border); color: var(--text-muted); white-space: nowrap; }
-.config-sync-fatechip-ic svg { width: 11px; height: 11px; display: block; }
-/* Containment axiom §0.2: a chip GROUP degrades to icon-only + tooltip together on true measured
-   overflow (chipOverflowObserver, SyncCenterView.ts) — never a mix of full and icon-only chips
-   on one row. */
-.config-sync-chips-compact .config-sync-fatechip-label { display: none; }
+/* Unified row fate chips (spec §3, C-#40) → 定稿轮 20 ④: icon-only, tooltip carries the
+   sentence — no pill box, no label, no overflow-degrade machinery; a quiet faint icon in the
+   row's right cluster, sitting just before the fate/state column. Fixed display order = the
+   model's own emit order (buildChips). The `-label` span survives only as the loud fallback
+   for an unmapped chip string. */
+.config-sync-fatechip { flex: none; display: inline-flex; align-items: center; gap: 4px; font-size: var(--font-ui-smaller); color: var(--text-faint); white-space: nowrap; }
+.config-sync-fatechip-ic svg { width: 13px; height: 13px; display: block; }
 /* Containment axiom §0.3: the fate sentence is the ONLY sacrificial element — the glyph
    (`flex: none`) always renders in full; only the sentence span shrinks/ellipsizes, down to
    nothing (the bare glyph) rather than ever eating into the glyph itself. */
@@ -1272,20 +1270,16 @@ body.is-mobile .config-sync-cardrow:not(.is-iconrow) > .config-sync-explabel-inl
    accents purple, matching the icon triggers' accent language) — it renders a real glyph in
    EVERY state now, `corner-down-right` included while it follows the default, so its box never
    collapses to text-only the way it used to.
-   Two DIFFERENT parents share this vocabulary and are NOT interchangeable: the Sync Center's
-   expanded card lands its cells directly on `.config-sync-cardrow`'s own four tracks (round-9 ⑤
-   below) so every row's icons/divider line up card-wide; the settings card's drawer instead nests
-   them inside `.config-sync-tworow`, itself sitting in ONE cell of `.config-sync-grid`'s own
-   four-track scope column (2026-07-26 card-visual-refresh) — that grid is untouched by round-9 ⑤,
-   so `.config-sync-tworow`'s own template stays as it is, just narrower now that its fleet cell
-   holds an icon instead of icon+wordmark. */
-.config-sync-tworow { display: grid; grid-template-columns: minmax(0, 68px) 1px 1fr; align-items: center; gap: 0 14px; }
+   ONE parent shape on both surfaces since 定稿轮 19: the Sync Center's expanded card lands its
+   cells directly on `.config-sync-cardrow`'s four tracks (round-9 ⑤ below), and the Settings
+   drawer's `.config-sync-scrow` does exactly the same on ITS four tracks — the old nested
+   `.config-sync-tworow` wrapper (one cell of the retired `.config-sync-grid`) is gone. */
 .config-sync-tworow-seg { display: inline-flex; align-items: center; gap: 2px; border-radius: var(--radius-s); padding: 3px 6px; font-size: var(--font-ui-smaller); color: var(--text-muted); cursor: pointer; white-space: nowrap; }
 .config-sync-tworow-seg:hover, .config-sync-tworow-seg:focus-visible { color: var(--text-normal); background: var(--background-modifier-hover); }
 .config-sync-tworow-ic { display: inline-flex; align-items: center; }
 .config-sync-tworow-ic .svg-icon { width: var(--icon-s); height: var(--icon-s); }
 /* Faint tier (定稿轮 17①), matching the quiet zone's indent-guide rule. */
-.config-sync-tworow-vline { width: 1px; align-self: stretch; background: color-mix(in srgb, var(--background-modifier-border) 60%, transparent); transition: opacity 0.12s ease; }
+.config-sync-tworow-vline { width: 1px; align-self: stretch; background: color-mix(in srgb, var(--background-modifier-border) 60%, transparent); }
 /* The PICKER `chevrons-up-down` affordance every clickable segment carries (round-9 ②, round-12:
    was text `▾`) — decorative (the icon/segment it sits beside owns the click/keydown handlers),
    small and muted so it reads as a hint, not a second control.
@@ -1293,17 +1287,21 @@ body.is-mobile .config-sync-cardrow:not(.is-iconrow) > .config-sync-explabel-inl
    rest, constant layout (opacity only, never display:none while interactive) — revealed on the
    containing ROW's hover or while the trigger's own menu is open (`.is-open`, set by
    wireMenuTrigger/onHide in both SettingTab.ts and SyncCenterView.ts), which also accents it the
-   same purple/accent language `.is-set` already uses elsewhere. Row scopes: `.config-sync-grid`
+   same purple/accent language `.is-set` already uses elsewhere. Row scopes: `.config-sync-scrow`
    (every Settings-tab card row) and `.config-sync-cardrow` (the Sync Center's expanded card
    rows) — the two places this glyph actually lives. */
 .config-sync-tworow-chev { display: inline-flex; align-items: center; color: var(--text-faint); margin-left: 1px; opacity: 0; transition: opacity 0.12s ease; }
 .config-sync-tworow-chev svg { width: 11px; height: 11px; }
-.config-sync-grid:hover .config-sync-tworow-chev,
+/* `.is-open >` is a CHILD combinator on purpose (轮 18 bugfix): the ⇕ is always a direct child
+   of its own trigger (fleet cell / sharing icon / local seg), and `.is-open` is ALSO the fold
+   state of far ancestors (an expanded `.config-sync-section`) — a descendant match lit every
+   chev inside an expanded section permanently, defeating the hover-reveal there. */
+.config-sync-scrow:hover .config-sync-tworow-chev,
 .config-sync-cardrow:hover .config-sync-tworow-chev,
-.is-open .config-sync-tworow-chev {
+.is-open > .config-sync-tworow-chev {
   opacity: 1;
 }
-.is-open .config-sync-tworow-chev { color: var(--interactive-accent); }
+.is-open > .config-sync-tworow-chev { color: var(--interactive-accent); }
 /* Mobile has no hover to reveal it (same degradation the fold chevron takes, round-12 乙) — the
    mobile section switcher (`.config-sync-switcher-chev`, its own class, its own always-visible
    rule below) is the one deliberate exception: it is the sole entrance to the section list there. */
@@ -1312,30 +1310,17 @@ body.is-mobile .config-sync-tworow-chev { display: none; }
    (`THIS_DEVICE_EYEBROW`, enablementRow.ts) — plus the wrapper that groups it with the segment
    glyph and carries the shared `.is-set` accent (purple, matching the icon triggers' language)
    instead of the old `.is-local.is-set` pairing on the segment itself. */
-.config-sync-tworow-localcell { display: inline-flex; align-items: center; gap: 6px; min-width: 0; transition: opacity 0.12s ease; }
-.config-sync-tworow-eyebrow { color: var(--text-faint); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
-.config-sync-tworow-localcell.is-set .config-sync-tworow-eyebrow { color: var(--text-muted); }
+.config-sync-tworow-localcell { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+/* Typeset exactly like the row labels (轮 20 ① — label and eyebrow used to read as two fonts);
+   purple on a set exception lives on the segment alone. */
+.config-sync-tworow-eyebrow { color: var(--text-muted); font-size: var(--font-ui-smaller); text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap; }
 .config-sync-tworow-localcell.is-set .config-sync-tworow-seg { color: var(--color-purple); }
-/* Rest-hidden local layer (定稿轮 17④, same idiom as the ⇕ chevron's hover-reveal above, one
-   level up): a local cell still on "follows the default" (`:not(.is-set)`) hides at rest —
-   the cell AND the divider right before it, opacity only so layout never shifts — collapsing
-   the N-fold "this device ↳" repetition in a member list to exactly the rows that deviate.
-   One negative-form rule instead of a hide/reveal pair, so reveal never has to out-rank hide:
-   the row's hover, any open menu inside it (`.is-open`, fleet or local — an engaged row shows
-   its whole shape), or keyboard focus anywhere in the row suppresses the hiding. A SET
-   exception (purple) is state, not affordance — always visible. Mobile is excluded outright:
-   no hover there, and a hidden local cell would be an unreachable one. Row scopes are the
-   ⇕ rule's own two: `.config-sync-grid` (Settings tab) and `.config-sync-cardrow` (Sync
-   Center card). */
-body:not(.is-mobile) :is(.config-sync-grid, .config-sync-cardrow):not(:hover):not(:focus-within):not(:has(.is-open)) .config-sync-tworow-localcell:not(.is-set),
-body:not(.is-mobile) :is(.config-sync-grid, .config-sync-cardrow):not(:hover):not(:focus-within):not(:has(.is-open)) .config-sync-tworow-vline:has(+ .config-sync-tworow-localcell:not(.is-set)) {
-  opacity: 0;
-}
-/* The settings card's fleet segment is renderSharingCycle carrying the `chevron` hook (round-9 ②
-   — no more `labelFor` wordmark), so it must read as the same content-sized glyph+▾ box the Sync
-   Center paints by hand. The base .config-sync-sharingicon is a fixed-width grid cell everywhere
-   else, which is why this narrows it only inside the row. */
-.config-sync-tworow .config-sync-sharingicon { width: fit-content; padding: 3px 6px; }
+/* NO rest-hiding of the local cell (定稿轮 18, overturning 轮 17④'s experiment): the cell,
+   its eyebrow and the divider before it are state and stay visible on every surface — the
+   hover-reveal idiom's scope is the ⇕ glyph alone (the -chev rules above). */
+/* Every drawer sharing picker is a content-sized glyph+⇕ box now (the fixed-width grid cell it
+   used to fill retired with `.config-sync-grid`, 定稿轮 19) — same box the Sync Center paints. */
+.config-sync-scrow .config-sync-sharingicon { width: fit-content; padding: 3px 6px; }
 /* Sync Center expanded-card placement (round-9 ⑤): these three land directly on
    `.config-sync-cardrow`'s own tracks 2/3/4 rather than nesting inside `.config-sync-tworow`
    above — scoped to a direct child of `.config-sync-cardrow` so the settings card's OWN use of
@@ -1349,13 +1334,16 @@ body:not(.is-mobile) :is(.config-sync-grid, .config-sync-cardrow):not(:hover):no
 /* The per-key/fields-mode fallback fleet cell (spec §6.1 C-#25): plain italic note text, no icon,
    no `▾` — it has no menu to open — spanning tracks 2+3 since it carries real prose instead of a
    glyph; the local segment beside it still lands on track 4 normally. */
-.config-sync-tworow .config-sync-sharingicon:hover, .config-sync-tworow .config-sync-sharingicon:focus-visible { background: var(--background-modifier-hover); }
-/* The expanded card itself — a quiet properties zone (定稿轮 17①, retiring C-#2's bordered box
-   and C-#47's fill logic): no border box, no fill, no radius. The zone is tied to its parent row
-   by the left indent under the row's name column (chevron 16px + its 4px margin ≈ 20px) plus one
-   faint indent-guide rule on its left edge — the row hairlines are gone with the box (see
-   .config-sync-card-fieldrow below), so nothing reads as a table embedded in a borderless panel. */
-.config-sync-itemcard { margin-left: var(--size-4-5); border-left: 1px solid color-mix(in srgb, var(--background-modifier-border) 60%, transparent); padding: var(--size-2-1) var(--size-4-3); }
+.config-sync-scrow .config-sync-sharingicon:hover, .config-sync-scrow .config-sync-sharingicon:focus-visible { background: var(--background-modifier-hover); }
+/* The expanded card itself — a quiet properties zone (定稿轮 17①: no border box, no fill, no
+   radius), tied to its parent row by the FOLD THREAD (定稿轮 19e 案C, shared verbatim with the
+   Settings drawer's .config-sync-item-exp below): a faint 1px rule whose x sits under the fold
+   chevron's center (chevron 16px wide at the row's left edge → center ≈ 8px), running the
+   zone's height, while the content indents to the parent's title-text start (chevron + 8px gap
+   ≈ 24px). Drawn as ::before, never border-left — a line on the content edge has no geometric
+   relationship to the chevron (19e 案A, rejected). */
+.config-sync-itemcard { margin-left: 24px; position: relative; padding: var(--size-2-1) 0; }
+.config-sync-itemcard::before { content: ""; position: absolute; left: -16px; top: 2px; bottom: 2px; width: 1px; background: color-mix(in srgb, var(--background-modifier-border) 60%, transparent); }
 /* Config Sync's pinned self row (Community section) — same row shape as a normal item, own fate
    text instead of a checkbox since it isn't staged through the normal apply/capture run. */
 .config-sync-hub-row.is-self { cursor: pointer; }
@@ -1374,18 +1362,31 @@ body:not(.is-mobile) :is(.config-sync-grid, .config-sync-cardrow):not(:hover):no
 .config-sync-save-error { color: var(--text-error); font-size: var(--font-ui-smaller); margin-top: 4px; }
 
 /* 0.21.0 unified row expansion: fields / data.json view / advanced */
-.config-sync-item-exp { border-top: 1px solid var(--background-modifier-border); margin-top: var(--size-4-2); padding-top: var(--size-4-2); }
+/* The drawer anchors to its card by the same fold thread the Sync Center's quiet zone uses
+   (定稿轮 19e 案C — see .config-sync-itemcard): content indents to the card title's text start
+   (chevron 16px + 4px margin ≈ 20px), the thread sits under the chevron's center (≈ 8px). */
+.config-sync-item-exp { border-top: 1px solid var(--background-modifier-border); margin-top: var(--size-4-2); padding-top: var(--size-4-2); margin-left: 20px; position: relative; }
+.config-sync-item-exp::before { content: ""; position: absolute; left: -12px; top: var(--size-4-2); bottom: 2px; width: 1px; background: color-mix(in srgb, var(--background-modifier-border) 60%, transparent); }
 .config-sync-explabel { color: var(--text-muted); font-size: var(--font-ui-smaller); text-transform: uppercase; letter-spacing: 0.05em; margin: var(--size-4-2) 0 var(--size-2-1); }
 .config-sync-explabel:first-child { margin-top: 0; }
 .config-sync-explabel-inline { margin: 0; }
 .config-sync-json-empty { color: var(--text-faint); font-style: italic; font-size: var(--font-ui-smaller); }
 .config-sync-json-pre { white-space: pre-wrap; word-break: break-all; font-family: var(--font-monospace); font-size: var(--font-ui-smaller); line-height: 1.55; background: var(--background-secondary); border: 1px solid var(--background-modifier-border); border-radius: var(--radius-s); padding: var(--size-4-2); max-height: 220px; overflow: auto; margin: 0; }
 .config-sync-json-key { border-radius: 3px; padding: 0 2px; color: var(--text-faint); }
-.config-sync-json-key.config-sync-json-none, .config-sync-json-key.config-sync-json-detected { cursor: pointer; }
 .config-sync-json-key.config-sync-json-strip { color: var(--color-red); background: rgba(var(--color-red-rgb), 0.15); }
 .config-sync-json-key.config-sync-json-desktop { color: var(--color-blue); }
 .config-sync-json-key.config-sync-json-mobile { color: var(--color-orange); }
-.config-sync-json-key.config-sync-json-detected { color: var(--color-purple); text-decoration: underline dotted; }
+.config-sync-json-key.config-sync-json-detected { color: var(--color-purple); }
+/* Key clickability made explicit (定稿轮 19 ②, GitHub issue #2 "didn't realize I could click"):
+   EVERY un-ruled key on a non-carrier card wears a persistent dashed underline; hover turns it
+   solid/accent and reveals a small `+` after the key. Carrier cards never add this class. */
+.config-sync-json-clickable { cursor: pointer; text-decoration: underline dashed color-mix(in srgb, var(--text-faint) 70%, transparent); text-underline-offset: 3px; }
+.config-sync-json-clickable:hover, .config-sync-json-clickable:focus-visible { text-decoration: underline solid var(--interactive-accent); color: var(--text-normal); background: rgba(var(--interactive-accent-rgb), 0.12); }
+.config-sync-json-clickable::after { content: "+"; color: var(--interactive-accent); font-size: 0.9em; margin-left: 3px; opacity: 0; }
+.config-sync-json-clickable:hover::after, .config-sync-json-clickable:focus-visible::after { opacity: 1; }
+/* The preview's top action line — the hint that used to trail the bottom legend. */
+.config-sync-json-hint { display: flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: var(--font-ui-smaller); margin-bottom: var(--size-2-2); }
+.config-sync-json-hint .svg-icon { width: 13px; height: 13px; color: var(--interactive-accent); }
 .config-sync-json-val { color: var(--text-muted); }
 .config-sync-json-num { color: var(--color-green); }
 .config-sync-json-legend { color: var(--text-muted); font-size: var(--font-ui-smaller); margin-top: var(--size-2-2); }
@@ -1405,41 +1406,80 @@ body:not(.is-mobile) :is(.config-sync-grid, .config-sync-cardrow):not(:hover):no
 .config-sync-json-el.config-sync-json-desktop { color: var(--color-blue); }
 .config-sync-json-el.config-sync-json-mobile { color: var(--color-orange); }
 .config-sync-json-el.config-sync-json-strip { color: var(--color-red); }
-/* Unified card (spec 2026-07-25-unified-card-design.md §4) — Obsidian tab card renderer. */
-.config-sync-card-badge { margin-left: var(--size-4-2); font-size: var(--font-ui-smaller); border-radius: 9px; padding: 1px 8px; }
-.config-sync-card-badge-desktop { color: var(--color-blue); background: rgba(var(--color-blue-rgb), 0.12); }
-.config-sync-card-badge-mobile { color: var(--color-orange); background: rgba(var(--color-orange-rgb), 0.12); }
+/* Unified card header badges (轮 21E, replacing the text pills): icon-only with an optional
+   9px corner count, tooltip = the sentence; they live in the Setting row's CONTROL cell just
+   before the sync toggle. Grey = innate (desktop-only plugin, on/off only), color = the
+   user's own rule/exception (#162 ② — the two desktop meanings must read apart). Text renders
+   only as the loud fallback for a badge missing its icon. */
+.config-sync-card-badge { position: relative; display: inline-flex; align-items: center; font-size: var(--font-ui-smaller); padding-right: 2px; }
+.config-sync-card-badge-ic svg { width: 14px; height: 14px; display: block; }
+.config-sync-card-badge-cnt { position: absolute; top: -7px; right: -4px; font-size: 9px; line-height: 1; font-variant-numeric: tabular-nums; }
+.config-sync-card-badge-desktop { color: var(--color-blue); }
+.config-sync-card-badge-mobile { color: var(--color-orange); }
 /* on: this device (spec §4 row badges: blue/amber/PINK) — red stays reserved for the field-sharing
    "this device" preview color (.config-sync-json-strip above); don't reuse it here (FINDING 3). */
-.config-sync-card-badge-local { color: var(--color-pink); background: rgba(var(--color-pink-rgb), 0.12); }
-.config-sync-card-badge-count { color: var(--color-cyan); background: rgba(var(--color-cyan-rgb), 0.12); }
+.config-sync-card-badge-local { color: var(--color-pink); }
+.config-sync-card-badge-count { color: var(--color-cyan); }
 /* A carrier card's local fact ("N left to me", spec 2026-08-12-enablement-two-layers-design.md
    §6.4): purple, the color the two-segment row's local segment already wears when this device has
-   taken an element out of the shared answer (.config-sync-tworow-seg.is-local.is-set). The fleet
-   fact beside it keeps the count palette above — two facts, two colors, never one number. */
-.config-sync-card-badge-mine { color: var(--color-purple); background: rgba(var(--color-purple-rgb), 0.12); }
-/* Innate platform chip ("desktop-only plugin", round-8 spec §2): neutral grey,
-   inline-flex only here so the embedded monitor icon aligns with the text. */
-.config-sync-card-badge-plat { color: var(--text-muted); background: var(--background-modifier-border); display: inline-flex; align-items: center; gap: 4px; vertical-align: -1px; }
-.config-sync-card-badge-ic svg { width: 11px; height: 11px; display: block; }
-.config-sync-card-badge-state { color: var(--text-faint); background: transparent; border: 1px dashed var(--background-modifier-border-hover); }
+   taken an element out of the shared answer. The fleet fact beside it keeps the count palette
+   above — two facts, two colors, never one number. */
+.config-sync-card-badge-mine { color: var(--color-purple); }
+.config-sync-card-badge-plat { color: var(--text-muted); }
+.config-sync-card-badge-state { color: var(--text-faint); }
 .config-sync-item-wrap .setting-item-description:empty { display: none; }
 .config-sync-section-sub { color: var(--text-muted); font-size: var(--font-ui-small); padding: 4px 0 2px; }
 
-/* Card visual refresh (spec 2026-07-26-card-visual-refresh-design.md §2) — the four-column grid
-   every "row" in a card drawer aligns to: content 1fr | scope icon | lock icon | action icon.
-   Scope is a Commander-style cycling icon since round 6 (2026-07-27 定稿), so its column shrank
-   from the old 120px dropdown width to match the other icon columns. */
-.config-sync-grid { display: grid; grid-template-columns: 1fr var(--cs-scope-w, 28px) 28px 28px; align-items: center; column-gap: var(--size-4-2); }
-/* …except when that column carries the two-segment enablement row (spec §6.1) instead of a single
-   cycling icon: the segment pair is glyph + word twice, which a 28px icon track cannot hold. One
-   rule, keyed on the row's own content, so every row that carries the control gets the track and
-   every row that doesn't keeps the icon rail. */
-.config-sync-grid:has(> .config-sync-tworow) { --cs-scope-w: auto; }
-/* Idle ghosts stay faintly visible (0.25) rather than fully hidden — an invisible reserved
-   action column reads as a dead gutter at the card's right rail (round-5 feedback). */
-.config-sync-ghost { opacity: 0.25; transition: opacity 0.12s; }
-.config-sync-grid:hover .config-sync-ghost, .config-sync-grid:focus-within .config-sync-ghost, .config-sync-ghost.is-active { opacity: 1; }
+/* The Settings drawer's row grammar (定稿轮 19, replacing the 2026-07-26 four-column
+   content|scope|state|action grid and its `--cs-scope-w` widening): the Sync Center card's own
+   shape with a wider identity track — identity | controls | divider | detail. Identity holds
+   the row's name (an uppercase zone label, a mono key/filename, a member name — long names
+   ellipsize); the controls CLUSTER is left-anchored in its column in fixed role order
+   scope-picker → lock → per-item icon (→ folder toggle); the divider+detail pair renders only
+   on two-segment rows (vline + local cell land on tracks 3/4 as direct children, exactly like
+   `.config-sync-cardrow`). Nothing anchors to the drawer's right edge — removal verbs live in
+   each row's own scope menu (19d), so there is no action column and no ghost ✕ any more. */
+.config-sync-scrow { display: grid; grid-template-columns: 170px 108px 1px 1fr; align-items: center; column-gap: var(--size-4-2); padding: var(--size-4-1) 0; font-size: var(--font-ui-smaller); }
+/* The controls column as a fixed three-slot grid (轮 21A, DESIGN §1.4 SLOTS): aux (eye /
+   per-item icon) | lock | device picker — same-type controls one strict column each, device
+   LAST beside the divider/THIS DEVICE column; a row without a control leaves the slot empty. */
+.config-sync-scrow-slots { display: grid; grid-template-columns: 24px 24px 44px; align-items: center; column-gap: var(--size-4-2); }
+.config-sync-scrow-slot { display: flex; align-items: center; justify-content: center; min-width: 0; }
+/* STATE controls right-anchor on the card-toggle rail (轮 20 ②乙): a folder row's sync toggle
+   lands in this track-4 cell, right edge shared with the card header's own toggle; RULE
+   controls (pickers/locks) stay left-anchored in the slot columns. */
+.config-sync-scrow-end { grid-column: 4; justify-self: end; display: flex; align-items: center; }
+.config-sync-scrow-col4 { grid-column: 4; }
+/* The path row's full-width filename line (轮 21A #155): spans every track so plugin-length
+   paths never wrap; ellipsis only as the genuine last resort. */
+.config-sync-card-pathline { grid-column: 1 / -1; min-width: 0; overflow: hidden; }
+.config-sync-card-pathline .config-sync-card-path { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The Advanced rule editor's vertical form (轮 21D): one field per scrow row, label | control. */
+.config-sync-advrow { grid-template-columns: 130px 1fr; }
+.config-sync-advrow-ctl { display: flex; align-items: center; min-width: 0; }
+.config-sync-advform input { font-size: var(--font-ui-smaller); }
+.config-sync-advform input::placeholder { color: var(--text-faint); font-style: italic; }
+.config-sync-advrow-ctl > input { width: 100%; max-width: 380px; }
+/* The composite path box (#163): location mini-menu | divider | borderless path input, one
+   input-shaped container. */
+.config-sync-pathbox { display: flex; align-items: center; width: 100%; max-width: 380px; background: var(--background-modifier-form-field); border: 1px solid var(--background-modifier-border); border-radius: var(--input-radius, 6px); overflow: hidden; }
+.config-sync-pathbox-prefix { display: inline-flex; align-items: center; gap: 3px; padding: 4px 10px; color: var(--text-muted); font-size: var(--font-ui-smaller); white-space: nowrap; cursor: pointer; }
+.config-sync-pathbox-prefix:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
+.config-sync-pathbox-div { width: 1px; align-self: stretch; background: var(--background-modifier-border); }
+.config-sync-pathbox-input, .config-sync-pathbox input { border: none !important; background: transparent !important; box-shadow: none !important; flex: 1; min-width: 0; }
+/* TYPE's icon picker reuses the sharing-icon look but is always a set value, never a dimmed
+   default — full opacity, muted (no accent: file/folder is a fact, not a narrowing). */
+.config-sync-adv-typeic { color: var(--text-muted); opacity: 1; }
+/* The BRAT map note as a quiet one-line status (轮 21C — no boxed Setting row). */
+.config-sync-beta-mapnote { display: flex; align-items: center; gap: var(--size-4-2); color: var(--text-muted); font-size: var(--font-ui-smaller); padding: var(--size-4-1) 0 var(--size-4-2); }
+.config-sync-scrow > .config-sync-ldname, .config-sync-scrow > .config-sync-fkey { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Folder sync toggles sit a notch below Obsidian's default size so the cluster reads as one
+   quiet row of controls (定稿轮 19 mockup); origin right so the scaled toggle's RIGHT edge is
+   the one that holds the rail. */
+.config-sync-scrow .checkbox-container { transform: scale(0.85); transform-origin: right center; }
+/* Mobile: the 170/96 tracks would leave a two-segment row's local cell ~50px at 360px wide —
+   step both down; names ellipsize sooner, the shape stays. */
+body.is-mobile .config-sync-scrow { grid-template-columns: minmax(90px, 32%) 64px 1px 1fr; }
 .config-sync-lock { color: var(--text-muted); cursor: pointer; }
 .config-sync-lock.is-on { color: var(--color-cyan); background: var(--background-modifier-hover); border-radius: var(--radius-s); }
 .config-sync-dim { opacity: 0.5; pointer-events: none; cursor: default; }
@@ -1448,7 +1488,6 @@ body:not(.is-mobile) :is(.config-sync-grid, .config-sync-cardrow):not(:hover):no
    (round-5 feedback), so nested layers are neutralized and the outer .config-sync-dim wins. */
 .config-sync-dim .config-sync-dim { opacity: 1; }
 .config-sync-dim :disabled { opacity: 1; }
-.config-sync-card-actioncell { display: flex; align-items: center; gap: 2px; }
 
 .config-sync-card-sfhead { margin-bottom: var(--size-4-1); }
 .config-sync-card-path { font-family: var(--font-monospace); font-size: var(--font-ui-smaller); color: var(--text-normal); }
@@ -1471,11 +1510,10 @@ body:not(.is-mobile) :is(.config-sync-grid, .config-sync-cardrow):not(:hover):no
 .config-sync-card-sfbody { margin-top: var(--size-2-2); }
 
 .config-sync-card-fields { margin-bottom: var(--size-4-1); }
-/* Zone ① "Enabled on" is the grid's row now (spec 2026-07-26-card-visual-refresh-design.md §2.1/§4
-   Step 1) — display/columns come from .config-sync-grid; this rule only supplies spacing. */
 /* No border-bottom on card rows any more (定稿轮 17① — hairline-per-row read as a table;
    rhythm comes from row padding alone, in the Sync Center's quiet zone and the Settings
-   drawer alike). */
+   drawer alike). Drawer rows' display/columns come from .config-sync-scrow (定稿轮 19);
+   these modifiers only supply the Sync Center card's own spacing. */
 .config-sync-card-fieldrow { padding: var(--size-4-1) 0; font-size: var(--font-ui-smaller); }
 .config-sync-card-rulerow { padding: var(--size-4-1) 0; font-size: var(--font-ui-smaller); }
 /* Commander-style sharing icon (round-6 定稿): the glyph IS the state — the "everywhere" default
@@ -1489,16 +1527,21 @@ body:not(.is-mobile) :is(.config-sync-grid, .config-sync-cardrow):not(:hover):no
    The wrapper and its label are one pair and are named as one: a half-renamed pair leaves the next
    reader unable to tell which word is current. */
 .config-sync-card-rulecontent { display: flex; align-items: center; gap: var(--size-4-2); min-width: 0; }
-.config-sync-card-perelement { display: inline-flex; align-items: center; }
-.config-sync-card-perelement-label { font-size: var(--font-ui-smaller); color: var(--text-faint); margin-left: var(--size-2-1); }
-.config-sync-card-elrow { padding: var(--size-4-1) 0 var(--size-4-1) var(--size-4-6); font-size: var(--font-ui-smaller); }
-.config-sync-card-elname { font-family: var(--font-monospace); color: var(--text-muted); }
+/* Per-item device rules as an icon toggle (定稿轮 19c #143, replacing text+ToggleComponent):
+   `list-checks` in the rule row's cluster — off sits faint like the sharing pickers' `all`
+   default, on renders `.is-set` accent; encrypted rules disable it via `.config-sync-dim`. */
+.config-sync-perelement-ic { display: flex; align-items: center; justify-content: center; color: var(--text-muted); cursor: pointer; opacity: 0.45; transition: opacity 0.12s; border-radius: var(--radius-s); }
+.config-sync-perelement-ic:hover, .config-sync-perelement-ic:focus-visible { opacity: 1; background: var(--background-modifier-hover); }
+.config-sync-perelement-ic.is-set { opacity: 1; color: var(--interactive-accent); }
+/* Element rows indent inside the identity track (not the row itself — the control column must
+   stay on the parent rule row's own vertical rule). */
+.config-sync-card-elrow > .config-sync-card-elname { margin-left: var(--size-4-6); }
+.config-sync-card-elname { font-family: var(--font-monospace); color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .config-sync-card-companions { margin-bottom: var(--size-4-1); }
 /* .config-sync-card-companionrow stays flex-based — it's still the layout for the path-EDIT row
-   (renderCompanionPathEditRow: input | spacer | Save | Cancel), untouched by the card visual
-   refresh. The folder row and member rows below use the grid instead, via
-   .config-sync-card-companiongrid (spacing/font only — .config-sync-grid supplies the columns). */
+   (renderCompanionPathEditRow: input | spacer | Save | Cancel). The folder row and member rows
+   below are scrows; .config-sync-card-companiongrid remains only as the is-orphan hook. */
 .config-sync-card-companionrow { display: flex; align-items: center; gap: var(--size-4-2); padding: var(--size-4-1) 0; font-size: var(--font-ui-smaller); }
 .config-sync-card-companionrow .config-sync-card-pathinput { flex: 1; min-width: 8em; }
 .config-sync-card-companiongrid { padding: var(--size-4-1) 0; font-size: var(--font-ui-smaller); }
@@ -1507,7 +1550,12 @@ body:not(.is-mobile) :is(.config-sync-grid, .config-sync-cardrow):not(:hover):no
    its own aria-label carrying the full "N themes"/"N files" sentence — no more inline `· ` text). */
 .config-sync-card-foldercontent { display: flex; align-items: center; gap: 4px; cursor: pointer; min-width: 0; }
 .config-sync-card-memberarrow { color: var(--text-muted); }
-.config-sync-card-snippetmembers { margin-left: var(--size-4-6); }
+/* Member indent lives on the NAME inside the identity cell, never on the container (轮 20 ②乙):
+   a container margin used to shift the member rows' whole grid 24px right, knocking their
+   pickers off the card's one control column (#150). */
+.config-sync-card-snippetmembers .config-sync-scrow > .config-sync-ldname,
+.config-sync-card-snippetmembers .config-sync-scrow > .config-sync-orphancell,
+.config-sync-card-snippetmembers .config-sync-ldhint { margin-left: var(--size-4-6); }
 /* The two carrier cards' element rows (spec §6.4) — the same rows the snippet member list draws,
    one level up: they hang off the card's own drawer rather than off a companion folder, so they
    carry the drawer's indent instead of the member list's. */
@@ -1858,44 +1906,15 @@ body.is-mobile .config-sync-report-files .config-sync-seg-btn {
 }
 body.is-mobile .config-sync-report-files { font-size: var(--font-ui-small); }
 
-/* ── Mobile chip structure (C-#43/#44, batch-21 spec §1/§4 — revises C-#41/batch-20) ──
-   Constant row skeleton: line 1 is always chevron + name + spacer + sentence + checkbox; ANY
-   chip-bearing row (1+ chips, revised from batch-20's 2+) moves its chips to their own indented
-   line 2 (JS branch, SyncCenterView.ts renderItemRow) so line 1 never carries chips. Chipless
-   rows stay single-line. Never a third line — the whole chip group degrades to icon-only +
-   tooltip together (same chipOverflowObserver/`.config-sync-chips-compact` mechanism as desktop,
-   applied to this line instead of the row) rather than wrapping. The pair reads as ONE row: line
-   1 (`.config-sync-hub-row`) hands its own trailing hairline off to line 2 when a meta line
-   follows it, so the two lines aren't split by a border between them.
-   Spacing (spec §4, design intent in px, mapped to nearest `--size-*` token — no exact-px token
-   exists for either target): row-group rhythm 22px → 24px (`2×var(--size-4-3)`, this rule's own
-   top/bottom padding on a chipless row, or the top padding of the row that FOLLOWS a chipmeta
-   line); chip meta line's own gap under ITS row 7px → 6px (`var(--size-2-3)`, the `:has()` rule
-   below — higher specificity than the general row padding, so it wins on that one row's bottom
-   only); chipmeta's own trailing gap before the next row bumped to `var(--size-4-3)` (12px) to
-   complete that 24px rhythm; 20px left inset unchanged (`var(--size-4-5)`, already exact). */
+/* Mobile row rhythm (batch-21 §4; the chip meta line retired in 定稿轮 20 ④ — icon-only chips
+   fit inline on every width, so a row is always one line: chevron + name + spacer + chips +
+   sentence + checkbox). */
 body.is-mobile .config-sync-hub-row { padding: var(--size-4-3) 0; }
-body.is-mobile .config-sync-hub-row:has(+ .config-sync-row-chipmeta) {
-  padding-bottom: var(--size-2-3);
-  border-bottom: none;
-}
-body.is-mobile .config-sync-row-chipmeta {
-  display: flex;
-  align-items: center;
-  gap: var(--size-4-2);
-  margin-left: var(--size-4-5);
-  padding-bottom: var(--size-4-3);
-  border-bottom: 1px solid var(--background-modifier-border);
-  overflow: hidden;
-  white-space: nowrap;
-}
-/* The truly-last row/meta line in a card never carries a trailing hairline against the card's
-   own bottom edge (review fix, C-#5 precedent): `:last-of-type` can't express this — every row's
-   `detail` drawer div immediately follows it, so no row/meta div is ever literally the last div
-   among card's children. `markLastRow` (SyncCenterView.ts) marks it explicitly instead, on every
-   DOM change that could move what's last. */
-body.is-mobile .config-sync-row-last.config-sync-hub-row,
-body.is-mobile .config-sync-row-last.config-sync-row-chipmeta {
+/* The truly-last row in a card never carries a trailing hairline against the card's own bottom
+   edge (review fix, C-#5 precedent): `:last-of-type` can't express this — every row's `detail`
+   drawer div immediately follows it, so no row div is ever literally the last div among card's
+   children. `markLastRow` (SyncCenterView.ts) marks it explicitly instead. */
+body.is-mobile .config-sync-row-last.config-sync-hub-row {
   border-bottom: none;
 }
 

@@ -33,12 +33,19 @@ import {
 // (only for cards with an `enablement` projection, only when non-default) → N device-scoped →
 // N encrypted. Zero counts are omitted entirely — a badge never reads "0 …".
 
+// 轮 21E: badges render icon-only with an optional 9px corner count — `text` is the tooltip
+// sentence now (and the loud fallback for a badge missing its icon), never inline copy.
 export interface Badge {
   text: string;
   cls: string;
-  icon?: string; // lucide icon rendered before the text (round-8 "desktop-only plugin" chip)
+  icon?: string;
+  count?: number;
   tooltip?: string;
 }
+
+// Mode DISPLAY names (轮 21D — stored ids `plain`/`fields`/`encrypted` never change): "Plain"
+// and "Fields" were implementation words; "Per-key rules" is the drawer's own vocabulary.
+export const MODE_LABELS = { plain: "Whole file", fields: "Per-key rules", encrypted: "Encrypted" } as const;
 
 const ON_BADGE_TEXT = { desktop: "on: desktop", mobile: "on: mobile", local: "on: this device" } as const;
 
@@ -184,32 +191,34 @@ export function computeBadges(
     badges.push({
       text: "on/off only",
       cls: "config-sync-card-badge-state",
+      icon: "toggle-left",
       tooltip: "No settings file on this device yet — only the on/off state syncs.",
     });
   }
-  // Innate manifest property first, ahead of every config-driven badge — neutral grey so the
-  // colored "on: …" (the user's CHOICE) keeps its contrast (round-8 spec §2, mockup-approved).
+  // Innate manifest property first, ahead of every config-driven badge — GREY, because grey =
+  // innate and color = your choice (轮 21 #162 ②: the two desktop meanings must read apart).
   if (def.desktopOnly === true) {
     badges.push({ text: "desktop-only plugin", cls: "config-sync-card-badge-plat", icon: "monitor" });
   }
   // An exception outranks the rule here for the same reason it does at run time (spec §5
   // precedence 1): what this device actually does is the truer thing to say about it. A
   // `this-device` RULE ("Each device decides") sets no class and is not itself an exception, so it
-  // earns no badge — the card's own row is where that answer lives.
+  // earns no badge — the card's own row is where that answer lives. Colored = the user's rule:
+  // blue monitor / amber smartphone / the local-exception corner glyph.
   if (def.enablement !== undefined && enablement !== null) {
     const cls = sharingClass(enablement.rule);
-    if (enablement.exception !== null) badges.push({ text: ON_BADGE_TEXT.local, cls: ON_BADGE_CLASS.local });
-    else if (cls !== null) badges.push({ text: ON_BADGE_TEXT[cls], cls: ON_BADGE_CLASS[cls] });
+    if (enablement.exception !== null) badges.push({ text: ON_BADGE_TEXT.local, cls: ON_BADGE_CLASS.local, icon: "corner-down-right" });
+    else if (cls !== null) badges.push({ text: ON_BADGE_TEXT[cls], cls: ON_BADGE_CLASS[cls], icon: cls === "desktop" ? "monitor" : "smartphone" });
   }
   if (carrier !== null) {
-    if (carrier.fleet > 0) badges.push({ text: `${carrier.fleet} device-scoped`, cls: CARRIER_FLEET_BADGE_CLASS });
-    if (carrier.local > 0) badges.push({ text: `${carrier.local} left to me`, cls: CARRIER_LOCAL_BADGE_CLASS });
+    if (carrier.fleet > 0) badges.push({ text: `${carrier.fleet} device-scoped`, cls: CARRIER_FLEET_BADGE_CLASS, icon: "monitor-smartphone", count: carrier.fleet });
+    if (carrier.local > 0) badges.push({ text: `${carrier.local} left to me`, cls: CARRIER_LOCAL_BADGE_CLASS, icon: "corner-down-right", count: carrier.local });
   } else {
     const classPinned = countClassPinned(item);
-    if (classPinned > 0) badges.push({ text: `${classPinned} device-scoped`, cls: "config-sync-card-badge-count" });
+    if (classPinned > 0) badges.push({ text: `${classPinned} device-scoped`, cls: "config-sync-card-badge-count", icon: "monitor-smartphone", count: classPinned });
   }
   const encrypted = countEncrypted(item);
-  if (encrypted > 0) badges.push({ text: `${encrypted} encrypted`, cls: "config-sync-card-badge-count" });
+  if (encrypted > 0) badges.push({ text: `${encrypted} encrypted`, cls: "config-sync-card-badge-count", icon: "lock", count: encrypted });
   return badges;
 }
 
@@ -298,7 +307,10 @@ export const ENABLED_CSS_SNIPPETS_KEY = "enabledCssSnippets";
 // same producer `ruleHomeFor` asks when it WRITES the rules. Spelling the whole-file key as `""`
 // here would be a second author for a derived key, which is the drift this release exists to end;
 // registry.ts's deriveMode still carries that literal, and it is the one place it is spelled.
-function isEnablementRuleKey(def: ItemDef, key: string): boolean {
+// Exported for the File preview (定稿轮 19 ②): an enablement key must not wear the clickable
+// affordance either — clicking it would write a rule buildRuleRows filters right back out, an
+// invisible junk entry (found live when the dashed underline first invited that click).
+export function isEnablementRuleKey(def: ItemDef, key: string): boolean {
   const list = carrierListFor(def);
   if (list !== null) return key === perElementKeyFor(list);
   return def.section === "obsidian" && def.id === "appearance" && key === perElementKeyFor("enabled-css-snippets");
@@ -574,12 +586,14 @@ export interface PreviewLegendEntry {
   cls: string | null; // dot color class — set exactly when kind is "sharing"
   text: string;
 }
+// The old trailing "click a key to add a rule" hint entry moved to the preview's TOP action
+// line (定稿轮 19 ②, `config-sync-json-hint` in SettingTab.ts) — the legend now carries only
+// the color/lock annotations.
 export const PREVIEW_LEGEND_ENTRIES: PreviewLegendEntry[] = [
   { kind: "sharing", cls: "config-sync-json-desktop", text: "desktop only" },
   { kind: "sharing", cls: "config-sync-json-mobile", text: "mobile only" },
   { kind: "sharing", cls: "config-sync-json-strip", text: "this device" },
   { kind: "lock", cls: null, text: "encrypted" },
-  { kind: "hint", cls: null, text: "click a key to add a rule" },
 ];
 
 // ── Sync all (spec §4/§5/§10, D11) — one master row per Core/Community/Beta section: toggles

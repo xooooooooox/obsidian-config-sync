@@ -101,6 +101,7 @@ describe("computeBadges", () => {
     expect(badges[0]).toEqual({
       text: "on/off only",
       cls: "config-sync-card-badge-state",
+      icon: "toggle-left",
       tooltip: "No settings file on this device yet — only the on/off state syncs.",
     });
   });
@@ -130,23 +131,23 @@ describe("computeBadges", () => {
     expect(computeBadges(dOnly, cfg(), FOLLOWS_ALL, null)).toEqual([{ text: "desktop-only plugin", cls: "config-sync-card-badge-plat", icon: "monitor" }]);
     expect(computeBadges(dOnly, cfg(), RULE(perClass("desktop")), null)).toEqual([
       { text: "desktop-only plugin", cls: "config-sync-card-badge-plat", icon: "monitor" },
-      { text: "on: desktop", cls: "config-sync-card-badge-desktop" },
+      { text: "on: desktop", cls: "config-sync-card-badge-desktop", icon: "monitor" },
     ]);
   });
 
   it("a class rule shows the matching on: badge — only when the def has an enablement", () => {
-    expect(computeBadges(COMMUNITY_DEF, cfg(), RULE(perClass("desktop")), null)).toEqual([{ text: "on: desktop", cls: "config-sync-card-badge-desktop" }]);
-    expect(computeBadges(COMMUNITY_DEF, cfg(), RULE(perClass("mobile")), null)).toEqual([{ text: "on: mobile", cls: "config-sync-card-badge-mobile" }]);
+    expect(computeBadges(COMMUNITY_DEF, cfg(), RULE(perClass("desktop")), null)).toEqual([{ text: "on: desktop", cls: "config-sync-card-badge-desktop", icon: "monitor" }]);
+    expect(computeBadges(COMMUNITY_DEF, cfg(), RULE(perClass("mobile")), null)).toEqual([{ text: "on: mobile", cls: "config-sync-card-badge-mobile", icon: "smartphone" }]);
     // no-enablement card (app): the same input produces NO badge — the projection doesn't exist
     // for this card at all.
     expect(computeBadges(APP_DEF, cfg(), RULE(perClass("desktop")), null)).toEqual([]);
   });
 
   it("shows 'on: this device' from THIS DEVICE's exception, and it outranks the fleet rule", () => {
-    expect(computeBadges(COMMUNITY_DEF, cfg(), RULE(EVERYWHERE, "on"), null)).toEqual([{ text: "on: this device", cls: "config-sync-card-badge-local" }]);
-    expect(computeBadges(COMMUNITY_DEF, cfg(), RULE(EVERYWHERE, "off"), null)).toEqual([{ text: "on: this device", cls: "config-sync-card-badge-local" }]);
+    expect(computeBadges(COMMUNITY_DEF, cfg(), RULE(EVERYWHERE, "on"), null)).toEqual([{ text: "on: this device", cls: "config-sync-card-badge-local", icon: "corner-down-right" }]);
+    expect(computeBadges(COMMUNITY_DEF, cfg(), RULE(EVERYWHERE, "off"), null)).toEqual([{ text: "on: this device", cls: "config-sync-card-badge-local", icon: "corner-down-right" }]);
     // precedence 1: the class rule loses to the exception, exactly as decideEnablement decides
-    expect(computeBadges(COMMUNITY_DEF, cfg(), RULE(perClass("desktop"), "off"), null)).toEqual([{ text: "on: this device", cls: "config-sync-card-badge-local" }]);
+    expect(computeBadges(COMMUNITY_DEF, cfg(), RULE(perClass("desktop"), "off"), null)).toEqual([{ text: "on: this device", cls: "config-sync-card-badge-local", icon: "corner-down-right" }]);
     expect(computeBadges(COMMUNITY_DEF, cfg(), FOLLOWS_ALL, null)).toEqual([]);
   });
 
@@ -168,7 +169,7 @@ describe("computeBadges", () => {
     expect(countEncrypted(fieldsEncrypted)).toBe(1);
     const fileEncrypted = cfg({ settingsFile: { mode: "plain", rules: {}, perElement: {}, fileRule: { sharing: EVERYWHERE, encrypted: true } } });
     expect(countEncrypted(fileEncrypted)).toBe(1);
-    expect(computeBadges(HOTKEYS_DEF, fileEncrypted, null, null)).toEqual([{ text: "1 encrypted", cls: "config-sync-card-badge-count" }]);
+    expect(computeBadges(HOTKEYS_DEF, fileEncrypted, null, null)).toEqual([{ text: "1 encrypted", cls: "config-sync-card-badge-count", icon: "lock", count: 1 }]);
   });
 
   it("badge order is on: -> device-scoped -> encrypted, omitting zero counts", () => {
@@ -176,9 +177,9 @@ describe("computeBadges", () => {
       settingsFile: { mode: "fields", rules: { a: { sharing: perClass("mobile"), encrypted: true } }, perElement: {} },
     });
     expect(computeBadges(COMMUNITY_DEF, c, RULE(perClass("desktop")), null)).toEqual([
-      { text: "on: desktop", cls: "config-sync-card-badge-desktop" },
-      { text: "1 device-scoped", cls: "config-sync-card-badge-count" },
-      { text: "1 encrypted", cls: "config-sync-card-badge-count" },
+      { text: "on: desktop", cls: "config-sync-card-badge-desktop", icon: "monitor" },
+      { text: "1 device-scoped", cls: "config-sync-card-badge-count", icon: "monitor-smartphone", count: 1 },
+      { text: "1 encrypted", cls: "config-sync-card-badge-count", icon: "lock", count: 1 },
     ]);
   });
 });
@@ -681,13 +682,12 @@ describe("nextSharing / sharing icon cycle (round-6 定稿: Commander-style shar
 });
 
 describe("PREVIEW_LEGEND_ENTRIES (round-7 spec §2, 定稿 B: color dots + neutral words, no emoji)", () => {
-  it("lists the three sharing dots (preview key classes), then lock, then the hint", () => {
+  it("lists the three sharing dots (preview key classes), then lock — no trailing hint (定稿轮 19 ②: the action sentence moved to the preview's top line)", () => {
     expect(PREVIEW_LEGEND_ENTRIES).toEqual([
       { kind: "sharing", cls: "config-sync-json-desktop", text: "desktop only" },
       { kind: "sharing", cls: "config-sync-json-mobile", text: "mobile only" },
       { kind: "sharing", cls: "config-sync-json-strip", text: "this device" },
       { kind: "lock", cls: null, text: "encrypted" },
-      { kind: "hint", cls: null, text: "click a key to add a rule" },
     ]);
   });
 

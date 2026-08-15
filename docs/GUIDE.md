@@ -66,7 +66,7 @@ Open the **Sync Center** any time for the full picture; its header is its own st
 
 - Every synced thing — a plugin, an Obsidian option group, a folder — is **one row**. A row's companions (Appearance's `themes`/`snippets` presets, or any item's own `+ Add folder` companions) dissolve into that same row rather than getting rows of their own, so ticking or expanding the parent covers them too.
 - Rows sort into four fixed sections — **Obsidian**, **Core plugins**, **Community plugins** (beta plugins included, the Config Sync self row pinned first, reading `your Sync Center — manages itself`) and **Your folders** — alphabetical within each. Click a section header to collapse/expand it (remembered while the pane stays open); its trailing count reads `N`, or `N/M` once a filter or search narrows it.
-- Each row reads **name · chips · direction icon · checkbox**. A directional row's icon (orange ↑ capture / blue ↓ apply) carries the row's **fate sentence** as its hover text; `— In sync` / `— No settings yet` / `⚠ Changed on both sides` rows keep the sentence inline (a conflict must shout). Chips call out only facts that deviate from the default — `not installed here`, `desktop only`, `stays off`, `off here — your rule` / `on here — your rule`, `🔒 encrypted`, a folder path. The **fate sentence** is the row's plain-language verdict on what the next run would do to it: `↓ Installs · turns on · applies settings`, `↓ Updates · applies settings`, `↑ Captures settings`, `↓ Applies theme & snippets — live` (Appearance), `↓ Applies N files` (a folder). Identical rows read `— In sync`; a row with nothing saved anywhere yet reads `— No settings yet`; one that changed on both sides since your last sync reads `⚠ Changed on both sides` and stays unstageable until you resolve it (below).
+- Each row reads **name · … · chips · direction icon · checkbox** — the chips sit on the row's right, just before the direction icon, as quiet icons whose hover text says the fact in full (`not installed here`, `desktop only`, `stays off`, `off here — your rule` / `on here — your rule`, `encrypted`). A chip appears only when a fact deviates from the default. A directional row's icon (orange ↑ capture / blue ↓ apply) carries the row's **fate sentence** as its hover text; `— In sync` / `— No settings yet` / `⚠ Changed on both sides` rows keep the sentence inline (a conflict must shout). The **fate sentence** is the row's plain-language verdict on what the next run would do to it: `↓ Installs · turns on · applies settings`, `↓ Updates · applies settings`, `↑ Captures settings`, `↓ Applies theme & snippets — live` (Appearance), `↓ Applies N files` (a folder). Identical rows read `— In sync`; a row with nothing saved anywhere yet reads `— No settings yet`; one that changed on both sides since your last sync reads `⚠ Changed on both sides` and stays unstageable until you resolve it (below).
 - In-sync, excluded, and no-settings rows sit dimmed with the checkbox hidden, folded behind a trailing line per section, in this order: `✓ N items in sync ▸`, `⊘ N items not synced on this device ▸`, `○ N items with no settings yet ▸` — click to expand in place.
 - The checkbox means one thing everywhere: include this row in the next run. It never changes what would happen, only whether it happens — so a section's own select-all is always safe, and it skips the self row, in-sync/excluded/no-settings rows and any unresolved conflict.
 - The filter pills — **All**, **To capture**, **To apply**, **In sync**, **Not synced here**, **No settings yet** — narrow every section by the same fate; they hide rows, they never move them between sections. **Not synced here** (and its matching fold/badges) only appears once at least one item is excluded — an empty bucket shows nothing, same as **In sync**/**No settings yet**.
@@ -97,7 +97,7 @@ Whatever the shared rule says, **this device can still say something different**
 
 #### Which devices turn each plugin on
 
-The Core plugins and Community plugins on/off lists are cards of their own now, under the **Obsidian** tab in Settings, alongside App settings/Appearance/Hotkeys — not just a list of individual plugin cards. Each carries a badge for how many plugins have a shared rule set (`N device-scoped`) and how many this device has excepted for itself (`N left to me`), and its drawer lists **Which devices turn each plugin on** — one row per plugin, same shared-answer-plus-this-device shape as everywhere else, so you can see and change every plugin's rule from one place instead of hunting through individual cards.
+The Core plugins and Community plugins on/off lists are cards of their own now, under the **Obsidian** tab in Settings, alongside App settings/Appearance/Hotkeys — not just a list of individual plugin cards. Each carries a badge for how many plugins have a shared rule set (`N device-scoped`) and how many this device has excepted for itself (`N left to me`), and its drawer lists every plugin under an **Enabled on** header (hover it for the full sentence: which devices turn each plugin on) — one row per plugin, same shared-answer-plus-this-device shape as everywhere else, with the `this device` column named once in the header instead of on every row.
 
 #### Header chip and the this-device pane
 
@@ -152,7 +152,7 @@ Obsidian and core-plugin items are anchored to the Obsidian app version rather t
 
 - **General** — PKM mode (auto-detects IOTO vaults), the data folder location, status toggles (sync menu change counts, automatic remote checks, periodic local check), the status bar (item, remote push/pull counts, opt-in ribbon dot, mobile force-show), ribbon icons.
 
-Every row across **Obsidian**, **Core plugins**, **Community plugins** and **Beta** is a card: name, badges (a grey `desktop-only plugin` chip when the plugin can't run on mobile; `on: desktop` / `on: mobile` / `on: this device` when a plugin's enabled state isn't the default; counts of device-scoped and encrypted rules), a sync toggle, and a chevron that opens its drawer.
+Every row across **Obsidian**, **Core plugins**, **Community plugins** and **Beta** is a card: name, then — on the right, beside the sync toggle — its badges as quiet icons with a small corner count and the sentence in the hover text: a grey monitor when the plugin itself can't run on mobile (grey = innate), a colored device icon when YOU set its enabled state (`on: desktop` / `on: mobile` / `on: this device` — color = your choice), a two-device icon counting device-scoped rules, a lock counting encrypted ones. Then the sync toggle and a chevron that opens the drawer.
 
 - The **Obsidian** tab has five cards: **App settings** (the whole `app.json` — editing, new-note and link behavior, and other general options), **Appearance** (theme, fonts and CSS snippets), **Hotkeys** (your custom keyboard shortcuts), and **Core plugins** / **Community plugins** — the two on/off lists themselves, each showing **Which devices turn each plugin on** (see [Each device decides, and this device's own exceptions](#each-device-decides-and-this-devices-own-exceptions)).
 - **Core** and **Community** plugins also get a full card of their own each, one per plugin: a core plugin's card exists even before it has written its settings file here — the file's path is known from the plugin itself, so its store copy stays attached wherever the file exists.
@@ -161,7 +161,7 @@ Every row across **Obsidian**, **Core plugins**, **Community plugins** and **Bet
 - The **Beta** tab tracks community plugins installed through [BRAT](https://github.com/TfTHacker/obsidian42-brat) — same card, same three drawer zones — so their configs sync like any other plugin.
 - Each section lists its cards alphabetically; sensitive-looking keys (tokens, secrets) are highlighted inside a card's File preview so you see them before enabling syncing.
 
-A card's drawer has up to three zones, and every sharing control in them is the same cycling icon: the glyph shows the current rule (a monitor+phone pair = `All devices`, a monitor = `Desktop only`, a phone = `Mobile only`, an airplay mark = `This device`), a click advances to the next value, and the default sits dimmed while anything narrower lights up in the accent color.
+A card's drawer has up to three zones. Every row reads the same way: the row's name on the left, its controls in one shared column beside it — so all the controls in a card line up — and every sharing control is the same picker icon: the glyph shows the current rule (a monitor+phone pair = `All devices`, a monitor = `Desktop only`, a phone = `Mobile only`, an airplay mark = `This device`), a click opens a menu of the values, and the default sits dimmed while anything narrower lights up in the accent color.
 
 #### Enabled on
 
@@ -174,20 +174,20 @@ Starts as one path row: the file's path, a sharing icon (no `This device` here) 
 - Click it to edit in place (Enter commits, Esc cancels).
 - While editing a committed custom path, a quiet **Reset to default** action restores the built-in default.
 
-Below the path row, a collapsed **File preview** (`▸ File preview`) expands into a read-only view of the file, keys colored by their rule, with a color-dot legend underneath (blue = desktop only, amber = mobile only, red = this device, a lock mark = encrypted); click a key to add a rule for it directly.
+The eye icon beside the filename opens the **File preview** — a read-only view of the file, keys colored by their rule, with a color-dot legend underneath (blue = desktop only, amber = mobile only, red = this device, a lock mark = encrypted). Any key you can add a rule for wears a dashed underline, and the line above the preview says it plainly: **click any key to add a rule for it**.
 
 The moment a card has any per-key rule, it switches to per-key mode:
 
 - The path row's own sharing/lock dim (each ruled key now governs itself).
-- A row appears per configured key with its own sharing icon, a lock toggle (greyed out at `This device`) and a ✕ to remove the rule.
-- A string-array key's rule adds a **Per-item device rules** toggle so each element gets its own sharing icon instead of one rule for the whole key.
+- A **Key rules** list appears with a row per configured key: its own sharing icon and a lock toggle (greyed out at `This device`). To remove the rule, open the key's sharing menu and pick **Remove rule** at the bottom.
+- A string-array key's rule adds a **Per-item device rules** icon (a small checklist, lit when on) so each element gets its own sharing icon instead of one rule for the whole key.
 - Removing the last rule reverts the card to whole-file mode.
 
-#### Companion folders
+#### Folders
 
 Lists any vault-relative folder that travels with the item — Appearance ships `themes/` and `snippets/` as presets, and every card's drawer ends with a quiet **+ Add folder** row to add any other path (duplicates and paths already claimed by another item are rejected).
 
-- Each folder row has a sharing icon and a sync toggle (plus a ✕ on any folder you added yourself), and clicking the folder's name opens its path for editing.
+- Each folder row has a sharing icon and a sync toggle, and clicking the folder's name opens its path for editing. A folder you added yourself is removed from its sharing menu's **Remove folder** entry; presets can only be relocated, never removed.
 - A folder's file list is collapsed behind a `· N files`/`· N themes` count — click to expand it.
 - Opening `snippets/` lists each file as its own row with a sharing icon: the file itself always syncs, and the icon only decides which devices turn it on.
 - A file that has been deleted but still holds a device choice stays listed — struck through, marked `file deleted` — until you press **Forget**, which clears the choice (the next capture then removes it from the store); the folder's count only counts files that still exist.
@@ -195,7 +195,7 @@ Lists any vault-relative folder that travels with the item — Appearance ships 
 
 #### Advanced
 
-**Custom rules** (fully yours: vault-root files, extra folders, sync modes) and **Discovered files** (config files we couldn't classify; toggle to sync — name and path are fixed by the file), each row using its own field-rule editor (a `This device`/`Encrypted`/`Desktop only`/`Mobile only` action dropdown, separate from a card's icon-based Settings file zone). When any managed item is customized (path, fields or mode diverge from its default), a summary row lists them with a **Reset all to defaults** button.
+**Custom rules** (fully yours: vault-root files, extra folders) and **Discovered files** (config files we couldn't classify; toggle to sync — name and path are fixed by the file). A rule's editor is one field per line: a name (e.g. `templates`), a path box whose leading segment picks the base (`Vault root` or `Config folder`) before you type the relative path, a file/folder type icon, a devices picker, a **Mode** (`Whole file` syncs the file as-is · `Per-key rules` gives each key its own rule · `Encrypted` stores the whole file encrypted), and an optional description. When any managed item is customized (path, fields or mode diverge from its default), a summary row lists them with a **Reset all to defaults** button.
 
 #### Remotes
 
