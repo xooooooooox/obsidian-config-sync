@@ -1465,8 +1465,10 @@ export class SyncCenterView extends ItemView {
 
   private renderSectionEntries(container: HTMLElement): void {
     this.renderSelfEntry(container);
+    // No head over the scope list (定稿轮 17②): the self card's own "plugin settings ↔ store"
+    // subtitle already carries the device↔store relation — grouping is by dividers alone, and
+    // the only head left is Remotes', which earns its place by carrying live checked-age state.
     container.createDiv({ cls: "config-sync-side-divider" });
-    container.createDiv({ cls: "config-sync-side-head", text: "This device ↔ store" });
 
     const deviceEntry = (cat: StorageSection | "beta" | "all", label: string, rows: StatusRow[]): void => {
       const active = this.panelSection.kind === "device" && this.panelSection.cat === cat;
@@ -1664,16 +1666,14 @@ export class SyncCenterView extends ItemView {
         attr: { "aria-label": `${none} item${none === 1 ? "" : "s"} with no settings yet` },
       });
     }
-    head.createSpan({
-      cls: "config-sync-center-refreshed",
-      text: this.lastRefreshedAt === null ? "" : `refreshed ${relativeAge(this.lastRefreshedAt)}`,
-    });
     // Manual refresh (定稿 2026-07-17, replaces the enabled-set polling; made global 定稿
     // 2026-08-04 — #1): re-scans local state, catching plugin toggles made in Obsidian's
     // settings modal while the panel stayed open, and re-checks every remote (desktop only).
+    // The old "refreshed just now" text span is gone (定稿轮 17③) — the age lives in this
+    // button's tooltip instead, recomputed on each render exactly like the span's text was.
     const refresh = new ExtraButtonComponent(head);
     refresh.setIcon("refresh-cw");
-    refresh.setTooltip("Refresh");
+    refresh.setTooltip(this.lastRefreshedAt === null ? "Refresh" : `Refresh — refreshed ${relativeAge(this.lastRefreshedAt)}`);
     refresh.extraSettingsEl.addClass("config-sync-center-refresh");
     refresh.extraSettingsEl.toggleClass("config-sync-refresh-spinning", this.host.remoteRefreshProgress() !== null);
     refresh.onClick(async () => {
@@ -2645,12 +2645,9 @@ export class SyncCenterView extends ItemView {
       return;
     }
     const name = r.group.name;
-    // Own wrapper for the field rows (ledger C-#5 root cause): `.config-sync-card-fieldrow`'s
-    // `:last-of-type` border-removal matches by TAG, not class — with the Stop-syncing footer
-    // appended as a further `<div>` sibling of the rows in `detail`, the true last row stopped
-    // qualifying as last-of-type and kept its `border-bottom`, stacking with the footer's own
-    // `border-top` into an empty hairline-bounded band. Rows live in their own `fields` div so
-    // `:last-of-type` only ever sees other field rows, and the footer sits outside it entirely.
+    // Own wrapper for the field rows (ledger C-#5; the border-stacking bug that created it is
+    // moot since 定稿轮 17① removed row borders, but the wrapper still groups the rows and
+    // carries their bottom margin, keeping any future non-row sibling in `detail` outside it).
     const fields = detail.createDiv({ cls: "config-sync-card-fields" });
     const dir = isConflict ? this.conflictChoice.get(name) ?? null : input.direction;
     this.renderCardKeyRow(fields, dir === "apply" ? "On apply" : dir === "capture" ? "On capture" : "State", (value) => {

@@ -259,7 +259,12 @@ SyncCenterView.ts and cleared via `Menu.onHide`), which also turns it accent-col
 open-state language the switcher already had. Mobile (`body.is-mobile`) hides it entirely, no
 hover to reveal it there; the compact section switcher's own `config-sync-switcher-chev` is the
 one deliberate exception, staying always visible on every platform (it is the sole entrance to
-the section list on mobile, where the sidebar is gone). `eye` — the SETTINGS
+the section list on mobile, where the sidebar is gone). **定稿轮 17④ extends the same rest-hidden
+idiom one level up:** a two-segment row's whole LOCAL cell (eyebrow + glyph + ⇕) and the divider
+before it hide at rest while the cell still follows the default (`:not(.is-set)`) and reveal on
+the same triggers (containing row hover, own menu `.is-open`, `:focus-within`); a set exception
+(`.is-set`, purple) stays always visible, and mobile keeps every local cell visible (no hover
+there, and hiding it would remove the only way to set an exception). `eye` — the SETTINGS
 FILE row's File preview trigger (§4 below), replacing the collapsed `▸ File preview` text row.
 All three registered by hand in the icon-collision guard alongside `file-diff`/`settings-2`.
 
@@ -335,7 +340,12 @@ noted):
 - **Sidebar** `config-sync-side-item/-side-badge/-side-head` — sections with tiny count
   badges; active = accent tint. The Config Sync self layer leads as a distinct hero card
   `config-sync-side-self` (`-side-self-ic` icon tile, `-side-self-title`/`-side-self-sub`,
-  `-side-self-pill` reusing `selfStatePill`), echoing the header self-chip. **Switcher**
+  `-side-self-pill` reusing `selfStatePill`), echoing the header self-chip. Grouping is by
+  `config-sync-side-divider` hairlines alone (定稿轮 17②): self card / scope list / remotes /
+  History each separated by one divider, with NO group head except Remotes — its head is the one
+  that earns its place by carrying live state (`Remotes · checked <age>` + the re-check button);
+  the old `This device ↔ store` head over the scope list is deleted (the self card's own
+  `plugin settings ↔ store` subtitle already carries that relation). **Switcher**
   `config-sync-switcher` — compact replacement.
 - **Rows** `config-sync-hub-row` — the unified grammar's one-object-one-row shape (spec
   `2026-08-06-sync-center-unified-grammar-design.md` §1/§3, extended to companion families
@@ -455,13 +465,15 @@ noted):
   same rule as the carrier label fallback). On narrow phones a section head keeps its pills and the "N selected" hint on
   one line (`white-space: nowrap; flex: none`) — the title is the only element allowed to
   wrap.
-- **Expanded card (Sync Center row)** `config-sync-itemcard` — bordered, left-indented under
-  the row's name column and offset one notch from the section behind it, so it reads as one
-  contained unit; row hairlines (`config-sync-card-fieldrow`) stay inside this box, never
-  full-pane rules. Filled (`--background-secondary` + border + `--radius-s`) on its own; inside a
-  section (now that the section body itself is filled, C-#47) the drawer drops a level instead —
-  border + radius stay, background drops to none, so the hierarchy reads unambiguously box >
-  filled section body > outlined drawer, never two equal-weight filled blocks stacked. Every row
+- **Expanded card (Sync Center row)** `config-sync-itemcard` — a quiet properties zone
+  (定稿轮 17①, replacing the bordered/filled drawer): no border, no fill, no radius — the zone
+  is tied to its parent row by a left indent under the row's name column plus one faint
+  indent-guide rule on its left edge (`border-left`, the divider color at reduced opacity),
+  and rhythm comes from row padding alone — `config-sync-card-fieldrow` carries NO
+  `border-bottom` any more (the hairline-per-row look read as a table embedded in a borderless
+  panel; `config-sync-card-rulerow` in the Settings drawer sheds its hairlines with it, same
+  sweep). The two-segment divider `config-sync-tworow-vline` drops to the same faint tier as
+  the indent guide. Every row
   (`renderCardKeyRow`/`renderTwoSegmentRow`/`renderCardIconActionRow`, round-9 ⑤ "one grid per
   card") shares ONE grid, `.config-sync-cardrow { grid-template-columns: 130px 56px 1px 1fr }` —
   label | fleet icon | divider | value/local — so a two-segment row's fleet icon and its divider
@@ -510,7 +522,7 @@ noted):
   chips stay. **The card footer's destructive `⊘ Stop syncing` button is gone** (spec §6.2):
   stopping a whole item's sync now happens on its own Settings card, one gesture, one home —
   reached from here only through `More`.
-- **Two-segment row** (`config-sync-tsrow`, spec §6.1, round-9 ②/⑤, `ui/enablementRow.ts`) —
+- **Two-segment row** (`config-sync-tworow*` classes, spec §6.1, round-9 ②/⑤, `ui/enablementRow.ts`) —
   replaces the old icon-trigger-plus-menu `Runs on`/`Settings sync` rows (and their five-stop
   `RUNS_ON_ICONS` vocabulary, §2.3) with one shape reused by three surfaces: a Sync Center row's
   `Enabled on`/`Settings sync`, a plugin card's `Enabled on`, and a carrier card's element rows
@@ -527,7 +539,15 @@ noted):
   ②: it used to render no icon at all here) · `power`/`power-off` for an element, `circle-slash`
   for a whole file · tooltip `This device: <state>`; click opens the local menu
   (`buildLocalMenu`/`buildFileLocalMenu`, §2.3 — unchanged, they still label the MENU ITEMS, a
-  different string from the segment's own tooltip). The per-key/fields-mode fallback's fleet
+  different string from the segment's own tooltip). **Rest-hidden while following (定稿轮 17④,
+  §2.3 above):** a local cell still on `follows the default` (`:not(.is-set)`) hides at rest —
+  the cell AND the divider before it, `opacity` only so layout never shifts — and reveals on
+  the containing row's hover, its own menu-open `.is-open`, or keyboard `:focus-within`; a set
+  exception stays always visible (purple), mobile always shows every local cell. This collapses
+  the N-fold `this device ↳` repetition in a carrier's element list to exactly the rows that
+  actually deviate, on every surface that renders the row (sweep §2.1: carrier element rows,
+  snippet member rows, zone ①, and the Sync Center card's `Enabled on`/`Settings sync` rows —
+  the fields-mode fallback's local cell included). The per-key/fields-mode fallback's fleet
   cell is a dim `settings-2` icon + tooltip `Per-key rules decide — opens Settings`, click =
   the same deep-link the `More` row takes (round-10 ①: the prose sentence could never fit the
   56px icon track — three-line wrap; icon + tooltip is the row language everywhere else, and
@@ -565,7 +585,7 @@ noted):
   the run-history list; the view swaps table → card layout when compact (`<700px`) so mobile
   reads top-to-bottom without horizontal scroll (`-hcard-sum` wraps; `-hcard-act` `min-width:0`).
   Head/legend and the `renderActionInto` action painter are shared by both layouts; detail view unchanged.
-- **Header status bar** — **self chip** `config-sync-self-chip` (is-up/down/ok tints) + `-self-chip-ic`, `config-sync-head-divider`, then the pills; push/pull totals use `config-sync-pill.is-push` (pink) / `.is-pull` (cyan).
+- **Header status bar** — **self chip** `config-sync-self-chip` (is-up/down/ok tints) + `-self-chip-ic`, `config-sync-head-divider`, then the pills; push/pull totals use `config-sync-pill.is-push` (pink) / `.is-pull` (cyan). The bar ends in the one right-aligned refresh control (`config-sync-center-refresh`, `refresh-cw`): no `refreshed …` text span any more (定稿轮 17③) — the age lives in the button's own tooltip (`Refresh — refreshed just now` / `… 5m ago`, `relativeAge`), same on desktop and mobile.
 - **Status bar item** (`src/ui/statusBar.ts`, rendered by `main.ts`) — plain colored text
   segments, no pill backgrounds (mockup candidate A); colors identical to the header pills
   (`is-up` orange, `is-down` accent, `is-push` pink, `is-pull` cyan). Clean state = a dimmed
