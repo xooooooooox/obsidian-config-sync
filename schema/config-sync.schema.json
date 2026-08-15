@@ -2,98 +2,127 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://raw.githubusercontent.com/xooooooooox/obsidian-config-sync/main/schema/config-sync.schema.json",
   "title": "Config Sync groups file (legacy, pre-schema-v2)",
-  "description": "The hand-edited groups file at <data folder>/config-sync.json. Config Sync no longer WRITES this file — since settings schema v2 the sync list is compiled from the plugin's own data.json (`items` + `customGroups`) — but `validateSyncManifest` still reads and validates one, so a vault that predates v2, or a rule set kept by hand, is described here. This schema mirrors that validator; the validator is the authority.",
+  "description": "The hand-edited groups file at <data folder>/config-sync.json. Config Sync no longer WRITES this file — since settings schema v2 the sync list is compiled from the plugin's own data.json (`items` + `custom`) — but `validateSyncManifest`/`parseGroup` (src/core/manifest.ts) still read and validate one, so a vault that predates v2, or a rule set kept by hand, is described here. This schema mirrors that validator; the validator is the authority. As of schema v3 the vocabulary matches data.json's own: `sharing` objects (not the old flat `scope` string) and `perElement` (not `perItem`).",
   "type": "object",
   "required": ["version", "groups"],
+  "additionalProperties": true,
   "properties": {
     "$schema": { "type": "string" },
-    "version": { "const": 1 },
+    "version": { "const": 1, "description": "The manifest FILE's own format version — unrelated to data.json's schemaVersion. This build only accepts 1." },
     "groups": {
       "type": "array",
       "items": {
         "type": "object",
         "required": ["name", "path", "type", "devices"],
-        "additionalProperties": false,
+        "additionalProperties": true,
+        "description": "additionalProperties is true here (unlike the strict per-rule shape validateSyncManifest enforces at parse time) because parseGroup validates the named fields and then CARRIES every other key on the object untouched (invariant II.1) — a field a newer build wrote survives an older build's read instead of being silently stripped.",
         "properties": {
-          "name": { "type": "string", "minLength": 1, "description": "Unique group name" },
-          "path": { "type": "string", "minLength": 1, "description": "Vault-relative path; {configDir} expands to this device's config dir" },
-          "type": { "enum": ["file", "dir"] },
-          "devices": { "enum": ["all", "desktop", "mobile"] },
+          "name": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$", "description": "Unique rule id. Letters, digits, \"-\" or \"_\", starting with a letter or digit (manifest.ts's GROUP_NAME_RE) — the same pattern enforced at the companion add/edit UI boundary." },
+          "path": { "type": "string", "minLength": 1, "description": "Vault-relative path; {configDir} expands to this device's config dir. Must not start with \"/\" and must not contain a \"..\" path segment." },
+          "type": { "enum": ["file", "folder"], "description": "\"file\" or \"folder\" only. \"dir\" is NOT accepted here — that spelling exists only as a v2 settings-document literal, converted by src/core/v2Migration.ts before a value ever reaches this validator; a hand-written config-sync.json using \"dir\" is rejected." },
+          "devices": { "enum": ["all", "desktop", "mobile"], "description": "Which device CLASS this rule's whole group targets. Distinct from a field/file rule's own \"sharing\" — see the fieldRule/fileRule definitions." },
           "description": { "type": "string", "minLength": 1, "description": "Human-readable label for this group, shown in the settings panel" },
+          "sanitize": { "not": {}, "description": "REFUSED outright if present (not merely ignored): this is the pre-v2 `{\"pattern\", \"action\": \"strip\"|\"encrypt\"}` shape. Rename to \"mode\": \"fields\" with a \"fields\" rules array." },
           "mode": {
             "enum": ["plain", "fields", "encrypted"],
             "description": "Sync mode. Absent = \"plain\". \"fields\" (file groups only) applies per-key rules; \"encrypted\" encrypts the whole file."
           },
           "fields": {
             "type": "array",
-            "description": "Per-key rules. Only valid with \"mode\": \"fields\".",
+            "description": "Per-key rules. Only valid with \"mode\": \"fields\" — present without it is rejected.",
             "items": { "$ref": "#/definitions/fieldRule" }
           },
           "fileRule": {
             "$ref": "#/definitions/fileRule",
-            "description": "Whole-file rule for a Plain single-file group. Never valid with \"mode\": \"fields\" or \"encrypted\"."
+            "description": "Whole-file rule for a Plain single-file group (\"type\": \"file\" only — never a folder group). Never valid with \"mode\": \"fields\" or \"encrypted\"."
           },
-          "perItem": {
+          "perElement": {
             "type": "object",
-            "description": "Per-element scopes for string-array keys: key name -> { element value -> scope }. Only valid with \"mode\": \"fields\"; a key listed here can never also be encrypted.",
+            "description": "Per-element sharing for string-array/boolean-map keys: key name -> { element value -> sharing }. Only valid with \"mode\": \"fields\"; a key listed here can never also have \"encrypted\": true in its own field rule (encryption stays key-level).",
             "additionalProperties": {
               "type": "object",
-              "additionalProperties": { "$ref": "#/definitions/scope" }
+              "additionalProperties": { "$ref": "#/definitions/sharing" }
             }
           },
           "label": { "type": "string", "minLength": 1, "description": "Display name recorded when the item is enabled or captured; shown even where the plugin isn't installed." },
-          "origin": { "const": "discovered", "description": "Set by the plugin for rules created from the Discovered-files section; name and path are fixed by the file." }
+          "origin": { "const": "discovered", "description": "Set by the plugin for rules created from the Discovered-files section; name and path are fixed by the file." },
+          "ref": {
+            "type": "string",
+            "pattern": "^(obsidian|core|community|custom|legacy)/.+$",
+            "description": "This rule's item identity (src/core/types.ts's ItemRef) — the key of the store lock, the device-local baselines and the device-local opt-out list. A group the compiler produced always carries one; a hand-written rule that omits it is assigned the same ref a v1/v2 lock converter would give its name (manifest.ts's legacyRef), so it is never truly optional in practice, just optional to WRITE by hand."
+          }
         },
         "allOf": [
           {
-            "if": { "properties": { "mode": { "const": "fields" } }, "required": ["mode"] },
-            "then": {},
-            "else": {
-              "not": { "required": ["perItem"] },
-              "description": "\"perItem\" needs \"mode\": \"fields\" — otherwise the per-element scopes never take effect."
-            }
+            "if": { "required": ["fields"] },
+            "then": { "properties": { "mode": { "const": "fields" } }, "required": ["mode"] },
+            "description": "\"fields\" needs \"mode\": \"fields\" — otherwise the per-key rules never take effect."
           },
           {
-            "if": { "properties": { "mode": { "enum": ["fields", "encrypted"] } }, "required": ["mode"] },
+            "if": { "properties": { "mode": { "const": "fields" } }, "required": ["mode"] },
+            "then": { "properties": { "type": { "const": "file" } } },
+            "description": "\"mode\": \"fields\" is only supported on file groups."
+          },
+          {
+            "if": { "required": ["perElement"] },
+            "then": { "properties": { "mode": { "const": "fields" } }, "required": ["mode"] },
+            "description": "\"perElement\" needs \"mode\": \"fields\" — otherwise the per-element sharing never takes effect."
+          },
+          {
+            "if": { "required": ["fileRule"] },
             "then": {
-              "not": { "required": ["fileRule"] },
-              "description": "A whole-file rule belongs to a Plain group; \"fields\"/\"encrypted\" carry their own rules."
-            }
+              "properties": { "type": { "const": "file" } },
+              "not": { "properties": { "mode": { "enum": ["fields", "encrypted"] } }, "required": ["mode"] }
+            },
+            "description": "\"fileRule\" only applies to a single-file rule (\"type\": \"file\") in Plain mode — never a folder group, never combined with \"mode\": \"fields\" or \"encrypted\"."
           }
         ]
       }
     }
   },
   "definitions": {
-    "scope": {
-      "enum": ["all", "desktop", "mobile", "local"],
-      "description": "Where the value is shared: every device, one device class (each class keeping its own value in a __scopes__ sidecar), or \"local\" — never leaves this device and never enters the store."
+    "sharing": {
+      "description": "\"Who shares a value\" (src/core/types.ts's Sharing) — retired v1's flat scope enum (\"all\"|\"desktop\"|\"mobile\"|\"local\"), which collapsed two orthogonal questions (is this shared, and with whom?) into one list.",
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "everywhere" } }, "description": "Every device gets the same value." },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "class"],
+          "properties": { "kind": { "const": "per-class" }, "class": { "enum": ["desktop", "mobile"] } },
+          "description": "Each device class keeps its own value in a __scopes__ sidecar."
+        },
+        { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "this-device" } }, "description": "Never leaves this device and never enters the store — v1's \"local\"." }
+      ]
     },
     "fieldRule": {
       "type": "object",
-      "required": ["pattern", "scope", "encrypted"],
-      "additionalProperties": false,
-      "description": "Scope and encryption are independent axes, not one action enum. (Before schema v2 this was {\"pattern\", \"action\": \"strip\"|\"encrypt\"}; that shape is no longer accepted.)",
+      "required": ["pattern", "sharing", "encrypted"],
+      "additionalProperties": true,
+      "description": "Sharing and encryption are independent axes, not one action enum. (Before schema v2 this was {\"pattern\", \"action\": \"strip\"|\"encrypt\"}; that shape is rejected — see the top-level \"sanitize\" property. Before schema v3 this was {\"pattern\", \"scope\", \"encrypted\"}; \"scope\" strings are no longer accepted, only \"sharing\" objects.)",
       "properties": {
         "pattern": { "type": "string", "minLength": 1, "description": "Key-name glob pattern (* wildcard)" },
-        "scope": { "$ref": "#/definitions/scope" },
+        "sharing": { "$ref": "#/definitions/sharing" },
         "encrypted": { "type": "boolean" },
         "locked": { "type": "boolean", "description": "Preset rule injected by the plugin; cannot be removed in the UI." }
       },
       "not": {
-        "properties": { "scope": { "const": "local" }, "encrypted": { "const": true } },
-        "required": ["scope", "encrypted"],
-        "description": "A value that never leaves this device has nothing to encrypt for transit."
+        "properties": { "sharing": { "type": "object", "properties": { "kind": { "const": "this-device" } }, "required": ["kind"] }, "encrypted": { "const": true } },
+        "required": ["sharing", "encrypted"],
+        "description": "A value that never leaves this device (sharing.kind: \"this-device\") has nothing to encrypt for transit."
       }
     },
     "fileRule": {
       "type": "object",
-      "required": ["scope", "encrypted"],
-      "additionalProperties": false,
+      "required": ["sharing", "encrypted"],
+      "additionalProperties": true,
       "properties": {
-        "scope": {
-          "enum": ["all", "desktop", "mobile"],
-          "description": "No \"local\": a Plain file that should not travel is expressed by the group's own sync toggle."
+        "sharing": {
+          "oneOf": [
+            { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "everywhere" } } },
+            { "type": "object", "additionalProperties": false, "required": ["kind", "class"], "properties": { "kind": { "const": "per-class" }, "class": { "enum": ["desktop", "mobile"] } } }
+          ],
+          "description": "No \"this-device\": a Plain file that should not travel is expressed by the rule's own sync toggle, not by a file-level rule."
         },
         "encrypted": { "type": "boolean" }
       }

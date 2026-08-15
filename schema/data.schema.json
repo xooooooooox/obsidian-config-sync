@@ -1,0 +1,234 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/xooooooooox/obsidian-config-sync/main/schema/data.schema.json",
+  "title": "Config Sync plugin settings (data.json)",
+  "description": "<vault>/.obsidian/plugins/config-sync/data.json at schemaVersion 4 — src/main.ts's ConfigSyncSettings, the plugin's OWN settings document (not the sync store). The sync list is never stored directly: it is COMPILED from `items` on every load/save (src/core/registry.ts's compileItems). Authority: src/main.ts (ConfigSyncSettings/DEFAULT_SETTINGS), src/core/registry.ts (Item/ItemMap), src/core/types.ts (Sharing/FieldRule/FileRule/Remote), src/core/switchList.ts (perElementKeyFor), src/core/enablementRules.ts (ruleHomeFor), src/core/settingsMigration.ts (CURRENT_SCHEMA) and docs/ARCHITECTURE.md's Data model section. `schemaVersion` gates everything: a document with a HIGHER number is refused outright (never downgraded, never overwritten) rather than validated against this shape — see settingsMigration.ts's classifySettings.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schemaVersion",
+    "pkmMode",
+    "rootPath",
+    "remotes",
+    "items",
+    "ribbonButtons",
+    "statusInMenu",
+    "statusBarItem",
+    "statusBarRemote",
+    "ribbonDot",
+    "mobileStatusBar",
+    "remoteAutoCheck",
+    "localPeriodicCheck",
+    "runHistory"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 4,
+      "description": "Must equal settingsMigration.ts's CURRENT_SCHEMA. A document this build wrote always carries exactly 4; an older number is migrated on load (v2 -> v3 -> v4, never validated against this schema first), and a higher number stops this build from touching the document at all (invariant II.3) — this schema describes ONLY the v4 shape a current build reads and writes."
+    },
+    "pkmMode": {
+      "enum": ["auto", "ioto", "default"],
+      "description": "Which PKM framework convention decides the store's default root path (src/core/pkm.ts's PkmMode). \"auto\" detects the ioto-update plugin at runtime; \"ioto\"/\"default\" pin the choice. Transport wiring, not the sync contract — locked out of the self item's own store copy by catalog.ts's selfPresetRules (this-device sharing), so it never travels to another device via a pull/push of config-sync's own settings."
+    },
+    "rootPath": {
+      "type": "string",
+      "description": "Absolute-in-vault path to this device's sync store root, or \"\" to follow the pkmMode default (src/core/pkm.ts's resolveRootPath). Locked-local transport wiring (catalog.ts's selfPresetRules, sharing: this-device) — every device may legitimately point at a different root, so this field is stripped from the self item's own store copy and never overwrites another device's value on pull/apply."
+    },
+    "remotes": {
+      "type": "array",
+      "description": "Configured sync remotes (src/core/types.ts's Remote union). Locked-local transport wiring like rootPath — a remote's URL/path/credentials describe THIS device's connection to the fleet, so this field never leaves the device either (catalog.ts's selfPresetRules).",
+      "items": { "$ref": "#/definitions/remote" }
+    },
+    "items": { "$ref": "#/definitions/itemMap" },
+    "ribbonButtons": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Per-button ribbon-icon visibility (src/core/types.ts's RibbonButtons = Record<RibbonKey, boolean>). Unknown/future keys ride through untouched (invariant II.1) — see the schema-wide note.",
+      "required": ["sync"],
+      "properties": {
+        "sync": { "type": "boolean", "description": "Show a dedicated ribbon icon that opens the Sync Center, separate from the plugin's always-present main ribbon icon." }
+      }
+    },
+    "statusInMenu": { "type": "boolean", "description": "Show pending up/down counts in the ribbon icon's click menu title." },
+    "statusBarItem": { "type": "boolean", "description": "Master toggle for the status-bar item." },
+    "statusBarRemote": { "type": "boolean", "description": "Include per-remote push/pull count segments (⇡/⇣) in the status-bar item." },
+    "ribbonDot": { "type": "boolean", "description": "Legacy corner dot on the main ribbon icon signalling pending changes; off by default since the status-bar item took over the same job." },
+    "mobileStatusBar": { "type": "boolean", "description": "Force-show Obsidian's own status bar on phones (a CSS class toggle only; no data of its own)." },
+    "remoteAutoCheck": { "type": "boolean", "description": "Periodically refresh remote push/pull state in the background (desktop only — src/main.ts gates the timers on Platform.isDesktop)." },
+    "localPeriodicCheck": { "type": "boolean", "description": "Periodically refresh local (store-vs-vault) sync status while the window has focus." },
+    "runHistory": { "$ref": "#/definitions/runHistorySettings" }
+  },
+  "definitions": {
+    "sharing": {
+      "description": "\"Who shares a value\" (src/core/types.ts's Sharing) — a union, not a flat enum, because the device class only exists for one of the three answers.",
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "everywhere" } }, "description": "Every device gets the same value; the default reading when no rule mentions a key at all." },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "class"],
+          "properties": { "kind": { "const": "per-class" }, "class": { "enum": ["desktop", "mobile"], "description": "Which device class carries this value; the other class keeps its own value in a __scopes__ sidecar." } },
+          "description": "Each device CLASS keeps its own value."
+        },
+        { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "this-device" } }, "description": "Never enters the store, never resurrected from it — a value or an enablement decision that stays purely local to this one device." }
+      ]
+    },
+    "fileSharing": {
+      "description": "A file-level Sharing that excludes this-device (src/core/types.ts's FileSharing): a Plain file that should not sync at all is expressed by the item's own `synced` toggle, not by a file-level rule.",
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "everywhere" } } },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "class"], "properties": { "kind": { "const": "per-class" }, "class": { "enum": ["desktop", "mobile"] } } }
+      ]
+    },
+    "itemFieldRule": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "A per-key field rule as stored under `settingsFile.rules[<pattern>]` (src/core/registry.ts's ItemFieldRule = Omit<FieldRule, \"pattern\">). The map KEY is the key-name glob pattern (`*` wildcard) — deliberately not repeated as a `pattern` property here, so there is exactly one source of truth for which key a rule governs.",
+      "required": ["sharing", "encrypted"],
+      "properties": {
+        "sharing": { "$ref": "#/definitions/sharing" },
+        "encrypted": { "type": "boolean", "description": "Whole-value encryption for this key. A this-device rule can never be encrypted — nothing leaves the device for encryption to protect in transit — but this schema does not enforce that cross-field rule; src/core/manifest.ts's validator does." },
+        "locked": { "type": "boolean", "description": "Preset rule injected by the plugin itself (e.g. the self item's rootPath/remotes strips); cannot be removed through the UI." }
+      }
+    },
+    "fileRule": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Plain-mode whole-file rule (src/core/types.ts's FileRule), stored on `settingsFile.fileRule`. Only meaningful when `settingsFile.mode` is \"plain\" (or absent) — manifest.ts rejects it combined with \"fields\"/\"encrypted\".",
+      "required": ["sharing", "encrypted"],
+      "properties": {
+        "sharing": { "$ref": "#/definitions/fileSharing" },
+        "encrypted": { "type": "boolean", "description": "Whole-file encryption: the item's entire store copy is one encrypted envelope instead of the raw file." }
+      }
+    },
+    "perElementSharing": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/definitions/sharing" },
+      "description": "Element value/id -> Sharing, for one string-array (or on/off-map) key. An element with no entry here defaults to everywhere."
+    },
+    "settingsFile": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "One item's own settings-file configuration (src/core/registry.ts's ItemSettingsFile). A registry item's `mode` is DERIVED from whether it has any per-key rules (never chosen directly); a `custom` item chooses it explicitly, \"encrypted\" included.",
+      "required": ["mode", "rules", "perElement"],
+      "properties": {
+        "mode": { "enum": ["plain", "fields", "encrypted"], "description": "\"plain\" = whole file, one rule at most (fileRule). \"fields\" = per-key rules (rules/perElement apply). \"encrypted\" = the whole file is one encrypted envelope; custom items only." },
+        "fileRule": { "$ref": "#/definitions/fileRule" },
+        "rules": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/definitions/itemFieldRule" },
+          "description": "Key-name glob pattern -> field rule. Only meaningful in \"fields\" mode."
+        },
+        "perElement": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/definitions/perElementSharing" },
+          "description": "JSON field key -> per-element sharing map, for string-array/boolean-map keys (src/core/types.ts's PerElementSharing, generalizing the switch-list mechanism to any such key). RESERVED KEY \"\": on the two carrier items ONLY — items.obsidian[\"core-plugins\"].settingsFile.perElement[\"\"] and items.obsidian[\"community-plugins\"].settingsFile.perElement[\"\"] — the empty string means \"this whole file IS the list\" (src/core/switchList.ts's perElementKeyFor): core-plugins.json/community-plugins.json have no JSON field to index a rule by, so their carrier item's rules live under this key instead of a real field name. Every other item indexes perElement by an actual field name (e.g. appearance's \"enabledCssSnippets\" — src/core/enablementRules.ts's ruleHomeFor: snippets rules live at items.obsidian.appearance.settingsFile.perElement[\"enabledCssSnippets\"])."
+        }
+      }
+    },
+    "companion": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "A companion folder riding an item's card (src/core/registry.ts's ItemCompanion) — a preset (appearance's themes/snippets) or a user-added folder.",
+      "required": ["path", "device", "enabled"],
+      "properties": {
+        "path": { "type": "string", "description": "Vault-relative path; may start with the {configDir} variable." },
+        "device": { "enum": ["all", "desktop", "mobile"], "description": "Which device class this companion group syncs on (src/core/types.ts's DeviceClass)." },
+        "enabled": { "type": "boolean" }
+      }
+    },
+    "item": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "One item's stored configuration (src/core/registry.ts's Item) — the same shape whether the item is a registry item (an installed Obsidian card/core plugin/community plugin) or a `custom` rule. UNKNOWN PROPERTIES ARE VALID AND MUST BE PRESERVED: registry.ts's WRITTEN_ITEM_KEYS carries every field this build does not itself write through untouched (invariant II.1) — a field a NEWER build recorded here must survive an older build's round trip.",
+      "required": ["synced"],
+      "properties": {
+        "synced": {
+          "type": "boolean",
+          "description": "Is this item synced at all — renamed from v3's `enabled`, which conflated two meanings (\"this item is synced\" vs \"this plugin is turned on\"; the second lives in Obsidian's own on/off-list files and is never stored here). `{synced: false}` is NOT residue to prune: an entry's mere PRESENCE in items.core/items.community is this device's capture mask for that on/off-list element, so an absent entry and a `{synced: false}` entry mean different things, and nothing on the write path removes an entry once written."
+        },
+        "type": {
+          "enum": ["file", "folder"],
+          "description": "Required on a `custom` item (which has no registry def to derive it from); absent on a registry item, whose type is always \"file\" (its own settings file). v2's \"dir\" is converted by the migration and is never written or read as such by this build."
+        },
+        "path": {
+          "type": "string",
+          "description": "Set only when it differs from the item's registry default path; required for a `custom` item, which has no def to derive one from."
+        },
+        "bratRepo": {
+          "type": "string",
+          "description": "The BRAT repo this plugin installs from, \"owner/repo\" — cached here from BRAT's own list so classification (the Beta tab) and install-on-apply work without re-resolving. A property of the plugin it describes, not of BRAT: this replaced a v3 top-level `bratIndex` map, a second list of plugin ids that could drift from items.community the moment a plugin left one and not the other."
+        },
+        "settingsFile": { "$ref": "#/definitions/settingsFile" },
+        "companions": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/companion" },
+          "description": "Preset (themes/snippets) plus user-added companion folders. Optional and no longer written empty — an item earns its card whether or not it carries this field."
+        },
+        "description": { "type": "string", "description": "Custom items only — kept from the pre-v3 SyncGroup literal." },
+        "label": { "type": "string", "description": "Custom items only — display name recorded at capture/enable." },
+        "origin": { "const": "discovered", "description": "Custom items only. Set when the rule was created from the Discovered-files section; name/path are then fixed by the file." }
+      }
+    },
+    "itemSection": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/definitions/item" },
+      "description": "ItemId -> Item, for one storage section."
+    },
+    "itemMap": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "The document's item store (src/core/registry.ts's ItemMap): StorageSection -> ItemId -> Item. Exactly two levels, NEVER flattened, and never a `beta` key — `beta` is a presented classification derived at runtime from each community item's own bratRepo (registry.ts's storageSection), not a storage key. Two ids may legitimately collide across sections (a core plugin and a community plugin sharing a name), which is the point of nesting.",
+      "required": ["obsidian", "core", "community", "custom"],
+      "properties": {
+        "obsidian": { "$ref": "#/definitions/itemSection", "description": "The three Obsidian cards (app, appearance, hotkeys) plus the two enablement carriers (core-plugins, community-plugins — real items since 2026-08-12-enablement-two-layers, not a compile-time-only artifact)." },
+        "core": { "$ref": "#/definitions/itemSection", "description": "One entry per core plugin id this device has (or has had) an opinion about." },
+        "community": { "$ref": "#/definitions/itemSection", "description": "One entry per community/beta plugin id, including config-sync's own self item (catalog.ts's SELF_ITEM_ID = \"config-sync\") and every BRAT-managed (\"beta\") plugin — beta is a presented section only; it stores here." },
+        "custom": { "$ref": "#/definitions/itemSection", "description": "Hand-added rules for files/folders with no registry item — the Advanced tab's \"Custom rules\"/\"Discovered files\". `type` and `path` are required on every entry here." }
+      }
+    },
+    "remote": {
+      "description": "src/core/types.ts's Remote union, validated on write by src/core/manifest.ts's parseRemote (invoked from the settings-tab save path, not on every data.json load).",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": true,
+          "required": ["name", "type", "storePath"],
+          "properties": {
+            "name": { "type": "string", "minLength": 1 },
+            "type": { "const": "vault" },
+            "storePath": { "type": "string", "pattern": "^(/|~($|/))", "description": "Absolute path of the store directory on this device's filesystem, or a leading-~ path. Never a vault-relative path — this is a filesystem location outside the vault entirely." },
+            "excludeSelf": { "type": "boolean", "description": "true = config-sync's own settings never travel to/from this remote. Absent = false." }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": true,
+          "required": ["name", "type", "url", "branch"],
+          "properties": {
+            "name": { "type": "string", "minLength": 1 },
+            "type": { "const": "git" },
+            "url": { "type": "string", "minLength": 1 },
+            "branch": { "type": "string", "minLength": 1 },
+            "subdir": { "type": "string", "description": "Store folder inside the repo; absent = repo root. Must stay inside the repository (no leading slash, no \"..\" segment)." },
+            "excludeSelf": { "type": "boolean" },
+            "tokenId": { "type": "string", "pattern": "^[a-z0-9-]+$", "maxLength": 64, "description": "Name of the keychain secret holding the access token — the token itself never enters data.json." },
+            "username": { "type": "string", "minLength": 1, "description": "Sent alongside the token; absent = \"token\", which PAT-only hosts ignore but a self-hosted GitLab validates." }
+          }
+        }
+      ]
+    },
+    "runHistorySettings": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Local-only record of past capture/apply/pull/push runs (src/main.ts's RunHistorySettings); never synced — it describes this device's own history, not the fleet's shared contract.",
+      "required": ["enabled", "path", "maxCount", "maxDays"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "path": { "type": "string", "description": "\"\" = default {configDir}/plugins/config-sync/run-history.json." },
+        "maxCount": { "type": "integer", "minimum": 0, "description": "0 = unlimited." },
+        "maxDays": { "type": "integer", "minimum": 0, "description": "0 = keep forever." }
+      }
+    }
+  }
+}

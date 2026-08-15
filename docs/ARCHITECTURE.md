@@ -963,7 +963,9 @@ resolve it. Dropping such an entry instead would read as never-synced, which def
 - **`data.json`** (`ConfigSyncSettings`, plugin settings, `schemaVersion: 4`) — what syncs and how,
   compiled to `SyncGroup[]` on every load/save; there is no separate hand-edited manifest file
   anymore (the old `config-sync.json` at `<store root>/` is legacy and only ever read to detect a
-  pre-v2 install — see the schema-gate invariant above). **Structure carries the taxonomy**: an
+  pre-v2 install — see the schema-gate invariant above). `schema/data.schema.json` is this shape's
+  authoritative reference — the file the owner's schema-first rule (CLAUDE.md) asks a persisted-shape
+  change to update first. **Structure carries the taxonomy**: an
   item's family and id are where it SITS, not a prefix parsed out of its key. Fields:
   - `items: Record<StorageSection, Record<ItemId, Item>>` — two levels, never flattened, never a
     `beta` key. Two ids may legitimately collide across sections (a core and a community plugin

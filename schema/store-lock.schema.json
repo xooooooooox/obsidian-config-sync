@@ -35,6 +35,8 @@
     "entry": {
       "type": "object",
       "additionalProperties": true,
+      "required": ["source"],
+      "description": "manifest.ts's parseStoreLockEntry throws if \"source\" is absent or malformed — it is the one field every entry must carry, however old the lock. Every other named field is optional.",
       "properties": {
         "source": {
           "type": "object",
