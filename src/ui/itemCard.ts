@@ -222,16 +222,16 @@ export function hasEnablementZone(def: ItemDef): boolean {
   return def.enablement !== undefined;
 }
 
-// Zone ① copy (spec 2026-08-12-enablement-two-layers-design.md §6.5). Same name, same values, same
-// data as the Sync Center's row of that name. Only rendered for a def where hasEnablementZone(def)
-// is true.
+// Zone ① copy (spec 2026-08-12-enablement-two-layers-design.md §6.5, row-label shortened round-9
+// ①). Same name, same values, same data as the Sync Center's row of that name. Only rendered for a
+// def where hasEnablementZone(def) is true.
 //
-// The hint is the FLEET segment's aria-label, joined with that segment's current label. It names the
-// question the four rule values answer, which is NOT the one `sharingCycleTooltip` asks ("Where it
-// syncs") — the fleet segment shares that control's gesture, not its vocabulary. The local segment
-// carries its own label and never borrows this one.
-export const DEFAULT_ENABLED_ON_LABEL = "Default enabled on";
-export const DEFAULT_ENABLED_ON_HINT = "Which devices turn this plugin on";
+// The word "Default" moved into the fleet segment's own tooltip (`enablementRow.ts`'s
+// `enabledOnTooltip`) — this label is now just what the ROW is, matching the Sync Center's
+// shortened row label exactly. The old `DEFAULT_ENABLED_ON_HINT` aria sentence retired with it:
+// each segment now carries its own producer-built aria-label instead of a hint this label used to
+// share with the fleet segment's tooltip.
+export const ENABLED_ON_LABEL = "Enabled on";
 
 export type SettingsFileZoneKind = "none" | "state-only" | "settings";
 

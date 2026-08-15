@@ -121,19 +121,27 @@ layer to speak for); the whole cycle renders through the one shared
 a direct-cycle click there advances straight to the next option. `monitor-smartphone` — the
 sharing-cycle "All devices" stop.
 
-**The two-segment row** (spec `2026-08-12-enablement-two-layers-design.md` §6.1, `ui/enablementRow.ts`):
-`label | fleet segment | divider | local segment`, shared by a Sync Center row's `Default enabled
-on`/`Default settings sync`, a plugin card's `Default enabled on`, and a carrier card's element
-rows — replacing the old `Runs on`/`Settings sync` icon-trigger-plus-menu rows and their
-`RUNS_ON_ICONS` vocabulary outright. Fleet segment: `sharingIcon`'s icons for the three device
-stops, plus `users` for `Each device decides` (**never** `airplay` here — the value is about the
-fleet's arrangement, not this device, and `airplay` reads as screen mirroring to a reader who
-hasn't read the source). Local segment: **no icon** while following the default (a default has
-nothing to say) · `power` / `power-off` for an element-level local exception (**On here**/**Off
-here**) · `circle-slash` for a whole-file local opt-out (**Not synced here**, reused from the fold
-family below — same meaning, "not synced on this device," deliberately) — click on either segment
-opens an Obsidian `Menu` (never cycling; `ui/enablementRow.ts`'s `buildLocalMenu`/
-`buildFileLocalMenu` are its one producer each).
+**The two-segment row** (spec `2026-08-12-enablement-two-layers-design.md` §6.1, round-9 ②/⑤
+icon-only revision, `ui/enablementRow.ts`): `label | fleet segment | divider | local segment`,
+shared by a Sync Center row's `Enabled on`/`Settings sync` (shortened from `Default enabled
+on`/`Default settings sync` — the word "Default" moved into the fleet segment's own tooltip), a
+plugin card's `Enabled on`, and a carrier card's element rows — replacing the old `Runs
+on`/`Settings sync` icon-trigger-plus-menu rows and their `RUNS_ON_ICONS` vocabulary outright.
+Both segments are icon-only now, glyph + a small muted `▾` affordance, no visible wordmark. Fleet
+segment: `sharingIcon`'s icons for the three device stops, plus `users` for `Each device decides`
+(**never** `airplay` here — the value is about the fleet's arrangement, not this device, and
+`airplay` reads as screen mirroring to a reader who hasn't read the source); tooltip
+`Default enabled on: <ruleLabel>` / `Default settings sync: <sharingLabel>`. Local segment: a
+muted "this device" eyebrow beside its own glyph, one for EVERY state now — `corner-down-right`
+while following the default (round-9 ②: it used to render no glyph at all here, since a default
+had nothing to say, but a bare wordmark beside an icon+chevron fleet segment read as unfinished)
+· `power` / `power-off` for an element-level local exception (**On here**/**Off here**) ·
+`circle-slash` for a whole-file local opt-out (**Not synced here**, reused from the fold family
+below — same meaning, "not synced on this device," deliberately); tooltip `This device: <state>`
+(`follows the default` / `on here` / `off here` / `not synced here`). Click on either segment opens
+an Obsidian `Menu` (never cycling; `ui/enablementRow.ts`'s `buildLocalMenu`/`buildFileLocalMenu`
+are its one producer each — unchanged this round, they still label the MENU ITEMS, which is a
+different string from the segment's own tooltip).
 
 `settings-2` — the sidebar Config Sync
 self-entry tile, the compact switcher's self entry, the self pane's title-row Settings
@@ -315,14 +323,14 @@ noted):
   badge covered), `padding-bottom: var(--size-4-2)` separates the head from the body by
   material contrast alone (no hairline), disclosure triangle (▾ open / ▸ collapsed)
   scaled to the header size; a checkbox click on the header stages, anywhere else on the
-  header toggles collapse. A trailing count pill reads `N of M` under a filter; Core/Community
+  header toggles collapse. A trailing count pill reads `N/M` under a filter; Core/Community
   carry a header chip (`renderCarrierChip`, spec §6.3) reading `settings-2` + `synced` /
   `not synced` — **read-only since this release**: it used to be the on/off carrier's own
   configurable toggle (a popover offering `Sync on/off` / `Stop syncing on/off`), and now only
   jumps to the carrier's own Settings card, where that toggle lives (§2.5 above). Same shape on
   every platform — no mobile-only icon fallback, and never the toggle glyphs
   (`toggle-right`/`toggle-left`, retired with the write path they used to promise). On mobile the
-  head stays one line — count pill compacts `N of M`
+  head stays one line — count pill reads `N/M`, the one form both platforms share
   to `N/M`, the per-section "N selected" hint drops (the section checkbox's checked/
   indeterminate state and the global footer already carry it). Section select-all/clear targets actionable visible rows only —
   excludes the self row, in-sync, nothing-yet, and unresolved-conflict rows. Per-section
@@ -357,43 +365,60 @@ noted):
   section (now that the section body itself is filled, C-#47) the drawer drops a level instead —
   border + radius stay, background drops to none, so the hierarchy reads unambiguously box >
   filled section body > outlined drawer, never two equal-weight filled blocks stacked. Every row
-  (`renderCardKeyRow`) is a fixed-width muted small-caps key
-  immediately followed by its value — the key column is `flex: 0 0 15ch`, sized to the
-  longest key (`After install`) so a key never wraps; the value cell takes the rest
-  (`min-width: 0`, no fixed narrow width — ellipsis is a last resort, never a first one,
-  while the row still has room). A row that builds no value renders nothing at all: no
-  separator, no reserved height (ledger C-#5) — built off-DOM first, appended only once
-  non-empty. **Mobile stacking (batch-21 spec §3, C-#43/#44):** each fieldrow's label and
-  value stack vertically instead — label on its own line (same muted small-caps style) above
-  a full-width value — CSS-only (`flex-direction: column`, the label span and value div are
-  already siblings), fixing the narrow-viewport clipping this batch closes. Resolve's
-  segmented control spans the full stacked value width on mobile, 50/50 (`flex: 1` per
-  button, centered text) instead of content-sized, so neither option clips at 375px. Desktop
-  keeps the fixed-label-column layout above, unchanged. Standardized row set, in this order, each omitted when not applicable: `On
+  (`renderCardKeyRow`/`renderTwoSegmentRow`/`renderCardIconActionRow`, round-9 ⑤ "one grid per
+  card") shares ONE grid, `.config-sync-cardrow { grid-template-columns: 130px 56px 1px 1fr }` —
+  label | fleet icon | divider | value/local — so a two-segment row's fleet icon and its divider
+  land on the SAME vertical rule across every row of the card, the More row's icon included (the
+  four-track shape used to belong only to the settings card's `.config-sync-grid`; the Sync
+  Center's own card grew this one alongside it once round-9 ①'s shortened labels — `Enabled on`,
+  `Settings sync` — made a 130px label track and a 56px icon-only track both comfortable). Wide
+  rows (State/Files/Resolve/After install/Enablement/Note, and the fields-mode fallback note) put
+  their whole value in `.config-sync-cardval`, spanning tracks 2-4 as one cell (`min-width: 0`, no
+  fixed narrow width — ellipsis is a last resort, never a first one, while the row still has
+  room); two-segment/icon-only rows (`.is-iconrow` — not `.is-compact`, which already names the
+  narrow-viewport `.config-sync-shell` layout, an unrelated axis) land their cells directly on
+  tracks 2/3/4 instead. A row that builds no value renders nothing at all: no separator, no
+  reserved height (ledger C-#5) — built off-DOM first, appended only once non-empty. **Mobile:**
+  wide rows keep their pre-existing stack-to-full-width fallback (batch-21 spec §3, C-#43/#44 —
+  label above a full-width value, CSS-only `flex-direction: column`) unchanged, since Resolve's
+  segmented control still needs the full device width the shared grid's `1fr` remainder can't
+  spare at ~360px; icon rows (two-segment/More) stay on the SAME shared grid at every width instead —
+  there is nothing long to clip, only a glyph + chevron, and stacking them would silently
+  re-introduce the misalignment round-9 ⑤ exists to remove. Standardized row set, in this order,
+  each omitted when not applicable: `On
   apply` / `On capture` / `State` (the fate sentence expanded to a full clause — install
   source, update versions, capture consequence) · `Files` (direction-aware entries, `+` /
   `↑` / deletion, `view ▸` / `diff ▸`) · `Resolve` (conflict rows only — segmented `Use
-  theirs ↓` / `Keep mine ↑`) · `Default enabled on` (plugins whose carrier is synced) / `After install`
+  theirs ↓` / `Keep mine ↑`) · `Enabled on` (plugins whose carrier is synced, shortened from
+  `Default enabled on` round-9 ①) / `After install`
   (carrier not synced, row installs) / `Enablement` (carrier not synced, plugin installed
-  but locally off — the fallback ladder's third leaf) · `Default settings sync` (the item's own file-level sharing rule) · `More` (icon-only deep-link into the Settings tab, scrolled to this item's own card — the whole sentence moved into its tooltip, no trailing `▸`) ·
+  but locally off — the fallback ladder's third leaf) · `Settings sync` (the item's own
+  file-level sharing rule, shortened from `Default settings sync`) · `More` (icon-only deep-link into the Settings tab, scrolled to this item's own card — the whole sentence moved into its tooltip, no trailing `▸`) ·
   `Note` (honest runtime notes, e.g. Hotkeys' "Takes effect after an app reload"). While the
   card is open, the collapsed row's own fate sentence/glyph hides (ledger C-#9, Rows above)
   — the card's `On apply`/`On capture`/`State` row is the single statement; checkbox and
   chips stay. **The card footer's destructive `⊘ Stop syncing` button is gone** (spec §6.2):
   stopping a whole item's sync now happens on its own Settings card, one gesture, one home —
   reached from here only through `More`.
-- **Two-segment row** (`config-sync-tsrow`, spec §6.1, `ui/enablementRow.ts`) — replaces the old
-  icon-trigger-plus-menu `Runs on`/`Settings sync` rows (and their five-stop `RUNS_ON_ICONS`
-  vocabulary, §2.3) with one shape reused by three surfaces: a Sync Center row's `Default
-  enabled on`/`Default settings sync`, a plugin card's `Default enabled on`, and a carrier
-  card's element rows (Unified card below). Four fixed tracks — `label | fleet segment |
-  divider | local segment` — so every row on a card lands its icon and state word on the same
-  vertical line. Fleet segment: icon + text, click opens an Obsidian `Menu` of the four values
-  (`All devices` / `Desktop only` / `Mobile only` / `Each device decides`); icons are
-  `sharingIcon`'s (§2.3), `users` for `Each device decides`. Local segment: following the
-  default renders **no icon**, just a dim `Follows the default`; an exception renders its
-  accent icon (`power`/`power-off` for an element, `circle-slash` for a whole file) + state
-  word, click opens the local menu (`buildLocalMenu`/`buildFileLocalMenu`, §2.3). `After
+- **Two-segment row** (`config-sync-tsrow`, spec §6.1, round-9 ②/⑤, `ui/enablementRow.ts`) —
+  replaces the old icon-trigger-plus-menu `Runs on`/`Settings sync` rows (and their five-stop
+  `RUNS_ON_ICONS` vocabulary, §2.3) with one shape reused by three surfaces: a Sync Center row's
+  `Enabled on`/`Settings sync`, a plugin card's `Enabled on`, and a carrier card's element rows
+  (Unified card below). Fleet cell on track 2, the divider filling track 3, the local cell on
+  track 4 of the row's own four-track grid (round-9 ⑤ above) — so every row's icon and divider
+  land on the same vertical rule. Fleet segment: icon + a muted `▾` affordance, NO visible
+  wordmark any more (round-9 ②) — click opens an Obsidian `Menu` of the four values (`All devices`
+  / `Desktop only` / `Mobile only` / `Each device decides`); icons are `sharingIcon`'s (§2.3),
+  `users` for `Each device decides`; tooltip `Default enabled on: <ruleLabel>` /
+  `Default settings sync: <sharingLabel>` — the word "Default" that used to open the row's own
+  label now lives here instead. Local segment: a muted "this device" eyebrow beside its own
+  icon + `▾` — EVERY state has a glyph now, `corner-down-right` for `follows` included (round-9
+  ②: it used to render no icon at all here) · `power`/`power-off` for an element, `circle-slash`
+  for a whole file · tooltip `This device: <state>`; click opens the local menu
+  (`buildLocalMenu`/`buildFileLocalMenu`, §2.3 — unchanged, they still label the MENU ITEMS, a
+  different string from the segment's own tooltip). The per-key/fields-mode fallback keeps its
+  italic note as the fleet cell instead (no icon, no `▾` — it has no menu to open, spanning
+  tracks 2+3 for the prose), with its local segment rendering normally. `After
   install`/`Enablement` keep their own textual triggers (`config-sync-menuchip
   config-sync-card-trigger` — no glyph vocabulary for them), restyled to the same trigger-box
   family so the card reads as one control language regardless of trigger kind. The Settings
@@ -493,17 +518,19 @@ noted):
     (0.45) and any narrower sharing renders `.is-set` (accent, full opacity). ① and ②
     render only when they apply, ③ Companion folders always renders (down to just its quiet
     `+ Add folder` row, `config-sync-add-row-quiet`, when a card has no folders yet):
-    ① **Default enabled on** (plugin cards whose def carries an `enablement` projection — spec §6.5)
-    — the two-segment row (`ui/enablementRow.ts`, above), not a cycling icon: the fleet segment
-    writes the carrier's `perElement` rule (`core/enablementRules.ts`, never this plugin's own
-    settings-file entry); the local segment writes this device's own exception
-    (`core/deviceElements.ts`, never inside `data.json`). Three shapes (spec §6.5): a class rule
-    (`Desktop only`/`Mobile only`) shows only `Follows the default` in the local segment — no
+    ① **Enabled on** (shortened from `Default enabled on`, round-9 ①; plugin cards whose def
+    carries an `enablement` projection — spec §6.5) — the two-segment row (`ui/enablementRow.ts`,
+    above), not a cycling icon: the fleet segment writes the carrier's `perElement` rule
+    (`core/enablementRules.ts`, never this plugin's own settings-file entry); the local segment
+    writes this device's own exception (`core/deviceElements.ts`, never inside `data.json`). Three
+    shapes (spec §6.5): a class rule (`Desktop only`/`Mobile only`) shows only the follow glyph
+    (`corner-down-right`, tooltip `This device: follows the default`) in the local segment — no
     editable local state, since one would claim a device answer the sync itself decides; `All
-    devices` with a local exception set shows the purple `On here`/`Off here`, editable; `Each
-    device decides` shows the local state directly, no `Follows` option (there is no shared answer
-    to follow) — landing on it for the first time seeds the exception with the plugin's CURRENT
-    state (`ruleLandingNeedsSeed`), so switching to it never itself flips the switch.
+    devices` with a local exception set shows the purple `power`/`power-off` glyph (tooltip
+    `This device: on here`/`off here`), editable; `Each device decides` shows the local state
+    directly, no `Follows` option in the MENU (there is no shared answer to follow) — landing on
+    it for the first time seeds the exception with the plugin's CURRENT state
+    (`ruleLandingNeedsSeed`), so switching to it never itself flips the switch.
     ② **Settings file** — mode is derived, never chosen: no per-key rule anywhere (`rules` and
     `perElement` both empty) is whole-file state, any rule is per-key state. The grid's first row
     (`config-sync-card-sfhead`) is always the path row: path code, a 3-option sharing icon (no

@@ -420,7 +420,7 @@ functions.
   totals), the self pane (coldstart/adopt), the four fixed type sections (`renderTypeSection`,
   one object = one row, companion families dissolved into their parent's row), the unified card
   renderer (`renderUnifiedCard` — On apply/On capture/State, Files, Resolve (if conflicted),
-  `Default enabled on`/After install/Enablement, `Default settings sync`, More, Note), filters/search,
+  `Enabled on`/After install/Enablement, `Settings sync`, More, Note), filters/search,
   the Leftover section, the sticky result strip, run History, the Remotes block (which renders the
   remote pane's diffs through the same type-section/family grammar as the main list), and
   Capture/Apply/Pull/Push actions. Row content is memoized once per render (`deriveRow`) so the
@@ -437,7 +437,7 @@ functions.
   `2026-08-12-enablement-two-layers-design.md` §6.2): the Sync Center now only changes rules and sets
   local exceptions; `StopSyncingModal` — unchanged itself — is called from exactly one place, the
   settings panel card's own toggle (`SettingTab.ts`), so the destructive gesture has one home, beside
-  the confirmation the change deserves. `Default settings sync`'s row still offers a device opt-out —
+  the confirmation the change deserves. `Settings sync`'s row still offers a device opt-out —
   it moved INTO that row's local segment (`buildFileLocalMenu`, `ui/enablementRow.ts`) rather than
   the footer menu it used to live in — and `MORE`'s icon-only deep link (`renderMoreRow`, never
   `sliders-horizontal`: that glyph already means `your rule` in the fate chips) is the only remaining
@@ -491,9 +491,9 @@ functions.
   (`renderSharingCycle`): one glyph that IS the state, a click advances it. Every Settings drawer
   sharing cell that has no local layer (a plain field rule) still renders through this one function.
 - `ui/enablementRow.ts` — the two-segment row's MODEL (spec §6.1: `label | fleet segment | divider |
-  local segment`), shared by three renderers — a Sync Center row's `Default enabled on`
+  local segment`), shared by three renderers — a Sync Center row's `Enabled on`
   (`renderTwoSegmentRow`, SyncCenterView.ts, replacing the old `Runs on` icon-trigger-plus-menu
-  control `renderCardIconMenuRow` used to draw), a plugin card's `Default enabled on`, and a
+  control `renderCardIconMenuRow` used to draw), a plugin card's `Enabled on`, and a
   carrier card's element rows (SettingTab.ts) — so what each segment SAYS is decided once and the
   renderers only paint it. `RULE_OPTIONS`/`ruleIcon`/`ruleLabel` are the fleet vocabulary
   (`sharingIcon`'s icons, plus `users` for `Each device decides` — `airplay`, `sharingIcon`'s own
@@ -523,7 +523,7 @@ functions.
   across those surfaces. `TYPE_SECTION_ORDER`/
   `TYPE_SECTION_TITLES`/`typeSectionForRow` fix the four sections (Obsidian/Core plugins/
   Community plugins/Your folders — beta folds into Community, custom groups into Your folders);
-  `sectionCountLabel` renders a section head's trailing `N` / `N of M`. `familyRollup` derives one
+  `sectionCountLabel` renders a section head's trailing `N` / `N/M`. `familyRollup` derives one
   family's fate from its parent + companion `GroupState`s (settings/folder verbs join, an
   Appearance override replaces them, any per-file conflict or split-direction membership becomes
   `⚠`); `mergeFamilyChanges`/`fileEntryFor` back the card's direction-aware Files rows.
@@ -1006,7 +1006,7 @@ resolve it. Dropping such an entry instead would read as never-synced, which def
     §2/§5; see the 2×2 table above). The fleet layer is `Item.settingsFile.perElement` on the
     carrier item, read and written through `core/enablementRules.ts` (`enablementRules`,
     `enablementRuleFor`, `withEnablementRule`) — one reader, one writer; all three UI entrances (a
-    carrier card's element row, a plugin card's `Default enabled on`, a Sync Center row) go through
+    carrier card's element row, a plugin card's `Enabled on` row, a Sync Center row) go through
     it. The local layer is `config-sync-device-elements` in localStorage, read and written through
     `core/deviceElements.ts` (`parseDeviceElements`, `deviceElementState`, `withDeviceElement`) —
     shaped like `perElement` (list id → element id → state) so both layers share one mental model,

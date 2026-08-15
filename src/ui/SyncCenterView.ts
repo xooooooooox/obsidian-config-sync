@@ -10,13 +10,14 @@ import {
   buildFileLocalMenu,
   buildLocalMenu,
   enablementRowModel,
-  FOLLOWS_LABEL,
-  NOT_SYNCED_HERE_LABEL,
+  fileEnablementRowModel,
+  fileLocalSegment,
   RowSegment,
   RULE_OPTIONS,
   ruleIcon,
   ruleLabel,
   ruleLandingNeedsSeed,
+  THIS_DEVICE_EYEBROW,
 } from "./enablementRow";
 import { Availability } from "../core/availability";
 import { REUSE_MAX_AGE_MS } from "../external/readerCache";
@@ -60,7 +61,6 @@ import {
   SectionKind,
   sectionForItem,
   sectionCountLabel,
-  mobileSectionCountLabel,
   showColdStartBanner,
   stageableRow,
   StageableRow,
@@ -2116,13 +2116,11 @@ export class SyncCenterView extends ItemView {
     const head = fold.createDiv({ cls: "config-sync-section-head" });
     const chevron = head.createSpan({ cls: "config-sync-row-chevron", text: open ? "▾" : "▸" });
     head.createSpan({ cls: "config-sync-section-title", text: TYPE_SECTION_TITLES[ts] });
-    // C-#41 (spec §2): the count fact is the same on every platform, just compacted — "6 of 31"
-    // becomes "6/31" on mobile (mobileSectionCountLabel is a no-op string otherwise).
+    // One compact form on every platform (2026-08-13 live find): "6/31". C-#41 introduced the
+    // compaction for mobile; the desktop's longer "6 of 31" said the same thing in more ink.
     head.createSpan({
       cls: "config-sync-pill is-neutral",
-      text: Platform.isMobile
-        ? mobileSectionCountLabel(rows.length, visible.length, filtered)
-        : sectionCountLabel(rows.length, visible.length, filtered),
+      text: sectionCountLabel(rows.length, visible.length, filtered),
     });
     // Core/Community's carrier chip: inline in the head on every platform (batch-21 spec §2,
     // revising batch-20's mobile second-line drop) — same full-text shape on desktop and mobile
@@ -2487,8 +2485,20 @@ export class SyncCenterView extends ItemView {
     // shrinks/ellipsizes, so the fate sentence is the sole sacrificial element (axiom §0.3).
     const fateWrap = row.createSpan({ cls: "config-sync-fate-wrap" });
     fateWrap.hidden = expanded;
-    fateWrap.createSpan({ cls: "config-sync-fate-glyph", text: fate.glyph });
-    fateWrap.createSpan({ cls: "config-sync-fate-text", text: ` ${fate.sentence}` });
+    // A DIRECTIONAL fate renders as the colored action icon alone (定稿轮 2 follow-up,
+    // 2026-08-13): ACTION_ICON's arrow-up-from-line/arrow-down-to-line in the same orange/accent
+    // the pills and file rows speak — the original row vocabulary the README screenshots show —
+    // with the fate sentence in the tooltip, consistent with this round's icon+tooltip language.
+    // The sentence itself still opens the card (the State row says it in full). Conflict (⚠) and
+    // neutral (—) fates keep their text form: a conflict must shout, and "—" has no action icon.
+    if (fate.glyph === "↑" || fate.glyph === "↓") {
+      const action: SyncAction = fate.glyph === "↑" ? "capture" : "apply";
+      const ic = fateWrap.createSpan({ cls: `config-sync-fate-ic ${ACTION_COLOR_CLASS[action]}`, attr: { "aria-label": fate.sentence } });
+      setIcon(ic, ACTION_ICON[action]);
+    } else {
+      fateWrap.createSpan({ cls: "config-sync-fate-glyph", text: fate.glyph });
+      fateWrap.createSpan({ cls: "config-sync-fate-text", text: ` ${fate.sentence}` });
+    }
 
     if (!inert) {
       const cb = row.createEl("input", { type: "checkbox" });
@@ -2616,15 +2626,31 @@ export class SyncCenterView extends ItemView {
     }
   }
 
-  // One row inside the expanded card (spec §4, ledger C-#2): a fixed-width muted label with its
-  // value immediately adjacent, shared by every card row (On apply/Files/Runs on/Settings
-  // sync/More/Note/Resolve) — never a label on its own line with the value spread underneath.
-  // Built off-DOM first (ledger C-#5): if `build` leaves the value empty, the row is dropped
-  // entirely — no separator, no height — rather than appended and pruned; Task 2's rule-control
-  // triggers render through this same helper, so an N/A control must vanish the same way.
-  private renderCardKeyRow(detail: HTMLElement, label: string, build: (value: HTMLElement) => void): void {
-    const row = createDiv({ cls: "config-sync-card-fieldrow config-sync-cardrow" });
+  // The row shell every card row shares (spec round-9 ⑤ "one grid per card"): a fixed label on
+  // track 1 of `.config-sync-cardrow`'s four tracks. Callers fill the rest — either one value cell
+  // spanning tracks 2-4 (renderCardKeyRow, below) or up to three cells landed directly on tracks
+  // 2/3/4 (renderTwoSegmentRow, renderCardIconActionRow) — so every row's icons and its divider
+  // sit on the SAME vertical rules regardless of which shape painted them.
+  //
+  // `iconRow` marks the icon-cell shape (two-segment rows, the More row): content-sized, so mobile
+  // keeps it on the shared grid instead of the wide rows' stack-to-full-width fallback below —
+  // there is no long text here to clip, only a glyph, and stacking would just waste a line. Named
+  // `is-iconrow`, not `is-compact` — that modifier already means something else on
+  // `.config-sync-shell` (the narrow-viewport pane layout), an unrelated axis.
+  private cardRowShell(label: string, iconRow: boolean): HTMLElement {
+    const row = createDiv({ cls: `config-sync-card-fieldrow config-sync-cardrow${iconRow ? " is-iconrow" : ""}` });
     row.createSpan({ cls: "config-sync-explabel config-sync-explabel-inline", text: label });
+    return row;
+  }
+
+  // One row inside the expanded card (spec §4, ledger C-#2): a fixed-width muted label with its
+  // value immediately adjacent, shared by every card row (On apply/Files/Settings sync/More/Note/
+  // Resolve) — never a label on its own line with the value spread underneath. Built off-DOM first
+  // (ledger C-#5): if `build` leaves the value empty, the row is dropped entirely — no separator,
+  // no height — rather than appended and pruned; Task 2's rule-control triggers render through this
+  // same helper, so an N/A control must vanish the same way.
+  private renderCardKeyRow(detail: HTMLElement, label: string, build: (value: HTMLElement) => void): void {
+    const row = this.cardRowShell(label, false);
     const value = row.createDiv({ cls: "config-sync-cardval" });
     build(value);
     if (value.childNodes.length === 0) return;
@@ -2803,44 +2829,60 @@ export class SyncCenterView extends ItemView {
     });
   }
 
-  // One segment cell of a two-segment row: icon (when the segment has one) + wordmark, wired to
-  // its own menu. Factored out of renderTwoSegmentRow so `Default settings sync`'s fields-mode
-  // branch (a plain fleet NOTE, not a menu) can still paint a working local segment beside it
-  // without renderTwoSegmentRow having to accept a fleet that lies about opening a menu.
-  private paintTwoSegmentCell(host: HTMLElement, seg: RowSegment, cls: string, menu: () => Menu): void {
-    const el = host.createSpan({ cls, attr: { "aria-label": seg.label } });
+  // The fleet segment of a two-segment row (spec §6.1, round-9 ②): an icon + a muted `▾`
+  // affordance, wired to its own menu — no visible wordmark any more (the row's own label already
+  // says what the ROW is; the segment's tooltip says what its VALUE is). Lands on track 2 of the
+  // row's four-track grid (round-9 ⑤), so every two-segment row's fleet icon — and the More row's
+  // — sit on the same vertical rule.
+  private paintFleetSegment(host: HTMLElement, seg: RowSegment, isSet: boolean, menu: () => Menu): void {
+    const el = host.createSpan({ cls: `config-sync-tworow-fleetcell${isSet ? " is-set" : ""}`, attr: { "aria-label": seg.tooltip } });
     if (seg.icon !== null) setIcon(el.createSpan({ cls: "config-sync-tworow-ic" }), seg.icon);
-    el.createSpan({ text: seg.label });
+    el.createSpan({ cls: "config-sync-tworow-chev", text: "▾" });
     this.wireMenuTrigger(el, menu);
   }
 
-  // The two-segment row (spec §6.1): fleet answer on the left of the divider, this device's own
-  // exception on the right. Both segments open a menu; the local one renders wordmark-only while it
-  // follows, because a default has nothing to say.
+  // The local segment (round-9 ②): a muted "this device" eyebrow beside the same icon+▾ shape,
+  // wired to the local menu. Factored out of renderTwoSegmentRow so `Settings sync`'s fields-mode
+  // branch (a plain fleet NOTE, not a menu) can still paint a working local segment beside it
+  // without renderTwoSegmentRow having to accept a fleet that lies about opening a menu. Lands on
+  // track 4.
+  private paintLocalSegment(host: HTMLElement, seg: RowSegment, isException: boolean, menu: () => Menu): void {
+    const cell = host.createDiv({ cls: `config-sync-tworow-localcell${isException ? " is-set" : ""}` });
+    cell.createSpan({ cls: "config-sync-tworow-eyebrow", text: THIS_DEVICE_EYEBROW });
+    const el = cell.createSpan({ cls: "config-sync-tworow-seg", attr: { "aria-label": seg.tooltip } });
+    if (seg.icon !== null) setIcon(el.createSpan({ cls: "config-sync-tworow-ic" }), seg.icon);
+    el.createSpan({ cls: "config-sync-tworow-chev", text: "▾" });
+    this.wireMenuTrigger(el, menu);
+  }
+
+  // The two-segment row (spec §6.1, round-9 ⑤ "one grid per card"): fleet cell on track 2, the
+  // divider filling track 3, the local cell on track 4 — direct children of the row's own
+  // four-track grid rather than a nested sub-grid, so every two-segment row's icons and divider
+  // land on the SAME vertical rules as every other row in the card. Both segments open a menu.
   private renderTwoSegmentRow(
     detail: HTMLElement,
     label: string,
     fleet: { seg: RowSegment; isSet: boolean; menu: () => Menu },
     local: { seg: RowSegment; isException: boolean; menu: () => Menu } | null
   ): void {
-    this.renderCardKeyRow(detail, label, (value) => {
-      const row = value.createDiv({ cls: "config-sync-tworow" });
-      this.paintTwoSegmentCell(row, fleet.seg, `config-sync-tworow-seg${fleet.isSet ? " is-set" : ""}`, fleet.menu);
-      if (local === null) return;
+    const row = this.cardRowShell(label, true);
+    this.paintFleetSegment(row, fleet.seg, fleet.isSet, fleet.menu);
+    if (local !== null) {
       row.createSpan({ cls: "config-sync-tworow-vline" });
-      this.paintTwoSegmentCell(row, local.seg, `config-sync-tworow-seg is-local${local.isException ? " is-set" : ""}`, local.menu);
-    });
+      this.paintLocalSegment(row, local.seg, local.isException, local.menu);
+    }
+    detail.appendChild(row);
   }
 
-  // Default enabled on (spec §6.2) — only for a plugin row whose carrier is synced: with no shared
-  // list there is no default to state.
+  // Enabled on (spec §6.2, row label shortened round-9 ①) — only for a plugin row whose carrier is
+  // synced: with no shared list there is no default to state.
   private renderDefaultEnabledOnRow(detail: HTMLElement, name: string, input: FateInput): void {
     const list = enablementCarrierFor(this.rowRef(name));
     const elementId = this.carrierElementFor(name);
     const model = enablementRowModel({ rule: input.ruleSharing, exception: input.localException });
     this.renderTwoSegmentRow(
       detail,
-      "Default enabled on",
+      "Enabled on",
       {
         seg: model.fleet,
         isSet: input.ruleSharing.kind !== "everywhere",
@@ -2942,42 +2984,42 @@ export class SyncCenterView extends ItemView {
     });
   }
 
-  // Default settings sync (spec §6.1/§6.2, ledger C-#3/C-#7/C-#10): a two-segment row like `Default
-  // enabled on` — fleet segment is the item's own file-level sharing (SAME icon vocabulary the
-  // Settings tab's file-row control uses, sharingIcon; write target Item.settingsFile.fileRule.sharing
-  // for every item, custom (folder) items included since runsOn's retirement, 2026-08-12-enablement-
-  // two-layers task 8 — one entrance, not two); local segment is this device's own whole-file
-  // opt-out (§6.2's footer menu, second item, moved here). The Settings tab's own drawer cycle
-  // control (renderSharingCycle) is untouched.
+  // Settings sync (spec §6.1/§6.2, ledger C-#3/C-#7/C-#10, row label shortened round-9 ①): a
+  // two-segment row like `Enabled on` — fleet segment is the item's own file-level sharing (SAME
+  // icon vocabulary the Settings tab's file-row control uses, sharingIcon; write target
+  // Item.settingsFile.fileRule.sharing for every item, custom (folder) items included since
+  // runsOn's retirement, 2026-08-12-enablement-two-layers task 8 — one entrance, not two); local
+  // segment is this device's own whole-file opt-out (§6.2's footer menu, second item, moved here).
+  // The Settings tab's own drawer cycle control (renderSharingCycle) is untouched.
   private renderSettingsSyncRow(detail: HTMLElement, r: StatusRow): void {
     const name = r.group.name;
     const ref = this.itemRefFor(name);
     if (ref === null) return;
     const optedOut = this.host.deviceOptedOut(name);
-    const localSeg: RowSegment = optedOut ? { icon: "circle-slash", label: NOT_SYNCED_HERE_LABEL } : { icon: null, label: FOLLOWS_LABEL };
-    const local = { seg: localSeg, isException: optedOut, menu: () => this.fileLocalMenu(name, optedOut) };
+    const localMenu = (): Menu => this.fileLocalMenu(name, optedOut);
     // C-#25: a fields-mode item has no legal whole-file fileRule to write (setItemFileSharing
     // throws on it) — the fleet side must not offer a menu whose choice would just be discarded,
-    // but the local segment (this device's own opt-out) is a different datum and still works.
+    // but the local segment (this device's own opt-out) is a different datum and still works. The
+    // note replaces the fleet cell outright (round-9 ②: no icon, no ▾ for it) — the local segment
+    // still comes from fileLocalSegment, the SAME producer the legal branch below uses.
     if (!this.host.itemFileSharingMenuLegal(ref)) {
-      this.renderCardKeyRow(detail, "Default settings sync", (value) => {
-        const row = value.createDiv({ cls: "config-sync-tworow" });
-        row.createDiv({ cls: "config-sync-expand-note", text: FILE_SHARING_MENU_UNAVAILABLE_TEXT });
-        row.createSpan({ cls: "config-sync-tworow-vline" });
-        this.paintTwoSegmentCell(row, local.seg, `config-sync-tworow-seg is-local${local.isException ? " is-set" : ""}`, local.menu);
-      });
+      const row = this.cardRowShell("Settings sync", true);
+      row.createDiv({ cls: "config-sync-expand-note config-sync-tworow-fleetnote", text: FILE_SHARING_MENU_UNAVAILABLE_TEXT });
+      this.paintLocalSegment(row, fileLocalSegment(optedOut), optedOut, localMenu);
+      detail.appendChild(row);
       return;
     }
     const current = this.host.itemFileSharing(ref);
+    const model = fileEnablementRowModel({ sharing: current, optedOut });
     this.renderTwoSegmentRow(
       detail,
-      "Default settings sync",
+      "Settings sync",
       {
-        seg: { icon: sharingIcon(current), label: sharingLabel(current) },
+        seg: model.fleet,
         isSet: current.kind !== "everywhere",
         menu: () => this.fileSharingMenu(ref, current),
       },
-      local
+      { seg: model.local, isException: model.localIsException, menu: localMenu }
     );
   }
 
@@ -3017,25 +3059,27 @@ export class SyncCenterView extends ItemView {
 
   // Icon trigger + plain click (spec §6.2 `More`): unlike renderCardIconMenuRow's family, this
   // row opens Settings directly rather than offering a menu — a sibling helper keeps that
-  // distinction honest instead of routing a single-item fake menu through wireMenuTrigger.
+  // distinction honest instead of routing a single-item fake menu through wireMenuTrigger. Lands
+  // on track 2 of the row's four-track grid (round-9 ⑤), the same track every two-segment row's
+  // fleet icon lands on, tracks 3/4 left empty — no divider, since there is no second segment.
   private renderCardIconActionRow(detail: HTMLElement, label: string, icon: string, isSet: boolean, ariaLabel: string, onActivate: () => void): void {
-    this.renderCardKeyRow(detail, label, (value) => {
-      const trigger = value.createSpan({
-        cls: `config-sync-sharingicon config-sync-card-trigger${isSet ? " is-set" : ""}`,
-        attr: { "aria-label": ariaLabel, role: "button", tabindex: "0" },
-      });
-      setIcon(trigger, icon);
-      const activate = (e: Event): void => {
-        e.stopPropagation();
-        onActivate();
-      };
-      trigger.addEventListener("click", activate);
-      trigger.addEventListener("keydown", (e) => {
-        if (e.key !== "Enter" && e.key !== " ") return;
-        e.preventDefault();
-        activate(e);
-      });
+    const row = this.cardRowShell(label, true);
+    const trigger = row.createSpan({
+      cls: `config-sync-sharingicon config-sync-card-trigger config-sync-cardrow-track2${isSet ? " is-set" : ""}`,
+      attr: { "aria-label": ariaLabel, role: "button", tabindex: "0" },
     });
+    setIcon(trigger, icon);
+    const activate = (e: Event): void => {
+      e.stopPropagation();
+      onActivate();
+    };
+    trigger.addEventListener("click", activate);
+    trigger.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      e.preventDefault();
+      activate(e);
+    });
+    detail.appendChild(row);
   }
 
   // More bridge (spec §6.2): icon-only deep link into the Settings tab for this item's card — the

@@ -25,6 +25,10 @@ export function renderSharingCycle(
     note?: string;
     iconFor?: (s: Sharing) => string;
     labelFor?: (s: Sharing) => string; // set ⇒ a visible text label joins the glyph (spec §6.1)
+    // Appends the same muted `▾` affordance the two-segment row's other segments carry (round-9
+    // ②) — set only by the callers that ARE a two-segment row's fleet cell, never the plain
+    // per-key/per-file cycle cells that have no local segment beside them to match.
+    chevron?: boolean;
     ariaLabel?: string;
     onChange: (v: Sharing) => void;
   }
@@ -32,6 +36,7 @@ export function renderSharingCycle(
   const icon = cell.createSpan({ cls: `config-sync-sharingicon${opts.sharing.kind !== "everywhere" ? " is-set" : ""}` });
   setIcon(icon, (opts.iconFor ?? sharingIcon)(opts.sharing));
   if (opts.labelFor !== undefined) icon.createSpan({ cls: "config-sync-sharingicon-label", text: opts.labelFor(opts.sharing) });
+  if (opts.chevron === true) icon.createSpan({ cls: "config-sync-tworow-chev", text: "▾" });
   // aria-label alone: Obsidian renders its own tooltip for [aria-label] elements — adding
   // `title` too stacks a second (native) tooltip on hover (round-8 feedback ①).
   icon.setAttribute("aria-label", opts.ariaLabel ?? sharingCycleTooltip(opts.sharing, opts.note));

@@ -367,16 +367,11 @@ export function typeSectionForRow(defSection: StorageSection | "beta"): TypeSect
   return defSection;
 }
 
-// Section header count pill: "31" when nothing narrows the section, "6 of 31" once a state
-// filter or a search query hides some of its rows.
+// Section header count pill: "31" when nothing narrows the section, "6/31" once a state
+// filter or a search query hides some of its rows. One form on every platform (2026-08-13 live
+// find) — C-#41's mobile-only compaction retired with its desktop long form.
 export function sectionCountLabel(total: number, visible: number, filtered: boolean): string {
-  return filtered ? `${visible} of ${total}` : `${total}`;
-}
-
-// Mobile section head (C-#41 spec §2): the same fact, compacted to `n/m` — unfiltered renders
-// identically on both platforms since there is nothing to compact.
-export function mobileSectionCountLabel(total: number, visible: number, filtered: boolean): string {
-  return sectionCountLabel(total, visible, filtered).replace(" of ", "/");
+  return filtered ? `${visible}/${total}` : `${total}`;
 }
 
 // ── Remote pane C-grammar model (2026-08-07-c-livetest-batch4 task 1) ──────────────────────────

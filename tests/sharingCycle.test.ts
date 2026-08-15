@@ -101,6 +101,16 @@ describe("renderSharingCycle — the enablement vocabulary reaches the settings 
     expect(trigger.children.map((c) => c.text)).toEqual(["Each device decides"]);
   });
 
+  // Round-9 ②: the two-segment row's fleet cell drops labelFor (icon-only) and instead opts into
+  // the shared `▾` affordance every clickable segment carries — a separate hook from labelFor so
+  // the plain file-sharing cells (which pass neither) stay byte-identical.
+  it("chevron appends the shared ▾ affordance, off by default", () => {
+    const bare = render({ sharing: THIS_DEVICE, options: RULE_OPTIONS, disabled: false, iconFor: ruleIcon, onChange: noop });
+    expect(bare.children).toEqual([]);
+    const withChevron = render({ sharing: THIS_DEVICE, options: RULE_OPTIONS, disabled: false, iconFor: ruleIcon, chevron: true, onChange: noop });
+    expect(withChevron.children.map((c) => ({ cls: c.cls, text: c.text }))).toEqual([{ cls: "config-sync-tworow-chev", text: "▾" }]);
+  });
+
   it("uses ariaLabel verbatim instead of the file-sharing tooltip", () => {
     const trigger = render({ sharing: THIS_DEVICE, options: RULE_OPTIONS, disabled: false, ariaLabel: "Which devices turn this plugin on — Each device decides", onChange: noop });
     expect(trigger.attrs["aria-label"]).toBe("Which devices turn this plugin on — Each device decides");

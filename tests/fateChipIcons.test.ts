@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { FATE_CHIP_ICON } from "../src/ui/fateChipIcons";
 import { ACTION_ICON } from "../src/ui/actionIcons";
 import { FOLD_ICON } from "../src/ui/foldIcons";
-import { buildFileLocalMenu, buildLocalMenu, ruleIcon, ruleLabel, RULE_OPTIONS } from "../src/ui/enablementRow";
+import { buildFileLocalMenu, buildLocalMenu, enablementRowModel, fileEnablementRowModel, ruleIcon, ruleLabel, RULE_OPTIONS } from "../src/ui/enablementRow";
 import { EVERYWHERE } from "../src/core/types";
 
 // C-#40 spec §4: every string buildChips (fateModel.ts) can produce, plus the two chips added
@@ -100,8 +100,27 @@ describe("glyph registry — one glyph, one meaning (icon-collision guard)", () 
     { glyph: "settings-2", producer: "SyncCenterView (external, hardcoded)", home: "SyncCenterView 'opens Settings' sites" },
   ];
 
+  // The local segment's `follows` glyph (round-9 ②, DESIGN.md icon table): `corner-down-right` is
+  // new — the local segment used to render no icon at all while following the default, so this is
+  // the first registration of the glyph anywhere. Fed from the REAL model functions (enablementRow.ts's
+  // `enablementRowModel`/`fileEnablementRowModel`), not a hand-copied string, so a future rename of
+  // the glyph breaks this test instead of leaving it silently stale — the same "iterate the real
+  // producer" discipline `ruleHomes`/`localMenuHomes` above already follow. Scoped to the `follows`
+  // state alone: the on/off/not-synced states already resolve to `power`/`power-off`/`circle-slash`,
+  // which `buildLocalMenu`/`buildFileLocalMenu` above already register from their OWN producer — a
+  // second registration of the same glyphs under a different producer name here would read as an
+  // undeclared collision, not the intentional one-meaning reuse it actually is.
+  function localSegmentFollowHomes(): GlyphHome[] {
+    const homes: GlyphHome[] = [];
+    const elementFollow = enablementRowModel({ rule: EVERYWHERE, exception: null }).local.icon;
+    if (elementFollow !== null) homes.push({ glyph: elementFollow, producer: "enablementRowModel", home: "enablementRowModel(local, follows)" });
+    const fileFollow = fileEnablementRowModel({ sharing: EVERYWHERE, optedOut: false }).local.icon;
+    if (fileFollow !== null) homes.push({ glyph: fileFollow, producer: "fileEnablementRowModel", home: "fileEnablementRowModel(local, follows)" });
+    return homes;
+  }
+
   function allHomes(): GlyphHome[] {
-    return [...fateChipHomes(), ...actionHomes(), ...foldHomes(), ...ruleHomes(), ...localMenuHomes(), ...EXTERNAL_HOMES];
+    return [...fateChipHomes(), ...actionHomes(), ...foldHomes(), ...ruleHomes(), ...localMenuHomes(), ...localSegmentFollowHomes(), ...EXTERNAL_HOMES];
   }
 
   // Declared, intentional glyph reuse across producers — the ONLY escape hatch this test allows.
@@ -115,6 +134,10 @@ describe("glyph registry — one glyph, one meaning (icon-collision guard)", () 
     "power-off": "off, on this device — a resolved fate this run or a local exception, same direction",
     "circle-slash": "not synced with this item, on this device",
     check: "affirmative — settled / already matching, nothing left for this glyph to say",
+    // round-9 ②: the local segment's `follows` glyph, same meaning whether it's an element-layer
+    // exception (enablementRowModel) or the whole-file opt-out layer (fileEnablementRowModel) —
+    // "this device has no exception of its own, it does whatever the shared answer says."
+    "corner-down-right": "this device follows the default (no exception of its own)",
   };
 
   it("every producer contributes at least one glyph (an empty producer would pass vacuously)", () => {
@@ -123,6 +146,7 @@ describe("glyph registry — one glyph, one meaning (icon-collision guard)", () 
     expect(foldHomes().length).toBeGreaterThan(0);
     expect(ruleHomes().length).toBeGreaterThan(0);
     expect(localMenuHomes().length).toBeGreaterThan(0);
+    expect(localSegmentFollowHomes().length).toBeGreaterThan(0);
   });
 
   it("never lets a glyph carry two undeclared meanings across the fate-chip, action, fold, rule and local-exception registries", () => {

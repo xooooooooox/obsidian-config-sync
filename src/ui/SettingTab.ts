@@ -74,7 +74,16 @@ import { classifyJsonKeys, classifyPerElementLines, jsonElementClass, jsonKeyCla
 import { renderSharingCycle } from "./sharingCycle";
 import { DeviceElementState } from "../core/deviceElements";
 import { enablementRules, RuleListId, ruledElementIds } from "../core/enablementRules";
-import { buildLocalMenu, enablementRowModel, EnablementRowModel, ruleIcon, ruleLabel, ruleLandingNeedsSeed, RULE_OPTIONS } from "./enablementRow";
+import {
+  buildLocalMenu,
+  enabledOnTooltip,
+  enablementRowModel,
+  EnablementRowModel,
+  ruleIcon,
+  ruleLandingNeedsSeed,
+  RULE_OPTIONS,
+  THIS_DEVICE_EYEBROW,
+} from "./enablementRow";
 import { StopSyncingModal } from "./SyncCenterView";
 import { RunKind, stopSyncDesc } from "../core/runHistory";
 import {
@@ -94,9 +103,8 @@ import {
   companionConflictError,
   companionNameConflictError,
   computeBadges,
-  DEFAULT_ENABLED_ON_HINT,
-  DEFAULT_ENABLED_ON_LABEL,
   DEFAULT_FIELD_RULE,
+  ENABLED_ON_LABEL,
   DESKTOP_ONLY_ALL_NOTE,
   ENABLED_CSS_SNIPPETS_KEY,
   encryptToggleDisabled,
@@ -1040,12 +1048,14 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     if (ruleLandingNeedsSeed(rule, this.host.deviceElementFor(list, elementId))) await this.host.leaveToThisDevice(list, elementId);
   }
 
-  // The two-segment row's LOCAL half (spec §6.1), painted once for both of this file's rows that
-  // have one: a plugin card's `Default enabled on` and a carrier card's element rows. It leads with
-  // the divider because the divider only exists when there IS a second segment.
+  // The two-segment row's LOCAL half (spec §6.1, round-9 ② eyebrow+icon+▾ revision), painted once
+  // for both of this file's rows that have one: a plugin card's `Enabled on` and a carrier card's
+  // element rows. It leads with the divider because the divider only exists when there IS a
+  // second segment. A muted "this device" eyebrow sits above/beside the glyph so the local
+  // segment reads as its own thing even though it no longer carries a visible state word.
   //
   // A class rule that this device does not match has nothing true to show as a local state, so it
-  // shows the default sentence — but the menu stays live, because an exception outranks a class
+  // shows the follow glyph/tooltip — but the menu stays live, because an exception outranks a class
   // rule (spec §5 precedence 1) and a row that cannot be excepted would be a dead end.
   private renderLocalSegment(
     cell: HTMLElement,
@@ -1059,12 +1069,14 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     }
   ): void {
     cell.createSpan({ cls: "config-sync-tworow-vline" });
-    const local = cell.createSpan({
-      cls: `config-sync-tworow-seg is-local${opts.model.localIsException ? " is-set" : ""}`,
-      attr: { role: "button", tabindex: "0", "aria-label": opts.model.local.label },
+    const wrap = cell.createDiv({ cls: `config-sync-tworow-localcell${opts.model.localIsException ? " is-set" : ""}` });
+    wrap.createSpan({ cls: "config-sync-tworow-eyebrow", text: THIS_DEVICE_EYEBROW });
+    const local = wrap.createSpan({
+      cls: "config-sync-tworow-seg",
+      attr: { role: "button", tabindex: "0", "aria-label": opts.model.local.tooltip },
     });
     if (opts.model.local.icon !== null) setIcon(local.createSpan({ cls: "config-sync-tworow-ic" }), opts.model.local.icon);
-    local.createSpan({ text: opts.model.local.label });
+    local.createSpan({ cls: "config-sync-tworow-chev", text: "▾" });
     const openLocalMenu = (x: number, y: number): void => {
       const menu = new Menu();
       // The entry list is buildLocalMenu's (enablementRow.ts), not this file's — the Sync Center's
@@ -1092,10 +1104,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     });
   }
 
-  // Zone ① `Default enabled on` (spec §6.5) — core/community/beta plugin cards only. Same name,
-  // same values, same data as the Sync Center's row of that name: this used to be a 4-stop cycle
-  // whose first three stops wrote `runsOn.device` and whose fourth wrote `thisDeviceItems`, i.e.
-  // one control with two destinations. Now it is two controls, one per layer, each with one writer.
+  // Zone ① `Enabled on` (spec §6.5, row-label shortened round-9 ①) — core/community/beta plugin
+  // cards only. Same name, same values, same data as the Sync Center's row of that name: this used
+  // to be a 4-stop cycle whose first three stops wrote `runsOn.device` and whose fourth wrote
+  // `thisDeviceItems`, i.e. one control with two destinations. Now it is two controls, one per
+  // layer, each with one writer.
   // Grid row (spec 2026-07-26-card-visual-refresh-design.md §2.1/§4 Step 1): label in the content
   // column, both segments in the sharing column, last two columns empty.
   private renderDefaultEnabledOnRow(exp: HTMLElement, def: ItemDef, wrap: HTMLElement): void {
@@ -1104,7 +1117,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const list = enablement.list;
     const elementId = enablement.element;
     const row = exp.createDiv({ cls: "config-sync-grid config-sync-card-fieldrow" });
-    row.createDiv({ cls: "config-sync-explabel config-sync-explabel-inline", text: DEFAULT_ENABLED_ON_LABEL });
+    row.createDiv({ cls: "config-sync-explabel config-sync-explabel-inline", text: ENABLED_ON_LABEL });
     const cell = row.createDiv({ cls: "config-sync-tworow" });
     const build = (): void => {
       cell.empty();
@@ -1115,17 +1128,19 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         build();
         this.refreshCardBadges(wrap, def);
       };
-      // Fleet segment: the cycle idiom the card already teaches (renderSharingCycle), over the four
-      // rule values — with the enablement vocabulary passed in, because the same `Sharing` union
-      // answers a different question here (see renderSharingCycle's own note). A desktop-only plugin
-      // still drops the mobile stop: mobile can never install it.
+      // Fleet segment (round-9 ②): icon-only now, over the four rule values — with the enablement
+      // vocabulary passed in, because the same `Sharing` union answers a different question here
+      // (see renderSharingCycle's own note). No `labelFor`: the wordmark retired everywhere the
+      // two-segment presentation appears, and `enabledOnTooltip` — the same producer the Sync
+      // Center's row reads — is the aria-label/tooltip instead. A desktop-only plugin still drops
+      // the mobile stop: mobile can never install it.
       renderSharingCycle(cell.createDiv(), {
         sharing: rule,
         options: def.desktopOnly === true ? RULE_OPTIONS.filter((o) => o.kind !== "per-class" || o.class !== "mobile") : RULE_OPTIONS,
         disabled: false,
         iconFor: ruleIcon,
-        labelFor: ruleLabel,
-        ariaLabel: `${DEFAULT_ENABLED_ON_HINT} — ${ruleLabel(rule)}${def.desktopOnly === true && rule.kind === "everywhere" ? ` (${DESKTOP_ONLY_ALL_NOTE})` : ""}`,
+        chevron: true,
+        ariaLabel: `${enabledOnTooltip(rule)}${def.desktopOnly === true && rule.kind === "everywhere" ? ` (${DESKTOP_ONLY_ALL_NOTE})` : ""}`,
         onChange: (v) => void this.setRuleWithLanding(list, elementId, v).then(after),
       });
       this.renderLocalSegment(cell, { list, elementId, rule, exception, model, after });
@@ -1170,15 +1185,16 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         build();
         opts.onWritten();
       };
-      // Fleet segment — the same control, vocabulary and desktop-only stop-drop the plugin card's
-      // `Default enabled on` uses above, because it is the same question about the same datum.
+      // Fleet segment (round-9 ②: icon-only, same as the plugin card's) — the same control,
+      // vocabulary and desktop-only stop-drop the plugin card's `Enabled on` uses above, because
+      // it is the same question about the same datum.
       renderSharingCycle(cell.createDiv(), {
         sharing: rule,
         options: opts.desktopOnly ? RULE_OPTIONS.filter((o) => o.kind !== "per-class" || o.class !== "mobile") : RULE_OPTIONS,
         disabled: false,
         iconFor: ruleIcon,
-        labelFor: ruleLabel,
-        ariaLabel: `${DEFAULT_ENABLED_ON_HINT} — ${ruleLabel(rule)}${opts.desktopOnly && rule.kind === "everywhere" ? ` (${DESKTOP_ONLY_ALL_NOTE})` : ""}`,
+        chevron: true,
+        ariaLabel: `${enabledOnTooltip(rule)}${opts.desktopOnly && rule.kind === "everywhere" ? ` (${DESKTOP_ONLY_ALL_NOTE})` : ""}`,
         onChange: (v) => void this.writeElementRule(opts.def, opts.wrap, opts.list, opts.elementId, v).then(after),
       });
       if (hasLocalLayer) this.renderLocalSegment(cell, { list: opts.list, elementId: opts.elementId, rule, exception, model, after });

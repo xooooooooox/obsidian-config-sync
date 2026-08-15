@@ -2,8 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   buildFileLocalMenu,
   buildLocalMenu,
+  enabledOnTooltip,
   enablementRowModel,
+  fileEnablementRowModel,
+  fileLocalSegment,
   FOLLOWS_LABEL,
+  localSegmentTooltip,
   NOT_SYNCED_HERE_LABEL,
   OFF_HERE_LABEL,
   ON_HERE_LABEL,
@@ -11,6 +15,8 @@ import {
   ruleLabel,
   ruleLandingNeedsSeed,
   RULE_OPTIONS,
+  settingsSyncTooltip,
+  THIS_DEVICE_EYEBROW,
 } from "../src/ui/enablementRow";
 import { EVERYWHERE, perClass, THIS_DEVICE } from "../src/core/types";
 
@@ -25,17 +31,68 @@ describe("the two-segment row", () => {
     expect(RULE_OPTIONS.map(ruleIcon)).not.toContain("airplay");
   });
 
-  it("the follow state has no icon — the default has nothing to say", () => {
+  // Round-9 ②: the follow state used to render no icon at all — a default had nothing to say —
+  // but a bare wordmark next to an icon+chevron fleet segment read as unfinished, so it now
+  // carries `corner-down-right` and the shared "This device: …" tooltip like every other state.
+  it("the follow state has a glyph now — corner-down-right, dim, not an exception", () => {
     const m = enablementRowModel({ rule: EVERYWHERE, exception: null });
-    expect(m.local).toEqual({ icon: null, label: "Follows the default" });
+    expect(m.local).toEqual({ icon: "corner-down-right", tooltip: "This device: follows the default" });
     expect(m.localIsException).toBe(false);
   });
 
   it("an exception shows its own state, whatever the rule says (precedence 1 is visible)", () => {
     for (const rule of [EVERYWHERE, perClass("desktop"), THIS_DEVICE]) {
-      expect(enablementRowModel({ rule, exception: "on" }).local).toEqual({ icon: "power", label: "On here" });
-      expect(enablementRowModel({ rule, exception: "off" }).local).toEqual({ icon: "power-off", label: "Off here" });
+      expect(enablementRowModel({ rule, exception: "on" }).local).toEqual({ icon: "power", tooltip: "This device: on here" });
+      expect(enablementRowModel({ rule, exception: "off" }).local).toEqual({ icon: "power-off", tooltip: "This device: off here" });
       expect(enablementRowModel({ rule, exception: "on" }).localIsException).toBe(true);
+    }
+  });
+
+  // Round-9 ②'s "one producer for every string" rule: both painters (SyncCenterView, SettingTab)
+  // and this test read the SAME tooltip builders instead of re-spelling the sentences.
+  it("the fleet tooltip is 'Default enabled on: <ruleLabel>', producer-vs-producer", () => {
+    for (const rule of RULE_OPTIONS) {
+      expect(enabledOnTooltip(rule)).toBe(`Default enabled on: ${ruleLabel(rule)}`);
+      expect(enablementRowModel({ rule, exception: null }).fleet.tooltip).toBe(enabledOnTooltip(rule));
+    }
+  });
+
+  it("the local tooltip is named once per state and reused by the model", () => {
+    expect(localSegmentTooltip("follows")).toBe("This device: follows the default");
+    expect(localSegmentTooltip("on")).toBe("This device: on here");
+    expect(localSegmentTooltip("off")).toBe("This device: off here");
+    expect(localSegmentTooltip("not-synced")).toBe("This device: not synced here");
+  });
+
+  it("THIS_DEVICE_EYEBROW is stored lowercase — CSS uppercases it for display", () => {
+    expect(THIS_DEVICE_EYEBROW).toBe("this device");
+  });
+});
+
+// The whole-FILE row's model counterpart (round-9 ②, `Settings sync`) — same shape, a FileSharing
+// fleet datum and a two-state local layer (follow / not-synced-here).
+describe("fileEnablementRowModel", () => {
+  it("the fleet segment carries sharingIcon's glyph and the 'Default settings sync: …' tooltip", () => {
+    const m = fileEnablementRowModel({ sharing: EVERYWHERE, optedOut: false });
+    expect(m.fleet).toEqual({ icon: "monitor-smartphone", tooltip: "Default settings sync: All devices" });
+    expect(settingsSyncTooltip(EVERYWHERE)).toBe("Default settings sync: All devices");
+  });
+
+  it("follows when not opted out; not-synced-here, with the fold family's circle-slash, when opted out", () => {
+    expect(fileEnablementRowModel({ sharing: EVERYWHERE, optedOut: false }).local).toEqual({
+      icon: "corner-down-right",
+      tooltip: "This device: follows the default",
+    });
+    const optedOut = fileEnablementRowModel({ sharing: EVERYWHERE, optedOut: true });
+    expect(optedOut.local).toEqual({ icon: "circle-slash", tooltip: "This device: not synced here" });
+    expect(optedOut.localIsException).toBe(true);
+  });
+
+  // C-#25's fallback (a fields-mode item's fleet cell is an italic note, not a menu): the local
+  // half alone must still be the SAME producer, not a second hand-typed copy of it.
+  it("fileLocalSegment is the same producer fileEnablementRowModel's local half uses", () => {
+    for (const optedOut of [false, true]) {
+      expect(fileLocalSegment(optedOut)).toEqual(fileEnablementRowModel({ sharing: EVERYWHERE, optedOut }).local);
     }
   });
 });

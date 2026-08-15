@@ -14,7 +14,7 @@ import {
   countEncrypted,
   encryptDisabledForSharing,
   encryptToggleDisabled,
-  DEFAULT_ENABLED_ON_LABEL,
+  ENABLED_ON_LABEL,
   fileRuleLegalForMode,
   FILE_SHARING_MENU_UNAVAILABLE_TEXT,
   hasEnablementZone,
@@ -562,8 +562,8 @@ describe("buildCompanionRows", () => {
 });
 
 describe("zone ① Enabled on (spec §4/§10, D4 — core/community/beta plugin tabs, task-6-brief.md)", () => {
-  it("DEFAULT_ENABLED_ON_LABEL is copy-contract exact", () => {
-    expect(DEFAULT_ENABLED_ON_LABEL).toBe("Default enabled on");
+  it("ENABLED_ON_LABEL is copy-contract exact (round-9 ① shortened row label)", () => {
+    expect(ENABLED_ON_LABEL).toBe("Enabled on");
   });
 
   it("the zone is present for every core def regardless of settings-file state (full core list, incl. state-only)", () => {
