@@ -109,6 +109,11 @@ describe("glyph registry — one glyph, one meaning (icon-collision guard)", () 
     { glyph: "columns-2", producer: "diffView (external, hardcoded)", home: "renderDiffPanel — split diff" },
     { glyph: "fold-vertical", producer: "diffView (external, hardcoded)", home: "renderDiffPanel — collapse unchanged lines" },
     { glyph: "unfold-vertical", producer: "diffView (external, hardcoded)", home: "renderDiffPanel — show all lines" },
+    // Round-12 (text-triangle sweep, DESIGN.md §2.4): the two chevron families, plus the File
+    // preview trigger — none behind an exported table either.
+    { glyph: "chevron-right", producer: "foldChevron (external, hardcoded)", home: "renderFoldChevron — FOLD family disclosure rotate" },
+    { glyph: "chevrons-up-down", producer: "SyncCenterView/SettingTab (external, hardcoded)", home: "PICKER family — two-segment rows + the switcher" },
+    { glyph: "eye", producer: "SettingTab (external, hardcoded)", home: "SETTINGS FILE row — File preview trigger" },
   ];
 
   // The local segment's `follows` glyph (round-9 ②, DESIGN.md icon table): `corner-down-right` is

@@ -102,13 +102,14 @@ describe("renderSharingCycle — the enablement vocabulary reaches the settings 
   });
 
   // Round-9 ②: the two-segment row's fleet cell drops labelFor (icon-only) and instead opts into
-  // the shared `▾` affordance every clickable segment carries — a separate hook from labelFor so
-  // the plain file-sharing cells (which pass neither) stay byte-identical.
-  it("chevron appends the shared ▾ affordance, off by default", () => {
+  // the shared PICKER affordance every clickable segment carries — a separate hook from labelFor
+  // so the plain file-sharing cells (which pass neither) stay byte-identical. Round-12: the
+  // affordance is the `chevrons-up-down` icon now, not text `▾`.
+  it("chevron appends the shared picker affordance, off by default", () => {
     const bare = render({ sharing: THIS_DEVICE, options: RULE_OPTIONS, disabled: false, iconFor: ruleIcon, onChange: noop });
     expect(bare.children).toEqual([]);
     const withChevron = render({ sharing: THIS_DEVICE, options: RULE_OPTIONS, disabled: false, iconFor: ruleIcon, chevron: true, onChange: noop });
-    expect(withChevron.children.map((c) => ({ cls: c.cls, text: c.text }))).toEqual([{ cls: "config-sync-tworow-chev", text: "▾" }]);
+    expect(withChevron.children.map((c) => ({ cls: c.cls, iconName: c.iconName }))).toEqual([{ cls: "config-sync-tworow-chev", iconName: "chevrons-up-down" }]);
   });
 
   it("uses ariaLabel verbatim instead of the file-sharing tooltip", () => {

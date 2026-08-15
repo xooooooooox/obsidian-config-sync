@@ -321,11 +321,12 @@ export function buildRuleRows(def: ItemDef, item: Item, liveDoc: Record<string, 
   }));
 }
 
-// Progressive-disclosure collapsed-row label for a companion's member list (spec
-// 2026-07-26-card-visual-refresh-design.md §4): "· N themes" for the themes/ preset, "· N files"
-// for everything else.
+// Progressive-disclosure member-count sentence for a companion's member pill (spec
+// 2026-07-26-card-visual-refresh-design.md §4; round-12 甲: the pill itself now shows the bare
+// number — this is its aria-label/tooltip only): "N themes" for the themes/ preset, "N files"
+// for everything else. The `· ` separator retired with the old inline-text form.
 export function memberCountLabel(isThemesPreset: boolean, n: number): string {
-  return isThemesPreset ? `· ${n} themes` : `· ${n} files`;
+  return isThemesPreset ? `${n} themes` : `${n} files`;
 }
 
 export function encryptDisabledForSharing(sharing: Sharing): boolean {
@@ -556,6 +557,11 @@ export function sharingCycleTooltip(sharing: Sharing, note?: string): string {
 // active — remove them to control the whole file again`/`Remove rule`/`Reset to default path`/
 // `Encrypt` · `Encrypted`, which are single-call-site literals inlined directly in SettingTab.ts.
 export const CUSTOM_PATH_LABEL = "Custom path";
+// Round-12: the `eye` icon beside the settings-file filename (SettingTab.ts's
+// renderSettingsFilePathRow) that replaced the collapsed `▸ File preview` text row — same string
+// for both its aria-label/tooltip and, previously, the row's own label, so the affordance still
+// reads as the same feature under its new trigger.
+export const FILE_PREVIEW_LABEL = "File preview";
 export const PER_ELEMENT_RULES_LABEL = "Per-item device rules";
 export const ADD_FOLDER_LABEL = "+ Add folder";
 export const SYNC_ALL_LABEL = "Sync all";

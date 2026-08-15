@@ -72,6 +72,7 @@ import { confirmPresetPathChange } from "./ConfirmModal";
 import { commitDraft } from "./commitGroups";
 import { classifyJsonKeys, classifyPerElementLines, jsonElementClass, jsonKeyClass, KeyClass } from "./jsonView";
 import { renderSharingCycle } from "./sharingCycle";
+import { renderFoldChevron, setFoldOpen } from "./foldChevron";
 import { DeviceElementState } from "../core/deviceElements";
 import { enablementRules, RuleListId, ruledElementIds } from "../core/enablementRules";
 import {
@@ -134,6 +135,7 @@ import {
   COMPANION_DEVICE_OPTIONS,
   ADD_FOLDER_LABEL,
   CUSTOM_PATH_LABEL,
+  FILE_PREVIEW_LABEL,
   validateCompanionBasename,
   validateCompanionPath,
 } from "./itemCard";
@@ -900,10 +902,15 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const expKey = cardExpandKey(defRef(def));
     const row = new Setting(wrap).setName(def.label).setDesc(def.description);
     row.settingEl.setAttribute("data-search-anchor", itemAnchorId(defRef(def)));
-    const chevron = createSpan({ cls: "config-sync-row-chevron" });
+    // Round-12: unified onto the shared FOLD helper — one rotating `chevron-right` instead of
+    // swapping between `chevron-down`/`chevron-right`. `.setName` above already put the label
+    // text into `row.nameEl`, so the chevron still needs an explicit `.prepend` to land before it
+    // (renderFoldChevron only appends).
+    const chevron = renderFoldChevron(row.nameEl, this.expanded.has(expKey), null);
+    row.nameEl.prepend(chevron);
     const syncExpansion = (): void => {
       const open = this.expanded.has(expKey);
-      setIcon(chevron, open ? "chevron-down" : "chevron-right");
+      setFoldOpen(chevron, open);
       const existing = row.settingEl.querySelector(":scope > .config-sync-item-exp");
       if (open && existing === null) this.renderCardExpansion(row.settingEl, wrap, def);
       else if (!open && existing !== null) existing.remove();
@@ -913,7 +920,6 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       else this.expanded.add(expKey);
       syncExpansion();
     });
-    row.nameEl.prepend(chevron);
     for (const badge of computeBadges(def, item, this.enablementOf(def), this.carrierCountsOf(def))) this.renderBadge(row.nameEl, badge);
     row.addToggle((t) =>
       t.setValue(item.synced).onChange(async (v) => {
@@ -1048,7 +1054,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     if (ruleLandingNeedsSeed(rule, this.host.deviceElementFor(list, elementId))) await this.host.leaveToThisDevice(list, elementId);
   }
 
-  // The two-segment row's LOCAL half (spec §6.1, round-9 ② eyebrow+icon+▾ revision), painted once
+  // The two-segment row's LOCAL half (spec §6.1, round-9 ② eyebrow+icon+picker revision), painted once
   // for both of this file's rows that have one: a plugin card's `Enabled on` and a carrier card's
   // element rows. It leads with the divider because the divider only exists when there IS a
   // second segment. A muted "this device" eyebrow sits above/beside the glyph so the local
@@ -1076,7 +1082,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       attr: { role: "button", tabindex: "0", "aria-label": opts.model.local.tooltip },
     });
     if (opts.model.local.icon !== null) setIcon(local.createSpan({ cls: "config-sync-tworow-ic" }), opts.model.local.icon);
-    local.createSpan({ cls: "config-sync-tworow-chev", text: "▾" });
+    setIcon(local.createSpan({ cls: "config-sync-tworow-chev" }), "chevrons-up-down");
     const openLocalMenu = (x: number, y: number): void => {
       const menu = new Menu();
       // The entry list is buildLocalMenu's (enablementRow.ts), not this file's — the Sync Center's
@@ -1342,6 +1348,31 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           startEdit();
+        }
+      });
+      // Round-12: the File preview trigger — was a collapsed `▸ File preview` text row below the
+      // rule rows, now an `eye` icon 6px after the filename here, same open-state language as the
+      // FILES row's `file-diff` icon (renderUnifiedFiles): `.is-open` turns it accent-colored,
+      // never a second glyph swapped in. refreshCardBody swaps only the bodyHost (where the
+      // preview block itself lives); refreshPathRow rebuilds THIS row so the icon's own `.is-open`
+      // reflects the fresh state too.
+      const previewOpen = this.previewOpen.has(def.id);
+      const previewIcon = pathHost.createSpan({
+        cls: `config-sync-card-previewicon${previewOpen ? " is-open" : ""}`,
+        attr: { role: "button", tabindex: "0", "aria-label": FILE_PREVIEW_LABEL },
+      });
+      setIcon(previewIcon, "eye");
+      const togglePreview = (): void => {
+        if (this.previewOpen.has(def.id)) this.previewOpen.delete(def.id);
+        else this.previewOpen.add(def.id);
+        this.refreshCardBody(wrap, def);
+        this.refreshPathRow(wrap, def);
+      };
+      previewIcon.addEventListener("click", togglePreview);
+      previewIcon.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          togglePreview();
         }
       });
     }
@@ -1648,28 +1679,13 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   }
 
   // Progressive disclosure (spec §4): collapsed by default, `previewOpen` is UI-transient
-  // (session-only, mirrors the drawer's own `expanded` set). Expanding is the only thing that can
-  // trigger the file read this row's content depends on — a card already read for its rule rows
-  // (renderCardBodyInto) reuses that same read, it is never repeated.
+  // (session-only, mirrors the drawer's own `expanded` set). Round-12: the trigger itself moved
+  // to the `eye` icon on the path row (renderSettingsFilePathRow) — this method only renders the
+  // CONTENT now, gated on the same `previewOpen` set the icon writes. Expanding is still the only
+  // thing that can trigger the file read this content depends on — a card already read for its
+  // rule rows (renderCardBodyInto) reuses that same read, it is never repeated.
   private renderPreviewDisclosure(bodyEl: HTMLElement, def: ItemDef, item: Item, doc: Record<string, unknown>, fileState: CardFileState, wrap: HTMLElement): void {
-    const open = this.previewOpen.has(def.id);
-    const toggleRow = bodyEl.createDiv({ cls: "config-sync-card-disclosure" });
-    toggleRow.setText(`${open ? "▾" : "▸"} File preview`);
-    toggleRow.setAttribute("role", "button");
-    toggleRow.setAttribute("tabindex", "0");
-    const toggle = (): void => {
-      if (this.previewOpen.has(def.id)) this.previewOpen.delete(def.id);
-      else this.previewOpen.add(def.id);
-      this.refreshCardBody(wrap, def);
-    };
-    toggleRow.addEventListener("click", toggle);
-    toggleRow.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        toggle();
-      }
-    });
-    if (!open) return;
+    if (!this.previewOpen.has(def.id)) return;
     if (fileState === "missing") {
       bodyEl.createDiv({ cls: "config-sync-json-empty", text: "No file on this device yet — nothing to preview." });
       return;
@@ -1820,7 +1836,8 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   }
 
   // Folder row = the grid's row for one companion (spec §2.1/§4 Step 2/3): name + member count
-  // (patched in once the async scan below resolves) + ▸/▾ in the content column | scope ▾ | small
+  // pill (patched in once the async scan below resolves) + fold chevron in the content column |
+  // scope picker | small
   // toggle | ✎ (every row) with ✕ ADDITIONALLY for a user-added row (never for a preset — D8: a
   // preset is only ever relocated via the warning-gated path edit, never removed outright). Returns
   // the count span so renderCompanionZone's async scan can patch it in place; null while this row
@@ -1859,8 +1876,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         startPathEdit();
       }
     });
-    const countEl = contentCell.createSpan({ cls: "config-sync-card-membercount" });
-    contentCell.createSpan({ cls: "config-sync-card-memberarrow", text: open ? "▾" : "▸" });
+    // Round-12 甲: bare-number pill (same neutral family the panel's other counts use) — the full
+    // "N themes"/"N files" sentence moves to the pill's own aria-label/tooltip — then the FOLD
+    // family's rotating chevron, replacing the old "· N themes ▸/▾" inline text.
+    const countEl = contentCell.createSpan({ cls: "config-sync-pill is-neutral config-sync-card-membercount" });
+    renderFoldChevron(contentCell, open, "config-sync-card-memberarrow");
     const toggle = (): void => this.toggleCompanionMembers(wrap, def, memberKey);
     contentCell.addEventListener("click", toggle);
     contentCell.addEventListener("keydown", (e) => {
@@ -2018,7 +2038,8 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   // render while `open` (and there is anything to show).
   private renderPlainCompanionMembers(listEl: HTMLElement, files: string[], countEl: HTMLElement | null, open: boolean, isThemesPreset: boolean): void {
     const names = sortCompanionMemberNames(files);
-    countEl?.setText(memberCountLabel(isThemesPreset, names.length));
+    countEl?.setText(String(names.length));
+    countEl?.setAttribute("aria-label", memberCountLabel(isThemesPreset, names.length));
     if (!open || names.length === 0) return;
     const wrapEl = listEl.createDiv({ cls: "config-sync-card-snippetmembers" });
     for (const name of names) {
@@ -2116,7 +2137,9 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   // orphan pill and Forget stay here, because they are facts about a FILE, which is a thing only
   // this list's elements have.
   private renderSnippetMembers(listEl: HTMLElement, def: ItemDef, rows: SnippetMemberRow[], wrap: HTMLElement, countEl: HTMLElement | null, open: boolean): void {
-    countEl?.setText(memberCountLabel(false, rows.filter((r) => r.fileExists).length));
+    const fileCount = rows.filter((r) => r.fileExists).length;
+    countEl?.setText(String(fileCount));
+    countEl?.setAttribute("aria-label", memberCountLabel(false, fileCount));
     if (!open || rows.length === 0) return;
     const wrapEl = listEl.createDiv({ cls: "config-sync-card-snippetmembers" });
     for (const row of rows) {
@@ -2897,7 +2920,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const isOpen = this.expanded.has(group.name);
     const row = listEl.createDiv({ cls: "config-sync-row" + (isOpen ? " is-open" : "") });
     row.setAttribute("data-search-anchor", `advanced-rule-${group.name}`);
-    row.createSpan({ cls: "config-sync-row-chevron", text: isOpen ? "▾" : "▸" });
+    renderFoldChevron(row, isOpen, null);
     row.createSpan({ cls: "config-sync-rule-name", text: splitLocation(group.path).rel });
     row.createDiv({ cls: "config-sync-rule-spacer" });
     new ToggleComponent(row).setValue(true).setTooltip("Stop syncing this file").onChange(async (v) => {
@@ -2922,7 +2945,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const isOpen = this.expanded.has(group.name);
     const row = listEl.createDiv({ cls: "config-sync-row" + (isOpen ? " is-open" : "") });
     row.setAttribute("data-search-anchor", `advanced-rule-${group.name}`);
-    row.createSpan({ cls: "config-sync-row-chevron", text: isOpen ? "▾" : "▸" });
+    renderFoldChevron(row, isOpen, null);
     row.createSpan({ cls: "config-sync-card-title", text: group.name === "" ? "(unnamed)" : this.host.displayName(group.name, group.label) });
     row.createSpan({ cls: "config-sync-row-path", text: splitLocation(group.path).rel });
     row.createDiv({ cls: "config-sync-rule-spacer" });
@@ -3130,7 +3153,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const isOpen = this.expanded.has(key);
     const row = listEl.createDiv({ cls: "config-sync-row" + (isOpen ? " is-open" : "") });
     row.setAttribute("data-search-anchor", `remote-${draft.name}`);
-    row.createSpan({ cls: "config-sync-row-chevron", text: isOpen ? "▾" : "▸" });
+    renderFoldChevron(row, isOpen, null);
     const nameSpan = row.createSpan({ cls: "config-sync-rule-name", text: draft.name === "" ? "(unnamed)" : draft.name });
     row.createSpan({ cls: "config-sync-row-type", text: draft.type === "vault" ? "Vault" : "Git" });
     row.createSpan({

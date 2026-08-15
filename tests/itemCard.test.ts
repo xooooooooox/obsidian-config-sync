@@ -370,10 +370,12 @@ describe("buildRuleRows (spec 2026-07-26-card-visual-refresh-design.md §3 — t
 });
 
 describe("memberCountLabel", () => {
+  // Round-12 甲: the pill shows the bare number now — this is its aria-label/tooltip full form,
+  // no leading `· ` separator.
   it("is copy-contract exact for themes vs. non-themes presets", () => {
-    expect(memberCountLabel(true, 3)).toBe("· 3 themes");
-    expect(memberCountLabel(false, 5)).toBe("· 5 files");
-    expect(memberCountLabel(false, 0)).toBe("· 0 files");
+    expect(memberCountLabel(true, 3)).toBe("3 themes");
+    expect(memberCountLabel(false, 5)).toBe("5 files");
+    expect(memberCountLabel(false, 0)).toBe("0 files");
   });
 });
 

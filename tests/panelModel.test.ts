@@ -280,7 +280,7 @@ describe("copy strings", () => {
   });
 
   it("more-files line", () => {
-    expect(moreFilesText(5)).toBe("… 5 more files ▸");
+    expect(moreFilesText(5)).toBe("… 5 more files");
   });
 
   // C-#45 §7 (fix-round 4): verbatim-consistent with the row sentence ("Not synced on this
@@ -688,11 +688,13 @@ describe("onOffNarrationLines", () => {
 });
 
 describe("onOffLineText", () => {
-  it("singular, closed", () => {
-    expect(onOffLineText(1, false)).toBe("On/off list · differs for 1 plugin ▸");
+  // Round-12: `open` dropped — plain text, no trailing triangle; the renderer's own fold chevron
+  // carries the open/closed state now.
+  it("singular", () => {
+    expect(onOffLineText(1)).toBe("On/off list · differs for 1 plugin");
   });
-  it("plural, open", () => {
-    expect(onOffLineText(2, true)).toBe("On/off list · differs for 2 plugins ▾");
+  it("plural", () => {
+    expect(onOffLineText(2)).toBe("On/off list · differs for 2 plugins");
   });
 });
 

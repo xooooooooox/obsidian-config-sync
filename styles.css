@@ -176,7 +176,11 @@
   vertical-align: text-bottom;
   margin-right: var(--size-4-1);
 }
-.config-sync-row-chevron svg { width: 16px; height: 16px; }
+.config-sync-row-chevron svg { width: 16px; height: 16px; transition: transform 0.12s ease; }
+/* FOLD family (round-12, DESIGN.md §2.4): one SVG `chevron-right`, rotated 90° when open — never
+   two glyphs swapped, never text. Every fold site shares this one rule via `renderFoldChevron`/
+   `setFoldOpen` (ui/foldChevron.ts). */
+.config-sync-row-chevron.is-open svg { transform: rotate(90deg); }
 /* Compact the device dropdown so it reads at the same visual weight as the mode segment/toggle. */
 .config-sync-item-wrap > .setting-item .setting-item-control select.dropdown {
   height: auto;
@@ -615,6 +619,13 @@ body.is-mobile.config-sync-mobile-statusbar .status-bar {
 
 .config-sync-hub-row { display: flex; align-items: center; gap: var(--size-4-2); padding: var(--size-4-2) 0; border-bottom: 1px solid var(--background-modifier-border); cursor: pointer; white-space: nowrap; }
 .config-sync-hub-row .config-sync-rule-name { flex: none; }
+/* Hover-reveal (round-12 乙): the item/self row's own fold chevron is invisible at rest, appears
+   on hover or once the row is expanded (`is-open` always visible) — element stays in the DOM
+   either way, so layout never shifts. Mobile drops it entirely (no hover to reveal it there — the
+   mockup disclosed this degradation), same idiom the mobile checkbox-only rows already use. */
+.config-sync-hub-row .config-sync-row-chevron { opacity: 0; transition: opacity 0.12s ease; }
+.config-sync-hub-row:hover .config-sync-row-chevron,
+.config-sync-hub-row .config-sync-row-chevron.is-open { opacity: 1; }
 .config-sync-card > .config-sync-hub-row:last-of-type { border-bottom: none; }
 .config-sync-state-icon { flex: none; width: 1.2em; text-align: center; font-size: var(--font-ui-small); display: inline-flex; align-items: center; justify-content: center; }
 .config-sync-state-icon svg { width: 13px; height: 13px; }
@@ -983,7 +994,13 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 
 .config-sync-switcher { display: flex; align-items: center; gap: var(--size-4-1); width: 100%; background: var(--background-secondary); border: 1px solid var(--background-modifier-border); border-radius: 8px; padding: 7px 11px; cursor: pointer; font-size: var(--font-ui-small); }
 
-.config-sync-switcher-chev { margin-left: auto; color: var(--text-faint); }
+/* Round-12: PICKER family `chevrons-up-down`, ~13px — static faint, accent-colored while its own
+   menu is open (the mobile switcher's one case where a PICKER glyph earns the accent, since this
+   menu isn't a transient Obsidian `Menu`; it's the switcher's own inline panel — replaces the old
+   ▾/▴ text flip). */
+.config-sync-switcher-chev { display: inline-flex; align-items: center; margin-left: auto; color: var(--text-faint); }
+.config-sync-switcher-chev svg { width: 13px; height: 13px; }
+.config-sync-switcher-chev.is-open { color: var(--interactive-accent); }
 
 .config-sync-switcher-selfic { display: inline-flex; align-items: center; color: var(--interactive-accent); }
 .config-sync-switcher-selfic svg { width: 14px; height: 14px; }
@@ -1016,6 +1033,10 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 
 /* Touch targets — Obsidian sets body.is-mobile on phones and tablets */
 body.is-mobile .config-sync-hub-row { min-height: 44px; }
+/* Round-12 乙: mobile has no hover to reveal the item/self row's fold chevron, so it stays
+   hidden entirely there (the mockup disclosed this degradation) — element still in the DOM,
+   just display:none, so nothing else in the row shifts. */
+body.is-mobile .config-sync-hub-row .config-sync-row-chevron { display: none; }
 
 
 
@@ -1256,10 +1277,11 @@ body.is-mobile .config-sync-cardrow:not(.is-iconrow) > .config-sync-explabel-inl
 .config-sync-tworow-ic { display: inline-flex; align-items: center; }
 .config-sync-tworow-ic .svg-icon { width: var(--icon-s); height: var(--icon-s); }
 .config-sync-tworow-vline { width: 1px; align-self: stretch; background: var(--background-modifier-border); }
-/* The `▾` affordance every clickable segment carries (round-9 ②) — decorative (the icon/segment
-   it sits beside owns the click/keydown handlers), small and muted so it reads as a hint, not a
-   second control. */
-.config-sync-tworow-chev { font-size: 10px; color: var(--text-faint); margin-left: 1px; }
+/* The PICKER `chevrons-up-down` affordance every clickable segment carries (round-9 ②, round-12:
+   was text `▾`) — decorative (the icon/segment it sits beside owns the click/keydown handlers),
+   small and muted so it reads as a hint, not a second control. */
+.config-sync-tworow-chev { display: inline-flex; align-items: center; color: var(--text-faint); margin-left: 1px; }
+.config-sync-tworow-chev svg { width: 11px; height: 11px; }
 /* The local segment's muted eyebrow (round-9 ②) — rendered uppercase here, stored lowercase
    (`THIS_DEVICE_EYEBROW`, enablementRow.ts) — plus the wrapper that groups it with the segment
    glyph and carries the shared `.is-set` accent (purple, matching the icon triggers' language)
@@ -1391,11 +1413,14 @@ body.is-mobile .config-sync-cardrow:not(.is-iconrow) > .config-sync-explabel-inl
 .config-sync-dim .config-sync-dim { opacity: 1; }
 .config-sync-dim :disabled { opacity: 1; }
 .config-sync-card-actioncell { display: flex; align-items: center; gap: 2px; }
-.config-sync-card-disclosure { cursor: pointer; color: var(--text-muted); font-size: var(--font-ui-smaller); padding: var(--size-4-1) 0; }
-.config-sync-card-disclosure:hover { color: var(--text-normal); }
 
 .config-sync-card-sfhead { margin-bottom: var(--size-4-1); }
 .config-sync-card-path { font-family: var(--font-monospace); font-size: var(--font-ui-smaller); color: var(--text-normal); }
+/* Round-12: the File preview trigger, 6px after the filename — same open-state language as
+   .config-sync-diffic (FILES row's diff icon): faint at rest, accent while open. */
+.config-sync-card-previewicon { display: inline-flex; align-items: center; margin-left: 6px; color: var(--text-faint); cursor: pointer; }
+.config-sync-card-previewicon svg { width: 14px; height: 14px; }
+.config-sync-card-previewicon.is-open { color: var(--interactive-accent); }
 /* Path text doubles as the edit entry point (round-6 定稿: no ✎ pencil) — hover/focus reveal a
    dotted underline + soft backdrop as the "this is editable" affordance; a committed custom
    path stays accented so deviation from the default is visible at rest. */
@@ -1440,9 +1465,10 @@ body.is-mobile .config-sync-cardrow:not(.is-iconrow) > .config-sync-explabel-inl
 .config-sync-card-companionrow { display: flex; align-items: center; gap: var(--size-4-2); padding: var(--size-4-1) 0; font-size: var(--font-ui-smaller); }
 .config-sync-card-companionrow .config-sync-card-pathinput { flex: 1; min-width: 8em; }
 .config-sync-card-companiongrid { padding: var(--size-4-1) 0; font-size: var(--font-ui-smaller); }
-/* Folder row content column (spec §4 Step 3): name + member count + ▸/▾, click-to-expand. */
+/* Folder row content column (spec §4 Step 3): name + member count pill + fold chevron,
+   click-to-expand (round-12 甲: the count is a bare-number `config-sync-pill is-neutral` now,
+   its own aria-label carrying the full "N themes"/"N files" sentence — no more inline `· ` text). */
 .config-sync-card-foldercontent { display: flex; align-items: center; gap: 4px; cursor: pointer; min-width: 0; }
-.config-sync-card-membercount { color: var(--text-faint); }
 .config-sync-card-memberarrow { color: var(--text-muted); }
 .config-sync-card-snippetmembers { margin-left: var(--size-4-6); }
 /* The two carrier cards' element rows (spec §6.4) — the same rows the snippet member list draws,
@@ -1695,6 +1721,8 @@ button.config-sync-add-row, button.config-sync-add-row:hover { background: none;
 @media (prefers-reduced-motion: reduce) {
   .config-sync-runline-dot { animation: none; }
   .config-sync-progress.is-active::after { animation: none; opacity: 0.35; left: 35%; }
+  .config-sync-row-chevron svg { transition: none; }
+  .config-sync-hub-row .config-sync-row-chevron { transition: none; }
 }
 
 /* ── Mobile layout fixes (定稿 mobile-fixes-mockup, 2026-07-17) ──

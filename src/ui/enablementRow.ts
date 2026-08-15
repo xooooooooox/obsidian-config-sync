@@ -5,7 +5,7 @@
  * Three surfaces render this row — a Sync Center row's `Enabled on`/`Settings sync`, a plugin
  * card's, and a carrier card's element rows — and they must say the same thing, so what each
  * segment SAYS (icon + tooltip) is decided once, here, and the renderers only paint it: an icon,
- * a `▾` affordance, and an aria-label/tooltip built by the exported functions below — never a
+ * a PICKER `chevrons-up-down` affordance (round-12: was text `▾`), and an aria-label/tooltip built by the exported functions below — never a
  * hand-spelled string at the paint site.
  *
  * Round-9 ②: both segments are icon-only now (no more visible wordmark) — the word "Default"

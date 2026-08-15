@@ -146,7 +146,8 @@ shared by a Sync Center row's `Enabled on`/`Settings sync` (shortened from `Defa
 on`/`Default settings sync` — the word "Default" moved into the fleet segment's own tooltip), a
 plugin card's `Enabled on`, and a carrier card's element rows — replacing the old `Runs
 on`/`Settings sync` icon-trigger-plus-menu rows and their `RUNS_ON_ICONS` vocabulary outright.
-Both segments are icon-only now, glyph + a small muted `▾` affordance, no visible wordmark. Fleet
+Both segments are icon-only now, glyph + a small muted `chevrons-up-down` PICKER affordance
+(round-12: was text `▾`), no visible wordmark. Fleet
 segment: `sharingIcon`'s icons for the three device stops, plus `users` for `Each device decides`
 (**never** `airplay` here — the value is about the fleet's arrangement, not this device, and
 `airplay` reads as screen mirroring to a reader who hasn't read the source); tooltip
@@ -205,6 +206,24 @@ highlighted): `rows-2` unified diff (tooltip `Unified diff`) · `columns-2` spli
 `unfold-vertical` show all lines (tooltip `Show all lines`) — the labels that used to sit on the
 buttons (`Unified`/`Split`/`Collapse`/`Full`) now live in the tooltips only.
 
+**Round-12 additions (the text-triangle sweep, §2.4 below):** `chevron-right` — the FOLD family's
+one glyph, rendered by the shared `renderFoldChevron`/`setFoldOpen` helper (`ui/foldChevron.ts`)
+and rotated 90° via CSS when open; every "expands in place" site in the app (Sync Center section
+heads, fold-group/self/item rows, the run-strip's `details`, the self pane's `view change`, the
+Settings tab's rule/remote rows and its member-disclosure arrow, the conflict modal, the report
+strip's per-result rows) now shares this one glyph instead of swapping `chevron-down`/
+`chevron-right` or setting text. Already registered for a different meaning (qualifier-autocomplete
+key rows, §2.3 above) — the two uses never collide because a key row never toggles open/closed, so
+this is a deliberate one-glyph-two-contexts reuse, not tracked as a collision. `chevrons-up-down` —
+the PICKER family's one glyph ("opens a menu/list to choose one of N"): the two-segment row's
+fleet/local segments (`config-sync-tworow-chev`, every site — `enablementRow`'s shared cycle
+control included) and the compact switcher (`config-sync-switcher-chev`), replacing the old muted
+`▾` affordance and the switcher's `▾`/`▴` flip; small (~11px in-row, ~13px switcher), static faint
+everywhere except the switcher, which turns accent-colored while its own menu is open (an
+in-row menu is an Obsidian `Menu`, transient, so it never earns the accent). `eye` — the SETTINGS
+FILE row's File preview trigger (§4 below), replacing the collapsed `▸ File preview` text row.
+All three registered by hand in the icon-collision guard alongside `file-diff`/`settings-2`.
+
 ### 2.4 Glyph language (text, reused everywhere)
 
 Direction *actions* (capture/apply/push/pull) now render as the dedicated icons from
@@ -214,7 +233,13 @@ sidebar/switcher badges, and the mobile filter pills (short form) — except two
 surfaces, which render real Lucide icons instead, parallel to §2.1's key-round exception:
 the header/self-pane self-chip (`check`/`settings`, SyncCenterView.ts) and the
 qualifier-autocomplete value rows (`check`, qualifierSearch.ts). Everywhere else ✓/○
-remain text. Chevrons `▸ ▾ ▴`. Actions `⤓` install, `⏻` enable. Report chips `+ ~ −`.
+remain text. **Chevrons are two distinct glyph families now (round-12), never text:** FOLD
+("expands in place") is one SVG `chevron-right`, rotated 90° via CSS when open — never two
+glyphs swapped, never `renderFoldChevron`'s caller reaching for `setText`; PICKER ("opens a
+menu/list to choose one of N") is SVG `chevrons-up-down`, small and static faint (the mobile
+switcher accents while open, §2.3 above). The old text triangles `▸ ▾ ▴` are banned everywhere —
+every site that used to set one of them as text now renders through one of the two families
+above. Actions `⤓` install, `⏻` enable. Report chips `+ ~ −`.
 Warnings `⚠ ✗`. Conflict modal `＋ ＝`. `⌂` is the vocabulary's local/device-exception
 glyph, used wherever a decision is pinned to one device — the conflict modal is one case
 (`＋ ＝ ⌂`). Scope-cycle controls render their local stop as Lucide `airplay` instead
@@ -350,8 +375,8 @@ noted):
   off `--text-faint`, now that the head sits on the section's bare margin above the filled
   body rather than a flat, single-tone box; unmistakable as a header even with its trailing
   badge covered), `padding-bottom: var(--size-4-2)` separates the head from the body by
-  material contrast alone (no hairline), disclosure triangle (▾ open / ▸ collapsed)
-  scaled to the header size; a checkbox click on the header stages, anywhere else on the
+  material contrast alone (no hairline), the FOLD family's rotating `chevron-right`
+  (round-12: was a text disclosure triangle) scaled to the header size; a checkbox click on the header stages, anywhere else on the
   header toggles collapse. A trailing count pill reads `N/M` under a filter; Core/Community
   carry a header chip (`renderCarrierChip`, spec §6.3) reading `settings-2` + `synced` /
   `not synced` — **read-only since this release**: it used to be the on/off carrier's own
@@ -364,7 +389,9 @@ noted):
   indeterminate state and the global footer already carry it). Section select-all/clear targets actionable visible rows only —
   excludes the self row, in-sync, nothing-yet, and unresolved-conflict rows. Per-section
   trailing fold lines (`config-sync-unchanged`) aggregate only their own section's `N in
-  sync ▸` / `N with nothing to sync yet ▸`, expandable in place. Switching into a filter
+  sync` / `N with nothing to sync yet` (plain text, the leading `.config-sync-row-chevron` plus
+  the fixed-size fold icon compose around it — no trailing triangle baked into the string,
+  C-#50/round-12), expandable in place. Switching into a filter
   pill or a search hit auto-expands every section once, on that transition only, so a
   manual re-collapse during the rest of that filtered/search session still sticks. Group
   headers `config-sync-sect` (uppercase + hairline) — used in the run-report breakdown.
@@ -378,7 +405,8 @@ noted):
   head-outside/body-filled pattern needs a body wrapper element around the entry rows (a
   `.ts` DOM change) — deliberately deferred, not this round's to make. Carrier divergence
   there renders as a pinned
-  `On/off list · differs for N plugins ▸` line (`config-sync-remote-onoff`) whose
+  `On/off list · differs for N plugins` line (plain text, trailing rotating `chevron-right`
+  — round-12, was baked into the string) (`config-sync-remote-onoff`) whose
   expansion shows the per-plugin flips (`config-sync-remote-fliplist`) and the file diff.
   Companion families fold the same way here: companion diff entries merge into their
   parent's entry, each file re-pathed under a `<companion>/` prefix (e.g. `themes/Blue
@@ -440,13 +468,14 @@ noted):
   `Enabled on`/`Settings sync`, a plugin card's `Enabled on`, and a carrier card's element rows
   (Unified card below). Fleet cell on track 2, the divider filling track 3, the local cell on
   track 4 of the row's own four-track grid (round-9 ⑤ above) — so every row's icon and divider
-  land on the same vertical rule. Fleet segment: icon + a muted `▾` affordance, NO visible
+  land on the same vertical rule. Fleet segment: icon + a muted PICKER `chevrons-up-down`
+  affordance (round-12: was text `▾`), NO visible
   wordmark any more (round-9 ②) — click opens an Obsidian `Menu` of the four values (`All devices`
   / `Desktop only` / `Mobile only` / `Each device decides`); icons are `sharingIcon`'s (§2.3),
   `users` for `Each device decides`; tooltip `Default enabled on: <ruleLabel>` /
   `Default settings sync: <sharingLabel>` — the word "Default" that used to open the row's own
   label now lives here instead. Local segment: a muted "this device" eyebrow beside its own
-  icon + `▾` — EVERY state has a glyph now, `corner-down-right` for `follows` included (round-9
+  icon + `chevrons-up-down` — EVERY state has a glyph now, `corner-down-right` for `follows` included (round-9
   ②: it used to render no icon at all here) · `power`/`power-off` for an element, `circle-slash`
   for a whole file · tooltip `This device: <state>`; click opens the local menu
   (`buildLocalMenu`/`buildFileLocalMenu`, §2.3 — unchanged, they still label the MENU ITEMS, a
@@ -455,7 +484,7 @@ noted):
   the same deep-link the `More` row takes (round-10 ①: the prose sentence could never fit the
   56px icon track — three-line wrap; icon + tooltip is the row language everywhere else, and
   `settings-2`'s registered meaning "opens Settings" matches the click's actual behaviour). No
-  `▾` — it is a jump, not a menu; the local segment renders normally beside it. `After
+  picker glyph — it is a jump, not a menu; the local segment renders normally beside it. `After
   install`/`Enablement` keep their own textual triggers (`config-sync-menuchip
   config-sync-card-trigger` — no glyph vocabulary for them), restyled to the same trigger-box
   family so the card reads as one control language regardless of trigger kind. The Settings
@@ -570,7 +599,9 @@ noted):
     (`ruleLandingNeedsSeed`), so switching to it never itself flips the switch.
     ② **Settings file** — mode is derived, never chosen: no per-key rule anywhere (`rules` and
     `perElement` both empty) is whole-file state, any rule is per-key state. The grid's first row
-    (`config-sync-card-sfhead`) is always the path row: path code, a 3-option sharing icon (no
+    (`config-sync-card-sfhead`) is always the path row: path code, an `eye` icon 6px after the
+    filename (round-12, `config-sync-card-previewicon` — the File preview trigger, see below),
+    a 3-option sharing icon (no
     `This device`) and a lock icon toggle (`config-sync-lock`, `.is-on` when encrypted) that
     encrypts the whole file. The path text itself is the edit entry point
     (`config-sync-card-pathbtn`, hover = dotted underline + soft backdrop; `.is-custom` accent
@@ -587,9 +618,11 @@ noted):
     or while `Per-item device rules` is on) and a ✕ (`Remove rule`) that deletes it; a string-array
     key adds a `Per-item device rules` toggle (`config-sync-card-perelement`) — flip it on and each
     element gets its own row (`config-sync-card-elrow`) instead of one rule for the whole key.
-    Removing the last rule flips the card back to whole-file state. Below the rule rows, a
-    collapsed disclosure (`config-sync-card-disclosure`, `▸ File preview` / `▾ File preview`)
-    expands into the read-only `data.json` preview (`jsonView.ts`) — collapsed by default, so a
+    Removing the last rule flips the card back to whole-file state. File preview (round-12: no
+    longer a collapsed text row of its own — the `eye` icon beside the filename above is the
+    trigger now, aria-label/tooltip `File preview`, keyboard-accessible like the FILES row's
+    `file-diff` icon, `.is-open` turns it accent-colored the same way) expands into the
+    read-only `data.json` preview (`jsonView.ts`) below the rule rows — collapsed by default, so a
     card with no rules never reads its file at all — keys colored by rule, a color-dot legend (`config-sync-legend-dot`, round-7 定稿 B)
     underneath, a lucide `lock` (`config-sync-json-lock`) marks an encrypted key,
     `--color-purple` = detected-but-unruled, faint = plain; a `perElement` array colors each
@@ -606,8 +639,11 @@ noted):
     companion folder (③ below) instead.
     ③ **Companion folders** — preset (`themes/`, `snippets/`) and user-added vault-relative
     folders, each on the same grid (`config-sync-card-companiongrid`): content column is the path
-    plus a collapsed member count (`config-sync-card-membercount`: `· N themes` for the themes/
-    preset, `· N files` otherwise) and a ▸/▾ arrow (`config-sync-card-memberarrow`) — click the
+    plus a collapsed member count — round-12: `config-sync-pill is-neutral` bare number
+    (`config-sync-card-membercount`, same neutral-pill family the panel's other counts use),
+    aria-label/tooltip the full `N themes`/`N files` sentence (`memberCountLabel`, was inline
+    text `· N themes`/`· N files`) — then the FOLD family's rotating `chevron-right`
+    (`config-sync-card-memberarrow`, was a text ▸/▾ arrow) — click the
     row to expand its member list, while the folder name itself (same `config-sync-card-pathbtn`
     affordance, click/keydown stopPropagation so it never doubles as the member toggle) opens the
     Save/Cancel path-edit row (autofocused; Escape cancels via the same keymap `Scope` as the

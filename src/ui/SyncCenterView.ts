@@ -83,6 +83,7 @@ import { RunRecord, RunKind, RunStatus, worstStatus, formatRunTime, deleteLeftov
 import { ACTION_ICON, ACTION_COLOR_CLASS, renderActionIcon, renderActionCount, type SyncAction } from "./actionIcons";
 import { FATE_CHIP_ICON } from "./fateChipIcons";
 import { renderFoldIcon, renderFoldCount, type FoldKind } from "./foldIcons";
+import { renderFoldChevron, setFoldOpen } from "./foldChevron";
 // ITEM_SECTION_LABELS aliased: this file already declares its own ITEM_SECTION_LABELS (sidebar category
 // labels, see below) for an unrelated domain.
 import {
@@ -1408,7 +1409,9 @@ export class SyncCenterView extends ItemView {
 
   private renderSelfViewChange(block: HTMLElement, dir: Direction): void {
     const open = this.selfDiffOpen.has(dir);
-    const link = block.createDiv({ cls: "config-sync-self-viewchange", text: open ? "▾ hide change (data.json)" : "▸ view change (data.json)" });
+    const link = block.createDiv({ cls: "config-sync-self-viewchange" });
+    renderFoldChevron(link, open, null);
+    link.appendText(open ? "hide change (data.json)" : "view change (data.json)");
     link.addEventListener("click", () => {
       if (open) this.selfDiffOpen.delete(dir);
       else this.selfDiffOpen.add(dir);
@@ -1567,7 +1570,7 @@ export class SyncCenterView extends ItemView {
       const icon = this.remoteIcon(this.host.remoteCheck(this.panelSection.name)?.check);
       this.paintStateIcon(sw.createSpan({ cls: `config-sync-state-icon ${icon.cls}` }), icon);
     }
-    sw.createSpan({ cls: "config-sync-switcher-chev", text: this.switcherOpen ? "▴" : "▾" });
+    setIcon(sw.createSpan({ cls: `config-sync-switcher-chev${this.switcherOpen ? " is-open" : ""}` }), "chevrons-up-down");
     sw.addEventListener("click", (e) => {
       e.stopPropagation();
       this.switcherOpen = !this.switcherOpen;
@@ -1720,7 +1723,9 @@ export class SyncCenterView extends ItemView {
     }
     const meta = head.createDiv({ cls: "config-sync-strip-meta" });
     renderReportPills(meta, run.results);
-    const toggle = meta.createSpan({ cls: "config-sync-strip-toggle", text: run.expanded ? "details ▾" : "details ▸" });
+    const toggle = meta.createSpan({ cls: "config-sync-strip-toggle" });
+    toggle.appendText("details");
+    renderFoldChevron(toggle, run.expanded, null);
     toggle.addEventListener("click", () => {
       run.expanded = !run.expanded;
       this.render(this.renderGen);
@@ -2114,7 +2119,7 @@ export class SyncCenterView extends ItemView {
     const open = this.typeSectionOpen.has(ts);
     const fold = host.createDiv({ cls: `config-sync-section is-typesection is-${ts}${open ? " is-open" : ""}` });
     const head = fold.createDiv({ cls: "config-sync-section-head" });
-    const chevron = head.createSpan({ cls: "config-sync-row-chevron", text: open ? "▾" : "▸" });
+    const chevron = renderFoldChevron(head, open, null);
     head.createSpan({ cls: "config-sync-section-title", text: TYPE_SECTION_TITLES[ts] });
     // One compact form on every platform (2026-08-13 live find): "6/31". C-#41 introduced the
     // compaction for mobile; the desktop's longer "6 of 31" said the same thing in more ink.
@@ -2166,13 +2171,13 @@ export class SyncCenterView extends ItemView {
       if (this.typeSectionOpen.has(ts)) {
         this.typeSectionOpen.delete(ts);
         fold.removeClass("is-open");
-        chevron.setText("▸");
+        setFoldOpen(chevron, false);
         card?.remove();
         card = null;
       } else {
         this.typeSectionOpen.add(ts);
         fold.addClass("is-open");
-        chevron.setText("▾");
+        setFoldOpen(chevron, true);
         card = this.buildTypeSectionCard(fold, ts, visible, showSelf);
       }
     });
@@ -2245,14 +2250,14 @@ export class SyncCenterView extends ItemView {
     const key = `${this.sectionKey()}::${ts}`;
     let open = openSet.has(key);
     const line = parent.createDiv({ cls: "config-sync-unchanged" });
-    const chevron = line.createSpan({ cls: "config-sync-row-chevron", text: open ? "▾" : "▸" });
+    const chevron = renderFoldChevron(line, open, null);
     renderFoldIcon(line, kind);
     const label = line.createSpan({ cls: "config-sync-fold-label", text: text(rows.length) });
     let foldCard: HTMLElement | null = open ? this.buildFoldCard(parent, line, rows) : null;
     line.addEventListener("click", (e) => {
       e.stopPropagation();
       open = !open;
-      chevron.setText(open ? "▾" : "▸");
+      setFoldOpen(chevron, open);
       label.setText(text(rows.length));
       if (open) {
         openSet.add(key);
@@ -2287,7 +2292,7 @@ export class SyncCenterView extends ItemView {
     if (this.selfInfo === null) return;
     const expanded = this.expandedItems.has(SELF_GROUP_NAME);
     const row = card.createDiv({ cls: "config-sync-hub-row is-self" });
-    const chev = row.createSpan({ cls: "config-sync-row-chevron", text: expanded ? "▾" : "▸" });
+    const chev = renderFoldChevron(row, expanded, null);
     row.createSpan({ cls: "config-sync-rule-name", text: "Config Sync" });
     row.createDiv({ cls: "config-sync-rule-spacer" });
     row.createSpan({ cls: "config-sync-self-fate", text: "your Sync Center — manages itself" });
@@ -2298,7 +2303,7 @@ export class SyncCenterView extends ItemView {
       if (this.expandedItems.has(SELF_GROUP_NAME)) this.expandedItems.delete(SELF_GROUP_NAME);
       else this.expandedItems.add(SELF_GROUP_NAME);
       detail.hidden = !detail.hidden;
-      chev.setText(detail.hidden ? "▸" : "▾");
+      setFoldOpen(chev, !detail.hidden);
     });
   }
 
@@ -2466,7 +2471,7 @@ export class SyncCenterView extends ItemView {
       cls: `config-sync-hub-row${inert ? " is-insync" : ""}${unresolvedConflict ? " is-conflict" : ""}`,
       attr: { "aria-label": this.host.resolvedPath(group) },
     });
-    const chev = row.createSpan({ cls: "config-sync-row-chevron", text: expanded ? "▾" : "▸" });
+    const chev = renderFoldChevron(row, expanded, null);
     this.renderRuleName(row, group.name, group.label);
     // C-#43/#44 (batch-21 spec §1, revising batch-20's ≥2 threshold): ANY chip-bearing row (1+
     // chips) pushes its chips to their own indented meta line under the row (built below, after
@@ -2538,7 +2543,7 @@ export class SyncCenterView extends ItemView {
       if (this.expandedItems.has(group.name)) this.expandedItems.delete(group.name);
       else this.expandedItems.add(group.name);
       detail.hidden = !detail.hidden;
-      chev.setText(detail.hidden ? "▸" : "▾");
+      setFoldOpen(chev, !detail.hidden);
       fateWrap.hidden = !detail.hidden;
       // Review fix: hiding/showing fateWrap changes how much of the row's own width its OTHER
       // content (chips inline in the row, on desktop or a mobile 0–1-chip row) has to share — a
@@ -2833,7 +2838,11 @@ export class SyncCenterView extends ItemView {
     };
     for (const e of shown) renderEntry(e);
     if (rest.length > 0) {
-      const more = detail.createDiv({ cls: "config-sync-more-files", text: moreFilesText(rest.length) });
+      const more = detail.createDiv({ cls: "config-sync-more-files" });
+      more.appendText(moreFilesText(rest.length));
+      // A one-way reveal (never re-collapses), so the chevron never rotates — the FOLD family's
+      // glyph, static, same idiom as the row-chevron everywhere else (round-12).
+      setIcon(more.createSpan({ cls: "config-sync-row-chevron" }), "chevron-right");
       more.addEventListener("click", (ev) => {
         ev.stopPropagation();
         more.remove();
@@ -2873,29 +2882,29 @@ export class SyncCenterView extends ItemView {
     });
   }
 
-  // The fleet segment of a two-segment row (spec §6.1, round-9 ②): an icon + a muted `▾`
-  // affordance, wired to its own menu — no visible wordmark any more (the row's own label already
-  // says what the ROW is; the segment's tooltip says what its VALUE is). Lands on track 2 of the
-  // row's four-track grid (round-9 ⑤), so every two-segment row's fleet icon — and the More row's
-  // — sit on the same vertical rule.
+  // The fleet segment of a two-segment row (spec §6.1, round-9 ②): an icon + a muted PICKER
+  // `chevrons-up-down` affordance (round-12: was text `▾`), wired to its own menu — no visible
+  // wordmark any more (the row's own label already says what the ROW is; the segment's tooltip
+  // says what its VALUE is). Lands on track 2 of the row's four-track grid (round-9 ⑤), so every
+  // two-segment row's fleet icon — and the More row's — sit on the same vertical rule.
   private paintFleetSegment(host: HTMLElement, seg: RowSegment, isSet: boolean, menu: () => Menu): void {
     const el = host.createSpan({ cls: `config-sync-tworow-fleetcell${isSet ? " is-set" : ""}`, attr: { "aria-label": seg.tooltip } });
     if (seg.icon !== null) setIcon(el.createSpan({ cls: "config-sync-tworow-ic" }), seg.icon);
-    el.createSpan({ cls: "config-sync-tworow-chev", text: "▾" });
+    setIcon(el.createSpan({ cls: "config-sync-tworow-chev" }), "chevrons-up-down");
     this.wireMenuTrigger(el, menu);
   }
 
-  // The local segment (round-9 ②): a muted "this device" eyebrow beside the same icon+▾ shape,
-  // wired to the local menu. Factored out of renderTwoSegmentRow so `Settings sync`'s fields-mode
-  // branch (a plain fleet NOTE, not a menu) can still paint a working local segment beside it
-  // without renderTwoSegmentRow having to accept a fleet that lies about opening a menu. Lands on
-  // track 4.
+  // The local segment (round-9 ②): a muted "this device" eyebrow beside the same icon+picker
+  // shape, wired to the local menu. Factored out of renderTwoSegmentRow so `Settings sync`'s
+  // fields-mode branch (a plain fleet NOTE, not a menu) can still paint a working local segment
+  // beside it without renderTwoSegmentRow having to accept a fleet that lies about opening a
+  // menu. Lands on track 4.
   private paintLocalSegment(host: HTMLElement, seg: RowSegment, isException: boolean, menu: () => Menu): void {
     const cell = host.createDiv({ cls: `config-sync-tworow-localcell${isException ? " is-set" : ""}` });
     cell.createSpan({ cls: "config-sync-tworow-eyebrow", text: THIS_DEVICE_EYEBROW });
     const el = cell.createSpan({ cls: "config-sync-tworow-seg", attr: { "aria-label": seg.tooltip } });
     if (seg.icon !== null) setIcon(el.createSpan({ cls: "config-sync-tworow-ic" }), seg.icon);
-    el.createSpan({ cls: "config-sync-tworow-chev", text: "▾" });
+    setIcon(el.createSpan({ cls: "config-sync-tworow-chev" }), "chevrons-up-down");
     this.wireMenuTrigger(el, menu);
   }
 
@@ -3682,10 +3691,11 @@ export class SyncCenterView extends ItemView {
         });
       }
       if (matched > 0) {
-        const line = detail.createDiv({
-          cls: "config-sync-unchanged",
-          text: `✓ ${matched} more item${matched === 1 ? " matches" : "s match"} ▸`,
-        });
+        const line = detail.createDiv({ cls: "config-sync-unchanged" });
+        line.appendText(`✓ ${matched} more item${matched === 1 ? " matches" : "s match"}`);
+        // A one-way reveal (never re-collapses) — same static FOLD glyph as renderUnifiedFiles's
+        // "N more files" line (round-12).
+        setIcon(line.createSpan({ cls: "config-sync-row-chevron" }), "chevron-right");
         line.addEventListener("click", () => line.setText(`✓ ${matchNames.join(" · ")}`));
       }
     }
@@ -3743,12 +3753,13 @@ export class SyncCenterView extends ItemView {
       this.renderRemoteFileRows(fold, e, remoteName);
     };
     let open = this.remoteFoldsOpen.has(key);
-    line.setText(onOffLineText(n, open));
+    line.appendText(onOffLineText(n));
+    const chev = renderFoldChevron(line, open, null);
     if (open) buildFold();
     else fold.hide();
     line.addEventListener("click", () => {
       open = !open;
-      line.setText(onOffLineText(n, open));
+      setFoldOpen(chev, open);
       if (!open) {
         fold.hide();
         this.remoteFoldsOpen.delete(key);
@@ -3775,7 +3786,7 @@ export class SyncCenterView extends ItemView {
     const key = `${remoteName}::${e.group}`;
     const isOpen = this.remoteFoldsOpen.has(key);
     const row = detail.createDiv({ cls: "config-sync-report-row config-sync-remote-row" });
-    const chev = row.createSpan({ cls: "config-sync-cm-chev", text: isOpen ? "▾" : "▸" });
+    const chev = renderFoldChevron(row, isOpen, "config-sync-cm-chev");
     this.renderRuleName(row, e.group, storedLabel);
     row.createDiv({ cls: "config-sync-rule-spacer" });
     const counts = { added: 0, updated: 0, deleted: 0 };
@@ -3792,14 +3803,14 @@ export class SyncCenterView extends ItemView {
       const open = fold.isShown();
       if (open) {
         fold.hide();
-        chev.setText("▸");
+        setFoldOpen(chev, false);
         this.remoteFoldsOpen.delete(key);
         return;
       }
       fold.empty();
       this.renderRemoteFileRows(fold, e, remoteName);
       fold.show();
-      chev.setText("▾");
+      setFoldOpen(chev, true);
       this.remoteFoldsOpen.add(key);
     });
   }

@@ -129,7 +129,7 @@ export interface CappedEntry {
 }
 
 // Flattens a change set (added → updated → deleted) and splits it at `limit`
-// so the detail view can render `shown` plus a "… N more files ▸" line for `rest`.
+// so the detail view can render `shown` plus a "… N more files" line for `rest`.
 export function capFileEntries(changes: FileChanges, limit: number): { shown: CappedEntry[]; rest: CappedEntry[] } {
   const all: CappedEntry[] = [
     ...changes.added.map((name): CappedEntry => ({ kind: "add", name })),
@@ -155,8 +155,11 @@ export function excludedLineText(n: number): string {
   return `${n} item${n === 1 ? "" : "s"} not synced on this device`;
 }
 
+// Round-12: plain text, no trailing triangle — the renderer appends a static FOLD-family
+// `chevron-right` after this label (same idiom insyncLineText's comment above already
+// established); this "more" line never re-collapses, so the icon never rotates.
 export function moreFilesText(n: number): string {
-  return `… ${n} more files ▸`;
+  return `… ${n} more files`;
 }
 
 // Default direction by state: capture for local-changed/not-captured, apply otherwise.
@@ -455,8 +458,11 @@ export function onOffFlips(local: string | null, remote: string | null): OnOffFl
   };
 }
 
-export function onOffLineText(n: number, open: boolean): string {
-  return `On/off list · differs for ${n} plugin${n === 1 ? "" : "s"} ${open ? "▾" : "▸"}`;
+// Round-12: `open` dropped — plain text now, no trailing triangle baked into the string. The
+// renderer composes a FOLD-family `chevron-right` after this label and rotates it via
+// `setFoldOpen` on toggle instead of re-setting the whole line's text.
+export function onOffLineText(n: number): string {
+  return `On/off list · differs for ${n} plugin${n === 1 ? "" : "s"}`;
 }
 
 // Cap on display names shown per side before collapsing to "and N more" (spec

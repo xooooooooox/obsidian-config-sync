@@ -1,7 +1,8 @@
-import { Setting } from "obsidian";
+import { Setting, setIcon } from "obsidian";
 import { GroupResult, StorageSection } from "../core/types";
 import { isChanged } from "../core/runHistory";
 import { SECTION_LABELS, sectionForGroup } from "../core/catalog";
+import { renderFoldChevron, setFoldOpen } from "./foldChevron";
 
 export const REPORT_CATEGORY_ORDER: StorageSection[] = ["obsidian", "core", "community", "custom"];
 
@@ -92,10 +93,11 @@ export function renderReportContent(container: HTMLElement, results: GroupResult
     renderResultRow(container.createDiv({ cls: "config-sync-card" }), meta, "Sync setup");
   }
   if (unchanged.length > 0) {
-    const line = container.createDiv({
-      cls: "config-sync-unchanged",
-      text: `✓ ${unchanged.length} item${unchanged.length === 1 ? "" : "s"} unchanged ▸`,
-    });
+    const line = container.createDiv({ cls: "config-sync-unchanged" });
+    line.appendText(`✓ ${unchanged.length} item${unchanged.length === 1 ? "" : "s"} unchanged`);
+    // A one-way reveal (never re-collapses) — static FOLD glyph, same idiom as
+    // SyncCenterView.ts's "N more files"/"N more item matches" lines (round-12).
+    setIcon(line.createSpan({ cls: "config-sync-row-chevron" }), "chevron-right");
     line.addEventListener("click", () => {
       line.setText(`✓ ${unchanged.map((r) => opts.labelFor(r.group)).join(" · ")}`);
     });
@@ -110,7 +112,7 @@ export function renderReportContent(container: HTMLElement, results: GroupResult
 function renderResultRow(block: HTMLElement, r: GroupResult, label: string): void {
   const isError = r.status !== "ok";
   const row = block.createDiv({ cls: "config-sync-report-row" });
-  const chev = row.createSpan({ cls: "config-sync-row-chevron", text: isError ? "▾" : "▸" });
+  const chev = renderFoldChevron(row, isError, null);
   row.createSpan({ cls: "config-sync-rule-name", text: label });
   if (r.stateNote !== undefined) {
     row.createSpan({
@@ -136,6 +138,6 @@ function renderResultRow(block: HTMLElement, r: GroupResult, label: string): voi
   for (const f of r.changes.deleted) detail.createDiv({ cls: "is-del", text: `− ${f}` });
   row.addEventListener("click", () => {
     detail.hidden = !detail.hidden;
-    chev.setText(detail.hidden ? "▸" : "▾");
+    setFoldOpen(chev, !detail.hidden);
   });
 }
