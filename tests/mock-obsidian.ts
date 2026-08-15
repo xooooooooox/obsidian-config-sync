@@ -64,7 +64,8 @@ export class Notice {
 export const Platform = { isMobile: false, isDesktop: true, isDesktopApp: true, isMobileApp: false };
 // Records the glyph ON the element it was given. Obsidian's real setIcon appends an <svg>; this
 // suite has no DOM, so the icon NAME is the only observable — and a renderer that chooses between
-// two icon vocabularies (sharingCycle.ts's `iconFor` hook) has nothing else to be tested by.
+// two icon vocabularies (SettingTab's `renderSharingPicker`/`iconFor` hook) has nothing else to be
+// tested by.
 export function setIcon(el?: unknown, icon?: string): void {
   if (typeof el === "object" && el !== null) (el as { iconName?: string }).iconName = icon;
 }

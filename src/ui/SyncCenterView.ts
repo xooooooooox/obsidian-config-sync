@@ -2946,11 +2946,17 @@ export class SyncCenterView extends ItemView {
 
   // Click/keydown → open an Obsidian Menu at the trigger's position, shared by every card
   // rule-control trigger (icon or text) so a menu opens the same way regardless of trigger kind.
+  // Tracks `.is-open` on the trigger while the menu is showing (定稿轮 16甲乙, ⇕ hover-reveal —
+  // DESIGN.md §2.3), cleared via `Menu.onHide` — the PICKER chevron accents and stays revealed
+  // while its own menu is open, matching SettingTab's own `wireMenuTrigger`.
   private wireMenuTrigger(trigger: HTMLElement, buildMenu: () => Menu): void {
     trigger.setAttribute("role", "button");
     trigger.setAttribute("tabindex", "0");
     const open = (x: number, y: number): void => {
-      buildMenu().showAtPosition({ x, y });
+      const menu = buildMenu();
+      trigger.addClass("is-open");
+      menu.onHide(() => trigger.removeClass("is-open"));
+      menu.showAtPosition({ x, y });
     };
     trigger.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -3136,7 +3142,8 @@ export class SyncCenterView extends ItemView {
   // Item.settingsFile.fileRule.sharing for every item, custom (folder) items included since
   // runsOn's retirement, 2026-08-12-enablement-two-layers task 8 — one entrance, not two); local
   // segment is this device's own whole-file opt-out (§6.2's footer menu, second item, moved here).
-  // The Settings tab's own drawer cycle control (renderSharingCycle) is untouched.
+  // The Settings tab's own drawer control (renderSharingPicker, 定稿轮 16甲) opens the same kind of
+  // menu now — the two entrances stayed in step, just not through this method.
   private renderSettingsSyncRow(detail: HTMLElement, r: StatusRow): void {
     const name = r.group.name;
     const ref = this.itemRefFor(name);

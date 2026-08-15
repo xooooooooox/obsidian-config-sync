@@ -1289,9 +1289,26 @@ body.is-mobile .config-sync-cardrow:not(.is-iconrow) > .config-sync-explabel-inl
 .config-sync-tworow-vline { width: 1px; align-self: stretch; background: var(--background-modifier-border); }
 /* The PICKER `chevrons-up-down` affordance every clickable segment carries (round-9 ②, round-12:
    was text `▾`) — decorative (the icon/segment it sits beside owns the click/keydown handlers),
-   small and muted so it reads as a hint, not a second control. */
-.config-sync-tworow-chev { display: inline-flex; align-items: center; color: var(--text-faint); margin-left: 1px; }
+   small and muted so it reads as a hint, not a second control.
+   Hover-reveal (定稿轮 14b/16乙, same idiom as the fold chevron's round-12 乙 above): invisible at
+   rest, constant layout (opacity only, never display:none while interactive) — revealed on the
+   containing ROW's hover or while the trigger's own menu is open (`.is-open`, set by
+   wireMenuTrigger/onHide in both SettingTab.ts and SyncCenterView.ts), which also accents it the
+   same purple/accent language `.is-set` already uses elsewhere. Row scopes: `.config-sync-grid`
+   (every Settings-tab card row) and `.config-sync-cardrow` (the Sync Center's expanded card
+   rows) — the two places this glyph actually lives. */
+.config-sync-tworow-chev { display: inline-flex; align-items: center; color: var(--text-faint); margin-left: 1px; opacity: 0; transition: opacity 0.12s ease; }
 .config-sync-tworow-chev svg { width: 11px; height: 11px; }
+.config-sync-grid:hover .config-sync-tworow-chev,
+.config-sync-cardrow:hover .config-sync-tworow-chev,
+.is-open .config-sync-tworow-chev {
+  opacity: 1;
+}
+.is-open .config-sync-tworow-chev { color: var(--interactive-accent); }
+/* Mobile has no hover to reveal it (same degradation the fold chevron takes, round-12 乙) — the
+   mobile section switcher (`.config-sync-switcher-chev`, its own class, its own always-visible
+   rule below) is the one deliberate exception: it is the sole entrance to the section list there. */
+body.is-mobile .config-sync-tworow-chev { display: none; }
 /* The local segment's muted eyebrow (round-9 ②) — rendered uppercase here, stored lowercase
    (`THIS_DEVICE_EYEBROW`, enablementRow.ts) — plus the wrapper that groups it with the segment
    glyph and carries the shared `.is-set` accent (purple, matching the icon triggers' language)
@@ -1733,6 +1750,7 @@ button.config-sync-add-row, button.config-sync-add-row:hover { background: none;
   .config-sync-progress.is-active::after { animation: none; opacity: 0.35; left: 35%; }
   .config-sync-row-chevron svg { transition: none; }
   .config-sync-hub-row .config-sync-row-chevron { transition: none; }
+  .config-sync-tworow-chev { transition: none; }
 }
 
 /* ── Mobile layout fixes (定稿 mobile-fixes-mockup, 2026-07-17) ──

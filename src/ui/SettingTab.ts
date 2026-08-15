@@ -23,6 +23,7 @@ import {
   Section,
   Sharing,
   sharingClass,
+  sharingEquals,
   SyncGroup,
   SyncMode,
   THIS_DEVICE,
@@ -71,7 +72,6 @@ import { FolderSelectModal } from "./FolderSelectModal";
 import { confirmPresetPathChange } from "./ConfirmModal";
 import { commitDraft } from "./commitGroups";
 import { classifyJsonKeys, classifyPerElementLines, jsonElementClass, jsonKeyClass, KeyClass } from "./jsonView";
-import { renderSharingCycle } from "./sharingCycle";
 import { renderFoldChevron, setFoldOpen } from "./foldChevron";
 import { DeviceElementState } from "../core/deviceElements";
 import { enablementRules, RuleListId, ruledElementIds } from "../core/enablementRules";
@@ -81,6 +81,7 @@ import {
   enablementRowModel,
   EnablementRowModel,
   ruleIcon,
+  ruleLabel,
   ruleLandingNeedsSeed,
   RULE_OPTIONS,
   THIS_DEVICE_EYEBROW,
@@ -124,6 +125,8 @@ import {
   PREVIEW_LEGEND_ENTRIES,
   sectionAllEnabled,
   settingsFileZoneKind,
+  sharingCycleTooltip,
+  sharingIcon,
   sharingLabel,
   SnippetMemberRow,
   sortCompanionMemberNames,
@@ -1056,6 +1059,82 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     if (ruleLandingNeedsSeed(rule, this.host.deviceElementFor(list, elementId))) await this.host.leaveToThisDevice(list, elementId);
   }
 
+  // Wires a picker trigger's click/keydown → opens an Obsidian `Menu` at the click/keyboard
+  // position, and tracks `.is-open` on the trigger while the menu is showing (定稿轮 16甲, ⇕
+  // hover-reveal — DESIGN.md §2.3), cleared via `Menu.onHide`. Shared by every sharing/rule
+  // picker in this file (renderSharingPicker below) and the local-segment menu, so the
+  // open/close bookkeeping lives in exactly one place — the same shape SyncCenterView's own
+  // `wireMenuTrigger` uses, so a menu opens and reveals its chevron the same way everywhere.
+  private wireMenuTrigger(trigger: HTMLElement, buildMenu: () => Menu): void {
+    trigger.setAttribute("role", "button");
+    trigger.setAttribute("tabindex", "0");
+    const open = (x: number, y: number): void => {
+      const menu = buildMenu();
+      trigger.addClass("is-open");
+      menu.onHide(() => trigger.removeClass("is-open"));
+      menu.showAtPosition({ x, y });
+    };
+    trigger.addEventListener("click", (e) => {
+      e.stopPropagation();
+      open(e.clientX, e.clientY);
+    });
+    trigger.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      e.preventDefault();
+      e.stopPropagation();
+      const r = trigger.getBoundingClientRect();
+      open(r.left, r.bottom);
+    });
+  }
+
+  // The sharing/rule picker trigger (定稿轮 16甲: the click-to-cycle idiom — renderSharingCycle —
+  // retires everywhere). Icon + a small muted `chevrons-up-down` PICKER affordance opens an
+  // Obsidian `Menu` listing `options`, checkmarked on the current value — the same idiom the
+  // local segment below and the Sync Center's own pickers already use. `iconFor`/`labelFor`
+  // choose the vocabulary: the enablement rows (plugin card `Enabled on`, carrier element rows)
+  // pass `ruleIcon`/`ruleLabel` (enablementRow.ts — the SAME producer the Sync Center's own
+  // `ruleMenu` reads, so both entrances offer identical wording); the plain field/file/companion
+  // rows fall back to `sharingIcon`/`sharingLabel` (itemCard.ts), byte-identical to the old
+  // cycle's default vocabulary. `disabled` keeps the old dim, non-interactive rendering — no
+  // chevron, no menu (the settings-file row's per-key-rules-active state).
+  private renderSharingPicker(
+    cell: HTMLElement,
+    opts: {
+      sharing: Sharing;
+      options: readonly Sharing[];
+      disabled: boolean;
+      note?: string;
+      iconFor?: (s: Sharing) => string;
+      labelFor?: (s: Sharing) => string;
+      ariaLabel?: string;
+      onChange: (v: Sharing) => void;
+    }
+  ): void {
+    const iconOf = opts.iconFor ?? sharingIcon;
+    const labelOf = opts.labelFor ?? sharingLabel;
+    const icon = cell.createSpan({ cls: `config-sync-sharingicon${opts.sharing.kind !== "everywhere" ? " is-set" : ""}` });
+    setIcon(icon, iconOf(opts.sharing));
+    icon.setAttribute("aria-label", opts.ariaLabel ?? sharingCycleTooltip(opts.sharing, opts.note));
+    if (opts.disabled) {
+      icon.addClass("config-sync-dim");
+      return;
+    }
+    setIcon(icon.createSpan({ cls: "config-sync-tworow-chev" }), "chevrons-up-down");
+    this.wireMenuTrigger(icon, () => {
+      const menu = new Menu();
+      for (const o of opts.options) {
+        menu.addItem((item) =>
+          item
+            .setTitle(labelOf(o))
+            .setIcon(iconOf(o))
+            .setChecked(sharingEquals(o, opts.sharing))
+            .onClick(() => opts.onChange(o))
+        );
+      }
+      return menu;
+    });
+  }
+
   // The two-segment row's LOCAL half (spec §6.1, round-9 ② eyebrow+icon+picker revision), painted once
   // for both of this file's rows that have one: a plugin card's `Enabled on` and a carrier card's
   // element rows. It leads with the divider because the divider only exists when there IS a
@@ -1079,13 +1158,10 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     cell.createSpan({ cls: "config-sync-tworow-vline" });
     const wrap = cell.createDiv({ cls: `config-sync-tworow-localcell${opts.model.localIsException ? " is-set" : ""}` });
     wrap.createSpan({ cls: "config-sync-tworow-eyebrow", text: THIS_DEVICE_EYEBROW });
-    const local = wrap.createSpan({
-      cls: "config-sync-tworow-seg",
-      attr: { role: "button", tabindex: "0", "aria-label": opts.model.local.tooltip },
-    });
+    const local = wrap.createSpan({ cls: "config-sync-tworow-seg", attr: { "aria-label": opts.model.local.tooltip } });
     if (opts.model.local.icon !== null) setIcon(local.createSpan({ cls: "config-sync-tworow-ic" }), opts.model.local.icon);
     setIcon(local.createSpan({ cls: "config-sync-tworow-chev" }), "chevrons-up-down");
-    const openLocalMenu = (x: number, y: number): void => {
+    this.wireMenuTrigger(local, () => {
       const menu = new Menu();
       // The entry list is buildLocalMenu's (enablementRow.ts), not this file's — the Sync Center's
       // row asks the same producer, so the two entrances cannot offer different choices (§6.6).
@@ -1098,17 +1174,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
           if (entry.icon !== null) i.setIcon(entry.icon);
         });
       }
-      menu.showAtPosition({ x, y });
-    };
-    local.addEventListener("click", (e) => {
-      e.stopPropagation();
-      openLocalMenu(e.clientX, e.clientY);
-    });
-    local.addEventListener("keydown", (e) => {
-      if (e.key !== "Enter" && e.key !== " ") return;
-      e.preventDefault();
-      const r = local.getBoundingClientRect();
-      openLocalMenu(r.left, r.bottom);
+      return menu;
     });
   }
 
@@ -1136,18 +1202,19 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         build();
         this.refreshCardBadges(wrap, def);
       };
-      // Fleet segment (round-9 ②): icon-only now, over the four rule values — with the enablement
-      // vocabulary passed in, because the same `Sharing` union answers a different question here
-      // (see renderSharingCycle's own note). No `labelFor`: the wordmark retired everywhere the
-      // two-segment presentation appears, and `enabledOnTooltip` — the same producer the Sync
+      // Fleet segment (round-9 ②, menu since 定稿轮 16甲): icon-only, over the four rule values —
+      // with the enablement vocabulary passed in, because the same `Sharing` union answers a
+      // different question here (see renderSharingPicker's own note). No `labelFor` glyph beside
+      // the icon: the wordmark retired everywhere the two-segment presentation appears; `ruleLabel`
+      // still supplies each MENU ITEM's title. `enabledOnTooltip` — the same producer the Sync
       // Center's row reads — is the aria-label/tooltip instead. A desktop-only plugin still drops
       // the mobile stop: mobile can never install it.
-      renderSharingCycle(cell.createDiv(), {
+      this.renderSharingPicker(cell.createDiv(), {
         sharing: rule,
         options: def.desktopOnly === true ? RULE_OPTIONS.filter((o) => o.kind !== "per-class" || o.class !== "mobile") : RULE_OPTIONS,
         disabled: false,
         iconFor: ruleIcon,
-        chevron: true,
+        labelFor: ruleLabel,
         ariaLabel: `${enabledOnTooltip(rule)}${def.desktopOnly === true && rule.kind === "everywhere" ? ` (${DESKTOP_ONLY_ALL_NOTE})` : ""}`,
         onChange: (v) => void this.setRuleWithLanding(list, elementId, v).then(after),
       });
@@ -1203,15 +1270,15 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         build();
         opts.onWritten();
       };
-      // Fleet segment (round-9 ②: icon-only, same as the plugin card's) — the same control,
-      // vocabulary and desktop-only stop-drop the plugin card's `Enabled on` uses above, because
-      // it is the same question about the same datum.
-      renderSharingCycle(hasLocalLayer ? fleetHost.createDiv() : fleetHost, {
+      // Fleet segment (round-9 ②: icon-only, same as the plugin card's; menu since 定稿轮 16甲) —
+      // the same control, vocabulary and desktop-only stop-drop the plugin card's `Enabled on`
+      // uses above, because it is the same question about the same datum.
+      this.renderSharingPicker(hasLocalLayer ? fleetHost.createDiv() : fleetHost, {
         sharing: rule,
         options: opts.desktopOnly ? RULE_OPTIONS.filter((o) => o.kind !== "per-class" || o.class !== "mobile") : RULE_OPTIONS,
         disabled: false,
         iconFor: ruleIcon,
-        chevron: true,
+        labelFor: ruleLabel,
         ariaLabel: `${enabledOnTooltip(rule)}${opts.desktopOnly && rule.kind === "everywhere" ? ` (${DESKTOP_ONLY_ALL_NOTE})` : ""}`,
         onChange: (v) => void this.writeElementRule(opts.def, opts.wrap, opts.list, opts.elementId, v).then(after),
       });
@@ -1410,7 +1477,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     };
     // setFileRule re-renders this whole row after every write, so the icon always reflects the
     // freshly-saved sharing without any extra bookkeeping here.
-    renderSharingCycle(sharingCell, {
+    this.renderSharingPicker(sharingCell, {
       sharing: rule.sharing,
       options: FILE_SHARING_OPTIONS,
       disabled: locked,
@@ -1587,7 +1654,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       })();
     };
     // setRule → refreshCardBody rebuilds every rule row, so the icon re-reads the fresh sharing.
-    renderSharingCycle(fr.createDiv(), {
+    this.renderSharingPicker(fr.createDiv(), {
       sharing: row.rule.sharing,
       options: FIELD_SHARING_OPTIONS,
       disabled: false,
@@ -1656,7 +1723,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     r.createSpan({ cls: "config-sync-card-elname", text: element });
     const sharingCell = r.createDiv();
     // refreshCardBody below rebuilds these element rows, so the icon re-reads the fresh sharing.
-    renderSharingCycle(sharingCell, {
+    this.renderSharingPicker(sharingCell, {
       sharing,
       options: FIELD_SHARING_OPTIONS,
       disabled: false,
@@ -1929,13 +1996,13 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       })();
     };
     // updateCompanion deliberately never re-renders (see its comment), so the icon rebuilds
-    // itself from a locally-tracked value after each advance. A companion folder syncs as a
+    // itself from a locally-tracked value after each pick. A companion folder syncs as a
     // whole, so its axis is the device class, not a per-key sharing.
     const deviceCell = r.createDiv();
     let curDevice = row.device;
     const buildDevice = (): void => {
       deviceCell.empty();
-      renderSharingCycle(deviceCell, {
+      this.renderSharingPicker(deviceCell, {
         sharing: curDevice === "all" ? EVERYWHERE : perClass(curDevice),
         options: COMPANION_DEVICE_OPTIONS.map((d) => (d === "all" ? EVERYWHERE : perClass(d))),
         disabled: false,

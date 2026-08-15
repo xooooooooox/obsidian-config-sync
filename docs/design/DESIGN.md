@@ -149,14 +149,25 @@ double as the self-pane title's capture/coldstart states, with `alert-triangle` 
 `settings` default — see §2.4) · tabs: `settings`,
 `gem`, `toy-brick`, `puzzle`, `flask-conical` (BratIcon preferred when registered),
 `wrench`, `git-branch` · `monitor` / `smartphone` — `sharingIcon`'s Desktop only/Mobile only
-stops (every sharing cycle) and the row-level
+stops (every sharing picker) and the row-level
 desktop-only-plugin badge (`config-sync-card-badge-plat`, itemCard.ts) · `airplay` —
-`sharingIcon` "This device" stop, used ONLY for a plain field/file rule's cycle (no local
-layer to speak for); the whole cycle renders through the one shared
-`renderSharingCycle` (sharingCycle.ts; the model — `sharingIcon`/`nextSharing`/`sharingCycleTooltip`
-— stays in itemCard.ts), used by every Settings drawer sharing cell that has no local layer —
-a direct-cycle click there advances straight to the next option. `monitor-smartphone` — the
-sharing-cycle "All devices" stop.
+`sharingIcon` "This device" stop, used ONLY for a plain field/file rule's picker (no local
+layer to speak for). **The click-to-cycle idiom is retired (定稿轮 16甲):** `renderSharingCycle`
+(sharingCycle.ts) is deleted outright — every sharing/rule control in the Settings tab now opens
+an Obsidian `Menu` instead of advancing on click, through `SettingTab.ts`'s own
+`renderSharingPicker` (the vocabulary model — `sharingIcon`/`nextSharing`/`sharingCycleTooltip` —
+stays in itemCard.ts; `nextSharing` keeps its own unit tests as a pure function even though
+nothing renders through it any more). Every Settings drawer sharing cell — the settings-file
+row's whole-file sharing, a rule row's/array-element's per-key sharing, a companion folder's
+device class, a plugin card's `Enabled on` fleet segment, a carrier element's fleet segment —
+is a picker now: icon + a small muted `chevrons-up-down` PICKER affordance, click opens a `Menu`
+listing `options` with icons + a checkmark on the current value (§2.4). `iconFor`/`labelFor`
+select the vocabulary; the enablement rows (`Enabled on`, carrier elements) pass
+`ruleIcon`/`ruleLabel` (`enablementRow.ts`) — the SAME producer the Sync Center's own `ruleMenu`
+reads, so both entrances offer identical wording — everything else falls back to
+`sharingIcon`/`sharingLabel`. A disabled cell (the settings-file row's per-key-rules-active
+state) keeps the old dim, non-interactive rendering: no chevron, no menu. `monitor-smartphone` —
+the "All devices" stop.
 
 **The two-segment row** (spec `2026-08-12-enablement-two-layers-design.md` §6.1, round-9 ②/⑤
 icon-only revision, `ui/enablementRow.ts`): `label | fleet segment | divider | local segment`,
@@ -236,11 +247,19 @@ strip's per-result rows) now shares this one glyph instead of swapping `chevron-
 key rows, §2.3 above) — the two uses never collide because a key row never toggles open/closed, so
 this is a deliberate one-glyph-two-contexts reuse, not tracked as a collision. `chevrons-up-down` —
 the PICKER family's one glyph ("opens a menu/list to choose one of N"): the two-segment row's
-fleet/local segments (`config-sync-tworow-chev`, every site — `enablementRow`'s shared cycle
-control included) and the compact switcher (`config-sync-switcher-chev`), replacing the old muted
-`▾` affordance and the switcher's `▾`/`▴` flip; small (~11px in-row, ~13px switcher), static faint
-everywhere except the switcher, which turns accent-colored while its own menu is open (an
-in-row menu is an Obsidian `Menu`, transient, so it never earns the accent). `eye` — the SETTINGS
+fleet/local segments and every plain sharing/rule picker (`config-sync-tworow-chev`, one class,
+every site — `renderSharingPicker`/`renderLocalSegment` in SettingTab.ts and their SyncCenterView.ts
+counterparts all paint it) and the compact switcher (`config-sync-switcher-chev`), replacing the
+old muted `▾` affordance and the switcher's `▾`/`▴` flip; small (~11px in-row, ~13px switcher).
+**⇕ hover-reveal (定稿轮 14b/16乙):** `config-sync-tworow-chev` is invisible at rest (`opacity: 0`,
+constant layout — never a horizontal shift) and reveals on two triggers — the containing ROW's
+hover (`.config-sync-grid`/`.config-sync-cardrow`, the two places this glyph lives) or while its
+own trigger's menu is open (`.is-open`, set by `wireMenuTrigger` in both SettingTab.ts and
+SyncCenterView.ts and cleared via `Menu.onHide`), which also turns it accent-colored — the SAME
+open-state language the switcher already had. Mobile (`body.is-mobile`) hides it entirely, no
+hover to reveal it there; the compact section switcher's own `config-sync-switcher-chev` is the
+one deliberate exception, staying always visible on every platform (it is the sole entrance to
+the section list on mobile, where the sidebar is gone). `eye` — the SETTINGS
 FILE row's File preview trigger (§4 below), replacing the collapsed `▸ File preview` text row.
 All three registered by hand in the icon-collision guard alongside `file-diff`/`settings-2`.
 
@@ -256,8 +275,9 @@ qualifier-autocomplete value rows (`check`, qualifierSearch.ts). Everywhere else
 remain text. **Chevrons are two distinct glyph families now (round-12), never text:** FOLD
 ("expands in place") is one SVG `chevron-right`, rotated 90° via CSS when open — never two
 glyphs swapped, never `renderFoldChevron`'s caller reaching for `setText`; PICKER ("opens a
-menu/list to choose one of N") is SVG `chevrons-up-down`, small and static faint (the mobile
-switcher accents while open, §2.3 above). The old text triangles `▸ ▾ ▴` are banned everywhere —
+menu/list to choose one of N") is SVG `chevrons-up-down`, small, faint, and hover-revealed (row
+hover or its own open menu — §2.3 above); the mobile switcher is the one always-visible
+exception. The old text triangles `▸ ▾ ▴` are banned everywhere —
 every site that used to set one of them as text now renders through one of the two families
 above. Actions `⤓` install, `⏻` enable. Report chips `+ ~ −`.
 Warnings `⚠ ✗`. Conflict modal `＋ ＝`. `⌂` is the vocabulary's local/device-exception
@@ -516,8 +536,12 @@ noted):
   install`/`Enablement` keep their own textual triggers (`config-sync-menuchip
   config-sync-card-trigger` — no glyph vocabulary for them), restyled to the same trigger-box
   family so the card reads as one control language regardless of trigger kind. The Settings
-  tab's plain field/file sharing cell is untouched where it has no local layer: it keeps the
-  direct-cycle `renderSharingCycle` idiom (a click advances straight to the next option).
+  tab's plain field/file sharing cell (no local layer to pair with — the settings-file row's
+  whole-file sharing, a rule row's/array-element's per-key sharing, a companion folder's device
+  class) is a picker too now (定稿轮 16甲, `SettingTab.ts`'s `renderSharingPicker`): icon +
+  `chevrons-up-down`, click opens a `Menu` of `options`, checkmarked on the current value —
+  the click-to-cycle idiom (`renderSharingCycle`) it used to keep is deleted outright, not just
+  superseded elsewhere.
 - **Enablement rule (per-plugin, per-element)** — one rule per list element (a plugin, a
   snippet), stored on the CARRIER item that carries the list, set from any of the three
   entrances above through the one pair of producers `ui/enablementRow.ts`/
@@ -604,17 +628,18 @@ noted):
     4-column grid (`config-sync-grid`: content `1fr` | sharing `var(--cs-scope-w, 28px)` | state
     `28px` | action `28px`; action-column icons are `config-sync-ghost`, faint 0.25 idle, full on
     the row's `:hover`/`:focus-within` or `.is-active`, so the grid stays quiet until touched).
-    Every sharing control in a drawer is one Commander-style cycling icon
-    (`config-sync-sharingicon`, `renderSharingCycle`): the glyph IS the state (`sharingIcon`:
-    monitor+smartphone = All devices, monitor = Desktop only, smartphone = Mobile only,
-    airplay = This device), a click advances to the next value in that row's own option list
-    (`nextSharing`, wrapping), tooltip `Where it syncs (currently: …)`; the `all` default sits dim
-    (0.45) and any narrower sharing renders `.is-set` (accent, full opacity). ① and ②
+    Every sharing control in a drawer is one picker icon (`config-sync-sharingicon`,
+    `renderSharingPicker`, 定稿轮 16甲 — the click-to-cycle idiom, `renderSharingCycle`, is
+    deleted): the glyph IS the state (`sharingIcon`: monitor+smartphone = All devices,
+    monitor = Desktop only, smartphone = Mobile only, airplay = This device), a click opens an
+    Obsidian `Menu` of that row's own option list, checkmarked on the current value, tooltip
+    `Where it syncs (currently: …)`; the `all` default sits dim (0.45) and any narrower sharing
+    renders `.is-set` (accent, full opacity). ① and ②
     render only when they apply, ③ Companion folders always renders (down to just its quiet
     `+ Add folder` row, `config-sync-add-row-quiet`, when a card has no folders yet):
     ① **Enabled on** (shortened from `Default enabled on`, round-9 ①; plugin cards whose def
     carries an `enablement` projection — spec §6.5) — the two-segment row (`ui/enablementRow.ts`,
-    above), not a cycling icon: the fleet segment writes the carrier's `perElement` rule
+    above), not a single picker: the fleet segment writes the carrier's `perElement` rule
     (`core/enablementRules.ts`, never this plugin's own settings-file entry); the local segment
     writes this device's own exception (`core/deviceElements.ts`, never inside `data.json`). Three
     shapes (spec §6.5): a class rule (`Desktop only`/`Mobile only`) shows only the follow glyph
