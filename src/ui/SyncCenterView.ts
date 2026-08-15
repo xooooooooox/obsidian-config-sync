@@ -40,6 +40,7 @@ import {
   fateBucketCounts,
   FateBucketCounts,
   fileEntryFor,
+  filesChangeLabel,
   foldCompanionEntries,
   groupExcludedHere,
   insyncLineText,
@@ -82,7 +83,7 @@ import { renderReportContent, renderReportPills, stripHeader } from "./reportCon
 import { RunRecord, RunKind, RunStatus, worstStatus, formatRunTime, deleteLeftoverDesc } from "../core/runHistory";
 import { ACTION_ICON, ACTION_COLOR_CLASS, renderActionIcon, renderActionCount, type SyncAction } from "./actionIcons";
 import { FATE_CHIP_ICON } from "./fateChipIcons";
-import { renderFoldIcon, renderFoldCount, type FoldKind } from "./foldIcons";
+import { renderFoldIcon, renderFoldCount, FOLD_ICON, FOLD_ICON_COLOR_CLASS, type FoldKind } from "./foldIcons";
 import { renderFoldChevron, setFoldOpen } from "./foldChevron";
 // ITEM_SECTION_LABELS aliased: this file already declares its own ITEM_SECTION_LABELS (sidebar category
 // labels, see below) for an unrelated domain.
@@ -418,6 +419,11 @@ export class SyncCenterView extends ItemView {
   // selections do. Resets outright after a successful run (renderActionBar's `run`).
   private conflictChoice: Map<string, ConflictChoice> = new Map();
   private expandedItems: Set<string> = new Set();
+  // 定稿轮 12+13 ②: which item cards' FILES row is expanded past its default collapsed
+  // count-only line — keyed by group name, same "Set that survives repaints, starts fresh with a
+  // new view instance" idiom expandedItems/remoteFoldsOpen already use, so a repaint mid-review
+  // doesn't re-collapse a row the user just opened.
+  private expandedFileRows: Set<string> = new Set();
   // Remote pane fold state (spec §2, C-#21): survives repaints (periodic check, notify) the way
   // expandedItems/typeSectionOpen do for the main list — a repaint rebuilds the pane fresh, so
   // without this the on/off line, object-row folds, and open inline diffs would collapse on every
@@ -2296,6 +2302,11 @@ export class SyncCenterView extends ItemView {
     row.createSpan({ cls: "config-sync-rule-name", text: "Config Sync" });
     row.createDiv({ cls: "config-sync-rule-spacer" });
     row.createSpan({ cls: "config-sync-self-fate", text: "your Sync Center — manages itself" });
+    // Fate-icon column alignment (live-test find): the self row never stages through the normal
+    // run and so never has a checkbox — same spacer the item rows' inert branch uses, so its text
+    // lands on the same right edge every OTHER row's fate icon does instead of sitting flush
+    // against the card's own edge.
+    this.renderFateSpacer(row);
     const detail = card.createDiv({ cls: "config-sync-report-files" });
     detail.hidden = !expanded;
     this.renderConfigSyncMode(detail);
@@ -2494,12 +2505,18 @@ export class SyncCenterView extends ItemView {
     // 2026-08-13): ACTION_ICON's arrow-up-from-line/arrow-down-to-line in the same orange/accent
     // the pills and file rows speak — the original row vocabulary the README screenshots show —
     // with the fate sentence in the tooltip, consistent with this round's icon+tooltip language.
-    // The sentence itself still opens the card (the State row says it in full). Conflict (⚠) and
-    // neutral (—) fates keep their text form: a conflict must shout, and "—" has no action icon.
+    // The sentence itself still opens the card (the State row says it in full). A NEUTRAL (—)
+    // fate (定稿轮 12+13 ③, DESIGN §2.1) renders the same way now — the fold family's own icon
+    // (`renderNeutralFateIcon`) instead of the bare glyph + sentence text, "In sync"/green-check,
+    // "No settings yet"/faint-circle, "Not synced on this device"/faint-circle-slash. Conflict
+    // (⚠) alone keeps its text form: a conflict must shout, and it has no action/fold icon to
+    // become.
     if (fate.glyph === "↑" || fate.glyph === "↓") {
       const action: SyncAction = fate.glyph === "↑" ? "capture" : "apply";
       const ic = fateWrap.createSpan({ cls: `config-sync-fate-ic ${ACTION_COLOR_CLASS[action]}`, attr: { "aria-label": fate.sentence } });
       setIcon(ic, ACTION_ICON[action]);
+    } else if (fate.glyph === "—") {
+      this.renderNeutralFateIcon(fateWrap, fate);
     } else {
       fateWrap.createSpan({ cls: "config-sync-fate-glyph", text: fate.glyph });
       fateWrap.createSpan({ cls: "config-sync-fate-text", text: ` ${fate.sentence}` });
@@ -2522,6 +2539,17 @@ export class SyncCenterView extends ItemView {
         }
         this.render(this.renderGen);
       });
+    } else {
+      // Fate-icon column alignment (live-test find): an inert row (in sync / no settings yet /
+      // not synced on this device / an unresolved conflict) renders no checkbox, so without
+      // something occupying that slot the row's own flex layout (the `config-sync-rule-spacer`
+      // pushing everything after it to the row's right edge) leaves fateWrap flush against the
+      // row's own edge — one column further right than a stageable row's fate icon, which stops
+      // short of the checkbox. This spacer reserves that slot instead: an invisible checkbox
+      // itself, so it rides the exact same `.config-sync-hub-row input[type="checkbox"]` sizing
+      // rule real checkboxes use (15px desktop / 24px mobile, styles.css) rather than a
+      // hand-measured pixel width — a future checkbox-size change tracks here for free.
+      this.renderFateSpacer(row);
     }
 
     // C-#43/#44 (batch-21 spec §1, mobile only): the indented second line the 1+-chip branch above
@@ -2556,6 +2584,39 @@ export class SyncCenterView extends ItemView {
       this.syncChipOverflow(row);
       if (meta !== null) this.syncChipOverflow(meta);
     });
+  }
+
+  // Fate-icon column alignment (live-test find, see renderItemRow's inert branch and
+  // renderSelfRow): an invisible, disabled `input[type="checkbox"]` — not a hand-measured `<div>`
+  // — so it matches the real checkbox's `.config-sync-hub-row input[type="checkbox"]` sizing rule
+  // (styles.css) exactly, on every platform, for free. `visibility: hidden` (not `display: none`)
+  // keeps it in flow, taking up its slot without being clickable or focusable.
+  private renderFateSpacer(row: HTMLElement): void {
+    const spacer = row.createEl("input", { type: "checkbox", cls: "config-sync-fate-spacer", attr: { "aria-hidden": "true" } });
+    spacer.disabled = true;
+  }
+
+  // 定稿轮 12+13 ③ (DESIGN §2.1): a neutral fate's own three shapes derive to the same FoldKind
+  // key `renderFoldCount`'s filter pills already use — `nothingYet` first (C-#28's own
+  // precedence: a degraded-empty-verb direction still reports as nothing-yet), then `excluded`
+  // (either C-#24 class exclusion or a C-#45 opt-out — both set `fate.excluded`), else the row is
+  // genuinely `insync`. Reading the Fate's OWN fields (not re-deriving from FateInput or matching
+  // sentence text) is the same "single source of truth" precedent nothingYet/excluded's own doc
+  // comments (fateModel.ts) already establish for fateBucket.
+  private renderNeutralFateIcon(parent: HTMLElement, fate: Fate): void {
+    const kind: FoldKind = fate.nothingYet ? "nosettings" : fate.excluded ? "excluded" : "insync";
+    this.renderFateStateIcon(parent, kind, fate.sentence);
+  }
+
+  // The lower-level producer `renderNeutralFateIcon` calls, also used directly by a row that
+  // knows its own fold kind without building a full `Fate` (renderRemoteDiffEntry's opted-out
+  // row below) — reuses `foldIcons.ts`'s `FOLD_ICON`/`FOLD_ICON_COLOR_CLASS`, the SAME producer
+  // the trailing-fold summary lines read, at the row's own `config-sync-fate-ic` size instead of
+  // the fold line's 12px (DESIGN §2.1 — one vocabulary, two sizes for two contexts).
+  private renderFateStateIcon(parent: HTMLElement, kind: FoldKind, sentence: string): void {
+    const colorCls = FOLD_ICON_COLOR_CLASS[kind];
+    const ic = parent.createSpan({ cls: `config-sync-fate-ic${colorCls !== null ? ` ${colorCls}` : ""}`, attr: { "aria-label": sentence } });
+    setIcon(ic, FOLD_ICON[kind]);
   }
 
   // Presentation-only wrapper around the shared `effectiveFate` derivation (panelModel.ts, task
@@ -2726,27 +2787,59 @@ export class SyncCenterView extends ItemView {
     return `${text}.`;
   }
 
-  // Files (spec §4, round-11 ③): the row's own track-2 badge says which side these changes land
-  // on — ONCE, here — so no FILES entry has to repeat a direction glyph (renderUnifiedFiles below
-  // speaks only the diff-kind family). Built directly rather than through renderCardKeyRow: the
-  // badge is a static, non-interactive icon cell (no menu, no `▾`), a shape none of
-  // renderCardKeyRow's other callers need, and threading an optional icon through that shared
-  // helper for one row would ripple a parameter every other call site has to pass as absent.
-  // No divider — there is no second segment to divide from — so the value cell spans tracks 3-4
-  // alongside the badge on track 2 rather than 2-4 (`config-sync-cardval` unmodified would
-  // overlap it). Not marked `is-iconrow`: file names can run long, so this row keeps the
-  // wide-row mobile stack-to-full-width fallback (DESIGN §4) instead of the icon-rows' shared
-  // grid at every width.
+  // Files (spec §4, round-11 ③): the direction badge, the count pill, and the FOLD chevron render
+  // as one tight cluster on the row's value cell (live-test fix-round: the old track-2 badge +
+  // tracks-3/-4 value split left a ~90px hole between them) — badge, pill, and chevron are all
+  // flex children of the SAME head, never split across grid cells, so there is no separate
+  // "collapsed" vs "expanded" cell shape to keep in sync: the cluster is the row's first line in
+  // both states, and the entry list (when expanded) just sits below it. Built directly rather than
+  // through renderCardKeyRow: the badge is a static, non-interactive icon (no menu, no `▾`), a
+  // shape none of renderCardKeyRow's other callers need, and threading an optional icon through
+  // that shared helper for one row would ripple a parameter every other call site has to pass as
+  // absent. Not marked `is-iconrow`: file names can run long, so this row keeps the wide-row
+  // mobile stack-to-full-width fallback (DESIGN §4) instead of the icon-rows' shared grid at
+  // every width.
+  // 定稿轮 12+13 ②: default = count-only, same click-to-expand idiom the Settings tab's
+  // companion member count (`config-sync-card-membercount`/`-memberarrow`) already established —
+  // a neutral bare-number pill (aria/tooltip the full `filesChangeLabel` sentence) plus the FOLD
+  // family's rotating chevron, remembered per row in `expandedFileRows` while the pane stays
+  // open. Empty-row drop (no changes at all) happens up front now instead of after building the
+  // entry list, since the collapsed head always renders SOMETHING once there IS at least one
+  // change — the old `value.childNodes.length === 0` probe would never see an empty value again.
   private renderFilesRow(detail: HTMLElement, r: StatusRow, changes: FileChanges, dir: Direction, encrypted: boolean): void {
+    const total = changes.added.length + changes.updated.length + changes.deleted.length;
+    if (total === 0) return;
     const row = this.cardRowShell("Files", false);
-    const badge = row.createSpan({
-      cls: `config-sync-cardrow-track2 config-sync-files-badge ${ACTION_COLOR_CLASS[dir]}`,
-      attr: { "aria-label": dir === "capture" ? "These changes land in the store" : "These changes land on this device" },
-    });
-    setIcon(badge, ACTION_ICON[dir]);
     const value = row.createDiv({ cls: "config-sync-cardval config-sync-files-val" });
-    this.renderUnifiedFiles(value, r, changes, dir, encrypted);
-    if (value.childNodes.length === 0) return;
+    const key = r.group.name;
+    const build = (): void => {
+      value.empty();
+      const expanded = this.expandedFileRows.has(key);
+      const head = value.createDiv({
+        cls: "config-sync-files-head",
+        attr: { role: "button", tabindex: "0", "aria-label": filesChangeLabel(total) },
+      });
+      const badge = head.createSpan({
+        cls: `config-sync-files-badge ${ACTION_COLOR_CLASS[dir]}`,
+        attr: { "aria-label": dir === "capture" ? "These changes land in the store" : "These changes land on this device" },
+      });
+      setIcon(badge, ACTION_ICON[dir]);
+      head.createSpan({ cls: "config-sync-pill is-neutral", text: String(total) });
+      renderFoldChevron(head, expanded, null);
+      const toggle = (): void => {
+        if (this.expandedFileRows.has(key)) this.expandedFileRows.delete(key);
+        else this.expandedFileRows.add(key);
+        build();
+      };
+      head.addEventListener("click", toggle);
+      head.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        e.preventDefault();
+        toggle();
+      });
+      if (expanded) this.renderUnifiedFiles(value.createDiv({ cls: "config-sync-files-list" }), r, changes, dir, encrypted);
+    };
+    build();
     detail.appendChild(row);
   }
 
@@ -3779,7 +3872,9 @@ export class SyncCenterView extends ItemView {
       const row = detail.createDiv({ cls: "config-sync-report-row config-sync-remote-row" });
       this.renderRuleName(row, e.group, storedLabel);
       row.createDiv({ cls: "config-sync-rule-spacer" });
-      row.createSpan({ cls: "config-sync-fate-text", text: "Not synced on this device" });
+      // 定稿轮 12+13 ③: the same row-level icon the main list's excluded fate renders now, not
+      // text — this row IS that fate, just reached from the remote diff pane.
+      this.renderFateStateIcon(row, "excluded", "Not synced on this device");
       this.renderFateChip(row, "your rule");
       return;
     }

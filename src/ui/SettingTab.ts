@@ -1039,9 +1039,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     this.renderSettingsFileZone(exp, def, item, wrap);
     const carrier = carrierListFor(def);
     if (carrier !== null) this.renderCarrierElements(exp, def, carrier, wrap);
-    // companionHost is its own stable container (mirrors zone ②'s bodyHost) so a member-list
-    // expand/collapse can refresh just zone ③ (refreshCompanionZone) without rebuilding the whole
-    // card — badges, the path row, and zone ②'s own disclosure state stay untouched.
+    // companionHost is its own stable container (mirrors zone ②'s bodyHost): a companion
+    // add/remove or path edit still rebuilds the whole card (renderItemCard), landing here fresh.
+    // A member-list expand/collapse touches neither this host nor the card at all any more (live-
+    // test fix-round) — the fold toggle wired inside renderCompanionZone flips the member host's
+    // own `hidden` + its chevron in place.
     const companionHost = exp.createDiv({ cls: "config-sync-card-companionzonehost" });
     this.renderCompanionZone(companionHost, def, item, wrap);
   }
@@ -1181,9 +1183,19 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     // one column over and the button wraps onto an implicit second grid row.
     const contentCell = opts.orphan ? row.createDiv({ cls: "config-sync-orphancell" }) : row;
     contentCell.createSpan({ cls: "config-sync-ldname", text: opts.label });
-    const cell = row.createDiv({ cls: "config-sync-tworow" });
+    // 定稿轮 12+13 ① (DESIGN §1.4 "one vertical rule"): a row with a local exception layer
+    // (carrier elements — plugins) still wraps its fleet+local pair in `.config-sync-tworow`,
+    // whose `:has(> .config-sync-tworow)` override widens track 2 to fit both segments — that
+    // width is genuinely needed there. A row with NO local layer (a snippet member — SNIPPET_LIST
+    // isn't an enablement list) has only the one fleet control; wrapping it in `.config-sync-tworow`
+    // too used to shrink-wrap track 2 around it regardless, so its lone control landed hugging the
+    // name column instead of on the fixed track-2 slot the settings-file row's sharing icon and a
+    // companion row's device-sharing icon both sit on — the two control stacks never shared a
+    // vertical rule. A fleet-only row now gets a plain track-2 cell instead, same shape as those
+    // other single-icon rows, so every right-side control in the card lands on the same rules.
+    const fleetHost = hasLocalLayer ? row.createDiv({ cls: "config-sync-tworow" }) : row.createDiv();
     const build = (): void => {
-      cell.empty();
+      fleetHost.empty();
       const rule = this.host.enablementRuleFor(opts.list, opts.elementId);
       const exception = hasLocalLayer ? this.host.deviceElementFor(opts.list, opts.elementId) : null;
       const model = enablementRowModel({ rule, exception });
@@ -1194,7 +1206,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       // Fleet segment (round-9 ②: icon-only, same as the plugin card's) — the same control,
       // vocabulary and desktop-only stop-drop the plugin card's `Enabled on` uses above, because
       // it is the same question about the same datum.
-      renderSharingCycle(cell.createDiv(), {
+      renderSharingCycle(hasLocalLayer ? fleetHost.createDiv() : fleetHost, {
         sharing: rule,
         options: opts.desktopOnly ? RULE_OPTIONS.filter((o) => o.kind !== "per-class" || o.class !== "mobile") : RULE_OPTIONS,
         disabled: false,
@@ -1203,7 +1215,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         ariaLabel: `${enabledOnTooltip(rule)}${opts.desktopOnly && rule.kind === "everywhere" ? ` (${DESKTOP_ONLY_ALL_NOTE})` : ""}`,
         onChange: (v) => void this.writeElementRule(opts.def, opts.wrap, opts.list, opts.elementId, v).then(after),
       });
-      if (hasLocalLayer) this.renderLocalSegment(cell, { list: opts.list, elementId: opts.elementId, rule, exception, model, after });
+      if (hasLocalLayer) this.renderLocalSegment(fleetHost, { list: opts.list, elementId: opts.elementId, rule, exception, model, after });
     };
     build();
     row.createDiv(); // state column — empty
@@ -1781,17 +1793,38 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     for (const row of rows) {
       const key = this.companionMemberKey(def, row);
       const open = this.membersOpen.has(key);
-      const countEl = this.renderCompanionRow(listEl, def, row, wrap);
+      // Forward references (live-test fix-round, race root cause): the toggle callback needs
+      // both, but `rowEls` is this very call's return value and `membersHost` is only created
+      // right after it (DOM order requires the row before its host) — both are only ever READ
+      // from the callback, which can't fire until this render pass has finished assigning them.
+      let rowEls: { countEl: HTMLElement; chevron: HTMLElement } | null = null;
+      let membersHost: HTMLElement | null = null;
+      rowEls = this.renderCompanionRow(listEl, def, row, wrap, open, () => {
+        const nowOpen = !this.membersOpen.has(key);
+        if (nowOpen) this.membersOpen.add(key);
+        else this.membersOpen.delete(key);
+        // The fold toggle ONLY flips visibility + the chevron now — no zone rebuild, no new file
+        // scan. The member host was already populated once, on this card expansion's own scan
+        // below (or is still filling in — the scan patches it in place whenever it lands,
+        // regardless of open/closed, so there's nothing left for a toggle to kick off).
+        if (rowEls !== null) setFoldOpen(rowEls.chevron, nowOpen);
+        if (membersHost !== null) membersHost.hidden = !nowOpen;
+      });
       // Synchronous per-row anchor: the async member scans below resolve in arbitrary order, so
       // they must land in a host reserved DIRECTLY under their own folder row — appending to
       // listEl would file one folder's members under whichever row happened to render last.
-      const membersHost = listEl.createDiv({ cls: "config-sync-card-memberhost" });
+      membersHost = listEl.createDiv({ cls: "config-sync-card-memberhost" });
+      membersHost.hidden = !open;
+      // Narrowed capture (membersHost itself stays nullable — the toggle callback above needs a
+      // defensive null check since it's wired before this assignment runs): the two scans below
+      // are plain closures over a `let`, so TS can't carry the non-null narrowing in without one.
+      const host = membersHost;
       const mapKey = def.presetCompanions?.find((p) => p.path === row.path)?.mapKey;
       if (mapKey === ENABLED_CSS_SNIPPETS_KEY) {
         void (async () => {
           const files = await this.host.listSnippetFiles();
-          if (!membersHost.isConnected) return; // the drawer closed while the scan was in flight
-          this.renderSnippetMembers(membersHost, def, buildSnippetMemberRows(files, this.snippetRules()), wrap, countEl, open);
+          if (!host.isConnected) return; // the card collapsed / the zone rebuilt while the scan was in flight
+          this.renderSnippetMembers(host, def, buildSnippetMemberRows(files, this.snippetRules()), wrap, rowEls?.countEl ?? null);
         })();
       } else {
         // Plain (non-mapKey) companion: list-only member names, no per-member scope chip — the
@@ -1803,8 +1836,8 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         const isThemesPreset = row.isPreset && mapKey === undefined;
         void (async () => {
           const files = await this.host.listCompanionFiles(row.path);
-          if (!membersHost.isConnected) return;
-          this.renderPlainCompanionMembers(membersHost, files, countEl, open, isThemesPreset);
+          if (!host.isConnected) return;
+          this.renderPlainCompanionMembers(host, files, rowEls?.countEl ?? null, isThemesPreset);
         })();
       }
     }
@@ -1822,35 +1855,28 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     return `${defRef(def)}::${row.path}`;
   }
 
-  private refreshCompanionZone(wrap: HTMLElement, def: ItemDef): void {
-    const host = wrap.querySelector(".config-sync-card-companionzonehost");
-    if (!(host instanceof HTMLElement)) return;
-    host.empty();
-    this.renderCompanionZone(host, def, this.itemOf(def), wrap);
-  }
-
-  private toggleCompanionMembers(wrap: HTMLElement, def: ItemDef, key: string): void {
-    if (this.membersOpen.has(key)) this.membersOpen.delete(key);
-    else this.membersOpen.add(key);
-    this.refreshCompanionZone(wrap, def);
-  }
-
   // Folder row = the grid's row for one companion (spec §2.1/§4 Step 2/3): name + member count
   // pill (patched in once the async scan below resolves) + fold chevron in the content column |
   // scope picker | small
   // toggle | ✎ (every row) with ✕ ADDITIONALLY for a user-added row (never for a preset — D8: a
   // preset is only ever relocated via the warning-gated path edit, never removed outright). Returns
-  // the count span so renderCompanionZone's async scan can patch it in place; null while this row
-  // is mid path-edit (renderCompanionPathEditRow owns the DOM then, nothing here to patch).
-  private renderCompanionRow(listEl: HTMLElement, def: ItemDef, row: CompanionRowModel, wrap: HTMLElement): HTMLElement | null {
+  // the count span (so renderCompanionZone's async scan can patch it in place) and the chevron (so
+  // its own toggle callback can rotate it without a rebuild); null while this row is mid path-edit
+  // (renderCompanionPathEditRow owns the DOM then, nothing here to patch or toggle).
+  private renderCompanionRow(
+    listEl: HTMLElement,
+    def: ItemDef,
+    row: CompanionRowModel,
+    wrap: HTMLElement,
+    open: boolean,
+    onToggle: () => void
+  ): { countEl: HTMLElement; chevron: HTMLElement } | null {
     const editKey = this.companionEditKey(def, row.path);
     if (this.companionPathEditing.has(editKey)) {
       this.renderCompanionPathEditRow(listEl, def, row, wrap, editKey);
       return null;
     }
     const r = listEl.createDiv({ cls: "config-sync-grid config-sync-card-companiongrid" });
-    const memberKey = this.companionMemberKey(def, row);
-    const open = this.membersOpen.has(memberKey);
     const contentCell = r.createDiv({ cls: "config-sync-card-foldercontent" });
     contentCell.setAttribute("role", "button");
     contentCell.setAttribute("tabindex", "0");
@@ -1880,13 +1906,12 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     // "N themes"/"N files" sentence moves to the pill's own aria-label/tooltip — then the FOLD
     // family's rotating chevron, replacing the old "· N themes ▸/▾" inline text.
     const countEl = contentCell.createSpan({ cls: "config-sync-pill is-neutral config-sync-card-membercount" });
-    renderFoldChevron(contentCell, open, "config-sync-card-memberarrow");
-    const toggle = (): void => this.toggleCompanionMembers(wrap, def, memberKey);
-    contentCell.addEventListener("click", toggle);
+    const chevron = renderFoldChevron(contentCell, open, "config-sync-card-memberarrow");
+    contentCell.addEventListener("click", onToggle);
     contentCell.addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
-        toggle();
+        onToggle();
       }
     });
     const updateCompanion = (mutator: (c: { path: string; device: DeviceClass; enabled: boolean }) => { path: string; device: DeviceClass; enabled: boolean }): void => {
@@ -1933,7 +1958,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       });
       removeBtn.extraSettingsEl.addClass("config-sync-ghost");
     }
-    return countEl;
+    return { countEl, chevron };
   }
 
   // Preset row path edit (spec §4/§8, D8): validate -> no-op guard -> companionConflict ->
@@ -2034,13 +2059,15 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   }
 
   // Progressive disclosure (spec §4 Step 3): the count always patches into the folder row's own
-  // countEl once the scan resolves — collapsed or not — but the member rows + hint themselves only
-  // render while `open` (and there is anything to show).
-  private renderPlainCompanionMembers(listEl: HTMLElement, files: string[], countEl: HTMLElement | null, open: boolean, isThemesPreset: boolean): void {
+  // countEl once the scan resolves — collapsed or not. The member rows + hint themselves render
+  // unconditionally too now (live-test fix-round): the fold toggle no longer rebuilds this zone,
+  // so the content has to already exist for a later open to reveal — `membersHost.hidden`
+  // (renderCompanionZone) is the only thing gating visibility, never a rebuild-time `open` check.
+  private renderPlainCompanionMembers(listEl: HTMLElement, files: string[], countEl: HTMLElement | null, isThemesPreset: boolean): void {
     const names = sortCompanionMemberNames(files);
     countEl?.setText(String(names.length));
     countEl?.setAttribute("aria-label", memberCountLabel(isThemesPreset, names.length));
-    if (!open || names.length === 0) return;
+    if (names.length === 0) return;
     const wrapEl = listEl.createDiv({ cls: "config-sync-card-snippetmembers" });
     for (const name of names) {
       wrapEl.createDiv({ cls: "config-sync-grid config-sync-card-companiongrid", text: name });
@@ -2132,15 +2159,18 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   }
 
   // Progressive disclosure (spec §4 Step 3): count always patches into countEl; member rows +
-  // hint only render while `open`. Snippets are never the themes preset, so memberCountLabel's
-  // first argument is always false here. Each row is renderElementRuleRow's (spec §6.4) — the
-  // orphan pill and Forget stay here, because they are facts about a FILE, which is a thing only
-  // this list's elements have.
-  private renderSnippetMembers(listEl: HTMLElement, def: ItemDef, rows: SnippetMemberRow[], wrap: HTMLElement, countEl: HTMLElement | null, open: boolean): void {
+  // hint render unconditionally too now (live-test fix-round, same reasoning as
+  // renderPlainCompanionMembers above) — the fold toggle no longer rebuilds this zone, so the
+  // content has to already exist for a later open to reveal; `membersHost.hidden`
+  // (renderCompanionZone) is the only thing gating visibility. Snippets are never the themes
+  // preset, so memberCountLabel's first argument is always false here. Each row is
+  // renderElementRuleRow's (spec §6.4) — the orphan pill and Forget stay here, because they are
+  // facts about a FILE, which is a thing only this list's elements have.
+  private renderSnippetMembers(listEl: HTMLElement, def: ItemDef, rows: SnippetMemberRow[], wrap: HTMLElement, countEl: HTMLElement | null): void {
     const fileCount = rows.filter((r) => r.fileExists).length;
     countEl?.setText(String(fileCount));
     countEl?.setAttribute("aria-label", memberCountLabel(false, fileCount));
-    if (!open || rows.length === 0) return;
+    if (rows.length === 0) return;
     const wrapEl = listEl.createDiv({ cls: "config-sync-card-snippetmembers" });
     for (const row of rows) {
       const contentCell = this.renderElementRuleRow(wrapEl, {
@@ -2165,7 +2195,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
             const files = await this.host.listSnippetFiles();
             if (!listEl.isConnected) return; // the drawer closed while the scan was in flight
             listEl.empty();
-            this.renderSnippetMembers(listEl, def, buildSnippetMemberRows(files, this.snippetRules()), wrap, countEl, open);
+            this.renderSnippetMembers(listEl, def, buildSnippetMemberRows(files, this.snippetRules()), wrap, countEl);
             this.refreshCardBadges(wrap, def);
           })();
         });

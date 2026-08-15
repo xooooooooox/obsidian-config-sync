@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { capFileEntries, insyncLineText, excludedLineText, statusBarStatuses, moreFilesText, visibleUnderFilter, fateBucket, fateBucketCounts, partitionSection, legacyLockedFamilyBucket, RowBucket, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, runProgressLabel, showColdStartBanner, enablementCarrierFor, carrierIsSynced, TYPE_SECTION_TITLES, typeSectionForRow, sectionCountLabel, unifiedFooterSummary, fileEntryFor, stagedPayload, StageableRow, effectiveFate, remoteSections, onOffFlips, onOffLineText, onOffNarrationLines, familyRollup, FamilyMember, mergeFamilyChanges, foldCompanionEntries, groupExcludedHere, CAPTURE_ADDED_TOOLTIP, CAPTURE_UPDATED_TOOLTIP, CAPTURE_DELETED_TOOLTIP, APPLY_ADDED_TOOLTIP, APPLY_UPDATED_TOOLTIP, APPLY_DELETED_TOOLTIP } from "../src/ui/panelModel";
+import { capFileEntries, insyncLineText, excludedLineText, statusBarStatuses, moreFilesText, filesChangeLabel, visibleUnderFilter, fateBucket, fateBucketCounts, partitionSection, legacyLockedFamilyBucket, RowBucket, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, runProgressLabel, showColdStartBanner, enablementCarrierFor, carrierIsSynced, TYPE_SECTION_TITLES, typeSectionForRow, sectionCountLabel, unifiedFooterSummary, fileEntryFor, stagedPayload, StageableRow, effectiveFate, remoteSections, onOffFlips, onOffLineText, onOffNarrationLines, familyRollup, FamilyMember, mergeFamilyChanges, foldCompanionEntries, groupExcludedHere, CAPTURE_ADDED_TOOLTIP, CAPTURE_UPDATED_TOOLTIP, CAPTURE_DELETED_TOOLTIP, APPLY_ADDED_TOOLTIP, APPLY_UPDATED_TOOLTIP, APPLY_DELETED_TOOLTIP } from "../src/ui/panelModel";
 import { GroupState, GroupStatus, OTHER_STORE_FILES_GROUP, RemoteDiffEntry, RemoteDiffFile } from "../src/core/status";
 import { FileChanges, SyncGroup, EVERYWHERE, perClass, StorageSection } from "../src/core/types";
 import { Availability } from "../src/core/availability";
@@ -281,6 +281,12 @@ describe("copy strings", () => {
 
   it("more-files line", () => {
     expect(moreFilesText(5)).toBe("… 5 more files");
+  });
+
+  // 定稿轮 12+13 ②: the FILES row's collapsed count pill's aria-label/tooltip.
+  it("files-change label", () => {
+    expect(filesChangeLabel(1)).toBe("1 files change");
+    expect(filesChangeLabel(4)).toBe("4 files change");
   });
 
   // C-#45 §7 (fix-round 4): verbatim-consistent with the row sentence ("Not synced on this

@@ -78,6 +78,7 @@ single-row and bulk alike.
 | Touch targets | 44px rows/switcher/search-adjacent, 36px pills/seg/side items, 32px detail seg buttons | mobile minimums |
 | Mobile bottom clearance | `calc(var(--mobile-toolbar-height, 48px) + 88px)` | clears navbar + user status-bar snippets |
 | Inline micro-gaps | 3px (sidebar column rhythm) · 5px (icon↔label clusters) | between `--size-4-*` steps; 8px gaps use `var(--size-4-2)` |
+| Settings-card control column (round 12+13 ①, structural — not probed this round) | Every right-side control in an item card's drawer lands on `.config-sync-grid`'s tracks 2-4: the settings-file row (sharing/lock), a companion parent row (device-sharing/toggle), and an element row's own control(s). Track 2 stays the fixed `28px` default UNLESS a row's control genuinely needs more (a fleet+local pair — `renderElementRuleRow`'s `hasLocalLayer` case, `renderDefaultEnabledOnRow`), which alone earns the `:has(> .config-sync-tworow)` `--cs-scope-w: auto` widening. A fleet-ONLY element row (no local layer — e.g. a snippet member) never wraps in `.config-sync-tworow` any more, so it renders in the same plain fixed-width track-2 cell every other single-icon row uses. | one vertical rule runs through the card's right column instead of a member row's lone control hugging the name column while two empty 28px tracks trail it (live screenshot evidence, round 12+13) |
 
 ## 2. Icon set
 
@@ -87,7 +88,9 @@ Action states carry dedicated Lucide icons (via `setIcon`): capture `arrow-up-fr
 apply `arrow-down-to-line`/accent, push `cloud-upload`/pink, pull `cloud-download`/cyan
 (`src/ui/actionIcons.ts` is the single source). Status glyphs stay text: `≠` differs/faint ·
 `—` miss/faint · `○` no-settings/faint · `✓` ok/green · `?` unknown · **key** (`key-round`)
-locked/cyan.
+locked/cyan. This is `.config-sync-state-icon` specifically (a Statistic-workspace/switcher
+vocabulary) — it is UNRELATED to a collapsed item row's own neutral (`—`-glyph) fate, which round
+12+13 ③ moved onto the fold family's icons instead (below).
 
 **Direction arrows say which side, once, per surface** (round-11 ③ restores the pre-C 2.x FILES
 vocabulary that round-10 ②'s SVG-everywhere sweep briefly erased): the surfaces that say "this
@@ -113,6 +116,21 @@ this device` / `○ N with no settings yet`) are a DIFFERENT vocabulary from thi
 column — canvas-metrics found the text glyphs optically unequal across themes (font-fallback ink
 weight), so those three states moved to fixed-size 12px Lucide instead (§2.3). This state column
 itself is untouched.
+
+Round 12+13 ③ (supersedes the old "ROW state column stays text" ruling `foldIcons.ts` used to
+carry in its own header comment — this DESIGN section is the authority, not that comment): a
+collapsed item row's NEUTRAL fate (`—` glyph — `In sync` / `No settings yet` / `Not synced on
+this device`) reuses the fold family's own `FOLD_ICON`/`FOLD_ICON_COLOR_CLASS`
+(`foldIcons.ts`) at the row's own `.config-sync-fate-ic` size/placement instead of rendering the
+sentence as text — the fold kind is derived from the `Fate` the row already carries
+(`fate.nothingYet` → `nosettings`/`circle`, `fate.excluded` → `excluded`/`circle-slash`,
+else → `insync`/`check`), aria-label = the sentence, unchanged. Same reuse on the remote
+diff pane's own opted-out row (`renderRemoteDiffEntry`) — every ROW-level instance of these
+three sentences renders this way now, not just the collapsed main-list row. The `⚠` conflict
+fate is UNCHANGED — it keeps its text glyph + sentence, since a conflict must shout and has no
+action icon to become. A fold-group HEADER line (`53 items in sync`, the C-#50 summary above)
+keeps its own pre-existing text+icon form untouched — this ruling is about the ROW, not the
+group header. Chips are unaffected.
 
 ### 2.2 Mode badges (`.config-sync-mode-badge`, 12px, `--text-faint`)
 
@@ -177,7 +195,9 @@ rule · `power-off` stays off (**not** `power` — `power` now means "this devic
 the two-segment row's local segment, so a chip saying the row stays OFF cannot share it) · `lock`
 encrypted · `check` your choice · trailing-fold states
 (`config-sync-fold-ic`, `FOLD_ICON` in `foldIcons.ts`, C-#50): `check`/green in sync ·
-`circle-slash`/muted not synced on this device · `circle`/muted no settings yet.
+`circle-slash`/muted not synced on this device · `circle`/muted no settings yet — the SAME three
+(same producer, `config-sync-fate-ic` sizing) also render a collapsed item row's own neutral fate
+now (round 12+13 ③, §2.1 above).
 
 **`ban` is retired** — it was the Sync Center card footer's `⊘ Stop syncing` action icon
 (`renderStopSyncing`), and that footer is gone (spec `2026-08-12-enablement-two-layers-design.md`
@@ -444,13 +464,21 @@ noted):
   re-introduce the misalignment round-9 ⑤ exists to remove. Standardized row set, in this order,
   each omitted when not applicable: `On
   apply` / `On capture` / `State` (the fate sentence expanded to a full clause — install
-  source, update versions, capture consequence) · `Files` (direction-aware entries — `+` /
+  source, update versions, capture consequence) · `Files` (round 12+13 ②: collapsed by
+  default — a neutral `config-sync-pill is-neutral` count (aria/tooltip `<n> files change`)
+  plus the FOLD family's rotating `chevron-right`, same click-to-expand idiom
+  `config-sync-card-membercount`/`-memberarrow` already use for a companion folder's member
+  count (§4 Companion folders below) — expanding reveals the entry list this bullet describes,
+  remembered per row while the pane stays open (`expandedFileRows`, a `Set` keyed by group
+  name, cleared with `expandedItems`/`remoteFoldsOpen` when the pane closes); direction-aware
+  entries — `+` /
   `~` / `−`, both directions, round-11 ③ — each ending in ONE 14px `file-diff` icon when
   diffable/viewable, never per-kind icons: the point is "changes live here, click to see,"
   tooltip `View changes` (diff) / `View content` (an added file, nothing local to diff
   against yet); the OPEN state turns the icon accent-colored, replacing the old `▾`/`▴` text
   flip — the `· ` separator and the words retire with it; an encrypted entry keeps its
-  no-affordance note instead) · `Resolve` (conflict rows only — segmented `Use
+  no-affordance note instead; the `capFileEntries` 10-cap + "… N more files" line applies
+  inside the expanded state, unchanged) · `Resolve` (conflict rows only — segmented `Use
   theirs ↓` / `Keep mine ↑`) · `Enabled on` (plugins whose carrier is synced, shortened from
   `Default enabled on` round-9 ①) / `After install`
   (carrier not synced, row installs) / `Enablement` (carrier not synced, plugin installed
@@ -654,7 +682,12 @@ noted):
     zero rows renders no `Companion folders` header, just the Add-folder row). Opening
     `snippets/` lists members (`config-sync-card-snippetmembers`), each its own sharing icon — it
     writes `enabledCssSnippets` AND decides whether the file itself travels — the only companion
-    whose members carry a sharing control; a plain (unmapped) folder's members list for
+    whose members carry a sharing control (round 12+13 ①: that icon renders in the same plain
+    fixed-width track-2 cell the folder row's own device-sharing icon uses, not the
+    `.config-sync-tworow` auto-width wrapper — a snippet member has no local-exception layer to
+    need the extra room, and reusing the wrapper regardless used to leave its lone icon hugging
+    the name column instead of sitting on the card's one vertical control rule, §1.4); a plain
+    (unmapped) folder's members list for
     information only (`ItemDef.presetCompanions` has no per-member carry mechanism today — a
     future engine iteration, not this one). A member whose file has been deleted but still holds a
     device choice is an orphan row (`is-orphan`): its name renders struck faint

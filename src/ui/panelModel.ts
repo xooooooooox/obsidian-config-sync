@@ -162,6 +162,14 @@ export function moreFilesText(n: number): string {
   return `… ${n} more files`;
 }
 
+// 定稿轮 12+13 ②: the FILES row's default collapsed state — a bare-number `config-sync-pill
+// is-neutral` (same neutral-pill family `config-sync-card-membercount` already established for a
+// companion folder's member count), this sentence living in the pill's own aria-label/tooltip
+// only, same split as `memberCountLabel` (itemCard.ts).
+export function filesChangeLabel(n: number): string {
+  return `${n} files change`;
+}
+
 // Default direction by state: capture for local-changed/not-captured, apply otherwise.
 export function directionForState(state: GroupState): Direction {
   return state === "local-changed" || state === "not-captured" ? "capture" : "apply";

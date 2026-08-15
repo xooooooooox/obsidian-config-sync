@@ -6,9 +6,14 @@ import { setIcon } from "obsidian";
 // unequal across themes (the excluded glyph 33% taller than the no-settings one, a font-fallback
 // artifact) — fixed-size SVG reads as optically equal instead. `ban` stays reserved for the
 // Stop-syncing ACTION (itemCard.ts's stop-sync menu) — action and state never share an icon, so
-// the "not synced on this device" STATE uses `circle-slash`. The ROW state column
-// (`.config-sync-state-icon` — ✓ ○ ≠ — ? key) is untouched by this map; it stays text (DESIGN.md
-// §2.1).
+// the "not synced on this device" STATE uses `circle-slash`. `.config-sync-state-icon` (✓ ○ ≠ —
+// ? key, a DIFFERENT, Statistic-workspace vocabulary) is untouched by this map and stays text —
+// but a collapsed item ROW's own neutral (`—`-glyph) fate is NOT that column: round 12+13 ③
+// (DESIGN.md §2.1, the authority for this ruling — supersedes this comment's own earlier claim
+// that "the row state column stays text") reuses this same FOLD_ICON/FOLD_ICON_COLOR_CLASS map at
+// the row's `config-sync-fate-ic` size for exactly that fate (SyncCenterView.ts's fateWrap and
+// renderRemoteDiffEntry) — the fold vocabulary now speaks at both the group-header line and the
+// row it summarizes.
 export type FoldKind = "insync" | "excluded" | "nosettings";
 
 export const FOLD_ICON: Record<FoldKind, string> = {
