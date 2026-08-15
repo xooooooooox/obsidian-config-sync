@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { capFileEntries, insyncLineText, excludedLineText, statusBarStatuses, moreFilesText, visibleUnderFilter, fateBucket, fateBucketCounts, partitionSection, legacyLockedFamilyBucket, RowBucket, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, runProgressLabel, showColdStartBanner, enablementCarrierFor, carrierIsSynced, TYPE_SECTION_TITLES, typeSectionForRow, sectionCountLabel, unifiedFooterSummary, fileEntryFor, stagedPayload, StageableRow, effectiveFate, remoteSections, onOffFlips, onOffLineText, onOffNarrationLines, familyRollup, FamilyMember, mergeFamilyChanges, foldCompanionEntries, groupExcludedHere } from "../src/ui/panelModel";
+import { capFileEntries, insyncLineText, excludedLineText, statusBarStatuses, moreFilesText, visibleUnderFilter, fateBucket, fateBucketCounts, partitionSection, legacyLockedFamilyBucket, RowBucket, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, runProgressLabel, showColdStartBanner, enablementCarrierFor, carrierIsSynced, TYPE_SECTION_TITLES, typeSectionForRow, sectionCountLabel, unifiedFooterSummary, fileEntryFor, stagedPayload, StageableRow, effectiveFate, remoteSections, onOffFlips, onOffLineText, onOffNarrationLines, familyRollup, FamilyMember, mergeFamilyChanges, foldCompanionEntries, groupExcludedHere, CAPTURE_ADDED_TOOLTIP, CAPTURE_UPDATED_TOOLTIP, CAPTURE_DELETED_TOOLTIP, APPLY_ADDED_TOOLTIP, APPLY_UPDATED_TOOLTIP, APPLY_DELETED_TOOLTIP } from "../src/ui/panelModel";
 import { GroupState, GroupStatus, OTHER_STORE_FILES_GROUP, RemoteDiffEntry, RemoteDiffFile } from "../src/core/status";
 import { FileChanges, SyncGroup, EVERYWHERE, perClass, StorageSection } from "../src/core/types";
 import { Availability } from "../src/core/availability";
@@ -843,46 +843,69 @@ describe("foldCompanionEntries — remote pane companions merge into their paren
   });
 });
 
-describe("fileEntryFor — spec §4 direction-aware file entries (ledger #8)", () => {
+describe("fileEntryFor — spec §4 direction-aware file entries (ledger #8, round-11 ③)", () => {
   it("apply, raw 'deleted' (store-only): a brand-new file lands locally — + / view, nothing to diff against", () => {
     const e = fileEntryFor({ kind: "deleted", rel: "data.json" }, "apply", false);
-    expect(e).toEqual({ glyph: "+", label: "data.json", affordance: "view", note: null });
+    expect(e).toEqual({ glyph: "+", label: "data.json", affordance: "view", note: null, tooltip: APPLY_ADDED_TOOLTIP });
   });
   it("apply, raw 'added' (local-only): apply removes it to match the store — del, no affordance", () => {
     const e = fileEntryFor({ kind: "added", rel: "stale.json" }, "apply", false);
-    expect(e).toEqual({ glyph: "del", label: "stale.json", affordance: "none", note: null });
+    expect(e).toEqual({ glyph: "del", label: "stale.json", affordance: "none", note: null, tooltip: APPLY_DELETED_TOOLTIP });
   });
   it("apply, raw 'updated' (both sides exist): both-sides — neutral glyph, diff", () => {
     const e = fileEntryFor({ kind: "updated", rel: "data.json" }, "apply", false);
-    expect(e).toEqual({ glyph: "·", label: "data.json", affordance: "diff", note: null });
+    expect(e).toEqual({ glyph: "·", label: "data.json", affordance: "diff", note: null, tooltip: APPLY_UPDATED_TOOLTIP });
   });
-  it("capture, raw 'added' (local-only, capture would add it to the store): capture-side — ↑ / diff", () => {
+  it("capture, raw 'added' (local-only, capture would add it to the store): + glyph — round-11 restores the diff-kind vocabulary under capture too, no more ↑", () => {
     const e = fileEntryFor({ kind: "added", rel: "data.json" }, "capture", false);
-    expect(e).toEqual({ glyph: "↑", label: "data.json", affordance: "diff", note: null });
+    expect(e).toEqual({ glyph: "+", label: "data.json", affordance: "diff", note: null, tooltip: CAPTURE_ADDED_TOOLTIP });
   });
-  it("capture, raw 'updated': capture-side — ↑ / diff", () => {
+  it("capture, raw 'updated': neutral glyph — diff", () => {
     const e = fileEntryFor({ kind: "updated", rel: "data.json" }, "capture", false);
-    expect(e).toEqual({ glyph: "↑", label: "data.json", affordance: "diff", note: null });
+    expect(e).toEqual({ glyph: "·", label: "data.json", affordance: "diff", note: null, tooltip: CAPTURE_UPDATED_TOOLTIP });
   });
   it("capture, raw 'deleted' (store-only, capture would remove it from the store): a real deletion — del, no affordance", () => {
     const e = fileEntryFor({ kind: "deleted", rel: "gone.json" }, "capture", false);
-    expect(e).toEqual({ glyph: "del", label: "gone.json", affordance: "none", note: null });
+    expect(e).toEqual({ glyph: "del", label: "gone.json", affordance: "none", note: null, tooltip: CAPTURE_DELETED_TOOLTIP });
   });
   it("encrypted apply-added: still + glyph, but no preview", () => {
     const e = fileEntryFor({ kind: "deleted", rel: "secret.json" }, "apply", true);
-    expect(e).toEqual({ glyph: "+", label: "secret.json", affordance: "none", note: "changed — encrypted, no preview" });
+    expect(e).toEqual({ glyph: "+", label: "secret.json", affordance: "none", note: "changed — encrypted, no preview", tooltip: APPLY_ADDED_TOOLTIP });
   });
   it("encrypted apply-updated: neutral glyph, no preview", () => {
     const e = fileEntryFor({ kind: "updated", rel: "secret.json" }, "apply", true);
-    expect(e).toEqual({ glyph: "·", label: "secret.json", affordance: "none", note: "changed — encrypted, no preview" });
+    expect(e).toEqual({ glyph: "·", label: "secret.json", affordance: "none", note: "changed — encrypted, no preview", tooltip: APPLY_UPDATED_TOOLTIP });
   });
-  it("encrypted capture-side: ↑ glyph, no preview", () => {
-    const e = fileEntryFor({ kind: "updated", rel: "secret.json" }, "capture", true);
-    expect(e).toEqual({ glyph: "↑", label: "secret.json", affordance: "none", note: "changed — encrypted, no preview" });
+  it("encrypted capture-side: + glyph, no preview", () => {
+    const e = fileEntryFor({ kind: "added", rel: "secret.json" }, "capture", true);
+    expect(e).toEqual({ glyph: "+", label: "secret.json", affordance: "none", note: "changed — encrypted, no preview", tooltip: CAPTURE_ADDED_TOOLTIP });
   });
   it("encrypted deletion (either direction): del strikethrough is unaffected by encryption — nothing to preview either way", () => {
-    expect(fileEntryFor({ kind: "added", rel: "secret.json" }, "apply", true)).toEqual({ glyph: "del", label: "secret.json", affordance: "none", note: null });
-    expect(fileEntryFor({ kind: "deleted", rel: "secret.json" }, "capture", true)).toEqual({ glyph: "del", label: "secret.json", affordance: "none", note: null });
+    expect(fileEntryFor({ kind: "added", rel: "secret.json" }, "apply", true)).toEqual({ glyph: "del", label: "secret.json", affordance: "none", note: null, tooltip: APPLY_DELETED_TOOLTIP });
+    expect(fileEntryFor({ kind: "deleted", rel: "secret.json" }, "capture", true)).toEqual({ glyph: "del", label: "secret.json", affordance: "none", note: null, tooltip: CAPTURE_DELETED_TOOLTIP });
+  });
+
+  // (i) round-11 requirement: both directions × three kinds produce +/·/del with the right
+  // tooltip — table-driven, against the exported tooltip constants (the same producer
+  // fileEntryFor itself reads from), so a future edit to any of them can't drift silently.
+  describe("both directions × three kinds — the diff-kind vocabulary is direction-independent, only the tooltip differs", () => {
+    const cases: { dir: "apply" | "capture"; kind: "added" | "updated" | "deleted"; glyph: "+" | "·" | "del"; tooltip: string }[] = [
+      { dir: "capture", kind: "added", glyph: "+", tooltip: CAPTURE_ADDED_TOOLTIP },
+      { dir: "capture", kind: "updated", glyph: "·", tooltip: CAPTURE_UPDATED_TOOLTIP },
+      { dir: "capture", kind: "deleted", glyph: "del", tooltip: CAPTURE_DELETED_TOOLTIP },
+      // apply mirrors added/deleted (fileEntryFor's own doc comment) — feed the RAW kind that
+      // produces each EFFECTIVE outcome under apply direction.
+      { dir: "apply", kind: "deleted", glyph: "+", tooltip: APPLY_ADDED_TOOLTIP }, // store-only → new locally
+      { dir: "apply", kind: "updated", glyph: "·", tooltip: APPLY_UPDATED_TOOLTIP },
+      { dir: "apply", kind: "added", glyph: "del", tooltip: APPLY_DELETED_TOOLTIP }, // local-only → removed by apply
+    ];
+    for (const c of cases) {
+      it(`${c.dir}/${c.kind} → ${c.glyph} · "${c.tooltip}"`, () => {
+        const e = fileEntryFor({ kind: c.kind, rel: "f" }, c.dir, false);
+        expect(e.glyph).toBe(c.glyph);
+        expect(e.tooltip).toBe(c.tooltip);
+      });
+    }
   });
 });
 

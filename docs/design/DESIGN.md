@@ -89,6 +89,25 @@ apply `arrow-down-to-line`/accent, push `cloud-upload`/pink, pull `cloud-downloa
 `—` miss/faint · `○` no-settings/faint · `✓` ok/green · `?` unknown · **key** (`key-round`)
 locked/cyan.
 
+**Direction arrows say which side, once, per surface** (round-11 ③ restores the pre-C 2.x FILES
+vocabulary that round-10 ②'s SVG-everywhere sweep briefly erased): the surfaces that say "this
+goes up/down" are the header pills, a collapsed row's fate glyph, and — new this round — the
+FILES row's own track-2 direction badge (`arrow-up-from-line` orange / `arrow-down-to-line`
+accent, tooltip `These changes land in the store` / `These changes land on this device`). A
+FILES *entry* itself never carries a direction glyph: it speaks the diff-kind family `+` (green,
+added) / `~` (blue, updated) / `−` (red, strikethrough, deleted) in BOTH directions — round-10
+②'s capture-side collapse to a single `↑` was an undocumented C-rework change that erased the
+new/updated/removed distinction, which is real information a user loses without it (a new store
+file starts syncing to your other devices; a removal removes it everywhere). Each entry's
+`aria-label`/hover carries the side+consequence sentence instead (the tooltip `fileEntryFor`
+produces, `src/ui/panelModel.ts`, exported as named constants so the icon-collision guard and
+tests share the producer): capture — added `New in the store — starts syncing to your other
+devices`, updated `Store copy updated`, deleted `Removed from the store — removed from your
+other devices`; apply — added `New on this device`, updated `Changed on this device`, deleted
+`Deleted from this device`. Changing how ONE surface draws an arrow means sweeping the
+row-level list above, not the FILES entry vocabulary — they are deliberately two different
+vocabularies now, not one collapsed onto the other.
+
 C-#50: the Sync Center's trailing-fold summary lines (`✓ N items in sync` / `⊘ N not synced on
 this device` / `○ N with no settings yet`) are a DIFFERENT vocabulary from this text-glyph state
 column — canvas-metrics found the text glyphs optically unequal across themes (font-fallback ink
@@ -175,6 +194,16 @@ no hover). It is a shortcut, never a control: click jumps to the carrier's own S
 where the sync toggle it used to BE now lives. Never the toggle glyphs
 (`toggle-right`/`toggle-left`, retired with it) — a toggle shape promises "click to flip," and
 this chip cannot.
+
+**Round-11 additions:** `file-diff` — the FILES row's per-entry trailing affordance, "view this
+entry's changes/content" (§4 Files bullet above); registered by hand in the icon-collision
+guard (`tests/fateChipIcons.test.ts`'s `EXTERNAL_HOMES`, same treatment as `settings-2`) since
+it sits behind no exported table. The diff panel's own segmented toggles (`diffView.ts`) are
+icon+tooltip now, form and active-segment highlighting unchanged (two segments, active
+highlighted): `rows-2` unified diff (tooltip `Unified diff`) · `columns-2` split diff (tooltip
+`Split diff`) · `fold-vertical` collapse unchanged lines (tooltip `Collapse unchanged lines`) ·
+`unfold-vertical` show all lines (tooltip `Show all lines`) — the labels that used to sit on the
+buttons (`Unified`/`Split`/`Collapse`/`Full`) now live in the tooltips only.
 
 ### 2.4 Glyph language (text, reused everywhere)
 
@@ -387,8 +416,13 @@ noted):
   re-introduce the misalignment round-9 ⑤ exists to remove. Standardized row set, in this order,
   each omitted when not applicable: `On
   apply` / `On capture` / `State` (the fate sentence expanded to a full clause — install
-  source, update versions, capture consequence) · `Files` (direction-aware entries, `+` /
-  `↑` / deletion, `view ▸` / `diff ▸`) · `Resolve` (conflict rows only — segmented `Use
+  source, update versions, capture consequence) · `Files` (direction-aware entries — `+` /
+  `~` / `−`, both directions, round-11 ③ — each ending in ONE 14px `file-diff` icon when
+  diffable/viewable, never per-kind icons: the point is "changes live here, click to see,"
+  tooltip `View changes` (diff) / `View content` (an added file, nothing local to diff
+  against yet); the OPEN state turns the icon accent-colored, replacing the old `▾`/`▴` text
+  flip — the `· ` separator and the words retire with it; an encrypted entry keeps its
+  no-affordance note instead) · `Resolve` (conflict rows only — segmented `Use
   theirs ↓` / `Keep mine ↑`) · `Enabled on` (plugins whose carrier is synced, shortened from
   `Default enabled on` round-9 ①) / `After install`
   (carrier not synced, row installs) / `Enablement` (carrier not synced, plugin installed
@@ -416,9 +450,12 @@ noted):
   ②: it used to render no icon at all here) · `power`/`power-off` for an element, `circle-slash`
   for a whole file · tooltip `This device: <state>`; click opens the local menu
   (`buildLocalMenu`/`buildFileLocalMenu`, §2.3 — unchanged, they still label the MENU ITEMS, a
-  different string from the segment's own tooltip). The per-key/fields-mode fallback keeps its
-  italic note as the fleet cell instead (no icon, no `▾` — it has no menu to open, spanning
-  tracks 2+3 for the prose), with its local segment rendering normally. `After
+  different string from the segment's own tooltip). The per-key/fields-mode fallback's fleet
+  cell is a dim `settings-2` icon + tooltip `Per-key rules decide — opens Settings`, click =
+  the same deep-link the `More` row takes (round-10 ①: the prose sentence could never fit the
+  56px icon track — three-line wrap; icon + tooltip is the row language everywhere else, and
+  `settings-2`'s registered meaning "opens Settings" matches the click's actual behaviour). No
+  `▾` — it is a jump, not a menu; the local segment renders normally beside it. `After
   install`/`Enablement` keep their own textual triggers (`config-sync-menuchip
   config-sync-card-trigger` — no glyph vocabulary for them), restyled to the same trigger-box
   family so the card reads as one control language regardless of trigger kind. The Settings

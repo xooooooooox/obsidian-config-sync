@@ -655,13 +655,36 @@ export function unifiedFooterSummary(sel: { applyN: number; installs: number; tu
 // is the fix for ledger #8 (a not-installed plugin's incoming settings used to render as a
 // strikethrough deletion).
 
+// The six side+consequence sentences a FILES entry's tooltip carries (round-11 ③, DESIGN §2.1):
+// exported as named constants — the single producer both fileEntryFor below and the
+// icon-collision/tooltip guards read from, so a future edit to any of them can't drift the two
+// apart silently (the same "producer-vs-producer" discipline the fate-chip glyph registry uses).
+export const CAPTURE_ADDED_TOOLTIP = "New in the store — starts syncing to your other devices";
+export const CAPTURE_UPDATED_TOOLTIP = "Store copy updated";
+export const CAPTURE_DELETED_TOOLTIP = "Removed from the store — removed from your other devices";
+export const APPLY_ADDED_TOOLTIP = "New on this device";
+export const APPLY_UPDATED_TOOLTIP = "Changed on this device";
+export const APPLY_DELETED_TOOLTIP = "Deleted from this device";
+
 export interface FileEntryPresentation {
-  glyph: "+" | "↑" | "del" | "·";
+  glyph: "+" | "·" | "del";
   label: string;
   affordance: "view" | "diff" | "none";
   note: string | null;
+  // The side+consequence sentence for this entry's aria-label/hover (round-11 ③): the FILES
+  // row's own track-2 badge says which side the whole list affects, ONCE — this says what
+  // happens to THIS file. Always present, encrypted entries included (the note above only
+  // withholds the content preview, not the fact of what changed).
+  tooltip: string;
 }
 
+// Direction arrows (DESIGN §2.1) now say which side exactly once, on the FILES row's own
+// track-2 badge — never per entry. An entry's own glyph is the diff-kind family (`+`/`·`/`del`,
+// rendered `+`/`~`/`−`) in BOTH directions, restoring the pre-C 2.x vocabulary round-10 ②'s
+// capture-side collapse to a bare `↑` had erased: added/updated/deleted is real information
+// (a new store file starts syncing to a user's other devices; a removal removes it everywhere),
+// not a direction. This function is the single producer of that per-entry read — glyph says
+// WHAT happened to the file, tooltip says WHERE (which side, what consequence).
 export function fileEntryFor(
   change: { kind: "added" | "updated" | "deleted"; rel: string },
   effDir: "apply" | "capture",
@@ -674,17 +697,20 @@ export function fileEntryFor(
   // drives the collapsed/expanded strikethrough regardless of direction (#8's other rule: "del"
   // strikethrough only when the EFFECTIVE direction actually deletes, i.e. only here).
   if (effectiveKind === "deleted") {
-    return { glyph: "del", label: change.rel, affordance: "none", note: null };
+    const tooltip = effDir === "capture" ? CAPTURE_DELETED_TOOLTIP : APPLY_DELETED_TOOLTIP;
+    return { glyph: "del", label: change.rel, affordance: "none", note: null, tooltip };
   }
 
   const ENCRYPTED_NOTE = "changed — encrypted, no preview";
+  const glyph = effectiveKind === "added" ? "+" : "·";
   if (effDir === "capture") {
-    return { glyph: "↑", label: change.rel, affordance: encrypted ? "none" : "diff", note: encrypted ? ENCRYPTED_NOTE : null };
+    const tooltip = effectiveKind === "added" ? CAPTURE_ADDED_TOOLTIP : CAPTURE_UPDATED_TOOLTIP;
+    return { glyph, label: change.rel, affordance: encrypted ? "none" : "diff", note: encrypted ? ENCRYPTED_NOTE : null, tooltip };
   }
   // apply, content-bearing (added = brand-new to local, updated = both sides exist)
-  const glyph = effectiveKind === "added" ? "+" : "·";
   const affordance = effectiveKind === "added" ? "view" : "diff";
-  return { glyph, label: change.rel, affordance: encrypted ? "none" : affordance, note: encrypted ? ENCRYPTED_NOTE : null };
+  const tooltip = effectiveKind === "added" ? APPLY_ADDED_TOOLTIP : APPLY_UPDATED_TOOLTIP;
+  return { glyph, label: change.rel, affordance: encrypted ? "none" : affordance, note: encrypted ? ENCRYPTED_NOTE : null, tooltip };
 }
 
 // ── Unified staging (spec §5, task 6) ───────────────────────────────────────────────────────────

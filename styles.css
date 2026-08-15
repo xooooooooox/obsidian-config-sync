@@ -548,9 +548,28 @@ body.is-phone .config-sync-fkey {
 .config-sync-chip.is-del { background: rgba(var(--color-red-rgb), 0.15); color: var(--color-red); }
 .config-sync-report-files { font-family: var(--font-monospace); font-size: var(--font-ui-smaller); margin: 0 0 var(--size-4-2) var(--size-4-4); }
 .config-sync-report-files .is-add { color: var(--color-green); }
-.config-sync-report-files .is-up { color: var(--color-orange); }
 .config-sync-report-files .is-upd { color: var(--color-blue); }
 .config-sync-report-files .is-del { color: var(--color-red); text-decoration: line-through; }
+/* A diffable/viewable FILES entry ends in one 14px file-diff icon (DESIGN §2.3/§4, round-11 ③):
+   "changes live here, click to see" — never per-kind icons, never the old `· view ▾`/`· diff ▾`
+   text. Muted idle; .is-open (the inline diff panel is expanded) goes accent instead of the old
+   ▾/▴ text flip. Replaces round-10 ②'s now-removed `.config-sync-file-ic` (the capture-side ↑
+   arrow it drew is gone — round-11 restores the pre-C +/~/− vocabulary for FILES entries). */
+.config-sync-diffic { display: inline-flex; vertical-align: -2px; margin-left: 5px; color: var(--text-faint); cursor: pointer; }
+.config-sync-diffic svg { width: 14px; height: 14px; }
+.config-sync-diffic.is-open { color: var(--interactive-accent); }
+/* The FILES row's own track-2 direction badge (DESIGN §2.1, round-11 ③): says which side the
+   whole list affects, once — reuses the track-2 grid-cell idiom (`.config-sync-cardrow-track2`)
+   without the interactive fleet-cell look (no menu, no hover surface, no `▾`; it isn't a
+   trigger). Its value cell spans tracks 3-4 instead of the usual 2-4 so the badge and the file
+   list never overlap; no divider — there is no second segment to divide it from. */
+.config-sync-files-badge { display: inline-flex; align-items: center; }
+.config-sync-files-badge svg { width: 14px; height: 14px; }
+.config-sync-files-badge.is-up { color: var(--color-orange); }
+.config-sync-files-badge.is-down { color: var(--interactive-accent); }
+/* Two classes for specificity over `.config-sync-cardval`'s own `grid-column: 2 / -1` (defined
+   later in the file, in the Expanded-card grid section) rather than depending on source order. */
+.config-sync-cardval.config-sync-files-val { grid-column: 3 / -1; }
 /* C-#50 (spec 2026-08-10-c-livetest-batch24-fold-family.md §2): the fold line's own leading
    chevron + fixed-size icon replace the old text-glyph-prefix/trailing-triangle string — flex row,
    same gap the mockup's `.fold` used. */
@@ -1267,7 +1286,6 @@ body.is-mobile .config-sync-cardrow:not(.is-iconrow) > .config-sync-explabel-inl
 /* The per-key/fields-mode fallback fleet cell (spec §6.1 C-#25): plain italic note text, no icon,
    no `▾` — it has no menu to open — spanning tracks 2+3 since it carries real prose instead of a
    glyph; the local segment beside it still lands on track 4 normally. */
-.config-sync-cardrow > .config-sync-tworow-fleetnote { grid-column: 2 / 4; }
 .config-sync-tworow .config-sync-sharingicon:hover, .config-sync-tworow .config-sync-sharingicon:focus-visible { background: var(--background-modifier-hover); }
 /* The expanded card itself (ledger C-#2): bordered, left-indented under the row's name column
    (chevron 16px + its 4px margin ≈ 20px) and offset one notch from the section behind it, so the
@@ -1537,7 +1555,11 @@ button.config-sync-add-row, button.config-sync-add-row:hover { background: none;
 .config-sync-cm-difftools { display: flex; align-items: center; gap: var(--size-4-2); padding: var(--size-4-1) var(--size-4-3); border-top: 1px solid var(--background-modifier-border); }
 .config-sync-cm-diffmeta { color: var(--text-faint); font-size: var(--font-ui-smaller); font-family: var(--font-monospace); }
 .config-sync-cm-viewseg { display: flex; border: 1px solid var(--background-modifier-border); border-radius: var(--radius-s); overflow: hidden; }
-.config-sync-cm-viewbtn { font-size: 10.5px; padding: 2px 9px; border: none; border-radius: 0; background: transparent; color: var(--text-muted); cursor: pointer; box-shadow: none; }
+/* round-11 ④: Unified/Split and Collapse/Full became icon segments (setIcon, aria-label carries
+   the old button label) — padding/sizing adjusted from the text-button original for a centered
+   14px glyph instead of a text run. */
+.config-sync-cm-viewbtn { display: inline-flex; align-items: center; justify-content: center; padding: 4px 7px; border: none; border-radius: 0; background: transparent; color: var(--text-muted); cursor: pointer; box-shadow: none; }
+.config-sync-cm-viewbtn svg { width: 14px; height: 14px; }
 .config-sync-cm-viewbtn + .config-sync-cm-viewbtn { border-left: 1px solid var(--background-modifier-border); }
 .config-sync-cm-viewbtn.is-on { background: var(--background-modifier-hover); color: var(--text-normal); }
 

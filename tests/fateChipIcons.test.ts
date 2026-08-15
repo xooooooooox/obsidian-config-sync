@@ -96,8 +96,19 @@ describe("glyph registry — one glyph, one meaning (icon-collision guard)", () 
   // call sites (the MORE row, the read-only carrier chip, the Config Sync self-pane tile/button), all
   // for the one meaning "opens Settings". Registered here by hand — the one entry in this test with
   // no producer function to iterate — so a FUTURE table cannot silently claim the same glyph.
+  //
+  // round-11 ③/④: five more hardcoded glyphs, none behind an exported table either — the FILES
+  // row's per-entry diff/view affordance (SyncCenterView.ts) and the diff panel's segmented
+  // toggles (diffView.ts). Each carries exactly one meaning; registering them here (rather than
+  // leaving them invisible to this guard) means a future reuse of any of the five for something
+  // else fails loudly instead of silently colliding.
   const EXTERNAL_HOMES: GlyphHome[] = [
     { glyph: "settings-2", producer: "SyncCenterView (external, hardcoded)", home: "SyncCenterView 'opens Settings' sites" },
+    { glyph: "file-diff", producer: "SyncCenterView (external, hardcoded)", home: "renderUnifiedFiles — view this entry's changes/content" },
+    { glyph: "rows-2", producer: "diffView (external, hardcoded)", home: "renderDiffPanel — unified diff" },
+    { glyph: "columns-2", producer: "diffView (external, hardcoded)", home: "renderDiffPanel — split diff" },
+    { glyph: "fold-vertical", producer: "diffView (external, hardcoded)", home: "renderDiffPanel — collapse unchanged lines" },
+    { glyph: "unfold-vertical", producer: "diffView (external, hardcoded)", home: "renderDiffPanel — show all lines" },
   ];
 
   // The local segment's `follows` glyph (round-9 ②, DESIGN.md icon table): `corner-down-right` is

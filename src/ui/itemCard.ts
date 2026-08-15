@@ -509,7 +509,7 @@ export const FILE_SHARING_OPTIONS: Sharing[] = [EVERYWHERE, perClass("desktop"),
 // C-#25: what the Sync Center's Settings-sync row shows instead of a menu when
 // fileRuleLegalForMode is false — vocabulary matches the More row's "Per-key rules, locks &
 // folders" (spec §1) rather than inventing a second phrase for the same idea.
-export const FILE_SHARING_MENU_UNAVAILABLE_TEXT = "Per-key rules decide — see More";
+export const FILE_SHARING_MENU_UNAVAILABLE_TEXT = "Per-key rules decide — opens Settings";
 export const FIELD_SHARING_OPTIONS: Sharing[] = [EVERYWHERE, perClass("desktop"), perClass("mobile"), THIS_DEVICE];
 export const COMPANION_DEVICE_OPTIONS: DeviceClass[] = ["all", "desktop", "mobile"];
 

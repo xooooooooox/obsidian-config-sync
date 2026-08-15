@@ -1,4 +1,4 @@
-import { Platform } from "obsidian";
+import { Platform, setIcon } from "obsidian";
 
 // Shared git-style diff renderer (extracted from ConflictModal, 定稿 conflict-modal-v4):
 // unified/split views, LCS line diff with a cap, session-level view preference. Consumed by
@@ -151,8 +151,10 @@ export function renderDiffPanel(
   };
   if (!Platform.isMobile) {
     const toggle = toolbar.createDiv({ cls: "config-sync-cm-viewseg" });
-    const uni = toggle.createEl("button", { cls: "config-sync-cm-viewbtn", text: "Unified" });
-    const spl = toggle.createEl("button", { cls: "config-sync-cm-viewbtn", text: "Split" });
+    const uni = toggle.createEl("button", { cls: "config-sync-cm-viewbtn", attr: { "aria-label": "Unified diff" } });
+    setIcon(uni, "rows-2");
+    const spl = toggle.createEl("button", { cls: "config-sync-cm-viewbtn", attr: { "aria-label": "Split diff" } });
+    setIcon(spl, "columns-2");
     const paint = (): void => {
       uni.toggleClass("is-on", sessionDiffView === "unified");
       spl.toggleClass("is-on", sessionDiffView === "split");
@@ -172,8 +174,10 @@ export function renderDiffPanel(
     paint();
   }
   const collapseSeg = toolbar.createDiv({ cls: "config-sync-cm-viewseg" });
-  const colBtn = collapseSeg.createEl("button", { cls: "config-sync-cm-viewbtn", text: "Collapse" });
-  const fullBtn = collapseSeg.createEl("button", { cls: "config-sync-cm-viewbtn", text: "Full" });
+  const colBtn = collapseSeg.createEl("button", { cls: "config-sync-cm-viewbtn", attr: { "aria-label": "Collapse unchanged lines" } });
+  setIcon(colBtn, "fold-vertical");
+  const fullBtn = collapseSeg.createEl("button", { cls: "config-sync-cm-viewbtn", attr: { "aria-label": "Show all lines" } });
+  setIcon(fullBtn, "unfold-vertical");
   const paintCollapse = (): void => {
     colBtn.toggleClass("is-on", sessionDiffCollapse);
     fullBtn.toggleClass("is-on", !sessionDiffCollapse);

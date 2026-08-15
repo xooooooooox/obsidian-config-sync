@@ -232,7 +232,7 @@ describe("fileRuleLegalForMode (C-#25 — mirrors manifest.ts's fileRule validat
 // false — pinned here so a future edit to either string can't drift them apart silently.
 describe("FILE_SHARING_MENU_UNAVAILABLE_TEXT", () => {
   it("matches the copy-contract-exact string", () => {
-    expect(FILE_SHARING_MENU_UNAVAILABLE_TEXT).toBe("Per-key rules decide — see More");
+    expect(FILE_SHARING_MENU_UNAVAILABLE_TEXT).toBe("Per-key rules decide — opens Settings");
   });
 });
 

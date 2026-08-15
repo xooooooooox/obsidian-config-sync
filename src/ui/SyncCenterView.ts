@@ -2593,7 +2593,7 @@ export class SyncCenterView extends ItemView {
 
     const changes = this.familyChanges(r);
     if (dir !== null && hasChanges(changes)) {
-      this.renderCardKeyRow(fields, "Files", (value) => this.renderUnifiedFiles(value, r, changes, dir, input.encrypted));
+      this.renderFilesRow(fields, r, changes, dir, input.encrypted);
     }
 
     if (isConflict) this.renderResolveRow(fields, r);
@@ -2721,6 +2721,30 @@ export class SyncCenterView extends ItemView {
     return `${text}.`;
   }
 
+  // Files (spec §4, round-11 ③): the row's own track-2 badge says which side these changes land
+  // on — ONCE, here — so no FILES entry has to repeat a direction glyph (renderUnifiedFiles below
+  // speaks only the diff-kind family). Built directly rather than through renderCardKeyRow: the
+  // badge is a static, non-interactive icon cell (no menu, no `▾`), a shape none of
+  // renderCardKeyRow's other callers need, and threading an optional icon through that shared
+  // helper for one row would ripple a parameter every other call site has to pass as absent.
+  // No divider — there is no second segment to divide from — so the value cell spans tracks 3-4
+  // alongside the badge on track 2 rather than 2-4 (`config-sync-cardval` unmodified would
+  // overlap it). Not marked `is-iconrow`: file names can run long, so this row keeps the
+  // wide-row mobile stack-to-full-width fallback (DESIGN §4) instead of the icon-rows' shared
+  // grid at every width.
+  private renderFilesRow(detail: HTMLElement, r: StatusRow, changes: FileChanges, dir: Direction, encrypted: boolean): void {
+    const row = this.cardRowShell("Files", false);
+    const badge = row.createSpan({
+      cls: `config-sync-cardrow-track2 config-sync-files-badge ${ACTION_COLOR_CLASS[dir]}`,
+      attr: { "aria-label": dir === "capture" ? "These changes land in the store" : "These changes land on this device" },
+    });
+    setIcon(badge, ACTION_ICON[dir]);
+    const value = row.createDiv({ cls: "config-sync-cardval config-sync-files-val" });
+    this.renderUnifiedFiles(value, r, changes, dir, encrypted);
+    if (value.childNodes.length === 0) return;
+    detail.appendChild(row);
+  }
+
   // Files row (spec §4/#8): direction-aware entries via fileEntryFor, reusing the same
   // diffPair-backed inline expand renderCappedChanges already uses for "view" and "diff" alike
   // (the "view" case is just a diff against an empty base — the same content diffPair already
@@ -2730,30 +2754,40 @@ export class SyncCenterView extends ItemView {
     const renderEntry = (e: CappedEntry): void => {
       const kind: "added" | "updated" | "deleted" = e.kind === "add" ? "added" : e.kind === "upd" ? "updated" : "deleted";
       const pres = fileEntryFor({ kind, rel: e.name }, dir, encrypted);
+      // "+"/"·"/"del" render "+"/"~"/"−" in BOTH directions now (DESIGN §2.1, round-11 ③): the
+      // FILES row's own track-2 badge says which side, once — an entry never repeats a direction
+      // glyph, only the diff-kind family. Styling follows the PRESENTATION glyph, never the raw
+      // capture-perspective `e.kind` — under apply direction add/delete mirror each other
+      // (fileEntryFor's own doc comment), so keying the class off `e.kind` let a "+" entry
+      // inherit "is-del"'s strikethrough (ledger C-#4).
       const glyphText = pres.glyph === "del" ? "−" : pres.glyph === "·" ? "~" : pres.glyph;
-      // Styling follows the PRESENTATION glyph, never the raw capture-perspective `e.kind` — under
-      // apply direction add/delete mirror each other (fileEntryFor's doc comment above), so keying
-      // the class off `e.kind` let a "+" entry inherit "is-del"'s strikethrough (ledger C-#4).
-      const glyphCls = pres.glyph === "+" ? "is-add" : pres.glyph === "↑" ? "is-up" : pres.glyph === "del" ? "is-del" : "is-upd";
-      const line = detail.createDiv({ cls: `${glyphCls}${pres.glyph === "del" ? " config-sync-file-del" : ""}`, text: `${glyphText} ${pres.label}` });
+      const glyphCls = pres.glyph === "+" ? "is-add" : pres.glyph === "del" ? "is-del" : "is-upd";
+      const line = detail.createDiv({
+        cls: `${glyphCls}${pres.glyph === "del" ? " config-sync-file-del" : ""}`,
+        text: `${glyphText} ${pres.label}`,
+        attr: { "aria-label": pres.tooltip },
+      });
       if (pres.note !== null) {
         line.createSpan({ cls: "config-sync-file-note", text: ` · ${pres.note}` });
         return;
       }
       if (pres.affordance === "none") return;
-      const word = pres.affordance === "view" ? "view" : "diff";
+      // One 14px file-diff icon closes a diffable/viewable entry (DESIGN §2.3/§4, round-11 ③) —
+      // never per-kind icons, never the old `· view ▾`/`· diff ▾` text: "changes live here, click
+      // to see." The OPEN state turns the icon accent-colored instead of flipping ▾/▴ text.
       line.addClass("config-sync-diffable");
-      const hint = line.createSpan({ cls: "config-sync-diffhint", text: ` · ${word} ▾` });
+      const affLabel = pres.affordance === "view" ? "View content" : "View changes";
+      const diffIcon = line.createSpan({ cls: "config-sync-diffic", attr: { "aria-label": affLabel, role: "button", tabindex: "0" } });
+      setIcon(diffIcon, "file-diff");
       let panel: HTMLElement | null = null;
-      line.addEventListener("click", (ev) => {
-        ev.stopPropagation();
+      const toggle = (): void => {
         if (panel !== null) {
           panel.remove();
           panel = null;
-          hint.setText(` · ${word} ▾`);
+          diffIcon.removeClass("is-open");
           return;
         }
-        hint.setText(` · ${word} ▴`);
+        diffIcon.addClass("is-open");
         const p = createDiv({ cls: "config-sync-inline-diff" });
         panel = p;
         line.insertAdjacentElement("afterend", p);
@@ -2785,6 +2819,16 @@ export class SyncCenterView extends ItemView {
           const rightLabel = dir === "capture" ? "this device (what capture would write)" : "store (what apply would write)";
           renderDiffPanel(p, base, produced, leftLabel, rightLabel, switchSorted || jsonSorted ? `${e.name} · sorted view` : e.name);
         });
+      };
+      line.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        toggle();
+      });
+      diffIcon.addEventListener("keydown", (ev) => {
+        if (ev.key !== "Enter" && ev.key !== " ") return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        toggle();
       });
     };
     for (const e of shown) renderEntry(e);
@@ -2999,12 +3043,30 @@ export class SyncCenterView extends ItemView {
     const localMenu = (): Menu => this.fileLocalMenu(name, optedOut);
     // C-#25: a fields-mode item has no legal whole-file fileRule to write (setItemFileSharing
     // throws on it) — the fleet side must not offer a menu whose choice would just be discarded,
-    // but the local segment (this device's own opt-out) is a different datum and still works. The
-    // note replaces the fleet cell outright (round-9 ②: no icon, no ▾ for it) — the local segment
-    // still comes from fileLocalSegment, the SAME producer the legal branch below uses.
+    // but the local segment (this device's own opt-out) is a different datum and still works.
+    // The fleet cell is a dim settings-2 + tooltip, click = the item's Settings card (round-10 ①:
+    // the prose sentence wrapped to three lines inside the 56px icon track; icon + tooltip is the
+    // row language everywhere else, and settings-2's registered meaning — "opens Settings" — is
+    // exactly what the click does). No ▾: a jump, not a menu. Same destination as the More row,
+    // and honestly redundant with it — the redundancy says "your answer lives over there".
     if (!this.host.itemFileSharingMenuLegal(ref)) {
       const row = this.cardRowShell("Settings sync", true);
-      row.createDiv({ cls: "config-sync-expand-note config-sync-tworow-fleetnote", text: FILE_SHARING_MENU_UNAVAILABLE_TEXT });
+      const trigger = row.createSpan({
+        cls: "config-sync-sharingicon config-sync-card-trigger config-sync-cardrow-track2",
+        attr: { "aria-label": FILE_SHARING_MENU_UNAVAILABLE_TEXT, role: "button", tabindex: "0" },
+      });
+      setIcon(trigger, "settings-2");
+      const jump = (e: Event): void => {
+        e.stopPropagation();
+        this.host.openSettingsAt(ref);
+      };
+      trigger.addEventListener("click", jump);
+      trigger.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        e.preventDefault();
+        jump(e);
+      });
+      row.createSpan({ cls: "config-sync-tworow-vline" });
       this.paintLocalSegment(row, fileLocalSegment(optedOut), optedOut, localMenu);
       detail.appendChild(row);
       return;
@@ -3754,7 +3816,12 @@ export class SyncCenterView extends ItemView {
       line.createSpan({ cls: "config-sync-remote-fname", text: f.itemRel });
       const key = `${remoteName}::${e.group}::${f.itemRel}`;
       const isOpen = this.remoteFoldsOpen.has(key);
-      const hint = line.createSpan({ cls: "config-sync-diffhint", text: isOpen ? " · diff ▴" : " · diff ▾" });
+      // Same trailing affordance as the local FILES list (round-11 ②'s one-icon rule, and its own
+      // sweep lesson: this remote line is the SAME control on another surface, so it changes with
+      // it — a `· diff ▾` left behind here is exactly the drift DESIGN §2.1 now forbids).
+      const affLabel = f.kind === "added" ? "View content" : "View changes";
+      const diffIcon = line.createSpan({ cls: `config-sync-diffic${isOpen ? " is-open" : ""}`, attr: { "aria-label": affLabel, role: "button", tabindex: "0" } });
+      setIcon(diffIcon, "file-diff");
       let panel: HTMLElement | null = null;
       // Content is always rebuilt from the CURRENT compare result (spec §2) — a fresh render
       // that opens because the key persisted renders the same panel a click would build live.
@@ -3769,11 +3836,11 @@ export class SyncCenterView extends ItemView {
         if (panel !== null) {
           panel.remove();
           panel = null;
-          hint.setText(" · diff ▾");
+          diffIcon.removeClass("is-open");
           this.remoteFoldsOpen.delete(key);
           return;
         }
-        hint.setText(" · diff ▴");
+        diffIcon.addClass("is-open");
         const p = createDiv({ cls: "config-sync-inline-diff" });
         panel = p;
         line.insertAdjacentElement("afterend", p);
