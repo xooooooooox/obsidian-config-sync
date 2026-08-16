@@ -636,13 +636,19 @@ noted):
   picker glyph — it is a jump, not a menu; the local segment renders normally beside it. `After
   install`/`Enablement` keep their own textual triggers (`config-sync-menuchip
   config-sync-card-trigger` — no glyph vocabulary for them), styled to the same trigger-box
-  family so the card reads as one control language regardless of trigger kind. Every Settings
-  tab sharing cell is a picker too (`SettingTab.ts`'s `renderSharingPicker`): icon +
-  `chevrons-up-down`, click opens a `Menu` of `options`, checkmarked on the current value. Two of
-  them now pair with their own local layer, same producer as the Sync Center's (`paintLocalSegment`,
-  above) — the settings-file row's whole-file sharing and a rule row's own per-key sharing; an
-  array-element's per-key sharing and a companion folder's device class still have none to pair
-  with.
+  family so the card reads as one control language regardless of trigger kind. The Settings
+  tab's plain field/file sharing cell is a picker too (`SettingTab.ts`'s `renderSharingPicker`):
+  icon + `chevrons-up-down`, click opens a `Menu` of `options`, checkmarked on the current value.
+  Two of them now pair with their own local layer, same producer as the Sync Center's
+  (`paintLocalSegment`, above) — the settings-file row's whole-file sharing and an ITEM CARD's
+  own key-rules row (`renderRuleRow`, §4 zone ②); an array-element's per-key sharing (either
+  surface) and a companion folder's device class still have none to pair with — and neither does
+  the Advanced tab's custom-rule editor's own rule row (`buildFieldsEditor`): it offers the same
+  `FIELD_SHARING_OPTIONS` values as an item card's key-rules row (still `airplay`/`This device`
+  glyph, never renamed — §2.3), but calls no `paintLocalSegment`, even though a custom item's
+  compiled `SyncGroup` does carry the same `ItemRef` (`ref: itemRef("custom", name)`,
+  `registry.ts`) an item card's key rows key their own exception by — the wiring simply never
+  reached that editor.
 - **Enablement rule (per-plugin, per-element)** — one rule per list element (a plugin, a
   snippet), stored on the CARRIER item that carries the list, set from any of the three
   entrances above through the one pair of producers `ui/enablementRow.ts`/
