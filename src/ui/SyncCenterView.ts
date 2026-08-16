@@ -3105,7 +3105,7 @@ export class SyncCenterView extends ItemView {
     return menu;
   }
 
-  // The entry list is buildFileLocalMenu's (enablementRow.ts) — a DIFFERENT datum from
+  // The entry list is buildOptOutLocalMenu's (enablementRow.ts) — a DIFFERENT datum from
   // buildLocalMenu's element-layer menu (localMenu, above): this is the whole-FILE device opt-out
   // always offering both entries.
   private fileLocalMenu(name: string, optedOut: boolean): Menu {

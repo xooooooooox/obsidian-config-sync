@@ -129,7 +129,7 @@ describe("glyph registry — one glyph, one meaning (icon-collision guard)", () 
   // the glyph breaks this test instead of leaving it silently stale — the same "iterate the real
   // producer" discipline `ruleHomes`/`localMenuHomes` above already follow. Scoped to the `follows`
   // state alone: the on/off/not-synced states already resolve to `power`/`power-off`/`circle-slash`,
-  // which `buildLocalMenu`/`buildFileLocalMenu` above already register from their OWN producer — a
+  // which `buildLocalMenu`/`buildOptOutLocalMenu` above already register from their OWN producer — a
   // second registration of the same glyphs under a different producer name here would read as an
   // undeclared collision, not the intentional one-meaning reuse it actually is.
   function localSegmentFollowHomes(): GlyphHome[] {
