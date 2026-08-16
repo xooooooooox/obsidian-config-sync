@@ -77,12 +77,15 @@ import { DeviceElementState } from "../core/deviceElements";
 import { enablementRules, RuleListId, ruledElementIds } from "../core/enablementRules";
 import {
   buildLocalMenu,
+  buildOptOutLocalMenu,
   enabledOnTooltip,
   enablementRowModel,
   EnablementRowModel,
+  optOutLocalSegment,
   ruleIcon,
   ruleLabel,
   ruleLandingNeedsSeed,
+  RowSegment,
   RULE_OPTIONS,
   THIS_DEVICE_EYEBROW,
 } from "./enablementRow";
@@ -1183,27 +1186,39 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       after: () => void;
     }
   ): void {
-    cell.createSpan({ cls: "config-sync-tworow-vline" });
-    const wrap = cell.createDiv({ cls: `config-sync-tworow-localcell${opts.model.localIsException ? " is-set" : ""}` });
-    if (opts.showEyebrow) wrap.createSpan({ cls: "config-sync-tworow-eyebrow", text: THIS_DEVICE_EYEBROW });
-    const local = wrap.createSpan({ cls: "config-sync-tworow-seg", attr: { "aria-label": opts.model.local.tooltip } });
-    if (opts.model.local.icon !== null) setIcon(local.createSpan({ cls: "config-sync-tworow-ic" }), opts.model.local.icon);
-    setIcon(local.createSpan({ cls: "config-sync-tworow-chev" }), "chevrons-up-down");
-    this.wireMenuTrigger(local, () => {
-      const menu = new Menu();
-      // The entry list is buildLocalMenu's (enablementRow.ts), not this file's — the Sync Center's
-      // row asks the same producer, so the two entrances cannot offer different choices (§6.6).
-      for (const entry of buildLocalMenu(opts.rule, opts.exception, {
-        follow: () => void this.host.followTheDefault(opts.list, opts.elementId).then(opts.after),
-        setState: (state) => void this.host.setDeviceElement(opts.list, opts.elementId, state).then(opts.after),
-      })) {
-        menu.addItem((i) => {
-          i.setTitle(entry.title).setChecked(entry.checked).onClick(entry.action);
-          if (entry.icon !== null) i.setIcon(entry.icon);
-        });
-      }
-      return menu;
+    this.paintLocalSegment(cell, {
+      seg: opts.model.local,
+      isException: opts.model.localIsException,
+      showEyebrow: opts.showEyebrow,
+      menu: () => {
+        const menu = new Menu();
+        // The entry list is buildLocalMenu's (enablementRow.ts), not this file's — the Sync Center's
+        // row asks the same producer, so the two entrances cannot offer different choices (§6.6).
+        for (const entry of buildLocalMenu(opts.rule, opts.exception, {
+          follow: () => void this.host.followTheDefault(opts.list, opts.elementId).then(opts.after),
+          setState: (state) => void this.host.setDeviceElement(opts.list, opts.elementId, state).then(opts.after),
+        })) {
+          menu.addItem((i) => {
+            i.setTitle(entry.title).setChecked(entry.checked).onClick(entry.action);
+            if (entry.icon !== null) i.setIcon(entry.icon);
+          });
+        }
+        return menu;
+      },
     });
+  }
+
+  // The local segment's PAINT, shared by every layer that has one: the enablement exception, the
+  // whole-file opt-out, and a per-key rule's own exception. What each layer differs in is its
+  // model and its menu, not its shape — so the shape lives here once.
+  private paintLocalSegment(cell: HTMLElement, opts: { seg: RowSegment; isException: boolean; showEyebrow: boolean; menu: () => Menu }): void {
+    cell.createSpan({ cls: "config-sync-tworow-vline" });
+    const wrap = cell.createDiv({ cls: `config-sync-tworow-localcell${opts.isException ? " is-set" : ""}` });
+    if (opts.showEyebrow) wrap.createSpan({ cls: "config-sync-tworow-eyebrow", text: THIS_DEVICE_EYEBROW });
+    const local = wrap.createSpan({ cls: "config-sync-tworow-seg", attr: { "aria-label": opts.seg.tooltip } });
+    if (opts.seg.icon !== null) setIcon(local.createSpan({ cls: "config-sync-tworow-ic" }), opts.seg.icon);
+    setIcon(local.createSpan({ cls: "config-sync-tworow-chev" }), "chevrons-up-down");
+    this.wireMenuTrigger(local, opts.menu);
   }
 
   // Zone ① `Enabled on` (spec §6.5) — core/community/beta plugin
@@ -1410,6 +1425,31 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const line1 = row.createDiv({ cls: "config-sync-scrow" });
     line1.createDiv({ cls: "config-sync-explabel config-sync-explabel-inline", text: "Settings sync" });
     const slots = this.scrowSlots(line1);
+
+    // The local segment answers "does THIS device sync the file at all" — a different datum from
+    // the fields-mode branch below (which is about whether per-key rules, not the whole file,
+    // decide the keys), so it paints here, once, ahead of that branch, and applies to both.
+    const optedOut = this.host.deviceOptedOut(def.groupName);
+    this.paintLocalSegment(line1, {
+      seg: optOutLocalSegment(optedOut),
+      isException: optedOut,
+      showEyebrow: true,
+      menu: () => {
+        const menu = new Menu();
+        // buildOptOutLocalMenu is the SAME producer the Sync Center's own row asks (§5.3) — two
+        // entrances, one entry list, so they cannot offer different choices.
+        for (const entry of buildOptOutLocalMenu(optedOut, {
+          follow: () => void this.host.setDeviceOptOut(def.groupName, false).then(() => this.renderItemCard(wrap, def)),
+          optOut: () => void this.host.setDeviceOptOut(def.groupName, true).then(() => this.renderItemCard(wrap, def)),
+        })) {
+          menu.addItem((i) => {
+            i.setTitle(entry.title).setChecked(entry.checked).onClick(entry.action);
+            if (entry.icon !== null) i.setIcon(entry.icon);
+          });
+        }
+        return menu;
+      },
+    });
 
     const line2 = row.createDiv({ cls: "config-sync-scrow" });
     const pathHost = line2.createDiv({ cls: "config-sync-card-pathhost config-sync-card-pathline" });
