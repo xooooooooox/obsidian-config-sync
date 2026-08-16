@@ -113,13 +113,13 @@ export function settingsSyncTooltip(sharing: FileSharing): string {
 
 export function fileEnablementRowModel(input: { sharing: FileSharing; optedOut: boolean }): FileEnablementRowModel {
   const fleet: RowSegment = { icon: sharingIcon(input.sharing), tooltip: settingsSyncTooltip(input.sharing) };
-  return { fleet, local: fileLocalSegment(input.optedOut), localIsException: input.optedOut };
+  return { fleet, local: optOutLocalSegment(input.optedOut), localIsException: input.optedOut };
 }
 
-// The local half alone (the fields-mode fallback): a caller whose fleet has no
-// legal value to show still has a real local opt-out to paint, and it must be the SAME segment
-// fileEnablementRowModel's local half would produce — never a second, hand-typed copy of it.
-export function fileLocalSegment(optedOut: boolean): RowSegment {
+// The local half alone — shared by BOTH layers that have a two-state local answer: the whole-file
+// opt-out (`Settings sync`) and a per-key rule's own exception. Same states, same words, so it is
+// one producer; a second copy would be a second place for "not synced here" to drift.
+export function optOutLocalSegment(optedOut: boolean): RowSegment {
   return localSegment(optedOut ? "not-synced" : "follows");
 }
 
@@ -130,7 +130,7 @@ export function fileLocalSegment(optedOut: boolean): RowSegment {
 export interface LocalMenuItem {
   title: string;
   // The follow entry has none: the icon-for-every-state rule covers the SEGMENT only —
-  // buildLocalMenu/buildFileLocalMenu label the menu
+  // buildLocalMenu/buildOptOutLocalMenu label the menu
   // items, and `Follows the default`'s menu row is not one with a glyph.
   icon: string | null;
   checked: boolean;
@@ -166,7 +166,7 @@ export interface FileLocalMenuHandlers {
   optOut: () => void;
 }
 
-export function buildFileLocalMenu(optedOut: boolean, handlers: FileLocalMenuHandlers): LocalMenuItem[] {
+export function buildOptOutLocalMenu(optedOut: boolean, handlers: FileLocalMenuHandlers): LocalMenuItem[] {
   return [
     { title: FOLLOWS_LABEL, icon: null, checked: !optedOut, action: handlers.follow },
     { title: NOT_SYNCED_HERE_LABEL, icon: "circle-slash", checked: optedOut, action: handlers.optOut },

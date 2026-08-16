@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { FATE_CHIP_ICON } from "../src/ui/fateChipIcons";
 import { ACTION_ICON } from "../src/ui/actionIcons";
 import { FOLD_ICON } from "../src/ui/foldIcons";
-import { buildFileLocalMenu, buildLocalMenu, enablementRowModel, fileEnablementRowModel, ruleIcon, ruleLabel, RULE_OPTIONS } from "../src/ui/enablementRow";
+import { buildOptOutLocalMenu, buildLocalMenu, enablementRowModel, fileEnablementRowModel, ruleIcon, ruleLabel, RULE_OPTIONS } from "../src/ui/enablementRow";
 import { EVERYWHERE } from "../src/core/types";
 
 // Every string buildChips (fateModel.ts) can produce, plus the two chips added
@@ -83,10 +83,10 @@ describe("glyph registry — one glyph, one meaning (icon-collision guard)", () 
   function localMenuHomes(): GlyphHome[] {
     const noop = (): void => {};
     const elementMenu = buildLocalMenu(EVERYWHERE, null, { follow: noop, setState: noop });
-    const fileMenu = buildFileLocalMenu(false, { follow: noop, optOut: noop });
+    const fileMenu = buildOptOutLocalMenu(false, { follow: noop, optOut: noop });
     const homes: GlyphHome[] = [];
     for (const item of elementMenu) if (item.icon !== null) homes.push({ glyph: item.icon, producer: "buildLocalMenu", home: `buildLocalMenu '${item.title}'` });
-    for (const item of fileMenu) if (item.icon !== null) homes.push({ glyph: item.icon, producer: "buildFileLocalMenu", home: `buildFileLocalMenu '${item.title}'` });
+    for (const item of fileMenu) if (item.icon !== null) homes.push({ glyph: item.icon, producer: "buildOptOutLocalMenu", home: `buildOptOutLocalMenu '${item.title}'` });
     return homes;
   }
 
