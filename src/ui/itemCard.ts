@@ -1,14 +1,13 @@
 /**
- * Unified card — pure render helpers (spec docs/superpowers/specs/2026-07-25-unified-card-design.md
- * §4/§5/§10, task-5-brief.md). One renderer works for every ItemDef (registry.ts); this module
+ * Unified card — pure render helpers. One renderer works for every ItemDef (registry.ts); this module
  * holds every piece of that renderer's logic that can be expressed as a pure function of
  * (def, cfg, live-file-state) — badge computation, zone presence, and the Fields/Companion-folders
  * row models — so it can be unit tested without touching the DOM or Obsidian's API.
  * `src/ui/SettingTab.ts`'s `renderItemCard` is the only consumer that turns these models into
  * actual elements.
  *
- * Every literal string exported here is copy-contract-exact (spec §10) — grep the spec table
- * before changing any of them.
+ * Every literal string exported here is copy-contract-exact — treat the wording as final copy,
+ * not as an implementation detail free to drift.
  */
 import { GROUP_NAME_RE } from "../core/manifest";
 import { basename } from "../core/pathing";
@@ -28,13 +27,13 @@ import {
   THIS_DEVICE,
 } from "../core/types";
 
-// ── Row badges (spec §4, D2) ────────────────────────────────────────────────────────────────
+// ── Row badges ──────────────────────────────────────────────────────────────────────────────
 // Row = name + badges + sync toggle + chevron, NOTHING else. Badge order: enablement rule
 // (only for cards with an `enablement` projection, only when non-default) → N device-scoped →
 // N encrypted. Zero counts are omitted entirely — a badge never reads "0 …".
 
-// 轮 21E: badges render icon-only with an optional 9px corner count — `text` is the tooltip
-// sentence now (and the loud fallback for a badge missing its icon), never inline copy.
+// Badges render icon-only with an optional 9px corner count — `text` is the tooltip
+// sentence (and the loud fallback for a badge missing its icon), never inline copy.
 export interface Badge {
   text: string;
   cls: string;
@@ -43,8 +42,8 @@ export interface Badge {
   tooltip?: string;
 }
 
-// Mode DISPLAY names (轮 21D — stored ids `plain`/`fields`/`encrypted` never change): "Plain"
-// and "Fields" were implementation words; "Per-key rules" is the drawer's own vocabulary.
+// Mode DISPLAY names (stored ids `plain`/`fields`/`encrypted` never change): "Plain"
+// and "Fields" are implementation words; "Per-key rules" is the drawer's own vocabulary.
 export const MODE_LABELS = { plain: "Whole file", fields: "Per-key rules", encrypted: "Encrypted" } as const;
 
 const ON_BADGE_TEXT = { desktop: "on: desktop", mobile: "on: mobile", local: "on: this device" } as const;
@@ -55,7 +54,7 @@ const ON_BADGE_CLASS = {
   local: "config-sync-card-badge-local",
 } as const;
 
-// A carrier card's two badges (spec §6.4). Two facts, two colors: what the fleet agreed
+// A carrier card's two badges. Two facts, two colors: what the fleet agreed
 // (`N device-scoped`) and what this device kept for itself (`N left to me`). Mixing them into one
 // count is what made the old "N device-scoped" badge unreadable on a device that had its own
 // exceptions. The fleet half keeps the count palette every other card badge counts in; the local
@@ -67,8 +66,7 @@ const CARRIER_LOCAL_BADGE_CLASS = "config-sync-card-badge-mine";
 // The fileRule/rules half of countClassPinned, split out so the carrier badge (carrierBadgeCounts
 // below) can count a carrier's OWN class pins without also walking `perElement` — on a carrier,
 // perElement IS the element rules carrierBadgeCounts already counts via enablementRules, so folding
-// countClassPinned's perElement loop in here too would double-count the same rules under one badge
-// (final-review IMPORTANT 3).
+// countClassPinned's perElement loop in here too would double-count the same rules under one badge.
 function countFileAndRuleClassPinned(item: Item): number {
   const sf = item.settingsFile;
   if (sf === undefined) return 0;
@@ -81,7 +79,7 @@ function countFileAndRuleClassPinned(item: Item): number {
 }
 
 // A fileRule-encrypted item (Plain mode, whole file encrypted) counts as one toward "N
-// encrypted" — there is no separate lock-badge string in the copy contract (spec §10's badge
+// encrypted" — there is no separate lock-badge string in the copy contract (the badge
 // list has only "N encrypted"), so the fileRule contributes to the same count instead of a
 // second badge.
 export function countClassPinned(item: Item): number {
@@ -106,7 +104,7 @@ export function countEncrypted(item: Item): number {
   return n;
 }
 
-// ── The two on/off-list carrier cards (spec §6.4) ───────────────────────────────────────────
+// ── The two on/off-list carrier cards ───────────────────────────────────────────────────────
 
 // Which enablement list a card CARRIES, or null for a card that carries none. THE producer of
 // "this is a carrier card": the badges, the drawer's element section and its row list all ask it,
@@ -127,7 +125,7 @@ export interface CarrierCounts {
 // "device-scoped" would name something the rule does not do. `exceptionIds` comes from the caller
 // because the exception table is localStorage (deviceElements.ts) — no `Item` knows it.
 //
-// `fleet` also folds in the carrier's OWN class pins (final-review IMPORTANT 3): a carrier is an
+// `fleet` also folds in the carrier's OWN class pins: a carrier is an
 // item like any other, and its `fileRule.sharing` (settable from the Sync Center's Default settings
 // sync row — e.g. "Desktop only") or a class-pinned `rules` entry is just as much a "this many
 // devices" fact as its element rules are. Dropping them showed no badge at all for that state. Uses
@@ -151,7 +149,7 @@ export interface CarrierElementRow {
   desktopOnly: boolean;
 }
 
-// The carrier drawer's element list (spec §6.4): every element installed on this device, plus every
+// The carrier drawer's element list: every element installed on this device, plus every
 // element that already carries a rule or a local exception — a plugin uninstalled here still has a
 // choice recorded for the fleet, and a row that vanished the moment it was uninstalled would leave
 // that choice unreachable from the only card that shows it. Sorted by what the reader sees (the
@@ -170,11 +168,10 @@ export function buildCarrierElementRows(defs: ItemDef[], list: RuleListId, ruled
     .sort((a, b) => a.label.localeCompare(b.label, "en", { sensitivity: "base" }));
 }
 
-// `enablement` is the card's two enablement layers (spec §5), or null for a def that has no
+// `enablement` is the card's two enablement layers, or null for a def that has no
 // enablement projection at all: the fleet rule from the carrier item (enablementRules.ts) and this
-// device's own exception (deviceElements.ts). It replaces the `isThisDevice` boolean AND the
-// `item.runsOn.device` read this used to do — both of those were the retired one-field model, and
-// a badge derived from a field no run reads any more would be a claim about nothing.
+// device's own exception (deviceElements.ts). A badge must derive from these two layers —
+// a badge derived from a field no run reads would be a claim about nothing.
 //
 // `carrier` is the counts for a card that carries a list (carrierBadgeCounts), null for every other
 // card. It REPLACES this card's own `N device-scoped` badge rather than joining it: on a carrier
@@ -196,12 +193,12 @@ export function computeBadges(
     });
   }
   // Innate manifest property first, ahead of every config-driven badge — GREY, because grey =
-  // innate and color = your choice (轮 21 #162 ②: the two desktop meanings must read apart).
+  // innate and color = your choice (the two desktop meanings must read apart).
   if (def.desktopOnly === true) {
     badges.push({ text: "desktop-only plugin", cls: "config-sync-card-badge-plat", icon: "monitor" });
   }
-  // An exception outranks the rule here for the same reason it does at run time (spec §5
-  // precedence 1): what this device actually does is the truer thing to say about it. A
+  // An exception outranks the rule here for the same reason it does at run time:
+  // what this device actually does is the truer thing to say about it. A
   // `this-device` RULE ("Each device decides") sets no class and is not itself an exception, so it
   // earns no badge — the card's own row is where that answer lives. Colored = the user's rule:
   // blue monitor / amber smartphone / the local-exception corner glyph.
@@ -222,24 +219,20 @@ export function computeBadges(
   return badges;
 }
 
-// ── Zone presence (spec §4) ─────────────────────────────────────────────────────────────────
+// ── Zone presence ───────────────────────────────────────────────────────────────────────────
 
 // Zone ① "Enabled on" exists only for cards whose registry def carries an enablement projection
-// (core/community/beta plugins) — Task 6 builds the zone itself; this task only needs to know
-// whether to reserve the slot.
+// (core/community/beta plugins) — this only decides whether to reserve the slot.
 export function hasEnablementZone(def: ItemDef): boolean {
   return def.enablement !== undefined;
 }
 
-// Zone ① copy (spec 2026-08-12-enablement-two-layers-design.md §6.5, row-label shortened round-9
-// ①). Same name, same values, same data as the Sync Center's row of that name. Only rendered for a
-// def where hasEnablementZone(def) is true.
+// Zone ① copy. Same name, same values, same data as the Sync Center's row of that name. Only
+// rendered for a def where hasEnablementZone(def) is true.
 //
-// The word "Default" moved into the fleet segment's own tooltip (`enablementRow.ts`'s
-// `enabledOnTooltip`) — this label is now just what the ROW is, matching the Sync Center's
-// shortened row label exactly. The old `DEFAULT_ENABLED_ON_HINT` aria sentence retired with it:
-// each segment now carries its own producer-built aria-label instead of a hint this label used to
-// share with the fleet segment's tooltip.
+// The word "Default" lives in the fleet segment's own tooltip (`enablementRow.ts`'s
+// `enabledOnTooltip`) — this label is just what the ROW is, matching the Sync Center's
+// row label exactly; each segment carries its own producer-built aria-label.
 export const ENABLED_ON_LABEL = "Enabled on";
 
 export type SettingsFileZoneKind = "none" | "state-only" | "settings";
@@ -257,7 +250,7 @@ export function stateOnlyHint(itemLabel: string, expectedFile: string): string {
   return `Settings appear here once ${itemLabel} writes ${expectedFile}.`;
 }
 
-// ── Settings file mode (spec §4/§5, D9; spec 2026-07-26-card-visual-refresh-design.md §3) ──────
+// ── Settings file mode ──────────────────────────────────────────────────────────────────────────
 
 // Item convenience form of the same test — false when the card has no settingsFile at all
 // (nothing to derive from).
@@ -265,7 +258,7 @@ export function hasKeyRules(item: Item): boolean {
   return item.settingsFile !== undefined && deriveMode(item.settingsFile) === "fields";
 }
 
-// Whole-file fileRule legality (C-#25) — mirrors manifest.ts's parseGroup validator EXACTLY
+// Whole-file fileRule legality — mirrors manifest.ts's parseGroup validator EXACTLY
 // (manifest.ts:165-169): a fileRule is only legal on a "plain" (or absent, which defaults to
 // plain) mode group, never "fields" or "encrypted". Every registry item compiles to type:"file"
 // (registry.ts's compileSingleFile), so type is never the deciding factor here — mode always is.
@@ -276,7 +269,7 @@ export function fileRuleLegalForMode(mode: SyncMode | undefined): boolean {
   return mode === undefined || mode === "plain";
 }
 
-// ── Fields zone row models (spec §4, D6) ────────────────────────────────────────────────────
+// ── Fields zone row models ──────────────────────────────────────────────────────────────────
 
 export const DEFAULT_FIELD_RULE: ItemFieldRule = { sharing: EVERYWHERE, encrypted: false };
 
@@ -295,21 +288,21 @@ export interface FieldRowModel {
 // folder's member list is the snippet list, so the card knows to draw element-rule rows under it
 // instead of plain filenames. NOT the key its rules are stored under: that is `perElementKeyFor`'s
 // answer (they are the same string today, and the rule-row exclusion below asks the producer, not
-// this). File preview's click-to-add still excludes it (spec §4/§5).
+// this). File preview's click-to-add still excludes it.
 export const ENABLED_CSS_SNIPPETS_KEY = "enabledCssSnippets";
 
 // A perElement key that holds an ENABLEMENT LIST's rules is never an ordinary rule row: those rules
 // have rows of their own on the same card (the Appearance card's snippet members, a carrier card's
-// element rows — spec §6.4), and a whole-file list's key has no name to render at all, so it would
+// element rows), and a whole-file list's key has no name to render at all, so it would
 // come out as a nameless row with a ✕ beside it.
 //
-// WHICH key that is comes from `perElementKeyFor` and nowhere else (spec §3.3, §9 lesson 2/3) — the
+// WHICH key that is comes from `perElementKeyFor` and nowhere else — the
 // same producer `ruleHomeFor` asks when it WRITES the rules. Spelling the whole-file key as `""`
-// here would be a second author for a derived key, which is the drift this release exists to end;
+// here would be a second author for a derived key, and two authors drift;
 // registry.ts's deriveMode still carries that literal, and it is the one place it is spelled.
-// Exported for the File preview (定稿轮 19 ②): an enablement key must not wear the clickable
+// Exported for the File preview: an enablement key must not wear the clickable
 // affordance either — clicking it would write a rule buildRuleRows filters right back out, an
-// invisible junk entry (found live when the dashed underline first invited that click).
+// invisible junk entry.
 export function isEnablementRuleKey(def: ItemDef, key: string): boolean {
   const list = carrierListFor(def);
   if (list !== null) return key === perElementKeyFor(list);
@@ -317,7 +310,7 @@ export function isEnablementRuleKey(def: ItemDef, key: string): boolean {
 }
 
 // Rule rows list ONLY configured keys (rules ∪ perItem) — browsing the file's full key set is the
-// File preview's job now (spec 2026-07-26-card-visual-refresh-design.md §3.1). Key order: rules
+// File preview's job. Key order: rules
 // first (insertion order), then perItem-only keys. A key absent from liveDoc (settings file not
 // yet re-read, or the key was removed from the file) defaults isArray to false rather than
 // throwing.
@@ -333,10 +326,9 @@ export function buildRuleRows(def: ItemDef, item: Item, liveDoc: Record<string, 
   }));
 }
 
-// Progressive-disclosure member-count sentence for a companion's member pill (spec
-// 2026-07-26-card-visual-refresh-design.md §4; round-12 甲: the pill itself now shows the bare
-// number — this is its aria-label/tooltip only): "N themes" for the themes/ preset, "N files"
-// for everything else. The `· ` separator retired with the old inline-text form.
+// Progressive-disclosure member-count sentence for a companion's member pill (the pill itself
+// shows the bare number — this is its aria-label/tooltip only): "N themes" for the themes/
+// preset, "N files" for everything else.
 export function memberCountLabel(isThemesPreset: boolean, n: number): string {
   return isThemesPreset ? `${n} themes` : `${n} files`;
 }
@@ -345,8 +337,8 @@ export function encryptDisabledForSharing(sharing: Sharing): boolean {
   return sharing.kind === "this-device";
 }
 
-// Encrypt and per-element rules are mutually exclusive on the same rule (manifest.ts's D3
-// perItem+encrypted rejection) — final-review MUST-FIX 2 enforces this in BOTH directions at the
+// Encrypt and per-element rules are mutually exclusive on the same rule (manifest.ts's
+// perItem+encrypted rejection) — enforced in BOTH directions at the
 // write boundary, not just via disabled controls: encryptToggleDisabled below covers "the Encrypt
 // checkbox must render disabled while Per-item is on" (added to the pre-existing this-device
 // disable reason); applyPerElementToggle covers "enabling per-element rules must clear encrypted in the SAME
@@ -356,13 +348,12 @@ export function encryptToggleDisabled(sharing: Sharing, perElementEnabled: boole
   return encryptDisabledForSharing(sharing) || perElementEnabled;
 }
 
-// The reverse hint (ENCRYPT_DISABLED_PERITEM_HINT, "Turn off Per-item device rules to encrypt.")
-// retired in 定稿轮 23 ②: a lock that can't encrypt no longer renders at all, so there is no
-// disabled lock left to carry it — the mutual exclusion still surfaces through this hint on the
+// No reverse hint: a lock that can't encrypt does not render at all, so there is no
+// disabled lock left to carry one — the mutual exclusion still surfaces through this hint on the
 // per-item icon while the rule is encrypted.
 export const PER_ITEM_DISABLED_HINT = "Turn off Encrypt to enable Per-item device rules.";
 
-// Toggling per-element rules on/off for one Fields-mode row (D3 + MUST-FIX 2): turning it ON must
+// Toggling per-element rules on/off for one Fields-mode row: turning it ON must
 // clear `encrypted` on the SAME rule in the SAME write.
 export function applyPerElementToggle(sf: ItemSettingsFile, key: string, enabled: boolean): ItemSettingsFile {
   const nextPerElement = { ...sf.perElement };
@@ -382,15 +373,15 @@ export function buildPerElementRows(elements: string[], sharings: PerElementShar
   return elements.map((element) => ({ element, sharing: sharings[element] ?? EVERYWHERE }));
 }
 
-// ── Appearance specifics (spec §4/§5) ───────────────────────────────────────────────────────
+// ── Appearance specifics ────────────────────────────────────────────────────────────────────
 
 export const SNIPPET_MEMBER_HINT = "Files always sync — each snippet's choice here is where it's turned on.";
 
 export const SNIPPET_ORPHAN_HINT =
   "A deleted file stays listed while it still has a device choice. Forget clears the choice — the next capture then removes the snippet from every device.";
 
-// The row carries no `sharing` of its own: since the member rows became element-rule rows (spec
-// §6.4) each one reads its rule through `enablementRuleFor`, the same reader the other two
+// The row carries no `sharing` of its own: the member rows are element-rule rows, so
+// each one reads its rule through `enablementRuleFor`, the same reader the other two
 // entrances use, so a copy handed down through this model would be a second reader with a chance
 // to be stale.
 export interface SnippetMemberRow {
@@ -408,15 +399,13 @@ export function buildSnippetMemberRows(fileNames: string[], rules: PerElementSha
 }
 
 // A snippet's rule is written by `withEnablementRule` (enablementRules.ts) like every other
-// element's, through the SAME `setEnablementRule` host method the two plugin lists use. The local
-// `withSnippetSharing` that used to do it here is retired: it was the generalization's ancestor, it
-// wrote the same map under the same key, and keeping both would have been two writers for one datum
-// (spec §6.6). Its empty-map pruning — the thing that kept a bare `{}` from pinning the card in
-// Fields mode forever — lives on in withEnablementRule, tested there.
+// element's, through the SAME `setEnablementRule` host method the two plugin lists use — one
+// writer for one datum. Its empty-map pruning is what keeps a bare `{}` from pinning the card in
+// Fields mode forever.
 
-// ── Companion folders zone (spec §4, D8 — scaffold only; Task 7 wires add/remove/warnings) ──
+// ── Companion folders zone ──────────────────────────────────────────────────────────────────
 
-// Tail hint under a non-snippet companion's member-file list (spec §3.1) — a plain folder has no
+// Tail hint under a non-snippet companion's member-file list — a plain folder has no
 // per-file control (see renderPlainCompanionMembers's doc comment), so this clarifies that
 // the folder's own device/enabled row above governs every file inside it.
 export const FOLDER_MEMBER_HINT = "This folder syncs as a whole — everything in it goes to the devices selected above.";
@@ -444,7 +433,7 @@ export function buildCompanionRows(def: ItemDef, item: Item): CompanionRowModel[
   return [...presetRows, ...userRows];
 }
 
-// ── Companion / custom-path input validation (spec §4, D7/D8, task-7-brief.md) ─────────────────
+// ── Companion / custom-path input validation ────────────────────────────────────────────────────
 // Shared by zone ② "Custom path" and zone ③ "+ Add folder": both accept a vault-relative path
 // typed by the user. Trims, turns backslashes into forward slashes (Windows paste), collapses
 // "//", and strips leading/trailing slashes. Validation then rejects empty, absolute (leading
@@ -483,7 +472,7 @@ export function companionConflictError(itemLabel: string): string {
   return `${itemLabel} already syncs this path.`;
 }
 
-// Basename-derived group-name shape check (final-review MUST-FIX 1). registry.ts's
+// Basename-derived group-name shape check. registry.ts's
 // compileCompanions names a companion group after basename(path) — parseGroup (manifest.ts)
 // enforces GROUP_NAME_RE on every group name, so a basename that fails it (a space, a dot, any
 // other punctuation) compiles here without complaint but bricks recompile()'s validateSyncManifest
@@ -502,16 +491,16 @@ export function companionNameConflictError(name: string): string {
   return `"${name}" is already used by another synced item — rename this folder or choose a different path.`;
 }
 
-// Plain (non-mapKey) companion member listing (spec §4 "成员行" — themes/ and any user-added
-// folder): file/folder names on disk, deduped and sorted. No per-member sharing chip here — see
-// task-7-brief.md/uc-task-7-report.md for why (the switch-list engine only knows
+// Plain (non-mapKey) companion member listing (themes/ and any user-added
+// folder): file/folder names on disk, deduped and sorted. No per-member sharing chip here —
+// the switch-list engine only knows
 // about community-plugins.json, core-plugins.json and enabledCssSnippets; an arbitrary plain
-// directory group has no per-file sharing mechanism to write to).
+// directory group has no per-file sharing mechanism to write to.
 export function sortCompanionMemberNames(names: string[]): string[] {
   return [...new Set(names)].sort((a, b) => a.localeCompare(b));
 }
 
-// ── Copy contract (spec §10, verbatim) ──────────────────────────────────────────────────────
+// ── Copy contract (verbatim) ────────────────────────────────────────────────────────────────
 
 // Sharing is a union, so its display vocabulary is a function of the value rather than a record
 // keyed by a flat enum — a per-class rule's word depends on the class it carries.
@@ -522,14 +511,14 @@ export function sharingLabel(sharing: Sharing): string {
 }
 
 export const FILE_SHARING_OPTIONS: Sharing[] = [EVERYWHERE, perClass("desktop"), perClass("mobile")];
-// C-#25: what the Sync Center's Settings-sync row shows instead of a menu when
+// What the Sync Center's Settings-sync row shows instead of a menu when
 // fileRuleLegalForMode is false — vocabulary matches the More row's "Per-key rules, locks &
-// folders" (spec §1) rather than inventing a second phrase for the same idea.
+// folders" rather than inventing a second phrase for the same idea.
 export const FILE_SHARING_MENU_UNAVAILABLE_TEXT = "Per-key rules decide — opens Settings";
 export const FIELD_SHARING_OPTIONS: Sharing[] = [EVERYWHERE, perClass("desktop"), perClass("mobile"), THIS_DEVICE];
 export const COMPANION_DEVICE_OPTIONS: DeviceClass[] = ["all", "desktop", "mobile"];
 
-// Sharing renders as a Commander-style clickable icon (round-6 定稿): the icon IS the state, a
+// Sharing renders as a Commander-style clickable icon: the icon IS the state, a
 // click advances to the next option in the row's own option list, wrapping at the end.
 export function sharingIcon(sharing: Sharing): string {
   if (sharing.kind === "everywhere") return "monitor-smartphone";
@@ -546,8 +535,8 @@ export function nextSharing(current: Sharing, options: readonly Sharing[]): Shar
   }
   // Stored value missing from the offered options (e.g. a stale mobile rule on a desktop-only
   // plugin whose cycle no longer offers mobile): resume from the value's slot in the canonical
-  // order to the next offered option instead of snapping back to options[0] (round-8 spec §2 —
-  // the cycle continues, the stale stored value is never silently rewritten).
+  // order to the next offered option instead of snapping back to options[0] —
+  // the cycle continues, the stale stored value is never silently rewritten.
   const canon: readonly Sharing[] = [EVERYWHERE, perClass("desktop"), perClass("mobile"), THIS_DEVICE];
   const start = canon.findIndex((o) => sharingEquals(o, current));
   for (let step = 1; step <= canon.length; step++) {
@@ -567,30 +556,25 @@ export function sharingCycleTooltip(sharing: Sharing, note?: string): string {
   return `Where it syncs (currently: ${label})`;
 }
 
-// Reused as the ✎ icon's tooltip/aria (spec 2026-07-26-card-visual-refresh-design.md §2/§5) — no
-// longer an inline toggle label; the toggle itself was deleted, along with `Per-key rules are
-// active — remove them to control the whole file again`/`Remove rule`/`Reset to default path`/
-// `Encrypt` · `Encrypted`, which are single-call-site literals inlined directly in SettingTab.ts.
+// The ✎ icon's tooltip/aria.
 export const CUSTOM_PATH_LABEL = "Custom path";
-// Round-12: the `eye` icon beside the settings-file filename (SettingTab.ts's
-// renderSettingsFilePathRow) that replaced the collapsed `▸ File preview` text row — same string
-// for both its aria-label/tooltip and, previously, the row's own label, so the affordance still
-// reads as the same feature under its new trigger.
+// The `eye` icon beside the settings-file filename (SettingTab.ts's
+// renderSettingsFilePathRow) — the same string serves as its aria-label and tooltip.
 export const FILE_PREVIEW_LABEL = "File preview";
 export const PER_ELEMENT_RULES_LABEL = "Per-item device rules";
 export const ADD_FOLDER_LABEL = "+ Add folder";
 export const SYNC_ALL_LABEL = "Sync all";
 export const SYNC_ALL_HINT = "Toggle every plugin below.";
-// File-preview footer legend (round-7 spec §2, 定稿 B): color dots + neutral words. The old
-// single-string legend rendered as plain text, so the colors it *named* never showed; sharing
+// File-preview footer legend: color dots + neutral words. A single-string legend would render
+// as plain text, so the colors it *named* would never show; sharing
 // entries reuse the preview's own key color classes so dot and key can never drift apart.
 export interface PreviewLegendEntry {
   kind: "sharing" | "lock" | "hint";
   cls: string | null; // dot color class — set exactly when kind is "sharing"
   text: string;
 }
-// The old trailing "click a key to add a rule" hint entry moved to the preview's TOP action
-// line (定稿轮 19 ②, `config-sync-json-hint` in SettingTab.ts) — the legend now carries only
+// The "click a key to add a rule" hint lives on the preview's TOP action
+// line (`config-sync-json-hint` in SettingTab.ts) — the legend carries only
 // the color/lock annotations.
 export const PREVIEW_LEGEND_ENTRIES: PreviewLegendEntry[] = [
   { kind: "sharing", cls: "config-sync-json-desktop", text: "desktop only" },
@@ -599,10 +583,9 @@ export const PREVIEW_LEGEND_ENTRIES: PreviewLegendEntry[] = [
   { kind: "lock", cls: null, text: "encrypted" },
 ];
 
-// ── Sync all (spec §4/§5/§10, D11) — one master row per Core/Community/Beta section: toggles
+// ── Sync all — one master row per Core/Community/Beta section: toggles
 // every card's Item.synced in that section; its own value is derived (all-enabled), never
-// stored separately. No kind-exclusion: every def in the section participates, unlike the old
-// per-catalog-section "list"/allowSyncAll split this replaces.
+// stored separately. No kind-exclusion: every def in the section participates.
 
 export function sectionAllEnabled(defs: ItemDef[], items: ItemMap): boolean {
   return defs.length > 0 && defs.every((d) => itemFor(items, d).synced);

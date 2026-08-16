@@ -5,8 +5,8 @@ import { perElementKeyFor } from "../src/core/switchList";
 import { perClass, THIS_DEVICE } from "../src/core/types";
 
 // The v3 → v4 migration (spec 2026-08-12-enablement-two-layers-design.md §4). Every rule of §4's
-// table, plus the one behaviour §4 does not have a row for: v3's STRUCTURAL this-device, the mask an
-// unsynced card used to imply (see v4Migration.ts's header).
+// table, plus the one behaviour §4 does not have a row for: v3's STRUCTURAL this-device, the mask
+// an unsynced card implied in v3 (see v4Migration.ts's header).
 //
 // The reserved perElement key always comes from its ONE producer (switchList.ts's perElementKeyFor),
 // never a "" literal — a derived key with two authors is the drift this release exists to end.
@@ -35,6 +35,11 @@ describe("v3 → v4", () => {
   it("leaves an already-renamed synced alone — the v2 chain hands one in", () => {
     const { document } = migrateV4Settings({ schemaVersion: 3, items: { community: { dataview: { synced: true } } } });
     expect(document.items).toMatchObject({ community: { dataview: { synced: true } } });
+  });
+
+  it("an item with neither enabled nor synced gains an explicit synced: false — the written document satisfies its own schema", () => {
+    const { document } = migrateV4Settings({ schemaVersion: 3, items: { community: { dataview: { bratRepo: "a/b" } } } });
+    expect(document.items).toMatchObject({ community: { dataview: { synced: false, bratRepo: "a/b" } } });
   });
 
   it("a device rule moves onto the carrier, under the reserved key", () => {
@@ -143,11 +148,11 @@ describe("v3 → v4", () => {
     expect(obsidian["core-plugins"]?.synced).toBe(false);
   });
 
-  // Final-review IMPORTANT 2: a v3 document never wrote a carrier entry — v3's own compile decided a
-  // carrier's sync via the retired anyEnabledInList over the section, never by reading
+  // A v3 document never wrote a carrier entry — v3's own compile decided a
+  // carrier's sync via anyEnabledInList over the section, never by reading
   // `items.obsidian["core-plugins"|"community-plugins"]`. A `synced`/`enabled` value already sitting
-  // there in a v3 doc is v2-chip residue (v2's old carrier chip wrote an inert bare-key entry that no
-  // v3 build ever gave behaviour to), not a value any build chose — so the section predicate now
+  // there in a v3 doc is v2-chip residue (v2's carrier chip wrote an inert bare-key entry that no
+  // v3 build ever gave behaviour to), not a value any build chose — so the section predicate
   // IGNORES it, in both directions, rather than "existing value wins".
   it("a v2-chip carrier entry is neutralized when nothing in its section is synced — the predicate wins, not the residue", () => {
     const { document } = migrateV4Settings({

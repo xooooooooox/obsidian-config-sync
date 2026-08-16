@@ -18,14 +18,14 @@ describe("parseLedger", () => {
     expect(parseLedger(raw)).toEqual({ version: LEDGER_VERSION, items: { "community/a": ENTRY } });
   });
   // A v1 ledger is READ, not re-keyed: the conversion needs the compiled sync list, which does not
-  // exist at parse time (spec §4). The version it reports is what tells rekeyLedger there is work.
+  // exist at parse time. The version it reports is what tells rekeyLedger there is work.
   it("reads a v1 ledger's group-name keys unchanged, and says it is v1", () => {
     const raw = JSON.stringify({ version: 1, groups: { "plugin-a": ENTRY, bad: { store: 5 } } });
     expect(parseLedger(raw)).toEqual({ version: 1, items: { "plugin-a": ENTRY } });
   });
 });
 
-describe("rekeyLedger (spec §4 — the baselines move with the lock)", () => {
+describe("rekeyLedger — the baselines move with the lock", () => {
   const toRef = (name: string): string => (name.startsWith("plugin-") ? `community/${name.slice("plugin-".length)}` : `legacy/${name}`);
 
   it("moves every v1 key through the producer and stamps the new version", () => {

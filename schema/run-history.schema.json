@@ -1,0 +1,46 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/xooooooooox/obsidian-config-sync/main/schema/run-history.schema.json",
+  "title": "Config Sync run history (run-history.json)",
+  "description": "The device-local log of past runs, one JSON array, newest handling per src/main.ts's retention settings (data.json's `runHistory`: maxCount/maxDays). Default location {configDir}/plugins/config-sync/run-history.json; the path is configurable and the file never syncs — it describes this device's own history. Authority: src/core/runHistory.ts's RunRecord and src/core/types.ts's GroupResult.",
+  "type": "array",
+  "items": { "$ref": "#/definitions/runRecord" },
+  "definitions": {
+    "runRecord": {
+      "type": "object",
+      "required": ["at", "kind", "remote", "status", "changed", "issues", "desc", "results"],
+      "additionalProperties": true,
+      "properties": {
+        "at": { "type": "integer", "description": "Milliseconds since the epoch, stamped when the record is written." },
+        "kind": {
+          "enum": ["capture", "apply", "pull", "push", "adopt", "stop-sync", "delete-leftover"],
+          "description": "What ran. The first five move settings; \"stop-sync\" and \"delete-leftover\" are removal actions that prune the tracked set / the store."
+        },
+        "remote": { "type": ["string", "null"], "description": "The remote's name for pull/push; null for local runs." },
+        "status": { "enum": ["ok", "warning", "error"], "description": "Worst status across the run's per-item results." },
+        "changed": { "type": "integer", "minimum": 0, "description": "How many items did something." },
+        "issues": { "type": "integer", "minimum": 0, "description": "How many items ended in warning or error." },
+        "desc": { "type": "string", "description": "One-line human summary, shown in the history list." },
+        "results": {
+          "type": "array",
+          "description": "Full per-item detail for the detail view (src/core/types.ts's GroupResult); empty for removal actions.",
+          "items": {
+            "type": "object",
+            "required": ["group", "status"],
+            "additionalProperties": true,
+            "properties": {
+              "group": { "type": "string", "description": "The item/group name this result describes." },
+              "status": { "enum": ["ok", "warning", "error"] },
+              "filesWritten": { "type": "array", "items": { "type": "string" } },
+              "filesDeleted": { "type": "array", "items": { "type": "string" } },
+              "messages": { "type": "array", "items": { "type": "string" } },
+              "needsAppReload": { "type": "boolean", "description": "true when the run touched files Obsidian only re-reads at app reload." }
+            }
+          }
+        },
+        "removed": { "type": "array", "items": { "type": "string" }, "description": "stop-sync only: labels of the items removed from sync." },
+        "deletedFiles": { "type": "array", "items": { "type": "string" }, "description": "stop-sync / delete-leftover: store paths deleted (without the \"store/\" prefix)." }
+      }
+    }
+  }
+}

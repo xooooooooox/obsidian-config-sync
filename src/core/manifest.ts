@@ -34,7 +34,7 @@ export class ManifestValidationError extends Error {
 // A rule/group name's legal shape — also enforced at the companion-add/edit UI boundary (see
 // registry.ts's companionNameConflict / itemCard.ts's validateCompanionBasename), so a basename
 // that would fail parseGroup below is rejected before it ever reaches settings, not just at
-// compile/validate time (final-review MUST-FIX 1: a persisted bad shape silently zeroes out
+// compile/validate time (a persisted bad shape silently zeroes out
 // compiledGroups on next launch — see main.ts's recompile).
 export const GROUP_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 
@@ -68,7 +68,7 @@ function isValidFieldsArray(v: unknown): v is FieldRule[] {
   return Array.isArray(v) && v.every((f) => isValidFieldRule(f));
 }
 
-// Structural check only (spec §3, D3): every element's value must be a Sharing. Whether the key
+// Structural check only: every element's value must be a Sharing. Whether the key
 // it's attached to is actually a string array at runtime is checked at capture time
 // (perElement.ts's readPerElementArray) — it can't be verified statically from the manifest alone.
 function isValidPerElementSharing(v: unknown): v is PerElementSharing {
@@ -108,7 +108,7 @@ export function validateSyncManifest(data: unknown): SyncManifest {
   for (const g of groups) {
     if (names.has(g.name)) throw new ManifestValidationError(`two rules are named "${g.name}" — rename one of them so each rule has a unique name`);
     names.add(g.name);
-    // The same rule one level down (task-3 review I3): the ref is the key of the lock, the baselines
+    // The same rule one level down: the ref is the key of the lock, the baselines
     // and the opt-out list, so two rules sharing one is two rules sharing a baseline — the failure
     // this whole re-key exists to prevent, and it must not be catchable only by a name check that
     // happens to correlate with it.
@@ -267,8 +267,8 @@ function parseGroup(g: unknown, index: number): SyncGroup {
   const trimmedLabel = typeof label === "string" ? label.trim() : "";
   if (trimmedLabel !== "") group.label = trimmedLabel;
   if (origin === "discovered") group.origin = "discovered";
-  // Validate-and-carry, the same rule parseStoreLockEntry follows (2.21.0 §3.1, invariant II.1).
-  // Task 1 left this one a rebuild-from-a-whitelist; task 3 closes it, because the whitelist now has
+  // Validate-and-carry, the same rule parseStoreLockEntry follows —
+  // never a rebuild-from-a-whitelist, because a whitelist has
   // something load-bearing to drop. main.ts's recompile pushes every COMPILED group through this
   // parser as a safety net, so a whitelist here silently strips whatever compileItems put on a group
   // that this function has not been taught about — `ref` first among them, and with it the key of
@@ -282,9 +282,9 @@ function parseGroup(g: unknown, index: number): SyncGroup {
 // Every field of a SyncGroup this parser validates for itself; anything else on a group is carried.
 // `sanitize` is listed even though it has no home on a SyncGroup: it is a v1 field this parser
 // REJECTS above, and a rejected field must not come back in through the carry.
-const WRITTEN_GROUP_KEYS = ["name", "ref", "path", "type", "devices", "sanitize", "mode", "fields", "fileRule", "perElement", "description", "label", "origin"] as const;
+export const WRITTEN_GROUP_KEYS = ["name", "ref", "path", "type", "devices", "sanitize", "mode", "fields", "fileRule", "perElement", "description", "label", "origin"] as const;
 
-// Validates + normalizes a carrier lock entry's element names (spec §3's `display.elements`, v2's
+// Validates + normalizes a carrier lock entry's element names (`display.elements`; v2's
 // `memberLabels`): every value must be text, same strictness as the sibling label; empty/whitespace
 // values are dropped, so an all-empty map normalizes to absent (undefined), matching how a
 // trimmed-empty label is dropped rather than stored. `raw` undefined is the normal, non-throwing
@@ -307,7 +307,7 @@ function parseElementLabels(raw: unknown, ref: string): Record<string, string> |
 
 const KNOWN_LOCK_ENTRY_KEYS = ["source", "innate", "display"] as const;
 
-// A v1/v2 entry's flat fields → v3's `source`/`innate`/`display` partition (spec §3/§5). The ONE
+// A v1/v2 entry's flat fields → v3's `source`/`innate`/`display` partition. The ONE
 // place the old field names are read: everything downstream sees a v3 entry, whatever wrote the
 // file. `sourcePluginVersion` wins over `sourceAppVersion` when a hand-edited entry carries both —
 // the plugin is the more specific claim, and v2's own readers asked for it first.
@@ -340,8 +340,8 @@ function parseLockSource(raw: unknown, ref: string): LockSource | undefined {
   return { kind, version };
 }
 
-// Validate-and-carry, not rebuild-from-a-whitelist (spec 2026-08-11-data-model-hardening.md §3.1,
-// invariant II.1). The named fields are validated and normalized — same rejections, same dropping
+// Validate-and-carry, not rebuild-from-a-whitelist.
+// The named fields are validated and normalized — same rejections, same dropping
 // of a blank label and a non-string version — and every other key of the entry rides through
 // untouched. A rebuild was never just a local loss: the pull path writes the PARSED lock back
 // (ConfigSyncCore's merge at the end of the pull flow), so one pull by an older device stripped a
@@ -452,25 +452,25 @@ export function parseStoreLock(raw: string, groups?: readonly SyncGroup[]): Stor
   return { capturedAt: parsed.capturedAt, items, ...carried };
 }
 
-// The store lock's format version this build writes (spec §3). Absent on disk = 1, the flat shape.
+// The store lock's format version this build writes. Absent on disk = 1, the flat shape.
 export const STORE_LOCK_VERSION = 3;
 
-// §4.3 copy: what pull and push say when the store at the other end declares a version this build
+// What pull and push say when the store at the other end declares a version this build
 // cannot write.
 export const STORE_LOCK_FUTURE_MESSAGE = "The store was written by a newer Config Sync. Update Config Sync on this device before syncing.";
 
-// A lock's declared format version. `version` reaches us through parseStoreLock's carried tail
-// (§3.1), so it is literally whatever the file held: a value that isn't a number is not evidence
+// A lock's declared format version. `version` reaches us through parseStoreLock's carried tail,
+// so it is literally whatever the file held: a value that isn't a number is not evidence
 // of a newer format — and refusing to sync over a typo would strand a whole fleet — so it reads as
 // today's shape instead.
 export function storeLockVersion(lock: StoreLock): number {
   return typeof lock.version === "number" ? lock.version : 1;
 }
 
-// The per-item payload (§6) reaches a reader exactly the way `version` does — through the carried
+// The per-item payload reaches a reader exactly the way `version` does — through the carried
 // tail, never through validation — so every read narrows the raw value here instead of trusting the
 // declared type. Deliberate, and the same argument as storeLockVersion's: a value this build cannot
-// make sense of must ride through untouched (invariant II.1) rather than be dropped by a
+// make sense of must ride through untouched rather than be dropped by a
 // normalising parse, and a build that cannot read it must not act on it either. Empty string counts
 // as absent: it dates nothing and fingerprints nothing.
 function lockText(v: unknown): string | undefined {
@@ -493,7 +493,7 @@ export function lockWatermark(lock: StoreLock): string {
 // pull), while a v1 device's stands in for both and tracks whatever it last pulled — which is OUR
 // `capturedAt`. So an older device that pulled from us and pushed back read as "newer" against a
 // watermark we had deliberately left behind, with zero content difference, in exactly the mixed
-// fleet §6 exists to keep quiet. Taking the later of the two puts both sides on the same scale.
+// fleet the freshness rules exist to keep quiet. Taking the later of the two puts both sides on the same scale.
 export function lockLineage(lock: StoreLock): string {
   const watermark = lockWatermark(lock);
   const w = Date.parse(watermark);
@@ -503,7 +503,7 @@ export function lockLineage(lock: StoreLock): string {
   return c > w ? lock.capturedAt : watermark;
 }
 
-// The `hash` field's documented shape (§6): the algorithm names itself, so a later build can change
+// The `hash` field's documented shape: the algorithm names itself, so a later build can change
 // it without every reader having to guess from the digest's length. Comparison is plain string
 // equality either way — the prefix rides along on both sides.
 export const STORE_LOCK_HASH_PREFIX = "sha256:";
@@ -605,11 +605,11 @@ export function derivedLockCapturedAt(
 // an entry from its own computed values must also clear the v2 pair underneath the rebuild, or a
 // `hash` it deliberately omitted this run would survive from the previous lock and fingerprint
 // content that no longer exists.
-const WRITTEN_LOCK_ENTRY_KEYS = [...KNOWN_LOCK_ENTRY_KEYS, "capturedAt", "hash"] as const;
+export const WRITTEN_LOCK_ENTRY_KEYS = [...KNOWN_LOCK_ENTRY_KEYS, "capturedAt", "hash"] as const;
 
 // The part of a lock entry this build does NOT write — carried onto a rebuilt entry so a field a
 // newer build recorded survives our capture instead of being stripped and published as a loss to
-// the whole fleet (§6, task-2 finding I-1: without this, §3.1's carrying parser is theatre, because
+// the whole fleet (without this, the carrying parser is theatre, because
 // the writers rebuild from fresh literals).
 export function lockEntryTail(entry: StoreLockEntry | undefined): Record<string, unknown> {
   if (entry === undefined) return {};
@@ -618,7 +618,7 @@ export function lockEntryTail(entry: StoreLockEntry | undefined): Record<string,
   return tail;
 }
 
-const WRITTEN_LOCK_KEYS = ["version", "syncedWatermark", "capturedAt", "items"] as const;
+export const WRITTEN_LOCK_KEYS = ["version", "syncedWatermark", "capturedAt", "items"] as const;
 
 // The same carry, one level up: the lock's own unknown TOP-LEVEL keys.
 export function lockTail(lock: StoreLock | null): Record<string, unknown> {
@@ -631,11 +631,12 @@ export function lockTail(lock: StoreLock | null): Record<string, unknown> {
 // The version a lock DOCUMENT declares, read straight off the JSON — never through parseStoreLock.
 // "Is this shape valid for v1?" and "was this written by a newer build?" are different questions and
 // must not share an answer: parseStoreLock still enforces the v1 entry rule (a string
-// sourcePluginVersion or sourceAppVersion), so any v3 that restructures the entry throws there — and
-// §6's own "Out of scope" note names exactly such a restructure (the source/innate/display
-// partition) as the deferred v3 change. Asking the version through the parser therefore meant the
-// gate could not survive the very change it exists to protect against (final-review C1): the parse
-// threw, the refusal was skipped, and capture rewrote v3's bookkeeping as `version: 2` and pushed
+// sourcePluginVersion or sourceAppVersion), so any v3 that restructures the entry throws there —
+// and the source/innate/display partition is exactly such a restructure.
+// Asking the version through the parser would therefore mean the
+// gate could not survive the very change it exists to protect against: the parse
+// would throw, the refusal would be skipped, and capture would rewrite v3's bookkeeping as
+// `version: 2` and push
 // the loss to the fleet. Anything that is not JSON at all, or declares no numeric `version`, reads
 // as today's shape — refusing to sync over a typo would strand a whole fleet.
 export function declaredStoreLockVersion(raw: string | null): number {
@@ -649,7 +650,7 @@ export function declaredStoreLockVersion(raw: string | null): number {
   return isPlainObject(parsed) && typeof parsed.version === "number" ? parsed.version : 1;
 }
 
-// The §4.3 gate, run by capture and the pull merge against the LOCAL store's lock, and by pull and
+// The lock version gate, run by capture and the pull merge against the LOCAL store's lock, and by pull and
 // push against the one at the other end. A version from the future is a refusal, NOT the `unknown`
 // state checkRemote reports for a lock it merely cannot read: an unparseable lock keeps today's
 // behaviour (capture rewrites it, pull merges around it), while a newer version means the file has a

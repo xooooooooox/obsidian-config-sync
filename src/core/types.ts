@@ -1,7 +1,7 @@
-// The vocabulary (spec 2026-08-11-v3-one-vocabulary-design.md §1): one concept, one word.
-// `scope` is retired outright — it used to mean the settings area, the item category AND the
+// The vocabulary: one concept, one word.
+// There is deliberately no `scope` — in v2 it meant the settings area, the item category AND the
 // sharing rule, in three different places, so every consumer had to know which one it was looking
-// at. Each of those three is now its own named type below.
+// at. Each of those three is its own named type below.
 
 // "which devices something runs on" — the `device` axis. Named DeviceClass because a compiled
 // group and a companion both carry one; the WORD in the data is `device`.
@@ -9,14 +9,14 @@ export type DeviceClass = "all" | "desktop" | "mobile";
 
 export type SyncMode = "plain" | "fields" | "encrypted";
 
-// "which family an item belongs to" (§1) — the values an item is STORED under (spec §7b). Structure
-// carries this now: the settings document nests items by section instead of prefixing their ids, so
+// "which family an item belongs to" — the values an item is STORED under. Structure
+// carries this: the settings document nests items by section instead of prefixing their ids, so
 // two ids may legitimately collide across sections (a core and a community plugin that share a
 // name).
 export const STORAGE_SECTIONS = ["obsidian", "core", "community", "custom"] as const;
 export type StorageSection = (typeof STORAGE_SECTIONS)[number];
 
-// The PRESENTED section list (spec §7b): `beta` is not a family, it is an install source (BRAT),
+// The PRESENTED section list: `beta` is not a family, it is an install source (BRAT),
 // derived at runtime from each community item's own `bratRepo` field (bratIndex.ts's
 // `bratRepoIndex`). It is a search value, a settings tab and a card badge — it
 // is never a storage key, because an item that changed section (and therefore its identity) the
@@ -29,16 +29,15 @@ export type Section = (typeof SECTIONS)[number];
 export type ItemId = string;
 
 // The one-string form of (section, id) — for the places that genuinely cannot nest: localStorage
-// keys (main.ts's deviceOptOutGroups and friends). `thisDeviceItems` used to be another such flat
-// list; it retired outright with `runsOn` (2026-08-12-enablement-two-layers). INSIDE the document,
+// keys (main.ts's deviceOptOutGroups and friends). INSIDE the document,
 // section and id are already structural; a compound key there would be a second, disagreeable
 // source of truth.
 //
 // Built from StorageSection, not Section, ON PURPOSE: a ref is an IDENTITY, and `beta` is a
 // classification. A `beta/<id>` ref would name an item no reader can find (every reader resolves
 // the community section), and would change the moment BRAT's list changed — a classification
-// leaking into an identity is the exact defect class this release exists to end, so the type makes
-// it unrepresentable rather than merely wrong.
+// leaking into an identity is the exact defect class this vocabulary exists to end, so the type
+// makes it unrepresentable rather than merely wrong.
 export type ItemRef = `${StorageSection}/${ItemId}`;
 
 export function itemRef(section: StorageSection, id: ItemId): ItemRef {
@@ -57,7 +56,7 @@ export function parseItemRef(ref: string): { section: StorageSection; id: ItemId
   return { section: section as StorageSection, id: ref.slice(cut + 1) };
 }
 
-// "who shares a value" (§1). A union, not an enum, because the class only exists for one of the
+// "who shares a value". A union, not an enum, because the class only exists for one of the
 // three answers — the old flat RuleScope ("all" | "desktop" | "mobile" | "local") collapsed two
 // orthogonal questions ("is this shared, and with whom?") into one list, which is why every
 // consumer had to special-case "local" by hand.
@@ -109,7 +108,7 @@ export function asFileSharing(v: unknown): FileSharing | undefined {
   return s === undefined || s.kind === "this-device" ? undefined : s;
 }
 
-// Per-element sharing for a string-array key (spec §2's `perElement`): element value -> sharing; an
+// Per-element sharing for a string-array key (`perElement`): element value -> sharing; an
 // element with no entry defaults to everywhere. Generalizes the switch-list mechanism to any
 // string-array key, not just community-plugins.json / core-plugins.json / enabledCssSnippets.
 export type PerElementSharing = Record<string, Sharing>;
@@ -121,7 +120,7 @@ export interface FieldRule {
   locked?: boolean; // preset rule; cannot be removed in the UI
 }
 
-// Plain-mode whole-file rule (spec §2, D9). `sharing` cannot be this-device by construction.
+// Plain-mode whole-file rule. `sharing` cannot be this-device by construction.
 export interface FileRule {
   sharing: FileSharing;
   encrypted: boolean;
@@ -129,11 +128,11 @@ export interface FileRule {
 
 export interface SyncGroup {
   name: string;
-  // THE identity (spec §3/§4), minted by the compiler and by nobody else — registry.ts's
+  // THE identity, minted by the compiler and by nobody else — registry.ts's
   // compileItems for an item's own file, itemKeys.ts's companionRef/carrierRef for the two things
   // that are not items. It keys the store lock, the device-local baselines and the device-local
   // opt-out list; `name` keeps its own three jobs (the store path's display label, the manifest's
-  // uniqueness rule, the switch-list lookup) and is no longer an identity.
+  // uniqueness rule, the switch-list lookup) and is not an identity.
   //
   // Optional because a SyncGroup can also arrive from a hand-written legacy `config-sync.json` (see
   // manifest.ts's parseGroup), which has no item behind it. Such a group has no lock entry and no
@@ -148,7 +147,7 @@ export interface SyncGroup {
   // Whole-file encryption for a Plain single-file group (settingsFile only — never folder
   // members). Only meaningful when mode is absent or "plain"; manifest.ts rejects it otherwise.
   fileRule?: FileRule;
-  // Per-element sharing maps for string-array keys under mode "fields" (spec §3, D3): key ->
+  // Per-element sharing maps for string-array keys under mode "fields": key ->
   // element sharing map. A key listed here is governed exclusively by capturePerElementArray/
   // applyPerElementArray (src/core/perElement.ts) instead of the key's own {sharing, encrypted}
   // rule; manifest.ts rejects combining a perElement key with encrypted:true (encrypt stays
@@ -164,7 +163,7 @@ export interface SyncManifest {
   groups: SyncGroup[];
 }
 
-// Where a lock entry's version came from (spec §3). v2 encoded the KIND OF SOURCE in the field
+// Where a lock entry's version came from. v2 encoded the KIND OF SOURCE in the field
 // NAME — `sourcePluginVersion` / `sourceAppVersion` — so every reader had to know both names and
 // try them in order. One object, one `kind`, and adding a third source later is a value change.
 export interface LockSource {
@@ -172,12 +171,12 @@ export interface LockSource {
   version: string;
 }
 
-// One lock entry per item (spec §3). The index signature is the carried tail (spec
-// 2026-08-11-data-model-hardening.md §3.1, invariant II.1): parseStoreLock validates the named
+// One lock entry per item. The index signature is the carried
+// tail: parseStoreLock validates the named
 // fields and keeps every other key exactly as it found it, so a field a NEWER build writes
 // survives a parse here instead of being stripped and pushed back out to the fleet as a loss.
 export interface StoreLockEntry {
-  // This item's OWN provenance (spec 2026-08-11-data-model-hardening.md §6), so freshness stops
+  // This item's OWN provenance, so freshness stops
   // being a single whole-store timestamp. Both reach a reader through the carried tail rather than
   // through validation — read them with manifest.ts's lockEntryCapturedAt / lockEntryHash, never
   // off these fields, for the same reason `version` is read via storeLockVersion. `hash` is absent
@@ -186,7 +185,7 @@ export interface StoreLockEntry {
   hash?: string; // fingerprint of this item's store content — the same canonical hash the direction baseline uses
   source?: LockSource;
   // What the ITEM is, independent of anything a user chose: `desktopOnly` means the plugin's own
-  // manifest says it cannot run on mobile. 2.21.0 §6 deferred this partition because an older
+  // manifest says it cannot run on mobile. 2.21.0 deferred this partition because an older
   // reader threw on an entry it could not recognise; v3 is gated, so it lands here.
   innate?: { desktopOnly?: true };
   // Names, never behaviour. `elements` (v2's `memberLabels`) is id → display name, only on a
@@ -196,35 +195,35 @@ export interface StoreLockEntry {
   [key: string]: unknown;
 }
 
-// section -> id -> entry (spec §3). Typed as a plain two-level record rather than
+// section -> id -> entry. Typed as a plain two-level record rather than
 // `Record<StorageSection, …>`: the sections this build knows are the four StorageSections plus
 // itemKeys.ts's `legacy` holding pen, and a section a NEWER build writes has to ride through the
-// parse untouched like any other unknown key — carrying is an invariant at EVERY level (§3.1), and
+// parse untouched like any other unknown key — carrying is an invariant at EVERY level, and
 // a required-key type would make the top level the one place it did not hold.
 export type LockItems = Record<string, Record<string, StoreLockEntry>>;
 
 export interface StoreLock {
-  // The lock's FORMAT version (spec 2026-08-11-data-model-hardening.md §4.3). Absent = 1: a lock
+  // The lock's FORMAT version. Absent = 1: a lock
   // written before that release has the flat `groups` shape and is converted on the way in. This
   // build writes 3. Declared here for the writers, but never trusted as a number on the way in — it
   // rides through parseStoreLock in the carried tail like any other key, so read it through
   // manifest.ts's storeLockVersion rather than off this field.
   version?: number;
-  // The lineage watermark (§6): the remote state this store was last aligned to. Only a pull moves
-  // it — that alignment is what makes status.ts's remoteLockAhead settle to false after a pull, and
-  // it used to be smuggled into `capturedAt`, which had to carry both meanings at once. Absent = a
+  // The lineage watermark: the remote state this store was last aligned to. Only a pull moves
+  // it — that alignment is what makes status.ts's remoteLockAhead settle to false after a pull,
+  // and it is its own field so `capturedAt` never carries both meanings at once. Absent = a
   // v1 lock, whose `capturedAt` still carries both; read it through manifest.ts's lockWatermark.
   syncedWatermark?: string;
   // DERIVED since v2: max(items[*][*].capturedAt), i.e. the newest moment any item in THIS store
   // was captured. It describes local content only — a pull recomputes it from the merged entries
-  // and never copies the remote's value over it, which is what used to make it a watermark by
+  // and never copies the remote's value over it, which is what would make it a watermark by
   // accident.
   capturedAt: string;
-  // Was v2's flat `groups`, keyed by compiled group name (spec §3/§5). Reach an entry through
+  // Was v2's flat `groups`, keyed by compiled group name. Reach an entry through
   // manifest.ts's lockEntry/lockEntryList, never by indexing two levels by hand: the nesting is one
   // fact, and two sites that spell it out are two sites that can disagree about it.
   items: LockItems;
-  [key: string]: unknown; // carried the same way as an entry's unknown keys (§3.1)
+  [key: string]: unknown; // carried the same way as an entry's unknown keys
 }
 
 export interface FileChanges {

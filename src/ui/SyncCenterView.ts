@@ -108,8 +108,8 @@ export function syncTypeValue(g: SyncGroup): "file" | "folder" {
 export function syncModeValue(g: SyncGroup): string {
   return g.mode ?? "plain";
 }
-// The row's PanelFilter bucket, mirroring the state-filter pills (ledger C-#23: fate-derived, not
-// raw GroupState — a conflict-bucket row resolves to "apply", its current placement). locked →
+// The row's PanelFilter bucket, mirroring the state-filter pills: fate-derived, not raw
+// GroupState — a conflict-bucket row resolves to "apply", its current placement. locked →
 // null (no bucket, unchanged).
 export function syncActionValue(bucket: RowBucket): "capture" | "apply" | "ok" | "none" | null {
   for (const f of ["capture", "apply", "ok", "none"] as const) {
@@ -121,19 +121,19 @@ export function syncActionValue(bucket: RowBucket): "capture" | "apply" | "ok" |
 // The Sync Center search bar's whole vocabulary, in the order the autocomplete offers it.
 //
 // Exported so the tests can assert against the SHIPPED list rather than their own copy of it
-// (task-1 NEW-I2's lesson: a test that restates a literal agrees with whichever site its author was
+// (a test that restates a literal agrees with whichever site its author was
 // looking at). `as const` is load-bearing, not decoration: it gives `SyncQualifierKey` below, which
 // makes `syncResolvers` a total map over these keys — so renaming a key here without renaming its
 // resolver is a compile error rather than a qualifier that parses and autocompletes and then
 // filters nothing.
 export const SYNC_QUALIFIER_SPECS = [
   { key: "type", description: "item kind", values: [{ value: "file", description: "single-file item" }, { value: "folder", description: "folder item" }] },
-  // `section:` — spec §7. It replaces v2's `scope:` outright, with NO alias: `scope` named three
+  // `section:` replaces v2's `scope:` outright, with NO alias: `scope` named three
   // different concepts depending on where you stood, and accepting it here would keep one of them
   // alive in the one place the user actually types. An unrecognised key is free text, so a typed
   // `scope:core` now searches for the literal words instead of silently filtering.
   //
-  // `beta` is presented but never stored (spec §7b): it is an install source derived from the BRAT
+  // `beta` is presented but never stored: it is an install source derived from the BRAT
   // index, so the resolver reads the same presented section the sidebar does.
   { key: "section", description: "item family", values: [{ value: "obsidian" }, { value: "core" }, { value: "community" }, { value: "beta", description: "installed via BRAT" }, { value: "custom" }] },
   { key: "action", description: "what it needs", values: [{ value: "capture", description: "needs capture" }, { value: "apply", description: "needs apply" }, { value: "ok", description: "in sync" }, { value: "none", description: "no settings yet" }] },
@@ -143,7 +143,7 @@ export const SYNC_QUALIFIER_SPECS = [
 export type SyncQualifierKey = (typeof SYNC_QUALIFIER_SPECS)[number]["key"];
 export const SYNC_QUALIFIER_KEYS: ReadonlySet<string> = new Set(SYNC_QUALIFIER_SPECS.map((s) => s.key));
 
-// Sidebar section order: Beta sits between Community and custom (batch 3 ③).
+// Sidebar section order: Beta sits between Community and custom.
 const ITEM_SECTION_ORDER: (StorageSection | "beta")[] = ["obsidian", "core", "community", "beta", "custom"];
 const ITEM_SECTION_LABELS: Record<StorageSection | "beta", string> = { ...SECTION_LABELS, beta: "Beta" };
 
@@ -151,22 +151,22 @@ const STATUS_CLS: Record<RunStatus, string> = { ok: "is-ok", warning: "is-warn",
 // RunKind is wider than SyncAction (it also has "adopt"/"stop-sync"/"delete-leftover"), so
 // map explicitly rather than assigning rec.kind directly — undefined for the non-actions.
 const ACTION_CELL_MAP: Partial<Record<RunKind, SyncAction>> = { capture: "capture", apply: "apply", adopt: "apply", push: "push", pull: "pull" };
-// The two on/off list carriers (task-4): "one object = one row" dissolves their own list row
+// The two on/off list carriers: "one object = one row" dissolves their own list row
 // into the Core/Community section header chip — they never appear as a row themselves.
 const CARRIER_GROUP_NAMES = new Set(["core-plugins", "community-plugins"]);
-// C-#48 (search perf spec §3): trailing debounce for the search input's heavy re-render — long
+// Trailing debounce for the search input's heavy re-render — long
 // enough to coalesce a fast typist's whole burst into one render, short enough to still read as
 // live filtering once typing pauses.
 const SEARCH_DEBOUNCE_MS = 130;
 
-// After-install menu labels (spec §4, copy final) — the fallback ladder's two real choices
+// After-install menu labels — the fallback ladder's two real choices
 // (carrier NOT synced, row installs).
 const AFTER_INSTALL_LABELS: Record<"install-enable" | "install", string> = {
   "install-enable": "Turn it on",
   install: "Leave it off",
 };
 
-// Enablement menu labels (review fix #3, task 6 round 2 — same copy as After install, different
+// Enablement menu labels (same copy as After install, different
 // StateAction domain): carrier NOT synced, row already installed but disabled. Stored under
 // "enable"/"none" rather than "install-enable"/"install" so a stored choice stays valid under
 // `isValidPolicy` for a disabled row's own ladder (`policyOptions`) and survives `reload()`'s
@@ -179,13 +179,13 @@ const ENABLEMENT_LABELS: Record<"enable" | "none", string> = {
 // Session-remembered UI state: which sections have their ✓ / ⊘ / ○ trailing lines flattened open.
 const sessionUi = {
   insyncOpen: new Set<string>(),
-  excludedOpen: new Set<string>(), // C-#45 §7 (fix-round 4)
+  excludedOpen: new Set<string>(),
   nosettingsOpen: new Set<string>(),
 };
 
 // Staging state lives at session level, not view level: mobile Obsidian recreates views on
 // tab switches, and per-instance state would re-run the default pre-check on every
-// recreation — a run's cleared selection came back "self-checked" (batch 3 ⑥).
+// recreation — a run's cleared selection came back "self-checked".
 const sessionStaging = {
   selected: new Set<string>(),
   directionOverride: new Map<string, Direction>(),
@@ -224,12 +224,12 @@ export interface SyncCenterHost {
   selfStatus(): Promise<SelfSyncInfo>;
   coldStartDismissed(): boolean;
   setColdStartDismissed(v: boolean): void;
-  // Non-null when this device's data.json was written by a newer Config Sync (spec
-  // 2026-08-11-data-model-hardening.md §4.1): the plugin refuses every write while it is set, and
+  // Non-null when this device's data.json was written by a newer Config Sync:
+  // the plugin refuses every write while it is set, and
   // the panel says so instead of quietly offering runs that would be refused one by one.
   schemaStop(): { found: number } | null;
   // The same predicate the settings tab asks, and asking IS the refusal (the notice fires on the
-  // user's gesture). §4.2b: a flow that will be refused refuses BEFORE it opens — a modal that
+  // user's gesture). A flow that will be refused refuses BEFORE it opens — a modal that
   // takes a decision from the user and only then declines is the same defect as a pull that lets
   // them resolve conflicts it was never going to apply.
   settingsWritable(): boolean;
@@ -240,10 +240,10 @@ export interface SyncCenterHost {
   // `lockStoredLabel(lastLock, ref)` read displayName/displayParts already fall back to when no
   // override is passed (the lock is keyed by item ref since v3, and an on/off-list element with no
   // entry of its own falls back to its carrier's recorded name). Exposed so a caller building its
-  // own priority chain (remote pane, C-#14) can slot the local lock in ahead of a remote's label
+  // own priority chain (remote pane) can slot the local lock in ahead of a remote's label
   // without bypassing it.
   localLockLabel(group: string): string | undefined;
-  // The parent GROUP name for a companion group (c-livetest batch5 task 2, spec §1) — null for a
+  // The parent GROUP name for a companion group — null for a
   // non-companion, a custom group, or the legacy enabled-css-snippets switch list (out of scope).
   companionParentOf(group: string): string | null;
   captureItems(items: CaptureItem[], onProgress?: ProgressFn): Promise<GroupResult[] | null>;
@@ -253,7 +253,7 @@ export interface SyncCenterHost {
   remoteCheck(name: string): { check: RemoteCheck; at: number } | undefined;
   refreshRemoteChecks(): Promise<void>;
   remoteRefreshProgress(): { total: number; done: number } | null;
-  // R9: identifies the reader-cache generation a compare was started against, so a re-render can
+  // Identifies the reader-cache generation a compare was started against, so a re-render can
   // tell "still the same remote refresh cycle" (re-attach to the in-flight compare) from "the
   // remote changed or a refresh completed" (start a fresh one).
   readerGeneration(): number;
@@ -270,34 +270,33 @@ export interface SyncCenterHost {
   loadRunHistory(): Promise<RunRecord[]>;
   appendRunHistory(kind: RunKind, remote: string | null, results: GroupResult[]): Promise<void>;
   clearRunHistory(): Promise<void>;
-  // `stopSyncing`/`storeFileCount` are NOT here: the Stop-syncing footer that called them retired
-  // with §6.2's row contract, and the gesture's one home is now the settings-panel card's own
-  // toggle — so both moved to `SettingsHost` (SettingTab.ts) rather than lingering here with no
-  // caller. This view changes rules and sets local exceptions; stopping a whole item is a jump away
-  // through `MORE`.
+  // `stopSyncing`/`storeFileCount` are NOT here: the gesture's one home is the settings-panel
+  // card's own toggle — so both live on `SettingsHost` (SettingTab.ts) rather than lingering here
+  // with no caller. This view changes rules and sets local exceptions; stopping a whole item is a
+  // jump away through `MORE`.
   //
-  // The Stop-syncing menu's per-device layer (C-#45, spec §1/§3): read = has THIS device opted
+  // The Stop-syncing menu's per-device layer: read = has THIS device opted
   // this group out; write = set/clear THIS device's own opt-out (never another device's).
   deviceOptedOut(groupName: string): boolean;
   setDeviceOptOut(groupName: string, on: boolean): Promise<void>;
   listLeftoverStoreFiles(): Promise<{ rel: string; name: string; path: string; size: number }[]>;
-  deleteLeftoverStoreFiles(rels: string[]): Promise<string[] | null>; // deleted rels, or null when refused (§4.2b)
+  deleteLeftoverStoreFiles(rels: string[]): Promise<string[] | null>; // deleted rels, or null when refused
   appendActionHistory(entry: { kind: RunKind; desc: string; changed: number; removed?: string[]; deletedFiles?: string[] }): Promise<void>;
   // Bidirectional divergence for a switch-list group (exceptions masked); null when either
   // side is missing or unparseable. `masked` is the augmented exception set itself — the
-  // enablement fate derivation (#5-B) needs to tell "off everywhere" from "excluded by a rule".
+  // enablement fate derivation needs to tell "off everywhere" from "excluded by a rule".
   switchDivergenceFor(name: string): Promise<{ captureRemoves: string[]; applyDisables: string[]; masked: string[] } | null>;
   // Contents for an inline change diff: base = current state of the target side, produced =
   // what the pending action (capture/apply) would write. null = no diff available.
   diffPair(name: string, rel: string, dir: Direction): Promise<{ base: string; produced: string } | null>;
-  // The two enablement layers (spec §6.6), one read/write pair each — the SAME pair the Settings
+  // The two enablement layers, one read/write pair each — the SAME pair the Settings
   // panel's card rows call, so the three entrances cannot drift apart.
   // The fleet rule for one element of one list.
   enablementRuleFor(list: RuleListId, elementId: string): Sharing;
   setEnablementRule(list: RuleListId, elementId: string, sharing: Sharing): Promise<void>;
   // This device's own exception for that element: null = follows the rule.
   deviceElementFor(list: RuleListId, elementId: string): DeviceElementState | null;
-  // Take the element out of the shared answer, keeping EXACTLY what it is right now (spec §6.5).
+  // Take the element out of the shared answer, keeping EXACTLY what it is right now.
   leaveToThisDevice(list: RuleListId, elementId: string): Promise<void>;
   // Put it back under the shared answer.
   followTheDefault(list: RuleListId, elementId: string): Promise<void>;
@@ -306,20 +305,20 @@ export interface SyncCenterHost {
   // The Settings-sync menu: the same field the Settings tab's file-row sharing control edits
   // (Item.settingsFile.fileRule.sharing — this-device is structurally excluded there).
   itemFileSharing(ref: ItemRef): FileSharing;
-  // C-#25: whether the item's current mode makes a whole-file fileRule write legal (mirrors
+  // Whether the item's current mode makes a whole-file fileRule write legal (mirrors
   // manifest.ts's validator via itemCard.ts's fileRuleLegalForMode) — false for a fields-mode
   // item, whose Settings-sync row must not offer a menu setItemFileSharing would then throw on.
   itemFileSharingMenuLegal(ref: ItemRef): boolean;
   // Also the write target for a custom (folder) item's device class since runsOn's retirement
-  // (2026-08-12-enablement-two-layers, task 8) — the same field the Advanced tab's "Devices"
+  // — the same field the Advanced tab's "Devices"
   // dropdown writes (SettingTab.commitGroups → persistCustomItems → customItemFromGroup), a
   // folder simply has no other settings-file content to share the write with.
   setItemFileSharing(ref: ItemRef, sharing: FileSharing): Promise<void>;
-  // The More bridge (task 7 implements the scroll/expand target): deep-links into the Settings
+  // The More bridge: deep-links into the Settings
   // tab for this item's card.
   openSettingsAt(ref: ItemRef): void;
   // The item a compiled group belongs to — a registry LOOKUP, never a parse of the group name
-  // (spec §5: the `plugin-` prefix retires as a parser). null for a group no item owns.
+  // (the `plugin-` prefix is not a parser). null for a group no item owns.
   itemRefForGroup(name: string): ItemRef | null;
 }
 
@@ -340,12 +339,12 @@ function isoAge(iso: string | null): string {
   return Number.isNaN(ms) ? "unknown" : relativeAge(ms);
 }
 
-// remoteLabels (batch6 task-1): group name -> label from the remote store.lock.json, for the
-// remote pane to show a real plugin name instead of a raw group id (Task 2's rendering job) —
+// remoteLabels: group name -> label from the remote store.lock.json, for the
+// remote pane to show a real plugin name instead of a raw group id —
 // empty on an absent/malformed remote lock, never a reason for the compare itself to fail.
 type RemoteCompareResult = { entries: RemoteDiffEntry[]; lockDiffers: boolean; remoteLabels: Record<string, string> };
 
-// R9: one compare per (remote name, reader-cache generation) — see renderRemoteDetail.
+// One compare per (remote name, reader-cache generation) — see renderRemoteDetail.
 // `result` is populated once the compare settles successfully and the entry stays put (it is
 // NOT cleared on success) so every re-render while it's still the current key paints the cached
 // result instead of flashing "Fetching remote…" again. A rejection clears the entry outright (see
@@ -366,7 +365,7 @@ interface StatusRow {
   status: GroupStatus;
 }
 
-// One derivation per row per render cycle (ledger C-#22, spec §2): rollup, fate input, fate and
+// One derivation per row per render cycle: rollup, fate input, fate and
 // bucket computed together once per group name — every consumer (familyRollupFor, familyState,
 // fateWithInput, fateFor, rowBucket) reads the same cached entry instead of re-deriving. Cache
 // lives on the view (see rowDerivationCache) and is cleared at the top of render()/reload().
@@ -383,14 +382,14 @@ export class SyncCenterView extends ItemView {
   private groups: SyncGroup[] = [];
   private statuses: Map<string, GroupStatus> = new Map();
   private availability: Map<string, Availability> = new Map();
-  // Enablement-carrier divergence (spec 2026-08-06-enablement-single-entry-design.md #5-B),
+  // Enablement-carrier divergence,
   // fetched once per reload — only present for a carrier that's itself compiled, so a disabled
   // row's presence here doubles as "this carrier is synced AND its data is readable".
   private carrierDivergence: Map<EnablementList, { captureRemoves: string[]; applyDisables: string[]; masked: string[] }> = new Map();
-  // ledger C-#22: per-render-cycle memo for rowBucket/familyRollupFor/familyState/fateWithInput/
+  // Per-render-cycle memo for rowBucket/familyRollupFor/familyState/fateWithInput/
   // fateFor — see deriveRow(). Cleared at the top of render()/reload().
   private rowDerivationCache: Map<string, RowDerivation> = new Map();
-  // C-#48 (search perf, spec 2026-08-10-c-livetest-batch23-search-perf.md §2/§3): the sidebar
+  // Search perf: the sidebar
   // search re-derives every row's searchable text and the whole sorted row list on EVERY
   // keystroke — live-measured as the dominant cost (a keystroke's `familySearchText` calls alone
   // walked `host.companionParentOf` tens of thousands of times, since `familyCompanions` rescans
@@ -401,22 +400,22 @@ export class SyncCenterView extends ItemView {
   private searchTextCache: Map<string, string> = new Map();
   private rowsCache: StatusRow[] | null = null;
   private policy = sessionStaging.policy;
-  // Fold state for the four unified type sections (task-4).
+  // Fold state for the four unified type sections.
   private typeSectionOpen: Set<TypeSection> = new Set();
   private selected = sessionStaging.selected;
   private directionOverride = sessionStaging.directionOverride;
-  // Conflict resolutions (spec §4/§5, task 6): view-level, not session-level like the maps
+  // Conflict resolutions: view-level, not session-level like the maps
   // above — a conflict resolution is a live judgment call on the CURRENT divergence, not
   // something that should survive a mobile tab-switch view recreation the way staged
   // selections do. Resets outright after a successful run (renderActionBar's `run`).
   private conflictChoice: Map<string, ConflictChoice> = new Map();
   private expandedItems: Set<string> = new Set();
-  // 定稿轮 12+13 ②: which item cards' FILES row is expanded past its default collapsed
+  // Which item cards' FILES row is expanded past its default collapsed
   // count-only line — keyed by group name, same "Set that survives repaints, starts fresh with a
   // new view instance" idiom expandedItems/remoteFoldsOpen already use, so a repaint mid-review
   // doesn't re-collapse a row the user just opened.
   private expandedFileRows: Set<string> = new Set();
-  // Remote pane fold state (spec §2, C-#21): survives repaints (periodic check, notify) the way
+  // Remote pane fold state: survives repaints (periodic check, notify) the way
   // expandedItems/typeSectionOpen do for the main list — a repaint rebuilds the pane fresh, so
   // without this the on/off line, object-row folds, and open inline diffs would collapse on every
   // tick. Keys: `{remoteName}::{group}` (row fold), `{remoteName}::{group}::onoff` (on/off line),
@@ -451,14 +450,14 @@ export class SyncCenterView extends ItemView {
   // the search input itself. Set on every full render().
   private mainEl: HTMLElement | null = null;
   private sideSectionEl: HTMLElement | null = null;
-  // C-#48 (search perf, spec §3 "instant field, deferred work"): the search input's own value is
+  // "Instant field, deferred work": the search input's own value is
   // always native/instant; the heavy re-render (sidebar badges + the whole main pane) is debounced
   // behind this single timer so a fast typist never pays for every intermediate keystroke — only
   // the query it settles on. One timer shared by the sidebar and compact-mainbar search inputs
   // (never both live at once — `renderSidebar`/`renderItemMode`'s compact branch are mutually
   // exclusive per render). Cancelled in onClose so a closed view can't fire a stale render.
   private searchDebounceTimer: number | null = null;
-  // R9: the remote pane's compare in flight, if any — see renderRemoteDetail.
+  // The remote pane's compare in flight, if any — see renderRemoteDetail.
   private inflightCompare: InflightCompare | null = null;
 
   constructor(leaf: WorkspaceLeaf, private host: SyncCenterHost) {
@@ -505,7 +504,7 @@ export class SyncCenterView extends ItemView {
     this.qac.destroy(); // release the widget's document-level listener if the view closes mid-dropdown
     if (this.searchDebounceTimer !== null) {
       window.clearTimeout(this.searchDebounceTimer);
-      this.searchDebounceTimer = null; // C-#48 fix-round-2 (nit): match the clear+null idiom used everywhere else
+      this.searchDebounceTimer = null; // match the clear+null idiom used everywhere else
     }
     this.contentEl.empty();
   }
@@ -532,11 +531,11 @@ export class SyncCenterView extends ItemView {
 
   private async reload(): Promise<void> {
     const gen = ++this.renderGen;
-    // ledger C-#22: a reload always means new data — drop the row derivation memo up front so no
+    // A reload always means new data — drop the row derivation memo up front so no
     // interaction landing mid-reload (before the closing render() call) can read a bucket/fate
-    // computed against the groups/statuses this reload is about to replace. C-#48: the search-text
+    // computed against the groups/statuses this reload is about to replace. The search-text
     // and rows() memos are equally stale once the group list is about to change. (A pending
-    // debounced search re-render is handled too — see renderMainRegion()'s own cancel, fix-round-2:
+    // debounced search re-render is handled too — see renderMainRegion()'s own cancel:
     // reload() always ends in render() → renderMainRegion(), so that single cancel point covers
     // this path already; no separate copy needed here.)
     this.rowDerivationCache.clear();
@@ -607,7 +606,7 @@ export class SyncCenterView extends ItemView {
     if (!sessionStaging.seeded) {
       sessionStaging.seeded = true;
       for (const s of statuses) {
-        // never-synced rows are deliberately NOT pre-checked (定稿 2026-07-28): in the upgrade
+        // never-synced rows are deliberately NOT pre-checked: in the upgrade
         // window a group with uncaptured local edits also reads never-synced, and pre-checking
         // it under the apply default would make one blind "Apply N items" press overwrite those
         // edits. Cold-start users select-all instead; safety beats one click.
@@ -622,7 +621,7 @@ export class SyncCenterView extends ItemView {
     return this.availability.get(name) ?? { kind: "enabled", drift: null, localVersion: null, storeVersion: null, anchor: "app", desktopOnly: false };
   }
 
-  // Install targets the version the store captured (方案 A); latest when unrecorded.
+  // Install targets the version the store captured; latest when unrecorded.
   private installTargetText(name: string): string {
     const v = this.availOf(name).storeVersion;
     return v !== null ? `the captured version ${v}` : "the latest version";
@@ -640,7 +639,7 @@ export class SyncCenterView extends ItemView {
   }
 
   // The item ref behind a row's group name — THE resolver this view asks whenever it needs the
-  // identity rather than the label (spec §5: the `plugin-` prefix retires as a parser). The host's
+  // identity rather than the label (the `plugin-` prefix is not a parser). The host's
   // registry lookup answers for a compiled row; a store-only row falls through to the same closed
   // legacy rules a v1/v2 lock read uses (itemKeys.ts's lockRefFor), so the one case that used to
   // force a name parse — a row with no def — is answered by the single producer too.
@@ -657,7 +656,7 @@ export class SyncCenterView extends ItemView {
     return ref;
   }
 
-  // rowRef is asked per row per render (ledger C-#22's discipline), and both halves of it cost
+  // rowRef is asked per row per render, and both halves of it cost
   // real work — a registry scan and, for a store-only row, an index build. Memoized against the
   // group list's identity, so a reload rebuilds it and nothing else does.
   private rowRefSource: SyncGroup[] | null = null;
@@ -678,7 +677,7 @@ export class SyncCenterView extends ItemView {
     return p.parent === null ? p.label : `${p.parent} › ${p.label}`;
   }
 
-  // One representative compiled group per family (spec §1 "one object"): the parent, or an
+  // One representative compiled group per family ("one object"): the parent, or an
   // orphan companion whose parent isn't itself compiled here — e.g. the item's own settings file
   // is device-scoped off this device while the companion isn't (honest degradation: a family can
   // only fold into a parent that actually exists).
@@ -690,7 +689,7 @@ export class SyncCenterView extends ItemView {
     });
   }
 
-  // A family's companion StatusRows for `parentName` (spec §1): groupOwners' def-level
+  // A family's companion StatusRows for `parentName`: groupOwners' def-level
   // presetCompanions plus any item's configured companions, restricted to ones currently
   // compiled and statused. Empty for a standalone row (custom folder, no-companion item) —
   // familyRollup's single-member truth-table guarantee then makes every consumer below
@@ -705,7 +704,7 @@ export class SyncCenterView extends ItemView {
     return out;
   }
 
-  // A dir-type member's file count for the rollup (spec §2's "companion file changes (summed
+  // A dir-type member's file count for the rollup ("companion file changes (summed
   // count N)"): 0 for a file-type member (its own settings payload is a separate verb component
   // — see computeFateInput's hasSettingsPayload) and for a dir member with no diff computed yet.
   private memberFileCount(r: StatusRow): number {
@@ -714,7 +713,7 @@ export class SyncCenterView extends ItemView {
 
   // The family rollup for a row (itself + its companions) — shared by computeFateInput (fate/
   // direction/conflict), familyState (counts/filters/visibility), stagedRows' companion fan-out,
-  // and renderUnifiedFiles' merged Files section. Memoized via deriveRow (ledger C-#22).
+  // and renderUnifiedFiles' merged Files section. Memoized via deriveRow.
   private familyRollupFor(r: StatusRow): FamilyRollup {
     return this.deriveRow(r).rollup;
   }
@@ -730,7 +729,7 @@ export class SyncCenterView extends ItemView {
     return familyRollup(members);
   }
 
-  // The family's Files section (spec §4): parent changes plus every companion's, each companion's
+  // The family's Files section: parent changes plus every companion's, each companion's
   // paths prefixed with its own group name so `themes/Foo.css` reads as a path under the family
   // rather than colliding with the parent's own files. A member with no changes attached is
   // skipped (mergeFamilyChanges only ever sees members that HAVE a `changes` set).
@@ -754,8 +753,8 @@ export class SyncCenterView extends ItemView {
     return { group: r.group.name, rel: mergedRel };
   }
 
-  // The state a row's FAMILY presents as (spec §2). Ledger C-#23: every count/filter/partition/
-  // fold consumer now reads `rowBucket` (below) instead — this is left as (1) the pre-task
+  // The state a row's FAMILY presents as. Every count/filter/partition/
+  // fold consumer reads `rowBucket` (below) instead — this is left as (1) the
   // fallback `rowBucket` uses when the row's OWN state is "locked" (see its comment) and (2) the
   // handful of call sites that genuinely need a row's OWN member state (fateWithInput's locked
   // bypass, the default-policy suggestion) go through presState(r) directly, not this rollup.
@@ -763,15 +762,15 @@ export class SyncCenterView extends ItemView {
     return this.familyRollupFor(r).state;
   }
 
-  // The single per-row bucket derivation every count/filter/partition/fold consumer reads (ledger
-  // C-#23, spec §1): a `↓ Turns on` row can no longer land in the "no settings yet" fold its raw
+  // The single per-row bucket derivation every count/filter/partition/fold consumer reads:
+  // a `↓ Turns on` row can never land in the "no settings yet" fold its raw
   // GroupState might suggest — its bucket comes from the SAME fate it renders with. Memoized via
-  // deriveRow (ledger C-#22) — see there for the locked-bucket bypass reasoning.
+  // deriveRow — see there for the locked-bucket bypass reasoning.
   private rowBucket(r: StatusRow): RowBucket {
     return this.deriveRow(r).bucket;
   }
 
-  // The single derivation pass for a row (ledger C-#22, spec §2): computes the rollup, fate
+  // The single derivation pass for a row: computes the rollup, fate
   // input, fate and bucket together, once, and caches by group name for the rest of the render
   // cycle — familyRollupFor/familyState/fateWithInput/fateFor/rowBucket all read this cache
   // instead of re-deriving. Cache is cleared at the top of render()/reload() (see
@@ -784,8 +783,8 @@ export class SyncCenterView extends ItemView {
   // passphrase, alongside a plain companion dir with real changes) rolls up to the companion's
   // directional state, not "locked" — so an unconditional "—"/non-stageable bypass fate would
   // otherwise fateBucket to "ok" and the whole family would silently vanish from counts/filters/
-  // the active partition (review fix; config-reachable by any user). `legacyLockedFamilyBucket`
-  // reproduces exactly where familyState(r) landed pre-task, from the family's raw state, never
+  // the active partition (config-reachable by any user). `legacyLockedFamilyBucket`
+  // reproduces the bucket familyState(r) alone would give, from the family's raw state, never
   // from fate.
   private deriveRow(r: StatusRow): RowDerivation {
     const cached = this.rowDerivationCache.get(r.group.name);
@@ -802,7 +801,7 @@ export class SyncCenterView extends ItemView {
     return derived;
   }
 
-  // C-#48 (search perf spec §2/§3): memoized per render cycle (cleared alongside
+  // Memoized per render cycle (cleared alongside
   // rowDerivationCache — see render()/reload()). Every sidebar section entry and both in-section
   // paths called this fresh on every call — up to ~15 rebuilds of the same sorted array per
   // keystroke, each re-sorting with a `fullName`/localeCompare comparator and re-scanning
@@ -821,9 +820,9 @@ export class SyncCenterView extends ItemView {
       if (status !== undefined) out.push({ group, status });
     }
     // The store manifest accretes in capture order; the view sorts deterministically — type
-    // section rank, then display name — so e.g. core items never interleave the Obsidian ones
-    // (batch 3 ④). Ranking by TYPE_SECTION_ORDER rather than raw ITEM_SECTION_ORDER merges beta into
-    // the same rank as community (task-4 review fix): the brief's "alphabetical within" a type
+    // section rank, then display name — so e.g. core items never interleave the Obsidian
+    // ones. Ranking by TYPE_SECTION_ORDER rather than raw ITEM_SECTION_ORDER merges beta into
+    // the same rank as community: "alphabetical within" a type
     // section means ONE merged alphabetical list, not a community block followed by a beta
     // block — itemSectionOf/typeSectionForRow already agree that beta belongs in Community.
     out.sort((a, b) => {
@@ -841,7 +840,7 @@ export class SyncCenterView extends ItemView {
   // the BRAT index, which present under Beta (parity with the settings Beta tab).
   private itemSectionOf(name: string): StorageSection | "beta" {
     const cat = sectionForGroup(name);
-    // Beta is a presented classification over a community item (spec §7b), so the id it asks BRAT
+    // Beta is a presented classification over a community item, so the id it asks BRAT
     // about comes from the row's ref — never sliced off the name.
     const owner = refItemId(this.rowRef(name));
     if (cat === "community" && owner !== null && this.betaIds.has(owner.id)) return "beta";
@@ -859,13 +858,13 @@ export class SyncCenterView extends ItemView {
     return effectiveDirection(this.presState(r), this.directionOverride.get(r.group.name));
   }
 
-  // Presentation state: version-ahead in-sync rows surface as to-capture (定稿 feedback-trio).
+  // Presentation state: version-ahead in-sync rows surface as to-capture.
   private presState(r: StatusRow): GroupState {
     return presentedState(r.status.state, this.availOf(r.group.name).drift);
   }
 
   // The item ref for a row's compiled group name. A registry LOOKUP through the host, not an
-  // inverse parse of the name (spec §5): the registry already knows which def produced which
+  // inverse parse of the name: the registry already knows which def produced which
   // group name, so nothing here has to know that a community item's group carries a `plugin-`
   // prefix. null for a group no item owns (a companion, an enablement carrier), whose rows never
   // reach the Settings-sync menu or the More bridge.
@@ -873,20 +872,20 @@ export class SyncCenterView extends ItemView {
     return this.host.itemRefForGroup(name);
   }
 
-  // The real FateInput derivation (Task 1's model, fully wired; family-rolled-up c-livetest
-  // batch5 task 2): `pres` is the FAMILY's rollup state (parent + companions) — it, not the row's
-  // own presState, now drives direction/conflict/nothingYet/stageability, via the same
+  // The real FateInput derivation:
+  // `pres` is the FAMILY's rollup state (parent + companions) — it, not the row's
+  // own presState, drives direction/conflict/nothingYet/stageability, via the same
   // stageableRow/effectiveDirection chains a plain row always used (familyRollup's single-member
   // guarantee makes a companion-less row byte-identical to before). `hasSettingsPayload` (the
-  // settings verb) reads the row's own RAW `r.status.state` (C-#37), not the version-ahead-
+  // settings verb) reads the row's own RAW `r.status.state`, not the version-ahead-
   // relabeled presState — a raw-in-sync/drift-ahead row genuinely writes no settings file, only
   // `versionAhead` below explains its capture; folderFileCount covers a companion's own file
-  // changes separately (spec §2: "parent settings payload changed → settings verb; companion file
+  // changes separately ("parent settings payload changed → settings verb; companion file
   // changes → folder verb joins"). storeListOn/locallyOn/ruleSharing/localException only exist for a
   // carrier-synced plugin row — for every other row (obsidian/folder/self-excluded/
   // carrier-unsynced) they stay at their "no enablement dimension" defaults, which
   // `effectiveTurnsOn`/`buildChips` already treat as a no-op (see fateModel.ts). Called exactly
-  // once per row per render cycle, from deriveRow() (ledger C-#22), which already has the rollup
+  // once per row per render cycle, from deriveRow(), which already has the rollup
   // computed — takes it as a parameter rather than recomputing it.
   private computeFateInput(r: StatusRow, rollup: FamilyRollup): FateInput {
     const name = r.group.name;
@@ -912,17 +911,17 @@ export class SyncCenterView extends ItemView {
     }
     const pres = rollup.state;
     const optedOutHere = this.host.deviceOptedOut(name);
-    // C-#45 fix-round 2 (root cause of the live kickstart failure — Remotely Save stayed
-    // "Installs" in To apply after "On this device"): forcing direction null HERE, not just
-    // rowFate's own output, is what makes every OTHER direction-reading consumer agree — the
+    // Forcing direction null HERE, not just rowFate's own output, is what makes every OTHER
+    // direction-reading consumer agree (otherwise an opted-out not-installed plugin still reads
+    // "Installs" in To apply) — the
     // card's On-apply/On-capture header + Files visibility (renderUnifiedCard's `dir`) and
     // stateClauseText's clause branch both read `input.direction` directly, not `fate.glyph`, so
-    // patching rowFate alone left them still deriving the row's real, still-derivable direction
-    // from the availability ladder/rollup — a not-installed plugin has an "apply" direction
-    // independent of this device's opt-out. Mirrors how groupExcludedHere's class exclusion
-    // already arrives with direction:null BY CONSTRUCTION (the synthetic in-sync status
+    // patching rowFate alone would leave them still deriving the row's real, still-derivable
+    // direction from the availability ladder/rollup — a not-installed plugin has an "apply"
+    // direction independent of this device's opt-out. Mirrors how groupExcludedHere's class
+    // exclusion already arrives with direction:null BY CONSTRUCTION (the synthetic in-sync status
     // computeStatuses synthesizes upstream) — opt-out has no such synthetic status (the real
-    // comparison genuinely runs, C-#45 spec §4), so it's forced null here instead.
+    // comparison genuinely runs), so it's forced null here instead.
     const rawDirection = stageableRow(pres, this.sectionOf(name)) ? effectiveDirection(pres, this.directionOverride.get(name)) : null;
     const direction = optedOutHere ? null : rawDirection;
     const rollupFiles = direction === "apply" ? rollup.applyFiles : direction === "capture" ? rollup.captureFiles : 0;
@@ -932,7 +931,7 @@ export class SyncCenterView extends ItemView {
       nothingYet: pres === "no-settings",
       installed: a.kind !== "not-installed",
       hasUpdate: a.anchor === "plugin" && a.drift === "behind",
-      // C-#37: driftFor (availability.ts) only ever returns "ahead" once both versions are
+      // driftFor (availability.ts) only ever returns "ahead" once both versions are
       // non-null — mirrored via the && chain below (not a defensive fallback) rather than
       // asserted, since TS can't infer that guarantee from `a.drift` alone.
       versionAhead:
@@ -946,7 +945,7 @@ export class SyncCenterView extends ItemView {
       localException,
       deviceClass,
       desktopOnly: a.desktopOnly,
-      // C-#24: THIS row's own compiled group (not the family rollup) is scoped away from this
+      // THIS row's own compiled group (not the family rollup) is scoped away from this
       // device's class by the item's Settings-sync file rule — the same layer desktopOnly reads
       // its fact from (`a`/`r.group`), never the store; groupExcludedHere (panelModel.ts) checks
       // both the group-level devices class AND a Plain file's own fileRule.sharing, since the two
@@ -954,10 +953,10 @@ export class SyncCenterView extends ItemView {
       // otherwise neutral (direction null) — a directional/conflict member always wins, so a
       // still-syncing companion is never masked.
       excludedHere: groupExcludedHere(r.group, deviceClass),
-      // C-#45: THIS row's own group, opted out on THIS device via the Stop-syncing menu — a
+      // THIS row's own group, opted out on THIS device via the Stop-syncing menu — a
       // DIFFERENT fact/cause from excludedHere (a per-device choice, not a class rule) AND a
       // DIFFERENT precedence (unconditional, not direction-null-gated — see `direction` above and
-      // rowFate's own fix-round-2 comment); rowFate renders the two identically once either wins
+      // rowFate's own comment); rowFate renders the two identically once either wins
       // (glyph/sentence/chip/stageable); only the card clause (stateClauseText) tells them apart.
       optedOutHere,
       hasSettingsPayload: r.status.state !== "no-settings" && r.status.state !== "in-sync" && r.status.state !== "locked",
@@ -989,11 +988,11 @@ export class SyncCenterView extends ItemView {
     return c.added.length + c.updated.length + c.deleted.length;
   }
 
-  // "locked" (encrypted, no passphrase set) has no representation in spec §3's verb table —
+  // "locked" (encrypted, no passphrase set) has no representation in the fate verb table —
   // content comparison never even ran, so direction/conflict/nothingYet are all meaningless here.
   // Bypasses rowFate for this one state and reuses this codebase's existing approved copy for it
   // (stateIcon's "locked" tip, already shown elsewhere in this view) rather than letting it fall
-  // through to a misleading "In sync". Memoized via deriveRow (ledger C-#22).
+  // through to a misleading "In sync". Memoized via deriveRow.
   private fateWithInput(r: StatusRow): { fate: Fate; input: FateInput } {
     const { fate, input } = this.deriveRow(r);
     return { fate, input };
@@ -1004,7 +1003,7 @@ export class SyncCenterView extends ItemView {
   }
 
   // All user-facing counts (header pills, sidebar badges, filter pills, switcher) must agree
-  // with what the filters actually show — i.e. count each row's BUCKET (ledger C-#23, spec §1),
+  // with what the filters actually show — i.e. count each row's BUCKET,
   // not its raw family/member state.
   private presentedCounts(rows: StatusRow[]): FateBucketCounts {
     return fateBucketCounts(rows.map((r) => this.rowBucket(r)));
@@ -1012,13 +1011,13 @@ export class SyncCenterView extends ItemView {
 
   private render(gen: number): void {
     if (gen !== this.renderGen) return;
-    // ledger C-#22: a fresh render cycle — any staging state a render-triggering handler just
+    // A fresh render cycle — any staging state a render-triggering handler just
     // changed (direction override, conflict choice, selection, filter, search…) must be read
-    // fresh, not off derivations cached for the PREVIOUS cycle's state. C-#48: the search-text/
+    // fresh, not off derivations cached for the PREVIOUS cycle's state. The search-text/
     // rows() memos don't depend on that staging state, only on `this.groups` — clearing them here
     // too is cheap insurance (one full render, not one per keystroke) against anything upstream of
     // render() replacing `this.groups` without going through reload()'s own clear. (A pending
-    // debounced search re-render is handled too — see renderMainRegion()'s own cancel, fix-round-2:
+    // debounced search re-render is handled too — see renderMainRegion()'s own cancel:
     // render() always calls renderMainRegion() below, so that single cancel point covers this path
     // already; no separate copy needed here.)
     this.rowDerivationCache.clear();
@@ -1035,7 +1034,7 @@ export class SyncCenterView extends ItemView {
     this.contentEl.scrollTop = scrollTop;
   }
 
-  // C-#48 (search perf spec §3): coalesces a burst of keystrokes into one trailing re-render —
+  // Coalesces a burst of keystrokes into one trailing re-render —
   // `run` always closes over live view state (`this.search` etc.), never a value captured at
   // schedule time, so whichever keystroke is LAST when the timer fires is the one that renders;
   // an earlier, still-pending timer is cancelled outright rather than left to also fire.
@@ -1049,22 +1048,21 @@ export class SyncCenterView extends ItemView {
 
   // Rebuilds only the main pane from the current panelSection. The sidebar search calls this (plus
   // an in-place sidebar section-list refresh) on each keystroke instead of render(), so the search
-  // input and its autocomplete are never torn down mid-type — which used to blink the dropdown
-  // once per keystroke.
+  // input and its autocomplete are never torn down mid-type.
   //
-  // C-#48 fix-round-2 (review): a pending debounced search re-render (see debounceSearchRender)
-  // must never survive past THIS rebuild, no matter which of this method's callers triggered it —
-  // fix-round-1 cancelled the timer at the top of render()/reload() instead, but two direct
+  // A pending debounced search re-render (see debounceSearchRender)
+  // must never survive past THIS rebuild, no matter which of this method's callers triggered it.
+  // Cancelling the timer at the top of render()/reload() would not be enough: two direct
   // callers (the cold-start banner's "Review settings →"/dismiss handlers, renderItemMode) bypass
-  // both: they call renderMainRegion() straight, without going through render()/reload() first. A
+  // both — they call renderMainRegion() straight, without going through render()/reload() first. A
   // realistic sequence — type in the compact search box (timer armed) then, within the debounce
-  // window, tap the banner (first-run-on-a-phone territory, both visible together) — left the OLD
-  // timer to fire ~130ms later into DOM this call already replaced (main.empty() below), running
+  // window, tap the banner (first-run-on-a-phone territory, both visible together) — would leave
+  // the timer to fire ~130ms later into DOM this call already replaced (main.empty() below), running
   // the compact path's stale renderPills/renderSectionsBody/refreshGlobalSelectAll closure against
   // detached elements. Cancelling HERE, at the top of the one method every caller (render(),
   // reload() via render(), the debounce's own trailing call, and both banner handlers) funnels
-  // through, is the single choke point — render()/reload() no longer carry their own copy of this
-  // (removed, single source of truth: one cancel to keep in sync, not three). Idempotent: by the
+  // through, is the single choke point — render()/reload() carry no copy of their own
+  // (single source of truth: one cancel to keep in sync, not three). Idempotent: by the
   // time the debounce's OWN trailing call reaches here, `debounceSearchRender` has already nulled
   // the field itself, so this is a harmless no-op on that path.
   private renderMainRegion(): void {
@@ -1218,8 +1216,8 @@ export class SyncCenterView extends ItemView {
 
     if (info.state === "coldstart") {
       if (!info.storePresent) {
-        // C-#19: a never-pulled fresh device has no store to adopt from yet — no "Found a
-        // configuration" claim, no Adopt, no Capture caution (spec 2026-08-08-c-livetest-batch9 §1).
+        // A never-pulled fresh device has no store to adopt from yet — no "Found a
+        // configuration" claim, no Adopt, no Capture caution.
         pane.createDiv({ cls: "config-sync-self-sub", text: "This is a new device — it has no sync list yet." });
         const block = pane.createDiv({ cls: "config-sync-self-block" });
         block.createDiv({ cls: "config-sync-self-block-h", text: "No store on this device yet" });
@@ -1264,7 +1262,7 @@ export class SyncCenterView extends ItemView {
 
     if (info.state === "insync") {
       pane.createDiv({ cls: "config-sync-self-sub", text: `The list of what this device syncs — ${info.itemCount} item${info.itemCount === 1 ? "" : "s"}, in sync with the store.` });
-      // Post-adopt nudge (folds in the old guidance banner): the list is set up but items may not
+      // Post-adopt nudge: the list is set up but items may not
       // be applied to this device yet. Point at Apply (store → device), never Capture.
       const toApply = this.presentedCounts(this.mainRows()).down;
       if (toApply > 0) {
@@ -1409,7 +1407,7 @@ export class SyncCenterView extends ItemView {
         this.filter = "all"; // searching means "find this item"
         this.expandAllTypeSections(); // transition into search: expand once so hits are discoverable
       }
-      // C-#48 (search perf spec §3): the heavy part — sidebar hit badges + the whole main pane
+      // The heavy part — sidebar hit badges + the whole main pane
       // (pills, list, sections all read this.search) — is debounced so a fast typist's in-between
       // keystrokes never pay for a render; `debounceSearchRender` always reads live `this.search`
       // when it fires, so the LAST keystroke in a burst is the one that settles, never a stale one.
@@ -1425,7 +1423,7 @@ export class SyncCenterView extends ItemView {
 
   private renderSectionEntries(container: HTMLElement): void {
     this.renderSelfEntry(container);
-    // No head over the scope list (定稿轮 17②): the self card's own "plugin settings ↔ store"
+    // No head over the scope list: the self card's own "plugin settings ↔ store"
     // subtitle already carries the device↔store relation — grouping is by dividers alone, and
     // the only head left is Remotes', which earns its place by carrying live checked-age state.
     container.createDiv({ cls: "config-sync-side-divider" });
@@ -1446,7 +1444,7 @@ export class SyncCenterView extends ItemView {
         if (c.up > 0) renderActionCount(item.createSpan({ cls: "config-sync-side-badge is-up" }), "capture", c.up);
         if (c.down > 0) renderActionCount(item.createSpan({ cls: "config-sync-side-badge is-down" }), "apply", c.down);
         if (c.ok > 0) item.createSpan({ cls: "config-sync-side-badge is-ok", text: `✓${c.ok}` });
-        if (c.excluded > 0) item.createSpan({ cls: "config-sync-side-badge is-excluded", text: `⊘${c.excluded}` }); // C-#45 §7
+        if (c.excluded > 0) item.createSpan({ cls: "config-sync-side-badge is-excluded", text: `⊘${c.excluded}` });
         if (c.none > 0) item.createSpan({ cls: "config-sync-side-badge is-none", text: `○${c.none}` });
       }
       item.addEventListener("click", () => {
@@ -1526,7 +1524,7 @@ export class SyncCenterView extends ItemView {
       if (c.up > 0) renderActionCount(sw.createSpan({ cls: "config-sync-side-badge is-up" }), "capture", c.up);
       if (c.down > 0) renderActionCount(sw.createSpan({ cls: "config-sync-side-badge is-down" }), "apply", c.down);
       if (c.ok > 0) sw.createSpan({ cls: "config-sync-side-badge is-ok", text: `✓${c.ok}` });
-      if (c.excluded > 0) sw.createSpan({ cls: "config-sync-side-badge is-excluded", text: `⊘${c.excluded}` }); // C-#45 §7
+      if (c.excluded > 0) sw.createSpan({ cls: "config-sync-side-badge is-excluded", text: `⊘${c.excluded}` });
       if (c.none > 0) sw.createSpan({ cls: "config-sync-side-badge is-none", text: `○${c.none}` });
     } else if (this.panelSection.kind === "history") {
       sw.createSpan({ text: "History" });
@@ -1571,7 +1569,7 @@ export class SyncCenterView extends ItemView {
   }
 
   private renderHeader(): void {
-    // No title span: the pane header already reads "Sync Center" (mobile polish round 2).
+    // No title span: the pane header already reads "Sync Center".
     const head = this.contentEl.createDiv({ cls: "config-sync-center-head" });
     this.renderSelfChip(head);
     if (this.selfInfo !== null) head.createSpan({ cls: "config-sync-head-divider" });
@@ -1608,9 +1606,9 @@ export class SyncCenterView extends ItemView {
       text: `✓ ${ok}`,
       attr: { "aria-label": `${ok} item${ok === 1 ? "" : "s"} in sync` },
     });
-    // C-#45 §7 (fix-round 4): mirrors the ok/none pills' own shape — unconditional-count vs.
+    // Mirrors the ok/none pills' own shape — unconditional-count vs.
     // N=0-suppressed is inconsistent between ok (always shown) and none (suppressed) even today;
-    // `excluded` follows `none`'s precedent (suppressed at 0), matching the spec's explicit
+    // `excluded` follows `none`'s precedent (suppressed at 0), matching the explicit
     // empty-state rule for the FILTER pill, applied consistently here too.
     if (excluded > 0) {
       pills.createSpan({
@@ -1626,11 +1624,9 @@ export class SyncCenterView extends ItemView {
         attr: { "aria-label": `${none} item${none === 1 ? "" : "s"} with no settings yet` },
       });
     }
-    // Manual refresh (定稿 2026-07-17, replaces the enabled-set polling; made global 定稿
-    // 2026-08-04 — #1): re-scans local state, catching plugin toggles made in Obsidian's
+    // Manual refresh: re-scans local state, catching plugin toggles made in Obsidian's
     // settings modal while the panel stayed open, and re-checks every remote (desktop only).
-    // The old "refreshed just now" text span is gone (定稿轮 17③) — the age lives in this
-    // button's tooltip instead, recomputed on each render exactly like the span's text was.
+    // The refreshed-age lives in this button's tooltip, recomputed on each render.
     const refresh = new ExtraButtonComponent(head);
     refresh.setIcon("refresh-cw");
     refresh.setTooltip(this.lastRefreshedAt === null ? "Refresh" : `Refresh — refreshed ${relativeAge(this.lastRefreshedAt)}`);
@@ -1643,8 +1639,8 @@ export class SyncCenterView extends ItemView {
   }
 
   // The run's report is recorded to history and surfaced in the inline strip; the strip
-  // expands by default when the outcome isn't clean (定稿 2026-07-18 — no more silent-looking
-  // green success hiding failures behind "details").
+  // expands by default when the outcome isn't clean — never a silent-looking
+  // green success hiding failures behind "details".
   private setLastRun(kind: RunKind, remote: string | null, results: GroupResult[] | null): void {
     if (results === null) return;
     this.lastRun = { kind, remote, results, expanded: worstStatus(results) !== "ok" };
@@ -1669,7 +1665,7 @@ export class SyncCenterView extends ItemView {
   private renderResultStrip(main: HTMLElement): void {
     const run = this.lastRun;
     if (run === null) return;
-    // Severity split (spec 2026-08-09-c-livetest-batch16 §2, C-#35): only a genuine failure
+    // Severity split: only a genuine failure
     // (tone "issue") flips the strip to issue tone; a benign success-side note (e.g. the
     // version-fallback line) stays success-framed with its own amber count instead of reading
     // as a failure. See reportContent.stripHeader/resultLevel's doc comments for the mapping.
@@ -1724,7 +1720,7 @@ export class SyncCenterView extends ItemView {
     const out = rec.kind === "capture" || rec.kind === "push";
     const base = rec.kind.charAt(0).toUpperCase() + rec.kind.slice(1);
     const label = rec.remote !== null ? `${base} · ${rec.remote}` : base;
-    // Split the old out/in glyph into per-action icons so history matches the panel's
+    // Per-action icons so history matches the panel's
     // vocabulary; adopt maps to the apply icon (like the self-badge), and any unmapped
     // kind falls back to the text glyph.
     const action = ACTION_CELL_MAP[rec.kind];
@@ -1868,8 +1864,7 @@ export class SyncCenterView extends ItemView {
   }
 
   // Total over SYNC_QUALIFIER_SPECS' keys by type (see the specs' comment): the spec list and this
-  // map are the two halves of one vocabulary, and every defect on this branch has been one half of
-  // a relationship moving without the other.
+  // map are the two halves of one vocabulary and must always move together.
   private syncResolvers(): Record<SyncQualifierKey, QualifierResolver<StatusRow>> {
     return {
       type: (r) => syncTypeValue(r.group),
@@ -1880,11 +1875,11 @@ export class SyncCenterView extends ItemView {
     };
   }
 
-  // A family row matches search on the parent's own name/label OR any companion's (spec §1's
-  // dissolved companions must stay findable by their own name even though they no longer render
+  // A family row matches search on the parent's own name/label OR any companion's (dissolved
+  // companions must stay findable by their own name even though they no longer render
   // their own row).
   //
-  // C-#48 (search perf spec §2/§3): memoized per render cycle, keyed by group name (cleared
+  // Memoized per render cycle, keyed by group name (cleared
   // alongside rowDerivationCache — see render()/reload()) — live-measured as the dominant
   // per-keystroke cost. This text depends only on the row's own group/label and its companions,
   // never on the query, so recomputing it on every one of a keystroke's several full-row-list
@@ -1915,11 +1910,11 @@ export class SyncCenterView extends ItemView {
   }
 
   private renderItemMode(main: HTMLElement): void {
-    // §4.1 refusal, in the cold-start banner's own structure with no primary action: there is
+    // Newer-schema refusal, in the cold-start banner's own structure with no primary action: there is
     // nothing to click here, and no dismiss either — this is a standing condition the user can
     // only clear by updating Config Sync, not a nudge to be waved away. It takes the banner slot
     // outright: while it holds, "this device hasn't synced yet" is not the story to tell.
-    // The wording is §4.1's final copy — the same sentence `SCHEMA_FUTURE_NOTICE`
+    // The wording is the same sentence `SCHEMA_FUTURE_NOTICE`
     // (core/settingsMigration.ts) carries into every refused write; the split below is only the
     // bold-lead presentation the cold-start banner already uses, so the two must stay identical.
     const schemaStop = this.host.schemaStop();
@@ -1948,7 +1943,7 @@ export class SyncCenterView extends ItemView {
     }
     this.renderResultStrip(main);
     const inSection = this.sectionRows();
-    // The two on/off list carriers dissolve into their section's header chip (task-4) — never a
+    // The two on/off list carriers dissolve into their section's header chip — never a
     // row of their own — so every row-driven count (pills, select-all) excludes them up front.
     const pillPool = inSection.filter((r) => !CARRIER_GROUP_NAMES.has(r.group.name));
     const bar = main.createDiv({ cls: "config-sync-mainbar" });
@@ -1967,29 +1962,28 @@ export class SyncCenterView extends ItemView {
     const sectionsHost = main.createDiv();
 
     // Pills recompute from the live search term. While searching, they count the MATCHED
-    // set (定稿): the All pill keeps the unfiltered total as "n / m".
+    // set: the All pill keeps the unfiltered total as "n / m".
     const renderPills = (): void => {
       pillRow.empty();
       const pillRows = this.searching()
         ? pillPool.filter((r) => this.rowMatchesSearch(r))
         : pillPool;
       const counts = this.presentedCounts(pillRows);
-      // Mobile shows the short glyph form (定稿 B) — the panel's icon language (↑ ↓ ✓ ○) —
-      // so all five pills always fit one line; desktop keeps the full labels. C-#50 follow-up: the
+      // Mobile shows the short glyph form — the panel's icon language (↑ ↓ ✓ ○) —
+      // so all five pills always fit one line; desktop keeps the full labels. The
       // ok/excluded/none short forms render the same fixed-size Lucide icon the fold lines use
-      // (foldIcons.ts) instead of a text glyph — this was the one place the three glyphs sat side
-      // by side, so the pre-task optical mismatch survived here after the fold lines themselves
-      // were fixed.
+      // (foldIcons.ts) instead of a text glyph — this is the one place the three glyphs sit side
+      // by side, so a text glyph here would optically mismatch the fold lines.
       const allLabel = this.searching() ? `All ${pillRows.length} / ${pillPool.length}` : `All ${pillPool.length}`;
       const defs: { key: PanelFilter; label: string; short: string; action?: SyncAction; foldKind?: FoldKind; count?: number }[] = [
         { key: "all", label: allLabel, short: allLabel },
         { key: "capture", label: `To capture ${counts.up}`, short: "", action: "capture", count: counts.up },
         { key: "apply", label: `To apply ${counts.down}`, short: "", action: "apply", count: counts.down },
         { key: "ok", label: `In sync ${counts.ok}`, short: "", foldKind: "insync", count: counts.ok },
-        // C-#45 §7 (fix-round 4, mockup option A): "Not synced here" — deliberately not "Skipped"
+        // "Not synced here" — deliberately not "Skipped"
         // (that word is already run-event vocabulary, `⚠ update skipped` ConfigSyncCore.ts, and
         // this is a standing state, not a run outcome). Empty state: N=0 renders neither this pill
-        // nor the matching fold (spec's explicit rule, matching ✓/○'s fold-suppression precedent).
+        // nor the matching fold (matching ✓/○'s fold-suppression precedent).
         ...(counts.excluded > 0
           ? [{ key: "excluded" as const, label: `Not synced here ${counts.excluded}`, short: "", foldKind: "excluded" as const, count: counts.excluded }]
           : []),
@@ -2004,26 +1998,24 @@ export class SyncCenterView extends ItemView {
         else shortEl.setText(d.short);
         pill.addEventListener("click", () => {
           // Transition into a non-"all" filter: expand every section once so the pill's hits are
-          // discoverable (spec'd auto-expand-on-activation, not a per-render override).
+          // discoverable (auto-expand-on-activation, not a per-render override).
           if (d.key !== this.filter && d.key !== "all") this.expandAllTypeSections();
           this.filter = d.key;
           this.render(this.renderGen);
         });
       }
-      // The "leftover" store-orphans pill has no place in this row (task-4/8): those files have no
+      // The "leftover" store-orphans pill has no place in this row: those files have no
       // registry item, so they can't become a row in any type section. `renderLeftoverSection`
       // stays reachable unconditionally instead (below), so the orphans it manages never go dark.
     };
 
-    // One flat row list per type section (task-4 skeleton) — replaces the old main list +
-    // separate outdated/disabled/not-installed/desktop-only sections. Row rendering itself is
-    // unchanged (Task 5 restyles it); this only decides which section a row lands in.
+    // One flat row list per type section — this only decides which section a row lands in.
     const renderSectionsBody = (): void => {
       sectionsHost.empty();
       for (const ts of TYPE_SECTION_ORDER) this.renderTypeSection(sectionsHost, ts, inSection);
-      // Store orphans (task-8 dissolution): unrelated to any type section — they have no
-      // registry item to compile a row for — so this renders unconditionally rather than through
-      // the (now-gone) "leftover" filter pill, only settling into the unfiltered/non-search view
+      // Store orphans: unrelated to any type section — they have no
+      // registry item to compile a row for — so this renders unconditionally,
+      // only settling into the unfiltered/non-search view
       // so it doesn't clutter a focused "To apply"/search pass.
       if (this.leftovers.length > 0 && this.filter === "all" && !this.searching()) this.renderLeftoverSection(sectionsHost);
     };
@@ -2044,7 +2036,7 @@ export class SyncCenterView extends ItemView {
           this.filter = "all";
           this.expandAllTypeSections(); // transition into search: expand once so hits are discoverable
         }
-        // C-#48 (search perf spec §3): same trailing debounce as the desktop sidebar search — this
+        // Same trailing debounce as the desktop sidebar search — this
         // is the mobile/narrow-pane path, at least as latency-sensitive as desktop.
         this.debounceSearchRender(() => {
           renderPills();
@@ -2058,7 +2050,7 @@ export class SyncCenterView extends ItemView {
     this.renderActionBar(main);
   }
 
-  // Ledger C-#1 review fix: entering a filtered/search view auto-expands every section ONCE, on
+  // Entering a filtered/search view auto-expands every section ONCE, on
   // the filter/search state TRANSITION (called from the pill-click/search-input handlers below,
   // never from render itself) — so a filtered hit is discoverable without the section header
   // click losing its effect for the rest of that filtered/search session.
@@ -2066,7 +2058,7 @@ export class SyncCenterView extends ItemView {
     for (const ts of TYPE_SECTION_ORDER) this.typeSectionOpen.add(ts);
   }
 
-  // One of the four fixed type sections (spec §2): a fold containing every row whose section maps
+  // One of the four fixed type sections: a fold containing every row whose section maps
   // here via typeSectionForRow, alphabetical within (rows() already sorts by section then name).
   // The self item is pinned first in Community, outside the row/Fate machinery entirely.
   private renderTypeSection(host: HTMLElement, ts: TypeSection, inSection: StatusRow[]): void {
@@ -2076,9 +2068,9 @@ export class SyncCenterView extends ItemView {
     const showSelf = ts === "community" && this.selfInfo !== null && this.filter === "all" && !this.searching();
     if (visible.length === 0 && !showSelf) return; // sections with nothing to show hide entirely
     const filtered = this.filter !== "all" || this.searching();
-    // Ledger C-#1 review fix: `open` reads ONLY typeSectionOpen — a filter/search no longer forces
-    // every section open on every render (that made the header click's toggle invisible the
-    // moment any filter pill or search was active, reproducing the "decorative triangle" report).
+    // `open` reads ONLY typeSectionOpen — a filter/search never forces
+    // every section open on every render (that would make the header click's toggle invisible the
+    // moment any filter pill or search was active — a decorative triangle).
     // Filtered hits stay discoverable instead via expandAllTypeSections(), called once on the
     // filter/search TRANSITION (see the pill/search-input handlers below), not on every render —
     // so a manual collapse inside an already-filtered view sticks.
@@ -2087,14 +2079,14 @@ export class SyncCenterView extends ItemView {
     const head = fold.createDiv({ cls: "config-sync-section-head" });
     const chevron = renderFoldChevron(head, open, null);
     head.createSpan({ cls: "config-sync-section-title", text: TYPE_SECTION_TITLES[ts] });
-    // One compact form on every platform (2026-08-13 live find): "6/31". C-#41 introduced the
-    // compaction for mobile; the desktop's longer "6 of 31" said the same thing in more ink.
+    // One compact form on every platform: "6/31" — the longer "6 of 31" says the same thing
+    // in more ink.
     head.createSpan({
       cls: "config-sync-pill is-neutral",
       text: sectionCountLabel(rows.length, visible.length, filtered),
     });
-    // Core/Community's carrier chip: inline in the head on every platform (batch-21 spec §2,
-    // revising batch-20's mobile second-line drop) — same full-text shape on desktop and mobile
+    // Core/Community's carrier chip: inline in the head on every platform
+    // — same full-text shape on desktop and mobile
     // (renderCarrierChip's own doc comment), so the head still fits on one line without a
     // dedicated meta line.
     const carrierId: EnablementList | null = ts === "core" ? "core-plugins" : ts === "community" ? "community-plugins" : null;
@@ -2102,9 +2094,9 @@ export class SyncCenterView extends ItemView {
     const checkable = visible.filter((r) => this.fateFor(r).stageable);
     const staged = checkable.filter((r) => this.selected.has(r.group.name)).length;
     // The checked/indeterminate select-all checkbox plus the global footer already carry this
-    // fact on mobile, where head space is scarce (spec §2) — desktop keeps the hint.
+    // fact on mobile, where head space is scarce — desktop keeps the hint.
     if (staged > 0 && !Platform.isMobile) head.createSpan({ cls: "config-sync-section-hint", text: `${staged} selected` });
-    // C-#27: nothing to stage in this section (e.g. pre-adopt Community, only the self row) means
+    // Nothing to stage in this section (e.g. pre-adopt Community, only the self row) means
     // no select-all affordance at all, not a disabled one — a control with nothing it could ever
     // do is not a state, it's dead weight.
     if (checkable.length > 0) {
@@ -2127,9 +2119,9 @@ export class SyncCenterView extends ItemView {
         this.render(this.renderGen);
       });
     }
-    // Ledger C-#22: collapse/expand flips the DOM in place — `is-open` class, chevron glyph, and
+    // Collapse/expand flips the DOM in place — `is-open` class, chevron glyph, and
     // the card itself (built just-in-time / torn down on close) — never a full this.render().
-    // Mirrors the C-#9 row-expand precedent (fateEl.hidden flip, no render). `visible`/`showSelf`
+    // Mirrors the row-expand precedent (fateEl.hidden flip, no render). `visible`/`showSelf`
     // are frozen from this render cycle, which is correct: only the fold's own open/closed state
     // changes here, never the underlying data.
     let card: HTMLElement | null = open ? this.buildTypeSectionCard(fold, ts, visible, showSelf) : null;
@@ -2149,29 +2141,28 @@ export class SyncCenterView extends ItemView {
     });
   }
 
-  // A type section's body (spec §2): extracted from renderTypeSection (ledger C-#22) so the
+  // A type section's body: extracted from renderTypeSection so the
   // section-head toggle can build/remove just this one section's body in place instead of a full
   // render(). Returns a `display: contents` wrapper (same idiom as .config-sync-item-wrap) so the
   // whole body — the active-rows card plus every fold line and its own opened card — collapses
   // and removes as one unit, while its children still sit directly on the section's own ground
-  // (spec §3: fold lines are never nested inside the filled card).
+  // (fold lines are never nested inside the filled card).
   private buildTypeSectionCard(fold: HTMLElement, ts: TypeSection, visible: StatusRow[], showSelf: boolean): HTMLElement {
     const body = fold.createDiv({ cls: "config-sync-section-body" });
     if (this.filter === "all" && !this.searching()) {
-      // ✓ / ⊘ / ○ rows fold into their own trailing line, same shape as the old flat list (#10) —
-      // now aggregated per section instead of once for the whole pane. Ledger C-#23 (spec §1;
-      // C-#45 §7 adds excluded, fix-round 4): partitioned by BUCKET, not raw state — active =
+      // ✓ / ⊘ / ○ rows fold into their own trailing line,
+      // aggregated per section. Partitioned by BUCKET, not raw state — active =
       // conflict|apply|capture (plus locked, its current placement, preserved); the folds hold
-      // ok/excluded/none. Fold order ✓ → ⊘ → ○ (spec §7: "from nothing-to-do, to my own rule, to
+      // ok/excluded/none. Fold order ✓ → ⊘ → ○ ("from nothing-to-do, to my own rule, to
       // no data yet") — rows within each fold stay name-sorted since `visible` already is.
       const bucketed = visible.map((r) => ({ r, section: partitionSection(this.rowBucket(r)) }));
       const active = bucketed.filter((x) => x.section === "active").map((x) => x.r);
       const insync = bucketed.filter((x) => x.section === "insync").map((x) => x.r);
       const excluded = bucketed.filter((x) => x.section === "excluded").map((x) => x.r);
       const nosettings = bucketed.filter((x) => x.section === "nosettings").map((x) => x.r);
-      // C-#50 (spec §3): the filled card wraps rows only — it renders exactly when the section
+      // The filled card wraps rows only — it renders exactly when the section
       // has real rows (the self row or an active row); a section whose visible content is fold
-      // lines alone shows head + fold lines with no filled block (mockup §3).
+      // lines alone shows head + fold lines with no filled block.
       if (showSelf || active.length > 0) {
         const card = body.createDiv({ cls: "config-sync-card" });
         if (showSelf) this.renderSelfRow(card);
@@ -2191,14 +2182,14 @@ export class SyncCenterView extends ItemView {
     return body;
   }
 
-  // Per-section variant of the old renderTrailingLine — keyed by section too, so expanding the
-  // ✓ fold in one section doesn't also expand it in another. Ledger C-#22: toggling the fold
+  // The trailing fold line, keyed by section, so expanding the
+  // ✓ fold in one section doesn't also expand it in another. Toggling the fold
   // flips the line and builds/removes just its own rows in place — never a full this.render().
-  // C-#50 (spec §2/§3): the line composes the SAME leading `.config-sync-row-chevron` the list
-  // rows use, plus a fixed-size Lucide fold icon (foldIcons.ts), around `text`'s now-plain-text
+  // The line composes the SAME leading `.config-sync-row-chevron` the list
+  // rows use, plus a fixed-size Lucide fold icon (foldIcons.ts), around `text`'s plain-text
   // label — no glyph prefix, no trailing triangle baked into the string. An opened fold's rows get
   // their OWN filled card, inserted right after the line (never the active-rows card) — the
-  // invariant "filled block = rows" holds for every fold, in every state (mockup §4).
+  // invariant "filled block = rows" holds for every fold, in every state.
   private renderSectionTrailingLine(
     parent: HTMLElement,
     ts: TypeSection,
@@ -2231,8 +2222,8 @@ export class SyncCenterView extends ItemView {
     });
   }
 
-  // Builds an open trailing fold's OWN filled card (spec §3, mockup §4), inserted directly after
-  // `line`. Unlike the pre-task shared-card version, `renderItemRow` writes straight into this
+  // Builds an open trailing fold's OWN filled card, inserted directly after
+  // `line`. `renderItemRow` writes straight into this
   // fresh, empty card — no anchor-shuffling needed, since nothing else ever shares it.
   private buildFoldCard(parent: HTMLElement, line: HTMLElement, rows: StatusRow[]): HTMLElement {
     const card = parent.createDiv({ cls: "config-sync-card" });
@@ -2242,7 +2233,7 @@ export class SyncCenterView extends ItemView {
     return card;
   }
 
-  // Config Sync's own row (spec §2): pinned first in Community, outside the checkbox/Fate
+  // Config Sync's own row: pinned first in Community, outside the checkbox/Fate
   // machinery — it isn't staged through the normal apply/capture run (its own Adopt/Capture
   // buttons in the expanded content do that). Expand reuses the existing self-pane content.
   private renderSelfRow(card: HTMLElement): void {
@@ -2253,7 +2244,7 @@ export class SyncCenterView extends ItemView {
     row.createSpan({ cls: "config-sync-rule-name", text: "Config Sync" });
     row.createDiv({ cls: "config-sync-rule-spacer" });
     row.createSpan({ cls: "config-sync-self-fate", text: "your Sync Center — manages itself" });
-    // Fate-icon column alignment (live-test find): the self row never stages through the normal
+    // Fate-icon column alignment: the self row never stages through the normal
     // run and so never has a checkbox — same spacer the item rows' inert branch uses, so its text
     // lands on the same right edge every OTHER row's fate icon does instead of sitting flush
     // against the card's own edge.
@@ -2269,13 +2260,13 @@ export class SyncCenterView extends ItemView {
     });
   }
 
-  // The Core/Community section header chip (spec §6.3). It used to WRITE `Item.synced`; it now only
+  // The Core/Community section header chip. It never WRITES `Item.synced`; it only
   // SHOWS it and jumps to where that value is configured. One datum, one writer — and the writer is
   // the card's own toggle in the settings panel, beside the confirmation the change deserves.
   //
-  // Same shape on both platforms. The mobile branch this replaces rendered a bare toggle glyph with
-  // the copy in a tooltip — on the one platform that has no hover to show it. A short word costs one
-  // line of nothing and reads everywhere.
+  // Same shape on both platforms. A bare toggle glyph with
+  // the copy in a tooltip would be unreadable on the one platform that has no hover to show it —
+  // a short word costs one line of nothing and reads everywhere.
   private renderCarrierChip(head: HTMLElement, carrierId: EnablementList): void {
     const synced = this.groups.some((g) => g.name === carrierId);
     const tooltip = synced
@@ -2298,8 +2289,8 @@ export class SyncCenterView extends ItemView {
   }
 
   // Tri-state select-all over the currently visible checkable rows (section + filter + search).
-  // Fate.stageable (task-4) drives the skip — carrier rows are excluded outright since they no
-  // longer render as list rows (task-4 dissolves them into the section header chip).
+  // Fate.stageable drives the skip — carrier rows are excluded outright since they never
+  // render as list rows (they dissolve into the section header chip).
   private checkableRows(inSection: StatusRow[]): string[] {
     return this.visibleRows(inSection)
       .filter((r) => !CARRIER_GROUP_NAMES.has(r.group.name) && this.fateFor(r).stageable)
@@ -2310,7 +2301,7 @@ export class SyncCenterView extends ItemView {
     const checkable = this.checkableRows(inSection);
     const selectedCount = checkable.filter((n) => this.selected.has(n)).length;
     box.indeterminate = false;
-    // Idle renders nothing (0.27.5): a disabled ghost box reads as a broken checkbox.
+    // Idle renders nothing: a disabled ghost box reads as a broken checkbox.
     box.toggleClass("config-sync-selectall-idle", checkable.length === 0);
     if (checkable.length === 0) {
       box.disabled = true;
@@ -2352,7 +2343,7 @@ export class SyncCenterView extends ItemView {
     el.appendText(parts.label);
   }
 
-  // C-#40 (spec §1) → 定稿轮 20 ④: every fate chip is icon-only now, single source
+  // Every fate chip is icon-only, single source
   // FATE_CHIP_ICON (fateChipIcons.ts), the chip's full sentence living in the tooltip — the
   // icon+tooltip row language everywhere else already speaks. An unmapped string (should never
   // happen — chips are presentation) keeps a text label as the loud fallback.
@@ -2365,10 +2356,10 @@ export class SyncCenterView extends ItemView {
     return chipEl;
   }
 
-  // C-#41 mobile chip-meta trailing hairline (review fix): `card`'s children interleave
+  // Mobile chip-meta trailing hairline: `card`'s children interleave
   // row/meta divs with each row's own `detail` drawer div — a `detail` always immediately
   // follows its row/meta, so no row-shaped selector is EVER literally `:last-of-type` div (the
-  // exact C-#5 footgun, styles.css comment near `config-sync-card-fields`). Rather than another
+  // exact footgun the styles.css comment near `config-sync-card-fields` describes). Rather than another
   // tag-dependent selector, this marks the true last row/meta explicitly with a class every time
   // the set of rendered rows could have changed (initial card build, a trailing fold's
   // open/close) — mobile-only (desktop keeps its own pre-existing, untouched border rule) and
@@ -2381,9 +2372,8 @@ export class SyncCenterView extends ItemView {
     rows.item(rows.length - 1)?.addClass("config-sync-row-last");
   }
 
-  // The unified row (spec §3): `[checkbox] Name [chips…] <fate sentence> ▸`. One object, one row
-  // — the old policy/fate pills, mode badges' state coupling, and per-section stageability
-  // reasoning all collapse into `fate.chips`/`fate.sentence`/`fate.stageable`.
+  // The unified row: `[checkbox] Name [chips…] <fate sentence> ▸`. One object, one row
+  // — `fate.chips`/`fate.sentence`/`fate.stageable` carry everything the row states.
   private renderItemRow(card: HTMLElement, r: StatusRow): void {
     const { group } = r;
     const { fate: rawFate, input } = this.fateWithInput(r);
@@ -2392,34 +2382,33 @@ export class SyncCenterView extends ItemView {
     const fate = this.displayFate(rawFate, input, group.name);
     const inert = !fate.stageable;
     const expanded = this.expandedItems.has(group.name);
-    // No row-level aria-label (轮 21F): Obsidian renders aria-labels as hover tooltips, so the
-    // resolved path this used to carry popped on any blank stretch of the row.
+    // No row-level aria-label: Obsidian renders aria-labels as hover tooltips — a
+    // row-level one pops on any blank stretch of the row.
     const row = card.createDiv({
       cls: `config-sync-hub-row${inert ? " is-insync" : ""}${unresolvedConflict ? " is-conflict" : ""}`,
     });
     const chev = renderFoldChevron(row, expanded, null);
     this.renderRuleName(row, group.name, group.label);
     row.createDiv({ cls: "config-sync-rule-spacer" });
-    // 定稿轮 20 ④: chips are icon-only and live on the row's RIGHT, one quiet cluster just
+    // Chips are icon-only and live on the row's RIGHT, one quiet cluster just
     // before the fate/state column — not tags trailing the name. Display order is the model's
     // own emit order (buildChips, deterministic) — never re-sorted here. Icon-only chips fit
-    // any width, so the mobile second-line (C-#43/#44) and the overflow-degrade machinery
-    // (C-#39 chipOverflowObserver et al.) retired with the labels.
+    // any width, so no mobile second line and no overflow-degrade machinery is needed.
     for (const chip of fate.chips) this.renderFateChip(row, chip);
-    // Ledger C-#9: the fate sentence/glyph repeats the card's own "On apply"/"On capture" clause
+    // The fate sentence/glyph repeats the card's own "On apply"/"On capture" clause
     // once expanded, so it hides while the drawer is open (checkbox and chips stay); the click
     // handler below flips `hidden` alongside the chevron/drawer so it tracks expand/collapse
-    // without a full re-render. C-#39 (spec §3): glyph and sentence are separate flex children of
+    // without a full re-render. Glyph and sentence are separate flex children of
     // this wrap — the glyph stays `flex: none` (always visible in full); only the sentence span
-    // shrinks/ellipsizes, so the fate sentence is the sole sacrificial element (axiom §0.3).
+    // shrinks/ellipsizes, so the fate sentence is the sole sacrificial element.
     const fateWrap = row.createSpan({ cls: "config-sync-fate-wrap" });
     fateWrap.hidden = expanded;
-    // A DIRECTIONAL fate renders as the colored action icon alone (定稿轮 2 follow-up,
-    // 2026-08-13): ACTION_ICON's arrow-up-from-line/arrow-down-to-line in the same orange/accent
-    // the pills and file rows speak — the original row vocabulary the README screenshots show —
-    // with the fate sentence in the tooltip, consistent with this round's icon+tooltip language.
+    // A DIRECTIONAL fate renders as the colored action icon alone:
+    // ACTION_ICON's arrow-up-from-line/arrow-down-to-line in the same orange/accent
+    // the pills and file rows speak — the row vocabulary the README screenshots show —
+    // with the fate sentence in the tooltip, consistent with the icon+tooltip language.
     // The sentence itself still opens the card (the State row says it in full). A NEUTRAL (—)
-    // fate (定稿轮 12+13 ③, DESIGN §2.1) renders the same way now — the fold family's own icon
+    // fate (DESIGN §2.1) renders the same way — the fold family's own icon
     // (`renderNeutralFateIcon`) instead of the bare glyph + sentence text, "In sync"/green-check,
     // "No settings yet"/faint-circle, "Not synced on this device"/faint-circle-slash. Conflict
     // (⚠) alone keeps its text form: a conflict must shout, and it has no action/fold icon to
@@ -2453,7 +2442,7 @@ export class SyncCenterView extends ItemView {
         this.render(this.renderGen);
       });
     } else {
-      // Fate-icon column alignment (live-test find): an inert row (in sync / no settings yet /
+      // Fate-icon column alignment: an inert row (in sync / no settings yet /
       // not synced on this device / an unresolved conflict) renders no checkbox, so without
       // something occupying that slot the row's own flex layout (the `config-sync-rule-spacer`
       // pushing everything after it to the row's right edge) leaves fateWrap flush against the
@@ -2477,7 +2466,7 @@ export class SyncCenterView extends ItemView {
     });
   }
 
-  // Fate-icon column alignment (live-test find, see renderItemRow's inert branch and
+  // Fate-icon column alignment (see renderItemRow's inert branch and
   // renderSelfRow): an invisible, disabled `input[type="checkbox"]` — not a hand-measured `<div>`
   // — so it matches the real checkbox's `.config-sync-hub-row input[type="checkbox"]` sizing rule
   // (styles.css) exactly, on every platform, for free. `visibility: hidden` (not `display: none`)
@@ -2487,10 +2476,10 @@ export class SyncCenterView extends ItemView {
     spacer.disabled = true;
   }
 
-  // 定稿轮 12+13 ③ (DESIGN §2.1): a neutral fate's own three shapes derive to the same FoldKind
-  // key `renderFoldCount`'s filter pills already use — `nothingYet` first (C-#28's own
-  // precedence: a degraded-empty-verb direction still reports as nothing-yet), then `excluded`
-  // (either C-#24 class exclusion or a C-#45 opt-out — both set `fate.excluded`), else the row is
+  // DESIGN §2.1: a neutral fate's own three shapes derive to the same FoldKind
+  // key `renderFoldCount`'s filter pills already use — `nothingYet` first (the same
+  // precedence rowFate applies: a degraded-empty-verb direction still reports as nothing-yet), then `excluded`
+  // (either class exclusion or a device opt-out — both set `fate.excluded`), else the row is
   // genuinely `insync`. Reading the Fate's OWN fields (not re-deriving from FateInput or matching
   // sentence text) is the same "single source of truth" precedent nothingYet/excluded's own doc
   // comments (fateModel.ts) already establish for fateBucket.
@@ -2510,14 +2499,14 @@ export class SyncCenterView extends ItemView {
     setIcon(ic, FOLD_ICON[kind]);
   }
 
-  // Presentation-only wrapper around the shared `effectiveFate` derivation (panelModel.ts, task
-  // 6 round 2 fix): once Resolve picks a side, the row reads exactly like a normal directed row
+  // Presentation-only wrapper around the shared `effectiveFate` derivation (panelModel.ts):
+  // once Resolve picks a side, the row reads exactly like a normal directed row
   // — a real sentence/chips computed as if the conflict were simply that direction (never the
   // frozen "⚠ Changed on both sides"), plus the `your choice` chip. `fallbackTurnsOn` is
   // deliberately NOT passed here (`false`) — the fate SENTENCE must stay free of enablement
-  // verbs for the carrier-unsynced fallback ladders (spec §3); `stagedRows()`/`footerSelection()`
+  // verbs for the carrier-unsynced fallback ladders; `stagedRows()`/`footerSelection()`
   // call the same `effectiveFate` WITH that bridge for the actual staging/counting truth, so the
-  // sentence and the run can only differ in that one spec-mandated place, never accidentally.
+  // sentence and the run can only differ in that one deliberate place, never accidentally.
   private displayFate(fate: Fate, input: FateInput, name: string): Fate {
     const choice = this.conflictChoice.get(name) ?? null;
     const resolved = effectiveFate(fate, input, choice, false);
@@ -2525,7 +2514,7 @@ export class SyncCenterView extends ItemView {
     return { ...resolved, chips: [...resolved.chips, "your choice"], stageable: true };
   }
 
-  // The expanded card (spec §4): standardized rows in order, each omitted when N/A. `fate` is
+  // The expanded card: standardized rows in order, each omitted when N/A. `fate` is
   // already the display (post-resolution) fate; `isConflict` names the row as a conflict
   // regardless of resolution, so Resolve keeps rendering (letting a choice be changed) and the
   // On-apply/On-capture header + Files stay keyed off the CHOSEN side rather than the old
@@ -2536,9 +2525,8 @@ export class SyncCenterView extends ItemView {
       return;
     }
     const name = r.group.name;
-    // Own wrapper for the field rows (ledger C-#5; the border-stacking bug that created it is
-    // moot since 定稿轮 17① removed row borders, but the wrapper still groups the rows and
-    // carries their bottom margin, keeping any future non-row sibling in `detail` outside it).
+    // Own wrapper for the field rows: it groups the rows and
+    // carries their bottom margin, keeping any future non-row sibling in `detail` outside it.
     const fields = detail.createDiv({ cls: "config-sync-card-fields" });
     const dir = isConflict ? this.conflictChoice.get(name) ?? null : input.direction;
     this.renderCardKeyRow(fields, dir === "apply" ? "On apply" : dir === "capture" ? "On capture" : "State", (value) => {
@@ -2552,16 +2540,16 @@ export class SyncCenterView extends ItemView {
 
     if (isConflict) this.renderResolveRow(fields, r);
 
-    // Runs on is one of the two "always available" rule menus (spec §1/§4 — no stageable
+    // Runs on is one of the two "always available" rule menus (no stageable
     // qualifier, unlike After install's explicit "only ¬carrierSynced ∧ ¬installed"): a
     // carrier-synced plugin needs it reachable from its steady in-sync state too, so an
     // exception can be set BEFORE the row ever diverges. After install keeps the stageable
     // guard — harmless there since an installable row is already stageable via
-    // stageableRow's non-main-section carve-out. Enablement (review fix #3, task 6 round 2) is
+    // stageableRow's non-main-section carve-out. Enablement is
     // the third and last leaf of this same ladder: an installed-but-disabled row whose carrier
     // ISN'T synced has no `Runs on` (nothing to route through) and no `After install` (already
-    // installed) — without it there is no enable path in the unified grammar at all, a real
-    // regression from pre-C's `disabledRowAction` default. Ungated by `fate.stageable`, matching
+    // installed) — without it there is no enable path in the unified grammar
+    // at all. Ungated by `fate.stageable`, matching
     // `Runs on`'s own precedent (reachable from the row's steady state, not just mid-divergence).
     if (input.carrierSynced) this.renderDefaultEnabledOnRow(fields, name, input);
     else if (!input.installed) {
@@ -2580,7 +2568,7 @@ export class SyncCenterView extends ItemView {
     }
   }
 
-  // The row shell every card row shares (spec round-9 ⑤ "one grid per card"): a fixed label on
+  // The row shell every card row shares ("one grid per card"): a fixed label on
   // track 1 of `.config-sync-cardrow`'s four tracks. Callers fill the rest — either one value cell
   // spanning tracks 2-4 (renderCardKeyRow, below) or up to three cells landed directly on tracks
   // 2/3/4 (renderTwoSegmentRow, renderCardIconActionRow) — so every row's icons and its divider
@@ -2597,11 +2585,11 @@ export class SyncCenterView extends ItemView {
     return row;
   }
 
-  // One row inside the expanded card (spec §4, ledger C-#2): a fixed-width muted label with its
+  // One row inside the expanded card: a fixed-width muted label with its
   // value immediately adjacent, shared by every card row (On apply/Files/Settings sync/More/Note/
-  // Resolve) — never a label on its own line with the value spread underneath. Built off-DOM first
-  // (ledger C-#5): if `build` leaves the value empty, the row is dropped entirely — no separator,
-  // no height — rather than appended and pruned; Task 2's rule-control triggers render through this
+  // Resolve) — never a label on its own line with the value spread underneath. Built off-DOM
+  // first: if `build` leaves the value empty, the row is dropped entirely — no separator,
+  // no height — rather than appended and pruned; the rule-control triggers render through this
   // same helper, so an N/A control must vanish the same way.
   private renderCardKeyRow(detail: HTMLElement, label: string, build: (value: HTMLElement) => void): void {
     const row = this.cardRowShell(label, false);
@@ -2611,7 +2599,7 @@ export class SyncCenterView extends ItemView {
     detail.appendChild(row);
   }
 
-  // Resolve (spec §4, conflict rows only): segmented `Use theirs ↓` / `Keep mine ↑`. Clicking
+  // Resolve (conflict rows only): segmented `Use theirs ↓` / `Keep mine ↑`. Clicking
   // the already-active choice clears it (the same "click the active segment to unstage" idiom
   // `renderDirectionToggle` already uses elsewhere) — Resolve doubles as this row's only
   // staging affordance, since its checkbox stays hidden (`Fate.stageable` false) until chosen.
@@ -2642,14 +2630,14 @@ export class SyncCenterView extends ItemView {
   }
 
   // The `On apply`/`On capture`/`State` row's text: the fate sentence, expanded with the
-  // specifics spec §4 calls out verbatim (install source, update versions, capture consequence).
+  // specifics (install source, update versions, capture consequence).
   private stateClauseText(r: StatusRow, fate: Fate, input: FateInput): string {
     if (fate.glyph === "⚠") return "Changed on both sides.";
-    // C-#28/29: the nothing-yet presentation (direct or degraded from an empty-verb direction —
+    // The nothing-yet presentation (direct or degraded from an empty-verb direction —
     // fateModel.ts's rowFate) speaks in cause voice, not just its terse row sentence + period.
     if (fate.sentence === NOTHING_YET_SENTENCE) return "No saved settings anywhere yet — neither this device nor the store has any.";
     if (input.direction === null) {
-      // C-#24/C-#45: the card's STATE clause spells out WHY, not just the row's terse sentence —
+      // The card's STATE clause spells out WHY, not just the row's terse sentence —
       // and the two exclusion causes read differently even though the row above them is identical.
       if (input.excludedHere) return "Not synced on this device — your Settings sync rule excludes it.";
       if (input.optedOutHere === true) return "Not synced on this device — you turned it off here. Your other devices keep syncing it.";
@@ -2665,7 +2653,7 @@ export class SyncCenterView extends ItemView {
       text = text.replace(/^Updates/, `Updates ${a.localVersion ?? "current"} → ${a.storeVersion ?? "latest"}`);
     }
     if (input.direction === "capture") {
-      // C-#37: version-ahead branches off the fact (input.versionAhead), never the new joined
+      // Version-ahead branches off the fact (input.versionAhead), never the joined
       // sentence strings — every other capture row falls through to the existing two clauses
       // untouched.
       if (input.versionAhead !== null) text = versionAheadClause(input, input.versionAhead);
@@ -2675,9 +2663,8 @@ export class SyncCenterView extends ItemView {
     return `${text}.`;
   }
 
-  // Files (spec §4, round-11 ③): the direction badge, the count pill, and the FOLD chevron render
-  // as one tight cluster on the row's value cell (live-test fix-round: the old track-2 badge +
-  // tracks-3/-4 value split left a ~90px hole between them) — badge, pill, and chevron are all
+  // Files: the direction badge, the count pill, and the FOLD chevron render
+  // as one tight cluster on the row's value cell — badge, pill, and chevron are all
   // flex children of the SAME head, never split across grid cells, so there is no separate
   // "collapsed" vs "expanded" cell shape to keep in sync: the cluster is the row's first line in
   // both states, and the entry list (when expanded) just sits below it. Built directly rather than
@@ -2687,13 +2674,13 @@ export class SyncCenterView extends ItemView {
   // absent. Not marked `is-iconrow`: file names can run long, so this row keeps the wide-row
   // mobile stack-to-full-width fallback (DESIGN §4) instead of the icon-rows' shared grid at
   // every width.
-  // 定稿轮 12+13 ②: default = count-only, same click-to-expand idiom the Settings tab's
+  // Default = count-only, same click-to-expand idiom the Settings tab's
   // companion member count (`config-sync-card-membercount`/`-memberarrow`) already established —
   // a neutral bare-number pill (aria/tooltip the full `filesChangeLabel` sentence) plus the FOLD
   // family's rotating chevron, remembered per row in `expandedFileRows` while the pane stays
-  // open. Empty-row drop (no changes at all) happens up front now instead of after building the
+  // open. Empty-row drop (no changes at all) happens up front rather than after building the
   // entry list, since the collapsed head always renders SOMETHING once there IS at least one
-  // change — the old `value.childNodes.length === 0` probe would never see an empty value again.
+  // change.
   private renderFilesRow(detail: HTMLElement, r: StatusRow, changes: FileChanges, dir: Direction, encrypted: boolean): void {
     const total = changes.added.length + changes.updated.length + changes.deleted.length;
     if (total === 0) return;
@@ -2731,7 +2718,7 @@ export class SyncCenterView extends ItemView {
     detail.appendChild(row);
   }
 
-  // Files row (spec §4/#8): direction-aware entries via fileEntryFor, reusing the same
+  // Files row: direction-aware entries via fileEntryFor, reusing the same
   // diffPair-backed inline expand renderCappedChanges already uses for "view" and "diff" alike
   // (the "view" case is just a diff against an empty base — the same content diffPair already
   // returns — mirroring the remote pane's "not in your store" content view).
@@ -2740,12 +2727,12 @@ export class SyncCenterView extends ItemView {
     const renderEntry = (e: CappedEntry): void => {
       const kind: "added" | "updated" | "deleted" = e.kind === "add" ? "added" : e.kind === "upd" ? "updated" : "deleted";
       const pres = fileEntryFor({ kind, rel: e.name }, dir, encrypted);
-      // "+"/"·"/"del" render "+"/"~"/"−" in BOTH directions now (DESIGN §2.1, round-11 ③): the
+      // "+"/"·"/"del" render "+"/"~"/"−" in BOTH directions (DESIGN §2.1): the
       // FILES row's own track-2 badge says which side, once — an entry never repeats a direction
       // glyph, only the diff-kind family. Styling follows the PRESENTATION glyph, never the raw
       // capture-perspective `e.kind` — under apply direction add/delete mirror each other
-      // (fileEntryFor's own doc comment), so keying the class off `e.kind` let a "+" entry
-      // inherit "is-del"'s strikethrough (ledger C-#4).
+      // (fileEntryFor's own doc comment), so keying the class off `e.kind` would let a "+" entry
+      // inherit "is-del"'s strikethrough.
       const glyphText = pres.glyph === "del" ? "−" : pres.glyph === "·" ? "~" : pres.glyph;
       const glyphCls = pres.glyph === "+" ? "is-add" : pres.glyph === "del" ? "is-del" : "is-upd";
       const line = detail.createDiv({
@@ -2758,8 +2745,8 @@ export class SyncCenterView extends ItemView {
         return;
       }
       if (pres.affordance === "none") return;
-      // One 14px file-diff icon closes a diffable/viewable entry (DESIGN §2.3/§4, round-11 ③) —
-      // never per-kind icons, never the old `· view ▾`/`· diff ▾` text: "changes live here, click
+      // One 14px file-diff icon closes a diffable/viewable entry (DESIGN §2.3/§4) —
+      // never per-kind icons, never a `· view ▾`/`· diff ▾` text: "changes live here, click
       // to see." The OPEN state turns the icon accent-colored instead of flipping ▾/▴ text.
       line.addClass("config-sync-diffable");
       const affLabel = pres.affordance === "view" ? "View content" : "View changes";
@@ -2822,7 +2809,7 @@ export class SyncCenterView extends ItemView {
       const more = detail.createDiv({ cls: "config-sync-more-files" });
       more.appendText(moreFilesText(rest.length));
       // A one-way reveal (never re-collapses), so the chevron never rotates — the FOLD family's
-      // glyph, static, same idiom as the row-chevron everywhere else (round-12).
+      // glyph, static, same idiom as the row-chevron everywhere else.
       setIcon(more.createSpan({ cls: "config-sync-row-chevron" }), "chevron-right");
       more.addEventListener("click", (ev) => {
         ev.stopPropagation();
@@ -2834,7 +2821,7 @@ export class SyncCenterView extends ItemView {
 
   // Click/keydown → open an Obsidian Menu at the trigger's position, shared by every card
   // rule-control trigger (icon or text) so a menu opens the same way regardless of trigger kind.
-  // Tracks `.is-open` on the trigger while the menu is showing (定稿轮 16甲乙, ⇕ hover-reveal —
+  // Tracks `.is-open` on the trigger while the menu is showing (⇕ hover-reveal —
   // DESIGN.md §2.3), cleared via `Menu.onHide` — the PICKER chevron accents and stays revealed
   // while its own menu is open, matching SettingTab's own `wireMenuTrigger`.
   private wireMenuTrigger(trigger: HTMLElement, buildMenu: () => Menu): void {
@@ -2869,10 +2856,10 @@ export class SyncCenterView extends ItemView {
     });
   }
 
-  // The fleet segment of a two-segment row (spec §6.1, round-9 ②): an icon + a muted PICKER
-  // `chevrons-up-down` affordance (round-12: was text `▾`), wired to its own menu — no visible
-  // wordmark any more (the row's own label already says what the ROW is; the segment's tooltip
-  // says what its VALUE is). Lands on track 2 of the row's four-track grid (round-9 ⑤), so every
+  // The fleet segment of a two-segment row: an icon + a muted PICKER
+  // `chevrons-up-down` affordance, wired to its own menu — no visible
+  // wordmark (the row's own label already says what the ROW is; the segment's tooltip
+  // says what its VALUE is). Lands on track 2 of the row's four-track grid, so every
   // two-segment row's fleet icon — and the More row's — sit on the same vertical rule.
   private paintFleetSegment(host: HTMLElement, seg: RowSegment, isSet: boolean, menu: () => Menu): void {
     const el = host.createSpan({ cls: `config-sync-tworow-fleetcell${isSet ? " is-set" : ""}`, attr: { "aria-label": seg.tooltip } });
@@ -2881,7 +2868,7 @@ export class SyncCenterView extends ItemView {
     this.wireMenuTrigger(el, menu);
   }
 
-  // The local segment (round-9 ②): a muted "this device" eyebrow beside the same icon+picker
+  // The local segment: a muted "this device" eyebrow beside the same icon+picker
   // shape, wired to the local menu. Factored out of renderTwoSegmentRow so `Settings sync`'s
   // fields-mode branch (a plain fleet NOTE, not a menu) can still paint a working local segment
   // beside it without renderTwoSegmentRow having to accept a fleet that lies about opening a
@@ -2895,7 +2882,7 @@ export class SyncCenterView extends ItemView {
     this.wireMenuTrigger(el, menu);
   }
 
-  // The two-segment row (spec §6.1, round-9 ⑤ "one grid per card"): fleet cell on track 2, the
+  // The two-segment row ("one grid per card"): fleet cell on track 2, the
   // divider filling track 3, the local cell on track 4 — direct children of the row's own
   // four-track grid rather than a nested sub-grid, so every two-segment row's icons and divider
   // land on the SAME vertical rules as every other row in the card. Both segments open a menu.
@@ -2914,7 +2901,7 @@ export class SyncCenterView extends ItemView {
     detail.appendChild(row);
   }
 
-  // Enabled on (spec §6.2, row label shortened round-9 ①) — only for a plugin row whose carrier is
+  // Enabled on — only for a plugin row whose carrier is
   // synced: with no shared list there is no default to state.
   private renderDefaultEnabledOnRow(detail: HTMLElement, name: string, input: FateInput): void {
     const list = enablementCarrierFor(this.rowRef(name));
@@ -2950,16 +2937,16 @@ export class SyncCenterView extends ItemView {
     return menu;
   }
 
-  // The fleet write, plus §6.5 case 3's landing seed — the same pair the Settings card's cycle does
+  // The fleet write, plus the landing seed — the same pair the Settings card's cycle does
   // (SettingTab.setRuleWithLanding), asking the same producer (ruleLandingNeedsSeed), so landing on
-  // `Each device decides` behaves identically at both entrances (§6.6).
+  // `Each device decides` behaves identically at both entrances.
   private async setRuleWithLanding(list: RuleListId, elementId: string, rule: Sharing): Promise<void> {
     await this.host.setEnablementRule(list, elementId, rule);
     if (ruleLandingNeedsSeed(rule, this.host.deviceElementFor(list, elementId))) await this.host.leaveToThisDevice(list, elementId);
   }
 
   // The entry list is buildLocalMenu's (enablementRow.ts), not this file's — the Settings card's row
-  // asks the same producer, so the two entrances cannot offer different choices (§6.6). `Follows the
+  // asks the same producer, so the two entrances cannot offer different choices. `Follows the
   // default` is absent under `Each device decides`: there is no shared answer to follow.
   private localMenu(list: EnablementList, elementId: string, rule: Sharing, current: "on" | "off" | null): Menu {
     const menu = new Menu();
@@ -2975,7 +2962,7 @@ export class SyncCenterView extends ItemView {
     return menu;
   }
 
-  // After install (spec §4, fallback ladder — only when the carrier is NOT synced and the row
+  // After install (fallback ladder — only when the carrier is NOT synced and the row
   // installs): today's install-enable/install policy choice, alive only in the fallback grammar.
   private renderAfterInstallRow(detail: HTMLElement, r: StatusRow): void {
     const name = r.group.name;
@@ -2997,7 +2984,7 @@ export class SyncCenterView extends ItemView {
     });
   }
 
-  // Enablement (review fix #3, task 6 round 2 — fallback ladder's third leaf): an installed but
+  // Enablement (fallback ladder's third leaf): an installed but
   // disabled plugin whose carrier ISN'T synced has no other enable path in the unified grammar
   // (`Runs on` needs a synced carrier to route through; `After install` only fires for a
   // not-yet-installed row). Same two options/copy as `After install`, written into the same
@@ -3024,25 +3011,25 @@ export class SyncCenterView extends ItemView {
     });
   }
 
-  // Settings sync (spec §6.1/§6.2, ledger C-#3/C-#7/C-#10, row label shortened round-9 ①): a
+  // Settings sync: a
   // two-segment row like `Enabled on` — fleet segment is the item's own file-level sharing (SAME
   // icon vocabulary the Settings tab's file-row control uses, sharingIcon; write target
   // Item.settingsFile.fileRule.sharing for every item, custom (folder) items included since
-  // runsOn's retirement, 2026-08-12-enablement-two-layers task 8 — one entrance, not two); local
-  // segment is this device's own whole-file opt-out (§6.2's footer menu, second item, moved here).
-  // The Settings tab's own drawer control (renderSharingPicker, 定稿轮 16甲) opens the same kind of
-  // menu now — the two entrances stayed in step, just not through this method.
+  // runsOn's retirement — one entrance, not two); local
+  // segment is this device's own whole-file opt-out.
+  // The Settings tab's own drawer control (renderSharingPicker) opens the same kind of
+  // menu — the two entrances stay in step, just not through this method.
   private renderSettingsSyncRow(detail: HTMLElement, r: StatusRow): void {
     const name = r.group.name;
     const ref = this.itemRefFor(name);
     if (ref === null) return;
     const optedOut = this.host.deviceOptedOut(name);
     const localMenu = (): Menu => this.fileLocalMenu(name, optedOut);
-    // C-#25: a fields-mode item has no legal whole-file fileRule to write (setItemFileSharing
+    // A fields-mode item has no legal whole-file fileRule to write (setItemFileSharing
     // throws on it) — the fleet side must not offer a menu whose choice would just be discarded,
     // but the local segment (this device's own opt-out) is a different datum and still works.
-    // The fleet cell is a dim settings-2 + tooltip, click = the item's Settings card (round-10 ①:
-    // the prose sentence wrapped to three lines inside the 56px icon track; icon + tooltip is the
+    // The fleet cell is a dim settings-2 + tooltip, click = the item's Settings card
+    // (icon + tooltip is the
     // row language everywhere else, and settings-2's registered meaning — "opens Settings" — is
     // exactly what the click does). No ▾: a jump, not a menu. Same destination as the More row,
     // and honestly redundant with it — the redundancy says "your answer lives over there".
@@ -3101,7 +3088,7 @@ export class SyncCenterView extends ItemView {
 
   // The entry list is buildFileLocalMenu's (enablementRow.ts) — a DIFFERENT datum from
   // buildLocalMenu's element-layer menu (localMenu, above): this is the whole-FILE device opt-out
-  // (spec §6.2), always offering both entries.
+  // always offering both entries.
   private fileLocalMenu(name: string, optedOut: boolean): Menu {
     const menu = new Menu();
     for (const entry of buildFileLocalMenu(optedOut, {
@@ -3116,10 +3103,10 @@ export class SyncCenterView extends ItemView {
     return menu;
   }
 
-  // Icon trigger + plain click (spec §6.2 `More`): unlike renderCardIconMenuRow's family, this
+  // Icon trigger + plain click (the `More` row): unlike renderCardIconMenuRow's family, this
   // row opens Settings directly rather than offering a menu — a sibling helper keeps that
   // distinction honest instead of routing a single-item fake menu through wireMenuTrigger. Lands
-  // on track 2 of the row's four-track grid (round-9 ⑤), the same track every two-segment row's
+  // on track 2 of the row's four-track grid, the same track every two-segment row's
   // fleet icon lands on, tracks 3/4 left empty — no divider, since there is no second segment.
   private renderCardIconActionRow(detail: HTMLElement, label: string, icon: string, isSet: boolean, ariaLabel: string, onActivate: () => void): void {
     const row = this.cardRowShell(label, true);
@@ -3141,9 +3128,9 @@ export class SyncCenterView extends ItemView {
     detail.appendChild(row);
   }
 
-  // More bridge (spec §6.2): icon-only deep link into the Settings tab for this item's card — the
-  // whole sentence now lives in the tooltip since there is no line of text left to hold it, and
-  // the trailing `▸` is gone with the text. Never `sliders-horizontal`: that glyph already means
+  // More bridge: icon-only deep link into the Settings tab for this item's card — the
+  // whole sentence lives in the tooltip since there is no line of text
+  // to hold it. Never `sliders-horizontal`: that glyph already means
   // `your rule` in the fate chips (fateChipIcons.ts).
   private renderMoreRow(detail: HTMLElement, name: string): void {
     const isFolder = this.itemSectionOf(name) === "custom";
@@ -3171,7 +3158,7 @@ export class SyncCenterView extends ItemView {
   private async deleteLeftovers(rels: string[]): Promise<void> {
     const paths = this.leftovers.filter((l) => rels.includes(l.rel)).map((l) => l.path);
     const deleted = await this.host.deleteLeftoverStoreFiles(rels);
-    if (deleted === null) return; // refused (§4.2b) — no history entry, and nothing to re-read
+    if (deleted === null) return; // refused — no history entry, and nothing to re-read
     await this.host.appendActionHistory({
       kind: "delete-leftover",
       desc: deleteLeftoverDesc(deleted.length),
@@ -3201,8 +3188,8 @@ export class SyncCenterView extends ItemView {
     }
   }
 
-  // Capture-direction disabled rows default to ⏻ Enable (spec 2026-07-17); everything else
-  // takes the availability ladder's first action. A carrier-synced disabled row (spec #5-B)
+  // Capture-direction disabled rows default to ⏻ Enable; everything else
+  // takes the availability ladder's first action. A carrier-synced disabled row
   // never defaults to an enable — the on/off card is the single write path for it.
   private defaultPolicyFor(r: StatusRow): StateAction {
     if (this.sectionOf(r.group.name) === "disabled") {
@@ -3212,13 +3199,13 @@ export class SyncCenterView extends ItemView {
     return defaultPolicy(this.availOf(r.group.name));
   }
 
-  // The two carrier-unsynced fallback ladders' menu choice, folded into a single boolean
-  // (review fix #2/#3, task 6 round 2): `Fate.turnsOn` is unconditionally `false` whenever the
-  // carrier is unsynced (spec §3: "enablement verbs never appear" there), so neither ladder's
+  // The two carrier-unsynced fallback ladders' menu choice, folded into a single boolean:
+  // `Fate.turnsOn` is unconditionally `false` whenever the
+  // carrier is unsynced ("enablement verbs never appear" there), so neither ladder's
   // choice can ever reach `effectiveFate` through the row's own fate — this is the ONE place
   // that reads `this.policy` for that purpose, shared by `stagedRows()` (payload) and
-  // `footerSelection()` (counts) so they can't independently drift (the review's root-cause
-  // principle). Not installed → After install (`renderAfterInstallRow`, default on unless
+  // `footerSelection()` (counts) so they can't independently
+  // drift. Not installed → After install (`renderAfterInstallRow`, default on unless
   // explicitly "install"); installed-but-disabled → Enablement (`renderEnablementRow`, default
   // on unless explicitly "none"). Carrier-synced rows never reach either branch.
   private fallbackTurnsOn(name: string, input: FateInput): boolean {
@@ -3227,7 +3214,7 @@ export class SyncCenterView extends ItemView {
     return this.availOf(name).kind === "disabled" && this.policy.get(name) !== "none";
   }
 
-  // stagedPayload's input rows (spec §5, task 6): one entry per row currently in the list
+  // stagedPayload's input rows: one entry per row currently in the list
   // (carriers included — they're excluded from rendering, not from this set, since their own
   // file can differ independently of any member — see stagedPayload's carrier-synthesis rule).
   // `CARRIER_GROUP_NAMES` guards `carrier`/`elementId`: `computeFateInput` reads carrierSynced/true
@@ -3279,7 +3266,7 @@ export class SyncCenterView extends ItemView {
     if (slots.length > 1) {
       // Which staged names are BRAT-managed is decided HERE, where the identity is: the row's item
       // ref says which section and id it is, so nothing has to read a plugin id back out of a group
-      // name (spec §5).
+      // name.
       const ordered = orderInstallsCatalogFirst(slots.map(({ item }) => item.name), (name) => {
         const owner = refItemId(this.rowRef(name));
         return owner?.section === "community" && this.betaIds.has(owner.id);
@@ -3294,8 +3281,8 @@ export class SyncCenterView extends ItemView {
     return items;
   }
 
-  // Footer breakdown (spec §5): counts derive from the SAME `effectiveFate` per row that feeds
-  // `stagedRows()` (review fix #1/#2) — not an independent re-derivation — so the footer total
+  // Footer breakdown: counts derive from the SAME `effectiveFate` per row that feeds
+  // `stagedRows()` — not an independent re-derivation — so the footer total
   // can never disagree with what a press of Apply/Capture would actually run, for a resolved
   // conflict's real turnsOn or a fallback-ladder "Turn it on" choice alike. Counts derive
   // straight from the rows, not the (possibly carrier-synthesized) apply/capture item arrays: a
@@ -3351,7 +3338,7 @@ export class SyncCenterView extends ItemView {
       const fill = barEl?.querySelector<HTMLElement>("div") ?? null;
       if (barEl !== null) {
         barEl.show();
-        barEl.addClass("is-active"); // indeterminate shimmer while steps run (定稿 2026-07-17)
+        barEl.addClass("is-active"); // indeterminate shimmer while steps run
       }
       btn.buttonEl.addClass("is-busy");
       // Live status line under the action bar: "Name — phase…" + a slow-step hint after ~8s.
@@ -3378,7 +3365,7 @@ export class SyncCenterView extends ItemView {
             if (fill !== null) fill.style.width = `${total === 0 ? 0 : Math.round((done / total) * 100)}%`;
           });
           this.setLastRun(verb === "Capturing" ? "capture" : "apply", null, results);
-          // Conflict resolutions are a per-run judgment call (spec §5/§4) — a successful run
+          // Conflict resolutions are a per-run judgment call — a successful run
           // clears the whole map rather than pruning row-by-row, so a resolved-but-still-differing
           // straggler (a partial failure elsewhere in the same run) re-asks rather than silently
           // re-running last time's choice against a divergence that may have moved on.
@@ -3403,7 +3390,7 @@ export class SyncCenterView extends ItemView {
       return { wrap, btn };
     };
 
-    // Both buttons show only when both directions are staged (spec §5) — otherwise a lone
+    // Both buttons show only when both directions are staged — otherwise a lone
     // staged side gets its own button, and an empty selection shows neither (the footer's
     // "Nothing selected" already says so).
     const capW = capItems.length > 0 || this.activeRun?.verb === "Capturing" ? mkWrapped() : null;
@@ -3471,11 +3458,11 @@ export class SyncCenterView extends ItemView {
     }
   }
 
-  // R9: a per-remote progress notify during refreshRemoteChecks triggers a full re-render, which
-  // used to call this.host.deepDiff again every time — abandoning the in-flight clone (whose git
-  // subprocess runs on regardless) and resetting the elapsed indicator to 0.0s. Re-render now
+  // A per-remote progress notify during refreshRemoteChecks triggers a full re-render. A re-render
   // re-attaches to the SAME compare (keyed by remote name + reader-cache generation) instead of
-  // restarting it; a new generation (refresh completed, remote edited) naturally starts a fresh one.
+  // restarting it — restarting would abandon the in-flight clone (whose git subprocess runs on
+  // regardless) and reset the elapsed indicator to 0.0s;
+  // a new generation (refresh completed, remote edited) naturally starts a fresh one.
   // A compare that already settled successfully stays cached on the entry (startRemoteCompare)
   // so a re-render while OTHER remotes are still being checked paints the stored result directly
   // instead of flashing the progress UI and re-comparing again.
@@ -3490,7 +3477,7 @@ export class SyncCenterView extends ItemView {
         this.paintRemoteCompareResult(detail, remote, check, reattach.result);
         return;
       }
-      // R6: a same-generation cached result older than REUSE_MAX_AGE_MS is stale — fall through
+      // A same-generation cached result older than REUSE_MAX_AGE_MS is stale — fall through
       // to start a fresh compare (below) instead of serving it forever within the generation.
       this.inflightCompare = null;
       reattach = null;
@@ -3540,7 +3527,7 @@ export class SyncCenterView extends ItemView {
       detail.empty();
       const raw = (e as Error).message;
       // Vault remotes have no login and no timeout marker; raw fs errors like EACCES
-      // "permission denied" must not read as a Git login problem (spec 3b: non-git → other).
+      // "permission denied" must not read as a Git login problem (non-git → other).
       const kind = remote.type === "git" ? classifyRemoteFailure(raw) : "other";
       const card = detail.createDiv({ cls: "config-sync-remote-errcard" });
       card.createDiv({ cls: "config-sync-remote-errcard-head", text: `Couldn't compare with ${remote.name}` });
@@ -3600,27 +3587,26 @@ export class SyncCenterView extends ItemView {
   private paintRemoteCompareResult(detail: HTMLElement, remote: Remote, check: RemoteCheck | undefined, dd: RemoteCompareResult): void {
     detail.empty();
     const { entries, lockDiffers, remoteLabels } = dd;
-    // Ledger C-#14: local resolution wins throughout — the view's own in-memory group label
+    // Local resolution wins throughout — the view's own in-memory group label
     // first, then this device's own (possibly backfill-healed) local lock label, matching
     // displayName's own fallback order — and only then the remote's lock label, for entries this
     // device has never captured a label for at all (e.g. remote-only groups).
     const storedLabel = (g: string): string | undefined =>
       findGroupByName(this.groups, g)?.label ?? this.host.localLockLabel(g) ?? remoteLabels[g];
 
-    // Companion entries fold into their parent's BEFORE sectioning (spec §5): the remote pane
-    // shows the same one-entry-per-family grammar the main list's rows() does — everything else
-    // from batch 4 (sections, on/off extraction, the "N more items match" summary below) runs
-    // unchanged over the folded set.
+    // Companion entries fold into their parent's BEFORE sectioning: the remote pane
+    // shows the same one-entry-per-family grammar the main list's rows() does — the
+    // sections, on/off extraction, and the "N more items match" summary below all run
+    // over the folded set.
     const folded = foldCompanionEntries(entries, (g) => this.host.companionParentOf(g));
     const changed = folded.filter((e) => e.files.length > 0);
-    // Mirrors the main list's four fixed type sections (spec 2026-08-07-c-livetest-batch4 task 2)
-    // instead of the old flat ITEM_SECTION_ORDER/config-sync-sect breakdown — same section vocabulary,
+    // Mirrors the main list's four fixed type sections — same section vocabulary,
     // same on/off-carrier extraction, so a remote diff and the item list never disagree on where
     // a plugin lives.
     for (const sec of remoteSections(changed, (g) => this.itemSectionOf(g), (g) => this.fullName(g, storedLabel(g)))) {
       const n = sec.entries.length + (sec.onOff !== null ? 1 : 0);
       // No chevron/checkbox/carrier-chip/click handler here: this header is read-only summary,
-      // never a control — a dead affordance is the ledger C-#1 bug this task must not repeat.
+      // never a control — a dead affordance reads as a broken one.
       const fold = detail.createDiv({ cls: `config-sync-section is-typesection is-open is-static is-${sec.section}` });
       const head = fold.createDiv({ cls: "config-sync-section-head" });
       head.createSpan({ cls: "config-sync-section-title", text: TYPE_SECTION_TITLES[sec.section] });
@@ -3649,7 +3635,7 @@ export class SyncCenterView extends ItemView {
           : "✓ remote matches the local store",
       });
     } else {
-      // The aligned action's REAL payload, then what it will not do (spec Item 3): Pull is
+      // The aligned action's REAL payload, then what it will not do: Pull is
       // additive (never removes local files); Push mirrors (removes remote-only files).
       const allFiles = changed.flatMap((e) => e.files);
       const incoming = allFiles.filter((f) => f.kind !== "deleted").length;
@@ -3682,7 +3668,7 @@ export class SyncCenterView extends ItemView {
         const line = detail.createDiv({ cls: "config-sync-unchanged" });
         line.appendText(`✓ ${matched} more item${matched === 1 ? " matches" : "s match"}`);
         // A one-way reveal (never re-collapses) — same static FOLD glyph as renderUnifiedFiles's
-        // "N more files" line (round-12).
+        // "N more files" line.
         setIcon(line.createSpan({ cls: "config-sync-row-chevron" }), "chevron-right");
         line.addEventListener("click", () => line.setText(`✓ ${matchNames.join(" · ")}`));
       }
@@ -3696,10 +3682,10 @@ export class SyncCenterView extends ItemView {
     this.renderRemoteButtons(detail, remote, pullAligned, entries.length === 0 && !lockDiffers);
   }
 
-  // The pinned on/off line (spec task 2 §3): a section's core-plugins/community-plugins entry
+  // The pinned on/off line: a section's core-plugins/community-plugins entry
   // never renders as an ordinary row — its file diff IS a member on/off delta, so this is the
   // only place that delta shows. Sums onOffFlips over every file the carrier entry carries
-  // (normally exactly one) rather than assuming a single file, per the brief.
+  // (normally exactly one) rather than assuming a single file.
   private renderRemoteOnOff(host: HTMLElement, e: RemoteDiffEntry, remoteName: string, storedLabel: (g: string) => string | undefined): void {
     const onAtRemote: string[] = [];
     const offAtRemote: string[] = [];
@@ -3718,12 +3704,12 @@ export class SyncCenterView extends ItemView {
     const key = `${remoteName}::${e.group}::onoff`;
     const line = host.createDiv({ cls: "config-sync-remote-onoff" });
     const fold = host.createDiv({ cls: "config-sync-remote-fliplist" });
-    // Content is always rebuilt from the CURRENT compare result (spec §2) — no cached-`built`
+    // Content is always rebuilt from the CURRENT compare result — no cached-`built`
     // divergence between a fresh render that opens because the key persisted and a click that
     // opens it live; both paths call this.
     const buildFold = (): void => {
       fold.empty();
-      // Element id → group name by carrier (spec §2): community carrier ids compile to
+      // Element id → group name by carrier: community carrier ids compile to
       // `plugin-<id>` groups; core carrier ids ARE the group name — then the same
       // storedLabel → displayParts chain the section's own rows resolve names through, so
       // narration names never disagree with a row's display name.
@@ -3760,14 +3746,14 @@ export class SyncCenterView extends ItemView {
   }
 
   private renderRemoteDiffEntry(detail: HTMLElement, e: RemoteDiffEntry, remoteName: string, storedLabel?: string): void {
-    // C-#45 (spec §2): honest, never pretend the item doesn't exist — an item THIS device has
+    // Honest, never pretend the item doesn't exist — an item THIS device has
     // opted out of gets the same excluded presentation here it gets in the main list, no fold
     // (there is nothing to diff into: this device never reads or writes it either direction).
     if (this.host.deviceOptedOut(e.group)) {
       const row = detail.createDiv({ cls: "config-sync-report-row config-sync-remote-row" });
       this.renderRuleName(row, e.group, storedLabel);
       row.createDiv({ cls: "config-sync-rule-spacer" });
-      // 定稿轮 12+13 ③: the same row-level icon the main list's excluded fate renders now, not
+      // The same row-level icon the main list's excluded fate renders, not
       // text — this row IS that fate, just reached from the remote diff pane.
       this.renderFateStateIcon(row, "excluded", "Not synced on this device");
       this.renderFateChip(row, "your rule");
@@ -3785,7 +3771,7 @@ export class SyncCenterView extends ItemView {
     if (counts.updated > 0) row.createSpan({ cls: "config-sync-chip is-upd", text: `~${counts.updated}` });
     if (counts.deleted > 0) row.createSpan({ cls: "config-sync-chip is-del", text: `−${counts.deleted}` });
     const fold = detail.createDiv({ cls: "config-sync-remote-files" });
-    // Content is always rebuilt from the CURRENT compare result (spec §2) — a fresh render that
+    // Content is always rebuilt from the CURRENT compare result — a fresh render that
     // opens because the key persisted renders the same content a click would build live.
     if (isOpen) this.renderRemoteFileRows(fold, e, remoteName);
     else fold.hide();
@@ -3817,14 +3803,14 @@ export class SyncCenterView extends ItemView {
       line.createSpan({ cls: "config-sync-remote-fname", text: f.itemRel });
       const key = `${remoteName}::${e.group}::${f.itemRel}`;
       const isOpen = this.remoteFoldsOpen.has(key);
-      // Same trailing affordance as the local FILES list (round-11 ②'s one-icon rule, and its own
-      // sweep lesson: this remote line is the SAME control on another surface, so it changes with
-      // it — a `· diff ▾` left behind here is exactly the drift DESIGN §2.1 now forbids).
+      // Same trailing affordance as the local FILES list (one-icon rule:
+      // this remote line is the SAME control on another surface, so it changes with
+      // it — a `· diff ▾` left behind here is exactly the drift DESIGN §2.1 forbids).
       const affLabel = f.kind === "added" ? "View content" : "View changes";
       const diffIcon = line.createSpan({ cls: `config-sync-diffic${isOpen ? " is-open" : ""}`, attr: { "aria-label": affLabel, role: "button", tabindex: "0" } });
       setIcon(diffIcon, "file-diff");
       let panel: HTMLElement | null = null;
-      // Content is always rebuilt from the CURRENT compare result (spec §2) — a fresh render
+      // Content is always rebuilt from the CURRENT compare result — a fresh render
       // that opens because the key persisted renders the same panel a click would build live.
       if (isOpen) {
         const p = createDiv({ cls: "config-sync-inline-diff" });
@@ -3912,12 +3898,9 @@ export class SyncCenterView extends ItemView {
   }
 }
 
-// Confirmation for the divergence shortcut: pre-checked list of this device's extra ids;
-// confirming adds the checked ones to the device-local exceptions.
 // Confirm removing an item from sync, offering to also delete its saved copy in the store.
-// Exported (task 10): the Sync Center footer that used to open this modal retired with §6.2's
-// row contract — task 12 wires the settings-panel card's write entrance directly to it, so it
-// needs a caller outside this file. The modal itself, and its own tests, are untouched.
+// Exported: the settings-panel card's write entrance (SettingTab.ts) is wired directly to it,
+// so it needs a caller outside this file.
 export class StopSyncingModal extends Modal {
   private deleteStore: boolean;
 

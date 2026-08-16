@@ -487,10 +487,9 @@ describe("checkRemote per-item resolution (v2)", () => {
     expect(await stateOf(v2(AT, { a: item(AT, "h1"), b: item(AT, "h2") }), v2(AT, { a: item(AT, "h1") }))).toBe("remote-older");
   });
 
-  // Task-3 review I1: the gate asks whether the PAYLOAD is there, not what the version number says.
+  // The gate asks whether the PAYLOAD is there, not what the version number says.
   // A 2.21.0 peer writes `version: 2` and stamps every entry — excluding it would blank the per-item
-  // path for the whole transition window and bring back the phantom "the store has newer settings"
-  // §6 removed.
+  // path for the whole transition window and bring back a phantom "the store has newer settings".
   it("a 2.21.0 peer (version 2, but every entry stamped) is still resolved per item", async () => {
     const older: StoreLock = {
       version: 2,
@@ -666,7 +665,7 @@ describe("stale device-local key in the store base", () => {
   });
 });
 
-// batch6 task-1 (spec 2026-08-08-c-livetest-batch6-remote-labels.md): the remote pane's plugin
+// The remote pane's plugin
 // names come from the remote store.lock.json's own label fields — remoteLockLabels is the pure
 // extraction step, deliberately tolerant of anything short of a real parsed store.lock.json
 // (deepDiff's remote read must never throw over this).
@@ -701,11 +700,11 @@ describe("remoteLockLabels", () => {
   });
 });
 
-// 2026-08-09-c-livetest-batch15 (spec 2026-08-09-c-livetest-batch15-member-labels.md): a
+// A
 // remote-only on/off member with no group entry of its own gets a name from its carrier's
 // memberLabels — same chain position as resolveHostStoredLabel's local one (after own-entry
 // labels, before the id fallback).
-describe("remoteLockLabels — carrier memberLabels fallback (batch15)", () => {
+describe("remoteLockLabels — carrier memberLabels fallback", () => {
   it("adds a plugin-<id> entry from the community carrier's memberLabels", () => {
     const lockJson = {
       capturedAt: "t",

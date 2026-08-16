@@ -34,7 +34,7 @@ function noticeCount(message: string): number {
   return NoticeSpy.messages.filter((m) => m === message).length;
 }
 
-// Fast-forward past the refusal-notice window. The stop notice at LOAD seeds it (final-review N1),
+// Fast-forward past the refusal-notice window. The stop notice at LOAD seeds it,
 // so a gesture in the same ten seconds deliberately adds nothing to what is already on screen — the
 // tests below that are about what a LATER gesture says age the window rather than pretending the
 // startup notice never fired. Bracket access for the same reason the rest of this file uses it:
@@ -53,8 +53,8 @@ interface StopSurface {
   refreshLocalStatus: () => Promise<void>;
   settingsWritable: () => boolean;
   setEnablementRule: (list: string, elementId: string, sharing: Sharing) => Promise<void>;
-  // Reached through the plugin itself, not through a host: `stopSyncing` moved off `SyncCenterHost`
-  // in task 12 (the footer that called it retired) and onto `SettingsHost`, which IS the plugin.
+  // Reached through the plugin itself, not through a host: `stopSyncing` lives on
+  // `SettingsHost`, which IS the plugin, not on `SyncCenterHost`.
   stopSyncing: (groupName: string, deleteStore: boolean) => Promise<string[] | null>;
   storeFileCount: (groupName: string) => Promise<number>;
   displayName: (group: string, storedLabel?: string) => string;
@@ -152,9 +152,9 @@ describe("§4.1 — a data.json from a newer build is never reset and never over
     expect(noticeCount(SCHEMA_FUTURE_NOTICE)).toBe(1);
   });
 
-  // FINAL-REVIEW N1: the load's own notice has to seed the same quiet window every other refusal
-  // shares. It did not, so the first gesture after startup stacked a second copy of the identical
-  // sentence beside the one still on screen — precisely what that window was introduced to prevent.
+  // The load's own notice has to seed the same quiet window every other refusal
+  // shares — otherwise the first gesture after startup stacks a second copy of the identical
+  // sentence beside the one still on screen, precisely what that window exists to prevent.
   it("a gesture right after startup adds nothing to the notice already on screen", async () => {
     NoticeSpy.messages = [];
     const { instance } = makePlugin(new MemFS(), futureDocument());
@@ -345,7 +345,7 @@ describe("§4.1 — a data.json from a newer build is never reset and never over
     expect(await io.exists("config-dir/plugins/config-sync/run-history.json")).toBe(true);
   });
 
-  // The sibling guard (round-4 review N2): every run is refused before it starts, so nothing here
+  // The sibling guard: every run is refused before it starts, so nothing here
   // could be a real record either — and the Sync Center's `setLastRun` returning early on the
   // refusal is caller discipline, not a guarantee.
   it("a run history entry is never written for a run that could not have happened", async () => {
@@ -382,7 +382,7 @@ describe("§4.1 — a data.json from a newer build is never reset and never over
     expect(ok.local("config-sync-baselines")).toBeDefined();
   });
 
-  // Review N4: the settings tab's text fields refuse per KEYSTROKE. A notice per character is
+  // The settings tab's text fields refuse per KEYSTROKE. A notice per character is
   // worse than silence — a storm teaches the user to ignore the one message that matters — so the
   // MESSAGE is said once per window while every one of those keystrokes is still refused.
   it("a run of edits produces one notice, not one per keystroke — and every one of them is still refused", async () => {
@@ -687,12 +687,12 @@ describe("§4.3 — the store lock's version", () => {
     expect(await io.exists("cs/store/configdir/hotkeys.json")).toBe(false);
   });
 
-  // FINAL-REVIEW C1. Every v3 fixture above happens to satisfy v1's entry rule, so the gate was
-  // never asked the question that breaks it. `parseStoreLock` still enforces "every entry carries a
+  // Every v3 fixture above happens to satisfy v1's entry rule, so those cases never ask the
+  // question that breaks a parser-mediated gate. `parseStoreLock` enforces "every entry carries a
   // string sourcePluginVersion or sourceAppVersion" — so a v3 that RESTRUCTURES the entry throws
-  // there, and a gate that read the version through the parser treated that throw as permission to
-  // proceed. The restructure is not hypothetical: it is exactly the source/innate/display partition
-  // §6's own "Out of scope" note defers to v3, which is why those two fields were kept flat. Asking
+  // there, and a gate that read the version through the parser would treat that throw as
+  // permission to proceed. The restructure is not hypothetical: a source/innate/display partition
+  // is a natural v3 shape, which is why those two fields were kept flat here. Asking
   // the version off a raw JSON.parse is what separates "invalid for v1" from "newer than us".
   describe("a v3 lock this build cannot even parse", () => {
     const V4_RESTRUCTURED = JSON.stringify({
@@ -777,12 +777,12 @@ describe("§4.3 — the store lock's version", () => {
     });
   });
 
-  // Round-4 review N1: the startup label heal is the FOURTH writer of this file, and the case is
+  // The startup label heal is the FOURTH writer of this file, and the case is
   // worse than the others — data.json here is a perfectly readable v2, so `schemaStop` is null and
   // the stop state's guard says nothing, and the write fires at startup with no user action at
   // all. The pairing that proves it: `refreshLocalStatus` over a lock in THIS build's own format
   // (the heal test above, at version 3) does write the healed label. A v1/v2 lock would not be that
-  // pairing — task-3's C1 ruling stopped the heal upgrading a format, so those are left
+  // pairing — the heal never upgrades a format, so those are left
   // byte-identical too, for a different reason (lockLabelHeal.test.ts holds that case).
   it("the startup label heal refuses a lock from a newer build and leaves it byte-identical", async () => {
     const v4Lock = JSON.stringify({ version: 4, capturedAt: "2026-08-01T00:00:00.000Z", items: { community: { demo: { source: { kind: "plugin", version: "1.0.0" } } } } }, null, 2);
@@ -983,10 +983,9 @@ describe("§5 — content at the far end with no lock", () => {
   });
 });
 
-// §4.2b, round-4 review N5's "a flow that will be refused refuses BEFORE it opens". The coverage
-// lived here against SyncCenterView.openStopSyncing until the Sync Center footer retired
-// (2026-08-12-enablement-two-layers task 10); the gesture's one home is now the settings-panel
-// card's own toggle (spec §6.2), so the guarantee is re-asserted at that call site.
+// "A flow that will be refused refuses BEFORE it opens." The gesture's one home is the
+// settings-panel card's own toggle (there is no Sync Center footer), so the guarantee is
+// asserted at that call site.
 //
 // `storeFileCount` is the probe: `openStopSyncing` awaits it BEFORE it constructs the modal, so a
 // run that never asks for a count is a run that never opened one — and it never reached
@@ -1157,10 +1156,10 @@ async function readSourceFile(path: string): Promise<string> {
   return fs.readFileSync(path, "utf8");
 }
 
-// spec §6.3 / §9 criterion 5-6: the Sync Center carrier chip retired its ONLY write path
-// (setItemSyncEnabled) — it now only reads Item.synced and jumps to the card that writes it
+// The Sync Center carrier chip has no write path
+// (no setItemSyncEnabled) — it only reads Item.synced and jumps to the card that writes it
 // (SettingTab's updateItem). Proven at the string level, not just by absence of a call site: the
-// method itself no longer exists anywhere in the plugin.
+// method does not exist anywhere in the plugin.
 describe("Item.synced has exactly one writer, and it is not in the Sync Center", () => {
   it("the string does not appear in the Sync Center view", async () => {
     const view = await readSourceFile("src/ui/SyncCenterView.ts");

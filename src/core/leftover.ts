@@ -11,7 +11,7 @@ export interface LeftoverFile {
   path: string; // rel without the leading "store/", shown in the row
 }
 
-// The list-membership compile BOTH delta sides share (spec 2026-07-28 §2): items compiled WITH
+// The list-membership compile BOTH delta sides share: items compiled WITH
 // synthesized defs for ids whose plugin isn't installed here, so an item this data.json carries
 // never drops out of membership just because its plugin is absent on this device. betaIds comes
 // from the caller (main.ts's `bratRepoIndex(this.settings.items)`) so a synthesized def
@@ -35,14 +35,14 @@ export function selfListGroups(defs: ItemDef[], items: ItemMap, betaIds: Readonl
 // offer other devices' store files as deletable, and readStoreContractLocals would return an empty
 // map, switching OFF the store-contract this-device strip so this device could publish its own
 // device-local values into the store. Nothing is written back and the lock is not touched: this is
-// a read boundary, and the store's own re-key is spec §3 (task 3).
+// a read boundary — the store's own re-key happens elsewhere.
 // Best-effort by contract otherwise: malformed or uncompilable foreign content yields [] rather
 // than breaking status/leftover views.
 export function storeSelfCopyGroups(json: string, defs: ItemDef[], betaIds: ReadonlySet<string>): SyncGroup[] {
   try {
     const parsed: unknown = JSON.parse(json);
     if (typeof parsed !== "object" || parsed === null) return [];
-    // §4.2's gate, on the read side (final-review M3): a store copy written by a NEWER build is not
+    // The version gate, on the read side: a store copy written by a NEWER build is not
     // ours to compile — its `items` may mean something this build cannot see, and every consumer of
     // this list (the self pane's delta, leftover attribution, the store-contract strip) would then
     // act on a reading we invented. Empty is what this function already answers for content it

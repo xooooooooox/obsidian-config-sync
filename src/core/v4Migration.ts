@@ -1,5 +1,5 @@
 /**
- * The v3 → v4 settings migration (spec 2026-08-12-enablement-two-layers-design.md §4).
+ * The v3 → v4 settings migration.
  *
  * The ONE piece of code that will ever read a v3 `data.json` again. Pure: the shell decides when it
  * runs, saves the result exactly once, and owns the localStorage half (main.ts's
@@ -10,34 +10,17 @@
  * rebuilt by spreading what was found — which is what carries a key this build has never heard of
  * (invariant II.1) — and a value whose shape we cannot read is left exactly as found.
  *
- * `thisDeviceItems` migrates in TWO halves and the second one is not optional (§4). A v3 pin did not
- * merely mask its element, it FORCED it (the retired forcedRunsOn, resolved against the persisted
+ * `thisDeviceItems` migrates in TWO halves and the second one is not optional. A v3 pin did not
+ * merely mask its element, it FORCED it (resolved against the persisted
  * list). The rule below preserves WHO decides; the `freeze` list the shell consumes preserves WHAT
  * was decided. Only both together leave every switch where it was.
  *
- * THE STRUCTURAL THIS-DEVICE RULE (F1) is the half of v3's behaviour that was never written down.
- * v3 derived an element's sharing (registry.ts's retired `elementSharings`) as
- * `item.synced ? deviceSharing(item.runsOn?.device) : THIS_DEVICE` — so EVERY core/community entry
- * whose card was off masked its element: it never entered the store and was never resurrected from
- * it, and its `runsOn` was a label the mask never read. Task 7 retired that derivation by spec (a
- * rule is a thing the user wrote, not a thing a disabled card implies), which means the migration is
- * the only place left that can preserve it: an entry that is not synced gets a stored `this-device`
- * rule saying exactly what its absence used to say — ahead of, and instead of, any class rule its
- * own `runsOn` would otherwise have produced. Without it, the first capture after a v4 load would
- * publish every locally-enabled plugin the user had never chosen to sync, to the whole fleet.
- *
- * Those structural rules do NOT join the freeze list, and that is a statement about v3, not a
- * shortcut. In v3 both a structural this-device and a pin reached `runsOnForces`, which resolved a
- * rule-less id through `forcedRunsOn(switchListMemberOn(persisted, id))` — a force computed FROM
- * the persisted local file and recomputed every run, which is the same answer v4's `this-device`
- * decision (enablementDecision.ts: masked, force null) reaches by leaving the element alone. The
- * two coincide for every list whose store and local sides have the SAME shape, which is every list
- * a device writes for itself; they can differ where the shapes disagree (a local array against a
- * store map, where applySwitchList's pass-through drops a locally-on excepted id that v3's
- * addForceOn re-added). That asymmetry belongs to `this-device` itself, not to this migration — it
- * is exactly what a rule written through the UI does today — so it is preserved, not compensated
- * for. A pin is frozen anyway because §4 says a pin's local half must be pinned down, and freezing
- * it to the state that is already on disk changes nothing at the moment of the migration either.
+ * The structural this-device rule: a v3 core/community entry whose card was off masked its element
+ * whatever its `runsOn` claimed, so an entry that is not synced gets a stored `this-device` rule
+ * saying exactly what its absence meant — ahead of, and instead of, any class rule its own
+ * `runsOn` would otherwise have produced (without it, the first capture after a v4 load would
+ * publish every locally-enabled plugin the user had never chosen to sync, to the whole fleet).
+ * Structural rules do NOT join the freeze list; only pins do.
  */
 import { ruleHomeFor } from "./enablementRules";
 import { isPlainObject } from "./sanitize";
@@ -98,6 +81,10 @@ export function migrateV4Settings(input: Doc): V4Migration {
       if ("enabled" in item) {
         item.synced = item.enabled;
         delete item.enabled;
+      } else if (!("synced" in item)) {
+        // Establish the field even where v3 never wrote `enabled`: readers already treat a missing
+        // value as unsynced, and the written document must satisfy its own schema (`synced` required).
+        item.synced = false;
       }
       const device = deviceAxisOf(item.runsOn); // "desktop" | "mobile" | null; ignores force
       delete item.runsOn;
@@ -150,12 +137,12 @@ export function migrateV4Settings(input: Doc): V4Migration {
   for (const rule of rules) writeRule(items, rule);
 
   // Rule 6 — the carriers' own `synced`. Until v4 a carrier compiled iff any item in its section was
-  // synced (the retired anyEnabledInList); from v4 it compiles iff its own item says so. Without
+  // synced (v3's anyEnabledInList); from v4 it compiles iff its own item says so. Without
   // this line, every user's on/off sync would silently stop on the first v4 load.
   //
   // The section predicate ALWAYS wins here, for the two carrier ids ONLY — never "existing value
   // wins". No v3 build ever wrote a carrier entry to `items.obsidian`: v3's own compile decided a
-  // carrier's sync by the retired anyEnabledInList over the section, and never read
+  // carrier's sync by anyEnabledInList over the section, and never read
   // `items.obsidian["core-plugins"|"community-plugins"]` at all. So a `synced` value already sitting
   // there is not a value ANY v3 build chose — it is v2-chip residue: v2's old carrier chip wrote an
   // inert `items["core-plugins"] = {enabled:true}` (a bare id, which v2ItemLocation's fallback lands
@@ -198,9 +185,9 @@ function writeRule(items: Doc, { list, elementId, sharing }: RuleWrite): void {
   items[home.section] = section;
 }
 
-// `device: "all"` writes NOTHING (spec §4): the default is what an absent rule already means, and
+// `device: "all"` writes NOTHING: the default is what an absent rule already means, and
 // storing it would be residue the first round trip has to clean up. `force` is read and discarded —
-// it claimed "here" and behaved "everywhere", and all three vaults have zero of them.
+// it claimed "here" and behaved "everywhere".
 function deviceAxisOf(runsOn: unknown): "desktop" | "mobile" | null {
   if (!isPlainObject(runsOn)) return null;
   const device = runsOn.device;

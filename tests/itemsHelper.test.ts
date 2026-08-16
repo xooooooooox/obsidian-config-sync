@@ -6,7 +6,7 @@ import { itemsIn } from "./items";
 // or because an id is just a string) and both compile to nothing, leaving an assertion green for a
 // reason it never intended.
 describe("itemsIn — hostile about the shapes that pass for the wrong reason", () => {
-  it("refuses a beta section: beta is presented, never stored (spec §7b)", () => {
+  it("refuses a beta section: beta is presented, never stored", () => {
     expect(() => itemsIn({ beta: { "slides-rup": { synced: true } } } as never)).toThrow(/beta/);
   });
 

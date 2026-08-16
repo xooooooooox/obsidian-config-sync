@@ -196,7 +196,7 @@ describe("parseStoreLock — v1/v2 → v3 conversion", () => {
     expect(lockEntry(lock, "legacy/who-knows")).toBeUndefined();
   });
 
-  // Task-3 review I2: `items` is REBUILT by the parse, so a section it cannot read cannot ride the
+  // `items` is REBUILT by the parse, so a section it cannot read cannot ride the
   // top-level tail — it is kept in place and narrowed where it is consumed instead (invariant
   // II.1 + II.2 together).
   it("carries a section bucket this build cannot read, and ignores it at the point of use", () => {
@@ -215,9 +215,9 @@ describe("parseStoreLock — v1/v2 → v3 conversion", () => {
   });
 });
 
-// Task-3 review I3: a `ref` is a KEY, and the key space's sections are closed. `beta` is a presented
-// classification and never an identity (spec §7b) — a validator that accepted any two segments would
-// let exactly the leak this branch has spent three tasks closing back in through a store manifest.
+// A `ref` is a KEY, and the key space's sections are closed. `beta` is a presented
+// classification and never an identity — a validator that accepted any two segments would
+// let a `beta/<id>` identity leak back in through a store manifest.
 describe("parseGroup — the ref is validated against the key space", () => {
   const withRef = (ref: unknown): string =>
     JSON.stringify({ version: 1, groups: [{ name: "x", ref, path: "{configDir}/x.json", type: "file", devices: "all" }] });
@@ -427,7 +427,7 @@ describe("parseStoreLock widened schema", () => {
   });
 });
 
-// 2026-08-09-c-livetest-batch15 (spec 2026-08-09-c-livetest-batch15-member-labels.md): the two
+// The two
 // carrier entries additionally carry memberLabels (id → display name) — validated/preserved the
 // same way the single-label field above is, and fully back-compatible in both directions.
 describe("parseStoreLock memberLabels", () => {

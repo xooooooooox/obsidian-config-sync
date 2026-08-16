@@ -20,10 +20,9 @@ export const SWITCH_LISTS: Record<string, SwitchListSpec> = {
   "enabled-css-snippets": { localFile: "appearance.json", field: "enabledCssSnippets" },
 };
 
-// An on/off list an ITEM's enablement can ride (spec §5, "retired outright"): the identity is the
-// list, and its filename is derived from that identity HERE and nowhere else — v2 spelled the
-// filename into every def (`enablement.carrier: "core-plugins.json"`) and then compared strings
-// against it in half a dozen places. Which lists exist as carriers is the registry's declaration
+// An on/off list an ITEM's enablement can ride: the identity is the
+// list, and its filename is derived from that identity HERE and nowhere else — never spelled
+// into defs and string-compared at the use sites. Which lists exist as carriers is the registry's declaration
 // (registry.ts's ENABLEMENT_LISTS); what file one lives in is this table's.
 export type EnablementList = "core-plugins" | "community-plugins";
 
@@ -33,13 +32,13 @@ export function enablementListFile(list: EnablementList): string {
   return spec.localFile;
 }
 
-// The `perElement` key a list's rules live under (spec §3.3). A field list is indexed by its JSON
+// The `perElement` key a list's rules live under. A field list is indexed by its JSON
 // key name (appearance's `enabledCssSnippets`); a whole-file list has no key name to index, so the
 // reserved key "" means "this file itself is the list".
 //
 // THE one producer of that string. Every compare, lookup and write goes through it, and the tests
-// assert it against SWITCH_LISTS rather than against a literal — a derived key with two authors is
-// the drift this release exists to end (spec §9 lesson 2/3).
+// assert it against SWITCH_LISTS rather than against a literal — a derived key with two authors
+// drifts.
 export function perElementKeyFor(list: string): string {
   const spec = SWITCH_LISTS[list];
   if (spec === undefined) throw new Error(`switch list "${list}" has no spec — SWITCH_LISTS and the caller disagree about "${list}"`);
@@ -169,7 +168,7 @@ export function memberUniverse(store: SwitchList | null, local: SwitchList | nul
 }
 
 // Whether an id/key is ON in a SwitchList — array presence / map truthy value, the exact reading
-// applySwitchList's own exception pass-through relies on for a masked id (task-2 fix: mask
+// applySwitchList's own exception pass-through relies on for a masked id (mask
 // producers must derive "locally on" from this PERSISTED content, never from a live runtime
 // query, which can diverge — see main.ts's leaveToThisDevice, its only caller). A null list
 // (unreadable/absent local file) counts as off.
@@ -178,7 +177,7 @@ export function switchListMemberOn(list: SwitchList | null, id: string): boolean
   return Array.isArray(list) ? list.includes(id) : list[id] === true;
 }
 
-// Total ON-member count of a SwitchList (2026-08-08-c-livetest-batch8): array length (every
+// Total ON-member count of a SwitchList: array length (every
 // element is on) or the number of true-valued map keys. A null list counts as 0, matching
 // switchListMemberOn's null handling — the on/off narration's "whole list flipped" case relies on
 // this being the same on-reading switchListMemberOn uses, not a raw member count.
@@ -192,13 +191,13 @@ export function switchListOnCount(list: SwitchList | null): number {
  * Arrays: remove excepted strings, preserve order.
  * Maps: remove excepted keys.
  */
-// Capture is PASS-THROUGH for excluded ids (甲, 2026-07-16): non-excluded ids follow local
+// Capture is PASS-THROUGH for excluded ids: non-excluded ids follow local
 // (whole-list mirror as always); excluded ids copy the store's existing state verbatim —
 // present stays present, absent stays absent. An excluding device can therefore neither add
 // nor remove an excluded id from the shared list. `store === null` (first capture or
 // unreadable) contributes nothing for excluded ids.
 //
-// Ordering is STORE-STABLE (2026-07-17): the produced list walks the store first — excluded ids
+// Ordering is STORE-STABLE: the produced list walks the store first — excluded ids
 // pass through in place, members still enabled locally keep their positions — then appends
 // local-only non-excluded entries in local order. Identical membership therefore captures
 // byte-identical to the store: diffs show only true adds/removes, and excluded ids never
@@ -234,7 +233,7 @@ export function captureSwitchList(local: SwitchList, store: SwitchList | null, e
   }
 }
 
-// Bidirectional divergence summary (定稿 2026-07-17): the non-excluded ids each direction
+// Bidirectional divergence summary: the non-excluded ids each direction
 // would destroy. captureRemoves = enabled in the store but not here (capture drops them from
 // the shared list — other devices then turn them off); applyDisables = enabled only here
 // (apply turns them off — excluding them first keeps them). Both sorted for stable display.

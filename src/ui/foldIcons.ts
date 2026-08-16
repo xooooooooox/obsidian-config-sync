@@ -1,18 +1,15 @@
 import { setIcon } from "obsidian";
 
-// The three trailing-fold states' icon vocabulary (C-#50, spec
-// 2026-08-10-c-livetest-batch24-fold-family.md §1): fixed-size 12px Lucide icons replace the old
-// text glyphs (✓ ○ ⊘) — canvas-metrics measured on the reporting device found their ink heights
-// unequal across themes (the excluded glyph 33% taller than the no-settings one, a font-fallback
-// artifact) — fixed-size SVG reads as optically equal instead. `ban` stays reserved for the
+// The three trailing-fold states' icon vocabulary: fixed-size 12px Lucide icons, never
+// text glyphs (✓ ○ ⊘) — text-glyph ink heights are unequal across themes (a font-fallback
+// artifact); fixed-size SVG reads as optically equal instead. `ban` stays reserved for the
 // Stop-syncing ACTION (itemCard.ts's stop-sync menu) — action and state never share an icon, so
 // the "not synced on this device" STATE uses `circle-slash`. `.config-sync-state-icon` (✓ ○ ≠ —
 // ? key, a DIFFERENT, Statistic-workspace vocabulary) is untouched by this map and stays text —
-// but a collapsed item ROW's own neutral (`—`-glyph) fate is NOT that column: round 12+13 ③
-// (DESIGN.md §2.1, the authority for this ruling — supersedes this comment's own earlier claim
-// that "the row state column stays text") reuses this same FOLD_ICON/FOLD_ICON_COLOR_CLASS map at
+// but a collapsed item ROW's own neutral (`—`-glyph) fate is NOT that column: per DESIGN.md §2.1
+// (the authority for this ruling), the same FOLD_ICON/FOLD_ICON_COLOR_CLASS map is reused at
 // the row's `config-sync-fate-ic` size for exactly that fate (SyncCenterView.ts's fateWrap and
-// renderRemoteDiffEntry) — the fold vocabulary now speaks at both the group-header line and the
+// renderRemoteDiffEntry) — the fold vocabulary speaks at both the group-header line and the
 // row it summarizes.
 export type FoldKind = "insync" | "excluded" | "nosettings";
 
@@ -39,8 +36,8 @@ export function renderFoldIcon(parent: HTMLElement, kind: FoldKind): HTMLSpanEle
 }
 
 // Appends the fold icon followed by `count` — the filter pills' short (mobile/compact) form for
-// the ok/excluded/none pills (C-#50 follow-up: the same optical mismatch the fold lines had,
-// surviving in the one place these three glyphs sat side by side). Unlike renderActionCount
+// the ok/excluded/none pills (the same optical mismatch the fold lines had would otherwise
+// survive in the one place these three glyphs sit side by side). Unlike renderActionCount
 // (actionIcons.ts), the count is ALWAYS appended, never suppressed at 0 — the pre-existing short
 // text (`✓ ${n}` etc.) never omitted a zero either, and that must stay byte-for-byte.
 export function renderFoldCount(parent: HTMLElement, kind: FoldKind, count: number): void {

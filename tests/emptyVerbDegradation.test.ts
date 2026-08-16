@@ -7,11 +7,10 @@ import { Availability } from "../src/core/availability";
 import { Fate } from "../src/ui/fateModel";
 import { RowBucket } from "../src/ui/panelModel";
 
-// C-#28 (docs/superpowers/specs/2026-08-09-c-livetest-batch13-empty-verbs.md), review round 2:
-// the reviewer's gap was that fateModel.test.ts only pins rowFate in isolation — these tests
+// fateModel.test.ts only pins rowFate in isolation — these tests
 // drive the REAL private computeFateInput/computeFamilyRollup/deriveRow chain (SyncCenterView.ts)
-// the live bug actually ran through, the same way scopeExcludedRow.test.ts drives the real
-// plugin for C-#24 rather than hand-building a FateInput. `SyncCenterHost` is an interface, so a
+// that production rows actually run through, the same way scopeExcludedRow.test.ts drives the
+// real plugin rather than hand-building a FateInput. `SyncCenterHost` is an interface, so a
 // minimal fake implementing only what deriveRow's path actually calls
 // (`companionParentOf`/`memberRuleFor`) is enough — no full plugin/app needed.
 interface Harness {
@@ -29,7 +28,7 @@ function harness(opts: {
 }): Harness {
   const host = {
     companionParentOf: opts.companionParentOf ?? (() => null),
-    // The two enablement layers the row reads (spec §5): the harness has no registry behind it,
+    // The two enablement layers the row reads: the harness has no registry behind it,
     // so both answer their neutral value — no rule written, no exception here.
     enablementRuleFor: () => EVERYWHERE,
     deviceElementFor: () => null,
@@ -54,8 +53,8 @@ function dirGroup(name: string): SyncGroup {
   return { name, path: name, type: "folder", devices: "all" };
 }
 
-describe("deriveRow — empty-verb degradation, integration (C-#28, review round 2)", () => {
-  // CRITICAL fix under review: a `not-captured` companion never carries a `changes` payload
+describe("deriveRow — empty-verb degradation, integration", () => {
+  // A `not-captured` companion never carries a `changes` payload
   // (status.ts:64) — its file count is structurally invisible, not zero. The parent itself has
   // no settings of its own ("no-settings" — neutral parent). The family still rolls up to a real
   // capture direction (the companion IS genuinely uncaptured work); the empty verb set must NOT
@@ -86,7 +85,7 @@ describe("deriveRow — empty-verb degradation, integration (C-#28, review round
   // "no-settings" (no store data, no local settings) and whose enablement is already in sync
   // (store list also says off — `stays off`, no "turns on" verb). Pre-fix this derived a bare ↓
   // with an empty sentence, still stageable. Post-fix: degrades to nothing-yet, bucket "none" —
-  // pinned at the deriveRow level, not just rowFate, per the reviewer's gap.
+  // pinned at the deriveRow level, not just rowFate.
   it("the live 5-row scenario (disabled plugin, stays off, no settings): degrades, bucket none", () => {
     const plugin = fileGroup("plugin-format-converter");
     const carrier = fileGroup("community-plugins");

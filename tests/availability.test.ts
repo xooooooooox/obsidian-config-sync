@@ -126,14 +126,14 @@ describe("desktopOnlyPluginIds", () => {
   });
 });
 
-// membersExcludedByClass / memberForceOff / forcedRunsOn / preferStoredRunsOn retired with the
-// two-layer cutover (2026-08-12-enablement-two-layers-design.md §5): the mask and the two force
-// sets are now ONE decision per element (enablementDecision.ts, tests/enablementDecision.test.ts),
+// There is no membersExcludedByClass / memberForceOff / forcedRunsOn / preferStoredRunsOn
+// (2026-08-12-enablement-two-layers-design.md §5): the mask and the two force
+// sets are ONE decision per element (enablementDecision.ts, tests/enablementDecision.test.ts),
 // and the runtime projection off it is covered end to end by tests/enablementRuntime.test.ts.
 
-// asRunsOn retired with `runsOn` itself (2026-08-12-enablement-two-layers, task 8) — the runtime
-// narrowing this described now applies to Sharing (asSharing/asFileSharing, types.ts), which is
-// what every rule reaches a reader through since the two-layer cutover.
+// There is no asRunsOn (retired with `runsOn` itself) — that runtime
+// narrowing applies to Sharing (asSharing/asFileSharing, types.ts), which is
+// what every rule reaches a reader through.
 
 describe("snippetOrphans", () => {
   it("flags names enabled locally with no file anywhere", () => {

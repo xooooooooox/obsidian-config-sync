@@ -55,18 +55,17 @@ describe("visibleUnderFilter", () => {
   });
 });
 
-// C-#24 fix round 2: live verification found the group-level `devices` axis alone (the original
-// fix) misses the case where a group's own `devices` stays "all" while its Plain-mode
-// `fileRule.sharing` carries the real exclusion — the exact reported scenario (Settings-sync menu
+// The group-level `devices` axis alone misses the case where a group's own `devices` stays "all"
+// while its Plain-mode `fileRule.sharing` carries the real exclusion (e.g. a Settings-sync menu
 // write on Hotkeys). groupExcludedHere reads BOTH axes independently.
-describe("groupExcludedHere — C-#24 fix round 2 (devices AND fileRule.sharing, independently)", () => {
+describe("groupExcludedHere — devices AND fileRule.sharing, independently", () => {
   const group = (overrides: Partial<SyncGroup>): SyncGroup => ({ name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all", ...overrides });
 
-  it("devices mismatch alone (no fileRule) → true — the original axis, unregressed", () => {
+  it("devices mismatch alone (no fileRule) → true — the devices axis alone suffices", () => {
     expect(groupExcludedHere(group({ devices: "mobile" }), "desktop")).toBe(true);
   });
 
-  it("devices: all + fileRule.sharing: mobile on desktop → true — the reported live scenario", () => {
+  it("devices: all + fileRule.sharing: mobile on desktop → true — the sharing axis alone suffices", () => {
     expect(groupExcludedHere(group({ devices: "all", fileRule: { sharing: perClass("mobile"), encrypted: false } }), "desktop")).toBe(true);
   });
 
@@ -78,7 +77,7 @@ describe("groupExcludedHere — C-#24 fix round 2 (devices AND fileRule.sharing,
     expect(groupExcludedHere(group({ devices: "all", fileRule: { sharing: EVERYWHERE, encrypted: false } }), "desktop")).toBe(false);
   });
 
-  it("fileRule absent, devices: all → false — byte-identical to before this fix", () => {
+  it("fileRule absent, devices: all → false — no exclusion on either axis", () => {
     expect(groupExcludedHere(group({ devices: "all" }), "desktop")).toBe(false);
   });
 
@@ -95,7 +94,7 @@ function fate(glyph: Fate["glyph"], stageable: boolean, nothingYet = false, excl
   return { glyph, sentence: "", chips: [], stageable, turnsOn: false, nothingYet, excluded };
 }
 
-describe("fateBucket — spec §1 truth table (ledger C-#23; §7 adds excluded, fix-round 4)", () => {
+describe("fateBucket — glyph/stageable/nothingYet/excluded truth table", () => {
   it("⚠ conflict, regardless of nothingYet", () => {
     expect(fateBucket(fate("⚠", false, false))).toBe("conflict");
     expect(fateBucket(fate("⚠", false, true))).toBe("conflict");
@@ -111,8 +110,7 @@ describe("fateBucket — spec §1 truth table (ledger C-#23; §7 adds excluded, 
     expect(fateBucket(fate("↑", true, true))).toBe("capture");
   });
 
-  // §7: excluded wins over nothingYet — positioned after the stageable checks, before nothingYet,
-  // exactly the spec's stated placement.
+  // excluded wins over nothingYet — positioned after the stageable checks, before nothingYet.
   it("excluded (non-stageable) → excluded, even when nothingYet is also true", () => {
     expect(fateBucket(fate("—", false, false, true))).toBe("excluded");
     expect(fateBucket(fate("—", false, true, true))).toBe("excluded");
@@ -134,9 +132,8 @@ describe("fateBucket — spec §1 truth table (ledger C-#23; §7 adds excluded, 
     expect(fateBucket(fate("—", false, false))).toBe("ok");
   });
 
-  // C-#24/C-#45 §7: a rule-excluded OR opted-out row's real rowFate output (never a hand-built
-  // Fate fixture) now buckets "excluded" (§7 — was "ok" pre-fix-round-4; the whole point of §7 is
-  // that "ok"/"in sync" must stop silently counting a device-rule-excluded row).
+  // A rule-excluded OR opted-out row's real rowFate output (never a hand-built Fate fixture)
+  // buckets "excluded" — "ok"/"in sync" must not silently count a device-rule-excluded row.
   it("excludedHere row (real rowFate output) buckets excluded, not ok/none", () => {
     const excludedInput: FateInput = {
       direction: null, conflict: false, nothingYet: false, installed: true,
@@ -152,8 +149,8 @@ describe("fateBucket — spec §1 truth table (ledger C-#23; §7 adds excluded, 
     expect(fateBucket(excludedFate)).toBe("excluded");
   });
 
-  // §7: the opt-out cause (C-#45) buckets identically to the class-rule cause — "same user-rule
-  // family, same placement" — via the direction-derivable live shape (fix-round 2's repro).
+  // The opt-out cause buckets identically to the class-rule cause — same user-rule
+  // family, same placement — via the direction-derivable live shape.
   it("optedOutHere row (real rowFate output, direction-derivable shape) buckets excluded too", () => {
     const optedOutInput: FateInput = {
       direction: "apply", conflict: false, nothingYet: false, installed: false,
@@ -167,7 +164,7 @@ describe("fateBucket — spec §1 truth table (ledger C-#23; §7 adds excluded, 
     expect(fateBucket(optedOutFate)).toBe("excluded");
   });
 
-  // C-#28 hardening (review round 2): fateBucket reads the Fate's OWN nothingYet verdict, never
+  // fateBucket reads the Fate's OWN nothingYet verdict, never
   // an external/caller-computed flag — a degraded apply fate buckets "none" even when a caller's
   // separate `pres === "no-settings"` guess would have said otherwise.
   it("a degraded apply fate (empty verb set) buckets none via its own nothingYet field", () => {
@@ -186,7 +183,7 @@ describe("fateBucket — spec §1 truth table (ledger C-#23; §7 adds excluded, 
   });
 });
 
-describe("fateBucketCounts — counts parity on a mixed row set (ledger C-#23; §7 adds excluded)", () => {
+describe("fateBucketCounts — counts parity on a mixed row set", () => {
   it("conflict counts under the apply/'down' pill (today's placement, preserved); locked counts under 'none'; excluded gets its own tally", () => {
     const buckets: RowBucket[] = ["capture", "capture", "apply", "conflict", "ok", "excluded", "none", "locked"];
     expect(fateBucketCounts(buckets)).toEqual({ up: 2, down: 2, ok: 1, none: 2, excluded: 1 });
@@ -207,7 +204,7 @@ describe("fateBucketCounts — counts parity on a mixed row set (ledger C-#23; �
   });
 });
 
-describe("partitionSection — active/insync/excluded/nosettings partition (ledger C-#23; §7 adds excluded)", () => {
+describe("partitionSection — active/insync/excluded/nosettings partition", () => {
   it("conflict, apply, capture, and locked are all active", () => {
     for (const b of ["conflict", "apply", "capture", "locked"] as const) expect(partitionSection(b)).toBe("active");
   });
@@ -219,7 +216,7 @@ describe("partitionSection — active/insync/excluded/nosettings partition (ledg
   });
 });
 
-describe("legacyLockedFamilyBucket — a locked row's bucket, reproducing pre-task familyState placement (review fix)", () => {
+describe("legacyLockedFamilyBucket — a locked row buckets by its family's raw state, never its fate", () => {
   it("a locked parent with a DIRECTIONAL (apply) companion buckets apply, not 'ok' — the regression", () => {
     // familyRollup treats a locked member as neutral, so a directional companion (e.g. a plain
     // settings dir with real changes) pulls the family's rollup off "locked" onto its own state.
@@ -239,7 +236,7 @@ describe("legacyLockedFamilyBucket — a locked row's bucket, reproducing pre-ta
     expect(legacyLockedFamilyBucket("differs")).toBe("conflict");
   });
 
-  it("a solo locked family (no directional companion — rollup stays 'locked') keeps its pre-task placement", () => {
+  it("a solo locked family (no directional companion — rollup stays 'locked') buckets locked", () => {
     expect(legacyLockedFamilyBucket("locked")).toBe("locked");
   });
 });
@@ -272,8 +269,8 @@ describe("capFileEntries", () => {
 });
 
 describe("copy strings", () => {
-  // C-#50 (spec 2026-08-10-c-livetest-batch24-fold-family.md §2): plain text now — no glyph
-  // prefix, no trailing triangle. The renderer composes the leading chevron and the fold icon.
+  // These lines are plain text — no glyph prefix, no trailing triangle. The renderer composes
+  // the leading chevron and the fold icon.
   it("in-sync line pluralizes, no glyph/triangle", () => {
     expect(insyncLineText(1)).toBe("1 item in sync");
     expect(insyncLineText(2)).toBe("2 items in sync");
@@ -283,15 +280,15 @@ describe("copy strings", () => {
     expect(moreFilesText(5)).toBe("… 5 more files");
   });
 
-  // 定稿轮 12+13 ②: the FILES row's collapsed count pill's aria-label/tooltip.
+  // The FILES row's collapsed count pill's aria-label/tooltip.
   it("files-change label", () => {
     expect(filesChangeLabel(1)).toBe("1 files change");
     expect(filesChangeLabel(4)).toBe("4 files change");
   });
 
-  // C-#45 §7 (fix-round 4): verbatim-consistent with the row sentence ("Not synced on this
-  // device") — pill → fold → row wording maps at zero cost, per the spec's own copy rationale.
-  // C-#50: plain text now (see insyncLineText's comment above).
+  // Verbatim-consistent with the row sentence ("Not synced on this
+  // device") — pill → fold → row wording maps at zero cost.
+  // Plain text (see insyncLineText's comment above).
   it("excluded line pluralizes, no glyph/triangle", () => {
     expect(excludedLineText(1)).toBe("1 item not synced on this device");
     expect(excludedLineText(2)).toBe("2 items not synced on this device");
@@ -356,7 +353,7 @@ describe("matchesSearch", () => {
 });
 
 describe("nosettingsLineText", () => {
-  // C-#50: plain text now (see insyncLineText's comment above).
+  // Plain text (see insyncLineText's comment above).
   it("pluralizes, no glyph/triangle", () => {
     expect(nosettingsLineText(1)).toBe("1 item with no settings yet");
     expect(nosettingsLineText(16)).toBe("16 items with no settings yet");
@@ -496,7 +493,7 @@ describe("enablementCarrierFor / carrierIsSynced", () => {
   });
 });
 
-// ── Unified grammar view skeleton (task-4: type sections, pills, folds, footer) ─────────────
+// ── Unified grammar view skeleton (type sections, pills, folds, footer) ─────────────────────
 
 describe("typeSectionForRow", () => {
   it("obsidian/core/community pass straight through", () => {
@@ -552,7 +549,7 @@ describe("unifiedFooterSummary", () => {
   });
 });
 
-// ── Remote pane C-grammar model (c-livetest batch4 task 1) ─────────────────────────────────────
+// ── Remote pane C-grammar model ────────────────────────────────────────────────────────────────
 
 describe("remoteSections", () => {
   const entry = (group: string): RemoteDiffEntry => ({ group, files: [] });
@@ -694,8 +691,8 @@ describe("onOffNarrationLines", () => {
 });
 
 describe("onOffLineText", () => {
-  // Round-12: `open` dropped — plain text, no trailing triangle; the renderer's own fold chevron
-  // carries the open/closed state now.
+  // Plain text — no `open` word, no trailing triangle; the renderer's own fold chevron
+  // carries the open/closed state.
   it("singular", () => {
     expect(onOffLineText(1)).toBe("On/off list · differs for 1 plugin");
   });
@@ -704,7 +701,7 @@ describe("onOffLineText", () => {
   });
 });
 
-// ── Family rollup (c-livetest batch5 task 1) ────────────────────────────────────────────────────
+// ── Family rollup ────────────────────────────────────────────────────────────────────────────────
 
 describe("familyRollup — companion groups dissolve into their parent's state", () => {
   const m = (name: string, state: GroupState, fileCount = 0): FamilyMember => ({ name, state, fileCount });
@@ -766,7 +763,7 @@ describe("familyRollup — companion groups dissolve into their parent's state",
     expect(r.state).toBe("local-changed");
   });
 
-  // Review fix (IMPORTANT): a solo neutral member must roll up to ITS OWN state, not a
+  // A solo neutral member must roll up to ITS OWN state, not a
   // special-cased guess — "locked" has no no-settings/in-sync special case to fall into.
   it("solo locked parent (no companions) → locked, not in-sync", () => {
     expect(familyRollup([m("parent", "locked")]).state).toBe("locked");
@@ -784,7 +781,7 @@ describe("familyRollup — companion groups dissolve into their parent's state",
   });
 });
 
-describe("mergeFamilyChanges — spec §4 Files card concat", () => {
+describe("mergeFamilyChanges — Files card concat", () => {
   const changes = (added: string[], updated: string[], deleted: string[]): FileChanges => ({ added, updated, deleted });
 
   it("parent (null prefix) paths are unchanged", () => {
@@ -851,7 +848,7 @@ describe("foldCompanionEntries — remote pane companions merge into their paren
   });
 });
 
-describe("fileEntryFor — spec §4 direction-aware file entries (ledger #8, round-11 ③)", () => {
+describe("fileEntryFor — direction-aware file entries", () => {
   it("apply, raw 'deleted' (store-only): a brand-new file lands locally — + / view, nothing to diff against", () => {
     const e = fileEntryFor({ kind: "deleted", rel: "data.json" }, "apply", false);
     expect(e).toEqual({ glyph: "+", label: "data.json", affordance: "view", note: null, tooltip: APPLY_ADDED_TOOLTIP });
@@ -864,7 +861,7 @@ describe("fileEntryFor — spec §4 direction-aware file entries (ledger #8, rou
     const e = fileEntryFor({ kind: "updated", rel: "data.json" }, "apply", false);
     expect(e).toEqual({ glyph: "·", label: "data.json", affordance: "diff", note: null, tooltip: APPLY_UPDATED_TOOLTIP });
   });
-  it("capture, raw 'added' (local-only, capture would add it to the store): + glyph — round-11 restores the diff-kind vocabulary under capture too, no more ↑", () => {
+  it("capture, raw 'added' (local-only, capture would add it to the store): + glyph — the diff-kind vocabulary holds under capture too, never ↑", () => {
     const e = fileEntryFor({ kind: "added", rel: "data.json" }, "capture", false);
     expect(e).toEqual({ glyph: "+", label: "data.json", affordance: "diff", note: null, tooltip: CAPTURE_ADDED_TOOLTIP });
   });
@@ -893,7 +890,7 @@ describe("fileEntryFor — spec §4 direction-aware file entries (ledger #8, rou
     expect(fileEntryFor({ kind: "deleted", rel: "secret.json" }, "capture", true)).toEqual({ glyph: "del", label: "secret.json", affordance: "none", note: null, tooltip: CAPTURE_DELETED_TOOLTIP });
   });
 
-  // (i) round-11 requirement: both directions × three kinds produce +/·/del with the right
+  // Both directions × three kinds produce +/·/del with the right
   // tooltip — table-driven, against the exported tooltip constants (the same producer
   // fileEntryFor itself reads from), so a future edit to any of them can't drift silently.
   describe("both directions × three kinds — the diff-kind vocabulary is direction-independent, only the tooltip differs", () => {
@@ -917,7 +914,7 @@ describe("fileEntryFor — spec §4 direction-aware file entries (ledger #8, rou
   });
 });
 
-describe("stagedPayload — spec §5 unified staging (task 6)", () => {
+describe("stagedPayload — unified staging", () => {
   const enabledAvail: Availability = { kind: "enabled", drift: null, localVersion: "1.0.0", storeVersion: null, anchor: "plugin", desktopOnly: false };
   const notInstalledAvail: Availability = { kind: "not-installed", drift: null, localVersion: null, storeVersion: "1.0.0", anchor: "plugin", desktopOnly: false };
   const behindAvail: Availability = { kind: "enabled", drift: "behind", localVersion: "1.0.0", storeVersion: "1.1.0", anchor: "plugin", desktopOnly: false };
@@ -946,12 +943,11 @@ describe("stagedPayload — spec §5 unified staging (task 6)", () => {
     expect(capture).toEqual([]);
   });
 
-  // C-#45 fix-round 2 (coordinator's "check the family/rollup path" follow-up on the live
-  // kickstart failure): an opted-out PARENT's row is forced to glyph "—"/stageable:false —
+  // An opted-out PARENT's row is forced to glyph "—"/stageable:false —
   // rowDirection reads `row.fate.glyph`, so the row is skipped by `dir === null` BEFORE the
   // companion fan-out (`row.companionNames`) ever runs. This is what keeps the family's presented
   // "inert" row honest even though the ROLLUP that produced the row's underlying direction never
-  // knew about the opt-out (only the parent's own group is checked, C-#45's spec §1 scope) — a
+  // knew about the opt-out (only the parent's own group is checked) — a
   // real, still-uncaptured companion never sneaks into the payload through the parent's own entry.
   it("a parent forced inert (opted-out shape: glyph —, stageable false) excludes itself AND its companions from the payload, even though the rollup fed it a real family direction", () => {
     const { apply, capture } = stagedPayload([
@@ -1013,11 +1009,10 @@ describe("stagedPayload — spec §5 unified staging (task 6)", () => {
     expect(stagedPayload([row({ id: "x", fate: fate("↑"), availability: notInstalledAvail })]).capture).toEqual([{ name: "x", action: "none" }]);
   });
 
-  // I-2 fix (2026-08-06 final review): the Enablement fallback row's "Turn it on" choice folds
+  // The Enablement fallback row's "Turn it on" choice folds
   // into the row's own fate.turnsOn via effectiveFate/fallbackTurnsOn (SyncCenterView.ts) — the
   // SAME bridge apply already uses, no parallel derivation — so a capture-direction row staged
-  // with turnsOn:true must deliver CaptureItem action "enable", restoring the pre-C
-  // disabledRowAction capture-side enable path the §4 amendment names.
+  // with turnsOn:true must deliver CaptureItem action "enable" (the capture-side enable path).
   it("a capture row whose fate says turnsOn (the Enablement fallback's 'Turn it on' choice) carries action 'enable'", () => {
     expect(stagedPayload([row({ id: "x", fate: fate("↑", true), availability: notInstalledAvail })]).capture).toEqual([{ name: "x", action: "enable" }]);
   });
@@ -1065,12 +1060,12 @@ describe("stagedPayload — spec §5 unified staging (task 6)", () => {
     expect(apply).toEqual([{ name: "plugin-real-name", action: "none" }]);
   });
 
-  // Review fix #1 (task 6 round 2): a resolved conflict row must stage exactly what its real
+  // A resolved conflict row must stage exactly what its real
   // turnsOn says — stagedPayload itself already honors whatever `fate.turnsOn` it's given for a
   // conflict row (it never re-derives it), so this pins that contract explicitly: a caller that
   // feeds a conflict row a REAL (non-frozen) turnsOn value gets the full matrix + member
   // contribution, exactly like a normal directed row would.
-  it("a resolved conflict row whose real fate turns it on stages the -enable action AND contributes its elementId (the exact missing case review fix #1 calls out)", () => {
+  it("a resolved conflict row whose real fate turns it on stages the -enable action AND contributes its elementId", () => {
     const { apply } = stagedPayload([
       row({
         id: "plugin-x",
@@ -1102,7 +1097,7 @@ describe("stagedPayload — spec §5 unified staging (task 6)", () => {
     expect(apply.find((i) => i.name === "community-plugins")).toBeUndefined();
   });
 
-  // ── Companion fan-out (c-livetest batch5 task 1) ────────────────────────────────────────────
+  // ── Companion fan-out ───────────────────────────────────────────────────────────────────────
   describe("companion fan-out", () => {
     it("an apply-direction row stages its apply-side companions as plain entries, after itself", () => {
       const { apply } = stagedPayload([
@@ -1152,7 +1147,7 @@ describe("stagedPayload — spec §5 unified staging (task 6)", () => {
   });
 });
 
-describe("effectiveFate — single per-row derivation shared by staging/footer/display (task 6 round 2 fix)", () => {
+describe("effectiveFate — single per-row derivation shared by staging/footer/display", () => {
   const baseInput: FateInput = {
     direction: "apply", conflict: false, nothingYet: false, installed: true,
     hasUpdate: false, carrierSynced: true, storeListOn: null, locallyOn: false,
@@ -1199,11 +1194,11 @@ describe("effectiveFate — single per-row derivation shared by staging/footer/d
     expect(f.glyph).toBe("↓");
   });
 
-  // The exact end-to-end scenario review fix #1 calls out, wired through the real pipeline
+  // The end-to-end scenario, wired through the real pipeline
   // (effectiveFate's output feeding stagedPayload directly) rather than a hand-built turnsOn — a
   // resolved conflict on a carrier-synced plugin whose store list wants it on stages
   // install-enable/update-enable/enable per the matrix AND contributes its elementId, never the
-  // silent "none" the frozen conflict fate used to produce.
+  // silent "none" a frozen conflict fate would produce.
   it("integration: a resolved conflict whose store list turns it on stages install-enable and contributes its elementId", () => {
     const input: FateInput = { ...baseInput, installed: false, carrierSynced: true, storeListOn: true, locallyOn: false };
     const resolved = effectiveFate(conflictFate, input, "apply", false);

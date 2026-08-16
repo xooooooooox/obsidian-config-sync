@@ -13,7 +13,7 @@ import { readPerElementArray, sharingOf } from "./perElement";
 import { addForceOn, applySwitchList, captureSwitchList, localRealPath, memberUniverse, parseSwitchList, readLocalSwitchList, subtractForceOff, isSwitchListGroup, SwitchList, switchListsEqual, writeLocalSwitchList } from "./switchList";
 
 // `current` is the group NAME (the UI maps it to a display label); `phase` is a short live
-// phrase for the in-item step ("downloading via BRAT…", "writing settings…") — spec 2026-07-17.
+// phrase for the in-item step ("downloading via BRAT…", "writing settings…").
 export type ProgressFn = (done: number, total: number, current: string, phase?: string) => void;
 
 export interface PluginHost {
@@ -111,7 +111,7 @@ export function storeDir(ctx: CoreContext): string {
 }
 
 // Legacy location only: 1.x wrote a one-slot apply backup here for "Revert last apply"
-// (feature removed in round-7 spec §3). Nothing writes it anymore — removeLegacyBackup deletes
+// (feature removed). Nothing writes it anymore — removeLegacyBackup deletes
 // a leftover copy on the next apply.
 export function backupDir(ctx: CoreContext): string {
   return `${ctx.configDir}/config-sync-backup`;
@@ -133,7 +133,7 @@ export async function loadManifest(ctx: CoreContext): Promise<SyncManifest> {
 }
 
 // The compiled sync list is passed to parseStoreLock so a v1/v2 lock is re-keyed against what this
-// device actually compiles (spec §3/§4) instead of against the closed legacy rules alone.
+// device actually compiles instead of against the closed legacy rules alone.
 export async function loadLock(ctx: CoreContext): Promise<StoreLock | null> {
   const p = lockPath(ctx);
   if (!(await ctx.io.exists(p))) return null;
@@ -196,10 +196,10 @@ function runExceptions(ctx: CoreContext, name: string, store: SwitchList | null,
   return [...new Set([...base, ...unstaged])];
 }
 
-// Restricts a force-on/off mask (Task 2's always-here/never-here table) to the run's staged
-// members: unrestricted when `stagedMembers` is undefined (today's whole-run mask behavior,
-// unchanged), otherwise only ids also named in `stagedMembers` — an unstaged member's switch
-// must never move, including via a force mask (fix to review finding on task 3: `stagedMembers:
+// Restricts a force-on/off mask (the always-here/never-here table) to the run's staged
+// members: unrestricted when `stagedMembers` is undefined (the whole-run mask behavior),
+// otherwise only ids also named in `stagedMembers` — an unstaged member's switch
+// must never move, including via a force mask (`stagedMembers:
 // []` must mean zero switch flips even when a force-on/off mask is active for the group).
 function scopedMask(mask: string[], stagedMembers?: string[]): string[] {
   return stagedMembers === undefined ? mask : mask.filter((id) => stagedMembers.includes(id));
@@ -219,7 +219,7 @@ function refreshLockDesktopOnly(
 ): StoreLockEntry {
   const pluginId = pluginIdForGroup(group);
   if (pluginId === null || plugins.getInstalledPluginVersion(pluginId) === null) return entry;
-  // `innate` is a partition, not a single flag (spec §3): a claim inside it this build does not
+  // `innate` is a partition, not a single flag: a claim inside it this build does not
   // know is kept, and only `desktopOnly` is rewritten from the live manifest.
   const { desktopOnly, ...restInnate } = entry.innate ?? {};
   const innate = plugins.isDesktopOnly(pluginId) ? { desktopOnly: true as const, ...restInnate } : restInnate;
@@ -248,15 +248,14 @@ function switchDeltaMessages(delta: { on: string[]; off: string[] }): string[] {
 }
 
 // Switch-list groups whose delta is applied to the running app immediately after their carrier
-// file write (spec 2026-08-05-onoff-apply-runtime-design.md): core and community plugins. The
+// file write: core and community plugins. The
 // third switch-list carrier, "enabled-css-snippets", has no per-id runtime hook — it hot-applies
-// through the appearance-family pass below instead (spec
-// 2026-08-06-batch2-scroll-and-appearance-hotapply-design.md).
+// through the appearance-family pass below instead.
 const RUNTIME_SWITCH_GROUPS: ReadonlySet<string> = new Set(["core-plugins", "community-plugins"]);
 
-// A carrier's element NAMES (spec §3's `display.elements`, v2's `memberLabels`) for its CURRENT
+// A carrier's element NAMES (`display.elements`; v2's `memberLabels`) for its CURRENT
 // store-list members, MERGED additively with what was
-// already known (review fix, 2026-08-09-c-livetest-batch15): community ids resolve through the
+// already known: community ids resolve through the
 // installed-plugin manifest, core ids through the internal-plugin instance — same two lookups the
 // single-label resolvers above/below already use — but "can't resolve locally" must never erase a
 // name this device previously learned (from its own earlier capture, from a heal on ANOTHER
@@ -293,7 +292,7 @@ function memberLabelsEqual(existing: Record<string, string> | undefined, next: R
 
 // The appearance card's own file group, its two companion dir groups, and the snippet
 // switch-list carrier that writes into appearance.json — the file set reloadAppearance()
-// re-applies in one pass (spec 2026-08-06-batch2-scroll-and-appearance-hotapply-design.md).
+// re-applies in one pass.
 const APPEARANCE_FAMILY: ReadonlySet<string> = new Set(["appearance", "themes", "snippets", "enabled-css-snippets"]);
 
 // Shared post-pass for apply()/applyWithActions(): if this run wrote or deleted any
@@ -384,7 +383,7 @@ async function writeClassified(
   (existed ? result.changes.updated : result.changes.added).push(relName);
 }
 
-// Base-hygiene guard (spec 2026-07-25-domain-mirror-design.md §2.2): contentUnchanged
+// Base-hygiene guard: contentUnchanged
 // deliberately ignores class-scoped top-level keys on both sides (correct for diff/status —
 // it prevents phantom to-capture entries), so a store base written before a class rule existed
 // can still carry those keys after contentUnchanged reports equal. The base must never keep
@@ -404,7 +403,7 @@ function baseHasStaleClassKeys(effGroup: SyncGroup, existing: string): boolean {
   return Object.keys(parsed).some((k) => keyMatchesAny(k, patterns));
 }
 
-// Base-hygiene guard for stale this-device per-element entries (smoke-test fix, third extension of
+// Base-hygiene guard for stale this-device per-element entries (an extension of
 // the mechanism above): perElementArrayUnchanged deliberately ignores this-device elements
 // symmetrically on both sides (correct for diff/status — re-sharing an element as this-device
 // shouldn't read as a pending change), so a store base written before the change (or before the
@@ -428,16 +427,16 @@ function baseHasStalePerElementElements(effGroup: SyncGroup, existing: string): 
   });
 }
 
-// Base-hygiene guard for stale top-level local-scoped keys (third family, 2026-08-04): like the
+// Base-hygiene guard for stale top-level local-scoped keys (third family): like the
 // two guards above, contentUnchanged deliberately ignores top-level scope:"local" keys on both
-// sides (Fix B's withContractLocals — correct for diff/status, prevents a phantom to-capture on a
+// sides (withContractLocals — correct for diff/status, prevents a phantom to-capture on a
 // re-scoped field), so a base written before the field became local can still carry that key after
 // contentUnchanged reports equal. The store must never hold a device-local value, so this forces
 // the rewrite that captureTransform's strip has already removed the key from. A per-item key is
 // governed exclusively by the perElement machinery (capturePerElementArray/applyPerElementArray), never by
 // this top-level guard, even when a stray FieldRule pattern also happens to match its key name —
 // so stripPatterns is filtered through the same excludingPerElement exclusion the strip paths use,
-// or a legitimate perElement key would permanently flag the base as stale (round-2026-08-05 fix). No-op
+// or a legitimate perElement key would permanently flag the base as stale. No-op
 // when the group has no local patterns, or the existing content isn't a parseable JSON object.
 export function baseHasStaleLocalKeys(effGroup: SyncGroup, existing: string): boolean {
   const patterns = excludingPerElement(effGroup, stripPatterns(effGroup));
@@ -452,9 +451,9 @@ export function baseHasStaleLocalKeys(effGroup: SyncGroup, existing: string): bo
   return Object.keys(parsed).some((k) => keyMatchesAny(k, patterns));
 }
 
-// Refreshes every locally-resolvable lock entry's label in place (2026-08-08-c-livetest-batch6
-// task-1) — capture only resolves a label for the groups it actually processes (:454/:477
-// above), so an entry born on an older lock, or carried forward untouched by a partial-selection
+// Refreshes every locally-resolvable lock entry's label in place —
+// capture only resolves a label for the groups it actually processes
+// (see above), so an entry born on an older lock, or carried forward untouched by a partial-selection
 // run, stays label-less forever without a dedicated heal. Called at the tail of every capture run
 // and once at startup (main.ts). Never touches capturedAt or entries this vault can't resolve
 // (an uninstalled plugin, an orphaned/dropped group) — returns whether anything changed, so a
@@ -463,10 +462,9 @@ export function baseHasStaleLocalKeys(effGroup: SyncGroup, existing: string): bo
 // already made), pre-read by the caller so this function itself stays synchronous/IO-free and
 // directly unit-testable (see tests/core.test.ts) — readCarrierSwitchLists below is the shared
 // reader both call sites (main.ts startup, capture's own tail call) use to build it.
-// excluded (C-#45, spec 2026-08-10-c-livetest-batch22-device-optout.md §4): group names THIS
+// excluded: group names THIS
 // device has opted out of — the heal must not resurrect/write their lock entry either, exactly
-// like it must not re-capture their content. Optional/defaults to none so every pre-existing
-// caller (including every direct backfillLockLabels test) is unaffected.
+// like it must not re-capture their content. Optional/defaults to none.
 export function backfillLockLabels(
   groups: SyncGroup[],
   plugins: PluginHost,
@@ -474,20 +472,19 @@ export function backfillLockLabels(
   carrierLists: Record<"core-plugins" | "community-plugins", SwitchList | null>,
   excluded?: ReadonlySet<string>
 ): boolean {
-  // §4.3, and the fourth lock writer (round-4 review N1): the heal's caller rewrites the whole
+  // This is the fourth lock writer: the heal's caller rewrites the whole
   // file from this object, so a lock from a newer build must not be mutated here at all. The gate
   // lives on the MUTATION rather than on the caller because the two callers differ: main.ts's
   // startup heal writes only when this returns true, so refusing the mutation refuses that write;
   // capture discards the boolean and writes unconditionally, and is safe instead because capture
-  // gates the local lock itself before it touches anything (see its own §4.3 check). Startup is
-  // the case that needs this one — it runs with no user action behind it and, unlike the §4.2
-  // case, with a data.json this build reads perfectly, so `schemaStop` is null and round 1's guard
-  // says nothing. Deliberately NOT left to §3.1's carrying parser to make the round trip lossless:
-  // that would rest the invariant on the parser instead of on the gate, which is the argument
-  // §3.1 exists to make.
-  // §4.3 + task-3 review C1: this heal only ever touches a lock ALREADY in the format this build
-  // writes. Two failures share one rule. A lock from the FUTURE must not be mutated at all (the
-  // 2.21.0 case). And a lock from the PAST must not be mutated either — parseStoreLock converts a
+  // gates the local lock itself before it touches anything (see its own version check). Startup is
+  // the case that needs this one — it runs with no user action behind it and
+  // with a data.json this build reads perfectly, so `schemaStop` is null and the settings-side
+  // guard says nothing. Deliberately NOT left to the carrying parser to make the round trip
+  // lossless: that would rest the invariant on the parser instead of on the gate.
+  // The heal only ever touches a lock ALREADY in the format this build
+  // writes. Two failures share one rule. A lock from the FUTURE must not be mutated at all.
+  // And a lock from the PAST must not be mutated either — parseStoreLock converts a
   // v1/v2 file to the v3 shape IN MEMORY, so writing that object back would leave `items` on disk
   // under the old `version`: a 2.21.0 peer would not refuse it (the number is not from the future),
   // could not parse it (it needs `groups`), and its next capture would rewrite the whole lock flat,
@@ -503,7 +500,7 @@ export function backfillLockLabels(
     if (group.ref === undefined || excluded?.has(group.ref) === true) continue;
     const entry = lockEntry(lock, group.ref);
     if (entry === undefined) continue;
-    // A LOOKUP, not a name parse (spec §5): the group's own ref says which section it belongs to,
+    // A LOOKUP, not a name parse: the group's own ref says which section it belongs to,
     // so only a community item's OWN group carries the community label — never a companion dir or
     // a custom rule that merely happens to sit on a plugin path (both of which resolve a pluginId
     // from their path, and neither of which is that plugin's item).
@@ -519,7 +516,7 @@ export function backfillLockLabels(
     setLockEntry(lock.items, group.ref, { ...entry, display: { ...entry.display, label } });
     changed = true;
   }
-  // Element-name heal (2026-08-09-c-livetest-batch15): MERGED with the existing map every call
+  // Element-name heal: MERGED with the existing map every call
   // (carrierMemberLabels' own doc comment) — same write-only-on-change guarantee as the label
   // loop above, but a name this device can't resolve locally is carried forward from the
   // existing entry rather than dropped, so a heal on one device never erases a name only another
@@ -568,12 +565,12 @@ export async function capture(
   names?: string[],
   onProgress?: ProgressFn,
   stagedMembersByName?: Record<string, string[] | undefined>,
-  // C-#45 (spec §4): forwarded verbatim to the tail heal below — see backfillLockLabels' own
-  // `excluded` doc comment. Optional/defaults to none; every pre-existing caller is unaffected.
+  // Forwarded verbatim to the tail heal below — see backfillLockLabels' own
+  // `excluded` doc comment. Optional/defaults to none.
   optedOutForHeal?: ReadonlySet<string>
 ): Promise<GroupResult[]> {
   const manifest = await loadManifest(ctx);
-  // §4.3, the STORE side of the gate (task-3 review I3): the local store lives inside the vault,
+  // The STORE side of the version gate: the local store lives inside the vault,
   // and the vault is synced by other tools (git, Remotely Save, a file-sync service) — so a newer
   // build on ANOTHER device can put a v3 lock into this store with no pull ever happening. Capture
   // is about to replace that lock wholesale; refused here, before the first group is written, or
@@ -593,10 +590,10 @@ export async function capture(
   const selected = names === undefined ? null : new Set(names);
   const toProcess = manifest.groups.filter((g) => selected === null || selected.has(g.name));
   const items: LockItems = {};
-  // A captured group's entry (§6): this build's own fields, computed fresh, laid over the part of
-  // the previous entry this build does not write. The rebuild used to be a bare literal, which
-  // stripped every field a NEWER build had recorded and republished the loss to the fleet on the
-  // next push — task-2 finding I-1, and the reason §3.1's carrying parser alone is theatre. The
+  // A captured group's entry: this build's own fields, computed fresh, laid over the part of
+  // the previous entry this build does not write. A bare-literal rebuild would strip
+  // every field a NEWER build had recorded and republish the loss to the fleet on the
+  // next push — the carrying parser alone cannot prevent that. The
   // known fields are still REPLACED rather than merged: dropping `desktopOnly` when a plugin stops
   // being desktop-only, or `label` when it can no longer be resolved, is deliberate. `hash` is
   // omitted (never blanked) when captureGroup could not fingerprint the group's store copy.
@@ -642,7 +639,7 @@ export async function capture(
           // (path `{configDir}/plugins/<id>`, ref `<owner>/<basename>`) or a custom rule scoped to a
           // plugin path also resolves a pluginId here but must never carry the label, or
           // displayLabelForGroup's storedLabel-?? -name fallback renders it as "Name › Name". A
-          // LOOKUP on the group's own ref, not a parse of its name (spec §5).
+          // LOOKUP on the group's own ref, not a parse of its name.
           const label = owner?.section === "community" ? ctx.plugins.getInstalledPluginName(pluginId) : null;
           const entry: StoreLockEntry = { source: { kind: "plugin", version } };
           if (ctx.plugins.isDesktopOnly(pluginId)) entry.innate = { desktopOnly: true };
@@ -683,7 +680,7 @@ export async function capture(
   for (const [ref, entry] of lockEntryList(previous?.items ?? {})) {
     if (!registryRefs.has(ref as ItemRef)) setLockEntry(items, ref, entry);
   }
-  // §6: the top-level stamp is DERIVED from the entries now, not from the clock — it says how fresh
+  // The top-level stamp is DERIVED from the entries, not from the clock — it says how fresh
   // this store's content is, and a capture that touched two items must not claim the rest were
   // captured with them. A full capture still lands on ctx.now(), because every entry carries it.
   const capturedAt = derivedLockCapturedAt(items, [], ctx.now());
@@ -691,18 +688,18 @@ export async function capture(
   // the parser emits `capturedAt`, `items`, then the carried tail — and `version`/`syncedWatermark`
   // ride that tail (they are read through narrowing helpers, never validated in).
   const lock: StoreLock = {
-    // §6: the top-level stamp is DERIVED from the entries now, not taken from the clock.
+    // The top-level stamp is DERIVED from the entries, not taken from the clock.
     capturedAt,
     items,
-    // §4.3: every lock this build writes declares its format version, so a build that gains a new
+    // Every lock this build writes declares its format version, so a build that gains a new
     // lock field can tell "written before that field existed" from "written by something newer".
     version: STORE_LOCK_VERSION,
-    // Lineage, not freshness: only a pull moves the watermark (§6). A capture that bumped it would
+    // Lineage, not freshness: only a pull moves the watermark. A capture that bumped it would
     // tell every other device "I have seen a state newer than yours" on the strength of a purely
-    // local change, which is the false "the store has newer settings" this release is removing. A
+    // local change — a false "the store has newer settings". A
     // store that has never pulled starts its own lineage at its own capture time.
     syncedWatermark: previous !== null ? lockWatermark(previous) : capturedAt,
-    // The lock's own unknown TOP-LEVEL keys (§6, task-2 finding I-1): capture rewrites the whole
+    // The lock's own unknown TOP-LEVEL keys: capture rewrites the whole
     // file, so without this a field a newer build recorded at the top level is stripped here.
     ...lockTail(previous),
   };
@@ -721,7 +718,7 @@ export async function capture(
 // salt and nonce, so two devices that captured identical plaintext hold different ciphertext — and a
 // hash that always differs is worse than no hash at all: it would report every encrypted item as a
 // permanent difference. Those groups publish `capturedAt` alone and are dated, not fingerprinted
-// (spec §6: leave the value absent rather than emit one that cannot match).
+// (leave the value absent rather than emit one that cannot match).
 function storeContentIsHashable(group: SyncGroup): boolean {
   return !groupNeedsPassphrase(group) && !isWholeFileEncrypted(group);
 }
@@ -731,7 +728,7 @@ const DEVICE_CLASSES = ["desktop", "mobile"] as const;
 // One file group's WHOLE store copy: the base file and the per-device-class sidecars beside it.
 // A sidecar is store content like any other — it holds a class's shared values, it travels with the
 // store, and it genuinely changes — so a hash that saw only the base would let two stores differing
-// only in a sidecar read as identical (review N2). That is a false NEGATIVE, and the comparison now
+// only in a sidecar read as identical. That is a false NEGATIVE, and the comparison
 // trusts an equal hash outright, so it would silently withhold a pull the user should have been
 // offered. It is stable across devices for the same reason the base is: a device writes only its OWN
 // class's sidecar, but the store holds both and both travel, so two devices whose stores agree hash
@@ -795,10 +792,10 @@ async function captureGroup(
   if (group.type === "file") {
     const plainLocalContent = await ctx.io.read(real);
     const exc = excFor(ctx, group.name);
-    // Switch lists take the switch path whether or not exceptions exist — the old exc.length
-    // guard left exception-free devices writing local enable-order into the store (2026-07-17).
+    // Switch lists take the switch path whether or not exceptions exist — an exc.length
+    // guard would leave exception-free devices writing local enable-order into the store.
     const localSwitchList = isSwitchListGroup(group.name) ? readLocalSwitchList(group.name, plainLocalContent) : null;
-    // Pass-through (甲): excluded ids copy the store's existing state, so read it first.
+    // Pass-through: excluded ids copy the store's existing state, so read it first.
     let existingStoreList: SwitchList | null = null;
     if (localSwitchList !== null && (await ctx.io.exists(store))) {
       existingStoreList = parseSwitchList(await ctx.io.read(store));
@@ -808,8 +805,8 @@ async function captureGroup(
     const sidecarPath = store + sidecarStoreSuffix(ctx.deviceClass);
     const existingSidecar = (await ctx.io.exists(sidecarPath)) ? await ctx.io.read(sidecarPath) : null;
     const effGroup = overlayGroup(ctx, group, [plainLocalContent]);
-    // Prior store content: needed for perElement keys (spec §3, D3 — capturing a per-element array must
-    // preserve the other device's already-captured elements) and, since C-#36, so captureTransform
+    // Prior store content: needed for perElement keys (capturing a per-element array must
+    // preserve the other device's already-captured elements) and so captureTransform
     // can reuse an unchanged encrypted field's existing envelope instead of re-encrypting it —
     // never needed for groups with neither, but harmless to read either way (see captureTransform's
     // storeContent doc comment; a switch-list group's real store read already happened above).
@@ -907,7 +904,7 @@ export type StateAction = "none" | "enable" | "update" | "update-enable" | "inst
 export interface ApplyItem {
   name: string;
   action: StateAction;
-  // Partial-selection switch staging (Sync Center unified grammar, task 3): for a switch-list
+  // Partial-selection switch staging (Sync Center unified grammar): for a switch-list
   // group, restricts which members this run touches — members not named here keep their local
   // value. Absent = today's whole-list behavior.
   stagedMembers?: string[];
@@ -1048,7 +1045,7 @@ async function runStateAction(
         const text = isUpdate ? `⤓ updated to ${version} & enabled` : `⤓ installed & enabled ${version}`;
         // fallbackMsgs was already reported via the object above's `messages` field — applyWithActions
         // pushes that unconditionally before finish ever runs (skipConfig-false path), so repeating it
-        // here would render the fallback line twice (live evidence 2026-08-09, C-#35).
+        // here would render the fallback line twice.
         return { note: { kind: "ok", text }, messages: [] };
       } catch (e) {
         const verb = isUpdate ? "updated" : "installed";
@@ -1061,24 +1058,24 @@ async function runStateAction(
   };
 }
 
-// Capture-side policy (spec 2026-07-17): a disabled plugin whose settings flow device→store
+// Capture-side policy: a disabled plugin whose settings flow device→store
 // can still be turned on as part of the run. Enabling has no ordering constraint against the
 // capture, so it runs after — keeping the report sequence natural.
 export interface CaptureItem {
   name: string;
   action: "enable" | "none";
-  // Partial-selection switch staging (Sync Center unified grammar, task 3): for a switch-list
+  // Partial-selection switch staging (Sync Center unified grammar): for a switch-list
   // group, restricts which members this run touches — members not named here keep their store
   // value. Absent = today's whole-list behavior.
   stagedMembers?: string[];
 }
 
-// Runner-level payload guard (C-#45, spec 2026-08-10-c-livetest-batch22-device-optout.md §4): an
+// Runner-level payload guard: an
 // opted-out item cannot enter a capture/apply payload, even given a stale selection — called at
 // the host boundary (main.ts) before a CaptureItem[]/ApplyItem[] ever reaches captureWithActions/
 // applyWithActions, so this is enforcement below the UI's own stageable:false, not a duplicate of
 // it. Pure and generic over both item shapes (they share only `name`). The payload speaks group
-// NAMES and the opt-out list speaks item refs since v3 (spec §4), so the caller supplies the one
+// NAMES and the opt-out list speaks item refs, so the caller supplies the one
 // producer that bridges them (main.ts's groupRef) rather than this function growing a second.
 export function excludeOptedOutItems<T extends { name: string }>(items: T[], optedOut: ReadonlySet<string>, refOf: (name: string) => string): T[] {
   return items.filter((i) => !optedOut.has(refOf(i.name)));
@@ -1088,8 +1085,7 @@ export async function captureWithActions(
   ctx: CoreContext,
   items: CaptureItem[],
   onProgress?: ProgressFn,
-  // C-#45 (spec §4): forwarded verbatim to capture()'s own tail-heal guard. Optional/defaults to
-  // none; every pre-existing caller is unaffected.
+  // Forwarded verbatim to capture()'s own tail-heal guard. Optional/defaults to none.
   optedOutForHeal?: ReadonlySet<string>
 ): Promise<GroupResult[]> {
   const stagedMembersByName: Record<string, string[] | undefined> = {};
@@ -1122,11 +1118,11 @@ export async function captureWithActions(
   return results;
 }
 
-// Cold-bootstrap ordering (spec C §3): a staged batch can contain BRAT itself (a catalog install)
+// Cold-bootstrap ordering: a staged batch can contain BRAT itself (a catalog install)
 // alongside BRAT-managed plugins (installed via installViaBrat, which requires BRAT to already be on
 // disk), and the catalog installs must finish first. `isBratManaged` is asked per staged NAME by the
-// caller, which is the side that holds the identity — the `plugin-<id>` parse that used to live here
-// retires with the rest (spec §5), because ordering is not the place to decide what a name means.
+// caller, which is the side that holds the identity — never a `plugin-<id>` parse here,
+// because ordering is not the place to decide what a name means.
 // Stable: each bucket preserves the input's relative order.
 export function orderInstallsCatalogFirst(names: string[], isBratManaged: (name: string) => boolean): string[] {
   return [...names.filter((n) => !isBratManaged(n)), ...names.filter((n) => isBratManaged(n))];
@@ -1218,7 +1214,7 @@ async function applyGroup(ctx: CoreContext, group: SyncGroup, stagedMembers?: st
     result.messages.push(`store has no data for this group (expected at ${store}) — capture it from the source vault first`);
     return result;
   }
-  // Version gate, BEFORE the write (spec 2026-08-11-data-model-hardening.md §4.2, invariant II.3).
+  // Version gate, BEFORE the write.
   // Adopt/self-apply writes the store's data.json onto this device and only then reloads, so a
   // check on the reload side arrives after the local document is already gone — this one runs
   // while the local file is still intact and simply fails the item, with the local file
@@ -1252,7 +1248,7 @@ async function applyGroup(ctx: CoreContext, group: SyncGroup, stagedMembers?: st
         const afterOff = subtractForceOff(merged, scopedMask(ctx.switchForceOff?.[group.name] ?? [], stagedMembers));
         const finalList = addForceOn(afterOff, scopedMask(ctx.switchForceOn?.[group.name] ?? [], stagedMembers));
         content = writeLocalSwitchList(group.name, finalList, localContent);
-        // Name the plugins this write toggles (spec 2026-07-17): a store list lacking a
+        // Name the plugins this write toggles: a store list lacking a
         // just-enabled plugin turns it off persistently — that must be visible in the report.
         delta = switchDelta(localSwitchList, finalList);
         for (const line of switchDeltaMessages(delta)) result.messages.push(line);
@@ -1331,7 +1327,7 @@ function isLegacyManifestRel(rel: string): boolean {
   return rel === LEGACY_MANIFEST_REL || rel.startsWith(`${LEGACY_MANIFEST_REL}.migrated-`);
 }
 
-// §5 copy (spec 2026-08-12-loose-ends-design.md): what pull and push say when the far end holds
+// What pull and push say when the far end holds
 // content but no lock. It names what was found and what is missing, and then BOTH ways a user
 // arrives here — a path pointing INTO the store instead of at the folder holding it, and a target
 // that is simply not empty yet (a new repository created with a README is the common one, and that
@@ -1366,18 +1362,19 @@ export function remoteStoreContentRels(files: readonly string[]): string[] {
   return files.filter((rel) => rel !== LOCK_REL && !isLegacyManifestRel(rel) && !isJunkPath(rel));
 }
 
-// §5, in one sentence: refuse when there is content AND nothing here says what the content is.
+// The declared-store gate, in one sentence: refuse when there is content AND nothing here says
+// what the content is.
 //
-// "There is nothing here yet" and "I cannot see the bookkeeping" are different statements, and until
-// this gate existed they produced the same behaviour — a directory full of store content with no
-// store.lock.json was read as a brand-new remote and pulled wholesale, silently. No lock means no
+// "There is nothing here yet" and "I cannot see the bookkeeping" are different statements, and
+// without this gate they produce the same behaviour — a directory full of store content with no
+// store.lock.json reads as a brand-new remote and is pulled wholesale, silently. No lock means no
 // version, which means the version gate above never runs at all: it is only ever as strong as the
 // bookkeeping being FOUND.
 //
 // What it is NOT:
 //   · not a check that the far end is store-SHAPED. A remote pointed one level too deep, at the
-//     store folder itself, lists `configdir/…` and no `store/…` at all — a shape check would have
-//     waved through the very mistake that found this, and the worse mistype (a remote aimed at a
+//     store folder itself, lists `configdir/…` and no `store/…` at all — a shape check would
+//     wave through exactly that mistake, and the worse mistype (a remote aimed at a
 //     vault ROOT, listing notes and `.obsidian/…`) would read as empty and then be MIRRORED over by
 //     the first push.
 //   · not a check on the bookkeeping's CONTENTS. A lock that is present but unreadable keeps the
@@ -1435,7 +1432,7 @@ export interface PendingPull {
   remoteLockRaw: string | null;
   // The far end's file listing as the planner saw it — carried for the same reason remoteLockRaw is:
   // applyImport is the half that writes, and it re-runs both store gates on what it was handed
-  // rather than trusting that whoever built this plan ran them (see the §4.3 note there).
+  // rather than trusting that whoever built this plan ran them (see the version-gate note there).
   remoteFiles: string[];
   excludeSelf: boolean;
 }
@@ -1443,13 +1440,13 @@ export interface PendingPull {
 // Phase 1: read-only. Never writes anything.
 export async function planImport(ctx: CoreContext, reader: ExternalStoreReader, opts: { excludeSelf: boolean }): Promise<PendingPull> {
   const files = await reader.listFiles();
-  // §5: before a single remote file is read — content that nothing here identifies is refused, not
+  // Declared-store gate: before a single remote file is read — content that nothing here identifies is refused, not
   // adopted as a brand-new remote. Ahead of the version gate below because it is the condition under
   // which that gate cannot run at all.
   assertRemoteStoreDeclared(files);
   const remoteGroups = await remoteGroupsFrom(ctx, reader, files);
   const remoteLockRaw = files.includes(LOCK_REL) ? await reader.readFile(LOCK_REL) : null;
-  // §4.3: refused here, before a single remote file is read into a plan — a store whose lock comes
+  // Version gate: refused here, before a single remote file is read into a plan — a store whose lock comes
   // from a newer build is never merged into (and, at the end of applyImport, written back over)
   // by this one. Nothing has been written at this point, so the local store is untouched.
   assertStoreLockVersionUnderstood(remoteLockRaw);
@@ -1491,13 +1488,13 @@ export async function applyImport(
   choices: ("local" | "remote")[]
 ): Promise<GroupResult[]> {
   const { plan, remoteGroups, remoteLockRaw } = pending;
-  // §4.3 on the writer itself: planImport already refused a newer REMOTE, but applyImport is the
+  // The version gate on the writer itself: planImport already refused a newer REMOTE, but applyImport is the
   // half that writes, and the gate belongs on the write rather than on the caller's discipline.
   assertStoreLockVersionUnderstood(remoteLockRaw);
-  // §5, on the same footing: a plan built before the gate existed, or by a caller that never went
-  // through planImport, must not be the way content with no bookkeeping still lands in the store.
+  // The declared-store gate, on the same footing: a plan built by a caller that never went
+  // through planImport must not be the way content with no bookkeeping still lands in the store.
   assertRemoteStoreDeclared(pending.remoteFiles);
-  // And on the lock this merge is about to REPLACE — the local one (task-3 review I3). A v3 lock
+  // And on the lock this merge is about to REPLACE — the local one. A v3 lock
   // reaches this store through ordinary vault sync, with no pull involved, so "the remote is old
   // enough" says nothing about what is already here. planImport refuses this too, so the user is
   // never asked to resolve conflicts for a pull that cannot happen — but the planner is a
@@ -1507,7 +1504,7 @@ export async function applyImport(
   const localLockRaw = (await ctx.io.exists(lockPath(ctx))) ? await ctx.io.read(lockPath(ctx)) : null;
   assertStoreLockVersionUnderstood(localLockRaw);
   // Pull is pure store transport: it resolves file conflicts only. Definition (sync-list)
-  // conflicts and remote-only group additions are no longer applied by Pull — the local sync
+  // conflicts and remote-only group additions are never applied by Pull — the local sync
   // list converges through adopting the config-sync self item, not through a pull side-write.
   const fileConflicts = plan.conflicts.filter((c): c is Extract<MergeConflict, { kind: "file" }> => c.kind === "file");
   if (choices.length !== fileConflicts.length) {
@@ -1537,7 +1534,7 @@ export async function applyImport(
   await pruneEmptyDirsUnder(ctx.io, ctx.rootPath);
 
   // Local groups only — read for lock attribution and result ordering below; Pull never writes
-  // the sync list (the compiled item registry — schema v2, spec §6). Remote-only additions land
+  // the sync list (the compiled item registry). Remote-only additions land
   // in the store here and become adoptable via the config-sync pane.
   const groups = await readGroups(ctx);
 
@@ -1588,7 +1585,7 @@ export async function applyImport(
     // take from the remote — a group the user kept as "local" whose remote-only files still landed,
     // or one the remote's lock never described — would otherwise keep describing what was there
     // before. That is the one real counterexample to "only a capture changes store content, and a
-    // capture re-dates what it captured" (review N1), and the items-first comparison now leans on
+    // capture re-dates what it captured", and the items-first comparison leans on
     // that claim: an equal hash is believed outright, so a stamp that outran its content is exactly
     // the thing that must not exist. Entries ADOPTED from the remote are deliberately left alone —
     // they describe bytes we copied verbatim, and rewriting them is what would break the convergence
@@ -1617,20 +1614,20 @@ export async function applyImport(
         localLock?.capturedAt ?? remoteLock?.capturedAt ?? ctx.now()
       ),
       items: mergedItems,
-      // Same rule as capture (§4.3): this build wrote this file, so it declares the format this
+      // Same rule as capture: this build wrote this file, so it declares the format this
       // build writes — whichever version the two merged sides carried. Both are ≤ 3 by the time we
       // get here; a newer remote was refused above.
       version: STORE_LOCK_VERSION,
       // The pull is the ONLY writer that moves the watermark, and moving it is what makes
-      // remoteLockAhead settle to false afterwards (§6). It records the remote's LINEAGE, not its
+      // remoteLockAhead settle to false afterwards. It records the remote's LINEAGE, not its
       // bare watermark: a remote that captured after its own last pull stands at its `capturedAt`,
       // and aligning to anything less would leave us permanently behind a state we just adopted.
       syncedWatermark: remoteLock !== null ? lockLineage(remoteLock) : localLock !== null ? lockWatermark(localLock) : ctx.now(),
-      // Unknown TOP-LEVEL keys, from both sides (§6, task-2 finding I-1). The local lock's own keys
+      // Unknown TOP-LEVEL keys, from both sides. The local lock's own keys
       // win a collision — we cannot merge two values whose meaning we do not know, and the file we
       // are writing is this store's — but a key only the remote carries is adopted rather than
       // dropped: pull-then-push through this build would otherwise strip a newer build's top-level
-      // field from the remote, which is the very loss (S10) this release exists to stop.
+      // field from the remote, which is exactly the loss this discipline exists to stop.
       ...lockTail(remoteLock),
       ...lockTail(localLock),
     };
@@ -1680,13 +1677,13 @@ export async function pushExternal(ctx: CoreContext, writer: ExternalStoreWriter
     return r;
   };
   const remoteRels = await writer.listFiles();
-  // §5, push side: the far end holds content nothing there identifies, and push is the operation
+  // The declared-store gate, push side: the far end holds content nothing there identifies, and push is the operation
   // that would overwrite and mirror-delete it. Asked of the RAW listing, the same input the reader's
   // own check sees — the legacy-manifest filter below is about what gets pushed, not about what is
   // there, and here the legacy manifest is exactly the thing that must still count.
   assertRemoteStoreDeclared(remoteRels);
   const remoteFiles = new Set(remoteRels.filter((r) => !isLegacyManifestRel(r)));
-  // §4.3, push side: refused before the first writeFile — pushing this build's store over a remote
+  // The version gate, push side: refused before the first writeFile — pushing this build's store over a remote
   // written by a newer one would overwrite a shape we cannot read with one it cannot read back.
   if (remoteFiles.has(LOCK_REL)) assertStoreLockVersionUnderstood(await writer.readFile(LOCK_REL));
   for (const rel of pushableRels) {

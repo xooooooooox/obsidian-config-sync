@@ -1,11 +1,11 @@
 import { setIcon } from "obsidian";
 
-// The FOLD family's one glyph (DESIGN.md §2.4, round-12 text-triangle sweep): every "expands in
+// The FOLD family's one glyph (DESIGN.md §2.4): every "expands in
 // place" toggle across the app — Sync Center section heads, fold-group/self/item rows, the
 // run-strip's `details`, the self pane's `view change`, the Settings tab's rule/remote rows and
-// its member-disclosure arrow, the conflict modal, the report strip's per-result rows — used to
-// render its own text triangle (`▸`/`▾`) or, in one place, swap between `chevron-down`/
-// `chevron-right`. Both are banned now: one SVG `chevron-right`, rotated 90° via CSS
+// its member-disclosure arrow, the conflict modal, the report strip's per-result rows — must not
+// render its own text triangle (`▸`/`▾`) or swap between `chevron-down`/
+// `chevron-right`. Both are banned: one SVG `chevron-right`, rotated 90° via CSS
 // (`.config-sync-row-chevron.is-open svg`) when open, so a fold's glyph is a pure function of one
 // boolean and never a second icon name to keep in sync.
 //
@@ -20,8 +20,8 @@ export function renderFoldChevron(parent: HTMLElement, open: boolean, extraCls: 
   return el;
 }
 
-// Toggles a chevron `renderFoldChevron` already created between its open/closed rotation — the
-// click handler that used to call `setText("▾"/"▸")` calls this instead, so a fold's own
+// Toggles a chevron `renderFoldChevron` already created between its open/closed rotation —
+// click handlers call this (never setText("▾"/"▸")), so a fold's own
 // open/closed state can update the glyph in place without a full re-render.
 export function setFoldOpen(el: HTMLElement, open: boolean): void {
   el.toggleClass("is-open", open);

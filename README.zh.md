@@ -19,14 +19,14 @@
 ## 功能特性
 
 - **每个条目一张卡片** —— 每个被同步的对象（一组 Obsidian 选项、一个核心/社区插件、一份代码片段）都是一行 + 可展开抽屉，抽屉里放着它的规则；插件的启用状态就在它自己的卡片上。（[详情](docs/GUIDE.md#settings)）
-- **逐键的正交规则** —— 每个键都带有一个 `{sharing, encrypted}` 二元组（`All devices` / `Desktop only` / `Mobile only` / `This device`），字符串数组类型的键还可以让每个元素拥有自己的共享规则。（[详情](docs/GUIDE.md#field-rules--sensitive-settings)）
+- **逐键的正交规则** —— 每个键回答两个彼此独立的问题：由谁共享（`All devices` / `Desktop only` / `Mobile only` / `This device`），以及是否加密传输；列表型的键还可以让每个元素拥有自己的共享规则。（[详情](docs/GUIDE.md#field-rules--sensitive-settings)）
 - **凭证安全** —— `This device` 键永远不会离开本机，按设备设置的密码短语则为需要传输的内容加密。
 - **明确的 Apply** —— 在你勾选条目并按下 Apply 之前，设备上不会有任何变化；每次运行都会留在贴顶结果条与可浏览的 **History** 中可见。
 - **随时可见状态的 Sync Center** —— 每一行都会用大白话说清自己的命运（*开启 · 安装 · 应用设置*）、归一化的 JSON 差异、一个 *this device* 状态胶囊，以及每一类待办动作的总数。（[导览](docs/GUIDE.md#the-sync-center)）
 - **安装引擎** —— 本设备上版本落后、被禁用或未安装的插件可以在 Apply 过程中一并更新、启用或安装，并锁定到 capture 时的版本。（[规则](docs/GUIDE.md#availability-facts-and-the-install-engine)）
 - **Remotes（桌面端）** —— 针对 git 仓库或另一个 vault 执行 pull/push，并提供逐文件差异预览。（[详情](docs/GUIDE.md#transport)）
-- **可以一台一台地更新** —— 由更新版本的 Config Sync 写下的设置或 store 会被明确拒绝并给出提示，绝不会被重置或覆盖；而某台设备自己的选择（它把哪些条目排除在同步之外）就留在那台设备上，pull 抹不掉它。这层保护从 2.21.0 才开始生效；若要从更早的版本更新，请先看上面的提示。（[详情](docs/GUIDE.md#transport)）
-- **随处可搜索** —— 两个搜索框都支持带自动补全的 `key:value` 限定符（`section:`、`type:`、`action:`、`mode:`、`device:`），可与纯文本自由组合。
+- **可以一台一台地更新** —— 任何由更新版本的 Config Sync 写下的内容都会被明确拒绝并给出提示，绝不会被重置或覆盖（这层保护从 2.21.0 开始生效——更早的设备请先看上面的提示）。（[详情](docs/GUIDE.md#transport)）
+- **随处可搜索** —— 两个搜索框都支持带自动补全的 `key:value` 限定符，可与纯文本自由组合：Sync Center 支持 `section:` · `type:` · `action:` · `mode:` · `device:`，设置面板的搜索支持 `section:` · `type:`。
 - **状态栏** —— ↑ capture / ↓ apply 加上每个 remote 各自的 ⇡ push / ⇣ pull 计数一目了然；点击即可打开 Sync Center。
 - **移动端友好** —— capture、apply 与 Sync Center 在手机上均可正常工作；store 本身就是普通的 vault 内容，因此任何笔记同步工具都能携带它。
 
@@ -48,7 +48,7 @@
 
 两个层面，彼此分离。
 
-- **本地层面** —— **Capture** 把每个已启用条目的设置文件和 companion 文件夹复制进 store，按每个字段的 `{sharing, encrypted}` 规则处理；**Apply** 把你勾选的条目落地到本设备的配置目录。方向（↑ capture、↓ apply）来自每台设备各自的同步基线，而不是文件时间，因此 Sync Center 能判断究竟是哪一侧真正发生了变化。
+- **本地层面** —— **Capture** 把每个已启用条目的设置文件和 companion 文件夹复制进 store，按每个字段的共享与加密规则处理；**Apply** 把你勾选的条目落地到本设备的配置目录。方向（↑ capture、↓ apply）来自每台设备各自的同步基线，而不是文件时间，因此 Sync Center 能判断究竟是哪一侧真正发生了变化。
 - **传输层面** —— store 默认就是普通的 vault 内容，随你的笔记同步工具流转；全新设备会自行发现送达的 store，并提供一份 **Adopt** 引导。（桌面端）可选地，通过 Sync Center 的 Remotes 区块对 git 仓库或另一个 vault 执行 Pull/Push。
 
 完整导览——Sync Center 结构、字段规则、加密、安装引擎、remotes、实战演练——都在 **[用户指南](docs/GUIDE.md)** 中。
@@ -67,17 +67,13 @@
 
 - **[用户指南](docs/GUIDE.md)** —— 所有行为汇于一处：Sync Center、字段规则、敏感设置、传输、实战演练。
 - **[架构](docs/ARCHITECTURE.md)** —— 代码地图与不变量，供贡献者参考。
+- **[设计系统](docs/design/DESIGN.md)** —— UI 的设计 token、图标词汇与组件规则。
+- **[schema/](schema/)** —— 用 JSON Schema 记录的全部持久化数据形状（`data.json`、store 锁、本地存储、运行历史）。
 
 ## 开发
 
-```bash
-npm install
-npm run dev     # watch build
-npm test        # vitest
-npm run build   # type-check + production bundle
-```
-
-请针对专门的测试 vault 进行开发（切勿使用真实 vault）。
+环境搭建、常用命令、dev-vault 冒烟流程与发布流程见 **[CONTRIBUTING.md](CONTRIBUTING.md)**。
+请针对专门的测试 vault 进行开发，切勿使用真实 vault。
 
 ## 许可证
 

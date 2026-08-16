@@ -5,10 +5,10 @@ import { FOLD_ICON } from "../src/ui/foldIcons";
 import { buildFileLocalMenu, buildLocalMenu, enablementRowModel, fileEnablementRowModel, ruleIcon, ruleLabel, RULE_OPTIONS } from "../src/ui/enablementRow";
 import { EVERYWHERE } from "../src/core/types";
 
-// C-#40 spec §4: every string buildChips (fateModel.ts) can produce, plus the two chips added
+// Every string buildChips (fateModel.ts) can produce, plus the two chips added
 // at render time, must resolve to an icon; an unknown chip string is simply absent from the map
 // (text-only fallback lives in the renderer) rather than throwing.
-describe("FATE_CHIP_ICON — chip→icon map completeness (C-#40)", () => {
+describe("FATE_CHIP_ICON — chip→icon map completeness", () => {
   const chips = [
     "not installed here",
     "desktop only",
@@ -31,9 +31,8 @@ describe("FATE_CHIP_ICON — chip→icon map completeness (C-#40)", () => {
       "your rule": "sliders-horizontal",
       "off here — your rule": "sliders-horizontal",
       "on here — your rule": "sliders-horizontal",
-      // `power` was re-pointed at the local-exception ON state by
-      // 2026-08-12-enablement-two-layers-design.md §7 — a chip that says the row stays off must
-      // not share it.
+      // `power` means the local-exception ON state (2026-08-12-enablement-two-layers-design.md
+      // §7) — a chip that says the row stays off must not share it.
       "stays off": "power-off",
       encrypted: "lock",
       "your choice": "check",
@@ -45,12 +44,11 @@ describe("FATE_CHIP_ICON — chip→icon map completeness (C-#40)", () => {
   });
 });
 
-// Registry-level guard (spec §9 "one glyph, one meaning" + task-13 brief): this is the third time a
-// glyph collision was caught by hand — `power`/`stays off` this round, `sliders-horizontal` almost
-// borrowed for the MORE row (SyncCenterView.ts renderMoreRow comment), before that another. Every
-// producer below is the REAL exported table/function, not a hand-copied literal of it (spec §9
-// lesson 3: "a test must be producer-vs-producer") — if a table's values change, this test reads the
-// change instead of going stale next to it.
+// Registry-level guard ("one glyph, one meaning"): glyph collisions are easy to introduce by
+// hand — e.g. `power` vs `stays off`, or `sliders-horizontal` nearly borrowed for the MORE row
+// (SyncCenterView.ts renderMoreRow comment). Every producer below is the REAL exported
+// table/function, not a hand-copied literal of it (producer-vs-producer) — if a table's values
+// change, this test reads the change instead of going stale next to it.
 describe("glyph registry — one glyph, one meaning (icon-collision guard)", () => {
   interface GlyphHome {
     glyph: string;
@@ -97,7 +95,7 @@ describe("glyph registry — one glyph, one meaning (icon-collision guard)", () 
   // for the one meaning "opens Settings". Registered here by hand — the one entry in this test with
   // no producer function to iterate — so a FUTURE table cannot silently claim the same glyph.
   //
-  // round-11 ③/④: five more hardcoded glyphs, none behind an exported table either — the FILES
+  // Five more hardcoded glyphs, none behind an exported table either — the FILES
   // row's per-entry diff/view affordance (SyncCenterView.ts) and the diff panel's segmented
   // toggles (diffView.ts). Each carries exactly one meaning; registering them here (rather than
   // leaving them invisible to this guard) means a future reuse of any of the five for something
@@ -109,25 +107,24 @@ describe("glyph registry — one glyph, one meaning (icon-collision guard)", () 
     { glyph: "columns-2", producer: "diffView (external, hardcoded)", home: "renderDiffPanel — split diff" },
     { glyph: "fold-vertical", producer: "diffView (external, hardcoded)", home: "renderDiffPanel — collapse unchanged lines" },
     { glyph: "unfold-vertical", producer: "diffView (external, hardcoded)", home: "renderDiffPanel — show all lines" },
-    // Round-12 (text-triangle sweep, DESIGN.md §2.4): the two chevron families, plus the File
+    // Text-triangle sweep (DESIGN.md §2.4): the two chevron families, plus the File
     // preview trigger — none behind an exported table either.
     { glyph: "chevron-right", producer: "foldChevron (external, hardcoded)", home: "renderFoldChevron — FOLD family disclosure rotate" },
     { glyph: "chevrons-up-down", producer: "SyncCenterView/SettingTab (external, hardcoded)", home: "PICKER family — two-segment rows + the switcher" },
     { glyph: "eye", producer: "SettingTab (external, hardcoded)", home: "SETTINGS FILE row — File preview trigger" },
-    // 定稿轮 19 (DESIGN.md §2.3): the per-item icon toggle, the menu-borne destructive verb, and
+    // DESIGN.md §2.3: the per-item icon toggle, the menu-borne destructive verb, and
     // the File preview's top action line — hardcoded in SettingTab.ts, registered here so a
     // future reuse for a different meaning fails loudly.
     { glyph: "list-checks", producer: "SettingTab (external, hardcoded)", home: "rule row — Per-item device rules icon toggle" },
-    { glyph: "trash", producer: "SettingTab (external, hardcoded)", home: "scope menus — Remove rule / Remove folder (19d)" },
+    { glyph: "trash", producer: "SettingTab (external, hardcoded)", home: "scope menus — Remove rule / Remove folder" },
     { glyph: "plus", producer: "SettingTab (external, hardcoded)", home: "File preview hint line — click a key to add a rule" },
-    // 定稿轮 23 ② (DESIGN.md §2.3): the encrypt toggle's rest state — closed `lock` stays the
+    // DESIGN.md §2.3: the encrypt toggle's rest state — closed `lock` stays the
     // encrypted state everywhere (mode badge / json keys / legend + the toggle's on-state).
     { glyph: "lock-open", producer: "SettingTab (external, hardcoded)", home: "renderLockToggle — unencrypted-but-available rest state" },
   ];
 
-  // The local segment's `follows` glyph (round-9 ②, DESIGN.md icon table): `corner-down-right` is
-  // new — the local segment used to render no icon at all while following the default, so this is
-  // the first registration of the glyph anywhere. Fed from the REAL model functions (enablementRow.ts's
+  // The local segment's `follows` glyph (DESIGN.md icon table): `corner-down-right` is
+  // registered nowhere else. Fed from the REAL model functions (enablementRow.ts's
   // `enablementRowModel`/`fileEnablementRowModel`), not a hand-copied string, so a future rename of
   // the glyph breaks this test instead of leaving it silently stale — the same "iterate the real
   // producer" discipline `ruleHomes`/`localMenuHomes` above already follow. Scoped to the `follows`
@@ -149,17 +146,17 @@ describe("glyph registry — one glyph, one meaning (icon-collision guard)", () 
   }
 
   // Declared, intentional glyph reuse across producers — the ONLY escape hatch this test allows.
-  // Every entry names the ONE meaning the glyph carries everywhere it appears (spec §7's own framing
-  // for two of these: `monitor` = desktop everywhere it appears; `circle-slash` = "not synced on this
-  // device", reused deliberately from the fold family). A glyph reused with two DIFFERENT meanings —
-  // `power` briefly meaning both "this device turned it on" and "the shared list has it off" — is
+  // Every entry names the ONE meaning the glyph carries everywhere it appears (`monitor` = desktop
+  // everywhere it appears; `circle-slash` = "not synced on this device", reused deliberately from
+  // the fold family). A glyph reused with two DIFFERENT meanings — e.g. `power` meaning both "this
+  // device turned it on" and "the shared list has it off" — is
   // exactly the bug class this test exists to catch.
   const ALLOWED_SHARED_MEANING: Record<string, string> = {
     monitor: "desktop-only device class",
     "power-off": "off, on this device — a resolved fate this run or a local exception, same direction",
     "circle-slash": "not synced with this item, on this device",
     check: "affirmative — settled / already matching, nothing left for this glyph to say",
-    // round-9 ②: the local segment's `follows` glyph, same meaning whether it's an element-layer
+    // The local segment's `follows` glyph, same meaning whether it's an element-layer
     // exception (enablementRowModel) or the whole-file opt-out layer (fileEnablementRowModel) —
     // "this device has no exception of its own, it does whatever the shared answer says."
     "corner-down-right": "this device follows the default (no exception of its own)",

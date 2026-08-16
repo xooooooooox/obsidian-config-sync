@@ -72,7 +72,7 @@ export function optionReservedName(file: string): string {
 // THE one place the `plugin-` group-name prefix is written (registry.ts's buildItemDefs and the
 // two catalog listings below all call it). It is lineage, not taxonomy: the item's section already
 // says "community", and the prefix survives only because the group name is the store lock's and
-// the baselines' key until spec §3 re-keys them (task 3).
+// the baselines' legacy key.
 export function communityGroupName(pluginId: string): string {
   return `plugin-${pluginId}`;
 }
@@ -180,12 +180,11 @@ export async function listDiscovered(
   return out;
 }
 
-// NOTE: the unified-card engine (registry.ts) is now the source of truth for how app.json's
+// NOTE: the unified-card engine (registry.ts) is the source of truth for how app.json's
 // keys split across the Editor/Files and links/Appearance/Other cards and how appearance.json +
-// themes/ + snippets/ compose (spec 2026-07-25-unified-card-design.md §5). listOptionSections
-// stays at the pre-registry granularity — one row per reserved option name — for the settings
-// panel (Task 5/6 rebuilds SettingTab.ts directly on ItemDefs; this catalog is otherwise still
-// used by Sync Center scope/search plumbing).
+// themes/ + snippets/ compose. listOptionSections
+// stays at a finer granularity — one row per reserved option name — and is
+// used by Sync Center scope/search plumbing.
 export async function listOptionSections(io: FileIO, configDir: string, _groups: SyncGroup[]): Promise<CatalogSection[]> {
   const { files, dirs } = await presentSets(io, configDir);
   const available: CatalogItem[] = [];
@@ -323,7 +322,7 @@ export async function listPluginSections(
   ];
 }
 
-// Beta tab (定稿 mockup v2): plugins whose id resolves through the BRAT index. Same three
+// Beta tab: plugins whose id resolves through the BRAT index. Same three
 // sections as Community; row descriptions carry the owner/repo so the source is visible.
 // No on/off-list section — the enabled list stays under Community plugins.
 export async function listBetaSections(
@@ -368,12 +367,11 @@ export const SELF_GROUP_NAME = "plugin-config-sync";
 
 // The self item's store copy carries the whole sync contract, so it ships locked strip presets for
 // the transport wiring — the fields that describe THIS device's connection to the store and must
-// never travel (spec §2). Everything else in the document is the shared contract and does travel.
+// never travel. Everything else in the document is the shared contract and does travel.
 //
-// `thisDeviceItems` was a third preset here, stripping v3's local-semantics list the same way.
-// It retired outright with `runsOn` (2026-08-12-enablement-two-layers, task 8): a rule now lives on
+// A rule lives on
 // the carrier item, and this device's own exception lives in localStorage (deviceElements.ts), so
-// there is no longer a document field to strip. The two that remain are purely the transport
+// there is no local-semantics document field to strip. The two presets here are purely the transport
 // wiring — the connection to the store itself, not anything the store's contract governs.
 export function selfPresetRules(): FieldRule[] {
   return [
@@ -387,7 +385,7 @@ export function selfPresetRules(): FieldRule[] {
 // Matching is pattern-only, deliberately scope/encrypted-blind: a user rule like {rootPath, all,
 // encrypted:true} is replaced by the locked local-scope preset — device-local fields must never
 // leave the device, even encrypted, so the conflicting rule is intentionally overridden (silently).
-// THE single shared implementation (C-#31): registry.ts's withSelfPresets — the compile path that
+// THE single shared implementation: registry.ts's withSelfPresets — the compile path that
 // feeds both adoptConfiguration's apply and the self item's status/diff compare — calls this same
 // function instead of reimplementing the merge, so a field is excluded from adopt if and only if
 // it is excluded from compare. Every top-level settings field NOT covered by selfPresetRules()
@@ -504,17 +502,17 @@ export function displayLabelForGroup(name: string, plugins: PluginHost, storedLa
 }
 
 // The Sync Center host wiring (main.ts syncCenterHost()) composes a caller's explicit override
-// with two snapshot fallbacks before calling displayLabelForGroup — kept here, pure and directly
-// testable, after the host wrapper itself silently dropped every caller's explicit override for
-// months (it declared only the `(group)` parameter, so TypeScript never flagged the discarded
-// second argument; C-#14 live-verify). Priority: caller's explicit override, then the
+// with two snapshot fallbacks before calling displayLabelForGroup — kept pure and directly
+// testable in lockLabels.ts (a host wrapper that declares only the `(group)` parameter would
+// silently discard every caller's explicit override, and TypeScript never flags the discarded
+// second argument). Priority: caller's explicit override, then the
 // last-computed live SyncGroup list, then the last-loaded local lock's own label.
 //
-// A `plugin-<id>` / core-settings-id group with none of the above (2026-08-09-c-livetest-batch15:
-// a pure on/off-list member, never individually synced, so it has no lock entry of its own) falls
+// A `plugin-<id>` / core-settings-id group with none of the above (a pure on/off-list member,
+// never individually synced, so it has no lock entry of its own) falls
 // through one more step to its carrier's element name for that id before returning undefined — the caller
 // (displayLabelForGroup) supplies the final bare-id fallback, so this function itself never
 // returns the id.
-// resolveHostStoredLabel used to live here; it moved to lockLabels.ts when the lock became keyed by
-// item ref, because reading a v3 entry needs manifest.ts's accessors and this module sits below
+// resolveHostStoredLabel lives in lockLabels.ts because reading a v3 entry needs manifest.ts's
+// accessors and this module sits below
 // them. displayLabelForGroup above is the other half of that chain and stays here.

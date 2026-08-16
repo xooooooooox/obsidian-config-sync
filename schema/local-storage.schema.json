@@ -1,0 +1,73 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/xooooooooox/obsidian-config-sync/main/schema/local-storage.schema.json",
+  "title": "Config Sync device-local storage entries",
+  "description": "The plugin's per-device, per-vault storage entries, read and written through Obsidian's app.loadLocalStorage/app.saveLocalStorage (which namespace by vault). These are NOT one JSON document: each named property below describes the parsed value of ONE storage key. Everything here is deliberately local — a datum true only of this device must not live in data.json, because that document travels wholesale and another device's pull would overwrite it (src/core/deviceElements.ts explains the failure this rule was learned from). Every reader is tolerant: an entry a user or a half-finished write left in any shape reads as \"no data\", never as a load failure, and is never rewritten in place. Authority: src/core/deviceElements.ts, src/core/ledger.ts, src/main.ts.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "config-sync-device-elements": {
+      "$ref": "#/definitions/deviceElements",
+      "description": "THIS device's exception table for on/off elements (stored as a JSON string). See the definition."
+    },
+    "config-sync-device-optouts": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Item refs (src/core/types.ts's ItemRef, e.g. \"community/dataview\") this device has opted out of syncing (stored as a JSON string). An empty list clears the key rather than storing \"[]\". Same key space as the store lock and the baselines ledger."
+    },
+    "config-sync-baselines": {
+      "$ref": "#/definitions/ledger",
+      "description": "Device-local sync baselines (stored as a JSON string). See the definition."
+    },
+    "config-sync-device-id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "This device's stable identity, generated once on first need and never regenerated while present. Reading a document's carried opt-outs is gated to run BEFORE this key is first minted, so an empty document cannot be what creates the identity."
+    },
+    "config-sync-coldstart-dismissed": {
+      "const": "1",
+      "description": "Present (as the literal string \"1\") once the user dismisses the cold-start banner; absent otherwise. Cleared by writing null."
+    },
+    "config-sync-passphrase": {
+      "type": "string",
+      "description": "LEGACY location only: the encryption passphrase's plaintext home from builds that ran without app.secretStorage. A current build stores the passphrase in secretStorage under the id \"config-sync-passphrase\" (src/core/secrets.ts's PASSPHRASE_SECRET_ID); when this localStorage entry is found it is migrated there and cleared. A healthy current install does not carry this key."
+    }
+  },
+  "definitions": {
+    "deviceElements": {
+      "type": "object",
+      "description": "List id (src/core/switchList.ts's SWITCH_LISTS keys, e.g. \"core-plugins\") -> element id -> what this device decided. The shape mirrors data.json's `perElement` — two levels, the same element ids — so a reader can hold one mental model for both layers; only the value differs (a rule says who SHARES an element, an exception says whether it is on or off HERE). The outer key is the LIST id, not perElementKeyFor's reserved-key result: localStorage has no document to index into, so the list's own identity is the whole key.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": { "enum": ["on", "off"] }
+      }
+    },
+    "ledger": {
+      "type": "object",
+      "required": ["version", "items"],
+      "additionalProperties": true,
+      "description": "src/core/ledger.ts's Ledger: for each item, the canonical hashes of its store and local content as of the last moment THIS device saw the item in sync. Direction for a differing item is a three-way comparison against this baseline instead of an mtime guess.",
+      "properties": {
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The version AS READ, not a claim about the shape (ledger.ts's LEDGER_VERSION is currently 2). v1 keyed entries by the compiled group name; v2 keys them by the item's ref — the same key space the store lock uses. A v1 ledger is rekeyed on load."
+        },
+        "items": {
+          "type": "object",
+          "description": "ItemRef -> baseline entry.",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["store", "local", "at"],
+            "additionalProperties": true,
+            "properties": {
+              "store": { "type": "string", "description": "Canonical hash of the item's store copy at baseline time, or the sentinel \"absent\" (ledger.ts's ABSENT_HASH) when that side had no content at all." },
+              "local": { "type": "string", "description": "Canonical hash of the item's local (vault) content at baseline time, or \"absent\"." },
+              "at": { "type": "string", "description": "When the baseline was recorded (ISO date-time)." }
+            }
+          }
+        }
+      }
+    }
+  }
+}

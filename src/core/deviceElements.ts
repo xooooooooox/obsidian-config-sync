@@ -1,11 +1,10 @@
 /**
- * THE local exception table (spec 2026-08-12-enablement-two-layers-design.md §3.4): which on/off
+ * THE local exception table: which on/off
  * elements THIS device has taken out of the shared answer, and what it decided for them.
  *
- * It lives in localStorage and nowhere else, for the reason C-#52 paid for once already: a datum
+ * It lives in localStorage and nowhere else: a datum
  * true only of this device, stored in a document that travels wholesale, is a datum another
- * device's pull will overwrite. `thisDeviceItems` was exactly that, and this table is what replaces
- * it.
+ * device's pull will overwrite.
  *
  * The shape mirrors data.json's `perElement` — two levels, the same element ids — so a reader can
  * hold one mental model for both layers. Only the value differs: a rule says who SHARES an element,

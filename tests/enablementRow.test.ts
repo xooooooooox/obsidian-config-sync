@@ -31,10 +31,10 @@ describe("the two-segment row", () => {
     expect(RULE_OPTIONS.map(ruleIcon)).not.toContain("airplay");
   });
 
-  // Round-9 ②: the follow state used to render no icon at all — a default had nothing to say —
-  // but a bare wordmark next to an icon+chevron fleet segment read as unfinished, so it now
+  // The follow state carries a glyph even though a default has nothing to say —
+  // a bare wordmark next to an icon+chevron fleet segment would read as unfinished, so it
   // carries `corner-down-right` and the shared "This device: …" tooltip like every other state.
-  it("the follow state has a glyph now — corner-down-right, dim, not an exception", () => {
+  it("the follow state has a glyph — corner-down-right, dim, not an exception", () => {
     const m = enablementRowModel({ rule: EVERYWHERE, exception: null });
     expect(m.local).toEqual({ icon: "corner-down-right", tooltip: "This device: follows the default" });
     expect(m.localIsException).toBe(false);
@@ -48,7 +48,7 @@ describe("the two-segment row", () => {
     }
   });
 
-  // Round-9 ②'s "one producer for every string" rule: both painters (SyncCenterView, SettingTab)
+  // The "one producer for every string" rule: both painters (SyncCenterView, SettingTab)
   // and this test read the SAME tooltip builders instead of re-spelling the sentences.
   it("the fleet tooltip is 'Default enabled on: <ruleLabel>', producer-vs-producer", () => {
     for (const rule of RULE_OPTIONS) {
@@ -69,7 +69,7 @@ describe("the two-segment row", () => {
   });
 });
 
-// The whole-FILE row's model counterpart (round-9 ②, `Settings sync`) — same shape, a FileSharing
+// The whole-FILE row's model counterpart (`Settings sync`) — same shape, a FileSharing
 // fleet datum and a two-state local layer (follow / not-synced-here).
 describe("fileEnablementRowModel", () => {
   it("the fleet segment carries sharingIcon's glyph and the 'Default settings sync: …' tooltip", () => {
@@ -88,7 +88,7 @@ describe("fileEnablementRowModel", () => {
     expect(optedOut.localIsException).toBe(true);
   });
 
-  // C-#25's fallback (a fields-mode item's fleet cell is an italic note, not a menu): the local
+  // The fields-mode fallback (a fields-mode item's fleet cell is an italic note, not a menu): the local
   // half alone must still be the SAME producer, not a second hand-typed copy of it.
   it("fileLocalSegment is the same producer fileEnablementRowModel's local half uses", () => {
     for (const optedOut of [false, true]) {

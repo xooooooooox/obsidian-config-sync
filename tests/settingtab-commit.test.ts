@@ -51,12 +51,12 @@ describe("setMemberDeviceClass", () => {
 });
 
 
-// Fix round 2: the custom section's unknown-field carry reads the tail off the STORED item, and a
+// The custom section's unknown-field carry reads the tail off the STORED item, and a
 // RENAME changes the map key while leaving the item's identity in the store alone — so a lookup by
 // name alone would silently drop every field a newer build wrote the moment a user renamed a rule.
 // Driven through the real persist path (persistCustomItems), not the pure converter, because the
 // name→path fallback lives in the tab.
-describe("persistCustomItems — the carry survives a rename (2.21.0 invariant II.1)", () => {
+describe("persistCustomItems — the carry survives a rename", () => {
   const STORED: Item = { ...customItemFromGroup({ name: "old-name", path: "notes/x.json", type: "file", devices: "all" }), writtenByANewerBuild: { keep: true } } as Item;
 
   interface PersistTab {
@@ -109,12 +109,12 @@ describe("persistCustomItems — the carry survives a rename (2.21.0 invariant I
   });
 });
 
-// The path the encrypted-mode defect actually manifested on (review M7). A custom rule is the only
+// A custom rule is the only
 // item that CHOOSES its mode — the Advanced tab's Mode dropdown offers Plain/Fields/Encrypt on
-// every one — and the item ↔ group conversion used to enumerate only "fields", so editing any
-// other field of an encrypted rule silently rewrote it to Plain and the next capture wrote that
-// file into the store as PLAINTEXT. Driven through the real persist path, then back out through
-// the compile path, because the loss needed both halves to show.
+// every one. If the item ↔ group conversion enumerated only "fields", editing any
+// other field of an encrypted rule would silently rewrite it to Plain and the next capture would
+// write that file into the store as PLAINTEXT. Driven through the real persist path, then back
+// out through the compile path, because the loss needs both halves to show.
 describe("persistCustomItems — an Encrypt-mode custom rule survives an unrelated edit", () => {
   it("keeps mode:'encrypted' through the item round trip and back into the compiled group", async () => {
     const host = {

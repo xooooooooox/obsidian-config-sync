@@ -42,8 +42,8 @@ export function confirmWarnings(app: App, title: string, lines: string[]): Promi
   });
 }
 
-// Companion-folder / custom-path preset-change guard (spec §4/§8, D7/D8 — task-7-brief.md's
-// character-exact modal contract). Reused verbatim for both zone ② (Settings file custom path)
+// Companion-folder / custom-path preset-change guard (the modal copy is
+// character-exact contract text). Reused verbatim for both zone ② (Settings file custom path)
 // and zone ③ (Companion folders) whenever the path being changed away from is a registry PRESET
 // (an item's default settingsFile path, or a presetCompanions entry) — never for a plain
 // user-added companion, which has no preset identity to warn about.

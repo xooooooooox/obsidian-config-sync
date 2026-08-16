@@ -9,14 +9,14 @@ import { perElementKeyFor } from "../src/core/switchList";
 import { DEVICE_ELEMENTS_KEY } from "../src/core/deviceElements";
 import { applyWithActions, capture, CoreContext } from "../src/core/ConfigSyncCore";
 
-// The runtime cutover (spec 2026-08-12-enablement-two-layers-design.md §5): what a run actually
+// What a run actually
 // does is ONE decision per element over a stored fleet rule and this device's own exception, and
 // `coreContext()`'s three fields — switchExceptions / switchForceOn / switchForceOff — are three
 // projections of that one decision.
 //
-// These assert on those three fields, never on a UI value: §9's acceptance criteria 3 and 4 are
-// about what a RUN does, and the four derivations this replaced are exactly why a UI value and a
-// run once disagreed (C-#52). Harness pattern from tests/deviceOptOut.test.ts — a real
+// These assert on those three fields, never on a UI value: the contract here is
+// about what a RUN does — a UI value derived separately is exactly how a UI and a
+// run can disagree. Harness pattern from tests/deviceOptOut.test.ts — a real
 // ConfigSyncPlugin, an in-memory localStorage, a real MemFS behind the switch-list file.
 
 const ELEMENT = "remotely-save";
@@ -109,12 +109,12 @@ function seededIO(persistedOn: string[]): MemFS {
   return io;
 }
 
-describe("the runtime mask reads one rule layer and one local layer (spec §5)", () => {
-  // §9 criterion 3 (C-#52's regression assertion). The failure this closes: `thisDeviceItems` lived
-  // in data.json, a pull replaced that document with another device's, and this device's own choice
-  // was simply gone. A SECOND plugin instance is what proves it — same localStorage, a foreign
+describe("the runtime mask reads one rule layer and one local layer", () => {
+  // The failure this closes: a per-device choice kept
+  // in data.json would be gone the moment a pull replaced that document with another
+  // device's. A SECOND plugin instance is what proves it — same localStorage, a foreign
   // data.json, and the exception still decides.
-  it("an Off here survives a pull that rewrites data.json (C-#52 regression)", async () => {
+  it("an Off here survives a pull that rewrites data.json", async () => {
     const io = seededIO([ELEMENT]);
     const first = await makePlugin({ io, liveEnabled: [ELEMENT] });
     await first.plugin.setDeviceElement(LIST, ELEMENT, "off");
@@ -199,8 +199,8 @@ describe("the runtime mask reads one rule layer and one local layer (spec §5)",
     expect(ctx.switchForceOn[LIST] ?? []).toContain(ELEMENT);
   });
 
-  // One writer, one store (spec §6.6): clearing the last exception drops the localStorage key
-  // outright rather than leaving `{}` behind (C-#26's prune discipline).
+  // One writer, one store: clearing the last exception drops the localStorage key
+  // outright rather than leaving `{}` behind (prune discipline).
   it("followTheDefault clears the exception and leaves the store as it was found", async () => {
     const io = seededIO([ELEMENT]);
     const { plugin, local } = await makePlugin({ io, liveEnabled: [ELEMENT] });
@@ -387,7 +387,7 @@ describe.each(["desktop", "mobile"] as const)("the v3 → v4 migration moves no 
   });
 });
 
-describe("the v3 → v4 migration moves no switch (spec §9 criterion 2)", () => {
+describe("the v3 → v4 migration moves no switch", () => {
 
   // §9 criterion 2: the retired fields are gone from what reaches DISK — the leak window
   // `thisDeviceItems` opened (a this-device datum in a document that travels) closes here, not

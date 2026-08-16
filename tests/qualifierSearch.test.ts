@@ -123,9 +123,9 @@ describe("suggest", () => {
   });
 });
 
-// The vocabulary the user actually types (spec §7), asserted against the SHIPPED spec lists rather
+// The vocabulary the user actually types, asserted against the SHIPPED spec lists rather
 // than a copy of them — a test that restates the literal agrees with whichever site its author was
-// reading and says nothing about the other (task-1 NEW-I2).
+// reading and says nothing about the other.
 describe("the shipped qualifier vocabulary", () => {
   const syncKeys = SYNC_QUALIFIER_SPECS.map((s) => s.key);
   const settingKeys = SETTING_QUALIFIER_SPECS.map((s) => s.key);
@@ -212,16 +212,16 @@ describe("sync resolver values", () => {
     expect(syncModeValue({ mode: "fields" } as never)).toBe("fields");
     expect(syncModeValue({ mode: "encrypted" } as never)).toBe("encrypted");
   });
-  it("action: fate bucket → PanelFilter bucket, locked → null (ledger C-#23: bucket-driven, not raw state)", () => {
+  it("action: fate bucket → PanelFilter bucket, locked → null (bucket-driven, not raw state)", () => {
     expect(syncActionValue("capture")).toBe("capture");
     expect(syncActionValue("apply")).toBe("apply");
     expect(syncActionValue("conflict")).toBe("apply"); // conflict's current placement, preserved
     expect(syncActionValue("ok")).toBe("ok");
     expect(syncActionValue("none")).toBe("none");
     expect(syncActionValue("locked")).toBeNull();
-    // C-#45 §7 (fix-round 4): "excluded" is a new bucket outside this function's fixed
-    // capture/apply/ok/none vocabulary (the `action:` qualifier's own value set, GUIDE.md,
-    // is unchanged by §7) — same non-match treatment as "locked", not a regression.
+    // "excluded" is a bucket outside this function's fixed
+    // capture/apply/ok/none vocabulary (the `action:` qualifier's own value set, GUIDE.md)
+    // — same non-match treatment as "locked".
     expect(syncActionValue("excluded")).toBeNull();
   });
 });

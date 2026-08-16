@@ -107,9 +107,9 @@ function items(): ItemMap {
 }
 
 // v2Migration.ts legitimately still WRITES `runsOn` into its v3-shaped output — a v3 document is
-// task 9's v4 migration's INPUT (the chain is v2 → v3 → v4), so the field is real output here even
-// though `Item` itself dropped it with runsOn's own retirement (2026-08-12-enablement-two-layers,
-// task 8). Read it structurally, off the raw migrated value, rather than through the Item type.
+// the v4 migration's INPUT (the chain is v2 → v3 → v4), so the field is real output here even
+// though the `Item` type itself no longer carries runsOn.
+// Read it structurally, off the raw migrated value, rather than through the Item type.
 function runsOnOf(item: unknown): unknown {
   return (item as { runsOn?: unknown } | undefined)?.runsOn;
 }
@@ -137,7 +137,7 @@ describe("migrateV2Settings — §5 identity rows", () => {
     expect(items().core["backlink"]).toEqual({ synced: true });
   });
 
-  // Fix round 2, review NEW-I2 — the same harm class as reading a v2 store copy as nothing, on the
+  // The same harm class as reading a v2 store copy as nothing, on the
   // write side. Adopting a store contract still written by a 2.21.0 device applies the STORE's
   // document as the base (schemaVersion 2 and all) while preserving this device's locked-local
   // presets, and `thisDeviceItems` is the only one of the three whose NAME changed. Overwriting it
@@ -168,8 +168,8 @@ describe("migrateV2Settings — §5 identity rows", () => {
   });
 });
 
-// Task-4 review finding: every item in v2Document() carries an explicit `enabled`, so the suite
-// never proved the OTHER direction — a v2 item that never had the key must not come out the other
+// Every item in v2Document() carries an explicit `enabled`, so the suite above cannot prove
+// the OTHER direction — a v2 item that never had the key must not come out the other
 // side with a spurious `synced`. itemFrom's rename is `if ("enabled" in item) { … }`; an
 // unconditional `item.synced = item.enabled` would silently write `synced: undefined` here, which
 // `?.synced === undefined` cannot tell apart from a genuinely absent key — hence the `in` checks.
@@ -231,7 +231,7 @@ describe("migrateV2Settings — runsOn preserves what the system DID, not what t
     expect(runsOnOf(items().community["dataview"])).toEqual({ device: "desktop" });
   });
 
-  it("always-here / never-here become the force axis, fleet-wide (C-#46 out of scope, §8)", () => {
+  it("always-here / never-here become the force axis, fleet-wide", () => {
     expect(runsOnOf(items().community["templater"])).toEqual({ device: "all", force: { state: "on", where: "everywhere" } });
     expect(runsOnOf(items().core["daily-notes"])).toEqual({ device: "all", force: { state: "off", where: "everywhere" } });
   });
@@ -274,7 +274,7 @@ describe("migrateV2Settings — runsOn preserves what the system DID, not what t
 });
 
 describe("migrateV2Settings — customGroups become items.custom (§5)", () => {
-  // devices -> a file-level sharing rule (task 8, 2026-08-12-enablement-two-layers): customItemsFrom
+  // devices -> a file-level sharing rule: customItemsFrom
   // hands the v2 literal to customItemFromGroup, the SAME group -> item producer the Advanced tab
   // persists through, so a migrated custom rule's device class lands exactly where a re-edited
   // one's would.
@@ -330,10 +330,9 @@ describe("migrateV2Settings — the carry invariant everywhere else", () => {
   });
 
   // The fixture MUST reach the app-slice merge (all three slices plus an appearance card carrying
-  // the borrowed showInlineTitle rule): that pass deletes TWO levels down, and the first version of
-  // this test used the §5 fixture, which has no slices — so the merge returned at its early guard
-  // and the test proved nothing while the migration really was editing the caller's document
-  // (fix round 1, review I2).
+  // the borrowed showInlineTitle rule): that pass deletes TWO levels down. A fixture with no
+  // slices makes the merge return at its early guard, and the test proves nothing while the
+  // migration could still be editing the caller's document.
   it("never mutates the document it was handed — including through the app-slice merge", () => {
     const source: Record<string, unknown> = {
       schemaVersion: 2,
@@ -548,7 +547,7 @@ const ENV: RegistryEnv = {
 // v2's group-name producer, restored verbatim from registry.ts@2.21.0. It is the OTHER side of
 // every producer-vs-producer assertion below: asserting the new names against literals typed here
 // would pass just as happily if both sides moved together, which is exactly how a re-keying breaks
-// silently (task-1 review NEW-I2).
+// silently.
 function legacyGroupName(v2Id: string): string {
   if (v2Id.startsWith("core:")) return v2Id.slice("core:".length);
   if (v2Id.startsWith("community:")) return `plugin-${v2Id.slice("community:".length)}`;
@@ -578,12 +577,12 @@ function neverSynced(keys: string[], ledger: Ledger): string[] {
   return keys.filter((key) => ledger.items[key] === undefined);
 }
 
-// Review I1's distinction — a materialised orphan rule (v2's memberRules entry with no items entry
-// of its own) is kept but stays invisible until its plugin is installed — retired along with
-// itemEarnsDef itself (2026-08-12-enablement-two-layers, task 8): there is no longer a rule-only
-// shape to exclude, because a rule now lives on the CARRIER item, not on the plugin's own entry, so
+// A materialised orphan rule (v2's memberRules entry with no items entry
+// of its own) needs no special "invisible until installed" exclusion:
+// there is no rule-only
+// shape to exclude, because a rule lives on the CARRIER item, not on the plugin's own entry, so
 // every migrated entry earns a def like any other (registry.ts's defsForForeignItems). What
-// survives from I1 is the fact the rule itself is preserved on disk regardless.
+// matters is that the rule itself is preserved on disk regardless.
 describe("a materialised orphan rule (v2's memberRules with no items entry of its own)", () => {
   const migratedItems = (): ItemMap => migrateV2Settings(v2Document()).document.items as ItemMap;
 
@@ -617,11 +616,11 @@ describe("a materialised orphan rule (v2's memberRules with no items entry of it
 // recompile() runs on every load, or the user's whole sync list would come back empty behind a
 // Notice. Asserted on the full §5 fixture, not a minimal one.
 //
-// task 5 / task 9 boundary: the two on/off lists are items now, and migrateV2Settings does not yet
-// seed items.obsidian["core-plugins"/"community-plugins"].synced for a v2 document — that backfill
-// is task 9's (registry.ts's retired ENABLEMENT_LISTS compile-loop said so explicitly). Until it
-// lands, a migrated v2 document's carriers compile to nothing, same as any other v2 read on this
-// branch; "core-plugins"/"community-plugins" are gone from the expected list below for that reason,
+// The two on/off lists are items, and migrateV2Settings (the v2 → v3 step) does not
+// seed items.obsidian["core-plugins"/"community-plugins"].synced for a v2 document — that
+// backfill belongs to the v4 step. Compiled from the v3-shaped output alone, a migrated v2
+// document's carriers compile to nothing;
+// "core-plugins"/"community-plugins" are absent from the expected list below for that reason,
 // not because the migration dropped the plugins they carry (backlink/graph/dataview/etc. are all
 // still here).
 describe("the migrated document compiles into a manifest the engine accepts", () => {
@@ -647,15 +646,15 @@ describe("the migrated document compiles into a manifest the engine accepts", ()
   });
 });
 
-describe("the baseline ledger survives the migration (§4, §9's headline gate)", () => {
+describe("the baseline ledger survives the migration", () => {
   it("v2's group-name producer and v3's agree for every item — the key space did not move", () => {
     for (const def of buildItemDefs(ENV)) {
       expect(def.groupName).toBe(legacyGroupName(v2IdOf(def)));
     }
   });
 
-  // §9's headline gate, end to end across BOTH halves of the migration: the document moves to v3
-  // (task 2) and the baselines move with the lock to item refs (task 3, spec §4). What must not
+  // The headline gate, end to end across BOTH halves of the migration: the document moves to v3
+  // and the baselines move with the lock to item refs. What must not
   // change is which items have a baseline at all — a missing one reads as never-synced, whose
   // default direction is APPLY, so a half-moved key space would offer to overwrite this device's
   // live config for every item at once.

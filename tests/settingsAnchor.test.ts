@@ -4,11 +4,12 @@ import { buildItemDefs, defRef, ItemDef, RegistryEnv } from "../src/core/registr
 import { ItemRef, SyncGroup } from "../src/core/types";
 import { itemsIn } from "./items";
 
-// NEW-I1 (fix round 2). The C1 fix made a `beta/<id>` ref unmintable, and the type found every
-// CONSTRUCTION. It could not find the COMPARISONS: `consumeSettingsAnchor` matched a def against a
+// The type system makes a `beta/<id>` ref unmintable, so it protects every
+// CONSTRUCTION. It cannot protect the COMPARISONS: if `consumeSettingsAnchor` matched a def
+// against a
 // parsed ref with `d.section === parsed.section`, presented on the left ("beta") and stored on the
-// right ("community"), so every BRAT-managed plugin's "More ▸ opens Settings" fell through to the
-// Advanced tab with a dead `advanced-rule-<id>` anchor. A regression against BASE, invisible to
+// right ("community"), every BRAT-managed plugin's "More ▸ opens Settings" would fall through to
+// the Advanced tab with a dead `advanced-rule-<id>` anchor — a regression invisible to
 // tsc, and reachable from the one bridge the Sync Center uses to deep-link into this panel.
 //
 // This drives the real anchor path — the tab's own consume, fed the ref main.ts's openSettingsAt
@@ -57,10 +58,10 @@ describe("SettingTab.consumeSettingsAnchor — the More bridge lands on the card
   const defs = buildItemDefs(ENV);
   const beta = defs.find((d) => d.id === "slides-rup") as ItemDef;
 
-  // NEW-I2 (fix round 3) reshaped these: asserting an anchor against its own LITERAL is exactly
-  // why the search-index divergence survived the NEW-I1 test — a literal agrees with whichever
+  // Asserting an anchor against its own LITERAL is exactly
+  // how a search-index divergence survives — a literal agrees with whichever
   // producer the test author was looking at, and says nothing about the other three. Every
-  // assertion below now compares a producer against a producer.
+  // assertion below compares a producer against a producer.
   it("a BRAT-managed plugin's ref opens its Beta card — the def presents beta, the ref stores community", () => {
     expect(beta.section).toBe("beta");
 
@@ -104,15 +105,15 @@ describe("SettingTab.consumeSettingsAnchor — the More bridge lands on the card
 });
 
 
-// NEW-I2 (fix round 3). The item card's anchor and drawer key had FOUR authors — the card
-// renderer, the search index, the More bridge's consumer, and jumpTo — and they agreed only by
-// spelling. When the card sites moved to `defRef(def)` and the search index was left on `def.id`,
-// every item hit in every section stopped jumping, silently: `highlightAnchor` finds no element
+// The item card's anchor and drawer key have FOUR authors — the card
+// renderer, the search index, the More bridge's consumer, and jumpTo — and they agree only by
+// spelling. If the card sites use `defRef(def)` while the search index stays on `def.id`,
+// every item hit in every section stops jumping, silently: `highlightAnchor` finds no element
 // and returns.
 //
 // The shape that catches this is PRODUCER VERSUS PRODUCER. A test that pins either side against a
-// literal passes while the other side drifts — which is precisely what happened.
-describe("the item card's derived keys have one producer (NEW-I2)", () => {
+// literal passes while the other side drifts.
+describe("the item card's derived keys have one producer", () => {
   const defs = buildItemDefs(ENV);
 
   it("what buildSearchIndex emits is what the card's own anchor consumer produces — for every item", async () => {

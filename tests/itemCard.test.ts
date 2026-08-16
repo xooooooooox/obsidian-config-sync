@@ -40,8 +40,8 @@ import { perElementKeyFor } from "../src/core/switchList";
 import { itemsIn } from "./items";
 import { EVERYWHERE, perClass, Sharing, THIS_DEVICE } from "../src/core/types";
 
-// spec docs/superpowers/specs/2026-07-25-unified-card-design.md §4/§5/§10; task-5-brief.md;
-// docs/superpowers/specs/2026-07-26-ui-feedback-round2-design.md §2 (app-slice mechanism removed).
+// Design references: docs/superpowers/specs/2026-07-25-unified-card-design.md §4/§5/§10 and
+// docs/superpowers/specs/2026-07-26-ui-feedback-round2-design.md §2 (no app-slice mechanism).
 
 function def(overrides: Partial<ItemDef> = {}): ItemDef {
   return { id: "app", groupName: "app", label: "App settings", description: "d", section: "obsidian", ...overrides };
@@ -126,7 +126,7 @@ describe("computeBadges", () => {
     expect(computeBadges(COMMUNITY_DEF, cfg({ synced: true }), RULE(THIS_DEVICE), null)).toEqual([]);
   });
 
-  it("desktop-only def prepends the innate grey chip ahead of every config badge (round-8 spec §2)", () => {
+  it("desktop-only def prepends the innate grey chip ahead of every config badge", () => {
     const dOnly: ItemDef = { ...COMMUNITY_DEF, desktopOnly: true };
     expect(computeBadges(dOnly, cfg(), FOLLOWS_ALL, null)).toEqual([{ text: "desktop-only plugin", cls: "config-sync-card-badge-plat", icon: "monitor" }]);
     expect(computeBadges(dOnly, cfg(), RULE(perClass("desktop")), null)).toEqual([
@@ -204,10 +204,9 @@ describe("zone presence", () => {
   });
 });
 
-// effectiveMode/modeChipLabel/cardBodyPlan are gone by design (spec §3.2 — the header mode chip
-// and the Plain/Fields branch it drove are both deleted) — deriveMode/hasKeyRules below replace
-// their role.
-describe("deriveMode / hasKeyRules (spec 2026-07-26-card-visual-refresh-design.md §3)", () => {
+// There is no header mode chip and no Plain/Fields branch — deriveMode/hasKeyRules carry that
+// role: the mode is derived from the rules themselves, never stored as UI state.
+describe("deriveMode / hasKeyRules", () => {
   it("empty rules+perItem derives plain; any rule or perItem derives fields", () => {
     const empty: ItemSettingsFile = { mode: "plain", rules: {}, perElement: {} };
     expect(deriveMode(empty)).toBe("plain");
@@ -217,10 +216,10 @@ describe("deriveMode / hasKeyRules (spec 2026-07-26-card-visual-refresh-design.m
   });
 });
 
-// C-#25: mirrors manifest.ts's parseGroup fileRule validator (type:"file" plain-mode groups
+// Mirrors manifest.ts's parseGroup fileRule validator (type:"file" plain-mode groups
 // only) — every registry item already compiles to type:"file", so mode is the only surviving
 // gate the Sync Center row and setItemFileScope's guard both need to agree on.
-describe("fileRuleLegalForMode (C-#25 — mirrors manifest.ts's fileRule validator)", () => {
+describe("fileRuleLegalForMode — mirrors manifest.ts's fileRule validator", () => {
   it("plain (or absent, which defaults to plain) is legal; fields and encrypted are not", () => {
     expect(fileRuleLegalForMode(undefined)).toBe(true);
     expect(fileRuleLegalForMode("plain")).toBe(true);
@@ -229,7 +228,7 @@ describe("fileRuleLegalForMode (C-#25 — mirrors manifest.ts's fileRule validat
   });
 });
 
-// C-#25 copy contract: the Sync Center row shows this instead of a menu when the helper above is
+// Copy contract: the Sync Center row shows this instead of a menu when the helper above is
 // false — pinned here so a future edit to either string can't drift them apart silently.
 describe("FILE_SHARING_MENU_UNAVAILABLE_TEXT", () => {
   it("matches the copy-contract-exact string", () => {
@@ -237,10 +236,9 @@ describe("FILE_SHARING_MENU_UNAVAILABLE_TEXT", () => {
   });
 });
 
-// C-#26: prune truth table — the exact residue that hit the user on 2026-08-09 (a stray
-// fileRule:{sharing: EVERYWHERE,encrypted:false} or an all-default settingsFile surviving a write-back)
-// cannot recur.
-describe("pruneSettingsFile (C-#26)", () => {
+// Prune truth table: a stray fileRule:{sharing: EVERYWHERE,encrypted:false} or an all-default
+// settingsFile must never survive a write-back as residue.
+describe("pruneSettingsFile", () => {
   it("an all-default settingsFile prunes to undefined", () => {
     expect(pruneSettingsFile(defaultSettingsFile())).toBeUndefined();
   });
@@ -347,8 +345,8 @@ describe("buildRuleRows (spec 2026-07-26-card-visual-refresh-design.md §3 — t
 
   // The same exclusion, for the other two cards that keep enablement rules in perElement. A whole-
   // file list's key has no name to show, and its rules already have rows of their own in the
-  // carrier's drawer (spec §6.4) — before task 12 the first rule a user set on either list put a
-  // nameless row, with a ✕, into the card's Settings-file zone.
+  // carrier's drawer — without the exclusion, the first rule a user set on either list would put
+  // a nameless row, with a ✕, into the card's Settings-file zone.
   it("a carrier card's own rule key is excluded from rule rows, and its real keys are not", () => {
     const carrier: ItemDef = def({ id: "community-plugins", groupName: "community-plugins", label: "Community plugins" });
     const key = perElementKeyFor("community-plugins");
@@ -371,7 +369,7 @@ describe("buildRuleRows (spec 2026-07-26-card-visual-refresh-design.md §3 — t
 });
 
 describe("memberCountLabel", () => {
-  // Round-12 甲: the pill shows the bare number now — this is its aria-label/tooltip full form,
+  // The pill shows the bare number — this is its aria-label/tooltip full form,
   // no leading `· ` separator.
   it("is copy-contract exact for themes vs. non-themes presets", () => {
     expect(memberCountLabel(true, 3)).toBe("3 themes");
@@ -380,7 +378,7 @@ describe("memberCountLabel", () => {
   });
 });
 
-describe("applyPerElementToggle / encryptToggleDisabled (final-review MUST-FIX 2 — Encrypt and Per-item scopes are mutually exclusive per rule)", () => {
+describe("applyPerElementToggle / encryptToggleDisabled — Encrypt and Per-item scopes are mutually exclusive per rule", () => {
   it("enabling Per-item on an already-encrypted key clears encrypted in the SAME write", () => {
     const sf: ItemSettingsFile = { mode: "fields", rules: { userIgnoreFilters: { sharing: EVERYWHERE, encrypted: true } }, perElement: {} };
     const next = applyPerElementToggle(sf, "userIgnoreFilters", true);
@@ -444,12 +442,12 @@ describe("buildSnippetMemberRows", () => {
   });
 });
 
-// `withSnippetSharing` retired here (task 12): a snippet's rule is written by `withEnablementRule`
-// like every other element's, and this describe's subject — clearing the last scoped snippet must
-// not leave an empty enabledCssSnippets map behind — is asserted against that writer in
-// tests/enablementRules.test.ts, on the same key this one used.
+// There is no `withSnippetSharing`: a snippet's rule is written by `withEnablementRule`
+// like every other element's, and clearing the last scoped snippet must
+// not leave an empty enabledCssSnippets map behind — asserted against that writer in
+// tests/enablementRules.test.ts, on the same key.
 
-// The two carrier cards (spec §6.4). `carrierListFor` is THE producer of "this card carries a
+// The two carrier cards. `carrierListFor` is THE producer of "this card carries a
 // list"; the badges, the drawer's section and its rows all ask it, so these assert the answer for
 // each of the five Obsidian cards rather than for the two that say yes.
 describe("carrierListFor", () => {
@@ -483,7 +481,7 @@ describe("carrierBadgeCounts", () => {
     expect(carrierBadgeCounts(itemsIn({}), "core-plugins", [])).toEqual({ fleet: 0, local: 0 });
   });
 
-  // Final-review IMPORTANT 3: the carrier's OWN class pins (fileRule.sharing — settable from the
+  // The carrier's OWN class pins (fileRule.sharing — settable from the
   // Sync Center's Default settings sync row — and any class-pinned `rules` entry) must join the
   // element class rules in the SAME "N device-scoped" count, without double-counting: `perElement`
   // holds the element rules already counted above, so folding in `countClassPinned` whole (which also
@@ -551,11 +549,11 @@ describe("buildCompanionRows", () => {
     ]);
   });
 
-  it("a def with no preset companions and an empty config produces no rows — renderCompanionZone still renders the Add-folder entry unconditionally on this empty-array path (spec §5, task-3-brief.md Step 2/4)", () => {
+  it("a def with no preset companions and an empty config produces no rows — renderCompanionZone still renders the Add-folder entry unconditionally on this empty-array path", () => {
     expect(buildCompanionRows(APP_DEF, cfg())).toEqual([]);
   });
 
-  it("an absent companions key reads exactly like an empty list — presets still synthesize their rows (§5.2)", () => {
+  it("an absent companions key reads exactly like an empty list — presets still synthesize their rows", () => {
     expect(buildCompanionRows(APPEARANCE_DEF, { synced: true })).toEqual(buildCompanionRows(APPEARANCE_DEF, { synced: true, companions: [] }));
     expect(buildCompanionRows(APPEARANCE_DEF, { synced: true })).toEqual([
       { path: "{configDir}/themes", device: "all", enabled: false, isPreset: true },
@@ -564,8 +562,8 @@ describe("buildCompanionRows", () => {
   });
 });
 
-describe("zone ① Enabled on (spec §4/§10, D4 — core/community/beta plugin tabs, task-6-brief.md)", () => {
-  it("ENABLED_ON_LABEL is copy-contract exact (round-9 ① shortened row label)", () => {
+describe("zone ① Enabled on — core/community/beta plugin tabs", () => {
+  it("ENABLED_ON_LABEL is copy-contract exact", () => {
     expect(ENABLED_ON_LABEL).toBe("Enabled on");
   });
 
@@ -577,7 +575,7 @@ describe("zone ① Enabled on (spec §4/§10, D4 — core/community/beta plugin 
   });
 });
 
-describe("Sync all (spec §4/§5/§10, D11 — one master row per Core/Community/Beta section, no kind-exclusion)", () => {
+describe("Sync all — one master row per Core/Community/Beta section, no kind-exclusion", () => {
   const CORE_DEFS = [CORE_STATE_ONLY_DEF, CORE_WITH_FILE_DEF];
 
   it("copy is exact", () => {
@@ -606,7 +604,7 @@ describe("Sync all (spec §4/§5/§10, D11 — one master row per Core/Community
 
   // Every entry SURVIVES being turned off. In the enablement sections an entry's presence is this
   // device's capture mask for that element, so "off" has to be recorded rather than pruned —
-  // final-review C1, and the reason withItem removes nothing.
+  // which is why withItem removes nothing.
   it("applySyncAll(off) turns every def in the list off — no kind-exclusion, every def in the section participates", () => {
     const items = itemsIn({
       core: { [CORE_STATE_ONLY_DEF.id]: cfg({ synced: true }), [CORE_WITH_FILE_DEF.id]: cfg({ synced: true, description: "kept" }) },
@@ -624,7 +622,7 @@ describe("Sync all (spec §4/§5/§10, D11 — one master row per Core/Community
   });
 });
 
-describe("nextSharing / sharing icon cycle (round-6 定稿: Commander-style sharing control)", () => {
+describe("nextSharing / sharing icon cycle — Commander-style sharing control", () => {
   const DESKTOP = perClass("desktop");
   const MOBILE = perClass("mobile");
 
@@ -649,7 +647,7 @@ describe("nextSharing / sharing icon cycle (round-6 定稿: Commander-style shar
   // now applied inline to RULE_OPTIONS by the row that needs it (SettingTab's
   // renderDefaultEnabledOnRow), so there is no second list to keep in step.
 
-  it("stale stored value missing from the options resumes at the next offered canonical stop (round-8 spec §2)", () => {
+  it("stale stored value missing from the options resumes at the next offered canonical stop", () => {
     // a mobile rule left behind on a plugin that later became desktop-only → this-device, not everywhere
     expect(nextSharing(MOBILE, [EVERYWHERE, DESKTOP, THIS_DEVICE])).toEqual(THIS_DEVICE);
     // options without this-device either: mobile wraps past it to everywhere
@@ -681,8 +679,8 @@ describe("nextSharing / sharing icon cycle (round-6 定稿: Commander-style shar
   });
 });
 
-describe("PREVIEW_LEGEND_ENTRIES (round-7 spec §2, 定稿 B: color dots + neutral words, no emoji)", () => {
-  it("lists the three sharing dots (preview key classes), then lock — no trailing hint (定稿轮 19 ②: the action sentence moved to the preview's top line)", () => {
+describe("PREVIEW_LEGEND_ENTRIES — color dots + neutral words, no emoji", () => {
+  it("lists the three sharing dots (preview key classes), then lock — no trailing hint (the action sentence lives on the preview's top line)", () => {
     expect(PREVIEW_LEGEND_ENTRIES).toEqual([
       { kind: "sharing", cls: "config-sync-json-desktop", text: "desktop only" },
       { kind: "sharing", cls: "config-sync-json-mobile", text: "mobile only" },

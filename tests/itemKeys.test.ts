@@ -11,9 +11,9 @@ import { itemsIn } from "./items";
 //
 // The load-bearing assertions here are producer-versus-producer — two sites made to agree with each
 // other, never with a literal written by hand (the `producer vs producer` block below, plus the
-// re-keying gates at the end). Task 1's two regressions both survived tests that compared a key
-// against the tester's own copy of it: the copy moved with the code, and the site that had not moved
-// stayed silently broken.
+// re-keying gates at the end). A regression survives any test that compares a key
+// against the tester's own copy of it: the copy moves with the code, and the site that has not
+// moved stays silently broken.
 //
 // Where a literal DOES appear it is pinning something no second producer can state — the exact set of
 // names the closed legacy rules cannot place, and the refs those rules produce for a name this device
@@ -43,7 +43,7 @@ function compiled(): { defs: ItemDef[]; groups: SyncGroup[] } {
         app: { synced: true },
         appearance: { synced: true, companions: [{ path: "{configDir}/themes", device: "all", enabled: true }] },
         hotkeys: { synced: true },
-        // The two carriers are items now (task 5): their own entry, not a plugin being synced
+        // The two carriers are items: their own entry, not a plugin being synced
         // underneath, is what compiles core-plugins.json/community-plugins.json.
         "core-plugins": { synced: true },
         "community-plugins": { synced: true },
@@ -168,8 +168,8 @@ describe("producer vs producer", () => {
   });
 
   // Why carriers are keyed under `obsidian`: that section's id space is closed and declared in
-  // code, so a carrier key cannot collide with an ITEM it doesn't already name. Task 5 changed the
-  // shape of this claim, not its truth: core-plugins/community-plugins now collide with an obsidian
+  // code, so a carrier key cannot collide with an ITEM it doesn't already name.
+  // core-plugins/community-plugins collide with an obsidian
   // card id BY CONSTRUCTION, because they are that card's own id (defRef and carrierRef mint the
   // same string). `enabled-css-snippets` is the control case — it carries no item (its rules live
   // on appearance's own settingsFile.perElement, enablementRules.ts's ruleHomeFor), so it still
@@ -261,9 +261,9 @@ describe("the baseline re-key leaves the never-synced count unchanged", () => {
     expect(rekeyRefList(moved, toRef)).toEqual(moved); // idempotent by shape — a second load re-keys nothing
   });
 
-  // Final-review I2: the "already moved" test is `isLockRef`, not `parseItemRef`. They answer
+  // The "already moved" test is `isLockRef`, not `parseItemRef`. They answer
   // different questions and `legacy/…` is deliberately a legal KEY that names no resolvable ITEM —
-  // so asking the second question made an entry in the holding pen look unmoved, and it grew a
+  // asking the second question would make an entry in the holding pen look unmoved, growing a
   // segment per load with a localStorage write each time and no prune to ever clear it.
   it("an entry already in the holding pen survives repeated loads unchanged", () => {
     const toRef = lockRefFor(compiledLegal());

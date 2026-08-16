@@ -1,6 +1,5 @@
 /**
- * The stored-name chain: what the store lock knows a group is called (C-#14, and
- * 2026-08-09-c-livetest-batch15's carrier fallback).
+ * The stored-name chain: what the store lock knows a group is called.
  *
  * Its own module because it sits at a junction: it needs manifest.ts's lock accessors AND catalog.ts
  * is where its caller's other half (displayLabelForGroup) lives — and catalog.ts is below manifest.ts
@@ -14,7 +13,7 @@ import { StoreLock, SyncGroup } from "./types";
 
 // The lock's own name for one item: its entry's label, then — for an on/off-list element that is
 // never individually synced, and so has no entry of its own — the name its CARRIER recorded for it
-// (spec §3's `display.elements`, v2's `memberLabels`). Both reads go through the item ref, which is
+// (`display.elements`; v2's `memberLabels`). Both reads go through the item ref, which is
 // what the lock is keyed by since v3.
 export function lockStoredLabel(lock: StoreLock | null, ref: string): string | undefined {
   const own = lockLabel(lockEntry(lock, ref));
@@ -28,9 +27,9 @@ export function lockStoredLabel(lock: StoreLock | null, ref: string): string | u
 /**
  * The Sync Center host wiring (main.ts syncCenterHost()) composes a caller's explicit override with
  * two snapshot fallbacks before calling catalog.ts's displayLabelForGroup — kept here, pure and
- * directly testable, after the host wrapper itself silently dropped every caller's explicit override
- * for months (it declared only the `(group)` parameter, so TypeScript never flagged the discarded
- * second argument; C-#14 live-verify).
+ * directly testable: a host wrapper that declares only the `(group)` parameter silently drops
+ * every caller's explicit override, and TypeScript never flags the discarded
+ * second argument.
  *
  * Priority: the caller's explicit override, then the last-computed live SyncGroup list, then the
  * last-loaded local lock — the group's own entry, then its carrier's name for it as an element. The

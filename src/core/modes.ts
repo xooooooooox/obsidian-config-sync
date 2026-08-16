@@ -67,7 +67,7 @@ export function groupNeedsPassphrase(group: SyncGroup): boolean {
 }
 
 // True when the group's STORE copy is a whole-file encryption envelope — either mode:"encrypted"
-// or a Plain-mode FileRule with encrypted:true (spec §2, D9). Callers that would otherwise diff
+// or a Plain-mode FileRule with encrypted:true. Callers that would otherwise diff
 // raw local content against the raw store copy (e.g. the Sync Center's interactive diff panel)
 // must suppress that comparison for these groups instead of showing ciphertext as a line diff.
 export function isWholeFileEncrypted(group: SyncGroup): boolean {
@@ -115,7 +115,7 @@ export function excludingPerElement(group: SyncGroup, patterns: string[]): strin
   return patterns.filter((p) => !perElementKeys.some((k) => keyMatchesAny(k, [p])));
 }
 
-// Class rules are TOP-LEVEL ONLY (spec §2.1): partition and preservation act on root object
+// Class rules are TOP-LEVEL ONLY: partition and preservation act on root object
 // keys; nested keys with matching names are untouched.
 function dropTopLevel(v: unknown, patterns: string[]): unknown {
   if (patterns.length === 0 || !isPlainObject(v)) return v;
@@ -133,7 +133,7 @@ function requirePassphrase(group: SyncGroup, passphrase: string | null): string 
   return passphrase as string;
 }
 
-// Plain-mode whole-file encryption (FileRule, spec §2 D9). Unlike mode:"encrypted",
+// Plain-mode whole-file encryption (FileRule). Unlike mode:"encrypted",
 // FileRule-encrypted groups are NOT gated by groupNeedsPassphrase/requirePassphrase: capture and
 // apply still require a passphrase (explicit, actionable error below — never a silent plaintext
 // write/read), but comparison (contentUnchanged) degrades gracefully instead of locking the
@@ -173,7 +173,7 @@ function buildNote(encrypted: string[], stripped: string[], classOnly: string | 
 // never tells "unchanged" — fieldUnchanged's mac-based check does. Reusing the OLD envelope
 // byte-for-byte when the plaintext hasn't moved is what keeps the store (and the capture-preview
 // diff, which calls captureTransform the same way — see main.ts's diffPair) from showing every
-// encrypted field as replaced on every capture (C-#36).
+// encrypted field as replaced on every capture.
 async function reuseOrEncryptField(passphrase: string, plaintext: unknown, storeFieldValue: unknown): Promise<string> {
   const serialized = JSON.stringify(plaintext);
   if (isFieldEnvelope(storeFieldValue) && (await fieldUnchanged(passphrase, storeFieldValue, serialized))) {
@@ -271,14 +271,14 @@ export async function captureTransform(
   content: string,
   passphrase: string | null,
   deviceClass: "desktop" | "mobile",
-  // Prior store content — used for perItem keys (§3, D3: capturing a shared array must preserve
-  // the other device's already-captured elements) AND, since C-#36, to look up an encrypted
+  // Prior store content — used for perItem keys (capturing a shared array must preserve
+  // the other device's already-captured elements) AND to look up an encrypted
   // FIELD's existing envelope so an unchanged plaintext reuses it byte-for-byte instead of
   // re-encrypting with a fresh salt/IV (fieldUnchanged's mac is the deterministic "same
   // plaintext" check — see reuseOrEncryptField). Optional so plain/whole-file-encrypted callers
   // (which never need it) are unaffected.
   storeContent?: string | null,
-  // Prior __scopes__ sidecar content for THIS device class — same C-#36 envelope-reuse lookup,
+  // Prior __scopes__ sidecar content for THIS device class — same envelope-reuse lookup,
   // but for class-scoped (desktop/mobile) + encrypted:true fields, whose store copy lives in the
   // sidecar rather than the main store body. Optional; omitted callers just always re-encrypt
   // these fields fresh (correct default — no prior sidecar to reuse from).
@@ -349,7 +349,7 @@ export async function captureTransform(
       ? `${deviceClass}-only ${classOnlyNames.map((k) => (keyMatchesAny(k, ownEncrypt) ? `${k} (encrypted)` : k)).join(", ")}`
       : null;
   const note = buildNote([...matched], stripped, classOnly);
-  // Per-item keys (§3, D3): merge local's all/own-class elements with the prior store's
+  // Per-item keys: merge local's all/own-class elements with the prior store's
   // other-class elements, one key at a time. Reads local values from the pristine `parsed`
   // (never from afterEncrypt/parsedBase, which the class partition above never touches for
   // these keys anyway thanks to excludingPerElement, but the raw source is the clearest contract).
@@ -406,7 +406,7 @@ export async function applyTransform(
   // Other-class keys never belong on this device; own-class keys are preserved from local ONLY
   // when there is no sidecar to supply the authoritative value (degradation path).
   const classPreserve = [...other, ...(ownScopeContent === null ? own : [])];
-  // Per-item keys (§3, D3): store's all/own-class elements plus local's "local"-scoped elements
+  // Per-item keys: store's all/own-class elements plus local's "local"-scoped elements
   // (the store never carries "local" elements — capture drops them — so this is the only path
   // that keeps them). Reads the store side from `incoming` (post-decrypt; irrelevant here since
   // perItem keys are never encrypted) and the local side from the raw local document.
@@ -482,7 +482,7 @@ export async function contentUnchanged(
   }
   let localParsed = JSON.parse(localContent) as unknown;
   const strip = excludingPerElement(group, stripPatterns(group));
-  // Per-item keys (§3, D3): a per-item array is a membership list, not a positionally-ordered
+  // Per-item keys: a per-item array is a membership list, not a positionally-ordered
   // array — compare it via perElementArrayUnchanged (masks out this device's own blind spots: the
   // other class's elements and "local"-scoped elements, symmetrically on both sides) instead of
   // fieldsUnchanged's strict same-length/same-order array check, then drop the key from the

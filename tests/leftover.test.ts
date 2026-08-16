@@ -69,7 +69,7 @@ describe("storeSelfCopyGroups", () => {
     it("recompiles every section, custom items included, into the store's group list", () => {
       const json = JSON.stringify({
         items: itemsIn({
-          // The carrier is an item now (task 5): its own entry, not merely "some plugin in the
+          // The carrier is an item: its own entry, not merely "some plugin in the
           // section is synced", is what makes compileItems emit "community-plugins".
           obsidian: { "community-plugins": { synced: true } },
           community: { demo: { synced: true } },
@@ -131,8 +131,8 @@ describe("storeSelfCopyGroups", () => {
 
     // The two carriers are in this list BECAUSE the read runs the whole chain (v2 → v3 → v4): the
     // v4 step's rule 6 seeds `items.obsidian["core-plugins"/"community-plugins"].synced` from
-    // whether the section had a synced item, which is exactly what the retired `anyEnabledInList`
-    // compile loop used to answer. Without it a foreign copy's on/off lists read as not synced at
+    // whether the section had a synced item, which is exactly what v2/v3's `anyEnabledInList`
+    // compile loop answered. Without it a foreign copy's on/off lists read as not synced at
     // all, and the self pane would report them as this device's own additions.
     it("recompiles the flat v2 item map and its customGroups into the store's group list", () => {
       const names = storeSelfCopyGroups(v2Copy, defs, NO_BETA_IDS)
@@ -229,7 +229,7 @@ describe("selfListGroups (delta ghost regression, spec 2026-07-28 §2)", () => {
   });
 });
 
-// Final-review M3: §4.2's gate on the read side. A store copy written by a NEWER build is not ours
+// The version gate on the read side. A store copy written by a NEWER build is not ours
 // to compile — its `items` may mean something this build cannot see, and every consumer of this list
 // would then act on a reading we invented.
 describe("storeSelfCopyGroups — a self copy from a newer build", () => {

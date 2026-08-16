@@ -1,16 +1,19 @@
-// Schema-catch-up gate (CLAUDE.md's schema-first rule): the three files under schema/ are
+// Schema-catch-up gate (CLAUDE.md's schema-first rule): the files under schema/ are
 // hand-maintained documentation of a persisted shape, not code the build type-checks against, so
 // nothing else in this suite would catch them drifting from the producers they describe. No
 // JSON-schema validator library is a devDependency (package.json) and none is added here — these
 // are structural assertions against the parsed schema JSON and a couple of real-shaped fixtures,
 // checked the same way the schema files themselves are checked: producer literal vs. producer
-// literal (CURRENT_SCHEMA, STORE_LOCK_VERSION), not a copy of either re-typed by hand.
+// literal (CURRENT_SCHEMA, STORE_LOCK_VERSION, the WRITTEN_* key lists), not a copy of either
+// re-typed by hand.
 import { Platform } from "obsidian";
 import { beforeAll, describe, expect, it } from "vitest";
 import { CURRENT_SCHEMA } from "../src/core/settingsMigration";
-import { STORE_LOCK_VERSION } from "../src/core/manifest";
-import { emptyItemMap, withItem, type ItemMap } from "../src/core/registry";
+import { STORE_LOCK_VERSION, WRITTEN_GROUP_KEYS, WRITTEN_LOCK_ENTRY_KEYS, WRITTEN_LOCK_KEYS } from "../src/core/manifest";
+import { emptyItemMap, withItem, WRITTEN_ITEM_KEYS, type ItemMap } from "../src/core/registry";
 import { perElementKeyFor } from "../src/core/switchList";
+import { DEVICE_ELEMENTS_KEY } from "../src/core/deviceElements";
+import { PASSPHRASE_SECRET_ID } from "../src/core/secrets";
 import { EVERYWHERE, perClass, THIS_DEVICE } from "../src/core/types";
 
 // obsidianmd/no-nodejs-modules: fs must be reached through a Platform.isDesktop-guarded dynamic
@@ -44,6 +47,8 @@ describe("schema/*.schema.json parse as valid JSON", () => {
   it("data.schema.json", async () => expect(readSchema("data.schema.json")).resolves.toBeTruthy());
   it("config-sync.schema.json", async () => expect(readSchema("config-sync.schema.json")).resolves.toBeTruthy());
   it("store-lock.schema.json", async () => expect(readSchema("store-lock.schema.json")).resolves.toBeTruthy());
+  it("local-storage.schema.json", async () => expect(readSchema("local-storage.schema.json")).resolves.toBeTruthy());
+  it("run-history.schema.json", async () => expect(readSchema("run-history.schema.json")).resolves.toBeTruthy());
 });
 
 describe("data.schema.json", () => {
@@ -83,6 +88,11 @@ describe("data.schema.json", () => {
     const definitions = parsed.definitions as { itemMap: { required?: string[]; properties?: Record<string, unknown> } };
     expect(definitions.itemMap.required).toEqual(expect.arrayContaining(["obsidian", "core", "community", "custom"]));
     expect(Object.keys(definitions.itemMap.properties ?? {})).not.toContain("beta");
+  });
+
+  it("the item definition names exactly the fields this build writes — registry.ts's WRITTEN_ITEM_KEYS, producer vs. producer", () => {
+    const definitions = parsed.definitions as { item: { properties?: Record<string, unknown> } };
+    expect(Object.keys(definitions.item.properties ?? {}).sort()).toEqual([...WRITTEN_ITEM_KEYS].sort());
   });
 
   // A REAL fixture — built the same way the plugin itself would populate settings.items (registry.ts's
@@ -149,6 +159,11 @@ describe("config-sync.schema.json (legacy manifest) matches manifest.ts's curren
     const groupsSchema = parsed.properties as { groups: { items: { properties: { type: { enum?: string[] } } } } };
     expect(groupsSchema.groups.items.properties.type.enum).toEqual(["file", "folder"]);
   });
+
+  it("the group shape names exactly the fields parseGroup writes — manifest.ts's WRITTEN_GROUP_KEYS, producer vs. producer", () => {
+    const groupsSchema = parsed.properties as { groups: { items: { properties?: Record<string, unknown> } } };
+    expect(Object.keys(groupsSchema.groups.items.properties ?? {}).sort()).toEqual([...WRITTEN_GROUP_KEYS].sort());
+  });
 });
 
 describe("store-lock.schema.json", () => {
@@ -169,5 +184,45 @@ describe("store-lock.schema.json", () => {
   it("every entry requires `source`, matching parseStoreLockEntry's own refusal", () => {
     const definitions = parsed.definitions as { entry: { required?: string[] } };
     expect(definitions.entry.required).toContain("source");
+  });
+
+  it("top-level and entry properties name exactly the fields this build writes — manifest.ts's WRITTEN_LOCK_* lists, producer vs. producer", () => {
+    const props = parsed.properties as Record<string, unknown>;
+    expect(Object.keys(props).sort()).toEqual([...WRITTEN_LOCK_KEYS].sort());
+    const definitions = parsed.definitions as { entry: { properties?: Record<string, unknown> } };
+    expect(Object.keys(definitions.entry.properties ?? {}).sort()).toEqual([...WRITTEN_LOCK_ENTRY_KEYS].sort());
+  });
+});
+
+describe("local-storage.schema.json names the keys the code actually uses", () => {
+  let parsed: Record<string, unknown>;
+  beforeAll(async () => {
+    parsed = (await readSchema("local-storage.schema.json")).parsed;
+  });
+
+  it("documents the device-elements table under its producer's key and the passphrase under the secret id — producer vs. producer", () => {
+    const props = parsed.properties as Record<string, unknown>;
+    expect(Object.keys(props)).toContain(DEVICE_ELEMENTS_KEY);
+    expect(Object.keys(props)).toContain(PASSPHRASE_SECRET_ID);
+    expect(Object.keys(props)).toEqual(
+      expect.arrayContaining(["config-sync-device-optouts", "config-sync-baselines", "config-sync-device-id", "config-sync-coldstart-dismissed"])
+    );
+  });
+
+  it("the device-elements value space is exactly on/off", () => {
+    const definitions = parsed.definitions as { deviceElements: { additionalProperties: { additionalProperties: { enum?: string[] } } } };
+    expect(definitions.deviceElements.additionalProperties.additionalProperties.enum).toEqual(["on", "off"]);
+  });
+});
+
+describe("run-history.schema.json matches runHistory.ts's record shape", () => {
+  let parsed: Record<string, unknown>;
+  beforeAll(async () => {
+    parsed = (await readSchema("run-history.schema.json")).parsed;
+  });
+
+  it("the kind enum carries every RunKind including the removal actions", () => {
+    const definitions = parsed.definitions as { runRecord: { properties: { kind: { enum?: string[] } } } };
+    expect(definitions.runRecord.properties.kind.enum).toEqual(["capture", "apply", "pull", "push", "adopt", "stop-sync", "delete-leftover"]);
   });
 });

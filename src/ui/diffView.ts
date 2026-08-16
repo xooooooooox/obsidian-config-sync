@@ -1,6 +1,6 @@
 import { Platform, setIcon } from "obsidian";
 
-// Shared git-style diff renderer (extracted from ConflictModal, 定稿 conflict-modal-v4):
+// Shared git-style diff renderer (extracted from ConflictModal):
 // unified/split views, LCS line diff with a cap, session-level view preference. Consumed by
 // the conflict modal and the Sync Center's inline change diffs.
 

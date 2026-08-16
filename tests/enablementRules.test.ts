@@ -46,7 +46,7 @@ describe("enablementRules", () => {
     });
   });
 
-  it("an everywhere write clears the entry, and clearing the last one leaves data.json as it was found (C-#26)", () => {
+  it("an everywhere write clears the entry, and clearing the last one leaves data.json as it was found", () => {
     const before = emptyItemMap();
     const with1 = withEnablementRule(before, "core-plugins", "daily-notes", THIS_DEVICE);
     const back = withEnablementRule(with1, "core-plugins", "daily-notes", EVERYWHERE);

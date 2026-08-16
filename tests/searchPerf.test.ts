@@ -3,16 +3,13 @@ import { SyncCenterView } from "../src/ui/SyncCenterView";
 import { SyncGroup } from "../src/core/types";
 import { GroupStatus } from "../src/core/status";
 
-// C-#48 (docs/superpowers/specs/2026-08-10-c-livetest-batch23-search-perf.md): live-measured on a
-// 100+ row vault, a single search keystroke cost 400-500ms end to end. Real instrumentation (a
-// live Sync Center, temporary performance.now() wrappers around the real methods — see the task
-// report, not shipped here) attributed the overwhelming majority of that to `familySearchText`
-// re-deriving every row's searchable text from scratch on every one of a keystroke's several
-// full-row-list passes (sidebar per-section badges, filter pills, each type section): each call
-// rescans `familyCompanions`, which itself walks the WHOLE group list through
-// `host.companionParentOf` — on a 100+ row vault, tens of thousands of redundant calls per
-// keystroke. `rows()` (the sorted row list) showed the same pattern at smaller scale — rebuilt and
-// re-sorted from scratch on every sidebar section entry.
+// Search-keystroke performance: a single keystroke makes several full-row-list passes (sidebar
+// per-section badges, filter pills, each type section). Without memoization, `familySearchText`
+// re-derives every row's searchable text from scratch on each pass — each call rescans
+// `familyCompanions`, which itself walks the WHOLE group list through `host.companionParentOf` —
+// tens of thousands of redundant calls per keystroke on a 100+ row vault. `rows()` (the sorted
+// row list) has the same shape at smaller scale. These tests pin the memo caches and the debounce
+// that keep that work per-render, not per-call.
 //
 // These tests drive the REAL private familySearchText/rows/debounceSearchRender via the same
 // harness idiom as tests/emptyVerbDegradation.test.ts (a minimal fake host, bracket access to
@@ -72,7 +69,7 @@ function harness(opts: { groups: SyncGroup[]; statuses: Record<string, GroupStat
   };
 }
 
-describe("familySearchText — per-row memoization (C-#48)", () => {
+describe("familySearchText — per-row memoization", () => {
   it("first call derives the family text (own name + label + every companion's)", () => {
     const parent = fileGroup("custom-notes", "My Notes");
     const companion = fileGroup("notes-attachments", "Attachments");
@@ -121,7 +118,7 @@ describe("familySearchText — per-row memoization (C-#48)", () => {
     expect(textB).not.toContain("Alpha");
   });
 
-  // Review fix-round-1 (adjudicated gap): the memo-hit tests above prove the FAST path; they don't
+  // The memo-hit tests above prove the FAST path; they don't
   // prove the cache can't go stale. This is the actual risk surface — a memo that never clears
   // would "work" (fast, wrong) forever. Applies the EXACT clear the source performs at the top of
   // render()/reload() (`searchTextCache.clear()`), never a different one, so this stays true to
@@ -163,7 +160,7 @@ describe("familySearchText — per-row memoization (C-#48)", () => {
   });
 });
 
-describe("rows() — per-render-cycle memoization (C-#48)", () => {
+describe("rows() — per-render-cycle memoization", () => {
   it("repeat calls return the same sorted content without re-deriving family groups", () => {
     const groups = [fileGroup("zeta", "Zeta"), fileGroup("alpha", "Alpha"), fileGroup("mid", "Mid")];
     const statuses: Record<string, GroupStatus> = Object.fromEntries(groups.map((g) => [g.name, { group: g.name, state: "no-settings" as const }]));
@@ -177,7 +174,7 @@ describe("rows() — per-render-cycle memoization (C-#48)", () => {
     expect(second.map((r) => r.group.name)).toEqual(["alpha", "mid", "zeta"]); // sort order preserved
   });
 
-  // Review fix-round-1 (adjudicated gap): rows() depends on BOTH this.groups AND this.statuses
+  // rows() depends on BOTH this.groups AND this.statuses
   // (a group with no matching status entry is filtered out) — invalidation must hold for either
   // mutation, using the exact clear the source performs (`rowsCache = null`).
   it("clearing rowsCache (the render()/reload() invalidation point) picks up a newly-added group", () => {
@@ -207,7 +204,7 @@ describe("rows() — per-render-cycle memoization (C-#48)", () => {
   });
 });
 
-describe("debounceSearchRender — single trailing timer, settles on the final call (C-#48 spec §3)", () => {
+describe("debounceSearchRender — single trailing timer, settles on the final call", () => {
   // debounceSearchRender uses window.setTimeout/clearTimeout (the repo's own idiom — see the
   // pre-existing slowTimer/ticker fields in SyncCenterView.ts) — this test env has no DOM/window
   // (this repo's UI code has no DOM test harness), so `window` is stubbed via vitest's own
@@ -258,16 +255,15 @@ describe("debounceSearchRender — single trailing timer, settles on the final c
     expect(seen).toEqual(["a", "b"]);
   });
 
-  // Review fix-round-2 (Important gap, round-1 was incomplete): the cold-start banner's
-  // "Review settings →"/dismiss handlers call `renderMainRegion()` DIRECTLY, bypassing the
-  // render()/reload()-only cancel round-1 added — a realistic sequence (type in the compact search
+  // The cold-start banner's "Review settings →"/dismiss handlers call `renderMainRegion()`
+  // DIRECTLY, bypassing render()/reload() — a realistic sequence (type in the compact search
   // box, then tap the banner within the debounce window — both visible together on a first-run
-  // phone) left the OLD timer to fire later into DOM `renderMainRegion()` had already replaced,
-  // running the compact path's stale `renderPills`/`renderSectionsBody`/`refreshGlobalSelectAll`
-  // closure against detached elements. Round-2 moved the cancel to the TOP of `renderMainRegion()`
-  // itself instead — the single method every caller (render(), reload() via render(), the
-  // debounce's own trailing call, AND both banner handlers) funnels through — and removed the
-  // round-1 render()/reload() copies (single source of truth). This drives the REAL
+  // phone) would otherwise leave the OLD timer to fire later into DOM `renderMainRegion()` had
+  // already replaced, running the compact path's stale
+  // `renderPills`/`renderSectionsBody`/`refreshGlobalSelectAll` closure against detached elements.
+  // So the cancel lives at the TOP of `renderMainRegion()` itself — the single method every
+  // caller (render(), reload() via render(), the debounce's own trailing call, AND both banner
+  // handlers) funnels through (single source of truth). This drives the REAL
   // `renderMainRegion()`, not a simulated proxy: `mainEl` stays null in this harness (no DOM), so
   // the call exercises exactly the cancel block and then returns — the same short-circuit
   // production hits whenever `renderMainRegion()` runs before the view's first full render.

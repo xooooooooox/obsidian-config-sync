@@ -203,7 +203,7 @@ describe("parseSwitchList", () => {
   });
 });
 
-describe("captureSwitchList (array shape) — pass-through for excluded ids (甲)", () => {
+describe("captureSwitchList (array shape) — pass-through for excluded ids", () => {
   it("returns structurally equal copy with empty exceptions (store irrelevant)", () => {
     const input: SwitchList = ["a", "b", "c"];
     const result = captureSwitchList(input, ["stale"], []);
@@ -247,7 +247,7 @@ describe("captureSwitchList (array shape) — pass-through for excluded ids (甲
   });
 });
 
-describe("captureSwitchList (map shape) — pass-through for excluded ids (甲)", () => {
+describe("captureSwitchList (map shape) — pass-through for excluded ids", () => {
   it("returns structurally equal copy with empty exceptions", () => {
     const input: SwitchList = { a: true, b: false };
     const result = captureSwitchList(input, { a: true }, []);

@@ -402,10 +402,10 @@ describe("capture", () => {
     expect(again[0]?.filesWritten).toEqual([]); // unchanged local content — nothing rewritten
   });
 
-  // C-#36: an encrypted FIELD whose plaintext didn't change must reuse its existing store envelope
+  // An encrypted FIELD whose plaintext didn't change must reuse its existing store envelope
   // byte-for-byte, even when the group's file is rewritten because a DIFFERENT, unrelated field
-  // changed — mirrors the live BRAT bug (token fields' plaintexts identical both sides; the real
-  // change was pluginSubListFrozenVersion, but every capture re-encrypted the tokens anyway).
+  // changed — the BRAT shape: token fields' plaintexts identical both sides while the real change
+  // is pluginSubListFrozenVersion; re-encrypting the tokens anyway would churn the store.
   it("captures fields-mode encrypted keys as envelopes; re-capture with an unrelated plain-field change reuses the untouched envelope", async () => {
     const FIELDS_MANIFEST = JSON.stringify({
       version: 1,
@@ -482,7 +482,7 @@ describe("apply", () => {
     expect(plugins.log).toEqual(["disable:demo", "enable:demo"]);
   });
 
-  it("mirrors dir groups with deletion and writes no backup (round-7 spec §3: revert removed)", async () => {
+  it("mirrors dir groups with deletion and writes no backup (there is no revert facility)", async () => {
     const { io, ctx } = setup();
     await seedStore(io, ctx);
     io.seed({ ".obs/snippets/local-only.css": "bye", ".obs/snippets/one.css": "one-v1" });
@@ -501,7 +501,7 @@ describe("apply", () => {
     expect(results[0]?.messages[0]).toContain("capture it from the source vault first");
   });
 
-  it("deletes a leftover 1.x backup folder on apply (round-7 spec §3: legacy cleanup)", async () => {
+  it("deletes a leftover 1.x backup folder on apply (legacy cleanup)", async () => {
     const { io, ctx } = setup();
     await seedStore(io, ctx);
     io.seed({ ".obs/config-sync-backup/index.json": "{}", ".obs/config-sync-backup/files/0": "old" });
@@ -546,13 +546,13 @@ describe("apply", () => {
   });
 });
 
-// C-#31: adoptConfiguration (main.ts) applies the self group ("plugin-config-sync") through this
-// same apply() — the exact path an "Adopt configuration" run takes. This is the §2 adopt truth
+// adoptConfiguration (main.ts) applies the self group ("plugin-config-sync") through this
+// same apply() — the exact path an "Adopt configuration" run takes. The adopt truth
 // table: a store self-copy carrying bratIndex/memberRules/items/customGroups (every kind of
 // top-level field the self item can carry, none of them preset-excluded) plus its own trio values,
 // applied over a local copy with DIFFERENT trio values — every synced field must come out equal to
 // the store, and the trio must come out equal to the PRE-adopt local values, untouched.
-describe("apply — self group field completeness (adopt truth table, C-#31)", () => {
+describe("apply — self group field completeness (adopt truth table)", () => {
   const SELF_PATH = "{configDir}/plugins/config-sync/data.json";
   const STORE_SELF_REL = "cs/store/configdir/plugins/config-sync/data.json";
   const LOCAL_SELF_REL = ".obs/plugins/config-sync/data.json";
@@ -674,9 +674,9 @@ describe("applyWithActions", () => {
     expect(plugins.log).toContain("enable-persist:demo");
     expect(plugins.enabled.has("demo")).toBe(true);
   });
-  // Regression (live evidence 2026-08-09, C-#35): the fallback line was pushed once via the
-  // prelude's own `messages` and again via `finish`'s success return — applyWithActions pushes
-  // both unconditionally, so it rendered twice.
+  // The fallback line must render exactly once: applyWithActions pushes both the prelude's own
+  // `messages` and `finish`'s success return unconditionally, so a line placed in both would
+  // render twice.
   it("install-enable with a version fallback reports the note exactly once, as a success note (not an issue)", async () => {
     const { io, plugins, ctx } = setup();
     await seedStore(io, ctx);
@@ -1069,7 +1069,7 @@ describe("switch-list apply switches the delta at runtime (spec B)", () => {
     expect((r?.messages ?? []).some((m) => m.includes("a"))).toBe(true);
   });
 
-  // Regression (controller ruling, C-#35 follow-up): applyGroup pre-sets needsAppReload false
+  // applyGroup pre-sets needsAppReload false
   // right before the runtime switch runs (the switch itself is normally the reload), so a
   // per-id failure leaves the written file and the running app disagreeing — that must
   // restore needsAppReload to true (mirrors hotApplyAppearanceFamily's honest-on-failure
@@ -1845,10 +1845,10 @@ describe("readGroups / writeGroups", () => {
   });
 });
 
-// spec 2026-08-11-data-model-hardening.md §6. Two halves: the payload capture writes, and the CARRY
-// — §3.1 taught the parser to keep unknown keys, but capture rebuilds the whole lock and each
-// captured entry from its own values, so without the carry here that parser work is theatre and the
-// format still cannot evolve (task-2 finding I-1).
+// Two halves: the payload capture writes, and the CARRY
+// — the parser keeps unknown keys, but capture rebuilds the whole lock and each
+// captured entry from its own values, so without the carry here that parser work is theatre and
+// the format still cannot evolve.
 describe("store.lock.json v2 payload — capture", () => {
   const TWO_GROUPS = JSON.stringify({
     version: 1,
@@ -1987,7 +1987,7 @@ describe("capture app-version recording", () => {
   });
 });
 
-// task-2 (spec 2026-08-05-install-runtime-audit-round §2): the lock is the label's carrier for
+// The lock is the label's carrier for
 // not-installed plugins, so capture must resolve and record it the same way the registry does —
 // runtime plugin/core name, never the raw id.
 describe("capture records a group label", () => {
@@ -2024,7 +2024,7 @@ describe("capture records a group label", () => {
     expect(lock.items["obsidian"]?.["hotkeys"]).toEqual(capturedEntry({ source: { kind: "app", version: "1.8.7" } }));
   });
 
-  // I1 (final-review, 2026-08-05 round): pluginIdForGroup also resolves for a companion dir
+  // pluginIdForGroup also resolves for a companion dir
   // (group name = folder basename, not "plugin-<id>") and for custom rules on a plugin path.
   // Only the canonical "plugin-<id>" group may carry the community label — otherwise
   // displayLabelForGroup's storedLabel-fallback branch renders the companion as "Dataview › Dataview".
@@ -2057,7 +2057,7 @@ describe("capture records a group label", () => {
   });
 });
 
-// 2026-08-09-c-livetest-batch15 (spec 2026-08-09-c-livetest-batch15-member-labels.md): capture's
+// Capture's
 // own tail heal call (backfillLockLabels, wired with the store content this run just wrote) is
 // the writer for a captured carrier's memberLabels — COMMUNITY_MANIFEST/CORE_MANIFEST are defined
 // further down this file (switch-list exceptions describe block) but usable here: vitest runs
@@ -2087,13 +2087,13 @@ describe("capture records carrier memberLabels", () => {
   });
 });
 
-// batch6 task-1 (spec 2026-08-08-c-livetest-batch6-remote-labels.md): a group entry born before
-// capture started resolving labels (or from an all-in-sync run that never touched it) stays
+// A group entry born without a resolved label
+// (or from an all-in-sync run that never touched it) stays
 // label-less forever without a dedicated heal — backfillLockLabels is that heal, run at the tail
 // of every capture and once at startup (main.ts) so the remote pane always has a name to show.
 //
-// carrierLists (batch15 signature addition) is irrelevant to these single-label cases — both
-// carriers null means "nothing to heal there", so behavior is byte-identical to the pre-batch15 calls.
+// carrierLists is irrelevant to these single-label cases — both
+// carriers null means "nothing to heal there".
 const NO_CARRIER_LISTS: Record<"core-plugins" | "community-plugins", SwitchList | null> = {
   "core-plugins": null,
   "community-plugins": null,
@@ -2184,10 +2184,10 @@ describe("backfillLockLabels", () => {
   });
 });
 
-// C-#45 (spec 2026-08-10-c-livetest-batch22-device-optout.md §4): the tail heal must not
+// The tail heal must not
 // resurrect/write a lock entry for a group THIS device has opted out of, even when it's otherwise
 // perfectly resolvable — `excluded` is a bare extra skip check ahead of the existing entry lookup.
-describe("backfillLockLabels — excluded (C-#45)", () => {
+describe("backfillLockLabels — excluded", () => {
   const PLUGIN_DEMO_GROUP: SyncGroup = withRef({ name: "plugin-demo", path: "{configDir}/plugins/demo/data.json", type: "file", devices: "all" });
 
   it("skips a label-less resolvable entry that is in the excluded set", () => {
@@ -2203,7 +2203,7 @@ describe("backfillLockLabels — excluded (C-#45)", () => {
     expect(lock.items["community"]?.["demo"]).toEqual({ source: { kind: "plugin", version: "1.0.0" } }); // no label written
   });
 
-  it("an omitted excluded set heals exactly as before (backward compatible)", () => {
+  it("an omitted excluded set heals every resolvable entry", () => {
     const { plugins } = setup();
     plugins.installedNames.set("demo", "Demo Plugin");
     const lock: StoreLock = {
@@ -2230,9 +2230,9 @@ describe("backfillLockLabels — excluded (C-#45)", () => {
   });
 });
 
-// C-#45 (spec §4): runner-level payload guard — the pure filter main.ts's captureItems/applyItems
+// Runner-level payload guard — the pure filter main.ts's captureItems/applyItems
 // call before a CaptureItem[]/ApplyItem[] ever reaches captureWithActions/applyWithActions.
-describe("excludeOptedOutItems (C-#45)", () => {
+describe("excludeOptedOutItems", () => {
   it("drops an item whose name is in the opted-out set", () => {
     const items = [{ name: "a" }, { name: "b" }, { name: "c" }];
     expect(excludeOptedOutItems(items, new Set(["b"]), (n) => n)).toEqual([{ name: "a" }, { name: "c" }]);
@@ -2252,9 +2252,9 @@ describe("excludeOptedOutItems (C-#45)", () => {
   });
 });
 
-// C-#45 (spec §4): capture()'s own tail-heal call threads optedOutForHeal straight into
+// capture()'s own tail-heal call threads optedOutForHeal straight into
 // backfillLockLabels — an end-to-end proof the two unit-tested pieces above actually wire together.
-describe("capture — optedOutForHeal threads through to the tail heal (C-#45)", () => {
+describe("capture — optedOutForHeal threads through to the tail heal", () => {
   it("an opted-out group's stale/label-less lock entry is carried forward but never healed", async () => {
     const { io, plugins, ctx } = setup();
     plugins.installedNames.set("demo", "Demo Plugin");
@@ -2271,7 +2271,7 @@ describe("capture — optedOutForHeal threads through to the tail heal (C-#45)",
   });
 });
 
-// 2026-08-09-c-livetest-batch15 (spec 2026-08-09-c-livetest-batch15-member-labels.md): the two
+// The two
 // carrier lock entries (core-plugins, community-plugins) additionally carry memberLabels — a name
 // for every CURRENT store-list member this device can resolve, healed the same way the single
 // label above is (write-only-on-change, capturedAt untouched).
@@ -2361,12 +2361,12 @@ describe("backfillLockLabels memberLabels", () => {
     expect(lock.capturedAt).toBe("2026-01-01T00:00:00.000Z");
   });
 
-  // Review round 2 fix (2026-08-09-c-livetest-batch15): the heal must MERGE additively — a name
+  // The heal must MERGE additively — a name
   // this device can't resolve locally must survive from the existing map, never get erased just
-  // because this device's own plugin set is narrower. Reviewer's exact empirical repro: seeded
-  // {completr, dataview}, a device with only dataview installed used to heal the map down to
-  // {dataview} — completr's name was gone.
-  it("superset preservation: a name unresolvable on THIS device survives the heal (reviewer repro)", () => {
+  // because this device's own plugin set is narrower. The failure shape: seeded
+  // {completr, dataview}, a device with only dataview installed heals the map down to
+  // {dataview} — completr's name is gone.
+  it("superset preservation: a name unresolvable on THIS device survives the heal", () => {
     const { plugins } = setup();
     plugins.installedNames.set("dataview", "Dataview"); // "completr" is NOT installed here
     const lock: StoreLock = {
@@ -2499,7 +2499,7 @@ describe("pull lock adoption for identical groups (version-refresh chain)", () =
     await applyImport(ctx, pending, []);
     const lock = JSON.parse(await io.read("cs/store.lock.json")) as { capturedAt: string; syncedWatermark: string; items: Record<string, Record<string, StoreLockEntry>> };
     expect(lock.items["obsidian"]?.["hotkeys"]?.source?.version).toBe("2.0.0"); // adopted despite zero file writes
-    // spec §6 split the one field that used to carry both meanings: the remote's lineage lands on
+    // Two fields, two meanings: the remote's lineage lands on
     // syncedWatermark (which is what makes remoteLockAhead settle), while capturedAt keeps
     // describing this store's own content and is never overwritten with the remote's stamp.
     expect(lock.syncedWatermark).toBe("newer");
@@ -2580,7 +2580,7 @@ describe("switch-list exceptions", () => {
       expect(JSON.parse(await io.read(".obs/community-plugins.json"))).toEqual(["a", "b"]);
     });
 
-    // Mask table (Sync Center unified grammar, task 2): always-here → exception + forceOn. The
+    // Mask table: always-here → exception + forceOn. The
     // member is off locally AND off in the store list, yet an always-here rule still turns it on.
     it("switchForceOn turns on an always-here member that is off locally and off in the store", async () => {
       const { io, ctx } = setup();
@@ -2703,7 +2703,7 @@ describe("switch-list exceptions", () => {
   });
 });
 
-describe("partial-selection switch staging (Sync Center unified grammar, task 3)", () => {
+describe("partial-selection switch staging", () => {
   describe("applyWithActions with ApplyItem.stagedMembers", () => {
     it("stages a subset — only staged members flip, delta message shrinks to them", async () => {
       const { io, ctx } = setup();
@@ -2734,7 +2734,7 @@ describe("partial-selection switch staging (Sync Center unified grammar, task 3)
       expect(JSON.parse(await io.read(".obs/community-plugins.json"))).toEqual(["keep"]);
     });
 
-    it("stagedMembers undefined applies the whole list, byte-for-byte as today", async () => {
+    it("stagedMembers undefined applies the whole list", async () => {
       const { io, ctx } = setup();
       io.seed({
         ".obs/community-plugins.json": JSON.stringify(["keep", "local-only"]),
@@ -2748,10 +2748,10 @@ describe("partial-selection switch staging (Sync Center unified grammar, task 3)
       expect(JSON.parse(await io.read(".obs/community-plugins.json"))).toEqual(["keep", "store-only"]);
     });
 
-    // Review fix (task 3): subtractForceOff/addForceOn used to run unconditionally, ignoring
+    // subtractForceOff/addForceOn must not run unconditionally, ignoring
     // stagedMembers — a force-on/off mask could flip an UNSTAGED member's switch even with
-    // stagedMembers: []. Masks must now be scoped to stagedMembers when it is provided.
-    it("stagedMembers: [] leaves an active switchForceOn mask untouched (reviewer counterexample)", async () => {
+    // stagedMembers: []. Masks are scoped to stagedMembers when it is provided.
+    it("stagedMembers: [] leaves an active switchForceOn mask untouched", async () => {
       const { io, ctx } = setup();
       ctx.switchForceOn = { "community-plugins": ["always-on"] };
       io.seed({
@@ -2821,10 +2821,8 @@ describe("partial-selection switch staging (Sync Center unified grammar, task 3)
 // (compile-time-only), same as customGroups.test.ts — main.ts has no harness of its own (Plugin is
 // stubbed to an empty class by tests/mock-obsidian.ts).
 //
-// The switch-mask suites that used to live here — addSwitchExceptions' this-device pins,
-// switchMemberDecisions, the persisted-vs-live rule readings, and Item.runsOn's stored-rule
-// precedence — retired with the two-layer cutover (2026-08-12-enablement-two-layers-design.md §5).
-// Their successor is tests/enablementRuntime.test.ts, which asserts on the same coreContext()
+// Switch-mask behavior (exceptions, force masks, rule precedence) is covered by
+// tests/enablementRuntime.test.ts, which asserts on coreContext()
 // outputs against the stored rule + this device's own exception.
 function fakePluginApp(): unknown {
   return {
@@ -2856,7 +2854,7 @@ function makeDisplayNamePlugin(lastLock: StoreLock | null): DisplayNamePluginSur
   return instance;
 }
 
-// task-2 (spec 2026-08-05-install-runtime-audit-round §2): the resolver order is
+// The resolver order is
 // runtime name -> stored (registry) label -> lock label -> id. Runtime always misses here
 // (fakePluginApp has no manifests), so these cases isolate stored-vs-lock-vs-id.
 describe("displayName / displayParts — lock label as the final fallback", () => {
@@ -3133,7 +3131,7 @@ interface SelfStatusPluginSurface {
   syncCenterHost: () => { selfStatus: () => Promise<SelfSyncInfo> };
 }
 
-// C-#19 (spec 2026-08-08-c-livetest-batch9 \u00a71): storePresent must reflect the store lock OR the
+// storePresent must reflect the store lock OR the
 // store's self-copy, never itemCount \u2014 a device with no compiled local list (settings.items
 // stays {} here, same as makeSwitchPlugin's stub loadData) always takes selfStatus's coldstart
 // early return, so these cases isolate storePresent's own derivation.
@@ -3152,7 +3150,7 @@ function makeSelfStatusPlugin(io: MemFS): SelfStatusPluginSurface {
   return instance;
 }
 
-describe("selfStatus.storePresent (C-#19)", () => {
+describe("selfStatus.storePresent", () => {
   it("lock only \u2192 storePresent true", async () => {
     const io = new MemFS();
     io.seed({ "cs/store.lock.json": JSON.stringify({ capturedAt: "2026-08-01T00:00:00.000Z", groups: {} }) });

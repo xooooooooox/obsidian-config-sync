@@ -7,15 +7,15 @@ import { groupExcludedHere } from "../src/ui/panelModel";
 import { Item } from "../src/core/registry";
 import { itemsIn } from "./items";
 
-// C-#24 root cause (ledger .superpowers/sdd/2026-08-06-c-livetest/issues.md): groupsForDevice
+// groupsForDevice
 // (ConfigSyncCore.ts:138-140) drops a scope-mismatched group before statusForGroups ever runs —
-// correct for capture/apply (comparing content across device classes is meaningless), but that
-// same drop used to make computeStatuses (main.ts, SyncCenterHost) omit the group's status AND
-// availability entirely, so SyncCenterView.rows()/familyGroups() never produced a row for it —
-// the item was invisible, not merely mislabeled "In sync". This test drives the REAL plugin
+// correct for capture/apply (comparing content across device classes is meaningless), but if that
+// same drop reached computeStatuses (main.ts, SyncCenterHost) it would omit the group's status AND
+// availability entirely, so SyncCenterView.rows()/familyGroups() would never produce a row for it —
+// the item would be invisible, not merely mislabeled "In sync". This test drives the REAL plugin
 // (main.ts has no dedicated test harness — mock-obsidian.ts stubs it to an empty class — so this
 // builds the minimum fake `app` the way mainReloadSettings.test.ts does) through the actual
-// syncCenterHost().computeStatuses() wiring to pin that a rule-excluded item now gets a row.
+// syncCenterHost().computeStatuses() wiring to pin that a rule-excluded item gets a row.
 function fakeApp(): unknown {
   return {
     vault: {
@@ -41,7 +41,7 @@ function baseData(obsidian: Record<string, unknown>): unknown {
   return { schemaVersion: 4, items: itemsIn({ obsidian: obsidian as Record<string, Item> }), remotes: [] };
 }
 
-describe("SyncCenterHost.computeStatuses — a device-scope-excluded item still gets a row (C-#24)", () => {
+describe("SyncCenterHost.computeStatuses — a device-scope-excluded item still gets a row", () => {
   it("hotkeys scoped mobile-only on a desktop-class instance: still present, synthetic neutral status", async () => {
     const plugin = new ConfigSyncPlugin({} as never, {} as never);
     const instance = plugin as unknown as {
@@ -94,7 +94,7 @@ describe("SyncCenterHost.computeStatuses — a device-scope-excluded item still 
     expect(statuses.find((s) => s.group === "hotkeys")?.state).toBe("no-settings");
   });
 
-  // C-#24 fix round 2: the real Settings-sync menu write path (setItemFileSharing), driven end to
+  // The real Settings-sync menu write path (setItemFileSharing), driven end to
   // end through saveSettings' own recompile — never a hand-built settings shape — feeding the
   // resulting compiled group straight into groupExcludedHere, the same call computeFateInput makes.
   it("the real setItemFileSharing('hotkeys','mobile') write path compiles a group groupExcludedHere reads true", async () => {
@@ -125,12 +125,11 @@ describe("SyncCenterHost.computeStatuses — a device-scope-excluded item still 
   });
 });
 
-// C-#25/C-#26 (docs/superpowers/specs/2026-08-09-c-livetest-batch12-fields-honesty.md): the live
-// repro was setItemFileSharing resolving without error on a fields-mode item while persisting
-// nothing (deriveMode stripped the just-written fileRule at the old main.ts:1350) — the item's
-// card no longer offers that menu at all (SyncCenterView's renderSettingsSyncRow), but the API
+// setItemFileSharing must never resolve without error on a fields-mode item while persisting
+// nothing (deriveMode would strip a just-written fileRule) — the item's
+// card doesn't offer that menu at all (SyncCenterView's renderSettingsSyncRow), but the API
 // itself must also refuse the write outright rather than silently no-op for any other caller.
-describe("setItemFileSharing — fields-mode guard (C-#25) + write-back pruning (C-#26)", () => {
+describe("setItemFileSharing — fields-mode guard + write-back pruning", () => {
   type Harness = {
     app: unknown;
     settings: { items: { obsidian: Record<string, { settingsFile?: { fileRule?: { sharing: FileSharing; encrypted: boolean } } }> } };

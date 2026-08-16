@@ -14,22 +14,22 @@ import { EVERYWHERE, perClass } from "../src/core/types";
 // test-only static capture without lying about the real API surface anywhere else.
 const NoticeSpy = Notice as unknown as { lastMessage: string | undefined };
 
-// Review finding 1 (Task 4 fix round 1): adoptConfiguration and applyItems (main.ts) both call
-// loadSettings() after a self-group apply rewrites the plugin's own data.json, but never
-// recompiled — compiledGroups stayed stale until an unrelated save/restart. The fix routes both
-// call sites through a new private reloadSettings() = loadSettings() + recompile().
+// adoptConfiguration and applyItems (main.ts) both call
+// loadSettings() after a self-group apply rewrites the plugin's own data.json; without a
+// recompile, compiledGroups would stay stale until an unrelated save/restart. Both
+// call sites therefore route through a private reloadSettings() = loadSettings() + recompile().
 //
 // main.ts has no existing test harness (it extends Obsidian's real Plugin, which the vitest mock
 // — tests/mock-obsidian.ts — deliberately stubs to an empty class since "no test drives these
 // components"). This test builds the minimum fake `app`/`loadData` needed to exercise
 // loadSettings/recompile/reloadSettings directly on a real ConfigSyncPlugin instance, via bracket
 // access to bypass TypeScript's `private` (a compile-time-only restriction) — it is a real
-// regression test, not a mock of the behavior under test: reverting reloadSettings() back to
-// loadSettings()-only during development made it fail (see fix-round-1 report).
+// regression test, not a mock of the behavior under test: it fails if reloadSettings() is
+// reduced to loadSettings() without the recompile.
 function fakeApp(local: Map<string, string> = new Map()): unknown {
   return {
-    // reloadSettings() re-keys this device's own two localStorage stores after the compile (spec
-    // §4) — a fake App without them would fail on the read, not on anything this file is about.
+    // reloadSettings() re-keys this device's own two localStorage stores after the compile —
+    // a fake App without them would fail on the read, not on anything this file is about.
     // Stateful so the re-key can be OBSERVED, not merely tolerated (see the compile-gate test).
     loadLocalStorage: (key: string) => local.get(key) ?? null,
     saveLocalStorage: (key: string, value: unknown) => {
@@ -90,11 +90,11 @@ describe("ConfigSyncPlugin.reloadSettings — loadSettings() must be followed by
   });
 });
 
-// Final-review defense-in-depth / seam test 3: recompile()'s catch branch must keep whatever
+// recompile()'s catch branch must keep whatever
 // compiledGroups held before the failing recompile (mid-session, that's the last-good compiled
 // list — never wiped to reflect the bad in-flight edit) and its Notice must name the offending
 // group/item and the reason, not a generic line.
-describe("ConfigSyncPlugin.recompile — keeps last-good compiledGroups on a mid-session failure (final-review defense-in-depth)", () => {
+describe("ConfigSyncPlugin.recompile — keeps last-good compiledGroups on a mid-session failure", () => {
   it("a CompileError from a colliding custom path leaves the previous compiledGroups untouched and names the offending items in the Notice", async () => {
     const plugin = new ConfigSyncPlugin({} as never, {} as never);
     const instance = plugin as unknown as {
@@ -174,10 +174,10 @@ describe("ConfigSyncPlugin.loadSettings/saveSettings — nested defaults and an 
     expect((saved()?.runHistory as { maxDays: number }).maxDays).toBe(30);
   });
 
-  // C-#54 phase 2 (spec 2026-08-11-v3-one-vocabulary-design.md §5): `companions: []` is no longer
-  // written. It only ever persisted so a build that read `cfg.companions` unguarded could still
-  // read our document, and no such build can read a v3 document at all — the version gate refuses
-  // it. An absent key already means "no companion folders" everywhere it is read.
+  // `companions: []` is never
+  // written: an absent key already means "no companion folders" everywhere it is read, and
+  // no build that read `cfg.companions` unguarded can read a v3 document at all — the version
+  // gate refuses it.
   it("does not write an empty companions list for an item that has no companion folders", async () => {
     const { instance, saved } = makeLoadSavePlugin(
       baseData({
@@ -208,14 +208,14 @@ describe("ConfigSyncPlugin.loadSettings/saveSettings — nested defaults and an 
 
 });
 
-// spec 2026-08-11-data-model-hardening.md §3.2 (invariant II.2): the load path used to drop every
-// stored rule value this build doesn't recognise and save immediately, so a rule written by a
-// NEWER build became a deletion this device pushed to the whole fleet on its next capture. The
-// value must now survive the load untouched, trigger no save, and simply be ignored at the point
+// The load path must never drop a
+// stored rule value this build doesn't recognise and save immediately — a rule written by a
+// NEWER build would become a deletion this device pushes to the whole fleet on its next capture.
+// The value must survive the load untouched, trigger no save, and simply be ignored at the point
 // of use.
 //
-// The rule itself moved with the two-layer cutover (2026-08-12-enablement-two-layers-design.md
-// §3.3): it lives on the carrier item's `perElement` map, and `asSharing` (enablementRules.ts) is
+// The rule lives on the carrier item's `perElement` map (2026-08-12-enablement-two-layers-design.md
+// §3.3), and `asSharing` (enablementRules.ts) is
 // what drops an unreadable one FROM THE READ. Both halves are asserted here through the real
 // plugin — the surviving bytes, and the two readers that must not act on them.
 describe("ConfigSyncPlugin.loadSettings — an unrecognised enablement rule survives and is ignored", () => {
@@ -230,7 +230,7 @@ describe("ConfigSyncPlugin.loadSettings — an unrecognised enablement rule surv
   }
 
   // The reserved key "" is perElementKeyFor("community-plugins") — asserted against the producer,
-  // never spelled as a literal (spec §9 lesson 2).
+  // never spelled as a literal.
   const carrierWithRules = (rules: Record<string, unknown>): ItemMap =>
     itemsIn({
       obsidian: {
@@ -254,8 +254,8 @@ describe("ConfigSyncPlugin.loadSettings — an unrecognised enablement rule surv
     };
 
     // No recompile(): this fixture hand-writes `mode: "fields"` on the carrier, and manifest.ts's
-    // perElement validator rejects a sharing shape it does not know. That seam is CLOSED rather
-    // than owned by task 9: a carrier's mode is DERIVED (registry.ts's deriveMode, which excludes
+    // perElement validator rejects a sharing shape it does not know. That seam is CLOSED by
+    // construction: a carrier's mode is DERIVED (registry.ts's deriveMode, which excludes
     // the reserved key by construction), so a rule written by the one writer — or by the v4
     // migration — leaves the carrier Plain, and compileSingleFile only copies `perElement` onto a
     // group in "fields" mode. An unknown rule therefore never reaches the validator at all. This
@@ -276,10 +276,10 @@ describe("ConfigSyncPlugin.loadSettings — an unrecognised enablement rule surv
   });
 });
 
-// spec 2026-08-11-data-model-hardening.md §3.3 (invariant II.4): bratIndex is a REPLICATED
+// bratIndex is a REPLICATED
 // index — a device without BRAT still needs it to install beta plugins. resolveBratIndex prunes
-// against THIS device's repo list, so on a device with no list at all the refresh used to save an
-// emptied index: a fleet-shared structure wiped by the device that knows least about it.
+// against THIS device's repo list, so on a device with no list at all the refresh would otherwise
+// save an emptied index: a fleet-shared structure wiped by the device that knows least about it.
 describe("ConfigSyncPlugin.refreshBratIndex — a device with no BRAT repo list writes nothing", () => {
   interface BratSurface {
     app: unknown;
@@ -316,7 +316,7 @@ describe("ConfigSyncPlugin.refreshBratIndex — a device with no BRAT repo list 
   });
 });
 
-// Final-review I1. The §4 re-key keys every baseline against `compiledGroups`, so it must not run
+// The baseline re-key keys every baseline against `compiledGroups`, so it must not run
 // when the compile that produced that list FAILED: `lockRefFor([])` has no rule for a companion or a
 // custom rule, so each of those baselines would land under `legacy/…` — and `rekeyLedger` would then
 // stamp the ledger's new version, so the mistake is never retried. Every one of them would read as
@@ -360,10 +360,10 @@ describe("the baseline re-key runs only when the compile it keys against succeed
     expect(local.get(BASELINES)).toBe(V1_LEDGER); // untouched — still v1, still name-keyed, still retryable
   });
 
-  // Final-review N1: the re-key was not the only writer that keys against `compiledGroups`. The
-  // status path prunes the ledger against it too, so a failed compile made it persist an EMPTY one —
-  // reaching I1's end state by a different road. Both preconditions now sit on saveBaselines, the
-  // ONE writer every baseline write goes through.
+  // The re-key is not the only writer that keys against `compiledGroups`. The
+  // status path prunes the ledger against it too, so a failed compile could make it persist an
+  // EMPTY one — the same end state by a different road. Both preconditions sit on saveBaselines,
+  // the ONE writer every baseline write goes through.
   it("no baseline write survives a failed compile, whichever writer asks", async () => {
     const local = new Map([[BASELINES, V1_LEDGER]]);
     const instance = makePlugin(

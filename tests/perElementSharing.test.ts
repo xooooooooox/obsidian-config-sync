@@ -6,7 +6,7 @@ import { PerElementSharing, perClass, SyncGroup, EVERYWHERE, THIS_DEVICE } from 
 import { capture, CoreContext, writeGroups } from "../src/core/ConfigSyncCore";
 import { MemFS, FakePlugins, memGroupsIO } from "./memfs";
 
-// Task 3 (spec 2026-07-25-unified-card-design.md §3, D3): per-item scopes generalize
+// Per-item scopes (spec 2026-07-25-unified-card-design.md §3) generalize
 // switch-list semantics to any string-array key. capture(c) = local[scope∈{all,c}] (local
 // order) ++ store[scope=otherClass(c)] (store order), deduped first-occurrence-wins.
 // apply(c) = store[scope∈{all,c}] (store order) ++ local[scope=local] (local order), deduped.
@@ -238,7 +238,7 @@ describe("manifest validation — perItem", () => {
   });
 });
 
-// Handoff note (task-4-brief.md): captureTransform's optional 5th param (prior store content) —
+// captureTransform's optional 5th param (prior store content) —
 // ConfigSyncCore.ts's captureGroup must thread the EXISTING store copy through it for perItem
 // groups, or a second device's capture degrades to first-capture semantics every run and
 // silently drops whatever the other device already contributed. Drives capture() end-to-end

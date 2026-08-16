@@ -1,10 +1,10 @@
 /**
- * THE precedence (spec 2026-08-12-enablement-two-layers-design.md §5): given the fleet rule for an
+ * THE precedence: given the fleet rule for an
  * element, this device's own exception for it, and this device's class, what does a run do?
  *
- * Four rules, top down, first hit wins — and they are HERE, once, because they used to be spread
- * across `memberLocalIdsFor`, `memberForceOffIds`, `runsOnForces` and `preferStoredRunsOn`, which is
- * why "a local choice survives a pull" (C-#52) was true in one of them and false in another.
+ * Four rules, top down, first hit wins — and they are HERE, once: spread across several
+ * independent derivations, "a local choice survives a pull" can be true in one of them and
+ * false in another.
  *
  * The two outputs mean what they have always meant to the switch-list engine:
  *   - `masked`: the id joins `switchExceptions` — capture passes it through untouched (it can

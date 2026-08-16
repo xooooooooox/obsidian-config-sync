@@ -28,11 +28,11 @@
     },
     "pkmMode": {
       "enum": ["auto", "ioto", "default"],
-      "description": "Which PKM framework convention decides the store's default root path (src/core/pkm.ts's PkmMode). \"auto\" detects the ioto-update plugin at runtime; \"ioto\"/\"default\" pin the choice. Transport wiring, not the sync contract — locked out of the self item's own store copy by catalog.ts's selfPresetRules (this-device sharing), so it never travels to another device via a pull/push of config-sync's own settings."
+      "description": "Which PKM framework convention decides the store's default root path (src/core/pkm.ts's PkmMode). \"auto\" detects the ioto-update plugin at runtime; \"ioto\"/\"default\" pin the choice. Part of the fleet-shared contract: unlike rootPath and remotes it carries no selfPresetRules strip (catalog.ts locks only those two), so it travels with config-sync's own settings — the resulting root path still differs per device only if a device overrides rootPath."
     },
     "rootPath": {
       "type": "string",
-      "description": "Absolute-in-vault path to this device's sync store root, or \"\" to follow the pkmMode default (src/core/pkm.ts's resolveRootPath). Locked-local transport wiring (catalog.ts's selfPresetRules, sharing: this-device) — every device may legitimately point at a different root, so this field is stripped from the self item's own store copy and never overwrites another device's value on pull/apply."
+      "description": "Vault-relative path (no leading slash — e.g. the defaults \"config-sync\" and \"0-Extra/config-sync\") to this device's sync store root, or \"\" to follow the pkmMode default (src/core/pkm.ts's resolveRootPath). Locked-local transport wiring (catalog.ts's selfPresetRules, sharing: this-device) — every device may legitimately point at a different root, so this field is stripped from the self item's own store copy and never overwrites another device's value on pull/apply."
     },
     "remotes": {
       "type": "array",
@@ -76,8 +76,8 @@
     "fileSharing": {
       "description": "A file-level Sharing that excludes this-device (src/core/types.ts's FileSharing): a Plain file that should not sync at all is expressed by the item's own `synced` toggle, not by a file-level rule.",
       "oneOf": [
-        { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "everywhere" } } },
-        { "type": "object", "additionalProperties": false, "required": ["kind", "class"], "properties": { "kind": { "const": "per-class" }, "class": { "enum": ["desktop", "mobile"] } } }
+        { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "everywhere" } }, "description": "Every device gets the same file content." },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "class"], "properties": { "kind": { "const": "per-class" }, "class": { "enum": ["desktop", "mobile"] } }, "description": "Each device CLASS keeps its own copy of the file; the other class's copy lives in a __scopes__ sidecar." }
       ]
     },
     "itemFieldRule": {
@@ -134,7 +134,7 @@
       "properties": {
         "path": { "type": "string", "description": "Vault-relative path; may start with the {configDir} variable." },
         "device": { "enum": ["all", "desktop", "mobile"], "description": "Which device class this companion group syncs on (src/core/types.ts's DeviceClass)." },
-        "enabled": { "type": "boolean" }
+        "enabled": { "type": "boolean", "description": "Whether this companion folder currently syncs (rides its owner's card). NOT the field the item-level `enabled` -> `synced` rename touched — companions kept the name because it never had the double meaning that forced the rename." }
       }
     },
     "item": {
@@ -195,8 +195,8 @@
           "additionalProperties": true,
           "required": ["name", "type", "storePath"],
           "properties": {
-            "name": { "type": "string", "minLength": 1 },
-            "type": { "const": "vault" },
+            "name": { "type": "string", "minLength": 1, "description": "Display name for this remote, unique among this device's remotes; also the key run records and status use to say which remote a pull/push targeted." },
+            "type": { "const": "vault", "description": "A sibling vault's store on the same filesystem, reached by path." },
             "storePath": { "type": "string", "pattern": "^(/|~($|/))", "description": "Absolute path of the store directory on this device's filesystem, or a leading-~ path. Never a vault-relative path — this is a filesystem location outside the vault entirely." },
             "excludeSelf": { "type": "boolean", "description": "true = config-sync's own settings never travel to/from this remote. Absent = false." }
           }
@@ -206,14 +206,14 @@
           "additionalProperties": true,
           "required": ["name", "type", "url", "branch"],
           "properties": {
-            "name": { "type": "string", "minLength": 1 },
-            "type": { "const": "git" },
-            "url": { "type": "string", "minLength": 1 },
-            "branch": { "type": "string", "minLength": 1 },
-            "subdir": { "type": "string", "description": "Store folder inside the repo; absent = repo root. Must stay inside the repository (no leading slash, no \"..\" segment)." },
-            "excludeSelf": { "type": "boolean" },
-            "tokenId": { "type": "string", "pattern": "^[a-z0-9-]+$", "maxLength": 64, "description": "Name of the keychain secret holding the access token — the token itself never enters data.json." },
-            "username": { "type": "string", "minLength": 1, "description": "Sent alongside the token; absent = \"token\", which PAT-only hosts ignore but a self-hosted GitLab validates." }
+            "name": { "type": "string", "minLength": 1, "description": "Display name for this remote, unique among this device's remotes; also the key run records and status use to say which remote a pull/push targeted." },
+            "type": { "const": "git", "description": "A git repository holding a store (desktop only — the git transport shells out to the git binary)." },
+            "url": { "type": "string", "minLength": 1, "description": "Clone URL (https or ssh), passed to git verbatim." },
+            "branch": { "type": "string", "minLength": 1, "description": "Branch pulled from and pushed to; never inferred from the repository's default." },
+            "subdir": { "type": "string", "description": "Store folder inside the repo; absent = repo root. Must stay inside the repository — the validator (manifest.ts's parseRemote) additionally rejects a leading slash and any \"..\" segment, and drops an empty string rather than storing it." },
+            "excludeSelf": { "type": "boolean", "description": "true = config-sync's own settings never travel to/from this remote. Absent = false." },
+            "tokenId": { "type": "string", "pattern": "^[a-z0-9-]+$", "maxLength": 64, "not": { "const": "config-sync-passphrase" }, "description": "Name of the keychain secret holding the access token — the token itself never enters data.json. Never the reserved id \"config-sync-passphrase\" (the encryption passphrase's own secret; manifest.ts rejects a remote that names it)." },
+            "username": { "type": "string", "minLength": 1, "description": "Sent alongside the token; absent = \"token\", which PAT-only hosts ignore but a self-hosted GitLab validates. Not offered in the settings UI (a linked token alone suffices in practice) but honored when present in a hand-edited document. The validator additionally rejects whitespace and control characters — the value enters a git credential-helper protocol line." }
           }
         }
       ]
@@ -221,10 +221,10 @@
     "runHistorySettings": {
       "type": "object",
       "additionalProperties": true,
-      "description": "Local-only record of past capture/apply/pull/push runs (src/main.ts's RunHistorySettings); never synced — it describes this device's own history, not the fleet's shared contract.",
+      "description": "Retention settings for the run-history log (src/main.ts's RunHistorySettings) — configuration, not the log itself. These settings are ordinary shared fields and travel with config-sync's own settings like any other; the log file they govern (run-history.json, schema/run-history.schema.json) is what stays local to each device.",
       "required": ["enabled", "path", "maxCount", "maxDays"],
       "properties": {
-        "enabled": { "type": "boolean" },
+        "enabled": { "type": "boolean", "description": "Master switch: record a RunRecord for every capture/apply/pull/push/removal run." },
         "path": { "type": "string", "description": "\"\" = default {configDir}/plugins/config-sync/run-history.json." },
         "maxCount": { "type": "integer", "minimum": 0, "description": "0 = unlimited." },
         "maxDays": { "type": "integer", "minimum": 0, "description": "0 = keep forever." }

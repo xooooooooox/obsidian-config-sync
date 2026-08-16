@@ -23,7 +23,7 @@ import { leftoverStoreRels } from "../src/core/leftover";
 import { Section } from "../src/core/types";
 import { itemsIn } from "./items";
 
-// spec docs/superpowers/specs/2026-07-25-unified-card-design.md §4/§8, D7/D8; task-7-brief.md.
+// Design reference: docs/superpowers/specs/2026-07-25-unified-card-design.md §4/§8.
 
 function settings(partial: Partial<Record<Section, Record<string, Item>>> = {}): CompileSettings {
   return { items: itemsIn(partial) };
@@ -91,7 +91,7 @@ describe("companionConflictError copy", () => {
   });
 });
 
-describe("validateCompanionBasename (final-review MUST-FIX 1 — UI-level: refuses the add BEFORE persist)", () => {
+describe("validateCompanionBasename (UI-level: refuses the add BEFORE persist)", () => {
   it("rejects a basename containing a space", () => {
     expect(validateCompanionBasename("assets/My Folder")).toBe(
       'Folder name "My Folder" must use only letters, digits, "-" or "_", starting with a letter or digit.'
@@ -107,7 +107,7 @@ describe("validateCompanionBasename (final-review MUST-FIX 1 — UI-level: refus
   });
 });
 
-describe("companionNameConflict (final-review MUST-FIX 1 — UI-level: refuses the add BEFORE persist)", () => {
+describe("companionNameConflict (UI-level: refuses the add BEFORE persist)", () => {
   const defs = buildItemDefs(ENV);
   const dataview = defs.find((d) => d.section === "community" && d.id === "dataview") as ItemDef;
 

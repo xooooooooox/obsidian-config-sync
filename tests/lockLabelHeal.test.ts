@@ -3,7 +3,7 @@ import ConfigSyncPlugin from "../src/main";
 import { MemFS } from "./memfs";
 import { itemsIn } from "./items";
 
-// batch6 task-1 (spec 2026-08-08-c-livetest-batch6-remote-labels.md): startup heal wiring —
+// Startup heal wiring —
 // backfillLockLabels itself is unit-tested in tests/core.test.ts; this covers the main.ts call
 // site, guarded to run once per plugin load (not on every refreshLocalStatus) and to no-op when
 // there is no local store to heal yet.
@@ -97,7 +97,7 @@ describe("startup lock-label heal (main.ts refreshLocalStatus wiring)", () => {
     expect(await io.read("cs/store.lock.json")).toBe(afterFirst);
   });
 
-  // Task-3 review C1, and the reason this file exists at all: the heal is the FOURTH writer of this
+  // The reason this file exists at all: the heal is the FOURTH writer of this
   // file, it fires at startup with no user action behind it, and what it writes looks cosmetic — the
   // exact profile of a writer nobody counts. It must never change the lock's FORMAT.
   //

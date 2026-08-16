@@ -37,8 +37,8 @@ describe("classifyJsonKeys", () => {
   });
 });
 
-// FINDING 2 (Task 5 review): per-element array coloring (spec D10 "逐项数组按元素着色") was
-// never implemented — these pin the pure state-walk that colors each element of a per-element-ruled array by ITS OWN sharing, independent of unrelated keys and nested structures.
+// Per-element array coloring: these pin the pure state-walk that colors each element of a
+// per-element-ruled array by ITS OWN sharing, independent of unrelated keys and nested structures.
 describe("classifyPerElementLines", () => {
   it("colors each element of a per-element array by its own sharing, defaulting an unruled element to everywhere", () => {
     const doc = { userIgnoreFilters: ["*.tmp", "*.log", "*.bak"] };

@@ -110,7 +110,7 @@ export class QualifierAutocomplete {
   private selected = 0;
   private open = false;
   private readonly onInput = (): void => this.refresh(true);
-  // Discoverability (round-8 spec §3): focusing the input opens the suggestions immediately —
+  // Discoverability: focusing the input opens the suggestions immediately —
   // an empty (or trailing-space) input lists every qualifier key; a mid-word token prefix-
   // filters, and a token matching no key closes the dropdown so plain text search stays quiet.
   private readonly onFocus = (): void => this.refresh(true);

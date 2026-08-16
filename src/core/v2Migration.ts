@@ -1,24 +1,24 @@
 /**
- * The v2 → v3 settings migration (spec 2026-08-11-v3-one-vocabulary-design.md §5, §7b, §4).
+ * The v2 → v3 settings migration.
  *
  * This is the ONLY code in the plugin that will ever read a v2 `data.json` again, and the one
  * place a document is allowed to be rewritten — downward from v2, once, on the load that finds it
  * (see main.ts's loadSettings). Everything here is pure: the shell decides when to run it, saves
- * the result exactly once, and owns the localStorage half of §4.
+ * the result exactly once, and owns the localStorage half of the re-key.
  *
  * Two rules shape every function below.
  *
  * 1. **A v2 document is written by ANOTHER build**, so the v2 compile-time shapes are claims about
  *    it, not facts. Every level is therefore handled as a plain object of `unknown` values and
  *    rebuilt by SPREADING what was found — which is what carries a key this build has never heard
- *    of straight through the migration (2.21.0 invariant II.1, and spec §9's explicit requirement
- *    for `customGroups` entries). A value whose shape we cannot read is left exactly as found
+ *    of straight through the migration (including
+ *    `customGroups` entries). A value whose shape we cannot read is left exactly as found
  *    rather than dropped or "fixed": this is a migration, not a validator, and the v3 validator
  *    (manifest.ts) refuses the same shapes v2's did, so a document that did not compile before does
  *    not start compiling now.
- * 2. **Preserve what the system DID, not what the menu SAID** (spec §7b) — see `runsOnFrom`.
+ * 2. **Preserve what the system DID, not what the menu SAID** — see `runsOnFrom`.
  *
- * The two v2 normalizers task 1 deleted live here, because a v2 SHAPE is the only thing they ever
+ * The two v2 normalizers live here, because a v2 SHAPE is the only thing they ever
  * operated on: `mergeLegacyAppSliceItems` (the app-slice merge) and `drainEnabledOnLocal`
  * (`enabledOn: "local"` → this device's own list). In v2 both ran on EVERY load, because devices
  * still on an older build kept re-publishing the old form into the shared contract; there is no
@@ -36,7 +36,7 @@ export interface V2Migration {
   // The v3 document: ready for withDefaults, and for exactly one save.
   document: Doc;
   // v2's CARRIED `deviceOptOuts` map (group name -> the device ids that opted it out), handed back
-  // rather than dropped on the floor. §5 retires the field, but a device that jumps straight from
+  // rather than dropped on the floor. v3 retires the field, but a device that jumps straight from
   // 2.20.0 to v3 has never run the build that copied its own entries into localStorage — dropping
   // the map without absorbing it first would silently start syncing items that device deliberately
   // opted out of. The shell absorbs it (main.ts's absorbCarriedDeviceOptOuts) before saving.
@@ -45,13 +45,13 @@ export interface V2Migration {
 
 // ── v2 identity → v3 identity ──────────────────────────────────────────────────────────────────
 
-// v2 encoded an item's family as a PREFIX on its id; v3 nests by section instead (spec §1/§2).
+// v2 encoded an item's family as a PREFIX on its id; v3 nests by section instead.
 // One producer for that translation, used by all three v2 fields keyed by an item id — `items`,
-// `memberRules` and `localMembers` — because a derived key needs exactly one producer (spec §7b):
+// `memberRules` and `localMembers` — because a derived key needs exactly one producer:
 // three copies of "does it start with community:?" is precisely the shape that drifts.
 //
 // `beta` is not among the answers, and cannot be: v2 gave a BRAT plugin the `community:` prefix
-// like any other community plugin, and §7b keeps it stored there. An item that changed its
+// like any other community plugin, and v3 keeps it stored there. An item that changed its
 // storage key the day BRAT adopted it would be churn no benefit justifies.
 const V2_SECTION_PREFIXES: readonly { prefix: string; section: StorageSection }[] = [
   { prefix: "core:", section: "core" },
@@ -76,7 +76,7 @@ export function v2ItemRef(v2Id: string): ItemRef {
   return itemRef(section, id);
 }
 
-// ── Value mappings (spec §5's lower half) ──────────────────────────────────────────────────────
+// ── Value mappings ─────────────────────────────────────────────────────────────────────────────
 
 // v2's flat `RuleScope` ("all" | "desktop" | "mobile" | "local") → v3's `Sharing` union. Used for
 // field rules, file rules and per-element maps alike, so the three cannot disagree.
@@ -107,7 +107,7 @@ function ruleFrom(rule: unknown): unknown {
   return out;
 }
 
-// `perItem` → `perElement` (spec §5): key name -> element value -> sharing.
+// `perItem` → `perElement`: key name -> element value -> sharing.
 function perElementFrom(perItem: unknown): unknown {
   if (!isPlainObject(perItem)) return perItem;
   const out: Doc = {};
@@ -123,8 +123,8 @@ function perElementFrom(perItem: unknown): unknown {
   return out;
 }
 
-// `companions[].scope` → `companions[].device` (spec §5). Same value space (a DeviceClass), same
-// meaning; only the word changed, because `scope` meant three different things in v2 (spec §1).
+// `companions[].scope` → `companions[].device`. Same value space (a DeviceClass), same
+// meaning; only the word changed, because `scope` meant three different things in v2.
 function companionFrom(companion: unknown): unknown {
   if (!isPlainObject(companion)) return companion;
   const out: Doc = { ...companion };
@@ -140,7 +140,7 @@ function deviceFrom(v: unknown): "all" | "desktop" | "mobile" | undefined {
 }
 
 /**
- * v2's `enabledOn` + `memberRules[id]` → one `runsOn` (spec §5, §7b).
+ * v2's `enabledOn` + `memberRules[id]` → one `runsOn`.
  *
  * THE RULING THIS ENCODES: preserve what the system DID, not what the menu SAID. In v2 the
  * Runs-on menu's device choice ("Computers only"/"Phones only") lived in `memberRules` and was
@@ -151,19 +151,19 @@ function deviceFrom(v: unknown): "all" | "desktop" | "mobile" | undefined {
  * the two disagreed keeps its effective masking, and the menu starts telling the truth about it.
  *
  * The force axis is orthogonal and comes only from `memberRules`. `where: "everywhere"` for both
- * values is deliberate and behaviour-preserving (C-#46, spec §8): today's "here" rules are
+ * values is deliberate and behaviour-preserving: v2's "here" rules are
  * fleet-wide in effect whatever the copy says, and whether they SHOULD be is a product question
- * this release explicitly does not answer — the new field just makes the answer cheap to change.
+ * the migration explicitly does not answer — the new field just makes the answer cheap to change.
  *
  * `enabledOn: "local"` never reaches here: `drainEnabledOnLocal` has already moved it to this
  * device's own list, which is where v2 read it from too. A value neither axis recognises is
- * DROPPED, not ignored-and-kept: v2 ignored it at the point of use and left it on disk (invariant
- * II.2), but both fields it could live in retire with v2, so there is nowhere left to keep it. It
+ * DROPPED, not ignored-and-kept: v2 ignored it at the point of use and left it on disk,
+ * but both fields it could live in retire with v2, so there is nowhere left to keep it. It
  * did nothing in v2 either, so nothing observable goes with it — see the same note at the orphan
  * pass in migrateV2Settings, which is the other place this decision shows.
  *
  * Returns undefined for a rule that says nothing at all, so the key is simply absent — the same
- * never-write-a-no-op-value discipline this codebase applies throughout (C-#26).
+ * never-write-a-no-op-value discipline this codebase applies throughout.
  */
 export function runsOnFrom(enabledOn: unknown, memberRule: unknown): Doc | undefined {
   const device = deviceFrom(enabledOn) ?? deviceFrom(memberRule) ?? "all";
@@ -177,12 +177,12 @@ export function runsOnFrom(enabledOn: unknown, memberRule: unknown): Doc | undef
   return force === undefined ? { device } : { device, force };
 }
 
-// ── The two restored v2 normalizers (spec §9) ──────────────────────────────────────────────────
+// ── The two restored v2 normalizers ────────────────────────────────────────────────────────────
 
-// v2 shape revision (spec 2026-07-26-ui-feedback-round2-design.md §2.3): the three app.json slice
+// v2 shape revision: the three app.json slice
 // cards (editor/files-links/other) plus a top-level `appJson` mode merge into a single "app" item.
 // Appearance's only-ever borrowed app.json key was showInlineTitle; that snapshot is hardcoded
-// here rather than derived, since the appTabFor lookup it used to come from is long gone.
+// here rather than derived — it is a frozen fact about v2.
 // Same-pattern rules/perItem entries are first-seen-wins, in encounter order
 // editor → files-links → other → appearance.
 //
@@ -220,8 +220,8 @@ export function mergeLegacyAppSliceItems(items: Doc, appJson: unknown): boolean 
     if (isPlainObject(appearanceSf.rules)) delete appearanceSf.rules[key];
     if (isPlainObject(appearanceSf.perItem)) delete appearanceSf.perItem[key];
   }
-  // No `companions: []`. v2 still wrote it so a device on an older build could read the entry
-  // (§5.2 phase 1); v3 stops writing it (C-#54 phase 2, spec §5) because no build that reads
+  // No `companions: []`. v2 still wrote it so a device on an older build could read the entry;
+  // v3 stops writing it because no build that reads
   // `companions` unguarded can read a v3 document at all — the version gate refuses it.
   // `appJson?.mode ?? "fields"` — verbatim, including a value this build does not recognise. v2
   // carried whatever was stored there and let the compile path decide (only "fields" was ever
@@ -235,7 +235,7 @@ export function mergeLegacyAppSliceItems(items: Doc, appJson: unknown): boolean 
   return true;
 }
 
-// Task-2 retarget (spec 2026-08-04-per-device-scope-local-containment-design.md): "this device"
+// In late v2, "this device"
 // stopped living in `ItemConfig.enabledOn` and moved to the settings-level list, so a stored
 // `enabledOn: "local"` is a pre-retarget artifact v2 already ignored where it was read. Drains
 // every such id into that list and deletes the dead key. Mutates both, in place, like the v2
@@ -251,11 +251,11 @@ export function drainEnabledOnLocal(items: Doc, thisDeviceIds: string[]): boolea
   return changed;
 }
 
-// ── The carried device opt-out map (§5's "dropped" row, done without losing the choice) ────────
+// ── The carried device opt-out map (dropped without losing the choice) ─────────────────────────
 
 // This device's group names inside v2's carried map. Anything that isn't the old shape (a hand
-// edit, a future build's replacement) contributes nothing and is left alone. Restored from the
-// version task 1 retired with the field itself: the field is gone from v3, but a document being
+// edit, a future build's replacement) contributes nothing and is left alone.
+// The field is gone from v3, but a document being
 // migrated is by definition still carrying it.
 export function deviceOptOutsFor(map: unknown, deviceId: string): string[] {
   if (!isPlainObject(map)) return [];
@@ -267,12 +267,12 @@ export function deviceOptOutsFor(map: unknown, deviceId: string): string[] {
 // ── The migration ──────────────────────────────────────────────────────────────────────────────
 
 // One item's v2 `ItemConfig` → v3 `Item`. `memberRule` is this item's entry in the top-level
-// `memberRules` side table, which v3 does not have: a rule lives on the thing it governs (spec §2).
+// `memberRules` side table, which v3 does not have: a rule lives on the thing it governs.
 function itemFrom(cfg: unknown, memberRule: unknown): unknown {
   if (!isPlainObject(cfg)) return cfg; // left exactly as found — see this module's rule 1
   const item: Doc = { ...cfg };
 
-  // v2's `enabled` is v3's `synced` (spec 2026-08-12-enablement-two-layers-design.md §3.2) — same
+  // v2's `enabled` is v3's `synced` — same
   // field, renamed key, so this is a KEY rename, not a value change (mirrors `customPath` → `path`
   // below).
   if ("enabled" in item) {
@@ -287,7 +287,7 @@ function itemFrom(cfg: unknown, memberRule: unknown): unknown {
 
   if (isPlainObject(item.settingsFile)) {
     const sf: Doc = { ...item.settingsFile };
-    // `settingsFile.customPath` → the item's own `path` (spec §2): a path is a property of the
+    // `settingsFile.customPath` → the item's own `path`: a path is a property of the
     // item, not of the rules that read its file. Carried whenever the key was present, including
     // an empty string — v2's `customPath ?? defaultPath` only fell back on an absent value, and so
     // does v3's `item.path ?? defaultPath`.
@@ -317,7 +317,7 @@ function itemFrom(cfg: unknown, memberRule: unknown): unknown {
 
   if (Array.isArray(item.companions)) {
     // An empty list is dropped rather than rewritten: `companions: []` is what v2 wrote on every
-    // entry for an older build's benefit (§5.2 phase 1) and every read has always been `?? []`, so
+    // entry for an older build's benefit and every read has always been `?? []`, so
     // removing it here is provably behaviour-neutral and stops the migrated document from carrying
     // ~100 keys v3 would never write. A non-empty list is real configuration and is only remapped.
     if (item.companions.length === 0) delete item.companions;
@@ -350,12 +350,12 @@ function ownCopy(v: unknown): unknown {
   return out;
 }
 
-// v2's `customGroups: SyncGroup[]` → entries of `items.custom` (spec §5). The v2 literal is first
+// v2's `customGroups: SyncGroup[]` → entries of `items.custom`. The v2 literal is first
 // brought up to the v3 SyncGroup vocabulary (`dir` → `folder`, `scope` → `sharing`, `perItem` →
 // `perElement`), then handed to registry.ts's `customItemFromGroup` — the SAME group → item
 // producer the Advanced tab persists through, so a migrated custom rule and a re-edited one can
-// never end up shaped differently. Its carried-tail handling is what satisfies spec §9's
-// requirement that a v2 custom entry keeps its unknown fields.
+// never end up shaped differently. Its carried-tail handling is what guarantees
+// that a v2 custom entry keeps its unknown fields.
 function customItemsFrom(customGroups: unknown): [string, Item][] {
   if (!Array.isArray(customGroups)) return [];
   const out: [string, Item][] = [];
@@ -379,7 +379,7 @@ function customItemsFrom(customGroups: unknown): [string, Item][] {
 }
 
 /**
- * A v2 `data.json` → a v3 one (spec §5, every row).
+ * A v2 `data.json` → a v3 one.
  *
  * Total and pure: the input is never mutated, and no input shape can make it throw — the load path
  * has to be able to order its writes for safety rather than around exceptions. Idempotent by the
@@ -395,7 +395,7 @@ export function migrateV2Settings(data: Doc): V2Migration {
   // v2's flat item map, DEEPLY privately owned from here on. The two normalizers below mutate what
   // they are given, and `mergeLegacyAppSliceItems` reaches two levels down — it deletes the
   // borrowed `showInlineTitle` out of `appearance.settingsFile.rules` — so a shallow copy of the
-  // map and of each item still left the caller's document being edited (fix round 1, review I2).
+  // map and of each item would still leave the caller's document being edited.
   // A non-object `items` is not data — v2 could not read it either — and is replaced rather than
   // carried, because the v3 sections have to exist for anything else to land in them.
   const v2Items: Doc = isPlainObject(doc.items) ? (ownCopy(doc.items) as Doc) : {};
@@ -404,7 +404,7 @@ export function migrateV2Settings(data: Doc): V2Migration {
   // Snapshot BEFORE the merge, which deletes the three slice ids: the orphan pass below asks "did
   // this id have an item of its own?", and after the merge `editor` no longer looks like it did.
   // Without this a stray memberRule for a retired slice id resurrects a junk `items.obsidian.editor`
-  // entry that is inert but written to disk forever (review M3).
+  // entry that is inert but written to disk forever.
   const hadItem = new Set(Object.keys(v2Items));
 
   mergeLegacyAppSliceItems(v2Items, doc.appJson);
@@ -456,7 +456,7 @@ export function migrateV2Settings(data: Doc): V2Migration {
   delete doc.customGroups;
   delete doc.localMembers;
   delete doc.memberRules;
-  // §5: the carried opt-out map retires with the fleet it existed for. Returned to the caller
+  // The carried opt-out map retires with the fleet it existed for. Returned to the caller
   // first — see V2Migration.carriedDeviceOptOuts.
   delete doc.deviceOptOuts;
   doc.schemaVersion = 3;

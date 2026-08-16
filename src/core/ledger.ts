@@ -1,5 +1,5 @@
 /**
- * Device-local sync baselines (spec 2026-07-27 direction-baseline).
+ * Device-local sync baselines.
  * Each entry records the canonical hash of an item's store and local content as of the last
  * moment THIS device saw the item in sync. Direction for a differing item is then a
  * three-way comparison against this baseline instead of an mtime guess.
@@ -15,7 +15,7 @@ export interface BaselineEntry {
   at: string;
 }
 
-// v1 keyed every baseline by the compiled group name; v2 keys them by the item's ref (spec §4), the
+// v1 keyed every baseline by the compiled group name; v2 keys them by the item's ref, the
 // same key the store lock uses — one key space, moved in one change, or every baseline becomes
 // unresolvable, which reads as never-synced, which defaults to APPLY.
 export const LEDGER_VERSION = 2;
@@ -75,9 +75,9 @@ export function parseLedger(raw: unknown): Ledger {
 }
 
 /**
- * The §4 re-key, run once: every baseline moves from its group name to its item ref.
+ * The v1 → v2 re-key, run once: every baseline moves from its group name to its item ref.
  *
- * NEVER DROPS (spec §4). A missing baseline reads as never-synced, which defaults to APPLY — so
+ * NEVER DROPS. A missing baseline reads as never-synced, which defaults to APPLY — so
  * dropping one would offer to overwrite this device's live config with the store's. An entry whose
  * name nothing on this device claims keeps its content under itemKeys.ts's `legacy/` section, where
  * no reader can resolve it: inert, but preserved and self-describing. Whether such an entry should
@@ -86,7 +86,7 @@ export function parseLedger(raw: unknown): Ledger {
  * undo.
  *
  * `toRef` is the single producer (itemKeys.ts's lockRefFor), the same one that re-keys the lock:
- * two sites deriving this key for two purposes is precisely the drift task 1 paid for twice.
+ * two sites deriving this key for two purposes is precisely how drift happens.
  */
 export function rekeyLedger(ledger: Ledger, toRef: (name: string) => string): Ledger {
   if (ledger.version === LEDGER_VERSION) return ledger;

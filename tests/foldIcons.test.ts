@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { FOLD_ICON, FOLD_ICON_COLOR_CLASS, type FoldKind } from "../src/ui/foldIcons";
 
-// C-#50 (spec 2026-08-10-c-livetest-batch24-fold-family.md §1): the three trailing-fold states'
-// icon vocabulary — fixed-size Lucide replacing the old unequal-weight text glyphs.
-describe("FOLD_ICON — fold-state→icon map (C-#50)", () => {
+// The three trailing-fold states'
+// icon vocabulary — fixed-size Lucide icons, never unequal-weight text glyphs.
+describe("FOLD_ICON — fold-state→icon map", () => {
   const kinds: FoldKind[] = ["insync", "excluded", "nosettings"];
 
   it("maps every fold state to an icon", () => {

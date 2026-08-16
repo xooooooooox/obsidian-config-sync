@@ -59,7 +59,7 @@ export function availabilityForGroup(group: SyncGroup, plugins: PluginHost, lock
   }
   const localVersion = plugins.getAppVersion();
   const storeVersion = lockSourceVersion(entry, "app");
-  // A LOOKUP on the group's own ref (spec §5): "is this a core plugin's settings file?" is what the
+  // A LOOKUP on the group's own ref: "is this a core plugin's settings file?" is what the
   // item's section says, not what a bare name happens to match in the runtime core-id list.
   const core = refItemId(group.ref ?? "");
   const kind: AvailabilityKind = core?.section === "core" && !plugins.isCorePluginEnabled(core.id) ? "disabled" : "enabled";
@@ -96,10 +96,10 @@ export function desktopOnlyPluginIds(groups: SyncGroup[], plugins: PluginHost, l
   }
   // Lock entries with no local group: a flagged plugin that isn't installed on this device
   // compiles to nothing, so the loop above never reaches its flag — but its element still lives
-  // in the store's switch list and must stay masked (2026-07-27 mobile find: "simpread" kept
+  // in the store's switch list and must stay masked (otherwise it keeps
   // reappearing in every mobile diff). Manifest stays first: installed plugins are judged by
   // their manifest above, so a stale lock flag alone never masks one.
-  // No parse left to do: the lock is keyed by item ref since v3 (spec §3), so a community item's
+  // No parse left to do: the lock is keyed by item ref since v3, so a community item's
   // plugin id IS the id half of its key. A companion or a carrier is excluded by refItemId, which
   // answers only for a two-segment key.
   for (const [ref, entry] of lockEntryList(lock?.items ?? {})) {
@@ -110,11 +110,10 @@ export function desktopOnlyPluginIds(groups: SyncGroup[], plugins: PluginHost, l
   return ids;
 }
 
-// The per-element mask and the two force sets used to be derived here, from a `RunsOn` re-read on
-// every call (`forcedRunsOn` / `preferStoredRunsOn` / `membersExcludedByClass` / `memberForceOff`).
-// They are gone: enablementDecision.ts is now the ONE place a fleet rule and this device's own
+// The per-element mask and the two force sets are NOT derived here:
+// enablementDecision.ts is the ONE place a fleet rule and this device's own
 // exception are combined into a mask + a force, and main.ts projects all three runtime fields off
-// that single decision. What survives here is the DESKTOP-ONLY auto-derivation above
+// that single decision. What lives here is the DESKTOP-ONLY auto-derivation above
 // (desktopOnlyPluginIds), which is a manifest fact rather than a rule the user wrote, and joins the
 // mask alongside the decisions rather than through them.
 

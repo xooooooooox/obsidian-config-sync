@@ -8,27 +8,22 @@ import { CaptureItem, ApplyItem } from "../src/core/ConfigSyncCore";
 import { Item } from "../src/core/registry";
 import { itemsIn } from "./items";
 
-// C-#45 (spec 2026-08-10-c-livetest-batch22-device-optout.md): per-device item opt-out via the
-// Stop-syncing menu's "On this device". main.ts has no dedicated test harness (Plugin is stubbed
-// to an empty class by tests/mock-obsidian.ts) — these build a real ConfigSyncPlugin instance the
-// same way tests/customGroups.test.ts / tests/scopeExcludedRow.test.ts / tests/lockLabelHeal.test.ts
-// already do, via bracket access to bypass TypeScript's `private` (compile-time-only).
+// Per-device item opt-out via the Stop-syncing menu's "On this device". main.ts has no dedicated
+// test harness (Plugin is stubbed to an empty class by tests/mock-obsidian.ts) — these build a
+// real ConfigSyncPlugin instance the same way tests/customGroups.test.ts /
+// tests/scopeExcludedRow.test.ts / tests/lockLabelHeal.test.ts already do, via bracket access to
+// bypass TypeScript's `private` (compile-time-only).
 //
-// Fix-round 1 (reviewer-caught CRITICAL): the device identity lives in localStorage, NEVER
-// data.json (main.ts's deviceId() method) — data.json travels wholesale (git-tracked vaults,
-// remotely-save, manual copies), so a value trusted from an inherited data.json would let a
-// bootstrapped machine silently claim the source machine's identity. A stateful in-memory
-// loadLocalStorage/saveLocalStorage pair (below) is what lets these tests both seed a KNOWN
-// "this device" id per test and prove a real generate-then-persist round-trip.
+// The device identity lives in localStorage, NEVER data.json (main.ts's deviceId() method) —
+// data.json travels wholesale (git-tracked vaults, remotely-save, manual copies), so a value
+// trusted from an inherited data.json would let a bootstrapped machine silently claim the source
+// machine's identity. A stateful in-memory loadLocalStorage/saveLocalStorage pair (below) lets
+// these tests both seed a KNOWN "this device" id per test and prove a real generate-then-persist
+// round-trip.
 //
-// C-#52 (spec 2026-08-11-data-model-hardening.md §2): the opt-out ITSELF moved into that same
-// store, under "config-sync-device-optouts" as a JSON array of ITEM REFS (spec §4 re-keyed it from
-// group names, together with the lock and the baselines — one key space) — that list is the
-// AUTHORITY every read goes through. The old `deviceOptOuts` map is not deleted from data.json
-// though (the §2 ruling): removing a field is two-phase, and a document written without it, once
-// adopted by a device still on the old build, takes THAT device's opt-out with it — C-#52's own
-// failure inflicted by C-#52's fix. So the map is carried, other devices' entries are never
-// touched, and this device's entry in it is kept in step with localStorage.
+// The opt-out itself lives in that same store, under "config-sync-device-optouts" as a JSON array
+// of ITEM REFS (one key space with the lock and the baselines) — that list is the authority every
+// read goes through.
 
 const OPTOUTS_KEY = "config-sync-device-optouts";
 
@@ -110,7 +105,7 @@ function optOutList(local: (key: string) => string | undefined): string[] {
   return raw === undefined ? [] : (JSON.parse(raw) as string[]);
 }
 
-describe("setDeviceOptOut / deviceOptedOut — round-trip + C-#26 prune discipline (C-#45, §2 storage)", () => {
+describe("setDeviceOptOut / deviceOptedOut — round-trip + prune discipline in localStorage", () => {
   it("set true persists into localStorage — the authority no pull or adopt can overwrite", async () => {
     const { instance, saved, local } = makePlugin({ hotkeys: { synced: true } }, {}, "d1");
     await instance.loadSettings();
@@ -121,9 +116,7 @@ describe("setDeviceOptOut / deviceOptedOut — round-trip + C-#26 prune discipli
 
     expect(instance.syncCenterHost().deviceOptedOut("hotkeys")).toBe(true);
     expect(optOutList(local)).toEqual(["obsidian/hotkeys"]); // the ITEM, not the compiled group name
-    // ...and nothing else: the fleet-shared `deviceOptOuts` map this used to keep in step is gone
-    // from the document (spec §5, C-#54 phase 2) — the version gate refuses a v3 document to
-    // every build that read it, so the carry has nothing left to protect.
+    // ...and nothing else: the opt-out never touches the document — localStorage is the only store.
     expect(saved()).toBeNull();
   });
 
@@ -171,7 +164,7 @@ describe("setDeviceOptOut / deviceOptedOut — round-trip + C-#26 prune discipli
     expect(optOutList(local).sort()).toEqual(["obsidian/appearance", "obsidian/hotkeys"]);
   });
 
-  // Spec §4's re-key, at the seam the shell really runs it (main.ts onload/reloadSettings, after
+  // The group-name→item-ref re-key, at the seam the shell really runs it (main.ts onload/reloadSettings, after
   // the compile — the conversion asks the compiler what each name's ref is). Idempotent BY SHAPE:
   // a name has no "/" and a ref always does, so a second run cannot re-key what has already moved.
   it("re-keys a list still written in group names, once, and leaves an already-moved list alone", async () => {
@@ -215,14 +208,10 @@ describe("setDeviceOptOut / deviceOptedOut — round-trip + C-#26 prune discipli
   });
 });
 
-// The fleet-shared `deviceOptOuts` map is retired with v3 (spec
-// 2026-08-11-v3-one-vocabulary-design.md §5, C-#54 phase 2). Its two behaviours — reading this
-// device's entries out of a carried map at load, and keeping this device's entry in step on every
-// write — existed only so a device still on a build that READ that map would not lose its own
-// opt-out when it adopted our document. No such build can read a v3 document at all: the version
-// gate refuses it and says so. localStorage is the authority, and now the only store.
+// localStorage is the authority and the only store: opt-outs are never read from or written to
+// the document, so another device's choice cannot travel with it.
 
-describe("SyncCenterHost.computeStatuses — a device-opted-out item still gets a row (C-#45)", () => {
+describe("SyncCenterHost.computeStatuses — a device-opted-out item still gets a row", () => {
   it("hotkeys opted out on THIS device: still present, synthetic neutral status, deviceOptedOut true", async () => {
     const { instance } = makePlugin({ hotkeys: { synced: true } }, {}, "d1", { [OPTOUTS_KEY]: JSON.stringify(["obsidian/hotkeys"]) });
     await instance.loadSettings();
@@ -237,8 +226,8 @@ describe("SyncCenterHost.computeStatuses — a device-opted-out item still gets 
   });
 
   it("hotkeys opted out on a DIFFERENT device: this device runs a real comparison, unaffected", async () => {
-    // Post-§2 that is simply "this device has no opt-out": another device's choice lives in ITS
-    // localStorage and can no longer reach this document at all.
+    // "Opted out on a different device" is simply "this device has no opt-out": another device's
+    // choice lives in ITS localStorage and cannot reach this document at all.
     const { instance } = makePlugin({ hotkeys: { synced: true } }, {}, "d1");
     await instance.loadSettings();
     await instance.recompile();
@@ -260,7 +249,7 @@ describe("SyncCenterHost.computeStatuses — a device-opted-out item still gets 
   });
 });
 
-// Runner-level payload guard (spec §4): captureItems/applyItems must skip an opted-out group EVEN
+// Runner-level payload guard: captureItems/applyItems must skip an opted-out group EVEN
 // GIVEN an explicit stale selection naming it — the guard lives below the UI's own stageable:false,
 // at the host boundary itself. Full local/store file IO (mirrors tests/lockLabelHeal.test.ts).
 interface IoSurface {
@@ -306,7 +295,7 @@ function makeIoPlugin(io: MemFS): IoSurface {
   return instance;
 }
 
-describe("captureItems/applyItems — runner-level opted-out guard (C-#45 spec §4)", () => {
+describe("captureItems/applyItems — runner-level opted-out guard", () => {
   it("capture skips an opted-out group's content even when explicitly named in the payload", async () => {
     const io = new MemFS();
     io.seed({

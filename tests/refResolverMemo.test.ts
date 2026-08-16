@@ -3,14 +3,14 @@ import ConfigSyncPlugin from "../src/main";
 import { SyncCenterView } from "../src/ui/SyncCenterView";
 import { SyncGroup } from "../src/core/types";
 
-// Task-3 review I4, and the reason this file exists: BOTH ref resolvers memoize, and a memo with no
+// The reason this file exists: BOTH ref resolvers memoize, and a memo with no
 // test is a memo the next reader deletes as "an unnecessary field".
 //
 // The cost they avoid is not theoretical. `lockRefFor(groups)` BUILDS a name→ref index over the whole
 // compiled list, and both resolvers are asked per row per render — main.ts's by `displayName` and
 // `isDeviceOptedOut`, the view's by half a dozen row-level derivations. Rebuilding that index per
-// call is the same per-row, per-render rebuild this project has already paid for twice (C-#22, then
-// C-#48's `familySearchText`/`rows()`), which is why the guards below assert the two things a
+// call is the same per-row, per-render rebuild `familySearchText`/`rows()` memoize away
+// (tests/searchPerf.test.ts), which is why the guards below assert the two things a
 // deletion would break: the memo HOLDS while its source is unchanged, and it is REBUILT the moment
 // the source list is replaced — the identity check both resolvers use as their invalidation point.
 
@@ -36,7 +36,7 @@ function shell(groups: SyncGroup[]): ShellSurface {
   return instance;
 }
 
-describe("main.ts groupRef — memoized name→ref index (task-3 review I4)", () => {
+describe("main.ts groupRef — memoized name→ref index", () => {
   it("resolves through the compiled list, and through the legacy rules for a name it does not hold", () => {
     const s = shell([fileGroup("plugin-dataview", "community/dataview")]);
     expect(s.groupRef("plugin-dataview")).toBe("community/dataview");
@@ -102,7 +102,7 @@ function viewHarness(groups: SyncGroup[], answer: (name: string) => string | nul
   };
 }
 
-describe("SyncCenterView rowRef — memoized per group list (task-3 review I4)", () => {
+describe("SyncCenterView rowRef — memoized per group list", () => {
   it("asks the host once per name, then serves the memo", () => {
     const h = viewHarness([fileGroup("plugin-dataview")], (n) => (n === "plugin-dataview" ? "community/dataview" : null));
     expect(h.view.rowRef("plugin-dataview")).toBe("community/dataview");

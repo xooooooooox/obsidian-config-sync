@@ -159,7 +159,7 @@ export interface SettingsHost extends Plugin {
     remoteAutoCheck: boolean;
     localPeriodicCheck: boolean;
     runHistory: { enabled: boolean; path: string; maxCount: number; maxDays: number };
-    // Unified-card model (spec 2026-07-25-unified-card-design.md §6): the Obsidian tab's card
+    // Unified-card model (spec §6): the Obsidian tab's card
     // renderer reads/writes these fields directly, durably, through saveSettings() (which
     // persists AND recompiles — see main.ts).
     // Every section, custom items included: the Advanced tab's "Custom rules"/"Discovered files"
@@ -167,8 +167,8 @@ export interface SettingsHost extends Plugin {
     items: ItemMap;
   };
   saveSettings(): Promise<void>;
-  // False while this device's data.json was written by a newer Config Sync (spec
-  // 2026-08-11-data-model-hardening.md §4.2b). Every writer in this file is mutate-then-save, and
+  // False while this device's data.json was written by a newer Config Sync (the §4.2b
+  // hardening rule). Every writer in this file is mutate-then-save, and
   // `saveSettings` refuses too late to undo the mutation — so the write must be refused BEFORE it
   // touches `settings`, or memory diverges from disk with no recompile. Asking also tells the
   // user why (the refusal notice fires here, on their gesture).
@@ -187,14 +187,12 @@ export interface SettingsHost extends Plugin {
   // carrier card's badges and of its element list. `deviceElementFor` cannot answer it one element
   // at a time: the table is localStorage (deviceElements.ts), and only main.ts reads that.
   deviceElementIds(list: RuleListId): string[];
-  // The card head's destructive action (spec §6.2). These three moved here from `SyncCenterHost`
-  // with the gesture itself — the Sync Center's Stop-syncing footer retired in task 10, and the
-  // first two have had no caller there since. `appendActionHistory` stays on both hosts: the
-  // leftover-cleanup entry the view still records is the same run history.
+  // The card head's destructive action (spec §6.2). `appendActionHistory` exists on both hosts:
+  // the leftover-cleanup entry the Sync Center view records is the same run history.
   stopSyncing(groupName: string, deleteStore: boolean): Promise<string[] | null>;
   storeFileCount(groupName: string): Promise<number>;
   appendActionHistory(entry: { kind: RunKind; desc: string; changed: number; removed?: string[]; deletedFiles?: string[] }): Promise<void>;
-  // Drops the per-refresh reader cache (#3): call after settings.remotes changes so a stale
+  // Drops the per-refresh reader cache: call after settings.remotes changes so a stale
   // reader for an edited/removed remote's old URL/branch/subdir/storePath is never reused.
   clearReaderCache(): void;
   // The registry's item defs (registry.ts's buildItemDefs, rebuilt by main.ts on every
@@ -207,7 +205,7 @@ export interface SettingsHost extends Plugin {
   // Basenames (no extension) of .css files actually present under the vault's snippets/ folder —
   // feeds the Appearance card's snippets companion member rows (spec §4/§5).
   listSnippetFiles(): Promise<string[]>;
-  // Immediate child file/folder names of an arbitrary companion path (task-7-brief.md) — feeds
+  // Immediate child file/folder names of an arbitrary companion path — feeds
   // the plain (non-mapKey) companion member listing zone ③ shows for themes/ and any user-added
   // folder. `path` is a companion's own path field (may be "{configDir}/…" or vault-relative).
   listCompanionFiles(path: string): Promise<string[]>;
@@ -237,23 +235,15 @@ export interface SettingsHost extends Plugin {
   displayName(group: string, storedLabel?: string): string;
 }
 
-// ── The item card's derived keys — ONE producer each (fix round 3, NEW-I2) ──────────────────
+// ── The item card's derived keys — ONE producer each ────────────────────────────────────────
 //
 // A card row carries a `data-search-anchor` and its drawer is keyed in `expanded`. Four places
 // need those two strings: the card renderer that WRITES the anchor, the search index that emits
 // one to jump to, the More bridge's anchor consumer, and jumpTo's derivation of the drawer key
-// from an anchor. Every one of them used to build the strings inline from `def.id`, and they
-// agreed only because they happened to spell it the same way.
+// from an anchor.
 //
-// They stopped agreeing the moment the card sites moved to `defRef(def)` (v3: a card's identity is
-// its ItemRef) and the search index was left on `def.id` — `item-dataview` never matched
-// `item-community/dataview`, so `highlightAnchor` returned silently and EVERY item hit in EVERY
-// section stopped jumping. The comment on buildSearchIndex records that the same divergence had
-// already been fixed once before, from the other direction.
-//
-// A derived key with four authors will diverge again on the next rename. These are its only
-// authors now, and `refFromItemAnchor` is the single inverse so jumpTo cannot re-derive it by
-// hand either.
+// A derived key with four authors diverges on the next rename. These are its only authors, and
+// `refFromItemAnchor` is the single inverse so jumpTo cannot re-derive it by hand either.
 const ITEM_ANCHOR_PREFIX = "item-";
 const CARD_EXPAND_PREFIX = "card:";
 
@@ -287,7 +277,7 @@ function defaultFieldsFromDetection(keys: string[]): FieldRule[] {
   return keys.map((pattern) => ({ pattern, ...(SENSITIVE_ENCRYPT_RE.test(pattern) ? ENCRYPT_RULE : LOCAL_RULE) }));
 }
 
-// Path row lock/sharing disabled tooltip (spec 2026-07-26-card-visual-refresh-design.md §5, exact) —
+// Path row lock/sharing disabled tooltip (spec §5, exact wording) —
 // shown whenever the card has any per-key rule (hasKeyRules): the whole-file sharing/encrypt row
 // hands control to the per-key rows below it.
 const PER_KEY_RULES_ACTIVE_HINT = "Per-key rules are active — remove them to control the whole file again";
@@ -310,8 +300,8 @@ function parseCardDoc(raw: string | null): { doc: Record<string, unknown>; fileS
 }
 
 // Legacy single-select 5-way action, kept only as an adapter for the still-mutually-exclusive
-// dropdowns below (Task 5 replaces these with the real sharing+encrypted card controls). Round-trips
-// exactly the mapping in the task brief: strip<->local/false, encrypt<->all/true,
+// dropdowns below. Round-trips
+// exactly: strip<->local/false, encrypt<->all/true,
 // desktop<->desktop/false, mobile<->mobile/false, all<->all/false (inert default).
 type LegacyFieldAction = "strip" | "encrypt" | "desktop" | "mobile" | "all";
 const LOCAL_RULE: Pick<FieldRule, "sharing" | "encrypted"> = { sharing: THIS_DEVICE, encrypted: false };
@@ -386,7 +376,7 @@ const TABS: { id: PanelTab; label: string; icon: string; desktopOnly?: true }[] 
   { id: "obsidian", label: "Obsidian", icon: "gem" },
   { id: "core", label: "Core plugins", icon: "toy-brick" },
   { id: "plugins", label: "Community plugins", icon: "puzzle" },
-  { id: "beta", label: "Beta", icon: "flask-conical" }, // BRAT's own BratIcon when registered (定稿)
+  { id: "beta", label: "Beta", icon: "flask-conical" }, // BRAT's own BratIcon when registered
   { id: "advanced", label: "Advanced", icon: "wrench" },
   { id: "sources", label: "Remotes", icon: "git-branch", desktopOnly: true },
 ];
@@ -494,7 +484,7 @@ export function settingTypeValue(hit: Pick<SearchHit, "item">): "file" | "folder
 }
 
 // `section:` — spec §7, the same word the Sync Center's search bar uses, so one concept is typed one
-// way in both boxes. NO alias for v2's `scope:`: a key this set doesn't know is free text, so a
+// way in both boxes. NO `scope:` alias: a key this set doesn't know is free text, so a
 // typed `scope:core` searches for those literal words instead of quietly filtering.
 //
 // Here `section` names the settings AREA — this panel's own tabs — where the Sync Center's names an
@@ -502,10 +492,8 @@ export function settingTypeValue(hit: Pick<SearchHit, "item">): "file" | "folder
 // both); the extras are the areas that hold no items at all: `general` and `remotes`, plus
 // `advanced`, which is where custom rules and discovered files live in this panel.
 //
-// `custom` is the one word that is a family here rather than an area (§4): it was answerable in the
-// Sync Center and not here, so the same word meant different things depending on which box you were
-// typing in — the exact defect the one-vocabulary release set out to remove. An Advanced-tab rule
-// now answers both words; `advanced` still means that tab, its own non-item settings included.
+// `custom` is the one word that is a family here rather than an area (§4): an Advanced-tab rule
+// answers both words; `advanced` still means that tab, its own non-item settings included.
 //
 // Exported for the tests, which assert against the shipped list rather than restating it; `as const`
 // is what makes the resolver map below total over these keys (see SYNC_QUALIFIER_SPECS).
@@ -536,8 +524,8 @@ export function setMemberDeviceClass(
   return next;
 }
 
-// Every settingsFile write funnels through here (spec 2026-07-26-card-visual-refresh-design.md
-// §3.1 "自动切换") so the stored `mode` is never a user choice — it's re-derived from the rules/
+// Every settingsFile write funnels through here (spec §3.1 auto-switch) so the stored `mode` is
+// never a user choice — it's re-derived from the rules/
 // perElement the write just produced. A write that lands on "fields" also drops any `fileRule`: the
 // two are a manifest-illegal combination (manifest.ts rejects fields+fileRule), and forcing this
 // here means every settingsFile-mutating call site gets that invariant for free instead of having
@@ -563,8 +551,8 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private sourcesErrorEl: HTMLElement | null = null;
   private groupsErrorMsg = "";
   private sourcesErrorMsg = "";
-  // null = no pinned error (轮 21 #158: the old "" sentinel collided with the unnamed
-  // placeholder rule's empty NAME, so a successful save showed a blank inline error there).
+  // null = no pinned error — an "" sentinel would collide with the unnamed placeholder rule's
+  // empty NAME, showing a blank inline error after a successful save.
   private saveErrorFor: string | null = null;
   private detections = new Map<string, SensitiveScan>(); // group name -> live scan, filled in as reads complete
   private passphraseStatusEl: HTMLElement | null = null;
@@ -573,7 +561,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private addingCompanion = new Set<string>(); // UI-transient: zone ③ "+ Add folder" inputs open
   private companionPathEditing = new Set<string>(); // UI-transient: zone ③ rows mid path-edit ("def.id::path")
   private previewOpen = new Set<string>(); // UI-transient: zone ② "File preview" disclosure open this session, keyed by def.id
-  private membersOpen = new Set<string>(); // UI-transient: zone ③ member-list disclosure open this session, keyed "def.id:path" (spec 2026-07-26-card-visual-refresh-design.md §4)
+  private membersOpen = new Set<string>(); // UI-transient: zone ③ member-list disclosure open this session, keyed "def.id:path" (spec §4)
   // In-place refresh hooks for enable toggles: a per-card toggle rebuilds only the section "Sync
   // all" headers, and "Sync all" rebuilds only the cards — never rerender(), whose
   // containerEl.empty() + async rebuild visibly flashes and drops the panel mid-scroll.
@@ -664,10 +652,10 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     if (ref === null) return null;
     const parsed = parseItemRef(ref);
     if (parsed === null) return null;
-    // defForRef, never `d.section === parsed.section` (fix round 2, NEW-I1): a BRAT-managed
+    // defForRef, never `d.section === parsed.section`: a BRAT-managed
     // plugin's def PRESENTS as `beta` while its ref stores `community`, so the raw comparison
-    // never matched and every beta card's "More ▸ opens Settings" landed on the Advanced tab
-    // with a dead anchor. Both sides go through storageSection exactly once in there.
+    // would never match and every beta card's "More ▸ opens Settings" would land on the Advanced
+    // tab with a dead anchor. Both sides go through storageSection exactly once in there.
     const def = defForRef(this.host.itemDefs(), ref);
     if (def !== undefined) {
       this.activeTab = SECTION_TAB[def.section];
@@ -768,7 +756,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     return this.host.listPluginSections(this.groups);
   }
 
-  // Beta tab header (定稿 mockup v2): what the tab is, the map-note line with the resolve
+  // Beta tab header: what the tab is, the map-note line with the resolve
   // state, and ↻ Re-scan. Unresolved repos trigger one automatic background re-scan per
   // panel lifetime — failures wait for the next manual scan instead of looping.
   private async renderBetaHeader(containerEl: HTMLElement, gen: number): Promise<void> {
@@ -779,7 +767,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       .setDesc("Plugins installed through BRAT instead of the community catalog. Settings sync the same way — only the install path differs.")
       .setHeading();
     head.settingEl.setAttribute("data-search-anchor", "beta-header");
-    // The map note renders ONLY while something is unresolved (轮 22 #164 ①): a fully-resolved
+    // The map note renders ONLY while something is unresolved: a fully-resolved
     // list is pure noise — the install path does its own last-chance refresh, and this tab
     // auto-rescans below. While incomplete it matters: an unmatched beta plugin's install would
     // fall back to the community catalog, which a beta-only plugin isn't in.
@@ -800,7 +788,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     }
   }
 
-  // ── Unified card renderer — every ItemDef section (spec §4/§5, task-5/6-brief.md) ──────────
+  // ── Unified card renderer — every ItemDef section (spec §4/§5) ──────────────────────────────
   // One renderer for every ItemDef: name + badges + sync toggle + chevron on the row, a drawer
   // with a Settings file zone (and, for Appearance, a Companion folders zone). Reads/writes
   // settings.items directly through host.saveSettings() — durable, recompiles. The Advanced
@@ -871,11 +859,10 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const defs = this.host.itemDefs().filter((d) => d.section === section);
     for (const def of defs) this.ensureCardDetection(def, this.itemOf(def));
     if (gen !== this.renderGen) return;
-    // No section-sub line (轮 22 #164 ②): "syncs its files" stopped being true once installs
-    // moved to the catalog/BRAT engine, and the cards themselves say what syncs.
+    // No section-sub line — the cards themselves say what syncs.
     if (withSyncAll && defs.length > 0) this.renderSyncAllRow(containerEl, defs);
     // Cards render in def order — buildItemDefs already alphabetizes each section (spec §4).
-    // No sensitive-first reordering: it broke the dictionary order users scan by (round-6 bug ②).
+    // No sensitive-first reordering: it breaks the dictionary order users scan by.
     const listEl = containerEl.createDiv();
     for (const def of defs) {
       const wrap = listEl.createDiv({ cls: "config-sync-item-wrap" });
@@ -908,7 +895,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const expKey = cardExpandKey(defRef(def));
     const row = new Setting(wrap).setName(def.label).setDesc(def.description);
     row.settingEl.setAttribute("data-search-anchor", itemAnchorId(defRef(def)));
-    // Round-12: unified onto the shared FOLD helper — one rotating `chevron-right` instead of
+    // Unified onto the shared FOLD helper — one rotating `chevron-right` instead of
     // swapping between `chevron-down`/`chevron-right`. `.setName` above already put the label
     // text into `row.nameEl`, so the chevron still needs an explicit `.prepend` to land before it
     // (renderFoldChevron only appends).
@@ -926,7 +913,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       else this.expanded.add(expKey);
       syncExpansion();
     });
-    // 轮 21E: badges live on the control side, just before the sync toggle — icon + corner
+    // Badges live on the control side, just before the sync toggle — icon + corner
     // count, tooltip carrying the sentence — not text tags trailing the name.
     for (const badge of computeBadges(def, item, this.enablementOf(def), this.carrierCountsOf(def))) this.renderBadge(row.controlEl, badge);
     row.addToggle((t) =>
@@ -949,9 +936,8 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   // one, and it comes in as a callback).
   //
   // Turning an item OFF removes it from every device's contract and can delete its store copy — the
-  // one destructive gesture on this card, and since the Sync Center's footer retired (spec §6.2)
-  // its only home. The confirmation is the SAME modal that footer opened; nothing about
-  // StopSyncingModal changes, only who calls it. The two carrier cards go through it like any
+  // one destructive gesture on this card, and its only home (spec §6.2). The confirmation is
+  // StopSyncingModal. The two carrier cards go through it like any
   // other: a carrier is an item, it has a store copy, and "one home for the gesture" does not mean
   // "one home for the items we thought of first".
   //
@@ -959,10 +945,9 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   // included (registry.ts's buildItemDefs; main.ts's adopt path says so in as many words), so the
   // Community tab carries a Config Sync card with this same toggle — and the modal's delete-store
   // checkbox defaults to CHECKED, which on this one item would delete the self copy that carries
-  // the sync contract to every other device. The gesture has excluded the self item since it was
-  // designed (2026-07-18-stop-syncing-design.md §A, "not the self item"); §6.2 moved the gesture's
-  // home, not its scope. So this card keeps the plain write it has always had: `synced` flips,
-  // nothing is deleted, and it is reversible in place.
+  // the sync contract to every other device. The gesture excludes the self item by design
+  // ("not the self item"); §6.2 places the gesture's home, not its scope. So this card keeps
+  // the plain write: `synced` flips, nothing is deleted, and it is reversible in place.
   //
   // Turning any item back ON is the plain path too — restoring sync destroys nothing.
   private async cardSyncedToggled(def: ItemDef, wrap: HTMLElement, v: boolean, snapBack: () => void): Promise<void> {
@@ -976,9 +961,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     for (const rebuild of this.syncAllRebuilds) rebuild();
   }
 
-  // The card's destructive action (spec §6.2), body unchanged from the Sync Center footer's
-  // `openStopSyncing` that task 10 deleted — minus the two things only a view had (its selection
-  // set and its reload).
+  // The card's destructive action (spec §6.2).
   private async openStopSyncing(def: ItemDef, wrap: HTMLElement): Promise<void> {
     // §4.2b: refuse before the modal opens, not after the user has decided in it. `stopSyncing`
     // still refuses on its own — this is the courtesy, that is the guarantee.
@@ -1015,13 +998,13 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     }
   }
 
-  // 轮 21E: icon-only, a 9px corner count when the badge carries one, tooltip = the sentence;
+  // Icon-only, a 9px corner count when the badge carries one, tooltip = the sentence;
   // a badge missing its icon keeps the text as the loud fallback.
   private renderBadge(host: HTMLElement, badge: Badge): HTMLElement {
     const el = host.createSpan({ cls: `config-sync-card-badge ${badge.cls}` });
     if (badge.icon !== undefined) {
       setIcon(el.createSpan({ cls: "config-sync-card-badge-ic" }), badge.icon);
-      // A corner count of 1 says nothing the icon doesn't (轮 22 #165) — digits appear from 2
+      // A corner count of 1 says nothing the icon doesn't — digits appear from 2
       // up; the tooltip always carries the exact sentence ("1 device-scoped").
       if (badge.count !== undefined && badge.count > 1) el.createSpan({ cls: "config-sync-card-badge-cnt", text: String(badge.count) });
     } else {
@@ -1042,10 +1025,10 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     this.renderCardBodyInto(host, def, this.itemOf(def), wrap);
   }
 
-  // In-place path-row refresh for hasKeyRules flips (round-7 spec §1): the row sits outside
-  // refreshCardBody's swap target, and the full renderItemCard previously used here collapsed
-  // the card around its async file read — the panel visibly jumped and the File preview lost its
-  // scroll position. The error element is the row's own next sibling (renderSettingsFileZone
+  // In-place path-row refresh for hasKeyRules flips: the row sits outside
+  // refreshCardBody's swap target, and a full renderItemCard would collapse
+  // the card around its async file read — the panel would visibly jump and the File preview
+  // would lose its scroll position. The error element is the row's own next sibling (renderSettingsFileZone
   // creates them adjacently), so both anchors are stable across body swaps.
   private refreshPathRow(wrap: HTMLElement, def: ItemDef): void {
     const row = wrap.querySelector(".config-sync-card-sfhead");
@@ -1064,8 +1047,8 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     if (carrier !== null) this.renderCarrierElements(exp, def, carrier, wrap);
     // companionHost is its own stable container (mirrors zone ②'s bodyHost): a companion
     // add/remove or path edit still rebuilds the whole card (renderItemCard), landing here fresh.
-    // A member-list expand/collapse touches neither this host nor the card at all any more (live-
-    // test fix-round) — the fold toggle wired inside renderCompanionZone flips the member host's
+    // A member-list expand/collapse touches neither this host nor the card at all —
+    // the fold toggle wired inside renderCompanionZone flips the member host's
     // own `hidden` + its chevron in place.
     const companionHost = exp.createDiv({ cls: "config-sync-card-companionzonehost" });
     this.renderCompanionZone(companionHost, def, item, wrap);
@@ -1080,7 +1063,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   }
 
   // Wires a picker trigger's click/keydown → opens an Obsidian `Menu` at the click/keyboard
-  // position, and tracks `.is-open` on the trigger while the menu is showing (定稿轮 16甲, ⇕
+  // position, and tracks `.is-open` on the trigger while the menu is showing (⇕
   // hover-reveal — DESIGN.md §2.3), cleared via `Menu.onHide`. Shared by every sharing/rule
   // picker in this file (renderSharingPicker below) and the local-segment menu, so the
   // open/close bookkeeping lives in exactly one place — the same shape SyncCenterView's own
@@ -1107,7 +1090,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     });
   }
 
-  // The scrow controls column as a fixed three-slot grid (轮 21A, DESIGN §1.4 SLOTS): aux (the
+  // The scrow controls column as a fixed three-slot grid (DESIGN §1.4 SLOTS): aux (the
   // path row's eye / an array rule row's per-item icon) | lock | device picker — same-type
   // controls land in the same slot on every row, so each forms a strict column card-wide; a
   // row without a control leaves its slot empty. Device is LAST, beside the divider/THIS
@@ -1121,20 +1104,20 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     };
   }
 
-  // The sharing/rule picker trigger (定稿轮 16甲: the click-to-cycle idiom — renderSharingCycle —
-  // retires everywhere). Icon + a small muted `chevrons-up-down` PICKER affordance opens an
+  // The sharing/rule picker trigger.
+  // Icon + a small muted `chevrons-up-down` PICKER affordance opens an
   // Obsidian `Menu` listing `options`, checkmarked on the current value — the same idiom the
   // local segment below and the Sync Center's own pickers already use. `iconFor`/`labelFor`
   // choose the vocabulary: the enablement rows (plugin card `Enabled on`, carrier element rows)
   // pass `ruleIcon`/`ruleLabel` (enablementRow.ts — the SAME producer the Sync Center's own
   // `ruleMenu` reads, so both entrances offer identical wording); the plain field/file/companion
-  // rows fall back to `sharingIcon`/`sharingLabel` (itemCard.ts), byte-identical to the old
-  // cycle's default vocabulary. `disabled` keeps the dim, non-interactive rendering — no menu,
-  // but the ⇕ span still renders (轮 23 #166 ①: without it the box is 14px narrower and the
-  // centered device slot drifts the icon out of the column); CSS keeps a dim picker's ⇕ at
+  // rows fall back to `sharingIcon`/`sharingLabel` (itemCard.ts).
+  // `disabled` keeps the dim, non-interactive rendering — no menu,
+  // but the ⇕ span still renders: without it the box is 14px narrower and the
+  // centered device slot drifts the icon out of the column; CSS keeps a dim picker's ⇕ at
   // opacity 0 even on row hover (the settings-file row's per-key-rules-active state).
-  // `extras` (定稿轮 19d): a removable row's destructive verb lives HERE, after a separator, as
-  // a warning-red trash item — the inline ✕ ExtraButtons are gone. Only the rows that ARE
+  // `extras`: a removable row's destructive verb lives HERE, after a separator, as
+  // a warning-red trash item. Only the rows that ARE
   // removable pass one (a key-rule row's `Remove rule`, a user-added folder's `Remove folder`).
   private renderSharingPicker(
     cell: HTMLElement,
@@ -1180,11 +1163,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     });
   }
 
-  // The two-segment row's LOCAL half (spec §6.1, round-9 ② eyebrow+icon+picker revision), painted once
+  // The two-segment row's LOCAL half (spec §6.1), painted once
   // for both of this file's rows that have one: a plugin card's `Enabled on` and a carrier card's
   // element rows. It leads with the divider because the divider only exists when there IS a
   // second segment. A muted "this device" eyebrow sits above/beside the glyph so the local
-  // segment reads as its own thing even though it no longer carries a visible state word.
+  // segment reads as its own thing even though it carries no visible state word.
   //
   // A class rule that this device does not match has nothing true to show as a local state, so it
   // shows the follow glyph/tooltip — but the menu stays live, because an exception outranks a class
@@ -1197,7 +1180,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       rule: Sharing;
       exception: DeviceElementState | null;
       model: EnablementRowModel;
-      // 轮 20 ③: a carrier member row suppresses the per-row eyebrow — `this device` is its
+      // A carrier member row suppresses the per-row eyebrow — `this device` is its
       // list's COLUMN HEADER there (renderCarrierElements); single-row surfaces keep it inline.
       showEyebrow: boolean;
       after: () => void;
@@ -1226,12 +1209,10 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     });
   }
 
-  // Zone ① `Enabled on` (spec §6.5, row-label shortened round-9 ①) — core/community/beta plugin
-  // cards only. Same name, same values, same data as the Sync Center's row of that name: this used
-  // to be a 4-stop cycle whose first three stops wrote `runsOn.device` and whose fourth wrote
-  // `thisDeviceItems`, i.e. one control with two destinations. Now it is two controls, one per
-  // layer, each with one writer.
-  // A scrow (定稿轮 19): label on the identity track, the fleet picker in the controls column,
+  // Zone ① `Enabled on` (spec §6.5) — core/community/beta plugin
+  // cards only. Same name, same values, same data as the Sync Center's row of that name: two
+  // controls, one per layer, each with one writer.
+  // A scrow: label on the identity track, the fleet picker in the controls column,
   // divider + local cell landing on tracks 3/4 as direct row children — the same placement the
   // Sync Center card's own `Enabled on` row uses.
   private renderDefaultEnabledOnRow(exp: HTMLElement, def: ItemDef, wrap: HTMLElement): void {
@@ -1251,10 +1232,10 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         build();
         this.refreshCardBadges(wrap, def);
       };
-      // Fleet segment (round-9 ②, menu since 定稿轮 16甲): icon-only, over the four rule values —
+      // Fleet segment: icon-only, over the four rule values —
       // with the enablement vocabulary passed in, because the same `Sharing` union answers a
       // different question here (see renderSharingPicker's own note). No `labelFor` glyph beside
-      // the icon: the wordmark retired everywhere the two-segment presentation appears; `ruleLabel`
+      // the icon: the two-segment presentation carries no wordmark anywhere; `ruleLabel`
       // still supplies each MENU ITEM's title. `enabledOnTooltip` — the same producer the Sync
       // Center's row reads — is the aria-label/tooltip instead. A desktop-only plugin still drops
       // the mobile stop: mobile can never install it.
@@ -1281,7 +1262,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   // (registry.ts's isEnablementList — main.ts's enablementDecisions walks exactly those two lists,
   // and perElement.ts reads rules alone). `enabled-css-snippets` has no such application path, so a
   // snippet row would be offering a choice nothing would ever honour: it keeps the fleet segment
-  // alone, which is what snippet rows have always shown (task 7 carry F5). The host methods stay
+  // alone, which is what snippet rows show. The host methods stay
   // `RuleListId`-wide — the asymmetry is in what this row OFFERS, not in what the layer can store.
   //
   // Returns the row's CONTENT cell, so a caller with an affordance of its own (the snippets
@@ -1312,7 +1293,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         build();
         opts.onWritten();
       };
-      // Fleet segment (round-9 ②: icon-only, same as the plugin card's; menu since 定稿轮 16甲) —
+      // Fleet segment (icon-only, same as the plugin card's) —
       // the same control, vocabulary and desktop-only stop-drop the plugin card's `Enabled on`
       // uses above, because it is the same question about the same datum. A snippet member
       // (no local layer) simply ends the row here: columns 3/4 stay empty.
@@ -1334,8 +1315,8 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   // The fleet write from an element row, plus the two card-level consequences every write into this
   // item's `perElement` map has. The first rule on a card (or the last one cleared) flips
   // hasKeyRules, which (un)dims the path row's own sharing/lock controls (spec §3.1) — refreshed in
-  // place, because the full card re-render this used to do made the panel jump on 2 of every 4
-  // cycle clicks (round-7 bug 1). The File preview colors its elements from the same map.
+  // place, because a full card re-render makes the panel visibly jump.
+  // The File preview colors its elements from the same map.
   //
   // The rule home for the row's list IS the card the row is drawn in — snippets belong to
   // Appearance, a carrier's elements to the carrier (enablementRules.ts's ruleHomeFor) — which is
@@ -1354,7 +1335,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   // element, under one section title. No search box — spec §10 leaves that open, and Community's 73
   // rows are a grouping decision this card is not the place to take unasked.
   private renderCarrierElements(exp: HTMLElement, def: ItemDef, list: RuleListId, wrap: HTMLElement): void {
-    // Zone-header scrow (轮 20 ③; label shortened 轮 21B): `Enabled on` — zone ①'s own word,
+    // Zone-header scrow: `Enabled on` — zone ①'s own word,
     // because this list IS that datum per element — with the full sentence in the tooltip;
     // `this device` heads the local column, and the member rows below suppress their per-row
     // eyebrow (showEyebrow: false in renderElementRuleRow).
@@ -1380,7 +1361,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
 
   private renderSettingsFileZone(exp: HTMLElement, def: ItemDef, item: Item, wrap: HTMLElement): void {
     const kind = settingsFileZoneKind(def);
-    // The zone label is the path ROW's own identity cell now (定稿轮 19c #144) — a standalone
+    // The zone label is the path ROW's own identity cell — a standalone
     // label line remains only for the kinds that have no path row to carry it.
     if (kind === "none") {
       exp.createDiv({ cls: "config-sync-explabel", text: "Settings file" });
@@ -1392,7 +1373,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       exp.createDiv({ cls: "config-sync-expdesc", text: stateOnlyHint(def.label, expectedFile) });
       return;
     }
-    // A CONTAINER since 轮 21A — renderSettingsFilePathRow builds its two scrow lines inside
+    // A CONTAINER — renderSettingsFilePathRow builds its two scrow lines inside
     // (refreshPathRow's row/errorEl adjacency contract is unchanged).
     const pathRow = exp.createDiv({ cls: "config-sync-card-sfhead" });
     const pathErrorEl = exp.createDiv({ cls: "config-sync-save-error mod-warning" });
@@ -1408,30 +1389,28 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     return `custompath:${defRef(def)}`;
   }
 
-  // Zone ② path row = a scrow whose identity cell IS the zone header (定稿轮 19c #144): the
+  // Zone ② path row = a scrow whose identity cell IS the zone header: the
   // uppercase `SETTINGS FILE` label stacked over the mono filename + eye; the controls cluster
   // holds scope + lock. Locked (dim, disabled) whenever the card has any per-key rule —
-  // per-key state owns scope/encrypt then, not the whole-file row (spec §3.1). fileRule read/write
-  // below is moved VERBATIM from the old Plain-mode row (same normalization, only the shape moved).
+  // per-key state owns scope/encrypt then, not the whole-file row (spec §3.1).
   private renderSettingsFilePathRow(row: HTMLElement, errorEl: HTMLElement, def: ItemDef, item: Item, wrap: HTMLElement): void {
     const defaultPath = def.settingsFile!.defaultPath!;
     const current = item.path ?? defaultPath;
     const committed = item.path !== undefined;
     const key = this.customPathEditingKey(def);
-    // The path text itself is the edit entry point (round-6 定稿: the ✎ pencil and the ↺ reset
-    // icon are gone) — a committed custom path shows as accented text like any other, and
+    // The path text itself is the edit entry point —
+    // a committed custom path shows as accented text like any other, and
     // "Reset to default" becomes a text action inside the edit state.
     const editing = this.customPathEditing.has(key);
     const locked = hasKeyRules(item);
 
-    // Two lines (轮 21A, #154/#155): line 1 = the zone label + the slots cluster strictly on
-    // the label's own line (the old two-line identity cell left the cluster vertically
-    // centered BETWEEN label and filename, anchored to neither); line 2 = the filename
+    // Two lines: line 1 = the zone label + the slots cluster strictly on
+    // the label's own line; line 2 = the filename
     // spanning the full card width, so plugin-length paths never wrap.
     const line1 = row.createDiv({ cls: "config-sync-scrow" });
     line1.createDiv({ cls: "config-sync-explabel config-sync-explabel-inline", text: "Settings file" });
     const slots = this.scrowSlots(line1);
-    // The File preview trigger lives in the aux slot now (轮 21A — the eye is an action on this
+    // The File preview trigger lives in the aux slot (the eye is an action on this
     // file, so it joins the file's own controls; rendered in the edit state too, so the slot
     // column never blinks). Same open-state language as the FILES row's `file-diff` icon.
     const previewOpen = this.previewOpen.has(def.id);
@@ -1524,7 +1503,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     // and the row MUST rebuild itself after the write: this row lives outside refreshCardBody's
     // swap target, so without the rebuild the lock/scope controls keep replaying their stale
     // render-time value — a lock click after the first one re-sends the same boolean forever
-    // ("encrypted can never be turned off", round-6 bug ①).
+    // (otherwise encrypted could never be turned off).
     const setFileRule = (mutator: (r: { sharing: FileSharing; encrypted: boolean }) => { sharing: FileSharing; encrypted: boolean }): void => {
       void (async () => {
         await this.updateItem(def, (c) => {
@@ -1552,7 +1531,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     if (locked) {
       for (const cell of [sharingCell, lockCell]) {
         // The lock cell is usually EMPTY here (renderLockToggle paints nothing while
-        // disabled+unencrypted, 轮 23 ②) — skip it, or the hint tooltips blank space (#159).
+        // disabled+unencrypted) — skip it, or the hint tooltips blank space.
         if (cell.childElementCount === 0) continue;
         cell.addClass("config-sync-dim");
         cell.setAttribute("aria-label", PER_KEY_RULES_ACTIVE_HINT);
@@ -1600,7 +1579,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       this.renderItemCard(wrap, def); // same restore path Cancel takes: the edit did not happen
       return;
     }
-    // Every registry item's settingsFile carries a preset default path (task-7-brief.md), so
+    // Every registry item's settingsFile carries a preset default path, so
     // ANY committed change here — first customization or a further edit — goes through the same
     // preset-change guard (D7).
     const confirmed = await confirmPresetPathChange(this.app, def.label);
@@ -1623,8 +1602,8 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   }
 
   // Icon lock control (spec §2.2/§5) shared by the path row (whole-file encrypt) and every rule
-  // row (per-key encrypt) — also the interface Task 3's rows reuse. Three states (定稿轮 23
-  // #166 ②): unencrypted-but-available renders an OPEN lock (a closed one read as
+  // row (per-key encrypt). Three states:
+  // unencrypted-but-available renders an OPEN lock (a closed one reads as
   // already-encrypted), encrypted renders the closed `.is-on` lock, and a lock that can neither
   // show state nor take a click (disabled AND unencrypted — a `This device` rule, per-item rules
   // on, the path row while per-key rules own the file) renders NOTHING: its empty slot keeps the
@@ -1650,7 +1629,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     });
   }
 
-  // Decides whether zone ②'s body needs a file read at all (spec §4 "渐进披露"): a card with no
+  // Decides whether zone ②'s body needs a file read at all (spec §4 progressive disclosure): a card with no
   // per-key rules AND a collapsed preview never reads the file — rule rows are empty either way
   // (buildRuleRows needs no live doc to return []) and there's nothing else to show. Every other
   // combination reads once and renders rule rows + the preview disclosure off-DOM before swapping
@@ -1660,7 +1639,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const open = this.previewOpen.has(def.id);
     // Per-host generation token: rapid successive writes (scope-icon cycling) fire overlapping
     // async reads below, and without this the EARLIER read resolving LAST would swap a stale
-    // body over the fresh one (R4 backlog ③). Only the newest call may complete the swap; the
+    // body over the fresh one. Only the newest call may complete the swap; the
     // synchronous branch bumps it too, so it also invalidates any read still in flight.
     const gen = String(Number(host.dataset.csBodyGen ?? "0") + 1);
     host.dataset.csBodyGen = gen;
@@ -1683,7 +1662,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       build(tmp, doc, fileState);
       // The swap replaces the File preview's <pre> wholesale, so its scroll position is carried
       // across by hand — a rule added by clicking a key deep in a long file must not snap the
-      // preview back to the first line (round-7 spec §1, bug 3).
+      // preview back to the first line.
       const prevScroll = host.querySelector(".config-sync-json-pre")?.scrollTop ?? 0;
       host.empty();
       while (tmp.firstChild !== null) host.appendChild(tmp.firstChild);
@@ -1695,7 +1674,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   }
 
   // Rule rows list ONLY configured keys (buildRuleRows) — browsing the file's full key set is
-  // File preview's job now (spec §3.1). Nothing renders when there are none.
+  // File preview's job (spec §3.1). Nothing renders when there are none.
   private renderRuleRows(bodyEl: HTMLElement, def: ItemDef, item: Item, doc: Record<string, unknown>, wrap: HTMLElement): void {
     const rows = buildRuleRows(def, item, doc);
     if (rows.length === 0) return;
@@ -1706,7 +1685,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
 
   private renderRuleRow(panel: HTMLElement, def: ItemDef, item: Item, row: FieldRowModel, doc: Record<string, unknown>, wrap: HTMLElement): void {
     const fr = panel.createDiv({ cls: "config-sync-scrow config-sync-card-rulerow" });
-    // The key IS the row's identity (定稿轮 19): a mono name on track 1, the whole control
+    // The key IS the row's identity: a mono name on track 1, the whole control
     // cluster — scope → lock → (array keys) per-item icon — left-anchored in the controls column.
     fr.createSpan({ cls: "config-sync-fkey", text: row.key });
     const slots = this.scrowSlots(fr);
@@ -1722,7 +1701,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       })();
     };
     // setRule → refreshCardBody rebuilds every rule row, so the icon re-reads the fresh sharing.
-    // The rule's removal is the menu's own warning item (定稿轮 19d — the ✕ ExtraButton is gone).
+    // The rule's removal is the menu's own warning item.
     this.renderSharingPicker(slots.device, {
       sharing: row.rule.sharing,
       options: FIELD_SHARING_OPTIONS,
@@ -1743,8 +1722,8 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
             });
             if (!hasKeyRules(this.itemOf(def))) {
               // Removing the last rule flips hasKeyRules -> false, which undims the path row's own
-              // scope/lock controls (spec §3.1) — refreshed in place (round-7 spec §1; the full
-              // re-render used before jumped the panel and left the dim state stale on other paths).
+              // scope/lock controls (spec §3.1) — refreshed in place: a full re-render would
+              // jump the panel and leave the dim state stale on other paths.
               this.refreshPathRow(wrap, def);
             }
             this.refreshCardBadges(wrap, def);
@@ -1757,8 +1736,8 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const lockDisabled = encryptToggleDisabled(row.rule.sharing, row.perElementEnabled);
     this.renderLockToggle(lockCell, { encrypted: row.rule.encrypted, disabled: lockDisabled, onChange: (v) => setRule((r) => ({ ...r, encrypted: v })) });
     if (row.isArray) {
-      // Per-item device rules as an icon toggle (定稿轮 19c #143, replacing text+ToggleComponent).
-      // MUST-FIX 2 (final-review): Encrypt and Per-item scopes are mutually exclusive on the same
+      // Per-item device rules as an icon toggle.
+      // Encrypt and Per-item scopes are mutually exclusive on the same
       // rule (manifest.ts D3) — enabling Per-item here clears `encrypted` in the SAME write
       // (applyPerElementToggle), and this icon renders disabled while the rule is already
       // encrypted (the lock disappears the other way — encryptToggleDisabled makes
@@ -1799,7 +1778,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     }
   }
 
-  // Array-key element row, indented under its rule row (spec §3.1 "保留现交互"; the indent lives
+  // Array-key element row, indented under its rule row (spec §3.1 preserves this interaction; the indent lives
   // on the name inside the identity track, so the control column stays on the parent's rule).
   private renderPerElementRow(panel: HTMLElement, def: ItemDef, key: string, element: string, sharing: Sharing, wrap: HTMLElement): void {
     const r = panel.createDiv({ cls: "config-sync-scrow config-sync-card-elrow" });
@@ -1830,7 +1809,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
 
   // Un-ruled key click in the File preview (spec D6): promotes this item's own settingsFile.mode
   // to "fields" (deriveMode does this automatically once the rule below exists) and seeds an
-  // inert/encrypt-looking default rule, exactly like the old per-group JSON preview did.
+  // inert/encrypt-looking default rule.
   private async addRuleForKey(def: ItemDef, key: string): Promise<void> {
     const rule: ItemFieldRule = { sharing: EVERYWHERE, encrypted: SENSITIVE_ENCRYPT_RE.test(key) };
     await this.updateItem(def, (c) => {
@@ -1841,9 +1820,9 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   }
 
   // Progressive disclosure (spec §4): collapsed by default, `previewOpen` is UI-transient
-  // (session-only, mirrors the drawer's own `expanded` set). Round-12: the trigger itself moved
-  // to the `eye` icon on the path row (renderSettingsFilePathRow) — this method only renders the
-  // CONTENT now, gated on the same `previewOpen` set the icon writes. Expanding is still the only
+  // (session-only, mirrors the drawer's own `expanded` set). The trigger is
+  // the `eye` icon on the path row (renderSettingsFilePathRow) — this method only renders the
+  // CONTENT, gated on the same `previewOpen` set the icon writes. Expanding is still the only
   // thing that can trigger the file read this content depends on — a card already read for its
   // rule rows (renderCardBodyInto) reuses that same read, it is never repeated.
   private renderPreviewDisclosure(bodyEl: HTMLElement, def: ItemDef, item: Item, doc: Record<string, unknown>, fileState: CardFileState, wrap: HTMLElement): void {
@@ -1860,8 +1839,8 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   }
 
   private renderCardDataPreview(bodyEl: HTMLElement, def: ItemDef, item: Item, doc: Record<string, unknown>, wrap: HTMLElement): void {
-    // Key clickability made explicit (定稿轮 19 ②, GitHub issue #2 "didn't realize I could
-    // click"): the action sentence leads the preview instead of trailing the bottom legend, and
+    // Key clickability is made explicit (users didn't realize they could
+    // click): the action sentence leads the preview instead of trailing the bottom legend, and
     // every un-ruled key below wears a persistent dashed underline (config-sync-json-clickable).
     // A carrier card suppresses both — its elements' rules live on the element rows, not here.
     if (carrierListFor(def) === null) {
@@ -1871,10 +1850,10 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     }
     const pre = bodyEl.createEl("pre", { cls: "config-sync-json-pre" });
     // A carrier card's element rows (the drawer, spec §6.4) ARE its rule surface — a per-key rule on
-    // a boolean plugin map has no meaning, and clicking one here used to write `sf.rules[<plugin id>]`
-    // (final-review CRITICAL 1), which flips the item into "fields" mode and corrupts the switch-list
-    // file on next capture (registry.ts's perElementFromMap now also refuses that key, belt-and-braces,
-    // but this is the affordance that invited the click in the first place). Suppressed entirely below:
+    // a boolean plugin map has no meaning, and a click writing `sf.rules[<plugin id>]`
+    // would flip the item into "fields" mode and corrupt the switch-list
+    // file on next capture (registry.ts's perElementFromMap also refuses that key, belt-and-braces,
+    // but this affordance is what would invite the click). Suppressed entirely below:
     // no click handler, and no "you could add a rule here" styling on an un-ruled key.
     const isCarrier = carrierListFor(def) !== null;
     const detectedKeys = this.detections.get(def.id)?.keys ?? [];
@@ -1901,15 +1880,14 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
           cls: `config-sync-json-key${noRuleHint ? "" : ` ${jsonKeyClass(kc)}`}${ruleable ? " config-sync-json-clickable" : ""}`,
           text: `"${key}"`,
         });
-        // An encrypted rule marks its key with the same lucide lock the rest of the panel uses
-        // (round-7 spec §2 — the old emoji suffix is gone).
+        // An encrypted rule marks its key with the same lucide lock the rest of the panel uses.
         if (kc.state.encrypted) setIcon(kspan.createSpan({ cls: "config-sync-json-lock" }), "lock");
         if (ruleable) {
           kspan.addEventListener("click", () => {
             void this.addRuleForKey(def, key).then(() => {
               // Adding a rule can flip hasKeyRules -> true, which dims the path row's own
-              // scope/lock controls (spec §3.1) — refreshed in place (round-7 spec §1; the full
-              // re-render used before reset this preview's scroll to the top, round-7 bug 3).
+              // scope/lock controls (spec §3.1) — refreshed in place: a full re-render would
+              // reset this preview's scroll to the top.
               this.refreshPathRow(wrap, def);
               this.refreshCardBadges(wrap, def);
               this.refreshCardBody(wrap, def);
@@ -1950,7 +1928,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
 
   // "+ Add folder" is available on every card (spec §5) — a def with no preset companions and an
   // empty config produces zero rows (buildCompanionRows), in which case the zone renders no
-  // header and no rows, just the Add-folder entry point below. EXCEPT carriers (轮 23 #166 ③):
+  // header and no rows, just the Add-folder entry point below. EXCEPT carriers:
   // a switch registry has no meaning for a folder to attach to (an arbitrary folder belongs to
   // a custom rule), so a carrier card gets no Add-folder entry point — but a legacy user-added
   // folder in config still renders its row, visible and removable, never silently active.
@@ -1963,7 +1941,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     for (const row of rows) {
       const key = this.companionMemberKey(def, row);
       const open = this.membersOpen.has(key);
-      // Forward references (live-test fix-round, race root cause): the toggle callback needs
+      // Forward references: the toggle callback needs
       // both, but `rowEls` is this very call's return value and `membersHost` is only created
       // right after it (DOM order requires the row before its host) — both are only ever READ
       // from the callback, which can't fire until this render pass has finished assigning them.
@@ -2000,7 +1978,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         // Plain (non-mapKey) companion: list-only member names, no per-member scope chip — the
         // switch-list engine only knows community-plugins.json, core-plugins.json and
         // enabledCssSnippets today, so an arbitrary folder group has no per-file sharing
-        // mechanism to wire a chip to (task-7-brief.md; see uc-task-7-report.md). isThemesPreset
+        // mechanism to wire a chip to. isThemesPreset
         // (spec §4's "· N themes" vs "· N files") is true only for a preset row with no mapKey —
         // today that is exactly the Appearance card's themes/ preset, never a plain user folder.
         const isThemesPreset = row.isPreset && mapKey === undefined;
@@ -2018,7 +1996,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     return `${defRef(def)}::${path}`;
   }
 
-  // Member-list collapse key (spec 2026-07-26-card-visual-refresh-design.md §4 Step 3) — UI-
+  // Member-list collapse key (spec §4 Step 3) — UI-
   // transient. Double-colon separator matches companionEditKey: an item ref itself contains a
   // single slash, so "::" keeps the join unambiguous.
   private companionMemberKey(def: ItemDef, row: CompanionRowModel): string {
@@ -2050,7 +2028,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const contentCell = r.createDiv({ cls: "config-sync-card-foldercontent" });
     contentCell.setAttribute("role", "button");
     contentCell.setAttribute("tabindex", "0");
-    // The folder name itself is the path-edit entry point (round-6 定稿: the ✎ pencil is gone) —
+    // The folder name itself is the path-edit entry point —
     // it needs its own click/key handling with stopPropagation so it doesn't ALSO toggle the
     // member list, which the rest of the content cell still does.
     const pathEl = contentCell.createEl("code", { cls: "config-sync-card-path config-sync-card-pathbtn", text: splitLocation(row.path).rel });
@@ -2072,9 +2050,9 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         startPathEdit();
       }
     });
-    // Round-12 甲: bare-number pill (same neutral family the panel's other counts use) — the full
-    // "N themes"/"N files" sentence moves to the pill's own aria-label/tooltip — then the FOLD
-    // family's rotating chevron, replacing the old "· N themes ▸/▾" inline text.
+    // Bare-number pill (same neutral family the panel's other counts use) — the full
+    // "N themes"/"N files" sentence lives in the pill's own aria-label/tooltip — then the FOLD
+    // family's rotating chevron.
     const countEl = contentCell.createSpan({ cls: "config-sync-pill is-neutral config-sync-card-membercount" });
     const chevron = renderFoldChevron(contentCell, open, "config-sync-card-memberarrow");
     contentCell.addEventListener("click", onToggle);
@@ -2101,8 +2079,8 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     // updateCompanion deliberately never re-renders (see its comment), so the icon rebuilds
     // itself from a locally-tracked value after each pick. A companion folder syncs as a
     // whole, so its axis is the device class, not a per-key sharing. The picker sits in the
-    // shared device slot (轮 21A); a user-added row's removal is the picker menu's own warning
-    // item (19d — no ✕ ExtraButton, and a preset's menu offers no such item).
+    // shared device slot; a user-added row's removal is the picker menu's own warning
+    // item (a preset's menu offers no such item).
     const deviceCell = this.scrowSlots(r).device;
     let curDevice = row.device;
     const buildDevice = (): void => {
@@ -2129,7 +2107,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       });
     };
     buildDevice();
-    // STATE control on the rail (轮 20 ②乙): the sync toggle right-anchors in the track-4 end
+    // STATE control on the rail: the sync toggle right-anchors in the track-4 end
     // cell, sharing the card header toggle's right edge — rule controls stay in the cluster.
     const end = r.createDiv({ cls: "config-sync-scrow-end" });
     new ToggleComponent(end).setValue(row.enabled).onChange((v) => updateCompanion((c) => ({ ...c, enabled: v })));
@@ -2165,7 +2143,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
           cancel(); // no real change
           return;
         }
-        // MUST-FIX 1 (final-review): reject a basename that would never survive
+        // Reject a basename that would never survive
         // validateSyncManifest (illegal group-name shape) or that collides with another
         // compiled group's name — BEFORE persisting, not just at the next recompile.
         const basenameError = validateCompanionBasename(validation.path);
@@ -2187,8 +2165,8 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
           return;
         }
         // The warning modal only makes sense for a PRESET path (ConfirmModal.ts) — a plain
-        // user-added folder has no preset identity to move away from, so its own ✎ (now offered
-        // on every companion row, spec 2026-07-26-card-visual-refresh-design.md §4 Step 2) commits
+        // user-added folder has no preset identity to move away from, so its path edit (offered
+        // on every companion row, spec §4 Step 2) commits
         // straight away.
         // §4.2b: refuse before the warning modal opens (see the settings-file path row above).
         if (!this.host.settingsWritable()) {
@@ -2220,7 +2198,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     });
     // Escape cancels THIS edit, not the settings window — same keymap-Scope technique as the
     // settings-file path row (Obsidian's keymap sees Escape at window capture before any element
-    // listener, so stopPropagation can't help). Deferred in round 6b (spec §3), closed out here.
+    // listener, so stopPropagation can't help).
     // popScope is idempotent; cancel()'s re-render detaches the input without a blur in Chromium.
     const escScope = new Scope();
     escScope.register([], "Escape", () => {
@@ -2235,7 +2213,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
 
   // Progressive disclosure (spec §4 Step 3): the count always patches into the folder row's own
   // countEl once the scan resolves — collapsed or not. The member rows + hint themselves render
-  // unconditionally too now (live-test fix-round): the fold toggle no longer rebuilds this zone,
+  // unconditionally: the fold toggle never rebuilds this zone,
   // so the content has to already exist for a later open to reveal — `membersHost.hidden`
   // (renderCompanionZone) is the only thing gating visibility, never a rebuild-time `open` check.
   private renderPlainCompanionMembers(listEl: HTMLElement, files: string[], countEl: HTMLElement | null, isThemesPreset: boolean): void {
@@ -2246,7 +2224,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const wrapEl = listEl.createDiv({ cls: "config-sync-card-snippetmembers" });
     for (const name of names) {
       // Name inside an -ldname span (not row text) so the member indent lands on the name cell,
-      // same as snippet rows — the row's own grid stays on the card's shared columns (轮 20 ②乙).
+      // same as snippet rows — the row's own grid stays on the card's shared columns.
       wrapEl.createDiv({ cls: "config-sync-scrow config-sync-card-companiongrid" }).createSpan({ cls: "config-sync-ldname", text: name });
     }
     wrapEl.createDiv({ cls: "config-sync-ldhint", text: FOLDER_MEMBER_HINT });
@@ -2291,7 +2269,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         errorEl.show();
         return;
       }
-      // MUST-FIX 1 (final-review): reject a basename that would never survive
+      // Reject a basename that would never survive
       // validateSyncManifest (illegal group-name shape) or that collides with another compiled
       // group's name — BEFORE persisting, not just at the next recompile.
       const basenameError = validateCompanionBasename(validation.path);
@@ -2336,8 +2314,8 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   }
 
   // Progressive disclosure (spec §4 Step 3): count always patches into countEl; member rows +
-  // hint render unconditionally too now (live-test fix-round, same reasoning as
-  // renderPlainCompanionMembers above) — the fold toggle no longer rebuilds this zone, so the
+  // hint render unconditionally (same reasoning as
+  // renderPlainCompanionMembers above) — the fold toggle never rebuilds this zone, so the
   // content has to already exist for a later open to reveal; `membersHost.hidden`
   // (renderCompanionZone) is the only thing gating visibility. Snippets are never the themes
   // preset, so memberCountLabel's first argument is always false here. Each row is
@@ -2398,7 +2376,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     // on/off list is meaningless. A three-button segment with one forced choice is noise, so
     // these rows render no segment at all.
     if (isSwitchListGroup(group.name)) return;
-    // 轮 21D: the §2.2 display names — the stored ids never change.
+    // The §2.2 display names — the stored ids never change.
     const modes: { id: SyncMode; label: string }[] = [
       { id: "plain", label: MODE_LABELS.plain },
       { id: "fields", label: MODE_LABELS.fields },
@@ -2414,7 +2392,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     // silently revert here too.
     const appearancePinned = group.name === "appearance" && this.groups.some((g) => g.name === "enabled-css-snippets");
     const pinnedToFields = group.name === SELF_GROUP_NAME || appearancePinned;
-    // A text menu picker (轮 21D — the panel's one picker idiom, same as After install's chip):
+    // A text menu picker (the panel's one picker idiom, same as After install's chip):
     // current label + ⇕, click opens the mode menu; a pinned item renders dim with the reason
     // in its tooltip and no menu at all.
     const chip = controlEl.createSpan({
@@ -2555,10 +2533,9 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   //
   // The card-tab hits are sourced from itemDefs() — the SAME registry data renderItemCard reads
   // (renderRegistryCards filters `this.host.itemDefs()` by section) — and the anchor comes from
-  // `itemAnchorId`, the same producer renderItemCard writes with. Sourcing the same data was never
-  // enough on its own: this line has now diverged from the renderer TWICE (first sectionsFor's
-  // CatalogItem.name vs def.id, then def.id vs defRef), and both times every jump silently
-  // no-opped. One producer is what actually holds them together.
+  // `itemAnchorId`, the same producer renderItemCard writes with. Sourcing the same data is not
+  // enough on its own: any inline re-derivation silently breaks every jump the moment one side
+  // spells the key differently. One producer is what actually holds them together.
   private async buildSearchIndex(gen: number): Promise<SearchHit[] | null> {
     if (gen !== this.renderGen) return null;
     const hits: SearchHit[] = [];
@@ -2609,8 +2586,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         continue;
       }
       // core-plugins/community-plugins are the hidden enablement carriers registry.ts compiles —
-      // never reserved names any more (the aggregate rows they used to back are gone, spec §7 item
-      // 1), but still not a generic "Custom rule" a user could edit here.
+      // not reserved names, but still not a generic "Custom rule" a user could edit here.
       if (g.origin !== undefined || reserved.has(g.name) || isSwitchListGroup(g.name)) continue;
       hits.push({
         section: "advanced",
@@ -2702,7 +2678,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       this.activeTab = this.sectionTab(hit.section);
       // Card hits: open the matching card's drawer so the jump lands on visible detail, not just
       // a collapsed row. Both strings come from the one producer pair above — never re-derived
-      // here, which is how the two used to drift apart.
+      // here.
       const cardRef = hit.kind === "item" ? refFromItemAnchor(hit.anchorId) : null;
       if (cardRef !== null) this.expanded.add(cardExpandKey(cardRef));
       await this.rerender(0);
@@ -2712,7 +2688,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
 
   // The one card-anchoring mechanism in this file: scrolls a rendered `data-search-anchor`
   // target into view and flashes the search bar's highlight. Used by jumpTo (search-hit clicks)
-  // and by display() (the More bridge's pending anchor, C-#11) — both land identically. Callers
+  // and by display() (the More bridge's pending anchor) — both land identically. Callers
   // must have already applied whatever state change (activeTab/expanded) and awaited a render.
   private highlightAnchor(anchorId: string): void {
     const target = this.containerEl.querySelector(`[data-search-anchor="${CSS.escape(anchorId)}"]`);
@@ -2925,7 +2901,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
 
   private renderPassphrase(containerEl: HTMLElement): void {
     const def = this.generalSetting("general-passphrase");
-    // Storage-location note (spec 2026-07-27-passphrase-keychain-design.md), appended at render
+    // Storage-location note, appended at render
     // time like the data-folder suffix — the static desc stays the version-neutral search copy.
     const storageNote = this.host.passphraseKeychainBacked()
       ? "On this device it is stored encrypted in Obsidian's keychain (Settings → Keychain)."
@@ -2938,14 +2914,14 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     );
     setting.settingEl.addClass("config-sync-ppset");
     let draft = "";
-    // 定稿 feedback-trio.html: a fixed badge left of the input — green when set, caution when
-    // not — replaces the old unstyled status tail buried in the description.
+    // A fixed badge left of the input — green when set, caution when
+    // not.
     this.passphraseStatusEl = setting.controlEl.createSpan({ cls: "config-sync-ppbadge" });
     let setBtn: ButtonComponent | null = null;
     let clearBtn: ExtraButtonComponent | null = null;
     const refreshControls = (): void => {
       this.updatePassphraseStatus();
-      setBtn?.setDisabled(draft === ""); // empty input must not silently clear (确认 2026-07-16)
+      setBtn?.setDisabled(draft === ""); // empty input must not silently clear
       clearBtn?.extraSettingsEl.toggle(this.host.passphrase() !== null);
     };
     setting.addText((t) => {
@@ -3022,10 +2998,10 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     return reserved.has(g.name) || syncedPlugin || isSwitchListGroup(g.name);
   }
 
-  // Durable write path for the Advanced tab's "Custom rules"/"Discovered files" (task-8 concern
-  // fix, spec §6 addition): the old path wrote the FULL mutated draft (registry-derived groups
-  // included) through the session-only groupsIO/writeGroupsFile route, so a custom rule or an
-  // adopted discovered file vanished on the next Obsidian restart. Registry-derived groups are
+  // Durable write path for the Advanced tab's "Custom rules"/"Discovered files"
+  // (spec §6): writing the FULL mutated draft (registry-derived groups
+  // included) through the session-only groupsIO/writeGroupsFile route would make a custom rule or
+  // an adopted discovered file vanish on the next Obsidian restart. Registry-derived groups are
   // never stored — they're recompiled from settings.items on every load (registry.ts's
   // compileItems) — so only the non-managed subset of `fullDraft` (custom rules + adopted
   // discovered files alike; a discovered-file adoption is just an items.custom entry) gets
@@ -3035,7 +3011,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   // The stored custom item a draft row came FROM. By name first; by path when the name has moved,
   // because a rename is the one edit that changes the map key while leaving the item's identity in
   // the store alone — without the fallback, renaming a rule would silently drop every field a
-  // newer build wrote onto it (fix round 2). A rename AND a path change in the same commit still
+  // newer build wrote onto it. A rename AND a path change in the same commit still
   // loses the tail; there is nothing left to match on, and the Advanced tab commits per field.
   private storedCustomFor(g: SyncGroup): Item | undefined {
     const custom = this.host.settings.items.custom;
@@ -3043,7 +3019,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   }
 
   private async persistCustomItems(fullDraft: SyncGroup[]): Promise<void> {
-    // §4.2b — before the items assignment below. THROWN, not returned (round-4 review N3):
+    // §4.2b — before the items assignment below. THROWN, not returned:
     // commitDraft already keeps the caller's draft whenever this write fails, so raising the
     // refusal here is what stops a refused edit from staying visible in the Advanced tab until
     // Settings is reopened. It also surfaces in the tab's existing inline error slot.
@@ -3054,7 +3030,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       if (g.name.trim() === "" || this.isManagedGroup(g, reserved)) continue;
       // The stored item is handed in as the tail's source: the draft came through
       // validateSyncManifest, whose whitelist parse has already dropped any field a newer build
-      // wrote (2.21.0 invariant II.1 — see customItemFromGroup).
+      // wrote (see customItemFromGroup).
       nextCustom[g.name] = customItemFromGroup(g, this.storedCustomFor(g));
     }
     const nextItems: ItemMap = { ...this.host.settings.items, custom: nextCustom };
@@ -3183,17 +3159,15 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       this.refresh();
     });
     if (this.saveErrorFor === group.name) {
-      // The trailing "The change was reverted." is gone (§4.2b copy ruling): the §4.1 refusal this
-      // now also carries already ends with "Nothing has been changed," which says it better, and
-      // the sentence it was appended to could arrive with or without its own full stop — hence one
-      // normalised join instead of two literals colliding into "…changed.. The change was…".
+      // The wrapped message can arrive with or without its own full stop — hence one
+      // normalised join instead of two literals colliding into "…changed..".
       listEl.createDiv({ cls: "config-sync-save-error mod-warning", text: `Couldn't save this change — ${this.groupsErrorMsg.replace(/\.$/, "")}.` });
     }
     if (isOpen) this.renderRuleForm(listEl, group, "custom");
   }
 
-  // 轮 21D: a VERTICAL scrow form — one field per row (`config-sync-advrow`: label | control),
-  // replacing the old two-line mixed grid. Product-voice placeholders (the name charset lives
+  // A VERTICAL scrow form — one field per row (`config-sync-advrow`: label | control).
+  // Product-voice placeholders (the name charset lives
   // in the validation error, never the placeholder); the location picker sits INSIDE the path
   // input box; TYPE is an icon picker; DEVICES reuses the panel's sharing picker; MODE speaks
   // the §2.2 display names.
@@ -3224,7 +3198,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         });
         nameC.inputEl.addClass("config-sync-rule-name-input");
       }
-      // One composite path box (轮 21D #163): the location mini-menu leads INSIDE the input box,
+      // One composite path box: the location mini-menu leads INSIDE the input box,
       // a thin divider, then the borderless relative-path input — pick the base, type the rest.
       const loc = splitLocation(group.path);
       const box = advRow("Path").createDiv({ cls: "config-sync-pathbox" });
@@ -3262,7 +3236,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       });
     }
 
-    // TYPE as an icon picker (轮 21D #163: no "File" wordmark — icon + tooltip + ⇕ on hover,
+    // TYPE as an icon picker (no "File" wordmark — icon + tooltip + ⇕ on hover,
     // the panel's one picker idiom).
     const TYPE_META = {
       file: { icon: "file", label: "File", tooltip: "File — syncs a single file" },
@@ -3296,13 +3270,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       sharing: group.devices === "all" ? EVERYWHERE : perClass(group.devices),
       options: [EVERYWHERE, perClass("desktop"), perClass("mobile")],
       disabled: false,
-      onChange: async (v) => {
-        await this.commitGroups((draft) => {
+      onChange: (v) =>
+        void this.commitGroups((draft) => {
           const g = draft.find((x) => x.name === group.name);
           if (g !== undefined) g.devices = sharingClass(v) ?? "all";
-        }, group.name);
-        this.refresh();
-      },
+        }, group.name).then(() => this.refresh()),
     });
     this.renderModeSegment(advRow("Mode"), group, () => this.refresh());
     const descC = new TextComponent(advRow("Description"));
@@ -3361,7 +3333,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     } else {
       this.groupsErrorMsg = res.error;
       // A culprit of "" is a REAL pin (the unnamed placeholder rule) — only undefined means
-      // "no specific row", which is why the no-pin sentinel is null, never "" (#158).
+      // "no specific row", which is why the no-pin sentinel is null, never "".
       this.saveErrorFor = culprit ?? null;
     }
     // When the error is pinned to a specific row (inline), don't also show it at the page bottom.
@@ -3424,11 +3396,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   }
 
   private renderRemoteForm(listEl: HTMLElement, draft: RemoteDraft, nameSpan: HTMLElement): void {
-    // 定稿轮 24 补 (#168): the remote editor speaks the Advanced form's grammar — one field per
+    // The remote editor speaks the Advanced form's grammar — one field per
     // row (advrow, on the wider `config-sync-remrow` label track), TYPE as the panel's text menu
-    // picker, Browse inside the path box. Handlers are unchanged: every one is still
-    // `draft.x = …; saveRemotes()`. The Username input is gone (#169: a linked token is enough —
-    // live-tested against a self-hosted GitLab too); a stored `username` still round-trips
+    // picker, Browse inside the path box. Every handler is
+    // `draft.x = …; saveRemotes()`. There is no Username input (a linked token is enough —
+    // verified against a self-hosted GitLab too); a stored `username` still round-trips
     // through toDraft/toCandidate and still reaches git auth, there is just no input for it.
     const panel = listEl.createDiv({ cls: "config-sync-expand config-sync-advform" });
     const remRow = (label: string, required: boolean): HTMLElement => {
@@ -3479,7 +3451,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     nameC.inputEl.addClass("config-sync-rule-name-input");
 
     if (draft.type === "vault") {
-      // Browse lives INSIDE the path box (mockup: same idea as the Advanced form's location
+      // Browse lives INSIDE the path box (same idea as the Advanced form's location
       // segment), behind a thin divider.
       const box = remRow("Store path", true).createDiv({ cls: "config-sync-pathbox" });
       const pathC = new TextComponent(box);
@@ -3638,7 +3610,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       this.host.settings.remotes = validateRemotes(this.sources.map(toCandidate));
       await this.host.saveSettings();
       // A remote's url/branch/subdir/storePath may just have changed — never let a later compare
-      // reuse a reader built from the pre-edit coordinates (#3).
+      // reuse a reader built from the pre-edit coordinates.
       this.host.clearReaderCache();
       this.sourcesErrorMsg = "";
     } catch (e) {

@@ -129,10 +129,8 @@ describe("withDefaults", () => {
   });
 });
 
-// spec 2026-08-11-data-model-hardening.md §2 ruling: the pre-C-#52 map is CARRIED. These two are
-// the whole contract in pure form — read this device's groups out of it, and write this device's
-// id into it without ever disturbing another device's entry.
-// `items` is a NESTED default (fix round 1): a document that never had a section must come back
+// A loaded document is carried, never trimmed: fields this build doesn't recognise survive.
+// `items` is a NESTED default: a document that never had a section must come back
 // with it, and the map must never be handed out as DEFAULT_SETTINGS' own object — every section is
 // written through registry.ts's withItem/withoutItem, and a shared mutable default is a bug
 // waiting for its first in-place write.
@@ -169,28 +167,27 @@ describe("SCHEMA_UPGRADE_NOTICE", () => {
   });
 });
 
-// §4.1/§4.2 final copy. Pinned character-exact for the same reason as the notice above: these are
-// the sentences the spec approved, and the UI vocabulary rule (`this device` / `your other
-// devices` / `the store`) lives in them.
+// Pinned character-exact for the same reason as the notice above: the UI vocabulary rule
+// (`this device` / `your other devices` / `the store`) lives in these sentences.
 describe("the version-gate copy", () => {
-  it("§4.1 — what the Sync Center's banner and every refused write say", () => {
+  it("what the Sync Center's banner and every refused write say", () => {
     expect(SCHEMA_FUTURE_NOTICE).toBe("These settings were written by a newer Config Sync. Update Config Sync on this device to open them. Nothing has been changed.");
   });
 
-  it("§4.2 — what the self item fails with when the store's document is newer", () => {
+  it("what the self item fails with when the store's document is newer", () => {
     expect(SCHEMA_FUTURE_APPLY_MESSAGE).toBe("The store's Config Sync settings were written by a newer version. Update Config Sync on this device before applying them.");
   });
 });
 
-// sanitizeMemberRules is gone (spec 2026-08-11-data-model-hardening.md §3.2, invariant II.2). It
-// dropped every memberRules value this build didn't recognise and saved immediately — so a rule
-// written by a NEWER build became a deletion this device published to the whole fleet on its next
-// capture. The contract it used to carry now lives in two places, and is tested there:
+// There is no sanitizeMemberRules: dropping every memberRules value this build didn't recognise
+// (and saving immediately) would turn a rule written by a NEWER build into a deletion this device
+// publishes to the whole fleet on its next capture. The contract lives in two places, and is
+// tested there:
 // storage is untouched by a load (tests/mainReloadSettings.test.ts, driving the real load path),
 // and an unrecognised value is ignored where it is consumed (tests/availability.test.ts's
 // asMemberRule/preferStoredMemberRule, plus memberRuleFor/memberRulesFor in mainReloadSettings).
 
-// C-#45 fix-round 1 (reviewer-caught CRITICAL): the per-device item opt-out rule's device
-// identity moved OUT of settings entirely, into localStorage (main.ts's deviceId() method,
+// The per-device item opt-out's device
+// identity lives in localStorage, never settings (main.ts's deviceId() method,
 // tested via tests/deviceOptOut.test.ts's real-plugin harness) — there is no settings-level
-// migration for it any more; settingsMigration.ts has nothing to own here.
+// migration for it; settingsMigration.ts has nothing to own here.

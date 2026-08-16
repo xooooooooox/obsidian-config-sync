@@ -4,11 +4,11 @@ import { buildItemDefs, compileItems, customItemFromGroup, Item, ItemMap, Regist
 import { perClass, SyncGroup } from "../src/core/types";
 import { itemsIn } from "./items";
 
-// Task-8 concern fix: the Advanced tab's "Custom rules"/"Discovered files" used to write through
-// a session-only groupsIO path — a custom rule or an adopted discovered file survived within the
-// current session but was lost on the next Obsidian restart/plugin reload, since nothing in
+// The Advanced tab's "Custom rules"/"Discovered files" must never write through
+// a session-only groupsIO path — a custom rule or an adopted discovered file would survive within
+// the current session but be lost on the next Obsidian restart/plugin reload, since nothing in
 // settings.items recorded it. The `custom` SECTION of settings.items (registry.ts's compileItems,
-// main.ts's stopSyncing) is their durable home now.
+// main.ts's stopSyncing) is their durable home.
 //
 // main.ts has no existing test harness beyond tests/mainReloadSettings.test.ts's pattern (Plugin
 // is stubbed to an empty class by tests/mock-obsidian.ts — no test drives Obsidian's own runtime).
@@ -115,11 +115,11 @@ describe("stopSyncing — custom-item removal is durable (items.custom), not ses
   });
 });
 
-// A custom item's device class lives on its file rule now, not on a retired `runsOn`
-// (2026-08-12-enablement-two-layers, task 8) — the same field a registry item's Settings-sync
+// A custom item's device class lives on its file rule, not on a `runsOn`
+// field — the same field a registry item's Settings-sync
 // control writes. manifest.ts refuses a `fileRule` on a folder group, so a folder's class is
 // elevated into the compiled group's `devices` instead of emitted as a rule.
-describe("a custom folder item's device class survives item -> compiled group -> item (task 8)", () => {
+describe("a custom folder item's device class survives item -> compiled group -> item", () => {
   const EMPTY_ENV: RegistryEnv = { cores: [], plugins: [], betaIds: new Set() };
 
   it("round-trips unchanged, and the compiled group carries devices with no fileRule key", () => {

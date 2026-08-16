@@ -13,21 +13,21 @@ export type Direction = "capture" | "apply";
 // apply = store-newer + differs, ok = in-sync.
 export type PanelFilter = "all" | "capture" | "apply" | "ok" | "excluded" | "none";
 
-// ── Fate-derived buckets (spec 2026-08-08-c-livetest-batch10 §1, ledger C-#23) ──────────────────
+// ── Fate-derived buckets ────────────────────────────────────────────────────────────────────────
 // The single per-row bucket derivation: every count/filter/partition/fold consumer reads THIS
 // instead of re-deriving from raw GroupState (familyState), so a `↓ Turns on` row (stageable apply,
 // sitting on a no-settings/in-sync GroupState) counts/filters/folds as "apply" — the same bucket
 // its rendered sentence implies — never falls through to whatever its raw state happens to say.
-// `fate.nothingYet` (C-#28 hardening, review round 2) is rowFate's OWN verdict — covers both the
+// `fate.nothingYet` is rowFate's OWN verdict — covers both the
 // direct nothing-yet presentation and one degraded from an empty-verb apply direction — never a
 // caller-recomputed guess (e.g. a family-rollup `pres === "no-settings"` check) that can disagree
 // with what rowFate actually decided.
 export type FateBucket = "conflict" | "apply" | "capture" | "excluded" | "ok" | "none";
 
-// C-#45 §7 (fix-round 4, mockup option A, user 定稿): a fifth bucket for a row a device-scope or
-// device-opt-out rule keeps this device from touching — was silently counted "ok" (`✓ N items in
-// sync`), which lies to the user who just turned an item off here. Returned for BOTH exclusion
-// causes (optedOutHere and C-#24 class exclusion — same user-rule family, same placement) via
+// A fifth bucket for a row a device-scope or
+// device-opt-out rule keeps this device from touching — counting it "ok" (`✓ N items in
+// sync`) would lie to the user who just turned an item off here. Returned for BOTH exclusion
+// causes (optedOutHere and class exclusion — same user-rule family, same placement) via
 // `fate.excluded` (fateModel.ts's own field, mirroring `nothingYet`'s precedent — the minimal
 // honest way for this function to know the cause without re-deriving it from FateInput, which it
 // never receives). Positioned after the stageable checks (conflict/apply/capture always win — a
@@ -47,15 +47,15 @@ export function fateBucket(fate: Fate): FateBucket {
 // NOT produced by fateBucket itself.
 export type RowBucket = FateBucket | "locked";
 
-// Pre-C-#23 fallback for a row whose OWN state is "locked" (review fix): fateWithInput's display
+// Fallback for a row whose OWN state is "locked": fateWithInput's display
 // bypass unconditionally returns a non-stageable "—" fate for ANY locked row — including one whose
 // FAMILY rolled up to a DIRECTIONAL companion's state (a locked parent's own state is neutral to
 // familyRollup, so a directional companion, e.g. a plain settings dir with real changes, still
 // pulls the family's rollup off "locked"). Feeding that bypass fate to fateBucket would silently
 // vanish such a family into "ok" (config-reachable: any item with companions set to Encrypted mode
 // with no passphrase). Locked has no fate-based reading at all, so its bucket is derived here
-// instead, straight from the family's raw GroupState via the OLD (pre-task) state→bucket
-// vocabulary — reproducing EXACTLY where familyState(r) used to land it: a directional companion
+// instead, straight from the family's raw GroupState via the plain state→bucket
+// vocabulary: a directional companion
 // state buckets the family as such; the neutral fallback (no directional companion — the rollup
 // stays "locked", true whenever the row is a solo locked item or every companion is itself
 // neutral) keeps the family's own "locked" placement.
@@ -66,10 +66,10 @@ export function legacyLockedFamilyBucket(familyState: GroupState): RowBucket {
   return "locked";
 }
 
-// Filter-pill visibility (spec §1.3): a conflict-bucket row stays visible under the "apply" filter
-// — its current placement, preserved (today a `differs` GroupState is already included there)
-// — rather than growing a dedicated "conflict" filter pill. "locked" is visible only under "all",
-// also today's placement (content comparison never ran for it, so no specific filter can claim it).
+// Filter-pill visibility: a conflict-bucket row stays visible under the "apply" filter
+// (a `differs` GroupState is included there)
+// rather than growing a dedicated "conflict" filter pill. "locked" is visible only under "all"
+// (content comparison never ran for it, so no specific filter can claim it).
 export function visibleUnderFilter(bucket: RowBucket, filter: PanelFilter): boolean {
   if (filter === "all") return true;
   if (bucket === "locked") return false;
@@ -80,7 +80,7 @@ export function visibleUnderFilter(bucket: RowBucket, filter: PanelFilter): bool
   return bucket === "ok";
 }
 
-// C-#45 §7: a dedicated `FateBucketCounts` (extends the core `BucketCounts` shape rather than
+// A dedicated `FateBucketCounts` (extends the core `BucketCounts` shape rather than
 // widening it) — `excluded` is a UI-presentation count, not a run-status one, so it stays out of
 // `core/status.ts`'s `BucketCounts`/`bucketCounts` (the raw comparison-based counter other,
 // non-UI code paths also use).
@@ -88,10 +88,10 @@ export interface FateBucketCounts extends BucketCounts {
   excluded: number;
 }
 
-// Filter-pill counts (spec §1.2): the apply pill counts the apply bucket AND conflict (its current
-// placement, preserved — a `differs` GroupState already counts under the "down"/To-apply pill
-// today); the capture pill counts capture; "In sync" = ok; "Not synced here" = excluded (§7);
-// "No settings yet" = none plus locked (also today's placement — bucketCounts already groups raw
+// Filter-pill counts: the apply pill counts the apply bucket AND conflict
+// (a `differs` GroupState counts under the "down"/To-apply pill);
+// the capture pill counts capture; "In sync" = ok; "Not synced here" = excluded;
+// "No settings yet" = none plus locked (bucketCounts already groups raw
 // "locked" under `none`).
 export function fateBucketCounts(buckets: RowBucket[]): FateBucketCounts {
   let up = 0;
@@ -109,10 +109,10 @@ export function fateBucketCounts(buckets: RowBucket[]): FateBucketCounts {
   return { up, down, ok, none, excluded };
 }
 
-// Section partition (spec §1.1; §7 adds "excluded"): active = conflict|apply|capture (plus locked
-// — today's placement, preserved: a locked row is currently neither in-sync nor no-settings, so
-// it renders active, unfolded); the folds hold ok/excluded/none — excluded gets its OWN fold
-// (§7), never merged into "insync" (the whole point: a user who just opted an item out must not
+// Section partition: active = conflict|apply|capture (plus locked
+// — a locked row is neither in-sync nor no-settings, so
+// it renders active, unfolded); the folds hold ok/excluded/none — excluded gets its OWN fold,
+// never merged into "insync" (the whole point: a user who just opted an item out must not
 // still read it inside "✓ N items in sync").
 export type PartitionSection = "active" | "insync" | "excluded" | "nosettings";
 
@@ -139,30 +139,29 @@ export function capFileEntries(changes: FileChanges, limit: number): { shown: Ca
   return { shown: all.slice(0, limit), rest: all.slice(limit) };
 }
 
-// C-#50 (spec 2026-08-10-c-livetest-batch24-fold-family.md §2): plain text, no glyph prefix, no
+// Plain text, no glyph prefix, no
 // trailing triangle — the renderer composes the leading `.config-sync-row-chevron` (▸/▾) and the
-// fixed-size Lucide fold icon (foldIcons.ts) around this label. Counts/pluralisation wording stay
-// byte-identical to the pre-task copy.
+// fixed-size Lucide fold icon (foldIcons.ts) around this label.
 export function insyncLineText(n: number): string {
   return `${n} item${n === 1 ? "" : "s"} in sync`;
 }
 
-// C-#45 §7 (fix-round 4): the excluded fold's own trailing line — same shape idiom as
-// insyncLineText/nosettingsLineText, copy 定稿 verbatim-consistent with the row sentence ("Not
-// synced on this device") so the pill → fold → row wording maps at zero cost. C-#50: plain text
-// now (see insyncLineText's comment above).
+// The excluded fold's own trailing line — same shape idiom as
+// insyncLineText/nosettingsLineText, copy kept verbatim-consistent with the row sentence ("Not
+// synced on this device") so the pill → fold → row wording maps at zero cost. Plain text
+// (see insyncLineText's comment above).
 export function excludedLineText(n: number): string {
   return `${n} item${n === 1 ? "" : "s"} not synced on this device`;
 }
 
-// Round-12: plain text, no trailing triangle — the renderer appends a static FOLD-family
+// Plain text, no trailing triangle — the renderer appends a static FOLD-family
 // `chevron-right` after this label (same idiom insyncLineText's comment above already
 // established); this "more" line never re-collapses, so the icon never rotates.
 export function moreFilesText(n: number): string {
   return `… ${n} more files`;
 }
 
-// 定稿轮 12+13 ②: the FILES row's default collapsed state — a bare-number `config-sync-pill
+// The FILES row's default collapsed state — a bare-number `config-sync-pill
 // is-neutral` (same neutral-pill family `config-sync-card-membercount` already established for a
 // companion folder's member count), this sentence living in the pill's own aria-label/tooltip
 // only, same split as `memberCountLabel` (itemCard.ts).
@@ -175,7 +174,7 @@ export function directionForState(state: GroupState): Direction {
   return state === "local-changed" || state === "not-captured" ? "capture" : "apply";
 }
 
-// Version-ahead presentation (定稿 feedback-trio, 2026-07-16): an item whose content matches
+// Version-ahead presentation: an item whose content matches
 // the store but whose LOCAL version is newer than the store's lock entry presents as
 // to-capture — capturing refreshes the lock version so other devices' outdated flow can fire.
 // Core state stays "in-sync"; this is a view-level derivation.
@@ -200,16 +199,16 @@ export function matchesSearch(name: string, query: string): boolean {
   return q === "" || name.toLowerCase().includes(q);
 }
 
-// C-#50: plain text (see insyncLineText's comment above).
+// Plain text (see insyncLineText's comment above).
 export function nosettingsLineText(n: number): string {
   return `${n} item${n === 1 ? "" : "s"} with no settings yet`;
 }
 
 export type SectionKind = "main" | "outdated" | "disabled" | "not-installed" | "desktop-only";
 
-// Unified rule (spec 2026-07-17, closes the install-only/enable-only/update-only family): in
+// Unified rule (closes the install-only/enable-only/update-only family): in
 // the non-main sections the state ACTION is the payload, so every row stages except locked —
-// an empty settings transfer (no-settings, in-sync) no longer gates interaction. Main-section
+// an empty settings transfer (no-settings, in-sync) does not gate interaction. Main-section
 // rows keep the plain stageability (there is no action to run there).
 export function stageableRow(state: GroupState, section: SectionKind): boolean {
   if (section === "desktop-only") return false; // informational only — can't run here, nothing to stage
@@ -217,15 +216,15 @@ export function stageableRow(state: GroupState, section: SectionKind): boolean {
   return stageableState(state);
 }
 
-// C-#24: a row's own compiled group can carry the device-scope fact in TWO independent places —
-// live evidence found both live in the store: (a) the group-level `devices` class (custom
+// A row's own compiled group can carry the device-scope fact in TWO independent places —
+// both occur in real stores: (a) the group-level `devices` class (custom
 // groups/companions; groupsForDevice's own exclusion axis — a genuinely different group never
 // even reaches this device's status pass), and (b) a Plain-mode settings-file's own
 // `fileRule.sharing` (the Settings-sync menu's write target, `setItemFileSharing`) — normally
 // elevated onto `devices` at compile time (registry.ts's compileSingleFile), but the two can
 // still disagree in practice (e.g. a pre-existing/migrated group whose top-level `devices` never
 // picked up a later fileRule-only write). Checking both, independently, is the only reading that
-// can't miss either axis. FileSharing excludes this-device by construction (D9), so a per-class
+// can't miss either axis. FileSharing excludes this-device by construction, so a per-class
 // value is always a real DeviceClass to compare against.
 export function groupExcludedHere(group: SyncGroup, deviceClass: "desktop" | "mobile"): boolean {
   const devicesExcluded = group.devices !== "all" && group.devices !== deviceClass;
@@ -264,7 +263,7 @@ export function statusBarStatuses(
   });
 }
 
-// Cold-start guidance (spec 2026-07-27): show only while the plugin's own settings are still
+// Cold-start guidance: show only while the plugin's own settings are still
 // pending (coldstart/adopt/both) AND some group has never synced on this device. "capture"
 // pending is a normal working state, not a cold start. Dismissal is device-local and cleared
 // by main.ts when self returns to insync, so a future genuine cold start shows it again.
@@ -306,7 +305,7 @@ export function policyOptions(a: Availability): PolicyOption[] {
     ];
   }
   if (a.anchor === "plugin" && a.drift === "behind") {
-    // Update targets the version the store's settings were captured on (方案 c), not "latest":
+    // Update targets the version the store's settings were captured on, not "latest":
     // drift === "behind" guarantees storeVersion is non-null.
     return [
       { action: "update", label: `⤓ Update to ${a.storeVersion}`, pill: "⤓ update" },
@@ -333,9 +332,9 @@ export function runProgressLabel(verb: "Capturing" | "Applying", done: number, t
   return `${verb === "Capturing" ? "↑" : "↓"} ${verb} ${done}/${total}…`;
 }
 
-// ── Enablement single entry (spec 2026-08-06-enablement-single-entry-design.md #5-B) ─────────
+// ── Enablement single entry ──────────────────────────────────────────────────────────────────
 
-// The on/off list an item's enablement rides, from the item's own REF (spec §5): a community item
+// The on/off list an item's enablement rides, from the item's own REF: a community item
 // rides the community list, everything else the core one. Takes the ref rather than the group name
 // because the section is a fact about the item, not something to be read back out of its name — the
 // caller resolves it once (SyncCenterView's rowRef) and hands it here.
@@ -345,16 +344,16 @@ export function enablementCarrierFor(itemRef: string): EnablementList {
 
 // True when that carrier is itself a synced (compiled) item — the on/off card then owns
 // enablement outright, and the disabled item's own per-card policy never runs.
-// Refs on both sides (task-3 review M6): the carrier's own ref against the refs of the compiled
-// groups. The previous form compared a LIST id against compiled group NAMES — true only because a
+// Refs on both sides: the carrier's own ref against the refs of the compiled
+// groups. Never compare a LIST id against compiled group NAMES — that only works because a
 // carrier's group name happens to equal its list id, which is a coincidence of the compiler's
 // choice, not a fact either side states.
 export function carrierIsSynced(itemRef: string, compiledRefs: readonly (string | undefined)[]): boolean {
   return compiledRefs.includes(carrierRef(enablementCarrierFor(itemRef)));
 }
 
-// ── Unified grammar view skeleton (spec 2026-08-06-sync-center-unified-grammar-design.md §2) ──
-// Replaces the old main/outdated/disabled/not-installed/desktop-only dichotomy: every row lives
+// ── Unified grammar view skeleton ──────────────────────────────────────────────────────────────
+// Every row lives
 // in exactly one of these four fixed sections, keyed off its scope — readiness state (outdated,
 // disabled, not installed…) becomes row-level fate instead of a separate section.
 
@@ -367,7 +366,7 @@ export const TYPE_SECTION_TITLES: Record<TypeSection, string> = {
   folders: "Your folders",
 };
 
-// Fixed display order (spec §2), alphabetical within each section separately (byLabel).
+// Fixed display order, alphabetical within each section separately (byLabel).
 export const TYPE_SECTION_ORDER: readonly TypeSection[] = ["obsidian", "core", "community", "folders"];
 
 // beta plugins sit in the Community section (parity with the settings Beta tab pinning them
@@ -379,13 +378,12 @@ export function typeSectionForRow(defSection: StorageSection | "beta"): TypeSect
 }
 
 // Section header count pill: "31" when nothing narrows the section, "6/31" once a state
-// filter or a search query hides some of its rows. One form on every platform (2026-08-13 live
-// find) — C-#41's mobile-only compaction retired with its desktop long form.
+// filter or a search query hides some of its rows. One form on every platform.
 export function sectionCountLabel(total: number, visible: number, filtered: boolean): string {
   return filtered ? `${visible}/${total}` : `${total}`;
 }
 
-// ── Remote pane C-grammar model (2026-08-07-c-livetest-batch4 task 1) ──────────────────────────
+// ── Remote pane C-grammar model ────────────────────────────────────────────────────────────────
 // Buckets a remote's raw file diff into the same four TYPE_SECTION_ORDER sections the main list
 // uses: the two switch-list carriers never appear as an ordinary row (their delta is an on/off
 // summary, not a file to diff), everything else sorts into the section its category maps to.
@@ -436,8 +434,8 @@ export function remoteSections(
 // membership — reuses parseSwitchList's shape handling so community-plugins.json (array) and
 // core-plugins.json (map) both work, and degrades an unparseable/absent side to "nothing on"
 // rather than throwing (a remote file that failed to fetch must still render, not crash the pane).
-// remoteOnCount/localOnCount are the per-side SOURCE on-set sizes the batch-8 narration needs
-// (spec §1): onAtRemote's source is the remote list's total on-member count, offAtRemote's is the
+// remoteOnCount/localOnCount are the per-side SOURCE on-set sizes the narration needs:
+// onAtRemote's source is the remote list's total on-member count, offAtRemote's is the
 // store (local) list's — extended onto this return rather than re-parsing in a sibling function,
 // since both lists are already parsed here.
 export interface OnOffFlipsResult {
@@ -466,23 +464,22 @@ export function onOffFlips(local: string | null, remote: string | null): OnOffFl
   };
 }
 
-// Round-12: `open` dropped — plain text now, no trailing triangle baked into the string. The
+// Plain text, no trailing triangle baked into the string. The
 // renderer composes a FOLD-family `chevron-right` after this label and rotates it via
 // `setFoldOpen` on toggle instead of re-setting the whole line's text.
 export function onOffLineText(n: number): string {
   return `On/off list · differs for ${n} plugin${n === 1 ? "" : "s"}`;
 }
 
-// Cap on display names shown per side before collapsing to "and N more" (spec
-// 2026-08-08-c-livetest-batch8 §1).
+// Cap on display names shown per side before collapsing to "and N more".
 const ONOFF_NARRATION_CAP = 5;
 
 export interface OnOffNarrationLine {
-  prefix: string; // e.g. "on at kickstart: " — plain narration text
+  prefix: string; // e.g. "on at <remote>: " — plain narration text
   value: string; // e.g. "its entire list — 74 plugins" / "A, B, C, D, E, and 69 more" — the emphasized part
 }
 
-// One side's expanded narration (spec §1): a side's flip count equalling its source on-set size
+// One side's expanded narration: a side's flip count equalling its source on-set size
 // means every on-member flipped — the whole-list case (covers the fresh/empty-other-side wall of
 // ids) — otherwise up to ONOFF_NARRATION_CAP display names, sorted, then "and N more" once
 // truncated. An empty side yields no line (unchanged: still omitted entirely).
@@ -503,9 +500,9 @@ function onOffSideLine(
   return { prefix, value: `${shown.join(", ")}, and ${names.length - ONOFF_NARRATION_CAP} more` };
 }
 
-// Ready-to-render expanded on/off narration lines (spec 2026-08-08-c-livetest-batch8 §3):
+// Ready-to-render expanded on/off narration lines:
 // `displayOf` resolves a flip's element id to its display name through the pane's own
-// group-name → storedLabel → displayParts chain (§2), so narration names never disagree with row
+// group-name → storedLabel → displayParts chain, so narration names never disagree with row
 // names. Either side is null when its flip list is empty.
 export function onOffNarrationLines(
   onAtRemote: string[],
@@ -521,9 +518,9 @@ export function onOffNarrationLines(
   };
 }
 
-// ── Family rollup (spec 2026-08-07-c-livetest-batch5 task 1) ───────────────────────────────────
+// ── Family rollup ──────────────────────────────────────────────────────────────────────────────
 // A "family" is a parent object plus its companion groups (e.g. Appearance's themes/snippets
-// dirs) — principle #1's "one object = one row" means the family presents through ONE state,
+// dirs) — "one object = one row" means the family presents through ONE state,
 // derived here, rather than each companion surfacing its own row.
 
 export interface FamilyMember {
@@ -597,8 +594,8 @@ export function familyRollup(members: FamilyMember[]): FamilyRollup {
   return { state: neutralState, applyMembers, captureMembers, applyFiles, captureFiles };
 }
 
-// Concatenates a family's members' file changes into one set for the expanded card (spec §4
-// "Files"), rewriting each companion's paths relative to the family so `themes/Foo.css` reads
+// Concatenates a family's members' file changes into one set for the expanded card's
+// "Files", rewriting each companion's paths relative to the family so `themes/Foo.css` reads
 // as a path under the parent rather than a bare `Foo.css` that collides with the parent's own
 // files. The parent itself passes `prefix: null` — its paths are already correct as-is.
 export function mergeFamilyChanges(parts: { prefix: string | null; changes: FileChanges }[]): FileChanges {
@@ -614,8 +611,8 @@ export function mergeFamilyChanges(parts: { prefix: string | null; changes: File
   return { added, updated, deleted };
 }
 
-// Folds a remote diff's companion entries into their parent's entry (spec §7 remote pane stays
-// unchanged in shape — only companions dissolve), so the remote pane shows the same one-row-per-
+// Folds a remote diff's companion entries into their parent's entry (the remote pane keeps its
+// shape — only companions dissolve), so the remote pane shows the same one-row-per-
 // family grammar as the main list. `parentOf` returns null for non-companions (they pass
 // through untouched). Order is first-seen: a family's position in the result is wherever its
 // parent entry OR its first companion appears first in `entries`.
@@ -643,8 +640,8 @@ export function foldCompanionEntries(entries: RemoteDiffEntry[], parentOf: (grou
   return result;
 }
 
-// The action bar's staged-selection line (replaces the old 5-param footerSummary once the view
-// derives every count from Fate — spec §5). `applyN`/`captureN` are the two direction totals;
+// The action bar's staged-selection line (the view
+// derives every count from Fate). `applyN`/`captureN` are the two direction totals;
 // installs/turnsOn/settings are an apply-side breakdown (subsets of applyN, no "+").
 export function unifiedFooterSummary(sel: { applyN: number; installs: number; turnsOn: number; settings: number; captureN: number }): string {
   const total = sel.applyN + sel.captureN;
@@ -658,18 +655,18 @@ export function unifiedFooterSummary(sel: { applyN: number; installs: number; tu
   return `${total} selected — ${parts.join(" · ")}`;
 }
 
-// ── Expanded-card file entries (spec §4, ledger #8) ─────────────────────────────────────────────
+// ── Expanded-card file entries ──────────────────────────────────────────────────────────────────
 // FileChanges (capFileEntries's source) is always computed from the CAPTURE side's perspective
 // (types.ts/status.ts): "added" = present locally, absent from the store; "deleted" = present in
 // the store, absent locally; "updated" = present on both sides, differs. Under capture direction
 // that perspective already IS the effective action. Under apply direction the target is local, so
 // added/deleted mirror each other: a store-only file ("deleted", capture-perspective) is really a
 // brand-new file landing locally (nothing to diff against — "view" the incoming content); a
-// local-only file ("added") is really removed once apply makes local match the store. This mirror
-// is the fix for ledger #8 (a not-installed plugin's incoming settings used to render as a
-// strikethrough deletion).
+// local-only file ("added") is really removed once apply makes local match the store. Without
+// this mirror, a not-installed plugin's incoming settings would render as a
+// strikethrough deletion.
 
-// The six side+consequence sentences a FILES entry's tooltip carries (round-11 ③, DESIGN §2.1):
+// The six side+consequence sentences a FILES entry's tooltip carries (DESIGN.md §2.1):
 // exported as named constants — the single producer both fileEntryFor below and the
 // icon-collision/tooltip guards read from, so a future edit to any of them can't drift the two
 // apart silently (the same "producer-vs-producer" discipline the fate-chip glyph registry uses).
@@ -685,17 +682,17 @@ export interface FileEntryPresentation {
   label: string;
   affordance: "view" | "diff" | "none";
   note: string | null;
-  // The side+consequence sentence for this entry's aria-label/hover (round-11 ③): the FILES
+  // The side+consequence sentence for this entry's aria-label/hover: the FILES
   // row's own track-2 badge says which side the whole list affects, ONCE — this says what
   // happens to THIS file. Always present, encrypted entries included (the note above only
   // withholds the content preview, not the fact of what changed).
   tooltip: string;
 }
 
-// Direction arrows (DESIGN §2.1) now say which side exactly once, on the FILES row's own
+// Direction arrows (DESIGN.md §2.1) say which side exactly once, on the FILES row's own
 // track-2 badge — never per entry. An entry's own glyph is the diff-kind family (`+`/`·`/`del`,
-// rendered `+`/`~`/`−`) in BOTH directions, restoring the pre-C 2.x vocabulary round-10 ②'s
-// capture-side collapse to a bare `↑` had erased: added/updated/deleted is real information
+// rendered `+`/`~`/`−`) in BOTH directions — never collapsed to a bare direction
+// arrow: added/updated/deleted is real information
 // (a new store file starts syncing to a user's other devices; a removal removes it everywhere),
 // not a direction. This function is the single producer of that per-entry read — glyph says
 // WHAT happened to the file, tooltip says WHERE (which side, what consequence).
@@ -708,7 +705,7 @@ export function fileEntryFor(
     effDir === "capture" ? change.kind : change.kind === "added" ? "deleted" : change.kind === "deleted" ? "added" : "updated";
 
   // A real deletion never has content to preview — encryption is moot, and the "del" glyph
-  // drives the collapsed/expanded strikethrough regardless of direction (#8's other rule: "del"
+  // drives the collapsed/expanded strikethrough regardless of direction ("del"
   // strikethrough only when the EFFECTIVE direction actually deletes, i.e. only here).
   if (effectiveKind === "deleted") {
     const tooltip = effDir === "capture" ? CAPTURE_DELETED_TOOLTIP : APPLY_DELETED_TOOLTIP;
@@ -727,9 +724,8 @@ export function fileEntryFor(
   return { glyph, label: change.rel, affordance: encrypted ? "none" : affordance, note: encrypted ? ENCRYPTED_NOTE : null, tooltip };
 }
 
-// ── Unified staging (spec §5, task 6) ───────────────────────────────────────────────────────────
-// Replaces the old policy/disabled ladders (defaultPolicy, disabledRowAction) for the unified
-// grammar: the run payload is derived straight from each row's checkbox + Fate, with the
+// ── Unified staging ─────────────────────────────────────────────────────────────────────────────
+// The run payload is derived straight from each row's checkbox + Fate, with the
 // two on/off carriers' member state collected separately from their own file-level entry.
 
 export type ConflictChoice = "apply" | "capture";
@@ -750,7 +746,7 @@ export interface StageableRow {
   companionNames: { apply: string[]; capture: string[] };
 }
 
-// Row action matrix (replaces defaultPolicy for the unified grammar): a not-installed row
+// Row action matrix: a not-installed row
 // ignores hasUpdate entirely (there's nothing installed to be behind); an installed row behind
 // the store's captured version offers update; everything else is a plain enable/none. `turnsOn`
 // (Fate's own field) is the single switch deciding every "…-enable" suffix.
@@ -772,13 +768,13 @@ function rowDirection(row: StageableRow): "apply" | "capture" | null {
 }
 
 // stagedPayload(rows): pure derivation from the current checkbox/conflict-choice session state
-// to the two run payloads (spec §5). Unselected rows and unresolved conflicts are excluded —
+// to the two run payloads. Unselected rows and unresolved conflicts are excluded —
 // never stageable. A plugin row with a synced carrier contributes its elementId to that
 // carrier's stagedMembers on the SAME side it runs on: apply only when its fate would actually
 // turn it on here (an id left out of stagedMembers keeps its current value, so a settings-only
 // apply can't accidentally move a member it never meant to touch); capture always (a capture
-// pushes local state as-is, on or off — there's no "turnsOn" concept on that side, the
-// partial-selection symmetry spec §5 calls for). The carrier's own item — reused from its own
+// pushes local state as-is, on or off — there's no "turnsOn" concept on that side, which is
+// the partial-selection symmetry). The carrier's own item — reused from its own
 // row when that row is itself staged (the carrier file differs on its own), else synthesized —
 // always carries `stagedMembers` once it exists, even `[]`, so a run that stages only settings
 // (no member) can never fall back to the whole-list write.
@@ -813,7 +809,7 @@ export function stagedPayload(rows: StageableRow[]): { apply: ApplyItem[]; captu
       // "turnsOn" concept on that side by default — rowFate always hands capture rows turnsOn:
       // false) — EXCEPT the Enablement fallback row's explicit "Turn it on" choice, which
       // `effectiveFate`/`fallbackTurnsOn` fold into `row.fate.turnsOn` the same way they do for
-      // apply (spec 2026-08-06 §4 Enablement amendment: restores the pre-C capture-side enable).
+      // apply.
       capture.push({ name: row.itemName, action: row.fate.turnsOn ? "enable" : "none" });
       for (const name of row.companionNames.capture) {
         if (!capture.some((i) => i.name === name)) capture.push({ name, action: "none" });
@@ -840,7 +836,7 @@ export function stagedPayload(rows: StageableRow[]): { apply: ApplyItem[]; captu
 // The single per-row fate derivation shared by every consumer that needs to know "what will
 // this row's run actually do" — staging (feeds stagedPayload via the caller's stagedRows()),
 // footer counts, and the resolved-conflict display all call this SAME function instead of each
-// re-deriving their own copy (review fix, task 6 round 2: a resolved conflict's displayed
+// re-deriving their own copy (a resolved conflict's displayed
 // "turns on" and its actual staged action must never be able to disagree, and the footer's
 // "turns on" count must never disagree with the payload's).
 //
@@ -848,9 +844,9 @@ export function stagedPayload(rows: StageableRow[]): { apply: ApplyItem[]; captu
 // a `⚠` fate) re-derives a REAL directed fate via `rowFate` itself — never the frozen
 // `turnsOn: false` the conflict branch always returns — so "Use theirs" on a plugin whose store
 // switch-list state would turn it on genuinely stages that. (2) `fallbackTurnsOn` folds in the
-// two carrier-unsynced fallback ladders' menu choice (After install / Enablement, spec §4) —
+// two carrier-unsynced fallback ladders' menu choice (After install / Enablement) —
 // `Fate.turnsOn` is unconditionally `false` there by design (the sentence must stay free of
-// enablement verbs per spec §3), so the caller computes that choice separately and passes it
+// enablement verbs), so the caller computes that choice separately and passes it
 // through here rather than `rowFate` ever seeing it.
 export function effectiveFate(fate: Fate, input: FateInput, conflictChoice: ConflictChoice | null, fallbackTurnsOn: boolean): Fate {
   const resolved = fate.glyph === "⚠" && conflictChoice !== null ? rowFate({ ...input, conflict: false, direction: conflictChoice }) : fate;

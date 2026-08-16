@@ -30,9 +30,9 @@ export function jsonKeyClass(kc: KeyClass): string {
   return kc.detected ? "config-sync-json-detected" : "config-sync-json-none";
 }
 
-// ── Per-item array element coloring (spec D10 "逐项数组按元素着色") ─────────────────────────
+// ── Per-element array coloring ──────────────────────────────────────────────────────────────
 // classifyJsonKeys only classifies top-level key LINES; a string-array key with per-element
-// rules enabled (D3 — top-level string-array keys only) also needs each ELEMENT line colored
+// rules enabled (top-level string-array keys only) also needs each ELEMENT line colored
 // by that element's own sharing. `raw` is the pretty-printed `JSON.stringify(doc, null, 2)` text
 // the preview already renders line-by-line, so classification is keyed by line index (0-based,
 // matching `raw.split("\n")`) for a trivial O(1) lookup while the renderer walks the same lines.

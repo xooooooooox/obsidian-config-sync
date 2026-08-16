@@ -33,10 +33,9 @@ import { ReaderCache, remoteReaderKey } from "./external/readerCache";
 import { retry, HttpStatusError, TimeoutError, isRetryableError } from "./core/async";
 import { RunRecord, RunKind, summarizeRun, pruneHistory } from "./core/runHistory";
 
-// Structural view of app.secretStorage, from when the plugin still compiled for minAppVersion
-// 1.8.7 and feature-detected the API at runtime (spec 2026-07-27-passphrase-keychain-design.md).
-// The floor is now 1.11.4, so the property is always present; the detection below and its
-// localStorage fallback are legacy. The git-token path uses the typed SecretStorage directly.
+// Structural view of app.secretStorage. app.secretStorage is always present at minAppVersion
+// 1.11.4+; the detection and localStorage fallback below are kept for safety and are candidates
+// for removal. The git-token path uses the typed SecretStorage directly.
 interface SecretStore {
   getSecret(id: string): string | null;
   setSecret(id: string, secret: string): void;
@@ -97,7 +96,7 @@ import { renderStatusBarItem, statusBarSegments } from "./ui/statusBar";
 import { SYNC_CENTER_VIEW_TYPE, SelfSyncInfo, SyncCenterHost, SyncCenterView } from "./ui/SyncCenterView";
 import { ConfigSyncSettingTab } from "./ui/SettingTab";
 
-// Settings schema v4 (spec 2026-08-12-enablement-two-layers-design.md §3.1). The sync list is not a
+// Settings schema v4. The sync list is not a
 // stored SyncGroup[] — it is COMPILED (registry.ts's compileItems) from `items` on every
 // load/save. Structure carries the taxonomy: `items` nests by section, and `custom` is one of
 // those sections rather than a second data shape. The literal type is deliberate: it is the one
@@ -151,7 +150,7 @@ const DEFAULT_SETTINGS: ConfigSyncSettings = {
   runHistory: { enabled: true, path: "", maxCount: 50, maxDays: 30 },
 };
 
-// How long the §4.1 refusal notice stays ON SCREEN — and, for exactly that long, how long the same
+// How long the schema-stop refusal notice stays ON SCREEN — and, for exactly that long, how long the same
 // message stays quiet after being raised (schemaStopped). One literal, one rule: never two copies
 // of the same sentence at once. A run of keystrokes in a settings text field therefore raises it
 // once, while a gesture made after it has faded gets its own answer; the refusal itself is never
@@ -201,7 +200,7 @@ interface InternalPluginsRegistry {
 
 // app.vault's internal config loader; not part of the public API. setupConfig() rebuilds `config`
 // as a fresh object from app.json + appearance.json (deleted keys handled) — the deterministic
-// replacement for "reload the app" (spec 2026-08-06-batch2-scroll-and-appearance-hotapply-design.md).
+// replacement for "reload the app".
 interface VaultInternal {
   config: { cssTheme?: string; enabledCssSnippets?: string[] };
   setupConfig(): Promise<void>;
@@ -229,8 +228,8 @@ interface AppInternal {
 // The Sync Center's More bridge uses this to open the plugin's own Settings tab (the same entry
 // point Obsidian's plugin list gear icon uses); SettingTab.display() then consumes
 // pendingSettingsDeepLink to scroll to/expand the specific item's card once it lands there.
-// activeTab is read by openSettingsAt to avoid re-opening a tab open() already activated (root
-// cause of C-#11 — see there).
+// activeTab is read by openSettingsAt to avoid re-opening a tab open() already activated
+// (see openSettingsAt).
 interface AppWithSetting {
   setting: { open(): void; openTabById(id: string): void; activeTab: { id: string } | null };
 }
@@ -271,22 +270,22 @@ export default class ConfigSyncPlugin extends Plugin {
   // The most recently loaded store.lock.json — the last-resort source for a not-installed
   // group's display name (see displayName/displayParts).
   private lastLock: StoreLock | null = null;
-  // Compiled engine state (spec §6): the sync list is DERIVED from settings.items, never stored
+  // Compiled engine state: the sync list is DERIVED from settings.items, never stored
   // directly. Recomputed on load and after every settings save (see saveSettings/recompile).
   private registryDefs: ItemDef[] = [];
   private compiledGroups: SyncGroup[] = [];
   remoteChecks = new Map<string, { check: RemoteCheck; at: number }>();
   private storeEventTimer: number | null = null;
   private remoteAutoCheckStartupTimer: number | null = null;
-  // Per-refresh reader cache (#3): a compare (deepDiff) reuses the reader refreshRemoteChecks
+  // Per-refresh reader cache: a compare (deepDiff) reuses the reader refreshRemoteChecks
   // already built for the same remote in this generation, instead of cloning the store again.
   private readerCache = new ReaderCache<ExternalStoreReader>(() => Date.now());
-  // Live progress for a global refresh (#3/#4b, option 2): non-null only while refreshRemoteChecks
+  // Live progress for a global refresh: non-null only while refreshRemoteChecks
   // is running, so the Sync Center can paint a working state before the first clone completes.
   private remoteRefreshProgress: { total: number; done: number } | null = null;
-  // R10: two overlapping refreshes shared one remoteRefreshProgress (done could pass total, and
-  // the first finisher nulled progress out from under the still-running second). A second call
-  // while one is in flight returns the SAME promise instead of starting a parallel run.
+  // Two overlapping refreshes must not share one remoteRefreshProgress (done could pass total,
+  // and the first finisher would null progress out from under the still-running second). A second
+  // call while one is in flight returns the SAME promise instead of starting a parallel run.
   private remoteRefreshRun: Promise<void> | null = null;
   // Startup lock-label heal (backfillLockLabels) runs once per plugin load, not on every
   // refreshLocalStatus — refreshLocalStatus fires on a timer, on layout ready, and after nearly
@@ -298,7 +297,7 @@ export default class ConfigSyncPlugin extends Plugin {
   // can only go stale if something outside the plugin edits localStorage — and every write here
   // refreshes it (saveDeviceOptOutGroups).
   private deviceOptOutsCache: string[] | null = null;
-  // The §4.1 stop state (spec 2026-08-11-data-model-hardening.md, invariant II.3): non-null when
+  // Newer-schema stop state: non-null when
   // the data.json on disk was written by a newer Config Sync. While it is set, this build owns
   // nothing here — it neither resets the document nor writes over it, and every mutating entry
   // point refuses. Cleared by the next load that finds a document this build understands.
@@ -361,8 +360,8 @@ export default class ConfigSyncPlugin extends Plugin {
   // Called on load and after every settings save (see saveSettings) so compiledGroups never goes
   // stale. A path-collision CompileError is surfaced as a Notice and leaves the PREVIOUS compiled
   // groups in place — a bad edit must never silently wipe out the working sync list.
-  // Returns whether the compile SUCCEEDED — not a courtesy, a precondition (final-review I1). The
-  // §4 re-key keys every baseline against `compiledGroups`, and a failed compile leaves that list
+  // Returns whether the compile SUCCEEDED — not a courtesy, a precondition. The baseline
+  // re-key keys every baseline against `compiledGroups`, and a failed compile leaves that list
   // empty (or last-good), so the re-key would resolve nothing and file every companion and custom
   // rule under `legacy/…` — then stamp the ledger's new version, so it is never retried. One bad
   // custom rule name is enough to get there, and the user sees only a generic Notice.
@@ -372,10 +371,10 @@ export default class ConfigSyncPlugin extends Plugin {
     // uninstalled plugin (e.g. install-on-apply's pending target), which env.plugins doesn't see
     // yet — without the synthesized def that item would have no group to compile into.
     this.registryDefs = defsForForeignItems(buildItemDefs(env), this.settings.items, env.betaIds);
-    // Defense-in-depth (final-review fix): captured explicitly so "keep the last-good compiled
-    // list on failure" is provable rather than incidental (mid-session this already happened by
-    // omission — the catch branch never reassigned this.compiledGroups — but that's fragile to a
-    // future refactor that adds a second assignment inside the try block). At first-load failure
+    // Defense-in-depth: captured explicitly so "keep the last-good compiled list on failure" is
+    // provable rather than incidental — relying on the catch branch merely not reassigning
+    // this.compiledGroups would be fragile to a future refactor that adds a second assignment
+    // inside the try block. At first-load failure
     // there is no last-good yet, so this.compiledGroups correctly stays the constructor's `[]` —
     // the Notice below (naming the offending group/item via e.message) is what has to make that
     // failure actionable instead.
@@ -433,7 +432,7 @@ export default class ConfigSyncPlugin extends Plugin {
       const ctx = await this.coreContext();
       const manifest = await loadManifest(ctx);
       const device = Platform.isMobile ? ("mobile" as const) : ("desktop" as const);
-      // C-#45: an opted-out group never runs a real comparison on this device (spec §4) — dropped
+      // An opted-out group never runs a real comparison on this device — dropped
       // the same way groupsForDevice's own device-class filter already drops a scope-mismatched
       // group, before status/ledger/the ribbon count ever see it.
       const optedOut = this.deviceOptedOutRefs();
@@ -451,18 +450,18 @@ export default class ConfigSyncPlugin extends Plugin {
         lock = null;
       }
       const host = this.pluginHost();
-      // Startup heal (backfillLockLabels, spec 2026-08-08-c-livetest-batch6-remote-labels.md):
+      // Startup heal (backfillLockLabels):
       // a fresh device with no local store yet is a no-op (lock === null) — the flag still
       // flips so a later pull's lock never gets a second heal attempt bolted onto this same load.
-      // `optedOut` (C-#45 spec §4): the heal must not resurrect/write a lock entry this device
+      // `optedOut`: the heal must not resurrect/write a lock entry this device
       // deliberately never captures.
-      // §4.2b: the stop state writes NOTHING to either side, and this heal is the one remaining
+      // The stop state writes NOTHING to either side, and this heal is the one remaining
       // store write on the startup path — cosmetic labels, but an exception here is the kind that
       // grows. Read straight off the field instead of through schemaStopped(): this runs on a
       // timer with no user gesture behind it, and a notice would fire again every refresh cycle.
       // `lockLabelsHealed` stays false while stopped, so a load that clears the stop state still
       // gets its one heal.
-      // §4.3 (round-4 review N1): this is the fourth writer of store.lock.json, and it fires at
+      // This is the fourth writer of store.lock.json, and it fires at
       // startup with no user action — the version of the lock it would replace is checked inside
       // backfillLockLabels, which refuses to mutate a lock from a newer build at all (see its own
       // doc comment). A future lock therefore produces no change and no write here.
@@ -599,19 +598,19 @@ export default class ConfigSyncPlugin extends Plugin {
         const manifest = await loadManifest(ctx);
         const device = Platform.isMobile ? ("mobile" as const) : ("desktop" as const);
         const groupsForThisClass = groupsForDevice(manifest, device);
-        // C-#24 root cause: groupsForDevice drops a scope-mismatched group before it ever reaches
+        // groupsForDevice drops a scope-mismatched group before it ever reaches
         // statusForGroups — comparing its content across device classes would be meaningless (the
         // store copy may belong to a different device's rule entirely), so it correctly never runs
-        // capture/apply/status for these. But that same drop used to make the item invisible in the
-        // Sync Center, not merely mislabeled — no row, no availability entry, nothing for the fate
-        // layer to read. These groups still get a row here: a synthetic, never-comparison-run
-        // "in-sync" status so computeFateInput's excludedHere (SyncCenterView.ts) can author the
-        // honest sentence instead of the row vanishing.
+        // capture/apply/status for these. Without the split below, that same drop would make the
+        // item invisible in the Sync Center, not merely mislabeled — no row, no availability
+        // entry, nothing for the fate layer to read. These groups still get a row here: a
+        // synthetic, never-comparison-run "in-sync" status so computeFateInput's excludedHere
+        // (SyncCenterView.ts) can author the honest sentence instead of the row vanishing.
         const excludedGroups = manifest.groups.filter((g) => g.devices !== "all" && g.devices !== device);
-        // C-#45 (spec 2026-08-10-c-livetest-batch22-device-optout.md §4): a device-opted-out group
+        // A device-opted-out group
         // IS this device's class (groupsForDevice never drops it) — a run must still skip it, so
         // it's split out of the real run set the SAME way excludedGroups is, and gets the SAME
-        // synthetic-neutral-status treatment (batch-11 precedent) so rowFate's excluded branch
+        // synthetic-neutral-status treatment so rowFate's excluded branch
         // (optedOutHere) can speak instead of a real — and here, meaningless, since this device
         // never captures/applies it — comparison running.
         const optedOutRefs = this.deviceOptedOutRefs();
@@ -634,11 +633,11 @@ export default class ConfigSyncPlugin extends Plugin {
         for (const g of groups) availability[g.name] = availabilityForGroup(g, this.pluginHost(), lock);
         for (const g of excludedGroups) availability[g.name] = availabilityForGroup(g, this.pluginHost(), lock);
         for (const g of optedOutGroups) availability[g.name] = availabilityForGroup(g, this.pluginHost(), lock);
-        // Keep the status bar's snapshot in step with THIS compute (it used to be refreshed
-        // only by refreshLocalStatus), and count with the center's own lens — main-section
+        // Keep the status bar's snapshot in step with THIS compute (not only with
+        // refreshLocalStatus), and count with the center's own lens — main-section
         // rows only (statusBarStatuses) — so the bar can never disagree with the pills. Excluded
         // groups (class rule AND device opt-out) stay out of this count (always-neutral, never
-        // up/down either way) — unrelated surface, out of C-#24's scope.
+        // up/down either way).
         this.presentedStatuses = statusBarStatuses(statuses, (name) => availability[name], Platform.isMobile);
         this.updateStatusIndicators();
         const excludedStatuses: GroupStatus[] = excludedGroups.map((g) => ({ group: g.name, state: "in-sync" }));
@@ -803,7 +802,7 @@ export default class ConfigSyncPlugin extends Plugin {
       schemaStop: () => this.schemaStop,
       settingsWritable: () => this.settingsWritable(),
       adoptConfiguration: async () => {
-        // §4.1: adopt is the one entry point that rewrites this device's own data.json wholesale —
+        // Schema stop: adopt is the one entry point that rewrites this device's own data.json wholesale —
         // the very document the stop state is protecting.
         if (this.schemaStopped()) return null;
         try {
@@ -828,10 +827,10 @@ export default class ConfigSyncPlugin extends Plugin {
         }
       },
       captureItems: async (items: CaptureItem[], onProgress?: ProgressFn) => {
-        if (this.schemaStopped()) return null; // §4.1
+        if (this.schemaStopped()) return null; // schema stop
         try {
           const ctx = await this.coreContext();
-          // C-#45 (spec §4): runner-level guard, not just the UI's own stageable:false — an
+          // Runner-level guard, not just the UI's own stageable:false — an
           // opted-out group cannot enter a capture payload even if a stale selection sneaks one
           // in, and the tail heal (backfillLockLabels, threaded through here) must not write its
           // lock entry either.
@@ -847,10 +846,10 @@ export default class ConfigSyncPlugin extends Plugin {
         }
       },
       applyItems: async (items: ApplyItem[], onProgress?: ProgressFn) => {
-        if (this.schemaStopped()) return null; // §4.1
+        if (this.schemaStopped()) return null; // schema stop
         try {
           const ctx = await this.coreContext();
-          // C-#45 (spec §4): same runner-level guard as captureItems — apply never installs/
+          // Same runner-level guard as captureItems — apply never installs/
           // writes an opted-out group even given a stale selection.
           const results = await applyWithActions(ctx, excludeOptedOutItems(items, this.deviceOptedOutRefs(), (n) => this.groupRef(n)), this.installPlugin(), onProgress);
           if (results.some((r) => r.group === SELF_GROUP_NAME && r.status !== "error")) {
@@ -902,11 +901,11 @@ export default class ConfigSyncPlugin extends Plugin {
         return { entries, lockDiffers, remoteLabels };
       },
       pullFrom: async (remote) => {
-        if (this.schemaStopped()) return null; // §4.1
+        if (this.schemaStopped()) return null; // schema stop
         try {
           const ctx = await this.coreContext();
           const pending = await planImport(ctx, await this.createReader(remote), { excludeSelf: remote.excludeSelf === true });
-          // Pull resolves file conflicts only; sync-list (definition) conflicts are no longer
+          // Pull resolves file conflicts only; sync-list (definition) conflicts are never
           // applied by Pull, so they don't prompt — the list converges via adopt.
           const fileConflicts = pending.plan.conflicts.filter((c) => c.kind === "file");
           if (fileConflicts.length > 0) {
@@ -938,18 +937,18 @@ export default class ConfigSyncPlugin extends Plugin {
           return results;
         } catch (e) {
           const message = (e as Error).message;
-          // The §4.3 refusal already says what to do (update Config Sync) — appending the
+          // The newer-lock refusal already says what to do (update Config Sync) — appending the
           // check-your-URL advice would send the user after a problem they do not have. Same
           // reasoning as the no-token case, which is likewise our own refusal, not a transport
-          // failure, and as §5's, which says something more specific about the path than the
-          // generic advice could.
+          // failure, and as the own-store refusal's, which says something more specific about
+          // the path than the generic advice could.
           const advice = classifyRemoteFailure(message) === "no-token" || isOwnStoreRefusal(message) ? "" : " — check the remote's URL or path and try again.";
           new Notice(`Config Sync pull failed: ${message}${advice}`, 10000);
           return null;
         }
       },
       pushTo: async (remote) => {
-        if (this.schemaStopped()) return null; // §4.1
+        if (this.schemaStopped()) return null; // schema stop
         try {
           const ctx = await this.coreContext();
           const results = await pushExternal(ctx, await this.createWriter(remote), { excludeSelf: remote.excludeSelf === true });
@@ -1052,7 +1051,7 @@ export default class ConfigSyncPlugin extends Plugin {
     return parseLedger(this.app.loadLocalStorage("config-sync-baselines"));
   }
 
-  // §4.2b (review M4): a baseline is the fingerprint of a group this device believes it syncs, and
+  // Stop-state refusal: a baseline is the fingerprint of a group this device believes it syncs, and
   // that belief comes from `compiledGroups` — compiled from a document this build cannot read. Two
   // devices never see each other's baselines, so this is not "something another device can see";
   // it is refused for the other half of the rule: writing it records a fiction, and direction
@@ -1061,17 +1060,15 @@ export default class ConfigSyncPlugin extends Plugin {
   // scratch preferences that read nothing from the document — the passphrase above, the cold-start
   // dismissal below, clearing the run history on request — are deliberately NOT refused.
   //
-  // Two more preconditions, both from final-review N1, and both here rather than at the call sites
+  // Two more preconditions, both here rather than at the call sites
   // because this is the ONE writer every baseline write goes through — the status refresh, the Sync
-  // Center's compute, the self pane and the §4 re-key alike. Gating the re-key alone left the status
+  // Center's compute, the self pane and the ref re-key alike. Gating the re-key alone leaves the status
   // path free to do the same damage by a different road: with `compiledGroups` empty after a failed
   // compile, its prune keeps nothing and persists an EMPTY ledger, and every item then reads as
   // never-synced, whose default direction is APPLY — exactly what the re-key's gate was filed for.
   //
   // 1. The compile must have SUCCEEDED. A baseline is keyed by, and pruned against, the compiled
-  //    list; a list this build could not produce is not evidence about anything. (The pruning
-  //    itself predates this branch — what was new is that the empty list became reachable once the
-  //    re-key stopped running first.)
+  //    list; a list this build could not produce is not evidence about anything.
   // 2. The ledger must be the version this build writes. A writer that does not understand the file
   //    it is rewriting declines — the same rule as the store-lock gate and the label heal. That is
   //    the half that makes the property hold no matter which writer runs first next time: a v1
@@ -1090,14 +1087,14 @@ export default class ConfigSyncPlugin extends Plugin {
     this.app.saveLocalStorage("config-sync-coldstart-dismissed", v ? "1" : null);
   }
 
-  // This device's own identity (C-#45). Since the opt-out list stopped being keyed by it (spec
-  // 2026-08-11-data-model-hardening.md §2) the only reader left is that move's migration, which
+  // This device's own identity. Since the opt-out list stopped being keyed by it,
+  // the only reader left is that move's migration, which
   // needs it to tell this device's entry from the other devices' in the old shared map. MUST live
   // in localStorage, never data.json: data.json travels wholesale (git-tracked vaults,
   // remotely-save, manual copies), and a value trusted from an inherited data.json would let a
   // bootstrapped machine silently claim the source machine's identity — and with it that machine's
-  // opt-outs (fix-round 1, reviewer-caught CRITICAL — the settings-field version this replaced had
-  // exactly that hole). localStorage is per-vault, per-device, invisible to vault-wide sync
+  // opt-outs (a settings-field home for this id would have exactly that hole).
+  // localStorage is per-vault, per-device, invisible to vault-wide sync
   // (ledger.ts's own header comment; same primitive as
   // `passphrase`/`loadBaselines`/`coldStartDismissed` above) — a wholesale copy leaves it empty on
   // the new machine, so it generates and persists its own id there instead; the collision class is
@@ -1113,8 +1110,8 @@ export default class ConfigSyncPlugin extends Plugin {
     return fresh;
   }
 
-  // The group names THIS device has opted out of (spec 2026-08-11-data-model-hardening.md §2,
-  // C-#52). It lives next to the device id above because it lives BY it: a datum true only of this
+  // The group names THIS device has opted out of.
+  // It lives next to the device id above because it lives BY it: a datum true only of this
   // device, and defined by this device's identity, belongs in the same store as the identity
   // itself. As a data.json field (`deviceOptOuts`, group name -> device ids) it rode the self
   // item's whole-document propagation, and the live failure that followed was inevitable — a pull
@@ -1142,7 +1139,7 @@ export default class ConfigSyncPlugin extends Plugin {
     return names;
   }
 
-  // The localStorage half of §5's `deviceOptOuts → dropped` row, run once by the v2 → v3 migration.
+  // The localStorage half of dropping the carried `deviceOptOuts` map, run once by the v2 → v3 migration.
   // v2 carried a fleet-shared map (group name -> the device ids that opted it out) purely so a
   // device still on a build that read it would not lose its own entry; 2.21.0 moved the authority
   // to localStorage and absorbed the map on every load. A device that jumps straight from 2.20.0
@@ -1164,7 +1161,7 @@ export default class ConfigSyncPlugin extends Plugin {
 
   private saveDeviceOptOutGroups(names: string[]): void {
     // An empty list clears the key rather than storing "[]" — the same prune discipline the
-    // settings map followed (C-#26), so opting out and back in leaves the store as it was found.
+    // settings map follows, so opting out and back in leaves the store as it was found.
     this.app.saveLocalStorage("config-sync-device-optouts", names.length > 0 ? JSON.stringify(names) : null);
     this.deviceOptOutsCache = [...names];
   }
@@ -1228,7 +1225,7 @@ export default class ConfigSyncPlugin extends Plugin {
           { attempts: 3, retryable: isRetryableError, onAttempt: (n) => this.installPhase?.(`download failed — retrying (${n}/3)…`) }
         )
       );
-      // Resolution order (spec C4): BRAT index → community catalog. An unmapped id gets one
+      // Resolution order: BRAT index → community catalog. An unmapped id gets one
       // last-chance index refresh before falling back to the catalog path.
       this.installFn = async (id: string, onPhase?: (phase: string) => void, targetVersion?: string): Promise<string> => {
         // Installs run strictly sequentially, so a single field safely carries the active
@@ -1238,7 +1235,7 @@ export default class ConfigSyncPlugin extends Plugin {
         const repo = itemAt(this.settings.items, "community", id)?.bratRepo;
         if (repo !== undefined) {
           // BRAT-managed plugins track their own beta channel — version-pinning applies to the
-          // community-catalog path only (spec C).
+          // community-catalog path only.
           onPhase?.("downloading via BRAT…");
           return this.installViaBrat(id, repo);
         }
@@ -1269,7 +1266,7 @@ export default class ConfigSyncPlugin extends Plugin {
   }
 
   async appendRunHistory(kind: RunKind, remote: string | null, results: GroupResult[]): Promise<void> {
-    // §4.2b, same rule as appendActionHistory below: no run can have happened while the stop state
+    // Same stop-state rule as appendActionHistory below: no run can have happened while the stop state
     // holds, so nothing here can be a real record. The Sync Center already returns before calling
     // this (setLastRun stops on the refusal's `null`), but caller discipline is not a guarantee.
     if (this.schemaStop !== null) return;
@@ -1286,7 +1283,7 @@ export default class ConfigSyncPlugin extends Plugin {
   }
 
   // Removal/cleanup actions (Stop syncing, delete leftover) — no GroupResults, always "ok".
-  // §4.2b: a refused action is never recorded as done. Both callers now stop on the refusal signal
+  // Stop-state rule: a refused action is never recorded as done. Both callers stop on the refusal signal
   // their action returns (stopSyncing/deleteLeftoverStoreFiles return null), but this record is
   // written by the CALLER, so the last word belongs here: while the stop state holds no entry is
   // written at all, and a future caller cannot log a refusal as a success by forgetting to check.
@@ -1359,12 +1356,12 @@ export default class ConfigSyncPlugin extends Plugin {
     return parseBratRepoList(await this.app.vault.adapter.read(path));
   }
 
-  // Fill + prune the id→repo index (spec C1). Never runs during capture; triggered by the Beta
+  // Fill + prune the id→repo index. Never runs during capture; triggered by the Beta
   // tab, its ↻ Re-scan, or an install for an unmapped id. Returns {resolved, total} for the UI.
   async refreshBratIndex(): Promise<{ resolved: number; total: number }> {
     const repos = await this.bratRepos();
-    // A device with no BRAT list at all is a READER of the index, never its writer (spec
-    // 2026-08-11-data-model-hardening.md §3.3, invariant II.4). resolveBratIndex prunes ids whose
+    // A device with no BRAT list at all is a READER of the index, never its writer.
+    // resolveBratIndex prunes ids whose
     // repo is gone from THIS device's list, so an empty list resolves to an empty index — and this
     // method would save it, wiping a fleet-shared structure from the device that knows least about
     // it. The Beta tab's map-note reports what it can see either way (bratScanStatus, local-only).
@@ -1378,7 +1375,7 @@ export default class ConfigSyncPlugin extends Plugin {
         return null;
       }
     });
-    // §4.2b: the assignment sits INSIDE the stop check, not before it — `resolveBratIndex` above
+    // Stop-state rule: the assignment sits INSIDE the stop check, not before it — `resolveBratIndex` above
     // pruned the index against this device's repo list, and publishing that reading of a document
     // we cannot read is exactly what the stop state forbids. Silent (the Beta tab re-scans on its
     // own when it opens, with no user gesture behind it — a notice there would fire unprompted).
@@ -1389,14 +1386,12 @@ export default class ConfigSyncPlugin extends Plugin {
     return { resolved: Object.keys(next).length, total: repos.length };
   }
 
-  // A compiled group's item ref — THE way this shell asks the key space a question (spec §3/§4).
+  // A compiled group's item ref — THE way this shell asks the key space a question.
   // A name nothing compiles resolves through the same legacy rules a v1/v2 lock read uses, so a
   // display lookup and a lock read can never disagree about which entry they mean.
   //
-  // Memoized against the compiled list's identity (task-3 review I4): `lockRefFor` BUILDS an index,
-  // and this is asked per row per render by isDeviceOptedOut and displayName. The same regression
-  // the Sync Center's own resolver was caught with — fixed there and left here, which is the third
-  // time on this branch that one half of a pair moved and the other did not.
+  // Memoized against the compiled list's identity: `lockRefFor` BUILDS an index,
+  // and this is asked per row per render by isDeviceOptedOut and displayName.
   private groupRefSource: SyncGroup[] | null = null;
   private groupRefFor: (group: string) => string = lockRefFor([]);
   private groupRef(group: string): string {
@@ -1409,8 +1404,8 @@ export default class ConfigSyncPlugin extends Plugin {
 
   displayName(group: string, storedLabel?: string): string {
     // Routes every caller (direct or via the Sync Center host's resolveHostStoredLabel
-    // pre-resolve) through the SAME chain — including its carrier element-name fallback
-    // (2026-08-09-c-livetest-batch15) — so a bare `this.displayName(name)` call (e.g.
+    // pre-resolve) through the SAME chain — including its carrier element-name fallback —
+    // so a bare `this.displayName(name)` call (e.g.
     // ConflictModal's name resolver) never falls back to the id where the wrapped path would
     // have found a name. Idempotent when storedLabel already arrived resolved.
     return displayLabelForGroup(group, this.pluginHost(), resolveHostStoredLabel(group, storedLabel, this.lastGroups, this.lastLock, (n) => this.groupRef(n)));
@@ -1423,11 +1418,11 @@ export default class ConfigSyncPlugin extends Plugin {
     };
   }
 
-  // The Sync Center host resolver (c-livetest batch5 task 2, spec §1): the parent GROUP name for
+  // The Sync Center host resolver: the parent GROUP name for
   // a companion group, so the view can fold a family into one row/entry — null for a non-companion,
   // a custom group, or `enabled-css-snippets` (none of which groupOwners ever attributes to a
   // def-level companionPath, so the out-of-scope cases fall out of this check for free).
-  // groupOwners only knows STATIC def-level presetCompanions; spec §1's family also includes "any
+  // groupOwners only knows STATIC def-level presetCompanions; a family also includes "any
   // item's configured companions" (the Settings drawer's "+ Add folder", any item, not just the
   // ones with a preset) — those live in settings.items, not the registry, so a group groupOwners
   // doesn't recognize falls through to a scan there. Mirrors compileCompanions' own filter
@@ -1476,14 +1471,14 @@ export default class ConfigSyncPlugin extends Plugin {
     };
   }
 
-  // ── The two enablement layers (spec 2026-08-12-enablement-two-layers-design.md §5) ─────────
+  // ── The two enablement layers ───────────────────────────────────────────────────────────────
   //
   // The fleet rule lives on the carrier item (enablementRules.ts); this device's own exception
   // lives in localStorage (deviceElements.ts); decideEnablement (enablementDecision.ts) is the one
   // place the two are combined. Everything downstream — the capture/apply mask, the two force
-  // sets, every UI row — projects off that one decision, because the four independent derivations
-  // this replaced are exactly how "a local choice survives a pull" came to be true in one of them
-  // and false in another (C-#52).
+  // sets, every UI row — projects off that one decision: multiple independent derivations are
+  // exactly how "a local choice survives a pull" can come to be true in one of them and false
+  // in another.
 
   // The device-element table, parsed at most once per load (same discipline as deviceOptOutsCache
   // — this is read per element per render).
@@ -1497,7 +1492,7 @@ export default class ConfigSyncPlugin extends Plugin {
   private saveDeviceElements(next: DeviceElements): void {
     this.deviceElementsCache = next;
     // An empty table clears the key rather than storing "{}" — the same prune discipline the
-    // opt-out list and the settings map follow (C-#26).
+    // opt-out list and the settings map follow.
     this.app.saveLocalStorage(DEVICE_ELEMENTS_KEY, Object.keys(next).length === 0 ? null : JSON.stringify(next));
   }
 
@@ -1529,13 +1524,13 @@ export default class ConfigSyncPlugin extends Plugin {
     return out;
   }
 
-  // The fleet rule for one element of one list — read and write, the only pair (spec §6.6).
+  // The fleet rule for one element of one list — read and write, the only pair.
   enablementRuleFor(list: RuleListId, elementId: string): Sharing {
     return enablementRuleFor(this.settings.items, list, elementId);
   }
 
   async setEnablementRule(list: RuleListId, elementId: string, sharing: Sharing): Promise<void> {
-    if (this.schemaStopped()) return; // §4.2b: refuse BEFORE mutating
+    if (this.schemaStopped()) return; // refuse BEFORE mutating
     this.settings.items = withEnablementRule(this.settings.items, list, elementId, sharing);
     await this.saveSettings();
   }
@@ -1546,13 +1541,13 @@ export default class ConfigSyncPlugin extends Plugin {
   }
 
   // Every element of a list this device has an exception for — what a carrier card's `N left to me`
-  // badge counts and what its element list unions in (spec §6.4). The per-element read above cannot
+  // badge counts and what its element list unions in. The per-element read above cannot
   // answer it: the table is localStorage, which only this file touches.
   deviceElementIds(list: RuleListId): string[] {
     return deviceElementIds(this.deviceElements(), list);
   }
 
-  // "Leave it to me" keeps EXACTLY what is on this device right now (spec §6.5). The state is read
+  // "Leave it to me" keeps EXACTLY what is on this device right now. The state is read
   // from the PERSISTED list file — the same content applySwitchList's pass-through reads — never
   // from a live plugin query, which can diverge from disk (a non-persistent enablePlugin, which
   // config-sync's own apply cycle and the IOTO ecosystem both use).
@@ -1577,16 +1572,16 @@ export default class ConfigSyncPlugin extends Plugin {
     void this.refreshLocalStatus();
   }
 
-  // ONE writer for the exception table (spec §6.6) — the three methods above differ only in the
+  // ONE writer for the exception table — the three methods above differ only in the
   // value they hand it.
   private writeDeviceElement(list: RuleListId, elementId: string, state: DeviceElementState | null): void {
     this.saveDeviceElements(withDeviceElement(this.deviceElements(), list, elementId, state));
   }
 
-  // The LOCAL half of `thisDeviceItems`' migration (spec §4). The fleet half (a `this-device` rule)
+  // The LOCAL half of `thisDeviceItems`' migration. The fleet half (a `this-device` rule)
   // preserves who decides; this half preserves WHAT was decided. Both are needed because a v3
-  // this-device pin did not merely mask its element — it FORCED it (availability.ts's now-retired
-  // forcedRunsOn, against the persisted list). Writing the rule alone would turn a force into a
+  // this-device pin did not merely mask its element — it FORCED it (against the persisted
+  // list). Writing the rule alone would turn a force into a
   // pass-through, and the first apply after the migration could then move a switch the user had
   // pinned. With the freeze, the three list files are byte-identical before and after.
   //
@@ -1615,7 +1610,7 @@ export default class ConfigSyncPlugin extends Plugin {
     return readLocalSwitchList(list, await io.read(real));
   }
 
-  // Settings-sync menu read/write (unified grammar task-5): the same field the Settings tab's
+  // Settings-sync menu read/write: the same field the Settings tab's
   // file-row sharing control edits (Item.settingsFile.fileRule.sharing). `mode` is re-derived
   // on every write exactly as SettingTab's own withDerivedMode does, so a fileRule-only write
   // here never desyncs it from the rules/perElement it's actually driven by.
@@ -1626,7 +1621,7 @@ export default class ConfigSyncPlugin extends Plugin {
   }
 
 
-  // C-#25: the SAME legality test setItemFileSharing's guard throws on below — the Sync Center row
+  // The SAME legality test setItemFileSharing's guard throws on below — the Sync Center row
   // calls this to decide whether to offer the menu at all, so "offered" and "accepted" can never
   // disagree.
   private itemFileSharingMenuLegal(ref: ItemRef): boolean {
@@ -1637,15 +1632,15 @@ export default class ConfigSyncPlugin extends Plugin {
   }
 
   async setItemFileSharing(ref: ItemRef, sharing: FileSharing): Promise<void> {
-    if (this.schemaStopped()) return; // §4.2b
+    if (this.schemaStopped()) return; // schema stop
     const parsed = parseItemRef(ref);
     if (parsed === null) return;
     const item = itemAt(this.settings.items, parsed.section, parsed.id) ?? emptyItem();
     const sf = item.settingsFile ?? defaultSettingsFile();
     const mode = deriveMode(sf);
-    // C-#25 root cause: writing a fileRule on a fields-mode item used to resolve mode:"fields"
-    // below and silently strip the very fileRule this call just wrote — the item's card now never
-    // offers this menu (see itemFileSharingMenuLegal above), so reaching here with an illegal mode
+    // Writing a fileRule on a fields-mode item would resolve mode:"fields"
+    // below and silently strip the very fileRule this call just wrote — the item's card never
+    // offers this menu there (see itemFileSharingMenuLegal above), so reaching here with an illegal mode
     // means a caller ignored that and must be told loudly, not have its write vanish.
     if (!fileRuleLegalForMode(mode)) {
       throw new Error(`setItemFileSharing: "${ref}" is in "${mode}" mode — a whole-file sharing write is illegal there (manifest.ts's fileRule validator only allows plain-mode file groups)`);
@@ -1655,7 +1650,7 @@ export default class ConfigSyncPlugin extends Plugin {
     await this.saveSettings();
   }
 
-  // The Stop-syncing menu's "On this device"/"Sync on this device again" read (C-#45, spec §1/§3):
+  // The Stop-syncing menu's "On this device"/"Sync on this device again" read:
   // true iff this group is in THIS device's own opt-out list (localStorage — never data.json).
   private isDeviceOptedOut(groupName: string): boolean {
     return this.deviceOptOutGroups().includes(this.groupRef(groupName));
@@ -1663,26 +1658,18 @@ export default class ConfigSyncPlugin extends Plugin {
 
   // Every item ref THIS device has opted out of — the guard set for the run/heal seams
   // (captureItems/applyItems payload filtering, backfillLockLabels' tail heal, computeStatuses'
-  // synthetic-status treatment; C-#45 spec §4). Refs since v3 (spec §4): the opt-out list moved with
+  // synthetic-status treatment). Refs since v3: the opt-out list moved with
   // the lock and the baselines, because they are one key space and a half-moved one resolves
   // nothing.
   private deviceOptedOutRefs(): Set<string> {
     return new Set(this.deviceOptOutGroups());
   }
 
-  // The Stop-syncing menu's "On this device"/"Sync on this device again" write. Two stores, one
-  // gesture (spec 2026-08-11-data-model-hardening.md §2 and its ruling): localStorage is the
-  // AUTHORITY — that is the whole point of C-#52, a choice no pull or adopt can overwrite — and
-  // the document's carried map is then brought in step for THIS device's id alone, so a device
-  // still on the old build (which reads that map and nothing else) is never told something false
-  // about us. Other devices' entries are never touched; see withDeviceOptOut.
-  // One store, one gesture. The fleet-shared `deviceOptOuts` map this used to keep in step is
-  // gone from the document (spec §5, C-#54 phase 2): it only ever existed so a device still on a
-  // build that read that map would not lose its own entry when it adopted ours, and no such build
-  // can read a v3 document at all — the version gate refuses it and says so. localStorage is the
-  // authority, and now the only one.
+  // The Stop-syncing menu's "On this device"/"Sync on this device again" write. One store, one
+  // gesture: localStorage is the AUTHORITY — a local choice no pull or adopt can overwrite —
+  // and the only one.
   async setDeviceOptOut(groupName: string, on: boolean): Promise<void> {
-    // §4.2b (review I1): the opt-out list is DERIVED from the document we cannot read (the group
+    // Stop-state rule: the opt-out list is DERIVED from the document we cannot read (the group
     // name comes from `compiledGroups`) and decides what every future run skips.
     if (this.schemaStopped()) return;
     const ref = this.groupRef(groupName);
@@ -1698,14 +1685,13 @@ export default class ConfigSyncPlugin extends Plugin {
   private openSettingsAt(ref: ItemRef): void {
     this.pendingSettingsDeepLink = ref;
     const app = this.app as unknown as AppWithSetting;
-    // ROOT CAUSE (C-#11, live-traced via console instrumentation on a real build): open() itself
+    // open() itself
     // re-opens whatever tab was last active — when that's already this plugin's tab (the common
     // case once Settings has been opened here even once), open()'s internal openTabById() already
-    // fires SettingTab.display(). openTabById() has no "already active" guard (traced in
-    // Obsidian's own compiled Setting class), so the unconditional explicit call below used to
+    // fires SettingTab.display(). openTabById() has no "already active" guard (Obsidian's own
+    // compiled Setting class), so an unconditional explicit call here would
     // re-run display() a second time, resetting activeTab/expanded back to defaults right after
-    // the first display() had consumed pendingSettingsDeepLink and applied them — a live-confirmed
-    // double render (renderGen incremented twice per open), not a "consume never fires" bug.
+    // the first display() had consumed pendingSettingsDeepLink and applied them.
     // Call it again only when open() didn't already land us on our own tab — but open() is a
     // no-op while the modal is already showing (no tab change at all), so also force it when we
     // were already active *before* open() ran, or a repeat More click while Settings is already
@@ -1726,7 +1712,7 @@ export default class ConfigSyncPlugin extends Plugin {
   // The item a compiled group belongs to, as the one-string ref localStorage and the Sync Center
   // host both speak — a registry LOOKUP (registry.ts's itemForGroupName), never a parse of the
   // group name. null for a companion group or a name no def claims. An enablement carrier resolves
-  // here too, to its own def (task 5) — it is not a special case; a custom item's group name IS
+  // here too, to its own def — it is not a special case; a custom item's group name IS
   // its id.
   itemRefForGroup(name: string): ItemRef | null {
     const def = itemForGroupName(this.registryDefs, name);
@@ -1769,7 +1755,7 @@ export default class ConfigSyncPlugin extends Plugin {
   }
 
   // A group's PERSISTED local switch-list content — the same file applySwitchList's exception
-  // pass-through reads (task-2 fix #1: never a live PluginHost query, which can diverge from what
+  // pass-through reads (never a live PluginHost query, which can diverge from what
   // is actually on disk — the divergence pluginState.ts documents). Absent group/file/unparseable → null,
   // treated as "off" by switchListMemberOn.
   private async localSwitchListFor(name: string): Promise<SwitchList | null> {
@@ -1787,8 +1773,8 @@ export default class ConfigSyncPlugin extends Plugin {
       throw new Error(`Config Sync: invalid data folder "${rootPath}" — set a vault-relative path in settings`);
     }
     this.lastResolvedRoot = rootPath;
-    // ONE decision per element per run; the mask and both force sets are projections of it. The
-    // three used to be three independent derivations, which is how they came to disagree.
+    // ONE decision per element per run; the mask and both force sets are projections of it —
+    // three independent derivations could disagree.
     const decisions = this.decisionsByList();
     return {
       io: this.configIO(),
@@ -1801,14 +1787,13 @@ export default class ConfigSyncPlugin extends Plugin {
       switchForceOff: this.forcedFrom(decisions, "off"),
       switchForceOn: this.forcedFrom(decisions, "on"),
       // No fieldOverlay: compileItems (registry.ts) already merges every app-slice card's rules
-      // into the compiled "app" group at settings-compile time — the v3-era runtime overlay
-      // (appTabRules/appTabsNonDefault, src/core/appTabs.ts) is superseded and removed.
+      // into the compiled "app" group at settings-compile time.
       groupsIO: {
         read: async () => this.compiledGroups,
         // The sync list is DERIVED from settings.items, not stored directly, so a raw group-list
         // write has no durable home. The only remaining caller is stopSyncing's fallback for a
-        // group with no known owner — every registry-produced group has one since task 5 gave the
-        // two carriers their own def, so this is reachable only for a name no def or custom entry
+        // group with no known owner — every registry-produced group has one (the two carriers
+        // have their own def), so this is reachable only for a name no def or custom entry
         // claims at all (a future/unrecognized group) — kept in memory for the rest of the
         // session, never a source of data loss, just non-persistence across a reload.
         write: async (groups) => {
@@ -1837,7 +1822,7 @@ export default class ConfigSyncPlugin extends Plugin {
     return reader;
   }
 
-  // Dynamic import() keeps Node fs/child_process out of the mobile load path (spec D6):
+  // Dynamic import() keeps Node fs/child_process out of the mobile load path:
   // a static import would execute require("fs") at plugin load and crash on mobile.
   private async buildReader(remote: Remote): Promise<ExternalStoreReader> {
     if (remote.type === "vault") {
@@ -1848,7 +1833,7 @@ export default class ConfigSyncPlugin extends Plugin {
     return createGitReader(remote.url, remote.branch, remote.subdir ?? "", resolveGitToken(this.app.secretStorage, remote));
   }
 
-  // Dynamic import() keeps Node fs/child_process out of the mobile load path (spec D6):
+  // Dynamic import() keeps Node fs/child_process out of the mobile load path:
   // a static import would execute require("fs") at plugin load and crash on mobile.
   private async createWriter(remote: Remote): Promise<ExternalStoreWriter> {
     if (remote.type === "vault") {
@@ -1874,13 +1859,13 @@ export default class ConfigSyncPlugin extends Plugin {
 
   // Returns the store paths it deleted (display form, no "store/" prefix) so the caller can
   // record them in run history; empty when deleteStore is false or there was no store data.
-  // Returns the store paths it deleted, or `null` when the run was refused (§4.2b) — the same
+  // Returns the store paths it deleted, or `null` when the run was refused (stop state) — the same
   // "it did not happen" signal the runs already use (see the Sync Center's setLastRun), and the
   // reason it is not an empty array: `[]` is a legitimate outcome (nothing to delete) that the
   // caller records in the run history, so a refusal must be a different value or it gets logged
   // as a success.
   async stopSyncing(groupName: string, deleteStore: boolean): Promise<string[] | null> {
-    // §4.1, same rule as the five runs above: this deletes store content BEFORE it touches
+    // Schema stop, same rule as the five runs above: this deletes store content BEFORE it touches
     // settings, so leaving it to saveSettings' own refusal would delete first and refuse after.
     // Which files belong to which group is decided by compiledGroups, and this build cannot
     // compile a document it does not understand — the deletion would be a guess.
@@ -1966,9 +1951,9 @@ export default class ConfigSyncPlugin extends Plugin {
   }
 
   // Returns the store rels it deleted, or `null` when refused — same signal and same reasoning as
-  // stopSyncing above (§4.2b).
+  // stopSyncing above.
   async deleteLeftoverStoreFiles(rels: string[]): Promise<string[] | null> {
-    // §4.1: "leftover" means "no compiled group claims this file", and under the stop state the
+    // Schema stop: "leftover" means "no compiled group claims this file", and under the stop state the
     // compile ran against a document this build cannot fully read — a file a newer item legitimately
     // owns would look deletable. Refuse rather than delete on a guess.
     if (this.schemaStopped()) return null;
@@ -2036,14 +2021,14 @@ export default class ConfigSyncPlugin extends Plugin {
   }
 
   // Basenames (no extension) of .css files actually present under snippets/ — feeds the
-  // Appearance card's snippets companion member rows (spec §4/§5); reuses the same directory
+  // Appearance card's snippets companion member rows; reuses the same directory
   // scan snippetUniverse() already does for the old switch-list drawer.
   async listSnippetFiles(): Promise<string[]> {
     return (await this.snippetUniverse()).fromDir;
   }
 
   // Immediate child file/folder names of a companion path — plain (non-mapKey) companion member
-  // listing (spec §4 "成员行"; task-7-brief.md). No per-member sharing: an arbitrary folder group
+  // listing. No per-member sharing: an arbitrary folder group
   // has no per-file sharing mechanism today (only the three named switch lists in
   // SWITCH_LISTS do), so this is informational-only, unlike listSnippetFiles above.
   async listCompanionFiles(path: string): Promise<string[]> {
@@ -2125,9 +2110,9 @@ export default class ConfigSyncPlugin extends Plugin {
     return resolveEffectiveMode("auto", this.pkmProbe());
   }
 
-  // The load-time version gate (classifySettings, spec 2026-08-11-data-model-hardening.md §4.1).
-  // `migrate` — a v2 document is brought forward field by field (spec 2026-08-11-v3-one-vocabulary
-  // §5) and saved once, silently: nothing was reset, so nothing is announced. `legacy` — a v1 or
+  // The load-time version gate (classifySettings).
+  // `migrate` — a v2 document is brought forward field by field
+  // and saved once, silently: nothing was reset, so nothing is announced. `legacy` — a v1 or
   // unversioned document has no field a v3 shape could be reconstructed from, so the plugin starts
   // fresh with defaults and asks the user to reconfigure. `future` is the case this gate was split
   // out for: the old `schemaVersion !== CURRENT` test sent a document from a NEWER build down that
@@ -2139,11 +2124,11 @@ export default class ConfigSyncPlugin extends Plugin {
     const load = classifySettings(data);
     if (load.kind === "future") {
       this.schemaStop = { found: load.found };
-      // Said once, here, and not only to whoever opens the Sync Center (§4.2b): a device that has
-      // silently stopped syncing is the failure this release exists to prevent, so it must be
+      // Said once, here, and not only to whoever opens the Sync Center: a device that has
+      // silently stopped syncing is the failure the version gate exists to prevent, so it must be
       // visible without the user going looking. Same mechanism and duration as the legacy branch's
-      // own notice below — and it seeds the same quiet window every other refusal shares
-      // (final-review N1), or a gesture within REFUSAL_NOTICE_MS would stack a second copy of this
+      // own notice below — and it seeds the same quiet window every other refusal shares,
+      // or a gesture within REFUSAL_NOTICE_MS would stack a second copy of this
       // exact sentence beside the one still on screen, which is what that window exists to prevent.
       this.lastRefusalNoticeAt = Date.now();
       new Notice(SCHEMA_FUTURE_NOTICE, REFUSAL_NOTICE_MS);
@@ -2156,17 +2141,14 @@ export default class ConfigSyncPlugin extends Plugin {
     }
     this.schemaStop = null;
     // Quick commands moved to the Ribbon Organizer plugin in 1.7.0; drop the stale key so the
-    // next save cleans data.json. C-#45 fix-round 1: an earlier build of the device-opt-out
-    // feature (never released/committed) briefly stored the device identity as a settings field
-    // (`deviceId`) — a reviewer-caught CRITICAL, since data.json travels wholesale (git-tracked
-    // vaults, remotely-save, manual copies) and a value trusted from an inherited data.json would
-    // let a bootstrapped machine silently claim the source machine's identity. The identity now
-    // lives only in localStorage (see the deviceId() method below); dropping a stray leftover key
-    // here is ignore-and-prune, not migrate — the field never shipped to a real user (no release,
-    // no commit), so there is nothing meaningful to carry forward, only a local/dev-testing
-    // artifact to sweep off the next save.
+    // next save cleans data.json. `deviceId` is likewise swept: the device identity lives only in
+    // localStorage (see the deviceId() method below) — data.json travels wholesale (git-tracked
+    // vaults, remotely-save, manual copies), and a value trusted from an inherited data.json would
+    // let a bootstrapped machine silently claim the source machine's identity — so a stray
+    // settings-field copy is ignore-and-prune, not migrate: nothing meaningful to carry forward,
+    // only an artifact to sweep off the next save.
     //
-    // Ahead of the migrate branch, not after it (fix round 1, review M6): a v2 document is the one
+    // Ahead of the migrate branch, not after it: a v2 document is the one
     // most likely to still carry both, and the migration SAVES — so leaving the sweep downstream
     // would deliberately write a stray `deviceId` back to disk for one cycle. It is skipped for a
     // `future` document (which returned above) because this build owns nothing there.
@@ -2180,7 +2162,7 @@ export default class ConfigSyncPlugin extends Plugin {
       // returns a document of any other version untouched — so this can never take a different
       // branch by accident the way a `data !== null` guard falling through to `legacy` would.
       //
-      // The CHAIN is the point (spec §4): migrateV2Settings answers with a v3 document, which
+      // The CHAIN is the point: migrateV2Settings answers with a v3 document, which
       // migrateV4Settings then takes the rest of the way, so a device that skipped 2.22.0 entirely
       // still lands on v4 in this one load. A document that is already v3 simply starts at the
       // second step, and carries no v2 opt-out map to absorb.
@@ -2212,23 +2194,22 @@ export default class ConfigSyncPlugin extends Plugin {
       return;
     }
     this.settings = withDefaults(DEFAULT_SETTINGS, data);
-    // A field this build doesn't recognise is deliberately NOT sanitized here (spec
-    // 2026-08-11-data-model-hardening.md §3.2, invariant II.2): the load path used to drop every
-    // such value and save immediately, which turned a NEWER build's data into a deletion this
-    // device then pushed to the whole fleet. This is what a v3 document's leftover `runsOn` rides
-    // through as, now that the field itself has retired (2026-08-12-enablement-two-layers, task 8)
-    // — unknown data in an item's carried tail (registry.ts's itemTail/WRITTEN_ITEM_KEYS), ignored
+    // A field this build doesn't recognise is deliberately NOT sanitized here:
+    // dropping every such value and saving immediately would turn a NEWER build's data into a
+    // deletion this device then pushes to the whole fleet. This is what a v3 document's leftover
+    // `runsOn` rides through as —
+    // unknown data in an item's carried tail (registry.ts's itemTail/WRITTEN_ITEM_KEYS), ignored
     // where it is consumed and never rewritten out from under a newer build that might still read
     // it.
   }
 
-  // The answer every mutating entry point gives while the §4.1 stop state holds: true means the
+  // The answer every mutating entry point gives while the stop state holds: true means the
   // caller must stop, having written nothing, and the user has been told why in the same words the
   // Sync Center's banner uses. Refusal, not silent recovery — a toggle that quietly did nothing
   // would be indistinguishable from a save that worked.
   //
   // The REFUSAL is never suppressed; only a repeat of the same notice while the previous one is
-  // still on screen is (round-4 review N4 — REFUSAL_NOTICE_MS is both its lifetime and the quiet
+  // still on screen is (REFUSAL_NOTICE_MS is both its lifetime and the quiet
   // window, so the two can't drift apart). The settings tab's text fields refuse per KEYSTROKE,
   // and a notice per character is worse than silence: a storm teaches the user to ignore the one
   // message that matters. Suppressing here rather than special-casing the text fields keeps one
@@ -2245,7 +2226,7 @@ export default class ConfigSyncPlugin extends Plugin {
     return true;
   }
 
-  // SettingsHost-facing (§4.2b): may the settings tab write right now? Asking IS the refusal —
+  // SettingsHost-facing: may the settings tab write right now? Asking IS the refusal —
   // the notice fires here, on the user's own gesture — because every writer in that file is
   // mutate-then-save and `saveSettings` refuses too late to undo the mutation. A writer that only
   // learned at save time left memory diverged from disk with no recompile.
@@ -2254,7 +2235,7 @@ export default class ConfigSyncPlugin extends Plugin {
   }
 
   async saveSettings(): Promise<void> {
-    // The choke point for every settings writer, the settings tab's own included (§4.1): a
+    // The choke point for every settings writer, the settings tab's own included: a
     // document written by a newer build is never written back by this one. Our shape would flatten
     // the fields we cannot see, and the result would travel to the user's other devices.
     if (this.schemaStopped()) return;
@@ -2272,7 +2253,7 @@ export default class ConfigSyncPlugin extends Plugin {
   }
 
   /**
-   * The §4 re-key of this device's own two stores — the baselines and the opt-out list — from
+   * The re-key of this device's own two stores — the baselines and the opt-out list — from
    * compiled group names to item refs. Runs after every compile, not only after the v2 → v3 document
    * migration, and both halves are idempotent (the ledger by its own version, the opt-out list by
    * the shape of its entries), so a crash between the two writes finishes on the next load rather
@@ -2281,7 +2262,7 @@ export default class ConfigSyncPlugin extends Plugin {
    * AFTER a SUCCESSFUL compile, deliberately: the conversion asks the compiler what each name's ref
    * is (itemKeys.ts's lockRefFor), so it can only run once compiledGroups is both present and
    * trustworthy — see recompile's return value, and its callers, which is where that precondition is
-   * enforced. Nothing is dropped (see rekeyLedger) and nothing is written while the §4.2b stop state
+   * enforced. Nothing is dropped (see rekeyLedger) and nothing is written while the stop state
    * holds, because both stores describe a document this build has declared it cannot read.
    *
    * The ledger's version is stamped by the same call that does the work, so there is no window in

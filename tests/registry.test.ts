@@ -29,7 +29,7 @@ import { mergePresetFields, selfPresetRules } from "../src/core/catalog";
 import { carrierRef } from "../src/core/itemKeys";
 import { withEnablementRule } from "../src/core/enablementRules";
 
-// spec 2026-07-25-unified-card-design.md §1/§3/§5/§6; task-4-brief.md compile rules.
+// Design reference: docs/superpowers/specs/2026-07-25-unified-card-design.md §1/§3/§5/§6.
 
 // Fixtures name items the way the document does: section, then bare id.
 function settings(partial: Partial<Record<StorageSection, Record<string, Item>>> = {}): CompileSettings {
@@ -53,7 +53,7 @@ function findGroup(groups: SyncGroup[], name: string): SyncGroup | undefined {
 const EMPTY_ENV: RegistryEnv = { cores: [], plugins: [], betaIds: new Set() };
 
 describe("buildItemDefs", () => {
-  it("always includes the five Obsidian cards — the three settings cards plus the two on/off lists (task 5)", () => {
+  it("always includes the five Obsidian cards — the three settings cards plus the two on/off lists", () => {
     const defs = buildItemDefs(EMPTY_ENV);
     const obsidianIds = defs.filter((d) => d.section === "obsidian").map((d) => d.id).sort();
     expect(obsidianIds).toEqual(["app", "appearance", "community-plugins", "core-plugins", "hotkeys"]);
@@ -140,13 +140,13 @@ describe("selected-but-uninstalled items compile locally", () => {
   });
 });
 
-// C1 (fix round 1): `beta` is a PRESENTED classification, never a stored one (spec §7b). A
+// `beta` is a PRESENTED classification, never a stored one. A
 // `beta/<id>` ref would name an item no reader can find — every mask reader resolves the
 // `community` section — so the chip would show a pin the capture/apply mask never saw, and the id
 // would change the day BRAT adopted or dropped the plugin. `ItemRef` is built from
 // StorageSection, so `itemRef(def.section, …)` does not compile for a def that may be beta;
 // `defRef` is the only def → ref conversion and it goes through `storageSection`.
-describe("item identity never carries the beta classification (spec §7b)", () => {
+describe("item identity never carries the beta classification", () => {
   const env: RegistryEnv = { ...EMPTY_ENV, plugins: [{ id: "slides-rup", name: "SlidesRup" }], betaIds: new Set(["slides-rup"]) };
   const defs = buildItemDefs(env);
   const beta = defs.find((d) => d.id === "slides-rup") as ItemDef;
@@ -177,7 +177,7 @@ describe("item identity never carries the beta classification (spec §7b)", () =
     expect(parseItemRef("community/slides-rup")).toEqual({ section: "community", id: "slides-rup" });
   });
 
-  // NEW-I1 (fix round 2): closing the leak by construction protects MINTING, not MATCHING. The
+  // Closing the leak by construction protects MINTING, not MATCHING. The
   // type stops `itemRef(def.section, …)`, but nothing stopped `def.section === parsed.section` —
   // presented on the left, stored on the right — from silently never matching for a beta def.
   // defForRef is the one matching bridge, and it must find a beta def by its community ref.
@@ -288,7 +288,7 @@ describe("compileItems — plugin cards (dir/file group when enabled)", () => {
     const g = findGroup(groups, "plugin-dataview")!;
     expect(g.path).toBe("{configDir}/plugins/dataview/data.json");
     expect(g.fileRule).toEqual({ sharing: perClass("desktop"), encrypted: true });
-    expect(g.devices).toBe("desktop"); // Task-2-deferred: sharing → devices class
+    expect(g.devices).toBe("desktop"); // sharing → devices class
   });
 
   it("a disabled plugin card compiles no group", () => {
@@ -323,11 +323,9 @@ describe("compileItems — plugin cards (dir/file group when enabled)", () => {
   });
 });
 
-// Retired-behaviour update (task 5): these two used to assert `anyEnabledInList` — a carrier
-// compiled the moment ANY card in its section was synced. The carriers are ordinary items now
-// (see "the on/off lists as items" below), so a card underneath no longer drives its carrier's
-// compile on its own; only the carrier's OWN entry does. Kept here, retitled, because they still
-// pin something the new describe block doesn't: that a card being on is no longer SUFFICIENT.
+// The carriers are ordinary items (see "the on/off lists as items" below): a card underneath
+// never drives its carrier's compile on its own; only the carrier's OWN entry does. These two
+// pin the negative half — that a card being on is not SUFFICIENT.
 describe("compileItems — the two on/off lists as carriers", () => {
   it("compile iff the carrier's own item is synced — a card in that section being on is no longer sufficient", () => {
     const env: RegistryEnv = {
@@ -358,10 +356,9 @@ describe("compileItems — the two on/off lists as carriers", () => {
   });
 });
 
-// spec §3.1/§3.3: the two on/off lists are ordinary registry items now — their own def, their own
-// card, their own entry in `items.obsidian`. Their ref was already `obsidian/<list>` (itemKeys.ts's
-// carrierRef, since v3), so nothing here re-keys anything; it only gives that ref a def and a
-// compile path through the ordinary single-file loop, retiring the special-case one.
+// The two on/off lists are ordinary registry items — their own def, their own
+// card, their own entry in `items.obsidian`. Their ref is `obsidian/<list>` (itemKeys.ts's
+// carrierRef), and they compile through the ordinary single-file loop, no special case.
 describe("the on/off lists as items", () => {
   const env = { cores: [{ id: "daily-notes", name: "Daily notes", fileExists: true }], plugins: [{ id: "dataview", name: "Dataview" }], betaIds: new Set<string>() };
 
@@ -374,7 +371,7 @@ describe("the on/off lists as items", () => {
     }
   });
 
-  // Task 11 (spec §6.3): the Sync Center's carrier chip is a read-only shortcut now, and it must
+  // The Sync Center's carrier chip is a read-only shortcut, and it must
   // jump to the card whether or not the carrier is synced — a NOT-synced carrier has no compiled
   // group, but the def exists regardless, and itemForGroupName is a DEF lookup (registry.ts), never
   // a compiled-list lookup. An empty items map is the sharpest way to prove that.
@@ -399,7 +396,7 @@ describe("the on/off lists as items", () => {
     expect(carrier?.perElement).toBeUndefined();
   });
 
-  it("element rules never reach the compiled group — storage is uniform, application is not (spec §3.3)", () => {
+  it("element rules never reach the compiled group — storage is uniform, application is not", () => {
     const defs = buildItemDefs(env);
     const items = withEnablementRule(itemsIn({ obsidian: { "core-plugins": { synced: true } } }), "core-plugins", "daily-notes", THIS_DEVICE);
     const carrier = compileItems(defs, { items }).find((g) => g.name === "core-plugins");
@@ -407,24 +404,22 @@ describe("the on/off lists as items", () => {
     expect(carrier?.mode).toBeUndefined();
   });
 
-  // Final-review CRITICAL 1: the File preview's click-to-add (SettingTab.ts's addRuleForKey) used to
-  // let a click write `settingsFile.rules[<plugin id>]` straight onto a carrier — deriveMode then
-  // flips the item to "fields" mode (rules is no longer empty; that part is a genuine, correct field
-  // rule and IS expected to compile), and before this fix compileSingleFile also copied `perElement`
-  // onto the compiled group VERBATIM, including the reserved "" key the carrier's own element rules
-  // live under. Downstream, captureTransform read that "" key as a per-element ARRAY field and wrote
-  // `"": []` into core-plugins.json/community-plugins.json, corrupting the switch-list file (the next
-  // load's parseSwitchList returns null and the whole mechanism goes silently bypassed). The UI-level
-  // fix (this file's sibling, SettingTab.ts) now suppresses the click that produces the rules entry in
-  // the first place, but this test defends the registry.ts layer on its own: even a carrier item that
-  // ALREADY carries both (e.g. a vault saved before the UI fix shipped) must never let the reserved
-  // key reach the compiled group.
-  it("a carrier item carrying both a rules entry and reserved-key element rules never leaks the reserved key onto the compiled group (final-review CRITICAL 1)", () => {
+  // A rules entry keyed by a plugin id can land on a carrier item (the File preview's
+  // click-to-add, SettingTab.ts's addRuleForKey, is suppressed for carriers, but a vault saved by
+  // an older build can already carry one) — deriveMode then flips the item to "fields" mode
+  // (rules is no longer empty; that part is a genuine, correct field rule and IS expected to
+  // compile). compileSingleFile must NOT copy `perElement` onto the compiled group VERBATIM:
+  // that would include the reserved "" key the carrier's own element rules live under, and
+  // downstream captureTransform would read that "" key as a per-element ARRAY field and write
+  // `"": []` into core-plugins.json/community-plugins.json, corrupting the switch-list file (the
+  // next load's parseSwitchList returns null and the whole mechanism goes silently bypassed).
+  // This test defends the registry.ts layer on its own, independent of the UI-level suppression.
+  it("a carrier item carrying both a rules entry and reserved-key element rules never leaks the reserved key onto the compiled group", () => {
     const defs = buildItemDefs(env);
     const withElementRule = withEnablementRule(itemsIn({ obsidian: { "core-plugins": { synced: true } } }), "core-plugins", "daily-notes", THIS_DEVICE);
     const carrierItem = withElementRule.obsidian["core-plugins"]!;
     const sf = carrierItem.settingsFile!; // holds perElement[""] = { "daily-notes": THIS_DEVICE } from withEnablementRule above
-    // Simulates exactly what addRuleForKey used to write on click: a rules entry keyed by a plugin
+    // A rules entry keyed by a plugin
     // id, on top of the reserved-key element rules already present.
     const corrupted: Item = { ...carrierItem, settingsFile: { ...sf, mode: "fields", rules: { "some-plugin-id": { sharing: EVERYWHERE, encrypted: false } } } };
     const items: ItemMap = { ...withElementRule, obsidian: { ...withElementRule.obsidian, "core-plugins": corrupted } };
@@ -437,7 +432,7 @@ describe("the on/off lists as items", () => {
     expect(carrier?.perElement).toBeUndefined();
   });
 
-  // perElementFromMap-level (final-review CRITICAL 1 test ii): a real perElement key survives
+  // perElementFromMap-level: a real perElement key survives
   // alongside the reserved "" key being dropped — proven through a fields-mode item's compiled group
   // rather than calling the (unexported) function directly.
   it("perElementFromMap drops only the reserved '' key — a real perElement key rides through untouched", () => {
@@ -460,10 +455,10 @@ describe("the on/off lists as items", () => {
   });
 });
 
-// enablementSharing / structuralLocalElements / elementSharings / deviceSharing retired with the
-// two-layer cutover (2026-08-12-enablement-two-layers-design.md §5): a per-element rule is STORED
-// on the carrier item (enablementRules.ts, tests/enablementRules.test.ts) instead of derived from
-// each item's own runsOn plus whether its card happens to be switched on.
+// There is no enablementSharing / structuralLocalElements / elementSharings / deviceSharing
+// (2026-08-12-enablement-two-layers-design.md §5): a per-element rule is STORED
+// on the carrier item (enablementRules.ts, tests/enablementRules.test.ts) rather than derived
+// from each item's own runsOn plus whether its card happens to be switched on.
 
 describe("compileItems — companion path collisions", () => {
   it("throws a CompileError when two DIFFERENT items' carriers land on the same store path", () => {
@@ -498,15 +493,15 @@ describe("compileItems — companion path collisions", () => {
   });
 });
 
-// Final-review MUST-FIX 1 / seam test 1: compileItems itself only checks PATH collisions
+// compileItems itself only checks PATH collisions
 // (claimPath) — it never validates a companion's basename-derived group NAME shape or a NAME
-// collision across items with different paths. That gap is what previously let the companion
+// collision across items with different paths. That gap would let the companion
 // add/edit UI persist a settings.items shape that compiles fine here but bricks recompile()'s
 // validateSyncManifest safety net (main.ts) on every subsequent load, zeroing out compiledGroups.
-// The UI-side boundary fix (validateCompanionBasename / companionNameConflict, tested in
+// The UI-side boundary (validateCompanionBasename / companionNameConflict, tested in
 // tests/companions.test.ts) is what actually prevents this from ever being persisted; these tests
-// pin the end-to-end compile+validate behavior that fix protects against.
-describe("compileItems -> validateSyncManifest safety net — companion basename (final-review MUST-FIX 1)", () => {
+// pin the end-to-end compile+validate behavior it protects against.
+describe("compileItems -> validateSyncManifest safety net — companion basename", () => {
   const env: RegistryEnv = {
     ...EMPTY_ENV,
     plugins: [
@@ -564,7 +559,7 @@ describe("compileItems — self item protection (withSelfPresets)", () => {
     expect(() => validateSyncManifest({ version: 1, groups })).not.toThrow();
   });
 
-  // C-#31 one-list invariant: withSelfPresets (this file) must derive the self group's fields
+  // One-list invariant: withSelfPresets (this file) must derive the self group's fields
   // through catalog.ts's mergePresetFields — the SAME function the self item's other
   // preset-merge call sites (ensureSelfPresets/groupForItem) use — never a second, independently
   // maintained copy of the preset+rest merge. If a future edit reimplemented the merge here
@@ -581,7 +576,7 @@ describe("compileItems — self item protection (withSelfPresets)", () => {
     expect(compiledFields).toEqual(mergePresetFields([{ pattern: "someCustomKey", sharing: perClass("desktop"), encrypted: false }]));
   });
 
-  // C-#31 one-list invariant, part 2: the compiled self group's exclusion set (locked, scope
+  // One-list invariant, part 2: the compiled self group's exclusion set (locked, scope
   // "local" fields — what adopt preserves from local instead of importing from the store, and
   // what the self compare treats as never-a-difference) is EXACTLY selfPresetRules()'s pattern
   // set, regardless of what other rules the item carries. A future settings field (e.g. a
@@ -631,18 +626,18 @@ describe("groupOwners — compiled group name -> owning item(s), for durable sto
     expect(owners["plugin-dataview"]).toEqual([{ section: "community", id: "dataview" }]);
   });
 
-  it("maps a custom item's group to its own custom-section owner (task-8 concern fix)", () => {
+  it("maps a custom item's group to its own custom-section owner", () => {
     const items = itemsIn({ custom: customSection([{ name: "my-rule", path: "notes/custom.json", type: "file", devices: "all" }]) });
     const owners = groupOwners(buildItemDefs(EMPTY_ENV), items);
     expect(owners["my-rule"]).toEqual([{ section: "custom", id: "my-rule" }]);
   });
 });
 
-// Task-8 concern fix: the Advanced tab's "Custom rules"/"Discovered files" used to be
-// session-only (a bare in-memory groupsIO write) — the `custom` SECTION of settings.items +
-// compileItems is their durable home now, going through the SAME claimPath accounting as every
-// other item.
-describe("compileItems — the custom section (spec §2/§6)", () => {
+// The Advanced tab's "Custom rules"/"Discovered files" live durably in
+// the `custom` SECTION of settings.items +
+// compileItems, going through the SAME claimPath accounting as every
+// other item — never a session-only in-memory groupsIO write.
+describe("compileItems — the custom section", () => {
   function withCustom(groups: SyncGroup[], rest: Partial<Record<StorageSection, Record<string, Item>>> = {}): CompileSettings {
     return { items: itemsIn({ ...rest, custom: customSection(groups) }) };
   }
@@ -650,14 +645,14 @@ describe("compileItems — the custom section (spec §2/§6)", () => {
   it("compiles a custom item and appends it to the compiled list", () => {
     const defs = buildItemDefs(EMPTY_ENV);
     const group: SyncGroup = { name: "my-rule", path: "notes/custom.json", type: "file", devices: "all" };
-    // The compiler mints the item's ref alongside its name (spec §3/§4) — a custom item's key is
+    // The compiler mints the item's ref alongside its name — a custom item's key is
     // `custom/<name>`, and it is the ONLY producer of that key.
     expect(findGroup(compileItems(defs, withCustom([group])), "my-rule")).toEqual({ ...group, ref: "custom/my-rule" });
   });
 
-  // Task-3 review M4: the name decides the KEY now, so a name that cannot be one must fail before it
-  // mints one — and it must fail by NAME. Left to validateSyncManifest downstream, the user met a
-  // generic "your sync setup has an invalid rule" Notice with no culprit in it.
+  // The name decides the KEY, so a name that cannot be one must fail before it
+  // mints one — and it must fail by NAME. Left to validateSyncManifest downstream, the user would
+  // meet a generic "your sync setup has an invalid rule" Notice with no culprit in it.
   it("names the offending custom rule when its name is not a legal one", () => {
     const defs = buildItemDefs(EMPTY_ENV);
     const bad: SyncGroup = { name: "bad name!", path: "notes/x.json", type: "file", devices: "all" };
@@ -706,7 +701,7 @@ describe("compileItems — the custom section (spec §2/§6)", () => {
     expect(compileItems(defs, { items })).toEqual([]);
   });
 
-  // 2.21.0 invariant II.1, at the custom section's own round trip (fix round 1, I1): a field a
+  // The unknown-field carry, at the custom section's own round trip: a field a
   // NEWER build wrote onto a custom item must survive item -> compiled group -> Advanced-tab draft
   // -> item. v2's `{...cg}` spread carried it by accident; v3 rebuilds from a field list, so the
   // carry has to be deliberate on both sides.
@@ -727,7 +722,7 @@ describe("compileItems — the custom section (spec §2/§6)", () => {
     expect(next.settingsFile?.fileRule).toEqual({ sharing: perClass("mobile"), encrypted: false });
   });
 
-  // Fix round 2: the tail crosses the Item/SyncGroup boundary, and the two shapes share field
+  // The tail crosses the Item/SyncGroup boundary, and the two shapes share field
   // NAMES — `mode`/`fields`/`fileRule`/`perElement` are SyncGroup fields today and could become
   // Item fields tomorrow. An unfiltered spread would let a value written for one be read as the
   // other, which is worse than losing it: the compiled group is rebuilt from the item every load,
@@ -762,10 +757,10 @@ describe("compileItems — the custom section (spec §2/§6)", () => {
   });
 });
 
-// withRunsOnDevice / itemWithDevice retired with `runsOn` itself (2026-08-12-enablement-two-layers,
-// task 8): a custom item's device class is its file-level sharing now (customItemFromGroup, tested
+// There is no withRunsOnDevice / itemWithDevice / `runsOn` (2026-08-12-enablement-two-layers):
+// a custom item's device class is its file-level sharing (customItemFromGroup, tested
 // above) — the same field and writer as every registry item's Settings-sync control — and the
-// on/off-list's own two layers (the settings card's former "Enabled on" cycle) are
+// on/off-list's own two layers are
 // enablementRules.ts/deviceElements.ts, covered by tests/enablementDecision.test.ts.
 
 describe("parentCardLabel", () => {
@@ -813,7 +808,7 @@ describe("parentCardLabel", () => {
     expect(parentCardLabel("scripts", defs, s)).toBe("Dataview");
   });
 
-  // presetCompanions basename fallback (c-livetest batch4 task 1): themes/snippets still read as
+  // presetCompanions basename fallback: themes/snippets still read as
   // "Appearance" even when the user never touched that companion — display-only, so it applies
   // whether or not the appearance card itself is enabled.
   it("empty settings.items → themes/snippets fall back to the appearance def's label", () => {
@@ -837,17 +832,16 @@ describe("parentCardLabel", () => {
   });
 });
 
-// itemEarnsDef (final review C1 + review NEW-I1's predicate) retired with `runsOn` itself
-// (2026-08-12-enablement-two-layers, task 8): its one exclusion was an entry whose only content was
-// a Runs-on rule, and that shape no longer exists — a rule now lives on the carrier item, not on
+// There is no itemEarnsDef (retired with `runsOn`, 2026-08-12-enablement-two-layers): its one
+// exclusion was an entry whose only content was
+// a Runs-on rule, and that shape no longer exists — a rule lives on the carrier item, not on
 // the plugin's own entry. defsForForeignItems' `known.has(id)` guard is the whole test again; see
 // its own comment in registry.ts.
 
 // The presence of an entry is this device's capture mask for an on/off-list element, so a write
-// must never decide an entry has nothing to say. An earlier round pruned `{synced:false}` here by
-// analogy with the C-#26 field prunes; the analogy was false — those drop a FIELD whose absence and
-// default agree, this dropped the entry whose existence IS the decision — and the result was
-// final-review C1.
+// must never decide an entry has nothing to say. Pruning `{synced:false}` by
+// analogy with the field prunes would be a false analogy — those drop a FIELD whose absence and
+// default agree; this entry's existence IS the decision.
 describe("withItem — never removes an entry", () => {
   it("stores an off entry rather than pruning it, because its presence is the mask", () => {
     const items = itemsIn({ community: { demo: { synced: true } } });
@@ -862,8 +856,7 @@ describe("withItem — never removes an entry", () => {
     expect(next.obsidian["hotkeys"]).toEqual({ synced: true });
   });
 
-  // An off card keeps both its entry and its def, so it can be turned back on (review NEW-I1) — the
-  // half of itemEarnsDef's old distinction that survives its retirement.
+  // An off card keeps both its entry and its def, so it can be turned back on.
   it("an off card keeps both its entry and its def", () => {
     const env: RegistryEnv = { cores: [], plugins: [], betaIds: new Set() };
     const items = withItem(itemsIn({}), "community", "was-a-card", { synced: false });

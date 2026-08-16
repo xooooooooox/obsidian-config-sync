@@ -36,7 +36,7 @@ describe("groupNeedsPassphrase", () => {
   });
 });
 
-// Regression (Task 2 review, Finding 1): the Sync Center's diff panel must suppress a raw
+// The Sync Center's diff panel must suppress a raw
 // plaintext-vs-ciphertext diff for a Plain group with fileRule.encrypted:true, the same way it
 // already does for mode:"encrypted".
 describe("isWholeFileEncrypted", () => {
@@ -117,13 +117,13 @@ describe("captureTransform / applyTransform round-trip", () => {
   });
 });
 
-// C-#36: an encrypted field whose plaintext hasn't changed must reuse its existing store envelope
+// An encrypted field whose plaintext hasn't changed must reuse its existing store envelope
 // byte-for-byte (fieldUnchanged's mac decides "unchanged") — every encryption otherwise draws a
 // fresh salt/IV (crypto.ts), so re-encrypting an unchanged field makes it masquerade as a change.
 // captureTransform is the single function both the real capture write (ConfigSyncCore.ts) and the
-// Sync Center's capture-preview diff (main.ts's diffPair) call the same way, so fixing it here
-// fixes both — this suite is the byte-identical proof for that shared path.
-describe("captureTransform: unchanged encrypted fields keep their envelopes (C-#36)", () => {
+// Sync Center's capture-preview diff (main.ts's diffPair) call the same way, so the guarantee
+// holds for both — this suite is the byte-identical proof for that shared path.
+describe("captureTransform: unchanged encrypted fields keep their envelopes", () => {
   const group = (over: object): SyncGroup =>
     ({ name: "g", path: "{configDir}/x.json", type: "file", devices: "all", ...over }) as unknown as SyncGroup;
 

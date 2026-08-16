@@ -494,18 +494,18 @@ describe("displayLabelForGroup label priority", () => {
   });
 });
 
-// Regression for the C-#14 live-verify find: main.ts's syncCenterHost() wired displayName/
-// displayParts as `(g) => this.displayName(g, ...)` — declaring only the `group` parameter, so
+// Arity guard: if main.ts's syncCenterHost() wired displayName/
+// displayParts as `(g) => this.displayName(g, ...)` — declaring only the `group` parameter —
 // every caller's explicit storedLabel argument (the view passes one at half a dozen call sites)
-// was silently discarded. TypeScript never flagged it because an implementation is allowed to
-// ignore a caller-supplied argument for a parameter it doesn't declare. This exercises the exact
-// priority chain the host wiring now delegates to, so a future re-introduction of the arity bug
+// would be silently discarded. TypeScript never flags this because an implementation is allowed
+// to ignore a caller-supplied argument for a parameter it doesn't declare. This exercises the
+// exact priority chain the host wiring delegates to, so an introduction of the arity bug
 // (or a wrong priority order) fails here instead of only being catchable on a real device.
 // The host's single ref producer, with no compiled list behind it (these fixtures describe names,
 // not a compile) — the same function main.ts binds to compiledGroups.
 const refOf = lockRefFor([]);
 
-describe("resolveHostStoredLabel (host wiring priority, C-#14)", () => {
+describe("resolveHostStoredLabel (host wiring priority)", () => {
   const group: SyncGroup = { name: "plugin-dataview", path: "{configDir}/plugins/dataview/data.json", type: "file", devices: "all", label: "from lastGroups" };
   const lock: StoreLock = { capturedAt: "2026-08-08T00:00:00.000Z", items: { community: { dataview: { display: { label: "from lastLock" } } } } };
 
@@ -523,11 +523,11 @@ describe("resolveHostStoredLabel (host wiring priority, C-#14)", () => {
   });
 });
 
-// 2026-08-09-c-livetest-batch15 (spec 2026-08-09-c-livetest-batch15-member-labels.md): a pure
+// A pure
 // on/off-list member (no own lock entry — never individually synced) falls through one more step,
 // to its carrier's memberLabels[id] — same chain function, same priority order, id fallback still
 // left to the caller (displayLabelForGroup).
-describe("resolveHostStoredLabel — carrier memberLabels fallback (batch15)", () => {
+describe("resolveHostStoredLabel — carrier memberLabels fallback", () => {
   it("falls through to the community carrier's memberLabels for a plugin-<id> group with no entry of its own", () => {
     const lock: StoreLock = {
       capturedAt: "t",
@@ -593,8 +593,8 @@ describe("groupForItem", () => {
 });
 
 describe("selfPresetRules", () => {
-  // thisDeviceItems retired outright with runsOn (2026-08-12-enablement-two-layers, task 8): the
-  // two remaining presets are the transport wiring; the third was a local-semantics field that no
+  // There is no thisDeviceItems preset (retired with runsOn): the
+  // two presets are the transport wiring; a third local-semantics field no
   // longer exists.
   it("only the transport wiring — the fields that describe THIS device's connection to the store", () => {
     expect(selfPresetRules().map((r) => r.pattern)).toEqual(["rootPath", "remotes"]);

@@ -1,16 +1,17 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://raw.githubusercontent.com/xooooooooox/obsidian-config-sync/main/schema/config-sync.schema.json",
-  "title": "Config Sync groups file (legacy, pre-schema-v2)",
-  "description": "The hand-edited groups file at <data folder>/config-sync.json. Config Sync no longer WRITES this file — since settings schema v2 the sync list is compiled from the plugin's own data.json (`items` + `custom`) — but `validateSyncManifest`/`parseGroup` (src/core/manifest.ts) still read and validate one, so a vault that predates v2, or a rule set kept by hand, is described here. This schema mirrors that validator; the validator is the authority. As of schema v3 the vocabulary matches data.json's own: `sharing` objects (not the old flat `scope` string) and `perElement` (not `perItem`).",
+  "title": "Config Sync groups file (config-sync.json)",
+  "description": "The groups file at <data folder>/config-sync.json. Config Sync no longer WRITES this file — since settings schema v2 the sync list is compiled from the plugin's own data.json (`items` + `custom`) — but this shape is more than a legacy reader: every compiled group passes through `parseGroup` on every recompile (src/main.ts's recompile -> src/core/manifest.ts), so it is the live internal contract for what a sync rule looks like, as well as the format of a hand-kept or pre-v2 file. This schema mirrors that validator; the validator is the authority. As of schema v3 the vocabulary matches data.json's own: `sharing` objects (not the old flat `scope` string) and `perElement` (not `perItem`).",
   "type": "object",
   "required": ["version", "groups"],
   "additionalProperties": true,
   "properties": {
-    "$schema": { "type": "string" },
+    "$schema": { "type": "string", "description": "Ignored by the plugin (manifest.ts proves an incoming one changes nothing); a hand-edited file may point it at this schema for editor validation." },
     "version": { "const": 1, "description": "The manifest FILE's own format version — unrelated to data.json's schemaVersion. This build only accepts 1." },
     "groups": {
       "type": "array",
+      "description": "The sync rules, one object per rule. Order is not meaningful; identity is each group's `name`. validateSyncManifest additionally rejects what draft-07 cannot express: duplicate names, duplicate refs, duplicate store paths, and a custom rule that takes a reserved name at the wrong path.",
       "items": {
         "type": "object",
         "required": ["name", "path", "type", "devices"],
@@ -21,7 +22,7 @@
           "path": { "type": "string", "minLength": 1, "description": "Vault-relative path; {configDir} expands to this device's config dir. Must not start with \"/\" and must not contain a \"..\" path segment." },
           "type": { "enum": ["file", "folder"], "description": "\"file\" or \"folder\" only. \"dir\" is NOT accepted here — that spelling exists only as a v2 settings-document literal, converted by src/core/v2Migration.ts before a value ever reaches this validator; a hand-written config-sync.json using \"dir\" is rejected." },
           "devices": { "enum": ["all", "desktop", "mobile"], "description": "Which device CLASS this rule's whole group targets. Distinct from a field/file rule's own \"sharing\" — see the fieldRule/fileRule definitions." },
-          "description": { "type": "string", "minLength": 1, "description": "Human-readable label for this group, shown in the settings panel" },
+          "description": { "type": "string", "description": "Human-readable label for this group, shown in the settings panel. An empty or whitespace-only value is dropped by the parser (trim-and-drop), not rejected." },
           "sanitize": { "not": {}, "description": "REFUSED outright if present (not merely ignored): this is the pre-v2 `{\"pattern\", \"action\": \"strip\"|\"encrypt\"}` shape. Rename to \"mode\": \"fields\" with a \"fields\" rules array." },
           "mode": {
             "enum": ["plain", "fields", "encrypted"],
@@ -44,7 +45,7 @@
               "additionalProperties": { "$ref": "#/definitions/sharing" }
             }
           },
-          "label": { "type": "string", "minLength": 1, "description": "Display name recorded when the item is enabled or captured; shown even where the plugin isn't installed." },
+          "label": { "type": "string", "description": "Display name recorded when the item is enabled or captured; shown even where the plugin isn't installed. An empty or whitespace-only value is dropped by the parser (trim-and-drop), not rejected." },
           "origin": { "const": "discovered", "description": "Set by the plugin for rules created from the Discovered-files section; name and path are fixed by the file." },
           "ref": {
             "type": "string",
@@ -103,7 +104,7 @@
       "properties": {
         "pattern": { "type": "string", "minLength": 1, "description": "Key-name glob pattern (* wildcard)" },
         "sharing": { "$ref": "#/definitions/sharing" },
-        "encrypted": { "type": "boolean" },
+        "encrypted": { "type": "boolean", "description": "Whole-value encryption for the keys this pattern matches. A this-device rule can never be encrypted — nothing leaves the device for encryption to protect in transit (the `not` clause below)." },
         "locked": { "type": "boolean", "description": "Preset rule injected by the plugin; cannot be removed in the UI." }
       },
       "not": {
@@ -124,7 +125,7 @@
           ],
           "description": "No \"this-device\": a Plain file that should not travel is expressed by the rule's own sync toggle, not by a file-level rule."
         },
-        "encrypted": { "type": "boolean" }
+        "encrypted": { "type": "boolean", "description": "Whole-file encryption: the group's entire store copy is one encrypted envelope instead of the raw file." }
       }
     }
   }

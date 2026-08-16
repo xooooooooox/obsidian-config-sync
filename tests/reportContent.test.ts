@@ -23,7 +23,7 @@ describe("chipTooltip", () => {
   });
 });
 
-// Producer -> level table (spec 2026-08-09-c-livetest-batch16 §2, C-#35): resultLevel is the
+// Producer -> level table: resultLevel is the
 // presentation-only classification the run strip and message lines key off — it never touches
 // GroupResult.status.
 describe("resultLevel", () => {

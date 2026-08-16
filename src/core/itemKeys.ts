@@ -1,11 +1,10 @@
 /**
- * THE key space (spec 2026-08-11-v3-one-vocabulary-design.md §3/§4): the one identity the store
+ * THE key space: the one identity the store
  * lock, the device-local baselines and the device-local opt-out list are all keyed by.
  *
- * Until v3 that key was the COMPILED GROUP NAME — `plugin-<id>`, a bare core id, a companion's
- * folder basename, a custom rule's name — which meant taxonomy had to be parsed back out of a
- * string, and a rename or a re-classification silently orphaned every baseline the old name held.
- * v3 keys all four stores by the item's own reference instead, and this module is the ONE producer
+ * All four stores are keyed by the item's own reference — never the compiled group name, which
+ * would mean parsing taxonomy back out of a string and letting a rename or re-classification
+ * silently orphan every baseline the old name held. This module is the ONE producer
  * of that reference for the two things that are not items:
  *
  *   - a COMPANION belongs to an item. It has no identity of its own — its group name is only
@@ -20,12 +19,12 @@
  *     exactly like app.json — and because the `obsidian` section's id space is CLOSED and declared
  *     in code (registry.ts's OBSIDIAN_CARD_DEFS), a carrier key cannot collide with an item by
  *     construction: core-plugins and community-plugins are two of that closed set's five ids, not
- *     ids from a runtime-injected space that merely happens not to clash with it (task 5 gave the
- *     two carriers their own def in that exact list, so `defRef` and `carrierRef` mint the SAME
+ *     ids from a runtime-injected space that merely happens not to clash with it (the
+ *     two carriers have their own def in that exact list, so `defRef` and `carrierRef` mint the SAME
  *     string). Filing it under `core`/`community` (where the Sync Center SHOWS it) would put it in
  *     a runtime-injected id space (catalog.ts's setCorePluginIds) where collision is merely
  *     improbable. The tab it appears under is presentation — the same legitimate split between
- *     stored and presented vocabulary §7b already blesses for `beta`.
+ *     stored and presented vocabulary that `beta` already has.
  *
  * Collision-freedom, by construction rather than by luck: no item id ever contains a "/" (plugin
  * and core ids are Obsidian's, the three Obsidian card ids are literals, and a custom item's name
@@ -51,8 +50,8 @@ export function splitRef(ref: string): { section: string; id: string } {
 }
 
 // Every section a KEY may name: the four stored sections, plus the holding pen for a v1/v2 entry
-// nothing claimed. Closed on purpose (task-3 review I3) — `beta` is a presented classification and
-// never an identity (spec §7b), and a first draft of `isLockRef` accepted any two segments, which
+// nothing claimed. Closed on purpose — `beta` is a presented classification and
+// never an identity; accepting any two segments would
 // let `beta/x` through a validator whose whole job is to keep it out. Wider than `parseItemRef`
 // only by `legacy/`, which is a legal KEY and an unresolvable ITEM — two different questions, and
 // conflating them is what made the validator reject a ref its own backfill had just minted.
@@ -103,8 +102,8 @@ export function groupRefIndex(groups: readonly SyncGroup[]): ReadonlyMap<string,
 // which branch happens to run first.
 export const OBSIDIAN_CARD_IDS = ["app", "appearance", "hotkeys", "core-plugins", "community-plugins"] as const;
 
-// The `plugin-` group-name prefix, in the ONE place it still has a reason to exist: reading a lock
-// a 2.21.0 device wrote. Everywhere else it retires with v3 (spec §5) — this is not taxonomy being
+// The `plugin-` group-name prefix, in the ONE place it has a reason to exist: reading a lock
+// a 2.21.0 device wrote. This is not taxonomy being
 // parsed out of a live name, it is a legacy FILE FORMAT being read, exactly like v2Migration.ts's
 // `community:` prefix.
 const LEGACY_PLUGIN_PREFIX = "plugin-";
@@ -118,7 +117,7 @@ const LEGACY_PLUGIN_PREFIX = "plugin-";
  * plugin installed there, a core plugin absent here) so two devices converting the same v2 lock
  * agree; then `legacy/<name>`.
  *
- * That last case is a DECISION, not a fallback (spec §4's "never dropped"): a migration is one-way
+ * That last case is a DECISION ("never dropped"), not a fallback: a migration is one-way
  * and has no undo, so it is not allowed to delete. An entry no item claims is kept verbatim under a
  * section no reader can resolve — inert, but honest and recoverable — and whether it should still
  * exist at all is left to the ordinary prune (ledger.ts's pruneLedger, capture's registry sweep),
@@ -142,17 +141,17 @@ export function lockRefFor(groups: readonly SyncGroup[]): (name: string) => stri
   return (name: string) => legacyRef(name, index);
 }
 
-// Re-keys a stored list of names (the device opt-out list, §4). Idempotent BY SHAPE rather than by a
+// Re-keys a stored list of names (the device opt-out list). Idempotent BY SHAPE rather than by a
 // version flag the list has nowhere to keep: a compiled group name has no "/" in it at all, so an
 // entry that has already moved passes through untouched and a half-written list finishes the move on
 // the next load.
 //
-// The test is `isLockRef`, NOT `parseItemRef` (final-review I2). They answer different questions —
+// The test is `isLockRef`, NOT `parseItemRef`. They answer different questions —
 // "is this a legal KEY?" and "does this name an item this build can resolve?" — and `legacy/…` is
 // deliberately the one that is the first and not the second. Asked the second question, an entry
-// already in the holding pen looked unmoved and grew a segment per load (`legacy/legacy/foo`), with
-// a localStorage write each time and no prune that would ever clear it. Same shape as the label
-// heal's C1: a guard chosen by name rather than by the question it has to answer.
+// already in the holding pen would look unmoved and grow a segment per load (`legacy/legacy/foo`),
+// with a localStorage write each time and no prune that would ever clear it — a guard must be
+// chosen by the question it has to answer, not by name.
 export function rekeyRefList(names: readonly string[], toRef: (name: string) => string): string[] {
   return [...new Set(names.map((n) => (isLockRef(n) ? n : toRef(n))))];
 }

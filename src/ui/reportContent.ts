@@ -21,7 +21,7 @@ export function changedOf(results: GroupResult[]): { changed: GroupResult[]; unc
   return { changed, unchanged: results.filter((r) => !changed.includes(r)) };
 }
 
-// Severity split (spec 2026-08-09-c-livetest-batch16 §2, C-#35): GroupResult.status alone
+// Severity split: GroupResult.status alone
 // can't tell a genuine failure from a benign success-side note — both today land on
 // "warning" (e.g. "⚠ install failed" and the version-fallback note are both status
 // "warning"; core.test.ts pins that mapping, so it stays as-is). The stateNote's own kind
@@ -48,7 +48,7 @@ export interface StripHeader {
   tone: "issue" | "note" | "clean";
 }
 
-// Run-strip header derivation (spec 2026-08-09-c-livetest-batch16 §2, C-#35): any genuine
+// Run-strip header derivation: any genuine
 // failure renders "✗ Applied with N issue(s)" in issue tone; otherwise any success-side note
 // renders "Applied · N note(s)" in success tone; a run with neither is today's plain clean strip.
 export function stripHeader(results: GroupResult[]): StripHeader {
@@ -96,7 +96,7 @@ export function renderReportContent(container: HTMLElement, results: GroupResult
     const line = container.createDiv({ cls: "config-sync-unchanged" });
     line.appendText(`✓ ${unchanged.length} item${unchanged.length === 1 ? "" : "s"} unchanged`);
     // A one-way reveal (never re-collapses) — static FOLD glyph, same idiom as
-    // SyncCenterView.ts's "N more files"/"N more item matches" lines (round-12).
+    // SyncCenterView.ts's "N more files"/"N more item matches" lines.
     setIcon(line.createSpan({ cls: "config-sync-row-chevron" }), "chevron-right");
     line.addEventListener("click", () => {
       line.setText(`✓ ${unchanged.map((r) => opts.labelFor(r.group)).join(" · ")}`);

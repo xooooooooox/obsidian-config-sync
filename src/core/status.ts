@@ -35,7 +35,7 @@ export async function statusForGroups(
   for (const group of groups) {
     try {
       const effGroup = withContractLocals(group, contractLocals.get(group.name) ?? []);
-      // Keyed by the item's ref, not by the group name (spec §4): the baselines, the lock and the
+      // Keyed by the item's ref, not by the group name: the baselines, the lock and the
       // opt-out list are ONE key space. A group with no ref has no identity to hold a baseline by,
       // so it compares without one — which is what it always did before it had an entry at all.
       const r = await groupStatus(ctx, effGroup, group.ref === undefined ? undefined : ledger.items[group.ref]);
@@ -219,12 +219,12 @@ export async function checkRemote(
   groups?: readonly SyncGroup[]
 ): Promise<RemoteCheck> {
   const files = await reader.listFiles();
-  // Store presence, asked as one question (§5). With no lock there is nothing to compare either way,
+  // Store presence, asked as one question. With no lock there is nothing to compare either way,
   // so all that is left to decide is whether this remote is EMPTY — the first-push target, and the
   // sole case that reports no-store — or merely uncomparable: content, or a legacy manifest
   // declaring a store this build still pulls the old way. Both halves come from the same two
   // producers the pull/push gate uses, so a remote that gate refuses can never read here as an empty
-  // one inviting the push it would then decline (the rule §4.3 already follows for a future lock).
+  // one inviting the push it would then decline (the rule the version gate already follows for a future lock).
   if (!files.includes("store.lock.json")) {
     const empty = !remoteDeclaresStore(files) && remoteStoreContentRels(files).length === 0;
     return { state: empty ? "no-store" : "unknown", remoteCapturedAt: null };
@@ -235,7 +235,7 @@ export async function checkRemote(
   } catch {
     return { state: "unknown", remoteCapturedAt: null };
   }
-  // A remote this build cannot read must not look ACTIONABLE (spec §6, task-3 concern 6). §4.3
+  // A remote this build cannot read must not look ACTIONABLE. The version gate
   // refuses the pull itself, but a refusal the user only meets after accepting an invitation is a
   // worse surface than never being invited: "unknown" already means "this remote cannot be
   // compared", which is exactly true here. No new RemoteState, no UI change. The capture stamp is
@@ -262,7 +262,7 @@ export async function checkRemote(
 const NON_CONTENT_LOCK_ENTRY_KEYS = new Set(["display", "capturedAt"]);
 
 // Deep equality that does not care about key order. Written out rather than done with
-// JSON.stringify because the carried tail (§3.1) can hold anything a newer build wrote, and two
+// JSON.stringify because the carried tail can hold anything a newer build wrote, and two
 // devices that emit the same object in a different order hold the same value — stringifying would
 // turn that into a permanent phantom "the remote is ahead".
 function lockValuesEqual(a: unknown, b: unknown): boolean {
@@ -278,7 +278,7 @@ function lockValuesEqual(a: unknown, b: unknown): boolean {
 }
 
 // Do these two entries describe the same store content? Only keys present on BOTH sides count
-// (spec §6, the mixed-fleet rule): an un-updated device strips `version`/`capturedAt`/`hash` every
+// (the mixed-fleet rule): an un-updated device strips `version`/`capturedAt`/`hash` every
 // time it pulls, and the next capture here writes them back — comparing keys only one side has
 // would surface that churn as a false "the store has newer settings" until the last device is
 // updated. A key on both sides with different values is a difference, exactly as before.
@@ -292,7 +292,7 @@ function lockEntriesEquivalent(mine: StoreLockEntry, theirs: StoreLockEntry): bo
 }
 
 // "Remote has newer version info" — semantic, not byte, comparison of the two store locks
-// (2026-07-17: byte compare kept the hint alive forever, since a merged local lock keeps
+// (a byte compare would keep the hint alive forever, since a merged local lock keeps
 // local-only entries and its own formatting). True when a remote group entry is missing locally, or
 // when one differs and the remote's copy is the fresher of the two, or — only where the entries
 // cannot settle it — when the remote's lineage is newer. Local-only entries and a locally-newer
@@ -311,8 +311,8 @@ export function remoteLockAhead(localRaw: string | null, remoteRaw: string | nul
   }
   // The ITEMS answer first. A remote entry we do not have at all, or one that differs and was
   // captured later there than here, is a pull worth offering; anything the entries can settle, they
-  // settle. (Before §6 there was no per-item date, so every difference had to read as "ahead" —
-  // which is why a purely local capture used to light the hint up on every other device.)
+  // settle. (Without a per-item date, every difference would have to read as "ahead" —
+  // and a purely local capture would light the hint up on every other device.)
   let compared = 0;
   let dated = 0;
   for (const [ref, entry] of lockEntryList(remote.items)) {
@@ -322,14 +322,14 @@ export function remoteLockAhead(localRaw: string | null, remoteRaw: string | nul
     const freshness = itemFreshness(mine, entry);
     if (freshness === "newer" || freshness === "undatable") return true;
     compared++;
-    // ORDERABLE on both sides, not merely present (review N3). A stamp `Date.parse` cannot read
+    // ORDERABLE on both sides, not merely present. A stamp `Date.parse` cannot read
     // dates nothing, and counting it would silence the timestamp path below on the strength of
     // evidence that could not itself have spoken. Absent and unreadable are the same fact here.
     if (entryTime(mine) !== null && entryTime(entry) !== null) dated++;
   }
   // Every remote entry was present here AND dated on both sides: the per-item evidence is complete,
   // and it says no. The store-level stamp must not then manufacture a difference the items
-  // themselves deny — that is the mixed-fleet rule (§6) applied one level up, and it is the whole
+  // themselves deny — that is the mixed-fleet rule applied one level up, and it is the whole
   // reason this comparison is key-by-key instead of one timestamp. The stamp only gets to speak
   // where the items leave a gap: no entries at all, or one carried forward from a build that never
   // dated it.
@@ -344,11 +344,11 @@ export function remoteLockAhead(localRaw: string | null, remoteRaw: string | nul
 // comparison back to the store-level timestamp rather than guessing.
 type ItemFreshness = "equal" | "newer" | "older" | "undatable" | "absent";
 
-// Does this lock carry the per-item evidence the comparison below needs (§6)? Asked of the PAYLOAD,
-// never of the version number (task-3 review I1). The gate used to read `storeLockVersion(…) <
-// STORE_LOCK_VERSION`, which silently became "< 3" the moment the lock format moved — excluding
+// Does this lock carry the per-item evidence the comparison below needs? Asked of the PAYLOAD,
+// never of the version number. A gate reading `storeLockVersion(…) <
+// STORE_LOCK_VERSION` silently becomes "< 3" the moment the lock format moves — excluding
 // every 2.21.0 peer for the whole transition window, even though those peers do stamp each entry,
-// and reinstating exactly the phantom "the store has newer settings" §6 removed. A version
+// and reinstating exactly the phantom "the store has newer settings". A version
 // comparison is a proxy for a capability; it goes stale as soon as the number moves.
 function hasPerItemPayload(lock: StoreLock): boolean {
   return lockEntryList(lock.items).some(([, entry]) => lockEntryCapturedAt(entry) !== undefined);
@@ -378,7 +378,7 @@ function itemFreshness(mine: StoreLockEntry | undefined, theirs: StoreLockEntry 
   return r > l ? "newer" : r < l ? "older" : "undatable";
 }
 
-// Per-item resolution for checkRemote (§6): when BOTH locks carry the v2 payload, the state comes
+// Per-item resolution for checkRemote: when BOTH locks carry the v2 payload, the state comes
 // from the entries rather than from one whole-store timestamp — so a store that is merely older in
 // wall-clock terms but holds the same items reads as "same". `ignoreRefs` drops entries that never
 // count — without it a remote with `excludeSelf` would resolve a direction from the one entry the

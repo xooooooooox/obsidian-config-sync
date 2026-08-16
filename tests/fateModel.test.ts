@@ -9,7 +9,7 @@ const base: FateInput = {
   hasSettingsPayload: true, versionAhead: null, special: null, folderFileCount: null, encrypted: false,
 };
 
-describe("rowFate — spec §3 verb table", () => {
+describe("rowFate — the verb table", () => {
   it("install + turn on + settings", () => {
     const f = rowFate({ ...base, installed: false, storeListOn: true });
     expect(f.glyph).toBe("↓");
@@ -68,14 +68,14 @@ describe("rowFate — spec §3 verb table", () => {
   });
 });
 
-// C-#28: a derived APPLY direction may never carry an empty verb set — it degrades to the
+// A derived APPLY direction may never carry an empty verb set — it degrades to the
 // nothing-yet presentation instead of rendering a bare glyph with no sentence. Capture is
-// deliberately NOT symmetric (controller ruling, review round 2): a capture-directional rollup
+// deliberately NOT symmetric: a capture-directional rollup
 // only exists because some member is genuinely local-changed/not-captured, and the only
 // empty-verb capture shape is a `not-captured` member whose file count is structurally invisible
 // (status.ts never attaches `changes` there) — real capturable work, not nothing-yet.
-describe("rowFate — empty-verb degradation (C-#28, apply-only)", () => {
-  it("apply, empty verb set (the live 5-row scenario: installed, stays off, no settings, no update) degrades to nothing-yet", () => {
+describe("rowFate — empty-verb degradation (apply-only)", () => {
+  it("apply, empty verb set (installed, stays off, no settings, no update) degrades to nothing-yet", () => {
     const f = rowFate({ ...base, hasSettingsPayload: false, storeListOn: false });
     expect(f.glyph).toBe("—");
     expect(f.sentence).toBe("No settings yet");
@@ -118,10 +118,10 @@ describe("rowFate — empty-verb degradation (C-#28, apply-only)", () => {
   });
 });
 
-// C-#28 controller ruling (review round 2): capture never degrades — an empty capture verb set
+// Capture never degrades — an empty capture verb set
 // (no settings payload, no visible folder files, no carrier turn-on) is real, invisible-count
 // work, so it renders a generic count-free verb instead.
-describe("rowFate — capture empty verb set stays directional (C-#28 ruling)", () => {
+describe("rowFate — capture empty verb set stays directional", () => {
   it("capture, empty verb set: generic 'Captures files', stageable, no degradation", () => {
     const f = rowFate({ ...base, direction: "capture", hasSettingsPayload: false, storeListOn: null });
     expect(f.glyph).toBe("↑");
@@ -137,8 +137,8 @@ describe("rowFate — capture empty verb set stays directional (C-#28 ruling)", 
   });
 });
 
-// C-#24: a rule-excluded item tells the truth instead of masquerading as "In sync".
-describe("rowFate — excludedHere (C-#24)", () => {
+// A rule-excluded item tells the truth instead of masquerading as "In sync".
+describe("rowFate — excludedHere", () => {
   it("neutral + excludedHere: honest sentence, unstageable, dash glyph, your-rule chip", () => {
     const f = rowFate({ ...base, direction: null, excludedHere: true });
     expect(f.sentence).toBe("Not synced on this device");
@@ -162,27 +162,24 @@ describe("rowFate — excludedHere (C-#24)", () => {
     expect(f.sentence).toBe("Changed on both sides");
     expect(f.chips).not.toContain("your rule");
   });
-  it("excludedHere false is byte-identical to the pre-existing sentences (in sync / nothing yet)", () => {
+  it("excludedHere false leaves the neutral sentences untouched (in sync / nothing yet)", () => {
     expect(rowFate({ ...base, direction: null, excludedHere: false }).sentence).toBe("In sync");
     expect(rowFate({ ...base, direction: null, excludedHere: false, nothingYet: true }).sentence).toBe("No settings yet");
     expect(rowFate({ ...base, direction: null, excludedHere: false }).chips).not.toContain("your rule");
   });
 });
 
-// C-#45 (spec 2026-08-10-c-livetest-batch22-device-optout.md §2): a DIFFERENT cause (a per-device
-// choice, not a class rule) but the IDENTICAL row treatment as excludedHere — same glyph/sentence/
-// chip/stageable; only the card clause (SyncCenterView.ts's stateClauseText) tells them apart.
-// C-#45 fix-round 2 (live failure, kickstart real-use-case): Remotely Save stayed "Installs" in
-// To apply after "On this device" — root cause, rowFate only consulted excludedHere/optedOutHere
-// inside its direction===null branch (C-#24's family-member-wins precedence), but a not-installed
-// plugin derives a REAL "apply" direction from the availability ladder independent of the opt-out
-// fact, so that branch was unreachable for this row; the fact was threaded into FateInput but
-// could never win. Fix: optedOutHere is now checked UNCONDITIONALLY, before conflict/direction —
-// spec §1 "renders inert" has no family-member-wins exception, unlike excludedHere's C-#24 gate,
-// which stays exactly as it was (see the "class exclusion" tests below). The tests below this
-// comment REPLACE the fix-round-1 versions, which hand-built every case with `direction: null` —
-// exactly the shape that masked this bug (the coordinator's own diagnosis).
-describe("rowFate — optedOutHere (C-#45 fix-round 2: unconditional, not direction-null-gated)", () => {
+// The opt-out is a DIFFERENT cause (a per-device choice, not a class rule) but gets the
+// IDENTICAL row treatment as excludedHere — same glyph/sentence/chip/stageable; only the card
+// clause (SyncCenterView.ts's stateClauseText) tells them apart.
+// optedOutHere is checked UNCONDITIONALLY, before conflict/direction: a not-installed plugin
+// derives a REAL "apply" direction from the availability ladder independent of the opt-out fact,
+// so a direction-null-only check would never fire for it (e.g. Remotely Save would stay
+// "Installs" in To apply after "On this device"). An opted-out row "renders inert" with no
+// family-member-wins exception, unlike excludedHere's gate (see the "class exclusion" tests
+// below). These cases deliberately include direction-derivable shapes, not just
+// `direction: null` literals — the hand-built-null shape is exactly what would mask the bug.
+describe("rowFate — optedOutHere (unconditional, not direction-null-gated)", () => {
   it("neutral + optedOutHere: same honest sentence, unstageable, dash glyph, your-rule chip as excludedHere", () => {
     const f = rowFate({ ...base, direction: null, optedOutHere: true });
     expect(f.sentence).toBe("Not synced on this device");
@@ -195,11 +192,10 @@ describe("rowFate — optedOutHere (C-#45 fix-round 2: unconditional, not direct
     const f = rowFate({ ...base, direction: null, optedOutHere: true, nothingYet: true });
     expect(f.sentence).toBe("Not synced on this device");
   });
-  // THE EXACT LIVE SHAPE (kickstart, Remotely Save): installed:false + a real "apply" direction
+  // The direction-derivable shape: installed:false + a real "apply" direction
   // derived from the availability ladder (the plugin isn't installed here, so a plain apply row
-  // would normally read "Installs") + optedOutHere:true. Truth-table case per the coordinator's
-  // explicit ask.
-  it("direction-derivable input (installed:false, apply ladder) + optedOutHere:true → inert excluded fate, not 'Installs' (live-failure repro)", () => {
+  // would normally read "Installs") + optedOutHere:true.
+  it("direction-derivable input (installed:false, apply ladder) + optedOutHere:true → inert excluded fate, not 'Installs'", () => {
     const f = rowFate({ ...base, direction: "apply", installed: false, optedOutHere: true });
     expect(f.sentence).toBe("Not synced on this device");
     expect(f.sentence).not.toContain("Installs");
@@ -208,7 +204,7 @@ describe("rowFate — optedOutHere (C-#45 fix-round 2: unconditional, not direct
     expect(f.chips).toContain("your rule");
     expect(f.chips).not.toContain("not installed here"); // a run-consequence chip — meaningless for an inert row
   });
-  it("a directional family member does NOT override optedOutHere — opt-out has no family-member-wins exception (spec §1, unlike excludedHere)", () => {
+  it("a directional family member does NOT override optedOutHere — opt-out has no family-member-wins exception (unlike excludedHere)", () => {
     const f = rowFate({ ...base, direction: "apply", optedOutHere: true });
     expect(f.sentence).toBe("Not synced on this device");
     expect(f.chips).toContain("your rule");
@@ -224,7 +220,7 @@ describe("rowFate — optedOutHere (C-#45 fix-round 2: unconditional, not direct
     expect(f.sentence).toBe("Not synced on this device");
     expect(f.glyph).toBe("—");
   });
-  it("optedOutHere absent (the default for every pre-existing FateInput literal) is byte-identical to false", () => {
+  it("optedOutHere absent reads exactly like false", () => {
     expect(rowFate({ ...base, direction: null }).sentence).toBe("In sync");
     expect(rowFate({ ...base, direction: null }).chips).not.toContain("your rule");
     expect(rowFate({ ...base, direction: "apply" }).sentence).toBe("Applies settings");
@@ -236,11 +232,10 @@ describe("rowFate — optedOutHere (C-#45 fix-round 2: unconditional, not direct
   });
 });
 
-// C-#45 fix-round 3 (live-verified on kickstart, second residue after fix-round 2): the opted-out
-// row rendered ["your rule", "off here — your rule", "encrypted"] against the mockup's single
-// `your rule` (+ intrinsic facts) — a Runs-on ENABLEMENT rule is a run-consequence fact, moot
-// while the whole item is ignored on this device, and duplicated the `your rule` attribution.
-describe("rowFate — optedOutHere suppresses the local-exception chips (C-#45 fix-round 3)", () => {
+// An opted-out row shows a single `your rule` chip (+ intrinsic facts), never the local-exception
+// chips too — a Runs-on ENABLEMENT rule is a run-consequence fact, moot while the whole item is
+// ignored on this device, and would duplicate the `your rule` attribution.
+describe("rowFate — optedOutHere suppresses the local-exception chips", () => {
   it("never-here's chip is suppressed when opted out — only your rule remains", () => {
     const f = rowFate({ ...base, direction: null, optedOutHere: true, localException: "off" });
     expect(f.chips).toContain("your rule");
@@ -257,16 +252,14 @@ describe("rowFate — optedOutHere suppresses the local-exception chips (C-#45 f
   });
   it("intrinsic-fact chips (encrypted, desktop only) survive opt-out — only run-consequence chips are suppressed", () => {
     const f = rowFate({ ...base, direction: null, optedOutHere: true, localException: "off", encrypted: true, desktopOnly: true });
-    expect(f.chips).toEqual(["desktop only", "your rule", "encrypted"]); // exact set + order the mockup shows
+    expect(f.chips).toEqual(["desktop only", "your rule", "encrypted"]); // exact set, in buildChips's fixed emit order
   });
 });
 
-// Class exclusion (C-#24, excludedHere) keeps its EXISTING direction-null-only precedence
-// byte-identical — these are the same assertions the fix-round-1 optedOutHere tests used to make
-// (now proven wrong for opt-out), reattached to excludedHere where they remain correct: a
+// Class exclusion (excludedHere) keeps its direction-null-only precedence — unlike opt-out: a
 // genuinely still-syncing family member legitimately outranks a class-scope mismatch on a
 // DIFFERENT row of the same family, so excludedHere must still lose to a real direction/conflict.
-describe("rowFate — excludedHere keeps C-#24's family-member-wins precedence (fix-round-2 regression guard)", () => {
+describe("rowFate — excludedHere keeps its family-member-wins precedence", () => {
   it("a directional family member keeps its directional sentence — excludedHere is ignored (unchanged)", () => {
     const f = rowFate({ ...base, direction: "apply", excludedHere: true });
     expect(f.sentence).not.toBe("Not synced on this device");
@@ -303,9 +296,9 @@ describe("rowFate — the two enablement layers", () => {
   });
 });
 
-// c-livetest batch5 task 1: a family whose companion(s) contribute files joins the folder verb
+// A family whose companion(s) contribute files joins the folder verb
 // after the row's own settings verb, instead of the folder row's REPLACE behavior above.
-describe("rowFate — family file-verb join (c-livetest batch5)", () => {
+describe("rowFate — family file-verb join", () => {
   it("settings + files: join, settings verb first", () => {
     const f = rowFate({ ...base, folderFileCount: 3 });
     expect(f.sentence).toBe("Applies settings · applies 3 files");
@@ -339,7 +332,7 @@ describe("rowFate — family file-verb join (c-livetest batch5)", () => {
     expect(f.sentence).toBe("Installs · turns on · applies settings · applies 2 files");
   });
 
-  // Review fix (CRITICAL): a folder row in a state with no `changes` attached (e.g.
+  // A folder row in a state with no `changes` attached (e.g.
   // "not-captured" — groupStatus never attaches one there) has folderFileCount:null, not 0. The
   // special:"folder" branch must fall through to the generic settings verb, never render empty.
   it("folder row with folderFileCount:null falls through to the generic settings verb (capture)", () => {
@@ -352,10 +345,10 @@ describe("rowFate — family file-verb join (c-livetest batch5)", () => {
   });
 });
 
-// C-#37: files in-sync both sides but installed plugin version newer than the store's — a
+// Files in-sync both sides but installed plugin version newer than the store's — a
 // raw-in-sync row that presentedState relabels to-capture, whose only real work is recording the
-// newer version. versionAhead joins after whatever verb chain the row already has (spec §2).
-describe("rowFate — version-ahead capture (C-#37)", () => {
+// newer version. versionAhead joins after whatever verb chain the row already has.
+describe("rowFate — version-ahead capture", () => {
   const ahead = { installed: "2.2.3", stored: "2.2.2" };
 
   it("pure version-ahead: no settings payload, no other verb — records version alone", () => {
@@ -379,9 +372,9 @@ describe("rowFate — version-ahead capture (C-#37)", () => {
   });
 });
 
-// C-#37: the card's on-capture clause — same three cases as the sentence above, asserted through
-// the exported pure helper stateClauseText delegates to (spec §4).
-describe("versionAheadClause — card on-capture clauses (C-#37, spec §3)", () => {
+// The card's on-capture clause — same three cases as the sentence above, asserted through
+// the exported pure helper stateClauseText delegates to.
+describe("versionAheadClause — card on-capture clauses", () => {
   const ahead = { installed: "2.2.3", stored: "2.2.2" };
 
   it("pure version-ahead", () => {

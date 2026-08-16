@@ -1,7 +1,8 @@
 /**
- * Per-element sharing for string-array keys (spec 2026-07-25-unified-card-design.md §3, D3;
- * renamed from perItem by 2026-08-11-v3-one-vocabulary-design.md §1: one entry of an on/off list
- * is an ELEMENT, and an item is a card in the registry — the old name meant both). Generalizes the
+ * Per-element sharing for string-array keys ("per-element", not "per-item":
+ * one entry of an on/off list
+ * is an ELEMENT, and an item is a card in the registry — a name covering both would be
+ * ambiguous). Generalizes the
  * switch-list mechanism so ANY string-array key — not just community-plugins.json /
  * core-plugins.json / enabledCssSnippets — can give each element its own Sharing. An element with
  * no entry in the map is shared everywhere.
