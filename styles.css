@@ -1458,6 +1458,11 @@ body.is-mobile .config-sync-scrow { grid-template-columns: minmax(90px, 32%) 64p
 /* Flex so the edit state's input + Reset link share one line inside the content column. */
 .config-sync-card-pathhost { min-width: 8em; display: flex; align-items: center; }
 .config-sync-card-pathinput { width: 100%; font-family: var(--font-monospace); font-size: var(--font-ui-smaller); }
+/* Visible, in-card explanation for the fields-mode settings-file row (no fileRule left to draw a
+   picker for) — same click target as the dim settings-2 jump beside it (renderSettingsFilePathRow),
+   styled like .config-sync-expdesc so it reads as a caption, not a control, at rest. */
+.config-sync-card-keyrulesnote { color: var(--text-faint); font-size: var(--font-ui-smaller); cursor: pointer; margin-top: var(--size-2-1); }
+.config-sync-card-keyrulesnote:hover, .config-sync-card-keyrulesnote:focus-visible { color: var(--text-muted); text-decoration: underline dotted var(--text-faint); text-underline-offset: 3px; }
 .config-sync-card-sfbody { margin-top: var(--size-2-2); }
 
 .config-sync-card-fields { margin-bottom: var(--size-4-1); }

@@ -285,10 +285,10 @@ function defaultFieldsFromDetection(keys: string[]): FieldRule[] {
   return keys.map((pattern) => ({ pattern, ...(SENSITIVE_ENCRYPT_RE.test(pattern) ? ENCRYPT_RULE : LOCAL_RULE) }));
 }
 
-// Path row lock/sharing disabled tooltip (spec §5, exact wording) —
-// shown whenever the card has any per-key rule (hasKeyRules): the whole-file sharing/encrypt row
-// hands control to the per-key rows below it.
-const PER_KEY_RULES_ACTIVE_HINT = "Per-key rules are active — remove them to control the whole file again";
+// Visible text, not a tooltip: this row is unreadable on a phone precisely because the old
+// explanation only existed on hover. The dim settings-2 carries the same sentence without the
+// arrow as its aria-label — one sentence, one producer.
+const PER_KEY_RULES_JUMP_TEXT = "Per-key rules decide — jump to them";
 
 // The Access-token control's standing explanation (DESIGN.md §4 Remote editor): tooltip-borne, so
 // it never spends a form row of its own.
@@ -1502,6 +1502,56 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     });
 
     const sharingCell = slots.device;
+    const lockCell = slots.lock;
+    if (locked) {
+      // Fields mode: compileSingleFile (registry.ts) only reads settingsFile.fileRule in its
+      // "plain" branch, so once the group has any per-key rule the whole-file rule compiles to
+      // nothing — and pruneSettingsFile only drops a fileRule that is exactly {everywhere,
+      // false}, so a `Desktop only` set (or an `encrypted: true`) from before the first per-key
+      // rule can survive in data.json with nothing left enforcing it (spec §3.2). Reading it here
+      // would draw a scope or lock that states a value that stopped being true the moment the
+      // first per-key rule was added, so this branch never touches item.settingsFile?.fileRule at
+      // all — neither cell — and never mutates it either: per-key rules are the only truth here,
+      // and the row says so instead of drawing a stale one.
+      const jumpIcon = sharingCell.createSpan({
+        cls: "config-sync-sharingicon",
+        attr: { role: "button", tabindex: "0", "aria-label": PER_KEY_RULES_JUMP_TEXT },
+      });
+      setIcon(jumpIcon, "settings-2");
+      // lockCell stays empty — there is no fileRule.encrypted left to speak for.
+      const jumpToKeyRules = (): void => {
+        const target = wrap.querySelector(".config-sync-card-fields");
+        if (target === null) return; // card body not rendered yet (async file read still in flight)
+        target.scrollIntoView({ block: "center" });
+        // Same visual language highlightAnchor uses for a card-level jump — this one stays
+        // inside the current card, so it scopes its lookup to `wrap` instead of the whole panel.
+        target.addClass("config-sync-search-highlight");
+        window.setTimeout(() => target.removeClass("config-sync-search-highlight"), 1800);
+      };
+      jumpIcon.addEventListener("click", jumpToKeyRules);
+      jumpIcon.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          jumpToKeyRules();
+        }
+      });
+      // Visible text, not a tooltip (see PER_KEY_RULES_JUMP_TEXT above) — the aria-label on the
+      // icon carries the same sentence for a screen reader, this line carries it for eyes.
+      const note = row.createDiv({
+        cls: "config-sync-card-keyrulesnote",
+        text: `${PER_KEY_RULES_JUMP_TEXT} ↓`,
+        attr: { role: "button", tabindex: "0" },
+      });
+      note.addEventListener("click", jumpToKeyRules);
+      note.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          jumpToKeyRules();
+        }
+      });
+      return;
+    }
+
     const rule = item.settingsFile?.fileRule ?? { sharing: EVERYWHERE, encrypted: false };
     // The mutator MUST read the rule fresh inside updateItem (not the render-time `rule` above),
     // and the row MUST rebuild itself after the write: this row lives outside refreshCardBody's
@@ -1525,22 +1575,10 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     this.renderSharingPicker(sharingCell, {
       sharing: rule.sharing,
       options: FILE_SHARING_OPTIONS,
-      disabled: locked,
+      disabled: false,
       onChange: (v) => setFileRule((r) => ({ ...r, sharing: v as FileSharing })),
     });
-
-    const lockCell = slots.lock;
-    this.renderLockToggle(lockCell, { encrypted: rule.encrypted, disabled: locked, onChange: (v) => setFileRule((r) => ({ ...r, encrypted: v })) });
-
-    if (locked) {
-      for (const cell of [sharingCell, lockCell]) {
-        // The lock cell is usually EMPTY here (renderLockToggle paints nothing while
-        // disabled+unencrypted) — skip it, or the hint tooltips blank space.
-        if (cell.childElementCount === 0) continue;
-        cell.addClass("config-sync-dim");
-        cell.setAttribute("aria-label", PER_KEY_RULES_ACTIVE_HINT);
-      }
-    }
+    this.renderLockToggle(lockCell, { encrypted: rule.encrypted, disabled: false, onChange: (v) => setFileRule((r) => ({ ...r, encrypted: v })) });
   }
 
   // Shared commit path for every settings-file path change (typed edit, or the ↺ revert-to-default

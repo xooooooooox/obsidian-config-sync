@@ -189,8 +189,10 @@ double as the self-pane title's capture/coldstart states, with `alert-triangle` 
 `wrench`, `git-branch` · `monitor` / `smartphone` — `sharingIcon`'s Desktop only/Mobile only
 stops (every sharing picker) and the row-level
 desktop-only-plugin badge (`config-sync-card-badge-plat`, itemCard.ts) · `airplay` —
-`sharingIcon` "This device" stop, used ONLY for a plain field/file rule's picker (no local
-layer to speak for). **There is no click-to-cycle control:** every sharing/rule control in
+`sharingIcon` "This device" stop, used ONLY for a rule row's picker — a plain field row or an
+array rule row alike (no local layer to speak for; `FILE_SHARING_OPTIONS` excludes this stop,
+so the settings-file row's own sharing cell never offers it, whole-file or fields-mode alike).
+**There is no click-to-cycle control:** every sharing/rule control in
 the Settings tab opens an Obsidian `Menu`, through `SettingTab.ts`'s own
 `renderSharingPicker` (the vocabulary model — `sharingIcon`/`nextSharing`/`sharingCycleTooltip` —
 lives in itemCard.ts; `nextSharing` keeps its own unit tests as a pure function even though
@@ -202,9 +204,9 @@ listing `options` with icons + a checkmark on the current value (§2.4). `iconFo
 select the vocabulary; the enablement rows (`Enabled on`, carrier elements) pass
 `ruleIcon`/`ruleLabel` (`enablementRow.ts`) — the SAME producer the Sync Center's own `ruleMenu`
 reads, so both entrances offer identical wording — everything else falls back to
-`sharingIcon`/`sharingLabel`. A disabled cell (the settings-file row's per-key-rules-active
-state) keeps the dim, non-interactive rendering: no menu (but see the ⇕ constant-width rule
-below). `monitor-smartphone` — the "All devices" stop.
+`sharingIcon`/`sharingLabel`. The settings-file row's fields-mode cell is the one sharing cell
+that renders no picker at all — see §4 zone ② for the dim `settings-2` jump that replaces it.
+`monitor-smartphone` — the "All devices" stop.
 
 **The two-segment row** (`ui/enablementRow.ts`): `label | fleet segment | divider | local
 segment`, shared by a Sync Center row's `Enabled on`/`Settings sync`, a plugin card's
@@ -301,9 +303,9 @@ accent-colored — the SAME open-state language the switcher has. The menu-open 
 expanded `.config-sync-section`), and a descendant match would light every ⇕ inside an
 expanded section permanently — the ⇕ is always a direct child of its own trigger, so the
 child combinator is exact. **Constant layout is a WIDTH promise too:** a DISABLED picker
-(`.config-sync-dim` on the sharing icon — the settings-file row while per-key rules own the
-file) still renders its ⇕ span — a picker box without the ⇕ is 14px narrower, and the
-centered device slot then drifts its icon out of the column every enabled picker aligns to.
+(`renderSharingPicker`'s `disabled` option, `.config-sync-dim` on the sharing icon) still
+renders its ⇕ span — a picker box without the ⇕ is 14px narrower, and the centered device slot
+then drifts its icon out of the column every enabled picker aligns to.
 The dim picker's ⇕ just never reveals — a suppression rule after the hover-reveal keeps it
 at `opacity: 0` on row hover (it has no menu to open, so `.is-open` can't light it either).
 Mobile (`body.is-mobile`) hides it entirely, no hover to reveal it there; the compact
@@ -902,9 +904,18 @@ noted):
     own Escape handling would close the settings window otherwise), and a committed custom path
     shows a quiet `Reset to default` text action (`config-sync-reset-link`, registered on
     mousedown so the input's blur-commit can't tear it out first) inside the edit row. In
-    whole-file state the path row's sharing/lock are live; in per-key state the sharing picker
-    renders `config-sync-dim` and disabled (tooltip "Per-key rules are active — remove them to
-    control the whole file again") while the lock disappears (three-state rule above),
+    whole-file state the path row's sharing/lock read `item.settingsFile.fileRule` live; per-key
+    state never reads that field for display at all (§3.2 — `compileSingleFile` stops compiling
+    it the moment the group turns fields-mode, so a whole-file rule left over from before the
+    first per-key rule would state a value nothing enforces any more; it survives in
+    `data.json` only because `pruneSettingsFile` still needs it for a clean round-trip). Its
+    sharing slot instead draws a dim `settings-2` (`config-sync-sharingicon`, no `⇕` — a jump,
+    not a menu) as a `role="button"` link to the Key rules panel below: click/Enter/Space
+    scrolls to it and flashes `config-sync-search-highlight`, the SAME class the search bar's
+    own card jump uses. Its `aria-label` and a VISIBLE line under the row both read `Per-key
+    rules decide — jump to them` (the trailing `↓` lives only in the visible copy — a phone has
+    no hover, so the sentence cannot live in a tooltip alone), while the lock slot renders
+    nothing (three-state rule above),
     and — under their own `KEY RULES` zone label — a rule row
     (`config-sync-card-rulerow`, a scrow) appears per configured
     key — never every key in the file, only ones with a rule; browsing the rest is File
