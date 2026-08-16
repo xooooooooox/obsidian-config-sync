@@ -158,6 +158,17 @@ functions.
   tolerates any unreadable shape as "no exception here" (never a load failure, the same discipline
   `deviceOptOutGroups` follows), and `deviceElementState`/`withDeviceElement` are the one reader and
   one writer.
+- `core/deviceFields.ts` — the local layer's sibling for per-key rules: which of an item's own
+  rule PATTERNS THIS device has taken out of sync, keyed `ItemRef → pattern → "not-synced"` (one
+  state only — a key is either following the shared rule or excepted, no on/off pair to choose
+  between). Lives in `localStorage` (`config-sync-device-fields`) and nowhere else, same reasoning
+  as `deviceElements.ts` above. Keyed by the rule's PATTERN, verbatim as `settingsFile.rules`
+  spells it, not an expanded key name, so excepting a `plugins.*` rule excepts every key it
+  matches, today or after the document gains a key tomorrow. `parseDeviceFields` is tolerant the
+  same way `parseDeviceElements` is; `deviceFieldExcepted`/`withDeviceField` are the one reader and
+  one writer, and `fieldExceptionsByGroupName` re-keys the table from `ItemRef` to the group name
+  every capture/apply/compare call site already holds — the bridge into `CoreContext.fieldExceptions`.
+  Capture's own use of the exception is the **preserve-not-strip** rule (Core invariants below).
 - `core/enablementDecision.ts` — the precedence (spec §5): given a list element's fleet rule, this
   device's own exception for it, and this device's class, what a run does. One function,
   `decideEnablement`, first match wins — replacing four separate derivations
@@ -450,7 +461,7 @@ functions.
   rules and sets local exceptions. `StopSyncingModal` is called from exactly one place, the settings
   panel card's own toggle (`SettingTab.ts`), so the destructive gesture has one home, beside the
   confirmation the change deserves. `Settings sync`'s row offers the device opt-out in its local
-  segment (`buildFileLocalMenu`, `ui/enablementRow.ts`), and `MORE`'s icon-only deep link
+  segment (`buildOptOutLocalMenu`, `ui/enablementRow.ts`), and `MORE`'s icon-only deep link
   (`renderMoreRow`, never `sliders-horizontal`: that glyph already means `your rule` in the fate
   chips) is the only path to Settings for stopping a whole item's sync.
 - `fateModel.ts` — the fate-sentence engine: `rowFate(FateInput): Fate` is the pure function
@@ -498,17 +509,21 @@ functions.
   picker every sharing cell renders through. `sharingIcon`'s vocabulary (`monitor-smartphone`/
   `monitor`/`smartphone`/`airplay`) backs the fleet segment of the two-segment row below.
 - `ui/enablementRow.ts` — the two-segment row's MODEL (`label | fleet segment | divider |
-  local segment`), shared by three renderers — a Sync Center row's `Enabled on`
-  (`renderTwoSegmentRow`, SyncCenterView.ts), a plugin card's `Enabled on`, and a
-  carrier card's element rows (SettingTab.ts) — so what each segment SAYS is decided once and the
+  local segment`), shared by four renderers — a Sync Center row's `Enabled on`
+  (`renderTwoSegmentRow`, SyncCenterView.ts), a plugin card's `Enabled on`, a carrier card's
+  element rows, and a Settings-panel item card's own path row and per-key rule rows
+  (SettingTab.ts, `paintLocalSegment`) — so what each segment SAYS is decided once and the
   renderers only paint it. `RULE_OPTIONS`/`ruleIcon`/`ruleLabel` are the fleet vocabulary
   (`sharingIcon`'s icons, plus `users` for `Each device decides` — `airplay`, `sharingIcon`'s own
   this-device glyph, would read as screen mirroring to a reader who has not read the source);
-  `buildLocalMenu`/`buildFileLocalMenu` are the one producer each for the local segment's menu (the
-  element-level exception menu and the whole-file opt-out menu are different data and get their own
-  two-entry/four-value producers rather than one four-value shape trying to serve both).
-  `enablementRowModel` composes a rule + an exception into what both segments say; the local segment
-  renders no icon while it follows the default (a default has nothing to say).
+  `buildLocalMenu` is the element-level exception menu's one producer, and `buildOptOutLocalMenu`
+  is the one producer for BOTH two-state local answers — the whole-file opt-out and a per-key
+  rule's own exception — sharing one two-entry producer (`optOutLocalSegment` paints their shared
+  segment shape) rather than each hand-typing a copy; the element-level menu stays its own
+  four-value producer, a genuinely different datum (an on/off exception, not a follow/except
+  pair). `enablementRowModel`/`fileEnablementRowModel` compose a rule + an exception into what
+  both segments say; the local segment renders no icon while it follows the default (a default
+  has nothing to say).
 - `actionIcons.ts` — the single source for the per-action Lucide icons + color classes
   (Capture/Apply/Push/Pull) reused across the panel, buttons, badges and History.
 - `fateChipIcons.ts` — `FATE_CHIP_ICON`: the fate-chip string → Lucide glyph registry (single
@@ -650,6 +665,13 @@ functions.
   never ran 2.21.0's absorb, so dropping the field without reading it once would silently resume
   syncing items that device deliberately opted out of. It is a union, never a replacement, which
   also makes running it twice a no-op.
+  `deviceFields()`/`saveDeviceFields()` are the same primitive again, under
+  `config-sync-device-fields`: a per-item table (`ItemRef` → rule PATTERN → `"not-synced"`)
+  recording which of an item's own per-key rules THIS device has taken out of sync — keyed by
+  pattern, not an expanded key name, so excepting a `plugins.*` rule excepts everything it matches.
+  Parsed at most once per load (`deviceFieldsCache`, same discipline as `deviceOptOutGroups` above)
+  and never rewritten in place: an unreadable shape reads as "no exceptions," whether that shape is
+  a corrupt write or simply a newer build's own.
 
 **Brand assets**
 - `assets/` — brand SVGs: `icon.svg` (24×24, `currentColor`, iconize-importable), `logo.svg`
@@ -752,6 +774,15 @@ Changes must preserve these:
   copy." **The list is keyed by `ItemRef`**, the same key space as the lock and the baselines.
   (Why the rule exists, and why the fleet-shared `deviceOptOuts` map it replaced is deleted rather
   than carried, is the Storage-invariants story above — I.1 and its corollary.)
+- **A device-local exception preserves the store's existing value; it never strips.** Excepting a
+  per-key rule's pattern (`config-sync-device-fields`, `core/deviceFields.ts`) tells THIS device to
+  stop syncing the keys that pattern covers — capture leaves the store's copy of each excepted key
+  exactly as it found it, and apply/comparison mask it the same way an other-class key is masked
+  (`captureTransform`/`applyTransform`/`contentUnchanged`, `core/modes.ts`). This device neither
+  contributes its own value for what it has excepted nor deletes the store's: a device-local
+  exception has no fleet consensus behind it, so stripping the key would let one device's private
+  decision delete another device's data on that key at the next push. The whole-file opt-out above
+  differs only in scope — one whole file instead of one rule's keys — never in this semantic.
 - **Enabled = loaded OR persisted** (`pluginRuntimeEnabled`). Reading `enabledPlugins` alone
   misclassifies a running-but-unpersisted plugin as disabled.
 - **Self-apply never disables/reloads Config Sync.** Applying a plugin's settings cycles it
@@ -941,7 +972,7 @@ Four storage homes, one per clause of invariant I above, and a datum belongs to 
 
 | Home | What lives there | Why not elsewhere |
 |---|---|---|
-| **`localStorage`** (per vault, per device) | the device id, the sync baselines, the passphrase, the cold-start dismissal, the **On this device** whole-file opt-out list (`config-sync-device-optouts`), the on/off-list local exception table (`config-sync-device-elements`) | true only of THIS device and defined by its identity; `data.json` travels wholesale, so a shared field keyed by device id is erased by one pull + adopt |
+| **`localStorage`** (per vault, per device) | the device id, the sync baselines, the passphrase, the cold-start dismissal, the **On this device** whole-file opt-out list (`config-sync-device-optouts`), the on/off-list local exception table (`config-sync-device-elements`), the per-key-rule local exception table (`config-sync-device-fields`) | true only of THIS device and defined by its identity; `data.json` travels wholesale, so a shared field keyed by device id is erased by one pull + adopt |
 | **`data.json`, locked-local preset** (`selfPresetRules`) | `rootPath`, `remotes` (with their `tokenId` names) | this vault's transport wiring — it is in the document, but stripped from the document's own store copy so it never reaches another device |
 | **`data.json`, ordinary fields** | `items` (nested by section, custom items included), PKM mode, run-history config, ribbon/status toggles | the fleet's shared sync contract: every device is meant to converge on it |
 | **`store.lock.json`** | per-item `source`, `innate`, `display`, `capturedAt`, `hash`; the store's own `version` and `syncedWatermark` | provenance and freshness of store CONTENT, which is a fact about the store, not about the settings that produced it |
@@ -960,6 +991,11 @@ is the one place a fleet rule and a local exception are reconciled into that mas
 a local exception outranks the rule; an `each device decides` (`this-device`) rule masks without
 forcing (this device's own state stands); a `per-class` rule not matching this device's class masks
 and forces off; otherwise the element follows the shared list untouched.
+
+A per-key field rule has the same fleet/local shape (fleet: `settingsFile.rules[<pattern>].sharing`;
+local: `config-sync-device-fields`, localStorage, `core/deviceFields.ts`) but a different
+reconciliation — there is no on/off mask to compute, since the local half here is not a state to
+merge in but an instruction to leave the key alone entirely (Core invariants above).
 
 **Schemas** (`schema/`, hand-maintained JSON Schema — the repo's schema-first rule, CLAUDE.md):
 `data.schema.json` (data.json at `schemaVersion: 4`), `store-lock.schema.json` (store.lock.json),
@@ -1043,6 +1079,14 @@ resolve it. Dropping such an entry instead would read as never-synced, which def
     different table from the per-ELEMENT exception table above (`config-sync-device-elements`,
     keyed by list id + element id): the two answer the two rows of the 2×2 table, and neither reads
     the other's key space.
+  - **A per-key rule's own local layer** is `config-sync-device-fields` in localStorage, read and
+    written through `core/deviceFields.ts` (`deviceFieldExcepted`, `withDeviceField`), keyed
+    `ItemRef` → rule pattern rather than list id + element id — the third table beside the two
+    above, and structurally its own kind: excepting a key is not a state to fold into a mask
+    (`decideEnablement`'s job), it is an instruction `captureTransform`/`applyTransform`/
+    `contentUnchanged` (`core/modes.ts`) read directly, to leave that key's slot exactly as capture
+    found it. `fieldExceptionsByGroupName` bridges `ItemRef` keying to the group-name keying
+    `CoreContext.fieldExceptions` carries, mirroring `switchExceptions`'s own bridge.
   - There is no second data shape for custom rules: `custom` is a section whose items have the same
     `Item` shape as everything else (v2's `customGroups` array is converted by the migration). One
     consequence is accepted: `items.custom` is an object, so an all-digits rule name sorts to the

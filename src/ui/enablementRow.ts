@@ -154,11 +154,14 @@ export function buildLocalMenu(rule: Sharing, exception: DeviceElementState | nu
   return items;
 }
 
-// The whole-FILE local menu (`DEFAULT SETTINGS SYNC`): a DIFFERENT
-// datum from buildLocalMenu's above — a device opt-out of the entire item, not one element of an
-// enablement list — so it gets its own two-entry producer rather than being folded into
-// buildLocalMenu's four-value shape. Always both entries: unlike the element menu there is no
-// `this-device` rule that would make `Follows the default` meaningless here.
+// The two-state local menu shared by BOTH opt-out layers: the whole-file device opt-out
+// (`Settings sync`) and a per-key rule's own exception (`deviceFields.ts`) — same two answers,
+// follow or don't, so one producer serves both callers instead of each hand-typing its own copy.
+// Still a DIFFERENT datum from buildLocalMenu's above — an on/off exception for one element of an
+// enablement list, a three-way local answer over a four-value fleet rule — so it keeps its own
+// two-entry producer rather than being folded into buildLocalMenu's shape. Always both entries:
+// unlike the element menu there is no `this-device` rule that would make `Follows the default`
+// meaningless here.
 export const NOT_SYNCED_HERE_LABEL = "Not synced here";
 
 export interface FileLocalMenuHandlers {

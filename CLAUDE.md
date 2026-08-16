@@ -50,8 +50,8 @@ Full map: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 - **Retired fields, gone from the document:** `runsOn`, `thisDeviceItems`, `bratIndex`,
   `deviceOptOuts`, `customGroups`. Enablement rules live on the carrier item's
   `settingsFile.perElement`; device-local exceptions live in localStorage
-  (`config-sync-device-elements` / `config-sync-device-optouts`). Only the migrations read
-  the old shapes.
+  (`config-sync-device-elements` / `config-sync-device-optouts` / `config-sync-device-fields`).
+  Only the migrations read the old shapes.
 - The word `scope` is retired everywhere (code and copy); the current words are `section` /
   `sharing` / `device` / `mode` / `element` / `action` / `type` (DESIGN.md §3).
 

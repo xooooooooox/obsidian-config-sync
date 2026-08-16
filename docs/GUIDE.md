@@ -39,7 +39,7 @@ Two planes, kept separate: a **local plane** (this device's live config ↔ the 
 **Local plane:**
 
 - **Capture** copies every enabled item's settings file and companion folders into `<data folder>/store/`, applying each field's sharing and encryption rule (or the whole-file rule, for items with no per-key rules), skips OS junk files, and records source plugin versions (or the Obsidian app version, for Obsidian/core items) in `store.lock.json`. Only changed files are rewritten; the Sync Center's Capture button captures just what you've ticked.
-- **Apply** picks items and lands them into this device's config dir (whatever its name) — there's no confirmation dialog; ticking and pressing Apply executes directly. For a community plugin that's outdated, disabled or not installed on this device, Apply can also update, enable or install it first (see [Availability facts and the install engine](#availability-facts-and-the-install-engine)). `This device` fields and encrypted content resolve per the item's rules; a `This device` field keeps its local value untouched.
+- **Apply** picks items and lands them into this device's config dir (whatever its name) — there's no confirmation dialog; ticking and pressing Apply executes directly. For a community plugin that's outdated, disabled or not installed on this device, Apply can also update, enable or install it first (see [Availability facts and the install engine](#availability-facts-and-the-install-engine)). `Each device decides` fields and encrypted content resolve per the item's rules; an `Each device decides` field keeps its local value untouched.
 - The **Sync Center** compares live config against the store per item; direction (↑ to capture, ↓ to apply) comes from a per-device sync baseline, not file times — each time this device sees an item in sync, it remembers a fingerprint of both sides, so a later difference can tell which side actually moved. A directional row shows a colored arrow icon (orange ↑ to capture, an accent-colored ↓ to apply) whose hover text — its **fate sentence** — states the verdict in plain language (`Installs · turns on · applies settings`, `Captures settings`…); expanding the row spells the same sentence out in full. See [The Sync Center](#the-sync-center) for the grammar. An item with no baseline on this device yet (a fresh install, or one pending its first sync since upgrading) defaults to apply; one that changed on both sides since this device's last sync reads `⚠ Changed on both sides` and stays unstageable until you resolve it. Remote freshness is still checked automatically.
 
 **On-disk store layout:**
@@ -163,25 +163,25 @@ Every row across **Obsidian**, **Core plugins**, **Community plugins** and **Bet
 - The **Beta** tab tracks community plugins installed through [BRAT](https://github.com/TfTHacker/obsidian42-brat) — same card, same three drawer zones — so their configs sync like any other plugin.
 - Each section lists its cards alphabetically; sensitive-looking keys (tokens, secrets) are highlighted inside a card's File preview so you see them before enabling syncing.
 
-A card's drawer has up to three zones. Every row reads the same way: the row's name on the left, its controls in one shared column beside it — so all the controls in a card line up — and every sharing control is the same picker icon: the glyph shows the current rule (a monitor+phone pair = `All devices`, a monitor = `Desktop only`, a phone = `Mobile only`, an airplay mark = `This device`), a click opens a menu of the values, and the default sits dimmed while anything narrower lights up in the accent color.
+A card's drawer has up to three zones. Every row reads the same way: the row's name on the left, its controls in one shared column beside it — so all the controls in a card line up — and every sharing control is the same picker icon: the glyph shows the current rule (a monitor+phone pair = `All devices`, a monitor = `Desktop only`, a phone = `Mobile only`); the fourth stop, where there is no shared answer at all, reads `Each device decides` (a small people mark) wherever the row also carries its own **this device** column beside it — a per-key rule, a plugin's Enabled on — or plain `This device` (an airplay mark) wherever it doesn't, since nothing there could hold a separate exception anyway — an array element's own rule, a folder's device class, the Advanced tab's custom rules. A click opens a menu of the values, and the default sits dimmed while anything narrower lights up in the accent color.
 
 #### Enabled on
 
 A plugin's on/off state lives on its own card, in its **Enabled on** zone (shortened from `Default enabled on`) — the same icon-plus-this-device row described in [Each device decides, and this device's own exceptions](#each-device-decides-and-this-devices-own-exceptions), reading and writing the same enabled-plugins list Obsidian maintains. Plugin cards only, and only for a plugin whose on/off list is itself tracked.
 
-#### Settings file
+#### Settings sync
 
-Starts as one path row: the file's path, a sharing icon (no `This device` here) and a lock toggle that encrypts the whole file — the lock shows **open** until you encrypt, closed and colored once you have (and leaves the row entirely once per-key rules take over — see below). The path text itself is the edit entry point:
+Starts as one path row: the file's path, a sharing icon (no `This device`/`Each device decides` stop here — a whole file is either shared or it isn't, nobody can be its sole owner) and a lock toggle that encrypts the whole file — the lock shows **open** until you encrypt, closed and colored once you have. Beside the sharing icon, the row also carries its own **this device** column — the same one-device opt-out the Sync Center's `Settings sync` row already showed: turn it on and this device stops syncing the file at all, still without touching what's already there or affecting any other device, and it stays put whether the card is in whole-file or per-key mode (below). The path text itself is the edit entry point:
 
 - Click it to edit in place (Enter commits, Esc cancels).
 - While editing a committed custom path, a quiet **Reset to default** action restores the built-in default.
 
-The eye icon beside the filename opens the **File preview** — a read-only view of the file, keys colored by their rule, with a color-dot legend underneath (blue = desktop only, amber = mobile only, red = this device, a lock mark = encrypted). Any key you can add a rule for wears a dashed underline, and the line above the preview says it plainly: **click any key to add a rule for it**.
+The eye icon, riding the same line as the filename, opens the **File preview** — a read-only view of the file, keys colored by their rule, with a color-dot legend underneath (blue = desktop only, amber = mobile only, red = this device, a lock mark = encrypted). Any key you can add a rule for wears a dashed underline, and the line above the preview says it plainly: **click any key to add a rule for it**.
 
 The moment a card has any per-key rule, it switches to per-key mode:
 
-- The path row's own sharing icon dims and its lock disappears (each ruled key now governs itself).
-- A **Key rules** list appears with a row per configured key: its own sharing icon and a lock toggle. A key that can't be encrypted — its rule is `This device`, or Per-item device rules are on — shows no lock at all. To remove the rule, open the key's sharing menu and pick **Remove rule** at the bottom.
+- The path row's own sharing icon and lock disappear — there is no whole-file rule left to show once per-key rules govern the keys individually — replaced by a dim jump icon and a visible **Per-key rules decide — jump to them ↓** line that scrolls straight down to the Key rules list. The row's own **this device** opt-out column (above) stays exactly where it was; it still stops the whole file, per-key rules included.
+- A **Key rules** list appears with a row per configured key: its own sharing icon, a lock toggle, and the same **this device** column as the path row, one per key (see **This device's own exception** in [Field rules & sensitive settings](#field-rules--sensitive-settings) below for what setting it does). A key that can't be encrypted — its rule is `Each device decides`, or Per-item device rules are on — shows no lock at all. To remove the rule, open the key's sharing menu and pick **Remove rule** at the bottom.
 - A string-array key's rule adds a **Per-item device rules** icon (a small checklist, lit when on) so each element gets its own sharing icon instead of one rule for the whole key.
 - Removing the last rule reverts the card to whole-file mode.
 
@@ -199,7 +199,7 @@ Lists any vault-relative folder that travels with the item — Appearance ships 
 
 **Custom rules** (fully yours: vault-root files, extra folders) and **Discovered files** (config files we couldn't classify; toggle to sync — the file fixes its name, path AND type, and its card names the file it belongs to). The discovered list keeps one stable order whether a file is on or off, so a fresh toggle never makes rows trade places. A rule's editor is one field per line: a name (e.g. `templates`), a path box whose leading segment picks the base (`Vault root` or `Config folder`) before you type the relative path, a file/folder type icon (changing it away from a file asks first — it drops the rule's key rules and encryption settings), a devices picker, a **Mode** (`Whole file` syncs the file as-is · `Per-key rules` gives each key its own rule · `Encrypted` stores the whole file encrypted; leaving Per-key rules with rules configured asks first too), and an optional description.
 
-With **Per-key rules** on, the editor works exactly like an item card's Settings file zone: each configured key is a row with its own sharing icon and lock, a **File preview** below shows the file with every key clickable (**click any key to add a rule for it**), and a pattern box at the bottom takes hand-typed globs like `*Token*` for keys the preview can't show. When any managed item is customized (path, fields or mode diverge from its default), a summary row lists them with a **Reset all to defaults** button.
+With **Per-key rules** on, the editor works much like an item card's Settings sync zone: each configured key is a row with its own sharing icon and lock, a **File preview** below shows the file with every key clickable (**click any key to add a rule for it**), and a pattern box at the bottom takes hand-typed globs like `*Token*` for keys the preview can't show — a custom rule's own key rows have no **this device** exception column of their own, unlike an item card's key rules (above). When any managed item is customized (path, fields or mode diverge from its default), a summary row lists them with a **Reset all to defaults** button.
 
 #### Remotes
 
@@ -207,11 +207,12 @@ Desktop only. Add a **git repository** (URL, branch, optional folder) or **anoth
 
 ## Field rules & sensitive settings
 
-Every field or file rule answers two independent questions — who shares the value, and whether it travels encrypted — set per key (or per file, when the item has no per-key rules) from a card's Settings file zone.
+Every field or file rule answers two independent questions — who shares the value, and whether it travels encrypted — set per key (or per file, when the item has no per-key rules) from a card's Settings sync zone. Independently of both, this device can except itself from any per-key rule, or from the whole file, without touching what the shared answer says for everyone else — see **This device's own exception** below.
 
-- **Sharing** — `All devices` keeps the key shared and identical everywhere; `Desktop only`/`Mobile only` keep it shared but let each device class hold its own value, in a `__scopes__` sidecar next to the file's store copy (that filename is a stored path, unchanged since 1.x, so existing stores keep working — e.g. `app.json`'s `userIgnoreFilters`, per-device search-ignore patterns, is commonly set `Desktop only`); `This device` (per-key rules only, not the whole-file rule) keeps a key out of the store entirely and never leaves this machine — Apply preserves the local value.
-- **Encrypt** — stores the value (or, for the whole-file rule, the whole file) as an encrypted envelope and decrypts it on Apply, so credentials can travel safely; a value that hasn't actually changed keeps its existing envelope, so an unrelated edit never makes it look changed in a diff. Not offered at `This device` (the lock disappears from the row), since a value that never leaves the device has nothing to encrypt for transit.
+- **Sharing** — `All devices` keeps the key shared and identical everywhere; `Desktop only`/`Mobile only` keep it shared but let each device class hold its own value, in a `__scopes__` sidecar next to the file's store copy (that filename is a stored path, unchanged since 1.x, so existing stores keep working — e.g. `app.json`'s `userIgnoreFilters`, per-device search-ignore patterns, is commonly set `Desktop only`); `Each device decides` (per-key rules only, not the whole-file rule) keeps a key out of the store entirely and never leaves this machine — Apply preserves the local value.
+- **Encrypt** — stores the value (or, for the whole-file rule, the whole file) as an encrypted envelope and decrypts it on Apply, so credentials can travel safely; a value that hasn't actually changed keeps its existing envelope, so an unrelated edit never makes it look changed in a diff. Not offered at `Each device decides` (the lock disappears from the row), since a value that never leaves the device has nothing to encrypt for transit.
 - **Per-item device rules** — a string-array key (a plugin's enabled elements, a CSS-snippets list, `userIgnoreFilters`…) can give each element its own sharing rule instead of one rule for the whole key, so each entry travels or stays local independently.
+- **This device's own exception** — beside every per-key rule's sharing icon, and beside the whole-file row's (above), sits a second, one-device-only column: turn it on and this device stops syncing that key — or, on the whole-file row, that entire file — full stop. The value already sitting in the store is left exactly as found: this device neither publishes its own copy over it nor deletes it, and no other device is affected either way. It's the same **this device** column and the same two-choice menu (`Follows the default` / `Not synced here`) as the Sync Center's own `Settings sync` row, and it never travels.
 
 #### Passphrase & keychain
 
@@ -226,7 +227,7 @@ Encrypt modes need a vault-level **Passphrase**, set once per device in Settings
 
 Every installed plugin is scanned for sensitive-looking keys (API keys, tokens, secrets, passwords, emails) or an opaque encrypted blob before you ever enable syncing; this only informs, you still choose the rule.
 
-A card's Settings file zone includes a read-only preview of the file, opened from the eye icon beside the filename (collapsed by default):
+A card's Settings sync zone includes a read-only preview of the file, opened from the eye icon beside the filename (collapsed by default):
 
 - Detected keys are called out with a purple, dotted-underline highlight inside the card's File preview.
 - A lock icon marks encrypted, and other keys are colored by rule state: red = this device, blue = desktop only, amber = mobile only, plain keys faint.
@@ -282,7 +283,7 @@ How the store travels between devices, beyond this device's own Capture/Apply (s
 
 **Sync a plugin's settings but keep credentials out of the store**
 1. Under *Community plugins*, open the plugin's card.
-2. In its **File preview**, click each credential key to add a rule, set its sharing to `This device` (or turn on its lock if you want it to travel).
+2. In its **File preview**, click each credential key to add a rule, set its sharing to `Each device decides` (or turn on its lock if you want it to travel).
 3. Capture. This-device credentials never enter the store; each device keeps its locally entered values across applies.
 
 **IOTO vault, from zero**
