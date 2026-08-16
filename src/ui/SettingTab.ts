@@ -127,6 +127,7 @@ import {
   PER_ITEM_DISABLED_HINT,
   PER_ELEMENT_RULES_LABEL,
   PREVIEW_LEGEND_ENTRIES,
+  ruleRowHasLocalLayer,
   sectionAllEnabled,
   settingsFileZoneKind,
   sharingCycleTooltip,
@@ -790,7 +791,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
 
   // ── Unified card renderer — every ItemDef section (spec §4/§5) ──────────────────────────────
   // One renderer for every ItemDef: name + badges + sync toggle + chevron on the row, a drawer
-  // with a Settings file zone (and, for Appearance, a Companion folders zone). Reads/writes
+  // with a Settings sync zone (and, for Appearance, a Companion folders zone). Reads/writes
   // settings.items directly through host.saveSettings() — durable, recompiles. The Advanced
   // tab's custom-rule/discovered-file editor (below) is durable the same way, through
   // items.custom (persistCustomItems).
@@ -1771,7 +1772,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     // in renderRuleRow).
     const head = bodyEl.createDiv({ cls: "config-sync-scrow" });
     head.createDiv({ cls: "config-sync-explabel config-sync-explabel-inline", text: "Key rules" });
-    head.createDiv({ cls: "config-sync-explabel config-sync-explabel-inline config-sync-scrow-col4", text: THIS_DEVICE_EYEBROW });
+    // …and no column header when no row under it has that column (every key here is a per-item
+    // one): a heading over an empty column is the same claim of an answer that isn't there.
+    if (rows.some(ruleRowHasLocalLayer)) {
+      head.createDiv({ cls: "config-sync-explabel config-sync-explabel-inline config-sync-scrow-col4", text: THIS_DEVICE_EYEBROW });
+    }
     const panel = bodyEl.createDiv({ cls: "config-sync-card-fields" });
     for (const row of rows) this.renderRuleRow(panel, def, item, row, doc, wrap);
   }
@@ -1874,28 +1879,32 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     // This key's own local layer (§8): a per-key rule is fleet-only no longer — `defRef` is this
     // file's one way to turn a card's def into the ItemRef the host's per-field methods key on
     // (see itemAnchorId/cardExpandKey above), so this reuses it rather than deriving a second ref.
-    const ref = defRef(def);
-    const excepted = this.host.deviceFieldExceptedFor(ref, row.key);
-    this.paintLocalSegment(fr, {
-      seg: optOutLocalSegment(excepted),
-      isException: excepted,
-      // `this device` is the rules zone's own COLUMN HEADER (renderRuleRows), so the member rows
-      // carry no eyebrow — exactly how renderCarrierElements/renderElementRuleRow do it.
-      showEyebrow: false,
-      menu: () => {
-        const menu = new Menu();
-        for (const entry of buildOptOutLocalMenu(excepted, {
-          follow: () => void this.host.setDeviceFieldExcepted(ref, row.key, false).then(() => this.refreshCardBody(wrap, def)),
-          optOut: () => void this.host.setDeviceFieldExcepted(ref, row.key, true).then(() => this.refreshCardBody(wrap, def)),
-        })) {
-          menu.addItem((i) => {
-            i.setTitle(entry.title).setChecked(entry.checked).onClick(entry.action);
-            if (entry.icon !== null) i.setIcon(entry.icon);
-          });
-        }
-        return menu;
-      },
-    });
+    // `ruleRowHasLocalLayer` is the one producer for WHICH rows have one: a per-item key's rules
+    // are honoured by the per-item machinery alone, which has no local layer to speak for (§2).
+    if (ruleRowHasLocalLayer(row)) {
+      const ref = defRef(def);
+      const excepted = this.host.deviceFieldExceptedFor(ref, row.key);
+      this.paintLocalSegment(fr, {
+        seg: optOutLocalSegment(excepted),
+        isException: excepted,
+        // `this device` is the rules zone's own COLUMN HEADER (renderRuleRows), so the member rows
+        // carry no eyebrow — exactly how renderCarrierElements/renderElementRuleRow do it.
+        showEyebrow: false,
+        menu: () => {
+          const menu = new Menu();
+          for (const entry of buildOptOutLocalMenu(excepted, {
+            follow: () => void this.host.setDeviceFieldExcepted(ref, row.key, false).then(() => this.refreshCardBody(wrap, def)),
+            optOut: () => void this.host.setDeviceFieldExcepted(ref, row.key, true).then(() => this.refreshCardBody(wrap, def)),
+          })) {
+            menu.addItem((i) => {
+              i.setTitle(entry.title).setChecked(entry.checked).onClick(entry.action);
+              if (entry.icon !== null) i.setIcon(entry.icon);
+            });
+          }
+          return menu;
+        },
+      });
+    }
     if (row.isArray && row.perElementEnabled) {
       const elements = isStringArrayValue(doc[row.key]) ? (doc[row.key] as string[]) : [];
       const sharings = item.settingsFile?.perElement[row.key] ?? {};
