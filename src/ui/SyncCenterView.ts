@@ -1429,9 +1429,10 @@ export class SyncCenterView extends ItemView {
 
   private renderSectionEntries(container: HTMLElement): void {
     this.renderSelfEntry(container);
-    // No head over the scope list: the self card's own "plugin settings ↔ store"
-    // subtitle already carries the device↔store relation — grouping is by dividers alone, and
-    // the only head left is Remotes', which earns its place by carrying live checked-age state.
+    // No group heads anywhere in the sidebar: the self card's own "plugin settings ↔ store"
+    // subtitle already carries the device↔store relation, and remotes sit behind their own
+    // divider like every other group — re-checking them belongs to the main region's global
+    // refresh button alone, and each remote row's state icon carries the result.
     container.createDiv({ cls: "config-sync-side-divider" });
 
     const deviceEntry = (cat: StorageSection | "beta" | "all", label: string, rows: StatusRow[]): void => {
@@ -1470,21 +1471,6 @@ export class SyncCenterView extends ItemView {
     const remotes = this.host.remotes();
     if (remotes.length > 0) {
       container.createDiv({ cls: "config-sync-side-divider" });
-      let newestCheck: number | null = null;
-      for (const remote of remotes) {
-        const c = this.host.remoteCheck(remote.name);
-        if (c !== undefined && (newestCheck === null || c.at > newestCheck)) newestCheck = c.at;
-      }
-      const head = container.createDiv({ cls: "config-sync-side-head config-sync-side-head-remotes" });
-      head.createSpan({ text: `Remotes · checked ${newestCheck === null ? "never" : relativeAge(newestCheck)}` });
-      const refresh = new ExtraButtonComponent(head);
-      refresh.setIcon("refresh-cw");
-      refresh.setTooltip("Re-check remotes");
-      refresh.onClick(async () => {
-        await this.host.refreshRemoteChecks();
-        this.render(this.renderGen);
-      });
-      refresh.extraSettingsEl.toggleClass("config-sync-refresh-spinning", this.host.remoteRefreshProgress() !== null);
       remotes.forEach((remote, idx) => {
         const active = this.panelSection.kind === "remote" && this.panelSection.name === remote.name;
         const item = container.createDiv({ cls: `config-sync-side-item${active ? " is-active" : ""}` });

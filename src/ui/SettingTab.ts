@@ -2408,11 +2408,14 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       void (async () => {
         // Leaving Per-key rules deletes every configured key rule — confirm instead of
         // silently destroying them (the card surface removes rules one at a time; this menu is
-        // the only place they could vanish in bulk).
-        const rulesDropped = group.mode === "fields" && mode !== "fields" ? (group.fields?.length ?? 0) : 0;
+        // the only place they could vanish in bulk). The rule count is read from this.groups at
+        // click time, never from the render-time `group` snapshot: per-key edits rebuild only
+        // the fields panel, so rules added since this drawer rendered are invisible to `group`.
+        const cur = this.groups.find((x) => x.name === group.name) ?? group;
+        const rulesDropped = cur.mode === "fields" && mode !== "fields" ? (cur.fields?.length ?? 0) : 0;
         if (rulesDropped > 0 && !(await confirmDropKeyRules(this.app, rulesDropped))) return;
         let fieldsForNewMode: FieldRule[] | undefined;
-        if (mode === "fields" && group.fields === undefined) {
+        if (mode === "fields" && cur.fields === undefined) {
           const scan = this.detections.get(group.name) ?? (await this.host.detectSensitive(group));
           this.detections.set(group.name, scan);
           if (scan.keys.length > 0) fieldsForNewMode = defaultFieldsFromDetection(scan.keys);
@@ -2451,15 +2454,43 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   // flattened the orthogonal sharing×encrypted pair, does not exist. Below the rows, the File
   // preview (click any key to add a rule); last, the raw pattern input as the glob escape hatch.
   // One file read feeds rows and preview alike; built after the read completes.
-  private renderFieldsEditor(hostEl: HTMLElement, group: SyncGroup, afterChange: () => void): void {
+  //
+  // Per-key edits rebuild ONLY this panel — the refreshCardBody swap (detached build, child
+  // swap, File-preview scroll carried across), never a whole-tab refresh(): the tab rebuild
+  // re-enters this editor's two-phase async fill, so the page briefly loses the editor's
+  // height and visibly collapses/re-expands. A failed save still falls back to refresh(),
+  // which is what renders the pinned save-error row outside this panel.
+  private renderFieldsEditor(hostEl: HTMLElement, group: SyncGroup): void {
     const panel = hostEl.createDiv({ cls: "config-sync-fields-editor" });
-    void (async () => {
-      const { doc } = parseCardDoc(await this.host.readItemFile(group));
-      this.buildFieldsEditor(panel, group, doc, afterChange);
-    })();
+    const rebuild = (): void => {
+      const gen = String(Number(panel.dataset.csFieldsGen ?? "0") + 1);
+      panel.dataset.csFieldsGen = gen;
+      void (async () => {
+        const fresh = this.groups.find((g) => g.name === group.name);
+        if (fresh === undefined) {
+          this.refresh();
+          return;
+        }
+        const { doc } = parseCardDoc(await this.host.readItemFile(fresh));
+        if (!panel.isConnected || panel.dataset.csFieldsGen !== gen) return; // tab re-rendered or a newer rebuild superseded this read
+        const tmp = createDiv();
+        this.buildFieldsEditor(tmp, fresh, doc, (ok) => {
+          if (ok) rebuild();
+          else this.refresh();
+        });
+        const prevScroll = panel.querySelector(".config-sync-json-pre")?.scrollTop ?? 0;
+        panel.empty();
+        while (tmp.firstChild !== null) panel.appendChild(tmp.firstChild);
+        if (prevScroll > 0) {
+          const pre = panel.querySelector(".config-sync-json-pre");
+          if (pre !== null) pre.scrollTop = prevScroll;
+        }
+      })();
+    };
+    rebuild();
   }
 
-  private buildFieldsEditor(panel: HTMLElement, group: SyncGroup, doc: Record<string, unknown>, afterChange: () => void): void {
+  private buildFieldsEditor(panel: HTMLElement, group: SyncGroup, doc: Record<string, unknown>, afterChange: (ok: boolean) => void): void {
     const detectedKeys = this.detections.get(group.name)?.keys ?? [];
     const rules = group.fields ?? [];
     const setRuleAt = (ruleIndex: number, mutator: (r: FieldRule) => void): void => {
@@ -2601,12 +2632,12 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       void (async () => {
         const pattern = input.value.trim();
         if (pattern === "") return;
-        await this.commitGroups((draft) => {
+        const ok = await this.commitGroups((draft) => {
           const g = draft.find((x) => x.name === group.name);
           if (g === undefined) return;
           g.fields = [...(g.fields ?? []), { pattern, ...LOCAL_RULE }];
         }, group.name);
-        afterChange();
+        afterChange(ok);
       })();
     });
   }
@@ -3366,8 +3397,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
             i.setTitle(TYPE_META[t].label).setIcon(TYPE_META[t].icon).setChecked(group.type === t).onClick(async () => {
               if (t === group.type) return;
               // Flipping away from "file" drops key rules and the encryption mode — confirm
-              // instead of silently destroying them.
-              const destructive = group.mode !== undefined || (group.fields?.length ?? 0) > 0;
+              // instead of silently destroying them. Read from this.groups at click time: the
+              // render-time `group` snapshot misses rules added through the fields panel's
+              // local rebuilds.
+              const cur = this.groups.find((x) => x.name === group.name) ?? group;
+              const destructive = cur.mode !== undefined || (cur.fields?.length ?? 0) > 0;
               if (destructive && !(await confirmTypeFlip(this.app, t))) return;
               await this.commitGroups((draft) => {
                 const g = draft.find((x) => x.name === group.name);
@@ -3409,7 +3443,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       });
     });
     if (group.mode === "fields") {
-      this.renderFieldsEditor(panel.createDiv(), group, () => this.refresh());
+      this.renderFieldsEditor(panel.createDiv(), group);
     }
     this.renderDetectionNote(panel, group);
   }

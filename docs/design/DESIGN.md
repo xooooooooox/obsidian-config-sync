@@ -394,15 +394,16 @@ noted):
 - **Pills** `config-sync-pill` (is-up/down/ok/none/neutral/warn/error/statenote) — counts and
   states; never interactive. **Filter pills** `config-sync-fpill` in `-fpillrow` — buttons;
   long/short label spans; mobile = glyph form, one line. Shared with the settings search's section pills.
-- **Sidebar** `config-sync-side-item/-side-badge/-side-head` — sections with tiny count
+- **Sidebar** `config-sync-side-item/-side-badge` — sections with tiny count
   badges; active = accent tint. The Config Sync self layer leads as a distinct hero card
   `config-sync-side-self` (`-side-self-ic` icon tile, `-side-self-title`/`-side-self-sub`,
   `-side-self-pill` reusing `selfStatePill`), echoing the header self-chip. Grouping is by
-  `config-sync-side-divider` hairlines alone: self card / scope list / remotes /
-  History each separated by one divider, with NO group head except Remotes — its head is the one
-  that earns its place by carrying live state (`Remotes · checked <age>` + the re-check
-  button); the self card's own `plugin settings ↔ store` subtitle already carries the
-  device↔store relation, so the scope list carries no head. **Switcher**
+  `config-sync-side-divider` hairlines alone: self card / scope list / remote rows /
+  History each separated by one divider, with NO group heads anywhere. Re-checking remotes
+  belongs to the main region's global refresh button alone (it re-scans local state AND
+  re-checks every remote; its tooltip carries the refreshed-age), and each remote row's own
+  state icon carries the result. The self card's own `plugin settings ↔ store` subtitle
+  already carries the device↔store relation. **Switcher**
   `config-sync-switcher` — compact replacement.
 - **Rows** `config-sync-hub-row` — one object = one row: chevron, name (`-rule-name`),
   a spacer, then the fate chips (`config-sync-fatechip`, rendered only when a fact deviates
@@ -694,6 +695,14 @@ noted):
   (same `config-sync-json-*` treatment, `Click any key to add a rule for it` hint, keys colored
   by rule, click-to-add) renders for file-type rules; the raw
   `Add key pattern…` input stays as the glob escape hatch, last.
+  Every per-key edit (lock, sharing, remove, per-item flip, click-to-add, glob add) rebuilds
+  ONLY the fields-editor panel — detached build, child swap, File-preview scroll carried
+  across, a generation guard against superseded reads — never the whole tab (whose re-render
+  re-enters the editor's async file read and visibly collapses/re-expands the page). A failed
+  save still falls back to the full refresh, which renders the pinned save-error row. Because
+  the surrounding form outlives those rebuilds, its destructive-change guards (MODE leaving
+  Per-key, TYPE flip) read the rule from current state at click time, never from the
+  render-time snapshot.
   A failed save pins its
   error inline with the CONCRETE reason — the no-error sentinel is `null`, never `""` (an
   empty-string sentinel collides with the unnamed placeholder rule's empty name, making a

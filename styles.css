@@ -758,10 +758,6 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
    carries the sidebar's own column layout while the search input above it stays put. */
 .config-sync-side-section { display: flex; flex-direction: column; gap: 3px; }
 
-.config-sync-side-head { font-size: var(--font-ui-smaller); text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); padding: var(--size-4-1) 4px; display: flex; align-items: center; gap: var(--size-4-1); }
-
-.config-sync-side-head-remotes { margin-top: var(--size-4-2); }
-
 /* Visual grouping in the sidebar (This device / Remotes / History). */
 .config-sync-side-divider { height: 1px; background: var(--background-modifier-border); margin: var(--size-4-2) 4px; }
 
