@@ -783,6 +783,17 @@ Changes must preserve these:
   exception has no fleet consensus behind it, so stripping the key would let one device's private
   decision delete another device's data on that key at the next push. The whole-file opt-out above
   differs only in scope — one whole file instead of one rule's keys — never in this semantic.
+  **"The store's copy" means both store files.** A fields-mode item's store copy is the base AND
+  this device class's `__scopes__` sidecar, and the class partition moves an own-class key into the
+  sidecar before any other rule runs — so a `Desktop only` key's store value exists only there. The
+  sidecar is shared by every device of that class, so publishing this device's value into it is the
+  same cross-device overwrite as publishing into the base. `captureTransform` therefore preserves
+  the prior sidecar's value for an excepted own-class key (ciphertext byte-for-byte where the rule
+  encrypts), applied after the sidecar's encryption pass so a preserved envelope is never
+  re-encrypted. Conversely, an exception speaks only for keys the base is entitled to hold: `strip`
+  and both classes' patterns are subtracted before the base preserve/re-add, or a stale key would be
+  pinned in the shared store forever and `baseHasStaleLocalKeys`/`baseHasStaleClassKeys` would force
+  a rewrite on every capture that never converges.
 - **Enabled = loaded OR persisted** (`pluginRuntimeEnabled`). Reading `enabledPlugins` alone
   misclassifies a running-but-unpersisted plugin as disabled.
 - **Self-apply never disables/reloads Config Sync.** Applying a plugin's settings cycles it
@@ -1086,7 +1097,11 @@ resolve it. Dropping such an entry instead would read as never-synced, which def
     (`decideEnablement`'s job), it is an instruction `captureTransform`/`applyTransform`/
     `contentUnchanged` (`core/modes.ts`) read directly, to leave that key's slot exactly as capture
     found it. `fieldExceptionsByGroupName` bridges `ItemRef` keying to the group-name keying
-    `CoreContext.fieldExceptions` carries, mirroring `switchExceptions`'s own bridge.
+    `CoreContext.fieldExceptions` carries, mirroring `switchExceptions`'s own bridge. A key whose
+    items each carry their own rule has no entry to make here and no control to make it with:
+    `excludingPerElement` removes per-item keys from every pattern set the three transforms read, so
+    `ruleRowHasLocalLayer` (`ui/itemCard.ts`) is the one producer deciding which rule rows paint the
+    local segment at all — an option no runtime path would honour is not offered.
   - There is no second data shape for custom rules: `custom` is a section whose items have the same
     `Item` shape as everything else (v2's `customGroups` array is converted by the migration). One
     consequence is accepted: `items.custom` is an object, so an all-digits rule name sorts to the
