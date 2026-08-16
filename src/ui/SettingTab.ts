@@ -1521,7 +1521,13 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       // lockCell stays empty — there is no fileRule.encrypted left to speak for.
       const jumpToKeyRules = (): void => {
         const target = wrap.querySelector(".config-sync-card-fields");
-        if (target === null) return; // card body not rendered yet (async file read still in flight)
+        // Absent while the async file read is still in flight (renderCardBodyInto) — or,
+        // permanently, for a card whose only per-key entries are all enablement-list keys (e.g.
+        // Appearance with nothing but snippet-member rules): buildRuleRows filters those out
+        // (isEnablementRuleKey, itemCard.ts) so hasKeyRules is true but no "Key rules" panel
+        // ever renders to jump to. Silent no-op either way — nothing worse than the old dim,
+        // non-interactive cell this replaces.
+        if (target === null) return;
         target.scrollIntoView({ block: "center" });
         // Same visual language highlightAnchor uses for a card-level jump — this one stays
         // inside the current card, so it scopes its lookup to `wrap` instead of the whole panel.
