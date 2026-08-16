@@ -19,6 +19,7 @@ import {
   THIS_DEVICE_EYEBROW,
 } from "../src/ui/enablementRow";
 import { EVERYWHERE, perClass, THIS_DEVICE } from "../src/core/types";
+import { FIELD_SHARING_OPTIONS, sharingIcon } from "../src/ui/itemCard";
 
 describe("the two-segment row", () => {
   it("names the four rule values exactly as the spec's copy table does", () => {
@@ -29,6 +30,18 @@ describe("the two-segment row", () => {
     expect(RULE_OPTIONS.map(ruleIcon)).toEqual(["monitor-smartphone", "monitor", "smartphone", "users"]);
     expect(RULE_OPTIONS.map(ruleIcon)).not.toContain("sliders-horizontal");
     expect(RULE_OPTIONS.map(ruleIcon)).not.toContain("airplay");
+  });
+
+  // A per-key rule row now has its own local layer (§8), so its fleet picker must speak the
+  // enablement vocabulary too — `airplay` reads as screen mirroring to anyone who has not read
+  // this file, so it stays out of any picker that has a local segment beside it. The per-element
+  // array rows (renderPerElementRow) have no local layer and keep `sharingIcon`'s own `airplay` —
+  // this pins that narrowing down so a later cleanup does not delete `airplay` as "dead".
+  it("a per-key rule row speaks the enablement vocabulary; airplay survives only where there is no local layer", () => {
+    // per-key rows now have a local layer -> users, never airplay
+    expect(FIELD_SHARING_OPTIONS.map(ruleIcon)).not.toContain("airplay");
+    // per-element array rows still have none -> airplay is still their this-device glyph
+    expect(sharingIcon({ kind: "this-device" })).toBe("airplay");
   });
 
   // The follow state carries a glyph even though a default has nothing to say —

@@ -1766,7 +1766,12 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private renderRuleRows(bodyEl: HTMLElement, def: ItemDef, item: Item, doc: Record<string, unknown>, wrap: HTMLElement): void {
     const rows = buildRuleRows(def, item, doc);
     if (rows.length === 0) return;
-    bodyEl.createDiv({ cls: "config-sync-explabel", text: "Key rules" });
+    // Zone-header scrow, same idiom as renderCarrierElements: `this device` heads the local
+    // column once, so the member rows below suppress their per-row eyebrow (showEyebrow: false
+    // in renderRuleRow).
+    const head = bodyEl.createDiv({ cls: "config-sync-scrow" });
+    head.createDiv({ cls: "config-sync-explabel config-sync-explabel-inline", text: "Key rules" });
+    head.createDiv({ cls: "config-sync-explabel config-sync-explabel-inline config-sync-scrow-col4", text: THIS_DEVICE_EYEBROW });
     const panel = bodyEl.createDiv({ cls: "config-sync-card-fields" });
     for (const row of rows) this.renderRuleRow(panel, def, item, row, doc, wrap);
   }
@@ -1790,10 +1795,17 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     };
     // setRule → refreshCardBody rebuilds every rule row, so the icon re-reads the fresh sharing.
     // The rule's removal is the menu's own warning item.
+    // A per-key rule now has its own local layer (below), so the fleet segment must not speak in
+    // "this device" terms any more — `ruleIcon`/`ruleLabel` rename the fourth stop from `This
+    // device`/`airplay` to `Each device decides`/`users` (enablementRow.ts). The STORED value is
+    // still the same `this-device` union member; only the presentation moves to the enablement
+    // vocabulary, matching the fleet pickers above it (renderDefaultEnabledOnRow, renderElementRuleRow).
     this.renderSharingPicker(slots.device, {
       sharing: row.rule.sharing,
       options: FIELD_SHARING_OPTIONS,
       disabled: false,
+      iconFor: ruleIcon,
+      labelFor: ruleLabel,
       onChange: (v) => setRule((r) => ({ ...r, sharing: v, encrypted: v.kind === "this-device" ? false : r.encrypted })),
       extras: [{
         title: "Remove rule",
@@ -1859,6 +1871,31 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         });
       }
     }
+    // This key's own local layer (§8): a per-key rule is fleet-only no longer — `defRef` is this
+    // file's one way to turn a card's def into the ItemRef the host's per-field methods key on
+    // (see itemAnchorId/cardExpandKey above), so this reuses it rather than deriving a second ref.
+    const ref = defRef(def);
+    const excepted = this.host.deviceFieldExceptedFor(ref, row.key);
+    this.paintLocalSegment(fr, {
+      seg: optOutLocalSegment(excepted),
+      isException: excepted,
+      // `this device` is the rules zone's own COLUMN HEADER (renderRuleRows), so the member rows
+      // carry no eyebrow — exactly how renderCarrierElements/renderElementRuleRow do it.
+      showEyebrow: false,
+      menu: () => {
+        const menu = new Menu();
+        for (const entry of buildOptOutLocalMenu(excepted, {
+          follow: () => void this.host.setDeviceFieldExcepted(ref, row.key, false).then(() => this.refreshCardBody(wrap, def)),
+          optOut: () => void this.host.setDeviceFieldExcepted(ref, row.key, true).then(() => this.refreshCardBody(wrap, def)),
+        })) {
+          menu.addItem((i) => {
+            i.setTitle(entry.title).setChecked(entry.checked).onClick(entry.action);
+            if (entry.icon !== null) i.setIcon(entry.icon);
+          });
+        }
+        return menu;
+      },
+    });
     if (row.isArray && row.perElementEnabled) {
       const elements = isStringArrayValue(doc[row.key]) ? (doc[row.key] as string[]) : [];
       const sharings = item.settingsFile?.perElement[row.key] ?? {};
