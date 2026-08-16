@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { FATE_CHIP_ICON } from "../src/ui/fateChipIcons";
 import { ACTION_ICON } from "../src/ui/actionIcons";
 import { FOLD_ICON } from "../src/ui/foldIcons";
-import { buildFileLocalMenu, buildLocalMenu, enablementRowModel, fileEnablementRowModel, ruleIcon, ruleLabel, RULE_OPTIONS } from "../src/ui/enablementRow";
+import { buildOptOutLocalMenu, buildLocalMenu, enablementRowModel, fileEnablementRowModel, ruleIcon, ruleLabel, RULE_OPTIONS } from "../src/ui/enablementRow";
 import { EVERYWHERE } from "../src/core/types";
 
 // Every string buildChips (fateModel.ts) can produce, plus the two chips added
@@ -83,10 +83,10 @@ describe("glyph registry — one glyph, one meaning (icon-collision guard)", () 
   function localMenuHomes(): GlyphHome[] {
     const noop = (): void => {};
     const elementMenu = buildLocalMenu(EVERYWHERE, null, { follow: noop, setState: noop });
-    const fileMenu = buildFileLocalMenu(false, { follow: noop, optOut: noop });
+    const fileMenu = buildOptOutLocalMenu(false, { follow: noop, optOut: noop });
     const homes: GlyphHome[] = [];
     for (const item of elementMenu) if (item.icon !== null) homes.push({ glyph: item.icon, producer: "buildLocalMenu", home: `buildLocalMenu '${item.title}'` });
-    for (const item of fileMenu) if (item.icon !== null) homes.push({ glyph: item.icon, producer: "buildFileLocalMenu", home: `buildFileLocalMenu '${item.title}'` });
+    for (const item of fileMenu) if (item.icon !== null) homes.push({ glyph: item.icon, producer: "buildOptOutLocalMenu", home: `buildOptOutLocalMenu '${item.title}'` });
     return homes;
   }
 
@@ -111,7 +111,7 @@ describe("glyph registry — one glyph, one meaning (icon-collision guard)", () 
     // preview trigger — none behind an exported table either.
     { glyph: "chevron-right", producer: "foldChevron (external, hardcoded)", home: "renderFoldChevron — FOLD family disclosure rotate" },
     { glyph: "chevrons-up-down", producer: "SyncCenterView/SettingTab (external, hardcoded)", home: "PICKER family — two-segment rows + the switcher" },
-    { glyph: "eye", producer: "SettingTab (external, hardcoded)", home: "SETTINGS FILE row — File preview trigger" },
+    { glyph: "eye", producer: "SettingTab (external, hardcoded)", home: "SETTINGS SYNC row — File preview trigger" },
     // DESIGN.md §2.3: the per-item icon toggle, the menu-borne destructive verb, and
     // the File preview's top action line — hardcoded in SettingTab.ts, registered here so a
     // future reuse for a different meaning fails loudly.
@@ -129,7 +129,7 @@ describe("glyph registry — one glyph, one meaning (icon-collision guard)", () 
   // the glyph breaks this test instead of leaving it silently stale — the same "iterate the real
   // producer" discipline `ruleHomes`/`localMenuHomes` above already follow. Scoped to the `follows`
   // state alone: the on/off/not-synced states already resolve to `power`/`power-off`/`circle-slash`,
-  // which `buildLocalMenu`/`buildFileLocalMenu` above already register from their OWN producer — a
+  // which `buildLocalMenu`/`buildOptOutLocalMenu` above already register from their OWN producer — a
   // second registration of the same glyphs under a different producer name here would read as an
   // undeclared collision, not the intentional one-meaning reuse it actually is.
   function localSegmentFollowHomes(): GlyphHome[] {

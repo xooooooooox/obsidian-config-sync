@@ -282,7 +282,12 @@ export async function captureTransform(
   // but for class-scoped (desktop/mobile) + encrypted:true fields, whose store copy lives in the
   // sidecar rather than the main store body. Optional; omitted callers just always re-encrypt
   // these fields fresh (correct default — no prior sidecar to reuse from).
-  priorOwnScopeContent?: string | null
+  priorOwnScopeContent?: string | null,
+  // Patterns THIS device has excepted (deviceFields.ts). Semantics differ from every other rule
+  // here: an exception is a device-local fact with NO fleet consensus behind it, so capture must
+  // leave the store's existing value exactly as it found it. Stripping instead would let one
+  // device's private decision delete another device's data on the next push.
+  deviceExcepted?: string[]
 ): Promise<{ content: string; note: string | null; ownScope: string | null }> {
   if (group.mode === undefined || group.mode === "plain") {
     if (group.fileRule?.encrypted === true) {
@@ -330,17 +335,43 @@ export async function captureTransform(
   // desktop/mobile + encrypted:true (D1 new combo): encrypt the own-class values BEFORE they
   // land in the sidecar — ciphertext goes into __scopes__, never plaintext.
   const ownEncrypt = excludingPerElement(group, classEncryptPatterns(group, deviceClass));
+  // The sidecar as this run found it — the envelope-reuse lookup below and the exception's
+  // preserve-what-you-found rule after it are both asking the same file the same question.
+  const priorScopeParsed = tryParseJson(priorOwnScopeContent);
+  const priorScopeObj = isPlainObject(priorScopeParsed) ? priorScopeParsed : {};
   let outScope = scopeObj;
   if (scopeObj !== null && ownEncrypt.length > 0) {
-    const priorScopeParsed = tryParseJson(priorOwnScopeContent);
-    const priorScopeObj = isPlainObject(priorScopeParsed) ? priorScopeParsed : {};
     const enc: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(scopeObj)) {
       enc[k] = keyMatchesAny(k, ownEncrypt) ? await reuseOrEncryptField(pw, v, priorScopeObj[k]) : v;
     }
     outScope = enc;
   }
-  const classOnlyNames = scopeObj !== null ? Object.keys(scopeObj) : [];
+  // Device exceptions act on TOP-LEVEL keys only, like every other class rule here.
+  const excepted = excludingPerElement(group, deviceExcepted ?? []);
+  // An own-class key's STORE copy lives in the class sidecar, never in the base — the partition
+  // above moved it there before any other rule ran. So "capture leaves the store's existing value
+  // as it found it" has to be honoured HERE as well as on the base below: the sidecar is one file
+  // shared by every device of this class, and publishing this device's private answer into it is
+  // the same cross-device overwrite the exception exists to prevent, one file over. Applied after
+  // the encryption pass so a preserved value — plaintext or envelope — carries over verbatim
+  // rather than being encrypted a second time.
+  if (excepted.length > 0 && outScope !== null) {
+    const kept: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(outScope)) {
+      if (!keyMatchesAny(k, excepted)) kept[k] = v;
+      else if (k in priorScopeObj) kept[k] = priorScopeObj[k];
+      // else: the sidecar never had it and this device must not contribute it — drop.
+    }
+    // A key the sidecar holds but local no longer does: still the store's, still preserved. Limited
+    // to keys the sidecar is entitled to hold (own-class), so a key that has since left this class
+    // is still purged by the ordinary rewrite rather than pinned here forever.
+    for (const [k, v] of Object.entries(priorScopeObj)) {
+      if (keyMatchesAny(k, own) && keyMatchesAny(k, excepted) && !(k in kept)) kept[k] = v;
+    }
+    outScope = kept;
+  }
+  const classOnlyNames = outScope !== null ? Object.keys(outScope) : [];
   // Mark keys that were ALSO encrypted before landing in the sidecar (D1 desktop/mobile+encrypted
   // combo) — otherwise the note reads identically to a plaintext class-scoped key, hiding that
   // ciphertext (not the raw value) is what's sitting in __scopes__.
@@ -364,6 +395,32 @@ export async function captureTransform(
     }
     finalContent = out;
   }
+  // Keys the BASE is forbidden to hold whatever this device thinks: the fleet rule either strips
+  // them (this-device) or pins them to a device class, and ConfigSyncCore's base-hygiene guards
+  // (baseHasStaleLocalKeys / baseHasStaleClassKeys) force a rewrite for as long as one survives
+  // there. An exception can only speak for keys that legitimately live in the base — preserving one
+  // of these from a stale base copy would pin a device-local value in the shared store forever AND
+  // leave the guard demanding a rewrite that never succeeds. Class-scoped exceptions are honoured
+  // on the sidecar above, which is where their store value actually lives.
+  const baseForbidden = [...strip, ...own, ...other];
+  if (excepted.length > 0 && isPlainObject(finalContent)) {
+    const priorObj = isPlainObject(priorStoreParsed) ? priorStoreParsed : {};
+    const out: Record<string, unknown> = {};
+    // Local's key order is preserved: an excepted key keeps its slot and only its VALUE comes
+    // from the store, so a capture that changes nothing writes the same bytes it read.
+    for (const [k, v] of Object.entries(finalContent)) {
+      if (!keyMatchesAny(k, excepted) || keyMatchesAny(k, baseForbidden)) {
+        out[k] = v;
+      } else if (k in priorObj) {
+        out[k] = priorObj[k];
+      }
+      // else: the store never had it and this device must not contribute it — drop.
+    }
+    for (const [k, v] of Object.entries(priorObj)) {
+      if (keyMatchesAny(k, excepted) && !keyMatchesAny(k, baseForbidden) && !(k in out)) out[k] = v;
+    }
+    finalContent = out;
+  }
   return {
     content: JSON.stringify(finalContent, null, 2) + "\n",
     note,
@@ -377,7 +434,8 @@ export async function applyTransform(
   localContent: string | null,
   passphrase: string | null,
   deviceClass: "desktop" | "mobile",
-  ownScopeContent: string | null
+  ownScopeContent: string | null,
+  deviceExcepted?: string[]
 ): Promise<string> {
   if (group.mode === undefined || group.mode === "plain") {
     if (group.fileRule?.encrypted === true) {
@@ -403,9 +461,12 @@ export async function applyTransform(
   const strip = excludingPerElement(group, stripPatterns(group));
   const own = excludingPerElement(group, classPatterns(group, deviceClass));
   const other = excludingPerElement(group, classPatterns(group, otherClass(deviceClass)));
+  // An excepted key behaves exactly like an other-class key on this device: the store never gets
+  // to place it here, and local's own value wins wherever local has one.
+  const excepted = excludingPerElement(group, deviceExcepted ?? []);
   // Other-class keys never belong on this device; own-class keys are preserved from local ONLY
   // when there is no sidecar to supply the authoritative value (degradation path).
-  const classPreserve = [...other, ...(ownScopeContent === null ? own : [])];
+  const classPreserve = [...other, ...(ownScopeContent === null ? own : []), ...excepted];
   // Per-item keys: store's all/own-class elements plus local's "local"-scoped elements
   // (the store never carries "local" elements — capture drops them — so this is the only path
   // that keeps them). Reads the store side from `incoming` (post-decrypt; irrelevant here since
@@ -448,7 +509,8 @@ export async function contentUnchanged(
   storeContent: string,
   passphrase: string | null,
   deviceClass: "desktop" | "mobile",
-  ownScopeContent: string | null
+  ownScopeContent: string | null,
+  deviceExcepted?: string[]
 ): Promise<boolean> {
   if (group.mode === undefined || group.mode === "plain") {
     if (group.fileRule?.encrypted === true) {
@@ -473,9 +535,11 @@ export async function contentUnchanged(
   const pw = requirePassphrase(group, passphrase);
   const own = excludingPerElement(group, classPatterns(group, deviceClass));
   const other = excludingPerElement(group, classPatterns(group, otherClass(deviceClass)));
+  const excepted = excludingPerElement(group, deviceExcepted ?? []);
   // Symmetric with applyTransform's classPreserve: other-class keys are always ignored; own-class
-  // keys are ignored too UNLESS a sidecar is present to overlay the authoritative value.
-  const classIgnore = [...other, ...(ownScopeContent === null ? own : [])];
+  // keys are ignored too UNLESS a sidecar is present to overlay the authoritative value; excepted
+  // keys are ignored too — masked on BOTH sides, or the item reads as to-capture forever.
+  const classIgnore = [...other, ...(ownScopeContent === null ? own : []), ...excepted];
   let storeParsed = JSON.parse(storeContent) as unknown;
   if (ownScopeContent !== null && isPlainObject(storeParsed)) {
     storeParsed = { ...storeParsed, ...(JSON.parse(ownScopeContent) as Record<string, unknown>) };

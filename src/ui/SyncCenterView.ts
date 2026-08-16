@@ -7,11 +7,11 @@ import { EVERYWHERE, FileChanges, FileSharing, GroupResult, hasChanges, ItemRef,
 import { DeviceElementState } from "../core/deviceElements";
 import { RuleListId } from "../core/enablementRules";
 import {
-  buildFileLocalMenu,
+  buildOptOutLocalMenu,
   buildLocalMenu,
   enablementRowModel,
   fileEnablementRowModel,
-  fileLocalSegment,
+  optOutLocalSegment,
   RowSegment,
   RULE_OPTIONS,
   ruleIcon,
@@ -3070,7 +3070,7 @@ export class SyncCenterView extends ItemView {
         jump(e);
       });
       row.createSpan({ cls: "config-sync-tworow-vline" });
-      this.paintLocalSegment(row, fileLocalSegment(optedOut), optedOut, localMenu);
+      this.paintLocalSegment(row, optOutLocalSegment(optedOut), optedOut, localMenu);
       detail.appendChild(row);
       return;
     }
@@ -3105,12 +3105,12 @@ export class SyncCenterView extends ItemView {
     return menu;
   }
 
-  // The entry list is buildFileLocalMenu's (enablementRow.ts) — a DIFFERENT datum from
+  // The entry list is buildOptOutLocalMenu's (enablementRow.ts) — a DIFFERENT datum from
   // buildLocalMenu's element-layer menu (localMenu, above): this is the whole-FILE device opt-out
   // always offering both entries.
   private fileLocalMenu(name: string, optedOut: boolean): Menu {
     const menu = new Menu();
-    for (const entry of buildFileLocalMenu(optedOut, {
+    for (const entry of buildOptOutLocalMenu(optedOut, {
       follow: () => void this.host.setDeviceOptOut(name, false).then(() => this.reload()),
       optOut: () => void this.host.setDeviceOptOut(name, true).then(() => this.reload()),
     })) {

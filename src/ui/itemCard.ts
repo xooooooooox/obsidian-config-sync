@@ -348,6 +348,17 @@ export function encryptToggleDisabled(sharing: Sharing, perElementEnabled: boole
   return encryptDisabledForSharing(sharing) || perElementEnabled;
 }
 
+// Which rule rows carry a "this device" answer of their own (spec §2). A key whose items each have
+// their own rule is governed end to end by the per-item machinery, and that machinery has no local
+// layer — capture and apply read the rules and nothing else, so both entries of a local menu here
+// would produce the same bytes. An option no runtime path will honour is exactly what §2 refused
+// for the element rows one level down; the same refusal applies to the row that turned them on.
+// The stored exception (if the key ever had one) is left alone rather than cleared: turning
+// per-item rules back off restores a control that means something again.
+export function ruleRowHasLocalLayer(row: FieldRowModel): boolean {
+  return !row.perElementEnabled;
+}
+
 // No reverse hint: a lock that can't encrypt does not render at all, so there is no
 // disabled lock left to carry one — the mutual exclusion still surfaces through this hint on the
 // per-item icon while the rule is encrypted.

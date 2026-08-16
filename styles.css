@@ -1373,9 +1373,11 @@ body.is-mobile .config-sync-tworow-chev { display: none; }
    `.config-sync-cardrow`). Nothing anchors to the drawer's right edge — removal verbs live in
    each row's own scope menu, so there is no action column. */
 .config-sync-scrow { display: grid; grid-template-columns: 170px 108px 1px 1fr; align-items: center; column-gap: var(--size-4-2); padding: var(--size-4-1) 0; font-size: var(--font-ui-smaller); }
-/* The controls column as a fixed three-slot grid (DESIGN.md §1.4 SLOTS): aux (eye /
-   per-item icon) | lock | device picker — same-type controls one strict column each, device
-   LAST beside the divider/THIS DEVICE column; a row without a control leaves the slot empty. */
+/* The controls column as a fixed three-slot grid (DESIGN.md §1.4 SLOTS): aux (an array
+   rule row's per-item icon — the path row's own aux slot stays empty, its eye rides the
+   filename line instead) | lock | device picker — same-type controls one strict column each,
+   device LAST beside the divider/THIS DEVICE column; a row without a control leaves the slot
+   empty. */
 .config-sync-scrow-slots { display: grid; grid-template-columns: 24px 24px 44px; align-items: center; column-gap: var(--size-4-2); }
 .config-sync-scrow-slot { display: flex; align-items: center; justify-content: center; min-width: 0; }
 /* STATE controls right-anchor on the card-toggle rail: a folder row's sync toggle
@@ -1387,6 +1389,10 @@ body.is-mobile .config-sync-tworow-chev { display: none; }
    paths never wrap; ellipsis only as the genuine last resort. */
 .config-sync-card-pathline { grid-column: 1 / -1; min-width: 0; overflow: hidden; }
 .config-sync-card-pathline .config-sync-card-path { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* A′: the eye is an action on the FILE, so it rides the filename line, right-flushed inside the
+   existing pathhost flex. Not .config-sync-scrow-end — that is grid-column:4 and would overlap
+   .config-sync-card-pathline's 1/-1 span. */
+.config-sync-card-pathline .config-sync-card-previewicon { margin-left: auto; flex: none; }
 /* The Advanced rule editor's vertical form: one field per scrow row, label | control. */
 .config-sync-advrow { grid-template-columns: 130px 1fr; }
 .config-sync-advrow-ctl { display: flex; align-items: center; min-width: 0; }
@@ -1436,7 +1442,8 @@ body.is-mobile .config-sync-scrow { grid-template-columns: minmax(90px, 32%) 64p
 /* The File preview trigger — same open-state language as
    .config-sync-diffic (FILES row's diff icon): accent while open. */
 /* Quiet-rest family: muted×45% at default
-   icon size, centered like every other slot control. */
+   icon size; positioning (right-flushed on the filename line) comes from
+   .config-sync-card-pathline .config-sync-card-previewicon above, not from here. */
 .config-sync-card-previewicon { display: inline-flex; align-items: center; color: var(--text-muted); cursor: pointer; opacity: 0.45; transition: opacity 0.12s; }
 .config-sync-card-previewicon:hover, .config-sync-card-previewicon:focus-visible { opacity: 1; }
 .config-sync-card-previewicon.is-open { opacity: 1; color: var(--interactive-accent); }
@@ -1451,6 +1458,11 @@ body.is-mobile .config-sync-scrow { grid-template-columns: minmax(90px, 32%) 64p
 /* Flex so the edit state's input + Reset link share one line inside the content column. */
 .config-sync-card-pathhost { min-width: 8em; display: flex; align-items: center; }
 .config-sync-card-pathinput { width: 100%; font-family: var(--font-monospace); font-size: var(--font-ui-smaller); }
+/* Visible, in-card explanation for the fields-mode settings-file row (no fileRule left to draw a
+   picker for) — same click target as the dim settings-2 jump beside it (renderSettingsFilePathRow),
+   styled like .config-sync-expdesc so it reads as a caption, not a control, at rest. */
+.config-sync-card-keyrulesnote { color: var(--text-faint); font-size: var(--font-ui-smaller); cursor: pointer; margin-top: var(--size-2-1); }
+.config-sync-card-keyrulesnote:hover, .config-sync-card-keyrulesnote:focus-visible { color: var(--text-muted); text-decoration: underline dotted var(--text-faint); text-underline-offset: 3px; }
 .config-sync-card-sfbody { margin-top: var(--size-2-2); }
 
 .config-sync-card-fields { margin-bottom: var(--size-4-1); }

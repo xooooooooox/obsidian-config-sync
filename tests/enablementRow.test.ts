@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildFileLocalMenu,
+  buildOptOutLocalMenu,
   buildLocalMenu,
   enabledOnTooltip,
   enablementRowModel,
   fileEnablementRowModel,
-  fileLocalSegment,
+  optOutLocalSegment,
   FOLLOWS_LABEL,
   localSegmentTooltip,
   NOT_SYNCED_HERE_LABEL,
@@ -19,6 +19,7 @@ import {
   THIS_DEVICE_EYEBROW,
 } from "../src/ui/enablementRow";
 import { EVERYWHERE, perClass, THIS_DEVICE } from "../src/core/types";
+import { FIELD_SHARING_OPTIONS, sharingIcon } from "../src/ui/itemCard";
 
 describe("the two-segment row", () => {
   it("names the four rule values exactly as the spec's copy table does", () => {
@@ -29,6 +30,18 @@ describe("the two-segment row", () => {
     expect(RULE_OPTIONS.map(ruleIcon)).toEqual(["monitor-smartphone", "monitor", "smartphone", "users"]);
     expect(RULE_OPTIONS.map(ruleIcon)).not.toContain("sliders-horizontal");
     expect(RULE_OPTIONS.map(ruleIcon)).not.toContain("airplay");
+  });
+
+  // A per-key rule row now has its own local layer (§8), so its fleet picker must speak the
+  // enablement vocabulary too — `airplay` reads as screen mirroring to anyone who has not read
+  // this file, so it stays out of any picker that has a local segment beside it. The per-element
+  // array rows (renderPerElementRow) have no local layer and keep `sharingIcon`'s own `airplay` —
+  // this pins that narrowing down so a later cleanup does not delete `airplay` as "dead".
+  it("a per-key rule row speaks the enablement vocabulary; airplay survives only where there is no local layer", () => {
+    // per-key rows now have a local layer -> users, never airplay
+    expect(FIELD_SHARING_OPTIONS.map(ruleIcon)).not.toContain("airplay");
+    // per-element array rows still have none -> airplay is still their this-device glyph
+    expect(sharingIcon({ kind: "this-device" })).toBe("airplay");
   });
 
   // The follow state carries a glyph even though a default has nothing to say —
@@ -90,9 +103,9 @@ describe("fileEnablementRowModel", () => {
 
   // The fields-mode fallback (a fields-mode item's fleet cell is an italic note, not a menu): the local
   // half alone must still be the SAME producer, not a second hand-typed copy of it.
-  it("fileLocalSegment is the same producer fileEnablementRowModel's local half uses", () => {
+  it("optOutLocalSegment is the same producer fileEnablementRowModel's local half uses", () => {
     for (const optedOut of [false, true]) {
-      expect(fileLocalSegment(optedOut)).toEqual(fileEnablementRowModel({ sharing: EVERYWHERE, optedOut }).local);
+      expect(optOutLocalSegment(optedOut)).toEqual(fileEnablementRowModel({ sharing: EVERYWHERE, optedOut }).local);
     }
   });
 });
@@ -146,27 +159,27 @@ describe("buildLocalMenu", () => {
 // ONE producer for the whole-FILE local menu (spec §6.2/§6.6) — a DIFFERENT datum from
 // buildLocalMenu's above (device opt-out of the entire item, not one element of an enablement
 // list), so it gets its own two-entry producer instead of being folded into the four-value shape.
-describe("buildFileLocalMenu", () => {
+describe("buildOptOutLocalMenu", () => {
   const handlers = { follow: () => {}, optOut: () => {} };
 
   it("always offers exactly follow / not-synced-here, in that order — no omit rule here", () => {
-    expect(buildFileLocalMenu(false, handlers).map((i) => i.title)).toEqual([FOLLOWS_LABEL, NOT_SYNCED_HERE_LABEL]);
-    expect(buildFileLocalMenu(true, handlers).map((i) => i.title)).toEqual([FOLLOWS_LABEL, NOT_SYNCED_HERE_LABEL]);
+    expect(buildOptOutLocalMenu(false, handlers).map((i) => i.title)).toEqual([FOLLOWS_LABEL, NOT_SYNCED_HERE_LABEL]);
+    expect(buildOptOutLocalMenu(true, handlers).map((i) => i.title)).toEqual([FOLLOWS_LABEL, NOT_SYNCED_HERE_LABEL]);
   });
 
   it("follow has no glyph; not-synced-here carries circle-slash, matching the row's set-state icon", () => {
-    expect(buildFileLocalMenu(false, handlers).map((i) => i.icon)).toEqual([null, "circle-slash"]);
+    expect(buildOptOutLocalMenu(false, handlers).map((i) => i.icon)).toEqual([null, "circle-slash"]);
   });
 
   it("checks exactly the current state", () => {
-    const checked = (optedOut: boolean): string[] => buildFileLocalMenu(optedOut, handlers).filter((i) => i.checked).map((i) => i.title);
+    const checked = (optedOut: boolean): string[] => buildOptOutLocalMenu(optedOut, handlers).filter((i) => i.checked).map((i) => i.title);
     expect(checked(false)).toEqual([FOLLOWS_LABEL]);
     expect(checked(true)).toEqual([NOT_SYNCED_HERE_LABEL]);
   });
 
   it("routes each entry to its own handler", () => {
     const seen: string[] = [];
-    const items = buildFileLocalMenu(false, { follow: () => seen.push("follow"), optOut: () => seen.push("optOut") });
+    const items = buildOptOutLocalMenu(false, { follow: () => seen.push("follow"), optOut: () => seen.push("optOut") });
     for (const i of items) i.action();
     expect(seen).toEqual(["follow", "optOut"]);
   });

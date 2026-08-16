@@ -88,10 +88,11 @@ single-row and bulk alike.
 **The settings-drawer row grid (scrow).** Every row in an item card's drawer is a
 `.config-sync-scrow`: `identity 170px | controls 108px | divider 1px | detail 1fr`. The
 controls column is a fixed THREE-SLOT grid (`.config-sync-scrow-slots`: aux 24 | lock 24 |
-device 44) — same-type controls sit in the same slot on every row, so eyes, locks and
-device pickers each form a strict column card-wide; a row without a control leaves its slot
-empty. Slot roles: aux = the File-preview `eye` (path row) or the per-item `list-checks`
-(array rule rows); lock = encrypt toggles; device = every scope/rule picker, LAST so it
+device 44) — same-type controls sit in the same slot on every row, so per-item icons, locks
+and device pickers each form a strict column card-wide; a row without a control leaves its
+slot empty. Slot roles: aux = the per-item `list-checks` (array rule rows) — the path row's
+own aux slot stays empty, since its File-preview `eye` rides the filename line instead (see
+below); lock = encrypt toggles; device = every scope/rule picker, LAST so it
 sits beside the divider/`THIS DEVICE` column (the three control kinds must read as adjacent
 columns, never scattered). STATE controls (a folder row's sync toggle) right-anchor on the
 card-toggle rail via `.config-sync-scrow-end`. Member-row indent lives on the name inside
@@ -99,12 +100,15 @@ the identity cell, never on the row. There is no other drawer grid — `.config-
 is the only row shape.
 
 **The path row.** Zone ②'s path row is TWO scrow lines inside the
-`.config-sync-card-sfhead` container: line 1 = the `SETTINGS FILE` label + the slots
-cluster (`👁 → 🔒 → 🖥⇕`), strictly on the label's own line — a cluster vertically centered
-between label and filename would be anchored to neither; line 2 = the filename spanning the
-full card width (`grid-column: 1 / -1`), so `plugins/<id>/data.json`-length paths never
-wrap. The filename keeps its click-to-edit behavior; the edit input takes the full-width
-line.
+`.config-sync-card-sfhead` container: line 1 = the `SETTINGS SYNC` label + the slots
+cluster (aux empty → `🔒` → `🖥⇕`), strictly on the label's own line — a cluster vertically
+centered between label and filename would be anchored to neither; line 2 = the filename
+spanning the full card width (`grid-column: 1 / -1`), so `plugins/<id>/data.json`-length
+paths never wrap, with the File-preview `eye` riding that same line, pushed to its right end
+(`margin-left: auto` inside the `.config-sync-card-pathhost` flex — never
+`.config-sync-scrow-end`, a fixed `grid-column: 4` track that would overlap this line's
+`1 / -1` span). The filename keeps its click-to-edit behavior; the edit input takes the
+full-width line, eye included.
 
 **Eyebrow type.** `.config-sync-tworow-eyebrow` is the SAME type as the row labels
 (`--font-ui-smaller`, 0.05em tracking, `--text-muted`) — one uppercase label style across a
@@ -185,8 +189,15 @@ double as the self-pane title's capture/coldstart states, with `alert-triangle` 
 `wrench`, `git-branch` · `monitor` / `smartphone` — `sharingIcon`'s Desktop only/Mobile only
 stops (every sharing picker) and the row-level
 desktop-only-plugin badge (`config-sync-card-badge-plat`, itemCard.ts) · `airplay` —
-`sharingIcon` "This device" stop, used ONLY for a plain field/file rule's picker (no local
-layer to speak for). **There is no click-to-cycle control:** every sharing/rule control in
+`sharingIcon` "This device" stop, used ONLY where that rule row has no local layer of its own to
+pair it with — an array element's own per-item rule, a companion folder's device class, the
+Advanced tab's custom-rule editor. An item card's own key rules (`renderRuleRow`, §4 zone ②) pass
+`ruleIcon`/`ruleLabel` instead, the SAME fourth-stop vocabulary `Enabled on` uses (`users`/`Each
+device decides`, §2.3 two-segment row) — the STORED value is unchanged, only the glyph, because
+that row now has its own local segment beside it and a bare `airplay` mark would read as this
+device's identity rather than the fleet's arrangement. `FILE_SHARING_OPTIONS` excludes this stop
+outright, so the settings-file row's own whole-file sharing cell never offers it, either mode.
+**There is no click-to-cycle control:** every sharing/rule control in
 the Settings tab opens an Obsidian `Menu`, through `SettingTab.ts`'s own
 `renderSharingPicker` (the vocabulary model — `sharingIcon`/`nextSharing`/`sharingCycleTooltip` —
 lives in itemCard.ts; `nextSharing` keeps its own unit tests as a pure function even though
@@ -198,14 +209,23 @@ listing `options` with icons + a checkmark on the current value (§2.4). `iconFo
 select the vocabulary; the enablement rows (`Enabled on`, carrier elements) pass
 `ruleIcon`/`ruleLabel` (`enablementRow.ts`) — the SAME producer the Sync Center's own `ruleMenu`
 reads, so both entrances offer identical wording — everything else falls back to
-`sharingIcon`/`sharingLabel`. A disabled cell (the settings-file row's per-key-rules-active
-state) keeps the dim, non-interactive rendering: no menu (but see the ⇕ constant-width rule
-below). `monitor-smartphone` — the "All devices" stop.
+`sharingIcon`/`sharingLabel`. The settings-file row's fields-mode cell is the one sharing cell
+that renders no picker at all — see §4 zone ② for the dim `settings-2` jump that replaces it.
+`monitor-smartphone` — the "All devices" stop.
 
 **The two-segment row** (`ui/enablementRow.ts`): `label | fleet segment | divider | local
 segment`, shared by a Sync Center row's `Enabled on`/`Settings sync`, a plugin card's
 `Enabled on`, and a carrier card's element rows (the word "Default" lives in the fleet
-segment's own tooltip, never in the row label). Both segments are icon-only, glyph + a
+segment's own tooltip, never in the row label). The Settings panel's own item-card path row
+(`renderSettingsFilePathRow`, §4 zone ②) carries the SAME name and now the same shape — its
+label reads `Settings sync` too, and line 1 paints the SAME local segment
+(`paintLocalSegment`/`optOutLocalSegment`, the whole-file device opt-out) beside it, painted
+once ahead of the per-key branch below so it shows whether the card is in whole-file or
+per-key state. It differs only as variant **A′**: the fleet slot is not a single fleet-glyph
+picker but the SLOTS cluster (lock + device picker, §4 zone ②), and its second line (the mono
+filename) carries no label of its own — the File-preview eye rides that line instead, right-flushed
+inside the pathhost flex, never `.config-sync-scrow-end` (a fixed `grid-column: 4` track that
+would overlap the filename line's `1 / -1` span). Both segments are icon-only, glyph + a
 small muted `chevrons-up-down` PICKER affordance, no visible wordmark. Fleet segment:
 `sharingIcon`'s icons for the three device stops, plus `users` for `Each device decides`
 (**never** `airplay` here — the value is about the fleet's arrangement, not this device,
@@ -218,8 +238,10 @@ exception (**On here**/**Off here**) · `circle-slash` for a whole-file local op
 synced here**, deliberately the fold family's glyph — same meaning, "not synced on this
 device"); tooltip `This device: <state>` (`follows the default` / `on here` / `off here` /
 `not synced here`). Click on either segment opens an Obsidian `Menu` (never cycling;
-`ui/enablementRow.ts`'s `buildLocalMenu`/`buildFileLocalMenu` are its one producer each —
-they label the MENU ITEMS, which is a different string from the segment's own tooltip).
+`ui/enablementRow.ts`'s `buildLocalMenu`/`buildOptOutLocalMenu` are its one producer each —
+the latter shared by BOTH two-state local answers, the whole-file opt-out and a per-key rule's
+own exception — they label the MENU ITEMS, which is a different string from the segment's own
+tooltip).
 
 `settings-2` — the sidebar Config Sync
 self-entry tile, the compact switcher's self entry, the self pane's title-row Settings
@@ -291,9 +313,9 @@ accent-colored — the SAME open-state language the switcher has. The menu-open 
 expanded `.config-sync-section`), and a descendant match would light every ⇕ inside an
 expanded section permanently — the ⇕ is always a direct child of its own trigger, so the
 child combinator is exact. **Constant layout is a WIDTH promise too:** a DISABLED picker
-(`.config-sync-dim` on the sharing icon — the settings-file row while per-key rules own the
-file) still renders its ⇕ span — a picker box without the ⇕ is 14px narrower, and the
-centered device slot then drifts its icon out of the column every enabled picker aligns to.
+(`renderSharingPicker`'s `disabled` option, `.config-sync-dim` on the sharing icon) still
+renders its ⇕ span — a picker box without the ⇕ is 14px narrower, and the centered device slot
+then drifts its icon out of the column every enabled picker aligns to.
 The dim picker's ⇕ just never reveals — a suppression rule after the hover-reveal keeps it
 at `opacity: 0` on row hover (it has no menu to open, so `.is-open` can't light it either).
 Mobile (`body.is-mobile`) hides it entirely, no hover to reveal it there; the compact
@@ -311,13 +333,14 @@ open (`.is-open`); an ACTIVE state (`.is-on` cyan lock, `.is-set` accent picker 
 seg, `.is-open` accent eye) is colored at full opacity — one rest shade card-wide, so no control
 reads brighter than its neighbors. Members: the sharing picker (`config-sync-sharingicon`),
 the per-item icon (`config-sync-perelement-ic`), the lock toggle (`config-sync-lock`), the
-File-preview eye (`config-sync-card-previewicon` — muted at the default icon size, centered
-in its aux slot, no extra margin), the two-segment local segment
+File-preview eye (`config-sync-card-previewicon` — muted at the default icon size,
+right-flushed on the filename line via `margin-left: auto`, no extra margin), the two-segment local segment
 (`config-sync-tworow-seg`) and the Sync Center fleet cell (`config-sync-tworow-fleetcell`) — the
 last two sweep BOTH surfaces, per §2.1. Quiet-rest is not the disabled treatment: `config-sync-dim`
 (50%, pointer-events none) still means "can't click", stacked on whatever the control rests at.
 
-`eye` — the SETTINGS FILE row's File preview trigger (§4 Unified card). `list-checks` — the
+`eye` — the SETTINGS SYNC row's File preview trigger, riding the filename's own line
+(§4 Unified card). `list-checks` — the
 per-item device-rules icon toggle on a string-array key's rule row (§4 zone ②). `trash` —
 the destructive verb: menu-borne on removable rows (`Remove rule`/`Remove folder`,
 warning-red, after a separator in the row's own scope menu — there are no inline ✕ buttons),
@@ -601,7 +624,8 @@ noted):
   icon + `chevrons-up-down` — EVERY state has a glyph, `corner-down-right` for `follows`
   included · `power`/`power-off` for an element, `circle-slash`
   for a whole file · tooltip `This device: <state>`; click opens the local menu
-  (`buildLocalMenu`/`buildFileLocalMenu`, §2.3 — they label the MENU ITEMS, a
+  (`buildLocalMenu`/`buildOptOutLocalMenu`, §2.3 — the latter shared by the whole-file opt-out
+  and a per-key rule's own exception alike — they label the MENU ITEMS, a
   different string from the segment's own tooltip). The local cell is ALWAYS visible — glyph,
   eyebrow and the divider before it alike; only its ⇕ picker hint hover-reveals, exactly like
   the fleet cell's (§2.3 hover-reveal law). The per-key fallback's fleet
@@ -613,10 +637,18 @@ noted):
   install`/`Enablement` keep their own textual triggers (`config-sync-menuchip
   config-sync-card-trigger` — no glyph vocabulary for them), styled to the same trigger-box
   family so the card reads as one control language regardless of trigger kind. The Settings
-  tab's plain field/file sharing cell (no local layer to pair with — the settings-file row's
-  whole-file sharing, a rule row's/array-element's per-key sharing, a companion folder's device
-  class) is a picker too (`SettingTab.ts`'s `renderSharingPicker`): icon +
-  `chevrons-up-down`, click opens a `Menu` of `options`, checkmarked on the current value.
+  tab's plain field/file sharing cell is a picker too (`SettingTab.ts`'s `renderSharingPicker`):
+  icon + `chevrons-up-down`, click opens a `Menu` of `options`, checkmarked on the current value.
+  Two of them now pair with their own local layer, same producer as the Sync Center's
+  (`paintLocalSegment`, above) — the settings-file row's whole-file sharing and an ITEM CARD's
+  own key-rules row (`renderRuleRow`, §4 zone ②); an array-element's per-key sharing (either
+  surface) and a companion folder's device class still have none to pair with — and neither does
+  the Advanced tab's custom-rule editor's own rule row (`buildFieldsEditor`): it offers the same
+  `FIELD_SHARING_OPTIONS` values as an item card's key-rules row (still `airplay`/`This device`
+  glyph, never renamed — §2.3), but calls no `paintLocalSegment`, even though a custom item's
+  compiled `SyncGroup` does carry the same `ItemRef` (`ref: itemRef("custom", name)`,
+  `registry.ts`) an item card's key rows key their own exception by — the wiring simply never
+  reached that editor.
 - **Enablement rule (per-plugin, per-element)** — one rule per list element (a plugin, a
   snippet), stored on the CARRIER item that carries the list, set from any of the three
   entrances above through the one pair of producers `ui/enablementRow.ts`/
@@ -831,8 +863,9 @@ noted):
   - **Drawer** `config-sync-item-exp`, up to three zones, every row across all three a
     `.config-sync-scrow` — `identity 170px | controls 108px |
     divider 1px | detail 1fr`, the controls column the fixed three-slot grid (§1.4:
-    aux 👁/`list-checks` | lock | device picker — same-type controls one strict column each,
-    device last beside the divider). Identity holds the row's name (an uppercase zone label, a
+    aux `list-checks` (the path row's own aux slot stays empty — its eye rides the filename
+    line instead, zone ② below) | lock | device picker — same-type controls one strict column
+    each, device last beside the divider). Identity holds the row's name (an uppercase zone label, a
     mono key/filename, or a member name); the divider + detail
     pair renders only on two-segment rows (the local `this device` cell, same as the Sync Center
     card). Only a folder row's sync toggle anchors to the drawer's right edge
@@ -844,8 +877,9 @@ noted):
     both surfaces).
     Every sharing control in a drawer is one picker icon (`config-sync-sharingicon`,
     `renderSharingPicker`): the glyph IS the state (`sharingIcon`: monitor+smartphone = All
-    devices, monitor = Desktop only, smartphone = Mobile only, airplay = This device), a
-    click opens an
+    devices, monitor = Desktop only, smartphone = Mobile only, airplay = This device — except a
+    key-rules row, whose fourth stop borrows `Enabled on`'s own `users` = `Each device decides`,
+    §2.3), a click opens an
     Obsidian `Menu` of that row's own option list, checkmarked on the current value, tooltip
     `Where it syncs (currently: …)`; the `all` default sits at quiet-rest (0.45) and any
     narrower sharing
@@ -866,14 +900,20 @@ noted):
     directly, no `Follows` option in the MENU (there is no shared answer to follow) — landing on
     it for the first time seeds the exception with the plugin's CURRENT state
     (`ruleLandingNeedsSeed`), so switching to it never itself flips the switch.
-    ② **Settings file** — mode is derived, never chosen: no per-key rule anywhere (`rules` and
+    ② **Settings sync** — mode is derived, never chosen: no per-key rule anywhere (`rules` and
     `perElement` both empty) is whole-file state, any rule is per-key state. The path row
     (`config-sync-card-sfhead`, a scrow) IS the zone header — no separate
-    label line: its identity cell stacks the uppercase `SETTINGS FILE` label over the mono
+    label line: its identity cell stacks the uppercase `SETTINGS SYNC` label over the mono
     filename; the `eye` (`config-sync-card-previewicon` — the File
-    preview trigger, see below) sits in the aux SLOT at the family size and quiet-rest shade;
-    the controls cluster holds the 3-option sharing icon (no
-    `This device`) and the lock toggle (`config-sync-lock`) that encrypts the whole file.
+    preview trigger, see below) rides the filename's own line instead, pushed to its right end
+    (`margin-left: auto` inside the pathhost flex, at the family size and quiet-rest shade —
+    never `.config-sync-scrow-end`, a fixed `grid-column: 4` that would overlap the filename
+    line's `1 / -1` span); the controls cluster holds the 3-option sharing icon (no
+    `This device`) and the lock toggle (`config-sync-lock`) that encrypts the whole file. Line 1
+    also carries the row's own local segment (`paintLocalSegment`/`optOutLocalSegment`, §2.3) —
+    THIS device's own opt-out of the whole file (`config-sync-device-optouts`, the same answer the
+    Sync Center's own `Settings sync` row shows) — painted once, ahead of the whole-file/per-key
+    branch below, so it renders in either mode.
     **The lock toggle is THREE-STATE everywhere it appears** (`renderLockToggle`, shared by this
     path row and every rule row): unencrypted-but-available paints an OPEN lock
     (`lock-open`, muted — a closed lock reads as already-encrypted); encrypted paints the closed
@@ -888,9 +928,18 @@ noted):
     own Escape handling would close the settings window otherwise), and a committed custom path
     shows a quiet `Reset to default` text action (`config-sync-reset-link`, registered on
     mousedown so the input's blur-commit can't tear it out first) inside the edit row. In
-    whole-file state the path row's sharing/lock are live; in per-key state the sharing picker
-    renders `config-sync-dim` and disabled (tooltip "Per-key rules are active — remove them to
-    control the whole file again") while the lock disappears (three-state rule above),
+    whole-file state the path row's sharing/lock read `item.settingsFile.fileRule` live; per-key
+    state never reads that field for display at all (§3.2 — `compileSingleFile` stops compiling
+    it the moment the group turns fields-mode, so a whole-file rule left over from before the
+    first per-key rule would state a value nothing enforces any more; it survives in
+    `data.json` only because `pruneSettingsFile` still needs it for a clean round-trip). Its
+    sharing slot instead draws a dim `settings-2` (`config-sync-sharingicon`, no `⇕` — a jump,
+    not a menu) as a `role="button"` link to the Key rules panel below: click/Enter/Space
+    scrolls to it and flashes `config-sync-search-highlight`, the SAME class the search bar's
+    own card jump uses. Its `aria-label` and a VISIBLE line under the row both read `Per-key
+    rules decide — jump to them` (the trailing `↓` lives only in the visible copy — a phone has
+    no hover, so the sentence cannot live in a tooltip alone), while the lock slot renders
+    nothing (three-state rule above),
     and — under their own `KEY RULES` zone label — a rule row
     (`config-sync-card-rulerow`, a scrow) appears per configured
     key — never every key in the file, only ones with a rule; browsing the rest is File
@@ -901,8 +950,14 @@ noted):
     the rule
     is encrypted, tooltip `Per-item device rules — each item gets its own rule`) — flip it on
     and each element gets its own scrow
-    (`config-sync-card-elrow`) instead of one rule for the whole key. The rule's REMOVAL is the
-    warning-red `Remove rule` item in its own scope menu.
+    (`config-sync-card-elrow`) instead of one rule for the whole key. Last in the rule row's own
+    cluster — same producer as the path row's above, appended after the per-item toggle — is its
+    own local segment: THIS device's own exception for that key's rule pattern
+    (`config-sync-device-fields`, keyed by pattern, `core/deviceFields.ts`). The `KEY RULES` zone
+    label doubles as the local column's header (`renderRuleRows`, the SAME `this device` eyebrow
+    the carrier-element list uses once for the whole panel), so individual rule rows suppress
+    their own per-row eyebrow. The rule's REMOVAL is the warning-red `Remove rule` item in its
+    own scope menu.
     Removing the last rule flips the card back to whole-file state. File preview: the `eye`
     icon beside the filename is the trigger (aria-label/tooltip `File preview`,
     keyboard-accessible like the FILES row's
