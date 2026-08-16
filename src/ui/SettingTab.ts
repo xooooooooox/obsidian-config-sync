@@ -187,6 +187,14 @@ export interface SettingsHost extends Plugin {
   // carrier card's badges and of its element list. `deviceElementFor` cannot answer it one element
   // at a time: the table is localStorage (deviceElements.ts), and only main.ts reads that.
   deviceElementIds(list: RuleListId): string[];
+  // The whole-file layer's read/write pair (spec §6.4) — the SAME pair the Sync Center host's
+  // Stop-syncing menu calls, so a row toggled from either surface never drifts from the other.
+  deviceOptedOut(groupName: string): boolean;
+  setDeviceOptOut(groupName: string, optedOut: boolean): Promise<void>;
+  // The per-key sibling of the pair above (spec §6.6, one layer down): which of an item's own
+  // rule patterns THIS device has taken out of sync (deviceFields.ts) — read and write, one pair.
+  deviceFieldExceptedFor(ref: ItemRef, pattern: string): boolean;
+  setDeviceFieldExcepted(ref: ItemRef, pattern: string, excepted: boolean): Promise<void>;
   // The card head's destructive action (spec §6.2). `appendActionHistory` exists on both hosts:
   // the leftover-cleanup entry the Sync Center view records is the same run history.
   stopSyncing(groupName: string, deleteStore: boolean): Promise<string[] | null>;

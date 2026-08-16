@@ -76,6 +76,7 @@ import {
 } from "./core/registry";
 import { enablementRuleFor, enablementRules, RuleListId, withEnablementRule } from "./core/enablementRules";
 import { DEVICE_ELEMENTS_KEY, DeviceElements, DeviceElementState, deviceElementIds, deviceElementState, parseDeviceElements, withDeviceElement } from "./core/deviceElements";
+import { DEVICE_FIELDS_KEY, DeviceFields, deviceFieldExcepted, fieldExceptionsByGroupName, parseDeviceFields, withDeviceField } from "./core/deviceFields";
 import { decideEnablement, EnablementDecision } from "./core/enablementDecision";
 import { classifySettings, CURRENT_SCHEMA, SCHEMA_FUTURE_NOTICE, SCHEMA_UPGRADE_NOTICE, withDefaults } from "./core/settingsMigration";
 import { deviceOptOutsFor, migrateV2Settings } from "./core/v2Migration";
@@ -721,6 +722,10 @@ export default class ConfigSyncPlugin extends Plugin {
           // would not do.
           const decisions = this.decisionsByList();
           const exc = isSwitchListGroup(name) ? ((await this.augmentedSwitchExceptions(rootPath, decisions))[name] ?? []) : [];
+          // Same producer coreContext() feeds ctx.fieldExceptions from (fieldExceptionsByGroupName) —
+          // a preview must not show what a real capture/apply would do while ignoring this device's
+          // own per-key exceptions.
+          const fieldExc = fieldExceptionsByGroupName(this.deviceFields(), this.compiledGroups)[name] ?? [];
           const cls: "desktop" | "mobile" = Platform.isMobile ? "mobile" : "desktop";
           if (dir === "capture") {
             let produced = local ?? "";
@@ -729,7 +734,7 @@ export default class ConfigSyncPlugin extends Plugin {
                 const l = readLocalSwitchList(name, local);
                 if (l !== null) produced = serialize(captureSwitchList(l, store !== null ? parseSwitchList(store) : null, exc));
               } else if (group.mode === "fields") {
-                produced = (await captureTransform(group, local, this.passphrase(), cls, store)).content;
+                produced = (await captureTransform(group, local, this.passphrase(), cls, store, undefined, fieldExc)).content;
               }
             }
             return { base: store ?? "", produced };
@@ -747,7 +752,7 @@ export default class ConfigSyncPlugin extends Plugin {
             } else if (group.mode === "fields") {
               const sidecarPath = `${storeBase}${sidecarStoreSuffix(cls)}`;
               const ownScope = (await io.exists(sidecarPath)) ? await io.read(sidecarPath) : null;
-              produced = await applyTransform(group, store, local, this.passphrase(), cls, ownScope);
+              produced = await applyTransform(group, store, local, this.passphrase(), cls, ownScope, fieldExc);
             }
           }
           return { base: local ?? "", produced };
@@ -1163,6 +1168,23 @@ export default class ConfigSyncPlugin extends Plugin {
     // settings map follows, so opting out and back in leaves the store as it was found.
     this.app.saveLocalStorage("config-sync-device-optouts", names.length > 0 ? JSON.stringify(names) : null);
     this.deviceOptOutsCache = [...names];
+  }
+
+  // Parsed at most once per load — this is read per rule row per render, same discipline as
+  // deviceOptOutsCache above.
+  private deviceFieldsCache: DeviceFields | null = null;
+
+  // Unreadable ⇒ an empty table. Never thrown, and NEVER written back: a shape this build does not
+  // recognise may be a newer build's, and rewriting it here would destroy that device's own answer.
+  private deviceFields(): DeviceFields {
+    if (this.deviceFieldsCache !== null) return this.deviceFieldsCache;
+    this.deviceFieldsCache = parseDeviceFields(this.app.loadLocalStorage(DEVICE_FIELDS_KEY));
+    return this.deviceFieldsCache;
+  }
+
+  private saveDeviceFields(table: DeviceFields): void {
+    this.app.saveLocalStorage(DEVICE_FIELDS_KEY, JSON.stringify(table));
+    this.deviceFieldsCache = table;
   }
 
   private pluginHost(): PluginHost {
@@ -1689,6 +1711,26 @@ export default class ConfigSyncPlugin extends Plugin {
     this.saveDeviceOptOutGroups([...refs]);
   }
 
+  // SettingsHost-facing binding of the same whole-file opt-out read isDeviceOptedOut already backs
+  // for the Sync Center host (syncCenterHost's `deviceOptedOut` above) — one implementation, two
+  // interface names.
+  deviceOptedOut(groupName: string): boolean {
+    return this.isDeviceOptedOut(groupName);
+  }
+
+  // SettingsHost-facing: this device's own exception for one rule's pattern on one item — the
+  // per-key sibling of isDeviceOptedOut/setDeviceOptOut above, one layer down.
+  deviceFieldExceptedFor(ref: ItemRef, pattern: string): boolean {
+    return deviceFieldExcepted(this.deviceFields(), ref, pattern);
+  }
+
+  async setDeviceFieldExcepted(ref: ItemRef, pattern: string, excepted: boolean): Promise<void> {
+    this.saveDeviceFields(withDeviceField(this.deviceFields(), ref, pattern, excepted));
+    // The comparison lens just moved — the panel and the status indicators must re-derive, same
+    // as setDeviceElement/leaveToThisDevice/followTheDefault below.
+    void this.refreshLocalStatus();
+  }
+
   // The More bridge's target item — set here, consumed once by SettingTab.display() via
   // consumePendingSettingsAnchor() below, which expands that item's card and scrolls to it.
   private pendingSettingsDeepLink: ItemRef | null = null;
@@ -1794,6 +1836,7 @@ export default class ConfigSyncPlugin extends Plugin {
       passphrase: this.passphrase(),
       deviceClass: Platform.isMobile ? "mobile" : "desktop",
       switchExceptions: await this.augmentedSwitchExceptions(rootPath, decisions),
+      fieldExceptions: fieldExceptionsByGroupName(this.deviceFields(), this.compiledGroups),
       switchForceOff: this.forcedFrom(decisions, "off"),
       switchForceOn: this.forcedFrom(decisions, "on"),
       // No fieldOverlay: compileItems (registry.ts) already merges every app-slice card's rules

@@ -13,6 +13,7 @@ import { STORE_LOCK_VERSION, WRITTEN_GROUP_KEYS, WRITTEN_LOCK_ENTRY_KEYS, WRITTE
 import { emptyItemMap, withItem, WRITTEN_ITEM_KEYS, type ItemMap } from "../src/core/registry";
 import { perElementKeyFor } from "../src/core/switchList";
 import { DEVICE_ELEMENTS_KEY } from "../src/core/deviceElements";
+import { DEVICE_FIELDS_KEY } from "../src/core/deviceFields";
 import { PASSPHRASE_SECRET_ID } from "../src/core/secrets";
 import { EVERYWHERE, perClass, THIS_DEVICE } from "../src/core/types";
 
@@ -203,6 +204,7 @@ describe("local-storage.schema.json names the keys the code actually uses", () =
   it("documents the device-elements table under its producer's key and the passphrase under the secret id — producer vs. producer", () => {
     const props = parsed.properties as Record<string, unknown>;
     expect(Object.keys(props)).toContain(DEVICE_ELEMENTS_KEY);
+    expect(Object.keys(props)).toContain(DEVICE_FIELDS_KEY);
     expect(Object.keys(props)).toContain(PASSPHRASE_SECRET_ID);
     expect(Object.keys(props)).toEqual(
       expect.arrayContaining(["config-sync-device-optouts", "config-sync-baselines", "config-sync-device-id", "config-sync-coldstart-dismissed"])
