@@ -49,6 +49,10 @@ export interface CoreContext {
   deviceClass: "desktop" | "mobile";
   groupsIO: GroupsIO;
   switchExceptions: Record<string, string[]>; // group name -> masked member ids (decideEnablement's `masked` ∪ auto-derived)
+  // group name -> rule patterns THIS device has excepted (deviceFields.ts). Same shape and same
+  // reason as switchExceptions above: a device-local fact the pure core must be TOLD, never read.
+  // Optional — a bare test context has none.
+  fieldExceptions?: Record<string, string[]>;
   switchForceOff?: Record<string, string[]>; // group name -> ids forced off on apply (a class rule on the wrong device class, or this device's own "Off here" exception)
   switchForceOn?: Record<string, string[]>; // group name -> ids forced on on apply (this device's own "On here" exception; see enablementDecision.ts)
   fieldOverlay?: (group: SyncGroup, topKeys: string[]) => FieldRule[] | null; // runtime category rules (e.g. app.json view rows)
@@ -182,6 +186,10 @@ export function groupForStoreRel(groups: SyncGroup[], rel: string): { name: stri
 
 function excFor(ctx: CoreContext, name: string): string[] {
   return isSwitchListGroup(name) ? (ctx.switchExceptions[name] ?? []) : [];
+}
+
+export function fieldExceptionsFor(ctx: CoreContext, group: SyncGroup): string[] {
+  return ctx.fieldExceptions?.[group.name] ?? [];
 }
 
 // Run-scoped exceptions for a partial-selection apply/capture (Sync Center unified grammar,
@@ -811,14 +819,14 @@ async function captureGroup(
     // never needed for groups with neither, but harmless to read either way (see captureTransform's
     // storeContent doc comment; a switch-list group's real store read already happened above).
     const priorStoreContent = localSwitchList === null && (await ctx.io.exists(store)) ? await ctx.io.read(store) : null;
-    const t = await captureTransform(effGroup, captureInput, ctx.passphrase, ctx.deviceClass, priorStoreContent, existingSidecar);
+    const t = await captureTransform(effGroup, captureInput, ctx.passphrase, ctx.deviceClass, priorStoreContent, existingSidecar, fieldExceptionsFor(ctx, effGroup));
     if (t.note !== null) result.messages.push(t.note);
     await writeClassified(ctx, store, t.content, basename(store), result, async (existing) => {
       if (localSwitchList !== null) {
         const existingSwitchList = parseSwitchList(existing);
         if (existingSwitchList !== null) return switchListsEqual(localSwitchList, existingSwitchList, runExc);
       }
-      const unchanged = await contentUnchanged(effGroup, plainLocalContent, existing, ctx.passphrase, ctx.deviceClass, existingSidecar);
+      const unchanged = await contentUnchanged(effGroup, plainLocalContent, existing, ctx.passphrase, ctx.deviceClass, existingSidecar, fieldExceptionsFor(ctx, effGroup));
       if (!unchanged) return false;
       // force the rewrite that purges stale class keys, stale local-scoped per-item elements, or stale top-level local keys
       return !baseHasStaleClassKeys(effGroup, existing) && !baseHasStalePerElementElements(effGroup, existing) && !baseHasStaleLocalKeys(effGroup, existing);
@@ -858,9 +866,9 @@ async function captureGroup(
     const target = `${store}/${rel}`;
     const plainLocalContent = await ctx.io.read(`${real}/${rel}`);
     if (group.mode === "encrypted") {
-      const t = await captureTransform(group, plainLocalContent, ctx.passphrase, ctx.deviceClass);
+      const t = await captureTransform(group, plainLocalContent, ctx.passphrase, ctx.deviceClass, undefined, undefined, fieldExceptionsFor(ctx, group));
       await writeClassified(ctx, target, t.content, rel, result, (existing) =>
-        contentUnchanged(group, plainLocalContent, existing, ctx.passphrase, ctx.deviceClass, null)
+        contentUnchanged(group, plainLocalContent, existing, ctx.passphrase, ctx.deviceClass, null, fieldExceptionsFor(ctx, group))
       );
     } else {
       await writeClassified(ctx, target, plainLocalContent, rel, result);
@@ -1256,7 +1264,7 @@ async function applyGroup(ctx: CoreContext, group: SyncGroup, stagedMembers?: st
         const sidecarPath = store + sidecarStoreSuffix(ctx.deviceClass);
         const existingSidecar = (await ctx.io.exists(sidecarPath)) ? await ctx.io.read(sidecarPath) : null;
         const effGroup = overlayGroup(ctx, group, [storeContent, localContent, existingSidecar]);
-        content = await applyTransform(effGroup, storeContent, localContent, ctx.passphrase, ctx.deviceClass, existingSidecar);
+        content = await applyTransform(effGroup, storeContent, localContent, ctx.passphrase, ctx.deviceClass, existingSidecar, fieldExceptionsFor(ctx, effGroup));
       }
       await writeClassified(ctx, real, content, basename(real), result);
       // Runtime switching happens AFTER the carrier file write lands (same ordering rationale
@@ -1274,7 +1282,7 @@ async function applyGroup(ctx: CoreContext, group: SyncGroup, stagedMembers?: st
         const storeContent = await ctx.io.read(`${store}/${rel}`);
         const content =
           group.mode === "encrypted"
-            ? await applyTransform(group, storeContent, null, ctx.passphrase, ctx.deviceClass, null)
+            ? await applyTransform(group, storeContent, null, ctx.passphrase, ctx.deviceClass, null, fieldExceptionsFor(ctx, group))
             : storeContent;
         await writeClassified(ctx, target, content, rel, result);
       }

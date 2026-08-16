@@ -219,6 +219,33 @@ describe("compileItems — app card", () => {
     const groups = compileItems(defs, settings({ obsidian: { app: emptyItem() } }));
     expect(findGroup(groups, "app")).toBeUndefined();
   });
+
+  // spec §3.2: a fileRule set before the card switched to per-key rules (mode "plain" ->
+  // "fields") is leftover state, not live configuration — only the "plain" branch of
+  // compileSingleFile ever reads item.settingsFile.fileRule. Pinning this protects the display
+  // fix in a later task from a future "compile it too, while we're at it" regression.
+  it("fields mode never compiles a leftover fileRule, and devices stays 'all'", () => {
+    const defs = buildItemDefs({ cores: [], plugins: [], betaIds: new Set() });
+    const groups = compileItems(
+      defs,
+      settings({
+        obsidian: {
+          app: {
+            synced: true,
+            settingsFile: {
+              mode: "fields",
+              rules: { vimMode: { sharing: perClass("desktop"), encrypted: false } },
+              perElement: {},
+              fileRule: { sharing: perClass("desktop"), encrypted: true },
+            },
+          },
+        },
+      })
+    );
+    const group = findGroup(groups, "app");
+    expect(group?.devices).toBe("all");
+    expect(group?.fileRule).toBeUndefined();
+  });
 });
 
 describe("compileItems — appearance card", () => {

@@ -1,4 +1,4 @@
-import { baseHasStaleLocalKeys, CoreContext, ExternalStoreReader, groupForStoreRel, isSelfStoreRel, loadManifest, overlayGroup, readStoreContractLocals, remoteDeclaresStore, remoteGroupsFrom, remoteStoreContentRels, storeDir, withContractLocals } from "./ConfigSyncCore";
+import { baseHasStaleLocalKeys, CoreContext, ExternalStoreReader, fieldExceptionsFor, groupForStoreRel, isSelfStoreRel, loadManifest, overlayGroup, readStoreContractLocals, remoteDeclaresStore, remoteGroupsFrom, remoteStoreContentRels, storeDir, withContractLocals } from "./ConfigSyncCore";
 import { isJunkPath, listFilesRecursive } from "./io";
 import { basename, groupStorePath, relativeTo, sidecarStoreSuffix } from "./pathing";
 import { FileChanges, hasChanges, itemRef, StoreLock, StoreLockEntry, SyncGroup } from "./types";
@@ -114,7 +114,7 @@ async function compareFile(ctx: CoreContext, group: SyncGroup, real: string, sto
     switchEqual !== null
       ? switchEqual
       : parseFileEnvelope(storeContent) !== null || effGroup.mode === "fields" || effGroup.mode === "encrypted"
-        ? await contentUnchanged(effGroup, liveContent, storeContent, ctx.passphrase, ctx.deviceClass, ownScope)
+        ? await contentUnchanged(effGroup, liveContent, storeContent, ctx.passphrase, ctx.deviceClass, ownScope, fieldExceptionsFor(ctx, effGroup))
         : liveContent === storeContent;
   const staleLocal = equal && baseHasStaleLocalKeys(effGroup, storeContent);
   const changes: FileChanges = equal
