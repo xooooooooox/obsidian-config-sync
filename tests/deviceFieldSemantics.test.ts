@@ -13,7 +13,13 @@ const group: SyncGroup = {
 };
 
 const local = JSON.stringify({ colorGroups: ["mine"], scale: 1 }, null, 2) + "\n";
-const store = JSON.stringify({ colorGroups: ["theirs"], scale: 1 }, null, 2) + "\n";
+// Deliberately the OPPOSITE key order from `local`: an implementation that rebuilds the object by
+// spreading non-excepted keys first and appending excepted keys from the store afterwards would
+// converge to a stable-but-wrong order on the first capture, and the idempotence test below would
+// still pass (same wrong order reproduced twice). Only a genuinely order-preserving
+// implementation — one that walks local's own key order and swaps in the store's value for an
+// excepted key's slot — produces output whose keys match `local`'s order, not `store`'s.
+const store = JSON.stringify({ scale: 1, colorGroups: ["theirs"] }, null, 2) + "\n";
 
 describe("capture with a device exception", () => {
   it("keeps the store's value for the excepted key — never publishes the local one", async () => {
@@ -29,6 +35,9 @@ describe("capture with a device exception", () => {
 
   it("is idempotent — a second capture reproduces the same bytes", async () => {
     const first = await captureTransform(group, local, null, "desktop", store, null, ["colorGroups"]);
+    // Local's key order ("colorGroups", "scale"), not the store's ("scale", "colorGroups") —
+    // proves the excepted key kept local's slot rather than being appended from the store.
+    expect(Object.keys(JSON.parse(first.content) as Record<string, unknown>)).toEqual(["colorGroups", "scale"]);
     const second = await captureTransform(group, local, null, "desktop", first.content, null, ["colorGroups"]);
     expect(second.content).toBe(first.content);
   });
