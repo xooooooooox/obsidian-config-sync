@@ -120,6 +120,9 @@ describe("glyph registry — one glyph, one meaning (icon-collision guard)", () 
     { glyph: "list-checks", producer: "SettingTab (external, hardcoded)", home: "rule row — Per-item device rules icon toggle" },
     { glyph: "trash", producer: "SettingTab (external, hardcoded)", home: "scope menus — Remove rule / Remove folder (19d)" },
     { glyph: "plus", producer: "SettingTab (external, hardcoded)", home: "File preview hint line — click a key to add a rule" },
+    // 定稿轮 23 ② (DESIGN.md §2.3): the encrypt toggle's rest state — closed `lock` stays the
+    // encrypted state everywhere (mode badge / json keys / legend + the toggle's on-state).
+    { glyph: "lock-open", producer: "SettingTab (external, hardcoded)", home: "renderLockToggle — unencrypted-but-available rest state" },
   ];
 
   // The local segment's `follows` glyph (round-9 ②, DESIGN.md icon table): `corner-down-right` is

@@ -148,6 +148,9 @@ were implementation words; "Per-key rules" is the drawer's own vocabulary for th
 ### 2.3 Lucide usage (setIcon)
 
 `refresh-cw` ribbon + both panel refreshes + status-bar item · `lock` mode badge ·
+`lock-open` the encrypt toggle's rest state (轮 23 ②: unencrypted-but-available — a closed lock
+there read as already-encrypted; closed `lock` stays the ENCRYPTED state everywhere, toggle
+on-state and pure state markers alike) ·
 `key-round` locked state · `chevron-down/right` settings rows · `x` clear/remove ·
 `trash` delete · `folder-open` browse · `rotate-cw` BRAT re-scan · `arrow-up-from-line` /
 `arrow-down-to-line` / `cloud-upload` / `cloud-download` sync-action icons (the first two
@@ -268,7 +271,12 @@ open-state language the switcher already had. The menu-open selector is `.is-ope
 CHILD combinator (轮 18 bugfix): `.is-open` doubles as fold state on far ancestors (an expanded
 `.config-sync-section`), and a descendant match lit every ⇕ inside an expanded section
 permanently — the ⇕ is always a direct child of its own trigger, so the child combinator is
-exact. Mobile (`body.is-mobile`) hides it entirely, no
+exact. A DISABLED picker (`.config-sync-dim` on the sharing icon — the settings-file row while
+per-key rules own the file) still renders its ⇕ span (轮 23 #166 ①): constant layout is a WIDTH
+promise too — a picker box without the ⇕ is 14px narrower, and the centered device slot then
+drifts its icon out of the column every enabled picker aligns to. The dim picker's ⇕ just never
+reveals — a suppression rule after the hover-reveal keeps it at `opacity: 0` on row hover (it has
+no menu to open, so `.is-open` can't light it either). Mobile (`body.is-mobile`) hides it entirely, no
 hover to reveal it there; the compact section switcher's own `config-sync-switcher-chev` is the
 one deliberate exception, staying always visible on every platform (it is the sole entrance to
 the section list on mobile, where the sidebar is gone). **The hover-reveal belongs to the ⇕
@@ -276,7 +284,20 @@ glyph ALONE (定稿轮 18, overturning 轮 17④):** extending it to a two-segme
 cell — eyebrow + glyph + divider appearing and vanishing with the row's hover — was tried and
 rejected (#139/#140): a whole cell that materializes on hover reads as missing content at rest,
 on every surface. State (the local cell, the divider) is always visible; only the affordance
-hint (⇕) is hover-dependent. `eye` — the SETTINGS
+hint (⇕) is hover-dependent.
+**Quiet-rest (定稿轮 24 甲, #167):** every CLICKABLE icon control rests at `--text-muted` ×
+`opacity: 0.45` and lifts to `opacity: 1` on its own hover/focus-visible or while its menu is
+open (`.is-open`); an ACTIVE state (`.is-on` cyan lock, `.is-set` accent picker / purple local
+seg, `.is-open` accent eye) is colored at full opacity — one rest shade card-wide, so no control
+reads brighter than its neighbors. Members: the sharing picker (`config-sync-sharingicon`) and
+per-item icon (`config-sync-perelement-ic`), which carried the idiom first, plus (轮 24) the
+lock toggle (`config-sync-lock`), the File-preview eye (`config-sync-card-previewicon` — also
+re-set from its legacy faint color, 14px size and 6px beside-the-filename margin to muted at the
+default icon size, centered in its aux slot), the two-segment local segment
+(`config-sync-tworow-seg`) and the Sync Center fleet cell (`config-sync-tworow-fleetcell`) — the
+last two sweep BOTH surfaces, per §2.1. Quiet-rest is not the disabled treatment: `config-sync-dim`
+(50%, pointer-events none) still means "can't click", stacked on whatever the control rests at.
+`eye` — the SETTINGS
 FILE row's File preview trigger (§4 below), replacing the collapsed `▸ File preview` text row.
 All three registered by hand in the icon-collision guard alongside `file-diff`/`settings-2`.
 **定稿轮 19 additions:** `list-checks` — the per-item device-rules icon toggle on a string-array
@@ -638,6 +659,22 @@ noted):
   error inline with the CONCRETE reason — the no-error sentinel is `null`, never `""` (轮 21
   #158: the empty-string sentinel collided with the unnamed placeholder rule's empty name, so a
   SUCCESSFUL save showed a blank "Couldn't save this change — ." on the unnamed row).
+- **Remote editor** (定稿轮 24 补 #168, `renderRemoteForm`): the SAME vertical form grammar on a
+  wider label track (`config-sync-remrow`, `label 150px | control 1fr` — the longest label is
+  `STORE FOLDER IN REPO`). TYPE: a text menu picker (`config-sync-menuchip` + ⇕, same idiom as
+  MODE — the old DropdownComponent retired). NAME: input, placeholder `e.g. work-laptop`,
+  required-`*` on the label (`config-sync-required`, kept from the old form). Vault type —
+  STORE PATH: the path input inside a `config-sync-pathbox` whose TRAILING segment, behind the
+  thin divider, is the `folder-open` Browse… icon (desktop only). Git type — URL / BRANCH /
+  STORE FOLDER IN REPO inputs, ACCESS TOKEN (Obsidian's secret picker in
+  `config-sync-secret-control`) with its status sentence on a label-less row underneath, then a
+  label-less `Test connection` row + the full-width test strip. **No Username field** (轮 24 补
+  #169): a linked token is enough — live-tested against a self-hosted GitLab as well — so the
+  input is gone; a `username` already stored in `data.json` still validates and still reaches
+  git auth (types/manifest/resolveGitToken untouched), it just has no UI. The
+  `Keep Config Sync's own settings out of this remote` toggle row closes the form unchanged
+  (`excludeSelf` — live on the whole pull/push/compare chain, NOT outdated). Every handler stays
+  `draft.x = …; saveRemotes()` behind the settingsWritable guard; behavior is untouched.
 - **Beta tab header** (轮 21C/22): the BRAT map note is a quiet one-line status
   (`config-sync-beta-mapnote`: muted text `Matched from BRAT's beta list · N of M repos
   resolved` + a small `rotate-cw` re-scan icon) that renders ONLY while something is
@@ -741,23 +778,33 @@ noted):
     `perElement` both empty) is whole-file state, any rule is per-key state. The path row
     (`config-sync-card-sfhead`, a scrow) IS the zone header now (定稿轮 19c #144 — no separate
     label line): its identity cell stacks the uppercase `SETTINGS FILE` label over the mono
-    filename + an `eye` icon 6px after it (round-12, `config-sync-card-previewicon` — the File
-    preview trigger, see below); the controls cluster holds the 3-option sharing icon (no
-    `This device`) and the lock icon toggle (`config-sync-lock`, `.is-on` when encrypted) that
-    encrypts the whole file. The path text itself is the edit entry point
+    filename; the `eye` (round-12, `config-sync-card-previewicon` — the File
+    preview trigger, see below) sits in the aux SLOT at the family size and quiet-rest shade
+    (轮 24 — its 6px beside-the-filename margin and 14px size are gone);
+    the controls cluster holds the 3-option sharing icon (no
+    `This device`) and the lock toggle (`config-sync-lock`) that encrypts the whole file.
+    **The lock toggle is THREE-STATE everywhere it appears** (`renderLockToggle`, shared by this
+    path row and every rule row — 定稿轮 23 ②): unencrypted-but-available paints an OPEN lock
+    (`lock-open`, muted — a closed lock read as already-encrypted); encrypted paints the closed
+    `lock`, `.is-on` cyan; and a lock that can neither show state nor take a click (disabled AND
+    unencrypted) paints NOTHING — its empty slot keeps the lock column, and no tooltip attaches
+    to the blank space (#159's lesson). Only disabled+encrypted, unreachable through the UI
+    today, still paints a dim closed lock: state is never hidden.
+    The path text itself is the edit entry point
     (`config-sync-card-pathbtn`, hover = dotted underline + soft backdrop; `.is-custom` accent
     once a custom path is committed): click it and the identity cell swaps to an input — Enter/blur
     commits, Escape cancels via a keymap `Scope` pushed while the input is focused (Obsidian's
     own Escape handling would close the settings window otherwise), and a committed custom path
     shows a quiet `Reset to default` text action (`config-sync-reset-link`, registered on
     mousedown so the input's blur-commit can't tear it out first) inside the edit row. In
-    whole-file state the path row's sharing/lock are live; in per-key state they render
-    `config-sync-dim` and disabled (tooltip "Per-key rules are active — remove them to control
-    the whole file again"), and — under their own `KEY RULES` zone label — a rule row
+    whole-file state the path row's sharing/lock are live; in per-key state the sharing picker
+    renders `config-sync-dim` and disabled (tooltip "Per-key rules are active — remove them to
+    control the whole file again") while the lock simply disappears (three-state rule above),
+    and — under their own `KEY RULES` zone label — a rule row
     (`config-sync-card-rulerow`, a scrow) appears per configured
     key — never every key in the file, only ones with a rule; browsing the rest is File
     preview's job (below). A rule row's identity is the mono key itself; its cluster is
-    scope-picker → lock (disabled at `This device` or while per-item rules are on) → for a
+    scope-picker → lock → for a
     string-array key, the per-item icon toggle (定稿轮 19c #143: lucide `list-checks`,
     `config-sync-perelement-ic` — off faint / on `.is-set` accent, disabled+dim while the rule
     is encrypted, tooltip `Per-item device rules — each item gets its own rule`; the old
@@ -816,7 +863,12 @@ noted):
     the warning-gated path edit, never removed outright, so its menu has no such item). A
     trailing quiet `+ Add folder` row
     (`config-sync-add-row-quiet`, no longer a full-width button) closes every card (a card with
-    zero rows renders no `Folders` header, just the Add-folder row). Opening
+    zero rows renders no `Folders` header, just the Add-folder row) — EXCEPT a carrier's
+    (轮 23 #166 ③): the two switch registries are lists of on/off choices, a folder has no
+    meaning attached to them (syncing an arbitrary folder is the Advanced rule form's job), so a
+    carrier card renders no Add-folder entry point at all; a legacy user-added folder on a
+    carrier, if one exists in config, still renders its row normally — visible and removable,
+    never silently active. Opening
     `snippets/` lists members (`config-sync-card-snippetmembers`), each its own sharing icon — it
     writes `enabledCssSnippets` AND decides whether the file itself travels — the only companion
     whose members carry a sharing control (a fleet-only scrow: identity name + the lone picker in

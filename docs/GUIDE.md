@@ -169,7 +169,7 @@ A plugin's on/off state lives on its own card, in its **Enabled on** zone (short
 
 #### Settings file
 
-Starts as one path row: the file's path, a sharing icon (no `This device` here) and a lock toggle that encrypts the whole file. The path text itself is the edit entry point:
+Starts as one path row: the file's path, a sharing icon (no `This device` here) and a lock toggle that encrypts the whole file — the lock shows **open** until you encrypt, closed and colored once you have. The path text itself is the edit entry point:
 
 - Click it to edit in place (Enter commits, Esc cancels).
 - While editing a committed custom path, a quiet **Reset to default** action restores the built-in default.
@@ -178,14 +178,14 @@ The eye icon beside the filename opens the **File preview** — a read-only view
 
 The moment a card has any per-key rule, it switches to per-key mode:
 
-- The path row's own sharing/lock dim (each ruled key now governs itself).
-- A **Key rules** list appears with a row per configured key: its own sharing icon and a lock toggle (greyed out at `This device`). To remove the rule, open the key's sharing menu and pick **Remove rule** at the bottom.
+- The path row's own sharing icon dims and its lock disappears (each ruled key now governs itself).
+- A **Key rules** list appears with a row per configured key: its own sharing icon and a lock toggle. A key that can't be encrypted — its rule is `This device`, or Per-item device rules are on — shows no lock at all. To remove the rule, open the key's sharing menu and pick **Remove rule** at the bottom.
 - A string-array key's rule adds a **Per-item device rules** icon (a small checklist, lit when on) so each element gets its own sharing icon instead of one rule for the whole key.
 - Removing the last rule reverts the card to whole-file mode.
 
 #### Folders
 
-Lists any vault-relative folder that travels with the item — Appearance ships `themes/` and `snippets/` as presets, and every card's drawer ends with a quiet **+ Add folder** row to add any other path (duplicates and paths already claimed by another item are rejected).
+Lists any vault-relative folder that travels with the item — Appearance ships `themes/` and `snippets/` as presets, and every card's drawer ends with a quiet **+ Add folder** row to add any other path (duplicates and paths already claimed by another item are rejected). The two on/off-list cards — **Core plugins** and **Community plugins** — are the exception: a folder has nothing to attach to there, so they carry no Add-folder row (to sync an arbitrary folder, add a custom rule under Advanced).
 
 - Each folder row has a sharing icon and a sync toggle, and clicking the folder's name opens its path for editing. A folder you added yourself is removed from its sharing menu's **Remove folder** entry; presets can only be relocated, never removed.
 - A folder's file list is collapsed behind a `· N files`/`· N themes` count — click to expand it.
@@ -199,14 +199,14 @@ Lists any vault-relative folder that travels with the item — Appearance ships 
 
 #### Remotes
 
-Desktop only. Add a **git repository** (URL, branch, optional folder) or **another vault**: click **Browse…**, pick the vault folder, and the store inside it is auto-detected. Each remote also has a **Keep Config Sync's own settings out of this remote** toggle: turn it on for a remote vault that keeps its own setup, and Pull, Push and the comparison stop touching Config Sync's own settings there. An https git remote can also carry an **access token** (a GitLab/GitHub personal access token): press **Link** to store it in Obsidian's keychain — or pick a secret already there — and Config Sync authenticates with it directly, with no reliance on the machine's git sign-in. Only the secret's name is written to the settings, and the remotes list is a this-device field Config Sync never sends anywhere — so every device links its own token once, and one that hasn't (because you copied `data.json` across, or removed the secret here) says so plainly instead of failing obscurely. Leave **Username** empty unless the host checks it: GitHub and GitLab.com ignore the username on token auth, while a self-hosted GitLab rejects anything but the account's own name.
+Desktop only. Add a **git repository** (URL, branch, optional folder) or **another vault**: click **Browse…**, pick the vault folder, and the store inside it is auto-detected. Each remote also has a **Keep Config Sync's own settings out of this remote** toggle: turn it on for a remote vault that keeps its own setup, and Pull, Push and the comparison stop touching Config Sync's own settings there. An https git remote can also carry an **access token** (a GitLab/GitHub personal access token): press **Link** to store it in Obsidian's keychain — or pick a secret already there — and Config Sync authenticates with it directly, with no reliance on the machine's git sign-in. Only the secret's name is written to the settings, and the remotes list is a this-device field Config Sync never sends anywhere — so every device links its own token once, and one that hasn't (because you copied `data.json` across, or removed the secret here) says so plainly instead of failing obscurely.
 
 ## Field rules & sensitive settings
 
 Every field or file rule is a `{sharing, encrypted}` pair, set per key (or per file, when the item has no per-key rules) from a card's Settings file zone.
 
 - **Sharing** — `All devices` keeps the key shared and identical everywhere; `Desktop only`/`Mobile only` keep it shared but let each device class hold its own value, in a `__scopes__` sidecar next to the file's store copy (that filename is a stored path, unchanged since 1.x, so existing stores keep working — e.g. `app.json`'s `userIgnoreFilters`, per-device search-ignore patterns, is commonly set `Desktop only`); `This device` (per-key rules only, not the whole-file rule) keeps a key out of the store entirely and never leaves this machine — Apply preserves the local value.
-- **Encrypt** — stores the value (or, for the whole-file rule, the whole file) as an encrypted envelope and decrypts it on Apply, so credentials can travel safely; a value that hasn't actually changed keeps its existing envelope, so an unrelated edit never makes it look changed in a diff. Greyed out at `This device`, since a value that never leaves the device has nothing to encrypt for transit.
+- **Encrypt** — stores the value (or, for the whole-file rule, the whole file) as an encrypted envelope and decrypts it on Apply, so credentials can travel safely; a value that hasn't actually changed keeps its existing envelope, so an unrelated edit never makes it look changed in a diff. Not offered at `This device` (the lock disappears from the row), since a value that never leaves the device has nothing to encrypt for transit.
 - **Per-item device rules** — a string-array key (a plugin's enabled elements, a CSS-snippets list, `userIgnoreFilters`…) can give each element its own sharing rule instead of one rule for the whole key, so each entry travels or stays local independently.
 
 #### Passphrase & keychain

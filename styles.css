@@ -217,32 +217,6 @@
   width: 100%;
 }
 
-.config-sync-form-line1 {
-  display: grid;
-  grid-template-columns: 10em 1fr;
-  gap: var(--size-4-3);
-  margin-bottom: var(--size-4-2);
-}
-
-.config-sync-form-line1.has-name {
-  grid-template-columns: minmax(8em, 14em) 10em 1fr;
-}
-
-.config-sync-form-line2 {
-  display: grid;
-  grid-template-columns: 7em 8em 1fr 1fr;
-  gap: var(--size-4-3);
-}
-
-.config-sync-form-label {
-  display: block;
-  color: var(--text-muted);
-  font-size: var(--font-ui-smaller);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin-bottom: var(--size-2-1);
-}
-
 .config-sync-add-row {
   display: flex;
   align-items: center;
@@ -271,38 +245,6 @@
   border-radius: var(--radius-s);
   padding: 0 var(--size-2-2);
   flex: none;
-}
-
-.config-sync-remote-path {
-  display: flex;
-  align-items: flex-end;
-  gap: var(--size-4-2);
-}
-
-.config-sync-remote-path > div:first-child {
-  flex: 1;
-}
-
-.config-sync-remote-git {
-  display: grid;
-  grid-template-columns: 1fr 8em 1fr;
-  gap: var(--size-4-3);
-}
-
-/* Labels may wrap to two lines; inputs stay on one shared baseline. */
-.config-sync-remote-git > div {
-  display: flex;
-  flex-direction: column;
-}
-.config-sync-remote-git > div input {
-  margin-top: auto;
-}
-
-.config-sync-remote-test {
-  display: flex;
-  align-items: center;
-  gap: var(--size-4-2);
-  margin-top: var(--size-4-2);
 }
 
 .config-sync-test-strip:empty {
@@ -337,24 +279,6 @@
   color: var(--color-red);
   background: rgba(var(--color-red-rgb), 0.1);
   border-color: rgba(var(--color-red-rgb), 0.4);
-}
-
-.config-sync-remote-token {
-  display: grid;
-  grid-template-columns: 1fr 12em;
-  gap: var(--size-4-3);
-  margin-top: var(--size-4-3);
-}
-
-.config-sync-remote-token > div {
-  display: flex;
-  flex-direction: column;
-}
-
-/* token control and username input share a bottom baseline even if a label wraps */
-.config-sync-secret-control,
-.config-sync-remote-token > div input {
-  margin-top: auto;
 }
 
 .config-sync-secret-control {
@@ -400,20 +324,6 @@
 }
 
 /* Phone layout — Obsidian sets body.is-phone; no pixel breakpoints */
-body.is-phone .config-sync-form-line1,
-body.is-phone .config-sync-form-line1.has-name,
-body.is-phone .config-sync-form-line2 {
-  grid-template-columns: 1fr;
-}
-
-body.is-phone .config-sync-remote-git {
-  grid-template-columns: 1fr;
-}
-
-body.is-phone .config-sync-remote-token {
-  grid-template-columns: 1fr;
-}
-
 body.is-phone .config-sync-item-wrap .setting-item {
   flex-direction: column;
   align-items: stretch;
@@ -1274,8 +1184,9 @@ body.is-mobile .config-sync-cardrow:not(.is-iconrow) > .config-sync-explabel-inl
    cells directly on `.config-sync-cardrow`'s four tracks (round-9 ⑤ below), and the Settings
    drawer's `.config-sync-scrow` does exactly the same on ITS four tracks — the old nested
    `.config-sync-tworow` wrapper (one cell of the retired `.config-sync-grid`) is gone. */
-.config-sync-tworow-seg { display: inline-flex; align-items: center; gap: 2px; border-radius: var(--radius-s); padding: 3px 6px; font-size: var(--font-ui-smaller); color: var(--text-muted); cursor: pointer; white-space: nowrap; }
-.config-sync-tworow-seg:hover, .config-sync-tworow-seg:focus-visible { color: var(--text-normal); background: var(--background-modifier-hover); }
+.config-sync-tworow-seg { display: inline-flex; align-items: center; gap: 2px; border-radius: var(--radius-s); padding: 3px 6px; font-size: var(--font-ui-smaller); color: var(--text-muted); cursor: pointer; white-space: nowrap; opacity: 0.45; transition: opacity 0.12s; }
+.config-sync-tworow-seg:hover, .config-sync-tworow-seg:focus-visible { opacity: 1; color: var(--text-normal); background: var(--background-modifier-hover); }
+.config-sync-tworow-seg.is-open { opacity: 1; }
 .config-sync-tworow-ic { display: inline-flex; align-items: center; }
 .config-sync-tworow-ic .svg-icon { width: var(--icon-s); height: var(--icon-s); }
 /* Faint tier (定稿轮 17①), matching the quiet zone's indent-guide rule. */
@@ -1302,6 +1213,10 @@ body.is-mobile .config-sync-cardrow:not(.is-iconrow) > .config-sync-explabel-inl
   opacity: 1;
 }
 .is-open > .config-sync-tworow-chev { color: var(--interactive-accent); }
+/* A DISABLED picker still renders its ⇕ span so the box keeps its enabled width (轮 23 #166 ①:
+   without it the centered device slot drifted the icon ~7px out of the column) — but it has no
+   menu to open, so the row-hover reveal above must never light it. */
+.config-sync-sharingicon.config-sync-dim .config-sync-tworow-chev { opacity: 0; }
 /* Mobile has no hover to reveal it (same degradation the fold chevron takes, round-12 乙) — the
    mobile section switcher (`.config-sync-switcher-chev`, its own class, its own always-visible
    rule below) is the one deliberate exception: it is the sole entrance to the section list there. */
@@ -1314,7 +1229,7 @@ body.is-mobile .config-sync-tworow-chev { display: none; }
 /* Typeset exactly like the row labels (轮 20 ① — label and eyebrow used to read as two fonts);
    purple on a set exception lives on the segment alone. */
 .config-sync-tworow-eyebrow { color: var(--text-muted); font-size: var(--font-ui-smaller); text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap; }
-.config-sync-tworow-localcell.is-set .config-sync-tworow-seg { color: var(--color-purple); }
+.config-sync-tworow-localcell.is-set .config-sync-tworow-seg { color: var(--color-purple); opacity: 1; }
 /* NO rest-hiding of the local cell (定稿轮 18, overturning 轮 17④'s experiment): the cell,
    its eyebrow and the divider before it are state and stay visible on every surface — the
    hover-reveal idiom's scope is the ⇕ glyph alone (the -chev rules above). */
@@ -1326,9 +1241,10 @@ body.is-mobile .config-sync-tworow-chev { display: none; }
    above — scoped to a direct child of `.config-sync-cardrow` so the settings card's OWN use of
    `.config-sync-tworow-vline`/`-localcell` (inside `.config-sync-tworow`'s 3-column grid,
    unrelated to these tracks) is untouched. */
-.config-sync-cardrow > .config-sync-tworow-fleetcell { grid-column: 2; display: inline-flex; align-items: center; gap: 2px; border-radius: var(--radius-s); padding: 3px 6px; color: var(--text-muted); cursor: pointer; }
-.config-sync-cardrow > .config-sync-tworow-fleetcell:hover, .config-sync-cardrow > .config-sync-tworow-fleetcell:focus-visible { color: var(--text-normal); background: var(--background-modifier-hover); }
-.config-sync-cardrow > .config-sync-tworow-fleetcell.is-set { color: var(--text-normal); }
+.config-sync-cardrow > .config-sync-tworow-fleetcell { grid-column: 2; display: inline-flex; align-items: center; gap: 2px; border-radius: var(--radius-s); padding: 3px 6px; color: var(--text-muted); cursor: pointer; opacity: 0.45; transition: opacity 0.12s; }
+.config-sync-cardrow > .config-sync-tworow-fleetcell:hover, .config-sync-cardrow > .config-sync-tworow-fleetcell:focus-visible { opacity: 1; color: var(--text-normal); background: var(--background-modifier-hover); }
+.config-sync-cardrow > .config-sync-tworow-fleetcell.is-open { opacity: 1; }
+.config-sync-cardrow > .config-sync-tworow-fleetcell.is-set { opacity: 1; color: var(--text-normal); }
 .config-sync-cardrow > .config-sync-tworow-vline { grid-column: 3; }
 .config-sync-cardrow > .config-sync-tworow-localcell { grid-column: 4; }
 /* The per-key/fields-mode fallback fleet cell (spec §6.1 C-#25): plain italic note text, no icon,
@@ -1460,6 +1376,11 @@ body.is-mobile .config-sync-tworow-chev { display: none; }
 .config-sync-advform input { font-size: var(--font-ui-smaller); }
 .config-sync-advform input::placeholder { color: var(--text-faint); font-style: italic; }
 .config-sync-advrow-ctl > input { width: 100%; max-width: 380px; }
+/* Remote editor rows (定稿轮 24 补 #168): the same vertical form on a wider label track — the
+   longest label is `STORE FOLDER IN REPO`. */
+.config-sync-remrow { grid-template-columns: 150px 1fr; }
+/* Browse… sits INSIDE the vault remote's path box, behind the thin divider (mockup). */
+.config-sync-pathbox > .clickable-icon { margin: 0; padding: 4px 8px; border-radius: 0; }
 /* The composite path box (#163): location mini-menu | divider | borderless path input, one
    input-shaped container. */
 .config-sync-pathbox { display: flex; align-items: center; width: 100%; max-width: 380px; background: var(--background-modifier-form-field); border: 1px solid var(--background-modifier-border); border-radius: var(--input-radius, 6px); overflow: hidden; }
@@ -1480,8 +1401,12 @@ body.is-mobile .config-sync-tworow-chev { display: none; }
 /* Mobile: the 170/96 tracks would leave a two-segment row's local cell ~50px at 360px wide —
    step both down; names ellipsize sooner, the shape stays. */
 body.is-mobile .config-sync-scrow { grid-template-columns: minmax(90px, 32%) 64px 1px 1fr; }
-.config-sync-lock { color: var(--text-muted); cursor: pointer; }
-.config-sync-lock.is-on { color: var(--color-cyan); background: var(--background-modifier-hover); border-radius: var(--radius-s); }
+/* Quiet-rest (定稿轮 24 甲, DESIGN §2.3): every clickable icon control rests at muted×45% and
+   lifts to 100% on its own hover/focus/menu-open; an ACTIVE state is colored at 100%. The lock
+   joins the idiom the sharing picker and per-item icon already carried. */
+.config-sync-lock { color: var(--text-muted); cursor: pointer; opacity: 0.45; transition: opacity 0.12s; }
+.config-sync-lock:hover, .config-sync-lock:focus-visible { opacity: 1; }
+.config-sync-lock.is-on { opacity: 1; color: var(--color-cyan); background: var(--background-modifier-hover); border-radius: var(--radius-s); }
 .config-sync-dim { opacity: 0.5; pointer-events: none; cursor: default; }
 /* Dim exactly once: a locked path row dims the CELL, while the lock icon/disabled select inside
    carry their own dim/disabled styling — stacked opacities looked like a rendering glitch
@@ -1493,9 +1418,12 @@ body.is-mobile .config-sync-scrow { grid-template-columns: minmax(90px, 32%) 64p
 .config-sync-card-path { font-family: var(--font-monospace); font-size: var(--font-ui-smaller); color: var(--text-normal); }
 /* Round-12: the File preview trigger, 6px after the filename — same open-state language as
    .config-sync-diffic (FILES row's diff icon): faint at rest, accent while open. */
-.config-sync-card-previewicon { display: inline-flex; align-items: center; margin-left: 6px; color: var(--text-faint); cursor: pointer; }
-.config-sync-card-previewicon svg { width: 14px; height: 14px; }
-.config-sync-card-previewicon.is-open { color: var(--interactive-accent); }
+/* Quiet-rest family (轮 24 甲) — was faint + 14px + a 6px legacy margin from its beside-the-
+   filename days, which off-centered it ~3px inside the aux slot; now muted×45% at default
+   icon size, centered like every other slot control. */
+.config-sync-card-previewicon { display: inline-flex; align-items: center; color: var(--text-muted); cursor: pointer; opacity: 0.45; transition: opacity 0.12s; }
+.config-sync-card-previewicon:hover, .config-sync-card-previewicon:focus-visible { opacity: 1; }
+.config-sync-card-previewicon.is-open { opacity: 1; color: var(--interactive-accent); }
 /* Path text doubles as the edit entry point (round-6 定稿: no ✎ pencil) — hover/focus reveal a
    dotted underline + soft backdrop as the "this is editable" affordance; a committed custom
    path stays accented so deviation from the default is visible at rest. */
@@ -1521,6 +1449,7 @@ body.is-mobile .config-sync-scrow { grid-template-columns: minmax(90px, 32%) 64p
    opacity. */
 .config-sync-sharingicon { display: flex; align-items: center; justify-content: center; color: var(--text-muted); cursor: pointer; opacity: 0.45; transition: opacity 0.12s; border-radius: var(--radius-s); }
 .config-sync-sharingicon:hover, .config-sync-sharingicon:focus-visible { opacity: 1; }
+.config-sync-sharingicon.is-open { opacity: 1; }
 .config-sync-sharingicon.is-set { opacity: 1; color: var(--interactive-accent); }
 /* Key + (array keys) the Per-item device rules toggle share the grid's content column on ONE line —
    as a fifth direct grid child the toggle auto-placed onto a wrapped second row (round-5 feedback).

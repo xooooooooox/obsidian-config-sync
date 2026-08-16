@@ -110,7 +110,6 @@ import {
   DESKTOP_ONLY_ALL_NOTE,
   ENABLED_CSS_SNIPPETS_KEY,
   encryptToggleDisabled,
-  ENCRYPT_DISABLED_PERITEM_HINT,
   FIELD_SHARING_OPTIONS,
   FieldRowModel,
   FILE_SHARING_OPTIONS,
@@ -1130,8 +1129,10 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   // pass `ruleIcon`/`ruleLabel` (enablementRow.ts — the SAME producer the Sync Center's own
   // `ruleMenu` reads, so both entrances offer identical wording); the plain field/file/companion
   // rows fall back to `sharingIcon`/`sharingLabel` (itemCard.ts), byte-identical to the old
-  // cycle's default vocabulary. `disabled` keeps the old dim, non-interactive rendering — no
-  // chevron, no menu (the settings-file row's per-key-rules-active state).
+  // cycle's default vocabulary. `disabled` keeps the dim, non-interactive rendering — no menu,
+  // but the ⇕ span still renders (轮 23 #166 ①: without it the box is 14px narrower and the
+  // centered device slot drifts the icon out of the column); CSS keeps a dim picker's ⇕ at
+  // opacity 0 even on row hover (the settings-file row's per-key-rules-active state).
   // `extras` (定稿轮 19d): a removable row's destructive verb lives HERE, after a separator, as
   // a warning-red trash item — the inline ✕ ExtraButtons are gone. Only the rows that ARE
   // removable pass one (a key-rule row's `Remove rule`, a user-added folder's `Remove folder`).
@@ -1154,11 +1155,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const icon = cell.createSpan({ cls: `config-sync-sharingicon${opts.sharing.kind !== "everywhere" ? " is-set" : ""}` });
     setIcon(icon, iconOf(opts.sharing));
     icon.setAttribute("aria-label", opts.ariaLabel ?? sharingCycleTooltip(opts.sharing, opts.note));
+    setIcon(icon.createSpan({ cls: "config-sync-tworow-chev" }), "chevrons-up-down");
     if (opts.disabled) {
       icon.addClass("config-sync-dim");
       return;
     }
-    setIcon(icon.createSpan({ cls: "config-sync-tworow-chev" }), "chevrons-up-down");
     this.wireMenuTrigger(icon, () => {
       const menu = new Menu();
       for (const o of opts.options) {
@@ -1550,6 +1551,9 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
 
     if (locked) {
       for (const cell of [sharingCell, lockCell]) {
+        // The lock cell is usually EMPTY here (renderLockToggle paints nothing while
+        // disabled+unencrypted, 轮 23 ②) — skip it, or the hint tooltips blank space (#159).
+        if (cell.childElementCount === 0) continue;
         cell.addClass("config-sync-dim");
         cell.setAttribute("aria-label", PER_KEY_RULES_ACTIVE_HINT);
       }
@@ -1619,13 +1623,17 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   }
 
   // Icon lock control (spec §2.2/§5) shared by the path row (whole-file encrypt) and every rule
-  // row (per-key encrypt) — also the interface Task 3's rows reuse. Tooltip/aria reflect only the
-  // CURRENT boolean (`Encrypt` / `Encrypted`); a disabled reason, if any, is the caller's job to
-  // surface (the caller owns the surrounding cell, which may need a DIFFERENT disabled reason —
-  // per-key-rules-active for the path row, per-item-scopes for a rule row).
+  // row (per-key encrypt) — also the interface Task 3's rows reuse. Three states (定稿轮 23
+  // #166 ②): unencrypted-but-available renders an OPEN lock (a closed one read as
+  // already-encrypted), encrypted renders the closed `.is-on` lock, and a lock that can neither
+  // show state nor take a click (disabled AND unencrypted — a `This device` rule, per-item rules
+  // on, the path row while per-key rules own the file) renders NOTHING: its empty slot keeps the
+  // column. Only disabled+encrypted (unreachable through the UI today) still paints, dim —
+  // state is never hidden. Tooltip/aria reflect only the CURRENT boolean (`Encrypt`/`Encrypted`).
   private renderLockToggle(cell: HTMLElement, opts: { encrypted: boolean; disabled: boolean; onChange: (v: boolean) => void }): void {
+    if (opts.disabled && !opts.encrypted) return;
     const icon = cell.createSpan({ cls: `config-sync-lock${opts.encrypted ? " is-on" : ""}` });
-    setIcon(icon, "lock");
+    setIcon(icon, opts.encrypted ? "lock" : "lock-open");
     icon.setAttribute("aria-label", opts.encrypted ? "Encrypted" : "Encrypt");
     if (opts.disabled) {
       icon.addClass("config-sync-dim");
@@ -1748,16 +1756,14 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const lockCell = slots.lock;
     const lockDisabled = encryptToggleDisabled(row.rule.sharing, row.perElementEnabled);
     this.renderLockToggle(lockCell, { encrypted: row.rule.encrypted, disabled: lockDisabled, onChange: (v) => setRule((r) => ({ ...r, encrypted: v })) });
-    if (lockDisabled && row.perElementEnabled) {
-      lockCell.setAttribute("aria-label", ENCRYPT_DISABLED_PERITEM_HINT);
-    }
     if (row.isArray) {
       // Per-item device rules as an icon toggle (定稿轮 19c #143, replacing text+ToggleComponent).
       // MUST-FIX 2 (final-review): Encrypt and Per-item scopes are mutually exclusive on the same
       // rule (manifest.ts D3) — enabling Per-item here clears `encrypted` in the SAME write
       // (applyPerElementToggle), and this icon renders disabled while the rule is already
-      // encrypted (the lock icon above renders disabled the other way — see encryptToggleDisabled)
-      // so the UI can never produce the combination the compiler rejects.
+      // encrypted (the lock disappears the other way — encryptToggleDisabled makes
+      // renderLockToggle render nothing while per-item is on) so the UI can never produce the
+      // combination the compiler rejects.
       const pi = slots.aux.createSpan({ cls: `config-sync-perelement-ic${row.perElementEnabled ? " is-set" : ""}` });
       setIcon(pi, "list-checks");
       if (row.rule.encrypted) {
@@ -1944,9 +1950,14 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
 
   // "+ Add folder" is available on every card (spec §5) — a def with no preset companions and an
   // empty config produces zero rows (buildCompanionRows), in which case the zone renders no
-  // header and no rows, just the Add-folder entry point below.
+  // header and no rows, just the Add-folder entry point below. EXCEPT carriers (轮 23 #166 ③):
+  // a switch registry has no meaning for a folder to attach to (an arbitrary folder belongs to
+  // a custom rule), so a carrier card gets no Add-folder entry point — but a legacy user-added
+  // folder in config still renders its row, visible and removable, never silently active.
   private renderCompanionZone(exp: HTMLElement, def: ItemDef, item: Item, wrap: HTMLElement): void {
     const rows = buildCompanionRows(def, item);
+    const isCarrier = carrierListFor(def) !== null;
+    if (isCarrier && rows.length === 0) return;
     if (rows.length > 0) exp.createDiv({ cls: "config-sync-explabel", text: "Folders" });
     const listEl = exp.createDiv({ cls: "config-sync-card-companions" });
     for (const row of rows) {
@@ -2000,7 +2011,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         })();
       }
     }
-    this.renderAddCompanionRow(exp, def, wrap);
+    if (!isCarrier) this.renderAddCompanionRow(exp, def, wrap);
   }
 
   private companionEditKey(def: ItemDef, path: string): string {
@@ -3181,16 +3192,6 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     if (isOpen) this.renderRuleForm(listEl, group, "custom");
   }
 
-  private formField(parent: HTMLElement, label: string): HTMLElement {
-    const f = parent.createDiv();
-    f.createEl("label", { cls: "config-sync-form-label", text: label });
-    return f;
-  }
-
-  private markRequired(field: HTMLElement): void {
-    field.querySelector<HTMLElement>("label")?.createSpan({ cls: "config-sync-required", text: "*" });
-  }
-
   // 轮 21D: a VERTICAL scrow form — one field per row (`config-sync-advrow`: label | control),
   // replacing the old two-line mixed grid. Product-voice placeholders (the name charset lives
   // in the validation error, never the placeholder); the location picker sits INSIDE the path
@@ -3423,27 +3424,51 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   }
 
   private renderRemoteForm(listEl: HTMLElement, draft: RemoteDraft, nameSpan: HTMLElement): void {
-    const panel = listEl.createDiv({ cls: "config-sync-expand" });
-    const field = this.formField.bind(this);
-    const line1 = panel.createDiv({ cls: "config-sync-form-line1" });
-    new DropdownComponent(field(line1, "Type"))
-      .addOption("vault", "Another vault")
-      .addOption("git", "Git repository")
-      .setValue(draft.type)
-      // §4.2b/N3: every handler in this form is `draft.x = …; saveRemotes()`, and `this.sources`
-      // IS what the panel renders — so a refused gesture must be refused BEFORE the draft moves,
-      // or the panel shows an edit that was never saved (the name field below is the plainest
-      // case: it renames the row header for a save that never happened).
-      .onChange(async (v) => {
-        if (!this.host.settingsWritable()) return;
-        draft.type = v as RemoteDraft["type"];
-        await this.saveRemotes();
-        this.refresh();
-      });
-    const nameField = field(line1, "Name");
-    this.markRequired(nameField);
-    const nameC = new TextComponent(nameField);
-    nameC.setPlaceholder("name").setValue(draft.name).onChange((v) => {
+    // 定稿轮 24 补 (#168): the remote editor speaks the Advanced form's grammar — one field per
+    // row (advrow, on the wider `config-sync-remrow` label track), TYPE as the panel's text menu
+    // picker, Browse inside the path box. Handlers are unchanged: every one is still
+    // `draft.x = …; saveRemotes()`. The Username input is gone (#169: a linked token is enough —
+    // live-tested against a self-hosted GitLab too); a stored `username` still round-trips
+    // through toDraft/toCandidate and still reaches git auth, there is just no input for it.
+    const panel = listEl.createDiv({ cls: "config-sync-expand config-sync-advform" });
+    const remRow = (label: string, required: boolean): HTMLElement => {
+      const r = panel.createDiv({ cls: "config-sync-scrow config-sync-advrow config-sync-remrow" });
+      const l = r.createDiv({ cls: "config-sync-explabel config-sync-explabel-inline", text: label });
+      if (required) l.createSpan({ cls: "config-sync-required", text: "*" });
+      return r.createDiv({ cls: "config-sync-advrow-ctl" });
+    };
+    // §4.2b/N3: every handler in this form is `draft.x = …; saveRemotes()`, and `this.sources`
+    // IS what the panel renders — so a refused gesture must be refused BEFORE the draft moves,
+    // or the panel shows an edit that was never saved (the name field below is the plainest
+    // case: it renames the row header for a save that never happened).
+    const typeChip = remRow("Type", false).createSpan({
+      cls: "config-sync-menuchip config-sync-card-trigger",
+      text: draft.type === "vault" ? "Another vault" : "Git repository",
+    });
+    setIcon(typeChip.createSpan({ cls: "config-sync-tworow-chev" }), "chevrons-up-down");
+    this.wireMenuTrigger(typeChip, () => {
+      const menu = new Menu();
+      const types: Array<{ id: RemoteDraft["type"]; label: string }> = [
+        { id: "vault", label: "Another vault" },
+        { id: "git", label: "Git repository" },
+      ];
+      for (const t of types) {
+        menu.addItem((item) =>
+          item
+            .setTitle(t.label)
+            .setChecked(draft.type === t.id)
+            .onClick(async () => {
+              if (!this.host.settingsWritable()) return;
+              draft.type = t.id;
+              await this.saveRemotes();
+              this.refresh();
+            })
+        );
+      }
+      return menu;
+    });
+    const nameC = new TextComponent(remRow("Name", true));
+    nameC.setPlaceholder("e.g. work-laptop").setValue(draft.name).onChange((v) => {
       if (!this.host.settingsWritable()) return; // §4.2b/N3
       this.expanded.delete(`remote:${draft.name}`);
       draft.name = v.trim();
@@ -3454,20 +3479,20 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     nameC.inputEl.addClass("config-sync-rule-name-input");
 
     if (draft.type === "vault") {
-      const line2 = panel.createDiv({ cls: "config-sync-remote-path" });
-      const pathField = field(line2, "Store path");
-      this.markRequired(pathField);
-      const pathC = new TextComponent(pathField);
+      // Browse lives INSIDE the path box (mockup: same idea as the Advanced form's location
+      // segment), behind a thin divider.
+      const box = remRow("Store path", true).createDiv({ cls: "config-sync-pathbox" });
+      const pathC = new TextComponent(box);
       pathC.setPlaceholder("/path/to/other-vault/…/config-sync").setValue(draft.storePath).onChange((v) => {
         if (!this.host.settingsWritable()) return; // §4.2b/N3
         draft.storePath = v.trim();
         void this.saveRemotes();
       });
       if (Platform.isDesktop) {
-        new ExtraButtonComponent(line2).setIcon("folder-open").setTooltip("Browse…").onClick(() => void this.browseStorePath(draft));
+        box.createDiv({ cls: "config-sync-pathbox-div" });
+        new ExtraButtonComponent(box).setIcon("folder-open").setTooltip("Browse…").onClick(() => void this.browseStorePath(draft));
       }
     } else {
-      const line2 = panel.createDiv({ cls: "config-sync-remote-git" });
       let strip: HTMLElement | null = null;
       const clearStrip = (): void => {
         if (strip) {
@@ -3475,23 +3500,19 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
           strip.className = "config-sync-test-strip";
         }
       };
-      const urlField = field(line2, "URL");
-      this.markRequired(urlField);
-      new TextComponent(urlField).setPlaceholder("git@host:me/config.git").setValue(draft.url).onChange((v) => {
+      new TextComponent(remRow("URL", true)).setPlaceholder("git@host:me/config.git").setValue(draft.url).onChange((v) => {
         if (!this.host.settingsWritable()) return; // §4.2b/N3
         draft.url = v.trim();
         clearStrip();
         void this.saveRemotes();
       });
-      const branchField = field(line2, "Branch");
-      this.markRequired(branchField);
-      new TextComponent(branchField).setPlaceholder("main").setValue(draft.branch).onChange((v) => {
+      new TextComponent(remRow("Branch", true)).setPlaceholder("main").setValue(draft.branch).onChange((v) => {
         if (!this.host.settingsWritable()) return; // §4.2b/N3
         draft.branch = v.trim();
         clearStrip();
         void this.saveRemotes();
       });
-      new TextComponent(field(line2, "Store folder in repo")).setPlaceholder("empty = repo root").setValue(draft.subdir).onChange((v) => {
+      new TextComponent(remRow("Store folder in repo", false)).setPlaceholder("empty = repo root").setValue(draft.subdir).onChange((v) => {
         if (!this.host.settingsWritable()) return; // §4.2b/N3
         draft.subdir = v.trim();
         void this.saveRemotes();
@@ -3501,19 +3522,9 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       // offers the ✕ that unlinks it. What it hands back — and all this plugin ever keeps — is
       // the secret's NAME, which rides along in the synced settings; the value stays in each
       // device's keychain, never read here and never written here.
-      const tokenLine = panel.createDiv({ cls: "config-sync-remote-token" });
-      const tokenField = field(tokenLine, "Access token");
-      const tokenControl = tokenField.createDiv({ cls: "config-sync-secret-control" });
+      const tokenControl = remRow("Access token", false).createDiv({ cls: "config-sync-secret-control" });
       const tokenC = new SecretComponent(this.app, tokenControl);
-      new TextComponent(field(tokenLine, "Username"))
-        .setPlaceholder("token")
-        .setValue(draft.username)
-        .onChange((v) => {
-          if (!this.host.settingsWritable()) return; // §4.2b/N3
-          draft.username = v.trim();
-          void this.saveRemotes();
-        });
-      const statusEl = panel.createDiv({ cls: "config-sync-token-status" });
+      const statusEl = remRow("", false).createDiv({ cls: "config-sync-token-status" });
       const paintTokenStatus = (): void => {
         const held = draft.tokenId !== "" && this.app.secretStorage.listSecrets().includes(draft.tokenId);
         statusEl.className =
@@ -3544,8 +3555,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         paintTokenStatus();
       });
       if (Platform.isDesktop) {
-        const testLine = panel.createDiv({ cls: "config-sync-remote-test" });
-        const btn = new ButtonComponent(testLine).setButtonText("Test connection");
+        const btn = new ButtonComponent(remRow("", false)).setButtonText("Test connection");
         strip = panel.createDiv({ cls: "config-sync-test-strip" });
         btn.onClick(async () => {
           btn.setDisabled(true).setButtonText("Testing…");

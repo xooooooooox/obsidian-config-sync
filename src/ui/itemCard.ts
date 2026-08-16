@@ -356,8 +356,11 @@ export function encryptToggleDisabled(sharing: Sharing, perElementEnabled: boole
   return encryptDisabledForSharing(sharing) || perElementEnabled;
 }
 
+// The reverse hint (ENCRYPT_DISABLED_PERITEM_HINT, "Turn off Per-item device rules to encrypt.")
+// retired in 定稿轮 23 ②: a lock that can't encrypt no longer renders at all, so there is no
+// disabled lock left to carry it — the mutual exclusion still surfaces through this hint on the
+// per-item icon while the rule is encrypted.
 export const PER_ITEM_DISABLED_HINT = "Turn off Encrypt to enable Per-item device rules.";
-export const ENCRYPT_DISABLED_PERITEM_HINT = "Turn off Per-item device rules to encrypt.";
 
 // Toggling per-element rules on/off for one Fields-mode row (D3 + MUST-FIX 2): turning it ON must
 // clear `encrypted` on the SAME rule in the SAME write.
