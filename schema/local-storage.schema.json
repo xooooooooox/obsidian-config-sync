@@ -10,6 +10,10 @@
       "$ref": "#/definitions/deviceElements",
       "description": "THIS device's exception table for on/off elements (stored as a JSON string). See the definition."
     },
+    "config-sync-device-fields": {
+      "$ref": "#/definitions/deviceFields",
+      "description": "THIS device's exception table for per-key rules (stored as a JSON string). See the definition."
+    },
     "config-sync-device-optouts": {
       "type": "array",
       "items": { "type": "string" },
@@ -40,6 +44,14 @@
       "additionalProperties": {
         "type": "object",
         "additionalProperties": { "enum": ["on", "off"] }
+      }
+    },
+    "deviceFields": {
+      "type": "object",
+      "description": "ItemRef -> rule pattern -> this device's exception. Written by src/core/deviceFields.ts; unreadable shapes read as an empty table and are never rewritten.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": { "type": "string", "const": "not-synced" }
       }
     },
     "ledger": {
