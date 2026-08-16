@@ -38,7 +38,7 @@ describe("parseSyncManifest", () => {
     expect(() => parseSyncManifest(JSON.stringify({ version: 2, groups: [] }))).toThrow('only supports "version": 1');
   });
   it("rejects duplicate group names", () => {
-    expect(() => parseSyncManifest(manifestWith([GOOD, { ...GOOD, path: ".x" }]))).toThrow("two rules are named");
+    expect(() => parseSyncManifest(manifestWith([GOOD, { ...GOOD, path: ".x" }]))).toThrow("Two rules are named");
   });
   it("rejects store path collisions", () => {
     const a = { name: "a", path: ".vimrc", type: "file", devices: "all" };
@@ -68,7 +68,7 @@ describe("parseSyncManifest", () => {
       version: 1,
       groups: [{ name: "a", path: "{configDir}/a.json", type: "file", devices: "all", origin: "picker" }],
     });
-    expect(() => parseSyncManifest(bad)).toThrow('only supported value is "discovered"');
+    expect(() => parseSyncManifest(bad)).toThrow('"origin" only supports "discovered"');
   });
   it("rejects paths with .. or absolute paths", () => {
     const g = { name: "e", path: "../outside", type: "file", devices: "all" };
@@ -93,13 +93,13 @@ describe("parseSyncManifest", () => {
     );
 
     const fieldsOnDir = { name: "d", path: "{configDir}/snippets", type: "folder", devices: "all", mode: "fields", fields: [{ pattern: "*Token*", sharing: THIS_DEVICE, encrypted: false }] };
-    expect(() => parseSyncManifest(manifestWith([fieldsOnDir]))).toThrow("only supported on file groups");
+    expect(() => parseSyncManifest(manifestWith([fieldsOnDir]))).toThrow("per-key rules only apply to a single file");
 
     const badMode = { name: "b", path: "{configDir}/hotkeys.json", type: "file", devices: "all", mode: "weird" };
-    expect(() => parseSyncManifest(manifestWith([badMode]))).toThrow('but it must be "plain", "fields" or "encrypted"');
+    expect(() => parseSyncManifest(manifestWith([badMode]))).toThrow('the mode must be "plain", "fields" or "encrypted"');
 
     const fieldsWithoutMode = { name: "fw", path: "{configDir}/hotkeys.json", type: "file", devices: "all", fields: [{ pattern: "*Token*", sharing: THIS_DEVICE, encrypted: false }] };
-    expect(() => parseSyncManifest(manifestWith([fieldsWithoutMode]))).toThrow('sets "fields" but not "mode": "fields"');
+    expect(() => parseSyncManifest(manifestWith([fieldsWithoutMode]))).toThrow('has a "fields" list but not "mode": "fields"');
   });
 });
 
@@ -120,7 +120,7 @@ describe("field rule scope/encrypted", () => {
   });
   it("rejects an unknown scope", () => {
     const g = { ...GOOD, mode: "fields", fields: [{ pattern: "a", scope: "tablet", encrypted: false }] };
-    expect(() => parseSyncManifest(manifestWith([g]))).toThrow('invalid "fields" list');
+    expect(() => parseSyncManifest(manifestWith([g]))).toThrow('the "fields" list is invalid');
   });
 });
 
@@ -230,7 +230,7 @@ describe("parseGroup — the ref is validated against the key space", () => {
 
   it("rejects a section that is not one — `beta` above all", () => {
     for (const ref of ["beta/dataview", "nope/x", "community/", "/dataview", "dataview", 42]) {
-      expect(() => parseSyncManifest(withRef(ref))).toThrow('has a "ref" that isn\'t an item reference');
+      expect(() => parseSyncManifest(withRef(ref))).toThrow('the "ref" isn\'t an item reference');
     }
   });
 
@@ -244,7 +244,7 @@ describe("parseGroup — the ref is validated against the key space", () => {
     });
     // Both rules are named, not just the one that happened to be second — a message that says
     // "and another" leaves the user to find the other half themselves.
-    expect(() => parseSyncManifest(two)).toThrow('rules "b" and "a" both sync the item "custom/same"');
+    expect(() => parseSyncManifest(two)).toThrow('Rules "b" and "a" both sync the item "custom/same"');
   });
 });
 
@@ -268,15 +268,15 @@ describe("validateRemotes", () => {
   });
   it("rejects a relative storePath", () => {
     expect(() => validateRemotes([{ name: "a", type: "vault", storePath: "vaults/kick" }])).toThrow(
-      'The store path for "a" needs to be a full path starting with / or ~/ — for example ~/Vaults/other-vault/config-sync.'
+      'Remote "a": the store path needs to be a full path starting with / or ~/ — for example ~/Vaults/other-vault/config-sync'
     );
   });
   it("rejects subdir escaping the repo", () => {
     expect(() => validateRemotes([{ name: "b", type: "git", url: "u", branch: "m", subdir: "../x" }])).toThrow("must stay inside the repository");
   });
   it("rejects unknown types and non-arrays", () => {
-    expect(() => validateRemotes([{ name: "a", type: "local-path", storePath: "/x" }])).toThrow('but it must be "vault" or "git"');
-    expect(() => validateRemotes({})).toThrow("remotes must be a list");
+    expect(() => validateRemotes([{ name: "a", type: "local-path", storePath: "/x" }])).toThrow('the type must be "vault" or "git"');
+    expect(() => validateRemotes({})).toThrow("Remotes must be a list");
   });
 
   it("accepts excludeSelf: true on both types; false/absent serialize as absent", () => {
@@ -316,14 +316,14 @@ describe("validateRemotes", () => {
 
   it("rejects a malformed tokenId", () => {
     expect(() => validateRemotes([{ name: "b", type: "git", url: "u", branch: "main", tokenId: "Bad_Id!" }])).toThrow(
-      "lowercase letters, digits, and dashes"
+      "lowercase letters, digits and dashes"
     );
   });
 
   it("rejects a tokenId longer than 64 characters", () => {
     expect(() =>
       validateRemotes([{ name: "b", type: "git", url: "u", branch: "main", tokenId: "a".repeat(65) }])
-    ).toThrow("lowercase letters, digits, and dashes");
+    ).toThrow("lowercase letters, digits and dashes");
   });
 
   it("rejects the vault passphrase's secret id as a tokenId", () => {
@@ -340,7 +340,7 @@ describe("validateSyncManifest", () => {
     expect(m.version).toBe(1);
   });
   it("rejects duplicate names on direct objects", () => {
-    expect(() => validateSyncManifest({ version: 1, groups: [GOOD, { ...GOOD }] })).toThrow("two rules are named");
+    expect(() => validateSyncManifest({ version: 1, groups: [GOOD, { ...GOOD }] })).toThrow("Two rules are named");
   });
   it("carries a group description through validation", () => {
     const g = { ...GOOD, description: "Custom keyboard shortcuts" };
@@ -351,14 +351,14 @@ describe("validateSyncManifest", () => {
     const blank = validateSyncManifest({ version: 1, groups: [{ ...GOOD, description: "   " }] });
     expect(blank.groups[0]?.description).toBeUndefined();
     expect(() => validateSyncManifest({ version: 1, groups: [{ ...GOOD, description: 42 }] })).toThrow(
-      'has a "description" that isn\'t text'
+      "the description must be plain text"
     );
   });
   it("round-trips a boolean locked flag on field rules and rejects a non-boolean one", () => {
     const withLocked = { ...GOOD, mode: "fields", fields: [{ pattern: "rootPath", sharing: THIS_DEVICE, encrypted: false, locked: true }] };
     expect(validateSyncManifest({ version: 1, groups: [withLocked] }).groups[0]?.fields?.[0]?.locked).toBe(true);
     const badLocked = { ...GOOD, mode: "fields", fields: [{ pattern: "rootPath", sharing: THIS_DEVICE, encrypted: false, locked: "yes" }] };
-    expect(() => validateSyncManifest({ version: 1, groups: [badLocked] })).toThrow('invalid "fields" list');
+    expect(() => validateSyncManifest({ version: 1, groups: [badLocked] })).toThrow('the "fields" list is invalid');
   });
 });
 
@@ -373,7 +373,7 @@ describe("group name format", () => {
   it("rejects names with spaces, illegal symbols, or leading punctuation", () => {
     for (const name of ["a b", "weird!", "-leading"]) {
       const g = { name, path: "{configDir}/x.json", type: "file", devices: "all" };
-      expect(() => parseSyncManifest(manifestWith([g]))).toThrow("has an invalid name");
+      expect(() => parseSyncManifest(manifestWith([g]))).toThrow("names use only letters");
     }
   });
 });
@@ -610,7 +610,7 @@ describe("group name validation allows uppercase", () => {
   });
   it("still rejects a leading punctuation name with the reworded message", () => {
     expect(() => parseSyncManifest(mk("-bad"))).toThrow(
-      'rule "-bad" has an invalid name — use only letters, digits, "-" or "_", starting with a letter or digit, e.g. "my-plugin"'
+      'Rule "-bad": names use only letters, digits, "-" or "_", starting with a letter or digit — e.g. my-plugin'
     );
   });
 });

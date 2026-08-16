@@ -189,10 +189,10 @@ describe("rule matrix — manifest validation", () => {
     expect(m.groups[0]?.fields).toEqual(fields);
   });
 
-  it("rejects a this-device sharing combined with encrypted=true, naming the key and both fields", () => {
+  it("rejects a this-device sharing combined with encrypted=true, naming the key and both facts", () => {
     const fields = [{ pattern: "myKey", sharing: THIS_DEVICE, encrypted: true }];
     expect(() => validateSyncManifest({ version: 1, groups: [{ ...BASE, mode: "fields", fields }] })).toThrow(
-      /myKey.*"this-device".*"encrypted": true/
+      /myKey.*This device.*encrypt/
     );
   });
 

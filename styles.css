@@ -285,7 +285,14 @@
   display: flex;
   align-items: center;
   gap: var(--size-4-2);
+  /* Same track as the form's text inputs, so the linked chip + button fill the column. */
+  width: 100%;
+  max-width: 380px;
 }
+/* SecretComponent always creates its value placeholder; empty (unlinked) it is a zero-width
+   flex item that still costs one gap — which is what indented the Link button off the inputs'
+   left edge. */
+.config-sync-secret-control > .setting-secret-value:empty { display: none; }
 
 .config-sync-token-status {
   margin-top: var(--size-4-1);
@@ -943,19 +950,11 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 
 .config-sync-fields-editor { border-top: 1px solid var(--background-modifier-border); margin-top: var(--size-4-2); padding-top: var(--size-4-2); }
 
-.config-sync-fieldrow { display: flex; align-items: center; gap: var(--size-4-2); padding: var(--size-4-1) 0; border-bottom: 1px solid var(--background-modifier-border); font-size: var(--font-ui-smaller); }
-
-.config-sync-fieldrow:last-of-type { border-bottom: none; }
-
 .config-sync-fkey { font-family: var(--font-monospace); color: var(--text-normal); }
-.config-sync-flock { display: inline-flex; align-items: center; color: var(--text-muted); flex: none; }
-.config-sync-flock svg { width: 13px; height: 13px; }
-.config-sync-fieldrow-xspacer { width: var(--size-4-6); flex: none; }
 
-.config-sync-ftag { font-size: 9.5px; color: var(--text-faint); }
+/* The pattern's origin tag, nested inside the mono key span — its own type, never the key's. */
+.config-sync-ftag { font-size: 9.5px; color: var(--text-faint); font-family: var(--font-interface); margin-left: 6px; }
 .config-sync-ftag.is-detected { color: var(--color-orange); } /* matches the JSON legend's detected color */
-
-.config-sync-act { display: inline-flex; flex: none; }
 
 .config-sync-addrow { display: flex; gap: var(--size-4-2); margin-top: var(--size-4-2); }
 
@@ -1284,7 +1283,22 @@ body.is-mobile .config-sync-tworow-chev { display: none; }
 .config-sync-side-badge.is-neutral { background: var(--background-modifier-hover); color: var(--text-normal); }
 
 /* 0.21.0 settings-mutation rollback: inline per-row error when a write fails */
-.config-sync-save-error { color: var(--text-error); font-size: var(--font-ui-smaller); margin-top: 4px; }
+/* Validation errors are ONE framed family (DESIGN.md §4 Form errors): a warning-tinted strip,
+   pinned as close to the offending control as the surface allows; :empty renders nothing (the
+   page-level slots are live-updated without a re-render). Runtime outcomes keep their own
+   treatments (test strip, remote error card, run strip). */
+.config-sync-form-error,
+.config-sync-save-error {
+  color: var(--text-warning);
+  font-size: var(--font-ui-smaller);
+  background: rgba(var(--color-orange-rgb), 0.08);
+  border: 1px solid rgba(var(--color-orange-rgb), 0.4);
+  border-radius: var(--radius-s);
+  padding: 6px 10px;
+  margin-top: var(--size-4-1);
+}
+.config-sync-form-error:empty,
+.config-sync-save-error:empty { display: none; }
 
 /* 0.21.0 unified row expansion: fields / data.json view / advanced */
 /* The drawer anchors to its card by the same fold thread the Sync Center's quiet zone uses

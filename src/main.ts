@@ -88,9 +88,8 @@ import { syncListDelta } from "./core/syncListDelta";
 import { selfPaneState } from "./core/selfPane";
 import { applyUpdates, baselineRefs, Ledger, LEDGER_VERSION, parseLedger, pruneLedger, rekeyLedger } from "./core/ledger";
 import { bucketCounts, checkRemote, diffRemote, GroupStatus, remoteDirectionCounts, RemoteCheck, remoteLockAhead, remoteLockLabels, statusForGroups } from "./core/status";
-import { EVERYWHERE, FileSharing, GroupResult, itemRef, ItemRef, parseItemRef, Remote, RibbonButtons, Sharing, StoreLock, SyncGroup } from "./core/types";
+import { EVERYWHERE, FileSharing, GroupResult, itemRef, ItemRef, parseItemRef, Remote, RibbonButtons, Sharing, StoreLock, SyncGroup, SyncMode } from "./core/types";
 import { statusBarStatuses } from "./ui/panelModel";
-import { fileRuleLegalForMode } from "./ui/itemCard";
 import { ConflictModal } from "./ui/ConflictModal";
 import { renderStatusBarItem, statusBarSegments } from "./ui/statusBar";
 import { SYNC_CENTER_VIEW_TYPE, SelfSyncInfo, SyncCenterHost, SyncCenterView } from "./ui/SyncCenterView";
@@ -1624,11 +1623,22 @@ export default class ConfigSyncPlugin extends Plugin {
   // The SAME legality test setItemFileSharing's guard throws on below — the Sync Center row
   // calls this to decide whether to offer the menu at all, so "offered" and "accepted" can never
   // disagree.
+  // The stored mode outranks derivation for the one value derivation cannot see: a custom item's
+  // `mode: "encrypted"` has no rules for deriveMode to read, and treating it as "plain" is how a
+  // sharing write once silently downgraded an encrypted rule to plaintext.
+  private effectiveFileMode(sf: ItemSettingsFile): SyncMode {
+    return sf.mode === "encrypted" ? "encrypted" : deriveMode(sf);
+  }
+
   private itemFileSharingMenuLegal(ref: ItemRef): boolean {
     const parsed = parseItemRef(ref);
     if (parsed === null) return false;
     const sf = itemAt(this.settings.items, parsed.section, parsed.id)?.settingsFile ?? defaultSettingsFile();
-    return fileRuleLegalForMode(deriveMode(sf));
+    // "fields" is the only illegal mode: there the per-key rules own the file and a fileRule
+    // would be stripped by withDerivedMode. An "encrypted" custom item is fine — its fileRule is
+    // the devices carrier (registry.ts's customGroup/customItemFromGroup round-trip), and the
+    // envelope stays on.
+    return this.effectiveFileMode(sf) !== "fields";
   }
 
   async setItemFileSharing(ref: ItemRef, sharing: FileSharing): Promise<void> {
@@ -1637,12 +1647,12 @@ export default class ConfigSyncPlugin extends Plugin {
     if (parsed === null) return;
     const item = itemAt(this.settings.items, parsed.section, parsed.id) ?? emptyItem();
     const sf = item.settingsFile ?? defaultSettingsFile();
-    const mode = deriveMode(sf);
+    const mode = this.effectiveFileMode(sf);
     // Writing a fileRule on a fields-mode item would resolve mode:"fields"
     // below and silently strip the very fileRule this call just wrote — the item's card never
     // offers this menu there (see itemFileSharingMenuLegal above), so reaching here with an illegal mode
     // means a caller ignored that and must be told loudly, not have its write vanish.
-    if (!fileRuleLegalForMode(mode)) {
+    if (mode === "fields") {
       throw new Error(`setItemFileSharing: "${ref}" is in "${mode}" mode — a whole-file sharing write is illegal there (manifest.ts's fileRule validator only allows plain-mode file groups)`);
     }
     const nextSf: ItemSettingsFile = { ...sf, mode, fileRule: { ...(sf.fileRule ?? { sharing: EVERYWHERE, encrypted: false }), sharing } };

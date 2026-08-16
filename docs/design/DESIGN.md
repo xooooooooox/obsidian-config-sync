@@ -634,6 +634,16 @@ noted):
   only when the run is clean, `is-warn` orange / `is-error` red otherwise; it sits in a
   sticky `-strip-dock` (opaque backing, pinned to the top of the scroll viewport) so the
   outcome survives scrolling.
+- **Form errors** — validation errors are ONE framed family: `config-sync-form-error`
+  (shared with the row-pinned `config-sync-save-error`): a warning-tinted strip
+  (`rgba(var(--color-orange-rgb), 0.08)` fill, 0.4-alpha border, `--radius-s`,
+  `--text-warning` text, `:empty` renders nothing — never a bare `mod-warning` paragraph),
+  pinned as close to the offending control as the surface allows: under its own card/row,
+  page-level only for list-level facts. Copy speaks the FORM, never the file: name fields by
+  their on-screen labels, give the next step, show example values without JSON syntax
+  (`Remote "kickstart": URL is required — point it at the git repository, e.g.
+  git@example.com:me/config.git`). Runtime outcomes keep their own treatments (test strip,
+  remote error card, run strip) — this family is for what the user typed, not what a run did.
 - **History** `config-sync-htable` (desktop 7-col table) / `config-sync-hcard*`
   (`-hcard-top/-act/-chev/-when/-sum/-foot`, `-hcard-pill.is-chg` neutral / `.is-iss` orange) —
   the run-history list; the view swaps table → card layout when compact (`<700px`) so mobile
@@ -660,10 +670,31 @@ noted):
   (`config-sync-pathbox-div`) from the borderless path input — pick the base, then type the
   relative path in the same box.
   TYPE: icon-only picker (`file`/`folder` glyphs, tooltip `File — syncs a single file` /
-  `Folder — syncs everything in it`, ⇕ on row hover). DEVICES: the panel's own sharing picker.
+  `Folder — syncs everything in it`, ⇕ on row hover); on a DISCOVERED rule it renders dim with
+  no menu (tooltip `File — decided by the file itself`) — the file fixes name, path AND type;
+  on a custom rule a type flip that would drop stored key rules or an encryption mode confirms
+  first (`Change to folder?` / `Change to file?`, body `This removes its key rules and
+  encryption settings.`, Cancel + warning-toned `Change type`). DEVICES: the panel's own
+  sharing picker.
   MODE: a text menu picker with the §2.2 display names (Whole file / Per-key rules /
-  Encrypted); pinned-to-Per-key items render it dim + tooltip, no menu. DESCRIPTION: input,
-  placeholder `optional`. Placeholders across the form are faint/italic. A failed save pins its
+  Encrypted); pinned-to-Per-key items render it dim + tooltip, no menu; leaving Per-key rules
+  while key rules exist confirms (`Switch mode?`, body `This removes N key rule(s) — each
+  key's sharing and encryption choices are lost.`, Cancel + warning-toned `Remove rules and
+  switch`). DESCRIPTION: input, placeholder `optional`. Placeholders across the form are
+  faint/italic.
+  A DISCOVERED rule's drawer opens with a read-only FILE row (mono store-relative path) — the
+  drawer must name the file it belongs to, since it has no Name/Path inputs. The Discovered
+  list itself is ONE stably-sorted list (by file path), adopted or not — adoption changes only
+  the row's own toggle/chevron, never its position — and a failed adopt pins a form-error strip
+  under its own row.
+  **Per-key rules speak the card's grammar**: each configured pattern is a
+  `config-sync-card-rulerow`-family scrow — mono pattern (+ a faint `detected` tag), then the
+  card's own sharing picker (with `Remove rule` as the menu's warning item) and three-state
+  lock; the lossy single-select action dropdown does not exist. Below the rows, a File preview
+  (same `config-sync-json-*` treatment, `Click any key to add a rule for it` hint, keys colored
+  by rule, click-to-add) renders for file-type rules; the raw
+  `Add key pattern…` input stays as the glob escape hatch, last.
+  A failed save pins its
   error inline with the CONCRETE reason — the no-error sentinel is `null`, never `""` (an
   empty-string sentinel collides with the unnamed placeholder rule's empty name, making a
   SUCCESSFUL save on the unnamed row read as a blank error).
@@ -675,8 +706,13 @@ noted):
   STORE PATH: the path input inside a `config-sync-pathbox` whose TRAILING segment, behind the
   thin divider, is the `folder-open` Browse… icon (desktop only). Git type — URL / BRANCH /
   STORE FOLDER IN REPO inputs, ACCESS TOKEN (Obsidian's secret picker in
-  `config-sync-secret-control`) with its status sentence on a label-less row underneath, then a
-  label-less `Test connection` row + the full-width test strip. **No Username field**: a
+  `config-sync-secret-control` — sized to the shared 380px input track, its empty placeholder
+  child hidden so the Link button sits flush with the inputs above). The standing explanation
+  (`For https URLs. Without a token, this device's own git sign-in is used. Stored in
+  Obsidian's keychain — link it once per device.`) lives in the control's tooltip, never a
+  row; a status sentence renders on a label-less row ONLY when it has something to say
+  (`✓ Token stored on this device.` / the ⚠ not-linked-here warning) — the default state
+  renders no row at all. Then a label-less `Test connection` row + the full-width test strip. **No Username field**: a
   linked token is enough — live-tested against a self-hosted GitLab as well; a `username`
   already stored in `data.json` still validates and still reaches git auth
   (types/manifest/resolveGitToken carry it), it just has no UI. The

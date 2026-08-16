@@ -155,7 +155,7 @@ export interface SyncGroup {
   perElement?: Record<string, PerElementSharing>;
   description?: string; // optional human-readable label, shown in the settings panel
   label?: string; // display name recorded at capture/enable; falls back through the resolver chain
-  origin?: "discovered"; // rule created from the Discovered-files section; name/path are fixed by the file
+  origin?: "discovered"; // rule created from the Discovered-files section; name, path AND type are fixed by the file
 }
 
 export interface SyncManifest {

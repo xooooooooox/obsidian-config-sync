@@ -210,7 +210,7 @@ describe("manifest validation — fileRule", () => {
       ManifestValidationError
     );
     expect(() => validateSyncManifest({ version: 1, groups: [groupWith({ sharing: THIS_DEVICE, encrypted: true })] })).toThrow(
-      /fileRule\.sharing.*this-device/
+      /whole-file rule cannot be This device/
     );
   });
 
@@ -229,7 +229,7 @@ describe("manifest validation — fileRule", () => {
   it('rejects fileRule on a "dir" group (companion folders stay plaintext — YAGNI)', () => {
     const dirGroup = { name: "snippets", path: "{configDir}/snippets", type: "folder", devices: "all", fileRule: { sharing: EVERYWHERE, encrypted: true } };
     expect(() => validateSyncManifest({ version: 1, groups: [dirGroup] })).toThrow(ManifestValidationError);
-    expect(() => validateSyncManifest({ version: 1, groups: [dirGroup] })).toThrow(/fileRule/);
+    expect(() => validateSyncManifest({ version: 1, groups: [dirGroup] })).toThrow(/whole-file rule only applies to a single file/);
   });
 
   it("rejects fileRule combined with mode:\"fields\" (never double-encrypt via two mechanisms)", () => {
@@ -243,7 +243,7 @@ describe("manifest validation — fileRule", () => {
       fileRule: { sharing: EVERYWHERE, encrypted: true },
     };
     expect(() => validateSyncManifest({ version: 1, groups: [g] })).toThrow(ManifestValidationError);
-    expect(() => validateSyncManifest({ version: 1, groups: [g] })).toThrow(/fileRule/);
+    expect(() => validateSyncManifest({ version: 1, groups: [g] })).toThrow(/whole-file rule only applies in Whole file/);
   });
 
   it('rejects fileRule combined with mode:"encrypted"', () => {

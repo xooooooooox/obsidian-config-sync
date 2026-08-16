@@ -85,6 +85,50 @@ export function confirmDeleteLeftovers(app: App, count: number): Promise<boolean
   });
 }
 
+// The two Advanced-form gestures that silently destroyed configuration confirm now
+// (DESIGN.md §4 Advanced rule editor) — the modal copy is character-exact contract text.
+class DestructiveEditModal extends Modal {
+  private confirmed = false;
+
+  constructor(app: App, private heading: string, private body: string, private cta: string, private onDone: (confirmed: boolean) => void) {
+    super(app);
+  }
+
+  onOpen(): void {
+    this.titleEl.setText(this.heading);
+    this.contentEl.createEl("p", { cls: "config-sync-modal-warn", text: this.body });
+    new Setting(this.contentEl)
+      .addButton((b) => b.setButtonText("Cancel").onClick(() => this.close()))
+      .addButton((b) =>
+        b
+          .setWarning()
+          .setButtonText(this.cta)
+          .onClick(() => {
+            this.confirmed = true;
+            this.close();
+          })
+      );
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+    this.onDone(this.confirmed);
+  }
+}
+
+export function confirmDropKeyRules(app: App, count: number): Promise<boolean> {
+  const rules = `${count} key rule${count === 1 ? "" : "s"}`;
+  return new Promise((resolve) => {
+    new DestructiveEditModal(app, "Switch mode?", `This removes ${rules} — each key's sharing and encryption choices are lost.`, "Remove rules and switch", resolve).open();
+  });
+}
+
+export function confirmTypeFlip(app: App, to: "file" | "folder"): Promise<boolean> {
+  return new Promise((resolve) => {
+    new DestructiveEditModal(app, `Change to ${to}?`, "This removes its key rules and encryption settings.", "Change type", resolve).open();
+  });
+}
+
 // Companion-folder / custom-path preset-change guard (the modal copy is
 // character-exact contract text). Reused verbatim for both zone ② (Settings file custom path)
 // and zone ③ (Companion folders) whenever the path being changed away from is a registry PRESET

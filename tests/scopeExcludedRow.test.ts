@@ -192,4 +192,30 @@ describe("setItemFileSharing — fields-mode guard + write-back pruning", () => 
 
     expect(instance.settings.items.obsidian["hotkeys"]?.settingsFile?.fileRule).toEqual({ sharing: EVERYWHERE, encrypted: true });
   });
+
+  // The stored mode outranks derivation: a custom item's `mode: "encrypted"` has no rules for
+  // deriveMode to read, and treating it as "plain" is how a Sync Center sharing change once
+  // silently downgraded a whole-file-encrypted rule to plaintext (the next capture would have
+  // written the store copy unencrypted).
+  it('a mode:"encrypted" custom item keeps its mode through a sharing write — never downgraded to plain', async () => {
+    const plugin = new ConfigSyncPlugin({} as never, {} as never);
+    const instance = plugin as unknown as Harness & {
+      settings: { items: { custom: Record<string, { settingsFile?: { mode?: string; fileRule?: { sharing: FileSharing; encrypted: boolean } } }> } };
+    };
+    instance.app = fakeApp();
+    instance.loadData = async () => ({
+      schemaVersion: 4,
+      items: itemsIn({ custom: { secrets: { synced: true, type: "file", path: "notes/secrets.json", settingsFile: { mode: "encrypted", rules: {}, perElement: {} } } } }),
+      remotes: [],
+    });
+    instance.saveData = async () => {};
+    await instance.loadSettings();
+    await instance.recompile();
+
+    await instance.setItemFileSharing("custom/secrets", perClass("desktop"));
+
+    const sf = instance.settings.items.custom["secrets"]?.settingsFile;
+    expect(sf?.mode).toBe("encrypted");
+    expect(sf?.fileRule).toEqual({ sharing: perClass("desktop"), encrypted: false });
+  });
 });

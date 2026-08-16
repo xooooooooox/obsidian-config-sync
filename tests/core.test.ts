@@ -1822,7 +1822,7 @@ describe("readGroups / writeGroups", () => {
     const { ctx } = setup();
     await writeGroups(ctx, [{ name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all" }]);
     const bad = [{ name: "rs", path: "{configDir}/plugins/remotely-save/data.json", type: "folder" as const, devices: "all" as const, mode: "fields" as const, fields: [{ pattern: "*Token*", sharing: THIS_DEVICE, encrypted: false }] }];
-    await expect(writeGroups(ctx, bad)).rejects.toThrow("file groups");
+    await expect(writeGroups(ctx, bad)).rejects.toThrow("per-key rules only apply to a single file");
     expect((await readGroups(ctx)).map((g) => g.name)).toEqual(["hotkeys"]);
   });
 

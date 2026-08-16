@@ -1,5 +1,5 @@
 import { refItemId } from "../core/itemKeys";
-import { App, ButtonComponent, DropdownComponent, ExtraButtonComponent, Menu, Notice, Platform, Plugin, PluginSettingTab, Scope, SearchComponent, SecretComponent, Setting, setIcon, setTooltip, TextComponent, ToggleComponent } from "obsidian";
+import { App, ButtonComponent, ExtraButtonComponent, Menu, Notice, Platform, Plugin, PluginSettingTab, Scope, SearchComponent, SecretComponent, Setting, setIcon, setTooltip, TextComponent, ToggleComponent } from "obsidian";
 import {
   QualifierAutocomplete,
   parseQuery,
@@ -69,7 +69,7 @@ import {
 } from "../core/registry";
 import { SCHEMA_FUTURE_NOTICE } from "../core/settingsMigration";
 import { FolderSelectModal } from "./FolderSelectModal";
-import { confirmPresetPathChange } from "./ConfirmModal";
+import { confirmDropKeyRules, confirmPresetPathChange, confirmTypeFlip } from "./ConfirmModal";
 import { commitDraft } from "./commitGroups";
 import { classifyJsonKeys, classifyPerElementLines, jsonElementClass, jsonKeyClass, KeyClass } from "./jsonView";
 import { renderFoldChevron, setFoldOpen } from "./foldChevron";
@@ -282,6 +282,10 @@ function defaultFieldsFromDetection(keys: string[]): FieldRule[] {
 // hands control to the per-key rows below it.
 const PER_KEY_RULES_ACTIVE_HINT = "Per-key rules are active — remove them to control the whole file again";
 
+// The Access-token control's standing explanation (DESIGN.md §4 Remote editor): tooltip-borne, so
+// it never spends a form row of its own.
+const TOKEN_LINK_HINT = "For https URLs. Without a token, this device's own git sign-in is used. Stored in Obsidian's keychain — link it once per device.";
+
 // zone ② body's file-read outcome (renderCardBodyInto below): "missing" = no file on this device
 // yet, "invalid" = present but not a JSON object, "ok" = usable — only "ok" carries a doc worth
 // handing to buildRuleRows/renderCardDataPreview.
@@ -299,29 +303,10 @@ function parseCardDoc(raw: string | null): { doc: Record<string, unknown>; fileS
   return { doc: parsed as Record<string, unknown>, fileState: "ok" };
 }
 
-// Legacy single-select 5-way action, kept only as an adapter for the still-mutually-exclusive
-// dropdowns below. Round-trips
-// exactly: strip<->local/false, encrypt<->all/true,
-// desktop<->desktop/false, mobile<->mobile/false, all<->all/false (inert default).
-type LegacyFieldAction = "strip" | "encrypt" | "desktop" | "mobile" | "all";
+// The protective default for a hand-typed pattern (the glob input): a credential glob should
+// start local, not shared. The card-style click-to-add uses its own everywhere/sensitive default.
 const LOCAL_RULE: Pick<FieldRule, "sharing" | "encrypted"> = { sharing: THIS_DEVICE, encrypted: false };
 const ENCRYPT_RULE: Pick<FieldRule, "sharing" | "encrypted"> = { sharing: EVERYWHERE, encrypted: true };
-
-function legacyActionFromRule(r: Pick<FieldRule, "sharing" | "encrypted">): LegacyFieldAction {
-  if (r.sharing.kind === "this-device") return "strip";
-  if (r.encrypted) return "encrypt";
-  return sharingClass(r.sharing) ?? "all";
-}
-
-function legacyRuleFromAction(action: LegacyFieldAction): Pick<FieldRule, "sharing" | "encrypted"> {
-  switch (action) {
-    case "strip": return LOCAL_RULE;
-    case "encrypt": return ENCRYPT_RULE;
-    case "desktop": return { sharing: perClass("desktop"), encrypted: false };
-    case "mobile": return { sharing: perClass("mobile"), encrypted: false };
-    case "all": return { sharing: EVERYWHERE, encrypted: false };
-  }
-}
 
 interface RemoteDraft {
   name: string;
@@ -549,6 +534,10 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private expanded = new Set<string>(); // UI-transient: advanced rows expanded this session
   private groupsErrorEl: HTMLElement | null = null;
   private sourcesErrorEl: HTMLElement | null = null;
+  // One error slot per remote card, so a validation error pins under the card it names —
+  // rebuilt on every renderSources; live-updated (no re-render) by saveRemotes.
+  private sourceErrorEls: HTMLElement[] = [];
+  private sourcesErrorFor: number | null = null;
   private groupsErrorMsg = "";
   private sourcesErrorMsg = "";
   // null = no pinned error — an "" sentinel would collide with the unnamed placeholder rule's
@@ -1839,29 +1828,54 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   }
 
   private renderCardDataPreview(bodyEl: HTMLElement, def: ItemDef, item: Item, doc: Record<string, unknown>, wrap: HTMLElement): void {
-    // Key clickability is made explicit (users didn't realize they could
-    // click): the action sentence leads the preview instead of trailing the bottom legend, and
-    // every un-ruled key below wears a persistent dashed underline (config-sync-json-clickable).
-    // A carrier card suppresses both — its elements' rules live on the element rows, not here.
-    if (carrierListFor(def) === null) {
+    // A carrier card's element rows (the drawer, spec §6.4) ARE its rule surface — a per-key rule
+    // on a boolean plugin map has no meaning, and a click writing `sf.rules[<plugin id>]` would
+    // flip the item into "fields" mode and corrupt the switch-list file on next capture
+    // (registry.ts's perElementFromMap also refuses that key, belt-and-braces, but this affordance
+    // is what would invite the click). An enablement key's rules live on member rows — a rule
+    // written here would be filtered straight back out by buildRuleRows. Both suppress the
+    // clickable affordance below.
+    const isCarrier = carrierListFor(def) !== null;
+    const rules: FieldRule[] = Object.entries(item.settingsFile?.rules ?? {}).map(([pattern, r]) => ({ pattern, ...r }));
+    this.renderJsonPreviewInto(bodyEl, doc, rules, this.detections.get(def.id)?.keys ?? [], item.settingsFile?.perElement ?? {}, {
+      showHint: !isCarrier,
+      ruleable: (key) => !isCarrier && !isEnablementRuleKey(def, key),
+      onAddRule: (key) => {
+        void this.addRuleForKey(def, key).then(() => {
+          // Adding a rule can flip hasKeyRules -> true, which dims the path row's own
+          // scope/lock controls (spec §3.1) — refreshed in place: a full re-render would
+          // reset this preview's scroll to the top.
+          this.refreshPathRow(wrap, def);
+          this.refreshCardBadges(wrap, def);
+          this.refreshCardBody(wrap, def);
+        });
+      },
+    });
+  }
+
+  // The one JSON-preview renderer, shared by the item card's zone ② and the Advanced rule form
+  // (which speaks SyncGroup, not ItemDef — the callers own the write path, this owns the paint).
+  private renderJsonPreviewInto(
+    bodyEl: HTMLElement,
+    doc: Record<string, unknown>,
+    rules: FieldRule[],
+    detectedKeys: string[],
+    perElement: Record<string, PerElementSharing>,
+    opts: { showHint: boolean; ruleable: (key: string) => boolean; onAddRule: (key: string) => void }
+  ): void {
+    // Key clickability is made explicit (users didn't realize they could click): the action
+    // sentence leads the preview instead of trailing the bottom legend, and every un-ruled key
+    // below wears a persistent dashed underline (config-sync-json-clickable).
+    if (opts.showHint) {
       const hint = bodyEl.createDiv({ cls: "config-sync-json-hint" });
       setIcon(hint.createSpan(), "plus");
       hint.appendText("Click any key to add a rule for it");
     }
     const pre = bodyEl.createEl("pre", { cls: "config-sync-json-pre" });
-    // A carrier card's element rows (the drawer, spec §6.4) ARE its rule surface — a per-key rule on
-    // a boolean plugin map has no meaning, and a click writing `sf.rules[<plugin id>]`
-    // would flip the item into "fields" mode and corrupt the switch-list
-    // file on next capture (registry.ts's perElementFromMap also refuses that key, belt-and-braces,
-    // but this affordance is what would invite the click). Suppressed entirely below:
-    // no click handler, and no "you could add a rule here" styling on an un-ruled key.
-    const isCarrier = carrierListFor(def) !== null;
-    const detectedKeys = this.detections.get(def.id)?.keys ?? [];
-    const rules: FieldRule[] = Object.entries(item.settingsFile?.rules ?? {}).map(([pattern, r]) => ({ pattern, ...r }));
     const raw = JSON.stringify(doc, null, 2);
     const classByKey = new Map<string, KeyClass>();
     for (const kc of classifyJsonKeys(raw, rules, detectedKeys)) classByKey.set(kc.key, kc);
-    const perElementLines = classifyPerElementLines(raw, item.settingsFile?.perElement ?? {});
+    const perElementLines = classifyPerElementLines(raw, perElement);
     const rawLines = raw.split("\n");
     for (let i = 0; i < rawLines.length; i++) {
       const line = rawLines[i]!;
@@ -1870,11 +1884,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       const kc = key !== undefined ? classByKey.get(key) : undefined;
       if (m !== null && key !== undefined && kc !== undefined) {
         pre.createSpan({ text: m[1] });
-        // No clickable affordance for an un-ruled key on a carrier card (nothing to click — see
-        // isCarrier above) or for an enablement key (its rules live on member rows; a rule
-        // written here would be filtered straight back out by buildRuleRows). Every other
-        // un-ruled key wears the dashed underline.
-        const ruleable = kc.state.sharing === null && !isCarrier && !isEnablementRuleKey(def, key);
+        const ruleable = kc.state.sharing === null && opts.ruleable(key);
         const noRuleHint = kc.state.sharing === null && !ruleable;
         const kspan = pre.createSpan({
           cls: `config-sync-json-key${noRuleHint ? "" : ` ${jsonKeyClass(kc)}`}${ruleable ? " config-sync-json-clickable" : ""}`,
@@ -1882,18 +1892,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         });
         // An encrypted rule marks its key with the same lucide lock the rest of the panel uses.
         if (kc.state.encrypted) setIcon(kspan.createSpan({ cls: "config-sync-json-lock" }), "lock");
-        if (ruleable) {
-          kspan.addEventListener("click", () => {
-            void this.addRuleForKey(def, key).then(() => {
-              // Adding a rule can flip hasKeyRules -> true, which dims the path row's own
-              // scope/lock controls (spec §3.1) — refreshed in place: a full re-render would
-              // reset this preview's scroll to the top.
-              this.refreshPathRow(wrap, def);
-              this.refreshCardBadges(wrap, def);
-              this.refreshCardBody(wrap, def);
-            });
-          });
-        }
+        if (ruleable) kspan.addEventListener("click", () => opts.onAddRule(key));
         pre.appendText(": ");
         const rest = m[3] ?? "";
         const comma = rest.endsWith(",");
@@ -2407,6 +2406,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     setIcon(chip.createSpan({ cls: "config-sync-tworow-chev" }), "chevrons-up-down");
     const pick = (mode: SyncMode): void => {
       void (async () => {
+        // Leaving Per-key rules deletes every configured key rule — confirm instead of
+        // silently destroying them (the card surface removes rules one at a time; this menu is
+        // the only place they could vanish in bulk).
+        const rulesDropped = group.mode === "fields" && mode !== "fields" ? (group.fields?.length ?? 0) : 0;
+        if (rulesDropped > 0 && !(await confirmDropKeyRules(this.app, rulesDropped))) return;
         let fieldsForNewMode: FieldRule[] | undefined;
         if (mode === "fields" && group.fields === undefined) {
           const scan = this.detections.get(group.name) ?? (await this.host.detectSensitive(group));
@@ -2441,75 +2445,155 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     });
   }
 
+  // The Advanced per-key editor speaks the card's own grammar (DESIGN.md §4 Advanced rule
+  // editor): each pattern is a rule-row scrow with the shared sharing picker (Remove rule as the
+  // menu's warning item) and the three-state lock — the single-select action dropdown, which
+  // flattened the orthogonal sharing×encrypted pair, does not exist. Below the rows, the File
+  // preview (click any key to add a rule); last, the raw pattern input as the glob escape hatch.
+  // One file read feeds rows and preview alike; built after the read completes.
   private renderFieldsEditor(hostEl: HTMLElement, group: SyncGroup, afterChange: () => void): void {
     const panel = hostEl.createDiv({ cls: "config-sync-fields-editor" });
+    void (async () => {
+      const { doc } = parseCardDoc(await this.host.readItemFile(group));
+      this.buildFieldsEditor(panel, group, doc, afterChange);
+    })();
+  }
+
+  private buildFieldsEditor(panel: HTMLElement, group: SyncGroup, doc: Record<string, unknown>, afterChange: () => void): void {
     const detectedKeys = this.detections.get(group.name)?.keys ?? [];
     const rules = group.fields ?? [];
-    for (const rule of rules) {
+    const setRuleAt = (ruleIndex: number, mutator: (r: FieldRule) => void): void => {
+      void this.commitGroups((draft) => {
+        const g = draft.find((x) => x.name === group.name);
+        const r = g?.fields?.[ruleIndex];
+        if (r !== undefined) mutator(r);
+      }, group.name).then(afterChange);
+    };
+    rules.forEach((rule, ruleIndex) => {
       const isDetected = detectedKeys.some((k) => keyMatchesAny(k, [rule.pattern]));
-      const fr = panel.createDiv({ cls: "config-sync-fieldrow" });
-      if (rule.locked === true) {
-        const lock = fr.createSpan({ cls: "config-sync-flock", attr: { "aria-label": "Preset rule — cannot be removed" } });
-        setIcon(lock, "lock");
-      }
-      fr.createSpan({ cls: "config-sync-fkey", text: rule.pattern });
-      fr.createSpan({ cls: `config-sync-ftag${isDetected ? " is-detected" : ""}`, text: isDetected ? "detected" : "manual" });
-      fr.createDiv({ cls: "config-sync-rule-spacer" });
+      const fr = panel.createDiv({ cls: "config-sync-scrow config-sync-card-rulerow" });
+      const keyCell = fr.createSpan({ cls: "config-sync-fkey", text: rule.pattern });
+      const tag = rule.locked === true ? "preset" : isDetected ? "detected" : "manual";
+      keyCell.createSpan({ cls: `config-sync-ftag${isDetected && rule.locked !== true ? " is-detected" : ""}`, text: tag });
+      const slots = this.scrowSlots(fr);
       // The appearance group's locked enabledCssSnippets strip (ensureAppearancePresets) isn't
-      // an ordinary fixed-action rule — it exists only to keep the field out of THIS file because
-      // it's synced elsewhere, per snippet on the Appearance card. A disabled "This device"
-      // dropdown would mislead (implying a choice), so it points at the real control instead.
-      const isSnippetPointer = rule.locked === true && rule.pattern === "enabledCssSnippets";
-      if (isSnippetPointer) {
-        fr.createSpan({ cls: "config-sync-ldhint", text: "locked — managed per snippet on the Appearance card (Companion folders → snippets)" });
-      } else {
-        const dd = new DropdownComponent(fr.createDiv({ cls: "config-sync-act" }));
-        dd.addOption("strip", "This device")
-          .addOption("encrypt", "Encrypted")
-          .addOption("desktop", "Desktop only")
-          .addOption("mobile", "Mobile only")
-          .setValue(legacyActionFromRule(rule) === "all" ? "strip" : legacyActionFromRule(rule))
-          .onChange((v) => {
-            void (async () => {
-              const ruleIndex = rules.indexOf(rule);
-              await this.commitGroups((draft) => {
-                const g = draft.find((x) => x.name === group.name);
-                const r = g?.fields?.[ruleIndex];
-                if (r !== undefined) Object.assign(r, legacyRuleFromAction(v as LegacyFieldAction));
-              }, group.name);
-              afterChange();
-            })();
+      // an ordinary fixed rule — it exists only to keep the field out of THIS file because
+      // it's synced elsewhere, per snippet on the Appearance card. A disabled picker would
+      // mislead (implying a choice), so it points at the real control instead.
+      if (rule.locked === true && rule.pattern === "enabledCssSnippets") {
+        fr.createDiv();
+        fr.createDiv({ cls: "config-sync-ldhint", text: "locked — managed per snippet on the Appearance card (Folders → snippets)" });
+        return;
+      }
+      const perElementOn = group.perElement?.[rule.pattern] !== undefined;
+      this.renderSharingPicker(slots.device, {
+        sharing: rule.sharing,
+        options: FIELD_SHARING_OPTIONS,
+        disabled: rule.locked === true,
+        onChange: (v) =>
+          setRuleAt(ruleIndex, (r) => {
+            r.sharing = v;
+            if (v.kind === "this-device") r.encrypted = false;
+          }),
+        extras:
+          rule.locked === true
+            ? []
+            : [{
+                title: "Remove rule",
+                icon: "trash",
+                action: () => {
+                  void this.commitGroups((draft) => {
+                    const g = draft.find((x) => x.name === group.name);
+                    if (g === undefined || g.fields === undefined) return;
+                    g.fields = g.fields.filter((_, i) => i !== ruleIndex);
+                    if (g.fields.length === 0) delete g.fields;
+                    if (g.perElement !== undefined) {
+                      delete g.perElement[rule.pattern];
+                      if (Object.keys(g.perElement).length === 0) delete g.perElement;
+                    }
+                  }, group.name).then(afterChange);
+                },
+              }],
+      });
+      if (rule.locked === true) slots.device.setAttribute("aria-label", "Preset rule — cannot be changed");
+      this.renderLockToggle(slots.lock, {
+        encrypted: rule.encrypted,
+        disabled: rule.locked === true || encryptToggleDisabled(rule.sharing, perElementOn),
+        onChange: (v) => setRuleAt(ruleIndex, (r) => (r.encrypted = v)),
+      });
+      // Per-item device rules for a string-array key — same icon toggle, same mutual exclusion
+      // with encryption as the card surface (manifest.ts D3).
+      if (isStringArrayValue(doc[rule.pattern])) {
+        const pi = slots.aux.createSpan({ cls: `config-sync-perelement-ic${perElementOn ? " is-set" : ""}` });
+        setIcon(pi, "list-checks");
+        if (rule.encrypted) {
+          pi.addClass("config-sync-dim");
+          pi.setAttribute("aria-label", PER_ITEM_DISABLED_HINT);
+        } else {
+          pi.setAttribute("aria-label", `${PER_ELEMENT_RULES_LABEL} — each item gets its own rule`);
+          pi.setAttribute("role", "button");
+          pi.setAttribute("tabindex", "0");
+          const flip = (): void => {
+            void this.commitGroups((draft) => {
+              const g = draft.find((x) => x.name === group.name);
+              if (g === undefined) return;
+              if (perElementOn) {
+                if (g.perElement !== undefined) {
+                  delete g.perElement[rule.pattern];
+                  if (Object.keys(g.perElement).length === 0) delete g.perElement;
+                }
+              } else {
+                g.perElement = { ...(g.perElement ?? {}), [rule.pattern]: {} };
+                const r = g.fields?.[ruleIndex];
+                if (r !== undefined) r.encrypted = false;
+              }
+            }, group.name).then(afterChange);
+          };
+          pi.addEventListener("click", flip);
+          pi.addEventListener("keydown", (e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              flip();
+            }
           });
-        // Locked preset rules are fixed to their action (ensureSelfPresets would revert any
-        // change on commit anyway) — disable the dropdown so the UI matches the data.
-        if (rule.locked === true) {
-          dd.setDisabled(true);
-          dd.selectEl.setAttribute("title", "Preset rule — action is fixed");
-        }
-        if (sharingClass(rule.sharing) !== null) {
-          fr.createSpan({ cls: "config-sync-ldhint", text: "each class keeps its own value" });
         }
       }
-      if (rule.locked === true) {
-        fr.createSpan({ cls: "config-sync-fieldrow-xspacer" }); // keep Strip/Encrypt aligned with unlocked rows
-      } else {
-        new ExtraButtonComponent(fr)
-          .setIcon("x")
-          .setTooltip("Remove rule")
-          .onClick(() => {
-            void (async () => {
-              const ruleIndex = rules.indexOf(rule);
-              await this.commitGroups((draft) => {
+      if (perElementOn) {
+        const elements = isStringArrayValue(doc[rule.pattern]) ? (doc[rule.pattern] as string[]) : [];
+        const sharings = group.perElement?.[rule.pattern] ?? {};
+        for (const el of buildPerElementRows(elements, sharings)) {
+          const r = panel.createDiv({ cls: "config-sync-scrow config-sync-card-elrow" });
+          r.createSpan({ cls: "config-sync-card-elname", text: el.element });
+          this.renderSharingPicker(this.scrowSlots(r).device, {
+            sharing: el.sharing,
+            options: FIELD_SHARING_OPTIONS,
+            disabled: false,
+            onChange: (v) => {
+              void this.commitGroups((draft) => {
                 const g = draft.find((x) => x.name === group.name);
-                if (g === undefined || g.fields === undefined) return;
-                g.fields = g.fields.filter((_, i) => i !== ruleIndex);
-                if (g.fields.length === 0) delete g.fields;
-              }, group.name);
-              afterChange();
-            })();
+                if (g === undefined) return;
+                const map = { ...(g.perElement?.[rule.pattern] ?? {}) };
+                if (v.kind === "everywhere") delete map[el.element];
+                else map[el.element] = v;
+                g.perElement = { ...(g.perElement ?? {}), [rule.pattern]: map };
+              }, group.name).then(afterChange);
+            },
           });
+        }
       }
-    }
+    });
+    // The File preview — same treatment, same click-to-add as the item card's zone ②.
+    this.renderJsonPreviewInto(panel, doc, rules, detectedKeys, group.perElement ?? {}, {
+      showHint: true,
+      ruleable: () => true,
+      onAddRule: (key) => {
+        void this.commitGroups((draft) => {
+          const g = draft.find((x) => x.name === group.name);
+          if (g === undefined) return;
+          g.fields = [...(g.fields ?? []), { pattern: key, sharing: EVERYWHERE, encrypted: SENSITIVE_ENCRYPT_RE.test(key) }];
+        }, group.name).then(afterChange);
+      },
+    });
     const addRow = panel.createDiv({ cls: "config-sync-addrow" });
     const input = addRow.createEl("input", { cls: "config-sync-addrow-input", attr: { placeholder: "Add key pattern… e.g. *Token*" } });
     const addBtn = addRow.createEl("button", { cls: "config-sync-addrow-btn", text: "Add" });
@@ -2967,15 +3051,15 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
 
   private renderGroupsReadError(containerEl: HTMLElement): boolean {
     if (this.groupsReadError === null) return false;
-    containerEl.createEl("p", {
+    containerEl.createDiv({
       text: `Cannot read your sync configuration — fix the error below, then reopen this tab: ${this.groupsReadError}`,
-      cls: "mod-warning",
+      cls: "config-sync-form-error",
     });
     return true;
   }
 
   private renderGroupsError(containerEl: HTMLElement): void {
-    this.groupsErrorEl = containerEl.createEl("p", { cls: "mod-warning" });
+    this.groupsErrorEl = containerEl.createDiv({ cls: "config-sync-form-error" });
     // Row-pinned (inline) errors are shown on their card; only surface page-level errors here.
     this.groupsErrorEl.setText(this.saveErrorFor === null ? this.groupsErrorMsg : "");
   }
@@ -3090,8 +3174,17 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         .setHeading()
         .setDesc("Config files we found but couldn't classify. Turn one on to start syncing it.");
       const discEl = containerEl.createDiv();
-      for (const group of discoveredOn) this.renderDiscoveredOnRow(discEl, group);
-      for (const d of discovered) this.renderDiscoveredRow(discEl, d);
+      // ONE stably-sorted list, adopted or not — adoption must change a row's own controls,
+      // never its position: two blocks ordered by unrelated keys made a fresh adopt relocate to
+      // the top, so the row the user had just clicked appeared to light up a DIFFERENT file.
+      const rows: ({ rel: string; on: true; group: SyncGroup } | { rel: string; on: false; file: { name: string; path: string } })[] = [
+        ...discoveredOn.map((group) => ({ rel: splitLocation(group.path).rel, on: true as const, group })),
+        ...discovered.map((file) => ({ rel: splitLocation(file.path).rel, on: false as const, file })),
+      ].sort((a, b) => a.rel.localeCompare(b.rel));
+      for (const r of rows) {
+        if (r.on) this.renderDiscoveredOnRow(discEl, r.group);
+        else this.renderDiscoveredRow(discEl, r.file);
+      }
     }
   }
 
@@ -3106,6 +3199,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       }, d.name);
       this.refresh();
     });
+    // A refused adopt must say so under its own row — the toggle springing back with the
+    // page-level message suppressed (culprit pinning) reads as "nothing happened".
+    if (this.saveErrorFor === d.name) {
+      listEl.createDiv({ cls: "config-sync-form-error", text: `Couldn't turn this on — ${this.groupsErrorMsg.replace(/\.$/, "")}.` });
+    }
   }
 
   private renderDiscoveredOnRow(listEl: HTMLElement, group: SyncGroup): void {
@@ -3130,6 +3228,9 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       else this.expanded.add(group.name);
       this.refresh();
     });
+    if (this.saveErrorFor === group.name) {
+      listEl.createDiv({ cls: "config-sync-form-error", text: `Couldn't save this change — ${this.groupsErrorMsg.replace(/\.$/, "")}.` });
+    }
     if (isOpen) this.renderRuleForm(listEl, group, "discovered");
   }
 
@@ -3180,6 +3281,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       return r.createDiv({ cls: "config-sync-advrow-ctl" });
     };
 
+    if (mode === "discovered") {
+      // A discovered drawer has no Name/Path inputs, so it must still NAME the file it belongs
+      // to — without this line nothing in the card says which row it is attached to.
+      advRow("File").createSpan({ cls: "config-sync-row-path", text: splitLocation(group.path).rel });
+    }
     if (mode !== "discovered") {
       if (mode === "custom") {
         const nameC = new TextComponent(advRow("Name"));
@@ -3244,28 +3350,41 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     } as const;
     const typeIc = advRow("Type").createSpan({ cls: "config-sync-sharingicon config-sync-adv-typeic" });
     setIcon(typeIc.createSpan(), TYPE_META[group.type].icon);
-    typeIc.setAttribute("aria-label", TYPE_META[group.type].tooltip);
+    // The ⇕ span renders in both states — constant layout is a width promise (§2.3).
     setIcon(typeIc.createSpan({ cls: "config-sync-tworow-chev" }), "chevrons-up-down");
-    this.wireMenuTrigger(typeIc, () => {
-      const menu = new Menu();
-      for (const t of ["file", "folder"] as const) {
-        menu.addItem((i) =>
-          i.setTitle(TYPE_META[t].label).setIcon(TYPE_META[t].icon).setChecked(group.type === t).onClick(async () => {
-            await this.commitGroups((draft) => {
-              const g = draft.find((x) => x.name === group.name);
-              if (g === undefined) return;
-              g.type = t;
-              if (g.type !== "file") {
-                delete g.mode;
-                delete g.fields;
-              }
-            }, group.name);
-            this.refresh();
-          })
-        );
-      }
-      return menu;
-    });
+    if (mode === "discovered") {
+      // The file fixes name, path AND type — a discovered rule is a file by construction, and a
+      // folder reading of a file path only ever fails at run time.
+      typeIc.addClass("config-sync-dim");
+      typeIc.setAttribute("aria-label", "File — decided by the file itself");
+    } else {
+      typeIc.setAttribute("aria-label", TYPE_META[group.type].tooltip);
+      this.wireMenuTrigger(typeIc, () => {
+        const menu = new Menu();
+        for (const t of ["file", "folder"] as const) {
+          menu.addItem((i) =>
+            i.setTitle(TYPE_META[t].label).setIcon(TYPE_META[t].icon).setChecked(group.type === t).onClick(async () => {
+              if (t === group.type) return;
+              // Flipping away from "file" drops key rules and the encryption mode — confirm
+              // instead of silently destroying them.
+              const destructive = group.mode !== undefined || (group.fields?.length ?? 0) > 0;
+              if (destructive && !(await confirmTypeFlip(this.app, t))) return;
+              await this.commitGroups((draft) => {
+                const g = draft.find((x) => x.name === group.name);
+                if (g === undefined) return;
+                g.type = t;
+                if (g.type !== "file") {
+                  delete g.mode;
+                  delete g.fields;
+                }
+              }, group.name);
+              this.refresh();
+            })
+          );
+        }
+        return menu;
+      });
+    }
     this.renderSharingPicker(advRow("Devices"), {
       sharing: group.devices === "all" ? EVERYWHERE : perClass(group.devices),
       options: [EVERYWHERE, perClass("desktop"), perClass("mobile")],
@@ -3347,9 +3466,17 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       .setHeading()
       .setDesc("Sync your settings with another vault or a git repository. Your own devices don't need a remote — your regular vault sync already carries the settings.");
     const listEl = containerEl.createDiv({ cls: "config-sync-sources" });
-    this.sources.forEach((draft, index) => this.renderRemoteRow(listEl, draft, index));
-    this.sourcesErrorEl = containerEl.createEl("p", { cls: "mod-warning" });
-    this.sourcesErrorEl.setText(this.sourcesErrorMsg);
+    this.sourceErrorEls = [];
+    this.sources.forEach((draft, index) => {
+      this.renderRemoteRow(listEl, draft, index);
+      // The per-card error slot sits right under its card (after the expanded form, when open);
+      // :empty renders nothing.
+      const slot = listEl.createDiv({ cls: "config-sync-form-error" });
+      slot.setText(this.sourcesErrorFor === index ? this.sourcesErrorMsg : "");
+      this.sourceErrorEls.push(slot);
+    });
+    this.sourcesErrorEl = containerEl.createDiv({ cls: "config-sync-form-error" });
+    this.sourcesErrorEl.setText(this.sourcesErrorFor === null ? this.sourcesErrorMsg : "");
     const addBtn = containerEl.createEl("button", { cls: "config-sync-add-row", text: "+ Add remote" });
     addBtn.addEventListener("click", () => {
       if (!this.host.settingsWritable()) return; // §4.2b/N3: no half-built remote that can never be saved
@@ -3495,10 +3622,20 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       // the secret's NAME, which rides along in the synced settings; the value stays in each
       // device's keychain, never read here and never written here.
       const tokenControl = remRow("Access token", false).createDiv({ cls: "config-sync-secret-control" });
+      // The standing explanation lives on the control, never a row of its own — the row-shaped
+      // version spent an empty 150px label track plus two wrapped lines pushing Test connection
+      // down (DESIGN.md §4 Remote editor).
+      setTooltip(tokenControl, TOKEN_LINK_HINT);
+      tokenControl.setAttribute("aria-label", TOKEN_LINK_HINT);
       const tokenC = new SecretComponent(this.app, tokenControl);
-      const statusEl = remRow("", false).createDiv({ cls: "config-sync-token-status" });
+      // The status row exists only while it has something to say (✓ stored / ⚠ not linked
+      // here); the default state renders no row at all.
+      const statusRow = remRow("", false);
+      const statusEl = statusRow.createDiv({ cls: "config-sync-token-status" });
       const paintTokenStatus = (): void => {
         const held = draft.tokenId !== "" && this.app.secretStorage.listSecrets().includes(draft.tokenId);
+        const rowEl = statusRow.parentElement; // remRow returns the control cell; its parent is the grid row
+        if (rowEl !== null) rowEl.toggle(draft.tokenId !== "");
         statusEl.className =
           "config-sync-token-status" + (held ? " is-ok" : draft.tokenId !== "" ? " is-warning" : "");
         statusEl.setText(
@@ -3506,7 +3643,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
             ? "✓ Token stored on this device."
             : draft.tokenId !== ""
               ? `⚠ This remote uses a token named "${draft.tokenId}", which this device doesn't have yet — link it here once.`
-              : "For https URLs. Without a token, this device's own git sign-in is used. Stored in Obsidian's keychain — link it once per device."
+              : ""
         );
       };
       tokenC.setValue(draft.tokenId);
@@ -3604,18 +3741,38 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     }
   }
 
+  // Which remote a validation error belongs to: the first prefix of the candidate list that
+  // fails is the culprit (the full-list message keeps the true numbering; a single-element
+  // re-validation would renumber "#N" to "#1").
+  private remoteErrorCulprit(candidates: unknown[]): number | null {
+    for (let i = 0; i < candidates.length; i++) {
+      try {
+        validateRemotes(candidates.slice(0, i + 1));
+      } catch {
+        return i;
+      }
+    }
+    return null;
+  }
+
   private async saveRemotes(): Promise<void> {
     if (!this.host.settingsWritable()) return; // §4.2b
+    const candidates = this.sources.map(toCandidate);
     try {
-      this.host.settings.remotes = validateRemotes(this.sources.map(toCandidate));
+      this.host.settings.remotes = validateRemotes(candidates);
       await this.host.saveSettings();
       // A remote's url/branch/subdir/storePath may just have changed — never let a later compare
       // reuse a reader built from the pre-edit coordinates.
       this.host.clearReaderCache();
       this.sourcesErrorMsg = "";
+      this.sourcesErrorFor = null;
     } catch (e) {
       this.sourcesErrorMsg = (e as Error).message;
+      this.sourcesErrorFor = this.remoteErrorCulprit(candidates);
     }
-    this.sourcesErrorEl?.setText(this.sourcesErrorMsg);
+    // Live update (no re-render): the culprit card's slot carries the message, every other slot
+    // and the page-level element go empty (:empty hides them).
+    this.sourceErrorEls.forEach((el, i) => el.setText(this.sourcesErrorFor === i ? this.sourcesErrorMsg : ""));
+    this.sourcesErrorEl?.setText(this.sourcesErrorFor === null ? this.sourcesErrorMsg : "");
   }
 }

@@ -46,7 +46,7 @@
             }
           },
           "label": { "type": "string", "description": "Display name recorded when the item is enabled or captured; shown even where the plugin isn't installed. An empty or whitespace-only value is dropped by the parser (trim-and-drop), not rejected." },
-          "origin": { "const": "discovered", "description": "Set by the plugin for rules created from the Discovered-files section; name and path are fixed by the file." },
+          "origin": { "const": "discovered", "description": "Set by the plugin for rules created from the Discovered-files section; name, path and type are fixed by the file (always a file, never a folder — the UI locks the type picker)." },
           "ref": {
             "type": "string",
             "pattern": "^(obsidian|core|community|custom|legacy)/.+$",
