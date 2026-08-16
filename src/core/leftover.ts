@@ -5,10 +5,30 @@ import { classifySettings } from "./settingsMigration";
 import { migrateV2Settings } from "./v2Migration";
 import { migrateV4Settings } from "./v4Migration";
 
+// The Leftover list's own grouping — the main list's section vocabulary, plus "other" for
+// vault-root and unclassifiable files.
+export type LeftoverSection = "obsidian" | "core" | "community" | "other";
+
+export const LEFTOVER_SECTION_ORDER: readonly LeftoverSection[] = ["obsidian", "core", "community", "other"];
+
 export interface LeftoverFile {
   rel: string; // store-root-relative, e.g. "store/configdir/plugins/x/data.json"
-  name: string; // derived display name
-  path: string; // rel without the leading "store/", shown in the row
+  section: LeftoverSection;
+  name: string; // the file's REAL owner (plugin/card label) or its basename — never the raw path
+  crumb: string | null; // owning card shown faint before the name (e.g. "Appearance"), when one applies
+  path: string; // rel without the leading "store/", shown in the row's mono line
+}
+
+// Name sources the classifier cannot know on its own, prebuilt by the caller (main.ts):
+// pluginLabels = plugin id -> display name (store-lock display.label, else the locally installed
+// manifest's name — absent means "fall back to the id"); fileOwners = configdir basename -> the
+// core plugin / Obsidian card that owns that file (from the local registry defs, which always
+// know every core plugin and card); appearanceLabel = the Appearance card's display label, the
+// breadcrumb every snippets/themes file wears.
+export interface LeftoverNames {
+  pluginLabels: ReadonlyMap<string, string>;
+  fileOwners: ReadonlyMap<string, { section: "obsidian" | "core"; label: string }>;
+  appearanceLabel: string;
 }
 
 // The list-membership compile BOTH delta sides share: items compiled WITH
@@ -66,23 +86,46 @@ export function storeSelfCopyGroups(json: string, defs: ItemDef[], betaIds: Read
   }
 }
 
-// A friendly name for an orphaned store file: the plugin id for a plugin path, otherwise the
-// store-relative path itself.
-function deriveName(storeInner: string): string {
+function basenameOf(storeInner: string): string {
+  const cut = storeInner.lastIndexOf("/");
+  return cut < 0 ? storeInner : storeInner.slice(cut + 1);
+}
+
+// A real identity for an orphaned store file — the name slot never shows a raw store path
+// (DESIGN.md §4 Leftover): a plugin file names its plugin (label, else bare id); a
+// snippets/themes file names its basename behind the Appearance breadcrumb; a config-root file
+// whose basename a core plugin or an Obsidian card owns names that owner; everything else names
+// its basename. The full path stays on the row's own mono line.
+function deriveDisplay(storeInner: string, names: LeftoverNames): { section: LeftoverSection; name: string; crumb: string | null } {
   const m = storeInner.match(/^configdir\/plugins\/([^/]+)\//);
-  return m !== null && m[1] !== undefined ? m[1] : storeInner;
+  if (m !== null && m[1] !== undefined) return { section: "community", name: names.pluginLabels.get(m[1]) ?? m[1], crumb: null };
+  if (/^configdir\/(snippets|themes)\//.test(storeInner)) {
+    return { section: "obsidian", name: basenameOf(storeInner), crumb: names.appearanceLabel };
+  }
+  if (storeInner.startsWith("configdir/")) {
+    const basename = basenameOf(storeInner);
+    const owner = names.fileOwners.get(basename);
+    if (owner !== undefined) return { section: owner.section, name: owner.label, crumb: null };
+    return { section: "obsidian", name: basename, crumb: null };
+  }
+  return { section: "other", name: basenameOf(storeInner), crumb: null };
 }
 
 // Store files that belong to no current group — settings config-sync saved for items no
 // longer tracked. Bookkeeping (store.lock.json, config-sync.json) lives outside "store/" and
 // is naturally excluded; only rels under "store/" that groupForStoreRel can't attribute count.
-export function leftoverStoreRels(rels: string[], groups: SyncGroup[]): LeftoverFile[] {
+export function leftoverStoreRels(rels: string[], groups: SyncGroup[], names: LeftoverNames): LeftoverFile[] {
   const out: LeftoverFile[] = [];
   for (const rel of rels) {
     if (!rel.startsWith("store/")) continue;
     if (groupForStoreRel(groups, rel).name !== "") continue;
     const inner = rel.slice("store/".length);
-    out.push({ rel, name: deriveName(inner), path: inner });
+    const display = deriveDisplay(inner, names);
+    out.push({ rel, section: display.section, name: display.name, crumb: display.crumb, path: inner });
   }
-  return out;
+  // Grouped presentation order: section (main-list order, "other" last), then name within.
+  return out.sort((a, b) => {
+    const s = LEFTOVER_SECTION_ORDER.indexOf(a.section) - LEFTOVER_SECTION_ORDER.indexOf(b.section);
+    return s !== 0 ? s : a.name.localeCompare(b.name);
+  });
 }

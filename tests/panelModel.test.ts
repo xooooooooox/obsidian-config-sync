@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { capFileEntries, insyncLineText, excludedLineText, statusBarStatuses, moreFilesText, filesChangeLabel, visibleUnderFilter, fateBucket, fateBucketCounts, partitionSection, legacyLockedFamilyBucket, RowBucket, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, runProgressLabel, showColdStartBanner, enablementCarrierFor, carrierIsSynced, TYPE_SECTION_TITLES, typeSectionForRow, sectionCountLabel, unifiedFooterSummary, fileEntryFor, stagedPayload, StageableRow, effectiveFate, remoteSections, onOffFlips, onOffLineText, onOffNarrationLines, familyRollup, FamilyMember, mergeFamilyChanges, foldCompanionEntries, groupExcludedHere, CAPTURE_ADDED_TOOLTIP, CAPTURE_UPDATED_TOOLTIP, CAPTURE_DELETED_TOOLTIP, APPLY_ADDED_TOOLTIP, APPLY_UPDATED_TOOLTIP, APPLY_DELETED_TOOLTIP } from "../src/ui/panelModel";
+import { capFileEntries, insyncLineText, excludedLineText, statusBarStatuses, moreFilesText, filesChangeLabel, visibleUnderFilter, leftoverPresentation, fateBucket, fateBucketCounts, partitionSection, legacyLockedFamilyBucket, RowBucket, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, runProgressLabel, showColdStartBanner, enablementCarrierFor, carrierIsSynced, TYPE_SECTION_TITLES, typeSectionForRow, sectionCountLabel, unifiedFooterSummary, fileEntryFor, stagedPayload, StageableRow, effectiveFate, remoteSections, onOffFlips, onOffLineText, onOffNarrationLines, familyRollup, FamilyMember, mergeFamilyChanges, foldCompanionEntries, groupExcludedHere, CAPTURE_ADDED_TOOLTIP, CAPTURE_UPDATED_TOOLTIP, CAPTURE_DELETED_TOOLTIP, APPLY_ADDED_TOOLTIP, APPLY_UPDATED_TOOLTIP, APPLY_DELETED_TOOLTIP } from "../src/ui/panelModel";
 import { GroupState, GroupStatus, OTHER_STORE_FILES_GROUP, RemoteDiffEntry, RemoteDiffFile } from "../src/core/status";
 import { FileChanges, SyncGroup, EVERYWHERE, perClass, StorageSection } from "../src/core/types";
 import { Availability } from "../src/core/availability";
@@ -41,6 +41,11 @@ describe("visibleUnderFilter", () => {
     expect(visibleUnderFilter("none", "all")).toBe(true);
   });
 
+  it("leftover hides every bucket — store orphans are a section, never rows", () => {
+    const buckets: RowBucket[] = ["conflict", "apply", "capture", "ok", "none", "locked", "excluded"];
+    for (const b of buckets) expect(visibleUnderFilter(b, "leftover")).toBe(false);
+  });
+
   it("locked shows only under all; capture/apply/ok/none exclude it", () => {
     expect(visibleUnderFilter("locked", "all")).toBe(true);
     expect(visibleUnderFilter("locked", "capture")).toBe(false);
@@ -52,6 +57,30 @@ describe("visibleUnderFilter", () => {
   it("never-synced rows: raw-state defaults still resolve apply/stageable (unrelated to bucket)", () => {
     expect(directionForState("never-synced")).toBe("apply");
     expect(stageableState("never-synced")).toBe(true);
+  });
+});
+
+// The Leftover surface's adoption gate (DESIGN.md §4 Leftover): while the plugin's own
+// configuration is pending adoption, "leftover" is not a judgment this device can make — the
+// section and its pill give way to a hint. Capture-pending does NOT gate (stopping a sync here
+// legitimately produces leftovers before the next capture), and an unknown self state reads as
+// "section" (unknown is not pending adoption).
+describe("leftoverPresentation", () => {
+  it("no orphans render nothing, whatever the self state", () => {
+    expect(leftoverPresentation("insync", 0)).toBe("none");
+    expect(leftoverPresentation("coldstart", 0)).toBe("none");
+  });
+
+  it("pending adoption (coldstart/adopt/both) renders the hint instead of the section", () => {
+    expect(leftoverPresentation("coldstart", 3)).toBe("hint");
+    expect(leftoverPresentation("adopt", 3)).toBe("hint");
+    expect(leftoverPresentation("both", 3)).toBe("hint");
+  });
+
+  it("insync, capture-pending, and unknown self states render the section", () => {
+    expect(leftoverPresentation("insync", 3)).toBe("section");
+    expect(leftoverPresentation("capture", 3)).toBe("section");
+    expect(leftoverPresentation(null, 3)).toBe("section");
   });
 });
 

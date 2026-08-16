@@ -57,6 +57,7 @@ interface StopSurface {
   // `SettingsHost`, which IS the plugin, not on `SyncCenterHost`.
   stopSyncing: (groupName: string, deleteStore: boolean) => Promise<string[] | null>;
   storeFileCount: (groupName: string) => Promise<number>;
+  listLeftoverStoreFiles: () => Promise<{ rel: string; section: string; name: string; crumb: string | null; path: string; size: number }[]>;
   displayName: (group: string, storedLabel?: string) => string;
   appendActionHistory: (entry: { kind: "stop-sync"; desc: string; changed: number }) => Promise<void>;
   settings: { rootPath: string; items: ItemMap };
@@ -275,6 +276,56 @@ describe("§4.1 — a data.json from a newer build is never reset and never over
 
     expect(await io.exists("cs/store/configdir/plugins/demo/data.json")).toBe(true);
     expect(await io.exists("cs/store/configdir/onlyANewerBuildKnowsThis.json")).toBe(true);
+  });
+
+  // The leftover list resolves REAL owner names (DESIGN.md §4 Leftover): a plugin file takes the
+  // store lock's display.label (else the installed manifest's name, else the bare id), a snippet
+  // wears the Appearance breadcrumb — and everything groups into the main list's sections.
+  it("leftover rows name their real owners from the lock, the manifest, or the bare id", async () => {
+    const io = new MemFS();
+    io.seed({
+      "cs/store/configdir/plugins/gone/data.json": "{}", // lock label below
+      "cs/store/configdir/plugins/demo-off/data.json": "{}", // no lock label, no manifest → bare id
+      "cs/store/configdir/snippets/x.css": "a{}",
+      "cs/store.lock.json": JSON.stringify({
+        version: 3,
+        capturedAt: "2026-01-01T00:00:00.000Z",
+        items: { community: { gone: { source: { kind: "plugin", version: "1.0.0" }, display: { label: "Gone Plugin" } } } },
+      }),
+    });
+    const { instance } = makePlugin(io, OK_DOCUMENT);
+    await instance.loadSettings();
+    await instance.recompile();
+
+    const out = await instance.listLeftoverStoreFiles();
+
+    expect(out.map((l) => ({ section: l.section, name: l.name, crumb: l.crumb }))).toEqual([
+      { section: "obsidian", name: "x.css", crumb: "Appearance" },
+      { section: "community", name: "demo-off", crumb: null },
+      { section: "community", name: "Gone Plugin", crumb: null },
+    ]);
+  });
+
+  // The ok case is what proves the refusal above is doing the work: same call, a document this
+  // build owns, and the deletion lands — returning the deleted rels (never null) and touching
+  // nothing a compiled group still claims.
+  it("leftover cleanup on an owned document deletes exactly the asked-for orphans", async () => {
+    const io = new MemFS();
+    io.seed({
+      "cs/store/configdir/plugins/demo/data.json": JSON.stringify({ store: true }), // tracked — untouched
+      "cs/store/configdir/plugins/gone/data.json": "{}",
+      "cs/store/configdir/snippets/old.css": "a{}",
+    });
+    const { instance } = makePlugin(io, OK_DOCUMENT);
+    await instance.loadSettings();
+    await instance.recompile();
+
+    const deleted = await instance.syncCenterHost().deleteLeftoverStoreFiles(["store/configdir/plugins/gone/data.json", "store/configdir/snippets/old.css"]);
+
+    expect(deleted).toEqual(["store/configdir/plugins/gone/data.json", "store/configdir/snippets/old.css"]);
+    expect(await io.exists("cs/store/configdir/plugins/gone/data.json")).toBe(false);
+    expect(await io.exists("cs/store/configdir/snippets/old.css")).toBe(false);
+    expect(await io.exists("cs/store/configdir/plugins/demo/data.json")).toBe(true);
   });
 
   // The startup lock-label heal was the one remaining store write while stopped (§4.2b). Cosmetic,

@@ -10,8 +10,9 @@ import { Fate, FateInput, rowFate } from "./fateModel";
 export type Direction = "capture" | "apply";
 
 // Panel row filter. Buckets match core bucketCounts: capture = local-changed + not-captured,
-// apply = store-newer + differs, ok = in-sync.
-export type PanelFilter = "all" | "capture" | "apply" | "ok" | "excluded" | "none";
+// apply = store-newer + differs, ok = in-sync. "leftover" narrows the view to the store-orphan
+// section alone — no ROW is ever a leftover, so every bucket hides under it.
+export type PanelFilter = "all" | "capture" | "apply" | "ok" | "excluded" | "none" | "leftover";
 
 // ── Fate-derived buckets ────────────────────────────────────────────────────────────────────────
 // The single per-row bucket derivation: every count/filter/partition/fold consumer reads THIS
@@ -72,6 +73,7 @@ export function legacyLockedFamilyBucket(familyState: GroupState): RowBucket {
 // (content comparison never ran for it, so no specific filter can claim it).
 export function visibleUnderFilter(bucket: RowBucket, filter: PanelFilter): boolean {
   if (filter === "all") return true;
+  if (filter === "leftover") return false; // store orphans are a section, never rows
   if (bucket === "locked") return false;
   if (filter === "capture") return bucket === "capture";
   if (filter === "apply") return bucket === "apply" || bucket === "conflict";
@@ -276,6 +278,24 @@ export function showColdStartBanner(
   if (selfState !== "coldstart" && selfState !== "adopt" && selfState !== "both") return false;
   return statuses.some((s) => s.state === "never-synced");
 }
+
+// How the Leftover surface presents (DESIGN.md §4 Leftover): "leftover" is a judgment about
+// which store files nothing tracks — a judgment this device cannot make while its own
+// configuration is still pending adoption (coldstart/adopt/both: the store side is the newer
+// one), so the section AND its filter pill give way to one quiet hint line. A capture-pending
+// self (this device's own config is the newer side) does NOT gate — stopping a sync here
+// legitimately produces leftovers before the next capture. An unknown self state reads as
+// "section": unknown is not pending adoption.
+export function leftoverPresentation(
+  selfState: "coldstart" | "adopt" | "capture" | "both" | "insync" | null,
+  count: number
+): "section" | "hint" | "none" {
+  if (count === 0) return "none";
+  return selfState === "coldstart" || selfState === "adopt" || selfState === "both" ? "hint" : "section";
+}
+
+export const LEFTOVER_ADOPT_HINT =
+  "Some store files aren't tracked here yet — adopt the configuration first, then anything truly left over shows up for cleanup.";
 
 export interface PolicyOption {
   action: StateAction;

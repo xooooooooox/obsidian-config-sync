@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { SyncGroup } from "../src/core/types";
-import { leftoverStoreRels, storeSelfCopyGroups, selfListGroups } from "../src/core/leftover";
+import { LeftoverNames, leftoverStoreRels, storeSelfCopyGroups, selfListGroups } from "../src/core/leftover";
 import { buildItemDefs, ItemDef, RegistryEnv } from "../src/core/registry";
 import { syncListDelta } from "../src/core/syncListDelta";
 import { itemsIn } from "./items";
@@ -9,6 +9,9 @@ const groups: SyncGroup[] = [
   { name: "plugin-demo", path: "{configDir}/plugins/demo/data.json", type: "file", devices: "all" },
   { name: "snippets", path: "{configDir}/snippets", type: "folder", devices: "all" },
 ];
+
+// The no-resolution baseline: every name falls back to id/basename.
+const NO_NAMES: LeftoverNames = { pluginLabels: new Map(), fileOwners: new Map(), appearanceLabel: "Appearance" };
 
 describe("leftoverStoreRels", () => {
   it("keeps only store files that map to no current group", () => {
@@ -20,19 +23,67 @@ describe("leftoverStoreRels", () => {
       "store.lock.json", // bookkeeping, not under store/ → excluded
       "config-sync.json", // legacy bookkeeping → excluded
     ];
-    const out = leftoverStoreRels(rels, groups);
-    expect(out.map((o) => o.rel)).toEqual(["store/configdir/plugins/gone/data.json", "store/configdir/app.json"]);
+    const out = leftoverStoreRels(rels, groups, NO_NAMES);
+    // sorted by section (obsidian before community), then name
+    expect(out.map((o) => o.rel)).toEqual(["store/configdir/app.json", "store/configdir/plugins/gone/data.json"]);
   });
 
-  it("derives a plugin id name for plugin paths and the relative path otherwise", () => {
+  // The name slot names the file's REAL owner, never a raw store path (DESIGN.md §4 Leftover):
+  // plugin label (else id), the Appearance breadcrumb for snippets/themes, the owning core
+  // plugin / Obsidian card for a config-root file, basename otherwise — grouped into the main
+  // list's section vocabulary, sorted section-then-name.
+  it("resolves real owners: plugin label, Appearance breadcrumb, file owner, basename fallback", () => {
+    const names: LeftoverNames = {
+      pluginLabels: new Map([["slides-rup", "Slides Rup"]]),
+      fileOwners: new Map([["graph.json", { section: "core", label: "Graph view" }]]),
+      appearanceLabel: "Appearance",
+    };
     const out = leftoverStoreRels(
-      ["store/configdir/plugins/cm-editor-syntax-highlight-obsidian/data.json", "store/configdir/graph.json"],
-      []
+      [
+        "store/configdir/plugins/slides-rup/data.json",
+        "store/configdir/plugins/cm-editor-syntax-highlight-obsidian/data.json",
+        "store/configdir/snippets/IOTO-TDL.css",
+        "store/configdir/themes/Blue Topaz/theme.css",
+        "store/configdir/graph.json",
+        "store/configdir/app.json",
+        "store/gitignore",
+      ],
+      [],
+      names
     );
     expect(out).toEqual([
-      { rel: "store/configdir/plugins/cm-editor-syntax-highlight-obsidian/data.json", name: "cm-editor-syntax-highlight-obsidian", path: "configdir/plugins/cm-editor-syntax-highlight-obsidian/data.json" },
-      { rel: "store/configdir/graph.json", name: "configdir/graph.json", path: "configdir/graph.json" },
+      // obsidian first: the app.json fallback (no owner registered in this fixture) and the two Appearance files
+      { rel: "store/configdir/app.json", section: "obsidian", name: "app.json", crumb: null, path: "configdir/app.json" },
+      { rel: "store/configdir/snippets/IOTO-TDL.css", section: "obsidian", name: "IOTO-TDL.css", crumb: "Appearance", path: "configdir/snippets/IOTO-TDL.css" },
+      { rel: "store/configdir/themes/Blue Topaz/theme.css", section: "obsidian", name: "theme.css", crumb: "Appearance", path: "configdir/themes/Blue Topaz/theme.css" },
+      // core: the owned config-root file names its core plugin
+      { rel: "store/configdir/graph.json", section: "core", name: "Graph view", crumb: null, path: "configdir/graph.json" },
+      // community: label when known, bare id when not — never the raw path
+      {
+        rel: "store/configdir/plugins/cm-editor-syntax-highlight-obsidian/data.json",
+        section: "community",
+        name: "cm-editor-syntax-highlight-obsidian",
+        crumb: null,
+        path: "configdir/plugins/cm-editor-syntax-highlight-obsidian/data.json",
+      },
+      { rel: "store/configdir/plugins/slides-rup/data.json", section: "community", name: "Slides Rup", crumb: null, path: "configdir/plugins/slides-rup/data.json" },
+      // other: vault-root files
+      { rel: "store/gitignore", section: "other", name: "gitignore", crumb: null, path: "gitignore" },
     ]);
+  });
+
+  // The very shape behind a real 29-row sighting: an item `synced: false` on BOTH sides (the local
+  // compile and the store's own self copy) compiles no group, so its store file IS leftover — by
+  // design; the case that must NOT read as leftover is the device-local "On this device" opt-out,
+  // which never touches `synced` and leaves the group compiled.
+  it("a store file whose item is synced: false on both sides reads as leftover", () => {
+    const env: RegistryEnv = { cores: [], plugins: [{ id: "demo", name: "Demo" }], betaIds: new Set() };
+    const defs = buildItemDefs(env);
+    const off = itemsIn({ obsidian: { "community-plugins": { synced: true } }, community: { demo: { synced: false } } });
+    const local = selfListGroups(defs, off, NO_BETA_IDS);
+    const storeCopy = storeSelfCopyGroups(JSON.stringify({ schemaVersion: 4, items: off }), defs, NO_BETA_IDS);
+    const out = leftoverStoreRels(["store/configdir/plugins/demo/data.json"], [...local, ...storeCopy], NO_NAMES);
+    expect(out.map((f) => f.name)).toEqual(["demo"]);
   });
 
   it("store files defined by the store's own sync list are pending, not leftover", () => {
@@ -43,7 +94,7 @@ describe("leftoverStoreRels", () => {
       "store/configdir/plugins/z/data.json", // store list (pulled, not yet adopted) → pending, not leftover
       "store/configdir/plugins/orphan/data.json", // neither → leftover
     ];
-    const out = leftoverStoreRels(rels, [...localGroups, ...storeListGroups]);
+    const out = leftoverStoreRels(rels, [...localGroups, ...storeListGroups], NO_NAMES);
     expect(out.map((f) => f.name)).toEqual(["orphan"]);
   });
 });
@@ -94,7 +145,7 @@ describe("storeSelfCopyGroups", () => {
       expect([...byName.keys()].sort()).toEqual(["community-plugins", "foreign", "plugin-foreign"]);
       expect(byName.get("plugin-foreign")?.path).toBe("{configDir}/plugins/foreign/data.json");
       // pulled-but-unadopted plugin data must attribute to the store list, not read as leftover
-      expect(leftoverStoreRels(["store/configdir/plugins/foreign/data.json", "store/configdir/plugins/foreign/main.js"], groups)).toEqual([]);
+      expect(leftoverStoreRels(["store/configdir/plugins/foreign/data.json", "store/configdir/plugins/foreign/main.js"], groups, NO_NAMES)).toEqual([]);
     });
 
     it("returns [] when the compile fails instead of breaking status", () => {
@@ -143,7 +194,7 @@ describe("storeSelfCopyGroups", () => {
 
     it("attributes a not-installed plugin's pulled files as pending, not as deletable leftover", () => {
       const groups = storeSelfCopyGroups(v2Copy, defs, NO_BETA_IDS);
-      expect(leftoverStoreRels(["store/configdir/plugins/foreign/data.json"], groups)).toEqual([]);
+      expect(leftoverStoreRels(["store/configdir/plugins/foreign/data.json"], groups, NO_NAMES)).toEqual([]);
     });
 
     // The rule readStoreContractLocals reads off these groups: a v2 `scope: "local"` field must

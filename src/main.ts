@@ -44,8 +44,8 @@ import { bratRepoIndex, parseBratRepoList, resolveBratIndex, withBratRepos } fro
 import { type CatalogSection, corePluginFile, displayLabelForGroup, findGroupByName, listBetaSections, listCoreSections, listDiscovered, listOptionSections, listPluginSections, SELF_GROUP_NAME, SELF_ITEM_ID, SELF_ITEM_REF, SELF_ITEM_SECTION, setCorePluginIds } from "./core/catalog";
 import { Availability, availabilityForGroup, desktopOnlyDrift, desktopOnlyPluginIds } from "./core/availability";
 import { listFilesRecursive, isJunkPath, FileIO } from "./core/io";
-import { leftoverStoreRels, storeSelfCopyGroups, selfListGroups } from "./core/leftover";
-import { parseStoreLock, STORE_LOCK_FUTURE_MESSAGE, validateSyncManifest } from "./core/manifest";
+import { LeftoverNames, LeftoverSection, leftoverStoreRels, storeSelfCopyGroups, selfListGroups } from "./core/leftover";
+import { lockEntry, lockLabel, parseStoreLock, STORE_LOCK_FUTURE_MESSAGE, validateSyncManifest } from "./core/manifest";
 import { lockRefFor, rekeyRefList } from "./core/itemKeys";
 import { lockStoredLabel, resolveHostStoredLabel } from "./core/lockLabels";
 import { basename, groupRealPath, groupStorePath, sidecarStoreSuffix } from "./core/pathing";
@@ -1930,7 +1930,42 @@ export default class ConfigSyncPlugin extends Plugin {
     return 1;
   }
 
-  async listLeftoverStoreFiles(): Promise<{ rel: string; name: string; path: string; size: number }[]> {
+  // The name sources leftoverStoreRels resolves real owners through (DESIGN.md §4 Leftover):
+  // plugin labels from the local store lock (its entries survive for exactly these files), else
+  // the locally installed manifest; config-root file owners from the registry defs, which always
+  // know every core plugin and Obsidian card.
+  private async leftoverNames(ctx: { io: FileIO; rootPath: string }, rels: string[]): Promise<LeftoverNames> {
+    let lock: StoreLock | null = null;
+    const lockPath = `${ctx.rootPath}/store.lock.json`;
+    try {
+      // compiledGroups lets a v1/v2 lock's name-keyed entries convert to refs where resolvable.
+      if (await ctx.io.exists(lockPath)) lock = parseStoreLock(await ctx.io.read(lockPath), this.compiledGroups);
+    } catch {
+      lock = null; // an unreadable lock only costs display names, never the listing
+    }
+    const registry = this.pluginRegistry();
+    const pluginLabels = new Map<string, string>();
+    for (const rel of rels) {
+      const m = rel.match(/^store\/configdir\/plugins\/([^/]+)\//);
+      const id = m?.[1];
+      if (id === undefined || pluginLabels.has(id)) continue;
+      const label = lockLabel(lockEntry(lock, itemRef("community", id))) ?? registry.manifests[id]?.name;
+      if (label !== undefined) pluginLabels.set(id, label);
+    }
+    const fileOwners = new Map<string, { section: "obsidian" | "core"; label: string }>();
+    let appearanceLabel = "Appearance";
+    for (const def of this.registryDefs) {
+      if (def.section !== "obsidian" && def.section !== "core") continue;
+      if (def.section === "obsidian" && def.id === "appearance") appearanceLabel = def.label;
+      const path = def.settingsFile?.defaultPath;
+      if (path === undefined || path === null) continue;
+      const basename = path.slice(path.lastIndexOf("/") + 1);
+      fileOwners.set(basename, { section: def.section === "core" ? "core" : "obsidian", label: def.label });
+    }
+    return { pluginLabels, fileOwners, appearanceLabel };
+  }
+
+  async listLeftoverStoreFiles(): Promise<{ rel: string; section: LeftoverSection; name: string; crumb: string | null; path: string; size: number }[]> {
     const ctx = await this.coreContext();
     if (!(await ctx.io.exists(ctx.rootPath))) return [];
     const files = (await listFilesRecursive(ctx.io, ctx.rootPath)).filter((f) => !isJunkPath(f));
@@ -1942,8 +1977,9 @@ export default class ConfigSyncPlugin extends Plugin {
     const storeGroups = (await ctx.io.exists(selfCopy))
       ? storeSelfCopyGroups(await ctx.io.read(selfCopy), this.registryDefs, new Set(Object.keys(bratRepoIndex(this.settings.items))))
       : [];
-    const out: { rel: string; name: string; path: string; size: number }[] = [];
-    for (const lf of leftoverStoreRels(rels, [...this.compiledGroups, ...storeGroups])) {
+    const names = await this.leftoverNames(ctx, rels);
+    const out: { rel: string; section: LeftoverSection; name: string; crumb: string | null; path: string; size: number }[] = [];
+    for (const lf of leftoverStoreRels(rels, [...this.compiledGroups, ...storeGroups], names)) {
       const st = await this.app.vault.adapter.stat(`${ctx.rootPath}/${lf.rel}`);
       out.push({ ...lf, size: st?.size ?? 0 });
     }

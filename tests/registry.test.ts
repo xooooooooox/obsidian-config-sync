@@ -308,10 +308,11 @@ describe("compileItems — plugin cards (dir/file group when enabled)", () => {
   it("① a file-absent but selected core plugin's store config is attributed, not leftover", () => {
     const env: RegistryEnv = { ...EMPTY_ENV, cores: [{ id: "backlink", name: "Backlinks", fileExists: false }] };
     const defs = buildItemDefs(env);
+    const noNames = { pluginLabels: new Map<string, string>(), fileOwners: new Map<string, { section: "obsidian" | "core"; label: string }>(), appearanceLabel: "Appearance" };
     const selected = compileItems(defs, settings({ core: { backlink: on() } }));
-    expect(leftoverStoreRels(["store/configdir/backlink.json"], selected)).toEqual([]);
+    expect(leftoverStoreRels(["store/configdir/backlink.json"], selected, noNames)).toEqual([]);
     const unselected = compileItems(defs, settings({}));
-    expect(leftoverStoreRels(["store/configdir/backlink.json"], unselected).map((l) => l.path)).toEqual(["configdir/backlink.json"]);
+    expect(leftoverStoreRels(["store/configdir/backlink.json"], unselected, noNames).map((l) => l.path)).toEqual(["configdir/backlink.json"]);
   });
 
   it("a core card with a settings file compiles a file group named by its bare id", () => {

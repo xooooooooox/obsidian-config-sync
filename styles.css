@@ -815,15 +815,36 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 .config-sync-fpill.is-leftover { color: var(--color-orange); border-color: rgba(var(--color-orange-rgb), 0.5); }
 .config-sync-fpill.is-leftover.is-active { background: var(--color-orange); border-color: var(--color-orange); color: var(--background-primary); }
 .config-sync-section.is-leftover { border-color: rgba(var(--color-orange-rgb), 0.45); }
-.config-sync-section.is-leftover .config-sync-section-title { color: var(--color-orange); }
+/* The one amber head: it keeps the section-head family's uppercase typography (DESIGN.md §4
+   Leftover — a 600-weight header is a title, not a textual note, so --color-orange, not
+   --text-warning). */
+.config-sync-section.is-leftover .config-sync-section-title {
+  color: var(--color-orange);
+  font-size: var(--font-ui-smaller);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: var(--font-semibold);
+}
+/* The fold body wrapper — display: contents, so note + card sit directly in the section's flow
+   (same idiom as the type sections' body wrapper). */
+.config-sync-leftover-body { display: contents; }
+/* While the plugin's own configuration is pending adoption, the section/pill give way to this
+   quiet hint — "leftover" is not a judgment an un-adopted device can make. */
+.config-sync-leftover-hint { color: var(--text-muted); font-size: var(--font-ui-small); border: 1px dashed var(--background-modifier-border); border-radius: var(--radius-m); padding: 8px 12px; margin-top: var(--size-4-2); }
 .config-sync-oflow { display: flex; align-items: center; gap: var(--size-4-3); padding: var(--size-4-2) 0; border-bottom: 1px solid var(--background-modifier-border); }
 .config-sync-oflow:last-child { border-bottom: none; }
 .config-sync-ofinfo { min-width: 0; flex: 1; }
 .config-sync-ofname { font-weight: var(--font-semibold); }
 .config-sync-ofpath { font-family: var(--font-monospace); color: var(--text-faint); font-size: var(--font-ui-smaller); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.config-sync-ofsize { color: var(--text-faint); font-size: var(--font-ui-smaller); white-space: nowrap; }
-.config-sync-ofdel { color: var(--text-muted); font-size: var(--font-ui-smaller); cursor: pointer; white-space: nowrap; }
-.config-sync-ofdel:hover { color: var(--color-red); }
+/* Size and the delete icon never give way — the info column is the only shrinkable element. */
+.config-sync-ofsize { color: var(--text-faint); font-size: var(--font-ui-smaller); white-space: nowrap; flex: none; }
+/* The trash deletes are quiet-rest icon controls (DESIGN.md §2.3) whose lift is the destructive
+   red, not the plain full-opacity lift. */
+.config-sync-ofdel { display: inline-flex; flex: none; color: var(--text-muted); opacity: 0.45; cursor: pointer; transition: opacity 0.12s, color 0.12s; }
+.config-sync-ofdel:hover,
+.config-sync-ofdel:focus-visible { opacity: 1; color: var(--color-red); }
+.config-sync-ofdelall { margin-left: auto; }
+.config-sync-modal-warn { color: var(--text-warning); }
 
 .config-sync-side-item { display: flex; align-items: center; gap: 5px; padding: 6px 9px; border-radius: 8px; border: 1px solid transparent; cursor: pointer; font-size: var(--font-ui-small); }
 
@@ -1256,7 +1277,9 @@ body.is-mobile .config-sync-tworow-chev { display: none; }
    and hint hold their shape; the title is the only element allowed to wrap. */
 .config-sync-section-head .config-sync-pill,
 .config-sync-section-hint { white-space: nowrap; flex: none; }
-.config-sync-section-note { color: var(--text-faint); font-style: italic; font-size: var(--font-ui-smaller); padding: 4px 0 2px 18px; }
+/* Upright, aligned to the title's own start — italic stays the placeholder/empty-state voice,
+   and there is no chevron here to indent under (DESIGN.md §4 Leftover). */
+.config-sync-section-note { color: var(--text-faint); font-size: var(--font-ui-smaller); padding: 4px 0 2px; }
 .config-sync-side-search { width: 100%; margin-bottom: 6px; }
 .config-sync-side-badge.is-neutral { background: var(--background-modifier-hover); color: var(--text-normal); }
 

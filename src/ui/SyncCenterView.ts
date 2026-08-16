@@ -45,6 +45,8 @@ import {
   groupExcludedHere,
   insyncLineText,
   isValidPolicy,
+  LEFTOVER_ADOPT_HINT,
+  leftoverPresentation,
   legacyLockedFamilyBucket,
   matchesSearch,
   mergeFamilyChanges,
@@ -77,6 +79,8 @@ import {
 } from "./panelModel";
 import { Fate, FateInput, NOTHING_YET_SENTENCE, rowFate, versionAheadClause } from "./fateModel";
 import { renderDiffPanel } from "./diffView";
+import { confirmDeleteLeftovers } from "./ConfirmModal";
+import { LEFTOVER_SECTION_ORDER, LeftoverSection } from "../core/leftover";
 import { EnablementList, isSwitchListGroup, switchListSortedView } from "../core/switchList";
 import { jsonSortedView } from "../core/merge";
 import { renderReportContent, renderReportPills, stripHeader } from "./reportContent";
@@ -279,7 +283,7 @@ export interface SyncCenterHost {
   // this group out; write = set/clear THIS device's own opt-out (never another device's).
   deviceOptedOut(groupName: string): boolean;
   setDeviceOptOut(groupName: string, on: boolean): Promise<void>;
-  listLeftoverStoreFiles(): Promise<{ rel: string; name: string; path: string; size: number }[]>;
+  listLeftoverStoreFiles(): Promise<{ rel: string; section: LeftoverSection; name: string; crumb: string | null; path: string; size: number }[]>;
   deleteLeftoverStoreFiles(rels: string[]): Promise<string[] | null>; // deleted rels, or null when refused
   appendActionHistory(entry: { kind: RunKind; desc: string; changed: number; removed?: string[]; deletedFiles?: string[] }): Promise<void>;
   // Bidirectional divergence for a switch-list group (exceptions masked); null when either
@@ -402,6 +406,8 @@ export class SyncCenterView extends ItemView {
   private policy = sessionStaging.policy;
   // Fold state for the four unified type sections.
   private typeSectionOpen: Set<TypeSection> = new Set();
+  // Fold state for the Leftover section — same lifetime as typeSectionOpen (per view instance).
+  private leftoverOpen = false;
   private selected = sessionStaging.selected;
   private directionOverride = sessionStaging.directionOverride;
   // Conflict resolutions: view-level, not session-level like the maps
@@ -442,7 +448,7 @@ export class SyncCenterView extends ItemView {
   }
   private history: RunRecord[] = [];
   private historyOpen: number | null = null; // index of the run whose detail is shown; null = table
-  private leftovers: { rel: string; name: string; path: string; size: number }[] = [];
+  private leftovers: { rel: string; section: LeftoverSection; name: string; crumb: string | null; path: string; size: number }[] = [];
   private readonly qac = new QualifierAutocomplete(SYNC_QUALIFIER_SPECS);
   private expandedDisclosures = new Set<string>(); // per-group disclosure keys, `${group}::<kind>`
   private ruleSearch = new Map<string, string>(); // per-group per-plugin-rule filter query
@@ -1942,6 +1948,9 @@ export class SyncCenterView extends ItemView {
       });
     }
     this.renderResultStrip(main);
+    // The Leftover filter only exists while its section does — deleting the last orphan (or the
+    // adoption gate engaging) with the filter active would otherwise strand an empty view.
+    if (this.filter === "leftover" && this.leftoverPresentation() !== "section") this.filter = "all";
     const inSection = this.sectionRows();
     // The two on/off list carriers dissolve into their section's header chip — never a
     // row of their own — so every row-driven count (pills, select-all) excludes them up front.
@@ -2004,20 +2013,44 @@ export class SyncCenterView extends ItemView {
           this.render(this.renderGen);
         });
       }
-      // The "leftover" store-orphans pill has no place in this row: those files have no
-      // registry item, so they can't become a row in any type section. `renderLeftoverSection`
-      // stays reachable unconditionally instead (below), so the orphans it manages never go dark.
+      // The Leftover pill (DESIGN.md §4 Leftover): conditional — it renders only while the store
+      // actually has orphans this device may judge (the adoption gate hides it with the section),
+      // amber, last in the row. Click narrows the view to the Leftover section alone; the store
+      // orphans behind it are a section, never rows, so no bucket answers this filter.
+      if (!this.searching() && this.leftoverPresentation() === "section") {
+        const n = this.leftovers.length;
+        const label = `Leftover ${n}`;
+        const pill = pillRow.createEl("button", {
+          cls: `config-sync-fpill is-leftover${this.filter === "leftover" ? " is-active" : ""}`,
+          attr: { "aria-label": label },
+        });
+        pill.createSpan({ cls: "config-sync-fpill-long", text: label });
+        pill.createSpan({ cls: "config-sync-fpill-short", text: `⌫ ${n}` });
+        pill.addEventListener("click", () => {
+          // Auto-expand on activation, same rule as the type sections' filter transition — a
+          // manual re-collapse inside the leftover view still sticks.
+          if (this.filter !== "leftover") this.leftoverOpen = true;
+          this.filter = "leftover";
+          this.render(this.renderGen);
+        });
+      }
     };
 
     // One flat row list per type section — this only decides which section a row lands in.
     const renderSectionsBody = (): void => {
       sectionsHost.empty();
-      for (const ts of TYPE_SECTION_ORDER) this.renderTypeSection(sectionsHost, ts, inSection);
-      // Store orphans: unrelated to any type section — they have no
-      // registry item to compile a row for — so this renders unconditionally,
-      // only settling into the unfiltered/non-search view
-      // so it doesn't clutter a focused "To apply"/search pass.
-      if (this.leftovers.length > 0 && this.filter === "all" && !this.searching()) this.renderLeftoverSection(sectionsHost);
+      // The Leftover filter shows the orphan section alone — type sections all hide.
+      if (this.filter !== "leftover") for (const ts of TYPE_SECTION_ORDER) this.renderTypeSection(sectionsHost, ts, inSection);
+      // Store orphans: unrelated to any type section — they have no registry item to compile a
+      // row for — so their section renders under the All and Leftover views only (never inside a
+      // focused direction filter or a search pass). While the plugin's own configuration is still
+      // pending adoption, "leftover" is not a judgment this device can make: the section gives
+      // way to one quiet hint line (DESIGN.md §4 Leftover).
+      if ((this.filter === "all" || this.filter === "leftover") && !this.searching()) {
+        const lo = this.leftoverPresentation();
+        if (lo === "section") this.renderLeftoverSection(sectionsHost);
+        else if (lo === "hint") sectionsHost.createDiv({ cls: "config-sync-leftover-hint", text: LEFTOVER_ADOPT_HINT });
+      }
     };
 
     renderPills();
@@ -3168,24 +3201,83 @@ export class SyncCenterView extends ItemView {
     await this.reload();
   }
 
+  // The Leftover section/pill/hint trio's one gate (panelModel's pure predicate).
+  private leftoverPresentation(): "section" | "hint" | "none" {
+    return leftoverPresentation(this.selfInfo?.state ?? null, this.leftovers.length);
+  }
+
+  // Bulk cleanup confirms — its consequence crosses devices (the next Push mirror-deletes what
+  // this removed); the per-row delete stays one-click.
+  private async confirmAndDeleteAll(): Promise<void> {
+    if (!(await confirmDeleteLeftovers(this.app, this.leftovers.length))) return;
+    await this.deleteLeftovers(this.leftovers.map((l) => l.rel));
+  }
+
   private renderLeftoverSection(host: HTMLElement): void {
-    const fold = host.createDiv({ cls: "config-sync-section is-leftover is-open" });
+    const open = this.leftoverOpen;
+    const fold = host.createDiv({ cls: `config-sync-section is-leftover${open ? " is-open" : ""}` });
     const head = fold.createDiv({ cls: "config-sync-section-head" });
+    const chevron = renderFoldChevron(head, open, null);
     head.createSpan({ cls: "config-sync-section-title", text: "Leftover in the store" });
     head.createSpan({ cls: "config-sync-pill is-neutral", text: `${this.leftovers.length}` });
-    const all = head.createSpan({ cls: "config-sync-hclear", text: "Delete all" });
-    all.addEventListener("click", () => void this.deleteLeftovers(this.leftovers.map((l) => l.rel)));
-    fold.createDiv({ cls: "config-sync-section-note", text: "Settings Config Sync saved for items you no longer sync. Safe to delete." });
-    const card = fold.createDiv({ cls: "config-sync-card" });
-    for (const lf of this.leftovers) {
-      const row = card.createDiv({ cls: "config-sync-oflow" });
-      const info = row.createDiv({ cls: "config-sync-ofinfo" });
-      info.createDiv({ cls: "config-sync-ofname", text: lf.name });
-      info.createDiv({ cls: "config-sync-ofpath", text: lf.path });
-      row.createSpan({ cls: "config-sync-ofsize", text: this.formatBytes(lf.size) });
-      const del = row.createSpan({ cls: "config-sync-ofdel", text: "Delete" });
-      del.addEventListener("click", () => void this.deleteLeftovers([lf.rel]));
+    const all = head.createSpan({ cls: "config-sync-ofdel config-sync-ofdelall" });
+    setIcon(all, "trash");
+    setTooltip(all, `Delete all — ${this.leftovers.length} file${this.leftovers.length === 1 ? "" : "s"}…`);
+    all.addEventListener("click", (e) => {
+      e.stopPropagation(); // the bulk delete never doubles as the fold toggle
+      void this.confirmAndDeleteAll();
+    });
+    // Collapse/expand flips the DOM in place — same idiom as the type sections' heads.
+    let body: HTMLElement | null = open ? this.buildLeftoverBody(fold) : null;
+    head.addEventListener("click", () => {
+      if (this.leftoverOpen) {
+        this.leftoverOpen = false;
+        fold.removeClass("is-open");
+        setFoldOpen(chevron, false);
+        body?.remove();
+        body = null;
+      } else {
+        this.leftoverOpen = true;
+        fold.addClass("is-open");
+        setFoldOpen(chevron, true);
+        body = this.buildLeftoverBody(fold);
+      }
+    });
+  }
+
+  private buildLeftoverBody(fold: HTMLElement): HTMLElement {
+    const body = fold.createDiv({ cls: "config-sync-leftover-body" });
+    body.createDiv({
+      cls: "config-sync-section-note",
+      text: "Settings saved for items nothing here syncs any more. Deleting removes them from the store — and from your other devices after the next sync.",
+    });
+    const card = body.createDiv({ cls: "config-sync-card" });
+    // Grouped by the main list's section vocabulary (the list arrives pre-sorted by section then
+    // name); an empty group renders no header.
+    const titles: Record<LeftoverSection, string> = { obsidian: "Obsidian", core: "Core plugins", community: "Community plugins", other: "Other files" };
+    for (const section of LEFTOVER_SECTION_ORDER) {
+      const files = this.leftovers.filter((lf) => lf.section === section);
+      if (files.length === 0) continue;
+      card.createDiv({ cls: "config-sync-sect", text: titles[section] });
+      for (const lf of files) {
+        const row = card.createDiv({ cls: "config-sync-oflow" });
+        const info = row.createDiv({ cls: "config-sync-ofinfo" });
+        const nm = info.createDiv({ cls: "config-sync-ofname" });
+        if (lf.crumb !== null) {
+          nm.createSpan({ cls: "config-sync-rule-parent", text: lf.crumb });
+          nm.createSpan({ cls: "config-sync-rule-parentsep", text: " › " });
+        }
+        nm.appendText(lf.name);
+        const path = info.createDiv({ cls: "config-sync-ofpath", text: lf.path });
+        setTooltip(path, lf.path); // the mono line ellipsizes; the full path stays reachable
+        row.createSpan({ cls: "config-sync-ofsize", text: this.formatBytes(lf.size) });
+        const del = row.createSpan({ cls: "config-sync-ofdel" });
+        setIcon(del, "trash");
+        setTooltip(del, "Delete from the store");
+        del.addEventListener("click", () => void this.deleteLeftovers([lf.rel]));
+      }
     }
+    return body;
   }
 
   // Capture-direction disabled rows default to ⏻ Enable; everything else

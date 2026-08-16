@@ -116,7 +116,7 @@ describe("glyph registry — one glyph, one meaning (icon-collision guard)", () 
     // the File preview's top action line — hardcoded in SettingTab.ts, registered here so a
     // future reuse for a different meaning fails loudly.
     { glyph: "list-checks", producer: "SettingTab (external, hardcoded)", home: "rule row — Per-item device rules icon toggle" },
-    { glyph: "trash", producer: "SettingTab (external, hardcoded)", home: "scope menus — Remove rule / Remove folder" },
+    { glyph: "trash", producer: "SettingTab/SyncCenterView (external, hardcoded)", home: "the destructive verb — scope menus' Remove rule / Remove folder, and the Leftover section's per-row + Delete-all deletes" },
     { glyph: "plus", producer: "SettingTab (external, hardcoded)", home: "File preview hint line — click a key to add a rule" },
     // DESIGN.md §2.3: the encrypt toggle's rest state — closed `lock` stays the
     // encrypted state everywhere (mode badge / json keys / legend + the toggle's on-state).

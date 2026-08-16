@@ -319,8 +319,10 @@ last two sweep BOTH surfaces, per §2.1. Quiet-rest is not the disabled treatmen
 
 `eye` — the SETTINGS FILE row's File preview trigger (§4 Unified card). `list-checks` — the
 per-item device-rules icon toggle on a string-array key's rule row (§4 zone ②). `trash` —
-the menu-borne destructive verb (`Remove rule`/`Remove folder`, warning-red, after a
-separator in the row's own scope menu — there are no inline ✕ buttons). `plus` — the File
+the destructive verb: menu-borne on removable rows (`Remove rule`/`Remove folder`,
+warning-red, after a separator in the row's own scope menu — there are no inline ✕ buttons),
+and the Leftover section's two delete controls (per-row and the head's Delete-all, §4 —
+quiet-rest, hover red). `plus` — the File
 preview's top action line (`Click any key to add a rule for it`). All hand-registered in
 the collision guard alongside `file-diff`/`settings-2`.
 
@@ -471,7 +473,7 @@ noted):
   `Core plugins` · `Community plugins` (the Config Sync self row pinned first) · `Your
   folders`. Availability is row state (chips + fate sentence, Rows above), never a section
   of its own; only the store-orphan
-  **Leftover** section (below) keeps a colored dashed frame. A type section's own
+  **Leftover** section (below) keeps a colored amber frame. A type section's own
   frame stays neutral — dashed when collapsed, solid when open — no drift-color borrowed
   from availability states. **Body fill:** the nested card stays
   unframed (`border: none`, `padding: 0` — same checkbox column as the main card)
@@ -705,16 +707,61 @@ noted):
   "Review settings →" routes to the self pane; dismissal (Lucide `x`) is device-local and
   resets when self returns to insync. Adopt itself still lives in the self pane, never in the
   banner.
-- **Leftover store files** — no filter pill (store orphans have no registry item, so they can
-  never become a row in any type section): whenever the store has orphans, the always-open amber
-  `config-sync-section.is-leftover` renders unconditionally under the unfiltered `All` pill
-  (hidden while a filter or search narrows the view) — `-oflow` rows (name / mono path / size / a
-  Delete text action), with "Delete all" in the head — both destructive text actions render per
-  §1.1 (idle muted, red on hover). Its frame/title stay amber (state ≠ category);
-  its nested card picks up the same body fill as any other section, unaffected by the
-  color accent (the fill lives on the card, the accent lives on the section's own border/title).
-  Removal kinds in
-  History render `⊘` (stop-sync) and `⌫` (delete-leftover), muted.
+- **Leftover store files** — store orphans have no registry item and never become rows in a
+  type section; they get their own always-open amber `config-sync-section.is-leftover` and a
+  CONDITIONAL filter pill:
+  - **Filter pill** (`config-sync-fpill is-leftover`): renders only while the store has orphans
+    (an empty bucket renders nothing, same as every other pill), last in the filter row, amber;
+    long form `Leftover N`, short (mobile) form `⌫ N`. Click narrows the view to the Leftover
+    section alone (`filter: "leftover"` — type sections hide); `All` returns. The section body
+    renders under `All` and `Leftover` and stays hidden under every other filter and while
+    searching.
+  - **Adoption gate**: while Config Sync's own state is pending adoption (self pane `coldstart`,
+    or a store-newer adopt state), "leftover" is not a judgment this device can make — the
+    section AND the pill are replaced by one quiet hint line (`config-sync-leftover-hint`, muted,
+    dashed frame): `Some store files aren't tracked here yet — adopt the configuration first,
+    then anything truly left over shows up for cleanup.` A self state that is merely
+    capture-pending (this device's own config is the newer side) does NOT gate — stopping a sync
+    here legitimately produces leftovers before the next capture.
+  - **Head**: the section-head family's uppercase/letter-spaced/`--font-ui-smaller` typography,
+    painted `--color-orange` (the one amber head — a 600-weight header is a title, not a textual
+    note, so it takes `--color-orange`, not `--text-warning`); count is the neutral pill. The
+    section folds exactly like a type section: the FOLD chevron leads the head, clicking the head
+    toggles in place, the state is remembered for the view instance's lifetime, and the default
+    is collapsed — activating the Leftover pill auto-expands it once (the same
+    auto-expand-on-activation rule the filter transition uses), so a manual re-collapse inside
+    the leftover view still sticks. At the head's right edge sits the bulk delete: a `trash` icon
+    (quiet-rest;
+    hover/focus red at full opacity), tooltip `Delete all — N files…`, and the trailing ellipsis
+    keeps its promise: click opens a confirm modal (`Delete N leftover files?` / body `Removes
+    these files from the store on this device.` / warning `After your next sync or Push, they are
+    gone from your other devices too. This cannot be undone.` / `Cancel` + warning-toned
+    `Delete N files`). Its click never doubles as the fold toggle (same carve-out as a section
+    head's checkbox), and it stays reachable while the section is collapsed. The per-row delete
+    stays one-click (no modal) — same `trash` icon, tooltip `Delete from the store`.
+  - **Subtitle** (`config-sync-section-note`, this class's only producer): upright (never italic
+    — italic is the placeholder/empty-state voice), aligned to the title's own start (no chevron
+    indent to inherit), copy: `Settings saved for items nothing here syncs any more. Deleting
+    removes them from the store — and from your other devices after the next sync.`
+  - **Rows** (`-oflow`: name / mono path / size / trash icon), grouped: the list is bucketed
+    into the main list's own section vocabulary — Obsidian · Core plugins · Community plugins ·
+    Other files (vault-root and unclassifiable) — under `config-sync-sect` group headers (the
+    run-report breakdown's uppercase + hairline family); an empty group renders no header, and
+    rows sort alphabetically by name within their group. The name slot never shows a raw store
+    path — it names the file's REAL owner, resolved through a fixed chain: a plugin file names
+    its plugin (the store lock's `display.label`, else the locally installed manifest's name,
+    else the bare id — the same fallback the main list's display-name chain ends in); a
+    snippets/themes file names its basename behind an `Appearance › ` breadcrumb (the owning
+    card, the same `Parent › ` grammar companion rows speak); a config-root file whose basename
+    a core plugin or an Obsidian card owns names that owner; everything else names its basename.
+    The mono path line below stays the full store-relative path, ellipsized with the full
+    path in its tooltip. Size and the trash icon are `flex: none` — the info column is the only
+    element that gives way, on every viewport; rows stay single-line on mobile.
+  - Frame/title stay amber (state ≠ category) — dashed when collapsed, solid when open, the same
+    frame grammar as every section; its nested card picks up
+    the same body fill as any other section, unaffected by the color accent (the fill lives on
+    the card, the accent lives on the section's own border/title). Removal kinds in History
+    render `⊘` (stop-sync) and `⌫` (delete-leftover), muted.
 - **Unified card** — ONE row + drawer renderer for every synced
   item (`SettingTab.ts`'s `renderItemCard`, driven by `registry.ts`'s `ItemDef`); no kind
   branches: an Obsidian option group, a core plugin and a community/beta plugin all

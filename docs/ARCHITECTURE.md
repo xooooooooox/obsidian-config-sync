@@ -340,8 +340,8 @@ functions.
   taxonomy; they no longer drive any tab's rendering (that's `registry.ts` + `itemCard.ts` now —
   see UI below) and today only feed `SettingTab.ts`'s search index and a few Advanced-tab helpers.
   `listDiscovered` (unclassified config-root files) is still live for the Advanced tab.
-  `sectionForGroup(name)` maps a compiled group name to its search/leftover section (`obsidian`/
-  `core`/`community`/`custom`) for the `section:` qualifier and leftover grouping; the switch-list
+  `sectionForGroup(name)` maps a compiled group name to its section (`obsidian`/
+  `core`/`community`/`custom`) for the `section:` qualifier and run-report grouping; the switch-list
   enablement-carrier groups `community-plugins`/`core-plugins` are pinned to `community`/`core`
   (the same way `enabled-css-snippets` is pinned to `obsidian`) instead of falling through to
   `custom`. `displayLabelForGroup` and `lockLabels.ts`'s `resolveHostStoredLabel` are the shared
@@ -549,7 +549,10 @@ functions.
   cold-start guidance banner (true while the plugin's own settings are pending adoption and at
   least one row still needs its first sync, unless dismissed) — separate from the self pane's own
   coldstart/adopt state, which speaks through `SelfSyncInfo.storePresent` instead (no store yet →
-  pull-first guidance; a store present → the Adopt guide). `stagedPayload`/`effectiveFate` turn
+  pull-first guidance; a store present → the Adopt guide). `leftoverPresentation(selfState, count)`
+  is the Leftover surface's one gate (section / hint / nothing): a device whose own configuration
+  is pending adoption cannot judge "leftover", so the section and its filter pill give way to
+  `LEFTOVER_ADOPT_HINT`; capture-pending does not gate. `stagedPayload`/`effectiveFate` turn
   the checked, resolved rows into the actual apply/capture item lists and the Resolve-aware
   display fate. Older section-based helpers (`policyOptions`, `sectionForItem`,
   `stageableRow`) remain as the fallback ladder's plumbing for `After install`/`Enablement` when a

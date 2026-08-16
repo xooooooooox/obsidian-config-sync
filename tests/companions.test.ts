@@ -244,10 +244,11 @@ describe("custom settings-file path changes the compiled group's path (D7) witho
 
   it("leftover pickup: once compiledGroups reflect the new path, the old store rel shows up as leftover (leftover.ts, no migration)", () => {
     const defs = buildItemDefs(EMPTY_ENV);
+    const noNames = { pluginLabels: new Map<string, string>(), fileOwners: new Map<string, { section: "obsidian" | "core"; label: string }>(), appearanceLabel: "Appearance" };
     const oldRel = "store/configdir/hotkeys.json";
     const compiledBefore = compileItems(defs, settings({ obsidian: { hotkeys: on() } }));
     // Before the change, the old rel is attributed to the hotkeys group — not leftover.
-    expect(leftoverStoreRels([oldRel], compiledBefore)).toEqual([]);
+    expect(leftoverStoreRels([oldRel], compiledBefore, noNames)).toEqual([]);
 
     const compiledAfter = compileItems(
       defs,
@@ -256,7 +257,7 @@ describe("custom settings-file path changes the compiled group's path (D7) witho
     // After the change, compiledGroups no longer contain any group at the old store path — the
     // existing leftover-detection flow (main.ts's listLeftoverStoreFiles, unioned with the store's
     // own self-copy group list) picks the old rel up on its own; no migration code needed.
-    const leftovers = leftoverStoreRels([oldRel], compiledAfter);
+    const leftovers = leftoverStoreRels([oldRel], compiledAfter, noNames);
     expect(leftovers).toHaveLength(1);
     expect(leftovers[0]?.rel).toBe(oldRel);
   });

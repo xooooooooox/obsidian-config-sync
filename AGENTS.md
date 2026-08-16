@@ -13,7 +13,8 @@ rules live in these files — read them instead of assuming sample-plugin defaul
 
 Where this repo deliberately differs from generic Obsidian sample-plugin guidance:
 
-- `main.js` **is committed** — it is the release artifact BRAT installs from the repo.
+- `main.js` sits at the repo root as a build output (gitignored, never committed); releases
+  attach it as a CI-built asset, which is what BRAT and the community directory install.
 - Source is organized as `src/core/` (pure, mobile-safe) · `src/external/` (Node,
   desktop-only) · `src/ui/` · `src/main.ts` — not the sample's `commands/`/`utils/` layout.
 - The two large UI files (`src/ui/SettingTab.ts`, `src/ui/SyncCenterView.ts`) are big by
