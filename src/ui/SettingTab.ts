@@ -1361,11 +1361,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     // The zone label is the path ROW's own identity cell — a standalone
     // label line remains only for the kinds that have no path row to carry it.
     if (kind === "none") {
-      exp.createDiv({ cls: "config-sync-explabel", text: "Settings file" });
+      exp.createDiv({ cls: "config-sync-explabel", text: "Settings sync" });
       return;
     }
     if (kind === "state-only") {
-      exp.createDiv({ cls: "config-sync-explabel", text: "Settings file" });
+      exp.createDiv({ cls: "config-sync-explabel", text: "Settings sync" });
       const expectedFile = def.section === "core" ? corePluginFile(def.id) : "its settings file";
       exp.createDiv({ cls: "config-sync-expdesc", text: stateOnlyHint(def.label, expectedFile) });
       return;
@@ -1387,9 +1387,10 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   }
 
   // Zone ② path row = a scrow whose identity cell IS the zone header: the
-  // uppercase `SETTINGS FILE` label stacked over the mono filename + eye; the controls cluster
-  // holds scope + lock. Locked (dim, disabled) whenever the card has any per-key rule —
-  // per-key state owns scope/encrypt then, not the whole-file row (spec §3.1).
+  // uppercase `SETTINGS SYNC` label stacked over the mono filename, the eye riding that same
+  // filename line; the controls cluster holds scope + lock. Locked (dim, disabled) whenever the
+  // card has any per-key rule — per-key state owns scope/encrypt then, not the whole-file row
+  // (spec §3.1).
   private renderSettingsFilePathRow(row: HTMLElement, errorEl: HTMLElement, def: ItemDef, item: Item, wrap: HTMLElement): void {
     const defaultPath = def.settingsFile!.defaultPath!;
     const current = item.path ?? defaultPath;
@@ -1401,34 +1402,14 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const editing = this.customPathEditing.has(key);
     const locked = hasKeyRules(item);
 
-    // Two lines: line 1 = the zone label + the slots cluster strictly on
-    // the label's own line; line 2 = the filename
-    // spanning the full card width, so plugin-length paths never wrap.
+    // Two lines, structurally identical to the `Enabled on` row above (label + scrow slots):
+    // line 1 = the zone label + the slots cluster strictly on the label's own line — aux stays
+    // empty here, this row has no per-item icon; line 2 = the filename, unlabeled — the mono
+    // text is its own identity — spanning the full card width, so plugin-length paths never
+    // wrap, with the eye riding that same line (below).
     const line1 = row.createDiv({ cls: "config-sync-scrow" });
-    line1.createDiv({ cls: "config-sync-explabel config-sync-explabel-inline", text: "Settings file" });
+    line1.createDiv({ cls: "config-sync-explabel config-sync-explabel-inline", text: "Settings sync" });
     const slots = this.scrowSlots(line1);
-    // The File preview trigger lives in the aux slot (the eye is an action on this
-    // file, so it joins the file's own controls; rendered in the edit state too, so the slot
-    // column never blinks). Same open-state language as the FILES row's `file-diff` icon.
-    const previewOpen = this.previewOpen.has(def.id);
-    const previewIcon = slots.aux.createSpan({
-      cls: `config-sync-card-previewicon${previewOpen ? " is-open" : ""}`,
-      attr: { role: "button", tabindex: "0", "aria-label": FILE_PREVIEW_LABEL },
-    });
-    setIcon(previewIcon, "eye");
-    const togglePreview = (): void => {
-      if (this.previewOpen.has(def.id)) this.previewOpen.delete(def.id);
-      else this.previewOpen.add(def.id);
-      this.refreshCardBody(wrap, def);
-      this.refreshPathRow(wrap, def);
-    };
-    previewIcon.addEventListener("click", togglePreview);
-    previewIcon.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        togglePreview();
-      }
-    });
 
     const line2 = row.createDiv({ cls: "config-sync-scrow" });
     const pathHost = line2.createDiv({ cls: "config-sync-card-pathhost config-sync-card-pathline" });
@@ -1493,6 +1474,32 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         }
       });
     }
+
+    // The File preview trigger rides the filename line — the eye is an action on this file, so
+    // it joins the file's own identity, not the rule row's controls cluster — pushed to the
+    // line's right end by `.config-sync-card-pathline .config-sync-card-previewicon`'s
+    // margin-left: auto (styles.css). Appended here, after BOTH branches above, so it renders in
+    // the edit state too and never disappears mid-edit. Same open-state language as the FILES
+    // row's `file-diff` icon.
+    const previewOpen = this.previewOpen.has(def.id);
+    const previewIcon = pathHost.createSpan({
+      cls: `config-sync-card-previewicon${previewOpen ? " is-open" : ""}`,
+      attr: { role: "button", tabindex: "0", "aria-label": FILE_PREVIEW_LABEL },
+    });
+    setIcon(previewIcon, "eye");
+    const togglePreview = (): void => {
+      if (this.previewOpen.has(def.id)) this.previewOpen.delete(def.id);
+      else this.previewOpen.add(def.id);
+      this.refreshCardBody(wrap, def);
+      this.refreshPathRow(wrap, def);
+    };
+    previewIcon.addEventListener("click", togglePreview);
+    previewIcon.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        togglePreview();
+      }
+    });
 
     const sharingCell = slots.device;
     const rule = item.settingsFile?.fileRule ?? { sharing: EVERYWHERE, encrypted: false };
