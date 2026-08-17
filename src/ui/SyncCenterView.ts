@@ -83,6 +83,7 @@ import {
   effectiveDirection,
 } from "./panelModel";
 import { Fate, FateInput, NOTHING_YET_SENTENCE, rowFate, versionAheadClause } from "./fateModel";
+import { openDiffModal } from "./DiffModal";
 import { renderDiffPanel } from "./diffView";
 import { confirmDeleteLeftovers } from "./ConfirmModal";
 import { LEFTOVER_SECTION_ORDER, LeftoverSection } from "../core/leftover";
@@ -92,7 +93,17 @@ import { renderReportContent, renderReportPills, stripHeader } from "./reportCon
 import { RunRecord, RunKind, RunStatus, worstStatus, formatRunTime, deleteLeftoverDesc } from "../core/runHistory";
 import { ACTION_ICON, ACTION_COLOR_CLASS, renderActionIcon, renderActionCount, type SyncAction } from "./actionIcons";
 import { FATE_CHIP_ICON } from "./fateChipIcons";
-import { renderFoldIcon, renderFoldCount, FOLD_ICON, FOLD_ICON_COLOR_CLASS, type FoldKind } from "./foldIcons";
+import {
+  renderFoldIconNamed,
+  renderFoldCount,
+  FOLD_ICON,
+  FOLD_ICON_COLOR_CLASS,
+  AVAILABILITY_FOLD_ICON,
+  AVAILABILITY_FOLD_TEXT,
+  AVAILABILITY_FOLD_NOTE,
+  type FoldKind,
+  type AvailabilityFoldKind,
+} from "./foldIcons";
 import { renderFoldChevron, setFoldOpen } from "./foldChevron";
 // ITEM_SECTION_LABELS aliased: this file already declares its own ITEM_SECTION_LABELS (sidebar category
 // labels, see below) for an unrelated domain.
@@ -185,12 +196,18 @@ const ENABLEMENT_LABELS: Record<"enable" | "none", string> = {
   none: "Leave it off",
 };
 
-// Session-remembered UI state: which sections have their ✓ / ⊘ / ○ trailing lines flattened open.
+// Session-remembered UI state: which sections have their trailing fold lines flattened open. The
+// availability folds share one set because their keys already carry the fold's own id.
 const sessionUi = {
   insyncOpen: new Set<string>(),
   excludedOpen: new Set<string>(),
   nosettingsOpen: new Set<string>(),
+  availabilityOpen: new Set<string>(),
 };
+
+// Escalating "less this device can do about it": a version away, a switch away, an install away,
+// and finally not possible here at all.
+const AVAILABILITY_FOLD_ORDER: AvailabilityFoldKind[] = ["outdated", "disabled", "not-installed", "desktop-only"];
 
 // Staging state lives at session level, not view level: mobile Obsidian recreates views on
 // tab switches, and per-instance state would re-run the default pre-check on every
@@ -1394,7 +1411,8 @@ export class SyncCenterView extends ItemView {
         holder.createDiv({ cls: "config-sync-expand-note", text: "Only key order / formatting differs." });
         return;
       }
-      renderDiffPanel(holder, base, produced, leftLabel, rightLabel, { name: "data.json", sorted: bothSorted });
+      renderDiffPanel(holder, base, produced, leftLabel, rightLabel, { name: "data.json", sorted: bothSorted },
+        () => openDiffModal(this.app, base, produced, leftLabel, rightLabel, { name: "data.json", sorted: bothSorted }));
     });
   }
 
@@ -1517,8 +1535,10 @@ export class SyncCenterView extends ItemView {
       container.createDiv({ cls: "config-sync-side-divider" });
       const active = this.panelSection.kind === "history";
       const item = container.createDiv({ cls: `config-sync-side-item${active ? " is-active" : ""}` });
+      // No count badge. Every other badge in this sidebar is a number of things waiting for you
+      // (↑ to capture, ✓ in sync); History's was the number of records kept, which is a cap, not a
+      // to-do — the same position saying two different kinds of thing.
       item.createSpan({ cls: "config-sync-side-name", text: "History" });
-      if (this.history.length > 0) item.createSpan({ cls: "config-sync-side-badge is-neutral", text: `${this.history.length}` });
       item.addEventListener("click", () => {
         this.panelSection = { kind: "history" };
         this.historyOpen = null;
@@ -2237,9 +2257,18 @@ export class SyncCenterView extends ItemView {
       // no data yet") — rows within each fold stay name-sorted since `visible` already is.
       const bucketed = visible.map((r) => ({ r, section: partitionSection(this.rowBucket(r)) }));
       const active = bucketed.filter((x) => x.section === "active").map((x) => x.r);
-      const insync = bucketed.filter((x) => x.section === "insync").map((x) => x.r);
-      const excluded = bucketed.filter((x) => x.section === "excluded").map((x) => x.r);
-      const nosettings = bucketed.filter((x) => x.section === "nosettings").map((x) => x.r);
+      // A row this device can't act on — not installed, disabled, outdated, desktop-only — folds by
+      // WHY rather than by fate. Only among the non-active rows: an actionable one (a plugin this
+      // run would install) stays at the top where the work is, availability chip and all. Without
+      // this split those rows landed in `○ no settings yet`, which is where the reporter went
+      // looking for "which ones aren't installed here" and found nothing that said so.
+      const availabilityOf = (r: StatusRow): SectionKind => this.sectionOf(r.group.name);
+      const inactive = bucketed.filter((x) => x.section !== "active");
+      const unavailable = inactive.filter((x) => availabilityOf(x.r) !== "main");
+      const byFate = inactive.filter((x) => availabilityOf(x.r) === "main");
+      const insync = byFate.filter((x) => x.section === "insync").map((x) => x.r);
+      const excluded = byFate.filter((x) => x.section === "excluded").map((x) => x.r);
+      const nosettings = byFate.filter((x) => x.section === "nosettings").map((x) => x.r);
       // The filled card wraps rows only — it renders exactly when the section
       // has real rows (the self row or an active row); a section whose visible content is fold
       // lines alone shows head + fold lines with no filled block.
@@ -2249,9 +2278,27 @@ export class SyncCenterView extends ItemView {
         for (const r of active) this.renderItemRow(card, r);
         this.markLastRow(card);
       }
-      this.renderSectionTrailingLine(body, ts, insync, sessionUi.insyncOpen, "insync", insyncLineText);
-      this.renderSectionTrailingLine(body, ts, excluded, sessionUi.excludedOpen, "excluded", excludedLineText);
-      this.renderSectionTrailingLine(body, ts, nosettings, sessionUi.nosettingsOpen, "nosettings", nosettingsLineText);
+      const fateFold = (rows: StatusRow[], openSet: Set<string>, kind: FoldKind, text: (n: number) => string): void =>
+        this.renderSectionTrailingLine(body, {
+          ts, rows, openSet, foldId: kind, icon: FOLD_ICON[kind], colorCls: FOLD_ICON_COLOR_CLASS[kind], text, note: null,
+        });
+      fateFold(insync, sessionUi.insyncOpen, "insync", insyncLineText);
+      fateFold(excluded, sessionUi.excludedOpen, "excluded", excludedLineText);
+      fateFold(nosettings, sessionUi.nosettingsOpen, "nosettings", nosettingsLineText);
+      // Availability last, in escalating "can't do anything here" order — the four titles and notes
+      // are the ones 987eacf deleted with the sections they belonged to.
+      for (const kind of AVAILABILITY_FOLD_ORDER) {
+        this.renderSectionTrailingLine(body, {
+          ts,
+          rows: unavailable.filter((x) => availabilityOf(x.r) === kind).map((x) => x.r),
+          openSet: sessionUi.availabilityOpen,
+          foldId: kind,
+          icon: AVAILABILITY_FOLD_ICON[kind],
+          colorCls: "is-warn",
+          text: AVAILABILITY_FOLD_TEXT[kind],
+          note: AVAILABILITY_FOLD_NOTE[kind],
+        });
+      }
     } else {
       // showSelf is only ever true alongside filter === "all" && !searching() (renderTypeSection's
       // own gate) — i.e. always the branch above — so this path never needs the self row.
@@ -2272,20 +2319,39 @@ export class SyncCenterView extends ItemView {
   // invariant "filled block = rows" holds for every fold, in every state.
   private renderSectionTrailingLine(
     parent: HTMLElement,
-    ts: TypeSection,
-    rows: StatusRow[],
-    openSet: Set<string>,
-    kind: FoldKind,
-    text: (n: number) => string
+    opts: {
+      ts: TypeSection;
+      rows: StatusRow[];
+      openSet: Set<string>;
+      foldId: string;
+      icon: string;
+      colorCls: string | null;
+      text: (n: number) => string;
+      // The availability folds carry one, explaining what applying would do for rows this device
+      // can't just apply to. It renders under the line and only while the fold is open — closed, it
+      // would be four paragraphs of guidance for rows nobody asked to see.
+      note: string | null;
+    }
   ): void {
+    const { ts, rows, openSet, text } = opts;
     if (rows.length === 0) return;
-    const key = `${this.sectionKey()}::${ts}`;
+    const key = `${this.sectionKey()}::${ts}::${opts.foldId}`;
     let open = openSet.has(key);
     const line = parent.createDiv({ cls: "config-sync-unchanged" });
     const chevron = renderFoldChevron(line, open, null);
-    renderFoldIcon(line, kind);
+    renderFoldIconNamed(line, opts.icon, opts.colorCls);
     const label = line.createSpan({ cls: "config-sync-fold-label", text: text(rows.length) });
-    let foldCard: HTMLElement | null = open ? this.buildFoldCard(parent, line, rows) : null;
+    const openBody = (): HTMLElement[] => {
+      const parts: HTMLElement[] = [];
+      if (opts.note !== null) {
+        const note = parent.createDiv({ cls: "config-sync-fold-note", text: opts.note });
+        line.after(note);
+        parts.push(note);
+      }
+      parts.push(this.buildFoldCard(parent, parts[0] ?? line, rows));
+      return parts;
+    };
+    let body: HTMLElement[] = open ? openBody() : [];
     line.addEventListener("click", (e) => {
       e.stopPropagation();
       open = !open;
@@ -2293,11 +2359,11 @@ export class SyncCenterView extends ItemView {
       label.setText(text(rows.length));
       if (open) {
         openSet.add(key);
-        foldCard = this.buildFoldCard(parent, line, rows);
+        body = openBody();
       } else {
         openSet.delete(key);
-        foldCard?.remove();
-        foldCard = null;
+        for (const el of body) el.remove();
+        body = [];
       }
     });
   }
@@ -2886,7 +2952,8 @@ export class SyncCenterView extends ItemView {
           }
           const leftLabel = dir === "capture" ? "store" : pres.affordance === "view" ? "not on this device yet" : "this device";
           const rightLabel = dir === "capture" ? "this device (what capture would write)" : "store (what apply would write)";
-          renderDiffPanel(p, base, produced, leftLabel, rightLabel, { name: e.name, sorted: switchSorted || jsonSorted });
+          renderDiffPanel(p, base, produced, leftLabel, rightLabel, { name: e.name, sorted: switchSorted || jsonSorted },
+            () => openDiffModal(this.app, base, produced, leftLabel, rightLabel, { name: e.name, sorted: switchSorted || jsonSorted }));
         });
       };
       line.addEventListener("click", (ev) => {
@@ -3943,7 +4010,8 @@ export class SyncCenterView extends ItemView {
     }
     const leftLabel = f.local !== null ? "your store" : "not in your store";
     const rightLabel = f.remote !== null ? remoteName : `not at ${remoteName}`;
-    renderDiffPanel(p, left, right, leftLabel, rightLabel, { name: f.itemRel, sorted: switchSorted || jsonSorted });
+    renderDiffPanel(p, left, right, leftLabel, rightLabel, { name: f.itemRel, sorted: switchSorted || jsonSorted },
+      () => openDiffModal(this.app, left, right, leftLabel, rightLabel, { name: f.itemRel, sorted: switchSorted || jsonSorted }));
   }
 
   private renderRemoteButtons(detail: HTMLElement, remote: Remote, pullAligned: boolean, noChanges: boolean): void {

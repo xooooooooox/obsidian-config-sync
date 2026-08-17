@@ -209,7 +209,8 @@ export class ConflictModal extends Modal {
       remoteText,
       "local  (this device)",
       `remote (${this.remoteName})`,
-      { name: c.kind === "definition" ? "sync rule" : "--- local · +++ remote", sorted: c.kind !== "definition" && sortedView }
+      { name: c.kind === "definition" ? "sync rule" : "--- local · +++ remote", sorted: c.kind !== "definition" && sortedView },
+      null // already a modal — there is nowhere bigger to open
     );
   }
 }

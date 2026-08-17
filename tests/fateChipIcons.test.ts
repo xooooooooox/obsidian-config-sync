@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { FATE_CHIP_ICON } from "../src/ui/fateChipIcons";
 import { ACTION_ICON } from "../src/ui/actionIcons";
-import { FOLD_ICON } from "../src/ui/foldIcons";
+import { FOLD_ICON, AVAILABILITY_FOLD_ICON } from "../src/ui/foldIcons";
 import { buildOptOutLocalMenu, buildLocalMenu, enablementRowModel, fileEnablementRowModel, ruleIcon, ruleLabel, RULE_OPTIONS } from "../src/ui/enablementRow";
 import { Badge, computeBadges } from "../src/ui/itemCard";
 import { Item, ItemDef, ItemSettingsFile } from "../src/core/registry";
@@ -123,7 +123,22 @@ describe("glyph registry — one glyph, one meaning (icon-collision guard)", () 
     // DESIGN.md §2.3: the encrypt toggle's rest state — closed `lock` stays the
     // encrypted state everywhere (mode badge / json keys / legend + the toggle's on-state).
     { glyph: "lock-open", producer: "SettingTab (external, hardcoded)", home: "renderLockToggle — unencrypted-but-available rest state" },
+    { glyph: "braces", producer: "SettingTab/SyncCenterView (external, hardcoded)", home: "per-key fallback — the keys inside this file decide (also MODE_ICON.fields)" },
+    { glyph: "share-2", producer: "SyncCenterView (external, hardcoded)", home: "carrier chip — the on/off list is shared with your other devices" },
+    { glyph: "maximize-2", producer: "diffView (external, hardcoded)", home: "renderDiffPanel — open this diff in a bigger window" },
+    { glyph: "file-text", producer: "itemCard MODE_ICON (external, hardcoded)", home: "MODE_ICON.plain — the whole file travels as one" },
   ];
+
+  // The availability folds (foldIcons.ts) — a real exported table, so it is WALKED rather than
+  // hand-listed: three of its four glyphs are the same marks the fate chips use for the same facts,
+  // and that reuse must stay declared rather than accidental.
+  function availabilityFoldHomes(): GlyphHome[] {
+    return Object.entries(AVAILABILITY_FOLD_ICON).map(([kind, glyph]) => ({
+      glyph,
+      producer: "AVAILABILITY_FOLD_ICON",
+      home: `AVAILABILITY_FOLD_ICON.${kind}`,
+    }));
+  }
 
   // The local segment's `follows` glyph (DESIGN.md icon table): `corner-down-right` is
   // registered nowhere else. Fed from the REAL model functions (enablementRow.ts's
@@ -174,7 +189,7 @@ describe("glyph registry — one glyph, one meaning (icon-collision guard)", () 
   }
 
   function allHomes(): GlyphHome[] {
-    return [...fateChipHomes(), ...actionHomes(), ...foldHomes(), ...ruleHomes(), ...localMenuHomes(), ...localSegmentFollowHomes(), ...badgeHomes(), ...EXTERNAL_HOMES];
+    return [...fateChipHomes(), ...actionHomes(), ...foldHomes(), ...ruleHomes(), ...localMenuHomes(), ...localSegmentFollowHomes(), ...badgeHomes(), ...availabilityFoldHomes(), ...EXTERNAL_HOMES];
   }
 
   // Declared, intentional glyph reuse across producers — the ONLY escape hatch this test allows.
@@ -187,6 +202,9 @@ describe("glyph registry — one glyph, one meaning (icon-collision guard)", () 
     monitor: "desktop-only device class",
     "power-off": "off, on this device — a resolved fate this run or a local exception, same direction",
     "circle-minus": "not synced with this item, on this device",
+    // The fate chip on a row and the fold line that gathers those rows state one fact — this device
+    // does not have the plugin — so they state it with one mark.
+    "circle-dashed": "not installed on this device",
     check: "affirmative — settled / already matching, nothing left for this glyph to say",
     // The local segment's `follows` glyph, same meaning whether it's an element-layer
     // exception (enablementRowModel) or the whole-file opt-out layer (fileEnablementRowModel) —

@@ -88,15 +88,25 @@ single-row and bulk alike.
 | Card value inset | `.config-sync-cardval { padding-left: var(--size-2-3) }` | matches the trigger boxes' own 6px, so prose and controls in a card share one left edge; the inset lives on the TRACK, not on each trigger, so anything added later aligns by construction |
 
 **The settings-drawer row grid (scrow).** Every row in an item card's drawer is a
-`.config-sync-scrow`: `identity 170px | controls 108px | divider 1px | detail 1fr`. The
+`.config-sync-scrow`: `identity 170px | controls 1fr | 1px | trailing max-content`. **The controls
+track is the flexible one and its cluster right-aligns inside it**, so the cluster hugs the
+card-toggle rail: a row with no trailing cell puts its controls on the card's right edge, and a
+folder row's own sync toggle (track 4) takes that edge with the controls immediately left of it.
+One vertical rule down the card, header toggle included. This is what "nothing anchors to the
+drawer's right edge" became once the two-layer merge emptied the right half — that rule existed to
+stop an ACTION column being invented, and rule controls lining up with the card's own toggle is not
+that. The
 controls column is a fixed THREE-SLOT grid (`.config-sync-scrow-slots`: aux 24 | lock 24 |
-device 44) — same-type controls sit in the same slot on every row, so per-item icons, locks
-and device pickers each form a strict column card-wide; a row without a control leaves its
-slot empty. Slot roles: aux = the per-item `list-checks` (array rule rows) — the path row's
-own aux slot stays empty, since its File-preview `eye` rides the filename line instead (see
-below); lock = encrypt toggles; device = every scope/rule picker AND the merged two-layer control,
-LAST and widest of the three (the three control kinds must read as adjacent
-columns, never scattered). STATE controls (a folder row's sync toggle) right-anchor on the
+device 68) — **fixed even though the cluster right-aligns**: without it the lock would drift with
+the width of whatever sits beside it, and the lock column is real alignment worth keeping. A row
+without a control leaves its slot empty. Slot roles: aux = the per-item `list-checks` (array rule
+rows) — the path row's own aux slot stays empty, since its File-preview `eye` rides the filename
+line instead (see below); lock = encrypt toggles; device = every scope/rule picker AND the merged
+two-layer control, LAST and widest of the three. **The device slot is sized for the widest thing it
+holds (the merged control) and its content right-aligns**, because the control's width varies by row
+— a `Not shared` key has one glyph where a two-layer row has three. Centering a variable-width
+control in a fixed slot equalizes centers and staggers edges, which put a one-glyph row ~12px right
+of its neighbours; right edges are what the eye follows here, since that is where the rail is. STATE controls (a folder row's sync toggle) right-anchor on the
 card-toggle rail via `.config-sync-scrow-end`. Member-row indent lives on the name inside
 the identity cell, never on the row. There is no other drawer grid — `.config-sync-scrow`
 is the only row shape.
@@ -608,7 +618,15 @@ noted):
   trailing fold lines (`config-sync-unchanged`) aggregate only their own section's `N in
   sync` / `N with nothing to sync yet` (plain text, the leading `.config-sync-row-chevron` plus
   the fixed-size fold icon compose around it — no trailing triangle in the string),
-  expandable in place. Switching into a filter
+  expandable in place. **Two axes of fold, in this order:** the three FATE folds
+  (✓ / ⊘ / ○ — "is there anything to do") and then the four AVAILABILITY folds (`outdated` /
+  `disabled` / `not-installed` / `desktop-only`, amber icons — "can this device do it at all"),
+  each carrying the explanatory note the equivalent section used to (`AVAILABILITY_FOLD_NOTE`),
+  rendered under the line while open. A row lands in an availability fold only if it is NOT
+  active: an actionable one (a plugin this run would install) stays at the top with the work,
+  wearing its own `not installed here` chip. This restores what `987eacf` dropped when the list
+  moved to type sections — those four groupings, with their copy — without folding away rows that
+  have something to do. Switching into a filter
   pill or a search hit auto-expands every section once, on that transition only, so a
   manual re-collapse during the rest of that filtered/search session still sticks. Group
   headers `config-sync-sect` (uppercase + hairline) — used in the run-report breakdown.

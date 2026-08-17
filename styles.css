@@ -516,6 +516,14 @@ body.is-phone .config-sync-fkey {
 .config-sync-fold-ic { display: inline-flex; flex: none; }
 .config-sync-fold-ic svg { width: 12px; height: 12px; display: block; }
 .config-sync-fold-ic.is-ok { color: var(--color-green); }
+/* The availability folds (outdated / disabled / not installed / desktop-only) take amber, so the
+   two axes read apart at a glance: the fate folds above answer "is there anything to do", these
+   answer "can this device do it at all". */
+.config-sync-fold-ic.is-warn { color: var(--color-orange); }
+/* An availability fold's note, from the sections this replaced: what applying would actually do for
+   rows this device can't just apply to. Indented past the fold's chevron + icon so it reads as
+   belonging to the line above, and only present while the fold is open. */
+.config-sync-fold-note { margin: var(--size-2-1) 0 var(--size-4-1) 30px; color: var(--text-faint); font-size: var(--font-ui-smaller); max-width: 68ch; }
 
 .config-sync-dot-capture, .config-sync-dot-apply { position: relative; }
 .config-sync-dot-capture::after, .config-sync-dot-apply::after {
@@ -1382,24 +1390,32 @@ body.is-mobile .config-sync-tworow-chev { display: none; }
 .config-sync-card-badge-state { color: var(--text-faint); }
 .config-sync-item-wrap .setting-item-description:empty { display: none; }
 
-/* The Settings drawer's row grammar: the Sync Center card's own
-   shape with a wider identity track — identity | controls | divider | detail. Identity holds
-   the row's name (an uppercase zone label, a mono key/filename, a member name — long names
-   ellipsize); the controls CLUSTER is left-anchored in its column in fixed role order
-   scope-picker → lock → per-item icon or merged control (→ folder toggle); track 3's divider
-   retired with the two-segment row, and track 4 now carries only what a row appends of its own.
-   Nothing anchors to the drawer's right edge — removal verbs live in
-   each row's own scope menu, so there is no action column. */
-.config-sync-scrow { display: grid; grid-template-columns: 170px 108px 1px 1fr; align-items: center; column-gap: var(--size-4-2); padding: var(--size-4-1) 0; font-size: var(--font-ui-smaller); }
+/* The Settings drawer's row grammar: identity | controls | 1px | trailing. Identity holds the row's
+   name (an uppercase zone label, a mono key/filename, a member name — long names ellipsize).
+   The controls track is the FLEXIBLE one and its cluster right-aligns inside it, so the cluster
+   hugs the card-toggle rail: a row with no trailing cell puts its controls on the card's right
+   edge, and a folder row's own sync toggle (track 4, `max-content`) takes that edge with the
+   controls immediately left of it. One vertical rule down the whole card, header toggle included.
+   This is what "nothing anchors to the drawer's right edge" turned into once the two-layer merge
+   emptied the right half: the rule existed to stop an ACTION column from being invented, and rule
+   controls lining up with the card's own toggle is not that.
+   Role order inside the cluster is unchanged: aux → lock → device (picker or merged control). */
+.config-sync-scrow { display: grid; grid-template-columns: 170px 1fr 1px max-content; align-items: center; column-gap: var(--size-4-2); padding: var(--size-4-1) 0; font-size: var(--font-ui-smaller); }
 /* The controls column as a fixed three-slot grid (DESIGN.md §1.4 SLOTS): aux (an array
    rule row's per-item icon — the path row's own aux slot stays empty, its eye rides the
    filename line instead) | lock | device picker — same-type controls one strict column each,
-   device LAST; a row without a control leaves the slot empty. The device slot is the widest of the
-   three: it holds either a lone sharing picker or the MERGED control (two glyphs + separator + ⇕),
-   which is the wider of the two. These track widths predate the merge and have not been
-   re-measured against it at narrow viewports. */
-.config-sync-scrow-slots { display: grid; grid-template-columns: 24px 24px 44px; align-items: center; column-gap: var(--size-4-2); }
+   device LAST; a row without a control leaves the slot empty. The grid stays FIXED even though the
+   cluster right-aligns: right-aligning the controls without it would let the lock drift left or
+   right with the width of whatever sits beside it, and the lock column is real alignment worth
+   keeping.
+   The device slot is sized for the WIDEST thing it holds — the merged control (two glyphs +
+   separator + ⇕) — not for a lone sharing picker, and its content right-aligns. Centering a
+   variable-width control in a fixed slot is what put a one-glyph `Not shared` row ~12px right of
+   the two-glyph rows above it: equal centers, unequal edges. Right edges are what the eye follows
+   here, because that is where the rail is. */
+.config-sync-scrow-slots { display: grid; grid-template-columns: 24px 24px 68px; align-items: center; column-gap: var(--size-4-2); justify-self: end; }
 .config-sync-scrow-slot { display: flex; align-items: center; justify-content: center; min-width: 0; }
+.config-sync-scrow-slot:last-child { justify-content: flex-end; }
 /* STATE controls right-anchor on the card-toggle rail: a folder row's sync toggle
    lands in this track-4 cell, right edge shared with the card header's own toggle; RULE
    controls (pickers/locks) stay left-anchored in the slot columns. */
@@ -1443,9 +1459,10 @@ body.is-mobile .config-sync-tworow-chev { display: none; }
    quiet row of controls; origin right so the scaled toggle's RIGHT edge is
    the one that holds the rail. */
 .config-sync-scrow .checkbox-container { transform: scale(0.85); transform-origin: right center; }
-/* Mobile: the 170/108 tracks leave too little for the row's own detail at 360px wide — step both
-   down; names ellipsize sooner, the shape stays. */
-body.is-mobile .config-sync-scrow { grid-template-columns: minmax(90px, 32%) 64px 1px 1fr; }
+/* Mobile: the fixed 170px identity track is too much of a 360px row — step it down; names
+   ellipsize sooner, the shape (flexible controls track, cluster on the rail) stays. Narrow-viewport
+   widths have not been re-measured since the two-layer merge; that pass is still open. */
+body.is-mobile .config-sync-scrow { grid-template-columns: minmax(90px, 32%) 1fr 1px max-content; }
 /* Quiet-rest (DESIGN.md §2.3): every clickable icon control rests at muted×45% and
    lifts to 100% on its own hover/focus/menu-open; an ACTIVE state is colored at 100%. The lock
    joins the idiom the sharing picker and per-item icon already carried. */
@@ -1649,6 +1666,15 @@ button.config-sync-add-row, button.config-sync-add-row:hover { background: none;
 .config-sync-cm-viewbtn.is-on { background: var(--background-modifier-hover); color: var(--text-normal); }
 
 .config-sync-cm-diffpane { border-top: 1px solid var(--background-modifier-border); font-family: var(--font-monospace); font-size: var(--font-ui-smaller); line-height: 1.75; max-height: 240px; overflow: auto; padding: var(--size-4-1) 0; }
+/* The diff, opened big. Inline, a diff is read through a letterbox: a card, inside a pane, inside a
+   240px-capped scroller. This is the same panel with those constraints lifted — starting large
+   rather than growing into it, since the whole reason to open it is that there was too much to
+   read. `resize` gives it a native drag handle for anyone who wants it larger or smaller still;
+   `min-height: 0` on the flex child is what lets the pane actually shrink with the frame instead of
+   pinning it to its content height. */
+.config-sync-diffmodal { width: 90vw; max-width: 1400px; height: 80vh; resize: both; overflow: auto; display: flex; flex-direction: column; }
+.config-sync-diffmodal .modal-content { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.config-sync-diffmodal .config-sync-cm-diffpane { flex: 1; min-height: 0; max-height: none; }
 .config-sync-cm-dline { padding: 0 var(--size-4-3); white-space: pre; }
 .config-sync-cm-dline.is-common { color: var(--text-faint); }
 .config-sync-cm-dline.is-del { background: rgba(var(--color-red-rgb), 0.14); color: var(--color-red); }

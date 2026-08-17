@@ -31,12 +31,52 @@ export const FOLD_ICON_COLOR_CLASS: Record<FoldKind, string | null> = {
   nosettings: null,
 };
 
+// The AVAILABILITY folds — a second axis, and deliberately a different one. The three above answer
+// "is there anything to do with this item"; these answer "can this device do it at all".
+//
+// Each glyph is the one the row's own fate chip already wears for the same fact (`circle-dashed`
+// not installed here, `monitor` desktop only, `power-off` off here), so the fold line and the rows
+// inside it say the same thing in the same mark. `circle-arrow-up` is the one new glyph: the store
+// was captured on a newer version than this device runs, and updating is the way out.
+//
+// The four titles and their notes come back verbatim from the sections this replaced
+// (987eacf deleted them when the list moved to type sections; the copy was good and the need for
+// it never went away — it just stopped being reachable).
+export type AvailabilityFoldKind = "outdated" | "disabled" | "not-installed" | "desktop-only";
+
+export const AVAILABILITY_FOLD_ICON: Record<AvailabilityFoldKind, string> = {
+  outdated: "circle-arrow-up",
+  disabled: "power-off",
+  "not-installed": "circle-dashed",
+  "desktop-only": "monitor",
+};
+
+export const AVAILABILITY_FOLD_TEXT: Record<AvailabilityFoldKind, (n: number) => string> = {
+  outdated: (n) => `${n} outdated on this device`,
+  disabled: (n) => `${n} disabled on this device`,
+  "not-installed": (n) => `${n} not installed on this device`,
+  "desktop-only": (n) => `${n} desktop-only`,
+};
+
+export const AVAILABILITY_FOLD_NOTE: Record<AvailabilityFoldKind, string> = {
+  outdated: "Store settings were captured on a newer plugin version than this device runs. Updating first is the safe path.",
+  disabled: "Settings sync either way. Choose whether applying also turns the plugin on.",
+  "not-installed": "Settings sync either way. Choose whether applying also installs the plugin.",
+  "desktop-only": "In your config but can't run on this device. Nothing to do here.",
+};
+
+// The one painter for a fold's fixed-size glyph. Takes the resolved name/color rather than a
+// FoldKind so the availability folds (a different kind set, same visual treatment) share it
+// instead of growing a second painter that could drift in size or class.
+export function renderFoldIconNamed(parent: HTMLElement, icon: string, colorCls: string | null): HTMLSpanElement {
+  const span = parent.createSpan({ cls: `config-sync-fold-ic${colorCls !== null ? ` ${colorCls}` : ""}` });
+  setIcon(span, icon);
+  return span;
+}
+
 // Appends the fold state's icon to `parent`, colored per FOLD_ICON_COLOR_CLASS.
 export function renderFoldIcon(parent: HTMLElement, kind: FoldKind): HTMLSpanElement {
-  const colorCls = FOLD_ICON_COLOR_CLASS[kind];
-  const span = parent.createSpan({ cls: `config-sync-fold-ic${colorCls !== null ? ` ${colorCls}` : ""}` });
-  setIcon(span, FOLD_ICON[kind]);
-  return span;
+  return renderFoldIconNamed(parent, FOLD_ICON[kind], FOLD_ICON_COLOR_CLASS[kind]);
 }
 
 // Appends the fold icon followed by `count` — the filter pills' short (mobile/compact) form for
