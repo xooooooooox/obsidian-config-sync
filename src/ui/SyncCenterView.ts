@@ -858,11 +858,20 @@ export class SyncCenterView extends ItemView {
     return cat;
   }
 
-  // Rows in the main section (availability "enabled", or app-anchored with no unhandled drift).
-  // Sidebar badges, header pills, filter pills, and select-all all bucket over this set only —
-  // outdated/disabled/not-installed rows live in their own sections with their own controls.
-  private mainRows(): StatusRow[] {
-    return this.rows().filter((r) => this.sectionOf(r.group.name) === "main");
+  // THE row set every count reads: exactly the rows the list renders. Families already folded
+  // (rows()), the self item already out (it has its own sidebar destination), and the two on/off
+  // carriers dropped here because they dissolve into their section's head chip rather than
+  // rendering as rows.
+  //
+  // Availability is deliberately NOT narrowed: an outdated/disabled/not-installed item is drawn in
+  // the list like any other row and can be staged (stageableRow: in the non-main sections the state
+  // ACTION is the payload), so a count that skipped it disagreed with the list it sits above. That
+  // narrowing is where `↑16` vs `To capture 14` came from — the header and sidebar counted
+  // main-only-with-carriers while the filter pills counted all-sections-without — and both readings
+  // were derived from a comment that stopped being true in 987eacf, when the availability sections
+  // were replaced by the four type sections.
+  private countable(rows: StatusRow[]): StatusRow[] {
+    return rows.filter((r) => !CARRIER_GROUP_NAMES.has(r.group.name));
   }
 
   private effDir(r: StatusRow): Direction {
@@ -1282,7 +1291,7 @@ export class SyncCenterView extends ItemView {
       pane.createDiv({ cls: "config-sync-self-sub", text: `The list of what this device syncs — ${info.itemCount} item${info.itemCount === 1 ? "" : "s"}, in sync with the store.` });
       // Post-adopt nudge: the list is set up but items may not
       // be applied to this device yet. Point at Apply (store → device), never Capture.
-      const toApply = this.presentedCounts(this.mainRows()).down;
+      const toApply = this.presentedCounts(this.countable(this.rows())).down;
       if (toApply > 0) {
         const block = pane.createDiv({ cls: "config-sync-self-block is-act" });
         block.createDiv({ cls: "config-sync-self-block-h", text: "Now set up this device" });
@@ -1452,9 +1461,10 @@ export class SyncCenterView extends ItemView {
       const item = container.createDiv({ cls: `config-sync-side-item${active ? " is-active" : ""}` });
       item.createSpan({ cls: "config-sync-side-name", text: label });
       if (this.searching()) {
-        // Hit counts must span the entry's full scope — every section (outdated/disabled/
-        // not-installed included), not just mainRows() — so a match hiding in e.g. "Not
-        // installed" still counts here. Bucket badges below stay main-section-only.
+        // Hit counts span the entry's full scope, carriers included: a search is "find this item",
+        // and a carrier IS findable (its own settings card is one click away through the section
+        // chip) even though it never renders as a row. The bucket badges below deliberately count a
+        // narrower set — `countable` — because those numbers must add up to the list.
         const sectionRows = cat === "all" ? this.rows() : this.rows().filter((r) => this.itemSectionOf(r.group.name) === cat);
         const hits = sectionRows.filter((r) => this.rowMatchesSearch(r)).length;
         item.createSpan({ cls: "config-sync-side-badge is-neutral", text: `${hits}` });
@@ -1473,9 +1483,9 @@ export class SyncCenterView extends ItemView {
       });
     };
 
-    deviceEntry("all", "All items", this.mainRows());
+    deviceEntry("all", "All items", this.countable(this.rows()));
     for (const cat of ITEM_SECTION_ORDER) {
-      const inCat = this.mainRows().filter((r) => this.itemSectionOf(r.group.name) === cat);
+      const inCat = this.countable(this.rows()).filter((r) => this.itemSectionOf(r.group.name) === cat);
       if (inCat.length === 0) continue;
       deviceEntry(cat, ITEM_SECTION_LABELS[cat], inCat);
     }
@@ -1524,7 +1534,7 @@ export class SyncCenterView extends ItemView {
     if (this.panelSection.kind === "device") {
       const cat = this.panelSection.cat;
       sw.createSpan({ text: cat === "all" ? "All items" : ITEM_SECTION_LABELS[cat] });
-      const c = this.presentedCounts(this.sectionRows().filter((r) => this.sectionOf(r.group.name) === "main"));
+      const c = this.presentedCounts(this.countable(this.sectionRows()));
       if (c.up > 0) renderActionCount(sw.createSpan({ cls: "config-sync-side-badge is-up" }), "capture", c.up);
       if (c.down > 0) renderActionCount(sw.createSpan({ cls: "config-sync-side-badge is-down" }), "apply", c.down);
       if (c.ok > 0) sw.createSpan({ cls: "config-sync-side-badge is-ok", text: `✓${c.ok}` });
@@ -1577,7 +1587,7 @@ export class SyncCenterView extends ItemView {
     const head = this.contentEl.createDiv({ cls: "config-sync-center-head" });
     this.renderSelfChip(head);
     if (this.selfInfo !== null) head.createSpan({ cls: "config-sync-head-divider" });
-    const { up, down, ok, excluded, none } = this.presentedCounts(this.mainRows());
+    const { up, down, ok, excluded, none } = this.presentedCounts(this.countable(this.rows()));
     const remoteStates = this.host.remotes().map((r) => this.host.remoteCheck(r.name)?.check.state ?? "unknown");
     const { push, pull } = remoteDirectionCounts(remoteStates);
     const pills = head.createSpan({ cls: "config-sync-report-pills" });
@@ -1950,9 +1960,9 @@ export class SyncCenterView extends ItemView {
     // adoption gate engaging) with the filter active would otherwise strand an empty view.
     if (this.filter === "leftover" && this.leftoverPresentation() !== "section") this.filter = "all";
     const inSection = this.sectionRows();
-    // The two on/off list carriers dissolve into their section's header chip — never a
-    // row of their own — so every row-driven count (pills, select-all) excludes them up front.
-    const pillPool = inSection.filter((r) => !CARRIER_GROUP_NAMES.has(r.group.name));
+    // Same producer the header pills and sidebar badges read (`countable`) — the three used to
+    // disagree, and this is the one place that disagreement was visible on a single screen.
+    const pillPool = this.countable(inSection);
     const bar = main.createDiv({ cls: "config-sync-mainbar" });
     const pillRow = bar.createDiv({ cls: "config-sync-fpillrow" });
     let searchEl: HTMLInputElement | null = null;

@@ -246,22 +246,50 @@ export function sectionForItem(a: Availability, isMobile: boolean): SectionKind 
   return "main";
 }
 
-// The status bar's data set: the same rows the Sync Center's header pills count — main-section
-// only, with the version-ahead presentation applied. Rows the center files under its own
-// sections (desktop-only / disabled / not-installed / outdated) are excluded here too;
-// counting them raw made the bar disagree with the center forever on devices where such
-// sections are populated (2026-07-27 phone find: center "in sync", bar "↓2"). A group with no
-// availability info is kept as-is — hiding it could silently blank a real pending state.
+// The status bar's data set: the rows the Sync Center LISTS, so the two can agree. Three
+// narrowings, each mirroring something the view does:
+//
+//   1. The self group is dropped — it has its own sidebar destination and never enters the list.
+//   2. Companions fold into their parent through `familyRollup`, the same producer the view's
+//      rows use. `fileCount` doesn't affect the rolled-up STATE, so 0 is passed for every member.
+//   3. Only `desktop-only` rows are dropped. `stageableRow` judges exactly that section
+//      unstageable ("informational only — can't run here"), so it is the one availability class the
+//      view itself never counts as pending. Outdated/disabled/not-installed rows DO stage and DO
+//      show up in the center's counts, so dropping them is what used to make the bar read low.
+//
+// One residual, deliberately not chased: the bar has no access to the view's fate machinery
+// (install policy, conflict choices, direction overrides), so a row whose FATE the view resolves to
+// something non-directional can still count here. The structural over-counts are gone; this one
+// needs the view's own state and is not worth mirroring in a status bar.
 export function statusBarStatuses(
   statuses: GroupStatus[],
   availabilityOf: (group: string) => Availability | undefined,
-  isMobile: boolean
+  isMobile: boolean,
+  family: { selfGroup: string; parentOf: (group: string) => string | null }
 ): GroupStatus[] {
-  return statuses.flatMap((st) => {
+  const present = new Set(statuses.map((s) => s.group));
+  const families = new Map<string, FamilyMember[]>();
+  for (const st of statuses) {
+    if (st.group === family.selfGroup) continue;
+    const parent = family.parentOf(st.group);
+    // A companion whose parent isn't compiled here stands on its own — the same honest degradation
+    // the view's familyGroups() makes.
+    const key = parent !== null && present.has(parent) ? parent : st.group;
     const a = availabilityOf(st.group);
-    if (a === undefined) return [st];
-    if (sectionForItem(a, isMobile) !== "main") return [];
-    return [{ ...st, state: presentedState(st.state, a.drift) }];
+    // A group with no availability info keeps its raw state — hiding or reinterpreting it could
+    // silently blank a real pending state.
+    const member: FamilyMember = { name: st.group, state: presentedState(st.state, a === undefined ? null : a.drift), fileCount: 0 };
+    const members = families.get(key);
+    if (members === undefined) families.set(key, [member]);
+    // The parent leads: familyRollup adopts the FIRST direction-contributing member's literal
+    // state, which is how a companion-less family keeps its own state byte-identical.
+    else if (st.group === key) members.unshift(member);
+    else members.push(member);
+  }
+  return [...families].flatMap(([group, members]) => {
+    const a = availabilityOf(group);
+    if (a !== undefined && sectionForItem(a, isMobile) === "desktop-only") return [];
+    return [{ group, state: familyRollup(members).state }];
   });
 }
 

@@ -481,7 +481,8 @@ export default class ConfigSyncPlugin extends Plugin {
           const g = scoped.find((x) => x.name === name);
           return g !== undefined ? availabilityForGroup(g, host, lock) : undefined;
         },
-        Platform.isMobile
+        Platform.isMobile,
+        { selfGroup: SELF_GROUP_NAME, parentOf: (g) => this.companionParentOf(g) }
       );
     } catch (e) {
       console.error("Config Sync: status refresh failed", e);
@@ -634,11 +635,14 @@ export default class ConfigSyncPlugin extends Plugin {
         for (const g of excludedGroups) availability[g.name] = availabilityForGroup(g, this.pluginHost(), lock);
         for (const g of optedOutGroups) availability[g.name] = availabilityForGroup(g, this.pluginHost(), lock);
         // Keep the status bar's snapshot in step with THIS compute (not only with
-        // refreshLocalStatus), and count with the center's own lens — main-section
-        // rows only (statusBarStatuses) — so the bar can never disagree with the pills. Excluded
-        // groups (class rule AND device opt-out) stay out of this count (always-neutral, never
-        // up/down either way).
-        this.presentedStatuses = statusBarStatuses(statuses, (name) => availability[name], Platform.isMobile);
+        // refreshLocalStatus), and count with the center's own lens (statusBarStatuses: self out,
+        // companions folded into their parent, desktop-only dropped) so the bar reads the same rows
+        // the center lists. Excluded groups (class rule AND device opt-out) stay out of this count
+        // (always-neutral, never up/down either way).
+        this.presentedStatuses = statusBarStatuses(statuses, (name) => availability[name], Platform.isMobile, {
+          selfGroup: SELF_GROUP_NAME,
+          parentOf: (g) => this.companionParentOf(g),
+        });
         this.updateStatusIndicators();
         const excludedStatuses: GroupStatus[] = excludedGroups.map((g) => ({ group: g.name, state: "in-sync" }));
         const optedOutStatuses: GroupStatus[] = optedOutGroups.map((g) => ({ group: g.name, state: "in-sync" }));

@@ -84,6 +84,8 @@ single-row and bulk alike.
 | Touch targets | 44px rows/switcher/search-adjacent, 36px pills/seg/side items, 32px detail seg buttons | mobile minimums |
 | Mobile bottom clearance | `calc(var(--mobile-toolbar-height, 48px) + 88px)` | clears navbar + user status-bar snippets |
 | Inline micro-gaps | 3px (sidebar column rhythm) · 5px (icon↔label clusters) | between `--size-4-*` steps; 8px gaps use `var(--size-4-2)` |
+| Drawer control glyphs | `var(--icon-s)`, ONE rule covering lock / sharing picker / per-item toggle / File-preview eye / merged control | only the merged control used to carry a size; the rest fell back to Obsidian's 18px default and read a size bigger the moment a 16px glyph landed beside them. The ⇕ keeps 11px through a same-specificity rule placed after it |
+| Card value inset | `.config-sync-cardval { padding-left: var(--size-2-3) }` | matches the trigger boxes' own 6px, so prose and controls in a card share one left edge; the inset lives on the TRACK, not on each trigger, so anything added later aligns by construction |
 
 **The settings-drawer row grid (scrow).** Every row in an item card's drawer is a
 `.config-sync-scrow`: `identity 170px | controls 108px | divider 1px | detail 1fr`. The
@@ -451,6 +453,11 @@ noted):
 - **Pills** `config-sync-pill` (is-up/down/ok/none/neutral/warn/error/statenote) — counts and
   states; never interactive. **Filter pills** `config-sync-fpill` in `-fpillrow` — buttons;
   long/short label spans; mobile = glyph form, one line. Shared with the settings search's section pills.
+  **Every count on this screen runs over the same rows** — the ones the list actually renders
+  (`countable`, ARCHITECTURE's panelModel entry): header pills, sidebar badges, switcher badges and
+  filter pills alike, with the status bar reproducing that set from outside the view. They read
+  three different pools until 2026-08-18, which is how `↑16` sat above `To capture 14` above a bar
+  saying `↑19` on one screen.
 - **Sidebar** `config-sync-side-item/-side-badge` — sections with tiny count
   badges; active = accent tint. The Config Sync self layer leads as a distinct hero card
   `config-sync-side-self` (`-side-self-ic` icon tile, `-side-self-title`/`-side-self-sub`,

@@ -1141,7 +1141,12 @@ body.is-mobile .config-sync-strip-meta .config-sync-report-pills { margin-left: 
    `.config-sync-shell`, an unrelated axis.) */
 .config-sync-cardrow { display: grid; grid-template-columns: 130px 56px 1px 1fr; align-items: center; column-gap: var(--size-4-2); }
 .config-sync-cardrow > .config-sync-explabel-inline { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.config-sync-cardval { grid-column: 2 / -1; min-width: 0; }
+/* The 6px matches the trigger boxes' own left padding (`.config-sync-mergedctl`,
+   `.config-sync-cardrow-track2`). Without it a wide row's content starts at the track edge while
+   every control on the rows below starts 6px in — the FILES row's direction badge sat visibly left
+   of the glyphs under it. Putting the inset on the TRACK rather than on each trigger means anything
+   that lands here later is aligned by construction. */
+.config-sync-cardval { grid-column: 2 / -1; min-width: 0; padding-left: var(--size-2-3); }
 /* Any single cell explicitly on track 2 (the More row's icon — the same track the merged control
    lands on) without claiming the trigger look (padding/hover/is-set) `.config-sync-mergedctl`
    bakes in for its own row shape. */
@@ -1155,6 +1160,9 @@ body.is-mobile .config-sync-strip-meta .config-sync-report-pills { margin-left: 
    the rows it matters most for. */
 body.is-mobile .config-sync-cardrow:not(.is-iconrow) { display: flex; flex-direction: column; align-items: stretch; gap: var(--size-4-2); }
 body.is-mobile .config-sync-cardrow:not(.is-iconrow) > .config-sync-explabel-inline { flex: none; padding-top: 0; }
+/* Stacked, there is no control column to align to — the value owns the full width, so the track
+   inset would just read as a stray indent under the label. */
+body.is-mobile .config-sync-cardrow:not(.is-iconrow) > .config-sync-cardval { padding-left: 0; }
 /* After install / Enablement are the two rule controls left on a textual menu —
    their fallback options have no glyph vocabulary to lean on. Ellipsis is a last
    resort for a genuinely narrow viewport, never a first resort while `.config-sync-cardval` still
@@ -1197,7 +1205,17 @@ body.is-mobile .config-sync-cardrow:not(.is-iconrow) > .config-sync-explabel-inl
 .config-sync-mergedctl.is-set .config-sync-mergedctl-local { color: var(--color-purple); }
 .config-sync-mergedctl-sep { color: var(--text-faint); opacity: 0.35; font-size: var(--font-ui-smaller); line-height: 1; }
 .config-sync-tworow-ic { display: inline-flex; align-items: center; }
-.config-sync-tworow-ic .svg-icon { width: var(--icon-s); height: var(--icon-s); }
+/* ONE glyph size for every drawer control. Only the merged control's own glyphs used to carry a
+   size rule; the lock, the sharing picker, the per-item toggle and the File-preview eye fell back
+   to Obsidian's default (18px) and read a size bigger than their neighbours — invisible while the
+   18px ones sat together, obvious the moment the merge put a 16px glyph directly beside the lock.
+   One rule for all five, so a control added later cannot drift off on its own. The ⇕ keeps its own
+   smaller size (its rule follows below, at equal specificity, so source order settles it). */
+.config-sync-tworow-ic .svg-icon,
+.config-sync-lock .svg-icon,
+.config-sync-sharingicon .svg-icon,
+.config-sync-perelement-ic .svg-icon,
+.config-sync-card-previewicon .svg-icon { width: var(--icon-s); height: var(--icon-s); }
 /* The PICKER `chevrons-up-down` affordance every clickable segment
    carries — decorative (the icon/segment it sits beside owns the click/keydown handlers),
    small and muted so it reads as a hint, not a second control.
@@ -1209,7 +1227,10 @@ body.is-mobile .config-sync-cardrow:not(.is-iconrow) > .config-sync-explabel-inl
    (every Settings-tab card row) and `.config-sync-cardrow` (the Sync Center's expanded card
    rows) — the two places this glyph actually lives. */
 .config-sync-tworow-chev { display: inline-flex; align-items: center; color: var(--text-faint); margin-left: 1px; opacity: 0; transition: opacity 0.12s ease; }
-.config-sync-tworow-chev svg { width: 11px; height: 11px; }
+/* `.svg-icon`, not `svg`: the size rule above matches `.config-sync-sharingicon .svg-icon`, which
+   would out-specify a plain `svg` descendant and blow the ⇕ up to the control size. Same shape,
+   same specificity, later in the file — so the ⇕ keeps 11px inside every trigger. */
+.config-sync-tworow-chev .svg-icon { width: 11px; height: 11px; }
 /* `.is-open >` is a CHILD combinator on purpose: the ⇕ is always a direct child
    of its own trigger (fleet cell / sharing icon / local seg), and `.is-open` is ALSO the fold
    state of far ancestors (an expanded `.config-sync-section`) — a descendant match would light

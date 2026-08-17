@@ -548,7 +548,12 @@ functions.
   never a second icon name to keep in sync.
 - `statusBar.ts` — pure segment model (`statusBarSegments`, `statusBarAriaLabel`) + a thin DOM
   renderer for the status-bar item; segments mirror the Sync Center header pills (↑/↓ from
-  presented bucket counts, ⇡/⇣ from `remoteDirectionCounts`).
+  presented bucket counts, ⇡/⇣ from `remoteDirectionCounts`). The bar runs outside the view, so
+  `panelModel.ts`'s `statusBarStatuses` reproduces the view's row set structurally: self dropped,
+  companions folded through `familyRollup`, and `desktop-only` dropped (the one availability class
+  `stageableRow` calls unstageable). It cannot reproduce the view's FATE machinery — install
+  policy, conflict choices, direction overrides — and that residual is stated at the function
+  rather than papered over.
 - `qualifierSearch.ts` — the `key:value` search shared by both search boxes: pure `parseQuery` /
   `matchesQualifiers` / `suggest` / `applySuggestion`, plus the `QualifierAutocomplete` DOM widget.
   A key the host's spec list does not declare is not a qualifier — it stays free text. That is what
@@ -561,7 +566,12 @@ functions.
   `Fate.excluded`, positioned after the stageable checks and before `nothingYet`) every consumer —
   section partition (active vs. the in-sync/excluded/no-settings folds), filter-pill counts,
   filter visibility, sidebar badges, header pills — reads, so a row can never disagree with itself
-  across those surfaces. `TYPE_SECTION_ORDER`/
+  across those surfaces. **Which ROWS those counts run over is decided once too**
+  (`SyncCenterView`'s `countable`): exactly the rows the list renders — families already folded,
+  the self item out, the two on/off carriers out (they dissolve into their section's head chip),
+  and every availability section IN, because an outdated/disabled/not-installed row is drawn and
+  staged like any other. The status bar reaches the same set from outside the view through
+  `statusBarStatuses` (below). `TYPE_SECTION_ORDER`/
   `TYPE_SECTION_TITLES`/`typeSectionForRow` fix the four sections (Obsidian/Core plugins/
   Community plugins/Your folders — beta folds into Community, custom groups into Your folders);
   `sectionCountLabel` renders a section head's trailing `N` / `N/M`. `familyRollup` derives one
