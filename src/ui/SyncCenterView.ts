@@ -1394,7 +1394,7 @@ export class SyncCenterView extends ItemView {
         holder.createDiv({ cls: "config-sync-expand-note", text: "Only key order / formatting differs." });
         return;
       }
-      renderDiffPanel(holder, base, produced, leftLabel, rightLabel, bothSorted ? "data.json · sorted view" : "data.json");
+      renderDiffPanel(holder, base, produced, leftLabel, rightLabel, { name: "data.json", sorted: bothSorted });
     });
   }
 
@@ -2344,17 +2344,21 @@ export class SyncCenterView extends ItemView {
   // SHOWS it and jumps to where that value is configured. One datum, one writer — and the writer is
   // the card's own toggle in the settings panel, beside the confirmation the change deserves.
   //
-  // Same shape on both platforms. A bare toggle glyph with
-  // the copy in a tooltip would be unreadable on the one platform that has no hover to show it —
-  // a short word costs one line of nothing and reads everywhere.
+  // Glyph + tooltip, no wordmark. The word it used to carry (`synced`) named the wrong thing
+  // anyway: what this chip reports is whether the on/off LIST is shared with your other devices,
+  // which is the `Not shared` axis, not the sync-run axis.
+  //
+  // The state therefore lives in the GLYPH, not in a color: `share-2` when the list is shared,
+  // `square-split-horizontal` — the same mark `ruleIcon` gives `Not shared` — when it isn't. That
+  // matters because a phone has no hover to reveal the tooltip; a reader there still gets two
+  // visibly different marks instead of one mark in two shades.
   private renderCarrierChip(head: HTMLElement, carrierId: EnablementList): void {
     const synced = this.groups.some((g) => g.name === carrierId);
     const tooltip = synced
-      ? "Which plugins are on is shared with your other devices — opens Settings"
-      : "Which plugins are on stays on this device — opens Settings";
+      ? "Which plugins are on is shared with your other devices. Opens Settings."
+      : "Which plugins are on stays on this device. Opens Settings.";
     const chip = head.createSpan({ cls: `config-sync-carrierchip${synced ? " is-synced" : ""}`, attr: { role: "button", tabindex: "0", "aria-label": tooltip } });
-    setIcon(chip.createSpan({ cls: "config-sync-carrierchip-ic" }), "settings-2");
-    chip.createSpan({ text: synced ? "synced" : "not synced" });
+    setIcon(chip.createSpan({ cls: "config-sync-carrierchip-ic" }), synced ? "share-2" : "square-split-horizontal");
     setTooltip(chip, tooltip);
     const open = (): void => {
       const ref = this.host.itemRefForGroup(carrierId);
@@ -2775,17 +2779,24 @@ export class SyncCenterView extends ItemView {
     const build = (): void => {
       value.empty();
       const expanded = this.expandedFileRows.has(key);
+      // ONE mark, not three. The row used to read `↑ (4) ›` — a direction badge, a neutral count
+      // pill and a fold chevron, each its own little target — where all three answered the same
+      // question. They are one badge now: the direction's icon and its count in a single pill that
+      // carries the direction's color, with the whole head as the click/keyboard target so nothing
+      // has to be aimed at. Expanded, the badge fills in (`.is-open`) instead of a chevron rotating
+      // beside it — same state, one fewer glyph.
       const head = value.createDiv({
         cls: "config-sync-files-head",
-        attr: { role: "button", tabindex: "0", "aria-label": filesChangeLabel(total) },
+        attr: {
+          role: "button",
+          tabindex: "0",
+          "aria-expanded": expanded ? "true" : "false",
+          "aria-label": `${filesChangeLabel(total)} — ${dir === "capture" ? "these changes land in the store" : "these changes land on this device"}`,
+        },
       });
-      const badge = head.createSpan({
-        cls: `config-sync-files-badge ${ACTION_COLOR_CLASS[dir]}`,
-        attr: { "aria-label": dir === "capture" ? "These changes land in the store" : "These changes land on this device" },
-      });
-      setIcon(badge, ACTION_ICON[dir]);
-      head.createSpan({ cls: "config-sync-pill is-neutral", text: String(total) });
-      renderFoldChevron(head, expanded, null);
+      const badge = head.createSpan({ cls: `config-sync-files-badge ${ACTION_COLOR_CLASS[dir]}${expanded ? " is-open" : ""}` });
+      setIcon(badge.createSpan({ cls: "config-sync-files-badge-ic" }), ACTION_ICON[dir]);
+      badge.createSpan({ text: String(total) });
       const toggle = (): void => {
         if (this.expandedFileRows.has(key)) this.expandedFileRows.delete(key);
         else this.expandedFileRows.add(key);
@@ -2875,7 +2886,7 @@ export class SyncCenterView extends ItemView {
           }
           const leftLabel = dir === "capture" ? "store" : pres.affordance === "view" ? "not on this device yet" : "this device";
           const rightLabel = dir === "capture" ? "this device (what capture would write)" : "store (what apply would write)";
-          renderDiffPanel(p, base, produced, leftLabel, rightLabel, switchSorted || jsonSorted ? `${e.name} · sorted view` : e.name);
+          renderDiffPanel(p, base, produced, leftLabel, rightLabel, { name: e.name, sorted: switchSorted || jsonSorted });
         });
       };
       line.addEventListener("click", (ev) => {
@@ -3069,15 +3080,18 @@ export class SyncCenterView extends ItemView {
     // so the shared half must not offer stops whose choice would just be discarded. The local layer
     // is a different datum and still works, so the row keeps both halves: the shared one
     // contributes a single entry that JUMPS to the item's Settings card instead of a list.
+    // `braces` says "the keys inside this file decide"; `settings-2` stays reserved for "opens
+    // Settings", which is what the `More` row two lines down means — same card, same glyph, two
+    // different facts was the confusion.
     if (!this.host.itemFileSharingMenuLegal(ref)) {
       this.renderMergedRow(detail, "Settings sync", {
-        shared: { icon: "settings-2", tooltip: FILE_SHARING_MENU_UNAVAILABLE_TEXT },
+        shared: { icon: "braces", tooltip: FILE_SHARING_MENU_UNAVAILABLE_TEXT },
         local: optOutLocalSegment(optedOut),
         localIsException: optedOut,
         sections: () => [
           {
             header: SHARED_WITH_HEADER,
-            items: [{ title: FILE_SHARING_MENU_UNAVAILABLE_TEXT, icon: "settings-2", checked: false, action: () => this.host.openSettingsAt(ref) }],
+            items: [{ title: FILE_SHARING_MENU_UNAVAILABLE_TEXT, icon: "braces", checked: false, action: () => this.host.openSettingsAt(ref) }],
           },
           localSection(),
         ],
@@ -3383,7 +3397,10 @@ export class SyncCenterView extends ItemView {
     // becomes three payload entries. Reporting that as "3 items" next to the footer's "1 selected"
     // puts two disagreeing numbers on one screen and names a fan-out the user never chose.
     const sel = this.footerSelection();
-    bar.createSpan({ cls: "config-sync-staged-count", text: unifiedFooterSummary(sel) });
+    // Empty means the line would only restate the buttons — render nothing rather than an empty
+    // span holding its own gap open.
+    const summary = unifiedFooterSummary(sel);
+    if (summary !== "") bar.createSpan({ cls: "config-sync-staged-count", text: summary });
     bar.createDiv({ cls: "config-sync-rule-spacer" });
     const capItems = this.capturePayload();
     const applyItems = this.applyPayload();
@@ -3926,7 +3943,7 @@ export class SyncCenterView extends ItemView {
     }
     const leftLabel = f.local !== null ? "your store" : "not in your store";
     const rightLabel = f.remote !== null ? remoteName : `not at ${remoteName}`;
-    renderDiffPanel(p, left, right, leftLabel, rightLabel, switchSorted || jsonSorted ? `${f.itemRel} · sorted view` : f.itemRel);
+    renderDiffPanel(p, left, right, leftLabel, rightLabel, { name: f.itemRel, sorted: switchSorted || jsonSorted });
   }
 
   private renderRemoteButtons(detail: HTMLElement, remote: Remote, pullAligned: boolean, noChanges: boolean): void {

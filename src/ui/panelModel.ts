@@ -688,19 +688,29 @@ export function foldCompanionEntries(entries: RemoteDiffEntry[], parentOf: (grou
   return result;
 }
 
-// The action bar's staged-selection line (the view
-// derives every count from Fate). `applyN`/`captureN` are the two direction totals;
-// installs/turnsOn/settings are an apply-side breakdown (subsets of applyN, no "+").
+// The action bar's staged-selection line (the view derives every count from Fate).
+// `applyN`/`captureN` are the two direction totals; installs/turnsOn/settings are an apply-side
+// breakdown (subsets of applyN, no "+").
+//
+// Counts lead: every number sits at the start of its own phrase, so they scan down one edge instead
+// of hiding behind a verb ("installs 2 · turns on 1" made the reader hunt for the digits).
+//
+// Empty when the line would only restate the buttons beside it. `1 selected — captures 1` next to a
+// `Capture 1 item` button is two sentences for one fact; the line earns its space only when it
+// carries an apply-side breakdown, or when both directions are staged and no single button
+// totals the selection.
 export function unifiedFooterSummary(sel: { applyN: number; installs: number; turnsOn: number; settings: number; captureN: number }): string {
   const total = sel.applyN + sel.captureN;
   if (total === 0) return "Nothing selected";
-  const parts: string[] = [];
-  if (sel.installs > 0) parts.push(`installs ${sel.installs}`);
-  if (sel.turnsOn > 0) parts.push(`turns on ${sel.turnsOn}`);
-  if (sel.settings > 0) parts.push(`settings ${sel.settings}`);
-  if (sel.captureN > 0) parts.push(`captures ${sel.captureN}`);
-  if (parts.length === 0) return `${total} selected`;
-  return `${total} selected — ${parts.join(" · ")}`;
+  const breakdown: string[] = [];
+  if (sel.installs > 0) breakdown.push(`${sel.installs} install`);
+  if (sel.turnsOn > 0) breakdown.push(`${sel.turnsOn} turn on`);
+  if (sel.settings > 0) breakdown.push(`${sel.settings} settings`);
+  const bothDirections = sel.applyN > 0 && sel.captureN > 0;
+  if (breakdown.length === 0 && !bothDirections) return "";
+  const parts = [...breakdown];
+  if (sel.captureN > 0) parts.push(`${sel.captureN} capture`);
+  return `${total} selected · ${parts.join(" · ")}`;
 }
 
 // ── Expanded-card file entries ──────────────────────────────────────────────────────────────────

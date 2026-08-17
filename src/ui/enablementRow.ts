@@ -28,15 +28,21 @@ export function ruleLabel(s: Sharing): string {
   return s.class === "desktop" ? "Desktop only" : "Mobile only";
 }
 
-// sharingIcon's vocabulary for the two class stops and the everywhere stop; `split` for not-shared.
-// NOT a negation glyph on purpose: `circle-slash` already means "not synced on this device" one
-// column over, and the two facts are the pair users most often confuse. `split` says something
-// positive instead — one path becoming two, the value diverging per device — so the shared answer
-// and the local exception never read as the same family. (`airplay`, sharingIcon's own this-device
-// glyph, means screen mirroring to anyone who has not read the source, and `users` read as MORE
-// sharing once the word became "Not shared".)
+// sharingIcon's vocabulary for the two class stops and the everywhere stop;
+// `square-split-horizontal` for not-shared.
+//
+// NOT a negation glyph on purpose: the local layer's own opt-out sits in the SAME control, and
+// those two facts are the pair users most often confuse — so the shared answer must not join the
+// negation family. This glyph says the positive thing instead: one box divided in two, a value
+// diverging per device.
+//
+// It replaced `split`, which said exactly the same thing and was unreadable saying it: at the 16px
+// every drawer control renders at, `split`'s two corner arrowheads and thin curved stem collapse
+// into a smudge. Same argument, legible execution — straight lines and square corners only.
+// (`airplay`, sharingIcon's own this-device glyph, reads as screen mirroring to anyone who has not
+// read the source; `users` read as MORE sharing once the word became "Not shared".)
 export function ruleIcon(s: Sharing): string {
-  return s.kind === "this-device" ? "split" : sharingIcon(s);
+  return s.kind === "this-device" ? "square-split-horizontal" : sharingIcon(s);
 }
 
 // A painted layer carries only what it SHOWS: a glyph (nullable — a layer with nothing to draw
@@ -104,11 +110,17 @@ export function localSegmentTooltip(state: LocalSegmentState): string {
 // `equal` also survives the move into a merged control: the old arrow only read as "follows" while
 // it sat to the RIGHT of the shared glyph, and it has to work in a menu list too, where it has no
 // neighbour to point back at.
+//
+// `circle-minus` for not-synced — the fold family's own glyph for the same state (foldIcons.ts),
+// deliberately shared. It replaced `circle-slash` in both places at once: at 16px a diagonal
+// through a circle is the least legible mark in this set, while a horizontal bar reads instantly
+// and says the same thing ("taken out of this device's set"). Circle either way, so the fold trio
+// check / minus-circle / circle stays one family.
 function localSegmentIcon(state: LocalSegmentState): string {
   if (state === "follows") return "equal";
   if (state === "on") return "power";
   if (state === "off") return "power-off";
-  return "circle-slash";
+  return "circle-minus";
 }
 
 function localSegment(state: LocalSegmentState): RowSegment {
@@ -247,7 +259,7 @@ export interface FileLocalMenuHandlers {
 export function buildOptOutLocalMenu(optedOut: boolean, handlers: FileLocalMenuHandlers): LocalMenuItem[] {
   return [
     { title: FOLLOWS_LABEL, icon: null, checked: !optedOut, action: handlers.follow },
-    { title: NOT_SYNCED_HERE_LABEL, icon: "circle-slash", checked: optedOut, action: handlers.optOut },
+    { title: NOT_SYNCED_HERE_LABEL, icon: "circle-minus", checked: optedOut, action: handlers.optOut },
   ];
 }
 

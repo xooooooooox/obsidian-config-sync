@@ -27,14 +27,15 @@ describe("the merged two-layer control", () => {
     expect(RULE_OPTIONS.map(ruleLabel)).toEqual(["All devices", "Desktop only", "Mobile only", "Not shared"]);
   });
 
-  // `split` is deliberately NOT a negation glyph: `circle-slash` already means "not synced on this
-  // device" in the local half of the same control, and those two facts are the pair users confuse
-  // most, so the shared answer must not join the same visual family.
+  // The fourth glyph is deliberately NOT a negation: the local layer's own opt-out sits in the same
+  // control, and those two facts are the pair users confuse most, so the shared answer must not join
+  // the negation family. `square-split-horizontal` replaced `split` — same argument, but readable at
+  // the 16px every drawer control renders at.
   it("gives each rule its own glyph, and never borrows a reserved one", () => {
-    expect(RULE_OPTIONS.map(ruleIcon)).toEqual(["monitor-smartphone", "monitor", "smartphone", "split"]);
+    expect(RULE_OPTIONS.map(ruleIcon)).toEqual(["monitor-smartphone", "monitor", "smartphone", "square-split-horizontal"]);
     expect(RULE_OPTIONS.map(ruleIcon)).not.toContain("sliders-horizontal");
     expect(RULE_OPTIONS.map(ruleIcon)).not.toContain("airplay");
-    expect(RULE_OPTIONS.map(ruleIcon)).not.toContain("circle-slash");
+    expect(RULE_OPTIONS.map(ruleIcon)).not.toContain("circle-minus"); // the local layer's own mark
   });
 
   // A per-key rule row now has its own local layer, so its shared half must speak the
@@ -101,13 +102,13 @@ describe("fileEnablementRowModel", () => {
     expect(settingsSyncTooltip(perClass("mobile"))).toBe("Only phones sync this file. Desktops don't sync it at all.");
   });
 
-  it("follows when not opted out; not-synced, with the fold family's circle-slash, when opted out", () => {
+  it("follows when not opted out; not-synced, with the fold family's own glyph, when opted out", () => {
     expect(fileEnablementRowModel({ sharing: EVERYWHERE, optedOut: false }).local).toEqual({
       icon: "equal",
       tooltip: "This device: follows what's shared.",
     });
     const optedOut = fileEnablementRowModel({ sharing: EVERYWHERE, optedOut: true });
-    expect(optedOut.local).toEqual({ icon: "circle-slash", tooltip: "This device: not synced. Your other devices keep sharing it." });
+    expect(optedOut.local).toEqual({ icon: "circle-minus", tooltip: "This device: not synced. Your other devices keep sharing it." });
     expect(optedOut.localIsException).toBe(true);
   });
 
@@ -177,8 +178,8 @@ describe("buildOptOutLocalMenu", () => {
     expect(buildOptOutLocalMenu(true, handlers).map((i) => i.title)).toEqual([FOLLOWS_LABEL, NOT_SYNCED_HERE_LABEL]);
   });
 
-  it("follow has no glyph; not-synced-here carries circle-slash, matching the row's set-state icon", () => {
-    expect(buildOptOutLocalMenu(false, handlers).map((i) => i.icon)).toEqual([null, "circle-slash"]);
+  it("follow has no glyph; not-synced-here carries the row's own set-state icon", () => {
+    expect(buildOptOutLocalMenu(false, handlers).map((i) => i.icon)).toEqual([null, "circle-minus"]);
   });
 
   it("checks exactly the current state", () => {

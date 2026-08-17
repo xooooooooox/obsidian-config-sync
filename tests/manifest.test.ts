@@ -268,7 +268,7 @@ describe("validateRemotes", () => {
   });
   it("rejects a relative storePath", () => {
     expect(() => validateRemotes([{ name: "a", type: "vault", storePath: "vaults/kick" }])).toThrow(
-      'Remote "a": the store path needs to be a full path starting with / or ~/ — for example ~/Vaults/other-vault/config-sync'
+      'Remote "a": the store path needs to be a full path starting with / or ~/, for example ~/Vaults/other-vault/config-sync'
     );
   });
   it("rejects subdir escaping the repo", () => {

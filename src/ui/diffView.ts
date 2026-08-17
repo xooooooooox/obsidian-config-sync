@@ -126,16 +126,24 @@ function renderSplit(pane: HTMLElement, rows: DiffRow[], leftLabel: string, righ
 }
 
 // Builds toolbar (meta + Unified⇄Split toggle) and the diff pane. Mobile forces unified.
+//
+// `meta.sorted` used to print as a trailing ` · sorted view`, which spent the toolbar's most
+// readable slot on a caveat while pushing the filename — the thing being diffed — off to the left.
+// The caveat is still true and still needed (the rows are NOT in file order), so it moves into the
+// meta's own accessible name instead of vanishing.
 export function renderDiffPanel(
   host: HTMLElement,
   leftText: string,
   rightText: string,
   leftLabel: string,
   rightLabel: string,
-  meta: string
+  meta: { name: string; sorted: boolean }
 ): void {
   const toolbar = host.createDiv({ cls: "config-sync-cm-difftools" });
-  toolbar.createSpan({ cls: "config-sync-cm-diffmeta", text: meta });
+  const metaEl = toolbar.createSpan({ cls: "config-sync-cm-diffmeta", text: meta.name });
+  if (meta.sorted) {
+    metaEl.setAttribute("aria-label", `${meta.name} — both sides are shown with their keys in the same sorted order, not the order they appear in the file.`);
+  }
   toolbar.createDiv({ cls: "config-sync-rule-spacer" });
   const pane = host.createDiv({ cls: "config-sync-cm-diffpane" });
   const render = (): void => {

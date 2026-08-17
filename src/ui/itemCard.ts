@@ -46,6 +46,14 @@ export interface Badge {
 // and "Fields" are implementation words; "Per-key rules" is the drawer's own vocabulary.
 export const MODE_LABELS = { plain: "Whole file", fields: "Per-key rules", encrypted: "Encrypted" } as const;
 
+// The same three modes as glyphs, for the Advanced rule form's Mode picker (its two neighbouring
+// rows, Type and Devices, are icon pickers — Mode was the last text chip and read as the odd row
+// out). `braces` says "the keys inside the file decide" and is the SAME mark a card's per-key jump
+// uses; `lock` is the encrypted state everywhere. `file-text`, NOT `file`: the Type row directly
+// above owns `file`/`folder` for a different question, and two adjacent rows drawing one glyph for
+// two questions is the collision this vocabulary exists to prevent.
+export const MODE_ICON: Record<keyof typeof MODE_LABELS, string> = { plain: "file-text", fields: "braces", encrypted: "lock" };
+
 const ON_BADGE_TEXT = { desktop: "on: desktop", mobile: "on: mobile", local: "on: this device" } as const;
 // The local badge's other half: an exception can force a plugin OFF here just as easily as on, and
 // the badge fires for both.

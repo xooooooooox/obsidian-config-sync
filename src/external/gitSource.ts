@@ -54,6 +54,16 @@ export function stripCredentialArgs(message: string): string {
   return message.split(`${TOKEN_CREDENTIAL_ARGS.join(" ")} `).join("");
 }
 
+// Node's exec error message restates the whole command line before git's own words:
+// `Command failed: git ls-remote --heads <url>\nfatal: bad repository ''`. Wrapping that in our own
+// "git … failed in …" prefix said the same thing three times and buried the one line that explains
+// anything — git's. Keep git's words, drop Node's restatement.
+export function gitFailureDetail(message: string): string {
+  const withoutPrefix = message.replace(/^Command failed:[^\n]*\n?/, "");
+  const trimmed = withoutPrefix.trim();
+  return trimmed === "" ? message.trim() : trimmed;
+}
+
 async function git(cwd: string, args: string[], auth: GitAuth | null, timeoutMs: number): Promise<string> {
   const fullArgs = auth === null ? args : [...TOKEN_CREDENTIAL_ARGS, ...args];
   try {
@@ -71,7 +81,7 @@ async function git(cwd: string, args: string[], auth: GitAuth | null, timeoutMs:
     const detail =
       err.killed === true && !err.message.includes("maxBuffer")
         ? `timed out after ${timeoutMs / 1000}s`
-        : stripCredentialArgs(err.message);
+        : gitFailureDetail(stripCredentialArgs(err.message));
     throw new Error(`git ${args.join(" ")} failed in ${cwd}: ${detail}`);
   }
 }

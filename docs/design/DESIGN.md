@@ -159,7 +159,7 @@ A collapsed item row's NEUTRAL fate (`In sync` / `No settings yet` / `Not synced
 device`) reuses the fold family's own `FOLD_ICON`/`FOLD_ICON_COLOR_CLASS` (`foldIcons.ts`)
 at the row's own `.config-sync-fate-ic` size/placement instead of rendering the sentence as
 text — the fold kind is derived from the `Fate` the row already carries (`fate.nothingYet`
-→ `nosettings`/`circle`, `fate.excluded` → `excluded`/`circle-slash`, else →
+→ `nosettings`/`circle`, `fate.excluded` → `excluded`/`circle-minus`, else →
 `insync`/`check`), aria-label = the sentence. Same reuse on the remote diff pane's own
 opted-out row (`renderRemoteDiffEntry`) — every ROW-level instance of these three sentences
 renders this way. The `⚠` conflict fate keeps its text glyph + sentence, since a conflict
@@ -167,17 +167,21 @@ must shout and has no action icon to become. A fold-group HEADER line (`53 items
 keeps its own text+icon form — this rule is about the ROW, not the group header. Chips are
 unaffected. (This DESIGN section is the authority on the split, not any code comment.)
 
-### 2.2 Mode badges (`.config-sync-mode-badge`, 12px, `--text-faint`)
+### 2.2 Mode vocabulary
 
 Mode display names (the stored ids `plain`/`fields`/`encrypted` never change):
 **Whole file / Per-key rules / Encrypted** (`MODE_LABELS`, itemCard.ts). "Plain" and
 "Fields" are implementation words and never appear in copy; "Per-key rules" is the drawer's
 own vocabulary for the same state.
 
-- encrypted → Lucide `lock`; tooltip "Encrypted — the whole file is stored encrypted".
-- fields → custom `drawFieldsBadge` SVG (three field lines + corner padlock; no Lucide
-  composite exists); tooltip "Per-key rules — only the chosen keys are filtered/encrypted".
-  plain → no badge.
+`MODE_ICON` (itemCard.ts) gives each mode one glyph: **plain → `file-text`**, **fields →
+`braces`**, **encrypted → `lock`**. Its one renderer today is the Advanced rule form's `MODE`
+picker, whose two neighbouring rows (Type, Devices) are icon pickers — Mode was the last text chip
+in that form and read as the odd row out. `file-text`, deliberately **not** `file`: the Type row
+directly above owns `file`/`folder` for a different question. An item CARD carries no mode badge at
+all — mode there is a derived, drawer-only state (`deriveMode`), never a header mark. (Until
+2026-08-18 this section described a custom `drawFieldsBadge` SVG; no such function had existed since
+the card's mode chip was removed.)
 
 ### 2.3 Lucide usage (setIcon)
 
@@ -197,7 +201,8 @@ desktop-only-plugin badge (`config-sync-card-badge-plat`, itemCard.ts) · `airpl
 `sharingIcon` "This device" stop, used ONLY where that rule row has no local layer of its own to
 pair it with — an array element's own per-item rule, a companion folder's device class, the
 Advanced tab's custom-rule editor. An item card's own key rules (`renderRuleRow`, §4 zone ②) pass
-`ruleIcon`/`ruleLabel` instead, the SAME fourth-stop vocabulary `Enabled on` uses (`split`/`Not
+`ruleIcon`/`ruleLabel` instead, the SAME fourth-stop vocabulary `Enabled on` uses
+(`square-split-horizontal`/`Not
 shared`, the merged control below) — the STORED value is unchanged, only the glyph and the word,
 because that row now carries a local layer in the same control and a bare `airplay` mark would read
 as this device's identity rather than the shared arrangement. `FILE_SHARING_OPTIONS` excludes this stop
@@ -239,12 +244,16 @@ things the row can be told, so the two can never disagree. Three rows are in tha
 governed by per-item rules, a key shared with no one (`ruleRowHasLocalLayer`), and a snippet, whose
 exceptions no run would honour.
 
-**Shared glyph:** `sharingIcon`'s icons for the three device stops, plus `split` for `Not shared`
+**Shared glyph:** `sharingIcon`'s icons for the three device stops, plus
+`square-split-horizontal` for `Not shared`
 (**never** `airplay`, which reads as screen mirroring to anyone who hasn't read the source;
-**never** a negation glyph either — `circle-slash` already means "not synced on this device" one
-glyph over, and those two facts are the pair users most often confuse, so the shared answer must
-not join the same visual family. `split` says the value diverges per device, which is what the
-fourth stop actually does). Its tooltip states the CONSEQUENCE, not the label, and there are
+**never** a negation glyph either — the local layer's own opt-out sits in the SAME control, and
+those two facts are the pair users most often confuse, so the shared answer must
+not join the negation family. A box divided in two says the value diverges per device, which is
+what the fourth stop actually does. It replaced `split`, which made the same argument and was
+unreadable making it: at 16px that glyph's two corner arrowheads and thin curved stem collapse into
+a smudge — same meaning, legible execution, straight lines and square corners only).
+Its tooltip states the CONSEQUENCE, not the label, and there are
 THREE of them because the same three words mean three different things: an on/off row turns the
 excluded class OFF (`enabledOnTooltip`), a whole-file row stops syncing there ENTIRELY
 (`settingsSyncTooltip`), one key just lets the excluded class keep its OWN value
@@ -258,9 +267,12 @@ OPPOSITE meaning — `on: this device` / `N left to me`, both of which say this 
 of its own. Those badges moved to the exception family in the same pass, so `corner-down-right` is
 retired from this vocabulary entirely; `equal` also has to work in a MENU list, where there is no
 neighbouring glyph for an arrow to point back at) · `power` / `power-off` for an element-level local
-exception (**Always on**/**Always off**) · `circle-slash` for a whole-file local opt-out
+exception (**Always on**/**Always off**) · `circle-minus` for a whole-file local opt-out
 (**Don't sync it**, deliberately the fold family's glyph — same meaning, "not synced on this
-device"); tooltip `This device: <state>` (`follows what's shared.` / `always on.` / `always off.` /
+device"; it replaced `circle-slash` in both places at once, because at this size a diagonal through
+a circle is the least legible mark in the set while a horizontal bar reads instantly and says the
+same thing. Still a circle, so the fold trio `check`/`circle-minus`/`circle` stays one family);
+tooltip `This device: <state>` (`follows what's shared.` / `always on.` / `always off.` /
 `not synced. Your other devices keep sharing it.` — only that last one carries a second sentence,
 because it is the state users mistake for `Not shared`, and the whole difference is what happens to
 everyone else). Only this half colors purple when this device has an exception
@@ -281,9 +293,14 @@ instead of a list of stops (§4 zone ②).
 
 `settings-2` — the sidebar Config Sync
 self-entry tile, the compact switcher's self entry, the self pane's title-row Settings
-button, the read-only carrier chip (§4 Type sections), and the Sync Center card's `More` row — an
+button, and the Sync Center card's `More` row — an
 icon-only deep link into the item's own Settings card (tooltip carries the sentence, no trailing
-`▸`; **never** `sliders-horizontal`, which already means `your rule` in the fate chips below) ·
+`▸`; **never** `sliders-horizontal`, which already means `your rule` in the fate chips below).
+**It means "opens Settings" and nothing else**: the per-key fallback cell used to draw it too, so a
+card showed the same mark on two rows for two different facts — that cell speaks `braces` now ·
+`braces` — "the keys inside this file decide": the fields-mode jump on both surfaces, and
+`MODE_ICON`'s fields stop (§2.2) ·
+`share-2` — the carrier chip's shared state (below) ·
 `arrow-left-right` — the Sync Center leaf/tab icon ·
 `chevron-right` — qualifier-autocomplete key rows (value rows use `check`, §2.4) · fate chips
 (`config-sync-fatechip`, `FATE_CHIP_ICON` in `fateChipIcons.ts` — icon-ONLY,
@@ -294,23 +311,27 @@ rule · `power-off` stays off (**not** `power` — `power` means "this device tu
 the merged control's local glyph, so a chip saying the row stays OFF cannot share it) · `lock`
 encrypted · `check` your choice · trailing-fold states
 (`config-sync-fold-ic`, `FOLD_ICON` in `foldIcons.ts`): `check`/green in sync ·
-`circle-slash`/muted not synced on this device · `circle`/muted no settings yet — the SAME three
+`circle-minus`/muted not synced on this device · `circle`/muted no settings yet — the SAME three
 (same producer, `config-sync-fate-ic` sizing) also render a collapsed item row's own neutral fate
 (§2.1 above).
 
 **`ban` is unused** — the whole-item destructive gesture lives on the item's own Settings
 card, beside its sync toggle, and is reached from the Sync Center only through the `More`
-deep link above — never a second control drawn straight onto the row. `circle-slash` has
+deep link above — never a second control drawn straight onto the row. `circle-minus` has
 exactly one job, the fold family's STATE glyph (and the local layer's whole-file opt-out,
 deliberately the same glyph and meaning) — an icon never means both a thing you can click
 and a thing that already happened.
 
 **Read-only carrier chip** — the Core/Community section header chip (`renderCarrierChip`,
-SyncCenterView.ts) shows `settings-2` + `synced` or `not synced`, same shape on both
-platforms (no mobile icon-only fallback — a hover-only tooltip is useless on the one platform with
-no hover). It is a shortcut, never a control: click jumps to the carrier's own Settings card,
-where the sync toggle lives. Never the toggle glyphs (`toggle-right`/`toggle-left`) — a
-toggle shape promises "click to flip," and this chip cannot.
+SyncCenterView.ts) is glyph-only with the sentence in its tooltip: `share-2` when the on/off list is
+shared with your other devices, `square-split-horizontal` — `ruleIcon`'s own `Not shared` mark, same
+word, same glyph — when it isn't. **The state lives in the GLYPH, not in a color**, because a phone
+has no hover to reveal the tooltip: two visibly different marks still tell the two states apart
+where one mark in two shades would not. (It carried the word `synced` until 2026-08-18. That word
+named the wrong axis — what the chip reports is whether the LIST is shared, not whether a sync ran —
+and the pair it belongs to is `Not shared`.) It is a shortcut, never a control: click jumps to the
+carrier's own Settings card, where the sync toggle lives. Never the toggle glyphs
+(`toggle-right`/`toggle-left`) — a toggle shape promises "click to flip," and this chip cannot.
 
 **The diff affordances:** `file-diff` — the FILES row's per-entry trailing affordance,
 "view this entry's changes/content" (§4 Files bullet); registered by hand in the
@@ -570,14 +591,14 @@ noted):
   material contrast alone (no hairline), with the FOLD family's rotating `chevron-right`
   scaled to the header size. A checkbox click on the header stages; anywhere else on the
   header toggles collapse. A trailing count pill reads `N/M` under a filter; Core/Community
-  carry a header chip (`renderCarrierChip`) reading `settings-2` + `synced` /
-  `not synced` — **read-only**: it only
+  carry a glyph-only header chip (`renderCarrierChip`): `share-2` when the list is shared,
+  `square-split-horizontal` when it isn't (§2.3) — **read-only**: it only
   jumps to the carrier's own Settings card, where the sync toggle lives (§2.3). On desktop
   a bare count hint (`config-sync-section-hint`) follows the head — but ONLY while **two or
   more** sections have staged rows, and it reads the number alone (`2`), never `2 selected`.
   The hint exists to answer what the global footer cannot — WHICH sections the selection is
   spread across — so with a single staged section it has no question to answer and its
-  `N selected` wording merely restates the footer's own `N selected — captures N` verbatim.
+  `N selected` wording merely restates what the footer and buttons already say.
   Its `aria-label` still carries the full `N selected` sentence: the visible form is a number,
   the spoken form is a sentence. On mobile it does not render at all (the section checkbox's
   checked/indeterminate state and the global footer already carry it), the head stays one
@@ -645,10 +666,12 @@ noted):
   each omitted when not applicable: `On
   apply` / `On capture` / `State` (the fate sentence expanded to a full clause — install
   source, update versions, capture consequence) · `Files` (collapsed by
-  default — a neutral `config-sync-pill is-neutral` count (aria/tooltip `<n> files change`)
-  plus the FOLD family's rotating `chevron-right`, same click-to-expand idiom
-  `config-sync-card-membercount`/`-memberarrow` use for a companion folder's member
-  count (§4 Unified card ③) — expanding reveals the entry list,
+  default — **ONE badge**, `config-sync-files-badge`: the direction's own icon and its count in a
+  single pill carrying the direction's color, outlined while collapsed and filled (`.is-open`) while
+  expanded. It replaced three separate marks — a bare direction icon, a neutral count pill and a
+  rotating `chevron-right` — that all answered the same question, and made an 11px chevron the
+  thing to aim at; the whole head is the click/keyboard target now, so nothing has to be aimed at,
+  and `aria-expanded` carries the state the chevron used to draw. Expanding reveals the entry list,
   remembered per row while the pane stays open (`expandedFileRows`, a `Set` keyed by group
   name, cleared with `expandedItems`/`remoteFoldsOpen` when the pane closes); direction-aware
   entries — `+` /
@@ -679,7 +702,8 @@ noted):
   `chevrons-up-down`; NO visible wordmark. Click (or Enter/Space) opens an Obsidian `Menu` whose
   two labelled sections are the two layers: `Shared with` (or `Enabled on`, on an on/off row) lists
   the four values `All devices` / `Desktop only` / `Mobile only` / `Not shared` (`sharingIcon`'s
-  icons, `split` for the fourth; the trigger's tooltip states the CONSEQUENCE per row kind, never
+  icons, `square-split-horizontal` for the fourth; the trigger's tooltip states the CONSEQUENCE per
+  row kind, never
   the label — §2.3); `On this device` lists that layer's own answers
   (`buildLocalMenu`/`buildOptOutLocalMenu`, §2.3 — the latter shared by the whole-file opt-out and a
   per-key rule's own exception alike — which label the MENU ITEMS, a different string from the
@@ -687,7 +711,7 @@ noted):
   Both glyphs are ALWAYS visible; only the ⇕ picker hint hover-reveals (§2.3 hover-reveal law).
   Where the row has no local layer at all it renders one glyph and a one-section menu (§2.3). The
   per-key fallback replaces the shared half's LIST with a single entry, `Per-key rules decide —
-  opens Settings` on a dim `settings-2` glyph, whose click is the same deep link the `More` row
+  opens Settings` on a dim `braces` glyph, whose click is the same deep link the `More` row
   takes — one click more than the old bare icon, and in exchange the jump carries a label instead
   of a tooltip a phone never shows. `After
   install`/`Enablement` keep their own textual triggers (`config-sync-menuchip
@@ -725,11 +749,17 @@ noted):
   (`rgba(var(--color-orange-rgb), 0.08)` fill, 0.4-alpha border, `--radius-s`,
   `--text-warning` text, `:empty` renders nothing — never a bare `mod-warning` paragraph),
   pinned as close to the offending control as the surface allows: under its own card/row,
-  page-level only for list-level facts. Copy speaks the FORM, never the file: name fields by
-  their on-screen labels, give the next step, show example values without JSON syntax
-  (`Remote "kickstart": URL is required — point it at the git repository, e.g.
-  git@example.com:me/config.git`). Runtime outcomes keep their own treatments (test strip,
-  remote error card, run strip) — this family is for what the user typed, not what a run did.
+  page-level only for list-level facts. **One sentence shape everywhere a message can fail:**
+  `<subject>: <what is wrong>. <what to do>.` — two short sentences, **no dash joining them**, with
+  example values shown without JSON syntax (`Remote "kickstart": a URL is required. Point it at the
+  git repository, e.g. git@example.com:me/config.git`).
+  Runtime outcomes keep their own strips but the same shape: a headline sentence plus, only when
+  there is one, a second quiet monospace line (`config-sync-strip-detail`) carrying the raw
+  technical detail — never spliced into the headline. That splice is what produced
+  `Could not reach remote — git ls-remote --heads failed in .: Command failed: git ls-remote
+  --heads fatal: bad repository ''`: three restatements of one failure with the only informative
+  clause last. The detail line never inherits the strip's tone color; a red command line reads as
+  more alarm than it is.
 - **History** `config-sync-htable` (desktop 7-col table) / `config-sync-hcard*`
   (`-hcard-top/-act/-chev/-when/-sum/-foot`, `-hcard-pill.is-chg` neutral / `.is-iss` orange) —
   the run-history list; the view swaps table → card layout when compact (`<700px`) so mobile
@@ -917,7 +947,8 @@ noted):
     pins draw `monitor`, all-mobile `smartphone`, mixed `contrast` (one thing, two different sides);
     all-on exceptions draw `power`, all-off `power-off`, mixed `user` ("answers this device makes
     for itself", echoing the sentence's own "me"). Never `monitor-smartphone` for `N device-scoped`:
-    that is `All devices`, the opposite of what the badge counts. Never `split` either — that is the
+    that is `All devices`, the opposite of what the badge counts. Never `square-split-horizontal`
+    either — that is the
     shared answer's "not shared at all", a different fact. The badges are walked by the glyph guard
     (`tests/fateChipIcons.test.ts`); they were outside it until 2026-08-17, and three separate badge
     glyph/copy defects lived in that blind spot at once;
@@ -942,7 +973,7 @@ noted):
     `renderSharingPicker`): the glyph IS the state (`sharingIcon`: monitor+smartphone = All
     devices, monitor = Desktop only, smartphone = Mobile only, airplay = This device — except a
     key-rules row, which carries a local layer and so is the merged control instead, its fourth stop
-    `Enabled on`'s own `split` = `Not shared`,
+    `Enabled on`'s own `square-split-horizontal` = `Not shared`,
     §2.3), a click opens an
     Obsidian `Menu` of that row's own option list, checkmarked on the current value, tooltip
     naming the per-key CONSEQUENCE (`Desktops share one value. Each phone keeps its own.` and its
@@ -1005,7 +1036,7 @@ noted):
     `data.json` only because `pruneSettingsFile` still needs it for a clean round-trip). The
     control keeps both halves — the local opt-out is a different datum and still works — but its
     shared half has no value to pick, so it contributes ONE menu entry instead of a list of stops:
-    `Per-key rules decide — jump to them`, on the same dim `settings-2` glyph the trigger shows.
+    `Per-key rules decide — jump to them`, on the same dim `braces` glyph the trigger shows.
     Choosing it scrolls to the rules and flashes `config-sync-search-highlight`, the SAME class the
     search bar's own card jump uses. The jump's TARGET is wherever the rules actually live: the
     `KEY RULES` panel when there is one, else — for a card whose only per-key entries are

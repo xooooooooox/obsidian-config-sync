@@ -179,14 +179,14 @@ describe("glyph registry — one glyph, one meaning (icon-collision guard)", () 
 
   // Declared, intentional glyph reuse across producers — the ONLY escape hatch this test allows.
   // Every entry names the ONE meaning the glyph carries everywhere it appears (`monitor` = desktop
-  // everywhere it appears; `circle-slash` = "not synced on this device", reused deliberately from
+  // everywhere it appears; `circle-minus` = "not synced on this device", reused deliberately from
   // the fold family). A glyph reused with two DIFFERENT meanings — e.g. `power` meaning both "this
   // device turned it on" and "the shared list has it off" — is
   // exactly the bug class this test exists to catch.
   const ALLOWED_SHARED_MEANING: Record<string, string> = {
     monitor: "desktop-only device class",
     "power-off": "off, on this device — a resolved fate this run or a local exception, same direction",
-    "circle-slash": "not synced with this item, on this device",
+    "circle-minus": "not synced with this item, on this device",
     check: "affirmative — settled / already matching, nothing left for this glyph to say",
     // The local segment's `follows` glyph, same meaning whether it's an element-layer
     // exception (enablementRowModel) or the whole-file opt-out layer (fileEnablementRowModel) —

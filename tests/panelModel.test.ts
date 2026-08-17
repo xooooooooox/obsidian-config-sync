@@ -591,21 +591,27 @@ describe("unifiedFooterSummary", () => {
   it("0 selected", () => {
     expect(unifiedFooterSummary({ applyN: 0, installs: 0, turnsOn: 0, settings: 0, captureN: 0 })).toBe("Nothing selected");
   });
+  // Counts lead every phrase, so they scan down one edge.
   it("apply only", () => {
     expect(unifiedFooterSummary({ applyN: 5, installs: 2, turnsOn: 3, settings: 4, captureN: 0 })).toBe(
-      "5 selected — installs 2 · turns on 3 · settings 4"
+      "5 selected · 2 install · 3 turn on · 4 settings"
     );
   });
   it("mixed apply + capture", () => {
     expect(unifiedFooterSummary({ applyN: 5, installs: 2, turnsOn: 3, settings: 4, captureN: 2 })).toBe(
-      "7 selected — installs 2 · turns on 3 · settings 4 · captures 2"
+      "7 selected · 2 install · 3 turn on · 4 settings · 2 capture"
     );
   });
-  it("capture only", () => {
-    expect(unifiedFooterSummary({ applyN: 0, installs: 0, turnsOn: 0, settings: 0, captureN: 2 })).toBe("2 selected — captures 2");
+  // The line exists to say what the buttons can't. `2 selected — captures 2` beside a
+  // `Capture 2 items` button was the same fact twice, so it renders nothing at all now.
+  it("says nothing when the buttons already say it", () => {
+    expect(unifiedFooterSummary({ applyN: 0, installs: 0, turnsOn: 0, settings: 0, captureN: 2 })).toBe("");
+    expect(unifiedFooterSummary({ applyN: 1, installs: 0, turnsOn: 0, settings: 0, captureN: 0 })).toBe("");
   });
-  it("selected but nothing to categorize falls back to the bare total", () => {
-    expect(unifiedFooterSummary({ applyN: 1, installs: 0, turnsOn: 0, settings: 0, captureN: 0 })).toBe("1 selected");
+  // Two directions means two buttons and no single total — the line is the only place the whole
+  // selection is counted, so it stays even with no apply-side breakdown.
+  it("stays when both directions are staged", () => {
+    expect(unifiedFooterSummary({ applyN: 1, installs: 0, turnsOn: 0, settings: 0, captureN: 2 })).toBe("3 selected · 2 capture");
   });
 });
 

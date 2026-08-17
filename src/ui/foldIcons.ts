@@ -4,7 +4,11 @@ import { setIcon } from "obsidian";
 // text glyphs (✓ ○ ⊘) — text-glyph ink heights are unequal across themes (a font-fallback
 // artifact); fixed-size SVG reads as optically equal instead. `ban` stays reserved for the
 // Stop-syncing ACTION (itemCard.ts's stop-sync menu) — action and state never share an icon, so
-// the "not synced on this device" STATE uses `circle-slash`. `.config-sync-state-icon` (✓ ○ ≠ —
+// the "not synced on this device" STATE uses `circle-minus` (it was `circle-slash` until
+// 2026-08-18: at this size a diagonal through a circle is the least legible mark in the set, and a
+// horizontal bar says "taken out of this device's set" more plainly. Still a circle, so the trio
+// below stays one family — and the merged control's own local glyph moved with it, since that is
+// the same state said in a different place). `.config-sync-state-icon` (✓ ○ ≠ —
 // ? key, a DIFFERENT, Statistic-workspace vocabulary) is untouched by this map and stays text —
 // but a collapsed item ROW's own neutral (`—`-glyph) fate is NOT that column: per DESIGN.md §2.1
 // (the authority for this ruling), the same FOLD_ICON/FOLD_ICON_COLOR_CLASS map is reused at
@@ -15,7 +19,7 @@ export type FoldKind = "insync" | "excluded" | "nosettings";
 
 export const FOLD_ICON: Record<FoldKind, string> = {
   insync: "check",
-  excluded: "circle-slash",
+  excluded: "circle-minus",
   nosettings: "circle",
 };
 

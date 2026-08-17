@@ -126,6 +126,7 @@ import {
   hasEnablementZone,
   hasKeyRules,
   isEnablementRuleKey,
+  MODE_ICON,
   MODE_LABELS,
   isStringArrayValue,
   memberCountLabel,
@@ -337,6 +338,26 @@ interface RemoteDraft {
   excludeSelf: boolean;
   tokenId: string;
   username: string;
+}
+
+// One shape for every result strip: a headline sentence, plus — only when there is one — a second,
+// quieter line carrying the raw technical detail.
+//
+// The detail never joins the headline. An operator needs git's own words; a reader needs a sentence
+// they can act on; one string cannot be both, and trying made
+// `Could not reach remote — git ls-remote --heads failed in .: Command failed: git ls-remote
+// --heads fatal: bad repository ''` — three restatements of one failure, with the only informative
+// clause last. Headlines are two short sentences (what happened, what to do) and carry no dash.
+function writeTestStrip(
+  strip: HTMLElement,
+  tone: "is-testing" | "is-ok" | "is-caution" | "is-error",
+  headline: string,
+  detail: string | null
+): void {
+  strip.className = `config-sync-test-strip ${tone}`;
+  strip.empty();
+  strip.createDiv({ text: headline });
+  if (detail !== null) strip.createDiv({ cls: "config-sync-strip-detail", text: detail });
 }
 
 function toDraft(r: Remote): RemoteDraft {
@@ -1580,12 +1601,16 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       // that JUMPS instead of a list of stops. That costs the jump one extra click and buys the
       // row the same shape as every other — and the jump stops being an unlabelled icon whose
       // only explanation was a tooltip a phone never shows.
+      // `braces`, not `settings-2`: this glyph says "the keys inside this file decide". `settings-2`
+      // means "opens Settings" and nothing else — the `More` row on the same card uses it, and two
+      // rows one above the other drawing the same mark for different facts is what sent the reader
+      // looking for a difference that was not there.
       this.paintMergedControl(sharingCell, {
-        shared: { icon: "settings-2", tooltip: PER_KEY_RULES_JUMP_TEXT },
+        shared: { icon: "braces", tooltip: PER_KEY_RULES_JUMP_TEXT },
         local: optOutLocalSegment(optedOut),
         localIsException: optedOut,
         sections: () => [
-          { header: SHARED_WITH_HEADER, items: [{ title: PER_KEY_RULES_JUMP_TEXT, icon: "settings-2", checked: false, action: jumpToKeyRules }] },
+          { header: SHARED_WITH_HEADER, items: [{ title: PER_KEY_RULES_JUMP_TEXT, icon: "braces", checked: false, action: jumpToKeyRules }] },
           localSection(),
         ],
       });
@@ -2541,18 +2566,26 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     // silently revert here too.
     const appearancePinned = group.name === "appearance" && this.groups.some((g) => g.name === "enabled-css-snippets");
     const pinnedToFields = group.name === SELF_GROUP_NAME || appearancePinned;
-    // A text menu picker (the panel's one picker idiom, same as After install's chip):
-    // current label + ⇕, click opens the mode menu; a pinned item renders dim with the reason
-    // in its tooltip and no menu at all.
-    const chip = controlEl.createSpan({
-      cls: "config-sync-menuchip config-sync-card-trigger",
-      text: pinnedToFields ? MODE_LABELS.fields : (modes.find((m) => m.id === current)?.label ?? current),
-    });
+    // An ICON picker, the same shape as the two rows above it (Type, Devices). Mode was the last
+    // text chip in this form and read as the odd row out. The glyphs are the mode vocabulary the
+    // rest of the product already speaks — `braces` for per-key rules (the keys inside the file
+    // decide), `lock` for encrypted — with `file-text` for whole-file, deliberately NOT the `file`
+    // that the Type row directly above uses for its own question.
+    const chip = controlEl.createSpan({ cls: "config-sync-sharingicon config-sync-card-trigger" });
+    const shown = pinnedToFields ? "fields" : current;
+    setIcon(chip.createSpan(), MODE_ICON[shown] ?? MODE_ICON.plain);
+    chip.setAttribute("aria-label", pinnedToFields
+      ? "This item always uses Per-key rules — some of its settings stay on each device"
+      : (modes.find((m) => m.id === current)?.label ?? current));
     if (pinnedToFields) {
       chip.addClass("config-sync-dim");
       setTooltip(chip, "This item always uses Per-key rules — some of its settings stay on each device");
+      // The ⇕ renders even here: a picker box without it is 14px narrower and this row's glyph
+      // would drift out of the column the two rows above sit in (§2.3's constant-layout rule).
+      setIcon(chip.createSpan({ cls: "config-sync-tworow-chev" }), "chevrons-up-down");
       return;
     }
+    setTooltip(chip, modes.find((m) => m.id === current)?.label ?? current);
     setIcon(chip.createSpan({ cls: "config-sync-tworow-chev" }), "chevrons-up-down");
     const pick = (mode: SyncMode): void => {
       void (async () => {
@@ -2592,7 +2625,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       const menu = new Menu();
       for (const m of modes) {
         if (m.id === "fields" && group.type !== "file") continue;
-        menu.addItem((i) => i.setTitle(m.label).setChecked(m.id === current).onClick(() => pick(m.id)));
+        menu.addItem((i) => i.setTitle(m.label).setIcon(MODE_ICON[m.id]).setChecked(m.id === current).onClick(() => pick(m.id)));
       }
       return menu;
     });
@@ -3852,8 +3885,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         strip = panel.createDiv({ cls: "config-sync-test-strip" });
         btn.onClick(async () => {
           btn.setDisabled(true).setButtonText("Testing…");
-          strip!.className = "config-sync-test-strip is-testing";
-          strip!.setText("Contacting remote…");
+          writeTestStrip(strip!, "is-testing", "Contacting remote…", null);
           try {
             const { gitLsRemote } = await import("../external/gitSource");
             let auth: GitAuth | null;
@@ -3863,20 +3895,18 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
               if (draft.username !== "") candidate.username = draft.username;
               auth = resolveGitToken(this.app.secretStorage, candidate);
             } catch (e) {
-              strip!.className = "config-sync-test-strip is-error";
-              strip!.setText(`✗ ${(e as Error).message}`);
+              writeTestStrip(strip!, "is-error", `✗ ${(e as Error).message}`, null);
               return;
             }
             const res = await gitLsRemote(draft.url, draft.branch, auth);
             if (res.kind === "error") {
-              strip!.className = "config-sync-test-strip is-error";
-              strip!.setText(`✗ Could not reach remote — ${res.message}`);
+              // Headline says what happened and what to do; git's own words go on the second,
+              // quieter line rather than into the sentence the reader has to parse first.
+              writeTestStrip(strip!, "is-error", "✗ Could not reach this remote. Check the URL, then try again.", res.message);
             } else if (res.branchFound) {
-              strip!.className = "config-sync-test-strip is-ok";
-              strip!.setText(`✓ Reachable — branch ${draft.branch} found`);
+              writeTestStrip(strip!, "is-ok", `✓ Reachable. Branch ${draft.branch} found.`, null);
             } else {
-              strip!.className = "config-sync-test-strip is-caution";
-              strip!.setText(`Reachable, but branch "${draft.branch}" not found`);
+              writeTestStrip(strip!, "is-caution", `Reachable, but branch "${draft.branch}" was not found.`, null);
             }
           } finally {
             btn.setDisabled(false).setButtonText("Test connection");
