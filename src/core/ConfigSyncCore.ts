@@ -53,8 +53,8 @@ export interface CoreContext {
   // reason as switchExceptions above: a device-local fact the pure core must be TOLD, never read.
   // Optional — a bare test context has none.
   fieldExceptions?: Record<string, string[]>;
-  switchForceOff?: Record<string, string[]>; // group name -> ids forced off on apply (a class rule on the wrong device class, or this device's own "Off here" exception)
-  switchForceOn?: Record<string, string[]>; // group name -> ids forced on on apply (this device's own "On here" exception; see enablementDecision.ts)
+  switchForceOff?: Record<string, string[]>; // group name -> ids forced off on apply (a class rule on the wrong device class, or this device's own "Always off" exception)
+  switchForceOn?: Record<string, string[]>; // group name -> ids forced on on apply (this device's own "Always on" exception; see enablementDecision.ts)
   fieldOverlay?: (group: SyncGroup, topKeys: string[]) => FieldRule[] | null; // runtime category rules (e.g. app.json view rows)
   // Compiles a self store copy's sync list. v3 copies persist `items` (custom section included; no
   // compiled groups array), and only the plugin holds the registry defs needed to compile them

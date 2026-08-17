@@ -3,22 +3,27 @@ import { ApplyItem, CaptureItem, orderInstallsCatalogFirst, ProgressFn, StateAct
 import { lockRefFor, refItemId } from "../core/itemKeys";
 import { GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry, RemoteDiffFile, remoteDirectionCounts } from "../core/status";
 import { SECTION_LABELS, findGroupByName, SELF_GROUP_NAME, sectionForGroup, communityGroupName } from "../core/catalog";
-import { EVERYWHERE, FileChanges, FileSharing, GroupResult, hasChanges, ItemRef, Remote, Sharing, sharingEquals, SyncGroup, StorageSection } from "../core/types";
+import { EVERYWHERE, FileChanges, FileSharing, GroupResult, hasChanges, ItemRef, Remote, Sharing, SyncGroup, StorageSection } from "../core/types";
 import { DeviceElementState } from "../core/deviceElements";
 import { RuleListId } from "../core/enablementRules";
 import {
   buildOptOutLocalMenu,
   buildLocalMenu,
+  ENABLED_ON_HEADER,
   enablementRowModel,
   fileEnablementRowModel,
+  MenuSectionModel,
+  ON_THIS_DEVICE_HEADER,
   optOutLocalSegment,
   RowSegment,
   RULE_OPTIONS,
   ruleIcon,
   ruleLabel,
   ruleLandingNeedsSeed,
-  THIS_DEVICE_EYEBROW,
+  SHARED_WITH_HEADER,
+  sharingMenuSection,
 } from "./enablementRow";
+import { paintMergedControl } from "./mergedControl";
 import { Availability } from "../core/availability";
 import { REUSE_MAX_AGE_MS } from "../external/readerCache";
 import { isWholeFileEncrypted } from "../core/modes";
@@ -2640,11 +2645,11 @@ export class SyncCenterView extends ItemView {
 
   // The row shell every card row shares ("one grid per card"): a fixed label on
   // track 1 of `.config-sync-cardrow`'s four tracks. Callers fill the rest — either one value cell
-  // spanning tracks 2-4 (renderCardKeyRow, below) or up to three cells landed directly on tracks
-  // 2/3/4 (renderTwoSegmentRow, renderCardIconActionRow) — so every row's icons and its divider
-  // sit on the SAME vertical rules regardless of which shape painted them.
+  // spanning tracks 2-4 (renderCardKeyRow, below) or a single control landing on track 2
+  // (renderMergedRow, renderCardIconActionRow) — so every row's icons
+  // sit on the SAME vertical rule regardless of which shape painted them.
   //
-  // `iconRow` marks the icon-cell shape (two-segment rows, the More row): content-sized, so mobile
+  // `iconRow` marks the icon-cell shape (merged-control rows, the More row): content-sized, so mobile
   // keeps it on the shared grid instead of the wide rows' stack-to-full-width fallback below —
   // there is no long text here to clip, only a glyph, and stacking would just waste a line. Named
   // `is-iconrow`, not `is-compact` — that modifier already means something else on
@@ -2917,7 +2922,7 @@ export class SyncCenterView extends ItemView {
   }
 
   // A generic "label: value-that-opens-a-menu" card row, shared by After install / Enablement —
-  // the two textual triggers left once Settings sync/Runs on moved onto the two-segment/icon
+  // the two textual triggers left once Settings sync/Runs on moved onto the merged-control/icon
   // idioms above.
   private renderCardMenuRow(detail: HTMLElement, label: string, valueText: string, ariaLabel: string, buildMenu: () => Menu): void {
     this.renderCardKeyRow(detail, label, (value) => {
@@ -2926,48 +2931,16 @@ export class SyncCenterView extends ItemView {
     });
   }
 
-  // The fleet segment of a two-segment row: an icon + a muted PICKER
-  // `chevrons-up-down` affordance, wired to its own menu — no visible
-  // wordmark (the row's own label already says what the ROW is; the segment's tooltip
-  // says what its VALUE is). Lands on track 2 of the row's four-track grid, so every
-  // two-segment row's fleet icon — and the More row's — sit on the same vertical rule.
-  private paintFleetSegment(host: HTMLElement, seg: RowSegment, isSet: boolean, menu: () => Menu): void {
-    const el = host.createSpan({ cls: `config-sync-tworow-fleetcell${isSet ? " is-set" : ""}`, attr: { "aria-label": seg.tooltip } });
-    if (seg.icon !== null) setIcon(el.createSpan({ cls: "config-sync-tworow-ic" }), seg.icon);
-    setIcon(el.createSpan({ cls: "config-sync-tworow-chev" }), "chevrons-up-down");
-    this.wireMenuTrigger(el, menu);
-  }
-
-  // The local segment: a muted "this device" eyebrow beside the same icon+picker
-  // shape, wired to the local menu. Factored out of renderTwoSegmentRow so `Settings sync`'s
-  // fields-mode branch (a plain fleet NOTE, not a menu) can still paint a working local segment
-  // beside it without renderTwoSegmentRow having to accept a fleet that lies about opening a
-  // menu. Lands on track 4.
-  private paintLocalSegment(host: HTMLElement, seg: RowSegment, isException: boolean, menu: () => Menu): void {
-    const cell = host.createDiv({ cls: `config-sync-tworow-localcell${isException ? " is-set" : ""}` });
-    cell.createSpan({ cls: "config-sync-tworow-eyebrow", text: THIS_DEVICE_EYEBROW });
-    const el = cell.createSpan({ cls: "config-sync-tworow-seg", attr: { "aria-label": seg.tooltip } });
-    if (seg.icon !== null) setIcon(el.createSpan({ cls: "config-sync-tworow-ic" }), seg.icon);
-    setIcon(el.createSpan({ cls: "config-sync-tworow-chev" }), "chevrons-up-down");
-    this.wireMenuTrigger(el, menu);
-  }
-
-  // The two-segment row ("one grid per card"): fleet cell on track 2, the
-  // divider filling track 3, the local cell on track 4 — direct children of the row's own
-  // four-track grid rather than a nested sub-grid, so every two-segment row's icons and divider
-  // land on the SAME vertical rules as every other row in the card. Both segments open a menu.
-  private renderTwoSegmentRow(
+  // Both layers in ONE control, the same shape the Settings panel paints (mergedControl.ts): the
+  // divider and the `this device` eyebrow that used to sit between them are gone, and the words
+  // that told the two layers apart moved into the menu as its two section headers.
+  private renderMergedRow(
     detail: HTMLElement,
     label: string,
-    fleet: { seg: RowSegment; isSet: boolean; menu: () => Menu },
-    local: { seg: RowSegment; isException: boolean; menu: () => Menu } | null
+    opts: { shared: RowSegment; local: RowSegment | null; localIsException: boolean; sections: () => readonly MenuSectionModel[] }
   ): void {
     const row = this.cardRowShell(label, true);
-    this.paintFleetSegment(row, fleet.seg, fleet.isSet, fleet.menu);
-    if (local !== null) {
-      row.createSpan({ cls: "config-sync-tworow-vline" });
-      this.paintLocalSegment(row, local.seg, local.isException, local.menu);
-    }
+    paintMergedControl(row, { ...opts, wire: (trigger, menu) => this.wireMenuTrigger(trigger, menu) });
     detail.appendChild(row);
   }
 
@@ -2977,59 +2950,39 @@ export class SyncCenterView extends ItemView {
     const list = enablementCarrierFor(this.rowRef(name));
     const elementId = this.carrierElementFor(name);
     const model = enablementRowModel({ rule: input.ruleSharing, exception: input.localException });
-    this.renderTwoSegmentRow(
-      detail,
-      "Enabled on",
-      {
-        seg: model.fleet,
-        isSet: input.ruleSharing.kind !== "everywhere",
-        menu: () => this.ruleMenu(list, elementId, input.ruleSharing),
-      },
-      {
-        seg: model.local,
-        isException: model.localIsException,
-        menu: () => this.localMenu(list, elementId, input.ruleSharing, input.localException),
-      }
-    );
+    this.renderMergedRow(detail, "Enabled on", {
+      shared: model.fleet,
+      local: model.local,
+      localIsException: model.localIsException,
+      sections: () => [
+        sharingMenuSection({
+          header: ENABLED_ON_HEADER,
+          options: RULE_OPTIONS,
+          current: input.ruleSharing,
+          iconFor: ruleIcon,
+          labelFor: ruleLabel,
+          onChange: (rule) => void this.setRuleWithLanding(list, elementId, rule).then(() => this.notifyExternalChange()),
+        }),
+        {
+          header: ON_THIS_DEVICE_HEADER,
+          // buildLocalMenu is the producer the Settings card's row asks too, so the two entrances
+          // cannot offer different choices. Its follow entry is absent under `Not shared`: there is
+          // no shared answer to follow, and this device's own state IS the answer.
+          items: buildLocalMenu(input.ruleSharing, input.localException, {
+            follow: () => void this.host.followTheDefault(list, elementId).then(() => this.reload()),
+            setState: (state) => void this.host.setDeviceElement(list, elementId, state).then(() => this.reload()),
+          }),
+        },
+      ],
+    });
   }
 
-  private ruleMenu(list: EnablementList, elementId: string, current: Sharing): Menu {
-    const menu = new Menu();
-    for (const rule of RULE_OPTIONS) {
-      menu.addItem((item) =>
-        item
-          .setTitle(ruleLabel(rule))
-          .setIcon(ruleIcon(rule))
-          .setChecked(sharingEquals(rule, current))
-          .onClick(() => void this.setRuleWithLanding(list, elementId, rule).then(() => this.notifyExternalChange()))
-      );
-    }
-    return menu;
-  }
-
-  // The fleet write, plus the landing seed — the same pair the Settings card's cycle does
+  // The shared write, plus the landing seed — the same pair the Settings card's own control does
   // (SettingTab.setRuleWithLanding), asking the same producer (ruleLandingNeedsSeed), so landing on
-  // `Each device decides` behaves identically at both entrances.
+  // `Not shared` behaves identically at both entrances.
   private async setRuleWithLanding(list: RuleListId, elementId: string, rule: Sharing): Promise<void> {
     await this.host.setEnablementRule(list, elementId, rule);
     if (ruleLandingNeedsSeed(rule, this.host.deviceElementFor(list, elementId))) await this.host.leaveToThisDevice(list, elementId);
-  }
-
-  // The entry list is buildLocalMenu's (enablementRow.ts), not this file's — the Settings card's row
-  // asks the same producer, so the two entrances cannot offer different choices. `Follows the
-  // default` is absent under `Each device decides`: there is no shared answer to follow.
-  private localMenu(list: EnablementList, elementId: string, rule: Sharing, current: "on" | "off" | null): Menu {
-    const menu = new Menu();
-    for (const entry of buildLocalMenu(rule, current, {
-      follow: () => void this.host.followTheDefault(list, elementId).then(() => this.reload()),
-      setState: (state) => void this.host.setDeviceElement(list, elementId, state).then(() => this.reload()),
-    })) {
-      menu.addItem((i) => {
-        i.setTitle(entry.title).setChecked(entry.checked).onClick(entry.action);
-        if (entry.icon !== null) i.setIcon(entry.icon);
-      });
-    }
-    return menu;
   }
 
   // After install (fallback ladder — only when the carrier is NOT synced and the row
@@ -3081,12 +3034,11 @@ export class SyncCenterView extends ItemView {
     });
   }
 
-  // Settings sync: a
-  // two-segment row like `Enabled on` — fleet segment is the item's own file-level sharing (SAME
-  // icon vocabulary the Settings tab's file-row control uses, sharingIcon; write target
-  // Item.settingsFile.fileRule.sharing for every item, custom (folder) items included since
-  // runsOn's retirement — one entrance, not two); local
-  // segment is this device's own whole-file opt-out.
+  // Settings sync: a merged control like `Enabled on` — the shared half is the item's own
+  // file-level sharing (SAME icon vocabulary the Settings tab's file-row control uses, sharingIcon;
+  // write target Item.settingsFile.fileRule.sharing for every item, custom (folder) items included
+  // since runsOn's retirement — one entrance, not two); the local half
+  // is this device's own whole-file opt-out.
   // The Settings tab's own drawer control (renderSharingPicker) opens the same kind of
   // menu — the two entrances stay in step, just not through this method.
   private renderSettingsSyncRow(detail: HTMLElement, r: StatusRow): void {
@@ -3094,90 +3046,59 @@ export class SyncCenterView extends ItemView {
     const ref = this.itemRefFor(name);
     if (ref === null) return;
     const optedOut = this.host.deviceOptedOut(name);
-    const localMenu = (): Menu => this.fileLocalMenu(name, optedOut);
-    // A fields-mode item has no legal whole-file fileRule to write (setItemFileSharing
-    // throws on it) — the fleet side must not offer a menu whose choice would just be discarded,
-    // but the local segment (this device's own opt-out) is a different datum and still works.
-    // The fleet cell is a dim settings-2 + tooltip, click = the item's Settings card
-    // (icon + tooltip is the
-    // row language everywhere else, and settings-2's registered meaning — "opens Settings" — is
-    // exactly what the click does). No ▾: a jump, not a menu. Same destination as the More row,
-    // and honestly redundant with it — the redundancy says "your answer lives over there".
+    // buildOptOutLocalMenu's entries — a DIFFERENT datum from buildLocalMenu's element-layer menu:
+    // this is the whole-FILE device opt-out, and it always offers both entries.
+    const localSection = (): MenuSectionModel => ({
+      header: ON_THIS_DEVICE_HEADER,
+      items: buildOptOutLocalMenu(optedOut, {
+        follow: () => void this.host.setDeviceOptOut(name, false).then(() => this.reload()),
+        optOut: () => void this.host.setDeviceOptOut(name, true).then(() => this.reload()),
+      }),
+    });
+    // A fields-mode item has no legal whole-file rule to write (setItemFileSharing throws on it),
+    // so the shared half must not offer stops whose choice would just be discarded. The local layer
+    // is a different datum and still works, so the row keeps both halves: the shared one
+    // contributes a single entry that JUMPS to the item's Settings card instead of a list.
     if (!this.host.itemFileSharingMenuLegal(ref)) {
-      const row = this.cardRowShell("Settings sync", true);
-      const trigger = row.createSpan({
-        cls: "config-sync-sharingicon config-sync-card-trigger config-sync-cardrow-track2",
-        attr: { "aria-label": FILE_SHARING_MENU_UNAVAILABLE_TEXT, role: "button", tabindex: "0" },
+      this.renderMergedRow(detail, "Settings sync", {
+        shared: { icon: "settings-2", tooltip: FILE_SHARING_MENU_UNAVAILABLE_TEXT },
+        local: optOutLocalSegment(optedOut),
+        localIsException: optedOut,
+        sections: () => [
+          {
+            header: SHARED_WITH_HEADER,
+            items: [{ title: FILE_SHARING_MENU_UNAVAILABLE_TEXT, icon: "settings-2", checked: false, action: () => this.host.openSettingsAt(ref) }],
+          },
+          localSection(),
+        ],
       });
-      setIcon(trigger, "settings-2");
-      const jump = (e: Event): void => {
-        e.stopPropagation();
-        this.host.openSettingsAt(ref);
-      };
-      trigger.addEventListener("click", jump);
-      trigger.addEventListener("keydown", (e) => {
-        if (e.key !== "Enter" && e.key !== " ") return;
-        e.preventDefault();
-        jump(e);
-      });
-      row.createSpan({ cls: "config-sync-tworow-vline" });
-      this.paintLocalSegment(row, optOutLocalSegment(optedOut), optedOut, localMenu);
-      detail.appendChild(row);
       return;
     }
     const current = this.host.itemFileSharing(ref);
     const model = fileEnablementRowModel({ sharing: current, optedOut });
-    this.renderTwoSegmentRow(
-      detail,
-      "Settings sync",
-      {
-        seg: model.fleet,
-        isSet: current.kind !== "everywhere",
-        menu: () => this.fileSharingMenu(ref, current),
-      },
-      { seg: model.local, isException: model.localIsException, menu: localMenu }
-    );
-  }
-
-  private fileSharingMenu(ref: ItemRef, current: FileSharing): Menu {
-    const menu = new Menu();
-    for (const opt of FILE_SHARING_OPTIONS) {
-      const sharing = opt as FileSharing;
-      menu.addItem((item) =>
-        item
-          .setTitle(sharingLabel(sharing))
-          .setIcon(sharingIcon(sharing))
-          .setChecked(sharingEquals(sharing, current))
-          .onClick(() => {
-            void this.host.setItemFileSharing(ref, sharing).then(() => this.notifyExternalChange());
-          })
-      );
-    }
-    return menu;
-  }
-
-  // The entry list is buildOptOutLocalMenu's (enablementRow.ts) — a DIFFERENT datum from
-  // buildLocalMenu's element-layer menu (localMenu, above): this is the whole-FILE device opt-out
-  // always offering both entries.
-  private fileLocalMenu(name: string, optedOut: boolean): Menu {
-    const menu = new Menu();
-    for (const entry of buildOptOutLocalMenu(optedOut, {
-      follow: () => void this.host.setDeviceOptOut(name, false).then(() => this.reload()),
-      optOut: () => void this.host.setDeviceOptOut(name, true).then(() => this.reload()),
-    })) {
-      menu.addItem((i) => {
-        i.setTitle(entry.title).setChecked(entry.checked).onClick(entry.action);
-        if (entry.icon !== null) i.setIcon(entry.icon);
-      });
-    }
-    return menu;
+    this.renderMergedRow(detail, "Settings sync", {
+      shared: model.fleet,
+      local: model.local,
+      localIsException: model.localIsException,
+      sections: () => [
+        sharingMenuSection({
+          header: SHARED_WITH_HEADER,
+          options: FILE_SHARING_OPTIONS,
+          current,
+          iconFor: sharingIcon,
+          labelFor: sharingLabel,
+          onChange: (v) => void this.host.setItemFileSharing(ref, v as FileSharing).then(() => this.reload()),
+        }),
+        localSection(),
+      ],
+    });
   }
 
   // Icon trigger + plain click (the `More` row): unlike renderCardIconMenuRow's family, this
   // row opens Settings directly rather than offering a menu — a sibling helper keeps that
   // distinction honest instead of routing a single-item fake menu through wireMenuTrigger. Lands
-  // on track 2 of the row's four-track grid, the same track every two-segment row's
-  // fleet icon lands on, tracks 3/4 left empty — no divider, since there is no second segment.
+  // on track 2 of the row's four-track grid, the same track every merged control lands on,
+  // tracks 3/4 left empty.
   private renderCardIconActionRow(detail: HTMLElement, label: string, icon: string, isSet: boolean, ariaLabel: string, onActivate: () => void): void {
     const row = this.cardRowShell(label, true);
     const trigger = row.createSpan({

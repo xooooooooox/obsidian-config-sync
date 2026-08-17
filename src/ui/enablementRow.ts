@@ -1,43 +1,49 @@
 /**
- * The two-segment row's MODEL: `label | fleet segment | divider | local segment`.
+ * The MODEL behind the merged two-layer control (painted by `mergedControl.ts`): what the shared
+ * answer and this device's own answer each SAY, and what the control's menu offers for each.
  *
- * Three surfaces render this row — a Sync Center row's `Enabled on`/`Settings sync`, a plugin
- * card's, and a carrier card's element rows — and they must say the same thing, so what each
- * segment SAYS (icon + tooltip) is decided once, here, and the renderers only paint it: an icon,
- * a PICKER `chevrons-up-down` affordance, and an aria-label/tooltip built by the exported
- * functions below — never a hand-spelled string at the paint site.
+ * Four surfaces render it — a Sync Center row's `Enabled on`/`Settings sync`, a plugin card's
+ * `Enabled on`, a carrier card's element rows, and an item card's per-key rule rows — and they must
+ * say the same thing, so the words are decided once, here, and the renderers only paint them: a
+ * glyph per layer, one PICKER `chevrons-up-down`, and an aria-label built by the exported functions
+ * below — never a hand-spelled string at the paint site.
  *
- * Both segments are icon-only (no visible wordmark) — the word "Default" lives in the fleet
- * tooltip (`Default enabled on: …`), and the local segment carries a muted "this device" eyebrow
- * plus a glyph for EVERY state, including `follows` (`corner-down-right`): a bare wordmark row
- * next to an icon+chevron fleet segment reads as unfinished, so `follows` gets a real glyph too.
+ * Both layers are glyph-only (no visible wordmark). The word "Default" is retired: it named nothing
+ * the interface ever showed. The local layer has a glyph for EVERY state, `follows` (`equal`)
+ * included — a layer that disappears while it agrees with the shared answer reads as missing, not
+ * as agreement. What used to be a muted `this device` eyebrow beside that glyph is now the menu's
+ * `On this device` section header, which says the same word once instead of on every row.
  * `airplay` is not used for "this device" — it reads as screen mirroring to anyone who has not
  * read this file, so it stays out of this vocabulary.
  */
-import { FileSharing, Sharing, EVERYWHERE, perClass, THIS_DEVICE } from "../core/types";
+import { FileSharing, Sharing, sharingEquals, EVERYWHERE, perClass, THIS_DEVICE } from "../core/types";
 import { DeviceElementState } from "../core/deviceElements";
-import { sharingIcon, sharingLabel } from "./itemCard";
+import { NOT_SHARED_LABEL, sharingIcon } from "./itemCard";
 
 export const RULE_OPTIONS: readonly Sharing[] = [EVERYWHERE, perClass("desktop"), perClass("mobile"), THIS_DEVICE];
 
 export function ruleLabel(s: Sharing): string {
   if (s.kind === "everywhere") return "All devices";
-  if (s.kind === "this-device") return "Each device decides";
+  if (s.kind === "this-device") return NOT_SHARED_LABEL;
   return s.class === "desktop" ? "Desktop only" : "Mobile only";
 }
 
-// sharingIcon's vocabulary for the two class stops and the everywhere stop; `users` for
-// each-device-decides — the value is about the fleet's PEOPLE-side arrangement ("each of you
-// decides"), and `airplay` (sharingIcon's own this-device glyph) means screen mirroring to a reader
-// who has not read the source.
+// sharingIcon's vocabulary for the two class stops and the everywhere stop; `split` for not-shared.
+// NOT a negation glyph on purpose: `circle-slash` already means "not synced on this device" one
+// column over, and the two facts are the pair users most often confuse. `split` says something
+// positive instead — one path becoming two, the value diverging per device — so the shared answer
+// and the local exception never read as the same family. (`airplay`, sharingIcon's own this-device
+// glyph, means screen mirroring to anyone who has not read the source, and `users` read as MORE
+// sharing once the word became "Not shared".)
 export function ruleIcon(s: Sharing): string {
-  return s.kind === "this-device" ? "users" : sharingIcon(s);
+  return s.kind === "this-device" ? "split" : sharingIcon(s);
 }
 
-// A painted segment carries only what it SHOWS: a glyph (nullable, for the per-key fallback fleet
-// cell, which keeps its italic note instead) and the aria-label/tooltip
-// sentence. No visible wordmark any more — the row's own label (passed separately to the row
-// builder) already says what the ROW is about; the segment's tooltip says what its VALUE is.
+// A painted layer carries only what it SHOWS: a glyph (nullable — a layer with nothing to draw
+// contributes no glyph, and the control then renders the other one alone) and the tooltip sentence
+// its half of the control's aria-label is built from. No visible wordmark — the row's own label
+// (passed separately to the row builder) already says what the ROW is about; the tooltip says what
+// the VALUE is.
 export interface RowSegment {
   icon: string | null;
   tooltip: string;
@@ -49,39 +55,57 @@ export interface EnablementRowModel {
   localIsException: boolean;
 }
 
-export const FOLLOWS_LABEL = "Follows the default";
-export const ON_HERE_LABEL = "On here";
-export const OFF_HERE_LABEL = "Off here";
+// "the default" named nothing the interface ever showed. These read against the `On this device`
+// section header they sit under, so none of them repeats "here" either.
+export const FOLLOWS_LABEL = "Follow what's shared";
+export const ON_HERE_LABEL = "Always on";
+export const OFF_HERE_LABEL = "Always off";
 
-// Rendered uppercase via CSS (`text-transform: uppercase`), stored lowercase here — the local
-// segment's muted eyebrow, shared verbatim by every two-segment row's local half so
-// "this device" is spelled once.
-export const THIS_DEVICE_EYEBROW = "this device";
-
-// The fleet segment's tooltip — "Default enabled on: <ruleLabel>" — exported so both
-// painters and their tests read the SAME sentence instead of re-spelling it.
+// The shared segment's tooltip for an ENABLEMENT-LIST row (one plugin, one snippet). It states the
+// CONSEQUENCE, not the label, because the same three words mean three different things across the
+// three row kinds and only the consequence tells them apart:
+//
+//   this row (an on/off list)  `Desktop only` → desktops turn it on, phones leave it off
+//   a whole settings file      `Desktop only` → only desktops sync the file at all
+//   one key inside a file      `Desktop only` → desktops share a value, each phone keeps its own
+//
+// Here the excluded class is turned OFF: applyPerElementArray (perElement.ts) filters the element
+// out of the incoming list and only `this-device` elements survive from the local one, so a phone
+// applying a desktop-scoped element ends up without it.
 export function enabledOnTooltip(rule: Sharing): string {
-  return `Default enabled on: ${ruleLabel(rule)}`;
+  if (rule.kind === "everywhere") return "Every device turns it on.";
+  if (rule.kind === "this-device") return "Nobody shares this. Every device keeps its own on/off.";
+  return rule.class === "desktop"
+    ? "Desktops turn it on. On phones it stays off."
+    : "Phones turn it on. On desktops it stays off.";
 }
 
-// The local segment's four possible states, named once: shared by the element-layer row
+// The local layer's four possible states, named once: shared by the element-layer row
 // (enablementRowModel) and the whole-file row (fileEnablementRowModel) so "this device
 // follows/on/off/not-synced" is never spelled twice.
 export type LocalSegmentState = "follows" | "on" | "off" | "not-synced";
 
 // Exported so both painters and their tests read the SAME sentence ("one producer for
 // every string") instead of re-spelling "This device: …" at each paint site.
+// `not-synced` carries a second sentence the other three don't need: it is the one state users
+// routinely confuse with the shared answer's `Not shared`, and the whole difference is what happens
+// to EVERYONE ELSE. Saying it here is the only place that difference is ever stated.
 export function localSegmentTooltip(state: LocalSegmentState): string {
-  const phrase =
-    state === "follows" ? "follows the default" : state === "on" ? "on here" : state === "off" ? "off here" : "not synced here";
-  return `This device: ${phrase}`;
+  if (state === "follows") return "This device: follows what's shared.";
+  if (state === "on") return "This device: always on.";
+  if (state === "off") return "This device: always off.";
+  return "This device: not synced. Your other devices keep sharing it.";
 }
 
-// `corner-down-right` for follows (DESIGN.md icon table): the local segment always has
-// a glyph, so a two-segment row's local cell lines up with an exception's the same way its fleet
-// cell always does.
+// `equal` for follows: this device MATCHES the shared answer. It replaced `corner-down-right`, which
+// was carrying two opposite meanings at once — here it said "no device-specific setting", while the
+// card and carrier badges (DESIGN.md's badge table) use it for `on: this device` and `N left to me`,
+// which say the reverse. Those two agree with each other and keep the glyph; this one moves.
+// `equal` also survives the move into a merged control: the old arrow only read as "follows" while
+// it sat to the RIGHT of the shared glyph, and it has to work in a menu list too, where it has no
+// neighbour to point back at.
 function localSegmentIcon(state: LocalSegmentState): string {
-  if (state === "follows") return "corner-down-right";
+  if (state === "follows") return "equal";
   if (state === "on") return "power";
   if (state === "off") return "power-off";
   return "circle-slash";
@@ -97,7 +121,7 @@ export function enablementRowModel(input: { rule: Sharing; exception: DeviceElem
   return { fleet, local: localSegment(input.exception === "on" ? "on" : "off"), localIsException: true };
 }
 
-// The whole-FILE two-segment row's model counterpart (`Settings sync`): same shape,
+// The whole-FILE row's model counterpart (`Settings sync`): same shape,
 // a different fleet datum (`FileSharing`, not the enablement `Sharing` union — `this-device` is
 // structurally excluded) and a two-state local layer (follow / not-synced-here — the
 // opt-out is a boolean, so there is no on/off pair to choose between).
@@ -107,8 +131,17 @@ export interface FileEnablementRowModel {
   localIsException: boolean;
 }
 
+// The shared segment's tooltip for a WHOLE-FILE row. Strongest of the three consequences: a
+// class-scoped file rule becomes the compiled group's own device class (registry.ts's
+// devicesForFileRule), and a group scoped away from this device is not compiled into its sync set
+// at all. The excluded class does not keep a private copy the way one excluded KEY does; it simply
+// has nothing to do with the file. `FileSharing` excludes this-device by construction, so there is
+// no fourth sentence to write: "every device keeps its own whole file" is just not syncing it.
 export function settingsSyncTooltip(sharing: FileSharing): string {
-  return `Default settings sync: ${sharingLabel(sharing)}`;
+  if (sharing.kind === "everywhere") return "Every device syncs this file.";
+  return sharing.class === "desktop"
+    ? "Only desktops sync this file. Phones don't sync it at all."
+    : "Only phones sync this file. Desktops don't sync it at all.";
 }
 
 export function fileEnablementRowModel(input: { sharing: FileSharing; optedOut: boolean }): FileEnablementRowModel {
@@ -116,7 +149,7 @@ export function fileEnablementRowModel(input: { sharing: FileSharing; optedOut: 
   return { fleet, local: optOutLocalSegment(input.optedOut), localIsException: input.optedOut };
 }
 
-// The local half alone — shared by BOTH layers that have a two-state local answer: the whole-file
+// The local half alone — shared by BOTH rows that have a two-state local answer: the whole-file
 // opt-out (`Settings sync`) and a per-key rule's own exception. Same states, same words, so it is
 // one producer; a second copy would be a second place for "not synced here" to drift.
 export function optOutLocalSegment(optedOut: boolean): RowSegment {
@@ -125,16 +158,58 @@ export function optOutLocalSegment(optedOut: boolean): RowSegment {
 
 // One local-segment menu, as DATA, for both entrances. The two surfaces turn it into an
 // Obsidian `Menu`; neither decides what is IN it, because they disagreed the moment they each
-// decided separately — the Sync Center offered `Follows the default` under `Each device decides`,
+// decided separately — the Sync Center offered a follow entry under `Not shared`,
 // where there is no shared answer to follow.
 export interface LocalMenuItem {
-  title: string;
   // The follow entry has none: the icon-for-every-state rule covers the SEGMENT only —
   // buildLocalMenu/buildOptOutLocalMenu label the menu
-  // items, and `Follows the default`'s menu row is not one with a glyph.
+  // items, and the follow entry's menu row is not one with a glyph.
+  title: string;
   icon: string | null;
   checked: boolean;
   action: () => void;
+  // Only the shared section's LAST stop sets this. The first three answer "who gets the shared
+  // value"; `Not shared` answers "is there one at all" — a different question in the same radio
+  // group, which is precisely why it read as the odd one out. The rule stays one group (picking any
+  // stop unpicks the others) and the line says the question changed.
+  separatorBefore?: boolean;
+}
+
+// One menu, two questions, so two labelled sections instead of six flat entries. The headers are
+// what make the same three words unambiguous: `Shared with: Desktop only` and `Enabled on: Desktop
+// only` read correctly and differently, where the bare stop could not.
+export interface MenuSectionModel {
+  // `null` for a trailing group that is not a third question — a row's destructive verb
+  // (`Remove rule`) rides along at the end, separated but unlabelled, because naming it would
+  // promote a one-item action to the rank of the two answers above it.
+  header: string | null;
+  items: LocalMenuItem[];
+}
+
+export const SHARED_WITH_HEADER = "Shared with";
+export const ENABLED_ON_HEADER = "Enabled on";
+export const ON_THIS_DEVICE_HEADER = "On this device";
+
+// The shared half of a merged control's menu, as DATA. One producer so every surface offers the
+// same stops in the same order with the same separator before the fourth.
+export function sharingMenuSection(opts: {
+  header: string;
+  options: readonly Sharing[];
+  current: Sharing;
+  iconFor: (s: Sharing) => string;
+  labelFor: (s: Sharing) => string;
+  onChange: (s: Sharing) => void;
+}): MenuSectionModel {
+  return {
+    header: opts.header,
+    items: opts.options.map((s) => ({
+      title: opts.labelFor(s),
+      icon: opts.iconFor(s),
+      checked: sharingEquals(s, opts.current),
+      action: () => opts.onChange(s),
+      separatorBefore: s.kind === "this-device",
+    })),
+  };
 }
 
 export interface LocalMenuHandlers {
@@ -160,9 +235,9 @@ export function buildLocalMenu(rule: Sharing, exception: DeviceElementState | nu
 // Still a DIFFERENT datum from buildLocalMenu's above — an on/off exception for one element of an
 // enablement list, a three-way local answer over a four-value fleet rule — so it keeps its own
 // two-entry producer rather than being folded into buildLocalMenu's shape. Always both entries:
-// unlike the element menu there is no `this-device` rule that would make `Follows the default`
+// unlike the element menu there is no `this-device` rule that would make `Follow what's shared`
 // meaningless here.
-export const NOT_SYNCED_HERE_LABEL = "Not synced here";
+export const NOT_SYNCED_HERE_LABEL = "Don't sync it";
 
 export interface FileLocalMenuHandlers {
   follow: () => void;
@@ -176,8 +251,8 @@ export function buildOptOutLocalMenu(optedOut: boolean, handlers: FileLocalMenuH
   ];
 }
 
-// Landing the FLEET segment on `Each device decides` while this device has no exception yet leaves
-// the row with nothing true to say: it renders `Follows the default` beside a menu that (per
+// Landing the shared half on `Not shared` while this device has no exception yet leaves
+// the row with nothing true to say: it renders the follow glyph beside a menu that (per
 // buildLocalMenu) does not offer that state — a label the user cannot re-select, describing a
 // default that does not exist. So: the moment the element leaves the shared
 // answer its exception is seeded with EXACTLY what it is right now (host.leaveToThisDevice), so the

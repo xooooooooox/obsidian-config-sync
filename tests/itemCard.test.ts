@@ -5,12 +5,13 @@ import {
   buildCompanionRows,
   buildPerElementRows,
   buildRuleRows,
+  enablementRuleKeysOf,
   buildCarrierElementRows,
   buildSnippetMemberRows,
   carrierBadgeCounts,
   carrierListFor,
   computeBadges,
-  countClassPinned,
+  classPinnedKinds,
   countEncrypted,
   encryptDisabledForSharing,
   encryptToggleDisabled,
@@ -120,9 +121,9 @@ describe("computeBadges", () => {
     expect(computeBadges(COMMUNITY_DEF, cfg({ synced: true }), null, null)).toEqual([]);
   });
 
-  // "Each device decides" is a FLEET arrangement, not this device's own state — there is nothing
+  // "Not shared" is a SHARED-layer arrangement, not this device's own state — there is nothing
   // true to say about this machine until it actually takes an exception.
-  it("an Each-device-decides rule with no exception shows no badge either", () => {
+  it("a Not-shared rule with no exception shows no badge either", () => {
     expect(computeBadges(COMMUNITY_DEF, cfg({ synced: true }), RULE(THIS_DEVICE), null)).toEqual([]);
   });
 
@@ -143,11 +144,15 @@ describe("computeBadges", () => {
     expect(computeBadges(APP_DEF, cfg(), RULE(perClass("desktop")), null)).toEqual([]);
   });
 
-  it("shows 'on: this device' from THIS DEVICE's exception, and it outranks the fleet rule", () => {
-    expect(computeBadges(COMMUNITY_DEF, cfg(), RULE(EVERYWHERE, "on"), null)).toEqual([{ text: "on: this device", cls: "config-sync-card-badge-local", icon: "corner-down-right" }]);
-    expect(computeBadges(COMMUNITY_DEF, cfg(), RULE(EVERYWHERE, "off"), null)).toEqual([{ text: "on: this device", cls: "config-sync-card-badge-local", icon: "corner-down-right" }]);
+  // This test used to assert that an "off" exception still produced `on: this device` with the
+  // `corner-down-right` glyph — it pinned the defect rather than the intent, which is why the badge
+  // could tell users a plugin was on here while the row beside it showed it forced off. The badge
+  // knows which exception it is; it now says which, in both the word and the glyph.
+  it("names WHICH exception this device made, and it outranks the fleet rule", () => {
+    expect(computeBadges(COMMUNITY_DEF, cfg(), RULE(EVERYWHERE, "on"), null)).toEqual([{ text: "on: this device", cls: "config-sync-card-badge-local", icon: "power" }]);
+    expect(computeBadges(COMMUNITY_DEF, cfg(), RULE(EVERYWHERE, "off"), null)).toEqual([{ text: "off: this device", cls: "config-sync-card-badge-local", icon: "power-off" }]);
     // precedence 1: the class rule loses to the exception, exactly as decideEnablement decides
-    expect(computeBadges(COMMUNITY_DEF, cfg(), RULE(perClass("desktop"), "off"), null)).toEqual([{ text: "on: this device", cls: "config-sync-card-badge-local", icon: "corner-down-right" }]);
+    expect(computeBadges(COMMUNITY_DEF, cfg(), RULE(perClass("desktop"), "off"), null)).toEqual([{ text: "off: this device", cls: "config-sync-card-badge-local", icon: "power-off" }]);
     expect(computeBadges(COMMUNITY_DEF, cfg(), FOLLOWS_ALL, null)).toEqual([]);
   });
 
@@ -159,9 +164,9 @@ describe("computeBadges", () => {
         perElement: { arr: { x: perClass("desktop"), y: perClass("mobile"), z: EVERYWHERE } },
       },
     });
-    expect(countClassPinned(c)).toBe(4); // a, b, arr.x, arr.y
+    expect(classPinnedKinds(c)).toEqual(["desktop", "mobile", "desktop", "mobile"]); // a, b, arr.x, arr.y
     const withFileRule = cfg({ settingsFile: { mode: "plain", rules: {}, perElement: {}, fileRule: { sharing: perClass("desktop"), encrypted: false } } });
-    expect(countClassPinned(withFileRule)).toBe(1);
+    expect(classPinnedKinds(withFileRule)).toEqual(["desktop"]);
   });
 
   it("counts encrypted fields AND a fileRule-encrypted whole file into the SAME 'N encrypted' badge (no separate lock badge string)", () => {
@@ -178,8 +183,24 @@ describe("computeBadges", () => {
     });
     expect(computeBadges(COMMUNITY_DEF, c, RULE(perClass("desktop")), null)).toEqual([
       { text: "on: desktop", cls: "config-sync-card-badge-desktop", icon: "monitor" },
-      { text: "1 device-scoped", cls: "config-sync-card-badge-count", icon: "monitor-smartphone", count: 1 },
+      // Its one pinned rule is Mobile only, so the badge says `smartphone`. It used to say
+      // `monitor-smartphone` — the glyph for `All devices` — while counting keys that are pointedly
+      // NOT on all devices.
+      { text: "1 device-scoped", cls: "config-sync-card-badge-count", icon: "smartphone", count: 1 },
       { text: "1 encrypted", cls: "config-sync-card-badge-count", icon: "lock", count: 1 },
+    ]);
+  });
+
+  it("only a card whose pins DISAGREE falls back to the neutral summariser", () => {
+    const mixed = cfg({
+      settingsFile: {
+        mode: "fields",
+        rules: { a: { sharing: perClass("mobile"), encrypted: false }, b: { sharing: perClass("desktop"), encrypted: false } },
+        perElement: {},
+      },
+    });
+    expect(computeBadges(HOTKEYS_DEF, mixed, null, null)).toEqual([
+      { text: "2 device-scoped", cls: "config-sync-card-badge-count", icon: "contrast", count: 2 },
     ]);
   });
 });
@@ -320,6 +341,26 @@ describe("buildRuleRows (spec 2026-07-26-card-visual-refresh-design.md §3 — t
     });
     const rows = buildRuleRows(HOTKEYS_DEF, c, { a: 1, b: ["x"], c: ["y"] });
     expect(rows.map((r) => r.key)).toEqual(["a", "b", "c"]);
+  });
+
+  // The Appearance trap: deriveMode counts enablementCssSnippets (so the card IS in per-key mode
+  // and the path row says per-key rules decide), while buildRuleRows filters it right back out —
+  // leaving no `Key rules` panel to jump to. enablementRuleKeysOf names exactly the keys that fell
+  // through, so the jump can follow presetCompanions' declared mapKey to where their rows DO live.
+  it("enablementRuleKeysOf names the keys buildRuleRows drops — Appearance's whole set", () => {
+    const c = cfg({
+      settingsFile: { mode: "fields", rules: { enabledCssSnippets: { sharing: EVERYWHERE, encrypted: false } }, perElement: { enabledCssSnippets: { s: perClass("mobile") } } },
+    });
+    expect(buildRuleRows(APPEARANCE_DEF, c, { enabledCssSnippets: ["s"] })).toEqual([]);
+    expect(enablementRuleKeysOf(APPEARANCE_DEF, c)).toEqual(["enabledCssSnippets"]);
+    // …and the declared link the jump follows to find that row.
+    expect(APPEARANCE_DEF.presetCompanions?.find((p) => p.mapKey === "enabledCssSnippets")?.path).toBe("{configDir}/snippets");
+  });
+
+  it("enablementRuleKeysOf is empty for an ordinary key — the Key rules panel renders and owns the jump", () => {
+    const c = cfg({ settingsFile: { mode: "fields", rules: { accentColor: { sharing: EVERYWHERE, encrypted: false } }, perElement: {} } });
+    expect(buildRuleRows(APPEARANCE_DEF, c, { accentColor: "x" }).map((r) => r.key)).toEqual(["accentColor"]);
+    expect(enablementRuleKeysOf(APPEARANCE_DEF, c)).toEqual([]);
   });
 
   it("returns no rows when settingsFile is absent", () => {
@@ -470,15 +511,15 @@ describe("carrierBadgeCounts", () => {
 
   it("counts class rules for the fleet and this device's exceptions for the local half — never one number", () => {
     const items = withRules({ dataview: perClass("desktop"), templater: perClass("mobile"), git: THIS_DEVICE });
-    expect(carrierBadgeCounts(items, "community-plugins", ["git", "omnisearch"])).toEqual({ fleet: 2, local: 2 });
+    expect(carrierBadgeCounts(items, "community-plugins", ["on", "off"])).toEqual({ fleet: ["desktop", "mobile"], local: ["on", "off"] });
   });
 
-  it("`Each device decides` is not device-scoped — it hands the element back, it does not scope it", () => {
-    expect(carrierBadgeCounts(withRules({ git: THIS_DEVICE }), "community-plugins", [])).toEqual({ fleet: 0, local: 0 });
+  it("`Not shared` is not device-scoped — it hands the element back, it does not scope it", () => {
+    expect(carrierBadgeCounts(withRules({ git: THIS_DEVICE }), "community-plugins", [])).toEqual({ fleet: [], local: [] });
   });
 
   it("a list with nothing decided counts nothing (a badge never reads '0 …')", () => {
-    expect(carrierBadgeCounts(itemsIn({}), "core-plugins", [])).toEqual({ fleet: 0, local: 0 });
+    expect(carrierBadgeCounts(itemsIn({}), "core-plugins", [])).toEqual({ fleet: [], local: [] });
   });
 
   // The carrier's OWN class pins (fileRule.sharing — settable from the
@@ -502,7 +543,19 @@ describe("carrierBadgeCounts", () => {
     });
     // element class rules: daily-notes only (graph is this-device, not class-scoped) = 1
     // carrier's own pins: fileRule (1) + rules["some-key"] (1) = 2
-    expect(carrierBadgeCounts(items, "core-plugins", [])).toEqual({ fleet: 3, local: 0 });
+    // Order is deliberately NOT asserted: the badge reads the length and whether the kinds agree,
+    // so pinning it would fix an incidental of how the two halves happen to be concatenated.
+    const counts = carrierBadgeCounts(items, "core-plugins", []);
+    expect(counts.fleet.length).toBe(3);
+    expect([...counts.fleet].sort()).toEqual(["desktop", "desktop", "mobile"]);
+    expect(counts.local).toEqual([]);
+  });
+
+  // The rule the whole badge family follows now: name the SPECIFIC thing when the set agrees, fall
+  // back to a neutral summariser only when it genuinely mixes.
+  it("a set that agrees on one class still reads as that class", () => {
+    const items = withRules({ dataview: perClass("mobile"), templater: perClass("mobile") });
+    expect(carrierBadgeCounts(items, "community-plugins", []).fleet).toEqual(["mobile", "mobile"]);
   });
 });
 
@@ -665,17 +718,23 @@ describe("nextSharing / sharing icon cycle — Commander-style sharing control",
   // the row they served is two segments now, and its vocabulary lives in enablementRow.ts
   // (tests/enablementRow.test.ts).
 
+  // The fourth stop was "This device", which put the LOCAL layer's own wording inside the SHARED
+  // layer's menu — the single likeliest way to confuse two facts that behave oppositely.
   it("sharing labels are copy-contract exact", () => {
-    expect([EVERYWHERE, DESKTOP, MOBILE, THIS_DEVICE].map(sharingLabel)).toEqual(["All devices", "Desktop only", "Mobile only", "This device"]);
+    expect([EVERYWHERE, DESKTOP, MOBILE, THIS_DEVICE].map(sharingLabel)).toEqual(["All devices", "Desktop only", "Mobile only", "Not shared"]);
   });
 
-  it("tooltip names the current sharing", () => {
-    expect(sharingCycleTooltip(EVERYWHERE)).toBe("Where it syncs (currently: All devices)");
-    expect(sharingCycleTooltip(THIS_DEVICE)).toBe("Where it syncs (currently: This device)");
+  // A per-key rule is the WEAKEST of the three row kinds' consequences: nothing is turned off and
+  // nothing stops syncing, the excluded class just keeps its own value. The label cannot say that.
+  it("tooltip states the per-key consequence, not the label", () => {
+    expect(sharingCycleTooltip(EVERYWHERE)).toBe("One value, the same everywhere.");
+    expect(sharingCycleTooltip(DESKTOP)).toBe("Desktops share one value. Each phone keeps its own.");
+    expect(sharingCycleTooltip(MOBILE)).toBe("Phones share one value. Each desktop keeps its own.");
+    expect(sharingCycleTooltip(THIS_DEVICE)).toBe("No shared value. Every device keeps its own.");
   });
 
   it("tooltip appends the desktop-only note to the everywhere stop", () => {
-    expect(sharingCycleTooltip(EVERYWHERE, DESKTOP_ONLY_ALL_NOTE)).toBe("Where it syncs (currently: All devices — mobile is excluded automatically)");
+    expect(sharingCycleTooltip(EVERYWHERE, DESKTOP_ONLY_ALL_NOTE)).toBe("One value, the same everywhere. (mobile is excluded automatically)");
   });
 });
 
@@ -684,7 +743,9 @@ describe("PREVIEW_LEGEND_ENTRIES — color dots + neutral words, no emoji", () =
     expect(PREVIEW_LEGEND_ENTRIES).toEqual([
       { kind: "sharing", cls: "config-sync-json-desktop", text: "desktop only" },
       { kind: "sharing", cls: "config-sync-json-mobile", text: "mobile only" },
-      { kind: "sharing", cls: "config-sync-json-strip", text: "this device" },
+      // The legend names the SHARED answer that colours the key, so it reads `not shared` like the
+      // menu — never `this device`, which is the local layer's word for a different fact.
+      { kind: "sharing", cls: "config-sync-json-strip", text: "not shared" },
       { kind: "lock", cls: null, text: "encrypted" },
     ]);
   });
