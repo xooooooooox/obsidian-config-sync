@@ -289,9 +289,10 @@ function defaultFieldsFromDetection(keys: string[]): FieldRule[] {
   return keys.map((pattern) => ({ pattern, ...(SENSITIVE_ENCRYPT_RE.test(pattern) ? ENCRYPT_RULE : LOCAL_RULE) }));
 }
 
-// Visible text, not a tooltip: this row is unreadable on a phone precisely because the old
-// explanation only existed on hover. The dim settings-2 carries the same sentence without the
-// arrow as its aria-label — one sentence, one producer.
+// Tooltip-borne, and deliberately NOT repeated as visible copy: the `KEY RULES` zone label sits
+// directly below this row and answers the same question nearer and permanently, so a visible line
+// would only say twice what the layout already says once. The reading path that matters starts at
+// the eye (browse the file), and adding a key raises that zone label on its own.
 const PER_KEY_RULES_JUMP_TEXT = "Per-key rules decide — jump to them";
 
 // The Access-token control's standing explanation (DESIGN.md §4 Remote editor): tooltip-borne, so
@@ -1555,10 +1556,17 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       // all — neither cell — and never mutates it either: per-key rules are the only truth here,
       // and the row says so instead of drawing a stale one.
       const jumpIcon = sharingCell.createSpan({
-        cls: "config-sync-sharingicon",
+        cls: "config-sync-sharingicon is-jump",
         attr: { role: "button", tabindex: "0", "aria-label": PER_KEY_RULES_JUMP_TEXT },
       });
       setIcon(jumpIcon, "settings-2");
+      // The ⇕ span for its WIDTH alone, never its meaning — the same reason renderSharingPicker
+      // renders one even when disabled (see its comment: without it the box is 14px narrower and
+      // the centered device slot drifts the icon out of the column, which is exactly what this
+      // hand-rolled cell used to do to the row above it). `is-jump` pins it invisible in every
+      // state including row hover, since this cell opens no menu to advertise. It cannot borrow
+      // `config-sync-dim` for that: that class also kills pointer events, and this cell is clicked.
+      setIcon(jumpIcon.createSpan({ cls: "config-sync-tworow-chev" }), "chevrons-up-down");
       // lockCell stays empty — there is no fileRule.encrypted left to speak for.
       const jumpToKeyRules = (): void => {
         const target = wrap.querySelector(".config-sync-card-fields");
@@ -1577,20 +1585,6 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       };
       jumpIcon.addEventListener("click", jumpToKeyRules);
       jumpIcon.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          jumpToKeyRules();
-        }
-      });
-      // Visible text, not a tooltip (see PER_KEY_RULES_JUMP_TEXT above) — the aria-label on the
-      // icon carries the same sentence for a screen reader, this line carries it for eyes.
-      const note = row.createDiv({
-        cls: "config-sync-card-keyrulesnote",
-        text: `${PER_KEY_RULES_JUMP_TEXT} ↓`,
-        attr: { role: "button", tabindex: "0" },
-      });
-      note.addEventListener("click", jumpToKeyRules);
-      note.addEventListener("keydown", (e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           jumpToKeyRules();

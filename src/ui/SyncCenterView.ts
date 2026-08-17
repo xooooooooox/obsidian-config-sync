@@ -940,9 +940,16 @@ export class SyncCenterView extends ItemView {
       // driftFor (availability.ts) only ever returns "ahead" once both versions are
       // non-null — mirrored via the && chain below (not a defensive fallback) rather than
       // asserted, since TS can't infer that guarantee from `a.drift` alone.
+      // BOTH anchors, not just "plugin". An app-anchored row (App settings, Appearance, Hotkeys,
+      // the two plugin lists) drifts exactly the same way when Obsidian itself updates, and
+      // `availabilityForGroup`'s app branch fills the same two version fields — but the original
+      // C-#37 gate only ever admitted plugins, so those rows kept landing on the generic
+      // `Captures files` fallback: a promise to edit files that the run does not keep, on a row
+      // whose files match the store byte for byte. `anchor` still travels so the copy can name
+      // WHOSE version moved (a bare "version 1.13.7" on App settings names nobody).
       versionAhead:
-        a.anchor === "plugin" && a.drift === "ahead" && a.localVersion !== null && a.storeVersion !== null
-          ? { installed: a.localVersion, stored: a.storeVersion }
+        a.drift === "ahead" && a.localVersion !== null && a.storeVersion !== null
+          ? { installed: a.localVersion, stored: a.storeVersion, anchor: a.anchor }
           : null,
       carrierSynced,
       storeListOn,
@@ -2026,7 +2033,12 @@ export class SyncCenterView extends ItemView {
     const renderSectionsBody = (): void => {
       sectionsHost.empty();
       // The Leftover filter shows the orphan section alone — type sections all hide.
-      if (this.filter !== "leftover") for (const ts of TYPE_SECTION_ORDER) this.renderTypeSection(sectionsHost, ts, inSection);
+      if (this.filter !== "leftover") {
+        // Computed ONCE for the whole pass and handed down: each head's hint depends on how many
+        // OTHER sections are staged, which no single section can see for itself.
+        const stagedSections = this.stagedSectionCount(inSection);
+        for (const ts of TYPE_SECTION_ORDER) this.renderTypeSection(sectionsHost, ts, inSection, stagedSections);
+      }
       // Store orphans: unrelated to any type section — they have no registry item to compile a
       // row for — so their section renders under the All and Leftover views only (never inside a
       // focused direction filter or a search pass). While the plugin's own configuration is still
@@ -2077,13 +2089,34 @@ export class SyncCenterView extends ItemView {
     for (const ts of TYPE_SECTION_ORDER) this.typeSectionOpen.add(ts);
   }
 
+  // One producer for "which rows belong to this section, and which of them survive the current
+  // search/filter" — the head's count pill needs both halves, and stagedSectionCount needs the
+  // second, so deriving it twice is how the hint and the section it sits on would come to disagree.
+  private typeSectionRows(inSection: StatusRow[], ts: TypeSection): { rows: StatusRow[]; visible: StatusRow[] } {
+    const rows = inSection.filter((r) => !CARRIER_GROUP_NAMES.has(r.group.name) && typeSectionForRow(this.itemSectionOf(r.group.name)) === ts);
+    const matches = this.searching() ? rows.filter((r) => this.rowMatchesSearch(r)) : rows;
+    return { rows, visible: matches.filter((r) => visibleUnderFilter(this.rowBucket(r), this.filter)) };
+  }
+
+  // How many type sections currently hold a staged row. Counted over VISIBLE rows, the same set
+  // each head counts, so a section whose staged rows are filtered out of view cannot keep its
+  // neighbour's hint alive from off-screen.
+  private stagedSectionCount(inSection: StatusRow[]): number {
+    let n = 0;
+    for (const ts of TYPE_SECTION_ORDER) {
+      const { visible } = this.typeSectionRows(inSection, ts);
+      if (visible.some((r) => this.selected.has(r.group.name) && this.fateFor(r).stageable)) n++;
+    }
+    return n;
+  }
+
   // One of the four fixed type sections: a fold containing every row whose section maps
   // here via typeSectionForRow, alphabetical within (rows() already sorts by section then name).
   // The self item is pinned first in Community, outside the row/Fate machinery entirely.
-  private renderTypeSection(host: HTMLElement, ts: TypeSection, inSection: StatusRow[]): void {
-    const rows = inSection.filter((r) => !CARRIER_GROUP_NAMES.has(r.group.name) && typeSectionForRow(this.itemSectionOf(r.group.name)) === ts);
-    const matches = this.searching() ? rows.filter((r) => this.rowMatchesSearch(r)) : rows;
-    const visible = matches.filter((r) => visibleUnderFilter(this.rowBucket(r), this.filter));
+  // `stagedSections` is the whole pass's count of sections holding a staged row — a section head
+  // cannot see its neighbours, and its hint depends on them.
+  private renderTypeSection(host: HTMLElement, ts: TypeSection, inSection: StatusRow[], stagedSections: number): void {
+    const { rows, visible } = this.typeSectionRows(inSection, ts);
     const showSelf = ts === "community" && this.selfInfo !== null && this.filter === "all" && !this.searching();
     if (visible.length === 0 && !showSelf) return; // sections with nothing to show hide entirely
     const filtered = this.filter !== "all" || this.searching();
@@ -2112,9 +2145,22 @@ export class SyncCenterView extends ItemView {
     if (carrierId !== null) this.renderCarrierChip(head, carrierId);
     const checkable = visible.filter((r) => this.fateFor(r).stageable);
     const staged = checkable.filter((r) => this.selected.has(r.group.name)).length;
-    // The checked/indeterminate select-all checkbox plus the global footer already carry this
-    // fact on mobile, where head space is scarce — desktop keeps the hint.
-    if (staged > 0 && !Platform.isMobile) head.createSpan({ cls: "config-sync-section-hint", text: `${staged} selected` });
+    // The hint answers the one question the global footer cannot: WHICH sections the selection is
+    // spread across. With only one staged section there is no such question — its number is
+    // necessarily the footer's own total, and `N selected` restates `N selected — captures N`
+    // word for word, which is exactly how it read as duplication. So it needs two staged sections
+    // to appear, and then says the number ALONE: "selected" is the word that collided, the digit
+    // is the per-section fact. The full sentence stays in the aria-label — the visible form is a
+    // number, the spoken form is a sentence, and a screen reader never hears a naked digit.
+    // Mobile renders none of this at all: the select-all checkbox's checked/indeterminate state
+    // plus the footer already carry it, and head space is scarce.
+    if (staged > 0 && stagedSections > 1 && !Platform.isMobile) {
+      head.createSpan({
+        cls: "config-sync-section-hint",
+        text: String(staged),
+        attr: { "aria-label": `${staged} selected` },
+      });
+    }
     // Nothing to stage in this section (e.g. pre-adopt Community, only the self row) means
     // no select-all affordance at all, not a disabled one — a control with nothing it could ever
     // do is not a state, it's dead weight.
@@ -2414,14 +2460,18 @@ export class SyncCenterView extends ItemView {
     // own emit order (buildChips, deterministic) — never re-sorted here. Icon-only chips fit
     // any width, so no mobile second line and no overflow-degrade machinery is needed.
     for (const chip of fate.chips) this.renderFateChip(row, chip);
-    // The fate sentence/glyph repeats the card's own "On apply"/"On capture" clause
-    // once expanded, so it hides while the drawer is open (checkbox and chips stay); the click
-    // handler below flips `hidden` alongside the chevron/drawer so it tracks expand/collapse
-    // without a full re-render. Glyph and sentence are separate flex children of
-    // this wrap — the glyph stays `flex: none` (always visible in full); only the sentence span
-    // shrinks/ellipsizes, so the fate sentence is the sole sacrificial element.
+    // The fate SENTENCE repeats the card's own "On apply"/"On capture" clause once expanded, so
+    // it hides while the drawer is open (glyph, checkbox and chips stay); the click handler below
+    // flips `hidden` alongside the chevron/drawer so it tracks expand/collapse without a full
+    // re-render. The DIRECTION never hides with it: the card restates the sentence but never which
+    // way the run goes, so dropping the glyph too would make expanding a row cost information
+    // instead of adding it. Glyph and sentence are separate flex children of this wrap — the glyph
+    // stays `flex: none` (always visible in full); only the sentence span shrinks/ellipsizes, so
+    // the fate sentence is the sole sacrificial element.
+    // Only the conflict branch below renders a visible sentence at all: directional and neutral
+    // fates put theirs in a tooltip on an icon, which duplicates nothing on screen.
     const fateWrap = row.createSpan({ cls: "config-sync-fate-wrap" });
-    fateWrap.hidden = expanded;
+    let fateSentenceEl: HTMLElement | null = null;
     // A DIRECTIONAL fate renders as the colored action icon alone:
     // ACTION_ICON's arrow-up-from-line/arrow-down-to-line in the same orange/accent
     // the pills and file rows speak — the row vocabulary the README screenshots show —
@@ -2440,7 +2490,8 @@ export class SyncCenterView extends ItemView {
       this.renderNeutralFateIcon(fateWrap, fate);
     } else {
       fateWrap.createSpan({ cls: "config-sync-fate-glyph", text: fate.glyph });
-      fateWrap.createSpan({ cls: "config-sync-fate-text", text: ` ${fate.sentence}` });
+      fateSentenceEl = fateWrap.createSpan({ cls: "config-sync-fate-text", text: ` ${fate.sentence}` });
+      fateSentenceEl.hidden = expanded;
     }
 
     if (!inert) {
@@ -2481,7 +2532,7 @@ export class SyncCenterView extends ItemView {
       else this.expandedItems.add(group.name);
       detail.hidden = !detail.hidden;
       setFoldOpen(chev, !detail.hidden);
-      fateWrap.hidden = !detail.hidden;
+      if (fateSentenceEl !== null) fateSentenceEl.hidden = !detail.hidden;
     });
   }
 
@@ -3395,7 +3446,13 @@ export class SyncCenterView extends ItemView {
 
   private renderActionBar(macro: HTMLElement): void {
     const bar = macro.createDiv({ cls: "config-sync-actionbar" });
-    bar.createSpan({ cls: "config-sync-staged-count", text: unifiedFooterSummary(this.footerSelection()) });
+    // ONE selection reading feeds both the summary and the button labels. The payload arrays below
+    // are what the run executes, not what the buttons count: `stagedPayload` fans a staged family
+    // row out into itself plus one entry per actionable companion, so a single checked Appearance
+    // becomes three payload entries. Reporting that as "3 items" next to the footer's "1 selected"
+    // puts two disagreeing numbers on one screen and names a fan-out the user never chose.
+    const sel = this.footerSelection();
+    bar.createSpan({ cls: "config-sync-staged-count", text: unifiedFooterSummary(sel) });
     bar.createDiv({ cls: "config-sync-rule-spacer" });
     const capItems = this.capturePayload();
     const applyItems = this.applyPayload();
@@ -3478,7 +3535,7 @@ export class SyncCenterView extends ItemView {
         capW.btn.buttonEl.addClass("is-busy");
       } else {
         renderActionIcon(capW.btn.buttonEl, "capture");
-        capW.btn.buttonEl.appendText(` Capture ${capItems.length} item${capItems.length === 1 ? "" : "s"}`);
+        capW.btn.buttonEl.appendText(` Capture ${sel.captureN} item${sel.captureN === 1 ? "" : "s"}`);
       }
       capW.btn.buttonEl.addClass("config-sync-btn-capture");
       capW.btn.setDisabled(this.running || capItems.length === 0);
@@ -3492,7 +3549,7 @@ export class SyncCenterView extends ItemView {
         applyW.btn.buttonEl.addClass("is-busy");
       } else {
         renderActionIcon(applyW.btn.buttonEl, "apply");
-        applyW.btn.buttonEl.appendText(` Apply ${applyItems.length} item${applyItems.length === 1 ? "" : "s"}`);
+        applyW.btn.buttonEl.appendText(` Apply ${sel.applyN} item${sel.applyN === 1 ? "" : "s"}`);
       }
       applyW.btn.setDisabled(this.running || applyItems.length === 0);
     }

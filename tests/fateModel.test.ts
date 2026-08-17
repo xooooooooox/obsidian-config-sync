@@ -349,7 +349,7 @@ describe("rowFate — family file-verb join", () => {
 // raw-in-sync row that presentedState relabels to-capture, whose only real work is recording the
 // newer version. versionAhead joins after whatever verb chain the row already has.
 describe("rowFate — version-ahead capture", () => {
-  const ahead = { installed: "2.2.3", stored: "2.2.2" };
+  const ahead = { installed: "2.2.3", stored: "2.2.2", anchor: "plugin" as const };
 
   it("pure version-ahead: no settings payload, no other verb — records version alone", () => {
     const f = rowFate({ ...base, direction: "capture", hasSettingsPayload: false, versionAhead: ahead });
@@ -359,7 +359,7 @@ describe("rowFate — version-ahead capture", () => {
     expect(f.nothingYet).toBe(false);
   });
   it("settings + version: joins after the settings verb", () => {
-    const f = rowFate({ ...base, direction: "capture", hasSettingsPayload: true, versionAhead: { installed: "2.1.0", stored: "2.0.9" } });
+    const f = rowFate({ ...base, direction: "capture", hasSettingsPayload: true, versionAhead: { installed: "2.1.0", stored: "2.0.9", anchor: "plugin" } });
     expect(f.sentence).toBe("Captures settings · records version 2.1.0");
   });
   it("turned-on + version: joins after the turned-on verb", () => {
@@ -370,12 +370,35 @@ describe("rowFate — version-ahead capture", () => {
     expect(rowFate({ ...base, direction: "capture" }).sentence).toBe("Captures settings");
     expect(rowFate({ ...base, direction: "capture", hasSettingsPayload: false, storeListOn: false, locallyOn: true }).sentence).toBe("Turned on here — shares it");
   });
+
+  // App-anchored rows (App settings, Appearance, Hotkeys, the two plugin lists) drift when
+  // Obsidian itself updates. Before this, the fact never reached the model for them and the row
+  // fell through to the generic `Captures files` — a promise to edit files, on a row whose files
+  // match the store byte for byte.
+  const appAhead = { installed: "1.13.7", stored: "1.13.4", anchor: "app" as const };
+
+  it("app-anchored pure drift names Obsidian, never a bare version", () => {
+    const f = rowFate({ ...base, direction: "capture", hasSettingsPayload: false, versionAhead: appAhead });
+    expect(f.glyph).toBe("↑");
+    expect(f.sentence).toBe("Records Obsidian 1.13.7");
+    expect(f.stageable).toBe(true);
+  });
+  it("app-anchored drift never degrades to the generic captures-files fallback", () => {
+    const withDrift = rowFate({ ...base, direction: "capture", hasSettingsPayload: false, versionAhead: appAhead });
+    const withoutDrift = rowFate({ ...base, direction: "capture", hasSettingsPayload: false, versionAhead: null });
+    expect(withoutDrift.sentence).toBe("Captures files"); // the shape this used to produce
+    expect(withDrift.sentence).not.toBe("Captures files");
+  });
+  it("app-anchored joins the same way when the row has a settings verb too", () => {
+    const f = rowFate({ ...base, direction: "capture", hasSettingsPayload: true, versionAhead: appAhead });
+    expect(f.sentence).toBe("Captures settings · records Obsidian 1.13.7");
+  });
 });
 
 // The card's on-capture clause — same three cases as the sentence above, asserted through
 // the exported pure helper stateClauseText delegates to.
 describe("versionAheadClause — card on-capture clauses", () => {
-  const ahead = { installed: "2.2.3", stored: "2.2.2" };
+  const ahead = { installed: "2.2.3", stored: "2.2.2", anchor: "plugin" as const };
 
   it("pure version-ahead", () => {
     const input: FateInput = { ...base, direction: "capture", hasSettingsPayload: false, versionAhead: ahead };
@@ -395,6 +418,24 @@ describe("versionAheadClause — card on-capture clauses", () => {
     };
     expect(versionAheadClause(input, ahead)).toBe(
       "Turned on here — your other devices will turn it on the next time they apply. Also records the newer 2.2.3 so they can update",
+    );
+  });
+
+  // The app-anchored half. The pure clause leads with the subject (a plugin row is its own
+  // subject; Obsidian is not), while the two joined clauses keep the plugin form byte-identical —
+  // their first half already names the plugin, so only the app case gains the word.
+  const appAhead = { installed: "1.13.7", stored: "1.13.4", anchor: "app" as const };
+
+  it("app-anchored pure drift", () => {
+    const input: FateInput = { ...base, direction: "capture", hasSettingsPayload: false, versionAhead: appAhead };
+    expect(versionAheadClause(input, appAhead)).toBe(
+      "Obsidian 1.13.7 is newer than the store's 1.13.4 — capture records it so your other devices can update",
+    );
+  });
+  it("app-anchored settings + version names Obsidian where the plugin form stays bare", () => {
+    const input: FateInput = { ...base, direction: "capture", hasSettingsPayload: true, versionAhead: appAhead };
+    expect(versionAheadClause(input, appAhead)).toBe(
+      "Shares your settings with your other devices — and records the newer Obsidian 1.13.7 so they can update",
     );
   });
 });

@@ -179,9 +179,15 @@ note-composer.json ..................................... 👁
 
 实现约束(三条,均为硬性):
 
-1. eye 放进 `.config-sync-card-pathhost`(已是 flex,`styles.css:1452`),用 `margin-left: auto`
-   右推。文件名保住 `.config-sync-card-pathline { grid-column: 1 / -1 }`(`:1388`)的整行跨列 ——
-   那条规则的存在理由是「plugin-length paths never wrap」,省略号截断照旧。
+1. eye 放进 `.config-sync-card-pathhost`(已是 flex,`styles.css:1452`),**紧贴文件名右侧**(一个
+   `gap`,不是 `margin-left: auto`)。文件名保住
+   `.config-sync-card-pathline { grid-column: 1 / -1 }`(`:1388`)的整行跨列 —— 那条规则的存在
+   理由是「plugin-length paths never wrap」,省略号截断照旧。
+
+   **本条曾写错并已落地一版,2026-08-17 验收时修正**:初稿把 `margin-left: auto` 写成硬性约束。
+   但那一行跨的是全部四轨,`auto` 因此把 eye 顶到**整张卡片的右缘**,凭空造出一列"操作列" ——
+   直接违反 `styles.css:1373-1374` 的既有约定「Nothing anchors to the drawer's right edge …
+   there is no action column」。**是 spec 的错,不只是实现的错。**
 2. **不得**改用 `.config-sync-scrow-end`(`grid-column: 4`,`:1384`):它会与 `1/-1` 的跨列重叠。
 3. **编辑态必须继续渲染 eye**。今天它在编辑态照常渲染,理由是槽位列不闪(`:1402-1404`);A′ 后它
    排在 `TextComponent` 与 `Reset to default` 之后,同一条不变式照旧成立。
@@ -249,13 +255,23 @@ picker」。`DESIGN.md:211`(fleet 段永不用 `airplay`)不变,并因本轮而�
 | per-key fleet 段第四挡 | `users` | `Each device decides` |
 | 本机段 · 跟随 | `corner-down-right` | tooltip `This device: follows the default` |
 | 本机段 · 例外 | `circle-slash` | tooltip `This device: not synced here` |
-| fields 模式 fleet 格 | `settings-2` | `Per-key rules decide — jump to them ↓` |
+| fields 模式 fleet 格 | `settings-2` | tooltip `Per-key rules decide — jump to them` |
 | 本机段列头 | — | `this device`(`THIS_DEVICE_EYEBROW`) |
 
-就地说明的措辞定稿为 **`Per-key rules decide — jump to them ↓`**:它是**可见文字**,不是悬停
-tooltip —— 手机没有悬停,这正是今天那一格读不懂的根因。dim `settings-2` 的 `aria-label` 用同一句
-(去掉箭头),**一个字符串一个生产者**;两者同为点击目标,行为一致(滚动并高亮本卡的 per-key 规
-则区)。箭头 `↓` 指的是同一张卡片里位于其下方的规则区。
+**这句话只做 tooltip,不再有可见副本(2026-08-17 验收定稿,推翻初稿)**。初稿要求它是常驻可见
+文字,理由是「手机没有悬停」。真机验收后改判:那一格的真实阅读路径是**先点 eye 看文件内容**,
+而一旦加了键,`KEY RULES` 分节头就会出现在它正下方 —— 那个标题离得更近、常驻,且本来就在回答
+同一个问题。再写一行可见文字,是把版面已经说过一遍的话再说一遍。
+
+因此 `.config-sync-card-keyrulesnote` 及其 DOM 一并删除;`PER_KEY_RULES_JUMP_TEXT` 保留,作为
+dim `settings-2` 的 `aria-label`(去掉了箭头 `↓` —— 它原本指的是下方的规则区,现在没有可见文字
+承载它)。
+
+**该格同时携带一个不可见的 `⇕` 占位**(`is-jump`):它不开菜单,所以那个 ⇕ 在任何状态下都不显形
+(含行悬停 —— 显出来就是在暗示一个不存在的下拉);它存在的唯一理由是让字形盒子与
+`renderSharingPicker` 等宽,否则居中的 device 槽会把图标挤出列,正是初版落地后 `ENABLED ON` 与
+`SETTINGS SYNC` 两行错开 12px 的成因。**不可**改用 `config-sync-dim` 达成:那个类带
+`pointer-events: none`,而这一格是点击目标。
 
 两条既有文案的归属随之厘清:
 

@@ -449,8 +449,10 @@ noted):
   Apply/Capture run; selection never changes what would happen, only whether it happens. It
   is direction-colored (orange capture / accent apply, §1.1) like every other checkbox, and
   hidden entirely on inert rows (in-sync / nothing-yet / unresolved conflict). Expanding the
-  row hides the fate sentence/glyph — the card's own `On apply`/`On
-  capture`/`State` row becomes the single statement while open; chips and the checkbox stay.
+  row hides the fate SENTENCE only — the card's own `On apply`/`On capture`/`State` row becomes
+  the single statement while open. The direction GLYPH stays, along with the chips and the
+  checkbox: the card restates the sentence but never the direction, so hiding the glyph too
+  would make expanding a row cost information rather than add it.
   **Containment (global, every platform):** names and section titles never truncate or
   ellipsize; chips never wrap
   or clip — a row's chip GROUP degrades together to icon-only + tooltip once it overflows,
@@ -469,7 +471,16 @@ noted):
   settings verb with the folder verb (`Applies settings · applies N files` / `Captures
   settings · captures N files`, the same ` · ` join as the install/turn-on sequence);
   Appearance's override sentence (`Applies theme & snippets — live` / `Captures theme &
-  snippets`) replaces the joined pair outright. A conflict on any member,
+  snippets`) replaces the joined pair outright.
+  **Version drift is its own capture verb.** A row whose files match the store on both sides
+  can still be capture-directional because the store's lock records an OLDER source version
+  than the one installed now. That fact joins the verb chain with the same ` · ` grammar
+  (`records version 2.2.3` for a plugin-anchored row, `records Obsidian 1.13.7` for an
+  app-anchored one — App settings, Appearance, Hotkeys and the two plugin lists), and on a row
+  with no other verb it stands alone. Such a card renders **no FILES row, correctly**: nothing
+  in any file changes, and the sentence says so. The generic `Captures files` fallback must
+  never be what a version-drift row degrades to — it promises an edit the run will not make.
+  A conflict on any member,
   or actionable members split across both directions, renders the family `⚠ Changed on
   both sides` and reuses the existing Resolve grammar (`Use theirs ↓` / `Keep mine ↑`) at
   family level — no extra controls. Custom `+ Add folder` groups are not companions and stay
@@ -491,7 +502,12 @@ noted):
   select-alls (they carry no direction); idle select-all hides (`-selectall-idle`).
 - **Action bar** `config-sync-actionbar` — staged count + solid direction buttons
   (`-btn-capture` orange; Apply = `mod-cta`); 0-item = same color at 0.5 opacity; btnwrap
-  hosts the 2px progress bar + shimmer; `-runline` is the live status line.
+  hosts the 2px progress bar + shimmer; `-runline` is the live status line. **The button's
+  count is the count of STAGED ROWS** — the same number the footer summary states, never the
+  length of the derived payload. A staged family row fans out into its own entry plus one per
+  actionable companion before the run, so the payload is routinely larger than the selection;
+  reporting that as "items" puts two disagreeing numbers on one screen and names an internal
+  fan-out the user never chose. The run still executes every payload entry.
 - **Type sections** `config-sync-card`; the list is four fixed sections
   (`config-sync-section.is-typesection`), fixed order, alphabetical within: `Obsidian` ·
   `Core plugins` · `Community plugins` (the Config Sync self row pinned first) · `Your
@@ -516,10 +532,15 @@ noted):
   carry a header chip (`renderCarrierChip`) reading `settings-2` + `synced` /
   `not synced` — **read-only**: it only
   jumps to the carrier's own Settings card, where the sync toggle lives (§2.3). On desktop
-  a `N selected` hint (`config-sync-section-hint`) follows the head while any of the
-  section's rows are staged; on mobile it does not render (the section checkbox's checked/
-  indeterminate state and the global footer already carry it), the head stays one line, and
-  the title is the only element allowed to wrap.
+  a bare count hint (`config-sync-section-hint`) follows the head — but ONLY while **two or
+  more** sections have staged rows, and it reads the number alone (`2`), never `2 selected`.
+  The hint exists to answer what the global footer cannot — WHICH sections the selection is
+  spread across — so with a single staged section it has no question to answer and its
+  `N selected` wording merely restates the footer's own `N selected — captures N` verbatim.
+  Its `aria-label` still carries the full `N selected` sentence: the visible form is a number,
+  the spoken form is a sentence. On mobile it does not render at all (the section checkbox's
+  checked/indeterminate state and the global footer already carry it), the head stays one
+  line, and the title is the only element allowed to wrap.
   Section select-all/clear targets actionable visible rows only —
   excludes the self row, in-sync, nothing-yet, and unresolved-conflict rows. Per-section
   trailing fold lines (`config-sync-unchanged`) aggregate only their own section's `N in
@@ -905,10 +926,12 @@ noted):
     (`config-sync-card-sfhead`, a scrow) IS the zone header — no separate
     label line: its identity cell stacks the uppercase `SETTINGS SYNC` label over the mono
     filename; the `eye` (`config-sync-card-previewicon` — the File
-    preview trigger, see below) rides the filename's own line instead, pushed to its right end
-    (`margin-left: auto` inside the pathhost flex, at the family size and quiet-rest shade —
-    never `.config-sync-scrow-end`, a fixed `grid-column: 4` that would overlap the filename
-    line's `1 / -1` span); the controls cluster holds the 3-option sharing icon (no
+    preview trigger, see below) rides the filename's own line instead, **hugging the filename's
+    right edge** (a gap inside the pathhost flex, at the family size and quiet-rest shade). It
+    must NOT be pushed to the line's far end: that line spans `1 / -1`, so `margin-left: auto`
+    would anchor the eye to the CARD's right edge and invent the action column §2.1 forbids.
+    `.config-sync-scrow-end` is equally wrong — a fixed `grid-column: 4` that would overlap the
+    filename line's own `1 / -1` span. The controls cluster holds the 3-option sharing icon (no
     `This device`) and the lock toggle (`config-sync-lock`) that encrypts the whole file. Line 1
     also carries the row's own local segment (`paintLocalSegment`/`optOutLocalSegment`, §2.3) —
     THIS device's own opt-out of the whole file (`config-sync-device-optouts`, the same answer the
@@ -933,13 +956,16 @@ noted):
     it the moment the group turns fields-mode, so a whole-file rule left over from before the
     first per-key rule would state a value nothing enforces any more; it survives in
     `data.json` only because `pruneSettingsFile` still needs it for a clean round-trip). Its
-    sharing slot instead draws a dim `settings-2` (`config-sync-sharingicon`, no `⇕` — a jump,
-    not a menu) as a `role="button"` link to the Key rules panel below: click/Enter/Space
-    scrolls to it and flashes `config-sync-search-highlight`, the SAME class the search bar's
-    own card jump uses. Its `aria-label` and a VISIBLE line under the row both read `Per-key
-    rules decide — jump to them` (the trailing `↓` lives only in the visible copy — a phone has
-    no hover, so the sentence cannot live in a tooltip alone), while the lock slot renders
-    nothing (three-state rule above),
+    sharing slot instead draws a dim `settings-2` (`config-sync-sharingicon`) as a
+    `role="button"` link to the Key rules panel below: click/Enter/Space scrolls to it and
+    flashes `config-sync-search-highlight`, the SAME class the search bar's own card jump uses.
+    Its `aria-label` reads `Per-key rules decide — jump to them`, and that sentence lives in the
+    tooltip ALONE — no visible line repeats it, because the `KEY RULES` zone label sitting
+    directly below already answers the same question, nearer and permanently. It carries the
+    `⇕` span like every other picker even though it opens no menu: the span is pinned invisible
+    (never revealed on row hover — a jump must not advertise a dropdown) and exists purely to
+    keep the glyph box the same width, so the centered device slot holds its column against the
+    row above. The lock slot renders nothing (three-state rule above),
     and — under their own `KEY RULES` zone label — a rule row
     (`config-sync-card-rulerow`, a scrow) appears per configured
     key — never every key in the file, only ones with a rule; browsing the rest is File

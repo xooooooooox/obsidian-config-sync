@@ -1219,6 +1219,12 @@ body.is-mobile .config-sync-cardrow:not(.is-iconrow) > .config-sync-explabel-inl
    the centered device slot drifts the icon ~7px out of the column) — but it has no
    menu to open, so the row-hover reveal above must never light it. */
 .config-sync-sharingicon.config-sync-dim .config-sync-tworow-chev { opacity: 0; }
+/* Same width-keeping trick, one step further: the fields-mode JUMP cell is not a picker at all —
+   it opens no menu, so its ⇕ must stay invisible even on row hover (a revealed ⇕ advertises a
+   dropdown that does not exist). It cannot use .config-sync-dim to get there: that class carries
+   `pointer-events: none`, and this cell is the click target. Hence its own modifier, which has to
+   out-specify the row-hover reveal above. */
+.config-sync-sharingicon.is-jump .config-sync-tworow-chev { opacity: 0; }
 /* Mobile has no hover to reveal it (same degradation the fold chevron takes) — the
    mobile section switcher (`.config-sync-switcher-chev`, its own class, its own always-visible
    rule) is the one deliberate exception: it is the sole entrance to the section list there. */
@@ -1389,10 +1395,12 @@ body.is-mobile .config-sync-tworow-chev { display: none; }
    paths never wrap; ellipsis only as the genuine last resort. */
 .config-sync-card-pathline { grid-column: 1 / -1; min-width: 0; overflow: hidden; }
 .config-sync-card-pathline .config-sync-card-path { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* A′: the eye is an action on the FILE, so it rides the filename line, right-flushed inside the
-   existing pathhost flex. Not .config-sync-scrow-end — that is grid-column:4 and would overlap
-   .config-sync-card-pathline's 1/-1 span. */
-.config-sync-card-pathline .config-sync-card-previewicon { margin-left: auto; flex: none; }
+/* A′: the eye is an action on the FILE, so it rides the filename line — HUGGING the filename's
+   right edge, never flushed to the line's end. `margin-left: auto` here would anchor it to the
+   CARD's right edge (this line spans 1/-1) and invent the action column §2.1 forbids: "nothing
+   anchors to the drawer's right edge". Not .config-sync-scrow-end either — that is grid-column:4
+   and would overlap this line's own 1/-1 span. */
+.config-sync-card-pathline .config-sync-card-previewicon { margin-left: var(--size-4-2); flex: none; }
 /* The Advanced rule editor's vertical form: one field per scrow row, label | control. */
 .config-sync-advrow { grid-template-columns: 130px 1fr; }
 .config-sync-advrow-ctl { display: flex; align-items: center; min-width: 0; }
@@ -1458,11 +1466,6 @@ body.is-mobile .config-sync-scrow { grid-template-columns: minmax(90px, 32%) 64p
 /* Flex so the edit state's input + Reset link share one line inside the content column. */
 .config-sync-card-pathhost { min-width: 8em; display: flex; align-items: center; }
 .config-sync-card-pathinput { width: 100%; font-family: var(--font-monospace); font-size: var(--font-ui-smaller); }
-/* Visible, in-card explanation for the fields-mode settings-file row (no fileRule left to draw a
-   picker for) — same click target as the dim settings-2 jump beside it (renderSettingsFilePathRow),
-   styled like .config-sync-expdesc so it reads as a caption, not a control, at rest. */
-.config-sync-card-keyrulesnote { color: var(--text-faint); font-size: var(--font-ui-smaller); cursor: pointer; margin-top: var(--size-2-1); }
-.config-sync-card-keyrulesnote:hover, .config-sync-card-keyrulesnote:focus-visible { color: var(--text-muted); text-decoration: underline dotted var(--text-faint); text-underline-offset: 3px; }
 .config-sync-card-sfbody { margin-top: var(--size-2-2); }
 
 .config-sync-card-fields { margin-bottom: var(--size-4-1); }
