@@ -59,8 +59,8 @@ describe("applyUpdates / pruneLedger", () => {
     expect(pruneLedger(base, new Set(["community/a"])).items).toEqual({ "community/a": ENTRY });
   });
   // The prune is what eventually clears an unresolvable entry the re-key preserved: the migration
-  // never deletes, and the prune answers the question it cannot — is this still synced HERE?
-  it("baselineRefs is the keep-set: the refs of the groups this device syncs, and only those", () => {
+  // never deletes, and the prune answers the question it cannot — does this item still EXIST?
+  it("baselineRefs is the keep-set: the refs of the groups this device compiles, and only those", () => {
     const groups: SyncGroup[] = [
       { name: "plugin-a", ref: "community/a", path: "{configDir}/plugins/a/data.json", type: "file", devices: "all" },
       { name: "loose", path: "{configDir}/loose.json", type: "file", devices: "all" },
@@ -68,6 +68,57 @@ describe("applyUpdates / pruneLedger", () => {
     expect(baselineRefs(groups)).toEqual(new Set(["community/a"]));
     const base: Ledger = { version: LEDGER_VERSION, items: { "community/a": ENTRY, "legacy/who-knows": ENTRY } };
     expect(Object.keys(pruneLedger(base, baselineRefs(groups)).items)).toEqual(["community/a"]);
+  });
+});
+
+// THE CONTRACT, pinned. `pruneLedger` deletes what its keep-set omits, so what you build the
+// keep-set FROM decides which baselines survive — and a baseline is the only thing that can tell
+// "the store moved" from "this device moved" the next time an item is compared.
+//
+// Callers narrow the compile twice before comparing: once by device class, once by this device's
+// opt-out list. Both are REVERSIBLE CHOICES, not statements that an item stopped existing. Building
+// the keep-set from that narrowed list — which is what refreshLocalStatus did — deleted the
+// baseline of every opted-out and every class-scoped-away item on the next refresh. Opting back in
+// then found no baseline, so groupStatus (core/status.ts) fell through to `never-synced`: a row
+// that read "capture my newer settings" came back reading "apply the store over me", and an item
+// with companions rolled that up into a phantom `Changed on both sides`.
+describe("the prune's keep-set — existence, never current participation", () => {
+  const compiled: SyncGroup[] = [
+    { name: "plugin-a", ref: "community/a", path: "{configDir}/plugins/a/data.json", type: "file", devices: "all" },
+    { name: "plugin-optedout", ref: "community/optedout", path: "{configDir}/plugins/o/data.json", type: "file", devices: "all" },
+    { name: "plugin-desktoponly", ref: "community/desktoponly", path: "{configDir}/plugins/d/data.json", type: "file", devices: "desktop" },
+  ];
+  // What a mobile device actually compares: minus the desktop-only group, minus the opted-out one.
+  const compared = compiled.filter((g) => g.devices === "all" && g.ref !== "community/optedout");
+  const full: Ledger = {
+    version: LEDGER_VERSION,
+    items: {
+      "community/a": ENTRY,
+      "community/optedout": ENTRY,
+      "community/desktoponly": ENTRY,
+      "community/deleted": ENTRY, // nothing compiles this any more — the entry the prune is FOR
+    },
+  };
+
+  it("keeps the baseline of an item this device opted out of", () => {
+    expect(Object.keys(pruneLedger(full, baselineRefs(compiled)).items)).toContain("community/optedout");
+  });
+
+  it("keeps the baseline of an item scoped to another device class", () => {
+    expect(Object.keys(pruneLedger(full, baselineRefs(compiled)).items)).toContain("community/desktoponly");
+  });
+
+  it("still drops an entry nothing compiles — the prune's actual job is untouched", () => {
+    expect(Object.keys(pruneLedger(full, baselineRefs(compiled)).items)).not.toContain("community/deleted");
+  });
+
+  // The regression, stated as the difference between the two candidate keep-sets. Narrowing by what
+  // is being compared right now loses two baselines that the compile-wide set keeps.
+  it("loses baselines when built from what is compared instead of what is compiled", () => {
+    const byCompiled = Object.keys(pruneLedger(full, baselineRefs(compiled)).items).sort();
+    const byCompared = Object.keys(pruneLedger(full, baselineRefs(compared)).items).sort();
+    expect(byCompiled).toEqual(["community/a", "community/desktoponly", "community/optedout"]);
+    expect(byCompared).toEqual(["community/a"]);
   });
 });
 

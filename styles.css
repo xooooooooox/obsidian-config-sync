@@ -504,7 +504,15 @@ body.is-phone .config-sync-fkey {
 /* The head is the whole target — the badge inside it is never clicked on its own, so nothing has to
    be aimed at. Same shape whether the row is collapsed (head only) or expanded (head plus
    `.config-sync-files-list` underneath). */
-.config-sync-files-head { display: flex; align-items: center; cursor: pointer; width: fit-content; }
+/* The head carries no cursor and no target semantics of its own: the whole
+   `.config-sync-filesrow` is the button (renderFilesRow). It is a plain wrapper for the badge. */
+.config-sync-files-head { display: flex; align-items: center; width: fit-content; }
+/* The one expandable row in the card, so the one that has to LOOK operable: the
+   whole row lifts on hover and takes the focus ring, rather than a badge at the far right end
+   being the only live pixel on the line. */
+.config-sync-filesrow { cursor: pointer; }
+.config-sync-filesrow:hover { background: var(--background-modifier-hover); }
+.config-sync-filesrow:focus-visible { outline: 2px solid var(--interactive-accent); outline-offset: -2px; border-radius: var(--radius-s); }
 /* The list is a SIBLING of the FILES row (renderFilesRow), so it owns the card's full width
    instead of the grid remainder — file names are the one thing in this card that genuinely needs
    the width. A small indent is all that says "these belong to the row above"; anything wider would
@@ -721,7 +729,12 @@ body.is-mobile.config-sync-mobile-statusbar .status-bar {
   cursor: not-allowed;
 }
 
-.config-sync-hub-row.is-insync { opacity: 0.55; }
+/* Dimming is for rows with nothing to do — in sync, no settings yet, not synced here. An
+   unresolved conflict is ALSO unstageable (you must pick a side first) and so also carries
+   `is-inert`, but it is the opposite kind of nothing: it is the one row waiting on the user. It
+   used to inherit this opacity and read fainter than the routine work around it, which is what
+   "the font changed" turned out to be. */
+.config-sync-hub-row.is-inert:not(.is-conflict) { opacity: 0.55; }
 .config-sync-actionbar { display: flex; gap: var(--size-4-2); justify-content: flex-end; margin-top: var(--size-4-3); }
 /* Direction-colored action buttons at every count: Capture is solid orange,
    Apply solid accent (mod-cta) — the remote Pull/Push primary language. High enough

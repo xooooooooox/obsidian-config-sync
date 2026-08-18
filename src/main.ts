@@ -441,7 +441,16 @@ export default class ConfigSyncPlugin extends Plugin {
       const ledger = this.loadBaselines();
       const { statuses, updates } = await statusForGroups(ctx, scoped, ledger);
       this.localStatuses = statuses;
-      this.saveBaselines(pruneLedger(applyUpdates(ledger, updates), baselineRefs(scoped)));
+      // The prune's keep-set is the WHOLE compile (`manifest.groups`), never `scoped`. `scoped` is
+      // what this device COMPARES right now — already narrowed by the opt-out list and by the
+      // device-class filter — and both of those are reversible choices, not statements that an item
+      // stopped existing. Pruning by them deleted the baseline of every opted-out (and every
+      // class-scoped-away) item on the very next refresh, so opting back in found no baseline and
+      // groupStatus fell to `never-synced`: a row that was "↑ capture my newer settings" came back
+      // as "↓ apply the store over me", and an item with companions rolled that up into a phantom
+      // `Changed on both sides`. The prune still does its real job — an item deleted from the
+      // config leaves `manifest.groups`, so its entry still goes.
+      this.saveBaselines(pruneLedger(applyUpdates(ledger, updates), baselineRefs(manifest.groups)));
       // Presented buckets for the ribbon dot: version-ahead in-sync items count as to-capture,
       // matching the panel (0.23.4/0.23.5) — no crypto cost, just a lock read.
       let lock: StoreLock | null = null;
@@ -623,7 +632,12 @@ export default class ConfigSyncPlugin extends Plugin {
         const ledger = this.loadBaselines();
         const { statuses, updates } = await statusForGroups(ctx, groups, ledger);
         this.localStatuses = statuses;
-        this.saveBaselines(pruneLedger(applyUpdates(ledger, updates), baselineRefs(groups)));
+        // `lastGroups`, not `groups`: see refreshLocalStatus's note above. `groups` here is already
+        // minus the class-excluded and minus the opted-out, and pruning by it deletes exactly the
+        // baselines those two reversible choices must never touch. `lastGroups` is the reunion of
+        // all three, computed one line above for the panel — the same "everything this device
+        // compiles" set the keep-set wants.
+        this.saveBaselines(pruneLedger(applyUpdates(ledger, updates), baselineRefs(this.lastGroups)));
         let lock: StoreLock | null = null;
         try {
           lock = await loadLock(ctx);
@@ -1714,6 +1728,12 @@ export default class ConfigSyncPlugin extends Plugin {
     if (on) refs.add(ref);
     else refs.delete(ref);
     this.saveDeviceOptOutGroups([...refs]);
+    // The comparison lens just moved — an opted-out group stops being compared, an opted-in one
+    // starts again — so the panel and the status indicators must re-derive, exactly as
+    // saveDeviceField/setDeviceElement/leaveToThisDevice/followTheDefault already do. This was the
+    // only writer of that family missing it, which is why opting back in left a stale reading on
+    // screen until something else happened to refresh.
+    await this.refreshLocalStatus();
   }
 
   // SettingsHost-facing binding of the same whole-file opt-out read isDeviceOptedOut already backs

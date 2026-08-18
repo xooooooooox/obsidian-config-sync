@@ -2552,7 +2552,12 @@ export class SyncCenterView extends ItemView {
     // No row-level aria-label: Obsidian renders aria-labels as hover tooltips — a
     // row-level one pops on any blank stretch of the row.
     const row = card.createDiv({
-      cls: `config-sync-hub-row${inert ? " is-insync" : ""}${unresolvedConflict ? " is-conflict" : ""}`,
+      // `is-inert`, not the old `is-insync`: the flag is `!fate.stageable`, and TWO opposite states
+      // share that — "already in sync, nothing to do" and "changed on both sides, waiting on you".
+      // Under the old name the second inherited the first's `opacity: 0.55`, so the single row that
+      // needed the user's attention rendered FAINTER than the routine work above and below it. The
+      // dimming now belongs to the calm reading only (styles.css), and the name says what it tests.
+      cls: `config-sync-hub-row${inert ? " is-inert" : ""}${unresolvedConflict ? " is-conflict" : ""}`,
     });
     const chev = renderFoldChevron(row, expanded, null);
     this.renderRuleName(row, group.name, group.label);
@@ -2862,6 +2867,7 @@ export class SyncCenterView extends ItemView {
     const total = changes.added.length + changes.updated.length + changes.deleted.length;
     if (total === 0) return;
     const row = this.cardRowShell("Files", true);
+    row.addClass("config-sync-filesrow");
     const value = row.createDiv({ cls: "config-sync-cardrow-ctl config-sync-files-val" });
     const list = createDiv({ cls: "config-sync-files-list" });
     const key = r.group.name;
@@ -2872,34 +2878,38 @@ export class SyncCenterView extends ItemView {
       // ONE mark, not three. The row used to read `↑ (4) ›` — a direction badge, a neutral count
       // pill and a fold chevron, each its own little target — where all three answered the same
       // question. They are one badge now: the direction's icon and its count in a single pill that
-      // carries the direction's color, with the whole head as the click/keyboard target so nothing
-      // has to be aimed at. Expanded, the badge fills in (`.is-open`) instead of a chevron rotating
-      // beside it — same state, one fewer glyph.
-      const head = value.createDiv({
-        cls: "config-sync-files-head",
-        attr: {
-          role: "button",
-          tabindex: "0",
-          "aria-expanded": expanded ? "true" : "false",
-          "aria-label": `${filesChangeLabel(total)} — ${dir === "capture" ? "these changes land in the store" : "these changes land on this device"}`,
-        },
-      });
+      // carries the direction's color. The badge is pure STATE — the click/keyboard target is the
+      // whole row (wired below) — so there is nothing left on this line to aim at. Expanded, the
+      // badge fills in (`.is-open`) instead of a chevron rotating beside it: same state, one fewer
+      // glyph.
+      const head = value.createDiv({ cls: "config-sync-files-head" });
       const badge = head.createSpan({ cls: `config-sync-files-badge ${ACTION_COLOR_CLASS[dir]}${expanded ? " is-open" : ""}` });
       setIcon(badge.createSpan({ cls: "config-sync-files-badge-ic" }), ACTION_ICON[dir]);
       badge.createSpan({ text: String(total) });
-      const toggle = (): void => {
-        if (this.expandedFileRows.has(key)) this.expandedFileRows.delete(key);
-        else this.expandedFileRows.add(key);
-        build();
-      };
-      head.addEventListener("click", toggle);
-      head.addEventListener("keydown", (e) => {
-        if (e.key !== "Enter" && e.key !== " ") return;
-        e.preventDefault();
-        toggle();
-      });
+      row.setAttrs({ "aria-expanded": expanded ? "true" : "false" });
       if (expanded) this.renderUnifiedFiles(list, r, changes, dir, encrypted);
     };
+    // THE ROW is the target, not the badge. 2.25.0 moved every card control to the card's right
+    // edge, and the listeners had always been on the badge — so the only clickable thing slid to
+    // the row's far end, leaving the `FILES` label and the whole stretch between it and the badge
+    // dead. Wired once out here rather than inside `build`, which re-runs on every toggle and would
+    // otherwise stack a listener per expand.
+    const toggle = (): void => {
+      if (this.expandedFileRows.has(key)) this.expandedFileRows.delete(key);
+      else this.expandedFileRows.add(key);
+      build();
+    };
+    row.setAttrs({
+      role: "button",
+      tabindex: "0",
+      "aria-label": `${filesChangeLabel(total)} — ${dir === "capture" ? "these changes land in the store" : "these changes land on this device"}`,
+    });
+    row.addEventListener("click", toggle);
+    row.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      e.preventDefault();
+      toggle();
+    });
     build();
     detail.appendChild(row);
     detail.appendChild(list);
