@@ -1,4 +1,4 @@
-import { App, ButtonComponent, ExtraButtonComponent, ItemView, Menu, Modal, Platform, WorkspaceLeaf, setIcon, setTooltip } from "obsidian";
+import { App, ButtonComponent, ItemView, Menu, Modal, Platform, WorkspaceLeaf, setIcon, setTooltip } from "obsidian";
 import { ApplyItem, CaptureItem, orderInstallsCatalogFirst, ProgressFn, StateAction } from "../core/ConfigSyncCore";
 import { lockRefFor, refItemId } from "../core/itemKeys";
 import { GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry, RemoteDiffFile, remoteDirectionCounts } from "../core/status";
@@ -85,6 +85,7 @@ import { Fate, FateInput, NOTHING_YET_SENTENCE, rowFate, versionAheadClause } fr
 import { openDiffModal } from "./DiffModal";
 import { renderDiffPanel, type DiffResolveControl } from "./diffView";
 import { paintResolveSegment, renderResolveSegment } from "./resolveSegment";
+import { REFRESH_BUTTON_CLASS, holdSpin, paintRefreshButton, renderRefreshButton, type RefreshView } from "./refreshControl";
 import { confirmDeleteLeftovers } from "./ConfirmModal";
 import { LEFTOVER_SECTION_ORDER, LeftoverSection } from "../core/leftover";
 import { EnablementList, isSwitchListGroup, switchListSortedView } from "../core/switchList";
@@ -482,6 +483,9 @@ export class SyncCenterView extends ItemView {
   private search = "";
   private betaIds: Set<string> = new Set();
   private lastRefreshedAt: number | null = null;
+  // This view's own refresh gesture is in flight. Deliberately not derived from the plugin's
+  // remoteRefreshProgress — see refreshControl.ts's opening note for why that could never work.
+  private refreshing = false;
   private compact = false;
   private switcherOpen = false;
   private running = false;
@@ -1692,15 +1696,52 @@ export class SyncCenterView extends ItemView {
     // Manual refresh: re-scans local state, catching plugin toggles made in Obsidian's
     // settings modal while the panel stayed open, and re-checks every remote (desktop only).
     // The refreshed-age lives in this button's tooltip, recomputed on each render.
-    const refresh = new ExtraButtonComponent(head);
-    refresh.setIcon("refresh-cw");
-    refresh.setTooltip(this.lastRefreshedAt === null ? "Refresh" : `Refresh — refreshed ${relativeAge(this.lastRefreshedAt)}`);
-    refresh.extraSettingsEl.addClass("config-sync-center-refresh");
-    refresh.extraSettingsEl.toggleClass("config-sync-refresh-spinning", this.host.remoteRefreshProgress() !== null);
-    refresh.onClick(async () => {
+    // Every re-render reads the CURRENT busy state (refreshView), so the mid-refresh rebuilds the
+    // refresh itself provokes redraw the spin instead of erasing it.
+    renderRefreshButton(head, this.refreshView(), () => void this.runRefresh());
+  }
+
+  private refreshView(): RefreshView {
+    return {
+      // Either half counts as busy: this view's own gesture, or a remote sweep some other surface
+      // (the command, the status bar) kicked off while the panel was open.
+      busy: this.refreshing || this.host.remoteRefreshProgress() !== null,
+      age: this.lastRefreshedAt === null ? null : relativeAge(this.lastRefreshedAt),
+    };
+  }
+
+  // Repaints every refresh control currently on screen without a render — the button has to start
+  // spinning on the same tick as the click, and `reload()` does not touch the DOM until it ends.
+  private paintRefresh(): void {
+    for (const el of Array.from(this.contentEl.querySelectorAll(`.${REFRESH_BUTTON_CLASS}`))) {
+      paintRefreshButton(el as HTMLElement, this.refreshView());
+    }
+  }
+
+  // The whole gesture, both halves. Re-entrant clicks are dropped rather than queued: the remote
+  // half already de-dupes (main.ts's refreshRemoteChecks returns the in-flight run), but the local
+  // half does not, and a second full re-scan of every item buys nothing the first one is not
+  // already about to deliver.
+  private async runRefresh(): Promise<void> {
+    if (this.refreshing) return;
+    this.refreshing = true;
+    this.paintRefresh();
+    const startedAt = Date.now();
+    try {
       await this.host.refreshRemoteChecks(); // desktop: re-checks every remote (and reloads via notify)
       await this.reload();                   // mobile no-ops the above; ensure local still refreshes
-    });
+    } finally {
+      await this.holdSpin(Date.now() - startedAt);
+      this.refreshing = false;
+      this.paintRefresh();
+    }
+  }
+
+  // A one-line wrapper so the floor's timer is a seam the tests can stand in for, the same way they
+  // already stand in for the repaints — the pane's only browser timer is not worth a DOM
+  // environment to assert the re-entrancy guard around it.
+  private holdSpin(elapsed: number): Promise<void> {
+    return holdSpin(elapsed);
   }
 
   // The run's report is recorded to history and surfaced in the inline strip; the strip

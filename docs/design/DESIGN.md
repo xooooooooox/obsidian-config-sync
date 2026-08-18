@@ -844,6 +844,17 @@ noted):
   right-aligned refresh control (`config-sync-center-refresh`, `refresh-cw`): no `refreshed
   …` text span — the age lives in the button's own tooltip (`Refresh — refreshed just now`
   / `… 5m ago`, `relativeAge`), same on desktop and mobile.
+  BUSY STATE (`src/ui/refreshControl.ts`, builder + in-place repainter, the `resolveSegment.ts`
+  split): the icon spins (`config-sync-refresh-spinning`) and the tooltip becomes `Refreshing…`
+  — the age is dropped while the number it quotes is about to change. Busy spans the WHOLE gesture,
+  both the remote sweep and the local re-scan, and is the view's own flag rather than a reading of
+  `remoteRefreshProgress()`: that progress is per-remote, desktop-only, and could only be observed
+  by a render, while every progress tick starts a `reload()` that abandons the previous one — so the
+  only frame that ever reached the screen was the not-busy one. The control is therefore painted
+  directly, never via `render()`. A re-entrant click is dropped (the local half does not de-dupe on
+  its own), and the spin is held to a `MIN_SPIN_MS` floor so a fast refresh reads as a refresh
+  rather than as a dead button. `remoteRefreshProgress()` keeps its two real consumers: the
+  per-remote spinner in the sidebar and the aggregate line on a remote's pane.
 - **Status bar item** (`src/ui/statusBar.ts`, rendered by `main.ts`) — plain colored text
   segments, no pill backgrounds; colors identical to the header pills
   (`is-up` orange, `is-down` accent, `is-push` pink, `is-pull` cyan). Clean state = a dimmed
