@@ -126,17 +126,37 @@ function renderSplit(pane: HTMLElement, rows: DiffRow[], leftLabel: string, righ
 }
 
 // Builds toolbar (meta + Unified⇄Split toggle) and the diff pane. Mobile forces unified.
+//
+// `meta.sorted` used to print as a trailing ` · sorted view`, which spent the toolbar's most
+// readable slot on a caveat while pushing the filename — the thing being diffed — off to the left.
+// The caveat is still true and still needed (the rows are NOT in file order), so it moves into the
+// meta's own accessible name instead of vanishing.
+// `onExpand` renders the "open this in a bigger window" button. `null` where there is nowhere
+// bigger to go — inside the modal that button opens, and inside the conflict modal.
 export function renderDiffPanel(
   host: HTMLElement,
   leftText: string,
   rightText: string,
   leftLabel: string,
   rightLabel: string,
-  meta: string
+  meta: { name: string; sorted: boolean },
+  onExpand: (() => void) | null
 ): void {
   const toolbar = host.createDiv({ cls: "config-sync-cm-difftools" });
-  toolbar.createSpan({ cls: "config-sync-cm-diffmeta", text: meta });
+  const metaEl = toolbar.createSpan({ cls: "config-sync-cm-diffmeta", text: meta.name });
+  if (meta.sorted) {
+    metaEl.setAttribute("aria-label", `${meta.name} — both sides are shown with their keys in the same sorted order, not the order they appear in the file.`);
+  }
   toolbar.createDiv({ cls: "config-sync-rule-spacer" });
+  if (onExpand !== null) {
+    // Left of the view toggles: this button changes WHERE you read the diff, they change HOW.
+    const expand = toolbar.createEl("button", { cls: "config-sync-cm-viewbtn", attr: { "aria-label": "Open in a bigger window" } });
+    setIcon(expand, "maximize-2");
+    expand.addEventListener("click", (e) => {
+      e.stopPropagation();
+      onExpand();
+    });
+  }
   const pane = host.createDiv({ cls: "config-sync-cm-diffpane" });
   const render = (): void => {
     pane.empty();

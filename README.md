@@ -19,8 +19,8 @@ Selective, on-demand sync of Obsidian settings — hotkeys, CSS snippets, themes
 ## Features
 
 - **One card per item** — every synced thing (an Obsidian option group, a core or community plugin, a snippet) is one row with an expandable drawer holding its rules; a plugin's on/off state lives on its own card. ([details](docs/GUIDE.md#settings))
-- **Orthogonal field rules** — every key answers two independent questions, who shares it (`All devices` / `Desktop only` / `Mobile only` / `Each device decides`) and whether it travels encrypted; list-shaped keys can rule each element separately, and any key — or the whole file — can also be excepted on just this device, leaving the shared answer untouched for everyone else. ([details](docs/GUIDE.md#field-rules--sensitive-settings))
-- **Credential-safe** — `Each device decides` keys never leave the machine, and a per-device passphrase encrypts what should travel.
+- **Orthogonal field rules** — every key answers two independent questions, who shares it (`All devices` / `Desktop only` / `Mobile only` / `Not shared`) and whether it travels encrypted; list-shaped keys can rule each element separately, and any key — or the whole file — can also be excepted on just this device, leaving the shared answer untouched for everyone else. ([details](docs/GUIDE.md#field-rules--sensitive-settings))
+- **Credential-safe** — `Not shared` keys never leave the machine, and a per-device passphrase encrypts what should travel.
 - **Explicit Apply** — nothing changes a device until you tick items and press Apply; every run stays visible in the pinned result strip and a browsable **History**.
 - **A Sync Center that knows the state** — every row spells out its own fate in plain language (*turns on · installs · applies settings*), normalized JSON diffs, a *this device* status chip and totals for every pending action. ([tour](docs/GUIDE.md#the-sync-center))
 - **Install engine** — plugins that are outdated, disabled or missing on this device can be updated, enabled or installed during Apply, pinned to the captured version. ([rules](docs/GUIDE.md#availability-facts-and-the-install-engine))

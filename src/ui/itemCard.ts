@@ -46,7 +46,18 @@ export interface Badge {
 // and "Fields" are implementation words; "Per-key rules" is the drawer's own vocabulary.
 export const MODE_LABELS = { plain: "Whole file", fields: "Per-key rules", encrypted: "Encrypted" } as const;
 
+// The same three modes as glyphs, for the Advanced rule form's Mode picker (its two neighbouring
+// rows, Type and Devices, are icon pickers — Mode was the last text chip and read as the odd row
+// out). `braces` says "the keys inside the file decide" and is the SAME mark a card's per-key jump
+// uses; `lock` is the encrypted state everywhere. `file-text`, NOT `file`: the Type row directly
+// above owns `file`/`folder` for a different question, and two adjacent rows drawing one glyph for
+// two questions is the collision this vocabulary exists to prevent.
+export const MODE_ICON: Record<keyof typeof MODE_LABELS, string> = { plain: "file-text", fields: "braces", encrypted: "lock" };
+
 const ON_BADGE_TEXT = { desktop: "on: desktop", mobile: "on: mobile", local: "on: this device" } as const;
+// The local badge's other half: an exception can force a plugin OFF here just as easily as on, and
+// the badge fires for both.
+const OFF_BADGE_TEXT_LOCAL = "off: this device";
 
 const ON_BADGE_CLASS = {
   desktop: "config-sync-card-badge-desktop",
@@ -58,8 +69,9 @@ const ON_BADGE_CLASS = {
 // (`N device-scoped`) and what this device kept for itself (`N left to me`). Mixing them into one
 // count is what made the old "N device-scoped" badge unreadable on a device that had its own
 // exceptions. The fleet half keeps the count palette every other card badge counts in; the local
-// half takes the purple the two-segment row's local segment already wears when it is set
-// (`.config-sync-tworow-seg.is-local.is-set`), so the color says "this device" in both places.
+// half takes the purple the merged control's local glyph already wears when it is set
+// (`.config-sync-mergedctl.is-set .config-sync-mergedctl-local`), so the color says "this device"
+// in both places.
 const CARRIER_FLEET_BADGE_CLASS = "config-sync-card-badge-count";
 const CARRIER_LOCAL_BADGE_CLASS = "config-sync-card-badge-mine";
 
@@ -67,33 +79,69 @@ const CARRIER_LOCAL_BADGE_CLASS = "config-sync-card-badge-mine";
 // below) can count a carrier's OWN class pins without also walking `perElement` — on a carrier,
 // perElement IS the element rules carrierBadgeCounts already counts via enablementRules, so folding
 // countClassPinned's perElement loop in here too would double-count the same rules under one badge.
-function countFileAndRuleClassPinned(item: Item): number {
+function fileAndRuleClassKinds(item: Item): DeviceClass[] {
   const sf = item.settingsFile;
-  if (sf === undefined) return 0;
-  let n = 0;
-  if (sf.fileRule !== undefined && sharingClass(sf.fileRule.sharing) !== null) n++;
+  if (sf === undefined) return [];
+  const out: DeviceClass[] = [];
+  const fileClass = sf.fileRule === undefined ? null : sharingClass(sf.fileRule.sharing);
+  if (fileClass !== null) out.push(fileClass);
   for (const rule of Object.values(sf.rules)) {
-    if (sharingClass(rule.sharing) !== null) n++;
+    const cls = sharingClass(rule.sharing);
+    if (cls !== null) out.push(cls);
   }
-  return n;
+  return out;
+}
+
+// A count badge names the SPECIFIC thing when everything it counts is alike, and falls back to a
+// neutral summariser only when the set genuinely mixes. The enablement badge below already worked
+// this way (a class rule draws `monitor`/`smartphone`, never a stand-in); the count badges were the
+// exception, which is how `N device-scoped` ended up wearing `monitor-smartphone` — the glyph for
+// `All devices` — to count keys that are pointedly NOT on all devices.
+export function soleKind<T extends string>(kinds: readonly T[]): T | null {
+  const distinct = [...new Set(kinds)];
+  const first = distinct[0];
+  return distinct.length === 1 && first !== undefined ? first : null;
+}
+
+// `N device-scoped`: all pinned to one class → that class's own glyph, which is the same meaning it
+// carries everywhere else. Only a genuinely mixed card falls back, and then to `contrast` (one thing
+// with two different sides) — NOT `monitor-smartphone`, which means `All devices` and so said the
+// opposite of what this badge counts, and not `split`, which is the shared answer's "not shared at
+// all", a different fact.
+function deviceScopedIcon(kinds: readonly DeviceClass[]): string {
+  const sole = soleKind(kinds);
+  if (sole === null) return "contrast";
+  return sole === "desktop" ? "monitor" : "smartphone";
+}
+
+// `N left to me`: same rule one layer down. All the exceptions force it on → `power`; all off →
+// `power-off`; a mix has no honest single state to show, so it takes the neutral `user`.
+function leftToMeIcon(states: readonly DeviceElementState[]): string {
+  const sole = soleKind(states);
+  if (sole === null) return "user";
+  return sole === "on" ? "power" : "power-off";
+}
+
+// Returns one entry PER PINNED RULE, not a total: the badge needs both how many there are and
+// whether they agree on a class, and deriving those from two separate walks is how they would come
+// to disagree.
+export function classPinnedKinds(item: Item): DeviceClass[] {
+  const sf = item.settingsFile;
+  if (sf === undefined) return [];
+  const out = fileAndRuleClassKinds(item);
+  for (const sharings of Object.values(sf.perElement)) {
+    for (const sharing of Object.values(sharings)) {
+      const cls = sharingClass(sharing);
+      if (cls !== null) out.push(cls);
+    }
+  }
+  return out;
 }
 
 // A fileRule-encrypted item (Plain mode, whole file encrypted) counts as one toward "N
 // encrypted" — there is no separate lock-badge string in the copy contract (the badge
 // list has only "N encrypted"), so the fileRule contributes to the same count instead of a
 // second badge.
-export function countClassPinned(item: Item): number {
-  const sf = item.settingsFile;
-  if (sf === undefined) return 0;
-  let n = countFileAndRuleClassPinned(item);
-  for (const sharings of Object.values(sf.perElement)) {
-    for (const sharing of Object.values(sharings)) {
-      if (sharingClass(sharing) !== null) n++;
-    }
-  }
-  return n;
-}
-
 export function countEncrypted(item: Item): number {
   const sf = item.settingsFile;
   if (sf === undefined) return 0;
@@ -115,12 +163,14 @@ export function carrierListFor(def: ItemDef): RuleListId | null {
   return def.id === "core-plugins" || def.id === "community-plugins" ? def.id : null;
 }
 
+// Kinds, not totals — same reason classPinnedKinds returns them: each badge needs the count AND
+// whether its members agree on one kind, and one walk has to answer both.
 export interface CarrierCounts {
-  fleet: number;
-  local: number;
+  fleet: DeviceClass[];
+  local: DeviceElementState[];
 }
 
-// `fleet` counts CLASS rules only, not every rule: `Each device decides` (`this-device`) hands the
+// `fleet` counts CLASS rules only, not every rule: `Not shared` (`this-device`) hands the
 // element back to each device rather than scoping it to one kind of device, so counting it as
 // "device-scoped" would name something the rule does not do. `exceptionIds` comes from the caller
 // because the exception table is localStorage (deviceElements.ts) — no `Item` knows it.
@@ -132,13 +182,17 @@ export interface CarrierCounts {
 // `countFileAndRuleClassPinned`, not `countClassPinned`, on purpose: `countClassPinned`'s perElement
 // walk would count the SAME element rules `enablementRules` above already counts, under the same
 // badge.
-export function carrierBadgeCounts(items: ItemMap, list: RuleListId, exceptionIds: string[]): CarrierCounts {
+export function carrierBadgeCounts(items: ItemMap, list: RuleListId, exceptions: readonly DeviceElementState[]): CarrierCounts {
   const rules = enablementRules(items, list);
-  const elementRules = Object.values(rules).filter((s) => sharingClass(s) !== null).length;
+  const elementRules: DeviceClass[] = [];
+  for (const s of Object.values(rules)) {
+    const cls = sharingClass(s);
+    if (cls !== null) elementRules.push(cls);
+  }
   const home = ruleHomeFor(list);
   const carrierItem = itemAt(items, home.section, home.id);
-  const ownPins = carrierItem !== undefined ? countFileAndRuleClassPinned(carrierItem) : 0;
-  return { fleet: elementRules + ownPins, local: exceptionIds.length };
+  const ownPins = carrierItem !== undefined ? fileAndRuleClassKinds(carrierItem) : [];
+  return { fleet: [...elementRules, ...ownPins], local: [...exceptions] };
 }
 
 export const CARRIER_ELEMENTS_LABEL = "Which devices turn each plugin on";
@@ -199,20 +253,33 @@ export function computeBadges(
   }
   // An exception outranks the rule here for the same reason it does at run time:
   // what this device actually does is the truer thing to say about it. A
-  // `this-device` RULE ("Each device decides") sets no class and is not itself an exception, so it
+  // `this-device` RULE ("Not shared") sets no class and is not itself an exception, so it
   // earns no badge — the card's own row is where that answer lives. Colored = the user's rule:
   // blue monitor / amber smartphone / the local-exception corner glyph.
   if (def.enablement !== undefined && enablement !== null) {
     const cls = sharingClass(enablement.rule);
-    if (enablement.exception !== null) badges.push({ text: ON_BADGE_TEXT.local, cls: ON_BADGE_CLASS.local, icon: "corner-down-right" });
+    // The badge KNOWS which exception it is, so it says so: `power`/`power-off`, the same pair the
+    // row's own local glyph paints, and the matching word. It used to say `on: this device` for
+    // both — a plugin forced OFF here still read as on — and wore `corner-down-right`, which was
+    // the glyph for having NO exception. Both halves were wrong in the same place.
+    if (enablement.exception !== null) {
+      const on = enablement.exception === "on";
+      badges.push({ text: on ? ON_BADGE_TEXT.local : OFF_BADGE_TEXT_LOCAL, cls: ON_BADGE_CLASS.local, icon: on ? "power" : "power-off" });
+    }
     else if (cls !== null) badges.push({ text: ON_BADGE_TEXT[cls], cls: ON_BADGE_CLASS[cls], icon: cls === "desktop" ? "monitor" : "smartphone" });
   }
   if (carrier !== null) {
-    if (carrier.fleet > 0) badges.push({ text: `${carrier.fleet} device-scoped`, cls: CARRIER_FLEET_BADGE_CLASS, icon: "monitor-smartphone", count: carrier.fleet });
-    if (carrier.local > 0) badges.push({ text: `${carrier.local} left to me`, cls: CARRIER_LOCAL_BADGE_CLASS, icon: "corner-down-right", count: carrier.local });
+    if (carrier.fleet.length > 0) {
+      badges.push({ text: `${carrier.fleet.length} device-scoped`, cls: CARRIER_FLEET_BADGE_CLASS, icon: deviceScopedIcon(carrier.fleet), count: carrier.fleet.length });
+    }
+    if (carrier.local.length > 0) {
+      badges.push({ text: `${carrier.local.length} left to me`, cls: CARRIER_LOCAL_BADGE_CLASS, icon: leftToMeIcon(carrier.local), count: carrier.local.length });
+    }
   } else {
-    const classPinned = countClassPinned(item);
-    if (classPinned > 0) badges.push({ text: `${classPinned} device-scoped`, cls: "config-sync-card-badge-count", icon: "monitor-smartphone", count: classPinned });
+    const classPinned = classPinnedKinds(item);
+    if (classPinned.length > 0) {
+      badges.push({ text: `${classPinned.length} device-scoped`, cls: "config-sync-card-badge-count", icon: deviceScopedIcon(classPinned), count: classPinned.length });
+    }
   }
   const encrypted = countEncrypted(item);
   if (encrypted > 0) badges.push({ text: `${encrypted} encrypted`, cls: "config-sync-card-badge-count", icon: "lock", count: encrypted });
@@ -230,9 +297,9 @@ export function hasEnablementZone(def: ItemDef): boolean {
 // Zone ① copy. Same name, same values, same data as the Sync Center's row of that name. Only
 // rendered for a def where hasEnablementZone(def) is true.
 //
-// The word "Default" lives in the fleet segment's own tooltip (`enablementRow.ts`'s
+// The consequence of the shared answer lives in the control's own tooltip (`enablementRow.ts`'s
 // `enabledOnTooltip`) — this label is just what the ROW is, matching the Sync Center's
-// row label exactly; each segment carries its own producer-built aria-label.
+// row label exactly.
 export const ENABLED_ON_LABEL = "Enabled on";
 
 export type SettingsFileZoneKind = "none" | "state-only" | "settings";
@@ -309,6 +376,19 @@ export function isEnablementRuleKey(def: ItemDef, key: string): boolean {
   return def.section === "obsidian" && def.id === "appearance" && key === perElementKeyFor("enabled-css-snippets");
 }
 
+// The keys buildRuleRows below FILTERS OUT — the same predicate, read the other way round. They are
+// not missing rules: their rows live elsewhere on the card (a carrier's element rows, the Appearance
+// card's snippet members under `Folders`), which is exactly why the rule zone drops them. The path
+// row's jump needs them to answer "where do this card's per-key rules actually live" when the
+// `Key rules` panel is absent — for Appearance that panel never renders at all, because these ARE
+// its only keys (deriveMode counts them, buildRuleRows does not).
+export function enablementRuleKeysOf(def: ItemDef, item: Item): string[] {
+  const sf = item.settingsFile;
+  if (sf === undefined) return [];
+  const keys = [...Object.keys(sf.rules), ...Object.keys(sf.perElement)].filter((k) => isEnablementRuleKey(def, k));
+  return [...new Set(keys)];
+}
+
 // Rule rows list ONLY configured keys (rules ∪ perItem) — browsing the file's full key set is the
 // File preview's job. Key order: rules
 // first (insertion order), then perItem-only keys. A key absent from liveDoc (settings file not
@@ -348,15 +428,22 @@ export function encryptToggleDisabled(sharing: Sharing, perElementEnabled: boole
   return encryptDisabledForSharing(sharing) || perElementEnabled;
 }
 
-// Which rule rows carry a "this device" answer of their own (spec §2). A key whose items each have
-// their own rule is governed end to end by the per-item machinery, and that machinery has no local
-// layer — capture and apply read the rules and nothing else, so both entries of a local menu here
-// would produce the same bytes. An option no runtime path will honour is exactly what §2 refused
-// for the element rows one level down; the same refusal applies to the row that turned them on.
-// The stored exception (if the key ever had one) is left alone rather than cleared: turning
-// per-item rules back off restores a control that means something again.
+// Which rule rows carry a "this device" answer of their own. Two rows do not, for the
+// SAME reason — both entries of a local menu there would produce identical bytes, and an option no
+// runtime path will honour is exactly what the spec refused for the element rows one level down:
+//
+//   1. A key whose items each have their own rule is governed end to end by the per-item
+//      machinery, and that machinery has no local layer — capture and apply read the rules and
+//      nothing else.
+//   2. A key shared with NO ONE (`this-device`) is already absent from the store: stripPatterns
+//      drops it on capture and applyTransform preserves the local value, so "don't sync it here"
+//      asks for a state the key is permanently in. The shared answer said there is no shared value;
+//      the local layer's whole job is opting out of one.
+//
+// The stored exception (if the key ever had one) is left alone rather than cleared: moving the rule
+// back to a shared answer restores a control that means something again, with its old value intact.
 export function ruleRowHasLocalLayer(row: FieldRowModel): boolean {
-  return !row.perElementEnabled;
+  return !row.perElementEnabled && row.rule.sharing.kind !== "this-device";
 }
 
 // No reverse hint: a lock that can't encrypt does not render at all, so there is no
@@ -513,11 +600,21 @@ export function sortCompanionMemberNames(names: string[]): string[] {
 
 // ── Copy contract (verbatim) ────────────────────────────────────────────────────────────────
 
+// The fourth stop answers a DIFFERENT question from the first three. They say who gets the shared
+// answer; this one says there is no shared answer at all. That is why it sits below a separator in
+// every menu, and why the word leads with the fact rather than the consequence: the consequence
+// differs by row kind (an on/off list vs a whole file vs one key), and lives in the three tooltips.
+// Spelled here rather than in enablementRow.ts because that module imports THIS one.
+export const NOT_SHARED_LABEL = "Not shared";
+
 // Sharing is a union, so its display vocabulary is a function of the value rather than a record
 // keyed by a flat enum — a per-class rule's word depends on the class it carries.
 export function sharingLabel(sharing: Sharing): string {
   if (sharing.kind === "everywhere") return "All devices";
-  if (sharing.kind === "this-device") return "This device";
+  // Was "This device", which read as the LOCAL layer's answer sitting in the shared layer's menu —
+  // the single likeliest way to confuse the two. It says there is no shared value; what each device
+  // then keeps is the consequence, and lives in sharingCycleTooltip below.
+  if (sharing.kind === "this-device") return NOT_SHARED_LABEL;
   return sharing.class === "desktop" ? "Desktop only" : "Mobile only";
 }
 
@@ -562,9 +659,21 @@ export function nextSharing(current: Sharing, options: readonly Sharing[]): Shar
 // says so instead of letting "All devices" read as "mobile too".
 export const DESKTOP_ONLY_ALL_NOTE = "mobile is excluded automatically";
 
+// The shared segment's tooltip for ONE KEY inside a settings file: the third and weakest of the
+// three consequences. A class-scoped key is still synced on every device; the excluded class simply
+// keeps its own value instead of the shared one (modes.ts partitions own-class keys into the
+// `__scopes__` sidecar and preserves the other class's local value on apply). Nothing is turned off
+// and nothing stops syncing, which is exactly what the label alone cannot say.
 export function sharingCycleTooltip(sharing: Sharing, note?: string): string {
-  const label = note === undefined ? sharingLabel(sharing) : `${sharingLabel(sharing)} — ${note}`;
-  return `Where it syncs (currently: ${label})`;
+  const base =
+    sharing.kind === "everywhere"
+      ? "One value, the same everywhere."
+      : sharing.kind === "this-device"
+        ? "No shared value. Every device keeps its own."
+        : sharing.class === "desktop"
+          ? "Desktops share one value. Each phone keeps its own."
+          : "Phones share one value. Each desktop keeps its own.";
+  return note === undefined ? base : `${base} (${note})`;
 }
 
 // The ✎ icon's tooltip/aria.
@@ -590,7 +699,10 @@ export interface PreviewLegendEntry {
 export const PREVIEW_LEGEND_ENTRIES: PreviewLegendEntry[] = [
   { kind: "sharing", cls: "config-sync-json-desktop", text: "desktop only" },
   { kind: "sharing", cls: "config-sync-json-mobile", text: "mobile only" },
-  { kind: "sharing", cls: "config-sync-json-strip", text: "this device" },
+  // Reads the same word the menu two rows above it uses. It said "this device" until the fourth
+  // stop was renamed, at which point the legend was explaining a colour with a name that no control
+  // offered any more — and worse, with the LOCAL layer's word for a SHARED-layer answer.
+  { kind: "sharing", cls: "config-sync-json-strip", text: "not shared" },
   { kind: "lock", cls: null, text: "encrypted" },
 ];
 

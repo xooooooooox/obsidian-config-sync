@@ -98,7 +98,7 @@ export function parseSyncManifest(raw: string): SyncManifest {
 export function validateSyncManifest(data: unknown): SyncManifest {
   if (!isPlainObject(data)) throw new ManifestValidationError("config-sync.json must contain a JSON object, e.g. {\"version\": 1, \"groups\": []}");
   if (data.version !== 1) {
-    throw new ManifestValidationError(`config-sync.json has unsupported version ${String(data.version)} — this plugin version only supports "version": 1`);
+    throw new ManifestValidationError(`config-sync.json has unsupported version ${String(data.version)}. This plugin version only supports "version": 1`);
   }
   if (!Array.isArray(data.groups)) throw new ManifestValidationError('config-sync.json "groups" must be a list of rules, e.g. "groups": [{"name": "hotkeys", ...}]');
   const groups = data.groups.map((g, i) => parseGroup(g, i));
@@ -106,7 +106,7 @@ export function validateSyncManifest(data: unknown): SyncManifest {
   const refs = new Map<string, string>(); // ref -> the name of the rule that claimed it, so the error can name BOTH
   const storePaths = new Set<string>();
   for (const g of groups) {
-    if (names.has(g.name)) throw new ManifestValidationError(`Two rules are named "${g.name}" — rename one of them so each rule has a unique name`);
+    if (names.has(g.name)) throw new ManifestValidationError(`Two rules are named "${g.name}". Rename one of them so each rule has a unique name`);
     names.add(g.name);
     // The same rule one level down: the ref is the key of the lock, the baselines
     // and the opt-out list, so two rules sharing one is two rules sharing a baseline — the failure
@@ -115,13 +115,13 @@ export function validateSyncManifest(data: unknown): SyncManifest {
     if (g.ref !== undefined) {
       const claimed = refs.get(g.ref);
       if (claimed !== undefined) {
-        throw new ManifestValidationError(`Rules "${g.name}" and "${claimed}" both sync the item "${g.ref}" — give one of them a different name`);
+        throw new ManifestValidationError(`Rules "${g.name}" and "${claimed}" both sync the item "${g.ref}". Give one of them a different name`);
       }
       refs.set(g.ref, g.name);
     }
     const sp = groupStorePath(g.path);
     if (storePaths.has(sp)) {
-      throw new ManifestValidationError(`Rule "${g.name}" saves to the same store location as another rule ("${sp}") — give one of them a different path`);
+      throw new ManifestValidationError(`Rule "${g.name}" saves to the same store location as another rule ("${sp}"). Give one of them a different path`);
     }
     storePaths.add(sp);
   }
@@ -132,7 +132,7 @@ function parseGroup(g: unknown, index: number): SyncGroup {
   if (!isPlainObject(g)) throw new ManifestValidationError(`rule #${index + 1} must be an object, e.g. {"name": "hotkeys", "path": "{configDir}/hotkeys.json", "type": "file", "devices": "all"}`);
   const { name, ref, path, type, devices, sanitize, mode, fields, fileRule, perElement, description, label, origin } = g;
   if (typeof name !== "string" || name === "") {
-    throw new ManifestValidationError(`Rule #${index + 1}: a name is required — give it a short id, e.g. hotkeys`);
+    throw new ManifestValidationError(`Rule #${index + 1}: a name is required. Give it a short id, e.g. hotkeys`);
   }
   if (!GROUP_NAME_RE.test(name)) {
     throw new ManifestValidationError(
@@ -140,10 +140,10 @@ function parseGroup(g: unknown, index: number): SyncGroup {
     );
   }
   if (typeof path !== "string" || path === "") {
-    throw new ManifestValidationError(`Rule "${name}": a path is required — point it at the file or folder to sync, e.g. {configDir}/hotkeys.json`);
+    throw new ManifestValidationError(`Rule "${name}": a path is required. Point it at the file or folder to sync, e.g. {configDir}/hotkeys.json`);
   }
   if (path.startsWith("/") || path.split("/").includes("..")) {
-    throw new ManifestValidationError(`Rule "${name}": the path "${path}" must stay inside the vault — use a relative path without "..", e.g. {configDir}/hotkeys.json`);
+    throw new ManifestValidationError(`Rule "${name}": the path "${path}" must stay inside the vault. Use a relative path without "..", e.g. {configDir}/hotkeys.json`);
   }
   if (!isValidType(type)) {
     throw new ManifestValidationError(`Rule "${name}": the type must be "file" or "folder"`);
@@ -162,14 +162,14 @@ function parseGroup(g: unknown, index: number): SyncGroup {
       throw new ManifestValidationError(`Rule "${name}": the mode must be "plain", "fields" or "encrypted"`);
     }
     if (mode === "fields" && type !== "file") {
-      throw new ManifestValidationError(`Rule "${name}": per-key rules only apply to a single file — this rule is a ${String(type)}`);
+      throw new ManifestValidationError(`Rule "${name}": per-key rules only apply to a single file. This rule is a ${String(type)}`);
     }
     validatedMode = mode;
   }
   let validatedFields: FieldRule[] | undefined;
   if (fields !== undefined) {
     if (validatedMode !== "fields") {
-      throw new ManifestValidationError(`Rule "${name}": it has a "fields" list but not "mode": "fields" — add the mode so the key rules take effect`);
+      throw new ManifestValidationError(`Rule "${name}": it has a "fields" list but not "mode": "fields". Add the mode so the key rules take effect`);
     }
     if (Array.isArray(fields)) {
       for (const f of fields) {
@@ -689,14 +689,14 @@ function parseRemote(r: unknown, index: number): Remote {
   if (!isPlainObject(r)) throw new ManifestValidationError(`Remote #${index + 1} must be an object, e.g. {"name": "laptop", "type": "vault", "storePath": "/path/to/store"}`);
   const { name, type, storePath, url, branch, subdir, excludeSelf, tokenId, username } = r;
   if (typeof name !== "string" || name === "") {
-    throw new ManifestValidationError(`Remote #${index + 1}: a name is required — give it a short label, e.g. laptop`);
+    throw new ManifestValidationError(`Remote #${index + 1}: a name is required. Give it a short label, e.g. laptop`);
   }
   if (excludeSelf !== undefined && typeof excludeSelf !== "boolean") {
     throw new ManifestValidationError(`Remote "${name}": "excludeSelf" must be true or false`);
   }
   if (type === "vault") {
     if (typeof storePath !== "string" || !(storePath.startsWith("/") || storePath === "~" || storePath.startsWith("~/"))) {
-      throw new ManifestValidationError(`Remote "${name}": the store path needs to be a full path starting with / or ~/ — for example ~/Vaults/other-vault/config-sync`);
+      throw new ManifestValidationError(`Remote "${name}": the store path needs to be a full path starting with / or ~/, for example ~/Vaults/other-vault/config-sync`);
     }
     const remote: Remote = { name, type, storePath };
     if (excludeSelf === true) remote.excludeSelf = true;
@@ -704,24 +704,24 @@ function parseRemote(r: unknown, index: number): Remote {
   }
   if (type === "git") {
     if (typeof url !== "string" || url === "") {
-      throw new ManifestValidationError(`Remote "${name}": a URL is required — point it at the git repository, e.g. git@example.com:me/config.git`);
+      throw new ManifestValidationError(`Remote "${name}": a URL is required. Point it at the git repository, e.g. git@example.com:me/config.git`);
     }
     if (typeof branch !== "string" || branch === "") {
-      throw new ManifestValidationError(`Remote "${name}": a branch is required — name the branch to sync, e.g. main`);
+      throw new ManifestValidationError(`Remote "${name}": a branch is required. Name the branch to sync, e.g. main`);
     }
     if (subdir !== undefined && (typeof subdir !== "string" || subdir.startsWith("/") || subdir.split("/").includes(".."))) {
-      throw new ManifestValidationError(`Remote "${name}": the store folder must stay inside the repository — use a relative path without "..", e.g. config-sync`);
+      throw new ManifestValidationError(`Remote "${name}": the store folder must stay inside the repository. Use a relative path without "..", e.g. config-sync`);
     }
     if (tokenId !== undefined && (typeof tokenId !== "string" || !/^[a-z0-9-]+$/.test(tokenId) || tokenId.length > 64)) {
-      throw new ManifestValidationError(`Remote "${name}": the access token's name can use lowercase letters, digits and dashes, up to 64 characters — e.g. gitlab-token`);
+      throw new ManifestValidationError(`Remote "${name}": the access token's name can use lowercase letters, digits and dashes, up to 64 characters, e.g. gitlab-token`);
     }
     if (tokenId === PASSPHRASE_SECRET_ID) {
-      throw new ManifestValidationError(`Remote "${name}": "${PASSPHRASE_SECRET_ID}" is Config Sync's own vault passphrase — give this remote its own access token instead`);
+      throw new ManifestValidationError(`Remote "${name}": "${PASSPHRASE_SECRET_ID}" is Config Sync's own vault passphrase. Give this remote its own access token instead`);
     }
     // The username reaches git through the credential protocol, which is line-based: a newline
     // in it would forge protocol lines, so reject control characters outright.
     if (username !== undefined && (typeof username !== "string" || username === "" || /[\s\p{Cc}]/u.test(username))) {
-      throw new ManifestValidationError(`Remote "${name}": the username must be a single word without spaces, e.g. git — or leave it out for hosts that ignore it`);
+      throw new ManifestValidationError(`Remote "${name}": the username must be a single word without spaces, e.g. git. Leave it out for hosts that ignore it`);
     }
     const remote: Remote = { name, type, url, branch };
     if (typeof subdir === "string" && subdir !== "") remote.subdir = subdir;

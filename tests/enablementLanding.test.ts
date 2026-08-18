@@ -3,9 +3,9 @@ import { SyncCenterView } from "../src/ui/SyncCenterView";
 import { ConfigSyncSettingTab } from "../src/ui/SettingTab";
 import { EVERYWHERE, perClass, Sharing, THIS_DEVICE } from "../src/core/types";
 
-// Spec §6.5 case 3 + §6.6: landing the FLEET segment on `Each device decides` while this device has
+// Landing the shared half on `Not shared` while this device has
 // no exception yet must seed one from the element's real current state (host.leaveToThisDevice),
-// and BOTH entrances must do it — the settings card's cycle and the Sync Center's rule menu.
+// and BOTH entrances must do it — the settings card's control and the Sync Center's.
 //
 // This drives the two production methods directly (bracket access past `private`, the same pattern
 // tests/settingtab-commit.test.ts and tests/emptyVerbDegradation.test.ts already use) rather than
@@ -68,12 +68,12 @@ const entrances: { name: string; build: (host: Record<string, unknown>) => Landi
   },
 ];
 
-describe.each(entrances)("$name — landing on Each device decides", ({ build }) => {
+describe.each(entrances)("$name — landing on Not shared", ({ build }) => {
   it("writes the rule and seeds the exception from the element's real state", async () => {
     const { host, calls } = stubHost(null);
     await build(host)(LIST, ELEMENT, THIS_DEVICE);
     expect(calls.rules).toEqual([THIS_DEVICE]);
-    expect(calls.seeded).toBe(1); // …so the local segment shows On here / Off here, never a default that isn't there
+    expect(calls.seeded).toBe(1); // …so the local half shows Always on / Always off, never a shared answer that isn't there
   });
 
   it("never overwrites an exception this device already has", async () => {

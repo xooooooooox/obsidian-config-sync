@@ -14,7 +14,7 @@
  * rule IS.
  *
  * ONE reader, ONE writer. The three UI entrances — a carrier card's element row, a plugin
- * card's `Default enabled on`, a Sync Center row — all come through this file.
+ * card's `Enabled on`, a Sync Center row — all come through this file.
  */
 import { deriveMode, emptyItem, Item, ItemMap, ItemSettingsFile, itemAt, defaultSettingsFile, pruneSettingsFile, withItem, withoutItem } from "./registry";
 import { perElementKeyFor } from "./switchList";

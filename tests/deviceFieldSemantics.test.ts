@@ -173,6 +173,15 @@ describe("a per-item key has no local layer at all (spec §2)", () => {
     expect(ruleRowHasLocalLayer(row)).toBe(false);
     expect(ruleRowHasLocalLayer({ ...row, perElementEnabled: false })).toBe(true);
   });
+
+  // Same refusal, the other reason: a key shared with NO ONE is already absent from the store, so
+  // "don't sync it here" asks for the state it is permanently in. The shared answer said there is
+  // no shared value; opting out of one is the local layer's only job.
+  it("the rule row hides its local segment when the key is shared with no one", () => {
+    const row = { key: "colorGroups", isArray: false, rule: { sharing: THIS_DEVICE, encrypted: false }, perElementEnabled: false };
+    expect(ruleRowHasLocalLayer(row)).toBe(false);
+    expect(ruleRowHasLocalLayer({ ...row, rule: { sharing: EVERYWHERE, encrypted: false } })).toBe(true);
+  });
 });
 
 describe("an excepted encrypted key keeps the store's ciphertext byte-for-byte (spec §4)", () => {

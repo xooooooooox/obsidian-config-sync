@@ -73,21 +73,26 @@ import { confirmDropKeyRules, confirmPresetPathChange, confirmTypeFlip } from ".
 import { commitDraft } from "./commitGroups";
 import { classifyJsonKeys, classifyPerElementLines, jsonElementClass, jsonKeyClass, KeyClass } from "./jsonView";
 import { renderFoldChevron, setFoldOpen } from "./foldChevron";
+import { paintMergedControl } from "./mergedControl";
 import { DeviceElementState } from "../core/deviceElements";
 import { enablementRules, RuleListId, ruledElementIds } from "../core/enablementRules";
 import {
   buildLocalMenu,
   buildOptOutLocalMenu,
   enabledOnTooltip,
+  ENABLED_ON_HEADER,
   enablementRowModel,
-  EnablementRowModel,
+  MenuSectionModel,
+  ON_THIS_DEVICE_HEADER,
   optOutLocalSegment,
   ruleIcon,
   ruleLabel,
   ruleLandingNeedsSeed,
   RowSegment,
   RULE_OPTIONS,
-  THIS_DEVICE_EYEBROW,
+  settingsSyncTooltip,
+  SHARED_WITH_HEADER,
+  sharingMenuSection,
 } from "./enablementRow";
 import { StopSyncingModal } from "./SyncCenterView";
 import { RunKind, stopSyncDesc } from "../core/runHistory";
@@ -112,6 +117,7 @@ import {
   ENABLED_ON_LABEL,
   DESKTOP_ONLY_ALL_NOTE,
   ENABLED_CSS_SNIPPETS_KEY,
+  enablementRuleKeysOf,
   encryptToggleDisabled,
   FIELD_SHARING_OPTIONS,
   FieldRowModel,
@@ -120,6 +126,7 @@ import {
   hasEnablementZone,
   hasKeyRules,
   isEnablementRuleKey,
+  MODE_ICON,
   MODE_LABELS,
   isStringArrayValue,
   memberCountLabel,
@@ -289,9 +296,10 @@ function defaultFieldsFromDetection(keys: string[]): FieldRule[] {
   return keys.map((pattern) => ({ pattern, ...(SENSITIVE_ENCRYPT_RE.test(pattern) ? ENCRYPT_RULE : LOCAL_RULE) }));
 }
 
-// Visible text, not a tooltip: this row is unreadable on a phone precisely because the old
-// explanation only existed on hover. The dim settings-2 carries the same sentence without the
-// arrow as its aria-label — one sentence, one producer.
+// Tooltip-borne, and deliberately NOT repeated as visible copy: the `KEY RULES` zone label sits
+// directly below this row and answers the same question nearer and permanently, so a visible line
+// would only say twice what the layout already says once. The reading path that matters starts at
+// the eye (browse the file), and adding a key raises that zone label on its own.
 const PER_KEY_RULES_JUMP_TEXT = "Per-key rules decide — jump to them";
 
 // The Access-token control's standing explanation (DESIGN.md §4 Remote editor): tooltip-borne, so
@@ -330,6 +338,26 @@ interface RemoteDraft {
   excludeSelf: boolean;
   tokenId: string;
   username: string;
+}
+
+// One shape for every result strip: a headline sentence, plus — only when there is one — a second,
+// quieter line carrying the raw technical detail.
+//
+// The detail never joins the headline. An operator needs git's own words; a reader needs a sentence
+// they can act on; one string cannot be both, and trying made
+// `Could not reach remote — git ls-remote --heads failed in .: Command failed: git ls-remote
+// --heads fatal: bad repository ''` — three restatements of one failure, with the only informative
+// clause last. Headlines are two short sentences (what happened, what to do) and carry no dash.
+function writeTestStrip(
+  strip: HTMLElement,
+  tone: "is-testing" | "is-ok" | "is-caution" | "is-error",
+  headline: string,
+  detail: string | null
+): void {
+  strip.className = `config-sync-test-strip ${tone}`;
+  strip.empty();
+  strip.createDiv({ text: headline });
+  if (detail !== null) strip.createDiv({ cls: "config-sync-strip-detail", text: detail });
 }
 
 function toDraft(r: Remote): RemoteDraft {
@@ -800,7 +828,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     return itemFor(this.host.settings.items, def);
   }
 
-  // The card's two enablement layers, for the badges and the `Default enabled on` row — null for a
+  // The card's two enablement layers, for the badges and the `Enabled on` row — null for a
   // def with no enablement projection at all (an Obsidian/custom card), so a badge is never derived
   // from a list this item does not live in.
   private enablementOf(def: ItemDef): { rule: Sharing; exception: DeviceElementState | null } | null {
@@ -817,7 +845,17 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private carrierCountsOf(def: ItemDef): CarrierCounts | null {
     const list = carrierListFor(def);
     if (list === null) return null;
-    return carrierBadgeCounts(this.host.settings.items, list, this.host.deviceElementIds(list));
+    // The badge needs the exception STATES, not just how many there are: all-on draws `power`,
+    // all-off `power-off`, and only a mix falls back to the neutral mark. `deviceElementIds`
+    // returns exactly the ids that HAVE a state, so `deviceElementFor` answers for every one of
+    // them — mirrored with a flatMap rather than asserted, the same way driftFor's guarantee is.
+    const states = this.host
+      .deviceElementIds(list)
+      .flatMap((id) => {
+        const state = this.host.deviceElementFor(list, id);
+        return state === null ? [] : [state];
+      });
+    return carrierBadgeCounts(this.host.settings.items, list, states);
   }
 
   // Every settings-tab write funnels through here — the mutators themselves only ever spread what
@@ -1057,7 +1095,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
 
   // The fleet write, plus §6.5 case 3's landing seed. Same body as the Sync Center's rule menu
   // (SyncCenterView.setRuleWithLanding), asking the same producer (ruleLandingNeedsSeed), so landing
-  // on `Each device decides` behaves identically whichever entrance the user came through.
+  // on `Not shared` behaves identically whichever entrance the user came through.
   private async setRuleWithLanding(list: RuleListId, elementId: string, rule: Sharing): Promise<void> {
     await this.host.setEnablementRule(list, elementId, rule);
     if (ruleLandingNeedsSeed(rule, this.host.deviceElementFor(list, elementId))) await this.host.leaveToThisDevice(list, elementId);
@@ -1108,7 +1146,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   // The sharing/rule picker trigger.
   // Icon + a small muted `chevrons-up-down` PICKER affordance opens an
   // Obsidian `Menu` listing `options`, checkmarked on the current value — the same idiom the
-  // local segment below and the Sync Center's own pickers already use. `iconFor`/`labelFor`
+  // merged control below and the Sync Center's own pickers already use. `iconFor`/`labelFor`
   // choose the vocabulary: the enablement rows (plugin card `Enabled on`, carrier element rows)
   // pass `ruleIcon`/`ruleLabel` (enablementRow.ts — the SAME producer the Sync Center's own
   // `ruleMenu` reads, so both entrances offer identical wording); the plain field/file/companion
@@ -1164,70 +1202,75 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     });
   }
 
-  // The two-segment row's LOCAL half (spec §6.1), painted once
-  // for both of this file's rows that have one: a plugin card's `Enabled on` and a carrier card's
-  // element rows. It leads with the divider because the divider only exists when there IS a
-  // second segment. A muted "this device" eyebrow sits above/beside the glyph so the local
-  // segment reads as its own thing even though it carries no visible state word.
+  // The control's SHAPE lives in mergedControl.ts, so the Sync Center paints the identical thing
+  // rather than a second spelling of it; only the menu-trigger wiring stays here, where this view
+  // already keeps it.
+  private paintMergedControl(
+    cell: HTMLElement,
+    opts: { shared: RowSegment; local: RowSegment | null; localIsException: boolean; sections: () => readonly MenuSectionModel[] }
+  ): void {
+    paintMergedControl(cell, { ...opts, wire: (trigger, menu) => this.wireMenuTrigger(trigger, menu) });
+  }
+
+  // The merged control for an ELEMENT row — the plugin card's own `Enabled on` and a carrier card's
+  // member rows, which ask the same question about the same datum and so must offer the same thing.
   //
-  // A class rule that this device does not match has nothing true to show as a local state, so it
-  // shows the follow glyph/tooltip — but the menu stays live, because an exception outranks a class
-  // rule (spec §5 precedence 1) and a row that cannot be excepted would be a dead end.
-  private renderLocalSegment(
+  // Note the asymmetry with a per-key rule row, which drops its local section entirely under
+  // `Not shared`: for a KEY that answer means "the value just stays where it is", so there is
+  // nothing left for this device to decide. For an ELEMENT it means the opposite — the on/off state
+  // has to come from SOMEWHERE, and with no shared answer this device's own is the only one there
+  // is. So the section stays, minus its `follow` entry (buildLocalMenu drops it: there is no shared
+  // answer to follow).
+  private paintElementControl(
     cell: HTMLElement,
     opts: {
       list: RuleListId;
       elementId: string;
       rule: Sharing;
       exception: DeviceElementState | null;
-      model: EnablementRowModel;
-      // A carrier member row suppresses the per-row eyebrow — `this device` is its
-      // list's COLUMN HEADER there (renderCarrierElements); single-row surfaces keep it inline.
-      showEyebrow: boolean;
+      hasLocalLayer: boolean;
+      desktopOnly: boolean;
+      onRuleChange: (v: Sharing) => void;
       after: () => void;
     }
   ): void {
-    this.paintLocalSegment(cell, {
-      seg: opts.model.local,
-      isException: opts.model.localIsException,
-      showEyebrow: opts.showEyebrow,
-      menu: () => {
-        const menu = new Menu();
-        // The entry list is buildLocalMenu's (enablementRow.ts), not this file's — the Sync Center's
-        // row asks the same producer, so the two entrances cannot offer different choices (§6.6).
-        for (const entry of buildLocalMenu(opts.rule, opts.exception, {
-          follow: () => void this.host.followTheDefault(opts.list, opts.elementId).then(opts.after),
-          setState: (state) => void this.host.setDeviceElement(opts.list, opts.elementId, state).then(opts.after),
-        })) {
-          menu.addItem((i) => {
-            i.setTitle(entry.title).setChecked(entry.checked).onClick(entry.action);
-            if (entry.icon !== null) i.setIcon(entry.icon);
-          });
-        }
-        return menu;
+    const model = enablementRowModel({ rule: opts.rule, exception: opts.exception });
+    // A desktop-only plugin still drops the mobile stop: mobile can never install it.
+    const options = opts.desktopOnly ? RULE_OPTIONS.filter((o) => o.kind !== "per-class" || o.class !== "mobile") : RULE_OPTIONS;
+    const note = opts.desktopOnly && opts.rule.kind === "everywhere" ? ` (${DESKTOP_ONLY_ALL_NOTE})` : "";
+    this.paintMergedControl(cell, {
+      shared: { icon: model.fleet.icon, tooltip: `${enabledOnTooltip(opts.rule)}${note}` },
+      local: opts.hasLocalLayer ? model.local : null,
+      localIsException: opts.hasLocalLayer && model.localIsException,
+      sections: () => {
+        const shared = sharingMenuSection({
+          header: ENABLED_ON_HEADER,
+          options,
+          current: opts.rule,
+          iconFor: ruleIcon,
+          labelFor: ruleLabel,
+          onChange: opts.onRuleChange,
+        });
+        if (!opts.hasLocalLayer) return [shared];
+        return [
+          shared,
+          {
+            header: ON_THIS_DEVICE_HEADER,
+            items: buildLocalMenu(opts.rule, opts.exception, {
+              follow: () => void this.host.followTheDefault(opts.list, opts.elementId).then(opts.after),
+              setState: (state) => void this.host.setDeviceElement(opts.list, opts.elementId, state).then(opts.after),
+            }),
+          },
+        ];
       },
     });
   }
 
-  // The local segment's PAINT, shared by every layer that has one: the enablement exception, the
-  // whole-file opt-out, and a per-key rule's own exception. What each layer differs in is its
-  // model and its menu, not its shape — so the shape lives here once.
-  private paintLocalSegment(cell: HTMLElement, opts: { seg: RowSegment; isException: boolean; showEyebrow: boolean; menu: () => Menu }): void {
-    cell.createSpan({ cls: "config-sync-tworow-vline" });
-    const wrap = cell.createDiv({ cls: `config-sync-tworow-localcell${opts.isException ? " is-set" : ""}` });
-    if (opts.showEyebrow) wrap.createSpan({ cls: "config-sync-tworow-eyebrow", text: THIS_DEVICE_EYEBROW });
-    const local = wrap.createSpan({ cls: "config-sync-tworow-seg", attr: { "aria-label": opts.seg.tooltip } });
-    if (opts.seg.icon !== null) setIcon(local.createSpan({ cls: "config-sync-tworow-ic" }), opts.seg.icon);
-    setIcon(local.createSpan({ cls: "config-sync-tworow-chev" }), "chevrons-up-down");
-    this.wireMenuTrigger(local, opts.menu);
-  }
-
-  // Zone ① `Enabled on` (spec §6.5) — core/community/beta plugin
-  // cards only. Same name, same values, same data as the Sync Center's row of that name: two
-  // controls, one per layer, each with one writer.
-  // A scrow: label on the identity track, the fleet picker in the controls column,
-  // divider + local cell landing on tracks 3/4 as direct row children — the same placement the
-  // Sync Center card's own `Enabled on` row uses.
+  // Zone ① `Enabled on` — core/community/beta plugin cards only. Same name, same values, same data
+  // as the Sync Center's row of that name: ONE control carrying both layers, each layer with its
+  // own writer.
+  // A scrow: label on the identity track, the merged control in the device slot of the controls
+  // column — the same placement the Sync Center card's own `Enabled on` row uses.
   private renderDefaultEnabledOnRow(exp: HTMLElement, def: ItemDef, wrap: HTMLElement): void {
     const enablement = def.enablement;
     if (enablement === undefined) return;
@@ -1240,28 +1283,20 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       const slots = this.scrowSlots(row);
       const rule = this.host.enablementRuleFor(list, elementId);
       const exception = this.host.deviceElementFor(list, elementId);
-      const model = enablementRowModel({ rule, exception });
       const after = (): void => {
         build();
         this.refreshCardBadges(wrap, def);
       };
-      // Fleet segment: icon-only, over the four rule values —
-      // with the enablement vocabulary passed in, because the same `Sharing` union answers a
-      // different question here (see renderSharingPicker's own note). No `labelFor` glyph beside
-      // the icon: the two-segment presentation carries no wordmark anywhere; `ruleLabel`
-      // still supplies each MENU ITEM's title. `enabledOnTooltip` — the same producer the Sync
-      // Center's row reads — is the aria-label/tooltip instead. A desktop-only plugin still drops
-      // the mobile stop: mobile can never install it.
-      this.renderSharingPicker(slots.device, {
-        sharing: rule,
-        options: def.desktopOnly === true ? RULE_OPTIONS.filter((o) => o.kind !== "per-class" || o.class !== "mobile") : RULE_OPTIONS,
-        disabled: false,
-        iconFor: ruleIcon,
-        labelFor: ruleLabel,
-        ariaLabel: `${enabledOnTooltip(rule)}${def.desktopOnly === true && rule.kind === "everywhere" ? ` (${DESKTOP_ONLY_ALL_NOTE})` : ""}`,
-        onChange: (v) => void this.setRuleWithLanding(list, elementId, v).then(after),
+      this.paintElementControl(slots.device, {
+        list,
+        elementId,
+        rule,
+        exception,
+        hasLocalLayer: true,
+        desktopOnly: def.desktopOnly === true,
+        onRuleChange: (v) => void this.setRuleWithLanding(list, elementId, v).then(after),
+        after,
       });
-      this.renderLocalSegment(row, { list, elementId, rule, exception, model, showEyebrow: true, after });
     };
     build();
   }
@@ -1271,11 +1306,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   // so they are the same row. Appearance's snippet rows are the older half of this; this is what
   // makes the two new carrier cards reuse them instead of growing a second dialect.
   //
-  // The LOCAL segment renders only for a list whose exceptions a run actually applies
+  // The LOCAL layer renders only for a list whose exceptions a run actually applies
   // (registry.ts's isEnablementList — main.ts's enablementDecisions walks exactly those two lists,
   // and perElement.ts reads rules alone). `enabled-css-snippets` has no such application path, so a
-  // snippet row would be offering a choice nothing would ever honour: it keeps the fleet segment
-  // alone, which is what snippet rows show. The host methods stay
+  // snippet row would be offering a choice nothing would ever honour: its control keeps the shared
+  // glyph alone, and its menu the shared section alone. The host methods stay
   // `RuleListId`-wide — the asymmetry is in what this row OFFERS, not in what the layer can store.
   //
   // Returns the row's CONTENT cell, so a caller with an affordance of its own (the snippets
@@ -1289,37 +1324,33 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const row = host.createDiv({ cls: `config-sync-scrow config-sync-card-companiongrid${opts.orphan ? " is-orphan" : ""}` });
     // The pill and the Forget button must live INSIDE the identity cell, or every later cell
     // shifts one column over and the button wraps onto an implicit second grid row. The identity
-    // cell (and anything a caller appended into it) survives rebuilds: `build` only empties the
-    // controls cluster and clears the divider/local cells after it.
+    // cell (and anything a caller appended into it) survives rebuilds: `build` empties the device
+    // slot and nothing else, since the merged control is the row's only rebuilt part.
     const contentCell = opts.orphan ? row.createDiv({ cls: "config-sync-orphancell" }) : row;
     contentCell.createSpan({ cls: "config-sync-ldname", text: opts.label });
     const slots = this.scrowSlots(row);
     const ctl = slots.device;
-    const slotsHost = slots.aux.parentElement as HTMLElement;
     const build = (): void => {
       ctl.empty();
-      while (slotsHost.nextSibling !== null) slotsHost.nextSibling.remove(); // drop the previous divider/local cells (tracks 3/4)
       const rule = this.host.enablementRuleFor(opts.list, opts.elementId);
       const exception = hasLocalLayer ? this.host.deviceElementFor(opts.list, opts.elementId) : null;
-      const model = enablementRowModel({ rule, exception });
       const after = (): void => {
         build();
         opts.onWritten();
       };
-      // Fleet segment (icon-only, same as the plugin card's) —
-      // the same control, vocabulary and desktop-only stop-drop the plugin card's `Enabled on`
-      // uses above, because it is the same question about the same datum. A snippet member
-      // (no local layer) simply ends the row here: columns 3/4 stay empty.
-      this.renderSharingPicker(ctl, {
-        sharing: rule,
-        options: opts.desktopOnly ? RULE_OPTIONS.filter((o) => o.kind !== "per-class" || o.class !== "mobile") : RULE_OPTIONS,
-        disabled: false,
-        iconFor: ruleIcon,
-        labelFor: ruleLabel,
-        ariaLabel: `${enabledOnTooltip(rule)}${opts.desktopOnly && rule.kind === "everywhere" ? ` (${DESKTOP_ONLY_ALL_NOTE})` : ""}`,
-        onChange: (v) => void this.writeElementRule(opts.def, opts.wrap, opts.list, opts.elementId, v).then(after),
+      // The SAME control the plugin card's own `Enabled on` paints, because it is the same question
+      // about the same datum. A snippet member has no local layer, so its control is one glyph and
+      // its menu one section.
+      this.paintElementControl(ctl, {
+        list: opts.list,
+        elementId: opts.elementId,
+        rule,
+        exception,
+        hasLocalLayer,
+        desktopOnly: opts.desktopOnly,
+        onRuleChange: (v) => void this.writeElementRule(opts.def, opts.wrap, opts.list, opts.elementId, v).then(after),
+        after,
       });
-      if (hasLocalLayer) this.renderLocalSegment(row, { list: opts.list, elementId: opts.elementId, rule, exception, model, showEyebrow: false, after });
     };
     build();
     return contentCell;
@@ -1348,14 +1379,13 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   // element, under one section title. No search box — spec §10 leaves that open, and Community's 73
   // rows are a grouping decision this card is not the place to take unasked.
   private renderCarrierElements(exp: HTMLElement, def: ItemDef, list: RuleListId, wrap: HTMLElement): void {
-    // Zone-header scrow: `Enabled on` — zone ①'s own word,
-    // because this list IS that datum per element — with the full sentence in the tooltip;
-    // `this device` heads the local column, and the member rows below suppress their per-row
-    // eyebrow (showEyebrow: false in renderElementRuleRow).
+    // Zone-header scrow: `Enabled on` — zone ①'s own word, because this list IS that datum per
+    // element — with the full sentence in the tooltip. No `this device` column header: there is no
+    // local COLUMN any more, both layers live inside each row's one control, and the words that
+    // tell them apart are that control's two menu section headers.
     const head = exp.createDiv({ cls: "config-sync-scrow" });
     const headLabel = head.createDiv({ cls: "config-sync-explabel config-sync-explabel-inline", text: ENABLED_ON_LABEL });
     setTooltip(headLabel, CARRIER_ELEMENTS_LABEL);
-    head.createDiv({ cls: "config-sync-explabel config-sync-explabel-inline config-sync-scrow-col4", text: THIS_DEVICE_EYEBROW });
     const listEl = exp.createDiv({ cls: "config-sync-card-carrierelements" });
     const rows = buildCarrierElementRows(this.host.itemDefs(), list, ruledElementIds(this.host.settings.items, list), this.host.deviceElementIds(list));
     for (const row of rows) {
@@ -1427,29 +1457,17 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     line1.createDiv({ cls: "config-sync-explabel config-sync-explabel-inline", text: "Settings sync" });
     const slots = this.scrowSlots(line1);
 
-    // The local segment answers "does THIS device sync the file at all" — a different datum from
-    // the fields-mode branch below (which is about whether per-key rules, not the whole file,
-    // decide the keys), so it paints here, once, ahead of that branch, and applies to both.
+    // "Does THIS device sync the file at all" — true in BOTH modes, so it is built once here and
+    // handed to whichever branch below paints the control. buildOptOutLocalMenu is the SAME
+    // producer the Sync Center's own row asks: two entrances, one entry list, so they cannot
+    // offer different choices.
     const optedOut = this.host.deviceOptedOut(def.groupName);
-    this.paintLocalSegment(line1, {
-      seg: optOutLocalSegment(optedOut),
-      isException: optedOut,
-      showEyebrow: true,
-      menu: () => {
-        const menu = new Menu();
-        // buildOptOutLocalMenu is the SAME producer the Sync Center's own row asks (§5.3) — two
-        // entrances, one entry list, so they cannot offer different choices.
-        for (const entry of buildOptOutLocalMenu(optedOut, {
-          follow: () => void this.host.setDeviceOptOut(def.groupName, false).then(() => this.renderItemCard(wrap, def)),
-          optOut: () => void this.host.setDeviceOptOut(def.groupName, true).then(() => this.renderItemCard(wrap, def)),
-        })) {
-          menu.addItem((i) => {
-            i.setTitle(entry.title).setChecked(entry.checked).onClick(entry.action);
-            if (entry.icon !== null) i.setIcon(entry.icon);
-          });
-        }
-        return menu;
-      },
+    const localSection = (): MenuSectionModel => ({
+      header: ON_THIS_DEVICE_HEADER,
+      items: buildOptOutLocalMenu(optedOut, {
+        follow: () => void this.host.setDeviceOptOut(def.groupName, false).then(() => this.renderItemCard(wrap, def)),
+        optOut: () => void this.host.setDeviceOptOut(def.groupName, true).then(() => this.renderItemCard(wrap, def)),
+      }),
     });
 
     const line2 = row.createDiv({ cls: "config-sync-scrow" });
@@ -1554,20 +1572,23 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       // first per-key rule was added, so this branch never touches item.settingsFile?.fileRule at
       // all — neither cell — and never mutates it either: per-key rules are the only truth here,
       // and the row says so instead of drawing a stale one.
-      const jumpIcon = sharingCell.createSpan({
-        cls: "config-sync-sharingicon",
-        attr: { role: "button", tabindex: "0", "aria-label": PER_KEY_RULES_JUMP_TEXT },
-      });
-      setIcon(jumpIcon, "settings-2");
       // lockCell stays empty — there is no fileRule.encrypted left to speak for.
       const jumpToKeyRules = (): void => {
-        const target = wrap.querySelector(".config-sync-card-fields");
-        // Absent while the async file read is still in flight (renderCardBodyInto) — or,
-        // permanently, for a card whose only per-key entries are all enablement-list keys (e.g.
-        // Appearance with nothing but snippet-member rules): buildRuleRows filters those out
-        // (isEnablementRuleKey, itemCard.ts) so hasKeyRules is true but no "Key rules" panel
-        // ever renders to jump to. Silent no-op either way — nothing worse than the old dim,
-        // non-interactive cell this replaces.
+        // "Jump to the per-key rules" means WHEREVER they live, which is not always the `Key rules`
+        // panel. A card whose only per-key entries are enablement-list keys renders no such panel:
+        // buildRuleRows filters those keys out (their rows already exist elsewhere), yet deriveMode
+        // still counts them, so the cell correctly says per-key rules decide. Appearance is the one
+        // item where that is the WHOLE set — its single rule is `enabledCssSnippets`, whose rows
+        // live under `Folders → snippets`. Follow the declared link (`presetCompanions[].mapKey`)
+        // to that row rather than adding a second hardcoded branch for it.
+        const target =
+          wrap.querySelector(".config-sync-card-fields") ??
+          enablementRuleKeysOf(def, item)
+            .map((k) => wrap.querySelector(`[data-cs-mapkey="${k}"]`))
+            .find((el) => el !== null) ??
+          null;
+        // Still null while the async file read is in flight (renderCardBodyInto has not built the
+        // body yet) — silent no-op, the next click after it lands works.
         if (target === null) return;
         target.scrollIntoView({ block: "center" });
         // Same visual language highlightAnchor uses for a card-level jump — this one stays
@@ -1575,26 +1596,23 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         target.addClass("config-sync-search-highlight");
         window.setTimeout(() => target.removeClass("config-sync-search-highlight"), 1800);
       };
-      jumpIcon.addEventListener("click", jumpToKeyRules);
-      jumpIcon.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          jumpToKeyRules();
-        }
-      });
-      // Visible text, not a tooltip (see PER_KEY_RULES_JUMP_TEXT above) — the aria-label on the
-      // icon carries the same sentence for a screen reader, this line carries it for eyes.
-      const note = row.createDiv({
-        cls: "config-sync-card-keyrulesnote",
-        text: `${PER_KEY_RULES_JUMP_TEXT} ↓`,
-        attr: { role: "button", tabindex: "0" },
-      });
-      note.addEventListener("click", jumpToKeyRules);
-      note.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          jumpToKeyRules();
-        }
+      // One control here too, even though its two halves do different KINDS of thing: the shared
+      // half has no value to pick (per-key rules decide), so it contributes a single menu entry
+      // that JUMPS instead of a list of stops. That costs the jump one extra click and buys the
+      // row the same shape as every other — and the jump stops being an unlabelled icon whose
+      // only explanation was a tooltip a phone never shows.
+      // `braces`, not `settings-2`: this glyph says "the keys inside this file decide". `settings-2`
+      // means "opens Settings" and nothing else — the `More` row on the same card uses it, and two
+      // rows one above the other drawing the same mark for different facts is what sent the reader
+      // looking for a difference that was not there.
+      this.paintMergedControl(sharingCell, {
+        shared: { icon: "braces", tooltip: PER_KEY_RULES_JUMP_TEXT },
+        local: optOutLocalSegment(optedOut),
+        localIsException: optedOut,
+        sections: () => [
+          { header: SHARED_WITH_HEADER, items: [{ title: PER_KEY_RULES_JUMP_TEXT, icon: "braces", checked: false, action: jumpToKeyRules }] },
+          localSection(),
+        ],
       });
       return;
     }
@@ -1619,12 +1637,27 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     };
     // setFileRule re-renders this whole row after every write, so the icon always reflects the
     // freshly-saved sharing without any extra bookkeeping here.
-    this.renderSharingPicker(sharingCell, {
-      sharing: rule.sharing,
-      options: FILE_SHARING_OPTIONS,
-      disabled: false,
-      onChange: (v) => setFileRule((r) => ({ ...r, sharing: v as FileSharing })),
+    // Three stops, not four: `FileSharing` excludes this-device by construction — a whole file that
+    // every device keeps its own copy of is simply a file nobody syncs, which is the card's own
+    // toggle, not a sharing rule.
+    this.paintMergedControl(sharingCell, {
+      shared: { icon: sharingIcon(rule.sharing), tooltip: settingsSyncTooltip(rule.sharing) },
+      local: optOutLocalSegment(optedOut),
+      localIsException: optedOut,
+      sections: () => [
+        sharingMenuSection({
+          header: SHARED_WITH_HEADER,
+          options: FILE_SHARING_OPTIONS,
+          current: rule.sharing,
+          iconFor: sharingIcon,
+          labelFor: sharingLabel,
+          onChange: (v) => setFileRule((r) => ({ ...r, sharing: v as FileSharing })),
+        }),
+        localSection(),
+      ],
     });
+    // The lock stays its OWN control: it is a toggle, not a menu, and folding a one-click flip into
+    // a control whose whole job is "open a menu" would cost it that click for nothing.
     this.renderLockToggle(lockCell, { encrypted: rule.encrypted, disabled: false, onChange: (v) => setFileRule((r) => ({ ...r, encrypted: v })) });
   }
 
@@ -1767,16 +1800,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private renderRuleRows(bodyEl: HTMLElement, def: ItemDef, item: Item, doc: Record<string, unknown>, wrap: HTMLElement): void {
     const rows = buildRuleRows(def, item, doc);
     if (rows.length === 0) return;
-    // Zone-header scrow, same idiom as renderCarrierElements: `this device` heads the local
-    // column once, so the member rows below suppress their per-row eyebrow (showEyebrow: false
-    // in renderRuleRow).
+    // Zone header, label only. The `this device` column header retired with the merged control:
+    // there is no local COLUMN any more, both layers live inside one control, and the words that
+    // told them apart moved into that control's menu as its two section headers.
     const head = bodyEl.createDiv({ cls: "config-sync-scrow" });
     head.createDiv({ cls: "config-sync-explabel config-sync-explabel-inline", text: "Key rules" });
-    // …and no column header when no row under it has that column (every key here is a per-item
-    // one): a heading over an empty column is the same claim of an answer that isn't there.
-    if (rows.some(ruleRowHasLocalLayer)) {
-      head.createDiv({ cls: "config-sync-explabel config-sync-explabel-inline config-sync-scrow-col4", text: THIS_DEVICE_EYEBROW });
-    }
     const panel = bodyEl.createDiv({ cls: "config-sync-card-fields" });
     for (const row of rows) this.renderRuleRow(panel, def, item, row, doc, wrap);
   }
@@ -1800,42 +1828,62 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     };
     // setRule → refreshCardBody rebuilds every rule row, so the icon re-reads the fresh sharing.
     // The rule's removal is the menu's own warning item.
-    // A per-key rule now has its own local layer (below), so the fleet segment must not speak in
+    // A per-key rule now has its own local layer (below), so its shared half must not speak in
     // "this device" terms any more — `ruleIcon`/`ruleLabel` rename the fourth stop from `This
-    // device`/`airplay` to `Each device decides`/`users` (enablementRow.ts). The STORED value is
+    // device`/`airplay` to `Not shared`/`split` (enablementRow.ts). The STORED value is
     // still the same `this-device` union member; only the presentation moves to the enablement
-    // vocabulary, matching the fleet pickers above it (renderDefaultEnabledOnRow, renderElementRuleRow).
-    this.renderSharingPicker(slots.device, {
-      sharing: row.rule.sharing,
-      options: FIELD_SHARING_OPTIONS,
-      disabled: false,
-      iconFor: ruleIcon,
-      labelFor: ruleLabel,
-      onChange: (v) => setRule((r) => ({ ...r, sharing: v, encrypted: v.kind === "this-device" ? false : r.encrypted })),
-      extras: [{
-        title: "Remove rule",
-        icon: "trash",
-        action: () => {
-          void (async () => {
-            await this.updateItem(def, (c) => {
-              const sf = c.settingsFile ?? defaultSettingsFile();
-              const rules = { ...sf.rules };
-              delete rules[row.key];
-              const perElement = { ...sf.perElement };
-              delete perElement[row.key];
-              return { ...c, settingsFile: withDerivedMode({ ...sf, rules, perElement }) };
-            });
-            if (!hasKeyRules(this.itemOf(def))) {
-              // Removing the last rule flips hasKeyRules -> false, which undims the path row's own
-              // scope/lock controls (spec §3.1) — refreshed in place: a full re-render would
-              // jump the panel and leave the dim state stale on other paths.
-              this.refreshPathRow(wrap, def);
-            }
-            this.refreshCardBadges(wrap, def);
-            this.refreshCardBody(wrap, def);
-          })();
-        },
-      }],
+    // vocabulary, matching the controls above it (renderDefaultEnabledOnRow, renderElementRuleRow).
+    const removeRule = (): void => {
+      void (async () => {
+        await this.updateItem(def, (c) => {
+          const sf = c.settingsFile ?? defaultSettingsFile();
+          const rules = { ...sf.rules };
+          delete rules[row.key];
+          const perElement = { ...sf.perElement };
+          delete perElement[row.key];
+          return { ...c, settingsFile: withDerivedMode({ ...sf, rules, perElement }) };
+        });
+        if (!hasKeyRules(this.itemOf(def))) {
+          // Removing the last rule flips hasKeyRules -> false, which undims the path row's own
+          // scope/lock controls (spec §3.1) — refreshed in place: a full re-render would
+          // jump the panel and leave the dim state stale on other paths.
+          this.refreshPathRow(wrap, def);
+        }
+        this.refreshCardBadges(wrap, def);
+        this.refreshCardBody(wrap, def);
+      })();
+    };
+    // ONE control for both layers. `ruleRowHasLocalLayer` decides whether there
+    // IS a second layer: a per-item key is governed by the per-item machinery, and a `Not shared`
+    // key has no shared value to opt out of — either way the control shows one glyph and the menu
+    // one section, so what you can see and what you can pick always match.
+    const ref = defRef(def);
+    const hasLocal = ruleRowHasLocalLayer(row);
+    const excepted = hasLocal && this.host.deviceFieldExceptedFor(ref, row.key);
+    this.paintMergedControl(slots.device, {
+      shared: { icon: ruleIcon(row.rule.sharing), tooltip: sharingCycleTooltip(row.rule.sharing) },
+      local: hasLocal ? optOutLocalSegment(excepted) : null,
+      localIsException: excepted,
+      sections: () => {
+        const shared = sharingMenuSection({
+          header: SHARED_WITH_HEADER,
+          options: FIELD_SHARING_OPTIONS,
+          current: row.rule.sharing,
+          iconFor: ruleIcon,
+          labelFor: ruleLabel,
+          onChange: (v) => setRule((r) => ({ ...r, sharing: v, encrypted: v.kind === "this-device" ? false : r.encrypted })),
+        });
+        const localSection: MenuSectionModel[] = hasLocal
+          ? [{
+              header: ON_THIS_DEVICE_HEADER,
+              items: buildOptOutLocalMenu(excepted, {
+                follow: () => void this.host.setDeviceFieldExcepted(ref, row.key, false).then(() => this.refreshCardBody(wrap, def)),
+                optOut: () => void this.host.setDeviceFieldExcepted(ref, row.key, true).then(() => this.refreshCardBody(wrap, def)),
+              }),
+            }]
+          : [];
+        return [shared, ...localSection, { header: null, items: [{ title: "Remove rule", icon: "trash", checked: false, action: removeRule }] }];
+      },
     });
     const lockCell = slots.lock;
     const lockDisabled = encryptToggleDisabled(row.rule.sharing, row.perElementEnabled);
@@ -1875,35 +1923,6 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
           }
         });
       }
-    }
-    // This key's own local layer (§8): a per-key rule is fleet-only no longer — `defRef` is this
-    // file's one way to turn a card's def into the ItemRef the host's per-field methods key on
-    // (see itemAnchorId/cardExpandKey above), so this reuses it rather than deriving a second ref.
-    // `ruleRowHasLocalLayer` is the one producer for WHICH rows have one: a per-item key's rules
-    // are honoured by the per-item machinery alone, which has no local layer to speak for (§2).
-    if (ruleRowHasLocalLayer(row)) {
-      const ref = defRef(def);
-      const excepted = this.host.deviceFieldExceptedFor(ref, row.key);
-      this.paintLocalSegment(fr, {
-        seg: optOutLocalSegment(excepted),
-        isException: excepted,
-        // `this device` is the rules zone's own COLUMN HEADER (renderRuleRows), so the member rows
-        // carry no eyebrow — exactly how renderCarrierElements/renderElementRuleRow do it.
-        showEyebrow: false,
-        menu: () => {
-          const menu = new Menu();
-          for (const entry of buildOptOutLocalMenu(excepted, {
-            follow: () => void this.host.setDeviceFieldExcepted(ref, row.key, false).then(() => this.refreshCardBody(wrap, def)),
-            optOut: () => void this.host.setDeviceFieldExcepted(ref, row.key, true).then(() => this.refreshCardBody(wrap, def)),
-          })) {
-            menu.addItem((i) => {
-              i.setTitle(entry.title).setChecked(entry.checked).onClick(entry.action);
-              if (entry.icon !== null) i.setIcon(entry.icon);
-            });
-          }
-          return menu;
-        },
-      });
     }
     if (row.isArray && row.perElementEnabled) {
       const elements = isStringArrayValue(doc[row.key]) ? (doc[row.key] as string[]) : [];
@@ -2091,7 +2110,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       // from the callback, which can't fire until this render pass has finished assigning them.
       let rowEls: { countEl: HTMLElement; chevron: HTMLElement } | null = null;
       let membersHost: HTMLElement | null = null;
-      rowEls = this.renderCompanionRow(listEl, def, row, wrap, open, () => {
+      // Hoisted above the row render (it used to sit below, beside the member scan): the row itself
+      // now stamps this key, so the two readers — the scan that decides WHICH member list to draw,
+      // and the jump that needs to FIND this row — still ask the same single lookup.
+      const mapKey = def.presetCompanions?.find((p) => p.path === row.path)?.mapKey;
+      rowEls = this.renderCompanionRow(listEl, def, row, wrap, open, mapKey, () => {
         const nowOpen = !this.membersOpen.has(key);
         if (nowOpen) this.membersOpen.add(key);
         else this.membersOpen.delete(key);
@@ -2111,7 +2134,6 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       // defensive null check since it's wired before this assignment runs): the two scans below
       // are plain closures over a `let`, so TS can't carry the non-null narrowing in without one.
       const host = membersHost;
-      const mapKey = def.presetCompanions?.find((p) => p.path === row.path)?.mapKey;
       if (mapKey === ENABLED_CSS_SNIPPETS_KEY) {
         void (async () => {
           const files = await this.host.listSnippetFiles();
@@ -2161,6 +2183,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     row: CompanionRowModel,
     wrap: HTMLElement,
     open: boolean,
+    mapKey: string | undefined,
     onToggle: () => void
   ): { countEl: HTMLElement; chevron: HTMLElement } | null {
     const editKey = this.companionEditKey(def, row.path);
@@ -2168,7 +2191,14 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       this.renderCompanionPathEditRow(listEl, def, row, wrap, editKey);
       return null;
     }
-    const r = listEl.createDiv({ cls: "config-sync-scrow config-sync-card-companiongrid" });
+    // The row carries its own mapKey so the path row's jump can FIND it by data instead of by a
+    // second hardcoded "appearance means snippets" branch: `mapKey` already declares which settings
+    // key this folder's member list is stored under (registry.ts's presetCompanions), and that is
+    // precisely the link the jump needs. Absent on plain folders, which carry no key.
+    const r = listEl.createDiv({
+      cls: "config-sync-scrow config-sync-card-companiongrid",
+      attr: mapKey === undefined ? {} : { "data-cs-mapkey": mapKey },
+    });
     const contentCell = r.createDiv({ cls: "config-sync-card-foldercontent" });
     contentCell.setAttribute("role", "button");
     contentCell.setAttribute("tabindex", "0");
@@ -2536,18 +2566,26 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     // silently revert here too.
     const appearancePinned = group.name === "appearance" && this.groups.some((g) => g.name === "enabled-css-snippets");
     const pinnedToFields = group.name === SELF_GROUP_NAME || appearancePinned;
-    // A text menu picker (the panel's one picker idiom, same as After install's chip):
-    // current label + ⇕, click opens the mode menu; a pinned item renders dim with the reason
-    // in its tooltip and no menu at all.
-    const chip = controlEl.createSpan({
-      cls: "config-sync-menuchip config-sync-card-trigger",
-      text: pinnedToFields ? MODE_LABELS.fields : (modes.find((m) => m.id === current)?.label ?? current),
-    });
+    // An ICON picker, the same shape as the two rows above it (Type, Devices). Mode was the last
+    // text chip in this form and read as the odd row out. The glyphs are the mode vocabulary the
+    // rest of the product already speaks — `braces` for per-key rules (the keys inside the file
+    // decide), `lock` for encrypted — with `file-text` for whole-file, deliberately NOT the `file`
+    // that the Type row directly above uses for its own question.
+    const chip = controlEl.createSpan({ cls: "config-sync-sharingicon config-sync-card-trigger" });
+    const shown = pinnedToFields ? "fields" : current;
+    setIcon(chip.createSpan(), MODE_ICON[shown] ?? MODE_ICON.plain);
+    chip.setAttribute("aria-label", pinnedToFields
+      ? "This item always uses Per-key rules — some of its settings stay on each device"
+      : (modes.find((m) => m.id === current)?.label ?? current));
     if (pinnedToFields) {
       chip.addClass("config-sync-dim");
       setTooltip(chip, "This item always uses Per-key rules — some of its settings stay on each device");
+      // The ⇕ renders even here: a picker box without it is 14px narrower and this row's glyph
+      // would drift out of the column the two rows above sit in (§2.3's constant-layout rule).
+      setIcon(chip.createSpan({ cls: "config-sync-tworow-chev" }), "chevrons-up-down");
       return;
     }
+    setTooltip(chip, modes.find((m) => m.id === current)?.label ?? current);
     setIcon(chip.createSpan({ cls: "config-sync-tworow-chev" }), "chevrons-up-down");
     const pick = (mode: SyncMode): void => {
       void (async () => {
@@ -2587,7 +2625,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       const menu = new Menu();
       for (const m of modes) {
         if (m.id === "fields" && group.type !== "file") continue;
-        menu.addItem((i) => i.setTitle(m.label).setChecked(m.id === current).onClick(() => pick(m.id)));
+        menu.addItem((i) => i.setTitle(m.label).setIcon(MODE_ICON[m.id]).setChecked(m.id === current).onClick(() => pick(m.id)));
       }
       return menu;
     });
@@ -3847,8 +3885,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         strip = panel.createDiv({ cls: "config-sync-test-strip" });
         btn.onClick(async () => {
           btn.setDisabled(true).setButtonText("Testing…");
-          strip!.className = "config-sync-test-strip is-testing";
-          strip!.setText("Contacting remote…");
+          writeTestStrip(strip!, "is-testing", "Contacting remote…", null);
           try {
             const { gitLsRemote } = await import("../external/gitSource");
             let auth: GitAuth | null;
@@ -3858,20 +3895,18 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
               if (draft.username !== "") candidate.username = draft.username;
               auth = resolveGitToken(this.app.secretStorage, candidate);
             } catch (e) {
-              strip!.className = "config-sync-test-strip is-error";
-              strip!.setText(`✗ ${(e as Error).message}`);
+              writeTestStrip(strip!, "is-error", `✗ ${(e as Error).message}`, null);
               return;
             }
             const res = await gitLsRemote(draft.url, draft.branch, auth);
             if (res.kind === "error") {
-              strip!.className = "config-sync-test-strip is-error";
-              strip!.setText(`✗ Could not reach remote — ${res.message}`);
+              // Headline says what happened and what to do; git's own words go on the second,
+              // quieter line rather than into the sentence the reader has to parse first.
+              writeTestStrip(strip!, "is-error", "✗ Could not reach this remote. Check the URL, then try again.", res.message);
             } else if (res.branchFound) {
-              strip!.className = "config-sync-test-strip is-ok";
-              strip!.setText(`✓ Reachable — branch ${draft.branch} found`);
+              writeTestStrip(strip!, "is-ok", `✓ Reachable. Branch ${draft.branch} found.`, null);
             } else {
-              strip!.className = "config-sync-test-strip is-caution";
-              strip!.setText(`Reachable, but branch "${draft.branch}" not found`);
+              writeTestStrip(strip!, "is-caution", `Reachable, but branch "${draft.branch}" was not found.`, null);
             }
           } finally {
             btn.setDisabled(false).setButtonText("Test connection");

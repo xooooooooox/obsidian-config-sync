@@ -10,10 +10,12 @@ describe("FOLD_ICON — fold-state→icon map", () => {
     for (const k of kinds) expect(FOLD_ICON[k]).toBeTruthy();
   });
 
-  it("uses the exact icons named in the spec — circle-slash never ban (action vs. state)", () => {
+  // `ban` stays reserved for the stop-syncing ACTION — action and state never share a glyph. All
+  // three are circles, so the trio reads as one family at a glance.
+  it("uses the exact icons named in the spec — never ban (action vs. state)", () => {
     expect(FOLD_ICON).toEqual({
       insync: "check",
-      excluded: "circle-slash",
+      excluded: "circle-minus",
       nosettings: "circle",
     });
   });

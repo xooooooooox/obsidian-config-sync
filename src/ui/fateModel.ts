@@ -1,5 +1,29 @@
 import type { Sharing } from "../core/types";
 
+// `anchor` is what the two versions BELONG to, and it exists purely so the copy can name the
+// subject: a plugin row's own version is understood from the row's name, but an app-anchored row
+// (App settings, Appearance, Hotkeys, the two plugin lists) would otherwise say "version 1.13.7"
+// while naming nobody. Same shape as `Availability["anchor"]`, which is where it comes from.
+export interface VersionAhead {
+  installed: string;
+  stored: string;
+  anchor: "plugin" | "app";
+}
+
+// The object of "records ___" in the ROW sentence. A plugin row keeps the word `version` it has
+// always had; an app-anchored row names Obsidian instead, because "version 1.13.7" on a row called
+// App settings names nobody.
+function versionVerbObject(v: VersionAhead): string {
+  return v.anchor === "app" ? `Obsidian ${v.installed}` : `version ${v.installed}`;
+}
+
+// The object of "…the newer ___ so they can update" in the two JOINED card clauses. Deliberately
+// NOT the same producer as above: the plugin form there has always been the bare number (the
+// clause's own first half already names the plugin), and it must stay byte-identical.
+function newerVersionName(v: VersionAhead): string {
+  return v.anchor === "app" ? `Obsidian ${v.installed}` : v.installed;
+}
+
 export interface FateInput {
   direction: "apply" | "capture" | null; // null → in sync / nothing yet
   conflict: boolean;                     // both sides changed
@@ -36,10 +60,11 @@ export interface FateInput {
                                           // Optional so a FateInput literal without it reads as
                                           // "not opted out".
   hasSettingsPayload: boolean;           // this run writes settings files
-  versionAhead: { installed: string; stored: string } | null; // installed plugin version
-                                          // is newer than the store's recorded version (drift
-                                          // "ahead") — capture's real work here is recording the
-                                          // newer version, independent of hasSettingsPayload
+  versionAhead: VersionAhead | null;      // the installed version (of the plugin, or of Obsidian
+                                          // itself for an app-anchored row) is newer than the
+                                          // store's recorded one (drift "ahead") — capture's real
+                                          // work here is recording the newer version, independent
+                                          // of hasSettingsPayload
   special: "appearance" | "folder" | null; // "folder": a folder-type row — its own files ARE the
                                             // payload, folderFileCount REPLACES the settings verb
                                             // (never joins); non-null AND non-folder rows with a
@@ -205,7 +230,7 @@ export function rowFate(i: FateInput): Fate {
     const verb = settingsVerb(i, turnedOn);
     // Version-ahead's own segment joins after whatever verb chain above produced (·
     // grammar), never replaces it — a pure version-ahead row (verb null) renders it alone.
-    const versionVerb = i.versionAhead !== null ? `records version ${i.versionAhead.installed}` : null;
+    const versionVerb = i.versionAhead !== null ? `records ${versionVerbObject(i.versionAhead)}` : null;
     const joined = versionVerb === null ? verb : verb === null ? versionVerb : `${verb} · ${versionVerb}`;
     // An empty capture verb set is real, invisible-count work (a
     // `not-captured` companion — see nothingYetFate's comment) — never degrades. Generic,
@@ -230,12 +255,16 @@ export function rowFate(i: FateInput): Fate {
 // `input.versionAhead` (caller narrows it non-null before calling) plus the same flags
 // settingsVerb's capture branch reads, never by matching the row sentence strings, so every
 // non-version-ahead row's clause stays byte-identical.
-export function versionAheadClause(input: FateInput, versionAhead: { installed: string; stored: string }): string {
+export function versionAheadClause(input: FateInput, versionAhead: VersionAhead): string {
+  const newer = newerVersionName(versionAhead);
   if (capturedTurnsOn(input)) {
-    return `Turned on here — your other devices will turn it on the next time they apply. Also records the newer ${versionAhead.installed} so they can update`;
+    return `Turned on here — your other devices will turn it on the next time they apply. Also records the newer ${newer} so they can update`;
   }
   if (input.hasSettingsPayload) {
-    return `Shares your settings with your other devices — and records the newer ${versionAhead.installed} so they can update`;
+    return `Shares your settings with your other devices — and records the newer ${newer} so they can update`;
   }
-  return `Installed ${versionAhead.installed} is newer than the store's ${versionAhead.stored} — capture records it so your other devices can update`;
+  // The pure-drift clause names the subject up front, since this is the ONLY sentence the row
+  // gets: a plugin's own version needs no subject (the row is the plugin), Obsidian's does.
+  const subject = versionAhead.anchor === "app" ? `Obsidian ${versionAhead.installed}` : `Installed ${versionAhead.installed}`;
+  return `${subject} is newer than the store's ${versionAhead.stored} — capture records it so your other devices can update`;
 }

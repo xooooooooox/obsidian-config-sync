@@ -19,8 +19,8 @@
 ## 功能特性
 
 - **每个条目一张卡片** —— 每个被同步的对象（一组 Obsidian 选项、一个核心/社区插件、一份代码片段）都是一行 + 可展开抽屉，抽屉里放着它的规则；插件的启用状态就在它自己的卡片上。（[详情](docs/GUIDE.md#settings)）
-- **逐键的正交规则** —— 每个键回答两个彼此独立的问题：由谁共享（`All devices` / `Desktop only` / `Mobile only` / `Each device decides`），以及是否加密传输；列表型的键还可以让每个元素拥有自己的共享规则，任意一个键——或整份文件——也都可以单独在本机例外，不影响其他设备看到的共享答案。（[详情](docs/GUIDE.md#field-rules--sensitive-settings)）
-- **凭证安全** —— `Each device decides` 键永远不会离开本机，按设备设置的密码短语则为需要传输的内容加密。
+- **逐键的正交规则** —— 每个键回答两个彼此独立的问题：由谁共享（`All devices` / `Desktop only` / `Mobile only` / `Not shared`），以及是否加密传输；列表型的键还可以让每个元素拥有自己的共享规则，任意一个键——或整份文件——也都可以单独在本机例外，不影响其他设备看到的共享答案。（[详情](docs/GUIDE.md#field-rules--sensitive-settings)）
+- **凭证安全** —— `Not shared` 键永远不会离开本机，按设备设置的密码短语则为需要传输的内容加密。
 - **明确的 Apply** —— 在你勾选条目并按下 Apply 之前，设备上不会有任何变化；每次运行都会留在贴顶结果条与可浏览的 **History** 中可见。
 - **随时可见状态的 Sync Center** —— 每一行都会用大白话说清自己的命运（*开启 · 安装 · 应用设置*）、归一化的 JSON 差异、一个 *this device* 状态胶囊，以及每一类待办动作的总数。（[导览](docs/GUIDE.md#the-sync-center)）
 - **安装引擎** —— 本设备上版本落后、被禁用或未安装的插件可以在 Apply 过程中一并更新、启用或安装，并锁定到 capture 时的版本。（[规则](docs/GUIDE.md#availability-facts-and-the-install-engine)）

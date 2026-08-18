@@ -506,24 +506,36 @@ functions.
   unit-testable without touching the DOM; `SettingTab.ts`'s renderers turn these models into
   elements. The sharing-picker model lives here too (`sharingIcon`/`nextSharing`/
   `sharingCycleTooltip`), consumed by `SettingTab.ts`'s `renderSharingPicker` — the menu-based
-  picker every sharing cell renders through. `sharingIcon`'s vocabulary (`monitor-smartphone`/
-  `monitor`/`smartphone`/`airplay`) backs the fleet segment of the two-segment row below.
-- `ui/enablementRow.ts` — the two-segment row's MODEL (`label | fleet segment | divider |
-  local segment`), shared by four renderers — a Sync Center row's `Enabled on`
-  (`renderTwoSegmentRow`, SyncCenterView.ts), a plugin card's `Enabled on`, a carrier card's
-  element rows, and a Settings-panel item card's own path row and per-key rule rows
-  (SettingTab.ts, `paintLocalSegment`) — so what each segment SAYS is decided once and the
-  renderers only paint it. `RULE_OPTIONS`/`ruleIcon`/`ruleLabel` are the fleet vocabulary
-  (`sharingIcon`'s icons, plus `users` for `Each device decides` — `airplay`, `sharingIcon`'s own
-  this-device glyph, would read as screen mirroring to a reader who has not read the source);
+  picker every sharing cell with no local layer renders through. `sharingIcon`'s vocabulary
+  (`monitor-smartphone`/`monitor`/`smartphone`/`airplay`) backs the shared half of the merged
+  control below.
+- `ui/mergedControl.ts` — the merged two-layer control's SHAPE, painted once for both surfaces:
+  `sharedGlyph · localGlyph ⇕` in one trigger, and `buildSectionedMenu`, which turns a list of
+  `MenuSectionModel`s into an Obsidian `Menu` with `setIsLabel` headers and separators. The two
+  views own their row SHELL (a scrow vs a card row) and their own menu-trigger wiring; everything
+  between lives here, so the two surfaces cannot drift on what a row offers.
+- `ui/enablementRow.ts` — that control's MODEL, shared by four renderers — a Sync Center row's
+  `Enabled on`/`Settings sync` (`renderMergedRow`, SyncCenterView.ts), a plugin card's
+  `Enabled on`, a carrier card's element rows, and a Settings-panel item card's own path row and
+  per-key rule rows (SettingTab.ts, `paintMergedControl`) — so what each layer SAYS is decided once
+  and the renderers only paint it. `sharingMenuSection` builds the shared half's section (same
+  stops, same order, same separator before the fourth, at every entrance), and
+  `SHARED_WITH_HEADER`/`ENABLED_ON_HEADER`/`ON_THIS_DEVICE_HEADER` are the section headers that
+  make the same three words unambiguous — `Enabled on: Desktop only` and `Shared with: Desktop
+  only` say different things, where the bare stop could not.
+  `RULE_OPTIONS`/`ruleIcon`/`ruleLabel` are the shared-layer vocabulary
+  (`sharingIcon`'s icons, plus `square-split-horizontal` for `Not shared` — `airplay`,
+  `sharingIcon`'s own this-device glyph, would read as screen mirroring to a reader who has not read
+  the source, and a negation glyph would put the shared answer in the local exception's family,
+  which is the one distinction readers most often lose);
   `buildLocalMenu` is the element-level exception menu's one producer, and `buildOptOutLocalMenu`
   is the one producer for BOTH two-state local answers — the whole-file opt-out and a per-key
-  rule's own exception — sharing one two-entry producer (`optOutLocalSegment` paints their shared
-  segment shape) rather than each hand-typing a copy; the element-level menu stays its own
-  four-value producer, a genuinely different datum (an on/off exception, not a follow/except
+  rule's own exception — sharing one two-entry producer (`optOutLocalSegment` builds their shared
+  glyph+tooltip) rather than each hand-typing a copy; the element-level menu stays its own
+  producer, a genuinely different datum (an on/off exception, not a follow/except
   pair). `enablementRowModel`/`fileEnablementRowModel` compose a rule + an exception into what
-  both segments say; the local segment renders no icon while it follows the default (a default
-  has nothing to say).
+  both halves say; the local half has a glyph in every state, `equal` for "follows what's shared"
+  included — a layer that vanishes while it agrees reads as missing, not as agreement.
 - `actionIcons.ts` — the single source for the per-action Lucide icons + color classes
   (Capture/Apply/Push/Pull) reused across the panel, buttons, badges and History.
 - `fateChipIcons.ts` — `FATE_CHIP_ICON`: the fate-chip string → Lucide glyph registry (single
@@ -536,7 +548,12 @@ functions.
   never a second icon name to keep in sync.
 - `statusBar.ts` — pure segment model (`statusBarSegments`, `statusBarAriaLabel`) + a thin DOM
   renderer for the status-bar item; segments mirror the Sync Center header pills (↑/↓ from
-  presented bucket counts, ⇡/⇣ from `remoteDirectionCounts`).
+  presented bucket counts, ⇡/⇣ from `remoteDirectionCounts`). The bar runs outside the view, so
+  `panelModel.ts`'s `statusBarStatuses` reproduces the view's row set structurally: self dropped,
+  companions folded through `familyRollup`, and `desktop-only` dropped (the one availability class
+  `stageableRow` calls unstageable). It cannot reproduce the view's FATE machinery — install
+  policy, conflict choices, direction overrides — and that residual is stated at the function
+  rather than papered over.
 - `qualifierSearch.ts` — the `key:value` search shared by both search boxes: pure `parseQuery` /
   `matchesQualifiers` / `suggest` / `applySuggestion`, plus the `QualifierAutocomplete` DOM widget.
   A key the host's spec list does not declare is not a qualifier — it stays free text. That is what
@@ -549,7 +566,12 @@ functions.
   `Fate.excluded`, positioned after the stageable checks and before `nothingYet`) every consumer —
   section partition (active vs. the in-sync/excluded/no-settings folds), filter-pill counts,
   filter visibility, sidebar badges, header pills — reads, so a row can never disagree with itself
-  across those surfaces. `TYPE_SECTION_ORDER`/
+  across those surfaces. **Which ROWS those counts run over is decided once too**
+  (`SyncCenterView`'s `countable`): exactly the rows the list renders — families already folded,
+  the self item out, the two on/off carriers out (they dissolve into their section's head chip),
+  and every availability section IN, because an outdated/disabled/not-installed row is drawn and
+  staged like any other. The status bar reaches the same set from outside the view through
+  `statusBarStatuses` (below). `TYPE_SECTION_ORDER`/
   `TYPE_SECTION_TITLES`/`typeSectionForRow` fix the four sections (Obsidian/Core plugins/
   Community plugins/Your folders — beta folds into Community, custom groups into Your folders);
   `sectionCountLabel` renders a section head's trailing `N` / `N/M`. `familyRollup` derives one
@@ -753,7 +775,7 @@ Changes must preserve these:
   nested object is ignored for class partitioning; `strip`/`encrypt` are unaffected and keep
   their any-depth semantics.
 - **Device-local facts never enter the shared store; the store contract decides what is
-  device-local.** The explicit **Each device decides** choice for a list element lives in
+  device-local.** The explicit **Not shared** choice for a list element lives in
   `config-sync-device-elements` (localStorage, never inside `data.json` at all — see the Data model
   and Enablement notes below), never in the carrier item's own `perElement` rule. On capture and comparison a
   group's this-device fields are stripped using the union of the local rule and the store contract's
@@ -1100,8 +1122,11 @@ resolve it. Dropping such an entry instead would read as never-synced, which def
     `CoreContext.fieldExceptions` carries, mirroring `switchExceptions`'s own bridge. A key whose
     items each carry their own rule has no entry to make here and no control to make it with:
     `excludingPerElement` removes per-item keys from every pattern set the three transforms read, so
-    `ruleRowHasLocalLayer` (`ui/itemCard.ts`) is the one producer deciding which rule rows paint the
-    local segment at all — an option no runtime path would honour is not offered.
+    `ruleRowHasLocalLayer` (`ui/itemCard.ts`) is the one producer deciding which rule rows carry a
+    local layer at all — an option no runtime path would honour is not offered. It says no for a
+    `Not shared` key too, for the opposite reason: nothing entered the store, so there is no shared
+    value to opt out of. Either way the control shows one glyph and its menu one section, so what a
+    row shows and what it can be told never disagree.
   - There is no second data shape for custom rules: `custom` is a section whose items have the same
     `Item` shape as everything else (v2's `customGroups` array is converted by the migration). One
     consequence is accepted: `items.custom` is an object, so an all-digits rule name sorts to the

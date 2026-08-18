@@ -114,7 +114,7 @@ describe("the runtime mask reads one rule layer and one local layer", () => {
   // in data.json would be gone the moment a pull replaced that document with another
   // device's. A SECOND plugin instance is what proves it — same localStorage, a foreign
   // data.json, and the exception still decides.
-  it("an Off here survives a pull that rewrites data.json", async () => {
+  it("an Always off survives a pull that rewrites data.json", async () => {
     const io = seededIO([ELEMENT]);
     const first = await makePlugin({ io, liveEnabled: [ELEMENT] });
     await first.plugin.setDeviceElement(LIST, ELEMENT, "off");
@@ -155,10 +155,10 @@ describe("the runtime mask reads one rule layer and one local layer", () => {
     expect(plugin.deviceElementFor(LIST, ELEMENT)).toBe("off");
   });
 
-  // Precedence 2. "Each device decides" is pass-through, not a decision: the element leaves the
+  // Precedence 2. "Not shared" is pass-through, not a decision: the element leaves the
   // shared answer and whatever is on this machine stays exactly as it is. A force here would be
   // this build deciding something the user never said.
-  it("Each device decides masks without forcing — the local file is left exactly as it was", async () => {
+  it("Not shared masks without forcing — the local file is left exactly as it was", async () => {
     const io = seededIO([ELEMENT]);
     const before = io.files.get(LOCAL_FILE);
     const { plugin } = await makePlugin({ io, rules: { [ELEMENT]: THIS_DEVICE }, liveEnabled: [ELEMENT] });

@@ -281,6 +281,18 @@
   border-color: rgba(var(--color-red-rgb), 0.4);
 }
 
+/* The raw technical detail under a strip's headline: monospace, quiet, and wrapping — it is there
+   for whoever is diagnosing, never for whoever is just reading what went wrong. It never inherits
+   the strip's tone color; a red command line reads as more alarm than it is. */
+.config-sync-strip-detail {
+  margin-top: var(--size-2-1);
+  font-family: var(--font-monospace);
+  font-size: var(--font-smallest);
+  color: var(--text-faint);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .config-sync-secret-control {
   display: flex;
   align-items: center;
@@ -477,20 +489,22 @@ body.is-phone .config-sync-fkey {
 .config-sync-diffic { display: inline-flex; vertical-align: -2px; margin-left: 5px; color: var(--text-faint); cursor: pointer; }
 .config-sync-diffic svg { width: 14px; height: 14px; }
 .config-sync-diffic.is-open { color: var(--interactive-accent); }
-/* The FILES row's direction badge (DESIGN.md §2.1): part of the head cluster below rather than
-   sitting alone on grid track 2 — a lone badge leaves a ~90px hole between it and the count
-   pill. No hover surface, no `▾`; it isn't a trigger on its own, just
-   the first icon in the head's click target. */
-.config-sync-files-badge { display: inline-flex; align-items: center; }
-.config-sync-files-badge svg { width: 14px; height: 14px; }
+/* The FILES row's badge (DESIGN.md §2.1): direction icon AND count in ONE pill, carrying the
+   direction's own color. It replaced three separate marks — a bare direction icon, a neutral count
+   pill and a fold chevron — that all answered "what and how much moves here"; three targets for one
+   question, and the chevron in particular was a 11px thing to aim at. Outlined while collapsed,
+   filled while open: the same state the chevron used to carry, with no extra glyph. */
+.config-sync-files-badge { display: inline-flex; align-items: center; gap: 4px; border: 1px solid currentColor; border-radius: 999px; padding: 1px 8px 1px 6px; font-size: var(--font-ui-smaller); font-variant-numeric: tabular-nums; }
+.config-sync-files-badge-ic { display: inline-flex; align-items: center; }
+.config-sync-files-badge-ic .svg-icon { width: 13px; height: 13px; }
 .config-sync-files-badge.is-up { color: var(--color-orange); }
 .config-sync-files-badge.is-down { color: var(--interactive-accent); }
-/* The FILES row's head — direction badge, bare-number pill,
-   FOLD chevron — is one tight cluster on `.config-sync-cardval`'s default 2/-1 span, same shape
-   whether the row is collapsed (head only) or expanded (head plus `.config-sync-files-list`
-   underneath). Same shape/gap `.config-sync-card-foldercontent` (a companion folder's own
-   member-count row) already established. */
-.config-sync-files-head { display: flex; align-items: center; gap: 6px; cursor: pointer; width: fit-content; }
+.config-sync-files-badge.is-up.is-open { background: rgba(var(--color-orange-rgb), 0.16); }
+.config-sync-files-badge.is-down.is-open { background: var(--background-modifier-hover); }
+/* The head is the whole target — the badge inside it is never clicked on its own, so nothing has to
+   be aimed at. Same shape whether the row is collapsed (head only) or expanded (head plus
+   `.config-sync-files-list` underneath). */
+.config-sync-files-head { display: flex; align-items: center; cursor: pointer; width: fit-content; }
 .config-sync-files-list { margin-top: var(--size-4-1); }
 /* The fold line leads with its own chevron + fixed-size icon — a flex row. */
 .config-sync-unchanged { display: flex; align-items: center; gap: 7px; color: var(--text-muted); font-size: var(--font-ui-smaller); margin-top: var(--size-4-2); cursor: pointer; }
@@ -502,6 +516,14 @@ body.is-phone .config-sync-fkey {
 .config-sync-fold-ic { display: inline-flex; flex: none; }
 .config-sync-fold-ic svg { width: 12px; height: 12px; display: block; }
 .config-sync-fold-ic.is-ok { color: var(--color-green); }
+/* The availability folds (outdated / disabled / not installed / desktop-only) take amber, so the
+   two axes read apart at a glance: the fate folds above answer "is there anything to do", these
+   answer "can this device do it at all". */
+.config-sync-fold-ic.is-warn { color: var(--color-orange); }
+/* An availability fold's note, from the sections this replaced: what applying would actually do for
+   rows this device can't just apply to. Indented past the fold's chevron + icon so it reads as
+   belonging to the line above, and only present while the fold is open. */
+.config-sync-fold-note { margin: var(--size-2-1) 0 var(--size-4-1) 30px; color: var(--text-faint); font-size: var(--font-ui-smaller); max-width: 68ch; }
 
 .config-sync-dot-capture, .config-sync-dot-apply { position: relative; }
 .config-sync-dot-capture::after, .config-sync-dot-apply::after {
@@ -1122,37 +1144,49 @@ body.is-mobile .config-sync-strip-meta .config-sync-report-pills { margin-left: 
 /* Core/Community section header chip: a read-only shortcut to where the on/off list's
    own sync membership is actually decided — the settings card's toggle, one write path. Same shape
    on both platforms. */
-.config-sync-carrierchip { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--background-modifier-border); border-radius: 999px; padding: 1px 8px; font-size: var(--font-ui-smaller); color: var(--text-muted); cursor: pointer; white-space: nowrap; }
+/* Glyph-only now (the word moved into the tooltip, and the STATE moved into the glyph so a phone
+   still tells the two apart) — so the padding tightens to a round badge instead of a word pill. */
+.config-sync-carrierchip { display: inline-flex; align-items: center; border: 1px solid var(--background-modifier-border); border-radius: 999px; padding: 2px 7px; font-size: var(--font-ui-smaller); color: var(--text-muted); cursor: pointer; white-space: nowrap; }
 .config-sync-carrierchip.is-synced { color: var(--color-green); border-color: rgba(var(--color-green-rgb), 0.4); }
 .config-sync-carrierchip-ic svg { width: 13px; height: 13px; display: block; }
 /* Expanded-card rows ("one grid per card"): every row shares the
-   SAME four grid tracks — label | fleet icon | divider | value/local — so a two-segment row's
-   fleet icon and divider land on one vertical rule across every row of the card, the More row's
-   icon included (shortened labels are what make the 130px label track and the 56px
-   icon track — one glyph + a `▾` chevron, no wordmark — both comfortable). Wide rows
-   (State/Files/Resolve/After install/Enablement/Settings sync's fields-mode note/Note) put their
+   SAME four grid tracks — label | control | 1px | value — so the merged control lands on one
+   vertical rule across every row of the card, the More row's icon included (shortened labels are
+   what make the 130px label track and the 56px icon track — glyphs + a `▾` chevron, no wordmark —
+   both comfortable). Track 3 held the two-layer divider until the merge and is now empty; it stays
+   so this grid and `.config-sync-scrow` keep the same four-track shape, and so the `grid-column: 4`
+   anchors there keep their number. Wide rows
+   (State/Files/Resolve/After install/Enablement/Note) put their
    whole value in `.config-sync-cardval`, spanning tracks 2-4 as one cell (`min-width: 0`, no fixed
    narrow width, so content never truncates while the row still has room — ellipsis is a last
-   resort, never a first one). Two-segment/icon-only rows (`.is-iconrow`) land their cells directly
-   on tracks 2/3/4 instead — see renderTwoSegmentRow/renderCardIconActionRow. (`.is-iconrow`, not
+   resort, never a first one). Icon-only rows (`.is-iconrow`) put their one control on track 2
+   instead — see renderMergedRow/renderCardIconActionRow. (`.is-iconrow`, not
    `.is-compact` — that modifier already means the narrow-viewport pane layout on
    `.config-sync-shell`, an unrelated axis.) */
 .config-sync-cardrow { display: grid; grid-template-columns: 130px 56px 1px 1fr; align-items: center; column-gap: var(--size-4-2); }
 .config-sync-cardrow > .config-sync-explabel-inline { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.config-sync-cardval { grid-column: 2 / -1; min-width: 0; }
-/* Any single cell explicitly on track 2 (the More row's icon — the same track a two-segment row's
-   fleet cell lands on) without claiming the full fleet-cell look (padding/hover/is-set) that
-   `.config-sync-tworow-fleetcell` bakes in for its own row shape. */
+/* The 6px matches the trigger boxes' own left padding (`.config-sync-mergedctl`,
+   `.config-sync-cardrow-track2`). Without it a wide row's content starts at the track edge while
+   every control on the rows below starts 6px in — the FILES row's direction badge sat visibly left
+   of the glyphs under it. Putting the inset on the TRACK rather than on each trigger means anything
+   that lands here later is aligned by construction. */
+.config-sync-cardval { grid-column: 2 / -1; min-width: 0; padding-left: var(--size-2-3); }
+/* Any single cell explicitly on track 2 (the More row's icon — the same track the merged control
+   lands on) without claiming the trigger look (padding/hover/is-set) `.config-sync-mergedctl`
+   bakes in for its own row shape. */
 .config-sync-cardrow-track2 { grid-column: 2; }
 /* Only WIDE rows stack label-above-
    value on mobile — Resolve's segmented control (and any other long value) needs the full device
    width, not the ~55px `1fr` remainder a shared four-track row would leave it at 360px. Icon rows
-   (`.is-iconrow` — two-segment rows, the More row) have nothing long to clip, just a glyph +
+   (`.is-iconrow` — merged-control rows, the More row) have nothing long to clip, just a glyph +
    chevron, so they keep the shared grid at every width instead: the shared grid's whole point is
    icons landing on one vertical rule, which a mobile-only stack would silently un-do for exactly
    the rows it matters most for. */
 body.is-mobile .config-sync-cardrow:not(.is-iconrow) { display: flex; flex-direction: column; align-items: stretch; gap: var(--size-4-2); }
 body.is-mobile .config-sync-cardrow:not(.is-iconrow) > .config-sync-explabel-inline { flex: none; padding-top: 0; }
+/* Stacked, there is no control column to align to — the value owns the full width, so the track
+   inset would just read as a stray indent under the label. */
+body.is-mobile .config-sync-cardrow:not(.is-iconrow) > .config-sync-cardval { padding-left: 0; }
 /* After install / Enablement are the two rule controls left on a textual menu —
    their fallback options have no glyph vocabulary to lean on. Ellipsis is a last
    resort for a genuinely narrow viewport, never a first resort while `.config-sync-cardval` still
@@ -1175,24 +1209,37 @@ body.is-mobile .config-sync-cardrow:not(.is-iconrow) > .config-sync-explabel-inl
 .config-sync-sharingicon.config-sync-card-trigger { display: inline-flex; align-items: center; justify-content: center; width: fit-content; padding: 3px 4px; }
 .config-sync-sharingicon.config-sync-card-trigger:hover, .config-sync-sharingicon.config-sync-card-trigger:focus-visible { background: var(--background-modifier-hover); }
 .config-sync-menuchip.config-sync-card-trigger { padding: 3px 8px; }
-/* The two-segment enablement row: `fleet segment | divider | local segment`, one shape shared by
-   the Sync Center's row and the settings card's. Both segments are icon-only — glyph + a muted
-   `▾` affordance, no visible wordmark — the row's own label already says what the row is, and
-   each segment's aria-label/tooltip (built once, `enablementRow.ts`) says what its value is.
-   The local segment carries a muted "this device" eyebrow beside its glyph (`.is-set` still
-   accents purple, matching the icon triggers' accent language) — it renders a real glyph in
-   EVERY state, `corner-down-right` included while it follows the default, so its box never
-   collapses to text-only.
-   ONE parent shape on both surfaces: the Sync Center's expanded card lands its
-   cells directly on `.config-sync-cardrow`'s four tracks (below), and the Settings
-   drawer's `.config-sync-scrow` does exactly the same on ITS four tracks — no nested wrapper. */
-.config-sync-tworow-seg { display: inline-flex; align-items: center; gap: 2px; border-radius: var(--radius-s); padding: 3px 6px; font-size: var(--font-ui-smaller); color: var(--text-muted); cursor: pointer; white-space: nowrap; opacity: 0.45; transition: opacity 0.12s; }
-.config-sync-tworow-seg:hover, .config-sync-tworow-seg:focus-visible { opacity: 1; color: var(--text-normal); background: var(--background-modifier-hover); }
-.config-sync-tworow-seg.is-open { opacity: 1; }
+/* The merged enablement control: both layers in ONE trigger — shared glyph, this device's glyph,
+   one ⇕ — one shape shared by the Sync Center's row and the settings card's, painted once
+   (`mergedControl.ts`). It replaced a `fleet segment | divider | local segment` row whose middle
+   column was a `this device` eyebrow, spending a permanent column on a layer that is almost always
+   "no exception" — and on a phone a column that did not fit. Glyph-only, no visible wordmark: the
+   row's own label says what the row is, the trigger's aria-label (built once, `enablementRow.ts`)
+   says what both layers currently answer, and the menu's two section headers carry the words that
+   used to be the eyebrow. Quiet-rest like every other icon control (the -chev rules below); the
+   whole box lifts together on hover, because it IS one control.
+   ONE placement on both surfaces: a direct child of the row, landing on track 2 of the Sync
+   Center's `.config-sync-cardrow` and in the device slot of the Settings drawer's
+   `.config-sync-scrow` — no nested wrapper on either. */
+.config-sync-mergedctl { display: inline-flex; align-items: center; gap: 2px; width: fit-content; padding: 3px 6px; border-radius: var(--radius-s); color: var(--text-muted); cursor: pointer; opacity: 0.45; transition: opacity 0.12s; }
+.config-sync-mergedctl:hover, .config-sync-mergedctl:focus-visible { opacity: 1; background: var(--background-modifier-hover); }
+.config-sync-mergedctl.is-set { opacity: 1; }
+/* Only the local half colors when THIS device has an exception — the shared glyph keeps saying what
+   the shared answer is, which is the whole reason both glyphs stayed visible. */
+.config-sync-mergedctl.is-set .config-sync-mergedctl-local { color: var(--color-purple); }
+.config-sync-mergedctl-sep { color: var(--text-faint); opacity: 0.35; font-size: var(--font-ui-smaller); line-height: 1; }
 .config-sync-tworow-ic { display: inline-flex; align-items: center; }
-.config-sync-tworow-ic .svg-icon { width: var(--icon-s); height: var(--icon-s); }
-/* Faint tier, matching the quiet zone's indent-guide rule. */
-.config-sync-tworow-vline { width: 1px; align-self: stretch; background: color-mix(in srgb, var(--background-modifier-border) 60%, transparent); }
+/* ONE glyph size for every drawer control. Only the merged control's own glyphs used to carry a
+   size rule; the lock, the sharing picker, the per-item toggle and the File-preview eye fell back
+   to Obsidian's default (18px) and read a size bigger than their neighbours — invisible while the
+   18px ones sat together, obvious the moment the merge put a 16px glyph directly beside the lock.
+   One rule for all five, so a control added later cannot drift off on its own. The ⇕ keeps its own
+   smaller size (its rule follows below, at equal specificity, so source order settles it). */
+.config-sync-tworow-ic .svg-icon,
+.config-sync-lock .svg-icon,
+.config-sync-sharingicon .svg-icon,
+.config-sync-perelement-ic .svg-icon,
+.config-sync-card-previewicon .svg-icon { width: var(--icon-s); height: var(--icon-s); }
 /* The PICKER `chevrons-up-down` affordance every clickable segment
    carries — decorative (the icon/segment it sits beside owns the click/keydown handlers),
    small and muted so it reads as a hint, not a second control.
@@ -1204,7 +1251,10 @@ body.is-mobile .config-sync-cardrow:not(.is-iconrow) > .config-sync-explabel-inl
    (every Settings-tab card row) and `.config-sync-cardrow` (the Sync Center's expanded card
    rows) — the two places this glyph actually lives. */
 .config-sync-tworow-chev { display: inline-flex; align-items: center; color: var(--text-faint); margin-left: 1px; opacity: 0; transition: opacity 0.12s ease; }
-.config-sync-tworow-chev svg { width: 11px; height: 11px; }
+/* `.svg-icon`, not `svg`: the size rule above matches `.config-sync-sharingicon .svg-icon`, which
+   would out-specify a plain `svg` descendant and blow the ⇕ up to the control size. Same shape,
+   same specificity, later in the file — so the ⇕ keeps 11px inside every trigger. */
+.config-sync-tworow-chev .svg-icon { width: 11px; height: 11px; }
 /* `.is-open >` is a CHILD combinator on purpose: the ⇕ is always a direct child
    of its own trigger (fleet cell / sharing icon / local seg), and `.is-open` is ALSO the fold
    state of far ancestors (an expanded `.config-sync-section`) — a descendant match would light
@@ -1223,35 +1273,11 @@ body.is-mobile .config-sync-cardrow:not(.is-iconrow) > .config-sync-explabel-inl
    mobile section switcher (`.config-sync-switcher-chev`, its own class, its own always-visible
    rule) is the one deliberate exception: it is the sole entrance to the section list there. */
 body.is-mobile .config-sync-tworow-chev { display: none; }
-/* The local segment's muted eyebrow — rendered uppercase here, stored lowercase
-   (`THIS_DEVICE_EYEBROW`, enablementRow.ts) — plus the wrapper that groups it with the segment
-   glyph and carries the shared `.is-set` accent (purple, matching the icon triggers'
-   language). */
-.config-sync-tworow-localcell { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
-/* Typeset exactly like the row labels — label and eyebrow must read as one font;
-   purple on a set exception lives on the segment alone. */
-.config-sync-tworow-eyebrow { color: var(--text-muted); font-size: var(--font-ui-smaller); text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap; }
-.config-sync-tworow-localcell.is-set .config-sync-tworow-seg { color: var(--color-purple); opacity: 1; }
-/* NO rest-hiding of the local cell: the cell,
-   its eyebrow and the divider before it are state and stay visible on every surface — the
-   hover-reveal idiom's scope is the ⇕ glyph alone (the -chev rules above). */
+/* NO rest-hiding of the merged control: both glyphs are STATE and stay visible on every
+   surface — the hover-reveal idiom's scope is the ⇕ glyph alone (the -chev rules above). */
 /* Every drawer sharing picker is a content-sized glyph+⇕ box — same box the Sync Center
    paints. */
 .config-sync-scrow .config-sync-sharingicon { width: fit-content; padding: 3px 6px; }
-/* Sync Center expanded-card placement: these three land directly on
-   `.config-sync-cardrow`'s own tracks 2/3/4 rather than nesting inside `.config-sync-tworow`
-   above — scoped to a direct child of `.config-sync-cardrow` so the settings card's OWN use of
-   `.config-sync-tworow-vline`/`-localcell` (inside `.config-sync-tworow`'s 3-column grid,
-   unrelated to these tracks) is untouched. */
-.config-sync-cardrow > .config-sync-tworow-fleetcell { grid-column: 2; display: inline-flex; align-items: center; gap: 2px; border-radius: var(--radius-s); padding: 3px 6px; color: var(--text-muted); cursor: pointer; opacity: 0.45; transition: opacity 0.12s; }
-.config-sync-cardrow > .config-sync-tworow-fleetcell:hover, .config-sync-cardrow > .config-sync-tworow-fleetcell:focus-visible { opacity: 1; color: var(--text-normal); background: var(--background-modifier-hover); }
-.config-sync-cardrow > .config-sync-tworow-fleetcell.is-open { opacity: 1; }
-.config-sync-cardrow > .config-sync-tworow-fleetcell.is-set { opacity: 1; color: var(--text-normal); }
-.config-sync-cardrow > .config-sync-tworow-vline { grid-column: 3; }
-.config-sync-cardrow > .config-sync-tworow-localcell { grid-column: 4; }
-/* The per-key/fields-mode fallback fleet cell: plain italic note text, no icon,
-   no `▾` — it has no menu to open — spanning tracks 2+3 since it carries real prose instead of a
-   glyph; the local segment beside it still lands on track 4 normally. */
 .config-sync-scrow .config-sync-sharingicon:hover, .config-sync-scrow .config-sync-sharingicon:focus-visible { background: var(--background-modifier-hover); }
 /* The expanded card itself — a quiet properties zone (no border box, no fill, no
    radius), tied to its parent row by the FOLD THREAD (shared verbatim with the
@@ -1356,7 +1382,7 @@ body.is-mobile .config-sync-tworow-chev { display: none; }
 .config-sync-card-badge-local { color: var(--color-pink); }
 .config-sync-card-badge-count { color: var(--color-cyan); }
 /* A carrier card's local fact ("N left to me"):
-   purple, the color the two-segment row's local segment already wears when this device has
+   purple, the color the merged control's local glyph already wears when this device has
    taken an element out of the shared answer. The fleet fact beside it keeps the count palette
    above — two facts, two colors, never one number. */
 .config-sync-card-badge-mine { color: var(--color-purple); }
@@ -1364,22 +1390,32 @@ body.is-mobile .config-sync-tworow-chev { display: none; }
 .config-sync-card-badge-state { color: var(--text-faint); }
 .config-sync-item-wrap .setting-item-description:empty { display: none; }
 
-/* The Settings drawer's row grammar: the Sync Center card's own
-   shape with a wider identity track — identity | controls | divider | detail. Identity holds
-   the row's name (an uppercase zone label, a mono key/filename, a member name — long names
-   ellipsize); the controls CLUSTER is left-anchored in its column in fixed role order
-   scope-picker → lock → per-item icon (→ folder toggle); the divider+detail pair renders only
-   on two-segment rows (vline + local cell land on tracks 3/4 as direct children, exactly like
-   `.config-sync-cardrow`). Nothing anchors to the drawer's right edge — removal verbs live in
-   each row's own scope menu, so there is no action column. */
-.config-sync-scrow { display: grid; grid-template-columns: 170px 108px 1px 1fr; align-items: center; column-gap: var(--size-4-2); padding: var(--size-4-1) 0; font-size: var(--font-ui-smaller); }
+/* The Settings drawer's row grammar: identity | controls | 1px | trailing. Identity holds the row's
+   name (an uppercase zone label, a mono key/filename, a member name — long names ellipsize).
+   The controls track is the FLEXIBLE one and its cluster right-aligns inside it, so the cluster
+   hugs the card-toggle rail: a row with no trailing cell puts its controls on the card's right
+   edge, and a folder row's own sync toggle (track 4, `max-content`) takes that edge with the
+   controls immediately left of it. One vertical rule down the whole card, header toggle included.
+   This is what "nothing anchors to the drawer's right edge" turned into once the two-layer merge
+   emptied the right half: the rule existed to stop an ACTION column from being invented, and rule
+   controls lining up with the card's own toggle is not that.
+   Role order inside the cluster is unchanged: aux → lock → device (picker or merged control). */
+.config-sync-scrow { display: grid; grid-template-columns: 170px 1fr 1px max-content; align-items: center; column-gap: var(--size-4-2); padding: var(--size-4-1) 0; font-size: var(--font-ui-smaller); }
 /* The controls column as a fixed three-slot grid (DESIGN.md §1.4 SLOTS): aux (an array
    rule row's per-item icon — the path row's own aux slot stays empty, its eye rides the
    filename line instead) | lock | device picker — same-type controls one strict column each,
-   device LAST beside the divider/THIS DEVICE column; a row without a control leaves the slot
-   empty. */
-.config-sync-scrow-slots { display: grid; grid-template-columns: 24px 24px 44px; align-items: center; column-gap: var(--size-4-2); }
+   device LAST; a row without a control leaves the slot empty. The grid stays FIXED even though the
+   cluster right-aligns: right-aligning the controls without it would let the lock drift left or
+   right with the width of whatever sits beside it, and the lock column is real alignment worth
+   keeping.
+   The device slot is sized for the WIDEST thing it holds — the merged control (two glyphs +
+   separator + ⇕) — not for a lone sharing picker, and its content right-aligns. Centering a
+   variable-width control in a fixed slot is what put a one-glyph `Not shared` row ~12px right of
+   the two-glyph rows above it: equal centers, unequal edges. Right edges are what the eye follows
+   here, because that is where the rail is. */
+.config-sync-scrow-slots { display: grid; grid-template-columns: 24px 24px 68px; align-items: center; column-gap: var(--size-4-2); justify-self: end; }
 .config-sync-scrow-slot { display: flex; align-items: center; justify-content: center; min-width: 0; }
+.config-sync-scrow-slot:last-child { justify-content: flex-end; }
 /* STATE controls right-anchor on the card-toggle rail: a folder row's sync toggle
    lands in this track-4 cell, right edge shared with the card header's own toggle; RULE
    controls (pickers/locks) stay left-anchored in the slot columns. */
@@ -1389,10 +1425,12 @@ body.is-mobile .config-sync-tworow-chev { display: none; }
    paths never wrap; ellipsis only as the genuine last resort. */
 .config-sync-card-pathline { grid-column: 1 / -1; min-width: 0; overflow: hidden; }
 .config-sync-card-pathline .config-sync-card-path { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* A′: the eye is an action on the FILE, so it rides the filename line, right-flushed inside the
-   existing pathhost flex. Not .config-sync-scrow-end — that is grid-column:4 and would overlap
-   .config-sync-card-pathline's 1/-1 span. */
-.config-sync-card-pathline .config-sync-card-previewicon { margin-left: auto; flex: none; }
+/* A′: the eye is an action on the FILE, so it rides the filename line — HUGGING the filename's
+   right edge, never flushed to the line's end. `margin-left: auto` here would anchor it to the
+   CARD's right edge (this line spans 1/-1) and invent the action column §2.1 forbids: "nothing
+   anchors to the drawer's right edge". Not .config-sync-scrow-end either — that is grid-column:4
+   and would overlap this line's own 1/-1 span. */
+.config-sync-card-pathline .config-sync-card-previewicon { margin-left: var(--size-4-2); flex: none; }
 /* The Advanced rule editor's vertical form: one field per scrow row, label | control. */
 .config-sync-advrow { grid-template-columns: 130px 1fr; }
 .config-sync-advrow-ctl { display: flex; align-items: center; min-width: 0; }
@@ -1421,9 +1459,10 @@ body.is-mobile .config-sync-tworow-chev { display: none; }
    quiet row of controls; origin right so the scaled toggle's RIGHT edge is
    the one that holds the rail. */
 .config-sync-scrow .checkbox-container { transform: scale(0.85); transform-origin: right center; }
-/* Mobile: the 170/108 tracks would leave a two-segment row's local cell too narrow at 360px
-   wide — step both down; names ellipsize sooner, the shape stays. */
-body.is-mobile .config-sync-scrow { grid-template-columns: minmax(90px, 32%) 64px 1px 1fr; }
+/* Mobile: the fixed 170px identity track is too much of a 360px row — step it down; names
+   ellipsize sooner, the shape (flexible controls track, cluster on the rail) stays. Narrow-viewport
+   widths have not been re-measured since the two-layer merge; that pass is still open. */
+body.is-mobile .config-sync-scrow { grid-template-columns: minmax(90px, 32%) 1fr 1px max-content; }
 /* Quiet-rest (DESIGN.md §2.3): every clickable icon control rests at muted×45% and
    lifts to 100% on its own hover/focus/menu-open; an ACTIVE state is colored at 100%. The lock
    joins the idiom the sharing picker and per-item icon already carried. */
@@ -1458,11 +1497,6 @@ body.is-mobile .config-sync-scrow { grid-template-columns: minmax(90px, 32%) 64p
 /* Flex so the edit state's input + Reset link share one line inside the content column. */
 .config-sync-card-pathhost { min-width: 8em; display: flex; align-items: center; }
 .config-sync-card-pathinput { width: 100%; font-family: var(--font-monospace); font-size: var(--font-ui-smaller); }
-/* Visible, in-card explanation for the fields-mode settings-file row (no fileRule left to draw a
-   picker for) — same click target as the dim settings-2 jump beside it (renderSettingsFilePathRow),
-   styled like .config-sync-expdesc so it reads as a caption, not a control, at rest. */
-.config-sync-card-keyrulesnote { color: var(--text-faint); font-size: var(--font-ui-smaller); cursor: pointer; margin-top: var(--size-2-1); }
-.config-sync-card-keyrulesnote:hover, .config-sync-card-keyrulesnote:focus-visible { color: var(--text-muted); text-decoration: underline dotted var(--text-faint); text-underline-offset: 3px; }
 .config-sync-card-sfbody { margin-top: var(--size-2-2); }
 
 .config-sync-card-fields { margin-bottom: var(--size-4-1); }
@@ -1632,6 +1666,15 @@ button.config-sync-add-row, button.config-sync-add-row:hover { background: none;
 .config-sync-cm-viewbtn.is-on { background: var(--background-modifier-hover); color: var(--text-normal); }
 
 .config-sync-cm-diffpane { border-top: 1px solid var(--background-modifier-border); font-family: var(--font-monospace); font-size: var(--font-ui-smaller); line-height: 1.75; max-height: 240px; overflow: auto; padding: var(--size-4-1) 0; }
+/* The diff, opened big. Inline, a diff is read through a letterbox: a card, inside a pane, inside a
+   240px-capped scroller. This is the same panel with those constraints lifted — starting large
+   rather than growing into it, since the whole reason to open it is that there was too much to
+   read. `resize` gives it a native drag handle for anyone who wants it larger or smaller still;
+   `min-height: 0` on the flex child is what lets the pane actually shrink with the frame instead of
+   pinning it to its content height. */
+.config-sync-diffmodal { width: 90vw; max-width: 1400px; height: 80vh; resize: both; overflow: auto; display: flex; flex-direction: column; }
+.config-sync-diffmodal .modal-content { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.config-sync-diffmodal .config-sync-cm-diffpane { flex: 1; min-height: 0; max-height: none; }
 .config-sync-cm-dline { padding: 0 var(--size-4-3); white-space: pre; }
 .config-sync-cm-dline.is-common { color: var(--text-faint); }
 .config-sync-cm-dline.is-del { background: rgba(var(--color-red-rgb), 0.14); color: var(--color-red); }

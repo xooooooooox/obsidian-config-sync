@@ -1,9 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { FATE_CHIP_ICON } from "../src/ui/fateChipIcons";
 import { ACTION_ICON } from "../src/ui/actionIcons";
-import { FOLD_ICON } from "../src/ui/foldIcons";
+import { FOLD_ICON, AVAILABILITY_FOLD_ICON } from "../src/ui/foldIcons";
 import { buildOptOutLocalMenu, buildLocalMenu, enablementRowModel, fileEnablementRowModel, ruleIcon, ruleLabel, RULE_OPTIONS } from "../src/ui/enablementRow";
-import { EVERYWHERE } from "../src/core/types";
+import { Badge, computeBadges } from "../src/ui/itemCard";
+import { Item, ItemDef, ItemSettingsFile } from "../src/core/registry";
+import { EVERYWHERE, perClass } from "../src/core/types";
 
 // Every string buildChips (fateModel.ts) can produce, plus the two chips added
 // at render time, must resolve to an icon; an unknown chip string is simply absent from the map
@@ -121,7 +123,22 @@ describe("glyph registry — one glyph, one meaning (icon-collision guard)", () 
     // DESIGN.md §2.3: the encrypt toggle's rest state — closed `lock` stays the
     // encrypted state everywhere (mode badge / json keys / legend + the toggle's on-state).
     { glyph: "lock-open", producer: "SettingTab (external, hardcoded)", home: "renderLockToggle — unencrypted-but-available rest state" },
+    { glyph: "braces", producer: "SettingTab/SyncCenterView (external, hardcoded)", home: "per-key fallback — the keys inside this file decide (also MODE_ICON.fields)" },
+    { glyph: "share-2", producer: "SyncCenterView (external, hardcoded)", home: "carrier chip — the on/off list is shared with your other devices" },
+    { glyph: "maximize-2", producer: "diffView (external, hardcoded)", home: "renderDiffPanel — open this diff in a bigger window" },
+    { glyph: "file-text", producer: "itemCard MODE_ICON (external, hardcoded)", home: "MODE_ICON.plain — the whole file travels as one" },
   ];
+
+  // The availability folds (foldIcons.ts) — a real exported table, so it is WALKED rather than
+  // hand-listed: three of its four glyphs are the same marks the fate chips use for the same facts,
+  // and that reuse must stay declared rather than accidental.
+  function availabilityFoldHomes(): GlyphHome[] {
+    return Object.entries(AVAILABILITY_FOLD_ICON).map(([kind, glyph]) => ({
+      glyph,
+      producer: "AVAILABILITY_FOLD_ICON",
+      home: `AVAILABILITY_FOLD_ICON.${kind}`,
+    }));
+  }
 
   // The local segment's `follows` glyph (DESIGN.md icon table): `corner-down-right` is
   // registered nowhere else. Fed from the REAL model functions (enablementRow.ts's
@@ -141,25 +158,72 @@ describe("glyph registry — one glyph, one meaning (icon-collision guard)", () 
     return homes;
   }
 
+  // The CARD BADGES, driven through the real `computeBadges`. They were the guard's blind spot, and
+  // it cost three separate bugs in one pass: `N left to me` wearing the glyph that meant "no
+  // exception", `on: this device` shown for an OFF exception, and `N device-scoped` wearing
+  // `monitor-smartphone` — the `All devices` glyph — to count keys that are pointedly not on all
+  // devices. None of the three could fail a test that never looked at badges. Every shape that
+  // produces a badge is exercised here so a future badge glyph is checked against every other
+  // meaning in the product.
+  function badgeHomes(): GlyphHome[] {
+    const def = (over: Partial<ItemDef> = {}): ItemDef => ({ id: "x", groupName: "x", label: "X", description: "d", section: "obsidian", ...over });
+    const plugin = def({ section: "community", enablement: { list: "community-plugins", element: "x" } });
+    const item = (sf: Partial<ItemSettingsFile>): Item => ({ synced: true, settingsFile: { mode: "fields", rules: {}, perElement: {}, ...sf } });
+    const shapes: Array<{ label: string; badges: Badge[] }> = [
+      { label: "enablement rule, class-scoped", badges: computeBadges(plugin, item({}), { rule: perClass("desktop"), exception: null }, null) },
+      { label: "enablement exception, on", badges: computeBadges(plugin, item({}), { rule: EVERYWHERE, exception: "on" }, null) },
+      { label: "enablement exception, off", badges: computeBadges(plugin, item({}), { rule: EVERYWHERE, exception: "off" }, null) },
+      { label: "device-scoped, all one class", badges: computeBadges(def(), item({ rules: { a: { sharing: perClass("mobile"), encrypted: false } } }), null, null) },
+      {
+        label: "device-scoped, mixed classes",
+        badges: computeBadges(def(), item({ rules: { a: { sharing: perClass("mobile"), encrypted: false }, b: { sharing: perClass("desktop"), encrypted: false } } }), null, null),
+      },
+      { label: "encrypted", badges: computeBadges(def(), item({ rules: { a: { sharing: EVERYWHERE, encrypted: true } } }), null, null) },
+      { label: "carrier counts, all one exception state", badges: computeBadges(def(), item({}), null, { fleet: ["desktop"], local: ["on", "on"] }) },
+      { label: "carrier counts, mixed exception states", badges: computeBadges(def(), item({}), null, { fleet: [], local: ["on", "off"] }) },
+      { label: "desktop-only plugin", badges: computeBadges(def({ section: "community", desktopOnly: true }), item({}), null, null) },
+    ];
+    return shapes.flatMap((s) =>
+      s.badges.flatMap((b) => (b.icon === undefined ? [] : [{ glyph: b.icon, producer: "computeBadges", home: `card badge — ${b.text}` }]))
+    );
+  }
+
   function allHomes(): GlyphHome[] {
-    return [...fateChipHomes(), ...actionHomes(), ...foldHomes(), ...ruleHomes(), ...localMenuHomes(), ...localSegmentFollowHomes(), ...EXTERNAL_HOMES];
+    return [...fateChipHomes(), ...actionHomes(), ...foldHomes(), ...ruleHomes(), ...localMenuHomes(), ...localSegmentFollowHomes(), ...badgeHomes(), ...availabilityFoldHomes(), ...EXTERNAL_HOMES];
   }
 
   // Declared, intentional glyph reuse across producers — the ONLY escape hatch this test allows.
   // Every entry names the ONE meaning the glyph carries everywhere it appears (`monitor` = desktop
-  // everywhere it appears; `circle-slash` = "not synced on this device", reused deliberately from
+  // everywhere it appears; `circle-minus` = "not synced on this device", reused deliberately from
   // the fold family). A glyph reused with two DIFFERENT meanings — e.g. `power` meaning both "this
   // device turned it on" and "the shared list has it off" — is
   // exactly the bug class this test exists to catch.
   const ALLOWED_SHARED_MEANING: Record<string, string> = {
     monitor: "desktop-only device class",
     "power-off": "off, on this device — a resolved fate this run or a local exception, same direction",
-    "circle-slash": "not synced with this item, on this device",
+    "circle-minus": "not synced with this item, on this device",
+    // The fate chip on a row and the fold line that gathers those rows state one fact — this device
+    // does not have the plugin — so they state it with one mark.
+    "circle-dashed": "not installed on this device",
     check: "affirmative — settled / already matching, nothing left for this glyph to say",
     // The local segment's `follows` glyph, same meaning whether it's an element-layer
     // exception (enablementRowModel) or the whole-file opt-out layer (fileEnablementRowModel) —
-    // "this device has no exception of its own, it does whatever the shared answer says."
-    "corner-down-right": "this device follows the default (no exception of its own)",
+    // "this device matches the shared answer, it has no answer of its own."
+    // It was `corner-down-right` until 2026-08-17, when that glyph turned out to be carrying two
+    // OPPOSITE meanings across the product: here it said "nothing device-specific", while the card
+    // and carrier badges use it for `on: this device` and `N left to me`. Those two agree with each
+    // other, so they kept it and this one moved — which is this guard's whole purpose, one glyph
+    // one meaning, applied to a collision the guard itself could not see (the badges are not one of
+    // the registries it walks).
+    equal: "this device matches the shared answer (no answer of its own)",
+    // The three the badges brought in when they joined this guard. All same-meaning by
+    // construction: a badge summarising rules now speaks the SAME vocabulary those rules do, which
+    // is exactly why it collides here and exactly why the collision is legitimate. The glyph it
+    // used to wear, `monitor-smartphone`, collided with nothing — because it meant `All devices`,
+    // something the badge never counted.
+    lock: "encrypted",
+    smartphone: "mobile-only device class",
+    power: "on, on this device — a local exception, wherever it is summarised",
   };
 
   it("every producer contributes at least one glyph (an empty producer would pass vacuously)", () => {

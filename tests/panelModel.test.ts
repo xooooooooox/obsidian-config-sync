@@ -452,39 +452,70 @@ describe("runProgressLabel", () => {
 });
 
 
-describe("statusBarStatuses — the status bar counts what the Sync Center's main section counts", () => {
+describe("statusBarStatuses — the status bar counts the rows the Sync Center lists", () => {
   const av = (over: Partial<Availability>): Availability => ({
     kind: "enabled", drift: null, localVersion: "1.0.0", storeVersion: "1.0.0", anchor: "plugin", desktopOnly: false, ...over,
   });
   const st = (group: string, state: GroupState) => ({ group, state });
+  const noFamily = { selfGroup: "config-sync", parentOf: () => null };
 
-  // The 2026-07-27 phone find: groups for plugins not installed on this device (or desktop-only
-  // there) sat in their own Sync Center sections — excluded from the header pills — while the
-  // status bar's raw bucketCounts still counted them: center "in sync", bar "↓2", forever.
-  it("drops rows outside the main section", () => {
+  // The 2026-07-27 phone find: a desktop-only plugin can't run here and `stageableRow` calls it
+  // unstageable, so the center never counts it as pending — the bar's raw bucketCounts did:
+  // center "in sync", bar "↓2", forever.
+  it("drops desktop-only rows, the one class the center calls unstageable", () => {
     const avail: Record<string, Availability> = {
       "plugin-a": av({}),
-      "plugin-git": av({ kind: "not-installed", localVersion: null }),
       "plugin-simpread": av({ kind: "not-installed", localVersion: null, desktopOnly: true }),
     };
-    const statuses = [st("plugin-a", "in-sync"), st("plugin-git", "store-newer"), st("plugin-simpread", "differs")];
-    const out = statusBarStatuses(statuses, (g) => avail[g], true);
-    expect(out).toEqual([{ group: "plugin-a", state: "in-sync" }]);
+    const statuses = [st("plugin-a", "in-sync"), st("plugin-simpread", "differs")];
+    expect(statusBarStatuses(statuses, (g) => avail[g], true, noFamily)).toEqual([{ group: "plugin-a", state: "in-sync" }]);
   });
 
-  it("applies the version-ahead presentation to main-section rows and keeps unknown groups", () => {
+  // Not-installed and outdated rows DO stage in the center (there the state's ACTION is the
+  // payload), so a bar that dropped them read low against the very pills it mirrors.
+  it("keeps not-installed and outdated rows — the center stages and counts them", () => {
+    const avail: Record<string, Availability> = {
+      "plugin-git": av({ kind: "not-installed", localVersion: null }),
+      "plugin-b": av({ drift: "behind", localVersion: "0.9.0" }),
+    };
+    const statuses = [st("plugin-git", "store-newer"), st("plugin-b", "store-newer")];
+    expect(statusBarStatuses(statuses, (g) => avail[g], false, noFamily)).toEqual([
+      { group: "plugin-git", state: "store-newer" },
+      { group: "plugin-b", state: "store-newer" },
+    ]);
+  });
+
+  it("applies the version-ahead presentation and keeps groups with no availability info", () => {
     const avail: Record<string, Availability> = { "plugin-a": av({ drift: "ahead", storeVersion: "0.9.0" }) };
     const statuses = [st("plugin-a", "in-sync"), st("mystery", "store-newer")];
-    const out = statusBarStatuses(statuses, (g) => avail[g], false);
-    expect(out).toEqual([
+    expect(statusBarStatuses(statuses, (g) => avail[g], false, noFamily)).toEqual([
       { group: "plugin-a", state: "local-changed" }, // ahead + in-sync presents as to-capture
       { group: "mystery", state: "store-newer" }, // no availability info → keep, don't hide
     ]);
   });
 
-  it("drops outdated (drift-behind) rows like the center does", () => {
-    const avail: Record<string, Availability> = { "plugin-b": av({ drift: "behind", localVersion: "0.9.0" }) };
-    expect(statusBarStatuses([st("plugin-b", "store-newer")], (g) => avail[g], false)).toEqual([]);
+  // The self item has its own sidebar destination and never enters the list; counting it made the
+  // bar read one higher than every pill on the screen.
+  it("drops the self group", () => {
+    expect(statusBarStatuses([st("config-sync", "local-changed"), st("hotkeys", "in-sync")], () => undefined, false, noFamily)).toEqual([
+      { group: "hotkeys", state: "in-sync" },
+    ]);
+  });
+
+  // A companion is one row in the center (folded into its parent's family), so it must be one row
+  // here too — otherwise Appearance's themes/snippets each added their own ↑.
+  it("folds companions into their parent, and rolls their states up together", () => {
+    const family = { selfGroup: "config-sync", parentOf: (g: string) => (g === "themes" || g === "snippets" ? "appearance" : null) };
+    const statuses = [st("appearance", "in-sync"), st("themes", "local-changed"), st("snippets", "in-sync")];
+    // one row, and the family's pending capture survives the fold
+    expect(statusBarStatuses(statuses, () => undefined, false, family)).toEqual([{ group: "appearance", state: "local-changed" }]);
+  });
+
+  it("leaves a companion standing alone when its parent is not compiled here", () => {
+    const family = { selfGroup: "config-sync", parentOf: () => "appearance" };
+    expect(statusBarStatuses([st("snippets", "local-changed")], () => undefined, false, family)).toEqual([
+      { group: "snippets", state: "local-changed" },
+    ]);
   });
 });
 
@@ -560,21 +591,27 @@ describe("unifiedFooterSummary", () => {
   it("0 selected", () => {
     expect(unifiedFooterSummary({ applyN: 0, installs: 0, turnsOn: 0, settings: 0, captureN: 0 })).toBe("Nothing selected");
   });
+  // Counts lead every phrase, so they scan down one edge.
   it("apply only", () => {
     expect(unifiedFooterSummary({ applyN: 5, installs: 2, turnsOn: 3, settings: 4, captureN: 0 })).toBe(
-      "5 selected — installs 2 · turns on 3 · settings 4"
+      "5 selected · 2 install · 3 turn on · 4 settings"
     );
   });
   it("mixed apply + capture", () => {
     expect(unifiedFooterSummary({ applyN: 5, installs: 2, turnsOn: 3, settings: 4, captureN: 2 })).toBe(
-      "7 selected — installs 2 · turns on 3 · settings 4 · captures 2"
+      "7 selected · 2 install · 3 turn on · 4 settings · 2 capture"
     );
   });
-  it("capture only", () => {
-    expect(unifiedFooterSummary({ applyN: 0, installs: 0, turnsOn: 0, settings: 0, captureN: 2 })).toBe("2 selected — captures 2");
+  // The line exists to say what the buttons can't. `2 selected — captures 2` beside a
+  // `Capture 2 items` button was the same fact twice, so it renders nothing at all now.
+  it("says nothing when the buttons already say it", () => {
+    expect(unifiedFooterSummary({ applyN: 0, installs: 0, turnsOn: 0, settings: 0, captureN: 2 })).toBe("");
+    expect(unifiedFooterSummary({ applyN: 1, installs: 0, turnsOn: 0, settings: 0, captureN: 0 })).toBe("");
   });
-  it("selected but nothing to categorize falls back to the bare total", () => {
-    expect(unifiedFooterSummary({ applyN: 1, installs: 0, turnsOn: 0, settings: 0, captureN: 0 })).toBe("1 selected");
+  // Two directions means two buttons and no single total — the line is the only place the whole
+  // selection is counted, so it stays even with no apply-side breakdown.
+  it("stays when both directions are staged", () => {
+    expect(unifiedFooterSummary({ applyN: 1, installs: 0, turnsOn: 0, settings: 0, captureN: 2 })).toBe("3 selected · 2 capture");
   });
 });
 

@@ -246,22 +246,50 @@ export function sectionForItem(a: Availability, isMobile: boolean): SectionKind 
   return "main";
 }
 
-// The status bar's data set: the same rows the Sync Center's header pills count — main-section
-// only, with the version-ahead presentation applied. Rows the center files under its own
-// sections (desktop-only / disabled / not-installed / outdated) are excluded here too;
-// counting them raw made the bar disagree with the center forever on devices where such
-// sections are populated (2026-07-27 phone find: center "in sync", bar "↓2"). A group with no
-// availability info is kept as-is — hiding it could silently blank a real pending state.
+// The status bar's data set: the rows the Sync Center LISTS, so the two can agree. Three
+// narrowings, each mirroring something the view does:
+//
+//   1. The self group is dropped — it has its own sidebar destination and never enters the list.
+//   2. Companions fold into their parent through `familyRollup`, the same producer the view's
+//      rows use. `fileCount` doesn't affect the rolled-up STATE, so 0 is passed for every member.
+//   3. Only `desktop-only` rows are dropped. `stageableRow` judges exactly that section
+//      unstageable ("informational only — can't run here"), so it is the one availability class the
+//      view itself never counts as pending. Outdated/disabled/not-installed rows DO stage and DO
+//      show up in the center's counts, so dropping them is what used to make the bar read low.
+//
+// One residual, deliberately not chased: the bar has no access to the view's fate machinery
+// (install policy, conflict choices, direction overrides), so a row whose FATE the view resolves to
+// something non-directional can still count here. The structural over-counts are gone; this one
+// needs the view's own state and is not worth mirroring in a status bar.
 export function statusBarStatuses(
   statuses: GroupStatus[],
   availabilityOf: (group: string) => Availability | undefined,
-  isMobile: boolean
+  isMobile: boolean,
+  family: { selfGroup: string; parentOf: (group: string) => string | null }
 ): GroupStatus[] {
-  return statuses.flatMap((st) => {
+  const present = new Set(statuses.map((s) => s.group));
+  const families = new Map<string, FamilyMember[]>();
+  for (const st of statuses) {
+    if (st.group === family.selfGroup) continue;
+    const parent = family.parentOf(st.group);
+    // A companion whose parent isn't compiled here stands on its own — the same honest degradation
+    // the view's familyGroups() makes.
+    const key = parent !== null && present.has(parent) ? parent : st.group;
     const a = availabilityOf(st.group);
-    if (a === undefined) return [st];
-    if (sectionForItem(a, isMobile) !== "main") return [];
-    return [{ ...st, state: presentedState(st.state, a.drift) }];
+    // A group with no availability info keeps its raw state — hiding or reinterpreting it could
+    // silently blank a real pending state.
+    const member: FamilyMember = { name: st.group, state: presentedState(st.state, a === undefined ? null : a.drift), fileCount: 0 };
+    const members = families.get(key);
+    if (members === undefined) families.set(key, [member]);
+    // The parent leads: familyRollup adopts the FIRST direction-contributing member's literal
+    // state, which is how a companion-less family keeps its own state byte-identical.
+    else if (st.group === key) members.unshift(member);
+    else members.push(member);
+  }
+  return [...families].flatMap(([group, members]) => {
+    const a = availabilityOf(group);
+    if (a !== undefined && sectionForItem(a, isMobile) === "desktop-only") return [];
+    return [{ group, state: familyRollup(members).state }];
   });
 }
 
@@ -660,19 +688,29 @@ export function foldCompanionEntries(entries: RemoteDiffEntry[], parentOf: (grou
   return result;
 }
 
-// The action bar's staged-selection line (the view
-// derives every count from Fate). `applyN`/`captureN` are the two direction totals;
-// installs/turnsOn/settings are an apply-side breakdown (subsets of applyN, no "+").
+// The action bar's staged-selection line (the view derives every count from Fate).
+// `applyN`/`captureN` are the two direction totals; installs/turnsOn/settings are an apply-side
+// breakdown (subsets of applyN, no "+").
+//
+// Counts lead: every number sits at the start of its own phrase, so they scan down one edge instead
+// of hiding behind a verb ("installs 2 · turns on 1" made the reader hunt for the digits).
+//
+// Empty when the line would only restate the buttons beside it. `1 selected — captures 1` next to a
+// `Capture 1 item` button is two sentences for one fact; the line earns its space only when it
+// carries an apply-side breakdown, or when both directions are staged and no single button
+// totals the selection.
 export function unifiedFooterSummary(sel: { applyN: number; installs: number; turnsOn: number; settings: number; captureN: number }): string {
   const total = sel.applyN + sel.captureN;
   if (total === 0) return "Nothing selected";
-  const parts: string[] = [];
-  if (sel.installs > 0) parts.push(`installs ${sel.installs}`);
-  if (sel.turnsOn > 0) parts.push(`turns on ${sel.turnsOn}`);
-  if (sel.settings > 0) parts.push(`settings ${sel.settings}`);
-  if (sel.captureN > 0) parts.push(`captures ${sel.captureN}`);
-  if (parts.length === 0) return `${total} selected`;
-  return `${total} selected — ${parts.join(" · ")}`;
+  const breakdown: string[] = [];
+  if (sel.installs > 0) breakdown.push(`${sel.installs} install`);
+  if (sel.turnsOn > 0) breakdown.push(`${sel.turnsOn} turn on`);
+  if (sel.settings > 0) breakdown.push(`${sel.settings} settings`);
+  const bothDirections = sel.applyN > 0 && sel.captureN > 0;
+  if (breakdown.length === 0 && !bothDirections) return "";
+  const parts = [...breakdown];
+  if (sel.captureN > 0) parts.push(`${sel.captureN} capture`);
+  return `${total} selected · ${parts.join(" · ")}`;
 }
 
 // ── Expanded-card file entries ──────────────────────────────────────────────────────────────────

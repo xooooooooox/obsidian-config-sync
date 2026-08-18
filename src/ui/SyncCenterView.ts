@@ -3,22 +3,27 @@ import { ApplyItem, CaptureItem, orderInstallsCatalogFirst, ProgressFn, StateAct
 import { lockRefFor, refItemId } from "../core/itemKeys";
 import { GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry, RemoteDiffFile, remoteDirectionCounts } from "../core/status";
 import { SECTION_LABELS, findGroupByName, SELF_GROUP_NAME, sectionForGroup, communityGroupName } from "../core/catalog";
-import { EVERYWHERE, FileChanges, FileSharing, GroupResult, hasChanges, ItemRef, Remote, Sharing, sharingEquals, SyncGroup, StorageSection } from "../core/types";
+import { EVERYWHERE, FileChanges, FileSharing, GroupResult, hasChanges, ItemRef, Remote, Sharing, SyncGroup, StorageSection } from "../core/types";
 import { DeviceElementState } from "../core/deviceElements";
 import { RuleListId } from "../core/enablementRules";
 import {
   buildOptOutLocalMenu,
   buildLocalMenu,
+  ENABLED_ON_HEADER,
   enablementRowModel,
   fileEnablementRowModel,
+  MenuSectionModel,
+  ON_THIS_DEVICE_HEADER,
   optOutLocalSegment,
   RowSegment,
   RULE_OPTIONS,
   ruleIcon,
   ruleLabel,
   ruleLandingNeedsSeed,
-  THIS_DEVICE_EYEBROW,
+  SHARED_WITH_HEADER,
+  sharingMenuSection,
 } from "./enablementRow";
+import { paintMergedControl } from "./mergedControl";
 import { Availability } from "../core/availability";
 import { REUSE_MAX_AGE_MS } from "../external/readerCache";
 import { isWholeFileEncrypted } from "../core/modes";
@@ -78,6 +83,7 @@ import {
   effectiveDirection,
 } from "./panelModel";
 import { Fate, FateInput, NOTHING_YET_SENTENCE, rowFate, versionAheadClause } from "./fateModel";
+import { openDiffModal } from "./DiffModal";
 import { renderDiffPanel } from "./diffView";
 import { confirmDeleteLeftovers } from "./ConfirmModal";
 import { LEFTOVER_SECTION_ORDER, LeftoverSection } from "../core/leftover";
@@ -87,7 +93,17 @@ import { renderReportContent, renderReportPills, stripHeader } from "./reportCon
 import { RunRecord, RunKind, RunStatus, worstStatus, formatRunTime, deleteLeftoverDesc } from "../core/runHistory";
 import { ACTION_ICON, ACTION_COLOR_CLASS, renderActionIcon, renderActionCount, type SyncAction } from "./actionIcons";
 import { FATE_CHIP_ICON } from "./fateChipIcons";
-import { renderFoldIcon, renderFoldCount, FOLD_ICON, FOLD_ICON_COLOR_CLASS, type FoldKind } from "./foldIcons";
+import {
+  renderFoldIconNamed,
+  renderFoldCount,
+  FOLD_ICON,
+  FOLD_ICON_COLOR_CLASS,
+  AVAILABILITY_FOLD_ICON,
+  AVAILABILITY_FOLD_TEXT,
+  AVAILABILITY_FOLD_NOTE,
+  type FoldKind,
+  type AvailabilityFoldKind,
+} from "./foldIcons";
 import { renderFoldChevron, setFoldOpen } from "./foldChevron";
 // ITEM_SECTION_LABELS aliased: this file already declares its own ITEM_SECTION_LABELS (sidebar category
 // labels, see below) for an unrelated domain.
@@ -180,12 +196,18 @@ const ENABLEMENT_LABELS: Record<"enable" | "none", string> = {
   none: "Leave it off",
 };
 
-// Session-remembered UI state: which sections have their ✓ / ⊘ / ○ trailing lines flattened open.
+// Session-remembered UI state: which sections have their trailing fold lines flattened open. The
+// availability folds share one set because their keys already carry the fold's own id.
 const sessionUi = {
   insyncOpen: new Set<string>(),
   excludedOpen: new Set<string>(),
   nosettingsOpen: new Set<string>(),
+  availabilityOpen: new Set<string>(),
 };
+
+// Escalating "less this device can do about it": a version away, a switch away, an install away,
+// and finally not possible here at all.
+const AVAILABILITY_FOLD_ORDER: AvailabilityFoldKind[] = ["outdated", "disabled", "not-installed", "desktop-only"];
 
 // Staging state lives at session level, not view level: mobile Obsidian recreates views on
 // tab switches, and per-instance state would re-run the default pre-check on every
@@ -853,11 +875,20 @@ export class SyncCenterView extends ItemView {
     return cat;
   }
 
-  // Rows in the main section (availability "enabled", or app-anchored with no unhandled drift).
-  // Sidebar badges, header pills, filter pills, and select-all all bucket over this set only —
-  // outdated/disabled/not-installed rows live in their own sections with their own controls.
-  private mainRows(): StatusRow[] {
-    return this.rows().filter((r) => this.sectionOf(r.group.name) === "main");
+  // THE row set every count reads: exactly the rows the list renders. Families already folded
+  // (rows()), the self item already out (it has its own sidebar destination), and the two on/off
+  // carriers dropped here because they dissolve into their section's head chip rather than
+  // rendering as rows.
+  //
+  // Availability is deliberately NOT narrowed: an outdated/disabled/not-installed item is drawn in
+  // the list like any other row and can be staged (stageableRow: in the non-main sections the state
+  // ACTION is the payload), so a count that skipped it disagreed with the list it sits above. That
+  // narrowing is where `↑16` vs `To capture 14` came from — the header and sidebar counted
+  // main-only-with-carriers while the filter pills counted all-sections-without — and both readings
+  // were derived from a comment that stopped being true in 987eacf, when the availability sections
+  // were replaced by the four type sections.
+  private countable(rows: StatusRow[]): StatusRow[] {
+    return rows.filter((r) => !CARRIER_GROUP_NAMES.has(r.group.name));
   }
 
   private effDir(r: StatusRow): Direction {
@@ -940,9 +971,16 @@ export class SyncCenterView extends ItemView {
       // driftFor (availability.ts) only ever returns "ahead" once both versions are
       // non-null — mirrored via the && chain below (not a defensive fallback) rather than
       // asserted, since TS can't infer that guarantee from `a.drift` alone.
+      // BOTH anchors, not just "plugin". An app-anchored row (App settings, Appearance, Hotkeys,
+      // the two plugin lists) drifts exactly the same way when Obsidian itself updates, and
+      // `availabilityForGroup`'s app branch fills the same two version fields — but the original
+      // C-#37 gate only ever admitted plugins, so those rows kept landing on the generic
+      // `Captures files` fallback: a promise to edit files that the run does not keep, on a row
+      // whose files match the store byte for byte. `anchor` still travels so the copy can name
+      // WHOSE version moved (a bare "version 1.13.7" on App settings names nobody).
       versionAhead:
-        a.anchor === "plugin" && a.drift === "ahead" && a.localVersion !== null && a.storeVersion !== null
-          ? { installed: a.localVersion, stored: a.storeVersion }
+        a.drift === "ahead" && a.localVersion !== null && a.storeVersion !== null
+          ? { installed: a.localVersion, stored: a.storeVersion, anchor: a.anchor }
           : null,
       carrierSynced,
       storeListOn,
@@ -1270,7 +1308,7 @@ export class SyncCenterView extends ItemView {
       pane.createDiv({ cls: "config-sync-self-sub", text: `The list of what this device syncs — ${info.itemCount} item${info.itemCount === 1 ? "" : "s"}, in sync with the store.` });
       // Post-adopt nudge: the list is set up but items may not
       // be applied to this device yet. Point at Apply (store → device), never Capture.
-      const toApply = this.presentedCounts(this.mainRows()).down;
+      const toApply = this.presentedCounts(this.countable(this.rows())).down;
       if (toApply > 0) {
         const block = pane.createDiv({ cls: "config-sync-self-block is-act" });
         block.createDiv({ cls: "config-sync-self-block-h", text: "Now set up this device" });
@@ -1373,7 +1411,8 @@ export class SyncCenterView extends ItemView {
         holder.createDiv({ cls: "config-sync-expand-note", text: "Only key order / formatting differs." });
         return;
       }
-      renderDiffPanel(holder, base, produced, leftLabel, rightLabel, bothSorted ? "data.json · sorted view" : "data.json");
+      renderDiffPanel(holder, base, produced, leftLabel, rightLabel, { name: "data.json", sorted: bothSorted },
+        () => openDiffModal(this.app, base, produced, leftLabel, rightLabel, { name: "data.json", sorted: bothSorted }));
     });
   }
 
@@ -1440,9 +1479,10 @@ export class SyncCenterView extends ItemView {
       const item = container.createDiv({ cls: `config-sync-side-item${active ? " is-active" : ""}` });
       item.createSpan({ cls: "config-sync-side-name", text: label });
       if (this.searching()) {
-        // Hit counts must span the entry's full scope — every section (outdated/disabled/
-        // not-installed included), not just mainRows() — so a match hiding in e.g. "Not
-        // installed" still counts here. Bucket badges below stay main-section-only.
+        // Hit counts span the entry's full scope, carriers included: a search is "find this item",
+        // and a carrier IS findable (its own settings card is one click away through the section
+        // chip) even though it never renders as a row. The bucket badges below deliberately count a
+        // narrower set — `countable` — because those numbers must add up to the list.
         const sectionRows = cat === "all" ? this.rows() : this.rows().filter((r) => this.itemSectionOf(r.group.name) === cat);
         const hits = sectionRows.filter((r) => this.rowMatchesSearch(r)).length;
         item.createSpan({ cls: "config-sync-side-badge is-neutral", text: `${hits}` });
@@ -1461,9 +1501,9 @@ export class SyncCenterView extends ItemView {
       });
     };
 
-    deviceEntry("all", "All items", this.mainRows());
+    deviceEntry("all", "All items", this.countable(this.rows()));
     for (const cat of ITEM_SECTION_ORDER) {
-      const inCat = this.mainRows().filter((r) => this.itemSectionOf(r.group.name) === cat);
+      const inCat = this.countable(this.rows()).filter((r) => this.itemSectionOf(r.group.name) === cat);
       if (inCat.length === 0) continue;
       deviceEntry(cat, ITEM_SECTION_LABELS[cat], inCat);
     }
@@ -1495,8 +1535,10 @@ export class SyncCenterView extends ItemView {
       container.createDiv({ cls: "config-sync-side-divider" });
       const active = this.panelSection.kind === "history";
       const item = container.createDiv({ cls: `config-sync-side-item${active ? " is-active" : ""}` });
+      // No count badge. Every other badge in this sidebar is a number of things waiting for you
+      // (↑ to capture, ✓ in sync); History's was the number of records kept, which is a cap, not a
+      // to-do — the same position saying two different kinds of thing.
       item.createSpan({ cls: "config-sync-side-name", text: "History" });
-      if (this.history.length > 0) item.createSpan({ cls: "config-sync-side-badge is-neutral", text: `${this.history.length}` });
       item.addEventListener("click", () => {
         this.panelSection = { kind: "history" };
         this.historyOpen = null;
@@ -1512,7 +1554,7 @@ export class SyncCenterView extends ItemView {
     if (this.panelSection.kind === "device") {
       const cat = this.panelSection.cat;
       sw.createSpan({ text: cat === "all" ? "All items" : ITEM_SECTION_LABELS[cat] });
-      const c = this.presentedCounts(this.sectionRows().filter((r) => this.sectionOf(r.group.name) === "main"));
+      const c = this.presentedCounts(this.countable(this.sectionRows()));
       if (c.up > 0) renderActionCount(sw.createSpan({ cls: "config-sync-side-badge is-up" }), "capture", c.up);
       if (c.down > 0) renderActionCount(sw.createSpan({ cls: "config-sync-side-badge is-down" }), "apply", c.down);
       if (c.ok > 0) sw.createSpan({ cls: "config-sync-side-badge is-ok", text: `✓${c.ok}` });
@@ -1565,7 +1607,7 @@ export class SyncCenterView extends ItemView {
     const head = this.contentEl.createDiv({ cls: "config-sync-center-head" });
     this.renderSelfChip(head);
     if (this.selfInfo !== null) head.createSpan({ cls: "config-sync-head-divider" });
-    const { up, down, ok, excluded, none } = this.presentedCounts(this.mainRows());
+    const { up, down, ok, excluded, none } = this.presentedCounts(this.countable(this.rows()));
     const remoteStates = this.host.remotes().map((r) => this.host.remoteCheck(r.name)?.check.state ?? "unknown");
     const { push, pull } = remoteDirectionCounts(remoteStates);
     const pills = head.createSpan({ cls: "config-sync-report-pills" });
@@ -1938,9 +1980,9 @@ export class SyncCenterView extends ItemView {
     // adoption gate engaging) with the filter active would otherwise strand an empty view.
     if (this.filter === "leftover" && this.leftoverPresentation() !== "section") this.filter = "all";
     const inSection = this.sectionRows();
-    // The two on/off list carriers dissolve into their section's header chip — never a
-    // row of their own — so every row-driven count (pills, select-all) excludes them up front.
-    const pillPool = inSection.filter((r) => !CARRIER_GROUP_NAMES.has(r.group.name));
+    // Same producer the header pills and sidebar badges read (`countable`) — the three used to
+    // disagree, and this is the one place that disagreement was visible on a single screen.
+    const pillPool = this.countable(inSection);
     const bar = main.createDiv({ cls: "config-sync-mainbar" });
     const pillRow = bar.createDiv({ cls: "config-sync-fpillrow" });
     let searchEl: HTMLInputElement | null = null;
@@ -2026,7 +2068,12 @@ export class SyncCenterView extends ItemView {
     const renderSectionsBody = (): void => {
       sectionsHost.empty();
       // The Leftover filter shows the orphan section alone — type sections all hide.
-      if (this.filter !== "leftover") for (const ts of TYPE_SECTION_ORDER) this.renderTypeSection(sectionsHost, ts, inSection);
+      if (this.filter !== "leftover") {
+        // Computed ONCE for the whole pass and handed down: each head's hint depends on how many
+        // OTHER sections are staged, which no single section can see for itself.
+        const stagedSections = this.stagedSectionCount(inSection);
+        for (const ts of TYPE_SECTION_ORDER) this.renderTypeSection(sectionsHost, ts, inSection, stagedSections);
+      }
       // Store orphans: unrelated to any type section — they have no registry item to compile a
       // row for — so their section renders under the All and Leftover views only (never inside a
       // focused direction filter or a search pass). While the plugin's own configuration is still
@@ -2077,13 +2124,34 @@ export class SyncCenterView extends ItemView {
     for (const ts of TYPE_SECTION_ORDER) this.typeSectionOpen.add(ts);
   }
 
+  // One producer for "which rows belong to this section, and which of them survive the current
+  // search/filter" — the head's count pill needs both halves, and stagedSectionCount needs the
+  // second, so deriving it twice is how the hint and the section it sits on would come to disagree.
+  private typeSectionRows(inSection: StatusRow[], ts: TypeSection): { rows: StatusRow[]; visible: StatusRow[] } {
+    const rows = inSection.filter((r) => !CARRIER_GROUP_NAMES.has(r.group.name) && typeSectionForRow(this.itemSectionOf(r.group.name)) === ts);
+    const matches = this.searching() ? rows.filter((r) => this.rowMatchesSearch(r)) : rows;
+    return { rows, visible: matches.filter((r) => visibleUnderFilter(this.rowBucket(r), this.filter)) };
+  }
+
+  // How many type sections currently hold a staged row. Counted over VISIBLE rows, the same set
+  // each head counts, so a section whose staged rows are filtered out of view cannot keep its
+  // neighbour's hint alive from off-screen.
+  private stagedSectionCount(inSection: StatusRow[]): number {
+    let n = 0;
+    for (const ts of TYPE_SECTION_ORDER) {
+      const { visible } = this.typeSectionRows(inSection, ts);
+      if (visible.some((r) => this.selected.has(r.group.name) && this.fateFor(r).stageable)) n++;
+    }
+    return n;
+  }
+
   // One of the four fixed type sections: a fold containing every row whose section maps
   // here via typeSectionForRow, alphabetical within (rows() already sorts by section then name).
   // The self item is pinned first in Community, outside the row/Fate machinery entirely.
-  private renderTypeSection(host: HTMLElement, ts: TypeSection, inSection: StatusRow[]): void {
-    const rows = inSection.filter((r) => !CARRIER_GROUP_NAMES.has(r.group.name) && typeSectionForRow(this.itemSectionOf(r.group.name)) === ts);
-    const matches = this.searching() ? rows.filter((r) => this.rowMatchesSearch(r)) : rows;
-    const visible = matches.filter((r) => visibleUnderFilter(this.rowBucket(r), this.filter));
+  // `stagedSections` is the whole pass's count of sections holding a staged row — a section head
+  // cannot see its neighbours, and its hint depends on them.
+  private renderTypeSection(host: HTMLElement, ts: TypeSection, inSection: StatusRow[], stagedSections: number): void {
+    const { rows, visible } = this.typeSectionRows(inSection, ts);
     const showSelf = ts === "community" && this.selfInfo !== null && this.filter === "all" && !this.searching();
     if (visible.length === 0 && !showSelf) return; // sections with nothing to show hide entirely
     const filtered = this.filter !== "all" || this.searching();
@@ -2112,9 +2180,22 @@ export class SyncCenterView extends ItemView {
     if (carrierId !== null) this.renderCarrierChip(head, carrierId);
     const checkable = visible.filter((r) => this.fateFor(r).stageable);
     const staged = checkable.filter((r) => this.selected.has(r.group.name)).length;
-    // The checked/indeterminate select-all checkbox plus the global footer already carry this
-    // fact on mobile, where head space is scarce — desktop keeps the hint.
-    if (staged > 0 && !Platform.isMobile) head.createSpan({ cls: "config-sync-section-hint", text: `${staged} selected` });
+    // The hint answers the one question the global footer cannot: WHICH sections the selection is
+    // spread across. With only one staged section there is no such question — its number is
+    // necessarily the footer's own total, and `N selected` restates `N selected — captures N`
+    // word for word, which is exactly how it read as duplication. So it needs two staged sections
+    // to appear, and then says the number ALONE: "selected" is the word that collided, the digit
+    // is the per-section fact. The full sentence stays in the aria-label — the visible form is a
+    // number, the spoken form is a sentence, and a screen reader never hears a naked digit.
+    // Mobile renders none of this at all: the select-all checkbox's checked/indeterminate state
+    // plus the footer already carry it, and head space is scarce.
+    if (staged > 0 && stagedSections > 1 && !Platform.isMobile) {
+      head.createSpan({
+        cls: "config-sync-section-hint",
+        text: String(staged),
+        attr: { "aria-label": `${staged} selected` },
+      });
+    }
     // Nothing to stage in this section (e.g. pre-adopt Community, only the self row) means
     // no select-all affordance at all, not a disabled one — a control with nothing it could ever
     // do is not a state, it's dead weight.
@@ -2176,9 +2257,18 @@ export class SyncCenterView extends ItemView {
       // no data yet") — rows within each fold stay name-sorted since `visible` already is.
       const bucketed = visible.map((r) => ({ r, section: partitionSection(this.rowBucket(r)) }));
       const active = bucketed.filter((x) => x.section === "active").map((x) => x.r);
-      const insync = bucketed.filter((x) => x.section === "insync").map((x) => x.r);
-      const excluded = bucketed.filter((x) => x.section === "excluded").map((x) => x.r);
-      const nosettings = bucketed.filter((x) => x.section === "nosettings").map((x) => x.r);
+      // A row this device can't act on — not installed, disabled, outdated, desktop-only — folds by
+      // WHY rather than by fate. Only among the non-active rows: an actionable one (a plugin this
+      // run would install) stays at the top where the work is, availability chip and all. Without
+      // this split those rows landed in `○ no settings yet`, which is where the reporter went
+      // looking for "which ones aren't installed here" and found nothing that said so.
+      const availabilityOf = (r: StatusRow): SectionKind => this.sectionOf(r.group.name);
+      const inactive = bucketed.filter((x) => x.section !== "active");
+      const unavailable = inactive.filter((x) => availabilityOf(x.r) !== "main");
+      const byFate = inactive.filter((x) => availabilityOf(x.r) === "main");
+      const insync = byFate.filter((x) => x.section === "insync").map((x) => x.r);
+      const excluded = byFate.filter((x) => x.section === "excluded").map((x) => x.r);
+      const nosettings = byFate.filter((x) => x.section === "nosettings").map((x) => x.r);
       // The filled card wraps rows only — it renders exactly when the section
       // has real rows (the self row or an active row); a section whose visible content is fold
       // lines alone shows head + fold lines with no filled block.
@@ -2188,9 +2278,27 @@ export class SyncCenterView extends ItemView {
         for (const r of active) this.renderItemRow(card, r);
         this.markLastRow(card);
       }
-      this.renderSectionTrailingLine(body, ts, insync, sessionUi.insyncOpen, "insync", insyncLineText);
-      this.renderSectionTrailingLine(body, ts, excluded, sessionUi.excludedOpen, "excluded", excludedLineText);
-      this.renderSectionTrailingLine(body, ts, nosettings, sessionUi.nosettingsOpen, "nosettings", nosettingsLineText);
+      const fateFold = (rows: StatusRow[], openSet: Set<string>, kind: FoldKind, text: (n: number) => string): void =>
+        this.renderSectionTrailingLine(body, {
+          ts, rows, openSet, foldId: kind, icon: FOLD_ICON[kind], colorCls: FOLD_ICON_COLOR_CLASS[kind], text, note: null,
+        });
+      fateFold(insync, sessionUi.insyncOpen, "insync", insyncLineText);
+      fateFold(excluded, sessionUi.excludedOpen, "excluded", excludedLineText);
+      fateFold(nosettings, sessionUi.nosettingsOpen, "nosettings", nosettingsLineText);
+      // Availability last, in escalating "can't do anything here" order — the four titles and notes
+      // are the ones 987eacf deleted with the sections they belonged to.
+      for (const kind of AVAILABILITY_FOLD_ORDER) {
+        this.renderSectionTrailingLine(body, {
+          ts,
+          rows: unavailable.filter((x) => availabilityOf(x.r) === kind).map((x) => x.r),
+          openSet: sessionUi.availabilityOpen,
+          foldId: kind,
+          icon: AVAILABILITY_FOLD_ICON[kind],
+          colorCls: "is-warn",
+          text: AVAILABILITY_FOLD_TEXT[kind],
+          note: AVAILABILITY_FOLD_NOTE[kind],
+        });
+      }
     } else {
       // showSelf is only ever true alongside filter === "all" && !searching() (renderTypeSection's
       // own gate) — i.e. always the branch above — so this path never needs the self row.
@@ -2211,20 +2319,39 @@ export class SyncCenterView extends ItemView {
   // invariant "filled block = rows" holds for every fold, in every state.
   private renderSectionTrailingLine(
     parent: HTMLElement,
-    ts: TypeSection,
-    rows: StatusRow[],
-    openSet: Set<string>,
-    kind: FoldKind,
-    text: (n: number) => string
+    opts: {
+      ts: TypeSection;
+      rows: StatusRow[];
+      openSet: Set<string>;
+      foldId: string;
+      icon: string;
+      colorCls: string | null;
+      text: (n: number) => string;
+      // The availability folds carry one, explaining what applying would do for rows this device
+      // can't just apply to. It renders under the line and only while the fold is open — closed, it
+      // would be four paragraphs of guidance for rows nobody asked to see.
+      note: string | null;
+    }
   ): void {
+    const { ts, rows, openSet, text } = opts;
     if (rows.length === 0) return;
-    const key = `${this.sectionKey()}::${ts}`;
+    const key = `${this.sectionKey()}::${ts}::${opts.foldId}`;
     let open = openSet.has(key);
     const line = parent.createDiv({ cls: "config-sync-unchanged" });
     const chevron = renderFoldChevron(line, open, null);
-    renderFoldIcon(line, kind);
+    renderFoldIconNamed(line, opts.icon, opts.colorCls);
     const label = line.createSpan({ cls: "config-sync-fold-label", text: text(rows.length) });
-    let foldCard: HTMLElement | null = open ? this.buildFoldCard(parent, line, rows) : null;
+    const openBody = (): HTMLElement[] => {
+      const parts: HTMLElement[] = [];
+      if (opts.note !== null) {
+        const note = parent.createDiv({ cls: "config-sync-fold-note", text: opts.note });
+        line.after(note);
+        parts.push(note);
+      }
+      parts.push(this.buildFoldCard(parent, parts[0] ?? line, rows));
+      return parts;
+    };
+    let body: HTMLElement[] = open ? openBody() : [];
     line.addEventListener("click", (e) => {
       e.stopPropagation();
       open = !open;
@@ -2232,11 +2359,11 @@ export class SyncCenterView extends ItemView {
       label.setText(text(rows.length));
       if (open) {
         openSet.add(key);
-        foldCard = this.buildFoldCard(parent, line, rows);
+        body = openBody();
       } else {
         openSet.delete(key);
-        foldCard?.remove();
-        foldCard = null;
+        for (const el of body) el.remove();
+        body = [];
       }
     });
   }
@@ -2283,17 +2410,21 @@ export class SyncCenterView extends ItemView {
   // SHOWS it and jumps to where that value is configured. One datum, one writer — and the writer is
   // the card's own toggle in the settings panel, beside the confirmation the change deserves.
   //
-  // Same shape on both platforms. A bare toggle glyph with
-  // the copy in a tooltip would be unreadable on the one platform that has no hover to show it —
-  // a short word costs one line of nothing and reads everywhere.
+  // Glyph + tooltip, no wordmark. The word it used to carry (`synced`) named the wrong thing
+  // anyway: what this chip reports is whether the on/off LIST is shared with your other devices,
+  // which is the `Not shared` axis, not the sync-run axis.
+  //
+  // The state therefore lives in the GLYPH, not in a color: `share-2` when the list is shared,
+  // `square-split-horizontal` — the same mark `ruleIcon` gives `Not shared` — when it isn't. That
+  // matters because a phone has no hover to reveal the tooltip; a reader there still gets two
+  // visibly different marks instead of one mark in two shades.
   private renderCarrierChip(head: HTMLElement, carrierId: EnablementList): void {
     const synced = this.groups.some((g) => g.name === carrierId);
     const tooltip = synced
-      ? "Which plugins are on is shared with your other devices — opens Settings"
-      : "Which plugins are on stays on this device — opens Settings";
+      ? "Which plugins are on is shared with your other devices. Opens Settings."
+      : "Which plugins are on stays on this device. Opens Settings.";
     const chip = head.createSpan({ cls: `config-sync-carrierchip${synced ? " is-synced" : ""}`, attr: { role: "button", tabindex: "0", "aria-label": tooltip } });
-    setIcon(chip.createSpan({ cls: "config-sync-carrierchip-ic" }), "settings-2");
-    chip.createSpan({ text: synced ? "synced" : "not synced" });
+    setIcon(chip.createSpan({ cls: "config-sync-carrierchip-ic" }), synced ? "share-2" : "square-split-horizontal");
     setTooltip(chip, tooltip);
     const open = (): void => {
       const ref = this.host.itemRefForGroup(carrierId);
@@ -2414,14 +2545,18 @@ export class SyncCenterView extends ItemView {
     // own emit order (buildChips, deterministic) — never re-sorted here. Icon-only chips fit
     // any width, so no mobile second line and no overflow-degrade machinery is needed.
     for (const chip of fate.chips) this.renderFateChip(row, chip);
-    // The fate sentence/glyph repeats the card's own "On apply"/"On capture" clause
-    // once expanded, so it hides while the drawer is open (checkbox and chips stay); the click
-    // handler below flips `hidden` alongside the chevron/drawer so it tracks expand/collapse
-    // without a full re-render. Glyph and sentence are separate flex children of
-    // this wrap — the glyph stays `flex: none` (always visible in full); only the sentence span
-    // shrinks/ellipsizes, so the fate sentence is the sole sacrificial element.
+    // The fate SENTENCE repeats the card's own "On apply"/"On capture" clause once expanded, so
+    // it hides while the drawer is open (glyph, checkbox and chips stay); the click handler below
+    // flips `hidden` alongside the chevron/drawer so it tracks expand/collapse without a full
+    // re-render. The DIRECTION never hides with it: the card restates the sentence but never which
+    // way the run goes, so dropping the glyph too would make expanding a row cost information
+    // instead of adding it. Glyph and sentence are separate flex children of this wrap — the glyph
+    // stays `flex: none` (always visible in full); only the sentence span shrinks/ellipsizes, so
+    // the fate sentence is the sole sacrificial element.
+    // Only the conflict branch below renders a visible sentence at all: directional and neutral
+    // fates put theirs in a tooltip on an icon, which duplicates nothing on screen.
     const fateWrap = row.createSpan({ cls: "config-sync-fate-wrap" });
-    fateWrap.hidden = expanded;
+    let fateSentenceEl: HTMLElement | null = null;
     // A DIRECTIONAL fate renders as the colored action icon alone:
     // ACTION_ICON's arrow-up-from-line/arrow-down-to-line in the same orange/accent
     // the pills and file rows speak — the row vocabulary the README screenshots show —
@@ -2440,7 +2575,8 @@ export class SyncCenterView extends ItemView {
       this.renderNeutralFateIcon(fateWrap, fate);
     } else {
       fateWrap.createSpan({ cls: "config-sync-fate-glyph", text: fate.glyph });
-      fateWrap.createSpan({ cls: "config-sync-fate-text", text: ` ${fate.sentence}` });
+      fateSentenceEl = fateWrap.createSpan({ cls: "config-sync-fate-text", text: ` ${fate.sentence}` });
+      fateSentenceEl.hidden = expanded;
     }
 
     if (!inert) {
@@ -2481,7 +2617,7 @@ export class SyncCenterView extends ItemView {
       else this.expandedItems.add(group.name);
       detail.hidden = !detail.hidden;
       setFoldOpen(chev, !detail.hidden);
-      fateWrap.hidden = !detail.hidden;
+      if (fateSentenceEl !== null) fateSentenceEl.hidden = !detail.hidden;
     });
   }
 
@@ -2589,11 +2725,11 @@ export class SyncCenterView extends ItemView {
 
   // The row shell every card row shares ("one grid per card"): a fixed label on
   // track 1 of `.config-sync-cardrow`'s four tracks. Callers fill the rest — either one value cell
-  // spanning tracks 2-4 (renderCardKeyRow, below) or up to three cells landed directly on tracks
-  // 2/3/4 (renderTwoSegmentRow, renderCardIconActionRow) — so every row's icons and its divider
-  // sit on the SAME vertical rules regardless of which shape painted them.
+  // spanning tracks 2-4 (renderCardKeyRow, below) or a single control landing on track 2
+  // (renderMergedRow, renderCardIconActionRow) — so every row's icons
+  // sit on the SAME vertical rule regardless of which shape painted them.
   //
-  // `iconRow` marks the icon-cell shape (two-segment rows, the More row): content-sized, so mobile
+  // `iconRow` marks the icon-cell shape (merged-control rows, the More row): content-sized, so mobile
   // keeps it on the shared grid instead of the wide rows' stack-to-full-width fallback below —
   // there is no long text here to clip, only a glyph, and stacking would just waste a line. Named
   // `is-iconrow`, not `is-compact` — that modifier already means something else on
@@ -2709,17 +2845,24 @@ export class SyncCenterView extends ItemView {
     const build = (): void => {
       value.empty();
       const expanded = this.expandedFileRows.has(key);
+      // ONE mark, not three. The row used to read `↑ (4) ›` — a direction badge, a neutral count
+      // pill and a fold chevron, each its own little target — where all three answered the same
+      // question. They are one badge now: the direction's icon and its count in a single pill that
+      // carries the direction's color, with the whole head as the click/keyboard target so nothing
+      // has to be aimed at. Expanded, the badge fills in (`.is-open`) instead of a chevron rotating
+      // beside it — same state, one fewer glyph.
       const head = value.createDiv({
         cls: "config-sync-files-head",
-        attr: { role: "button", tabindex: "0", "aria-label": filesChangeLabel(total) },
+        attr: {
+          role: "button",
+          tabindex: "0",
+          "aria-expanded": expanded ? "true" : "false",
+          "aria-label": `${filesChangeLabel(total)} — ${dir === "capture" ? "these changes land in the store" : "these changes land on this device"}`,
+        },
       });
-      const badge = head.createSpan({
-        cls: `config-sync-files-badge ${ACTION_COLOR_CLASS[dir]}`,
-        attr: { "aria-label": dir === "capture" ? "These changes land in the store" : "These changes land on this device" },
-      });
-      setIcon(badge, ACTION_ICON[dir]);
-      head.createSpan({ cls: "config-sync-pill is-neutral", text: String(total) });
-      renderFoldChevron(head, expanded, null);
+      const badge = head.createSpan({ cls: `config-sync-files-badge ${ACTION_COLOR_CLASS[dir]}${expanded ? " is-open" : ""}` });
+      setIcon(badge.createSpan({ cls: "config-sync-files-badge-ic" }), ACTION_ICON[dir]);
+      badge.createSpan({ text: String(total) });
       const toggle = (): void => {
         if (this.expandedFileRows.has(key)) this.expandedFileRows.delete(key);
         else this.expandedFileRows.add(key);
@@ -2809,7 +2952,8 @@ export class SyncCenterView extends ItemView {
           }
           const leftLabel = dir === "capture" ? "store" : pres.affordance === "view" ? "not on this device yet" : "this device";
           const rightLabel = dir === "capture" ? "this device (what capture would write)" : "store (what apply would write)";
-          renderDiffPanel(p, base, produced, leftLabel, rightLabel, switchSorted || jsonSorted ? `${e.name} · sorted view` : e.name);
+          renderDiffPanel(p, base, produced, leftLabel, rightLabel, { name: e.name, sorted: switchSorted || jsonSorted },
+            () => openDiffModal(this.app, base, produced, leftLabel, rightLabel, { name: e.name, sorted: switchSorted || jsonSorted }));
         });
       };
       line.addEventListener("click", (ev) => {
@@ -2866,7 +3010,7 @@ export class SyncCenterView extends ItemView {
   }
 
   // A generic "label: value-that-opens-a-menu" card row, shared by After install / Enablement —
-  // the two textual triggers left once Settings sync/Runs on moved onto the two-segment/icon
+  // the two textual triggers left once Settings sync/Runs on moved onto the merged-control/icon
   // idioms above.
   private renderCardMenuRow(detail: HTMLElement, label: string, valueText: string, ariaLabel: string, buildMenu: () => Menu): void {
     this.renderCardKeyRow(detail, label, (value) => {
@@ -2875,48 +3019,16 @@ export class SyncCenterView extends ItemView {
     });
   }
 
-  // The fleet segment of a two-segment row: an icon + a muted PICKER
-  // `chevrons-up-down` affordance, wired to its own menu — no visible
-  // wordmark (the row's own label already says what the ROW is; the segment's tooltip
-  // says what its VALUE is). Lands on track 2 of the row's four-track grid, so every
-  // two-segment row's fleet icon — and the More row's — sit on the same vertical rule.
-  private paintFleetSegment(host: HTMLElement, seg: RowSegment, isSet: boolean, menu: () => Menu): void {
-    const el = host.createSpan({ cls: `config-sync-tworow-fleetcell${isSet ? " is-set" : ""}`, attr: { "aria-label": seg.tooltip } });
-    if (seg.icon !== null) setIcon(el.createSpan({ cls: "config-sync-tworow-ic" }), seg.icon);
-    setIcon(el.createSpan({ cls: "config-sync-tworow-chev" }), "chevrons-up-down");
-    this.wireMenuTrigger(el, menu);
-  }
-
-  // The local segment: a muted "this device" eyebrow beside the same icon+picker
-  // shape, wired to the local menu. Factored out of renderTwoSegmentRow so `Settings sync`'s
-  // fields-mode branch (a plain fleet NOTE, not a menu) can still paint a working local segment
-  // beside it without renderTwoSegmentRow having to accept a fleet that lies about opening a
-  // menu. Lands on track 4.
-  private paintLocalSegment(host: HTMLElement, seg: RowSegment, isException: boolean, menu: () => Menu): void {
-    const cell = host.createDiv({ cls: `config-sync-tworow-localcell${isException ? " is-set" : ""}` });
-    cell.createSpan({ cls: "config-sync-tworow-eyebrow", text: THIS_DEVICE_EYEBROW });
-    const el = cell.createSpan({ cls: "config-sync-tworow-seg", attr: { "aria-label": seg.tooltip } });
-    if (seg.icon !== null) setIcon(el.createSpan({ cls: "config-sync-tworow-ic" }), seg.icon);
-    setIcon(el.createSpan({ cls: "config-sync-tworow-chev" }), "chevrons-up-down");
-    this.wireMenuTrigger(el, menu);
-  }
-
-  // The two-segment row ("one grid per card"): fleet cell on track 2, the
-  // divider filling track 3, the local cell on track 4 — direct children of the row's own
-  // four-track grid rather than a nested sub-grid, so every two-segment row's icons and divider
-  // land on the SAME vertical rules as every other row in the card. Both segments open a menu.
-  private renderTwoSegmentRow(
+  // Both layers in ONE control, the same shape the Settings panel paints (mergedControl.ts): the
+  // divider and the `this device` eyebrow that used to sit between them are gone, and the words
+  // that told the two layers apart moved into the menu as its two section headers.
+  private renderMergedRow(
     detail: HTMLElement,
     label: string,
-    fleet: { seg: RowSegment; isSet: boolean; menu: () => Menu },
-    local: { seg: RowSegment; isException: boolean; menu: () => Menu } | null
+    opts: { shared: RowSegment; local: RowSegment | null; localIsException: boolean; sections: () => readonly MenuSectionModel[] }
   ): void {
     const row = this.cardRowShell(label, true);
-    this.paintFleetSegment(row, fleet.seg, fleet.isSet, fleet.menu);
-    if (local !== null) {
-      row.createSpan({ cls: "config-sync-tworow-vline" });
-      this.paintLocalSegment(row, local.seg, local.isException, local.menu);
-    }
+    paintMergedControl(row, { ...opts, wire: (trigger, menu) => this.wireMenuTrigger(trigger, menu) });
     detail.appendChild(row);
   }
 
@@ -2926,59 +3038,39 @@ export class SyncCenterView extends ItemView {
     const list = enablementCarrierFor(this.rowRef(name));
     const elementId = this.carrierElementFor(name);
     const model = enablementRowModel({ rule: input.ruleSharing, exception: input.localException });
-    this.renderTwoSegmentRow(
-      detail,
-      "Enabled on",
-      {
-        seg: model.fleet,
-        isSet: input.ruleSharing.kind !== "everywhere",
-        menu: () => this.ruleMenu(list, elementId, input.ruleSharing),
-      },
-      {
-        seg: model.local,
-        isException: model.localIsException,
-        menu: () => this.localMenu(list, elementId, input.ruleSharing, input.localException),
-      }
-    );
+    this.renderMergedRow(detail, "Enabled on", {
+      shared: model.fleet,
+      local: model.local,
+      localIsException: model.localIsException,
+      sections: () => [
+        sharingMenuSection({
+          header: ENABLED_ON_HEADER,
+          options: RULE_OPTIONS,
+          current: input.ruleSharing,
+          iconFor: ruleIcon,
+          labelFor: ruleLabel,
+          onChange: (rule) => void this.setRuleWithLanding(list, elementId, rule).then(() => this.notifyExternalChange()),
+        }),
+        {
+          header: ON_THIS_DEVICE_HEADER,
+          // buildLocalMenu is the producer the Settings card's row asks too, so the two entrances
+          // cannot offer different choices. Its follow entry is absent under `Not shared`: there is
+          // no shared answer to follow, and this device's own state IS the answer.
+          items: buildLocalMenu(input.ruleSharing, input.localException, {
+            follow: () => void this.host.followTheDefault(list, elementId).then(() => this.reload()),
+            setState: (state) => void this.host.setDeviceElement(list, elementId, state).then(() => this.reload()),
+          }),
+        },
+      ],
+    });
   }
 
-  private ruleMenu(list: EnablementList, elementId: string, current: Sharing): Menu {
-    const menu = new Menu();
-    for (const rule of RULE_OPTIONS) {
-      menu.addItem((item) =>
-        item
-          .setTitle(ruleLabel(rule))
-          .setIcon(ruleIcon(rule))
-          .setChecked(sharingEquals(rule, current))
-          .onClick(() => void this.setRuleWithLanding(list, elementId, rule).then(() => this.notifyExternalChange()))
-      );
-    }
-    return menu;
-  }
-
-  // The fleet write, plus the landing seed — the same pair the Settings card's cycle does
+  // The shared write, plus the landing seed — the same pair the Settings card's own control does
   // (SettingTab.setRuleWithLanding), asking the same producer (ruleLandingNeedsSeed), so landing on
-  // `Each device decides` behaves identically at both entrances.
+  // `Not shared` behaves identically at both entrances.
   private async setRuleWithLanding(list: RuleListId, elementId: string, rule: Sharing): Promise<void> {
     await this.host.setEnablementRule(list, elementId, rule);
     if (ruleLandingNeedsSeed(rule, this.host.deviceElementFor(list, elementId))) await this.host.leaveToThisDevice(list, elementId);
-  }
-
-  // The entry list is buildLocalMenu's (enablementRow.ts), not this file's — the Settings card's row
-  // asks the same producer, so the two entrances cannot offer different choices. `Follows the
-  // default` is absent under `Each device decides`: there is no shared answer to follow.
-  private localMenu(list: EnablementList, elementId: string, rule: Sharing, current: "on" | "off" | null): Menu {
-    const menu = new Menu();
-    for (const entry of buildLocalMenu(rule, current, {
-      follow: () => void this.host.followTheDefault(list, elementId).then(() => this.reload()),
-      setState: (state) => void this.host.setDeviceElement(list, elementId, state).then(() => this.reload()),
-    })) {
-      menu.addItem((i) => {
-        i.setTitle(entry.title).setChecked(entry.checked).onClick(entry.action);
-        if (entry.icon !== null) i.setIcon(entry.icon);
-      });
-    }
-    return menu;
   }
 
   // After install (fallback ladder — only when the carrier is NOT synced and the row
@@ -3030,12 +3122,11 @@ export class SyncCenterView extends ItemView {
     });
   }
 
-  // Settings sync: a
-  // two-segment row like `Enabled on` — fleet segment is the item's own file-level sharing (SAME
-  // icon vocabulary the Settings tab's file-row control uses, sharingIcon; write target
-  // Item.settingsFile.fileRule.sharing for every item, custom (folder) items included since
-  // runsOn's retirement — one entrance, not two); local
-  // segment is this device's own whole-file opt-out.
+  // Settings sync: a merged control like `Enabled on` — the shared half is the item's own
+  // file-level sharing (SAME icon vocabulary the Settings tab's file-row control uses, sharingIcon;
+  // write target Item.settingsFile.fileRule.sharing for every item, custom (folder) items included
+  // since runsOn's retirement — one entrance, not two); the local half
+  // is this device's own whole-file opt-out.
   // The Settings tab's own drawer control (renderSharingPicker) opens the same kind of
   // menu — the two entrances stay in step, just not through this method.
   private renderSettingsSyncRow(detail: HTMLElement, r: StatusRow): void {
@@ -3043,90 +3134,62 @@ export class SyncCenterView extends ItemView {
     const ref = this.itemRefFor(name);
     if (ref === null) return;
     const optedOut = this.host.deviceOptedOut(name);
-    const localMenu = (): Menu => this.fileLocalMenu(name, optedOut);
-    // A fields-mode item has no legal whole-file fileRule to write (setItemFileSharing
-    // throws on it) — the fleet side must not offer a menu whose choice would just be discarded,
-    // but the local segment (this device's own opt-out) is a different datum and still works.
-    // The fleet cell is a dim settings-2 + tooltip, click = the item's Settings card
-    // (icon + tooltip is the
-    // row language everywhere else, and settings-2's registered meaning — "opens Settings" — is
-    // exactly what the click does). No ▾: a jump, not a menu. Same destination as the More row,
-    // and honestly redundant with it — the redundancy says "your answer lives over there".
+    // buildOptOutLocalMenu's entries — a DIFFERENT datum from buildLocalMenu's element-layer menu:
+    // this is the whole-FILE device opt-out, and it always offers both entries.
+    const localSection = (): MenuSectionModel => ({
+      header: ON_THIS_DEVICE_HEADER,
+      items: buildOptOutLocalMenu(optedOut, {
+        follow: () => void this.host.setDeviceOptOut(name, false).then(() => this.reload()),
+        optOut: () => void this.host.setDeviceOptOut(name, true).then(() => this.reload()),
+      }),
+    });
+    // A fields-mode item has no legal whole-file rule to write (setItemFileSharing throws on it),
+    // so the shared half must not offer stops whose choice would just be discarded. The local layer
+    // is a different datum and still works, so the row keeps both halves: the shared one
+    // contributes a single entry that JUMPS to the item's Settings card instead of a list.
+    // `braces` says "the keys inside this file decide"; `settings-2` stays reserved for "opens
+    // Settings", which is what the `More` row two lines down means — same card, same glyph, two
+    // different facts was the confusion.
     if (!this.host.itemFileSharingMenuLegal(ref)) {
-      const row = this.cardRowShell("Settings sync", true);
-      const trigger = row.createSpan({
-        cls: "config-sync-sharingicon config-sync-card-trigger config-sync-cardrow-track2",
-        attr: { "aria-label": FILE_SHARING_MENU_UNAVAILABLE_TEXT, role: "button", tabindex: "0" },
+      this.renderMergedRow(detail, "Settings sync", {
+        shared: { icon: "braces", tooltip: FILE_SHARING_MENU_UNAVAILABLE_TEXT },
+        local: optOutLocalSegment(optedOut),
+        localIsException: optedOut,
+        sections: () => [
+          {
+            header: SHARED_WITH_HEADER,
+            items: [{ title: FILE_SHARING_MENU_UNAVAILABLE_TEXT, icon: "braces", checked: false, action: () => this.host.openSettingsAt(ref) }],
+          },
+          localSection(),
+        ],
       });
-      setIcon(trigger, "settings-2");
-      const jump = (e: Event): void => {
-        e.stopPropagation();
-        this.host.openSettingsAt(ref);
-      };
-      trigger.addEventListener("click", jump);
-      trigger.addEventListener("keydown", (e) => {
-        if (e.key !== "Enter" && e.key !== " ") return;
-        e.preventDefault();
-        jump(e);
-      });
-      row.createSpan({ cls: "config-sync-tworow-vline" });
-      this.paintLocalSegment(row, optOutLocalSegment(optedOut), optedOut, localMenu);
-      detail.appendChild(row);
       return;
     }
     const current = this.host.itemFileSharing(ref);
     const model = fileEnablementRowModel({ sharing: current, optedOut });
-    this.renderTwoSegmentRow(
-      detail,
-      "Settings sync",
-      {
-        seg: model.fleet,
-        isSet: current.kind !== "everywhere",
-        menu: () => this.fileSharingMenu(ref, current),
-      },
-      { seg: model.local, isException: model.localIsException, menu: localMenu }
-    );
-  }
-
-  private fileSharingMenu(ref: ItemRef, current: FileSharing): Menu {
-    const menu = new Menu();
-    for (const opt of FILE_SHARING_OPTIONS) {
-      const sharing = opt as FileSharing;
-      menu.addItem((item) =>
-        item
-          .setTitle(sharingLabel(sharing))
-          .setIcon(sharingIcon(sharing))
-          .setChecked(sharingEquals(sharing, current))
-          .onClick(() => {
-            void this.host.setItemFileSharing(ref, sharing).then(() => this.notifyExternalChange());
-          })
-      );
-    }
-    return menu;
-  }
-
-  // The entry list is buildOptOutLocalMenu's (enablementRow.ts) — a DIFFERENT datum from
-  // buildLocalMenu's element-layer menu (localMenu, above): this is the whole-FILE device opt-out
-  // always offering both entries.
-  private fileLocalMenu(name: string, optedOut: boolean): Menu {
-    const menu = new Menu();
-    for (const entry of buildOptOutLocalMenu(optedOut, {
-      follow: () => void this.host.setDeviceOptOut(name, false).then(() => this.reload()),
-      optOut: () => void this.host.setDeviceOptOut(name, true).then(() => this.reload()),
-    })) {
-      menu.addItem((i) => {
-        i.setTitle(entry.title).setChecked(entry.checked).onClick(entry.action);
-        if (entry.icon !== null) i.setIcon(entry.icon);
-      });
-    }
-    return menu;
+    this.renderMergedRow(detail, "Settings sync", {
+      shared: model.fleet,
+      local: model.local,
+      localIsException: model.localIsException,
+      sections: () => [
+        sharingMenuSection({
+          header: SHARED_WITH_HEADER,
+          options: FILE_SHARING_OPTIONS,
+          current,
+          iconFor: sharingIcon,
+          labelFor: sharingLabel,
+          onChange: (v) => void this.host.setItemFileSharing(ref, v as FileSharing).then(() => this.reload()),
+        }),
+        localSection(),
+      ],
+    });
   }
 
   // Icon trigger + plain click (the `More` row): unlike renderCardIconMenuRow's family, this
   // row opens Settings directly rather than offering a menu — a sibling helper keeps that
   // distinction honest instead of routing a single-item fake menu through wireMenuTrigger. Lands
-  // on track 2 of the row's four-track grid, the same track every two-segment row's
-  // fleet icon lands on, tracks 3/4 left empty — no divider, since there is no second segment.
+  // on track 2 of the row's four-track grid, the same track every merged control lands on,
+  // tracks 3/4 left empty.
   private renderCardIconActionRow(detail: HTMLElement, label: string, icon: string, isSet: boolean, ariaLabel: string, onActivate: () => void): void {
     const row = this.cardRowShell(label, true);
     const trigger = row.createSpan({
@@ -3395,7 +3458,16 @@ export class SyncCenterView extends ItemView {
 
   private renderActionBar(macro: HTMLElement): void {
     const bar = macro.createDiv({ cls: "config-sync-actionbar" });
-    bar.createSpan({ cls: "config-sync-staged-count", text: unifiedFooterSummary(this.footerSelection()) });
+    // ONE selection reading feeds both the summary and the button labels. The payload arrays below
+    // are what the run executes, not what the buttons count: `stagedPayload` fans a staged family
+    // row out into itself plus one entry per actionable companion, so a single checked Appearance
+    // becomes three payload entries. Reporting that as "3 items" next to the footer's "1 selected"
+    // puts two disagreeing numbers on one screen and names a fan-out the user never chose.
+    const sel = this.footerSelection();
+    // Empty means the line would only restate the buttons — render nothing rather than an empty
+    // span holding its own gap open.
+    const summary = unifiedFooterSummary(sel);
+    if (summary !== "") bar.createSpan({ cls: "config-sync-staged-count", text: summary });
     bar.createDiv({ cls: "config-sync-rule-spacer" });
     const capItems = this.capturePayload();
     const applyItems = this.applyPayload();
@@ -3478,7 +3550,7 @@ export class SyncCenterView extends ItemView {
         capW.btn.buttonEl.addClass("is-busy");
       } else {
         renderActionIcon(capW.btn.buttonEl, "capture");
-        capW.btn.buttonEl.appendText(` Capture ${capItems.length} item${capItems.length === 1 ? "" : "s"}`);
+        capW.btn.buttonEl.appendText(` Capture ${sel.captureN} item${sel.captureN === 1 ? "" : "s"}`);
       }
       capW.btn.buttonEl.addClass("config-sync-btn-capture");
       capW.btn.setDisabled(this.running || capItems.length === 0);
@@ -3492,7 +3564,7 @@ export class SyncCenterView extends ItemView {
         applyW.btn.buttonEl.addClass("is-busy");
       } else {
         renderActionIcon(applyW.btn.buttonEl, "apply");
-        applyW.btn.buttonEl.appendText(` Apply ${applyItems.length} item${applyItems.length === 1 ? "" : "s"}`);
+        applyW.btn.buttonEl.appendText(` Apply ${sel.applyN} item${sel.applyN === 1 ? "" : "s"}`);
       }
       applyW.btn.setDisabled(this.running || applyItems.length === 0);
     }
@@ -3938,7 +4010,8 @@ export class SyncCenterView extends ItemView {
     }
     const leftLabel = f.local !== null ? "your store" : "not in your store";
     const rightLabel = f.remote !== null ? remoteName : `not at ${remoteName}`;
-    renderDiffPanel(p, left, right, leftLabel, rightLabel, switchSorted || jsonSorted ? `${f.itemRel} · sorted view` : f.itemRel);
+    renderDiffPanel(p, left, right, leftLabel, rightLabel, { name: f.itemRel, sorted: switchSorted || jsonSorted },
+      () => openDiffModal(this.app, left, right, leftLabel, rightLabel, { name: f.itemRel, sorted: switchSorted || jsonSorted }));
   }
 
   private renderRemoteButtons(detail: HTMLElement, remote: Remote, pullAligned: boolean, noChanges: boolean): void {
