@@ -524,10 +524,10 @@ functions.
   make the same three words unambiguous — `Enabled on: Desktop only` and `Shared with: Desktop
   only` say different things, where the bare stop could not.
   `RULE_OPTIONS`/`ruleIcon`/`ruleLabel` are the shared-layer vocabulary
-  (`sharingIcon`'s icons, plus `split` for `Not shared` — `airplay`, `sharingIcon`'s own
-  this-device glyph, would read as screen mirroring to a reader who has not read the source, and a
-  negation glyph would put the shared answer in `circle-slash`'s family, which is the local
-  exception's);
+  (`sharingIcon`'s icons, plus `square-split-horizontal` for `Not shared` — `airplay`,
+  `sharingIcon`'s own this-device glyph, would read as screen mirroring to a reader who has not read
+  the source, and a negation glyph would put the shared answer in the local exception's family,
+  which is the one distinction readers most often lose);
   `buildLocalMenu` is the element-level exception menu's one producer, and `buildOptOutLocalMenu`
   is the one producer for BOTH two-state local answers — the whole-file opt-out and a per-key
   rule's own exception — sharing one two-entry producer (`optOutLocalSegment` builds their shared
