@@ -61,7 +61,6 @@ import {
   onOffLineText,
   onOffNarrationLines,
   PanelFilter,
-  partitionSection,
   presentedState,
   remoteSections,
   RowBucket,
@@ -84,7 +83,8 @@ import {
 } from "./panelModel";
 import { Fate, FateInput, NOTHING_YET_SENTENCE, rowFate, versionAheadClause } from "./fateModel";
 import { openDiffModal } from "./DiffModal";
-import { renderDiffPanel } from "./diffView";
+import { renderDiffPanel, type DiffResolveControl } from "./diffView";
+import { paintResolveSegment, renderResolveSegment } from "./resolveSegment";
 import { confirmDeleteLeftovers } from "./ConfirmModal";
 import { LEFTOVER_SECTION_ORDER, LeftoverSection } from "../core/leftover";
 import { EnablementList, isSwitchListGroup, switchListSortedView } from "../core/switchList";
@@ -102,14 +102,26 @@ import {
   AVAILABILITY_FOLD_ICON,
   AVAILABILITY_FOLD_TEXT,
   AVAILABILITY_FOLD_NOTE,
+  CONFLICT_ICON,
+  CONFLICT_COLOR_CLASS,
   type FoldKind,
   type AvailabilityFoldKind,
 } from "./foldIcons";
+import {
+  placeRow,
+  FATE_FOLD_ORDER,
+  AVAILABILITY_FOLD_ORDER,
+  FATE_PILL_FOLD,
+  type FateFold,
+} from "./panelTaxonomy";
 import { renderFoldChevron, setFoldOpen } from "./foldChevron";
+import { SettingsSpot } from "./settingsDeepLink";
 // ITEM_SECTION_LABELS aliased: this file already declares its own ITEM_SECTION_LABELS (sidebar category
 // labels, see below) for an unrelated domain.
 import {
   FILE_SHARING_MENU_UNAVAILABLE_TEXT,
+  PER_KEY_RULES_STATE_TEXT,
+  PER_KEY_RULES_ACTION_TEXT,
   FILE_SHARING_OPTIONS,
   sharingIcon,
   sharingLabel,
@@ -208,7 +220,6 @@ const sessionUi = {
 
 // Escalating "less this device can do about it": a version away, a switch away, an install away,
 // and finally not possible here at all.
-const AVAILABILITY_FOLD_ORDER: AvailabilityFoldKind[] = ["outdated", "disabled", "not-installed", "desktop-only"];
 
 // Staging state lives at session level, not view level: mobile Obsidian recreates views on
 // tab switches, and per-instance state would re-run the default pre-check on every
@@ -343,7 +354,7 @@ export interface SyncCenterHost {
   setItemFileSharing(ref: ItemRef, sharing: FileSharing): Promise<void>;
   // The More bridge: deep-links into the Settings
   // tab for this item's card.
-  openSettingsAt(ref: ItemRef): void;
+  openSettingsAt(ref: ItemRef, spot: SettingsSpot): void;
   // The item a compiled group belongs to — a registry LOOKUP, never a parse of the group name
   // (the `plugin-` prefix is not a parser). null for a group no item owns.
   itemRefForGroup(name: string): ItemRef | null;
@@ -444,6 +455,18 @@ export class SyncCenterView extends ItemView {
   // new view instance" idiom expandedItems/remoteFoldsOpen already use, so a repaint mid-review
   // doesn't re-collapse a row the user just opened.
   private expandedFileRows: Set<string> = new Set();
+  // Which file entries have their inline diff open — `{group}::{rel}`, the same idiom
+  // remoteFoldsOpen already uses for the remote pane's inline diffs, and for the same reason: a
+  // repaint rebuilds the list, and a diff held only in a closure would vanish with it. It became
+  // load-bearing once Resolve moved INTO the diff toolbar: picking a side re-renders, and closing
+  // the evidence the moment someone acts on it is the opposite of what that control is for.
+  private openEntryDiffs: Set<string> = new Set();
+  // Panels rescued from a card about to be rebuilt in place, keyed the same way. The rebuilt entry
+  // ADOPTS its old panel and keeps showing it until the fresh read lands, instead of inserting an
+  // empty one and filling it a tick later — the same "build detached, swap when ready" rule
+  // SettingTab's renderCardBodyInto follows, and the difference between "the preview changed" and
+  // "the card blinked". Non-null only for the duration of one refreshItemRow.
+  private adoptedDiffPanels: Map<string, HTMLElement> | null = null;
   // Remote pane fold state: survives repaints (periodic check, notify) the way
   // expandedItems/typeSectionOpen do for the main list — a repaint rebuilds the pane fresh, so
   // without this the on/off line, object-row folds, and open inline diffs would collapse on every
@@ -1413,7 +1436,7 @@ export class SyncCenterView extends ItemView {
         return;
       }
       renderDiffPanel(holder, base, produced, leftLabel, rightLabel, { name: "data.json", sorted: bothSorted },
-        () => openDiffModal(this.app, base, produced, leftLabel, rightLabel, { name: "data.json", sorted: bothSorted }));
+        () => openDiffModal(this.app, base, produced, leftLabel, rightLabel, { name: "data.json", sorted: bothSorted }), null);
     });
   }
 
@@ -1491,9 +1514,13 @@ export class SyncCenterView extends ItemView {
         const c = this.presentedCounts(rows);
         if (c.up > 0) renderActionCount(item.createSpan({ cls: "config-sync-side-badge is-up" }), "capture", c.up);
         if (c.down > 0) renderActionCount(item.createSpan({ cls: "config-sync-side-badge is-down" }), "apply", c.down);
-        if (c.ok > 0) item.createSpan({ cls: "config-sync-side-badge is-ok", text: `✓${c.ok}` });
-        if (c.excluded > 0) item.createSpan({ cls: "config-sync-side-badge is-excluded", text: `⊘${c.excluded}` });
-        if (c.none > 0) item.createSpan({ cls: "config-sync-side-badge is-none", text: `○${c.none}` });
+        // Same fixed-size Lucide glyphs the fold lines and the card draw (FATE_PILL_FOLD →
+        // renderFoldCount), never hand-written `✓`/`⊘`/`○` text. Text glyphs put a DIFFERENT mark on
+        // the same state depending on which surface you looked at, and `⊘` in particular ran into
+        // the digit beside it with no room to breathe.
+        if (c.ok > 0) renderFoldCount(item.createSpan({ cls: "config-sync-side-badge is-ok" }), FATE_PILL_FOLD.ok, c.ok);
+        if (c.excluded > 0) renderFoldCount(item.createSpan({ cls: "config-sync-side-badge is-excluded" }), FATE_PILL_FOLD.excluded, c.excluded);
+        if (c.none > 0) renderFoldCount(item.createSpan({ cls: "config-sync-side-badge is-none" }), FATE_PILL_FOLD.none, c.none);
       }
       item.addEventListener("click", () => {
         this.panelSection = { kind: "device", cat };
@@ -1558,9 +1585,9 @@ export class SyncCenterView extends ItemView {
       const c = this.presentedCounts(this.countable(this.sectionRows()));
       if (c.up > 0) renderActionCount(sw.createSpan({ cls: "config-sync-side-badge is-up" }), "capture", c.up);
       if (c.down > 0) renderActionCount(sw.createSpan({ cls: "config-sync-side-badge is-down" }), "apply", c.down);
-      if (c.ok > 0) sw.createSpan({ cls: "config-sync-side-badge is-ok", text: `✓${c.ok}` });
-      if (c.excluded > 0) sw.createSpan({ cls: "config-sync-side-badge is-excluded", text: `⊘${c.excluded}` });
-      if (c.none > 0) sw.createSpan({ cls: "config-sync-side-badge is-none", text: `○${c.none}` });
+      if (c.ok > 0) renderFoldCount(sw.createSpan({ cls: "config-sync-side-badge is-ok" }), FATE_PILL_FOLD.ok, c.ok);
+      if (c.excluded > 0) renderFoldCount(sw.createSpan({ cls: "config-sync-side-badge is-excluded" }), FATE_PILL_FOLD.excluded, c.excluded);
+      if (c.none > 0) renderFoldCount(sw.createSpan({ cls: "config-sync-side-badge is-none" }), FATE_PILL_FOLD.none, c.none);
     } else if (this.panelSection.kind === "history") {
       sw.createSpan({ text: "History" });
     } else if (this.panelSection.kind === "self") {
@@ -1636,28 +1663,31 @@ export class SyncCenterView extends ItemView {
         "pull", pull,
       );
     }
-    pills.createSpan({
-      cls: "config-sync-pill is-ok",
-      text: `✓ ${ok}`,
-      attr: { "aria-label": `${ok} item${ok === 1 ? "" : "s"} in sync` },
-    });
+    renderFoldCount(
+      pills.createSpan({ cls: "config-sync-pill is-ok", attr: { "aria-label": `${ok} item${ok === 1 ? "" : "s"} in sync` } }),
+      FATE_PILL_FOLD.ok, ok,
+    );
     // Mirrors the ok/none pills' own shape — unconditional-count vs.
     // N=0-suppressed is inconsistent between ok (always shown) and none (suppressed) even today;
     // `excluded` follows `none`'s precedent (suppressed at 0), matching the explicit
     // empty-state rule for the FILTER pill, applied consistently here too.
     if (excluded > 0) {
-      pills.createSpan({
-        cls: "config-sync-pill is-excluded",
-        text: `⊘ ${excluded}`,
-        attr: { "aria-label": `${excluded} item${excluded === 1 ? "" : "s"} not synced on this device` },
-      });
+      renderFoldCount(
+        pills.createSpan({
+          cls: "config-sync-pill is-excluded",
+          attr: { "aria-label": `${excluded} item${excluded === 1 ? "" : "s"} not synced on this device` },
+        }),
+        FATE_PILL_FOLD.excluded, excluded,
+      );
     }
     if (none > 0) {
-      pills.createSpan({
-        cls: "config-sync-pill is-none",
-        text: `○ ${none}`,
-        attr: { "aria-label": `${none} item${none === 1 ? "" : "s"} with no settings yet` },
-      });
+      renderFoldCount(
+        pills.createSpan({
+          cls: "config-sync-pill is-none",
+          attr: { "aria-label": `${none} item${none === 1 ? "" : "s"} with no settings yet` },
+        }),
+        FATE_PILL_FOLD.none, none,
+      );
     }
     // Manual refresh: re-scans local state, catching plugin toggles made in Obsidian's
     // settings modal while the panel stayed open, and re-checks every remote (desktop only).
@@ -2256,20 +2286,17 @@ export class SyncCenterView extends ItemView {
       // conflict|apply|capture (plus locked, its current placement, preserved); the folds hold
       // ok/excluded/none. Fold order ✓ → ⊘ → ○ ("from nothing-to-do, to my own rule, to
       // no data yet") — rows within each fold stay name-sorted since `visible` already is.
-      const bucketed = visible.map((r) => ({ r, section: partitionSection(this.rowBucket(r)) }));
-      const active = bucketed.filter((x) => x.section === "active").map((x) => x.r);
-      // A row this device can't act on — not installed, disabled, outdated, desktop-only — folds by
-      // WHY rather than by fate. Only among the non-active rows: an actionable one (a plugin this
-      // run would install) stays at the top where the work is, availability chip and all. Without
-      // this split those rows landed in `○ no settings yet`, which is where the reporter went
-      // looking for "which ones aren't installed here" and found nothing that said so.
-      const availabilityOf = (r: StatusRow): SectionKind => this.sectionOf(r.group.name);
-      const inactive = bucketed.filter((x) => x.section !== "active");
-      const unavailable = inactive.filter((x) => availabilityOf(x.r) !== "main");
-      const byFate = inactive.filter((x) => availabilityOf(x.r) === "main");
-      const insync = byFate.filter((x) => x.section === "insync").map((x) => x.r);
-      const excluded = byFate.filter((x) => x.section === "excluded").map((x) => x.r);
-      const nosettings = byFate.filter((x) => x.section === "nosettings").map((x) => x.r);
+      // Filing is `placeRow`'s call, not this function's (panelTaxonomy.ts): a row has a FATE and an
+      // AVAILABILITY at once, and which of the two files it is a decision with a documented reason,
+      // not an inline filter. It used to live here as `availability wins`, which quietly filed a
+      // row the user had opted THIS device out of under `N not installed on this device` while the
+      // `Not synced here` pill still counted it — a number with nothing behind it.
+      const placed = visible.map((r) => ({ r, at: placeRow(this.rowBucket(r), this.sectionOf(r.group.name)) }));
+      const active = placed.filter((x) => x.at.zone === "active").map((x) => x.r);
+      const fateRows = (fold: FateFold): StatusRow[] =>
+        placed.filter((x) => x.at.zone === "fate" && x.at.fold === fold).map((x) => x.r);
+      const availabilityRows = (fold: AvailabilityFoldKind): StatusRow[] =>
+        placed.filter((x) => x.at.zone === "availability" && x.at.fold === fold).map((x) => x.r);
       // The filled card wraps rows only — it renders exactly when the section
       // has real rows (the self row or an active row); a section whose visible content is fold
       // lines alone shows head + fold lines with no filled block.
@@ -2283,15 +2310,21 @@ export class SyncCenterView extends ItemView {
         this.renderSectionTrailingLine(body, {
           ts, rows, openSet, foldId: kind, icon: FOLD_ICON[kind], colorCls: FOLD_ICON_COLOR_CLASS[kind], text, note: null,
         });
-      fateFold(insync, sessionUi.insyncOpen, "insync", insyncLineText);
-      fateFold(excluded, sessionUi.excludedOpen, "excluded", excludedLineText);
-      fateFold(nosettings, sessionUi.nosettingsOpen, "nosettings", nosettingsLineText);
+      const fateFoldUi: Record<FateFold, { open: Set<string>; text: (n: number) => string }> = {
+        insync: { open: sessionUi.insyncOpen, text: insyncLineText },
+        excluded: { open: sessionUi.excludedOpen, text: excludedLineText },
+        nosettings: { open: sessionUi.nosettingsOpen, text: nosettingsLineText },
+      };
+      for (const fold of FATE_FOLD_ORDER) {
+        const ui = fateFoldUi[fold];
+        fateFold(fateRows(fold), ui.open, fold, ui.text);
+      }
       // Availability last, in escalating "can't do anything here" order — the four titles and notes
       // are the ones 987eacf deleted with the sections they belonged to.
       for (const kind of AVAILABILITY_FOLD_ORDER) {
         this.renderSectionTrailingLine(body, {
           ts,
-          rows: unavailable.filter((x) => availabilityOf(x.r) === kind).map((x) => x.r),
+          rows: availabilityRows(kind),
           openSet: sessionUi.availabilityOpen,
           foldId: kind,
           icon: AVAILABILITY_FOLD_ICON[kind],
@@ -2429,7 +2462,7 @@ export class SyncCenterView extends ItemView {
     setTooltip(chip, tooltip);
     const open = (): void => {
       const ref = this.host.itemRefForGroup(carrierId);
-      if (ref !== null) this.host.openSettingsAt(ref);
+      if (ref !== null) this.host.openSettingsAt(ref, "card");
     };
     chip.addEventListener("click", (e) => { e.stopPropagation(); open(); });
     chip.addEventListener("keydown", (e) => { if (e.key !== "Enter" && e.key !== " ") return; e.preventDefault(); e.stopPropagation(); open(); });
@@ -2536,7 +2569,13 @@ export class SyncCenterView extends ItemView {
     // No row-level aria-label: Obsidian renders aria-labels as hover tooltips — a
     // row-level one pops on any blank stretch of the row.
     const row = card.createDiv({
-      cls: `config-sync-hub-row${inert ? " is-insync" : ""}${unresolvedConflict ? " is-conflict" : ""}`,
+      // `is-inert`, not the old `is-insync`: the flag is `!fate.stageable`, and TWO opposite states
+      // share that — "already in sync, nothing to do" and "changed on both sides, waiting on you".
+      // Under the old name the second inherited the first's `opacity: 0.55`, so the single row that
+      // needed the user's attention rendered FAINTER than the routine work above and below it. The
+      // dimming now belongs to the calm reading only (styles.css), and the name says what it tests.
+      cls: `config-sync-hub-row${inert ? " is-inert" : ""}${unresolvedConflict ? " is-conflict" : ""}`,
+      attr: { "data-cs-row": group.name },
     });
     const chev = renderFoldChevron(row, expanded, null);
     this.renderRuleName(row, group.name, group.label);
@@ -2575,8 +2614,9 @@ export class SyncCenterView extends ItemView {
     } else if (fate.glyph === "—") {
       this.renderNeutralFateIcon(fateWrap, fate);
     } else {
-      fateWrap.createSpan({ cls: "config-sync-fate-glyph", text: fate.glyph });
-      fateSentenceEl = fateWrap.createSpan({ cls: "config-sync-fate-text", text: ` ${fate.sentence}` });
+      const ic = fateWrap.createSpan({ cls: `config-sync-fate-ic ${CONFLICT_COLOR_CLASS}`, attr: { "aria-label": fate.sentence } });
+      setIcon(ic, CONFLICT_ICON);
+      fateSentenceEl = fateWrap.createSpan({ cls: "config-sync-fate-text", text: fate.sentence });
       fateSentenceEl.hidden = expanded;
     }
 
@@ -2610,7 +2650,7 @@ export class SyncCenterView extends ItemView {
       this.renderFateSpacer(row);
     }
 
-    const detail = card.createDiv({ cls: "config-sync-report-files config-sync-itemcard" });
+    const detail = card.createDiv({ cls: "config-sync-report-files config-sync-itemcard", attr: { "data-cs-row": group.name } });
     detail.hidden = !expanded;
     this.renderUnifiedCard(detail, r, fate, input, isConflict);
     row.addEventListener("click", () => {
@@ -2690,8 +2730,15 @@ export class SyncCenterView extends ItemView {
     });
 
     const changes = this.familyChanges(r);
-    if (dir !== null && hasChanges(changes)) {
-      this.renderFilesRow(fields, r, changes, dir, input.encrypted);
+    // An unresolved conflict has no direction yet, and the FILES row used to be gated on one — so
+    // the card asked you to pick a side while showing you nothing to pick it from, and only
+    // revealed the files AFTER you had committed. The evidence now comes first: an unresolved
+    // conflict previews the `Use theirs` side (`apply`), and the toolbar control both switches the
+    // preview and IS the choice, because in this plugin a diff always shows what one choice would
+    // do (see diffView's DiffResolveControl).
+    const previewDir: Direction | null = dir ?? (isConflict ? "apply" : null);
+    if (previewDir !== null && hasChanges(changes)) {
+      this.renderFilesRow(fields, r, changes, previewDir, input.encrypted, isConflict ? this.conflictResolve(r, changes) : null);
     }
 
     if (isConflict) this.renderResolveRow(fields, r);
@@ -2726,13 +2773,15 @@ export class SyncCenterView extends ItemView {
 
   // The row shell every card row shares ("one grid per card"): a fixed label on
   // track 1 of `.config-sync-cardrow`'s four tracks. Callers fill the rest — either one value cell
-  // spanning tracks 2-4 (renderCardKeyRow, below) or a single control landing on track 2
-  // (renderMergedRow, renderCardIconActionRow) — so every row's icons
-  // sit on the SAME vertical rule regardless of which shape painted them.
+  // spanning tracks 2-4 (renderCardKeyRow, below) or a single control landing on the last track
+  // (renderMergedRow, renderCardIconActionRow, renderFilesRow) — so every row's icons
+  // sit on the SAME vertical rule, at the card's right edge, regardless of which shape painted
+  // them.
   //
-  // `iconRow` marks the icon-cell shape (merged-control rows, the More row): content-sized, so mobile
-  // keeps it on the shared grid instead of the wide rows' stack-to-full-width fallback below —
-  // there is no long text here to clip, only a glyph, and stacking would just waste a line. Named
+  // `iconRow` marks the icon-cell shape (merged-control rows, the More row, Files): content-sized,
+  // so mobile keeps it on the shared grid instead of the wide rows' stack-to-full-width fallback
+  // below — there is no long text here to clip, only a glyph or a badge, and stacking would just
+  // waste a line. Named
   // `is-iconrow`, not `is-compact` — that modifier already means something else on
   // `.config-sync-shell` (the narrow-viewport pane layout), an unrelated axis.
   private cardRowShell(label: string, iconRow: boolean): HTMLElement {
@@ -2755,6 +2804,103 @@ export class SyncCenterView extends ItemView {
     detail.appendChild(row);
   }
 
+  // The same choice the Resolve row below offers, handed to every diff this row opens. Two
+  // entrances, one datum (`conflictChoice`) — the toolbar one exists because the diff is where the
+  // consequences of each side are actually visible.
+  //
+  // `scopeNote` is the honest disclosure for a multi-file item: the run writes a whole group
+  // (`ApplyItem`/`CaptureItem` carry a group name; the only partial mechanism, `stagedMembers`, is
+  // switch-list-only), so picking a side inside one file's diff settles its siblings too. Saying so
+  // costs one line; not saying it would let a user resolve a file this window never showed them.
+  private conflictResolve(r: StatusRow, changes: FileChanges): DiffResolveControl {
+    const name = r.group.name;
+    const total = changes.added.length + changes.updated.length + changes.deleted.length;
+    return {
+      group: name,
+      chosen: this.conflictChoice.get(name) ?? null,
+      scopeNote: total > 1 ? `Resolves all ${total} files in ${r.group.label} — this item is written as a whole.` : null,
+      onPick: (choice) => this.pickConflictSide(name, choice),
+    };
+  }
+
+  // Clicking the already-active side clears it (the same "click the active segment to unstage"
+  // idiom renderDirectionToggle uses), so both entrances behave identically.
+  //
+  // Deliberately NOT `render()`. That empties `contentEl` and rebuilds the whole pane — header,
+  // sidebar, every card — which is fine for a filter change and wrong here: this control sits
+  // INSIDE the thing being torn down, on top of a diff the user is reading, and toggling between
+  // the two sides made the card visibly flash. So the update is scoped to what a choice actually
+  // changes, and that list is short enough to write down:
+  //
+  //   1. every rendered copy of this item's segment (the card row, and each open diff's toolbar)
+  //   2. this item's own row and card — the fate icon, the checkbox, the FILES badge, and the
+  //      `State` header that becomes `On apply`/`On capture`
+  //   3. the footer, whose counts and button labels read the selection
+  //
+  // Nothing else on the pane depends on one row's conflict choice, so nothing else is touched.
+  private pickConflictSide(name: string, choice: ConflictChoice): void {
+    if (this.conflictChoice.get(name) === choice) {
+      this.conflictChoice.delete(name);
+      this.selected.delete(name);
+    } else {
+      this.conflictChoice.set(name, choice);
+      this.selected.add(name);
+    }
+    // The row's fate is memoized per group; it has to re-derive against the choice just made.
+    this.rowDerivationCache.delete(name);
+    this.repaintResolveSegments(name);
+    this.refreshItemRow(name);
+    this.refreshActionBar();
+  }
+
+  // Every copy of this item's segment currently on screen — the card row's, and one per open diff
+  // toolbar. Found by data attribute rather than by a registry, so a copy rendered later (a diff
+  // opened after the choice) is not something anyone has to remember to register.
+  private repaintResolveSegments(name: string): void {
+    const chosen = this.conflictChoice.get(name) ?? null;
+    this.contentEl.querySelectorAll(`[data-cs-resolve="${name}"]`).forEach((seg) => paintResolveSegment(seg, chosen));
+  }
+
+  // Rebuilds ONE item's row and card in place, leaving the rest of the pane untouched. The two are
+  // siblings under the same filled card (renderItemRow appends them in that order), so they move as
+  // a pair, back to the same position; `markLastRow` re-runs because the pair may have been last.
+  private refreshItemRow(name: string): void {
+    const row = this.contentEl.querySelector(`.config-sync-hub-row[data-cs-row="${name}"]`);
+    const detail = this.contentEl.querySelector(`.config-sync-itemcard[data-cs-row="${name}"]`);
+    const card = row?.parentElement ?? null;
+    const r = this.rows().find((x) => x.group.name === name);
+    if (row === null || detail === null || card === null || r === undefined) return;
+    const anchor = detail.nextSibling;
+    // Rescue any open diff before the subtree goes: see adoptedDiffPanels.
+    const adopted = new Map<string, HTMLElement>();
+    detail.querySelectorAll(".config-sync-inline-diff[data-cs-diff]").forEach((el) => {
+      const key = el.getAttribute("data-cs-diff");
+      if (key !== null) adopted.set(key, el as HTMLElement);
+    });
+    row.remove();
+    detail.remove();
+    const staging = createDiv();
+    this.adoptedDiffPanels = adopted;
+    try {
+      this.renderItemRow(staging, r);
+    } finally {
+      this.adoptedDiffPanels = null;
+    }
+    while (staging.firstChild !== null) card.insertBefore(staging.firstChild, anchor);
+    this.markLastRow(card);
+  }
+
+  // The footer reads the whole selection, so a choice that stages or unstages a row moves it.
+  // Rebuilt rather than patched: its buttons are ButtonComponents wired to payloads derived from
+  // that same selection, and re-deriving them is what keeps the labels and the run in step.
+  private refreshActionBar(): void {
+    const bar = this.contentEl.querySelector(".config-sync-actionbar");
+    const macro = bar?.parentElement ?? null;
+    if (bar === null || macro === null) return;
+    bar.remove();
+    this.renderActionBar(macro);
+  }
+
   // Resolve (conflict rows only): segmented `Use theirs ↓` / `Keep mine ↑`. Clicking
   // the already-active choice clears it (the same "click the active segment to unstage" idiom
   // `renderDirectionToggle` already uses elsewhere) — Resolve doubles as this row's only
@@ -2763,25 +2909,11 @@ export class SyncCenterView extends ItemView {
     const name = r.group.name;
     this.renderCardKeyRow(detail, "Resolve", (value) => {
       const segrow = value.createDiv({ cls: "config-sync-segrow" });
-      const seg = segrow.createDiv({ cls: "config-sync-seg" });
-      const current = this.conflictChoice.get(name);
-      const opt = (choice: ConflictChoice, label: string): void => {
-        const on = current === choice;
-        const b = seg.createEl("button", { cls: `config-sync-seg-btn is-${choice}${on ? " is-on" : ""}`, text: label });
-        b.addEventListener("click", (e) => {
-          e.stopPropagation();
-          if (on) {
-            this.conflictChoice.delete(name);
-            this.selected.delete(name);
-          } else {
-            this.conflictChoice.set(name, choice);
-            this.selected.add(name);
-          }
-          this.render(this.renderGen);
-        });
-      };
-      opt("apply", "Use theirs ↓");
-      opt("capture", "Keep mine ↑");
+      renderResolveSegment(segrow, {
+        group: name,
+        chosen: this.conflictChoice.get(name) ?? null,
+        onPick: (side) => this.pickConflictSide(name, side),
+      });
     });
   }
 
@@ -2827,9 +2959,12 @@ export class SyncCenterView extends ItemView {
   // through renderCardKeyRow: the badge is a static, non-interactive icon (no menu, no `▾`), a
   // shape none of renderCardKeyRow's other callers need, and threading an optional icon through
   // that shared helper for one row would ripple a parameter every other call site has to pass as
-  // absent. Not marked `is-iconrow`: file names can run long, so this row keeps the wide-row
-  // mobile stack-to-full-width fallback (DESIGN §4) instead of the icon-rows' shared grid at
-  // every width.
+  // absent. Marked `is-iconrow`: the row's whole value is one badge now, so it belongs on the
+  // shared grid at every width, landing on the same vertical rule as the merged controls under it.
+  // The expanded entry list is a SIBLING of the row, not part of its value cell — file names can
+  // run long, and as a sibling the list owns the card's full width on phone and desktop alike
+  // instead of the grid's remainder. It stays in the DOM while collapsed; `.config-sync-files-list`
+  // is `:empty`-hidden so a folded row carries no stray gap.
   // Default = count-only, same click-to-expand idiom the Settings tab's
   // companion member count (`config-sync-card-membercount`/`-memberarrow`) already established —
   // a neutral bare-number pill (aria/tooltip the full `filesChangeLabel` sentence) plus the FOLD
@@ -2837,55 +2972,72 @@ export class SyncCenterView extends ItemView {
   // open. Empty-row drop (no changes at all) happens up front rather than after building the
   // entry list, since the collapsed head always renders SOMETHING once there IS at least one
   // change.
-  private renderFilesRow(detail: HTMLElement, r: StatusRow, changes: FileChanges, dir: Direction, encrypted: boolean): void {
+  private renderFilesRow(detail: HTMLElement, r: StatusRow, changes: FileChanges, dir: Direction, encrypted: boolean, resolve: DiffResolveControl | null): void {
     const total = changes.added.length + changes.updated.length + changes.deleted.length;
     if (total === 0) return;
-    const row = this.cardRowShell("Files", false);
-    const value = row.createDiv({ cls: "config-sync-cardval config-sync-files-val" });
+    const row = this.cardRowShell("Files", true);
+    row.addClass("config-sync-filesrow");
+    const value = row.createDiv({ cls: "config-sync-cardrow-ctl config-sync-files-val" });
+    const list = createDiv({ cls: "config-sync-files-list" });
     const key = r.group.name;
     const build = (): void => {
       value.empty();
+      list.empty();
       const expanded = this.expandedFileRows.has(key);
       // ONE mark, not three. The row used to read `↑ (4) ›` — a direction badge, a neutral count
       // pill and a fold chevron, each its own little target — where all three answered the same
       // question. They are one badge now: the direction's icon and its count in a single pill that
-      // carries the direction's color, with the whole head as the click/keyboard target so nothing
-      // has to be aimed at. Expanded, the badge fills in (`.is-open`) instead of a chevron rotating
-      // beside it — same state, one fewer glyph.
-      const head = value.createDiv({
-        cls: "config-sync-files-head",
-        attr: {
-          role: "button",
-          tabindex: "0",
-          "aria-expanded": expanded ? "true" : "false",
-          "aria-label": `${filesChangeLabel(total)} — ${dir === "capture" ? "these changes land in the store" : "these changes land on this device"}`,
-        },
+      // carries the direction's color. The badge is pure STATE — the click/keyboard target is the
+      // whole row (wired below) — so there is nothing left on this line to aim at. Expanded, the
+      // badge fills in (`.is-open`) instead of a chevron rotating beside it: same state, one fewer
+      // glyph.
+      const head = value.createDiv({ cls: "config-sync-files-head" });
+      // While a conflict is undecided the badge wears the CONFLICT mark, not a direction arrow:
+      // the row has no direction yet, and `dir` here is only the side being previewed. Once a side
+      // is picked it becomes an ordinary directional badge like every other row's.
+      const undecided = resolve !== null && resolve.chosen === null;
+      const badge = head.createSpan({
+        cls: `config-sync-files-badge ${undecided ? CONFLICT_COLOR_CLASS : ACTION_COLOR_CLASS[dir]}${expanded ? " is-open" : ""}`,
       });
-      const badge = head.createSpan({ cls: `config-sync-files-badge ${ACTION_COLOR_CLASS[dir]}${expanded ? " is-open" : ""}` });
-      setIcon(badge.createSpan({ cls: "config-sync-files-badge-ic" }), ACTION_ICON[dir]);
+      setIcon(badge.createSpan({ cls: "config-sync-files-badge-ic" }), undecided ? CONFLICT_ICON : ACTION_ICON[dir]);
       badge.createSpan({ text: String(total) });
-      const toggle = (): void => {
-        if (this.expandedFileRows.has(key)) this.expandedFileRows.delete(key);
-        else this.expandedFileRows.add(key);
-        build();
-      };
-      head.addEventListener("click", toggle);
-      head.addEventListener("keydown", (e) => {
-        if (e.key !== "Enter" && e.key !== " ") return;
-        e.preventDefault();
-        toggle();
-      });
-      if (expanded) this.renderUnifiedFiles(value.createDiv({ cls: "config-sync-files-list" }), r, changes, dir, encrypted);
+      row.setAttrs({ "aria-expanded": expanded ? "true" : "false" });
+      if (expanded) this.renderUnifiedFiles(list, r, changes, dir, encrypted, resolve);
     };
+    // THE ROW is the target, not the badge. 2.25.0 moved every card control to the card's right
+    // edge, and the listeners had always been on the badge — so the only clickable thing slid to
+    // the row's far end, leaving the `FILES` label and the whole stretch between it and the badge
+    // dead. Wired once out here rather than inside `build`, which re-runs on every toggle and would
+    // otherwise stack a listener per expand.
+    const toggle = (): void => {
+      if (this.expandedFileRows.has(key)) this.expandedFileRows.delete(key);
+      else this.expandedFileRows.add(key);
+      build();
+    };
+    row.setAttrs({
+      role: "button",
+      tabindex: "0",
+      "aria-label":
+        resolve !== null && resolve.chosen === null
+          ? `${filesChangeLabel(total)} — changed on both sides; open to compare each side before choosing`
+          : `${filesChangeLabel(total)} — ${dir === "capture" ? "these changes land in the store" : "these changes land on this device"}`,
+    });
+    row.addEventListener("click", toggle);
+    row.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      e.preventDefault();
+      toggle();
+    });
     build();
     detail.appendChild(row);
+    detail.appendChild(list);
   }
 
   // Files row: direction-aware entries via fileEntryFor, reusing the same
   // diffPair-backed inline expand renderCappedChanges already uses for "view" and "diff" alike
   // (the "view" case is just a diff against an empty base — the same content diffPair already
   // returns — mirroring the remote pane's "not in your store" content view).
-  private renderUnifiedFiles(detail: HTMLElement, r: StatusRow, changes: FileChanges, dir: Direction, encrypted: boolean): void {
+  private renderUnifiedFiles(detail: HTMLElement, r: StatusRow, changes: FileChanges, dir: Direction, encrypted: boolean, resolve: DiffResolveControl | null): void {
     const { shown, rest } = capFileEntries(changes, 10);
     const renderEntry = (e: CappedEntry): void => {
       const kind: "added" | "updated" | "deleted" = e.kind === "add" ? "added" : e.kind === "upd" ? "updated" : "deleted";
@@ -2915,21 +3067,19 @@ export class SyncCenterView extends ItemView {
       const affLabel = pres.affordance === "view" ? "View content" : "View changes";
       const diffIcon = line.createSpan({ cls: "config-sync-diffic", attr: { "aria-label": affLabel, role: "button", tabindex: "0" } });
       setIcon(diffIcon, "file-diff");
+      const owner = this.fileOwner(r, e.name);
+      const diffKey = `${owner.group}::${owner.rel}`;
       let panel: HTMLElement | null = null;
-      const toggle = (): void => {
-        if (panel !== null) {
-          panel.remove();
-          panel = null;
-          diffIcon.removeClass("is-open");
-          return;
-        }
+      const open = (): void => {
         diffIcon.addClass("is-open");
-        const p = createDiv({ cls: "config-sync-inline-diff" });
+        // Adopted when this card is being rebuilt around an already-open diff: the old panel keeps
+        // its content on screen while the new side is read.
+        const p = this.adoptedDiffPanels?.get(diffKey) ?? createDiv({ cls: "config-sync-inline-diff", attr: { "data-cs-diff": diffKey } });
         panel = p;
         line.insertAdjacentElement("afterend", p);
-        const owner = this.fileOwner(r, e.name);
         void this.host.diffPair(owner.group, owner.rel, dir).then((pair) => {
           if (panel !== p) return;
+          p.empty();
           if (pair === null) {
             p.createDiv({ cls: "config-sync-expand-note", text: "no diff available" });
             return;
@@ -2954,9 +3104,22 @@ export class SyncCenterView extends ItemView {
           const leftLabel = dir === "capture" ? "store" : pres.affordance === "view" ? "not on this device yet" : "this device";
           const rightLabel = dir === "capture" ? "this device (what capture would write)" : "store (what apply would write)";
           renderDiffPanel(p, base, produced, leftLabel, rightLabel, { name: e.name, sorted: switchSorted || jsonSorted },
-            () => openDiffModal(this.app, base, produced, leftLabel, rightLabel, { name: e.name, sorted: switchSorted || jsonSorted }));
+            () => openDiffModal(this.app, base, produced, leftLabel, rightLabel, { name: e.name, sorted: switchSorted || jsonSorted }), resolve);
         });
       };
+      const toggle = (): void => {
+        if (panel !== null) {
+          this.openEntryDiffs.delete(diffKey);
+          panel.remove();
+          panel = null;
+          diffIcon.removeClass("is-open");
+          return;
+        }
+        this.openEntryDiffs.add(diffKey);
+        open();
+      };
+      // Re-open on a repaint, before any listener fires — see openEntryDiffs.
+      if (this.openEntryDiffs.has(diffKey)) open();
       line.addEventListener("click", (ev) => {
         ev.stopPropagation();
         toggle();
@@ -3159,7 +3322,12 @@ export class SyncCenterView extends ItemView {
         sections: () => [
           {
             header: SHARED_WITH_HEADER,
-            items: [{ title: FILE_SHARING_MENU_UNAVAILABLE_TEXT, icon: "braces", checked: false, action: () => this.host.openSettingsAt(ref) }],
+            items: [
+              { title: PER_KEY_RULES_STATE_TEXT, icon: "braces", checked: false, isLabel: true, action: () => {} },
+              // `settings-2` here and nowhere else in this pair: from the Sync Center this really
+              // does open Settings, which is the one thing that glyph means.
+              { title: PER_KEY_RULES_ACTION_TEXT, icon: "settings-2", checked: false, action: () => this.host.openSettingsAt(ref, "key-rules") },
+            ],
           },
           localSection(),
         ],
@@ -3189,12 +3357,12 @@ export class SyncCenterView extends ItemView {
   // Icon trigger + plain click (the `More` row): unlike renderCardIconMenuRow's family, this
   // row opens Settings directly rather than offering a menu — a sibling helper keeps that
   // distinction honest instead of routing a single-item fake menu through wireMenuTrigger. Lands
-  // on track 2 of the row's four-track grid, the same track every merged control lands on,
-  // tracks 3/4 left empty.
+  // on the last track of the row's four-track grid, the same track every merged control lands on,
+  // so it shares their right-edge rule; tracks 2/3 left empty.
   private renderCardIconActionRow(detail: HTMLElement, label: string, icon: string, isSet: boolean, ariaLabel: string, onActivate: () => void): void {
     const row = this.cardRowShell(label, true);
     const trigger = row.createSpan({
-      cls: `config-sync-sharingicon config-sync-card-trigger config-sync-cardrow-track2${isSet ? " is-set" : ""}`,
+      cls: `config-sync-sharingicon config-sync-card-trigger config-sync-cardrow-ctl${isSet ? " is-set" : ""}`,
       attr: { "aria-label": ariaLabel, role: "button", tabindex: "0" },
     });
     setIcon(trigger, icon);
@@ -3220,7 +3388,7 @@ export class SyncCenterView extends ItemView {
     const tooltip = isFolder ? "Folder rules — opens Settings" : "Per-key rules, locks & folders — opens Settings";
     this.renderCardIconActionRow(detail, "More", "settings-2", false, tooltip, () => {
       const ref = this.itemRefFor(name);
-      if (ref !== null) this.host.openSettingsAt(ref);
+      if (ref !== null) this.host.openSettingsAt(ref, "card");
     });
   }
 
@@ -4012,7 +4180,7 @@ export class SyncCenterView extends ItemView {
     const leftLabel = f.local !== null ? "your store" : "not in your store";
     const rightLabel = f.remote !== null ? remoteName : `not at ${remoteName}`;
     renderDiffPanel(p, left, right, leftLabel, rightLabel, { name: f.itemRel, sorted: switchSorted || jsonSorted },
-      () => openDiffModal(this.app, left, right, leftLabel, rightLabel, { name: f.itemRel, sorted: switchSorted || jsonSorted }));
+      () => openDiffModal(this.app, left, right, leftLabel, rightLabel, { name: f.itemRel, sorted: switchSorted || jsonSorted }), null);
   }
 
   private renderRemoteButtons(detail: HTMLElement, remote: Remote, pullAligned: boolean, noChanges: boolean): void {

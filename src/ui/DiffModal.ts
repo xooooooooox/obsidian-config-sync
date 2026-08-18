@@ -29,7 +29,7 @@ class DiffModal extends Modal {
     this.titleEl.setText(this.meta.name);
     this.modalEl.addClass("config-sync-diffmodal");
     // No expand button here — this IS the bigger window.
-    renderDiffPanel(this.contentEl, this.left, this.right, this.leftLabel, this.rightLabel, this.meta, null);
+    renderDiffPanel(this.contentEl, this.left, this.right, this.leftLabel, this.rightLabel, this.meta, null, null);
   }
 
   onClose(): void {

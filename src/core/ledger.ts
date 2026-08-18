@@ -104,11 +104,22 @@ export function applyUpdates(ledger: Ledger, updates: LedgerUpdates): Ledger {
   return { version: ledger.version, items };
 }
 
-// The keep-set every prune is called with: the refs of the groups this device currently syncs. A
-// group with no ref holds no baseline (see statusForGroups), so it contributes nothing here — and
+// The keep-set every prune is called with: the refs of every group this device COMPILES — the whole
+// manifest, before the device-class filter and before the opt-out list narrow it down to what is
+// actually being compared right now.
+//
+// The distinction is the whole contract. **The prune answers "does this item still exist?", never
+// "is it being compared right now?"** A baseline records when this device last agreed with the
+// store; an item scoped to another device class, or one the user opted this device out of, has not
+// stopped existing — both are reversible choices — and its baseline is exactly what makes the
+// answer correct when the choice is reversed. Passing the narrowed list here deleted those
+// baselines on the next refresh, so opting back in found none and groupStatus fell to
+// `never-synced`: a "capture my newer settings" row came back as "apply the store over me".
+//
+// A group with no ref holds no baseline (see statusForGroups), so it contributes nothing here — and
 // an entry under a ref nothing compiles, including a `legacy/` one the re-key preserved, is what
 // this prune exists to clear: the re-key never deletes, and the prune answers the question it
-// cannot ("is this still synced HERE?").
+// cannot.
 export function baselineRefs(groups: readonly SyncGroup[]): Set<string> {
   return new Set(groups.flatMap((g) => (g.ref === undefined ? [] : [g.ref as string])));
 }

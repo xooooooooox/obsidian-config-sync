@@ -78,17 +78,23 @@ single-row and bulk alike.
 
 | What | Value | Why |
 |---|---|---|
-| Checkbox column | mainbar `padding-right: calc(var(--size-4-3) + 1px)`; sections carry the card inset themselves (nested card unframed); section-head boxes `margin-left: auto` | one shared right edge: select-all = card rows = section rows = section heads (probe-equal, desktop + mobile) |
+| Checkbox column | mainbar `padding-right: calc(var(--size-4-3) + 1px)`; a section's nested card is unframed and bleeds its padding back out (`margin: 0 calc(-1 * var(--size-4-3))`), so its content box still sits on the section's own inset; section-head boxes `margin-left: auto` | one shared right edge: select-all = card rows = section rows = section heads (probe-equal, desktop + mobile) |
 | Header ↻ | `margin-right: 7px` | glyph right edge == checkbox column (probed) |
 | Checkboxes | 15px desktop / 24px mobile (radius 6px), pseudo ✓ offsets differ per platform | Obsidian's mobile checkbox styling defeats hit-area tricks; visual = touch target |
 | Touch targets | 44px rows/switcher/search-adjacent, 36px pills/seg/side items, 32px detail seg buttons | mobile minimums |
 | Mobile bottom clearance | `calc(var(--mobile-toolbar-height, 48px) + 88px)` | clears navbar + user status-bar snippets |
 | Inline micro-gaps | 3px (sidebar column rhythm) · 5px (icon↔label clusters) | between `--size-4-*` steps; 8px gaps use `var(--size-4-2)` |
 | Drawer control glyphs | `var(--icon-s)`, ONE rule covering lock / sharing picker / per-item toggle / File-preview eye / merged control | only the merged control used to carry a size; the rest fell back to Obsidian's 18px default and read a size bigger the moment a 16px glyph landed beside them. The ⇕ keeps 11px through a same-specificity rule placed after it |
-| Card value inset | `.config-sync-cardval { padding-left: var(--size-2-3) }` | matches the trigger boxes' own 6px, so prose and controls in a card share one left edge; the inset lives on the TRACK, not on each trigger, so anything added later aligns by construction |
+| Card control rail | `.config-sync-cardrow > .config-sync-mergedctl, .config-sync-cardrow > .config-sync-cardrow-ctl { grid-column: 4; justify-self: end }` | ONE rule puts every card control on the card's right edge, the same rule the item rows' checkboxes sit on, so a control added later aligns by construction. `.config-sync-cardval` needs no inset of its own: nothing lands on track 2 for it to line up with any more |
+| Card trigger padding | `.config-sync-mergedctl` and `.config-sync-sharingicon.config-sync-card-trigger` both `3px 6px` | the boxes all end on the rail, so a padding difference between them shows up as a difference between their GLYPHS — which is what the eye follows. At 4px vs 6px the More row's icon sat 2px right of the merged controls above it, boxes perfectly aligned the whole time |
 
 **The settings-drawer row grid (scrow).** Every row in an item card's drawer is a
-`.config-sync-scrow`: `identity 170px | controls 1fr | 1px | trailing max-content`. **The controls
+`.config-sync-scrow`: `identity 170px | controls 1fr | 1px | trailing minmax(44px, max-content)`.
+**Track 4 is reserved, not content-sized**: it holds a row's own STATE toggle (a folder's sync
+switch), which only some rows have, and while it was `max-content` a row without one let its rule
+cluster run 44px further right than the row above it — the same glyph in two different columns on
+neighbouring rows. Reserving it gives the drawer two honest columns instead: toggles on the rail,
+rule controls immediately left of it, both card-wide. **The controls
 track is the flexible one and its cluster right-aligns inside it**, so the cluster hugs the
 card-toggle rail: a row with no trailing cell puts its controls on the card's right edge, and a
 folder row's own sync toggle (track 4) takes that edge with the controls immediately left of it.
@@ -96,10 +102,16 @@ One vertical rule down the card, header toggle included. This is what "nothing a
 drawer's right edge" became once the two-layer merge emptied the right half — that rule existed to
 stop an ACTION column being invented, and rule controls lining up with the card's own toggle is not
 that. The
-controls column is a fixed THREE-SLOT grid (`.config-sync-scrow-slots`: aux 24 | lock 24 |
-device 68) — **fixed even though the cluster right-aligns**: without it the lock would drift with
-the width of whatever sits beside it, and the lock column is real alignment worth keeping. A row
-without a control leaves its slot empty. Slot roles: aux = the per-item `list-checks` (array rule
+controls cluster (`.config-sync-scrow-slots`) packs against the right, and two properties hold it
+together — they do NOT trade off against each other. **Role order is pinned in CSS** (`order` on
+`.is-aux` / `.is-lock` / `.is-device`), not left to whichever order a caller happens to fill the
+slots in. **Width is per-role and fixed while occupied** (aux 24 | lock 24 | device 68), so each
+role forms a strict column card-wide. An **empty slot is removed from the flow entirely**
+(`:empty`) rather than holding its width and a column-gap: it used to hold both, so a row missing
+its aux control showed a visible hole and its remaining controls floated left of the rail. Removing
+an empty slot cannot pull an occupied one out of column, because the cluster measures from the
+RIGHT — the device column from the rail, the lock column from the device column — and neither ever
+depended on whether aux happened to be there. Slot roles: aux = the per-item `list-checks` (array rule
 rows) — the path row's own aux slot stays empty, since its File-preview `eye` rides the filename
 line instead (see below); lock = encrypt toggles; device = every scope/rule picker AND the merged
 two-layer control, LAST and widest of the three. **The device slot is sized for the widest thing it
@@ -622,11 +634,21 @@ noted):
   (✓ / ⊘ / ○ — "is there anything to do") and then the four AVAILABILITY folds (`outdated` /
   `disabled` / `not-installed` / `desktop-only`, amber icons — "can this device do it at all"),
   each carrying the explanatory note the equivalent section used to (`AVAILABILITY_FOLD_NOTE`),
-  rendered under the line while open. A row lands in an availability fold only if it is NOT
-  active: an actionable one (a plugin this run would install) stays at the top with the work,
-  wearing its own `not installed here` chip. This restores what `987eacf` dropped when the list
-  moved to type sections — those four groupings, with their copy — without folding away rows that
-  have something to do. Switching into a filter
+  rendered under the line while open. **Which of the two axes files a row is declared once**, in
+  `ui/panelTaxonomy.ts`'s `placeRow`, not spelled inline where the folds are built — a row has a
+  fate AND an availability at all times, so this is a decision with a reason, and the reason has to
+  be somewhere a reader can find it. The rule: anything the next run would act on
+  (`conflict`/`apply`/`capture`/`locked`) stays ACTIVE at the top with the work, wearing its own
+  `not installed here` chip. Of the rest, `insync` and `nosettings` YIELD to the availability fold
+  (`FATE_FOLD_YIELDS_TO_AVAILABILITY`) — both mean "nothing to do", and the availability fold says
+  something strictly more useful about the same nothing. `excluded` **never yields**: it is a
+  decision the user made about this device, not a fact about the machine, and the person who set it
+  comes back searching for the words the `Not synced here` pill used. While availability won
+  outright, such a row was counted by that pill and filed under `N not installed on this device` —
+  a number with nothing behind it. `tests/panelTaxonomy.test.ts` pins the whole (fate × availability)
+  table plus the invariant that a fold-owning pill and its fold describe the same rows. This axis
+  split also restores what `987eacf` dropped when the list moved to type sections — those four
+  groupings, with their copy — without folding away rows that have something to do. Switching into a filter
   pill or a search hit auto-expands every section once, on that transition only, so a
   manual re-collapse during the rest of that filtered/search session still sticks. Group
   headers `config-sync-sect` (uppercase + hairline) — used in the run-report breakdown.
@@ -660,26 +682,35 @@ noted):
   Settings drawer's `config-sync-card-rulerow` carry NO `border-bottom` (a hairline per row
   reads as a table embedded in a borderless panel). Every row
   (`renderCardKeyRow`/`renderMergedRow`/`renderCardIconActionRow`) shares ONE grid,
-  `.config-sync-cardrow { grid-template-columns: 130px 56px 1px 1fr }` —
-  label | control | 1px | value — so every row's control
-  lands on the SAME vertical rule across the card, the More row's icon included. Track 3 carried
+  `.config-sync-cardrow { grid-template-columns: 130px 1fr 1px max-content }` —
+  label | free | 1px | control — the control track LAST and content-sized, so every row's control
+  anchors to the card's RIGHT edge, on the same vertical rule as the item rows' own checkboxes
+  above it, at every viewport width. (An earlier shape pinned the control to a fixed 130px offset
+  instead. Unremarkable on a wide desktop card; dead centre of a 390px phone row.) Track 3 carried
   the two-segment divider until the merge and is now empty; it stays so this grid and the drawer's
   keep the same four-track shape and the `grid-column: 4` anchors keep their number.
-  (The Settings drawer's `.config-sync-scrow` speaks the same grammar with a wider 170px
-  identity column and the three-slot controls column — §1.4.) Wide
-  rows (State/Files/Resolve/After install/Enablement/Note) put
+  (The Settings drawer's `.config-sync-scrow` speaks the same grammar — a wider 170px
+  identity column, the three-slot controls column, the same right-anchored end — §1.4.) Wide
+  rows (State/Resolve/After install/Enablement/Note) put
   their whole value in `.config-sync-cardval`, spanning tracks 2-4 as one cell (`min-width: 0`, no
   fixed narrow width — ellipsis is a last resort, never a first one, while the row still has
   room); icon-only rows (`.is-iconrow` — not `.is-compact`, which already names the
-  narrow-viewport `.config-sync-shell` layout, an unrelated axis) put their one control on
-  track 2 instead. A row that builds no value renders nothing at all: no separator, no
+  narrow-viewport `.config-sync-shell` layout, an unrelated axis) put their one control on the
+  last track instead. A row that builds no value renders nothing at all: no separator, no
   reserved height — built off-DOM first, appended only once non-empty. **Mobile:**
   wide rows stack to full width (label above a full-width value, CSS-only
   `flex-direction: column`), since Resolve's
   segmented control needs the full device width the shared grid's `1fr` remainder can't
-  spare at ~360px; icon rows (merged control/More) stay on the SAME shared grid at every width —
-  there is nothing long to clip, only a glyph + chevron, and stacking them would silently
-  re-introduce the cross-row misalignment the shared grid exists to remove. Standardized
+  spare at ~360px; icon rows (merged control/More/Files) stay on the SAME shared grid at every
+  width — there is nothing long to clip, only a glyph or a badge, and stacking them would silently
+  re-introduce the cross-row misalignment the shared grid exists to remove. A section's nested
+  `.config-sync-card` keeps every other card's horizontal padding and bleeds it back out with an
+  equal negative margin: row content lands exactly where the section's own inset used to put it
+  (one checkbox column, above), while the FILL reaches the section frame, 12px clear of the text on
+  either side. The padding was zeroed instead until 2.25.0, on the reasoning that the section frame
+  already carried the inset — but that inset sat OUTSIDE the fill, so fill and row text shared one
+  edge. Barely visible on a wide desktop card; on a phone the words sit right on the colour and
+  read as spilling out of the block. Standardized
   row set, in this order,
   each omitted when not applicable: `On
   apply` / `On capture` / `State` (the fate sentence expanded to a full clause — install
@@ -689,8 +720,11 @@ noted):
   expanded. It replaced three separate marks — a bare direction icon, a neutral count pill and a
   rotating `chevron-right` — that all answered the same question, and made an 11px chevron the
   thing to aim at; the whole head is the click/keyboard target now, so nothing has to be aimed at,
-  and `aria-expanded` carries the state the chevron used to draw. Expanding reveals the entry list,
-  remembered per row while the pane stays open (`expandedFileRows`, a `Set` keyed by group
+  and `aria-expanded` carries the state the chevron used to draw. One badge is also why this is an
+  icon row: the badge sits on the control rail with every other card control, and the entry list it
+  opens is a SIBLING of the row rather than part of its value cell, so file names get the card's
+  full width on phone and desktop alike instead of the grid's remainder. Expanding reveals the
+  entry list, remembered per row while the pane stays open (`expandedFileRows`, a `Set` keyed by group
   name, cleared with `expandedItems`/`remoteFoldsOpen` when the pane closes); direction-aware
   entries — `+` /
   `~` / `−`, both directions — each ending in ONE 14px `file-diff` icon when
@@ -710,11 +744,29 @@ noted):
   chips stay. **The card has no destructive footer:**
   stopping a whole item's sync happens on its own Settings card, one gesture, one home —
   reached from here only through `More`.
+- **Conflict resolution lives in the diff.** A diff in this plugin is never "how these two files
+  differ": `diffPair`'s `produced` has already been through captureTransform/applyTransform, so what
+  it shows is **what one CHOICE would do**. Direction is not a parameter for viewing a difference;
+  it is the thing being viewed. That makes the control that picks a preview and the control that
+  picks a side the same control, and it lives in the diff toolbar (`DiffResolveControl`,
+  `diffView.ts`) — `Use theirs ↓ | Keep mine ↑`, the active side in its own direction colour.
+  The card keeps its `Resolve` row for someone who already knows which side they want; both
+  entrances route through one `pickConflictSide`, so they are one decision, not two that agree.
+  An unresolved conflict renders its FILES row previewing the `Use theirs` side — it used to render
+  no FILES row at all (the row was gated on a decided direction), which asked the user to choose
+  with nothing on screen to choose from and revealed the files only after they had committed.
+  **Scope is the item, and the UI says so when that matters**: a run writes a whole group
+  (`ApplyItem`/`CaptureItem` carry a group name; `stagedMembers` is switch-list-only), so on a
+  multi-file item a side picked in one file's diff settles its siblings — disclosed in a line under
+  the toolbar, and omitted on a single-file item where the file IS the item. Open inline diffs
+  survive the repaint a pick causes (`openEntryDiffs`, the same idiom `remoteFoldsOpen` uses):
+  closing the evidence the moment someone acts on it is the opposite of what the control is for.
 - **Merged two-layer control** (`config-sync-mergedctl*` classes, `ui/mergedControl.ts` +
   `ui/enablementRow.ts`) — one shape reused by four surfaces: a Sync Center row's
   `Enabled on`/`Settings sync`, a plugin card's `Enabled on`, a carrier card's element rows, and an
-  item card's key rules and path row (Unified card below). It lands on track 2 of the Sync Center's
-  four-track grid (Expanded card above) and in the device slot of the Settings drawer's
+  item card's key rules and path row (Unified card below). It lands on the control track of the
+  Sync Center's four-track grid (Expanded card above) and in the device slot of the Settings
+  drawer's
   `.config-sync-scrow` (§1.4) — one control, so one cell on either surface, and every row's control
   on the same vertical rule. Shared glyph, a faint `·`, this device's glyph, then ONE muted PICKER
   `chevrons-up-down`; NO visible wordmark. Click (or Enter/Space) opens an Obsidian `Menu` whose
@@ -728,10 +780,13 @@ noted):
   glyph's tooltip). The word "Default" is retired: it named nothing the interface ever showed.
   Both glyphs are ALWAYS visible; only the ⇕ picker hint hover-reveals (§2.3 hover-reveal law).
   Where the row has no local layer at all it renders one glyph and a one-section menu (§2.3). The
-  per-key fallback replaces the shared half's LIST with a single entry, `Per-key rules decide —
-  opens Settings` on a dim `braces` glyph, whose click is the same deep link the `More` row
-  takes — one click more than the old bare icon, and in exchange the jump carries a label instead
-  of a tooltip a phone never shows. `After
+  per-key fallback replaces the shared half's LIST with a state line plus an action — `Per-key
+  rules decide this` (`setIsLabel`, unpickable) then `Open the per-key rules` — on a dim `braces`
+  glyph, the action being the same deep link the `More` row takes, only aimed at the rules
+  themselves (`spot: "key-rules"`). One click more than the old bare icon, and in exchange the jump
+  carries a label instead of a tooltip a phone never shows. It was ONE line for a while, sitting
+  where the value stops sit with a checkmark slot of its own: every signal of something you pick,
+  none of the behaviour. `After
   install`/`Enablement` keep their own textual triggers (`config-sync-menuchip
   config-sync-card-trigger` — no glyph vocabulary for them), styled to the same trigger-box
   family so the card reads as one control language regardless of trigger kind. A sharing cell with
@@ -1054,7 +1109,11 @@ noted):
     `data.json` only because `pruneSettingsFile` still needs it for a clean round-trip). The
     control keeps both halves — the local opt-out is a different datum and still works — but its
     shared half has no value to pick, so it contributes ONE menu entry instead of a list of stops:
-    `Per-key rules decide — jump to them`, on the same dim `braces` glyph the trigger shows.
+    two lines — `Per-key rules decide this` (a `setIsLabel` state line, not pickable) then
+    `Open the per-key rules` — on the same dim `braces` glyph the trigger shows. One line carrying
+    both read as a value stop and behaved as a link; and BOTH surfaces now read the same two
+    constants (itemCard.ts), which is what ended one fact being spelled `— opens Settings` in the
+    Sync Center and `— jump to them` in Settings.
     Choosing it scrolls to the rules and flashes `config-sync-search-highlight`, the SAME class the
     search bar's own card jump uses. The jump's TARGET is wherever the rules actually live: the
     `KEY RULES` panel when there is one, else — for a card whose only per-key entries are

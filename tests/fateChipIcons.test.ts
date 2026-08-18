@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { FATE_CHIP_ICON } from "../src/ui/fateChipIcons";
 import { ACTION_ICON } from "../src/ui/actionIcons";
-import { FOLD_ICON, AVAILABILITY_FOLD_ICON } from "../src/ui/foldIcons";
+import { FOLD_ICON, AVAILABILITY_FOLD_ICON, CONFLICT_ICON } from "../src/ui/foldIcons";
 import { buildOptOutLocalMenu, buildLocalMenu, enablementRowModel, fileEnablementRowModel, ruleIcon, ruleLabel, RULE_OPTIONS } from "../src/ui/enablementRow";
 import { Badge, computeBadges } from "../src/ui/itemCard";
 import { Item, ItemDef, ItemSettingsFile } from "../src/core/registry";
@@ -72,6 +72,13 @@ describe("glyph registry — one glyph, one meaning (icon-collision guard)", () 
 
   function foldHomes(): GlyphHome[] {
     return Object.entries(FOLD_ICON).map(([key, glyph]) => ({ glyph, producer: "FOLD_ICON", home: `FOLD_ICON['${key}']` }));
+  }
+
+  // The conflict mark joins the guard the moment it stops being a text glyph: it is the fifth state
+  // in the row's fate column (↑ ↓ ✓ ⊖ ○ ⚠) and the last one to become an icon, so from here on a
+  // future reuse of `triangle-alert` for a different meaning has to collide loudly.
+  function conflictHomes(): GlyphHome[] {
+    return [{ glyph: CONFLICT_ICON, producer: "CONFLICT_ICON", home: "the row's conflict fate — changed on both sides" }];
   }
 
   function ruleHomes(): GlyphHome[] {
@@ -189,7 +196,7 @@ describe("glyph registry — one glyph, one meaning (icon-collision guard)", () 
   }
 
   function allHomes(): GlyphHome[] {
-    return [...fateChipHomes(), ...actionHomes(), ...foldHomes(), ...ruleHomes(), ...localMenuHomes(), ...localSegmentFollowHomes(), ...badgeHomes(), ...availabilityFoldHomes(), ...EXTERNAL_HOMES];
+    return [...fateChipHomes(), ...actionHomes(), ...foldHomes(), ...conflictHomes(), ...ruleHomes(), ...localMenuHomes(), ...localSegmentFollowHomes(), ...badgeHomes(), ...availabilityFoldHomes(), ...EXTERNAL_HOMES];
   }
 
   // Declared, intentional glyph reuse across producers — the ONLY escape hatch this test allows.
