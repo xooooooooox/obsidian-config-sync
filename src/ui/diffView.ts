@@ -1,4 +1,5 @@
 import { Platform, setIcon } from "obsidian";
+import { renderResolveSegment, type ResolveSide } from "./resolveSegment";
 
 // Shared git-style diff renderer (extracted from ConflictModal):
 // unified/split views, LCS line diff with a cap, session-level view preference. Consumed by
@@ -143,12 +144,14 @@ function renderSplit(pane: HTMLElement, rows: DiffRow[], leftLabel: string, righ
 // the card and then look somewhere else got the order backwards: the evidence arrived after the
 // decision.
 export interface DiffResolveControl {
-  chosen: "apply" | "capture" | null;
+  // The item this decides for — the segment carries it so an in-place repaint can find every copy.
+  group: string;
+  chosen: ResolveSide | null;
   // Set only when this file is not the whole story — a folder item or one with companions, where
   // the run writes every file together and picking a side here settles them all. Null on a
   // single-file item, where the file IS the item and there is nothing to disclose.
   scopeNote: string | null;
-  onPick: (choice: "apply" | "capture") => void;
+  onPick: (side: ResolveSide) => void;
 }
 
 export function renderDiffPanel(
@@ -170,19 +173,7 @@ export function renderDiffPanel(
   // Before the view controls: this one changes WHAT you are looking at (and what will happen);
   // those change how it is drawn.
   if (resolve !== null) {
-    const seg = toolbar.createDiv({ cls: "config-sync-cm-resolveseg" });
-    const opt = (choice: "apply" | "capture", label: string, icon: string): void => {
-      const on = resolve.chosen === choice;
-      const b = seg.createEl("button", { cls: `config-sync-cm-resolvebtn is-${choice}${on ? " is-on" : ""}` });
-      setIcon(b.createSpan({ cls: "config-sync-cm-resolveic" }), icon);
-      b.createSpan({ text: label });
-      b.addEventListener("click", (e) => {
-        e.stopPropagation();
-        resolve.onPick(choice);
-      });
-    };
-    opt("apply", "Use theirs", "arrow-down-to-line");
-    opt("capture", "Keep mine", "arrow-up-from-line");
+    renderResolveSegment(toolbar, { group: resolve.group, chosen: resolve.chosen, onPick: resolve.onPick });
   }
   if (onExpand !== null) {
     // Left of the view toggles: this button changes WHERE you read the diff, they change HOW.

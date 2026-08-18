@@ -15,15 +15,22 @@ import type { DiffResolveControl } from "../src/ui/diffView";
 interface ResolveInternals {
   conflictChoice: Map<string, "apply" | "capture">;
   selected: Set<string>;
-  render: (gen: number) => void;
   renderGen: number;
+  repaintResolveSegments: (name: string) => void;
+  refreshItemRow: (name: string) => void;
+  refreshActionBar: () => void;
   pickConflictSide: (name: string, choice: "apply" | "capture") => void;
   conflictResolve: (r: unknown, changes: FileChanges) => DiffResolveControl;
 }
 
+// The three repaints a choice triggers all need a live pane; the decision under test is what runs
+// before them, and it is the part that has to be identical whichever entrance called it. Stubbing
+// them here is the same line the pre-existing tests drew around `render`.
 function viewFor(): ResolveInternals {
   const view = new SyncCenterView({} as never, {} as never) as unknown as ResolveInternals;
-  view.render = () => {}; // the real one needs a live pane; the decision under test runs before it
+  view.repaintResolveSegments = () => {};
+  view.refreshItemRow = () => {};
+  view.refreshActionBar = () => {};
   return view;
 }
 

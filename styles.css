@@ -776,18 +776,6 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 
 .config-sync-expand-note { color: var(--text-muted); font-size: var(--font-ui-smaller); font-style: italic; margin: 0 0 var(--size-4-1) 0; font-family: var(--font-interface); }
 .config-sync-more-files { color: var(--text-muted); cursor: pointer; }
-.config-sync-seg { display: inline-flex; border: 1px solid var(--background-modifier-border); border-radius: 5px; overflow: hidden; margin: 2px 0 var(--size-4-1) 0; font-family: var(--font-interface); }
-
-.config-sync-seg-btn { background: none; border: none; border-radius: 0; box-shadow: none; height: auto; padding: 1px 9px; font-size: var(--font-ui-smaller); color: var(--text-muted); cursor: pointer; }
-
-.config-sync-seg-btn.is-capture { color: var(--color-orange); }
-
-.config-sync-seg-btn.is-apply { color: var(--interactive-accent); }
-
-.config-sync-seg-btn.is-capture.is-on { background: rgba(var(--color-orange-rgb), 0.25); color: var(--color-orange); }
-
-.config-sync-seg-btn.is-apply.is-on { background: rgba(var(--interactive-accent-rgb), 0.25); color: var(--interactive-accent); }
-
 .config-sync-staged-count { color: var(--text-muted); font-size: var(--font-ui-smaller); }
 
 .config-sync-center-head { display: flex; align-items: center; gap: var(--size-4-2); padding-bottom: var(--size-4-2); }
@@ -1037,7 +1025,7 @@ body.is-mobile .config-sync-fpill .config-sync-fpill-short { display: inline; }
 body.is-mobile .config-sync-segrow { flex-wrap: wrap; }
 
 body.is-mobile .config-sync-fpill,
-body.is-mobile .config-sync-seg-btn,
+body.is-mobile .config-sync-resolvebtn,
 body.is-mobile .config-sync-side-item,
 body.is-mobile .config-sync-switcher,
 body.is-mobile .config-sync-unchanged,
@@ -1713,20 +1701,25 @@ button.config-sync-add-row, button.config-sync-add-row:hover { background: none;
 
 .config-sync-cm-difftools { display: flex; align-items: center; gap: var(--size-4-2); padding: var(--size-4-1) var(--size-4-3); border-top: 1px solid var(--background-modifier-border); }
 .config-sync-cm-diffmeta { color: var(--text-faint); font-size: var(--font-ui-smaller); font-family: var(--font-monospace); }
-/* The Resolve choice, living in the diff toolbar (diffView.ts's DiffResolveControl).
-   Same segmented shell as the view toggles beside it — they are neighbours and must read as one
-   family — but it carries WORDS, because unlike unified-vs-split these two options are not
-   guessable from a glyph, and picking one changes what the run does. The active side takes its
-   direction's own colour, the same orange/accent the badges and arrows use, so the choice is
-   legible at a glance without a second vocabulary. */
-.config-sync-cm-resolveseg { display: flex; border: 1px solid var(--background-modifier-border); border-radius: var(--radius-s); overflow: hidden; }
-.config-sync-cm-resolvebtn { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border: none; border-radius: 0; background: transparent; color: var(--text-muted); font-size: var(--font-ui-smaller); cursor: pointer; box-shadow: none; white-space: nowrap; }
-.config-sync-cm-resolvebtn + .config-sync-cm-resolvebtn { border-left: 1px solid var(--background-modifier-border); }
-.config-sync-cm-resolvebtn:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
-.config-sync-cm-resolveic { display: inline-flex; align-items: center; }
-.config-sync-cm-resolveic svg { width: 13px; height: 13px; display: block; }
-.config-sync-cm-resolvebtn.is-apply.is-on { background: rgba(var(--interactive-accent-rgb), 0.16); color: var(--interactive-accent); }
-.config-sync-cm-resolvebtn.is-capture.is-on { background: rgba(var(--color-orange-rgb), 0.16); color: var(--color-orange); }
+/* THE conflict choice control (resolveSegment.ts), one look for both places
+   that offer it: the card's `Resolve` row and the toolbar of every diff that row has open. They
+   were two controls for a while — one spelling its directions as text arrows, the other as icons,
+   with different colours, paddings and fills — which is one decision wearing two faces.
+   Icons, never `↓`/`↑` text: the row's fate column finished migrating off text glyphs this same
+   release, and two characters here would have re-introduced what that swept out. Each side keeps
+   its DIRECTION's colour at rest, not just when picked, so the two are told apart before anything
+   is chosen; picking deepens the same colour rather than introducing another. */
+.config-sync-resolveseg { display: inline-flex; border: 1px solid var(--background-modifier-border); border-radius: var(--radius-s); overflow: hidden; }
+.config-sync-resolvebtn { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border: none; border-radius: 0; background: transparent; font-size: var(--font-ui-smaller); cursor: pointer; box-shadow: none; white-space: nowrap; height: auto; }
+.config-sync-resolvebtn + .config-sync-resolvebtn { border-left: 1px solid var(--background-modifier-border); }
+.config-sync-resolveic { display: inline-flex; align-items: center; }
+.config-sync-resolveic svg { width: 13px; height: 13px; display: block; }
+.config-sync-resolvebtn.is-apply { color: var(--interactive-accent); }
+.config-sync-resolvebtn.is-capture { color: var(--color-orange); }
+.config-sync-resolvebtn.is-apply:hover { background: rgba(var(--interactive-accent-rgb), 0.1); }
+.config-sync-resolvebtn.is-capture:hover { background: rgba(var(--color-orange-rgb), 0.1); }
+.config-sync-resolvebtn.is-apply.is-on { background: rgba(var(--interactive-accent-rgb), 0.25); }
+.config-sync-resolvebtn.is-capture.is-on { background: rgba(var(--color-orange-rgb), 0.25); }
 /* Only rendered for a multi-file item, where picking a side settles files this window is not
    showing. A quiet line under the toolbar rather than a warning box: it is a fact about scope, not
    a problem. */
@@ -1963,21 +1956,18 @@ body.is-mobile .config-sync-switcher {
 
 /* Expanded-item detail: one scale for everything inside (desktop + mobile) — buttons,
    file lines and notes all sit at --font-ui-smaller with a shared indent and rhythm. */
-.config-sync-report-files .config-sync-seg { margin: var(--size-2-1) 0; }
-.config-sync-report-files .config-sync-seg-btn {
-  font-size: var(--font-ui-smaller);
-  padding: 2px 10px;
-}
-/* Resolve's `.config-sync-seg` is this rule's only consumer — mobile
-   spans it the full stacked card-value width, 50/50 split (`flex: 1` per button, centered text),
-   touch padding bumped to ~8px vertical, so neither "Use theirs"/"Keep mine" clips at
-   375px. Desktop's content-sized inline-flex pair is untouched. */
-body.is-mobile .config-sync-report-files .config-sync-seg { display: flex; width: 100%; }
-body.is-mobile .config-sync-report-files .config-sync-seg-btn {
+.config-sync-report-files .config-sync-resolveseg { margin: var(--size-2-1) 0; }
+/* Scoped to the CARD's copy, not the diff toolbar's: mobile spans it the full stacked
+   card-value width, 50/50 split (`flex: 1` per button, centered), touch padding bumped to ~8px
+   vertical, so neither "Use theirs"/"Keep mine" clips at 375px. The toolbar's copy sits in a
+   horizontal control cluster and keeps its content-sized shape on every platform. Desktop's
+   content-sized inline-flex pair is untouched. */
+body.is-mobile .config-sync-report-files > .config-sync-card-fields .config-sync-resolveseg { display: flex; width: 100%; }
+body.is-mobile .config-sync-report-files > .config-sync-card-fields .config-sync-resolvebtn {
   flex: 1;
   min-height: 32px;
   padding: var(--size-4-2) var(--size-4-1);
-  text-align: center;
+  justify-content: center;
 }
 body.is-mobile .config-sync-report-files { font-size: var(--font-ui-small); }
 

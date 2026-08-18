@@ -84,6 +84,7 @@ import {
 import { Fate, FateInput, NOTHING_YET_SENTENCE, rowFate, versionAheadClause } from "./fateModel";
 import { openDiffModal } from "./DiffModal";
 import { renderDiffPanel, type DiffResolveControl } from "./diffView";
+import { paintResolveSegment, renderResolveSegment } from "./resolveSegment";
 import { confirmDeleteLeftovers } from "./ConfirmModal";
 import { LEFTOVER_SECTION_ORDER, LeftoverSection } from "../core/leftover";
 import { EnablementList, isSwitchListGroup, switchListSortedView } from "../core/switchList";
@@ -458,6 +459,12 @@ export class SyncCenterView extends ItemView {
   // load-bearing once Resolve moved INTO the diff toolbar: picking a side re-renders, and closing
   // the evidence the moment someone acts on it is the opposite of what that control is for.
   private openEntryDiffs: Set<string> = new Set();
+  // Panels rescued from a card about to be rebuilt in place, keyed the same way. The rebuilt entry
+  // ADOPTS its old panel and keeps showing it until the fresh read lands, instead of inserting an
+  // empty one and filling it a tick later — the same "build detached, swap when ready" rule
+  // SettingTab's renderCardBodyInto follows, and the difference between "the preview changed" and
+  // "the card blinked". Non-null only for the duration of one refreshItemRow.
+  private adoptedDiffPanels: Map<string, HTMLElement> | null = null;
   // Remote pane fold state: survives repaints (periodic check, notify) the way
   // expandedItems/typeSectionOpen do for the main list — a repaint rebuilds the pane fresh, so
   // without this the on/off line, object-row folds, and open inline diffs would collapse on every
@@ -2566,6 +2573,7 @@ export class SyncCenterView extends ItemView {
       // needed the user's attention rendered FAINTER than the routine work above and below it. The
       // dimming now belongs to the calm reading only (styles.css), and the name says what it tests.
       cls: `config-sync-hub-row${inert ? " is-inert" : ""}${unresolvedConflict ? " is-conflict" : ""}`,
+      attr: { "data-cs-row": group.name },
     });
     const chev = renderFoldChevron(row, expanded, null);
     this.renderRuleName(row, group.name, group.label);
@@ -2640,7 +2648,7 @@ export class SyncCenterView extends ItemView {
       this.renderFateSpacer(row);
     }
 
-    const detail = card.createDiv({ cls: "config-sync-report-files config-sync-itemcard" });
+    const detail = card.createDiv({ cls: "config-sync-report-files config-sync-itemcard", attr: { "data-cs-row": group.name } });
     detail.hidden = !expanded;
     this.renderUnifiedCard(detail, r, fate, input, isConflict);
     row.addEventListener("click", () => {
@@ -2806,6 +2814,7 @@ export class SyncCenterView extends ItemView {
     const name = r.group.name;
     const total = changes.added.length + changes.updated.length + changes.deleted.length;
     return {
+      group: name,
       chosen: this.conflictChoice.get(name) ?? null,
       scopeNote: total > 1 ? `Resolves all ${total} files in ${r.group.label} — this item is written as a whole.` : null,
       onPick: (choice) => this.pickConflictSide(name, choice),
@@ -2814,6 +2823,19 @@ export class SyncCenterView extends ItemView {
 
   // Clicking the already-active side clears it (the same "click the active segment to unstage"
   // idiom renderDirectionToggle uses), so both entrances behave identically.
+  //
+  // Deliberately NOT `render()`. That empties `contentEl` and rebuilds the whole pane — header,
+  // sidebar, every card — which is fine for a filter change and wrong here: this control sits
+  // INSIDE the thing being torn down, on top of a diff the user is reading, and toggling between
+  // the two sides made the card visibly flash. So the update is scoped to what a choice actually
+  // changes, and that list is short enough to write down:
+  //
+  //   1. every rendered copy of this item's segment (the card row, and each open diff's toolbar)
+  //   2. this item's own row and card — the fate icon, the checkbox, the FILES badge, and the
+  //      `State` header that becomes `On apply`/`On capture`
+  //   3. the footer, whose counts and button labels read the selection
+  //
+  // Nothing else on the pane depends on one row's conflict choice, so nothing else is touched.
   private pickConflictSide(name: string, choice: ConflictChoice): void {
     if (this.conflictChoice.get(name) === choice) {
       this.conflictChoice.delete(name);
@@ -2822,7 +2844,59 @@ export class SyncCenterView extends ItemView {
       this.conflictChoice.set(name, choice);
       this.selected.add(name);
     }
-    this.render(this.renderGen);
+    // The row's fate is memoized per group; it has to re-derive against the choice just made.
+    this.rowDerivationCache.delete(name);
+    this.repaintResolveSegments(name);
+    this.refreshItemRow(name);
+    this.refreshActionBar();
+  }
+
+  // Every copy of this item's segment currently on screen — the card row's, and one per open diff
+  // toolbar. Found by data attribute rather than by a registry, so a copy rendered later (a diff
+  // opened after the choice) is not something anyone has to remember to register.
+  private repaintResolveSegments(name: string): void {
+    const chosen = this.conflictChoice.get(name) ?? null;
+    this.contentEl.querySelectorAll(`[data-cs-resolve="${name}"]`).forEach((seg) => paintResolveSegment(seg, chosen));
+  }
+
+  // Rebuilds ONE item's row and card in place, leaving the rest of the pane untouched. The two are
+  // siblings under the same filled card (renderItemRow appends them in that order), so they move as
+  // a pair, back to the same position; `markLastRow` re-runs because the pair may have been last.
+  private refreshItemRow(name: string): void {
+    const row = this.contentEl.querySelector(`.config-sync-hub-row[data-cs-row="${name}"]`);
+    const detail = this.contentEl.querySelector(`.config-sync-itemcard[data-cs-row="${name}"]`);
+    const card = row?.parentElement ?? null;
+    const r = this.rows().find((x) => x.group.name === name);
+    if (row === null || detail === null || card === null || r === undefined) return;
+    const anchor = detail.nextSibling;
+    // Rescue any open diff before the subtree goes: see adoptedDiffPanels.
+    const adopted = new Map<string, HTMLElement>();
+    detail.querySelectorAll(".config-sync-inline-diff[data-cs-diff]").forEach((el) => {
+      const key = el.getAttribute("data-cs-diff");
+      if (key !== null) adopted.set(key, el as HTMLElement);
+    });
+    row.remove();
+    detail.remove();
+    const staging = createDiv();
+    this.adoptedDiffPanels = adopted;
+    try {
+      this.renderItemRow(staging, r);
+    } finally {
+      this.adoptedDiffPanels = null;
+    }
+    while (staging.firstChild !== null) card.insertBefore(staging.firstChild, anchor);
+    this.markLastRow(card);
+  }
+
+  // The footer reads the whole selection, so a choice that stages or unstages a row moves it.
+  // Rebuilt rather than patched: its buttons are ButtonComponents wired to payloads derived from
+  // that same selection, and re-deriving them is what keeps the labels and the run in step.
+  private refreshActionBar(): void {
+    const bar = this.contentEl.querySelector(".config-sync-actionbar");
+    const macro = bar?.parentElement ?? null;
+    if (bar === null || macro === null) return;
+    bar.remove();
+    this.renderActionBar(macro);
   }
 
   // Resolve (conflict rows only): segmented `Use theirs ↓` / `Keep mine ↑`. Clicking
@@ -2833,18 +2907,11 @@ export class SyncCenterView extends ItemView {
     const name = r.group.name;
     this.renderCardKeyRow(detail, "Resolve", (value) => {
       const segrow = value.createDiv({ cls: "config-sync-segrow" });
-      const seg = segrow.createDiv({ cls: "config-sync-seg" });
-      const current = this.conflictChoice.get(name);
-      const opt = (choice: ConflictChoice, label: string): void => {
-        const on = current === choice;
-        const b = seg.createEl("button", { cls: `config-sync-seg-btn is-${choice}${on ? " is-on" : ""}`, text: label });
-        b.addEventListener("click", (e) => {
-          e.stopPropagation();
-          this.pickConflictSide(name, choice);
-        });
-      };
-      opt("apply", "Use theirs ↓");
-      opt("capture", "Keep mine ↑");
+      renderResolveSegment(segrow, {
+        group: name,
+        chosen: this.conflictChoice.get(name) ?? null,
+        onPick: (side) => this.pickConflictSide(name, side),
+      });
     });
   }
 
@@ -3003,11 +3070,14 @@ export class SyncCenterView extends ItemView {
       let panel: HTMLElement | null = null;
       const open = (): void => {
         diffIcon.addClass("is-open");
-        const p = createDiv({ cls: "config-sync-inline-diff" });
+        // Adopted when this card is being rebuilt around an already-open diff: the old panel keeps
+        // its content on screen while the new side is read.
+        const p = this.adoptedDiffPanels?.get(diffKey) ?? createDiv({ cls: "config-sync-inline-diff", attr: { "data-cs-diff": diffKey } });
         panel = p;
         line.insertAdjacentElement("afterend", p);
         void this.host.diffPair(owner.group, owner.rel, dir).then((pair) => {
           if (panel !== p) return;
+          p.empty();
           if (pair === null) {
             p.createDiv({ cls: "config-sync-expand-note", text: "no diff available" });
             return;
