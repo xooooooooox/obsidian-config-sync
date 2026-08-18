@@ -600,6 +600,16 @@ body.is-mobile.config-sync-mobile-statusbar .status-bar {
 .config-sync-side-badge .config-sync-fold-ic,
 .config-sync-pill .config-sync-fold-ic,
 .config-sync-fpill-short .config-sync-fold-ic { margin-right: 2px; vertical-align: -0.12em; }
+/* …and at the SAME SIZE as the action icons beside them: 1em, not the base rule's fixed 12px.
+   The two families used two different units, which happened to agree wherever the container is
+   12px (the header strip, the filter pills) and disagreed in the one place it isn't — the sidebar
+   badge is 10px, so ✓/○ rendered 20% larger than ↑ AND at a heavier stroke (24-viewBox,
+   stroke-width 2, so 12px draws a 1px line where 10px draws 0.83px), which is what made one row's
+   badges read as belonging to two different sets. The fold LINES keep the fixed 12px — that size
+   exists so three glyphs sitting side by side read as optically equal, and it is untouched here. */
+.config-sync-side-badge .config-sync-fold-ic svg,
+.config-sync-pill .config-sync-fold-ic svg,
+.config-sync-fpill-short .config-sync-fold-ic svg { width: 1em; height: 1em; }
 .config-sync-action-icon.is-up { color: var(--color-orange); }
 .config-sync-action-icon.is-down { color: var(--interactive-accent); }
 .config-sync-action-icon.is-push { color: var(--color-pink); }
@@ -895,7 +905,22 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 
 .config-sync-side-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-.config-sync-side-badge { font-size: 10px; border-radius: 8px; padding: 0 5px; flex: none; }
+/* The badges are a COLUMN, so every capsule is the same width. Right-packing already lined up
+   their right edges; their left edges were ragged for two reasons — a one-digit count is ~8px
+   narrower than a two-digit one, and the UI font's digits are proportional, so even two counts of
+   the same length differed (`○42` 36.3 vs `○19` 33.7). tabular-nums fixes the second and makes `ch`
+   exactly one digit wide; the min-width reserves three digits (a single bucket reaching three
+   figures is ordinary on a large vault) plus the icon and the horizontal padding. It stays a
+   MINIMUM: a fourth digit widens that one badge rather than being clipped.
+   Content stays left-packed, so the icons line up as their own column and a short count leaves
+   trailing space — the numbers themselves do not align, which is the accepted trade.
+   The badge's own `display` is deliberately left alone: it is already a flex ITEM, and the fold/
+   action icons above align by inline `vertical-align`, which a flex container would ignore. */
+.config-sync-side-badge {
+  font-size: 10px; border-radius: 8px; padding: 0 5px; flex: none;
+  font-variant-numeric: tabular-nums;
+  min-width: calc(1em + 3ch + 12px);
+}
 
 .config-sync-side-badge.is-up { background: rgba(var(--color-orange-rgb), 0.15); color: var(--color-orange); }
 

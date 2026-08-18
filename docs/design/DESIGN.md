@@ -335,7 +335,11 @@ encrypted · `check` your choice · trailing-fold states
 (`config-sync-fold-ic`, `FOLD_ICON` in `foldIcons.ts`): `check`/green in sync ·
 `circle-minus`/muted not synced on this device · `circle`/muted no settings yet — the SAME three
 (same producer, `config-sync-fate-ic` sizing) also render a collapsed item row's own neutral fate
-(§2.1 above).
+(§2.1 above). SIZE: the fold LINES keep the fixed 12px (three glyphs side by side must read as
+optically equal); inside a count BADGE the same glyphs switch to `1em`, matching the action icons
+they sit beside. The two families used to disagree on the unit, which went unnoticed everywhere
+the container is 12px and showed up in the sidebar, whose badge is 10px — `✓`/`○` drew 20% larger
+than `↑`, at a heavier stroke, in the same row.
 
 **`ban` is unused** — the whole-item destructive gesture lives on the item's own Settings
 card, beside its sync toggle, and is reached from the Sync Center only through the `More`
@@ -502,7 +506,14 @@ noted):
   three different pools until 2026-08-18, which is how `↑16` sat above `To capture 14` above a bar
   saying `↑19` on one screen.
 - **Sidebar** `config-sync-side-item/-side-badge` — sections with tiny count
-  badges; active = accent tint. The Config Sync self layer leads as a distinct hero card
+  badges; active = accent tint. The badges are a COLUMN, not a right-packed run: every capsule
+  carries `min-width: calc(1em + 3ch + 12px)` (icon + three digits + padding) and
+  `font-variant-numeric: tabular-nums`, so one-digit and two-digit counts occupy the same width
+  and each column's edges line up down the list. Content stays left-packed — the icons form their
+  own column and a short count leaves trailing space; the DIGITS deliberately do not align, which
+  is the accepted trade for not reserving a fixed slot per state (that would cost 120–200px of
+  permanently reserved sidebar width and squeeze the names first). Alignment here is geometric,
+  not semantic: a row whose only badge is `↑` sits in the column another row fills with `○`. The Config Sync self layer leads as a distinct hero card
   `config-sync-side-self` (`-side-self-ic` icon tile, `-side-self-title`/`-side-self-sub`,
   `-side-self-pill` reusing `selfStatePill`), echoing the header self-chip. Grouping is by
   `config-sync-side-divider` hairlines alone: self card / scope list / remote rows /
