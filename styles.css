@@ -578,11 +578,15 @@ body.is-mobile.config-sync-mobile-statusbar .status-bar {
 .config-sync-side-badge .config-sync-action-icon,
 .config-sync-pill .config-sync-action-icon,
 .config-sync-fpill-short .config-sync-action-icon { margin-right: 2px; }
-/* The ok/excluded/none filter pills' short (mobile/compact) form reuses
-   .config-sync-fold-ic (foldIcons.ts's renderFoldCount) instead of a text glyph — same inline
-   vertical-align/spacing treatment .config-sync-fpill-short already gives .config-sync-action-icon
-   above, so both icon families sit on the same baseline in this row. The base .config-sync-fold-ic
-   rule (used by the trailing-fold lines, already flex-aligned there) is untouched. */
+/* Every count badge that wears a fate glyph reuses .config-sync-fold-ic
+   (foldIcons.ts's renderFoldCount) instead of a text glyph — the header strip, the sidebar's
+   per-section badges, the compact switcher and the short filter pills, so ONE state never wears two
+   marks depending on which surface you looked at. Same inline vertical-align/spacing treatment
+   these containers already give .config-sync-action-icon above, so both icon families sit on the
+   same baseline. The base .config-sync-fold-ic rule (the trailing-fold lines, already flex-aligned
+   there) is untouched. */
+.config-sync-side-badge .config-sync-fold-ic,
+.config-sync-pill .config-sync-fold-ic,
 .config-sync-fpill-short .config-sync-fold-ic { margin-right: 2px; vertical-align: -0.12em; }
 .config-sync-action-icon.is-up { color: var(--color-orange); }
 .config-sync-action-icon.is-down { color: var(--interactive-accent); }
@@ -1218,9 +1222,14 @@ body.is-mobile .config-sync-cardrow:not(.is-iconrow) > .config-sync-explabel-inl
    blank click flip a stored rule. This modifier content-sizes the box instead; the
    Settings-drawer usage never carries it, so that control is untouched. Text triggers keep their
    border (no glyph to lean on) but share the icon's padding/hover surface so a row reads as one
-   family regardless of trigger kind. */
+   family regardless of trigger kind.
+   The 6px horizontal padding is shared with `.config-sync-mergedctl` on purpose, and it has to be
+   the SAME number: both boxes end on the card's control rail, so a difference between them shows up
+   as a difference between their GLYPHS, which is what the eye actually follows. At 4px vs 6px the
+   More row's icon sat 2px right of the merged controls above it — the boxes were aligned the whole
+   time. */
 .config-sync-card-trigger { border-radius: var(--radius-s); }
-.config-sync-sharingicon.config-sync-card-trigger { display: inline-flex; align-items: center; justify-content: center; width: fit-content; padding: 3px 4px; }
+.config-sync-sharingicon.config-sync-card-trigger { display: inline-flex; align-items: center; justify-content: center; width: fit-content; padding: 3px 6px; }
 .config-sync-sharingicon.config-sync-card-trigger:hover, .config-sync-sharingicon.config-sync-card-trigger:focus-visible { background: var(--background-modifier-hover); }
 .config-sync-menuchip.config-sync-card-trigger { padding: 3px 8px; }
 /* The merged enablement control: both layers in ONE trigger — shared glyph, this device's glyph,
@@ -1414,22 +1423,36 @@ body.is-mobile .config-sync-tworow-chev { display: none; }
    emptied the right half: the rule existed to stop an ACTION column from being invented, and rule
    controls lining up with the card's own toggle is not that.
    Role order inside the cluster is unchanged: aux → lock → device (picker or merged control). */
-.config-sync-scrow { display: grid; grid-template-columns: 170px 1fr 1px max-content; align-items: center; column-gap: var(--size-4-2); padding: var(--size-4-1) 0; font-size: var(--font-ui-smaller); }
-/* The controls column as a fixed three-slot grid (DESIGN.md §1.4 SLOTS): aux (an array
-   rule row's per-item icon — the path row's own aux slot stays empty, its eye rides the
-   filename line instead) | lock | device picker — same-type controls one strict column each,
-   device LAST; a row without a control leaves the slot empty. The grid stays FIXED even though the
-   cluster right-aligns: right-aligning the controls without it would let the lock drift left or
-   right with the width of whatever sits beside it, and the lock column is real alignment worth
-   keeping.
-   The device slot is sized for the WIDEST thing it holds — the merged control (two glyphs +
-   separator + ⇕) — not for a lone sharing picker, and its content right-aligns. Centering a
-   variable-width control in a fixed slot is what put a one-glyph `Not shared` row ~12px right of
-   the two-glyph rows above it: equal centers, unequal edges. Right edges are what the eye follows
-   here, because that is where the rail is. */
-.config-sync-scrow-slots { display: grid; grid-template-columns: 24px 24px 68px; align-items: center; column-gap: var(--size-4-2); justify-self: end; }
-.config-sync-scrow-slot { display: flex; align-items: center; justify-content: center; min-width: 0; }
-.config-sync-scrow-slot:last-child { justify-content: flex-end; }
+/* Track 4 is RESERVED, not max-content. It holds a row's own STATE toggle (a folder's sync
+   switch), which only some rows have — and while it was content-sized, a row without one let its
+   rule cluster run 44px further right than the row above it. Two neighbouring rows put the same
+   glyph in two different columns, which is what "the columns don't line up" was. Reserving the
+   toggle's width on every row gives the drawer two honest columns instead: toggles on the rail,
+   rule controls immediately left of it, both card-wide. `minmax` rather than a flat 44px so a
+   wider trailing cell can still grow. */
+.config-sync-scrow { display: grid; grid-template-columns: 170px 1fr 1px minmax(44px, max-content); align-items: center; column-gap: var(--size-4-2); padding: var(--size-4-1) 0; font-size: var(--font-ui-smaller); }
+/* The controls cluster (DESIGN.md §1.4 SLOTS): aux (an array rule row's per-item
+   icon — the path row's own aux slot stays empty, its eye rides the filename line instead) | lock |
+   device picker, packed against the right.
+   Two rules, and they do NOT trade off against each other:
+   ROLE ORDER is pinned in CSS (`order` below), not left to the order a caller happens to fill the
+   slots in — so aux is always left of lock is always left of device, whoever built them.
+   WIDTH is per-role and fixed WHILE OCCUPIED, so each role forms a strict column card-wide (the
+   device slot sized for the widest thing it holds — the merged control: two glyphs + separator +
+   ⇕ — never for a lone sharing picker, its content right-aligned, because centering a
+   variable-width control in a fixed slot equalizes centers and staggers edges).
+   An EMPTY slot is removed from the flow entirely (`:empty`), rather than holding its width and a
+   column-gap. It used to hold both, so a row missing its aux control showed a visible hole and its
+   remaining controls floated left of the rail. Removing an empty slot cannot move an occupied one
+   out of column, because the cluster packs from the RIGHT: the device column is measured from the
+   rail, the lock column from the device column, and neither has ever depended on whether aux
+   happened to be there. */
+.config-sync-scrow-slots { display: flex; align-items: center; justify-content: flex-end; column-gap: var(--size-4-2); justify-self: end; }
+.config-sync-scrow-slot { display: flex; align-items: center; justify-content: center; flex: none; min-width: 0; }
+.config-sync-scrow-slot:empty { display: none; }
+.config-sync-scrow-slot.is-aux { order: 1; min-width: 24px; }
+.config-sync-scrow-slot.is-lock { order: 2; min-width: 24px; }
+.config-sync-scrow-slot.is-device { order: 3; min-width: 68px; justify-content: flex-end; }
 /* STATE controls right-anchor on the card-toggle rail: a folder row's sync toggle
    lands in this track-4 cell, right edge shared with the card header's own toggle; RULE
    controls (pickers/locks) stay left-anchored in the slot columns. */

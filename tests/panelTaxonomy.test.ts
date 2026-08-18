@@ -1,0 +1,140 @@
+import { describe, expect, it } from "vitest";
+import {
+  placeRow,
+  pillCounts,
+  PILL_FATE_FOLD,
+  FATE_PILL_FOLD,
+  FATE_FOLD_ORDER,
+  AVAILABILITY_FOLD_ORDER,
+  FATE_FOLD_YIELDS_TO_AVAILABILITY,
+  type FateFold,
+} from "../src/ui/panelTaxonomy";
+import { partitionSection, type PanelFilter, type RowBucket, type SectionKind } from "../src/ui/panelModel";
+import { AVAILABILITY_FOLD_TEXT, type AvailabilityFoldKind } from "../src/ui/foldIcons";
+
+// The panel's containment rules, pinned. Three surfaces have to agree about where a row lives —
+// the filter pill that COUNTS it, the section that HOLDS it, the fold that FILES it — and until
+// 2.25.0 nothing forced them to. They drifted: a row the user had opted this device out of was
+// counted by `Not synced here` and filed under `N not installed on this device`, so clicking the
+// pill's number led to a list with nothing in it saying those words. These tests are the mechanism
+// that stops the three from drifting again, so they assert the WHOLE table, not the one case.
+
+const BUCKETS: RowBucket[] = ["conflict", "apply", "capture", "locked", "ok", "excluded", "none"];
+const AVAILABILITIES: SectionKind[] = ["main", "outdated", "disabled", "not-installed", "desktop-only"];
+
+describe("placeRow — the full (fate × availability) table", () => {
+  it("is total: every combination has exactly one home", () => {
+    for (const bucket of BUCKETS) {
+      for (const availability of AVAILABILITIES) {
+        const at = placeRow(bucket, availability);
+        expect(at.zone, `${bucket} × ${availability}`).toMatch(/^(active|fate|availability)$/);
+        if (at.zone === "fate") expect(FATE_FOLD_ORDER).toContain(at.fold);
+        if (at.zone === "availability") expect(AVAILABILITY_FOLD_ORDER).toContain(at.fold);
+      }
+    }
+  });
+
+  // Work stays where the work is: a plugin this run would install belongs at the top of its
+  // section wearing its `not installed here` chip, never folded away behind the very fact that
+  // makes it interesting.
+  it("keeps every actionable bucket active, whatever this device can or can't do", () => {
+    for (const bucket of ["conflict", "apply", "capture", "locked"] as const) {
+      for (const availability of AVAILABILITIES) {
+        expect(placeRow(bucket, availability), `${bucket} × ${availability}`).toEqual({ zone: "active" });
+      }
+    }
+  });
+
+  it("files an available non-active row by its own fate", () => {
+    expect(placeRow("ok", "main")).toEqual({ zone: "fate", fold: "insync" });
+    expect(placeRow("excluded", "main")).toEqual({ zone: "fate", fold: "excluded" });
+    expect(placeRow("none", "main")).toEqual({ zone: "fate", fold: "nosettings" });
+  });
+
+  // "Nothing to do" yields to the fold that explains WHY there is nothing to do — that is what the
+  // availability folds are for, notes and all.
+  it("hands in-sync and no-settings rows to the availability fold when this device can't act", () => {
+    for (const availability of AVAILABILITY_FOLD_ORDER) {
+      expect(placeRow("ok", availability)).toEqual({ zone: "availability", fold: availability });
+      expect(placeRow("none", availability)).toEqual({ zone: "availability", fold: availability });
+    }
+  });
+
+  // THE REGRESSION. `excluded` is the user's own decision about this device, not a fact about the
+  // machine, and the person looking for it searches with the words the pill used.
+  it("never lets availability swallow a row the user opted this device out of", () => {
+    for (const availability of AVAILABILITY_FOLD_ORDER) {
+      expect(placeRow("excluded", availability), `excluded × ${availability}`).toEqual({
+        zone: "fate",
+        fold: "excluded",
+      });
+    }
+  });
+
+  it("derives its fate half from partitionSection, never a second copy of the bucket vocabulary", () => {
+    for (const bucket of BUCKETS) {
+      const at = placeRow(bucket, "main");
+      const expected = partitionSection(bucket);
+      expect(at.zone === "active" ? "active" : at.zone === "fate" ? at.fold : null).toBe(expected);
+    }
+  });
+});
+
+// The property that actually broke: a fold-owning pill's number and the fold that speaks its words
+// must describe the SAME rows. Stated over the whole table rather than over one example, so a
+// future change to FATE_FOLD_YIELDS_TO_AVAILABILITY has to come here and say so out loud.
+describe("pill ⇄ fold agreement", () => {
+  const foldPills = Object.entries(PILL_FATE_FOLD) as [PanelFilter, FateFold][];
+
+  it("gives every fold-owning pill a fold whose rows it counts", () => {
+    for (const [pill, fold] of foldPills) {
+      for (const availability of AVAILABILITIES) {
+        const bucket = BUCKETS.find((b) => pillCounts(b, pill) && partitionSection(b) === fold);
+        expect(bucket, `no bucket for pill ${pill}`).toBeDefined();
+        if (bucket === undefined) continue;
+        const at = placeRow(bucket, availability);
+        // Either the pill's own fold holds it, or the taxonomy declared this fold yields — there is
+        // no third outcome, and no silent one.
+        if (at.zone === "fate") expect(at.fold).toBe(fold);
+        else expect(FATE_FOLD_YIELDS_TO_AVAILABILITY[fold], `${pill} × ${availability} vanished`).toBe(true);
+      }
+    }
+  });
+
+  // A yielding fold is only acceptable because the fold it yields TO names the row in words of its
+  // own. A fold with no text would be a hole.
+  it("only yields to availability folds that have their own label", () => {
+    for (const fold of FATE_FOLD_ORDER) {
+      if (!FATE_FOLD_YIELDS_TO_AVAILABILITY[fold]) continue;
+      for (const availability of AVAILABILITY_FOLD_ORDER) {
+        expect(AVAILABILITY_FOLD_TEXT[availability](1).length).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("counts a Not-synced-here row under exactly one pill", () => {
+    const pills: PanelFilter[] = ["capture", "apply", "ok", "excluded", "none"];
+    expect(pills.filter((p) => pillCounts("excluded", p))).toEqual(["excluded"]);
+  });
+});
+
+describe("FATE_PILL_FOLD — one glyph per state across every surface", () => {
+  // The header strip, the sidebar badges, the compact switcher, the fold lines and the card all
+  // resolve their mark through this map; hand-written `✓`/`⊘`/`○` text is what let them disagree.
+  it("maps each fate pill to the fold whose icon it must wear", () => {
+    expect(FATE_PILL_FOLD).toEqual({ ok: "insync", excluded: "excluded", none: "nosettings" });
+  });
+
+  it("agrees with partitionSection, so the badge and the fold can never name different states", () => {
+    for (const bucket of ["ok", "excluded", "none"] as const) {
+      expect(FATE_PILL_FOLD[bucket]).toBe(partitionSection(bucket));
+    }
+  });
+});
+
+describe("fold render order", () => {
+  it("puts fate before availability — what happens, then why it can't", () => {
+    expect(FATE_FOLD_ORDER).toEqual(["insync", "excluded", "nosettings"]);
+    expect(AVAILABILITY_FOLD_ORDER).toEqual(["outdated", "disabled", "not-installed", "desktop-only"] as AvailabilityFoldKind[]);
+  });
+});

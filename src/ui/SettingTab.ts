@@ -1,4 +1,5 @@
 import { refItemId } from "../core/itemKeys";
+import { SettingsDeepLink } from "./settingsDeepLink";
 import { App, ButtonComponent, ExtraButtonComponent, Menu, Notice, Platform, Plugin, PluginSettingTab, Scope, SearchComponent, SecretComponent, Setting, setIcon, setTooltip, TextComponent, ToggleComponent } from "obsidian";
 import {
   QualifierAutocomplete,
@@ -220,7 +221,7 @@ export interface SettingsHost extends Plugin {
   // The Sync Center More bridge's pending target (main.ts's openSettingsAt), read-and-cleared:
   // null on a normal Settings open, else the item ref whose card render() should expand and
   // scroll to once, this open only.
-  consumePendingSettingsAnchor(): ItemRef | null;
+  consumePendingSettingsAnchor(): SettingsDeepLink | null;
   // Basenames (no extension) of .css files actually present under the vault's snippets/ folder —
   // feeds the Appearance card's snippets companion member rows (spec §4/§5).
   listSnippetFiles(): Promise<string[]>;
@@ -677,8 +678,9 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   // place the config exists. Returned anchorId feeds highlightAnchor once display()'s render
   // settles — the caller never scrolls itself.
   private consumeSettingsAnchor(): string | null {
-    const ref = this.host.consumePendingSettingsAnchor();
-    if (ref === null) return null;
+    const link = this.host.consumePendingSettingsAnchor();
+    if (link === null) return null;
+    const { ref, spot } = link;
     const parsed = parseItemRef(ref);
     if (parsed === null) return null;
     // defForRef, never `d.section === parsed.section`: a BRAT-managed
@@ -689,6 +691,13 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     if (def !== undefined) {
       this.activeTab = SECTION_TAB[def.section];
       this.expanded.add(cardExpandKey(ref));
+      // `key-rules` lands on the rules themselves, so it hands off to landPendingKeyRulesJump and
+      // returns NO card anchor: flashing the whole card first and the rules a moment later would
+      // read as two different answers to one click. Card-level jumps (More) keep the card flash.
+      if (spot === "key-rules") {
+        this.pendingKeyRulesJump = def.id;
+        return null;
+      }
       return itemAnchorId(ref);
     }
     this.activeTab = "advanced";
@@ -1129,17 +1138,21 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     });
   }
 
-  // The scrow controls column as a fixed three-slot grid (DESIGN §1.4 SLOTS): aux (the
-  // path row's eye / an array rule row's per-item icon) | lock | device picker — same-type
-  // controls land in the same slot on every row, so each forms a strict column card-wide; a
-  // row without a control leaves its slot empty. Device is LAST, beside the divider/THIS
-  // DEVICE column.
+  // The scrow controls cluster (DESIGN §1.4 SLOTS): aux (the path row's eye / an array
+  // rule row's per-item icon) | lock | device picker — same-type controls land in the same slot on
+  // every row, so each forms a strict column card-wide.
+  //
+  // Each slot carries its ROLE as a class, and the role decides both its order and its width in CSS
+  // rather than here: a slot left unfilled is removed from the flow by `:empty`, so it no longer
+  // holds a column-gap open beside controls that are actually there. Building all three
+  // unconditionally is what makes that work — a slot filled later by a rebuilt row starts matching
+  // `:empty` or stops matching it on its own, with no bookkeeping on this side.
   private scrowSlots(row: HTMLElement): { aux: HTMLElement; lock: HTMLElement; device: HTMLElement } {
     const slots = row.createDiv({ cls: "config-sync-scrow-slots" });
     return {
-      aux: slots.createDiv({ cls: "config-sync-scrow-slot" }),
-      lock: slots.createDiv({ cls: "config-sync-scrow-slot" }),
-      device: slots.createDiv({ cls: "config-sync-scrow-slot" }),
+      aux: slots.createDiv({ cls: "config-sync-scrow-slot is-aux" }),
+      lock: slots.createDiv({ cls: "config-sync-scrow-slot is-lock" }),
+      device: slots.createDiv({ cls: "config-sync-scrow-slot is-device" }),
     };
   }
 
@@ -1573,29 +1586,6 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       // all — neither cell — and never mutates it either: per-key rules are the only truth here,
       // and the row says so instead of drawing a stale one.
       // lockCell stays empty — there is no fileRule.encrypted left to speak for.
-      const jumpToKeyRules = (): void => {
-        // "Jump to the per-key rules" means WHEREVER they live, which is not always the `Key rules`
-        // panel. A card whose only per-key entries are enablement-list keys renders no such panel:
-        // buildRuleRows filters those keys out (their rows already exist elsewhere), yet deriveMode
-        // still counts them, so the cell correctly says per-key rules decide. Appearance is the one
-        // item where that is the WHOLE set — its single rule is `enabledCssSnippets`, whose rows
-        // live under `Folders → snippets`. Follow the declared link (`presetCompanions[].mapKey`)
-        // to that row rather than adding a second hardcoded branch for it.
-        const target =
-          wrap.querySelector(".config-sync-card-fields") ??
-          enablementRuleKeysOf(def, item)
-            .map((k) => wrap.querySelector(`[data-cs-mapkey="${k}"]`))
-            .find((el) => el !== null) ??
-          null;
-        // Still null while the async file read is in flight (renderCardBodyInto has not built the
-        // body yet) — silent no-op, the next click after it lands works.
-        if (target === null) return;
-        target.scrollIntoView({ block: "center" });
-        // Same visual language highlightAnchor uses for a card-level jump — this one stays
-        // inside the current card, so it scopes its lookup to `wrap` instead of the whole panel.
-        target.addClass("config-sync-search-highlight");
-        window.setTimeout(() => target.removeClass("config-sync-search-highlight"), 1800);
-      };
       // One control here too, even though its two halves do different KINDS of thing: the shared
       // half has no value to pick (per-key rules decide), so it contributes a single menu entry
       // that JUMPS instead of a list of stops. That costs the jump one extra click and buys the
@@ -1610,7 +1600,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         local: optOutLocalSegment(optedOut),
         localIsException: optedOut,
         sections: () => [
-          { header: SHARED_WITH_HEADER, items: [{ title: PER_KEY_RULES_JUMP_TEXT, icon: "braces", checked: false, action: jumpToKeyRules }] },
+          { header: SHARED_WITH_HEADER, items: [{ title: PER_KEY_RULES_JUMP_TEXT, icon: "braces", checked: false, action: () => this.jumpToKeyRules(wrap, def, item) }] },
           localSection(),
         ],
       });
@@ -1757,6 +1747,49 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   // combination reads once and renders rule rows + the preview disclosure off-DOM before swapping
   // into `host` in one shot, so refreshCardBody never flashes an empty body while the read is in
   // flight.
+  // "Jump to the per-key rules" means WHEREVER they live, which is not always the `Key rules`
+  // panel. A card whose only per-key entries are enablement-list keys renders no such panel:
+  // buildRuleRows filters those keys out (their rows already exist elsewhere), yet deriveMode still
+  // counts them, so the cell correctly says per-key rules decide. Appearance is the one item where
+  // that is the WHOLE set — its single rule is `enabledCssSnippets`, whose rows live under
+  // `Folders → snippets`. Follow the declared link (`presetCompanions[].mapKey`) to that row rather
+  // than adding a second hardcoded branch for it.
+  //
+  // A method rather than a closure inside the rule row, because BOTH entrances to this jump have to
+  // land in the same place: the row's own menu here, and the Sync Center card's identically-worded
+  // `Per-key rules decide` (which arrives through the settings deep link, spot `key-rules`). While
+  // this lived in the row, the Sync Center's copy had nothing to call and settled for highlighting
+  // the whole card instead — same words, two different landings.
+  private jumpToKeyRules(wrap: HTMLElement, def: ItemDef, item: Item): void {
+    const target =
+      wrap.querySelector(".config-sync-card-fields") ??
+      enablementRuleKeysOf(def, item)
+        .map((k) => wrap.querySelector(`[data-cs-mapkey="${k}"]`))
+        .find((el) => el !== null) ??
+      null;
+    // Still null while the async file read is in flight (renderCardBodyInto has not built the body
+    // yet) — silent no-op, the next click after it lands works. The deep-link path never sees this:
+    // it fires FROM the body-built hook below.
+    if (target === null) return;
+    target.scrollIntoView({ block: "center" });
+    // Same visual language highlightAnchor uses for a card-level jump — this one stays inside the
+    // current card, so it scopes its lookup to `wrap` instead of the whole panel.
+    target.addClass("config-sync-search-highlight");
+    window.setTimeout(() => target.removeClass("config-sync-search-highlight"), 1800);
+  }
+
+  // Set by consumeSettingsAnchor when the deep link asked for spot `key-rules`; consumed by the
+  // first card body that finishes building for that item. The wait is the point — the key-rules
+  // rows only exist once the async file read lands, so a jump attempted at display() time would
+  // find nothing and silently do nothing.
+  private pendingKeyRulesJump: string | null = null;
+
+  private landPendingKeyRulesJump(def: ItemDef, item: Item, wrap: HTMLElement): void {
+    if (this.pendingKeyRulesJump !== def.id) return;
+    this.pendingKeyRulesJump = null;
+    this.jumpToKeyRules(wrap, def, item);
+  }
+
   private renderCardBodyInto(host: HTMLElement, def: ItemDef, item: Item, wrap: HTMLElement): void {
     const open = this.previewOpen.has(def.id);
     // Per-host generation token: rapid successive writes (scope-icon cycling) fire overlapping
@@ -1773,6 +1806,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     if (!hasKeyRules(item) && !open) {
       host.empty();
       build(host, {}, "missing");
+      this.landPendingKeyRulesJump(def, item, wrap);
       return;
     }
     void (async () => {
@@ -1792,6 +1826,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         const pre = host.querySelector(".config-sync-json-pre");
         if (pre !== null) pre.scrollTop = prevScroll;
       }
+      this.landPendingKeyRulesJump(def, item, wrap);
     })();
   }
 

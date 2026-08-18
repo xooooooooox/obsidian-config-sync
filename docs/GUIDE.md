@@ -67,12 +67,60 @@ Open the **Sync Center** any time for the full picture; its header is its own st
 - Every synced thing — a plugin, an Obsidian option group, a folder — is **one row**. A row's companions (Appearance's `themes`/`snippets` presets, or any item's own `+ Add folder` companions) dissolve into that same row rather than getting rows of their own, so ticking or expanding the parent covers them too.
 - Rows sort into four fixed sections — **Obsidian**, **Core plugins**, **Community plugins** (beta plugins included, the Config Sync self row pinned first, reading `your Sync Center — manages itself`) and **Your folders** — alphabetical within each. Click a section header to collapse/expand it (remembered while the pane stays open); its trailing count reads `N`, or `N/M` once a filter or search narrows it.
 - Each row reads **name · … · chips · direction icon · checkbox** — the chips sit on the row's right, just before the direction icon, as quiet icons whose hover text says the fact in full (`not installed here`, `desktop only`, `stays off`, `off here — your rule` / `on here — your rule`, `encrypted`). A chip appears only when a fact deviates from the default. A directional row's icon (orange ↑ capture / accent-colored ↓ apply) carries the row's **fate sentence** as its hover text; `— In sync` / `— No settings yet` / `⚠ Changed on both sides` rows keep the sentence inline (a conflict must shout). The **fate sentence** is the row's plain-language verdict on what the next run would do to it: `↓ Installs · turns on · applies settings`, `↓ Updates · applies settings`, `↑ Captures settings`, `↓ Applies theme & snippets — live` (Appearance), `↓ Applies N files` (a folder). Identical rows read `— In sync`; a row with nothing saved anywhere yet reads `— No settings yet`; one that changed on both sides since your last sync reads `⚠ Changed on both sides` and stays unstageable until you resolve it (below).
-- In-sync, excluded, and no-settings rows sit dimmed with the checkbox hidden, folded behind a trailing line per section, in this order: `N items in sync`, `N items not synced on this device`, `N items with no settings yet` — each led by its own small state icon and a fold arrow; click to expand in place.
-- After those come the **availability folds**, in amber: `N outdated on this device`, `N disabled on this device`, `N not installed on this device`, `N desktop-only`. They answer a different question from the three above — not "is there anything to do", but "can this device do it at all" — and each one explains what applying would mean for the rows inside it. A plugin this run would actually install stays up top with the rest of the work, wearing a `not installed here` chip; the folds gather the ones there's nothing to do about.
+- In-sync, not-synced-here and no-settings rows sit dimmed with the checkbox hidden, folded behind a trailing line per section, then the amber **availability folds** after those — every state, its mark and its words are in [The states, in one place](#the-states-in-one-place) below.
 - The checkbox means one thing everywhere: include this row in the next run. It never changes what would happen, only whether it happens — so a section's own select-all is always safe, and it skips the self row, in-sync/excluded/no-settings rows and any unresolved conflict.
 - The filter pills — **All**, **To capture**, **To apply**, **In sync**, **Not synced here**, **No settings yet** — narrow every section by the same fate; they hide rows, they never move them between sections. **Not synced here** (and its matching fold/badges) only appears once at least one item is excluded — an empty bucket shows nothing, same as **In sync**/**No settings yet**. An amber **Leftover** pill appears the same conditional way, only while the store holds files nothing syncs any more; it shows the Leftover section alone (see [Leftovers](#leftovers)).
 - A rule that keeps an item off this device's class (e.g. Hotkeys set to `Desktop only` while you're on a phone) reads `— Not synced on this device` with a `your rule` chip, instead of a misleading `In sync` — and counts under **Not synced here**, not **In sync**. An item you opted THIS device out of (below) reads the identical row and counts the same way — the card's **State** clause is what tells the two causes apart.
 - JSON diffs render with keys in a normalized order, so a pure key-order/formatting difference is called out instead of showing as noise.
+
+#### The states, in one place
+
+A row carries **two** states at once, and they answer different questions. **Fate** is what the next
+run would do to it; **availability** is whether this device can act on it at all. The filter pills
+count by fate; the folds below the rows file by both. Everything here comes from one declaration in
+the code (`src/ui/panelTaxonomy.ts`), so a state can never wear two different marks on two different
+surfaces again.
+
+**Fate** — what the next run would do. The header strip, the sidebar counts and the filter pills all
+count these, and the three foldable ones each own a trailing fold line whose words match their
+pill's.
+
+| State | Pill / fold line | Icon | Colour | What it means |
+|---|---|---|---|---|
+| To capture | `To capture N` | `arrow-up-from-line` | orange | This device's settings are the newer ones; capturing writes them to the store |
+| To apply | `To apply N` | `arrow-down-to-line` | accent | The store is newer; applying brings it to this device |
+| Changed on both sides | counted under `To apply` | `⚠` inline | orange | Both sides moved since your last sync. Unstageable until you resolve it |
+| In sync | `In sync N` · `N items in sync` | `check` | green | Identical on both sides — nothing to do |
+| Not synced here | `Not synced here N` · `N items not synced on this device` | `circle-minus` | purple | You turned this item off on THIS device, or a device rule keeps it off this device's class. Your other devices keep syncing it |
+| No settings yet | `No settings yet N` · `N items with no settings yet` | `circle` | muted | Nothing saved for it anywhere yet |
+| Locked | counted under `No settings yet` | `lock` chip | muted | Encrypted, and this device has no passphrase — it can't be compared, so it has no fate |
+
+**Availability** — whether this device can act at all. These render as amber folds under the fate
+folds, and each carries a note explaining what applying would mean for the rows inside it.
+
+| State | Fold line | Icon | Colour | What it means |
+|---|---|---|---|---|
+| Outdated | `N outdated on this device` | `circle-arrow-up` | orange | The store was captured on a newer plugin version than this device runs. Updating first is the safe path |
+| Disabled | `N disabled on this device` | `power-off` | orange | Installed but switched off. Settings sync either way; applying can also turn it on |
+| Not installed | `N not installed on this device` | `circle-dashed` | orange | Not on this device. Settings sync either way; applying can also install it |
+| Desktop-only | `N desktop-only` | `monitor` | orange | In your config but can't run here. Nothing to do |
+
+**Which one files a row.** Work stays where the work is: anything the next run would act on
+(`To capture`, `To apply`, `Changed on both sides`, `Locked`) stays at the top of its section,
+unfolded, wearing its availability chip. Of the rest, `In sync` and `No settings yet` hand
+themselves to the availability fold when this device can't act — that fold says something strictly
+more useful about the same nothing. **`Not synced here` never does**: it is a decision you made
+about this device, not a fact about the machine, and it stays under the words the pill used so you
+can find it again.
+
+**Transport** — desktop only, and about remotes rather than rows: `push` (`cloud-upload`, pink) is
+store changes not yet pushed to a remote, `pull` (`cloud-download`, cyan) is remote changes not yet
+pulled. **Leftover** (amber) is a section, not a row state: store files nothing syncs any more.
+
+**Row chips** — quiet icons on the row's right, each appearing only when a fact deviates from the
+default: `not installed here` (`circle-dashed`), `desktop only` (`monitor`), `stays off`
+(`power-off`), `your rule` / `off here — your rule` / `on here — your rule`
+(`sliders-horizontal`), `encrypted` (`lock`), `your choice` (`check`).
 
 #### The expanded card
 

@@ -61,7 +61,6 @@ import {
   onOffLineText,
   onOffNarrationLines,
   PanelFilter,
-  partitionSection,
   presentedState,
   remoteSections,
   RowBucket,
@@ -105,7 +104,15 @@ import {
   type FoldKind,
   type AvailabilityFoldKind,
 } from "./foldIcons";
+import {
+  placeRow,
+  FATE_FOLD_ORDER,
+  AVAILABILITY_FOLD_ORDER,
+  FATE_PILL_FOLD,
+  type FateFold,
+} from "./panelTaxonomy";
 import { renderFoldChevron, setFoldOpen } from "./foldChevron";
+import { SettingsSpot } from "./settingsDeepLink";
 // ITEM_SECTION_LABELS aliased: this file already declares its own ITEM_SECTION_LABELS (sidebar category
 // labels, see below) for an unrelated domain.
 import {
@@ -208,7 +215,6 @@ const sessionUi = {
 
 // Escalating "less this device can do about it": a version away, a switch away, an install away,
 // and finally not possible here at all.
-const AVAILABILITY_FOLD_ORDER: AvailabilityFoldKind[] = ["outdated", "disabled", "not-installed", "desktop-only"];
 
 // Staging state lives at session level, not view level: mobile Obsidian recreates views on
 // tab switches, and per-instance state would re-run the default pre-check on every
@@ -343,7 +349,7 @@ export interface SyncCenterHost {
   setItemFileSharing(ref: ItemRef, sharing: FileSharing): Promise<void>;
   // The More bridge: deep-links into the Settings
   // tab for this item's card.
-  openSettingsAt(ref: ItemRef): void;
+  openSettingsAt(ref: ItemRef, spot: SettingsSpot): void;
   // The item a compiled group belongs to — a registry LOOKUP, never a parse of the group name
   // (the `plugin-` prefix is not a parser). null for a group no item owns.
   itemRefForGroup(name: string): ItemRef | null;
@@ -1491,9 +1497,13 @@ export class SyncCenterView extends ItemView {
         const c = this.presentedCounts(rows);
         if (c.up > 0) renderActionCount(item.createSpan({ cls: "config-sync-side-badge is-up" }), "capture", c.up);
         if (c.down > 0) renderActionCount(item.createSpan({ cls: "config-sync-side-badge is-down" }), "apply", c.down);
-        if (c.ok > 0) item.createSpan({ cls: "config-sync-side-badge is-ok", text: `✓${c.ok}` });
-        if (c.excluded > 0) item.createSpan({ cls: "config-sync-side-badge is-excluded", text: `⊘${c.excluded}` });
-        if (c.none > 0) item.createSpan({ cls: "config-sync-side-badge is-none", text: `○${c.none}` });
+        // Same fixed-size Lucide glyphs the fold lines and the card draw (FATE_PILL_FOLD →
+        // renderFoldCount), never hand-written `✓`/`⊘`/`○` text. Text glyphs put a DIFFERENT mark on
+        // the same state depending on which surface you looked at, and `⊘` in particular ran into
+        // the digit beside it with no room to breathe.
+        if (c.ok > 0) renderFoldCount(item.createSpan({ cls: "config-sync-side-badge is-ok" }), FATE_PILL_FOLD.ok, c.ok);
+        if (c.excluded > 0) renderFoldCount(item.createSpan({ cls: "config-sync-side-badge is-excluded" }), FATE_PILL_FOLD.excluded, c.excluded);
+        if (c.none > 0) renderFoldCount(item.createSpan({ cls: "config-sync-side-badge is-none" }), FATE_PILL_FOLD.none, c.none);
       }
       item.addEventListener("click", () => {
         this.panelSection = { kind: "device", cat };
@@ -1558,9 +1568,9 @@ export class SyncCenterView extends ItemView {
       const c = this.presentedCounts(this.countable(this.sectionRows()));
       if (c.up > 0) renderActionCount(sw.createSpan({ cls: "config-sync-side-badge is-up" }), "capture", c.up);
       if (c.down > 0) renderActionCount(sw.createSpan({ cls: "config-sync-side-badge is-down" }), "apply", c.down);
-      if (c.ok > 0) sw.createSpan({ cls: "config-sync-side-badge is-ok", text: `✓${c.ok}` });
-      if (c.excluded > 0) sw.createSpan({ cls: "config-sync-side-badge is-excluded", text: `⊘${c.excluded}` });
-      if (c.none > 0) sw.createSpan({ cls: "config-sync-side-badge is-none", text: `○${c.none}` });
+      if (c.ok > 0) renderFoldCount(sw.createSpan({ cls: "config-sync-side-badge is-ok" }), FATE_PILL_FOLD.ok, c.ok);
+      if (c.excluded > 0) renderFoldCount(sw.createSpan({ cls: "config-sync-side-badge is-excluded" }), FATE_PILL_FOLD.excluded, c.excluded);
+      if (c.none > 0) renderFoldCount(sw.createSpan({ cls: "config-sync-side-badge is-none" }), FATE_PILL_FOLD.none, c.none);
     } else if (this.panelSection.kind === "history") {
       sw.createSpan({ text: "History" });
     } else if (this.panelSection.kind === "self") {
@@ -1636,28 +1646,31 @@ export class SyncCenterView extends ItemView {
         "pull", pull,
       );
     }
-    pills.createSpan({
-      cls: "config-sync-pill is-ok",
-      text: `✓ ${ok}`,
-      attr: { "aria-label": `${ok} item${ok === 1 ? "" : "s"} in sync` },
-    });
+    renderFoldCount(
+      pills.createSpan({ cls: "config-sync-pill is-ok", attr: { "aria-label": `${ok} item${ok === 1 ? "" : "s"} in sync` } }),
+      FATE_PILL_FOLD.ok, ok,
+    );
     // Mirrors the ok/none pills' own shape — unconditional-count vs.
     // N=0-suppressed is inconsistent between ok (always shown) and none (suppressed) even today;
     // `excluded` follows `none`'s precedent (suppressed at 0), matching the explicit
     // empty-state rule for the FILTER pill, applied consistently here too.
     if (excluded > 0) {
-      pills.createSpan({
-        cls: "config-sync-pill is-excluded",
-        text: `⊘ ${excluded}`,
-        attr: { "aria-label": `${excluded} item${excluded === 1 ? "" : "s"} not synced on this device` },
-      });
+      renderFoldCount(
+        pills.createSpan({
+          cls: "config-sync-pill is-excluded",
+          attr: { "aria-label": `${excluded} item${excluded === 1 ? "" : "s"} not synced on this device` },
+        }),
+        FATE_PILL_FOLD.excluded, excluded,
+      );
     }
     if (none > 0) {
-      pills.createSpan({
-        cls: "config-sync-pill is-none",
-        text: `○ ${none}`,
-        attr: { "aria-label": `${none} item${none === 1 ? "" : "s"} with no settings yet` },
-      });
+      renderFoldCount(
+        pills.createSpan({
+          cls: "config-sync-pill is-none",
+          attr: { "aria-label": `${none} item${none === 1 ? "" : "s"} with no settings yet` },
+        }),
+        FATE_PILL_FOLD.none, none,
+      );
     }
     // Manual refresh: re-scans local state, catching plugin toggles made in Obsidian's
     // settings modal while the panel stayed open, and re-checks every remote (desktop only).
@@ -2256,20 +2269,17 @@ export class SyncCenterView extends ItemView {
       // conflict|apply|capture (plus locked, its current placement, preserved); the folds hold
       // ok/excluded/none. Fold order ✓ → ⊘ → ○ ("from nothing-to-do, to my own rule, to
       // no data yet") — rows within each fold stay name-sorted since `visible` already is.
-      const bucketed = visible.map((r) => ({ r, section: partitionSection(this.rowBucket(r)) }));
-      const active = bucketed.filter((x) => x.section === "active").map((x) => x.r);
-      // A row this device can't act on — not installed, disabled, outdated, desktop-only — folds by
-      // WHY rather than by fate. Only among the non-active rows: an actionable one (a plugin this
-      // run would install) stays at the top where the work is, availability chip and all. Without
-      // this split those rows landed in `○ no settings yet`, which is where the reporter went
-      // looking for "which ones aren't installed here" and found nothing that said so.
-      const availabilityOf = (r: StatusRow): SectionKind => this.sectionOf(r.group.name);
-      const inactive = bucketed.filter((x) => x.section !== "active");
-      const unavailable = inactive.filter((x) => availabilityOf(x.r) !== "main");
-      const byFate = inactive.filter((x) => availabilityOf(x.r) === "main");
-      const insync = byFate.filter((x) => x.section === "insync").map((x) => x.r);
-      const excluded = byFate.filter((x) => x.section === "excluded").map((x) => x.r);
-      const nosettings = byFate.filter((x) => x.section === "nosettings").map((x) => x.r);
+      // Filing is `placeRow`'s call, not this function's (panelTaxonomy.ts): a row has a FATE and an
+      // AVAILABILITY at once, and which of the two files it is a decision with a documented reason,
+      // not an inline filter. It used to live here as `availability wins`, which quietly filed a
+      // row the user had opted THIS device out of under `N not installed on this device` while the
+      // `Not synced here` pill still counted it — a number with nothing behind it.
+      const placed = visible.map((r) => ({ r, at: placeRow(this.rowBucket(r), this.sectionOf(r.group.name)) }));
+      const active = placed.filter((x) => x.at.zone === "active").map((x) => x.r);
+      const fateRows = (fold: FateFold): StatusRow[] =>
+        placed.filter((x) => x.at.zone === "fate" && x.at.fold === fold).map((x) => x.r);
+      const availabilityRows = (fold: AvailabilityFoldKind): StatusRow[] =>
+        placed.filter((x) => x.at.zone === "availability" && x.at.fold === fold).map((x) => x.r);
       // The filled card wraps rows only — it renders exactly when the section
       // has real rows (the self row or an active row); a section whose visible content is fold
       // lines alone shows head + fold lines with no filled block.
@@ -2283,15 +2293,21 @@ export class SyncCenterView extends ItemView {
         this.renderSectionTrailingLine(body, {
           ts, rows, openSet, foldId: kind, icon: FOLD_ICON[kind], colorCls: FOLD_ICON_COLOR_CLASS[kind], text, note: null,
         });
-      fateFold(insync, sessionUi.insyncOpen, "insync", insyncLineText);
-      fateFold(excluded, sessionUi.excludedOpen, "excluded", excludedLineText);
-      fateFold(nosettings, sessionUi.nosettingsOpen, "nosettings", nosettingsLineText);
+      const fateFoldUi: Record<FateFold, { open: Set<string>; text: (n: number) => string }> = {
+        insync: { open: sessionUi.insyncOpen, text: insyncLineText },
+        excluded: { open: sessionUi.excludedOpen, text: excludedLineText },
+        nosettings: { open: sessionUi.nosettingsOpen, text: nosettingsLineText },
+      };
+      for (const fold of FATE_FOLD_ORDER) {
+        const ui = fateFoldUi[fold];
+        fateFold(fateRows(fold), ui.open, fold, ui.text);
+      }
       // Availability last, in escalating "can't do anything here" order — the four titles and notes
       // are the ones 987eacf deleted with the sections they belonged to.
       for (const kind of AVAILABILITY_FOLD_ORDER) {
         this.renderSectionTrailingLine(body, {
           ts,
-          rows: unavailable.filter((x) => availabilityOf(x.r) === kind).map((x) => x.r),
+          rows: availabilityRows(kind),
           openSet: sessionUi.availabilityOpen,
           foldId: kind,
           icon: AVAILABILITY_FOLD_ICON[kind],
@@ -2429,7 +2445,7 @@ export class SyncCenterView extends ItemView {
     setTooltip(chip, tooltip);
     const open = (): void => {
       const ref = this.host.itemRefForGroup(carrierId);
-      if (ref !== null) this.host.openSettingsAt(ref);
+      if (ref !== null) this.host.openSettingsAt(ref, "card");
     };
     chip.addEventListener("click", (e) => { e.stopPropagation(); open(); });
     chip.addEventListener("keydown", (e) => { if (e.key !== "Enter" && e.key !== " ") return; e.preventDefault(); e.stopPropagation(); open(); });
@@ -3167,7 +3183,7 @@ export class SyncCenterView extends ItemView {
         sections: () => [
           {
             header: SHARED_WITH_HEADER,
-            items: [{ title: FILE_SHARING_MENU_UNAVAILABLE_TEXT, icon: "braces", checked: false, action: () => this.host.openSettingsAt(ref) }],
+            items: [{ title: FILE_SHARING_MENU_UNAVAILABLE_TEXT, icon: "braces", checked: false, action: () => this.host.openSettingsAt(ref, "key-rules") }],
           },
           localSection(),
         ],
@@ -3228,7 +3244,7 @@ export class SyncCenterView extends ItemView {
     const tooltip = isFolder ? "Folder rules — opens Settings" : "Per-key rules, locks & folders — opens Settings";
     this.renderCardIconActionRow(detail, "More", "settings-2", false, tooltip, () => {
       const ref = this.itemRefFor(name);
-      if (ref !== null) this.host.openSettingsAt(ref);
+      if (ref !== null) this.host.openSettingsAt(ref, "card");
     });
   }
 

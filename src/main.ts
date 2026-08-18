@@ -47,6 +47,7 @@ import { listFilesRecursive, isJunkPath, FileIO } from "./core/io";
 import { LeftoverNames, LeftoverSection, leftoverStoreRels, storeSelfCopyGroups, selfListGroups } from "./core/leftover";
 import { lockEntry, lockLabel, parseStoreLock, STORE_LOCK_FUTURE_MESSAGE, validateSyncManifest } from "./core/manifest";
 import { lockRefFor, rekeyRefList } from "./core/itemKeys";
+import { SettingsDeepLink, SettingsSpot } from "./ui/settingsDeepLink";
 import { lockStoredLabel, resolveHostStoredLabel } from "./core/lockLabels";
 import { basename, groupRealPath, groupStorePath, sidecarStoreSuffix } from "./core/pathing";
 import {
@@ -805,7 +806,7 @@ export default class ConfigSyncPlugin extends Plugin {
       itemFileSharing: (ref) => this.itemFileSharing(ref),
       itemFileSharingMenuLegal: (ref) => this.itemFileSharingMenuLegal(ref),
       setItemFileSharing: (ref, sharing) => this.setItemFileSharing(ref, sharing),
-      openSettingsAt: (ref) => this.openSettingsAt(ref),
+      openSettingsAt: (ref, spot) => this.openSettingsAt(ref, spot),
       itemRefForGroup: (name) => this.itemRefForGroup(name),
       schemaStop: () => this.schemaStop,
       settingsWritable: () => this.settingsWritable(),
@@ -1737,9 +1738,9 @@ export default class ConfigSyncPlugin extends Plugin {
 
   // The More bridge's target item — set here, consumed once by SettingTab.display() via
   // consumePendingSettingsAnchor() below, which expands that item's card and scrolls to it.
-  private pendingSettingsDeepLink: ItemRef | null = null;
-  private openSettingsAt(ref: ItemRef): void {
-    this.pendingSettingsDeepLink = ref;
+  private pendingSettingsDeepLink: SettingsDeepLink | null = null;
+  private openSettingsAt(ref: ItemRef, spot: SettingsSpot): void {
+    this.pendingSettingsDeepLink = { ref, spot };
     const app = this.app as unknown as AppWithSetting;
     // open() itself
     // re-opens whatever tab was last active — when that's already this plugin's tab (the common
@@ -1759,10 +1760,10 @@ export default class ConfigSyncPlugin extends Plugin {
 
   // SettingsHost-facing read-and-clear: the settings tab calls this once per display() so a
   // pending deep link is consumed exactly once per Settings open.
-  consumePendingSettingsAnchor(): ItemRef | null {
-    const ref = this.pendingSettingsDeepLink;
+  consumePendingSettingsAnchor(): SettingsDeepLink | null {
+    const link = this.pendingSettingsDeepLink;
     this.pendingSettingsDeepLink = null;
-    return ref;
+    return link;
   }
 
   // The item a compiled group belongs to, as the one-string ref localStorage and the Sync Center

@@ -86,9 +86,15 @@ single-row and bulk alike.
 | Inline micro-gaps | 3px (sidebar column rhythm) · 5px (icon↔label clusters) | between `--size-4-*` steps; 8px gaps use `var(--size-4-2)` |
 | Drawer control glyphs | `var(--icon-s)`, ONE rule covering lock / sharing picker / per-item toggle / File-preview eye / merged control | only the merged control used to carry a size; the rest fell back to Obsidian's 18px default and read a size bigger the moment a 16px glyph landed beside them. The ⇕ keeps 11px through a same-specificity rule placed after it |
 | Card control rail | `.config-sync-cardrow > .config-sync-mergedctl, .config-sync-cardrow > .config-sync-cardrow-ctl { grid-column: 4; justify-self: end }` | ONE rule puts every card control on the card's right edge, the same rule the item rows' checkboxes sit on, so a control added later aligns by construction. `.config-sync-cardval` needs no inset of its own: nothing lands on track 2 for it to line up with any more |
+| Card trigger padding | `.config-sync-mergedctl` and `.config-sync-sharingicon.config-sync-card-trigger` both `3px 6px` | the boxes all end on the rail, so a padding difference between them shows up as a difference between their GLYPHS — which is what the eye follows. At 4px vs 6px the More row's icon sat 2px right of the merged controls above it, boxes perfectly aligned the whole time |
 
 **The settings-drawer row grid (scrow).** Every row in an item card's drawer is a
-`.config-sync-scrow`: `identity 170px | controls 1fr | 1px | trailing max-content`. **The controls
+`.config-sync-scrow`: `identity 170px | controls 1fr | 1px | trailing minmax(44px, max-content)`.
+**Track 4 is reserved, not content-sized**: it holds a row's own STATE toggle (a folder's sync
+switch), which only some rows have, and while it was `max-content` a row without one let its rule
+cluster run 44px further right than the row above it — the same glyph in two different columns on
+neighbouring rows. Reserving it gives the drawer two honest columns instead: toggles on the rail,
+rule controls immediately left of it, both card-wide. **The controls
 track is the flexible one and its cluster right-aligns inside it**, so the cluster hugs the
 card-toggle rail: a row with no trailing cell puts its controls on the card's right edge, and a
 folder row's own sync toggle (track 4) takes that edge with the controls immediately left of it.
@@ -96,10 +102,16 @@ One vertical rule down the card, header toggle included. This is what "nothing a
 drawer's right edge" became once the two-layer merge emptied the right half — that rule existed to
 stop an ACTION column being invented, and rule controls lining up with the card's own toggle is not
 that. The
-controls column is a fixed THREE-SLOT grid (`.config-sync-scrow-slots`: aux 24 | lock 24 |
-device 68) — **fixed even though the cluster right-aligns**: without it the lock would drift with
-the width of whatever sits beside it, and the lock column is real alignment worth keeping. A row
-without a control leaves its slot empty. Slot roles: aux = the per-item `list-checks` (array rule
+controls cluster (`.config-sync-scrow-slots`) packs against the right, and two properties hold it
+together — they do NOT trade off against each other. **Role order is pinned in CSS** (`order` on
+`.is-aux` / `.is-lock` / `.is-device`), not left to whichever order a caller happens to fill the
+slots in. **Width is per-role and fixed while occupied** (aux 24 | lock 24 | device 68), so each
+role forms a strict column card-wide. An **empty slot is removed from the flow entirely**
+(`:empty`) rather than holding its width and a column-gap: it used to hold both, so a row missing
+its aux control showed a visible hole and its remaining controls floated left of the rail. Removing
+an empty slot cannot pull an occupied one out of column, because the cluster measures from the
+RIGHT — the device column from the rail, the lock column from the device column — and neither ever
+depended on whether aux happened to be there. Slot roles: aux = the per-item `list-checks` (array rule
 rows) — the path row's own aux slot stays empty, since its File-preview `eye` rides the filename
 line instead (see below); lock = encrypt toggles; device = every scope/rule picker AND the merged
 two-layer control, LAST and widest of the three. **The device slot is sized for the widest thing it
@@ -622,11 +634,21 @@ noted):
   (✓ / ⊘ / ○ — "is there anything to do") and then the four AVAILABILITY folds (`outdated` /
   `disabled` / `not-installed` / `desktop-only`, amber icons — "can this device do it at all"),
   each carrying the explanatory note the equivalent section used to (`AVAILABILITY_FOLD_NOTE`),
-  rendered under the line while open. A row lands in an availability fold only if it is NOT
-  active: an actionable one (a plugin this run would install) stays at the top with the work,
-  wearing its own `not installed here` chip. This restores what `987eacf` dropped when the list
-  moved to type sections — those four groupings, with their copy — without folding away rows that
-  have something to do. Switching into a filter
+  rendered under the line while open. **Which of the two axes files a row is declared once**, in
+  `ui/panelTaxonomy.ts`'s `placeRow`, not spelled inline where the folds are built — a row has a
+  fate AND an availability at all times, so this is a decision with a reason, and the reason has to
+  be somewhere a reader can find it. The rule: anything the next run would act on
+  (`conflict`/`apply`/`capture`/`locked`) stays ACTIVE at the top with the work, wearing its own
+  `not installed here` chip. Of the rest, `insync` and `nosettings` YIELD to the availability fold
+  (`FATE_FOLD_YIELDS_TO_AVAILABILITY`) — both mean "nothing to do", and the availability fold says
+  something strictly more useful about the same nothing. `excluded` **never yields**: it is a
+  decision the user made about this device, not a fact about the machine, and the person who set it
+  comes back searching for the words the `Not synced here` pill used. While availability won
+  outright, such a row was counted by that pill and filed under `N not installed on this device` —
+  a number with nothing behind it. `tests/panelTaxonomy.test.ts` pins the whole (fate × availability)
+  table plus the invariant that a fold-owning pill and its fold describe the same rows. This axis
+  split also restores what `987eacf` dropped when the list moved to type sections — those four
+  groupings, with their copy — without folding away rows that have something to do. Switching into a filter
   pill or a search hit auto-expands every section once, on that transition only, so a
   manual re-collapse during the rest of that filtered/search session still sticks. Group
   headers `config-sync-sect` (uppercase + hairline) — used in the run-report breakdown.
