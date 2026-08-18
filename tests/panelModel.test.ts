@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { capFileEntries, insyncLineText, excludedLineText, statusBarStatuses, moreFilesText, filesChangeLabel, visibleUnderFilter, leftoverPresentation, fateBucket, fateBucketCounts, partitionSection, legacyLockedFamilyBucket, RowBucket, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, runProgressLabel, showColdStartBanner, enablementCarrierFor, carrierIsSynced, TYPE_SECTION_TITLES, typeSectionForRow, sectionCountLabel, unifiedFooterSummary, fileEntryFor, stagedPayload, StageableRow, effectiveFate, remoteSections, onOffFlips, onOffLineText, onOffNarrationLines, familyRollup, FamilyMember, mergeFamilyChanges, foldCompanionEntries, groupExcludedHere, CAPTURE_ADDED_TOOLTIP, CAPTURE_UPDATED_TOOLTIP, CAPTURE_DELETED_TOOLTIP, APPLY_ADDED_TOOLTIP, APPLY_UPDATED_TOOLTIP, APPLY_DELETED_TOOLTIP } from "../src/ui/panelModel";
+import { capFileEntries, insyncLineText, excludedLineText, statusBarStatuses, moreFilesText, filesChangeLabel, visibleUnderFilter, leftoverPresentation, fateBucket, fateBucketCounts, partitionSection, legacyLockedFamilyBucket, RowBucket, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, runProgressLabel, showColdStartBanner, enablementCarrierFor, carrierIsSynced, TYPE_SECTION_TITLES, typeSectionForRow, sectionCountLabel, widestCountDigits, unifiedFooterSummary, fileEntryFor, stagedPayload, StageableRow, effectiveFate, remoteSections, onOffFlips, onOffLineText, onOffNarrationLines, familyRollup, FamilyMember, mergeFamilyChanges, foldCompanionEntries, groupExcludedHere, CAPTURE_ADDED_TOOLTIP, CAPTURE_UPDATED_TOOLTIP, CAPTURE_DELETED_TOOLTIP, APPLY_ADDED_TOOLTIP, APPLY_UPDATED_TOOLTIP, APPLY_DELETED_TOOLTIP } from "../src/ui/panelModel";
 import { GroupState, GroupStatus, OTHER_STORE_FILES_GROUP, RemoteDiffEntry, RemoteDiffFile } from "../src/core/status";
 import { FileChanges, SyncGroup, EVERYWHERE, perClass, StorageSection } from "../src/core/types";
 import { Availability } from "../src/core/availability";
@@ -593,6 +593,28 @@ describe("sectionCountLabel", () => {
   });
   it("filtered form: compact visible/total, one form on every platform", () => {
     expect(sectionCountLabel(31, 6, true)).toBe("6/31");
+  });
+});
+
+// The sidebar's count badges reserve a digit slot so their icons line up as a column. The
+// reservation is measured, not written into the stylesheet, because a fixed number is wrong in both
+// directions at once — the two tests below are those two directions.
+describe("widestCountDigits", () => {
+  it("reserves what the widest count actually needs, so nothing overflows the column", () => {
+    expect(widestCountDigits([7, 312, 1])).toBe(3);
+    expect(widestCountDigits([5, 1024, 9])).toBe(4);
+  });
+
+  it("reserves no more than that, so short counts carry no dead space", () => {
+    expect(widestCountDigits([14, 51, 42])).toBe(2);
+    expect(widestCountDigits([3, 1, 9])).toBe(1);
+  });
+
+  // A pane with nothing to count still reserves one slot: "0" is one character wide, and the
+  // badges that would show it are suppressed at 0 anyway.
+  it("never reserves zero slots", () => {
+    expect(widestCountDigits([0, 0, 0])).toBe(1);
+    expect(widestCountDigits([])).toBe(1);
   });
 });
 

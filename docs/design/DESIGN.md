@@ -506,14 +506,21 @@ noted):
   three different pools until 2026-08-18, which is how `↑16` sat above `To capture 14` above a bar
   saying `↑19` on one screen.
 - **Sidebar** `config-sync-side-item/-side-badge` — sections with tiny count
-  badges; active = accent tint. The badges are a COLUMN, not a right-packed run: every capsule
-  carries `min-width: calc(1em + 3ch + 12px)` (icon + three digits + padding) and
-  `font-variant-numeric: tabular-nums`, so one-digit and two-digit counts occupy the same width
-  and each column's edges line up down the list. Content stays left-packed — the icons form their
-  own column and a short count leaves trailing space; the DIGITS deliberately do not align, which
-  is the accepted trade for not reserving a fixed slot per state (that would cost 120–200px of
-  permanently reserved sidebar width and squeeze the names first). Alignment here is geometric,
-  not semantic: a row whose only badge is `↑` sits in the column another row fills with `○`. The Config Sync self layer leads as a distinct hero card
+  badges; active = accent tint. The badges are a COLUMN, and what has to line up is the ICON at each
+  badge's left edge: every capsule carries `font-variant-numeric: tabular-nums` and
+  `min-width: calc(1em + var(--cs-badge-digits) * 1ch + 12px)` (icon + digit slot + padding).
+  `--cs-badge-digits` is MEASURED per render on the shell (`SyncCenterView.badgeDigits` →
+  `widestCountDigits`, from the `All items` buckets and the row total that bounds a search's hit
+  badge), never written into the stylesheet: a fixed reservation is wrong in both directions at
+  once — too small and the longest count overflows the column the reservation exists to hold, too
+  large and every shorter count carries the difference as dead space (a hard-coded `3ch` turned
+  `↑3` from 28px into 41px, all of it trailing, and that is what made the first attempt read as
+  ugly). Content stays left-packed — the icons form their own column and a short count leaves
+  trailing space; the DIGITS deliberately do not align, which is the accepted trade for not
+  reserving a fixed slot per state (that alternative — a subgrid with one track per state — gives
+  zero trailing space but leaves holes wherever a row lacks a state, and moves a lone badge off the
+  right edge into the middle of the row). Alignment here is geometric, not semantic: a row whose
+  only badge is `↑` sits in the column another row fills with `○`. The Config Sync self layer leads as a distinct hero card
   `config-sync-side-self` (`-side-self-ic` icon tile, `-side-self-title`/`-side-self-sub`,
   `-side-self-pill` reusing `selfStatePill`), echoing the header self-chip. Grouping is by
   `config-sync-side-divider` hairlines alone: self card / scope list / remote rows /

@@ -436,6 +436,15 @@ export function sectionCountLabel(total: number, visible: number, filtered: bool
   return filtered ? `${visible}/${total}` : `${total}`;
 }
 
+// How many digit slots the sidebar's count badges reserve, so their icons line up as a column.
+// Derived from the widest count actually on the pane, never fixed: a fixed reservation is wrong in
+// both directions at once — too small and the longest count overflows the very column the
+// reservation exists to hold, too large and every shorter count carries the difference as dead
+// space inside its own capsule. Zero counts still take one slot, because "0" is one character wide.
+export function widestCountDigits(counts: readonly number[]): number {
+  return String(Math.max(0, ...counts)).length;
+}
+
 // ── Remote pane C-grammar model ────────────────────────────────────────────────────────────────
 // Buckets a remote's raw file diff into the same four TYPE_SECTION_ORDER sections the main list
 // uses: the two switch-list carriers never appear as an ordinary row (their delta is an on/off

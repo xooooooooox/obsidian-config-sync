@@ -78,6 +78,7 @@ import {
   typeSectionForRow,
   unifiedFooterSummary,
   visibleUnderFilter,
+  widestCountDigits,
   Direction,
   effectiveDirection,
 } from "./panelModel";
@@ -1081,6 +1082,24 @@ export class SyncCenterView extends ItemView {
     return fateBucketCounts(rows.map((r) => this.rowBucket(r)));
   }
 
+  // The digit slot every count badge reserves. Measured from the widest number any badge on this
+  // pane could show rather than fixed in the stylesheet: a hard-coded reservation is wrong in both
+  // directions — too small and one long count breaks the column it was there to keep, too large and
+  // every short count carries dead space inside its capsule (a fixed 3 turned `↑3` from 28px into
+  // 41px, all of it trailing).
+  // A search REPLACES the bucket badges with a single neutral hit count, so the two never share a
+  // pane and the reservation follows whichever is on screen — folding the hit bound into the
+  // resting case would reserve the row total's width (3 digits at 107 items) for buckets that only
+  // ever reach 2, which is the over-reservation this whole measurement exists to avoid.
+  // Either way `All items` bounds every per-category entry, each being a subset of it.
+  private badgeDigits(): number {
+    if (this.searching()) {
+      return widestCountDigits([this.rows().filter((r) => this.rowMatchesSearch(r)).length]);
+    }
+    const c = this.presentedCounts(this.countable(this.rows()));
+    return widestCountDigits([c.up, c.down, c.ok, c.excluded, c.none]);
+  }
+
   private render(gen: number): void {
     if (gen !== this.renderGen) return;
     // A fresh render cycle — any staging state a render-triggering handler just
@@ -1099,6 +1118,10 @@ export class SyncCenterView extends ItemView {
     this.contentEl.empty();
     this.renderHeader();
     const shell = this.contentEl.createDiv({ cls: `config-sync-shell${this.compact ? " is-compact" : ""}` });
+    // How many digit slots the count badges reserve, so their icons line up as a column without
+    // over-reserving. Set on the shell because the sidebar and the compact switcher both draw
+    // `.config-sync-side-badge` and only one of them exists at a time.
+    shell.style.setProperty("--cs-badge-digits", String(this.badgeDigits()));
     if (this.compact) this.renderSwitcher(shell);
     else this.renderSidebar(shell);
     this.mainEl = shell.createDiv({ cls: "config-sync-main" });

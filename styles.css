@@ -905,21 +905,26 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 
 .config-sync-side-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* The badges are a COLUMN, so every capsule is the same width. Right-packing already lined up
-   their right edges; their left edges were ragged for two reasons — a one-digit count is ~8px
-   narrower than a two-digit one, and the UI font's digits are proportional, so even two counts of
-   the same length differed (`○42` 36.3 vs `○19` 33.7). tabular-nums fixes the second and makes `ch`
-   exactly one digit wide; the min-width reserves three digits (a single bucket reaching three
-   figures is ordinary on a large vault) plus the icon and the horizontal padding. It stays a
-   MINIMUM: a fourth digit widens that one badge rather than being clipped.
+/* The badges are a COLUMN: what has to line up is the ICON at each badge's left edge, which needs
+   every capsule to be the same width. Right-packing already lined up their right edges; their left
+   edges were ragged for two reasons — a one-digit count is ~8px narrower than a two-digit one, and
+   the UI font's digits are proportional, so even two counts of the same length differed (`○42` 36.3
+   vs `○19` 33.7). tabular-nums settles the second and makes `ch` exactly one digit wide; the
+   min-width reserves the icon, the padding, and `--cs-badge-digits` digits.
+   That digit count is MEASURED per render (SyncCenterView.badgeDigits) rather than written here,
+   because any number picked in the stylesheet is wrong in both directions at once: too small and
+   the longest count overflows the column the reservation exists to hold, too large and every
+   shorter count carries the difference as dead space inside its capsule — a hard-coded 3 turned
+   `↑3` from 28px into 41px, all of it trailing. The fallback only covers a badge rendered outside
+   the shell that sets the property; nothing does that today.
    Content stays left-packed, so the icons line up as their own column and a short count leaves
-   trailing space — the numbers themselves do not align, which is the accepted trade.
+   trailing space — the digits themselves do not align, which is the accepted trade.
    The badge's own `display` is deliberately left alone: it is already a flex ITEM, and the fold/
    action icons above align by inline `vertical-align`, which a flex container would ignore. */
 .config-sync-side-badge {
   font-size: 10px; border-radius: 8px; padding: 0 5px; flex: none;
   font-variant-numeric: tabular-nums;
-  min-width: calc(1em + 3ch + 12px);
+  min-width: calc(1em + var(--cs-badge-digits, 2) * 1ch + 12px);
 }
 
 .config-sync-side-badge.is-up { background: rgba(var(--color-orange-rgb), 0.15); color: var(--color-orange); }
