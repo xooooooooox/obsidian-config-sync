@@ -92,6 +92,7 @@ import { jsonSortedView } from "../core/merge";
 import { renderReportContent, renderReportPills, stripHeader } from "./reportContent";
 import { RunRecord, RunKind, RunStatus, worstStatus, formatRunTime, deleteLeftoverDesc } from "../core/runHistory";
 import { ACTION_ICON, ACTION_COLOR_CLASS, renderActionIcon, renderActionCount, type SyncAction } from "./actionIcons";
+import { ENABLEMENT_CARRIER_GROUPS } from "../core/switchList";
 import { FATE_CHIP_ICON } from "./fateChipIcons";
 import {
   renderFoldIconNamed,
@@ -173,7 +174,7 @@ const STATUS_CLS: Record<RunStatus, string> = { ok: "is-ok", warning: "is-warn",
 const ACTION_CELL_MAP: Partial<Record<RunKind, SyncAction>> = { capture: "capture", apply: "apply", adopt: "apply", push: "push", pull: "pull" };
 // The two on/off list carriers: "one object = one row" dissolves their own list row
 // into the Core/Community section header chip — they never appear as a row themselves.
-const CARRIER_GROUP_NAMES = new Set(["core-plugins", "community-plugins"]);
+
 // Trailing debounce for the search input's heavy re-render — long
 // enough to coalesce a fast typist's whole burst into one render, short enough to still read as
 // live filtering once typing pauses.
@@ -888,7 +889,7 @@ export class SyncCenterView extends ItemView {
   // were derived from a comment that stopped being true in 987eacf, when the availability sections
   // were replaced by the four type sections.
   private countable(rows: StatusRow[]): StatusRow[] {
-    return rows.filter((r) => !CARRIER_GROUP_NAMES.has(r.group.name));
+    return rows.filter((r) => !ENABLEMENT_CARRIER_GROUPS.has(r.group.name));
   }
 
   private effDir(r: StatusRow): Direction {
@@ -2128,7 +2129,7 @@ export class SyncCenterView extends ItemView {
   // search/filter" — the head's count pill needs both halves, and stagedSectionCount needs the
   // second, so deriving it twice is how the hint and the section it sits on would come to disagree.
   private typeSectionRows(inSection: StatusRow[], ts: TypeSection): { rows: StatusRow[]; visible: StatusRow[] } {
-    const rows = inSection.filter((r) => !CARRIER_GROUP_NAMES.has(r.group.name) && typeSectionForRow(this.itemSectionOf(r.group.name)) === ts);
+    const rows = inSection.filter((r) => !ENABLEMENT_CARRIER_GROUPS.has(r.group.name) && typeSectionForRow(this.itemSectionOf(r.group.name)) === ts);
     const matches = this.searching() ? rows.filter((r) => this.rowMatchesSearch(r)) : rows;
     return { rows, visible: matches.filter((r) => visibleUnderFilter(this.rowBucket(r), this.filter)) };
   }
@@ -2443,7 +2444,7 @@ export class SyncCenterView extends ItemView {
   // render as list rows (they dissolve into the section header chip).
   private checkableRows(inSection: StatusRow[]): string[] {
     return this.visibleRows(inSection)
-      .filter((r) => !CARRIER_GROUP_NAMES.has(r.group.name) && this.fateFor(r).stageable)
+      .filter((r) => !ENABLEMENT_CARRIER_GROUPS.has(r.group.name) && this.fateFor(r).stageable)
       .map((r) => r.group.name);
   }
 
@@ -3358,7 +3359,7 @@ export class SyncCenterView extends ItemView {
   // stagedPayload's input rows: one entry per row currently in the list
   // (carriers included — they're excluded from rendering, not from this set, since their own
   // file can differ independently of any member — see stagedPayload's carrier-synthesis rule).
-  // `CARRIER_GROUP_NAMES` guards `carrier`/`elementId`: `computeFateInput` reads carrierSynced/true
+  // `ENABLEMENT_CARRIER_GROUPS` guards `carrier`/`elementId`: `computeFateInput` reads carrierSynced/true
   // for a carrier's OWN row too (its group name resolves to itself under
   // `enablementCarrierFor`/`carrierElementFor`), which would otherwise feed its own name back in
   // as a bogus "member" of itself. `fate` is the single shared `effectiveFate` derivation
@@ -3368,7 +3369,7 @@ export class SyncCenterView extends ItemView {
     return this.rows().map((r) => {
       const { fate, input } = this.fateWithInput(r);
       const name = r.group.name;
-      const isCarrierMember = input.carrierSynced && !CARRIER_GROUP_NAMES.has(name);
+      const isCarrierMember = input.carrierSynced && !ENABLEMENT_CARRIER_GROUPS.has(name);
       const choice = this.conflictChoice.get(name) ?? null;
       // The row's companion groups actionable in each direction (rollup's applyMembers/
       // captureMembers, parent name excluded — it's `itemName` already): stagedPayload fans these

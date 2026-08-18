@@ -26,6 +26,12 @@ export const SWITCH_LISTS: Record<string, SwitchListSpec> = {
 // (registry.ts's ENABLEMENT_LISTS); what file one lives in is this table's.
 export type EnablementList = "core-plugins" | "community-plugins";
 
+// The same two, as the GROUP names they compile to (the ids verbatim). Every count has to exclude
+// them — a carrier dissolves into its section's head chip instead of rendering as a row — so the
+// set lives here, once. Two copies of these strings is precisely how the Sync Center's counts and
+// the status bar's came to disagree: the view grew the exclusion, the bar did not.
+export const ENABLEMENT_CARRIER_GROUPS: ReadonlySet<string> = new Set<EnablementList>(["core-plugins", "community-plugins"]);
+
 export function enablementListFile(list: EnablementList): string {
   const spec = SWITCH_LISTS[list];
   if (spec === undefined) throw new Error(`switch list "${list}" has no spec — SWITCH_LISTS and EnablementList disagree`);

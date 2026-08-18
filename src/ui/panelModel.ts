@@ -5,6 +5,7 @@ import { carrierRef, refItemId } from "../core/itemKeys";
 import { ApplyItem, CaptureItem, StateAction } from "../core/ConfigSyncCore";
 import { EnablementList, memberUniverse, parseSwitchList, switchListMemberOn, switchListOnCount } from "../core/switchList";
 import { Fate, FateInput, rowFate } from "./fateModel";
+import { ENABLEMENT_CARRIER_GROUPS } from "../core/switchList";
 
 // Direction a checkable row acts in: capture pushes this device → store; apply pulls store → device.
 export type Direction = "capture" | "apply";
@@ -271,6 +272,10 @@ export function statusBarStatuses(
   const families = new Map<string, FamilyMember[]>();
   for (const st of statuses) {
     if (st.group === family.selfGroup) continue;
+    // …and the two on/off carriers, for the same reason the view drops them: they dissolve into
+    // their section's head chip and never render as rows. Counting them here is what left the bar
+    // reading one higher in each direction than the pills right above it.
+    if (ENABLEMENT_CARRIER_GROUPS.has(st.group)) continue;
     const parent = family.parentOf(st.group);
     // A companion whose parent isn't compiled here stands on its own — the same honest degradation
     // the view's familyGroups() makes.
