@@ -81,22 +81,43 @@ count by fate; the folds below the rows file by both. Everything here comes from
 the code (`src/ui/panelTaxonomy.ts`), so a state can never wear two different marks on two different
 surfaces again.
 
+**Where a state can show up.** Five surfaces carry state, and they are not five copies of one thing —
+each answers a different question, which is why the same item can be counted in one and absent from
+another:
+
+1. **Header strip** (top, right of the Config Sync chip) — the whole vault at a glance, **plus** the
+   remote `push`/`pull` totals. The only place row states and remote states sit side by side.
+2. **Sidebar counts** (`All items`, `Obsidian`, `Core plugins`, …) — the same numbers, split by
+   category. Navigation, not filtering: clicking one changes which category you are looking at.
+3. **Filter pills** (above the list) — the current category's numbers, and clicking one hides
+   everything else. While a search is running they count the matches instead.
+4. **Section fold lines** (inside `Obsidian`, `Core plugins`, …) — where the quiet rows actually
+   live. **These exist only under `All` with no search**: any filter or search flattens the section
+   into one plain list, because the pill you just clicked already is the filing.
+5. **The section header's own number** — a total (`31`, or `6/31` once narrowed), not a state. It is
+   grey for that reason.
+
+Surfaces 1–3 all read the same counter, so they can never contradict each other; only their scope
+differs.
+
 **Fate** — what the next run would do. The header strip, the sidebar counts and the filter pills all
 count these, and the three foldable ones each own a trailing fold line whose words match their
 pill's.
 
-| State | Pill / fold line | Icon | Colour | What it means |
-|---|---|---|---|---|
-| To capture | `To capture N` | `arrow-up-from-line` | orange | This device's settings are the newer ones; capturing writes them to the store |
-| To apply | `To apply N` | `arrow-down-to-line` | accent | The store is newer; applying brings it to this device |
-| Changed on both sides | counted under `To apply` | `⚠` inline | orange | Both sides moved since your last sync. Unstageable until you resolve it |
-| In sync | `In sync N` · `N items in sync` | `check` | green | Identical on both sides — nothing to do |
-| Not synced here | `Not synced here N` · `N items not synced on this device` | `circle-minus` | purple | You turned this item off on THIS device, or a device rule keeps it off this device's class. Your other devices keep syncing it |
-| No settings yet | `No settings yet N` · `N items with no settings yet` | `circle` | muted | Nothing saved for it anywhere yet |
-| Locked | counted under `No settings yet` | `lock` chip | muted | Encrypted, and this device has no passphrase — it can't be compared, so it has no fate |
+| State | Pill / fold line | Icon | Colour | Where you see it | What it means |
+|---|---|---|---|---|---|
+| To capture | `To capture N` | `arrow-up-from-line` | orange | Header · sidebar · pill · on the row. Never folds — work stays visible | This device's settings are the newer ones; capturing writes them to the store |
+| To apply | `To apply N` | `arrow-down-to-line` | accent | Same as above | The store is newer; applying brings it to this device |
+| Changed on both sides | counted under `To apply` | `triangle-alert` | red | Counted inside `To apply` everywhere; on the row it keeps its sentence on screen instead of hiding it in a tooltip | Both sides moved since your last sync. Unstageable until you resolve it |
+| In sync | `In sync N` · `N items in sync` | `check` | green | Header (shown even at 0) · sidebar (hidden at 0) · pill (shown even at 0) · fold line | Identical on both sides — nothing to do |
+| Not synced here | `Not synced here N` · `N items not synced on this device` | `circle-minus` | purple | Header · sidebar · pill · fold line — all four disappear entirely when nothing is excluded | You turned this item off on THIS device, or a device rule keeps it off this device's class. Your other devices keep syncing it |
+| No settings yet | `No settings yet N` · `N items with no settings yet` | `circle` | muted | Header (hidden at 0) · sidebar (hidden at 0) · pill (shown even at 0) · fold line | Nothing saved for it anywhere yet |
+| Locked | counted under `No settings yet` | `lock` chip | muted | Counted inside `No settings yet`; visible as a row only under `All` | Encrypted, and this device has no passphrase — it can't be compared, so it has no fate |
 
-**Availability** — whether this device can act at all. These render as amber folds under the fate
-folds, and each carries a note explaining what applying would mean for the rows inside it.
+**Availability** — whether this device can act at all. These live in **one** surface only: the amber
+folds under the fate folds, each carrying a note on what applying would mean for the rows inside.
+They are never counted by a pill or a badge — the rows inside them are already counted there by
+their fate.
 
 | State | Fold line | Icon | Colour | What it means |
 |---|---|---|---|---|
@@ -115,7 +136,11 @@ can find it again.
 
 **Transport** — desktop only, and about remotes rather than rows: `push` (`cloud-upload`, pink) is
 store changes not yet pushed to a remote, `pull` (`cloud-download`, cyan) is remote changes not yet
-pulled. **Leftover** (amber) is a section, not a row state: store files nothing syncs any more.
+pulled. As totals these appear in the header strip and the status bar only — never in a sidebar
+count, a filter pill or a fold, all of which are about items. Each remote's own state (`✓` matches,
+`↓` remote is newer, `↑` remote is older, `—` no store there yet, `?` unknown) shows beside its name
+in the sidebar and on its own pane. **Leftover** (amber) is a section, not a row state: store files
+nothing syncs any more.
 
 **Row chips** — quiet icons on the row's right, each appearing only when a fact deviates from the
 default: `not installed here` (`circle-dashed`), `desktop only` (`monitor`), `stays off`
