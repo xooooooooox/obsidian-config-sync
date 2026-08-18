@@ -18,6 +18,8 @@ import {
   ENABLED_ON_LABEL,
   fileRuleLegalForMode,
   FILE_SHARING_MENU_UNAVAILABLE_TEXT,
+  PER_KEY_RULES_STATE_TEXT,
+  PER_KEY_RULES_ACTION_TEXT,
   hasEnablementZone,
   hasKeyRules,
   memberCountLabel,
@@ -249,11 +251,26 @@ describe("fileRuleLegalForMode — mirrors manifest.ts's fileRule validator", ()
   });
 });
 
-// Copy contract: the Sync Center row shows this instead of a menu when the helper above is
-// false — pinned here so a future edit to either string can't drift them apart silently.
-describe("FILE_SHARING_MENU_UNAVAILABLE_TEXT", () => {
-  it("matches the copy-contract-exact string", () => {
-    expect(FILE_SHARING_MENU_UNAVAILABLE_TEXT).toBe("Per-key rules decide — opens Settings");
+// Copy contract for the per-key fallback, pinned so an edit on one surface cannot drift from the
+// other. The menu says the fact and the action as TWO lines — the single line they used to share
+// looked like a value stop and behaved like a link — and BOTH surfaces read these same two
+// constants, which is what ended the era of "opens Settings" here and "jump to them" there for one
+// identical fact. The tooltip stays one line because a tooltip is one line.
+describe("per-key fallback copy", () => {
+  it("says what decides, separately from what you can do about it", () => {
+    expect(PER_KEY_RULES_STATE_TEXT).toBe("Per-key rules decide this");
+    expect(PER_KEY_RULES_ACTION_TEXT).toBe("Open the per-key rules");
+  });
+
+  // The action reads true wherever it is offered: from the Sync Center it opens Settings and lands
+  // on the rules, inside Settings it scrolls to them. Naming a surface here (as both old strings
+  // did) is what forced two spellings.
+  it("names no surface, so one string can serve both", () => {
+    expect(PER_KEY_RULES_ACTION_TEXT).not.toMatch(/Settings|below|here/i);
+  });
+
+  it("keeps the trigger's one-line tooltip", () => {
+    expect(FILE_SHARING_MENU_UNAVAILABLE_TEXT).toBe("Per-key rules decide — open them in Settings");
   });
 });
 

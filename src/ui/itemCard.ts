@@ -619,10 +619,20 @@ export function sharingLabel(sharing: Sharing): string {
 }
 
 export const FILE_SHARING_OPTIONS: Sharing[] = [EVERYWHERE, perClass("desktop"), perClass("mobile")];
-// What the Sync Center's Settings-sync row shows instead of a menu when
-// fileRuleLegalForMode is false — vocabulary matches the More row's "Per-key rules, locks &
-// folders" rather than inventing a second phrase for the same idea.
-export const FILE_SHARING_MENU_UNAVAILABLE_TEXT = "Per-key rules decide — opens Settings";
+// The shared half of a per-key item's Settings-sync control, in two lines: what decides, then what
+// you can do about it. They used to be one line that looked like a value stop and behaved like a
+// link — every signal of something you pick, none of the behaviour.
+//
+// ONE pair of strings for BOTH surfaces. The Sync Center used to say "— opens Settings" and the
+// Settings tab "— jump to them": the same fact, worded twice, and after 2.25.0 they also land in
+// the same place, so there was nothing left for two spellings to distinguish. `Open the per-key
+// rules` is true on both — from the Sync Center it opens Settings and lands on them, inside
+// Settings it scrolls to them — and the ICON is what stays surface-specific (`settings-2` only
+// where something really does open Settings).
+export const PER_KEY_RULES_STATE_TEXT = "Per-key rules decide this";
+export const PER_KEY_RULES_ACTION_TEXT = "Open the per-key rules";
+// The trigger's tooltip still has to say both halves in one breath — a tooltip is one line.
+export const FILE_SHARING_MENU_UNAVAILABLE_TEXT = "Per-key rules decide — open them in Settings";
 export const FIELD_SHARING_OPTIONS: Sharing[] = [EVERYWHERE, perClass("desktop"), perClass("mobile"), THIS_DEVICE];
 export const COMPANION_DEVICE_OPTIONS: DeviceClass[] = ["all", "desktop", "mobile"];
 

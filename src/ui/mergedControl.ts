@@ -30,8 +30,15 @@ export function buildSectionedMenu(sections: readonly MenuSectionModel[]): Menu 
       // who gets it), and the line says so without splitting the radio group in two.
       if (entry.separatorBefore === true) menu.addSeparator();
       menu.addItem((item) => {
-        item.setTitle(entry.title).setChecked(entry.checked).onClick(entry.action);
+        item.setTitle(entry.title);
         if (entry.icon !== null) item.setIcon(entry.icon);
+        // A state line states; it does not offer. `setIsLabel` drops the checkmark slot and the
+        // hover/pick affordance, which is exactly the difference that was missing.
+        if (entry.isLabel === true) {
+          item.setIsLabel(true);
+          return;
+        }
+        item.setChecked(entry.checked).onClick(entry.action);
       });
     }
   });

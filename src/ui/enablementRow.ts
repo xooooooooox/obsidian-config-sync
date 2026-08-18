@@ -185,6 +185,12 @@ export interface LocalMenuItem {
   // group, which is precisely why it read as the odd one out. The rule stays one group (picking any
   // stop unpicks the others) and the line says the question changed.
   separatorBefore?: boolean;
+  // Renders as a NON-SELECTABLE line (Obsidian's `setIsLabel`), for a section whose answer is a
+  // fact rather than a choice. `Per-key rules decide` used to be an ordinary entry sitting where
+  // the value stops sit, checkmark slot and all — it had every visual signal of something you pick
+  // and none of the behaviour, so it read as one. State and action are two lines now: this one says
+  // what decides, the one under it does something about it.
+  isLabel?: boolean;
 }
 
 // One menu, two questions, so two labelled sections instead of six flat entries. The headers are

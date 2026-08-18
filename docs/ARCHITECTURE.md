@@ -328,7 +328,14 @@ functions.
   a status recompute whose `in-sync` results reseed the baseline (this also covers upgrade
   migration and self-healing after a wiped ledger). `parseLedger`/`applyUpdates`/`pruneLedger` are
   pure and total: malformed or missing input parses to an empty ledger, entries for groups that
-  left the compiled config are pruned on write, `no-settings`/`not-captured` groups drop
+  left the compiled config are pruned on write — and **only** for that reason: the keep-set is built
+  from the whole compile, never from the narrowed list a device actually compares. The device-class
+  filter and this device's opt-out list both narrow that list, and both are reversible choices
+  rather than statements that an item stopped existing; building the keep-set from them (which
+  `refreshLocalStatus` did until 2.25.0) deleted the baseline of every opted-out and every
+  class-scoped-away item on the next refresh, so reversing the choice found no baseline and the row
+  fell to `never-synced` — which presents as APPLY, on a row that had been asking to be captured.
+  The prune answers "does this item still exist?", never "is it being compared right now?" — `no-settings`/`not-captured` groups drop
   their entry, while comparison errors and `locked` groups keep theirs (a transient read failure
   or missing passphrase must not degrade direction knowledge). A lost ledger only ever widens uncertainty toward
   `never-synced`, never guesses a destructive direction.

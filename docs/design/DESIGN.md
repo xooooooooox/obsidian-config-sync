@@ -780,10 +780,13 @@ noted):
   glyph's tooltip). The word "Default" is retired: it named nothing the interface ever showed.
   Both glyphs are ALWAYS visible; only the ⇕ picker hint hover-reveals (§2.3 hover-reveal law).
   Where the row has no local layer at all it renders one glyph and a one-section menu (§2.3). The
-  per-key fallback replaces the shared half's LIST with a single entry, `Per-key rules decide —
-  opens Settings` on a dim `braces` glyph, whose click is the same deep link the `More` row
-  takes — one click more than the old bare icon, and in exchange the jump carries a label instead
-  of a tooltip a phone never shows. `After
+  per-key fallback replaces the shared half's LIST with a state line plus an action — `Per-key
+  rules decide this` (`setIsLabel`, unpickable) then `Open the per-key rules` — on a dim `braces`
+  glyph, the action being the same deep link the `More` row takes, only aimed at the rules
+  themselves (`spot: "key-rules"`). One click more than the old bare icon, and in exchange the jump
+  carries a label instead of a tooltip a phone never shows. It was ONE line for a while, sitting
+  where the value stops sit with a checkmark slot of its own: every signal of something you pick,
+  none of the behaviour. `After
   install`/`Enablement` keep their own textual triggers (`config-sync-menuchip
   config-sync-card-trigger` — no glyph vocabulary for them), styled to the same trigger-box
   family so the card reads as one control language regardless of trigger kind. A sharing cell with
@@ -1106,7 +1109,11 @@ noted):
     `data.json` only because `pruneSettingsFile` still needs it for a clean round-trip). The
     control keeps both halves — the local opt-out is a different datum and still works — but its
     shared half has no value to pick, so it contributes ONE menu entry instead of a list of stops:
-    `Per-key rules decide — jump to them`, on the same dim `braces` glyph the trigger shows.
+    two lines — `Per-key rules decide this` (a `setIsLabel` state line, not pickable) then
+    `Open the per-key rules` — on the same dim `braces` glyph the trigger shows. One line carrying
+    both read as a value stop and behaved as a link; and BOTH surfaces now read the same two
+    constants (itemCard.ts), which is what ended one fact being spelled `— opens Settings` in the
+    Sync Center and `— jump to them` in Settings.
     Choosing it scrolls to the rules and flashes `config-sync-search-highlight`, the SAME class the
     search bar's own card jump uses. The jump's TARGET is wherever the rules actually live: the
     `KEY RULES` panel when there is one, else — for a card whose only per-key entries are

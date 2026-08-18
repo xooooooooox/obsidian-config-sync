@@ -120,6 +120,8 @@ import { SettingsSpot } from "./settingsDeepLink";
 // labels, see below) for an unrelated domain.
 import {
   FILE_SHARING_MENU_UNAVAILABLE_TEXT,
+  PER_KEY_RULES_STATE_TEXT,
+  PER_KEY_RULES_ACTION_TEXT,
   FILE_SHARING_OPTIONS,
   sharingIcon,
   sharingLabel,
@@ -3320,7 +3322,12 @@ export class SyncCenterView extends ItemView {
         sections: () => [
           {
             header: SHARED_WITH_HEADER,
-            items: [{ title: FILE_SHARING_MENU_UNAVAILABLE_TEXT, icon: "braces", checked: false, action: () => this.host.openSettingsAt(ref, "key-rules") }],
+            items: [
+              { title: PER_KEY_RULES_STATE_TEXT, icon: "braces", checked: false, isLabel: true, action: () => {} },
+              // `settings-2` here and nowhere else in this pair: from the Sync Center this really
+              // does open Settings, which is the one thing that glyph means.
+              { title: PER_KEY_RULES_ACTION_TEXT, icon: "settings-2", checked: false, action: () => this.host.openSettingsAt(ref, "key-rules") },
+            ],
           },
           localSection(),
         ],

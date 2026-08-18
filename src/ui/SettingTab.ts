@@ -1,5 +1,6 @@
 import { refItemId } from "../core/itemKeys";
 import { SettingsDeepLink } from "./settingsDeepLink";
+import { PER_KEY_RULES_ACTION_TEXT, PER_KEY_RULES_STATE_TEXT } from "./itemCard";
 import { App, ButtonComponent, ExtraButtonComponent, Menu, Notice, Platform, Plugin, PluginSettingTab, Scope, SearchComponent, SecretComponent, Setting, setIcon, setTooltip, TextComponent, ToggleComponent } from "obsidian";
 import {
   QualifierAutocomplete,
@@ -301,7 +302,10 @@ function defaultFieldsFromDetection(keys: string[]): FieldRule[] {
 // directly below this row and answers the same question nearer and permanently, so a visible line
 // would only say twice what the layout already says once. The reading path that matters starts at
 // the eye (browse the file), and adding a key raises that zone label on its own.
-const PER_KEY_RULES_JUMP_TEXT = "Per-key rules decide — jump to them";
+// One tooltip saying both halves, because a tooltip is one line. The MENU says them as two
+// (itemCard.ts's PER_KEY_RULES_STATE_TEXT / _ACTION_TEXT) — and the Sync Center's copy of this row
+// reads from the same constants, so the two surfaces can no longer word the same fact differently.
+const PER_KEY_RULES_TOOLTIP = "Per-key rules decide — open them below";
 
 // The Access-token control's standing explanation (DESIGN.md §4 Remote editor): tooltip-borne, so
 // it never spends a form row of its own.
@@ -1596,11 +1600,19 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       // rows one above the other drawing the same mark for different facts is what sent the reader
       // looking for a difference that was not there.
       this.paintMergedControl(sharingCell, {
-        shared: { icon: "braces", tooltip: PER_KEY_RULES_JUMP_TEXT },
+        shared: { icon: "braces", tooltip: PER_KEY_RULES_TOOLTIP },
         local: optOutLocalSegment(optedOut),
         localIsException: optedOut,
         sections: () => [
-          { header: SHARED_WITH_HEADER, items: [{ title: PER_KEY_RULES_JUMP_TEXT, icon: "braces", checked: false, action: () => this.jumpToKeyRules(wrap, def, item) }] },
+          {
+            header: SHARED_WITH_HEADER,
+            items: [
+              { title: PER_KEY_RULES_STATE_TEXT, icon: "braces", checked: false, isLabel: true, action: () => {} },
+              // No `settings-2` on this side: Settings is already open, so nothing opens — the jump
+              // scrolls within this very card.
+              { title: PER_KEY_RULES_ACTION_TEXT, icon: null, checked: false, action: () => this.jumpToKeyRules(wrap, def, item) },
+            ],
+          },
           localSection(),
         ],
       });
