@@ -83,7 +83,7 @@ import {
 } from "./panelModel";
 import { Fate, FateInput, NOTHING_YET_SENTENCE, rowFate, versionAheadClause } from "./fateModel";
 import { openDiffModal } from "./DiffModal";
-import { renderDiffPanel } from "./diffView";
+import { renderDiffPanel, type DiffResolveControl } from "./diffView";
 import { confirmDeleteLeftovers } from "./ConfirmModal";
 import { LEFTOVER_SECTION_ORDER, LeftoverSection } from "../core/leftover";
 import { EnablementList, isSwitchListGroup, switchListSortedView } from "../core/switchList";
@@ -101,6 +101,8 @@ import {
   AVAILABILITY_FOLD_ICON,
   AVAILABILITY_FOLD_TEXT,
   AVAILABILITY_FOLD_NOTE,
+  CONFLICT_ICON,
+  CONFLICT_COLOR_CLASS,
   type FoldKind,
   type AvailabilityFoldKind,
 } from "./foldIcons";
@@ -450,6 +452,12 @@ export class SyncCenterView extends ItemView {
   // new view instance" idiom expandedItems/remoteFoldsOpen already use, so a repaint mid-review
   // doesn't re-collapse a row the user just opened.
   private expandedFileRows: Set<string> = new Set();
+  // Which file entries have their inline diff open — `{group}::{rel}`, the same idiom
+  // remoteFoldsOpen already uses for the remote pane's inline diffs, and for the same reason: a
+  // repaint rebuilds the list, and a diff held only in a closure would vanish with it. It became
+  // load-bearing once Resolve moved INTO the diff toolbar: picking a side re-renders, and closing
+  // the evidence the moment someone acts on it is the opposite of what that control is for.
+  private openEntryDiffs: Set<string> = new Set();
   // Remote pane fold state: survives repaints (periodic check, notify) the way
   // expandedItems/typeSectionOpen do for the main list — a repaint rebuilds the pane fresh, so
   // without this the on/off line, object-row folds, and open inline diffs would collapse on every
@@ -1419,7 +1427,7 @@ export class SyncCenterView extends ItemView {
         return;
       }
       renderDiffPanel(holder, base, produced, leftLabel, rightLabel, { name: "data.json", sorted: bothSorted },
-        () => openDiffModal(this.app, base, produced, leftLabel, rightLabel, { name: "data.json", sorted: bothSorted }));
+        () => openDiffModal(this.app, base, produced, leftLabel, rightLabel, { name: "data.json", sorted: bothSorted }), null);
     });
   }
 
@@ -2596,8 +2604,9 @@ export class SyncCenterView extends ItemView {
     } else if (fate.glyph === "—") {
       this.renderNeutralFateIcon(fateWrap, fate);
     } else {
-      fateWrap.createSpan({ cls: "config-sync-fate-glyph", text: fate.glyph });
-      fateSentenceEl = fateWrap.createSpan({ cls: "config-sync-fate-text", text: ` ${fate.sentence}` });
+      const ic = fateWrap.createSpan({ cls: `config-sync-fate-ic ${CONFLICT_COLOR_CLASS}`, attr: { "aria-label": fate.sentence } });
+      setIcon(ic, CONFLICT_ICON);
+      fateSentenceEl = fateWrap.createSpan({ cls: "config-sync-fate-text", text: fate.sentence });
       fateSentenceEl.hidden = expanded;
     }
 
@@ -2711,8 +2720,15 @@ export class SyncCenterView extends ItemView {
     });
 
     const changes = this.familyChanges(r);
-    if (dir !== null && hasChanges(changes)) {
-      this.renderFilesRow(fields, r, changes, dir, input.encrypted);
+    // An unresolved conflict has no direction yet, and the FILES row used to be gated on one — so
+    // the card asked you to pick a side while showing you nothing to pick it from, and only
+    // revealed the files AFTER you had committed. The evidence now comes first: an unresolved
+    // conflict previews the `Use theirs` side (`apply`), and the toolbar control both switches the
+    // preview and IS the choice, because in this plugin a diff always shows what one choice would
+    // do (see diffView's DiffResolveControl).
+    const previewDir: Direction | null = dir ?? (isConflict ? "apply" : null);
+    if (previewDir !== null && hasChanges(changes)) {
+      this.renderFilesRow(fields, r, changes, previewDir, input.encrypted, isConflict ? this.conflictResolve(r, changes) : null);
     }
 
     if (isConflict) this.renderResolveRow(fields, r);
@@ -2778,6 +2794,37 @@ export class SyncCenterView extends ItemView {
     detail.appendChild(row);
   }
 
+  // The same choice the Resolve row below offers, handed to every diff this row opens. Two
+  // entrances, one datum (`conflictChoice`) — the toolbar one exists because the diff is where the
+  // consequences of each side are actually visible.
+  //
+  // `scopeNote` is the honest disclosure for a multi-file item: the run writes a whole group
+  // (`ApplyItem`/`CaptureItem` carry a group name; the only partial mechanism, `stagedMembers`, is
+  // switch-list-only), so picking a side inside one file's diff settles its siblings too. Saying so
+  // costs one line; not saying it would let a user resolve a file this window never showed them.
+  private conflictResolve(r: StatusRow, changes: FileChanges): DiffResolveControl {
+    const name = r.group.name;
+    const total = changes.added.length + changes.updated.length + changes.deleted.length;
+    return {
+      chosen: this.conflictChoice.get(name) ?? null,
+      scopeNote: total > 1 ? `Resolves all ${total} files in ${r.group.label} — this item is written as a whole.` : null,
+      onPick: (choice) => this.pickConflictSide(name, choice),
+    };
+  }
+
+  // Clicking the already-active side clears it (the same "click the active segment to unstage"
+  // idiom renderDirectionToggle uses), so both entrances behave identically.
+  private pickConflictSide(name: string, choice: ConflictChoice): void {
+    if (this.conflictChoice.get(name) === choice) {
+      this.conflictChoice.delete(name);
+      this.selected.delete(name);
+    } else {
+      this.conflictChoice.set(name, choice);
+      this.selected.add(name);
+    }
+    this.render(this.renderGen);
+  }
+
   // Resolve (conflict rows only): segmented `Use theirs ↓` / `Keep mine ↑`. Clicking
   // the already-active choice clears it (the same "click the active segment to unstage" idiom
   // `renderDirectionToggle` already uses elsewhere) — Resolve doubles as this row's only
@@ -2793,14 +2840,7 @@ export class SyncCenterView extends ItemView {
         const b = seg.createEl("button", { cls: `config-sync-seg-btn is-${choice}${on ? " is-on" : ""}`, text: label });
         b.addEventListener("click", (e) => {
           e.stopPropagation();
-          if (on) {
-            this.conflictChoice.delete(name);
-            this.selected.delete(name);
-          } else {
-            this.conflictChoice.set(name, choice);
-            this.selected.add(name);
-          }
-          this.render(this.renderGen);
+          this.pickConflictSide(name, choice);
         });
       };
       opt("apply", "Use theirs ↓");
@@ -2863,7 +2903,7 @@ export class SyncCenterView extends ItemView {
   // open. Empty-row drop (no changes at all) happens up front rather than after building the
   // entry list, since the collapsed head always renders SOMETHING once there IS at least one
   // change.
-  private renderFilesRow(detail: HTMLElement, r: StatusRow, changes: FileChanges, dir: Direction, encrypted: boolean): void {
+  private renderFilesRow(detail: HTMLElement, r: StatusRow, changes: FileChanges, dir: Direction, encrypted: boolean, resolve: DiffResolveControl | null): void {
     const total = changes.added.length + changes.updated.length + changes.deleted.length;
     if (total === 0) return;
     const row = this.cardRowShell("Files", true);
@@ -2883,11 +2923,17 @@ export class SyncCenterView extends ItemView {
       // badge fills in (`.is-open`) instead of a chevron rotating beside it: same state, one fewer
       // glyph.
       const head = value.createDiv({ cls: "config-sync-files-head" });
-      const badge = head.createSpan({ cls: `config-sync-files-badge ${ACTION_COLOR_CLASS[dir]}${expanded ? " is-open" : ""}` });
-      setIcon(badge.createSpan({ cls: "config-sync-files-badge-ic" }), ACTION_ICON[dir]);
+      // While a conflict is undecided the badge wears the CONFLICT mark, not a direction arrow:
+      // the row has no direction yet, and `dir` here is only the side being previewed. Once a side
+      // is picked it becomes an ordinary directional badge like every other row's.
+      const undecided = resolve !== null && resolve.chosen === null;
+      const badge = head.createSpan({
+        cls: `config-sync-files-badge ${undecided ? CONFLICT_COLOR_CLASS : ACTION_COLOR_CLASS[dir]}${expanded ? " is-open" : ""}`,
+      });
+      setIcon(badge.createSpan({ cls: "config-sync-files-badge-ic" }), undecided ? CONFLICT_ICON : ACTION_ICON[dir]);
       badge.createSpan({ text: String(total) });
       row.setAttrs({ "aria-expanded": expanded ? "true" : "false" });
-      if (expanded) this.renderUnifiedFiles(list, r, changes, dir, encrypted);
+      if (expanded) this.renderUnifiedFiles(list, r, changes, dir, encrypted, resolve);
     };
     // THE ROW is the target, not the badge. 2.25.0 moved every card control to the card's right
     // edge, and the listeners had always been on the badge — so the only clickable thing slid to
@@ -2902,7 +2948,10 @@ export class SyncCenterView extends ItemView {
     row.setAttrs({
       role: "button",
       tabindex: "0",
-      "aria-label": `${filesChangeLabel(total)} — ${dir === "capture" ? "these changes land in the store" : "these changes land on this device"}`,
+      "aria-label":
+        resolve !== null && resolve.chosen === null
+          ? `${filesChangeLabel(total)} — changed on both sides; open to compare each side before choosing`
+          : `${filesChangeLabel(total)} — ${dir === "capture" ? "these changes land in the store" : "these changes land on this device"}`,
     });
     row.addEventListener("click", toggle);
     row.addEventListener("keydown", (e) => {
@@ -2919,7 +2968,7 @@ export class SyncCenterView extends ItemView {
   // diffPair-backed inline expand renderCappedChanges already uses for "view" and "diff" alike
   // (the "view" case is just a diff against an empty base — the same content diffPair already
   // returns — mirroring the remote pane's "not in your store" content view).
-  private renderUnifiedFiles(detail: HTMLElement, r: StatusRow, changes: FileChanges, dir: Direction, encrypted: boolean): void {
+  private renderUnifiedFiles(detail: HTMLElement, r: StatusRow, changes: FileChanges, dir: Direction, encrypted: boolean, resolve: DiffResolveControl | null): void {
     const { shown, rest } = capFileEntries(changes, 10);
     const renderEntry = (e: CappedEntry): void => {
       const kind: "added" | "updated" | "deleted" = e.kind === "add" ? "added" : e.kind === "upd" ? "updated" : "deleted";
@@ -2949,19 +2998,14 @@ export class SyncCenterView extends ItemView {
       const affLabel = pres.affordance === "view" ? "View content" : "View changes";
       const diffIcon = line.createSpan({ cls: "config-sync-diffic", attr: { "aria-label": affLabel, role: "button", tabindex: "0" } });
       setIcon(diffIcon, "file-diff");
+      const owner = this.fileOwner(r, e.name);
+      const diffKey = `${owner.group}::${owner.rel}`;
       let panel: HTMLElement | null = null;
-      const toggle = (): void => {
-        if (panel !== null) {
-          panel.remove();
-          panel = null;
-          diffIcon.removeClass("is-open");
-          return;
-        }
+      const open = (): void => {
         diffIcon.addClass("is-open");
         const p = createDiv({ cls: "config-sync-inline-diff" });
         panel = p;
         line.insertAdjacentElement("afterend", p);
-        const owner = this.fileOwner(r, e.name);
         void this.host.diffPair(owner.group, owner.rel, dir).then((pair) => {
           if (panel !== p) return;
           if (pair === null) {
@@ -2988,9 +3032,22 @@ export class SyncCenterView extends ItemView {
           const leftLabel = dir === "capture" ? "store" : pres.affordance === "view" ? "not on this device yet" : "this device";
           const rightLabel = dir === "capture" ? "this device (what capture would write)" : "store (what apply would write)";
           renderDiffPanel(p, base, produced, leftLabel, rightLabel, { name: e.name, sorted: switchSorted || jsonSorted },
-            () => openDiffModal(this.app, base, produced, leftLabel, rightLabel, { name: e.name, sorted: switchSorted || jsonSorted }));
+            () => openDiffModal(this.app, base, produced, leftLabel, rightLabel, { name: e.name, sorted: switchSorted || jsonSorted }), resolve);
         });
       };
+      const toggle = (): void => {
+        if (panel !== null) {
+          this.openEntryDiffs.delete(diffKey);
+          panel.remove();
+          panel = null;
+          diffIcon.removeClass("is-open");
+          return;
+        }
+        this.openEntryDiffs.add(diffKey);
+        open();
+      };
+      // Re-open on a repaint, before any listener fires — see openEntryDiffs.
+      if (this.openEntryDiffs.has(diffKey)) open();
       line.addEventListener("click", (ev) => {
         ev.stopPropagation();
         toggle();
@@ -4046,7 +4103,7 @@ export class SyncCenterView extends ItemView {
     const leftLabel = f.local !== null ? "your store" : "not in your store";
     const rightLabel = f.remote !== null ? remoteName : `not at ${remoteName}`;
     renderDiffPanel(p, left, right, leftLabel, rightLabel, { name: f.itemRel, sorted: switchSorted || jsonSorted },
-      () => openDiffModal(this.app, left, right, leftLabel, rightLabel, { name: f.itemRel, sorted: switchSorted || jsonSorted }));
+      () => openDiffModal(this.app, left, right, leftLabel, rightLabel, { name: f.itemRel, sorted: switchSorted || jsonSorted }), null);
   }
 
   private renderRemoteButtons(detail: HTMLElement, remote: Remote, pullAligned: boolean, noChanges: boolean): void {

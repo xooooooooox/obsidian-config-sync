@@ -744,6 +744,23 @@ noted):
   chips stay. **The card has no destructive footer:**
   stopping a whole item's sync happens on its own Settings card, one gesture, one home —
   reached from here only through `More`.
+- **Conflict resolution lives in the diff.** A diff in this plugin is never "how these two files
+  differ": `diffPair`'s `produced` has already been through captureTransform/applyTransform, so what
+  it shows is **what one CHOICE would do**. Direction is not a parameter for viewing a difference;
+  it is the thing being viewed. That makes the control that picks a preview and the control that
+  picks a side the same control, and it lives in the diff toolbar (`DiffResolveControl`,
+  `diffView.ts`) — `Use theirs ↓ | Keep mine ↑`, the active side in its own direction colour.
+  The card keeps its `Resolve` row for someone who already knows which side they want; both
+  entrances route through one `pickConflictSide`, so they are one decision, not two that agree.
+  An unresolved conflict renders its FILES row previewing the `Use theirs` side — it used to render
+  no FILES row at all (the row was gated on a decided direction), which asked the user to choose
+  with nothing on screen to choose from and revealed the files only after they had committed.
+  **Scope is the item, and the UI says so when that matters**: a run writes a whole group
+  (`ApplyItem`/`CaptureItem` carry a group name; `stagedMembers` is switch-list-only), so on a
+  multi-file item a side picked in one file's diff settles its siblings — disclosed in a line under
+  the toolbar, and omitted on a single-file item where the file IS the item. Open inline diffs
+  survive the repaint a pick causes (`openEntryDiffs`, the same idiom `remoteFoldsOpen` uses):
+  closing the evidence the moment someone acts on it is the opposite of what the control is for.
 - **Merged two-layer control** (`config-sync-mergedctl*` classes, `ui/mergedControl.ts` +
   `ui/enablementRow.ts`) — one shape reused by four surfaces: a Sync Center row's
   `Enabled on`/`Settings sync`, a plugin card's `Enabled on`, a carrier card's element rows, and an

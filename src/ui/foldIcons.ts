@@ -31,6 +31,21 @@ export const FOLD_ICON_COLOR_CLASS: Record<FoldKind, string | null> = {
   nosettings: null,
 };
 
+// The conflict mark. Not a fold — a conflict is the one row state with nothing to fold INTO, and
+// the only fate that keeps its sentence on screen ("a conflict must shout"). It lives here anyway
+// because this file is the row-state icon vocabulary, and until 2.25.0 conflict was the last state
+// in that column still drawing a TEXT glyph (`⚠`) while ↑/↓/✓/⊖/○ had all become fixed-size SVG:
+// its size and baseline drifted with the font, and it could not carry a colour class of its own.
+//
+// Red, not the orange it shared with `capture`. A routine "your settings are newer, capture them"
+// and a deadlock waiting on the user were wearing the same colour in the same column, and once the
+// conflict row stopped being dimmed (it used to inherit the in-sync opacity) that collision was the
+// only thing left telling them apart — which is to say, nothing was. Red has uses elsewhere (a
+// failed run in the result strip, a deleted line in a diff), but those are other surfaces; in the
+// row's fate column nothing else claims it.
+export const CONFLICT_ICON = "triangle-alert";
+export const CONFLICT_COLOR_CLASS = "is-conflict";
+
 // The AVAILABILITY folds — a second axis, and deliberately a different one. The three above answer
 // "is there anything to do with this item"; these answer "can this device do it at all".
 //
