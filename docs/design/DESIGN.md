@@ -78,14 +78,14 @@ single-row and bulk alike.
 
 | What | Value | Why |
 |---|---|---|
-| Checkbox column | mainbar `padding-right: calc(var(--size-4-3) + 1px)`; sections carry the card inset themselves (nested card unframed); section-head boxes `margin-left: auto` | one shared right edge: select-all = card rows = section rows = section heads (probe-equal, desktop + mobile) |
+| Checkbox column | mainbar `padding-right: calc(var(--size-4-3) + 1px)`; a section's nested card is unframed and bleeds its padding back out (`margin: 0 calc(-1 * var(--size-4-3))`), so its content box still sits on the section's own inset; section-head boxes `margin-left: auto` | one shared right edge: select-all = card rows = section rows = section heads (probe-equal, desktop + mobile) |
 | Header ↻ | `margin-right: 7px` | glyph right edge == checkbox column (probed) |
 | Checkboxes | 15px desktop / 24px mobile (radius 6px), pseudo ✓ offsets differ per platform | Obsidian's mobile checkbox styling defeats hit-area tricks; visual = touch target |
 | Touch targets | 44px rows/switcher/search-adjacent, 36px pills/seg/side items, 32px detail seg buttons | mobile minimums |
 | Mobile bottom clearance | `calc(var(--mobile-toolbar-height, 48px) + 88px)` | clears navbar + user status-bar snippets |
 | Inline micro-gaps | 3px (sidebar column rhythm) · 5px (icon↔label clusters) | between `--size-4-*` steps; 8px gaps use `var(--size-4-2)` |
 | Drawer control glyphs | `var(--icon-s)`, ONE rule covering lock / sharing picker / per-item toggle / File-preview eye / merged control | only the merged control used to carry a size; the rest fell back to Obsidian's 18px default and read a size bigger the moment a 16px glyph landed beside them. The ⇕ keeps 11px through a same-specificity rule placed after it |
-| Card value inset | `.config-sync-cardval { padding-left: var(--size-2-3) }` | matches the trigger boxes' own 6px, so prose and controls in a card share one left edge; the inset lives on the TRACK, not on each trigger, so anything added later aligns by construction |
+| Card control rail | `.config-sync-cardrow > .config-sync-mergedctl, .config-sync-cardrow > .config-sync-cardrow-ctl { grid-column: 4; justify-self: end }` | ONE rule puts every card control on the card's right edge, the same rule the item rows' checkboxes sit on, so a control added later aligns by construction. `.config-sync-cardval` needs no inset of its own: nothing lands on track 2 for it to line up with any more |
 
 **The settings-drawer row grid (scrow).** Every row in an item card's drawer is a
 `.config-sync-scrow`: `identity 170px | controls 1fr | 1px | trailing max-content`. **The controls
@@ -660,26 +660,35 @@ noted):
   Settings drawer's `config-sync-card-rulerow` carry NO `border-bottom` (a hairline per row
   reads as a table embedded in a borderless panel). Every row
   (`renderCardKeyRow`/`renderMergedRow`/`renderCardIconActionRow`) shares ONE grid,
-  `.config-sync-cardrow { grid-template-columns: 130px 56px 1px 1fr }` —
-  label | control | 1px | value — so every row's control
-  lands on the SAME vertical rule across the card, the More row's icon included. Track 3 carried
+  `.config-sync-cardrow { grid-template-columns: 130px 1fr 1px max-content }` —
+  label | free | 1px | control — the control track LAST and content-sized, so every row's control
+  anchors to the card's RIGHT edge, on the same vertical rule as the item rows' own checkboxes
+  above it, at every viewport width. (An earlier shape pinned the control to a fixed 130px offset
+  instead. Unremarkable on a wide desktop card; dead centre of a 390px phone row.) Track 3 carried
   the two-segment divider until the merge and is now empty; it stays so this grid and the drawer's
   keep the same four-track shape and the `grid-column: 4` anchors keep their number.
-  (The Settings drawer's `.config-sync-scrow` speaks the same grammar with a wider 170px
-  identity column and the three-slot controls column — §1.4.) Wide
-  rows (State/Files/Resolve/After install/Enablement/Note) put
+  (The Settings drawer's `.config-sync-scrow` speaks the same grammar — a wider 170px
+  identity column, the three-slot controls column, the same right-anchored end — §1.4.) Wide
+  rows (State/Resolve/After install/Enablement/Note) put
   their whole value in `.config-sync-cardval`, spanning tracks 2-4 as one cell (`min-width: 0`, no
   fixed narrow width — ellipsis is a last resort, never a first one, while the row still has
   room); icon-only rows (`.is-iconrow` — not `.is-compact`, which already names the
-  narrow-viewport `.config-sync-shell` layout, an unrelated axis) put their one control on
-  track 2 instead. A row that builds no value renders nothing at all: no separator, no
+  narrow-viewport `.config-sync-shell` layout, an unrelated axis) put their one control on the
+  last track instead. A row that builds no value renders nothing at all: no separator, no
   reserved height — built off-DOM first, appended only once non-empty. **Mobile:**
   wide rows stack to full width (label above a full-width value, CSS-only
   `flex-direction: column`), since Resolve's
   segmented control needs the full device width the shared grid's `1fr` remainder can't
-  spare at ~360px; icon rows (merged control/More) stay on the SAME shared grid at every width —
-  there is nothing long to clip, only a glyph + chevron, and stacking them would silently
-  re-introduce the cross-row misalignment the shared grid exists to remove. Standardized
+  spare at ~360px; icon rows (merged control/More/Files) stay on the SAME shared grid at every
+  width — there is nothing long to clip, only a glyph or a badge, and stacking them would silently
+  re-introduce the cross-row misalignment the shared grid exists to remove. A section's nested
+  `.config-sync-card` keeps every other card's horizontal padding and bleeds it back out with an
+  equal negative margin: row content lands exactly where the section's own inset used to put it
+  (one checkbox column, above), while the FILL reaches the section frame, 12px clear of the text on
+  either side. The padding was zeroed instead until 2.25.0, on the reasoning that the section frame
+  already carried the inset — but that inset sat OUTSIDE the fill, so fill and row text shared one
+  edge. Barely visible on a wide desktop card; on a phone the words sit right on the colour and
+  read as spilling out of the block. Standardized
   row set, in this order,
   each omitted when not applicable: `On
   apply` / `On capture` / `State` (the fate sentence expanded to a full clause — install
@@ -689,8 +698,11 @@ noted):
   expanded. It replaced three separate marks — a bare direction icon, a neutral count pill and a
   rotating `chevron-right` — that all answered the same question, and made an 11px chevron the
   thing to aim at; the whole head is the click/keyboard target now, so nothing has to be aimed at,
-  and `aria-expanded` carries the state the chevron used to draw. Expanding reveals the entry list,
-  remembered per row while the pane stays open (`expandedFileRows`, a `Set` keyed by group
+  and `aria-expanded` carries the state the chevron used to draw. One badge is also why this is an
+  icon row: the badge sits on the control rail with every other card control, and the entry list it
+  opens is a SIBLING of the row rather than part of its value cell, so file names get the card's
+  full width on phone and desktop alike instead of the grid's remainder. Expanding reveals the
+  entry list, remembered per row while the pane stays open (`expandedFileRows`, a `Set` keyed by group
   name, cleared with `expandedItems`/`remoteFoldsOpen` when the pane closes); direction-aware
   entries — `+` /
   `~` / `−`, both directions — each ending in ONE 14px `file-diff` icon when
@@ -713,8 +725,9 @@ noted):
 - **Merged two-layer control** (`config-sync-mergedctl*` classes, `ui/mergedControl.ts` +
   `ui/enablementRow.ts`) — one shape reused by four surfaces: a Sync Center row's
   `Enabled on`/`Settings sync`, a plugin card's `Enabled on`, a carrier card's element rows, and an
-  item card's key rules and path row (Unified card below). It lands on track 2 of the Sync Center's
-  four-track grid (Expanded card above) and in the device slot of the Settings drawer's
+  item card's key rules and path row (Unified card below). It lands on the control track of the
+  Sync Center's four-track grid (Expanded card above) and in the device slot of the Settings
+  drawer's
   `.config-sync-scrow` (§1.4) — one control, so one cell on either surface, and every row's control
   on the same vertical rule. Shared glyph, a faint `·`, this device's glyph, then ONE muted PICKER
   `chevrons-up-down`; NO visible wordmark. Click (or Enter/Space) opens an Obsidian `Menu` whose

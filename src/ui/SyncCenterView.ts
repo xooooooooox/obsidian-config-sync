@@ -2726,13 +2726,15 @@ export class SyncCenterView extends ItemView {
 
   // The row shell every card row shares ("one grid per card"): a fixed label on
   // track 1 of `.config-sync-cardrow`'s four tracks. Callers fill the rest — either one value cell
-  // spanning tracks 2-4 (renderCardKeyRow, below) or a single control landing on track 2
-  // (renderMergedRow, renderCardIconActionRow) — so every row's icons
-  // sit on the SAME vertical rule regardless of which shape painted them.
+  // spanning tracks 2-4 (renderCardKeyRow, below) or a single control landing on the last track
+  // (renderMergedRow, renderCardIconActionRow, renderFilesRow) — so every row's icons
+  // sit on the SAME vertical rule, at the card's right edge, regardless of which shape painted
+  // them.
   //
-  // `iconRow` marks the icon-cell shape (merged-control rows, the More row): content-sized, so mobile
-  // keeps it on the shared grid instead of the wide rows' stack-to-full-width fallback below —
-  // there is no long text here to clip, only a glyph, and stacking would just waste a line. Named
+  // `iconRow` marks the icon-cell shape (merged-control rows, the More row, Files): content-sized,
+  // so mobile keeps it on the shared grid instead of the wide rows' stack-to-full-width fallback
+  // below — there is no long text here to clip, only a glyph or a badge, and stacking would just
+  // waste a line. Named
   // `is-iconrow`, not `is-compact` — that modifier already means something else on
   // `.config-sync-shell` (the narrow-viewport pane layout), an unrelated axis.
   private cardRowShell(label: string, iconRow: boolean): HTMLElement {
@@ -2827,9 +2829,12 @@ export class SyncCenterView extends ItemView {
   // through renderCardKeyRow: the badge is a static, non-interactive icon (no menu, no `▾`), a
   // shape none of renderCardKeyRow's other callers need, and threading an optional icon through
   // that shared helper for one row would ripple a parameter every other call site has to pass as
-  // absent. Not marked `is-iconrow`: file names can run long, so this row keeps the wide-row
-  // mobile stack-to-full-width fallback (DESIGN §4) instead of the icon-rows' shared grid at
-  // every width.
+  // absent. Marked `is-iconrow`: the row's whole value is one badge now, so it belongs on the
+  // shared grid at every width, landing on the same vertical rule as the merged controls under it.
+  // The expanded entry list is a SIBLING of the row, not part of its value cell — file names can
+  // run long, and as a sibling the list owns the card's full width on phone and desktop alike
+  // instead of the grid's remainder. It stays in the DOM while collapsed; `.config-sync-files-list`
+  // is `:empty`-hidden so a folded row carries no stray gap.
   // Default = count-only, same click-to-expand idiom the Settings tab's
   // companion member count (`config-sync-card-membercount`/`-memberarrow`) already established —
   // a neutral bare-number pill (aria/tooltip the full `filesChangeLabel` sentence) plus the FOLD
@@ -2840,11 +2845,13 @@ export class SyncCenterView extends ItemView {
   private renderFilesRow(detail: HTMLElement, r: StatusRow, changes: FileChanges, dir: Direction, encrypted: boolean): void {
     const total = changes.added.length + changes.updated.length + changes.deleted.length;
     if (total === 0) return;
-    const row = this.cardRowShell("Files", false);
-    const value = row.createDiv({ cls: "config-sync-cardval config-sync-files-val" });
+    const row = this.cardRowShell("Files", true);
+    const value = row.createDiv({ cls: "config-sync-cardrow-ctl config-sync-files-val" });
+    const list = createDiv({ cls: "config-sync-files-list" });
     const key = r.group.name;
     const build = (): void => {
       value.empty();
+      list.empty();
       const expanded = this.expandedFileRows.has(key);
       // ONE mark, not three. The row used to read `↑ (4) ›` — a direction badge, a neutral count
       // pill and a fold chevron, each its own little target — where all three answered the same
@@ -2875,10 +2882,11 @@ export class SyncCenterView extends ItemView {
         e.preventDefault();
         toggle();
       });
-      if (expanded) this.renderUnifiedFiles(value.createDiv({ cls: "config-sync-files-list" }), r, changes, dir, encrypted);
+      if (expanded) this.renderUnifiedFiles(list, r, changes, dir, encrypted);
     };
     build();
     detail.appendChild(row);
+    detail.appendChild(list);
   }
 
   // Files row: direction-aware entries via fileEntryFor, reusing the same
@@ -3189,12 +3197,12 @@ export class SyncCenterView extends ItemView {
   // Icon trigger + plain click (the `More` row): unlike renderCardIconMenuRow's family, this
   // row opens Settings directly rather than offering a menu — a sibling helper keeps that
   // distinction honest instead of routing a single-item fake menu through wireMenuTrigger. Lands
-  // on track 2 of the row's four-track grid, the same track every merged control lands on,
-  // tracks 3/4 left empty.
+  // on the last track of the row's four-track grid, the same track every merged control lands on,
+  // so it shares their right-edge rule; tracks 2/3 left empty.
   private renderCardIconActionRow(detail: HTMLElement, label: string, icon: string, isSet: boolean, ariaLabel: string, onActivate: () => void): void {
     const row = this.cardRowShell(label, true);
     const trigger = row.createSpan({
-      cls: `config-sync-sharingicon config-sync-card-trigger config-sync-cardrow-track2${isSet ? " is-set" : ""}`,
+      cls: `config-sync-sharingicon config-sync-card-trigger config-sync-cardrow-ctl${isSet ? " is-set" : ""}`,
       attr: { "aria-label": ariaLabel, role: "button", tabindex: "0" },
     });
     setIcon(trigger, icon);

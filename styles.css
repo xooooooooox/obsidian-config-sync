@@ -505,7 +505,13 @@ body.is-phone .config-sync-fkey {
    be aimed at. Same shape whether the row is collapsed (head only) or expanded (head plus
    `.config-sync-files-list` underneath). */
 .config-sync-files-head { display: flex; align-items: center; cursor: pointer; width: fit-content; }
-.config-sync-files-list { margin-top: var(--size-4-1); }
+/* The list is a SIBLING of the FILES row (renderFilesRow), so it owns the card's full width
+   instead of the grid remainder — file names are the one thing in this card that genuinely needs
+   the width. A small indent is all that says "these belong to the row above"; anything wider would
+   spend on decoration the phone width it just bought. It stays in the DOM while collapsed —
+   `:empty` keeps a folded row from carrying a stray gap under it. */
+.config-sync-files-list { margin-top: var(--size-4-1); margin-left: var(--size-4-3); }
+.config-sync-files-list:empty { display: none; }
 /* The fold line leads with its own chevron + fixed-size icon — a flex row. */
 .config-sync-unchanged { display: flex; align-items: center; gap: 7px; color: var(--text-muted); font-size: var(--font-ui-smaller); margin-top: var(--size-4-2); cursor: pointer; }
 .config-sync-unchanged .config-sync-row-chevron { margin-right: 0; }
@@ -1089,12 +1095,22 @@ body.is-mobile .config-sync-strip-meta .config-sync-report-pills { margin-left: 
 
 /* 0.20.0 availability sections */
 .config-sync-section { border: 1px dashed var(--background-modifier-border); border-radius: 8px; padding: 8px var(--size-4-3); margin-top: 8px; }
-/* One checkbox column: the section's own frame carries the card inset; the
-   nested card drops its frame so section rows share the main card's checkbox column —
-   border/padding stay zeroed (geometry doesn't move) but the fill stays:
-   background/border-radius match the panel's own `.config-sync-card` (line above) so a
-   section's body reads as the SAME filled block, one per category. */
-.config-sync-section .config-sync-card { border: none; background: var(--background-secondary); padding: 0; border-radius: var(--radius-m); }
+/* One checkbox column, and the fill still holds its text: the nested card
+   drops its FRAME and keeps every other card's horizontal padding (line above), then bleeds that
+   padding back out with an equal negative margin. The content box therefore lands exactly where
+   the section's own inset used to put it — select-all, card rows, section rows and section heads
+   keep the single right edge they are probed for — while the FILL now reaches the section frame,
+   12px clear of the text on either side. The padding used to be zeroed instead, on the reasoning
+   that the section's frame already carried the inset; but that inset sat OUTSIDE the fill, so fill
+   and row text shared one edge. Unremarkable on a wide desktop card. On a phone the words sit
+   right on the colour and read as if they were spilling out of the block. Background and radius
+   come from `.config-sync-card` unchanged, so a section's body still reads as the SAME filled
+   block, one per category. */
+.config-sync-section .config-sync-card {
+  border: none;
+  margin-left: calc(-1 * var(--size-4-3));
+  margin-right: calc(-1 * var(--size-4-3));
+}
 /* Layout-invisible wrapper (same idiom as .config-sync-item-wrap) around a type
    section's body — the active-rows card plus every fold line and its own opened card — so the
    section-head toggle can remove the whole body as one unit while its children still sit directly
@@ -1150,43 +1166,41 @@ body.is-mobile .config-sync-strip-meta .config-sync-report-pills { margin-left: 
 .config-sync-carrierchip.is-synced { color: var(--color-green); border-color: rgba(var(--color-green-rgb), 0.4); }
 .config-sync-carrierchip-ic svg { width: 13px; height: 13px; display: block; }
 /* Expanded-card rows ("one grid per card"): every row shares the
-   SAME four grid tracks — label | control | 1px | value — so the merged control lands on one
-   vertical rule across every row of the card, the More row's icon included (shortened labels are
-   what make the 130px label track and the 56px icon track — glyphs + a `▾` chevron, no wordmark —
-   both comfortable). Track 3 held the two-layer divider until the merge and is now empty; it stays
-   so this grid and `.config-sync-scrow` keep the same four-track shape, and so the `grid-column: 4`
-   anchors there keep their number. Wide rows
-   (State/Files/Resolve/After install/Enablement/Note) put their
+   SAME four grid tracks — label | free | 1px | control — which is also `.config-sync-scrow`'s
+   shape in the Settings drawer, so the two surfaces really do speak one grammar. The control
+   track is LAST and content-sized: every card control anchors to the card's RIGHT edge, on the
+   same vertical rule as the item rows' own checkboxes above it, at every viewport width. The
+   shape before this pinned controls to a fixed 130px offset instead — unremarkable on a wide
+   desktop card, dead centre of a 390px phone row. Track 3 held the two-layer divider until the
+   merge and is now empty; it stays so both grids keep the same four-track shape, and so the
+   `grid-column: 4` anchors keep their number. Wide rows
+   (State/Resolve/After install/Enablement/Note) put their
    whole value in `.config-sync-cardval`, spanning tracks 2-4 as one cell (`min-width: 0`, no fixed
    narrow width, so content never truncates while the row still has room — ellipsis is a last
-   resort, never a first one). Icon-only rows (`.is-iconrow`) put their one control on track 2
-   instead — see renderMergedRow/renderCardIconActionRow. (`.is-iconrow`, not
+   resort, never a first one). Icon-only rows (`.is-iconrow`) put their one control on the last
+   track instead — see renderMergedRow/renderCardIconActionRow/renderFilesRow. (`.is-iconrow`, not
    `.is-compact` — that modifier already means the narrow-viewport pane layout on
    `.config-sync-shell`, an unrelated axis.) */
-.config-sync-cardrow { display: grid; grid-template-columns: 130px 56px 1px 1fr; align-items: center; column-gap: var(--size-4-2); }
+.config-sync-cardrow { display: grid; grid-template-columns: 130px 1fr 1px max-content; align-items: center; column-gap: var(--size-4-2); }
 .config-sync-cardrow > .config-sync-explabel-inline { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* The 6px matches the trigger boxes' own left padding (`.config-sync-mergedctl`,
-   `.config-sync-cardrow-track2`). Without it a wide row's content starts at the track edge while
-   every control on the rows below starts 6px in — the FILES row's direction badge sat visibly left
-   of the glyphs under it. Putting the inset on the TRACK rather than on each trigger means anything
-   that lands here later is aligned by construction. */
-.config-sync-cardval { grid-column: 2 / -1; min-width: 0; padding-left: var(--size-2-3); }
-/* Any single cell explicitly on track 2 (the More row's icon — the same track the merged control
-   lands on) without claiming the trigger look (padding/hover/is-set) `.config-sync-mergedctl`
-   bakes in for its own row shape. */
-.config-sync-cardrow-track2 { grid-column: 2; }
+.config-sync-cardval { grid-column: 2 / -1; min-width: 0; }
+/* Every card control — the merged trigger, the More row's icon, the FILES badge — lands on the
+   last track, right-aligned, by ONE rule, so a control added later is aligned by construction.
+   `.config-sync-mergedctl` is scoped to this grid on purpose: the Settings drawer builds the very
+   same trigger inside its own slot, where the drawer's grid already places it.
+   `.config-sync-cardrow-ctl` is the plain cell for a control that does not claim the trigger look
+   (padding/hover/is-set) `.config-sync-mergedctl` bakes in for its own row shape. */
+.config-sync-cardrow > .config-sync-mergedctl,
+.config-sync-cardrow > .config-sync-cardrow-ctl { grid-column: 4; justify-self: end; }
 /* Only WIDE rows stack label-above-
    value on mobile — Resolve's segmented control (and any other long value) needs the full device
    width, not the ~55px `1fr` remainder a shared four-track row would leave it at 360px. Icon rows
-   (`.is-iconrow` — merged-control rows, the More row) have nothing long to clip, just a glyph +
-   chevron, so they keep the shared grid at every width instead: the shared grid's whole point is
-   icons landing on one vertical rule, which a mobile-only stack would silently un-do for exactly
-   the rows it matters most for. */
+   (`.is-iconrow` — merged-control rows, the More row, FILES) have nothing long to clip, just a
+   glyph or a badge, so they keep the shared grid at every width instead: the shared grid's whole
+   point is icons landing on one vertical rule, which a mobile-only stack would silently un-do for
+   exactly the rows it matters most for. */
 body.is-mobile .config-sync-cardrow:not(.is-iconrow) { display: flex; flex-direction: column; align-items: stretch; gap: var(--size-4-2); }
 body.is-mobile .config-sync-cardrow:not(.is-iconrow) > .config-sync-explabel-inline { flex: none; padding-top: 0; }
-/* Stacked, there is no control column to align to — the value owns the full width, so the track
-   inset would just read as a stray indent under the label. */
-body.is-mobile .config-sync-cardrow:not(.is-iconrow) > .config-sync-cardval { padding-left: 0; }
 /* After install / Enablement are the two rule controls left on a textual menu —
    their fallback options have no glyph vocabulary to lean on. Ellipsis is a last
    resort for a genuinely narrow viewport, never a first resort while `.config-sync-cardval` still
@@ -1218,9 +1232,9 @@ body.is-mobile .config-sync-cardrow:not(.is-iconrow) > .config-sync-cardval { pa
    says what both layers currently answer, and the menu's two section headers carry the words that
    used to be the eyebrow. Quiet-rest like every other icon control (the -chev rules below); the
    whole box lifts together on hover, because it IS one control.
-   ONE placement on both surfaces: a direct child of the row, landing on track 2 of the Sync
-   Center's `.config-sync-cardrow` and in the device slot of the Settings drawer's
-   `.config-sync-scrow` — no nested wrapper on either. */
+   ONE placement on both surfaces: a direct child of the row, landing on the control track of the
+   Sync Center's `.config-sync-cardrow` and in the device slot of the Settings drawer's
+   `.config-sync-scrow` — no nested wrapper on either, and right-aligned on both. */
 .config-sync-mergedctl { display: inline-flex; align-items: center; gap: 2px; width: fit-content; padding: 3px 6px; border-radius: var(--radius-s); color: var(--text-muted); cursor: pointer; opacity: 0.45; transition: opacity 0.12s; }
 .config-sync-mergedctl:hover, .config-sync-mergedctl:focus-visible { opacity: 1; background: var(--background-modifier-hover); }
 .config-sync-mergedctl.is-set { opacity: 1; }
