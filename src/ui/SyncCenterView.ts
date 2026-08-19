@@ -2835,19 +2835,17 @@ export class SyncCenterView extends ItemView {
     }
   }
 
-  // The row shell every card row shares ("one grid per card"): a fixed label on
-  // track 1 of `.config-sync-cardrow`'s four tracks. Callers fill the rest — either one value cell
-  // spanning tracks 2-4 (renderCardKeyRow, below) or a single control landing on the last track
-  // (renderMergedRow, renderCardIconActionRow, renderFilesRow) — so every row's icons
-  // sit on the SAME vertical rule, at the card's right edge, regardless of which shape painted
-  // them.
+  // The row shell every card row shares ("one grid per card"): a fixed label on track 1 of
+  // `.config-sync-cardrow`. Callers fill the rest — either one value cell spanning the remaining
+  // tracks (renderCardKeyRow, below) or a single control landing on the last one (renderMergedRow,
+  // renderCardIconActionRow, renderFilesRow) — so every row's icons sit on the same vertical rule
+  // at the card's right edge, whichever shape painted them.
   //
   // `iconRow` marks the icon-cell shape (merged-control rows, the More row, Files): content-sized,
-  // so mobile keeps it on the shared grid instead of the wide rows' stack-to-full-width fallback
-  // below — there is no long text here to clip, only a glyph or a badge, and stacking would just
-  // waste a line. Named
-  // `is-iconrow`, not `is-compact` — that modifier already means something else on
-  // `.config-sync-shell` (the narrow-viewport pane layout), an unrelated axis.
+  // so mobile keeps it on the shared grid instead of the wide rows' stack-to-full-width fallback —
+  // a glyph or a badge has nothing to clip, and stacking would waste a line. Named `is-iconrow`,
+  // not `is-compact`: that modifier names the narrow-viewport pane layout on
+  // `.config-sync-shell`, an unrelated axis.
   private cardRowShell(label: string, iconRow: boolean): HTMLElement {
     const row = createDiv({ cls: `config-sync-card-fieldrow config-sync-cardrow${iconRow ? " is-iconrow" : ""}` });
     row.createSpan({ cls: "config-sync-explabel config-sync-explabel-inline", text: label });
@@ -3418,11 +3416,10 @@ export class SyncCenterView extends ItemView {
     });
   }
 
-  // Icon trigger + plain click (the `More` row): unlike renderCardIconMenuRow's family, this
-  // row opens Settings directly rather than offering a menu — a sibling helper keeps that
-  // distinction honest instead of routing a single-item fake menu through wireMenuTrigger. Lands
-  // on the last track of the row's four-track grid, the same track every merged control lands on,
-  // so it shares their right-edge rule; tracks 2/3 left empty.
+  // Icon trigger + plain click (the `More` row): unlike renderCardIconMenuRow's family, this row
+  // opens Settings directly rather than offering a menu — a sibling helper keeps that distinction
+  // honest instead of routing a single-item fake menu through wireMenuTrigger. Lands on the same
+  // last track as every merged control, so it shares their rail rule; the middle track stays empty.
   private renderCardIconActionRow(detail: HTMLElement, label: string, icon: string, isSet: boolean, ariaLabel: string, onActivate: () => void): void {
     const row = this.cardRowShell(label, true);
     const trigger = row.createSpan({

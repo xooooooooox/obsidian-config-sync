@@ -85,43 +85,40 @@ single-row and bulk alike.
 | Mobile bottom clearance | `calc(var(--mobile-toolbar-height, 48px) + 88px)` | clears navbar + user status-bar snippets |
 | Inline micro-gaps | 3px (sidebar column rhythm) · 5px (icon↔label clusters) | between `--size-4-*` steps; 8px gaps use `var(--size-4-2)` |
 | Drawer control glyphs | `var(--icon-s)`, ONE rule covering lock / sharing picker / per-item toggle / File-preview eye / merged control | only the merged control used to carry a size; the rest fell back to Obsidian's 18px default and read a size bigger the moment a 16px glyph landed beside them. The ⇕ keeps 11px through a same-specificity rule placed after it |
-| Card control rail | `.config-sync-cardrow > .config-sync-mergedctl, .config-sync-cardrow > .config-sync-cardrow-ctl { grid-column: 4; justify-self: end }` | ONE rule puts every card control on the card's right edge, the same rule the item rows' checkboxes sit on, so a control added later aligns by construction. `.config-sync-cardval` needs no inset of its own: nothing lands on track 2 for it to line up with any more |
-| Card trigger padding | `.config-sync-mergedctl` and `.config-sync-sharingicon.config-sync-card-trigger` both `3px 6px` | the boxes all end on the rail, so a padding difference between them shows up as a difference between their GLYPHS — which is what the eye follows. At 4px vs 6px the More row's icon sat 2px right of the merged controls above it, boxes perfectly aligned the whole time |
+| Card control rail | `.config-sync-cardrow > .config-sync-mergedctl, .config-sync-cardrow > .config-sync-cardrow-ctl { grid-column: -2; justify-self: end }` | ONE rule puts every card control on the card's right edge, the same rule the item rows' checkboxes sit on, so a control added later aligns by construction. `.config-sync-cardval` needs no inset of its own: nothing lands on track 2 for it to line up with any more |
+| Card trigger padding | `.config-sync-mergedctl` and `.config-sync-sharingicon.config-sync-card-trigger` both `3px 6px` | the boxes all end on the rail, so a padding difference between them shows up as a difference between their glyphs, and the glyph is what the eye follows |
+| ⇕ column | `--cs-chev-slot: 14px` (gap 2 + margin 1 + glyph 11); every rail control either holds a ⇕ or reserves the column with `padding-right` | aligning box right edges staggers glyphs by exactly the ⇕'s width: a rail of merged controls (⇕) beside `More` and `Files` (no ⇕) measured 1677 / 1691 / 1691 for its last visible mark on boxes that all ended at 1697. The ⇕ rests invisible, so a reserved-but-empty column reads as the rail's own inset rather than a hole |
 
 **The settings-drawer row grid (scrow).** Every row in an item card's drawer is a
-`.config-sync-scrow`: `identity 170px | controls 1fr | 1px | trailing minmax(44px, max-content)`.
-**Track 4 is reserved, not content-sized**: it holds a row's own STATE toggle (a folder's sync
-switch), which only some rows have, and while it was `max-content` a row without one let its rule
-cluster run 44px further right than the row above it — the same glyph in two different columns on
-neighbouring rows. Reserving it gives the drawer two honest columns instead: toggles on the rail,
-rule controls immediately left of it, both card-wide. **The controls
-track is the flexible one and its cluster right-aligns inside it**, so the cluster hugs the
-card-toggle rail: a row with no trailing cell puts its controls on the card's right edge, and a
-folder row's own sync toggle (track 4) takes that edge with the controls immediately left of it.
-One vertical rule down the card, header toggle included. This is what "nothing anchors to the
-drawer's right edge" became once the two-layer merge emptied the right half — that rule existed to
-stop an ACTION column being invented, and rule controls lining up with the card's own toggle is not
-that. The
-controls cluster (`.config-sync-scrow-slots`) packs against the right, and two properties hold it
-together — they do NOT trade off against each other. **Role order is pinned in CSS** (`order` on
-`.is-aux` / `.is-lock` / `.is-device`), not left to whichever order a caller happens to fill the
-slots in. **Width is per-role and fixed while occupied** (aux 24 | lock 24 | device 68), so each
-role forms a strict column card-wide. An **empty slot is removed from the flow entirely**
-(`:empty`) rather than holding its width and a column-gap: it used to hold both, so a row missing
-its aux control showed a visible hole and its remaining controls floated left of the rail. Removing
-an empty slot cannot pull an occupied one out of column, because the cluster measures from the
-RIGHT — the device column from the rail, the lock column from the device column — and neither ever
-depended on whether aux happened to be there. Slot roles: aux = the per-item `list-checks` (array rule
-rows) — the path row's own aux slot stays empty, since its File-preview `eye` rides the filename
-line instead (see below); lock = encrypt toggles; device = every scope/rule picker AND the merged
-two-layer control, LAST and widest of the three. **The device slot is sized for the widest thing it
-holds (the merged control) and its content right-aligns**, because the control's width varies by row
-— a `Not shared` key has one glyph where a two-layer row has three. Centering a variable-width
-control in a fixed slot equalizes centers and staggers edges, which put a one-glyph row ~12px right
-of its neighbours; right edges are what the eye follows here, since that is where the rail is. STATE controls (a folder row's sync toggle) right-anchor on the
-card-toggle rail via `.config-sync-scrow-end`. Member-row indent lives on the name inside
-the identity cell, never on the row. There is no other drawer grid — `.config-sync-scrow`
-is the only row shape.
+`.config-sync-scrow`: `identity 170px | controls 1fr | trailing minmax(44px, max-content)`.
+**Track 3 is reserved, not content-sized**: it holds a row's own STATE toggle (a folder's sync
+switch), which only some rows have, and content-sizing it lets a row without one run 44px further
+right than the row above. Reserving it gives the drawer two columns: toggles on the rail, rule
+controls immediately left of it, both card-wide. **The controls track is the flexible one and its
+cluster right-aligns inside it**, so a row with no trailing cell puts its controls on the card's
+right edge and a folder row's toggle takes that edge with the controls immediately left. One
+vertical rule down the card, header toggle included.
+
+The controls cluster (`.config-sync-scrow-slots`) packs against the right, and three properties hold
+it together. **Role order is pinned in CSS** (`order` on `.is-aux` / `.is-lock` / `.is-device`), not
+left to whichever order a caller fills the slots in. **An empty slot leaves the flow entirely**
+(`:empty`), so it holds neither width nor a column-gap beside controls that are actually there;
+removing it cannot pull an occupied slot out of column, because the cluster measures from the RIGHT.
+**Each slot is one column** (aux 24 | lock 24 | device 68), so a control lands at the same x on
+every row. Slot roles: aux = the per-item `list-checks` on array rule rows, empty on the path row
+(its File-preview `eye` rides the filename line); lock = encrypt toggles; device = every scope/rule
+picker AND the merged two-layer control, last and widest of the three.
+
+**The device slot's control FILLS the slot** (`width: 100%`) and its ⇕ takes the right edge
+(`margin-left: auto`). What lands here has two natural widths — a merged control carrying both
+layers measures 65px, a picker or a merged control with no local layer measures 40px — so hugging
+one edge puts the leading glyph of the narrow ones 25px off the column. Filling the slot instead
+puts every shared glyph on the column's left edge and every ⇕ on its right, and leaves the slack
+between the local layer and the ⇕: exactly where the row is missing something. The 68px is a
+`min-width`, so a wider control grows the column rather than overflowing it. Reserve what is always
+there, never what varies, and let the slack trail — the same rule the sidebar count badges follow. STATE controls (a folder row's sync toggle) right-anchor on the card-toggle rail via
+`.config-sync-scrow-end`. Member-row indent lives on the name inside the identity cell, never on the
+row. There is no other drawer grid — `.config-sync-scrow` is the only row shape.
 
 **The path row.** Zone ②'s path row is TWO scrow lines inside the
 `.config-sync-card-sfhead` container: line 1 = the `SETTINGS SYNC` label + the slots
@@ -131,7 +128,7 @@ spanning the full card width (`grid-column: 1 / -1`), so `plugins/<id>/data.json
 paths never wrap, with the File-preview `eye` riding that same line, hugging the filename's right
 edge (a gap inside the `.config-sync-card-pathhost` flex — never `margin-left: auto`, which would
 anchor it to the CARD's right edge across this line's `1 / -1` span and invent the action column
-§2.1 forbids, and never `.config-sync-scrow-end`, a fixed `grid-column: 4` track that would overlap
+§2.1 forbids, and never `.config-sync-scrow-end`, the fixed trailing track, which would overlap
 that same span). The filename keeps its click-to-edit behavior; the edit input takes the
 full-width line, eye included.
 
@@ -700,13 +697,11 @@ noted):
   Settings drawer's `config-sync-card-rulerow` carry NO `border-bottom` (a hairline per row
   reads as a table embedded in a borderless panel). Every row
   (`renderCardKeyRow`/`renderMergedRow`/`renderCardIconActionRow`) shares ONE grid,
-  `.config-sync-cardrow { grid-template-columns: 130px 1fr 1px max-content }` —
-  label | free | 1px | control — the control track LAST and content-sized, so every row's control
+  `.config-sync-cardrow { grid-template-columns: 130px 1fr max-content }` —
+  label | free | control — the control track LAST and content-sized, so every row's control
   anchors to the card's RIGHT edge, on the same vertical rule as the item rows' own checkboxes
-  above it, at every viewport width. (An earlier shape pinned the control to a fixed 130px offset
-  instead. Unremarkable on a wide desktop card; dead centre of a 390px phone row.) Track 3 carried
-  the two-segment divider until the merge and is now empty; it stays so this grid and the drawer's
-  keep the same four-track shape and the `grid-column: 4` anchors keep their number.
+  above it, at every viewport width. A control with no ⇕ of its own reserves that column
+  (`--cs-chev-slot`) so the rail aligns glyphs, not box edges.
   (The Settings drawer's `.config-sync-scrow` speaks the same grammar — a wider 170px
   identity column, the three-slot controls column, the same right-anchored end — §1.4.) Wide
   rows (State/Resolve/After install/Enablement/Note) put
@@ -783,7 +778,7 @@ noted):
   `ui/enablementRow.ts`) — one shape reused by four surfaces: a Sync Center row's
   `Enabled on`/`Settings sync`, a plugin card's `Enabled on`, a carrier card's element rows, and an
   item card's key rules and path row (Unified card below). It lands on the control track of the
-  Sync Center's four-track grid (Expanded card above) and in the device slot of the Settings
+  Sync Center's card grid (Expanded card above) and in the device slot of the Settings
   drawer's
   `.config-sync-scrow` (§1.4) — one control, so one cell on either surface, and every row's control
   on the same vertical rule. Shared glyph, a faint `·`, this device's glyph, then ONE muted PICKER
@@ -1057,14 +1052,12 @@ noted):
     a zero count never renders. Then the sync toggle. No mode chip — mode is a derived,
     drawer-only state (`deriveMode`), never a header control.
   - **Drawer** `config-sync-item-exp`, up to three zones, every row across all three a
-    `.config-sync-scrow` — `identity 170px | controls 108px |
-    divider 1px | detail 1fr`, the controls column the fixed three-slot grid (§1.4:
+    `.config-sync-scrow` — `identity 170px | controls 1fr | trailing minmax(44px, max-content)`,
+    the controls column the fixed three-slot grid (§1.4:
     aux `list-checks` (the path row's own aux slot stays empty — its eye rides the filename
     line instead, zone ② below) | lock | device picker or the merged control — same-type controls
     one strict column each, device last). Identity holds the row's name (an uppercase zone label, a
-    mono key/filename, or a member name); tracks 3 and 4 carried the two-segment divider and its
-    local cell until the merge and now stay empty on every row but the ones that append something
-    of their own. Only a folder row's sync toggle anchors to the drawer's right edge
+    mono key/filename, or a member name). Only a folder row's sync toggle anchors to the drawer's right edge
     (`.config-sync-scrow-end`, the card-toggle rail); there are no inline ✕ buttons — a
     removable row's REMOVAL lives in its own scope picker's menu, after a separator, as a
     warning-red `trash` item (`Remove rule` on a key-rule row, `Remove folder` on a
@@ -1109,7 +1102,7 @@ noted):
     right edge** (a gap inside the pathhost flex, at the family size and quiet-rest shade). It
     must NOT be pushed to the line's far end: that line spans `1 / -1`, so `margin-left: auto`
     would anchor the eye to the CARD's right edge and invent the action column §2.1 forbids.
-    `.config-sync-scrow-end` is equally wrong — a fixed `grid-column: 4` that would overlap the
+    `.config-sync-scrow-end` is equally wrong — the fixed trailing track, which would overlap the
     filename line's own `1 / -1` span. The controls cluster holds the lock toggle
     (`config-sync-lock`, which encrypts the whole file) and, in the device slot, the merged control
     (§2.3): its shared half is the 3-option whole-file sharing (no `This device` — `FileSharing`

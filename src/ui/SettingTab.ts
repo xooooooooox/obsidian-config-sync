@@ -1142,15 +1142,12 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     });
   }
 
-  // The scrow controls cluster (DESIGN §1.4 SLOTS): aux (the path row's eye / an array
-  // rule row's per-item icon) | lock | device picker — same-type controls land in the same slot on
-  // every row, so each forms a strict column card-wide.
+  // The scrow controls cluster (DESIGN 1.4 SLOTS): aux (an array rule row's per-item icon) | lock |
+  // device picker — same-type controls land in the same slot on every row, so each forms a column
+  // card-wide. The role class decides both order and width in CSS, never here.
   //
-  // Each slot carries its ROLE as a class, and the role decides both its order and its width in CSS
-  // rather than here: a slot left unfilled is removed from the flow by `:empty`, so it no longer
-  // holds a column-gap open beside controls that are actually there. Building all three
-  // unconditionally is what makes that work — a slot filled later by a rebuilt row starts matching
-  // `:empty` or stops matching it on its own, with no bookkeeping on this side.
+  // All three are built unconditionally: an unfilled slot leaves the flow via `:empty`, and a slot
+  // filled later by a rebuilt row starts or stops matching it on its own, with no bookkeeping here.
   private scrowSlots(row: HTMLElement): { aux: HTMLElement; lock: HTMLElement; device: HTMLElement } {
     const slots = row.createDiv({ cls: "config-sync-scrow-slots" });
     return {
@@ -1168,10 +1165,8 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   // pass `ruleIcon`/`ruleLabel` (enablementRow.ts — the SAME producer the Sync Center's own
   // `ruleMenu` reads, so both entrances offer identical wording); the plain field/file/companion
   // rows fall back to `sharingIcon`/`sharingLabel` (itemCard.ts).
-  // `disabled` keeps the dim, non-interactive rendering — no menu,
-  // but the ⇕ span still renders: without it the box is 14px narrower and the
-  // centered device slot drifts the icon out of the column; CSS keeps a dim picker's ⇕ at
-  // opacity 0 even on row hover (the settings-file row's per-key-rules-active state).
+  // `disabled` keeps the dim, non-interactive rendering — no menu, but the ⇕ span still renders so
+  // the box keeps its enabled shape; CSS keeps a dim picker's ⇕ at opacity 0 even on row hover.
   // `extras`: a removable row's destructive verb lives HERE, after a separator, as
   // a warning-red trash item. Only the rows that ARE
   // removable pass one (a key-rule row's `Remove rule`, a user-added folder's `Remove folder`).

@@ -1207,23 +1207,17 @@ body.is-mobile .config-sync-strip-meta .config-sync-report-pills { margin-left: 
 .config-sync-carrierchip { display: inline-flex; align-items: center; border: 1px solid var(--background-modifier-border); border-radius: 999px; padding: 2px 7px; font-size: var(--font-ui-smaller); color: var(--text-muted); cursor: pointer; white-space: nowrap; }
 .config-sync-carrierchip.is-synced { color: var(--color-green); border-color: rgba(var(--color-green-rgb), 0.4); }
 .config-sync-carrierchip-ic svg { width: 13px; height: 13px; display: block; }
-/* Expanded-card rows ("one grid per card"): every row shares the
-   SAME four grid tracks — label | free | 1px | control — which is also `.config-sync-scrow`'s
-   shape in the Settings drawer, so the two surfaces really do speak one grammar. The control
-   track is LAST and content-sized: every card control anchors to the card's RIGHT edge, on the
-   same vertical rule as the item rows' own checkboxes above it, at every viewport width. The
-   shape before this pinned controls to a fixed 130px offset instead — unremarkable on a wide
-   desktop card, dead centre of a 390px phone row. Track 3 held the two-layer divider until the
-   merge and is now empty; it stays so both grids keep the same four-track shape, and so the
-   `grid-column: 4` anchors keep their number. Wide rows
-   (State/Resolve/After install/Enablement/Note) put their
-   whole value in `.config-sync-cardval`, spanning tracks 2-4 as one cell (`min-width: 0`, no fixed
-   narrow width, so content never truncates while the row still has room — ellipsis is a last
-   resort, never a first one). Icon-only rows (`.is-iconrow`) put their one control on the last
-   track instead — see renderMergedRow/renderCardIconActionRow/renderFilesRow. (`.is-iconrow`, not
-   `.is-compact` — that modifier already means the narrow-viewport pane layout on
+/* Expanded-card rows ("one grid per card"): label | free | control, the same grammar
+   `.config-sync-scrow` speaks in the Settings drawer. The control track is LAST and content-sized,
+   so every card control anchors to the card's RIGHT edge — the vertical rule the item rows'
+   checkboxes already sit on — at every viewport width. Wide rows
+   (State/Resolve/After install/Enablement/Note) put their whole value in `.config-sync-cardval`,
+   spanning tracks 2 to the end as one cell (`min-width: 0`, no fixed narrow width, so content
+   truncates only once the row genuinely has no room). Icon-only rows (`.is-iconrow`) put their one
+   control on the last track instead — renderMergedRow/renderCardIconActionRow/renderFilesRow.
+   (`.is-iconrow`, not `.is-compact` — that modifier names the narrow-viewport pane layout on
    `.config-sync-shell`, an unrelated axis.) */
-.config-sync-cardrow { display: grid; grid-template-columns: 130px 1fr 1px max-content; align-items: center; column-gap: var(--size-4-2); }
+.config-sync-cardrow { --cs-chev-slot: 14px; display: grid; grid-template-columns: 130px 1fr max-content; align-items: center; column-gap: var(--size-4-2); }
 .config-sync-cardrow > .config-sync-explabel-inline { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .config-sync-cardval { grid-column: 2 / -1; min-width: 0; }
 /* Every card control — the merged trigger, the More row's icon, the FILES badge — lands on the
@@ -1233,10 +1227,10 @@ body.is-mobile .config-sync-strip-meta .config-sync-report-pills { margin-left: 
    `.config-sync-cardrow-ctl` is the plain cell for a control that does not claim the trigger look
    (padding/hover/is-set) `.config-sync-mergedctl` bakes in for its own row shape. */
 .config-sync-cardrow > .config-sync-mergedctl,
-.config-sync-cardrow > .config-sync-cardrow-ctl { grid-column: 4; justify-self: end; }
+.config-sync-cardrow > .config-sync-cardrow-ctl { grid-column: -2; justify-self: end; }
 /* Only WIDE rows stack label-above-
    value on mobile — Resolve's segmented control (and any other long value) needs the full device
-   width, not the ~55px `1fr` remainder a shared four-track row would leave it at 360px. Icon rows
+   width, not the ~55px `1fr` remainder the shared grid would leave it at 360px. Icon rows
    (`.is-iconrow` — merged-control rows, the More row, FILES) have nothing long to clip, just a
    glyph or a badge, so they keep the shared grid at every width instead: the shared grid's whole
    point is icons landing on one vertical rule, which a mobile-only stack would silently un-do for
@@ -1270,18 +1264,20 @@ body.is-mobile .config-sync-cardrow:not(.is-iconrow) > .config-sync-explabel-inl
 .config-sync-sharingicon.config-sync-card-trigger { display: inline-flex; align-items: center; justify-content: center; width: fit-content; padding: 3px 6px; }
 .config-sync-sharingicon.config-sync-card-trigger:hover, .config-sync-sharingicon.config-sync-card-trigger:focus-visible { background: var(--background-modifier-hover); }
 .config-sync-menuchip.config-sync-card-trigger { padding: 3px 8px; }
+/* The rail aligns GLYPHS, and a ⇕ is trailing width inside its own trigger — so a control without
+   one reserves that column beside itself, or its glyph sits `--cs-chev-slot` right of every glyph
+   above it while the boxes measure perfectly aligned. A MARGIN, not padding: each trigger keeps its
+   own 6px box padding, and padding here would swallow it. */
+.config-sync-cardrow > .config-sync-cardrow-ctl { margin-right: var(--cs-chev-slot); }
 /* The merged enablement control: both layers in ONE trigger — shared glyph, this device's glyph,
    one ⇕ — one shape shared by the Sync Center's row and the settings card's, painted once
-   (`mergedControl.ts`). It replaced a `fleet segment | divider | local segment` row whose middle
-   column was a `this device` eyebrow, spending a permanent column on a layer that is almost always
-   "no exception" — and on a phone a column that did not fit. Glyph-only, no visible wordmark: the
-   row's own label says what the row is, the trigger's aria-label (built once, `enablementRow.ts`)
-   says what both layers currently answer, and the menu's two section headers carry the words that
-   used to be the eyebrow. Quiet-rest like every other icon control (the -chev rules below); the
-   whole box lifts together on hover, because it IS one control.
+   (`mergedControl.ts`). Glyph-only, no visible wordmark: the row's own label says what the row is,
+   the trigger's aria-label (built once, `enablementRow.ts`) says what both layers currently answer,
+   and the menu's two section headers name the two layers. Quiet-rest like every other icon control
+   (the -chev rules below); the whole box lifts together on hover, because it IS one control.
    ONE placement on both surfaces: a direct child of the row, landing on the control track of the
    Sync Center's `.config-sync-cardrow` and in the device slot of the Settings drawer's
-   `.config-sync-scrow` — no nested wrapper on either, and right-aligned on both. */
+   `.config-sync-scrow` — no nested wrapper on either. */
 .config-sync-mergedctl { display: inline-flex; align-items: center; gap: 2px; width: fit-content; padding: 3px 6px; border-radius: var(--radius-s); color: var(--text-muted); cursor: pointer; opacity: 0.45; transition: opacity 0.12s; }
 .config-sync-mergedctl:hover, .config-sync-mergedctl:focus-visible { opacity: 1; background: var(--background-modifier-hover); }
 .config-sync-mergedctl.is-set { opacity: 1; }
@@ -1326,8 +1322,7 @@ body.is-mobile .config-sync-cardrow:not(.is-iconrow) > .config-sync-explabel-inl
   opacity: 1;
 }
 .is-open > .config-sync-tworow-chev { color: var(--interactive-accent); }
-/* A DISABLED picker still renders its ⇕ span so the box keeps its enabled width (without it
-   the centered device slot drifts the icon ~7px out of the column) — but it has no
+/* A DISABLED picker still renders its ⇕ span, so it keeps the enabled box's shape — but it has no
    menu to open, so the row-hover reveal above must never light it. */
 .config-sync-sharingicon.config-sync-dim .config-sync-tworow-chev { opacity: 0; }
 /* Mobile has no hover to reveal it (same degradation the fold chevron takes) — the
@@ -1451,51 +1446,43 @@ body.is-mobile .config-sync-tworow-chev { display: none; }
 .config-sync-card-badge-state { color: var(--text-faint); }
 .config-sync-item-wrap .setting-item-description:empty { display: none; }
 
-/* The Settings drawer's row grammar: identity | controls | 1px | trailing. Identity holds the row's
-   name (an uppercase zone label, a mono key/filename, a member name — long names ellipsize).
-   The controls track is the FLEXIBLE one and its cluster right-aligns inside it, so the cluster
-   hugs the card-toggle rail: a row with no trailing cell puts its controls on the card's right
-   edge, and a folder row's own sync toggle (track 4, `max-content`) takes that edge with the
-   controls immediately left of it. One vertical rule down the whole card, header toggle included.
-   This is what "nothing anchors to the drawer's right edge" turned into once the two-layer merge
-   emptied the right half: the rule existed to stop an ACTION column from being invented, and rule
-   controls lining up with the card's own toggle is not that.
-   Role order inside the cluster is unchanged: aux → lock → device (picker or merged control). */
-/* Track 4 is RESERVED, not max-content. It holds a row's own STATE toggle (a folder's sync
-   switch), which only some rows have — and while it was content-sized, a row without one let its
-   rule cluster run 44px further right than the row above it. Two neighbouring rows put the same
-   glyph in two different columns, which is what "the columns don't line up" was. Reserving the
-   toggle's width on every row gives the drawer two honest columns instead: toggles on the rail,
-   rule controls immediately left of it, both card-wide. `minmax` rather than a flat 44px so a
-   wider trailing cell can still grow. */
-.config-sync-scrow { display: grid; grid-template-columns: 170px 1fr 1px minmax(44px, max-content); align-items: center; column-gap: var(--size-4-2); padding: var(--size-4-1) 0; font-size: var(--font-ui-smaller); }
+/* The Settings drawer's row grammar: identity | controls | trailing. Identity holds the row's
+   name (an uppercase zone label, a mono key/filename, a member name — long names ellipsize). The
+   controls track is the FLEXIBLE one and its cluster right-aligns inside it, so the cluster hugs
+   the card-toggle rail: a row with no trailing cell puts its controls on the card's right edge, and
+   a folder row's own sync toggle takes that edge with the controls immediately left of it. One
+   vertical rule down the whole card, header toggle included.
+   The trailing track is RESERVED, not content-sized: only some rows carry a state toggle, and
+   content-sizing it lets a row without one run 44px further right than the row above. `minmax`
+   rather than a flat 44px so a wider trailing cell can still grow. */
+.config-sync-scrow { display: grid; grid-template-columns: 170px 1fr minmax(44px, max-content); align-items: center; column-gap: var(--size-4-2); padding: var(--size-4-1) 0; font-size: var(--font-ui-smaller); }
 /* The controls cluster (DESIGN.md §1.4 SLOTS): aux (an array rule row's per-item
    icon — the path row's own aux slot stays empty, its eye rides the filename line instead) | lock |
    device picker, packed against the right.
-   Two rules, and they do NOT trade off against each other:
    ROLE ORDER is pinned in CSS (`order` below), not left to the order a caller happens to fill the
    slots in — so aux is always left of lock is always left of device, whoever built them.
-   WIDTH is per-role and fixed WHILE OCCUPIED, so each role forms a strict column card-wide (the
-   device slot sized for the widest thing it holds — the merged control: two glyphs + separator +
-   ⇕ — never for a lone sharing picker, its content right-aligned, because centering a
-   variable-width control in a fixed slot equalizes centers and staggers edges).
-   An EMPTY slot is removed from the flow entirely (`:empty`), rather than holding its width and a
-   column-gap. It used to hold both, so a row missing its aux control showed a visible hole and its
-   remaining controls floated left of the rail. Removing an empty slot cannot move an occupied one
-   out of column, because the cluster packs from the RIGHT: the device column is measured from the
-   rail, the lock column from the device column, and neither has ever depended on whether aux
-   happened to be there. */
+   EACH SLOT IS ONE COLUMN, so a control lands at the same x on every row of the card.
+   An EMPTY slot leaves the flow entirely (`:empty`) rather than holding its width and a column-gap
+   beside controls that are actually there; that cannot pull an occupied slot out of column, because
+   the cluster measures from the RIGHT — device from the rail, lock from device. */
 .config-sync-scrow-slots { display: flex; align-items: center; justify-content: flex-end; column-gap: var(--size-4-2); justify-self: end; }
 .config-sync-scrow-slot { display: flex; align-items: center; justify-content: center; flex: none; min-width: 0; }
 .config-sync-scrow-slot:empty { display: none; }
 .config-sync-scrow-slot.is-aux { order: 1; min-width: 24px; }
 .config-sync-scrow-slot.is-lock { order: 2; min-width: 24px; }
-.config-sync-scrow-slot.is-device { order: 3; min-width: 68px; justify-content: flex-end; }
+.config-sync-scrow-slot.is-device { order: 3; min-width: 68px; }
+/* The device control FILLS its slot and its ⇕ takes the right edge, so the leading glyph sits on the
+   column's left edge and the ⇕ on its right whatever the control is. What lands here has two natural
+   widths — both layers ≈65px, a picker (or a merged control with no local layer) ≈40px — and hugging
+   either edge puts the narrow one's leading glyph 25px off the column. The slack falls between the
+   local layer and the ⇕: where the row is actually missing something. `min-width` above, so a wider
+   control grows the column instead of overflowing it. */
+.config-sync-scrow-slot.is-device > * { width: 100%; }
+.config-sync-scrow-slot.is-device .config-sync-tworow-chev { margin-left: auto; }
 /* STATE controls right-anchor on the card-toggle rail: a folder row's sync toggle
    lands in this track-4 cell, right edge shared with the card header's own toggle; RULE
    controls (pickers/locks) stay left-anchored in the slot columns. */
-.config-sync-scrow-end { grid-column: 4; justify-self: end; display: flex; align-items: center; }
-.config-sync-scrow-col4 { grid-column: 4; }
+.config-sync-scrow-end { grid-column: -2; justify-self: end; display: flex; align-items: center; }
 /* The path row's full-width filename line: spans every track so plugin-length
    paths never wrap; ellipsis only as the genuine last resort. */
 .config-sync-card-pathline { grid-column: 1 / -1; min-width: 0; overflow: hidden; }
@@ -1503,8 +1490,8 @@ body.is-mobile .config-sync-tworow-chev { display: none; }
 /* A′: the eye is an action on the FILE, so it rides the filename line — HUGGING the filename's
    right edge, never flushed to the line's end. `margin-left: auto` here would anchor it to the
    CARD's right edge (this line spans 1/-1) and invent the action column §2.1 forbids: "nothing
-   anchors to the drawer's right edge". Not .config-sync-scrow-end either — that is grid-column:4
-   and would overlap this line's own 1/-1 span. */
+   anchors to the drawer's right edge". Not .config-sync-scrow-end either — that sits on the
+   trailing track and would overlap this line's own 1/-1 span. */
 .config-sync-card-pathline .config-sync-card-previewicon { margin-left: var(--size-4-2); flex: none; }
 /* The Advanced rule editor's vertical form: one field per scrow row, label | control. */
 .config-sync-advrow { grid-template-columns: 130px 1fr; }
@@ -1537,7 +1524,7 @@ body.is-mobile .config-sync-tworow-chev { display: none; }
 /* Mobile: the fixed 170px identity track is too much of a 360px row — step it down; names
    ellipsize sooner, the shape (flexible controls track, cluster on the rail) stays. Narrow-viewport
    widths have not been re-measured since the two-layer merge; that pass is still open. */
-body.is-mobile .config-sync-scrow { grid-template-columns: minmax(90px, 32%) 1fr 1px max-content; }
+body.is-mobile .config-sync-scrow { grid-template-columns: minmax(90px, 32%) 1fr max-content; }
 /* Quiet-rest (DESIGN.md §2.3): every clickable icon control rests at muted×45% and
    lifts to 100% on its own hover/focus/menu-open; an ACTIVE state is colored at 100%. The lock
    joins the idiom the sharing picker and per-item icon already carried. */
