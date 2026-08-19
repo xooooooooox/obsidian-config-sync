@@ -53,7 +53,7 @@ Full map: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
   (`config-sync-device-elements` / `config-sync-device-optouts` / `config-sync-device-fields`).
   Only the migrations read the old shapes.
 - The word `scope` is retired everywhere (code and copy); the current words are `section` /
-  `sharing` / `device` / `mode` / `element` / `action` / `type` (DESIGN.md §3).
+  `sharing` / `device` / `mode` / `element` / `action` / `type` (DESIGN.md's Copy principles).
 
 ## Smoke testing — agent notes
 
@@ -83,9 +83,12 @@ The general dev-vault workflow is in [CONTRIBUTING.md](CONTRIBUTING.md). Agent-s
   core logic, transport, release flow, and the rules in this file — needs a dated
   `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md` approved BEFORE the edit lands, with no
   size exemption. Q&A, diagnosis and scratchpad files are exempt; so is this decision record.
-- **Section citations:** cite a numbered heading as `DESIGN.md §2.3` or `<spec>.md §4`
-  — every citation must resolve to a real heading, and renumbering either side updates
-  its citations in the same branch. No test covers this.
+- **No section-number citations, and no `§`:** an invariant in a comment has to stand on
+  its own; a reader judging whether the rule holds must never need a second file. When a
+  pointer genuinely helps, name the document and the heading's own title (`DESIGN.md`'s
+  Semantic colors section), never a number. Numbered citations break silently when either
+  side is renumbered, nothing tests them, and a citation into `docs/superpowers/` rests on
+  files this repo declares are never a statement of the current system.
 - **Smoke before deploy:** a UI change is never "style-only" — render functions carry event
   wiring. Before deploying any UI diff, run the `dev/vault` smoke harness and CLICK every
   control the diff touched; a diff that edits a render function must list the event

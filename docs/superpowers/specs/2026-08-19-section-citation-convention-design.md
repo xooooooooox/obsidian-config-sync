@@ -1,7 +1,11 @@
 # `§N` 章节引用约定的文档化 — design
 
-Date: 2026-08-19 · Scope: `CLAUDE.md` `## Rules` 一条 · Status: 待评审 ·
+Date: 2026-08-19 · Scope: `CLAUDE.md` `## Rules` 一条 ·
+Status: **已被 `2026-08-19-docs-and-comments-iteration-design.md` 取代** ·
 起因: 用户级 CLAUDE.md 排版符号规则评审时,本仓库被取作样本实测
+
+> 本份的结论是「保留 `§`,不做批量替换」。owner 随后裁定 `§` 全库退役,理由记在取代它的
+> 那一份里。以下内容原样保留:它记录的是当时的判断。
 
 本轮不改任何代码,也不改任何既有引用。唯一产出是把一个已在全仓运行、却零文档的约定写进
 `CLAUDE.md`。
