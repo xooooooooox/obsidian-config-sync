@@ -15,7 +15,7 @@ npm run lint           # eslint
 npm run smoke:install  # build and install into ./dev/vault (see Smoke testing)
 ```
 
-- **Lint ceiling:** 0 errors / 58 warnings. Never add inline `eslint-disable`; product-term
+- **Lint ceiling:** 0 errors / 57 warnings. Never add inline `eslint-disable`; product-term
   sentence-case exceptions go through `ignoreWords` in `eslint.config.mts`. CI lints every
   commit on all branches.
 - **Color gate:** `./scripts/check-no-hardcoded-color.sh` must pass — all CSS uses Obsidian

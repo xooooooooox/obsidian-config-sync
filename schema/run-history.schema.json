@@ -34,7 +34,26 @@
               "filesWritten": { "type": "array", "items": { "type": "string" } },
               "filesDeleted": { "type": "array", "items": { "type": "string" } },
               "messages": { "type": "array", "items": { "type": "string" } },
-              "needsAppReload": { "type": "boolean", "description": "true when the run touched files Obsidian only re-reads at app reload." }
+              "needsAppReload": { "type": "boolean", "description": "true when the run touched files Obsidian only re-reads at app reload." },
+              "changes": {
+                "type": "object",
+                "description": "Which store paths the run added, updated or deleted for this item (src/core/types.ts's FileChanges). GroupResult is stored verbatim, so this field is written even though the list view does not read it.",
+                "additionalProperties": true,
+                "properties": {
+                  "added": { "type": "array", "items": { "type": "string" } },
+                  "updated": { "type": "array", "items": { "type": "string" } },
+                  "deleted": { "type": "array", "items": { "type": "string" } }
+                }
+              },
+              "stateNote": {
+                "type": "object",
+                "description": "A remark that is not a failure, such as an install that fell forward to a later version. Present only when the run had something to say beyond its status.",
+                "additionalProperties": true,
+                "properties": {
+                  "kind": { "enum": ["ok", "warn"] },
+                  "text": { "type": "string" }
+                }
+              }
             }
           }
         },

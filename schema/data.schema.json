@@ -145,7 +145,7 @@
       "properties": {
         "synced": {
           "type": "boolean",
-          "description": "Is this item synced at all — renamed from v3's `enabled`, which conflated two meanings (\"this item is synced\" vs \"this plugin is turned on\"; the second lives in Obsidian's own on/off-list files and is never stored here). `{synced: false}` is NOT residue to prune: an entry's mere PRESENCE in items.core/items.community is this device's capture mask for that on/off-list element, so an absent entry and a `{synced: false}` entry mean different things, and nothing on the write path removes an entry once written."
+          "description": "Is this item synced at all. It never means \"this plugin is turned on\": that answer lives in Obsidian's own on/off-list files and is never stored here. `{synced: false}` is NOT residue to prune: an entry's mere PRESENCE in items.core/items.community is this device's capture mask for that on/off-list element, so an absent entry and a `{synced: false}` entry mean different things, and nothing on the write path removes an entry once written."
         },
         "type": {
           "enum": ["file", "folder"],
@@ -163,7 +163,7 @@
         "companions": {
           "type": "array",
           "items": { "$ref": "#/definitions/companion" },
-          "description": "Preset (themes/snippets) plus user-added companion folders. Optional and no longer written empty — an item earns its card whether or not it carries this field."
+          "description": "Preset (themes/snippets) plus user-added companion folders. Optional and never written empty: an item earns its card whether or not it carries this field."
         },
         "description": { "type": "string", "description": "Custom items only — kept from the pre-v3 SyncGroup literal." },
         "label": { "type": "string", "description": "Custom items only — display name recorded at capture/enable." },

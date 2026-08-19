@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://raw.githubusercontent.com/xooooooooox/obsidian-config-sync/main/schema/config-sync.schema.json",
   "title": "Config Sync groups file (config-sync.json)",
-  "description": "The groups file at <data folder>/config-sync.json. Config Sync no longer WRITES this file — since settings schema v2 the sync list is compiled from the plugin's own data.json (`items` + `custom`) — but this shape is more than a legacy reader: every compiled group passes through `parseGroup` on every recompile (src/main.ts's recompile -> src/core/manifest.ts), so it is the live internal contract for what a sync rule looks like, as well as the format of a hand-kept or pre-v2 file. This schema mirrors that validator; the validator is the authority. As of schema v3 the vocabulary matches data.json's own: `sharing` objects (not the old flat `scope` string) and `perElement` (not `perItem`).",
+  "description": "The groups file at <data folder>/config-sync.json. Nothing writes this file: the sync list is compiled from the plugin's own data.json (`items` + `custom`). The shape is more than a legacy reader, though: every compiled group passes through `parseGroup` on every recompile (src/main.ts's recompile -> src/core/manifest.ts), so it is the live internal contract for what a sync rule looks like, as well as the format of a hand-kept or pre-v2 file. This schema mirrors that validator; the validator is the authority. The vocabulary matches data.json's own: `sharing` objects and `perElement`.",
   "type": "object",
   "required": ["version", "groups"],
   "additionalProperties": true,
@@ -100,7 +100,7 @@
       "type": "object",
       "required": ["pattern", "sharing", "encrypted"],
       "additionalProperties": true,
-      "description": "Sharing and encryption are independent axes, not one action enum. (Before schema v2 this was {\"pattern\", \"action\": \"strip\"|\"encrypt\"}; that shape is rejected — see the top-level \"sanitize\" property. Before schema v3 this was {\"pattern\", \"scope\", \"encrypted\"}; \"scope\" strings are no longer accepted, only \"sharing\" objects.)",
+      "description": "Sharing and encryption are independent axes, not one action enum. Two older shapes are rejected rather than migrated: {\"pattern\", \"action\": \"strip\"|\"encrypt\"} (see the top-level \"sanitize\" property) and {\"pattern\", \"scope\", \"encrypted\"} — a \"scope\" string is not accepted, only a \"sharing\" object.",
       "properties": {
         "pattern": { "type": "string", "minLength": 1, "description": "Key-name glob pattern (* wildcard)" },
         "sharing": { "$ref": "#/definitions/sharing" },

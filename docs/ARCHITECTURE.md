@@ -247,7 +247,7 @@ functions.
   standalone group. It backs `GroupDisplayParts` and the host's `displayParts(group,
   storedLabel)` (`main.ts`), which the Sync Center (`SyncCenterView.ts`) renders as a faint
   `Parent › ` prefix and folds into its sort key and search text — display-only, never persisted
-  (`displayName`/`backfillLabels` still write the bare label to the store manifest).
+  (`displayName` and `backfillLockLabels` write the bare label to the store lock).
 
 **Status & availability**
 - `core/status.ts` — per-item status (`statusForGroups`), remote freshness (`diffRemote`,
@@ -257,8 +257,8 @@ functions.
   RemoteDiffFile[]` — one entry per file with its `kind` (`added`/`updated`/`deleted`) and both
   sides' content, so the UI renders file lists and content diffs instead of bare counts;
   `excludeSelf` drops the self item's store rels from both sides before diffing.
-  `remoteLockAhead(localRaw, remoteRaw, ignoreGroups)` takes an explicit `ignoreGroups` list —
-  callers pass `[SELF_GROUP_NAME]` when a remote's `excludeSelf` is set, so a divergent self lock
+  `remoteLockAhead(localRaw, remoteRaw, ignoreRefs, groups?)` takes an explicit `ignoreRefs` list —
+  callers pass `[SELF_ITEM_REF]` when a remote's `excludeSelf` is set, so a divergent self lock
   entry never keeps the "remote has newer version info" hint alive forever. `applyImport` closes the
   loop on the writer side: after a pull it carries every non-ignored remote lock entry (all but the
   self group when `excludeSelf`, and any group whose file conflict the user kept as `local`) into the
@@ -283,12 +283,12 @@ functions.
   moving on capture (lineage belongs to the pull) while a v1 lock's single stamp stands in for both
   and tracks whatever it last pulled, which is OUR `capturedAt` — so comparing the two directly made
   an older device that pulled from us and pushed back read as "newer" with zero content difference,
-  in exactly the mixed fleet the item-by-item comparison exists to keep quiet. `checkRemote(localLock, reader, ignoreGroups)`
+  in exactly the mixed fleet the item-by-item comparison exists to keep quiet. `checkRemote(localLock, reader, ignoreRefs, groups?)`
   keeps its cheap contract (the lock file, no store reads) and its `{state, remoteCapturedAt}` shape,
   but when BOTH locks are v2 or newer it decides the state from the entries (`perItemRemoteState`)
   instead of one whole-store timestamp: a store merely older in clock terms whose items all match
   reads `same`.
-  `ignoreGroups` is REQUIRED for the same reason `remoteLockAhead` takes one — a remote with
+  `ignoreRefs` is REQUIRED for the same reason `remoteLockAhead` takes one — a remote with
   `excludeSelf` never exchanges the self entry, so without it the per-item path resolves a direction
   from the one entry the two sides diverge on by design, and no Pull could ever clear the arrow. It
   falls back to today's timestamp comparison whenever per-item resolution cannot answer: either side
@@ -339,12 +339,13 @@ functions.
   or missing passphrase must not degrade direction knowledge). A lost ledger only ever widens uncertainty toward
   `never-synced`, never guesses a destructive direction.
 - `core/availability.ts` — is a plugin enabled / disabled / not-installed on this device, plus
-  version drift (`availabilityForGroup`, `compareVersions`); `snippetOrphans(local, store,
+  version drift (`availabilityForGroup`, `compareVersions`); `snippetOrphans(localOn, storeOn,
   localFiles, storeFiles)` — enabled-snippet names with no `.css` file locally **and** none in
   the store's snippets dir (the store-file check is a fresh-device safeguard: before its
-  `snippets/` folder has synced down, the store copy still covers it). `membersExcludedByClass`/
-  `memberForceOff` compute, for any switch group, which element ids a shared per-class sharing rule
-  keeps off this device and which of those must be force-removed from the applied list.
+  `snippets/` folder has synced down, the store copy still covers it); `desktopOnlyDrift` and
+  `desktopOnlyPluginIds`, which read the same availability facts fleet-wide. Which element ids a
+  shared per-class rule keeps off this device is `enablementDecision.ts`'s answer, not this
+  module's.
 - `core/pluginState.ts` — `pluginRuntimeEnabled`: a plugin is "on" when **loaded OR persisted**.
 - `core/remoteFailure.ts` — `classifyRemoteFailure`: pure classification of a remote-compare
   failure message (`no-token` / `auth` / `timeout` / `other`) so the remote pane can offer the
@@ -542,6 +543,22 @@ functions.
   pair). `enablementRowModel`/`fileEnablementRowModel` compose a rule + an exception into what
   both halves say; the local half has a glyph in every state, `equal` for "follows what's shared"
   included — a layer that vanishes while it agrees reads as missing, not as agreement.
+- `ui/panelTaxonomy.ts` — ONE declaration of which fold a Sync Center row files under
+  (`placeRow`, `FATE_FOLD_YIELDS_TO_AVAILABILITY`), read by every consumer: the sections, the
+  filter pills, the counts. A row carries a fate AND an availability at all times, so the choice
+  between the two axes is a decision with a reason, and it lives here rather than inline wherever
+  a fold is built. `tests/panelTaxonomy.test.ts` pins the whole table.
+- `ui/resolveSegment.ts` — the conflict side-choice control, painted identically on the item card
+  and inside a file's diff, so both entrances write one decision through `pickConflictSide`.
+- `ui/refreshControl.ts` — the refresh button's busy state. Busy is passed in rather than derived
+  from a remote-only signal, so the control spins for the whole refresh on desktop and mobile alike.
+- `ui/settingsDeepLink.ts` — the Sync-Center-to-Settings bridge: `{ ref, spot }`, where `spot` is
+  `"card"` or `"key-rules"`. Carrying the spot is what lets one bridge serve two jumps that mean
+  different things: `More ▸ Per-key rules, locks & folders` means "this item's drawer", while
+  `Per-key rules decide` must land on the key-rules rows themselves, the way Settings' own copy of
+  that jump does.
+- `ui/DiffModal.ts` — `openDiffModal`, the resizable standalone diff window; it shares
+  `diffView.ts`'s unified/split and collapse preferences with the inline view.
 - `actionIcons.ts` — the single source for the per-action Lucide icons + color classes
   (Capture/Apply/Push/Pull) reused across the panel, buttons, badges and History.
 - `fateChipIcons.ts` — `FATE_CHIP_ICON`: the fate-chip string → Lucide glyph registry (single
@@ -983,7 +1000,7 @@ Changes must preserve these:
   request. The background paths (`saveBaselines`, the heal, `refreshBratIndex`) read `schemaStop`
   directly instead of through `schemaStopped()`: they are timer- or render-driven, with no user
   gesture to raise a notice about. The refusal itself is never suppressed, but a REPEAT of its
-  notice inside `REFUSAL_NOTICE_WINDOW` is: the settings tab's text fields refuse per keystroke, and
+  notice inside `REFUSAL_NOTICE_MS` is: the settings tab's text fields refuse per keystroke, and
   a notice per character is worse than silence. **A flow that will be refused refuses before it
   opens** — pull before the conflict modal, Stop syncing before its own — and a refused gesture
   never moves the settings tab's drafts either, or the panel would show a delete that did not
@@ -1242,7 +1259,7 @@ resolve it. Dropping such an entry instead would read as never-synced, which def
 
 Commands, gates and the smoke workflow live in [../CONTRIBUTING.md](../CONTRIBUTING.md).
 The invariants the gates protect: unit tests run over the pure core (in-memory `FileIO` +
-fake `PluginHost`); lint is held at 0 errors / a 58-warning ceiling with no inline
+fake `PluginHost`); lint is held at 0 errors / a 57-warning ceiling with no inline
 disables (sentence-case exceptions go through `ignoreWords` in `eslint.config.mts`); all
 CSS uses Obsidian theme variables (`scripts/check-no-hardcoded-color.sh`), with
 `body.is-mobile`/`body.is-phone` scoping for touch; live checks run against `dev/vault/`,

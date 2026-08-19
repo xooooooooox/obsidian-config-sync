@@ -29,7 +29,7 @@ Obsidian plugin: selective config distribution across devices/vaults.
 ## Commands
 
 `npm run dev` (watch) · `npm run build` (type-check + bundle — run before finishing any
-change) · `npm test` (vitest) · `npm run lint` (0 errors / 58-warning ceiling, no inline
+change) · `npm test` (vitest) · `npm run lint` (0 errors / 57-warning ceiling, no inline
 disables) · `npm run smoke:install` (build into `./dev/vault`) ·
 `./scripts/check-no-hardcoded-color.sh` (CSS gate). Details and the release flow:
 [CONTRIBUTING.md](CONTRIBUTING.md).
