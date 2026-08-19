@@ -170,11 +170,10 @@ export async function listDiscovered(
   return out;
 }
 
-// NOTE: the unified-card engine (registry.ts) is the source of truth for how app.json's
-// keys split across the Editor/Files and links/Appearance/Other cards and how appearance.json +
-// themes/ + snippets/ compose. listOptionSections
-// stays at a finer granularity — one row per reserved option name — and is
-// used by Sync Center scope/search plumbing.
+// The unified-card engine (registry.ts) is the source of truth for how app.json's keys split
+// across the Editor/Files and links/Appearance/Other cards and how appearance.json + themes/ +
+// snippets/ compose. listOptionSections stays at a finer granularity, one row per reserved option
+// name, and is what the Sync Center's section and search plumbing reads.
 export async function listOptionSections(io: FileIO, configDir: string, _groups: SyncGroup[]): Promise<CatalogSection[]> {
   const { files, dirs } = await presentSets(io, configDir);
   const available: CatalogItem[] = [];

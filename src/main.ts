@@ -33,9 +33,10 @@ import { ReaderCache, remoteReaderKey } from "./external/readerCache";
 import { retry, HttpStatusError, TimeoutError, isRetryableError } from "./core/async";
 import { RunRecord, RunKind, summarizeRun, pruneHistory } from "./core/runHistory";
 
-// Structural view of app.secretStorage. app.secretStorage is always present at minAppVersion
-// 1.11.4+; the detection and localStorage fallback below are kept for safety and are candidates
-// for removal. The git-token path uses the typed SecretStorage directly.
+// Structural view of app.secretStorage, which manifest.json's minAppVersion guarantees is present.
+// TODO: drop the detection and the localStorage fallback below. They are dead on every supported
+// Obsidian version; removing them needs one release where no user reports falling back, and nothing
+// currently reports it. The git-token path already uses the typed SecretStorage directly.
 interface SecretStore {
   getSecret(id: string): string | null;
   setSecret(id: string, secret: string): void;
@@ -1109,9 +1110,9 @@ export default class ConfigSyncPlugin extends Plugin {
     this.app.saveLocalStorage("config-sync-coldstart-dismissed", v ? "1" : null);
   }
 
-  // This device's own identity. Since the opt-out list stopped being keyed by it,
-  // the only reader left is that move's migration, which
-  // needs it to tell this device's entry from the other devices' in the old shared map. MUST live
+  // This device's own identity. The opt-out list is not keyed by it, so the only reader is the
+  // migration that absorbed the old shared map, which needs it to tell this device's entry from the
+  // other devices' in that map. MUST live
   // in localStorage, never data.json: data.json travels wholesale (git-tracked vaults,
   // remotely-save, manual copies), and a value trusted from an inherited data.json would let a
   // bootstrapped machine silently claim the source machine's identity — and with it that machine's

@@ -697,8 +697,8 @@ export class SyncCenterView extends ItemView {
   // The item ref behind a row's group name — THE resolver this view asks whenever it needs the
   // identity rather than the label (the `plugin-` prefix is not a parser). The host's
   // registry lookup answers for a compiled row; a store-only row falls through to the same closed
-  // legacy rules a v1/v2 lock read uses (itemKeys.ts's lockRefFor), so the one case that used to
-  // force a name parse — a row with no def — is answered by the single producer too.
+  // legacy rules a v1/v2 lock read uses (itemKeys.ts's lockRefFor), so the one case that could
+  // otherwise force a name parse — a row with no def — is answered by the single producer too.
   private rowRef(name: string): string {
     if (this.rowRefSource !== this.groups) {
       this.rowRefSource = this.groups;
@@ -910,11 +910,9 @@ export class SyncCenterView extends ItemView {
   //
   // Availability is deliberately NOT narrowed: an outdated/disabled/not-installed item is drawn in
   // the list like any other row and can be staged (stageableRow: in the non-main sections the state
-  // ACTION is the payload), so a count that skipped it disagreed with the list it sits above. That
-  // narrowing is where `↑16` vs `To capture 14` came from — the header and sidebar counted
-  // main-only-with-carriers while the filter pills counted all-sections-without — and both readings
-  // were derived from a comment that stopped being true in 987eacf, when the availability sections
-  // were replaced by the four type sections.
+  // ACTION is the payload), so a count that skipped it would disagree with the list it sits above.
+  // Narrow it in one place and not another and the header reads `↑16` over a `To capture 14` from
+  // the pills: one counting main-only-with-carriers, the other all-sections-without.
   private countable(rows: StatusRow[]): StatusRow[] {
     return rows.filter((r) => !ENABLEMENT_CARRIER_GROUPS.has(r.group.name));
   }
@@ -3010,27 +3008,22 @@ export class SyncCenterView extends ItemView {
     return `${text}.`;
   }
 
-  // Files: the direction badge, the count pill, and the FOLD chevron render
-  // as one tight cluster on the row's value cell — badge, pill, and chevron are all
-  // flex children of the SAME head, never split across grid cells, so there is no separate
-  // "collapsed" vs "expanded" cell shape to keep in sync: the cluster is the row's first line in
-  // both states, and the entry list (when expanded) just sits below it. Built directly rather than
-  // through renderCardKeyRow: the badge is a static, non-interactive icon (no menu, no `▾`), a
-  // shape none of renderCardKeyRow's other callers need, and threading an optional icon through
-  // that shared helper for one row would ripple a parameter every other call site has to pass as
-  // absent. Marked `is-iconrow`: the row's whole value is one badge now, so it belongs on the
-  // shared grid at every width, landing on the same vertical rule as the merged controls under it.
-  // The expanded entry list is a SIBLING of the row, not part of its value cell — file names can
-  // run long, and as a sibling the list owns the card's full width on phone and desktop alike
-  // instead of the grid's remainder. It stays in the DOM while collapsed; `.config-sync-files-list`
-  // is `:empty`-hidden so a folded row carries no stray gap.
-  // Default = count-only, same click-to-expand idiom the Settings tab's
-  // companion member count (`config-sync-card-membercount`/`-memberarrow`) already established —
-  // a neutral bare-number pill (aria/tooltip the full `filesChangeLabel` sentence) plus the FOLD
-  // family's rotating chevron, remembered per row in `expandedFileRows` while the pane stays
-  // open. Empty-row drop (no changes at all) happens up front rather than after building the
-  // entry list, since the collapsed head always renders SOMETHING once there IS at least one
-  // change.
+  // The row's value is ONE badge, so the head has the same shape collapsed and expanded and there
+  // is no second cell shape to keep in sync. Marked `is-iconrow` so it sits on the shared grid at
+  // every width, on the same vertical rule as the merged controls under it.
+  //
+  // Built directly rather than through renderCardKeyRow: this badge is static and non-interactive,
+  // a shape none of that helper's other callers need, and threading an optional icon through it
+  // would ripple a parameter every other call site passes as absent.
+  //
+  // The expanded entry list is a SIBLING of the row, not part of its value cell: file names run
+  // long, and as a sibling the list owns the card's full width on phone and desktop alike instead
+  // of the grid's remainder. It stays in the DOM while collapsed, and `.config-sync-files-list` is
+  // `:empty`-hidden so a folded row carries no stray gap. Expansion is remembered per row in
+  // `expandedFileRows` while the pane stays open.
+  //
+  // A row with no changes at all drops out up front, before the entry list is built, because the
+  // collapsed head always renders something once there is at least one change.
   private renderFilesRow(detail: HTMLElement, r: StatusRow, changes: FileChanges, dir: Direction, encrypted: boolean, resolve: DiffResolveControl | null): void {
     const total = changes.added.length + changes.updated.length + changes.deleted.length;
     if (total === 0) return;
@@ -3061,11 +3054,10 @@ export class SyncCenterView extends ItemView {
       row.setAttrs({ "aria-expanded": expanded ? "true" : "false" });
       if (expanded) this.renderUnifiedFiles(list, r, changes, dir, encrypted, resolve);
     };
-    // THE ROW is the target, not the badge. 2.25.0 moved every card control to the card's right
-    // edge, and the listeners had always been on the badge — so the only clickable thing slid to
-    // the row's far end, leaving the `FILES` label and the whole stretch between it and the badge
-    // dead. Wired once out here rather than inside `build`, which re-runs on every toggle and would
-    // otherwise stack a listener per expand.
+    // THE ROW is the target, not the badge. Every card control sits on the card's right edge, so
+    // listening on the badge alone would leave the `FILES` label and the whole stretch between it
+    // and the badge dead. Wired once out here rather than inside `build`, which re-runs on every
+    // toggle and would otherwise stack a listener per expand.
     const toggle = (): void => {
       if (this.expandedFileRows.has(key)) this.expandedFileRows.delete(key);
       else this.expandedFileRows.add(key);

@@ -495,9 +495,9 @@ describe("statusBarStatuses — the status bar counts the rows the Sync Center l
   });
 
   // The carriers dissolve into their section's head chip and never render as rows, so the view's
-  // counts drop them. The bar did not, and read one higher in EACH direction than the pills right
-  // above it — visible in the 2.24.0 README screenshot before it was taken. Both now read the same
-  // exported set (ENABLEMENT_CARRIER_GROUPS), so a third copy of those two strings cannot appear.
+  // counts drop them. The bar must drop them too, or it reads one higher in EACH direction than the
+  // pills right above it. Both read the same exported set (ENABLEMENT_CARRIER_GROUPS), so a third
+  // copy of those two strings cannot appear.
   it("drops the two on/off carriers, like every count in the view", () => {
     const statuses = [st("core-plugins", "local-changed"), st("community-plugins", "store-newer"), st("hotkeys", "in-sync")];
     expect(statusBarStatuses(statuses, () => undefined, false, noFamily)).toEqual([{ group: "hotkeys", state: "in-sync" }]);

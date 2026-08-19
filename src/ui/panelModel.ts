@@ -257,10 +257,10 @@ export function sectionForItem(a: Availability, isMobile: boolean): SectionKind 
 //      view itself never counts as pending. Outdated/disabled/not-installed rows DO stage and DO
 //      show up in the center's counts, so dropping them would make the bar read low.
 //
-// One residual, deliberately not chased: the bar has no access to the view's fate machinery
-// (install policy, conflict choices, direction overrides), so a row whose FATE the view resolves to
-// something non-directional can still count here. The structural over-counts are gone; this one
-// needs the view's own state and is not worth mirroring in a status bar.
+// One accepted residual: the bar has no access to the view's fate machinery (install policy,
+// conflict choices, direction overrides), so a row whose FATE the view resolves to something
+// non-directional can still count here. Closing it means mirroring the view's own state into a
+// status bar, which costs more than the disagreement it removes.
 export function statusBarStatuses(
   statuses: GroupStatus[],
   availabilityOf: (group: string) => Availability | undefined,
