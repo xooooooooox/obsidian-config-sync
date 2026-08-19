@@ -9,11 +9,6 @@
 
 在多台设备和多个 vault 之间，按需、选择性地同步 Obsidian 设置——快捷键、CSS 代码片段、主题、插件配置。数据默认借助你现有的笔记同步工具(note sync)（remotely-save、Obsidian Sync、iCloud……）传输，也可以使用 config-sync 自带的 git / vault 远程通道。任何设置在没有在 Sync Center 中明确执行 **Apply**(应用) 之前，绝不会落到设备上。
 
-> [!IMPORTANT]
-> **在任何一台设备再次 capture 或 pull 之前，先把所有设备都更新到本版本。**
-> **2.23.0** 把设置换成了新的格式，而且是单向的。仍停留在 **2.21.0** 或 **2.22.0** 的设备遇到新格式会明确拒绝并给出提示，什么都不会改动；而 **2.20.0 或更早**的设备会把 Config Sync 的设置**重置为默认值**——这一条事后无法补救。请先在所有设备上更新 Config Sync，然后照常使用。
-> 一个你从未为它设过规则的插件，一旦共享名单本身开始同步，就会跟随它——因此**升级后的第一次同步可能会把某些插件打开或关闭**，把设备之间此前悄悄积累的差异收拢到一致。见[从 2.21.0 及更早版本更新](docs/GUIDE.md#updating-from-2210-and-earlier)。
-
 ![Sync Center](docs/assets/sync-panel.png)
 
 ## 功能特性
@@ -25,7 +20,7 @@
 - **随时可见状态的 Sync Center** —— 每一行都会用大白话说清自己的命运（*开启 · 安装 · 应用设置*）、归一化的 JSON 差异、一个 *this device* 状态胶囊，以及每一类待办动作的总数。（[导览](docs/GUIDE.md#the-sync-center)）
 - **安装引擎** —— 本设备上版本落后、被禁用或未安装的插件可以在 Apply 过程中一并更新、启用或安装，并锁定到 capture 时的版本。（[规则](docs/GUIDE.md#availability-facts-and-the-install-engine)）
 - **Remotes（桌面端）** —— 针对 git 仓库或另一个 vault 执行 pull/push，并提供逐文件差异预览。（[详情](docs/GUIDE.md#transport)）
-- **可以一台一台地更新** —— 任何由更新版本的 Config Sync 写下的内容都会被明确拒绝并给出提示，绝不会被重置或覆盖（这层保护从 2.21.0 开始生效——更早的设备请先看上面的提示）。（[详情](docs/GUIDE.md#transport)）
+- **可以一台一台地更新** —— 任何由更新版本的 Config Sync 写下的内容都会被明确拒绝并给出提示，绝不会被重置或覆盖。（[详情](docs/GUIDE.md#transport) · [升级须知](UPGRADING.md)）
 - **随处可搜索** —— 两个搜索框都支持带自动补全的 `key:value` 限定符，可与纯文本自由组合：Sync Center 支持 `section:` · `type:` · `action:` · `mode:` · `device:`，设置面板的搜索支持 `section:` · `type:`。
 - **状态栏** —— ↑ capture / ↓ apply 加上每个 remote 各自的 ⇡ push / ⇣ pull 计数一目了然；点击即可打开 Sync Center。
 - **移动端友好** —— capture、apply 与 Sync Center 在手机上均可正常工作；store 本身就是普通的 vault 内容，因此任何笔记同步工具都能携带它。
@@ -66,6 +61,8 @@
 ## 文档
 
 - **[用户指南](docs/GUIDE.md)** —— 所有行为汇于一处：Sync Center、字段规则、敏感设置、传输、实战演练。
+- **[更新日志](CHANGELOG.md)** —— 每个版本改了什么。
+- **[升级须知](UPGRADING.md)** —— 哪些版本在你再次同步之前需要你先做点什么。
 - **[架构](docs/ARCHITECTURE.md)** —— 代码地图与不变量，供贡献者参考。
 - **[设计系统](docs/design/DESIGN.md)** —— UI 的设计 token、图标词汇与组件规则。
 - **[schema/](schema/)** —— 用 JSON Schema 记录的全部持久化数据形状（`data.json`、store 锁、本地存储、运行历史）。

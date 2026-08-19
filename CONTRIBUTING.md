@@ -73,6 +73,11 @@ update the affected docs in the SAME branch:
 - `docs/ARCHITECTURE.md` — code map / invariants, when structure changes
 - `docs/design/DESIGN.md` — before any UI change (design-first)
 - `schema/*.schema.json` — before any persisted-shape change (schema-first)
+- `CHANGELOG.md` — at release time, one entry per version (see Releasing)
+- `UPGRADING.md` — only when a release asks the user to act before syncing again
+
+Version history goes in those last two and nowhere else: the docs above state how the plugin
+behaves now, not how it got there.
 
 Pure internal refactors that change nothing a user sees need no doc edit. Gate: docs must
 be current before merging to `main` and before cutting a release.
@@ -82,14 +87,17 @@ or identifiers — write `~/path` and `<host>`-style placeholders instead.
 
 ## Releasing
 
-1. `npm version <x.y.z>` — bumps `manifest.json`/`versions.json`, commits, tags (tag has no
+1. Write the release's `CHANGELOG.md` entry first, at the top: a bare `## x.y.z` heading and
+   flat `-` bullets, each opening with `Added` / `Fixed` / `Improved` / `Changed` / `Removed`.
+   No dates, no sub-bullets, no category headings.
+2. `npm version <x.y.z>` — bumps `manifest.json`/`versions.json`, commits, tags (tag has no
    leading `v`).
-2. `git push --follow-tags` — CI builds a **draft** GitHub release with the three assets
+3. `git push --follow-tags` — CI builds a **draft** GitHub release with the three assets
    (`main.js`, `manifest.json`, `styles.css`).
-3. Hand-write the release notes (never auto-generated); the release title is the bare
-   version number.
-4. Publish the draft — the community directory and BRAT only see published releases.
+4. The release body is that changelog entry (never auto-generated); the release title is the
+   bare version number.
+5. Publish the draft — the community directory and BRAT only see published releases.
 
-Release-notes requirements for schema-affecting releases (upgrade order, disclosure of
-behavior changes) are listed in `docs/ARCHITECTURE.md` under "Current state & how to
-resume".
+A release that changes a persisted format also writes an `UPGRADING.md` entry, and its
+release body links there. What belongs in that entry — the update order, and any behavior
+that differs after the migration — is set out in `docs/ARCHITECTURE.md`'s closing section.

@@ -9,11 +9,6 @@
 
 Selective, on-demand sync of Obsidian settings — hotkeys, CSS snippets, themes, plugin configs — across devices and vaults. The data rides your existing note sync (remotely-save, Obsidian Sync, iCloud…) by default, or config-sync's own git / vault remotes. Nothing ever lands on a device without an explicit **Apply** from the Sync Center.
 
-> [!IMPORTANT]
-> **Update every device before any of them captures or pulls again.**
-> **2.23.0** moved the settings to a new format, and the move is one way. A device still on **2.21.0** or **2.22.0** meets the new format, refuses it with a plain message and changes nothing. A device on **2.20.0 or earlier resets its Config Sync settings to defaults** — that one cannot be fixed afterwards. Update Config Sync everywhere first, then carry on as usual.
-> A plugin nobody ever set a rule for now follows the shared on/off list, once that list itself is synced — so **the first sync after upgrading may turn some plugins on or off**, converging whatever differences had silently built up between your devices. See [Updating from 2.21.0 and earlier](docs/GUIDE.md#updating-from-2210-and-earlier).
-
 ![Sync Center](docs/assets/sync-panel.png)
 
 ## Features
@@ -25,7 +20,7 @@ Selective, on-demand sync of Obsidian settings — hotkeys, CSS snippets, themes
 - **A Sync Center that knows the state** — every row spells out its own fate in plain language (*turns on · installs · applies settings*), normalized JSON diffs, a *this device* status chip and totals for every pending action. ([tour](docs/GUIDE.md#the-sync-center))
 - **Install engine** — plugins that are outdated, disabled or missing on this device can be updated, enabled or installed during Apply, pinned to the captured version. ([rules](docs/GUIDE.md#availability-facts-and-the-install-engine))
 - **Remotes (desktop)** — pull/push the store against a git repo or another vault, with per-file diff previews. ([details](docs/GUIDE.md#transport))
-- **Safe to update one device at a time** — anything written by a newer Config Sync is refused with a plain message, never reset or overwritten (protection starts at 2.21.0 — see the notice above for older devices). ([details](docs/GUIDE.md#transport))
+- **Safe to update one device at a time** — anything written by a newer Config Sync is refused with a plain message, never reset or overwritten. ([details](docs/GUIDE.md#transport) · [upgrade notes](UPGRADING.md))
 - **Search everywhere** — both search boxes accept `key:value` qualifiers with autocomplete, combined freely with plain text: the Sync Center takes `section:` · `type:` · `action:` · `mode:` · `device:`, the settings search `section:` · `type:`.
 - **Status bar** — ↑ capture / ↓ apply plus per-remote ⇡ push / ⇣ pull counts at a glance; click opens the Sync Center.
 - **Mobile-friendly** — capture, apply and the Sync Center work on phones; the store is plain vault content, so any note sync carries it.
@@ -66,6 +61,8 @@ All three are inert until you configure a remote, and never run without an expli
 ## Documentation
 
 - **[User guide](docs/GUIDE.md)** — every behavior in one place: the Sync Center, field rules, sensitive settings, transport, walkthroughs.
+- **[Changelog](CHANGELOG.md)** — what changed in each release.
+- **[Upgrade notes](UPGRADING.md)** — the versions that ask something of you before you sync again.
 - **[Architecture](docs/ARCHITECTURE.md)** — code map and invariants, for contributors.
 - **[Design system](docs/design/DESIGN.md)** — the UI's tokens, icon vocabulary and component rules.
 - **[schema/](schema/)** — JSON Schemas documenting every persisted shape (`data.json`, the store lock, local storage, run history).

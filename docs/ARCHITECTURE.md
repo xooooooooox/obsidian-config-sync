@@ -1254,23 +1254,18 @@ never a real vault.
 
 ## Current state & how to resume
 
-- The version in `manifest.json` is the source of truth for the current release; older releases'
-  history is retained on GitHub.
+- The version in `manifest.json` is the source of truth for the current release; what each
+  release changed is in [../CHANGELOG.md](../CHANGELOG.md).
 - **Parked backlog** (deferred by the maintainer — don't start without an explicit pick):
   1. UI audit polish — `design/DESIGN.md` §6 (remaining: one undecided TS-only class
      (`-cm-unified`), micro font sizes, text-on-fill variable split, border-radius tiers, the
      shared `-fpill` class; dead-CSS and emoji-remnant findings are resolved).
   2. Capture/pull interruption robustness (crash-marker vs full atomicity — direction undecided).
   3. Run-history file diffs (unified diff per changed file, with a size cap).
-- **Release flow**: see [../CONTRIBUTING.md](../CONTRIBUTING.md) (version bump → push tags →
-  CI draft → hand-written notes → publish).
-- **This (v4) release's notes must LEAD with "update every device first."** `schemaVersion: 4` is
-  one-way: a device on 2.21.0 or 2.22.0 refuses the new format and changes nothing, but one on
-  **2.20.0 or earlier resets to defaults**, and that cannot be fixed retroactively.
-  `store.lock.json version: 3` is untouched by this release — the enablement model lives entirely in
-  `data.json`, and nothing here gates on the lock's own format. The behaviour difference belongs in
-  the same notes, not a footnote — **a plugin nobody ever wrote an enablement rule for now follows
-  the shared on/off list once the list itself is synced**, so the first sync after upgrading
-  converges whatever switch differences had silently accumulated between devices (some plugins may
-  turn on or off). `docs/GUIDE.md`'s
-  [Updating from 2.21.0 and earlier](GUIDE.md#updating-from-2210-and-earlier) is the long form.
+- **Release flow**: see [../CONTRIBUTING.md](../CONTRIBUTING.md) (changelog entry → version bump →
+  push tags → CI draft → publish).
+- **A release that changes a persisted format writes an [../UPGRADING.md](../UPGRADING.md) entry
+  before it ships.** Two things belong there and nowhere else: the update ORDER, when an older
+  device would react to the new format by resetting rather than refusing, and any behaviour that
+  differs on the far side of the migration. Both are the kind of thing a user can only act on
+  before they sync, so a footnote in the changelog is not enough.

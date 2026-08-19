@@ -12,6 +12,10 @@ Obsidian plugin: selective config distribution across devices/vaults.
 - [`docs/GUIDE.md`](docs/GUIDE.md) — the user guide (Obsidian-user-facing; behavioral
   detail lives there, not in the READMEs). `README.md`/`README.zh.md` are the short pitch,
   kept in sync with each other.
+- [`CHANGELOG.md`](CHANGELOG.md) — what changed in each release, newest first. A release's
+  GitHub notes are its entry here; nothing else records version history.
+- [`UPGRADING.md`](UPGRADING.md) — the versions that ask something of the user (update order,
+  one-way format changes, one-time cleanups). Everything else upgrades in place.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — commands, lint/color gates, smoke workflow,
   template-upstream merge rules, release process, docs-currency rule.
 - `schema/` — JSON Schemas for every persisted shape: `data.schema.json`,
@@ -97,6 +101,13 @@ The general dev-vault workflow is in [CONTRIBUTING.md](CONTRIBUTING.md). Agent-s
   in a line or two. Never write what the code already says, and never write the changelog
   ("used to be", "before this", "at 4px the icon sat 2px right") — git owns that. A rule whose
   reason takes a paragraph is usually a rule that wants a measurement in DESIGN.md instead.
+- **Docs state the current system, not its history:** `README*`, `docs/GUIDE.md`,
+  `docs/ARCHITECTURE.md` and `docs/design/DESIGN.md` describe how the plugin behaves now.
+  What changed in which release belongs in `CHANGELOG.md`; what a user must DO to upgrade
+  belongs in `UPGRADING.md`. A version number earns its place in an evergreen doc only when
+  it names wire compatibility this build still has to tolerate today (a mixed fleet, an
+  older store format), or when it is a pointer into `UPGRADING.md`. "As of this version",
+  "used to", and "no longer" are the shapes to catch.
 - **Documentation currency:** user-facing behavior changes update the affected docs in the
   SAME branch (see CONTRIBUTING.md's list); docs must be current before merging to `main`
   and before cutting a release.

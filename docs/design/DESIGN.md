@@ -1233,9 +1233,8 @@ noted):
     The member count (`config-sync-card-membercount`) counts real files only. While any orphan row
     is present, a warning-toned hint (`config-sync-ldhint config-sync-orphanhint`, `--text-warning`)
     renders above the always-on `SNIPPET_MEMBER_HINT`, explaining the Forget affordance.
-  - **Release notes**: the binding release-notes requirements (upgrade order, enablement
-    convergence disclosure) live in `docs/ARCHITECTURE.md`'s "Current state & how to
-    resume" — one home, not duplicated here.
+  - **Release notes**: what each release changed goes in `CHANGELOG.md`, and what a user must
+    do before syncing again goes in `UPGRADING.md`. Neither is duplicated here.
 
 ## 5. Conventions
 
