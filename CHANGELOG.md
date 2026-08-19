@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.24.2
+
+- Added `CHANGELOG.md` and `UPGRADING.md`. A release's notes are its changelog entry, and the versions that ask you to do something before syncing again are in one place instead of scattered through the README and the guide
+- Changed the README and the user guide to describe how the plugin behaves now. The upgrade notice that opened the README, and the guide's migration section, moved to `UPGRADING.md`. What the plugin does today about mixed versions and older stores stays in the guide, because that is current behaviour rather than history
+- Fixed nine places where the architecture doc described code that had been renamed or refactored under it, among them two functions attributed to a module they do not live in, and a schema documenting six of a record's eight persisted fields
+
+Nothing in the plugin itself changed: `main.js` is byte-identical to 2.24.1, and `styles.css` differs from it only in comments.
+
 ## 2.24.1
 
 - Fixed an item reading the wrong direction after **Don't sync it** was turned on and then off again: a row that should have offered to capture offered to apply instead, and an item with companion folders rolled that up into a phantom `Changed on both sides`. Applying from that state could overwrite local changes that were still waiting to be captured. Items toggled before this release need their direction checked; see [UPGRADING.md](UPGRADING.md)
