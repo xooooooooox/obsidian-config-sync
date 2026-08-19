@@ -89,7 +89,7 @@ functions.
   entry's name survives, an id no longer listed is dropped) so no device's heal can erase a name
   only some OTHER device could resolve. Runs at the tail of every capture and once on startup when
   something resolvable is stale; write-only-on-change, `capturedAt` never touched (a heal is not a
-  capture). **The startup heal never changes a lock's FORMAT** (spec §3, task-3 C1): it runs only on
+  capture). **The startup heal never changes a lock's FORMAT**: it runs only on
   a lock whose declared version is exactly the one this build writes, and leaves a v1, v2 or v4+ lock
   byte-identical. Writing a v1/v2 lock back in v3 shape under its old `version` produces a hybrid a
   2.21.0 peer neither refuses (it reads `2`) nor parses (it needs `groups`) — it reads it as corrupt
@@ -106,17 +106,16 @@ functions.
   changed — captured twice over unchanged content is byte-stable output, and only a genuinely
   changed value produces a fresh envelope; the capture-preview diff goes through the same path, so
   it never shows an unchanged encrypted field as touched.
-- `core/types.ts` — **the vocabulary** (spec 2026-08-11-v3-one-vocabulary-design.md §1: one concept,
-  one word) and the shared types built from it: `SyncGroup`, `SyncManifest`, `StoreLock`,
-  `GroupResult`, `FileChanges`/`hasChanges`, `Remote`, `SyncMode`. The word `scope` is retired
-  outright — it used to mean the settings area, the item family AND the sharing rule, so every
-  consumer had to know which one it was reading. Each is now its own named type:
+- `core/types.ts` — **the vocabulary** (one concept, one word) and the shared types built from it:
+  `SyncGroup`, `SyncManifest`, `StoreLock`, `GroupResult`, `FileChanges`/`hasChanges`, `Remote`,
+  `SyncMode`. The word `scope` is forbidden here: it can mean the settings area, the item family or
+  the sharing rule, so a consumer reading it cannot tell which. Each is its own named type:
   - `Sharing` — "who shares a value": `{ kind: "everywhere" } | { kind: "per-class"; class:
     "desktop" | "mobile" } | { kind: "this-device" }`. A union, not an enum, because the class only
-    exists for one of the three answers; the old flat `RuleScope` collapsed two orthogonal questions
-    into one list, which is why every consumer special-cased `"local"` by hand. `FileSharing =
-    Exclude<Sharing, { kind: "this-device" }>` makes a file-level `this-device` unrepresentable —
-    "don't sync it at all" is the item's own toggle — so the old runtime guard has nothing to guard.
+    exists for one of the three answers; a flat enum would collapse two orthogonal questions into
+    one list and force every consumer to special-case one member by hand. `FileSharing =
+    Exclude<Sharing, { kind: "this-device" }>` makes a file-level `this-device` unrepresentable,
+    since "don't sync it at all" is the item's own toggle, so no runtime guard is needed for it.
     Helpers: `EVERYWHERE`/`perClass`/`THIS_DEVICE`, `sharingClass`, `isThisDevice`, `sharingEquals`,
     and `asSharing`/`asFileSharing` for narrowing a value read off a document.
   - `StorageSection` (`obsidian` · `core` · `community` · `custom`) vs `Section` (those plus `beta`)
@@ -138,10 +137,10 @@ functions.
   sharing rule (this-device elements never enter the store; per-class elements go through the same
   partition as class field rules) while preserving the other device's already-captured elements,
   since the array is one shared list, not a per-device sidecar.
-- `core/enablementRules.ts` (spec `2026-08-12-enablement-two-layers-design.md` §3.3) — the fleet
-  layer of enablement: one `Sharing` per list element, stored on the item that CARRIES the list
-  (`ruleHomeFor` — the two plugin lists carry their own since this release; the snippet list is a
-  field of `appearance`, so `appearance` carries it) under `settingsFile.perElement[<key>]`, `key`
+- `core/enablementRules.ts` — the fleet layer of enablement: one `Sharing` per list element, stored
+  on the item that CARRIES the list (`ruleHomeFor`: the two plugin lists carry their own, and the
+  snippet list is a field of `appearance`, so `appearance` carries it) under
+  `settingsFile.perElement[<key>]`, `key`
   from `switchList.ts`'s `perElementKeyFor`, the derived key's one producer. `enablementRules`/
   `enablementRuleFor` read, `withEnablementRule` writes (pure — an `everywhere` write CLEARS the
   entry rather than storing the default, so a round trip through the control leaves `data.json`
@@ -169,7 +168,7 @@ functions.
   one writer, and `fieldExceptionsByGroupName` re-keys the table from `ItemRef` to the group name
   every capture/apply/compare call site already holds — the bridge into `CoreContext.fieldExceptions`.
   Capture's own use of the exception is the **preserve-not-strip** rule (Core invariants below).
-- `core/enablementDecision.ts` — the precedence (spec §5): given a list element's fleet rule, this
+- `core/enablementDecision.ts` — the precedence: given a list element's fleet rule, this
   device's own exception for it, and this device's class, what a run does. One function,
   `decideEnablement`, first match wins — replacing four separate derivations
   (`memberLocalIdsFor`/`memberForceOffIds`/`runsOnForces`/`preferStoredRunsOn`) that used to
@@ -180,9 +179,9 @@ functions.
   `null` meaning "leave whatever is on disk." A `this-device` rule with no exception masks WITHOUT
   forcing — the element is this device's own business, and pass-through already says that; a force
   there would be this build deciding something the user never said.
-- `core/v4Migration.ts` — the v3 → v4 migration (spec §4), the one piece of code that will ever read
+- `core/v4Migration.ts` — the v3 → v4 migration, the one piece of code that will ever read
   a v3 `data.json` again; see the migration chain note in Data model below for what it does.
-- `core/itemKeys.ts` — the ONE key space (spec §3/§4). The store lock, the device-local baselines
+- `core/itemKeys.ts` — the ONE key space. The store lock, the device-local baselines
   and the device-local opt-out list are all keyed by `ItemRef`, and the compiler is its only
   producer. `companionRef(owner, basename)` keys a companion under its owner
   (`obsidian/appearance/themes`) — it has no identity of its own, so owner-relative keying makes its
@@ -194,7 +193,7 @@ functions.
   under `legacy/<name>`, a section deliberately outside `StorageSection` so `parseItemRef` refuses it
   and no reader can resolve it. Dropping such an entry would read as never-synced, which defaults to
   APPLY. `groupRefIndex`, `refItemId`, `isLockRef`, `rekeyRefList`, `OBSIDIAN_CARD_IDS`.
-- `core/v2Migration.ts` — the one-way v2 → v3 conversion (spec §5), run once on load and saved once:
+- `core/v2Migration.ts` — the one-way v2 → v3 conversion, run once on load and saved once:
   `items["community:x"]` → `items.community.x`, `customGroups[]` → `items.custom[name]` (`type:
   "dir"` → `"folder"`), `memberRules` + `enabledOn` → `runsOn`, `localMembers` → `thisDeviceItems`
   (re-keyed to refs), every rule's `scope` → `sharing`, `perItem` → `perElement`,
@@ -209,8 +208,8 @@ functions.
   sits below `manifest.ts` — and one priority order split across two files is one that can be
   reordered in half.
 - `core/registry.ts` — the item registry and its compiler, replacing the v3-era per-kind catalog
-  rows (`app-view-*`, `appearance-domain`) with one flat list of `ItemDef` (task-4-brief.md, spec
-  §1/§6; app.json merged to a single card per `2026-07-26-ui-feedback-round2-design.md` §2).
+  rows (`app-view-*`, `appearance-domain`) with one flat list of `ItemDef`;
+  `app.json` is one card.
   `buildItemDefs(env)` builds one `ItemDef` per card — the five Obsidian cards (`app` /
   `appearance` / `hotkeys` / `core-plugins` / `community-plugins`, fixed order from
   `OBSIDIAN_CARD_DEFS`; the last two are the on/off-list carriers, ordinary items since this
@@ -264,9 +263,9 @@ functions.
   loop on the writer side: after a pull it carries every non-ignored remote lock entry (all but the
   self group when `excludeSelf`, and any group whose file conflict the user kept as `local`) into the
   local lock, so `remoteLockAhead` converges to false once contents match — the hint clears after a
-  single Pull instead of nagging. **How it compares** (spec §6): **the items answer first**, each
-  remote entry weighed **key by key, never `JSON.stringify`** — key order, in the known block or in
-  the carried tail, can no longer read as a difference. Three rules narrow what counts: `display`
+  single Pull instead of nagging. **How it compares**: **the items answer first**, each
+  remote entry weighed **key by key, never `JSON.stringify`**, so key order cannot read as a
+  difference, in the known block or in the carried tail. Three rules narrow what counts: `display`
   (`label` / `elements`) is display and never counts (a plugin renamed on one device is not something to
   Pull); `capturedAt` is freshness, so it ORDERS two differing entries rather than being one more
   thing that differs; and **only keys present on BOTH sides are compared** — in a mixed fleet an
@@ -284,7 +283,7 @@ functions.
   moving on capture (lineage belongs to the pull) while a v1 lock's single stamp stands in for both
   and tracks whatever it last pulled, which is OUR `capturedAt` — so comparing the two directly made
   an older device that pulled from us and pushed back read as "newer" with zero content difference,
-  in exactly the mixed fleet §6 exists to keep quiet. `checkRemote(localLock, reader, ignoreGroups)`
+  in exactly the mixed fleet the item-by-item comparison exists to keep quiet. `checkRemote(localLock, reader, ignoreGroups)`
   keeps its cheap contract (the lock file, no store reads) and its `{state, remoteCapturedAt}` shape,
   but when BOTH locks are v2 or newer it decides the state from the entries (`perItemRemoteState`)
   instead of one whole-store timestamp: a store merely older in clock terms whose items all match
@@ -298,7 +297,7 @@ functions.
   for an encrypted item, which carries no `hash` and so is ordered by capture time alone — a
   same-content re-capture elsewhere still reads as newer. A remote lock whose `version` is higher
   than this build understands reports `unknown` (the state that already means "cannot be compared"),
-  so the panel never invites a Pull that §4.3 would then refuse — no new `RemoteState`, no UI change.
+  so the panel never invites a Pull that the store-version gate would then refuse — no new `RemoteState`, no UI change.
   Direction for a changed group
   is a three-way comparison against this device's `core/ledger.ts` entry, never file mtimes or the
   lock's `capturedAt`: no entry → `never-synced` (apply-default, counts into `bucketCounts.down`);
@@ -321,7 +320,7 @@ functions.
   answer comes from the registry's `SWITCH_LISTS` rather than a hardcoded name set)
   hash their canonical *set* form rather than raw bytes, so on/off-list reordering never reads as
   movement, and folder groups hash a sorted `rel\nsha256(content)` manifest. **The ledger is keyed by
-  `ItemRef`** (spec §4), the same key space as the lock and the opt-out list; `rekeyLedger`
+  `ItemRef`**, the same key space as the lock and the opt-out list; `rekeyLedger`
   (itemKeys.ts) converts a v2 ledger's group names once, during the migration — never dropping an
   entry, because a missing baseline reads as never-synced, which defaults to APPLY. `main.ts` is the ledger's
   only writer — there is no separate write hook in capture/apply, since every run already triggers
@@ -331,10 +330,10 @@ functions.
   left the compiled config are pruned on write — and **only** for that reason: the keep-set is built
   from the whole compile, never from the narrowed list a device actually compares. The device-class
   filter and this device's opt-out list both narrow that list, and both are reversible choices
-  rather than statements that an item stopped existing; building the keep-set from them (which
-  `refreshLocalStatus` did until 2.25.0) deleted the baseline of every opted-out and every
-  class-scoped-away item on the next refresh, so reversing the choice found no baseline and the row
-  fell to `never-synced` — which presents as APPLY, on a row that had been asking to be captured.
+  rather than statements that an item stopped existing. Building the keep-set from them instead
+  deletes the baseline of every opted-out and every class-scoped-away item on the next refresh, so
+  reversing the choice finds no baseline and the row falls to `never-synced`, which presents as
+  APPLY on a row that had been asking to be captured.
   The prune answers "does this item still exist?", never "is it being compared right now?" — `no-settings`/`not-captured` groups drop
   their entry, while comparison errors and `locked` groups keep theirs (a transient read failure
   or missing passphrase must not degrade direction knowledge). A lost ledger only ever widens uncertainty toward
@@ -355,8 +354,8 @@ functions.
   "adopting/capturing would add/remove …" summary.
 - `core/catalog.ts` — `OPTION_LABELS`/`listOptionSections`/`listCoreSections`/
   `listPluginSections`/`listBetaSections` are the pre-registry `CatalogItem`/`CatalogSection`
-  taxonomy; they no longer drive any tab's rendering (that's `registry.ts` + `itemCard.ts` now —
-  see UI below) and today only feed `SettingTab.ts`'s search index and a few Advanced-tab helpers.
+  taxonomy. They do not drive any tab's rendering (`registry.ts` + `itemCard.ts` do, see UI below);
+  they feed `SettingTab.ts`'s search index and a few Advanced-tab helpers.
   `listDiscovered` (unclassified config-root files) is still live for the Advanced tab.
   `sectionForGroup(name)` maps a compiled group name to its section (`obsidian`/
   `core`/`community`/`custom`) for the `section:` qualifier and run-report grouping; the switch-list
@@ -438,9 +437,9 @@ functions.
 - `core/installer.ts` — download a plugin from the community catalog, version-pinned via the
   root manifest + tagged release; `CatalogError`/`DownloadError`.
 - `core/bratIndex.ts` — the BRAT `id → repo` index for beta plugins. `bratRepoIndex(items)` is a
-  VIEW over `items.community.*.bratRepo` (each plugin's own field, since this release — not a
-  top-level `bratIndex` map, which used to be a second id list beside `items.community` that could
-  drift from it), and `withBratRepos` writes the inverse: every resolved id gets its repo on its own
+  VIEW over `items.community.*.bratRepo`, each plugin's own field. It is deliberately not a
+  top-level `bratIndex` map, which would be a second id list beside `items.community` free to drift
+  from it. `withBratRepos` writes the inverse: every resolved id gets its repo on its own
   item, and an id with no item yet earns a `{synced: false}` skeleton rather than starting to sync.
 - `core/pkm.ts` — PKM mode (`auto`/`ioto`/`default`) and store-root discovery
   (`resolveRootPath`, `discoverStoreRoot`).
@@ -472,7 +471,7 @@ functions.
   (`renderMoreRow`, never `sliders-horizontal`: that glyph already means `your rule` in the fate
   chips) is the only path to Settings for stopping a whole item's sync.
 - `fateModel.ts` — the fate-sentence engine: `rowFate(FateInput): Fate` is the pure function
-  behind every row's verdict (spec `2026-08-06-sync-center-unified-grammar-design.md` §3's verb
+  behind every row's verdict (the verb
   table) — glyph (`↓`/`↑`/`—`/`⚠`), sentence, chips (`not installed here`/`desktop only`/
   `stays off`/`off here — your rule`/`on here — your rule`/`🔒 encrypted`/`your rule` — the last
   four are suppressed on an excluded row: run-consequence facts are moot
@@ -632,7 +631,7 @@ functions.
   "another vault" remote (an absolute store path).
 - `readerCache.ts` — a framework-free `ReaderCache` + `remoteReaderKey`: since a reader is a
   point-in-time in-memory snapshot (the git reader deletes its temp clone before returning), it is
-  cached per refresh generation and reused, so a compare no longer re-clones after the status check.
+  cached per refresh generation and reused, so a compare does not re-clone after the status check.
   `refreshRemoteChecks` bumps the generation once per refresh; `deepDiff` reads with `{ reuse: true }`
   while `pullFrom`/`pushTo` stay fresh; a remote add/edit/delete clears the cache.
 - `pickFolder.ts` — the Electron folder-picker dialog.
@@ -708,8 +707,7 @@ functions.
 
 ## Storage invariants
 
-The two rules the whole data model answers to (spec
-`2026-08-11-data-model-hardening.md` §1, stated here verbatim). Everything in **Data model** below
+The two rules the whole data model answers to. Everything in **Data model** below
 is an instance of one of them; the **Core invariants** that follow are the code-level consequences.
 
 **Invariant I — where a datum lives.**
@@ -744,18 +742,18 @@ II.4 is `refreshBratIndex` on a device with no BRAT list, wiping a fleet-shared 
 
 The invariants are stated as the rules the data model is held to, not as a claim that every site
 already satisfies them. **II.4 is the one still partly open**: `refreshBratIndex`'s guard covers only
-the empty case (`repos.length === 0`, spec §5.3), so a device that has ONE BRAT repo still prunes the
-entries for the other nine when it writes — a partial source of truth acting as a full one. It fires
-from the Beta tab's render with no user gesture behind it. Narrowing that guard from "knows nothing"
-to "knows less than the index does" is follow-up work, not something this release did.
+the empty case (`repos.length === 0`), so a device that has ONE BRAT repo still prunes the entries
+for the other nine when it writes, a partial source of truth acting as a full one. It fires from the
+Beta tab's render with no user gesture behind it. Narrowing that guard from "knows nothing" to
+"knows less than the index does" is open work.
 
-**I's corollary now holds with no exceptions.** `deviceOptOuts` — a `deviceId`-keyed map — was
-carried in data.json through 2.21.0 on purpose, because removing a field is a two-phase change: a
-document written without it, adopted by a device still on the old build, takes THAT device's opt-out
-with it — the I.1 failure pointed the other way. **Phase 2 lands here**: the version
-gate is what makes it safe — a build old enough to need the carry is a build that cannot read this
+**I's corollary holds with no exceptions.** `deviceOptOuts`, a `deviceId`-keyed map, does not exist
+in `data.json`. **Do not re-introduce it**, and note what makes its absence safe rather than a
+regression: dropping a field like this is a two-phase change, because a document written without it
+and adopted by a build that still reads it hands THAT device someone else's opt-out. The version
+gate closes phase two, since a build old enough to need the field is a build that cannot read this
 document at all. The migration reads the map once (`absorbCarriedDeviceOptOuts`, a union into
-localStorage) and then deletes the field. Do not re-introduce it.
+localStorage) and then deletes the field.
 
 ## Core invariants
 
@@ -834,15 +832,14 @@ Changes must preserve these:
   "plugin" | "app", version }` object — v2 encoded the KIND in the field NAME
   (`sourcePluginVersion`/`sourceAppVersion`), so every reader had to know both and try them in
   order — plus `innate` (what the item IS, e.g. `desktopOnly`), `display` (`label` and, on a carrier
-  entry, `elements` — names, never behaviour) and, since v2 (spec
-  `2026-08-11-data-model-hardening.md` §6), its own
-  `capturedAt` and a `hash` of its store copy. That `source`/`innate`/`display` partition was
-  deferred in 2.21.0 because an older reader threw on an entry it could not recognise; **v3 is
-  gated, so it lands here.** **Freshness and lineage are two fields, not one.**
-  The single `capturedAt` used to carry both meanings: "when this store was captured" (what
-  `checkRemote` reads) and "the state we last aligned to" (what a pull set to the remote's value so
-  `remoteLockAhead` would converge). Now `syncedWatermark` is the lineage — **only a pull moves it**
-  — and `capturedAt` is derived, `max(items[*][*].capturedAt)`, describing local content only. A pull
+  entry, `elements` — names, never behaviour) and its own `capturedAt` and a `hash` of its store
+  copy. Restructuring an entry this way needs the version gate: an older reader throws on an entry
+  it cannot recognise, so the partition is only safe once such a reader is locked out.
+  **Freshness and lineage are two fields, not one**, because one field cannot answer both
+  questions: "when this store was captured" (what `checkRemote` reads) and "the state we last
+  aligned to" (what a pull sets so `remoteLockAhead` converges). `syncedWatermark` is the lineage
+  and **only a pull moves it**; `capturedAt` is derived, `max(items[*][*].capturedAt)`, describing
+  local content only. A pull
   recomputes it from the merged entries, floored at the value it already had (a pull is additive, so
   the store it produces can never be older than the one it started from); a capture stamps the items
   it touched and leaves the rest alone — as does a pull, for the one group whose store content it
@@ -869,10 +866,10 @@ Changes must preserve these:
   where the disk genuinely differs, and that direction is safe — it surfaces a pull, it never hides
   one. `parseStoreLock` (`core/manifest.ts`)
   validates the named fields and
-  **carries every key it does not know** — per entry and at the lock's top level (spec
-  `2026-08-11-data-model-hardening.md` §3.1). It used to rebuild each entry from a whitelist, and
-  since the pull path writes the PARSED lock back, one pull by an older device stripped a newer
-  device's fields and pushed the loss on to the fleet. **The writers carry the tail too**, or that
+  **carries every key it does not know**, per entry and at the lock's top level. Rebuilding an entry
+  from a whitelist instead would be fleet-wide data loss: the pull path writes the PARSED lock back,
+  so one pull by an older device would strip a newer device's fields and push the loss onward.
+  **The writers carry the tail too**, or that
   parser is theatre: three sites build lock structures from fresh literals — capture's whole-lock
   build, capture's per-group entry rebuild, and the pull merge — and each lays its own computed
   fields OVER what it does not write (`lockTail` / `lockEntryTail`, `core/manifest.ts`) instead of
@@ -891,7 +888,7 @@ Changes must preserve these:
   parse-then-write of the same lock produce the same bytes, so a round trip does not churn the
   vault's history. (`backfillLockLabels` is the exception — it appends `display` to an
   entry it heals, and the next parse normalises the order back.) The lock also carries its own format
-  `version` (§4.3): absent = 1 (the flat `groups` shape), 2 = flat with per-item provenance, 3 = the
+  `version`: absent = 1 (the flat `groups` shape), 2 = flat with per-item provenance, 3 = the
   nested `items` shape this build writes (`STORE_LOCK_VERSION`). v1 and v2 are converted on the way
   in; the version is read through `storeLockVersion`, never off the field, because it rides in the
   carried tail like any other key. **The gate belongs to the store, not to "the remote":** the
@@ -906,7 +903,7 @@ Changes must preserve these:
   capture already gated the same lock before touching anything.) The heal is the only lock writer
   that fires with no user action AND with `schemaStop` null — its trigger is a perfectly readable
   `data.json` — which is why it needs a gate of its own rather than the stop state's; it is
-  deliberately not left to §3.1's carrying parser to make the round trip lossless, since that would
+  deliberately not left to the carrying parser to make the round trip lossless, since that would
   rest the invariant on the parser instead of on the gate.
   `planImport` checks both locks as well, so a doomed pull is
   refused before the user is ever asked to resolve conflicts; the planner is a courtesy and
@@ -915,8 +912,8 @@ Changes must preserve these:
   unreadable lock keeps today's tolerant behaviour, and a `version` that isn't a number reads as 1
   rather than stranding a fleet on a typo.
   **A gate on a version is only as strong as the bookkeeping being FOUND**, which is what
-  `assertRemoteStoreDeclared` adds: no lock ⇒ no version ⇒ none of the above runs, and a remote
-  holding content with no `store.lock.json` used to be read as brand new and pulled wholesale, in
+  `assertRemoteStoreDeclared` adds: no lock ⇒ no version ⇒ none of the above runs. Without it a
+  remote holding content with no `store.lock.json` reads as brand new and is pulled wholesale, in
   silence (a remote pointed one level too deep at the `store` folder is the realistic way there).
   Pull, the pull merge and push all refuse it with `STORE_LOCK_MISSING_MESSAGE`. In one sentence:
   **refuse when there is content AND nothing here says what the content is.** Two producers, both
@@ -931,13 +928,14 @@ Changes must preserve these:
   actually pointed at. A LEGACY store is NOT the case the gate is for — its root manifest says what
   the folder is and this build still reads it (`remoteGroupsFrom` parses it, `migrateLegacyManifest`
   exists), so "no lock" there means "bookkeeping older than the lock" and the pull takes the legacy
-  path it always had; a `.migrated-` remnant declares nothing (nothing reads it), so content beside
-  one is refused like any other. Consequence to carry in release notes: a first push to a non-empty
-  target is refused where its files used to be mirror-deleted, so the copy names BOTH causes (wrong
-  folder / target not empty yet). `checkRemote` reserves `no-store` for a remote with nothing in it
+  path the legacy shape needs; a `.migrated-` remnant declares nothing (nothing reads it), so content
+  beside one is refused like any other. A first push to a non-empty target is therefore refused
+  rather than mirror-deleting its files, and the copy names BOTH causes (wrong folder / target not
+  empty yet). `checkRemote` reserves `no-store` for a remote with nothing in it
   at all — the first-push target — and answers `unknown` for anything present it cannot compare, so a
-  remote the gate refuses can never read as an invitation to the push it would then decline. (The 1.x one-slot apply backup at `<configDir>/config-sync-backup` is gone with the removed
-  Revert feature; apply deletes a leftover copy.)
+  remote the gate refuses can never read as an invitation to the push it would then decline.
+  (`<configDir>/config-sync-backup` is a legacy path only: nothing writes it, and apply deletes a
+  leftover copy.)
 - **The store is configDir-agnostic.** Paths use the literal `configdir` segment, so a vault on
   `.obsidian` and one on `.obsidian_apple` map to the same store.
 - **Run history is a separate, local-only file** — never captured, never synced.
@@ -960,15 +958,14 @@ Changes must preserve these:
   (which refuse it politely) or by ≤2.20.0 (which resets). `legacy` (the v1-era
   `groups`/`memberScopes`/`memberLocal`/
   `appJsonTabs` shape, or anything unversioned) blocks with a `Notice` and starts from
-  `DEFAULT_SETTINGS` — schema v1 has no field a later shape could be reconstructed from. `future` is
-  the half that exists
-  because the gate used to be `schemaVersion !== 2`: a document from a newer build took the legacy
-  path, and since `data.json` travels between a user's devices wholesale, one updated device could
-  reset — and then, at the next save, overwrite — the setup of every device that hadn't updated
-  yet (spec `2026-08-11-data-model-hardening.md` §4.1, invariant II.3). It now sets `main.ts`'s
+  `DEFAULT_SETTINGS` — schema v1 has no field a later shape could be reconstructed from. `future`
+  exists so that a document from a newer build never takes the legacy path (invariant II.3): since
+  `data.json` travels between a user's devices wholesale, one updated device taking that path would
+  reset, and then at the next save overwrite, the setup of every device that had not updated yet.
+  It sets `main.ts`'s
   `schemaStop`, leaves the file untouched, and says so once at load through the same `Notice` the
-  legacy branch uses — a device that has silently stopped syncing must be visible without the user
-  going looking (§4.2b). **While it holds, this build writes nothing another device can see, and
+  legacy branch uses, because a device that has silently stopped syncing must be visible without the
+  user going looking. **While it holds, this build writes nothing another device can see, and
   nothing derived from the document it cannot read**; a writer that appears on no list is refused
   rather than exempt. Refused: `saveSettings`, and `settingsWritable()` ahead of it — every settings
   writer is mutate-then-save, so a save-time refusal would arrive after the mutation and leave
@@ -977,7 +974,7 @@ Changes must preserve these:
   before any settings write could refuse for them and choose files through a `compiledGroups`
   compiled from the misread document — both answer `null` for "refused", never `[]`, so a caller
   cannot record a refusal as a completed action; `appendActionHistory` and `appendRunHistory`, which
-  have the last word on that; `setDeviceOptOut`, which since §2 lives in localStorage and no longer passes the
+  have the last word on that; `setDeviceOptOut`, which lives in localStorage and so does not pass the
   `saveSettings` choke point at all; `refreshBratIndex`; the startup lock-label heal in
   `refreshLocalStatus`; and `saveBaselines` — per-device localStorage no other device sees, but
   computed from that same misread `compiledGroups`, so writing it records a fiction that direction
@@ -993,7 +990,7 @@ Changes must preserve these:
   happen (the Advanced tab gets this from `commitDraft`, which keeps its draft whenever the write
   throws; the remotes list guards its structural gestures directly). The Sync Center states the
   refusal in the cold-start banner's structure with no action (`schemaStop()` on `SyncCenterHost`).
-  The **same gate runs before the write**, not only at load (§4.2): adopt/self-apply writes the
+  The **same gate runs before the write**, not only at load: adopt/self-apply writes the
   store's `data.json` onto this device and only then reloads, so `applyGroup` classifies the
   incoming document (`isFutureSchemaDocument`) while the local file is still intact and fails just
   that item, byte-identical, through the ordinary run-result path.
@@ -1018,7 +1015,7 @@ Four storage homes, one per clause of invariant I above, and a datum belongs to 
 | **`store.lock.json`** | per-item `source`, `innate`, `display`, `capturedAt`, `hash`; the store's own `version` and `syncedWatermark` | provenance and freshness of store CONTENT, which is a fact about the store, not about the settings that produced it |
 
 Enablement itself answers the same two questions — "does this travel, and at what grain?" — twice
-over (spec `2026-08-12-enablement-two-layers-design.md` §2):
+over:
 
 |  | **fleet** — shared default, travels via `data.json` | **local** — this device's exception, never travels |
 |---|---|---|
@@ -1045,7 +1042,7 @@ and `run-history.schema.json` (the run log). They document the persisted shapes 
 external tools; the plugin never validates against them at runtime — the parsers are the authority —
 and `tests/schemaFiles.test.ts` gates them against the producers so they cannot silently drift.
 
-**The one key space** (spec §3/§4): the store lock, the device-local baselines and the device-local
+**The one key space**: the store lock, the device-local baselines and the device-local
 opt-out list are all keyed by `ItemRef` (`${section}/${id}`), minted only by the compiler
 (`itemKeys.ts`). A companion is keyed under its owner (three segments), a carrier as
 `obsidian/<list>`, and anything a v1/v2 conversion cannot place is kept inert under `legacy/<name>`
@@ -1063,7 +1060,7 @@ resolve it. Dropping such an entry instead would read as never-synced, which def
     `beta` key. Two ids may legitimately collide across sections (a core and a community plugin
     sharing a name), which is the point of nesting. `Item = { synced, type?, path?, bratRepo?,
     settingsFile?, companions?, description?, label?, origin? }`:
-    - `synced` (renamed from `enabled`, spec `2026-08-12-enablement-two-layers-design.md` §3.2) —
+    - `synced` (renamed from `enabled`) —
       is this item synced at all. The old name meant two different things one line apart — "this
       item is synced" and "this plugin is turned on" — and the second meaning is not stored here at
       all; it lives in Obsidian's own on/off-list files, and config-sync only masks them (see
@@ -1084,20 +1081,19 @@ resolve it. Dropping such an entry instead would read as never-synced, which def
       `perElement`'s reserved key `""` (`switchList.ts`'s `perElementKeyFor`, the derived key's one
       producer) means "this whole file IS the list": `core-plugins.json`/`community-plugins.json`
       have no JSON field to index a rule by, so their carrier item — `items.obsidian.core-plugins` /
-      `items.obsidian.community-plugins`, real items since this release, not a compile-time-only
-      artifact — stores its rules under `perElement[""]` instead. `enabled-css-snippets` keeps
-      indexing by its actual field name (`appearance.json`'s `enabledCssSnippets`), unchanged.
+      `items.obsidian.community-plugins`, real stored items rather than compile-time-only
+      artifacts — stores its rules under `perElement[""]` instead. `enabled-css-snippets` indexes by
+      its actual field name (`appearance.json`'s `enabledCssSnippets`).
     - `companions?: { path, device: DeviceClass, enabled }[]` — preset (`themes/`, `snippets/`) plus
-      user-added companion folders. Optional, and **no longer written empty**: v2 wrote
-      `companions: []` at every construction site so that 2.20.0, which read the field unguarded,
-      would not throw. That was phase 1 of a two-phase removal; the version gate is
-      phase 2, and every site now omits it. The card-visibility cost this drop was once thought to
-      carry is **not** one: any entry in `items.community`/`items.core` earns its card (above), with
+      user-added companion folders. Optional, and **never written empty**. Writing `companions: []`
+      was a compatibility measure for a build that read the field unguarded and would otherwise
+      throw; the version gate locks that build out, so every site omits it. Dropping it costs no
+      card visibility: any entry in `items.community`/`items.core` earns its card (above), with
       or without a `companions: []` beside it. `{synced: false}` is not residue however much it looks like it —
       it is what an absent entry is not, in the one place that matters most, and nothing on the
       write path prunes it.
-  - **Enablement — two layers, one precedence** (spec `2026-08-12-enablement-two-layers-design.md`
-    §2/§5; see the 2×2 table above). The fleet layer is `Item.settingsFile.perElement` on the
+  - **Enablement — two layers, one precedence** (see the 2×2 table above). The fleet layer is
+    `Item.settingsFile.perElement` on the
     carrier item, read and written through `core/enablementRules.ts` (`enablementRules`,
     `enablementRuleFor`, `withEnablementRule`) — one reader, one writer; all three UI entrances (a
     carrier card's element row, a plugin card's `Enabled on` row, a Sync Center row) go through
@@ -1167,7 +1163,7 @@ resolve it. Dropping such an entry instead would read as never-synced, which def
     `core/v4Migration.ts` then takes that document the rest of the way: `enabled` → `synced`;
     `runsOn.device` becomes a `perClass` rule on the carrier, `runsOn.force` is dropped (all three
     real vaults had zero of them at migration time); `bratIndex` folds into `Item.bratRepo`.
-    **`thisDeviceItems` migrates in two halves, and the second is not optional** (spec §4): a v3 pin
+    **`thisDeviceItems` migrates in two halves, and the second is not optional**: a v3 pin
     did not merely mask its element, it FORCED it, so the fleet half (a `this-device` rule on the
     carrier, preserving WHO decides) and the local half (the pinned element's CURRENT state, frozen
     into `config-sync-device-elements` by `main.ts`'s `freezeThisDeviceElements`, preserving WHAT was
@@ -1202,9 +1198,9 @@ resolve it. Dropping such an entry instead would read as never-synced, which def
   name and, on the two carrier entries only, id → name for the on/off list's elements. Names, never
   behaviour: `status.ts` never counts `display` as a difference. The labels are healed in place by
   `backfillLockLabels`.
-  That `source`/`innate`/`display` partition is what 2.21.0 §6 deferred: it had to stay flat there
-  because `manifest.ts`'s entry validator makes an OLDER reader throw on an entry with neither
-  version field, and a restructured entry looks exactly like that. **v3 is gated, so the constraint
+  That `source`/`innate`/`display` partition depends on the version gate: `manifest.ts`'s entry
+  validator makes an OLDER reader throw on an entry with neither version field, and a restructured
+  entry looks exactly like that. **v3 is gated, so the constraint
   is lifted.**
   The version and watermark are declared on the types but read through `manifest.ts`'s narrowing
   helpers (`storeLockVersion`, `lockWatermark`, `lockEntryCapturedAt`, `lockEntryHash`, `lockLabel`,
@@ -1257,7 +1253,7 @@ never a real vault.
 - The version in `manifest.json` is the source of truth for the current release; what each
   release changed is in [../CHANGELOG.md](../CHANGELOG.md).
 - **Parked backlog** (deferred by the maintainer — don't start without an explicit pick):
-  1. UI audit polish — `design/DESIGN.md` §6 (remaining: one undecided TS-only class
+  1. UI audit polish — `design/DESIGN.md`'s Open items (remaining: one undecided TS-only class
      (`-cm-unified`), micro font sizes, text-on-fill variable split, border-radius tiers, the
      shared `-fpill` class; dead-CSS and emoji-remnant findings are resolved).
   2. Capture/pull interruption robustness (crash-marker vs full atomicity — direction undecided).
