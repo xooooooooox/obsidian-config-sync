@@ -3,14 +3,12 @@ import { PanelFilter, RowBucket, SectionKind, partitionSection, visibleUnderFilt
 
 // WHERE A ROW GOES, and which pill counts it — one declaration, read by every consumer.
 //
-// The panel answers three nested questions, and until 2.25.0 each was answered in a different
-// place: which filter pills exist (renderPills), which sections a pill's view holds
-// (renderTypeSection), and which fold inside a section a given row lands in (buildTypeSectionCard's
-// inline filters). Nothing tied the three together, so they could — and did — disagree: a row could
-// be COUNTED by the `Not synced here` pill while being FILED under `N not installed on this
-// device`, leaving a user who clicked the pill's number with nothing in the list that said those
-// words. This module is the single source of truth for all three, and tests/panelTaxonomy.test.ts
-// pins the whole table plus the invariant that broke.
+// The panel answers three nested questions: which filter pills exist (renderPills), which sections
+// a pill's view holds (renderTypeSection), and which fold inside a section a row lands in
+// (buildTypeSectionCard). Answer them in three places and they drift: a row gets COUNTED by the
+// `Not synced here` pill while being FILED under `N not installed on this device`, so clicking the
+// pill's number lands on a list with none of those words in it. tests/panelTaxonomy.test.ts pins
+// the whole table plus that invariant.
 //
 // Two orthogonal axes decide a row's home:
 //
@@ -39,9 +37,9 @@ export type RowPlacement =
 //
 // `excluded` NEVER yields. It is not an environment fact; it is a decision the user made about
 // this device ("don't sync this here"). Someone who set it and comes back looking for it searches
-// for the words the pill used, and the pill counts by fate. Filing it under `not installed on this
-// device` hid a user's own choice behind a fact about the machine — the 2.25.0 report. The row
-// keeps its `not installed here` chip either way, so the fact is not lost, only demoted.
+// for the words the pill uses, and the pill counts by fate. Filing it under `not installed on this
+// device` would hide a user's own choice behind a fact about the machine. The row keeps its
+// `not installed here` chip either way, so the fact is not lost, only demoted.
 export const FATE_FOLD_YIELDS_TO_AVAILABILITY: Record<FateFold, boolean> = {
   insync: true,
   excluded: false,

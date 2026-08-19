@@ -38,14 +38,12 @@ export class ConflictModal extends Modal {
     const autoCount = auto.addGroups.length + auto.writeFiles.length + auto.keptLocalGroups.length + auto.keptLocalFiles.length + auto.identical.length;
     const compared = autoCount + plan.conflicts.length;
 
-    // ── pinned header ──
     const header = this.contentEl.createDiv({ cls: "config-sync-cm-header" });
     header.createDiv({ cls: "config-sync-cm-title", text: "Resolve pull conflicts" });
     header.createDiv({ cls: "config-sync-cm-sub", text: `Pulling from ${this.remoteName} · ${compared} items compared` });
 
     const body = this.contentEl.createDiv({ cls: "config-sync-cm-body" });
 
-    // ── auto-merged section (collapsed by default) ──
     const addCount = auto.addGroups.length + auto.writeFiles.length;
     const identCount = auto.identical.length;
     const keptCount = auto.keptLocalGroups.length + auto.keptLocalFiles.length;
@@ -75,7 +73,6 @@ export class ConflictModal extends Modal {
       setFoldOpen(autoChev, !open);
     });
 
-    // ── conflicts header + shortcuts ──
     const chead = body.createDiv({ cls: "config-sync-cm-chead" });
     chead.createSpan({ cls: "config-sync-cm-ctitle", text: `${plan.conflicts.length} conflict${plan.conflicts.length === 1 ? "" : "s"}` });
     chead.createSpan({ cls: "config-sync-cm-csub", text: "both sides changed — pick a side per row" });
@@ -85,10 +82,8 @@ export class ConflictModal extends Modal {
     allLocal.addEventListener("click", () => this.chooseAll("local"));
     allRemote.addEventListener("click", () => this.chooseAll("remote"));
 
-    // ── conflict rows ──
     plan.conflicts.forEach((c, i) => this.renderConflict(body, c, i));
 
-    // ── pinned footer ──
     const footer = this.contentEl.createDiv({ cls: "config-sync-cm-footer" });
     this.statusEl = footer.createSpan({ cls: "config-sync-cm-status" });
     footer.createDiv({ cls: "config-sync-rule-spacer" });

@@ -256,7 +256,7 @@ export interface SettingsHost extends Plugin {
   displayName(group: string, storedLabel?: string): string;
 }
 
-// ── The item card's derived keys — ONE producer each ────────────────────────────────────────
+// The item card's derived keys: one producer each, so no consumer re-derives one by hand.
 //
 // A card row carries a `data-search-anchor` and its drawer is keyed in `expanded`. Four places
 // need those two strings: the card renderer that WRITES the anchor, the search index that emits
@@ -491,7 +491,6 @@ const SECTION_LABEL: Record<SearchHit["section"], string> = {
   sources: "Remotes",
 };
 
-// --- Qualifier search vocabulary (SettingTab) ---
 //
 // A hit answers with its settings AREA — this panel's own tabs — and, when the two differ, ALSO
 // with the family the item belongs to (§4). The family is not spelled out here: it comes from
@@ -830,7 +829,6 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     }
   }
 
-  // ── Unified card renderer — every ItemDef section (spec §4/§5) ──────────────────────────────
   // One renderer for every ItemDef: name + badges + sync toggle + chevron on the row, a drawer
   // with a Settings sync zone (and, for Appearance, a Companion folders zone). Reads/writes
   // settings.items directly through host.saveSettings() — durable, recompiles. The Advanced
@@ -2152,9 +2150,9 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       // from the callback, which can't fire until this render pass has finished assigning them.
       let rowEls: { countEl: HTMLElement; chevron: HTMLElement } | null = null;
       let membersHost: HTMLElement | null = null;
-      // Hoisted above the row render (it used to sit below, beside the member scan): the row itself
-      // now stamps this key, so the two readers — the scan that decides WHICH member list to draw,
-      // and the jump that needs to FIND this row — still ask the same single lookup.
+      // Resolved above the row render, because the row itself stamps this key: the scan that
+      // decides WHICH member list to draw and the jump that needs to FIND this row must ask one
+      // lookup, not two that can disagree.
       const mapKey = def.presetCompanions?.find((p) => p.path === row.path)?.mapKey;
       rowEls = this.renderCompanionRow(listEl, def, row, wrap, open, mapKey, () => {
         const nowOpen = !this.membersOpen.has(key);

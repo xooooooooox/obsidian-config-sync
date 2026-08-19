@@ -27,7 +27,6 @@ import {
   THIS_DEVICE,
 } from "../core/types";
 
-// ── Row badges ──────────────────────────────────────────────────────────────────────────────
 // Row = name + badges + sync toggle + chevron, NOTHING else. Badge order: enablement rule
 // (only for cards with an `enablement` projection, only when non-default) → N device-scoped →
 // N encrypted. Zero counts are omitted entirely — a badge never reads "0 …".
@@ -152,7 +151,6 @@ export function countEncrypted(item: Item): number {
   return n;
 }
 
-// ── The two on/off-list carrier cards ───────────────────────────────────────────────────────
 
 // Which enablement list a card CARRIES, or null for a card that carries none. THE producer of
 // "this is a carrier card": the badges, the drawer's element section and its row list all ask it,
@@ -259,9 +257,9 @@ export function computeBadges(
   if (def.enablement !== undefined && enablement !== null) {
     const cls = sharingClass(enablement.rule);
     // The badge KNOWS which exception it is, so it says so: `power`/`power-off`, the same pair the
-    // row's own local glyph paints, and the matching word. It used to say `on: this device` for
-    // both — a plugin forced OFF here still read as on — and wore `corner-down-right`, which was
-    // the glyph for having NO exception. Both halves were wrong in the same place.
+    // row's own local glyph paints, and the matching word. One badge for both exceptions would say
+    // `on: this device` over a plugin forced OFF here, and would have to wear
+    // `corner-down-right`, the glyph for having NO exception.
     if (enablement.exception !== null) {
       const on = enablement.exception === "on";
       badges.push({ text: on ? ON_BADGE_TEXT.local : OFF_BADGE_TEXT_LOCAL, cls: ON_BADGE_CLASS.local, icon: on ? "power" : "power-off" });
@@ -286,7 +284,6 @@ export function computeBadges(
   return badges;
 }
 
-// ── Zone presence ───────────────────────────────────────────────────────────────────────────
 
 // Zone ① "Enabled on" exists only for cards whose registry def carries an enablement projection
 // (core/community/beta plugins) — this only decides whether to reserve the slot.
@@ -317,7 +314,6 @@ export function stateOnlyHint(itemLabel: string, expectedFile: string): string {
   return `Settings appear here once ${itemLabel} writes ${expectedFile}.`;
 }
 
-// ── Settings file mode ──────────────────────────────────────────────────────────────────────────
 
 // Item convenience form of the same test — false when the card has no settingsFile at all
 // (nothing to derive from).
@@ -336,7 +332,6 @@ export function fileRuleLegalForMode(mode: SyncMode | undefined): boolean {
   return mode === undefined || mode === "plain";
 }
 
-// ── Fields zone row models ──────────────────────────────────────────────────────────────────
 
 export const DEFAULT_FIELD_RULE: ItemFieldRule = { sharing: EVERYWHERE, encrypted: false };
 
@@ -471,7 +466,6 @@ export function buildPerElementRows(elements: string[], sharings: PerElementShar
   return elements.map((element) => ({ element, sharing: sharings[element] ?? EVERYWHERE }));
 }
 
-// ── Appearance specifics ────────────────────────────────────────────────────────────────────
 
 export const SNIPPET_MEMBER_HINT = "Files always sync — each snippet's choice here is where it's turned on.";
 
@@ -501,7 +495,6 @@ export function buildSnippetMemberRows(fileNames: string[], rules: PerElementSha
 // writer for one datum. Its empty-map pruning is what keeps a bare `{}` from pinning the card in
 // Fields mode forever.
 
-// ── Companion folders zone ──────────────────────────────────────────────────────────────────
 
 // Tail hint under a non-snippet companion's member-file list — a plain folder has no
 // per-file control (see renderPlainCompanionMembers's doc comment), so this clarifies that
@@ -531,7 +524,6 @@ export function buildCompanionRows(def: ItemDef, item: Item): CompanionRowModel[
   return [...presetRows, ...userRows];
 }
 
-// ── Companion / custom-path input validation ────────────────────────────────────────────────────
 // Shared by zone ② "Custom path" and zone ③ "+ Add folder": both accept a vault-relative path
 // typed by the user. Trims, turns backslashes into forward slashes (Windows paste), collapses
 // "//", and strips leading/trailing slashes. Validation then rejects empty, absolute (leading
@@ -598,7 +590,6 @@ export function sortCompanionMemberNames(names: string[]): string[] {
   return [...new Set(names)].sort((a, b) => a.localeCompare(b));
 }
 
-// ── Copy contract (verbatim) ────────────────────────────────────────────────────────────────
 
 // The fourth stop answers a DIFFERENT question from the first three. They say who gets the shared
 // answer; this one says there is no shared answer at all. That is why it sits below a separator in
@@ -620,15 +611,12 @@ export function sharingLabel(sharing: Sharing): string {
 
 export const FILE_SHARING_OPTIONS: Sharing[] = [EVERYWHERE, perClass("desktop"), perClass("mobile")];
 // The shared half of a per-key item's Settings-sync control, in two lines: what decides, then what
-// you can do about it. They used to be one line that looked like a value stop and behaved like a
-// link — every signal of something you pick, none of the behaviour.
+// you can do about it. One line carrying both looks like a value stop and behaves like a link.
 //
-// ONE pair of strings for BOTH surfaces. The Sync Center used to say "— opens Settings" and the
-// Settings tab "— jump to them": the same fact, worded twice, and after 2.25.0 they also land in
-// the same place, so there was nothing left for two spellings to distinguish. `Open the per-key
-// rules` is true on both — from the Sync Center it opens Settings and lands on them, inside
-// Settings it scrolls to them — and the ICON is what stays surface-specific (`settings-2` only
-// where something really does open Settings).
+// ONE pair of strings for BOTH surfaces, because both land in the same place and there is nothing
+// for two spellings to distinguish. `Open the per-key rules` is true either way: from the Sync
+// Center it opens Settings and lands on them, inside Settings it scrolls to them. The ICON is what
+// stays surface-specific (`settings-2` only where something really does open Settings).
 export const PER_KEY_RULES_STATE_TEXT = "Per-key rules decide this";
 export const PER_KEY_RULES_ACTION_TEXT = "Open the per-key rules";
 // The trigger's tooltip still has to say both halves in one breath — a tooltip is one line.
@@ -716,7 +704,7 @@ export const PREVIEW_LEGEND_ENTRIES: PreviewLegendEntry[] = [
   { kind: "lock", cls: null, text: "encrypted" },
 ];
 
-// ── Sync all — one master row per Core/Community/Beta section: toggles
+// Sync all — one master row per Core/Community/Beta section: toggles
 // every card's Item.synced in that section; its own value is derived (all-enabled), never
 // stored separately. No kind-exclusion: every def in the section participates.
 

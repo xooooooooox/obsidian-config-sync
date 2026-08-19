@@ -136,7 +136,6 @@ import {
   type QualifierResolver,
 } from "./qualifierSearch";
 
-// --- Qualifier search vocabulary (Sync Center) ---
 export function syncTypeValue(g: SyncGroup): "file" | "folder" {
   return g.type === "folder" ? "folder" : "file";
 }
@@ -1842,7 +1841,6 @@ export class SyncCenterView extends ItemView {
     }
   }
 
-  // ── Run history browser ─────────────────────────────────────────────────────────────────
   private actionCell(rec: RunRecord): { glyph: string; dir: "in" | "out" | "remove"; label: string; action?: SyncAction } {
     if (rec.kind === "stop-sync") return { glyph: "⊘", dir: "remove", label: "Stop syncing" };
     if (rec.kind === "delete-leftover") return { glyph: "⌫", dir: "remove", label: "Delete leftover" };
@@ -2352,9 +2350,9 @@ export class SyncCenterView extends ItemView {
       // no data yet") — rows within each fold stay name-sorted since `visible` already is.
       // Filing is `placeRow`'s call, not this function's (panelTaxonomy.ts): a row has a FATE and an
       // AVAILABILITY at once, and which of the two files it is a decision with a documented reason,
-      // not an inline filter. It used to live here as `availability wins`, which quietly filed a
-      // row the user had opted THIS device out of under `N not installed on this device` while the
-      // `Not synced here` pill still counted it — a number with nothing behind it.
+      // not an inline filter. Deciding it here as "availability wins" files a row the user opted
+      // THIS device out of under `N not installed on this device` while the `Not synced here` pill
+      // still counts it, which is a number with nothing behind it.
       const placed = visible.map((r) => ({ r, at: placeRow(this.rowBucket(r), this.sectionOf(r.group.name)) }));
       const active = placed.filter((x) => x.at.zone === "active").map((x) => x.r);
       const fateRows = (fold: FateFold): StatusRow[] =>
@@ -2508,9 +2506,9 @@ export class SyncCenterView extends ItemView {
   // SHOWS it and jumps to where that value is configured. One datum, one writer — and the writer is
   // the card's own toggle in the settings panel, beside the confirmation the change deserves.
   //
-  // Glyph + tooltip, no wordmark. The word it used to carry (`synced`) named the wrong thing
-  // anyway: what this chip reports is whether the on/off LIST is shared with your other devices,
-  // which is the `Not shared` axis, not the sync-run axis.
+  // Glyph + tooltip, no wordmark. A word like `synced` would name the wrong axis: this chip reports
+  // whether the on/off LIST is shared with your other devices, which is the `Not shared` axis, not
+  // the sync-run axis.
   //
   // The state therefore lives in the GLYPH, not in a color: `share-2` when the list is shared,
   // `square-split-horizontal` — the same mark `ruleIcon` gives `Not shared` — when it isn't. That
@@ -2633,11 +2631,10 @@ export class SyncCenterView extends ItemView {
     // No row-level aria-label: Obsidian renders aria-labels as hover tooltips — a
     // row-level one pops on any blank stretch of the row.
     const row = card.createDiv({
-      // `is-inert`, not the old `is-insync`: the flag is `!fate.stageable`, and TWO opposite states
-      // share that — "already in sync, nothing to do" and "changed on both sides, waiting on you".
-      // Under the old name the second inherited the first's `opacity: 0.55`, so the single row that
-      // needed the user's attention rendered FAINTER than the routine work above and below it. The
-      // dimming now belongs to the calm reading only (styles.css), and the name says what it tests.
+      // `is-inert` names what the flag tests (`!fate.stageable`), which TWO opposite states share:
+      // "already in sync, nothing to do" and "changed on both sides, waiting on you". Naming it for
+      // the first would dim the second, so the single row needing attention would render fainter
+      // than the routine work around it. Dimming belongs to the calm reading only (styles.css).
       cls: `config-sync-hub-row${inert ? " is-inert" : ""}${unresolvedConflict ? " is-conflict" : ""}`,
       attr: { "data-cs-row": group.name },
     });
@@ -2794,9 +2791,9 @@ export class SyncCenterView extends ItemView {
     });
 
     const changes = this.familyChanges(r);
-    // An unresolved conflict has no direction yet, and the FILES row used to be gated on one — so
-    // the card asked you to pick a side while showing you nothing to pick it from, and only
-    // revealed the files AFTER you had committed. The evidence now comes first: an unresolved
+    // An unresolved conflict has no direction yet, so the FILES row must not be gated on one:
+    // gating it asks the user to pick a side while showing nothing to pick it from, revealing the
+    // files only after they have committed. The evidence comes first instead. An unresolved
     // conflict previews the `Use theirs` side (`apply`), and the toolbar control both switches the
     // preview and IS the choice, because in this plugin a diff always shows what one choice would
     // do (see diffView's DiffResolveControl).
@@ -3046,13 +3043,11 @@ export class SyncCenterView extends ItemView {
       value.empty();
       list.empty();
       const expanded = this.expandedFileRows.has(key);
-      // ONE mark, not three. The row used to read `↑ (4) ›` — a direction badge, a neutral count
-      // pill and a fold chevron, each its own little target — where all three answered the same
-      // question. They are one badge now: the direction's icon and its count in a single pill that
-      // carries the direction's color. The badge is pure STATE — the click/keyboard target is the
-      // whole row (wired below) — so there is nothing left on this line to aim at. Expanded, the
-      // badge fills in (`.is-open`) instead of a chevron rotating beside it: same state, one fewer
-      // glyph.
+      // ONE mark, not three: a direction badge, a neutral count pill and a fold chevron all answer
+      // the same question, and split across three glyphs each becomes its own small target. This is
+      // one badge carrying the direction's icon, its count and its color. The badge is pure STATE,
+      // with the whole row as the click and keyboard target (wired below), so there is nothing on
+      // this line to aim at. Expanded, the badge fills in (`.is-open`) rather than adding a chevron.
       const head = value.createDiv({ cls: "config-sync-files-head" });
       // While a conflict is undecided the badge wears the CONFLICT mark, not a direction arrow:
       // the row has no direction yet, and `dir` here is only the side being previewed. Once a side
@@ -3245,9 +3240,9 @@ export class SyncCenterView extends ItemView {
     });
   }
 
-  // Both layers in ONE control, the same shape the Settings panel paints (mergedControl.ts): the
-  // divider and the `this device` eyebrow that used to sit between them are gone, and the words
-  // that told the two layers apart moved into the menu as its two section headers.
+  // Both layers in ONE control, the same shape the Settings panel paints (mergedControl.ts). It
+  // carries no divider and no `this device` eyebrow: the words that tell the two layers apart are
+  // the menu's two section headers.
   private renderMergedRow(
     detail: HTMLElement,
     label: string,

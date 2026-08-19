@@ -43,7 +43,6 @@ export interface V2Migration {
   carriedDeviceOptOuts: unknown;
 }
 
-// ── v2 identity → v3 identity ──────────────────────────────────────────────────────────────────
 
 // v2 encoded an item's family as a PREFIX on its id; v3 nests by section instead.
 // One producer for that translation, used by all three v2 fields keyed by an item id — `items`,
@@ -76,7 +75,6 @@ export function v2ItemRef(v2Id: string): ItemRef {
   return itemRef(section, id);
 }
 
-// ── Value mappings ─────────────────────────────────────────────────────────────────────────────
 
 // v2's flat `RuleScope` ("all" | "desktop" | "mobile" | "local") → v3's `Sharing` union. Used for
 // field rules, file rules and per-element maps alike, so the three cannot disagree.
@@ -177,7 +175,6 @@ export function runsOnFrom(enabledOn: unknown, memberRule: unknown): Doc | undef
   return force === undefined ? { device } : { device, force };
 }
 
-// ── The two restored v2 normalizers ────────────────────────────────────────────────────────────
 
 // v2 shape revision: the three app.json slice
 // cards (editor/files-links/other) plus a top-level `appJson` mode merge into a single "app" item.
@@ -251,7 +248,7 @@ export function drainEnabledOnLocal(items: Doc, thisDeviceIds: string[]): boolea
   return changed;
 }
 
-// ── The carried device opt-out map (dropped without losing the choice) ─────────────────────────
+// The carried device opt-out map: dropped from the document without losing the choice itself.
 
 // This device's group names inside v2's carried map. Anything that isn't the old shape (a hand
 // edit, a future build's replacement) contributes nothing and is left alone.
@@ -264,7 +261,6 @@ export function deviceOptOutsFor(map: unknown, deviceId: string): string[] {
     .map(([name]) => name);
 }
 
-// ── The migration ──────────────────────────────────────────────────────────────────────────────
 
 // One item's v2 `ItemConfig` → v3 `Item`. `memberRule` is this item's entry in the top-level
 // `memberRules` side table, which v3 does not have: a rule lives on the thing it governs.

@@ -30,7 +30,6 @@ export function jsonKeyClass(kc: KeyClass): string {
   return kc.detected ? "config-sync-json-detected" : "config-sync-json-none";
 }
 
-// ── Per-element array coloring ──────────────────────────────────────────────────────────────
 // classifyJsonKeys only classifies top-level key LINES; a string-array key with per-element
 // rules enabled (top-level string-array keys only) also needs each ELEMENT line colored
 // by that element's own sharing. `raw` is the pretty-printed `JSON.stringify(doc, null, 2)` text

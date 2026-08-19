@@ -325,7 +325,6 @@ export default class ConfigSyncPlugin extends Plugin {
     this.applyMobileStatusBar();
     this.addCommand({ id: "sync", name: "Open Sync Center", callback: () => void this.openSyncCenter() });
 
-    // --- awareness runtime ---
     this.registerEvent(this.app.vault.on("modify", (f) => this.onStoreFileEvent(f.path)));
     this.registerEvent(this.app.vault.on("create", (f) => this.onStoreFileEvent(f.path)));
     this.registerEvent(this.app.vault.on("delete", (f) => this.onStoreFileEvent(f.path)));
@@ -1286,7 +1285,7 @@ export default class ConfigSyncPlugin extends Plugin {
     return this.installFn;
   }
 
-  // ── Run history (local-only, never synced) ──────────────────────────────────────────────
+  // Run history is local-only and never synced.
   private runHistoryPath(): string {
     const custom = this.settings.runHistory.path.trim();
     return custom !== "" ? custom : `${this.app.vault.configDir}/plugins/config-sync/run-history.json`;
@@ -1511,7 +1510,6 @@ export default class ConfigSyncPlugin extends Plugin {
     };
   }
 
-  // ── The two enablement layers ───────────────────────────────────────────────────────────────
   //
   // The fleet rule lives on the carrier item (enablementRules.ts); this device's own exception
   // lives in localStorage (deviceElements.ts); decideEnablement (enablementDecision.ts) is the one
@@ -1930,7 +1928,6 @@ export default class ConfigSyncPlugin extends Plugin {
     await writeGroups(await this.coreContext(), groups);
   }
 
-  // ── Stop syncing + store leftover cleanup ───────────────────────────────────────────────
   private groupStoreAbs(ctx: CoreContext, group: SyncGroup): string {
     return `${ctx.rootPath}/store/${groupStorePath(group.path)}`;
   }
@@ -2254,7 +2251,7 @@ export default class ConfigSyncPlugin extends Plugin {
       return;
     }
     this.schemaStop = null;
-    // Quick commands moved to the Ribbon Organizer plugin in 1.7.0; drop the stale key so the
+    // Quick commands live in the Ribbon Organizer plugin, so the stale key is dropped here and the
     // next save cleans data.json. `deviceId` is likewise swept: the device identity lives only in
     // localStorage (see the deviceId() method below) — data.json travels wholesale (git-tracked
     // vaults, remotely-save, manual copies), and a value trusted from an inherited data.json would

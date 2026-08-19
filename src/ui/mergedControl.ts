@@ -1,11 +1,10 @@
 /**
  * THE merged two-layer control, painted once for both surfaces.
  *
- * A row's shared answer and this device's own answer used to be two controls with a divider and a
- * `this device` eyebrow between them — a permanent column spent on a layer that is almost always
- * "no exception", and on a phone a column that did not fit at all. They are one control now: both
- * glyphs, one `chevrons-up-down`, one click target, one Tab stop, one menu whose two labelled
- * sections carry the two layers.
+ * A row's shared answer and this device's own answer are ONE control: both glyphs, one
+ * `chevrons-up-down`, one click target, one Tab stop, one menu whose two labelled sections carry
+ * the two layers. Two controls with a divider and an eyebrow between them would spend a permanent
+ * column on a layer that is almost always "no exception", and on a phone that column does not fit.
  *
  * The Settings panel and the Sync Center each own their row SHELL (a scrow vs a card row), but the
  * control inside is the same markup and the same menu shape, so it lives here rather than being
@@ -15,9 +14,9 @@
 import { Menu, setIcon } from "obsidian";
 import { MenuSectionModel, RowSegment } from "./enablementRow";
 
-// Section headers are the whole point of the merge: two questions used to sit in one flat list with
-// nothing saying they WERE two questions, which is how "no shared value" and "this device opts out"
-// came to read as the same thing. `setIsLabel` renders a header row that cannot be picked.
+// Section headers are the whole point of the merge. Flatten the two questions into one list with
+// nothing saying they ARE two questions and "no shared value" reads the same as "this device opts
+// out". `setIsLabel` renders a header row that cannot be picked.
 export function buildSectionedMenu(sections: readonly MenuSectionModel[]): Menu {
   const menu = new Menu();
   sections.forEach((section, i) => {

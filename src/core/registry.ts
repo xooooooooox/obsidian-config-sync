@@ -195,7 +195,6 @@ export function itemFor(items: ItemMap, def: ItemDef): Item {
   return itemAt(items, def.section, def.id) ?? emptyItem();
 }
 
-// ── What a stored entry is worth ────────────────────────────────────────────────────────────────
 //
 // AN ENTRY'S PRESENCE IS LOAD-BEARING. An id that is in the store's on/off list but has no def here (the plugin is
 // not installed) still needs its entry: the item is what a rule, a lock label and a baseline are
@@ -239,7 +238,6 @@ export function emptyItem(): Item {
   return { synced: false };
 }
 
-// ── Registry construction ───────────────────────────────────────────────────────────────────
 
 export interface RegistryCoreEnv {
   id: string;
@@ -374,7 +372,6 @@ export function defsForForeignItems(defs: ItemDef[], items: ItemMap, betaIds: Re
   return extras.length === 0 ? defs : [...defs, ...extras];
 }
 
-// ── Compile ──────────────────────────────────────────────────────────────────────────────────
 
 // The shape compileItems needs out of ConfigSyncSettings — spelled out structurally (rather than
 // imported from main.ts) so this module never depends on the plugin's top-level settings type.
@@ -702,7 +699,6 @@ export function compileItems(defs: ItemDef[], settings: CompileSettings): SyncGr
   return groups;
 }
 
-// ── Group -> owning item(s), for durable "stop syncing" ────────────────────────────────────────
 
 // Which item(s) to flip when a user asks to stop syncing a compiled group by name — used by
 // main.ts's stopSyncing so the effect survives the next recompile (settings.items is the only
@@ -717,7 +713,6 @@ export interface GroupOwner {
   companionPath?: string;
 }
 
-// ── Companion / custom-path collision check ─────────────────────────────────────────────────────
 
 // Whether `path` (already normalized/validated by the caller — see itemCard.ts's
 // validateCompanionPath) is already claimed by ANY carrier known to the registry: an item's

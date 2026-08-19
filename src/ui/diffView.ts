@@ -128,10 +128,10 @@ function renderSplit(pane: HTMLElement, rows: DiffRow[], leftLabel: string, righ
 
 // Builds toolbar (meta + Unified⇄Split toggle) and the diff pane. Mobile forces unified.
 //
-// `meta.sorted` used to print as a trailing ` · sorted view`, which spent the toolbar's most
-// readable slot on a caveat while pushing the filename — the thing being diffed — off to the left.
-// The caveat is still true and still needed (the rows are NOT in file order), so it moves into the
-// meta's own accessible name instead of vanishing.
+// `meta.sorted` lives in the meta's accessible name rather than printing as a trailing
+// ` · sorted view`: the caveat is true and needed (the rows are NOT in file order), but spelling it
+// inline spends the toolbar's most readable slot on it and pushes the filename, the thing being
+// diffed, off to the left.
 // `onExpand` renders the "open this in a bigger window" button. `null` where there is nowhere
 // bigger to go — inside the modal that button opens, and inside the pull-conflict modal.
 //

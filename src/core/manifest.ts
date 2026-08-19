@@ -488,12 +488,13 @@ export function lockWatermark(lock: StoreLock): string {
 // (`syncedWatermark`) or by producing it here (`capturedAt`). Never older than its own `capturedAt`
 // — and THAT is what makes two locks from different builds comparable at all.
 //
-// Getting this wrong was a live regression. `syncedWatermark` alone is not the same quantity as a v1
-// lock's `capturedAt`: an updated device's watermark stops moving on capture (lineage belongs to the
-// pull), while a v1 device's stands in for both and tracks whatever it last pulled — which is OUR
-// `capturedAt`. So an older device that pulled from us and pushed back read as "newer" against a
-// watermark we had deliberately left behind, with zero content difference, in exactly the mixed
-// fleet the freshness rules exist to keep quiet. Taking the later of the two puts both sides on the same scale.
+// Reading `syncedWatermark` alone is wrong, because it is not the same quantity as a v1 lock's
+// `capturedAt`: an updated device's watermark stops moving on capture (lineage belongs to the
+// pull), while a v1 device's stands in for both and tracks whatever it last pulled, which is OUR
+// `capturedAt`. Compare those two directly and an older device that pulled from us and pushed back
+// reads as "newer" against a watermark we deliberately left behind, with zero content difference,
+// in exactly the mixed fleet the freshness rules exist to keep quiet. Taking the later of the two
+// puts both sides on the same scale.
 export function lockLineage(lock: StoreLock): string {
   const watermark = lockWatermark(lock);
   const w = Date.parse(watermark);
@@ -516,7 +517,7 @@ export function lockEntryHash(entry: StoreLockEntry): string | undefined {
   return lockText(entry.hash);
 }
 
-// ── The nested `items` map, read and written in exactly one place each ─────────────────────────
+// The nested `items` map is read in exactly one place and written in exactly one place.
 
 // One item's entry. THE reader: nothing indexes `lock.items[section][id]` by hand, because the
 // nesting is one fact and two sites that spell it out are two sites that can disagree about it.

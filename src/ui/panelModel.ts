@@ -15,7 +15,6 @@ export type Direction = "capture" | "apply";
 // section alone — no ROW is ever a leftover, so every bucket hides under it.
 export type PanelFilter = "all" | "capture" | "apply" | "ok" | "excluded" | "none" | "leftover";
 
-// ── Fate-derived buckets ────────────────────────────────────────────────────────────────────────
 // The single per-row bucket derivation: every count/filter/partition/fold consumer reads THIS
 // instead of re-deriving from raw GroupState (familyState), so a `↓ Turns on` row (stageable apply,
 // sitting on a no-settings/in-sync GroupState) counts/filters/folds as "apply" — the same bucket
@@ -256,7 +255,7 @@ export function sectionForItem(a: Availability, isMobile: boolean): SectionKind 
 //   3. Only `desktop-only` rows are dropped. `stageableRow` judges exactly that section
 //      unstageable ("informational only — can't run here"), so it is the one availability class the
 //      view itself never counts as pending. Outdated/disabled/not-installed rows DO stage and DO
-//      show up in the center's counts, so dropping them is what used to make the bar read low.
+//      show up in the center's counts, so dropping them would make the bar read low.
 //
 // One residual, deliberately not chased: the bar has no access to the view's fate machinery
 // (install policy, conflict choices, direction overrides), so a row whose FATE the view resolves to
@@ -385,7 +384,6 @@ export function runProgressLabel(verb: "Capturing" | "Applying", done: number, t
   return `${verb === "Capturing" ? "↑" : "↓"} ${verb} ${done}/${total}…`;
 }
 
-// ── Enablement single entry ──────────────────────────────────────────────────────────────────
 
 // The on/off list an item's enablement rides, from the item's own REF: a community item
 // rides the community list, everything else the core one. Takes the ref rather than the group name
@@ -405,7 +403,6 @@ export function carrierIsSynced(itemRef: string, compiledRefs: readonly (string 
   return compiledRefs.includes(carrierRef(enablementCarrierFor(itemRef)));
 }
 
-// ── Unified grammar view skeleton ──────────────────────────────────────────────────────────────
 // Every row lives
 // in exactly one of these four fixed sections, keyed off its scope — readiness state (outdated,
 // disabled, not installed…) becomes row-level fate instead of a separate section.
@@ -445,7 +442,6 @@ export function widestCountDigits(counts: readonly number[]): number {
   return String(Math.max(0, ...counts)).length;
 }
 
-// ── Remote pane C-grammar model ────────────────────────────────────────────────────────────────
 // Buckets a remote's raw file diff into the same four TYPE_SECTION_ORDER sections the main list
 // uses: the two switch-list carriers never appear as an ordinary row (their delta is an on/off
 // summary, not a file to diff), everything else sorts into the section its category maps to.
@@ -580,7 +576,6 @@ export function onOffNarrationLines(
   };
 }
 
-// ── Family rollup ──────────────────────────────────────────────────────────────────────────────
 // A "family" is a parent object plus its companion groups (e.g. Appearance's themes/snippets
 // dirs) — "one object = one row" means the family presents through ONE state,
 // derived here, rather than each companion surfacing its own row.
@@ -727,7 +722,6 @@ export function unifiedFooterSummary(sel: { applyN: number; installs: number; tu
   return `${total} selected · ${parts.join(" · ")}`;
 }
 
-// ── Expanded-card file entries ──────────────────────────────────────────────────────────────────
 // FileChanges (capFileEntries's source) is always computed from the CAPTURE side's perspective
 // (types.ts/status.ts): "added" = present locally, absent from the store; "deleted" = present in
 // the store, absent locally; "updated" = present on both sides, differs. Under capture direction
@@ -796,7 +790,6 @@ export function fileEntryFor(
   return { glyph, label: change.rel, affordance: encrypted ? "none" : affordance, note: encrypted ? ENCRYPTED_NOTE : null, tooltip };
 }
 
-// ── Unified staging ─────────────────────────────────────────────────────────────────────────────
 // The run payload is derived straight from each row's checkbox + Fate, with the
 // two on/off carriers' member state collected separately from their own file-level entry.
 

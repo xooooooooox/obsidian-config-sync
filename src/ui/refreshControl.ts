@@ -2,24 +2,13 @@ import { ExtraButtonComponent, setTooltip } from "obsidian";
 
 // THE header's refresh control — its look, its words, and its busy state in one place.
 //
-// The spin used to be derived, at render time, from the plugin's `remoteRefreshProgress()`: non-null
-// only on desktop, and only for the seconds a remote clone is actually in flight. That could not
-// work, for three separate reasons that all pointed the same way:
-//
-//   - The class was only ever applied by a full re-render, and every progress tick called
-//     notifySyncCenter → reload(), which bumps `renderGen` and makes the PREVIOUS reload abandon
-//     itself at its next generation check. The only reload that survived to paint was the one
-//     started after progress went back to null — i.e. the panel could only ever draw the
-//     not-busy frame.
-//   - On mobile the remote half returns immediately (`Platform.isDesktop` gate), so there was no
-//     progress to derive anything from at all.
-//   - The expensive half of a refresh is LOCAL (re-reading and re-hashing every item), and that
-//     half was never represented in the button's state to begin with.
-//
-// So busy is no longer derived from one of the two halves. The view owns it, it covers the whole
-// gesture, and it is painted straight onto the element (paintRefreshButton) instead of waiting for
-// a render that may never come — the same builder/repainter split resolveSegment.ts uses, and for
-// the same reason: the control must update while the thing that would rebuild it is still running.
+// Busy is owned by the view and painted straight onto the element (paintRefreshButton), never
+// derived from remote progress and never waiting on a re-render. Deriving it cannot work: remote
+// progress is desktop-only and covers neither the local half of a refresh (the expensive half) nor
+// mobile at all, and a progress tick reloads the panel, which abandons the in-flight render — so
+// the only frame that survives to paint is the not-busy one. Painting directly is the same
+// builder/repainter split resolveSegment.ts uses, for the same reason: the control must update
+// while the thing that would rebuild it is still running.
 
 export const REFRESH_ICON = "refresh-cw";
 export const REFRESH_BUTTON_CLASS = "config-sync-center-refresh";

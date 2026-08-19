@@ -4,14 +4,14 @@ import { setIcon } from "obsidian";
 // text glyphs (✓ ○ ⊘) — text-glyph ink heights are unequal across themes (a font-fallback
 // artifact); fixed-size SVG reads as optically equal instead. `ban` stays reserved for the
 // Stop-syncing ACTION (itemCard.ts's stop-sync menu) — action and state never share an icon, so
-// the "not synced on this device" STATE uses `circle-minus` (it was `circle-slash` until
-// 2026-08-18: at this size a diagonal through a circle is the least legible mark in the set, and a
-// horizontal bar says "taken out of this device's set" more plainly. Still a circle, so the trio
-// below stays one family — and the merged control's own local glyph moved with it, since that is
-// the same state said in a different place). `.config-sync-state-icon` (✓ ○ ≠ —
+// the "not synced on this device" STATE uses `circle-minus`. Not `circle-slash`: at this size a
+// diagonal through a circle is the least legible mark in the set, while a horizontal bar says
+// "taken out of this device's set" plainly. Still a circle, so the trio below stays one family,
+// and the merged control's own local glyph carries the same mark, being the same state said in a
+// different place. `.config-sync-state-icon` (✓ ○ ≠ —
 // ? key, a DIFFERENT, Statistic-workspace vocabulary) is untouched by this map and stays text —
-// but a collapsed item ROW's own neutral (`—`-glyph) fate is NOT that column: per DESIGN.md §2.1
-// (the authority for this ruling), the same FOLD_ICON/FOLD_ICON_COLOR_CLASS map is reused at
+// but a collapsed item ROW's own neutral (`—`-glyph) fate is NOT that column: per DESIGN.md's
+// State column section (the authority for this ruling), the same FOLD_ICON/FOLD_ICON_COLOR_CLASS map is reused at
 // the row's `config-sync-fate-ic` size for exactly that fate (SyncCenterView.ts's fateWrap and
 // renderRemoteDiffEntry) — the fold vocabulary speaks at both the group-header line and the
 // row it summarizes.
@@ -33,16 +33,15 @@ export const FOLD_ICON_COLOR_CLASS: Record<FoldKind, string | null> = {
 
 // The conflict mark. Not a fold — a conflict is the one row state with nothing to fold INTO, and
 // the only fate that keeps its sentence on screen ("a conflict must shout"). It lives here anyway
-// because this file is the row-state icon vocabulary, and until 2.25.0 conflict was the last state
-// in that column still drawing a TEXT glyph (`⚠`) while ↑/↓/✓/⊖/○ had all become fixed-size SVG:
-// its size and baseline drifted with the font, and it could not carry a colour class of its own.
+// because this file is the row-state icon vocabulary, and every state in that column is a
+// fixed-size SVG. A text glyph (`⚠`) here would drift in size and baseline with the font and could
+// carry no colour class of its own.
 //
-// Red, not the orange it shared with `capture`. A routine "your settings are newer, capture them"
-// and a deadlock waiting on the user were wearing the same colour in the same column, and once the
-// conflict row stopped being dimmed (it used to inherit the in-sync opacity) that collision was the
-// only thing left telling them apart — which is to say, nothing was. Red has uses elsewhere (a
-// failed run in the result strip, a deleted line in a diff), but those are other surfaces; in the
-// row's fate column nothing else claims it.
+// Red, not the orange `capture` wears. A routine "your settings are newer, capture them" and a
+// deadlock waiting on the user must not share a colour in the same column: the conflict row is not
+// dimmed, so colour is the only thing left to tell the two apart. Red has uses elsewhere (a failed
+// run in the result strip, a deleted line in a diff), but those are other surfaces; in the row's
+// fate column nothing else claims it.
 export const CONFLICT_ICON = "triangle-alert";
 export const CONFLICT_COLOR_CLASS = "is-conflict";
 
@@ -53,10 +52,6 @@ export const CONFLICT_COLOR_CLASS = "is-conflict";
 // not installed here, `monitor` desktop only, `power-off` off here), so the fold line and the rows
 // inside it say the same thing in the same mark. `circle-arrow-up` is the one new glyph: the store
 // was captured on a newer version than this device runs, and updating is the way out.
-//
-// The four titles and their notes come back verbatim from the sections this replaced
-// (987eacf deleted them when the list moved to type sections; the copy was good and the need for
-// it never went away — it just stopped being reachable).
 export type AvailabilityFoldKind = "outdated" | "disabled" | "not-installed" | "desktop-only";
 
 export const AVAILABILITY_FOLD_ICON: Record<AvailabilityFoldKind, string> = {

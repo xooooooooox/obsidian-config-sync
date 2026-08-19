@@ -85,24 +85,14 @@ export function reservedNames(pluginIds: string[]): Set<string> {
   return names;
 }
 
-// The `plugin-` prefix survives in this file, in five name-reading helpers: expectedPathForName,
-// defaultGroupForName, pluginGroupItems, sectionForGroup and displayLabelForGroup.
-//
-// Task 3 closed every parse whose reason was "the lock is keyed by a name, so there is no ref to
-// look up" — the lock, the baselines and the opt-out list all speak ItemRefs now, and with them
-// went the parses in ConfigSyncCore (capture's label resolver, backfillLockLabels,
-// orderInstallsCatalogFirst), availability.ts (desktopOnlyPluginIds), this file's own
-// carrierMemberKey, SettingTab's isManagedGroup and the Sync Center's carrierElementFor /
-// itemSectionOf / enablementCarrierFor.
-//
-// These five are NOT that case, and no task on this branch closes them — task 4 owns the search
-// vocabulary and the docs, not this module's shape, so saying "a later task" would be a promise
-// nobody has made. What keeps them: they are asked by NAME by the settings catalog (a picker row,
-// a discovered file, a store-only group with no item anywhere), this module is `core` and must not
-// depend on the registry (registry.ts imports catalog.ts, so the arrow points one way only), and
-// they answer for names the registry never produces. Closing them means giving the settings
-// catalog the same row identity the Sync Center now has — a real change of shape, worth its own
-// design rather than a rider on a re-key.
+// The `plugin-` prefix is parsed in five name-reading helpers here: expectedPathForName,
+// defaultGroupForName, pluginGroupItems, sectionForGroup and displayLabelForGroup. Everywhere an
+// ItemRef is available the parse is unnecessary and forbidden; these five have no ref to look up.
+// They are asked by NAME by the settings catalog (a picker row, a discovered file, a store-only
+// group with no item anywhere), and they answer for names the registry never produces. This module
+// is `core` and cannot reach for the registry to resolve them: registry.ts imports catalog.ts, so
+// the arrow points one way only. Closing them means giving the settings catalog the same row
+// identity the Sync Center has, which is a change of shape rather than a rename.
 export function expectedPathForName(name: string): string | null {
   for (const [file, meta] of Object.entries(OPTION_LABELS)) {
     if (optionReservedName(file) === name) return `{configDir}/${meta.type === "folder" ? name : file}`;

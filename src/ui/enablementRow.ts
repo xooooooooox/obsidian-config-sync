@@ -11,8 +11,8 @@
  * Both layers are glyph-only (no visible wordmark). The word "Default" is retired: it named nothing
  * the interface ever showed. The local layer has a glyph for EVERY state, `follows` (`equal`)
  * included — a layer that disappears while it agrees with the shared answer reads as missing, not
- * as agreement. What used to be a muted `this device` eyebrow beside that glyph is now the menu's
- * `On this device` section header, which says the same word once instead of on every row.
+ * as agreement. The words that name the two layers live in the menu's section headers, so
+ * `On this device` is said once per menu instead of once per row.
  * `airplay` is not used for "this device" — it reads as screen mirroring to anyone who has not
  * read this file, so it stays out of this vocabulary.
  */
@@ -36,11 +36,10 @@ export function ruleLabel(s: Sharing): string {
 // negation family. This glyph says the positive thing instead: one box divided in two, a value
 // diverging per device.
 //
-// It replaced `split`, which said exactly the same thing and was unreadable saying it: at the 16px
-// every drawer control renders at, `split`'s two corner arrowheads and thin curved stem collapse
-// into a smudge. Same argument, legible execution — straight lines and square corners only.
+// Straight lines and square corners only: at the 16px every drawer control renders at, a glyph like
+// `split` collapses into a smudge, its two corner arrowheads and thin curved stem indistinguishable.
 // (`airplay`, sharingIcon's own this-device glyph, reads as screen mirroring to anyone who has not
-// read the source; `users` read as MORE sharing once the word became "Not shared".)
+// read the source; `users` reads as MORE sharing beside the word "Not shared".)
 export function ruleIcon(s: Sharing): string {
   return s.kind === "this-device" ? "square-split-horizontal" : sharingIcon(s);
 }
@@ -103,19 +102,16 @@ export function localSegmentTooltip(state: LocalSegmentState): string {
   return "This device: not synced. Your other devices keep sharing it.";
 }
 
-// `equal` for follows: this device MATCHES the shared answer. It replaced `corner-down-right`, which
-// was carrying two opposite meanings at once — here it said "no device-specific setting", while the
-// card and carrier badges (DESIGN.md's badge table) use it for `on: this device` and `N left to me`,
-// which say the reverse. Those two agree with each other and keep the glyph; this one moves.
-// `equal` also survives the move into a merged control: the old arrow only read as "follows" while
-// it sat to the RIGHT of the shared glyph, and it has to work in a menu list too, where it has no
-// neighbour to point back at.
+// `equal` for follows: this device MATCHES the shared answer. Not `corner-down-right`, which the
+// card and carrier badges already use for `on: this device` and `N left to me` — the reverse claim,
+// so one glyph would carry two opposite meanings. `equal` also has to work in a menu list, where
+// there is no neighbouring glyph for an arrow to point back at.
 //
-// `circle-minus` for not-synced — the fold family's own glyph for the same state (foldIcons.ts),
-// deliberately shared. It replaced `circle-slash` in both places at once: at 16px a diagonal
-// through a circle is the least legible mark in this set, while a horizontal bar reads instantly
-// and says the same thing ("taken out of this device's set"). Circle either way, so the fold trio
-// check / minus-circle / circle stays one family.
+// `circle-minus` for not-synced, the fold family's own glyph for the same state (foldIcons.ts),
+// deliberately shared. Not `circle-slash`: at 16px a diagonal through a circle is the least legible
+// mark in this set, while a horizontal bar reads instantly and says the same thing ("taken out of
+// this device's set"). Circle either way, so the fold trio check / minus-circle / circle stays one
+// family.
 function localSegmentIcon(state: LocalSegmentState): string {
   if (state === "follows") return "equal";
   if (state === "on") return "power";
@@ -186,10 +182,10 @@ export interface LocalMenuItem {
   // stop unpicks the others) and the line says the question changed.
   separatorBefore?: boolean;
   // Renders as a NON-SELECTABLE line (Obsidian's `setIsLabel`), for a section whose answer is a
-  // fact rather than a choice. `Per-key rules decide` used to be an ordinary entry sitting where
-  // the value stops sit, checkmark slot and all — it had every visual signal of something you pick
-  // and none of the behaviour, so it read as one. State and action are two lines now: this one says
-  // what decides, the one under it does something about it.
+  // fact rather than a choice. `Per-key rules decide` as an ordinary entry would sit where the
+  // value stops sit, checkmark slot and all: every visual signal of something you pick, none of the
+  // behaviour. State and action are two lines: this one says what decides, the one under it does
+  // something about it.
   isLabel?: boolean;
 }
 

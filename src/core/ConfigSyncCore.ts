@@ -114,9 +114,8 @@ export function storeDir(ctx: CoreContext): string {
   return `${ctx.rootPath}/store`;
 }
 
-// Legacy location only: 1.x wrote a one-slot apply backup here for "Revert last apply"
-// (feature removed). Nothing writes it anymore — removeLegacyBackup deletes
-// a leftover copy on the next apply.
+// A legacy path: nothing writes it. removeLegacyBackup deletes a leftover copy on the next apply,
+// which is the only reason this name still needs to resolve.
 export function backupDir(ctx: CoreContext): string {
   return `${ctx.configDir}/config-sync-backup`;
 }
@@ -1445,7 +1444,7 @@ export interface PendingPull {
   excludeSelf: boolean;
 }
 
-// Phase 1: read-only. Never writes anything.
+// Read-only: this half of a pull never writes anything, so a refusal below costs nothing.
 export async function planImport(ctx: CoreContext, reader: ExternalStoreReader, opts: { excludeSelf: boolean }): Promise<PendingPull> {
   const files = await reader.listFiles();
   // Declared-store gate: before a single remote file is read — content that nothing here identifies is refused, not
@@ -1488,8 +1487,8 @@ export async function planImport(ctx: CoreContext, reader: ExternalStoreReader, 
   return { plan, remoteGroups, remoteLockRaw, remoteFiles: files, excludeSelf: opts.excludeSelf };
 }
 
-// Phase 2: writes the whole merge result — all auto-merged parts plus each conflict's chosen
-// side — in one pass. Never deletes local-only files or groups.
+// Writes the whole merge result, auto-merged parts and each conflict's chosen side, in one pass.
+// Never deletes local-only files or groups.
 export async function applyImport(
   ctx: CoreContext,
   pending: PendingPull,

@@ -69,7 +69,6 @@ export function parseSwitchList(content: string): SwitchList | null {
   try {
     const parsed: unknown = JSON.parse(content);
 
-    // Array of strings
     if (Array.isArray(parsed)) {
       if (parsed.every((item): item is string => typeof item === "string")) {
         return parsed;
@@ -77,7 +76,6 @@ export function parseSwitchList(content: string): SwitchList | null {
       return null;
     }
 
-    // Record of booleans (object but not array)
     if (typeof parsed === "object" && parsed !== null) {
       const rec = parsed as Record<string, unknown>;
       if (Object.values(rec).every((val) => typeof val === "boolean")) {
@@ -284,19 +282,16 @@ export function applySwitchList(
   const excSet = new Set(exceptions);
 
   if (Array.isArray(store)) {
-    // Result is array
     const storeSynced = store.filter((id) => !excSet.has(id));
 
     if (local === null) {
       return storeSynced;
     }
 
-    // Append local ∩ exceptions in local order
     if (Array.isArray(local)) {
       const localExcepted = local.filter((id) => excSet.has(id));
       return [...storeSynced, ...localExcepted];
     } else {
-      // local is map; extract excepted keys that have truthy values
       const localExcepted: string[] = [];
       for (const exc of exceptions) {
         if (exc in local && local[exc]) {
@@ -306,10 +301,8 @@ export function applySwitchList(
       return [...storeSynced, ...localExcepted];
     }
   } else {
-    // Result is map
     const result: Record<string, boolean> = {};
 
-    // Add store entries minus excepted keys
     for (const [key, value] of Object.entries(store)) {
       if (!excSet.has(key)) {
         result[key] = value;
@@ -320,14 +313,10 @@ export function applySwitchList(
       return result;
     }
 
-    // Add local entries for excepted keys
     if (Array.isArray(local)) {
-      // local is array; don't add excepted keys unless they're in store (already added)
-      // Actually, for mixed shapes, we only preserve excepted keys if they're in store.
-      // This is handled above: we already skipped excepted keys in store.
-      // For local array, we don't add anything new for excepted keys (membership check irrelevant for maps).
+      // A local array carries no per-key value to write into a map result, and the excepted keys
+      // were already skipped on the store pass, so there is nothing to add here.
     } else {
-      // local is also map; add/override with local entries for excepted keys
       for (const exc of exceptions) {
         const localVal = local[exc];
         if (localVal !== undefined) {
@@ -353,7 +342,6 @@ export function switchListsEqual(
 ): boolean {
   const excSet = new Set(exceptions);
 
-  // Different shapes → not equal
   if (Array.isArray(local) !== Array.isArray(store)) {
     return false;
   }
