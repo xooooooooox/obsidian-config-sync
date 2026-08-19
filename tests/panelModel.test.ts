@@ -60,7 +60,7 @@ describe("visibleUnderFilter", () => {
   });
 });
 
-// The Leftover surface's adoption gate (DESIGN.md §4 Leftover): while the plugin's own
+// The Leftover surface's adoption gate (DESIGN.md Leftover): while the plugin's own
 // configuration is pending adoption, "leftover" is not a judgment this device can make — the
 // section and its pill give way to a hint. Capture-pending does NOT gate (stopping a sync here
 // legitimately produces leftovers before the next capture), and an unknown self state reads as
@@ -543,14 +543,14 @@ describe("showColdStartBanner", () => {
 });
 
 // memberDecisionsFromSharing / MemberDecision retired with the two-layer cutover
-// (2026-08-12-enablement-two-layers-design.md §5): "what has this element decided" is no longer a
+// (2026-08-12-enablement-two-layers-design.md): "what has this element decided" is no longer a
 // projection of the item's own runsOn plus a structural card state — it is decideEnablement over a
 // stored rule and this device's own exception (tests/enablementDecision.test.ts).
 
 describe("enablementCarrierFor / carrierIsSynced", () => {
   it("community items carry via community-plugins; core items via core-plugins", () => {
     // The input is the item's REF, not its group name: which list an item's enablement rides is a
-    // fact about the item's section (spec §5), so nothing reads a prefix back out of a name.
+    // fact about the item's section, so nothing reads a prefix back out of a name.
     expect(enablementCarrierFor("community/zk-prefixer")).toBe("community-plugins");
     expect(enablementCarrierFor("core/file-explorer")).toBe("core-plugins");
   });

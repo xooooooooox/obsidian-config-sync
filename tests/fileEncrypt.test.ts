@@ -7,7 +7,7 @@ import { apply, capture, CoreContext, overlayGroup } from "../src/core/ConfigSyn
 import { parseSyncManifest } from "../src/core/manifest";
 import { MemFS, FakePlugins, memGroupsIO } from "./memfs";
 
-// Plain whole-file encryption + FileRule (spec 2026-07-25-unified-card-design.md §2):
+// Plain whole-file encryption + FileRule (spec 2026-07-25-unified-card-design.md):
 // a Plain single-file group can carry `fileRule: {scope, encrypted}`. encrypted:true means
 // the STORE copy is an encryption envelope (same crypto pipeline as mode:"encrypted"); the local
 // disk copy stays plaintext. No "local" scope at the file level.

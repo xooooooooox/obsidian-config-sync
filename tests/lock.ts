@@ -19,7 +19,7 @@ export function withRef(group: SyncGroup): SyncGroup {
   return { ...group, ref: lockRefFor([])(group.name) as ItemRef };
 }
 
-// Test-side readers for the v3 store lock (spec §3). The lock nests by section and id; an assertion
+// Test-side readers for the v3 store lock. The lock nests by section and id; an assertion
 // almost always cares about ONE item, so these flatten it back to `ref -> entry` rather than making
 // every expectation spell out two levels.
 export function flatLock(lock: { items: LockItems }): Record<string, StoreLockEntry> {

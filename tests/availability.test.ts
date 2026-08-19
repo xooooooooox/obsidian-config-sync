@@ -127,7 +127,7 @@ describe("desktopOnlyPluginIds", () => {
 });
 
 // There is no membersExcludedByClass / memberForceOff / forcedRunsOn / preferStoredRunsOn
-// (2026-08-12-enablement-two-layers-design.md §5): the mask and the two force
+// (2026-08-12-enablement-two-layers-design.md): the mask and the two force
 // sets are ONE decision per element (enablementDecision.ts, tests/enablementDecision.test.ts),
 // and the runtime projection off it is covered end to end by tests/enablementRuntime.test.ts.
 

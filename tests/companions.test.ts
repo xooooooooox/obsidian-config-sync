@@ -23,7 +23,7 @@ import { leftoverStoreRels } from "../src/core/leftover";
 import { Section } from "../src/core/types";
 import { itemsIn } from "./items";
 
-// Design reference: docs/superpowers/specs/2026-07-25-unified-card-design.md §4/§8.
+// Design reference: docs/superpowers/specs/2026-07-25-unified-card-design.md/
 
 function settings(partial: Partial<Record<Section, Record<string, Item>>> = {}): CompileSettings {
   return { items: itemsIn(partial) };

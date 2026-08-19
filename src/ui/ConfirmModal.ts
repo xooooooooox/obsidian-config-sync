@@ -42,7 +42,7 @@ export function confirmWarnings(app: App, title: string, lines: string[]): Promi
   });
 }
 
-// Bulk leftover cleanup (DESIGN.md §4 Leftover): the per-row delete stays one-click; the
+// Bulk leftover cleanup (DESIGN.md's Leftover section): the per-row delete stays one-click; the
 // Delete-all gesture confirms, because its consequence crosses devices — the modal copy is
 // character-exact contract text.
 class DeleteLeftoversModal extends Modal {
@@ -86,7 +86,7 @@ export function confirmDeleteLeftovers(app: App, count: number): Promise<boolean
 }
 
 // The two Advanced-form gestures that silently destroyed configuration confirm now
-// (DESIGN.md §4 Advanced rule editor) — the modal copy is character-exact contract text.
+// (DESIGN.md's Advanced rule editor) — the modal copy is character-exact contract text.
 class DestructiveEditModal extends Modal {
   private confirmed = false;
 

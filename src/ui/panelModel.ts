@@ -311,7 +311,7 @@ export function showColdStartBanner(
   return statuses.some((s) => s.state === "never-synced");
 }
 
-// How the Leftover surface presents (DESIGN.md §4 Leftover): "leftover" is a judgment about
+// How the Leftover surface presents (DESIGN.md's Leftover section): "leftover" is a judgment about
 // which store files nothing tracks — a judgment this device cannot make while its own
 // configuration is still pending adoption (coldstart/adopt/both: the store side is the newer
 // one), so the section AND its filter pill give way to one quiet hint line. A capture-pending
@@ -732,7 +732,7 @@ export function unifiedFooterSummary(sel: { applyN: number; installs: number; tu
 // this mirror, a not-installed plugin's incoming settings would render as a
 // strikethrough deletion.
 
-// The six side+consequence sentences a FILES entry's tooltip carries (DESIGN.md §2.1):
+// The six side+consequence sentences a FILES entry's tooltip carries (DESIGN.md's State column):
 // exported as named constants — the single producer both fileEntryFor below and the
 // icon-collision/tooltip guards read from, so a future edit to any of them can't drift the two
 // apart silently (the same "producer-vs-producer" discipline the fate-chip glyph registry uses).
@@ -755,7 +755,7 @@ export interface FileEntryPresentation {
   tooltip: string;
 }
 
-// Direction arrows (DESIGN.md §2.1) say which side exactly once, on the FILES row's own
+// Direction arrows (DESIGN.md's State column) say which side exactly once, on the FILES row's own
 // track-2 badge — never per entry. An entry's own glyph is the diff-kind family (`+`/`·`/`del`,
 // rendered `+`/`~`/`−`) in BOTH directions — never collapsed to a bare direction
 // arrow: added/updated/deleted is real information

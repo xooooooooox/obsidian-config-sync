@@ -1,6 +1,6 @@
 import { setIcon } from "obsidian";
 
-// The FOLD family's one glyph (DESIGN.md §2.4): every "expands in
+// The FOLD family's one glyph (DESIGN.md's Glyph language): every "expands in
 // place" toggle across the app — Sync Center section heads, fold-group/self/item rows, the
 // run-strip's `details`, the self pane's `view change`, the Settings tab's rule/remote rows and
 // its member-disclosure arrow, the conflict modal, the report strip's per-result rows — must not

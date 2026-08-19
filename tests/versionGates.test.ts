@@ -14,15 +14,15 @@ import { itemsIn } from "./items";
 import { Item, ItemDef, ItemMap } from "../src/core/registry";
 import { enablementRuleFor } from "../src/core/enablementRules";
 
-// spec 2026-08-11-data-model-hardening.md §4 (invariant II.3): a document or store written by a
+// spec 2026-08-11-data-model-hardening.md (invariant II.3): a document or store written by a
 // NEWER build is refused with a clear message — never downgraded, never reset, never overwritten.
 // Three gates, tested here end to end:
-//   §4.1 the settings classifier's stop state and the writers that refuse while it holds,
-//   §4.2 the pre-write guard on the self item's apply (the local file must survive the refusal),
-//   §4.3 the store lock's own version, refused by pull and by push.
+//   the settings classifier's stop state and the writers that refuse while it holds,
+//   the pre-write guard on the self item's apply (the local file must survive the refusal),
+//   the store lock's own version, refused by pull and by push.
 //
 // main.ts has no dedicated test harness (Plugin is stubbed to an empty class by
-// tests/mock-obsidian.ts), so the §4.1 tests build a real ConfigSyncPlugin the same way
+// tests/mock-obsidian.ts), so the tests build a real ConfigSyncPlugin the same way
 // tests/deviceOptOut.test.ts / tests/mainReloadSettings.test.ts already do, via bracket access to
 // bypass TypeScript's compile-time-only `private`.
 
@@ -77,7 +77,7 @@ interface StopSurface {
 }
 
 // A real (in-memory, stateful) localStorage: the stop state has to be provable for the things that
-// live THERE rather than in data.json — the per-device opt-out (§2) and the sync baselines.
+// live THERE rather than in data.json — the per-device opt-out and the sync baselines.
 function makePlugin(io: MemFS, data: unknown): { instance: StopSurface; saveCount: () => number; local: (key: string) => string | undefined } {
   const plugin = new ConfigSyncPlugin({} as never, {} as never);
   const instance = plugin as unknown as StopSurface;
@@ -127,7 +127,7 @@ function futureDocument(): unknown {
 
 const A_REMOTE: Remote = { name: "other", type: "vault", storePath: "/nowhere/config-sync" };
 
-describe("§4.1 — a data.json from a newer build is never reset and never overwritten", () => {
+describe("a data.json from a newer build is never reset and never overwritten", () => {
   it("loading one writes nothing, not even the migrations that normally save on sight", async () => {
     const { instance, saveCount } = makePlugin(new MemFS(), futureDocument());
 
@@ -141,7 +141,7 @@ describe("§4.1 — a data.json from a newer build is never reset and never over
     expect(instance.settings.items.community["demo"]).toEqual({ synced: true, futureRule: { device: "here-on-tuesdays" } });
   });
 
-  // §4.2b: a device that has silently stopped syncing is the failure this release exists to
+  // a device that has silently stopped syncing is the failure this release exists to
   // prevent, so it says so at load — not only to whoever opens the Sync Center. Same mechanism and
   // duration as the legacy branch's own notice.
   it("says so once at load, and only for a future document", async () => {
@@ -270,7 +270,7 @@ describe("§4.1 — a data.json from a newer build is never reset and never over
     await instance.recompile();
 
     // null, not [] — "[] deleted" is a legitimate outcome the caller records in the run history,
-    // so the refusal has to be a value a caller cannot mistake for a successful run (§4.2b).
+    // so the refusal has to be a value a caller cannot mistake for a successful run.
     expect(await instance.stopSyncing("plugin-demo", true)).toBeNull();
     expect(await instance.syncCenterHost().deleteLeftoverStoreFiles(["store/configdir/onlyANewerBuildKnowsThis.json"])).toBeNull();
 
@@ -278,7 +278,7 @@ describe("§4.1 — a data.json from a newer build is never reset and never over
     expect(await io.exists("cs/store/configdir/onlyANewerBuildKnowsThis.json")).toBe(true);
   });
 
-  // The leftover list resolves REAL owner names (DESIGN.md §4 Leftover): a plugin file takes the
+  // The leftover list resolves REAL owner names (DESIGN.md Leftover): a plugin file takes the
   // store lock's display.label (else the installed manifest's name, else the bare id), a snippet
   // wears the Appearance breadcrumb — and everything groups into the main list's sections.
   it("leftover rows name their real owners from the lock, the manifest, or the bare id", async () => {
@@ -328,7 +328,7 @@ describe("§4.1 — a data.json from a newer build is never reset and never over
     expect(await io.exists("cs/store/configdir/plugins/demo/data.json")).toBe(true);
   });
 
-  // The startup lock-label heal was the one remaining store write while stopped (§4.2b). Cosmetic,
+  // The startup lock-label heal was the one remaining store write while stopped. Cosmetic,
   // but "the stop state writes nothing" is the rule, and this is the kind of exception that grows.
   // The `ok` case below is what proves the refusal is doing the work: the same heal, same lock,
   // same missing label, and it lands.
@@ -356,7 +356,7 @@ describe("§4.1 — a data.json from a newer build is never reset and never over
     expect(lockEntry(parseStoreLock(await okIo.read("cs/store.lock.json")), "community/demo")?.display?.label).toBe("Demo Plugin");
   });
 
-  // Review I1: the opt-out moved to localStorage in §2, which took it out from behind
+  // Review I1: the opt-out moved to localStorage in, which took it out from behind
   // `saveSettings`' choke point — and it is reachable with the banner on screen, through the same
   // Stop-syncing menu whose "Everywhere…" is refused. The two must agree.
   it("Stop syncing → On this device is refused, and writes no localStorage", async () => {
@@ -491,7 +491,7 @@ describe("§4.1 — a data.json from a newer build is never reset and never over
   });
 });
 
-// §4.2: adopt/self-apply writes the store's data.json onto this device and only then reloads, so a
+// adopt/self-apply writes the store's data.json onto this device and only then reloads, so a
 // check inside loadSettings arrives after the local document is already gone. The guard runs
 // BEFORE the write, on the incoming document, and fails only that item.
 const SELF_STORE_REL = "cs/store/configdir/plugins/config-sync/data.json";
@@ -519,7 +519,7 @@ function guardCtx(io: MemFS): CoreContext {
   };
 }
 
-describe("§4.2 — the guard runs before the write, not after it", () => {
+describe("the guard runs before the write, not after it", () => {
   const LOCAL_SELF = JSON.stringify({ schemaVersion: 4, items: itemsIn({ obsidian: { hotkeys: { synced: true } } }) }, null, 2);
 
   async function runAdopt(storeSelf: string): Promise<{ io: MemFS; results: GroupResult[] }> {
@@ -543,7 +543,7 @@ describe("§4.2 — the guard runs before the write, not after it", () => {
     return { io, results };
   }
 
-  it("fails the self item with the §4.2 message and leaves the local document byte-identical", async () => {
+  it("fails the self item with the message and leaves the local document byte-identical", async () => {
     const { io, results } = await runAdopt(JSON.stringify({ schemaVersion: 5, items: {} }));
 
     const self = results.find((r) => r.group === SELF_GROUP_NAME);
@@ -569,7 +569,7 @@ describe("§4.2 — the guard runs before the write, not after it", () => {
   });
 });
 
-// §4.3: `version` absent = 1 (today's shape); this build writes 2; a lock declaring more than 2 is
+// `version` absent = 1 (today's shape); this build writes 2; a lock declaring more than 2 is
 // refused — it is not the `unknown` state an unreadable lock gets. The gate belongs to the STORE,
 // not to "the remote" (review I3): the store lives in the vault, the vault is synced by other
 // tools, so a v3 lock lands here with no pull involved and every operation that WRITES the lock
@@ -617,11 +617,11 @@ function fakeWriter(initial: Record<string, string>): { writer: ExternalStoreWri
 // A lock in the shape a 2.21.0 device writes — the transition window's normal store, and still the
 // "today's shape" side of every gate below.
 const V1_LOCK = JSON.stringify({ capturedAt: "2026-08-01T00:00:00.000Z", groups: { hotkeys: { sourceAppVersion: "1.8.7" } } });
-// "From the future" is version 4 now that this build writes 3 (spec §3). The gate is unchanged; the
+// "From the future" is version 4 now that this build writes 3. The gate is unchanged; the
 // number it refuses moved with the format, which is the whole point of declaring one.
 const V4_LOCK = JSON.stringify({ version: 4, capturedAt: "2026-08-01T00:00:00.000Z", items: { obsidian: { hotkeys: { source: { kind: "app", version: "1.8.7" } } } } });
 
-describe("§4.3 — the store lock's version", () => {
+describe("the store lock's version", () => {
   it("absent means 1: today's locks parse and read exactly as they always did", () => {
     const lock = parseStoreLock(V1_LOCK);
     expect(storeLockVersion(lock)).toBe(1);
@@ -633,7 +633,7 @@ describe("§4.3 — the store lock's version", () => {
   // typo would strand a whole fleet — so it degrades to today's shape instead of throwing.
   it("a non-numeric version degrades to 1 rather than throwing", () => {
     expect(storeLockVersion(parseStoreLock(JSON.stringify({ version: "4", capturedAt: "t", items: {} })))).toBe(1);
-    expect(parseStoreLock(JSON.stringify({ version: "4", capturedAt: "t", items: {} })).version).toBe("4"); // and it is carried, not dropped (§3.1)
+    expect(parseStoreLock(JSON.stringify({ version: "4", capturedAt: "t", items: {} })).version).toBe("4"); // and it is carried, not dropped
   });
 
   it("capture writes this build's version", async () => {
@@ -862,7 +862,7 @@ describe("§4.3 — the store lock's version", () => {
   });
 });
 
-// §5 (spec 2026-08-12-loose-ends-design.md). The version gate above is only ever as strong as the
+// (spec 2026-08-12-loose-ends-design.md). The version gate above is only ever as strong as the
 // lock being FOUND: no lock means no version, so none of it runs. Until now a directory full of
 // store content with no store.lock.json was read as a brand-new remote and pulled wholesale, in
 // silence — which is how a controller who pointed a remote one level too deep copied 94 files onto
@@ -871,7 +871,7 @@ describe("§4.3 — the store lock's version", () => {
 // The two statements this separates are "there is nothing here yet" and "I cannot see the
 // bookkeeping". The first is a first-push target, and has to keep working — a new remote is set up
 // that way. The second is a refusal.
-describe("§5 — content at the far end with no lock", () => {
+describe("content at the far end with no lock", () => {
   const LOCAL_STORE = { "cs/store.lock.json": V1_LOCK, "cs/store/configdir/hotkeys.json": '{"mine":1}' };
   // The listing the mistake actually produces. A remote pointed AT the store folder rather than at
   // the folder holding it lists the store's own contents — `configdir/…`, with no `store/` prefix
@@ -1011,7 +1011,7 @@ describe("§5 — content at the far end with no lock", () => {
   });
 
   // The status the user sees has to agree with what the gesture will do, or they are invited into a
-  // refusal — the same rule §4.3 already follows for a lock from the future. checkRemote answers
+  // refusal — the same rule already follows for a lock from the future. checkRemote answers
   // from the same predicate the gate does, so the two cannot drift apart.
   it("the remote's reported state agrees with the refusal — uncomparable, never an empty remote", async () => {
     expect((await checkRemote(null, fakeReader(ONE_LEVEL_TOO_DEEP), [])).state).toBe("unknown");
@@ -1091,7 +1091,7 @@ describe("stop syncing refuses before the modal opens", () => {
 // IS `SELF_GROUP_NAME`, and the modal's delete-store checkbox defaults to checked, so routing this
 // one card through the confirmation would offer to delete the self copy that carries the sync
 // contract to every other device. The gesture has excluded the self item since it was designed
-// (2026-07-18-stop-syncing-design.md §A, "not the self item").
+// ("not the self item").
 //
 // Driven at the card head's real handler (`cardSyncedToggled`), not at a predicate: the defect this
 // closes was never a wrong rule, it was a caller that routed a case it should not have.
@@ -1153,7 +1153,7 @@ describe("the card head's toggle and config-sync's own card", () => {
   });
 });
 
-// §4.2b/N3, the settings tab's own drafts: a refused gesture must not move what the panel renders,
+///N3, the settings tab's own drafts: a refused gesture must not move what the panel renders,
 // or the UI shows an edit that never happened. The Advanced tab gets this from ONE line —
 // `persistCustomGroups` throws the refusal, and `commitDraft` already keeps the caller's draft
 // whenever the write fails — which is what covers all ~15 `commitGroups` call sites at once.

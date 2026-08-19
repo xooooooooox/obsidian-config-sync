@@ -43,8 +43,8 @@ import { perElementKeyFor } from "../src/core/switchList";
 import { itemsIn } from "./items";
 import { EVERYWHERE, perClass, Sharing, THIS_DEVICE } from "../src/core/types";
 
-// Design references: docs/superpowers/specs/2026-07-25-unified-card-design.md §4/§5/§10 and
-// docs/superpowers/specs/2026-07-26-ui-feedback-round2-design.md §2 (no app-slice mechanism).
+// Design references: docs/superpowers/specs/2026-07-25-unified-card-design.md// and
+// docs/superpowers/specs/2026-07-26-ui-feedback-round2-design.md (no app-slice mechanism).
 
 function def(overrides: Partial<ItemDef> = {}): ItemDef {
   return { id: "app", groupName: "app", label: "App settings", description: "d", section: "obsidian", ...overrides };
@@ -91,7 +91,7 @@ function cfg(overrides: Partial<Item> = {}): Item {
   return { ...emptyItem(), ...overrides };
 }
 
-// computeBadges' enablement badge reads the TWO LAYERS (spec 2026-08-12 §5), not the item's own
+// computeBadges' enablement badge reads the TWO LAYERS (spec 2026-08-12), not the item's own
 // runsOn: the fleet rule from the carrier plus this device's own exception. `null` = the def has no
 // enablement projection at all. An exception outranks the rule, exactly as a run does.
 const RULE = (r: Sharing, exception: "on" | "off" | null = null): { rule: Sharing; exception: "on" | "off" | null } => ({ rule: r, exception });
@@ -329,7 +329,7 @@ describe("encryptDisabledForSharing", () => {
   });
 });
 
-describe("buildRuleRows (spec 2026-07-26-card-visual-refresh-design.md §3 — the only rule-row model; supersedes the deleted buildFieldRows)", () => {
+describe("buildRuleRows (spec 2026-07-26-card-visual-refresh-design.md — the only rule-row model; supersedes the deleted buildFieldRows)", () => {
   it("lists ONLY configured keys, not every live-doc key", () => {
     const c = cfg({ settingsFile: { mode: "fields", rules: { ruled: { sharing: perClass("desktop"), encrypted: false } }, perElement: {} } });
     const rows = buildRuleRows(HOTKEYS_DEF, c, { ruled: 1, unruled: 2 });
@@ -390,7 +390,7 @@ describe("buildRuleRows (spec 2026-07-26-card-visual-refresh-design.md §3 — t
     expect(rows).toEqual([expect.objectContaining({ key: "items", isArray: false })]);
   });
 
-  // Producer versus producer (spec §9 lesson 3): the key an enablement list's rules live under is
+  // Producer versus producer: the key an enablement list's rules live under is
   // `perElementKeyFor`'s answer, so the exclusion is asserted against that producer — never against
   // the literal `enabledCssSnippets`, and never against a bare `""`. A test pinned to a literal
   // passes while the producer drifts, which is the exact failure this release exists to end.

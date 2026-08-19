@@ -131,7 +131,7 @@ describe("ConfigSyncPlugin.recompile — keeps last-good compiledGroups on a mid
   });
 });
 
-// spec 2026-08-11-data-model-hardening.md §5.1, driven through the real load→save path: an older
+// spec 2026-08-11-data-model-hardening.md, driven through the real load→save path: an older
 // document must come back with the nested defaults filled in and everything it carried (known or
 // not) still on it.
 describe("ConfigSyncPlugin.loadSettings/saveSettings — nested defaults and an absent companions key", () => {
@@ -215,7 +215,7 @@ describe("ConfigSyncPlugin.loadSettings/saveSettings — nested defaults and an 
 // of use.
 //
 // The rule lives on the carrier item's `perElement` map (2026-08-12-enablement-two-layers-design.md
-// §3.3), and `asSharing` (enablementRules.ts) is
+//), and `asSharing` (enablementRules.ts) is
 // what drops an unreadable one FROM THE READ. Both halves are asserted here through the real
 // plugin — the surviving bytes, and the two readers that must not act on them.
 describe("ConfigSyncPlugin.loadSettings — an unrecognised enablement rule survives and is ignored", () => {
@@ -295,8 +295,7 @@ describe("ConfigSyncPlugin.refreshBratIndex — a device with no BRAT repo list 
     const instance = plugin as unknown as BratSurface;
     instance.app = fakeApp(); // no live BRAT instance, and adapter.exists() is false → repos is []
     const index = { "my-beta-plugin": "owner/my-beta-plugin" };
-    // The index lives ON the plugins it describes since 2026-08-12-enablement-two-layers §3.2 —
-    // `bratRepoIndex(items)` is the reader, and the top-level map is what the v4 migration folds in.
+    // The index lives ON the plugins it describes since 2026-08-12-enablement-two-layers // `bratRepoIndex(items)` is the reader, and the top-level map is what the v4 migration folds in.
     instance.loadData = async () => ({
       schemaVersion: 4,
       items: itemsIn({ community: { "my-beta-plugin": { synced: true, bratRepo: index["my-beta-plugin"] } } }),

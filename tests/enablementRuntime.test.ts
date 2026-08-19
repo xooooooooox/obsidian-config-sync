@@ -40,7 +40,7 @@ function makeLocalStorage(seed: Record<string, string>): {
   };
 }
 
-// The carrier item is where a fleet rule lives (spec §3.3) — synced, so compileItems emits the
+// The carrier item is where a fleet rule lives — synced, so compileItems emits the
 // `community-plugins` group whose local file the persisted read below actually finds. The
 // perElement key comes from its ONE producer, never a literal.
 function carrier(rules: Record<string, Sharing>): Item {
@@ -135,7 +135,7 @@ describe("the runtime mask reads one rule layer and one local layer", () => {
     expect(ctx.switchForceOff[LIST] ?? []).toContain(ELEMENT);
   });
 
-  // §9 criterion 4: precedence 1 beats precedence 3. The rule is set AFTER the exception and to the
+  // criterion 4: precedence 1 beats precedence 3. The rule is set AFTER the exception and to the
   // class this device IS — under the old model the class rule was the only thing the mask read for
   // a non-pinned id, so the exception would have vanished behind it.
   it("a local exception outranks a class rule set afterwards", async () => {
@@ -181,7 +181,7 @@ describe("the runtime mask reads one rule layer and one local layer", () => {
     expect(ctx.switchForceOff[LIST] ?? []).not.toContain(ELEMENT);
   });
 
-  // Spec §6.5, "switching to an exception keeps the status quo". The state is read from the
+  // Spec, "switching to an exception keeps the status quo". The state is read from the
   // PERSISTED list file, never from a live plugin query: a non-persistent enablePlugin (which
   // config-sync's own apply cycle and the IOTO ecosystem both use) leaves a plugin loaded without
   // it being in the persisted enabled set, so the two genuinely diverge.
@@ -216,7 +216,7 @@ describe("the runtime mask reads one rule layer and one local layer", () => {
   });
 });
 
-// ── The migration's acceptance criteria (spec §9) ──────────────────────────────────────────────
+// ── The migration's acceptance criteria ──────────────────────────────────────────────
 //
 // Criterion 1 is the only HARD behavioural assertion the v3 → v4 migration makes: not a switch
 // moves. It is asserted at the only place that can prove it — the BYTES of the on/off list files,
@@ -240,7 +240,7 @@ const STORE_COMMUNITY = "cs/store/configdir/community-plugins.json";
 const STORE_CORE = "cs/store/configdir/core-plugins.json";
 const LOCAL_CORE = "config-dir/core-plugins.json";
 
-// A v3 document with one of every shape §4 has a row for, plus the two shapes it has no row for:
+// A v3 document with one of every shape has a row for, plus the two shapes it has no row for:
 // an entry that is simply not synced (`some-unsynced`), and one that is not synced but carries a
 // device rule anyway (`unsynced-desktop`). v3 masked BOTH structurally — an unsynced item's
 // `runsOn` was a label its mask never read — and migrating the second as a class rule is what would
@@ -320,7 +320,7 @@ function seededMigrationIO(deviceClass: "desktop" | "mobile"): MemFS {
 // this build writes for the wrong reason masks-and-follows here and masks-and-forces-off there, and
 // only the second one deletes a line from a file. `Platform` is the module-level object main.ts
 // reads (tests/mock-obsidian.ts), so flipping it flips what `coreContext()` computes.
-describe.each(["desktop", "mobile"] as const)("the v3 → v4 migration moves no switch on a %s (spec §9 criterion 1)", (deviceClass) => {
+describe.each(["desktop", "mobile"] as const)("the v3 → v4 migration moves no switch on a %s", (deviceClass) => {
   const wasMobile = Platform.isMobile;
   beforeEach(() => {
     Platform.isMobile = deviceClass === "mobile";
@@ -389,7 +389,7 @@ describe.each(["desktop", "mobile"] as const)("the v3 → v4 migration moves no 
 
 describe("the v3 → v4 migration moves no switch", () => {
 
-  // §9 criterion 2: the retired fields are gone from what reaches DISK — the leak window
+  // criterion 2: the retired fields are gone from what reaches DISK — the leak window
   // `thisDeviceItems` opened (a this-device datum in a document that travels) closes here, not
   // merely in memory.
   it("the saved document carries none of the retired fields (criterion 2)", async () => {
@@ -402,7 +402,7 @@ describe("the v3 → v4 migration moves no switch", () => {
 
     // `enabled` is asserted at the ITEM level rather than by a regex over the whole document,
     // because two legitimate `enabled` fields remain and must: a companion's own on/off
-    // (ItemCompanion.enabled) and the local run-history preference. The walk says exactly what §3.2
+    // (ItemCompanion.enabled) and the local run-history preference. The walk says exactly what
     // retired — an ITEM's `enabled`, now `synced` — without pretending the others are gone.
     for (const byId of Object.values(document?.items as Record<string, Record<string, Record<string, unknown>>>)) {
       for (const [id, item] of Object.entries(byId)) {

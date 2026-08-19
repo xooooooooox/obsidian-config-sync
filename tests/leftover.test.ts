@@ -28,7 +28,7 @@ describe("leftoverStoreRels", () => {
     expect(out.map((o) => o.rel)).toEqual(["store/configdir/app.json", "store/configdir/plugins/gone/data.json"]);
   });
 
-  // The name slot names the file's REAL owner, never a raw store path (DESIGN.md §4 Leftover):
+  // The name slot names the file's REAL owner, never a raw store path (DESIGN.md Leftover):
   // plugin label (else id), the Appearance breadcrumb for snippets/themes, the owning core
   // plugin / Obsidian card for a config-root file, basename otherwise — grouped into the main
   // list's section vocabulary, sorted section-then-name.
@@ -247,7 +247,7 @@ describe("storeSelfCopyGroups", () => {
   });
 });
 
-describe("selfListGroups (delta ghost regression, spec 2026-07-28 §2)", () => {
+describe("selfListGroups (delta ghost regression, spec 2026-07-28)", () => {
   const defs = buildItemDefs({
     cores: [],
     plugins: [{ id: "omnisearch", name: "Omnisearch", desktopOnly: false }],

@@ -121,7 +121,7 @@ describe("fileEnablementRowModel", () => {
   });
 });
 
-// ONE producer for the local menu (spec §6.6). Both entrances — the Sync Center's row and the
+// ONE producer for the local menu. Both entrances — the Sync Center's row and the
 // settings card's — feed this list into an Obsidian Menu; when they each built their own, the Sync
 // Center offered a follow entry under a rule that has no shared answer to follow.
 describe("buildLocalMenu", () => {
@@ -167,7 +167,7 @@ describe("buildLocalMenu", () => {
   });
 });
 
-// ONE producer for the whole-FILE local menu (spec §6.2/§6.6) — a DIFFERENT datum from
+// ONE producer for the whole-FILE local menu — a DIFFERENT datum from
 // buildLocalMenu's above (device opt-out of the entire item, not one element of an enablement
 // list), so it gets its own two-entry producer instead of being folded into the four-value shape.
 describe("buildOptOutLocalMenu", () => {

@@ -11,9 +11,9 @@ import { lockRefFor } from "../src/core/itemKeys";
 import { EVERYWHERE, perClass, THIS_DEVICE } from "../src/core/types";
 import { perElementKeyFor } from "../src/core/switchList";
 
-// The v2 → v3 migration (spec 2026-08-11-v3-one-vocabulary-design.md §5, §7b, §9). One fixture
-// carries every row of §5's table, so a change that breaks one row breaks a named assertion rather
-// than a fixture nobody recognises; the awkward cases §9 calls out (a custom group, a discovered
+// The v2 → v3 migration (spec 2026-08-11-v3-one-vocabulary-design.md,,). One fixture
+// carries every row of's table, so a change that breaks one row breaks a named assertion rather
+// than a fixture nobody recognises; the awkward cases calls out (a custom group, a discovered
 // file, an item with perItem, enabledOn "mobile", a never-here rule) are all in it.
 
 const NEWER_BUILD = { wroteThis: [1, 2] };
@@ -47,7 +47,7 @@ function v2Document(): Record<string, unknown> {
         },
       },
       hotkeys: { enabled: false, companions: [] },
-      // enabledOn "mobile" (§9's awkward case) AND a memberRules class value that disagrees (§7b)
+      // enabledOn "mobile" AND a memberRules class value that disagrees
       "core:graph": { enabled: true, companions: [], enabledOn: "mobile" },
       // enabledOn "local" — drained into this device's own list
       "core:backlink": { enabled: true, companions: [], enabledOn: "local" },
@@ -62,7 +62,7 @@ function v2Document(): Record<string, unknown> {
           fileRule: { scope: "desktop", encrypted: true },
         },
       },
-      // a BRAT plugin: v2 keyed it `community:` and §7b keeps it stored there
+      // a BRAT plugin: v2 keyed it `community:` and keeps it stored there
       "community:my-beta-plugin": { enabled: true, companions: [], unknownItemField: NEWER_BUILD },
       "community:config-sync": { enabled: true, companions: [] },
     },
@@ -82,9 +82,9 @@ function v2Document(): Record<string, unknown> {
     ],
     memberRules: {
       "community:dataview": "desktop",
-      "core:graph": "desktop", // disagrees with enabledOn: "mobile" — §7b says the mask wins
+      "core:graph": "desktop", // disagrees with enabledOn: "mobile" — says the mask wins
       "community:templater": "always-here", // no items entry of its own
-      "core:daily-notes": "never-here", // §9's awkward case
+      "core:daily-notes": "never-here", //'s awkward case
       "community:excalidraw": "mobile",
       "community:futurist": "on-tuesdays", // a value neither axis recognises
     },
@@ -114,7 +114,7 @@ function runsOnOf(item: unknown): unknown {
   return (item as { runsOn?: unknown } | undefined)?.runsOn;
 }
 
-describe("migrateV2Settings — §5 identity rows", () => {
+describe("migrateV2Settings — identity rows", () => {
   it("splits the prefixed id into a section and a bare id; bare ids are obsidian", () => {
     const map = items();
     expect(Object.keys(map.obsidian).sort()).toEqual(["app", "appearance", "hotkeys"]);
@@ -122,7 +122,7 @@ describe("migrateV2Settings — §5 identity rows", () => {
     expect(Object.keys(map.community).sort()).toEqual(["config-sync", "dataview", "excalidraw", "my-beta-plugin", "templater"]);
   });
 
-  it("a beta plugin migrates into items.community, exactly where its v2 key put it (§7b)", () => {
+  it("a beta plugin migrates into items.community, exactly where its v2 key put it", () => {
     const map = items();
     expect(map.community["my-beta-plugin"]?.synced).toBe(true);
     expect((map as unknown as Record<string, unknown>).beta).toBeUndefined();
@@ -189,7 +189,7 @@ describe("migrateV2Settings — a v2 item with no `enabled` key gains no `synced
   });
 });
 
-describe("migrateV2Settings — §5 value rows", () => {
+describe("migrateV2Settings — value rows", () => {
   it("a field rule's scope becomes a sharing, keeping encrypted and locked", () => {
     expect(items().obsidian["app"]?.settingsFile?.rules["*Token*"]).toEqual({ sharing: THIS_DEVICE, encrypted: false });
     expect(items().obsidian["appearance"]?.settingsFile?.rules["enabledCssSnippets"]).toEqual({
@@ -199,7 +199,7 @@ describe("migrateV2Settings — §5 value rows", () => {
     });
   });
 
-  it("perItem becomes perElement, with the same value mapping (§9's awkward case)", () => {
+  it("perItem becomes perElement, with the same value mapping", () => {
     const sf = items().obsidian["appearance"]?.settingsFile;
     expect(sf?.perElement).toEqual({ enabledCssSnippets: { "my-snippet.css": perClass("desktop"), "other.css": THIS_DEVICE } });
     expect((sf as unknown as Record<string, unknown>).perItem).toBeUndefined();
@@ -221,8 +221,8 @@ describe("migrateV2Settings — §5 value rows", () => {
   });
 });
 
-// §7b's ruling, which is the one place the migration has to choose between two v2 fields.
-describe("migrateV2Settings — runsOn preserves what the system DID, not what the menu SAID (§7b)", () => {
+//'s ruling, which is the one place the migration has to choose between two v2 fields.
+describe("migrateV2Settings — runsOn preserves what the system DID, not what the menu SAID", () => {
   it("enabledOn wins over a disagreeing memberRules class value", () => {
     expect(runsOnOf(items().core["graph"])).toEqual({ device: "mobile" });
   });
@@ -273,7 +273,7 @@ describe("migrateV2Settings — runsOn preserves what the system DID, not what t
   });
 });
 
-describe("migrateV2Settings — customGroups become items.custom (§5)", () => {
+describe("migrateV2Settings — customGroups become items.custom", () => {
   // devices -> a file-level sharing rule: customItemsFrom
   // hands the v2 literal to customItemFromGroup, the SAME group -> item producer the Advanced tab
   // persists through, so a migrated custom rule's device class lands exactly where a re-edited
@@ -309,7 +309,7 @@ describe("migrateV2Settings — customGroups become items.custom (§5)", () => {
     expect(group?.mode).toBe("encrypted");
   });
 
-  // spec §9: the 2.21.0 carry invariant binds the migration path too.
+  // spec the 2.21.0 carry invariant binds the migration path too.
   it("carries a v2 customGroups entry's unknown fields through", () => {
     expect(items().custom["vaultcss"]).toMatchObject({ unknownGroupField: NEWER_BUILD });
   });
@@ -412,7 +412,7 @@ describe("migrateV2Settings — runs once, and only on a v2 document", () => {
   });
 });
 
-// ── The two restored v2 normalizers (spec §9: the release's only real coverage loss) ────────────
+// ── The two restored v2 normalizers ────────────
 
 describe("mergeLegacyAppSliceItems", () => {
   it("merges the three slices into one app item, first-seen-wins in encounter order", () => {
@@ -527,7 +527,7 @@ describe("drainEnabledOnLocal", () => {
   });
 });
 
-// ── §4 / §9's headline gate: the baselines ─────────────────────────────────────────────────────
+// ── /'s headline gate: the baselines ─────────────────────────────────────────────────────
 
 const ENV: RegistryEnv = {
   cores: [
@@ -614,7 +614,7 @@ describe("a materialised orphan rule (v2's memberRules with no items entry of it
 
 // The end-to-end shape gate: whatever the migration produced has to survive the same validator
 // recompile() runs on every load, or the user's whole sync list would come back empty behind a
-// Notice. Asserted on the full §5 fixture, not a minimal one.
+// Notice. Asserted on the full fixture, not a minimal one.
 //
 // The two on/off lists are items, and migrateV2Settings (the v2 → v3 step) does not
 // seed items.obsidian["core-plugins"/"community-plugins"].synced for a v2 document — that
@@ -708,7 +708,7 @@ function rulesOn(items: ItemMap, list: "core-plugins" | "community-plugins"): Re
 }
 
 describe("ConfigSyncPlugin.loadSettings — a v2 document migrates, saves once, and says nothing", () => {
-  // The CHAIN (spec 2026-08-12-enablement-two-layers §4): a 2.20.0 device that skipped 2.22.0 goes
+  // The CHAIN (spec 2026-08-12-enablement-two-layers): a 2.20.0 device that skipped 2.22.0 goes
   // v2 → v3 → v4 in this one load, so the v3 fields this fixture is full of (`runsOn`,
   // `thisDeviceItems`, `bratIndex`) exist only in memory between the two steps and never reach disk.
   it("migrates in memory, writes the v4 document exactly once, and raises no reset notice", async () => {
@@ -749,7 +749,7 @@ describe("ConfigSyncPlugin.loadSettings — a v2 document migrates, saves once, 
     expect(NoticeSpy.lastMessage).toBeUndefined();
   });
 
-  // §5 retires the carried map. It is absorbed on the way out, or a device that never ran 2.21.0
+  // retires the carried map. It is absorbed on the way out, or a device that never ran 2.21.0
   // silently resumes syncing what it deliberately opted out of.
   it("absorbs THIS device's carried opt-outs into localStorage before the field disappears", async () => {
     const store: Record<string, string | null> = { "config-sync-device-id": "dev-1" };

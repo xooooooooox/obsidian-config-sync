@@ -29,7 +29,7 @@ import { mergePresetFields, selfPresetRules } from "../src/core/catalog";
 import { carrierRef } from "../src/core/itemKeys";
 import { withEnablementRule } from "../src/core/enablementRules";
 
-// Design reference: docs/superpowers/specs/2026-07-25-unified-card-design.md §1/§3/§5/§6.
+// Design reference: docs/superpowers/specs/2026-07-25-unified-card-design.md///
 
 // Fixtures name items the way the document does: section, then bare id.
 function settings(partial: Partial<Record<StorageSection, Record<string, Item>>> = {}): CompileSettings {
@@ -220,7 +220,7 @@ describe("compileItems — app card", () => {
     expect(findGroup(groups, "app")).toBeUndefined();
   });
 
-  // spec §3.2: a fileRule set before the card switched to per-key rules (mode "plain" ->
+  // spec a fileRule set before the card switched to per-key rules (mode "plain" ->
   // "fields") is leftover state, not live configuration — only the "plain" branch of
   // compileSingleFile ever reads item.settingsFile.fileRule. Pinning this protects the display
   // fix in a later task from a future "compile it too, while we're at it" regression.
@@ -484,7 +484,7 @@ describe("the on/off lists as items", () => {
 });
 
 // There is no enablementSharing / structuralLocalElements / elementSharings / deviceSharing
-// (2026-08-12-enablement-two-layers-design.md §5): a per-element rule is STORED
+// (2026-08-12-enablement-two-layers-design.md): a per-element rule is STORED
 // on the carrier item (enablementRules.ts, tests/enablementRules.test.ts) rather than derived
 // from each item's own runsOn plus whether its card happens to be switched on.
 

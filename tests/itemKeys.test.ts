@@ -6,7 +6,7 @@ import { SWITCH_LISTS } from "../src/core/switchList";
 import { parseItemRef, SyncGroup } from "../src/core/types";
 import { itemsIn } from "./items";
 
-// The one key space (spec §3/§4): the store lock, the device-local baselines and the device-local
+// The one key space: the store lock, the device-local baselines and the device-local
 // opt-out list are all keyed by the item's ref, and the COMPILER is its only producer.
 //
 // The load-bearing assertions here are producer-versus-producer — two sites made to agree with each
@@ -189,7 +189,7 @@ describe("companions and carriers are keyed and resolvable", () => {
     expect(groups.find((g) => g.name === "themes")?.ref).toBe(companionRef("obsidian/appearance", "{configDir}/themes"));
     // Two groups, ONE name, two distinct keys — the whole point of keying a companion under its
     // owner. A beta plugin's companion lands under `community`, never `beta`: a classification is
-    // not an identity (spec §7b).
+    // not an identity.
     const logs = groups.filter((g) => g.name === "logs");
     expect(logs).toHaveLength(2);
     expect(logs.map((g) => g.ref).sort()).toEqual(["community/completr/logs", "community/dataview/logs"]);
@@ -218,7 +218,7 @@ describe("companions and carriers are keyed and resolvable", () => {
   });
 });
 
-// §9's headline gate. A baseline is what tells this device an item was ever in sync; a missing one
+//'s headline gate. A baseline is what tells this device an item was ever in sync; a missing one
 // reads as never-synced, which defaults to APPLY. So the re-key's whole job is that the SAME items
 // have baselines afterwards — not that the keys look right.
 describe("the baseline re-key leaves the never-synced count unchanged", () => {

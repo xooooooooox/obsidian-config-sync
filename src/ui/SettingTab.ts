@@ -172,7 +172,7 @@ export interface SettingsHost extends Plugin {
     remoteAutoCheck: boolean;
     localPeriodicCheck: boolean;
     runHistory: { enabled: boolean; path: string; maxCount: number; maxDays: number };
-    // Unified-card model (spec §6): the Obsidian tab's card
+    // Unified-card model: the Obsidian tab's card
     // renderer reads/writes these fields directly, durably, through saveSettings() (which
     // persists AND recompiles — see main.ts).
     // Every section, custom items included: the Advanced tab's "Custom rules"/"Discovered files"
@@ -180,19 +180,18 @@ export interface SettingsHost extends Plugin {
     items: ItemMap;
   };
   saveSettings(): Promise<void>;
-  // False while this device's data.json was written by a newer Config Sync (the §4.2b
-  // hardening rule). Every writer in this file is mutate-then-save, and
+  // False while this device's data.json was written by a newer Config Sync (the schema-refusal rule). Every writer in this file is mutate-then-save, and
   // `saveSettings` refuses too late to undo the mutation — so the write must be refused BEFORE it
   // touches `settings`, or memory diverges from disk with no recompile. Asking also tells the
   // user why (the refusal notice fires here, on their gesture).
   settingsWritable(): boolean;
-  // The two enablement layers (spec §6.6), one read/write pair each — the SAME pair the Sync
+  // The two enablement layers, one read/write pair each — the SAME pair the Sync
   // Center's row of the same name calls, so the three entrances cannot drift apart. `RuleListId`,
   // not `EnablementList`: the snippet rows need the third list.
   enablementRuleFor(list: RuleListId, elementId: string): Sharing;
   setEnablementRule(list: RuleListId, elementId: string, sharing: Sharing): Promise<void>;
   deviceElementFor(list: RuleListId, elementId: string): DeviceElementState | null;
-  // Take the element out of the shared answer, keeping EXACTLY what it is right now (spec §6.5).
+  // Take the element out of the shared answer, keeping EXACTLY what it is right now.
   leaveToThisDevice(list: RuleListId, elementId: string): Promise<void>;
   followTheDefault(list: RuleListId, elementId: string): Promise<void>;
   setDeviceElement(list: RuleListId, elementId: string, state: DeviceElementState): Promise<void>;
@@ -200,15 +199,15 @@ export interface SettingsHost extends Plugin {
   // carrier card's badges and of its element list. `deviceElementFor` cannot answer it one element
   // at a time: the table is localStorage (deviceElements.ts), and only main.ts reads that.
   deviceElementIds(list: RuleListId): string[];
-  // The whole-file layer's read/write pair (spec §6.4) — the SAME pair the Sync Center host's
+  // The whole-file layer's read/write pair — the SAME pair the Sync Center host's
   // Stop-syncing menu calls, so a row toggled from either surface never drifts from the other.
   deviceOptedOut(groupName: string): boolean;
   setDeviceOptOut(groupName: string, optedOut: boolean): Promise<void>;
-  // The per-key sibling of the pair above (spec §6.6, one layer down): which of an item's own
+  // The per-key sibling of the pair above: which of an item's own
   // rule patterns THIS device has taken out of sync (deviceFields.ts) — read and write, one pair.
   deviceFieldExceptedFor(ref: ItemRef, pattern: string): boolean;
   setDeviceFieldExcepted(ref: ItemRef, pattern: string, excepted: boolean): Promise<void>;
-  // The card head's destructive action (spec §6.2). `appendActionHistory` exists on both hosts:
+  // The card head's destructive action. `appendActionHistory` exists on both hosts:
   // the leftover-cleanup entry the Sync Center view records is the same run history.
   stopSyncing(groupName: string, deleteStore: boolean): Promise<string[] | null>;
   storeFileCount(groupName: string): Promise<number>;
@@ -224,7 +223,7 @@ export interface SettingsHost extends Plugin {
   // scroll to once, this open only.
   consumePendingSettingsAnchor(): SettingsDeepLink | null;
   // Basenames (no extension) of .css files actually present under the vault's snippets/ folder —
-  // feeds the Appearance card's snippets companion member rows (spec §4/§5).
+  // feeds the Appearance card's snippets companion member rows.
   listSnippetFiles(): Promise<string[]>;
   // Immediate child file/folder names of an arbitrary companion path — feeds
   // the plain (non-mapKey) companion member listing zone ③ shows for themes/ and any user-added
@@ -287,7 +286,7 @@ export function refFromItemAnchor(anchorId: string): ItemRef | null {
   return parsed === null ? null : itemRef(parsed.section, parsed.id);
 }
 
-// The snippets list id, spelled once (spec §6.6). Appearance's member rows are elements of
+// The snippets list id, spelled once. Appearance's member rows are elements of
 // `enabled-css-snippets` exactly as a plugin row is an element of its plugin list — the same rule
 // store, the same writer, the same row.
 const SNIPPET_LIST: RuleListId = "enabled-css-snippets";
@@ -307,7 +306,7 @@ function defaultFieldsFromDetection(keys: string[]): FieldRule[] {
 // reads from the same constants, so the two surfaces can no longer word the same fact differently.
 const PER_KEY_RULES_TOOLTIP = "Per-key rules decide — open them below";
 
-// The Access-token control's standing explanation (DESIGN.md §4 Remote editor): tooltip-borne, so
+// The Access-token control's standing explanation (DESIGN.md's Remote editor): tooltip-borne, so
 // it never spends a form row of its own.
 const TOKEN_LINK_HINT = "For https URLs. Without a token, this device's own git sign-in is used. Stored in Obsidian's keychain — link it once per device.";
 
@@ -476,7 +475,7 @@ interface SearchHit {
   anchorId: string;
   item?: Pick<CatalogItem, "type">;
   // The compiled group this hit stands for, when the hit's TAB is not also its family — the
-  // Advanced tab's rules and discovered files (§4). Read by settingSectionValue alone, to ask the
+  // Advanced tab's rules and discovered files. Read by settingSectionValue alone, to ask the
   // Sync Center's own producer which family the item belongs to.
   groupName?: string;
 }
@@ -493,7 +492,7 @@ const SECTION_LABEL: Record<SearchHit["section"], string> = {
 
 //
 // A hit answers with its settings AREA — this panel's own tabs — and, when the two differ, ALSO
-// with the family the item belongs to (§4). The family is not spelled out here: it comes from
+// with the family the item belongs to. The family is not spelled out here: it comes from
 // `sectionForGroup`, the very function the Sync Center's `section:` resolver uses, so a custom rule
 // answers the same word in both search boxes by construction rather than by two authors happening
 // to type "custom" twice. Both answers are true of an Advanced-tab rule — it IS a custom item, and
@@ -512,7 +511,7 @@ export function settingTypeValue(hit: Pick<SearchHit, "item">): "file" | "folder
   return hit.item.type;
 }
 
-// `section:` — spec §7, the same word the Sync Center's search bar uses, so one concept is typed one
+// `section:` — the same word the Sync Center's search bar uses, so one concept is typed one
 // way in both boxes. NO `scope:` alias: a key this set doesn't know is free text, so a
 // typed `scope:core` searches for those literal words instead of quietly filtering.
 //
@@ -521,7 +520,7 @@ export function settingTypeValue(hit: Pick<SearchHit, "item">): "file" | "folder
 // both); the extras are the areas that hold no items at all: `general` and `remotes`, plus
 // `advanced`, which is where custom rules and discovered files live in this panel.
 //
-// `custom` is the one word that is a family here rather than an area (§4): an Advanced-tab rule
+// `custom` is the one word that is a family here rather than an area: an Advanced-tab rule
 // answers both words; `advanced` still means that tab, its own non-item settings included.
 //
 // Exported for the tests, which assert against the shipped list rather than restating it; `as const`
@@ -553,7 +552,7 @@ export function setMemberDeviceClass(
   return next;
 }
 
-// Every settingsFile write funnels through here (spec §3.1 auto-switch) so the stored `mode` is
+// Every settingsFile write funnels through here so the stored `mode` is
 // never a user choice — it's re-derived from the rules/
 // perElement the write just produced. A write that lands on "fields" also drops any `fileRule`: the
 // two are a manifest-illegal combination (manifest.ts rejects fields+fileRule), and forcing this
@@ -594,7 +593,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private addingCompanion = new Set<string>(); // UI-transient: zone ③ "+ Add folder" inputs open
   private companionPathEditing = new Set<string>(); // UI-transient: zone ③ rows mid path-edit ("def.id::path")
   private previewOpen = new Set<string>(); // UI-transient: zone ② "File preview" disclosure open this session, keyed by def.id
-  private membersOpen = new Set<string>(); // UI-transient: zone ③ member-list disclosure open this session, keyed "def.id:path" (spec §4)
+  private membersOpen = new Set<string>(); // UI-transient: zone ③ member-list disclosure open this session, keyed "def.id:path"
   // In-place refresh hooks for enable toggles: a per-card toggle rebuilds only the section "Sync
   // all" headers, and "Sync all" rebuilds only the cards — never rerender(), whose
   // containerEl.empty() + async rebuild visibly flashes and drops the panel mid-scroll.
@@ -851,7 +850,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     };
   }
 
-  // A carrier card's two badge counts (spec §6.4) — null for every card that carries no list, so a
+  // A carrier card's two badge counts — null for every card that carries no list, so a
   // count is never derived for a card whose drawer has no elements to count.
   private carrierCountsOf(def: ItemDef): CarrierCounts | null {
     const list = carrierListFor(def);
@@ -872,7 +871,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   // Every settings-tab write funnels through here — the mutators themselves only ever spread what
   // they get, and the two-level map write is done in one place (registry.ts's withItem).
   private async updateItem(def: ItemDef, mutator: (item: Item) => Item): Promise<void> {
-    if (!this.host.settingsWritable()) return; // §4.2b — refuse before the mutation, not after
+    if (!this.host.settingsWritable()) return; // refuse before the mutation, not after
     const next = mutator(itemAt(this.host.settings.items, def.section, def.id) ?? emptyItem());
     this.host.settings.items = withItem(this.host.settings.items, def.section, def.id, next);
     await this.host.saveSettings();
@@ -902,7 +901,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   }
 
   // One card list for any ItemDef section — the Obsidian tab (no Sync-all master row: its five
-  // cards are concept areas, not a plugin list) and Core/Community/Beta (Sync-all, spec §4/§5/§10,
+  // cards are concept areas, not a plugin list) and Core/Community/Beta (Sync-all,
   // D11 — a single master row over every card in the section, no kind-exclusion of any kind: every
   // def participates, including state-only core cards).
   private async renderRegistryCards(containerEl: HTMLElement, gen: number, section: Section, withSyncAll: boolean): Promise<void> {
@@ -911,7 +910,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     if (gen !== this.renderGen) return;
     // No section-sub line — the cards themselves say what syncs.
     if (withSyncAll && defs.length > 0) this.renderSyncAllRow(containerEl, defs);
-    // Cards render in def order — buildItemDefs already alphabetizes each section (spec §4).
+    // Cards render in def order — buildItemDefs already alphabetizes each section.
     // No sensitive-first reordering: it breaks the dictionary order users scan by.
     const listEl = containerEl.createDiv();
     for (const def of defs) {
@@ -928,7 +927,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       const head = new Setting(host).setName(SYNC_ALL_LABEL).setDesc(SYNC_ALL_HINT).setHeading();
       head.addToggle((t) =>
         t.setValue(sectionAllEnabled(defs, this.host.settings.items)).onChange(async (v) => {
-          if (!this.host.settingsWritable()) return; // §4.2b
+          if (!this.host.settingsWritable()) return;
           this.host.settings.items = applySyncAll(defs, this.host.settings.items, v);
           await this.host.saveSettings();
           for (const { wrap, def } of this.cardHosts) this.renderItemCard(wrap, def);
@@ -986,7 +985,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   // one, and it comes in as a callback).
   //
   // Turning an item OFF removes it from every device's contract and can delete its store copy — the
-  // one destructive gesture on this card, and its only home (spec §6.2). The confirmation is
+  // one destructive gesture on this card, and its only home. The confirmation is
   // StopSyncingModal. The two carrier cards go through it like any
   // other: a carrier is an item, it has a store copy, and "one home for the gesture" does not mean
   // "one home for the items we thought of first".
@@ -996,7 +995,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   // Community tab carries a Config Sync card with this same toggle — and the modal's delete-store
   // checkbox defaults to CHECKED, which on this one item would delete the self copy that carries
   // the sync contract to every other device. The gesture excludes the self item by design
-  // ("not the self item"); §6.2 places the gesture's home, not its scope. So this card keeps
+  // ("not the self item"): where the gesture lives says nothing about what it covers. So this card keeps
   // the plain write: `synced` flips, nothing is deleted, and it is reversible in place.
   //
   // Turning any item back ON is the plain path too — restoring sync destroys nothing.
@@ -1011,16 +1010,16 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     for (const rebuild of this.syncAllRebuilds) rebuild();
   }
 
-  // The card's destructive action (spec §6.2).
+  // The card's destructive action.
   private async openStopSyncing(def: ItemDef, wrap: HTMLElement): Promise<void> {
-    // §4.2b: refuse before the modal opens, not after the user has decided in it. `stopSyncing`
+    // refuse before the modal opens, not after the user has decided in it. `stopSyncing`
     // still refuses on its own — this is the courtesy, that is the guarantee.
     if (!this.host.settingsWritable()) return;
     const label = this.host.displayName(def.groupName, def.label);
     const count = await this.host.storeFileCount(def.groupName);
     new StopSyncingModal(this.app, label, count, async (deleteStore) => {
       const deleted = await this.host.stopSyncing(def.groupName, deleteStore);
-      if (deleted === null) return; // refused (§4.2b) — the item is still synced, so nothing is recorded
+      if (deleted === null) return; // refused — the item is still synced, so nothing is recorded
       await this.host.appendActionHistory({
         kind: "stop-sync",
         desc: stopSyncDesc(label, deleted.length),
@@ -1104,7 +1103,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     this.renderCompanionZone(companionHost, def, item, wrap);
   }
 
-  // The fleet write, plus §6.5 case 3's landing seed. Same body as the Sync Center's rule menu
+  // The fleet write, plus the landing seed. Same body as the Sync Center's rule menu
   // (SyncCenterView.setRuleWithLanding), asking the same producer (ruleLandingNeedsSeed), so landing
   // on `Not shared` behaves identically whichever entrance the user came through.
   private async setRuleWithLanding(list: RuleListId, elementId: string, rule: Sharing): Promise<void> {
@@ -1114,7 +1113,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
 
   // Wires a picker trigger's click/keydown → opens an Obsidian `Menu` at the click/keyboard
   // position, and tracks `.is-open` on the trigger while the menu is showing (⇕
-  // hover-reveal — DESIGN.md §2.3), cleared via `Menu.onHide`. Shared by every sharing/rule
+  // hover-reveal — DESIGN.md's Lucide usage), cleared via `Menu.onHide`. Shared by every sharing/rule
   // picker in this file (renderSharingPicker below) and the local-segment menu, so the
   // open/close bookkeeping lives in exactly one place — the same shape SyncCenterView's own
   // `wireMenuTrigger` uses, so a menu opens and reveals its chevron the same way everywhere.
@@ -1311,7 +1310,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     build();
   }
 
-  // ONE element-rule row (spec §6.4): a snippet under Appearance and a plugin under Core/Community
+  // ONE element-rule row: a snippet under Appearance and a plugin under Core/Community
   // plugins are the same thing — an element of an on/off list with a rule and a local exception —
   // so they are the same row. Appearance's snippet rows are the older half of this; this is what
   // makes the two new carrier cards reuse them instead of growing a second dialect.
@@ -1368,7 +1367,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
 
   // The fleet write from an element row, plus the two card-level consequences every write into this
   // item's `perElement` map has. The first rule on a card (or the last one cleared) flips
-  // hasKeyRules, which (un)dims the path row's own sharing/lock controls (spec §3.1) — refreshed in
+  // hasKeyRules, which (un)dims the path row's own sharing/lock controls — refreshed in
   // place, because a full card re-render makes the panel visibly jump.
   // The File preview colors its elements from the same map.
   //
@@ -1377,7 +1376,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   // what lets one method serve both callers.
   private async writeElementRule(def: ItemDef, wrap: HTMLElement, list: RuleListId, elementId: string, rule: Sharing): Promise<void> {
     const hadKeyRules = hasKeyRules(this.itemOf(def));
-    // The landing seed (§6.5 case 3) exists to keep the LOCAL segment truthful, so it applies to
+    // The landing seed exists to keep the LOCAL segment truthful, so it applies to
     // exactly the lists that have one.
     if (isEnablementList(list)) await this.setRuleWithLanding(list, elementId, rule);
     else await this.host.setEnablementRule(list, elementId, rule);
@@ -1385,8 +1384,8 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     this.refreshCardBody(wrap, def);
   }
 
-  // The two carrier cards' element drawer (spec §6.4): the list this card carries, one row per
-  // element, under one section title. No search box — spec §10 leaves that open, and Community's 73
+  // The two carrier cards' element drawer: the list this card carries, one row per
+  // element, under one section title. No search box: Community's 73
   // rows are a grouping decision this card is not the place to take unasked.
   private renderCarrierElements(exp: HTMLElement, def: ItemDef, list: RuleListId, wrap: HTMLElement): void {
     // Zone-header scrow: `Enabled on` — zone ①'s own word, because this list IS that datum per
@@ -1446,7 +1445,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   // uppercase `SETTINGS SYNC` label stacked over the mono filename, the eye riding that same
   // filename line; the controls cluster holds scope + lock. Locked (dim, disabled) whenever the
   // card has any per-key rule — per-key state owns scope/encrypt then, not the whole-file row
-  // (spec §3.1).
+  //.
   private renderSettingsFilePathRow(row: HTMLElement, errorEl: HTMLElement, def: ItemDef, item: Item, wrap: HTMLElement): void {
     const defaultPath = def.settingsFile!.defaultPath!;
     const current = item.path ?? defaultPath;
@@ -1577,7 +1576,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       // "plain" branch, so once the group has any per-key rule the whole-file rule compiles to
       // nothing — and pruneSettingsFile only drops a fileRule that is exactly {everywhere,
       // false}, so a `Desktop only` set (or an `encrypted: true`) from before the first per-key
-      // rule can survive in data.json with nothing left enforcing it (spec §3.2). Reading it here
+      // rule can survive in data.json with nothing left enforcing it. Reading it here
       // would draw a scope or lock that states a value that stopped being true the moment the
       // first per-key rule was added, so this branch never touches item.settingsFile?.fileRule at
       // all — neither cell — and never mutates it either: per-key rules are the only truth here,
@@ -1689,7 +1688,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       errorEl.show();
       return;
     }
-    // §4.2b: refuse before the warning modal opens — `updateItem` below would refuse anyway, but
+    // refuse before the warning modal opens — `updateItem` below would refuse anyway, but
     // only after the user had weighed a preset change they were never going to be allowed to make.
     if (!this.host.settingsWritable()) {
       this.customPathEditing.delete(editKey);
@@ -1718,7 +1717,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     this.renderItemCard(wrap, def);
   }
 
-  // Icon lock control (spec §2.2/§5) shared by the path row (whole-file encrypt) and every rule
+  // Icon lock control shared by the path row (whole-file encrypt) and every rule
   // row (per-key encrypt). Three states:
   // unencrypted-but-available renders an OPEN lock (a closed one reads as
   // already-encrypted), encrypted renders the closed `.is-on` lock, and a lock that can neither
@@ -1746,7 +1745,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     });
   }
 
-  // Decides whether zone ②'s body needs a file read at all (spec §4 progressive disclosure): a card with no
+  // Decides whether zone ②'s body needs a file read at all: a card with no
   // per-key rules AND a collapsed preview never reads the file — rule rows are empty either way
   // (buildRuleRows needs no live doc to return []) and there's nothing else to show. Every other
   // combination reads once and renders rule rows + the preview disclosure off-DOM before swapping
@@ -1836,7 +1835,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   }
 
   // Rule rows list ONLY configured keys (buildRuleRows) — browsing the file's full key set is
-  // File preview's job (spec §3.1). Nothing renders when there are none.
+  // File preview's job. Nothing renders when there are none.
   private renderRuleRows(bodyEl: HTMLElement, def: ItemDef, item: Item, doc: Record<string, unknown>, wrap: HTMLElement): void {
     const rows = buildRuleRows(def, item, doc);
     if (rows.length === 0) return;
@@ -1885,7 +1884,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         });
         if (!hasKeyRules(this.itemOf(def))) {
           // Removing the last rule flips hasKeyRules -> false, which undims the path row's own
-          // scope/lock controls (spec §3.1) — refreshed in place: a full re-render would
+          // scope/lock controls — refreshed in place: a full re-render would
           // jump the panel and leave the dim state stale on other paths.
           this.refreshPathRow(wrap, def);
         }
@@ -1971,8 +1970,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     }
   }
 
-  // Array-key element row, indented under its rule row (spec §3.1 preserves this interaction; the indent lives
-  // on the name inside the identity track, so the control column stays on the parent's rule).
+  // Array-key element row, indented under its rule row.
   private renderPerElementRow(panel: HTMLElement, def: ItemDef, key: string, element: string, sharing: Sharing, wrap: HTMLElement): void {
     const r = panel.createDiv({ cls: "config-sync-scrow config-sync-card-elrow" });
     r.createSpan({ cls: "config-sync-card-elname", text: element });
@@ -2012,7 +2010,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     this.expanded.add(cardExpandKey(defRef(def)));
   }
 
-  // Progressive disclosure (spec §4): collapsed by default, `previewOpen` is UI-transient
+  // Progressive disclosure: collapsed by default, `previewOpen` is UI-transient
   // (session-only, mirrors the drawer's own `expanded` set). The trigger is
   // the `eye` icon on the path row (renderSettingsFilePathRow) — this method only renders the
   // CONTENT, gated on the same `previewOpen` set the icon writes. Expanding is still the only
@@ -2032,7 +2030,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   }
 
   private renderCardDataPreview(bodyEl: HTMLElement, def: ItemDef, item: Item, doc: Record<string, unknown>, wrap: HTMLElement): void {
-    // A carrier card's element rows (the drawer, spec §6.4) ARE its rule surface — a per-key rule
+    // A carrier card's element rows (the drawer) ARE its rule surface — a per-key rule
     // on a boolean plugin map has no meaning, and a click writing `sf.rules[<plugin id>]` would
     // flip the item into "fields" mode and corrupt the switch-list file on next capture
     // (registry.ts's perElementFromMap also refuses that key, belt-and-braces, but this affordance
@@ -2047,7 +2045,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       onAddRule: (key) => {
         void this.addRuleForKey(def, key).then(() => {
           // Adding a rule can flip hasKeyRules -> true, which dims the path row's own
-          // scope/lock controls (spec §3.1) — refreshed in place: a full re-render would
+          // scope/lock controls — refreshed in place: a full re-render would
           // reset this preview's scroll to the top.
           this.refreshPathRow(wrap, def);
           this.refreshCardBadges(wrap, def);
@@ -2129,7 +2127,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     });
   }
 
-  // "+ Add folder" is available on every card (spec §5) — a def with no preset companions and an
+  // "+ Add folder" is available on every card — a def with no preset companions and an
   // empty config produces zero rows (buildCompanionRows), in which case the zone renders no
   // header and no rows, just the Add-folder entry point below. EXCEPT carriers:
   // a switch registry has no meaning for a folder to attach to (an arbitrary folder belongs to
@@ -2185,7 +2183,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         // switch-list engine only knows community-plugins.json, core-plugins.json and
         // enabledCssSnippets today, so an arbitrary folder group has no per-file sharing
         // mechanism to wire a chip to. isThemesPreset
-        // (spec §4's "· N themes" vs "· N files") is true only for a preset row with no mapKey —
+        // is true only for a preset row with no mapKey —
         // today that is exactly the Appearance card's themes/ preset, never a plain user folder.
         const isThemesPreset = row.isPreset && mapKey === undefined;
         void (async () => {
@@ -2202,14 +2200,14 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     return `${defRef(def)}::${path}`;
   }
 
-  // Member-list collapse key (spec §4 Step 3) — UI-
+  // Member-list collapse key — UI-
   // transient. Double-colon separator matches companionEditKey: an item ref itself contains a
   // single slash, so "::" keeps the join unambiguous.
   private companionMemberKey(def: ItemDef, row: CompanionRowModel): string {
     return `${defRef(def)}::${row.path}`;
   }
 
-  // Folder row = the grid's row for one companion (spec §2.1/§4 Step 2/3): name + member count
+  // Folder row = the grid's row for one companion: name + member count
   // pill (patched in once the async scan below resolves) + fold chevron in the content column |
   // scope picker | small
   // toggle | ✎ (every row) with ✕ ADDITIONALLY for a user-added row (never for a preset — D8: a
@@ -2328,7 +2326,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     return { countEl, chevron };
   }
 
-  // Preset row path edit (spec §4/§8, D8): validate -> no-op guard -> companionConflict ->
+  // Preset row path edit: validate -> no-op guard -> companionConflict ->
   // confirmPresetPathChange -> on confirm, drop the entry at the OLD preset path (if any — a
   // never-toggled preset has none) and add a fresh one at the new path carrying over the same
   // device/enabled — this "captures the new path as a fresh item" (it renders as an ordinary user
@@ -2380,9 +2378,9 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         }
         // The warning modal only makes sense for a PRESET path (ConfirmModal.ts) — a plain
         // user-added folder has no preset identity to move away from, so its path edit (offered
-        // on every companion row, spec §4 Step 2) commits
+        // on every companion row) commits
         // straight away.
-        // §4.2b: refuse before the warning modal opens (see the settings-file path row above).
+        // refuse before the warning modal opens (see the settings-file path row above).
         if (!this.host.settingsWritable()) {
           cancel(); // the same restore path Cancel takes — the edit did not happen
           return;
@@ -2425,7 +2423,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     window.setTimeout(() => input.inputEl.focus(), 0); // autofocus, matching the path row's edit state
   }
 
-  // Progressive disclosure (spec §4 Step 3): the count always patches into the folder row's own
+  // Progressive disclosure: the count always patches into the folder row's own
   // countEl once the scan resolves — collapsed or not. The member rows + hint themselves render
   // unconditionally: the fold toggle never rebuilds this zone,
   // so the content has to already exist for a later open to reveal — `membersHost.hidden`
@@ -2448,7 +2446,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     return `addcompanion:${def.id}`;
   }
 
-  // "+ Add folder" (spec §4/§10, D8): a plain vault-relative path, same validate/conflict guard
+  // "+ Add folder": a plain vault-relative path, same validate/conflict guard
   // as everything else in this zone — dedupe-within-the-card falls out of companionConflict for
   // free (a duplicate add collides with THIS item's own existing preset/companion entry, see
   // registry.ts's companionConflict doc comment). New rows land enabled — the user just asked
@@ -2456,7 +2454,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private renderAddCompanionRow(exp: HTMLElement, def: ItemDef, wrap: HTMLElement): void {
     const key = this.addCompanionKey(def);
     if (!this.addingCompanion.has(key)) {
-      // Downgraded to a quiet link-like text row (spec §4 Step 4) — .config-sync-add-row-quiet
+      // Downgraded to a quiet link-like text row — .config-sync-add-row-quiet
       // overrides the bordered/centered chrome the "+ Add rule"/"+ Add remote" buttons elsewhere
       // still use, so only this row's look changes.
       const addBtn = exp.createEl("button", { cls: "config-sync-add-row config-sync-add-row-quiet", text: ADD_FOLDER_LABEL });
@@ -2522,18 +2520,18 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   }
 
   // THE snippet rule map — read through enablementRules like every other list's, rather than
-  // reaching into appearance's `perElement` by hand (spec §6.6: one reader, one writer).
+  // reaching into appearance's `perElement` by hand.
   private snippetRules(): PerElementSharing {
     return enablementRules(this.host.settings.items, SNIPPET_LIST);
   }
 
-  // Progressive disclosure (spec §4 Step 3): count always patches into countEl; member rows +
+  // Progressive disclosure: count always patches into countEl; member rows +
   // hint render unconditionally (same reasoning as
   // renderPlainCompanionMembers above) — the fold toggle never rebuilds this zone, so the
   // content has to already exist for a later open to reveal; `membersHost.hidden`
   // (renderCompanionZone) is the only thing gating visibility. Snippets are never the themes
   // preset, so memberCountLabel's first argument is always false here. Each row is
-  // renderElementRuleRow's (spec §6.4) — the orphan pill and Forget stay here, because they are
+  // renderElementRuleRow's — the orphan pill and Forget stay here, because they are
   // facts about a FILE, which is a thing only this list's elements have.
   private renderSnippetMembers(listEl: HTMLElement, def: ItemDef, rows: SnippetMemberRow[], wrap: HTMLElement, countEl: HTMLElement | null): void {
     const fileCount = rows.filter((r) => r.fileExists).length;
@@ -2590,7 +2588,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     // on/off list is meaningless. A three-button segment with one forced choice is noise, so
     // these rows render no segment at all.
     if (isSwitchListGroup(group.name)) return;
-    // The §2.2 display names — the stored ids never change.
+    // The mode vocabulary's display names — the stored ids never change.
     const modes: { id: SyncMode; label: string }[] = [
       { id: "plain", label: MODE_LABELS.plain },
       { id: "fields", label: MODE_LABELS.fields },
@@ -2621,7 +2619,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       chip.addClass("config-sync-dim");
       setTooltip(chip, "This item always uses Per-key rules — some of its settings stay on each device");
       // The ⇕ renders even here: a picker box without it is 14px narrower and this row's glyph
-      // would drift out of the column the two rows above sit in (§2.3's constant-layout rule).
+      // would drift out of the column the two rows above sit in.
       setIcon(chip.createSpan({ cls: "config-sync-tworow-chev" }), "chevrons-up-down");
       return;
     }
@@ -2671,7 +2669,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     });
   }
 
-  // The Advanced per-key editor speaks the card's own grammar (DESIGN.md §4 Advanced rule
+  // The Advanced per-key editor speaks the card's own grammar (DESIGN.md's Advanced rule
   // editor): each pattern is a rule-row scrow with the shared sharing picker (Remove rule as the
   // menu's warning item) and the three-state lock — the single-select action dropdown, which
   // flattened the orthogonal sharing×encrypted pair, does not exist. Below the rows, the File
@@ -2898,7 +2896,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
           name: def.label,
           desc: [def.description, stateOnly ? "on/off only" : "", path ?? ""].filter((s) => s !== "").join(" "),
           anchorId: itemAnchorId(defRef(def)),
-          // §3: the type this item actually has, not a blanket "file". A registry item's own thing
+          // The type this item actually has, not a blanket "file". A registry item's own thing
           // is its settings FILE (registry.ts's Item.type) — its companion folders are groups of
           // their own, and no card hit stands for one. A state-only item has no file at all, so it
           // answers NEITHER `type:` word: that is what an absent `item` means to settingTypeValue,
@@ -2916,7 +2914,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
           name: this.host.displayName(g.name, g.label),
           desc: splitLocation(g.path).rel,
           anchorId: `advanced-rule-${g.name}`,
-          // §3/§4: the group's own type — the same field the Sync Center's `type:` reads — and its
+          // The group's own type — the same field the Sync Center's `type:` reads — and its
           // name, so `section:` can ask which family it belongs to.
           item: { type: g.type },
           groupName: g.name,
@@ -2932,8 +2930,8 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         name: this.host.displayName(g.name, g.label),
         desc: "Custom rule",
         anchorId: `advanced-rule-${g.name}`,
-        item: { type: g.type }, // §3: a rule pointing at a folder answers type:folder
-        groupName: g.name, // §4: …and section:custom, the family sectionForGroup gives it
+        item: { type: g.type }, // a rule pointing at a folder answers type:folder
+        groupName: g.name, // …and section:custom, the family sectionForGroup gives it
       });
     }
     if (Platform.isDesktop) {
@@ -3065,7 +3063,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         .addOption("default", "Default")
         .setValue(this.host.settings.pkmMode)
         .onChange(async (v) => {
-          if (!this.host.settingsWritable()) return; // §4.2b
+          if (!this.host.settingsWritable()) return;
           this.host.settings.pkmMode = v as PkmMode;
           await this.host.saveSettings();
           this.loaded = false;
@@ -3092,7 +3090,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
           new Notice(`Config Sync: invalid data folder "${trimmed}" — must be a vault-relative path`);
           return;
         }
-        if (!this.host.settingsWritable()) return; // §4.2b
+        if (!this.host.settingsWritable()) return;
         this.host.settings.rootPath = trimmed;
         await this.host.saveSettings();
       });
@@ -3112,7 +3110,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       "general-status-in-menu"
     ).addToggle((t) =>
       t.setValue(this.host.settings.statusInMenu).onChange(async (v) => {
-        if (!this.host.settingsWritable()) return; // §4.2b
+        if (!this.host.settingsWritable()) return;
         this.host.settings.statusInMenu = v;
         await this.host.saveSettings();
       })
@@ -3125,7 +3123,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       "general-remote-auto-check"
     ).addToggle((t) =>
       t.setValue(this.host.settings.remoteAutoCheck).onChange(async (v) => {
-        if (!this.host.settingsWritable()) return; // §4.2b
+        if (!this.host.settingsWritable()) return;
         this.host.settings.remoteAutoCheck = v;
         await this.host.saveSettings();
       })
@@ -3138,7 +3136,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       "general-local-periodic-check"
     ).addToggle((t) =>
       t.setValue(this.host.settings.localPeriodicCheck).onChange(async (v) => {
-        if (!this.host.settingsWritable()) return; // §4.2b
+        if (!this.host.settingsWritable()) return;
         this.host.settings.localPeriodicCheck = v;
         await this.host.saveSettings();
       })
@@ -3150,7 +3148,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const heading = this.generalSetting("general-run-history");
     this.anchor(new Setting(containerEl).setName(heading.name).setDesc(heading.desc).setHeading(), "general-run-history").addToggle((t) =>
       t.setValue(s.enabled).onChange(async (v) => {
-        if (!this.host.settingsWritable()) return; // §4.2b
+        if (!this.host.settingsWritable()) return;
         s.enabled = v;
         await this.host.saveSettings();
       })
@@ -3161,7 +3159,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         .setPlaceholder("{configDir}/plugins/config-sync/run-history.json")
         .setValue(s.path)
         .onChange(async (v) => {
-          if (!this.host.settingsWritable()) return; // §4.2b
+          if (!this.host.settingsWritable()) return;
           s.path = v.trim();
           await this.host.saveSettings();
         })
@@ -3169,7 +3167,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const count = this.generalSetting("general-run-history-count");
     this.anchor(new Setting(containerEl).setName(count.name).setDesc(count.desc), "general-run-history-count").addText((t) =>
       t.setValue(String(s.maxCount)).onChange(async (v) => {
-        if (!this.host.settingsWritable()) return; // §4.2b
+        if (!this.host.settingsWritable()) return;
         const n = Number.parseInt(v, 10);
         s.maxCount = Number.isFinite(n) && n >= 0 ? n : 0;
         await this.host.saveSettings();
@@ -3178,7 +3176,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const days = this.generalSetting("general-run-history-days");
     this.anchor(new Setting(containerEl).setName(days.name).setDesc(days.desc), "general-run-history-days").addText((t) =>
       t.setValue(String(s.maxDays)).onChange(async (v) => {
-        if (!this.host.settingsWritable()) return; // §4.2b
+        if (!this.host.settingsWritable()) return;
         const n = Number.parseInt(v, 10);
         s.maxDays = Number.isFinite(n) && n >= 0 ? n : 0;
         await this.host.saveSettings();
@@ -3207,7 +3205,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       const s = new Setting(containerEl).setName(d.label);
       s.addToggle((t) =>
         t.setValue(this.host.settings.ribbonButtons[d.key]).onChange(async (v) => {
-          if (!this.host.settingsWritable()) return; // §4.2b
+          if (!this.host.settingsWritable()) return;
           this.host.settings.ribbonButtons[d.key] = v;
           await this.host.saveSettings();
           this.host.refreshRibbons();
@@ -3222,7 +3220,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       const def = this.generalSetting(anchorId);
       this.anchor(new Setting(containerEl).setName(def.name).setDesc(def.desc), anchorId).addToggle((t) =>
         t.setValue(get()).onChange(async (v) => {
-          if (!this.host.settingsWritable()) return; // §4.2b — covers all four status-bar toggles
+          if (!this.host.settingsWritable()) return; // covers all four status-bar toggles
           set(v);
           await this.host.saveSettings();
           after();
@@ -3326,7 +3324,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   // rule or discovered file — see persistCustomItems, which uses this same test to decide what
   // durably belongs in items.custom.
   private isManagedGroup(g: SyncGroup, reserved: ReadonlySet<string>): boolean {
-    // The SECTION comes from the group's own ref, never from its name (spec §5): a group that
+    // The SECTION comes from the group's own ref, never from its name: a group that
     // arrived through the STORE and is in neither the defs nor settings.items still carries one —
     // manifest.ts's parseGroup gives every group the ref the legacy rules resolve for it. The path
     // test stays because it answers a different question: a hand-written rule may legitimately be
@@ -3337,7 +3335,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   }
 
   // Durable write path for the Advanced tab's "Custom rules"/"Discovered files"
-  // (spec §6): writing the FULL mutated draft (registry-derived groups
+  //: writing the FULL mutated draft (registry-derived groups
   // included) through the session-only groupsIO/writeGroupsFile route would make a custom rule or
   // an adopted discovered file vanish on the next Obsidian restart. Registry-derived groups are
   // never stored — they're recompiled from settings.items on every load (registry.ts's
@@ -3357,7 +3355,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   }
 
   private async persistCustomItems(fullDraft: SyncGroup[]): Promise<void> {
-    // §4.2b — before the items assignment below. THROWN, not returned:
+    // before the items assignment below. THROWN, not returned:
     // commitDraft already keeps the caller's draft whenever this write fails, so raising the
     // refusal here is what stops a refused edit from staying visible in the Advanced tab until
     // Settings is reopened. It also surfaces in the tab's existing inline error slot.
@@ -3525,7 +3523,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   // Product-voice placeholders (the name charset lives
   // in the validation error, never the placeholder); the location picker sits INSIDE the path
   // input box; TYPE is an icon picker; DEVICES reuses the panel's sharing picker; MODE speaks
-  // the §2.2 display names.
+  // the mode vocabulary's display names.
   private renderRuleForm(listEl: HTMLElement, group: SyncGroup, mode: "custom" | "discovered"): void {
     const panel = listEl.createDiv({ cls: "config-sync-expand config-sync-advform" });
     let currentName = group.name;
@@ -3571,7 +3569,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         for (const l of ["vault", "config"] as const) {
           menu.addItem((i) =>
             i.setTitle(LOC_LABELS[l]).setChecked(splitLocation(this.groups.find((g) => g.name === currentName)?.path ?? group.path).location === l).onClick(() => {
-              // §4.2b/P4: a failed commit pins its message to THIS row, which only paints on a
+              // a failed commit pins its message to THIS row, which only paints on a
               // render — refresh on failure only; on success the row repaints via refresh() so
               // the prefix shows the fresh location.
               void this.commitGroups((draft) => {
@@ -3591,7 +3589,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
           const g = draft.find((x) => x.name === currentName);
           if (g !== undefined) g.path = joinLocation(splitLocation(g.path).location, v.trim());
         }, currentName).then((ok) => {
-          if (!ok) this.refresh(); // §4.2b/P4 — see the location menu above
+          if (!ok) this.refresh(); // see the location menu above
         });
       });
     }
@@ -3604,7 +3602,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     } as const;
     const typeIc = advRow("Type").createSpan({ cls: "config-sync-sharingicon config-sync-adv-typeic" });
     setIcon(typeIc.createSpan(), TYPE_META[group.type].icon);
-    // The ⇕ span renders in both states — constant layout is a width promise (§2.3).
+    // The ⇕ span renders in both states — constant layout is a width promise.
     setIcon(typeIc.createSpan({ cls: "config-sync-tworow-chev" }), "chevrons-up-down");
     if (mode === "discovered") {
       // The file fixes name, path AND type — a discovered rule is a file by construction, and a
@@ -3662,7 +3660,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         if (d !== "") g.description = d;
         else delete g.description;
       }, currentName).then((ok) => {
-        if (!ok) this.refresh(); // §4.2b/P4 — see the Location dropdown above
+        if (!ok) this.refresh(); // see the Location dropdown above
       });
     });
     if (group.mode === "fields") {
@@ -3736,7 +3734,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     this.sourcesErrorEl.setText(this.sourcesErrorFor === null ? this.sourcesErrorMsg : "");
     const addBtn = containerEl.createEl("button", { cls: "config-sync-add-row", text: "+ Add remote" });
     addBtn.addEventListener("click", () => {
-      if (!this.host.settingsWritable()) return; // §4.2b/N3: no half-built remote that can never be saved
+      if (!this.host.settingsWritable()) return; // no half-built remote that can never be saved
       this.sources.push({ name: "", type: "vault", storePath: "", url: "", branch: "", subdir: "", excludeSelf: false, tokenId: "", username: "" });
       this.expanded.add("remote:");
       this.refresh();
@@ -3760,7 +3758,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       .setIcon("trash")
       .setTooltip("Delete remote")
       .onClick(async () => {
-        // §4.2b/N3: `this.sources` is what the panel renders, so splicing it on a refused gesture
+        // `this.sources` is what the panel renders, so splicing it on a refused gesture
         // would show the remote as deleted until Settings is reopened — the UI claiming something
         // that did not happen. Refuse before the draft moves. (The Advanced tab gets the same
         // property from commitDraft, which keeps its draft whenever the write fails.)
@@ -3793,7 +3791,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       if (required) l.createSpan({ cls: "config-sync-required", text: "*" });
       return r.createDiv({ cls: "config-sync-advrow-ctl" });
     };
-    // §4.2b/N3: every handler in this form is `draft.x = …; saveRemotes()`, and `this.sources`
+    // every handler in this form is `draft.x = …; saveRemotes()`, and `this.sources`
     // IS what the panel renders — so a refused gesture must be refused BEFORE the draft moves,
     // or the panel shows an edit that was never saved (the name field below is the plainest
     // case: it renames the row header for a save that never happened).
@@ -3825,7 +3823,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     });
     const nameC = new TextComponent(remRow("Name", true));
     nameC.setPlaceholder("e.g. work-laptop").setValue(draft.name).onChange((v) => {
-      if (!this.host.settingsWritable()) return; // §4.2b/N3
+      if (!this.host.settingsWritable()) return;
       this.expanded.delete(`remote:${draft.name}`);
       draft.name = v.trim();
       this.expanded.add(`remote:${draft.name}`);
@@ -3840,7 +3838,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       const box = remRow("Store path", true).createDiv({ cls: "config-sync-pathbox" });
       const pathC = new TextComponent(box);
       pathC.setPlaceholder("/path/to/other-vault/…/config-sync").setValue(draft.storePath).onChange((v) => {
-        if (!this.host.settingsWritable()) return; // §4.2b/N3
+        if (!this.host.settingsWritable()) return;
         draft.storePath = v.trim();
         void this.saveRemotes();
       });
@@ -3857,19 +3855,19 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         }
       };
       new TextComponent(remRow("URL", true)).setPlaceholder("git@host:me/config.git").setValue(draft.url).onChange((v) => {
-        if (!this.host.settingsWritable()) return; // §4.2b/N3
+        if (!this.host.settingsWritable()) return;
         draft.url = v.trim();
         clearStrip();
         void this.saveRemotes();
       });
       new TextComponent(remRow("Branch", true)).setPlaceholder("main").setValue(draft.branch).onChange((v) => {
-        if (!this.host.settingsWritable()) return; // §4.2b/N3
+        if (!this.host.settingsWritable()) return;
         draft.branch = v.trim();
         clearStrip();
         void this.saveRemotes();
       });
       new TextComponent(remRow("Store folder in repo", false)).setPlaceholder("empty = repo root").setValue(draft.subdir).onChange((v) => {
-        if (!this.host.settingsWritable()) return; // §4.2b/N3
+        if (!this.host.settingsWritable()) return;
         draft.subdir = v.trim();
         void this.saveRemotes();
       });
@@ -3881,7 +3879,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       const tokenControl = remRow("Access token", false).createDiv({ cls: "config-sync-secret-control" });
       // The standing explanation lives on the control, never a row of its own — the row-shaped
       // version spent an empty 150px label track plus two wrapped lines pushing Test connection
-      // down (DESIGN.md §4 Remote editor).
+      // down (DESIGN.md's Remote editor).
       setTooltip(tokenControl, TOKEN_LINK_HINT);
       tokenControl.setAttribute("aria-label", TOKEN_LINK_HINT);
       const tokenC = new SecretComponent(this.app, tokenControl);
@@ -3908,7 +3906,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       // The picker reports null when the user unlinks, which the typings spell as string.
       tokenC.onChange((name: string | null) => {
         if (!this.host.settingsWritable()) {
-          tokenC.setValue(draft.tokenId); // §4.2b/N3: put the picker back — the link never happened
+          tokenC.setValue(draft.tokenId); // put the picker back — the link never happened
           return;
         }
         if (name === PASSPHRASE_SECRET_ID) {
@@ -3959,14 +3957,14 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     selfText.createDiv({ cls: "config-sync-remote-selfname", text: "Keep Config Sync's own settings out of this remote" });
     selfText.createDiv({ cls: "config-sync-remote-selfdesc", text: "For a vault that keeps its own setup: Pull and Push skip Config Sync's settings, and the comparison stops reporting them." });
     new ToggleComponent(selfLine).setValue(draft.excludeSelf).onChange((v) => {
-      if (!this.host.settingsWritable()) return; // §4.2b/N3
+      if (!this.host.settingsWritable()) return;
       draft.excludeSelf = v;
       void this.saveRemotes();
     });
   }
 
   private async browseStorePath(draft: RemoteDraft): Promise<void> {
-    // §4.2b: a flow that will be refused refuses before it opens. This one opens the OS folder
+    // a flow that will be refused refuses before it opens. This one opens the OS folder
     // picker and then, sometimes, a second modal to choose among the stores it found — the most
     // expensive "and then we declined" in the plugin.
     if (!this.host.settingsWritable()) return;
@@ -4010,7 +4008,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   }
 
   private async saveRemotes(): Promise<void> {
-    if (!this.host.settingsWritable()) return; // §4.2b
+    if (!this.host.settingsWritable()) return;
     const candidates = this.sources.map(toCandidate);
     try {
       this.host.settings.remotes = validateRemotes(candidates);

@@ -4,7 +4,7 @@ import { decryptField, isFieldEnvelope } from "../src/core/crypto";
 import { validateSyncManifest, ManifestValidationError } from "../src/core/manifest";
 import { SyncGroup, EVERYWHERE, THIS_DEVICE, perClass } from "../src/core/types";
 
-// Orthogonal rule model (spec 2026-07-25-unified-card-design.md §2, D1): one test per
+// Orthogonal rule model (spec 2026-07-25-unified-card-design.md, D1): one test per
 // {scope, encrypted} matrix cell — capture placement, encrypted-cell ciphertext, and apply
 // round-trips on both device classes.
 

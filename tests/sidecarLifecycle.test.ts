@@ -6,7 +6,7 @@ import { MemFS, FakePlugins, memGroupsIO } from "./memfs";
 // Regression for the capture base-hygiene bug (2026-07-25): a fresh class rule on a fields-mode
 // group must purge the class-scoped key from the store BASE, not just write the sidecar.
 // contentUnchanged deliberately ignores class-scoped top-level keys on both sides (spec
-// 2026-07-25-domain-mirror-design.md §2.2's diff semantics), so before the fix, a base that
+// 2026-07-25-domain-mirror-design.md's diff semantics), so before the fix, a base that
 // still carried the class key after the rule was added looked "unchanged" and was never rewritten.
 describe("capture sidecar lifecycle: base-hygiene for class keys", () => {
   const APP_GROUP: SyncGroup = {
@@ -53,7 +53,7 @@ describe("capture sidecar lifecycle: base-hygiene for class keys", () => {
     const r = results.find((x) => x.group === "app");
     expect(r?.status).toBe("ok");
 
-    // Base purged of the class-scoped key — §2.2's "no class-scoped keys in the base" invariant.
+    // Base purged of the class-scoped key —'s "no class-scoped keys in the base" invariant.
     expect(JSON.parse(await io.read(BASE_PATH))).toEqual({ attachmentFolderPath: "99" });
     expect(r?.changes.updated).toEqual(["app.json"]);
 
@@ -90,7 +90,7 @@ describe("capture sidecar lifecycle: base-hygiene for class keys", () => {
 // whose value was already in the store base (captured before the local rule) must be purged
 // from the base. contentUnchanged strips top-level local keys on both sides (Fix B), so a stale
 // base looked "unchanged" and was never rewritten — the leak the class-key and per-item guards
-// already close for their families, now closed for top-level local keys too (§2.2 semantics).
+// already close for their families, now closed for top-level local keys too.
 describe("capture base-hygiene for top-level local keys", () => {
   const LOCAL_FIELD_GROUP: SyncGroup = {
     name: "app",

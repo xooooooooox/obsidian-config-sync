@@ -6,7 +6,7 @@ import { PerElementSharing, perClass, SyncGroup, EVERYWHERE, THIS_DEVICE } from 
 import { capture, CoreContext, writeGroups } from "../src/core/ConfigSyncCore";
 import { MemFS, FakePlugins, memGroupsIO } from "./memfs";
 
-// Per-item scopes (spec 2026-07-25-unified-card-design.md §3) generalize
+// Per-item scopes (spec 2026-07-25-unified-card-design.md) generalize
 // switch-list semantics to any string-array key. capture(c) = local[scope∈{all,c}] (local
 // order) ++ store[scope=otherClass(c)] (store order), deduped first-occurrence-wins.
 // apply(c) = store[scope∈{all,c}] (store order) ++ local[scope=local] (local order), deduped.

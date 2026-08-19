@@ -153,7 +153,7 @@ describe("the shipped qualifier vocabulary", () => {
     const section = SETTING_QUALIFIER_SPECS.find((s) => s.key === "section");
     expect(section?.values.map((v) => v.value)).toEqual(["general", "obsidian", "core", "community", "advanced", "custom", "remotes"]);
   });
-  // §4: every word the Sync Center offers for an item FAMILY is offered here too — `custom` was the
+  // every word the Sync Center offers for an item FAMILY is offered here too — `custom` was the
   // one missing, so the same word answered differently depending on which box you typed it in.
   // Asserted between the two shipped spec lists, not against a copy of either.
   it("both panels offer the same family words (beta aside, which this panel folds into community)", () => {
@@ -173,7 +173,7 @@ describe("the shipped qualifier vocabulary", () => {
   });
 });
 
-// NO ALIAS (spec §7, the user's ruling): the retired syntax stops working rather than being quietly
+// NO ALIAS: the retired syntax stops working rather than being quietly
 // accepted. `scope:` is not a key in either panel, so it falls through to free text — which is what
 // makes the change visible (a search that suddenly finds nothing) instead of silent.
 describe("`scope:` is retired in both search bars", () => {
@@ -237,7 +237,7 @@ describe("setting resolver values", () => {
     expect(settingSectionValue({ section: "advanced" })).toEqual(["advanced"]);
   });
 
-  // §4: an Advanced-tab item answers the tab AND its family — and the family word is not this
+  // an Advanced-tab item answers the tab AND its family — and the family word is not this
   // test's invention or the resolver's: both ask `sectionForGroup`, the function the Sync Center's
   // own `section:` resolver calls, so the two search boxes cannot answer differently.
   it("section: a custom rule answers its tab and the family the Sync Center gives it", () => {
@@ -259,7 +259,7 @@ describe("setting resolver values", () => {
   });
 });
 
-// §3/§4 (spec 2026-08-12-loose-ends-design.md), driven through the REAL index and the REAL resolver
+/// (spec 2026-08-12-loose-ends-design.md), driven through the REAL index and the REAL resolver
 // maps of both panels — not through hand-built hits. `type:folder` answered nothing in the settings
 // panel for as long as it has been offered, because the index stamped every item `{type: "file"}`;
 // `section:custom` answered in one box and not the other. Both are questions about what the panels
@@ -318,7 +318,7 @@ describe("the two search boxes over the same items", () => {
     return GROUPS.filter((g) => matchesQualifiers({ group: g }, parsed.qualifiers, resolvers)).map((g) => g.name);
   }
 
-  it("§3: an item that is a folder answers type:folder — and stops answering type:file", async () => {
+  it("an item that is a folder answers type:folder — and stops answering type:file", async () => {
     const hits = await settingsHits();
 
     expect(panelAnswers(hits, "type:folder")).toContain(FOLDER_RULE.name);
@@ -326,7 +326,7 @@ describe("the two search boxes over the same items", () => {
     expect(panelAnswers(hits, "type:file")).toContain(FILE_RULE.name);
   });
 
-  it("§3: every hit's type is the one the Sync Center reads off the same group", async () => {
+  it("every hit's type is the one the Sync Center reads off the same group", async () => {
     const hits = await settingsHits();
     const byName = new Map(hits.map((h) => [h.name, h]));
 
@@ -340,7 +340,7 @@ describe("the two search boxes over the same items", () => {
     }
   });
 
-  it("§3: an on/off-only item claims neither type — it has no file to be one", async () => {
+  it("an on/off-only item claims neither type — it has no file to be one", async () => {
     const hits = await settingsHits();
 
     expect(hits.map((h) => h.name)).toContain(STATE_ONLY.label); // indexed, and findable by name
@@ -348,14 +348,14 @@ describe("the two search boxes over the same items", () => {
     expect(panelAnswers(hits, "type:folder")).not.toContain(STATE_ONLY.label);
   });
 
-  it("§4: section:custom finds the custom rule in BOTH boxes", async () => {
+  it("section:custom finds the custom rule in BOTH boxes", async () => {
     const hits = await settingsHits();
 
     expect(centerAnswers("section:custom")).toContain(FOLDER_RULE.name); // as it already did
     expect(panelAnswers(hits, "section:custom")).toContain(FOLDER_RULE.name); // and now here too
   });
 
-  it("§4: section:advanced still means that tab — every item it renders", async () => {
+  it("section:advanced still means that tab — every item it renders", async () => {
     const hits = await settingsHits();
     const advanced = panelAnswers(hits, "section:advanced");
 

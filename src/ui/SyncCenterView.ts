@@ -2134,7 +2134,7 @@ export class SyncCenterView extends ItemView {
           this.render(this.renderGen);
         });
       }
-      // The Leftover pill (DESIGN.md §4 Leftover): conditional — it renders only while the store
+      // The Leftover pill (DESIGN.md's Leftover section): conditional — it renders only while the store
       // actually has orphans this device may judge (the adoption gate hides it with the section),
       // amber, last in the row. Click narrows the view to the Leftover section alone; the store
       // orphans behind it are a section, never rows, so no bucket answers this filter.
@@ -2171,7 +2171,7 @@ export class SyncCenterView extends ItemView {
       // row for — so their section renders under the All and Leftover views only (never inside a
       // focused direction filter or a search pass). While the plugin's own configuration is still
       // pending adoption, "leftover" is not a judgment this device can make: the section gives
-      // way to one quiet hint line (DESIGN.md §4 Leftover).
+      // way to one quiet hint line (DESIGN.md's Leftover section).
       if ((this.filter === "all" || this.filter === "leftover") && !this.searching()) {
         const lo = this.leftoverPresentation();
         if (lo === "section") this.renderLeftoverSection(sectionsHost);
@@ -2663,7 +2663,7 @@ export class SyncCenterView extends ItemView {
     // the pills and file rows speak — the row vocabulary the README screenshots show —
     // with the fate sentence in the tooltip, consistent with the icon+tooltip language.
     // The sentence itself still opens the card (the State row says it in full). A NEUTRAL (—)
-    // fate (DESIGN §2.1) renders the same way — the fold family's own icon
+    // fate (DESIGN.md's State column) renders the same way — the fold family's own icon
     // (`renderNeutralFateIcon`) instead of the bare glyph + sentence text, "In sync"/green-check,
     // "No settings yet"/faint-circle, "Not synced on this device"/faint-circle-slash. Conflict
     // (⚠) alone keeps its text form: a conflict must shout, and it has no action/fold icon to
@@ -2733,7 +2733,7 @@ export class SyncCenterView extends ItemView {
     spacer.disabled = true;
   }
 
-  // DESIGN §2.1: a neutral fate's own three shapes derive to the same FoldKind
+  // DESIGN.md's State column: a neutral fate's own three shapes derive to the same FoldKind
   // key `renderFoldCount`'s filter pills already use — `nothingYet` first (the same
   // precedence rowFate applies: a degraded-empty-verb direction still reports as nothing-yet), then `excluded`
   // (either class exclusion or a device opt-out — both set `fate.excluded`), else the row is
@@ -2749,7 +2749,7 @@ export class SyncCenterView extends ItemView {
   // knows its own fold kind without building a full `Fate` (renderRemoteDiffEntry's opted-out
   // row below) — reuses `foldIcons.ts`'s `FOLD_ICON`/`FOLD_ICON_COLOR_CLASS`, the SAME producer
   // the trailing-fold summary lines read, at the row's own `config-sync-fate-ic` size instead of
-  // the fold line's 12px (DESIGN §2.1 — one vocabulary, two sizes for two contexts).
+  // the fold line's 12px (DESIGN.md's State column — one vocabulary, two sizes for two contexts).
   private renderFateStateIcon(parent: HTMLElement, kind: FoldKind, sentence: string): void {
     const colorCls = FOLD_ICON_COLOR_CLASS[kind];
     const ic = parent.createSpan({ cls: `config-sync-fate-ic${colorCls !== null ? ` ${colorCls}` : ""}`, attr: { "aria-label": sentence } });
@@ -3099,7 +3099,7 @@ export class SyncCenterView extends ItemView {
     const renderEntry = (e: CappedEntry): void => {
       const kind: "added" | "updated" | "deleted" = e.kind === "add" ? "added" : e.kind === "upd" ? "updated" : "deleted";
       const pres = fileEntryFor({ kind, rel: e.name }, dir, encrypted);
-      // "+"/"·"/"del" render "+"/"~"/"−" in BOTH directions (DESIGN §2.1): the
+      // "+"/"·"/"del" render "+"/"~"/"−" in BOTH directions (DESIGN.md's State column): the
       // FILES row's own track-2 badge says which side, once — an entry never repeats a direction
       // glyph, only the diff-kind family. Styling follows the PRESENTATION glyph, never the raw
       // capture-perspective `e.kind` — under apply direction add/delete mirror each other
@@ -3117,7 +3117,7 @@ export class SyncCenterView extends ItemView {
         return;
       }
       if (pres.affordance === "none") return;
-      // One 14px file-diff icon closes a diffable/viewable entry (DESIGN §2.3/§4) —
+      // One 14px file-diff icon closes a diffable/viewable entry (DESIGN.md's Lucide usage) —
       // never per-kind icons, never a `· view ▾`/`· diff ▾` text: "changes live here, click
       // to see." The OPEN state turns the icon accent-colored instead of flipping ▾/▴ text.
       line.addClass("config-sync-diffable");
@@ -3206,7 +3206,7 @@ export class SyncCenterView extends ItemView {
   // Click/keydown → open an Obsidian Menu at the trigger's position, shared by every card
   // rule-control trigger (icon or text) so a menu opens the same way regardless of trigger kind.
   // Tracks `.is-open` on the trigger while the menu is showing (⇕ hover-reveal —
-  // DESIGN.md §2.3), cleared via `Menu.onHide` — the PICKER chevron accents and stays revealed
+  // DESIGN.md's Lucide usage), cleared via `Menu.onHide` — the PICKER chevron accents and stays revealed
   // while its own menu is open, matching SettingTab's own `wireMenuTrigger`.
   private wireMenuTrigger(trigger: HTMLElement, buildMenu: () => Menu): void {
     trigger.setAttribute("role", "button");
@@ -4180,7 +4180,7 @@ export class SyncCenterView extends ItemView {
       const isOpen = this.remoteFoldsOpen.has(key);
       // Same trailing affordance as the local FILES list (one-icon rule:
       // this remote line is the SAME control on another surface, so it changes with
-      // it — a `· diff ▾` left behind here is exactly the drift DESIGN §2.1 forbids).
+      // it — a `· diff ▾` left behind here is exactly the drift DESIGN.md's State column forbids).
       const affLabel = f.kind === "added" ? "View content" : "View changes";
       const diffIcon = line.createSpan({ cls: `config-sync-diffic${isOpen ? " is-open" : ""}`, attr: { "aria-label": affLabel, role: "button", tabindex: "0" } });
       setIcon(diffIcon, "file-diff");

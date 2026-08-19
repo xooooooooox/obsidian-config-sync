@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { decideEnablement } from "../src/core/enablementDecision";
 import { EVERYWHERE, perClass, THIS_DEVICE } from "../src/core/types";
 
-// Spec §5's four rules, top down, first hit wins.
+// Spec's four rules, top down, first hit wins.
 describe("decideEnablement", () => {
   it("1. a local exception wins outright — the rule is not even consulted", () => {
     for (const rule of [EVERYWHERE, perClass("desktop"), perClass("mobile"), THIS_DEVICE]) {

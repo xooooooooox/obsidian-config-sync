@@ -36,7 +36,7 @@ describe("rekeyLedger — the baselines move with the lock", () => {
     const v2: Ledger = { version: LEDGER_VERSION, items: { "community/a": ENTRY } };
     expect(rekeyLedger(v2, toRef)).toBe(v2);
   });
-  // The §4 ruling: a migration with no undo is not allowed to delete. An entry nothing claims keeps
+  // The ruling: a migration with no undo is not allowed to delete. An entry nothing claims keeps
   // its content under a section no reader can resolve — inert, but never dropped, because a missing
   // baseline reads as never-synced and defaults to APPLY.
   it("keeps an entry nothing claims, under a key no reader can resolve", () => {

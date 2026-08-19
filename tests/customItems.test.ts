@@ -43,7 +43,7 @@ interface PluginTestSurface {
   saveData: (d: unknown) => Promise<void>;
   loadSettings: () => Promise<void>;
   recompile: () => Promise<boolean>;
-  stopSyncing: (groupName: string, deleteStore: boolean) => Promise<string[] | null>; // null = refused (spec 2026-08-11 §4.2b)
+  stopSyncing: (groupName: string, deleteStore: boolean) => Promise<string[] | null>; // null = refused (spec 2026-08-11)
   settings: { items: ItemMap };
   compiledGroups: { name: string }[];
 }

@@ -685,7 +685,7 @@ export function validateRemotes(data: unknown): Remote[] {
 
 // These messages surface inside the Remotes FORM (pinned under the offending card) as well as on
 // a hand-edited data.json — so they name what's on screen (the field labels, the remote by name)
-// and never quote JSON syntax (DESIGN.md §4 Form errors).
+// and never quote JSON syntax (DESIGN.md's Form rules errors).
 function parseRemote(r: unknown, index: number): Remote {
   if (!isPlainObject(r)) throw new ManifestValidationError(`Remote #${index + 1} must be an object, e.g. {"name": "laptop", "type": "vault", "storePath": "/path/to/store"}`);
   const { name, type, storePath, url, branch, subdir, excludeSelf, tokenId, username } = r;

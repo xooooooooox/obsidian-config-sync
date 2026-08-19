@@ -64,7 +64,7 @@ describe("statusForGroups", () => {
     const { ctx } = await seededAndCaptured();
     const { statuses, updates } = await statusAndUpdates(ctx);
     expect(statuses.every((s) => s.state === "in-sync")).toBe(true);
-    // The updates are keyed by the ITEM, not the compiled group name (spec §4) — the same key the
+    // The updates are keyed by the ITEM, not the compiled group name — the same key the
     // lock uses, because they are one key space.
     expect(Object.keys(updates).sort()).toEqual(["community/demo", "legacy/snippets", "obsidian/hotkeys"]);
     expect(updates["obsidian/hotkeys"]).not.toBeNull();
@@ -317,7 +317,7 @@ describe("diffRemote", () => {
 
 describe("remoteLockAhead", () => {
   // A v1-shaped lock, keyed by group name — what a 2.21.0 device writes, and still the input this
-  // comparison has to read during the transition (spec §3). parseStoreLock converts both sides
+  // comparison has to read during the transition. parseStoreLock converts both sides
   // through the same producer, so the comparison sees one vocabulary whatever wrote the files.
   const lock = (capturedAt: string, groups: Record<string, object>) => JSON.stringify({ capturedAt, groups });
   it("false when the local lock semantically covers the remote one (post-pull state)", () => {
@@ -353,7 +353,7 @@ describe("remoteLockAhead", () => {
   });
 });
 
-// spec 2026-08-11-data-model-hardening.md §6. The comparison is key by key, never JSON.stringify;
+// spec 2026-08-11-data-model-hardening.md The comparison is key by key, never JSON.stringify;
 // display fields do not count; a field only one side has does not count; the ITEMS answer first,
 // and the store-level stamp speaks only where they leave a gap.
 describe("remoteLockAhead against the v2 payload", () => {
@@ -470,7 +470,7 @@ describe("checkRemote per-item resolution (v2)", () => {
 
   it("reads 'same' when both sides hold the same items, however the whole-store stamps compare", async () => {
     // The remote's whole-store stamp is an hour ahead; every item in it is identical, so a pull
-    // would change nothing. Before §6 this reported "remote-newer" and invited a pointless pull.
+    // would change nothing. Before this reported "remote-newer" and invited a pointless pull.
     const entries: Record<string, StoreLockEntry> = { a: item(AT, "h1") };
     expect(await stateOf(v2(AT, entries), v2(LATER, entries))).toBe("same");
   });
@@ -537,12 +537,12 @@ describe("checkRemote", () => {
   const localLock = { capturedAt: "2026-07-08T00:00:00.000Z", items: {} };
   it("classifies all five states", async () => {
     expect((await checkRemote(localLock, fakeReader({}), [])).state).toBe("no-store");
-    // Content with no lock: uncomparable, and refused by pull and push (§5) — never reported as an
+    // Content with no lock: uncomparable, and refused by pull and push — never reported as an
     // empty remote inviting a first push.
     expect((await checkRemote(localLock, fakeReader({ "store/configdir/hotkeys.json": "{}" }), [])).state).toBe("unknown");
     // A legacy root manifest declares a store this build still reads (and still pulls), so it is not
     // the empty remote a first push is for — just one with no lock to compare against. Unchanged
-    // from before §5.
+    // from before
     expect((await checkRemote(localLock, fakeReader({ "config-sync.json": "{}" }), [])).state).toBe("unknown");
     const at = (t: string): Record<string, string> => ({ "config-sync.json": "{}", "store.lock.json": JSON.stringify({ capturedAt: t, items: {} }) });
     expect((await checkRemote(localLock, fakeReader(at("2026-07-09T00:00:00.000Z")), [])).state).toBe("remote-newer");

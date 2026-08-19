@@ -92,7 +92,7 @@ function basenameOf(storeInner: string): string {
 }
 
 // A real identity for an orphaned store file — the name slot never shows a raw store path
-// (DESIGN.md §4 Leftover): a plugin file names its plugin (label, else bare id); a
+// (DESIGN.md's Leftover section): a plugin file names its plugin (label, else bare id); a
 // snippets/themes file names its basename behind the Appearance breadcrumb; a config-root file
 // whose basename a core plugin or an Obsidian card owns names that owner; everything else names
 // its basename. The full path stays on the row's own mono line.

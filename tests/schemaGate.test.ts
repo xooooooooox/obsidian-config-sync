@@ -6,7 +6,7 @@ import { emptyItemMap } from "../src/core/registry";
 // legacy and blocked with this exact Notice text. A v2 document takes the migration branch instead
 // — see tests/v2Migration.test.ts.
 //
-// spec 2026-08-11-data-model-hardening.md §4.1 (invariant II.3) splits a fourth answer out of the
+// spec 2026-08-11-data-model-hardening.md (invariant II.3) splits a fourth answer out of the
 // same test: `isLegacySettings` was `schemaVersion !== CURRENT`, so a document from a NEWER build took
 // the legacy path — notice, defaults in memory, the user's whole setup overwritten at the next
 // save. Since data.json travels between a user's devices wholesale, that made a staged upgrade
@@ -30,7 +30,7 @@ describe("classifySettings", () => {
     expect(classifySettings({})).toEqual({ kind: "legacy" });
   });
 
-  // v2 and v3 are the versions with a way forward (spec 2026-08-12-enablement-two-layers §4): they
+  // v2 and v3 are the versions with a way forward (spec 2026-08-12-enablement-two-layers): they
   // are neither reset nor refused, they are migrated, and a v2 document chains through v3 on the
   // way. v1 has no field a later shape could be reconstructed from and keeps the reset branch above.
   // The `from` is asserted because the load path branches on it — a v3 document must not be sent
@@ -56,7 +56,7 @@ describe("classifySettings", () => {
   });
 });
 
-// §4.2's half of the same gate: the document about to be written onto this device, still as text.
+//'s half of the same gate: the document about to be written onto this device, still as text.
 describe("isFutureSchemaDocument", () => {
   it("is true only for a document declaring a schema newer than this build's", () => {
     expect(isFutureSchemaDocument(JSON.stringify({ schemaVersion: CURRENT_SCHEMA + 1, items: {} }))).toBe(true);
@@ -71,7 +71,7 @@ describe("isFutureSchemaDocument", () => {
   });
 });
 
-// spec 2026-08-11-data-model-hardening.md §5.1 (S8): the shallow Object.assign this replaced
+// spec 2026-08-11-data-model-hardening.md (S8): the shallow Object.assign this replaced
 // filled only the top level, so a field added inside runHistory/ribbonButtons was `undefined` on
 // any older document. Invariant II.1 binds it in the other direction: nothing the document carries
 // may be lost, known or not.

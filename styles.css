@@ -177,7 +177,7 @@
   margin-right: var(--size-4-1);
 }
 .config-sync-row-chevron svg { width: 16px; height: 16px; transition: transform 0.12s ease; }
-/* FOLD family (DESIGN.md §2.4): one SVG `chevron-right`, rotated 90° when open — never
+/* FOLD family (DESIGN.md's Glyph language): one SVG `chevron-right`, rotated 90° when open — never
    two glyphs swapped, never text. Every fold site shares this one rule via `renderFoldChevron`/
    `setFoldOpen` (ui/foldChevron.ts). */
 .config-sync-row-chevron.is-open svg { transform: rotate(90deg); }
@@ -482,14 +482,14 @@ body.is-phone .config-sync-fkey {
 .config-sync-report-files .is-add { color: var(--color-green); }
 .config-sync-report-files .is-upd { color: var(--color-blue); }
 .config-sync-report-files .is-del { color: var(--color-red); text-decoration: line-through; }
-/* A diffable/viewable FILES entry ends in one 14px file-diff icon (DESIGN.md §2.3/§4):
+/* A diffable/viewable FILES entry ends in one 14px file-diff icon (DESIGN.md's Lucide usage):
    "changes live here, click to see" — never per-kind icons, never text. Muted idle;
    .is-open (the inline diff panel is expanded) goes accent. FILES entries keep the
    +/~/− vocabulary. */
 .config-sync-diffic { display: inline-flex; vertical-align: -2px; margin-left: 5px; color: var(--text-faint); cursor: pointer; }
 .config-sync-diffic svg { width: 14px; height: 14px; }
 .config-sync-diffic.is-open { color: var(--interactive-accent); }
-/* The FILES row's badge (DESIGN.md §2.1): direction icon AND count in ONE pill, carrying the
+/* The FILES row's badge (DESIGN.md's State column): direction icon AND count in ONE pill, carrying the
    direction's own color. It replaced three separate marks — a bare direction icon, a neutral count
    pill and a fold chevron — that all answered "what and how much moves here"; three targets for one
    question, and the chevron in particular was a 11px thing to aim at. Outlined while collapsed,
@@ -701,7 +701,7 @@ body.is-mobile.config-sync-mobile-statusbar .status-bar {
   color: var(--text-on-accent);
 }
 
-/* Orange fills carry --background-primary text (DESIGN.md §1.1); --text-on-accent is accent-fill only. */
+/* Orange fills carry --background-primary text (DESIGN.md's Semantic colors); --text-on-accent is accent-fill only. */
 .config-sync-hub-row input[type="checkbox"].is-capture:checked::after {
   color: var(--background-primary);
 }
@@ -868,7 +868,7 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 .config-sync-fpill.is-leftover { color: var(--color-orange); border-color: rgba(var(--color-orange-rgb), 0.5); }
 .config-sync-fpill.is-leftover.is-active { background: var(--color-orange); border-color: var(--color-orange); color: var(--background-primary); }
 .config-sync-section.is-leftover { border-color: rgba(var(--color-orange-rgb), 0.45); }
-/* The one amber head: it keeps the section-head family's uppercase typography (DESIGN.md §4
+/* The one amber head: it keeps the section-head family's uppercase typography (DESIGN.md's Component library
    Leftover — a 600-weight header is a title, not a textual note, so --color-orange, not
    --text-warning). */
 .config-sync-section.is-leftover .config-sync-section-title {
@@ -891,7 +891,7 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 .config-sync-ofpath { font-family: var(--font-monospace); color: var(--text-faint); font-size: var(--font-ui-smaller); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Size and the delete icon never give way — the info column is the only shrinkable element. */
 .config-sync-ofsize { color: var(--text-faint); font-size: var(--font-ui-smaller); white-space: nowrap; flex: none; }
-/* The trash deletes are quiet-rest icon controls (DESIGN.md §2.3) whose lift is the destructive
+/* The trash deletes are quiet-rest icon controls (DESIGN.md's Lucide usage) whose lift is the destructive
    red, not the plain full-opacity lift. */
 .config-sync-ofdel { display: inline-flex; flex: none; color: var(--text-muted); opacity: 0.45; cursor: pointer; transition: opacity 0.12s, color 0.12s; }
 .config-sync-ofdel:hover,
@@ -1353,13 +1353,13 @@ body.is-mobile .config-sync-tworow-chev { display: none; }
 .config-sync-section-head .config-sync-pill,
 .config-sync-section-hint { white-space: nowrap; flex: none; }
 /* Upright, aligned to the title's own start — italic stays the placeholder/empty-state voice,
-   and there is no chevron here to indent under (DESIGN.md §4 Leftover). */
+   and there is no chevron here to indent under (DESIGN.md's Leftover section). */
 .config-sync-section-note { color: var(--text-faint); font-size: var(--font-ui-smaller); padding: 4px 0 2px; }
 .config-sync-side-search { width: 100%; margin-bottom: 6px; }
 .config-sync-side-badge.is-neutral { background: var(--background-modifier-hover); color: var(--text-normal); }
 
 /* 0.21.0 settings-mutation rollback: inline per-row error when a write fails */
-/* Validation errors are ONE framed family (DESIGN.md §4 Form errors): a warning-tinted strip,
+/* Validation errors are ONE framed family (DESIGN.md's Form errors): a warning-tinted strip,
    pinned as close to the offending control as the surface allows; :empty renders nothing (the
    page-level slots are live-updated without a re-render). Runtime outcomes keep their own
    treatments (test strip, remote error card, run strip). */
@@ -1454,7 +1454,7 @@ body.is-mobile .config-sync-tworow-chev { display: none; }
    content-sizing it lets a row without one run 44px further right than the row above. `minmax`
    rather than a flat 44px so a wider trailing cell can still grow. */
 .config-sync-scrow { display: grid; grid-template-columns: 170px 1fr minmax(44px, max-content); align-items: center; column-gap: var(--size-4-2); padding: var(--size-4-1) 0; font-size: var(--font-ui-smaller); }
-/* The controls cluster (DESIGN.md §1.4 SLOTS): aux (an array rule row's per-item
+/* The controls cluster (DESIGN.md's Calibrated geometry, SLOTS): aux (an array rule row's per-item
    icon — the path row's own aux slot stays empty, its eye rides the filename line instead) | lock |
    device picker, packed against the right.
    ROLE ORDER is pinned in CSS (`order` below), not left to the order a caller happens to fill the
@@ -1487,7 +1487,7 @@ body.is-mobile .config-sync-tworow-chev { display: none; }
 .config-sync-card-pathline .config-sync-card-path { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* A′: the eye is an action on the FILE, so it rides the filename line — HUGGING the filename's
    right edge, never flushed to the line's end. `margin-left: auto` here would anchor it to the
-   CARD's right edge (this line spans 1/-1) and invent the action column §2.1 forbids: "nothing
+   CARD's right edge (this line spans 1/-1) and invent the action column the State column section forbids: "nothing
    anchors to the drawer's right edge". Not .config-sync-scrow-end either — that sits on the
    trailing track and would overlap this line's own 1/-1 span. */
 .config-sync-card-pathline .config-sync-card-previewicon { margin-left: var(--size-4-2); flex: none; }
@@ -1523,7 +1523,7 @@ body.is-mobile .config-sync-tworow-chev { display: none; }
    ellipsize sooner, the shape (flexible controls track, cluster on the rail) stays. Narrow-viewport
    widths have not been re-measured since the two-layer merge; that pass is still open. */
 body.is-mobile .config-sync-scrow { grid-template-columns: minmax(90px, 32%) 1fr max-content; }
-/* Quiet-rest (DESIGN.md §2.3): every clickable icon control rests at muted×45% and
+/* Quiet-rest (DESIGN.md's Lucide usage): every clickable icon control rests at muted×45% and
    lifts to 100% on its own hover/focus/menu-open; an ACTIVE state is colored at 100%. The lock
    joins the idiom the sharing picker and per-item icon already carried. */
 .config-sync-lock { color: var(--text-muted); cursor: pointer; opacity: 0.45; transition: opacity 0.12s; }
@@ -1878,7 +1878,7 @@ button.config-sync-add-row, button.config-sync-add-row:hover { background: none;
   opacity: 0.6;
   animation: config-sync-shimmer 1.2s linear infinite;
 }
-/* The apply bar is an accent fill, so its shimmer keeps --text-on-accent (DESIGN.md §1.1). */
+/* The apply bar is an accent fill, so its shimmer keeps --text-on-accent (DESIGN.md's Semantic colors). */
 .config-sync-btnwrap:has(button.mod-cta) .config-sync-progress.is-active::after {
   background: linear-gradient(90deg, transparent, var(--text-on-accent), transparent);
 }

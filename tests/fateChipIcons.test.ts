@@ -34,7 +34,7 @@ describe("FATE_CHIP_ICON — chip→icon map completeness", () => {
       "off here — your rule": "sliders-horizontal",
       "on here — your rule": "sliders-horizontal",
       // `power` means the local-exception ON state (2026-08-12-enablement-two-layers-design.md
-      // §7) — a chip that says the row stays off must not share it.
+      //) — a chip that says the row stays off must not share it.
       "stays off": "power-off",
       encrypted: "lock",
       "your choice": "check",
@@ -85,8 +85,8 @@ describe("glyph registry — one glyph, one meaning (icon-collision guard)", () 
     return RULE_OPTIONS.map((rule) => ({ glyph: ruleIcon(rule), producer: "ruleIcon(RULE_OPTIONS)", home: `ruleIcon(${ruleLabel(rule)})` }));
   }
 
-  // The two local-exception glyphs (`power`/`power-off`, enablementRow.ts §6.1's local segment) and
-  // the whole-file opt-out's `circle-slash` (§6.2 DEFAULT SETTINGS SYNC) come straight out of the row
+  // The two local-exception glyphs (`power`/`power-off`, enablementRow.ts's local segment) and
+  // the whole-file opt-out's `circle-slash` come straight out of the row
   // module's own menu builders — the same functions the row renders through, not a second hand-typed
   // pair of strings sitting next to the real ones.
   function localMenuHomes(): GlyphHome[] {
@@ -116,18 +116,18 @@ describe("glyph registry — one glyph, one meaning (icon-collision guard)", () 
     { glyph: "columns-2", producer: "diffView (external, hardcoded)", home: "renderDiffPanel — split diff" },
     { glyph: "fold-vertical", producer: "diffView (external, hardcoded)", home: "renderDiffPanel — collapse unchanged lines" },
     { glyph: "unfold-vertical", producer: "diffView (external, hardcoded)", home: "renderDiffPanel — show all lines" },
-    // Text-triangle sweep (DESIGN.md §2.4): the two chevron families, plus the File
+    // Text-triangle sweep (DESIGN.md): the two chevron families, plus the File
     // preview trigger — none behind an exported table either.
     { glyph: "chevron-right", producer: "foldChevron (external, hardcoded)", home: "renderFoldChevron — FOLD family disclosure rotate" },
     { glyph: "chevrons-up-down", producer: "SyncCenterView/SettingTab (external, hardcoded)", home: "PICKER family — two-segment rows + the switcher" },
     { glyph: "eye", producer: "SettingTab (external, hardcoded)", home: "SETTINGS SYNC row — File preview trigger" },
-    // DESIGN.md §2.3: the per-item icon toggle, the menu-borne destructive verb, and
+    // DESIGN.md: the per-item icon toggle, the menu-borne destructive verb, and
     // the File preview's top action line — hardcoded in SettingTab.ts, registered here so a
     // future reuse for a different meaning fails loudly.
     { glyph: "list-checks", producer: "SettingTab (external, hardcoded)", home: "rule row — Per-item device rules icon toggle" },
     { glyph: "trash", producer: "SettingTab/SyncCenterView (external, hardcoded)", home: "the destructive verb — scope menus' Remove rule / Remove folder, and the Leftover section's per-row + Delete-all deletes" },
     { glyph: "plus", producer: "SettingTab (external, hardcoded)", home: "File preview hint line — click a key to add a rule" },
-    // DESIGN.md §2.3: the encrypt toggle's rest state — closed `lock` stays the
+    // DESIGN.md: the encrypt toggle's rest state — closed `lock` stays the
     // encrypted state everywhere (mode badge / json keys / legend + the toggle's on-state).
     { glyph: "lock-open", producer: "SettingTab (external, hardcoded)", home: "renderLockToggle — unencrypted-but-available rest state" },
     { glyph: "braces", producer: "SettingTab/SyncCenterView (external, hardcoded)", home: "per-key fallback — the keys inside this file decide (also MODE_ICON.fields)" },

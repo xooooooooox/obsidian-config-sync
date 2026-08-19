@@ -149,7 +149,7 @@ describe("an exception cannot resurrect a key the base is forbidden to hold", ()
   });
 });
 
-describe("a per-item key has no local layer at all (spec §2)", () => {
+describe("a per-item key has no local layer at all", () => {
   const perElementGroup: SyncGroup = {
     ...group,
     fields: [{ pattern: "enabledSnippets", sharing: EVERYWHERE, encrypted: false }],
@@ -166,7 +166,7 @@ describe("a per-item key has no local layer at all (spec §2)", () => {
   });
 
   // …which is exactly why the row must not offer the control. A menu whose two entries produce the
-  // same bytes is an option no runtime path will honour — the reason §2 refused a local layer for
+  // same bytes is an option no runtime path will honour — the reason refused a local layer for
   // the element rows one level down.
   it("the rule row hides its local segment while per-item rules are on", () => {
     const row = { key: "enabledSnippets", isArray: true, rule: { sharing: EVERYWHERE, encrypted: false }, perElementEnabled: true };
@@ -184,7 +184,7 @@ describe("a per-item key has no local layer at all (spec §2)", () => {
   });
 });
 
-describe("an excepted encrypted key keeps the store's ciphertext byte-for-byte (spec §4)", () => {
+describe("an excepted encrypted key keeps the store's ciphertext byte-for-byte", () => {
   const encGroup: SyncGroup = { ...group, fields: [{ pattern: "colorGroups", sharing: EVERYWHERE, encrypted: true }] };
   const PASSPHRASE = "a passphrase this device happens to know";
 

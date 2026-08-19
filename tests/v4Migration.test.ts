@@ -4,8 +4,8 @@ import { migrateV2Settings } from "../src/core/v2Migration";
 import { perElementKeyFor } from "../src/core/switchList";
 import { perClass, THIS_DEVICE } from "../src/core/types";
 
-// The v3 → v4 migration (spec 2026-08-12-enablement-two-layers-design.md §4). Every rule of §4's
-// table, plus the one behaviour §4 does not have a row for: v3's STRUCTURAL this-device, the mask
+// The v3 → v4 migration (spec 2026-08-12-enablement-two-layers-design.md). Every rule of's
+// table, plus the one behaviour does not have a row for: v3's STRUCTURAL this-device, the mask
 // an unsynced card implied in v3 (see v4Migration.ts's header).
 //
 // The reserved perElement key always comes from its ONE producer (switchList.ts's perElementKeyFor),
@@ -93,7 +93,7 @@ describe("v3 → v4", () => {
     expect(carrierRules(document, "community-plugins")).toEqual({ "obsidian-git": THIS_DEVICE });
   });
 
-  // F1, the carry §4's table has no row for. v3 read an element's sharing as
+  // F1, the carry's table has no row for. v3 read an element's sharing as
   // `item.synced ? deviceSharing(...) : THIS_DEVICE` (registry.ts's retired elementSharings), so an
   // unsynced entry masked its element: it never entered the store and was never resurrected from it.
   // Without this rule the first capture after a v4 load would publish every locally-enabled plugin
@@ -107,7 +107,7 @@ describe("v3 → v4", () => {
     expect(carrierRules(document, "core-plugins")).toEqual({ graph: THIS_DEVICE });
     // …and NOT on the freeze list: v3's structural mask was pass-through (its forcedRunsOn was
     // recomputed from the persisted file every run, which is the same no-op v4's this-device
-    // decision is), while a pin's force is what §4 asks to be pinned down.
+    // decision is), while a pin's force is what asks to be pinned down.
     expect(freeze).toEqual([]);
   });
 
@@ -247,7 +247,7 @@ describe("v3 → v4", () => {
     expect(migrateV4Settings(doc).document).toBe(doc);
   });
 
-  // The chain the load path runs for a device that skipped 2.22.0 entirely (spec §4): v2 → v3 → v4
+  // The chain the load path runs for a device that skipped 2.22.0 entirely: v2 → v3 → v4
   // in one load. migrateV2Settings emits the v3 shape BY CONTRACT — `runsOn`, `thisDeviceItems` and
   // `bratIndex` included — and this is what takes it the rest of the way.
   it("composes with the v2 migration: a 2.20.0 document lands on v4 in one pass", () => {

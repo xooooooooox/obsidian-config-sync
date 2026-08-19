@@ -72,7 +72,7 @@ describe("startup lock-label heal (main.ts refreshLocalStatus wiring)", () => {
 
     await plugin.refreshLocalStatus();
 
-    // The heal lands on the item's ref, and the label lands in the display partition (spec §3).
+    // The heal lands on the item's ref, and the label lands in the display partition.
     const healed = JSON.parse(await io.read("cs/store.lock.json")) as { capturedAt: string; items: Record<string, Record<string, { display?: { label?: string } }>> };
     expect(healed.items["community"]?.["demo"]?.display?.label).toBe("Demo Plugin");
     expect(healed.capturedAt).toBe("2026-01-01T00:00:00.000Z"); // never touched

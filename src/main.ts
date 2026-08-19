@@ -2005,7 +2005,7 @@ export default class ConfigSyncPlugin extends Plugin {
     return 1;
   }
 
-  // The name sources leftoverStoreRels resolves real owners through (DESIGN.md §4 Leftover):
+  // The name sources leftoverStoreRels resolves real owners through (DESIGN.md's Leftover section):
   // plugin labels from the local store lock (its entries survive for exactly these files), else
   // the locally installed manifest; config-root file owners from the registry defs, which always
   // know every core plugin and Obsidian card.

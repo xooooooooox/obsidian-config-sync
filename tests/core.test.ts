@@ -48,7 +48,7 @@ async function seedGroups(ctx: CoreContext, manifestJson: string): Promise<void>
   await writeGroups(ctx, parseSyncManifest(manifestJson).groups);
 }
 
-// spec 2026-08-11-data-model-hardening.md §6: every entry capture writes now also carries its own
+// spec 2026-08-11-data-model-hardening.md: every entry capture writes now also carries its own
 // capturedAt and a hash of its store copy. The assertions below are about the KNOWN fields, so they
 // wrap the expected entry rather than restate two values none of them is testing. The v2 payload
 // itself is asserted directly in the "store.lock.json v2 payload" describe block.
@@ -111,7 +111,7 @@ describe("orderInstallsCatalogFirst", () => {
     const names = ["plugin-slides-rup", "plugin-obsidian42-brat", "plugin-dataview"];
     const isBrat = (id: string): boolean => id === "slides-rup";
     // The predicate is asked per staged NAME: the caller holds the identity, so nothing here reads
-    // a plugin id back out of a group name (spec §5).
+    // a plugin id back out of a group name.
     expect(orderInstallsCatalogFirst(names, (n) => n.startsWith("plugin-") && isBrat(n.slice("plugin-".length)))).toEqual(["plugin-obsidian42-brat", "plugin-dataview", "plugin-slides-rup"]);
   });
 
@@ -148,10 +148,10 @@ describe("capture", () => {
     expect(JSON.parse(await io.read("cs/store/configdir/plugins/demo/data.json"))).toEqual({ theme: "x" });
     const lock = JSON.parse(await io.read("cs/store.lock.json")) as { capturedAt: string; items: Record<string, Record<string, unknown>> };
     expect(lock).toEqual({
-      // spec 2026-08-11-data-model-hardening.md §4.3: every lock this build writes declares its
+      // spec 2026-08-11-data-model-hardening.md: every lock this build writes declares its
       // format version (absent = 1, today's shape). Refusal behaviour lives in tests/versionGates.
       version: 3,
-      // §6: a store that has never pulled starts its own lineage at its own capture time, and the
+      // a store that has never pulled starts its own lineage at its own capture time, and the
       // top-level stamp is max(groups[*].capturedAt) — for a whole-store capture, ctx.now().
       syncedWatermark: "2026-07-08T00:00:00.000Z",
       capturedAt: "2026-07-08T00:00:00.000Z",
@@ -908,7 +908,7 @@ function fakeReader(files: Record<string, string>): ExternalStoreReader {
 }
 
 // A store's bookkeeping, in the shape every captured store carries one. Spread into the remote
-// fixtures below because §5 (spec 2026-08-12-loose-ends-design.md) refuses a remote that holds
+// fixtures below because (spec 2026-08-12-loose-ends-design.md) refuses a remote that holds
 // content with no lock: these tests are about what a pull/push DOES with a store, so they have to
 // describe a store rather than the shape the gate now turns away — which
 // tests/versionGates.test.ts holds instead.
@@ -1298,7 +1298,7 @@ describe("planImport / applyImport", () => {
 
   it("legacy compat: falls back to a root config-sync.json when no self store item is present", async () => {
     const { ctx } = setup();
-    // No lock, deliberately (and unchanged since before §5): the legacy root manifest IS this
+    // No lock, deliberately (and unchanged since before): the legacy root manifest IS this
     // remote's bookkeeping, so the gate lets it through to the legacy path instead of refusing it
     // as content nothing identifies.
     const remote = {
@@ -1378,7 +1378,7 @@ describe("planImport / applyImport", () => {
       expect(lock.items["legacy"]?.["snippets"]).toEqual({ source: { kind: "app", version: "1.0.0" } }); // kept local
     });
 
-    // §5 narrowed the shapes this can be asked about: a remote holding content with no lock is
+    // narrowed the shapes this can be asked about: a remote holding content with no lock is
     // refused outright now, so the only lockless remote a pull ever reaches is an empty one — the
     // first-push target. Neither side has a lock, and the merge still invents none.
     it("writes nothing when neither side has a lock", async () => {
@@ -1518,8 +1518,8 @@ describe("planImport / applyImport", () => {
       expect(after.items["obsidian"]?.["hotkeys"]?.source?.version).toBe("LOCAL");
     });
 
-    // spec 2026-08-11-data-model-hardening.md §6, the pull half of the writers' carry. The merge
-    // builds the lock from a fresh literal, so without this it strips the top-level keys §3.1's
+    // spec 2026-08-11-data-model-hardening.md, the pull half of the writers' carry. The merge
+    // builds the lock from a fresh literal, so without this it strips the top-level keys's
     // parser just went to the trouble of keeping — and then pushes the loss back to the remote.
     describe("the v2 payload survives a pull", () => {
       const localLock = {
@@ -1581,7 +1581,7 @@ describe("planImport / applyImport", () => {
         };
         const { raw } = await pull(localLock, olderRemote);
         const merged = JSON.parse(raw) as StoreLock;
-        // The remote's whole-store stamp is never copied over it (that conflation is what §6 split),
+        // The remote's whole-store stamp is never copied over it (that conflation is what split),
         // and a pull is additive — the store it produces cannot be older than the one it started from.
         expect(merged.capturedAt).toBe("2026-07-30T08:00:00.000Z");
       });
@@ -1685,7 +1685,7 @@ describe("pushExternal", () => {
     });
     await seedGroups(ctx, '{"version":1,"groups":[]}');
     // The remote's own lock, byte-identical to the local one so the push skips it — a remote with
-    // content and no lock is a refusal now (§5), not a push target.
+    // content and no lock is a refusal now, not a push target.
     const fw = fakeWriter({ "store.lock.json": '{"capturedAt":"t","groups":{}}', "store/gone.css": "stale" });
     const results = await pushExternal(ctx, fw.writer, { excludeSelf: false });
     expect(results.every((r) => r.status === "ok")).toBe(true);
@@ -1705,7 +1705,7 @@ describe("pushExternal", () => {
     });
     await seedGroups(ctx, MANIFEST);
     const fw = fakeWriter({
-      "store.lock.json": '{"capturedAt":"t","groups":{}}', // the remote's bookkeeping, identical -> skipped (§5)
+      "store.lock.json": '{"capturedAt":"t","groups":{}}', // the remote's bookkeeping, identical -> skipped
       "store/configdir/hotkeys.json": '{"a":1}', // identical to local -> must not be rewritten
     });
     const results = await pushExternal(ctx, fw.writer, { excludeSelf: false });
@@ -1767,7 +1767,7 @@ describe("pushExternal", () => {
     });
     await seedGroups(ctx, '{"version":1,"groups":[]}');
     const fw = fakeWriter({
-      "store.lock.json": '{"capturedAt":"t","groups":{}}', // identical to local -> skipped (§5: a store, not a bare directory of files)
+      "store.lock.json": '{"capturedAt":"t","groups":{}}', // identical to local -> skipped
       "store/configdir/plugins/config-sync/data.json": '{"theirs":true}',
     });
     const results = await pushExternal(ctx, fw.writer, { excludeSelf: true });
@@ -1880,7 +1880,7 @@ describe("store.lock.json v2 payload — capture", () => {
     expect(hotkeys?.["perMemberFreshness"]).toEqual({ x: 1 }); // the rebuilt entry kept the tail…
     expect(hotkeys?.source).toEqual({ kind: "app", version: "1.8.7" }); // …and the known field is still REPLACED, not merged
     expect(hotkeys?.capturedAt).toBe("2026-07-08T00:00:00.000Z");
-    expect(hotkeys?.hash).toMatch(/^sha256:[0-9a-f]{64}$/); // §6's documented shape — the algorithm names itself
+    expect(hotkeys?.hash).toMatch(/^sha256:[0-9a-f]{64}$/); //'s documented shape — the algorithm names itself
   });
 
   it("writes the key order parseStoreLock re-emits, so a round trip is byte-stable", async () => {
@@ -2981,7 +2981,7 @@ describe("applyImport — pull is pure store transport", () => {
       },
       remoteGroups: [],
       // A hand-built plan still has to describe a remote that could have produced it: a lock, and
-      // the listing it was read from (§5 — applyImport refuses content with no lock).
+      // the listing it was read from.
       remoteLockRaw: '{"capturedAt":"t","groups":{}}',
       remoteFiles: ["store.lock.json", "store/configdir/plugins/new/data.json"],
       excludeSelf: false,

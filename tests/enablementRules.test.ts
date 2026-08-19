@@ -6,7 +6,7 @@ import { EVERYWHERE, perClass, THIS_DEVICE } from "../src/core/types";
 import { itemsIn } from "./items";
 
 describe("perElementKeyFor", () => {
-  // Producer-vs-producer (spec §9 lesson 3): the reserved key is whatever the ONE producer says
+  // Producer-vs-producer: the reserved key is whatever the ONE producer says
   // it is, asserted against SWITCH_LISTS itself — never against a hand-written "" literal.
   it("answers the field name for a field list and the reserved key for a whole-file list", () => {
     for (const [list, spec] of Object.entries(SWITCH_LISTS)) {

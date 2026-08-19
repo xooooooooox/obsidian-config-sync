@@ -83,7 +83,7 @@ describe("listOptionSections", () => {
     expect(sections.some((s) => s.bucket === "notRecommended")).toBe(false);
   });
 
-  it("app.json is a single plain row — the v3 app-view/appearance-domain split is gone (spec 2026-07-25-unified-card-design.md §7)", async () => {
+  it("app.json is a single plain row — the v3 app-view/appearance-domain split is gone (spec 2026-07-25-unified-card-design.md)", async () => {
     const sections = await listOptionSections(optionFs(), ".obs", NO_GROUPS);
     const items = sections.flatMap((s) => s.items);
     expect(items.find((i) => i.name === "app")).toEqual({
@@ -132,7 +132,7 @@ describe("listCoreSections", () => {
     });
     const sections = await listCoreSections(io, ".obs", cores, NO_GROUPS);
     const byBucket = Object.fromEntries(sections.map((s) => [s.bucket, s]));
-    expect(byBucket["list"]).toBeUndefined(); // aggregate on/off-list row removed (spec §7 item 1)
+    expect(byBucket["list"]).toBeUndefined(); // aggregate on/off-list row removed
     // switcher is picked up dynamically even though it is not in CORE_ID_SEED
     expect(byBucket["enabled"]?.items.map((i) => i.name).sort()).toEqual(["graph", "properties", "switcher"]);
     expect(byBucket["enabled"]?.items.find((i) => i.name === "switcher")?.path).toBe("{configDir}/switcher.json");
@@ -177,14 +177,14 @@ describe("listPluginSections", () => {
     io.seed({ ".obs/community-plugins.json": "{}" });
     const sections = await listPluginSections(plugins, NO_GROUPS, new Set<string>());
     const byBucket = Object.fromEntries(sections.map((s) => [s.bucket, s]));
-    expect(byBucket["list"]).toBeUndefined(); // aggregate on/off-list row removed (spec §7 item 1)
+    expect(byBucket["list"]).toBeUndefined(); // aggregate on/off-list row removed
     expect(byBucket["enabled"]?.items.map((i) => i.name).sort()).toEqual(["plugin-dataview", "plugin-remotely-save"]);
     expect(byBucket["disabled"]?.items.map((i) => i.name)).toEqual(["plugin-off-plugin"]);
     expect(byBucket["notRecommended"]).toBeUndefined();
   });
 });
 
-describe("aggregate rows removed (spec 2026-07-25-unified-card-design.md §7 item 1)", () => {
+describe("aggregate rows removed (spec 2026-07-25-unified-card-design.md item 1)", () => {
   it("OPTION_LABELS carries no core-plugins.json / community-plugins.json entries", () => {
     expect(Object.keys(OPTION_LABELS)).not.toContain("core-plugins.json");
     expect(Object.keys(OPTION_LABELS)).not.toContain("community-plugins.json");
@@ -324,7 +324,7 @@ describe("name and path helpers", () => {
     expect(names.has("nope")).toBe(false);
   });
 
-  it("no longer reserves 'core-plugins'/'community-plugins' — the aggregate rows are gone (spec §7 item 1); those compiled group names are excluded from Advanced/search via isSwitchListGroup instead", () => {
+  it("no longer reserves 'core-plugins'/'community-plugins' — the aggregate rows are gone; those compiled group names are excluded from Advanced/search via isSwitchListGroup instead", () => {
     const names = reservedNames(["dataview"]);
     expect(names.has("core-plugins")).toBe(false);
     expect(names.has("community-plugins")).toBe(false);

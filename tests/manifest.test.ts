@@ -75,7 +75,7 @@ describe("parseSyncManifest", () => {
     expect(() => parseSyncManifest(manifestWith([g]))).toThrow("must stay inside the vault");
   });
   it("accepts mode/fields, rejects legacy sanitize and bad modes", () => {
-    // A rule with no compiler behind it gains the ref legacyRef gives its name (spec §3/§4) — the
+    // A rule with no compiler behind it gains the ref legacyRef gives its name — the
     // same producer the v1/v2 lock read uses, which is what makes a hand-written rule able to hold a
     // baseline instead of reading as never-synced.
     const fields = { name: "f", path: "{configDir}/plugins/demo/data.json", type: "file", devices: "all", mode: "fields", fields: [{ pattern: "*Token*", sharing: THIS_DEVICE, encrypted: false }] };
@@ -139,7 +139,7 @@ describe("parseStoreLock", () => {
   });
 });
 
-// spec §3/§5: a v1/v2 lock is READ and converted in memory. During the transition window every
+// spec/a v1/v2 lock is READ and converted in memory. During the transition window every
 // device still on 2.21.0 is writing one, so this is the normal path, not an edge case. The group
 // name → ref conversion asks the compiled sync list first (itemKeys.ts's lockRefFor) and falls back
 // to the closed legacy rules; a name nothing claims lands in `legacy/`, preserved and unresolvable.
@@ -468,7 +468,7 @@ describe("parseStoreLock memberLabels", () => {
   });
 });
 
-// spec 2026-08-11-data-model-hardening.md §3.1 (invariant II.1): the parse validates the fields it
+// spec 2026-08-11-data-model-hardening.md (invariant II.1): the parse validates the fields it
 // knows and CARRIES everything else. The whitelist rebuild this replaced was not a local loss — the
 // pull path writes the parsed lock back, so an older device stripped a newer device's fields and
 // pushed the loss on to the fleet, which is why the lock format could never evolve.
@@ -515,7 +515,7 @@ describe("parseStoreLock carries unknown keys (unknown ⇒ preserve)", () => {
   // The known fields come back in a FIXED order however the document happened to write them, and
   // the carried tail lands AFTER that block — so two devices re-emitting the same entry produce the
   // same bytes and the lock file stops churning the vault's history on every parse-and-write.
-  // (§6 retired the correctness half of this argument: remoteLockAhead no longer stringifies.)
+  //
   // The shuffle covers the tail as well as the known block, which is what the claim is about.
   it("emits the known fields in a fixed order, with the carried tail after them", () => {
     const shuffled = parseStoreLock(
@@ -542,9 +542,9 @@ describe("parseStoreLock carries unknown keys (unknown ⇒ preserve)", () => {
   });
 });
 
-// spec 2026-08-11-data-model-hardening.md §6: the v2 payload's readers. All four narrow the raw
+// spec 2026-08-11-data-model-hardening.md: the v2 payload's readers. All four narrow the raw
 // value rather than trusting the declared type, because the fields arrive through the carried tail
-// (§3.1) and are never validated on the way in.
+// and are never validated on the way in.
 describe("store.lock v2 field readers", () => {
   it("lockWatermark falls back to capturedAt for a v1 lock, which is the comparison v1 already made", () => {
     expect(lockWatermark({ capturedAt: "2026-08-01T00:00:00.000Z", items: {} })).toBe("2026-08-01T00:00:00.000Z");
