@@ -223,11 +223,10 @@ describe("glyph registry — one glyph, one meaning (icon-collision guard)", () 
     // one meaning, applied to a collision the guard itself could not see (the badges are not one of
     // the registries it walks).
     equal: "this device matches the shared answer (no answer of its own)",
-    // The three the badges brought in when they joined this guard. All same-meaning by
-    // construction: a badge summarising rules now speaks the SAME vocabulary those rules do, which
-    // is exactly why it collides here and exactly why the collision is legitimate. The glyph it
-    // used to wear, `monitor-smartphone`, collided with nothing — because it meant `All devices`,
-    // something the badge never counted.
+    // The three the badges contribute. All same-meaning by construction: a badge summarising rules
+    // speaks the SAME vocabulary those rules do, which is why it collides here and why the collision
+    // is legitimate. A glyph that collided with nothing would mean the badge was speaking a
+    // vocabulary of its own.
     lock: "encrypted",
     smartphone: "mobile-only device class",
     power: "on, on this device — a local exception, wherever it is summarised",

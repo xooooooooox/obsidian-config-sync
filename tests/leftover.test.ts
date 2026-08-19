@@ -155,7 +155,7 @@ describe("storeSelfCopyGroups", () => {
     });
   });
 
-  // Review C1. For the whole v3 transition window the store is still written by devices on 2.21.0,
+  // For the whole v3 transition window the store is still written by devices on 2.21.0,
   // so a v3 device reading a v2 self copy is the NORMAL state, not an edge case. Reading it as []
   // would report every item as "added" in the self pane, offer other devices' store files as
   // deletable leftover, and empty readStoreContractLocals — which switches OFF the store-contract

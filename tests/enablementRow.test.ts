@@ -133,9 +133,9 @@ describe("buildLocalMenu", () => {
     }
   });
 
-  // With `Not shared` every device's own state IS the answer, so following
-  // would be following nothing — and a row that showed the label without offering it (the settings
-  // card's shape before this fix) named a state the user could not re-select.
+  // With `Not shared` every device's own state IS the answer, so following would be following
+  // nothing. A row that shows the label without offering it names a state the user cannot
+  // re-select.
   it("omits follow under Not shared — at BOTH entrances, because there is only one list", () => {
     const items = buildLocalMenu(THIS_DEVICE, null, handlers);
     expect(items.map((i) => i.title)).toEqual([ON_HERE_LABEL, OFF_HERE_LABEL]);

@@ -146,10 +146,9 @@ describe("computeBadges", () => {
     expect(computeBadges(APP_DEF, cfg(), RULE(perClass("desktop")), null)).toEqual([]);
   });
 
-  // This test used to assert that an "off" exception still produced `on: this device` with the
-  // `corner-down-right` glyph — it pinned the defect rather than the intent, which is why the badge
-  // could tell users a plugin was on here while the row beside it showed it forced off. The badge
-  // knows which exception it is; it now says which, in both the word and the glyph.
+  // The badge knows WHICH exception this device made, so it says which, in the word and the glyph.
+  // Asserting a single `on: this device` for both would let the badge tell a user a plugin is on
+  // here while the row beside it shows it forced off.
   it("names WHICH exception this device made, and it outranks the fleet rule", () => {
     expect(computeBadges(COMMUNITY_DEF, cfg(), RULE(EVERYWHERE, "on"), null)).toEqual([{ text: "on: this device", cls: "config-sync-card-badge-local", icon: "power" }]);
     expect(computeBadges(COMMUNITY_DEF, cfg(), RULE(EVERYWHERE, "off"), null)).toEqual([{ text: "off: this device", cls: "config-sync-card-badge-local", icon: "power-off" }]);
@@ -185,9 +184,9 @@ describe("computeBadges", () => {
     });
     expect(computeBadges(COMMUNITY_DEF, c, RULE(perClass("desktop")), null)).toEqual([
       { text: "on: desktop", cls: "config-sync-card-badge-desktop", icon: "monitor" },
-      // Its one pinned rule is Mobile only, so the badge says `smartphone`. It used to say
-      // `monitor-smartphone` — the glyph for `All devices` — while counting keys that are pointedly
-      // NOT on all devices.
+      // Its one pinned rule is Mobile only, so the badge says `smartphone`. `monitor-smartphone`
+      // here would be the glyph for `All devices` over a count of keys that are pointedly NOT on
+      // all devices.
       { text: "1 device-scoped", cls: "config-sync-card-badge-count", icon: "smartphone", count: 1 },
       { text: "1 encrypted", cls: "config-sync-card-badge-count", icon: "lock", count: 1 },
     ]);
@@ -252,9 +251,9 @@ describe("fileRuleLegalForMode — mirrors manifest.ts's fileRule validator", ()
 });
 
 // Copy contract for the per-key fallback, pinned so an edit on one surface cannot drift from the
-// other. The menu says the fact and the action as TWO lines — the single line they used to share
-// looked like a value stop and behaved like a link — and BOTH surfaces read these same two
-// constants, which is what ended the era of "opens Settings" here and "jump to them" there for one
+// other. The menu says the fact and the action as TWO lines, since one line carrying both looks
+// like a value stop and behaves like a link, and BOTH surfaces read these same two
+// constants rather than spelling "opens Settings" here and "jump to them" there for one
 // identical fact. The tooltip stays one line because a tooltip is one line.
 describe("per-key fallback copy", () => {
   it("says what decides, separately from what you can do about it", () => {
@@ -393,7 +392,7 @@ describe("buildRuleRows (spec 2026-07-26-card-visual-refresh-design.md — the o
   // Producer versus producer: the key an enablement list's rules live under is
   // `perElementKeyFor`'s answer, so the exclusion is asserted against that producer — never against
   // the literal `enabledCssSnippets`, and never against a bare `""`. A test pinned to a literal
-  // passes while the producer drifts, which is the exact failure this release exists to end.
+  // passes while the producer drifts, which is the failure this pinning exists to prevent.
   it("appearance pointer-row logic: the snippet rules' key is excluded from rule rows (like buildFieldRows)", () => {
     const key = perElementKeyFor("enabled-css-snippets");
     const c = cfg({ settingsFile: { mode: "fields", rules: {}, perElement: { [key]: { x: perClass("desktop") } } } });

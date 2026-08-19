@@ -490,10 +490,10 @@ body.is-phone .config-sync-fkey {
 .config-sync-diffic svg { width: 14px; height: 14px; }
 .config-sync-diffic.is-open { color: var(--interactive-accent); }
 /* The FILES row's badge (DESIGN.md's State column): direction icon AND count in ONE pill, carrying the
-   direction's own color. It replaced three separate marks — a bare direction icon, a neutral count
-   pill and a fold chevron — that all answered "what and how much moves here"; three targets for one
-   question, and the chevron in particular was a 11px thing to aim at. Outlined while collapsed,
-   filled while open: the same state the chevron used to carry, with no extra glyph. */
+   direction's own color. ONE mark, not three: a bare direction icon, a neutral count pill and a fold
+   chevron all answer "what and how much moves here", which makes three targets for one question and
+   an 11px chevron the thing to aim at. Outlined while collapsed, filled while open, so the badge
+   carries the fold state with no extra glyph. */
 .config-sync-files-badge { display: inline-flex; align-items: center; gap: 4px; border: 1px solid currentColor; border-radius: 999px; padding: 1px 8px 1px 6px; font-size: var(--font-ui-smaller); font-variant-numeric: tabular-nums; }
 .config-sync-files-badge-ic { display: inline-flex; align-items: center; }
 .config-sync-files-badge-ic .svg-icon { width: 13px; height: 13px; }
@@ -748,9 +748,9 @@ body.is-mobile.config-sync-mobile-statusbar .status-bar {
 
 /* Dimming is for rows with nothing to do — in sync, no settings yet, not synced here. An
    unresolved conflict is ALSO unstageable (you must pick a side first) and so also carries
-   `is-inert`, but it is the opposite kind of nothing: it is the one row waiting on the user. It
-   used to inherit this opacity and read fainter than the routine work around it, which is what
-   "the font changed" turned out to be. */
+   `is-inert`, but it is the opposite kind of nothing: it is the one row waiting on the user. Let it
+   inherit this opacity and the row that needs attention renders fainter than the routine work
+   around it. */
 .config-sync-hub-row.is-inert:not(.is-conflict) { opacity: 0.55; }
 .config-sync-actionbar { display: flex; gap: var(--size-4-2); justify-content: flex-end; margin-top: var(--size-4-3); }
 /* Direction-colored action buttons at every count: Capture is solid orange,
@@ -811,7 +811,6 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 /* Visual grouping in the sidebar (This device / Remotes / History). */
 .config-sync-side-divider { height: 1px; background: var(--background-modifier-border); margin: var(--size-4-2) 4px; }
 
-/* ── Run history ─────────────────────────────────────────────────────────── */
 .config-sync-hhead { display: flex; align-items: baseline; gap: var(--size-4-2); margin-bottom: var(--size-4-1); }
 .config-sync-hhead-title { font-size: var(--font-ui-medium); font-weight: 600; }
 .config-sync-hhead-count { color: var(--text-faint); font-size: var(--font-ui-smaller); }
@@ -850,7 +849,6 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 .config-sync-hdwhen { color: var(--text-faint); font-size: var(--font-ui-smaller); font-family: var(--font-monospace); }
 .config-sync-hddesc { color: var(--text-muted); margin: var(--size-4-1) 0 var(--size-4-3); }
 
-/* ── Run history — compact card layout (narrow screens) ──────────────────── */
 .config-sync-hcard { border: 1px solid var(--background-modifier-border); background: var(--background-secondary); border-radius: var(--radius-m); padding: 11px 12px; margin-bottom: var(--size-4-2); cursor: pointer; }
 .config-sync-hcard:hover { background: var(--background-modifier-hover); }
 .config-sync-hcard-top { display: flex; align-items: center; gap: var(--size-4-2); }
@@ -863,7 +861,6 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 .config-sync-hcard-pill.is-chg { background: var(--background-modifier-hover); color: var(--text-muted); }
 .config-sync-hcard-pill.is-iss { background: rgba(var(--color-orange-rgb), 0.14); color: var(--color-orange); }
 
-/* ── Store leftover ───────────────────────────────────────────────────────── */
 .config-sync-segrow { display: flex; align-items: center; gap: var(--size-4-2); }
 .config-sync-fpill.is-leftover { color: var(--color-orange); border-color: rgba(var(--color-orange-rgb), 0.5); }
 .config-sync-fpill.is-leftover.is-active { background: var(--color-orange); border-color: var(--color-orange); color: var(--background-primary); }
@@ -906,17 +903,16 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 .config-sync-side-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* The badges are a COLUMN: what has to line up is the ICON at each badge's left edge, which needs
-   every capsule to be the same width. Right-packing already lined up their right edges; their left
-   edges were ragged for two reasons — a one-digit count is ~8px narrower than a two-digit one, and
-   the UI font's digits are proportional, so even two counts of the same length differed (`○42` 36.3
-   vs `○19` 33.7). tabular-nums settles the second and makes `ch` exactly one digit wide; the
-   min-width reserves the icon, the padding, and `--cs-badge-digits` digits.
+   every capsule to be the same width. Right-packing aligns the right edges only; two things ragged
+   the left ones — a one-digit count is ~8px narrower than a two-digit one, and the UI font's digits
+   are proportional, so even two counts of the same length differ. tabular-nums settles the second
+   and makes `ch` exactly one digit wide; the min-width reserves the icon, the padding, and
+   `--cs-badge-digits` digits. Measurements in DESIGN.md's Calibrated geometry.
    That digit count is MEASURED per render (SyncCenterView.badgeDigits) rather than written here,
    because any number picked in the stylesheet is wrong in both directions at once: too small and
    the longest count overflows the column the reservation exists to hold, too large and every
-   shorter count carries the difference as dead space inside its capsule — a hard-coded 3 turned
-   `↑3` from 28px into 41px, all of it trailing. The fallback only covers a badge rendered outside
-   the shell that sets the property; nothing does that today.
+   shorter count carries the difference as dead space inside its capsule. The fallback only covers a
+   badge rendered outside the shell that sets the property; nothing does that today.
    Content stays left-packed, so the icons line up as their own column and a short count leaves
    trailing space — the digits themselves do not align, which is the accepted trade.
    The badge's own `display` is deliberately left alone: it is already a flex ITEM, and the fold/
@@ -1080,7 +1076,6 @@ body.is-mobile .config-sync-section-head input[type="checkbox"]:indeterminate::a
   left: 4px;
 }
 
-/* 0.20.0 report styling */
 .config-sync-report-legend { color: var(--text-faint); font-size: var(--font-ui-smaller); margin: 2px 0 8px; }
 .config-sync-sect .config-sync-sect-count { margin-left: 6px; font-size: 10px; }
 .config-sync-pill.is-statenote { background: rgba(var(--color-cyan-rgb), 0.18); color: var(--color-cyan); }
@@ -1100,7 +1095,7 @@ body.is-mobile .config-sync-coldstart-banner { flex-wrap: wrap; }
 body.is-mobile .config-sync-coldstart-text { flex-basis: 100%; }
 body.is-mobile .config-sync-coldstart-actions { margin-left: auto; }
 
-/* 0.20.0 inline result strip */
+/* The inline result strip. */
 /* Sticky dock: opaque backing so scrolling rows don't bleed through the strip's translucent
    tint; pins the outcome to the top of the scroll viewport (see renderResultStrip). */
 .config-sync-strip-dock { position: sticky; top: 0; z-index: 5; background: var(--background-primary); padding-bottom: var(--size-4-2); border-bottom: 1px solid var(--background-modifier-border); margin-bottom: var(--size-4-2); }
@@ -1135,16 +1130,16 @@ body.is-mobile .config-sync-strip-meta {
 }
 body.is-mobile .config-sync-strip-meta .config-sync-report-pills { margin-left: 0; }
 
-/* 0.20.0 availability sections */
+/* The availability sections. */
 .config-sync-section { border: 1px dashed var(--background-modifier-border); border-radius: 8px; padding: 8px var(--size-4-3); margin-top: 8px; }
 /* One checkbox column, and the fill still holds its text: the nested card
    drops its FRAME and keeps every other card's horizontal padding (line above), then bleeds that
-   padding back out with an equal negative margin. The content box therefore lands exactly where
-   the section's own inset used to put it — select-all, card rows, section rows and section heads
-   keep the single right edge they are probed for — while the FILL now reaches the section frame,
-   12px clear of the text on either side. The padding used to be zeroed instead, on the reasoning
-   that the section's frame already carried the inset; but that inset sat OUTSIDE the fill, so fill
-   and row text shared one edge. Unremarkable on a wide desktop card. On a phone the words sit
+   padding back out with an equal negative margin. The content box therefore lands on the same
+   inset as everywhere else — select-all, card rows, section rows and section heads keep the single
+   right edge they are probed for — while the FILL reaches the section frame, 12px clear of the text
+   on either side. Zeroing the padding instead does not work, however much the section's frame looks
+   like it already carries the inset: that inset sits OUTSIDE the fill, so fill and row text end up
+   sharing one edge. Unremarkable on a wide desktop card. On a phone the words sit
    right on the colour and read as if they were spilling out of the block. Background and radius
    come from `.config-sync-card` unchanged, so a section's body still reads as the SAME filled
    block, one per category. */
@@ -1284,7 +1279,7 @@ body.is-mobile .config-sync-cardrow:not(.is-iconrow) > .config-sync-explabel-inl
 .config-sync-mergedctl.is-set .config-sync-mergedctl-local { color: var(--color-purple); }
 .config-sync-mergedctl-sep { color: var(--text-faint); opacity: 0.35; font-size: var(--font-ui-smaller); line-height: 1; }
 .config-sync-tworow-ic { display: inline-flex; align-items: center; }
-/* ONE glyph size for every drawer control. Only the merged control's own glyphs used to carry a
+/* ONE glyph size for every drawer control. Without it a control's glyph carries a
    size rule; the lock, the sharing picker, the per-item toggle and the File-preview eye fell back
    to Obsidian's default (18px) and read a size bigger than their neighbours — invisible while the
    18px ones sat together, obvious the moment the merge put a 16px glyph directly beside the lock.
@@ -1358,7 +1353,7 @@ body.is-mobile .config-sync-tworow-chev { display: none; }
 .config-sync-side-search { width: 100%; margin-bottom: 6px; }
 .config-sync-side-badge.is-neutral { background: var(--background-modifier-hover); color: var(--text-normal); }
 
-/* 0.21.0 settings-mutation rollback: inline per-row error when a write fails */
+/* Settings-mutation rollback: inline per-row error when a write fails. */
 /* Validation errors are ONE framed family (DESIGN.md's Form errors): a warning-tinted strip,
    pinned as close to the offending control as the surface allows; :empty renders nothing (the
    page-level slots are live-updated without a re-render). Runtime outcomes keep their own
@@ -1376,7 +1371,7 @@ body.is-mobile .config-sync-tworow-chev { display: none; }
 .config-sync-form-error:empty,
 .config-sync-save-error:empty { display: none; }
 
-/* 0.21.0 unified row expansion: fields / data.json view / advanced */
+/* Unified row expansion: fields / data.json view / advanced. */
 /* The drawer anchors to its card by the same fold thread the Sync Center's quiet zone uses
    (see .config-sync-itemcard): content indents to the card title's text start
    (chevron 16px + 4px margin ≈ 20px), the thread sits under the chevron's center (≈ 8px). */
@@ -1632,13 +1627,12 @@ button.config-sync-add-row, button.config-sync-add-row:hover { background: none;
 .config-sync-add-row-quiet { display: inline-flex; width: auto; justify-content: flex-start; padding: var(--size-4-1) 0; margin: var(--size-4-1) 0 0; border: none; color: var(--text-faint); }
 .config-sync-add-row-quiet:hover { color: var(--interactive-accent); border-color: transparent; }
 
-/* 0.21.0 select-all checkbox alignment */
+/* Select-all checkbox alignment. */
 /* Specificity must beat the base `.config-sync-mainbar input[type="checkbox"] { margin: 0 }`
    rule, or the auto margin is dropped and the box never right-aligns to the row column. */
 .config-sync-mainbar input[type="checkbox"].config-sync-selectall { margin-left: auto; }
 .config-sync-selectall-idle { visibility: hidden; }
 
-/* ── Pull conflict modal (self-config model) ──────────────────────────────── */
 .config-sync-cm {
   width: 680px;
   max-width: 92vw;
@@ -1718,10 +1712,9 @@ button.config-sync-add-row, button.config-sync-add-row:hover { background: none;
 .config-sync-cm-diffmeta { color: var(--text-faint); font-size: var(--font-ui-smaller); font-family: var(--font-monospace); }
 /* THE conflict choice control (resolveSegment.ts), one look for both places
    that offer it: the card's `Resolve` row and the toolbar of every diff that row has open. They
-   were two controls for a while — one spelling its directions as text arrows, the other as icons,
-   with different colours, paddings and fills — which is one decision wearing two faces.
-   Icons, never `↓`/`↑` text: the row's fate column finished migrating off text glyphs this same
-   release, and two characters here would have re-introduced what that swept out. Each side keeps
+   One decision must not wear two faces, so the two entrances share this markup rather than each
+   spelling its directions its own way. Icons, never `↓`/`↑` text: the row's fate column carries no
+   text glyphs, and two characters here would put them back. Each side keeps
    its DIRECTION's colour at rest, not just when picked, so the two are told apart before anything
    is chosen; picking deepens the same colour rather than introducing another. */
 .config-sync-resolveseg { display: inline-flex; border: 1px solid var(--background-modifier-border); border-radius: var(--radius-s); overflow: hidden; }
@@ -1781,11 +1774,9 @@ button.config-sync-add-row, button.config-sync-add-row:hover { background: none;
 }
 .config-sync-expdesc { color: var(--text-faint); font-size: var(--font-ui-smaller); margin-bottom: var(--size-4-1); }
 
-/* ── Switch-list "Local decisions (this device)" ── */
 .config-sync-ldname { font-weight: 500; }
 .config-sync-ldhint { color: var(--text-faint); font-size: var(--font-ui-smaller); }
 
-/* ── Passphrase status badge ── */
 .config-sync-ppbadge {
   font-size: var(--font-ui-smaller);
   padding: 2px 9px;
@@ -1805,7 +1796,6 @@ button.config-sync-add-row, button.config-sync-add-row:hover { background: none;
   border: 1px solid rgba(var(--color-orange-rgb), 0.4);
 }
 
-/* ── Inline change diff (Sync Center rows) ── */
 .config-sync-diffable { cursor: pointer; }
 .config-sync-diffhint { color: var(--text-faint); font-family: var(--font-ui); font-size: var(--font-ui-smaller); }
 .config-sync-inline-diff {
@@ -1894,8 +1884,7 @@ button.config-sync-add-row, button.config-sync-add-row:hover { background: none;
   .config-sync-tworow-chev { transition: none; }
 }
 
-/* ── Mobile layout fixes ──
-   All scoped to body.is-mobile: desktop layouts are untouched. */
+/* Everything below is scoped to body.is-mobile: desktop layouts are untouched. */
 
 /* Passphrase: the input takes a full line of its own so the caret never lands on the Set
    button; buttons follow on a right-aligned row below. */
@@ -1936,7 +1925,6 @@ body.is-mobile .config-sync-center-head .config-sync-pill {
   line-height: 1.5;
 }
 
-/* ── Mobile polish ── */
 
 /* The action bar must clear Obsidian's floating mobile navbar — plus room for a floating
    status-bar pill (a common snippet/theme pattern sits fixed above the navbar). Overshoot is

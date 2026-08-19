@@ -12,12 +12,12 @@ import {
 import { partitionSection, type PanelFilter, type RowBucket, type SectionKind } from "../src/ui/panelModel";
 import { AVAILABILITY_FOLD_TEXT, type AvailabilityFoldKind } from "../src/ui/foldIcons";
 
-// The panel's containment rules, pinned. Three surfaces have to agree about where a row lives —
-// the filter pill that COUNTS it, the section that HOLDS it, the fold that FILES it — and until
-// 2.25.0 nothing forced them to. They drifted: a row the user had opted this device out of was
-// counted by `Not synced here` and filed under `N not installed on this device`, so clicking the
-// pill's number led to a list with nothing in it saying those words. These tests are the mechanism
-// that stops the three from drifting again, so they assert the WHOLE table, not the one case.
+// The panel's containment rules, pinned. Three surfaces have to agree about where a row lives: the
+// filter pill that COUNTS it, the section that HOLDS it, the fold that FILES it. With nothing
+// forcing agreement they drift, and a row the user opted this device out of gets counted by
+// `Not synced here` while filed under `N not installed on this device`, so clicking the pill's
+// number leads to a list with none of those words in it. These tests are the mechanism that keeps
+// the three together, so they assert the WHOLE table, not the one case.
 
 const BUCKETS: RowBucket[] = ["conflict", "apply", "capture", "locked", "ok", "excluded", "none"];
 const AVAILABILITIES: SectionKind[] = ["main", "outdated", "disabled", "not-installed", "desktop-only"];

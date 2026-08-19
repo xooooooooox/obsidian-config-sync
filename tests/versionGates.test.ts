@@ -141,7 +141,7 @@ describe("a data.json from a newer build is never reset and never overwritten", 
     expect(instance.settings.items.community["demo"]).toEqual({ synced: true, futureRule: { device: "here-on-tuesdays" } });
   });
 
-  // a device that has silently stopped syncing is the failure this release exists to
+  // a device that has silently stopped syncing is the failure this gate exists to
   // prevent, so it says so at load — not only to whoever opens the Sync Center. Same mechanism and
   // duration as the legacy branch's own notice.
   it("says so once at load, and only for a future document", async () => {

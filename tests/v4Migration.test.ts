@@ -9,7 +9,7 @@ import { perClass, THIS_DEVICE } from "../src/core/types";
 // an unsynced card implied in v3 (see v4Migration.ts's header).
 //
 // The reserved perElement key always comes from its ONE producer (switchList.ts's perElementKeyFor),
-// never a "" literal — a derived key with two authors is the drift this release exists to end.
+// never a "" literal: a derived key with two authors is exactly the drift this pins against.
 const COMMUNITY_KEY = perElementKeyFor("community-plugins");
 const CORE_KEY = perElementKeyFor("core-plugins");
 

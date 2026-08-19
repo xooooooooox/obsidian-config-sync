@@ -386,7 +386,7 @@ describe("rowFate — version-ahead capture", () => {
   it("app-anchored drift never degrades to the generic captures-files fallback", () => {
     const withDrift = rowFate({ ...base, direction: "capture", hasSettingsPayload: false, versionAhead: appAhead });
     const withoutDrift = rowFate({ ...base, direction: "capture", hasSettingsPayload: false, versionAhead: null });
-    expect(withoutDrift.sentence).toBe("Captures files"); // the shape this used to produce
+    expect(withoutDrift.sentence).toBe("Captures files"); // no version clause without drift
     expect(withDrift.sentence).not.toBe("Captures files");
   });
   it("app-anchored joins the same way when the row has a settings verb too", () => {
