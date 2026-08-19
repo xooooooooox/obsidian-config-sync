@@ -76,6 +76,13 @@ The general dev-vault workflow is in [CONTRIBUTING.md](CONTRIBUTING.md). Agent-s
   `docs/design/DESIGN.md` (with an owner-approved visual draft for visual changes). Only
   then does code move. A commit that changes a shape without its schema, or a surface
   without DESIGN.md, is incomplete by definition.
+- **Spec-first: ADOPTED**, satisfied by whichever written artifact already governs the change.
+  A UI structure/styling change is specced by its `docs/design/DESIGN.md` diff plus an
+  owner-approved visual draft; a persisted-shape change by its `schema/*.schema.json` diff
+  (both above). Everything else that grows out of a design or troubleshooting discussion —
+  core logic, transport, release flow, and the rules in this file — needs a dated
+  `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md` approved BEFORE the edit lands, with no
+  size exemption. Q&A, diagnosis and scratchpad files are exempt; so is this decision record.
 - **Smoke before deploy:** a UI change is never "style-only" — render functions carry event
   wiring. Before deploying any UI diff, run the `dev/vault` smoke harness and CLICK every
   control the diff touched; a diff that edits a render function must list the event
