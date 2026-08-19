@@ -1255,11 +1255,9 @@ body.is-mobile .config-sync-cardrow:not(.is-iconrow) > .config-sync-explabel-inl
    Settings-drawer usage never carries it, so that control is untouched. Text triggers keep their
    border (no glyph to lean on) but share the icon's padding/hover surface so a row reads as one
    family regardless of trigger kind.
-   The 6px horizontal padding is shared with `.config-sync-mergedctl` on purpose, and it has to be
-   the SAME number: both boxes end on the card's control rail, so a difference between them shows up
-   as a difference between their GLYPHS, which is what the eye actually follows. At 4px vs 6px the
-   More row's icon sat 2px right of the merged controls above it — the boxes were aligned the whole
-   time. */
+   The 6px horizontal padding is shared with `.config-sync-mergedctl` and has to be the SAME number:
+   both boxes end on the card's control rail, so any difference between them shows up as a
+   difference between their GLYPHS, which is what the eye follows. */
 .config-sync-card-trigger { border-radius: var(--radius-s); }
 .config-sync-sharingicon.config-sync-card-trigger { display: inline-flex; align-items: center; justify-content: center; width: fit-content; padding: 3px 6px; }
 .config-sync-sharingicon.config-sync-card-trigger:hover, .config-sync-sharingicon.config-sync-card-trigger:focus-visible { background: var(--background-modifier-hover); }

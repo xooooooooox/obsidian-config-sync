@@ -90,6 +90,10 @@ The general dev-vault workflow is in [CONTRIBUTING.md](CONTRIBUTING.md). Agent-s
   wiring. Before deploying any UI diff, run the `dev/vault` smoke harness and CLICK every
   control the diff touched; a diff that edits a render function must list the event
   listeners it moved. `npm test` alone proves nothing about a click path.
+- **Comments carry invariants, not history:** say why a rule exists and what breaks without it,
+  in a line or two. Never write what the code already says, and never write the changelog
+  ("used to be", "before this", "at 4px the icon sat 2px right") — git owns that. A rule whose
+  reason takes a paragraph is usually a rule that wants a measurement in DESIGN.md instead.
 - **Documentation currency:** user-facing behavior changes update the affected docs in the
   SAME branch (see CONTRIBUTING.md's list); docs must be current before merging to `main`
   and before cutting a release.
