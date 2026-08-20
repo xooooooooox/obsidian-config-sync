@@ -1,8 +1,8 @@
 import { App, ButtonComponent, ItemView, Menu, Modal, Platform, WorkspaceLeaf, setIcon, setTooltip } from "obsidian";
 import { ApplyItem, CaptureItem, orderInstallsCatalogFirst, ProgressFn, StateAction } from "../core/ConfigSyncCore";
 import { lockRefFor, refItemId } from "../core/itemKeys";
-import { GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry, remoteDirectionCounts } from "../core/status";
-import { SECTION_LABELS, findGroupByName, SELF_GROUP_NAME, SELF_ITEM_REF, sectionForGroup } from "../core/catalog";
+import { GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry, RemoteDiffFile, remoteDirectionCounts } from "../core/status";
+import { SECTION_LABELS, findGroupByName, SELF_GROUP_NAME, SELF_ITEM_REF, sectionForGroup, communityGroupName } from "../core/catalog";
 import { itemDirection } from "../core/remoteRules";
 import { EVERYWHERE, FileChanges, FileSharing, GroupResult, hasChanges, ItemRef, Remote, Sharing, SyncGroup, StorageSection } from "../core/types";
 import { DeviceElementState } from "../core/deviceElements";
@@ -59,6 +59,8 @@ import {
   matchesSearch,
   mergeFamilyChanges,
   moreFilesText,
+  onOffFlips,
+  onOffNarrationLines,
   nosettingsLineText,
   PanelFilter,
   presentedState,
@@ -3029,7 +3031,11 @@ export class SyncCenterView extends ItemView {
     // carries their bottom margin, keeping any future non-row sibling in `detail` outside it.
     const fields = detail.createDiv({ cls: "config-sync-card-fields" });
     const dir = isConflict ? this.conflictChoice.get(name) ?? null : input.direction;
-    this.renderCardKeyRow(fields, dir === "apply" ? "On apply" : dir === "capture" ? "On capture" : "State", (value) => {
+    const remoteRelation = this.relation.kind === "remote";
+    const dirLabel = remoteRelation
+      ? dir === "apply" ? "On pull" : dir === "capture" ? "On push" : "State"
+      : dir === "apply" ? "On apply" : dir === "capture" ? "On capture" : "State";
+    this.renderCardKeyRow(fields, dirLabel, (value) => {
       value.createDiv({ cls: "config-sync-expand-note", text: this.stateClauseText(r, fate, input) });
     });
 
@@ -3044,6 +3050,10 @@ export class SyncCenterView extends ItemView {
     if (previewDir !== null && hasChanges(changes)) {
       this.renderFilesRow(fields, r, changes, previewDir, input.encrypted, isConflict ? this.conflictResolve(r, changes) : null);
     }
+
+    // The flip list the retired remote pane pinned under its section head: under this relation the
+    // carrier is an ordinary row, so its delta belongs in its own card (spec 5.8.3).
+    if (remoteRelation) this.renderRemoteOnOffRow(fields, r);
 
     if (isConflict) this.renderResolveRow(fields, r);
 
@@ -3073,6 +3083,60 @@ export class SyncCenterView extends ItemView {
         value.createDiv({ cls: "config-sync-expand-note", text: "Takes effect after an app reload" });
       });
     }
+  }
+
+  // This remote's settled comparison entry for one row, companions already folded in — the same
+  // shape remoteRows() built the row from. null under the device relation, and for a row the
+  // comparison never mentioned.
+  private remoteEntryFor(group: string): RemoteDiffEntry | null {
+    const relation = this.relation;
+    if (relation.kind !== "remote") return null;
+    const result = this.remoteResultFor(relation.name);
+    if (result === null) return null;
+    const folded = foldCompanionEntries(result.entries, (g) => this.host.companionParentOf(g));
+    return folded.find((e) => e.group === group) ?? null;
+  }
+
+  // A carrier's own card row under the remote relation: which plugins are on at one side and off at
+  // the other. The carrier's file diff IS an on/off delta — a raw JSON diff would make the reader
+  // decode it — so the narration the retired remote pane pinned under its section head lives here,
+  // on the item it describes. Renders nothing when the carrier has no delta.
+  private renderRemoteOnOffRow(fields: HTMLElement, r: StatusRow): void {
+    const relation = this.relation;
+    if (relation.kind !== "remote" || !ENABLEMENT_CARRIER_GROUPS.has(r.group.name)) return;
+    const entry = this.remoteEntryFor(r.group.name);
+    if (entry === null) return;
+    const onAtRemote: string[] = [];
+    const offAtRemote: string[] = [];
+    let remoteOnCount = 0;
+    let localOnCount = 0;
+    // Sums the flips over every file the carrier entry carries (normally exactly one).
+    for (const f of entry.files) {
+      const flips = onOffFlips(f.local, f.remote);
+      onAtRemote.push(...flips.onAtRemote);
+      offAtRemote.push(...flips.offAtRemote);
+      remoteOnCount += flips.remoteOnCount;
+      localOnCount += flips.localOnCount;
+    }
+    onAtRemote.sort();
+    offAtRemote.sort();
+    if (onAtRemote.length === 0 && offAtRemote.length === 0) return;
+    // Element id → group name by carrier: community carrier ids compile to `plugin-<id>` groups;
+    // core carrier ids ARE the group name — then the same label chain the rows resolve through, so
+    // narration names never disagree with a row's display name.
+    const displayOf = (elementId: string): string => {
+      const group = r.group.name === "community-plugins" ? communityGroupName(elementId) : elementId;
+      return this.host.displayParts(group, findGroupByName(this.groups, group)?.label).label;
+    };
+    const narration = onOffNarrationLines(onAtRemote, offAtRemote, remoteOnCount, localOnCount, displayOf, relation.name);
+    this.renderCardKeyRow(fields, "On/off", (value) => {
+      for (const l of [narration.on, narration.off]) {
+        if (l === null) continue;
+        const line = value.createDiv({ cls: "config-sync-expand-note" });
+        line.appendText(l.prefix);
+        line.createSpan({ cls: "config-sync-remote-flip-value", text: l.value });
+      }
+    });
   }
 
   // The row shell every card row shares ("one grid per card"): a fixed label on track 1 of
@@ -3229,6 +3293,9 @@ export class SyncCenterView extends ItemView {
     if (input.direction === null) {
       // The card's STATE clause spells out WHY, not just the row's terse sentence —
       // and the two exclusion causes read differently even though the row above them is identical.
+      // Both causes are this DEVICE's rules; under a remote the row's own sentence already names
+      // the only rule in play (that remote's direction for this item), so it stands alone.
+      if (this.relation.kind === "remote") return `${fate.sentence}.`;
       if (input.excludedHere) return "Not synced on this device — your Settings sync rule excludes it.";
       if (input.optedOutHere === true) return "Not synced on this device — you turned it off here. Your other devices keep syncing it.";
       return `${fate.sentence}.`;
@@ -3371,6 +3438,16 @@ export class SyncCenterView extends ItemView {
         const p = this.adoptedDiffPanels?.get(diffKey) ?? createDiv({ cls: "config-sync-inline-diff", attr: { "data-cs-diff": diffKey } });
         panel = p;
         line.insertAdjacentElement("afterend", p);
+        // Under the remote relation the two sides are the store's and the remote's, and the
+        // comparison already read both — nothing to fetch, and diffPair (store vs THIS DEVICE)
+        // would answer a different question entirely. Looked up by the row's own merged rel, the
+        // same string remoteRows() folded the changes from.
+        const remoteFile = this.remoteEntryFor(r.group.name)?.files.find((f) => f.itemRel === e.name) ?? null;
+        if (remoteFile !== null) {
+          p.empty();
+          this.renderRemoteFileDiff(p, r.group.name, remoteFile);
+          return;
+        }
         void this.host.diffPair(owner.group, owner.rel, dir).then((pair) => {
           if (panel !== p) return;
           p.empty();
@@ -3438,6 +3515,37 @@ export class SyncCenterView extends ItemView {
         for (const entry of rest) renderEntry(entry);
       });
     }
+  }
+
+  // One file's two sides under the remote relation: your store against the remote, both already in
+  // hand from the comparison. Key-order-only differences are reported rather than diffed, the same
+  // way the device relation's own panel does it.
+  private renderRemoteFileDiff(p: HTMLElement, group: string, f: RemoteDiffFile): void {
+    const remoteName = this.relation.kind === "remote" ? this.relation.name : "";
+    let left = f.local ?? "";
+    let right = f.remote ?? "";
+    const switchSorted = isSwitchListGroup(group);
+    let jsonSorted = false;
+    if (switchSorted) {
+      left = f.local !== null ? switchListSortedView(f.local) : "";
+      right = f.remote !== null ? switchListSortedView(f.remote) : "";
+    } else if (f.itemRel.endsWith(".json") && f.local !== null && f.remote !== null) {
+      const sl = jsonSortedView(f.local);
+      const sr = jsonSortedView(f.remote);
+      if (sl !== null && sr !== null) {
+        left = sl;
+        right = sr;
+        jsonSorted = true;
+      }
+    }
+    if (f.local !== null && f.remote !== null && left === right) {
+      p.createDiv({ cls: "config-sync-expand-note", text: "Only key order / formatting differs." });
+      return;
+    }
+    const leftLabel = f.local !== null ? "your store" : "not in your store";
+    const rightLabel = f.remote !== null ? remoteName : `not at ${remoteName}`;
+    renderDiffPanel(p, left, right, leftLabel, rightLabel, { name: f.itemRel, sorted: switchSorted || jsonSorted },
+      () => openDiffModal(this.app, left, right, leftLabel, rightLabel, { name: f.itemRel, sorted: switchSorted || jsonSorted }), null);
   }
 
   // Click/keydown → open an Obsidian Menu at the trigger's position, shared by every card

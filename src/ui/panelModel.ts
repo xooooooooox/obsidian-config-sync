@@ -476,13 +476,6 @@ export function onOffFlips(local: string | null, remote: string | null): OnOffFl
   };
 }
 
-// Plain text, no trailing triangle baked into the string. The
-// renderer composes a FOLD-family `chevron-right` after this label and rotates it via
-// `setFoldOpen` on toggle instead of re-setting the whole line's text.
-export function onOffLineText(n: number): string {
-  return `On/off list · differs for ${n} plugin${n === 1 ? "" : "s"}`;
-}
-
 // Cap on display names shown per side before collapsing to "and N more".
 const ONOFF_NARRATION_CAP = 5;
 
