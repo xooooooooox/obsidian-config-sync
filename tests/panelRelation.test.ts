@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { destinationKey, foldStateKey, PanelDestination, PanelRelation, relationKey, relationLabel, viewOptions } from "../src/ui/panelModel";
+import { destinationKey, excludedLineText, foldStateKey, insyncLineText, PanelDestination, PanelRelation, relationCopy, relationKey, relationLabel, viewOptions } from "../src/ui/panelModel";
 
 describe("relationLabel", () => {
   it("names the two relations exactly as the design says", () => {
@@ -82,5 +82,54 @@ describe("viewOptions", () => {
       { kind: "capture", count: 1 },
       { kind: "apply", count: 2 },
     ]);
+  });
+});
+
+describe("relationCopy", () => {
+  it("keeps every word the device relation shows today", () => {
+    const c = relationCopy({ kind: "device" });
+    expect(c.bucket.capture).toBe("To capture");
+    expect(c.bucket.apply).toBe("To apply");
+    expect(c.bucket.ok).toBe("In sync");
+    expect(c.bucket.excluded).toBe("Not synced here");
+    expect(c.bucket.none).toBe("No settings yet");
+  });
+
+  it("keeps the device relation's fold lines byte-identical to the ones the list already draws", () => {
+    const c = relationCopy({ kind: "device" });
+    expect(c.matchFold(1)).toBe(insyncLineText(1));
+    expect(c.matchFold(4)).toBe(insyncLineText(4));
+    expect(c.excludedFold(2)).toBe(excludedLineText(2));
+  });
+
+  it("swaps in the remote relation's words, one for one", () => {
+    const c = relationCopy({ kind: "remote", name: "main" });
+    expect(c.bucket.capture).toBe("To push");
+    expect(c.bucket.apply).toBe("To pull");
+    expect(c.bucket.ok).toBe("In sync");
+    expect(c.bucket.excluded).toBe("Doesn't sync with this remote");
+    expect(c.bucket.none).toBe("Nothing captured yet");
+  });
+
+  it("gives both relations the same five buckets and no more", () => {
+    const device = Object.keys(relationCopy({ kind: "device" }).bucket).sort();
+    const remote = Object.keys(relationCopy({ kind: "remote", name: "m" }).bucket).sort();
+    expect(device).toEqual(remote);
+  });
+
+  it("carries the remote relation's own sentences", () => {
+    const c = relationCopy({ kind: "remote", name: "main" });
+    expect(c.sentence.push).toBe("Pushes settings");
+    expect(c.sentence.pull).toBe("Pulls settings");
+    expect(c.sentence.excluded).toBe("Doesn't sync with this remote");
+    expect(c.sentence.nothing).toBe("Nothing to send");
+  });
+
+  it("counts the fold lines in that relation's words", () => {
+    const c = relationCopy({ kind: "remote", name: "main" });
+    expect(c.matchFold(1)).toBe("1 item matches this remote");
+    expect(c.matchFold(4)).toBe("4 items match this remote");
+    expect(c.excludedFold(1)).toBe("1 item doesn't sync with this remote");
+    expect(c.excludedFold(3)).toBe("3 items don't sync with this remote");
   });
 });

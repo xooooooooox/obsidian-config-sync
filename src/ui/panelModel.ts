@@ -4,7 +4,7 @@ import { Availability, VersionDrift } from "../core/availability";
 import { carrierRef, refItemId } from "../core/itemKeys";
 import { ApplyItem, CaptureItem, StateAction } from "../core/ConfigSyncCore";
 import { EnablementList, memberUniverse, parseSwitchList, switchListMemberOn, switchListOnCount } from "../core/switchList";
-import { Fate, FateInput, rowFate } from "./fateModel";
+import { Fate, FateInput, NOTHING_YET_SENTENCE, rowFate } from "./fateModel";
 import { ENABLEMENT_CARRIER_GROUPS } from "../core/switchList";
 
 // Direction a checkable row acts in: capture pushes this device → store; apply pulls store → device.
@@ -990,4 +990,34 @@ export function viewOptions(input: {
     });
   }
   return out;
+}
+
+// The two relations' state words, one for one (spec 5.1). The BUCKETS are the same five under both —
+// what changes is only what they are called — so this is a lookup rather than a branch: the three
+// surfaces that bucket by state (sidebar badges, filter pills, header pills) each read the table and
+// none of them can drift from the others. `conflict` shares `apply`'s word under both relations, the
+// same way the apply filter pill already counts conflicts. The device column reuses the existing
+// fold-line functions rather than restating their copy, so the two can never disagree.
+export interface RelationCopy {
+  bucket: Record<FateBucket, string>;
+  sentence: { push: string; pull: string; excluded: string; nothing: string };
+  matchFold: (n: number) => string;
+  excludedFold: (n: number) => string;
+}
+
+export function relationCopy(r: PanelRelation): RelationCopy {
+  if (r.kind === "device") {
+    return {
+      bucket: { capture: "To capture", apply: "To apply", conflict: "To apply", ok: "In sync", excluded: "Not synced here", none: "No settings yet" },
+      sentence: { push: "Captures settings", pull: "Applies settings", excluded: "Not synced on this device", nothing: NOTHING_YET_SENTENCE },
+      matchFold: insyncLineText,
+      excludedFold: excludedLineText,
+    };
+  }
+  return {
+    bucket: { capture: "To push", apply: "To pull", conflict: "To pull", ok: "In sync", excluded: "Doesn't sync with this remote", none: "Nothing captured yet" },
+    sentence: { push: "Pushes settings", pull: "Pulls settings", excluded: "Doesn't sync with this remote", nothing: "Nothing to send" },
+    matchFold: (n) => `${n} item${n === 1 ? " matches" : "s match"} this remote`,
+    excludedFold: (n) => `${n} item${n === 1 ? " doesn't" : "s don't"} sync with this remote`,
+  };
 }
