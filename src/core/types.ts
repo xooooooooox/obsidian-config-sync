@@ -247,16 +247,53 @@ export interface GroupResult {
   stateNote?: { kind: "ok" | "warn"; text: string };
 }
 
-// excludeSelf (either type): true = Config Sync's own settings (the self item's store copy)
-// never travel to/from this remote — pull/push skip them and the comparison stops reporting
-// them. Absent = false = the self item travels like any other (same-lineage stores).
 // What the git transport answers a credential prompt with. The username matters: PAT-only hosts
 // ignore it, a self-hosted GitLab validates it — so it is carried, never assumed at the edge.
 export type GitAuth = { username: string; token: string };
 
+// Which way one thing travels with ONE remote. Not an ordered scale: "push" and "pull" are
+// incomparable, so a key's rule is a SUBSET of its item's allowed directions rather than a
+// stricter point on a line — intersectDirection below is the only correct combiner.
+export type RemoteDirection = "both" | "push" | "pull" | "none";
+
+export interface RemoteKeyRule {
+  direction: RemoteDirection;
+}
+
+export interface RemoteItemRule {
+  direction?: RemoteDirection;
+  // Key-name glob pattern -> that key's rule. Omitted when empty.
+  keys?: Record<string, RemoteKeyRule>;
+}
+
+// Section -> item id -> that item's rules for this remote. Two levels, never flattened: an item's
+// family and id are where it SITS, the same shape `items` and the store lock use.
+export type RemoteItems = Record<string, Record<string, RemoteItemRule>>;
+
+export function directionFlows(d: RemoteDirection): { push: boolean; pull: boolean } {
+  return { push: d === "both" || d === "push", pull: d === "both" || d === "pull" };
+}
+
+// The item's rule and the key's rule combine by INTERSECTION of the direction sets. A stored key
+// rule outside its item's subset stays as written and simply resolves to less here; nothing
+// rewrites it, so widening the item again restores what the user chose.
+export function intersectDirection(item: RemoteDirection, key: RemoteDirection): RemoteDirection {
+  const a = directionFlows(item);
+  const b = directionFlows(key);
+  const push = a.push && b.push;
+  const pull = a.pull && b.pull;
+  return push && pull ? "both" : push ? "push" : pull ? "pull" : "none";
+}
+
+// items: this device's direction rules for the remote, keyed section -> id (RemoteItems above).
+// It lives on the REMOTE and never on the item: a remote's name is this device's transport wiring,
+// and a rule written on the item would ride that item's store copy to the far vault and point at a
+// remote that does not exist there.
+// passphraseId: name of the keychain secret holding THIS REMOTE's store passphrase, for a remote
+// vault encrypting with a different one. Absent = the same passphrase as this vault.
 export type Remote =
-  | { name: string; type: "vault"; storePath: string; excludeSelf?: boolean } // storePath: absolute path of the store directory; leading ~ allowed
-  | { name: string; type: "git"; url: string; branch: string; subdir?: string; excludeSelf?: boolean; tokenId?: string; username?: string }; // subdir: store folder inside the repo; absent = repo root. tokenId: name of the keychain secret holding the token — the token itself never enters data.json. username: sent alongside it; absent = "token", which PAT-only hosts ignore but a self-hosted GitLab validates
+  | { name: string; type: "vault"; storePath: string; items?: RemoteItems; passphraseId?: string } // storePath: absolute path of the store directory; leading ~ allowed
+  | { name: string; type: "git"; url: string; branch: string; subdir?: string; items?: RemoteItems; passphraseId?: string; tokenId?: string; username?: string }; // subdir: store folder inside the repo; absent = repo root. tokenId: name of the keychain secret holding the token — the token itself never enters data.json. username: sent alongside it; absent = "token", which PAT-only hosts ignore but a self-hosted GitLab validates
 
 export type RibbonKey = "sync";
 export type RibbonButtons = Record<RibbonKey, boolean>;
