@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { capFileEntries, insyncLineText, excludedLineText, statusBarStatuses, moreFilesText, filesChangeLabel, visibleUnderFilter, leftoverPresentation, fateBucket, fateBucketCounts, partitionSection, legacyLockedFamilyBucket, RowBucket, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, runProgressLabel, showColdStartBanner, enablementCarrierFor, carrierIsSynced, TYPE_SECTION_TITLES, typeSectionForRow, sectionCountLabel, widestCountDigits, unifiedFooterSummary, fileEntryFor, stagedPayload, StageableRow, effectiveFate, remoteSections, onOffFlips, onOffLineText, onOffNarrationLines, familyRollup, FamilyMember, mergeFamilyChanges, foldCompanionEntries, groupExcludedHere, CAPTURE_ADDED_TOOLTIP, CAPTURE_UPDATED_TOOLTIP, CAPTURE_DELETED_TOOLTIP, APPLY_ADDED_TOOLTIP, APPLY_UPDATED_TOOLTIP, APPLY_DELETED_TOOLTIP } from "../src/ui/panelModel";
-import { GroupState, GroupStatus, OTHER_STORE_FILES_GROUP, RemoteDiffEntry, RemoteDiffFile } from "../src/core/status";
-import { FileChanges, SyncGroup, EVERYWHERE, perClass, StorageSection } from "../src/core/types";
+import { capFileEntries, insyncLineText, excludedLineText, statusBarStatuses, moreFilesText, filesChangeLabel, visibleUnderFilter, leftoverPresentation, fateBucket, fateBucketCounts, partitionSection, legacyLockedFamilyBucket, RowBucket, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, runProgressLabel, showColdStartBanner, enablementCarrierFor, carrierIsSynced, TYPE_SECTION_TITLES, typeSectionForRow, sectionCountLabel, widestCountDigits, unifiedFooterSummary, fileEntryFor, stagedPayload, StageableRow, effectiveFate, onOffFlips, onOffLineText, onOffNarrationLines, familyRollup, FamilyMember, mergeFamilyChanges, foldCompanionEntries, groupExcludedHere, CAPTURE_ADDED_TOOLTIP, CAPTURE_UPDATED_TOOLTIP, CAPTURE_DELETED_TOOLTIP, APPLY_ADDED_TOOLTIP, APPLY_UPDATED_TOOLTIP, APPLY_DELETED_TOOLTIP } from "../src/ui/panelModel";
+import { GroupState, GroupStatus, RemoteDiffEntry, RemoteDiffFile } from "../src/core/status";
+import { FileChanges, SyncGroup, EVERYWHERE, perClass } from "../src/core/types";
 import { Availability } from "../src/core/availability";
 import { Fate, FateInput, rowFate } from "../src/ui/fateModel";
 
@@ -647,62 +647,6 @@ describe("unifiedFooterSummary", () => {
 });
 
 // ── Remote pane C-grammar model ────────────────────────────────────────────────────────────────
-
-describe("remoteSections", () => {
-  const entry = (group: string): RemoteDiffEntry => ({ group, files: [] });
-
-  it("carriers (core-plugins, community-plugins) are extracted to their sections' onOff, never entries", () => {
-    const entries = [entry("core-plugins"), entry("community-plugins"), entry("app")];
-    const categoryOf = (g: string): StorageSection | "beta" => (g === "app" ? "obsidian" : "core");
-    const result = remoteSections(entries, categoryOf, (g) => g);
-    const core = result.find((s) => s.section === "core");
-    const community = result.find((s) => s.section === "community");
-    expect(core?.onOff).toEqual(entry("core-plugins"));
-    expect(core?.entries).toEqual([]);
-    expect(community?.onOff).toEqual(entry("community-plugins"));
-    expect(community?.entries).toEqual([]);
-  });
-
-  it("beta category lands in Community", () => {
-    const entries = [entry("plugin-x")];
-    const result = remoteSections(entries, () => "beta", (g) => g);
-    expect(result).toEqual([{ section: "community", onOff: null, entries: [entry("plugin-x")] }]);
-  });
-
-  it("custom lands in Your folders", () => {
-    const entries = [entry("my-folder")];
-    const result = remoteSections(entries, () => "custom", (g) => g);
-    expect(result).toEqual([{ section: "folders", onOff: null, entries: [entry("my-folder")] }]);
-  });
-
-  it("entries sort by displayNameOf (localeCompare)", () => {
-    const entries = [entry("b"), entry("a"), entry("c")];
-    const displayNameOf = (g: string): string => ({ a: "Alpha", b: "Beta", c: "Charlie" })[g] ?? g;
-    const result = remoteSections(entries, () => "custom", displayNameOf);
-    expect(result[0]?.entries.map((e) => e.group)).toEqual(["a", "b", "c"]);
-  });
-
-  it("sections with no onOff and no entries are absent from the result", () => {
-    expect(remoteSections([], () => "obsidian", (g) => g)).toEqual([]);
-  });
-
-  it("result is ordered by TYPE_SECTION_ORDER", () => {
-    const entries = [entry("my-folder"), entry("app"), entry("plugin-x"), entry("core-plugins")];
-    const categoryOf = (g: string): StorageSection | "beta" => {
-      if (g === "app") return "obsidian";
-      if (g === "plugin-x") return "community";
-      return "custom";
-    };
-    const result = remoteSections(entries, categoryOf, (g) => g);
-    expect(result.map((s) => s.section)).toEqual(["obsidian", "core", "community", "folders"]);
-  });
-
-  it("OTHER_STORE_FILES_GROUP sorts last within folders regardless of display name", () => {
-    const entries = [entry(OTHER_STORE_FILES_GROUP), entry("zzz-folder"), entry("aaa-folder")];
-    const result = remoteSections(entries, () => "custom", (g) => g);
-    expect(result[0]?.entries.map((e) => e.group)).toEqual(["aaa-folder", "zzz-folder", OTHER_STORE_FILES_GROUP]);
-  });
-});
 
 describe("onOffFlips", () => {
   it("community-plugins.json string-array format: on-at-remote / off-at-remote sets", () => {

@@ -1,8 +1,8 @@
 import { App, ButtonComponent, ItemView, Menu, Modal, Platform, WorkspaceLeaf, setIcon, setTooltip } from "obsidian";
 import { ApplyItem, CaptureItem, orderInstallsCatalogFirst, ProgressFn, StateAction } from "../core/ConfigSyncCore";
 import { lockRefFor, refItemId } from "../core/itemKeys";
-import { GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry, RemoteDiffFile, remoteDirectionCounts } from "../core/status";
-import { SECTION_LABELS, findGroupByName, SELF_GROUP_NAME, SELF_ITEM_REF, sectionForGroup, communityGroupName } from "../core/catalog";
+import { GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry, remoteDirectionCounts } from "../core/status";
+import { SECTION_LABELS, findGroupByName, SELF_GROUP_NAME, SELF_ITEM_REF, sectionForGroup } from "../core/catalog";
 import { itemDirection } from "../core/remoteRules";
 import { EVERYWHERE, FileChanges, FileSharing, GroupResult, hasChanges, ItemRef, Remote, Sharing, SyncGroup, StorageSection } from "../core/types";
 import { DeviceElementState } from "../core/deviceElements";
@@ -30,6 +30,7 @@ import { paintMergedControl } from "./mergedControl";
 import { nextCompact, sidebarNeededWidth, SidebarRowNeed } from "./sidebarFit";
 import { Availability } from "../core/availability";
 import { REUSE_MAX_AGE_MS } from "../external/readerCache";
+import { remoteFlowFor, remoteRowStatuses, skipRefsForSelection } from "../core/remoteRows";
 import { isWholeFileEncrypted } from "../core/modes";
 import { classifyRemoteFailure } from "../core/remoteFailure";
 import { GroupDisplayParts } from "../core/registry";
@@ -44,7 +45,6 @@ import {
   FamilyMember,
   FamilyRollup,
   familyRollup,
-  excludedLineText,
   fateBucket,
   fateBucketCounts,
   FateBucketCounts,
@@ -52,7 +52,6 @@ import {
   filesChangeLabel,
   foldCompanionEntries,
   groupExcludedHere,
-  insyncLineText,
   isValidPolicy,
   LEFTOVER_ADOPT_HINT,
   leftoverPresentation,
@@ -61,12 +60,9 @@ import {
   mergeFamilyChanges,
   moreFilesText,
   nosettingsLineText,
-  onOffFlips,
-  onOffLineText,
-  onOffNarrationLines,
   PanelFilter,
   presentedState,
-  remoteSections,
+  relationCopy,
   RowBucket,
   runProgressLabel,
   SectionKind,
@@ -149,6 +145,13 @@ import {
 // The one question this pane asks of a remote's rules: does Config Sync's own item travel with it at
 // all. "none" and only "none" earns the note — a one-way item still travels, and saying it stays out
 // would contradict the row above it.
+// A stand-in group for an item only the remote has: this device has no SyncGroup describing it, so
+// the row needs one to exist at all. It carries no `ref` — which is exactly why unticking such a row
+// cannot withhold it from a run (see renderRemoteActionBar): the transport's skip list speaks refs.
+function remoteOnlyGroup(name: string): SyncGroup {
+  return { name, path: "", type: "file", devices: "all" };
+}
+
 function selfStaysOut(remote: Remote): boolean {
   return itemDirection(remote.items, SELF_ITEM_REF) === "none";
 }
@@ -476,11 +479,10 @@ export class SyncCenterView extends ItemView {
   private expandedItems: Set<string> = new Set();
   // Which item cards' FILES row is expanded past its default collapsed
   // count-only line — keyed by group name, same "Set that survives repaints, starts fresh with a
-  // new view instance" idiom expandedItems/remoteFoldsOpen already use, so a repaint mid-review
+  // new view instance" idiom expandedItems already uses, so a repaint mid-review
   // doesn't re-collapse a row the user just opened.
   private expandedFileRows: Set<string> = new Set();
-  // Which file entries have their inline diff open — `{group}::{rel}`, the same idiom
-  // remoteFoldsOpen already uses for the remote pane's inline diffs, and for the same reason: a
+  // Which file entries have their inline diff open — `{group}::{rel}`: a
   // repaint rebuilds the list, and a diff held only in a closure would vanish with it. It became
   // load-bearing once Resolve moved INTO the diff toolbar: picking a side re-renders, and closing
   // the evidence the moment someone acts on it is the opposite of what that control is for.
@@ -491,12 +493,6 @@ export class SyncCenterView extends ItemView {
   // SettingTab's renderCardBodyInto follows, and the difference between "the preview changed" and
   // "the card blinked". Non-null only for the duration of one refreshItemRow.
   private adoptedDiffPanels: Map<string, HTMLElement> | null = null;
-  // Remote pane fold state: survives repaints (periodic check, notify) the way
-  // expandedItems/typeSectionOpen do for the main list — a repaint rebuilds the pane fresh, so
-  // without this the on/off line, object-row folds, and open inline diffs would collapse on every
-  // tick. Keys: `{remoteName}::{group}` (row fold), `{remoteName}::{group}::onoff` (on/off line),
-  // `{remoteName}::{group}::{itemRel}` (inline diff). Never persisted to disk; never pruned.
-  private remoteFoldsOpen: Set<string> = new Set();
   private renderGen = 0;
   private filter: PanelFilter = "all";
   // Two orthogonal axes — see panelModel's PanelRelation/PanelDestination. `relation` is what the
@@ -951,6 +947,67 @@ export class SyncCenterView extends ItemView {
   private deriveRow(r: StatusRow): RowDerivation {
     const cached = this.rowDerivationCache.get(r.group.name);
     if (cached !== undefined) return cached;
+    const relation = this.relation;
+    const derived = relation.kind === "remote" ? this.deriveRemoteRow(r, relation.name) : this.deriveDeviceRow(r);
+    this.rowDerivationCache.set(r.group.name, derived);
+    return derived;
+  }
+
+  // The remote relation's derivation. The availability ladder is not consulted at all — whether the
+  // store's copy differs from the remote's has nothing to do with what THIS device has installed
+  // (spec 5.1) — so every availability-fed input stays at its neutral value, and the sentence comes
+  // from the relation's own words (relationCopy) rather than from the device verbs. The rollup is
+  // single-member by construction: the comparison already folded companions into their parent, and
+  // this device's own statuses say nothing about what the remote holds.
+  private deriveRemoteRow(r: StatusRow, remoteName: string): RowDerivation {
+    const copy = relationCopy({ kind: "remote", name: remoteName });
+    const ref = this.itemRefFor(r.group.name);
+    const remote = this.host.remotes().find((x) => x.name === remoteName);
+    // "Excluded" under this relation is the remote's own rule, not a device rule: an item this
+    // remote neither pushes nor pulls.
+    const excluded = ref !== null && remote !== undefined && itemDirection(remote.items, ref) === "none";
+    const state = r.status.state;
+    const direction: Direction | null = excluded ? null : state === "store-newer" ? "apply" : state === "local-changed" ? "capture" : null;
+    const input: FateInput = {
+      direction,
+      conflict: false,
+      nothingYet: false,
+      installed: true,
+      hasUpdate: false,
+      carrierSynced: false,
+      storeListOn: null,
+      locallyOn: false,
+      ruleSharing: EVERYWHERE,
+      localException: null,
+      deviceClass: Platform.isMobile ? "mobile" : "desktop",
+      desktopOnly: false,
+      excludedHere: excluded,
+      optedOutHere: false,
+      hasSettingsPayload: direction !== null,
+      versionAhead: null,
+      special: r.group.type === "folder" ? "folder" : null,
+      folderFileCount: r.status.changes !== undefined ? this.folderChangeCount(r.status.changes) : null,
+      encrypted: isWholeFileEncrypted(r.group),
+    };
+    const fate: Fate = {
+      glyph: direction === "apply" ? "↓" : direction === "capture" ? "↑" : "—",
+      sentence: excluded
+        ? copy.sentence.excluded
+        : direction === "apply"
+          ? copy.sentence.pull
+          : direction === "capture"
+            ? copy.sentence.push
+            : copy.bucket.ok,
+      chips: [],
+      stageable: direction !== null,
+      turnsOn: false,
+      nothingYet: false,
+      excluded,
+    };
+    return { rollup: familyRollup([{ name: r.group.name, state, fileCount: this.memberFileCount(r) }]), input, fate, bucket: fateBucket(fate) };
+  }
+
+  private deriveDeviceRow(r: StatusRow): RowDerivation {
     const rollup = this.computeFamilyRollup(r);
     const input = this.computeFateInput(r, rollup);
     const locked = this.presState(r) === "locked";
@@ -958,9 +1015,7 @@ export class SyncCenterView extends ItemView {
       ? { glyph: "—", sentence: "Encrypted — set the passphrase in settings to compare", chips: ["encrypted"], stageable: false, turnsOn: false, nothingYet: false, excluded: false }
       : rowFate(input);
     const bucket: RowBucket = locked ? legacyLockedFamilyBucket(rollup.state) : fateBucket(fate);
-    const derived: RowDerivation = { rollup, input, fate, bucket };
-    this.rowDerivationCache.set(r.group.name, derived);
-    return derived;
+    return { rollup, input, fate, bucket };
   }
 
   // Memoized per render cycle (cleared alongside
@@ -972,15 +1027,8 @@ export class SyncCenterView extends ItemView {
   // always correct.
   private rows(): StatusRow[] {
     if (this.rowsCache !== null) return this.rowsCache;
-    const out: StatusRow[] = [];
-    for (const group of this.familyGroups()) {
-      // config-sync manages itself in its own sidebar destination (renderConfigSyncMode), so it
-      // never appears in the item list, sections, filter pills, or footer totals — all of which
-      // derive from this row set.
-      if (group.name === SELF_GROUP_NAME) continue;
-      const status = this.statuses.get(group.name);
-      if (status !== undefined) out.push({ group, status });
-    }
+    const relation = this.relation;
+    const out = relation.kind === "remote" ? this.remoteRows(relation.name) : this.deviceRows();
     // The store manifest accretes in capture order; the view sorts deterministically — type
     // section rank, then display name — so e.g. core items never interleave the Obsidian
     // ones. Ranking by TYPE_SECTION_ORDER rather than raw ITEM_SECTION_ORDER merges beta into
@@ -996,6 +1044,46 @@ export class SyncCenterView extends ItemView {
     });
     this.rowsCache = out;
     return out;
+  }
+
+  private deviceRows(): StatusRow[] {
+    const out: StatusRow[] = [];
+    for (const group of this.familyGroups()) {
+      // config-sync manages itself in its own sidebar destination (renderConfigSyncMode), so it
+      // never appears in the item list, sections, filter pills, or footer totals.
+      if (group.name === SELF_GROUP_NAME) continue;
+      const status = this.statuses.get(group.name);
+      if (status !== undefined) out.push({ group, status });
+    }
+    return out;
+  }
+
+  // The remote relation's rows, in the same shape the device relation produces (core/remoteRows.ts)
+  // — one list, one renderer. Empty while this remote's comparison is still running; renderItemMode
+  // paints the progress block instead of a list in that window.
+  private remoteRows(name: string): StatusRow[] {
+    const result = this.remoteResultFor(name);
+    if (result === null) return [];
+    // Companions fold into their parent BEFORE the rows are built, the same way familyGroups() folds
+    // them out of the device list — one row per family under either relation.
+    const folded = foldCompanionEntries(result.entries, (g) => this.host.companionParentOf(g));
+    const flow = remoteFlowFor(this.host.remoteCheck(name)?.check.state ?? "unknown");
+    // config-sync's own item keeps its device-relation face (the pinned self row) for now; its
+    // remote face — an ordinary, settable row — is Plan 2c's.
+    const localGroupNames = this.familyGroups().map((g) => g.name).filter((n) => n !== SELF_GROUP_NAME);
+    return remoteRowStatuses({ entries: folded, flow, localGroupNames })
+      .filter((status) => status.group !== SELF_GROUP_NAME)
+      .map((status) => ({ group: findGroupByName(this.groups, status.group) ?? remoteOnlyGroup(status.group), status }));
+  }
+
+  // This remote's settled comparison, if the one in flight is both current (same remote, same
+  // reader-cache generation) and fresh — the same key and freshness rule the compare's own
+  // re-attach uses, so the list and the progress block never disagree about which one it is.
+  private remoteResultFor(name: string): RemoteCompareResult | null {
+    const c = this.inflightCompare;
+    if (c === null || c.result === null) return null;
+    if (c.key !== `${name}:${this.host.readerGeneration()}`) return null;
+    return Date.now() - c.startedAt <= REUSE_MAX_AGE_MS ? c.result : null;
   }
 
   // A group's sidebar section: the catalog's stored section, except community plugins tracked in
@@ -1296,14 +1384,11 @@ export class SyncCenterView extends ItemView {
       this.renderHistoryMode(main);
       return;
     }
-    if (this.relation.kind === "remote") {
-      const name = this.relation.name;
-      const remote = this.host.remotes().find((x) => x.name === name);
-      if (remote !== undefined) {
-        this.renderRemoteMode(main, remote);
-        return;
-      }
-      this.relation = { kind: "device" }; // remote vanished (settings change) — fall back
+    // A remote the settings no longer have leaves the user stranded on a relation that cannot be
+    // drawn — fall back to this device. Every other relation lands in the same item list.
+    const relation = this.relation;
+    if (relation.kind === "remote" && !this.host.remotes().some((x) => x.name === relation.name)) {
+      this.relation = { kind: "device" };
     }
     this.renderItemMode(main);
   }
@@ -2171,6 +2256,18 @@ export class SyncCenterView extends ItemView {
   }
 
   private renderItemMode(main: HTMLElement): void {
+    const relation = this.relation;
+    const copy = relationCopy(relation);
+    // A remote's list cannot be drawn before its comparison answers, so that window gets the
+    // progress block instead — the same one the retired remote pane drew, in the list's place.
+    if (relation.kind === "remote") {
+      const remote = this.host.remotes().find((x) => x.name === relation.name);
+      if (remote !== undefined && this.remoteResultFor(remote.name) === null) {
+        this.renderResultStrip(main);
+        void this.renderRemoteComparing(main, remote);
+        return;
+      }
+    }
     // Newer-schema refusal, in the cold-start banner's own structure with no primary action: there is
     // nothing to click here, and no dismiss either — this is a standing condition the user can
     // only clear by updating Config Sync, not a nudge to be waved away. It takes the banner slot
@@ -2178,13 +2275,13 @@ export class SyncCenterView extends ItemView {
     // The wording is the same sentence `SCHEMA_FUTURE_NOTICE`
     // (core/settingsMigration.ts) carries into every refused write; the split below is only the
     // bold-lead presentation the cold-start banner already uses, so the two must stay identical.
-    const schemaStop = this.host.schemaStop();
+    const schemaStop = relation.kind === "device" ? this.host.schemaStop() : null;
     if (schemaStop !== null) {
       const banner = main.createDiv({ cls: "config-sync-coldstart-banner" });
       const txt = banner.createDiv({ cls: "config-sync-coldstart-text" });
       txt.createSpan({ cls: "config-sync-coldstart-head", text: "These settings were written by a newer Config Sync. " });
       txt.createSpan({ text: "Update Config Sync on this device to open them. Nothing has been changed." });
-    } else if (this.selfInfo !== null && showColdStartBanner(this.selfInfo.state, [...this.statuses.values()], this.host.coldStartDismissed())) {
+    } else if (relation.kind === "device" && this.selfInfo !== null && showColdStartBanner(this.selfInfo.state, [...this.statuses.values()], this.host.coldStartDismissed())) {
       const banner = main.createDiv({ cls: "config-sync-coldstart-banner" });
       const txt = banner.createDiv({ cls: "config-sync-coldstart-text" });
       txt.createSpan({ cls: "config-sync-coldstart-head", text: "This device hasn't synced with the store yet. " });
@@ -2241,17 +2338,17 @@ export class SyncCenterView extends ItemView {
       const allLabel = this.searching() ? `All ${pillRows.length} / ${pillPool.length}` : `All ${pillPool.length}`;
       const defs: { key: PanelFilter; label: string; short: string; action?: SyncAction; foldKind?: FoldKind; count?: number }[] = [
         { key: "all", label: allLabel, short: allLabel },
-        { key: "capture", label: `To capture ${counts.up}`, short: "", action: "capture", count: counts.up },
-        { key: "apply", label: `To apply ${counts.down}`, short: "", action: "apply", count: counts.down },
-        { key: "ok", label: `In sync ${counts.ok}`, short: "", foldKind: "insync", count: counts.ok },
+        { key: "capture", label: `${copy.bucket.capture} ${counts.up}`, short: "", action: "capture", count: counts.up },
+        { key: "apply", label: `${copy.bucket.apply} ${counts.down}`, short: "", action: "apply", count: counts.down },
+        { key: "ok", label: `${copy.bucket.ok} ${counts.ok}`, short: "", foldKind: "insync", count: counts.ok },
         // "Not synced here" — deliberately not "Skipped"
         // (that word is already run-event vocabulary, `⚠ update skipped` ConfigSyncCore.ts, and
         // this is a standing state, not a run outcome). Empty state: N=0 renders neither this pill
         // nor the matching fold (matching ✓/○'s fold-suppression precedent).
         ...(counts.excluded > 0
-          ? [{ key: "excluded" as const, label: `Not synced here ${counts.excluded}`, short: "", foldKind: "excluded" as const, count: counts.excluded }]
+          ? [{ key: "excluded" as const, label: `${copy.bucket.excluded} ${counts.excluded}`, short: "", foldKind: "excluded" as const, count: counts.excluded }]
           : []),
-        { key: "none", label: `No settings yet ${counts.none}`, short: "", foldKind: "nosettings", count: counts.none },
+        { key: "none", label: `${copy.bucket.none} ${counts.none}`, short: "", foldKind: "nosettings", count: counts.none },
       ];
       for (const d of defs) {
         const pill = pillRow.createEl("button", { cls: `config-sync-fpill${this.filter === d.key ? " is-active" : ""}`, attr: { "aria-label": d.label } });
@@ -2272,7 +2369,7 @@ export class SyncCenterView extends ItemView {
       // actually has orphans this device may judge (the adoption gate hides it with the section),
       // amber, last in the row. Click narrows the view to the Leftover section alone; the store
       // orphans behind it are a section, never rows, so no bucket answers this filter.
-      if (!this.searching() && this.leftoverPresentation() === "section") {
+      if (relation.kind === "device" && !this.searching() && this.leftoverPresentation() === "section") {
         const n = this.leftovers.length;
         const label = `Leftover ${n}`;
         const pill = pillRow.createEl("button", {
@@ -2306,7 +2403,7 @@ export class SyncCenterView extends ItemView {
       // focused direction filter or a search pass). While the plugin's own configuration is still
       // pending adoption, "leftover" is not a judgment this device can make: the section gives
       // way to one quiet hint line (DESIGN.md's Leftover section).
-      if ((this.filter === "all" || this.filter === "leftover") && !this.searching()) {
+      if (relation.kind === "device" && (this.filter === "all" || this.filter === "leftover") && !this.searching()) {
         const lo = this.leftoverPresentation();
         if (lo === "section") this.renderLeftoverSection(sectionsHost);
         else if (lo === "hint") sectionsHost.createDiv({ cls: "config-sync-leftover-hint", text: LEFTOVER_ADOPT_HINT });
@@ -2316,6 +2413,14 @@ export class SyncCenterView extends ItemView {
     renderPills();
     renderSectionsBody();
     this.wireGlobalSelectAll(selectAll, pillPool);
+    // Until 2c gives config-sync's own item its remote face, this note is the only thing that says
+    // the item is held back from this remote — the list itself has no row for it.
+    if (relation.kind === "remote") {
+      const remote = this.host.remotes().find((x) => x.name === relation.name);
+      if (remote !== undefined && selfStaysOut(remote)) {
+        main.createDiv({ cls: "config-sync-remote-selfnote", text: "Config Sync's own settings stay out of this remote" });
+      }
+    }
 
     // The compact search co-renders everything except its own input element, so the soft
     // keyboard stays open while pills, sections and select-all track the search.
@@ -2379,7 +2484,7 @@ export class SyncCenterView extends ItemView {
   // cannot see its neighbours, and its hint depends on them.
   private renderTypeSection(host: HTMLElement, ts: TypeSection, inSection: StatusRow[], stagedSections: number): void {
     const { rows, visible } = this.typeSectionRows(inSection, ts);
-    const showSelf = ts === "community" && this.selfInfo !== null && this.filter === "all" && !this.searching();
+    const showSelf = ts === "community" && this.relation.kind === "device" && this.selfInfo !== null && this.filter === "all" && !this.searching();
     if (visible.length === 0 && !showSelf) return; // sections with nothing to show hide entirely
     const filtered = this.filter !== "all" || this.searching();
     // `open` reads ONLY typeSectionOpen — a filter/search never forces
@@ -2506,9 +2611,10 @@ export class SyncCenterView extends ItemView {
         this.renderSectionTrailingLine(body, {
           ts, rows, openSet, foldId: kind, icon: FOLD_ICON[kind], colorCls: FOLD_ICON_COLOR_CLASS[kind], text, note: null,
         });
+      const copy = relationCopy(this.relation);
       const fateFoldUi: Record<FateFold, { open: Set<string>; text: (n: number) => string }> = {
-        insync: { open: sessionUi.insyncOpen, text: insyncLineText },
-        excluded: { open: sessionUi.excludedOpen, text: excludedLineText },
+        insync: { open: sessionUi.insyncOpen, text: copy.matchFold },
+        excluded: { open: sessionUi.excludedOpen, text: copy.excludedFold },
         nosettings: { open: sessionUi.nosettingsOpen, text: nosettingsLineText },
       };
       for (const fold of FATE_FOLD_ORDER) {
@@ -2516,8 +2622,11 @@ export class SyncCenterView extends ItemView {
         fateFold(fateRows(fold), ui.open, fold, ui.text);
       }
       // Availability last, in escalating "can't do anything here" order — the four titles and notes
-      // are the ones 987eacf deleted with the sections they belonged to.
-      for (const kind of AVAILABILITY_FOLD_ORDER) {
+      // are the ones 987eacf deleted with the sections they belonged to. The whole axis is the
+      // device relation's alone (spec 5.1): whether the store's copy differs from a remote's has
+      // nothing to do with what this device has installed, so under a remote there is nothing here
+      // to fold.
+      for (const kind of this.relation.kind === "remote" ? [] : AVAILABILITY_FOLD_ORDER) {
         this.renderSectionTrailingLine(body, {
           ts,
           rows: availabilityRows(kind),
@@ -3817,6 +3926,11 @@ export class SyncCenterView extends ItemView {
   }
 
   private renderActionBar(macro: HTMLElement): void {
+    const relation = this.relation;
+    if (relation.kind === "remote") {
+      this.renderRemoteActionBar(macro, relation.name);
+      return;
+    }
     const bar = macro.createDiv({ cls: "config-sync-actionbar" });
     // ONE selection reading feeds both the summary and the button labels. The payload arrays below
     // are what the run executes, not what the buttons count: `stagedPayload` fans a staged family
@@ -3933,22 +4047,61 @@ export class SyncCenterView extends ItemView {
     applyW?.btn.onClick(() => run(applyW.btn, capW?.btn ?? null, "Applying", this.applyPayload(), (n, p) => this.host.applyItems(n, p)));
   }
 
-  private renderRemoteMode(main: HTMLElement, remote: Remote): void {
-    this.renderResultStrip(main);
-    const check = this.host.remoteCheck(remote.name)?.check;
-    const icon = this.remoteIcon(check);
-    main.createDiv({
-      cls: "config-sync-remote-head",
-      text: `${remote.name} · captured ${isoAge(check?.remoteCapturedAt ?? null)} — ${icon.tip}`,
-    });
-    const prog = this.host.remoteRefreshProgress();
-    if (prog !== null) {
-      const agg = main.createDiv({ cls: "config-sync-cmp-agg" });
-      agg.createSpan({ cls: "config-sync-cmp-spinner" });
-      agg.createSpan({ text: `Checking ${prog.total} remote${prog.total === 1 ? "" : "s"}… ${prog.done} done` });
+  // The remote relation's action bar. The checkbox means the same thing it means under the device
+  // relation — "does this run include this row" — and each direction runs only the rows ticked on
+  // its own side (spec 5.3): `Pull N` the ones waiting to come in, `Push N` the ones waiting to go
+  // out. The rows left unticked become the transport's own skip list, which planImport/pushExternal
+  // have taken since schema v5, so the run itself needs no new concept.
+  //
+  // Known boundary: an item only the remote has has no local SyncGroup and therefore no ItemRef, so
+  // it cannot enter `allRefs` and unticking it withholds nothing — it travels either way. The skip
+  // list is keyed by ref and this view has no ref to give for such a row; Plan 3 gives those items
+  // a ref of their own when it takes on "items only the other side has".
+  private renderRemoteActionBar(macro: HTMLElement, name: string): void {
+    const remote = this.host.remotes().find((x) => x.name === name);
+    if (remote === undefined) return;
+    const bar = macro.createDiv({ cls: "config-sync-actionbar" });
+    const rows = this.rows();
+    const refsOf = (subset: StatusRow[]): ItemRef[] => subset.map((r) => r.group.ref).filter((x): x is ItemRef => x !== undefined);
+    const allRefs = refsOf(rows);
+    const stagedIn = (bucket: "apply" | "capture"): StatusRow[] =>
+      rows.filter((r) => this.selected.has(r.group.name) && this.rowBucket(r) === bucket);
+
+    const run = async (btn: ButtonComponent, dir: "pull" | "push", staged: StatusRow[]): Promise<void> => {
+      btn.setDisabled(true);
+      const skip = skipRefsForSelection({ allRefs, selectedRefs: refsOf(staged) });
+      const results = dir === "pull" ? await this.host.pullFrom(remote, skip) : await this.host.pushTo(remote, skip);
+      this.setLastRun(dir, remote.name, results);
+      this.selected.clear();
+      await this.reload();
+    };
+
+    const pullRows = stagedIn("apply");
+    const pushRows = stagedIn("capture");
+    // Same rule as the device relation's footer line (unifiedFooterSummary), in this relation's
+    // words: the line earns its space only when no single button totals the selection.
+    const total = pullRows.length + pushRows.length;
+    const summary = total === 0 ? "Nothing selected" : pullRows.length > 0 && pushRows.length > 0 ? `${total} selected · ${pushRows.length} push` : "";
+    if (summary !== "") bar.createSpan({ cls: "config-sync-staged-count", text: summary });
+    bar.createDiv({ cls: "config-sync-rule-spacer" });
+    if (pullRows.length > 0) {
+      const pull = new ButtonComponent(bar);
+      pull.setCta();
+      renderActionIcon(pull.buttonEl, "pull");
+      pull.buttonEl.appendText(` Pull ${pullRows.length} item${pullRows.length === 1 ? "" : "s"}`);
+      pull.buttonEl.addClass("config-sync-remote-btn", "is-pull");
+      pull.setDisabled(this.running);
+      pull.onClick(() => void run(pull, "pull", pullRows));
     }
-    const detail = main.createDiv({ cls: "config-sync-report-files config-sync-remote-pane" });
-    void this.renderRemoteDetail(detail, remote, check);
+
+    if (pushRows.length > 0) {
+      const push = new ButtonComponent(bar);
+      renderActionIcon(push.buttonEl, "push");
+      push.buttonEl.appendText(` Push ${pushRows.length} item${pushRows.length === 1 ? "" : "s"}`);
+      push.buttonEl.addClass("config-sync-remote-btn", "is-push");
+      push.setDisabled(this.running);
+      push.onClick(() => void run(push, "push", pushRows));
+    }
   }
 
   private remoteIcon(check: RemoteCheck | undefined): { glyph: string; cls: string; tip: string; action?: SyncAction } {
@@ -3973,22 +4126,19 @@ export class SyncCenterView extends ItemView {
   // restarting it — restarting would abandon the in-flight clone (whose git subprocess runs on
   // regardless) and reset the elapsed indicator to 0.0s;
   // a new generation (refresh completed, remote edited) naturally starts a fresh one.
-  // A compare that already settled successfully stays cached on the entry (startRemoteCompare)
-  // so a re-render while OTHER remotes are still being checked paints the stored result directly
-  // instead of flashing the progress UI and re-comparing again.
-  private async renderRemoteDetail(detail: HTMLElement, remote: Remote, check: RemoteCheck | undefined): Promise<void> {
-    detail.empty();
+  // A compare that already settled successfully stays cached on the entry (startRemoteCompare) and
+  // this method is never reached for it: renderItemMode asks remoteResultFor first and draws the
+  // list. Settling here therefore ends in a re-render, which finds that cached result and paints
+  // rows — this method only ever owns the waiting and the failure.
+  private async renderRemoteComparing(main: HTMLElement, remote: Remote): Promise<void> {
+    const detail = main.createDiv({ cls: "config-sync-report-files" });
     const gen = this.renderGen;
     const key = `${remote.name}:${this.host.readerGeneration()}`;
     let reattach = this.inflightCompare !== null && this.inflightCompare.key === key ? this.inflightCompare : null;
-
+    // A same-generation cached result older than REUSE_MAX_AGE_MS is stale (remoteResultFor already
+    // refused it, which is why this method is running) — drop the entry so a fresh compare starts
+    // instead of re-attaching to the settled one and returning the same stale answer forever.
     if (reattach !== null && reattach.result !== null) {
-      if (Date.now() - reattach.startedAt <= REUSE_MAX_AGE_MS) {
-        this.paintRemoteCompareResult(detail, remote, check, reattach.result);
-        return;
-      }
-      // A same-generation cached result older than REUSE_MAX_AGE_MS is stale — fall through
-      // to start a fresh compare (below) instead of serving it forever within the generation.
       this.inflightCompare = null;
       reattach = null;
     }
@@ -4025,9 +4175,8 @@ export class SyncCenterView extends ItemView {
     const active = reattach ?? this.startRemoteCompare(remote, key, startedAt, onPhase);
     active.ticker = ticker;
 
-    let dd: RemoteCompareResult;
     try {
-      dd = await active.promise;
+      await active.promise;
       window.clearInterval(ticker);
       if (active.ticker === ticker) active.ticker = null;
     } catch (e) {
@@ -4058,7 +4207,7 @@ export class SyncCenterView extends ItemView {
       return;
     }
     if (gen !== this.renderGen || this.relation.kind !== "remote" || this.relation.name !== remote.name) return;
-    this.paintRemoteCompareResult(detail, remote, check, dd);
+    this.renderMainRegion();
   }
 
   // Starts exactly one deepDiff for (remote, key) and stores it on this.inflightCompare. On
@@ -4094,319 +4243,6 @@ export class SyncCenterView extends ItemView {
     return entry;
   }
 
-  private paintRemoteCompareResult(detail: HTMLElement, remote: Remote, check: RemoteCheck | undefined, dd: RemoteCompareResult): void {
-    detail.empty();
-    const { entries, lockDiffers, remoteLabels } = dd;
-    // Local resolution wins throughout — the view's own in-memory group label
-    // first, then this device's own (possibly backfill-healed) local lock label, matching
-    // displayName's own fallback order — and only then the remote's lock label, for entries this
-    // device has never captured a label for at all (e.g. remote-only groups).
-    const storedLabel = (g: string): string | undefined =>
-      findGroupByName(this.groups, g)?.label ?? this.host.localLockLabel(g) ?? remoteLabels[g];
-
-    // Companion entries fold into their parent's BEFORE sectioning: the remote pane
-    // shows the same one-entry-per-family grammar the main list's rows() does — the
-    // sections, on/off extraction, and the "N more items match" summary below all run
-    // over the folded set.
-    const folded = foldCompanionEntries(entries, (g) => this.host.companionParentOf(g));
-    const changed = folded.filter((e) => e.files.length > 0);
-    // Mirrors the main list's four fixed type sections — same section vocabulary,
-    // same on/off-carrier extraction, so a remote diff and the item list never disagree on where
-    // a plugin lives.
-    for (const sec of remoteSections(changed, (g) => this.itemSectionOf(g), (g) => this.fullName(g, storedLabel(g)))) {
-      const n = sec.entries.length + (sec.onOff !== null ? 1 : 0);
-      // No chevron/checkbox/carrier-chip/click handler here: this header is read-only summary,
-      // never a control — a dead affordance reads as a broken one.
-      const fold = detail.createDiv({ cls: `config-sync-section is-typesection is-open is-static is-${sec.section}` });
-      const head = fold.createDiv({ cls: "config-sync-section-head" });
-      head.createSpan({ cls: "config-sync-section-title", text: TYPE_SECTION_TITLES[sec.section] });
-      head.createSpan({ cls: "config-sync-pill is-neutral", text: sectionCountLabel(n, n, false) });
-      if (sec.onOff !== null) this.renderRemoteOnOff(fold, sec.onOff, remote.name, storedLabel);
-      for (const e of sec.entries) this.renderRemoteDiffEntry(fold, e, remote.name, storedLabel(e.group));
-    }
-
-    const state = check?.state ?? "unknown";
-    const pullAligned = state === "remote-newer" || state === "same" || state === "unknown" || state === "no-store";
-
-    // "N more items match" line: groups present in this device's list minus the entries that differ
-    // (excludes the "" store-metadata pseudo-entry and any remote-only groups from the count).
-    const changedNames = new Set(changed.map((e) => e.group));
-    const matchNames = this.familyGroups()
-      // The excluded self item was never compared — it is neither changed nor matched, and
-      // listing it two lines above the "stays out of this remote" note would contradict it.
-      .filter((g) => !changedNames.has(g.name) && !(selfStaysOut(remote) && g.name === SELF_GROUP_NAME))
-      .map((g) => this.fullName(g.name, g.label));
-    const matched = matchNames.length;
-    if (entries.length === 0) {
-      detail.createDiv({
-        cls: "config-sync-unchanged",
-        text: lockDiffers
-          ? "✓ contents match — remote has newer version info; Pull refreshes it"
-          : "✓ remote matches the local store",
-      });
-    } else {
-      // The aligned action's REAL payload, then what it will not do: Pull is
-      // additive (never removes local files); Push mirrors (removes remote-only files).
-      const allFiles = changed.flatMap((e) => e.files);
-      const incoming = allFiles.filter((f) => f.kind !== "deleted").length;
-      const keptLocal = allFiles.filter((f) => f.kind === "deleted").length;
-      const outgoing = allFiles.filter((f) => f.kind !== "added").length;
-      const remoteOnly = allFiles.filter((f) => f.kind === "added").length;
-      const summary = detail.createDiv({ cls: "config-sync-remote-summary" });
-      summary.createDiv({
-        text: pullAligned
-          ? incoming === 0 ? "Pull would bring nothing" : `Pull would bring ${incoming} file${incoming === 1 ? "" : "s"}`
-          : outgoing === 0 ? "Push would send nothing" : `Push would send ${outgoing} file${outgoing === 1 ? "" : "s"}`,
-      });
-      if (pullAligned && keptLocal > 0) {
-        summary.createDiv({
-          cls: "config-sync-remote-kept",
-          text: keptLocal === 1
-            ? `1 file exists only in your store — Pull never removes files; Push would add it to ${remote.name}.`
-            : `${keptLocal} files exist only in your store — Pull never removes files; Push would add them to ${remote.name}.`,
-        });
-      }
-      if (!pullAligned && remoteOnly > 0) {
-        summary.createDiv({
-          cls: "config-sync-remote-kept",
-          text: remoteOnly === 1
-            ? `1 file exists only at ${remote.name} — Push would remove it there; Pull would bring it here.`
-            : `${remoteOnly} files exist only at ${remote.name} — Push would remove them there; Pull would bring them here.`,
-        });
-      }
-      if (matched > 0) {
-        const line = detail.createDiv({ cls: "config-sync-unchanged" });
-        line.appendText(`✓ ${matched} more item${matched === 1 ? " matches" : "s match"}`);
-        // A one-way reveal (never re-collapses) — same static FOLD glyph as renderUnifiedFiles's
-        // "N more files" line.
-        setIcon(line.createSpan({ cls: "config-sync-row-chevron" }), "chevron-right");
-        line.addEventListener("click", () => line.setText(`✓ ${matchNames.join(" · ")}`));
-      }
-    }
-    if (selfStaysOut(remote)) {
-      detail.createDiv({ cls: "config-sync-remote-selfnote", text: "Config Sync's own settings stay out of this remote" });
-    }
-
-    // lockDiffers alone still gives Pull something to do (refresh the newer version info),
-    // so it keeps the buttons live even when every file's contents match.
-    this.renderRemoteButtons(detail, remote, pullAligned, entries.length === 0 && !lockDiffers);
-  }
-
-  // The pinned on/off line: a section's core-plugins/community-plugins entry
-  // never renders as an ordinary row — its file diff IS a member on/off delta, so this is the
-  // only place that delta shows. Sums onOffFlips over every file the carrier entry carries
-  // (normally exactly one) rather than assuming a single file.
-  private renderRemoteOnOff(host: HTMLElement, e: RemoteDiffEntry, remoteName: string, storedLabel: (g: string) => string | undefined): void {
-    const onAtRemote: string[] = [];
-    const offAtRemote: string[] = [];
-    let remoteOnCount = 0;
-    let localOnCount = 0;
-    for (const f of e.files) {
-      const flips = onOffFlips(f.local, f.remote);
-      onAtRemote.push(...flips.onAtRemote);
-      offAtRemote.push(...flips.offAtRemote);
-      remoteOnCount += flips.remoteOnCount;
-      localOnCount += flips.localOnCount;
-    }
-    onAtRemote.sort();
-    offAtRemote.sort();
-    const n = onAtRemote.length + offAtRemote.length;
-    const key = `${remoteName}::${e.group}::onoff`;
-    const line = host.createDiv({ cls: "config-sync-remote-onoff" });
-    const fold = host.createDiv({ cls: "config-sync-remote-fliplist" });
-    // Content is always rebuilt from the CURRENT compare result — no cached-`built`
-    // divergence between a fresh render that opens because the key persisted and a click that
-    // opens it live; both paths call this.
-    const buildFold = (): void => {
-      fold.empty();
-      // Element id → group name by carrier: community carrier ids compile to
-      // `plugin-<id>` groups; core carrier ids ARE the group name — then the same
-      // storedLabel → displayParts chain the section's own rows resolve names through, so
-      // narration names never disagree with a row's display name.
-      const displayOf = (elementId: string): string => {
-        const group = e.group === "community-plugins" ? communityGroupName(elementId) : elementId;
-        return this.host.displayParts(group, storedLabel(group)).label;
-      };
-      const narration = onOffNarrationLines(onAtRemote, offAtRemote, remoteOnCount, localOnCount, displayOf, remoteName);
-      for (const l of [narration.on, narration.off]) {
-        if (l === null) continue;
-        const row = fold.createDiv();
-        row.appendText(l.prefix);
-        row.createSpan({ cls: "config-sync-remote-flip-value", text: l.value });
-      }
-      this.renderRemoteFileRows(fold, e, remoteName);
-    };
-    let open = this.remoteFoldsOpen.has(key);
-    line.appendText(onOffLineText(n));
-    const chev = renderFoldChevron(line, open, null);
-    if (open) buildFold();
-    else fold.hide();
-    line.addEventListener("click", () => {
-      open = !open;
-      setFoldOpen(chev, open);
-      if (!open) {
-        fold.hide();
-        this.remoteFoldsOpen.delete(key);
-        return;
-      }
-      buildFold();
-      fold.show();
-      this.remoteFoldsOpen.add(key);
-    });
-  }
-
-  private renderRemoteDiffEntry(detail: HTMLElement, e: RemoteDiffEntry, remoteName: string, storedLabel?: string): void {
-    // Honest, never pretend the item doesn't exist — an item THIS device has
-    // opted out of gets the same excluded presentation here it gets in the main list, no fold
-    // (there is nothing to diff into: this device never reads or writes it either direction).
-    if (this.host.deviceOptedOut(e.group)) {
-      const row = detail.createDiv({ cls: "config-sync-report-row config-sync-remote-row" });
-      this.renderRuleName(row, e.group, storedLabel);
-      row.createDiv({ cls: "config-sync-rule-spacer" });
-      // The same row-level icon the main list's excluded fate renders, not
-      // text — this row IS that fate, just reached from the remote diff pane.
-      this.renderFateStateIcon(row, "excluded", "Not synced on this device");
-      this.renderFateChip(row, "your rule");
-      return;
-    }
-    const key = `${remoteName}::${e.group}`;
-    const isOpen = this.remoteFoldsOpen.has(key);
-    const row = detail.createDiv({ cls: "config-sync-report-row config-sync-remote-row" });
-    const chev = renderFoldChevron(row, isOpen, "config-sync-cm-chev");
-    this.renderRuleName(row, e.group, storedLabel);
-    row.createDiv({ cls: "config-sync-rule-spacer" });
-    const counts = { added: 0, updated: 0, deleted: 0 };
-    for (const f of e.files) counts[f.kind]++;
-    if (counts.added > 0) row.createSpan({ cls: "config-sync-chip is-add", text: `+${counts.added}` });
-    if (counts.updated > 0) row.createSpan({ cls: "config-sync-chip is-upd", text: `~${counts.updated}` });
-    if (counts.deleted > 0) row.createSpan({ cls: "config-sync-chip is-del", text: `−${counts.deleted}` });
-    const fold = detail.createDiv({ cls: "config-sync-remote-files" });
-    // Content is always rebuilt from the CURRENT compare result — a fresh render that
-    // opens because the key persisted renders the same content a click would build live.
-    if (isOpen) this.renderRemoteFileRows(fold, e, remoteName);
-    else fold.hide();
-    row.addEventListener("click", () => {
-      const open = fold.isShown();
-      if (open) {
-        fold.hide();
-        setFoldOpen(chev, false);
-        this.remoteFoldsOpen.delete(key);
-        return;
-      }
-      fold.empty();
-      this.renderRemoteFileRows(fold, e, remoteName);
-      fold.show();
-      setFoldOpen(chev, true);
-      this.remoteFoldsOpen.add(key);
-    });
-  }
-
-  // File-level detail for one remote diff row: added → updated → deleted, each line expandable
-  // into a content diff (single-sided kinds diff against an empty side).
-  private renderRemoteFileRows(fold: HTMLElement, e: RemoteDiffEntry, remoteName: string): void {
-    const order = { added: 0, updated: 1, deleted: 2 } as const;
-    const files = [...e.files].sort((a, b) => order[a.kind] - order[b.kind] || (a.itemRel < b.itemRel ? -1 : a.itemRel > b.itemRel ? 1 : 0));
-    for (const f of files) {
-      const cls = f.kind === "added" ? "is-add" : f.kind === "updated" ? "is-upd" : "is-del";
-      const line = fold.createDiv({ cls: `config-sync-remote-frow ${cls} config-sync-diffable` });
-      line.createSpan({ cls: "config-sync-remote-fglyph", text: f.kind === "added" ? "+" : f.kind === "updated" ? "~" : "−" });
-      line.createSpan({ cls: "config-sync-remote-fname", text: f.itemRel });
-      const key = `${remoteName}::${e.group}::${f.itemRel}`;
-      const isOpen = this.remoteFoldsOpen.has(key);
-      // Same trailing affordance as the local FILES list (one-icon rule:
-      // this remote line is the SAME control on another surface, so it changes with
-      // it — a `· diff ▾` left behind here is exactly the drift DESIGN.md's State column forbids).
-      const affLabel = f.kind === "added" ? "View content" : "View changes";
-      const diffIcon = line.createSpan({ cls: `config-sync-diffic${isOpen ? " is-open" : ""}`, attr: { "aria-label": affLabel, role: "button", tabindex: "0" } });
-      setIcon(diffIcon, "file-diff");
-      let panel: HTMLElement | null = null;
-      // Content is always rebuilt from the CURRENT compare result — a fresh render
-      // that opens because the key persisted renders the same panel a click would build live.
-      if (isOpen) {
-        const p = createDiv({ cls: "config-sync-inline-diff" });
-        panel = p;
-        line.insertAdjacentElement("afterend", p);
-        this.renderRemoteFileDiff(p, e.group, f, remoteName);
-      }
-      line.addEventListener("click", (ev) => {
-        ev.stopPropagation();
-        if (panel !== null) {
-          panel.remove();
-          panel = null;
-          diffIcon.removeClass("is-open");
-          this.remoteFoldsOpen.delete(key);
-          return;
-        }
-        diffIcon.addClass("is-open");
-        const p = createDiv({ cls: "config-sync-inline-diff" });
-        panel = p;
-        line.insertAdjacentElement("afterend", p);
-        this.renderRemoteFileDiff(p, e.group, f, remoteName);
-        this.remoteFoldsOpen.add(key);
-      });
-    }
-  }
-
-  private renderRemoteFileDiff(p: HTMLElement, group: string, f: RemoteDiffFile, remoteName: string): void {
-    let left = f.local ?? "";
-    let right = f.remote ?? "";
-    const switchSorted = isSwitchListGroup(group);
-    let jsonSorted = false;
-    if (switchSorted) {
-      left = f.local !== null ? switchListSortedView(f.local) : "";
-      right = f.remote !== null ? switchListSortedView(f.remote) : "";
-    } else if (f.itemRel.endsWith(".json") && f.local !== null && f.remote !== null) {
-      const sl = jsonSortedView(f.local);
-      const sr = jsonSortedView(f.remote);
-      if (sl !== null && sr !== null) {
-        left = sl;
-        right = sr;
-        jsonSorted = true;
-      }
-    }
-    if (f.local !== null && f.remote !== null && left === right) {
-      p.createDiv({ cls: "config-sync-expand-note", text: "Only key order / formatting differs." });
-      return;
-    }
-    const leftLabel = f.local !== null ? "your store" : "not in your store";
-    const rightLabel = f.remote !== null ? remoteName : `not at ${remoteName}`;
-    renderDiffPanel(p, left, right, leftLabel, rightLabel, { name: f.itemRel, sorted: switchSorted || jsonSorted },
-      () => openDiffModal(this.app, left, right, leftLabel, rightLabel, { name: f.itemRel, sorted: switchSorted || jsonSorted }), null);
-  }
-
-  private renderRemoteButtons(detail: HTMLElement, remote: Remote, pullAligned: boolean, noChanges: boolean): void {
-    const bar = detail.createDiv({ cls: "config-sync-actionbar" });
-
-    const pull = new ButtonComponent(bar);
-    renderActionIcon(pull.buttonEl, "pull");
-    pull.buttonEl.appendText(` Pull from ${remote.name}`);
-    pull.buttonEl.addClass("config-sync-remote-btn", "is-pull");
-    if (noChanges) pull.buttonEl.addClass("is-dimmed");
-    else if (pullAligned) pull.buttonEl.addClass("is-primary");
-    else {
-      pull.buttonEl.addClass("is-dimmed");
-      pull.buttonEl.setAttribute("aria-label", "Pull would overwrite your newer local store");
-    }
-    pull.onClick(async () => {
-      this.setLastRun("pull", remote.name, await this.host.pullFrom(remote, []));
-      await this.reload();
-    });
-
-    const push = new ButtonComponent(bar);
-    renderActionIcon(push.buttonEl, "push");
-    push.buttonEl.appendText(` Push to ${remote.name}`);
-    push.buttonEl.addClass("config-sync-remote-btn", "is-push");
-    if (noChanges) push.buttonEl.addClass("is-dimmed");
-    else if (!pullAligned) push.buttonEl.addClass("is-primary");
-    else {
-      push.buttonEl.addClass("is-dimmed");
-      push.buttonEl.setAttribute("aria-label", "Push would overwrite the newer remote");
-    }
-    push.onClick(async () => {
-      this.setLastRun("push", remote.name, await this.host.pushTo(remote, []));
-      await this.reload();
-    });
-  }
 }
 
 // Confirm removing an item from sync, offering to also delete its saved copy in the store.

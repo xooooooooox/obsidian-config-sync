@@ -1,4 +1,4 @@
-import { BucketCounts, GroupState, GroupStatus, OTHER_STORE_FILES_GROUP, RemoteDiffEntry, RemoteState } from "../core/status";
+import { BucketCounts, GroupState, GroupStatus, RemoteDiffEntry, RemoteState } from "../core/status";
 import { FileChanges, sharingClass, StorageSection, SyncGroup } from "../core/types";
 import { Availability, VersionDrift } from "../core/availability";
 import { carrierRef, refItemId } from "../core/itemKeys";
@@ -440,52 +440,6 @@ export function sectionCountLabel(total: number, visible: number, filtered: bool
 // space inside its own capsule. Zero counts still take one slot, because "0" is one character wide.
 export function widestCountDigits(counts: readonly number[]): number {
   return String(Math.max(0, ...counts)).length;
-}
-
-// Buckets a remote's raw file diff into the same four TYPE_SECTION_ORDER sections the main list
-// uses: the two switch-list carriers never appear as an ordinary row (their delta is an on/off
-// summary, not a file to diff), everything else sorts into the section its category maps to.
-
-export interface RemoteSectionModel {
-  section: TypeSection;
-  onOff: RemoteDiffEntry | null;
-  entries: RemoteDiffEntry[];
-}
-
-export function remoteSections(
-  entries: RemoteDiffEntry[],
-  categoryOf: (group: string) => StorageSection | "beta",
-  displayNameOf: (group: string) => string
-): RemoteSectionModel[] {
-  const onOffBySection: Partial<Record<TypeSection, RemoteDiffEntry>> = {};
-  const rowsBySection = new Map<TypeSection, RemoteDiffEntry[]>();
-  for (const e of entries) {
-    if (e.group === "core-plugins") {
-      onOffBySection.core = e;
-      continue;
-    }
-    if (e.group === "community-plugins") {
-      onOffBySection.community = e;
-      continue;
-    }
-    const section = typeSectionForRow(categoryOf(e.group));
-    const rows = rowsBySection.get(section) ?? [];
-    rows.push(e);
-    rowsBySection.set(section, rows);
-  }
-  // (other store files) is unattributed metadata, not a real folder — it sorts last within Your
-  // folders regardless of display name so a genuine delta is never buried under it.
-  const byDisplayName = (a: RemoteDiffEntry, b: RemoteDiffEntry): number => {
-    if (a.group === OTHER_STORE_FILES_GROUP) return b.group === OTHER_STORE_FILES_GROUP ? 0 : 1;
-    if (b.group === OTHER_STORE_FILES_GROUP) return -1;
-    return displayNameOf(a.group).localeCompare(displayNameOf(b.group));
-  };
-  return TYPE_SECTION_ORDER.flatMap((section): RemoteSectionModel[] => {
-    const onOff = onOffBySection[section] ?? null;
-    const sectionEntries = (rowsBySection.get(section) ?? []).sort(byDisplayName);
-    if (onOff === null && sectionEntries.length === 0) return [];
-    return [{ section, onOff, entries: sectionEntries }];
-  });
 }
 
 // A carrier's on/off delta between the local store and a remote, as a plain set diff over
