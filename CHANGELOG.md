@@ -2,6 +2,7 @@
 
 ## 2.25.0
 
+- Changed the Sync Center's sidebar to answer one question instead of two. A view picker now sits at the top of it, and your remotes live in that picker rather than in the list below — each one showing its state right there, so you can see which remote needs attention without switching to it first. The list underneath is purely "which items do I want to see", and it no longer changes meaning depending on what else you had selected. On a narrow window or a phone, the same picker rides along in the compact section menu
 - Changed how a remote records what it will and will not exchange: instead of one fixed answer about Config Sync's own settings, a remote now carries a direction for any item, and for any key inside one. Nothing you see or do changes in this release — **Keep Config Sync's own settings out of this remote** still reads and writes the same choice, and Pull, Push and the comparison behave exactly as they did — but the format of the plugin's own settings changes, so a device on an older version cannot read it until you update it. See [UPGRADING.md](UPGRADING.md)
 
 ## 2.24.3

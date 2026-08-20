@@ -513,7 +513,14 @@ noted):
   three different pools until 2026-08-18, which is how `↑16` sat above `To capture 14` above a bar
   saying `↑19` on one screen.
 - **Sidebar** `config-sync-side-item/-side-badge` — sections with tiny count
-  badges; active = accent tint. The badges are a COLUMN, and what has to line up is the ICON at each
+  badges; active = accent tint. **The sidebar answers one question only: which items to show.**
+  Which RELATION is on screen is the `View` picker's question — `config-sync-view-picker` heads the
+  section list (`-view-current`/`-view-chev`, opening `-view-menu` of `-view-opt`, each labelled by
+  `-view-label`), and the remotes live in its dropdown rather than as sidebar entries. Each entry
+  carries its own badge: the device side its capture/apply item counts, a remote side its
+  whole-store state icon (an item count there needs a real comparison against that remote, so it
+  waits until remote rows exist). The compact switcher's menu renders this same section list, so the
+  picker follows it into narrow panes and phones with no second implementation. The badges are a COLUMN, and what has to line up is the ICON at each
   badge's left edge: every capsule carries `font-variant-numeric: tabular-nums` and
   `min-width: calc(1em + var(--cs-badge-digits) * 1ch + 12px)` (icon + digit slot + padding).
   `--cs-badge-digits` is MEASURED per render on the shell (`SyncCenterView.badgeDigits` →
@@ -540,10 +547,10 @@ noted):
   (`FIT_HYSTERESIS_PX`), since one shared threshold flips on every pixel of a window drag. The Config Sync self layer leads as a distinct hero card
   `config-sync-side-self` (`-side-self-ic` icon tile, `-side-self-title`/`-side-self-sub`,
   `-side-self-pill` reusing `selfStatePill`), echoing the header self-chip. Grouping is by
-  `config-sync-side-divider` hairlines alone: self card / scope list / remote rows /
+  `config-sync-side-divider` hairlines alone: View picker / self card / scope list /
   History each separated by one divider, with NO group heads anywhere. Re-checking remotes
   belongs to the main region's global refresh button alone (it re-scans local state AND
-  re-checks every remote; its tooltip carries the refreshed-age), and each remote row's own
+  re-checks every remote; its tooltip carries the refreshed-age), and each remote entry's own
   state icon carries the result. The self card's own `plugin settings ↔ store` subtitle
   already carries the device↔store relation. **Switcher**
   `config-sync-switcher` — compact replacement.

@@ -462,7 +462,14 @@ functions.
   `Enabled on`/After install/Enablement, `Settings sync`, More, Note), filters/search,
   the Leftover section, the sticky result strip, run History, the Remotes block (which renders the
   remote pane's diffs through the same type-section/family grammar as the main list), and
-  Capture/Apply/Pull/Push actions. Row content is memoized once per render (`deriveRow`) so the
+  Capture/Apply/Pull/Push actions. **Two orthogonal axes drive what it paints**, not one field:
+  `relation` (`PanelRelation` — this device against the store, or the store against one named
+  remote) is what the View picker sets; `destination` (`PanelDestination` — a slice of items, run
+  History, Config Sync's own entry) is what the sidebar sets. `renderMainRegionBody` checks them in
+  that order deliberately: `self` and `history` answer the same thing under either relation and are
+  dispatched first, so the relation never reaches them; only an items destination asks the relation,
+  and a relation naming a remote settings no longer has falls back to the device before rendering.
+  Row content is memoized once per render (`deriveRow`) so the
   section partition, filter-pill counts and row painting all read the same computed `Fate`/`FateInput`
   instead of re-deriving it per consumer. Its search bar's qualifiers are `SYNC_QUALIFIER_SPECS`
   (`type:` · `section:` · `action:` · `mode:` · `device:`), declared `as const` so `SyncQualifierKey`
@@ -615,7 +622,14 @@ functions.
   `SETTING_QUALIFIER_SPECS` both spell the item family `section:` now, with **no alias** for v2's
   `scope:`, so a typed `scope:core` searches for those literal words instead of quietly filtering.
 - `panelModel.ts` — the pure view-model layer over `fateModel.ts`, unrelated to the settings-tab
-  card renderer above. `fateBucket(fate)`/`fateBucketCounts` derive the one `RowBucket`
+  card renderer above. It also owns the panel's two navigation axes: `PanelRelation` /
+  `PanelDestination` and their keys (`relationKey` prefixes a remote's name so a remote called
+  `beta` or `history` cannot collide with the destination of the same spelling; `foldStateKey`
+  combines both so one section's folds under two relations are two different lists),
+  `relationLabel` (`This device ↔ store` / `store ↔ <name>`), and `viewOptions` — the View picker's
+  whole content as data, including the rule that a `current` naming a deleted remote resolves back
+  to this device so the picker always has exactly one active row.
+  `fateBucket(fate)`/`fateBucketCounts` derive the one `RowBucket`
   (`conflict`/`apply`/`capture`/`excluded`/`ok`/`none` — `excluded` read off
   `Fate.excluded`, positioned after the stageable checks and before `nothingYet`) every consumer —
   section partition (active vs. the in-sync/excluded/no-settings folds), filter-pill counts,
