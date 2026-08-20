@@ -18,9 +18,38 @@
  */
 import { FileSharing, Sharing, sharingEquals, EVERYWHERE, perClass, THIS_DEVICE } from "../core/types";
 import { DeviceElementState } from "../core/deviceElements";
-import { NOT_SHARED_LABEL, sharingIcon } from "./itemCard";
+import { NOT_SHARED_LABEL, restatesInnate, sharingIcon } from "./itemCard";
 
 export const RULE_OPTIONS: readonly Sharing[] = [EVERYWHERE, perClass("desktop"), perClass("mobile"), THIS_DEVICE];
+
+// The stops offered for an element whose plugin declares `isDesktopOnly`. `Mobile only` names
+// devices that can never run it; `All devices` claims a reach it does not have. Both were once
+// present, the second apologised for by a parenthetical ("mobile is excluded automatically") —
+// which is what a wrong stop looks like when it survives review. What is left are the two answers
+// that differ: desktops share the on/off state, or each desktop keeps its own.
+const DESKTOP_ONLY_RULE_OPTIONS: readonly Sharing[] = [perClass("desktop"), THIS_DEVICE];
+
+export function ruleOptionsFor(desktopOnly: boolean): readonly Sharing[] {
+  return desktopOnly ? DESKTOP_ONLY_RULE_OPTIONS : RULE_OPTIONS;
+}
+
+// What a row DISPLAYS, which is not always what is stored. With no rule at all the stored answer
+// reads back as `everywhere`, a stop a desktop-only row no longer offers — the menu would open with
+// nothing checked and the glyph would promise a reach the element does not have. Collapsing onto
+// the stop with identical behaviour keeps both honest without writing anything: picking is still
+// the only thing that writes.
+export function displayRule(rule: Sharing, desktopOnly: boolean): Sharing {
+  return restatesInnate(rule, desktopOnly) ? perClass("desktop") : rule;
+}
+
+// What a pick STORES, which is the inverse collapse. On a desktop-only element `Desktop only` is
+// exactly what no rule already does, so it is stored as no rule (`withEnablementRule` clears the
+// entry on `everywhere`). Two things depend on this: a round trip through the control leaves
+// data.json byte-identical, and the entry stays removable — with no `All devices` stop left in the
+// menu, an entry written here would otherwise have no way back out.
+export function ruleToStore(picked: Sharing, desktopOnly: boolean): Sharing {
+  return restatesInnate(picked, desktopOnly) ? EVERYWHERE : picked;
+}
 
 export function ruleLabel(s: Sharing): string {
   if (s.kind === "everywhere") return "All devices";
@@ -52,6 +81,19 @@ export function ruleIcon(s: Sharing): string {
 export interface RowSegment {
   icon: string | null;
   tooltip: string;
+  // Whether this half has an answer worth coloring — the shared half when it is narrower than
+  // `All devices` and not merely restating the manifest, the local half when this device has an
+  // exception. It rides the SEGMENT rather than the paint site because the two surfaces would
+  // otherwise each decide "is this set" for themselves, which is how they came to disagree before.
+  isSet: boolean;
+}
+
+// The shared half of a row whose answer is a plain `Sharing` value — a whole file's rule, one key's
+// rule. Icon and tooltip differ per row kind, so callers still pass those; what they must not each
+// decide is whether the answer is narrower than `All devices`, because that is what the color
+// depends on and four paint sites deciding it separately is how they drift.
+export function sharedSegment(input: { icon: string; tooltip: string; sharing: Sharing }): RowSegment {
+  return { icon: input.icon, tooltip: input.tooltip, isSet: input.sharing.kind !== "everywhere" };
 }
 
 export interface EnablementRowModel {
@@ -120,11 +162,18 @@ function localSegmentIcon(state: LocalSegmentState): string {
 }
 
 function localSegment(state: LocalSegmentState): RowSegment {
-  return { icon: localSegmentIcon(state), tooltip: localSegmentTooltip(state) };
+  return { icon: localSegmentIcon(state), tooltip: localSegmentTooltip(state), isSet: state !== "follows" };
 }
 
-export function enablementRowModel(input: { rule: Sharing; exception: DeviceElementState | null }): EnablementRowModel {
-  const fleet: RowSegment = { icon: ruleIcon(input.rule), tooltip: enabledOnTooltip(input.rule) };
+export function enablementRowModel(input: { rule: Sharing; exception: DeviceElementState | null; desktopOnly: boolean }): EnablementRowModel {
+  // The DISPLAYED rule, not the stored one: a desktop-only element with no rule stored still has to
+  // draw and describe the stop its menu offers.
+  const shown = displayRule(input.rule, input.desktopOnly);
+  const fleet: RowSegment = {
+    icon: ruleIcon(shown),
+    tooltip: enabledOnTooltip(shown),
+    isSet: shown.kind !== "everywhere" && !restatesInnate(input.rule, input.desktopOnly),
+  };
   if (input.exception === null) return { fleet, local: localSegment("follows"), localIsException: false };
   return { fleet, local: localSegment(input.exception === "on" ? "on" : "off"), localIsException: true };
 }
@@ -153,7 +202,7 @@ export function settingsSyncTooltip(sharing: FileSharing): string {
 }
 
 export function fileEnablementRowModel(input: { sharing: FileSharing; optedOut: boolean }): FileEnablementRowModel {
-  const fleet: RowSegment = { icon: sharingIcon(input.sharing), tooltip: settingsSyncTooltip(input.sharing) };
+  const fleet: RowSegment = { icon: sharingIcon(input.sharing), tooltip: settingsSyncTooltip(input.sharing), isSet: input.sharing.kind !== "everywhere" };
   return { fleet, local: optOutLocalSegment(input.optedOut), localIsException: input.optedOut };
 }
 

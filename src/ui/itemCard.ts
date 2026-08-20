@@ -64,6 +64,12 @@ const ON_BADGE_CLASS = {
   local: "config-sync-card-badge-local",
 } as const;
 
+// `N device-scoped`, wherever it renders. Its own class rather than the count class `N encrypted`
+// wears: the same cyan today, two different meanings, and one class would drag one badge along
+// whenever the other moved. The cyan is the merged control's shared-glyph color, so a card's badge
+// and the rows it counts are one glance apart.
+const SCOPED_BADGE_CLASS = "config-sync-card-badge-scoped";
+
 // A carrier card's two badges. Two facts, two colors: what the fleet agreed
 // (`N device-scoped`) and what this device kept for itself (`N left to me`). Mixing them into one
 // count is what made the old "N device-scoped" badge unreadable on a device that had its own
@@ -71,7 +77,7 @@ const ON_BADGE_CLASS = {
 // half takes the purple the merged control's local glyph already wears when it is set
 // (`.config-sync-mergedctl.is-set .config-sync-mergedctl-local`), so the color says "this device"
 // in both places.
-const CARRIER_FLEET_BADGE_CLASS = "config-sync-card-badge-count";
+const CARRIER_FLEET_BADGE_CLASS = SCOPED_BADGE_CLASS;
 const CARRIER_LOCAL_BADGE_CLASS = "config-sync-card-badge-mine";
 
 // The fileRule/rules half of countClassPinned, split out so the carrier badge (carrierBadgeCounts
@@ -180,10 +186,20 @@ export interface CarrierCounts {
 // `countFileAndRuleClassPinned`, not `countClassPinned`, on purpose: `countClassPinned`'s perElement
 // walk would count the SAME element rules `enablementRules` above already counts, under the same
 // badge.
-export function carrierBadgeCounts(items: ItemMap, list: RuleListId, exceptions: readonly DeviceElementState[]): CarrierCounts {
+export function carrierBadgeCounts(
+  items: ItemMap,
+  list: RuleListId,
+  exceptions: readonly DeviceElementState[],
+  isDesktopOnly: (elementId: string) => boolean
+): CarrierCounts {
   const rules = enablementRules(items, list);
   const elementRules: DeviceClass[] = [];
-  for (const s of Object.values(rules)) {
+  // A `Desktop only` rule on a plugin whose manifest is already desktop-only decides nothing, so it
+  // is not a device-scoping decision to count. Left in, it inflates the number AND can decide the
+  // glyph: a card whose only real rules are `Mobile only` reads as mixed (`contrast`) purely
+  // because of rules nobody made.
+  for (const [elementId, s] of Object.entries(rules)) {
+    if (restatesInnate(s, isDesktopOnly(elementId))) continue;
     const cls = sharingClass(s);
     if (cls !== null) elementRules.push(cls);
   }
@@ -264,7 +280,13 @@ export function computeBadges(
       const on = enablement.exception === "on";
       badges.push({ text: on ? ON_BADGE_TEXT.local : OFF_BADGE_TEXT_LOCAL, cls: ON_BADGE_CLASS.local, icon: on ? "power" : "power-off" });
     }
-    else if (cls !== null) badges.push({ text: ON_BADGE_TEXT[cls], cls: ON_BADGE_CLASS[cls], icon: cls === "desktop" ? "monitor" : "smartphone" });
+    // A rule that only restates the manifest earns nothing: the grey `desktop-only plugin` badge
+    // directly to its left already says it, and a second, COLORED monitor beside it claims the user
+    // decided something they did not. The local-exception branch above is untouched — an exception
+    // on the same plugin does say something new.
+    else if (cls !== null && !restatesInnate(enablement.rule, def.desktopOnly === true)) {
+      badges.push({ text: ON_BADGE_TEXT[cls], cls: ON_BADGE_CLASS[cls], icon: cls === "desktop" ? "monitor" : "smartphone" });
+    }
   }
   if (carrier !== null) {
     if (carrier.fleet.length > 0) {
@@ -276,7 +298,7 @@ export function computeBadges(
   } else {
     const classPinned = classPinnedKinds(item);
     if (classPinned.length > 0) {
-      badges.push({ text: `${classPinned.length} device-scoped`, cls: "config-sync-card-badge-count", icon: deviceScopedIcon(classPinned), count: classPinned.length });
+      badges.push({ text: `${classPinned.length} device-scoped`, cls: SCOPED_BADGE_CLASS, icon: deviceScopedIcon(classPinned), count: classPinned.length });
     }
   }
   const encrypted = countEncrypted(item);
@@ -652,26 +674,30 @@ export function nextSharing(current: Sharing, options: readonly Sharing[]): Shar
   throw new Error("nextSharing: options list is empty");
 }
 
-// Appended to the everywhere stop of a desktop-only plugin's ENABLED ON cycle: it never touches
-// mobile for these plugins (the runtime auto-mask keeps mobile's local state), so the tooltip
-// says so instead of letting "All devices" read as "mobile too".
-export const DESKTOP_ONLY_ALL_NOTE = "mobile is excluded automatically";
+// An answer that only repeats what the plugin's own manifest already says. On a plugin whose
+// manifest sets `isDesktopOnly`, `Desktop only` decides nothing — mobile cannot install it under
+// any rule — and neither does the absent rule that reads back as `everywhere`. THE producer for
+// that fact: a colored glyph and a rule badge both mean "your choice", and `N device-scoped` counts
+// decisions, so all three ask here instead of each testing the manifest flag for itself.
+// `Not shared` is never a restatement — handing every desktop its own on/off is a real choice the
+// manifest has no opinion about. Lives here rather than beside the row model because
+// enablementRow.ts imports this module, and the reverse edge would close a cycle.
+export function restatesInnate(sharing: Sharing, desktopOnly: boolean): boolean {
+  if (!desktopOnly) return false;
+  return sharing.kind === "everywhere" || (sharing.kind === "per-class" && sharing.class === "desktop");
+}
 
 // The shared segment's tooltip for ONE KEY inside a settings file: the third and weakest of the
 // three consequences. A class-scoped key is still synced on every device; the excluded class simply
 // keeps its own value instead of the shared one (modes.ts partitions own-class keys into the
 // `__scopes__` sidecar and preserves the other class's local value on apply). Nothing is turned off
 // and nothing stops syncing, which is exactly what the label alone cannot say.
-export function sharingCycleTooltip(sharing: Sharing, note?: string): string {
-  const base =
-    sharing.kind === "everywhere"
-      ? "One value, the same everywhere."
-      : sharing.kind === "this-device"
-        ? "No shared value. Every device keeps its own."
-        : sharing.class === "desktop"
-          ? "Desktops share one value. Each phone keeps its own."
-          : "Phones share one value. Each desktop keeps its own.";
-  return note === undefined ? base : `${base} (${note})`;
+export function sharingCycleTooltip(sharing: Sharing): string {
+  if (sharing.kind === "everywhere") return "One value, the same everywhere.";
+  if (sharing.kind === "this-device") return "No shared value. Every device keeps its own.";
+  return sharing.class === "desktop"
+    ? "Desktops share one value. Each phone keeps its own."
+    : "Phones share one value. Each desktop keeps its own.";
 }
 
 // The ✎ icon's tooltip/aria.

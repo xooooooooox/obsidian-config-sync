@@ -60,11 +60,14 @@ export interface MergedControlOpts {
 export function paintMergedControl(host: HTMLElement, opts: MergedControlOpts): void {
   // One control, so one sentence: the shared answer's consequence, then this device's own state.
   const tooltip = opts.local === null ? opts.shared.tooltip : `${opts.shared.tooltip} ${opts.local.tooltip}`;
-  const trigger = host.createSpan({
-    cls: `config-sync-mergedctl${opts.localIsException ? " is-set" : ""}`,
-    attr: { "aria-label": tooltip },
-  });
-  if (opts.shared.icon !== null) setIcon(trigger.createSpan({ cls: "config-sync-tworow-ic" }), opts.shared.icon);
+  // Two layers, two independent active states: purple for this device's exception, cyan for a
+  // shared answer narrower than `All devices`. Either one lifts the whole box out of quiet rest,
+  // because the box is one control.
+  const cls = ["config-sync-mergedctl"];
+  if (opts.localIsException) cls.push("is-set");
+  if (opts.shared.isSet) cls.push("is-shared-set");
+  const trigger = host.createSpan({ cls: cls.join(" "), attr: { "aria-label": tooltip } });
+  if (opts.shared.icon !== null) setIcon(trigger.createSpan({ cls: "config-sync-tworow-ic config-sync-mergedctl-shared" }), opts.shared.icon);
   if (opts.local !== null && opts.local.icon !== null) {
     trigger.createSpan({ cls: "config-sync-mergedctl-sep", text: "·" });
     setIcon(trigger.createSpan({ cls: "config-sync-tworow-ic config-sync-mergedctl-local" }), opts.local.icon);

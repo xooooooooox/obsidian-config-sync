@@ -31,6 +31,7 @@ One color per meaning, everywhere. Alpha fills always use
 | Pull (remote → store) | `--color-cyan` | pull state icon, Pull button (solid primary), status-bar segment, encrypt-related accents (see below) |
 | Push (store → remote) | `--color-pink` | push state icon, Push button (solid primary), status-bar segment |
 | Locked / encrypted-at-rest | `--color-cyan` | key state icon, statenote pills, policy seg on-state (json keys mark encryption with a colorless `lock` suffix — sharing alone drives key color) |
+| Device-scoped (a shared answer narrower than `All devices`) | `--color-cyan` | the merged control's shared glyph (`.config-sync-mergedctl.is-shared-set`) and the badge counting those answers (`config-sync-card-badge-scoped`) — one token, so a card's badge and the rows it counts are one glance apart. `N device-scoped` has its own class rather than sharing `config-sync-card-badge-count` with `N encrypted`: same hex today, two meanings, and a shared class would drag one along whenever the other moved |
 | Warning / caution | `--color-orange` | ⚠ pills, detect/device badges, amber version lines, unresolved conflicts, remote token-status awaiting this device's token, the leftover-section frame, orphan-row hint |
 | Error / destructive | `--color-red` | ✗ pills, test-strip error, diff deletions, strip-action on-state |
 | File changes (reports/diffs) | add `--color-green` · update `--color-blue` · delete `--color-red` | chips `+N ~N −N`, report file lines, conflict-modal marks — a *file-change* semantic, distinct from directions |
@@ -88,6 +89,10 @@ single-row and bulk alike.
 | Card control rail | `.config-sync-cardrow > .config-sync-mergedctl, .config-sync-cardrow > .config-sync-cardrow-ctl { grid-column: -2; justify-self: end }` | ONE rule puts every card control on the card's right edge, the same rule the item rows' checkboxes sit on, so a control added later aligns by construction. `.config-sync-cardval` needs no inset of its own: nothing lands on track 2 for it to line up with any more |
 | Card trigger padding | `.config-sync-mergedctl` and `.config-sync-sharingicon.config-sync-card-trigger` both `3px 6px` | the boxes all end on the rail, so a padding difference between them shows up as a difference between their glyphs, and the glyph is what the eye follows |
 | ⇕ column | `--cs-chev-slot: 14px` (gap 2 + margin 1 + glyph 11); every rail control either holds a ⇕ or reserves the column with `padding-right` | aligning box right edges staggers glyphs by exactly the ⇕'s width: a rail of merged controls (⇕) beside `More` and `Files` (no ⇕) measured 1677 / 1691 / 1691 for its last visible mark on boxes that all ended at 1697. The ⇕ rests invisible, so a reserved-but-empty column reads as the rail's own inset rather than a hole |
+
+| Narrow pane | `.config-sync-center.is-narrow`, decided by `ui/sidebarFit.ts` | ONE axis for the layout switch AND every narrow affordance. They were two: layout asked the width (`< 700`), the affordances asked the platform (`body.is-mobile`), so a narrow desktop window got the compact layout and none of what makes it readable. Touch-target and hover rules stay on `body.is-mobile` — those answer what you point with, not how wide the pane is |
+| Mainbar search (narrow) | `flex: 1 1 calc(100% - 44px)`, and NO `margin-left` | the select-all beside it already carries `margin-left: auto`. Two auto margins on one wrapped flex line do not stack — they SPLIT the free space, which left the search box floating mid-line with a gap on either side |
+| Header badges vs the drawer rail | badge cluster and drawer control share the box right edge; badge glyphs therefore land in the drawer's `⇕` column | KNOWN AND ACCEPTED, not an oversight. The `⇕` rests invisible, so the rightmost badge's GLYPH reads one column right of every glyph in the drawer while the boxes measure exactly aligned (probe: both end at 507). Both grids happen to have the same 24px pitch, so insetting the cluster by the `⇕` slot would put badge glyphs on the drawer's own glyph columns — deliberately not done: the shared box edge is the rule this rail is built on |
 
 **The settings-drawer row grid (scrow).** Every row in an item card's drawer is a
 `.config-sync-scrow`: `identity 170px | controls 1fr | trailing minmax(44px, max-content)`.
@@ -293,10 +298,16 @@ same thing. Still a circle, so the fold trio `check`/`circle-minus`/`circle` sta
 tooltip `This device: <state>` (`follows what's shared.` / `always on.` / `always off.` /
 `not synced. Your other devices keep sharing it.` — only that last one carries a second sentence,
 because it is the state users mistake for `Not shared`, and the whole difference is what happens to
-everyone else). Only this half colors purple when this device has an exception
-(`.config-sync-mergedctl.is-set`) — the shared glyph keeps saying what the shared answer is, which
-is the whole reason both glyphs stayed visible. The trigger's own `aria-label` is the two tooltips
-joined, in that order, so one hover states both layers.
+everyone else). This half colors purple when this device has an exception
+(`.config-sync-mergedctl.is-set`); the shared half colors cyan whenever the shared answer is
+narrower than `All devices` (`.config-sync-mergedctl.is-shared-set`) — the same cyan the badge
+counting those answers wears, so a card's badge and the rows behind it are one glance apart rather
+than two colors. Two layers, two colors, both always visible: the shared glyph keeps saying what
+the shared answer is, which is the whole reason both stayed visible. An answer that merely RESTATES
+the plugin's own manifest earns no color (`restatesInnate`, itemCard.ts) — a `Desktop only`
+rule on a plugin that is `isDesktopOnly` anyway decides nothing, and colored = your choice is the
+law it would break. The trigger's own `aria-label` is the two tooltips joined, in that order, so one
+hover states both layers.
 
 The local section's ENTRIES come from one producer each (`buildLocalMenu` for an element's three-way
 on/off, `buildOptOutLocalMenu` for the two-state opt-out shared by the whole-file row and a key
@@ -409,7 +420,7 @@ always visible; only the affordance hint (⇕) is hover-dependent.
 **Quiet-rest law:** every CLICKABLE icon control rests at `--text-muted` ×
 `opacity: 0.45` and lifts to `opacity: 1` on its own hover/focus-visible or while its menu is
 open (`.is-open`); an ACTIVE state (`.is-on` cyan lock, `.is-set` accent picker / purple local
-glyph, `.is-open` accent eye) is colored at full opacity — one rest shade card-wide, so no control
+glyph, `.is-shared-set` cyan shared glyph, `.is-open` accent eye) is colored at full opacity — one rest shade card-wide, so no control
 reads brighter than its neighbors. Members: the sharing picker (`config-sync-sharingicon`),
 the per-item icon (`config-sync-perelement-ic`), the lock toggle (`config-sync-lock`), the
 File-preview eye (`config-sync-card-previewicon` — muted at the default icon size,
@@ -516,7 +527,17 @@ noted):
   reserving a fixed slot per state (that alternative — a subgrid with one track per state — gives
   zero trailing space but leaves holes wherever a row lacks a state, and moves a lone badge off the
   right edge into the middle of the row). Alignment here is geometric, not semantic: a row whose
-  only badge is `↑` sits in the column another row fills with `○`. The Config Sync self layer leads as a distinct hero card
+  only badge is `↑` sits in the column another row fills with `○`.
+  **The sidebar exists only while it can show a row in full** (`ui/sidebarFit.ts`,
+  `SyncCenterView.evaluateCompact`): the needed width is measured from the rows as RENDERED — a zero
+  count draws no badge, so a vault whose items agree needs one badge's worth and the same vault
+  mid-sync needs five. Below that, the pane trades the sidebar for the compact switcher. This
+  replaced a fixed `view width < 700`, which asked a question nobody has: at 22% of an ordinary
+  window, five badges leave `All items` under 20px of name — squeezed past the ellipsis to nothing —
+  while one badge reads fine in the same column. Same width, two answers. `< 700` survives as a
+  floor (below it the main pane has nothing left to be narrow into) and a phone is always narrow;
+  everything between is decided by the fit. Leaving compact needs room to spare
+  (`FIT_HYSTERESIS_PX`), since one shared threshold flips on every pixel of a window drag. The Config Sync self layer leads as a distinct hero card
   `config-sync-side-self` (`-side-self-ic` icon tile, `-side-self-title`/`-side-self-sub`,
   `-side-self-pill` reusing `selfStatePill`), echoing the header self-chip. Grouping is by
   `config-sync-side-divider` hairlines alone: self card / scope list / remote rows /
@@ -744,8 +765,14 @@ noted):
   tooltip `View changes` (diff) / `View content` (an added file, nothing local to diff
   against yet); the OPEN state turns the icon accent-colored; an encrypted entry keeps its
   no-affordance note instead; the `capFileEntries` 10-cap + "… N more files" line applies
-  inside the expanded state) · `Resolve` (conflict rows only — segmented `Use
-  theirs ↓` / `Keep mine ↑`) · `Enabled on` (plugins whose carrier is synced) / `After install`
+  inside the expanded state) · `Resolve` (conflict rows only — `Use theirs` / `Keep mine`, TWO CHIPS
+  in the card's own control family, not a segmented control: same `3px 8px` box, border and radius
+  as `After install`/`Enablement` beside them. A frame around two cells with a hairline between was
+  the only shape of its kind on the card and read as imported from elsewhere. What the pair keeps is
+  its DIRECTION colour at rest — before anything is picked, each side already says which way it
+  goes — and picking deepens that colour and takes the border with it, so `chosen` is louder than
+  it was inside the frame. `ui/resolveSegment.ts` paints it once for both entrances, so the card and
+  the diff toolbar change together) · `Enabled on` (plugins whose carrier is synced) / `After install`
   (carrier not synced, row installs) / `Enablement` (carrier not synced, plugin installed
   but locally off — the fallback ladder's third leaf) · `Settings sync` (the item's own
   file-level sharing rule) · `More` (icon-only deep-link into the Settings tab, scrolled to
@@ -761,7 +788,7 @@ noted):
   it shows is **what one CHOICE would do**. Direction is not a parameter for viewing a difference;
   it is the thing being viewed. That makes the control that picks a preview and the control that
   picks a side the same control, and it lives in the diff toolbar (`DiffResolveControl`,
-  `diffView.ts`) — `Use theirs ↓ | Keep mine ↑`, the active side in its own direction colour.
+  `diffView.ts`) — `Use theirs` / `Keep mine`, the active side in its own direction colour.
   The card keeps its `Resolve` row for someone who already knows which side they want; both
   entrances route through one `pickConflictSide`, so they are one decision, not two that agree.
   An unresolved conflict renders its FILES row previewing the `Use theirs` side. Gating that row on
@@ -786,7 +813,14 @@ noted):
   the four values `All devices` / `Desktop only` / `Mobile only` / `Not shared` (`sharingIcon`'s
   icons, `square-split-horizontal` for the fourth; the trigger's tooltip states the CONSEQUENCE per
   row kind, never
-  the label — see Lucide usage); `On this device` lists that layer's own answers
+  the label — see Lucide usage). On an element whose plugin is `isDesktopOnly` that list is TWO
+  stops, `Desktop only` / `Not shared` (`ruleOptionsFor`, enablementRow.ts): a phone can never
+  install it, so the other two name devices that will never have it. `All devices` there is not a
+  stored value but the ABSENCE of a rule, so it is collapsed for display rather than dropped — the
+  row shows and checks `Desktop only` (`displayRule`), which is what such an element has always
+  done. Picking that stop writes nothing either (`ruleToStore` collapses it back to no rule): the
+  round trip stays byte-identical, and an entry written here would otherwise have no stop left to
+  remove it. `On this device` lists that layer's own answers
   (`buildLocalMenu`/`buildOptOutLocalMenu`, see Lucide usage; the latter shared by the whole-file opt-out and a
   per-key rule's own exception alike — which label the MENU ITEMS, a different string from the
   glyph's tooltip). The word "Default" is retired: it named nothing the interface ever showed.
@@ -1031,13 +1065,19 @@ noted):
     (itemCard.ts): `on/off only` → `toggle-left` grey · `desktop-only plugin` (manifest
     `isDesktopOnly`, an INNATE property) → grey `monitor` · the enablement badge when
     non-default (a local exception outranks the rule, same precedence as at run time; a rule
-    shared with no one, and no exception, earns no badge) → YOUR-RULE color: blue `monitor`
+    shared with no one, and no exception, earns no badge; and on a plugin that is `isDesktopOnly`
+    a `Desktop only` rule earns none either — `restatesInnate`, it repeats the grey badge directly
+    to its left and decides nothing, while a local exception on the same plugin still badges
+    because that one does say something new) → YOUR-RULE color: blue `monitor`
     `on: desktop` / amber `smartphone` `on: mobile` / pink `power` `on: this device` or
     `power-off` `off: this device` — the badge names WHICH exception, in both the word and the
     glyph, because it fires for either and a plugin forced OFF here must not read as on; grey =
     innate, colored = your choice (the two desktop meanings must read apart) ·
-    carrier cards' two counts (`carrierBadgeCounts`): `N device-scoped` (class rules only) and
-    purple `N left to me` · `lock`+n `N encrypted`;
+    carrier cards' two counts (`carrierBadgeCounts`): cyan `N device-scoped`
+    (`config-sync-card-badge-scoped`; class rules only, and never one that merely restates a
+    desktop-only manifest — those decide nothing, and counting them lets rules nobody chose set both
+    the number and the `soleKind` glyph, which is how an all-mobile card ends up wearing `contrast`)
+    and purple `N left to me` · `lock`+n `N encrypted`;
     **a count badge names the SPECIFIC thing when everything it counts agrees, and falls back to a
     neutral summariser only when the set genuinely mixes** (`soleKind`, itemCard.ts) — all-desktop
     pins draw `monitor`, all-mobile `smartphone`, mixed `contrast` (one thing, two different sides);

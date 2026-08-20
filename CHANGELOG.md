@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.24.3
+
+- Changed a sharing control to light up whenever the shared answer is narrower than **All devices**, in the same color as the card's own `N device-scoped` badge. The badge and the rows it counts now match at a glance, instead of leaving you to hunt for which row it meant
+- Changed **Enabled on** for a plugin that can only run on desktop: it offers **Desktop only** and **Not shared**, and nothing else. **All devices** was never true there — a phone can't install the plugin at all — and the parenthetical that used to explain that away is gone. Every device keeps behaving exactly as before; a **Desktop only** rule you had already set on such a plugin is dropped the next time you touch its control, since it was never doing anything
+- Fixed a plugin that can only run on desktop showing two desktop badges when you had also given it a **Desktop only** rule. That rule repeats what the plugin already is and changes nothing, so it no longer draws a badge of its own, and no longer counts toward `N device-scoped`. A choice you made for this one device still shows, because that one does say something new
+- Fixed the Sync Center's **Enabled on** offering a plugin stops the same plugin's Settings card refused. Both now offer the same answers for the same plugin
+- Changed when the Sync Center keeps its sidebar: it stays for as long as it can show every count a section carries with the name still readable beside them, and hands over to the compact section picker when it can't. It used to switch at a fixed window width, which was both too eager on a quiet vault and far too late on a busy one — at its worst the `All items` row showed five counts and no name at all
+- Fixed a narrow window getting the compact layout without any of what makes it readable: the filter pills now take their own line in their short form, and the search box fills that line instead of floating in the middle of it
+- Changed the conflict choice, **Use theirs** / **Keep mine**, to look like the other controls on the card it sits on. Same shape, same size; each side still carries its own direction colour, and the side you pick is clearer than before. The same control in a diff's toolbar changes with it
+
 ## 2.24.2
 
 - Added `CHANGELOG.md` and `UPGRADING.md`. A release's notes are its changelog entry, and the versions that ask you to do something before syncing again are in one place instead of scattered through the README and the guide

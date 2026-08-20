@@ -530,6 +530,14 @@ functions.
   `SHARED_WITH_HEADER`/`ENABLED_ON_HEADER`/`ON_THIS_DEVICE_HEADER` are the section headers that
   make the same three words unambiguous — `Enabled on: Desktop only` and `Shared with: Desktop
   only` say different things, where the bare stop could not.
+  `ruleOptionsFor` decides WHICH stops a row offers — `RULE_OPTIONS`, minus the two that name a
+  phone when the element's plugin declares `isDesktopOnly` — and `displayRule` decides which one it
+  shows as current, collapsing the `everywhere` an absent rule reads back as onto the stop that
+  behaves identically, so a two-stop menu never opens with nothing checked. `ruleToStore` is the
+  inverse: picking that collapsed stop clears the entry rather than writing one, keeping the round
+  trip byte-identical and the entry removable at all (a two-stop menu has no stop left to clear it
+  with). All three are asked at BOTH entrances, or one offers a stop the other refuses for the same
+  plugin.
   `RULE_OPTIONS`/`ruleIcon`/`ruleLabel` are the shared-layer vocabulary
   (`sharingIcon`'s icons, plus `square-split-horizontal` for `Not shared` — `airplay`,
   `sharingIcon`'s own this-device glyph, would read as screen mirroring to a reader who has not read
@@ -542,7 +550,23 @@ functions.
   producer, a genuinely different datum (an on/off exception, not a follow/except
   pair). `enablementRowModel`/`fileEnablementRowModel` compose a rule + an exception into what
   both halves say; the local half has a glyph in every state, `equal` for "follows what's shared"
-  included — a layer that vanishes while it agrees reads as missing, not as agreement.
+  included — a layer that vanishes while it agrees reads as missing, not as agreement. Each half
+  carries its own `isSet` (`RowSegment`), which is what its color reads: the paint site never
+  decides it, because two paint sites deciding it separately is how they drift. `sharedSegment`
+  answers it for the rows whose shared answer is a plain `Sharing` value. What makes an answer NOT
+  set even when it is narrower than `All devices` is `restatesInnate` (itemCard.ts) — the same
+  predicate `computeBadges` and `carrierBadgeCounts` ask, so a glyph, a badge and a count never
+  disagree about whether the user decided anything.
+- `ui/sidebarFit.ts` — WHEN the Sync Center trades its sidebar for the compact switcher. Pure and
+  DOM-free: `sidebarNeededWidth` takes the entries as `{name, badges}` and a text measurer,
+  `nextCompact` compares that against the column the stylesheet's `minmax(150px, 22%)` would give
+  and applies the floor, the platform override and the leave-hysteresis. `SyncCenterView`'s
+  `sidebarRowNeeds` builds the input from the same producers `renderSectionEntries` renders from, so
+  the two cannot disagree about which rows exist or how many badges each draws, and `measureSideName`
+  measures text on a detached canvas. **No DOM probe on purpose**: in compact there is no sidebar on
+  screen to measure, so a probe-based rule could never decide to bring it back. The column
+  constants are duplicated from `styles.css` (both sides carry a comment saying so) — a drift there
+  makes entering and leaving asymmetric, and an asymmetric pair oscillates.
 - `ui/panelTaxonomy.ts` — ONE declaration of which fold a Sync Center row files under
   (`placeRow`, `FATE_FOLD_YIELDS_TO_AVAILABILITY`), read by every consumer: the sections, the
   filter pills, the counts. A row carries a fate AND an availability at all times, so the choice

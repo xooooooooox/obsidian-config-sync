@@ -158,7 +158,7 @@ describe("glyph registry — one glyph, one meaning (icon-collision guard)", () 
   // undeclared collision, not the intentional one-meaning reuse it actually is.
   function localSegmentFollowHomes(): GlyphHome[] {
     const homes: GlyphHome[] = [];
-    const elementFollow = enablementRowModel({ rule: EVERYWHERE, exception: null }).local.icon;
+    const elementFollow = enablementRowModel({ rule: EVERYWHERE, exception: null, desktopOnly: false }).local.icon;
     if (elementFollow !== null) homes.push({ glyph: elementFollow, producer: "enablementRowModel", home: "enablementRowModel(local, follows)" });
     const fileFollow = fileEnablementRowModel({ sharing: EVERYWHERE, optedOut: false }).local.icon;
     if (fileFollow !== null) homes.push({ glyph: fileFollow, producer: "fileEnablementRowModel", home: "fileEnablementRowModel(local, follows)" });

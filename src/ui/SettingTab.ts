@@ -81,7 +81,7 @@ import { enablementRules, RuleListId, ruledElementIds } from "../core/enablement
 import {
   buildLocalMenu,
   buildOptOutLocalMenu,
-  enabledOnTooltip,
+  displayRule,
   ENABLED_ON_HEADER,
   enablementRowModel,
   MenuSectionModel,
@@ -91,7 +91,9 @@ import {
   ruleLabel,
   ruleLandingNeedsSeed,
   RowSegment,
-  RULE_OPTIONS,
+  ruleOptionsFor,
+  ruleToStore,
+  sharedSegment,
   settingsSyncTooltip,
   SHARED_WITH_HEADER,
   sharingMenuSection,
@@ -117,7 +119,6 @@ import {
   computeBadges,
   DEFAULT_FIELD_RULE,
   ENABLED_ON_LABEL,
-  DESKTOP_ONLY_ALL_NOTE,
   ENABLED_CSS_SNIPPETS_KEY,
   enablementRuleKeysOf,
   encryptToggleDisabled,
@@ -865,7 +866,19 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         const state = this.host.deviceElementFor(list, id);
         return state === null ? [] : [state];
       });
-    return carrierBadgeCounts(this.host.settings.items, list, states);
+    return carrierBadgeCounts(this.host.settings.items, list, states, this.desktopOnlyElementsOf(list));
+  }
+
+  // Which of a list's elements can only run on desktop — the same `desktopOnly` field the element
+  // rows read, so the count and the rows agree about which rules decide nothing. A plugin
+  // uninstalled here has no def and so answers false: its rule then counts, which is the honest
+  // answer when this device cannot read its manifest at all.
+  private desktopOnlyElementsOf(list: RuleListId): (elementId: string) => boolean {
+    const ids = new Set<string>();
+    for (const def of this.host.itemDefs()) {
+      if (def.enablement?.list === list && def.desktopOnly === true) ids.add(def.enablement.element);
+    }
+    return (elementId) => ids.has(elementId);
   }
 
   // Every settings-tab write funnels through here — the mutators themselves only ever spread what
@@ -1173,7 +1186,6 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       sharing: Sharing;
       options: readonly Sharing[];
       disabled: boolean;
-      note?: string;
       iconFor?: (s: Sharing) => string;
       labelFor?: (s: Sharing) => string;
       ariaLabel?: string;
@@ -1185,7 +1197,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const labelOf = opts.labelFor ?? sharingLabel;
     const icon = cell.createSpan({ cls: `config-sync-sharingicon${opts.sharing.kind !== "everywhere" ? " is-set" : ""}` });
     setIcon(icon, iconOf(opts.sharing));
-    icon.setAttribute("aria-label", opts.ariaLabel ?? sharingCycleTooltip(opts.sharing, opts.note));
+    icon.setAttribute("aria-label", opts.ariaLabel ?? sharingCycleTooltip(opts.sharing));
     setIcon(icon.createSpan({ cls: "config-sync-tworow-chev" }), "chevrons-up-down");
     if (opts.disabled) {
       icon.addClass("config-sync-dim");
@@ -1243,29 +1255,31 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       after: () => void;
     }
   ): void {
-    const model = enablementRowModel({ rule: opts.rule, exception: opts.exception });
-    // A desktop-only plugin still drops the mobile stop: mobile can never install it.
-    const options = opts.desktopOnly ? RULE_OPTIONS.filter((o) => o.kind !== "per-class" || o.class !== "mobile") : RULE_OPTIONS;
-    const note = opts.desktopOnly && opts.rule.kind === "everywhere" ? ` (${DESKTOP_ONLY_ALL_NOTE})` : "";
+    const model = enablementRowModel({ rule: opts.rule, exception: opts.exception, desktopOnly: opts.desktopOnly });
+    const options = ruleOptionsFor(opts.desktopOnly);
+    // The menu checks the DISPLAYED answer, not the stored one: a desktop-only element with no rule
+    // stored reads back as `All devices`, a stop its menu no longer offers, and the menu would open
+    // with nothing checked at all.
+    const shown = displayRule(opts.rule, opts.desktopOnly);
     this.paintMergedControl(cell, {
-      shared: { icon: model.fleet.icon, tooltip: `${enabledOnTooltip(opts.rule)}${note}` },
+      shared: model.fleet,
       local: opts.hasLocalLayer ? model.local : null,
       localIsException: opts.hasLocalLayer && model.localIsException,
       sections: () => {
         const shared = sharingMenuSection({
           header: ENABLED_ON_HEADER,
           options,
-          current: opts.rule,
+          current: shown,
           iconFor: ruleIcon,
           labelFor: ruleLabel,
-          onChange: opts.onRuleChange,
+          onChange: (v) => opts.onRuleChange(ruleToStore(v, opts.desktopOnly)),
         });
         if (!opts.hasLocalLayer) return [shared];
         return [
           shared,
           {
             header: ON_THIS_DEVICE_HEADER,
-            items: buildLocalMenu(opts.rule, opts.exception, {
+            items: buildLocalMenu(shown, opts.exception, {
               follow: () => void this.host.followTheDefault(opts.list, opts.elementId).then(opts.after),
               setState: (state) => void this.host.setDeviceElement(opts.list, opts.elementId, state).then(opts.after),
             }),
@@ -1592,7 +1606,9 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       // rows one above the other drawing the same mark for different facts is what sent the reader
       // looking for a difference that was not there.
       this.paintMergedControl(sharingCell, {
-        shared: { icon: "braces", tooltip: PER_KEY_RULES_TOOLTIP },
+        // Never `set`: the color says "you narrowed the shared answer", and here there is no shared
+        // answer on this row to narrow — the keys inside the file carry their own.
+        shared: { icon: "braces", tooltip: PER_KEY_RULES_TOOLTIP, isSet: false },
         local: optOutLocalSegment(optedOut),
         localIsException: optedOut,
         sections: () => [
@@ -1635,7 +1651,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     // every device keeps its own copy of is simply a file nobody syncs, which is the card's own
     // toggle, not a sharing rule.
     this.paintMergedControl(sharingCell, {
-      shared: { icon: sharingIcon(rule.sharing), tooltip: settingsSyncTooltip(rule.sharing) },
+      shared: sharedSegment({ icon: sharingIcon(rule.sharing), tooltip: settingsSyncTooltip(rule.sharing), sharing: rule.sharing }),
       local: optOutLocalSegment(optedOut),
       localIsException: optedOut,
       sections: () => [
@@ -1900,7 +1916,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const hasLocal = ruleRowHasLocalLayer(row);
     const excepted = hasLocal && this.host.deviceFieldExceptedFor(ref, row.key);
     this.paintMergedControl(slots.device, {
-      shared: { icon: ruleIcon(row.rule.sharing), tooltip: sharingCycleTooltip(row.rule.sharing) },
+      shared: sharedSegment({ icon: ruleIcon(row.rule.sharing), tooltip: sharingCycleTooltip(row.rule.sharing), sharing: row.rule.sharing }),
       local: hasLocal ? optOutLocalSegment(excepted) : null,
       localIsException: excepted,
       sections: () => {

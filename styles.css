@@ -1033,22 +1033,28 @@ body.is-mobile .config-sync-hub-row .config-sync-row-chevron { display: none; }
 
 
 
+/* NARROW PANE, not narrow PLATFORM. `.is-narrow` sits on the view root whenever the pane is in its
+   compact state (sidebarFit.ts decides it; a phone is always in it). These keyed off
+   `body.is-mobile` until a narrow desktop window turned out to get the compact LAYOUT and none of
+   the affordances that make it readable — long pills filling the first line, then a search box
+   stranded mid-way down the second. Touch-target and hover rules stay on `body.is-mobile` further
+   down: those answer what you point with, not how wide the pane is. */
 /* Filter pills: compact glyph+count pills on one line; the scroll container
    stays only as an overflow safety net for extreme counts/font scales. */
-body.is-mobile .config-sync-fpillrow {
+.config-sync-center.is-narrow .config-sync-fpillrow {
   flex: 1 1 100%;
   flex-wrap: nowrap;
   overflow-x: auto;
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
 }
-body.is-mobile .config-sync-fpillrow::-webkit-scrollbar { display: none; }
-body.is-mobile .config-sync-fpill { flex: none; white-space: nowrap; }
+.config-sync-center.is-narrow .config-sync-fpillrow::-webkit-scrollbar { display: none; }
+.config-sync-center.is-narrow .config-sync-fpill { flex: none; white-space: nowrap; }
 .config-sync-fpill-short { display: none; }
-body.is-mobile .config-sync-fpill .config-sync-fpill-long { display: none; }
-body.is-mobile .config-sync-fpill .config-sync-fpill-short { display: inline; }
+.config-sync-center.is-narrow .config-sync-fpill .config-sync-fpill-long { display: none; }
+.config-sync-center.is-narrow .config-sync-fpill .config-sync-fpill-short { display: inline; }
 
-body.is-mobile .config-sync-segrow { flex-wrap: wrap; }
+.config-sync-center.is-narrow .config-sync-segrow { flex-wrap: wrap; }
 
 body.is-mobile .config-sync-fpill,
 body.is-mobile .config-sync-resolvebtn,
@@ -1230,8 +1236,8 @@ body.is-mobile .config-sync-strip-meta .config-sync-report-pills { margin-left: 
    glyph or a badge, so they keep the shared grid at every width instead: the shared grid's whole
    point is icons landing on one vertical rule, which a mobile-only stack would silently un-do for
    exactly the rows it matters most for. */
-body.is-mobile .config-sync-cardrow:not(.is-iconrow) { display: flex; flex-direction: column; align-items: stretch; gap: var(--size-4-2); }
-body.is-mobile .config-sync-cardrow:not(.is-iconrow) > .config-sync-explabel-inline { flex: none; padding-top: 0; }
+.config-sync-center.is-narrow .config-sync-cardrow:not(.is-iconrow) { display: flex; flex-direction: column; align-items: stretch; gap: var(--size-4-2); }
+.config-sync-center.is-narrow .config-sync-cardrow:not(.is-iconrow) > .config-sync-explabel-inline { flex: none; padding-top: 0; }
 /* After install / Enablement are the two rule controls left on a textual menu —
    their fallback options have no glyph vocabulary to lean on. Ellipsis is a last
    resort for a genuinely narrow viewport, never a first resort while `.config-sync-cardval` still
@@ -1273,10 +1279,14 @@ body.is-mobile .config-sync-cardrow:not(.is-iconrow) > .config-sync-explabel-inl
    `.config-sync-scrow` — no nested wrapper on either. */
 .config-sync-mergedctl { display: inline-flex; align-items: center; gap: 2px; width: fit-content; padding: 3px 6px; border-radius: var(--radius-s); color: var(--text-muted); cursor: pointer; opacity: 0.45; transition: opacity 0.12s; }
 .config-sync-mergedctl:hover, .config-sync-mergedctl:focus-visible { opacity: 1; background: var(--background-modifier-hover); }
-.config-sync-mergedctl.is-set { opacity: 1; }
-/* Only the local half colors when THIS device has an exception — the shared glyph keeps saying what
-   the shared answer is, which is the whole reason both glyphs stayed visible. */
+.config-sync-mergedctl.is-set, .config-sync-mergedctl.is-shared-set { opacity: 1; }
+/* One color per layer, so the two never read as one state: purple when THIS device has an
+   exception, cyan when the shared answer is narrower than `All devices`. The cyan is the same token
+   the badge counting those answers wears, which is what lets a card's badge and the rows behind it
+   be one glance apart. A shared answer that merely restates a desktop-only manifest is not `set`
+   (restatesInnate, itemCard.ts) — colored means the user chose it. */
 .config-sync-mergedctl.is-set .config-sync-mergedctl-local { color: var(--color-purple); }
+.config-sync-mergedctl.is-shared-set .config-sync-mergedctl-shared { color: var(--color-cyan); }
 .config-sync-mergedctl-sep { color: var(--text-faint); opacity: 0.35; font-size: var(--font-ui-smaller); line-height: 1; }
 .config-sync-tworow-ic { display: inline-flex; align-items: center; }
 /* ONE glyph size for every drawer control. Without it a control's glyph carries a
@@ -1430,6 +1440,11 @@ body.is-mobile .config-sync-tworow-chev { display: none; }
    "this device" preview color (.config-sync-json-strip above); don't reuse it here. */
 .config-sync-card-badge-local { color: var(--color-pink); }
 .config-sync-card-badge-count { color: var(--color-cyan); }
+/* N device-scoped keeps its own class rather than sharing the one above with N encrypted: the same
+   hex today, two meanings, and the shared class would drag one along whenever the other moved.
+   It is the same cyan the merged control's shared glyph wears, so the badge and the rows it counts
+   are one glance apart. */
+.config-sync-card-badge-scoped { color: var(--color-cyan); }
 /* A carrier card's local fact ("N left to me"):
    purple, the color the merged control's local glyph already wears when this device has
    taken an element out of the shared answer. The fleet fact beside it keeps the count palette
@@ -1717,17 +1732,27 @@ button.config-sync-add-row, button.config-sync-add-row:hover { background: none;
    text glyphs, and two characters here would put them back. Each side keeps
    its DIRECTION's colour at rest, not just when picked, so the two are told apart before anything
    is chosen; picking deepens the same colour rather than introducing another. */
-.config-sync-resolveseg { display: inline-flex; border: 1px solid var(--background-modifier-border); border-radius: var(--radius-s); overflow: hidden; }
-.config-sync-resolvebtn { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border: none; border-radius: 0; background: transparent; font-size: var(--font-ui-smaller); cursor: pointer; box-shadow: none; white-space: nowrap; height: auto; }
-.config-sync-resolvebtn + .config-sync-resolvebtn { border-left: 1px solid var(--background-modifier-border); }
+/* Two chips in the card's own control family, not a segmented control. A frame around two cells
+   with a hairline between them was the only shape of its kind on the card — every other control
+   there (After install, Enablement, the rule pickers) is a single bordered chip at `3px 8px`, so
+   this one read as imported from somewhere else. Same box as the family now; what it keeps is the
+   DIRECTION colour at rest, which is a decision of its own: before anything is picked, the two
+   sides already say which way each one goes. Picking deepens that same colour and takes the border
+   with it, so "chosen" is louder than it was inside the frame. */
+.config-sync-resolveseg { display: inline-flex; gap: var(--size-4-2); }
+/* Scoped through the group, not written flat: these are `<button>`s, and Obsidian's own
+   `button:not(.clickable-icon)` out-specifies a lone class — a flat rule leaves them wearing
+   `--interactive-normal`, which inside the old frame read as a segmented control and outside it
+   reads as two raised buttons on a card that has none. */
+.config-sync-resolveseg .config-sync-resolvebtn { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border: 1px solid var(--background-modifier-border); border-radius: var(--radius-s); background: transparent; font-family: inherit; font-size: var(--font-ui-smaller); cursor: pointer; box-shadow: none; white-space: nowrap; height: auto; }
 .config-sync-resolveic { display: inline-flex; align-items: center; }
 .config-sync-resolveic svg { width: 13px; height: 13px; display: block; }
 .config-sync-resolvebtn.is-apply { color: var(--interactive-accent); }
 .config-sync-resolvebtn.is-capture { color: var(--color-orange); }
 .config-sync-resolvebtn.is-apply:hover { background: rgba(var(--interactive-accent-rgb), 0.1); }
 .config-sync-resolvebtn.is-capture:hover { background: rgba(var(--color-orange-rgb), 0.1); }
-.config-sync-resolvebtn.is-apply.is-on { background: rgba(var(--interactive-accent-rgb), 0.25); }
-.config-sync-resolvebtn.is-capture.is-on { background: rgba(var(--color-orange-rgb), 0.25); }
+.config-sync-resolvebtn.is-apply.is-on { background: rgba(var(--interactive-accent-rgb), 0.25); border-color: rgba(var(--interactive-accent-rgb), 0.45); }
+.config-sync-resolvebtn.is-capture.is-on { background: rgba(var(--color-orange-rgb), 0.25); border-color: rgba(var(--color-orange-rgb), 0.45); }
 /* Only rendered for a multi-file item, where picking a side settles files this window is not
    showing. A quiet line under the toolbar rather than a warning box: it is a fact about scope, not
    a problem. */
@@ -1933,11 +1958,16 @@ body.is-mobile .config-sync-center {
   padding-bottom: calc(var(--mobile-toolbar-height, 48px) + 88px);
 }
 
-/* The search row separates from the filter pills (own line, full width minus select-all). */
-body.is-mobile .config-sync-mainbar { row-gap: var(--size-4-2); }
-body.is-mobile .config-sync-mainbar .config-sync-search-wrap {
+/* The search row separates from the filter pills (own line, full width minus select-all).
+   `flex: 1` AND no auto margin: the select-all beside it carries `margin-left: auto` of its own, so
+   a second auto margin here does not push the box right — the two SPLIT the line's free space and
+   leave the search stranded between them. Filling the line is what the auto margin was reaching
+   for anyway, and it holds however wide the pane is. */
+.config-sync-center.is-narrow .config-sync-mainbar { row-gap: var(--size-4-2); }
+.config-sync-center.is-narrow .config-sync-mainbar .config-sync-search-wrap {
   flex: 1 1 calc(100% - 44px);
   min-width: 0;
+  margin-left: 0;
 }
 
 /* The section switcher matches the pills' height instead of undercutting them. */
@@ -1960,13 +1990,13 @@ body.is-mobile .config-sync-switcher {
 /* Expanded-item detail: one scale for everything inside (desktop + mobile) — buttons,
    file lines and notes all sit at --font-ui-smaller with a shared indent and rhythm. */
 .config-sync-report-files .config-sync-resolveseg { margin: var(--size-2-1) 0; }
-/* Scoped to the CARD's copy, not the diff toolbar's: mobile spans it the full stacked
+/* Scoped to the CARD's copy, not the diff toolbar's: a narrow pane spans it the full stacked
    card-value width, 50/50 split (`flex: 1` per button, centered), touch padding bumped to ~8px
    vertical, so neither "Use theirs"/"Keep mine" clips at 375px. The toolbar's copy sits in a
-   horizontal control cluster and keeps its content-sized shape on every platform. Desktop's
-   content-sized inline-flex pair is untouched. */
-body.is-mobile .config-sync-report-files > .config-sync-card-fields .config-sync-resolveseg { display: flex; width: 100%; }
-body.is-mobile .config-sync-report-files > .config-sync-card-fields .config-sync-resolvebtn {
+   horizontal control cluster and keeps its content-sized shape at every width. A wide pane's
+   content-sized pair is untouched. */
+.config-sync-center.is-narrow .config-sync-report-files > .config-sync-card-fields .config-sync-resolveseg { display: flex; width: 100%; }
+.config-sync-center.is-narrow .config-sync-report-files > .config-sync-card-fields .config-sync-resolvebtn {
   flex: 1;
   min-height: 32px;
   padding: var(--size-4-2) var(--size-4-1);

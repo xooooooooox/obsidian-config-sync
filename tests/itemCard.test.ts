@@ -25,7 +25,7 @@ import {
   memberCountLabel,
   nextSharing,
   PREVIEW_LEGEND_ENTRIES,
-  DESKTOP_ONLY_ALL_NOTE,
+  restatesInnate,
   FIELD_SHARING_OPTIONS,
   FILE_SHARING_OPTIONS,
   COMPANION_DEVICE_OPTIONS,
@@ -132,8 +132,26 @@ describe("computeBadges", () => {
   it("desktop-only def prepends the innate grey chip ahead of every config badge", () => {
     const dOnly: ItemDef = { ...COMMUNITY_DEF, desktopOnly: true };
     expect(computeBadges(dOnly, cfg(), FOLLOWS_ALL, null)).toEqual([{ text: "desktop-only plugin", cls: "config-sync-card-badge-plat", icon: "monitor" }]);
+    expect(computeBadges(dOnly, cfg(), RULE(perClass("mobile")), null)).toEqual([
+      { text: "desktop-only plugin", cls: "config-sync-card-badge-plat", icon: "monitor" },
+      { text: "on: mobile", cls: "config-sync-card-badge-mobile", icon: "smartphone" },
+    ]);
+  });
+
+  // Two monitors on one card, one grey and one blue, for a plugin that could never have run
+  // anywhere else: the rule repeats the innate chip beside it and decided nothing.
+  it("a Desktop-only rule on a desktop-only plugin adds no second badge", () => {
+    const dOnly: ItemDef = { ...COMMUNITY_DEF, desktopOnly: true };
     expect(computeBadges(dOnly, cfg(), RULE(perClass("desktop")), null)).toEqual([
       { text: "desktop-only plugin", cls: "config-sync-card-badge-plat", icon: "monitor" },
+    ]);
+    // An exception on the same plugin still badges — that one does say something new.
+    expect(computeBadges(dOnly, cfg(), RULE(perClass("desktop"), "off"), null)).toEqual([
+      { text: "desktop-only plugin", cls: "config-sync-card-badge-plat", icon: "monitor" },
+      { text: "off: this device", cls: "config-sync-card-badge-local", icon: "power-off" },
+    ]);
+    // Same rule on a plugin that CAN run on mobile is a real decision and keeps its badge.
+    expect(computeBadges(COMMUNITY_DEF, cfg(), RULE(perClass("desktop")), null)).toEqual([
       { text: "on: desktop", cls: "config-sync-card-badge-desktop", icon: "monitor" },
     ]);
   });
@@ -187,7 +205,7 @@ describe("computeBadges", () => {
       // Its one pinned rule is Mobile only, so the badge says `smartphone`. `monitor-smartphone`
       // here would be the glyph for `All devices` over a count of keys that are pointedly NOT on
       // all devices.
-      { text: "1 device-scoped", cls: "config-sync-card-badge-count", icon: "smartphone", count: 1 },
+      { text: "1 device-scoped", cls: "config-sync-card-badge-scoped", icon: "smartphone", count: 1 },
       { text: "1 encrypted", cls: "config-sync-card-badge-count", icon: "lock", count: 1 },
     ]);
   });
@@ -201,7 +219,7 @@ describe("computeBadges", () => {
       },
     });
     expect(computeBadges(HOTKEYS_DEF, mixed, null, null)).toEqual([
-      { text: "2 device-scoped", cls: "config-sync-card-badge-count", icon: "contrast", count: 2 },
+      { text: "2 device-scoped", cls: "config-sync-card-badge-scoped", icon: "contrast", count: 2 },
     ]);
   });
 });
@@ -524,18 +542,37 @@ describe("carrierListFor", () => {
 describe("carrierBadgeCounts", () => {
   const withRules = (rules: Record<string, Sharing>): ReturnType<typeof itemsIn> =>
     itemsIn({ obsidian: { "community-plugins": { synced: true, settingsFile: { mode: "plain", rules: {}, perElement: { "": rules } } } } });
+  // Every element runs everywhere unless a test says otherwise.
+  const runsEverywhere = (): boolean => false;
 
   it("counts class rules for the fleet and this device's exceptions for the local half — never one number", () => {
     const items = withRules({ dataview: perClass("desktop"), templater: perClass("mobile"), git: THIS_DEVICE });
-    expect(carrierBadgeCounts(items, "community-plugins", ["on", "off"])).toEqual({ fleet: ["desktop", "mobile"], local: ["on", "off"] });
+    expect(carrierBadgeCounts(items, "community-plugins", ["on", "off"], runsEverywhere)).toEqual({ fleet: ["desktop", "mobile"], local: ["on", "off"] });
   });
 
   it("`Not shared` is not device-scoped — it hands the element back, it does not scope it", () => {
-    expect(carrierBadgeCounts(withRules({ git: THIS_DEVICE }), "community-plugins", [])).toEqual({ fleet: [], local: [] });
+    expect(carrierBadgeCounts(withRules({ git: THIS_DEVICE }), "community-plugins", [], runsEverywhere)).toEqual({ fleet: [], local: [] });
   });
 
   it("a list with nothing decided counts nothing (a badge never reads '0 …')", () => {
-    expect(carrierBadgeCounts(itemsIn({}), "core-plugins", [])).toEqual({ fleet: [], local: [] });
+    expect(carrierBadgeCounts(itemsIn({}), "core-plugins", [], runsEverywhere)).toEqual({ fleet: [], local: [] });
+  });
+
+  // The count is meant to say how many device-scoping DECISIONS this card carries. A `Desktop only`
+  // rule on a plugin that cannot run on mobile anyway is not one, and leaving it in decides the
+  // glyph as well as the number: the card below has only mobile decisions, yet counting the two
+  // desktop restatements would make the set mixed and draw `contrast`.
+  it("a desktop rule on a desktop-only plugin is not a decision, and does not get to make the set mixed", () => {
+    const items = withRules({ dataview: perClass("mobile"), git: perClass("desktop"), "better-export-pdf": perClass("desktop") });
+    const desktopOnly = (id: string): boolean => id === "git" || id === "better-export-pdf";
+    expect(carrierBadgeCounts(items, "community-plugins", [], desktopOnly).fleet).toEqual(["mobile"]);
+    // Same data, nothing known to be desktop-only: every rule counts, and the set reads as mixed.
+    expect(carrierBadgeCounts(items, "community-plugins", [], runsEverywhere).fleet.length).toBe(3);
+  });
+
+  it("`Not shared` on a desktop-only plugin is still a real choice — it just is not a class rule", () => {
+    const items = withRules({ git: THIS_DEVICE, dataview: perClass("desktop") });
+    expect(carrierBadgeCounts(items, "community-plugins", [], () => true).fleet).toEqual([]);
   });
 
   // The carrier's OWN class pins (fileRule.sharing — settable from the
@@ -561,7 +598,7 @@ describe("carrierBadgeCounts", () => {
     // carrier's own pins: fileRule (1) + rules["some-key"] (1) = 2
     // Order is deliberately NOT asserted: the badge reads the length and whether the kinds agree,
     // so pinning it would fix an incidental of how the two halves happen to be concatenated.
-    const counts = carrierBadgeCounts(items, "core-plugins", []);
+    const counts = carrierBadgeCounts(items, "core-plugins", [], runsEverywhere);
     expect(counts.fleet.length).toBe(3);
     expect([...counts.fleet].sort()).toEqual(["desktop", "desktop", "mobile"]);
     expect(counts.local).toEqual([]);
@@ -571,7 +608,7 @@ describe("carrierBadgeCounts", () => {
   // back to a neutral summariser only when it genuinely mixes.
   it("a set that agrees on one class still reads as that class", () => {
     const items = withRules({ dataview: perClass("mobile"), templater: perClass("mobile") });
-    expect(carrierBadgeCounts(items, "community-plugins", []).fleet).toEqual(["mobile", "mobile"]);
+    expect(carrierBadgeCounts(items, "community-plugins", [], runsEverywhere).fleet).toEqual(["mobile", "mobile"]);
   });
 });
 
@@ -749,8 +786,25 @@ describe("nextSharing / sharing icon cycle — Commander-style sharing control",
     expect(sharingCycleTooltip(THIS_DEVICE)).toBe("No shared value. Every device keeps its own.");
   });
 
-  it("tooltip appends the desktop-only note to the everywhere stop", () => {
-    expect(sharingCycleTooltip(EVERYWHERE, DESKTOP_ONLY_ALL_NOTE)).toBe("One value, the same everywhere. (mobile is excluded automatically)");
+});
+
+// The one predicate three surfaces ask before they color a glyph, draw a badge, or count a rule.
+describe("restatesInnate", () => {
+  const DESKTOP = perClass("desktop");
+  const MOBILE = perClass("mobile");
+
+  it("a desktop-only plugin's desktop answers decide nothing — stored or defaulted", () => {
+    expect(restatesInnate(DESKTOP, true)).toBe(true);
+    // `everywhere` is what an ABSENT rule reads back as, and it is just as much a non-decision here.
+    expect(restatesInnate(EVERYWHERE, true)).toBe(true);
+  });
+
+  it("`Not shared` is a real choice even on a desktop-only plugin — the manifest has no opinion about it", () => {
+    expect(restatesInnate(THIS_DEVICE, true)).toBe(false);
+  });
+
+  it("nothing restates anything on a plugin that runs everywhere", () => {
+    for (const sharing of [EVERYWHERE, DESKTOP, MOBILE, THIS_DEVICE]) expect(restatesInnate(sharing, false)).toBe(false);
   });
 });
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildOptOutLocalMenu,
   buildLocalMenu,
+  displayRule,
   enabledOnTooltip,
   enablementRowModel,
   fileEnablementRowModel,
@@ -14,7 +15,10 @@ import {
   ruleIcon,
   ruleLabel,
   ruleLandingNeedsSeed,
+  ruleOptionsFor,
+  ruleToStore,
   RULE_OPTIONS,
+  sharedSegment,
   settingsSyncTooltip,
 } from "../src/ui/enablementRow";
 import { EVERYWHERE, perClass, THIS_DEVICE } from "../src/core/types";
@@ -54,16 +58,16 @@ describe("the merged two-layer control", () => {
   // old `corner-down-right` only read as "follows" while it stood to the right of the shared glyph,
   // and it also has to work in a menu list, where it has no neighbour to point back at.
   it("the follow state has a glyph — equal, not an exception", () => {
-    const m = enablementRowModel({ rule: EVERYWHERE, exception: null });
-    expect(m.local).toEqual({ icon: "equal", tooltip: "This device: follows what's shared." });
+    const m = enablementRowModel({ rule: EVERYWHERE, exception: null, desktopOnly: false });
+    expect(m.local).toEqual({ icon: "equal", tooltip: "This device: follows what's shared.", isSet: false });
     expect(m.localIsException).toBe(false);
   });
 
   it("an exception shows its own state, whatever the rule says (precedence 1 is visible)", () => {
     for (const rule of [EVERYWHERE, perClass("desktop"), THIS_DEVICE]) {
-      expect(enablementRowModel({ rule, exception: "on" }).local).toEqual({ icon: "power", tooltip: "This device: always on." });
-      expect(enablementRowModel({ rule, exception: "off" }).local).toEqual({ icon: "power-off", tooltip: "This device: always off." });
-      expect(enablementRowModel({ rule, exception: "on" }).localIsException).toBe(true);
+      expect(enablementRowModel({ rule, exception: "on", desktopOnly: false }).local).toEqual({ icon: "power", tooltip: "This device: always on.", isSet: true });
+      expect(enablementRowModel({ rule, exception: "off", desktopOnly: false }).local).toEqual({ icon: "power-off", tooltip: "This device: always off.", isSet: true });
+      expect(enablementRowModel({ rule, exception: "on", desktopOnly: false }).localIsException).toBe(true);
     }
   });
 
@@ -76,7 +80,7 @@ describe("the merged two-layer control", () => {
     expect(enabledOnTooltip(perClass("mobile"))).toBe("Phones turn it on. On desktops it stays off.");
     expect(enabledOnTooltip(THIS_DEVICE)).toBe("Nobody shares this. Every device keeps its own on/off.");
     // one producer: the model never re-spells it
-    for (const rule of RULE_OPTIONS) expect(enablementRowModel({ rule, exception: null }).fleet.tooltip).toBe(enabledOnTooltip(rule));
+    for (const rule of RULE_OPTIONS) expect(enablementRowModel({ rule, exception: null, desktopOnly: false }).fleet.tooltip).toBe(enabledOnTooltip(rule));
   });
 
   // `not-synced` is the only state that needs a second sentence: it is what users mistake for the
@@ -89,6 +93,57 @@ describe("the merged two-layer control", () => {
   });
 });
 
+// A desktop-only element is offered a different set of answers, and reads one stored answer as a
+// different one. Both live here so the Settings panel and the Sync Center cannot answer differently
+// for the same plugin — which is exactly what they did while only one of them filtered.
+describe("a desktop-only element's stops", () => {
+  it("offers two, and neither of them names a phone", () => {
+    expect(ruleOptionsFor(true).map(ruleLabel)).toEqual(["Desktop only", "Not shared"]);
+    expect(ruleOptionsFor(false)).toEqual(RULE_OPTIONS);
+  });
+
+  // With no rule stored the answer reads back as `everywhere` — a stop this row no longer offers,
+  // so the menu would open with nothing checked and the glyph would promise phones it cannot reach.
+  it("reads a stored-or-absent All devices as the stop it actually behaves like", () => {
+    expect(displayRule(EVERYWHERE, true)).toEqual(perClass("desktop"));
+    expect(displayRule(THIS_DEVICE, true)).toEqual(THIS_DEVICE);
+    expect(displayRule(EVERYWHERE, false)).toEqual(EVERYWHERE);
+  });
+
+  // The inverse collapse. Without it, picking the one positive stop writes an entry that changes
+  // nothing and that this menu — having no `All devices` stop — can never remove again.
+  it("stores the collapsed answer as no rule at all, so the round trip is byte-identical", () => {
+    expect(ruleToStore(perClass("desktop"), true)).toEqual(EVERYWHERE);
+    expect(ruleToStore(THIS_DEVICE, true)).toEqual(THIS_DEVICE);
+    expect(ruleToStore(perClass("desktop"), false)).toEqual(perClass("desktop"));
+  });
+
+  it("draws and describes the collapsed answer, and never colors it — nobody chose it", () => {
+    const m = enablementRowModel({ rule: EVERYWHERE, exception: null, desktopOnly: true });
+    expect(m.fleet.icon).toBe(ruleIcon(perClass("desktop")));
+    expect(m.fleet.tooltip).toBe(enabledOnTooltip(perClass("desktop")));
+    expect(m.fleet.isSet).toBe(false);
+    // A stored Desktop only reads identically: same non-decision, same silence.
+    expect(enablementRowModel({ rule: perClass("desktop"), exception: null, desktopOnly: true }).fleet.isSet).toBe(false);
+    // `Not shared` is a real choice, and colors.
+    expect(enablementRowModel({ rule: THIS_DEVICE, exception: null, desktopOnly: true }).fleet.isSet).toBe(true);
+  });
+});
+
+// `isSet` is what the shared glyph's color reads. It rides the segment so no paint site decides it.
+describe("the shared half's colored state", () => {
+  it("is set for every answer narrower than All devices, and only those", () => {
+    for (const rule of RULE_OPTIONS) {
+      expect(enablementRowModel({ rule, exception: null, desktopOnly: false }).fleet.isSet).toBe(rule.kind !== "everywhere");
+    }
+  });
+
+  it("sharedSegment answers the same question for the rows that carry a plain Sharing value", () => {
+    expect(sharedSegment({ icon: "monitor", tooltip: "t", sharing: perClass("desktop") }).isSet).toBe(true);
+    expect(sharedSegment({ icon: "monitor-smartphone", tooltip: "t", sharing: EVERYWHERE }).isSet).toBe(false);
+  });
+});
+
 // The whole-FILE row's model counterpart (`Settings sync`) — same shape, a FileSharing
 // fleet datum and a two-state local layer (follow / not-synced-here).
 describe("fileEnablementRowModel", () => {
@@ -97,7 +152,7 @@ describe("fileEnablementRowModel", () => {
   // at all. The excluded class keeps no private copy — it simply has nothing to do with the file.
   it("the fleet segment carries sharingIcon's glyph and the whole-file consequence", () => {
     const m = fileEnablementRowModel({ sharing: EVERYWHERE, optedOut: false });
-    expect(m.fleet).toEqual({ icon: "monitor-smartphone", tooltip: "Every device syncs this file." });
+    expect(m.fleet).toEqual({ icon: "monitor-smartphone", tooltip: "Every device syncs this file.", isSet: false });
     expect(settingsSyncTooltip(perClass("desktop"))).toBe("Only desktops sync this file. Phones don't sync it at all.");
     expect(settingsSyncTooltip(perClass("mobile"))).toBe("Only phones sync this file. Desktops don't sync it at all.");
   });
@@ -106,9 +161,10 @@ describe("fileEnablementRowModel", () => {
     expect(fileEnablementRowModel({ sharing: EVERYWHERE, optedOut: false }).local).toEqual({
       icon: "equal",
       tooltip: "This device: follows what's shared.",
+      isSet: false,
     });
     const optedOut = fileEnablementRowModel({ sharing: EVERYWHERE, optedOut: true });
-    expect(optedOut.local).toEqual({ icon: "circle-minus", tooltip: "This device: not synced. Your other devices keep sharing it." });
+    expect(optedOut.local).toEqual({ icon: "circle-minus", tooltip: "This device: not synced. Your other devices keep sharing it.", isSet: true });
     expect(optedOut.localIsException).toBe(true);
   });
 
@@ -144,7 +200,7 @@ describe("buildLocalMenu", () => {
 
   it("carries the same glyphs the control's local half shows, and none for follow", () => {
     expect(buildLocalMenu(EVERYWHERE, null, handlers).map((i) => i.icon)).toEqual([null, "power", "power-off"]);
-    const model = enablementRowModel({ rule: EVERYWHERE, exception: "on" });
+    const model = enablementRowModel({ rule: EVERYWHERE, exception: "on", desktopOnly: false });
     expect(buildLocalMenu(EVERYWHERE, "on", handlers).find((i) => i.title === ON_HERE_LABEL)?.icon).toBe(model.local.icon);
   });
 

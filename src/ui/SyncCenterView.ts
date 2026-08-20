@@ -9,6 +9,7 @@ import { RuleListId } from "../core/enablementRules";
 import {
   buildOptOutLocalMenu,
   buildLocalMenu,
+  displayRule,
   ENABLED_ON_HEADER,
   enablementRowModel,
   fileEnablementRowModel,
@@ -16,7 +17,8 @@ import {
   ON_THIS_DEVICE_HEADER,
   optOutLocalSegment,
   RowSegment,
-  RULE_OPTIONS,
+  ruleOptionsFor,
+  ruleToStore,
   ruleIcon,
   ruleLabel,
   ruleLandingNeedsSeed,
@@ -24,6 +26,7 @@ import {
   sharingMenuSection,
 } from "./enablementRow";
 import { paintMergedControl } from "./mergedControl";
+import { nextCompact, sidebarNeededWidth, SidebarRowNeed } from "./sidebarFit";
 import { Availability } from "../core/availability";
 import { REUSE_MAX_AGE_MS } from "../external/readerCache";
 import { isWholeFileEncrypted } from "../core/modes";
@@ -178,6 +181,10 @@ export type SyncQualifierKey = (typeof SYNC_QUALIFIER_SPECS)[number]["key"];
 export const SYNC_QUALIFIER_KEYS: ReadonlySet<string> = new Set(SYNC_QUALIFIER_SPECS.map((s) => s.key));
 
 // Sidebar section order: Beta sits between Community and custom.
+// Only reached when every count on the pane is zero, so no badge is rendered anywhere to measure —
+// and then no row's width depends on it. Roughly `min-width` at two digits (styles.css).
+const SIDE_BADGE_FALLBACK_PX = 32;
+
 const ITEM_SECTION_ORDER: (StorageSection | "beta")[] = ["obsidian", "core", "community", "beta", "custom"];
 const ITEM_SECTION_LABELS: Record<StorageSection | "beta", string> = { ...SECTION_LABELS, beta: "Beta" };
 
@@ -487,6 +494,10 @@ export class SyncCenterView extends ItemView {
   // remoteRefreshProgress — see refreshControl.ts's opening note for why that could never work.
   private refreshing = false;
   private compact = false;
+  // Cached across renders: a 2d context for text measurement (sidebarFit.ts's opening note says why
+  // the fit decision cannot use a DOM probe) and the resolved sidebar font it was set to.
+  private textCanvas: CanvasRenderingContext2D | null = null;
+  private sideFontCache: string | null = null;
   private switcherOpen = false;
   private running = false;
   private activeRun: { verb: "Capturing" | "Applying"; done: number; total: number } | null = null;
@@ -569,14 +580,87 @@ export class SyncCenterView extends ItemView {
     this.evaluateCompact();
   }
 
-  private evaluateCompact(): void {
+  // The answer, from the pane's current width and the rows as they stand. No side effects: both the
+  // resize path (which may have to re-render) and render() itself ask it, and render() must not be
+  // able to re-enter itself through it.
+  private computeCompact(): boolean {
     const width = this.contentEl.clientWidth;
-    if (width === 0) return; // hidden leaf
-    const compact = width < 700;
+    if (width === 0) return this.compact; // hidden leaf — nothing to measure, keep what we had
+    return nextCompact({
+      compact: this.compact,
+      forceNarrow: Platform.isMobile,
+      viewWidth: width,
+      neededWidth: sidebarNeededWidth(this.sidebarRowNeeds(), (name) => this.measureSideName(name), this.measureSideBadge()),
+    });
+  }
+
+  private evaluateCompact(): void {
+    const compact = this.computeCompact();
     if (compact !== this.compact) {
       this.compact = compact;
       if (!this.running) this.render(this.renderGen);
     }
+  }
+
+  // The sidebar's entries as WIDTHS: the same set renderSectionEntries builds, from the same
+  // producers, so the two can never disagree about which rows exist or how many badges each draws.
+  // A remote row draws a fixed state icon rather than a count badge, and History draws nothing —
+  // both are narrower than a badge, so counting them as one badge is a safe over-reservation and
+  // keeps this list honest about "the row has something trailing".
+  private sidebarRowNeeds(): SidebarRowNeed[] {
+    // The RESTING badges, never the search's single hit count — even while a search is running.
+    // Searching would otherwise collapse five badges into one, decide the pane can hold a sidebar
+    // again, and rebuild the panel out from under the input being typed into. The resting set is
+    // also the wider of the two, so measuring it is the safe bound either way.
+    const badgesFor = (rows: StatusRow[]): number => {
+      const c = this.presentedCounts(rows);
+      return [c.up, c.down, c.ok, c.excluded, c.none].filter((n) => n > 0).length;
+    };
+    const countable = this.countable(this.rows());
+    const needs: SidebarRowNeed[] = [{ name: "All items", badges: badgesFor(countable) }];
+    for (const cat of ITEM_SECTION_ORDER) {
+      const inCat = countable.filter((r) => this.itemSectionOf(r.group.name) === cat);
+      if (inCat.length === 0) continue;
+      needs.push({ name: ITEM_SECTION_LABELS[cat], badges: badgesFor(inCat) });
+    }
+    for (const remote of this.host.remotes()) needs.push({ name: remote.name, badges: 1 });
+    if (this.host.runHistoryEnabled()) needs.push({ name: "History", badges: 0 });
+    return needs;
+  }
+
+  // Text measurement without a DOM probe: in compact there is no sidebar on screen to measure, and
+  // a decision that can only be made while the thing it decides about is rendered cannot get out of
+  // compact again. The canvas and the resolved font are cached across calls — the font only changes
+  // when the theme does, and re-reading it per row turned one resize into dozens of style lookups.
+  private measureText(text: string, font: string): number {
+    // Obsidian's global `createEl` returns a DETACHED element, which is what a measuring canvas
+    // wants: it never enters the document and never lays anything out.
+    if (this.textCanvas === null) this.textCanvas = createEl("canvas").getContext("2d");
+    const ctx = this.textCanvas;
+    if (ctx === null) return text.length * 7; // no 2d context (headless): a coarse estimate beats none
+    if (ctx.font !== font) ctx.font = font;
+    return ctx.measureText(text).width;
+  }
+
+  private sideFont(): string {
+    const cs = window.getComputedStyle(this.contentEl);
+    const size = cs.getPropertyValue("--font-ui-small").trim() || "13px";
+    return `${size} ${cs.fontFamily}`;
+  }
+
+  private measureSideName(name: string): number {
+    if (this.sideFontCache === null) this.sideFontCache = this.sideFont();
+    return this.measureText(name, this.sideFontCache);
+  }
+
+  // One badge's reserved width. Measured off a live badge when there is one — the sidebar AND the
+  // compact switcher both draw `.config-sync-side-badge`, so one is on screen in either state —
+  // which keeps this free of the `min-width` arithmetic the stylesheet owns. The fallback covers
+  // the one case with no badge anywhere: every count is zero, and then nothing depends on it.
+  private measureSideBadge(): number {
+    const live = this.contentEl.querySelector(".config-sync-side-badge");
+    const width = live === null ? 0 : live.getBoundingClientRect().width;
+    return width > 0 ? width : SIDE_BADGE_FALLBACK_PX;
   }
 
   // Called by the plugin when awareness state changes while the view is open.
@@ -1112,8 +1196,17 @@ export class SyncCenterView extends ItemView {
     this.searchTextCache.clear();
     this.rowsCache = null;
     const scrollTop = this.contentEl.scrollTop;
+    // Re-decided on every render, not only on resize: what the sidebar needs is a function of the
+    // rows, and those change without the pane changing size — a search collapses five bucket badges
+    // into one hit count, a completed run empties buckets outright. Asked BEFORE the teardown, while
+    // the badge it measures is still on screen.
+    this.compact = this.computeCompact();
     this.contentEl.empty();
     this.renderHeader();
+    // The narrow state on the view ROOT, not just the shell: the header sits outside the shell and
+    // has to answer the same question. One class, one axis — before this, pane layout asked the
+    // width and every narrow affordance asked the platform, so a narrow desktop window got neither.
+    this.contentEl.toggleClass("is-narrow", this.compact);
     const shell = this.contentEl.createDiv({ cls: `config-sync-shell${this.compact ? " is-compact" : ""}` });
     // How many digit slots the count badges reserve, so their icons line up as a column without
     // over-reserving. Set on the shell because the sidebar and the compact switcher both draw
@@ -3250,7 +3343,12 @@ export class SyncCenterView extends ItemView {
   private renderDefaultEnabledOnRow(detail: HTMLElement, name: string, input: FateInput): void {
     const list = enablementCarrierFor(this.rowRef(name));
     const elementId = this.carrierElementFor(name);
-    const model = enablementRowModel({ rule: input.ruleSharing, exception: input.localException });
+    const model = enablementRowModel({ rule: input.ruleSharing, exception: input.localException, desktopOnly: input.desktopOnly });
+    // Both the stops offered and the one checked come from the same producers the Settings card's
+    // row asks — this entrance used to pass the unfiltered list, so a desktop-only plugin offered
+    // `Mobile only` here and not there, for the same plugin.
+    const options = ruleOptionsFor(input.desktopOnly);
+    const shown = displayRule(input.ruleSharing, input.desktopOnly);
     this.renderMergedRow(detail, "Enabled on", {
       shared: model.fleet,
       local: model.local,
@@ -3258,18 +3356,18 @@ export class SyncCenterView extends ItemView {
       sections: () => [
         sharingMenuSection({
           header: ENABLED_ON_HEADER,
-          options: RULE_OPTIONS,
-          current: input.ruleSharing,
+          options,
+          current: shown,
           iconFor: ruleIcon,
           labelFor: ruleLabel,
-          onChange: (rule) => void this.setRuleWithLanding(list, elementId, rule).then(() => this.notifyExternalChange()),
+          onChange: (rule) => void this.setRuleWithLanding(list, elementId, ruleToStore(rule, input.desktopOnly)).then(() => this.notifyExternalChange()),
         }),
         {
           header: ON_THIS_DEVICE_HEADER,
           // buildLocalMenu is the producer the Settings card's row asks too, so the two entrances
           // cannot offer different choices. Its follow entry is absent under `Not shared`: there is
           // no shared answer to follow, and this device's own state IS the answer.
-          items: buildLocalMenu(input.ruleSharing, input.localException, {
+          items: buildLocalMenu(shown, input.localException, {
             follow: () => void this.host.followTheDefault(list, elementId).then(() => this.reload()),
             setState: (state) => void this.host.setDeviceElement(list, elementId, state).then(() => this.reload()),
           }),
@@ -3365,7 +3463,9 @@ export class SyncCenterView extends ItemView {
     // different facts was the confusion.
     if (!this.host.itemFileSharingMenuLegal(ref)) {
       this.renderMergedRow(detail, "Settings sync", {
-        shared: { icon: "braces", tooltip: FILE_SHARING_MENU_UNAVAILABLE_TEXT },
+        // Never `set`: the color says "you narrowed the shared answer", and here there is no shared
+        // answer on this row to narrow — the keys inside the file carry their own.
+        shared: { icon: "braces", tooltip: FILE_SHARING_MENU_UNAVAILABLE_TEXT, isSet: false },
         local: optOutLocalSegment(optedOut),
         localIsException: optedOut,
         sections: () => [
