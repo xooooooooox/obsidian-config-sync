@@ -9,6 +9,10 @@ import {
   LockSource,
   PerElementSharing,
   Remote,
+  RemoteDirection,
+  RemoteItemRule,
+  RemoteItems,
+  RemoteKeyRule,
   StoreLock,
   StoreLockEntry,
   SyncGroup,
@@ -683,24 +687,80 @@ export function validateRemotes(data: unknown): Remote[] {
   return data.map((r, i) => parseRemote(r, i));
 }
 
+const REMOTE_DIRECTIONS = new Set(["both", "push", "pull", "none"]);
+
+// A remote's rules are hand-editable like everything else in data.json, so they are validated on
+// write with the same voice as the rest of this form: name the remote, name the field, never quote
+// JSON syntax.
+function parseRemoteItems(value: unknown, name: string): RemoteItems | undefined {
+  if (value === undefined) return undefined;
+  if (!isPlainObject(value)) throw new ManifestValidationError(`Remote "${name}": the per-item rules must be a set of sections`);
+  const out: RemoteItems = {};
+  for (const [section, byId] of Object.entries(value)) {
+    if (!isPlainObject(byId)) throw new ManifestValidationError(`Remote "${name}": the rules under "${section}" must be a set of items`);
+    const bucket: Record<string, RemoteItemRule> = {};
+    for (const [id, raw] of Object.entries(byId)) {
+      if (!isPlainObject(raw)) throw new ManifestValidationError(`Remote "${name}": the rule for "${section}/${id}" must be an object`);
+      const rule: RemoteItemRule = {};
+      if (raw.direction !== undefined) {
+        if (typeof raw.direction !== "string" || !REMOTE_DIRECTIONS.has(raw.direction)) {
+          throw new ManifestValidationError(`Remote "${name}": the direction for "${section}/${id}" must be both, push, pull or none`);
+        }
+        rule.direction = raw.direction as RemoteDirection;
+      }
+      if (raw.keys !== undefined) {
+        if (!isPlainObject(raw.keys)) {
+          throw new ManifestValidationError(`Remote "${name}": the key rules for "${section}/${id}" must be a set of key names`);
+        }
+        const keys: Record<string, RemoteKeyRule> = {};
+        for (const [pattern, kraw] of Object.entries(raw.keys)) {
+          if (!isPlainObject(kraw) || typeof kraw.direction !== "string" || !REMOTE_DIRECTIONS.has(kraw.direction)) {
+            throw new ManifestValidationError(`Remote "${name}": the direction for "${pattern}" must be both, push, pull or none`);
+          }
+          keys[pattern] = { direction: kraw.direction as RemoteDirection };
+        }
+        if (Object.keys(keys).length > 0) rule.keys = keys;
+      }
+      if (rule.direction !== undefined || rule.keys !== undefined) bucket[id] = rule;
+    }
+    if (Object.keys(bucket).length > 0) out[section] = bucket;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function parseRemotePassphraseId(value: unknown, name: string): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || !/^[a-z0-9-]+$/.test(value) || value.length > 64) {
+    throw new ManifestValidationError(
+      `Remote "${name}": the passphrase's name can use lowercase letters, digits and dashes, up to 64 characters, e.g. work-passphrase`
+    );
+  }
+  if (value === PASSPHRASE_SECRET_ID) {
+    throw new ManifestValidationError(
+      `Remote "${name}": "${PASSPHRASE_SECRET_ID}" is Config Sync's own vault passphrase. Give this remote its own secret instead`
+    );
+  }
+  return value;
+}
+
 // These messages surface inside the Remotes FORM (pinned under the offending card) as well as on
 // a hand-edited data.json — so they name what's on screen (the field labels, the remote by name)
 // and never quote JSON syntax (DESIGN.md's Form rules errors).
 function parseRemote(r: unknown, index: number): Remote {
   if (!isPlainObject(r)) throw new ManifestValidationError(`Remote #${index + 1} must be an object, e.g. {"name": "laptop", "type": "vault", "storePath": "/path/to/store"}`);
-  const { name, type, storePath, url, branch, subdir, excludeSelf, tokenId, username } = r;
+  const { name, type, storePath, url, branch, subdir, items, passphraseId, tokenId, username } = r;
   if (typeof name !== "string" || name === "") {
     throw new ManifestValidationError(`Remote #${index + 1}: a name is required. Give it a short label, e.g. laptop`);
-  }
-  if (excludeSelf !== undefined && typeof excludeSelf !== "boolean") {
-    throw new ManifestValidationError(`Remote "${name}": "excludeSelf" must be true or false`);
   }
   if (type === "vault") {
     if (typeof storePath !== "string" || !(storePath.startsWith("/") || storePath === "~" || storePath.startsWith("~/"))) {
       throw new ManifestValidationError(`Remote "${name}": the store path needs to be a full path starting with / or ~/, for example ~/Vaults/other-vault/config-sync`);
     }
     const remote: Remote = { name, type, storePath };
-    if (excludeSelf === true) remote.excludeSelf = true;
+    const rules = parseRemoteItems(items, name);
+    if (rules !== undefined) remote.items = rules;
+    const pass = parseRemotePassphraseId(passphraseId, name);
+    if (pass !== undefined) remote.passphraseId = pass;
     return remote;
   }
   if (type === "git") {
@@ -726,7 +786,10 @@ function parseRemote(r: unknown, index: number): Remote {
     }
     const remote: Remote = { name, type, url, branch };
     if (typeof subdir === "string" && subdir !== "") remote.subdir = subdir;
-    if (excludeSelf === true) remote.excludeSelf = true;
+    const rules = parseRemoteItems(items, name);
+    if (rules !== undefined) remote.items = rules;
+    const pass = parseRemotePassphraseId(passphraseId, name);
+    if (pass !== undefined) remote.passphraseId = pass;
     if (typeof tokenId === "string") remote.tokenId = tokenId;
     if (typeof username === "string") remote.username = username;
     return remote;

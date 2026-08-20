@@ -279,21 +279,6 @@ describe("validateRemotes", () => {
     expect(() => validateRemotes({})).toThrow("Remotes must be a list");
   });
 
-  it("accepts excludeSelf: true on both types; false/absent serialize as absent", () => {
-    const remotes = validateRemotes([
-      { name: "a", type: "vault", storePath: "/s", excludeSelf: true },
-      { name: "b", type: "vault", storePath: "/s", excludeSelf: false },
-      { name: "c", type: "git", url: "git@h:r.git", branch: "main", excludeSelf: true },
-    ]);
-    expect(remotes[0]).toEqual({ name: "a", type: "vault", storePath: "/s", excludeSelf: true });
-    expect(remotes[1]).toEqual({ name: "b", type: "vault", storePath: "/s" });
-    expect(remotes[2]).toEqual({ name: "c", type: "git", url: "git@h:r.git", branch: "main", excludeSelf: true });
-  });
-
-  it("rejects a non-boolean excludeSelf", () => {
-    expect(() => validateRemotes([{ name: "a", type: "vault", storePath: "/s", excludeSelf: "yes" }])).toThrow("must be true or false");
-  });
-
   it("round-trips tokenId on git remotes", () => {
     const remotes = validateRemotes([{ name: "b", type: "git", url: "u", branch: "main", tokenId: "gitlab-token" }]);
     expect(remotes[0]).toEqual({ name: "b", type: "git", url: "u", branch: "main", tokenId: "gitlab-token" });
@@ -330,6 +315,38 @@ describe("validateRemotes", () => {
     expect(() =>
       validateRemotes([{ name: "b", type: "git", url: "u", branch: "main", tokenId: "config-sync-passphrase" }])
     ).toThrow("Config Sync's own vault passphrase");
+  });
+});
+
+describe("parseRemote — direction rules and passphrase", () => {
+  it("carries a well-formed items map through", () => {
+    const [r] = validateRemotes([
+      { name: "work", type: "vault", storePath: "/tmp/store", items: { community: { dataview: { direction: "push" } } } },
+    ]);
+    expect(r.items).toEqual({ community: { dataview: { direction: "push" } } });
+  });
+
+  it("rejects a direction that is not one of the four", () => {
+    expect(() =>
+      validateRemotes([{ name: "work", type: "vault", storePath: "/tmp/store", items: { community: { dataview: { direction: "sideways" } } } }])
+    ).toThrow(/direction/);
+  });
+
+  it("rejects a non-object items map", () => {
+    expect(() => validateRemotes([{ name: "work", type: "vault", storePath: "/tmp/store", items: [] }])).toThrow(/rules/);
+  });
+
+  it("accepts a passphrase secret name and rejects the reserved one", () => {
+    const [ok] = validateRemotes([{ name: "work", type: "vault", storePath: "/tmp/store", passphraseId: "work-pass" }]);
+    expect(ok.passphraseId).toBe("work-pass");
+    expect(() => validateRemotes([{ name: "work", type: "vault", storePath: "/tmp/store", passphraseId: "config-sync-passphrase" }])).toThrow(
+      /own vault passphrase/
+    );
+  });
+
+  it("no longer carries excludeSelf through", () => {
+    const [r] = validateRemotes([{ name: "work", type: "vault", storePath: "/tmp/store", excludeSelf: true }]);
+    expect((r as Record<string, unknown>).excludeSelf).toBeUndefined();
   });
 });
 
