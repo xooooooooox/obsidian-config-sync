@@ -2,7 +2,8 @@ import { App, ButtonComponent, ItemView, Menu, Modal, Platform, WorkspaceLeaf, s
 import { ApplyItem, CaptureItem, orderInstallsCatalogFirst, ProgressFn, StateAction } from "../core/ConfigSyncCore";
 import { lockRefFor, refItemId } from "../core/itemKeys";
 import { GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry, RemoteDiffFile, remoteDirectionCounts } from "../core/status";
-import { SECTION_LABELS, findGroupByName, SELF_GROUP_NAME, sectionForGroup, communityGroupName } from "../core/catalog";
+import { SECTION_LABELS, findGroupByName, SELF_GROUP_NAME, SELF_ITEM_REF, sectionForGroup, communityGroupName } from "../core/catalog";
+import { itemDirection } from "../core/remoteRules";
 import { EVERYWHERE, FileChanges, FileSharing, GroupResult, hasChanges, ItemRef, Remote, Sharing, SyncGroup, StorageSection } from "../core/types";
 import { DeviceElementState } from "../core/deviceElements";
 import { RuleListId } from "../core/enablementRules";
@@ -138,6 +139,13 @@ import {
   type QualifierSpec,
   type QualifierResolver,
 } from "./qualifierSearch";
+
+// The one question this pane asks of a remote's rules: does Config Sync's own item travel with it at
+// all. "none" and only "none" earns the note — a one-way item still travels, and saying it stays out
+// would contradict the row above it.
+function selfStaysOut(remote: Remote): boolean {
+  return itemDirection(remote.items, SELF_ITEM_REF) === "none";
+}
 
 export function syncTypeValue(g: SyncGroup): "file" | "folder" {
   return g.type === "folder" ? "folder" : "file";
@@ -4091,7 +4099,7 @@ export class SyncCenterView extends ItemView {
     const matchNames = this.familyGroups()
       // The excluded self item was never compared — it is neither changed nor matched, and
       // listing it two lines above the "stays out of this remote" note would contradict it.
-      .filter((g) => !changedNames.has(g.name) && !(remote.excludeSelf === true && g.name === SELF_GROUP_NAME))
+      .filter((g) => !changedNames.has(g.name) && !(selfStaysOut(remote) && g.name === SELF_GROUP_NAME))
       .map((g) => this.fullName(g.name, g.label));
     const matched = matchNames.length;
     if (entries.length === 0) {
@@ -4140,7 +4148,7 @@ export class SyncCenterView extends ItemView {
         line.addEventListener("click", () => line.setText(`✓ ${matchNames.join(" · ")}`));
       }
     }
-    if (remote.excludeSelf === true) {
+    if (selfStaysOut(remote)) {
       detail.createDiv({ cls: "config-sync-remote-selfnote", text: "Config Sync's own settings stay out of this remote" });
     }
 

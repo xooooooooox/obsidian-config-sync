@@ -109,14 +109,14 @@ function makePlugin(io: MemFS, data: unknown): { instance: StopSurface; saveCoun
   return { instance, saveCount: () => saves, local: (key) => store.get(key) };
 }
 
-const OK_DOCUMENT = { schemaVersion: 4, rootPath: "cs", items: itemsIn({ community: { demo: { synced: true } } }), remotes: [] };
+const OK_DOCUMENT = { schemaVersion: 5, rootPath: "cs", items: itemsIn({ community: { demo: { synced: true } } }), remotes: [] };
 
 // A document from the future, carrying shapes this build has no idea what to do with. Any
 // `saveSettings()` on it would be an overwrite of a document this build does not own — exactly
 // what the stop state exists to prevent.
 function futureDocument(): unknown {
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     rootPath: "cs",
     items: itemsIn({ community: { demo: { synced: true, futureRule: { device: "here-on-tuesdays" } } as unknown as Item } }),
     remotes: [],
@@ -172,7 +172,7 @@ describe("a data.json from a newer build is never reset and never overwritten", 
 
   it("a document this build understands raises no stop notice at all", async () => {
     NoticeSpy.messages = [];
-    const ok = makePlugin(new MemFS(), { schemaVersion: 4, items: itemsIn({}), remotes: [] });
+    const ok = makePlugin(new MemFS(), { schemaVersion: 5, items: itemsIn({}), remotes: [] });
     await ok.instance.loadSettings();
     const fresh = makePlugin(new MemFS(), null);
     await fresh.instance.loadSettings();
@@ -188,7 +188,7 @@ describe("a data.json from a newer build is never reset and never overwritten", 
     await instance.loadSettings();
     expect(instance.syncCenterHost().schemaStop()).not.toBeNull();
 
-    instance.loadData = async () => ({ schemaVersion: 4, items: itemsIn({}), remotes: [] });
+    instance.loadData = async () => ({ schemaVersion: 5, items: itemsIn({}), remotes: [] });
     await instance.loadSettings();
 
     expect(instance.syncCenterHost().schemaStop()).toBeNull();
@@ -349,7 +349,7 @@ describe("a data.json from a newer build is never reset and never overwritten", 
 
     const okIo = new MemFS();
     okIo.seed(seed);
-    const ok = makePlugin(okIo, { schemaVersion: 4, rootPath: "cs", items: itemsIn({ community: { demo: { synced: true } } }), remotes: [] });
+    const ok = makePlugin(okIo, { schemaVersion: 5, rootPath: "cs", items: itemsIn({ community: { demo: { synced: true } } }), remotes: [] });
     await ok.instance.loadSettings();
     await ok.instance.recompile();
     await ok.instance.refreshLocalStatus();
@@ -520,7 +520,7 @@ function guardCtx(io: MemFS): CoreContext {
 }
 
 describe("the guard runs before the write, not after it", () => {
-  const LOCAL_SELF = JSON.stringify({ schemaVersion: 4, items: itemsIn({ obsidian: { hotkeys: { synced: true } } }) }, null, 2);
+  const LOCAL_SELF = JSON.stringify({ schemaVersion: 5, items: itemsIn({ obsidian: { hotkeys: { synced: true } } }) }, null, 2);
 
   async function runAdopt(storeSelf: string): Promise<{ io: MemFS; results: GroupResult[] }> {
     const io = new MemFS();
@@ -544,7 +544,7 @@ describe("the guard runs before the write, not after it", () => {
   }
 
   it("fails the self item with the message and leaves the local document byte-identical", async () => {
-    const { io, results } = await runAdopt(JSON.stringify({ schemaVersion: 5, items: {} }));
+    const { io, results } = await runAdopt(JSON.stringify({ schemaVersion: 6, items: {} }));
 
     const self = results.find((r) => r.group === SELF_GROUP_NAME);
     expect(self?.status).toBe("error");
@@ -554,14 +554,14 @@ describe("the guard runs before the write, not after it", () => {
   });
 
   it("other items in the same run are unaffected", async () => {
-    const { io, results } = await runAdopt(JSON.stringify({ schemaVersion: 5, items: {} }));
+    const { io, results } = await runAdopt(JSON.stringify({ schemaVersion: 6, items: {} }));
 
     expect(results.find((r) => r.group === "hotkeys")?.status).toBe("ok");
     expect(await io.read("config-dir/hotkeys.json")).toBe('{"store":1}');
   });
 
   it("a store document this build understands still applies exactly as before", async () => {
-    const incoming = JSON.stringify({ schemaVersion: 4, items: itemsIn({ obsidian: { appearance: { synced: true } } }) });
+    const incoming = JSON.stringify({ schemaVersion: 5, items: itemsIn({ obsidian: { appearance: { synced: true } } }) });
     const { io, results } = await runAdopt(incoming);
 
     expect(results.find((r) => r.group === SELF_GROUP_NAME)?.status).toBe("ok");
@@ -652,7 +652,7 @@ describe("the store lock's version", () => {
     io.seed({ "cs/store.lock.json": V1_LOCK, "cs/store/configdir/hotkeys.json": '{"mine":1}' });
     const ctx = guardCtx(io);
 
-    await expect(planImport(ctx, fakeReader({ "store.lock.json": V4_LOCK, "store/configdir/hotkeys.json": '{"theirs":1}' }), { excludeSelf: false })).rejects.toThrow(
+    await expect(planImport(ctx, fakeReader({ "store.lock.json": V4_LOCK, "store/configdir/hotkeys.json": '{"theirs":1}' }), { skipRefs: [] })).rejects.toThrow(
       STORE_LOCK_FUTURE_MESSAGE
     );
     expect(await io.read("cs/store.lock.json")).toBe(V1_LOCK);
@@ -665,7 +665,7 @@ describe("the store lock's version", () => {
     const ctx = guardCtx(io);
     const fw = fakeWriter({ "store.lock.json": V4_LOCK, "store/configdir/hotkeys.json": '{"theirs":1}' });
 
-    await expect(pushExternal(ctx, fw.writer, { excludeSelf: false })).rejects.toThrow(STORE_LOCK_FUTURE_MESSAGE);
+    await expect(pushExternal(ctx, fw.writer, { skipRefs: [] })).rejects.toThrow(STORE_LOCK_FUTURE_MESSAGE);
 
     expect(fw.writeLog).toEqual([]);
     expect(fw.files["store/configdir/hotkeys.json"]).toBe('{"theirs":1}');
@@ -698,13 +698,13 @@ describe("the store lock's version", () => {
     // below is what spares the user that adjudication, not an empty scenario.
     const okIo = new MemFS();
     okIo.seed({ ...store, "cs/store.lock.json": V1_LOCK });
-    const planned = await planImport(guardCtx(okIo), fakeReader(remote), { excludeSelf: false });
+    const planned = await planImport(guardCtx(okIo), fakeReader(remote), { skipRefs: [] });
     expect(planned.plan.conflicts.filter((c) => c.kind === "file")).toHaveLength(1);
 
     const io = new MemFS();
     io.seed({ ...store, "cs/store.lock.json": V4_LOCK });
 
-    await expect(planImport(guardCtx(io), fakeReader(remote), { excludeSelf: false })).rejects.toThrow(STORE_LOCK_FUTURE_MESSAGE);
+    await expect(planImport(guardCtx(io), fakeReader(remote), { skipRefs: [] })).rejects.toThrow(STORE_LOCK_FUTURE_MESSAGE);
 
     expect(await io.read("cs/store.lock.json")).toBe(V4_LOCK);
     expect(await io.read("cs/store/configdir/hotkeys.json")).toBe('{"mine":1}');
@@ -729,7 +729,7 @@ describe("the store lock's version", () => {
       remoteGroups: [],
       remoteLockRaw: V1_LOCK,
       remoteFiles: ["store.lock.json", "store/configdir/hotkeys.json"],
-      excludeSelf: false,
+      skipRefs: [],
     };
 
     await expect(applyImport(guardCtx(io), pending, [])).rejects.toThrow(STORE_LOCK_FUTURE_MESSAGE);
@@ -779,13 +779,13 @@ describe("the store lock's version", () => {
       const remoteFiles = { "store.lock.json": V4_RESTRUCTURED, "store/configdir/hotkeys.json": '{"theirs":1}' };
       const io = new MemFS();
       io.seed({ "cs/store.lock.json": V1_LOCK, "cs/store/configdir/hotkeys.json": '{"mine":1}' });
-      await expect(planImport(guardCtx(io), fakeReader(remoteFiles), { excludeSelf: false })).rejects.toThrow(STORE_LOCK_FUTURE_MESSAGE);
+      await expect(planImport(guardCtx(io), fakeReader(remoteFiles), { skipRefs: [] })).rejects.toThrow(STORE_LOCK_FUTURE_MESSAGE);
       expect(await io.read("cs/store/configdir/hotkeys.json")).toBe('{"mine":1}');
 
       const localIo = new MemFS();
       localIo.seed({ "cs/store.lock.json": V4_RESTRUCTURED, "cs/store/configdir/hotkeys.json": '{"mine":1}' });
       await expect(
-        planImport(guardCtx(localIo), fakeReader({ "store.lock.json": V1_LOCK, "store/configdir/hotkeys.json": '{"theirs":1}' }), { excludeSelf: false })
+        planImport(guardCtx(localIo), fakeReader({ "store.lock.json": V1_LOCK, "store/configdir/hotkeys.json": '{"theirs":1}' }), { skipRefs: [] })
       ).rejects.toThrow(STORE_LOCK_FUTURE_MESSAGE);
       expect(await localIo.read("cs/store.lock.json")).toBe(V4_RESTRUCTURED);
     });
@@ -807,7 +807,7 @@ describe("the store lock's version", () => {
         remoteGroups: [],
         remoteLockRaw: V1_LOCK,
         remoteFiles: ["store.lock.json", "store/configdir/hotkeys.json"],
-        excludeSelf: false,
+        skipRefs: [],
       };
 
       await expect(applyImport(guardCtx(io), pending, [])).rejects.toThrow(STORE_LOCK_FUTURE_MESSAGE);
@@ -821,7 +821,7 @@ describe("the store lock's version", () => {
       io.seed({ "cs/store.lock.json": V1_LOCK, "cs/store/configdir/hotkeys.json": '{"mine":1}' });
       const fw = fakeWriter({ "store.lock.json": V4_RESTRUCTURED, "store/configdir/hotkeys.json": '{"theirs":1}' });
 
-      await expect(pushExternal(guardCtx(io), fw.writer, { excludeSelf: false })).rejects.toThrow(STORE_LOCK_FUTURE_MESSAGE);
+      await expect(pushExternal(guardCtx(io), fw.writer, { skipRefs: [] })).rejects.toThrow(STORE_LOCK_FUTURE_MESSAGE);
 
       expect(fw.writeLog).toEqual([]);
       expect(fw.files["store.lock.json"]).toBe(V4_RESTRUCTURED);
@@ -853,11 +853,11 @@ describe("the store lock's version", () => {
     io.seed({ "cs/store.lock.json": V1_LOCK, "cs/store/configdir/hotkeys.json": '{"mine":1}' });
     const ctx = guardCtx(io);
 
-    const pending = await planImport(ctx, fakeReader({ "store.lock.json": V1_LOCK, "store/configdir/other.json": '{"theirs":1}' }), { excludeSelf: false });
+    const pending = await planImport(ctx, fakeReader({ "store.lock.json": V1_LOCK, "store/configdir/other.json": '{"theirs":1}' }), { skipRefs: [] });
     expect(pending.plan.auto.writeFiles.map((f) => f.rel)).toContain("store/configdir/other.json");
 
     const fw = fakeWriter({ "store.lock.json": V1_LOCK });
-    await pushExternal(ctx, fw.writer, { excludeSelf: false });
+    await pushExternal(ctx, fw.writer, { skipRefs: [] });
     expect(fw.files["store/configdir/hotkeys.json"]).toBe('{"mine":1}');
   });
 });
@@ -884,7 +884,7 @@ describe("content at the far end with no lock", () => {
     const io = new MemFS();
     io.seed(LOCAL_STORE);
 
-    await expect(planImport(guardCtx(io), fakeReader(ONE_LEVEL_TOO_DEEP), { excludeSelf: false })).rejects.toThrow(STORE_LOCK_MISSING_MESSAGE);
+    await expect(planImport(guardCtx(io), fakeReader(ONE_LEVEL_TOO_DEEP), { skipRefs: [] })).rejects.toThrow(STORE_LOCK_MISSING_MESSAGE);
 
     expect(await io.read("cs/store.lock.json")).toBe(V1_LOCK);
     expect(await io.read("cs/store/configdir/hotkeys.json")).toBe('{"mine":1}');
@@ -895,7 +895,7 @@ describe("content at the far end with no lock", () => {
     const io = new MemFS();
     io.seed(LOCAL_STORE);
 
-    await expect(planImport(guardCtx(io), fakeReader(LOCKLESS_STORE), { excludeSelf: false })).rejects.toThrow(STORE_LOCK_MISSING_MESSAGE);
+    await expect(planImport(guardCtx(io), fakeReader(LOCKLESS_STORE), { skipRefs: [] })).rejects.toThrow(STORE_LOCK_MISSING_MESSAGE);
 
     expect(await io.read("cs/store/configdir/hotkeys.json")).toBe('{"mine":1}');
   });
@@ -917,7 +917,7 @@ describe("content at the far end with no lock", () => {
       remoteGroups: [],
       remoteLockRaw: null,
       remoteFiles: Object.keys(ONE_LEVEL_TOO_DEEP),
-      excludeSelf: false,
+      skipRefs: [],
     };
 
     await expect(applyImport(guardCtx(io), pending, [])).rejects.toThrow(STORE_LOCK_MISSING_MESSAGE);
@@ -930,7 +930,7 @@ describe("content at the far end with no lock", () => {
     io.seed(LOCAL_STORE);
     const fw = fakeWriter(ONE_LEVEL_TOO_DEEP);
 
-    await expect(pushExternal(guardCtx(io), fw.writer, { excludeSelf: false })).rejects.toThrow(STORE_LOCK_MISSING_MESSAGE);
+    await expect(pushExternal(guardCtx(io), fw.writer, { skipRefs: [] })).rejects.toThrow(STORE_LOCK_MISSING_MESSAGE);
 
     expect(fw.writeLog).toEqual([]);
     expect(fw.files["configdir/hotkeys.json"]).toBe('{"theirs":1}'); // nor is anything of theirs deleted
@@ -942,7 +942,7 @@ describe("content at the far end with no lock", () => {
     io.seed(LOCAL_STORE);
     const fw = fakeWriter({});
 
-    await pushExternal(guardCtx(io), fw.writer, { excludeSelf: false });
+    await pushExternal(guardCtx(io), fw.writer, { skipRefs: [] });
 
     expect(fw.files["store/configdir/hotkeys.json"]).toBe('{"mine":1}');
     expect(fw.files["store.lock.json"]).toBe(V1_LOCK);
@@ -952,7 +952,7 @@ describe("content at the far end with no lock", () => {
     const io = new MemFS();
     io.seed(LOCAL_STORE);
 
-    const pending = await planImport(guardCtx(io), fakeReader({}), { excludeSelf: false });
+    const pending = await planImport(guardCtx(io), fakeReader({}), { skipRefs: [] });
 
     expect(pending.plan.auto.writeFiles).toEqual([]);
     expect(pending.plan.conflicts).toEqual([]);
@@ -974,7 +974,7 @@ describe("content at the far end with no lock", () => {
     });
     const remote = { "config-sync.json": legacyManifest, "store/configdir/hotkeys.json": '{"theirs":1}' };
 
-    const pending = await planImport(guardCtx(io), fakeReader(remote), { excludeSelf: false });
+    const pending = await planImport(guardCtx(io), fakeReader(remote), { skipRefs: [] });
 
     expect(pending.remoteGroups.map((g) => g.name)).toEqual(["hotkeys"]); // read out of the legacy manifest
     await applyImport(guardCtx(io), pending, ["remote"]);
@@ -986,7 +986,7 @@ describe("content at the far end with no lock", () => {
     io.seed(LOCAL_STORE);
 
     const legacy = fakeWriter({ "config-sync.json": "OLD-REMOTE", "store/configdir/hotkeys.json": '{"theirs":1}' });
-    await pushExternal(guardCtx(io), legacy.writer, { excludeSelf: false });
+    await pushExternal(guardCtx(io), legacy.writer, { skipRefs: [] });
     expect(legacy.files["store/configdir/hotkeys.json"]).toBe('{"mine":1}');
     expect(legacy.files["config-sync.json"]).toBe("OLD-REMOTE"); // never written, never deleted
   });
@@ -998,7 +998,7 @@ describe("content at the far end with no lock", () => {
     io.seed(LOCAL_STORE);
     const remote = { "config-sync.json.migrated-2020-01-01T00-00-00": "leftover", ...LOCKLESS_STORE };
 
-    await expect(planImport(guardCtx(io), fakeReader(remote), { excludeSelf: false })).rejects.toThrow(STORE_LOCK_MISSING_MESSAGE);
+    await expect(planImport(guardCtx(io), fakeReader(remote), { skipRefs: [] })).rejects.toThrow(STORE_LOCK_MISSING_MESSAGE);
   });
 
   it("an OS junk file alone still counts as empty", async () => {
@@ -1006,7 +1006,7 @@ describe("content at the far end with no lock", () => {
     io.seed(LOCAL_STORE);
 
     const junk = fakeWriter({ ".DS_Store": " " });
-    await pushExternal(guardCtx(io), junk.writer, { excludeSelf: false });
+    await pushExternal(guardCtx(io), junk.writer, { skipRefs: [] });
     expect(junk.files["store/configdir/hotkeys.json"]).toBe('{"mine":1}');
   });
 

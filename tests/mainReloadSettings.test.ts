@@ -53,7 +53,7 @@ function fakeApp(local: Map<string, string> = new Map()): unknown {
 
 // A v4 document with the named sections filled; the rest come out empty.
 function baseData(partial: Partial<Record<"obsidian" | "core" | "community" | "custom", Record<string, Item>>> = {}): unknown {
-  return { schemaVersion: 4, items: itemsIn(partial), remotes: [] };
+  return { schemaVersion: 5, items: itemsIn(partial), remotes: [] };
 }
 
 describe("ConfigSyncPlugin.reloadSettings — loadSettings() must be followed by recompile()", () => {
@@ -158,7 +158,7 @@ describe("ConfigSyncPlugin.loadSettings/saveSettings — nested defaults and an 
 
   it("fills a nested default an older document never had, and carries its unknown keys through the save", async () => {
     const { instance, saved } = makeLoadSavePlugin({
-      schemaVersion: 4,
+      schemaVersion: 5,
       items: itemsIn({}),
       remotes: [],
       runHistory: { enabled: false, path: "", maxCount: 5 }, // written before maxDays existed
@@ -247,7 +247,7 @@ describe("ConfigSyncPlugin.loadSettings — an unrecognised enablement rule surv
     const instance = plugin as unknown as RuleSurface;
     instance.app = fakeApp();
     const stored = { futurist: { kind: "on-tuesdays" }, known: perClass("desktop") };
-    instance.loadData = async () => ({ schemaVersion: 4, rootPath: "cs", items: carrierWithRules(stored), remotes: [] });
+    instance.loadData = async () => ({ schemaVersion: 5, rootPath: "cs", items: carrierWithRules(stored), remotes: [] });
     let saveCallCount = 0;
     instance.saveData = async () => {
       saveCallCount += 1;
@@ -297,7 +297,7 @@ describe("ConfigSyncPlugin.refreshBratIndex — a device with no BRAT repo list 
     const index = { "my-beta-plugin": "owner/my-beta-plugin" };
     // The index lives ON the plugins it describes since 2026-08-12-enablement-two-layers // `bratRepoIndex(items)` is the reader, and the top-level map is what the v4 migration folds in.
     instance.loadData = async () => ({
-      schemaVersion: 4,
+      schemaVersion: 5,
       items: itemsIn({ community: { "my-beta-plugin": { synced: true, bratRepo: index["my-beta-plugin"] } } }),
       remotes: [],
     });
@@ -348,7 +348,7 @@ describe("the baseline re-key runs only when the compile it keys against succeed
   it("recompile answers false when a custom rule cannot compile, and the ledger is left retryable", async () => {
     const local = new Map([[BASELINES, V1_LEDGER]]);
     const instance = makePlugin(
-      { schemaVersion: 4, items: itemsIn({ custom: { "bad name!": { synced: true, type: "file", path: "notes/x.json" } } }), remotes: [] },
+      { schemaVersion: 5, items: itemsIn({ custom: { "bad name!": { synced: true, type: "file", path: "notes/x.json" } } }), remotes: [] },
       local
     );
 
@@ -366,7 +366,7 @@ describe("the baseline re-key runs only when the compile it keys against succeed
   it("no baseline write survives a failed compile, whichever writer asks", async () => {
     const local = new Map([[BASELINES, V1_LEDGER]]);
     const instance = makePlugin(
-      { schemaVersion: 4, items: itemsIn({ custom: { "bad name!": { synced: true, type: "file", path: "notes/x.json" } } }), remotes: [] },
+      { schemaVersion: 5, items: itemsIn({ custom: { "bad name!": { synced: true, type: "file", path: "notes/x.json" } } }), remotes: [] },
       local
     );
     await instance.loadSettings();
@@ -384,7 +384,7 @@ describe("the baseline re-key runs only when the compile it keys against succeed
   // a shape whose own reader would answer empty.
   it("declines to persist a ledger that is not the version this build writes", async () => {
     const local = new Map([[BASELINES, V1_LEDGER]]);
-    const instance = makePlugin({ schemaVersion: 4, items: itemsIn({ obsidian: { hotkeys: { synced: true } } }), remotes: [] }, local);
+    const instance = makePlugin({ schemaVersion: 5, items: itemsIn({ obsidian: { hotkeys: { synced: true } } }), remotes: [] }, local);
     await instance.loadSettings();
     expect(await instance.recompile()).toBe(true); // the compile is fine — it is the LEDGER that is not ours
 
@@ -398,7 +398,7 @@ describe("the baseline re-key runs only when the compile it keys against succeed
   it("recompile answers true on a good document, and the re-key then runs once", async () => {
     const local = new Map([[BASELINES, V1_LEDGER]]);
     const instance = makePlugin(
-      { schemaVersion: 4, items: itemsIn({ obsidian: { appearance: { synced: true, companions: [{ path: "{configDir}/themes", device: "all", enabled: true }] } } }), remotes: [] },
+      { schemaVersion: 5, items: itemsIn({ obsidian: { appearance: { synced: true, companions: [{ path: "{configDir}/themes", device: "all", enabled: true }] } } }), remotes: [] },
       local
     );
 

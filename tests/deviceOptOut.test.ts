@@ -59,7 +59,7 @@ function fakeApp(localStorageApi: object): unknown {
 }
 
 function baseData(items: Record<string, unknown>, extra: Record<string, unknown> = {}): unknown {
-  return { schemaVersion: 4, items: itemsIn({ obsidian: items as Record<string, Item> }), remotes: [], ...extra };
+  return { schemaVersion: 5, items: itemsIn({ obsidian: items as Record<string, Item> }), remotes: [], ...extra };
 }
 
 interface Surface {

@@ -42,7 +42,7 @@ interface SecretStore {
   setSecret(id: string, secret: string): void;
 }
 import { bratRepoIndex, parseBratRepoList, resolveBratIndex, withBratRepos } from "./core/bratIndex";
-import { type CatalogSection, corePluginFile, displayLabelForGroup, findGroupByName, listBetaSections, listCoreSections, listDiscovered, listOptionSections, listPluginSections, SELF_GROUP_NAME, SELF_ITEM_ID, SELF_ITEM_REF, SELF_ITEM_SECTION, setCorePluginIds } from "./core/catalog";
+import { type CatalogSection, corePluginFile, displayLabelForGroup, findGroupByName, listBetaSections, listCoreSections, listDiscovered, listOptionSections, listPluginSections, SELF_GROUP_NAME, SELF_ITEM_ID, SELF_ITEM_SECTION, setCorePluginIds } from "./core/catalog";
 import { Availability, availabilityForGroup, desktopOnlyDrift, desktopOnlyPluginIds } from "./core/availability";
 import { listFilesRecursive, isJunkPath, FileIO } from "./core/io";
 import { LeftoverNames, LeftoverSection, leftoverStoreRels, storeSelfCopyGroups, selfListGroups } from "./core/leftover";
@@ -83,6 +83,7 @@ import { decideEnablement, EnablementDecision } from "./core/enablementDecision"
 import { classifySettings, CURRENT_SCHEMA, SCHEMA_FUTURE_NOTICE, SCHEMA_UPGRADE_NOTICE, withDefaults } from "./core/settingsMigration";
 import { deviceOptOutsFor, migrateV2Settings } from "./core/v2Migration";
 import { migrateV4Settings } from "./core/v4Migration";
+import { refsBlockedFor } from "./core/remoteRules";
 import { migrateV5Settings } from "./core/v5Migration";
 import { applySwitchList, captureSwitchList, EnablementList, enablementListFile, isSwitchListGroup, localRealPath, parseSwitchList, readLocalSwitchList, subtractForceOff, switchDivergence, SwitchList, switchListMemberOn, writeLocalSwitchList } from "./core/switchList";
 import { applyTransform, captureTransform, isWholeFileEncrypted, scanSensitive, SensitiveScan } from "./core/modes";
@@ -107,7 +108,7 @@ import { ConfigSyncSettingTab } from "./ui/SettingTab";
 // settingsMigration.ts's CURRENT_SCHEMA (which DEFAULT_SETTINGS below reads, so the two can never
 // disagree about what this build writes).
 interface ConfigSyncSettings {
-  schemaVersion: 4;
+  schemaVersion: 5;
 
   // Transport wiring — the locked-local preset (catalog.ts's selfPresetRules); never travels.
   pkmMode: PkmMode;
@@ -527,10 +528,10 @@ export default class ConfigSyncPlugin extends Plugin {
     for (const remote of this.settings.remotes) {
       try {
         const reader = await this.createReader(remote);
-        // The same ignore list `remoteLockAhead` gets for this remote: one that never exchanges the
-        // self item must not have its direction decided by the self lock entry — the two sides
-        // diverge there by design, and no Pull could ever clear the arrow.
-        const ignore = remote.excludeSelf === true ? [SELF_ITEM_REF] : [];
+        // The same ignore list `remoteLockAhead` gets for this remote: an item it never pulls must
+        // not have its direction decided by that item's lock entry — the two sides diverge there by
+        // design, and no Pull could ever clear the arrow.
+        const ignore = refsBlockedFor(remote.items, "pull");
         this.remoteChecks.set(remote.name, { check: await checkRemote(localLock, reader, ignore, this.compiledGroups), at: Date.now() });
       } catch (e) {
         this.remoteChecks.set(remote.name, { check: { state: "unknown", remoteCapturedAt: null }, at: Date.now() });
@@ -900,7 +901,10 @@ export default class ConfigSyncPlugin extends Plugin {
         onPhase?.("fetch");
         const reader = await this.createReader(remote, { reuse: true });
         onPhase?.("compare");
-        const entries = await diffRemote(ctx, reader, { excludeSelf: remote.excludeSelf === true });
+        // Comparison answers for both directions at once, so an item held back in either one has no
+        // difference this pane could offer to act on.
+        const skipRefs = [...new Set([...refsBlockedFor(remote.items, "pull"), ...refsBlockedFor(remote.items, "push")])];
+        const entries = await diffRemote(ctx, reader, { skipRefs });
         // A lock-only delta (version-refresh capture on the other side) is real pull payload
         // even when every store file matches — surface it so the hint isn't contradictory.
         let lockDiffers = false;
@@ -908,7 +912,7 @@ export default class ConfigSyncPlugin extends Plugin {
         try {
           const remoteLock = (await reader.listFiles()).includes("store.lock.json") ? await reader.readFile("store.lock.json") : null;
           const localLock = (await ctx.io.exists(`${ctx.rootPath}/store.lock.json`)) ? await ctx.io.read(`${ctx.rootPath}/store.lock.json`) : null;
-          lockDiffers = remoteLockAhead(localLock, remoteLock, remote.excludeSelf === true ? [SELF_ITEM_REF] : [], this.compiledGroups);
+          lockDiffers = remoteLockAhead(localLock, remoteLock, refsBlockedFor(remote.items, "pull"), this.compiledGroups);
           // Parsed separately from remoteLockAhead's own (tolerant) parse above — a malformed
           // remote lock must still leave lockDiffers at whatever remoteLockAhead just decided,
           // not get reset by a JSON.parse throw here.
@@ -928,7 +932,7 @@ export default class ConfigSyncPlugin extends Plugin {
         if (this.schemaStopped()) return null; // schema stop
         try {
           const ctx = await this.coreContext();
-          const pending = await planImport(ctx, await this.createReader(remote), { excludeSelf: remote.excludeSelf === true });
+          const pending = await planImport(ctx, await this.createReader(remote), { skipRefs: refsBlockedFor(remote.items, "pull") });
           // Pull resolves file conflicts only; sync-list (definition) conflicts are never
           // applied by Pull, so they don't prompt — the list converges via adopt.
           const fileConflicts = pending.plan.conflicts.filter((c) => c.kind === "file");
@@ -975,7 +979,7 @@ export default class ConfigSyncPlugin extends Plugin {
         if (this.schemaStopped()) return null; // schema stop
         try {
           const ctx = await this.coreContext();
-          const results = await pushExternal(ctx, await this.createWriter(remote), { excludeSelf: remote.excludeSelf === true });
+          const results = await pushExternal(ctx, await this.createWriter(remote), { skipRefs: refsBlockedFor(remote.items, "push") });
           await this.refreshRemoteChecks();
           return results;
         } catch (e) {

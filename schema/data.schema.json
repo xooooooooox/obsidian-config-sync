@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://raw.githubusercontent.com/xooooooooox/obsidian-config-sync/main/schema/data.schema.json",
   "title": "Config Sync plugin settings (data.json)",
-  "description": "<vault>/.obsidian/plugins/config-sync/data.json at schemaVersion 4 — src/main.ts's ConfigSyncSettings, the plugin's OWN settings document (not the sync store). The sync list is never stored directly: it is COMPILED from `items` on every load/save (src/core/registry.ts's compileItems). Authority: src/main.ts (ConfigSyncSettings/DEFAULT_SETTINGS), src/core/registry.ts (Item/ItemMap), src/core/types.ts (Sharing/FieldRule/FileRule/Remote), src/core/switchList.ts (perElementKeyFor), src/core/enablementRules.ts (ruleHomeFor), src/core/settingsMigration.ts (CURRENT_SCHEMA) and docs/ARCHITECTURE.md's Data model section. `schemaVersion` gates everything: a document with a HIGHER number is refused outright (never downgraded, never overwritten) rather than validated against this shape — see settingsMigration.ts's classifySettings.",
+  "description": "<vault>/.obsidian/plugins/config-sync/data.json at schemaVersion 5 — src/main.ts's ConfigSyncSettings, the plugin's OWN settings document (not the sync store). The sync list is never stored directly: it is COMPILED from `items` on every load/save (src/core/registry.ts's compileItems). Authority: src/main.ts (ConfigSyncSettings/DEFAULT_SETTINGS), src/core/registry.ts (Item/ItemMap), src/core/types.ts (Sharing/FieldRule/FileRule/Remote), src/core/switchList.ts (perElementKeyFor), src/core/enablementRules.ts (ruleHomeFor), src/core/settingsMigration.ts (CURRENT_SCHEMA) and docs/ARCHITECTURE.md's Data model section. `schemaVersion` gates everything: a document with a HIGHER number is refused outright (never downgraded, never overwritten) rather than validated against this shape — see settingsMigration.ts's classifySettings.",
   "type": "object",
   "additionalProperties": true,
   "required": [
@@ -23,8 +23,8 @@
   ],
   "properties": {
     "schemaVersion": {
-      "const": 4,
-      "description": "Must equal settingsMigration.ts's CURRENT_SCHEMA. A document this build wrote always carries exactly 4; an older number is migrated on load (v2 -> v3 -> v4, never validated against this schema first), and a higher number stops this build from touching the document at all (invariant II.3) — this schema describes ONLY the v4 shape a current build reads and writes."
+      "const": 5,
+      "description": "Must equal settingsMigration.ts's CURRENT_SCHEMA. A document this build wrote always carries exactly 5; an older number is migrated on load (v2 -> v3 -> v4 -> v5, never validated against this schema first), and a higher number stops this build from touching the document at all (invariant II.3) — this schema describes ONLY the v5 shape a current build reads and writes. v5 replaced each remote's `excludeSelf` boolean with the general per-remote direction rules (`items` on the remote): that boolean said exactly what `items.community[\"config-sync\"].direction = \"none\"` says, and one rule with two spellings drifts."
     },
     "pkmMode": {
       "enum": ["auto", "ioto", "default"],
@@ -187,6 +187,33 @@
         "custom": { "$ref": "#/definitions/itemSection", "description": "Hand-added rules for files/folders with no registry item — the Advanced tab's \"Custom rules\"/\"Discovered files\". `type` and `path` are required on every entry here." }
       }
     },
+    "remoteDirection": {
+      "enum": ["both", "push", "pull", "none"],
+      "description": "Which way one thing travels with one remote (src/core/types.ts's RemoteDirection). \"both\" = pushed and pulled, the reading when no rule mentions it at all; \"push\" = our copy overwrites the remote's and the remote's changes never come in; \"pull\" = the remote's copy comes in and ours never goes out; \"none\" = neither direction. NOT an ordered scale — \"push\" and \"pull\" are incomparable — so a key's rule must be a SUBSET of its item's allowed directions rather than merely \"stricter\". A stored key rule outside its item's subset is kept as written and resolved by intersection at run time, never silently rewritten."
+    },
+    "remoteKeyRule": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["direction"],
+      "description": "One key's direction rule for one remote, under `remotes[i].items[<section>][<id>].keys[<pattern>]`. The map KEY is the key-name glob pattern (`*` wildcard), deliberately not repeated as a `pattern` property — the same single-source-of-truth rule `settingsFile.rules` follows. Only meaningful where the item's store copy still has key names to point at: a per-key-rules item (field-level encryption included) or a plain JSON whole-file item. A whole-file-ENCRYPTED item has none (its store copy is one envelope), and neither does a non-JSON file or a folder item.",
+      "properties": {
+        "direction": { "$ref": "#/definitions/remoteDirection" }
+      }
+    },
+    "remoteItemRule": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "One item's rules for one remote. An absent entry reads as `{ direction: \"both\" }` with no key rules; default values are never written. These live INSIDE the remote object rather than on the item because a remote's name is this device's transport wiring: a rule written on the item would ride that item's store copy to the far vault and point at a remote that does not exist there. Nesting under `remotes` also inherits that field's locked-local strip for free (catalog.ts's selfPresetRules), so no new protection rule is needed.",
+      "properties": {
+        "direction": { "$ref": "#/definitions/remoteDirection" },
+        "keys": { "type": "object", "additionalProperties": { "$ref": "#/definitions/remoteKeyRule" }, "description": "Key-name glob pattern -> that key's direction rule for this remote. Omitted when empty." }
+      }
+    },
+    "remoteItems": {
+      "type": "object",
+      "description": "Section -> item id -> that item's rules for this remote. Two levels, never flattened into a \"community/dataview\" key: structure carries the taxonomy here exactly as it does in `items` and in store.lock.json's `items`. Same section key space (itemKeys.ts); the map is deliberately not closed.",
+      "additionalProperties": { "type": "object", "additionalProperties": { "$ref": "#/definitions/remoteItemRule" } }
+    },
     "remote": {
       "description": "src/core/types.ts's Remote union, validated on write by src/core/manifest.ts's parseRemote (invoked from the settings-tab save path, not on every data.json load).",
       "oneOf": [
@@ -198,7 +225,8 @@
             "name": { "type": "string", "minLength": 1, "description": "Display name for this remote, unique among this device's remotes; also the key run records and status use to say which remote a pull/push targeted." },
             "type": { "const": "vault", "description": "A sibling vault's store on the same filesystem, reached by path." },
             "storePath": { "type": "string", "pattern": "^(/|~($|/))", "description": "Absolute path of the store directory on this device's filesystem, or a leading-~ path. Never a vault-relative path — this is a filesystem location outside the vault entirely." },
-            "excludeSelf": { "type": "boolean", "description": "true = config-sync's own settings never travel to/from this remote. Absent = false." }
+            "items": { "$ref": "#/definitions/remoteItems" },
+            "passphraseId": { "type": "string", "pattern": "^[a-z0-9-]+$", "maxLength": 64, "not": { "const": "config-sync-passphrase" }, "description": "Name of the keychain secret holding THIS REMOTE's store passphrase, for a remote vault that encrypts with a different one. Absent = the same passphrase as this vault: ciphertext is carried across verbatim and nothing is decrypted in transit. When present, comparison decrypts each side with its own key and pull/push re-encrypt for the destination. Same shape and same guards as `tokenId` — the passphrase VALUE never enters data.json, and the reserved id \"config-sync-passphrase\" (this vault's own) is rejected." }
           }
         },
         {
@@ -211,7 +239,8 @@
             "url": { "type": "string", "minLength": 1, "description": "Clone URL (https or ssh), passed to git verbatim." },
             "branch": { "type": "string", "minLength": 1, "description": "Branch pulled from and pushed to; never inferred from the repository's default." },
             "subdir": { "type": "string", "description": "Store folder inside the repo; absent = repo root. Must stay inside the repository — the validator (manifest.ts's parseRemote) additionally rejects a leading slash and any \"..\" segment, and drops an empty string rather than storing it." },
-            "excludeSelf": { "type": "boolean", "description": "true = config-sync's own settings never travel to/from this remote. Absent = false." },
+            "items": { "$ref": "#/definitions/remoteItems" },
+            "passphraseId": { "type": "string", "pattern": "^[a-z0-9-]+$", "maxLength": 64, "not": { "const": "config-sync-passphrase" }, "description": "Name of the keychain secret holding THIS REMOTE's store passphrase, for a remote vault that encrypts with a different one. Absent = the same passphrase as this vault: ciphertext is carried across verbatim and nothing is decrypted in transit. When present, comparison decrypts each side with its own key and pull/push re-encrypt for the destination. Same shape and same guards as `tokenId` — the passphrase VALUE never enters data.json, and the reserved id \"config-sync-passphrase\" (this vault's own) is rejected." },
             "tokenId": { "type": "string", "pattern": "^[a-z0-9-]+$", "maxLength": 64, "not": { "const": "config-sync-passphrase" }, "description": "Name of the keychain secret holding the access token — the token itself never enters data.json. Never the reserved id \"config-sync-passphrase\" (the encryption passphrase's own secret; manifest.ts rejects a remote that names it)." },
             "username": { "type": "string", "minLength": 1, "description": "Sent alongside the token; absent = \"token\", which PAT-only hosts ignore but a self-hosted GitLab validates. Not offered in the settings UI (a linked token alone suffices in practice) but honored when present in a hand-edited document. The validator additionally rejects whitespace and control characters — the value enters a git credential-helper protocol line." }
           }

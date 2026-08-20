@@ -1318,7 +1318,8 @@ const LEGACY_MANIFEST_REL = "config-sync.json";
 const SELF_STORE_DATA_REL = `store/${groupStorePath("{configDir}/plugins/config-sync/data.json")}`;
 
 // Every store rel belonging to the self item: its data file plus the two device-class sidecars.
-// The excludeSelf remote option uses this to keep the self item out of pull/push/diff entirely.
+// The self item's fast path for the skip lists below — it is the one ref whose rels are known
+// without a group lookup, so it keeps working while a device's own registry is still empty.
 export function isSelfStoreRel(rel: string): boolean {
   return (
     rel === SELF_STORE_DATA_REL ||
@@ -1441,11 +1442,28 @@ export interface PendingPull {
   // applyImport is the half that writes, and it re-runs both store gates on what it was handed
   // rather than trusting that whoever built this plan ran them (see the version-gate note there).
   remoteFiles: string[];
-  excludeSelf: boolean;
+  // The items this remote does not pull, as its rules resolve them (remoteRules.ts's
+  // refsBlockedFor). Carried so applyImport skips exactly what the planner skipped.
+  skipRefs: ItemRef[];
+}
+
+// Every store rel belonging to a skipped item. Built per seam from the group lists that seam
+// already has: a rel belongs to a skipped item when its owning group's ref is in the list.
+export function skipRelPredicate(skipRefs: ItemRef[], ...groupLists: SyncGroup[][]): (rel: string) => boolean {
+  if (skipRefs.length === 0) return () => false;
+  const skipsSelf = skipRefs.includes(SELF_ITEM_REF);
+  return (rel: string): boolean => {
+    if (skipsSelf && isSelfStoreRel(rel)) return true;
+    for (const groups of groupLists) {
+      const ref = resolveGroupByStoreRel(groups, rel)?.ref;
+      if (ref !== undefined) return skipRefs.includes(ref);
+    }
+    return false;
+  };
 }
 
 // Read-only: this half of a pull never writes anything, so a refusal below costs nothing.
-export async function planImport(ctx: CoreContext, reader: ExternalStoreReader, opts: { excludeSelf: boolean }): Promise<PendingPull> {
+export async function planImport(ctx: CoreContext, reader: ExternalStoreReader, opts: { skipRefs: ItemRef[] }): Promise<PendingPull> {
   const files = await reader.listFiles();
   // Declared-store gate: before a single remote file is read — content that nothing here identifies is refused, not
   // adopted as a brand-new remote. Ahead of the version gate below because it is the condition under
@@ -1466,25 +1484,29 @@ export async function planImport(ctx: CoreContext, reader: ExternalStoreReader, 
   // what the planner happened to see.
   assertStoreLockVersionUnderstood((await ctx.io.exists(lockPath(ctx))) ? await ctx.io.read(lockPath(ctx)) : null);
 
+  // Local first, remote second — the same order owningGroupName resolves in: a rel this vault knows
+  // is answered by this vault's own registry, and only an unknown one asks the far end's.
+  const localGroups = await readGroups(ctx);
+  const skipped = skipRelPredicate(opts.skipRefs, localGroups, remoteGroups);
+
   const remoteFileMap = new Map<string, string>();
   for (const rel of files) {
-    if (rel === LOCK_REL || isLegacyManifestRel(rel) || (opts.excludeSelf && isSelfStoreRel(rel))) continue;
+    if (rel === LOCK_REL || isLegacyManifestRel(rel) || skipped(rel)) continue;
     remoteFileMap.set(rel, await reader.readFile(rel));
   }
 
-  const localGroups = await readGroups(ctx);
   const localFileMap = new Map<string, string>();
   if (await ctx.io.exists(ctx.rootPath)) {
     const localAbs = await listFilesRecursive(ctx.io, ctx.rootPath);
     for (const f of localAbs) {
       const rel = relativeTo(ctx.rootPath, f);
-      if (rel === LOCK_REL || isLegacyManifestRel(rel) || (opts.excludeSelf && isSelfStoreRel(rel))) continue;
+      if (rel === LOCK_REL || isLegacyManifestRel(rel) || skipped(rel)) continue;
       localFileMap.set(rel, await ctx.io.read(f));
     }
   }
 
   const plan = classifyMerge(localGroups, localFileMap, remoteGroups, remoteFileMap);
-  return { plan, remoteGroups, remoteLockRaw, remoteFiles: files, excludeSelf: opts.excludeSelf };
+  return { plan, remoteGroups, remoteLockRaw, remoteFiles: files, skipRefs: opts.skipRefs };
 }
 
 // Writes the whole merge result, auto-merged parts and each conflict's chosen side, in one pass.
@@ -1574,7 +1596,7 @@ export async function applyImport(
     const adoptedRefs = new Set<string>();
     if (remoteLock !== null) {
       for (const [ref, entry] of lockEntryList(remoteLock.items)) {
-        if (pending.excludeSelf && ref === SELF_ITEM_REF) continue;
+        if ((pending.skipRefs as string[]).includes(ref)) continue;
         if (localWonRefs.has(ref)) continue;
         // The remote's entry wins every field it HAS — the content is now the remote's, so its
         // versions, capture time and hash describe it. But a key only OUR entry carried is not the
@@ -1663,7 +1685,7 @@ export interface ExternalStoreWriter {
   finalize(): Promise<void>; // git: add/commit/push; local-path: no-op
 }
 
-export async function pushExternal(ctx: CoreContext, writer: ExternalStoreWriter, opts: { excludeSelf: boolean }): Promise<GroupResult[]> {
+export async function pushExternal(ctx: CoreContext, writer: ExternalStoreWriter, opts: { skipRefs: ItemRef[] }): Promise<GroupResult[]> {
   const localAbs = (await ctx.io.exists(ctx.rootPath)) ? await listFilesRecursive(ctx.io, ctx.rootPath) : [];
   const rels = localAbs.map((f) => f.slice(ctx.rootPath.length + 1)).sort();
   const hasStore = rels.some((r) => r.startsWith("store/")) || rels.includes(LOCK_REL);
@@ -1672,8 +1694,9 @@ export async function pushExternal(ctx: CoreContext, writer: ExternalStoreWriter
       `Local store has no captured data at ${ctx.rootPath} — capture from this device (or pull) before pushing.`
     );
   }
-  const pushableRels = rels.filter((r) => !isLegacyManifestRel(r) && !(opts.excludeSelf && isSelfStoreRel(r)));
   const manifest = await loadManifest(ctx);
+  const skipped = skipRelPredicate(opts.skipRefs, manifest.groups);
+  const pushableRels = rels.filter((r) => !isLegacyManifestRel(r) && !skipped(r));
   const byName = new Map<string, GroupResult>();
   const resultFor = (name: string): GroupResult => {
     let r = byName.get(name);
@@ -1705,7 +1728,7 @@ export async function pushExternal(ctx: CoreContext, writer: ExternalStoreWriter
   }
   const wanted = new Set(pushableRels);
   for (const rel of remoteFiles) {
-    if (opts.excludeSelf && isSelfStoreRel(rel)) continue; // the remote's own contract is not ours to delete
+    if (skipped(rel)) continue; // the remote's own copy of a withheld item is not ours to delete
     if (!wanted.has(rel)) {
       const { name, itemRel } = groupForStoreRel(manifest.groups, rel);
       await writer.deleteFile(rel);

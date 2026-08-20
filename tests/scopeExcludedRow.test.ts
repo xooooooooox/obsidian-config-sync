@@ -38,7 +38,7 @@ function fakeApp(): unknown {
 // A v3 document with just the obsidian section filled — the rest of the sections come from
 // DEFAULT_SETTINGS' own empty maps.
 function baseData(obsidian: Record<string, unknown>): unknown {
-  return { schemaVersion: 4, items: itemsIn({ obsidian: obsidian as Record<string, Item> }), remotes: [] };
+  return { schemaVersion: 5, items: itemsIn({ obsidian: obsidian as Record<string, Item> }), remotes: [] };
 }
 
 describe("SyncCenterHost.computeStatuses — a device-scope-excluded item still gets a row", () => {
@@ -204,7 +204,7 @@ describe("setItemFileSharing — fields-mode guard + write-back pruning", () => 
     };
     instance.app = fakeApp();
     instance.loadData = async () => ({
-      schemaVersion: 4,
+      schemaVersion: 5,
       items: itemsIn({ custom: { secrets: { synced: true, type: "file", path: "notes/secrets.json", settingsFile: { mode: "encrypted", rules: {}, perElement: {} } } } }),
       remotes: [],
     });

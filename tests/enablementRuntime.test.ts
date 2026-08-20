@@ -96,7 +96,7 @@ async function makePlugin(opts: {
     workspace: { getLeavesOfType: () => [] },
     ...ls.api,
   };
-  instance.loadData = async () => ({ schemaVersion: 4, rootPath: "cs", items: items(opts.rules ?? {}), remotes: [] });
+  instance.loadData = async () => ({ schemaVersion: 5, rootPath: "cs", items: items(opts.rules ?? {}), remotes: [] });
   instance.saveData = async () => {};
   await instance.loadSettings();
   await instance.recompile();
@@ -398,7 +398,7 @@ describe("the v3 → v4 migration moves no switch", () => {
     expect(document).not.toBeNull();
     const text = JSON.stringify(document);
     for (const dead of ["runsOn", "thisDeviceItems", "bratIndex"]) expect(text).not.toContain(dead);
-    expect(document?.schemaVersion).toBe(4);
+    expect(document?.schemaVersion).toBe(5);
 
     // `enabled` is asserted at the ITEM level rather than by a regex over the whole document,
     // because two legitimate `enabled` fields remain and must: a companion's own on/off

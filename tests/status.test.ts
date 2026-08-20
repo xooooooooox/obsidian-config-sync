@@ -3,6 +3,7 @@ import { CoreContext, capture, loadManifest, groupsForDevice, ExternalStoreReade
 import { parseSyncManifest, STORE_LOCK_VERSION } from "../src/core/manifest";
 import { lockByName } from "./lock";
 import { lockRefFor } from "../src/core/itemKeys";
+import { SELF_ITEM_REF } from "../src/core/catalog";
 import { statusForGroups, checkRemote, diffRemote, bucketCounts, remoteLockAhead, remoteDirectionCounts, remoteLockLabels, GroupStatus } from "../src/core/status";
 import { applyUpdates, emptyLedger, Ledger } from "../src/core/ledger";
 import { directionForState, stageableRow } from "../src/ui/panelModel";
@@ -233,7 +234,7 @@ describe("diffRemote", () => {
       "store/configdir/snippets/one.css": "REMOTE", // differs
       "store/configdir/snippets/extra.css": "x", // remote-only
     };
-    const entries = await diffRemote(ctx, fakeReader(remote), { excludeSelf: false });
+    const entries = await diffRemote(ctx, fakeReader(remote), { skipRefs: [] });
     const snip = entries.find((e) => e.group === "snippets");
     expect(snip?.files).toEqual([
       { itemRel: "extra.css", kind: "added", local: null, remote: "x" },
@@ -259,7 +260,7 @@ describe("diffRemote", () => {
       "store/configdir/plugins/config-sync/data.json": remoteSelf,
       "store/mystery/leftover.bin": "x", // matches neither manifest
     };
-    const entries = await diffRemote(ctx, fakeReader(remote), { excludeSelf: false });
+    const entries = await diffRemote(ctx, fakeReader(remote), { skipRefs: [] });
     const byName = Object.fromEntries(entries.map((e) => [e.group, e.files]));
     expect(byName["hotkeys"]).toEqual([{ itemRel: "hotkeys.json", kind: "added", local: null, remote: '{"a":1}' }]);
     expect(byName["snippets"]).toEqual([{ itemRel: "one.css", kind: "added", local: null, remote: "one" }]);
@@ -277,9 +278,9 @@ describe("diffRemote", () => {
     io.seed({ ".obs/community-plugins.json": '["a","b","c"]', "cs/store/configdir/community-plugins.json": '["a","b","c"]' });
     await writeGroups(ctx, parseSyncManifest(SWITCH_MANIFEST).groups);
     const reordered = { "store/configdir/community-plugins.json": '["c","a","b"]' };
-    expect(await diffRemote(ctx, fakeReader(reordered), { excludeSelf: false })).toEqual([]);
+    expect(await diffRemote(ctx, fakeReader(reordered), { skipRefs: [] })).toEqual([]);
     const membershipDiff = { "store/configdir/community-plugins.json": '["c","a","b","d"]' };
-    const entries = await diffRemote(ctx, fakeReader(membershipDiff), { excludeSelf: false });
+    const entries = await diffRemote(ctx, fakeReader(membershipDiff), { skipRefs: [] });
     expect(entries.find((e) => e.group === "community-plugins")?.files.map((f) => [f.itemRel, f.kind])).toEqual([["community-plugins.json", "updated"]]);
   });
 
@@ -292,7 +293,7 @@ describe("diffRemote", () => {
       "store/configdir/snippets/one.css": "one",
       "store/configdir/plugins/demo/data.json": await io.read("cs/store/configdir/plugins/demo/data.json"),
     };
-    const entries = await diffRemote(ctx, fakeReader(remote), { excludeSelf: false });
+    const entries = await diffRemote(ctx, fakeReader(remote), { skipRefs: [] });
     expect(entries).toEqual([]); // bookkeeping drift alone means "matches"
   });
 
@@ -308,8 +309,8 @@ describe("diffRemote", () => {
       "store/configdir/plugins/config-sync/data.json": JSON.stringify({ groups: selfGroups, theirs: true }),
       "store/configdir/plugins/config-sync/data.json.__scopes__.desktop.json": "{}",
     };
-    expect(await diffRemote(ctx, fakeReader(remote), { excludeSelf: true })).toEqual([]);
-    const withSelf = await diffRemote(ctx, fakeReader(remote), { excludeSelf: false });
+    expect(await diffRemote(ctx, fakeReader(remote), { skipRefs: [SELF_ITEM_REF] })).toEqual([]);
+    const withSelf = await diffRemote(ctx, fakeReader(remote), { skipRefs: [] });
     expect(withSelf.map((e) => e.group)).toEqual(["plugin-config-sync"]);
     expect(withSelf[0]?.files.map((f) => f.kind).sort()).toEqual(["added", "updated"]);
   });

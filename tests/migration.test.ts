@@ -91,9 +91,9 @@ describe("migrateV5Settings", () => {
       remotes: [{ name: "work", type: "vault", storePath: "/s", excludeSelf: true }],
     });
     expect(out.schemaVersion).toBe(5);
-    const remotes = out.remotes as Record<string, unknown>[];
-    expect(remotes[0].excludeSelf).toBeUndefined();
-    expect(remotes[0].items).toEqual({ community: { "config-sync": { direction: "none" } } });
+    expect(out.remotes).toEqual([
+      { name: "work", type: "vault", storePath: "/s", items: { community: { "config-sync": { direction: "none" } } } },
+    ]);
   });
 
   it("writes no rules at all when excludeSelf was absent or false", () => {
@@ -104,10 +104,10 @@ describe("migrateV5Settings", () => {
         { name: "b", type: "vault", storePath: "/s", excludeSelf: false },
       ],
     });
-    const remotes = out.remotes as Record<string, unknown>[];
-    expect(remotes[0].items).toBeUndefined();
-    expect(remotes[1].items).toBeUndefined();
-    expect(remotes[1].excludeSelf).toBeUndefined();
+    expect(out.remotes).toEqual([
+      { name: "a", type: "vault", storePath: "/s" },
+      { name: "b", type: "vault", storePath: "/s" },
+    ]);
   });
 
   it("carries every other field, known and unknown, untouched", () => {
@@ -119,9 +119,17 @@ describe("migrateV5Settings", () => {
     });
     expect(out.pkmMode).toBe("ioto");
     expect(out.somethingNewerWrote).toEqual({ a: 1 });
-    const r = (out.remotes as Record<string, unknown>[])[0];
-    expect(r.tokenId).toBe("t");
-    expect(r.futureField).toBe(7);
+    expect(out.remotes).toEqual([
+      {
+        name: "g",
+        type: "git",
+        url: "u",
+        branch: "main",
+        tokenId: "t",
+        futureField: 7,
+        items: { community: { "config-sync": { direction: "none" } } },
+      },
+    ]);
   });
 
   it("leaves a non-array remotes value exactly as found", () => {

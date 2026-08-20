@@ -711,7 +711,7 @@ describe("ConfigSyncPlugin.loadSettings — a v2 document migrates, saves once, 
   // The CHAIN (spec 2026-08-12-enablement-two-layers): a 2.20.0 device that skipped 2.22.0 goes
   // v2 → v3 → v4 in this one load, so the v3 fields this fixture is full of (`runsOn`,
   // `thisDeviceItems`, `bratIndex`) exist only in memory between the two steps and never reach disk.
-  it("migrates in memory, writes the v4 document exactly once, and raises no reset notice", async () => {
+  it("migrates in memory, writes the current document exactly once, and raises no reset notice", async () => {
     const plugin = new ConfigSyncPlugin({} as never, {} as never);
     const instance = plugin as unknown as LoadSurface;
     instance.app = fakeApp({ "config-sync-device-id": "dev-1" });
@@ -724,7 +724,7 @@ describe("ConfigSyncPlugin.loadSettings — a v2 document migrates, saves once, 
 
     await instance.loadSettings();
 
-    expect(instance.settings.schemaVersion).toBe(4);
+    expect(instance.settings.schemaVersion).toBe(5);
     // v2's `memberRules: desktop` for dataview arrived as a v3 `runsOn` and left as a carrier rule.
     expect(rulesOn(instance.settings.items, "community-plugins")["dataview"]).toEqual(perClass("desktop"));
     // v2's `localMembers` arrived as `thisDeviceItems` and left as this-device rules.
@@ -735,7 +735,7 @@ describe("ConfigSyncPlugin.loadSettings — a v2 document migrates, saves once, 
     expect(instance.settings.items.community["my-beta-plugin"]?.bratRepo).toBe("owner/my-beta-plugin");
     expect(saved.length).toBe(1);
     const written = saved[0] as Record<string, unknown>;
-    expect(written.schemaVersion).toBe(4);
+    expect(written.schemaVersion).toBe(5);
     // what the migration carried must reach DISK, not just memory
     expect(written.somethingFromTheFuture).toEqual(NEWER_BUILD);
     expect(written.memberRules).toBeUndefined();

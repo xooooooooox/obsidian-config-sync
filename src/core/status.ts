@@ -1,7 +1,7 @@
-import { baseHasStaleLocalKeys, CoreContext, ExternalStoreReader, fieldExceptionsFor, groupForStoreRel, isSelfStoreRel, loadManifest, overlayGroup, readStoreContractLocals, remoteDeclaresStore, remoteGroupsFrom, remoteStoreContentRels, storeDir, withContractLocals } from "./ConfigSyncCore";
+import { baseHasStaleLocalKeys, CoreContext, ExternalStoreReader, fieldExceptionsFor, groupForStoreRel, loadManifest, overlayGroup, readStoreContractLocals, remoteDeclaresStore, remoteGroupsFrom, remoteStoreContentRels, skipRelPredicate, storeDir, withContractLocals } from "./ConfigSyncCore";
 import { isJunkPath, listFilesRecursive } from "./io";
 import { basename, groupStorePath, relativeTo, sidecarStoreSuffix } from "./pathing";
-import { FileChanges, hasChanges, itemRef, StoreLock, StoreLockEntry, SyncGroup } from "./types";
+import { FileChanges, hasChanges, ItemRef, itemRef, StoreLock, StoreLockEntry, SyncGroup } from "./types";
 import { carrierRef, joinRef } from "./itemKeys";
 import { lockEntry, lockEntryCapturedAt, lockEntryHash, lockEntryList, lockLineage, parseStoreLock, storeLockVersion, STORE_LOCK_VERSION } from "./manifest";
 import { isPlainObject } from "./sanitize";
@@ -205,7 +205,7 @@ export interface RemoteCheck {
 }
 
 // `ignoreRefs` names lock entries that never count, exactly as in remoteLockAhead — callers pass
-// `[SELF_ITEM_REF]` for a remote with `excludeSelf`. It is REQUIRED, not defaulted: the per-item
+// the items this remote does not pull (remoteRules.ts's refsBlockedFor). It is REQUIRED, not defaulted: the per-item
 // path below resolves a direction from every entry it sees, so a forgotten argument would read the
 // self entry of a remote that deliberately never exchanges it and pin an arrow no Pull could ever
 // clear. The whole-store fallback has no per-entry granularity and is unaffected either way.
@@ -381,7 +381,7 @@ function itemFreshness(mine: StoreLockEntry | undefined, theirs: StoreLockEntry 
 // Per-item resolution for checkRemote: when BOTH locks carry the v2 payload, the state comes
 // from the entries rather than from one whole-store timestamp — so a store that is merely older in
 // wall-clock terms but holds the same items reads as "same". `ignoreRefs` drops entries that never
-// count — without it a remote with `excludeSelf` would resolve a direction from the one entry the
+// count — without it a remote that withholds an item would resolve a direction from an entry the
 // two sides deliberately never exchange, and no Pull could ever clear it. null = not decidable this
 // way (either side still at v1, no entries left to compare, an undatable difference, or the two
 // stores are ahead of each other in different items, which RemoteState has no word for); the caller
@@ -463,7 +463,7 @@ export interface RemoteDiffEntry {
 // filtered as metadata) so a delta never silently reads as "contents match".
 export const OTHER_STORE_FILES_GROUP = "(other store files)";
 
-export async function diffRemote(ctx: CoreContext, reader: ExternalStoreReader, opts: { excludeSelf: boolean }): Promise<RemoteDiffEntry[]> {
+export async function diffRemote(ctx: CoreContext, reader: ExternalStoreReader, opts: { skipRefs: ItemRef[] }): Promise<RemoteDiffEntry[]> {
   const manifest = await loadManifest(ctx);
   const remoteFiles = await reader.listFiles();
   // A fresh device knows few or no groups yet, so attribution falls back to the REMOTE
@@ -478,6 +478,7 @@ export async function diffRemote(ctx: CoreContext, reader: ExternalStoreReader, 
     // Only true bookkeeping (store.lock.json, legacy root manifests) lives outside store/.
     return rel.startsWith("store/") ? { name: OTHER_STORE_FILES_GROUP, itemRel: rel } : { name: "", itemRel: rel };
   };
+  const skipped = skipRelPredicate(opts.skipRefs, manifest.groups, remoteGroups);
   const localFiles = (await ctx.io.exists(ctx.rootPath)) ? await listFilesRecursive(ctx.io, ctx.rootPath) : [];
   const localRels = new Set(localFiles.map((f) => f.slice(ctx.rootPath.length + 1)));
   const byName = new Map<string, RemoteDiffEntry>();
@@ -499,7 +500,7 @@ export async function diffRemote(ctx: CoreContext, reader: ExternalStoreReader, 
     return a !== null && b !== null && switchListsEqual(a, b, []);
   };
   for (const rel of remoteFiles) {
-    if (opts.excludeSelf && isSelfStoreRel(rel)) continue;
+    if (skipped(rel)) continue;
     const { name, itemRel } = resolve(rel);
     if (!localRels.has(rel)) {
       entry(name).files.push({ itemRel, kind: "added", local: null, remote: await reader.readFile(rel) });
@@ -513,7 +514,7 @@ export async function diffRemote(ctx: CoreContext, reader: ExternalStoreReader, 
   }
   const remoteSet = new Set(remoteFiles);
   for (const rel of localRels) {
-    if (opts.excludeSelf && isSelfStoreRel(rel)) continue;
+    if (skipped(rel)) continue;
     if (!remoteSet.has(rel)) {
       const { name, itemRel } = resolve(rel);
       entry(name).files.push({ itemRel, kind: "deleted", local: await ctx.io.read(`${ctx.rootPath}/${rel}`), remote: null });

@@ -21,6 +21,7 @@ import {
   perClass,
   PerElementSharing,
   Remote,
+  RemoteItems,
   RibbonKey,
   Section,
   Sharing,
@@ -46,8 +47,10 @@ import {
   reservedNames,
   sectionForGroup,
   SELF_GROUP_NAME,
+  SELF_ITEM_REF,
   splitLocation,
 } from "../core/catalog";
+import { itemDirection, withItemDirection } from "../core/remoteRules";
 import {
   CompileError,
   companionConflict,
@@ -340,7 +343,10 @@ interface RemoteDraft {
   url: string;
   branch: string;
   subdir: string;
-  excludeSelf: boolean;
+  // Carried opaquely: the form never edits these two, and rebuilding a remote from a draft that
+  // dropped them would erase every direction rule and unlink the remote's passphrase.
+  items: RemoteItems | undefined;
+  passphraseId: string;
   tokenId: string;
   username: string;
 }
@@ -373,7 +379,8 @@ function toDraft(r: Remote): RemoteDraft {
     url: r.type === "git" ? r.url : "",
     branch: r.type === "git" ? r.branch : "",
     subdir: r.type === "git" ? (r.subdir ?? "") : "",
-    excludeSelf: r.excludeSelf === true,
+    items: r.items,
+    passphraseId: r.passphraseId ?? "",
     tokenId: r.type === "git" ? (r.tokenId ?? "") : "",
     username: r.type === "git" ? (r.username ?? "") : "",
   };
@@ -390,7 +397,8 @@ function toCandidate(d: RemoteDraft): unknown {
     if (d.tokenId !== "") c.tokenId = d.tokenId;
     if (d.username !== "") c.username = d.username;
   }
-  if (d.excludeSelf) c.excludeSelf = true;
+  if (d.items !== undefined) c.items = d.items;
+  if (d.passphraseId !== "") c.passphraseId = d.passphraseId;
   return c;
 }
 
@@ -3751,7 +3759,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const addBtn = containerEl.createEl("button", { cls: "config-sync-add-row", text: "+ Add remote" });
     addBtn.addEventListener("click", () => {
       if (!this.host.settingsWritable()) return; // no half-built remote that can never be saved
-      this.sources.push({ name: "", type: "vault", storePath: "", url: "", branch: "", subdir: "", excludeSelf: false, tokenId: "", username: "" });
+      this.sources.push({ name: "", type: "vault", storePath: "", url: "", branch: "", subdir: "", items: undefined, passphraseId: "", tokenId: "", username: "" });
       this.expanded.add("remote:");
       this.refresh();
     });
@@ -3972,9 +3980,10 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const selfText = selfLine.createDiv({ cls: "config-sync-remote-selftext" });
     selfText.createDiv({ cls: "config-sync-remote-selfname", text: "Keep Config Sync's own settings out of this remote" });
     selfText.createDiv({ cls: "config-sync-remote-selfdesc", text: "For a vault that keeps its own setup: Pull and Push skip Config Sync's settings, and the comparison stops reporting them." });
-    new ToggleComponent(selfLine).setValue(draft.excludeSelf).onChange((v) => {
+    const selfExcluded = itemDirection(draft.items, SELF_ITEM_REF) === "none";
+    new ToggleComponent(selfLine).setValue(selfExcluded).onChange((v) => {
       if (!this.host.settingsWritable()) return;
-      draft.excludeSelf = v;
+      draft.items = withItemDirection(draft.items, SELF_ITEM_REF, v ? "none" : "both");
       void this.saveRemotes();
     });
   }

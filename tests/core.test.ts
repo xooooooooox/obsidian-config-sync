@@ -5,7 +5,7 @@ import { lockEntry, STORE_LOCK_VERSION } from "../src/core/manifest";
 import { CoreContext, capture, captureWithActions, loadManifest, groupsForDevice, apply, applyWithActions, planImport, applyImport, PendingPull, ExternalStoreReader, pushExternal, ExternalStoreWriter, pluginIdForGroup, orderInstallsCatalogFirst, readGroups, writeGroups, deviceExcludedPluginIds, isSelfStoreRel, remoteGroupsFrom, groupForStoreRel, backfillLockLabels, excludeOptedOutItems } from "../src/core/ConfigSyncCore";
 import { parseStoreLock, parseSyncManifest } from "../src/core/manifest";
 import { SwitchList } from "../src/core/switchList";
-import { SELF_GROUP_NAME, selfPresetRules } from "../src/core/catalog";
+import { SELF_GROUP_NAME, SELF_ITEM_REF, selfPresetRules } from "../src/core/catalog";
 import { StoreLock, SyncGroup, EVERYWHERE, THIS_DEVICE, perClass } from "../src/core/types";
 import { isFieldEnvelope, parseFileEnvelope } from "../src/core/crypto";
 import { statusForGroups, remoteLockAhead } from "../src/core/status";
@@ -1151,7 +1151,7 @@ describe("planImport / applyImport", () => {
     io.seed({ "cs/store/configdir/snippets/one.css": "local-only" });
     const remote = { ...REMOTE_LOCK, "store/configdir/plugins/config-sync/data.json": selfDataJson([]) };
 
-    const pending = await planImport(ctx, fakeReader(remote), { excludeSelf: false });
+    const pending = await planImport(ctx, fakeReader(remote), { skipRefs: [] });
     expect(pending.plan.conflicts).toEqual([]);
     const results = await applyImport(ctx, pending, []);
 
@@ -1168,7 +1168,7 @@ describe("planImport / applyImport", () => {
       "store/configdir/hotkeys.json": '{"a":1}',
     };
 
-    const pending = await planImport(ctx, fakeReader(remote), { excludeSelf: false });
+    const pending = await planImport(ctx, fakeReader(remote), { skipRefs: [] });
     expect(pending.plan.conflicts).toEqual([]);
     const results = await applyImport(ctx, pending, []);
 
@@ -1189,7 +1189,7 @@ describe("planImport / applyImport", () => {
       "store/configdir/snippets/one.css": "one", // remote-only
     };
 
-    const pending = await planImport(ctx, fakeReader(remote), { excludeSelf: false });
+    const pending = await planImport(ctx, fakeReader(remote), { skipRefs: [] });
     expect(pending.plan.conflicts).toEqual([]);
     const results = await applyImport(ctx, pending, []);
 
@@ -1208,7 +1208,7 @@ describe("planImport / applyImport", () => {
       "store/configdir/community-plugins.json": '["ioto-tasks-center","config-sync","obsidian-image-toolkit"]', // same set, different order
     };
 
-    const pending = await planImport(ctx, fakeReader(remote), { excludeSelf: false });
+    const pending = await planImport(ctx, fakeReader(remote), { skipRefs: [] });
     expect(pending.plan.conflicts).toEqual([]);
     expect(pending.plan.auto.identical).toContain("file:store/configdir/community-plugins.json");
     // local bytes stay — no churn from the pull
@@ -1227,7 +1227,7 @@ describe("planImport / applyImport", () => {
       "store/configdir/hotkeys.json": '{"a":"remote"}',
     };
 
-    const pending = await planImport(ctx, fakeReader(remote), { excludeSelf: false });
+    const pending = await planImport(ctx, fakeReader(remote), { skipRefs: [] });
     expect(pending.plan.conflicts).toEqual([
       { kind: "file", name: "hotkeys", rel: "store/configdir/hotkeys.json", localContent: '{"a":"local"}', remoteContent: '{"a":"remote"}' },
     ]);
@@ -1247,7 +1247,7 @@ describe("planImport / applyImport", () => {
       "store/configdir/hotkeys.json": '{"a":"remote"}',
     };
 
-    const pending = await planImport(ctx, fakeReader(remote), { excludeSelf: false });
+    const pending = await planImport(ctx, fakeReader(remote), { skipRefs: [] });
     const results = await applyImport(ctx, pending, ["local"]);
 
     expect(await io.read("cs/store/configdir/hotkeys.json")).toBe('{"a":"local"}');
@@ -1261,7 +1261,7 @@ describe("planImport / applyImport", () => {
     await writeGroups(ctx, [localHotkeys]);
     const remote = { ...REMOTE_LOCK, "store/configdir/plugins/config-sync/data.json": selfDataJson([remoteHotkeys]) };
 
-    const pending = await planImport(ctx, fakeReader(remote), { excludeSelf: false });
+    const pending = await planImport(ctx, fakeReader(remote), { skipRefs: [] });
     // planImport still surfaces the difference (the Config Sync pane uses it), but pull no longer
     // resolves sync-list conflicts — no file conflicts, so choices = []. Convergence is via adopt.
     expect(pending.plan.conflicts).toEqual([{ kind: "definition", name: "hotkeys", local: localHotkeys, remote: remoteHotkeys }]);
@@ -1282,7 +1282,7 @@ describe("planImport / applyImport", () => {
       "store/configdir/snippets/one.css": "one",
     };
 
-    await planImport(ctx, fakeReader(remote), { excludeSelf: false });
+    await planImport(ctx, fakeReader(remote), { skipRefs: [] });
 
     expect(io.files).toEqual(before);
     expect(await readGroups(ctx)).toEqual([HOTKEYS_GROUP]);
@@ -1291,7 +1291,7 @@ describe("planImport / applyImport", () => {
   it("throws when choices.length does not match the number of conflicts", async () => {
     const { ctx } = setup();
     await writeGroups(ctx, [HOTKEYS_GROUP]);
-    const pending = await planImport(ctx, fakeReader({}), { excludeSelf: false });
+    const pending = await planImport(ctx, fakeReader({}), { skipRefs: [] });
     expect(pending.plan.conflicts).toEqual([]);
     await expect(applyImport(ctx, pending, ["remote"])).rejects.toThrow("expected 0");
   });
@@ -1306,7 +1306,7 @@ describe("planImport / applyImport", () => {
       "store/configdir/hotkeys.json": '{"a":1}',
     };
 
-    const pending = await planImport(ctx, fakeReader(remote), { excludeSelf: false });
+    const pending = await planImport(ctx, fakeReader(remote), { skipRefs: [] });
 
     expect(pending.remoteGroups.map((g) => g.name)).toEqual(["hotkeys", "snippets", "vimrc", "plugin-demo"]);
     const results = await applyImport(ctx, pending, []);
@@ -1320,7 +1320,7 @@ describe("planImport / applyImport", () => {
     io.seed({ "cs/config-sync.json.migrated-2026-01-01T00-00-00": "leftover" });
     const remote = { "config-sync.json.migrated-2020-01-01T00-00-00": "remote-leftover" };
 
-    const pending = await planImport(ctx, fakeReader(remote), { excludeSelf: false });
+    const pending = await planImport(ctx, fakeReader(remote), { skipRefs: [] });
 
     expect(pending.plan.auto.keptLocalFiles).toEqual([]);
     expect(pending.plan.auto.writeFiles).toEqual([]);
@@ -1343,9 +1343,9 @@ describe("planImport / applyImport", () => {
       "store/configdir/hotkeys.json": '{"a":1}',
     };
     // sanity: without the exclusion this exact setup IS a self-file conflict
-    expect((await planImport(ctx, fakeReader(remote), { excludeSelf: false })).plan.conflicts.length).toBe(1);
+    expect((await planImport(ctx, fakeReader(remote), { skipRefs: [] })).plan.conflicts.length).toBe(1);
 
-    const pending = await planImport(ctx, fakeReader(remote), { excludeSelf: true });
+    const pending = await planImport(ctx, fakeReader(remote), { skipRefs: [SELF_ITEM_REF] });
     expect(pending.plan.conflicts).toEqual([]);
     await applyImport(ctx, pending, []);
     expect(await io.read("cs/store/configdir/plugins/config-sync/data.json")).toBe('{"groups":[],"mine":true}');
@@ -1370,7 +1370,7 @@ describe("planImport / applyImport", () => {
         "store.lock.json": JSON.stringify({ capturedAt: "remote-time", items: { "obsidian": {"hotkeys": { source: { kind: "app", version: "2.0.0" } }} } }),
       };
 
-      const pending = await planImport(ctx, fakeReader(remote), { excludeSelf: false });
+      const pending = await planImport(ctx, fakeReader(remote), { skipRefs: [] });
       await applyImport(ctx, pending, ["remote"]);
 
       const lock = JSON.parse(await io.read("cs/store.lock.json")) as { capturedAt: string; items: Record<string, Record<string, unknown>> };
@@ -1385,7 +1385,7 @@ describe("planImport / applyImport", () => {
       const { io, ctx } = setup();
       await writeGroups(ctx, [HOTKEYS_GROUP]);
       io.seed({ "cs/store/configdir/hotkeys.json": '{"a":1}' });
-      const pending = await planImport(ctx, fakeReader({}), { excludeSelf: false });
+      const pending = await planImport(ctx, fakeReader({}), { skipRefs: [] });
       await applyImport(ctx, pending, []);
       expect(await io.exists("cs/store.lock.json")).toBe(false);
     });
@@ -1408,7 +1408,7 @@ describe("planImport / applyImport", () => {
         "store/configdir/plugins/config-sync/data.json": JSON.stringify({ schemaVersion: 2, items: { "community:foreign": { enabled: true } } }),
         "store.lock.json": remoteLock,
       };
-      const pending = await planImport(ctx, fakeReader(remote), { excludeSelf: false });
+      const pending = await planImport(ctx, fakeReader(remote), { skipRefs: [] });
       expect(pending.plan.conflicts.filter((c) => c.kind === "file")).toEqual([]);
       await applyImport(ctx, pending, []);
       const mergedRaw = await io.read("cs/store.lock.json");
@@ -1467,7 +1467,7 @@ describe("planImport / applyImport", () => {
       const before = await io.read("cs/store.lock.json");
       expect(remoteLockAhead(before, JSON.stringify(remoteLock), [])).toBe(true);
 
-      const pending = await planImport(ctx, fakeReader(remote), { excludeSelf: false });
+      const pending = await planImport(ctx, fakeReader(remote), { skipRefs: [] });
       expect(pending.plan.conflicts).toEqual([]);
       await applyImport(ctx, pending, []);
 
@@ -1490,7 +1490,7 @@ describe("planImport / applyImport", () => {
         "store/configdir/hotkeys.json": '{"a":1}',
         "store.lock.json": JSON.stringify(remoteLock),
       };
-      const pending = await planImport(ctx, fakeReader(remote), { excludeSelf: true });
+      const pending = await planImport(ctx, fakeReader(remote), { skipRefs: [SELF_ITEM_REF] });
       await applyImport(ctx, pending, []);
       const after = await io.read("cs/store.lock.json");
       expect(remoteLockAhead(after, JSON.stringify(remoteLock), ["community/config-sync"])).toBe(false);
@@ -1510,7 +1510,7 @@ describe("planImport / applyImport", () => {
         "store/configdir/hotkeys.json": '{"b":2}',
         "store.lock.json": JSON.stringify(remoteLock),
       };
-      const pending = await planImport(ctx, fakeReader(remote), { excludeSelf: false });
+      const pending = await planImport(ctx, fakeReader(remote), { skipRefs: [] });
       const conflicts = pending.plan.conflicts.filter((c) => c.kind === "file");
       expect(conflicts.length).toBe(1);
       await applyImport(ctx, pending, ["local"]);
@@ -1546,7 +1546,7 @@ describe("planImport / applyImport", () => {
         const pending = await planImport(
           ctx,
           fakeReader({ "store/configdir/hotkeys.json": '{"a":1}', "store.lock.json": JSON.stringify(remote) }),
-          { excludeSelf: false }
+          { skipRefs: [] }
         );
         await applyImport(ctx, pending, []);
         return { io, raw: await io.read("cs/store.lock.json") };
@@ -1613,7 +1613,7 @@ describe("planImport / applyImport", () => {
             items: { "legacy": {"snippets": { source: { kind: "app", version: "2.0.0" }, capturedAt: "2026-07-30T09:00:00.000Z", hash: "sha256:theirs" }} },
           }),
         };
-        const pending = await planImport(ctx, fakeReader(remote), { excludeSelf: false });
+        const pending = await planImport(ctx, fakeReader(remote), { skipRefs: [] });
         expect(pending.plan.conflicts.filter((c) => c.kind === "file").length).toBe(1);
         await applyImport(ctx, pending, ["local"]);
 
@@ -1687,7 +1687,7 @@ describe("pushExternal", () => {
     // The remote's own lock, byte-identical to the local one so the push skips it — a remote with
     // content and no lock is a refusal now, not a push target.
     const fw = fakeWriter({ "store.lock.json": '{"capturedAt":"t","groups":{}}', "store/gone.css": "stale" });
-    const results = await pushExternal(ctx, fw.writer, { excludeSelf: false });
+    const results = await pushExternal(ctx, fw.writer, { skipRefs: [] });
     expect(results.every((r) => r.status === "ok")).toBe(true);
     expect(fw.files["store/configdir/hotkeys.json"]).toBe('{"a":9}');
     expect(fw.files["store/gone.css"]).toBeUndefined();
@@ -1708,7 +1708,7 @@ describe("pushExternal", () => {
       "store.lock.json": '{"capturedAt":"t","groups":{}}', // the remote's bookkeeping, identical -> skipped
       "store/configdir/hotkeys.json": '{"a":1}', // identical to local -> must not be rewritten
     });
-    const results = await pushExternal(ctx, fw.writer, { excludeSelf: false });
+    const results = await pushExternal(ctx, fw.writer, { skipRefs: [] });
     expect(fw.writeLog).not.toContain("store/configdir/hotkeys.json");
     expect(fw.writeLog).toContain("store/configdir/snippets/one.css");
     const byGroup = Object.fromEntries(results.map((r) => [r.group, r.changes]));
@@ -1721,7 +1721,7 @@ describe("pushExternal", () => {
     io.seed({ "cs/store/configdir/hotkeys.json": "{}" });
     await seedGroups(ctx, '{"version":1,"groups":[]}');
     const fw = fakeWriter({});
-    const results = await pushExternal(ctx, fw.writer, { excludeSelf: false });
+    const results = await pushExternal(ctx, fw.writer, { skipRefs: [] });
     expect(fw.files["store/configdir/hotkeys.json"]).toBe("{}");
     expect(results.every((r) => r.status === "ok")).toBe(true);
   });
@@ -1731,7 +1731,7 @@ describe("pushExternal", () => {
     io.seed({ "cs/store.lock.json": '{"capturedAt":"t","groups":{}}' });
     await seedGroups(ctx, '{"version":1,"groups":[]}');
     const fw = fakeWriter({});
-    const results = await pushExternal(ctx, fw.writer, { excludeSelf: false });
+    const results = await pushExternal(ctx, fw.writer, { skipRefs: [] });
     expect(fw.files["store.lock.json"]).toBe('{"capturedAt":"t","groups":{}}');
     expect(results.every((r) => r.status === "ok")).toBe(true);
   });
@@ -1740,7 +1740,7 @@ describe("pushExternal", () => {
     const { ctx } = setup();
     await seedGroups(ctx, '{"version":1,"groups":[]}');
     const fw = fakeWriter({});
-    await expect(pushExternal(ctx, fw.writer, { excludeSelf: false })).rejects.toThrow("capture from this device");
+    await expect(pushExternal(ctx, fw.writer, { skipRefs: [] })).rejects.toThrow("capture from this device");
   });
 
   it("never writes a root config-sync.json, and excludes any lingering legacy manifest / migrated remnants from the push", async () => {
@@ -1752,7 +1752,7 @@ describe("pushExternal", () => {
     });
     await seedGroups(ctx, '{"version":1,"groups":[]}');
     const fw = fakeWriter({ "config-sync.json": "OLD-REMOTE" });
-    const results = await pushExternal(ctx, fw.writer, { excludeSelf: false });
+    const results = await pushExternal(ctx, fw.writer, { skipRefs: [] });
     expect(fw.files["config-sync.json"]).toBe("OLD-REMOTE"); // untouched: never written, never deleted
     expect(fw.files["config-sync.json.migrated-2026-01-01T00-00-00"]).toBeUndefined();
     expect(results.every((r) => r.status === "ok")).toBe(true);
@@ -1770,7 +1770,7 @@ describe("pushExternal", () => {
       "store.lock.json": '{"capturedAt":"t","groups":{}}', // identical to local -> skipped
       "store/configdir/plugins/config-sync/data.json": '{"theirs":true}',
     });
-    const results = await pushExternal(ctx, fw.writer, { excludeSelf: true });
+    const results = await pushExternal(ctx, fw.writer, { skipRefs: [SELF_ITEM_REF] });
     expect(fw.files["store/configdir/plugins/config-sync/data.json"]).toBe('{"theirs":true}'); // untouched both ways
     expect(fw.files["store/configdir/hotkeys.json"]).toBe('{"a":1}');
     expect(results.every((r) => r.status === "ok")).toBe(true);
@@ -2494,7 +2494,7 @@ describe("pull lock adoption for identical groups (version-refresh chain)", () =
       listFiles: async () => Object.keys(remoteFiles),
       readFile: async (rel) => remoteFiles[rel]!,
     };
-    const pending = await planImport(ctx, reader, { excludeSelf: false });
+    const pending = await planImport(ctx, reader, { skipRefs: [] });
     expect(pending.plan.conflicts).toEqual([]);
     await applyImport(ctx, pending, []);
     const lock = JSON.parse(await io.read("cs/store.lock.json")) as { capturedAt: string; syncedWatermark: string; items: Record<string, Record<string, StoreLockEntry>> };
@@ -2519,7 +2519,7 @@ describe("pull lock adoption for identical groups (version-refresh chain)", () =
       "store.lock.json": JSON.stringify({ capturedAt: "newer", items: { "obsidian": {"hotkeys": { source: { kind: "app", version: "2.0.0" } }} } }),
     };
     const reader: ExternalStoreReader = { listFiles: async () => Object.keys(remoteFiles), readFile: async (rel) => remoteFiles[rel]! };
-    const pending = await planImport(ctx, reader, { excludeSelf: false });
+    const pending = await planImport(ctx, reader, { skipRefs: [] });
     expect(pending.plan.conflicts.length).toBe(1);
     await applyImport(ctx, pending, ["local"]); // keep local content
     const lock = JSON.parse(await io.read("cs/store.lock.json")) as { items: Record<string, Record<string, StoreLockEntry>> };
@@ -2984,7 +2984,7 @@ describe("applyImport — pull is pure store transport", () => {
       // the listing it was read from.
       remoteLockRaw: '{"capturedAt":"t","groups":{}}',
       remoteFiles: ["store.lock.json", "store/configdir/plugins/new/data.json"],
-      excludeSelf: false,
+      skipRefs: [],
     };
     await applyImport(ctx, pending, []);
     expect(await readGroups(ctx)).toEqual(before); // sync list untouched
