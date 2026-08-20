@@ -12,9 +12,8 @@ import { setIcon } from "obsidian";
 // ? key, a DIFFERENT, Statistic-workspace vocabulary) is untouched by this map and stays text —
 // but a collapsed item ROW's own neutral (`—`-glyph) fate is NOT that column: per DESIGN.md's
 // State column section (the authority for this ruling), the same FOLD_ICON/FOLD_ICON_COLOR_CLASS map is reused at
-// the row's `config-sync-fate-ic` size for exactly that fate (SyncCenterView.ts's fateWrap and
-// renderRemoteDiffEntry) — the fold vocabulary speaks at both the group-header line and the
-// row it summarizes.
+// the row's `config-sync-fate-ic` size for exactly that fate (SyncCenterView.ts's fateWrap) — the
+// fold vocabulary speaks at both the group-header line and the row it summarizes.
 export type FoldKind = "insync" | "excluded" | "nosettings";
 
 export const FOLD_ICON: Record<FoldKind, string> = {

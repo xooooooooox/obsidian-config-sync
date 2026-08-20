@@ -183,9 +183,8 @@ device`) reuses the fold family's own `FOLD_ICON`/`FOLD_ICON_COLOR_CLASS` (`fold
 at the row's own `.config-sync-fate-ic` size/placement instead of rendering the sentence as
 text — the fold kind is derived from the `Fate` the row already carries (`fate.nothingYet`
 → `nosettings`/`circle`, `fate.excluded` → `excluded`/`circle-minus`, else →
-`insync`/`check`), aria-label = the sentence. Same reuse on the remote diff pane's own
-opted-out row (`renderRemoteDiffEntry`) — every ROW-level instance of these three sentences
-renders this way. The `⚠` conflict fate keeps its text glyph + sentence, since a conflict
+`insync`/`check`), aria-label = the sentence — every ROW-level instance of these three sentences
+renders this way, under either relation. The `⚠` conflict fate keeps its text glyph + sentence, since a conflict
 must shout and has no action icon to become. A fold-group HEADER line (`53 items in sync`)
 keeps its own text+icon form — this rule is about the ROW, not the group header. Chips are
 unaffected. (This DESIGN section is the authority on the split, not any code comment.)
@@ -517,9 +516,9 @@ noted):
   Which RELATION is on screen is the `View` picker's question — `config-sync-view-picker` heads the
   section list (`-view-current`/`-view-chev`, opening `-view-menu` of `-view-opt`, each labelled by
   `-view-label`), and the remotes live in its dropdown rather than as sidebar entries. Each entry
-  carries its own badge: the device side its capture/apply item counts, a remote side its
-  whole-store state icon (an item count there needs a real comparison against that remote, so it
-  waits until remote rows exist). The compact switcher's menu renders this same section list, so the
+  carries its own badge: the device side its capture/apply item counts, a remote side its push/pull
+  item counts once a comparison has run against it, and until then the cheap whole-store state icon
+  the lock file gives for free. The compact switcher's menu renders this same section list, so the
   picker follows it into narrow panes and phones with no second implementation. The badges are a COLUMN, and what has to line up is the ICON at each
   badge's left edge: every capsule carries `font-variant-numeric: tabular-nums` and
   `min-width: calc(1em + var(--cs-badge-digits) * 1ch + 12px)` (icon + digit slot + padding).
@@ -694,23 +693,19 @@ noted):
   pill or a search hit auto-expands every section once, on that transition only, so a
   manual re-collapse during the rest of that filtered/search session still sticks. Group
   headers `config-sync-sect` (uppercase + hairline) — used in the run-report breakdown.
-  The remote pane groups its diff entries with the same type-section head family as the
-  main list, in a static variant (`is-static`: no chevron, no collapse, no checkbox, no
-  carrier chip, default cursor). Head and entry rows are direct children here (no nested
-  card the way the collapsible type sections have), so the body fill does not reach it —
-  filling the whole static box (head included) would be a different visual pattern from
-  main sections (head outside the fill there). Matching the real
-  head-outside/body-filled pattern needs a body wrapper element around the entry rows (a
-  `.ts` DOM change) — deliberately deferred. Carrier divergence
-  there renders as a pinned
-  `On/off list · differs for N plugins` line (plain text, trailing rotating `chevron-right`)
-  (`config-sync-remote-onoff`) whose
-  expansion shows the per-plugin flips (`config-sync-remote-fliplist`) and the file diff.
-  Companion families fold the same way here: companion diff entries merge into their
-  parent's entry, each file re-pathed under a `<companion>/` prefix (e.g. `themes/Blue
-  Topaz.theme.css`) and chip counts summed — one entry per family; a companion whose
-  parent isn't known locally falls back to its own standalone entry (honest degradation,
-  same rule as the carrier label fallback).
+  **A remote's items render through these very sections** — same heads, same folds, same rows,
+  same cards, same checkboxes — with only the state words swapped (`To push`/`To pull`/`In sync`/
+  `Doesn't sync with this remote`/`Nothing captured yet`, and the fold lines `N items match this
+  remote` / `N items don't sync with this remote`). The availability axis (not installed / disabled
+  / desktop-only) is the device relation's alone and is not drawn under a remote: whether the
+  store's copy differs from the remote's says nothing about what this device has installed.
+  Carrier divergence is the carrier item's own card row (`On/off`, the per-plugin flip narration,
+  `config-sync-remote-flip-value`); per-file differences are that item's `Files` row, each entry
+  opening the store-vs-remote content diff. Companion families fold the same way here: companion
+  diff entries merge into their parent's entry, each file re-pathed under a `<companion>/` prefix
+  (e.g. `themes/Blue Topaz.theme.css`) — one row per family; a companion whose parent isn't known
+  locally falls back to its own standalone row (honest degradation, same rule as the carrier label
+  fallback).
 - **Expanded card (Sync Center row)** `config-sync-itemcard` — a quiet properties zone:
   no border, no fill, no radius. The zone
   is tied to its parent row by the **fold thread** (shared verbatim with the
@@ -864,8 +859,10 @@ noted):
   read-only, Type sections above). The snippets on/off list keeps its own member devices on the
   Appearance card (Unified card ③ below) — same mechanism, same row shape,
   fewer surfaces because it has no carrier card of its own.
-- **Remote** `config-sync-remote-btn` is-pull/is-push (solid cyan/pink when primary,
-  dimmed otherwise); diff entries reuse report rows + chips.
+- **Remote** — a remote is not a screen of its own: its rows, sections, cards and checkboxes are the
+  item list's, with the state words swapped (Type sections above). `config-sync-remote-btn`
+  is-pull/is-push (solid cyan/pink when primary, dimmed otherwise) is the action bar's pair of
+  direction buttons, `Pull N` / `Push N` over the rows ticked on that side.
 - **Reports** `config-sync-report-*`, chips, `-strip` result strip — outcome-toned: green
   only when the run is clean, `is-warn` orange / `is-error` red otherwise; it sits in a
   sticky `-strip-dock` (opaque backing, pinned to the top of the scroll viewport) so the
@@ -1319,5 +1316,5 @@ into the sections above — this list holds only what is still open.)
    semantic hook). The deliberately unstyled structural anchors — kept as query/layout
    hooks, no CSS on purpose — are: `config-sync-card-companionzonehost`,
    `config-sync-card-memberhost`, `config-sync-card-sfbodyhost`, `config-sync-cm-diffhost`,
-   `config-sync-remote-pane`, `config-sync-remote-summary`, `config-sync-settings-body`,
-   `config-sync-sources` (all locatable by class name; line numbers rot, symbols don't).
+   `config-sync-settings-body`, `config-sync-sources` (all locatable by class name; line
+   numbers rot, symbols don't).

@@ -44,7 +44,7 @@ Beta builds: via [BRAT](https://github.com/TfTHacker/obsidian42-brat), add `xooo
 Two planes, kept separate.
 
 - **Local plane** — **Capture** copies every enabled item's settings files and companion folders into the store, applying each field's sharing and encryption rule; **Apply** lands the items you tick into this device's config dir. Direction (↑ capture, ↓ apply) comes from a per-device sync baseline, not file times, so the Sync Center can tell which side actually moved.
-- **Transport plane** — by default the store is plain vault content and rides your note sync; a fresh device discovers an arriving store on its own and offers an **Adopt** guide. Optionally (desktop), Pull/Push move the store against a git repo or another vault from the Sync Center's Remotes block.
+- **Transport plane** — by default the store is plain vault content and rides your note sync; a fresh device discovers an arriving store on its own and offers an **Adopt** guide. Optionally (desktop), Pull/Push move the store against a git repo or another vault, from the Sync Center's own list with that remote selected in the View picker.
 
 The full tour — Sync Center anatomy, field rules, encryption, the install engine, remotes, walkthroughs — lives in the **[user guide](docs/GUIDE.md)**.
 

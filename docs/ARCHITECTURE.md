@@ -256,6 +256,14 @@ functions.
   (`displayName` and `backfillLockLabels` write the bare label to the store lock).
 
 **Status & availability**
+- `core/remoteRows.ts` — turns one remote comparison into the rows the device relation already
+  speaks. `remoteFlowFor(state)` gives the WHOLE list one direction (`diffRemote` only answers
+  "are the two sides byte-equal", so no row has its own evidence yet), and every undecided state
+  reads as `pull` because pull is the additive operation — push mirror-deletes, so an undecidable
+  state must land on the side that cannot destroy anything. `remoteRowStatuses` folds each entry's
+  files into the same `FileChanges` shape and calls every local item the comparison never mentioned
+  in sync; an entry with no local counterpart still gets a row. `skipRefsForSelection` turns the
+  checkboxes into the skip list the transport already takes: the rows the user did NOT tick.
 - `core/status.ts` — per-item status (`statusForGroups`), remote freshness (`diffRemote`,
   `remoteLockAhead`), and the counts the UI shows (`bucketCounts`, `remoteDirectionCounts` —
   the per-remote ⇡ push / ⇣ pull totals behind the header pills and the status bar).
@@ -355,7 +363,7 @@ functions.
   module's.
 - `core/pluginState.ts` — `pluginRuntimeEnabled`: a plugin is "on" when **loaded OR persisted**.
 - `core/remoteFailure.ts` — `classifyRemoteFailure`: pure classification of a remote-compare
-  failure message (`no-token` / `auth` / `timeout` / `other`) so the remote pane can offer the
+  failure message (`no-token` / `auth` / `timeout` / `other`) so a failed comparison can offer the
   right remedy instead of a raw git error.
 - `core/syncListDelta.ts` — `syncListDelta(local, store)`: the by-name added/removed difference
   between this device's compiled sync list and the store's, behind the Config Sync pane's
@@ -370,12 +378,12 @@ functions.
   enablement-carrier groups `community-plugins`/`core-plugins` are pinned to `community`/`core`
   (the same way `enabled-css-snippets` is pinned to `obsidian`) instead of falling through to
   `custom`. `displayLabelForGroup` and `lockLabels.ts`'s `resolveHostStoredLabel` are the shared
-  display-name chain every caller (row naming, remote-pane naming/sort, on/off-list narration,
+  display-name chain every caller (row naming, remote-row naming/sort, on/off-list narration,
   progress toasts) routes through, in priority order: the local manifest/custom-rule label → this
   device's own `store.lock.json` `display.label` → the group's own carrier's
   `display.elements[id]` (for a plugin/core group with no lock-entry label of its own) → the
   def-name/bare-id fallback.
-  The remote pane's `remoteLockLabels` (status.ts above) slots in as one more step, after this
+  A remote comparison's `remoteLockLabels` (status.ts above) slots in as one more step, after this
   device's own label and before the carrier fallback, so a remote's label can never shadow this
   device's own.
 - `core/leftover.ts` — `leftoverStoreRels`: store files with no matching group (cleanup surface).
@@ -460,9 +468,14 @@ functions.
   one object = one row, companion families dissolved into their parent's row), the unified card
   renderer (`renderUnifiedCard` — On apply/On capture/State, Files, Resolve (if conflicted),
   `Enabled on`/After install/Enablement, `Settings sync`, More, Note), filters/search,
-  the Leftover section, the sticky result strip, run History, the Remotes block (which renders the
-  remote pane's diffs through the same type-section/family grammar as the main list), and
-  Capture/Apply/Pull/Push actions. **Two orthogonal axes drive what it paints**, not one field:
+  the Leftover section, the sticky result strip, run History, and
+  Capture/Apply/Pull/Push actions. **There is no second renderer for remotes**: the remote relation
+  produces rows of the same shape (`core/remoteRows.ts`) and draws them through this same
+  `renderItemMode` — same sections, same rows, same card, same checkboxes — with only the state
+  words swapped (`relationCopy`) and the availability axis dropped, since store-copy-vs-remote-copy
+  has nothing to do with what this device has installed. While a remote's comparison is still
+  running, `renderRemoteComparing` holds the list's place; when it settles, the render finds the
+  cached result and paints rows. **Two orthogonal axes drive what it paints**, not one field:
   `relation` (`PanelRelation` — this device against the store, or the store against one named
   remote) is what the View picker sets; `destination` (`PanelDestination` — a slice of items, run
   History, Config Sync's own entry) is what the sidebar sets. `renderMainRegionBody` checks them in
@@ -626,9 +639,13 @@ functions.
   `PanelDestination` and their keys (`relationKey` prefixes a remote's name so a remote called
   `beta` or `history` cannot collide with the destination of the same spelling; `foldStateKey`
   combines both so one section's folds under two relations are two different lists),
-  `relationLabel` (`This device ↔ store` / `store ↔ <name>`), and `viewOptions` — the View picker's
-  whole content as data, including the rule that a `current` naming a deleted remote resolves back
-  to this device so the picker always has exactly one active row.
+  `relationLabel` (`This device ↔ store` / `store ↔ <name>`), `relationCopy` (the two relations'
+  state words as ONE table — `To capture`/`To push`, `Not synced here`/`Doesn't sync with this
+  remote`, the fold lines — so the three surfaces that bucket by state cannot drift apart), and
+  `viewOptions` — the View picker's whole content as data, including the rule that a `current`
+  naming a deleted remote resolves back to this device so the picker always has exactly one active
+  row. A remote's badge is a real item count once a comparison has run against it, and its cheap
+  whole-store state icon until then.
   `fateBucket(fate)`/`fateBucketCounts` derive the one `RowBucket`
   (`conflict`/`apply`/`capture`/`excluded`/`ok`/`none` — `excluded` read off
   `Fate.excluded`, positioned after the stageable checks and before `nothingYet`) every consumer —
@@ -646,11 +663,10 @@ functions.
   family's fate from its parent + companion `GroupState`s (settings/folder verbs join, an
   Appearance override replaces them, any per-file conflict or split-direction membership becomes
   `⚠`); `mergeFamilyChanges`/`fileEntryFor` back the card's direction-aware Files rows.
-  `remoteSections`/`foldCompanionEntries` bucket a remote's raw file diff into the same four type
-  sections and fold companion diff entries into their parent, mirroring the main list in the
-  remote pane; `onOffFlips`/`onOffNarrationLines` derive the pinned `On/off list` line's flip
-  counts and capped/whole-list narration for a diverged `core-plugins`/`community-plugins`
-  carrier. `showColdStartBanner(selfState, statuses, dismissed)` is the pure predicate behind the
+  `foldCompanionEntries` folds a remote diff's companion entries into their parent, so a remote
+  comparison yields the same one-row-per-family grammar; `onOffFlips`/`onOffNarrationLines` derive
+  the flip counts and capped/whole-list narration a diverged `core-plugins`/`community-plugins`
+  carrier shows in its own card's `On/off` row. `showColdStartBanner(selfState, statuses, dismissed)` is the pure predicate behind the
   cold-start guidance banner (true while the plugin's own settings are pending adoption and at
   least one row still needs its first sync, unless dismissed) — separate from the self pane's own
   coldstart/adopt state, which speaks through `SelfSyncInfo.storePresent` instead (no store yet →

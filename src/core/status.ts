@@ -403,7 +403,7 @@ function perItemRemoteState(local: StoreLock, remote: StoreLock, ignoreRefs: str
   return newer ? "remote-newer" : older ? "remote-older" : "same";
 }
 
-// Item ref -> label for every remote lock entry carrying one (Sync Center remote pane, spec
+// Item ref -> label for every remote lock entry carrying one (Sync Center remote rows, spec
 // 2026-08-08-c-livetest-batch6): deliberately tolerant of anything short of a real parsed
 // store.lock.json — an absent, malformed, or half-written remote lock must never break the compare,
 // so this returns {} instead of throwing. Callers own the JSON.parse of the raw remote file (this

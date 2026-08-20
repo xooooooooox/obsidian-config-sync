@@ -305,7 +305,7 @@ export interface SyncCenterHost {
   // `lockStoredLabel(lastLock, ref)` read displayName/displayParts already fall back to when no
   // override is passed (the lock is keyed by item ref since v3, and an on/off-list element with no
   // entry of its own falls back to its carrier's recorded name). Exposed so a caller building its
-  // own priority chain (remote pane) can slot the local lock in ahead of a remote's label
+  // own priority chain (remote rows) can slot the local lock in ahead of a remote's label
   // without bypassing it.
   localLockLabel(group: string): string | undefined;
   // The parent GROUP name for a companion group — null for a
@@ -407,11 +407,11 @@ function isoAge(iso: string | null): string {
 }
 
 // remoteLabels: group name -> label from the remote store.lock.json, for the
-// remote pane to show a real plugin name instead of a raw group id —
+// remote rows to show a real plugin name instead of a raw group id —
 // empty on an absent/malformed remote lock, never a reason for the compare itself to fail.
 type RemoteCompareResult = { entries: RemoteDiffEntry[]; lockDiffers: boolean; remoteLabels: Record<string, string> };
 
-// One compare per (remote name, reader-cache generation) — see renderRemoteDetail.
+// One compare per (remote name, reader-cache generation) — see renderRemoteComparing.
 // `result` is populated once the compare settles successfully and the entry stays put (it is
 // NOT cleared on success) so every re-render while it's still the current key paints the cached
 // result instead of flashing "Fetching remote…" again. A rejection clears the entry outright (see
@@ -546,7 +546,7 @@ export class SyncCenterView extends ItemView {
   // (never both live at once — `renderSidebar`/`renderItemMode`'s compact branch are mutually
   // exclusive per render). Cancelled in onClose so a closed view can't fire a stale render.
   private searchDebounceTimer: number | null = null;
-  // The remote pane's compare in flight, if any — see renderRemoteDetail.
+  // The current remote's comparison, in flight or settled — see renderRemoteComparing.
   private inflightCompare: InflightCompare | null = null;
 
   constructor(leaf: WorkspaceLeaf, private host: SyncCenterHost) {
@@ -3008,9 +3008,8 @@ export class SyncCenterView extends ItemView {
     this.renderFateStateIcon(parent, kind, fate.sentence);
   }
 
-  // The lower-level producer `renderNeutralFateIcon` calls, also used directly by a row that
-  // knows its own fold kind without building a full `Fate` (renderRemoteDiffEntry's opted-out
-  // row below) — reuses `foldIcons.ts`'s `FOLD_ICON`/`FOLD_ICON_COLOR_CLASS`, the SAME producer
+  // The lower-level producer `renderNeutralFateIcon` calls, also usable directly by a row that
+  // knows its own fold kind without building a full `Fate` — reuses `foldIcons.ts`'s `FOLD_ICON`/`FOLD_ICON_COLOR_CLASS`, the SAME producer
   // the trailing-fold summary lines read, at the row's own `config-sync-fate-ic` size instead of
   // the fold line's 12px (DESIGN.md's State column — one vocabulary, two sizes for two contexts).
   private renderFateStateIcon(parent: HTMLElement, kind: FoldKind, sentence: string): void {
@@ -3415,7 +3414,7 @@ export class SyncCenterView extends ItemView {
   // Files row: direction-aware entries via fileEntryFor, reusing the same
   // diffPair-backed inline expand renderCappedChanges already uses for "view" and "diff" alike
   // (the "view" case is just a diff against an empty base — the same content diffPair already
-  // returns — mirroring the remote pane's "not in your store" content view).
+  // returns — the same shape as the remote relation's "not in your store" content view).
   private renderUnifiedFiles(detail: HTMLElement, r: StatusRow, changes: FileChanges, dir: Direction, encrypted: boolean, resolve: DiffResolveControl | null): void {
     const { shown, rest } = capFileEntries(changes, 10);
     const renderEntry = (e: CappedEntry): void => {

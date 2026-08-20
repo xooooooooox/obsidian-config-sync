@@ -616,9 +616,8 @@ export function mergeFamilyChanges(parts: { prefix: string | null; changes: File
   return { added, updated, deleted };
 }
 
-// Folds a remote diff's companion entries into their parent's entry (the remote pane keeps its
-// shape — only companions dissolve), so the remote pane shows the same one-row-per-
-// family grammar as the main list. `parentOf` returns null for non-companions (they pass
+// Folds a remote diff's companion entries into their parent's entry, so a remote comparison yields
+// the same one-row-per-family grammar the main list has. `parentOf` returns null for non-companions (they pass
 // through untouched). Order is first-seen: a family's position in the result is wherever its
 // parent entry OR its first companion appears first in `entries`.
 export function foldCompanionEntries(entries: RemoteDiffEntry[], parentOf: (group: string) => string | null): RemoteDiffEntry[] {

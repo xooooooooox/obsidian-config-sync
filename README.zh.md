@@ -44,7 +44,7 @@
 两个层面，彼此分离。
 
 - **本地层面** —— **Capture** 把每个已启用条目的设置文件和 companion 文件夹复制进 store，按每个字段的共享与加密规则处理；**Apply** 把你勾选的条目落地到本设备的配置目录。方向（↑ capture、↓ apply）来自每台设备各自的同步基线，而不是文件时间，因此 Sync Center 能判断究竟是哪一侧真正发生了变化。
-- **传输层面** —— store 默认就是普通的 vault 内容，随你的笔记同步工具流转；全新设备会自行发现送达的 store，并提供一份 **Adopt** 引导。（桌面端）可选地，通过 Sync Center 的 Remotes 区块对 git 仓库或另一个 vault 执行 Pull/Push。
+- **传输层面** —— store 默认就是普通的 vault 内容，随你的笔记同步工具流转；全新设备会自行发现送达的 store，并提供一份 **Adopt** 引导。（桌面端）可选地，在 Sync Center 的 View 选择器里选中某个 remote，用同一份列表对 git 仓库或另一个 vault 执行 Pull/Push。
 
 完整导览——Sync Center 结构、字段规则、加密、安装引擎、remotes、实战演练——都在 **[用户指南](docs/GUIDE.md)** 中。
 
