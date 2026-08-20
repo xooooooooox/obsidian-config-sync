@@ -6,6 +6,19 @@ is in [CHANGELOG.md](CHANGELOG.md).
 
 Read from the version you are on upward, and do the oldest step first.
 
+## 2.25.0
+
+**Nothing to do.** This release changes the format of the plugin's own settings again, and the
+conversion happens on its own: the first time each device runs this version it converts its own
+settings in place on load, and everything you had set comes across. If you had ticked **Keep Config
+Sync's own settings out of this remote** on a remote, that remote keeps behaving exactly as it did
+and the toggle is still ticked where you left it.
+
+The one thing worth knowing is the same as it was for 2.23.0, and for the same reason: **a device
+still on an older version cannot read the new format.** From 2.21.0 onward it refuses it, says so
+plainly, and changes nothing at all — so an un-updated device waits rather than losing anything.
+Update it whenever you get to it, in any order, and it carries on where it left off.
+
 ## 2.24.1
 
 **Check the direction of any item you had switched to Don't sync it.**

@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.25.0
+
+- Changed how a remote records what it will and will not exchange: instead of one fixed answer about Config Sync's own settings, a remote now carries a direction for any item, and for any key inside one. Nothing you see or do changes in this release — **Keep Config Sync's own settings out of this remote** still reads and writes the same choice, and Pull, Push and the comparison behave exactly as they did — but the format of the plugin's own settings changes, so a device on an older version cannot read it until you update it. See [UPGRADING.md](UPGRADING.md)
+
 ## 2.24.3
 
 - Changed a sharing control to light up whenever the shared answer is narrower than **All devices**, in the same color as the card's own `N device-scoped` badge. The badge and the rows it counts now match at a glance, instead of leaving you to hunt for which row it meant

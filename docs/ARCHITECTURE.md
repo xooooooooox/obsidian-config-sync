@@ -56,13 +56,19 @@ functions.
 **Engine & context**
 - `core/ConfigSyncCore.ts` — the engine and its interfaces: `capture`, `apply`,
   `applyWithActions`, `captureWithActions`, `planImport`/`applyImport`,
-  `pushExternal`. `planImport(ctx, reader, opts: { excludeSelf: boolean })` and
-  `pushExternal(ctx, writer, opts: { excludeSelf: boolean })` both take an explicit options param
-  (no default): when `excludeSelf` is set, `isSelfStoreRel(rel)` (exported next to
-  `SELF_STORE_DATA_REL`) names the self item's data-file and sidecar rels, which `planImport` then
-  drops from both file maps before `classifyMerge` and `pushExternal` skips in its write loop —
-  and, on the push side, exempts from the mirror-delete loop too, so the remote's own self copy is
-  never deleted even though it's absent from the local push set. `remoteGroupsFrom(ctx, reader,
+  `pushExternal`. `planImport(ctx, reader, opts: { skipRefs: ItemRef[] })` and
+  `pushExternal(ctx, writer, opts: { skipRefs: ItemRef[] })` both take an explicit options param
+  (no default). `skipRefs` is a set of ItemRefs — the items that do not travel in that direction with
+  that remote, computed by `core/remoteRules.ts`'s `refsBlockedFor(remote.items, "pull" | "push")`.
+  `skipRelPredicate(skipRefs, ...groupLists)` turns it into a per-rel test: a rel belongs to a skipped
+  item when its owning group's ref (`resolveGroupByStoreRel`) is in the list, with
+  `isSelfStoreRel(rel)` (exported next to `SELF_STORE_DATA_REL`) as the self item's fast path — the
+  one ref whose rels are known without a group lookup, so it still answers while a device's own
+  registry is empty. `planImport` drops those rels from both file maps before `classifyMerge` and
+  carries `skipRefs` on the `PendingPull` so `applyImport` skips the same lock entries;
+  `pushExternal` skips them in its write loop — and exempts them from the mirror-delete loop too, so
+  the remote's own copy of a withheld item is never deleted even though it's absent from the local
+  push set. `remoteGroupsFrom(ctx, reader,
   files)` resolves the remote's sync list from its self store copy — schema v1 copies carry a
   compiled `groups` array; v3 copies carry nested `items` and compile through the injected
   `CoreContext.storeListGroups` hook (main.ts wires `storeSelfCopyGroups` with the plugin's
@@ -253,15 +259,16 @@ functions.
 - `core/status.ts` — per-item status (`statusForGroups`), remote freshness (`diffRemote`,
   `remoteLockAhead`), and the counts the UI shows (`bucketCounts`, `remoteDirectionCounts` —
   the per-remote ⇡ push / ⇣ pull totals behind the header pills and the status bar).
-  `diffRemote(ctx, reader, opts: { excludeSelf: boolean })` returns per-group `RemoteDiffEntry.files:
+  `diffRemote(ctx, reader, opts: { skipRefs: ItemRef[] })` returns per-group `RemoteDiffEntry.files:
   RemoteDiffFile[]` — one entry per file with its `kind` (`added`/`updated`/`deleted`) and both
   sides' content, so the UI renders file lists and content diffs instead of bare counts;
-  `excludeSelf` drops the self item's store rels from both sides before diffing.
+  `skipRefs` drops those items' store rels from both sides before diffing (comparison answers for
+  both directions at once, so main.ts passes the union of the pull and push blocked sets).
   `remoteLockAhead(localRaw, remoteRaw, ignoreRefs, groups?)` takes an explicit `ignoreRefs` list —
-  callers pass `[SELF_ITEM_REF]` when a remote's `excludeSelf` is set, so a divergent self lock
-  entry never keeps the "remote has newer version info" hint alive forever. `applyImport` closes the
+  callers pass `refsBlockedFor(remote.items, "pull")`, so a lock entry for an item the remote never
+  pulls cannot keep the "remote has newer version info" hint alive forever. `applyImport` closes the
   loop on the writer side: after a pull it carries every non-ignored remote lock entry (all but the
-  self group when `excludeSelf`, and any group whose file conflict the user kept as `local`) into the
+  items in `skipRefs`, and any group whose file conflict the user kept as `local`) into the
   local lock, so `remoteLockAhead` converges to false once contents match — the hint clears after a
   single Pull instead of nagging. **How it compares**: **the items answer first**, each
   remote entry weighed **key by key, never `JSON.stringify`**, so key order cannot read as a
@@ -288,9 +295,9 @@ functions.
   but when BOTH locks are v2 or newer it decides the state from the entries (`perItemRemoteState`)
   instead of one whole-store timestamp: a store merely older in clock terms whose items all match
   reads `same`.
-  `ignoreRefs` is REQUIRED for the same reason `remoteLockAhead` takes one — a remote with
-  `excludeSelf` never exchanges the self entry, so without it the per-item path resolves a direction
-  from the one entry the two sides diverge on by design, and no Pull could ever clear the arrow. It
+  `ignoreRefs` is REQUIRED for the same reason `remoteLockAhead` takes one — a remote never exchanges
+  the entry of an item it does not pull, so without it the per-item path resolves a direction
+  from an entry the two sides diverge on by design, and no Pull could ever clear the arrow. It
   falls back to today's timestamp comparison whenever per-item resolution cannot answer: either side
   at v1, no entries left to compare, a difference it cannot date, or the two stores ahead of each
   other in different items, which `RemoteState` has no word for. Per-item precision is also weaker
@@ -990,13 +997,14 @@ Changes must preserve these:
   path from `(ItemDef[], settings.items)` to the `SyncGroup[]` the engine runs; a `CompileError`
   (a path collision) is surfaced as a `Notice` and leaves the PREVIOUS `compiledGroups` in place —
   a bad edit must never silently wipe the working sync list.
-- **Schema v4 migrates from v2 and v3 only; v1 is a hard gate, and a NEWER schema is refused, not reset.**
+- **Schema v5 migrates from v2, v3 and v4 only; v1 is a hard gate, and a NEWER schema is refused, not reset.**
   `classifySettings` (`core/settingsMigration.ts`) answers `fresh` / `ok` / `migrate` / `legacy` /
-  `future` against `CURRENT_SCHEMA` (4) and `MIGRATABLE_SCHEMAS` ([2, 3]). `migrate` runs the
-  chain (`core/v2Migration.ts` then `core/v4Migration.ts`, each stage only if the document is below
-  it) once, on the load that finds it, saves once, and behaves afterwards exactly
-  as it did before — **it is one way**: after it the document cannot be read by 2.21.0/2.22.0
-  (which refuse it politely) or by ≤2.20.0 (which resets). `legacy` (the v1-era
+  `future` against `CURRENT_SCHEMA` (5) and `MIGRATABLE_SCHEMAS` ([2, 3, 4]). `migrate` runs the
+  chain (`core/v2Migration.ts`, then `core/v4Migration.ts`, then `core/v5Migration.ts` — each stage
+  returns a document of any other version untouched, so a later one simply starts further along)
+  once, on the load that finds it, saves once, and behaves afterwards exactly
+  as it did before — **it is one way**: after it the document cannot be read by any earlier build
+  (2.21.0 onward refuse it politely; ≤2.20.0 resets). `legacy` (the v1-era
   `groups`/`memberScopes`/`memberLocal`/
   `appJsonTabs` shape, or anything unversioned) blocks with a `Notice` and starts from
   `DEFAULT_SETTINGS` — schema v1 has no field a later shape could be reconstructed from. `future`
@@ -1051,7 +1059,7 @@ Four storage homes, one per clause of invariant I above, and a datum belongs to 
 | Home | What lives there | Why not elsewhere |
 |---|---|---|
 | **`localStorage`** (per vault, per device) | the device id, the sync baselines, the passphrase, the cold-start dismissal, the **On this device** whole-file opt-out list (`config-sync-device-optouts`), the on/off-list local exception table (`config-sync-device-elements`), the per-key-rule local exception table (`config-sync-device-fields`) | true only of THIS device and defined by its identity; `data.json` travels wholesale, so a shared field keyed by device id is erased by one pull + adopt |
-| **`data.json`, locked-local preset** (`selfPresetRules`) | `rootPath`, `remotes` (with their `tokenId` names) | this vault's transport wiring — it is in the document, but stripped from the document's own store copy so it never reaches another device |
+| **`data.json`, locked-local preset** (`selfPresetRules`) | `rootPath`, `remotes` (with their `tokenId` / `passphraseId` names and their `items` direction rules) | this vault's transport wiring — it is in the document, but stripped from the document's own store copy so it never reaches another device. A remote's direction rules nest INSIDE the remote, so they inherit this strip for free: no new protection rule, and a rule naming a remote can never ride an item's store copy to a vault where that remote does not exist |
 | **`data.json`, ordinary fields** | `items` (nested by section, custom items included), PKM mode, run-history config, ribbon/status toggles | the fleet's shared sync contract: every device is meant to converge on it |
 | **`store.lock.json`** | per-item `source`, `innate`, `display`, `capturedAt`, `hash`; the store's own `version` and `syncedWatermark` | provenance and freshness of store CONTENT, which is a fact about the store, not about the settings that produced it |
 
@@ -1076,7 +1084,7 @@ reconciliation — there is no on/off mask to compute, since the local half here
 merge in but an instruction to leave the key alone entirely (Core invariants above).
 
 **Schemas** (`schema/`, hand-maintained JSON Schema — the repo's schema-first rule, CLAUDE.md):
-`data.schema.json` (data.json at `schemaVersion: 4`), `store-lock.schema.json` (store.lock.json),
+`data.schema.json` (data.json at `schemaVersion: 5`), `store-lock.schema.json` (store.lock.json),
 `config-sync.schema.json` (the groups-file shape every compiled group still round-trips through
 `parseGroup`), `local-storage.schema.json` (the device-local `config-sync-*` localStorage entries)
 and `run-history.schema.json` (the run log). They document the persisted shapes for humans and
@@ -1090,7 +1098,7 @@ opt-out list are all keyed by `ItemRef` (`${section}/${id}`), minted only by the
 — a section deliberately outside `StorageSection`, so `parseItemRef` refuses it and no reader can
 resolve it. Dropping such an entry instead would read as never-synced, which defaults to APPLY.
 
-- **`data.json`** (`ConfigSyncSettings`, plugin settings, `schemaVersion: 4`) — what syncs and how,
+- **`data.json`** (`ConfigSyncSettings`, plugin settings, `schemaVersion: 5`) — what syncs and how,
   compiled to `SyncGroup[]` on every load/save; there is no separate hand-edited manifest file
   anymore (the old `config-sync.json` at `<store root>/` is legacy and only ever read to detect a
   pre-v2 install — see the schema-gate invariant above). `schema/data.schema.json` is this shape's

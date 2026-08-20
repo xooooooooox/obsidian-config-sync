@@ -971,8 +971,8 @@ noted):
   already stored in `data.json` still validates and still reaches git auth
   (types/manifest/resolveGitToken carry it), it just has no UI. The
   `Keep Config Sync's own settings out of this remote` toggle row closes the form
-  (`excludeSelf` — live on the whole pull/push/compare chain). Every handler is
-  `draft.x = …; saveRemotes()` behind the settingsWritable guard.
+  (the self item's direction rule on this remote — live on the whole pull/push/compare
+  chain). Every handler is `draft.x = …; saveRemotes()` behind the settingsWritable guard.
 - **Beta tab header**: the BRAT map note is a quiet one-line status
   (`config-sync-beta-mapnote`: muted text `Matched from BRAT's beta list · N of M repos
   resolved` + a small `rotate-cw` re-scan icon) that renders ONLY while something is
