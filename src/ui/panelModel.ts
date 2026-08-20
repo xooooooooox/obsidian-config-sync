@@ -5,6 +5,7 @@ import { carrierRef, refItemId } from "../core/itemKeys";
 import { ApplyItem, CaptureItem, StateAction } from "../core/ConfigSyncCore";
 import { EnablementList, memberUniverse, parseSwitchList, switchListMemberOn, switchListOnCount } from "../core/switchList";
 import { Fate, FateInput, NOTHING_YET_SENTENCE, rowFate } from "./fateModel";
+import { SyncAction } from "./actionIcons";
 import { ENABLEMENT_CARRIER_GROUPS } from "../core/switchList";
 
 // Direction a checkable row acts in: capture pushes this device → store; apply pulls store → device.
@@ -897,10 +898,11 @@ export function foldStateKey(r: PanelRelation, d: PanelDestination, section: str
   return `${relationKey(r)}::${destinationKey(d)}::${section}::${foldId}`;
 }
 
-// A remote's badge is its WHOLE-STORE state (the cheap lock-file answer the sidebar already draws),
-// not a count of items: an item count needs a real comparison against that remote, and this list is
-// built on every render. The device side counts items because those numbers are already in hand.
-export type ViewBadge = { kind: "capture" | "apply"; count: number } | { kind: "remote-state"; state: RemoteState };
+// A relation's badge is a count of items when that relation's numbers are in hand, and its cheap
+// whole-store state when they are not. The device side always counts; a remote counts only once a
+// real comparison against it has run (this list is rebuilt on every render, and comparing is a
+// network round trip), so both shapes stay.
+export type ViewBadge = { kind: SyncAction; count: number } | { kind: "remote-state"; state: RemoteState };
 
 export interface ViewOption {
   relation: PanelRelation;
@@ -915,7 +917,9 @@ export interface ViewOption {
 export function viewOptions(input: {
   current: PanelRelation;
   deviceCounts: { up: number; down: number };
-  remotes: readonly { name: string; state: RemoteState }[];
+  // `counts` is null for a remote no comparison has run against yet — that remote shows its
+  // whole-store state instead, the answer the lock file gives for free.
+  remotes: readonly { name: string; state: RemoteState; counts: { push: number; pull: number } | null }[];
 }): ViewOption[] {
   const { current, deviceCounts, remotes } = input;
   // Read out to a local BEFORE the callback below: TypeScript does not carry a narrowing of
@@ -929,12 +933,14 @@ export function viewOptions(input: {
   const out: ViewOption[] = [{ relation: device, label: relationLabel(device), active: liveName === null, badges: deviceBadges }];
   for (const r of remotes) {
     const relation: PanelRelation = { kind: "remote", name: r.name };
-    out.push({
-      relation,
-      label: relationLabel(relation),
-      active: liveName === r.name,
-      badges: [{ kind: "remote-state", state: r.state }],
-    });
+    const badges: ViewBadge[] = [];
+    if (r.counts === null) badges.push({ kind: "remote-state", state: r.state });
+    else {
+      // Zeroes drop, exactly as they do on the device row: a badge is a call to act.
+      if (r.counts.push > 0) badges.push({ kind: "push", count: r.counts.push });
+      if (r.counts.pull > 0) badges.push({ kind: "pull", count: r.counts.pull });
+    }
+    out.push({ relation, label: relationLabel(relation), active: liveName === r.name, badges });
   }
   return out;
 }

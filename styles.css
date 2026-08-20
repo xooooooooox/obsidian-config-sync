@@ -990,7 +990,6 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 .config-sync-mainbar .config-sync-search-wrap { margin-left: auto; width: 140px; }
 .config-sync-mainbar-search { background: var(--background-primary); border: 1px solid var(--background-modifier-border); border-radius: 6px; padding: 2px 8px; font-size: var(--font-ui-smaller); width: 100%; }
 
-.config-sync-remote-head { color: var(--text-muted); font-size: var(--font-ui-small); padding-bottom: var(--size-4-2); }
 
 .config-sync-shell.is-compact { grid-template-columns: 1fr; }
 
@@ -1205,17 +1204,6 @@ body.is-mobile .config-sync-strip-meta .config-sync-report-pills { margin-left: 
   letter-spacing: 0.06em;
 }
 .config-sync-section.is-typesection .config-sync-section-head .config-sync-row-chevron { font-size: var(--font-ui-smaller); }
-/* Remote pane's mirrored type sections: same header
-   family, but the header is read-only summary, not a control — no collapse to toggle, so it drops
-   the shared header's pointer cursor rather than growing a second header class. */
-.config-sync-section.is-static .config-sync-section-head { cursor: default; }
-/* Remote-pane static sections deliberately do NOT get the body-fill treatment other
-   sections do — they have no nested .config-sync-card (head and entry rows are both direct
-   children of the section box), so filling them the same way would mean filling the WHOLE box
-   including the head, a different visual pattern from main sections (head sits outside the fill
-   there). Matching the real pattern
-   needs a body wrapper element around the entry rows, which is a `.ts` DOM change — deliberately
-   deferred (SyncCenterView.ts's remote-pane rendering). Remote panes keep their unfilled look. */
 /* Core/Community section header chip: a read-only shortcut to where the on/off list's
    own sync membership is actually decided — the settings card's toggle, one write path. Same shape
    on both platforms. */
@@ -2076,66 +2064,8 @@ body.is-mobile .config-sync-row-last.config-sync-hub-row {
   color: var(--text-faint);
   font-size: var(--font-ui-smaller);
 }
-.config-sync-remote-row {
-  cursor: pointer;
-}
-.config-sync-remote-row:hover {
-  background: var(--background-modifier-hover);
-}
-.config-sync-remote-files {
-  margin: 2px 0 8px 22px;
-  padding-left: 10px;
-  border-left: 2px solid var(--background-modifier-border);
-}
-.config-sync-remote-frow {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-size: var(--font-ui-small);
-}
-.config-sync-remote-fglyph {
-  width: 12px;
-  text-align: center;
-  font-weight: 600;
-}
-.config-sync-remote-frow.is-add .config-sync-remote-fglyph {
-  color: var(--color-green);
-}
-.config-sync-remote-frow.is-upd .config-sync-remote-fglyph {
-  color: var(--color-yellow);
-}
-.config-sync-remote-frow.is-del .config-sync-remote-fglyph {
-  color: var(--color-red);
-}
-.config-sync-remote-fname {
-  font-family: var(--font-monospace);
-  font-size: var(--font-ui-smaller);
-  color: var(--text-normal);
-}
-.config-sync-remote-kept {
-  color: var(--text-muted);
-  font-size: var(--font-ui-smaller);
-  margin-top: 4px;
-}
-/* Pinned on/off line: same line treatment as .config-sync-unchanged's trailing folds,
-   with the diff-hint accent (.config-sync-diffhint's color) instead of --text-muted — it toggles a
-   diff-flavored detail, not a plain in-sync tally. */
-.config-sync-remote-onoff {
-  color: var(--text-faint);
-  font-size: var(--font-ui-smaller);
-  margin-top: var(--size-4-2);
-  cursor: pointer;
-}
-.config-sync-remote-fliplist {
-  margin: 2px 0 8px 22px;
-  padding-left: 10px;
-  border-left: 2px solid var(--background-modifier-border);
-  font-size: var(--font-ui-smaller);
-  color: var(--text-muted);
-}
-.config-sync-remote-fliplist .config-sync-remote-flip-value {
+/* The on/off narration's emphasized half, inside the carrier item's card row. */
+.config-sync-remote-flip-value {
   color: var(--text-normal);
 }
 .config-sync-remote-selfnote {

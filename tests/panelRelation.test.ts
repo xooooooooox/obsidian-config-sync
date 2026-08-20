@@ -40,8 +40,8 @@ describe("foldStateKey", () => {
 
 describe("viewOptions", () => {
   const remotes = [
-    { name: "main", state: "remote-newer" as const },
-    { name: "work", state: "same" as const },
+    { name: "main", state: "remote-newer" as const, counts: null },
+    { name: "work", state: "same" as const, counts: null },
   ];
 
   it("puts this device first, then the remotes in the order settings gave them", () => {
@@ -69,10 +69,22 @@ describe("viewOptions", () => {
     expect(opts[0]?.badges).toEqual([]);
   });
 
-  it("gives each remote its whole-store state, always — including the ones with nothing to do", () => {
+  it("gives a remote no comparison has run against its whole-store state", () => {
     const opts = viewOptions({ current: { kind: "device" }, deviceCounts: { up: 0, down: 0 }, remotes });
     expect(opts[1]?.badges).toEqual([{ kind: "remote-state", state: "remote-newer" }]);
     expect(opts[2]?.badges).toEqual([{ kind: "remote-state", state: "same" }]);
+  });
+
+  it("counts items for a remote a comparison HAS run against, and drops the zeroes", () => {
+    const compared = [{ name: "main", state: "remote-newer" as const, counts: { push: 0, pull: 4 } }];
+    const opts = viewOptions({ current: { kind: "remote", name: "main" }, deviceCounts: { up: 0, down: 0 }, remotes: compared });
+    expect(opts[1]?.badges).toEqual([{ kind: "pull", count: 4 }]);
+  });
+
+  it("gives a compared remote with nothing waiting no badges at all — not a state icon", () => {
+    const compared = [{ name: "main", state: "same" as const, counts: { push: 0, pull: 0 } }];
+    const opts = viewOptions({ current: { kind: "remote", name: "main" }, deviceCounts: { up: 0, down: 0 }, remotes: compared });
+    expect(opts[1]?.badges).toEqual([]);
   });
 
   it("offers this device alone when there are no remotes", () => {

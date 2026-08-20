@@ -430,6 +430,10 @@ interface InflightCompare {
 interface StatusRow {
   group: SyncGroup;
   status: GroupStatus;
+  // The remote this row's status came from, when it came from a remote comparison rather than from
+  // this device's own statuses. The derivation reads THIS, not the view's current relation, so the
+  // View picker can still count the device's own rows while a remote is the one on screen.
+  remote?: string;
 }
 
 // One derivation per row per render cycle: rollup, fate input, fate and
@@ -947,11 +951,14 @@ export class SyncCenterView extends ItemView {
   // reproduces the bucket familyState(r) alone would give, from the family's raw state, never
   // from fate.
   private deriveRow(r: StatusRow): RowDerivation {
-    const cached = this.rowDerivationCache.get(r.group.name);
+    // Keyed by relation AND name: the same item has one derivation against this device and another
+    // against a remote, and both are live in a single render (the View picker counts the device's
+    // rows while a remote's list is on screen).
+    const key = `${r.remote ?? ""}::${r.group.name}`;
+    const cached = this.rowDerivationCache.get(key);
     if (cached !== undefined) return cached;
-    const relation = this.relation;
-    const derived = relation.kind === "remote" ? this.deriveRemoteRow(r, relation.name) : this.deriveDeviceRow(r);
-    this.rowDerivationCache.set(r.group.name, derived);
+    const derived = r.remote !== undefined ? this.deriveRemoteRow(r, r.remote) : this.deriveDeviceRow(r);
+    this.rowDerivationCache.set(key, derived);
     return derived;
   }
 
@@ -1075,7 +1082,7 @@ export class SyncCenterView extends ItemView {
     const localGroupNames = this.familyGroups().map((g) => g.name).filter((n) => n !== SELF_GROUP_NAME);
     return remoteRowStatuses({ entries: folded, flow, localGroupNames })
       .filter((status) => status.group !== SELF_GROUP_NAME)
-      .map((status) => ({ group: findGroupByName(this.groups, status.group) ?? remoteOnlyGroup(status.group), status }));
+      .map((status) => ({ group: findGroupByName(this.groups, status.group) ?? remoteOnlyGroup(status.group), status, remote: name }));
   }
 
   // This remote's settled comparison, if the one in flight is both current (same remote, same
@@ -1693,9 +1700,6 @@ export class SyncCenterView extends ItemView {
       attr: { placeholder: "Filter by name…" },
     });
     searchEl.value = this.search;
-    // Still disabled under a remote relation: that pane has no rows to filter yet, and a search box
-    // that accepts typing and finds nothing is worse than one that says it does not apply here.
-    if (this.relation.kind === "remote") searchEl.disabled = true;
     this.qac.attach(searchEl);
     // The section list lives in its own container so a keystroke can refresh its hit-count badges in
     // place — the search input (and the autocomplete anchored to it) stays put, keeping focus and
@@ -1727,10 +1731,25 @@ export class SyncCenterView extends ItemView {
   // and every entry below it answers "which items". Each remote carries its state icon here, so
   // "which remote needs attention" is readable without switching to it first.
   private renderViewPicker(container: HTMLElement): void {
+    const relation = this.relation;
+    // The device row's numbers come from the device's OWN rows, never from whatever relation is on
+    // screen — `rows()` answers for the current relation, and while a remote is selected that would
+    // print the remote's counts next to "This device ↔ store".
+    const deviceCounts = this.presentedCounts(this.countable(this.deviceRows()));
     const opts = viewOptions({
-      current: this.relation,
-      deviceCounts: this.presentedCounts(this.countable(this.rows())),
-      remotes: this.host.remotes().map((r) => ({ name: r.name, state: this.host.remoteCheck(r.name)?.check.state ?? "unknown" })),
+      current: relation,
+      deviceCounts,
+      remotes: this.host.remotes().map((r) => {
+        // Only the relation on screen has a comparison behind it (one compare is held at a time),
+        // so every other remote falls back to its whole-store state icon.
+        const compared = relation.kind === "remote" && relation.name === r.name && this.remoteResultFor(r.name) !== null;
+        const counts = compared ? this.presentedCounts(this.countable(this.rows())) : null;
+        return {
+          name: r.name,
+          state: this.host.remoteCheck(r.name)?.check.state ?? "unknown",
+          counts: counts === null ? null : { push: counts.up, pull: counts.down },
+        };
+      }),
     });
     const current = opts.find((o) => o.active) ?? opts[0];
     if (current === undefined) return;
@@ -1765,8 +1784,7 @@ export class SyncCenterView extends ItemView {
       this.paintStateIcon(row.createSpan({ cls: `config-sync-state-icon ${icon.cls}`, attr: { "aria-label": icon.tip } }), icon);
       return;
     }
-    const cls = b.kind === "capture" ? "is-up" : "is-down";
-    renderActionCount(row.createSpan({ cls: `config-sync-side-badge ${cls}` }), b.kind, b.count);
+    renderActionCount(row.createSpan({ cls: `config-sync-side-badge ${ACTION_COLOR_CLASS[b.kind]}` }), b.kind, b.count);
   }
 
   private renderSectionEntries(container: HTMLElement): void {
@@ -3031,7 +3049,7 @@ export class SyncCenterView extends ItemView {
     // carries their bottom margin, keeping any future non-row sibling in `detail` outside it.
     const fields = detail.createDiv({ cls: "config-sync-card-fields" });
     const dir = isConflict ? this.conflictChoice.get(name) ?? null : input.direction;
-    const remoteRelation = this.relation.kind === "remote";
+    const remoteRelation = r.remote !== undefined;
     const dirLabel = remoteRelation
       ? dir === "apply" ? "On pull" : dir === "capture" ? "On push" : "State"
       : dir === "apply" ? "On apply" : dir === "capture" ? "On capture" : "State";
@@ -3295,7 +3313,7 @@ export class SyncCenterView extends ItemView {
       // and the two exclusion causes read differently even though the row above them is identical.
       // Both causes are this DEVICE's rules; under a remote the row's own sentence already names
       // the only rule in play (that remote's direction for this item), so it stands alone.
-      if (this.relation.kind === "remote") return `${fate.sentence}.`;
+      if (r.remote !== undefined) return `${fate.sentence}.`;
       if (input.excludedHere) return "Not synced on this device — your Settings sync rule excludes it.";
       if (input.optedOutHere === true) return "Not synced on this device — you turned it off here. Your other devices keep syncing it.";
       return `${fate.sentence}.`;
