@@ -699,8 +699,11 @@ noted):
   remote` / `N items don't sync with this remote`). The availability axis (not installed / disabled
   / desktop-only) is the device relation's alone and is not drawn under a remote: whether the
   store's copy differs from the remote's says nothing about what this device has installed.
-  Carrier divergence is the carrier item's own card row (`On/off`, the per-plugin flip narration,
-  `config-sync-remote-flip-value`); per-file differences are that item's `Files` row, each entry
+  The two on/off carriers, which are never rows under the device relation (they dissolve into the
+  section-head chip, and what they carry is spoken by each member's own row), ARE ordinary rows
+  under a remote: no member row says anything about enablement there, and the carrier's store copy
+  genuinely differs. Carrier divergence is then that row's own card row (`On/off`, the per-plugin
+  flip narration, `config-sync-remote-flip-value`); per-file differences are that item's `Files` row, each entry
   opening the store-vs-remote content diff. Companion families fold the same way here: companion
   diff entries merge into their parent's entry, each file re-pathed under a `<companion>/` prefix
   (e.g. `themes/Blue Topaz.theme.css`) — one row per family; a companion whose parent isn't known

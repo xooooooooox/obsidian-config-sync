@@ -653,7 +653,8 @@ functions.
   filter visibility, sidebar badges, header pills — reads, so a row can never disagree with itself
   across those surfaces. **Which ROWS those counts run over is decided once too**
   (`SyncCenterView`'s `countable`): exactly the rows the list renders — families already folded,
-  the self item out, the two on/off carriers out (they dissolve into their section's head chip),
+  the self item out, the two on/off carriers out under the DEVICE relation (they dissolve into their
+  section's head chip) and IN under a remote (there they are ordinary items with ordinary rows),
   and every availability section IN, because an outdated/disabled/not-installed row is drawn and
   staged like any other. The status bar reaches the same set from outside the view through
   `statusBarStatuses` (below). `TYPE_SECTION_ORDER`/
