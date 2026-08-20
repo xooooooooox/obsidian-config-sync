@@ -917,3 +917,35 @@ export function effectiveFate(fate: Fate, input: FateInput, conflictChoice: Conf
   const resolved = fate.glyph === "⚠" && conflictChoice !== null ? rowFate({ ...input, conflict: false, direction: conflictChoice }) : fate;
   return fallbackTurnsOn ? { ...resolved, turnsOn: true } : resolved;
 }
+
+// The panel answers two independent questions, and for a long time one field answered both: which
+// RELATION is on screen (this device against the store, or the store against one remote) and which
+// DESTINATION of the sidebar is selected (a slice of items, the run log, Config Sync's own entry).
+// Selecting a remote used to silently change what the item categories meant, which is why they are
+// two fields now.
+export type PanelRelation = { kind: "device" } | { kind: "remote"; name: string };
+
+export type PanelDestination =
+  | { kind: "items"; cat: StorageSection | "beta" | "all" }
+  | { kind: "history" }
+  | { kind: "self" };
+
+// Prefixed rather than bare: a remote may legitimately be named "beta" or "history", and an
+// unprefixed key would collide with the destination of the same spelling.
+export function relationKey(r: PanelRelation): string {
+  return r.kind === "device" ? "device" : `remote:${r.name}`;
+}
+
+export function relationLabel(r: PanelRelation): string {
+  return r.kind === "device" ? "This device ↔ store" : `store ↔ ${r.name}`;
+}
+
+export function destinationKey(d: PanelDestination): string {
+  return d.kind === "items" ? `items:${d.cat}` : d.kind;
+}
+
+// Fold state is per relation AND per destination: the same section under two relations is two
+// different lists, and a fold opened in one must not read as opened in the other.
+export function foldStateKey(r: PanelRelation, d: PanelDestination, section: string, foldId: string): string {
+  return `${relationKey(r)}::${destinationKey(d)}::${section}::${foldId}`;
+}
