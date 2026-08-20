@@ -83,6 +83,7 @@ import { decideEnablement, EnablementDecision } from "./core/enablementDecision"
 import { classifySettings, CURRENT_SCHEMA, SCHEMA_FUTURE_NOTICE, SCHEMA_UPGRADE_NOTICE, withDefaults } from "./core/settingsMigration";
 import { deviceOptOutsFor, migrateV2Settings } from "./core/v2Migration";
 import { migrateV4Settings } from "./core/v4Migration";
+import { migrateV5Settings } from "./core/v5Migration";
 import { applySwitchList, captureSwitchList, EnablementList, enablementListFile, isSwitchListGroup, localRealPath, parseSwitchList, readLocalSwitchList, subtractForceOff, switchDivergence, SwitchList, switchListMemberOn, writeLocalSwitchList } from "./core/switchList";
 import { applyTransform, captureTransform, isWholeFileEncrypted, scanSensitive, SensitiveScan } from "./core/modes";
 import { PkmMode, PkmProbe, resolveEffectiveMode, resolveRootPath } from "./core/pkm";
@@ -2274,19 +2275,19 @@ export default class ConfigSyncPlugin extends Plugin {
       // returns a document of any other version untouched — so this can never take a different
       // branch by accident the way a `data !== null` guard falling through to `legacy` would.
       //
-      // The CHAIN is the point: migrateV2Settings answers with a v3 document, which
-      // migrateV4Settings then takes the rest of the way, so a device that skipped 2.22.0 entirely
-      // still lands on v4 in this one load. A document that is already v3 simply starts at the
-      // second step, and carries no v2 opt-out map to absorb.
+      // The CHAIN is the point: migrateV2Settings answers with a v3 document, migrateV4Settings a v4
+      // one, and migrateV5Settings takes the rest of the way, so a device that skipped 2.22.0
+      // entirely still lands on v5 in this one load. A document that is already v3 or v4 simply
+      // starts further along, and carries no v2 opt-out map to absorb.
       const v3 = load.from === 2 ? migrateV2Settings(data ?? {}) : { document: data ?? {}, carriedDeviceOptOuts: undefined };
       const v4 = migrateV4Settings(v3.document);
-      this.settings = withDefaults(DEFAULT_SETTINGS, v4.document);
+      this.settings = withDefaults(DEFAULT_SETTINGS, migrateV5Settings(v4.document));
       // localStorage FIRST, the document second. The two stores are written back to back and a
       // crash between them has to leave a state the next load recovers from: with this order that
-      // state is "still a v2/v3 document, opt-outs already absorbed and exceptions already frozen",
+      // state is "still a v2/v3/v4 document, opt-outs already absorbed and exceptions already frozen",
       // which migrates again cleanly — the absorb is a union, and the freeze writes the element's
       // CURRENT state, which the run that wrote it did not change, so both are idempotent. The
-      // other order would leave a v4 document whose opt-out map and whose this-device pins are gone
+      // other order would leave a v5 document whose opt-out map and whose this-device pins are gone
       // and never reached localStorage — an unrecoverable loss of the user's own choices.
       this.absorbCarriedDeviceOptOuts(v3.carriedDeviceOptOuts);
       await this.freezeThisDeviceElements(v4.freeze);

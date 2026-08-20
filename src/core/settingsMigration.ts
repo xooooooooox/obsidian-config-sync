@@ -1,13 +1,14 @@
 /**
- * Load-shape concerns for the v4 settings schema. Two distinct things live here:
+ * Load-shape concerns for the v5 settings schema. Two distinct things live here:
  *
  * - The default fill every load starts from (`withDefaults`)
  *   — the stored document merged onto DEFAULT_SETTINGS,
  *   nested defaults included, unknown fields kept.
  * - The schema classifier (`classifySettings`) and the three version gates it feeds. Backwards: a
- *   `schemaVersion: 2` or `3` document is MIGRATED (v2Migration.ts, then v4Migration.ts) — once, on
+ *   `schemaVersion: 2`, `3` or `4` document is MIGRATED (v2Migration.ts, then v4Migration.ts, then
+ *   v5Migration.ts) — once, on
  *   the load that finds it, saved once, behaving afterwards exactly as it did before, with v2
- *   chaining through v3 in memory. A v1 or unversioned
+ *   chaining through v3 and v4 in memory. A v1 or unversioned
  *   document keeps the legacy branch: the plugin starts fresh with defaults and asks the user to
  *   reconfigure, because schema v1 has no field a later shape could be reconstructed from.
  *   Forwards: a document from a
@@ -19,7 +20,7 @@
 // The settings schema THIS build reads and writes. Named once, here: the classifier below, the
 // pre-write guard the apply path runs on an incoming document, and DEFAULT_SETTINGS' own
 // schemaVersion all mean the same number, and a future bump must move exactly one literal.
-export const CURRENT_SCHEMA = 4;
+export const CURRENT_SCHEMA = 5;
 
 export const SCHEMA_UPGRADE_NOTICE = "Config Sync: this update reset your sync setup — open Settings to choose what to sync again.";
 
@@ -39,19 +40,20 @@ export const SCHEMA_FUTURE_APPLY_MESSAGE =
 export type SettingsLoad =
   | { kind: "fresh" }
   | { kind: "ok" }
-  // A v2 or v3 document: migrated field by field (v2Migration.ts, then v4Migration.ts), saved once,
-  // and never reset. `from` says which one, because a v2 document takes BOTH steps and a v3 one only
-  // the second. v1 and unversioned documents keep the legacy branch below, because schema v1 has no
+  // A v2, v3 or v4 document: migrated field by field (v2Migration.ts, then v4Migration.ts, then
+  // v5Migration.ts), saved once, and never reset. `from` says where it enters the chain — each step
+  // returns a document of any other version untouched, so a later one simply starts further along.
+  // v1 and unversioned documents keep the legacy branch below, because schema v1 has no
   // field a later shape could be reconstructed from.
   | { kind: "migrate"; from: number }
   | { kind: "legacy" }
   | { kind: "future"; found: number };
 
-// The versions this build can bring forward, oldest first. v2 chains through v3 on its way
-// here — migrateV2Settings produces a v3 document, which migrateV4Settings then takes the rest of
-// the way, so a 2.20.0 device that skipped every release in between still lands on v4 in one load.
-// Named next to CURRENT_SCHEMA so the pair reads as the range this build accepts.
-export const MIGRATABLE_SCHEMAS: readonly number[] = [2, 3];
+// The versions this build can bring forward, oldest first. v2 chains through v3 and v4 on its way
+// here — migrateV2Settings produces a v3 document, migrateV4Settings a v4 one, and migrateV5Settings
+// takes the rest of the way, so a 2.20.0 device that skipped every release in between still lands on
+// v5 in one load. Named next to CURRENT_SCHEMA so the pair reads as the range this build accepts.
+export const MIGRATABLE_SCHEMAS: readonly number[] = [2, 3, 4];
 
 // The load-path classifier. Deliberately NOT a bare `schemaVersion !== CURRENT` test: that would
 // send a document

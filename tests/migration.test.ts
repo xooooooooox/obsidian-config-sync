@@ -3,6 +3,7 @@ import { migrateLegacyManifest } from "../src/core/manifest";
 import { ManifestValidationError } from "../src/core/manifest";
 import { ensureSelfPresets, SELF_GROUP_NAME, selfPresetRules } from "../src/core/catalog";
 import { SyncGroup } from "../src/core/types";
+import { migrateV5Settings } from "../src/core/v5Migration";
 import { MemFS } from "./memfs";
 
 const NOW = "2026-07-15T12:00:00.000Z";
@@ -75,5 +76,57 @@ describe("migrateLegacyManifest", () => {
     const self = withPresets.find((g) => g.name === SELF_GROUP_NAME);
     expect(self?.mode).toBe("fields");
     expect(self?.fields).toEqual(selfPresetRules());
+  });
+});
+
+describe("migrateV5Settings", () => {
+  it("does nothing to a document that is not v4", () => {
+    const doc = { schemaVersion: 5, remotes: [] };
+    expect(migrateV5Settings(doc)).toBe(doc);
+  });
+
+  it("turns excludeSelf into a direction rule on the self item", () => {
+    const out = migrateV5Settings({
+      schemaVersion: 4,
+      remotes: [{ name: "work", type: "vault", storePath: "/s", excludeSelf: true }],
+    });
+    expect(out.schemaVersion).toBe(5);
+    const remotes = out.remotes as Record<string, unknown>[];
+    expect(remotes[0].excludeSelf).toBeUndefined();
+    expect(remotes[0].items).toEqual({ community: { "config-sync": { direction: "none" } } });
+  });
+
+  it("writes no rules at all when excludeSelf was absent or false", () => {
+    const out = migrateV5Settings({
+      schemaVersion: 4,
+      remotes: [
+        { name: "a", type: "vault", storePath: "/s" },
+        { name: "b", type: "vault", storePath: "/s", excludeSelf: false },
+      ],
+    });
+    const remotes = out.remotes as Record<string, unknown>[];
+    expect(remotes[0].items).toBeUndefined();
+    expect(remotes[1].items).toBeUndefined();
+    expect(remotes[1].excludeSelf).toBeUndefined();
+  });
+
+  it("carries every other field, known and unknown, untouched", () => {
+    const out = migrateV5Settings({
+      schemaVersion: 4,
+      pkmMode: "ioto",
+      somethingNewerWrote: { a: 1 },
+      remotes: [{ name: "g", type: "git", url: "u", branch: "main", tokenId: "t", excludeSelf: true, futureField: 7 }],
+    });
+    expect(out.pkmMode).toBe("ioto");
+    expect(out.somethingNewerWrote).toEqual({ a: 1 });
+    const r = (out.remotes as Record<string, unknown>[])[0];
+    expect(r.tokenId).toBe("t");
+    expect(r.futureField).toBe(7);
+  });
+
+  it("leaves a non-array remotes value exactly as found", () => {
+    const out = migrateV5Settings({ schemaVersion: 4, remotes: "nonsense" });
+    expect(out.remotes).toBe("nonsense");
+    expect(out.schemaVersion).toBe(5);
   });
 });
