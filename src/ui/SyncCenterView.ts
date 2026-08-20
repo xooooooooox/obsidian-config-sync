@@ -85,6 +85,9 @@ import {
   widestCountDigits,
   Direction,
   effectiveDirection,
+  foldStateKey,
+  PanelDestination,
+  PanelRelation,
 } from "./panelModel";
 import { Fate, FateInput, NOTHING_YET_SENTENCE, rowFate, versionAheadClause } from "./fateModel";
 import { openDiffModal } from "./DiffModal";
@@ -491,7 +494,11 @@ export class SyncCenterView extends ItemView {
   private remoteFoldsOpen: Set<string> = new Set();
   private renderGen = 0;
   private filter: PanelFilter = "all";
-  private panelSection: { kind: "device"; cat: StorageSection | "beta" | "all" } | { kind: "remote"; name: string } | { kind: "history" } | { kind: "self" } = { kind: "device", cat: "all" };
+  // Two orthogonal axes — see panelModel's PanelRelation/PanelDestination. `relation` is what the
+  // View picker sets; `destination` is what the sidebar sets.
+  private relation: PanelRelation = { kind: "device" };
+  private destination: PanelDestination = { kind: "items", cat: "all" };
+  private viewPickerOpen = false;
   private selfInfo: SelfSyncInfo | null = null;
   private selfDiffOpen = new Set<Direction>(); // which self data.json diffs are expanded
   private landedInitial = false; // cold-start auto-land to the Config Sync pane happens once
@@ -702,7 +709,7 @@ export class SyncCenterView extends ItemView {
     // item list — once. After that the user navigates freely.
     if (!this.landedInitial) {
       this.landedInitial = true;
-      if (this.selfInfo.state === "coldstart") this.panelSection = { kind: "self" };
+      if (this.selfInfo.state === "coldstart") this.destination = { kind: "self" };
     }
     const history = this.host.runHistoryEnabled() ? await this.host.loadRunHistory() : [];
     if (gen !== this.renderGen) return;
@@ -1239,7 +1246,7 @@ export class SyncCenterView extends ItemView {
     }, SEARCH_DEBOUNCE_MS);
   }
 
-  // Rebuilds only the main pane from the current panelSection. The sidebar search calls this (plus
+  // Rebuilds only the main pane from the current relation/destination. The sidebar search calls this (plus
   // an in-place sidebar section-list refresh) on each keystroke instead of render(), so the search
   // input and its autocomplete are never torn down mid-type.
   //
@@ -1272,21 +1279,24 @@ export class SyncCenterView extends ItemView {
   }
 
   private renderMainRegionBody(main: HTMLElement): void {
-    if (this.panelSection.kind === "self") {
+    // self and History answer the same thing under either relation, so they are checked first and
+    // the relation never reaches them.
+    if (this.destination.kind === "self") {
       this.renderConfigSyncMode(main);
       return;
     }
-    if (this.panelSection.kind === "history") {
+    if (this.destination.kind === "history") {
       this.renderHistoryMode(main);
       return;
     }
-    if (this.panelSection.kind === "remote") {
-      const remote = this.host.remotes().find((x) => this.panelSection.kind === "remote" && x.name === this.panelSection.name);
+    if (this.relation.kind === "remote") {
+      const name = this.relation.name;
+      const remote = this.host.remotes().find((x) => x.name === name);
       if (remote !== undefined) {
         this.renderRemoteMode(main, remote);
         return;
       }
-      this.panelSection = { kind: "device", cat: "all" }; // remote vanished (settings change) — fall back
+      this.relation = { kind: "device" }; // remote vanished (settings change) — fall back
     }
     this.renderItemMode(main);
   }
@@ -1295,7 +1305,7 @@ export class SyncCenterView extends ItemView {
   // not in the item list. This entry carries a direction badge; clicking it opens the pane.
   private renderSelfEntry(container: HTMLElement): void {
     const info = this.selfInfo;
-    const active = this.panelSection.kind === "self";
+    const active = this.destination.kind === "self";
     // A distinct hero card, not a stray list row: this is the plugin syncing its own settings to
     // the store — a meta destination separate from the config items below. The icon tile, title +
     // sublabel, and status pill echo the self-chip in the header and the self pane this opens.
@@ -1310,7 +1320,7 @@ export class SyncCenterView extends ItemView {
       if (pill !== null) card.createSpan({ cls: `config-sync-side-self-pill ${pill.cls}`, text: pill.text });
     }
     card.addEventListener("click", () => {
-      this.panelSection = { kind: "self" };
+      this.destination = { kind: "self" };
       this.switcherOpen = false;
       this.render(this.renderGen);
     });
@@ -1424,7 +1434,9 @@ export class SyncCenterView extends ItemView {
           const acts = block.createDiv({ cls: "config-sync-self-acts" });
           const open = acts.createEl("button", { cls: "mod-cta", text: `Open ${name}` });
           open.addEventListener("click", () => {
-            this.panelSection = { kind: "remote", name };
+            this.relation = { kind: "remote", name };
+            // Leave the self destination too, or this very pane keeps covering the remote just picked.
+            this.destination = { kind: "items", cat: "all" };
             this.switcherOpen = false;
             this.render(this.renderGen);
           });
@@ -1447,7 +1459,7 @@ export class SyncCenterView extends ItemView {
       adopt.addEventListener("click", () => this.runSelfAdopt(adopt));
       const not = acts.createEl("button", { text: "Not now" });
       not.addEventListener("click", () => {
-        this.panelSection = { kind: "device", cat: "all" };
+        this.destination = { kind: "items", cat: "all" };
         this.render(this.renderGen);
       });
       return;
@@ -1467,7 +1479,7 @@ export class SyncCenterView extends ItemView {
         review.addEventListener("click", () => {
           this.expandAllTypeSections();
           this.filter = "apply";
-          this.panelSection = { kind: "device", cat: "all" };
+          this.destination = { kind: "items", cat: "all" };
           this.render(this.renderGen);
         });
       }
@@ -1587,7 +1599,9 @@ export class SyncCenterView extends ItemView {
       attr: { placeholder: "Filter by name…" },
     });
     searchEl.value = this.search;
-    if (this.panelSection.kind === "remote") searchEl.disabled = true;
+    // Still disabled under a remote relation: that pane has no rows to filter yet, and a search box
+    // that accepts typing and finds nothing is worse than one that says it does not apply here.
+    if (this.relation.kind === "remote") searchEl.disabled = true;
     this.qac.attach(searchEl);
     // The section list lives in its own container so a keystroke can refresh its hit-count badges in
     // place — the search input (and the autocomplete anchored to it) stays put, keeping focus and
@@ -1624,7 +1638,7 @@ export class SyncCenterView extends ItemView {
     container.createDiv({ cls: "config-sync-side-divider" });
 
     const deviceEntry = (cat: StorageSection | "beta" | "all", label: string, rows: StatusRow[]): void => {
-      const active = this.panelSection.kind === "device" && this.panelSection.cat === cat;
+      const active = this.destination.kind === "items" && this.destination.cat === cat;
       const item = container.createDiv({ cls: `config-sync-side-item${active ? " is-active" : ""}` });
       item.createSpan({ cls: "config-sync-side-name", text: label });
       if (this.searching()) {
@@ -1648,7 +1662,7 @@ export class SyncCenterView extends ItemView {
         if (c.none > 0) renderFoldCount(item.createSpan({ cls: "config-sync-side-badge is-none" }), FATE_PILL_FOLD.none, c.none);
       }
       item.addEventListener("click", () => {
-        this.panelSection = { kind: "device", cat };
+        this.destination = { kind: "items", cat };
         this.switcherOpen = false;
         this.render(this.renderGen);
       });
@@ -1661,39 +1675,16 @@ export class SyncCenterView extends ItemView {
       deviceEntry(cat, ITEM_SECTION_LABELS[cat], inCat);
     }
 
-    const remotes = this.host.remotes();
-    if (remotes.length > 0) {
-      container.createDiv({ cls: "config-sync-side-divider" });
-      remotes.forEach((remote, idx) => {
-        const active = this.panelSection.kind === "remote" && this.panelSection.name === remote.name;
-        const item = container.createDiv({ cls: `config-sync-side-item${active ? " is-active" : ""}` });
-        item.createSpan({ cls: "config-sync-side-name", text: remote.name });
-        const prog = this.host.remoteRefreshProgress();
-        if (prog !== null && idx >= prog.done) {
-          const s = item.createSpan({ cls: "config-sync-state-icon config-sync-row-checking" });
-          s.createSpan({ cls: "config-sync-cmp-spinner" });
-        } else {
-          const icon = this.remoteIcon(this.host.remoteCheck(remote.name)?.check);
-          this.paintStateIcon(item.createSpan({ cls: `config-sync-state-icon ${icon.cls}`, attr: { "aria-label": icon.tip } }), icon);
-        }
-        item.addEventListener("click", () => {
-          this.panelSection = { kind: "remote", name: remote.name };
-          this.switcherOpen = false;
-          this.render(this.renderGen);
-        });
-      });
-    }
-
     if (this.host.runHistoryEnabled()) {
       container.createDiv({ cls: "config-sync-side-divider" });
-      const active = this.panelSection.kind === "history";
+      const active = this.destination.kind === "history";
       const item = container.createDiv({ cls: `config-sync-side-item${active ? " is-active" : ""}` });
       // No count badge. Every other badge in this sidebar is a number of things waiting for you
       // (↑ to capture, ✓ in sync); History's was the number of records kept, which is a cap, not a
       // to-do — the same position saying two different kinds of thing.
       item.createSpan({ cls: "config-sync-side-name", text: "History" });
       item.addEventListener("click", () => {
-        this.panelSection = { kind: "history" };
+        this.destination = { kind: "history" };
         this.historyOpen = null;
         this.switcherOpen = false;
         this.render(this.renderGen);
@@ -1704,8 +1695,8 @@ export class SyncCenterView extends ItemView {
   // Compact replacement for the sidebar: current section as a button; dropdown mirrors the sidebar.
   private renderSwitcher(shell: HTMLElement): void {
     const sw = shell.createDiv({ cls: "config-sync-switcher" });
-    if (this.panelSection.kind === "device") {
-      const cat = this.panelSection.cat;
+    if (this.destination.kind === "items") {
+      const cat = this.destination.cat;
       sw.createSpan({ text: cat === "all" ? "All items" : ITEM_SECTION_LABELS[cat] });
       const c = this.presentedCounts(this.countable(this.sectionRows()));
       if (c.up > 0) renderActionCount(sw.createSpan({ cls: "config-sync-side-badge is-up" }), "capture", c.up);
@@ -1713,15 +1704,11 @@ export class SyncCenterView extends ItemView {
       if (c.ok > 0) renderFoldCount(sw.createSpan({ cls: "config-sync-side-badge is-ok" }), FATE_PILL_FOLD.ok, c.ok);
       if (c.excluded > 0) renderFoldCount(sw.createSpan({ cls: "config-sync-side-badge is-excluded" }), FATE_PILL_FOLD.excluded, c.excluded);
       if (c.none > 0) renderFoldCount(sw.createSpan({ cls: "config-sync-side-badge is-none" }), FATE_PILL_FOLD.none, c.none);
-    } else if (this.panelSection.kind === "history") {
+    } else if (this.destination.kind === "history") {
       sw.createSpan({ text: "History" });
-    } else if (this.panelSection.kind === "self") {
+    } else {
       setIcon(sw.createSpan({ cls: "config-sync-switcher-selfic" }), "settings-2");
       sw.createSpan({ text: "Config Sync" });
-    } else {
-      sw.createSpan({ text: this.panelSection.name });
-      const icon = this.remoteIcon(this.host.remoteCheck(this.panelSection.name)?.check);
-      this.paintStateIcon(sw.createSpan({ cls: `config-sync-state-icon ${icon.cls}` }), icon);
     }
     setIcon(sw.createSpan({ cls: `config-sync-switcher-chev${this.switcherOpen ? " is-open" : ""}` }), "chevrons-up-down");
     sw.addEventListener("click", (e) => {
@@ -1749,7 +1736,7 @@ export class SyncCenterView extends ItemView {
     setIcon(ic, pill.cls === "is-ok" ? "check" : pill.cls === "is-behind" ? "arrow-down-to-line" : "settings");
     chip.createSpan({ text: pill.text });
     chip.addEventListener("click", () => {
-      this.panelSection = { kind: "self" };
+      this.destination = { kind: "self" };
       this.switcherOpen = false;
       this.render(this.renderGen);
     });
@@ -1921,7 +1908,7 @@ export class SyncCenterView extends ItemView {
     });
     const open = meta.createSpan({ cls: "config-sync-strip-toggle", text: "open in history →" });
     open.addEventListener("click", () => {
-      this.panelSection = { kind: "history" };
+      this.destination = { kind: "history" };
       this.historyOpen = 0; // the run just recorded is newest
       this.switcherOpen = false;
       this.render(this.renderGen);
@@ -2078,13 +2065,6 @@ export class SyncCenterView extends ItemView {
     return status === "error" ? "Failed — some items couldn't run" : status === "warning" ? "Action needed — finish some items manually" : "Done — all succeeded";
   }
 
-  private sectionKey(): string {
-    if (this.panelSection.kind === "device") return this.panelSection.cat;
-    if (this.panelSection.kind === "history") return "history";
-    if (this.panelSection.kind === "self") return "self";
-    return `remote:${this.panelSection.name}`;
-  }
-
   private searching(): boolean {
     return this.search.trim() !== "";
   }
@@ -2130,8 +2110,8 @@ export class SyncCenterView extends ItemView {
 
   private sectionRows(): StatusRow[] {
     if (this.searching()) return this.rows();
-    if (this.panelSection.kind !== "device" || this.panelSection.cat === "all") return this.rows();
-    const cat = this.panelSection.cat;
+    if (this.destination.kind !== "items" || this.destination.cat === "all") return this.rows();
+    const cat = this.destination.cat;
     return this.rows().filter((r) => this.itemSectionOf(r.group.name) === cat);
   }
 
@@ -2157,7 +2137,7 @@ export class SyncCenterView extends ItemView {
       const actions = banner.createDiv({ cls: "config-sync-coldstart-actions" });
       const go = actions.createEl("button", { cls: "config-sync-coldstart-go", text: "Review settings →" });
       go.addEventListener("click", () => {
-        this.panelSection = { kind: "self" };
+        this.destination = { kind: "self" };
         this.renderMainRegion();
       });
       const close = actions.createEl("button", { cls: "config-sync-coldstart-x" });
@@ -2530,7 +2510,7 @@ export class SyncCenterView extends ItemView {
   ): void {
     const { ts, rows, openSet, text } = opts;
     if (rows.length === 0) return;
-    const key = `${this.sectionKey()}::${ts}::${opts.foldId}`;
+    const key = foldStateKey(this.relation, this.destination, ts, opts.foldId);
     let open = openSet.has(key);
     const line = parent.createDiv({ cls: "config-sync-unchanged" });
     const chevron = renderFoldChevron(line, open, null);
@@ -3982,9 +3962,9 @@ export class SyncCenterView extends ItemView {
 
     const onPhase = (phase: "fetch" | "compare"): void => {
       // A sidebar panel switch reuses renderGen (only reload() increments it), so also check
-      // panelSection — otherwise a stale onPhase from a since-abandoned remote pane could
+      // relation — otherwise a stale onPhase from a since-abandoned remote pane could
       // setText a detached node.
-      if (gen !== this.renderGen || this.panelSection.kind !== "remote" || this.panelSection.name !== remote.name) return;
+      if (gen !== this.renderGen || this.relation.kind !== "remote" || this.relation.name !== remote.name) return;
       phaseEl.setText(phase === "fetch" ? "Fetching remote…" : "Comparing files…");
     };
     const active = reattach ?? this.startRemoteCompare(remote, key, startedAt, onPhase);
@@ -3998,7 +3978,7 @@ export class SyncCenterView extends ItemView {
     } catch (e) {
       window.clearInterval(ticker);
       if (active.ticker === ticker) active.ticker = null;
-      if (gen !== this.renderGen || this.panelSection.kind !== "remote" || this.panelSection.name !== remote.name) return;
+      if (gen !== this.renderGen || this.relation.kind !== "remote" || this.relation.name !== remote.name) return;
       detail.empty();
       const raw = (e as Error).message;
       // Vault remotes have no login and no timeout marker; raw fs errors like EACCES
@@ -4022,7 +4002,7 @@ export class SyncCenterView extends ItemView {
       }
       return;
     }
-    if (gen !== this.renderGen || this.panelSection.kind !== "remote" || this.panelSection.name !== remote.name) return;
+    if (gen !== this.renderGen || this.relation.kind !== "remote" || this.relation.name !== remote.name) return;
     this.paintRemoteCompareResult(detail, remote, check, dd);
   }
 
