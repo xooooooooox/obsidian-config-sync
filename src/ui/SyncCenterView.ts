@@ -1117,7 +1117,12 @@ export class SyncCenterView extends ItemView {
   // Narrow it in one place and not another and the header reads `↑16` over a `To capture 14` from
   // the pills: one counting main-only-with-carriers, the other all-sections-without.
   private countable(rows: StatusRow[]): StatusRow[] {
-    return rows.filter((r) => !ENABLEMENT_CARRIER_GROUPS.has(r.group.name));
+    // The two on/off carriers are not rows under the DEVICE relation — they dissolve into their
+    // section's head chip, and what they carry (which plugins are on) is already spoken by each
+    // member's own row. Under a REMOTE relation neither is true: no member row says anything about
+    // enablement there, and the carrier's store copy genuinely differs, so it is an ordinary item
+    // with an ordinary row — and it has to count like one.
+    return rows.filter((r) => r.remote !== undefined || !ENABLEMENT_CARRIER_GROUPS.has(r.group.name));
   }
 
   private effDir(r: StatusRow): Direction {
@@ -2480,7 +2485,10 @@ export class SyncCenterView extends ItemView {
   // search/filter" — the head's count pill needs both halves, and stagedSectionCount needs the
   // second, so deriving it twice is how the hint and the section it sits on would come to disagree.
   private typeSectionRows(inSection: StatusRow[], ts: TypeSection): { rows: StatusRow[]; visible: StatusRow[] } {
-    const rows = inSection.filter((r) => !ENABLEMENT_CARRIER_GROUPS.has(r.group.name) && typeSectionForRow(this.itemSectionOf(r.group.name)) === ts);
+    const rows = inSection.filter(
+      // Carriers are rows under a remote and not under this device — see `countable`.
+      (r) => (r.remote !== undefined || !ENABLEMENT_CARRIER_GROUPS.has(r.group.name)) && typeSectionForRow(this.itemSectionOf(r.group.name)) === ts
+    );
     const matches = this.searching() ? rows.filter((r) => this.rowMatchesSearch(r)) : rows;
     return { rows, visible: matches.filter((r) => visibleUnderFilter(this.rowBucket(r), this.filter)) };
   }
@@ -4332,7 +4340,11 @@ export class SyncCenterView extends ItemView {
       return;
     }
     if (gen !== this.renderGen || this.relation.kind !== "remote" || this.relation.name !== remote.name) return;
-    this.renderMainRegion();
+    // A FULL render, not just the main region: the row memos (`rowsCache`/`rowDerivationCache`) are
+    // cleared by render() alone, and this render cycle's memo says "no rows" — the answer from
+    // before the comparison landed. The sidebar's badges and the View picker's counts read the same
+    // rows, so they have to be rebuilt with them.
+    this.render(this.renderGen);
   }
 
   // Starts exactly one deepDiff for (remote, key) and stores it on this.inflightCompare. On
