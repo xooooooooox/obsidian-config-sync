@@ -1,4 +1,4 @@
-import { BucketCounts, GroupState, GroupStatus, OTHER_STORE_FILES_GROUP, RemoteDiffEntry } from "../core/status";
+import { BucketCounts, GroupState, GroupStatus, OTHER_STORE_FILES_GROUP, RemoteDiffEntry, RemoteState } from "../core/status";
 import { FileChanges, sharingClass, StorageSection, SyncGroup } from "../core/types";
 import { Availability, VersionDrift } from "../core/availability";
 import { carrierRef, refItemId } from "../core/itemKeys";
@@ -948,4 +948,46 @@ export function destinationKey(d: PanelDestination): string {
 // different lists, and a fold opened in one must not read as opened in the other.
 export function foldStateKey(r: PanelRelation, d: PanelDestination, section: string, foldId: string): string {
   return `${relationKey(r)}::${destinationKey(d)}::${section}::${foldId}`;
+}
+
+// A remote's badge is its WHOLE-STORE state (the cheap lock-file answer the sidebar already draws),
+// not a count of items: an item count needs a real comparison against that remote, and this list is
+// built on every render. The device side counts items because those numbers are already in hand.
+export type ViewBadge = { kind: "capture" | "apply"; count: number } | { kind: "remote-state"; state: RemoteState };
+
+export interface ViewOption {
+  relation: PanelRelation;
+  label: string;
+  active: boolean;
+  badges: ViewBadge[];
+}
+
+// The whole content of the View picker, as data. A `current` naming a remote that settings no
+// longer has resolves to this device rather than to nothing — the picker always has exactly one
+// active row, and a deleted remote is not a state the user can be left stranded in.
+export function viewOptions(input: {
+  current: PanelRelation;
+  deviceCounts: { up: number; down: number };
+  remotes: readonly { name: string; state: RemoteState }[];
+}): ViewOption[] {
+  const { current, deviceCounts, remotes } = input;
+  // Read out to a local BEFORE the callback below: TypeScript does not carry a narrowing of
+  // `input.current.kind` into a closure, so `input.current.name` there would not compile.
+  const currentName = current.kind === "remote" ? current.name : null;
+  const liveName = currentName !== null && remotes.some((r) => r.name === currentName) ? currentName : null;
+  const deviceBadges: ViewBadge[] = [];
+  if (deviceCounts.up > 0) deviceBadges.push({ kind: "capture", count: deviceCounts.up });
+  if (deviceCounts.down > 0) deviceBadges.push({ kind: "apply", count: deviceCounts.down });
+  const device: PanelRelation = { kind: "device" };
+  const out: ViewOption[] = [{ relation: device, label: relationLabel(device), active: liveName === null, badges: deviceBadges }];
+  for (const r of remotes) {
+    const relation: PanelRelation = { kind: "remote", name: r.name };
+    out.push({
+      relation,
+      label: relationLabel(relation),
+      active: liveName === r.name,
+      badges: [{ kind: "remote-state", state: r.state }],
+    });
+  }
+  return out;
 }
