@@ -1,0 +1,75 @@
+import { keyMatchesAny } from "./sanitize";
+import { intersectDirection, ItemRef, parseItemRef, RemoteDirection, RemoteItemRule, RemoteItems } from "./types";
+
+// THE reader for a remote's rules. Every consumer — the four transport seams, the panel, the
+// counting surfaces — asks here, so "what does this remote do with this item" has one answer.
+
+// A ref that `parseItemRef` refuses has no rules and cannot be given any: it reaches us from a
+// document another build wrote, so it is ignored where it is read rather than trusted or deleted
+// (invariant II.2).
+function ruleFor(items: RemoteItems | undefined, ref: ItemRef): RemoteItemRule | undefined {
+  if (items === undefined) return undefined;
+  const parsed = parseItemRef(ref);
+  if (parsed === null) return undefined;
+  return items[parsed.section]?.[parsed.id];
+}
+
+export function itemDirection(items: RemoteItems | undefined, ref: ItemRef): RemoteDirection {
+  return ruleFor(items, ref)?.direction ?? "both";
+}
+
+// The key's own answer, already intersected with its item's. A stored key rule outside the item's
+// subset is honoured as written and simply resolves to less — never rewritten, so widening the
+// item again restores the user's choice.
+export function keyDirection(items: RemoteItems | undefined, ref: ItemRef, key: string): RemoteDirection {
+  const rule = ruleFor(items, ref);
+  const item = rule?.direction ?? "both";
+  const keys = rule?.keys;
+  if (keys === undefined) return item;
+  for (const [pattern, kr] of Object.entries(keys)) {
+    if (keyMatchesAny(key, [pattern])) return intersectDirection(item, kr.direction);
+  }
+  return item;
+}
+
+// Write one item's direction. The default is never stored: an entry that carries nothing else is
+// removed, and a map that ends up empty becomes undefined, so a document only ever holds decisions
+// somebody actually made.
+export function withItemDirection(
+  items: RemoteItems | undefined,
+  ref: ItemRef,
+  direction: RemoteDirection
+): RemoteItems | undefined {
+  const parsed = parseItemRef(ref);
+  if (parsed === null) return items;
+  const next: RemoteItems = {};
+  for (const [s, byId] of Object.entries(items ?? {})) next[s] = { ...byId };
+  const bucket = { ...(next[parsed.section] ?? {}) };
+  const existing = bucket[parsed.id];
+  const keys = existing?.keys;
+  if (direction === "both") {
+    if (keys === undefined) delete bucket[parsed.id];
+    else bucket[parsed.id] = { keys };
+  } else {
+    bucket[parsed.id] = keys === undefined ? { direction } : { direction, keys };
+  }
+  if (Object.keys(bucket).length === 0) delete next[parsed.section];
+  else next[parsed.section] = bucket;
+  return Object.keys(next).length === 0 ? undefined : next;
+}
+
+// Items that do NOT flow in the asked direction — the generalisation of the self-only skip list the
+// transport seams used to hard-code. Key rules never appear here: a key withheld inside an item that
+// still travels is a content decision, not an item the seam should skip.
+export function refsBlockedFor(items: RemoteItems | undefined, dir: "push" | "pull"): ItemRef[] {
+  const out: ItemRef[] = [];
+  for (const [section, byId] of Object.entries(items ?? {})) {
+    for (const [id, rule] of Object.entries(byId)) {
+      const d = rule.direction ?? "both";
+      if (d === "none" || (d === "push" && dir === "pull") || (d === "pull" && dir === "push")) {
+        out.push(`${section}/${id}` as ItemRef);
+      }
+    }
+  }
+  return out;
+}
