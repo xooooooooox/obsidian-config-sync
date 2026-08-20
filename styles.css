@@ -1013,7 +1013,10 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 .config-sync-view-picker { display: flex; flex-direction: column; gap: 4px; }
 .config-sync-view-current { display: flex; align-items: center; gap: 5px; padding: 6px 9px; border-radius: 8px; border: 1px solid var(--background-modifier-border); background: var(--background-secondary); cursor: pointer; font-size: var(--font-ui-small); }
 .config-sync-view-current.is-open { border-color: rgba(var(--interactive-accent-rgb), 0.4); }
-.config-sync-view-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* flex:1 for the same reason .config-sync-side-name carries it — the badges after it form a column
+   down the right edge, and a label that only took its own width would leave them ragged against the
+   sidebar entries directly below. */
+.config-sync-view-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .config-sync-view-chev { display: inline-flex; align-items: center; margin-left: auto; color: var(--text-faint); }
 .config-sync-view-chev svg { width: 13px; height: 13px; }
 .config-sync-view-menu { display: flex; flex-direction: column; gap: 3px; padding: 4px; border: 1px solid var(--background-modifier-border); border-radius: 8px; background: var(--background-primary); }
