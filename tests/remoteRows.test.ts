@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { remoteFlowFor, remoteRowStatuses } from "../src/core/remoteRows";
+import { remoteFlowFor, remoteRowStatuses, skipRefsForSelection } from "../src/core/remoteRows";
+import { ItemRef } from "../src/core/types";
 import { RemoteDiffEntry } from "../src/core/status";
 
 const entry = (group: string, kinds: ("added" | "updated" | "deleted")[]): RemoteDiffEntry => ({
@@ -61,5 +62,28 @@ describe("remoteRowStatuses", () => {
     const rows = remoteRowStatuses({ entries: [], flow: "pull", localGroupNames: local });
     expect(rows.every((s) => s.state === "in-sync")).toBe(true);
     expect(rows).toHaveLength(3);
+  });
+});
+
+describe("skipRefsForSelection", () => {
+  const all = ["obsidian/appearance", "core/backlink", "community/dataview"] as ItemRef[];
+
+  it("skips exactly what the user left unchecked", () => {
+    expect(skipRefsForSelection({ allRefs: all, selectedRefs: ["core/backlink"] as ItemRef[] }).sort()).toEqual([
+      "community/dataview",
+      "obsidian/appearance",
+    ]);
+  });
+
+  it("skips nothing when every row is checked", () => {
+    expect(skipRefsForSelection({ allRefs: all, selectedRefs: all })).toEqual([]);
+  });
+
+  it("skips everything when nothing is checked", () => {
+    expect(skipRefsForSelection({ allRefs: all, selectedRefs: [] }).sort()).toEqual([...all].sort());
+  });
+
+  it("ignores a selected ref that is not on the list at all", () => {
+    expect(skipRefsForSelection({ allRefs: all, selectedRefs: ["community/ghost"] as ItemRef[] }).sort()).toEqual([...all].sort());
   });
 });

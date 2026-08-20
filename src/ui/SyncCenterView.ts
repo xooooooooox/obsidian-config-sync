@@ -318,8 +318,10 @@ export interface SyncCenterHost {
   // remote changed or a refresh completed" (start a fresh one).
   readerGeneration(): number;
   deepDiff(remote: Remote, onPhase?: (phase: "fetch" | "compare") => void): Promise<RemoteCompareResult>;
-  pullFrom(remote: Remote): Promise<GroupResult[] | null>;
-  pushTo(remote: Remote): Promise<GroupResult[] | null>;
+  // skipRefs: the rows the user unticked. main.ts unions it with what this remote's own rules
+  // withhold — the view knows the selection, the plugin knows the rules, and neither guesses.
+  pullFrom(remote: Remote, skipRefs: ItemRef[]): Promise<GroupResult[] | null>;
+  pushTo(remote: Remote, skipRefs: ItemRef[]): Promise<GroupResult[] | null>;
   adoptConfiguration(): Promise<GroupResult[] | null>;
   // The installed plugin's manifest desktop-only flag — the source of truth regardless of
   // whether the member's own settings-file sync is enabled (the availability map only covers
@@ -4386,7 +4388,7 @@ export class SyncCenterView extends ItemView {
       pull.buttonEl.setAttribute("aria-label", "Pull would overwrite your newer local store");
     }
     pull.onClick(async () => {
-      this.setLastRun("pull", remote.name, await this.host.pullFrom(remote));
+      this.setLastRun("pull", remote.name, await this.host.pullFrom(remote, []));
       await this.reload();
     });
 
@@ -4401,7 +4403,7 @@ export class SyncCenterView extends ItemView {
       push.buttonEl.setAttribute("aria-label", "Push would overwrite the newer remote");
     }
     push.onClick(async () => {
-      this.setLastRun("push", remote.name, await this.host.pushTo(remote));
+      this.setLastRun("push", remote.name, await this.host.pushTo(remote, []));
       await this.reload();
     });
   }

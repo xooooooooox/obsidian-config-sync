@@ -1,5 +1,5 @@
 import { GroupState, GroupStatus, OTHER_STORE_FILES_GROUP, RemoteDiffEntry, RemoteState } from "./status";
-import { FileChanges } from "./types";
+import { FileChanges, ItemRef } from "./types";
 
 // Which way this whole comparison points. ONE direction for the whole list: diffRemote only answers
 // "are the two sides byte-equal", so there is no per-item evidence to point rows in different
@@ -45,4 +45,12 @@ export function remoteRowStatuses(input: {
     out.push({ group: name, state: "in-sync" });
   }
   return out;
+}
+
+// The rows the user did NOT tick, as the skip list the transport already speaks. The checkbox means
+// the same thing under both relations — "does this run include this row" — and under the remote
+// relation that is exactly `skipRefs`, which planImport/pushExternal have taken since schema v5.
+export function skipRefsForSelection(input: { allRefs: readonly ItemRef[]; selectedRefs: readonly ItemRef[] }): ItemRef[] {
+  const keep = new Set<string>(input.selectedRefs);
+  return input.allRefs.filter((r) => !keep.has(r));
 }

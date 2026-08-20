@@ -928,11 +928,12 @@ export default class ConfigSyncPlugin extends Plugin {
         }
         return { entries, lockDiffers, remoteLabels };
       },
-      pullFrom: async (remote) => {
+      pullFrom: async (remote, skipRefs) => {
         if (this.schemaStopped()) return null; // schema stop
         try {
           const ctx = await this.coreContext();
-          const pending = await planImport(ctx, await this.createReader(remote), { skipRefs: refsBlockedFor(remote.items, "pull") });
+          const blocked = refsBlockedFor(remote.items, "pull");
+          const pending = await planImport(ctx, await this.createReader(remote), { skipRefs: [...new Set([...blocked, ...skipRefs])] });
           // Pull resolves file conflicts only; sync-list (definition) conflicts are never
           // applied by Pull, so they don't prompt — the list converges via adopt.
           const fileConflicts = pending.plan.conflicts.filter((c) => c.kind === "file");
@@ -975,11 +976,12 @@ export default class ConfigSyncPlugin extends Plugin {
           return null;
         }
       },
-      pushTo: async (remote) => {
+      pushTo: async (remote, skipRefs) => {
         if (this.schemaStopped()) return null; // schema stop
         try {
           const ctx = await this.coreContext();
-          const results = await pushExternal(ctx, await this.createWriter(remote), { skipRefs: refsBlockedFor(remote.items, "push") });
+          const blocked = refsBlockedFor(remote.items, "push");
+          const results = await pushExternal(ctx, await this.createWriter(remote), { skipRefs: [...new Set([...blocked, ...skipRefs])] });
           await this.refreshRemoteChecks();
           return results;
         } catch (e) {
