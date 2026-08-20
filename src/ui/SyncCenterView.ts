@@ -88,6 +88,9 @@ import {
   foldStateKey,
   PanelDestination,
   PanelRelation,
+  relationLabel,
+  viewOptions,
+  ViewBadge,
 } from "./panelModel";
 import { Fate, FateInput, NOTHING_YET_SENTENCE, rowFate, versionAheadClause } from "./fateModel";
 import { openDiffModal } from "./DiffModal";
@@ -619,9 +622,9 @@ export class SyncCenterView extends ItemView {
 
   // The sidebar's entries as WIDTHS: the same set renderSectionEntries builds, from the same
   // producers, so the two can never disagree about which rows exist or how many badges each draws.
-  // A remote row draws a fixed state icon rather than a count badge, and History draws nothing —
-  // both are narrower than a badge, so counting them as one badge is a safe over-reservation and
-  // keeps this list honest about "the row has something trailing".
+  // The View picker's current line leads, and it is often the widest thing in the column — a
+  // relation label carries the remote's own name. Its chevron is narrower than a badge, so counting
+  // it as one is a safe over-reservation. History draws nothing trailing at all.
   private sidebarRowNeeds(): SidebarRowNeed[] {
     // The RESTING badges, never the search's single hit count — even while a search is running.
     // Searching would otherwise collapse five badges into one, decide the pane can hold a sidebar
@@ -632,13 +635,15 @@ export class SyncCenterView extends ItemView {
       return [c.up, c.down, c.ok, c.excluded, c.none].filter((n) => n > 0).length;
     };
     const countable = this.countable(this.rows());
-    const needs: SidebarRowNeed[] = [{ name: "All items", badges: badgesFor(countable) }];
+    const needs: SidebarRowNeed[] = [
+      { name: relationLabel(this.relation), badges: 1 },
+      { name: "All items", badges: badgesFor(countable) },
+    ];
     for (const cat of ITEM_SECTION_ORDER) {
       const inCat = countable.filter((r) => this.itemSectionOf(r.group.name) === cat);
       if (inCat.length === 0) continue;
       needs.push({ name: ITEM_SECTION_LABELS[cat], badges: badgesFor(inCat) });
     }
-    for (const remote of this.host.remotes()) needs.push({ name: remote.name, badges: 1 });
     if (this.host.runHistoryEnabled()) needs.push({ name: "History", badges: 0 });
     return needs;
   }
@@ -1629,12 +1634,60 @@ export class SyncCenterView extends ItemView {
     });
   }
 
+  // The head of the section list, above everything: it answers "which relation am I looking at",
+  // and every entry below it answers "which items". Each remote carries its state icon here, so
+  // "which remote needs attention" is readable without switching to it first.
+  private renderViewPicker(container: HTMLElement): void {
+    const opts = viewOptions({
+      current: this.relation,
+      deviceCounts: this.presentedCounts(this.countable(this.rows())),
+      remotes: this.host.remotes().map((r) => ({ name: r.name, state: this.host.remoteCheck(r.name)?.check.state ?? "unknown" })),
+    });
+    const current = opts.find((o) => o.active) ?? opts[0];
+    if (current === undefined) return;
+    const box = container.createDiv({ cls: "config-sync-view-picker" });
+    const head = box.createDiv({ cls: `config-sync-view-current${this.viewPickerOpen ? " is-open" : ""}` });
+    head.createSpan({ cls: "config-sync-view-label", text: current.label });
+    setIcon(head.createSpan({ cls: "config-sync-view-chev" }), "chevrons-up-down");
+    head.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.viewPickerOpen = !this.viewPickerOpen;
+      this.render(this.renderGen);
+    });
+    if (!this.viewPickerOpen) return;
+    const menu = box.createDiv({ cls: "config-sync-view-menu" });
+    for (const opt of opts) {
+      const row = menu.createDiv({ cls: `config-sync-view-opt${opt.active ? " is-active" : ""}` });
+      row.createSpan({ cls: "config-sync-view-label", text: opt.label });
+      for (const b of opt.badges) this.renderViewBadge(row, b);
+      row.addEventListener("click", () => {
+        this.relation = opt.relation;
+        this.viewPickerOpen = false;
+        this.switcherOpen = false;
+        // A relation change never moves the destination: the sidebar's answer is still the user's.
+        this.render(this.renderGen);
+      });
+    }
+  }
+
+  private renderViewBadge(row: HTMLElement, b: ViewBadge): void {
+    if (b.kind === "remote-state") {
+      const icon = this.remoteIcon({ state: b.state, remoteCapturedAt: null });
+      this.paintStateIcon(row.createSpan({ cls: `config-sync-state-icon ${icon.cls}`, attr: { "aria-label": icon.tip } }), icon);
+      return;
+    }
+    const cls = b.kind === "capture" ? "is-up" : "is-down";
+    renderActionCount(row.createSpan({ cls: `config-sync-side-badge ${cls}` }), b.kind, b.count);
+  }
+
   private renderSectionEntries(container: HTMLElement): void {
+    this.renderViewPicker(container);
+    container.createDiv({ cls: "config-sync-side-divider" });
     this.renderSelfEntry(container);
     // No group heads anywhere in the sidebar: the self card's own "plugin settings ↔ store"
-    // subtitle already carries the device↔store relation, and remotes sit behind their own
-    // divider like every other group — re-checking them belongs to the main region's global
-    // refresh button alone, and each remote row's state icon carries the result.
+    // subtitle already carries the device↔store relation. Remotes are not entries here at all —
+    // they live in the View picker above, each carrying its own state icon; re-checking them
+    // belongs to the main region's global refresh button alone.
     container.createDiv({ cls: "config-sync-side-divider" });
 
     const deviceEntry = (cat: StorageSection | "beta" | "all", label: string, rows: StatusRow[]): void => {
