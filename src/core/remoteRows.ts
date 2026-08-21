@@ -1,17 +1,5 @@
-import { GroupState, GroupStatus, OTHER_STORE_FILES_GROUP, RemoteDiffEntry, RemoteState } from "./status";
+import { GroupState, GroupStatus, ItemVerdict, OTHER_STORE_FILES_GROUP, RemoteDiffEntry } from "./status";
 import { FileChanges, ItemRef } from "./types";
-
-// Which way this whole comparison points. ONE direction for the whole list: diffRemote only answers
-// "are the two sides byte-equal", so there is no per-item evidence to point rows in different
-// directions yet.
-export type RemoteFlow = "pull" | "push";
-
-// Everything that is not "the remote is behind us" reads as pull, because pull is the additive
-// operation: it never removes a local file, while push mirror-deletes whatever the remote has and we
-// do not. An undecidable state must land on the side that cannot destroy anything.
-export function remoteFlowFor(state: RemoteState): RemoteFlow {
-  return state === "remote-older" ? "push" : "pull";
-}
 
 function changesOf(entry: RemoteDiffEntry): FileChanges {
   const out: FileChanges = { added: [], updated: [], deleted: [] };
@@ -19,32 +7,46 @@ function changesOf(entry: RemoteDiffEntry): FileChanges {
   return out;
 }
 
-// The remote relation's rows, in the SAME shape the device relation produces, so one renderer can
-// draw both. An item the comparison never mentioned is in sync with this remote — that is what
-// "the comparison found no difference" means, and it is why the local list is the row set's floor
-// rather than the diff being it.
+// The remote relation's rows, in the SAME shape the device relation produces, so one renderer draws
+// both. Two inputs, two jobs, kept apart on purpose:
+//
+//   `verdicts` says what each item still NEEDS (core/status.ts's remoteItemVerdicts, already
+//   intersected with this remote's four-stop rules) — that is the row's STATE.
+//   `entries` says which files differ — that is the card's EVIDENCE, and it no longer decides the
+//   state. An item whose bytes differ but whose difference runs in a closed direction is in sync
+//   (spec 3.3), and the card is where it still answers what changed over there.
+//
+// An item the table names but the diff never mentioned still gets its row: the remote can be ahead
+// on bookkeeping alone (a newer recorded version, same bytes), which is a real pull.
 export function remoteRowStatuses(input: {
   entries: readonly RemoteDiffEntry[];
-  flow: RemoteFlow;
+  verdicts: Record<string, ItemVerdict>;
+  refOf: (group: string) => string | undefined;
   localGroupNames: readonly string[];
 }): GroupStatus[] {
-  const { entries, flow, localGroupNames } = input;
-  const changedState: GroupState = flow === "pull" ? "store-newer" : "local-changed";
-  const out: GroupStatus[] = [];
-  const seen = new Set<string>();
+  const { entries, verdicts, refOf, localGroupNames } = input;
+  const changesByGroup = new Map<string, FileChanges>();
   for (const e of entries) {
     // "" is diffRemote's store-metadata pseudo-entry and OTHER_STORE_FILES_GROUP its unattributable
     // one. Neither is an item, so neither is ever a row.
     if (e.group === "" || e.group === OTHER_STORE_FILES_GROUP) continue;
     if (e.files.length === 0) continue;
-    seen.add(e.group);
-    out.push({ group: e.group, state: changedState, changes: changesOf(e) });
+    changesByGroup.set(e.group, changesOf(e));
   }
-  for (const name of localGroupNames) {
-    if (seen.has(name)) continue;
-    out.push({ group: name, state: "in-sync" });
-  }
-  return out;
+  const stateOf = (group: string): GroupState => {
+    const ref = refOf(group);
+    // A row with no ref carries no rule and no lock entry to judge by, so the file diff is all
+    // there is and a difference reads as an incoming one. (Plan 3b gives those items a ref.)
+    if (ref === undefined) return changesByGroup.has(group) ? "store-newer" : "in-sync";
+    const verdict = verdicts[ref];
+    return verdict === "pull" ? "store-newer" : verdict === "push" ? "local-changed" : "in-sync";
+  };
+  const names = [...new Set([...localGroupNames, ...changesByGroup.keys()])];
+  return names.map((group) => {
+    const changes = changesByGroup.get(group);
+    const status: GroupStatus = { group, state: stateOf(group) };
+    return changes === undefined ? status : { ...status, changes };
+  });
 }
 
 // The rows the user did NOT tick, as the skip list the transport already speaks. The checkbox means

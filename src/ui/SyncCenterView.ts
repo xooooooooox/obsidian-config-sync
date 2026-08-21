@@ -30,7 +30,7 @@ import { paintMergedControl } from "./mergedControl";
 import { nextCompact, sidebarNeededWidth, SidebarRowNeed } from "./sidebarFit";
 import { Availability } from "../core/availability";
 import { REUSE_MAX_AGE_MS } from "../external/readerCache";
-import { remoteFlowFor, remoteRowStatuses, skipRefsForSelection } from "../core/remoteRows";
+import { remoteRowStatuses, skipRefsForSelection } from "../core/remoteRows";
 import { isWholeFileEncrypted } from "../core/modes";
 import { classifyRemoteFailure } from "../core/remoteFailure";
 import { GroupDisplayParts } from "../core/registry";
@@ -1102,13 +1102,21 @@ export class SyncCenterView extends ItemView {
     // Companions fold into their parent BEFORE the rows are built, the same way familyGroups() folds
     // them out of the device list — one row per family under either relation.
     const folded = foldCompanionEntries(result.entries, (g) => this.host.companionParentOf(g));
-    const flow = remoteFlowFor(this.host.remoteCheck(name)?.check.state ?? "unknown");
+    // What each item still needs, already intersected with this remote's rules (spec 3.3/3.5). The
+    // periodic check produced it from the two locks; an empty table means nothing is waiting, which
+    // is different from "the two sides are byte-identical".
+    const verdicts = this.host.remoteCheck(name)?.check.itemVerdicts ?? {};
     // config-sync's own item is an ordinary row HERE (spec 5.6): the store's copy of it travels to a
     // remote like any other item, with its own direction and its own checkbox. Under the device
     // relation it stays the pinned self row instead — there it is the plugin managing itself, which
     // is not batch work and has its own sidebar destination.
     const localGroupNames = this.familyGroups().map((g) => g.name);
-    return remoteRowStatuses({ entries: folded, flow, localGroupNames })
+    return remoteRowStatuses({
+      entries: folded,
+      verdicts,
+      refOf: (g) => this.itemRefFor(g) ?? findGroupByName(this.groups, g)?.ref,
+      localGroupNames,
+    })
       .map((status) => ({ group: findGroupByName(this.groups, status.group) ?? remoteOnlyGroup(status.group), status, remote: name }));
   }
 
