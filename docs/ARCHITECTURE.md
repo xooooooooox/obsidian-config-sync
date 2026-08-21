@@ -257,21 +257,30 @@ functions.
 
 **Status & availability**
 - `core/remoteRows.ts` — turns one remote comparison into the rows the device relation already
-  speaks. `remoteFlowFor(state)` gives the WHOLE list one direction (`diffRemote` only answers
-  "are the two sides byte-equal", so no row has its own evidence yet), and every undecided state
-  reads as `pull` because pull is the additive operation — push mirror-deletes, so an undecidable
-  state must land on the side that cannot destroy anything. `remoteRowStatuses` folds each entry's
-  files into the same `FileChanges` shape and calls every local item the comparison never mentioned
-  in sync; an entry with no local counterpart still gets a row. `skipRefsForSelection` turns the
-  checkboxes into the skip list the transport already takes: the rows the user did NOT tick.
+  speaks. `remoteRowStatuses` takes TWO inputs with two jobs: the verdict table (`status.ts`) decides
+  each row's STATE, and `diffRemote`'s entries are the card's EVIDENCE — an item whose bytes differ
+  but whose difference runs in a closed direction is in sync (spec 3.3), and an item the table names
+  that the diff never mentioned still gets a row (the remote can be ahead on bookkeeping alone: a
+  newer recorded version over identical bytes, which is a real pull). A row with no `ref` has no rule
+  and no lock entry to judge by, so there the file diff is all there is. `skipRefsForSelection` turns
+  the checkboxes into the skip list the transport already takes: the rows the user did NOT tick.
 - `core/status.ts` — per-item status (`statusForGroups`), remote freshness (`diffRemote`,
   `remoteLockAhead`), and the counts the UI shows (`bucketCounts`; `remoteItemCounts` /
   `sumRemoteItemCounts` — the ⇡ push / ⇣ pull totals behind the header pills and the status bar,
-  counted in ITEMS). `checkRemote` fills `RemoteCheck.items` from the same per-ref `itemFreshness`
-  walk its whole-store verdict already runs, so those numbers cost no extra file read; `items: null`
-  means this remote cannot be counted item by item (a side that stamps no entry, or a remote that
-  never parsed) and is deliberately NOT zero — `sumRemoteItemCounts` reports those separately as
-  `uncounted`, so "nothing waiting" and "cannot say" stay apart.
+  counted in ITEMS). `remoteItemVerdicts` is the one producer behind both: ref → the direction that
+  item still NEEDS, taken from the same per-ref `itemFreshness` walk `checkRemote`'s whole-store
+  verdict already runs (so it costs no extra file read) and intersected with this remote's rules.
+  **Absent from that table means "nothing to do"**, which merges three cases that are one fact for
+  the reader (spec 3.3): the copies agree, the only difference runs in a direction this remote
+  closes, or the item exists on one side only and that direction is closed. `RemoteCheck.itemVerdicts`
+  carries it to the panel's rows; `remoteItemCounts` is only its tally, so a row and the number above
+  it cannot disagree. `null` (either field) means this remote cannot be judged item by item (a side
+  that stamps no entry, or a remote that never parsed) and is deliberately NOT zero —
+  `sumRemoteItemCounts` reports those separately as `uncounted`, so "nothing waiting" and "cannot
+  say" stay apart. **The two questions get their own ignore sets** (`DirectionIgnores`, spec 3.5):
+  "is anything worth pulling" ignores what never pulls, "is anything of mine to push" ignores what
+  never pushes — one shared set gets one of them wrong, and a `Push only` item the remote edited
+  would light an arrow no Pull could clear.
   `diffRemote(ctx, reader, opts: { skipRefs: ItemRef[] })` returns per-group `RemoteDiffEntry.files:
   RemoteDiffFile[]` — one entry per file with its `kind` (`added`/`updated`/`deleted`) and both
   sides' content, so the UI renders file lists and content diffs instead of bare counts;

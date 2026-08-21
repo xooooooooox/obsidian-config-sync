@@ -703,7 +703,14 @@ noted):
   The two on/off carriers, which are never rows under the device relation (they dissolve into the
   section-head chip, and what they carry is spoken by each member's own row), ARE ordinary rows
   under a remote: no member row says anything about enablement there, and the carrier's store copy
-  genuinely differs. Every row's card carries a `This remote` row — four stops, `Both ways` (the
+  genuinely differs. **A row's direction is its own**: it comes from what that item still needs with
+  this remote (the lock's per-item freshness, intersected with the item's four-stop rule), so one
+  list can hold `To pull` rows beside `To push` rows. **In sync means "nothing left to do in a
+  direction you allow"** — not "the two sides are byte-identical". A `Push only` item the remote
+  edited therefore folds into `In sync` with no checkbox; the card is where it still answers, with
+  `<remote> changed N files. Push only, so they stay there.` and a `Files` badge in the neutral
+  `files` glyph (`is-neutral`) — the direction colors all promise a run, and this one promises none.
+  Every row's card carries a `This remote` row — four stops, `Both ways` (the
   default, and the only one that leaves the row without a chip) / `Push only` / `Pull only` /
   `Neither way` — rendered as the card's own menu-chip idiom (the shape `After install` and
   `Enablement` already use). Its chips speak the transport's own glyphs: `cloud-upload`,
