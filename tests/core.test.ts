@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { appSource, pluginSource, withRef } from "./lock";
 import { StoreLockEntry } from "../src/core/types";
 import { lockEntry, STORE_LOCK_VERSION } from "../src/core/manifest";
-import { CoreContext, capture, captureWithActions, loadManifest, groupsForDevice, apply, applyWithActions, planImport, applyImport, PendingPull, ExternalStoreReader, pushExternal, ExternalStoreWriter, pluginIdForGroup, orderInstallsCatalogFirst, readGroups, writeGroups, deviceExcludedPluginIds, isSelfStoreRel, remoteGroupsFrom, groupForStoreRel, backfillLockLabels, excludeOptedOutItems } from "../src/core/ConfigSyncCore";
+import { CoreContext, capture, captureWithActions, loadManifest, groupsForDevice, apply, applyWithActions, planImport, applyImport, PendingPull, ExternalStoreReader, pushExternal, PUSH_RACE_MESSAGE, ExternalStoreWriter, pluginIdForGroup, orderInstallsCatalogFirst, readGroups, writeGroups, deviceExcludedPluginIds, isSelfStoreRel, remoteGroupsFrom, groupForStoreRel, backfillLockLabels, excludeOptedOutItems } from "../src/core/ConfigSyncCore";
 import { parseStoreLock, parseSyncManifest } from "../src/core/manifest";
 import { SwitchList } from "../src/core/switchList";
 import { SELF_GROUP_NAME, SELF_ITEM_REF, selfPresetRules } from "../src/core/catalog";
@@ -3344,6 +3344,64 @@ describe("push with per-key withholding", () => {
     // The bookkeeping we sent describes THAT file, not the one on this device.
     const pushed = parseStoreLock(fw.files["store.lock.json"] ?? "");
     expect(pushed.items["community"]?.["demo"]?.hash).not.toBe("sha256:mine");
+  });
+
+  it("aborts the whole push, writing nothing, when a rewritten file changed under it", async () => {
+    const { io, ctx } = setup();
+    io.seed({
+      "cs/store.lock.json": JSON.stringify({ capturedAt: "t", items: { community: { demo: { ...pluginSource("1.0.0") } } }, version: 3 }),
+      "cs/store/configdir/plugins/demo/data.json": demoDoc("mine", "mine"),
+      "cs/store/configdir/hotkeys.json": '{"a":1}',
+    });
+    await seedGroups(ctx, JSON.stringify({
+      version: 1,
+      groups: [
+        { name: "plugin-demo", path: "{configDir}/plugins/demo/data.json", type: "file", devices: "all" },
+        { name: "hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all" },
+      ],
+    }));
+    const groups = await readGroups(ctx);
+    const fw = fakeWriter({
+      "store.lock.json": JSON.stringify({ capturedAt: "t", items: {}, version: 3 }),
+      [REMOTE_REL]: demoDoc("theirs", "theirs"),
+    });
+    // The far end captures again between the plan and the write: the SECOND read answers differently.
+    let reads = 0;
+    const racing: ExternalStoreWriter = {
+      ...fw.writer,
+      async readFile(rel) {
+        const content = await fw.writer.readFile(rel);
+        if (rel !== REMOTE_REL) return content;
+        reads += 1;
+        return reads === 1 ? content : demoDoc("theirs", "MOVED");
+      },
+    };
+    await expect(
+      pushExternal(ctx, racing, { skipRefs: [], withheldPush: withheldPatternPredicate(RULES, "push", groups) })
+    ).rejects.toThrow(PUSH_RACE_MESSAGE);
+    // The promise this abort makes: NOTHING was written — not even the files that were fine.
+    expect(fw.writeLog).toEqual([]);
+    expect(fw.finalized).toBe(0);
+  });
+
+  it("does not re-read a file it forwards byte for byte — there is no window to lose", async () => {
+    const { io, ctx } = setup();
+    io.seed({
+      "cs/store.lock.json": JSON.stringify({ capturedAt: "t", items: {}, version: 3 }),
+      "cs/store/configdir/hotkeys.json": '{"a":1}',
+    });
+    await seedGroups(ctx, '{"version":1,"groups":[]}');
+    const fw = fakeWriter({ "store.lock.json": JSON.stringify({ capturedAt: "t", items: {}, version: 3 }), "store/configdir/hotkeys.json": '{"a":9}' });
+    const reads: string[] = [];
+    const counting: ExternalStoreWriter = {
+      ...fw.writer,
+      async readFile(rel) {
+        reads.push(rel);
+        return fw.writer.readFile(rel);
+      },
+    };
+    await pushExternal(ctx, counting, { skipRefs: [], withheldPush: () => [] });
+    expect(reads.filter((r) => r === "store/configdir/hotkeys.json")).toHaveLength(1);
   });
 
   it("writes nothing when only a withheld key differs", async () => {

@@ -1720,6 +1720,11 @@ export interface ExternalStoreWriter {
   finalize(): Promise<void>; // git: add/commit/push; local-path: no-op
 }
 
+// What a push says when the far end moved while it was being prepared. Product voice: what happened,
+// that nothing was written, and what to do — the file that moved is a developer's detail.
+export const PUSH_RACE_MESSAGE =
+  "The other end changed while this push was being prepared. Nothing was written — compare again, then push.";
+
 // A lock at the far end this build cannot parse, told apart from one that is not there — and it does
 // not need to be: both leave the push with no far-end entries to preserve. The version gate has
 // already refused a lock from a NEWER build, so what reaches here is a damaged file, and push is the
@@ -1798,7 +1803,13 @@ export async function pushExternal(
   // The version gate, push side: refused before the first writeFile — pushing this build's store over a remote
   // written by a newer one would overwrite a shape we cannot read with one it cannot read back.
   assertStoreLockVersionUnderstood(remoteLockRaw);
+  // PHASE 1 — work everything out, write nothing. A rewritten file's content is computed FROM what
+  // the far end currently holds (spec 3.2), so the run has a read-modify-write window; phase 2
+  // closes it before phase 3 puts down a single byte. The order IS the promise: a vault writer's
+  // writes are immediate and durable, so a refusal discovered mid-loop would leave a half-pushed
+  // store (spec 3.7).
   const rewritten = new Map<string, Record<string, string>>(); // ref -> rel -> the content we sent
+  const planned: { rel: string; name: string; itemRel: string; content: string; theirs: string | null; reread: boolean }[] = [];
   for (const rel of pushableRels) {
     if (rel === LOCK_REL) continue; // not content: derived and written at the end
     const { name, itemRel } = groupForStoreRel(manifest.groups, rel);
@@ -1814,11 +1825,25 @@ export async function pushExternal(
       const ref = resolveGroupByStoreRel(manifest.groups, rel)?.ref;
       if (ref !== undefined) rewritten.set(ref, { ...(rewritten.get(ref) ?? {}), [rel]: content });
     }
-    if (existed && theirs === content) continue; // unchanged: skip the write
-    await writer.writeFile(rel, content);
-    const result = resultFor(name);
-    result.filesWritten.push(rel);
-    (existed ? result.changes.updated : result.changes.added).push(itemRel);
+    planned.push({ rel, name, itemRel, content, theirs, reread: patterns.length > 0 });
+  }
+  // PHASE 2 — check the ground has not moved under the files whose content depends on it. A file we
+  // forward byte for byte has no window to lose: its content does not depend on what is over there,
+  // so it is deliberately not re-read. Not a retry — a push is not idempotent, so the refusal goes
+  // to the user and they decide what to do next.
+  for (const p of planned) {
+    if (!p.reread) continue;
+    const now = remoteFiles.has(p.rel) ? await writer.readFile(p.rel) : null;
+    if (now !== p.theirs) throw new Error(PUSH_RACE_MESSAGE);
+  }
+  // PHASE 3 — from here on it writes.
+  for (const p of planned) {
+    const existed = remoteFiles.has(p.rel);
+    if (existed && p.theirs === p.content) continue; // unchanged: skip the write
+    await writer.writeFile(p.rel, p.content);
+    const result = resultFor(p.name);
+    result.filesWritten.push(p.rel);
+    (existed ? result.changes.updated : result.changes.added).push(p.itemRel);
   }
   const wanted = new Set(pushableRels);
   for (const rel of remoteFiles) {
