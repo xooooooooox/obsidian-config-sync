@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { itemDirection, keyDirection, refsBlockedFor, withheldPatternsFor, withItemDirection } from "../src/core/remoteRules";
-import { directionFlows, intersectDirection, RemoteDirection, RemoteItems } from "../src/core/types";
+import { itemDirection, keyDirection, keyStopsWithin, refsBlockedFor, withheldPatternsFor, withItemDirection, withKeyDirection } from "../src/core/remoteRules";
+import { directionFlows, intersectDirection, ItemRef, RemoteDirection, RemoteItems } from "../src/core/types";
 
 describe("directionFlows", () => {
   it("maps each of the four positions to the two flags", () => {
@@ -131,5 +131,55 @@ describe("withheldPatternsFor", () => {
   it("has nothing to say about an item with no key rules", () => {
     expect(withheldPatternsFor(KEYED, "obsidian/app", "pull")).toEqual([]);
     expect(withheldPatternsFor(undefined, "community/dataview", "pull")).toEqual([]);
+  });
+});
+
+describe("withKeyDirection", () => {
+  it("stores a key's decision under its item, leaving the item's own direction alone", () => {
+    const next = withKeyDirection({ community: { dataview: { direction: "push" } } }, "community/dataview", "apiKey", "none");
+    expect(next).toEqual({ community: { dataview: { direction: "push", keys: { apiKey: { direction: "none" } } } } });
+  });
+
+  it("creates the item entry when the key is the first decision made about it", () => {
+    expect(withKeyDirection(undefined, "community/dataview", "apiKey", "pull")).toEqual({
+      community: { dataview: { keys: { apiKey: { direction: "pull" } } } },
+    });
+  });
+
+  it("never stores the default: setting a key back to Both ways removes its rule", () => {
+    const rules: RemoteItems = { community: { dataview: { keys: { apiKey: { direction: "none" }, other: { direction: "pull" } } } } };
+    expect(withKeyDirection(rules, "community/dataview", "apiKey", "both")).toEqual({
+      community: { dataview: { keys: { other: { direction: "pull" } } } },
+    });
+  });
+
+  it("drops an item that carries nothing else once its last key rule goes", () => {
+    const rules: RemoteItems = { community: { dataview: { keys: { apiKey: { direction: "none" } } } } };
+    expect(withKeyDirection(rules, "community/dataview", "apiKey", "both")).toBeUndefined();
+  });
+
+  it("keeps an item whose own direction is still a decision", () => {
+    const rules: RemoteItems = { community: { dataview: { direction: "pull", keys: { apiKey: { direction: "none" } } } } };
+    expect(withKeyDirection(rules, "community/dataview", "apiKey", "both")).toEqual({ community: { dataview: { direction: "pull" } } });
+  });
+
+  it("ignores a ref no build of this parser accepts", () => {
+    const rules: RemoteItems = { community: { dataview: { direction: "pull" } } };
+    expect(withKeyDirection(rules, "nonsense" as ItemRef, "k", "none")).toEqual(rules);
+  });
+});
+
+describe("keyStopsWithin", () => {
+  it("offers every stop under an item that travels both ways", () => {
+    expect(keyStopsWithin("both")).toEqual(["both", "push", "pull", "none"]);
+  });
+
+  it("offers only what the item still allows, so a key can never travel further than its item", () => {
+    expect(keyStopsWithin("pull")).toEqual(["pull", "none"]);
+    expect(keyStopsWithin("push")).toEqual(["push", "none"]);
+  });
+
+  it("leaves one stop under an item that travels neither way", () => {
+    expect(keyStopsWithin("none")).toEqual(["none"]);
   });
 });

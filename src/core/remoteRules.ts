@@ -92,3 +92,43 @@ export function unexchangedPatternsFor(items: RemoteItems | undefined, ref: Item
   if (keys === undefined) return [];
   return Object.keys(keys).filter((pattern) => keyDirection(items, ref, pattern) === "none");
 }
+
+// The four stops as DATA, in the order every surface offers them. The UI's own table maps these to
+// display names and glyphs; the order itself is a fact about the rules, not about the panel.
+const REMOTE_DIRECTIONS: readonly RemoteDirection[] = ["both", "push", "pull", "none"];
+
+// Write one key's direction inside one item. Same discipline as withItemDirection: the default is
+// never stored, an entry that carries nothing else is removed, and a map that ends up empty becomes
+// undefined — a document only ever holds decisions somebody actually made. The item's own direction
+// is untouched here; the two are separate decisions that meet at READ time (keyDirection).
+export function withKeyDirection(
+  items: RemoteItems | undefined,
+  ref: ItemRef,
+  pattern: string,
+  direction: RemoteDirection
+): RemoteItems | undefined {
+  const parsed = parseItemRef(ref);
+  if (parsed === null) return items;
+  const next: RemoteItems = {};
+  for (const [s, byId] of Object.entries(items ?? {})) next[s] = { ...byId };
+  const bucket = { ...(next[parsed.section] ?? {}) };
+  const existing = bucket[parsed.id];
+  const keys = { ...(existing?.keys ?? {}) };
+  if (direction === "both") delete keys[pattern];
+  else keys[pattern] = { direction };
+  const rule: RemoteItemRule = {};
+  if (existing?.direction !== undefined) rule.direction = existing.direction;
+  if (Object.keys(keys).length > 0) rule.keys = keys;
+  if (Object.keys(rule).length === 0) delete bucket[parsed.id];
+  else bucket[parsed.id] = rule;
+  if (Object.keys(bucket).length === 0) delete next[parsed.section];
+  else next[parsed.section] = bucket;
+  return Object.keys(next).length === 0 ? undefined : next;
+}
+
+// The stops a KEY can be set to under an item with this direction: those that survive the
+// intersection unchanged (spec 2.2). A menu offering more would let a click write a rule the reader
+// immediately resolves to something else — the control would be lying about its own effect.
+export function keyStopsWithin(item: RemoteDirection): RemoteDirection[] {
+  return REMOTE_DIRECTIONS.filter((d) => intersectDirection(item, d) === d);
+}
