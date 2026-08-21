@@ -906,9 +906,13 @@ export default class ConfigSyncPlugin extends Plugin {
         onPhase?.("fetch");
         const reader = await this.createReader(remote, { reuse: true });
         onPhase?.("compare");
-        // Comparison answers for both directions at once, so an item held back in either one has no
-        // difference this pane could offer to act on.
-        const skipRefs = [...new Set([...refsBlockedFor(remote.items, "pull"), ...refsBlockedFor(remote.items, "push")])];
+        // The comparison is EVIDENCE, not a to-do list: it skips only the items this remote exchanges
+        // neither way — the intersection of the two blocked sets, i.e. `Neither way`. An item that
+        // travels one way still gets compared, because the panel has two things to say about it: the
+        // direction it can still move in, and (when the other side changed it) what moved over there
+        // that is going to stay there (spec 3.3's accepted cost, answered in the card).
+        const noPull = new Set<string>(refsBlockedFor(remote.items, "pull"));
+        const skipRefs = refsBlockedFor(remote.items, "push").filter((ref) => noPull.has(ref));
         const entries = await diffRemote(ctx, reader, { skipRefs });
         // A lock-only delta (version-refresh capture on the other side) is real pull payload
         // even when every store file matches — surface it so the hint isn't contradictory.
