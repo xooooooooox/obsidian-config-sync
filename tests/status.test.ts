@@ -4,7 +4,7 @@ import { parseSyncManifest, STORE_LOCK_VERSION } from "../src/core/manifest";
 import { lockByName } from "./lock";
 import { lockRefFor } from "../src/core/itemKeys";
 import { SELF_ITEM_REF } from "../src/core/catalog";
-import { statusForGroups, checkRemote, diffRemote, bucketCounts, remoteLockAhead, remoteDirectionCounts, remoteLockLabels, GroupStatus } from "../src/core/status";
+import { statusForGroups, checkRemote, diffRemote, bucketCounts, remoteLockAhead, remoteDirectionCounts, remoteItemCounts, remoteLockLabels, sumRemoteItemCounts, GroupStatus, RemoteCheck } from "../src/core/status";
 import { applyUpdates, emptyLedger, Ledger } from "../src/core/ledger";
 import { directionForState, stageableRow } from "../src/ui/panelModel";
 import { StoreLock, StoreLockEntry, SyncGroup, THIS_DEVICE } from "../src/core/types";
@@ -738,5 +738,59 @@ describe("remoteLockLabels — carrier memberLabels fallback", () => {
     expect(
       remoteLockLabels({ capturedAt: "t", groups: { "community-plugins": { source: { kind: "app", version: "1.8.7" }, memberLabels: { x: "   " } } } }, lockRefFor([]))
     ).toEqual({});
+  });
+});
+
+describe("remoteItemCounts", () => {
+  const t0 = "2026-08-01T00:00:00.000Z";
+  const t1 = "2026-08-02T00:00:00.000Z";
+
+  it("counts the items each side is ahead on, not the remotes", () => {
+    const local = lockByName(t1, { app: { hash: "a", capturedAt: t1 }, hotkeys: { hash: "h", capturedAt: t0 } });
+    const remote = lockByName(t1, { app: { hash: "a2", capturedAt: t0 }, hotkeys: { hash: "h2", capturedAt: t1 } });
+    expect(remoteItemCounts(local, remote, [])).toEqual({ push: 1, pull: 1 });
+  });
+
+  it("counts nothing for items whose copies are identical", () => {
+    const same = { app: { hash: "a", capturedAt: t0 } };
+    expect(remoteItemCounts(lockByName(t0, same), lockByName(t1, same), [])).toEqual({ push: 0, pull: 0 });
+  });
+
+  it("ignores the refs this remote never exchanges", () => {
+    // lockRefFor([]) maps the plugin group name to `community/config-sync` — the same ref the
+    // ignore list speaks, which is exactly why the fixture goes through lockByName.
+    const local = lockByName(t1, { "plugin-config-sync": { hash: "a", capturedAt: t1 } });
+    const remote = lockByName(t1, { "plugin-config-sync": { hash: "b", capturedAt: t0 } });
+    expect(remoteItemCounts(local, remote, ["community/config-sync"])).toEqual({ push: 0, pull: 0 });
+  });
+
+  it("says it cannot count when a side stamps no entry with a capture time", () => {
+    const unstamped = lockByName(t0, { app: { hash: "a" } });
+    expect(remoteItemCounts(unstamped, lockByName(t1, { app: { hash: "b", capturedAt: t1 } }), [])).toBeNull();
+  });
+
+  it("counts every remote item as a pull when this device has no lock yet", () => {
+    const remote = lockByName(t1, { app: { hash: "a", capturedAt: t1 }, hotkeys: { hash: "h", capturedAt: t1 } });
+    expect(remoteItemCounts(null, remote, [])).toEqual({ push: 0, pull: 2 });
+  });
+});
+
+describe("sumRemoteItemCounts", () => {
+  const check = (items: { push: number; pull: number } | null): RemoteCheck => ({ state: "unknown", remoteCapturedAt: null, items });
+
+  it("adds the item counts up and says how many remotes they came from", () => {
+    expect(sumRemoteItemCounts([check({ push: 2, pull: 0 }), check({ push: 1, pull: 3 })])).toEqual({ push: 3, pull: 3, remotes: 2, uncounted: 0 });
+  });
+
+  it("counts a remote as contributing only when it has something waiting", () => {
+    expect(sumRemoteItemCounts([check({ push: 0, pull: 0 }), check({ push: 1, pull: 0 })])).toEqual({ push: 1, pull: 0, remotes: 1, uncounted: 0 });
+  });
+
+  it("keeps a remote it cannot count apart from one with nothing to do", () => {
+    expect(sumRemoteItemCounts([check(null), check({ push: 0, pull: 0 })])).toEqual({ push: 0, pull: 0, remotes: 0, uncounted: 1 });
+  });
+
+  it("says nothing is waiting when there are no remotes at all", () => {
+    expect(sumRemoteItemCounts([])).toEqual({ push: 0, pull: 0, remotes: 0, uncounted: 0 });
   });
 });

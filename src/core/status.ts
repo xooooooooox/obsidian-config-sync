@@ -199,9 +199,18 @@ export function remoteDirectionCounts(states: RemoteState[]): { push: number; pu
 
 export type RemoteState = "no-store" | "same" | "remote-newer" | "remote-older" | "unknown";
 
+export interface RemoteItemCounts {
+  push: number; // items this store is ahead on — Push would update the remote
+  pull: number; // items the remote is ahead on — Pull would update this store
+}
+
 export interface RemoteCheck {
   state: RemoteState;
   remoteCapturedAt: string | null;
+  // Per-ITEM counts, when both sides stamp their lock entries; null when this remote cannot be
+  // counted item by item (a side still on the older payload, or a remote that never parsed). null
+  // is NOT zero: a remote nobody can count must not read as a remote with nothing to do.
+  items: RemoteItemCounts | null;
 }
 
 // `ignoreRefs` names lock entries that never count, exactly as in remoteLockAhead — callers pass
@@ -227,30 +236,31 @@ export async function checkRemote(
   // one inviting the push it would then decline (the rule the version gate already follows for a future lock).
   if (!files.includes("store.lock.json")) {
     const empty = !remoteDeclaresStore(files) && remoteStoreContentRels(files).length === 0;
-    return { state: empty ? "no-store" : "unknown", remoteCapturedAt: null };
+    return { state: empty ? "no-store" : "unknown", remoteCapturedAt: null, items: null };
   }
   let remote: StoreLock;
   try {
     remote = parseStoreLock(await reader.readFile("store.lock.json"), groups);
   } catch {
-    return { state: "unknown", remoteCapturedAt: null };
+    return { state: "unknown", remoteCapturedAt: null, items: null };
   }
   // A remote this build cannot read must not look ACTIONABLE. The version gate
   // refuses the pull itself, but a refusal the user only meets after accepting an invitation is a
   // worse surface than never being invited: "unknown" already means "this remote cannot be
   // compared", which is exactly true here. No new RemoteState, no UI change. The capture stamp is
   // still reported — it parsed, and saying WHEN is not the same as inviting a pull.
-  if (storeLockVersion(remote) > STORE_LOCK_VERSION) return { state: "unknown", remoteCapturedAt: remote.capturedAt };
+  if (storeLockVersion(remote) > STORE_LOCK_VERSION) return { state: "unknown", remoteCapturedAt: remote.capturedAt, items: null };
   // No local lock yet (bootstrap device) but the remote parsed fine: a pull would populate
   // the store, so this is a known state, not "unknown" — reserve that for unreadable remotes.
-  if (localLock === null) return { state: "remote-newer", remoteCapturedAt: remote.capturedAt };
+  if (localLock === null) return { state: "remote-newer", remoteCapturedAt: remote.capturedAt, items: remoteItemCounts(null, remote, ignoreRefs) };
+  const counts = remoteItemCounts(localLock, remote, ignoreRefs);
   const perItem = perItemRemoteState(localLock, remote, ignoreRefs);
-  if (perItem !== null) return { state: perItem, remoteCapturedAt: remote.capturedAt };
+  if (perItem !== null) return { state: perItem, remoteCapturedAt: remote.capturedAt, items: counts };
   const r = Date.parse(remote.capturedAt);
   const l = Date.parse(localLock.capturedAt);
-  if (Number.isNaN(r) || Number.isNaN(l)) return { state: "unknown", remoteCapturedAt: remote.capturedAt };
+  if (Number.isNaN(r) || Number.isNaN(l)) return { state: "unknown", remoteCapturedAt: remote.capturedAt, items: counts };
   const state: RemoteState = r > l ? "remote-newer" : r < l ? "remote-older" : "same";
-  return { state, remoteCapturedAt: remote.capturedAt };
+  return { state, remoteCapturedAt: remote.capturedAt, items: counts };
 }
 
 // Entry fields that are never a DIFFERENCE. `display` is names: a plugin renamed on one device must
@@ -401,6 +411,50 @@ function perItemRemoteState(local: StoreLock, remote: StoreLock, ignoreRefs: str
   }
   if (newer && older) return null;
   return newer ? "remote-newer" : older ? "remote-older" : "same";
+}
+
+// How many ITEMS each side is ahead on. The same walk perItemRemoteState does — it already asks
+// `itemFreshness` per ref — kept as its own function because the two answer different questions:
+// that one collapses to a single whole-store word, this one is the number the panel and the status
+// bar show. Reads only the two locks already in hand, so a periodic check pays nothing for it.
+//
+// `local === null` is the bootstrap device: it has no store of its own yet, so every item the
+// remote holds is an item waiting to come in.
+export function remoteItemCounts(local: StoreLock | null, remote: StoreLock, ignoreRefs: string[]): RemoteItemCounts | null {
+  if (!hasPerItemPayload(remote)) return null;
+  if (local !== null && !hasPerItemPayload(local)) return null;
+  const refs = [...new Set([...(local === null ? [] : lockEntryList(local.items)), ...lockEntryList(remote.items)].map(([ref]) => ref))].filter(
+    (r) => !ignoreRefs.includes(r)
+  );
+  let push = 0;
+  let pull = 0;
+  for (const ref of refs) {
+    const freshness = itemFreshness(local === null ? undefined : lockEntry(local, ref), lockEntry(remote, ref));
+    if (freshness === "newer") pull++;
+    else if (freshness === "older") push++;
+  }
+  return { push, pull };
+}
+
+// The whole-fleet total the status bar and the header pills both read. `remotes` is how many
+// remotes actually contribute a number (the hover says "across N remotes"), `uncounted` how many
+// could not be counted at all — separate, because "nothing waiting" and "cannot say" are different
+// facts and one number would merge them.
+export function sumRemoteItemCounts(checks: readonly RemoteCheck[]): { push: number; pull: number; remotes: number; uncounted: number } {
+  let push = 0;
+  let pull = 0;
+  let remotes = 0;
+  let uncounted = 0;
+  for (const c of checks) {
+    if (c.items === null) {
+      uncounted++;
+      continue;
+    }
+    push += c.items.push;
+    pull += c.items.pull;
+    if (c.items.push > 0 || c.items.pull > 0) remotes++;
+  }
+  return { push, pull, remotes, uncounted };
 }
 
 // Item ref -> label for every remote lock entry carrying one (Sync Center remote rows, spec

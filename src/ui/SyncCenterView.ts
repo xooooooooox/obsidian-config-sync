@@ -1785,7 +1785,7 @@ export class SyncCenterView extends ItemView {
 
   private renderViewBadge(row: HTMLElement, b: ViewBadge): void {
     if (b.kind === "remote-state") {
-      const icon = this.remoteIcon({ state: b.state, remoteCapturedAt: null });
+      const icon = this.remoteIcon({ state: b.state, remoteCapturedAt: null, items: null });
       this.paintStateIcon(row.createSpan({ cls: `config-sync-state-icon ${icon.cls}`, attr: { "aria-label": icon.tip } }), icon);
       return;
     }
