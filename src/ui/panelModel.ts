@@ -973,3 +973,10 @@ export function relationCopy(r: PanelRelation): RelationCopy {
     excludedFold: (n) => `${n} item${n === 1 ? " doesn't" : "s don't"} sync with this remote`,
   };
 }
+
+// The card's answer for a row the LIST keeps quiet about (spec 3.3's accepted cost, paid back by
+// 5.4): the remote edited an item that only travels the other way. The row reads as in sync because
+// there is nothing to do; the card says what moved over there, and why it stays there.
+export function withheldChangeClause(remoteName: string, files: number): string {
+  return `${remoteName} changed ${files} file${files === 1 ? "" : "s"}. Push only, so they stay there.`;
+}

@@ -79,6 +79,7 @@ import {
   TYPE_SECTION_TITLES,
   typeSectionForRow,
   unifiedFooterSummary,
+  withheldChangeClause,
   visibleUnderFilter,
   widestCountDigits,
   Direction,
@@ -3107,8 +3108,14 @@ export class SyncCenterView extends ItemView {
     // preview and IS the choice, because in this plugin a diff always shows what one choice would
     // do (see diffView's DiffResolveControl).
     const previewDir: Direction | null = dir ?? (isConflict ? "apply" : null);
+    // Under a remote a row can have differing files and still nothing to do — the difference runs
+    // the way this remote does not (spec 3.3). The row stays quiet; the card still shows what moved
+    // over there, with a badge that carries no direction because these files will not travel.
+    const withheld = remoteRelation && previewDir === null && !input.excludedHere && hasChanges(changes);
     if (previewDir !== null && hasChanges(changes)) {
       this.renderFilesRow(fields, r, changes, previewDir, input.encrypted, isConflict ? this.conflictResolve(r, changes) : null);
+    } else if (withheld) {
+      this.renderFilesRow(fields, r, changes, null, input.encrypted, null);
     }
 
     // The flip list the retired remote pane pinned under its section head: under this relation the
@@ -3382,8 +3389,14 @@ export class SyncCenterView extends ItemView {
       // The card's STATE clause spells out WHY, not just the row's terse sentence —
       // and the two exclusion causes read differently even though the row above them is identical.
       // Both causes are this DEVICE's rules; under a remote the row's own sentence already names
-      // the only rule in play (that remote's direction for this item), so it stands alone.
-      if (r.remote !== undefined) return `${fate.sentence}.`;
+      // the only rule in play (that remote's direction for this item), so it stands alone — unless
+      // the item HAS differing files and still has nothing to do, which means the difference runs
+      // the way this remote does not. The list stays quiet about that; the card is where it answers.
+      if (r.remote !== undefined) {
+        const changed = r.status.changes === undefined ? 0 : this.folderChangeCount(r.status.changes);
+        if (changed > 0 && !input.excludedHere) return withheldChangeClause(r.remote, changed);
+        return `${fate.sentence}.`;
+      }
       if (input.excludedHere) return "Not synced on this device — your Settings sync rule excludes it.";
       if (input.optedOutHere === true) return "Not synced on this device — you turned it off here. Your other devices keep syncing it.";
       return `${fate.sentence}.`;
@@ -3424,7 +3437,11 @@ export class SyncCenterView extends ItemView {
   //
   // A row with no changes at all drops out up front, before the entry list is built, because the
   // collapsed head always renders something once there is at least one change.
-  private renderFilesRow(detail: HTMLElement, r: StatusRow, changes: FileChanges, dir: Direction, encrypted: boolean, resolve: DiffResolveControl | null): void {
+  // `dir` is null for files that are NOT going to travel: the remote changed an item that only
+  // moves the other way. The badge then wears a neutral `files` glyph instead of a direction arrow
+  // — an arrow would promise a run that is never going to happen — and the entries below keep the
+  // three diff colors, since what changed is still what changed.
+  private renderFilesRow(detail: HTMLElement, r: StatusRow, changes: FileChanges, dir: Direction | null, encrypted: boolean, resolve: DiffResolveControl | null): void {
     const total = changes.added.length + changes.updated.length + changes.deleted.length;
     if (total === 0) return;
     const row = this.cardRowShell("Files", true);
@@ -3446,13 +3463,16 @@ export class SyncCenterView extends ItemView {
       // the row has no direction yet, and `dir` here is only the side being previewed. Once a side
       // is picked it becomes an ordinary directional badge like every other row's.
       const undecided = resolve !== null && resolve.chosen === null;
-      const badge = head.createSpan({
-        cls: `config-sync-files-badge ${undecided ? CONFLICT_COLOR_CLASS : ACTION_COLOR_CLASS[dir]}${expanded ? " is-open" : ""}`,
-      });
-      setIcon(badge.createSpan({ cls: "config-sync-files-badge-ic" }), undecided ? CONFLICT_ICON : ACTION_ICON[dir]);
+      const colorCls = undecided ? CONFLICT_COLOR_CLASS : dir === null ? "is-neutral" : ACTION_COLOR_CLASS[dir];
+      const badge = head.createSpan({ cls: `config-sync-files-badge ${colorCls}${expanded ? " is-open" : ""}` });
+      setIcon(badge.createSpan({ cls: "config-sync-files-badge-ic" }), undecided ? CONFLICT_ICON : dir === null ? "files" : ACTION_ICON[dir]);
       badge.createSpan({ text: String(total) });
       row.setAttrs({ "aria-expanded": expanded ? "true" : "false" });
-      if (expanded) this.renderUnifiedFiles(list, r, changes, dir, encrypted, resolve);
+      // The entry list needs a perspective to present add/delete from; for withheld files that is
+      // the side that actually changed — the remote — i.e. the same reading a pull would use, minus
+      // the pull. (Their per-entry consequence tooltips still speak the device relation's words:
+      // known copy debt, tracked with the rest of the card's remote wording.)
+      if (expanded) this.renderUnifiedFiles(list, r, changes, dir ?? "apply", encrypted, resolve);
     };
     // THE ROW is the target, not the badge. Every card control sits on the card's right edge, so
     // listening on the badge alone would leave the `FILES` label and the whole stretch between it
@@ -3469,7 +3489,9 @@ export class SyncCenterView extends ItemView {
       "aria-label":
         resolve !== null && resolve.chosen === null
           ? `${filesChangeLabel(total)} — changed on both sides; open to compare each side before choosing`
-          : `${filesChangeLabel(total)} — ${dir === "capture" ? "these changes land in the store" : "these changes land on this device"}`,
+          : dir === null
+            ? `${filesChangeLabel(total)} — they stay at ${r.remote ?? "the remote"}`
+            : `${filesChangeLabel(total)} — ${dir === "capture" ? "these changes land in the store" : "these changes land on this device"}`,
     });
     row.addEventListener("click", toggle);
     row.addEventListener("keydown", (e) => {

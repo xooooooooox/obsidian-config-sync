@@ -480,6 +480,10 @@ body.is-phone .config-sync-fkey {
    yet, so neither of the two directional colours would be telling the truth. */
 .config-sync-files-badge.is-conflict { color: var(--color-red); }
 .config-sync-files-badge.is-conflict.is-open { background: rgba(var(--color-red-rgb), 0.16); }
+/* No direction: the remote changed files that are not going to travel (spec 3.3/5.4). Muted rather
+   than colored — the direction colors all promise a run, and this badge promises none. */
+.config-sync-files-badge.is-neutral { color: var(--text-muted); }
+.config-sync-files-badge.is-neutral.is-open { background: var(--background-modifier-hover); }
 .config-sync-files-badge.is-up { color: var(--color-orange); }
 .config-sync-files-badge.is-down { color: var(--interactive-accent); }
 .config-sync-files-badge.is-up.is-open { background: rgba(var(--color-orange-rgb), 0.16); }

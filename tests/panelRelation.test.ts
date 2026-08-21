@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { destinationKey, excludedLineText, foldStateKey, insyncLineText, PanelDestination, PanelRelation, relationCopy, relationKey, relationLabel, viewOptions } from "../src/ui/panelModel";
+import { destinationKey, excludedLineText, foldStateKey, withheldChangeClause, insyncLineText, PanelDestination, PanelRelation, relationCopy, relationKey, relationLabel, viewOptions } from "../src/ui/panelModel";
 
 describe("relationLabel", () => {
   it("names the two relations exactly as the design says", () => {
@@ -143,5 +143,15 @@ describe("relationCopy", () => {
     expect(c.matchFold(4)).toBe("4 items match this remote");
     expect(c.excludedFold(1)).toBe("1 item doesn't sync with this remote");
     expect(c.excludedFold(3)).toBe("3 items don't sync with this remote");
+  });
+});
+
+describe("withheldChangeClause", () => {
+  it("names the remote, the size of the change, and why it stays there", () => {
+    expect(withheldChangeClause("main", 3)).toBe("main changed 3 files. Push only, so they stay there.");
+  });
+
+  it("keeps the singular honest", () => {
+    expect(withheldChangeClause("main", 1)).toBe("main changed 1 file. Push only, so they stay there.");
   });
 });
