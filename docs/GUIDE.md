@@ -91,7 +91,7 @@ pill's.
 | In sync | `In sync N` · `N items in sync` | `check` | green | Header (shown even at 0) · sidebar (hidden at 0) · pill (shown even at 0) · fold line | Identical on both sides — nothing to do |
 | Not synced here | `Not synced here N` · `N items not synced on this device` | `circle-minus` | purple | Header · sidebar · pill · fold line — all four disappear entirely when nothing is excluded | You turned this item off on THIS device, or a device rule keeps it off this device's class. Your other devices keep syncing it |
 | No settings yet | `No settings yet N` · `N items with no settings yet` | `circle` | muted | Header (hidden at 0) · sidebar (hidden at 0) · pill (shown even at 0) · fold line | Nothing saved for it anywhere yet |
-| Locked | counted under `No settings yet` | `lock` chip | muted | Counted inside `No settings yet`; visible as a row only under `All` | Encrypted, and this device has no passphrase — it can't be compared, so it has no fate |
+| Locked | counted under `No settings yet` (with a remote selected: its own `Can't compare` group) | `lock` chip | muted | Counted inside `No settings yet`; visible as a row only under `All`. With a remote selected it has its own pill and folds away under `N items can't be compared` | Encrypted, and this device has no passphrase — it can't be compared, so it has no fate |
 
 **Availability** — whether this device can act at all. These live in **one** surface only: the amber
 folds under the fate folds, each carrying a note on what applying would mean for the rows inside.
