@@ -754,8 +754,9 @@ noted):
   (e.g. `themes/Blue Topaz.theme.css`) — one row per family; a companion whose parent isn't known
   locally falls back to its own standalone row (honest degradation, same rule as the carrier label
   fallback).
-  Under that row sits **`Keys`** (spec 5.4), one level down and the same gesture as the Settings
-  card's own `KEY RULES` block, deliberately: the keys that already carry a rule as rows with their
+  Under that row sits **`Key rules`** (spec 5.4's `Keys`, renamed in acceptance: the Settings
+  drawer's block and the More row's tooltip already said `Key rules`, and one thing carries one
+  name), one level down and the same gesture as that Settings `KEY RULES` block, deliberately: the keys that already carry a rule as rows with their
   own four-stop chip, then `Click any key to add a rule for it`, then the item's store copy —
   clicking an un-ruled key writes `Neither way` (the default is never stored, so a click that wrote
   the default would produce no rule, no row, and look like a dead control). A key's chip shows its

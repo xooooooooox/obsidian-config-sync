@@ -3328,7 +3328,7 @@ export class SyncCenterView extends ItemView {
       patterns: keyPatternsFor(remote.items, ref),
     });
     if (model.kind === "hidden") return;
-    this.renderCardKeyRow(fields, "Keys", (value) => {
+    this.renderCardKeyRow(fields, "Key rules", (value) => {
       if (model.kind === "note") {
         value.createDiv({ cls: "config-sync-expand-note", text: model.text });
         return;
@@ -4552,12 +4552,15 @@ export class SyncCenterView extends ItemView {
     const summary = total === 0 ? "Nothing selected" : pullRows.length > 0 && pushRows.length > 0 ? `${total} selected · ${pushRows.length} push` : "";
     if (summary !== "") bar.createSpan({ cls: "config-sync-staged-count", text: summary });
     bar.createDiv({ cls: "config-sync-rule-spacer" });
+    // Both wear the primary language they were designed for — solid direction color, dark text
+    // (`is-primary`). NOT `setCta()`: mod-cta paints the accent background while `is-pull`'s own
+    // rule painted cyan TEXT, and cyan on accent blue was the unreadable button the class contract
+    // breakage shipped (acceptance B4 — the is-primary vocabulary had survived only in CSS).
     if (pullRows.length > 0) {
       const pull = new ButtonComponent(bar);
-      pull.setCta();
       renderActionIcon(pull.buttonEl, "pull");
       pull.buttonEl.appendText(` Pull ${pullRows.length} item${pullRows.length === 1 ? "" : "s"}`);
-      pull.buttonEl.addClass("config-sync-remote-btn", "is-pull");
+      pull.buttonEl.addClass("config-sync-remote-btn", "is-pull", "is-primary");
       pull.setDisabled(this.running);
       pull.onClick(() => void run(pull, "pull", pullRows));
     }
@@ -4566,7 +4569,7 @@ export class SyncCenterView extends ItemView {
       const push = new ButtonComponent(bar);
       renderActionIcon(push.buttonEl, "push");
       push.buttonEl.appendText(` Push ${pushRows.length} item${pushRows.length === 1 ? "" : "s"}`);
-      push.buttonEl.addClass("config-sync-remote-btn", "is-push");
+      push.buttonEl.addClass("config-sync-remote-btn", "is-push", "is-primary");
       push.setDisabled(this.running);
       push.onClick(() => void run(push, "push", pushRows));
     }

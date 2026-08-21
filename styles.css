@@ -510,7 +510,10 @@ body.is-phone .config-sync-fkey {
    the width. A small indent is all that says "these belong to the row above"; anything wider would
    spend on decoration the phone width it just bought. It stays in the DOM while collapsed —
    `:empty` keeps a folded row from carrying a stray gap under it. */
-.config-sync-files-list { margin-top: var(--size-4-1); margin-left: var(--size-4-3); }
+/* Indent to the card grid's VALUE column start (label track + column-gap of
+   .config-sync-cardrow) — the list is a full-width sibling of its row on purpose, but its left
+   edge lines up with every other row's value, not at an indent of its own. */
+.config-sync-files-list { margin-top: var(--size-4-1); margin-left: calc(130px + var(--size-4-2)); }
 .config-sync-files-list:empty { display: none; }
 /* The fold line leads with its own chevron + fixed-size icon — a flex row. */
 .config-sync-unchanged { display: flex; align-items: center; gap: 7px; color: var(--text-muted); font-size: var(--font-ui-smaller); margin-top: var(--size-4-2); cursor: pointer; }
@@ -751,9 +754,6 @@ body.is-mobile.config-sync-mobile-statusbar .status-bar {
 .config-sync-btnwrap button:disabled { opacity: 0.5; }
 .config-sync-remote-btn.is-pull.is-primary { background: var(--color-cyan); color: var(--background-primary); border: none; }
 .config-sync-remote-btn.is-push.is-primary { background: var(--color-pink); color: var(--background-primary); border: none; }
-.config-sync-remote-btn.is-dimmed { opacity: 0.55; }
-.config-sync-remote-btn.is-pull:not(.is-primary) { color: var(--color-cyan); }
-.config-sync-remote-btn.is-push:not(.is-primary) { color: var(--color-pink); }
 body.is-mobile .config-sync-actionbar { flex-wrap: wrap; }
 body.is-mobile .config-sync-actionbar .config-sync-staged-count { flex: 1 1 100%; }
 body.is-mobile .config-sync-actionbar button { padding: var(--size-4-1) var(--size-4-2); }
