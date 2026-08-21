@@ -185,3 +185,70 @@ describe("an encrypted item compared with a remote", () => {
     expect(entry?.files.map((f) => f.kind)).toEqual(["deleted"]); // only this side has it: an ordinary push row
   });
 });
+
+import { applyImport, planImport, pushExternal, ExternalStoreWriter } from "../src/core/ConfigSyncCore";
+import { decryptFile, parseFileEnvelope } from "../src/core/crypto";
+import { transcodeContent } from "../src/core/transcode";
+
+// The full 4c loop on real envelopes: vault A (passphrase "a") pushes to a remote keyed "b", the
+// far end reads its copy under ITS OWN key, a second push writes nothing, and a change made over
+// there comes back readable under A's key. Each side only ever holds ciphertext its own key opens.
+describe("a remote keyed differently, round trip", () => {
+  function memWriter(files: Record<string, string>): { writer: ExternalStoreWriter; files: Record<string, string>; writeLog: string[] } {
+    const writeLog: string[] = [];
+    const writer: ExternalStoreWriter = {
+      async listFiles() {
+        return Object.keys(files).sort();
+      },
+      async readFile(rel) {
+        const c = files[rel];
+        if (c === undefined) throw new Error(`no ${rel}`);
+        return c;
+      },
+      async writeFile(rel, content) {
+        files[rel] = content;
+        writeLog.push(rel);
+      },
+      async deleteFile(rel) {
+        delete files[rel];
+      },
+      async finalize() {},
+    };
+    return { writer, files, writeLog };
+  }
+
+  it("pushes readable-by-them, stays silent when nothing changed, pulls back readable-by-us", async () => {
+    const mine = await vault({ passphrase: "a", at: "2026-08-20T00:00:00.000Z", content: SECRET });
+    const remote = memWriter({ "store.lock.json": JSON.stringify({ capturedAt: "t", items: {}, version: 3 }) });
+    const pushOpts = {
+      skipRefs: [],
+      withheldPush: (): string[] => [],
+      expectPush: [],
+      transcode: (rel: string, content: string, existing: string | null) =>
+        transcodeContent({ rel, content, existing, from: "a", to: "b" }),
+    };
+    await pushExternal(mine.ctx, remote.writer, pushOpts);
+    const overThere = remote.files[STORE_REL];
+    expect(overThere).toBeDefined();
+    expect(await decryptFile("b", parseFileEnvelope(overThere!)!, "secrets")).toBe(SECRET);
+
+    // Steady state: fresh salts on every encryption, and still not a byte moves.
+    const afterFirst = remote.writeLog.length;
+    await pushExternal(mine.ctx, remote.writer, pushOpts);
+    expect(remote.writeLog.length).toBe(afterFirst);
+
+    // The far end edits; the pull lands a copy THIS vault's key opens.
+    const changed = JSON.stringify({ token: "rotated", theme: "dark" }, null, 2) + "\n";
+    const far = await vault({ passphrase: "b", at: "2026-08-22T00:00:00.000Z", content: changed });
+    remote.files[STORE_REL] = await far.io.read(`cs/${STORE_REL}`);
+    remote.files["store.lock.json"] = await far.io.read("cs/store.lock.json");
+    const pending = await planImport(mine.ctx, remote.writer, {
+      skipRefs: [],
+      withheldPull: () => [],
+      transcode: (rel, content, existing) => transcodeContent({ rel, content, existing, from: "b", to: "a" }),
+    });
+    await applyImport(mine.ctx, pending, pending.plan.conflicts.map(() => "remote" as const));
+    const local = await mine.io.read(`cs/${STORE_REL}`);
+    expect(await decryptFile("a", parseFileEnvelope(local)!, "secrets")).toBe(changed);
+  });
+});
