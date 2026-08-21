@@ -1131,6 +1131,7 @@ export class SyncCenterView extends ItemView {
     return remoteRowStatuses({
       entries: folded,
       verdicts,
+      uncomparable: this.host.remoteCheck(name)?.check.uncomparable ?? [],
       refOf: (g) => this.itemRefFor(g) ?? findGroupByName(this.groups, g)?.ref,
       localGroupNames,
     })
@@ -1837,7 +1838,7 @@ export class SyncCenterView extends ItemView {
 
   private renderViewBadge(row: HTMLElement, b: ViewBadge): void {
     if (b.kind === "remote-state") {
-      const icon = this.remoteIcon({ state: b.state, remoteCapturedAt: null, items: null, itemVerdicts: null });
+      const icon = this.remoteIcon({ state: b.state, remoteCapturedAt: null, items: null, itemVerdicts: null, uncomparable: [] });
       this.paintStateIcon(row.createSpan({ cls: `config-sync-state-icon ${icon.cls}`, attr: { "aria-label": icon.tip } }), icon);
       return;
     }

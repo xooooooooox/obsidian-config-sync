@@ -21,10 +21,14 @@ function changesOf(entry: RemoteDiffEntry): FileChanges {
 export function remoteRowStatuses(input: {
   entries: readonly RemoteDiffEntry[];
   verdicts: Record<string, ItemVerdict>;
+  // The items whose copies could not be read here (spec 3.8). Outranks both other inputs: a verdict
+  // is a claim about a comparison, and for these there was none.
+  uncomparable: readonly string[];
   refOf: (group: string) => string | undefined;
   localGroupNames: readonly string[];
 }): GroupStatus[] {
   const { entries, verdicts, refOf, localGroupNames } = input;
+  const unreadable = new Set<string>(input.uncomparable);
   const changesByGroup = new Map<string, FileChanges>();
   for (const e of entries) {
     // "" is diffRemote's store-metadata pseudo-entry and OTHER_STORE_FILES_GROUP its unattributable
@@ -38,6 +42,9 @@ export function remoteRowStatuses(input: {
     // A row with no ref carries no rule and no lock entry to judge by, so the file diff is all
     // there is and a difference reads as an incoming one. (Plan 3b gives those items a ref.)
     if (ref === undefined) return changesByGroup.has(group) ? "store-newer" : "in-sync";
+    // The same state the device relation gives an encrypted item it cannot open — one word for one
+    // thing, and the relation's own copy table is what makes it read as `Can't compare` here.
+    if (unreadable.has(ref)) return "locked";
     const verdict = verdicts[ref];
     return verdict === "pull" ? "store-newer" : verdict === "push" ? "local-changed" : "in-sync";
   };

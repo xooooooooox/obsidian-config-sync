@@ -88,8 +88,8 @@ import { classifySettings, CURRENT_SCHEMA, SCHEMA_FUTURE_NOTICE, SCHEMA_UPGRADE_
 import { deviceOptOutsFor, migrateV2Settings } from "./core/v2Migration";
 import { migrateV4Settings } from "./core/v4Migration";
 import { refsBlockedFor, withItemDirection, withKeyDirection } from "./core/remoteRules";
-import { refsWithKeyRules, unexchangedPatternPredicate, withheldPatternPredicate } from "./core/keyWithholding";
-import { compareStoreItem } from "./core/itemCompare";
+import { unexchangedPatternPredicate, withheldPatternPredicate } from "./core/keyWithholding";
+import { compareStoreItem, refsNeedingContentCompare } from "./core/itemCompare";
 import { migrateV5Settings } from "./core/v5Migration";
 import { applySwitchList, captureSwitchList, EnablementList, enablementListFile, isSwitchListGroup, localRealPath, parseSwitchList, readLocalSwitchList, subtractForceOff, switchDivergence, SwitchList, switchListMemberOn, writeLocalSwitchList } from "./core/switchList";
 import { applyTransform, captureTransform, isWholeFileEncrypted, scanSensitive, SensitiveScan } from "./core/modes";
@@ -554,25 +554,25 @@ export default class ConfigSyncPlugin extends Plugin {
         const unexchanged = unexchangedPatternPredicate(remote.items, this.compiledGroups);
         const check = await checkRemote(localLock, reader, ignore, {
           groups: this.compiledGroups,
-          keyRuled: {
-            refs: refsWithKeyRules(remote.items),
-            sameApartFromWithheld: async (ref) =>
-              (await compareStoreItem({
+          content: {
+            refs: refsNeedingContentCompare({ groups: this.compiledGroups, items: remote.items }),
+            compare: (ref) =>
+              compareStoreItem({
                 io: ctx.io,
                 rootPath: ctx.rootPath,
                 reader,
                 groups: this.compiledGroups,
                 ref,
                 masked: unexchanged,
-                // Both sides open with this vault's own passphrase today; Plan 4b gives a remote
-                // its own, and only this line changes.
+                // Both sides open with this vault's own passphrase today; Plan 4b gives a remote its
+                // own, and only this line changes.
                 passphrase: { mine: ctx.passphrase, theirs: ctx.passphrase },
-              })) === "same",
+              }),
           },
         });
         this.remoteChecks.set(remote.name, { check, at: Date.now() });
       } catch (e) {
-        this.remoteChecks.set(remote.name, { check: { state: "unknown", remoteCapturedAt: null, items: null, itemVerdicts: null }, at: Date.now() });
+        this.remoteChecks.set(remote.name, { check: { state: "unknown", remoteCapturedAt: null, items: null, itemVerdicts: null, uncomparable: [] }, at: Date.now() });
         console.error(`Config Sync: remote check failed for ${remote.name}`, e);
       }
       if (this.remoteRefreshProgress !== null) this.remoteRefreshProgress.done++;
@@ -956,6 +956,8 @@ export default class ConfigSyncPlugin extends Plugin {
           // before the byte comparison, because those two values are MEANT to differ and a row
           // about them could never be acted on.
           unexchanged: unexchangedPatternPredicate(remote.items, this.compiledGroups),
+          // Each side opened with its own key (spec 3.8); the two are the same one until Plan 4b.
+          passphrase: { mine: ctx.passphrase, theirs: ctx.passphrase },
         });
         // A lock-only delta (version-refresh capture on the other side) is real pull payload
         // even when every store file matches — surface it so the hint isn't contradictory.

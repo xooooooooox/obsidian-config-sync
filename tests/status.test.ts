@@ -5,6 +5,7 @@ import { lockByName } from "./lock";
 import { lockRefFor } from "../src/core/itemKeys";
 import { SELF_ITEM_REF } from "../src/core/catalog";
 import { statusForGroups, checkRemote, DirectionIgnores, diffRemote, bucketCounts, remoteLockAhead, remoteItemCounts, remoteItemVerdicts, remoteLockLabels, sumRemoteItemCounts, GroupStatus, RemoteCheck } from "../src/core/status";
+import { ContentVerdict } from "../src/core/cipherCompare";
 import { applyUpdates, emptyLedger, Ledger } from "../src/core/ledger";
 import { directionForState, stageableRow } from "../src/ui/panelModel";
 import { StoreLock, StoreLockEntry, SyncGroup, THIS_DEVICE } from "../src/core/types";
@@ -14,7 +15,8 @@ import { MemFS, FakePlugins, memGroupsIO } from "./memfs";
 const NO_IGNORES: DirectionIgnores = { pull: [], push: [] };
 
 // A remote with no per-key rules: nothing can be settled by content, and nothing is asked to be.
-const NO_KEY_RULES = { groups: [], keyRuled: { refs: [], sameApartFromWithheld: async (): Promise<boolean> => true } };
+const NO_PASSPHRASE = { mine: null, theirs: null };
+const NO_KEY_RULES = { groups: [], content: { refs: [], compare: async (): Promise<ContentVerdict> => "same" } };
 
 const MANIFEST = JSON.stringify({
   version: 1,
@@ -240,7 +242,7 @@ describe("diffRemote", () => {
       "store/configdir/snippets/one.css": "REMOTE", // differs
       "store/configdir/snippets/extra.css": "x", // remote-only
     };
-    const entries = await diffRemote(ctx, fakeReader(remote), { skipRefs: [], unexchanged: () => [] });
+    const entries = await diffRemote(ctx, fakeReader(remote), { skipRefs: [], unexchanged: () => [], passphrase: NO_PASSPHRASE });
     const snip = entries.find((e) => e.group === "snippets");
     expect(snip?.files).toEqual([
       { itemRel: "extra.css", kind: "added", local: null, remote: "x" },
@@ -260,7 +262,7 @@ describe("diffRemote", () => {
       "store/configdir/snippets/one.css": "one",
       "store/configdir/plugins/demo/data.json": JSON.stringify({ ...JSON.parse(local), theme: "THEIRS" }, null, 2) + "\n",
     };
-    expect(await diffRemote(ctx, fakeReader(remote), { skipRefs: [], unexchanged: () => ["theme"] })).toEqual([]);
+    expect(await diffRemote(ctx, fakeReader(remote), { skipRefs: [], unexchanged: () => ["theme"], passphrase: NO_PASSPHRASE })).toEqual([]);
   });
 
   it("still reports that file as soon as anything else differs", async () => {
@@ -272,7 +274,7 @@ describe("diffRemote", () => {
       "store/configdir/snippets/one.css": "one",
       "store/configdir/plugins/demo/data.json": JSON.stringify({ ...JSON.parse(local), theme: "THEIRS", other: 1 }, null, 2) + "\n",
     };
-    const entries = await diffRemote(ctx, fakeReader(remote), { skipRefs: [], unexchanged: () => ["theme"] });
+    const entries = await diffRemote(ctx, fakeReader(remote), { skipRefs: [], unexchanged: () => ["theme"], passphrase: NO_PASSPHRASE });
     expect(entries.flatMap((e) => e.files.map((f) => f.itemRel))).toEqual(["data.json"]);
   });
 
@@ -293,7 +295,7 @@ describe("diffRemote", () => {
       "store/configdir/plugins/config-sync/data.json": remoteSelf,
       "store/mystery/leftover.bin": "x", // matches neither manifest
     };
-    const entries = await diffRemote(ctx, fakeReader(remote), { skipRefs: [], unexchanged: () => [] });
+    const entries = await diffRemote(ctx, fakeReader(remote), { skipRefs: [], unexchanged: () => [], passphrase: NO_PASSPHRASE });
     const byName = Object.fromEntries(entries.map((e) => [e.group, e.files]));
     expect(byName["hotkeys"]).toEqual([{ itemRel: "hotkeys.json", kind: "added", local: null, remote: '{"a":1}' }]);
     expect(byName["snippets"]).toEqual([{ itemRel: "one.css", kind: "added", local: null, remote: "one" }]);
@@ -311,9 +313,9 @@ describe("diffRemote", () => {
     io.seed({ ".obs/community-plugins.json": '["a","b","c"]', "cs/store/configdir/community-plugins.json": '["a","b","c"]' });
     await writeGroups(ctx, parseSyncManifest(SWITCH_MANIFEST).groups);
     const reordered = { "store/configdir/community-plugins.json": '["c","a","b"]' };
-    expect(await diffRemote(ctx, fakeReader(reordered), { skipRefs: [], unexchanged: () => [] })).toEqual([]);
+    expect(await diffRemote(ctx, fakeReader(reordered), { skipRefs: [], unexchanged: () => [], passphrase: NO_PASSPHRASE })).toEqual([]);
     const membershipDiff = { "store/configdir/community-plugins.json": '["c","a","b","d"]' };
-    const entries = await diffRemote(ctx, fakeReader(membershipDiff), { skipRefs: [], unexchanged: () => [] });
+    const entries = await diffRemote(ctx, fakeReader(membershipDiff), { skipRefs: [], unexchanged: () => [], passphrase: NO_PASSPHRASE });
     expect(entries.find((e) => e.group === "community-plugins")?.files.map((f) => [f.itemRel, f.kind])).toEqual([["community-plugins.json", "updated"]]);
   });
 
@@ -326,7 +328,7 @@ describe("diffRemote", () => {
       "store/configdir/snippets/one.css": "one",
       "store/configdir/plugins/demo/data.json": await io.read("cs/store/configdir/plugins/demo/data.json"),
     };
-    const entries = await diffRemote(ctx, fakeReader(remote), { skipRefs: [], unexchanged: () => [] });
+    const entries = await diffRemote(ctx, fakeReader(remote), { skipRefs: [], unexchanged: () => [], passphrase: NO_PASSPHRASE });
     expect(entries).toEqual([]); // bookkeeping drift alone means "matches"
   });
 
@@ -342,8 +344,8 @@ describe("diffRemote", () => {
       "store/configdir/plugins/config-sync/data.json": JSON.stringify({ groups: selfGroups, theirs: true }),
       "store/configdir/plugins/config-sync/data.json.__scopes__.desktop.json": "{}",
     };
-    expect(await diffRemote(ctx, fakeReader(remote), { skipRefs: [SELF_ITEM_REF], unexchanged: () => [] })).toEqual([]);
-    const withSelf = await diffRemote(ctx, fakeReader(remote), { skipRefs: [], unexchanged: () => [] });
+    expect(await diffRemote(ctx, fakeReader(remote), { skipRefs: [SELF_ITEM_REF], unexchanged: () => [], passphrase: NO_PASSPHRASE })).toEqual([]);
+    const withSelf = await diffRemote(ctx, fakeReader(remote), { skipRefs: [], unexchanged: () => [], passphrase: NO_PASSPHRASE });
     expect(withSelf.map((e) => e.group)).toEqual(["plugin-config-sync"]);
     expect(withSelf[0]?.files.map((f) => f.kind).sort()).toEqual(["added", "updated"]);
   });
@@ -597,11 +599,11 @@ describe("checkRemote · key-ruled items", () => {
     const asked: string[] = [];
     const check = await checkRemote(local, fakeReader(remoteAhead), NO_IGNORES, {
       groups: [],
-      keyRuled: {
+      content: {
         refs: ["community/dataview"],
-        sameApartFromWithheld: async (ref: string) => {
+        compare: async (ref: string): Promise<ContentVerdict> => {
           asked.push(ref);
-          return true; // masked-equal: nothing waiting, however the fingerprints compare
+          return "same"; // whatever the fingerprints say, the two copies hold the same thing
         },
       },
     });
@@ -613,7 +615,7 @@ describe("checkRemote · key-ruled items", () => {
   it("keeps the verdict when the masked comparison still sees a difference", async () => {
     const check = await checkRemote(local, fakeReader(remoteAhead), NO_IGNORES, {
       groups: [],
-      keyRuled: { refs: ["community/dataview"], sameApartFromWithheld: async () => false },
+      content: { refs: ["community/dataview"], compare: async (): Promise<ContentVerdict> => "differs" },
     });
     expect(check.itemVerdicts?.["community/dataview"]).toBe("pull");
   });
@@ -622,15 +624,33 @@ describe("checkRemote · key-ruled items", () => {
     let asked = 0;
     await checkRemote(local, fakeReader(remoteAhead), NO_IGNORES, {
       groups: [],
-      keyRuled: {
+      content: {
         refs: [],
-        sameApartFromWithheld: async () => {
+        compare: async (): Promise<ContentVerdict> => {
           asked += 1;
-          return true;
+          return "same";
         },
       },
     });
     expect(asked).toBe(0);
+  });
+
+  it("neither judges nor counts an item it cannot open, and names it", async () => {
+    const check = await checkRemote(local, fakeReader(remoteAhead), NO_IGNORES, {
+      groups: [],
+      content: { refs: ["community/dataview"], compare: async (): Promise<ContentVerdict> => "cannot" },
+    });
+    expect(check.uncomparable).toEqual(["community/dataview"]);
+    expect(check.itemVerdicts?.["community/dataview"]).toBeUndefined();
+    expect(check.items).toEqual({ push: 0, pull: 0 });
+  });
+
+  it("leaves `uncomparable` empty when every item could be read", async () => {
+    const check = await checkRemote(local, fakeReader(remoteAhead), NO_IGNORES, {
+      groups: [],
+      content: { refs: ["community/dataview"], compare: async (): Promise<ContentVerdict> => "differs" },
+    });
+    expect(check.uncomparable).toEqual([]);
   });
 });
 
@@ -880,7 +900,7 @@ describe("remoteItemCounts · counts the verdict table", () => {
 });
 
 describe("sumRemoteItemCounts", () => {
-  const check = (items: { push: number; pull: number } | null): RemoteCheck => ({ state: "unknown", remoteCapturedAt: null, items, itemVerdicts: null });
+  const check = (items: { push: number; pull: number } | null): RemoteCheck => ({ state: "unknown", remoteCapturedAt: null, items, itemVerdicts: null, uncomparable: [] });
 
   it("adds the item counts up and says how many remotes they came from", () => {
     expect(sumRemoteItemCounts([check({ push: 2, pull: 0 }), check({ push: 1, pull: 3 })])).toEqual({ push: 3, pull: 3, remotes: 2, uncounted: 0 });

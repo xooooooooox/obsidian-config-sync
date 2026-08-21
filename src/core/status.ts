@@ -6,11 +6,11 @@ import { carrierRef, joinRef } from "./itemKeys";
 import { lockEntry, lockEntryList, lockLineage, parseStoreLock, storeLockVersion, STORE_LOCK_VERSION } from "./manifest";
 import { isPlainObject } from "./sanitize";
 import { entryTime, hasPerItemPayload, itemFreshness } from "./lockFreshness";
+import { ContentVerdict, compareCopies } from "./cipherCompare";
 import { contentUnchanged, groupNeedsPassphrase } from "./modes";
 import { parseFileEnvelope } from "./crypto";
 import { localRealPath, parseSwitchList, readLocalSwitchList, isSwitchListGroup, switchListsEqual } from "./switchList";
 import { ABSENT_HASH, BaselineEntry, hashDirSide, hashFileSide, Ledger, LedgerUpdates } from "./ledger";
-import { sameApartFromWithheld } from "./keyWithholding";
 
 export type GroupState = "in-sync" | "local-changed" | "store-newer" | "differs" | "not-captured" | "never-synced" | "no-settings" | "locked";
 
@@ -223,6 +223,11 @@ export interface RemoteCheck {
   // ref -> the direction that item still needs, null on the same "cannot judge" terms as `items`.
   // The panel's rows read THIS; `items` is only its tally.
   itemVerdicts: Record<string, ItemVerdict> | null;
+  // The items whose two copies could not be read, so nothing is claimed about them (spec 3.8): they
+  // are in neither `itemVerdicts` nor either tally, and the panel gives them their own bucket. An
+  // empty list is the normal state; it is never null, because "we asked and nobody was unreadable"
+  // and "we never asked" both mean the same thing to every surface that reads it.
+  uncomparable: string[];
 }
 
 // `ignore` names the lock entries that never count, PER DIRECTION (spec 3.5) — callers pass
@@ -239,11 +244,11 @@ export async function checkRemote(
   ignore: DirectionIgnores,
   opts: {
     groups: readonly SyncGroup[];
-    // The items whose two copies differ BY DESIGN, because some key of theirs travels neither way,
-    // and the only thing that can tell whether they still need anything: their fingerprints never
-    // agree, so the entries alone would pin an arrow no run could clear (spec 3.4.3). Asked once per
-    // such item, and only for them — a remote with no key rules passes an empty list and pays nothing.
-    keyRuled: { refs: readonly string[]; sameApartFromWithheld: (ref: string) => Promise<boolean> };
+    // The items the two locks cannot settle, and the only ones a content read is spent on: those
+    // whose fingerprints differ by design (a key of theirs travels neither way, spec 3.4.3) and
+    // those that have no fingerprint at all (they hold ciphertext, spec 3.8). Asked once per such
+    // item — a remote with no key rules and nothing encrypted passes an empty list and pays nothing.
+    content: { refs: readonly string[]; compare: (ref: string) => Promise<ContentVerdict> };
   }
 ): Promise<RemoteCheck> {
   const groups = opts.groups;
@@ -256,42 +261,52 @@ export async function checkRemote(
   // one inviting the push it would then decline (the rule the version gate already follows for a future lock).
   if (!files.includes("store.lock.json")) {
     const empty = !remoteDeclaresStore(files) && remoteStoreContentRels(files).length === 0;
-    return { state: empty ? "no-store" : "unknown", remoteCapturedAt: null, items: null, itemVerdicts: null };
+    return { state: empty ? "no-store" : "unknown", remoteCapturedAt: null, items: null, itemVerdicts: null, uncomparable: [] };
   }
   let remote: StoreLock;
   try {
     remote = parseStoreLock(await reader.readFile("store.lock.json"), groups);
   } catch {
-    return { state: "unknown", remoteCapturedAt: null, items: null, itemVerdicts: null };
+    return { state: "unknown", remoteCapturedAt: null, items: null, itemVerdicts: null, uncomparable: [] };
   }
   // A remote this build cannot read must not look ACTIONABLE. The version gate
   // refuses the pull itself, but a refusal the user only meets after accepting an invitation is a
   // worse surface than never being invited: "unknown" already means "this remote cannot be
   // compared", which is exactly true here. No new RemoteState, no UI change. The capture stamp is
   // still reported — it parsed, and saying WHEN is not the same as inviting a pull.
-  if (storeLockVersion(remote) > STORE_LOCK_VERSION) return { state: "unknown", remoteCapturedAt: remote.capturedAt, items: null, itemVerdicts: null };
+  if (storeLockVersion(remote) > STORE_LOCK_VERSION) return { state: "unknown", remoteCapturedAt: remote.capturedAt, items: null, itemVerdicts: null, uncomparable: [] };
   // No local lock yet (bootstrap device) but the remote parsed fine: a pull would populate
   // the store, so this is a known state, not "unknown" — reserve that for unreadable remotes.
   if (localLock === null) {
     // Nothing here to compare content against, so nothing can be settled that way: on a bootstrap
     // device every item the remote holds is waiting to come in, key rules included.
     const first = remoteItemVerdicts(null, remote, ignore, new Set());
-    return { state: "remote-newer", remoteCapturedAt: remote.capturedAt, items: remoteItemCounts(first), itemVerdicts: first };
+    return { state: "remote-newer", remoteCapturedAt: remote.capturedAt, items: remoteItemCounts(first), itemVerdicts: first, uncomparable: [] };
   }
   // After the three refusals above, so a remote nobody can compare never costs a single extra read.
   const settled = new Set<string>();
-  for (const ref of opts.keyRuled.refs) {
-    if (await opts.keyRuled.sameApartFromWithheld(ref)) settled.add(ref);
+  const uncomparable: string[] = [];
+  for (const ref of opts.content.refs) {
+    const verdict = await opts.content.compare(ref);
+    // Both answers stop the lock entries from speaking, for opposite reasons: "same" because there
+    // is demonstrably nothing to do, "cannot" because we have no business pinning an arrow on a
+    // comparison that never happened. Only "cannot" is also REPORTED — an item nobody could read is
+    // something to say, an item that agrees is not.
+    if (verdict === "same") settled.add(ref);
+    if (verdict === "cannot") {
+      settled.add(ref);
+      uncomparable.push(ref);
+    }
   }
   const verdicts = remoteItemVerdicts(localLock, remote, ignore, settled);
   const counts = remoteItemCounts(verdicts);
   const perItem = perItemRemoteState(localLock, remote, ignore, settled);
-  if (perItem !== null) return { state: perItem, remoteCapturedAt: remote.capturedAt, items: counts, itemVerdicts: verdicts };
+  if (perItem !== null) return { state: perItem, remoteCapturedAt: remote.capturedAt, items: counts, itemVerdicts: verdicts, uncomparable };
   const r = Date.parse(remote.capturedAt);
   const l = Date.parse(localLock.capturedAt);
-  if (Number.isNaN(r) || Number.isNaN(l)) return { state: "unknown", remoteCapturedAt: remote.capturedAt, items: counts, itemVerdicts: verdicts };
+  if (Number.isNaN(r) || Number.isNaN(l)) return { state: "unknown", remoteCapturedAt: remote.capturedAt, items: counts, itemVerdicts: verdicts, uncomparable };
   const state: RemoteState = r > l ? "remote-newer" : r < l ? "remote-older" : "same";
-  return { state, remoteCapturedAt: remote.capturedAt, items: counts, itemVerdicts: verdicts };
+  return { state, remoteCapturedAt: remote.capturedAt, items: counts, itemVerdicts: verdicts, uncomparable };
 }
 
 // "Remote has newer version info" — semantic, not byte, comparison of the two store locks
@@ -494,6 +509,10 @@ export interface RemoteDiffFile {
 export interface RemoteDiffEntry {
   group: string;
   files: RemoteDiffFile[];
+  // At least one of this item's files is encrypted and could not be opened here, so what it holds
+  // is unknown rather than different (spec 3.8). It gets no file rows — listing one would claim a
+  // change nobody verified — and the card says why instead.
+  uncomparable?: true;
 }
 
 // Store files that neither manifest can attribute to a group. Kept visible (instead of being
@@ -503,7 +522,12 @@ export const OTHER_STORE_FILES_GROUP = "(other store files)";
 export async function diffRemote(
   ctx: CoreContext,
   reader: ExternalStoreReader,
-  opts: { skipRefs: ItemRef[]; unexchanged: (rel: string) => string[] }
+  opts: {
+    skipRefs: ItemRef[];
+    unexchanged: (rel: string) => string[];
+    // Each side's own key (spec 3.8). Equal today — a remote gets its own in Plan 4b.
+    passphrase: { mine: string | null; theirs: string | null };
+  }
 ): Promise<RemoteDiffEntry[]> {
   const manifest = await loadManifest(ctx);
   const remoteFiles = await reader.listFiles();
@@ -531,20 +555,23 @@ export async function diffRemote(
     }
     return e;
   };
-  const filesMatch = (name: string, rel: string, remoteContent: string, localContent: string): boolean => {
-    if (remoteContent === localContent) return true;
-    // Keys this remote exchanges neither way differ by design and always will (spec 3.3): a file
-    // whose ONLY difference is one of them has nothing waiting, and listing it puts a row on the
-    // card that no run could ever clear. Asked only where such keys exist, so a remote without key
-    // rules compares byte for byte exactly as before.
-    const patterns = opts.unexchanged(rel);
-    if (patterns.length > 0 && sameApartFromWithheld({ a: remoteContent, b: localContent, patterns })) return true;
+  // Byte equality, the keys that travel neither way (spec 3.3, masked before deciding), and
+  // ciphertext (spec 3.8, compared by what it says) all live in `compareCopies` — this adds only the
+  // one thing that is about the ITEM rather than the two copies.
+  const compareFiles = async (name: string, rel: string, remoteContent: string, localContent: string): Promise<ContentVerdict> => {
+    const verdict = await compareCopies({
+      mine: localContent,
+      theirs: remoteContent,
+      passphrase: opts.passphrase,
+      masked: opts.unexchanged(rel),
+      groupName: name,
+    });
+    if (verdict !== "differs" || !isSwitchListGroup(name)) return verdict;
     // Switch-list store copies are order-insensitive: each device captures in its own
     // store-stable order, so equal membership in a different order is not a difference.
-    if (!isSwitchListGroup(name)) return false;
     const a = parseSwitchList(remoteContent);
     const b = parseSwitchList(localContent);
-    return a !== null && b !== null && switchListsEqual(a, b, []);
+    return a !== null && b !== null && switchListsEqual(a, b, []) ? "same" : "differs";
   };
   for (const rel of remoteFiles) {
     if (skipped(rel)) continue;
@@ -554,8 +581,11 @@ export async function diffRemote(
     } else {
       const remoteContent = await reader.readFile(rel);
       const localContent = await ctx.io.read(`${ctx.rootPath}/${rel}`);
-      if (!filesMatch(name, rel, remoteContent, localContent)) {
+      const verdict = await compareFiles(name, rel, remoteContent, localContent);
+      if (verdict === "differs") {
         entry(name).files.push({ itemRel, kind: "updated", local: localContent, remote: remoteContent });
+      } else if (verdict === "cannot") {
+        entry(name).uncomparable = true;
       }
     }
   }
@@ -569,5 +599,5 @@ export async function diffRemote(
   }
   // The "" store-metadata pseudo-entry (lock + manifest bookkeeping) drifts on every capture;
   // it is not a difference worth reporting here. Pull/push REPORTS still show it.
-  return [...byName.values()].filter((e) => e.group !== "" && e.files.length > 0);
+  return [...byName.values()].filter((e) => e.group !== "" && (e.files.length > 0 || e.uncomparable === true));
 }

@@ -15,6 +15,7 @@ describe("remoteRowStatuses", () => {
 
   it("takes each row's direction from the verdict table, not from the file diff", () => {
     const rows = remoteRowStatuses({
+      uncomparable: [],
       entries: [entry("hotkeys", ["updated"]), entry("dataview", ["updated"])],
       verdicts: { "obsidian/hotkeys": "pull", "community/dataview": "push" },
       refOf,
@@ -26,23 +27,24 @@ describe("remoteRowStatuses", () => {
 
   it("calls an item in sync when its bytes differ but nothing flows in an allowed direction", () => {
     // spec 3.3: the remote edited a Push only item. Different bytes, no pending work.
-    const rows = remoteRowStatuses({ entries: [entry("dataview", ["updated"])], verdicts: {}, refOf, localGroupNames: local });
+    const rows = remoteRowStatuses({ uncomparable: [], entries: [entry("dataview", ["updated"])], verdicts: {}, refOf, localGroupNames: local });
     expect(rows.find((r) => r.group === "dataview")?.state).toBe("in-sync");
   });
 
   it("still carries the changed files, so the card can show what the row stays quiet about", () => {
-    const rows = remoteRowStatuses({ entries: [entry("dataview", ["updated", "added"])], verdicts: {}, refOf, localGroupNames: local });
+    const rows = remoteRowStatuses({ uncomparable: [], entries: [entry("dataview", ["updated", "added"])], verdicts: {}, refOf, localGroupNames: local });
     expect(rows.find((r) => r.group === "dataview")?.changes).toEqual({ added: ["f1.json"], updated: ["f0.json"], deleted: [] });
   });
 
   it("gives a row to an item the verdict table names but the file diff never mentioned", () => {
     // Version info moved on the remote and nothing else — a real pull, with no file-level delta.
-    const rows = remoteRowStatuses({ entries: [], verdicts: { "obsidian/hotkeys": "pull" }, refOf, localGroupNames: local });
+    const rows = remoteRowStatuses({ uncomparable: [], entries: [], verdicts: { "obsidian/hotkeys": "pull" }, refOf, localGroupNames: local });
     expect(rows.find((r) => r.group === "hotkeys")?.state).toBe("store-newer");
   });
 
   it("keeps an entry with no local counterpart — the remote has items this device does not", () => {
     const rows = remoteRowStatuses({
+      uncomparable: [],
       entries: [entry("themes", ["added"])],
       verdicts: {},
       refOf: (g) => (g === "themes" ? undefined : refOf(g)),
@@ -54,6 +56,7 @@ describe("remoteRowStatuses", () => {
 
   it("folds the file kinds into the same FileChanges shape the device relation uses", () => {
     const rows = remoteRowStatuses({
+      uncomparable: [],
       entries: [entry("hotkeys", ["added", "updated", "updated", "deleted"])],
       verdicts: { "obsidian/hotkeys": "pull" },
       refOf,
@@ -63,14 +66,26 @@ describe("remoteRowStatuses", () => {
   });
 
   it("drops the store-metadata pseudo-entry, which is bookkeeping and never an item", () => {
-    const rows = remoteRowStatuses({ entries: [entry("", ["updated"])], verdicts: {}, refOf, localGroupNames: local });
+    const rows = remoteRowStatuses({ uncomparable: [], entries: [entry("", ["updated"])], verdicts: {}, refOf, localGroupNames: local });
     expect(rows.every((r) => r.group !== "")).toBe(true);
   });
 
   it("says nothing is waiting when the table is empty and the diff found nothing", () => {
-    const rows = remoteRowStatuses({ entries: [], verdicts: {}, refOf, localGroupNames: local });
+    const rows = remoteRowStatuses({ uncomparable: [], entries: [], verdicts: {}, refOf, localGroupNames: local });
     expect(rows.every((r) => r.state === "in-sync")).toBe(true);
     expect(rows).toHaveLength(3);
+  });
+
+  it("says it cannot compare an item whose copies could not be opened here", () => {
+    const rows = remoteRowStatuses({
+      uncomparable: ["community/dataview"],
+      entries: [entry("dataview", ["updated"])],
+      verdicts: { "community/dataview": "pull" },
+      refOf,
+      localGroupNames: local,
+    });
+    // Outranks both the verdict and the file diff: neither is a claim anybody verified.
+    expect(rows.find((r) => r.group === "dataview")?.state).toBe("locked");
   });
 });
 

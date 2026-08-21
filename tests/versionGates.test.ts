@@ -13,9 +13,10 @@ import { CaptureItem, ApplyItem } from "../src/core/ConfigSyncCore";
 import { itemsIn } from "./items";
 import { Item, ItemDef, ItemMap } from "../src/core/registry";
 import { enablementRuleFor } from "../src/core/enablementRules";
+import { ContentVerdict } from "../src/core/cipherCompare";
 
 // A remote with no per-key rules: nothing can be settled by content, and nothing is asked to be.
-const NO_KEY_RULES = { groups: [], keyRuled: { refs: [], sameApartFromWithheld: async (): Promise<boolean> => true } };
+const NO_KEY_RULES = { groups: [], content: { refs: [], compare: async (): Promise<ContentVerdict> => "same" } };
 
 // spec 2026-08-11-data-model-hardening.md (invariant II.3): a document or store written by a
 // NEWER build is refused with a clear message — never downgraded, never reset, never overwritten.
