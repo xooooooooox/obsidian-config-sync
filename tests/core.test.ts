@@ -8,7 +8,7 @@ import { SwitchList } from "../src/core/switchList";
 import { SELF_GROUP_NAME, SELF_ITEM_REF, selfPresetRules } from "../src/core/catalog";
 import { RemoteItems, StoreLock, SyncGroup, EVERYWHERE, THIS_DEVICE, perClass } from "../src/core/types";
 import { withheldPatternPredicate } from "../src/core/keyWithholding";
-import { isFieldEnvelope, parseFileEnvelope } from "../src/core/crypto";
+import { decryptFile, encryptFile, isFieldEnvelope, parseFileEnvelope } from "../src/core/crypto";
 import { statusForGroups, remoteLockAhead } from "../src/core/status";
 import { emptyLedger } from "../src/core/ledger";
 import { isChanged } from "../src/core/runHistory";
@@ -17,6 +17,7 @@ import ConfigSyncPlugin from "../src/main";
 import { SelfSyncInfo } from "../src/ui/SyncCenterView";
 import { itemsIn } from "./items";
 import { differentKeyHold } from "../src/core/differentKeyHold";
+import { transcodeContent } from "../src/core/transcode";
 
 export const MANIFEST = JSON.stringify({
   version: 1,
@@ -3494,3 +3495,88 @@ describe("a remote that keeps its own passphrase", () => {
     expect(differentKeyHold({ key: { kind: "same-as-local", passphrase: "pw" }, remoteName: "work", groups: GROUPS })).toEqual({ skipRefs: [], results: [] });
   });
 });
+
+describe("pushExternal · transcode", () => {
+  const ENC_MANIFEST = JSON.stringify({
+    version: 1,
+    groups: [{ name: "secrets", path: "{configDir}/secrets.json", type: "file", devices: "all", mode: "encrypted" }],
+  });
+
+  async function seededEncrypted(plain: string): Promise<{ io: MemFS; ctx: CoreContext }> {
+    const { io, ctx } = setup();
+    io.seed({
+      "cs/store.lock.json": JSON.stringify({ capturedAt: "t", items: {}, version: 3 }),
+      "cs/store/configdir/secrets.json": await encryptFile("mine-pw", plain),
+    });
+    await seedGroups(ctx, ENC_MANIFEST);
+    return { io, ctx };
+  }
+
+  function hook(): (rel: string, content: string, existing: string | null) => Promise<string> {
+    return (rel, content, existing) => transcodeContent({ rel, content, existing, from: "mine-pw", to: "their-pw" });
+  }
+
+  it("sends the one-time conversion readable by the destination's own key", async () => {
+    const { ctx } = await seededEncrypted('{"token":"x"}\n');
+    const fw = fakeWriter({ "store.lock.json": JSON.stringify({ capturedAt: "t", items: {}, version: 3 }) });
+    await pushExternal(ctx, fw.writer, { skipRefs: [], withheldPush: () => [], expectPush: [], transcode: hook() });
+    const sent = fw.files["store/configdir/secrets.json"];
+    expect(sent).toBeDefined();
+    expect(await decryptFile("their-pw", parseFileEnvelope(sent!)!, "secrets")).toBe('{"token":"x"}\n');
+  });
+
+  it("writes nothing the second time — the destination's envelope is reused, not churned", async () => {
+    const { ctx } = await seededEncrypted('{"token":"x"}\n');
+    const fw = fakeWriter({ "store.lock.json": JSON.stringify({ capturedAt: "t", items: {}, version: 3 }) });
+    await pushExternal(ctx, fw.writer, { skipRefs: [], withheldPush: () => [], expectPush: [], transcode: hook() });
+    const afterFirst = fw.writeLog.length;
+    await pushExternal(ctx, fw.writer, { skipRefs: [], withheldPush: () => [], expectPush: [], transcode: hook() });
+    expect(fw.writeLog.length).toBe(afterFirst); // fresh salts notwithstanding, steady state is silent
+  });
+});
+
+describe("planImport · transcode", () => {
+  it("lands the remote's envelope re-encrypted for this vault, and quiet when nothing changed", async () => {
+    const { io, ctx } = setup();
+    const localCopy = await encryptFile("mine-pw", '{"token":"x"}\n');
+    io.seed({
+      "cs/store.lock.json": JSON.stringify({ capturedAt: "t", items: {}, version: 3 }),
+      "cs/store/configdir/secrets.json": localCopy,
+    });
+    await seedGroups(ctx, JSON.stringify({
+      version: 1,
+      groups: [{ name: "secrets", path: "{configDir}/secrets.json", type: "file", devices: "all", mode: "encrypted" }],
+    }));
+    const remoteSame = {
+      "store.lock.json": JSON.stringify({ capturedAt: "t", items: {}, version: 3 }),
+      "store/configdir/secrets.json": await encryptFile("their-pw", '{"token":"x"}\n'),
+    };
+    const hook = (rel: string, content: string, existing: string | null): Promise<string> =>
+      transcodeContent({ rel, content, existing, from: "their-pw", to: "mine-pw" });
+    const same = await planImport(ctx, fakeReader2(remoteSame), { skipRefs: [], withheldPull: () => [], transcode: hook });
+    // The reuse produced this vault's own bytes, so the plan holds no work at all for the item.
+    expect(same.plan.auto.writeFiles.filter((f) => f.rel.includes("secrets"))).toEqual([]);
+    expect(same.plan.conflicts).toEqual([]);
+
+    const remoteChanged = { ...remoteSame, "store/configdir/secrets.json": await encryptFile("their-pw", '{"token":"NEW"}\n') };
+    const changed = await planImport(ctx, fakeReader2(remoteChanged), { skipRefs: [], withheldPull: () => [], transcode: hook });
+    const all = [...changed.plan.auto.writeFiles, ...changed.plan.conflicts.flatMap((c) => (c.kind === "file" ? [{ rel: c.rel, content: c.remoteContent }] : []))];
+    const planned = all.find((f) => f.rel.includes("secrets"));
+    expect(planned).toBeDefined();
+    // What a pull would write opens under THIS vault's key.
+    expect(await decryptFile("mine-pw", parseFileEnvelope(planned!.content)!, "secrets")).toBe('{"token":"NEW"}\n');
+  });
+});
+
+function fakeReader2(files: Record<string, string>): ExternalStoreReader {
+  return {
+    async listFiles() {
+      return Object.keys(files).sort();
+    },
+    async readFile(rel) {
+      const c = files[rel];
+      if (c === undefined) throw new Error(`no ${rel}`);
+      return c;
+    },
+  };
+}

@@ -1473,7 +1473,14 @@ export function skipRelPredicate(skipRefs: ItemRef[], ...groupLists: SyncGroup[]
 export async function planImport(
   ctx: CoreContext,
   reader: ExternalStoreReader,
-  opts: { skipRefs: ItemRef[]; withheldPull: (rel: string) => string[] }
+  opts: {
+    skipRefs: ItemRef[];
+    withheldPull: (rel: string) => string[];
+    // Re-encrypts a remote file for THIS vault's key, reusing the local copy's envelopes where the
+    // plaintext matches (core/transcode.ts). Absent = the two sides share one passphrase, and
+    // ciphertext is forwarded verbatim — the road every remote without its own key is on.
+    transcode?: (rel: string, content: string, existing: string | null) => Promise<string>;
+  }
 ): Promise<PendingPull> {
   const files = await reader.listFiles();
   // Declared-store gate: before a single remote file is read — content that nothing here identifies is refused, not
@@ -1504,8 +1511,15 @@ export async function planImport(
   const mergedRefs = new Set<string>();
   for (const rel of files) {
     if (rel === LOCK_REL || isLegacyManifestRel(rel) || skipped(rel)) continue;
-    const raw = await reader.readFile(rel);
+    let raw = await reader.readFile(rel);
     const patterns = opts.withheldPull(rel);
+    const localAbs = `${ctx.rootPath}/${rel}`;
+    const keep = patterns.length === 0 && opts.transcode === undefined ? null : (await ctx.io.exists(localAbs)) ? await ctx.io.read(localAbs) : null;
+    // Transcode BEFORE the withheld overlay: from here on everything in the plan answers to this
+    // vault's own key, and the overlay's `keep` side already does. A reuse hit hands back the
+    // local copy's bytes, so an unchanged item classifies as no difference and the plan stays
+    // quiet — spec 3.9.1's whole point.
+    if (opts.transcode !== undefined) raw = await opts.transcode(rel, raw, keep);
     if (patterns.length === 0) {
       remoteFileMap.set(rel, raw);
       continue;
@@ -1513,8 +1527,6 @@ export async function planImport(
     // What lands in the plan is the MERGED content, not theirs: the planner's job is to describe
     // what a pull would write, and this is what it would write. It also settles the comparison for
     // free — a file whose only difference is a withheld key now equals ours and never comes up.
-    const localAbs = `${ctx.rootPath}/${rel}`;
-    const keep = (await ctx.io.exists(localAbs)) ? await ctx.io.read(localAbs) : null;
     remoteFileMap.set(rel, overlayWithheld({ rel, keep, take: raw, patterns }));
     const ref = resolveGroupByStoreRel(localGroups, rel)?.ref ?? resolveGroupByStoreRel(remoteGroups, rel)?.ref;
     if (ref !== undefined) mergedRefs.add(ref);
@@ -1781,6 +1793,9 @@ export async function pushExternal(
     // meaning is "the answer you acted on has since changed", so the answer's owner has to say so.
     // A caller with no judgement to speak of passes `[]` and the guard stays quiet: honest, not a hole.
     expectPush: readonly string[];
+    // Re-encrypts a local file for the REMOTE's key, reusing the far end's envelopes where the
+    // plaintext matches (core/transcode.ts). Absent = shared passphrase, verbatim forwarding.
+    transcode?: (rel: string, content: string, existing: string | null) => Promise<string>;
   }
 ): Promise<GroupResult[]> {
   const localAbs = (await ctx.io.exists(ctx.rootPath)) ? await listFilesRecursive(ctx.io, ctx.rootPath) : [];
@@ -1847,15 +1862,21 @@ export async function pushExternal(
     const existed = remoteFiles.has(rel);
     const theirs = existed ? await writer.readFile(rel) : null;
     const patterns = opts.withheldPush(rel);
+    // Transcode BEFORE the withheld overlay, so both of the overlay's sides answer to the far
+    // end's key. A reuse hit hands back THEIR bytes, so the identical-skip below keeps the steady
+    // state silent — fresh salts notwithstanding (spec 3.9.1).
+    const sending = opts.transcode === undefined ? mine : await opts.transcode(rel, mine, theirs);
     // Their value for a withheld key is not ours to delete: the store holds whole documents, not
     // patches, so sending the file without that key would make their next Apply drop it from their
     // live config. Push already reads their copy for the skip-if-identical test, so this is not new IO.
-    const content = patterns.length === 0 ? mine : overlayWithheld({ rel, keep: theirs, take: mine, patterns });
+    const content = patterns.length === 0 ? sending : overlayWithheld({ rel, keep: theirs, take: sending, patterns });
     if (patterns.length > 0) {
       const ref = resolveGroupByStoreRel(manifest.groups, rel)?.ref;
       if (ref !== undefined) rewritten.set(ref, { ...(rewritten.get(ref) ?? {}), [rel]: content });
     }
-    planned.push({ rel, name, itemRel, content, theirs, reread: patterns.length > 0 });
+    // A transcoded file's content depends on what is over there (the reuse comparand), so the
+    // write-ahead recheck must cover it exactly as it covers a withheld one.
+    planned.push({ rel, name, itemRel, content, theirs, reread: patterns.length > 0 || sending !== mine });
   }
   // PHASE 2 — check the ground has not moved under the files whose content depends on it. A file we
   // forward byte for byte has no window to lose: its content does not depend on what is over there,
