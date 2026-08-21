@@ -700,6 +700,22 @@ noted):
   remote` / `N items don't sync with this remote`). The availability axis (not installed / disabled
   / desktop-only) is the device relation's alone and is not drawn under a remote: whether the
   store's copy differs from the remote's says nothing about what this device has installed.
+  **`Can't compare` is the remote relation's own extra bucket** (spec 5.1), the mirror of that
+  asymmetry: an encrypted item whose two copies this device cannot open holds an unknown, not a
+  difference. Every encryption draws fresh randomness, so the same setting in two vaults is never
+  the same bytes — the copies are compared by what they SAY, and when the passphrase to say it is
+  missing the row states that instead of claiming a difference no run could clear. It is the very
+  `locked` state the device relation already gives such an item (one word for one thing); only the
+  relation's copy table differs — `Can't compare` here against the device side's placement under
+  `No settings yet` — with the fold line `N items can't be compared` and its own filter pill. The
+  row keeps the device relation's approved sentence verbatim (`Encrypted — set the passphrase in
+  settings to compare`), is never stageable, and counts in NEITHER direction: a bucket, not a
+  to-do. Its card shows no `Files` row (nothing was verified, so there is nothing to list) and
+  answers in `State`: `This item is encrypted and this device has no passphrase, so its two copies
+  can't be compared.` followed by the link into Settings → General's `Passphrase` row
+  (`general-passphrase`). An item the remote holds no copy of yet is NOT this state — it is an
+  ordinary `To push` row, because whether a passphrase opens something is only knowable by trying
+  it on something.
   The two on/off carriers, which are never rows under the device relation (they dissolve into the
   section-head chip, and what they carry is spoken by each member's own row), ARE ordinary rows
   under a remote: no member row says anything about enablement there, and the carrier's store copy
