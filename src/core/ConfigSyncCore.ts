@@ -3,6 +3,7 @@ import { FieldRule, GroupResult, hasChanges, ItemRef, LockItems, StoreLock, Stor
 import { basename, groupStorePath, relativeTo, resolveGroupByStoreRel, sidecarStoreSuffix } from "./pathing";
 import { carrierRef, refItemId } from "./itemKeys";
 import { assertStoreLockVersionUnderstood, derivedLockCapturedAt, itemEntry, lockElementLabels, lockEntry, lockEntryList, lockEntryTail, lockLabel, lockLineage, lockSourceVersion, lockTail, lockWatermark, parseStoreLock, parseSyncManifest, setLockEntry, storeLockVersion, STORE_LOCK_HASH_PREFIX, STORE_LOCK_VERSION, validateSyncManifest } from "./manifest";
+import { derivedPushLock } from "./derivedLock";
 import { isFutureSchemaDocument, SCHEMA_FUTURE_APPLY_MESSAGE } from "./settingsMigration";
 import { applyTransform, captureTransform, classPatterns, contentUnchanged, excludingPerElement, groupNeedsPassphrase, isWholeFileEncrypted, stripPatterns } from "./modes";
 import { hashDirSide, hashFileSide, sha256Hex } from "./ledger";
@@ -1685,6 +1686,21 @@ export interface ExternalStoreWriter {
   finalize(): Promise<void>; // git: add/commit/push; local-path: no-op
 }
 
+// A lock at the far end this build cannot parse, told apart from one that is not there — and it does
+// not need to be: both leave the push with no far-end entries to preserve. The version gate has
+// already refused a lock from a NEWER build, so what reaches here is a damaged file, and push is the
+// operation that replaces it, exactly as capture replaces a damaged local one. The LOCAL lock is
+// deliberately not read this way: a bookkeeping file we cannot read is this device's problem, and
+// pushing it to the whole fleet is not the way to find out.
+function parsedOrNull(raw: string | null, groups: readonly SyncGroup[]): StoreLock | null {
+  if (raw === null) return null;
+  try {
+    return parseStoreLock(raw, groups);
+  } catch {
+    return null;
+  }
+}
+
 export async function pushExternal(ctx: CoreContext, writer: ExternalStoreWriter, opts: { skipRefs: ItemRef[] }): Promise<GroupResult[]> {
   const localAbs = (await ctx.io.exists(ctx.rootPath)) ? await listFilesRecursive(ctx.io, ctx.rootPath) : [];
   const rels = localAbs.map((f) => f.slice(ctx.rootPath.length + 1)).sort();
@@ -1713,10 +1729,14 @@ export async function pushExternal(ctx: CoreContext, writer: ExternalStoreWriter
   // there, and here the legacy manifest is exactly the thing that must still count.
   assertRemoteStoreDeclared(remoteRels);
   const remoteFiles = new Set(remoteRels.filter((r) => !isLegacyManifestRel(r)));
+  // Read ONCE: the version gate below and the derived lock at the end must see the same bytes, for
+  // the same reason applyImport parses the bytes its own gate read.
+  const remoteLockRaw = remoteFiles.has(LOCK_REL) ? await writer.readFile(LOCK_REL) : null;
   // The version gate, push side: refused before the first writeFile — pushing this build's store over a remote
   // written by a newer one would overwrite a shape we cannot read with one it cannot read back.
-  if (remoteFiles.has(LOCK_REL)) assertStoreLockVersionUnderstood(await writer.readFile(LOCK_REL));
+  assertStoreLockVersionUnderstood(remoteLockRaw);
   for (const rel of pushableRels) {
+    if (rel === LOCK_REL) continue; // not content: derived and written at the end
     const { name, itemRel } = groupForStoreRel(manifest.groups, rel);
     const content = await ctx.io.read(`${ctx.rootPath}/${rel}`);
     const existed = remoteFiles.has(rel);
@@ -1735,6 +1755,26 @@ export async function pushExternal(ctx: CoreContext, writer: ExternalStoreWriter
       const result = resultFor(name);
       result.filesDeleted.push(rel);
       result.changes.deleted.push(itemRel);
+    }
+  }
+  // The bookkeeping goes last, and goes DERIVED. It is the one file whose content is not simply
+  // ours: it describes the store the far end holds after this push, and this push did not send
+  // everything (derivedLock.ts). No local lock = nothing to describe, and the push says nothing.
+  const localLockRaw = rels.includes(LOCK_REL) ? await ctx.io.read(`${ctx.rootPath}/${LOCK_REL}`) : null;
+  if (localLockRaw !== null) {
+    const derived = derivedPushLock({
+      local: parseStoreLock(localLockRaw, manifest.groups),
+      remote: parsedOrNull(remoteLockRaw, manifest.groups),
+      skipRefs: opts.skipRefs,
+    });
+    const content = JSON.stringify(derived, null, 2) + "\n";
+    const existed = remoteFiles.has(LOCK_REL);
+    if (!existed || remoteLockRaw !== content) {
+      const { name, itemRel } = groupForStoreRel(manifest.groups, LOCK_REL);
+      await writer.writeFile(LOCK_REL, content);
+      const result = resultFor(name);
+      result.filesWritten.push(LOCK_REL);
+      (existed ? result.changes.updated : result.changes.added).push(itemRel);
     }
   }
   await writer.finalize();

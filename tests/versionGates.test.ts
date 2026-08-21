@@ -945,7 +945,12 @@ describe("content at the far end with no lock", () => {
     await pushExternal(guardCtx(io), fw.writer, { skipRefs: [] });
 
     expect(fw.files["store/configdir/hotkeys.json"]).toBe('{"mine":1}');
-    expect(fw.files["store.lock.json"]).toBe(V1_LOCK);
+    // The bookkeeping lands too, though not byte for byte: what a push sends is derived
+    // (derivedLock.ts), so this v1 lock arrives re-keyed into the shape this build writes.
+    const pushed = parseStoreLock(fw.files["store.lock.json"] ?? "");
+    expect(pushed.capturedAt).toBe("2026-08-01T00:00:00.000Z");
+    expect(storeLockVersion(pushed)).toBe(STORE_LOCK_VERSION);
+    expect(lockEntry(pushed, "obsidian/hotkeys")?.source).toEqual({ kind: "app", version: "1.8.7" });
   });
 
   it("…and pulling from one is a no-op, not a refusal", async () => {

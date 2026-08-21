@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { withRef } from "./lock";
+import { appSource, pluginSource, withRef } from "./lock";
 import { StoreLockEntry } from "../src/core/types";
 import { lockEntry, STORE_LOCK_VERSION } from "../src/core/manifest";
 import { CoreContext, capture, captureWithActions, loadManifest, groupsForDevice, apply, applyWithActions, planImport, applyImport, PendingPull, ExternalStoreReader, pushExternal, ExternalStoreWriter, pluginIdForGroup, orderInstallsCatalogFirst, readGroups, writeGroups, deviceExcludedPluginIds, isSelfStoreRel, remoteGroupsFrom, groupForStoreRel, backfillLockLabels, excludeOptedOutItems } from "../src/core/ConfigSyncCore";
@@ -1732,7 +1732,11 @@ describe("pushExternal", () => {
     await seedGroups(ctx, '{"version":1,"groups":[]}');
     const fw = fakeWriter({});
     const results = await pushExternal(ctx, fw.writer, { skipRefs: [] });
-    expect(fw.files["store.lock.json"]).toBe('{"capturedAt":"t","groups":{}}');
+    // Semantics, not bytes: what a push sends is derived (derivedLock.ts), so a v1 local lock lands
+    // over there re-keyed into the shape this build writes.
+    const pushed = parseStoreLock(fw.files["store.lock.json"] ?? "");
+    expect(pushed.capturedAt).toBe("t");
+    expect(pushed.version).toBe(STORE_LOCK_VERSION);
     expect(results.every((r) => r.status === "ok")).toBe(true);
   });
 
@@ -1774,6 +1778,69 @@ describe("pushExternal", () => {
     expect(fw.files["store/configdir/plugins/config-sync/data.json"]).toBe('{"theirs":true}'); // untouched both ways
     expect(fw.files["store/configdir/hotkeys.json"]).toBe('{"a":1}');
     expect(results.every((r) => r.status === "ok")).toBe(true);
+  });
+
+  it("withheld item: the far end keeps its own lock entry, and ours never lands on top of it", async () => {
+    const { io, ctx } = setup();
+    io.seed({
+      "cs/store.lock.json": JSON.stringify({
+        capturedAt: "2026-08-02T00:00:00.000Z",
+        items: {
+          community: { "config-sync": { ...pluginSource("2.25.0"), hash: "sha256:mine", capturedAt: "2026-08-02T00:00:00.000Z" } },
+          obsidian: { hotkeys: { ...appSource("1.9.0"), hash: "sha256:h-mine", capturedAt: "2026-08-02T00:00:00.000Z" } },
+        },
+        version: 3,
+      }),
+      "cs/store/configdir/plugins/config-sync/data.json": '{"mine":true}',
+      "cs/store/configdir/hotkeys.json": '{"a":1}',
+    });
+    await seedGroups(ctx, '{"version":1,"groups":[]}');
+    const fw = fakeWriter({
+      "store.lock.json": JSON.stringify({
+        capturedAt: "2026-08-01T00:00:00.000Z",
+        items: {
+          community: { "config-sync": { ...pluginSource("2.24.3"), hash: "sha256:theirs", capturedAt: "2026-08-01T00:00:00.000Z" } },
+        },
+        version: 3,
+        syncedWatermark: "2026-08-01T00:00:00.000Z",
+      }),
+      "store/configdir/plugins/config-sync/data.json": '{"theirs":true}',
+    });
+    await pushExternal(ctx, fw.writer, { skipRefs: [SELF_ITEM_REF] });
+    const pushed = parseStoreLock(fw.files["store.lock.json"] ?? "");
+    // Their content was never sent, so their entry still describes it.
+    expect(pushed.items["community"]?.["config-sync"]?.hash).toBe("sha256:theirs");
+    // What we DID send is ours.
+    expect(pushed.items["obsidian"]?.["hotkeys"]?.hash).toBe("sha256:h-mine");
+    // Their lineage is theirs to move.
+    expect(pushed.syncedWatermark).toBe("2026-08-01T00:00:00.000Z");
+  });
+
+  it("pushing twice with nothing changed rewrites nothing at all, the lock included", async () => {
+    const { io, ctx } = setup();
+    io.seed({
+      "cs/store.lock.json": JSON.stringify({ capturedAt: "t", items: { obsidian: { hotkeys: { ...appSource("1.9.0"), hash: "sha256:h" } } }, version: 3 }),
+      "cs/store/configdir/hotkeys.json": '{"a":1}',
+    });
+    await seedGroups(ctx, '{"version":1,"groups":[]}');
+    const fw = fakeWriter({ "store.lock.json": "{}", "store/configdir/hotkeys.json": '{"a":9}' });
+    await pushExternal(ctx, fw.writer, { skipRefs: [] });
+    expect(fw.writeLog).toContain("store.lock.json");
+    fw.writeLog.length = 0;
+    await pushExternal(ctx, fw.writer, { skipRefs: [] });
+    expect(fw.writeLog).toEqual([]);
+  });
+
+  it("a lock at the far end that cannot be parsed does not stop the push", async () => {
+    const { io, ctx } = setup();
+    io.seed({
+      "cs/store.lock.json": JSON.stringify({ capturedAt: "t", items: {}, version: 3 }),
+      "cs/store/configdir/hotkeys.json": '{"a":1}',
+    });
+    await seedGroups(ctx, '{"version":1,"groups":[]}');
+    const fw = fakeWriter({ "store.lock.json": "not json at all" });
+    await pushExternal(ctx, fw.writer, { skipRefs: [] });
+    expect(parseStoreLock(fw.files["store.lock.json"] ?? "").version).toBe(STORE_LOCK_VERSION);
   });
 });
 
