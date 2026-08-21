@@ -31,6 +31,7 @@ import { nextCompact, sidebarNeededWidth, SidebarRowNeed } from "./sidebarFit";
 import { Availability } from "../core/availability";
 import { REUSE_MAX_AGE_MS } from "../external/readerCache";
 import { remoteRowStatuses, skipRefsForSelection } from "../core/remoteRows";
+import { PASSPHRASE_ANCHOR_ID } from "./SettingTab";
 import { isWholeFileEncrypted } from "../core/modes";
 import { classifyRemoteFailure } from "../core/remoteFailure";
 import { GroupDisplayParts } from "../core/registry";
@@ -48,6 +49,7 @@ import {
   fateBucket,
   fateBucketCounts,
   FateBucketCounts,
+  nonePresented,
   fileEntryFor,
   filesChangeLabel,
   foldCompanionEntries,
@@ -266,8 +268,24 @@ const sessionUi = {
   insyncOpen: new Set<string>(),
   excludedOpen: new Set<string>(),
   nosettingsOpen: new Set<string>(),
+  lockedOpen: new Set<string>(),
   availabilityOpen: new Set<string>(),
 };
+
+// The one fate an encrypted item wears when this device has no passphrase for it — the same
+// sentence under BOTH relations, because it is the same fact said to the same person. What differs
+// is only where the row is filed and what the bucket is called (relationCopy).
+function lockedFate(): Fate {
+  return {
+    glyph: "—",
+    sentence: "Encrypted — set the passphrase in settings to compare",
+    chips: ["encrypted"],
+    stageable: false,
+    turnsOn: false,
+    nothingYet: false,
+    excluded: false,
+  };
+}
 
 // Escalating "less this device can do about it": a version away, a switch away, an install away,
 // and finally not possible here at all.
@@ -421,6 +439,9 @@ export interface SyncCenterHost {
   // The More bridge: deep-links into the Settings
   // tab for this item's card.
   openSettingsAt(ref: ItemRef, spot: SettingsSpot): void;
+  // Settings → General, landing on one row. The `Can't compare` card's way out (spec 3.8): the
+  // passphrase it asks for belongs to the vault, not to the item the reader is looking at.
+  openSettingsGeneral(anchorId: string): void;
   // The item a compiled group belongs to — a registry LOOKUP, never a parse of the group name
   // (the `plugin-` prefix is not a parser). null for a group no item owns.
   itemRefForGroup(name: string): ItemRef | null;
@@ -1019,6 +1040,11 @@ export class SyncCenterView extends ItemView {
     const rule: RemoteDirection = ref === null || remote === undefined ? "both" : itemDirection(remote.items, ref);
     const excluded = rule === "none";
     const state = r.status.state;
+    // Nothing was compared, so there is no direction to derive and no verdict to trust: the row
+    // says so and stays out of both directions' counts (spec 3.8/5.1). Checked FIRST — an item's
+    // own four-stop rule is still its own, but a rule about which way a thing may travel says
+    // nothing about whether we could read it.
+    const unreadable = state === "locked";
     const direction: Direction | null = excluded ? null : state === "store-newer" ? "apply" : state === "local-changed" ? "capture" : null;
     const input: FateInput = {
       direction,
@@ -1041,31 +1067,35 @@ export class SyncCenterView extends ItemView {
       folderFileCount: r.status.changes !== undefined ? this.folderChangeCount(r.status.changes) : null,
       encrypted: isWholeFileEncrypted(r.group),
     };
-    const fate: Fate = {
-      glyph: direction === "apply" ? "↓" : direction === "capture" ? "↑" : "—",
-      sentence: excluded
-        ? copy.sentence.excluded
-        : direction === "apply"
-          ? copy.sentence.pull
-          : direction === "capture"
-            ? copy.sentence.push
-            : copy.bucket.ok,
-      chips: [REMOTE_DIRECTION_CHIP[rule]].filter((c): c is string => c !== null),
-      stageable: direction !== null,
-      turnsOn: false,
-      nothingYet: false,
-      excluded,
-    };
-    return { rollup: familyRollup([{ name: r.group.name, state, fileCount: this.memberFileCount(r) }]), input, fate, bucket: fateBucket(fate) };
+    const fate: Fate = unreadable
+      ? lockedFate()
+      : {
+          glyph: direction === "apply" ? "↓" : direction === "capture" ? "↑" : "—",
+          sentence: excluded
+            ? copy.sentence.excluded
+            : direction === "apply"
+              ? copy.sentence.pull
+              : direction === "capture"
+                ? copy.sentence.push
+                : copy.bucket.ok,
+          chips: [REMOTE_DIRECTION_CHIP[rule]].filter((c): c is string => c !== null),
+          stageable: direction !== null,
+          turnsOn: false,
+          nothingYet: false,
+          excluded,
+        };
+    // `fateBucket` reads a Fate alone and has no way to see this state (a locked fate is neutral
+    // and non-excluded, which reads as `ok`), so the bucket is decided here — the same reason
+    // `legacyLockedFamilyBucket` exists on the device side.
+    const bucket: RowBucket = unreadable ? "locked" : fateBucket(fate);
+    return { rollup: familyRollup([{ name: r.group.name, state, fileCount: this.memberFileCount(r) }]), input, fate, bucket };
   }
 
   private deriveDeviceRow(r: StatusRow): RowDerivation {
     const rollup = this.computeFamilyRollup(r);
     const input = this.computeFateInput(r, rollup);
     const locked = this.presState(r) === "locked";
-    const fate: Fate = locked
-      ? { glyph: "—", sentence: "Encrypted — set the passphrase in settings to compare", chips: ["encrypted"], stageable: false, turnsOn: false, nothingYet: false, excluded: false }
-      : rowFate(input);
+    const fate: Fate = locked ? lockedFate() : rowFate(input);
     const bucket: RowBucket = locked ? legacyLockedFamilyBucket(rollup.state) : fateBucket(fate);
     return { rollup, input, fate, bucket };
   }
@@ -1877,7 +1907,11 @@ export class SyncCenterView extends ItemView {
         // the digit beside it with no room to breathe.
         if (c.ok > 0) renderFoldCount(item.createSpan({ cls: "config-sync-side-badge is-ok" }), FATE_PILL_FOLD.ok, c.ok);
         if (c.excluded > 0) renderFoldCount(item.createSpan({ cls: "config-sync-side-badge is-excluded" }), FATE_PILL_FOLD.excluded, c.excluded);
-        if (c.none > 0) renderFoldCount(item.createSpan({ cls: "config-sync-side-badge is-none" }), FATE_PILL_FOLD.none, c.none);
+        const none = nonePresented(c, this.relation);
+        if (none > 0) renderFoldCount(item.createSpan({ cls: "config-sync-side-badge is-none" }), FATE_PILL_FOLD.none, none);
+        if (this.relation.kind === "remote" && c.locked > 0) {
+          renderFoldCount(item.createSpan({ cls: "config-sync-side-badge is-none" }), FATE_PILL_FOLD.locked, c.locked);
+        }
       }
       item.addEventListener("click", () => {
         this.destination = { kind: "items", cat };
@@ -1921,7 +1955,11 @@ export class SyncCenterView extends ItemView {
       if (c.down > 0) renderActionCount(sw.createSpan({ cls: "config-sync-side-badge is-down" }), "apply", c.down);
       if (c.ok > 0) renderFoldCount(sw.createSpan({ cls: "config-sync-side-badge is-ok" }), FATE_PILL_FOLD.ok, c.ok);
       if (c.excluded > 0) renderFoldCount(sw.createSpan({ cls: "config-sync-side-badge is-excluded" }), FATE_PILL_FOLD.excluded, c.excluded);
-      if (c.none > 0) renderFoldCount(sw.createSpan({ cls: "config-sync-side-badge is-none" }), FATE_PILL_FOLD.none, c.none);
+      const none = nonePresented(c, this.relation);
+      if (none > 0) renderFoldCount(sw.createSpan({ cls: "config-sync-side-badge is-none" }), FATE_PILL_FOLD.none, none);
+      if (this.relation.kind === "remote" && c.locked > 0) {
+        renderFoldCount(sw.createSpan({ cls: "config-sync-side-badge is-none" }), FATE_PILL_FOLD.locked, c.locked);
+      }
     } else if (this.destination.kind === "history") {
       sw.createSpan({ text: "History" });
     } else {
@@ -1965,7 +2003,9 @@ export class SyncCenterView extends ItemView {
     const head = this.contentEl.createDiv({ cls: "config-sync-center-head" });
     this.renderSelfChip(head);
     if (this.selfInfo !== null) head.createSpan({ cls: "config-sync-head-divider" });
-    const { up, down, ok, excluded, none } = this.presentedCounts(this.countable(this.rows()));
+    const counts = this.presentedCounts(this.countable(this.rows()));
+    const { up, down, ok, excluded } = counts;
+    const none = nonePresented(counts, this.relation);
     // Same producer the status bar reads (spec 5.5): these two pills count ITEMS waiting with the
     // remotes, and `spread` — how many remotes they came from — rides in their tooltips.
     const checks = this.host.remotes().map((r) => this.host.remoteCheck(r.name)?.check).filter((c): c is RemoteCheck => c !== undefined);
@@ -2025,6 +2065,19 @@ export class SyncCenterView extends ItemView {
           attr: { "aria-label": `${none} item${none === 1 ? "" : "s"} with no settings yet` },
         }),
         FATE_PILL_FOLD.none, none,
+      );
+    }
+    // The remote relation's own bucket (spec 5.1). Suppressed at 0 like the two above it, and
+    // deliberately uncoloured: every coloured pill in this strip promises a run, and this one
+    // promises none — it reports what could not be read, not what is waiting.
+    if (this.relation.kind === "remote" && counts.locked > 0) {
+      const n = counts.locked;
+      renderFoldCount(
+        pills.createSpan({
+          cls: "config-sync-pill is-unknown",
+          attr: { "aria-label": `${n} item${n === 1 ? "" : "s"} that can't be compared` },
+        }),
+        FATE_PILL_FOLD.locked, n,
       );
     }
     // Manual refresh: re-scans local state, catching plugin toggles made in Obsidian's
@@ -2434,7 +2487,12 @@ export class SyncCenterView extends ItemView {
         ...(counts.excluded > 0
           ? [{ key: "excluded" as const, label: `${copy.bucket.excluded} ${counts.excluded}`, short: "", foldKind: "excluded" as const, count: counts.excluded }]
           : []),
-        { key: "none", label: `${copy.bucket.none} ${counts.none}`, short: "", foldKind: "nosettings", count: counts.none },
+        { key: "none", label: `${copy.bucket.none} ${nonePresented(counts, relation)}`, short: "", foldKind: "nosettings", count: nonePresented(counts, relation) },
+        // `Can't compare` is the remote relation's alone (spec 5.1) and follows `excluded`'s
+        // empty-state rule: at 0 neither this pill nor its fold renders.
+        ...(relation.kind === "remote" && counts.locked > 0
+          ? [{ key: "locked" as const, label: `${copy.bucket.locked} ${counts.locked}`, short: "", foldKind: "locked" as const, count: counts.locked }]
+          : []),
       ];
       for (const d of defs) {
         const pill = pillRow.createEl("button", { cls: `config-sync-fpill${this.filter === d.key ? " is-active" : ""}`, attr: { "aria-label": d.label } });
@@ -2673,7 +2731,8 @@ export class SyncCenterView extends ItemView {
       // not an inline filter. Deciding it here as "availability wins" files a row the user opted
       // THIS device out of under `N not installed on this device` while the `Not synced here` pill
       // still counts it, which is a number with nothing behind it.
-      const placed = visible.map((r) => ({ r, at: placeRow(this.rowBucket(r), this.sectionOf(r.group.name)) }));
+      const foldLocked = this.relation.kind === "remote";
+      const placed = visible.map((r) => ({ r, at: placeRow(this.rowBucket(r), this.sectionOf(r.group.name), { foldLocked }) }));
       const active = placed.filter((x) => x.at.zone === "active").map((x) => x.r);
       const fateRows = (fold: FateFold): StatusRow[] =>
         placed.filter((x) => x.at.zone === "fate" && x.at.fold === fold).map((x) => x.r);
@@ -2697,6 +2756,7 @@ export class SyncCenterView extends ItemView {
         insync: { open: sessionUi.insyncOpen, text: copy.matchFold },
         excluded: { open: sessionUi.excludedOpen, text: copy.excludedFold },
         nosettings: { open: sessionUi.nosettingsOpen, text: nosettingsLineText },
+        locked: { open: sessionUi.lockedOpen, text: copy.lockedFold },
       };
       for (const fold of FATE_FOLD_ORDER) {
         const ui = fateFoldUi[fold];
@@ -2997,7 +3057,10 @@ export class SyncCenterView extends ItemView {
       const ic = fateWrap.createSpan({ cls: `config-sync-fate-ic ${ACTION_COLOR_CLASS[action]}`, attr: { "aria-label": fate.sentence } });
       setIcon(ic, ACTION_ICON[action]);
     } else if (fate.glyph === "—") {
-      this.renderNeutralFateIcon(fateWrap, fate);
+      // Under a remote an unreadable row wears the fold's own key mark. Under the device relation
+      // nothing changes: that row keeps the icon it has always had.
+      if (this.relation.kind === "remote" && this.rowBucket(r) === "locked") this.renderFateStateIcon(fateWrap, "locked", fate.sentence);
+      else this.renderNeutralFateIcon(fateWrap, fate);
     } else {
       const ic = fateWrap.createSpan({ cls: `config-sync-fate-ic ${CONFLICT_COLOR_CLASS}`, attr: { "aria-label": fate.sentence } });
       setIcon(ic, CONFLICT_ICON);
@@ -3113,8 +3176,19 @@ export class SyncCenterView extends ItemView {
     const dirLabel = remoteRelation
       ? dir === "apply" ? "On pull" : dir === "capture" ? "On push" : "State"
       : dir === "apply" ? "On apply" : dir === "capture" ? "On capture" : "State";
+    const unreadable = remoteRelation && r.status.state === "locked";
     this.renderCardKeyRow(fields, dirLabel, (value) => {
       value.createDiv({ cls: "config-sync-expand-note", text: this.stateClauseText(r, fate, input) });
+      // The one state whose card ends in a way out rather than a description: the reader is one
+      // passphrase away from an answer, and the row that takes it is in General, not on this card.
+      if (unreadable) {
+        const link = value.createEl("a", { cls: "config-sync-card-link", text: "Set it in Settings → General", href: "#" });
+        setIcon(link.createSpan({ cls: "config-sync-card-link-ic" }), "external-link");
+        link.addEventListener("click", (e) => {
+          e.preventDefault();
+          this.host.openSettingsGeneral(PASSPHRASE_ANCHOR_ID);
+        });
+      }
     });
 
     const changes = this.familyChanges(r);
@@ -3128,7 +3202,7 @@ export class SyncCenterView extends ItemView {
     // Under a remote a row can have differing files and still nothing to do — the difference runs
     // the way this remote does not (spec 3.3). The row stays quiet; the card still shows what moved
     // over there, with a badge that carries no direction because these files will not travel.
-    const withheld = remoteRelation && previewDir === null && !input.excludedHere && hasChanges(changes);
+    const withheld = remoteRelation && !unreadable && previewDir === null && !input.excludedHere && hasChanges(changes);
     if (previewDir !== null && hasChanges(changes)) {
       this.renderFilesRow(fields, r, changes, previewDir, input.encrypted, isConflict ? this.conflictResolve(r, changes) : null);
     } else if (withheld) {
@@ -3524,6 +3598,11 @@ export class SyncCenterView extends ItemView {
       // the item HAS differing files and still has nothing to do, which means the difference runs
       // the way this remote does not. The list stays quiet about that; the card is where it answers.
       if (r.remote !== undefined) {
+        // Nothing was compared, so the card says exactly that and no more — a difference count
+        // here would describe files nobody read (spec 3.8).
+        if (r.status.state === "locked") {
+          return "This item is encrypted and this device has no passphrase, so its two copies can't be compared.";
+        }
         const changed = r.status.changes === undefined ? 0 : this.folderChangeCount(r.status.changes);
         if (changed > 0 && !input.excludedHere) return withheldChangeClause(r.remote, changed);
         return `${fate.sentence}.`;

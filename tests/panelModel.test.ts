@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { capFileEntries, insyncLineText, excludedLineText, statusBarStatuses, moreFilesText, filesChangeLabel, visibleUnderFilter, leftoverPresentation, fateBucket, fateBucketCounts, partitionSection, legacyLockedFamilyBucket, RowBucket, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, runProgressLabel, showColdStartBanner, enablementCarrierFor, carrierIsSynced, TYPE_SECTION_TITLES, typeSectionForRow, sectionCountLabel, widestCountDigits, unifiedFooterSummary, fileEntryFor, stagedPayload, StageableRow, effectiveFate, onOffFlips, onOffNarrationLines, familyRollup, FamilyMember, mergeFamilyChanges, foldCompanionEntries, groupExcludedHere, CAPTURE_ADDED_TOOLTIP, CAPTURE_UPDATED_TOOLTIP, CAPTURE_DELETED_TOOLTIP, APPLY_ADDED_TOOLTIP, APPLY_UPDATED_TOOLTIP, APPLY_DELETED_TOOLTIP, keysRowModel, withheldKeysClause } from "../src/ui/panelModel";
+import { capFileEntries, insyncLineText, excludedLineText, statusBarStatuses, moreFilesText, filesChangeLabel, visibleUnderFilter, leftoverPresentation, fateBucket, fateBucketCounts, nonePresented, partitionSection, legacyLockedFamilyBucket, RowBucket, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, runProgressLabel, showColdStartBanner, enablementCarrierFor, carrierIsSynced, TYPE_SECTION_TITLES, typeSectionForRow, sectionCountLabel, widestCountDigits, unifiedFooterSummary, fileEntryFor, stagedPayload, StageableRow, effectiveFate, onOffFlips, onOffNarrationLines, familyRollup, FamilyMember, mergeFamilyChanges, foldCompanionEntries, groupExcludedHere, CAPTURE_ADDED_TOOLTIP, CAPTURE_UPDATED_TOOLTIP, CAPTURE_DELETED_TOOLTIP, APPLY_ADDED_TOOLTIP, APPLY_UPDATED_TOOLTIP, APPLY_DELETED_TOOLTIP, keysRowModel, withheldKeysClause } from "../src/ui/panelModel";
 import { GroupState, GroupStatus, RemoteDiffEntry, RemoteDiffFile } from "../src/core/status";
 import { FileChanges, SyncGroup, EVERYWHERE, perClass } from "../src/core/types";
 import { Availability } from "../src/core/availability";
@@ -213,23 +213,31 @@ describe("fateBucket — glyph/stageable/nothingYet/excluded truth table", () =>
 });
 
 describe("fateBucketCounts — counts parity on a mixed row set", () => {
-  it("conflict counts under the apply/'down' pill (today's placement, preserved); locked counts under 'none'; excluded gets its own tally", () => {
+  it("conflict counts under the apply/'down' pill (today's placement, preserved); locked is tallied apart; excluded gets its own tally", () => {
     const buckets: RowBucket[] = ["capture", "capture", "apply", "conflict", "ok", "excluded", "none", "locked"];
-    expect(fateBucketCounts(buckets)).toEqual({ up: 2, down: 2, ok: 1, none: 2, excluded: 1 });
+    expect(fateBucketCounts(buckets)).toEqual({ up: 2, down: 2, ok: 1, none: 1, excluded: 1, locked: 1 });
+  });
+
+  // The split is a presentation split, not a recount: under the device relation these rows are put
+  // back exactly where they have always been, so that surface cannot move by a single digit.
+  it("puts locked back under 'none' for the device relation, and leaves it out for a remote", () => {
+    const counts = fateBucketCounts(["none", "locked", "locked"]);
+    expect(nonePresented(counts, { kind: "device" })).toBe(3);
+    expect(nonePresented(counts, { kind: "remote", name: "work" })).toBe(1);
   });
 
   it("an enable-only ↓ row on a no-settings state counts under 'down' (apply), never 'none'", () => {
     const enableOnlyBucket = fateBucket(fate("↓", true, true)); // ↓ Turns on, nothingYet: true
     expect(enableOnlyBucket).toBe("apply");
-    expect(fateBucketCounts([enableOnlyBucket])).toEqual({ up: 0, down: 1, ok: 0, none: 0, excluded: 0 });
+    expect(fateBucketCounts([enableOnlyBucket])).toEqual({ up: 0, down: 1, ok: 0, none: 0, excluded: 0, locked: 0 });
   });
 
   it("excluded-only set counts entirely under 'excluded', nothing else", () => {
-    expect(fateBucketCounts(["excluded", "excluded"])).toEqual({ up: 0, down: 0, ok: 0, none: 0, excluded: 2 });
+    expect(fateBucketCounts(["excluded", "excluded"])).toEqual({ up: 0, down: 0, ok: 0, none: 0, excluded: 2, locked: 0 });
   });
 
   it("empty set counts all zero", () => {
-    expect(fateBucketCounts([])).toEqual({ up: 0, down: 0, ok: 0, none: 0, excluded: 0 });
+    expect(fateBucketCounts([])).toEqual({ up: 0, down: 0, ok: 0, none: 0, excluded: 0, locked: 0 });
   });
 });
 

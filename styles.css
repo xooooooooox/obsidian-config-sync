@@ -439,6 +439,11 @@ body.is-phone .config-sync-fkey {
 .config-sync-pill.is-none { background: var(--background-modifier-hover); color: var(--text-muted); }
 .config-sync-pill.is-push { background: rgba(var(--color-pink-rgb), 0.15); color: var(--color-pink); }
 .config-sync-pill.is-pull { background: rgba(var(--color-cyan-rgb), 0.15); color: var(--color-cyan); }
+/* `Can't compare` — the one bucket with no fill and no hue. Every coloured pill in this strip
+   promises a run (green: done, pink/cyan: a direction, purple: a rule); this one reports what could
+   not be read. A dashed outline is the mark for "undecided", and it must not borrow cyan, which in
+   the same strip means "there is something to pull". */
+.config-sync-pill.is-unknown { background: none; border: 1px dashed var(--background-modifier-border-hover); color: var(--text-muted); }
 .config-sync-pill.is-warn { background: none; color: var(--color-orange); margin-left: var(--size-4-1); }
 .config-sync-pill.is-error { background: none; color: var(--color-red); margin-left: var(--size-4-1); }
 
@@ -768,6 +773,11 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 @keyframes config-sync-spin { to { transform: rotate(360deg); } }
 
 .config-sync-expand-note { color: var(--text-muted); font-size: var(--font-ui-smaller); font-style: italic; margin: 0 0 var(--size-4-1) 0; font-family: var(--font-interface); }
+/* The `Can't compare` card's way out. Inline with the note above it rather than a button: it is a
+   destination, not an action on this item. */
+.config-sync-card-link { display: inline-flex; align-items: center; gap: var(--size-4-1); font-size: var(--font-ui-smaller); color: var(--text-accent); cursor: pointer; }
+.config-sync-card-link-ic { display: inline-flex; }
+.config-sync-card-link-ic svg { width: 12px; height: 12px; }
 .config-sync-more-files { color: var(--text-muted); cursor: pointer; }
 .config-sync-staged-count { color: var(--text-muted); font-size: var(--font-ui-smaller); }
 

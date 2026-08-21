@@ -224,6 +224,9 @@ export interface SettingsHost extends Plugin {
   // null on a normal Settings open, else the item ref whose card render() should expand and
   // scroll to once, this open only.
   consumePendingSettingsAnchor(): SettingsDeepLink | null;
+  // The same bridge for a GENERAL setting rather than an item's card: the Sync Center's
+  // `Can't compare` card sends the reader to the Passphrase row, which belongs to no item.
+  consumePendingGeneralAnchor(): string | null;
   // Basenames (no extension) of .css files actually present under the vault's snippets/ folder —
   // feeds the Appearance card's snippets companion member rows.
   listSnippetFiles(): Promise<string[]>;
@@ -425,6 +428,10 @@ interface GeneralSettingDef {
   anchorId: string;
 }
 
+// Named because a second surface sends people here: the Sync Center's `Can't compare` card, whose
+// whole answer is "set the passphrase". Two hard-coded copies of an anchor id is one drifting link.
+export const PASSPHRASE_ANCHOR_ID = "general-passphrase";
+
 const GENERAL_SETTINGS: GeneralSettingDef[] = [
   { name: "PKM mode", desc: "Adjusts the recommended storage location to match how your vault is organized. Auto detects IOTO vaults.", anchorId: "general-pkm-mode" },
   {
@@ -441,7 +448,7 @@ const GENERAL_SETTINGS: GeneralSettingDef[] = [
     desc: "Re-scans for local changes every 5 minutes while the window is focused, keeping the status bar fresh.",
     anchorId: "general-local-periodic-check",
   },
-  { name: "Passphrase", desc: "Needed for Encrypt modes. Enter the same passphrase on each device; it is never stored in the store or synced.", anchorId: "general-passphrase" },
+  { name: "Passphrase", desc: "Needed for Encrypt modes. Enter the same passphrase on each device; it is never stored in the store or synced.", anchorId: PASSPHRASE_ANCHOR_ID },
   {
     name: "Show status bar item",
     desc: "Sync status in the status bar: ↑ to capture, ↓ to apply. Click opens the Sync Center.",
@@ -687,6 +694,10 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   // place the config exists. Returned anchorId feeds highlightAnchor once display()'s render
   // settles — the caller never scrolls itself.
   private consumeSettingsAnchor(): string | null {
+    // A General row needs no tab decision and no card to expand — display() already opens there —
+    // so it is answered before the item machinery below, which would only try to parse it as a ref.
+    const general = this.host.consumePendingGeneralAnchor();
+    if (general !== null) return general;
     const link = this.host.consumePendingSettingsAnchor();
     if (link === null) return null;
     const { ref, spot } = link;
@@ -3258,7 +3269,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       new Setting(containerEl)
         .setName(def.name)
         .setDesc(`${def.desc} ${storageNote}`),
-      "general-passphrase"
+      PASSPHRASE_ANCHOR_ID
     );
     setting.settingEl.addClass("config-sync-ppset");
     let draft = "";

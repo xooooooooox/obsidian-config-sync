@@ -15,7 +15,7 @@ export type Direction = "capture" | "apply";
 // Panel row filter. Buckets match core bucketCounts: capture = local-changed + not-captured,
 // apply = store-newer + differs, ok = in-sync. "leftover" narrows the view to the store-orphan
 // section alone — no ROW is ever a leftover, so every bucket hides under it.
-export type PanelFilter = "all" | "capture" | "apply" | "ok" | "excluded" | "none" | "leftover";
+export type PanelFilter = "all" | "capture" | "apply" | "ok" | "excluded" | "none" | "locked" | "leftover";
 
 // The single per-row bucket derivation: every count/filter/partition/fold consumer reads THIS
 // instead of re-deriving from raw GroupState (familyState), so a `↓ Turns on` row (stageable apply,
@@ -76,7 +76,9 @@ export function legacyLockedFamilyBucket(familyState: GroupState): RowBucket {
 export function visibleUnderFilter(bucket: RowBucket, filter: PanelFilter): boolean {
   if (filter === "all") return true;
   if (filter === "leftover") return false; // store orphans are a section, never rows
-  if (bucket === "locked") return false;
+  // Only the remote relation offers the `Can't compare` pill, so under the device relation this
+  // second clause is unreachable and locked stays visible under "all" alone, exactly as before.
+  if (bucket === "locked") return filter === "locked";
   if (filter === "capture") return bucket === "capture";
   if (filter === "apply") return bucket === "apply" || bucket === "conflict";
   if (filter === "none") return bucket === "none";
@@ -90,6 +92,10 @@ export function visibleUnderFilter(bucket: RowBucket, filter: PanelFilter): bool
 // non-UI code paths also use).
 export interface FateBucketCounts extends BucketCounts {
   excluded: number;
+  // Split out of `none` rather than added to it: under a remote these rows have their own bucket
+  // (spec 5.1), and under the device relation they are put back where they have always been by
+  // `nonePresented` below — the one place that addition is written.
+  locked: number;
 }
 
 // Filter-pill counts: the apply pill counts the apply bucket AND conflict
@@ -103,14 +109,23 @@ export function fateBucketCounts(buckets: RowBucket[]): FateBucketCounts {
   let ok = 0;
   let none = 0;
   let excluded = 0;
+  let locked = 0;
   for (const b of buckets) {
     if (b === "capture") up++;
     else if (b === "apply" || b === "conflict") down++;
     else if (b === "ok") ok++;
     else if (b === "excluded") excluded++;
-    else none++; // "none" | "locked"
+    else if (b === "locked") locked++;
+    else none++;
   }
-  return { up, down, ok, none, excluded };
+  return { up, down, ok, none, excluded, locked };
+}
+
+// What the `No settings yet` bucket shows. Under a remote, `Can't compare` is its own bucket and
+// this is just `none`; under the device relation there is no such bucket and these rows have always
+// been counted here, so they are added back — the counting areas stay pixel-identical (spec 5.1).
+export function nonePresented(counts: FateBucketCounts, relation: PanelRelation): number {
+  return relation.kind === "remote" ? counts.none : counts.none + counts.locked;
 }
 
 // Section partition: active = conflict|apply|capture (plus locked
@@ -952,26 +967,32 @@ export function viewOptions(input: {
 // same way the apply filter pill already counts conflicts. The device column reuses the existing
 // fold-line functions rather than restating their copy, so the two can never disagree.
 export interface RelationCopy {
-  bucket: Record<FateBucket, string>;
+  bucket: Record<RowBucket, string>;
   sentence: { push: string; pull: string; excluded: string; nothing: string };
   matchFold: (n: number) => string;
   excludedFold: (n: number) => string;
+  lockedFold: (n: number) => string;
 }
 
 export function relationCopy(r: PanelRelation): RelationCopy {
   if (r.kind === "device") {
     return {
-      bucket: { capture: "To capture", apply: "To apply", conflict: "To apply", ok: "In sync", excluded: "Not synced here", none: "No settings yet" },
+      // `locked` shares `none`'s word here because it shares its bucket here: this relation has no
+      // `Can't compare` of its own, and never folds these rows (placeRow's `foldLocked`), so the
+      // fold text below is a total-Record formality that nothing renders.
+      bucket: { capture: "To capture", apply: "To apply", conflict: "To apply", ok: "In sync", excluded: "Not synced here", none: "No settings yet", locked: "No settings yet" },
       sentence: { push: "Captures settings", pull: "Applies settings", excluded: "Not synced on this device", nothing: NOTHING_YET_SENTENCE },
       matchFold: insyncLineText,
       excludedFold: excludedLineText,
+      lockedFold: nosettingsLineText,
     };
   }
   return {
-    bucket: { capture: "To push", apply: "To pull", conflict: "To pull", ok: "In sync", excluded: "Doesn't sync with this remote", none: "Nothing captured yet" },
+    bucket: { capture: "To push", apply: "To pull", conflict: "To pull", ok: "In sync", excluded: "Doesn't sync with this remote", none: "Nothing captured yet", locked: "Can't compare" },
     sentence: { push: "Pushes settings", pull: "Pulls settings", excluded: "Doesn't sync with this remote", nothing: "Nothing to send" },
     matchFold: (n) => `${n} item${n === 1 ? " matches" : "s match"} this remote`,
     excludedFold: (n) => `${n} item${n === 1 ? " doesn't" : "s don't"} sync with this remote`,
+    lockedFold: (n) => `${n} item${n === 1 ? "" : "s"} can't be compared`,
   };
 }
 

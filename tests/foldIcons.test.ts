@@ -17,6 +17,7 @@ describe("FOLD_ICON — fold-state→icon map", () => {
       insync: "check",
       excluded: "circle-minus",
       nosettings: "circle",
+      locked: "key-round",
     });
   });
 
@@ -32,6 +33,9 @@ describe("FOLD_ICON_COLOR_CLASS", () => {
       insync: "is-ok",
       excluded: null,
       nosettings: null,
+      // Uncoloured on purpose: every coloured mark in this column promises a run, and an item
+      // nobody could open promises none.
+      locked: null,
     });
   });
 });

@@ -14,12 +14,17 @@ import { setIcon } from "obsidian";
 // State column section (the authority for this ruling), the same FOLD_ICON/FOLD_ICON_COLOR_CLASS map is reused at
 // the row's `config-sync-fate-ic` size for exactly that fate (SyncCenterView.ts's fateWrap) — the
 // fold vocabulary speaks at both the group-header line and the row it summarizes.
-export type FoldKind = "insync" | "excluded" | "nosettings";
+// `locked` is the remote relation's alone (spec 5.1's `Can't compare`): an encrypted item whose two
+// copies this device cannot open. `key-round` is the mark the panel already gives a locked thing,
+// and it carries no colour — every coloured mark in this column promises a run, and this one
+// promises none.
+export type FoldKind = "insync" | "excluded" | "nosettings" | "locked";
 
 export const FOLD_ICON: Record<FoldKind, string> = {
   insync: "check",
   excluded: "circle-minus",
   nosettings: "circle",
+  locked: "key-round",
 };
 
 // insync keeps its established green (parity with the row state column's own ✓); the other two
@@ -28,6 +33,7 @@ export const FOLD_ICON_COLOR_CLASS: Record<FoldKind, string | null> = {
   insync: "is-ok",
   excluded: null,
   nosettings: null,
+  locked: null,
 };
 
 // The conflict mark. Not a fold — a conflict is the one row state with nothing to fold INTO, and
