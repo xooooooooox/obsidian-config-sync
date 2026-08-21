@@ -722,6 +722,18 @@ noted):
   (e.g. `themes/Blue Topaz.theme.css`) — one row per family; a companion whose parent isn't known
   locally falls back to its own standalone row (honest degradation, same rule as the carrier label
   fallback).
+  Under that row sits **`Keys`** (spec 5.4), one level down and the same gesture as the Settings
+  card's own `KEY RULES` block, deliberately: the keys that already carry a rule as rows with their
+  own four-stop chip, then `Click any key to add a rule for it`, then the item's store copy —
+  clicking an un-ruled key writes `Neither way` (the default is never stored, so a click that wrote
+  the default would produce no rule, no row, and look like a dead control). A key's chip shows its
+  RESOLVED direction and its menu offers only `keyStopsWithin` the item's own, because a key can
+  never travel further than the item it lives in; the label carries `limited by This remote` when
+  that narrowing is real. The document is folded away until asked for — a forty-key plugin would
+  otherwise push the rest of the card off screen. Four shapes, decided in `keysRowModel`
+  (panelModel.ts): the rules list, or one of three sentences naming a structural fact the user
+  cannot change (whole-file-encrypted item / a file with no keys / a folder), or — when the item
+  itself travels `Neither way` — **no row at all**, since the row directly above already says so.
 - **Expanded card (Sync Center row)** `config-sync-itemcard` — a quiet properties zone:
   no border, no fill, no radius. The zone
   is tied to its parent row by the **fold thread** (shared verbatim with the

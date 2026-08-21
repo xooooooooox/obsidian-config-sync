@@ -3248,7 +3248,9 @@ export class SyncCenterView extends ItemView {
     if (ref === null || remote === undefined) return null;
     return withheldKeysClause({
       remote: relation.name,
-      item: r.group.label ?? r.group.name,
+      // The name the card is titled with, not the compiled group name: this sentence sits inside
+      // that card, and "plugin-dataview" beside a heading that says "Dataview" reads as a leak.
+      item: this.host.displayParts(r.group.name, r.group.label).label,
       direction,
       keys: withheldPatternsFor(remote.items, ref, direction),
     });

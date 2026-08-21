@@ -489,6 +489,13 @@ functions.
   keep their order), used by both the merge-conflict modal and the Sync Center's diff preview —
   when a `.json` file's raw text differs but its sorted view doesn't, the preview shows a single
   "Only key order / formatting differs." note instead of a blank-looking diff.
+- `ui/jsonView.ts` — the key document's SHAPE (`renderJsonKeyDoc`), shared by the two surfaces that
+  paint it: the Settings card's rule block and the Sync Center card's `Keys` area. Only the shape is
+  shared. What a key's colour MEANS is the caller's question — Settings answers "who shares this
+  value", the Sync Center "which way does it travel with this remote" — so classification arrives as
+  `classOf`/`decorate`/`clickable` callbacks rather than being decided inside. Merging both answers
+  into one function is what would make this the wrong abstraction; duplicating the line-by-line
+  walk would be the other wrong one.
 - `core/derivedLock.ts` — `derivedPushLock`: the one rule for the `store.lock.json` a PUSH sends,
   which is not the one this device keeps. A push does not send everything, so an item withheld by
   the remote's rules (`Neither way` / `Pull only`) or left unticked for the run keeps the entry the
@@ -504,6 +511,11 @@ functions.
   dir, ...groupLists)` answers, per store rel, which key patterns do not travel that way — shaped
   like `skipRelPredicate` because it is the same question one level down, and answering only for a
   **file item's JSON copy** (a folder travels whole, and so does a file with no keys in it).
+  `core/remoteRules.ts` owns the two writers and the stop list: `withItemDirection` /
+  `withKeyDirection` (the default is never stored, an entry carrying nothing else is removed) and
+  `keyStopsWithin(item)`, the stops a KEY may be set to under an item with that direction — a menu
+  offering more would let a click write a rule the reader resolves to something else, i.e. a control
+  lying about its own effect.
   `overlayWithheld({keep, take, patterns})` is the merge itself, and one function serves both
   directions because they differ only in who is the draft: on a pull `keep` is this vault's store
   copy and `take` is the remote's, on a push they swap. `keep: null` — that side has no copy of the

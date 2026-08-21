@@ -2,6 +2,7 @@
 
 ## 2.25.0
 
+- Added a per-key choice about what each remote gets. Open an item while a remote is selected, click any key in it, and that key stops travelling — the rest of the item still does. Each key can travel both ways, only out, only in, or not at all, and never further than the item it lives in
 - Fixed a setting held back in both directions reading as unfinished work forever. Those two values are meant to differ, so they no longer count as a difference: the item stops asking to be pulled every time the other device saves, and its card stops listing a file you could never reconcile
 - Added holding a single setting back from a remote instead of the whole item. Pull takes everything else and leaves your value where it is; Push sends everything else and leaves **their** value where it is — a setting you hold back is never blanked out on the other side, which is what would happen if it were simply left out of what gets sent
 - Fixed a Push overwriting the other side's record of things it never sent. An item you keep out of a remote — Config Sync's own settings, or anything set to travel one way — left the far end holding a record that described a file we had deliberately not written, and that record is what its own devices read to decide whether they are behind. Their record of those items stays theirs now, and so does the mark of how far they have pulled

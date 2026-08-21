@@ -1402,7 +1402,14 @@ body.is-mobile .config-sync-tworow-chev { display: none; }
    ruled-key colour on THIS axis (a key with a direction rule) and the two-column rule rows. */
 .config-sync-json-key.config-sync-json-key-ruled { color: var(--interactive-accent); }
 .config-sync-keyrule-row { display: flex; align-items: center; gap: var(--size-4-2); padding: 2px 0; }
-.config-sync-keyrule-name { flex: 1; min-width: 0; font-family: var(--font-monospace); font-size: var(--font-ui-smaller); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The name column is BOUNDED, not stretched: a card is as wide as the pane, and a chip pushed to
+   that far edge reads as belonging to the card rather than to the key beside it. Bounding it
+   also lines the chips up in one column, the way the label/control rows above them do. */
+.config-sync-keyrule-name { flex: 0 1 auto; min-width: 210px; max-width: 100%; font-family: var(--font-monospace); font-size: var(--font-ui-smaller); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.config-sync-keyrule-row { justify-content: flex-start; }
+/* A tall value (the key rules plus the document) puts its label at the top, like every other
+   card row's single line does — centring it against a 20-line document loses the pairing. */
+.config-sync-card-fieldrow:has(.config-sync-json-hint) .config-sync-explabel { align-self: start; }
 .config-sync-keys-limited { color: var(--text-faint); font-size: var(--font-ui-smaller); margin-bottom: var(--size-2-1); }
 .config-sync-json-empty { color: var(--text-muted); font-size: var(--font-ui-smaller); }
 
