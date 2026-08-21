@@ -68,7 +68,12 @@ functions.
   carries `skipRefs` on the `PendingPull` so `applyImport` skips the same lock entries;
   `pushExternal` skips them in its write loop — and exempts them from the mirror-delete loop too, so
   the remote's own copy of a withheld item is never deleted even though it's absent from the local
-  push set. `remoteGroupsFrom(ctx, reader,
+  push set. **The lock is the one file push does not send verbatim**: it comes out of the write loop
+  and is written last, derived by `core/derivedLock.ts` from both sides plus that same `skipRefs`, so
+  the bookkeeping that lands over there describes what actually landed. Skipping content while
+  pushing the lock anyway was a live defect, not a gap: a remote with `excludeSelf` (now the self
+  item's `Neither way`) got our entry for the very copy we had refused to send, and every four-stop
+  rule after it inherited the same error. `remoteGroupsFrom(ctx, reader,
   files)` resolves the remote's sync list from its self store copy — schema v1 copies carry a
   compiled `groups` array; v3 copies carry nested `items` and compile through the injected
   `CoreContext.storeListGroups` hook (main.ts wires `storeSelfCopyGroups` with the plugin's
@@ -462,6 +467,15 @@ functions.
   keep their order), used by both the merge-conflict modal and the Sync Center's diff preview —
   when a `.json` file's raw text differs but its sorted view doesn't, the preview shows a single
   "Only key order / formatting differs." note instead of a blank-looking diff.
+- `core/derivedLock.ts` — `derivedPushLock`: the one rule for the `store.lock.json` a PUSH sends,
+  which is not the one this device keeps. A push does not send everything, so an item withheld by
+  the remote's rules (`Neither way` / `Pull only`) or left unticked for the run keeps the entry the
+  far end already had — ours would fingerprint a file we never wrote, and that entry is what the far
+  end's own devices read to decide whether they are behind. `syncedWatermark` is theirs for the same
+  reason: only a pull moves it, and our push is not their pull. Unknown keys are carried from both
+  sides, theirs winning a collision, because the file describes their store. **No new format** — the
+  result is a `store.lock.json`, field for field, so `store-lock.schema.json` is untouched; only the
+  values are computed. The local lock is never written by a push.
 
 **Install & discovery**
 - `core/installer.ts` — download a plugin from the community catalog, version-pinned via the
