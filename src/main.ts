@@ -83,7 +83,7 @@ import { decideEnablement, EnablementDecision } from "./core/enablementDecision"
 import { classifySettings, CURRENT_SCHEMA, SCHEMA_FUTURE_NOTICE, SCHEMA_UPGRADE_NOTICE, withDefaults } from "./core/settingsMigration";
 import { deviceOptOutsFor, migrateV2Settings } from "./core/v2Migration";
 import { migrateV4Settings } from "./core/v4Migration";
-import { refsBlockedFor } from "./core/remoteRules";
+import { refsBlockedFor, withItemDirection } from "./core/remoteRules";
 import { migrateV5Settings } from "./core/v5Migration";
 import { applySwitchList, captureSwitchList, EnablementList, enablementListFile, isSwitchListGroup, localRealPath, parseSwitchList, readLocalSwitchList, subtractForceOff, switchDivergence, SwitchList, switchListMemberOn, writeLocalSwitchList } from "./core/switchList";
 import { applyTransform, captureTransform, isWholeFileEncrypted, scanSensitive, SensitiveScan } from "./core/modes";
@@ -931,6 +931,16 @@ export default class ConfigSyncPlugin extends Plugin {
           lockDiffers = false;
         }
         return { entries, lockDiffers, remoteLabels };
+      },
+      setRemoteItemDirection: async (remoteName, ref, direction) => {
+        if (!this.settingsWritable()) return;
+        this.settings.remotes = this.settings.remotes.map((r) => (r.name === remoteName ? { ...r, items: withItemDirection(r.items, ref, direction) } : r));
+        await this.saveSettings();
+        // The same pair SettingTab.saveRemotes does after any remote edit: a reader built under the
+        // old rules must never serve the next comparison, and the check that feeds the counts has to
+        // be re-asked before the panel can show what changed.
+        this.clearReaderCache();
+        await this.refreshRemoteChecks();
       },
       pullFrom: async (remote, skipRefs) => {
         if (this.schemaStopped()) return null; // schema stop

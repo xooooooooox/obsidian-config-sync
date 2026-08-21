@@ -4,7 +4,7 @@ import { lockRefFor, refItemId } from "../core/itemKeys";
 import { GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry, RemoteDiffFile, sumRemoteItemCounts } from "../core/status";
 import { SECTION_LABELS, findGroupByName, SELF_GROUP_NAME, sectionForGroup, communityGroupName } from "../core/catalog";
 import { itemDirection } from "../core/remoteRules";
-import { EVERYWHERE, FileChanges, FileSharing, GroupResult, hasChanges, ItemRef, Remote, Sharing, SyncGroup, StorageSection } from "../core/types";
+import { EVERYWHERE, FileChanges, FileSharing, GroupResult, hasChanges, ItemRef, Remote, RemoteDirection, Sharing, SyncGroup, StorageSection } from "../core/types";
 import { DeviceElementState } from "../core/deviceElements";
 import { RuleListId } from "../core/enablementRules";
 import {
@@ -147,6 +147,30 @@ import {
 // The one question this pane asks of a remote's rules: does Config Sync's own item travel with it at
 // all. "none" and only "none" earns the note — a one-way item still travels, and saying it stays out
 // would contradict the row above it.
+// spec 5.3/5.4's four stops for one item against one remote, copy final. `Both ways` is the
+// default and the only stop that leaves the row without a chip — a chip states a decision, and the
+// default is the absence of one.
+const REMOTE_DIRECTION_ORDER: readonly RemoteDirection[] = ["both", "push", "pull", "none"];
+const REMOTE_DIRECTION_LABEL: Record<RemoteDirection, string> = {
+  both: "Both ways",
+  push: "Push only",
+  pull: "Pull only",
+  none: "Neither way",
+};
+const REMOTE_DIRECTION_ICON: Record<RemoteDirection, string> = {
+  both: "arrow-up-down",
+  push: "cloud-upload",
+  pull: "cloud-download",
+  none: "circle-slash",
+};
+// The row's own chip for a non-default stop (FATE_CHIP_ICON carries their glyphs).
+const REMOTE_DIRECTION_CHIP: Record<RemoteDirection, string | null> = {
+  both: null,
+  push: "push only",
+  pull: "pull only",
+  none: "neither way",
+};
+
 // A stand-in group for an item only the remote has: this device has no SyncGroup describing it, so
 // the row needs one to exist at all. It carries no `ref` — which is exactly why unticking such a row
 // cannot withhold it from a run (see renderRemoteActionBar): the transport's skip list speaks refs.
@@ -321,6 +345,10 @@ export interface SyncCenterHost {
   deepDiff(remote: Remote, onPhase?: (phase: "fetch" | "compare") => void): Promise<RemoteCompareResult>;
   // skipRefs: the rows the user unticked. main.ts unions it with what this remote's own rules
   // withhold — the view knows the selection, the plugin knows the rules, and neither guesses.
+  // Writes ONE item's direction for ONE remote. The rules live on the remote (spec 2.4), so this is
+  // a settings write — and it invalidates the reader cache, because the next comparison has to be
+  // made under the new rules instead of reusing the answer the old ones gave.
+  setRemoteItemDirection(remoteName: string, ref: ItemRef, direction: RemoteDirection): Promise<void>;
   pullFrom(remote: Remote, skipRefs: ItemRef[]): Promise<GroupResult[] | null>;
   pushTo(remote: Remote, skipRefs: ItemRef[]): Promise<GroupResult[] | null>;
   adoptConfiguration(): Promise<GroupResult[] | null>;
@@ -966,11 +994,13 @@ export class SyncCenterView extends ItemView {
   // this device's own statuses say nothing about what the remote holds.
   private deriveRemoteRow(r: StatusRow, remoteName: string): RowDerivation {
     const copy = relationCopy({ kind: "remote", name: remoteName });
-    const ref = this.itemRefFor(r.group.name);
+    const ref = this.itemRefFor(r.group.name) ?? r.group.ref ?? null;
     const remote = this.host.remotes().find((x) => x.name === remoteName);
-    // "Excluded" under this relation is the remote's own rule, not a device rule: an item this
-    // remote neither pushes nor pulls.
-    const excluded = ref !== null && remote !== undefined && itemDirection(remote.items, ref) === "none";
+    // ONE reading of this item's rule for this remote, feeding both the row's chip and its
+    // "excluded" presentation: "Excluded" under this relation is the remote's own rule, not a
+    // device rule — an item this remote neither pushes nor pulls.
+    const rule: RemoteDirection = ref === null || remote === undefined ? "both" : itemDirection(remote.items, ref);
+    const excluded = rule === "none";
     const state = r.status.state;
     const direction: Direction | null = excluded ? null : state === "store-newer" ? "apply" : state === "local-changed" ? "capture" : null;
     const input: FateInput = {
@@ -1003,7 +1033,7 @@ export class SyncCenterView extends ItemView {
           : direction === "capture"
             ? copy.sentence.push
             : copy.bucket.ok,
-      chips: [],
+      chips: [REMOTE_DIRECTION_CHIP[rule]].filter((c): c is string => c !== null),
       stageable: direction !== null,
       turnsOn: false,
       nothingYet: false,
@@ -3076,6 +3106,7 @@ export class SyncCenterView extends ItemView {
     // The flip list the retired remote pane pinned under its section head: under this relation the
     // carrier is an ordinary row, so its delta belongs in its own card (spec 5.8.3).
     if (remoteRelation) this.renderRemoteOnOffRow(fields, r);
+    if (remoteRelation) this.renderThisRemoteRow(fields, r);
 
     if (isConflict) this.renderResolveRow(fields, r);
 
@@ -3117,6 +3148,33 @@ export class SyncCenterView extends ItemView {
     if (result === null) return null;
     const folded = foldCompanionEntries(result.entries, (g) => this.host.companionParentOf(g));
     return folded.find((e) => e.group === group) ?? null;
+  }
+
+  // spec 5.4's `This remote` row: which way this ONE item flows with the remote on screen. Four
+  // stops, and the row above repeats the non-default ones as a chip (deriveRemoteRow). A row with no
+  // ref carries no control at all rather than a dead one: a rule is stored under a ref, and an item
+  // only the remote declares has none here — the same boundary that keeps it out of `skipRefs`.
+  private renderThisRemoteRow(fields: HTMLElement, r: StatusRow): void {
+    const relation = this.relation;
+    if (relation.kind !== "remote") return;
+    const ref = this.itemRefFor(r.group.name) ?? r.group.ref ?? null;
+    const remote = this.host.remotes().find((x) => x.name === relation.name);
+    if (ref === null || remote === undefined) return;
+    const current = itemDirection(remote.items, ref);
+    const name = relation.name;
+    this.renderCardMenuRow(fields, "This remote", REMOTE_DIRECTION_LABEL[current], `Choose which way ${name} exchanges this item`, () => {
+      const menu = new Menu();
+      for (const d of REMOTE_DIRECTION_ORDER) {
+        menu.addItem((item) =>
+          item
+            .setTitle(REMOTE_DIRECTION_LABEL[d])
+            .setIcon(REMOTE_DIRECTION_ICON[d])
+            .setChecked(d === current)
+            .onClick(() => void this.host.setRemoteItemDirection(name, ref, d).then(() => this.reload()))
+        );
+      }
+      return menu;
+    });
   }
 
   // A carrier's own card row under the remote relation: which plugins are on at one side and off at

@@ -20,6 +20,9 @@ describe("FATE_CHIP_ICON — chip→icon map completeness", () => {
     "stays off",
     "encrypted",
     "your choice",
+    "push only",
+    "pull only",
+    "neither way",
   ];
 
   it("maps every buildChips string + the two render-time chips to an icon", () => {
@@ -38,6 +41,10 @@ describe("FATE_CHIP_ICON — chip→icon map completeness", () => {
       "stays off": "power-off",
       encrypted: "lock",
       "your choice": "check",
+      // The remote relation's three direction chips share the transport's own glyphs.
+      "push only": "cloud-upload",
+      "pull only": "cloud-download",
+      "neither way": "circle-slash",
     });
   });
 
@@ -230,6 +237,10 @@ describe("glyph registry — one glyph, one meaning (icon-collision guard)", () 
     lock: "encrypted",
     smartphone: "mobile-only device class",
     power: "on, on this device — a local exception, wherever it is summarised",
+    // The direction chips and the buttons/badges that run those directions state one fact — which
+    // way this content moves with a remote — so they state it with one mark.
+    "cloud-upload": "flows toward the remote — the push direction, wherever it is stated",
+    "cloud-download": "flows toward this store — the pull direction, wherever it is stated",
   };
 
   it("every producer contributes at least one glyph (an empty producer would pass vacuously)", () => {

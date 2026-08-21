@@ -16,4 +16,10 @@ export const FATE_CHIP_ICON: Record<string, string> = {
   "stays off": "power-off",
   encrypted: "lock",
   "your choice": "check",
+  // The remote relation's direction chips (spec 5.3: a chip appears only off the default stop).
+  // Same two glyphs the Pull/Push buttons and the View picker badges use (ACTION_ICON) — one form,
+  // one meaning — plus the "nothing flows either way" slash.
+  "push only": "cloud-upload",
+  "pull only": "cloud-download",
+  "neither way": "circle-slash",
 };
