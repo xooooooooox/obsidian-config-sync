@@ -265,8 +265,13 @@ functions.
   in sync; an entry with no local counterpart still gets a row. `skipRefsForSelection` turns the
   checkboxes into the skip list the transport already takes: the rows the user did NOT tick.
 - `core/status.ts` — per-item status (`statusForGroups`), remote freshness (`diffRemote`,
-  `remoteLockAhead`), and the counts the UI shows (`bucketCounts`, `remoteDirectionCounts` —
-  the per-remote ⇡ push / ⇣ pull totals behind the header pills and the status bar).
+  `remoteLockAhead`), and the counts the UI shows (`bucketCounts`; `remoteItemCounts` /
+  `sumRemoteItemCounts` — the ⇡ push / ⇣ pull totals behind the header pills and the status bar,
+  counted in ITEMS). `checkRemote` fills `RemoteCheck.items` from the same per-ref `itemFreshness`
+  walk its whole-store verdict already runs, so those numbers cost no extra file read; `items: null`
+  means this remote cannot be counted item by item (a side that stamps no entry, or a remote that
+  never parsed) and is deliberately NOT zero — `sumRemoteItemCounts` reports those separately as
+  `uncounted`, so "nothing waiting" and "cannot say" stay apart.
   `diffRemote(ctx, reader, opts: { skipRefs: ItemRef[] })` returns per-group `RemoteDiffEntry.files:
   RemoteDiffFile[]` — one entry per file with its `kind` (`added`/`updated`/`deleted`) and both
   sides' content, so the UI renders file lists and content diffs instead of bare counts;
@@ -475,7 +480,13 @@ functions.
   words swapped (`relationCopy`) and the availability axis dropped, since store-copy-vs-remote-copy
   has nothing to do with what this device has installed. While a remote's comparison is still
   running, `renderRemoteComparing` holds the list's place; when it settles, the render finds the
-  cached result and paints rows. **Two orthogonal axes drive what it paints**, not one field:
+  cached result and paints rows. `renderThisRemoteRow` is the ONE write entrance for an item's
+  per-remote direction — the card row spec 5.4 calls `This remote`, four stops, through the host's
+  `setRemoteItemDirection` → `withItemDirection`, which then clears the reader cache so the next
+  comparison is made under the new rules. A row with no `ref` (an item only the remote declares)
+  renders no such control, the same boundary that keeps it out of `skipRefs`. config-sync's own item
+  is an ordinary row here and the pinned self row under the device relation — one object, two faces
+  (spec 5.6). **Two orthogonal axes drive what it paints**, not one field:
   `relation` (`PanelRelation` — this device against the store, or the store against one named
   remote) is what the View picker sets; `destination` (`PanelDestination` — a slice of items, run
   History, Config Sync's own entry) is what the sidebar sets. `renderMainRegionBody` checks them in
@@ -621,8 +632,11 @@ functions.
   fold in the app — a single `chevron-right` SVG rotated via CSS, so a fold's state is one boolean,
   never a second icon name to keep in sync.
 - `statusBar.ts` — pure segment model (`statusBarSegments`, `statusBarAriaLabel`) + a thin DOM
-  renderer for the status-bar item; segments mirror the Sync Center header pills (↑/↓ from
-  presented bucket counts, ⇡/⇣ from `remoteDirectionCounts`). The bar runs outside the view, so
+  renderer for the status-bar item; segments mirror the Sync Center header pills (↑/↓ from presented
+  bucket counts, ⇡/⇣ from `sumRemoteItemCounts`) and since 2.25.0 all four count the same unit —
+  ITEMS. How many remotes the ⇡/⇣ numbers span is a different fact, carried in the hover
+  (`statusBarAriaLabel`'s `span`, which also names any remote that could not be counted). The bar
+  runs outside the view, so
   `panelModel.ts`'s `statusBarStatuses` reproduces the view's row set structurally: self dropped,
   companions folded through `familyRollup`, and `desktop-only` dropped (the one availability class
   `stageableRow` calls unstageable). It cannot reproduce the view's FATE machinery — install

@@ -462,7 +462,8 @@ glyph, used wherever a decision is pinned to one device — the conflict modal i
 title icon (`config-sync-self-title-ic`) is Lucide (the self pane is a hero surface):
 `arrow-down-to-line` coldstart · `arrow-up-from-line` capture — the ACTION_ICON pair —
 plus `alert-triangle` both · `settings` default. Removal glyphs `⊘` stop-sync · `⌫`
-leftover. Status-bar remote counts use `⇡ ⇣` (text, matching the pill colors); navigation
+leftover. Status-bar remote counts use `⇡ ⇣` (text, matching the pill colors, counting items like
+every other segment there); navigation
 is `› ‹`; the sidebar's device↔store relation renders `↔`; strips/banners close with
 Lucide `x`. New UI must reuse this vocabulary rather than invent synonyms.
 
@@ -702,7 +703,12 @@ noted):
   The two on/off carriers, which are never rows under the device relation (they dissolve into the
   section-head chip, and what they carry is spoken by each member's own row), ARE ordinary rows
   under a remote: no member row says anything about enablement there, and the carrier's store copy
-  genuinely differs. Carrier divergence is then that row's own card row (`On/off`, the per-plugin
+  genuinely differs. Every row's card carries a `This remote` row — four stops, `Both ways` (the
+  default, and the only one that leaves the row without a chip) / `Push only` / `Pull only` /
+  `Neither way` — rendered as the card's own menu-chip idiom (the shape `After install` and
+  `Enablement` already use). Its chips speak the transport's own glyphs: `cloud-upload`,
+  `cloud-download`, `circle-slash`. A row with no ref carries no such control, because a rule is
+  stored under a ref. Carrier divergence is then that row's own card row (`On/off`, the per-plugin
   flip narration, `config-sync-remote-flip-value`); per-file differences are that item's `Files` row, each entry
   opening the store-vs-remote content diff. Companion families fold the same way here: companion
   diff entries merge into their parent's entry, each file re-pathed under a `<companion>/` prefix
@@ -863,7 +869,10 @@ noted):
   Appearance card (Unified card ③ below) — same mechanism, same row shape,
   fewer surfaces because it has no carrier card of its own.
 - **Remote** — a remote is not a screen of its own: its rows, sections, cards and checkboxes are the
-  item list's, with the state words swapped (Type sections above). `config-sync-remote-btn`
+  item list's, with the state words swapped (Type sections above). config-sync's own item is one of
+  those rows here; under the device relation the same object is the pinned, checkbox-less self row
+  ("manages itself"). Which way an item travels with a remote is set on its card and nowhere else —
+  the Settings toggle that once said it for that one item is gone. `config-sync-remote-btn`
   is-pull/is-push (solid cyan/pink when primary, dimmed otherwise) is the action bar's pair of
   direction buttons, `Pull N` / `Push N` over the rows ticked on that side.
 - **Reports** `config-sync-report-*`, chips, `-strip` result strip — outcome-toned: green
@@ -910,9 +919,14 @@ noted):
   per-remote spinner in the sidebar and the aggregate line on a remote's pane.
 - **Status bar item** (`src/ui/statusBar.ts`, rendered by `main.ts`) — plain colored text
   segments, no pill backgrounds; colors identical to the header pills
-  (`is-up` orange, `is-down` accent, `is-push` pink, `is-pull` cyan). Clean state = a dimmed
-  `refresh-cw` icon only (`--text-faint`). `mod-clickable`; aria-label lists the non-zero parts
-  (`Config Sync — 2 to capture · 1 to apply · 1 to push`).
+  (`is-up` orange, `is-down` accent, `is-push` pink, `is-pull` cyan). It sits outside the panel, so
+  it has no current relation and reports BOTH: this device against the store, and every remote
+  together. **All four segments count the same unit — items.** ⇡/⇣ used to count remotes, which put
+  two units on one line. How many remotes those items span is a different fact and lives in the
+  hover, as does any remote that could not be counted item by item (`… across 2 remotes · 1 remote
+  can't be counted yet` — never silently folded into a zero). Clean state = a dimmed `refresh-cw`
+  icon only (`--text-faint`). `mod-clickable`; aria-label lists the non-zero parts
+  (`Config Sync — 2 to capture · 1 to apply · 1 to push across 1 remote`).
 - **Advanced rule editor** (the custom/discovered rule form, `renderRuleForm`): a
   VERTICAL form of scrows (`config-sync-advform` wraps it; each row is a
   `config-sync-advrow`, `label 130px | control 1fr`), one field per row.
@@ -973,13 +987,13 @@ noted):
   Obsidian's keychain — link it once per device.`) lives in the control's tooltip, never a
   row; a status sentence renders on a label-less row ONLY when it has something to say
   (`✓ Token stored on this device.` / the ⚠ not-linked-here warning) — the default state
-  renders no row at all. Then a label-less `Test connection` row + the full-width test strip. **No Username field**: a
-  linked token is enough — live-tested against a self-hosted GitLab as well; a `username`
-  already stored in `data.json` still validates and still reaches git auth
-  (types/manifest/resolveGitToken carry it), it just has no UI. The
-  `Keep Config Sync's own settings out of this remote` toggle row closes the form
-  (the self item's direction rule on this remote — live on the whole pull/push/compare
-  chain). Every handler is `draft.x = …; saveRemotes()` behind the settingsWritable guard.
+  renders no row at all. Then a label-less `Test connection` row + the full-width test strip, which closes the form. **No
+  Username field**: a linked token is enough — live-tested against a self-hosted GitLab as well; a
+  `username` already stored in `data.json` still validates and still reaches git auth
+  (types/manifest/resolveGitToken carry it), it just has no UI. **No direction control either**:
+  what this remote exchanges is a per-ITEM rule, set on the item's card in the Sync Center
+  (`This remote`); the toggle that once spoke for config-sync's own item alone was a special case of
+  it and is gone. Every handler is `draft.x = …; saveRemotes()` behind the settingsWritable guard.
 - **Beta tab header**: the BRAT map note is a quiet one-line status
   (`config-sync-beta-mapnote`: muted text `Matched from BRAT's beta list · N of M repos
   resolved` + a small `rotate-cw` re-scan icon) that renders ONLY while something is
