@@ -275,6 +275,8 @@ Encrypt modes need a vault-level **Passphrase**, set once per device in Settings
 - A wrong passphrase on Apply fails cleanly without writing anything.
 - **Comparing with a remote reads what the copies say, not the bytes they are stored as.** Every encryption draws fresh randomness, so two vaults holding the very same setting hold different bytes — comparing those would report a difference no Push or Pull could ever clear. Config Sync opens both copies instead and compares what is inside.
 - **Without the passphrase on this device, those items say so.** They land in the remote view's own `Can't compare` group rather than claiming a difference nobody checked; setting the passphrase here makes them compare normally. An item the remote has no copy of yet is unaffected — it is an ordinary `To push` row, since a passphrase only proves itself against something to open.
+- **A remote whose vault uses a different passphrase can carry its own.** Each remote's editor (Settings → Remotes) has a `Passphrase` field, the same keychain-backed picker as the access token: link the other vault's passphrase there once per device, and comparison opens that remote's copies with it. Leave it empty when the two vaults share one passphrase — that is the default, and nothing changes.
+- **Until Config Sync can re-encrypt in transit, encrypted items don't travel to or from a remote with its own passphrase.** Pull and Push skip them — each skipped item gets its own line in the report, and nothing unreadable is ever written to either side. Everything not encrypted still travels normally.
 
 #### Sensitive-key detection
 

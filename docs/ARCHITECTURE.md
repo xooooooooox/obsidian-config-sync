@@ -570,21 +570,44 @@ functions.
   difference no run can clear. `compareCopies({mine, theirs, passphrase, masked, groupName})` answers
   in order: one side missing is an ordinary push/pull row and says nothing about passphrases;
   identical bytes are identical content (two devices on one store pay nothing here); different
-  STORAGE FORMS are a difference, not a puzzle to open; two whole-file envelopes decrypt the far
-  side once and check our own envelope's plaintext HMAC against it — the settled case costs one
-  decryption and one HMAC. The HMAC cannot tell a wrong passphrase from changed content (both come
-  back false), and that distinction IS the third answer, so a false sends it to open our own copy
-  and find out which. A document with encrypted FIELDS is masked, then every `enc:v1:` leaf is
-  replaced by what it says, and the two are compared normalised; a leaf that will not open makes the
-  whole answer `cannot`. Copies with no ciphertext anywhere delegate to `sameApartFromWithheld`, so
-  the plain path keeps exactly one implementation and can never answer `cannot`.
+  STORAGE FORMS are a difference, not a puzzle to open; two whole-file envelopes are decrypted —
+  our own FIRST, so a failure here is blamed here — and their plaintexts compared. A document with
+  encrypted FIELDS is masked, then every `enc:v1:` leaf is replaced by what it says, and the two
+  are compared normalised; a leaf that will not open decides the whole answer. Copies with no
+  ciphertext anywhere delegate to `sameApartFromWithheld`, so the plain path keeps exactly one
+  implementation and can never answer a `cannot`. The `cannot` itself carries WHICH side failed
+  (`{cannot: "here" | "there"}`): the two lead the user to different fixes — this device's own
+  passphrase versus the key saved for that remote — and a sentence naming one problem must never
+  link to the other one's settings. When both fail, "here" wins: the user can only fix what is
+  theirs to fix.
 - `core/itemCompare.ts` — the same question one level up, for a whole item.
   `compareStoreItem` reads its store files from both sides (a file item is its base copy plus the
   two per-class sidecars; a folder item is whatever either side holds under its store directory) and
   folds the per-file answers with one rule: **`differs` outranks `cannot`.** Once one file is
   plainly not the same we know something has to move, and downgrading the item to "we cannot tell"
-  because a SECOND file is unreadable throws away the answer we do have. `refsNeedingContentCompare`
-  names who pays: the items with key rules, plus the items holding ciphertext.
+  because a SECOND file is unreadable throws away the answer we do have. Among the unknowable,
+  "here" outranks "there", the same ordering compareCopies applies within one file.
+  `refsNeedingContentCompare` names who pays: the items with key rules, plus the items holding
+  ciphertext.
+- `core/remotePassphrase.ts` — which passphrase opens a remote's store.
+  `resolveRemotePassphrase(storage, remote, local)` answers in three kinds, because the three lead
+  to different consequences: `same-as-local` (the unset default — ciphertext travels verbatim and
+  every pre-existing behaviour holds byte for byte), `own` (a keychain entry named by
+  `remote.passphraseId`, activating the each-side-its-own-key paths), and `missing` (named but not
+  held on this device). Unlike `resolveGitToken`, absence does NOT throw: a token has no fallback,
+  a passphrase has one, and it is the road everybody is already on. A NAMED entry this device lacks
+  is reported rather than silently substituted — falling back would try our own secret against a
+  store it was never meant for and read as "wrong passphrase" when the truth is "not linked here".
+  `remoteKeyPassphrase` collapses the three to what a comparison actually opens with (`missing` →
+  null, i.e. the honest "cannot: there").
+- `core/differentKeyHold.ts` — TEMPORARY, deleted whole by Plan 4c. Until pull and push can
+  transcode, exchanging ciphertext with a remote keyed differently is wrong by construction — a
+  pull writes bytes this vault can never open into its own store, and only detonates at the next
+  apply, far from the scene. `differentKeyHold` therefore holds every item with ciphertext out of
+  the run at the PLANNING stage (3f's rule: every decision before the first byte), per item, with a
+  per-item report line; everything without ciphertext still travels. It exists BEFORE the transcode
+  because the Passphrase field exists before it: no field the settings offer may configure a state
+  the runs then corrupt.
 
 **Install & discovery**
 - `core/installer.ts` — download a plugin from the community catalog, version-pinned via the
