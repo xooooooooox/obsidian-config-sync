@@ -535,7 +535,7 @@ export default class ConfigSyncPlugin extends Plugin {
         const ignore = { pull: refsBlockedFor(remote.items, "pull"), push: refsBlockedFor(remote.items, "push") };
         this.remoteChecks.set(remote.name, { check: await checkRemote(localLock, reader, ignore, this.compiledGroups), at: Date.now() });
       } catch (e) {
-        this.remoteChecks.set(remote.name, { check: { state: "unknown", remoteCapturedAt: null, items: null }, at: Date.now() });
+        this.remoteChecks.set(remote.name, { check: { state: "unknown", remoteCapturedAt: null, items: null, itemVerdicts: null }, at: Date.now() });
         console.error(`Config Sync: remote check failed for ${remote.name}`, e);
       }
       if (this.remoteRefreshProgress !== null) this.remoteRefreshProgress.done++;

@@ -202,6 +202,10 @@ function blockedSets(ignore: DirectionIgnores): { pull: Set<string>; push: Set<s
   return { pull: new Set<string>(ignore.pull), push: new Set<string>(ignore.push) };
 }
 
+// What one item still needs with this remote — the panel's row state and the bar's counts both
+// come from here, so they cannot drift apart.
+export type ItemVerdict = "pull" | "push";
+
 export interface RemoteItemCounts {
   push: number; // items this store is ahead on — Push would update the remote
   pull: number; // items the remote is ahead on — Pull would update this store
@@ -214,6 +218,9 @@ export interface RemoteCheck {
   // counted item by item (a side still on the older payload, or a remote that never parsed). null
   // is NOT zero: a remote nobody can count must not read as a remote with nothing to do.
   items: RemoteItemCounts | null;
+  // ref -> the direction that item still needs, null on the same "cannot judge" terms as `items`.
+  // The panel's rows read THIS; `items` is only its tally.
+  itemVerdicts: Record<string, ItemVerdict> | null;
 }
 
 // `ignore` names the lock entries that never count, PER DIRECTION (spec 3.5) — callers pass
@@ -239,31 +246,35 @@ export async function checkRemote(
   // one inviting the push it would then decline (the rule the version gate already follows for a future lock).
   if (!files.includes("store.lock.json")) {
     const empty = !remoteDeclaresStore(files) && remoteStoreContentRels(files).length === 0;
-    return { state: empty ? "no-store" : "unknown", remoteCapturedAt: null, items: null };
+    return { state: empty ? "no-store" : "unknown", remoteCapturedAt: null, items: null, itemVerdicts: null };
   }
   let remote: StoreLock;
   try {
     remote = parseStoreLock(await reader.readFile("store.lock.json"), groups);
   } catch {
-    return { state: "unknown", remoteCapturedAt: null, items: null };
+    return { state: "unknown", remoteCapturedAt: null, items: null, itemVerdicts: null };
   }
   // A remote this build cannot read must not look ACTIONABLE. The version gate
   // refuses the pull itself, but a refusal the user only meets after accepting an invitation is a
   // worse surface than never being invited: "unknown" already means "this remote cannot be
   // compared", which is exactly true here. No new RemoteState, no UI change. The capture stamp is
   // still reported — it parsed, and saying WHEN is not the same as inviting a pull.
-  if (storeLockVersion(remote) > STORE_LOCK_VERSION) return { state: "unknown", remoteCapturedAt: remote.capturedAt, items: null };
+  if (storeLockVersion(remote) > STORE_LOCK_VERSION) return { state: "unknown", remoteCapturedAt: remote.capturedAt, items: null, itemVerdicts: null };
   // No local lock yet (bootstrap device) but the remote parsed fine: a pull would populate
   // the store, so this is a known state, not "unknown" — reserve that for unreadable remotes.
-  if (localLock === null) return { state: "remote-newer", remoteCapturedAt: remote.capturedAt, items: remoteItemCounts(null, remote, ignore) };
-  const counts = remoteItemCounts(localLock, remote, ignore);
+  if (localLock === null) {
+    const first = remoteItemVerdicts(null, remote, ignore);
+    return { state: "remote-newer", remoteCapturedAt: remote.capturedAt, items: remoteItemCounts(first), itemVerdicts: first };
+  }
+  const verdicts = remoteItemVerdicts(localLock, remote, ignore);
+  const counts = remoteItemCounts(verdicts);
   const perItem = perItemRemoteState(localLock, remote, ignore);
-  if (perItem !== null) return { state: perItem, remoteCapturedAt: remote.capturedAt, items: counts };
+  if (perItem !== null) return { state: perItem, remoteCapturedAt: remote.capturedAt, items: counts, itemVerdicts: verdicts };
   const r = Date.parse(remote.capturedAt);
   const l = Date.parse(localLock.capturedAt);
-  if (Number.isNaN(r) || Number.isNaN(l)) return { state: "unknown", remoteCapturedAt: remote.capturedAt, items: counts };
+  if (Number.isNaN(r) || Number.isNaN(l)) return { state: "unknown", remoteCapturedAt: remote.capturedAt, items: counts, itemVerdicts: verdicts };
   const state: RemoteState = r > l ? "remote-newer" : r < l ? "remote-older" : "same";
-  return { state, remoteCapturedAt: remote.capturedAt, items: counts };
+  return { state, remoteCapturedAt: remote.capturedAt, items: counts, itemVerdicts: verdicts };
 }
 
 // Entry fields that are never a DIFFERENCE. `display` is names: a plugin renamed on one device must
@@ -419,24 +430,44 @@ function perItemRemoteState(local: StoreLock, remote: StoreLock, ignore: Directi
   return newer ? "remote-newer" : older ? "remote-older" : "same";
 }
 
-// How many ITEMS each side is ahead on. The same walk perItemRemoteState does — it already asks
-// `itemFreshness` per ref — kept as its own function because the two answer different questions:
-// that one collapses to a single whole-store word, this one is the number the panel and the status
-// bar show. Reads only the two locks already in hand, so a periodic check pays nothing for it.
+// What each item still NEEDS with this remote. The same walk perItemRemoteState does — it already
+// asks `itemFreshness` per ref — kept as its own function because the two answer different
+// questions: that one collapses to a single whole-store word, this one is what every row and every
+// count reads. Reads only the two locks already in hand, so a periodic check pays nothing for it.
+//
+// Absent from the table means "nothing to do", which merges three cases that are ONE fact for the
+// reader (spec 3.3's redefinition of "in sync"): the two copies agree; the only difference runs in a
+// direction this remote closes; the item exists on one side only and that direction is closed.
 //
 // `local === null` is the bootstrap device: it has no store of its own yet, so every item the
 // remote holds is an item waiting to come in.
-export function remoteItemCounts(local: StoreLock | null, remote: StoreLock, ignore: DirectionIgnores): RemoteItemCounts | null {
+export function remoteItemVerdicts(
+  local: StoreLock | null,
+  remote: StoreLock,
+  ignore: DirectionIgnores
+): Record<string, ItemVerdict> | null {
   if (!hasPerItemPayload(remote)) return null;
   if (local !== null && !hasPerItemPayload(local)) return null;
   const refs = [...new Set([...(local === null ? [] : lockEntryList(local.items)), ...lockEntryList(remote.items)].map(([ref]) => ref))];
   const blocked = blockedSets(ignore);
-  let push = 0;
-  let pull = 0;
+  const out: Record<string, ItemVerdict> = {};
   for (const ref of refs) {
     const freshness = itemFreshness(local === null ? undefined : lockEntry(local, ref), lockEntry(remote, ref));
-    if (freshness === "newer" && !blocked.pull.has(ref)) pull++;
-    else if (freshness === "older" && !blocked.push.has(ref)) push++;
+    if (freshness === "newer" && !blocked.pull.has(ref)) out[ref] = "pull";
+    else if (freshness === "older" && !blocked.push.has(ref)) out[ref] = "push";
+  }
+  return out;
+}
+
+// The status bar's and the header pills' totals, counted off the SAME table the rows read, so a row
+// and the number above it can never disagree about what is waiting.
+export function remoteItemCounts(verdicts: Record<string, ItemVerdict> | null): RemoteItemCounts | null {
+  if (verdicts === null) return null;
+  let push = 0;
+  let pull = 0;
+  for (const v of Object.values(verdicts)) {
+    if (v === "pull") pull++;
+    else push++;
   }
   return { push, pull };
 }

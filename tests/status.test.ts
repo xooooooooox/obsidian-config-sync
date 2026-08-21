@@ -4,7 +4,7 @@ import { parseSyncManifest, STORE_LOCK_VERSION } from "../src/core/manifest";
 import { lockByName } from "./lock";
 import { lockRefFor } from "../src/core/itemKeys";
 import { SELF_ITEM_REF } from "../src/core/catalog";
-import { statusForGroups, checkRemote, DirectionIgnores, diffRemote, bucketCounts, remoteLockAhead, remoteItemCounts, remoteLockLabels, sumRemoteItemCounts, GroupStatus, RemoteCheck } from "../src/core/status";
+import { statusForGroups, checkRemote, DirectionIgnores, diffRemote, bucketCounts, remoteLockAhead, remoteItemCounts, remoteItemVerdicts, remoteLockLabels, sumRemoteItemCounts, GroupStatus, RemoteCheck } from "../src/core/status";
 import { applyUpdates, emptyLedger, Ledger } from "../src/core/ledger";
 import { directionForState, stageableRow } from "../src/ui/panelModel";
 import { StoreLock, StoreLockEntry, SyncGroup, THIS_DEVICE } from "../src/core/types";
@@ -726,42 +726,64 @@ describe("remoteLockLabels — carrier memberLabels fallback", () => {
   });
 });
 
-describe("remoteItemCounts", () => {
+describe("remoteItemVerdicts", () => {
   const t0 = "2026-08-01T00:00:00.000Z";
   const t1 = "2026-08-02T00:00:00.000Z";
+  const none = { pull: [], push: [] };
 
-  it("counts the items each side is ahead on, not the remotes", () => {
+  it("names the direction each unsettled item still needs", () => {
     const local = lockByName(t1, { app: { hash: "a", capturedAt: t1 }, hotkeys: { hash: "h", capturedAt: t0 } });
     const remote = lockByName(t1, { app: { hash: "a2", capturedAt: t0 }, hotkeys: { hash: "h2", capturedAt: t1 } });
-    expect(remoteItemCounts(local, remote, NO_IGNORES)).toEqual({ push: 1, pull: 1 });
+    expect(remoteItemVerdicts(local, remote, none)).toEqual({ "obsidian/app": "push", "obsidian/hotkeys": "pull" });
   });
 
-  it("counts nothing for items whose copies are identical", () => {
+  it("leaves a settled item out of the table entirely", () => {
     const same = { app: { hash: "a", capturedAt: t0 } };
-    expect(remoteItemCounts(lockByName(t0, same), lockByName(t1, same), NO_IGNORES)).toEqual({ push: 0, pull: 0 });
+    expect(remoteItemVerdicts(lockByName(t0, same), lockByName(t1, same), none)).toEqual({});
   });
 
-  it("ignores the refs this remote never exchanges", () => {
-    // lockRefFor([]) maps the plugin group name to `community/config-sync` — the same ref the
-    // ignore list speaks, which is exactly why the fixture goes through lockByName.
-    const local = lockByName(t1, { "plugin-config-sync": { hash: "a", capturedAt: t1 } });
-    const remote = lockByName(t1, { "plugin-config-sync": { hash: "b", capturedAt: t0 } });
-    expect(remoteItemCounts(local, remote, { pull: ["community/config-sync"], push: ["community/config-sync"] })).toEqual({ push: 0, pull: 0 });
+  it("leaves out an item whose only difference runs in a direction the rule closes", () => {
+    // The remote is ahead on dataview and the rule is push only: nothing to do, so nothing to say.
+    const local = lockByName(t0, { "plugin-dataview": { hash: "a", capturedAt: t0 } });
+    const remote = lockByName(t1, { "plugin-dataview": { hash: "b", capturedAt: t1 } });
+    expect(remoteItemVerdicts(local, remote, { pull: ["community/dataview"], push: [] })).toEqual({});
   });
 
-  it("says it cannot count when a side stamps no entry with a capture time", () => {
+  it("calls an item only the remote has a pull", () => {
+    // `themes` is a companion, so with no compiled list behind the fixture lockRefFor keys it under
+    // `legacy/` — the table is keyed by whatever the lock itself is keyed by, which is the point.
+    const local = lockByName(t0, { app: { hash: "a", capturedAt: t0 } });
+    const remote = lockByName(t1, { app: { hash: "a", capturedAt: t0 }, themes: { hash: "t", capturedAt: t1 } });
+    expect(remoteItemVerdicts(local, remote, none)).toEqual({ "legacy/themes": "pull" });
+  });
+
+  it("says it cannot judge when a side stamps no entry with a capture time", () => {
     const unstamped = lockByName(t0, { app: { hash: "a" } });
-    expect(remoteItemCounts(unstamped, lockByName(t1, { app: { hash: "b", capturedAt: t1 } }), NO_IGNORES)).toBeNull();
+    expect(remoteItemVerdicts(unstamped, lockByName(t1, { app: { hash: "b", capturedAt: t1 } }), none)).toBeNull();
   });
 
   it("counts every remote item as a pull when this device has no lock yet", () => {
     const remote = lockByName(t1, { app: { hash: "a", capturedAt: t1 }, hotkeys: { hash: "h", capturedAt: t1 } });
-    expect(remoteItemCounts(null, remote, NO_IGNORES)).toEqual({ push: 0, pull: 2 });
+    expect(remoteItemVerdicts(null, remote, none)).toEqual({ "obsidian/app": "pull", "obsidian/hotkeys": "pull" });
+  });
+});
+
+describe("remoteItemCounts · counts the verdict table", () => {
+  it("adds up what each direction still needs", () => {
+    expect(remoteItemCounts({ "obsidian/app": "push", "obsidian/hotkeys": "pull", "obsidian/themes": "pull" })).toEqual({ push: 1, pull: 2 });
+  });
+
+  it("passes the cannot-judge answer straight through", () => {
+    expect(remoteItemCounts(null)).toBeNull();
+  });
+
+  it("counts an empty table as nothing waiting", () => {
+    expect(remoteItemCounts({})).toEqual({ push: 0, pull: 0 });
   });
 });
 
 describe("sumRemoteItemCounts", () => {
-  const check = (items: { push: number; pull: number } | null): RemoteCheck => ({ state: "unknown", remoteCapturedAt: null, items });
+  const check = (items: { push: number; pull: number } | null): RemoteCheck => ({ state: "unknown", remoteCapturedAt: null, items, itemVerdicts: null });
 
   it("adds the item counts up and says how many remotes they came from", () => {
     expect(sumRemoteItemCounts([check({ push: 2, pull: 0 }), check({ push: 1, pull: 3 })])).toEqual({ push: 3, pull: 3, remotes: 2, uncounted: 0 });
@@ -780,7 +802,7 @@ describe("sumRemoteItemCounts", () => {
   });
 });
 
-describe("remoteItemCounts · direction-aware ignores", () => {
+describe("remoteItemVerdicts · direction-aware ignores", () => {
   const t0 = "2026-08-01T00:00:00.000Z";
   const t1 = "2026-08-02T00:00:00.000Z";
   const none = { pull: [], push: [] };
@@ -789,25 +811,25 @@ describe("remoteItemCounts · direction-aware ignores", () => {
     // The remote is ahead on dataview, but the rule says push only — nothing to pull.
     const local = lockByName(t0, { "plugin-dataview": { hash: "a", capturedAt: t0 } });
     const remote = lockByName(t1, { "plugin-dataview": { hash: "b", capturedAt: t1 } });
-    expect(remoteItemCounts(local, remote, { pull: ["community/dataview"], push: [] })).toEqual({ push: 0, pull: 0 });
+    expect(remoteItemCounts(remoteItemVerdicts(local, remote, { pull: ["community/dataview"], push: [] }))).toEqual({ push: 0, pull: 0 });
   });
 
   it("still counts the push for that same item when this side is the one ahead", () => {
     const local = lockByName(t1, { "plugin-dataview": { hash: "a", capturedAt: t1 } });
     const remote = lockByName(t0, { "plugin-dataview": { hash: "b", capturedAt: t0 } });
-    expect(remoteItemCounts(local, remote, { pull: ["community/dataview"], push: [] })).toEqual({ push: 1, pull: 0 });
+    expect(remoteItemCounts(remoteItemVerdicts(local, remote, { pull: ["community/dataview"], push: [] }))).toEqual({ push: 1, pull: 0 });
   });
 
   it("counts neither direction for an item the remote exchanges neither way", () => {
     const local = lockByName(t1, { "plugin-dataview": { hash: "a", capturedAt: t1 } });
     const remote = lockByName(t0, { "plugin-dataview": { hash: "b", capturedAt: t0 } });
     const both: DirectionIgnores = { pull: ["community/dataview"], push: ["community/dataview"] };
-    expect(remoteItemCounts(local, remote, both)).toEqual({ push: 0, pull: 0 });
+    expect(remoteItemCounts(remoteItemVerdicts(local, remote, both))).toEqual({ push: 0, pull: 0 });
   });
 
   it("counts both directions when nothing is withheld", () => {
     const local = lockByName(t1, { app: { hash: "a", capturedAt: t1 }, hotkeys: { hash: "h", capturedAt: t0 } });
     const remote = lockByName(t1, { app: { hash: "a2", capturedAt: t0 }, hotkeys: { hash: "h2", capturedAt: t1 } });
-    expect(remoteItemCounts(local, remote, none)).toEqual({ push: 1, pull: 1 });
+    expect(remoteItemCounts(remoteItemVerdicts(local, remote, none))).toEqual({ push: 1, pull: 1 });
   });
 });
