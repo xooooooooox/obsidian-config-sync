@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveRemotePassphrase } from "../src/core/remotePassphrase";
+import { remoteKeyPassphrase, resolveRemotePassphrase } from "../src/core/remotePassphrase";
 import { Remote } from "../src/core/types";
 
 const REMOTE: Remote = { name: "work", type: "vault", storePath: "/tmp/store" };
@@ -35,5 +35,14 @@ describe("resolveRemotePassphrase", () => {
   it("treats an empty stored secret as no secret at all", () => {
     const remote: Remote = { ...REMOTE, passphraseId: "work-pass" };
     expect(resolveRemotePassphrase(storage({ "work-pass": "" }), remote, "local-pw")).toEqual({ kind: "missing", secretId: "work-pass" });
+  });
+});
+
+describe("remoteKeyPassphrase", () => {
+  it("opens with the resolved key, and with nothing when the named entry is not held", () => {
+    expect(remoteKeyPassphrase({ kind: "same-as-local", passphrase: "pw" })).toBe("pw");
+    expect(remoteKeyPassphrase({ kind: "same-as-local", passphrase: null })).toBeNull();
+    expect(remoteKeyPassphrase({ kind: "own", passphrase: "their-pw" })).toBe("their-pw");
+    expect(remoteKeyPassphrase({ kind: "missing", secretId: "work-pass" })).toBeNull();
   });
 });

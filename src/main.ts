@@ -106,7 +106,7 @@ import { renderStatusBarItem, statusBarSegments } from "./ui/statusBar";
 import { SYNC_CENTER_VIEW_TYPE, SelfSyncInfo, SyncCenterHost, SyncCenterView } from "./ui/SyncCenterView";
 import { ConfigSyncSettingTab } from "./ui/SettingTab";
 import { differentKeyHold } from "./core/differentKeyHold";
-import { resolveRemotePassphrase } from "./core/remotePassphrase";
+import { remoteKeyPassphrase, resolveRemotePassphrase } from "./core/remotePassphrase";
 
 // Settings schema v4. The sync list is not a
 // stored SyncGroup[] — it is COMPILED (registry.ts's compileItems) from `items` on every
@@ -554,6 +554,9 @@ export default class ConfigSyncPlugin extends Plugin {
         // that travel neither way masked off.
         const ctx = await this.coreContext();
         const unexchanged = unexchangedPatternPredicate(remote.items, this.compiledGroups);
+        // Each side's own key (spec 3.8): the remote's copies open under whatever ITS vault
+        // encrypts with — by default the same passphrase as here, spec 3.9's unset case.
+        const theirs = remoteKeyPassphrase(resolveRemotePassphrase(this.app.secretStorage, remote, ctx.passphrase));
         const check = await checkRemote(localLock, reader, ignore, {
           groups: this.compiledGroups,
           content: {
@@ -566,9 +569,7 @@ export default class ConfigSyncPlugin extends Plugin {
                 groups: this.compiledGroups,
                 ref,
                 masked: unexchanged,
-                // Both sides open with this vault's own passphrase today; Plan 4b gives a remote its
-                // own, and only this line changes.
-                passphrase: { mine: ctx.passphrase, theirs: ctx.passphrase },
+                passphrase: { mine: ctx.passphrase, theirs },
               }),
           },
         });
@@ -960,8 +961,12 @@ export default class ConfigSyncPlugin extends Plugin {
           // before the byte comparison, because those two values are MEANT to differ and a row
           // about them could never be acted on.
           unexchanged: unexchangedPatternPredicate(remote.items, this.compiledGroups),
-          // Each side opened with its own key (spec 3.8); the two are the same one until Plan 4b.
-          passphrase: { mine: ctx.passphrase, theirs: ctx.passphrase },
+          // Each side opened with its own key (spec 3.8) — the remote's resolved from its own
+          // settings, this vault's from General.
+          passphrase: {
+            mine: ctx.passphrase,
+            theirs: remoteKeyPassphrase(resolveRemotePassphrase(this.app.secretStorage, remote, ctx.passphrase)),
+          },
         });
         // A lock-only delta (version-refresh capture on the other side) is real pull payload
         // even when every store file matches — surface it so the hint isn't contradictory.

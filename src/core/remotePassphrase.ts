@@ -28,3 +28,10 @@ export function resolveRemotePassphrase(
   if (secret === null || secret === "") return { kind: "missing", secretId: remote.passphraseId };
   return { kind: "own", passphrase: secret };
 }
+
+// The key a COMPARISON opens the remote's copies with. `missing` opens nothing — null here is what
+// sends every encrypted item to the honest "cannot: there" answer instead of trying a key that was
+// never the right one.
+export function remoteKeyPassphrase(key: RemoteKey): string | null {
+  return key.kind === "missing" ? null : key.passphrase;
+}
