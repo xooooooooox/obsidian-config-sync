@@ -84,7 +84,7 @@ import { classifySettings, CURRENT_SCHEMA, SCHEMA_FUTURE_NOTICE, SCHEMA_UPGRADE_
 import { deviceOptOutsFor, migrateV2Settings } from "./core/v2Migration";
 import { migrateV4Settings } from "./core/v4Migration";
 import { refsBlockedFor, withItemDirection } from "./core/remoteRules";
-import { withheldPatternPredicate } from "./core/keyWithholding";
+import { unexchangedPatternPredicate, withheldPatternPredicate } from "./core/keyWithholding";
 import { migrateV5Settings } from "./core/v5Migration";
 import { applySwitchList, captureSwitchList, EnablementList, enablementListFile, isSwitchListGroup, localRealPath, parseSwitchList, readLocalSwitchList, subtractForceOff, switchDivergence, SwitchList, switchListMemberOn, writeLocalSwitchList } from "./core/switchList";
 import { applyTransform, captureTransform, isWholeFileEncrypted, scanSensitive, SensitiveScan } from "./core/modes";
@@ -914,7 +914,13 @@ export default class ConfigSyncPlugin extends Plugin {
         // that is going to stay there (spec 3.3's accepted cost, answered in the card).
         const noPull = new Set<string>(refsBlockedFor(remote.items, "pull"));
         const skipRefs = refsBlockedFor(remote.items, "push").filter((ref) => noPull.has(ref));
-        const entries = await diffRemote(ctx, reader, { skipRefs });
+        const entries = await diffRemote(ctx, reader, {
+          skipRefs,
+          // One level down, the same reasoning: a key this remote exchanges neither way is masked
+          // before the byte comparison, because those two values are MEANT to differ and a row
+          // about them could never be acted on.
+          unexchanged: unexchangedPatternPredicate(remote.items, this.compiledGroups),
+        });
         // A lock-only delta (version-refresh capture on the other side) is real pull payload
         // even when every store file matches — surface it so the hint isn't contradictory.
         let lockDiffers = false;

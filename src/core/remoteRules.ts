@@ -82,3 +82,13 @@ export function withheldPatternsFor(items: RemoteItems | undefined, ref: ItemRef
   if (keys === undefined) return [];
   return Object.keys(keys).filter((pattern) => !directionFlows(keyDirection(items, ref, pattern))[dir]);
 }
+
+// The keys this remote exchanges in NEITHER direction. Narrower than "has a rule" on purpose: a key
+// that still travels one way converges the next time that direction runs, so a difference in it is
+// real work and must keep showing. Only these two-way-closed keys differ BY DESIGN, forever, which
+// is what makes them the ones a comparison has to mask (spec 3.3).
+export function unexchangedPatternsFor(items: RemoteItems | undefined, ref: ItemRef): string[] {
+  const keys = ruleFor(items, ref)?.keys;
+  if (keys === undefined) return [];
+  return Object.keys(keys).filter((pattern) => keyDirection(items, ref, pattern) === "none");
+}

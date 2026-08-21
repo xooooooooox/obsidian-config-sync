@@ -9,6 +9,7 @@ import { contentUnchanged, groupNeedsPassphrase } from "./modes";
 import { parseFileEnvelope } from "./crypto";
 import { localRealPath, parseSwitchList, readLocalSwitchList, isSwitchListGroup, switchListsEqual } from "./switchList";
 import { ABSENT_HASH, BaselineEntry, hashDirSide, hashFileSide, Ledger, LedgerUpdates } from "./ledger";
+import { sameApartFromWithheld } from "./keyWithholding";
 
 export type GroupState = "in-sync" | "local-changed" | "store-newer" | "differs" | "not-captured" | "never-synced" | "no-settings" | "locked";
 
@@ -553,7 +554,11 @@ export interface RemoteDiffEntry {
 // filtered as metadata) so a delta never silently reads as "contents match".
 export const OTHER_STORE_FILES_GROUP = "(other store files)";
 
-export async function diffRemote(ctx: CoreContext, reader: ExternalStoreReader, opts: { skipRefs: ItemRef[] }): Promise<RemoteDiffEntry[]> {
+export async function diffRemote(
+  ctx: CoreContext,
+  reader: ExternalStoreReader,
+  opts: { skipRefs: ItemRef[]; unexchanged: (rel: string) => string[] }
+): Promise<RemoteDiffEntry[]> {
   const manifest = await loadManifest(ctx);
   const remoteFiles = await reader.listFiles();
   // A fresh device knows few or no groups yet, so attribution falls back to the REMOTE
@@ -580,8 +585,14 @@ export async function diffRemote(ctx: CoreContext, reader: ExternalStoreReader, 
     }
     return e;
   };
-  const filesMatch = (name: string, remoteContent: string, localContent: string): boolean => {
+  const filesMatch = (name: string, rel: string, remoteContent: string, localContent: string): boolean => {
     if (remoteContent === localContent) return true;
+    // Keys this remote exchanges neither way differ by design and always will (spec 3.3): a file
+    // whose ONLY difference is one of them has nothing waiting, and listing it puts a row on the
+    // card that no run could ever clear. Asked only where such keys exist, so a remote without key
+    // rules compares byte for byte exactly as before.
+    const patterns = opts.unexchanged(rel);
+    if (patterns.length > 0 && sameApartFromWithheld({ a: remoteContent, b: localContent, patterns })) return true;
     // Switch-list store copies are order-insensitive: each device captures in its own
     // store-stable order, so equal membership in a different order is not a difference.
     if (!isSwitchListGroup(name)) return false;
@@ -597,7 +608,7 @@ export async function diffRemote(ctx: CoreContext, reader: ExternalStoreReader, 
     } else {
       const remoteContent = await reader.readFile(rel);
       const localContent = await ctx.io.read(`${ctx.rootPath}/${rel}`);
-      if (!filesMatch(name, remoteContent, localContent)) {
+      if (!filesMatch(name, rel, remoteContent, localContent)) {
         entry(name).files.push({ itemRel, kind: "updated", local: localContent, remote: remoteContent });
       }
     }

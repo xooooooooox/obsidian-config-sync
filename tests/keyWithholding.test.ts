@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { overlayWithheld, withheldPatternPredicate } from "../src/core/keyWithholding";
+import { overlayWithheld, sameApartFromWithheld, unexchangedPatternPredicate, withheldPatternPredicate } from "../src/core/keyWithholding";
 import { RemoteItems, SyncGroup } from "../src/core/types";
 
 const RULES: RemoteItems = {
@@ -63,5 +63,46 @@ describe("overlayWithheld", () => {
 
   it("refuses rather than guessing when a side is not JSON: a rule we cannot honour must not be silently skipped", () => {
     expect(() => overlayWithheld({ rel: "store/configdir/x.json", keep: "{", take: "{}", patterns: ["s"] })).toThrow("store/configdir/x.json");
+  });
+});
+
+describe("sameApartFromWithheld", () => {
+  it("calls two documents the same when they differ only in a key that travels neither way", () => {
+    expect(sameApartFromWithheld({ a: '{"x":1,"mine":"a"}', b: '{"x":1,"mine":"b"}', patterns: ["mine"] })).toBe(true);
+  });
+
+  it("still sees a difference in any other key", () => {
+    expect(sameApartFromWithheld({ a: '{"x":1,"mine":"a"}', b: '{"x":2,"mine":"a"}', patterns: ["mine"] })).toBe(false);
+  });
+
+  it("ignores key order and formatting, the way the store's two writers legitimately differ", () => {
+    expect(sameApartFromWithheld({ a: '{"a":1,"b":2}', b: '{\n  "b": 2,\n  "a": 1\n}\n', patterns: [] })).toBe(true);
+  });
+
+  it("one side missing the file entirely is a difference, not a match", () => {
+    expect(sameApartFromWithheld({ a: null, b: '{"x":1}', patterns: ["x"] })).toBe(false);
+    expect(sameApartFromWithheld({ a: null, b: null, patterns: [] })).toBe(true);
+  });
+
+  it("falls back to a byte comparison when a side is not JSON — answering a question, not writing a file", () => {
+    expect(sameApartFromWithheld({ a: "not json", b: "not json", patterns: ["x"] })).toBe(true);
+    expect(sameApartFromWithheld({ a: "not json", b: "other", patterns: ["x"] })).toBe(false);
+  });
+});
+
+describe("unexchangedPatternPredicate", () => {
+  const dataview: SyncGroup[] = [
+    { name: "plugin-dataview", ref: "community/dataview", path: "{configDir}/plugins/dataview/data.json", type: "file", devices: "all" },
+  ];
+  const REL = "store/configdir/plugins/dataview/data.json";
+
+  it("names only the keys that travel in NEITHER direction", () => {
+    const rules: RemoteItems = { community: { dataview: { keys: { stuck: { direction: "none" }, oneWay: { direction: "push" } } } } };
+    expect(unexchangedPatternPredicate(rules, dataview)(REL)).toEqual(["stuck"]);
+  });
+
+  it("counts a key narrowed to nothing by its item's own direction", () => {
+    const rules: RemoteItems = { community: { dataview: { direction: "pull", keys: { stuck: { direction: "push" } } } } };
+    expect(unexchangedPatternPredicate(rules, dataview)(REL)).toEqual(["stuck"]);
   });
 });
