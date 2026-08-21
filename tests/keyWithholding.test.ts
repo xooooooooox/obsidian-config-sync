@@ -9,6 +9,32 @@ const RULES: RemoteItems = {
   },
 };
 
+describe("relCanHaveKeys — the whole-file-encrypted refusal", () => {
+  // An envelope is JSON too: without the refusal, a stored key rule for one of these would send
+  // overlayWithheld off to "withhold" the envelope's own salt/iv/ct keys. The panel offers no way
+  // to write such a rule, but the gate is for the roads that don't go through the panel.
+  const rules: RemoteItems = {
+    custom: { blob: { keys: { token: { direction: "none" } } }, sealed: { keys: { token: { direction: "none" } } } },
+    community: { fields: { keys: { token: { direction: "none" } } } },
+  };
+  const groups = [
+    { name: "blob", ref: "custom/blob", path: "{configDir}/blob.json", type: "file", devices: "all", mode: "encrypted" },
+    { name: "sealed", ref: "custom/sealed", path: "{configDir}/sealed.json", type: "file", devices: "all", fileRule: { sharing: { kind: "everywhere" }, encrypted: true } },
+    { name: "plugin-fields", ref: "community/fields", path: "{configDir}/plugins/fields/data.json", type: "file", devices: "all", mode: "fields", fields: [{ pattern: "token", sharing: { kind: "everywhere" }, encrypted: true }] },
+  ] as unknown as SyncGroup[];
+
+  it("answers nothing for either whole-file-encrypted shape, whatever rules are stored", () => {
+    for (const make of [withheldPatternPredicate(rules, "push", groups), unexchangedPatternPredicate(rules, groups)]) {
+      expect(make("store/configdir/blob.json")).toEqual([]);
+      expect(make("store/configdir/sealed.json")).toEqual([]);
+    }
+  });
+
+  it("still answers for a field-level-encrypted item — its store copy is plain JSON", () => {
+    expect(withheldPatternPredicate(rules, "push", groups)("store/configdir/plugins/fields/data.json")).toEqual(["token"]);
+  });
+});
+
 describe("withheldPatternPredicate", () => {
   const groups: SyncGroup[] = [
     { name: "plugin-dataview", ref: "community/dataview", path: "{configDir}/plugins/dataview/data.json", type: "file", devices: "all" },

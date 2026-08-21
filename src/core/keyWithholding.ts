@@ -1,18 +1,23 @@
 import { unexchangedPatternsFor, withheldPatternsFor } from "./remoteRules";
 import { sortKeysDeep } from "./merge";
+import { isWholeFileEncrypted } from "./modes";
 import { resolveGroupByStoreRel } from "./pathing";
 import { isPlainObject, mergePreservingSanitized, sanitizeJson } from "./sanitize";
 import { ItemRef, RemoteItems, SyncGroup } from "./types";
 
 // A key rule can only exist where there are keys: a folder item travels as a whole, and so does a
 // file with no JSON in it. Both are structural facts about the item, not choices, and the card says
-// so in as many words rather than showing an empty Keys area.
+// so in as many words rather than showing an empty Keys area. A WHOLE-FILE-ENCRYPTED item is
+// refused here too, and the `.json` suffix must not be trusted to do it: an envelope is JSON as
+// well, so without this check a stored rule would send overlayWithheld off to "withhold" the
+// envelope's own salt/iv/ct keys. (A field-level-encrypted item passes — its store copy really is
+// a plain JSON document, key names and all.)
 function relCanHaveKeys(rel: string, groupLists: SyncGroup[][]): ItemRef | null {
   if (!rel.endsWith(".json")) return null;
   for (const list of groupLists) {
     const group = resolveGroupByStoreRel(list, rel);
     if (group === undefined) continue;
-    return group.type === "file" && group.ref !== undefined ? group.ref : null;
+    return group.type === "file" && group.ref !== undefined && !isWholeFileEncrypted(group) ? group.ref : null;
   }
   return null;
 }
