@@ -16,7 +16,6 @@ import { MemFS, FakePlugins, memGroupsIO } from "./memfs";
 import ConfigSyncPlugin from "../src/main";
 import { SelfSyncInfo } from "../src/ui/SyncCenterView";
 import { itemsIn } from "./items";
-import { differentKeyHold } from "../src/core/differentKeyHold";
 import { transcodeContent } from "../src/core/transcode";
 
 export const MANIFEST = JSON.stringify({
@@ -3467,34 +3466,6 @@ describe("push with per-key withholding", () => {
   });
 });
 
-describe("a remote that keeps its own passphrase", () => {
-  const GROUPS = [
-    { name: "secrets", ref: "custom/secrets", path: "{configDir}/secrets.json", type: "file", devices: "all", mode: "encrypted" },
-    { name: "hotkeys", ref: "obsidian/hotkeys", path: "{configDir}/hotkeys.json", type: "file", devices: "all" },
-  ] as unknown as SyncGroup[];
-
-  it("holds back every item with ciphertext, and says so per item", () => {
-    const hold = differentKeyHold({ key: { kind: "own", passphrase: "their-pw" }, remoteName: "work", groups: GROUPS });
-    expect(hold.skipRefs).toEqual(["custom/secrets"]);
-    expect(hold.results).toHaveLength(1);
-    expect(hold.results[0]?.group).toBe("secrets");
-    expect(hold.results[0]?.status).toBe("warning");
-    expect(hold.results[0]?.messages).toEqual([
-      "Skipped — work keeps its own passphrase, so this item's encrypted contents can't travel between the two. Nothing was written.",
-    ]);
-    expect(hold.results[0]?.filesWritten).toEqual([]);
-  });
-
-  it("holds the same way for a named key this device does not hold", () => {
-    const hold = differentKeyHold({ key: { kind: "missing", secretId: "work-pass" }, remoteName: "work", groups: GROUPS });
-    expect(hold.skipRefs).toEqual(["custom/secrets"]);
-  });
-
-  it("holds nothing back on the default — the road everybody is already on", () => {
-    expect(differentKeyHold({ key: { kind: "same-as-local", passphrase: null }, remoteName: "work", groups: GROUPS })).toEqual({ skipRefs: [], results: [] });
-    expect(differentKeyHold({ key: { kind: "same-as-local", passphrase: "pw" }, remoteName: "work", groups: GROUPS })).toEqual({ skipRefs: [], results: [] });
-  });
-});
 
 describe("pushExternal · transcode", () => {
   const ENC_MANIFEST = JSON.stringify({

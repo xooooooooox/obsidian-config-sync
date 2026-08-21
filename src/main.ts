@@ -105,8 +105,8 @@ import { ConflictModal } from "./ui/ConflictModal";
 import { renderStatusBarItem, statusBarSegments } from "./ui/statusBar";
 import { SYNC_CENTER_VIEW_TYPE, SelfSyncInfo, SyncCenterHost, SyncCenterView } from "./ui/SyncCenterView";
 import { ConfigSyncSettingTab } from "./ui/SettingTab";
-import { differentKeyHold } from "./core/differentKeyHold";
 import { remoteKeyPassphrase, resolveRemotePassphrase } from "./core/remotePassphrase";
+import { transcodeContent, transcodePreflight } from "./core/transcode";
 
 // Settings schema v4. The sync list is not a
 // stored SyncGroup[] — it is COMPILED (registry.ts's compileItems) from `items` on every
@@ -1032,17 +1032,28 @@ export default class ConfigSyncPlugin extends Plugin {
         try {
           const ctx = await this.coreContext();
           const blocked = refsBlockedFor(remote.items, "pull");
-          // Until 4c can transcode, ciphertext does not travel to or from a remote keyed
-          // differently — held out at the PLANNING stage (3f's rule: every decision before the
-          // first byte), with a per-item line in the report.
-          const hold = differentKeyHold({
-            key: resolveRemotePassphrase(this.app.secretStorage, remote, this.passphrase()),
+          const reader = await this.createReader(remote);
+          const key = resolveRemotePassphrase(this.app.secretStorage, remote, ctx.passphrase);
+          // The foreseeable transcode failures become per-item skips with their own report line
+          // (spec 3.9.2) — the run itself carries on, and what it carries is re-encrypted for this
+          // vault's key on the way in.
+          const hold = await transcodePreflight({
+            key,
             remoteName: remote.name,
+            direction: "pull",
             groups: this.compiledGroups,
+            io: ctx.io,
+            rootPath: ctx.rootPath,
+            reader,
+            localPassphrase: ctx.passphrase,
           });
-          const pending = await planImport(ctx, await this.createReader(remote), {
+          const pending = await planImport(ctx, reader, {
             skipRefs: [...new Set([...blocked, ...hold.skipRefs, ...skipRefs])],
             withheldPull: withheldPatternPredicate(remote.items, "pull", this.compiledGroups),
+            transcode:
+              key.kind === "own"
+                ? (rel, content, existing) => transcodeContent({ rel, content, existing, from: key.passphrase, to: ctx.passphrase })
+                : undefined,
           });
           // Pull resolves file conflicts only; sync-list (definition) conflicts are never
           // applied by Pull, so they don't prompt — the list converges via adopt.
@@ -1091,16 +1102,27 @@ export default class ConfigSyncPlugin extends Plugin {
         try {
           const ctx = await this.coreContext();
           const blocked = refsBlockedFor(remote.items, "push");
-          const hold = differentKeyHold({
-            key: resolveRemotePassphrase(this.app.secretStorage, remote, this.passphrase()),
+          const writer = await this.createWriter(remote);
+          const key = resolveRemotePassphrase(this.app.secretStorage, remote, ctx.passphrase);
+          const hold = await transcodePreflight({
+            key,
             remoteName: remote.name,
+            direction: "push",
             groups: this.compiledGroups,
+            io: ctx.io,
+            rootPath: ctx.rootPath,
+            reader: writer,
+            localPassphrase: ctx.passphrase,
           }); // see pullFrom
-          const results = await pushExternal(ctx, await this.createWriter(remote), {
+          const results = await pushExternal(ctx, writer, {
             skipRefs: [...new Set([...blocked, ...hold.skipRefs, ...skipRefs])],
             withheldPush: withheldPatternPredicate(remote.items, "push", this.compiledGroups),
             // What the panel judged and the user acted on — the guard's own input (spec 3.7).
             expectPush,
+            transcode:
+              key.kind === "own"
+                ? (rel, content, existing) => transcodeContent({ rel, content, existing, from: ctx.passphrase, to: key.passphrase })
+                : undefined,
           });
           await this.refreshRemoteChecks();
           return [...results, ...hold.results];
