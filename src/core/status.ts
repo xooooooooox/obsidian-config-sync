@@ -236,8 +236,16 @@ export async function checkRemote(
   localLock: StoreLock | null,
   reader: ExternalStoreReader,
   ignore: DirectionIgnores,
-  groups?: readonly SyncGroup[]
+  opts: {
+    groups: readonly SyncGroup[];
+    // The items whose two copies differ BY DESIGN, because some key of theirs travels neither way,
+    // and the only thing that can tell whether they still need anything: their fingerprints never
+    // agree, so the entries alone would pin an arrow no run could clear (spec 3.4.3). Asked once per
+    // such item, and only for them — a remote with no key rules passes an empty list and pays nothing.
+    keyRuled: { refs: readonly string[]; sameApartFromWithheld: (ref: string) => Promise<boolean> };
+  }
 ): Promise<RemoteCheck> {
+  const groups = opts.groups;
   const files = await reader.listFiles();
   // Store presence, asked as one question. With no lock there is nothing to compare either way,
   // so all that is left to decide is whether this remote is EMPTY — the first-push target, and the
@@ -264,12 +272,19 @@ export async function checkRemote(
   // No local lock yet (bootstrap device) but the remote parsed fine: a pull would populate
   // the store, so this is a known state, not "unknown" — reserve that for unreadable remotes.
   if (localLock === null) {
-    const first = remoteItemVerdicts(null, remote, ignore);
+    // Nothing here to compare content against, so nothing can be settled that way: on a bootstrap
+    // device every item the remote holds is waiting to come in, key rules included.
+    const first = remoteItemVerdicts(null, remote, ignore, new Set());
     return { state: "remote-newer", remoteCapturedAt: remote.capturedAt, items: remoteItemCounts(first), itemVerdicts: first };
   }
-  const verdicts = remoteItemVerdicts(localLock, remote, ignore);
+  // After the three refusals above, so a remote nobody can compare never costs a single extra read.
+  const settled = new Set<string>();
+  for (const ref of opts.keyRuled.refs) {
+    if (await opts.keyRuled.sameApartFromWithheld(ref)) settled.add(ref);
+  }
+  const verdicts = remoteItemVerdicts(localLock, remote, ignore, settled);
   const counts = remoteItemCounts(verdicts);
-  const perItem = perItemRemoteState(localLock, remote, ignore);
+  const perItem = perItemRemoteState(localLock, remote, ignore, settled);
   if (perItem !== null) return { state: perItem, remoteCapturedAt: remote.capturedAt, items: counts, itemVerdicts: verdicts };
   const r = Date.parse(remote.capturedAt);
   const l = Date.parse(localLock.capturedAt);
@@ -412,7 +427,7 @@ function itemFreshness(mine: StoreLockEntry | undefined, theirs: StoreLockEntry 
 // stores are ahead of each other in different items, which RemoteState has no word for); the caller
 // then does exactly what it did before. Reads only the two locks already in hand — no extra file
 // reads, as before.
-function perItemRemoteState(local: StoreLock, remote: StoreLock, ignore: DirectionIgnores): RemoteState | null {
+function perItemRemoteState(local: StoreLock, remote: StoreLock, ignore: DirectionIgnores, settled: ReadonlySet<string>): RemoteState | null {
   if (!hasPerItemPayload(local) || !hasPerItemPayload(remote)) return null;
   const refs = [...new Set([...lockEntryList(local.items), ...lockEntryList(remote.items)].map(([ref]) => ref))];
   if (refs.length === 0) return null;
@@ -420,6 +435,7 @@ function perItemRemoteState(local: StoreLock, remote: StoreLock, ignore: Directi
   let newer = false;
   let older = false;
   for (const ref of refs) {
+    if (settled.has(ref)) continue; // see remoteItemVerdicts: its entries are not allowed to speak
     const freshness = itemFreshness(lockEntry(local, ref), lockEntry(remote, ref));
     if (freshness === "undatable") return null;
     // Each direction is judged against its OWN ignore set: an item the remote never pulls cannot
@@ -445,7 +461,12 @@ function perItemRemoteState(local: StoreLock, remote: StoreLock, ignore: Directi
 export function remoteItemVerdicts(
   local: StoreLock | null,
   remote: StoreLock,
-  ignore: DirectionIgnores
+  ignore: DirectionIgnores,
+  // Items already proven to have nothing waiting by comparing their CONTENT with the keys that
+  // travel neither way masked off (spec 3.3/3.4.3). Their fingerprints will never agree — that is
+  // what the rule means — so the entries must not be allowed to speak for them at all. Without this,
+  // every capture on the other device relights an arrow no Pull could ever clear.
+  settled: ReadonlySet<string>
 ): Record<string, ItemVerdict> | null {
   if (!hasPerItemPayload(remote)) return null;
   if (local !== null && !hasPerItemPayload(local)) return null;
@@ -453,6 +474,7 @@ export function remoteItemVerdicts(
   const blocked = blockedSets(ignore);
   const out: Record<string, ItemVerdict> = {};
   for (const ref of refs) {
+    if (settled.has(ref)) continue;
     const freshness = itemFreshness(local === null ? undefined : lockEntry(local, ref), lockEntry(remote, ref));
     if (freshness === "newer" && !blocked.pull.has(ref)) out[ref] = "pull";
     else if (freshness === "older" && !blocked.push.has(ref)) out[ref] = "push";

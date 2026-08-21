@@ -14,6 +14,9 @@ import { itemsIn } from "./items";
 import { Item, ItemDef, ItemMap } from "../src/core/registry";
 import { enablementRuleFor } from "../src/core/enablementRules";
 
+// A remote with no per-key rules: nothing can be settled by content, and nothing is asked to be.
+const NO_KEY_RULES = { groups: [], keyRuled: { refs: [], sameApartFromWithheld: async (): Promise<boolean> => true } };
+
 // spec 2026-08-11-data-model-hardening.md (invariant II.3): a document or store written by a
 // NEWER build is refused with a clear message — never downgraded, never reset, never overwritten.
 // Three gates, tested here end to end:
@@ -1019,12 +1022,12 @@ describe("content at the far end with no lock", () => {
   // refusal — the same rule already follows for a lock from the future. checkRemote answers
   // from the same predicate the gate does, so the two cannot drift apart.
   it("the remote's reported state agrees with the refusal — uncomparable, never an empty remote", async () => {
-    expect((await checkRemote(null, fakeReader(ONE_LEVEL_TOO_DEEP), { pull: [], push: [] })).state).toBe("unknown");
-    expect((await checkRemote(null, fakeReader(LOCKLESS_STORE), { pull: [], push: [] })).state).toBe("unknown");
+    expect((await checkRemote(null, fakeReader(ONE_LEVEL_TOO_DEEP), { pull: [], push: [] }, NO_KEY_RULES)).state).toBe("unknown");
+    expect((await checkRemote(null, fakeReader(LOCKLESS_STORE), { pull: [], push: [] }, NO_KEY_RULES)).state).toBe("unknown");
     // A legacy store is not refused, but it is still uncomparable — there is no lock to weigh.
-    expect((await checkRemote(null, fakeReader({ "config-sync.json": "{}" }), { pull: [], push: [] })).state).toBe("unknown");
+    expect((await checkRemote(null, fakeReader({ "config-sync.json": "{}" }), { pull: [], push: [] }, NO_KEY_RULES)).state).toBe("unknown");
     // no-store is reserved for the one remote a first push is FOR: nothing here at all.
-    expect((await checkRemote(null, fakeReader({}), { pull: [], push: [] })).state).toBe("no-store");
+    expect((await checkRemote(null, fakeReader({}), { pull: [], push: [] }, NO_KEY_RULES)).state).toBe("no-store");
   });
 
   // The message is the only place either cause can be diagnosed from, and there are TWO of them: a

@@ -13,6 +13,9 @@ import { MemFS, FakePlugins, memGroupsIO } from "./memfs";
 // Nothing withheld in either direction — the shape checkRemote takes since the ignore set split.
 const NO_IGNORES: DirectionIgnores = { pull: [], push: [] };
 
+// A remote with no per-key rules: nothing can be settled by content, and nothing is asked to be.
+const NO_KEY_RULES = { groups: [], keyRuled: { refs: [], sameApartFromWithheld: async (): Promise<boolean> => true } };
+
 const MANIFEST = JSON.stringify({
   version: 1,
   groups: [
@@ -497,7 +500,7 @@ describe("checkRemote per-item resolution (v2)", () => {
     "store/configdir/hotkeys.json": "{}",
   });
   const stateOf = async (local: StoreLock, remote: StoreLock, ignore: DirectionIgnores = NO_IGNORES): Promise<string> =>
-    (await checkRemote(local, fakeReader(remoteFiles(remote)), ignore)).state;
+    (await checkRemote(local, fakeReader(remoteFiles(remote)), ignore, NO_KEY_RULES)).state;
 
   it("reads 'same' when both sides hold the same items, however the whole-store stamps compare", async () => {
     // The remote's whole-store stamp is an hour ahead; every item in it is identical, so a pull
@@ -548,7 +551,7 @@ describe("checkRemote per-item resolution (v2)", () => {
   it("a lock version this build cannot read reports 'unknown', so the panel never invites a pull", async () => {
     const local = v2(AT, { a: item(AT, "h1") });
     const future: StoreLock = { version: STORE_LOCK_VERSION + 1, capturedAt: LATER, items: { obsidian: { a: { source: { kind: "app", version: "1.0" } } } } };
-    const check = await checkRemote(local, fakeReader(remoteFiles(future)), NO_IGNORES);
+    const check = await checkRemote(local, fakeReader(remoteFiles(future)), NO_IGNORES, NO_KEY_RULES);
     expect(check.state).toBe("unknown");
     expect(check.remoteCapturedAt).toBe(LATER); // it parsed — saying WHEN is not inviting a pull
   });
@@ -564,33 +567,100 @@ describe("checkRemote per-item resolution (v2)", () => {
   });
 });
 
+describe("remoteItemVerdicts · items settled by content", () => {
+  const t0 = "2026-08-01T00:00:00.000Z";
+  const t1 = "2026-08-02T00:00:00.000Z";
+
+  it("drops the verdict for an item whose copies differ only in keys that travel neither way", () => {
+    // The remote captured later and its fingerprint differs — by design, and forever. Only a
+    // content comparison with those keys masked can settle it, and here it has.
+    const local = lockByName(t0, { "plugin-dataview": { hash: "a", capturedAt: t0 } });
+    const remote = lockByName(t1, { "plugin-dataview": { hash: "b", capturedAt: t1 } });
+    expect(remoteItemVerdicts(local, remote, NO_IGNORES, new Set(["community/dataview"]))).toEqual({});
+  });
+
+  it("leaves every other item exactly as it was", () => {
+    const local = lockByName(t0, { "plugin-dataview": { hash: "a", capturedAt: t0 }, app: { hash: "x", capturedAt: t0 } });
+    const remote = lockByName(t1, { "plugin-dataview": { hash: "b", capturedAt: t1 }, app: { hash: "y", capturedAt: t1 } });
+    expect(remoteItemVerdicts(local, remote, NO_IGNORES, new Set(["community/dataview"]))).toEqual({ "obsidian/app": "pull" });
+  });
+});
+
+describe("checkRemote · key-ruled items", () => {
+  const AT = "2026-08-11T10:00:00.000Z";
+  const LATER = "2026-08-11T11:00:00.000Z";
+  const entry = (capturedAt: string, hash: string): StoreLockEntry => ({ source: { kind: "app", version: "1.0" }, capturedAt, hash });
+  const local = lockByName(AT, { "plugin-dataview": entry(AT, "mine") });
+  const remoteAhead = { "store.lock.json": JSON.stringify(lockByName(LATER, { "plugin-dataview": entry(LATER, "theirs") })) };
+
+  it("asks the content comparison once per key-ruled item and lets it settle the row", async () => {
+    const asked: string[] = [];
+    const check = await checkRemote(local, fakeReader(remoteAhead), NO_IGNORES, {
+      groups: [],
+      keyRuled: {
+        refs: ["community/dataview"],
+        sameApartFromWithheld: async (ref: string) => {
+          asked.push(ref);
+          return true; // masked-equal: nothing waiting, however the fingerprints compare
+        },
+      },
+    });
+    expect(asked).toEqual(["community/dataview"]);
+    expect(check.itemVerdicts?.["community/dataview"]).toBeUndefined();
+    expect(check.state).toBe("same");
+  });
+
+  it("keeps the verdict when the masked comparison still sees a difference", async () => {
+    const check = await checkRemote(local, fakeReader(remoteAhead), NO_IGNORES, {
+      groups: [],
+      keyRuled: { refs: ["community/dataview"], sameApartFromWithheld: async () => false },
+    });
+    expect(check.itemVerdicts?.["community/dataview"]).toBe("pull");
+  });
+
+  it("never asks at all when the remote has no key rules", async () => {
+    let asked = 0;
+    await checkRemote(local, fakeReader(remoteAhead), NO_IGNORES, {
+      groups: [],
+      keyRuled: {
+        refs: [],
+        sameApartFromWithheld: async () => {
+          asked += 1;
+          return true;
+        },
+      },
+    });
+    expect(asked).toBe(0);
+  });
+});
+
 describe("checkRemote", () => {
   const localLock = { capturedAt: "2026-07-08T00:00:00.000Z", items: {} };
   it("classifies all five states", async () => {
-    expect((await checkRemote(localLock, fakeReader({}), NO_IGNORES)).state).toBe("no-store");
+    expect((await checkRemote(localLock, fakeReader({}), NO_IGNORES, NO_KEY_RULES)).state).toBe("no-store");
     // Content with no lock: uncomparable, and refused by pull and push — never reported as an
     // empty remote inviting a first push.
-    expect((await checkRemote(localLock, fakeReader({ "store/configdir/hotkeys.json": "{}" }), NO_IGNORES)).state).toBe("unknown");
+    expect((await checkRemote(localLock, fakeReader({ "store/configdir/hotkeys.json": "{}" }), NO_IGNORES, NO_KEY_RULES)).state).toBe("unknown");
     // A legacy root manifest declares a store this build still reads (and still pulls), so it is not
     // the empty remote a first push is for — just one with no lock to compare against. Unchanged
     // from before
-    expect((await checkRemote(localLock, fakeReader({ "config-sync.json": "{}" }), NO_IGNORES)).state).toBe("unknown");
+    expect((await checkRemote(localLock, fakeReader({ "config-sync.json": "{}" }), NO_IGNORES, NO_KEY_RULES)).state).toBe("unknown");
     const at = (t: string): Record<string, string> => ({ "config-sync.json": "{}", "store.lock.json": JSON.stringify({ capturedAt: t, items: {} }) });
-    expect((await checkRemote(localLock, fakeReader(at("2026-07-09T00:00:00.000Z")), NO_IGNORES)).state).toBe("remote-newer");
-    expect((await checkRemote(localLock, fakeReader(at("2026-07-07T00:00:00.000Z")), NO_IGNORES)).state).toBe("remote-older");
-    expect((await checkRemote(localLock, fakeReader(at("2026-07-08T00:00:00.000Z")), NO_IGNORES)).state).toBe("same");
+    expect((await checkRemote(localLock, fakeReader(at("2026-07-09T00:00:00.000Z")), NO_IGNORES, NO_KEY_RULES)).state).toBe("remote-newer");
+    expect((await checkRemote(localLock, fakeReader(at("2026-07-07T00:00:00.000Z")), NO_IGNORES, NO_KEY_RULES)).state).toBe("remote-older");
+    expect((await checkRemote(localLock, fakeReader(at("2026-07-08T00:00:00.000Z")), NO_IGNORES, NO_KEY_RULES)).state).toBe("same");
     // bootstrap device (no local lock yet) with a reachable, parseable remote → remote-newer,
     // not "unknown": a pull would populate the store, so the state is known and truthful.
-    expect((await checkRemote(null, fakeReader(at("2026-07-09T00:00:00.000Z")), NO_IGNORES)).state).toBe("remote-newer");
+    expect((await checkRemote(null, fakeReader(at("2026-07-09T00:00:00.000Z")), NO_IGNORES, NO_KEY_RULES)).state).toBe("remote-newer");
   });
   it("recognizes a new-format store (store/** + lock, no root config-sync.json)", async () => {
     const newFormat = {
       "store.lock.json": JSON.stringify({ capturedAt: "2026-07-09T00:00:00.000Z", items: {} }),
       "store/configdir/hotkeys.json": "{}",
     };
-    expect((await checkRemote(localLock, fakeReader(newFormat), NO_IGNORES)).state).toBe("remote-newer");
+    expect((await checkRemote(localLock, fakeReader(newFormat), NO_IGNORES, NO_KEY_RULES)).state).toBe("remote-newer");
     // store files but no lock yet → present but unknown, NOT no-store
-    expect((await checkRemote(localLock, fakeReader({ "store/configdir/hotkeys.json": "{}" }), NO_IGNORES)).state).toBe("unknown");
+    expect((await checkRemote(localLock, fakeReader({ "store/configdir/hotkeys.json": "{}" }), NO_IGNORES, NO_KEY_RULES)).state).toBe("unknown");
   });
 });
 
@@ -761,19 +831,19 @@ describe("remoteItemVerdicts", () => {
   it("names the direction each unsettled item still needs", () => {
     const local = lockByName(t1, { app: { hash: "a", capturedAt: t1 }, hotkeys: { hash: "h", capturedAt: t0 } });
     const remote = lockByName(t1, { app: { hash: "a2", capturedAt: t0 }, hotkeys: { hash: "h2", capturedAt: t1 } });
-    expect(remoteItemVerdicts(local, remote, none)).toEqual({ "obsidian/app": "push", "obsidian/hotkeys": "pull" });
+    expect(remoteItemVerdicts(local, remote, none, new Set())).toEqual({ "obsidian/app": "push", "obsidian/hotkeys": "pull" });
   });
 
   it("leaves a settled item out of the table entirely", () => {
     const same = { app: { hash: "a", capturedAt: t0 } };
-    expect(remoteItemVerdicts(lockByName(t0, same), lockByName(t1, same), none)).toEqual({});
+    expect(remoteItemVerdicts(lockByName(t0, same), lockByName(t1, same), none, new Set())).toEqual({});
   });
 
   it("leaves out an item whose only difference runs in a direction the rule closes", () => {
     // The remote is ahead on dataview and the rule is push only: nothing to do, so nothing to say.
     const local = lockByName(t0, { "plugin-dataview": { hash: "a", capturedAt: t0 } });
     const remote = lockByName(t1, { "plugin-dataview": { hash: "b", capturedAt: t1 } });
-    expect(remoteItemVerdicts(local, remote, { pull: ["community/dataview"], push: [] })).toEqual({});
+    expect(remoteItemVerdicts(local, remote, { pull: ["community/dataview"], push: [] }, new Set())).toEqual({});
   });
 
   it("calls an item only the remote has a pull", () => {
@@ -781,17 +851,17 @@ describe("remoteItemVerdicts", () => {
     // `legacy/` — the table is keyed by whatever the lock itself is keyed by, which is the point.
     const local = lockByName(t0, { app: { hash: "a", capturedAt: t0 } });
     const remote = lockByName(t1, { app: { hash: "a", capturedAt: t0 }, themes: { hash: "t", capturedAt: t1 } });
-    expect(remoteItemVerdicts(local, remote, none)).toEqual({ "legacy/themes": "pull" });
+    expect(remoteItemVerdicts(local, remote, none, new Set())).toEqual({ "legacy/themes": "pull" });
   });
 
   it("says it cannot judge when a side stamps no entry with a capture time", () => {
     const unstamped = lockByName(t0, { app: { hash: "a" } });
-    expect(remoteItemVerdicts(unstamped, lockByName(t1, { app: { hash: "b", capturedAt: t1 } }), none)).toBeNull();
+    expect(remoteItemVerdicts(unstamped, lockByName(t1, { app: { hash: "b", capturedAt: t1 } }), none, new Set())).toBeNull();
   });
 
   it("counts every remote item as a pull when this device has no lock yet", () => {
     const remote = lockByName(t1, { app: { hash: "a", capturedAt: t1 }, hotkeys: { hash: "h", capturedAt: t1 } });
-    expect(remoteItemVerdicts(null, remote, none)).toEqual({ "obsidian/app": "pull", "obsidian/hotkeys": "pull" });
+    expect(remoteItemVerdicts(null, remote, none, new Set())).toEqual({ "obsidian/app": "pull", "obsidian/hotkeys": "pull" });
   });
 });
 
@@ -838,25 +908,25 @@ describe("remoteItemVerdicts · direction-aware ignores", () => {
     // The remote is ahead on dataview, but the rule says push only — nothing to pull.
     const local = lockByName(t0, { "plugin-dataview": { hash: "a", capturedAt: t0 } });
     const remote = lockByName(t1, { "plugin-dataview": { hash: "b", capturedAt: t1 } });
-    expect(remoteItemCounts(remoteItemVerdicts(local, remote, { pull: ["community/dataview"], push: [] }))).toEqual({ push: 0, pull: 0 });
+    expect(remoteItemCounts(remoteItemVerdicts(local, remote, { pull: ["community/dataview"], push: [] }, new Set()))).toEqual({ push: 0, pull: 0 });
   });
 
   it("still counts the push for that same item when this side is the one ahead", () => {
     const local = lockByName(t1, { "plugin-dataview": { hash: "a", capturedAt: t1 } });
     const remote = lockByName(t0, { "plugin-dataview": { hash: "b", capturedAt: t0 } });
-    expect(remoteItemCounts(remoteItemVerdicts(local, remote, { pull: ["community/dataview"], push: [] }))).toEqual({ push: 1, pull: 0 });
+    expect(remoteItemCounts(remoteItemVerdicts(local, remote, { pull: ["community/dataview"], push: [] }, new Set()))).toEqual({ push: 1, pull: 0 });
   });
 
   it("counts neither direction for an item the remote exchanges neither way", () => {
     const local = lockByName(t1, { "plugin-dataview": { hash: "a", capturedAt: t1 } });
     const remote = lockByName(t0, { "plugin-dataview": { hash: "b", capturedAt: t0 } });
     const both: DirectionIgnores = { pull: ["community/dataview"], push: ["community/dataview"] };
-    expect(remoteItemCounts(remoteItemVerdicts(local, remote, both))).toEqual({ push: 0, pull: 0 });
+    expect(remoteItemCounts(remoteItemVerdicts(local, remote, both, new Set()))).toEqual({ push: 0, pull: 0 });
   });
 
   it("counts both directions when nothing is withheld", () => {
     const local = lockByName(t1, { app: { hash: "a", capturedAt: t1 }, hotkeys: { hash: "h", capturedAt: t0 } });
     const remote = lockByName(t1, { app: { hash: "a2", capturedAt: t0 }, hotkeys: { hash: "h2", capturedAt: t1 } });
-    expect(remoteItemCounts(remoteItemVerdicts(local, remote, none))).toEqual({ push: 1, pull: 1 });
+    expect(remoteItemCounts(remoteItemVerdicts(local, remote, none, new Set()))).toEqual({ push: 1, pull: 1 });
   });
 });

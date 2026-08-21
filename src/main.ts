@@ -84,7 +84,7 @@ import { classifySettings, CURRENT_SCHEMA, SCHEMA_FUTURE_NOTICE, SCHEMA_UPGRADE_
 import { deviceOptOutsFor, migrateV2Settings } from "./core/v2Migration";
 import { migrateV4Settings } from "./core/v4Migration";
 import { refsBlockedFor, withItemDirection } from "./core/remoteRules";
-import { unexchangedPatternPredicate, withheldPatternPredicate } from "./core/keyWithholding";
+import { refsWithKeyRules, storeItemsAgree, unexchangedPatternPredicate, withheldPatternPredicate } from "./core/keyWithholding";
 import { migrateV5Settings } from "./core/v5Migration";
 import { applySwitchList, captureSwitchList, EnablementList, enablementListFile, isSwitchListGroup, localRealPath, parseSwitchList, readLocalSwitchList, subtractForceOff, switchDivergence, SwitchList, switchListMemberOn, writeLocalSwitchList } from "./core/switchList";
 import { applyTransform, captureTransform, isWholeFileEncrypted, scanSensitive, SensitiveScan } from "./core/modes";
@@ -534,7 +534,19 @@ export default class ConfigSyncPlugin extends Plugin {
         // design, and no Pull could ever clear the arrow.
         // Two sets, one per direction (spec 3.5): what never comes in, and what never goes out.
         const ignore = { pull: refsBlockedFor(remote.items, "pull"), push: refsBlockedFor(remote.items, "push") };
-        this.remoteChecks.set(remote.name, { check: await checkRemote(localLock, reader, ignore, this.compiledGroups), at: Date.now() });
+        // An item with per-key rules cannot be judged from the two locks: its fingerprints differ by
+        // design. Those items — and only those — settle by comparing their content with the keys
+        // that travel neither way masked off.
+        const ctx = await this.coreContext();
+        const unexchanged = unexchangedPatternPredicate(remote.items, this.compiledGroups);
+        const check = await checkRemote(localLock, reader, ignore, {
+          groups: this.compiledGroups,
+          keyRuled: {
+            refs: refsWithKeyRules(remote.items),
+            sameApartFromWithheld: (ref) => storeItemsAgree({ io: ctx.io, rootPath: ctx.rootPath, reader, groups: this.compiledGroups, ref, unexchanged }),
+          },
+        });
+        this.remoteChecks.set(remote.name, { check, at: Date.now() });
       } catch (e) {
         this.remoteChecks.set(remote.name, { check: { state: "unknown", remoteCapturedAt: null, items: null, itemVerdicts: null }, at: Date.now() });
         console.error(`Config Sync: remote check failed for ${remote.name}`, e);
