@@ -1,6 +1,6 @@
 import { unexchangedPatternsFor, withheldPatternsFor } from "./remoteRules";
 import { sortKeysDeep } from "./merge";
-import { groupStorePath, resolveGroupByStoreRel, sidecarStoreSuffix } from "./pathing";
+import { resolveGroupByStoreRel } from "./pathing";
 import { isPlainObject, mergePreservingSanitized, sanitizeJson } from "./sanitize";
 import { ItemRef, RemoteItems, SyncGroup } from "./types";
 
@@ -113,8 +113,8 @@ export function sameApartFromWithheld(input: { a: string | null; b: string | nul
   return masked(pa) === masked(pb);
 }
 
-// Every item this remote holds key rules for: the refs that need the content comparison below, and
-// the only ones that pay for it.
+// Every item this remote holds key rules for: their fingerprints differ by design, so only a look
+// at their content can settle them (core/itemCompare.ts does the looking).
 export function refsWithKeyRules(items: RemoteItems | undefined): string[] {
   const out: string[] = [];
   for (const [section, byId] of Object.entries(items ?? {})) {
@@ -123,33 +123,4 @@ export function refsWithKeyRules(items: RemoteItems | undefined): string[] {
     }
   }
   return out;
-}
-
-// Do this item's two copies agree once the keys that travel neither way are masked off? Reads the
-// item's store rels from BOTH sides — this vault's through `io`, the far end's through the reader
-// the comparison was already using — and answers false as soon as any of them disagrees.
-//
-// Only a FILE item can carry key rules (relCanHaveKeys above says so), so the rels are its base copy
-// and its two per-class sidecars. Anything else agrees trivially here; if that rule is ever widened,
-// this list has to widen with it.
-export async function storeItemsAgree(input: {
-  io: { exists(path: string): Promise<boolean>; read(path: string): Promise<string> };
-  rootPath: string;
-  reader: { listFiles(): Promise<string[]>; readFile(rel: string): Promise<string> };
-  groups: readonly SyncGroup[];
-  ref: string;
-  unexchanged: (rel: string) => string[];
-}): Promise<boolean> {
-  const group = input.groups.find((g) => g.ref === input.ref);
-  if (group === undefined || group.type !== "file") return true;
-  const base = `store/${groupStorePath(group.path)}`;
-  const rels = [base, `${base}${sidecarStoreSuffix("desktop")}`, `${base}${sidecarStoreSuffix("mobile")}`];
-  const remoteRels = new Set(await input.reader.listFiles());
-  for (const rel of rels) {
-    const localPath = `${input.rootPath}/${rel}`;
-    const mine = (await input.io.exists(localPath)) ? await input.io.read(localPath) : null;
-    const theirs = remoteRels.has(rel) ? await input.reader.readFile(rel) : null;
-    if (!sameApartFromWithheld({ a: mine, b: theirs, patterns: input.unexchanged(rel) })) return false;
-  }
-  return true;
 }

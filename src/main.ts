@@ -88,7 +88,8 @@ import { classifySettings, CURRENT_SCHEMA, SCHEMA_FUTURE_NOTICE, SCHEMA_UPGRADE_
 import { deviceOptOutsFor, migrateV2Settings } from "./core/v2Migration";
 import { migrateV4Settings } from "./core/v4Migration";
 import { refsBlockedFor, withItemDirection, withKeyDirection } from "./core/remoteRules";
-import { refsWithKeyRules, storeItemsAgree, unexchangedPatternPredicate, withheldPatternPredicate } from "./core/keyWithholding";
+import { refsWithKeyRules, unexchangedPatternPredicate, withheldPatternPredicate } from "./core/keyWithholding";
+import { compareStoreItem } from "./core/itemCompare";
 import { migrateV5Settings } from "./core/v5Migration";
 import { applySwitchList, captureSwitchList, EnablementList, enablementListFile, isSwitchListGroup, localRealPath, parseSwitchList, readLocalSwitchList, subtractForceOff, switchDivergence, SwitchList, switchListMemberOn, writeLocalSwitchList } from "./core/switchList";
 import { applyTransform, captureTransform, isWholeFileEncrypted, scanSensitive, SensitiveScan } from "./core/modes";
@@ -555,7 +556,18 @@ export default class ConfigSyncPlugin extends Plugin {
           groups: this.compiledGroups,
           keyRuled: {
             refs: refsWithKeyRules(remote.items),
-            sameApartFromWithheld: (ref) => storeItemsAgree({ io: ctx.io, rootPath: ctx.rootPath, reader, groups: this.compiledGroups, ref, unexchanged }),
+            sameApartFromWithheld: async (ref) =>
+              (await compareStoreItem({
+                io: ctx.io,
+                rootPath: ctx.rootPath,
+                reader,
+                groups: this.compiledGroups,
+                ref,
+                masked: unexchanged,
+                // Both sides open with this vault's own passphrase today; Plan 4b gives a remote
+                // its own, and only this line changes.
+                passphrase: { mine: ctx.passphrase, theirs: ctx.passphrase },
+              })) === "same",
           },
         });
         this.remoteChecks.set(remote.name, { check, at: Date.now() });
