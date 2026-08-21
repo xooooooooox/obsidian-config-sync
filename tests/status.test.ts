@@ -4,7 +4,7 @@ import { parseSyncManifest, STORE_LOCK_VERSION } from "../src/core/manifest";
 import { lockByName } from "./lock";
 import { lockRefFor } from "../src/core/itemKeys";
 import { SELF_ITEM_REF } from "../src/core/catalog";
-import { statusForGroups, checkRemote, diffRemote, bucketCounts, remoteLockAhead, remoteDirectionCounts, remoteItemCounts, remoteLockLabels, sumRemoteItemCounts, GroupStatus, RemoteCheck } from "../src/core/status";
+import { statusForGroups, checkRemote, diffRemote, bucketCounts, remoteLockAhead, remoteItemCounts, remoteLockLabels, sumRemoteItemCounts, GroupStatus, RemoteCheck } from "../src/core/status";
 import { applyUpdates, emptyLedger, Ledger } from "../src/core/ledger";
 import { directionForState, stageableRow } from "../src/ui/panelModel";
 import { StoreLock, StoreLockEntry, SyncGroup, THIS_DEVICE } from "../src/core/types";
@@ -588,24 +588,6 @@ describe("bucketCounts", () => {
   it("bucketCounts sends never-synced to the apply bucket", () => {
     const statuses: GroupStatus[] = [{ group: "a", state: "never-synced" }];
     expect(bucketCounts(statuses)).toEqual({ up: 0, down: 1, ok: 0, none: 0 });
-  });
-});
-
-describe("remoteDirectionCounts", () => {
-  it("counts remote-older as push", () => {
-    expect(remoteDirectionCounts(["remote-older", "remote-older"])).toEqual({ push: 2, pull: 0 });
-  });
-  it("counts remote-newer as pull", () => {
-    expect(remoteDirectionCounts(["remote-newer"])).toEqual({ push: 0, pull: 1 });
-  });
-  it("ignores same/no-store/unknown", () => {
-    expect(remoteDirectionCounts(["same", "no-store", "unknown"])).toEqual({ push: 0, pull: 0 });
-  });
-  it("counts a mixed set", () => {
-    expect(remoteDirectionCounts(["remote-older", "remote-newer", "same"])).toEqual({ push: 1, pull: 1 });
-  });
-  it("returns zeroes for an empty list", () => {
-    expect(remoteDirectionCounts([])).toEqual({ push: 0, pull: 0 });
   });
 });
 

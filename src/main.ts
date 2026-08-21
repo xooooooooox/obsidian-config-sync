@@ -92,7 +92,7 @@ import { pluginRuntimeEnabled } from "./core/pluginState";
 import { syncListDelta } from "./core/syncListDelta";
 import { selfPaneState } from "./core/selfPane";
 import { applyUpdates, baselineRefs, Ledger, LEDGER_VERSION, parseLedger, pruneLedger, rekeyLedger } from "./core/ledger";
-import { bucketCounts, checkRemote, diffRemote, GroupStatus, remoteDirectionCounts, RemoteCheck, remoteLockAhead, remoteLockLabels, statusForGroups } from "./core/status";
+import { bucketCounts, checkRemote, diffRemote, GroupStatus, RemoteCheck, remoteLockAhead, remoteLockLabels, statusForGroups, sumRemoteItemCounts } from "./core/status";
 import { EVERYWHERE, FileSharing, GroupResult, itemRef, ItemRef, parseItemRef, Remote, RibbonButtons, Sharing, StoreLock, SyncGroup, SyncMode } from "./core/types";
 import { statusBarStatuses } from "./ui/panelModel";
 import { ConflictModal } from "./ui/ConflictModal";
@@ -555,7 +555,11 @@ export default class ConfigSyncPlugin extends Plugin {
   updateStatusIndicators(): void {
     const s = this.presentedStatuses ?? this.localStatuses ?? [];
     const { up, down } = bucketCounts(s);
-    const remoteStates = [...this.remoteChecks.values()].map((v) => v.check.state);
+    const checks = [...this.remoteChecks.values()].map((v) => v.check);
+    const remoteStates = checks.map((c) => c.state);
+    // Items, not remotes: the bar reports two relations on one line, so it has to speak one unit
+    // (spec 5.5). How many remotes those items are spread across goes into the hover.
+    const remoteItems = sumRemoteItemCounts(checks);
     const el = this.mainRibbonEl;
     if (el !== null) {
       const remoteNewer = remoteStates.some((st) => st === "remote-newer");
@@ -566,7 +570,7 @@ export default class ConfigSyncPlugin extends Plugin {
     const sb = this.statusBarEl;
     if (sb !== null) {
       sb.toggle(this.settings.statusBarItem);
-      renderStatusBarItem(sb, statusBarSegments({ up, down }, remoteDirectionCounts(remoteStates), this.settings.statusBarRemote));
+      renderStatusBarItem(sb, statusBarSegments({ up, down }, remoteItems, this.settings.statusBarRemote), remoteItems);
     }
   }
 

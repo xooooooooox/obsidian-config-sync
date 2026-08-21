@@ -1,7 +1,7 @@
 import { App, ButtonComponent, ItemView, Menu, Modal, Platform, WorkspaceLeaf, setIcon, setTooltip } from "obsidian";
 import { ApplyItem, CaptureItem, orderInstallsCatalogFirst, ProgressFn, StateAction } from "../core/ConfigSyncCore";
 import { lockRefFor, refItemId } from "../core/itemKeys";
-import { GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry, RemoteDiffFile, remoteDirectionCounts } from "../core/status";
+import { GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry, RemoteDiffFile, sumRemoteItemCounts } from "../core/status";
 import { SECTION_LABELS, findGroupByName, SELF_GROUP_NAME, SELF_ITEM_REF, sectionForGroup, communityGroupName } from "../core/catalog";
 import { itemDirection } from "../core/remoteRules";
 import { EVERYWHERE, FileChanges, FileSharing, GroupResult, hasChanges, ItemRef, Remote, Sharing, SyncGroup, StorageSection } from "../core/types";
@@ -1913,8 +1913,10 @@ export class SyncCenterView extends ItemView {
     this.renderSelfChip(head);
     if (this.selfInfo !== null) head.createSpan({ cls: "config-sync-head-divider" });
     const { up, down, ok, excluded, none } = this.presentedCounts(this.countable(this.rows()));
-    const remoteStates = this.host.remotes().map((r) => this.host.remoteCheck(r.name)?.check.state ?? "unknown");
-    const { push, pull } = remoteDirectionCounts(remoteStates);
+    // Same producer the status bar reads (spec 5.5): these two pills count ITEMS waiting with the
+    // remotes, and `spread` — how many remotes they came from — rides in their tooltips.
+    const checks = this.host.remotes().map((r) => this.host.remoteCheck(r.name)?.check).filter((c): c is RemoteCheck => c !== undefined);
+    const { push, pull, remotes: spread } = sumRemoteItemCounts(checks);
     const pills = head.createSpan({ cls: "config-sync-report-pills" });
     if (up > 0) {
       renderActionCount(
@@ -1930,13 +1932,19 @@ export class SyncCenterView extends ItemView {
     }
     if (push > 0) {
       renderActionCount(
-        pills.createSpan({ cls: "config-sync-pill is-push", attr: { "aria-label": `${push} remote${push === 1 ? "" : "s"} to push` } }),
+        pills.createSpan({
+          cls: "config-sync-pill is-push",
+          attr: { "aria-label": `${push} item${push === 1 ? "" : "s"} to push across ${spread} remote${spread === 1 ? "" : "s"}` },
+        }),
         "push", push,
       );
     }
     if (pull > 0) {
       renderActionCount(
-        pills.createSpan({ cls: "config-sync-pill is-pull", attr: { "aria-label": `${pull} remote${pull === 1 ? "" : "s"} to pull` } }),
+        pills.createSpan({
+          cls: "config-sync-pill is-pull",
+          attr: { "aria-label": `${pull} item${pull === 1 ? "" : "s"} to pull across ${spread} remote${spread === 1 ? "" : "s"}` },
+        }),
         "pull", pull,
       );
     }
