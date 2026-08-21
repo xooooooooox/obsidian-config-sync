@@ -69,7 +69,22 @@ functions.
   carries `skipRefs` on the `PendingPull` so `applyImport` skips the same lock entries;
   `pushExternal` skips them in its write loop — and exempts them from the mirror-delete loop too, so
   the remote's own copy of a withheld item is never deleted even though it's absent from the local
-  push set. **The lock is the one file push does not send verbatim**: it comes out of the write loop
+  push set.
+  **Push runs in three phases — plan, check, write — and the order is the promise** (spec 3.7).
+  Phase 1 works out every byte it will send and writes nothing; phase 2 re-reads the far end for the
+  files whose content was computed FROM it (the per-key rewrites, the only ones with a
+  read-modify-write window) and refuses with `PUSH_RACE_MESSAGE` if any moved; phase 3 writes. Doing
+  all the checking first is what makes "refused ⇒ nothing was written" true for a VAULT remote, whose
+  writes are immediate and durable — git gets it for free from its clone. Not a retry: a push is not
+  idempotent, so the refusal goes to the user. A file forwarded byte for byte is deliberately NOT
+  re-read: its content does not depend on what is over there, so it has no window to lose.
+  `expectPush` closes the third layer — the panel's judgement can be a refresh cycle old while this
+  push reads the far end fresh, so the caller passes **what the user picked** and the seam refuses
+  (`PUSH_STALE_MESSAGE`) when the far end has moved past any of it. It cannot be derived from the
+  push set, because `skipRefs` mixes unticked rows with rule-withheld items, and the guard's meaning
+  is "the answer you acted on has changed" — so the answer's owner has to say what it was. A caller
+  with no judgement passes `[]` and the guard stays quiet.
+  **The lock is the one file push does not send verbatim**: it comes out of the write loop
   and is written last, derived by `core/derivedLock.ts` from both sides plus that same `skipRefs`, so
   the bookkeeping that lands over there describes what actually landed. Skipping content while
   pushing the lock anyway was a live defect, not a gap: a remote with `excludeSelf` (now the self
@@ -496,6 +511,11 @@ functions.
   `classOf`/`decorate`/`clickable` callbacks rather than being decided inside. Merging both answers
   into one function is what would make this the wrong abstraction; duplicating the line-by-line
   walk would be the other wrong one.
+- `core/lockFreshness.ts` — `itemFreshness`: whether one item's two lock entries describe the same
+  content, and which side moved last (plus `hasPerItemPayload`/`entryTime`). Its own leaf module
+  because BOTH the panel (`status.ts`) and the push seam (`ConfigSyncCore.ts`) ask it, and status.ts
+  already imports the seam — leaving it there would make the two a cycle. It is a judgement about two
+  lock entries; neither the panel nor the transport is part of the question.
 - `core/derivedLock.ts` — `derivedPushLock`: the one rule for the `store.lock.json` a PUSH sends,
   which is not the one this device keeps. A push does not send everything, so an item withheld by
   the remote's rules (`Neither way` / `Pull only`) or left unticked for the run keeps the entry the

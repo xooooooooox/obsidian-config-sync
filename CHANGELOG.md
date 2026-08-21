@@ -2,6 +2,8 @@
 
 ## 2.25.0
 
+- Fixed a push racing another device's save. Config Sync now works out everything it is going to send, checks that the other end still looks the way it did, and only then writes — if anything moved in between it stops with nothing written, instead of quietly restoring the value that other device had just changed
+- Added a guard against acting on a comparison that has gone stale: if an item you picked has moved on at the other end since you last compared, Push stops and asks you to look again rather than overwriting it
 - Added a per-key choice about what each remote gets. Open an item while a remote is selected, click any key in it, and that key stops travelling — the rest of the item still does. Each key can travel both ways, only out, only in, or not at all, and never further than the item it lives in
 - Fixed a setting held back in both directions reading as unfinished work forever. Those two values are meant to differ, so they no longer count as a difference: the item stops asking to be pulled every time the other device saves, and its card stops listing a file you could never reconcile
 - Added holding a single setting back from a remote instead of the whole item. Pull takes everything else and leaves your value where it is; Push sends everything else and leaves **their** value where it is — a setting you hold back is never blanked out on the other side, which is what would happen if it were simply left out of what gets sent
