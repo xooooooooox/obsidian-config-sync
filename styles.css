@@ -320,27 +320,6 @@
   color: var(--color-orange);
 }
 
-.config-sync-remote-selfline {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid var(--background-modifier-border);
-}
-
-.config-sync-remote-selftext {
-  flex: 1;
-}
-
-.config-sync-remote-selfname {
-  font-size: var(--font-ui-small);
-}
-
-.config-sync-remote-selfdesc {
-  font-size: var(--font-ui-smaller);
-  color: var(--text-muted);
-}
 
 /* Phone layout — Obsidian sets body.is-phone; no pixel breakpoints */
 body.is-phone .config-sync-item-wrap .setting-item {

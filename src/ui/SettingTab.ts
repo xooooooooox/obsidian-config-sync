@@ -47,10 +47,8 @@ import {
   reservedNames,
   sectionForGroup,
   SELF_GROUP_NAME,
-  SELF_ITEM_REF,
   splitLocation,
 } from "../core/catalog";
-import { itemDirection, withItemDirection } from "../core/remoteRules";
 import {
   CompileError,
   companionConflict,
@@ -3976,16 +3974,6 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         });
       }
     }
-    const selfLine = panel.createDiv({ cls: "config-sync-remote-selfline" });
-    const selfText = selfLine.createDiv({ cls: "config-sync-remote-selftext" });
-    selfText.createDiv({ cls: "config-sync-remote-selfname", text: "Keep Config Sync's own settings out of this remote" });
-    selfText.createDiv({ cls: "config-sync-remote-selfdesc", text: "For a vault that keeps its own setup: Pull and Push skip Config Sync's settings, and the comparison stops reporting them." });
-    const selfExcluded = itemDirection(draft.items, SELF_ITEM_REF) === "none";
-    new ToggleComponent(selfLine).setValue(selfExcluded).onChange((v) => {
-      if (!this.host.settingsWritable()) return;
-      draft.items = withItemDirection(draft.items, SELF_ITEM_REF, v ? "none" : "both");
-      void this.saveRemotes();
-    });
   }
 
   private async browseStorePath(draft: RemoteDraft): Promise<void> {
