@@ -3,7 +3,7 @@ import { ApplyItem, CaptureItem, orderInstallsCatalogFirst, ProgressFn, StateAct
 import { lockRefFor, refItemId } from "../core/itemKeys";
 import { GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry, RemoteDiffFile, sumRemoteItemCounts } from "../core/status";
 import { SECTION_LABELS, findGroupByName, SELF_GROUP_NAME, sectionForGroup, communityGroupName } from "../core/catalog";
-import { itemDirection } from "../core/remoteRules";
+import { itemDirection, keyDirection, keyPatternsFor, keyStopsWithin, withheldPatternsFor } from "../core/remoteRules";
 import { EVERYWHERE, FileChanges, FileSharing, GroupResult, hasChanges, ItemRef, Remote, RemoteDirection, Sharing, SyncGroup, StorageSection } from "../core/types";
 import { DeviceElementState } from "../core/deviceElements";
 import { RuleListId } from "../core/enablementRules";
@@ -90,8 +90,11 @@ import {
   relationLabel,
   viewOptions,
   ViewBadge,
+  keysRowModel,
+  withheldKeysClause,
 } from "./panelModel";
 import { Fate, FateInput, NOTHING_YET_SENTENCE, rowFate, versionAheadClause } from "./fateModel";
+import { renderJsonKeyDoc } from "./jsonView";
 import { openDiffModal } from "./DiffModal";
 import { renderDiffPanel, type DiffResolveControl } from "./diffView";
 import { paintResolveSegment, renderResolveSegment } from "./resolveSegment";
@@ -350,6 +353,13 @@ export interface SyncCenterHost {
   // a settings write — and it invalidates the reader cache, because the next comparison has to be
   // made under the new rules instead of reusing the answer the old ones gave.
   setRemoteItemDirection(remoteName: string, ref: ItemRef, direction: RemoteDirection): Promise<void>;
+  // The same write one level down: ONE key inside ONE item. Separate entry point rather than an
+  // optional key on the one above, because they are two decisions that merely meet at read time.
+  setRemoteKeyDirection(remoteName: string, ref: ItemRef, pattern: string, direction: RemoteDirection): Promise<void>;
+  // This item's own store copy, parsed — the document the Keys area lets you click through. null
+  // when there is nothing to show (never captured, not JSON, or ciphertext), all three of which the
+  // Keys row has already explained in words before it would ask.
+  storeCopyOf(ref: ItemRef): Promise<Record<string, unknown> | null>;
   pullFrom(remote: Remote, skipRefs: ItemRef[]): Promise<GroupResult[] | null>;
   pushTo(remote: Remote, skipRefs: ItemRef[]): Promise<GroupResult[] | null>;
   adoptConfiguration(): Promise<GroupResult[] | null>;
@@ -507,6 +517,10 @@ export class SyncCenterView extends ItemView {
   // something that should survive a mobile tab-switch view recreation the way staged
   // selections do. Resets outright after a successful run (renderActionBar's `run`).
   private conflictChoice: Map<string, ConflictChoice> = new Map();
+  // Which items have their key document unfolded. UI-transient, session-only — the same footing as
+  // the card's own `expanded` set, and deliberately not persisted: a forty-key document is opened to
+  // do one thing, not to be left open.
+  private keyDocOpen: Set<string> = new Set();
   private expandedItems: Set<string> = new Set();
   // Which item cards' FILES row is expanded past its default collapsed
   // count-only line — keyed by group name, same "Set that survives repaints, starts fresh with a
@@ -3122,6 +3136,7 @@ export class SyncCenterView extends ItemView {
     // carrier is an ordinary row, so its delta belongs in its own card (spec 5.8.3).
     if (remoteRelation) this.renderRemoteOnOffRow(fields, r);
     if (remoteRelation) this.renderThisRemoteRow(fields, r);
+    if (remoteRelation) this.renderRemoteKeysRow(fields, r);
 
     if (isConflict) this.renderResolveRow(fields, r);
 
@@ -3189,6 +3204,117 @@ export class SyncCenterView extends ItemView {
         );
       }
       return menu;
+    });
+  }
+
+  // spec 5.4's `Keys`: which way each KEY of this item flows with the remote on screen. The shape is
+  // Settings' own `KEY RULES` block, deliberately — the ruled keys as rows, the `Click any key…`
+  // line, the document under it — because it is the same gesture asked about a different axis: there
+  // the colour says who shares a value, here it says which way it travels. The four shapes this row
+  // takes (including rendering nothing at all) are decided in panelModel's `keysRowModel`.
+  private renderRemoteKeysRow(fields: HTMLElement, r: StatusRow): void {
+    const relation = this.relation;
+    if (relation.kind !== "remote") return;
+    const ref = this.itemRefFor(r.group.name) ?? r.group.ref ?? null;
+    const remote = this.host.remotes().find((x) => x.name === relation.name);
+    if (ref === null || remote === undefined) return;
+    const item = itemDirection(remote.items, ref);
+    const model = keysRowModel({
+      item,
+      group: r.group,
+      encrypted: isWholeFileEncrypted(r.group),
+      patterns: keyPatternsFor(remote.items, ref),
+    });
+    if (model.kind === "hidden") return;
+    this.renderCardKeyRow(fields, "Keys", (value) => {
+      if (model.kind === "note") {
+        value.createDiv({ cls: "config-sync-expand-note", text: model.text });
+        return;
+      }
+      if (model.narrowed) value.createDiv({ cls: "config-sync-keys-limited", text: "limited by This remote" });
+      for (const pattern of model.keys) this.renderKeyRuleRow(value, relation.name, remote, ref, item, pattern);
+      this.renderKeyDocument(value, r, relation.name, remote, ref);
+    });
+  }
+
+  // The `On pull` / `On push` sentence for a row whose item travels but some of whose KEYS do not.
+  // The withheld set is the transport's own (`withheldPatternsFor`), so the card can only ever name
+  // keys a run would actually hold back. null = nothing held back in this direction.
+  private withheldKeysFor(r: StatusRow, direction: "pull" | "push"): string | null {
+    const relation = this.relation;
+    if (relation.kind !== "remote") return null;
+    const ref = this.itemRefFor(r.group.name) ?? r.group.ref ?? null;
+    const remote = this.host.remotes().find((x) => x.name === relation.name);
+    if (ref === null || remote === undefined) return null;
+    return withheldKeysClause({
+      remote: relation.name,
+      item: r.group.label ?? r.group.name,
+      direction,
+      keys: withheldPatternsFor(remote.items, ref, direction),
+    });
+  }
+
+  // One ruled key: its name, and a control showing what actually happens to it. The chip reads the
+  // RESOLVED direction (keyDirection), not the stored one — spec 2.2 keeps a stored rule the item
+  // has since narrowed exactly as written, and widening the item again restores it, but what the
+  // user is looking at right now is the narrower answer.
+  private renderKeyRuleRow(value: HTMLElement, remoteName: string, remote: Remote, ref: ItemRef, item: RemoteDirection, pattern: string): void {
+    const row = value.createDiv({ cls: "config-sync-keyrule-row" });
+    row.createSpan({ cls: "config-sync-keyrule-name", text: pattern });
+    const current = keyDirection(remote.items, ref, pattern);
+    const chip = row.createSpan({
+      cls: "config-sync-menuchip config-sync-card-trigger",
+      text: REMOTE_DIRECTION_LABEL[current],
+      attr: { "aria-label": `Choose which way ${remoteName} exchanges ${pattern}` },
+    });
+    this.wireMenuTrigger(chip, () => {
+      const menu = new Menu();
+      // Only the stops this item still allows: offering more would let a click write a rule the
+      // reader resolves to something else, i.e. a control lying about its own effect.
+      for (const d of keyStopsWithin(item)) {
+        menu.addItem((mi) =>
+          mi
+            .setTitle(REMOTE_DIRECTION_LABEL[d])
+            .setIcon(REMOTE_DIRECTION_ICON[d])
+            .setChecked(d === current)
+            .onClick(() => void this.host.setRemoteKeyDirection(remoteName, ref, pattern, d).then(() => this.reload()))
+        );
+      }
+      return menu;
+    });
+  }
+
+  // The document itself, folded away until asked for: a plugin with forty keys would otherwise push
+  // the rest of the card off screen the moment it is expanded. The line above it is not a button in
+  // Settings and is not one here either — it says the keys below can be clicked.
+  private renderKeyDocument(value: HTMLElement, r: StatusRow, remoteName: string, remote: Remote, ref: ItemRef): void {
+    const hint = value.createDiv({ cls: "config-sync-json-hint config-sync-card-trigger" });
+    setIcon(hint.createSpan({ cls: "config-sync-json-hint-icon" }), "plus");
+    hint.createSpan({ text: "Click any key to add a rule for it" });
+    hint.addEventListener("click", () => {
+      if (this.keyDocOpen.has(r.group.name)) this.keyDocOpen.delete(r.group.name);
+      else this.keyDocOpen.add(r.group.name);
+      void this.reload();
+    });
+    if (!this.keyDocOpen.has(r.group.name)) return;
+    const host = value.createDiv();
+    void this.host.storeCopyOf(ref).then((doc) => {
+      if (doc === null) {
+        host.createDiv({ cls: "config-sync-json-empty", text: "Nothing captured for this item yet — nothing to show." });
+        return;
+      }
+      renderJsonKeyDoc(host.createEl("pre", { cls: "config-sync-json-pre" }), {
+        raw: JSON.stringify(doc, null, 2),
+        // Two states, the same two Settings shows: a key that already carries a rule is coloured,
+        // every other key wears the dashed underline that says it can be clicked.
+        classOf: (key) => (keyDirection(remote.items, ref, key) === "both" ? null : "config-sync-json-key-ruled"),
+        clickable: (key) => keyDirection(remote.items, ref, key) === "both",
+        // A click writes `Neither way`, not the default. The default is `Both ways`, which by the
+        // writer's own discipline is never stored — so clicking would produce no rule, no row, and
+        // look like a dead control. Anyone reaching for a key here wants it to stop travelling; the
+        // other two stops are one more click away on the row it just created.
+        onPick: (key) => void this.host.setRemoteKeyDirection(remoteName, ref, key, "none").then(() => this.reload()),
+      });
     });
   }
 
@@ -3400,6 +3526,13 @@ export class SyncCenterView extends ItemView {
       if (input.excludedHere) return "Not synced on this device — your Settings sync rule excludes it.";
       if (input.optedOutHere === true) return "Not synced on this device — you turned it off here. Your other devices keep syncing it.";
       return `${fate.sentence}.`;
+    }
+    // Under a remote, a direction with keys held back says so instead of the terse sentence: the
+    // half that matters is that a withheld key keeps the OTHER side's value. Without it a reader
+    // assumes the key is dropped over there — which is what leaving it out would actually do.
+    if (r.remote !== undefined) {
+      const held = this.withheldKeysFor(r, input.direction === "apply" ? "pull" : "push");
+      if (held !== null) return held;
     }
     let text = fate.sentence;
     if (input.direction === "apply" && !input.installed) {

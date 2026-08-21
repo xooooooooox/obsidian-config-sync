@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { capFileEntries, insyncLineText, excludedLineText, statusBarStatuses, moreFilesText, filesChangeLabel, visibleUnderFilter, leftoverPresentation, fateBucket, fateBucketCounts, partitionSection, legacyLockedFamilyBucket, RowBucket, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, runProgressLabel, showColdStartBanner, enablementCarrierFor, carrierIsSynced, TYPE_SECTION_TITLES, typeSectionForRow, sectionCountLabel, widestCountDigits, unifiedFooterSummary, fileEntryFor, stagedPayload, StageableRow, effectiveFate, onOffFlips, onOffNarrationLines, familyRollup, FamilyMember, mergeFamilyChanges, foldCompanionEntries, groupExcludedHere, CAPTURE_ADDED_TOOLTIP, CAPTURE_UPDATED_TOOLTIP, CAPTURE_DELETED_TOOLTIP, APPLY_ADDED_TOOLTIP, APPLY_UPDATED_TOOLTIP, APPLY_DELETED_TOOLTIP } from "../src/ui/panelModel";
+import { capFileEntries, insyncLineText, excludedLineText, statusBarStatuses, moreFilesText, filesChangeLabel, visibleUnderFilter, leftoverPresentation, fateBucket, fateBucketCounts, partitionSection, legacyLockedFamilyBucket, RowBucket, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, runProgressLabel, showColdStartBanner, enablementCarrierFor, carrierIsSynced, TYPE_SECTION_TITLES, typeSectionForRow, sectionCountLabel, widestCountDigits, unifiedFooterSummary, fileEntryFor, stagedPayload, StageableRow, effectiveFate, onOffFlips, onOffNarrationLines, familyRollup, FamilyMember, mergeFamilyChanges, foldCompanionEntries, groupExcludedHere, CAPTURE_ADDED_TOOLTIP, CAPTURE_UPDATED_TOOLTIP, CAPTURE_DELETED_TOOLTIP, APPLY_ADDED_TOOLTIP, APPLY_UPDATED_TOOLTIP, APPLY_DELETED_TOOLTIP, keysRowModel, withheldKeysClause } from "../src/ui/panelModel";
 import { GroupState, GroupStatus, RemoteDiffEntry, RemoteDiffFile } from "../src/core/status";
 import { FileChanges, SyncGroup, EVERYWHERE, perClass } from "../src/core/types";
 import { Availability } from "../src/core/availability";
@@ -1240,5 +1240,77 @@ describe("effectiveFate — single per-row derivation shared by staging/footer/d
     ]);
     expect(apply.find((i) => i.name === "plugin-x")).toEqual({ name: "plugin-x", action: "install-enable" });
     expect(apply.find((i) => i.name === "community-plugins")).toEqual({ name: "community-plugins", action: "none", stagedMembers: ["x"] });
+  });
+});
+
+describe("keysRowModel", () => {
+  const file: SyncGroup = { name: "plugin-dataview", path: "{configDir}/plugins/dataview/data.json", type: "file", devices: "all" };
+  const folder: SyncGroup = { name: "snippets", path: "{configDir}/snippets", type: "folder", devices: "all" };
+  const text: SyncGroup = { name: "vimrc", path: ".vimrc-support", type: "file", devices: "all" };
+
+  it("renders nothing at all when the item travels neither way — the row above already said so", () => {
+    expect(keysRowModel({ item: "none", group: file, encrypted: false, patterns: [] })).toEqual({ kind: "hidden" });
+  });
+
+  it("says why a folder has no keys instead of leaving a gap", () => {
+    expect(keysRowModel({ item: "both", group: folder, encrypted: false, patterns: [] })).toEqual({
+      kind: "note",
+      text: "A folder travels as a whole — the direction above covers every file in it.",
+    });
+  });
+
+  it("says why a file with no JSON in it has no keys", () => {
+    expect(keysRowModel({ item: "both", group: text, encrypted: false, patterns: [] })).toEqual({
+      kind: "note",
+      text: "No keys in this file — it travels whole or not at all.",
+    });
+  });
+
+  it("says why a whole-file-encrypted item has no keys", () => {
+    expect(keysRowModel({ item: "both", group: file, encrypted: true, patterns: [] })).toEqual({
+      kind: "note",
+      text: "This file is stored as one encrypted blob — it travels whole or not at all.",
+    });
+  });
+
+  it("lists the keys that already carry a rule, and says nothing about the rest", () => {
+    expect(keysRowModel({ item: "both", group: file, encrypted: false, patterns: ["apiKey", "theme"] })).toEqual({
+      kind: "rules",
+      keys: ["apiKey", "theme"],
+      narrowed: false,
+    });
+  });
+
+  it("flags the narrowing when the item's own direction shortens what a key may be set to", () => {
+    expect(keysRowModel({ item: "pull", group: file, encrypted: false, patterns: [] })).toEqual({ kind: "rules", keys: [], narrowed: true });
+  });
+});
+
+describe("withheldKeysClause", () => {
+  const push = (keys: string[]): string | null => withheldKeysClause({ remote: "main", item: "Dataview", direction: "push", keys });
+
+  it("says nothing when nothing is held back", () => {
+    expect(push([])).toBeNull();
+  });
+
+  it("names one key, and says whose value survives", () => {
+    expect(push(["apiKey"])).toBe("Overwrites this remote's Dataview. apiKey keeps whatever main already has.");
+  });
+
+  it("names two", () => {
+    expect(push(["apiKey", "theme"])).toBe("Overwrites this remote's Dataview. apiKey and theme keep whatever main already has.");
+  });
+
+  it("names two and counts the rest", () => {
+    expect(push(["a", "b", "c", "d"])).toBe("Overwrites this remote's Dataview. a, b and 2 more keys keep whatever main already has.");
+  });
+
+  it("pull speaks of YOUR value, since that is the side being preserved", () => {
+    expect(withheldKeysClause({ remote: "main", item: "Appearance", direction: "pull", keys: ["accentColor"] })).toBe(
+      "Takes this remote's Appearance. accentColor keeps your value."
+    );
+    expect(withheldKeysClause({ remote: "main", item: "Appearance", direction: "pull", keys: ["a", "b"] })).toBe(
+      "Takes this remote's Appearance. a and b keep your values."
+    );
   });
 });

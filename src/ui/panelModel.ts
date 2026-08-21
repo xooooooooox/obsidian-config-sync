@@ -1,5 +1,6 @@
 import { BucketCounts, GroupState, GroupStatus, RemoteDiffEntry, RemoteState } from "../core/status";
-import { FileChanges, sharingClass, StorageSection, SyncGroup } from "../core/types";
+import { FileChanges, RemoteDirection, sharingClass, StorageSection, SyncGroup } from "../core/types";
+import { keyStopsWithin } from "../core/remoteRules";
 import { Availability, VersionDrift } from "../core/availability";
 import { carrierRef, refItemId } from "../core/itemKeys";
 import { ApplyItem, CaptureItem, StateAction } from "../core/ConfigSyncCore";
@@ -979,4 +980,52 @@ export function relationCopy(r: PanelRelation): RelationCopy {
 // there is nothing to do; the card says what moved over there, and why it stays there.
 export function withheldChangeClause(remoteName: string, files: number): string {
   return `${remoteName} changed ${files} file${files === 1 ? "" : "s"}. Push only, so they stay there.`;
+}
+
+// spec 5.4's `Keys` row, decided in one place. The three notes are structural facts the user cannot
+// change, so they are stated rather than left as an unexplained gap; the fourth case — the item
+// itself travels neither way — renders NOTHING, because the row directly above already says so and
+// the card's own rule is that a row with no value does not exist.
+//
+// Whether an item can have keys at all is the same question `core/keyWithholding.ts` answers for the
+// transport (`relCanHaveKeys`): a file item whose store copy is JSON. The two must stay in step —
+// a key rule the panel offers but the run ignores would be a control that does nothing.
+export type KeysRow =
+  | { kind: "hidden" }
+  | { kind: "note"; text: string }
+  | { kind: "rules"; keys: string[]; narrowed: boolean };
+
+export function keysRowModel(input: {
+  item: RemoteDirection;
+  group: SyncGroup;
+  encrypted: boolean;
+  patterns: readonly string[];
+}): KeysRow {
+  if (input.item === "none") return { kind: "hidden" };
+  if (input.group.type === "folder") return { kind: "note", text: "A folder travels as a whole — the direction above covers every file in it." };
+  if (input.encrypted) return { kind: "note", text: "This file is stored as one encrypted blob — it travels whole or not at all." };
+  if (!input.group.path.endsWith(".json")) return { kind: "note", text: "No keys in this file — it travels whole or not at all." };
+  // `narrowed` drives the `limited by This remote` line under the label: shown only when the item's
+  // own direction really does shorten what a key may be set to, never as decoration.
+  return { kind: "rules", keys: [...input.patterns], narrowed: keyStopsWithin(input.item).length < 4 };
+}
+
+// The `On push` / `On pull` sentence when some of this item's keys stay behind. The half that
+// matters is the second one: a withheld key keeps the OTHER side's value, and saying so is what
+// stops a user reading it as "that key gets deleted over there" — which is what would actually
+// happen if the key were merely left out of what we send.
+export function withheldKeysClause(input: {
+  remote: string;
+  item: string;
+  direction: "pull" | "push";
+  keys: readonly string[];
+}): string | null {
+  const keys = input.keys;
+  if (keys.length === 0) return null;
+  const named = keys.length <= 2 ? keys.join(" and ") : `${keys[0]}, ${keys[1]} and ${keys.length - 2} more key${keys.length - 2 === 1 ? "" : "s"}`;
+  const verb = keys.length === 1 ? "keeps" : "keep";
+  if (input.direction === "push") {
+    return `Overwrites this remote's ${input.item}. ${named} ${verb} whatever ${input.remote} already has.`;
+  }
+  return `Takes this remote's ${input.item}. ${named} ${verb} your value${keys.length === 1 ? "" : "s"}.`;
 }

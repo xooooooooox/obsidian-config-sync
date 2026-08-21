@@ -1397,6 +1397,15 @@ body.is-mobile .config-sync-tworow-chev { display: none; }
 .config-sync-json-val { color: var(--text-muted); }
 .config-sync-json-num { color: var(--color-green); }
 .config-sync-json-legend { color: var(--text-muted); font-size: var(--font-ui-smaller); margin-top: var(--size-2-2); }
+/* ---- the Sync Center card's Keys area (spec 5.4) ----------------------------------------------
+   Same document, same clickable keys as the Settings block above — the only new pieces are the
+   ruled-key colour on THIS axis (a key with a direction rule) and the two-column rule rows. */
+.config-sync-json-key.config-sync-json-key-ruled { color: var(--interactive-accent); }
+.config-sync-keyrule-row { display: flex; align-items: center; gap: var(--size-4-2); padding: 2px 0; }
+.config-sync-keyrule-name { flex: 1; min-width: 0; font-family: var(--font-monospace); font-size: var(--font-ui-smaller); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.config-sync-keys-limited { color: var(--text-faint); font-size: var(--font-ui-smaller); margin-bottom: var(--size-2-1); }
+.config-sync-json-empty { color: var(--text-muted); font-size: var(--font-ui-smaller); }
+
 /* Legend: color dots + neutral words, sharing classes shared with the
    key spans above so the palette can't drift. */
 .config-sync-legend-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 4px; }

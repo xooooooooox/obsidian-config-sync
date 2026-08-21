@@ -132,3 +132,10 @@ export function withKeyDirection(
 export function keyStopsWithin(item: RemoteDirection): RemoteDirection[] {
   return REMOTE_DIRECTIONS.filter((d) => intersectDirection(item, d) === d);
 }
+
+// The key patterns this item carries a rule for, in the order they were written. The panel lists
+// these and nothing else: a rule is a decision somebody made, and every other key in the document is
+// simply travelling with its item.
+export function keyPatternsFor(items: RemoteItems | undefined, ref: ItemRef): string[] {
+  return Object.keys(ruleFor(items, ref)?.keys ?? {});
+}

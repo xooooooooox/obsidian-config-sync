@@ -108,3 +108,54 @@ export function jsonElementClass(state: PerElementLine): string | null {
   if (state.sharing.kind === "this-device") return "config-sync-json-strip";
   return null;
 }
+
+// The SHAPE of the key document, shared by the two surfaces that show it: Settings' own rule block
+// and the Sync Center card's `Keys` area. Only the shape is shared — what a key's colour MEANS is
+// the caller's question (there: who shares this value; here: which way it travels with a remote), so
+// the classification arrives as `classOf`/`decorate` rather than being decided in here. Merging
+// those two answers into one function is what would make this the wrong abstraction.
+//
+// Lines that are not a top-level key (nested content, brackets, per-element entries) are printed
+// verbatim unless `line` claims them, which is how the Settings surface keeps colouring its
+// per-element rows.
+export function renderJsonKeyDoc(
+  pre: HTMLElement,
+  opts: {
+    raw: string;
+    classOf: (key: string) => string | null;
+    clickable: (key: string) => boolean;
+    onPick: (key: string) => void;
+    decorate?: (key: string, keySpan: HTMLElement) => void;
+    line?: (index: number, text: string) => boolean; // true = the caller painted this line itself
+  }
+): void {
+  const lines = opts.raw.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    const m = /^(\s{2})"([^"]+)":\s?(.*)$/.exec(line);
+    const key = m?.[2];
+    if (m === null || key === undefined) {
+      if (opts.line?.(i, line) !== true) pre.appendText(line);
+      pre.appendText("\n");
+      continue;
+    }
+    pre.createSpan({ text: m[1] });
+    const extra = opts.classOf(key);
+    const clickable = opts.clickable(key);
+    const keySpan = pre.createSpan({
+      cls: `config-sync-json-key${extra === null ? "" : ` ${extra}`}${clickable ? " config-sync-json-clickable" : ""}`,
+      text: `"${key}"`,
+    });
+    opts.decorate?.(key, keySpan);
+    if (clickable) keySpan.addEventListener("click", () => opts.onPick(key));
+    pre.appendText(": ");
+    const rest = m[3] ?? "";
+    const comma = rest.endsWith(",");
+    const val = comma ? rest.slice(0, -1) : rest;
+    if (/^".*"$/.test(val)) pre.createSpan({ cls: "config-sync-json-val", text: val });
+    else if (/^-?\d/.test(val)) pre.createSpan({ cls: "config-sync-json-num", text: val });
+    else pre.appendText(val);
+    if (comma) pre.appendText(",");
+    pre.appendText("\n");
+  }
+}

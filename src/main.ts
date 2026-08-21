@@ -51,6 +51,8 @@ import { lockRefFor, rekeyRefList } from "./core/itemKeys";
 import { SettingsDeepLink, SettingsSpot } from "./ui/settingsDeepLink";
 import { lockStoredLabel, resolveHostStoredLabel } from "./core/lockLabels";
 import { basename, groupRealPath, groupStorePath, sidecarStoreSuffix } from "./core/pathing";
+import { isPlainObject } from "./core/sanitize";
+import { parseFileEnvelope } from "./core/crypto";
 import {
   buildItemDefs,
   CompileError,
@@ -83,7 +85,7 @@ import { decideEnablement, EnablementDecision } from "./core/enablementDecision"
 import { classifySettings, CURRENT_SCHEMA, SCHEMA_FUTURE_NOTICE, SCHEMA_UPGRADE_NOTICE, withDefaults } from "./core/settingsMigration";
 import { deviceOptOutsFor, migrateV2Settings } from "./core/v2Migration";
 import { migrateV4Settings } from "./core/v4Migration";
-import { refsBlockedFor, withItemDirection } from "./core/remoteRules";
+import { refsBlockedFor, withItemDirection, withKeyDirection } from "./core/remoteRules";
 import { refsWithKeyRules, storeItemsAgree, unexchangedPatternPredicate, withheldPatternPredicate } from "./core/keyWithholding";
 import { migrateV5Settings } from "./core/v5Migration";
 import { applySwitchList, captureSwitchList, EnablementList, enablementListFile, isSwitchListGroup, localRealPath, parseSwitchList, readLocalSwitchList, subtractForceOff, switchDivergence, SwitchList, switchListMemberOn, writeLocalSwitchList } from "./core/switchList";
@@ -965,6 +967,32 @@ export default class ConfigSyncPlugin extends Plugin {
         // be re-asked before the panel can show what changed.
         this.clearReaderCache();
         await this.refreshRemoteChecks();
+      },
+      setRemoteKeyDirection: async (remoteName, ref, pattern, direction) => {
+        if (!this.settingsWritable()) return;
+        this.settings.remotes = this.settings.remotes.map((r) => (r.name === remoteName ? { ...r, items: withKeyDirection(r.items, ref, pattern, direction) } : r));
+        await this.saveSettings();
+        // Same pair as the item-level write above, and for the same reason: the rules a comparison
+        // was made under have just changed.
+        this.clearReaderCache();
+        await this.refreshRemoteChecks();
+      },
+      storeCopyOf: async (ref) => {
+        const group = this.compiledGroups.find((g) => g.ref === ref);
+        if (group === undefined || group.type !== "file") return null;
+        const ctx = await this.coreContext();
+        const path = `${ctx.rootPath}/store/${groupStorePath(group.path)}`;
+        if (!(await ctx.io.exists(path))) return null;
+        const raw = await ctx.io.read(path);
+        try {
+          const parsed: unknown = JSON.parse(raw);
+          // Ciphertext parses as JSON too (it is an envelope object), so the shape is checked rather
+          // than the parse: an envelope has no settings keys to offer, and the card has already said
+          // as much in words before this is ever asked.
+          return isPlainObject(parsed) && parseFileEnvelope(raw) === null ? parsed : null;
+        } catch {
+          return null;
+        }
       },
       pullFrom: async (remote, skipRefs) => {
         if (this.schemaStopped()) return null; // schema stop

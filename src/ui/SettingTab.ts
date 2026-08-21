@@ -74,7 +74,7 @@ import { SCHEMA_FUTURE_NOTICE } from "../core/settingsMigration";
 import { FolderSelectModal } from "./FolderSelectModal";
 import { confirmDropKeyRules, confirmPresetPathChange, confirmTypeFlip } from "./ConfirmModal";
 import { commitDraft } from "./commitGroups";
-import { classifyJsonKeys, classifyPerElementLines, jsonElementClass, jsonKeyClass, KeyClass } from "./jsonView";
+import { classifyJsonKeys, classifyPerElementLines, jsonElementClass, jsonKeyClass, KeyClass, renderJsonKeyDoc } from "./jsonView";
 import { renderFoldChevron, setFoldOpen } from "./foldChevron";
 import { paintMergedControl } from "./mergedControl";
 import { DeviceElementState } from "../core/deviceElements";
@@ -2100,46 +2100,36 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const classByKey = new Map<string, KeyClass>();
     for (const kc of classifyJsonKeys(raw, rules, detectedKeys)) classByKey.set(kc.key, kc);
     const perElementLines = classifyPerElementLines(raw, perElement);
-    const rawLines = raw.split("\n");
-    for (let i = 0; i < rawLines.length; i++) {
-      const line = rawLines[i]!;
-      const m = /^(\s{2})"([^"]+)":\s?(.*)$/.exec(line);
-      const key = m?.[2];
-      const kc = key !== undefined ? classByKey.get(key) : undefined;
-      if (m !== null && key !== undefined && kc !== undefined) {
-        pre.createSpan({ text: m[1] });
-        const ruleable = kc.state.sharing === null && opts.ruleable(key);
-        const noRuleHint = kc.state.sharing === null && !ruleable;
-        const kspan = pre.createSpan({
-          cls: `config-sync-json-key${noRuleHint ? "" : ` ${jsonKeyClass(kc)}`}${ruleable ? " config-sync-json-clickable" : ""}`,
-          text: `"${key}"`,
-        });
-        // An encrypted rule marks its key with the same lucide lock the rest of the panel uses.
-        if (kc.state.encrypted) setIcon(kspan.createSpan({ cls: "config-sync-json-lock" }), "lock");
-        if (ruleable) kspan.addEventListener("click", () => opts.onAddRule(key));
-        pre.appendText(": ");
-        const rest = m[3] ?? "";
-        const comma = rest.endsWith(",");
-        const val = comma ? rest.slice(0, -1) : rest;
-        if (/^".*"$/.test(val)) pre.createSpan({ cls: "config-sync-json-val", text: val });
-        else if (/^-?\d/.test(val)) pre.createSpan({ cls: "config-sync-json-num", text: val });
-        else pre.appendText(val);
-        if (comma) pre.appendText(",");
-      } else {
-        // Per-element array line (D10): colored by that element's own sharing, independent of
-        // the top-level key's own rule/color above.
+    // The SHAPE comes from jsonView's shared renderer (the Sync Center's own Keys area paints the
+    // same document); what a key's colour means stays here, because on this surface it answers "who
+    // shares this value" and over there it answers "which way does it travel".
+    const ruleableKey = (key: string): boolean => (classByKey.get(key)?.state.sharing ?? null) === null && opts.ruleable(key);
+    renderJsonKeyDoc(pre, {
+      raw,
+      classOf: (key) => {
+        const kc = classByKey.get(key);
+        if (kc === undefined) return null;
+        const noRuleHint = kc.state.sharing === null && !ruleableKey(key);
+        return noRuleHint ? null : jsonKeyClass(kc);
+      },
+      clickable: ruleableKey,
+      onPick: (key) => opts.onAddRule(key),
+      // An encrypted rule marks its key with the same lucide lock the rest of the panel uses.
+      decorate: (key, kspan) => {
+        if (classByKey.get(key)?.state.encrypted === true) setIcon(kspan.createSpan({ cls: "config-sync-json-lock" }), "lock");
+      },
+      // Per-element array line (D10): colored by that element's own sharing, independent of
+      // the top-level key's own rule/color above.
+      line: (i, line) => {
         const el = perElementLines.get(i);
         const elCls = el !== undefined ? jsonElementClass(el) : null;
-        if (el !== undefined && elCls !== null) {
-          const indent = /^\s*/.exec(line)?.[0] ?? "";
-          pre.appendText(indent);
-          pre.createSpan({ cls: `config-sync-json-el ${elCls}`, text: line.slice(indent.length) });
-        } else {
-          pre.appendText(line);
-        }
-      }
-      pre.appendText("\n");
-    }
+        if (el === undefined || elCls === null) return false;
+        const indent = /^\s*/.exec(line)?.[0] ?? "";
+        pre.appendText(indent);
+        pre.createSpan({ cls: `config-sync-json-el ${elCls}`, text: line.slice(indent.length) });
+        return true;
+      },
+    });
     const legend = bodyEl.createDiv({ cls: "config-sync-json-legend" });
     PREVIEW_LEGEND_ENTRIES.forEach((entry, i) => {
       if (i > 0) legend.createSpan({ cls: "config-sync-legend-sep", text: "·" });
