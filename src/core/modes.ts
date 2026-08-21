@@ -74,6 +74,15 @@ export function isWholeFileEncrypted(group: SyncGroup): boolean {
   return group.mode === "encrypted" || group.fileRule?.encrypted === true;
 }
 
+// Does this item's STORE copy hold ciphertext at all — whole-file envelope or encrypted fields?
+// The same coin as ConfigSyncCore's `storeContentIsHashable`, which is why that one is written in
+// terms of this: a fingerprint of ciphertext could never match across two vaults, and a comparison
+// that reads bytes could never call two such copies equal. Everything that has to know "is there
+// ciphertext in here" asks HERE, so the ledger and the comparison can never disagree about it.
+export function groupHasCiphertext(group: SyncGroup): boolean {
+  return groupNeedsPassphrase(group) || isWholeFileEncrypted(group);
+}
+
 // sharing this-device — dropped from the store, apply preserves the local value.
 export function stripPatterns(group: SyncGroup): string[] {
   if (group.mode !== "fields" || group.fields === undefined) return [];

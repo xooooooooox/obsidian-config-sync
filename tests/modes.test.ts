@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyTransform, captureTransform, contentUnchanged, scanSensitive, groupNeedsPassphrase, isWholeFileEncrypted } from "../src/core/modes";
+import { applyTransform, captureTransform, contentUnchanged, groupHasCiphertext, scanSensitive, groupNeedsPassphrase, isWholeFileEncrypted } from "../src/core/modes";
 import { isFieldEnvelope, parseFileEnvelope } from "../src/core/crypto";
 import { groupForItem, SELF_GROUP_NAME } from "../src/core/catalog";
 import { SyncGroup, EVERYWHERE, THIS_DEVICE, perClass } from "../src/core/types";
@@ -53,6 +53,20 @@ describe("isWholeFileEncrypted", () => {
   it("false for a plain group with no fileRule, and for mode:\"fields\"", () => {
     expect(isWholeFileEncrypted(base)).toBe(false);
     expect(isWholeFileEncrypted({ ...base, mode: "fields", fields: [{ pattern: "a", sharing: EVERYWHERE, encrypted: true }] })).toBe(false);
+  });
+});
+
+describe("groupHasCiphertext", () => {
+  const base = { name: "g", path: "{configDir}/x.json", type: "file", devices: "all" } as unknown as SyncGroup;
+  it("true for every shape whose store copy holds ciphertext", () => {
+    expect(groupHasCiphertext({ ...base, mode: "encrypted" })).toBe(true);
+    expect(groupHasCiphertext({ ...base, mode: "fields", fields: [{ pattern: "a", sharing: EVERYWHERE, encrypted: true }] })).toBe(true);
+    expect(groupHasCiphertext({ ...base, fileRule: { sharing: EVERYWHERE, encrypted: true } })).toBe(true);
+  });
+  it("false when nothing in the store copy is encrypted", () => {
+    expect(groupHasCiphertext(base)).toBe(false);
+    expect(groupHasCiphertext({ ...base, mode: "fields", fields: [{ pattern: "a", sharing: THIS_DEVICE, encrypted: false }] })).toBe(false);
+    expect(groupHasCiphertext({ ...base, fileRule: { sharing: EVERYWHERE, encrypted: false } })).toBe(false);
   });
 });
 

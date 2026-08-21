@@ -7,7 +7,7 @@ import { derivedPushLock } from "./derivedLock";
 import { itemFreshness } from "./lockFreshness";
 import { overlayWithheld } from "./keyWithholding";
 import { isFutureSchemaDocument, SCHEMA_FUTURE_APPLY_MESSAGE } from "./settingsMigration";
-import { applyTransform, captureTransform, classPatterns, contentUnchanged, excludingPerElement, groupNeedsPassphrase, isWholeFileEncrypted, stripPatterns } from "./modes";
+import { applyTransform, captureTransform, classPatterns, contentUnchanged, excludingPerElement, groupHasCiphertext, stripPatterns } from "./modes";
 import { hashDirSide, hashFileSide, sha256Hex } from "./ledger";
 import { classifyMerge, MergeConflict, MergePlan } from "./merge";
 import { SELF_GROUP_NAME, SELF_ITEM_REF } from "./catalog";
@@ -730,7 +730,7 @@ export async function capture(
 // permanent difference. Those groups publish `capturedAt` alone and are dated, not fingerprinted
 // (leave the value absent rather than emit one that cannot match).
 function storeContentIsHashable(group: SyncGroup): boolean {
-  return !groupNeedsPassphrase(group) && !isWholeFileEncrypted(group);
+  return !groupHasCiphertext(group);
 }
 
 const DEVICE_CLASSES = ["desktop", "mobile"] as const;
