@@ -531,7 +531,8 @@ export default class ConfigSyncPlugin extends Plugin {
         // The same ignore list `remoteLockAhead` gets for this remote: an item it never pulls must
         // not have its direction decided by that item's lock entry — the two sides diverge there by
         // design, and no Pull could ever clear the arrow.
-        const ignore = refsBlockedFor(remote.items, "pull");
+        // Two sets, one per direction (spec 3.5): what never comes in, and what never goes out.
+        const ignore = { pull: refsBlockedFor(remote.items, "pull"), push: refsBlockedFor(remote.items, "push") };
         this.remoteChecks.set(remote.name, { check: await checkRemote(localLock, reader, ignore, this.compiledGroups), at: Date.now() });
       } catch (e) {
         this.remoteChecks.set(remote.name, { check: { state: "unknown", remoteCapturedAt: null, items: null }, at: Date.now() });

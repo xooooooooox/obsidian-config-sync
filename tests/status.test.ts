@@ -4,11 +4,14 @@ import { parseSyncManifest, STORE_LOCK_VERSION } from "../src/core/manifest";
 import { lockByName } from "./lock";
 import { lockRefFor } from "../src/core/itemKeys";
 import { SELF_ITEM_REF } from "../src/core/catalog";
-import { statusForGroups, checkRemote, diffRemote, bucketCounts, remoteLockAhead, remoteItemCounts, remoteLockLabels, sumRemoteItemCounts, GroupStatus, RemoteCheck } from "../src/core/status";
+import { statusForGroups, checkRemote, DirectionIgnores, diffRemote, bucketCounts, remoteLockAhead, remoteItemCounts, remoteLockLabels, sumRemoteItemCounts, GroupStatus, RemoteCheck } from "../src/core/status";
 import { applyUpdates, emptyLedger, Ledger } from "../src/core/ledger";
 import { directionForState, stageableRow } from "../src/ui/panelModel";
 import { StoreLock, StoreLockEntry, SyncGroup, THIS_DEVICE } from "../src/core/types";
 import { MemFS, FakePlugins, memGroupsIO } from "./memfs";
+
+// Nothing withheld in either direction — the shape checkRemote takes since the ignore set split.
+const NO_IGNORES: DirectionIgnores = { pull: [], push: [] };
 
 const MANIFEST = JSON.stringify({
   version: 1,
@@ -466,8 +469,8 @@ describe("checkRemote per-item resolution (v2)", () => {
     "store.lock.json": JSON.stringify(lock),
     "store/configdir/hotkeys.json": "{}",
   });
-  const stateOf = async (local: StoreLock, remote: StoreLock, ignoreRefs: string[] = []): Promise<string> =>
-    (await checkRemote(local, fakeReader(remoteFiles(remote)), ignoreRefs)).state;
+  const stateOf = async (local: StoreLock, remote: StoreLock, ignore: DirectionIgnores = NO_IGNORES): Promise<string> =>
+    (await checkRemote(local, fakeReader(remoteFiles(remote)), ignore)).state;
 
   it("reads 'same' when both sides hold the same items, however the whole-store stamps compare", async () => {
     // The remote's whole-store stamp is an hour ahead; every item in it is identical, so a pull
@@ -518,7 +521,7 @@ describe("checkRemote per-item resolution (v2)", () => {
   it("a lock version this build cannot read reports 'unknown', so the panel never invites a pull", async () => {
     const local = v2(AT, { a: item(AT, "h1") });
     const future: StoreLock = { version: STORE_LOCK_VERSION + 1, capturedAt: LATER, items: { obsidian: { a: { source: { kind: "app", version: "1.0" } } } } };
-    const check = await checkRemote(local, fakeReader(remoteFiles(future)), []);
+    const check = await checkRemote(local, fakeReader(remoteFiles(future)), NO_IGNORES);
     expect(check.state).toBe("unknown");
     expect(check.remoteCapturedAt).toBe(LATER); // it parsed — saying WHEN is not inviting a pull
   });
@@ -530,37 +533,37 @@ describe("checkRemote per-item resolution (v2)", () => {
     const local = v2(AT, { a: item(AT, "h1"), "plugin-config-sync": item(AT, "mine") });
     const remote = v2(AT, { a: item(AT, "h1"), "plugin-config-sync": item(LATER, "theirs") });
     expect(await stateOf(local, remote)).toBe("remote-newer");
-    expect(await stateOf(local, remote, ["community/config-sync"])).toBe("same");
+    expect(await stateOf(local, remote, { pull: ["community/config-sync"], push: ["community/config-sync"] })).toBe("same");
   });
 });
 
 describe("checkRemote", () => {
   const localLock = { capturedAt: "2026-07-08T00:00:00.000Z", items: {} };
   it("classifies all five states", async () => {
-    expect((await checkRemote(localLock, fakeReader({}), [])).state).toBe("no-store");
+    expect((await checkRemote(localLock, fakeReader({}), NO_IGNORES)).state).toBe("no-store");
     // Content with no lock: uncomparable, and refused by pull and push — never reported as an
     // empty remote inviting a first push.
-    expect((await checkRemote(localLock, fakeReader({ "store/configdir/hotkeys.json": "{}" }), [])).state).toBe("unknown");
+    expect((await checkRemote(localLock, fakeReader({ "store/configdir/hotkeys.json": "{}" }), NO_IGNORES)).state).toBe("unknown");
     // A legacy root manifest declares a store this build still reads (and still pulls), so it is not
     // the empty remote a first push is for — just one with no lock to compare against. Unchanged
     // from before
-    expect((await checkRemote(localLock, fakeReader({ "config-sync.json": "{}" }), [])).state).toBe("unknown");
+    expect((await checkRemote(localLock, fakeReader({ "config-sync.json": "{}" }), NO_IGNORES)).state).toBe("unknown");
     const at = (t: string): Record<string, string> => ({ "config-sync.json": "{}", "store.lock.json": JSON.stringify({ capturedAt: t, items: {} }) });
-    expect((await checkRemote(localLock, fakeReader(at("2026-07-09T00:00:00.000Z")), [])).state).toBe("remote-newer");
-    expect((await checkRemote(localLock, fakeReader(at("2026-07-07T00:00:00.000Z")), [])).state).toBe("remote-older");
-    expect((await checkRemote(localLock, fakeReader(at("2026-07-08T00:00:00.000Z")), [])).state).toBe("same");
+    expect((await checkRemote(localLock, fakeReader(at("2026-07-09T00:00:00.000Z")), NO_IGNORES)).state).toBe("remote-newer");
+    expect((await checkRemote(localLock, fakeReader(at("2026-07-07T00:00:00.000Z")), NO_IGNORES)).state).toBe("remote-older");
+    expect((await checkRemote(localLock, fakeReader(at("2026-07-08T00:00:00.000Z")), NO_IGNORES)).state).toBe("same");
     // bootstrap device (no local lock yet) with a reachable, parseable remote → remote-newer,
     // not "unknown": a pull would populate the store, so the state is known and truthful.
-    expect((await checkRemote(null, fakeReader(at("2026-07-09T00:00:00.000Z")), [])).state).toBe("remote-newer");
+    expect((await checkRemote(null, fakeReader(at("2026-07-09T00:00:00.000Z")), NO_IGNORES)).state).toBe("remote-newer");
   });
   it("recognizes a new-format store (store/** + lock, no root config-sync.json)", async () => {
     const newFormat = {
       "store.lock.json": JSON.stringify({ capturedAt: "2026-07-09T00:00:00.000Z", items: {} }),
       "store/configdir/hotkeys.json": "{}",
     };
-    expect((await checkRemote(localLock, fakeReader(newFormat), [])).state).toBe("remote-newer");
+    expect((await checkRemote(localLock, fakeReader(newFormat), NO_IGNORES)).state).toBe("remote-newer");
     // store files but no lock yet → present but unknown, NOT no-store
-    expect((await checkRemote(localLock, fakeReader({ "store/configdir/hotkeys.json": "{}" }), [])).state).toBe("unknown");
+    expect((await checkRemote(localLock, fakeReader({ "store/configdir/hotkeys.json": "{}" }), NO_IGNORES)).state).toBe("unknown");
   });
 });
 
@@ -730,12 +733,12 @@ describe("remoteItemCounts", () => {
   it("counts the items each side is ahead on, not the remotes", () => {
     const local = lockByName(t1, { app: { hash: "a", capturedAt: t1 }, hotkeys: { hash: "h", capturedAt: t0 } });
     const remote = lockByName(t1, { app: { hash: "a2", capturedAt: t0 }, hotkeys: { hash: "h2", capturedAt: t1 } });
-    expect(remoteItemCounts(local, remote, [])).toEqual({ push: 1, pull: 1 });
+    expect(remoteItemCounts(local, remote, NO_IGNORES)).toEqual({ push: 1, pull: 1 });
   });
 
   it("counts nothing for items whose copies are identical", () => {
     const same = { app: { hash: "a", capturedAt: t0 } };
-    expect(remoteItemCounts(lockByName(t0, same), lockByName(t1, same), [])).toEqual({ push: 0, pull: 0 });
+    expect(remoteItemCounts(lockByName(t0, same), lockByName(t1, same), NO_IGNORES)).toEqual({ push: 0, pull: 0 });
   });
 
   it("ignores the refs this remote never exchanges", () => {
@@ -743,17 +746,17 @@ describe("remoteItemCounts", () => {
     // ignore list speaks, which is exactly why the fixture goes through lockByName.
     const local = lockByName(t1, { "plugin-config-sync": { hash: "a", capturedAt: t1 } });
     const remote = lockByName(t1, { "plugin-config-sync": { hash: "b", capturedAt: t0 } });
-    expect(remoteItemCounts(local, remote, ["community/config-sync"])).toEqual({ push: 0, pull: 0 });
+    expect(remoteItemCounts(local, remote, { pull: ["community/config-sync"], push: ["community/config-sync"] })).toEqual({ push: 0, pull: 0 });
   });
 
   it("says it cannot count when a side stamps no entry with a capture time", () => {
     const unstamped = lockByName(t0, { app: { hash: "a" } });
-    expect(remoteItemCounts(unstamped, lockByName(t1, { app: { hash: "b", capturedAt: t1 } }), [])).toBeNull();
+    expect(remoteItemCounts(unstamped, lockByName(t1, { app: { hash: "b", capturedAt: t1 } }), NO_IGNORES)).toBeNull();
   });
 
   it("counts every remote item as a pull when this device has no lock yet", () => {
     const remote = lockByName(t1, { app: { hash: "a", capturedAt: t1 }, hotkeys: { hash: "h", capturedAt: t1 } });
-    expect(remoteItemCounts(null, remote, [])).toEqual({ push: 0, pull: 2 });
+    expect(remoteItemCounts(null, remote, NO_IGNORES)).toEqual({ push: 0, pull: 2 });
   });
 });
 
@@ -774,5 +777,37 @@ describe("sumRemoteItemCounts", () => {
 
   it("says nothing is waiting when there are no remotes at all", () => {
     expect(sumRemoteItemCounts([])).toEqual({ push: 0, pull: 0, remotes: 0, uncounted: 0 });
+  });
+});
+
+describe("remoteItemCounts · direction-aware ignores", () => {
+  const t0 = "2026-08-01T00:00:00.000Z";
+  const t1 = "2026-08-02T00:00:00.000Z";
+  const none = { pull: [], push: [] };
+
+  it("does not count a pull for an item this remote never pulls", () => {
+    // The remote is ahead on dataview, but the rule says push only — nothing to pull.
+    const local = lockByName(t0, { "plugin-dataview": { hash: "a", capturedAt: t0 } });
+    const remote = lockByName(t1, { "plugin-dataview": { hash: "b", capturedAt: t1 } });
+    expect(remoteItemCounts(local, remote, { pull: ["community/dataview"], push: [] })).toEqual({ push: 0, pull: 0 });
+  });
+
+  it("still counts the push for that same item when this side is the one ahead", () => {
+    const local = lockByName(t1, { "plugin-dataview": { hash: "a", capturedAt: t1 } });
+    const remote = lockByName(t0, { "plugin-dataview": { hash: "b", capturedAt: t0 } });
+    expect(remoteItemCounts(local, remote, { pull: ["community/dataview"], push: [] })).toEqual({ push: 1, pull: 0 });
+  });
+
+  it("counts neither direction for an item the remote exchanges neither way", () => {
+    const local = lockByName(t1, { "plugin-dataview": { hash: "a", capturedAt: t1 } });
+    const remote = lockByName(t0, { "plugin-dataview": { hash: "b", capturedAt: t0 } });
+    const both: DirectionIgnores = { pull: ["community/dataview"], push: ["community/dataview"] };
+    expect(remoteItemCounts(local, remote, both)).toEqual({ push: 0, pull: 0 });
+  });
+
+  it("counts both directions when nothing is withheld", () => {
+    const local = lockByName(t1, { app: { hash: "a", capturedAt: t1 }, hotkeys: { hash: "h", capturedAt: t0 } });
+    const remote = lockByName(t1, { app: { hash: "a2", capturedAt: t0 }, hotkeys: { hash: "h2", capturedAt: t1 } });
+    expect(remoteItemCounts(local, remote, none)).toEqual({ push: 1, pull: 1 });
   });
 });

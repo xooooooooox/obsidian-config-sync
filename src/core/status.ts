@@ -186,6 +186,22 @@ export function bucketCounts(statuses: GroupStatus[]): BucketCounts {
 
 export type RemoteState = "no-store" | "same" | "remote-newer" | "remote-older" | "unknown";
 
+// The two questions a remote check answers need two ignore sets, not one (spec 3.5). "Is there
+// anything worth pulling" must ignore every item that does not pull; "is there anything of mine to
+// push" must ignore every item that does not push. Sharing one set gets one of the two wrong: a
+// `Push only` item the remote edited would light an arrow no Pull could ever clear — the exact bug
+// the original single-set comment set out to prevent.
+export interface DirectionIgnores {
+  pull: ItemRef[]; // refs that never flow remote → here
+  push: ItemRef[]; // refs that never flow here → remote
+}
+
+// A lock entry's ref reaches these walks as a plain string (that is what the lock is keyed by), so
+// membership is asked of string sets rather than of the typed arrays the rules produce.
+function blockedSets(ignore: DirectionIgnores): { pull: Set<string>; push: Set<string> } {
+  return { pull: new Set<string>(ignore.pull), push: new Set<string>(ignore.push) };
+}
+
 export interface RemoteItemCounts {
   push: number; // items this store is ahead on — Push would update the remote
   pull: number; // items the remote is ahead on — Pull would update this store
@@ -200,18 +216,18 @@ export interface RemoteCheck {
   items: RemoteItemCounts | null;
 }
 
-// `ignoreRefs` names lock entries that never count, exactly as in remoteLockAhead — callers pass
-// the items this remote does not pull (remoteRules.ts's refsBlockedFor). It is REQUIRED, not defaulted: the per-item
-// path below resolves a direction from every entry it sees, so a forgotten argument would read the
-// self entry of a remote that deliberately never exchanges it and pin an arrow no Pull could ever
-// clear. The whole-store fallback has no per-entry granularity and is unaffected either way.
+// `ignore` names the lock entries that never count, PER DIRECTION (spec 3.5) — callers pass
+// `refsBlockedFor(items, "pull")` and `…"push"` (remoteRules.ts). It is REQUIRED, not defaulted: the
+// per-item path below resolves a direction from every entry it sees, so a forgotten argument would
+// read the self entry of a remote that deliberately never exchanges it and pin an arrow no Pull
+// could ever clear. The whole-store fallback has no per-entry granularity and is unaffected.
 // `groups` re-keys a remote still on the v1/v2 lock format against what THIS device compiles — a
 // remote written by a 2.21.0 device is the normal state during the transition, and an entry keyed
 // differently on the two sides would read as an item we do not have, i.e. a pull that never settles.
 export async function checkRemote(
   localLock: StoreLock | null,
   reader: ExternalStoreReader,
-  ignoreRefs: string[],
+  ignore: DirectionIgnores,
   groups?: readonly SyncGroup[]
 ): Promise<RemoteCheck> {
   const files = await reader.listFiles();
@@ -239,9 +255,9 @@ export async function checkRemote(
   if (storeLockVersion(remote) > STORE_LOCK_VERSION) return { state: "unknown", remoteCapturedAt: remote.capturedAt, items: null };
   // No local lock yet (bootstrap device) but the remote parsed fine: a pull would populate
   // the store, so this is a known state, not "unknown" — reserve that for unreadable remotes.
-  if (localLock === null) return { state: "remote-newer", remoteCapturedAt: remote.capturedAt, items: remoteItemCounts(null, remote, ignoreRefs) };
-  const counts = remoteItemCounts(localLock, remote, ignoreRefs);
-  const perItem = perItemRemoteState(localLock, remote, ignoreRefs);
+  if (localLock === null) return { state: "remote-newer", remoteCapturedAt: remote.capturedAt, items: remoteItemCounts(null, remote, ignore) };
+  const counts = remoteItemCounts(localLock, remote, ignore);
+  const perItem = perItemRemoteState(localLock, remote, ignore);
   if (perItem !== null) return { state: perItem, remoteCapturedAt: remote.capturedAt, items: counts };
   const r = Date.parse(remote.capturedAt);
   const l = Date.parse(localLock.capturedAt);
@@ -384,17 +400,20 @@ function itemFreshness(mine: StoreLockEntry | undefined, theirs: StoreLockEntry 
 // stores are ahead of each other in different items, which RemoteState has no word for); the caller
 // then does exactly what it did before. Reads only the two locks already in hand — no extra file
 // reads, as before.
-function perItemRemoteState(local: StoreLock, remote: StoreLock, ignoreRefs: string[]): RemoteState | null {
+function perItemRemoteState(local: StoreLock, remote: StoreLock, ignore: DirectionIgnores): RemoteState | null {
   if (!hasPerItemPayload(local) || !hasPerItemPayload(remote)) return null;
-  const refs = [...new Set([...lockEntryList(local.items), ...lockEntryList(remote.items)].map(([ref]) => ref))].filter((r) => !ignoreRefs.includes(r));
+  const refs = [...new Set([...lockEntryList(local.items), ...lockEntryList(remote.items)].map(([ref]) => ref))];
   if (refs.length === 0) return null;
+  const blocked = blockedSets(ignore);
   let newer = false;
   let older = false;
   for (const ref of refs) {
     const freshness = itemFreshness(lockEntry(local, ref), lockEntry(remote, ref));
     if (freshness === "undatable") return null;
-    if (freshness === "newer") newer = true;
-    else if (freshness === "older") older = true;
+    // Each direction is judged against its OWN ignore set: an item the remote never pulls cannot
+    // make this store read "behind", and one it never pushes cannot make it read "ahead".
+    if (freshness === "newer" && !blocked.pull.has(ref)) newer = true;
+    else if (freshness === "older" && !blocked.push.has(ref)) older = true;
   }
   if (newer && older) return null;
   return newer ? "remote-newer" : older ? "remote-older" : "same";
@@ -407,18 +426,17 @@ function perItemRemoteState(local: StoreLock, remote: StoreLock, ignoreRefs: str
 //
 // `local === null` is the bootstrap device: it has no store of its own yet, so every item the
 // remote holds is an item waiting to come in.
-export function remoteItemCounts(local: StoreLock | null, remote: StoreLock, ignoreRefs: string[]): RemoteItemCounts | null {
+export function remoteItemCounts(local: StoreLock | null, remote: StoreLock, ignore: DirectionIgnores): RemoteItemCounts | null {
   if (!hasPerItemPayload(remote)) return null;
   if (local !== null && !hasPerItemPayload(local)) return null;
-  const refs = [...new Set([...(local === null ? [] : lockEntryList(local.items)), ...lockEntryList(remote.items)].map(([ref]) => ref))].filter(
-    (r) => !ignoreRefs.includes(r)
-  );
+  const refs = [...new Set([...(local === null ? [] : lockEntryList(local.items)), ...lockEntryList(remote.items)].map(([ref]) => ref))];
+  const blocked = blockedSets(ignore);
   let push = 0;
   let pull = 0;
   for (const ref of refs) {
     const freshness = itemFreshness(local === null ? undefined : lockEntry(local, ref), lockEntry(remote, ref));
-    if (freshness === "newer") pull++;
-    else if (freshness === "older") push++;
+    if (freshness === "newer" && !blocked.pull.has(ref)) pull++;
+    else if (freshness === "older" && !blocked.push.has(ref)) push++;
   }
   return { push, pull };
 }

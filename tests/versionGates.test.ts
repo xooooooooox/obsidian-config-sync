@@ -1014,12 +1014,12 @@ describe("content at the far end with no lock", () => {
   // refusal — the same rule already follows for a lock from the future. checkRemote answers
   // from the same predicate the gate does, so the two cannot drift apart.
   it("the remote's reported state agrees with the refusal — uncomparable, never an empty remote", async () => {
-    expect((await checkRemote(null, fakeReader(ONE_LEVEL_TOO_DEEP), [])).state).toBe("unknown");
-    expect((await checkRemote(null, fakeReader(LOCKLESS_STORE), [])).state).toBe("unknown");
+    expect((await checkRemote(null, fakeReader(ONE_LEVEL_TOO_DEEP), { pull: [], push: [] })).state).toBe("unknown");
+    expect((await checkRemote(null, fakeReader(LOCKLESS_STORE), { pull: [], push: [] })).state).toBe("unknown");
     // A legacy store is not refused, but it is still uncomparable — there is no lock to weigh.
-    expect((await checkRemote(null, fakeReader({ "config-sync.json": "{}" }), [])).state).toBe("unknown");
+    expect((await checkRemote(null, fakeReader({ "config-sync.json": "{}" }), { pull: [], push: [] })).state).toBe("unknown");
     // no-store is reserved for the one remote a first push is FOR: nothing here at all.
-    expect((await checkRemote(null, fakeReader({}), [])).state).toBe("no-store");
+    expect((await checkRemote(null, fakeReader({}), { pull: [], push: [] })).state).toBe("no-store");
   });
 
   // The message is the only place either cause can be diagnosed from, and there are TWO of them: a
