@@ -4,6 +4,7 @@ import { basename, groupStorePath, relativeTo, resolveGroupByStoreRel, sidecarSt
 import { carrierRef, refItemId } from "./itemKeys";
 import { assertStoreLockVersionUnderstood, derivedLockCapturedAt, itemEntry, lockElementLabels, lockEntry, lockEntryList, lockEntryTail, lockLabel, lockLineage, lockSourceVersion, lockTail, lockWatermark, parseStoreLock, parseSyncManifest, setLockEntry, storeLockVersion, STORE_LOCK_HASH_PREFIX, STORE_LOCK_VERSION, validateSyncManifest } from "./manifest";
 import { derivedPushLock } from "./derivedLock";
+import { overlayWithheld } from "./keyWithholding";
 import { isFutureSchemaDocument, SCHEMA_FUTURE_APPLY_MESSAGE } from "./settingsMigration";
 import { applyTransform, captureTransform, classPatterns, contentUnchanged, excludingPerElement, groupNeedsPassphrase, isWholeFileEncrypted, stripPatterns } from "./modes";
 import { hashDirSide, hashFileSide, sha256Hex } from "./ledger";
@@ -1446,6 +1447,10 @@ export interface PendingPull {
   // The items this remote does not pull, as its rules resolve them (remoteRules.ts's
   // refsBlockedFor). Carried so applyImport skips exactly what the planner skipped.
   skipRefs: ItemRef[];
+  // The items whose remote content this plan REWROTE, because some of their keys do not pull with
+  // this remote. Carried for the bookkeeping: their content is a hybrid of both sides, so the
+  // remote's lock entry does not describe what we are about to hold (see applyImport).
+  mergedRefs: string[];
 }
 
 // Every store rel belonging to a skipped item. Built per seam from the group lists that seam
@@ -1464,7 +1469,11 @@ export function skipRelPredicate(skipRefs: ItemRef[], ...groupLists: SyncGroup[]
 }
 
 // Read-only: this half of a pull never writes anything, so a refusal below costs nothing.
-export async function planImport(ctx: CoreContext, reader: ExternalStoreReader, opts: { skipRefs: ItemRef[] }): Promise<PendingPull> {
+export async function planImport(
+  ctx: CoreContext,
+  reader: ExternalStoreReader,
+  opts: { skipRefs: ItemRef[]; withheldPull: (rel: string) => string[] }
+): Promise<PendingPull> {
   const files = await reader.listFiles();
   // Declared-store gate: before a single remote file is read — content that nothing here identifies is refused, not
   // adopted as a brand-new remote. Ahead of the version gate below because it is the condition under
@@ -1491,9 +1500,23 @@ export async function planImport(ctx: CoreContext, reader: ExternalStoreReader, 
   const skipped = skipRelPredicate(opts.skipRefs, localGroups, remoteGroups);
 
   const remoteFileMap = new Map<string, string>();
+  const mergedRefs = new Set<string>();
   for (const rel of files) {
     if (rel === LOCK_REL || isLegacyManifestRel(rel) || skipped(rel)) continue;
-    remoteFileMap.set(rel, await reader.readFile(rel));
+    const raw = await reader.readFile(rel);
+    const patterns = opts.withheldPull(rel);
+    if (patterns.length === 0) {
+      remoteFileMap.set(rel, raw);
+      continue;
+    }
+    // What lands in the plan is the MERGED content, not theirs: the planner's job is to describe
+    // what a pull would write, and this is what it would write. It also settles the comparison for
+    // free — a file whose only difference is a withheld key now equals ours and never comes up.
+    const localAbs = `${ctx.rootPath}/${rel}`;
+    const keep = (await ctx.io.exists(localAbs)) ? await ctx.io.read(localAbs) : null;
+    remoteFileMap.set(rel, overlayWithheld({ rel, keep, take: raw, patterns }));
+    const ref = resolveGroupByStoreRel(localGroups, rel)?.ref ?? resolveGroupByStoreRel(remoteGroups, rel)?.ref;
+    if (ref !== undefined) mergedRefs.add(ref);
   }
 
   const localFileMap = new Map<string, string>();
@@ -1507,7 +1530,7 @@ export async function planImport(ctx: CoreContext, reader: ExternalStoreReader, 
   }
 
   const plan = classifyMerge(localGroups, localFileMap, remoteGroups, remoteFileMap);
-  return { plan, remoteGroups, remoteLockRaw, remoteFiles: files, skipRefs: opts.skipRefs };
+  return { plan, remoteGroups, remoteLockRaw, remoteFiles: files, skipRefs: opts.skipRefs, mergedRefs: [...mergedRefs] };
 }
 
 // Writes the whole merge result, auto-merged parts and each conflict's chosen side, in one pass.
@@ -1595,10 +1618,21 @@ export async function applyImport(
       }
     }
     const adoptedRefs = new Set<string>();
+    const mergedRefs = new Set<string>(pending.mergedRefs);
     if (remoteLock !== null) {
       for (const [ref, entry] of lockEntryList(remoteLock.items)) {
         if ((pending.skipRefs as string[]).includes(ref)) continue;
         if (localWonRefs.has(ref)) continue;
+        // A merged item's content is neither side's, so neither side's fingerprint describes it.
+        // Its entry is seeded from theirs — where the item came from is still theirs to tell — and
+        // the restamp loop below replaces the two fields that describe CONTENT. Deliberately not
+        // added to `adoptedRefs`: that set is what tells the restamp loop to leave an entry alone.
+        if (mergedRefs.has(ref)) {
+          const seeded = lockEntryTail(lockEntry(localLock, ref));
+          for (const key of Object.keys(entry)) delete seeded[key];
+          setLockEntry(mergedItems, ref, { ...entry, ...seeded });
+          continue;
+        }
         // The remote's entry wins every field it HAS — the content is now the remote's, so its
         // versions, capture time and hash describe it. But a key only OUR entry carried is not the
         // remote's to delete: dropping it is the same loss as the top-level strip, one level down,

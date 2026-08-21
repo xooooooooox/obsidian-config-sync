@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { overlayWithheld, withheldPatternPredicate } from "../src/core/keyWithholding";
-import { ItemRef, RemoteItems, SyncGroup } from "../src/core/types";
+import { RemoteItems, SyncGroup } from "../src/core/types";
 
 const RULES: RemoteItems = {
   community: {
@@ -11,9 +11,9 @@ const RULES: RemoteItems = {
 
 describe("withheldPatternPredicate", () => {
   const groups: SyncGroup[] = [
-    { name: "plugin-dataview", ref: "community/dataview" as ItemRef, path: "{configDir}/plugins/dataview/data.json", type: "file", devices: "all" },
-    { name: "snippets", ref: "obsidian/snippets" as ItemRef, path: "{configDir}/snippets", type: "folder", devices: "all" },
-    { name: "vimrc", ref: "obsidian/vimrc" as ItemRef, path: ".obsidian.vimrc", type: "file", devices: "all" },
+    { name: "plugin-dataview", ref: "community/dataview", path: "{configDir}/plugins/dataview/data.json", type: "file", devices: "all" },
+    { name: "snippets", ref: "obsidian/snippets", path: "{configDir}/snippets", type: "folder", devices: "all" },
+    { name: "vimrc", ref: "obsidian/vimrc", path: ".vimrc-support", type: "file", devices: "all" },
   ];
 
   it("answers for a file item's JSON store copy, sidecars included", () => {
@@ -26,7 +26,7 @@ describe("withheldPatternPredicate", () => {
     const rules: RemoteItems = { obsidian: { snippets: { keys: { a: { direction: "none" } } }, vimrc: { keys: { a: { direction: "none" } } } } };
     const at = withheldPatternPredicate(rules, "push", groups);
     expect(at("store/configdir/snippets/one.css")).toEqual([]); // a folder travels whole
-    expect(at("store/obsidian.vimrc")).toEqual([]); // no keys in this file
+    expect(at("store/vimrc-support")).toEqual([]); // no keys in this file
     expect(at("store.lock.json")).toEqual([]);
   });
 

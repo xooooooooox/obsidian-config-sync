@@ -84,6 +84,7 @@ import { classifySettings, CURRENT_SCHEMA, SCHEMA_FUTURE_NOTICE, SCHEMA_UPGRADE_
 import { deviceOptOutsFor, migrateV2Settings } from "./core/v2Migration";
 import { migrateV4Settings } from "./core/v4Migration";
 import { refsBlockedFor, withItemDirection } from "./core/remoteRules";
+import { withheldPatternPredicate } from "./core/keyWithholding";
 import { migrateV5Settings } from "./core/v5Migration";
 import { applySwitchList, captureSwitchList, EnablementList, enablementListFile, isSwitchListGroup, localRealPath, parseSwitchList, readLocalSwitchList, subtractForceOff, switchDivergence, SwitchList, switchListMemberOn, writeLocalSwitchList } from "./core/switchList";
 import { applyTransform, captureTransform, isWholeFileEncrypted, scanSensitive, SensitiveScan } from "./core/modes";
@@ -952,7 +953,10 @@ export default class ConfigSyncPlugin extends Plugin {
         try {
           const ctx = await this.coreContext();
           const blocked = refsBlockedFor(remote.items, "pull");
-          const pending = await planImport(ctx, await this.createReader(remote), { skipRefs: [...new Set([...blocked, ...skipRefs])] });
+          const pending = await planImport(ctx, await this.createReader(remote), {
+            skipRefs: [...new Set([...blocked, ...skipRefs])],
+            withheldPull: withheldPatternPredicate(remote.items, "pull", this.compiledGroups),
+          });
           // Pull resolves file conflicts only; sync-list (definition) conflicts are never
           // applied by Pull, so they don't prompt — the list converges via adopt.
           const fileConflicts = pending.plan.conflicts.filter((c) => c.kind === "file");
