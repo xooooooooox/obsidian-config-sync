@@ -19,6 +19,8 @@ import {
   loadManifest,
   lockPath,
   pushExternal,
+  PUSH_RACE_MESSAGE,
+  PUSH_STALE_MESSAGE,
   readCarrierSwitchLists,
   readGroups,
   STORE_LOCK_MISSING_MESSAGE,
@@ -168,7 +170,15 @@ const REFUSAL_NOTICE_MS = 10000;
 // already says what to do, so the pull/push notices append no generic "check the remote's URL"
 // advice on top of it.
 function isOwnStoreRefusal(message: string): boolean {
-  return message === STORE_LOCK_FUTURE_MESSAGE || message === STORE_LOCK_MISSING_MESSAGE;
+  return (
+    message === STORE_LOCK_FUTURE_MESSAGE ||
+    message === STORE_LOCK_MISSING_MESSAGE ||
+    // The two concurrency refusals (spec 3.7) belong here for the same reason: the remote is
+    // reachable and its path is right — it simply moved. Telling the user to check their URL sends
+    // them after a problem they do not have.
+    message === PUSH_RACE_MESSAGE ||
+    message === PUSH_STALE_MESSAGE
+  );
 }
 
 // app.plugins is not part of the public API; this is the community-standard access path.
