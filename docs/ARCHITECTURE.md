@@ -298,11 +298,21 @@ functions.
   "is anything worth pulling" ignores what never pulls, "is anything of mine to push" ignores what
   never pushes — one shared set gets one of them wrong, and a `Push only` item the remote edited
   would light an arrow no Pull could clear.
-  `diffRemote(ctx, reader, opts: { skipRefs: ItemRef[] })` returns per-group `RemoteDiffEntry.files:
+  **One level down, an item with per-key rules cannot be judged from the two locks at all**: its
+  fingerprints differ by design, so the fast path ("both hashed and equal ⇒ equal") never fires and
+  the capture stamps take over — and then every capture on the other device relights an arrow no run
+  can clear. `checkRemote`'s `keyRuled` option is the answer: for those items ONLY, and only after
+  the three refusals that make a remote uncomparable, it asks `storeItemsAgree` and passes the ones
+  that agree as `settled` to both `remoteItemVerdicts` and the whole-store `perItemRemoteState`,
+  where their entries are skipped outright. A remote with no key rules passes an empty list and pays
+  nothing.
+  `diffRemote(ctx, reader, opts: { skipRefs, unexchanged })` returns per-group `RemoteDiffEntry.files:
   RemoteDiffFile[]` — one entry per file with its `kind` (`added`/`updated`/`deleted`) and both
   sides' content, so the UI renders file lists and content diffs instead of bare counts;
   `skipRefs` drops those items' store rels from both sides before diffing (comparison answers for
-  both directions at once, so main.ts passes the union of the pull and push blocked sets).
+  both directions at once, so main.ts passes the union of the pull and push blocked sets), and
+  `unexchanged` masks the keys that travel neither way before the byte comparison, so a file whose
+  only difference is one of them is not listed as a row the user could never act on.
   `remoteLockAhead(localRaw, remoteRaw, ignoreRefs, groups?)` takes an explicit `ignoreRefs` list —
   callers pass `refsBlockedFor(remote.items, "pull")`, so a lock entry for an item the remote never
   pulls cannot keep the "remote has newer version info" hint alive forever. `applyImport` closes the
@@ -502,6 +512,16 @@ functions.
   this remote do with this item" keeps its single answer. A file with per-key rules that is not
   valid JSON is a refusal naming the file: pushing it whole would hand the far end a key we
   promised to withhold.
+  The COMPARISON side asks a different and strictly smaller question:
+  `unexchangedPatternPredicate` names only the keys that travel **neither** way
+  (`unexchangedPatternsFor` in `remoteRules.ts`), because those are the only ones that differ by
+  design forever — a key that still moves one way is real work until that direction runs, and
+  masking it would hide something a run would fix. `sameApartFromWithheld({a, b, patterns})` is that
+  masked comparison; unlike `overlayWithheld` it **tolerates** a side it cannot parse and falls back
+  to the byte comparison the caller would otherwise have done, because it answers a question rather
+  than producing bytes a run will send. `storeItemsAgree` lifts it to a whole item (base copy plus
+  its two per-class sidecars, read from `io` and the reader already in hand) and `refsWithKeyRules`
+  names the only items that pay for it.
 
 **Install & discovery**
 - `core/installer.ts` — download a plugin from the community catalog, version-pinned via the
