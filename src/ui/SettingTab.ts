@@ -315,6 +315,10 @@ const PER_KEY_RULES_TOOLTIP = "Per-key rules decide — open them below";
 // it never spends a form row of its own.
 const TOKEN_LINK_HINT = "For https URLs. Without a token, this device's own git sign-in is used. Stored in Obsidian's keychain — link it once per device.";
 
+// The Passphrase row's standing explanation — same placement discipline as the token's: on the
+// control, never a row of its own.
+const REMOTE_PASSPHRASE_HINT = "Only if this remote's vault uses a different passphrase than yours. Leave empty when they match.";
+
 // zone ② body's file-read outcome (renderCardBodyInto below): "missing" = no file on this device
 // yet, "invalid" = present but not a JSON object, "ok" = usable — only "ok" carries a doc worth
 // handing to buildRuleRows/renderCardDataPreview.
@@ -3975,6 +3979,47 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         });
       }
     }
+    // Outside the type branches on purpose, unlike the token: a VAULT remote's store can be
+    // encrypted just as a git one's can, so the passphrase belongs to every remote. Same control,
+    // same keychain discipline as the token — the name rides in data.json, the value never does.
+    const passControl = remRow("Passphrase", false).createDiv({ cls: "config-sync-secret-control" });
+    setTooltip(passControl, REMOTE_PASSPHRASE_HINT);
+    passControl.setAttribute("aria-label", REMOTE_PASSPHRASE_HINT);
+    const passC = new SecretComponent(this.app, passControl);
+    const passStatusRow = remRow("", false);
+    const passStatusEl = passStatusRow.createDiv({ cls: "config-sync-token-status" });
+    const paintPassStatus = (): void => {
+      const held = draft.passphraseId !== "" && this.app.secretStorage.listSecrets().includes(draft.passphraseId);
+      const rowEl = passStatusRow.parentElement;
+      if (rowEl !== null) rowEl.toggle(draft.passphraseId !== "");
+      passStatusEl.className =
+        "config-sync-token-status" + (held ? " is-ok" : draft.passphraseId !== "" ? " is-warning" : "");
+      passStatusEl.setText(
+        held
+          ? "✓ Passphrase stored on this device."
+          : draft.passphraseId !== ""
+            ? `⚠ This remote uses a passphrase named "${draft.passphraseId}", which this device doesn't have yet — link it here once.`
+            : ""
+      );
+    };
+    passC.setValue(draft.passphraseId);
+    paintPassStatus();
+    passC.onChange((name: string | null) => {
+      if (!this.host.settingsWritable()) {
+        passC.setValue(draft.passphraseId);
+        return;
+      }
+      if (name === PASSPHRASE_SECRET_ID) {
+        new Notice("Config Sync's own vault passphrase is stored under that name — pick or create a different secret for this remote.");
+        passC.setValue(draft.passphraseId);
+        return;
+      }
+      draft.passphraseId = name ?? "";
+      // saveRemotes clears the reader cache; the next check re-compares under the new key —
+      // the same afterlife a token edit gets.
+      void this.saveRemotes();
+      paintPassStatus();
+    });
   }
 
   private async browseStorePath(draft: RemoteDraft): Promise<void> {
