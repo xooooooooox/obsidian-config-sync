@@ -1735,7 +1735,36 @@ function parsedOrNull(raw: string | null, groups: readonly SyncGroup[]): StoreLo
   }
 }
 
-export async function pushExternal(ctx: CoreContext, writer: ExternalStoreWriter, opts: { skipRefs: ItemRef[] }): Promise<GroupResult[]> {
+// The fingerprint of what a push SENT, per item whose content it rewrote. Same hashing rule as
+// everywhere else (fileStoreCopyHash), fed this run's own bytes rather than the copy on disk —
+// which is the point: the two differ exactly where a key stayed behind. A rewritten item is always a
+// file item with a JSON store copy (keyWithholding.ts's own rule), so its base rel is the anchor and
+// its sidecars ride along; anything else answers null, and an absent fingerprint is never a difference.
+async function sentHashes(
+  ctx: CoreContext,
+  groups: SyncGroup[],
+  rewritten: ReadonlyMap<string, Record<string, string>>
+): Promise<Map<string, string | null>> {
+  const hashes = new Map<string, string | null>();
+  for (const [ref, byRel] of rewritten) {
+    const group = groups.find((g) => g.ref === ref);
+    const base = group === undefined ? undefined : byRel[`store/${groupStorePath(group.path)}`];
+    if (group === undefined || base === undefined || !storeContentIsHashable(group)) {
+      hashes.set(ref, null);
+      continue;
+    }
+    const sidecars: Record<"desktop" | "mobile", string | null> = { desktop: null, mobile: null };
+    for (const cls of DEVICE_CLASSES) sidecars[cls] = byRel[`store/${groupStorePath(group.path)}${sidecarStoreSuffix(cls)}`] ?? null;
+    hashes.set(ref, await fileStoreCopyHash(group.name, base, sidecars));
+  }
+  return hashes;
+}
+
+export async function pushExternal(
+  ctx: CoreContext,
+  writer: ExternalStoreWriter,
+  opts: { skipRefs: ItemRef[]; withheldPush: (rel: string) => string[] }
+): Promise<GroupResult[]> {
   const localAbs = (await ctx.io.exists(ctx.rootPath)) ? await listFilesRecursive(ctx.io, ctx.rootPath) : [];
   const rels = localAbs.map((f) => f.slice(ctx.rootPath.length + 1)).sort();
   const hasStore = rels.some((r) => r.startsWith("store/")) || rels.includes(LOCK_REL);
@@ -1769,12 +1798,23 @@ export async function pushExternal(ctx: CoreContext, writer: ExternalStoreWriter
   // The version gate, push side: refused before the first writeFile — pushing this build's store over a remote
   // written by a newer one would overwrite a shape we cannot read with one it cannot read back.
   assertStoreLockVersionUnderstood(remoteLockRaw);
+  const rewritten = new Map<string, Record<string, string>>(); // ref -> rel -> the content we sent
   for (const rel of pushableRels) {
     if (rel === LOCK_REL) continue; // not content: derived and written at the end
     const { name, itemRel } = groupForStoreRel(manifest.groups, rel);
-    const content = await ctx.io.read(`${ctx.rootPath}/${rel}`);
+    const mine = await ctx.io.read(`${ctx.rootPath}/${rel}`);
     const existed = remoteFiles.has(rel);
-    if (existed && (await writer.readFile(rel)) === content) continue; // unchanged: skip the write
+    const theirs = existed ? await writer.readFile(rel) : null;
+    const patterns = opts.withheldPush(rel);
+    // Their value for a withheld key is not ours to delete: the store holds whole documents, not
+    // patches, so sending the file without that key would make their next Apply drop it from their
+    // live config. Push already reads their copy for the skip-if-identical test, so this is not new IO.
+    const content = patterns.length === 0 ? mine : overlayWithheld({ rel, keep: theirs, take: mine, patterns });
+    if (patterns.length > 0) {
+      const ref = resolveGroupByStoreRel(manifest.groups, rel)?.ref;
+      if (ref !== undefined) rewritten.set(ref, { ...(rewritten.get(ref) ?? {}), [rel]: content });
+    }
+    if (existed && theirs === content) continue; // unchanged: skip the write
     await writer.writeFile(rel, content);
     const result = resultFor(name);
     result.filesWritten.push(rel);
@@ -1800,6 +1840,7 @@ export async function pushExternal(ctx: CoreContext, writer: ExternalStoreWriter
       local: parseStoreLock(localLockRaw, manifest.groups),
       remote: parsedOrNull(remoteLockRaw, manifest.groups),
       skipRefs: opts.skipRefs,
+      rewrittenHashes: await sentHashes(ctx, manifest.groups, rewritten),
     });
     const content = JSON.stringify(derived, null, 2) + "\n";
     const existed = remoteFiles.has(LOCK_REL);

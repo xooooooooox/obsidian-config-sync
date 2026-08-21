@@ -10,70 +10,88 @@ const t2 = "2026-08-03T00:00:00.000Z";
 // without a cast — and `LockItems` keeps the entries honestly typed rather than asserted into shape.
 const lock = (capturedAt: string, items: LockItems, tail: Record<string, unknown> = {}): StoreLock => ({ capturedAt, items, ...tail });
 
+// Most of these say nothing about rewritten content, so they go through a wrapper rather than
+// repeating an empty map ten times. The two that DO care pass their own.
+type DerivedInput = Parameters<typeof derivedPushLock>[0];
+const derived = (input: Omit<DerivedInput, "rewrittenHashes"> & { rewrittenHashes?: ReadonlyMap<string, string | null> }): StoreLock =>
+  derivedPushLock({ ...input, rewrittenHashes: input.rewrittenHashes ?? new Map() });
+
 describe("derivedPushLock", () => {
   it("sends our entry for an item this push sends", () => {
     const local = lock(t1, { community: { dataview: { hash: "mine", capturedAt: t1 } } });
     const remote = lock(t0, { community: { dataview: { hash: "theirs", capturedAt: t0 } } });
-    const out = derivedPushLock({ local, remote, skipRefs: [] });
+    const out = derived({ local, remote, skipRefs: [] });
     expect(out.items["community"]?.["dataview"]).toEqual({ hash: "mine", capturedAt: t1 });
   });
 
   it("keeps the far end's own entry for an item this push does not send", () => {
     const local = lock(t1, { community: { "config-sync": { hash: "mine", capturedAt: t1 } } });
     const remote = lock(t0, { community: { "config-sync": { hash: "theirs", capturedAt: t0 } } });
-    const out = derivedPushLock({ local, remote, skipRefs: ["community/config-sync"] });
+    const out = derived({ local, remote, skipRefs: ["community/config-sync"] });
     expect(out.items["community"]?.["config-sync"]).toEqual({ hash: "theirs", capturedAt: t0 });
   });
 
   it("writes no entry at all for a withheld item the far end has never had", () => {
     const local = lock(t1, { community: { "config-sync": { hash: "mine", capturedAt: t1 } } });
     const remote = lock(t0, {});
-    const out = derivedPushLock({ local, remote, skipRefs: ["community/config-sync"] });
+    const out = derived({ local, remote, skipRefs: ["community/config-sync"] });
     expect(out.items["community"]?.["config-sync"]).toBeUndefined();
   });
 
   it("drops an entry only the far end has: push mirror-deletes that item's files", () => {
     const local = lock(t1, { obsidian: { app: { hash: "mine", capturedAt: t1 } } });
     const remote = lock(t0, { obsidian: { app: { hash: "theirs", capturedAt: t0 } }, community: { gone: { hash: "g", capturedAt: t0 } } });
-    const out = derivedPushLock({ local, remote, skipRefs: [] });
+    const out = derived({ local, remote, skipRefs: [] });
     expect(out.items["community"]?.["gone"]).toBeUndefined();
   });
 
   it("carries a field only their entry had onto the entry we send", () => {
     const local = lock(t1, { obsidian: { app: { hash: "mine", capturedAt: t1 } } });
     const remote = lock(t0, { obsidian: { app: { hash: "theirs", capturedAt: t0, futureField: 7 } } });
-    const out = derivedPushLock({ local, remote, skipRefs: [] });
+    const out = derived({ local, remote, skipRefs: [] });
     expect(out.items["obsidian"]?.["app"]).toEqual({ hash: "mine", capturedAt: t1, futureField: 7 });
   });
 
   it("leaves their watermark where it is — our push is not their pull", () => {
     const local = lock(t1, {}, { syncedWatermark: t1 });
     const remote = lock(t0, {}, { syncedWatermark: t2 });
-    expect(derivedPushLock({ local, remote, skipRefs: [] }).syncedWatermark).toBe(t2);
+    expect(derived({ local, remote, skipRefs: [] }).syncedWatermark).toBe(t2);
   });
 
   it("uses our own watermark only when the far end has no lock at all", () => {
     const local = lock(t1, {}, { syncedWatermark: t1 });
-    expect(derivedPushLock({ local, remote: null, skipRefs: [] }).syncedWatermark).toBe(t1);
+    expect(derived({ local, remote: null, skipRefs: [] }).syncedWatermark).toBe(t1);
   });
 
   it("derives capturedAt from the entries it actually wrote, kept ones included", () => {
     const local = lock(t1, { obsidian: { app: { hash: "mine", capturedAt: t0 } } });
     const remote = lock(t0, { community: { "config-sync": { hash: "theirs", capturedAt: t2 } } });
-    const out = derivedPushLock({ local, remote, skipRefs: ["community/config-sync"] });
+    const out = derived({ local, remote, skipRefs: ["community/config-sync"] });
     expect(out.capturedAt).toBe(t2);
   });
 
   it("declares the format this build writes", () => {
-    expect(derivedPushLock({ local: lock(t1, {}), remote: null, skipRefs: [] }).version).toBe(3);
+    expect(derived({ local: lock(t1, {}), remote: null, skipRefs: [] }).version).toBe(3);
   });
 
   it("keeps an unknown top-level key from either side, the far end's winning a collision", () => {
     const local = lock(t1, {}, { mineOnly: 1, shared: "ours" });
     const remote = lock(t0, {}, { theirsOnly: 2, shared: "theirs" });
-    const out = derivedPushLock({ local, remote, skipRefs: [] });
+    const out = derived({ local, remote, skipRefs: [] });
     expect(out.mineOnly).toBe(1);
     expect(out.theirsOnly).toBe(2);
     expect(out.shared).toBe("theirs");
+  });
+
+  it("fingerprints a rewritten item by what was actually sent, not by what we hold", () => {
+    const local = lock(t1, { community: { demo: { hash: "sha256:mine", capturedAt: t1 } } });
+    const out = derived({ local, remote: null, skipRefs: [], rewrittenHashes: new Map([["community/demo", "sha256:sent"]]) });
+    expect(out.items["community"]?.["demo"]?.hash).toBe("sha256:sent");
+  });
+
+  it("drops the fingerprint of a rewritten item that cannot be fingerprinted at all", () => {
+    const local = lock(t1, { community: { demo: { hash: "sha256:mine", capturedAt: t1 } } });
+    const out = derived({ local, remote: null, skipRefs: [], rewrittenHashes: new Map([["community/demo", null]]) });
+    expect(out.items["community"]?.["demo"]).toEqual({ capturedAt: t1 });
   });
 });

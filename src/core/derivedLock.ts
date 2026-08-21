@@ -8,7 +8,7 @@ import {
   setLockEntry,
   STORE_LOCK_VERSION,
 } from "./manifest";
-import { LockItems, StoreLock } from "./types";
+import { LockItems, StoreLock, StoreLockEntry } from "./types";
 
 // The lock a push SENDS, which is not the lock this device HAS. The file describes the store the far
 // end will be holding once this push lands, and a push does not send everything: an item withheld by
@@ -22,8 +22,11 @@ export function derivedPushLock(input: {
   local: StoreLock;
   remote: StoreLock | null;
   skipRefs: readonly string[];
+  // ref -> the fingerprint of what this push actually SENT, for the items whose content it rewrote
+  // on the way out (some of their keys stay behind). null = that item cannot be fingerprinted.
+  rewrittenHashes: ReadonlyMap<string, string | null>;
 }): StoreLock {
-  const { local, remote, skipRefs } = input;
+  const { local, remote, skipRefs, rewrittenHashes } = input;
   const withheld = new Set<string>(skipRefs);
   const items: LockItems = {};
   for (const [ref, entry] of lockEntryList(local.items)) {
@@ -32,7 +35,16 @@ export function derivedPushLock(input: {
     // the other direction, so a newer build's per-item field survives a round trip through us.
     const carried = lockEntryTail(lockEntry(remote, ref));
     for (const key of Object.keys(entry)) delete carried[key];
-    setLockEntry(items, ref, { ...entry, ...carried });
+    const sent: StoreLockEntry = { ...entry, ...carried };
+    // A rewritten item is not described by OUR fingerprint: the far end holds a different file, and
+    // its own devices read this entry to decide whether they are behind. An absent fingerprint is
+    // never a difference, so where there is none to compute the field goes rather than lying.
+    if (rewrittenHashes.has(ref)) {
+      const hash = rewrittenHashes.get(ref) ?? null;
+      if (hash === null) delete sent.hash;
+      else sent.hash = hash;
+    }
+    setLockEntry(items, ref, sent);
   }
   // Their entries for the items we withheld. Iterating THEIR lock rather than the skip set keeps the
   // output order a function of the two documents alone — a stable byte sequence is what lets an

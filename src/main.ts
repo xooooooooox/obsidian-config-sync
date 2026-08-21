@@ -1004,7 +1004,10 @@ export default class ConfigSyncPlugin extends Plugin {
         try {
           const ctx = await this.coreContext();
           const blocked = refsBlockedFor(remote.items, "push");
-          const results = await pushExternal(ctx, await this.createWriter(remote), { skipRefs: [...new Set([...blocked, ...skipRefs])] });
+          const results = await pushExternal(ctx, await this.createWriter(remote), {
+            skipRefs: [...new Set([...blocked, ...skipRefs])],
+            withheldPush: withheldPatternPredicate(remote.items, "push", this.compiledGroups),
+          });
           await this.refreshRemoteChecks();
           return results;
         } catch (e) {

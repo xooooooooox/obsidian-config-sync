@@ -665,7 +665,7 @@ describe("the store lock's version", () => {
     const ctx = guardCtx(io);
     const fw = fakeWriter({ "store.lock.json": V4_LOCK, "store/configdir/hotkeys.json": '{"theirs":1}' });
 
-    await expect(pushExternal(ctx, fw.writer, { skipRefs: [] })).rejects.toThrow(STORE_LOCK_FUTURE_MESSAGE);
+    await expect(pushExternal(ctx, fw.writer, { skipRefs: [], withheldPush: () => [] })).rejects.toThrow(STORE_LOCK_FUTURE_MESSAGE);
 
     expect(fw.writeLog).toEqual([]);
     expect(fw.files["store/configdir/hotkeys.json"]).toBe('{"theirs":1}');
@@ -821,7 +821,7 @@ describe("the store lock's version", () => {
       io.seed({ "cs/store.lock.json": V1_LOCK, "cs/store/configdir/hotkeys.json": '{"mine":1}' });
       const fw = fakeWriter({ "store.lock.json": V4_RESTRUCTURED, "store/configdir/hotkeys.json": '{"theirs":1}' });
 
-      await expect(pushExternal(guardCtx(io), fw.writer, { skipRefs: [] })).rejects.toThrow(STORE_LOCK_FUTURE_MESSAGE);
+      await expect(pushExternal(guardCtx(io), fw.writer, { skipRefs: [], withheldPush: () => [] })).rejects.toThrow(STORE_LOCK_FUTURE_MESSAGE);
 
       expect(fw.writeLog).toEqual([]);
       expect(fw.files["store.lock.json"]).toBe(V4_RESTRUCTURED);
@@ -857,7 +857,7 @@ describe("the store lock's version", () => {
     expect(pending.plan.auto.writeFiles.map((f) => f.rel)).toContain("store/configdir/other.json");
 
     const fw = fakeWriter({ "store.lock.json": V1_LOCK });
-    await pushExternal(ctx, fw.writer, { skipRefs: [] });
+    await pushExternal(ctx, fw.writer, { skipRefs: [], withheldPush: () => [] });
     expect(fw.files["store/configdir/hotkeys.json"]).toBe('{"mine":1}');
   });
 });
@@ -930,7 +930,7 @@ describe("content at the far end with no lock", () => {
     io.seed(LOCAL_STORE);
     const fw = fakeWriter(ONE_LEVEL_TOO_DEEP);
 
-    await expect(pushExternal(guardCtx(io), fw.writer, { skipRefs: [] })).rejects.toThrow(STORE_LOCK_MISSING_MESSAGE);
+    await expect(pushExternal(guardCtx(io), fw.writer, { skipRefs: [], withheldPush: () => [] })).rejects.toThrow(STORE_LOCK_MISSING_MESSAGE);
 
     expect(fw.writeLog).toEqual([]);
     expect(fw.files["configdir/hotkeys.json"]).toBe('{"theirs":1}'); // nor is anything of theirs deleted
@@ -942,7 +942,7 @@ describe("content at the far end with no lock", () => {
     io.seed(LOCAL_STORE);
     const fw = fakeWriter({});
 
-    await pushExternal(guardCtx(io), fw.writer, { skipRefs: [] });
+    await pushExternal(guardCtx(io), fw.writer, { skipRefs: [], withheldPush: () => [] });
 
     expect(fw.files["store/configdir/hotkeys.json"]).toBe('{"mine":1}');
     // The bookkeeping lands too, though not byte for byte: what a push sends is derived
@@ -991,7 +991,7 @@ describe("content at the far end with no lock", () => {
     io.seed(LOCAL_STORE);
 
     const legacy = fakeWriter({ "config-sync.json": "OLD-REMOTE", "store/configdir/hotkeys.json": '{"theirs":1}' });
-    await pushExternal(guardCtx(io), legacy.writer, { skipRefs: [] });
+    await pushExternal(guardCtx(io), legacy.writer, { skipRefs: [], withheldPush: () => [] });
     expect(legacy.files["store/configdir/hotkeys.json"]).toBe('{"mine":1}');
     expect(legacy.files["config-sync.json"]).toBe("OLD-REMOTE"); // never written, never deleted
   });
@@ -1011,7 +1011,7 @@ describe("content at the far end with no lock", () => {
     io.seed(LOCAL_STORE);
 
     const junk = fakeWriter({ ".DS_Store": " " });
-    await pushExternal(guardCtx(io), junk.writer, { skipRefs: [] });
+    await pushExternal(guardCtx(io), junk.writer, { skipRefs: [], withheldPush: () => [] });
     expect(junk.files["store/configdir/hotkeys.json"]).toBe('{"mine":1}');
   });
 

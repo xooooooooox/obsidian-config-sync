@@ -1688,7 +1688,7 @@ describe("pushExternal", () => {
     // The remote's own lock, byte-identical to the local one so the push skips it — a remote with
     // content and no lock is a refusal now, not a push target.
     const fw = fakeWriter({ "store.lock.json": '{"capturedAt":"t","groups":{}}', "store/gone.css": "stale" });
-    const results = await pushExternal(ctx, fw.writer, { skipRefs: [] });
+    const results = await pushExternal(ctx, fw.writer, { skipRefs: [], withheldPush: () => [] });
     expect(results.every((r) => r.status === "ok")).toBe(true);
     expect(fw.files["store/configdir/hotkeys.json"]).toBe('{"a":9}');
     expect(fw.files["store/gone.css"]).toBeUndefined();
@@ -1709,7 +1709,7 @@ describe("pushExternal", () => {
       "store.lock.json": '{"capturedAt":"t","groups":{}}', // the remote's bookkeeping, identical -> skipped
       "store/configdir/hotkeys.json": '{"a":1}', // identical to local -> must not be rewritten
     });
-    const results = await pushExternal(ctx, fw.writer, { skipRefs: [] });
+    const results = await pushExternal(ctx, fw.writer, { skipRefs: [], withheldPush: () => [] });
     expect(fw.writeLog).not.toContain("store/configdir/hotkeys.json");
     expect(fw.writeLog).toContain("store/configdir/snippets/one.css");
     const byGroup = Object.fromEntries(results.map((r) => [r.group, r.changes]));
@@ -1722,7 +1722,7 @@ describe("pushExternal", () => {
     io.seed({ "cs/store/configdir/hotkeys.json": "{}" });
     await seedGroups(ctx, '{"version":1,"groups":[]}');
     const fw = fakeWriter({});
-    const results = await pushExternal(ctx, fw.writer, { skipRefs: [] });
+    const results = await pushExternal(ctx, fw.writer, { skipRefs: [], withheldPush: () => [] });
     expect(fw.files["store/configdir/hotkeys.json"]).toBe("{}");
     expect(results.every((r) => r.status === "ok")).toBe(true);
   });
@@ -1732,7 +1732,7 @@ describe("pushExternal", () => {
     io.seed({ "cs/store.lock.json": '{"capturedAt":"t","groups":{}}' });
     await seedGroups(ctx, '{"version":1,"groups":[]}');
     const fw = fakeWriter({});
-    const results = await pushExternal(ctx, fw.writer, { skipRefs: [] });
+    const results = await pushExternal(ctx, fw.writer, { skipRefs: [], withheldPush: () => [] });
     // Semantics, not bytes: what a push sends is derived (derivedLock.ts), so a v1 local lock lands
     // over there re-keyed into the shape this build writes.
     const pushed = parseStoreLock(fw.files["store.lock.json"] ?? "");
@@ -1745,7 +1745,7 @@ describe("pushExternal", () => {
     const { ctx } = setup();
     await seedGroups(ctx, '{"version":1,"groups":[]}');
     const fw = fakeWriter({});
-    await expect(pushExternal(ctx, fw.writer, { skipRefs: [] })).rejects.toThrow("capture from this device");
+    await expect(pushExternal(ctx, fw.writer, { skipRefs: [], withheldPush: () => [] })).rejects.toThrow("capture from this device");
   });
 
   it("never writes a root config-sync.json, and excludes any lingering legacy manifest / migrated remnants from the push", async () => {
@@ -1757,7 +1757,7 @@ describe("pushExternal", () => {
     });
     await seedGroups(ctx, '{"version":1,"groups":[]}');
     const fw = fakeWriter({ "config-sync.json": "OLD-REMOTE" });
-    const results = await pushExternal(ctx, fw.writer, { skipRefs: [] });
+    const results = await pushExternal(ctx, fw.writer, { skipRefs: [], withheldPush: () => [] });
     expect(fw.files["config-sync.json"]).toBe("OLD-REMOTE"); // untouched: never written, never deleted
     expect(fw.files["config-sync.json.migrated-2026-01-01T00-00-00"]).toBeUndefined();
     expect(results.every((r) => r.status === "ok")).toBe(true);
@@ -1775,7 +1775,7 @@ describe("pushExternal", () => {
       "store.lock.json": '{"capturedAt":"t","groups":{}}', // identical to local -> skipped
       "store/configdir/plugins/config-sync/data.json": '{"theirs":true}',
     });
-    const results = await pushExternal(ctx, fw.writer, { skipRefs: [SELF_ITEM_REF] });
+    const results = await pushExternal(ctx, fw.writer, { skipRefs: [SELF_ITEM_REF], withheldPush: () => [] });
     expect(fw.files["store/configdir/plugins/config-sync/data.json"]).toBe('{"theirs":true}'); // untouched both ways
     expect(fw.files["store/configdir/hotkeys.json"]).toBe('{"a":1}');
     expect(results.every((r) => r.status === "ok")).toBe(true);
@@ -1807,7 +1807,7 @@ describe("pushExternal", () => {
       }),
       "store/configdir/plugins/config-sync/data.json": '{"theirs":true}',
     });
-    await pushExternal(ctx, fw.writer, { skipRefs: [SELF_ITEM_REF] });
+    await pushExternal(ctx, fw.writer, { skipRefs: [SELF_ITEM_REF], withheldPush: () => [] });
     const pushed = parseStoreLock(fw.files["store.lock.json"] ?? "");
     // Their content was never sent, so their entry still describes it.
     expect(pushed.items["community"]?.["config-sync"]?.hash).toBe("sha256:theirs");
@@ -1825,10 +1825,10 @@ describe("pushExternal", () => {
     });
     await seedGroups(ctx, '{"version":1,"groups":[]}');
     const fw = fakeWriter({ "store.lock.json": "{}", "store/configdir/hotkeys.json": '{"a":9}' });
-    await pushExternal(ctx, fw.writer, { skipRefs: [] });
+    await pushExternal(ctx, fw.writer, { skipRefs: [], withheldPush: () => [] });
     expect(fw.writeLog).toContain("store.lock.json");
     fw.writeLog.length = 0;
-    await pushExternal(ctx, fw.writer, { skipRefs: [] });
+    await pushExternal(ctx, fw.writer, { skipRefs: [], withheldPush: () => [] });
     expect(fw.writeLog).toEqual([]);
   });
 
@@ -1840,7 +1840,7 @@ describe("pushExternal", () => {
     });
     await seedGroups(ctx, '{"version":1,"groups":[]}');
     const fw = fakeWriter({ "store.lock.json": "not json at all" });
-    await pushExternal(ctx, fw.writer, { skipRefs: [] });
+    await pushExternal(ctx, fw.writer, { skipRefs: [], withheldPush: () => [] });
     expect(parseStoreLock(fw.files["store.lock.json"] ?? "").version).toBe(STORE_LOCK_VERSION);
   });
 });
@@ -3312,5 +3312,48 @@ describe("pull with per-key withholding", () => {
     expect(entry?.capturedAt).toBe(ctx.now());
     // What the entry SAYS about the item — where it came from — is still theirs to tell.
     expect(entry?.source).toEqual({ kind: "plugin", version: "9.9.9" });
+  });
+});
+
+// spec 2026-08-20-remote-direction-rules-design.md §3.2 / §3.6: a key that does not push with this
+// remote keeps whatever the far end already has — the store holds whole documents, so leaving the
+// key out would DELETE their value rather than preserve it.
+describe("push with per-key withholding", () => {
+  const RULES: RemoteItems = { community: { demo: { keys: { localOnly: { direction: "none" } } } } };
+  const MANIFEST_DEMO = JSON.stringify({
+    version: 1,
+    groups: [{ name: "plugin-demo", path: "{configDir}/plugins/demo/data.json", type: "file", devices: "all" }],
+  });
+  const REMOTE_REL = "store/configdir/plugins/demo/data.json";
+  const demoDoc = (theme: string, localOnly: string): string => JSON.stringify({ theme, localOnly }, null, 2) + "\n";
+
+  it("the far end keeps its own value for a withheld key, and everything else of ours lands", async () => {
+    const { io, ctx } = setup();
+    io.seed({
+      "cs/store.lock.json": JSON.stringify({ capturedAt: "t", items: { community: { demo: { ...pluginSource("1.0.0"), hash: "sha256:mine" } } }, version: 3 }),
+      "cs/store/configdir/plugins/demo/data.json": demoDoc("mine", "mine"),
+    });
+    await seedGroups(ctx, MANIFEST_DEMO);
+    const groups = await readGroups(ctx);
+    const fw = fakeWriter({
+      "store.lock.json": JSON.stringify({ capturedAt: "t", items: {}, version: 3 }),
+      [REMOTE_REL]: demoDoc("theirs", "theirs"),
+    });
+    await pushExternal(ctx, fw.writer, { skipRefs: [], withheldPush: withheldPatternPredicate(RULES, "push", groups) });
+    expect(JSON.parse(fw.files[REMOTE_REL] ?? "")).toEqual({ theme: "mine", localOnly: "theirs" });
+    // The bookkeeping we sent describes THAT file, not the one on this device.
+    const pushed = parseStoreLock(fw.files["store.lock.json"] ?? "");
+    expect(pushed.items["community"]?.["demo"]?.hash).not.toBe("sha256:mine");
+  });
+
+  it("writes nothing when only a withheld key differs", async () => {
+    const { io, ctx } = setup();
+    const lockRaw = JSON.stringify({ capturedAt: "t", items: { community: { demo: { ...pluginSource("1.0.0") } } }, version: 3 });
+    io.seed({ "cs/store.lock.json": lockRaw, "cs/store/configdir/plugins/demo/data.json": demoDoc("same", "mine") });
+    await seedGroups(ctx, MANIFEST_DEMO);
+    const groups = await readGroups(ctx);
+    const fw = fakeWriter({ "store.lock.json": lockRaw, [REMOTE_REL]: demoDoc("same", "theirs") });
+    await pushExternal(ctx, fw.writer, { skipRefs: [], withheldPush: withheldPatternPredicate(RULES, "push", groups) });
+    expect(fw.writeLog).not.toContain(REMOTE_REL);
   });
 });
