@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { itemDirection, keyDirection, refsBlockedFor, withItemDirection } from "../src/core/remoteRules";
+import { itemDirection, keyDirection, refsBlockedFor, withheldPatternsFor, withItemDirection } from "../src/core/remoteRules";
 import { directionFlows, intersectDirection, RemoteDirection, RemoteItems } from "../src/core/types";
 
 describe("directionFlows", () => {
@@ -106,5 +106,30 @@ describe("refsBlockedFor", () => {
 
   it("is empty when there are no rules", () => {
     expect(refsBlockedFor(undefined, "push")).toEqual([]);
+  });
+});
+
+describe("withheldPatternsFor", () => {
+  const KEYED: RemoteItems = {
+    community: {
+      dataview: { keys: { "*Token*": { direction: "none" }, defaultView: { direction: "push" } } },
+      "config-sync": { direction: "pull", keys: { passphrase: { direction: "both" } } },
+    },
+  };
+
+  it("names the keys that do not travel in the asked direction", () => {
+    expect(withheldPatternsFor(KEYED, "community/dataview", "pull").sort()).toEqual(["*Token*", "defaultView"]);
+    expect(withheldPatternsFor(KEYED, "community/dataview", "push")).toEqual(["*Token*"]);
+  });
+
+  it("intersects with the item's own direction, so a key can never travel further than its item", () => {
+    // The item is Pull only; the key says both ways, which resolves to pull — so a PUSH withholds it.
+    expect(withheldPatternsFor(KEYED, "community/config-sync", "push")).toEqual(["passphrase"]);
+    expect(withheldPatternsFor(KEYED, "community/config-sync", "pull")).toEqual([]);
+  });
+
+  it("has nothing to say about an item with no key rules", () => {
+    expect(withheldPatternsFor(KEYED, "obsidian/app", "pull")).toEqual([]);
+    expect(withheldPatternsFor(undefined, "community/dataview", "pull")).toEqual([]);
   });
 });

@@ -1,5 +1,5 @@
 import { keyMatchesAny } from "./sanitize";
-import { intersectDirection, ItemRef, parseItemRef, RemoteDirection, RemoteItemRule, RemoteItems } from "./types";
+import { directionFlows, intersectDirection, ItemRef, parseItemRef, RemoteDirection, RemoteItemRule, RemoteItems } from "./types";
 
 // THE reader for a remote's rules. Every consumer — the four transport seams, the panel, the
 // counting surfaces — asks here, so "what does this remote do with this item" has one answer.
@@ -72,4 +72,13 @@ export function refsBlockedFor(items: RemoteItems | undefined, dir: "push" | "pu
     }
   }
   return out;
+}
+
+// The key patterns this remote does NOT let travel in the asked direction. The pattern IS the key as
+// far as a rule is concerned, so the answer comes from `keyDirection` above — already intersected
+// with the item's own direction, because a key can never travel further than the item it lives in.
+export function withheldPatternsFor(items: RemoteItems | undefined, ref: ItemRef, dir: "push" | "pull"): string[] {
+  const keys = ruleFor(items, ref)?.keys;
+  if (keys === undefined) return [];
+  return Object.keys(keys).filter((pattern) => !directionFlows(keyDirection(items, ref, pattern))[dir]);
 }
