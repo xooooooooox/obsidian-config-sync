@@ -708,12 +708,24 @@ noted):
   `locked` state the device relation already gives such an item (one word for one thing); only the
   relation's copy table differs — `Can't compare` here against the device side's placement under
   `No settings yet` — with the fold line `N items can't be compared` and its own filter pill. The
-  row keeps the device relation's approved sentence verbatim (`Encrypted — set the passphrase in
-  settings to compare`), is never stageable, and counts in NEITHER direction: a bucket, not a
+  row is never stageable and counts in NEITHER direction: a bucket, not a
   to-do. Its card shows no `Files` row (nothing was verified, so there is nothing to list) and
-  answers in `State`: `This item is encrypted and this device has no passphrase, so its two copies
-  can't be compared.` followed by the link into Settings → General's `Passphrase` row
-  (`general-passphrase`). An item the remote holds no copy of yet is NOT this state — it is an
+  answers in `State` with a way-out link. WHOSE key failed decides everything downstream, and the
+  comparison says which (`uncomparable`'s `here`/`there`). `here` — this device's own passphrase —
+  keeps the device relation's approved sentence verbatim on the row (`Encrypted — set the
+  passphrase in settings to compare`), the card clause `This item is encrypted and this device has
+  no passphrase, so its two copies can't be compared.`, and links into Settings → General's
+  `Passphrase` row (`general-passphrase`). `there` — the remote's copies do not open under any key
+  we hold — reads `Can't read this remote's copy` on the row, and the card clause splits once more
+  on whether that remote carries its own `Passphrase` entry (uncomparableClause, copy-final):
+  `<remote>'s copy is encrypted with a different passphrase.` when none is configured, or
+  `The passphrase saved for <remote> doesn't open its copy.` when one is — both linking into that
+  remote's own editor row (Settings → Remotes, anchor `remote-<name>`), never into General, because
+  a sentence naming one problem must not link to the other one's fix. The remote editor's
+  `Passphrase` row itself is the token picker verbatim — same keychain-backed `SecretComponent`,
+  same conditional status line, same reserved-name guard — and sits OUTSIDE the type branches: a
+  vault remote's store can be encrypted just as a git one's can.
+  An item the remote holds no copy of yet is NOT this state — it is an
   ordinary `To push` row, because whether a passphrase opens something is only knowable by trying
   it on something.
   The two on/off carriers, which are never rows under the device relation (they dissolve into the
