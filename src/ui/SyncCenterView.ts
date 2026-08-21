@@ -50,6 +50,9 @@ import {
   fateBucketCounts,
   FateBucketCounts,
   nonePresented,
+  LOCKED_HERE_SENTENCE,
+  LOCKED_THERE_SENTENCE,
+  uncomparableClause,
   fileEntryFor,
   filesChangeLabel,
   foldCompanionEntries,
@@ -272,13 +275,14 @@ const sessionUi = {
   availabilityOpen: new Set<string>(),
 };
 
-// The one fate an encrypted item wears when this device has no passphrase for it — the same
-// sentence under BOTH relations, because it is the same fact said to the same person. What differs
-// is only where the row is filed and what the bucket is called (relationCopy).
-function lockedFate(): Fate {
+// The one fate an unreadable encrypted item wears. The sentence is the caller's because it is the
+// one thing the two causes do not share: this device's own passphrase missing (both relations) and
+// the remote's copy not opening under any key we hold (remote relation only) are different facts
+// told to the same person — everything else about the row is identical.
+function lockedFate(sentence: string): Fate {
   return {
     glyph: "—",
-    sentence: "Encrypted — set the passphrase in settings to compare",
+    sentence,
     chips: ["encrypted"],
     stageable: false,
     turnsOn: false,
@@ -442,6 +446,9 @@ export interface SyncCenterHost {
   // Settings → General, landing on one row. The `Can't compare` card's way out (spec 3.8): the
   // passphrase it asks for belongs to the vault, not to the item the reader is looking at.
   openSettingsGeneral(anchorId: string): void;
+  // Settings → Remotes, landing on one remote's editor — the way out when it is THAT remote's
+  // passphrase that fails, not this device's own.
+  openSettingsRemote(name: string): void;
   // The item a compiled group belongs to — a registry LOOKUP, never a parse of the group name
   // (the `plugin-` prefix is not a parser). null for a group no item owns.
   itemRefForGroup(name: string): ItemRef | null;
@@ -1045,6 +1052,7 @@ export class SyncCenterView extends ItemView {
     // own four-stop rule is still its own, but a rule about which way a thing may travel says
     // nothing about whether we could read it.
     const unreadable = state === "locked";
+    const unreadableSide = this.host.remoteCheck(remoteName)?.check.uncomparable[ref ?? ""] ?? "here";
     const direction: Direction | null = excluded ? null : state === "store-newer" ? "apply" : state === "local-changed" ? "capture" : null;
     const input: FateInput = {
       direction,
@@ -1068,7 +1076,7 @@ export class SyncCenterView extends ItemView {
       encrypted: isWholeFileEncrypted(r.group),
     };
     const fate: Fate = unreadable
-      ? lockedFate()
+      ? lockedFate(unreadableSide === "here" ? LOCKED_HERE_SENTENCE : LOCKED_THERE_SENTENCE)
       : {
           glyph: direction === "apply" ? "↓" : direction === "capture" ? "↑" : "—",
           sentence: excluded
@@ -1095,7 +1103,7 @@ export class SyncCenterView extends ItemView {
     const rollup = this.computeFamilyRollup(r);
     const input = this.computeFateInput(r, rollup);
     const locked = this.presState(r) === "locked";
-    const fate: Fate = locked ? lockedFate() : rowFate(input);
+    const fate: Fate = locked ? lockedFate(LOCKED_HERE_SENTENCE) : rowFate(input);
     const bucket: RowBucket = locked ? legacyLockedFamilyBucket(rollup.state) : fateBucket(fate);
     return { rollup, input, fate, bucket };
   }
@@ -3180,13 +3188,19 @@ export class SyncCenterView extends ItemView {
     this.renderCardKeyRow(fields, dirLabel, (value) => {
       value.createDiv({ cls: "config-sync-expand-note", text: this.stateClauseText(r, fate, input) });
       // The one state whose card ends in a way out rather than a description: the reader is one
-      // passphrase away from an answer, and the row that takes it is in General, not on this card.
-      if (unreadable) {
-        const link = value.createEl("a", { cls: "config-sync-card-link", text: "Set it in Settings → General", href: "#" });
+      // passphrase away from an answer. WHOSE passphrase decides where the link goes — this
+      // device's own lives in General, the remote's lives on that remote's own settings row — and
+      // a sentence naming one problem must never link to the other one's fix.
+      if (unreadable && r.remote !== undefined) {
+        const side = this.host.remoteCheck(r.remote)?.check.uncomparable[this.itemRefFor(r.group.name) ?? r.group.ref ?? ""] ?? "here";
+        const text = side === "here" ? "Set it in Settings → General" : "Set it in Settings → Remotes";
+        const link = value.createEl("a", { cls: "config-sync-card-link", text, href: "#" });
         setIcon(link.createSpan({ cls: "config-sync-card-link-ic" }), "external-link");
+        const remoteName = r.remote;
         link.addEventListener("click", (e) => {
           e.preventDefault();
-          this.host.openSettingsGeneral(PASSPHRASE_ANCHOR_ID);
+          if (side === "here") this.host.openSettingsGeneral(PASSPHRASE_ANCHOR_ID);
+          else this.host.openSettingsRemote(remoteName);
         });
       }
     });
@@ -3599,9 +3613,14 @@ export class SyncCenterView extends ItemView {
       // the way this remote does not. The list stays quiet about that; the card is where it answers.
       if (r.remote !== undefined) {
         // Nothing was compared, so the card says exactly that and no more — a difference count
-        // here would describe files nobody read (spec 3.8).
+        // here would describe files nobody read (spec 3.8). Which of the three sayings depends on
+        // whose key failed and whether this remote carries its own (uncomparableClause).
         if (r.status.state === "locked") {
-          return "This item is encrypted and this device has no passphrase, so its two copies can't be compared.";
+          return uncomparableClause({
+            side: this.host.remoteCheck(r.remote)?.check.uncomparable[this.itemRefFor(r.group.name) ?? r.group.ref ?? ""] ?? "here",
+            remote: r.remote,
+            configured: this.host.remotes().find((x) => x.name === r.remote)?.passphraseId !== undefined,
+          });
         }
         const changed = r.status.changes === undefined ? 0 : this.folderChangeCount(r.status.changes);
         if (changed > 0 && !input.excludedHere) return withheldChangeClause(r.remote, changed);

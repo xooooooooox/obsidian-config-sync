@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { capFileEntries, insyncLineText, excludedLineText, statusBarStatuses, moreFilesText, filesChangeLabel, visibleUnderFilter, leftoverPresentation, fateBucket, fateBucketCounts, nonePresented, partitionSection, legacyLockedFamilyBucket, RowBucket, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, runProgressLabel, showColdStartBanner, enablementCarrierFor, carrierIsSynced, TYPE_SECTION_TITLES, typeSectionForRow, sectionCountLabel, widestCountDigits, unifiedFooterSummary, fileEntryFor, stagedPayload, StageableRow, effectiveFate, onOffFlips, onOffNarrationLines, familyRollup, FamilyMember, mergeFamilyChanges, foldCompanionEntries, groupExcludedHere, CAPTURE_ADDED_TOOLTIP, CAPTURE_UPDATED_TOOLTIP, CAPTURE_DELETED_TOOLTIP, APPLY_ADDED_TOOLTIP, APPLY_UPDATED_TOOLTIP, APPLY_DELETED_TOOLTIP, keysRowModel, withheldKeysClause } from "../src/ui/panelModel";
+import { capFileEntries, insyncLineText, excludedLineText, statusBarStatuses, moreFilesText, filesChangeLabel, visibleUnderFilter, leftoverPresentation, fateBucket, fateBucketCounts, nonePresented, partitionSection, legacyLockedFamilyBucket, RowBucket, directionForState, effectiveDirection, matchesSearch, nosettingsLineText, defaultPolicy, isValidPolicy, policyOptions, presentedState, sectionForItem, stageableRow, stageableState, runProgressLabel, showColdStartBanner, enablementCarrierFor, carrierIsSynced, TYPE_SECTION_TITLES, typeSectionForRow, sectionCountLabel, widestCountDigits, unifiedFooterSummary, fileEntryFor, stagedPayload, StageableRow, effectiveFate, onOffFlips, onOffNarrationLines, familyRollup, FamilyMember, mergeFamilyChanges, foldCompanionEntries, groupExcludedHere, CAPTURE_ADDED_TOOLTIP, CAPTURE_UPDATED_TOOLTIP, CAPTURE_DELETED_TOOLTIP, APPLY_ADDED_TOOLTIP, APPLY_UPDATED_TOOLTIP, APPLY_DELETED_TOOLTIP, keysRowModel, withheldKeysClause, uncomparableClause } from "../src/ui/panelModel";
 import { GroupState, GroupStatus, RemoteDiffEntry, RemoteDiffFile } from "../src/core/status";
 import { FileChanges, SyncGroup, EVERYWHERE, perClass } from "../src/core/types";
 import { Availability } from "../src/core/availability";
@@ -1319,6 +1319,26 @@ describe("withheldKeysClause", () => {
     );
     expect(withheldKeysClause({ remote: "main", item: "Appearance", direction: "pull", keys: ["a", "b"] })).toBe(
       "Takes this remote's Appearance. a and b keep your values."
+    );
+  });
+});
+
+describe("uncomparableClause — the three sayings, apart", () => {
+  it("speaks for this device when its own passphrase is the missing one", () => {
+    expect(uncomparableClause({ side: "here", remote: "work-vault", configured: false })).toBe(
+      "This item is encrypted and this device has no passphrase, so its two copies can't be compared."
+    );
+  });
+
+  it("names the mismatch when no key was ever configured for the remote", () => {
+    expect(uncomparableClause({ side: "there", remote: "work-vault", configured: false })).toBe(
+      "work-vault's copy is encrypted with a different passphrase."
+    );
+  });
+
+  it("blames the saved key when one was configured and still does not open the copy", () => {
+    expect(uncomparableClause({ side: "there", remote: "work-vault", configured: true })).toBe(
+      "The passphrase saved for work-vault doesn't open its copy."
     );
   });
 });

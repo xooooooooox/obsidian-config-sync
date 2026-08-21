@@ -865,7 +865,8 @@ export default class ConfigSyncPlugin extends Plugin {
       itemFileSharingMenuLegal: (ref) => this.itemFileSharingMenuLegal(ref),
       setItemFileSharing: (ref, sharing) => this.setItemFileSharing(ref, sharing),
       openSettingsAt: (ref, spot) => this.openSettingsAt(ref, spot),
-      openSettingsGeneral: (anchorId) => this.openSettingsGeneral(anchorId),
+      openSettingsGeneral: (anchorId) => this.openSettingsPanel("general", anchorId),
+      openSettingsRemote: (name) => this.openSettingsPanel("sources", `remote-${name}`),
       itemRefForGroup: (name) => this.itemRefForGroup(name),
       schemaStop: () => this.schemaStop,
       settingsWritable: () => this.settingsWritable(),
@@ -1885,21 +1886,21 @@ export default class ConfigSyncPlugin extends Plugin {
 
   // SettingsHost-facing read-and-clear: the settings tab calls this once per display() so a
   // pending deep link is consumed exactly once per Settings open.
-  private pendingGeneralAnchor: string | null = null;
+  private pendingPanelAnchor: { tab: "general" | "sources"; anchorId: string } | null = null;
 
-  private openSettingsGeneral(anchorId: string): void {
-    this.pendingGeneralAnchor = anchorId;
-    // display() opens on the General tab by default, so the anchor alone is the whole instruction;
-    // the modal dance below is the same one openSettingsAt documents in full.
+  // The modal dance is the same one openSettingsAt documents in full; only the destination
+  // differs — a panel row rather than an item's card.
+  private openSettingsPanel(tab: "general" | "sources", anchorId: string): void {
+    this.pendingPanelAnchor = { tab, anchorId };
     const app = this.app as unknown as AppWithSetting;
     const alreadyActive = app.setting.activeTab?.id === this.manifest.id;
     app.setting.open();
     if (alreadyActive || app.setting.activeTab?.id !== this.manifest.id) app.setting.openTabById(this.manifest.id);
   }
 
-  consumePendingGeneralAnchor(): string | null {
-    const anchor = this.pendingGeneralAnchor;
-    this.pendingGeneralAnchor = null;
+  consumePendingPanelAnchor(): { tab: "general" | "sources"; anchorId: string } | null {
+    const anchor = this.pendingPanelAnchor;
+    this.pendingPanelAnchor = null;
     return anchor;
   }
 

@@ -46,7 +46,7 @@ function tabFor(pending: SettingsDeepLink | null): AnchorTab {
     installedPluginIds: () => defs.filter((d) => d.groupName.startsWith("plugin-")).map((d) => d.id),
     remotes: [],
     consumePendingSettingsAnchor: () => pending,
-    consumePendingGeneralAnchor: () => null,
+    consumePendingPanelAnchor: () => null,
   };
   const tab = new ConfigSyncSettingTab({} as never, host as never);
   const priv = tab as unknown as AnchorTab;

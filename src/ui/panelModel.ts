@@ -996,6 +996,27 @@ export function relationCopy(r: PanelRelation): RelationCopy {
   };
 }
 
+// The locked row's sentence, per side. "here" is the device relation's long-standing copy, shared
+// verbatim under a remote when it is this device's own passphrase that is missing. "there" must NOT
+// reuse it: this device is unlocked, and telling its user to set a passphrase they already set
+// would be wrong in the one place the row gets to say anything.
+export const LOCKED_HERE_SENTENCE = "Encrypted — set the passphrase in settings to compare";
+export const LOCKED_THERE_SENTENCE = "Can't read this remote's copy";
+
+// The `Can't compare` card's State clause (spec 3.8's three sayings, verbatim). Which side could
+// not be opened comes from the comparison; whether this remote has its OWN key configured comes
+// from settings — the cross of the two is the sentence, and none of the three guesses anything:
+// with no key configured the copies provably answer to different passphrases, and with one
+// configured the copy provably does not open under it.
+export function uncomparableClause(input: { side: "here" | "there"; remote: string; configured: boolean }): string {
+  if (input.side === "here") {
+    return "This item is encrypted and this device has no passphrase, so its two copies can't be compared.";
+  }
+  return input.configured
+    ? `The passphrase saved for ${input.remote} doesn't open its copy.`
+    : `${input.remote}'s copy is encrypted with a different passphrase.`;
+}
+
 // The card's answer for a row the LIST keeps quiet about (spec 3.3's accepted cost, paid back by
 // 5.4): the remote edited an item that only travels the other way. The row reads as in sync because
 // there is nothing to do; the card says what moved over there, and why it stays there.

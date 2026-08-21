@@ -224,9 +224,10 @@ export interface SettingsHost extends Plugin {
   // null on a normal Settings open, else the item ref whose card render() should expand and
   // scroll to once, this open only.
   consumePendingSettingsAnchor(): SettingsDeepLink | null;
-  // The same bridge for a GENERAL setting rather than an item's card: the Sync Center's
-  // `Can't compare` card sends the reader to the Passphrase row, which belongs to no item.
-  consumePendingGeneralAnchor(): string | null;
+  // The same bridge for a row that belongs to no item's card: General's Passphrase row, or one
+  // remote's editor — the Sync Center's `Can't compare` card sends the reader to whichever of the
+  // two holds the key that failed.
+  consumePendingPanelAnchor(): { tab: "general" | "sources"; anchorId: string } | null;
   // Basenames (no extension) of .css files actually present under the vault's snippets/ folder —
   // feeds the Appearance card's snippets companion member rows.
   listSnippetFiles(): Promise<string[]>;
@@ -698,10 +699,13 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   // place the config exists. Returned anchorId feeds highlightAnchor once display()'s render
   // settles — the caller never scrolls itself.
   private consumeSettingsAnchor(): string | null {
-    // A General row needs no tab decision and no card to expand — display() already opens there —
-    // so it is answered before the item machinery below, which would only try to parse it as a ref.
-    const general = this.host.consumePendingGeneralAnchor();
-    if (general !== null) return general;
+    // A panel row needs no card to expand, only its tab — so it is answered before the item
+    // machinery below, which would only try to parse it as a ref.
+    const panel = this.host.consumePendingPanelAnchor();
+    if (panel !== null) {
+      this.activeTab = panel.tab;
+      return panel.anchorId;
+    }
     const link = this.host.consumePendingSettingsAnchor();
     if (link === null) return null;
     const { ref, spot } = link;
