@@ -19,6 +19,7 @@ describe("FATE_CHIP_ICON — chip→icon map completeness", () => {
     "on here — your rule",
     "stays off",
     "encrypted",
+    "encrypted keys",
     "your choice",
     "push only",
     "pull only",
@@ -40,6 +41,10 @@ describe("FATE_CHIP_ICON — chip→icon map completeness", () => {
       //) — a chip that says the row stays off must not share it.
       "stays off": "power-off",
       encrypted: "lock",
+      // `file-key`, deliberately not the spec's `key-round`: that glyph already carries "locked /
+      // can't compare" on this panel, and this very test's collision guard is the reason one
+      // glyph never carries two meanings.
+      "encrypted keys": "file-key",
       "your choice": "check",
       // The remote relation's three direction chips share the transport's own glyphs.
       "push only": "cloud-upload",

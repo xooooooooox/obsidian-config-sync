@@ -254,6 +254,18 @@ describe("rowFate — optedOutHere suppresses the local-exception chips", () => 
     const f = rowFate({ ...base, direction: null, optedOutHere: true, localException: "off", encrypted: true, desktopOnly: true });
     expect(f.chips).toEqual(["desktop only", "your rule", "encrypted"]); // exact set, in buildChips's fixed emit order
   });
+
+  // spec 2.3's two shapes of encryption, told apart on the row: a whole-file item is one sealed
+  // envelope, a field-level one is a plain document with some encrypted values — different facts,
+  // different chips. Mutually exclusive by manifest validation, so no row ever wears both.
+  it("gives a field-level-encrypted item its own chip, distinct from the whole-file one", () => {
+    const fields = rowFate({ ...base, direction: null, encryptedKeys: true });
+    expect(fields.chips).toContain("encrypted keys");
+    expect(fields.chips).not.toContain("encrypted");
+    const whole = rowFate({ ...base, direction: null, encrypted: true });
+    expect(whole.chips).toContain("encrypted");
+    expect(whole.chips).not.toContain("encrypted keys");
+  });
 });
 
 // Class exclusion (excludedHere) keeps its direction-null-only precedence — unlike opt-out: a

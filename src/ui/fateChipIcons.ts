@@ -15,6 +15,11 @@ export const FATE_CHIP_ICON: Record<string, string> = {
   // that says the row stays OFF cannot keep the same glyph — one form, one meaning.
   "stays off": "power-off",
   encrypted: "lock",
+  // spec 2.3's OTHER shape: a plain document with some encrypted values. `file-key`, not the
+  // spec's suggested `key-round` — that glyph already means "locked / can't compare" on this very
+  // panel (FOLD_ICON.locked, the state icon), and the collision guard's whole point is that one
+  // glyph carries one meaning.
+  "encrypted keys": "file-key",
   "your choice": "check",
   // The remote relation's direction chips (spec 5.3: a chip appears only off the default stop).
   // Same two glyphs the Pull/Push buttons and the View picker badges use (ACTION_ICON) — one form,

@@ -73,7 +73,12 @@ export interface FateInput {
                                             // settings — join, don't replace
   folderFileCount: number | null;        // non-null → contributes "…N files" (replace for a
                                           // folder row, join for any other row with companions)
-  encrypted: boolean;
+  encrypted: boolean;                    // WHOLE-FILE encrypted — one sealed envelope in the store
+  encryptedKeys?: boolean;               // FIELD-LEVEL encrypted — a plain document, some values
+                                          // ciphertext (spec 2.3's other shape; exclusive with
+                                          // `encrypted` by manifest validation). Optional so a
+                                          // FateInput literal without it reads as "no encrypted
+                                          // fields" — optedOutHere's precedent.
 }
 
 export interface Fate {
@@ -130,6 +135,7 @@ function buildChips(i: FateInput): string[] {
     else if (i.localException === "on") chips.push("on here — your rule");
   }
   if (i.encrypted) chips.push("encrypted");
+  else if (i.encryptedKeys === true) chips.push("encrypted keys");
   return chips;
 }
 

@@ -32,7 +32,7 @@ import { Availability } from "../core/availability";
 import { REUSE_MAX_AGE_MS } from "../external/readerCache";
 import { remoteRowStatuses, skipRefsForSelection } from "../core/remoteRows";
 import { PASSPHRASE_ANCHOR_ID } from "./SettingTab";
-import { isWholeFileEncrypted } from "../core/modes";
+import { groupNeedsPassphrase, isWholeFileEncrypted } from "../core/modes";
 import { classifyRemoteFailure } from "../core/remoteFailure";
 import { GroupDisplayParts } from "../core/registry";
 import {
@@ -278,17 +278,26 @@ const sessionUi = {
 // The one fate an unreadable encrypted item wears. The sentence is the caller's because it is the
 // one thing the two causes do not share: this device's own passphrase missing (both relations) and
 // the remote's copy not opening under any key we hold (remote relation only) are different facts
-// told to the same person — everything else about the row is identical.
-function lockedFate(sentence: string): Fate {
+// told to the same person. The chip is the caller's too — a locked item is still one of the two
+// shapes of encryption (spec 2.3), and its row wears the same mark it would wear unlocked.
+function lockedFate(sentence: string, chip: "encrypted" | "encrypted keys"): Fate {
   return {
     glyph: "—",
     sentence,
-    chips: ["encrypted"],
+    chips: [chip],
     stageable: false,
     turnsOn: false,
     nothingYet: false,
     excluded: false,
   };
+}
+
+// Which of spec 2.3's two encryption chips this item's row wears, if either: `encrypted` = one
+// sealed envelope, `encrypted keys` = a plain document with some encrypted values. Exclusive by
+// manifest validation.
+function encryptionChip(group: SyncGroup): "encrypted" | "encrypted keys" | null {
+  if (isWholeFileEncrypted(group)) return "encrypted";
+  return groupNeedsPassphrase(group) ? "encrypted keys" : null;
 }
 
 // Escalating "less this device can do about it": a version away, a switch away, an install away,
@@ -1074,9 +1083,10 @@ export class SyncCenterView extends ItemView {
       special: r.group.type === "folder" ? "folder" : null,
       folderFileCount: r.status.changes !== undefined ? this.folderChangeCount(r.status.changes) : null,
       encrypted: isWholeFileEncrypted(r.group),
+      encryptedKeys: encryptionChip(r.group) === "encrypted keys",
     };
     const fate: Fate = unreadable
-      ? lockedFate(unreadableSide === "here" ? LOCKED_HERE_SENTENCE : LOCKED_THERE_SENTENCE)
+      ? lockedFate(unreadableSide === "here" ? LOCKED_HERE_SENTENCE : LOCKED_THERE_SENTENCE, encryptionChip(r.group) ?? "encrypted")
       : {
           glyph: direction === "apply" ? "↓" : direction === "capture" ? "↑" : "—",
           sentence: excluded
@@ -1103,7 +1113,7 @@ export class SyncCenterView extends ItemView {
     const rollup = this.computeFamilyRollup(r);
     const input = this.computeFateInput(r, rollup);
     const locked = this.presState(r) === "locked";
-    const fate: Fate = locked ? lockedFate(LOCKED_HERE_SENTENCE) : rowFate(input);
+    const fate: Fate = locked ? lockedFate(LOCKED_HERE_SENTENCE, encryptionChip(r.group) ?? "encrypted") : rowFate(input);
     const bucket: RowBucket = locked ? legacyLockedFamilyBucket(rollup.state) : fateBucket(fate);
     return { rollup, input, fate, bucket };
   }
@@ -1350,6 +1360,7 @@ export class SyncCenterView extends ItemView {
             ? rollupFiles
             : null,
       encrypted: isWholeFileEncrypted(r.group),
+      encryptedKeys: encryptionChip(r.group) === "encrypted keys",
     };
   }
 
