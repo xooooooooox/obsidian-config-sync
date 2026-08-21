@@ -211,7 +211,11 @@ the card's mode chip was removed.)
 `lock-open` the encrypt toggle's rest state (unencrypted-but-available — a closed lock
 there reads as already-encrypted; closed `lock` is the ENCRYPTED state everywhere, toggle
 on-state and pure state markers alike) ·
-`key-round` locked state · `chevron-down/right` settings rows · `x` clear/remove ·
+`key-round` locked state · `file-key` the field-level-encrypted chip (spec 2.3's other
+shape: a plain document with some encrypted values — chip text `encrypted keys`, exclusive with
+the whole-file `encrypted`/`lock` chip by manifest validation; deliberately NOT the spec's
+suggested `key-round`, which already carries "locked / can't compare" on the same panel, and one
+glyph carries one meaning) · `chevron-down/right` settings rows · `x` clear/remove ·
 `trash` delete · `folder-open` browse · `rotate-cw` BRAT re-scan · `arrow-up-from-line` /
 `arrow-down-to-line` / `cloud-upload` / `cloud-download` sync-action icons (the first two
 double as the self-pane title's capture/coldstart states, with `alert-triangle` both and

@@ -540,7 +540,11 @@ functions.
 - `core/keyWithholding.ts` — the content side of a per-key rule. `withheldPatternPredicate(items,
   dir, ...groupLists)` answers, per store rel, which key patterns do not travel that way — shaped
   like `skipRelPredicate` because it is the same question one level down, and answering only for a
-  **file item's JSON copy** (a folder travels whole, and so does a file with no keys in it).
+  **file item's JSON copy** (a folder travels whole, and so does a file with no keys in it). A
+  whole-file-encrypted item is refused too, and the `.json` suffix cannot be trusted to do it: an
+  envelope is JSON as well, so a stored rule for one of these would send `overlayWithheld` off to
+  "withhold" the envelope's own salt/iv/ct keys. The panel offers no way to write such a rule; the
+  gate is for the roads that do not go through the panel.
   `core/remoteRules.ts` owns the two writers and the stop list: `withItemDirection` /
   `withKeyDirection` (the default is never stored, an entry carrying nothing else is removed) and
   `keyStopsWithin(item)`, the stops a KEY may be set to under an item with that direction — a menu
