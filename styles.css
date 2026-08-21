@@ -2068,12 +2068,6 @@ body.is-mobile .config-sync-row-last.config-sync-hub-row {
 .config-sync-remote-flip-value {
   color: var(--text-normal);
 }
-.config-sync-remote-selfnote {
-  color: var(--text-faint);
-  font-size: var(--font-ui-smaller);
-  font-style: italic;
-  margin-top: 8px;
-}
 
 .config-sync-required {
   color: var(--color-red);

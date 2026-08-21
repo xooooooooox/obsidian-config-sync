@@ -2,7 +2,7 @@ import { App, ButtonComponent, ItemView, Menu, Modal, Platform, WorkspaceLeaf, s
 import { ApplyItem, CaptureItem, orderInstallsCatalogFirst, ProgressFn, StateAction } from "../core/ConfigSyncCore";
 import { lockRefFor, refItemId } from "../core/itemKeys";
 import { GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry, RemoteDiffFile, sumRemoteItemCounts } from "../core/status";
-import { SECTION_LABELS, findGroupByName, SELF_GROUP_NAME, SELF_ITEM_REF, sectionForGroup, communityGroupName } from "../core/catalog";
+import { SECTION_LABELS, findGroupByName, SELF_GROUP_NAME, sectionForGroup, communityGroupName } from "../core/catalog";
 import { itemDirection } from "../core/remoteRules";
 import { EVERYWHERE, FileChanges, FileSharing, GroupResult, hasChanges, ItemRef, Remote, Sharing, SyncGroup, StorageSection } from "../core/types";
 import { DeviceElementState } from "../core/deviceElements";
@@ -152,10 +152,6 @@ import {
 // cannot withhold it from a run (see renderRemoteActionBar): the transport's skip list speaks refs.
 function remoteOnlyGroup(name: string): SyncGroup {
   return { name, path: "", type: "file", devices: "all" };
-}
-
-function selfStaysOut(remote: Remote): boolean {
-  return itemDirection(remote.items, SELF_ITEM_REF) === "none";
 }
 
 export function syncTypeValue(g: SyncGroup): "file" | "folder" {
@@ -1077,11 +1073,12 @@ export class SyncCenterView extends ItemView {
     // them out of the device list — one row per family under either relation.
     const folded = foldCompanionEntries(result.entries, (g) => this.host.companionParentOf(g));
     const flow = remoteFlowFor(this.host.remoteCheck(name)?.check.state ?? "unknown");
-    // config-sync's own item keeps its device-relation face (the pinned self row) for now; its
-    // remote face — an ordinary, settable row — is Plan 2c's.
-    const localGroupNames = this.familyGroups().map((g) => g.name).filter((n) => n !== SELF_GROUP_NAME);
+    // config-sync's own item is an ordinary row HERE (spec 5.6): the store's copy of it travels to a
+    // remote like any other item, with its own direction and its own checkbox. Under the device
+    // relation it stays the pinned self row instead — there it is the plugin managing itself, which
+    // is not batch work and has its own sidebar destination.
+    const localGroupNames = this.familyGroups().map((g) => g.name);
     return remoteRowStatuses({ entries: folded, flow, localGroupNames })
-      .filter((status) => status.group !== SELF_GROUP_NAME)
       .map((status) => ({ group: findGroupByName(this.groups, status.group) ?? remoteOnlyGroup(status.group), status, remote: name }));
   }
 
@@ -2446,14 +2443,6 @@ export class SyncCenterView extends ItemView {
     renderPills();
     renderSectionsBody();
     this.wireGlobalSelectAll(selectAll, pillPool);
-    // Until 2c gives config-sync's own item its remote face, this note is the only thing that says
-    // the item is held back from this remote — the list itself has no row for it.
-    if (relation.kind === "remote") {
-      const remote = this.host.remotes().find((x) => x.name === relation.name);
-      if (remote !== undefined && selfStaysOut(remote)) {
-        main.createDiv({ cls: "config-sync-remote-selfnote", text: "Config Sync's own settings stay out of this remote" });
-      }
-    }
 
     // The compact search co-renders everything except its own input element, so the soft
     // keyboard stays open while pills, sections and select-all track the search.
