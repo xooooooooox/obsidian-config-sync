@@ -56,9 +56,10 @@ functions.
 **Engine & context**
 - `core/ConfigSyncCore.ts` — the engine and its interfaces: `capture`, `apply`,
   `applyWithActions`, `captureWithActions`, `planImport`/`applyImport`,
-  `pushExternal`. `planImport(ctx, reader, opts: { skipRefs: ItemRef[] })` and
-  `pushExternal(ctx, writer, opts: { skipRefs: ItemRef[] })` both take an explicit options param
-  (no default). `skipRefs` is a set of ItemRefs — the items that do not travel in that direction with
+  `pushExternal`. `planImport(ctx, reader, opts: { skipRefs, withheldPull })` and
+  `pushExternal(ctx, writer, opts: { skipRefs, withheldPush })` both take an explicit options param
+  (no default) — the second field is the per-rel key predicate below, and a caller with no rules to
+  apply says so in as many words. `skipRefs` is a set of ItemRefs — the items that do not travel in that direction with
   that remote, computed by `core/remoteRules.ts`'s `refsBlockedFor(remote.items, "pull" | "push")`.
   `skipRelPredicate(skipRefs, ...groupLists)` turns it into a per-rel test: a rel belongs to a skipped
   item when its owning group's ref (`resolveGroupByStoreRel`) is in the list, with
@@ -73,7 +74,18 @@ functions.
   the bookkeeping that lands over there describes what actually landed. Skipping content while
   pushing the lock anyway was a live defect, not a gap: a remote with `excludeSelf` (now the self
   item's `Neither way`) got our entry for the very copy we had refused to send, and every four-stop
-  rule after it inherited the same error. `remoteGroupsFrom(ctx, reader,
+  rule after it inherited the same error.
+  **One level down, a key can stay behind while its item travels** (`core/keyWithholding.ts`).
+  `planImport` puts the MERGED content into the plan rather than the remote's — the planner
+  describes what a pull would write, and that is what it would write; it also settles the comparison
+  for free, since a file whose only difference is a withheld key now equals ours. The items it
+  rewrote ride the `PendingPull` as `mergedRefs`, because their content is a hybrid neither side's
+  lock entry describes: `applyImport` seeds their entry from the remote's (where the item came from
+  is still theirs to tell) and lets the restamp pass replace the two fields that describe CONTENT.
+  `pushExternal` reads the far end's copy — which it already did for the skip-if-identical test —
+  and lays ours over it, so **a withheld key keeps their value rather than being deleted**: the
+  store holds whole documents, not patches, so leaving the key out would make their next Apply drop
+  it from their live config. `remoteGroupsFrom(ctx, reader,
   files)` resolves the remote's sync list from its self store copy — schema v1 copies carry a
   compiled `groups` array; v3 copies carry nested `items` and compile through the injected
   `CoreContext.storeListGroups` hook (main.ts wires `storeSelfCopyGroups` with the plugin's
@@ -475,7 +487,21 @@ functions.
   reason: only a pull moves it, and our push is not their pull. Unknown keys are carried from both
   sides, theirs winning a collision, because the file describes their store. **No new format** — the
   result is a `store.lock.json`, field for field, so `store-lock.schema.json` is untouched; only the
-  values are computed. The local lock is never written by a push.
+  values are computed. The local lock is never written by a push. An item whose content the push
+  REWROTE (below) is refingerprinted from the bytes that went out, through `rewrittenHashes` — ours
+  would describe a file only this device holds.
+- `core/keyWithholding.ts` — the content side of a per-key rule. `withheldPatternPredicate(items,
+  dir, ...groupLists)` answers, per store rel, which key patterns do not travel that way — shaped
+  like `skipRelPredicate` because it is the same question one level down, and answering only for a
+  **file item's JSON copy** (a folder travels whole, and so does a file with no keys in it).
+  `overlayWithheld({keep, take, patterns})` is the merge itself, and one function serves both
+  directions because they differ only in who is the draft: on a pull `keep` is this vault's store
+  copy and `take` is the remote's, on a push they swap. `keep: null` — that side has no copy of the
+  file — DROPS the withheld key rather than taking it, in both directions. Which patterns a rule
+  resolves to is not asked here but in `core/remoteRules.ts` (`withheldPatternsFor`), so "what does
+  this remote do with this item" keeps its single answer. A file with per-key rules that is not
+  valid JSON is a refusal naming the file: pushing it whole would hand the far end a key we
+  promised to withhold.
 
 **Install & discovery**
 - `core/installer.ts` — download a plugin from the community catalog, version-pinned via the
