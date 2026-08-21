@@ -4,6 +4,7 @@ import { basename, groupStorePath, relativeTo, resolveGroupByStoreRel, sidecarSt
 import { carrierRef, refItemId } from "./itemKeys";
 import { assertStoreLockVersionUnderstood, derivedLockCapturedAt, itemEntry, lockElementLabels, lockEntry, lockEntryList, lockEntryTail, lockLabel, lockLineage, lockSourceVersion, lockTail, lockWatermark, parseStoreLock, parseSyncManifest, setLockEntry, storeLockVersion, STORE_LOCK_HASH_PREFIX, STORE_LOCK_VERSION, validateSyncManifest } from "./manifest";
 import { derivedPushLock } from "./derivedLock";
+import { itemFreshness } from "./lockFreshness";
 import { overlayWithheld } from "./keyWithholding";
 import { isFutureSchemaDocument, SCHEMA_FUTURE_APPLY_MESSAGE } from "./settingsMigration";
 import { applyTransform, captureTransform, classPatterns, contentUnchanged, excludingPerElement, groupNeedsPassphrase, isWholeFileEncrypted, stripPatterns } from "./modes";
@@ -1725,6 +1726,10 @@ export interface ExternalStoreWriter {
 export const PUSH_RACE_MESSAGE =
   "The other end changed while this push was being prepared. Nothing was written — compare again, then push.";
 
+// And what it says when the PICK, rather than the bytes, is what went stale.
+export const PUSH_STALE_MESSAGE =
+  "Some of the items you picked changed at the other end since you last compared. Nothing was written — refresh the comparison and pick again.";
+
 // A lock at the far end this build cannot parse, told apart from one that is not there — and it does
 // not need to be: both leave the push with no far-end entries to preserve. The version gate has
 // already refused a lock from a NEWER build, so what reaches here is a damaged file, and push is the
@@ -1768,7 +1773,15 @@ async function sentHashes(
 export async function pushExternal(
   ctx: CoreContext,
   writer: ExternalStoreWriter,
-  opts: { skipRefs: ItemRef[]; withheldPush: (rel: string) => string[] }
+  opts: {
+    skipRefs: ItemRef[];
+    withheldPush: (rel: string) => string[];
+    // The items the caller picked, i.e. what the user acted on. It cannot be derived from the push
+    // set — `skipRefs` mixes "not ticked" with "the rules withhold it" — and the guard's whole
+    // meaning is "the answer you acted on has since changed", so the answer's owner has to say so.
+    // A caller with no judgement to speak of passes `[]` and the guard stays quiet: honest, not a hole.
+    expectPush: readonly string[];
+  }
 ): Promise<GroupResult[]> {
   const localAbs = (await ctx.io.exists(ctx.rootPath)) ? await listFilesRecursive(ctx.io, ctx.rootPath) : [];
   const rels = localAbs.map((f) => f.slice(ctx.rootPath.length + 1)).sort();
@@ -1803,6 +1816,23 @@ export async function pushExternal(
   // The version gate, push side: refused before the first writeFile — pushing this build's store over a remote
   // written by a newer one would overwrite a shape we cannot read with one it cannot read back.
   assertStoreLockVersionUnderstood(remoteLockRaw);
+  // Read here rather than at the derived-lock step below: the stale-pick guard and the lock this
+  // push sends must reason about the same bytes, the same discipline applyImport follows for the
+  // lock its own gate checked.
+  const localLockRaw = rels.includes(LOCK_REL) ? await ctx.io.read(`${ctx.rootPath}/${LOCK_REL}`) : null;
+  // The judgement the user acted on can be a refresh cycle old, while this push reads the far end
+  // fresh (spec 3.7's third layer). What they picked is ITEMS, not bytes — so if a picked item has
+  // moved past us over there since, the pick rests on an answer that no longer holds. Stop and let
+  // them look again rather than overwriting on the strength of a stale reading. Before phase 1, so
+  // nothing is read for a run that cannot happen and nothing at all has been written.
+  if (opts.expectPush.length > 0 && localLockRaw !== null && remoteLockRaw !== null) {
+    const mineLock = parseStoreLock(localLockRaw, manifest.groups);
+    const theirsLock = parsedOrNull(remoteLockRaw, manifest.groups);
+    if (theirsLock !== null) {
+      const stale = opts.expectPush.filter((ref) => itemFreshness(lockEntry(mineLock, ref), lockEntry(theirsLock, ref)) === "newer");
+      if (stale.length > 0) throw new Error(PUSH_STALE_MESSAGE);
+    }
+  }
   // PHASE 1 — work everything out, write nothing. A rewritten file's content is computed FROM what
   // the far end currently holds (spec 3.2), so the run has a read-modify-write window; phase 2
   // closes it before phase 3 puts down a single byte. The order IS the promise: a vault writer's
@@ -1859,7 +1889,6 @@ export async function pushExternal(
   // The bookkeeping goes last, and goes DERIVED. It is the one file whose content is not simply
   // ours: it describes the store the far end holds after this push, and this push did not send
   // everything (derivedLock.ts). No local lock = nothing to describe, and the push says nothing.
-  const localLockRaw = rels.includes(LOCK_REL) ? await ctx.io.read(`${ctx.rootPath}/${LOCK_REL}`) : null;
   if (localLockRaw !== null) {
     const derived = derivedPushLock({
       local: parseStoreLock(localLockRaw, manifest.groups),

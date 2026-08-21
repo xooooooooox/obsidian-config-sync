@@ -361,7 +361,9 @@ export interface SyncCenterHost {
   // Keys row has already explained in words before it would ask.
   storeCopyOf(ref: ItemRef): Promise<Record<string, unknown> | null>;
   pullFrom(remote: Remote, skipRefs: ItemRef[]): Promise<GroupResult[] | null>;
-  pushTo(remote: Remote, skipRefs: ItemRef[]): Promise<GroupResult[] | null>;
+  // `expectPush` is what the user PICKED — the judgement they acted on. Separate from skipRefs,
+  // which mixes their unticked rows with the items this remote's own rules withhold.
+  pushTo(remote: Remote, skipRefs: ItemRef[], expectPush: ItemRef[]): Promise<GroupResult[] | null>;
   adoptConfiguration(): Promise<GroupResult[] | null>;
   // The installed plugin's manifest desktop-only flag — the source of truth regardless of
   // whether the member's own settings-file sync is enabled (the availability map only covers
@@ -4422,8 +4424,11 @@ export class SyncCenterView extends ItemView {
 
     const run = async (btn: ButtonComponent, dir: "pull" | "push", staged: StatusRow[]): Promise<void> => {
       btn.setDisabled(true);
-      const skip = skipRefsForSelection({ allRefs, selectedRefs: refsOf(staged) });
-      const results = dir === "pull" ? await this.host.pullFrom(remote, skip) : await this.host.pushTo(remote, skip);
+      const picked = refsOf(staged);
+      const skip = skipRefsForSelection({ allRefs, selectedRefs: picked });
+      // Push carries WHAT WAS PICKED as well as what to skip: this list is the judgement the user
+      // acted on, and the seam refuses rather than act on one the far end has moved past (spec 3.7).
+      const results = dir === "pull" ? await this.host.pullFrom(remote, skip) : await this.host.pushTo(remote, skip, picked);
       this.setLastRun(dir, remote.name, results);
       this.selected.clear();
       await this.reload();

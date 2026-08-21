@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { appSource, pluginSource, withRef } from "./lock";
 import { StoreLockEntry } from "../src/core/types";
 import { lockEntry, STORE_LOCK_VERSION } from "../src/core/manifest";
-import { CoreContext, capture, captureWithActions, loadManifest, groupsForDevice, apply, applyWithActions, planImport, applyImport, PendingPull, ExternalStoreReader, pushExternal, PUSH_RACE_MESSAGE, ExternalStoreWriter, pluginIdForGroup, orderInstallsCatalogFirst, readGroups, writeGroups, deviceExcludedPluginIds, isSelfStoreRel, remoteGroupsFrom, groupForStoreRel, backfillLockLabels, excludeOptedOutItems } from "../src/core/ConfigSyncCore";
+import { CoreContext, capture, captureWithActions, loadManifest, groupsForDevice, apply, applyWithActions, planImport, applyImport, PendingPull, ExternalStoreReader, pushExternal, PUSH_RACE_MESSAGE, PUSH_STALE_MESSAGE, ExternalStoreWriter, pluginIdForGroup, orderInstallsCatalogFirst, readGroups, writeGroups, deviceExcludedPluginIds, isSelfStoreRel, remoteGroupsFrom, groupForStoreRel, backfillLockLabels, excludeOptedOutItems } from "../src/core/ConfigSyncCore";
 import { parseStoreLock, parseSyncManifest } from "../src/core/manifest";
 import { SwitchList } from "../src/core/switchList";
 import { SELF_GROUP_NAME, SELF_ITEM_REF, selfPresetRules } from "../src/core/catalog";
@@ -1688,7 +1688,7 @@ describe("pushExternal", () => {
     // The remote's own lock, byte-identical to the local one so the push skips it — a remote with
     // content and no lock is a refusal now, not a push target.
     const fw = fakeWriter({ "store.lock.json": '{"capturedAt":"t","groups":{}}', "store/gone.css": "stale" });
-    const results = await pushExternal(ctx, fw.writer, { skipRefs: [], withheldPush: () => [] });
+    const results = await pushExternal(ctx, fw.writer, { skipRefs: [], withheldPush: () => [], expectPush: [] });
     expect(results.every((r) => r.status === "ok")).toBe(true);
     expect(fw.files["store/configdir/hotkeys.json"]).toBe('{"a":9}');
     expect(fw.files["store/gone.css"]).toBeUndefined();
@@ -1709,7 +1709,7 @@ describe("pushExternal", () => {
       "store.lock.json": '{"capturedAt":"t","groups":{}}', // the remote's bookkeeping, identical -> skipped
       "store/configdir/hotkeys.json": '{"a":1}', // identical to local -> must not be rewritten
     });
-    const results = await pushExternal(ctx, fw.writer, { skipRefs: [], withheldPush: () => [] });
+    const results = await pushExternal(ctx, fw.writer, { skipRefs: [], withheldPush: () => [], expectPush: [] });
     expect(fw.writeLog).not.toContain("store/configdir/hotkeys.json");
     expect(fw.writeLog).toContain("store/configdir/snippets/one.css");
     const byGroup = Object.fromEntries(results.map((r) => [r.group, r.changes]));
@@ -1722,7 +1722,7 @@ describe("pushExternal", () => {
     io.seed({ "cs/store/configdir/hotkeys.json": "{}" });
     await seedGroups(ctx, '{"version":1,"groups":[]}');
     const fw = fakeWriter({});
-    const results = await pushExternal(ctx, fw.writer, { skipRefs: [], withheldPush: () => [] });
+    const results = await pushExternal(ctx, fw.writer, { skipRefs: [], withheldPush: () => [], expectPush: [] });
     expect(fw.files["store/configdir/hotkeys.json"]).toBe("{}");
     expect(results.every((r) => r.status === "ok")).toBe(true);
   });
@@ -1732,7 +1732,7 @@ describe("pushExternal", () => {
     io.seed({ "cs/store.lock.json": '{"capturedAt":"t","groups":{}}' });
     await seedGroups(ctx, '{"version":1,"groups":[]}');
     const fw = fakeWriter({});
-    const results = await pushExternal(ctx, fw.writer, { skipRefs: [], withheldPush: () => [] });
+    const results = await pushExternal(ctx, fw.writer, { skipRefs: [], withheldPush: () => [], expectPush: [] });
     // Semantics, not bytes: what a push sends is derived (derivedLock.ts), so a v1 local lock lands
     // over there re-keyed into the shape this build writes.
     const pushed = parseStoreLock(fw.files["store.lock.json"] ?? "");
@@ -1745,7 +1745,7 @@ describe("pushExternal", () => {
     const { ctx } = setup();
     await seedGroups(ctx, '{"version":1,"groups":[]}');
     const fw = fakeWriter({});
-    await expect(pushExternal(ctx, fw.writer, { skipRefs: [], withheldPush: () => [] })).rejects.toThrow("capture from this device");
+    await expect(pushExternal(ctx, fw.writer, { skipRefs: [], withheldPush: () => [], expectPush: [] })).rejects.toThrow("capture from this device");
   });
 
   it("never writes a root config-sync.json, and excludes any lingering legacy manifest / migrated remnants from the push", async () => {
@@ -1757,7 +1757,7 @@ describe("pushExternal", () => {
     });
     await seedGroups(ctx, '{"version":1,"groups":[]}');
     const fw = fakeWriter({ "config-sync.json": "OLD-REMOTE" });
-    const results = await pushExternal(ctx, fw.writer, { skipRefs: [], withheldPush: () => [] });
+    const results = await pushExternal(ctx, fw.writer, { skipRefs: [], withheldPush: () => [], expectPush: [] });
     expect(fw.files["config-sync.json"]).toBe("OLD-REMOTE"); // untouched: never written, never deleted
     expect(fw.files["config-sync.json.migrated-2026-01-01T00-00-00"]).toBeUndefined();
     expect(results.every((r) => r.status === "ok")).toBe(true);
@@ -1775,7 +1775,7 @@ describe("pushExternal", () => {
       "store.lock.json": '{"capturedAt":"t","groups":{}}', // identical to local -> skipped
       "store/configdir/plugins/config-sync/data.json": '{"theirs":true}',
     });
-    const results = await pushExternal(ctx, fw.writer, { skipRefs: [SELF_ITEM_REF], withheldPush: () => [] });
+    const results = await pushExternal(ctx, fw.writer, { skipRefs: [SELF_ITEM_REF], withheldPush: () => [], expectPush: [] });
     expect(fw.files["store/configdir/plugins/config-sync/data.json"]).toBe('{"theirs":true}'); // untouched both ways
     expect(fw.files["store/configdir/hotkeys.json"]).toBe('{"a":1}');
     expect(results.every((r) => r.status === "ok")).toBe(true);
@@ -1807,7 +1807,7 @@ describe("pushExternal", () => {
       }),
       "store/configdir/plugins/config-sync/data.json": '{"theirs":true}',
     });
-    await pushExternal(ctx, fw.writer, { skipRefs: [SELF_ITEM_REF], withheldPush: () => [] });
+    await pushExternal(ctx, fw.writer, { skipRefs: [SELF_ITEM_REF], withheldPush: () => [], expectPush: [] });
     const pushed = parseStoreLock(fw.files["store.lock.json"] ?? "");
     // Their content was never sent, so their entry still describes it.
     expect(pushed.items["community"]?.["config-sync"]?.hash).toBe("sha256:theirs");
@@ -1825,10 +1825,10 @@ describe("pushExternal", () => {
     });
     await seedGroups(ctx, '{"version":1,"groups":[]}');
     const fw = fakeWriter({ "store.lock.json": "{}", "store/configdir/hotkeys.json": '{"a":9}' });
-    await pushExternal(ctx, fw.writer, { skipRefs: [], withheldPush: () => [] });
+    await pushExternal(ctx, fw.writer, { skipRefs: [], withheldPush: () => [], expectPush: [] });
     expect(fw.writeLog).toContain("store.lock.json");
     fw.writeLog.length = 0;
-    await pushExternal(ctx, fw.writer, { skipRefs: [], withheldPush: () => [] });
+    await pushExternal(ctx, fw.writer, { skipRefs: [], withheldPush: () => [], expectPush: [] });
     expect(fw.writeLog).toEqual([]);
   });
 
@@ -1840,7 +1840,7 @@ describe("pushExternal", () => {
     });
     await seedGroups(ctx, '{"version":1,"groups":[]}');
     const fw = fakeWriter({ "store.lock.json": "not json at all" });
-    await pushExternal(ctx, fw.writer, { skipRefs: [], withheldPush: () => [] });
+    await pushExternal(ctx, fw.writer, { skipRefs: [], withheldPush: () => [], expectPush: [] });
     expect(parseStoreLock(fw.files["store.lock.json"] ?? "").version).toBe(STORE_LOCK_VERSION);
   });
 });
@@ -3315,6 +3315,55 @@ describe("pull with per-key withholding", () => {
   });
 });
 
+// spec §3.7's third layer: the panel's judgement can be a refresh cycle old while the push reads the
+// far end fresh. What the user picked is ITEMS, not bytes.
+describe("push with a stale pick", () => {
+  const AT = "2026-08-11T10:00:00.000Z";
+  const LATER = "2026-08-11T11:00:00.000Z";
+  const MANIFEST_DEMO = JSON.stringify({
+    version: 1,
+    groups: [{ name: "plugin-demo", path: "{configDir}/plugins/demo/data.json", type: "file", devices: "all" }],
+  });
+  const entry = (capturedAt: string, hash: string): Record<string, unknown> => ({ ...pluginSource("1.0.0"), capturedAt, hash });
+  const lockOf = (capturedAt: string, e: Record<string, unknown>): string =>
+    JSON.stringify({ capturedAt, items: { community: { demo: e } }, version: 3 });
+
+  const setupPair = async (remoteEntry: Record<string, unknown>): Promise<{ ctx: CoreContext; fw: ReturnType<typeof fakeWriter> }> => {
+    const { io, ctx } = setup();
+    io.seed({
+      "cs/store.lock.json": lockOf(AT, entry(AT, "sha256:mine")),
+      "cs/store/configdir/plugins/demo/data.json": '{"theme":"mine"}',
+    });
+    await seedGroups(ctx, MANIFEST_DEMO);
+    const fw = fakeWriter({
+      "store.lock.json": lockOf(LATER, remoteEntry),
+      "store/configdir/plugins/demo/data.json": '{"theme":"theirs"}',
+    });
+    return { ctx, fw };
+  };
+
+  it("refuses to push a picked item the far end has moved past since the comparison", async () => {
+    const { ctx, fw } = await setupPair(entry(LATER, "sha256:theirs"));
+    await expect(
+      pushExternal(ctx, fw.writer, { skipRefs: [], withheldPush: () => [], expectPush: ["community/demo"] })
+    ).rejects.toThrow(PUSH_STALE_MESSAGE);
+    expect(fw.writeLog).toEqual([]);
+    expect(fw.finalized).toBe(0);
+  });
+
+  it("says nothing about an item the caller never claimed to have judged", async () => {
+    const { ctx, fw } = await setupPair(entry(LATER, "sha256:theirs"));
+    await pushExternal(ctx, fw.writer, { skipRefs: [], withheldPush: () => [], expectPush: [] });
+    expect(fw.writeLog).toContain("store/configdir/plugins/demo/data.json");
+  });
+
+  it("lets a picked item through when the far end has not moved past it", async () => {
+    const { ctx, fw } = await setupPair(entry(AT, "sha256:theirs"));
+    await pushExternal(ctx, fw.writer, { skipRefs: [], withheldPush: () => [], expectPush: ["community/demo"] });
+    expect(fw.writeLog).toContain("store/configdir/plugins/demo/data.json");
+  });
+});
+
 // spec 2026-08-20-remote-direction-rules-design.md §3.2 / §3.6: a key that does not push with this
 // remote keeps whatever the far end already has — the store holds whole documents, so leaving the
 // key out would DELETE their value rather than preserve it.
@@ -3339,7 +3388,7 @@ describe("push with per-key withholding", () => {
       "store.lock.json": JSON.stringify({ capturedAt: "t", items: {}, version: 3 }),
       [REMOTE_REL]: demoDoc("theirs", "theirs"),
     });
-    await pushExternal(ctx, fw.writer, { skipRefs: [], withheldPush: withheldPatternPredicate(RULES, "push", groups) });
+    await pushExternal(ctx, fw.writer, { skipRefs: [], withheldPush: withheldPatternPredicate(RULES, "push", groups), expectPush: [] });
     expect(JSON.parse(fw.files[REMOTE_REL] ?? "")).toEqual({ theme: "mine", localOnly: "theirs" });
     // The bookkeeping we sent describes THAT file, not the one on this device.
     const pushed = parseStoreLock(fw.files["store.lock.json"] ?? "");
@@ -3377,7 +3426,7 @@ describe("push with per-key withholding", () => {
       },
     };
     await expect(
-      pushExternal(ctx, racing, { skipRefs: [], withheldPush: withheldPatternPredicate(RULES, "push", groups) })
+      pushExternal(ctx, racing, { skipRefs: [], withheldPush: withheldPatternPredicate(RULES, "push", groups), expectPush: [] })
     ).rejects.toThrow(PUSH_RACE_MESSAGE);
     // The promise this abort makes: NOTHING was written — not even the files that were fine.
     expect(fw.writeLog).toEqual([]);
@@ -3400,7 +3449,7 @@ describe("push with per-key withholding", () => {
         return fw.writer.readFile(rel);
       },
     };
-    await pushExternal(ctx, counting, { skipRefs: [], withheldPush: () => [] });
+    await pushExternal(ctx, counting, { skipRefs: [], withheldPush: () => [], expectPush: [] });
     expect(reads.filter((r) => r === "store/configdir/hotkeys.json")).toHaveLength(1);
   });
 
@@ -3411,7 +3460,7 @@ describe("push with per-key withholding", () => {
     await seedGroups(ctx, MANIFEST_DEMO);
     const groups = await readGroups(ctx);
     const fw = fakeWriter({ "store.lock.json": lockRaw, [REMOTE_REL]: demoDoc("same", "theirs") });
-    await pushExternal(ctx, fw.writer, { skipRefs: [], withheldPush: withheldPatternPredicate(RULES, "push", groups) });
+    await pushExternal(ctx, fw.writer, { skipRefs: [], withheldPush: withheldPatternPredicate(RULES, "push", groups), expectPush: [] });
     expect(fw.writeLog).not.toContain(REMOTE_REL);
   });
 });

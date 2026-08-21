@@ -1045,7 +1045,7 @@ export default class ConfigSyncPlugin extends Plugin {
           return null;
         }
       },
-      pushTo: async (remote, skipRefs) => {
+      pushTo: async (remote, skipRefs, expectPush) => {
         if (this.schemaStopped()) return null; // schema stop
         try {
           const ctx = await this.coreContext();
@@ -1053,6 +1053,8 @@ export default class ConfigSyncPlugin extends Plugin {
           const results = await pushExternal(ctx, await this.createWriter(remote), {
             skipRefs: [...new Set([...blocked, ...skipRefs])],
             withheldPush: withheldPatternPredicate(remote.items, "push", this.compiledGroups),
+            // What the panel judged and the user acted on — the guard's own input (spec 3.7).
+            expectPush,
           });
           await this.refreshRemoteChecks();
           return results;
