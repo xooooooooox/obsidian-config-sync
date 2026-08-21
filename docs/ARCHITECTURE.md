@@ -600,14 +600,28 @@ functions.
   store it was never meant for and read as "wrong passphrase" when the truth is "not linked here".
   `remoteKeyPassphrase` collapses the three to what a comparison actually opens with (`missing` →
   null, i.e. the honest "cannot: there").
-- `core/differentKeyHold.ts` — TEMPORARY, deleted whole by Plan 4c. Until pull and push can
-  transcode, exchanging ciphertext with a remote keyed differently is wrong by construction — a
-  pull writes bytes this vault can never open into its own store, and only detonates at the next
-  apply, far from the scene. `differentKeyHold` therefore holds every item with ciphertext out of
-  the run at the PLANNING stage (3f's rule: every decision before the first byte), per item, with a
-  per-item report line; everything without ciphertext still travels. It exists BEFORE the transcode
-  because the Passphrase field exists before it: no field the settings offer may configure a state
-  the runs then corrupt.
+- `core/transcode.ts` — ciphertext re-encrypted for the side that will hold it, so each vault only
+  ever stores bytes its own key opens. `transcodeContent({rel, content, existing, from, to})` is a
+  content transform the two transport seams take as an optional `transcode` hook, applied at the
+  PLANNING stage (3f's rule: every decision before the first byte) and BEFORE the withheld overlay,
+  so both of the overlay's sides already answer to the destination's key. Detection is by CONTENT,
+  not by group — a whole-file envelope and an `enc:v1:` leaf identify themselves, and a cheap
+  substring gate spares plain files the parse. **Envelope reuse is correctness, not optimization**
+  (spec 3.9.1): every encryption draws a fresh salt, so without it every push would rewrite every
+  encrypted file, churn git history, and keep the panel's row off `In sync` forever. The rule: when
+  the destination's existing envelope already says the same thing (the plaintext HMAC's whole
+  purpose), ITS bytes come back verbatim — the seams' own skip-if-identical then keeps the steady
+  state silent, and what actually re-encrypts is content that changed plus each file's one-time
+  conversion. A push-side transcoded file is marked for the phase-2 recheck exactly like a withheld
+  one: its content depends on what is over there. `transcodePreflight` turns the FORESEEABLE
+  failures into per-item skips with their own report line (spec 3.9.2) — a key that does not open
+  the source side's copy, a named entry not linked here, this device's own vault locked on a push —
+  by trying the key before anything is planned; what still throws (`TranscodeError`) is the window
+  in between, and it aborts a run in which nothing has been written. On 3.9.3's cache pressure:
+  `derivedKeyCache` (crypto.ts) holds 256 derivations and clears whole when full. Both sides' READ
+  salts are fixed on disk and cached once per session; only changed fields pay a fresh WRITE salt,
+  which no cache could ever help — so the capacity stays until live use shows repeated clearing,
+  at which point the fix is a larger table or LRU eviction, not more caching of unrepeatable salts.
 
 **Install & discovery**
 - `core/installer.ts` — download a plugin from the community catalog, version-pinned via the
