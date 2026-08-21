@@ -13,16 +13,24 @@ describe("compareCopies", () => {
     expect(await compareCopies({ mine: a, theirs: b, passphrase: { mine: "pw", theirs: "pw" }, masked: [], groupName: "g" })).toBe("same");
   });
 
-  it("says it cannot compare when this device has no passphrase", async () => {
+  it("says THIS side cannot open when this device has no passphrase", async () => {
     const a = await encryptFile("pw", '{"token":"x"}\n');
     const b = await encryptFile("pw", '{"token":"y"}\n');
-    expect(await compareCopies({ mine: a, theirs: b, passphrase: { mine: null, theirs: null }, masked: [], groupName: "g" })).toBe("cannot");
+    expect(await compareCopies({ mine: a, theirs: b, passphrase: { mine: null, theirs: null }, masked: [], groupName: "g" })).toEqual({ cannot: "here" });
   });
 
-  it("says it cannot compare when the passphrase does not open the copies", async () => {
+  it("says the OTHER side cannot open when only the remote's key fails", async () => {
+    const a = await encryptFile("mine-pw", '{"token":"x"}\n');
+    const b = await encryptFile("their-pw", '{"token":"y"}\n');
+    expect(await compareCopies({ mine: a, theirs: b, passphrase: { mine: "mine-pw", theirs: "wrong" }, masked: [], groupName: "g" })).toEqual({ cannot: "there" });
+  });
+
+  it("names its own side first when neither key opens anything", async () => {
     const a = await encryptFile("pw", '{"token":"x"}\n');
     const b = await encryptFile("pw", '{"token":"y"}\n');
-    expect(await compareCopies({ mine: a, theirs: b, passphrase: { mine: "wrong", theirs: "wrong" }, masked: [], groupName: "g" })).toBe("cannot");
+    // The user can only fix what is theirs to fix; sending them to the remote's settings while
+    // their own passphrase is wrong would have them fix the wrong thing first.
+    expect(await compareCopies({ mine: a, theirs: b, passphrase: { mine: "wrong", theirs: "wrong" }, masked: [], groupName: "g" })).toEqual({ cannot: "here" });
   });
 
   it("still reports a real difference once both sides open", async () => {
@@ -44,10 +52,16 @@ describe("compareCopies", () => {
     expect(await compareCopies({ mine, theirs, passphrase: { mine: "pw", theirs: "pw" }, masked: [], groupName: "g" })).toBe("differs");
   });
 
-  it("cannot compare a field it has no passphrase for", async () => {
+  it("cannot compare a field it has no passphrase for, and says which side", async () => {
     const mine = JSON.stringify({ theme: "dark", token: await encryptField("pw", "s3cret") }, null, 2) + "\n";
     const theirs = JSON.stringify({ theme: "light", token: await encryptField("pw", "s3cret") }, null, 2) + "\n";
-    expect(await compareCopies({ mine, theirs, passphrase: { mine: null, theirs: null }, masked: [], groupName: "g" })).toBe("cannot");
+    expect(await compareCopies({ mine, theirs, passphrase: { mine: null, theirs: null }, masked: [], groupName: "g" })).toEqual({ cannot: "here" });
+  });
+
+  it("blames the remote's key for a field only its side fails to open", async () => {
+    const mine = JSON.stringify({ theme: "dark", token: await encryptField("mine-pw", "s") }, null, 2) + "\n";
+    const theirs = JSON.stringify({ theme: "dark", token: await encryptField("their-pw", "s") }, null, 2) + "\n";
+    expect(await compareCopies({ mine, theirs, passphrase: { mine: "mine-pw", theirs: "nope" }, masked: [], groupName: "g" })).toEqual({ cannot: "there" });
   });
 
   it("masks the keys that travel neither way before deciding", async () => {

@@ -638,9 +638,9 @@ describe("checkRemote · key-ruled items", () => {
   it("neither judges nor counts an item it cannot open, and names it", async () => {
     const check = await checkRemote(local, fakeReader(remoteAhead), NO_IGNORES, {
       groups: [],
-      content: { refs: ["community/dataview"], compare: async (): Promise<ContentVerdict> => "cannot" },
+      content: { refs: ["community/dataview"], compare: async (): Promise<ContentVerdict> => ({ cannot: "here" }) },
     });
-    expect(check.uncomparable).toEqual(["community/dataview"]);
+    expect(check.uncomparable).toEqual({ "community/dataview": "here" });
     expect(check.itemVerdicts?.["community/dataview"]).toBeUndefined();
     expect(check.items).toEqual({ push: 0, pull: 0 });
   });
@@ -650,7 +650,7 @@ describe("checkRemote · key-ruled items", () => {
       groups: [],
       content: { refs: ["community/dataview"], compare: async (): Promise<ContentVerdict> => "differs" },
     });
-    expect(check.uncomparable).toEqual([]);
+    expect(check.uncomparable).toEqual({});
   });
 });
 
@@ -900,7 +900,7 @@ describe("remoteItemCounts · counts the verdict table", () => {
 });
 
 describe("sumRemoteItemCounts", () => {
-  const check = (items: { push: number; pull: number } | null): RemoteCheck => ({ state: "unknown", remoteCapturedAt: null, items, itemVerdicts: null, uncomparable: [] });
+  const check = (items: { push: number; pull: number } | null): RemoteCheck => ({ state: "unknown", remoteCapturedAt: null, items, itemVerdicts: null, uncomparable: {} });
 
   it("adds the item counts up and says how many remotes they came from", () => {
     expect(sumRemoteItemCounts([check({ push: 2, pull: 0 }), check({ push: 1, pull: 3 })])).toEqual({ push: 3, pull: 3, remotes: 2, uncounted: 0 });

@@ -100,7 +100,7 @@ describe("an encrypted item compared with a remote", () => {
     const result = await check(ctx, io, remote);
     expect(result.itemVerdicts?.[REF]).toBeUndefined();
     expect(result.items).toEqual({ push: 0, pull: 0 });
-    expect(result.uncomparable).toEqual([]);
+    expect(result.uncomparable).toEqual({});
 
     const entries = await diffRemote(ctx, fakeReader(remote), {
       skipRefs: [],
@@ -112,7 +112,7 @@ describe("an encrypted item compared with a remote", () => {
     const rows = remoteRowStatuses({
       entries,
       verdicts: result.itemVerdicts ?? {},
-      uncomparable: result.uncomparable,
+      uncomparable: Object.keys(result.uncomparable),
       refOf: () => REF,
       localGroupNames: ["secrets"],
     });
@@ -125,7 +125,7 @@ describe("an encrypted item compared with a remote", () => {
 
     const result = await check(ctx, io, remote);
     expect(result.itemVerdicts?.[REF]).toBe("pull");
-    expect(result.uncomparable).toEqual([]);
+    expect(result.uncomparable).toEqual({});
 
     const entries = await diffRemote(ctx, fakeReader(remote), {
       skipRefs: [],
@@ -142,7 +142,7 @@ describe("an encrypted item compared with a remote", () => {
     const locked: CoreContext = { ...ctx, passphrase: null };
 
     const result = await check(locked, io, remote);
-    expect(result.uncomparable).toEqual([REF]);
+    expect(result.uncomparable).toEqual({ [REF]: "here" });
     expect(result.itemVerdicts?.[REF]).toBeUndefined();
     expect(result.items).toEqual({ push: 0, pull: 0 });
 
@@ -159,7 +159,7 @@ describe("an encrypted item compared with a remote", () => {
     const rows = remoteRowStatuses({
       entries,
       verdicts: result.itemVerdicts ?? {},
-      uncomparable: result.uncomparable,
+      uncomparable: Object.keys(result.uncomparable),
       refOf: () => REF,
       localGroupNames: ["secrets"],
     });
@@ -173,7 +173,7 @@ describe("an encrypted item compared with a remote", () => {
     const locked: CoreContext = { ...ctx, passphrase: null };
 
     const result = await check(locked, io, remote);
-    expect(result.uncomparable).toEqual([]);
+    expect(result.uncomparable).toEqual({});
 
     const entries = await diffRemote(locked, fakeReader(remote), {
       skipRefs: [],

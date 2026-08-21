@@ -1,4 +1,4 @@
-import { ContentVerdict, compareCopies } from "./cipherCompare";
+import { ContentVerdict, compareCopies, isCannot } from "./cipherCompare";
 import { FileIO, isJunkPath, listFilesRecursive } from "./io";
 import { refsWithKeyRules } from "./keyWithholding";
 import { groupHasCiphertext } from "./modes";
@@ -49,7 +49,8 @@ async function itemRels(input: {
 // `differs` outranks `cannot`: once one file is plainly not the same, we already know something has
 // to move, and downgrading the whole item to "we cannot tell" because a SECOND file is unreadable
 // would throw away the answer we do have. Only an item where nothing differed and something could
-// not be opened is genuinely unknowable.
+// not be opened is genuinely unknowable. Among the unknowable, "here" outranks "there" for the same
+// reason compareCopies orders its own answer that way: the user fixes their own side first.
 export async function compareStoreItem(input: {
   io: FileIO;
   rootPath: string;
@@ -63,7 +64,7 @@ export async function compareStoreItem(input: {
   if (group === undefined) return "same";
   const remoteRels = new Set(await input.reader.listFiles());
   const rels = await itemRels({ io: input.io, rootPath: input.rootPath, remoteRels, group });
-  let unopenable = false;
+  let unopenable: { cannot: "here" | "there" } | null = null;
   for (const rel of rels) {
     const localPath = `${input.rootPath}/${rel}`;
     const mine = (await input.io.exists(localPath)) ? await input.io.read(localPath) : null;
@@ -76,7 +77,7 @@ export async function compareStoreItem(input: {
       groupName: group.name,
     });
     if (verdict === "differs") return "differs";
-    if (verdict === "cannot") unopenable = true;
+    if (isCannot(verdict) && (unopenable === null || verdict.cannot === "here")) unopenable = verdict;
   }
-  return unopenable ? "cannot" : "same";
+  return unopenable ?? "same";
 }

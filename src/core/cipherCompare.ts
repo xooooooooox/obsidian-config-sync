@@ -1,4 +1,4 @@
-import { decryptField, decryptFile, fileUnchanged, isFieldEnvelope, parseFileEnvelope } from "./crypto";
+import { decryptField, decryptFile, isFieldEnvelope, parseFileEnvelope } from "./crypto";
 import { sameApartFromWithheld } from "./keyWithholding";
 import { sortKeysDeep } from "./merge";
 import { isPlainObject, sanitizeJson } from "./sanitize";
@@ -11,12 +11,24 @@ import { isPlainObject, sanitizeJson } from "./sanitize";
 // salt and IV, so the very same setting encrypted in two vaults is different bytes — always, even
 // under the same passphrase. Comparing bytes therefore lights a difference no run can ever clear,
 // which is exactly the permanent to-do spec 3.3 set out to abolish.
-export type ContentVerdict = "same" | "differs" | "cannot";
+export type ContentVerdict = "same" | "differs" | { cannot: "here" | "there" };
+
+// The side that could not be opened: "here" = this device's own passphrase is absent or wrong,
+// "there" = the key we hold for the remote does not open its copy. When both fail, "here" wins —
+// the user can only fix what is theirs to fix, and sending them to the remote's settings while
+// their own passphrase is wrong would have them fix the wrong thing first.
+export function isCannot(v: ContentVerdict): v is { cannot: "here" | "there" } {
+  return typeof v !== "string";
+}
 
 // Thrown while walking a document whose ciphertext will not open. Caught inside this module and
-// turned into "cannot" — it never escapes, and it is deliberately NOT an error the caller handles:
-// "we cannot tell" is one of this function's three normal answers, not a failure of it.
-class Unopenable extends Error {}
+// turned into a `cannot` — it never escapes, and it is deliberately NOT an error the caller
+// handles: "we cannot tell" is one of this function's three normal answers, not a failure of it.
+class Unopenable extends Error {
+  constructor(public side: "here" | "there") {
+    super();
+  }
+}
 
 function hasFieldEnvelope(v: unknown): boolean {
   if (isFieldEnvelope(v)) return true;
@@ -28,19 +40,19 @@ function hasFieldEnvelope(v: unknown): boolean {
 // A copy of the document with every encrypted leaf replaced by what it says. Pure: the input is
 // never touched, which matters because both sides of a comparison are documents somebody else's
 // code is still holding.
-async function decipherLeaves(v: unknown, passphrase: string | null, groupName: string): Promise<unknown> {
+async function decipherLeaves(v: unknown, passphrase: string | null, side: "here" | "there", groupName: string): Promise<unknown> {
   if (isFieldEnvelope(v)) {
-    if (passphrase === null) throw new Unopenable();
+    if (passphrase === null) throw new Unopenable(side);
     try {
       return await decryptField(passphrase, v, groupName);
     } catch {
-      throw new Unopenable();
+      throw new Unopenable(side);
     }
   }
-  if (Array.isArray(v)) return Promise.all(v.map((item) => decipherLeaves(item, passphrase, groupName)));
+  if (Array.isArray(v)) return Promise.all(v.map((item) => decipherLeaves(item, passphrase, side, groupName)));
   if (isPlainObject(v)) {
     const out: Record<string, unknown> = {};
-    for (const [k, val] of Object.entries(v)) out[k] = await decipherLeaves(val, passphrase, groupName);
+    for (const [k, val] of Object.entries(v)) out[k] = await decipherLeaves(val, passphrase, side, groupName);
     return out;
   }
   return v;
@@ -80,23 +92,22 @@ export async function compareCopies(input: {
   if ((envMine === null) !== (envTheirs === null)) return "differs";
 
   if (envMine !== null && envTheirs !== null) {
-    if (passphrase.mine === null || passphrase.theirs === null) return "cannot";
+    if (passphrase.mine === null) return { cannot: "here" };
+    if (passphrase.theirs === null) return { cannot: "there" };
+    // Our own copy opens (or fails) first — see isCannot's ordering note. Decrypting it here is
+    // not the fast path's extra cost: a wrong local passphrase would fail the HMAC check below
+    // anyway and force this same decryption to find out why.
+    let minePlain: string | null;
+    try {
+      minePlain = await decryptFile(passphrase.mine, envMine, groupName);
+    } catch {
+      return { cannot: "here" };
+    }
     let theirsPlain: string;
     try {
       theirsPlain = await decryptFile(passphrase.theirs, envTheirs, groupName);
     } catch {
-      return "cannot";
-    }
-    // The envelope carries an HMAC of its PLAINTEXT, which is what makes this comparison
-    // deterministic despite the fresh IV — so the settled case costs one decryption and one HMAC.
-    // It cannot, however, tell a wrong passphrase from changed content: both come back false. That
-    // distinction IS the third answer, so a false sends us to open our own copy and find out which.
-    if (masked.length === 0 && (await fileUnchanged(passphrase.mine, envMine, theirsPlain))) return "same";
-    let minePlain: string;
-    try {
-      minePlain = await decryptFile(passphrase.mine, envMine, groupName);
-    } catch {
-      return "cannot";
+      return { cannot: "there" };
     }
     return sameApartFromWithheld({ a: minePlain, b: theirsPlain, patterns: masked }) ? "same" : "differs";
   }
@@ -112,11 +123,13 @@ export async function compareCopies(input: {
 
   const patterns = [...masked];
   try {
-    const a = await decipherLeaves(sanitizeJson(docMine, patterns), passphrase.mine, groupName);
-    const b = await decipherLeaves(sanitizeJson(docTheirs, patterns), passphrase.theirs, groupName);
+    // Our own side first, whole, so a failure here is reported before one over there (isCannot's
+    // ordering note) even when both sides hold unreadable leaves.
+    const a = await decipherLeaves(sanitizeJson(docMine, patterns), passphrase.mine, "here", groupName);
+    const b = await decipherLeaves(sanitizeJson(docTheirs, patterns), passphrase.theirs, "there", groupName);
     return JSON.stringify(sortKeysDeep(a)) === JSON.stringify(sortKeysDeep(b)) ? "same" : "differs";
   } catch (e) {
-    if (e instanceof Unopenable) return "cannot";
+    if (e instanceof Unopenable) return { cannot: e.side };
     throw e;
   }
 }

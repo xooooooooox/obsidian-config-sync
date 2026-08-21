@@ -6,7 +6,7 @@ import { carrierRef, joinRef } from "./itemKeys";
 import { lockEntry, lockEntryList, lockLineage, parseStoreLock, storeLockVersion, STORE_LOCK_VERSION } from "./manifest";
 import { isPlainObject } from "./sanitize";
 import { entryTime, hasPerItemPayload, itemFreshness } from "./lockFreshness";
-import { ContentVerdict, compareCopies } from "./cipherCompare";
+import { ContentVerdict, compareCopies, isCannot } from "./cipherCompare";
 import { contentUnchanged, groupNeedsPassphrase } from "./modes";
 import { parseFileEnvelope } from "./crypto";
 import { localRealPath, parseSwitchList, readLocalSwitchList, isSwitchListGroup, switchListsEqual } from "./switchList";
@@ -223,11 +223,12 @@ export interface RemoteCheck {
   // ref -> the direction that item still needs, null on the same "cannot judge" terms as `items`.
   // The panel's rows read THIS; `items` is only its tally.
   itemVerdicts: Record<string, ItemVerdict> | null;
-  // The items whose two copies could not be read, so nothing is claimed about them (spec 3.8): they
-  // are in neither `itemVerdicts` nor either tally, and the panel gives them their own bucket. An
-  // empty list is the normal state; it is never null, because "we asked and nobody was unreadable"
-  // and "we never asked" both mean the same thing to every surface that reads it.
-  uncomparable: string[];
+  // ref -> which side could not be read, for the items nothing is claimed about (spec 3.8): they
+  // are in neither `itemVerdicts` nor either tally, and the panel gives them their own bucket. The
+  // side is what the card's sentence and its way-out link key off; the row does not care. An empty
+  // table is the normal state; it is never null, because "we asked and nobody was unreadable" and
+  // "we never asked" both mean the same thing to every surface that reads it.
+  uncomparable: Record<string, "here" | "there">;
 }
 
 // `ignore` names the lock entries that never count, PER DIRECTION (spec 3.5) — callers pass
@@ -261,41 +262,41 @@ export async function checkRemote(
   // one inviting the push it would then decline (the rule the version gate already follows for a future lock).
   if (!files.includes("store.lock.json")) {
     const empty = !remoteDeclaresStore(files) && remoteStoreContentRels(files).length === 0;
-    return { state: empty ? "no-store" : "unknown", remoteCapturedAt: null, items: null, itemVerdicts: null, uncomparable: [] };
+    return { state: empty ? "no-store" : "unknown", remoteCapturedAt: null, items: null, itemVerdicts: null, uncomparable: {} };
   }
   let remote: StoreLock;
   try {
     remote = parseStoreLock(await reader.readFile("store.lock.json"), groups);
   } catch {
-    return { state: "unknown", remoteCapturedAt: null, items: null, itemVerdicts: null, uncomparable: [] };
+    return { state: "unknown", remoteCapturedAt: null, items: null, itemVerdicts: null, uncomparable: {} };
   }
   // A remote this build cannot read must not look ACTIONABLE. The version gate
   // refuses the pull itself, but a refusal the user only meets after accepting an invitation is a
   // worse surface than never being invited: "unknown" already means "this remote cannot be
   // compared", which is exactly true here. No new RemoteState, no UI change. The capture stamp is
   // still reported — it parsed, and saying WHEN is not the same as inviting a pull.
-  if (storeLockVersion(remote) > STORE_LOCK_VERSION) return { state: "unknown", remoteCapturedAt: remote.capturedAt, items: null, itemVerdicts: null, uncomparable: [] };
+  if (storeLockVersion(remote) > STORE_LOCK_VERSION) return { state: "unknown", remoteCapturedAt: remote.capturedAt, items: null, itemVerdicts: null, uncomparable: {} };
   // No local lock yet (bootstrap device) but the remote parsed fine: a pull would populate
   // the store, so this is a known state, not "unknown" — reserve that for unreadable remotes.
   if (localLock === null) {
     // Nothing here to compare content against, so nothing can be settled that way: on a bootstrap
     // device every item the remote holds is waiting to come in, key rules included.
     const first = remoteItemVerdicts(null, remote, ignore, new Set());
-    return { state: "remote-newer", remoteCapturedAt: remote.capturedAt, items: remoteItemCounts(first), itemVerdicts: first, uncomparable: [] };
+    return { state: "remote-newer", remoteCapturedAt: remote.capturedAt, items: remoteItemCounts(first), itemVerdicts: first, uncomparable: {} };
   }
   // After the three refusals above, so a remote nobody can compare never costs a single extra read.
   const settled = new Set<string>();
-  const uncomparable: string[] = [];
+  const uncomparable: Record<string, "here" | "there"> = {};
   for (const ref of opts.content.refs) {
     const verdict = await opts.content.compare(ref);
     // Both answers stop the lock entries from speaking, for opposite reasons: "same" because there
-    // is demonstrably nothing to do, "cannot" because we have no business pinning an arrow on a
-    // comparison that never happened. Only "cannot" is also REPORTED — an item nobody could read is
-    // something to say, an item that agrees is not.
+    // is demonstrably nothing to do, a `cannot` because we have no business pinning an arrow on a
+    // comparison that never happened. Only the `cannot` is also REPORTED — an item nobody could
+    // read is something to say, an item that agrees is not.
     if (verdict === "same") settled.add(ref);
-    if (verdict === "cannot") {
+    if (isCannot(verdict)) {
       settled.add(ref);
-      uncomparable.push(ref);
+      uncomparable[ref] = verdict.cannot;
     }
   }
   const verdicts = remoteItemVerdicts(localLock, remote, ignore, settled);
@@ -584,7 +585,7 @@ export async function diffRemote(
       const verdict = await compareFiles(name, rel, remoteContent, localContent);
       if (verdict === "differs") {
         entry(name).files.push({ itemRel, kind: "updated", local: localContent, remote: remoteContent });
-      } else if (verdict === "cannot") {
+      } else if (isCannot(verdict)) {
         entry(name).uncomparable = true;
       }
     }

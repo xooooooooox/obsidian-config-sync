@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { compareStoreItem, refsNeedingContentCompare } from "../src/core/itemCompare";
+import { ContentVerdict } from "../src/core/cipherCompare";
 import { encryptField, encryptFile } from "../src/core/crypto";
 import { MemFS } from "./memfs";
 import { EVERYWHERE, RemoteItems, SyncGroup } from "../src/core/types";
@@ -30,7 +31,7 @@ async function verdict(input: {
   groups: SyncGroup[];
   passphrase?: string | null;
   masked?: (rel: string) => string[];
-}): Promise<string> {
+}): Promise<ContentVerdict> {
   const io = new MemFS();
   io.seed(Object.fromEntries(Object.entries(input.local).map(([rel, c]) => [`${ROOT}/${rel}`, c])));
   const pass = input.passphrase === undefined ? "pw" : input.passphrase;
@@ -58,7 +59,7 @@ describe("compareStoreItem", () => {
     const g = [group({ mode: "encrypted" })];
     const mine = await encryptFile("pw", '{"token":"x"}\n');
     const theirs = await encryptFile("pw", '{"token":"y"}\n');
-    expect(await verdict({ local: { [BASE]: mine }, remote: { [BASE]: theirs }, groups: g, passphrase: null })).toBe("cannot");
+    expect(await verdict({ local: { [BASE]: mine }, remote: { [BASE]: theirs }, groups: g, passphrase: null })).toEqual({ cannot: "here" });
   });
 
   it("finds a difference in an encrypted field inside a sidecar", async () => {

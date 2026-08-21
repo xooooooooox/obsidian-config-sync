@@ -572,7 +572,7 @@ export default class ConfigSyncPlugin extends Plugin {
         });
         this.remoteChecks.set(remote.name, { check, at: Date.now() });
       } catch (e) {
-        this.remoteChecks.set(remote.name, { check: { state: "unknown", remoteCapturedAt: null, items: null, itemVerdicts: null, uncomparable: [] }, at: Date.now() });
+        this.remoteChecks.set(remote.name, { check: { state: "unknown", remoteCapturedAt: null, items: null, itemVerdicts: null, uncomparable: {} }, at: Date.now() });
         console.error(`Config Sync: remote check failed for ${remote.name}`, e);
       }
       if (this.remoteRefreshProgress !== null) this.remoteRefreshProgress.done++;
