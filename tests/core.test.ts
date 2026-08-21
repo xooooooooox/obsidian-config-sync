@@ -8,7 +8,7 @@ import { SwitchList } from "../src/core/switchList";
 import { SELF_GROUP_NAME, SELF_ITEM_REF, selfPresetRules } from "../src/core/catalog";
 import { RemoteItems, StoreLock, SyncGroup, EVERYWHERE, THIS_DEVICE, perClass } from "../src/core/types";
 import { withheldPatternPredicate } from "../src/core/keyWithholding";
-import { decryptFile, encryptFile, isFieldEnvelope, parseFileEnvelope } from "../src/core/crypto";
+import { decryptField, decryptFile, encryptField, encryptFile, isFieldEnvelope, parseFileEnvelope } from "../src/core/crypto";
 import { statusForGroups, remoteLockAhead } from "../src/core/status";
 import { emptyLedger } from "../src/core/ledger";
 import { isChanged } from "../src/core/runHistory";
@@ -3551,3 +3551,65 @@ function fakeReader2(files: Record<string, string>): ExternalStoreReader {
     },
   };
 }
+
+describe("a withheld ENCRYPTED key keeps the other side's envelope, byte for byte", () => {
+  const FIELDS_MANIFEST = JSON.stringify({
+    version: 1,
+    groups: [
+      {
+        name: "plugin-fields", path: "{configDir}/plugins/fields/data.json", type: "file", devices: "all",
+        mode: "fields", fields: [{ pattern: "token", sharing: { kind: "everywhere" }, encrypted: true }],
+      },
+    ],
+  });
+  const REL = "store/configdir/plugins/fields/data.json";
+  const rules: RemoteItems = { community: { fields: { keys: { token: { direction: "none" } } } } };
+
+  async function seeded(minePass: string): Promise<{ io: MemFS; ctx: CoreContext; groups: SyncGroup[] }> {
+    const { io, ctx } = setup();
+    io.seed({
+      "cs/store.lock.json": JSON.stringify({ capturedAt: "t", items: {}, version: 3 }),
+      [`cs/${REL}`]: JSON.stringify({ theme: "mine", token: await encryptField(minePass, "my-secret") }, null, 2) + "\n",
+    });
+    await seedGroups(ctx, FIELDS_MANIFEST);
+    return { io, ctx, groups: await readGroups(ctx) };
+  }
+
+  it("under a shared passphrase: the ciphertext string over there does not move", async () => {
+    const { ctx, groups } = await seeded("pw");
+    const theirToken = await encryptField("pw", "their-secret");
+    const fw = fakeWriter({
+      "store.lock.json": JSON.stringify({ capturedAt: "t", items: {}, version: 3 }),
+      [REL]: JSON.stringify({ theme: "theirs", token: theirToken }, null, 2) + "\n",
+    });
+    await pushExternal(ctx, fw.writer, { skipRefs: [], withheldPush: withheldPatternPredicate(rules, "push", groups), expectPush: [] });
+    const sent = JSON.parse(fw.files[REL]!) as { theme: string; token: string };
+    expect(sent.theme).toBe("mine");
+    expect(sent.token).toBe(theirToken); // byte for byte — never re-encrypted, never replaced
+  });
+
+  it("under different passphrases: still their envelope verbatim, while the rest re-encrypts for them", async () => {
+    const { ctx, groups } = await seeded("mine-pw");
+    const theirToken = await encryptField("their-pw", "their-secret");
+    const fw = fakeWriter({
+      "store.lock.json": JSON.stringify({ capturedAt: "t", items: {}, version: 3 }),
+      [REL]: JSON.stringify({ theme: "theirs", token: theirToken, other: await encryptField("their-pw", "old") }, null, 2) + "\n",
+    });
+    // The local document also carries a non-withheld encrypted key, to prove the two fates apart.
+    const io2 = (ctx as unknown as { io: MemFS }).io;
+    io2.seed({
+      [`cs/${REL}`]: JSON.stringify(
+        { theme: "mine", token: await encryptField("mine-pw", "my-secret"), other: await encryptField("mine-pw", "NEW") }, null, 2) + "\n",
+    });
+    await pushExternal(ctx, fw.writer, {
+      skipRefs: [],
+      withheldPush: withheldPatternPredicate(rules, "push", groups),
+      expectPush: [],
+      transcode: (rel, content, existing) => transcodeContent({ rel, content, existing, from: "mine-pw", to: "their-pw" }),
+    });
+    const sent = JSON.parse(fw.files[REL]!) as { theme: string; token: string; other: string };
+    expect(sent.token).toBe(theirToken); // the withheld key: their own envelope, untouched
+    expect(await decryptField("their-pw", sent.other, "fields")).toBe("NEW"); // the travelling key: re-encrypted for them
+    expect(sent.theme).toBe("mine");
+  });
+});
