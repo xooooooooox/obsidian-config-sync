@@ -105,6 +105,8 @@ import { ConflictModal } from "./ui/ConflictModal";
 import { renderStatusBarItem, statusBarSegments } from "./ui/statusBar";
 import { SYNC_CENTER_VIEW_TYPE, SelfSyncInfo, SyncCenterHost, SyncCenterView } from "./ui/SyncCenterView";
 import { ConfigSyncSettingTab } from "./ui/SettingTab";
+import { differentKeyHold } from "./core/differentKeyHold";
+import { resolveRemotePassphrase } from "./core/remotePassphrase";
 
 // Settings schema v4. The sync list is not a
 // stored SyncGroup[] — it is COMPILED (registry.ts's compileItems) from `items` on every
@@ -1025,8 +1027,16 @@ export default class ConfigSyncPlugin extends Plugin {
         try {
           const ctx = await this.coreContext();
           const blocked = refsBlockedFor(remote.items, "pull");
+          // Until 4c can transcode, ciphertext does not travel to or from a remote keyed
+          // differently — held out at the PLANNING stage (3f's rule: every decision before the
+          // first byte), with a per-item line in the report.
+          const hold = differentKeyHold({
+            key: resolveRemotePassphrase(this.app.secretStorage, remote, this.passphrase()),
+            remoteName: remote.name,
+            groups: this.compiledGroups,
+          });
           const pending = await planImport(ctx, await this.createReader(remote), {
-            skipRefs: [...new Set([...blocked, ...skipRefs])],
+            skipRefs: [...new Set([...blocked, ...hold.skipRefs, ...skipRefs])],
             withheldPull: withheldPatternPredicate(remote.items, "pull", this.compiledGroups),
           });
           // Pull resolves file conflicts only; sync-list (definition) conflicts are never
@@ -1053,12 +1063,12 @@ export default class ConfigSyncPlugin extends Plugin {
             const results = await applyImport(ctx, modalPending, choices);
             await this.refreshLocalStatus();
             await this.refreshRemoteChecks();
-            return results;
+            return [...results, ...hold.results];
           }
           const results = await applyImport(ctx, pending, []);
           await this.refreshLocalStatus();
           await this.refreshRemoteChecks();
-          return results;
+          return [...results, ...hold.results];
         } catch (e) {
           const message = (e as Error).message;
           // The newer-lock refusal already says what to do (update Config Sync) — appending the
@@ -1076,14 +1086,19 @@ export default class ConfigSyncPlugin extends Plugin {
         try {
           const ctx = await this.coreContext();
           const blocked = refsBlockedFor(remote.items, "push");
+          const hold = differentKeyHold({
+            key: resolveRemotePassphrase(this.app.secretStorage, remote, this.passphrase()),
+            remoteName: remote.name,
+            groups: this.compiledGroups,
+          }); // see pullFrom
           const results = await pushExternal(ctx, await this.createWriter(remote), {
-            skipRefs: [...new Set([...blocked, ...skipRefs])],
+            skipRefs: [...new Set([...blocked, ...hold.skipRefs, ...skipRefs])],
             withheldPush: withheldPatternPredicate(remote.items, "push", this.compiledGroups),
             // What the panel judged and the user acted on — the guard's own input (spec 3.7).
             expectPush,
           });
           await this.refreshRemoteChecks();
-          return results;
+          return [...results, ...hold.results];
         } catch (e) {
           const message = (e as Error).message;
           const advice = classifyRemoteFailure(message) === "no-token" || isOwnStoreRefusal(message) ? "" : " — check the remote's URL or path and try again."; // see pullFrom
