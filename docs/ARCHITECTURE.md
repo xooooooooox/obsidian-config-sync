@@ -316,18 +316,28 @@ functions.
   **One level down, an item with per-key rules cannot be judged from the two locks at all**: its
   fingerprints differ by design, so the fast path ("both hashed and equal ⇒ equal") never fires and
   the capture stamps take over — and then every capture on the other device relights an arrow no run
-  can clear. `checkRemote`'s `keyRuled` option is the answer: for those items ONLY, and only after
-  the three refusals that make a remote uncomparable, it asks `storeItemsAgree` and passes the ones
-  that agree as `settled` to both `remoteItemVerdicts` and the whole-store `perItemRemoteState`,
-  where their entries are skipped outright. A remote with no key rules passes an empty list and pays
+  can clear. **An item holding ciphertext cannot be judged from them either**, for the opposite
+  reason: it has no fingerprint at all (a fingerprint of ciphertext could never match across two
+  vaults, so `storeContentIsHashable` never writes one), and every encryption draws fresh randomness
+  — the same setting in two vaults is never the same bytes. Two causes, one consequence, so
+  `checkRemote`'s `content` option answers both: for those items ONLY, and only after the three
+  refusals that make a remote uncomparable, it asks `compareStoreItem` (`core/itemCompare.ts`) and
+  routes the answer three ways. `same` and `cannot` both go into `settled`, where the lock entries
+  are skipped outright — the first because there is demonstrably nothing to do, the second because a
+  comparison that never happened must not pin an arrow. `cannot` is ALSO reported, as
+  `RemoteCheck.uncomparable`: an item nobody could read is something to say, an item that agrees is
+  not. `differs` says nothing and lets the two entries decide, which for an encrypted item means the
+  capture stamps. A remote with no key rules and nothing encrypted passes an empty list and pays
   nothing.
-  `diffRemote(ctx, reader, opts: { skipRefs, unexchanged })` returns per-group `RemoteDiffEntry.files:
+  `diffRemote(ctx, reader, opts: { skipRefs, unexchanged, passphrase })` returns per-group `RemoteDiffEntry.files:
   RemoteDiffFile[]` — one entry per file with its `kind` (`added`/`updated`/`deleted`) and both
   sides' content, so the UI renders file lists and content diffs instead of bare counts;
   `skipRefs` drops those items' store rels from both sides before diffing (comparison answers for
   both directions at once, so main.ts passes the union of the pull and push blocked sets), and
   `unexchanged` masks the keys that travel neither way before the byte comparison, so a file whose
-  only difference is one of them is not listed as a row the user could never act on.
+  only difference is one of them is not listed as a row the user could never act on. `passphrase`
+  carries each side's own key: a file this device cannot open produces NO file row and marks its
+  entry `uncomparable` instead, because listing one would claim a change nobody verified.
   `remoteLockAhead(localRaw, remoteRaw, ignoreRefs, groups?)` takes an explicit `ignoreRefs` list —
   callers pass `refsBlockedFor(remote.items, "pull")`, so a lock entry for an item the remote never
   pulls cannot keep the "remote has newer version info" hint alive forever. `applyImport` closes the
@@ -551,9 +561,30 @@ functions.
   masking it would hide something a run would fix. `sameApartFromWithheld({a, b, patterns})` is that
   masked comparison; unlike `overlayWithheld` it **tolerates** a side it cannot parse and falls back
   to the byte comparison the caller would otherwise have done, because it answers a question rather
-  than producing bytes a run will send. `storeItemsAgree` lifts it to a whole item (base copy plus
-  its two per-class sidecars, read from `io` and the reader already in hand) and `refsWithKeyRules`
-  names the only items that pay for it.
+  than producing bytes a run will send. `refsWithKeyRules` names the items that pay for it.
+- `core/cipherCompare.ts` — do two store copies of one file hold the same content, when one or both
+  are encrypted? THREE answers, not two: `same`, `differs`, and `cannot`. The third is the point. A
+  copy this device cannot open is not a copy that differs; saying "differs" about it states a fact
+  nobody has, and doing so by comparing BYTES is worse than useless here — each envelope carries its
+  own random salt and IV, so the same setting encrypted in two vaults differs forever, lighting a
+  difference no run can clear. `compareCopies({mine, theirs, passphrase, masked, groupName})` answers
+  in order: one side missing is an ordinary push/pull row and says nothing about passphrases;
+  identical bytes are identical content (two devices on one store pay nothing here); different
+  STORAGE FORMS are a difference, not a puzzle to open; two whole-file envelopes decrypt the far
+  side once and check our own envelope's plaintext HMAC against it — the settled case costs one
+  decryption and one HMAC. The HMAC cannot tell a wrong passphrase from changed content (both come
+  back false), and that distinction IS the third answer, so a false sends it to open our own copy
+  and find out which. A document with encrypted FIELDS is masked, then every `enc:v1:` leaf is
+  replaced by what it says, and the two are compared normalised; a leaf that will not open makes the
+  whole answer `cannot`. Copies with no ciphertext anywhere delegate to `sameApartFromWithheld`, so
+  the plain path keeps exactly one implementation and can never answer `cannot`.
+- `core/itemCompare.ts` — the same question one level up, for a whole item.
+  `compareStoreItem` reads its store files from both sides (a file item is its base copy plus the
+  two per-class sidecars; a folder item is whatever either side holds under its store directory) and
+  folds the per-file answers with one rule: **`differs` outranks `cannot`.** Once one file is
+  plainly not the same we know something has to move, and downgrading the item to "we cannot tell"
+  because a SECOND file is unreadable throws away the answer we do have. `refsNeedingContentCompare`
+  names who pays: the items with key rules, plus the items holding ciphertext.
 
 **Install & discovery**
 - `core/installer.ts` — download a plugin from the community catalog, version-pinned via the

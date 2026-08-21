@@ -2,6 +2,8 @@
 
 ## 2.25.0
 
+- Fixed encrypted items always looking out of sync with a remote. Every encryption draws fresh randomness, so two vaults holding the very same setting still hold different bytes — Config Sync now compares what the two copies say instead of the bytes they are stored as, and an encrypted item that matches finally reads as in sync
+- Added an honest answer for an encrypted item this device can't open: it says the two copies can't be compared, and offers the way to fix that, instead of claiming a difference nobody checked. Those items get their own group while a remote is selected, count in neither direction, and stay out of what a run would touch. An item the remote has no copy of yet is not one of them — it is an ordinary waiting item, since a passphrase only proves itself against something to open
 - Fixed a push racing another device's save. Config Sync now works out everything it is going to send, checks that the other end still looks the way it did, and only then writes — if anything moved in between it stops with nothing written, instead of quietly restoring the value that other device had just changed
 - Added a guard against acting on a comparison that has gone stale: if an item you picked has moved on at the other end since you last compared, Push stops and asks you to look again rather than overwriting it
 - Added a per-key choice about what each remote gets. Open an item while a remote is selected, click any key in it, and that key stops travelling — the rest of the item still does. Each key can travel both ways, only out, only in, or not at all, and never further than the item it lives in

@@ -273,6 +273,8 @@ Encrypt modes need a vault-level **Passphrase**, set once per device in Settings
 - On Obsidian 1.12+ it is stored encrypted in the app's keychain (Settings → Keychain); older installs keep it in plain app storage.
 - An item with encrypted content but no passphrase set on the current device shows a *locked* state (marked with a key icon) and won't capture or apply until the passphrase is set.
 - A wrong passphrase on Apply fails cleanly without writing anything.
+- **Comparing with a remote reads what the copies say, not the bytes they are stored as.** Every encryption draws fresh randomness, so two vaults holding the very same setting hold different bytes — comparing those would report a difference no Push or Pull could ever clear. Config Sync opens both copies instead and compares what is inside.
+- **Without the passphrase on this device, those items say so.** They land in the remote view's own `Can't compare` group rather than claiming a difference nobody checked; setting the passphrase here makes them compare normally. An item the remote has no copy of yet is unaffected — it is an ordinary `To push` row, since a passphrase only proves itself against something to open.
 
 #### Sensitive-key detection
 
