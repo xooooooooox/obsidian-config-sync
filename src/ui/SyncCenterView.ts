@@ -173,6 +173,28 @@ const REMOTE_DIRECTION_ICON: Record<RemoteDirection, string> = {
   pull: "cloud-download",
   none: "circle-slash",
 };
+// The four-stop segmented control (acceptance B2-V1): every offered stop visible at once, the
+// current one lit, one click to change — no menu between the reader and the answer. `stops` is the
+// caller's because a KEY may only be set within its item's own subset (keyStopsWithin); a segment
+// this control does not draw is a stop that click could not honestly write.
+function renderDirectionSeg(
+  parent: HTMLElement,
+  input: { stops: readonly RemoteDirection[]; current: RemoteDirection; ariaOf: (d: RemoteDirection) => string; onPick: (d: RemoteDirection) => void }
+): void {
+  const seg = parent.createSpan({ cls: "config-sync-dirseg" });
+  for (const d of input.stops) {
+    const btn = seg.createEl("button", {
+      cls: `config-sync-dirseg-btn${d === input.current ? " is-on" : ""}`,
+      attr: { "aria-label": input.ariaOf(d), "aria-pressed": d === input.current ? "true" : "false" },
+    });
+    setIcon(btn, REMOTE_DIRECTION_ICON[d]);
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (d !== input.current) input.onPick(d);
+    });
+  }
+}
+
 // The row's own chip for a non-default stop (FATE_CHIP_ICON carries their glyphs).
 const REMOTE_DIRECTION_CHIP: Record<RemoteDirection, string | null> = {
   both: null,
@@ -3293,20 +3315,16 @@ export class SyncCenterView extends ItemView {
     if (ref === null || remote === undefined) return;
     const current = itemDirection(remote.items, ref);
     const name = relation.name;
-    this.renderCardMenuRow(fields, "This remote", REMOTE_DIRECTION_LABEL[current], `Choose which way ${name} exchanges this item`, () => {
-      const menu = new Menu();
-      for (const d of REMOTE_DIRECTION_ORDER) {
-        menu.addItem((item) =>
-          item
-            .setTitle(REMOTE_DIRECTION_LABEL[d])
-            .setIcon(REMOTE_DIRECTION_ICON[d])
-            .setChecked(d === current)
-            .onClick(() => void this.host.setRemoteItemDirection(name, ref, d).then(() => this.reload()))
-        );
-      }
-      return menu;
+    const row = this.cardRowShell("This remote", true);
+    renderDirectionSeg(row.createSpan({ cls: "config-sync-cardrow-ctl" }), {
+      stops: REMOTE_DIRECTION_ORDER,
+      current,
+      ariaOf: (d) => `${REMOTE_DIRECTION_LABEL[d]} — which way ${name} exchanges this item`,
+      onPick: (d) => void this.host.setRemoteItemDirection(name, ref, d).then(() => this.reload()),
     });
+    fields.appendChild(row);
   }
+
 
   // spec 5.4's `Keys`: which way each KEY of this item flows with the remote on screen. The shape is
   // Settings' own `KEY RULES` block, deliberately — the ruled keys as rows, the `Click any key…`
@@ -3365,25 +3383,14 @@ export class SyncCenterView extends ItemView {
     const row = value.createDiv({ cls: "config-sync-keyrule-row" });
     row.createSpan({ cls: "config-sync-keyrule-name", text: pattern });
     const current = keyDirection(remote.items, ref, pattern);
-    const chip = row.createSpan({
-      cls: "config-sync-menuchip config-sync-card-trigger",
-      text: REMOTE_DIRECTION_LABEL[current],
-      attr: { "aria-label": `Choose which way ${remoteName} exchanges ${pattern}` },
-    });
-    this.wireMenuTrigger(chip, () => {
-      const menu = new Menu();
-      // Only the stops this item still allows: offering more would let a click write a rule the
-      // reader resolves to something else, i.e. a control lying about its own effect.
-      for (const d of keyStopsWithin(item)) {
-        menu.addItem((mi) =>
-          mi
-            .setTitle(REMOTE_DIRECTION_LABEL[d])
-            .setIcon(REMOTE_DIRECTION_ICON[d])
-            .setChecked(d === current)
-            .onClick(() => void this.host.setRemoteKeyDirection(remoteName, ref, pattern, d).then(() => this.reload()))
-        );
-      }
-      return menu;
+    // The item row's segmented control at key size, drawing ONLY the stops this item still allows
+    // (keyStopsWithin): a segment offering more would let a click write a rule the reader resolves
+    // to something else, i.e. a control lying about its own effect.
+    renderDirectionSeg(row.createSpan({ cls: "config-sync-keyrule-ctl" }), {
+      stops: keyStopsWithin(item),
+      current,
+      ariaOf: (d) => `${REMOTE_DIRECTION_LABEL[d]} — which way ${remoteName} exchanges ${pattern}`,
+      onPick: (d) => void this.host.setRemoteKeyDirection(remoteName, ref, pattern, d).then(() => this.reload()),
     });
   }
 

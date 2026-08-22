@@ -1414,6 +1414,19 @@ body.is-mobile .config-sync-tworow-chev { display: none; }
    also lines the chips up in one column, the way the label/control rows above them do. */
 .config-sync-keyrule-name { flex: 0 1 auto; min-width: 210px; max-width: 100%; font-family: var(--font-monospace); font-size: var(--font-ui-smaller); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .config-sync-keyrule-row { justify-content: flex-start; }
+.config-sync-keyrule-ctl { margin-left: auto; display: inline-flex; }
+
+/* The four-stop segmented control (This remote / each key rule). Current stop lit in accent —
+   the same "active" language the filter pills speak; the others stay faint until hovered. */
+.config-sync-dirseg { display: inline-flex; border: 1px solid var(--background-modifier-border); border-radius: 7px; overflow: hidden; background: var(--background-secondary); }
+.config-sync-dirseg-btn { all: unset; cursor: pointer; display: inline-flex; align-items: center; padding: 3px 7px; color: var(--text-faint); }
+.config-sync-dirseg-btn + .config-sync-dirseg-btn { border-left: 1px solid var(--background-modifier-border); }
+.config-sync-dirseg-btn:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
+.config-sync-dirseg-btn:focus-visible { box-shadow: inset 0 0 0 2px var(--interactive-accent); }
+.config-sync-dirseg-btn.is-on { background: rgba(var(--interactive-accent-rgb), 0.18); color: var(--interactive-accent); }
+.config-sync-dirseg-btn svg { width: 13px; height: 13px; }
+.config-sync-keyrule-ctl .config-sync-dirseg-btn { padding: 2px 6px; }
+.config-sync-keyrule-ctl .config-sync-dirseg-btn svg { width: 12px; height: 12px; }
 /* A tall value (the key rules plus the document) puts its label at the top, like every other
    card row's single line does — centring it against a 20-line document loses the pairing. */
 .config-sync-card-fieldrow:has(.config-sync-json-hint) .config-sync-explabel { align-self: start; }
