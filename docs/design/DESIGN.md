@@ -598,11 +598,11 @@ noted):
   a remote view's masthead it read as that remote's summary. The old `plugin settings ↔ store`
   sublabel lives in the self pane the row opens. The pill never wraps (nowrap); a narrow masthead
   ellipsizes the title instead. Grouping is by `config-sync-side-divider` hairlines alone:
-  masthead / scope list / History, with NO group heads anywhere. The sidebar carries NO search
-  (V2/V-a): the one search box lives in the main region's toolbar beside the filter pills at every
-  width — search and the pills filter the same list, the compact layout always kept it there, and
-  two homes for one control was a fork; the toolbar search's keystrokes still refresh the
-  sidebar's hit-count badges in place. Re-checking remotes
+  masthead / search / scope list / History, with NO group heads anywhere. The search sits below the masthead
+  and above the sections (V2, re-decided as P1 after V-a briefly moved it to the main toolbar):
+  top to bottom is the use order — choose what you are looking at, then filter it by name, and
+  what it filters is underneath. The compact layout, which has no sidebar, keeps its search in the
+  main toolbar beside the filter pills. Re-checking remotes
   belongs to the main region's global refresh button alone (it re-scans local state AND re-checks
   every remote; its tooltip carries the refreshed-age). **Switcher** `config-sync-switcher` —
   compact replacement for the section list alone: the masthead rides above it unchanged, and its

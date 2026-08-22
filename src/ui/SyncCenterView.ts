@@ -1945,13 +1945,41 @@ export class SyncCenterView extends ItemView {
     // looking at, then filter it. It lives OUTSIDE the section container so a keystroke's rebuild
     // never touches it.
     this.renderMasthead(side);
-    // No search here (V2/V-a): the ONE search lives in the main region's toolbar beside the
-    // filter pills — where the compact layout always had it — because search and the pills filter
-    // the same list. The sidebar is pure navigation: masthead → sections → History. The section
-    // list keeps its own container so the toolbar search's keystrokes can refresh its hit-count
-    // badges in place without touching the masthead.
+    // P1 (V2 reopened and re-decided): the search sits below the masthead and above the sections —
+    // top to bottom is the use order: choose what you are looking at, then filter it by name, and
+    // what it filters is underneath. (V-a briefly moved it to the main toolbar; reversed.)
+    const searchWrap = side.createDiv({ cls: "config-sync-search-wrap" });
+    const searchEl = searchWrap.createEl("input", {
+      type: "search",
+      cls: "config-sync-side-search",
+      attr: { placeholder: "Filter by name…" },
+    });
+    searchEl.value = this.search;
+    this.qac.attach(searchEl);
+    // The section list lives in its own container so a keystroke can refresh its hit-count badges in
+    // place — the search input (and the autocomplete anchored to it) stays put, keeping focus and
+    // never blinking mid-type.
     this.sideSectionEl = side.createDiv({ cls: "config-sync-side-section" });
     this.renderSectionEntries(this.sideSectionEl);
+    searchEl.addEventListener("input", () => {
+      const wasSearching = this.searching();
+      this.search = searchEl.value; // the field itself is native/instant — never waits on the render below
+      if (!wasSearching && this.searching()) {
+        this.filter = "all"; // searching means "find this item"
+        this.expandAllTypeSections(); // transition into search: expand once so hits are discoverable
+      }
+      // The heavy part — sidebar hit badges + the whole main pane
+      // (pills, list, sections all read this.search) — is debounced so a fast typist's in-between
+      // keystrokes never pay for a render; `debounceSearchRender` always reads live `this.search`
+      // when it fires, so the LAST keystroke in a burst is the one that settles, never a stale one.
+      this.debounceSearchRender(() => {
+        if (this.sideSectionEl !== null) {
+          this.sideSectionEl.empty();
+          this.renderSectionEntries(this.sideSectionEl);
+        }
+        this.renderMainRegion();
+      });
+    });
   }
 
   // The two-line masthead (acceptance T2/V3a): the self card and the View picker merged into ONE
@@ -2627,15 +2655,16 @@ export class SyncCenterView extends ItemView {
     const pillPool = this.countable(inSection);
     const bar = main.createDiv({ cls: "config-sync-mainbar" });
     const pillRow = bar.createDiv({ cls: "config-sync-fpillrow" });
-    // The one search, both widths (V2/V-a): search and the pills filter the same list, so they
-    // share this toolbar; the sidebar (which the compact layout never had) is pure navigation.
-    const searchWrap = bar.createDiv({ cls: "config-sync-search-wrap" });
-    const searchEl: HTMLInputElement = searchWrap.createEl("input", {
-      type: "search",
-      cls: "config-sync-mainbar-search",
-      attr: { placeholder: "Filter by name…" },
-    });
-    searchEl.value = this.search;
+    let searchEl: HTMLInputElement | null = null;
+    if (this.compact) {
+      const searchWrap = bar.createDiv({ cls: "config-sync-search-wrap" });
+      searchEl = searchWrap.createEl("input", {
+        type: "search",
+        cls: "config-sync-mainbar-search",
+        attr: { placeholder: "Filter by name…" },
+      });
+      searchEl.value = this.search;
+    }
     const selectAll = bar.createEl("input", { type: "checkbox", cls: "config-sync-selectall", attr: { "aria-label": "Select all visible items" } });
     const sectionsHost = main.createDiv();
 
@@ -2736,10 +2765,9 @@ export class SyncCenterView extends ItemView {
     renderSectionsBody();
     this.wireGlobalSelectAll(selectAll, pillPool);
 
-    // The search co-renders everything except its own input element, so focus (and the soft
-    // keyboard on mobile) stays put while pills, sections, the sidebar's hit badges and
-    // select-all all track the search.
-    {
+    // The compact search co-renders everything except its own input element, so the soft
+    // keyboard stays open while pills, sections and select-all track the search.
+    if (searchEl !== null) {
       const input = searchEl;
       input.addEventListener("input", () => {
         const wasSearching = this.searching();
@@ -2752,10 +2780,6 @@ export class SyncCenterView extends ItemView {
         // Same trailing debounce as the desktop sidebar search — this
         // is the mobile/narrow-pane path, at least as latency-sensitive as desktop.
         this.debounceSearchRender(() => {
-          if (this.sideSectionEl !== null) {
-            this.sideSectionEl.empty();
-            this.renderSectionEntries(this.sideSectionEl);
-          }
           renderPills();
           renderSectionsBody();
           this.refreshGlobalSelectAll(selectAll, pillPool);
