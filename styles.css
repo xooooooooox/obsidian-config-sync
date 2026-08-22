@@ -1006,7 +1006,12 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 .config-sync-mainbar { display: flex; align-items: center; gap: var(--size-4-1); padding-bottom: var(--size-4-2); flex-wrap: wrap; padding-right: calc(var(--size-4-3) + 1px); }
 
 .config-sync-mainbar .config-sync-search-wrap { margin-left: auto; width: 140px; }
-.config-sync-mainbar-search { background: var(--background-primary); border: 1px solid var(--background-modifier-border); border-radius: 6px; padding: 2px 8px; font-size: var(--font-ui-smaller); width: 100%; }
+/* The pill row's own shape (image 125): same capsule radius, border, type size and vertical
+   padding as .config-sync-fpill, so the search reads as a member of the toolbar it lives in
+   rather than a box parked beside it. */
+.config-sync-mainbar-search { background: none; border: 1px solid var(--background-modifier-border); border-radius: 999px; padding: 2px 10px; font-size: var(--font-ui-smaller); color: var(--text-normal); width: 100%; height: auto; box-shadow: none; }
+.config-sync-mainbar-search:focus { border-color: rgba(var(--interactive-accent-rgb), 0.6); box-shadow: none; }
+.config-sync-mainbar-search::placeholder { color: var(--text-faint); }
 
 
 .config-sync-shell.is-compact { grid-template-columns: 1fr; }
