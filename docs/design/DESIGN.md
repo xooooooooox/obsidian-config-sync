@@ -532,6 +532,13 @@ noted):
   letter (F3 — the name now never truncates). While a remote's comparison is in flight, a pulsing
   `-pending-dot` holds the slot instead (F4): an empty slot reads as "nothing to do", the dot as
   "still counting"; static under reduced motion, and the sidebar section badges hold the same dot.
+  A remote never CHECKED this session pends the same way (M1): the check table lives in memory, so
+  after a reload the verdict table's absence is indistinguishable from "nothing waiting" — the
+  panel used to render a false all-clear that silently flipped when the 30-second startup check
+  landed. The main region shows the checking block ("Checking <name>…", the comparing block's own
+  visual language without owning a deep compare) and kicks `refreshRemoteChecks` itself when none
+  is running (M2), so the window lasts one check, not a timer's grace. A remote that WAS checked
+  and came back unknown is a settled answer and does not pend.
   The dropdown rows
   (`-view-menu`/`-view-opt`) wear the same icon + short name; each carries its own badge: the
   device side its capture/apply item counts, the on-screen remote its push/pull counts from the

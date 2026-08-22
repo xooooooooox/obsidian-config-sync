@@ -1990,8 +1990,14 @@ export class SyncCenterView extends ItemView {
   // Is the current remote's comparison still in flight (acceptance F4)? Until a settled result
   // exists the rows are empty, and an empty badge slot would read as "nothing to do" when the
   // truth is "still counting" — the pending dot is what tells those two states apart.
+  // "Never checked THIS SESSION" pends too (acceptance M1): the checks map lives in memory, so
+  // right after a reload it is empty, and the verdict table's absence is indistinguishable from
+  // "nothing waiting" — the exact false all-clear the pending state exists to prevent. A remote
+  // that WAS checked and came back unknown is a settled (if unhappy) answer and does not pend.
   private remoteCountsPending(): boolean {
-    return this.relation.kind === "remote" && this.remoteResultFor(this.relation.name) === null;
+    if (this.relation.kind !== "remote") return false;
+    if (this.host.remoteCheck(this.relation.name) === undefined) return true;
+    return this.remoteResultFor(this.relation.name) === null;
   }
 
   private renderPendingDot(parent: HTMLElement): void {
@@ -2491,6 +2497,19 @@ export class SyncCenterView extends ItemView {
     // progress block instead — the same one the retired remote pane drew, in the list's place.
     if (relation.kind === "remote") {
       const remote = this.host.remotes().find((x) => x.name === relation.name);
+      // No check has run against this remote THIS SESSION: the verdict table every row bucket
+      // reads does not exist yet, and rendering the list anyway dressed a freshly reloaded pane
+      // in a false "In sync" that silently flipped when the 30-second startup check landed
+      // (acceptance M1). This window kicks the check itself (M2) instead of waiting for that
+      // timer, and deliberately does NOT start the deep compare: reaching renderRemoteComparing
+      // with a settled result would drop and restart it on every notify until the check lands —
+      // for a git remote, a clone per repaint.
+      if (remote !== undefined && this.host.remoteCheck(remote.name) === undefined) {
+        if (this.host.remoteRefreshProgress() === null) void this.host.refreshRemoteChecks();
+        this.renderResultStrip(main);
+        this.renderRemoteChecking(main, remote.name);
+        return;
+      }
       if (remote !== undefined && this.remoteResultFor(remote.name) === null) {
         this.renderResultStrip(main);
         void this.renderRemoteComparing(main, remote);
@@ -4690,6 +4709,18 @@ export class SyncCenterView extends ItemView {
   // this method is never reached for it: renderItemMode asks remoteResultFor first and draws the
   // list. Settling here therefore ends in a re-render, which finds that cached result and paints
   // rows — this method only ever owns the waiting and the failure.
+  // The pre-check waiting block: same visual language as the comparing block below, but it owns
+  // no deep compare — refreshRemoteChecks is the work it waits on, and its completion notify is
+  // what repaints this away. Copy stays in the panel's own progress voice ("Checking <name>…",
+  // the pending dot's hover sentence).
+  private renderRemoteChecking(main: HTMLElement, name: string): void {
+    const detail = main.createDiv({ cls: "config-sync-report-files" });
+    const box = detail.createDiv({ cls: "config-sync-remote-comparing" });
+    box.createSpan({ cls: "config-sync-cmp-spinner" });
+    box.createSpan({ cls: "config-sync-cmp-label", text: `Checking ${name}…` });
+    detail.createDiv({ cls: "config-sync-cmp-bar" }).createDiv({ cls: "config-sync-cmp-bar-fill" });
+  }
+
   private async renderRemoteComparing(main: HTMLElement, remote: Remote): Promise<void> {
     const detail = main.createDiv({ cls: "config-sync-report-files" });
     const gen = this.renderGen;

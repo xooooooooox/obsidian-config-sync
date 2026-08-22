@@ -635,6 +635,10 @@ body.is-mobile.config-sync-mobile-statusbar .status-bar {
 .config-sync-fate-ic.is-conflict { color: var(--color-red); }
 .config-sync-fate-ic.is-up { color: var(--color-orange); }
 .config-sync-fate-ic.is-down { color: var(--interactive-accent); }
+/* The remote relation's family (F1): the row's fate icon carries is-push/is-pull there, and these
+   two went missing when the class unified — the icon fell back to plain text grey (N1). */
+.config-sync-fate-ic.is-push { color: var(--color-pink); }
+.config-sync-fate-ic.is-pull { color: var(--color-cyan); }
 .config-sync-fate-ic svg { width: 14px; height: 14px; }
 .config-sync-fate-text { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 /* Red, not the orange `capture` already owns — see foldIcons.ts's CONFLICT_ICON for why the two
