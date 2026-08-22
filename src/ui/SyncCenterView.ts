@@ -94,6 +94,7 @@ import {
   PanelDestination,
   PanelRelation,
   relationHint,
+  destinationKey,
   relationKey,
   relationShortLabel,
   viewOptions,
@@ -1194,6 +1195,37 @@ export class SyncCenterView extends ItemView {
     for (const r of this.countable(this.rows())) out.add(this.itemSectionOf(r.group.name));
     for (const r of this.countable(this.deviceRows())) out.add(this.itemSectionOf(r.group.name));
     return out;
+  }
+
+  // 方案1 (acceptance N2): the one row the user just re-filed FROM INSIDE ITS OPEN CARD. While it
+  // holds, that row presents in place — exempt from the filter and from folding — because the
+  // re-filing was the user's own gesture and the card vanishing under their pointer mid-gesture is
+  // worse than the row briefly disagreeing with the pill counts (which are honest throughout).
+  // `context` pins where they were when they did it: any navigation — filter, search, relation,
+  // destination — retires the anchor instead of letting it revive on the way back.
+  private cardAnchor: { name: string; context: string } | null = null;
+
+  private anchorContext(): string {
+    return `${relationKey(this.relation)}::${destinationKey(this.destination)}::${this.filter}::${this.search}`;
+  }
+
+  // Set on the in-card mutations that can re-file the row (direction stops, key rules, withheld
+  // keys). Guarded on the card actually being open: these controls only exist inside one today,
+  // but the guard is what the anchor's lifetime rule (below) leans on.
+  private anchorCard(name: string): void {
+    if (this.expandedItems.has(name)) this.cardAnchor = { name, context: this.anchorContext() };
+  }
+
+  // The anchor, validated: gone once the card is collapsed or the user navigated away. Retiring is
+  // one-way — coming BACK to the same filter later must not resurrect a stale exemption.
+  private anchoredRowName(): string | null {
+    const a = this.cardAnchor;
+    if (a === null) return null;
+    if (a.context !== this.anchorContext() || !this.expandedItems.has(a.name)) {
+      this.cardAnchor = null;
+      return null;
+    }
+    return a.name;
   }
 
   private deviceRows(): StatusRow[] {
@@ -2710,7 +2742,11 @@ export class SyncCenterView extends ItemView {
       (r) => (r.remote !== undefined || !ENABLEMENT_CARRIER_GROUPS.has(r.group.name)) && typeSectionForRow(this.itemSectionOf(r.group.name)) === ts
     );
     const matches = this.searching() ? rows.filter((r) => this.rowMatchesSearch(r)) : rows;
-    return { rows, visible: matches.filter((r) => visibleUnderFilter(this.rowBucket(r), this.filter)) };
+    // The anchored row passes whatever the filter says (acceptance N2): its bucket just changed by
+    // the user's own hand inside its open card, and dropping it here is the vanish they complained
+    // about. The pills stay honest; only presentation is exempted, and only until they navigate.
+    const anchored = this.anchoredRowName();
+    return { rows, visible: matches.filter((r) => visibleUnderFilter(this.rowBucket(r), this.filter) || r.group.name === anchored) };
   }
 
   // How many type sections currently hold a staged row. Counted over VISIBLE rows, the same set
@@ -2841,7 +2877,8 @@ export class SyncCenterView extends ItemView {
       // THIS device out of under `N not installed on this device` while the `Not synced here` pill
       // still counts it, which is a number with nothing behind it.
       const foldLocked = this.relation.kind === "remote";
-      const placed = visible.map((r) => ({ r, at: placeRow(this.rowBucket(r), this.sectionOf(r.group.name), { foldLocked }) }));
+      const anchored = this.anchoredRowName();
+      const placed = visible.map((r) => ({ r, at: placeRow(this.rowBucket(r), this.sectionOf(r.group.name), { foldLocked, anchored: r.group.name === anchored }) }));
       const active = placed.filter((x) => x.at.zone === "active").map((x) => x.r);
       const fateRows = (fold: FateFold): StatusRow[] =>
         placed.filter((x) => x.at.zone === "fate" && x.at.fold === fold).map((x) => x.r);
@@ -3394,7 +3431,10 @@ export class SyncCenterView extends ItemView {
       stops: REMOTE_DIRECTION_ORDER,
       current,
       ariaOf: (d) => `${REMOTE_DIRECTION_LABEL[d]} — which way ${name} exchanges this item`,
-      onPick: (d) => void this.host.setRemoteItemDirection(name, ref, d).then(() => this.reload()),
+      onPick: (d) => {
+        this.anchorCard(r.group.name);
+        void this.host.setRemoteItemDirection(name, ref, d).then(() => this.reload());
+      },
     });
     fields.appendChild(row);
   }
@@ -3425,7 +3465,7 @@ export class SyncCenterView extends ItemView {
         return;
       }
       if (model.narrowed) value.createDiv({ cls: "config-sync-keys-limited", text: "limited by This remote" });
-      for (const pattern of model.keys) this.renderKeyRuleRow(value, relation.name, remote, ref, item, pattern);
+      for (const pattern of model.keys) this.renderKeyRuleRow(value, r.group.name, relation.name, remote, ref, item, pattern);
       this.renderKeyDocument(value, r, relation.name, remote, ref);
     });
   }
@@ -3453,7 +3493,7 @@ export class SyncCenterView extends ItemView {
   // RESOLVED direction (keyDirection), not the stored one — spec 2.2 keeps a stored rule the item
   // has since narrowed exactly as written, and widening the item again restores it, but what the
   // user is looking at right now is the narrower answer.
-  private renderKeyRuleRow(value: HTMLElement, remoteName: string, remote: Remote, ref: ItemRef, item: RemoteDirection, pattern: string): void {
+  private renderKeyRuleRow(value: HTMLElement, groupName: string, remoteName: string, remote: Remote, ref: ItemRef, item: RemoteDirection, pattern: string): void {
     const row = value.createDiv({ cls: "config-sync-keyrule-row" });
     row.createSpan({ cls: "config-sync-keyrule-name", text: pattern });
     const current = keyDirection(remote.items, ref, pattern);
@@ -3464,7 +3504,10 @@ export class SyncCenterView extends ItemView {
       stops: keyStopsWithin(item),
       current,
       ariaOf: (d) => `${REMOTE_DIRECTION_LABEL[d]} — which way ${remoteName} exchanges ${pattern}`,
-      onPick: (d) => void this.host.setRemoteKeyDirection(remoteName, ref, pattern, d).then(() => this.reload()),
+      onPick: (d) => {
+        this.anchorCard(groupName);
+        void this.host.setRemoteKeyDirection(remoteName, ref, pattern, d).then(() => this.reload());
+      },
     });
   }
 
@@ -3516,7 +3559,10 @@ export class SyncCenterView extends ItemView {
         // writer's own discipline is never stored — so clicking would produce no rule, no row, and
         // look like a dead control. Anyone reaching for a key here wants it to stop travelling; the
         // other two stops are one more click away on the row it just created.
-        onPick: (key) => void this.host.setRemoteKeyDirection(remoteName, ref, key, "none").then(() => this.reload()),
+        onPick: (key) => {
+          this.anchorCard(r.group.name);
+          void this.host.setRemoteKeyDirection(remoteName, ref, key, "none").then(() => this.reload());
+        },
       });
       // The same legend Settings puts under this document, in THIS surface's words: over there a
       // key's colour answers "who shares this value", here it answers "which way it travels" —

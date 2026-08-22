@@ -59,7 +59,13 @@ export const FATE_FOLD_YIELDS_TO_AVAILABILITY: Record<FateFold, boolean> = {
 // Under the device relation it keeps its long-standing place among the active rows, unchanged.
 // Explicit rather than defaulted: a forgotten argument would silently move rows under a relation
 // that never asked for it.
-export function placeRow(bucket: RowBucket, availability: SectionKind, opts: { foldLocked: boolean }): RowPlacement {
+export function placeRow(bucket: RowBucket, availability: SectionKind, opts: { foldLocked: boolean; anchored: boolean }): RowPlacement {
+  // The attention exception (acceptance N2): a row the user just re-filed from inside its own open
+  // card stays presented where they are looking, whatever its new bucket says — the alternative is
+  // the card vanishing mid-gesture into a fold or out of the filter. An anchor lives only until
+  // the card is collapsed or the user navigates (the view retires it); the filing rules below
+  // speak for every row nobody is holding open.
+  if (opts.anchored) return { zone: "active" };
   if (bucket === "locked" && opts.foldLocked) return { zone: "fate", fold: "locked" };
   const fold = partitionSection(bucket);
   if (fold === "active") return { zone: "active" };

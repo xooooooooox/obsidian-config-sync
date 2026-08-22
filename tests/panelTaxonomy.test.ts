@@ -24,7 +24,18 @@ const AVAILABILITIES: SectionKind[] = ["main", "outdated", "disabled", "not-inst
 // The device relation's answer. `locked` folds only under a remote (see the block at the bottom),
 // so every table below states the device placement and the remote one is asserted separately —
 // a shared default would hide which relation each row is about.
-const DEVICE = { foldLocked: false };
+const DEVICE = { foldLocked: false, anchored: false };
+
+describe("placeRow — the anchored exception (acceptance N2)", () => {
+  it("keeps an anchored row in the active zone, whatever its bucket or availability says", () => {
+    for (const bucket of BUCKETS) {
+      for (const availability of AVAILABILITIES) {
+        expect(placeRow(bucket, availability, { foldLocked: false, anchored: true }), `${bucket} × ${availability}`).toEqual({ zone: "active" });
+        expect(placeRow(bucket, availability, { foldLocked: true, anchored: true }), `${bucket} × ${availability} (remote)`).toEqual({ zone: "active" });
+      }
+    }
+  });
+});
 
 describe("placeRow — the full (fate × availability) table", () => {
   it("is total: every combination has exactly one home", () => {
@@ -97,13 +108,13 @@ describe("pill ⇄ fold agreement", () => {
         // `Can't compare` pill's fold exists only under a remote, and partitionSection is the
         // device relation's vocabulary alone.
         const foldOf = (b: RowBucket): FateFold | null => {
-          const at = placeRow(b, "main", { foldLocked: true });
+          const at = placeRow(b, "main", { foldLocked: true, anchored: false });
           return at.zone === "fate" ? at.fold : null;
         };
         const bucket = BUCKETS.find((b) => pillCounts(b, pill) && foldOf(b) === fold);
         expect(bucket, `no bucket for pill ${pill}`).toBeDefined();
         if (bucket === undefined) continue;
-        const at = placeRow(bucket, availability, { foldLocked: true });
+        const at = placeRow(bucket, availability, { foldLocked: true, anchored: false });
         // Either the pill's own fold holds it, or the taxonomy declared this fold yields — there is
         // no third outcome, and no silent one.
         if (at.zone === "fate") expect(at.fold).toBe(fold);
@@ -139,7 +150,7 @@ describe("pill ⇄ fold agreement", () => {
 describe("placeRow — Can't compare folds under a remote only", () => {
   it("folds an unreadable row away under a remote", () => {
     for (const availability of AVAILABILITIES) {
-      expect(placeRow("locked", availability, { foldLocked: true })).toEqual({ zone: "fate", fold: "locked" });
+      expect(placeRow("locked", availability, { foldLocked: true, anchored: false })).toEqual({ zone: "fate", fold: "locked" });
     }
   });
 
@@ -152,7 +163,7 @@ describe("placeRow — Can't compare folds under a remote only", () => {
   it("moves no other bucket when the fold is switched on", () => {
     for (const bucket of BUCKETS.filter((b) => b !== "locked")) {
       for (const availability of AVAILABILITIES) {
-        expect(placeRow(bucket, availability, { foldLocked: true })).toEqual(placeRow(bucket, availability, DEVICE));
+        expect(placeRow(bucket, availability, { foldLocked: true, anchored: false })).toEqual(placeRow(bucket, availability, DEVICE));
       }
     }
   });

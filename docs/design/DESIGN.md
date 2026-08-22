@@ -728,7 +728,15 @@ noted):
   comes back searching for the words the `Not synced here` pill uses. Let availability win there and
   the row is counted by that pill while filed under `N not installed on this device`, which is a
   number with nothing behind it. `tests/panelTaxonomy.test.ts` pins the whole (fate × availability)
-  table plus the invariant that a fold-owning pill and its fold describe the same rows. The axis
+  table plus the invariant that a fold-owning pill and its fold describe the same rows. One
+  exception outranks the whole table (N2, 方案1): the ANCHORED row — the one the user just re-filed
+  from inside its own open card (a direction stop, a key rule, a withheld key) — presents in place,
+  exempt from the filter and from folding, because the card vanishing under the pointer mid-gesture
+  is worse than one row briefly disagreeing with the pill counts (which stay honest throughout).
+  The anchor is one row at most, records the context it was set in (relation, destination, filter,
+  search), and retires one-way the moment the card collapses or any of that context changes —
+  coming back to the same filter later never resurrects it (`SyncCenterView.cardAnchor`;
+  `placeRow`'s `anchored` opt). The axis
   split is what lets the four availability groupings keep their copy without folding away rows that
   have something to do. Switching into a filter
   pill or a search hit auto-expands every section once, on that transition only, so a
