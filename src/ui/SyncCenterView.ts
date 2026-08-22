@@ -654,6 +654,19 @@ export class SyncCenterView extends ItemView {
   private searchDebounceTimer: number | null = null;
   // The current remote's comparison, in flight or settled — see renderRemoteComparing.
   private inflightCompare: InflightCompare | null = null;
+  // The last compare that SETTLED for each remote, any generation (acceptance O2): a rules edit
+  // invalidates the fresh result and used to blank the list into the progress block for the
+  // recompare's duration — a flash on every direction click. The stale list stays on screen
+  // instead while the fresh one runs (the pending dots already say "recounting"); this map is
+  // what it draws from. Names are never pruned: a stale entry is only ever read behind a check
+  // that a fresh compare is being asked for.
+  private lastSettledCompare = new Map<string, RemoteCompareResult>();
+  // The compare ensureRemoteCompare is already awaiting, keyed like the inflight entry — the
+  // refresh loop renders several times, and without this each render would stack another awaiter
+  // that re-renders on settle.
+  private ensureCompareKey: string | null = null;
+  // notifyExternalChange's trailing-debounce timer; cancelled in onClose like the search one.
+  private notifyDebounce: number | null = null;
 
   constructor(leaf: WorkspaceLeaf, private host: SyncCenterHost) {
     super(leaf);
@@ -700,6 +713,10 @@ export class SyncCenterView extends ItemView {
     if (this.searchDebounceTimer !== null) {
       window.clearTimeout(this.searchDebounceTimer);
       this.searchDebounceTimer = null; // match the clear+null idiom used everywhere else
+    }
+    if (this.notifyDebounce !== null) {
+      window.clearTimeout(this.notifyDebounce);
+      this.notifyDebounce = null;
     }
     this.contentEl.empty();
   }
@@ -803,10 +820,18 @@ export class SyncCenterView extends ItemView {
     return width > 0 ? width : SIDE_BADGE_FALLBACK_PX;
   }
 
-  // Called by the plugin when awareness state changes while the view is open.
+  // Called by the plugin when awareness state changes while the view is open. Coalesced
+  // (acceptance O2): one remote-check sweep notifies at start, once per remote, and at the end,
+  // and reloading on each rebuilt the pane three-plus times per gesture — a visible flicker.
+  // The trailing debounce turns a burst into one reload; a hundred milliseconds of lag on the
+  // first paint is below what the sweep itself takes.
   notifyExternalChange(): void {
-    if (this.running) return; // a rebuild mid-run would replace the live progress button
-    void this.reload();
+    if (this.notifyDebounce !== null) window.clearTimeout(this.notifyDebounce);
+    this.notifyDebounce = window.setTimeout(() => {
+      this.notifyDebounce = null;
+      if (this.running) return; // a rebuild mid-run would replace the live progress button
+      void this.reload();
+    }, 100);
   }
 
   private async reload(): Promise<void> {
@@ -1134,7 +1159,15 @@ export class SyncCenterView extends ItemView {
               : direction === "capture"
                 ? copy.sentence.push
                 : copy.bucket.ok,
-          chips: [REMOTE_DIRECTION_CHIP[rule]].filter((c): c is string => c !== null),
+          // One glyph, one meaning, ONCE per row (acceptance O1): the rule keeps its chip only on
+          // rows whose fate column says something else — `pull only` beside a waiting pull put two
+          // identical clouds a few pixels apart, and `neither way` beside the excluded circle-slash
+          // does the same. The redundant pair is always rule×fate of the SAME direction; the other
+          // combinations cannot collide (a rule that blocks a flow also blocks that fate).
+          chips:
+            (rule === "pull" && direction === "apply") || (rule === "push" && direction === "capture") || (rule === "none" && excluded)
+              ? []
+              : [REMOTE_DIRECTION_CHIP[rule]].filter((c): c is string => c !== null),
           stageable: direction !== null,
           turnsOn: false,
           nothingYet: false,
@@ -1244,7 +1277,10 @@ export class SyncCenterView extends ItemView {
   // — one list, one renderer. Empty while this remote's comparison is still running; renderItemMode
   // paints the progress block instead of a list in that window.
   private remoteRows(name: string): StatusRow[] {
-    const result = this.remoteResultFor(name);
+    // The stale fallback pairs with renderItemMode's quiet revalidation (acceptance O2): while a
+    // fresh compare is running, the last settled entries still draw — combined with the CURRENT
+    // check's verdicts below, so a just-changed rule reads correctly even from stale file contents.
+    const result = this.remoteResultFor(name) ?? this.lastSettledCompare.get(name) ?? null;
     if (result === null) return [];
     // Companions fold into their parent BEFORE the rows are built, the same way familyGroups() folds
     // them out of the device list — one row per family under either relation.
@@ -2543,9 +2579,15 @@ export class SyncCenterView extends ItemView {
         return;
       }
       if (remote !== undefined && this.remoteResultFor(remote.name) === null) {
-        this.renderResultStrip(main);
-        void this.renderRemoteComparing(main, remote);
-        return;
+        if (!this.lastSettledCompare.has(remote.name)) {
+          this.renderResultStrip(main);
+          void this.renderRemoteComparing(main, remote);
+          return;
+        }
+        // Stale-while-revalidate (acceptance O2): a settled list exists, so keep drawing it (the
+        // remoteRows fallback) and run the fresh compare quietly — swapping the whole list for the
+        // progress block made every rules edit flash. The pending dots already mark the recount.
+        void this.ensureRemoteCompare(remote);
       }
     }
     // Newer-schema refusal, in the cold-start banner's own structure with no primary action: there is
@@ -3431,9 +3473,11 @@ export class SyncCenterView extends ItemView {
       stops: REMOTE_DIRECTION_ORDER,
       current,
       ariaOf: (d) => `${REMOTE_DIRECTION_LABEL[d]} — which way ${name} exchanges this item`,
+      // No explicit reload: the write ends in refreshRemoteChecks, whose notifies land here as
+      // ONE debounced reload — a second reload from this handler was one more full repaint.
       onPick: (d) => {
         this.anchorCard(r.group.name);
-        void this.host.setRemoteItemDirection(name, ref, d).then(() => this.reload());
+        void this.host.setRemoteItemDirection(name, ref, d);
       },
     });
     fields.appendChild(row);
@@ -3506,7 +3550,7 @@ export class SyncCenterView extends ItemView {
       ariaOf: (d) => `${REMOTE_DIRECTION_LABEL[d]} — which way ${remoteName} exchanges ${pattern}`,
       onPick: (d) => {
         this.anchorCard(groupName);
-        void this.host.setRemoteKeyDirection(remoteName, ref, pattern, d).then(() => this.reload());
+        void this.host.setRemoteKeyDirection(remoteName, ref, pattern, d); // reload arrives via the debounced notify
       },
     });
   }
@@ -3561,7 +3605,7 @@ export class SyncCenterView extends ItemView {
         // other two stops are one more click away on the row it just created.
         onPick: (key) => {
           this.anchorCard(r.group.name);
-          void this.host.setRemoteKeyDirection(remoteName, ref, key, "none").then(() => this.reload());
+          void this.host.setRemoteKeyDirection(remoteName, ref, key, "none"); // reload arrives via the debounced notify
         },
       });
       // The same legend Settings puts under this document, in THIS surface's words: over there a
@@ -4755,6 +4799,33 @@ export class SyncCenterView extends ItemView {
   // this method is never reached for it: renderItemMode asks remoteResultFor first and draws the
   // list. Settling here therefore ends in a re-render, which finds that cached result and paints
   // rows — this method only ever owns the waiting and the failure.
+  // Runs (or re-attaches to) the fresh compare WITHOUT owning any DOM — the quiet half of
+  // stale-while-revalidate (acceptance O2). One awaiter per compare key: the refresh loop's
+  // notifies render repeatedly, and every render lands here again while the compare runs.
+  // On failure the stale entry is dropped and the next render takes the progress-block path,
+  // whose own compare (one retry) either succeeds or renders the error card.
+  private async ensureRemoteCompare(remote: Remote): Promise<void> {
+    const key = `${remote.name}:${this.host.readerGeneration()}`;
+    if (this.ensureCompareKey === key) return;
+    this.ensureCompareKey = key;
+    const gen = this.renderGen;
+    let reattach = this.inflightCompare !== null && this.inflightCompare.key === key ? this.inflightCompare : null;
+    if (reattach !== null && reattach.result !== null) {
+      this.inflightCompare = null;
+      reattach = null;
+    }
+    const active = reattach ?? this.startRemoteCompare(remote, key, Date.now(), () => {});
+    try {
+      await active.promise;
+    } catch {
+      this.lastSettledCompare.delete(remote.name);
+    } finally {
+      if (this.ensureCompareKey === key) this.ensureCompareKey = null;
+    }
+    if (gen !== this.renderGen || this.relation.kind !== "remote" || this.relation.name !== remote.name) return;
+    this.render(this.renderGen);
+  }
+
   // The pre-check waiting block: same visual language as the comparing block below, but it owns
   // no deep compare — refreshRemoteChecks is the work it waits on, and its completion notify is
   // what repaints this away. Copy stays in the panel's own progress voice ("Checking <name>…",
@@ -4873,6 +4944,7 @@ export class SyncCenterView extends ItemView {
       .then(
         (dd) => {
           if (this.inflightCompare === entry) entry.result = dd;
+          this.lastSettledCompare.set(remote.name, dd);
           return dd;
         },
         (e: unknown) => {

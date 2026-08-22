@@ -538,7 +538,14 @@ noted):
   landed. The main region shows the checking block ("Checking <name>…", the comparing block's own
   visual language without owning a deep compare) and kicks `refreshRemoteChecks` itself when none
   is running (M2), so the window lasts one check, not a timer's grace. A remote that WAS checked
-  and came back unknown is a settled answer and does not pend.
+  and came back unknown is a settled answer and does not pend. Once a remote HAS settled once,
+  invalidation revalidates quietly (O2): the last settled list keeps drawing (with the pending
+  dots marking the recount, and the CURRENT check's verdicts over the stale file entries, so a
+  just-changed rule reads correctly) while the fresh compare runs off-screen
+  (`SyncCenterView.ensureRemoteCompare`); the progress block is reserved for a remote with no
+  settled list at all, because swapping a full list for a spinner made every rules edit flash.
+  The view also coalesces the check sweep's notifies (start, per remote, end) into one trailing
+  reload — three-plus full rebuilds per gesture was the other half of that flash.
   The dropdown rows
   (`-view-menu`/`-view-opt`) wear the same icon + short name; each carries its own badge: the
   device side its capture/apply item counts, the on-screen remote its push/pull counts from the
@@ -604,7 +611,12 @@ noted):
   (`buildChips`, deterministic — the fixed ordering), never re-sorted at render. Icon-only
   chips fit any width, so there is no chip-overflow machinery and no mobile chip line
   beyond the skeleton rule below; a chip string missing
-  from the registry keeps a text label as the loud fallback. After the chips comes the fate
+  from the registry keeps a text label as the loud fallback. Under a remote, the rule's own chip
+  (`push only` / `pull only` / `neither way`) drops exactly when the fate column already wears the
+  same mark (O1): `pull only` beside a waiting pull put two identical clouds a few pixels apart,
+  and `neither way` beside the excluded circle-slash did the same; the redundant pair is always
+  rule×fate of the SAME direction, so the chip survives on every row whose fate says something
+  else. After the chips comes the fate
   sentence
   (`config-sync-fate-text`: direction glyph + verbs describing everything the run will do to
   this row), and last the
