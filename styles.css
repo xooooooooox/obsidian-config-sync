@@ -1425,6 +1425,10 @@ body.is-mobile .config-sync-tworow-chev { display: none; }
 .config-sync-json-clickable:hover::after, .config-sync-json-clickable:focus-visible::after { opacity: 1; }
 /* The preview's top action line. */
 .config-sync-json-hint { display: flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: var(--font-ui-smaller); margin-bottom: var(--size-2-2); }
+/* The hint's own `key` (S1/S2): only the dashed underline the document's clickable keys wear —
+   none of their box (the json-key padding and the hover `+` reserve opened a gap after the word)
+   and none of their type (the word stays in the hint's own font and size). */
+.config-sync-json-hint-key { text-decoration: underline dashed color-mix(in srgb, var(--text-faint) 70%, transparent); text-underline-offset: 3px; }
 .config-sync-json-hint .svg-icon { width: 13px; height: 13px; color: var(--interactive-accent); }
 .config-sync-json-val { color: var(--text-muted); }
 .config-sync-json-num { color: var(--color-green); }

@@ -3582,14 +3582,16 @@ export class SyncCenterView extends ItemView {
     });
     if (!open) return;
     // One line for the one gesture (Q3): Settings' own sentence, verbatim — and the word `key`
-    // wears the SAME dashed underline the clickable keys in the document wear, so the hint
-    // teaches the affordance by showing it, not by adding words (the legend that used to restate
-    // this click is gone).
+    // wears the same dashed underline the clickable keys in the document wear, so the hint
+    // teaches the affordance by showing it (the legend that used to restate this click is gone).
+    // The sentence lives in ONE child of the flex hint: the container's gap is for icon↔text,
+    // and splitting the words across siblings let it open holes mid-sentence (S1).
     const hint = value.createDiv({ cls: "config-sync-json-hint" });
     setIcon(hint.createSpan({ cls: "config-sync-json-hint-icon" }), "plus");
-    hint.createSpan({ text: "Click any " });
-    hint.createSpan({ cls: "config-sync-json-key config-sync-json-clickable", text: "key" });
-    hint.appendText(" to add a rule for it");
+    const line = hint.createSpan();
+    line.appendText("Click any ");
+    line.createSpan({ cls: "config-sync-json-hint-key", text: "key" });
+    line.appendText(" to add a rule for it");
     const host = value.createDiv();
     void this.host.storeCopyOf(ref).then((doc) => {
       if (doc === null) {

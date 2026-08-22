@@ -2112,7 +2112,12 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     if (opts.showHint) {
       const hint = bodyEl.createDiv({ cls: "config-sync-json-hint" });
       setIcon(hint.createSpan(), "plus");
-      hint.appendText("Click any key to add a rule for it");
+      // Same treatment as the Sync Center's hint (S3): the word `key` wears the clickable keys'
+      // dashed underline, one flex child for the whole sentence.
+      const line = hint.createSpan();
+      line.appendText("Click any ");
+      line.createSpan({ cls: "config-sync-json-hint-key", text: "key" });
+      line.appendText(" to add a rule for it");
     }
     const pre = bodyEl.createEl("pre", { cls: "config-sync-json-pre" });
     const raw = JSON.stringify(doc, null, 2);
