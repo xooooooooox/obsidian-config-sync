@@ -1431,21 +1431,24 @@ body.is-mobile .config-sync-tworow-chev { display: none; }
 .config-sync-keyrule-row { justify-content: flex-start; }
 .config-sync-keyrule-ctl { margin-left: auto; display: inline-flex; }
 
-/* The four-stop segmented control (This remote / each key rule). Current stop lit in accent —
-   the same "active" language the filter pills speak; the others stay faint until hovered. */
-.config-sync-dirseg { display: inline-flex; border: 1px solid var(--background-modifier-border); border-radius: 7px; overflow: hidden; background: var(--background-secondary); }
-.config-sync-dirseg-btn { all: unset; cursor: pointer; display: inline-flex; align-items: center; padding: 3px 7px; color: var(--text-faint); }
-.config-sync-dirseg-btn + .config-sync-dirseg-btn { border-left: 1px solid var(--background-modifier-border); }
-.config-sync-dirseg-btn:hover { color: var(--text-normal); background: var(--background-modifier-hover); }
-.config-sync-dirseg-btn:focus-visible { box-shadow: inset 0 0 0 2px var(--interactive-accent); }
-.config-sync-dirseg-btn.is-on { background: rgba(var(--interactive-accent-rgb), 0.18); color: var(--interactive-accent); }
+/* The four-stop control (This remote / each key rule): plain icons, no box — the card's other
+   controls (Settings sync, More) are borderless icons on the row's right edge, and a bordered
+   segment among them read as a foreign widget (acceptance J5). Only the ACTIVE stop keeps a
+   filled pill; the rest stay faint until hovered. */
+.config-sync-dirseg { display: inline-flex; gap: 2px; align-items: center; }
+.config-sync-dirseg-btn { all: unset; cursor: pointer; display: inline-flex; align-items: center; padding: 3px 5px; border-radius: 5px; color: var(--text-faint); opacity: 0.6; }
+.config-sync-dirseg-btn:hover { color: var(--text-normal); background: var(--background-modifier-hover); opacity: 1; }
+.config-sync-dirseg-btn:focus-visible { box-shadow: inset 0 0 0 2px var(--interactive-accent); opacity: 1; }
+.config-sync-dirseg-btn.is-on { background: rgba(var(--interactive-accent-rgb), 0.18); color: var(--interactive-accent); opacity: 1; }
 .config-sync-dirseg-btn svg { width: 13px; height: 13px; }
-.config-sync-keyrule-ctl .config-sync-dirseg-btn { padding: 2px 6px; }
+.config-sync-keyrule-ctl .config-sync-dirseg-btn { padding: 2px 4px; }
 .config-sync-keyrule-ctl .config-sync-dirseg-btn svg { width: 12px; height: 12px; }
 
-/* The Key rules document past its fold ceiling: clipped with a fade, `Show all N keys` beneath. */
-.config-sync-json-pre.is-truncated { max-height: 14em; overflow: hidden; -webkit-mask-image: linear-gradient(to bottom, black 70%, transparent); mask-image: linear-gradient(to bottom, black 70%, transparent); margin-bottom: 0; }
-.config-sync-json-more { color: var(--text-accent); font-size: var(--font-ui-smaller); cursor: pointer; padding: 2px 0 4px; }
+/* The Key rules row's own filename line (acceptance J4): the same pathline + eye Settings uses,
+   scoped so the value column's flex layout applies. */
+.config-sync-keydoc-pathline { display: flex; align-items: center; min-width: 0; }
+.config-sync-keydoc-pathline .config-sync-card-path { font-family: var(--font-monospace); font-size: var(--font-ui-smaller); color: var(--text-muted); }
+
 /* A tall value (the key rules plus the document) puts its label at the top, like every other
    card row's single line does — centring it against a 20-line document loses the pairing. */
 .config-sync-card-fieldrow:has(.config-sync-json-hint) .config-sync-explabel { align-self: start; }

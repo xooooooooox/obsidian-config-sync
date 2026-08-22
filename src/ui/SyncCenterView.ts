@@ -93,6 +93,7 @@ import {
   PanelDestination,
   PanelRelation,
   relationHint,
+  relationKey,
   relationShortLabel,
   viewOptions,
   ViewBadge,
@@ -135,10 +136,12 @@ import {
   type FateFold,
 } from "./panelTaxonomy";
 import { renderFoldChevron, setFoldOpen } from "./foldChevron";
+import { basename } from "../core/pathing";
 import { SettingsSpot } from "./settingsDeepLink";
 // ITEM_SECTION_LABELS aliased: this file already declares its own ITEM_SECTION_LABELS (sidebar category
 // labels, see below) for an unrelated domain.
 import {
+  FILE_PREVIEW_LABEL,
   FILE_SHARING_MENU_UNAVAILABLE_TEXT,
   PER_KEY_RULES_STATE_TEXT,
   PER_KEY_RULES_ACTION_TEXT,
@@ -160,10 +163,6 @@ import {
 // spec 5.3/5.4's four stops for one item against one remote, copy final. `Both ways` is the
 // default and the only stop that leaves the row without a chip — a chip states a decision, and the
 // default is the absence of one.
-// Past this many lines the Key rules document starts truncated behind its own `Show all N keys`
-// line — the fat-plugin ceiling that used to fold the whole document away (acceptance C2-V3).
-const KEY_DOC_FOLD_LINES = 12;
-
 const REMOTE_DIRECTION_ORDER: readonly RemoteDirection[] = ["both", "push", "pull", "none"];
 const REMOTE_DIRECTION_LABEL: Record<RemoteDirection, string> = {
   both: "Both ways",
@@ -1555,6 +1554,8 @@ export class SyncCenterView extends ItemView {
       if (pill !== null) card.createSpan({ cls: `config-sync-side-self-pill ${pill.cls}`, text: pill.text });
     }
     card.addEventListener("click", () => {
+      // Already here: re-rendering would only flash the pane it rebuilds (acceptance J3).
+      if (this.destination.kind === "self" && !this.switcherOpen) return;
       this.destination = { kind: "self" };
       this.switcherOpen = false;
       this.render(this.renderGen);
@@ -1928,6 +1929,12 @@ export class SyncCenterView extends ItemView {
       row.createSpan({ cls: "config-sync-view-label", text: relationShortLabel(opt.relation) });
       for (const b of opt.badges) this.renderViewBadge(row, b);
       row.addEventListener("click", () => {
+        // The relation you are already on: just close the menu, in place (acceptance J3).
+        if (relationKey(opt.relation) === relationKey(this.relation) && !this.switcherOpen) {
+          this.viewPickerOpen = false;
+          this.paintViewPicker(box);
+          return;
+        }
         this.relation = opt.relation;
         this.viewPickerOpen = false;
         this.switcherOpen = false;
@@ -1974,15 +1981,18 @@ export class SyncCenterView extends ItemView {
     const { up, down } = this.presentedCounts(this.countable(this.rows()));
     const upAction = this.directionAction("up");
     const downAction = this.directionAction("down");
+    // side-badge, not pill: the dropdown rows and the section list below all speak the sidebar's
+    // badge shape (with its digit-width column), and the closed control sits in that column too —
+    // two badge shapes one row apart read as two different things (acceptance J2).
     if (up > 0) {
       renderActionCount(
-        tail.createSpan({ cls: `config-sync-pill ${ACTION_COLOR_CLASS[upAction]}`, attr: { "aria-label": `${up} item${up === 1 ? "" : "s"} to ${upAction}` } }),
+        tail.createSpan({ cls: `config-sync-side-badge ${ACTION_COLOR_CLASS[upAction]}`, attr: { "aria-label": `${up} item${up === 1 ? "" : "s"} to ${upAction}` } }),
         upAction, up,
       );
     }
     if (down > 0) {
       renderActionCount(
-        tail.createSpan({ cls: `config-sync-pill ${ACTION_COLOR_CLASS[downAction]}`, attr: { "aria-label": `${down} item${down === 1 ? "" : "s"} to ${downAction}` } }),
+        tail.createSpan({ cls: `config-sync-side-badge ${ACTION_COLOR_CLASS[downAction]}`, attr: { "aria-label": `${down} item${down === 1 ? "" : "s"} to ${downAction}` } }),
         downAction, down,
       );
     }
@@ -1990,6 +2000,13 @@ export class SyncCenterView extends ItemView {
 
   private renderViewBadge(row: HTMLElement, b: ViewBadge): void {
     if (b.kind === "remote-state") {
+      // A remote whose CHECK has not landed yet while one is running gets the pending dot, not the
+      // "?" of a remote that was checked and could not be read — the startup window acceptance J1
+      // flagged: nothing in the badge slot read as "no news", when the truth was "still counting".
+      if (b.state === "unknown" && this.host.remoteRefreshProgress() !== null) {
+        row.createSpan({ cls: "config-sync-pending-dot", attr: { "aria-label": "Checking…" } });
+        return;
+      }
       const icon = this.remoteIcon({ state: b.state, remoteCapturedAt: null, items: null, itemVerdicts: null, uncomparable: {} });
       this.paintStateIcon(row.createSpan({ cls: `config-sync-state-icon ${icon.cls}`, attr: { "aria-label": icon.tip } }), icon);
       return;
@@ -2042,6 +2059,7 @@ export class SyncCenterView extends ItemView {
         }
       }
       item.addEventListener("click", () => {
+        if (this.destination.kind === "items" && this.destination.cat === cat && !this.switcherOpen) return; // see the self card's no-op
         this.destination = { kind: "items", cat };
         this.switcherOpen = false;
         this.render(this.renderGen);
@@ -2064,6 +2082,7 @@ export class SyncCenterView extends ItemView {
       // to-do — the same position saying two different kinds of thing.
       item.createSpan({ cls: "config-sync-side-name", text: "History" });
       item.addEventListener("click", () => {
+        if (this.destination.kind === "history" && !this.switcherOpen) return; // see the self card's no-op
         this.destination = { kind: "history" };
         this.historyOpen = null;
         this.switcherOpen = false;
@@ -3395,12 +3414,33 @@ export class SyncCenterView extends ItemView {
     });
   }
 
-  // The document, presented the way Settings presents it (acceptance C2-V3): the hint LEADS the
-  // open preview instead of gating it — users did not realize the keys could be clicked when the
-  // document hid behind a toggle. The forty-key worry that folded it in the first place is met one
-  // level down: a document longer than KEY_DOC_FOLD_LINES starts truncated behind its own
-  // `Show all N keys` line, so a fat plugin costs one extra click, not the whole card's height.
+  // The document, gated exactly the way Settings gates it (acceptance J4): the filename line
+  // carries the eye, the eye opens hint + document + legend. Two surfaces showing one document
+  // through two different gestures taught nobody either gesture — Settings' form is the settled
+  // one, so this borrows it verbatim (same icon, same open-state language, same 220px scrolling
+  // preview underneath; the interim `Show all N keys` fold retired with the always-open form).
   private renderKeyDocument(value: HTMLElement, r: StatusRow, remoteName: string, remote: Remote, ref: ItemRef): void {
+    const open = this.keyDocOpen.has(r.group.name);
+    const pathLine = value.createDiv({ cls: "config-sync-card-pathline config-sync-keydoc-pathline" });
+    pathLine.createSpan({ cls: "config-sync-card-path", text: basename(r.group.path) });
+    const eye = pathLine.createSpan({
+      cls: `config-sync-card-previewicon${open ? " is-open" : ""}`,
+      attr: { role: "button", tabindex: "0", "aria-label": FILE_PREVIEW_LABEL },
+    });
+    setIcon(eye, "eye");
+    const toggle = (): void => {
+      if (this.keyDocOpen.has(r.group.name)) this.keyDocOpen.delete(r.group.name);
+      else this.keyDocOpen.add(r.group.name);
+      void this.reload();
+    };
+    eye.addEventListener("click", toggle);
+    eye.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        toggle();
+      }
+    });
+    if (!open) return;
     const hint = value.createDiv({ cls: "config-sync-json-hint" });
     setIcon(hint.createSpan({ cls: "config-sync-json-hint-icon" }), "plus");
     hint.createSpan({ text: "Click any key to add a rule for it" });
@@ -3411,16 +3451,7 @@ export class SyncCenterView extends ItemView {
         return;
       }
       const raw = JSON.stringify(doc, null, 2);
-      const folded = raw.split("\n").length > KEY_DOC_FOLD_LINES && !this.keyDocOpen.has(r.group.name);
-      const pre = host.createEl("pre", { cls: `config-sync-json-pre${folded ? " is-truncated" : ""}` });
-      if (folded) {
-        const more = host.createDiv({ cls: "config-sync-json-more config-sync-card-trigger" });
-        more.setText(`… Show all ${Object.keys(doc).length} keys`);
-        more.addEventListener("click", () => {
-          this.keyDocOpen.add(r.group.name);
-          void this.reload();
-        });
-      }
+      const pre = host.createEl("pre", { cls: "config-sync-json-pre" });
       renderJsonKeyDoc(pre, {
         raw,
         // Two states, the same two Settings shows: a key that already carries a rule is coloured,
