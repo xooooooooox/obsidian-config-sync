@@ -1,7 +1,7 @@
 import { App, ButtonComponent, ItemView, Menu, Modal, Platform, WorkspaceLeaf, setIcon, setTooltip } from "obsidian";
 import { ApplyItem, CaptureItem, orderInstallsCatalogFirst, ProgressFn, StateAction } from "../core/ConfigSyncCore";
 import { lockRefFor, refItemId } from "../core/itemKeys";
-import { GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry, RemoteDiffFile, sumRemoteItemCounts } from "../core/status";
+import { GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry, RemoteDiffFile } from "../core/status";
 import { SECTION_LABELS, findGroupByName, SELF_GROUP_NAME, sectionForGroup, communityGroupName } from "../core/catalog";
 import { itemDirection, keyDirection, keyPatternsFor, keyStopsWithin, withheldPatternsFor } from "../core/remoteRules";
 import { EVERYWHERE, FileChanges, FileSharing, GroupResult, hasChanges, ItemRef, Remote, RemoteDirection, Sharing, SyncGroup, StorageSection } from "../core/types";
@@ -1928,57 +1928,53 @@ export class SyncCenterView extends ItemView {
     }
   }
 
+  // The relation's own direction verbs (acceptance F1): under a remote, "waiting up/down" IS
+  // push/pull and must wear that family's glyphs and colours — cloud/pink/cyan, the same marks the
+  // buttons and chips already speak — while the device relation keeps its capture/apply arrows.
+  // One glyph, one meaning, decided here once for every counting surface.
+  private directionAction(kind: "up" | "down"): SyncAction {
+    const remote = this.relation.kind === "remote";
+    return kind === "up" ? (remote ? "push" : "capture") : (remote ? "pull" : "apply");
+  }
+
+  // Is the current remote's comparison still in flight (acceptance F4)? Until a settled result
+  // exists the rows are empty, and an empty badge slot would read as "nothing to do" when the
+  // truth is "still counting" — the pending dot is what tells those two states apart.
+  private remoteCountsPending(): boolean {
+    return this.relation.kind === "remote" && this.remoteResultFor(this.relation.name) === null;
+  }
+
+  private renderPendingDot(parent: HTMLElement): void {
+    const name = this.relation.kind === "remote" ? this.relation.name : "";
+    parent.createSpan({ cls: "config-sync-pending-dot", attr: { "aria-label": `Checking ${name}…` } });
+  }
+
   // The current view's own count strip, on the picker's closed control (acceptance C3-a) — the
   // pills the panel header used to carry, moved to the row that names what they count. Same
   // producers, same zero-suppression rules; only `ok` shows unconditionally, its long precedent.
+  // The DIRECTION PAIR only (acceptance F2+F3): the same two badges the dropdown rows wear, so
+  // the closed control and its menu speak one shape. The bucket census (✓/⊖/○/can't-compare)
+  // lives complete in the filter-pill row — repeating it here is what squeezed the view's own
+  // name down to one letter. While a remote's comparison is still in flight, a pending dot holds
+  // the slot instead (acceptance F4): empty means nothing, the dot means still counting.
   private renderPickerCounts(tail: HTMLElement): void {
-    const counts = this.presentedCounts(this.countable(this.rows()));
-    const { up, down, ok, excluded } = counts;
-    const none = nonePresented(counts, this.relation);
+    if (this.remoteCountsPending()) {
+      this.renderPendingDot(tail);
+      return;
+    }
+    const { up, down } = this.presentedCounts(this.countable(this.rows()));
+    const upAction = this.directionAction("up");
+    const downAction = this.directionAction("down");
     if (up > 0) {
       renderActionCount(
-        tail.createSpan({ cls: "config-sync-pill is-up", attr: { "aria-label": `${up} item${up === 1 ? "" : "s"} to capture` } }),
-        "capture", up,
+        tail.createSpan({ cls: `config-sync-pill ${ACTION_COLOR_CLASS[upAction]}`, attr: { "aria-label": `${up} item${up === 1 ? "" : "s"} to ${upAction}` } }),
+        upAction, up,
       );
     }
     if (down > 0) {
       renderActionCount(
-        tail.createSpan({ cls: "config-sync-pill is-down", attr: { "aria-label": `${down} item${down === 1 ? "" : "s"} to apply` } }),
-        "apply", down,
-      );
-    }
-    renderFoldCount(
-      tail.createSpan({ cls: "config-sync-pill is-ok", attr: { "aria-label": `${ok} item${ok === 1 ? "" : "s"} in sync` } }),
-      FATE_PILL_FOLD.ok, ok,
-    );
-    if (excluded > 0) {
-      renderFoldCount(
-        tail.createSpan({
-          cls: "config-sync-pill is-excluded",
-          attr: { "aria-label": `${excluded} item${excluded === 1 ? "" : "s"} not synced on this device` },
-        }),
-        FATE_PILL_FOLD.excluded, excluded,
-      );
-    }
-    if (none > 0) {
-      renderFoldCount(
-        tail.createSpan({
-          cls: "config-sync-pill is-none",
-          attr: { "aria-label": `${none} item${none === 1 ? "" : "s"} with no settings yet` },
-        }),
-        FATE_PILL_FOLD.none, none,
-      );
-    }
-    // The remote relation's own bucket (spec 5.1) — uncoloured on purpose: every coloured pill in
-    // this strip promises a run, and this one reports what could not be read.
-    if (this.relation.kind === "remote" && counts.locked > 0) {
-      const n = counts.locked;
-      renderFoldCount(
-        tail.createSpan({
-          cls: "config-sync-pill is-unknown",
-          attr: { "aria-label": `${n} item${n === 1 ? "" : "s"} that can't be compared` },
-        }),
-        FATE_PILL_FOLD.locked, n,
+        tail.createSpan({ cls: `config-sync-pill ${ACTION_COLOR_CLASS[downAction]}`, attr: { "aria-label": `${down} item${down === 1 ? "" : "s"} to ${downAction}` } }),
+        downAction, down,
       );
     }
   }
@@ -2014,10 +2010,16 @@ export class SyncCenterView extends ItemView {
         const sectionRows = cat === "all" ? this.rows() : this.rows().filter((r) => this.itemSectionOf(r.group.name) === cat);
         const hits = sectionRows.filter((r) => this.rowMatchesSearch(r)).length;
         item.createSpan({ cls: "config-sync-side-badge is-neutral", text: `${hits}` });
+      } else if (this.remoteCountsPending()) {
+        // Still counting (acceptance F4): a dot in the badge slot, not an emptiness that reads as
+        // "nothing to do".
+        this.renderPendingDot(item);
       } else {
         const c = this.presentedCounts(rows);
-        if (c.up > 0) renderActionCount(item.createSpan({ cls: "config-sync-side-badge is-up" }), "capture", c.up);
-        if (c.down > 0) renderActionCount(item.createSpan({ cls: "config-sync-side-badge is-down" }), "apply", c.down);
+        const upAction = this.directionAction("up");
+        const downAction = this.directionAction("down");
+        if (c.up > 0) renderActionCount(item.createSpan({ cls: `config-sync-side-badge ${ACTION_COLOR_CLASS[upAction]}` }), upAction, c.up);
+        if (c.down > 0) renderActionCount(item.createSpan({ cls: `config-sync-side-badge ${ACTION_COLOR_CLASS[downAction]}` }), downAction, c.down);
         // Same fixed-size Lucide glyphs the fold lines and the card draw (FATE_PILL_FOLD →
         // renderFoldCount), never hand-written `✓`/`⊘`/`○` text. Text glyphs put a DIFFERENT mark on
         // the same state depending on which surface you looked at, and `⊘` in particular ran into
@@ -2068,8 +2070,11 @@ export class SyncCenterView extends ItemView {
       const cat = this.destination.cat;
       sw.createSpan({ text: cat === "all" ? "All items" : ITEM_SECTION_LABELS[cat] });
       const c = this.presentedCounts(this.countable(this.sectionRows()));
-      if (c.up > 0) renderActionCount(sw.createSpan({ cls: "config-sync-side-badge is-up" }), "capture", c.up);
-      if (c.down > 0) renderActionCount(sw.createSpan({ cls: "config-sync-side-badge is-down" }), "apply", c.down);
+      const upAction = this.directionAction("up");
+      const downAction = this.directionAction("down");
+      if (this.remoteCountsPending()) this.renderPendingDot(sw);
+      if (c.up > 0) renderActionCount(sw.createSpan({ cls: `config-sync-side-badge ${ACTION_COLOR_CLASS[upAction]}` }), upAction, c.up);
+      if (c.down > 0) renderActionCount(sw.createSpan({ cls: `config-sync-side-badge ${ACTION_COLOR_CLASS[downAction]}` }), downAction, c.down);
       if (c.ok > 0) renderFoldCount(sw.createSpan({ cls: "config-sync-side-badge is-ok" }), FATE_PILL_FOLD.ok, c.ok);
       if (c.excluded > 0) renderFoldCount(sw.createSpan({ cls: "config-sync-side-badge is-excluded" }), FATE_PILL_FOLD.excluded, c.excluded);
       const none = nonePresented(c, this.relation);
@@ -2096,34 +2101,12 @@ export class SyncCenterView extends ItemView {
   }
 
   private renderHeader(): void {
-    // No title span: the pane header already reads "Sync Center". This strip carries the FLEET
-    // half only (spec 5.5's remote aggregate) plus the refresh — the current view's own counts
-    // moved onto the View picker's closed control (acceptance C3-a), and the self chip retired
-    // with them: the pinned sidebar row already is the self destination (acceptance A3).
+    // No title span: the pane header already reads "Sync Center". Not a data surface at all any
+    // more (acceptance F2): the current view's counts live on the View picker's closed control,
+    // each remote's own on its dropdown row, and the fleet aggregate on the status bar — spec
+    // 5.5's designated home. The orphaned aggregate pill this strip briefly kept was the same
+    // number a single-remote setup already showed twice more, a few rows down.
     const head = this.contentEl.createDiv({ cls: "config-sync-center-head" });
-    // Same producer the status bar reads (spec 5.5): these two pills count ITEMS waiting with the
-    // remotes, and `spread` — how many remotes they came from — rides in their tooltips.
-    const checks = this.host.remotes().map((r) => this.host.remoteCheck(r.name)?.check).filter((c): c is RemoteCheck => c !== undefined);
-    const { push, pull, remotes: spread } = sumRemoteItemCounts(checks);
-    const pills = head.createSpan({ cls: "config-sync-report-pills" });
-    if (push > 0) {
-      renderActionCount(
-        pills.createSpan({
-          cls: "config-sync-pill is-push",
-          attr: { "aria-label": `${push} item${push === 1 ? "" : "s"} to push across ${spread} remote${spread === 1 ? "" : "s"}` },
-        }),
-        "push", push,
-      );
-    }
-    if (pull > 0) {
-      renderActionCount(
-        pills.createSpan({
-          cls: "config-sync-pill is-pull",
-          attr: { "aria-label": `${pull} item${pull === 1 ? "" : "s"} to pull across ${spread} remote${spread === 1 ? "" : "s"}` },
-        }),
-        "pull", pull,
-      );
-    }
     // Manual refresh: re-scans local state, catching plugin toggles made in Obsidian's
     // settings modal while the panel stayed open, and re-checks every remote (desktop only).
     // The refreshed-age lives in this button's tooltip, recomputed on each render.
@@ -2521,8 +2504,8 @@ export class SyncCenterView extends ItemView {
       const allLabel = this.searching() ? `All ${pillRows.length} / ${pillPool.length}` : `All ${pillPool.length}`;
       const defs: { key: PanelFilter; label: string; short: string; action?: SyncAction; foldKind?: FoldKind; count?: number }[] = [
         { key: "all", label: allLabel, short: allLabel },
-        { key: "capture", label: `${copy.bucket.capture} ${counts.up}`, short: "", action: "capture", count: counts.up },
-        { key: "apply", label: `${copy.bucket.apply} ${counts.down}`, short: "", action: "apply", count: counts.down },
+        { key: "capture", label: `${copy.bucket.capture} ${counts.up}`, short: "", action: this.directionAction("up"), count: counts.up },
+        { key: "apply", label: `${copy.bucket.apply} ${counts.down}`, short: "", action: this.directionAction("down"), count: counts.down },
         { key: "ok", label: `${copy.bucket.ok} ${counts.ok}`, short: "", foldKind: "insync", count: counts.ok },
         // "Not synced here" — deliberately not "Skipped"
         // (that word is already run-event vocabulary, `⚠ update skipped` ConfigSyncCore.ts, and
@@ -3097,7 +3080,9 @@ export class SyncCenterView extends ItemView {
     // (⚠) alone keeps its text form: a conflict must shout, and it has no action/fold icon to
     // become.
     if (fate.glyph === "↑" || fate.glyph === "↓") {
-      const action: SyncAction = fate.glyph === "↑" ? "capture" : "apply";
+      // The relation's own family (acceptance F1): a remote row's arrow is push/pull — cloud
+      // glyphs, pink/cyan — the same marks the buttons at the bottom of this very list speak.
+      const action: SyncAction = this.directionAction(fate.glyph === "↑" ? "up" : "down");
       const ic = fateWrap.createSpan({ cls: `config-sync-fate-ic ${ACTION_COLOR_CLASS[action]}`, attr: { "aria-label": fate.sentence } });
       setIcon(ic, ACTION_ICON[action]);
     } else if (fate.glyph === "—") {

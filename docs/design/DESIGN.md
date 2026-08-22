@@ -524,8 +524,15 @@ noted):
   (`-view-ic` + `relationShortLabel`: `monitor` + `This device`, or `cloud` + the remote's name —
   cloud is already this panel's remote glyph family, one mark for every transport type), with the
   full relation (`relationLabel`) and the `relationHint` sentence in hover/aria, and the CURRENT
-  view's own count pills riding its right edge (`-view-counts`, the strip the panel header used to
-  carry — same producers, same zero-suppression, `ok` unconditional). The dropdown rows
+  view's own DIRECTION PAIR riding its right edge (`-view-counts`) — the same two badges its
+  dropdown rows wear, in the relation's own family (F1: capture/apply arrows under the device
+  relation, push/pull clouds in pink/cyan under a remote — one glyph, one meaning, decided once in
+  `directionAction`). The bucket census (✓/⊖/○/can't-compare) deliberately does NOT ride here: it
+  lives complete in the filter-pill row, and repeating it squeezed the view's own name to one
+  letter (F3 — the name now never truncates). While a remote's comparison is in flight, a pulsing
+  `-pending-dot` holds the slot instead (F4): an empty slot reads as "nothing to do", the dot as
+  "still counting"; static under reduced motion, and the sidebar section badges hold the same dot.
+  The dropdown rows
   (`-view-menu`/`-view-opt`) wear the same icon + short name; each carries its own badge: the
   device side its capture/apply item counts, a remote side its push/pull item counts once a
   comparison has run against it, and until then the cheap whole-store state icon the lock file
@@ -965,11 +972,10 @@ noted):
   the run-history list; the view swaps table → card layout when compact (`<700px`) so mobile
   reads top-to-bottom without horizontal scroll (`-hcard-sum` wraps; `-hcard-act` `min-width:0`).
   Head/legend and the `renderActionInto` action painter are shared by both layouts; detail view unchanged.
-- **Header status bar** — the FLEET half only: push/pull totals across every remote,
-  `config-sync-pill.is-push` (pink) / `.is-pull` (cyan). The current view's own pills moved onto
-  the View picker's closed control, and the self chip retired with them — the pinned sidebar row
-  already is the self destination, and two `to capture` affordances a few rows apart answered the
-  same click (acceptance A3). The bar ends in the one
+- **Header status bar** — not a data surface at all (acceptance F2): the current view's counts
+  live on the View picker's closed control, each remote's own on its dropdown row, and the fleet
+  aggregate on the status bar, spec 5.5's designated home. The self chip retired with the counts —
+  the pinned sidebar row already is the self destination (A3). What remains is the one
   right-aligned refresh control (`config-sync-center-refresh`, `refresh-cw`): no `refreshed
   …` text span — the age lives in the button's own tooltip (`Refresh — refreshed just now`
   / `… 5m ago`, `relativeAge`), same on desktop and mobile.
