@@ -10,11 +10,11 @@ import { ACTION_ICON } from "./actionIcons";
 // which is the exact class of drift the merged two-layer control (mergedControl.ts) exists to
 // prevent, so this file exists for the same reason.
 //
-// The merge takes the better half of each: ICONS from the toolbar copy (the row's fate column
-// finished migrating off text glyphs this same release — foldIcons.ts's opening note — and leaving
-// two `↓`/`↑` characters here would have re-introduced exactly what that swept out), and RESTING
-// DIRECTION COLOUR from the card copy (before anything is picked, the two sides are already
-// telling you which way each one goes).
+// The merge takes ICONS from the toolbar copy (the row's fate column finished migrating off text
+// glyphs this same release — foldIcons.ts's opening note). Resting colour was re-decided in
+// acceptance AC/T2: the box wears the card's quiet menuchip family, and the direction colour
+// lives on the ICON alone until a side is hovered or chosen — the pair had become the one control
+// on the card that shouted before anything was decided.
 
 export type ResolveSide = "apply" | "capture";
 

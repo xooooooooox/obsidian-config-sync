@@ -1821,12 +1821,17 @@ button.config-sync-add-row, button.config-sync-add-row:hover { background: none;
 .config-sync-resolveseg .config-sync-resolvebtn { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border: 1px solid var(--background-modifier-border); border-radius: var(--radius-s); background: transparent; font-family: inherit; font-size: var(--font-ui-smaller); cursor: pointer; box-shadow: none; white-space: nowrap; height: auto; }
 .config-sync-resolveic { display: inline-flex; align-items: center; }
 .config-sync-resolveic svg { width: 13px; height: 13px; display: block; }
-.config-sync-resolvebtn.is-apply { color: var(--interactive-accent); }
-.config-sync-resolvebtn.is-capture { color: var(--color-orange); }
-.config-sync-resolvebtn.is-apply:hover { background: rgba(var(--interactive-accent-rgb), 0.1); }
-.config-sync-resolvebtn.is-capture:hover { background: rgba(var(--color-orange-rgb), 0.1); }
-.config-sync-resolvebtn.is-apply.is-on { background: rgba(var(--interactive-accent-rgb), 0.25); border-color: rgba(var(--interactive-accent-rgb), 0.45); }
-.config-sync-resolvebtn.is-capture.is-on { background: rgba(var(--color-orange-rgb), 0.25); border-color: rgba(var(--color-orange-rgb), 0.45); }
+/* T2 (acceptance AC, 定稿): at rest the pair wears the card's menuchip family — grey border,
+   muted text — with the DIRECTION colour kept on the icon alone, the fate icons' own language.
+   Hover pulls that side's colour onto text and border; the CHOSEN side adds the fill. The
+   loudness is spent on "picked", not on "waiting to be picked". */
+.config-sync-resolveseg .config-sync-resolvebtn { color: var(--text-muted); }
+.config-sync-resolvebtn.is-apply .config-sync-resolveic { color: var(--interactive-accent); }
+.config-sync-resolvebtn.is-capture .config-sync-resolveic { color: var(--color-orange); }
+.config-sync-resolvebtn.is-apply:hover { color: var(--interactive-accent); border-color: rgba(var(--interactive-accent-rgb), 0.45); background: rgba(var(--interactive-accent-rgb), 0.1); }
+.config-sync-resolvebtn.is-capture:hover { color: var(--color-orange); border-color: rgba(var(--color-orange-rgb), 0.45); background: rgba(var(--color-orange-rgb), 0.1); }
+.config-sync-resolvebtn.is-apply.is-on { color: var(--interactive-accent); border-color: rgba(var(--interactive-accent-rgb), 0.45); background: rgba(var(--interactive-accent-rgb), 0.15); }
+.config-sync-resolvebtn.is-capture.is-on { color: var(--color-orange); border-color: rgba(var(--color-orange-rgb), 0.45); background: rgba(var(--color-orange-rgb), 0.15); }
 /* Only rendered for a multi-file item, where picking a side settles files this window is not
    showing. A quiet line under the toolbar rather than a warning box: it is a fact about scope, not
    a problem. */

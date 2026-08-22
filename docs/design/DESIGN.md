@@ -911,9 +911,10 @@ noted):
   no-affordance note instead; the `capFileEntries` 10-cap + "… N more files" line applies
   inside the expanded state) · the conflict pair (`Use theirs` / `Keep mine`, TWO CHIPS
   in the card's own control family, not a segmented control: same `3px 8px` box, border and radius
-  as `After install`/`Enablement` beside them; each keeps its DIRECTION colour at rest — before
-  anything is picked, each side already says which way it goes — and picking deepens that colour
-  and takes the border with it. Since R4 the pair is drawn in exactly ONE place: inside the
+  as `After install`/`Enablement` beside them. Since AC/T2 the chips REST in the menuchip family —
+  grey border, muted text — with the direction colour on the icon alone (the fate icons' own
+  language); hovering a side pulls its colour onto text and border, and the CHOSEN side adds the
+  fill, so the loudness is spent on "picked" rather than "waiting to be picked". Since R4 the pair is drawn in exactly ONE place: inside the
   `Files` block's EXPANDED content, under the entries and whichever diff they open, folding with
   them — collapsed, the row's conflict badge and its "open to compare each side before choosing"
   sentence carry the invitation, so the pair never shows before the evidence can — with the
