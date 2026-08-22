@@ -588,6 +588,12 @@ export class SyncCenterView extends ItemView {
   // the card's own `expanded` set, and deliberately not persisted: a forty-key document is opened to
   // do one thing, not to be left open.
   private keyDocOpen: Set<string> = new Set();
+  // The last KNOWN raw text of each item's store copy, so an open key document paints
+  // synchronously on re-render (W2): the async fetch used to leave the region empty for a beat,
+  // and every rule click — which legitimately re-renders the pane — flashed the whole document.
+  // null is a real value ("nothing captured"); absence means never fetched. Never pruned: entries
+  // are only read behind an open document, and the fetch below repaints on any change.
+  private keyDocRawCache: Map<ItemRef, string | null> = new Map();
   private expandedItems: Set<string> = new Set();
   // Which item cards' FILES row is expanded past its default collapsed
   // count-only line — keyed by group name, same "Set that survives repaints, starts fresh with a
@@ -3576,12 +3582,12 @@ export class SyncCenterView extends ItemView {
     line.createSpan({ cls: "config-sync-json-hint-key", text: "key" });
     line.appendText(" to add a rule for it");
     const host = value.createDiv();
-    void this.host.storeCopyOf(ref).then((doc) => {
-      if (doc === null) {
+    const paint = (raw: string | null): void => {
+      host.empty();
+      if (raw === null) {
         host.createDiv({ cls: "config-sync-json-empty", text: "Nothing captured for this item yet — nothing to show." });
         return;
       }
-      const raw = JSON.stringify(doc, null, 2);
       const pre = host.createEl("pre", { cls: "config-sync-json-pre" });
       renderJsonKeyDoc(pre, {
         raw,
@@ -3601,6 +3607,17 @@ export class SyncCenterView extends ItemView {
           void this.host.setRemoteKeyDirection(remoteName, ref, key, "none"); // reload arrives via the debounced notify
         },
       });
+    };
+    // Last known copy paints NOW (W2 — no empty beat); the fetch repaints only if the store's
+    // copy actually changed since.
+    const cached = this.keyDocRawCache.get(ref);
+    const hadCache = this.keyDocRawCache.has(ref);
+    if (hadCache) paint(cached ?? null);
+    void this.host.storeCopyOf(ref).then((doc) => {
+      const raw = doc === null ? null : JSON.stringify(doc, null, 2);
+      if (hadCache && raw === cached) return;
+      this.keyDocRawCache.set(ref, raw);
+      paint(raw);
     });
   }
 
