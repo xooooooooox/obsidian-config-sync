@@ -795,9 +795,9 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 
 .config-sync-shell { display: grid; grid-template-columns: minmax(150px, 22%) minmax(0, 1fr); gap: var(--size-4-3); }
 
-/* S2 rhythm (acceptance AA, on trial): masthead and search sit as one control group (6px),
-   and the group keeps 14px of air from the section list it filters. */
-.config-sync-side { display: flex; flex-direction: column; gap: 6px; }
+/* S1 rhythm (acceptance AA, on trial): one spacing, every layer — masthead, search, divider,
+   sections all sit 10px apart; no group concept. */
+.config-sync-side { display: flex; flex-direction: column; gap: 10px; }
 /* The picker's closed control: icon, short name, then the current view's own count pills riding
    the right edge before the chevron (acceptance C3-a / A2-V1). */
 .config-sync-view-ic { display: inline-flex; color: var(--text-muted); }
@@ -817,9 +817,9 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 .config-sync-side-section { display: flex; flex-direction: column; gap: 3px; }
 
 /* Visual grouping in the sidebar (This device / Remotes / History). */
-/* Asymmetric on purpose: 6px of container gap sits above (6+8=14) and 3px of section gap below
-   (11+3=14), so the divider reads 14px from both neighbours — S2's group spacing. */
-.config-sync-side-divider { height: 1px; background: var(--background-modifier-border); margin: 8px 4px 11px; }
+/* Asymmetric on purpose: the 10px container gap already sits above (10+0=10) and 3px of section
+   gap below (7+3=10), so the divider reads 10px from both neighbours — S1's uniform rhythm. */
+.config-sync-side-divider { height: 1px; background: var(--background-modifier-border); margin: 0 4px 7px; }
 
 .config-sync-hhead { display: flex; align-items: baseline; gap: var(--size-4-2); margin-bottom: var(--size-4-1); }
 .config-sync-hhead-title { font-size: var(--font-ui-medium); font-weight: 600; }
