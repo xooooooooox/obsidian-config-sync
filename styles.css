@@ -1427,6 +1427,10 @@ body.is-mobile .config-sync-tworow-chev { display: none; }
 .config-sync-dirseg-btn svg { width: 13px; height: 13px; }
 .config-sync-keyrule-ctl .config-sync-dirseg-btn { padding: 2px 6px; }
 .config-sync-keyrule-ctl .config-sync-dirseg-btn svg { width: 12px; height: 12px; }
+
+/* The Key rules document past its fold ceiling: clipped with a fade, `Show all N keys` beneath. */
+.config-sync-json-pre.is-truncated { max-height: 14em; overflow: hidden; -webkit-mask-image: linear-gradient(to bottom, black 70%, transparent); mask-image: linear-gradient(to bottom, black 70%, transparent); margin-bottom: 0; }
+.config-sync-json-more { color: var(--text-accent); font-size: var(--font-ui-smaller); cursor: pointer; padding: 2px 0 4px; }
 /* A tall value (the key rules plus the document) puts its label at the top, like every other
    card row's single line does — centring it against a 20-line document loses the pairing. */
 .config-sync-card-fieldrow:has(.config-sync-json-hint) .config-sync-explabel { align-self: start; }

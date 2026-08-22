@@ -160,6 +160,10 @@ import {
 // spec 5.3/5.4's four stops for one item against one remote, copy final. `Both ways` is the
 // default and the only stop that leaves the row without a chip — a chip states a decision, and the
 // default is the absence of one.
+// Past this many lines the Key rules document starts truncated behind its own `Show all N keys`
+// line — the fat-plugin ceiling that used to fold the whole document away (acceptance C2-V3).
+const KEY_DOC_FOLD_LINES = 12;
+
 const REMOTE_DIRECTION_ORDER: readonly RemoteDirection[] = ["both", "push", "pull", "none"];
 const REMOTE_DIRECTION_LABEL: Record<RemoteDirection, string> = {
   both: "Both ways",
@@ -3237,6 +3241,10 @@ export class SyncCenterView extends ItemView {
       }
     });
 
+    // Acceptance C2-V3's order: the relation's own rule first (This remote), then the file
+    // evidence with its subordinate Key rules adjacent — a key rule acts on keys INSIDE the files
+    // listed right above it — and the entrances (Settings sync, More) keep the tail.
+    if (remoteRelation) this.renderThisRemoteRow(fields, r);
     const changes = this.familyChanges(r);
     // An unresolved conflict has no direction yet, so the FILES row must not be gated on one:
     // gating it asks the user to pick a side while showing nothing to pick it from, revealing the
@@ -3258,7 +3266,6 @@ export class SyncCenterView extends ItemView {
     // The flip list the retired remote pane pinned under its section head: under this relation the
     // carrier is an ordinary row, so its delta belongs in its own card (spec 5.8.3).
     if (remoteRelation) this.renderRemoteOnOffRow(fields, r);
-    if (remoteRelation) this.renderThisRemoteRow(fields, r);
     if (remoteRelation) this.renderRemoteKeysRow(fields, r);
 
     if (isConflict) this.renderResolveRow(fields, r);
@@ -3394,27 +3401,34 @@ export class SyncCenterView extends ItemView {
     });
   }
 
-  // The document itself, folded away until asked for: a plugin with forty keys would otherwise push
-  // the rest of the card off screen the moment it is expanded. The line above it is not a button in
-  // Settings and is not one here either — it says the keys below can be clicked.
+  // The document, presented the way Settings presents it (acceptance C2-V3): the hint LEADS the
+  // open preview instead of gating it — users did not realize the keys could be clicked when the
+  // document hid behind a toggle. The forty-key worry that folded it in the first place is met one
+  // level down: a document longer than KEY_DOC_FOLD_LINES starts truncated behind its own
+  // `Show all N keys` line, so a fat plugin costs one extra click, not the whole card's height.
   private renderKeyDocument(value: HTMLElement, r: StatusRow, remoteName: string, remote: Remote, ref: ItemRef): void {
-    const hint = value.createDiv({ cls: "config-sync-json-hint config-sync-card-trigger" });
+    const hint = value.createDiv({ cls: "config-sync-json-hint" });
     setIcon(hint.createSpan({ cls: "config-sync-json-hint-icon" }), "plus");
     hint.createSpan({ text: "Click any key to add a rule for it" });
-    hint.addEventListener("click", () => {
-      if (this.keyDocOpen.has(r.group.name)) this.keyDocOpen.delete(r.group.name);
-      else this.keyDocOpen.add(r.group.name);
-      void this.reload();
-    });
-    if (!this.keyDocOpen.has(r.group.name)) return;
     const host = value.createDiv();
     void this.host.storeCopyOf(ref).then((doc) => {
       if (doc === null) {
         host.createDiv({ cls: "config-sync-json-empty", text: "Nothing captured for this item yet — nothing to show." });
         return;
       }
-      renderJsonKeyDoc(host.createEl("pre", { cls: "config-sync-json-pre" }), {
-        raw: JSON.stringify(doc, null, 2),
+      const raw = JSON.stringify(doc, null, 2);
+      const folded = raw.split("\n").length > KEY_DOC_FOLD_LINES && !this.keyDocOpen.has(r.group.name);
+      const pre = host.createEl("pre", { cls: `config-sync-json-pre${folded ? " is-truncated" : ""}` });
+      if (folded) {
+        const more = host.createDiv({ cls: "config-sync-json-more config-sync-card-trigger" });
+        more.setText(`… Show all ${Object.keys(doc).length} keys`);
+        more.addEventListener("click", () => {
+          this.keyDocOpen.add(r.group.name);
+          void this.reload();
+        });
+      }
+      renderJsonKeyDoc(pre, {
+        raw,
         // Two states, the same two Settings shows: a key that already carries a rule is coloured,
         // every other key wears the dashed underline that says it can be clicked.
         classOf: (key) => (keyDirection(remote.items, ref, key) === "both" ? null : "config-sync-json-key-ruled"),
