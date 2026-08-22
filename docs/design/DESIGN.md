@@ -824,7 +824,10 @@ noted):
   listed above it — subordination made adjacency. The rows above the document are the keys that
   already carry a rule, each with its own key-size segmented control showing the RESOLVED direction
   and offering only `keyStopsWithin` the item's own, because a key can never travel further than
-  the item it lives in; the label carries `limited by This remote` when that narrowing is real.
+  the item it lives in; the opened document leads with `limited by This remote` when that narrowing is
+  real — beside the "Click any key" hint, not on the resting card (P2): the line answers "why are
+  there fewer stops", a question only asked once the rules are on screen, and the resting card's
+  shape stays Settings' own.
   Clicking an un-ruled key writes `Neither way` (the default is never stored, so a click that wrote
   the default would produce no rule, no row, and look like a dead control). Four shapes, decided in `keysRowModel`
   (panelModel.ts): the rules list, or one of three sentences naming a structural fact the user

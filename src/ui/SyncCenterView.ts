@@ -3508,9 +3508,8 @@ export class SyncCenterView extends ItemView {
         value.createDiv({ cls: "config-sync-expand-note", text: model.text });
         return;
       }
-      if (model.narrowed) value.createDiv({ cls: "config-sync-keys-limited", text: "limited by This remote" });
       for (const pattern of model.keys) this.renderKeyRuleRow(value, r.group.name, relation.name, remote, ref, item, pattern);
-      this.renderKeyDocument(value, r, relation.name, remote, ref);
+      this.renderKeyDocument(value, r, relation.name, remote, ref, model.narrowed);
     });
   }
 
@@ -3560,7 +3559,7 @@ export class SyncCenterView extends ItemView {
   // through two different gestures taught nobody either gesture — Settings' form is the settled
   // one, so this borrows it verbatim (same icon, same open-state language, same 220px scrolling
   // preview underneath; the interim `Show all N keys` fold retired with the always-open form).
-  private renderKeyDocument(value: HTMLElement, r: StatusRow, remoteName: string, remote: Remote, ref: ItemRef): void {
+  private renderKeyDocument(value: HTMLElement, r: StatusRow, remoteName: string, remote: Remote, ref: ItemRef, narrowed: boolean): void {
     const open = this.keyDocOpen.has(r.group.name);
     const pathLine = value.createDiv({ cls: "config-sync-card-pathline config-sync-keydoc-pathline" });
     pathLine.createSpan({ cls: "config-sync-card-path", text: basename(r.group.path) });
@@ -3582,6 +3581,12 @@ export class SyncCenterView extends ItemView {
       }
     });
     if (!open) return;
+    // `limited by This remote` lives HERE, not on the resting card (P2): it answers "why are there
+    // fewer stops to pick", a question only asked once the rules are on screen — an always-on line
+    // above the filename read as a property of the file, and the resting card's shape should stay
+    // Settings' own (the remote card is the device card with a different counterpart; it invents
+    // no interaction of its own).
+    if (narrowed) value.createDiv({ cls: "config-sync-keys-limited", text: "limited by This remote" });
     const hint = value.createDiv({ cls: "config-sync-json-hint" });
     setIcon(hint.createSpan({ cls: "config-sync-json-hint-icon" }), "plus");
     hint.createSpan({ text: "Click any key to add a rule for it" });

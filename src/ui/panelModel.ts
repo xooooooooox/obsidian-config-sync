@@ -1071,8 +1071,9 @@ export function keysRowModel(input: {
   if (input.group.type === "folder") return { kind: "note", text: "A folder travels as a whole — the direction above covers every file in it." };
   if (input.encrypted) return { kind: "note", text: "This file is stored as one encrypted blob — it travels whole or not at all." };
   if (!input.group.path.endsWith(".json")) return { kind: "note", text: "No keys in this file — it travels whole or not at all." };
-  // `narrowed` drives the `limited by This remote` line under the label: shown only when the item's
-  // own direction really does shorten what a key may be set to, never as decoration.
+  // `narrowed` drives the `limited by This remote` line inside the opened key document (beside the
+  // "Click any key" hint — the moment the question "why fewer stops" is actually asked): shown only
+  // when the item's own direction really does shorten what a key may be set to, never as decoration.
   return { kind: "rules", keys: [...input.patterns], narrowed: keyStopsWithin(input.item).length < 4 };
 }
 
