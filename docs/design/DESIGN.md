@@ -449,7 +449,7 @@ Direction *actions* (capture/apply/push/pull) render as the dedicated icons from
 plus a number (`renderActionCount`). `✓ ○` remain text and power header pills,
 sidebar/switcher badges, and the mobile filter pills (short form) — except two hero
 surfaces, which render real Lucide icons instead, parallel to the State column section's key-round exception:
-the header/self-pane self-chip (`check`/`settings`, SyncCenterView.ts) and the
+the self pane's title pill (`check`/`settings`, SyncCenterView.ts) and the
 qualifier-autocomplete value rows (`check`, qualifierSearch.ts). Everywhere else ✓/○
 remain text. **Chevrons are two distinct glyph families, never text:** FOLD
 ("expands in place") is one SVG `chevron-right`, rotated 90° via CSS when open — never two
@@ -518,13 +518,19 @@ noted):
   saying `↑19` on one screen.
 - **Sidebar** `config-sync-side-item/-side-badge` — sections with tiny count
   badges; active = accent tint. **The sidebar answers one question only: which items to show.**
-  Which RELATION is on screen is the `View` picker's question — `config-sync-view-picker` heads the
-  section list (`-view-current`/`-view-chev`, opening `-view-menu` of `-view-opt`, each labelled by
-  `-view-label`), and the remotes live in its dropdown rather than as sidebar entries. Each entry
-  carries its own badge: the device side its capture/apply item counts, a remote side its push/pull
-  item counts once a comparison has run against it, and until then the cheap whole-store state icon
-  the lock file gives for free. The compact switcher's menu renders this same section list, so the
-  picker follows it into narrow panes and phones with no second implementation. The badges are a COLUMN, and what has to line up is the ICON at each
+  Which RELATION is on screen is the `View` picker's question — `config-sync-view-picker` LEADS the
+  whole sidebar, above the search box (choose what you look at, then filter it: the reversed order
+  had the filter scoped by a control beneath it). Its closed control reads icon + SHORT name
+  (`-view-ic` + `relationShortLabel`: `monitor` + `This device`, or `cloud` + the remote's name —
+  cloud is already this panel's remote glyph family, one mark for every transport type), with the
+  full relation (`relationLabel`) and the `relationHint` sentence in hover/aria, and the CURRENT
+  view's own count pills riding its right edge (`-view-counts`, the strip the panel header used to
+  carry — same producers, same zero-suppression, `ok` unconditional). The dropdown rows
+  (`-view-menu`/`-view-opt`) wear the same icon + short name; each carries its own badge: the
+  device side its capture/apply item counts, a remote side its push/pull item counts once a
+  comparison has run against it, and until then the cheap whole-store state icon the lock file
+  gives for free. The compact switcher's menu renders the same section list WITH the picker at its
+  head (its only entry point there), so narrow panes and phones get no second implementation. The badges are a COLUMN, and what has to line up is the ICON at each
   badge's left edge: every capsule carries `font-variant-numeric: tabular-nums` and
   `min-width: calc(1em + var(--cs-badge-digits) * 1ch + 12px)` (icon + digit slot + padding).
   `--cs-badge-digits` is MEASURED per render on the shell (`SyncCenterView.badgeDigits` →
@@ -550,7 +556,7 @@ noted):
   everything between is decided by the fit. Leaving compact needs room to spare
   (`FIT_HYSTERESIS_PX`), since one shared threshold flips on every pixel of a window drag. The Config Sync self layer leads as a distinct hero card
   `config-sync-side-self` (`-side-self-ic` icon tile, `-side-self-title`/`-side-self-sub`,
-  `-side-self-pill` reusing `selfStatePill`), echoing the header self-chip. Grouping is by
+  `-side-self-pill` reusing `selfStatePill`). Grouping is by
   `config-sync-side-divider` hairlines alone: View picker / self card / scope list /
   History each separated by one divider, with NO group heads anywhere. Re-checking remotes
   belongs to the main region's global refresh button alone (it re-scans local state AND
@@ -744,10 +750,12 @@ noted):
   `files` glyph (`is-neutral`) — the direction colors all promise a run, and this one promises none.
   Every row's card carries a `This remote` row — four stops, `Both ways` (the
   default, and the only one that leaves the row without a chip) / `Push only` / `Pull only` /
-  `Neither way` — rendered as the card's own menu-chip idiom (the shape `After install` and
-  `Enablement` already use). Its chips speak the transport's own glyphs: `cloud-upload`,
-  `cloud-download`, `circle-slash`. A row with no ref carries no such control, because a rule is
-  stored under a ref. Carrier divergence is then that row's own card row (`On/off`, the per-plugin
+  `Neither way` — rendered as a SEGMENTED control on the control track (`config-sync-dirseg`,
+  acceptance B2-V1): every stop visible at once as its transport glyph (`arrow-up-down`,
+  `cloud-upload`, `cloud-download`, `circle-slash`), the current one lit in accent, one click to
+  change, stop names in hover/aria. Each key rule's row carries the same control at key size,
+  drawing ONLY `keyStopsWithin` the item's own direction. A row with no ref carries no such
+  control, because a rule is stored under a ref. Carrier divergence is then that row's own card row (`On/off`, the per-plugin
   flip narration, `config-sync-remote-flip-value`); per-file differences are that item's `Files` row, each entry
   opening the store-vs-remote content diff. Companion families fold the same way here: companion
   diff entries merge into their parent's entry, each file re-pathed under a `<companion>/` prefix
@@ -756,14 +764,19 @@ noted):
   fallback).
   Under that row sits **`Key rules`** (spec 5.4's `Keys`, renamed in acceptance: the Settings
   drawer's block and the More row's tooltip already said `Key rules`, and one thing carries one
-  name), one level down and the same gesture as that Settings `KEY RULES` block, deliberately: the keys that already carry a rule as rows with their
-  own four-stop chip, then `Click any key to add a rule for it`, then the item's store copy —
-  clicking an un-ruled key writes `Neither way` (the default is never stored, so a click that wrote
-  the default would produce no rule, no row, and look like a dead control). A key's chip shows its
-  RESOLVED direction and its menu offers only `keyStopsWithin` the item's own, because a key can
-  never travel further than the item it lives in; the label carries `limited by This remote` when
-  that narrowing is real. The document is folded away until asked for — a forty-key plugin would
-  otherwise push the rest of the card off screen. Four shapes, decided in `keysRowModel`
+  name), one level down and the same gesture as that Settings `KEY RULES` block, deliberately —
+  and since the acceptance round, the same PRESENTATION too: the hint (`+ Click any key to add a
+  rule for it`) LEADS the open document instead of gating it, ruled keys coloured, clickable keys
+  dash-underlined, and a document past `KEY_DOC_FOLD_LINES` (12) starts clipped behind its own
+  `… Show all N keys` line — the fat-plugin worry met one level down instead of hiding the whole
+  document. The row sits DIRECTLY under `Files` (card order: state → `This remote` → `Files` →
+  `On/off` → `Key rules` → entrances last), because a key rule acts on keys inside the very files
+  listed above it — subordination made adjacency. The rows above the document are the keys that
+  already carry a rule, each with its own key-size segmented control showing the RESOLVED direction
+  and offering only `keyStopsWithin` the item's own, because a key can never travel further than
+  the item it lives in; the label carries `limited by This remote` when that narrowing is real.
+  Clicking an un-ruled key writes `Neither way` (the default is never stored, so a click that wrote
+  the default would produce no rule, no row, and look like a dead control). Four shapes, decided in `keysRowModel`
   (panelModel.ts): the rules list, or one of three sentences naming a structural fact the user
   cannot change (whole-file-encrypted item / a file with no keys / a folder), or — when the item
   itself travels `Neither way` — **no row at all**, since the row directly above already says so.
@@ -952,9 +965,11 @@ noted):
   the run-history list; the view swaps table → card layout when compact (`<700px`) so mobile
   reads top-to-bottom without horizontal scroll (`-hcard-sum` wraps; `-hcard-act` `min-width:0`).
   Head/legend and the `renderActionInto` action painter are shared by both layouts; detail view unchanged.
-- **Header status bar** — **self chip** `config-sync-self-chip` (is-up/down/ok tints) +
-  `-self-chip-ic`, `config-sync-head-divider`, then the pills; push/pull totals use
-  `config-sync-pill.is-push` (pink) / `.is-pull` (cyan). The bar ends in the one
+- **Header status bar** — the FLEET half only: push/pull totals across every remote,
+  `config-sync-pill.is-push` (pink) / `.is-pull` (cyan). The current view's own pills moved onto
+  the View picker's closed control, and the self chip retired with them — the pinned sidebar row
+  already is the self destination, and two `to capture` affordances a few rows apart answered the
+  same click (acceptance A3). The bar ends in the one
   right-aligned refresh control (`config-sync-center-refresh`, `refresh-cw`): no `refreshed
   …` text span — the age lives in the button's own tooltip (`Refresh — refreshed just now`
   / `… 5m ago`, `relativeAge`), same on desktop and mobile.
