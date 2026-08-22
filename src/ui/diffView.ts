@@ -143,6 +143,10 @@ export function renderDiffPanel(
   meta: { name: string; sorted: boolean },
   onExpand: (() => void) | null
 ): void {
+  // Diffed once up front: besides feeding render(), the result decides whether the view/fold
+  // toggles exist at all — past DIFF_LINE_CAP there are no rows for them to act on, so they
+  // are not drawn.
+  const ops = diffLines(leftText, rightText);
   const toolbar = host.createDiv({ cls: "config-sync-cm-difftools" });
   const metaEl = toolbar.createSpan({ cls: "config-sync-cm-diffmeta", text: meta.name });
   if (meta.sorted) {
@@ -161,7 +165,6 @@ export function renderDiffPanel(
   const pane = host.createDiv({ cls: "config-sync-cm-diffpane" });
   const render = (): void => {
     pane.empty();
-    const ops = diffLines(leftText, rightText);
     if (ops === null) {
       pane.createDiv({ cls: "config-sync-cm-diffbig", text: "Content differs; too large to diff inline." });
       return;
@@ -170,7 +173,7 @@ export function renderDiffPanel(
     if (sessionDiffView === "unified" || Platform.isMobile) renderUnified(pane, rows, leftLabel, rightLabel);
     else renderSplit(pane, rows, leftLabel, rightLabel);
   };
-  if (!Platform.isMobile) {
+  if (ops !== null && !Platform.isMobile) {
     const toggle = toolbar.createDiv({ cls: "config-sync-cm-viewseg" });
     const uni = toggle.createEl("button", { cls: "config-sync-cm-viewbtn", attr: { "aria-label": "Unified diff" } });
     setIcon(uni, "rows-2");
@@ -194,27 +197,29 @@ export function renderDiffPanel(
     });
     paint();
   }
-  const collapseSeg = toolbar.createDiv({ cls: "config-sync-cm-viewseg" });
-  const colBtn = collapseSeg.createEl("button", { cls: "config-sync-cm-viewbtn", attr: { "aria-label": "Collapse unchanged lines" } });
-  setIcon(colBtn, "fold-vertical");
-  const fullBtn = collapseSeg.createEl("button", { cls: "config-sync-cm-viewbtn", attr: { "aria-label": "Show all lines" } });
-  setIcon(fullBtn, "unfold-vertical");
-  const paintCollapse = (): void => {
-    colBtn.toggleClass("is-on", sessionDiffCollapse);
-    fullBtn.toggleClass("is-on", !sessionDiffCollapse);
-  };
-  colBtn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    sessionDiffCollapse = true;
+  if (ops !== null) {
+    const collapseSeg = toolbar.createDiv({ cls: "config-sync-cm-viewseg" });
+    const colBtn = collapseSeg.createEl("button", { cls: "config-sync-cm-viewbtn", attr: { "aria-label": "Collapse unchanged lines" } });
+    setIcon(colBtn, "fold-vertical");
+    const fullBtn = collapseSeg.createEl("button", { cls: "config-sync-cm-viewbtn", attr: { "aria-label": "Show all lines" } });
+    setIcon(fullBtn, "unfold-vertical");
+    const paintCollapse = (): void => {
+      colBtn.toggleClass("is-on", sessionDiffCollapse);
+      fullBtn.toggleClass("is-on", !sessionDiffCollapse);
+    };
+    colBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      sessionDiffCollapse = true;
+      paintCollapse();
+      render();
+    });
+    fullBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      sessionDiffCollapse = false;
+      paintCollapse();
+      render();
+    });
     paintCollapse();
-    render();
-  });
-  fullBtn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    sessionDiffCollapse = false;
-    paintCollapse();
-    render();
-  });
-  paintCollapse();
+  }
   render();
 }

@@ -514,6 +514,11 @@ body.is-phone .config-sync-fkey {
    .config-sync-cardrow) — the list is a full-width sibling of its row on purpose, but its left
    edge lines up with every other row's value, not at an indent of its own. */
 .config-sync-files-list { margin-top: var(--size-4-1); margin-left: calc(130px + var(--size-4-2)); }
+/* A narrow pane takes the alignment indent back: those 138px are a third of the width the
+   sibling trick just bought, and spending them squeezes the entries, their inline diffs and the
+   resolve pair into the remainder — enough to clip "Keep mine" clean off a 375px phone. 8px
+   still says "these belong to the row above". */
+.config-sync-center.is-narrow .config-sync-files-list { margin-left: var(--size-4-2); }
 .config-sync-files-list:empty { display: none; }
 /* The fold line leads with its own chevron + fixed-size icon — a flex row. */
 .config-sync-unchanged { display: flex; align-items: center; gap: 7px; color: var(--text-muted); font-size: var(--font-ui-smaller); margin-top: var(--size-4-2); cursor: pointer; }
@@ -1805,7 +1810,9 @@ button.config-sync-add-row, button.config-sync-add-row:hover { background: none;
 .config-sync-cm-segbtn.is-on { background: rgba(var(--interactive-accent-rgb), 0.18); color: var(--text-accent); }
 
 .config-sync-cm-difftools { display: flex; align-items: center; gap: var(--size-4-2); padding: var(--size-4-1) var(--size-4-3); border-top: 1px solid var(--background-modifier-border); }
-.config-sync-cm-diffmeta { color: var(--text-faint); font-size: var(--font-ui-smaller); font-family: var(--font-monospace); }
+/* min-width 0 lets the name shrink as a flex item: a long filename truncates instead of pushing
+   the toolbar buttons past the card edge, where its overflow:hidden would clip them. */
+.config-sync-cm-diffmeta { color: var(--text-faint); font-size: var(--font-ui-smaller); font-family: var(--font-monospace); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* THE conflict choice control (resolveSegment.ts), one look for both places
    that offer it: the card's `Resolve` row and the toolbar of every diff that row has open. They
    One decision must not wear two faces, so the two entrances share this markup rather than each

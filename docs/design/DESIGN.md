@@ -377,7 +377,12 @@ toggles (`diffView.ts`) are icon+tooltip (two segments, active highlighted): `ro
 unified diff (tooltip `Unified diff`) · `columns-2` split diff (tooltip `Split diff`) ·
 `fold-vertical` collapse unchanged lines (tooltip `Collapse unchanged lines`) ·
 `unfold-vertical` show all lines (tooltip `Show all lines`) — the labels live in the
-tooltips only, never on the buttons.
+tooltips only, never on the buttons. Both segments render only when there are diff rows to act
+on: past `DIFF_LINE_CAP` the pane says `Content differs; too large to diff inline.` and the
+toolbar keeps just the filename and the `maximize-2` open-bigger button — fold/unfold with
+nothing to fold would be two dead controls in the narrowest toolbar the app draws. The filename
+truncates with an ellipsis rather than pushing the buttons out of the card; the full name still
+heads the bigger window that `maximize-2` opens.
 
 **The FOLD family:** `chevron-right` — the fold family's one glyph, rendered by the shared
 `renderFoldChevron`/`setFoldOpen` helper (`ui/foldChevron.ts`) and rotated 90° via CSS when
@@ -909,7 +914,11 @@ noted):
   the state a chevron would draw. One badge is also why this is an
   icon row: the badge sits on the control rail with every other card control, and the entry list it
   opens is a SIBLING of the row rather than part of its value cell, so file names get the card's
-  full width on phone and desktop alike instead of the grid's remainder. Expanding reveals the
+  full width instead of the grid's remainder. A wide pane indents the list to the value column so
+  its left edge lines up with every other row's value; a narrow pane collapses that indent to 8px —
+  just enough to say "these belong to the row above" — because the 138px alignment indent would
+  spend a third of a phone on decoration and squeeze the entries, their inline diffs and the
+  conflict pair into what is left. Expanding reveals the
   entry list, remembered per row while the pane stays open (`expandedFileRows`, a `Set` keyed by group
   name, cleared with `expandedItems`/`remoteFoldsOpen` when the pane closes); direction-aware
   entries — `+` /
@@ -945,10 +954,10 @@ noted):
   differ": `diffPair`'s `produced` has already been through captureTransform/applyTransform, so what
   it shows is **what one CHOICE would do**. Direction is not a parameter for viewing a difference;
   it is the thing being viewed. That makes the control that picks a preview and the control that
-  picks a side the same control, and it lives in the diff toolbar (`DiffResolveControl`,
-  `diffView.ts`) — `Use theirs` / `Keep mine`, the active side in its own direction colour.
-  The card keeps its `Resolve` row for someone who already knows which side they want; both
-  entrances route through one `pickConflictSide`, so they are one decision, not two that agree.
+  picks a side the same control: the `Use theirs` / `Keep mine` pair drawn once inside the `Files`
+  block's expanded content (Expanded card above; `conflictResolve` hands `resolveSegment.ts` its
+  `DiffResolveControl` descriptor), under the entries and whichever diffs they open. Every pick
+  routes through one `pickConflictSide`, so it is one decision however it is reached.
   An unresolved conflict renders its FILES row previewing the `Use theirs` side. Gating that row on
   a decided direction would ask the user to choose with nothing on screen to choose from, and reveal
   the files only after they had committed.
