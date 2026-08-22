@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { destinationKey, excludedLineText, foldStateKey, withheldChangeClause, insyncLineText, PanelDestination, PanelRelation, relationCopy, relationHint, relationKey, relationLabel, relationShortLabel, viewOptions } from "../src/ui/panelModel";
+import { destinationKey, pickerBadgeDigits, excludedLineText, foldStateKey, withheldChangeClause, insyncLineText, PanelDestination, PanelRelation, relationCopy, relationHint, relationKey, relationLabel, relationShortLabel, viewOptions } from "../src/ui/panelModel";
 
 describe("relationLabel", () => {
   it("names the two relations exactly as the design says", () => {
@@ -79,6 +79,15 @@ describe("viewOptions", () => {
     const compared = [{ name: "main", state: "remote-newer" as const, counts: { push: 0, pull: 4 } }];
     const opts = viewOptions({ current: { kind: "remote", name: "main" }, deviceCounts: { up: 0, down: 0 }, remotes: compared });
     expect(opts[1]?.badges).toEqual([{ kind: "pull", count: 4 }]);
+  });
+
+  it("counts a remote that is NOT the current view when its tally is in hand", () => {
+    const counted = [{ name: "main", state: "remote-newer" as const, counts: { push: 2, pull: 1 } }];
+    const opts = viewOptions({ current: { kind: "device" }, deviceCounts: { up: 0, down: 0 }, remotes: counted });
+    expect(opts[1]?.badges).toEqual([
+      { kind: "push", count: 2 },
+      { kind: "pull", count: 1 },
+    ]);
   });
 
   it("gives a compared remote with nothing waiting no badges at all — not a state icon", () => {
@@ -162,5 +171,25 @@ describe("relation short labels — the picker names what you look at", () => {
     expect(relationShortLabel({ kind: "remote", name: "main" })).toBe("main");
     expect(relationHint({ kind: "device" })).toBe("Comparing this device with your store");
     expect(relationHint({ kind: "remote", name: "main" })).toBe("Comparing your store with main");
+  });
+});
+
+describe("pickerBadgeDigits", () => {
+  it("reserves the widest count the picker itself shows, not the pane's", () => {
+    const opts = viewOptions({
+      current: { kind: "device" },
+      deviceCounts: { up: 11, down: 1 },
+      remotes: [{ name: "main", state: "same" as const, counts: { push: 0, pull: 4 } }],
+    });
+    expect(pickerBadgeDigits(opts)).toBe(2);
+  });
+
+  it("counts a state icon as no digits at all", () => {
+    const opts = viewOptions({
+      current: { kind: "device" },
+      deviceCounts: { up: 0, down: 0 },
+      remotes: [{ name: "main", state: "remote-newer" as const, counts: null }],
+    });
+    expect(pickerBadgeDigits(opts)).toBe(1);
   });
 });

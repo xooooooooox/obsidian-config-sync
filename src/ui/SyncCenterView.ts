@@ -86,6 +86,7 @@ import {
   unifiedFooterSummary,
   withheldChangeClause,
   visibleUnderFilter,
+  pickerBadgeDigits,
   widestCountDigits,
   Direction,
   effectiveDirection,
@@ -747,9 +748,12 @@ export class SyncCenterView extends ItemView {
       { name: relationShortLabel(this.relation), badges: 3 },
       { name: "All items", badges: badgesFor(countable) },
     ];
+    // The same presence set renderSectionEntries draws from — the width the pane reserves must be
+    // for the rows it will actually hold, including the skeleton a pending remote comparison keeps.
+    const present = this.presentSections();
     for (const cat of ITEM_SECTION_ORDER) {
       const inCat = countable.filter((r) => this.itemSectionOf(r.group.name) === cat);
-      if (inCat.length === 0) continue;
+      if (!present.has(cat)) continue;
       needs.push({ name: ITEM_SECTION_LABELS[cat], badges: badgesFor(inCat) });
     }
     if (this.host.runHistoryEnabled()) needs.push({ name: "History", badges: 0 });
@@ -786,7 +790,14 @@ export class SyncCenterView extends ItemView {
   // which keeps this free of the `min-width` arithmetic the stylesheet owns. The fallback covers
   // the one case with no badge anywhere: every count is zero, and then nothing depends on it.
   private measureSideBadge(): number {
-    const live = this.contentEl.querySelector(".config-sync-side-badge");
+    // A SECTION badge specifically: sidebarNeededWidth models the section rows, and the picker's
+    // badge column reserves its own (usually narrower) width since acceptance K1 — the first
+    // .config-sync-side-badge in the DOM is a picker one, and measuring it would understate the
+    // rows this width answer is about. The bare fallback covers the compact switcher, whose badges
+    // share the pane-wide reservation.
+    const live =
+      this.contentEl.querySelector(".config-sync-side-section .config-sync-side-badge") ??
+      this.contentEl.querySelector(".config-sync-side-badge");
     const width = live === null ? 0 : live.getBoundingClientRect().width;
     return width > 0 ? width : SIDE_BADGE_FALLBACK_PX;
   }
@@ -1169,6 +1180,19 @@ export class SyncCenterView extends ItemView {
       return this.fullName(a.group.name, a.group.label).localeCompare(this.fullName(b.group.name, b.group.label));
     });
     this.rowsCache = out;
+    return out;
+  }
+
+  // Which categories get a section entry. Presence is a fact about what EXISTS, so it cannot come
+  // from the relation-scoped rows() alone: while a remote comparison is still counting, rows() is
+  // empty, and deriving presence from it collapsed the whole section list to a lone "All items"
+  // for the pending window (acceptance L1 — seconds on a git remote, milliseconds on a vault one,
+  // hence "sometimes"). The device's own groups answer instantly; the union keeps a settled remote
+  // able to surface a category this device holds no items in.
+  private presentSections(): Set<StorageSection | "beta"> {
+    const out = new Set<StorageSection | "beta">();
+    for (const r of this.countable(this.rows())) out.add(this.itemSectionOf(r.group.name));
+    for (const r of this.countable(this.deviceRows())) out.add(this.itemSectionOf(r.group.name));
     return out;
   }
 
@@ -1888,19 +1912,29 @@ export class SyncCenterView extends ItemView {
       current: relation,
       deviceCounts,
       remotes: this.host.remotes().map((r) => {
-        // Only the relation on screen has a comparison behind it (one compare is held at a time),
-        // so every other remote falls back to its whole-store state icon.
+        // The on-screen remote's numbers come from the full comparison held behind it (content
+        // verdicts included); every OTHER checked remote wears the periodic check's lock tally
+        // (RemoteCheck.items), so the dropdown speaks one costume — capsules — for every remote it
+        // can count (acceptance L2). The bare whole-store state icon is only for the remote nobody
+        // can count; it used to dress every non-current remote, breaking the badge column with a
+        // naked glyph that was, for remote-newer, the pull capsule's own cloud.
+        const check = this.host.remoteCheck(r.name)?.check;
         const compared = relation.kind === "remote" && relation.name === r.name && this.remoteResultFor(r.name) !== null;
-        const counts = compared ? this.presentedCounts(this.countable(this.rows())) : null;
+        const deep = compared ? this.presentedCounts(this.countable(this.rows())) : null;
         return {
           name: r.name,
-          state: this.host.remoteCheck(r.name)?.check.state ?? "unknown",
-          counts: counts === null ? null : { push: counts.up, pull: counts.down },
+          state: check?.state ?? "unknown",
+          counts: deep !== null ? { push: deep.up, pull: deep.down } : (check?.items ?? null),
         };
       }),
     });
     const current = opts.find((o) => o.active) ?? opts[0];
     if (current === undefined) return;
+    // The picker's own digit reservation (acceptance K1), overriding the shell's pane-wide one:
+    // the head and the dropdown rows form a column of their own, and that column's widest count is
+    // measured from what the picker actually shows — repainted here because this box repaints in
+    // place, without a render() to refresh a shell-level value.
+    box.style.setProperty("--cs-badge-digits", String(pickerBadgeDigits(opts)));
     const head = box.createDiv({
       cls: `config-sync-view-current${this.viewPickerOpen ? " is-open" : ""}`,
       attr: { "aria-label": relationHint(current.relation) },
@@ -2067,9 +2101,10 @@ export class SyncCenterView extends ItemView {
     };
 
     deviceEntry("all", "All items", this.countable(this.rows()));
+    const present = this.presentSections();
     for (const cat of ITEM_SECTION_ORDER) {
       const inCat = this.countable(this.rows()).filter((r) => this.itemSectionOf(r.group.name) === cat);
-      if (inCat.length === 0) continue;
+      if (!present.has(cat)) continue;
       deviceEntry(cat, ITEM_SECTION_LABELS[cat], inCat);
     }
 

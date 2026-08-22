@@ -926,9 +926,11 @@ export function foldStateKey(r: PanelRelation, d: PanelDestination, section: str
 }
 
 // A relation's badge is a count of items when that relation's numbers are in hand, and its cheap
-// whole-store state when they are not. The device side always counts; a remote counts only once a
-// real comparison against it has run (this list is rebuilt on every render, and comparing is a
-// network round trip), so both shapes stay.
+// whole-store state when they are not. The device side always counts; the on-screen remote counts
+// from its full comparison, and every other checked remote from the periodic check's lock tally
+// (RemoteCheck.items) — so the dropdown wears one costume, capsules, for every remote it can count
+// (acceptance L2). The state shape remains for the remote nobody can count: unknown, no store yet,
+// or a side still on the older lock payload.
 export type ViewBadge = { kind: SyncAction; count: number } | { kind: "remote-state"; state: RemoteState };
 
 export interface ViewOption {
@@ -970,6 +972,16 @@ export function viewOptions(input: {
     out.push({ relation, label: relationLabel(relation), active: liveName === r.name, badges });
   }
   return out;
+}
+
+// The picker is its own badge column (acceptance K1): its capsules reserve the widest count the
+// picker itself shows — the device pair and each remote's pair — never the section list's maximum.
+// The two columns are not adjacent (the search field and the self card sit between them), so a
+// shared reservation had no alignment payoff; it only made the picker's short counts carry the
+// section maximum as trailing dead space. State icons contribute no digits: they are glyphs, not
+// counts.
+export function pickerBadgeDigits(opts: readonly ViewOption[]): number {
+  return widestCountDigits(opts.flatMap((o) => o.badges).map((b) => (b.kind === "remote-state" ? 0 : b.count)));
 }
 
 // The two relations' state words, one for one (spec 5.1). The BUCKETS are the same five under both —

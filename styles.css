@@ -1024,7 +1024,10 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 .config-sync-view-chev { display: inline-flex; align-items: center; color: var(--text-faint); }
 .config-sync-view-chev svg { width: 13px; height: 13px; }
 .config-sync-view-menu { display: flex; flex-direction: column; gap: 3px; padding: 4px; border: 1px solid var(--background-modifier-border); border-radius: 8px; background: var(--background-primary); }
-.config-sync-view-opt { display: flex; align-items: center; gap: 5px; padding: 5px 8px; border-radius: 6px; cursor: pointer; font-size: var(--font-ui-small); }
+/* Right padding 4px against the left's 8: box border (1) + menu padding (4) + this 4 puts the badge
+   column's right edge 9px in — the same 9px .config-sync-side-item's padding gives the section
+   badges, so the two regions' columns share one right edge down the sidebar. */
+.config-sync-view-opt { display: flex; align-items: center; gap: 5px; padding: 5px 4px 5px 8px; border-radius: 6px; cursor: pointer; font-size: var(--font-ui-small); }
 .config-sync-view-opt:hover { background: var(--background-modifier-hover); }
 .config-sync-view-opt.is-active { background: rgba(var(--interactive-accent-rgb), 0.14); }
 

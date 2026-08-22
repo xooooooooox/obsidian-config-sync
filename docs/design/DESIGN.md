@@ -534,15 +534,31 @@ noted):
   "still counting"; static under reduced motion, and the sidebar section badges hold the same dot.
   The dropdown rows
   (`-view-menu`/`-view-opt`) wear the same icon + short name; each carries its own badge: the
-  device side its capture/apply item counts, a remote side its push/pull item counts once a
-  comparison has run against it, and until then the cheap whole-store state icon the lock file
-  gives for free. The compact switcher's menu renders the same section list WITH the picker at its
-  head (its only entry point there), so narrow panes and phones get no second implementation. The badges are a COLUMN, and what has to line up is the ICON at each
+  device side its capture/apply item counts, the on-screen remote its push/pull counts from the
+  full comparison held behind it, and every OTHER checked remote its push/pull counts from the
+  periodic check's lock tally (`RemoteCheck.items`) — one costume, capsules, for every remote the
+  panel can count (L2; the earlier whole-store state icon on non-current remotes broke the badge
+  column with a naked glyph that was, for remote-newer, the pull capsule's own cloud). The bare
+  state icon remains only for the remote nobody can count: unknown, no store yet, or a side still
+  on the older lock payload. An opt row's right padding is 4px against the left's 8, so its badge
+  column's right edge lands the same 9px in as the section rows' (border 1 + menu padding 4 + 4). The compact switcher's menu renders the same section list WITH the picker at its
+  head (its only entry point there), so narrow panes and phones get no second implementation. A
+  category's section entry exists when the category EXISTS, not when the relation on screen has
+  rows for it (`presentSections`: the union of the current relation's rows and the device's own) —
+  deriving presence from the relation-scoped rows alone collapsed the whole list to a lone
+  `All items` while a remote comparison was still counting (L1); the skeleton now holds through the
+  pending window, each entry wearing the pending dot, and `sidebarRowNeeds` mirrors the same set so
+  the width the pane reserves is for the rows it will actually draw. The badges are a COLUMN, and what has to line up is the ICON at each
   badge's left edge: every capsule carries `font-variant-numeric: tabular-nums` and
   `min-width: calc(1em + var(--cs-badge-digits) * 1ch + 12px)` (icon + digit slot + padding).
-  `--cs-badge-digits` is MEASURED per render on the shell (`SyncCenterView.badgeDigits` →
-  `widestCountDigits`, from the `All items` buckets and the row total that bounds a search's hit
-  badge), never written into the stylesheet: a fixed reservation is wrong in both directions at
+  `--cs-badge-digits` is MEASURED per render, never written into the stylesheet — and per REGION
+  (K1): the shell's value (`SyncCenterView.badgeDigits` → `widestCountDigits`, from the `All items`
+  buckets and the row total that bounds a search's hit badge) serves the section list and the
+  compact switcher, while the View picker sets its own on its box (`pickerBadgeDigits`, from the
+  counts the picker itself shows). The two columns are not adjacent — the search field and the self
+  card sit between — so one shared reservation had no alignment payoff; it only made the picker's
+  short counts carry the section maximum (three digits at 109 items) as trailing dead space. Why
+  measured at all: a fixed reservation is wrong in both directions at
   once — too small and the longest count overflows the column the reservation exists to hold, too
   large and every shorter count carries the difference as dead space (a hard-coded `3ch` turned
   `↑3` from 28px into 41px, all of it trailing, and that is what made the first attempt read as
