@@ -62,7 +62,7 @@ export function runDesc(kind: RunKind, _remote: string | null, results: GroupRes
   const issues = results.filter((r) => r.status !== "ok");
   if (issues.length > 0) {
     const notInCatalog = issues.filter((r) => r.messages.some((m) => m.includes("not in the community catalog"))).length;
-    if (notInCatalog === issues.length) return `${plural(notInCatalog, "plugin")} not in the community catalog — install manually`;
+    if (notInCatalog === issues.length) return `${plural(notInCatalog, "plugin")} not in the community catalog; install manually`;
     const failed = results.filter((r) => r.status === "error").length;
     if (failed > 0) return `${plural(failed, "item")} failed`;
     return `${plural(issues.length, "item")} need attention`;

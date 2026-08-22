@@ -1775,7 +1775,7 @@ export class SyncCenterView extends ItemView {
       const behind = pane.createDiv({ cls: "config-sync-self-behind" });
       behind.createSpan({
         cls: "config-sync-self-behind-txt",
-        text: `Captured on Config Sync ${info.updateAvailable.store} — this device runs ${info.updateAvailable.local}. Update before adopting or applying.`,
+        text: `Captured on Config Sync ${info.updateAvailable.store}; this device runs ${info.updateAvailable.local}. Update before adopting or applying.`,
       });
       const open = behind.createEl("button", { cls: "config-sync-self-behind-btn", text: "Open Community plugins" });
       open.addEventListener("click", () => this.openCommunityPlugins());
@@ -1785,7 +1785,7 @@ export class SyncCenterView extends ItemView {
       if (!info.storePresent) {
         // A never-pulled fresh device has no store to adopt from yet — no "Found a
         // configuration" claim, no Adopt, no Capture caution.
-        pane.createDiv({ cls: "config-sync-self-sub", text: "This is a new device — it has no sync list yet." });
+        pane.createDiv({ cls: "config-sync-self-sub", text: "This is a new device, so it has no sync list yet." });
         const block = pane.createDiv({ cls: "config-sync-self-block" });
         block.createDiv({ cls: "config-sync-self-block-h", text: "No store on this device yet" });
         const first = this.host.remotes()[0];
@@ -1793,7 +1793,7 @@ export class SyncCenterView extends ItemView {
           const name = first.name;
           block.createDiv({
             cls: "config-sync-self-block-s",
-            text: `Pull from ${name} first — that brings the store to this device; then adopt its configuration.`,
+            text: `Pull from ${name} first: that brings the store to this device. Then adopt its configuration.`,
           });
           const acts = block.createDiv({ cls: "config-sync-self-acts" });
           const open = acts.createEl("button", { cls: "mod-cta", text: `Open ${name}` });
@@ -1812,12 +1812,12 @@ export class SyncCenterView extends ItemView {
         }
         return;
       }
-      pane.createDiv({ cls: "config-sync-self-sub", text: "This is a new device — it has no sync list yet. The store holds a configuration you can adopt to set it up." });
+      pane.createDiv({ cls: "config-sync-self-sub", text: "This is a new device, so it has no sync list yet. The store holds a configuration you can adopt to set it up." });
       const block = pane.createDiv({ cls: "config-sync-self-block is-act" });
       const when = info.capturedAt === null ? "" : ` · captured ${isoAge(info.capturedAt)}`;
       block.createDiv({ cls: "config-sync-self-block-h", text: "Found a configuration in the store" });
       block.createDiv({ cls: "config-sync-self-block-s", text: `${info.itemCount} sync item${info.itemCount === 1 ? "" : "s"}${when}. Adopt sets up this device's list; then apply the items you want.` });
-      block.createDiv({ cls: "config-sync-self-caution", text: "⚠ Don't Capture first — that would overwrite the store with this blank device's defaults." });
+      block.createDiv({ cls: "config-sync-self-caution", text: "⚠ Don't Capture first: that would overwrite the store with this blank device's defaults." });
       const acts = block.createDiv({ cls: "config-sync-self-acts" });
       const adopt = acts.createEl("button", { cls: "mod-cta", text: "Adopt configuration" });
       adopt.addEventListener("click", () => this.runSelfAdopt(adopt));
@@ -1830,14 +1830,14 @@ export class SyncCenterView extends ItemView {
     }
 
     if (info.state === "insync") {
-      pane.createDiv({ cls: "config-sync-self-sub", text: `The list of what this device syncs — ${info.itemCount} item${info.itemCount === 1 ? "" : "s"}, in sync with the store.` });
+      pane.createDiv({ cls: "config-sync-self-sub", text: `The list of what this device syncs: ${info.itemCount} item${info.itemCount === 1 ? "" : "s"}, in sync with the store.` });
       // Post-adopt nudge: the list is set up but items may not
       // be applied to this device yet. Point at Apply (store → device), never Capture.
       const toApply = this.presentedCounts(this.countable(this.rows())).down;
       if (toApply > 0) {
         const block = pane.createDiv({ cls: "config-sync-self-block is-act" });
         block.createDiv({ cls: "config-sync-self-block-h", text: "Now set up this device" });
-        block.createDiv({ cls: "config-sync-self-block-s", text: `${toApply} item${toApply === 1 ? "" : "s"} ready to apply from the store — Apply brings your settings and plugins onto this device.` });
+        block.createDiv({ cls: "config-sync-self-block-s", text: `${toApply} item${toApply === 1 ? "" : "s"} ready to apply from the store. Apply brings your settings and plugins onto this device.` });
         const acts = block.createDiv({ cls: "config-sync-self-acts" });
         const review = acts.createEl("button", { cls: "mod-cta", text: "Review what to apply" });
         review.addEventListener("click", () => {
@@ -1851,14 +1851,14 @@ export class SyncCenterView extends ItemView {
     }
 
     const sub = pane.createDiv({ cls: "config-sync-self-sub" });
-    if (info.state === "both") sub.setText("Both your list and the store changed. Adopt first, then capture — capturing now would overwrite another device's list additions with this device's older list.");
+    if (info.state === "both") sub.setText("Both your list and the store changed. Adopt first, then capture: capturing now would overwrite another device's list additions with this device's older list.");
     else if (info.state === "adopt") sub.setText("The list of what this device syncs changed in the store. Adopt to bring the new items onto this device; they then appear in your item list as normal, apply-able rows.");
     else sub.setText("You changed what this device syncs. Capture to publish it to the store, so your other devices can adopt it.");
 
     if (info.state === "adopt" || info.state === "both") {
       const block = pane.createDiv({ cls: "config-sync-self-block is-act" });
       block.createDiv({ cls: "config-sync-self-block-h", text: info.state === "both" ? "① Adopt updates from the store first" : "Updates from the store" });
-      if (info.state === "adopt") block.createDiv({ cls: "config-sync-self-block-s", text: "Adopting adds these to this device's sync list — it does not apply their settings; you still choose that per item afterward." });
+      if (info.state === "adopt") block.createDiv({ cls: "config-sync-self-block-s", text: "Adopting adds these to this device's sync list. It does not apply their settings; you still choose that per item afterward." });
       if (info.delta.added.length > 0 || info.delta.removed.length > 0) {
         this.renderSelfDelta(block, info.delta.added, info.delta.removed);
         this.renderSelfViewChange(block, "apply");
@@ -1876,7 +1876,7 @@ export class SyncCenterView extends ItemView {
       block.createDiv({ cls: "config-sync-self-block-h", text: gated ? "② Then capture your local change" : "Local changes not yet in the store" });
       if (info.delta.removed.length > 0) {
         this.renderSelfDelta(block, info.delta.removed, []); // your local-only groups
-        block.createDiv({ cls: "config-sync-self-block-s", text: "These are in this device's sync list but not the store's — Capture publishes their definitions." });
+        block.createDiv({ cls: "config-sync-self-block-s", text: "These are in this device's sync list but not the store's. Capture publishes their definitions." });
         this.renderSelfViewChange(block, "capture");
       } else {
         this.renderSelfContentDetail(block, info, "capture"); // config-sync's own settings/version changed, not the list
@@ -1885,7 +1885,7 @@ export class SyncCenterView extends ItemView {
       const cap = acts.createEl("button", { cls: "config-sync-btn-capture", text: "Capture" });
       if (gated) {
         cap.disabled = true;
-        acts.createSpan({ cls: "config-sync-self-hint", text: "— available after adopting" });
+        acts.createSpan({ cls: "config-sync-self-hint", text: "available after adopting" });
       } else {
         cap.addEventListener("click", () => this.runSelfCapture(cap));
       }
@@ -1898,7 +1898,7 @@ export class SyncCenterView extends ItemView {
     if (info.versionRefresh !== null) {
       block.createDiv({
         cls: "config-sync-self-block-s",
-        text: `Config Sync updated — this device ${info.versionRefresh.local} · store ${info.versionRefresh.store}. Capturing refreshes the store's recorded version.`,
+        text: `Config Sync updated: this device ${info.versionRefresh.local} · store ${info.versionRefresh.store}. Capturing refreshes the store's recorded version.`,
       });
       return;
     }
@@ -1908,7 +1908,7 @@ export class SyncCenterView extends ItemView {
         const n = info.flagsRefresh;
         block.createDiv({
           cls: "config-sync-self-block-s",
-          text: `${n} desktop-only plugin${n === 1 ? "" : "s"} not recorded in the store yet — capturing lets your phones skip installs that can't run there.`,
+          text: `${n} desktop-only plugin${n === 1 ? "" : "s"} not recorded in the store yet. Capturing lets your phones skip installs that can't run there.`,
         });
       }
       return;
@@ -2544,7 +2544,7 @@ export class SyncCenterView extends ItemView {
   }
 
   private statusTip(status: RunStatus): string {
-    return status === "error" ? "Failed — some items couldn't run" : status === "warning" ? "Action needed — finish some items manually" : "Done — all succeeded";
+    return status === "error" ? "Failed: some items couldn't run" : status === "warning" ? "Action needed: finish some items manually" : "Done: all succeeded";
   }
 
   private searching(): boolean {
@@ -2646,7 +2646,7 @@ export class SyncCenterView extends ItemView {
       const banner = main.createDiv({ cls: "config-sync-coldstart-banner" });
       const txt = banner.createDiv({ cls: "config-sync-coldstart-text" });
       txt.createSpan({ cls: "config-sync-coldstart-head", text: "This device hasn't synced with the store yet. " });
-      txt.createSpan({ text: "Adopt the plugin settings first — they carry the device rules that make the diffs below trustworthy — then review and apply." });
+      txt.createSpan({ text: "Adopt the plugin settings first: they carry the device rules that make the diffs below trustworthy. Then review and apply." });
       const actions = banner.createDiv({ cls: "config-sync-coldstart-actions" });
       const go = actions.createEl("button", { cls: "config-sync-coldstart-go", text: "Review settings →" });
       go.addEventListener("click", () => {
@@ -3096,7 +3096,7 @@ export class SyncCenterView extends ItemView {
     const chev = renderFoldChevron(row, expanded, null);
     row.createSpan({ cls: "config-sync-rule-name", text: "Config Sync" });
     row.createDiv({ cls: "config-sync-rule-spacer" });
-    row.createSpan({ cls: "config-sync-self-fate", text: "your Sync Center — manages itself" });
+    row.createSpan({ cls: "config-sync-self-fate", text: "your Sync Center: manages itself" });
     // Fate-icon column alignment: the self row never stages through the normal
     // run and so never has a checkbox — same spacer the item rows' inert branch uses, so its text
     // lands on the same right edge every OTHER row's fate icon does instead of sitting flush
@@ -3513,7 +3513,7 @@ export class SyncCenterView extends ItemView {
     renderDirectionMenu(row.createSpan({ cls: "config-sync-cardrow-ctl" }), {
       stops: REMOTE_DIRECTION_ORDER,
       current,
-      aria: `${REMOTE_DIRECTION_LABEL[current]} — which way ${name} exchanges this item`,
+      aria: `${REMOTE_DIRECTION_LABEL[current]}: which way ${name} exchanges this item`,
       // No explicit reload: the write ends in refreshRemoteChecks, whose notifies land here as
       // ONE debounced reload — a second reload from this handler was one more full repaint.
       onPick: (d) => {
@@ -3588,7 +3588,7 @@ export class SyncCenterView extends ItemView {
     renderDirectionMenu(row.createSpan({ cls: "config-sync-keyrule-ctl" }), {
       stops: keyStopsWithin(item),
       current,
-      aria: `${REMOTE_DIRECTION_LABEL[current]} — which way ${remoteName} exchanges ${pattern}`,
+      aria: `${REMOTE_DIRECTION_LABEL[current]}: which way ${remoteName} exchanges ${pattern}`,
       onPick: (d) => {
         this.anchorCard(groupName);
         void this.host.setRemoteKeyDirection(remoteName, ref, pattern, d); // reload arrives via the debounced notify
@@ -3644,7 +3644,7 @@ export class SyncCenterView extends ItemView {
     const paint = (raw: string | null): void => {
       host.empty();
       if (raw === null) {
-        host.createDiv({ cls: "config-sync-json-empty", text: "Nothing captured for this item yet — nothing to show." });
+        host.createDiv({ cls: "config-sync-json-empty", text: "Nothing captured for this item yet; nothing to show." });
         return;
       }
       const pre = host.createEl("pre", { cls: "config-sync-json-pre" });
@@ -3767,7 +3767,7 @@ export class SyncCenterView extends ItemView {
     return {
       group: name,
       chosen: this.conflictChoice.get(name) ?? null,
-      scopeNote: total > 1 ? `Resolves all ${total} files in ${r.group.label} — this item is written as a whole.` : null,
+      scopeNote: total > 1 ? `Resolves all ${total} files in ${r.group.label}: this item is written as a whole.` : null,
       onPick: (choice) => this.pickConflictSide(name, choice),
     };
   }
@@ -3861,7 +3861,7 @@ export class SyncCenterView extends ItemView {
     if (fate.glyph === "⚠") return "Changed on both sides.";
     // The nothing-yet presentation (direct or degraded from an empty-verb direction —
     // fateModel.ts's rowFate) speaks in cause voice, not just its terse row sentence + period.
-    if (fate.sentence === NOTHING_YET_SENTENCE) return "No saved settings anywhere yet — neither this device nor the store has any.";
+    if (fate.sentence === NOTHING_YET_SENTENCE) return "No saved settings anywhere yet: neither this device nor the store has any.";
     if (input.direction === null) {
       // The card's STATE clause spells out WHY, not just the row's terse sentence —
       // and the two exclusion causes read differently even though the row above them is identical.
@@ -3884,8 +3884,8 @@ export class SyncCenterView extends ItemView {
         if (changed > 0 && !input.excludedHere) return withheldChangeClause(r.remote, changed);
         return `${fate.sentence}.`;
       }
-      if (input.excludedHere) return "Not synced on this device — your Settings sync rule excludes it.";
-      if (input.optedOutHere === true) return "Not synced on this device — you turned it off here. Your other devices keep syncing it.";
+      if (input.excludedHere) return "Not synced on this device: your Settings sync rule excludes it.";
+      if (input.optedOutHere === true) return "Not synced on this device: you turned it off here. Your other devices keep syncing it.";
       return `${fate.sentence}.`;
     }
     // Under a remote, a direction with keys held back says so instead of the terse sentence: the
@@ -3910,7 +3910,7 @@ export class SyncCenterView extends ItemView {
       // untouched.
       if (input.versionAhead !== null) text = versionAheadClause(input, input.versionAhead);
       else if (text === "Captures settings") text = "Shares your settings with your other devices";
-      else if (text === "Turned on here — shares it") text = "Turned on here — your other devices will turn it on the next time they apply";
+      else if (text === "Turned on here · shares it") text = "Turned on here: your other devices will turn it on the next time they apply";
     }
     return `${text}.`;
   }
@@ -3997,10 +3997,10 @@ export class SyncCenterView extends ItemView {
       tabindex: "0",
       "aria-label":
         resolve !== null && resolve.chosen === null
-          ? `${filesChangeLabel(total)} — changed on both sides; open to compare each side before choosing`
+          ? `${filesChangeLabel(total)}: changed on both sides; open to compare each side before choosing`
           : dir === null
-            ? `${filesChangeLabel(total)} — they stay at ${r.remote ?? "the remote"}`
-            : `${filesChangeLabel(total)} — ${dir === "capture" ? "these changes land in the store" : "these changes land on this device"}`,
+            ? `${filesChangeLabel(total)}: they stay at ${r.remote ?? "the remote"}`
+            : `${filesChangeLabel(total)}: ${dir === "capture" ? "these changes land in the store" : "these changes land on this device"}`,
     });
     row.addEventListener("click", toggle);
     row.addEventListener("keydown", (e) => {
@@ -4412,7 +4412,7 @@ export class SyncCenterView extends ItemView {
   // `your rule` in the fate chips (fateChipIcons.ts).
   private renderMoreRow(detail: HTMLElement, name: string): void {
     const isFolder = this.itemSectionOf(name) === "custom";
-    const tooltip = isFolder ? "Folder rules — opens Settings" : "Per-key rules, locks & folders — opens Settings";
+    const tooltip = isFolder ? "Folder rules (opens Settings)" : "Per-key rules, locks & folders (opens Settings)";
     this.renderCardIconActionRow(detail, "More", "settings-2", false, tooltip, () => {
       const ref = this.itemRefFor(name);
       if (ref !== null) this.host.openSettingsAt(ref, "card");
@@ -4467,7 +4467,7 @@ export class SyncCenterView extends ItemView {
     head.createSpan({ cls: "config-sync-pill is-neutral", text: `${this.leftovers.length}` });
     const all = head.createSpan({ cls: "config-sync-ofdel config-sync-ofdelall" });
     setIcon(all, "trash");
-    setTooltip(all, `Delete all — ${this.leftovers.length} file${this.leftovers.length === 1 ? "" : "s"}…`);
+    setTooltip(all, `Delete all (${this.leftovers.length} file${this.leftovers.length === 1 ? "" : "s"})…`);
     all.addEventListener("click", (e) => {
       e.stopPropagation(); // the bulk delete never doubles as the fold toggle
       void this.confirmAndDeleteAll();
@@ -4494,7 +4494,7 @@ export class SyncCenterView extends ItemView {
     const body = fold.createDiv({ cls: "config-sync-leftover-body" });
     body.createDiv({
       cls: "config-sync-section-note",
-      text: "Settings saved for items nothing here syncs any more. Deleting removes them from the store — and from your other devices after the next sync.",
+      text: "Settings saved for items nothing here syncs any more. Deleting removes them from the store, and from your other devices after the next sync.",
     });
     const card = body.createDiv({ cls: "config-sync-card" });
     // Grouped by the main list's section vocabulary (the list arrives pre-sorted by section then
@@ -4699,11 +4699,11 @@ export class SyncCenterView extends ItemView {
       const slowText = statusEl.createSpan({ cls: "config-sync-runline-slow" });
       let slowTimer: number | null = null;
       const setStatus = (current: string, phase: string): void => {
-        statusText.setText(`${this.host.displayName(current)} — ${phase}`);
+        statusText.setText(`${this.host.displayName(current)}: ${phase}`);
         slowText.setText("");
         if (slowTimer !== null) window.clearTimeout(slowTimer);
         slowTimer = window.setTimeout(() => {
-          slowText.setText("Still working — network fetches can take a while");
+          slowText.setText("Still working: network fetches can take a while");
         }, 8000);
       };
       void (async () => {
@@ -4841,9 +4841,9 @@ export class SyncCenterView extends ItemView {
     const state = check?.state ?? "unknown";
     switch (state) {
       case "remote-newer":
-        return { glyph: "↓", cls: "is-pull", tip: "remote captured later — Pull would update your store", action: "pull" };
+        return { glyph: "↓", cls: "is-pull", tip: "remote captured later; Pull would update your store", action: "pull" };
       case "remote-older":
-        return { glyph: "↑", cls: "is-push", tip: "remote is older — Push would update the remote", action: "push" };
+        return { glyph: "↑", cls: "is-push", tip: "remote is older; Push would update the remote", action: "push" };
       case "same":
         return { glyph: "✓", cls: "is-ok", tip: "remote matches your store" };
       case "no-store":
@@ -5046,7 +5046,7 @@ export class StopSyncingModal extends Modal {
       cb.addEventListener("change", () => (this.deleteStore = cb.checked));
       const t = row.createSpan();
       t.createSpan({ text: `Also delete its settings saved in the store (${this.storeFiles} file${this.storeFiles === 1 ? "" : "s"})` });
-      t.createDiv({ cls: "config-sync-expdesc", text: "Recommended — otherwise they stay in the store, unused. You can re-add the item later either way." });
+      t.createDiv({ cls: "config-sync-expdesc", text: "Recommended: otherwise they stay in the store, unused. You can re-add the item later either way." });
     }
     const bar = this.contentEl.createDiv({ cls: "config-sync-modal-buttons" });
     new ButtonComponent(bar).setButtonText("Cancel").onClick(() => this.close());

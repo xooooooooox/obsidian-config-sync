@@ -415,7 +415,7 @@ export default class ConfigSyncPlugin extends Plugin {
         return false;
       }
       console.error("Config Sync: compiled sync groups failed validation", e);
-      new Notice(`Config Sync: your sync setup has an invalid rule (${reason}) — fix it under Settings → Advanced.`, 10000);
+      new Notice(`Config Sync: your sync setup has an invalid rule (${reason}). Fix it under Settings → Advanced.`, 10000);
       return false;
     }
   }
@@ -1073,7 +1073,7 @@ export default class ConfigSyncPlugin extends Plugin {
               ).open();
             });
             if (choices === null) {
-              new Notice("Pull cancelled — nothing was changed");
+              new Notice("Pull cancelled; nothing was changed");
               return null;
             }
             const results = await applyImport(ctx, modalPending, choices);
@@ -1092,7 +1092,7 @@ export default class ConfigSyncPlugin extends Plugin {
           // reasoning as the no-token case, which is likewise our own refusal, not a transport
           // failure, and as the own-store refusal's, which says something more specific about
           // the path than the generic advice could.
-          const advice = classifyRemoteFailure(message) === "no-token" || isOwnStoreRefusal(message) ? "" : " — check the remote's URL or path and try again.";
+          const advice = classifyRemoteFailure(message) === "no-token" || isOwnStoreRefusal(message) ? "" : " (check the remote's URL or path and try again)";
           new Notice(`Config Sync pull failed: ${message}${advice}`, 10000);
           return null;
         }
@@ -1128,7 +1128,7 @@ export default class ConfigSyncPlugin extends Plugin {
           return [...results, ...hold.results];
         } catch (e) {
           const message = (e as Error).message;
-          const advice = classifyRemoteFailure(message) === "no-token" || isOwnStoreRefusal(message) ? "" : " — check the remote's URL or path and try again."; // see pullFrom
+          const advice = classifyRemoteFailure(message) === "no-token" || isOwnStoreRefusal(message) ? "" : " (check the remote's URL or path and try again)"; // see pullFrom
           new Notice(`Config Sync push failed: ${message}${advice}`, 10000);
           return null;
         }
@@ -1411,7 +1411,7 @@ export default class ConfigSyncPlugin extends Plugin {
             if (res.status >= 200 && res.status < 300) return res.arrayBuffer;
             throw new HttpStatusError(res.status);
           },
-          { attempts: 3, retryable: isRetryableError, onAttempt: (n) => this.installPhase?.(`download failed — retrying (${n}/3)…`) }
+          { attempts: 3, retryable: isRetryableError, onAttempt: (n) => this.installPhase?.(`download failed, retrying (${n}/3)…`) }
         )
       );
       // Resolution order: BRAT index → community catalog. An unmapped id gets one
@@ -1513,7 +1513,7 @@ export default class ConfigSyncPlugin extends Plugin {
   private async installViaBrat(id: string, repo: string): Promise<string> {
     const beta = this.bratInstance()?.betaPlugins;
     if (beta === undefined || typeof beta.addPlugin !== "function") {
-      throw new Error(`"${id}" is managed by BRAT (${repo}) — enable BRAT and retry, or run BRAT's update command`);
+      throw new Error(`"${id}" is managed by BRAT (${repo}): enable BRAT and retry, or run BRAT's update command`);
     }
     const addPlugin = beta.addPlugin.bind(beta);
     // addPlugin(repo, updatePluginFiles, seeIfUpdatedOnly, reportIfNotUpdated, specifyVersion,
@@ -1526,12 +1526,12 @@ export default class ConfigSyncPlugin extends Plugin {
     // enabling is config-sync's own On-apply decision.
     const ok = await retry(
       () => this.withTimeout(addPlugin(repo, false, false, false, "", true, false, ""), 30_000, repo),
-      { attempts: 3, retryable: isRetryableError, onAttempt: (n) => this.installPhase?.(`BRAT install failed — retrying (${n}/3)…`) }
+      { attempts: 3, retryable: isRetryableError, onAttempt: (n) => this.installPhase?.(`BRAT install failed, retrying (${n}/3)…`) }
     );
     await this.pluginHost().reloadPluginManifests();
     const version = this.pluginHost().getInstalledPluginVersion(id);
     if (!ok || version === null) {
-      throw new Error(`BRAT could not install ${repo} — see BRAT's log for the reason`);
+      throw new Error(`BRAT could not install ${repo}; see BRAT's log for the reason`);
     }
     return version;
   }
@@ -1842,7 +1842,7 @@ export default class ConfigSyncPlugin extends Plugin {
     // offers this menu there (see itemFileSharingMenuLegal above), so reaching here with an illegal mode
     // means a caller ignored that and must be told loudly, not have its write vanish.
     if (mode === "fields") {
-      throw new Error(`setItemFileSharing: "${ref}" is in "${mode}" mode — a whole-file sharing write is illegal there (manifest.ts's fileRule validator only allows plain-mode file groups)`);
+      throw new Error(`setItemFileSharing: "${ref}" is in "${mode}" mode, where a whole-file sharing write is illegal (manifest.ts's fileRule validator only allows plain-mode file groups)`);
     }
     const nextSf: ItemSettingsFile = { ...sf, mode, fileRule: { ...(sf.fileRule ?? { sharing: EVERYWHERE, encrypted: false }), sharing } };
     this.settings.items = withItem(this.settings.items, parsed.section, parsed.id, { ...item, settingsFile: pruneSettingsFile(nextSf) });
@@ -2013,7 +2013,7 @@ export default class ConfigSyncPlugin extends Plugin {
   private async coreContext(): Promise<CoreContext> {
     const rootPath = await resolveRootPath(this.settings.rootPath, this.settings.pkmMode, this.pkmProbe());
     if (rootPath === "" || rootPath.startsWith("/") || rootPath.split("/").includes("..")) {
-      throw new Error(`Config Sync: invalid data folder "${rootPath}" — set a vault-relative path in settings`);
+      throw new Error(`Config Sync: invalid data folder "${rootPath}", set a vault-relative path in settings`);
     }
     this.lastResolvedRoot = rootPath;
     // ONE decision per element per run; the mask and both force sets are projections of it —

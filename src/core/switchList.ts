@@ -34,7 +34,7 @@ export const ENABLEMENT_CARRIER_GROUPS: ReadonlySet<string> = new Set<Enablement
 
 export function enablementListFile(list: EnablementList): string {
   const spec = SWITCH_LISTS[list];
-  if (spec === undefined) throw new Error(`switch list "${list}" has no spec — SWITCH_LISTS and EnablementList disagree`);
+  if (spec === undefined) throw new Error(`switch list "${list}" has no spec; SWITCH_LISTS and EnablementList disagree`);
   return spec.localFile;
 }
 
@@ -47,7 +47,7 @@ export function enablementListFile(list: EnablementList): string {
 // drifts.
 export function perElementKeyFor(list: string): string {
   const spec = SWITCH_LISTS[list];
-  if (spec === undefined) throw new Error(`switch list "${list}" has no spec — SWITCH_LISTS and the caller disagree about "${list}"`);
+  if (spec === undefined) throw new Error(`switch list "${list}" has no spec; SWITCH_LISTS and the caller disagree about "${list}"`);
   return spec.field ?? "";
 }
 

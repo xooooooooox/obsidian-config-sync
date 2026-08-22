@@ -117,7 +117,7 @@ describe("captureTransform / applyTransform round-trip", () => {
   it("throws PassphraseNeededError without a passphrase", async () => {
     const g = group({ mode: "encrypted" });
     await expect(captureTransform(g, src, null, "desktop")).rejects.toThrowError(
-      "passphrase not set on this device — Settings → General"
+      "passphrase not set on this device (Settings → General)"
     );
   });
 

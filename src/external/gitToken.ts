@@ -14,10 +14,10 @@ export function resolveGitToken(storage: Pick<SecretStorage, "getSecret">, remot
   if (remote.type !== "git" || remote.tokenId === undefined) return null;
   const secret = storage.getSecret(remote.tokenId);
   if (secret === null || secret === "") {
-    throw new Error(`No access token stored on this device for remote "${remote.name}" — link it once in Settings → Remotes.`);
+    throw new Error(`No access token stored on this device for remote "${remote.name}". Link it once in Settings → Remotes.`);
   }
   if (/[\r\n]/.test(secret) || secret !== secret.trim()) {
-    throw new Error(`The access token linked to remote "${remote.name}" has a line break or surrounding whitespace — re-save that secret in Settings → Keychain without it.`);
+    throw new Error(`The access token linked to remote "${remote.name}" has a line break or surrounding whitespace. Re-save that secret in Settings → Keychain without it.`);
   }
   return { username: remote.username ?? TOKEN_USERNAME, token: secret };
 }

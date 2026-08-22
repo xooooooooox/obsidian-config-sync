@@ -688,7 +688,7 @@ describe("applyWithActions", () => {
       return "2.2.3";
     });
     const fallbackLines = (results[0]?.messages ?? []).filter((m) => m.includes("no longer downloadable"));
-    expect(fallbackLines).toEqual(["the captured version 2.2.2 is no longer downloadable — installed 2.2.3 instead"]);
+    expect(fallbackLines).toEqual(["the captured version 2.2.2 is no longer downloadable; installed 2.2.3 instead"]);
     expect(results[0]?.stateNote).toEqual({ kind: "ok", text: "⤓ installed & enabled 2.2.3" });
     expect(results[0]?.status).toBe("warning"); // a note on a successful install, never promoted to "error"
     expect(plugins.enabled.has("demo")).toBe(true);
@@ -702,7 +702,7 @@ describe("applyWithActions", () => {
     });
     expect(results[0]?.status).toBe("ok");
     expect(results[0]?.stateNote).toEqual({ kind: "ok", text: "\u2913 installed & enabled 2.5.0" });
-    expect(results[0]?.messages).toContain("no settings in the store \u2014 installed the plugin only");
+    expect(results[0]?.messages).toContain("no settings in the store; installed the plugin only");
     expect(results[0]?.filesWritten).toEqual([]);
     expect(plugins.enabled.has("demo")).toBe(true);
     expect(await io.exists(".obs/plugins/demo/data.json")).toBe(false);
@@ -718,7 +718,7 @@ describe("applyWithActions", () => {
     });
     expect(results[0]?.status).toBe("ok");
     expect(results[0]?.stateNote).toEqual({ kind: "ok", text: "\u2913 updated to 2.0.0 & enabled" });
-    expect(results[0]?.messages).toContain("no settings in the store \u2014 updated the plugin only");
+    expect(results[0]?.messages).toContain("no settings in the store; updated the plugin only");
     expect(results[0]?.filesWritten).toEqual([]);
   });
   it("enable-only apply (no settings in the store) enables without writing files", async () => {
@@ -728,7 +728,7 @@ describe("applyWithActions", () => {
     const results = await applyWithActions(ctx, [{ name: "plugin-demo", action: "enable" }], async () => "9.9.9");
     expect(results[0]?.status).toBe("ok");
     expect(results[0]?.stateNote).toEqual({ kind: "ok", text: "\u23fb enabled" });
-    expect(results[0]?.messages).toContain("no settings in the store \u2014 enabled the plugin only");
+    expect(results[0]?.messages).toContain("no settings in the store; enabled the plugin only");
     expect(results[0]?.filesWritten).toEqual([]);
     expect(plugins.enabled.has("demo")).toBe(true);
     expect(await io.exists(".obs/plugins/demo/data.json")).toBe(false);
@@ -872,7 +872,7 @@ describe("applyWithActions", () => {
       await seedStore(io, ctx);
       const results = await applyWithActions(ctx, [{ name: "plugin-demo", action: "enable" }], async () => "9.9.9");
       expect(results[0]?.stateNote).toEqual({ kind: "warn", text: "⚠ enable failed" });
-      expect(results[0]?.messages).toEqual([`Obsidian did not enable "demo" — enable it manually in Community plugins`]);
+      expect(results[0]?.messages).toEqual([`Obsidian did not enable "demo": enable it manually in Community plugins`]);
       expect(plugins.enabled.has("demo")).toBe(false);
       expect(await io.exists(".obs/plugins/demo/data.json")).toBe(true); // config still written
     });
@@ -888,7 +888,7 @@ describe("applyWithActions", () => {
       });
       expect(results[0]?.stateNote).toEqual({ kind: "warn", text: "⚠ enable failed" });
       expect(results[0]?.messages).toEqual([
-        `installed 2.5.0, but: Obsidian did not enable "demo" — enable it manually in Community plugins`,
+        `installed 2.5.0, but: Obsidian did not enable "demo": enable it manually in Community plugins`,
       ]);
       expect(plugins.enabled.has("demo")).toBe(false);
       expect(await io.exists(".obs/plugins/demo/data.json")).toBe(true); // config still written — install succeeded

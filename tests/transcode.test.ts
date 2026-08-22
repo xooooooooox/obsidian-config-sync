@@ -116,7 +116,7 @@ describe("transcodePreflight", () => {
       localPassphrase: "pw",
     });
     expect(out.skipRefs).toEqual(["custom/secrets"]);
-    expect(out.results[0]?.messages).toEqual(["Skipped — the passphrase named for work isn't linked on this device. Nothing was written."]);
+    expect(out.results[0]?.messages).toEqual(["Skipped: the passphrase named for work isn't linked on this device. Nothing was written."]);
   });
 
   it("holds out an item whose remote copy the saved key does not open, and lets the rest travel", async () => {
@@ -132,7 +132,7 @@ describe("transcodePreflight", () => {
       localPassphrase: "pw",
     });
     expect(out.skipRefs).toEqual(["custom/secrets"]);
-    expect(out.results[0]?.messages).toEqual(["Skipped — the passphrase saved for work doesn't open its copy. Nothing was written."]);
+    expect(out.results[0]?.messages).toEqual(["Skipped: the passphrase saved for work doesn't open its copy. Nothing was written."]);
   });
 
   it("lets an item travel once the saved key opens its copy", async () => {
@@ -164,6 +164,6 @@ describe("transcodePreflight", () => {
       localPassphrase: null,
     });
     expect(out.skipRefs).toEqual(["custom/secrets"]);
-    expect(out.results[0]?.messages).toEqual(["Skipped — this item is encrypted and this device has no passphrase. Nothing was written."]);
+    expect(out.results[0]?.messages).toEqual(["Skipped: this item is encrypted and this device has no passphrase. Nothing was written."]);
   });
 });

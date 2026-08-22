@@ -692,20 +692,20 @@ describe("onOffNarrationLines", () => {
 
   it("whole-list on-side: flip count equals the remote source size", () => {
     const result = onOffNarrationLines(["a", "b"], [], 2, 0, idDisplay, "kickstart");
-    expect(result.on).toEqual({ prefix: "on at kickstart: ", value: "its entire list — 2 plugins" });
+    expect(result.on).toEqual({ prefix: "on at kickstart: ", value: "its entire list (2 plugins)" });
     expect(result.off).toBeNull();
   });
 
   it("whole-list off-side: flip count equals the store source size", () => {
     const result = onOffNarrationLines([], ["a", "b", "c"], 0, 3, idDisplay, "kickstart");
-    expect(result.off).toEqual({ prefix: "off at kickstart: ", value: "everything in your store's list — 3 plugins" });
+    expect(result.off).toEqual({ prefix: "off at kickstart: ", value: "everything in your store's list (3 plugins)" });
     expect(result.on).toBeNull();
   });
 
   it("whole-list on both sides simultaneously", () => {
     const result = onOffNarrationLines(["a"], ["b", "c"], 1, 2, idDisplay, "kickstart");
-    expect(result.on).toEqual({ prefix: "on at kickstart: ", value: "its entire list — 1 plugin" });
-    expect(result.off).toEqual({ prefix: "off at kickstart: ", value: "everything in your store's list — 2 plugins" });
+    expect(result.on).toEqual({ prefix: "on at kickstart: ", value: "its entire list (1 plugin)" });
+    expect(result.off).toEqual({ prefix: "off at kickstart: ", value: "everything in your store's list (2 plugins)" });
   });
 
   it("capped case: more than 5 names truncates to 5 plus a count of the rest", () => {
@@ -911,15 +911,15 @@ describe("fileEntryFor — direction-aware file entries", () => {
   });
   it("encrypted apply-added: still + glyph, but no preview", () => {
     const e = fileEntryFor({ kind: "deleted", rel: "secret.json" }, "apply", true);
-    expect(e).toEqual({ glyph: "+", label: "secret.json", affordance: "none", note: "changed — encrypted, no preview", tooltip: APPLY_ADDED_TOOLTIP });
+    expect(e).toEqual({ glyph: "+", label: "secret.json", affordance: "none", note: "changed (encrypted, no preview)", tooltip: APPLY_ADDED_TOOLTIP });
   });
   it("encrypted apply-updated: neutral glyph, no preview", () => {
     const e = fileEntryFor({ kind: "updated", rel: "secret.json" }, "apply", true);
-    expect(e).toEqual({ glyph: "·", label: "secret.json", affordance: "none", note: "changed — encrypted, no preview", tooltip: APPLY_UPDATED_TOOLTIP });
+    expect(e).toEqual({ glyph: "·", label: "secret.json", affordance: "none", note: "changed (encrypted, no preview)", tooltip: APPLY_UPDATED_TOOLTIP });
   });
   it("encrypted capture-side: + glyph, no preview", () => {
     const e = fileEntryFor({ kind: "added", rel: "secret.json" }, "capture", true);
-    expect(e).toEqual({ glyph: "+", label: "secret.json", affordance: "none", note: "changed — encrypted, no preview", tooltip: CAPTURE_ADDED_TOOLTIP });
+    expect(e).toEqual({ glyph: "+", label: "secret.json", affordance: "none", note: "changed (encrypted, no preview)", tooltip: CAPTURE_ADDED_TOOLTIP });
   });
   it("encrypted deletion (either direction): del strikethrough is unaffected by encryption — nothing to preview either way", () => {
     expect(fileEntryFor({ kind: "added", rel: "secret.json" }, "apply", true)).toEqual({ glyph: "del", label: "secret.json", affordance: "none", note: null, tooltip: APPLY_DELETED_TOOLTIP });
@@ -1263,21 +1263,21 @@ describe("keysRowModel", () => {
   it("says why a folder has no keys instead of leaving a gap", () => {
     expect(keysRowModel({ item: "both", group: folder, encrypted: false, patterns: [] })).toEqual({
       kind: "note",
-      text: "A folder travels as a whole — the direction above covers every file in it.",
+      text: "A folder travels as a whole: the direction above covers every file in it.",
     });
   });
 
   it("says why a file with no JSON in it has no keys", () => {
     expect(keysRowModel({ item: "both", group: text, encrypted: false, patterns: [] })).toEqual({
       kind: "note",
-      text: "No keys in this file — it travels whole or not at all.",
+      text: "No keys in this file: it travels whole or not at all.",
     });
   });
 
   it("says why a whole-file-encrypted item has no keys", () => {
     expect(keysRowModel({ item: "both", group: file, encrypted: true, patterns: [] })).toEqual({
       kind: "note",
-      text: "This file is stored as one encrypted blob — it travels whole or not at all.",
+      text: "This file is stored as one encrypted blob: it travels whole or not at all.",
     });
   });
 

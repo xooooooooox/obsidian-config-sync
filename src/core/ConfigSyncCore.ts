@@ -318,7 +318,7 @@ async function hotApplyAppearanceFamily(ctx: CoreContext, results: GroupResult[]
   } catch (e) {
     const message = (e as Error).message;
     for (const r of family) {
-      r.messages.push(`appearance hot-apply failed — reload the app to see the applied appearance: ${message}`);
+      r.messages.push(`appearance hot-apply failed, reload the app to see the applied appearance: ${message}`);
       if (r.status === "ok") r.status = "warning";
     }
   }
@@ -565,7 +565,7 @@ export async function readCarrierSwitchLists(
 function requireGroup(manifest: SyncManifest, name: string): SyncGroup {
   const group = manifest.groups.find((g) => g.name === name);
   if (group === undefined) {
-    throw new Error(`Unknown config-sync group "${name}" — not defined in plugin settings`);
+    throw new Error(`Unknown config-sync group "${name}": not defined in plugin settings`);
   }
   return group;
 }
@@ -943,12 +943,12 @@ async function enableForGroup(ctx: CoreContext, group: SyncGroup): Promise<{ not
     if (pluginId !== null) {
       await ctx.plugins.enablePluginPersistent(pluginId);
       if (!ctx.plugins.isPluginEnabled(pluginId)) {
-        throw new Error(`Obsidian did not enable "${pluginId}" — enable it manually in Community plugins`);
+        throw new Error(`Obsidian did not enable "${pluginId}": enable it manually in Community plugins`);
       }
     } else {
       await ctx.plugins.enableCorePlugin(group.name);
       if (!ctx.plugins.isCorePluginEnabled(group.name)) {
-        throw new Error(`Obsidian did not enable "${group.name}" — enable it in Options → Core plugins`);
+        throw new Error(`Obsidian did not enable "${group.name}": enable it in Options → Core plugins`);
       }
     }
     return { note: { kind: "ok", text: "⏻ enabled" }, messages: [] };
@@ -984,7 +984,7 @@ async function runStateAction(
   if (pluginId === null) {
     return {
       note: { kind: "warn", text: "⚠ update failed" },
-      messages: [`"${group.name}" has no plugin directory — install and update actions only work for community plugin items`],
+      messages: [`"${group.name}" has no plugin directory; install and update actions only work for community plugin items`],
       skipConfig: true,
     };
   }
@@ -993,7 +993,7 @@ async function runStateAction(
     // executing it (update disables first) — refuse and point at Obsidian's own updater.
     return {
       note: { kind: "warn", text: "⚠ update skipped" },
-      messages: ["Config Sync updates itself through Obsidian's plugin updater — Settings → Community plugins"],
+      messages: ["Config Sync updates itself through Obsidian's plugin updater (Settings → Community plugins)"],
       skipConfig: true,
     };
   }
@@ -1018,7 +1018,7 @@ async function runStateAction(
       }
       return {
         note: { kind: "warn", text: "⚠ update failed" },
-        messages: [`${messages[0]} — settings not applied (they were captured on a newer plugin version); update the plugin manually, then apply again`, ...messages.slice(1)],
+        messages: [`${messages[0]}; settings not applied (they were captured on a newer plugin version); update the plugin manually, then apply again`, ...messages.slice(1)],
         skipConfig: true,
       };
     }
@@ -1027,7 +1027,7 @@ async function runStateAction(
     const guidance = hasStoreData ? "settings were applied; install it manually to pick them up" : "install it manually";
     return {
       note: { kind: "warn", text: "⚠ install failed" },
-      messages: [`${messages[0]} — ${guidance}`],
+      messages: [`${messages[0]}; ${guidance}`],
       skipConfig: false,
     };
   }
@@ -1037,7 +1037,7 @@ async function runStateAction(
   const baseText = isUpdate ? `⤓ updated to ${version}` : `⤓ installed ${version}`;
   // The pinned version's release was gone, so the installer fell back to latest-stable.
   const fallbackMsgs = targetVersion !== null && version !== targetVersion
-    ? [`the captured version ${targetVersion} is no longer downloadable — installed ${version} instead`]
+    ? [`the captured version ${targetVersion} is no longer downloadable; installed ${version} instead`]
     : [];
   if (!(wantsEnable || (isUpdate && wasEnabled))) {
     return { note: { kind: "ok", text: baseText }, messages: fallbackMsgs, skipConfig: false };
@@ -1050,7 +1050,7 @@ async function runStateAction(
       try {
         await ctx.plugins.enablePluginPersistent(pluginId);
         if (!ctx.plugins.isPluginEnabled(pluginId)) {
-          throw new Error(`Obsidian did not enable "${pluginId}" — enable it manually in Community plugins`);
+          throw new Error(`Obsidian did not enable "${pluginId}": enable it manually in Community plugins`);
         }
         const text = isUpdate ? `⤓ updated to ${version} & enabled` : `⤓ installed & enabled ${version}`;
         // fallbackMsgs was already reported via the object above's `messages` field — applyWithActions
@@ -1194,9 +1194,9 @@ export async function applyWithActions(
           const pid = pluginIdForGroup(group);
           const isUpd = item.action === "update" || item.action === "update-enable";
           if (item.action === "enable") {
-            if (pid !== null && ctx.plugins.isPluginEnabled(pid)) r.messages.push("no settings in the store — enabled the plugin only");
+            if (pid !== null && ctx.plugins.isPluginEnabled(pid)) r.messages.push("no settings in the store; enabled the plugin only");
           } else if (pid !== null && ctx.plugins.getInstalledPluginVersion(pid) !== null && r.stateNote?.kind !== "warn") {
-            r.messages.push(isUpd ? "no settings in the store — updated the plugin only" : "no settings in the store — installed the plugin only");
+            r.messages.push(isUpd ? "no settings in the store; updated the plugin only" : "no settings in the store; installed the plugin only");
           }
         }
         results.push(r);
@@ -1221,7 +1221,7 @@ async function applyGroup(ctx: CoreContext, group: SyncGroup, stagedMembers?: st
   if (!(await ctx.io.exists(store))) {
     result.status = "error";
     result.needsAppReload = false;
-    result.messages.push(`store has no data for this group (expected at ${store}) — capture it from the source vault first`);
+    result.messages.push(`store has no data for this group (expected at ${store}); capture it from the source vault first`);
     return result;
   }
   // Version gate, BEFORE the write.
@@ -1345,7 +1345,7 @@ function isLegacyManifestRel(rel: string): boolean {
 // user's path is perfectly correct). A message that explains only the rarer cause sends the reader
 // after a problem they do not have, and teaches them to distrust the next message too.
 export const STORE_LOCK_MISSING_MESSAGE =
-  "This remote holds files but no store.lock.json, so Config Sync cannot tell whether it is a store. Point the remote at the folder that holds the store rather than inside it — or, if this is meant to be a new remote, clear what is already there first.";
+  "This remote holds files but no store.lock.json, so Config Sync cannot tell whether it is a store. Point the remote at the folder that holds the store rather than inside it; or, if this is meant to be a new remote, clear what is already there first.";
 
 // The far end's own statement of what it is: the lock this build writes, or the legacy root manifest
 // that predates it. Either one names the folder, and this build READS both — remoteGroupsFrom parses
@@ -1736,11 +1736,11 @@ export interface ExternalStoreWriter {
 // What a push says when the far end moved while it was being prepared. Product voice: what happened,
 // that nothing was written, and what to do — the file that moved is a developer's detail.
 export const PUSH_RACE_MESSAGE =
-  "The other end changed while this push was being prepared. Nothing was written — compare again, then push.";
+  "The other end changed while this push was being prepared. Nothing was written; compare again, then push.";
 
 // And what it says when the PICK, rather than the bytes, is what went stale.
 export const PUSH_STALE_MESSAGE =
-  "Some of the items you picked changed at the other end since you last compared. Nothing was written — refresh the comparison and pick again.";
+  "Some of the items you picked changed at the other end since you last compared. Nothing was written; refresh the comparison and pick again.";
 
 // A lock at the far end this build cannot parse, told apart from one that is not there — and it does
 // not need to be: both leave the push with no far-end entries to preserve. The version gate has
@@ -1803,7 +1803,7 @@ export async function pushExternal(
   const hasStore = rels.some((r) => r.startsWith("store/")) || rels.includes(LOCK_REL);
   if (!hasStore) {
     throw new Error(
-      `Local store has no captured data at ${ctx.rootPath} — capture from this device (or pull) before pushing.`
+      `Local store has no captured data at ${ctx.rootPath}; capture from this device (or pull) before pushing.`
     );
   }
   const manifest = await loadManifest(ctx);

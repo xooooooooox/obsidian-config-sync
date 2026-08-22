@@ -89,7 +89,7 @@ describe("parseSyncManifest", () => {
 
     const legacy = { name: "s", path: "{configDir}/hotkeys.json", type: "file", devices: "all", sanitize: ["*Token*"] };
     expect(() => parseSyncManifest(manifestWith([legacy]))).toThrow(
-      '"s" still uses the old sanitize setting — rename it to "mode": "fields" with "fields" rules (see the sensitive-settings guide in docs/GUIDE.md).'
+      '"s" still uses the old sanitize setting. Rename it to "mode": "fields" with "fields" rules (see the sensitive-settings guide in docs/GUIDE.md).'
     );
 
     const fieldsOnDir = { name: "d", path: "{configDir}/snippets", type: "folder", devices: "all", mode: "fields", fields: [{ pattern: "*Token*", sharing: THIS_DEVICE, encrypted: false }] };
@@ -632,7 +632,7 @@ describe("group name validation allows uppercase", () => {
   });
   it("still rejects a leading punctuation name with the reworded message", () => {
     expect(() => parseSyncManifest(mk("-bad"))).toThrow(
-      'Rule "-bad": names use only letters, digits, "-" or "_", starting with a letter or digit — e.g. my-plugin'
+      'Rule "-bad": names use only letters, digits, "-" or "_", starting with a letter or digit, e.g. my-plugin'
     );
   });
 });

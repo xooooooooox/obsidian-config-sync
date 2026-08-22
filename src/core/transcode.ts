@@ -171,9 +171,9 @@ export async function transcodePreflight(input: {
   const skip = (group: SyncGroup, message: string): void => {
     held.push({ group, message });
   };
-  const notLinked = `Skipped — the passphrase named for ${input.remoteName} isn't linked on this device. Nothing was written.`;
-  const doesNotOpen = `Skipped — the passphrase saved for ${input.remoteName} doesn't open its copy. Nothing was written.`;
-  const lockedHere = "Skipped — this item is encrypted and this device has no passphrase. Nothing was written.";
+  const notLinked = `Skipped: the passphrase named for ${input.remoteName} isn't linked on this device. Nothing was written.`;
+  const doesNotOpen = `Skipped: the passphrase saved for ${input.remoteName} doesn't open its copy. Nothing was written.`;
+  const lockedHere = "Skipped: this item is encrypted and this device has no passphrase. Nothing was written.";
 
   const remoteRels = input.key.kind === "missing" || input.direction === "push" ? null : new Set(await input.reader.listFiles());
   for (const group of encrypted) {

@@ -133,7 +133,7 @@ describe("companionNameConflict (UI-level: refuses the add BEFORE persist)", () 
 
 describe("companionNameConflictError copy", () => {
   it("names the offending id", () => {
-    expect(companionNameConflictError("logs")).toBe('"logs" is already used by another synced item — rename this folder or choose a different path.');
+    expect(companionNameConflictError("logs")).toBe('"logs" is already used by another synced item. Rename this folder or choose a different path.');
   });
 });
 

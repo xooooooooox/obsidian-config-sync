@@ -310,11 +310,11 @@ function defaultFieldsFromDetection(keys: string[]): FieldRule[] {
 // One tooltip saying both halves, because a tooltip is one line. The MENU says them as two
 // (itemCard.ts's PER_KEY_RULES_STATE_TEXT / _ACTION_TEXT) — and the Sync Center's copy of this row
 // reads from the same constants, so the two surfaces can no longer word the same fact differently.
-const PER_KEY_RULES_TOOLTIP = "Per-key rules decide — open them below";
+const PER_KEY_RULES_TOOLTIP = "Per-key rules decide; open them below";
 
 // The Access-token control's standing explanation (DESIGN.md's Remote editor): tooltip-borne, so
 // it never spends a form row of its own.
-const TOKEN_LINK_HINT = "For https URLs. Without a token, this device's own git sign-in is used. Stored in Obsidian's keychain — link it once per device.";
+const TOKEN_LINK_HINT = "For https URLs. Without a token, this device's own git sign-in is used. Stored in Obsidian's keychain; link it once per device.";
 
 // The Passphrase row's standing explanation — same placement discipline as the token's: on the
 // control, never a row of its own.
@@ -461,12 +461,12 @@ const GENERAL_SETTINGS: GeneralSettingDef[] = [
   },
   {
     name: "Show remote push/pull in status bar",
-    desc: "Include per-remote push ⇡ and pull ⇣ counts. Desktop only — remote checks don't run on mobile.",
+    desc: "Include per-remote push ⇡ and pull ⇣ counts. Desktop only: remote checks don't run on mobile.",
     anchorId: "general-status-bar-remote",
   },
   {
     name: "Ribbon icon status dot",
-    desc: "Colored corner dot on the ribbon icon — the old indicator, now off by default (invisible when the icon sits inside a ribbon group).",
+    desc: "Colored corner dot on the ribbon icon: the old indicator, now off by default (invisible when the icon sits inside a ribbon group).",
     anchorId: "general-ribbon-dot",
   },
   {
@@ -479,7 +479,7 @@ const GENERAL_SETTINGS: GeneralSettingDef[] = [
     desc: "The Config Sync ribbon icon always opens a menu of available actions. Optionally also show individual ribbon icons.",
     anchorId: "general-ribbon-buttons",
   },
-  { name: "Run history", desc: "Record every capture, apply, pull and push, and browse past runs from the Sync Center's History entry. Kept on this device only — never synced.", anchorId: "general-run-history" },
+  { name: "Run history", desc: "Record every capture, apply, pull and push, and browse past runs from the Sync Center's History entry. Kept on this device only, never synced.", anchorId: "general-run-history" },
   { name: "History file", desc: "A separate file next to the plugin's data.json (never inside it). Change to store the history elsewhere; leave blank for the default.", anchorId: "general-run-history-path" },
   { name: "Keep at most", desc: "Older runs beyond this count are pruned automatically. 0 keeps every run.", anchorId: "general-run-history-count" },
   { name: "Keep for", desc: "Runs older than this many days are pruned automatically. 0 keeps runs forever.", anchorId: "general-run-history-days" },
@@ -830,7 +830,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     if (gen !== this.renderGen) return;
     const head = new Setting(containerEl)
       .setName("Beta plugins")
-      .setDesc("Plugins installed through BRAT instead of the community catalog. Settings sync the same way — only the install path differs.")
+      .setDesc("Plugins installed through BRAT instead of the community catalog. Settings sync the same way; only the install path differs.")
       .setHeading();
     head.settingEl.setAttribute("data-search-anchor", "beta-header");
     // The map note renders ONLY while something is unresolved: a fully-resolved
@@ -1982,7 +1982,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         pi.addClass("config-sync-dim");
         pi.setAttribute("aria-label", PER_ITEM_DISABLED_HINT);
       } else {
-        pi.setAttribute("aria-label", `${PER_ELEMENT_RULES_LABEL} — each item gets its own rule`);
+        pi.setAttribute("aria-label", `${PER_ELEMENT_RULES_LABEL}: each item gets its own rule`);
         pi.setAttribute("role", "button");
         pi.setAttribute("tabindex", "0");
         const flip = (): void => {
@@ -2060,7 +2060,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private renderPreviewDisclosure(bodyEl: HTMLElement, def: ItemDef, item: Item, doc: Record<string, unknown>, fileState: CardFileState, wrap: HTMLElement): void {
     if (!this.previewOpen.has(def.id)) return;
     if (fileState === "missing") {
-      bodyEl.createDiv({ cls: "config-sync-json-empty", text: "No file on this device yet — nothing to preview." });
+      bodyEl.createDiv({ cls: "config-sync-json-empty", text: "No file on this device yet; nothing to preview." });
       return;
     }
     if (fileState === "invalid") {
@@ -2649,11 +2649,11 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const shown = pinnedToFields ? "fields" : current;
     setIcon(chip.createSpan(), MODE_ICON[shown] ?? MODE_ICON.plain);
     chip.setAttribute("aria-label", pinnedToFields
-      ? "This item always uses Per-key rules — some of its settings stay on each device"
+      ? "This item always uses Per-key rules: some of its settings stay on each device"
       : (modes.find((m) => m.id === current)?.label ?? current));
     if (pinnedToFields) {
       chip.addClass("config-sync-dim");
-      setTooltip(chip, "This item always uses Per-key rules — some of its settings stay on each device");
+      setTooltip(chip, "This item always uses Per-key rules: some of its settings stay on each device");
       // The ⇕ renders even here: a picker box without it is 14px narrower and this row's glyph
       // would drift out of the column the two rows above sit in.
       setIcon(chip.createSpan({ cls: "config-sync-tworow-chev" }), "chevrons-up-down");
@@ -2770,7 +2770,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       // mislead (implying a choice), so it points at the real control instead.
       if (rule.locked === true && rule.pattern === "enabledCssSnippets") {
         fr.createDiv();
-        fr.createDiv({ cls: "config-sync-ldhint", text: "locked — managed per snippet on the Appearance card (Folders → snippets)" });
+        fr.createDiv({ cls: "config-sync-ldhint", text: "locked: managed per snippet on the Appearance card (Folders → snippets)" });
         return;
       }
       const perElementOn = group.perElement?.[rule.pattern] !== undefined;
@@ -2803,7 +2803,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
                 },
               }],
       });
-      if (rule.locked === true) slots.device.setAttribute("aria-label", "Preset rule — cannot be changed");
+      if (rule.locked === true) slots.device.setAttribute("aria-label", "Preset rule (cannot be changed)");
       this.renderLockToggle(slots.lock, {
         encrypted: rule.encrypted,
         disabled: rule.locked === true || encryptToggleDisabled(rule.sharing, perElementOn),
@@ -2818,7 +2818,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
           pi.addClass("config-sync-dim");
           pi.setAttribute("aria-label", PER_ITEM_DISABLED_HINT);
         } else {
-          pi.setAttribute("aria-label", `${PER_ELEMENT_RULES_LABEL} — each item gets its own rule`);
+          pi.setAttribute("aria-label", `${PER_ELEMENT_RULES_LABEL}: each item gets its own rule`);
           pi.setAttribute("role", "button");
           pi.setAttribute("tabindex", "0");
           const flip = (): void => {
@@ -3123,7 +3123,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       t.onChange(async (v) => {
         const trimmed = v.trim();
         if (trimmed.startsWith("/") || trimmed.split("/").includes("..")) {
-          new Notice(`Config Sync: invalid data folder "${trimmed}" — must be a vault-relative path`);
+          new Notice(`Config Sync: invalid data folder "${trimmed}", must be a vault-relative path`);
           return;
         }
         if (!this.host.settingsWritable()) return;
@@ -3277,7 +3277,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     // time like the data-folder suffix — the static desc stays the version-neutral search copy.
     const storageNote = this.host.passphraseKeychainBacked()
       ? "On this device it is stored encrypted in Obsidian's keychain (Settings → Keychain)."
-      : "This device's Obsidian is older than 1.12, so it is stored unencrypted in app storage — update Obsidian to keep it in the encrypted keychain.";
+      : "This device's Obsidian is older than 1.12, so it is stored unencrypted in app storage. Update Obsidian to keep it in the encrypted keychain.";
     const setting = this.anchor(
       new Setting(containerEl)
         .setName(def.name)
@@ -3340,7 +3340,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
   private renderGroupsReadError(containerEl: HTMLElement): boolean {
     if (this.groupsReadError === null) return false;
     containerEl.createDiv({
-      text: `Cannot read your sync configuration — fix the error below, then reopen this tab: ${this.groupsReadError}`,
+      text: `Cannot read your sync configuration. Fix the error below, then reopen this tab: ${this.groupsReadError}`,
       cls: "config-sync-form-error",
     });
     return true;
@@ -3424,7 +3424,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     if (customized.length > 0) {
       new Setting(containerEl)
         .setName(`${customized.length} item${customized.length === 1 ? " uses" : "s use"} a customized rule`)
-        .setDesc(`${customized.map((g) => this.host.displayName(g.name, g.label)).join(", ")} — edit each on its own tab.`)
+        .setDesc(`${customized.map((g) => this.host.displayName(g.name, g.label)).join(", ")}. Edit each on its own tab.`)
         .addButton((b) =>
           b.setButtonText("Reset all to defaults").onClick(async () => {
             await this.commitGroups((draft) => {
@@ -3443,7 +3443,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Custom rules")
       .setHeading()
-      .setDesc("Your own rules for anything not listed elsewhere — vault-root files, extra folders, or per-key credential protection.");
+      .setDesc("Your own rules for anything not listed elsewhere: vault-root files, extra folders, or per-key credential protection.");
     const customEl = containerEl.createDiv();
     for (const group of custom) this.renderRuleCard(customEl, group);
     const addRule = containerEl.createEl("button", { cls: "config-sync-add-row", text: "+ Add rule" });
@@ -3490,7 +3490,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     // A refused adopt must say so under its own row — the toggle springing back with the
     // page-level message suppressed (culprit pinning) reads as "nothing happened".
     if (this.saveErrorFor === d.name) {
-      listEl.createDiv({ cls: "config-sync-form-error", text: `Couldn't turn this on — ${this.groupsErrorMsg.replace(/\.$/, "")}.` });
+      listEl.createDiv({ cls: "config-sync-form-error", text: `Couldn't turn this on: ${this.groupsErrorMsg.replace(/\.$/, "")}.` });
     }
   }
 
@@ -3517,7 +3517,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       this.refresh();
     });
     if (this.saveErrorFor === group.name) {
-      listEl.createDiv({ cls: "config-sync-form-error", text: `Couldn't save this change — ${this.groupsErrorMsg.replace(/\.$/, "")}.` });
+      listEl.createDiv({ cls: "config-sync-form-error", text: `Couldn't save this change: ${this.groupsErrorMsg.replace(/\.$/, "")}.` });
     }
     if (isOpen) this.renderRuleForm(listEl, group, "discovered");
   }
@@ -3550,7 +3550,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     if (this.saveErrorFor === group.name) {
       // The wrapped message can arrive with or without its own full stop — hence one
       // normalised join instead of two literals colliding into "…changed..".
-      listEl.createDiv({ cls: "config-sync-save-error mod-warning", text: `Couldn't save this change — ${this.groupsErrorMsg.replace(/\.$/, "")}.` });
+      listEl.createDiv({ cls: "config-sync-save-error mod-warning", text: `Couldn't save this change: ${this.groupsErrorMsg.replace(/\.$/, "")}.` });
     }
     if (isOpen) this.renderRuleForm(listEl, group, "custom");
   }
@@ -3633,8 +3633,8 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     // TYPE as an icon picker (no "File" wordmark — icon + tooltip + ⇕ on hover,
     // the panel's one picker idiom).
     const TYPE_META = {
-      file: { icon: "file", label: "File", tooltip: "File — syncs a single file" },
-      folder: { icon: "folder", label: "Folder", tooltip: "Folder — syncs everything in it" },
+      file: { icon: "file", label: "File", tooltip: "File: syncs a single file" },
+      folder: { icon: "folder", label: "Folder", tooltip: "Folder: syncs everything in it" },
     } as const;
     const typeIc = advRow("Type").createSpan({ cls: "config-sync-sharingicon config-sync-adv-typeic" });
     setIcon(typeIc.createSpan(), TYPE_META[group.type].icon);
@@ -3644,7 +3644,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
       // The file fixes name, path AND type — a discovered rule is a file by construction, and a
       // folder reading of a file path only ever fails at run time.
       typeIc.addClass("config-sync-dim");
-      typeIc.setAttribute("aria-label", "File — decided by the file itself");
+      typeIc.setAttribute("aria-label", "File: decided by the file itself");
     } else {
       typeIc.setAttribute("aria-label", TYPE_META[group.type].tooltip);
       this.wireMenuTrigger(typeIc, () => {
@@ -3712,7 +3712,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const noteEl = panel.createDiv({ cls: "config-sync-expand-note" });
     const show = (scan: SensitiveScan): void => {
       if (scan.keys.length === 0 && !scan.blob) return;
-      noteEl.setText(scan.blob ? "⚠ This file looks already encrypted — its keys can't be scanned." : `⚠ Sensitive keys detected: ${scan.keys.join(", ")}`);
+      noteEl.setText(scan.blob ? "⚠ This file looks already encrypted, so its keys can't be scanned." : `⚠ Sensitive keys detected: ${scan.keys.join(", ")}`);
     };
     if (cached !== undefined) {
       show(cached);
@@ -3755,7 +3755,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Remotes")
       .setHeading()
-      .setDesc("Sync your settings with another vault or a git repository. Your own devices don't need a remote — your regular vault sync already carries the settings.");
+      .setDesc("Sync your settings with another vault or a git repository. Your own devices don't need a remote: your regular vault sync already carries the settings.");
     const listEl = containerEl.createDiv({ cls: "config-sync-sources" });
     this.sourceErrorEls = [];
     this.sources.forEach((draft, index) => {
@@ -3933,7 +3933,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
           held
             ? "✓ Token stored on this device."
             : draft.tokenId !== ""
-              ? `⚠ This remote uses a token named "${draft.tokenId}", which this device doesn't have yet — link it here once.`
+              ? `⚠ This remote uses a token named "${draft.tokenId}", which this device doesn't have yet. Link it here once.`
               : ""
         );
       };
@@ -3946,7 +3946,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
           return;
         }
         if (name === PASSPHRASE_SECRET_ID) {
-          new Notice("Config Sync's own vault passphrase is stored under that name — pick or create a different secret for this remote.");
+          new Notice("Config Sync's own vault passphrase is stored under that name. Pick or create a different secret for this remote.");
           tokenC.setValue(draft.tokenId);
           return;
         }
@@ -4007,7 +4007,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         held
           ? "✓ Passphrase stored on this device."
           : draft.passphraseId !== ""
-            ? `⚠ This remote uses a passphrase named "${draft.passphraseId}", which this device doesn't have yet — link it here once.`
+            ? `⚠ This remote uses a passphrase named "${draft.passphraseId}", which this device doesn't have yet. Link it here once.`
             : ""
       );
     };
@@ -4019,7 +4019,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         return;
       }
       if (name === PASSPHRASE_SECRET_ID) {
-        new Notice("Config Sync's own vault passphrase is stored under that name — pick or create a different secret for this remote.");
+        new Notice("Config Sync's own vault passphrase is stored under that name. Pick or create a different secret for this remote.");
         passC.setValue(draft.passphraseId);
         return;
       }
@@ -4052,7 +4052,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         apply(first);
       } else if (dirs.length === 0) {
         apply(picked);
-        new Notice("No store found here yet — Pull needs the other vault to Capture first; Push will initialize a store at this path.");
+        new Notice("No store found here yet. Pull needs the other vault to Capture first; Push will initialize a store at this path.");
       } else {
         new FolderSelectModal(this.app, dirs, apply).open();
       }

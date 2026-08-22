@@ -133,7 +133,7 @@ function basename(p: string): string {
 }
 
 const SWITCH_LISTS = new Set(["core-plugins.json", "community-plugins.json"]);
-const CORE_CAUTION = "Contains account or device-specific data — not meant to travel between vaults.";
+const CORE_CAUTION = "Contains account or device-specific data, not meant to travel between vaults.";
 
 function section(bucket: string, heading: string, description: string, allowSyncAll: boolean, items: CatalogItem[]): CatalogSection[] {
   return items.length > 0 ? [{ bucket, heading, description, allowSyncAll, items }] : [];
@@ -212,7 +212,7 @@ export async function listOptionSections(io: FileIO, configDir: string, _groups:
 
   return [
     ...section("available", "Available", "Sync these settings that already exist in this vault.", true, available),
-    ...section("notPresent", "Not yet in this vault", "Nothing to sync yet — customize these in Obsidian first, then they'll appear here.", true, notPresent),
+    ...section("notPresent", "Not yet in this vault", "Nothing to sync yet: customize these in Obsidian first, then they'll appear here.", true, notPresent),
   ];
 }
 
@@ -275,7 +275,7 @@ function pluginGroupItems(groups: SyncGroup[], want: (id: string) => boolean, de
 }
 
 const NOT_INSTALLED_HEADING = "Not installed on this device";
-const NOT_INSTALLED_DESC = "Synced from the store — settings sync now; the plugin itself installs through the Sync Center.";
+const NOT_INSTALLED_DESC = "Synced from the store: settings sync now; the plugin itself installs through the Sync Center.";
 
 export async function listPluginSections(
   plugins: { id: string; name: string; enabled: boolean }[],

@@ -22,7 +22,7 @@
 // schemaVersion all mean the same number, and a future bump must move exactly one literal.
 export const CURRENT_SCHEMA = 5;
 
-export const SCHEMA_UPGRADE_NOTICE = "Config Sync: this update reset your sync setup — open Settings to choose what to sync again.";
+export const SCHEMA_UPGRADE_NOTICE = "Config Sync: this update reset your sync setup. Open Settings to choose what to sync again.";
 
 // Refusal copy, shown wherever a write is refused while the
 // stop state holds — the Sync Center's banner and every mutating entry point's notice.

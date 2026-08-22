@@ -117,7 +117,7 @@ function buildChips(i: FateInput): string[] {
   // from the availability ladder independent of the opt-out fact, so `not installed here`/`stays
   // off` (both describe what a RUN would do) must be suppressed here — the row is forced to never
   // run — the same way excludedHere's direction:null already makes them unreachable for that
-  // cause. The Runs-on ENABLEMENT-rule chips (`off here — your rule`/`on here — your rule`) are
+  // cause. The Runs-on ENABLEMENT-rule chips (`off here (your rule)`/`on here (your rule)`) are
   // ALSO run-consequence facts — a Runs-on rule is moot while the whole item is ignored on this
   // device, and showing it next to `your rule` reads as duplicate/conflicting attribution (the
   // opted-out row shows only `your rule` + intrinsic facts). `desktop only`/`encrypted` stay
@@ -131,8 +131,8 @@ function buildChips(i: FateInput): string[] {
     chips.push("stays off");
   }
   if (!inert) {
-    if (i.localException === "off") chips.push("off here — your rule");
-    else if (i.localException === "on") chips.push("on here — your rule");
+    if (i.localException === "off") chips.push("off here (your rule)");
+    else if (i.localException === "on") chips.push("on here (your rule)");
   }
   if (i.encrypted) chips.push("encrypted");
   else if (i.encryptedKeys === true) chips.push("encrypted keys");
@@ -159,7 +159,7 @@ function joinFolderVerb(settingsPart: string | null, folderVerb: string): string
 
 function settingsVerb(i: FateInput, turnedOn: boolean): string | null {
   if (i.direction === "capture") {
-    if (turnedOn) return "turned on here — shares it";
+    if (turnedOn) return "turned on here · shares it";
     if (i.special === "appearance") return "captures theme & snippets";
     // A folder row with no changes attached (e.g. "not-captured" — groupStatus never attaches
     // `changes` there) has folderFileCount:null, NOT a file count of zero: it must fall through
@@ -171,7 +171,7 @@ function settingsVerb(i: FateInput, turnedOn: boolean): string | null {
     }
     return settingsPart;
   }
-  if (i.special === "appearance") return "applies theme & snippets — live";
+  if (i.special === "appearance") return "applies theme & snippets · live";
   if (i.special === "folder" && i.folderFileCount !== null) return `applies ${i.folderFileCount} files`;
   const settingsPart = i.hasSettingsPayload ? "applies settings" : null;
   if (i.special !== "folder" && i.folderFileCount !== null && i.folderFileCount > 0) {
@@ -264,13 +264,13 @@ export function rowFate(i: FateInput): Fate {
 export function versionAheadClause(input: FateInput, versionAhead: VersionAhead): string {
   const newer = newerVersionName(versionAhead);
   if (capturedTurnsOn(input)) {
-    return `Turned on here — your other devices will turn it on the next time they apply. Also records the newer ${newer} so they can update`;
+    return `Turned on here: your other devices will turn it on the next time they apply. Also records the newer ${newer} so they can update`;
   }
   if (input.hasSettingsPayload) {
-    return `Shares your settings with your other devices — and records the newer ${newer} so they can update`;
+    return `Shares your settings with your other devices, and records the newer ${newer} so they can update`;
   }
   // The pure-drift clause names the subject up front, since this is the ONLY sentence the row
   // gets: a plugin's own version needs no subject (the row is the plugin), Obsidian's does.
   const subject = versionAhead.anchor === "app" ? `Obsidian ${versionAhead.installed}` : `Installed ${versionAhead.installed}`;
-  return `${subject} is newer than the store's ${versionAhead.stored} — capture records it so your other devices can update`;
+  return `${subject} is newer than the store's ${versionAhead.stored}; capture records it so your other devices can update`;
 }

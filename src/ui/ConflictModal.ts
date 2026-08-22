@@ -61,11 +61,11 @@ export class ConflictModal extends Modal {
       line.createSpan({ cls: `config-sync-cm-mark ${cls}`, text: mark });
       line.createSpan({ text });
     };
-    for (const g of auto.addGroups) reason("＋", "is-add", `${this.displayName(g.name)} — new item from remote (added, incl. its store files)`);
-    for (const f of auto.writeFiles) reason("＋", "is-add", `${f.name === "" ? f.rel : this.displayName(f.name)} — store file only on remote (written locally)`);
-    for (const id of auto.identical) reason("＝", "is-same", `${this.autoLabel(id)} — identical on both sides`);
-    for (const name of auto.keptLocalGroups) reason("⌂", "is-kept", `${this.displayName(name)} — only exists locally (kept, never deleted)`);
-    for (const rel of auto.keptLocalFiles) reason("⌂", "is-kept", `${rel} — only exists locally (kept)`);
+    for (const g of auto.addGroups) reason("＋", "is-add", `${this.displayName(g.name)}: new item from remote (added, incl. its store files)`);
+    for (const f of auto.writeFiles) reason("＋", "is-add", `${f.name === "" ? f.rel : this.displayName(f.name)}: store file only on remote (written locally)`);
+    for (const id of auto.identical) reason("＝", "is-same", `${this.autoLabel(id)}: identical on both sides`);
+    for (const name of auto.keptLocalGroups) reason("⌂", "is-kept", `${this.displayName(name)}: only exists locally (kept, never deleted)`);
+    for (const rel of auto.keptLocalFiles) reason("⌂", "is-kept", `${rel}: only exists locally (kept)`);
     autoHead.addEventListener("click", () => {
       const open = autoList.isShown();
       if (open) autoList.hide();
@@ -75,7 +75,7 @@ export class ConflictModal extends Modal {
 
     const chead = body.createDiv({ cls: "config-sync-cm-chead" });
     chead.createSpan({ cls: "config-sync-cm-ctitle", text: `${plan.conflicts.length} conflict${plan.conflicts.length === 1 ? "" : "s"}` });
-    chead.createSpan({ cls: "config-sync-cm-csub", text: "both sides changed — pick a side per row" });
+    chead.createSpan({ cls: "config-sync-cm-csub", text: "both sides changed; pick a side per row" });
     chead.createDiv({ cls: "config-sync-rule-spacer" });
     const allLocal = chead.createEl("button", { cls: "config-sync-cm-allbtn", text: "All local" });
     const allRemote = chead.createEl("button", { cls: "config-sync-cm-allbtn", text: "All remote" });
@@ -162,7 +162,7 @@ export class ConflictModal extends Modal {
     if (c.kind === "file" && isSelfStoreRel(c.rel)) {
       row.createDiv({
         cls: "config-sync-cm-selfhint",
-        text: "If this vault keeps its own Config Sync setup, you can leave it out of this remote — Settings → Remotes.",
+        text: "If this vault keeps its own Config Sync setup, you can leave it out of this remote (Settings → Remotes).",
       });
     }
   }

@@ -34,7 +34,7 @@ export function statusBarSegments(
 // many remotes are involved — so that goes here, where a hover can carry it. A remote nobody could
 // count is named rather than dropped: silence would read as "nothing waiting there".
 export function statusBarAriaLabel(segments: StatusBarSegment[], span: { remotes: number; uncounted: number }): string {
-  if (segments.length === 0 && span.uncounted === 0) return "Config Sync — all in sync";
+  if (segments.length === 0 && span.uncounted === 0) return "Config Sync: all in sync";
   const phrase = (s: StatusBarSegment): string =>
     s.kind === "up"
       ? `${s.count} to capture`
@@ -52,7 +52,7 @@ export function statusBarAriaLabel(segments: StatusBarSegment[], span: { remotes
     parts[parts.length - 1] = `${parts[parts.length - 1]} across ${span.remotes} remote${span.remotes === 1 ? "" : "s"}`;
   }
   if (span.uncounted > 0) parts.push(`${span.uncounted} remote${span.uncounted === 1 ? "" : "s"} can't be counted yet`);
-  return `Config Sync — ${parts.join(" · ")}`;
+  return `Config Sync: ${parts.join(" · ")}`;
 }
 
 // Thin DOM shell: rebuilds the item in place. Not unit-tested (repo policy: vitest covers pure

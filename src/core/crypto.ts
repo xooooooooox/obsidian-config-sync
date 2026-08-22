@@ -17,7 +17,7 @@ const PBKDF2_ITERATIONS = 210000;
 
 function requireWebCrypto(): void {
   if (globalThis.crypto?.subtle === undefined) {
-    throw new Error("WebCrypto is unavailable in this environment — Encrypt modes cannot run on this device");
+    throw new Error("WebCrypto is unavailable in this environment, so Encrypt modes cannot run on this device");
   }
 }
 
@@ -105,7 +105,7 @@ async function decryptRaw(passphrase: string, env: RawEnvelope, groupName: strin
     );
     return new TextDecoder().decode(pt);
   } catch {
-    throw new DecryptError(`cannot decrypt "${groupName}" — wrong passphrase on this device?`);
+    throw new DecryptError(`cannot decrypt "${groupName}" (wrong passphrase on this device?)`);
   }
 }
 
@@ -163,7 +163,7 @@ export async function encryptField(passphrase: string, plaintext: string): Promi
 
 export async function decryptField(passphrase: string, envelope: string, groupName: string): Promise<string> {
   const raw = parseFieldEnvelope(envelope);
-  if (raw === null) throw new DecryptError(`cannot decrypt "${groupName}" — wrong passphrase on this device?`);
+  if (raw === null) throw new DecryptError(`cannot decrypt "${groupName}" (wrong passphrase on this device?)`);
   return decryptRaw(passphrase, raw, groupName);
 }
 

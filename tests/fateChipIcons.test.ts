@@ -15,8 +15,8 @@ describe("FATE_CHIP_ICON — chip→icon map completeness", () => {
     "not installed here",
     "desktop only",
     "your rule",
-    "off here — your rule",
-    "on here — your rule",
+    "off here (your rule)",
+    "on here (your rule)",
     "stays off",
     "encrypted",
     "encrypted keys",
@@ -35,8 +35,8 @@ describe("FATE_CHIP_ICON — chip→icon map completeness", () => {
       "not installed here": "circle-dashed",
       "desktop only": "monitor",
       "your rule": "sliders-horizontal",
-      "off here — your rule": "sliders-horizontal",
-      "on here — your rule": "sliders-horizontal",
+      "off here (your rule)": "sliders-horizontal",
+      "on here (your rule)": "sliders-horizontal",
       // `power` means the local-exception ON state (2026-08-12-enablement-two-layers-design.md
       //) — a chip that says the row stays off must not share it.
       "stays off": "power-off",

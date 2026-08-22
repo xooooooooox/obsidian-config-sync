@@ -403,7 +403,7 @@ function claimPath(seen: Map<string, string>, owner: string, path: string): void
   const key = groupStorePath(path);
   const existing = seen.get(key);
   if (existing !== undefined && existing !== owner) {
-    throw new CompileError(`"${owner}" and "${existing}" both sync "${path}" — give one of them a different path.`);
+    throw new CompileError(`"${owner}" and "${existing}" both sync "${path}". Give one of them a different path.`);
   }
   seen.set(key, owner);
 }
@@ -559,10 +559,10 @@ function compileCustomItems(items: ItemMap, defs: ItemDef[], seenPaths: Map<stri
     // arrives as a generic "your sync setup has an invalid rule" with no culprit — and it also
     // decides which key the item takes, so a name that cannot be one must fail before it mints one.
     if (!GROUP_NAME_RE.test(name)) {
-      throw new CompileError(`"${name}" is not a valid custom rule name — use only letters, digits, "-" or "_", starting with a letter or digit.`);
+      throw new CompileError(`"${name}" is not a valid custom rule name. Use only letters, digits, "-" or "_", starting with a letter or digit.`);
     }
-    if (reserved.has(name)) throw new CompileError(`"${name}" is a reserved name — rename this custom rule.`);
-    if (seenNames.has(name)) throw new CompileError(`two custom rules are both named "${name}" — rename one of them.`);
+    if (reserved.has(name)) throw new CompileError(`"${name}" is a reserved name; rename this custom rule.`);
+    if (seenNames.has(name)) throw new CompileError(`two custom rules are both named "${name}"; rename one of them.`);
     seenNames.add(name);
     if (!item.synced) continue;
     const path = item.path ?? "";

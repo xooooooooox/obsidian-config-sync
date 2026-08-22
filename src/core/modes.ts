@@ -137,7 +137,7 @@ export class PassphraseNeededError extends Error {}
 
 function requirePassphrase(group: SyncGroup, passphrase: string | null): string {
   if (groupNeedsPassphrase(group) && passphrase === null) {
-    throw new PassphraseNeededError("passphrase not set on this device — Settings → General");
+    throw new PassphraseNeededError("passphrase not set on this device (Settings → General)");
   }
   return passphrase as string;
 }
@@ -150,7 +150,7 @@ function requirePassphrase(group: SyncGroup, passphrase: string | null): string 
 function requireFileRulePassphrase(groupName: string, path: string, passphrase: string | null, verb: "capture" | "apply"): string {
   if (passphrase === null) {
     throw new PassphraseNeededError(
-      `Group "${groupName}": cannot ${verb} the encrypted settings file "${path}" — no passphrase is set on this device. Set one in Settings → General, then ${verb} again.`
+      `Group "${groupName}": cannot ${verb} the encrypted settings file "${path}" because no passphrase is set on this device. Set one in Settings → General, then ${verb} again.`
     );
   }
   return passphrase;

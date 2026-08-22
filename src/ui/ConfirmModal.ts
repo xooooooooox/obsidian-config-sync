@@ -119,7 +119,7 @@ class DestructiveEditModal extends Modal {
 export function confirmDropKeyRules(app: App, count: number): Promise<boolean> {
   const rules = `${count} key rule${count === 1 ? "" : "s"}`;
   return new Promise((resolve) => {
-    new DestructiveEditModal(app, "Switch mode?", `This removes ${rules} — each key's sharing and encryption choices are lost.`, "Remove rules and switch", resolve).open();
+    new DestructiveEditModal(app, "Switch mode?", `This removes ${rules}; each key's sharing and encryption choices are lost.`, "Remove rules and switch", resolve).open();
   });
 }
 

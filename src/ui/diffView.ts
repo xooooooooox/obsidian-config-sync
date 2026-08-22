@@ -146,7 +146,7 @@ export function renderDiffPanel(
   const toolbar = host.createDiv({ cls: "config-sync-cm-difftools" });
   const metaEl = toolbar.createSpan({ cls: "config-sync-cm-diffmeta", text: meta.name });
   if (meta.sorted) {
-    metaEl.setAttribute("aria-label", `${meta.name} — both sides are shown with their keys in the same sorted order, not the order they appear in the file.`);
+    metaEl.setAttribute("aria-label", `${meta.name}: both sides are shown with their keys in the same sorted order, not the order they appear in the file.`);
   }
   toolbar.createDiv({ cls: "config-sync-rule-spacer" });
   if (onExpand !== null) {
@@ -163,7 +163,7 @@ export function renderDiffPanel(
     pane.empty();
     const ops = diffLines(leftText, rightText);
     if (ops === null) {
-      pane.createDiv({ cls: "config-sync-cm-diffbig", text: "Content differs — too large to diff inline." });
+      pane.createDiv({ cls: "config-sync-cm-diffbig", text: "Content differs; too large to diff inline." });
       return;
     }
     const rows: DiffRow[] = sessionDiffCollapse ? collapseUnchanged(ops, 3) : ops;

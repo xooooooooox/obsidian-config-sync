@@ -34,7 +34,7 @@ export interface RefreshView {
 
 export function refreshTooltip(state: RefreshView): string {
   if (state.busy) return REFRESH_BUSY_TOOLTIP;
-  return state.age === null ? "Refresh" : `Refresh — refreshed ${state.age}`;
+  return state.age === null ? "Refresh" : `Refresh (refreshed ${state.age})`;
 }
 
 // How much longer the spin must stay up after the work finished, given how long it ran.

@@ -343,7 +343,7 @@ export function leftoverPresentation(
 }
 
 export const LEFTOVER_ADOPT_HINT =
-  "Some store files aren't tracked here yet — adopt the configuration first, then anything truly left over shows up for cleanup.";
+  "Some store files aren't tracked here yet. Adopt the configuration first, then anything truly left over shows up for cleanup.";
 
 export interface PolicyOption {
   action: StateAction;
@@ -497,7 +497,7 @@ const ONOFF_NARRATION_CAP = 5;
 
 export interface OnOffNarrationLine {
   prefix: string; // e.g. "on at <remote>: " — plain narration text
-  value: string; // e.g. "its entire list — 74 plugins" / "A, B, C, D, E, and 69 more" — the emphasized part
+  value: string; // e.g. "its entire list (74 plugins)" / "A, B, C, D, E, and 69 more" — the emphasized part
 }
 
 // One side's expanded narration: a side's flip count equalling its source on-set size
@@ -513,7 +513,7 @@ function onOffSideLine(
 ): OnOffNarrationLine | null {
   if (ids.length === 0) return null;
   if (ids.length === sourceOnCount) {
-    return { prefix, value: `${wholeListPhrase} — ${ids.length} plugin${ids.length === 1 ? "" : "s"}` };
+    return { prefix, value: `${wholeListPhrase} (${ids.length} plugin${ids.length === 1 ? "" : "s"})` };
   }
   const names = [...ids.map(displayOf)].sort((a, b) => a.localeCompare(b));
   if (names.length <= ONOFF_NARRATION_CAP) return { prefix, value: names.join(", ") };
@@ -698,9 +698,9 @@ export function unifiedFooterSummary(sel: { applyN: number; installs: number; tu
 // exported as named constants — the single producer both fileEntryFor below and the
 // icon-collision/tooltip guards read from, so a future edit to any of them can't drift the two
 // apart silently (the same "producer-vs-producer" discipline the fate-chip glyph registry uses).
-export const CAPTURE_ADDED_TOOLTIP = "New in the store — starts syncing to your other devices";
+export const CAPTURE_ADDED_TOOLTIP = "New in the store: starts syncing to your other devices";
 export const CAPTURE_UPDATED_TOOLTIP = "Store copy updated";
-export const CAPTURE_DELETED_TOOLTIP = "Removed from the store — removed from your other devices";
+export const CAPTURE_DELETED_TOOLTIP = "Removed from the store: removed from your other devices";
 export const APPLY_ADDED_TOOLTIP = "New on this device";
 export const APPLY_UPDATED_TOOLTIP = "Changed on this device";
 export const APPLY_DELETED_TOOLTIP = "Deleted from this device";
@@ -740,7 +740,7 @@ export function fileEntryFor(
     return { glyph: "del", label: change.rel, affordance: "none", note: null, tooltip };
   }
 
-  const ENCRYPTED_NOTE = "changed — encrypted, no preview";
+  const ENCRYPTED_NOTE = "changed (encrypted, no preview)";
   const glyph = effectiveKind === "added" ? "+" : "·";
   if (effDir === "capture") {
     const tooltip = effectiveKind === "added" ? CAPTURE_ADDED_TOOLTIP : CAPTURE_UPDATED_TOOLTIP;
@@ -1023,7 +1023,7 @@ export function relationCopy(r: PanelRelation): RelationCopy {
 // verbatim under a remote when it is this device's own passphrase that is missing. "there" must NOT
 // reuse it: this device is unlocked, and telling its user to set a passphrase they already set
 // would be wrong in the one place the row gets to say anything.
-export const LOCKED_HERE_SENTENCE = "Encrypted — set the passphrase in settings to compare";
+export const LOCKED_HERE_SENTENCE = "Encrypted: set the passphrase in settings to compare";
 export const LOCKED_THERE_SENTENCE = "Can't read this remote's copy";
 
 // The `Can't compare` card's State clause (spec 3.8's three sayings, verbatim). Which side could
@@ -1067,9 +1067,9 @@ export function keysRowModel(input: {
   patterns: readonly string[];
 }): KeysRow {
   if (input.item === "none") return { kind: "hidden" };
-  if (input.group.type === "folder") return { kind: "note", text: "A folder travels as a whole — the direction above covers every file in it." };
-  if (input.encrypted) return { kind: "note", text: "This file is stored as one encrypted blob — it travels whole or not at all." };
-  if (!input.group.path.endsWith(".json")) return { kind: "note", text: "No keys in this file — it travels whole or not at all." };
+  if (input.group.type === "folder") return { kind: "note", text: "A folder travels as a whole: the direction above covers every file in it." };
+  if (input.encrypted) return { kind: "note", text: "This file is stored as one encrypted blob: it travels whole or not at all." };
+  if (!input.group.path.endsWith(".json")) return { kind: "note", text: "No keys in this file: it travels whole or not at all." };
   // No narrowing note: the item's own direction shortening what a key may be set to shows itself
   // on the key controls (keyStopsWithin drives their stops), and every sentence written for it was
   // read as a limit on WHICH keys can be ruled — the control teaching by its own shape beats a

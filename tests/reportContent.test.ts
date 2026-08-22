@@ -53,7 +53,7 @@ describe("resultLevel", () => {
         result({
           status: "warning",
           stateNote: { kind: "ok", text: "⤓ installed & enabled 2.2.3" },
-          messages: ["the captured version 2.2.2 is no longer downloadable — installed 2.2.3 instead"],
+          messages: ["the captured version 2.2.2 is no longer downloadable; installed 2.2.3 instead"],
         })
       )
     ).toBe("warning");
@@ -65,7 +65,7 @@ describe("resultLevel", () => {
         result({
           status: "ok",
           stateNote: { kind: "ok", text: "⤓ installed & enabled 2.5.0" },
-          messages: ["no settings in the store — installed the plugin only"],
+          messages: ["no settings in the store; installed the plugin only"],
         })
       )
     ).toBe("ok");

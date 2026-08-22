@@ -22,7 +22,7 @@ describe("file envelopes", () => {
     const env = parseFileEnvelope(await encryptFile("pw", "x"));
     if (env === null) throw new Error("unreachable");
     await expect(decryptFile("other", env, "hotkeys")).rejects.toThrowError(
-      'cannot decrypt "hotkeys" — wrong passphrase on this device?'
+      'cannot decrypt "hotkeys" (wrong passphrase on this device?)'
     );
     await expect(decryptFile("other", env, "hotkeys")).rejects.toBeInstanceOf(DecryptError);
   });
@@ -51,7 +51,7 @@ describe("webcrypto capability guard", () => {
     Object.defineProperty(globalThis, "crypto", { value: {}, configurable: true });
     try {
       await expect(encryptFile("pw", "x")).rejects.toThrowError(
-        "WebCrypto is unavailable in this environment — Encrypt modes cannot run on this device"
+        "WebCrypto is unavailable in this environment, so Encrypt modes cannot run on this device"
       );
     } finally {
       Object.defineProperty(globalThis, "crypto", { value: original, configurable: true });

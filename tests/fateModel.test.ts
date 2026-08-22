@@ -32,7 +32,7 @@ describe("rowFate — the verb table", () => {
   });
   it("appearance special", () => {
     const f = rowFate({ ...base, special: "appearance" });
-    expect(f.sentence).toBe("Applies theme & snippets — live");
+    expect(f.sentence).toBe("Applies theme & snippets · live");
   });
   it("folder", () => {
     const f = rowFate({ ...base, special: "folder", folderFileCount: 2 });
@@ -45,7 +45,7 @@ describe("rowFate — the verb table", () => {
   });
   it("capture: turned on here", () => {
     const f = rowFate({ ...base, direction: "capture", hasSettingsPayload: false, storeListOn: false, locallyOn: true });
-    expect(f.sentence).toBe("Turned on here — shares it");
+    expect(f.sentence).toBe("Turned on here · shares it");
   });
   it("capture: Appearance", () => {
     const f = rowFate({ ...base, direction: "capture", special: "appearance" });
@@ -93,7 +93,7 @@ describe("rowFate — empty-verb degradation (apply-only)", () => {
   // these pin the same guarantee explicitly against this rule).
   it("never fires on appearance special (verb always non-null)", () => {
     const f = rowFate({ ...base, hasSettingsPayload: false, special: "appearance" });
-    expect(f.sentence).toBe("Applies theme & snippets — live");
+    expect(f.sentence).toBe("Applies theme & snippets · live");
     expect(f.stageable).toBe(true);
   });
   it("never fires on a folder row with a file count (verb always non-null)", () => {
@@ -239,16 +239,16 @@ describe("rowFate — optedOutHere suppresses the local-exception chips", () => 
   it("never-here's chip is suppressed when opted out — only your rule remains", () => {
     const f = rowFate({ ...base, direction: null, optedOutHere: true, localException: "off" });
     expect(f.chips).toContain("your rule");
-    expect(f.chips).not.toContain("off here — your rule");
+    expect(f.chips).not.toContain("off here (your rule)");
   });
   it("always-here's chip is suppressed when opted out — only your rule remains", () => {
     const f = rowFate({ ...base, direction: null, optedOutHere: true, localException: "on" });
     expect(f.chips).toContain("your rule");
-    expect(f.chips).not.toContain("on here — your rule");
+    expect(f.chips).not.toContain("on here (your rule)");
   });
   it("NOT opted out: the enablement-rule chip is unaffected (regression guard — only opt-out suppresses it)", () => {
     const f = rowFate({ ...base, localException: "off" });
-    expect(f.chips).toContain("off here — your rule");
+    expect(f.chips).toContain("off here (your rule)");
   });
   it("intrinsic-fact chips (encrypted, desktop only) survive opt-out — only run-consequence chips are suppressed", () => {
     const f = rowFate({ ...base, direction: null, optedOutHere: true, localException: "off", encrypted: true, desktopOnly: true });
@@ -289,13 +289,13 @@ describe("rowFate — the two enablement layers", () => {
   it("never-here removes turns on, adds rule chip", () => {
     const f = rowFate({ ...base, storeListOn: true, localException: "off" });
     expect(f.sentence).toBe("Applies settings");
-    expect(f.chips).toContain("off here — your rule");
+    expect(f.chips).toContain("off here (your rule)");
     expect(f.turnsOn).toBe(false);
   });
   it("always-here on a store-off plugin adds turns on + rule chip", () => {
     const f = rowFate({ ...base, storeListOn: false, localException: "on" });
     expect(f.sentence).toBe("Turns on · applies settings");
-    expect(f.chips).toContain("on here — your rule");
+    expect(f.chips).toContain("on here (your rule)");
   });
   it("class rule suppresses turn-on on the wrong class", () => {
     const f = rowFate({ ...base, storeListOn: true, ruleSharing: perClass("mobile"), deviceClass: "desktop" });
@@ -337,7 +337,7 @@ describe("rowFate — family file-verb join", () => {
   });
   it("appearance special keeps its byte-identical sentence even with a nonzero folderFileCount", () => {
     const f = rowFate({ ...base, special: "appearance", folderFileCount: 3 });
-    expect(f.sentence).toBe("Applies theme & snippets — live");
+    expect(f.sentence).toBe("Applies theme & snippets · live");
   });
   it("joins alongside install + turns on", () => {
     const f = rowFate({ ...base, installed: false, storeListOn: true, folderFileCount: 2 });
@@ -376,11 +376,11 @@ describe("rowFate — version-ahead capture", () => {
   });
   it("turned-on + version: joins after the turned-on verb", () => {
     const f = rowFate({ ...base, direction: "capture", hasSettingsPayload: false, storeListOn: false, locallyOn: true, versionAhead: ahead });
-    expect(f.sentence).toBe("Turned on here — shares it · records version 2.2.3");
+    expect(f.sentence).toBe("Turned on here · shares it · records version 2.2.3");
   });
   it("versionAhead: null keeps every existing capture sentence byte-identical (fence)", () => {
     expect(rowFate({ ...base, direction: "capture" }).sentence).toBe("Captures settings");
-    expect(rowFate({ ...base, direction: "capture", hasSettingsPayload: false, storeListOn: false, locallyOn: true }).sentence).toBe("Turned on here — shares it");
+    expect(rowFate({ ...base, direction: "capture", hasSettingsPayload: false, storeListOn: false, locallyOn: true }).sentence).toBe("Turned on here · shares it");
   });
 
   // App-anchored rows (App settings, Appearance, Hotkeys, the two plugin lists) drift when
@@ -415,13 +415,13 @@ describe("versionAheadClause — card on-capture clauses", () => {
   it("pure version-ahead", () => {
     const input: FateInput = { ...base, direction: "capture", hasSettingsPayload: false, versionAhead: ahead };
     expect(versionAheadClause(input, ahead)).toBe(
-      "Installed 2.2.3 is newer than the store's 2.2.2 — capture records it so your other devices can update",
+      "Installed 2.2.3 is newer than the store's 2.2.2; capture records it so your other devices can update",
     );
   });
   it("settings + version", () => {
     const input: FateInput = { ...base, direction: "capture", hasSettingsPayload: true, versionAhead: ahead };
     expect(versionAheadClause(input, ahead)).toBe(
-      "Shares your settings with your other devices — and records the newer 2.2.3 so they can update",
+      "Shares your settings with your other devices, and records the newer 2.2.3 so they can update",
     );
   });
   it("turned-on + version", () => {
@@ -429,7 +429,7 @@ describe("versionAheadClause — card on-capture clauses", () => {
       ...base, direction: "capture", hasSettingsPayload: false, storeListOn: false, locallyOn: true, versionAhead: ahead,
     };
     expect(versionAheadClause(input, ahead)).toBe(
-      "Turned on here — your other devices will turn it on the next time they apply. Also records the newer 2.2.3 so they can update",
+      "Turned on here: your other devices will turn it on the next time they apply. Also records the newer 2.2.3 so they can update",
     );
   });
 
@@ -441,13 +441,13 @@ describe("versionAheadClause — card on-capture clauses", () => {
   it("app-anchored pure drift", () => {
     const input: FateInput = { ...base, direction: "capture", hasSettingsPayload: false, versionAhead: appAhead };
     expect(versionAheadClause(input, appAhead)).toBe(
-      "Obsidian 1.13.7 is newer than the store's 1.13.4 — capture records it so your other devices can update",
+      "Obsidian 1.13.7 is newer than the store's 1.13.4; capture records it so your other devices can update",
     );
   });
   it("app-anchored settings + version names Obsidian where the plugin form stays bare", () => {
     const input: FateInput = { ...base, direction: "capture", hasSettingsPayload: true, versionAhead: appAhead };
     expect(versionAheadClause(input, appAhead)).toBe(
-      "Shares your settings with your other devices — and records the newer Obsidian 1.13.7 so they can update",
+      "Shares your settings with your other devices, and records the newer Obsidian 1.13.7 so they can update",
     );
   });
 });

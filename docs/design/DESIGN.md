@@ -165,8 +165,8 @@ your other devices; a removal removes it everywhere) and must never collapse to 
 direction arrow. Each entry's `aria-label`/hover carries the side+consequence sentence
 (the tooltip `fileEntryFor` produces, `src/ui/panelModel.ts`, exported as named constants
 so the icon-collision guard and tests share the producer): capture — added `New in the
-store — starts syncing to your other devices`, updated `Store copy updated`, deleted
-`Removed from the store — removed from your other devices`; apply — added `New on this
+store: starts syncing to your other devices`, updated `Store copy updated`, deleted
+`Removed from the store: removed from your other devices`; apply — added `New on this
 device`, updated `Changed on this device`, deleted `Deleted from this device`. Changing how
 ONE surface draws an arrow means sweeping the row-level list above, not the FILES entry
 vocabulary — they are deliberately two different vocabularies, never one collapsed onto the
@@ -338,8 +338,8 @@ so one card cannot show the same mark on two rows for two different facts ·
 (`config-sync-fatechip`, `FATE_CHIP_ICON` in `fateChipIcons.ts` — icon-ONLY,
 the chip sentence in the tooltip; text renders only as the loud fallback for an unmapped
 string): `circle-dashed` not installed here ·
-`monitor` desktop only · `sliders-horizontal` your rule / off here — your rule / on here — your
-rule · `power-off` stays off (**not** `power` — `power` means "this device turned it on" in
+`monitor` desktop only · `sliders-horizontal` your rule / off here (your rule) / on here (your
+rule) · `power-off` stays off (**not** `power` — `power` means "this device turned it on" in
 the merged control's local glyph, so a chip saying the row stays OFF cannot share it) · `lock`
 encrypted · `check` your choice · trailing-fold states
 (`config-sync-fold-ic`, `FOLD_ICON` in `foldIcons.ts`): `check`/green in sync ·
@@ -609,8 +609,8 @@ noted):
   dropdown holds sections and History only (the self entry and the picker never repeat there).
 - **Rows** `config-sync-hub-row` — one object = one row: chevron, name (`-rule-name`),
   a spacer, then the fate chips (`config-sync-fatechip`, rendered only when a fact deviates
-  from default — `not installed here` · `desktop only` · `stays off` · `off here — your rule`
-  / `on here — your rule` · `encrypted` · `your choice` once a conflict is resolved).
+  from default — `not installed here` · `desktop only` · `stays off` · `off here (your rule)`
+  / `on here (your rule)` · `encrypted` · `your choice` once a conflict is resolved).
   **Chips are icon-only:** the glyph from `FATE_CHIP_ICON` (see Lucide usage) with the chip
   sentence in the tooltip, a quiet faint cluster on the row's RIGHT just before the fate/state
   column — never tags trailing the name. Display order is the model's own emit order
@@ -654,7 +654,7 @@ noted):
   companion. When companions contribute file changes the fate sentence joins the parent's
   settings verb with the folder verb (`Applies settings · applies N files` / `Captures
   settings · captures N files`, the same ` · ` join as the install/turn-on sequence);
-  Appearance's override sentence (`Applies theme & snippets — live` / `Captures theme &
+  Appearance's override sentence (`Applies theme & snippets · live` / `Captures theme &
   snippets`) replaces the joined pair outright.
   **Version drift is its own capture verb.** A row whose files match the store on both sides
   can still be capture-directional because the store's lock records an OLDER source version
@@ -680,7 +680,7 @@ noted):
   grammar, in Settings drawers and run reports.)
   The pinned Config Sync self row (`.is-self`, Community section) is the one exception: no
   checkbox (it isn't staged through Apply/Capture), its own fate text reads `your Sync
-  Center — manages itself`.
+  Center: manages itself`.
 - **Checkboxes** — custom-drawn inputs (hub-row/mainbar/section-head): direction-colored
   when a row (orange capture / accent apply), bright grey (`--text-normal`) for
   select-alls (they carry no direction); idle select-all hides (`-selectall-idle`).
@@ -778,7 +778,7 @@ noted):
   to-do. Its card shows no `Files` row (nothing was verified, so there is nothing to list) and
   answers in `State` with a way-out link. WHOSE key failed decides everything downstream, and the
   comparison says which (`uncomparable`'s `here`/`there`). `here` — this device's own passphrase —
-  keeps the device relation's approved sentence verbatim on the row (`Encrypted — set the
+  keeps the device relation's approved sentence verbatim on the row (`Encrypted: set the
   passphrase in settings to compare`), the card clause `This item is encrypted and this device has
   no passphrase, so its two copies can't be compared.`, and links into Settings → General's
   `Passphrase` row (`general-passphrase`). `there` — the remote's copies do not open under any key
@@ -1043,7 +1043,7 @@ noted):
   aggregate on the status bar, spec 5.5's designated home. The self chip retired with the counts —
   the pinned sidebar row already is the self destination (A3). What remains is the one
   right-aligned refresh control (`config-sync-center-refresh`, `refresh-cw`): no `refreshed
-  …` text span — the age lives in the button's own tooltip (`Refresh — refreshed just now`
+  …` text span — the age lives in the button's own tooltip (`Refresh (refreshed just now)`
   / `… 5m ago`, `relativeAge`), same on desktop and mobile.
   BUSY STATE (`src/ui/refreshControl.ts`, builder + in-place repainter, the `resolveSegment.ts`
   split): the icon spins (`config-sync-refresh-spinning`) and the tooltip becomes `Refreshing…`
@@ -1065,7 +1065,7 @@ noted):
   hover, as does any remote that could not be counted item by item (`… across 2 remotes · 1 remote
   can't be counted yet` — never silently folded into a zero). Clean state = a dimmed `refresh-cw`
   icon only (`--text-faint`). `mod-clickable`; aria-label lists the non-zero parts
-  (`Config Sync — 2 to capture · 1 to apply · 1 to push across 1 remote`).
+  (`Config Sync: 2 to capture · 1 to apply · 1 to push across 1 remote`).
 - **Advanced rule editor** (the custom/discovered rule form, `renderRuleForm`): a
   VERTICAL form of scrows (`config-sync-advform` wraps it; each row is a
   `config-sync-advrow`, `label 130px | control 1fr`), one field per row.
@@ -1075,9 +1075,9 @@ noted):
   mini-menu (`Vault root`/`Config folder` + ⇕, an Obsidian Menu) separated by a thin divider
   (`config-sync-pathbox-div`) from the borderless path input — pick the base, then type the
   relative path in the same box.
-  TYPE: icon-only picker (`file`/`folder` glyphs, tooltip `File — syncs a single file` /
-  `Folder — syncs everything in it`, ⇕ on row hover); on a DISCOVERED rule it renders dim with
-  no menu (tooltip `File — decided by the file itself`) — the file fixes name, path AND type;
+  TYPE: icon-only picker (`file`/`folder` glyphs, tooltip `File: syncs a single file` /
+  `Folder: syncs everything in it`, ⇕ on row hover); on a DISCOVERED rule it renders dim with
+  no menu (tooltip `File: decided by the file itself`) — the file fixes name, path AND type;
   on a custom rule a type flip that would drop stored key rules or an encryption mode confirms
   first (`Change to folder?` / `Change to file?`, body `This removes its key rules and
   encryption settings.`, Cancel + warning-toned `Change type`). DEVICES: the panel's own
@@ -1123,7 +1123,7 @@ noted):
   `config-sync-secret-control` — sized to the shared 380px input track, its empty placeholder
   child hidden so the Link button sits flush with the inputs above). The standing explanation
   (`For https URLs. Without a token, this device's own git sign-in is used. Stored in
-  Obsidian's keychain — link it once per device.`) lives in the control's tooltip, never a
+  Obsidian's keychain; link it once per device.`) lives in the control's tooltip, never a
   row; a status sentence renders on a label-less row ONLY when it has something to say
   (`✓ Token stored on this device.` / the ⚠ not-linked-here warning) — the default state
   renders no row at all. Then a label-less `Test connection` row + the full-width test strip, which closes the form. **No
@@ -1169,7 +1169,7 @@ noted):
   - **Adoption gate**: while Config Sync's own state is pending adoption (self pane `coldstart`,
     or a store-newer adopt state), "leftover" is not a judgment this device can make — the
     section AND the pill are replaced by one quiet hint line (`config-sync-leftover-hint`, muted,
-    dashed frame): `Some store files aren't tracked here yet — adopt the configuration first,
+    dashed frame): `Some store files aren't tracked here yet. Adopt the configuration first,
     then anything truly left over shows up for cleanup.` A self state that is merely
     capture-pending (this device's own config is the newer side) does NOT gate — stopping a sync
     here legitimately produces leftovers before the next capture.
@@ -1182,7 +1182,7 @@ noted):
     auto-expand-on-activation rule the filter transition uses), so a manual re-collapse inside
     the leftover view still sticks. At the head's right edge sits the bulk delete: a `trash` icon
     (quiet-rest;
-    hover/focus red at full opacity), tooltip `Delete all — N files…`, and the trailing ellipsis
+    hover/focus red at full opacity), tooltip `Delete all (N files)…`, and the trailing ellipsis
     keeps its promise: click opens a confirm modal (`Delete N leftover files?` / body `Removes
     these files from the store on this device.` / warning `After your next sync or Push, they are
     gone from your other devices too. This cannot be undone.` / `Cancel` + warning-toned
@@ -1192,7 +1192,7 @@ noted):
   - **Subtitle** (`config-sync-section-note`, this class's only producer): upright (never italic
     — italic is the placeholder/empty-state voice), aligned to the title's own start (no chevron
     indent to inherit), copy: `Settings saved for items nothing here syncs any more. Deleting
-    removes them from the store — and from your other devices after the next sync.`
+    removes them from the store, and from your other devices after the next sync.`
   - **Rows** (`-oflow`: name / mono path / size / trash icon), grouped: the list is bucketed
     into the main list's own section vocabulary — Obsidian · Core plugins · Community plugins ·
     Other files (vault-root and unclassifiable) — under `config-sync-sect` group headers (the
@@ -1350,7 +1350,7 @@ noted):
     (for a string-array key) the per-item icon toggle (lucide `list-checks`,
     `config-sync-perelement-ic` — off at quiet-rest / on `.is-set` accent, disabled+dim while
     the rule
-    is encrypted, tooltip `Per-item device rules — each item gets its own rule`) — flip it on
+    is encrypted, tooltip `Per-item device rules: each item gets its own rule`) — flip it on
     and each element gets its own scrow
     (`config-sync-card-elrow`) instead of one rule for the whole key — then the lock, then the
     merged control in the device slot: shared half = the key's own sharing rule, local half = THIS

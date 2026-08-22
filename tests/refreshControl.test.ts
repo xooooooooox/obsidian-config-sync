@@ -19,8 +19,8 @@ describe("refreshTooltip", () => {
   // about renaming anything the user already reads.
   it("keeps the established idle wording", () => {
     expect(refreshTooltip({ busy: false, age: null })).toBe("Refresh");
-    expect(refreshTooltip({ busy: false, age: "just now" })).toBe("Refresh — refreshed just now");
-    expect(refreshTooltip({ busy: false, age: "5m ago" })).toBe("Refresh — refreshed 5m ago");
+    expect(refreshTooltip({ busy: false, age: "just now" })).toBe("Refresh (refreshed just now)");
+    expect(refreshTooltip({ busy: false, age: "5m ago" })).toBe("Refresh (refreshed 5m ago)");
   });
 });
 

@@ -140,7 +140,7 @@ function parseGroup(g: unknown, index: number): SyncGroup {
   }
   if (!GROUP_NAME_RE.test(name)) {
     throw new ManifestValidationError(
-      `Rule "${name}": names use only letters, digits, "-" or "_", starting with a letter or digit — e.g. my-plugin`
+      `Rule "${name}": names use only letters, digits, "-" or "_", starting with a letter or digit, e.g. my-plugin`
     );
   }
   if (typeof path !== "string" || path === "") {
@@ -157,7 +157,7 @@ function parseGroup(g: unknown, index: number): SyncGroup {
   }
   if (sanitize !== undefined) {
     throw new ManifestValidationError(
-      `"${name}" still uses the old sanitize setting — rename it to "mode": "fields" with "fields" rules (see the sensitive-settings guide in docs/GUIDE.md).`
+      `"${name}" still uses the old sanitize setting. Rename it to "mode": "fields" with "fields" rules (see the sensitive-settings guide in docs/GUIDE.md).`
     );
   }
   let validatedMode: SyncMode | undefined;
@@ -179,14 +179,14 @@ function parseGroup(g: unknown, index: number): SyncGroup {
       for (const f of fields) {
         if (isPlainObject(f) && asSharing(f.sharing)?.kind === "this-device" && f.encrypted === true) {
           throw new ManifestValidationError(
-            `Rule "${name}": the key ${JSON.stringify(f.pattern)} is set to This device AND encrypted — a value that never leaves this device has nothing to encrypt`
+            `Rule "${name}": the key ${JSON.stringify(f.pattern)} is set to This device AND encrypted, but a value that never leaves this device has nothing to encrypt`
           );
         }
       }
     }
     if (!isValidFieldsArray(fields)) {
       throw new ManifestValidationError(
-        `Rule "${name}": the "fields" list is invalid — each entry needs a non-empty "pattern", a "sharing" of ${SHARING_SHAPE}, and a boolean "encrypted", e.g. {"pattern": "*Token*", "sharing": {"kind": "this-device"}, "encrypted": false}`
+        `Rule "${name}": the "fields" list is invalid. Each entry needs a non-empty "pattern", a "sharing" of ${SHARING_SHAPE}, and a boolean "encrypted", e.g. {"pattern": "*Token*", "sharing": {"kind": "this-device"}, "encrypted": false}`
       );
     }
     validatedFields = fields;
@@ -195,22 +195,22 @@ function parseGroup(g: unknown, index: number): SyncGroup {
   if (fileRule !== undefined) {
     if (type !== "file") {
       throw new ManifestValidationError(
-        `Rule "${name}": a whole-file rule only applies to a single file — this rule is a ${String(type)}`
+        `Rule "${name}": a whole-file rule only applies to a single file, but this rule is a ${String(type)}`
       );
     }
     if (validatedMode === "fields" || validatedMode === "encrypted") {
       throw new ManifestValidationError(
-        `Rule "${name}": a whole-file rule only applies in Whole file (plain) mode — this rule is in "${String(validatedMode)}" mode`
+        `Rule "${name}": a whole-file rule only applies in Whole file (plain) mode, but this rule is in "${String(validatedMode)}" mode`
       );
     }
     if (isPlainObject(fileRule) && asSharing(fileRule.sharing)?.kind === "this-device") {
       throw new ManifestValidationError(
-        `Rule "${name}": a whole-file rule cannot be This device — turning the rule's own sync off is how a file stays local; use everywhere or per-class`
+        `Rule "${name}": a whole-file rule cannot be This device (turning the rule's own sync off is how a file stays local); use everywhere or per-class`
       );
     }
     if (!isValidFileRule(fileRule)) {
       throw new ManifestValidationError(
-        `Rule "${name}": the "fileRule" is invalid — it needs a "sharing" of {"kind": "everywhere"} or {"kind": "per-class", "class": "desktop"|"mobile"} and a boolean "encrypted", e.g. {"sharing": {"kind": "everywhere"}, "encrypted": true}`
+        `Rule "${name}": the "fileRule" is invalid. It needs a "sharing" of {"kind": "everywhere"} or {"kind": "per-class", "class": "desktop"|"mobile"} and a boolean "encrypted", e.g. {"sharing": {"kind": "everywhere"}, "encrypted": true}`
       );
     }
     validatedFileRule = fileRule;
@@ -219,19 +219,19 @@ function parseGroup(g: unknown, index: number): SyncGroup {
   if (perElement !== undefined) {
     if (validatedMode !== "fields") {
       throw new ManifestValidationError(
-        `Rule "${name}": it has "perElement" but not "mode": "fields" — add the mode so per-element sharing takes effect`
+        `Rule "${name}": it has "perElement" but not "mode": "fields". Add the mode so per-element sharing takes effect`
       );
     }
     if (!isValidPerElementMap(perElement)) {
       throw new ManifestValidationError(
-        `Rule "${name}": the "perElement" map is invalid — each entry must map element values to a sharing of ${SHARING_SHAPE}, e.g. {"myKey": {"element-id": {"kind": "per-class", "class": "desktop"}}}`
+        `Rule "${name}": the "perElement" map is invalid. Each entry must map element values to a sharing of ${SHARING_SHAPE}, e.g. {"myKey": {"element-id": {"kind": "per-class", "class": "desktop"}}}`
       );
     }
     for (const key of Object.keys(perElement)) {
       const encryptedRule = (validatedFields ?? []).find((f) => f.encrypted === true && keyMatchesAny(key, [f.pattern]));
       if (encryptedRule !== undefined) {
         throw new ManifestValidationError(
-          `Rule "${name}": the key "${key}" has per-element sharing AND an encrypted rule — per-element keys can never be encrypted (encryption stays key-level)`
+          `Rule "${name}": the key "${key}" has per-element sharing AND an encrypted rule, but per-element keys can never be encrypted (encryption stays key-level)`
         );
       }
     }

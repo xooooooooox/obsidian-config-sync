@@ -8,8 +8,8 @@ export const FATE_CHIP_ICON: Record<string, string> = {
   "not installed here": "circle-dashed",
   "desktop only": "monitor",
   "your rule": "sliders-horizontal",
-  "off here — your rule": "sliders-horizontal",
-  "on here — your rule": "sliders-horizontal",
+  "off here (your rule)": "sliders-horizontal",
+  "on here (your rule)": "sliders-horizontal",
   // `power-off`, not `power`: `power`
   // means "this device has an exception and it is ON" in the merged enablement control, so a chip
   // that says the row stays OFF cannot keep the same glyph — one form, one meaning.

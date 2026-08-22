@@ -257,7 +257,7 @@ export function computeBadges(
       text: "on/off only",
       cls: "config-sync-card-badge-state",
       icon: "toggle-left",
-      tooltip: "No settings file on this device yet — only the on/off state syncs.",
+      tooltip: "No settings file on this device yet; only the on/off state syncs.",
     });
   }
   // Innate manifest property first, ahead of every config-driven badge — GREY, because grey =
@@ -489,10 +489,10 @@ export function buildPerElementRows(elements: string[], sharings: PerElementShar
 }
 
 
-export const SNIPPET_MEMBER_HINT = "Files always sync — each snippet's choice here is where it's turned on.";
+export const SNIPPET_MEMBER_HINT = "Files always sync; each snippet's choice here is where it's turned on.";
 
 export const SNIPPET_ORPHAN_HINT =
-  "A deleted file stays listed while it still has a device choice. Forget clears the choice — the next capture then removes the snippet from every device.";
+  "A deleted file stays listed while it still has a device choice. Forget clears the choice; the next capture then removes the snippet from every device.";
 
 // The row carries no `sharing` of its own: the member rows are element-rule rows, so
 // each one reads its rule through `enablementRuleFor`, the same reader the other two
@@ -521,7 +521,7 @@ export function buildSnippetMemberRows(fileNames: string[], rules: PerElementSha
 // Tail hint under a non-snippet companion's member-file list — a plain folder has no
 // per-file control (see renderPlainCompanionMembers's doc comment), so this clarifies that
 // the folder's own device/enabled row above governs every file inside it.
-export const FOLDER_MEMBER_HINT = "This folder syncs as a whole — everything in it goes to the devices selected above.";
+export const FOLDER_MEMBER_HINT = "This folder syncs as a whole: everything in it goes to the devices selected above.";
 
 export interface CompanionRowModel {
   path: string;
@@ -600,7 +600,7 @@ export function validateCompanionBasename(path: string): string | null {
 }
 
 export function companionNameConflictError(name: string): string {
-  return `"${name}" is already used by another synced item — rename this folder or choose a different path.`;
+  return `"${name}" is already used by another synced item. Rename this folder or choose a different path.`;
 }
 
 // Plain (non-mapKey) companion member listing (themes/ and any user-added
@@ -642,7 +642,7 @@ export const FILE_SHARING_OPTIONS: Sharing[] = [EVERYWHERE, perClass("desktop"),
 export const PER_KEY_RULES_STATE_TEXT = "Per-key rules decide this";
 export const PER_KEY_RULES_ACTION_TEXT = "Open the per-key rules";
 // The trigger's tooltip still has to say both halves in one breath — a tooltip is one line.
-export const FILE_SHARING_MENU_UNAVAILABLE_TEXT = "Per-key rules decide — open them in Settings";
+export const FILE_SHARING_MENU_UNAVAILABLE_TEXT = "Per-key rules decide; open them in Settings";
 export const FIELD_SHARING_OPTIONS: Sharing[] = [EVERYWHERE, perClass("desktop"), perClass("mobile"), THIS_DEVICE];
 export const COMPANION_DEVICE_OPTIONS: DeviceClass[] = ["all", "desktop", "mobile"];
 

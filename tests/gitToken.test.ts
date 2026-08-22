@@ -38,7 +38,7 @@ describe("resolveGitToken", () => {
 
   it("throws the actionable copy when this device never linked that secret", () => {
     expect(() => resolveGitToken(store({}), gitRemote("gitlab-xozoz"))).toThrow(
-      'No access token stored on this device for remote "kickstart" — link it once in Settings → Remotes.'
+      'No access token stored on this device for remote "kickstart". Link it once in Settings → Remotes.'
     );
   });
 

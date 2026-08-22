@@ -94,11 +94,11 @@ export function perElementArrayUnchanged(localArr: string[], storeArr: string[],
 // otherwise quietly drop or corrupt the field).
 export function readPerElementArray(document: unknown, groupName: string, key: string, verb: "capture" | "apply" | "compare"): string[] {
   if (!isPlainObject(document)) {
-    throw new Error(`Group "${groupName}": cannot ${verb} per-element key "${key}" — file content is not a JSON object`);
+    throw new Error(`Group "${groupName}": cannot ${verb} per-element key "${key}" because the file content is not a JSON object`);
   }
   const value = document[key];
   if (value === undefined) return [];
   if (Array.isArray(value) && value.every((el): el is string => typeof el === "string")) return value;
   const found = value === null ? "null" : Array.isArray(value) ? "array (non-string elements)" : typeof value;
-  throw new Error(`Group "${groupName}": per-element key "${key}" must be a string array to ${verb} — found ${found}`);
+  throw new Error(`Group "${groupName}": per-element key "${key}" must be a string array to ${verb}; found ${found}`);
 }

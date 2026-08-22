@@ -5,7 +5,7 @@ describe("classifyRemoteFailure", () => {
   it("classifies a missing token from resolveGitToken as no-token", () => {
     expect(
       classifyRemoteFailure(
-        'No access token stored on this device for remote "my-repo" — link it once in Settings → Remotes.'
+        'No access token stored on this device for remote "my-repo". Link it once in Settings → Remotes.'
       )
     ).toBe("no-token");
   });

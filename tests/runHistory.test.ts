@@ -39,7 +39,7 @@ describe("runDesc", () => {
   });
   it("all-not-in-catalog reads as a manual-install summary", () => {
     const r = res({ status: "warning", messages: ["not in the community catalog — install it manually"] });
-    expect(runDesc("apply", null, [r, r])).toBe("2 plugins not in the community catalog — install manually");
+    expect(runDesc("apply", null, [r, r])).toBe("2 plugins not in the community catalog; install manually");
   });
   it("hard failures read as failed", () => {
     const r = res({ status: "error", messages: ["store has no data for this group"] });

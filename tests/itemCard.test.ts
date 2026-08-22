@@ -105,7 +105,7 @@ describe("computeBadges", () => {
       text: "on/off only",
       cls: "config-sync-card-badge-state",
       icon: "toggle-left",
-      tooltip: "No settings file on this device yet — only the on/off state syncs.",
+      tooltip: "No settings file on this device yet; only the on/off state syncs.",
     });
   });
 
@@ -287,7 +287,7 @@ describe("per-key fallback copy", () => {
   });
 
   it("keeps the trigger's one-line tooltip", () => {
-    expect(FILE_SHARING_MENU_UNAVAILABLE_TEXT).toBe("Per-key rules decide — open them in Settings");
+    expect(FILE_SHARING_MENU_UNAVAILABLE_TEXT).toBe("Per-key rules decide; open them in Settings");
   });
 });
 

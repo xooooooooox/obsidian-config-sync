@@ -68,7 +68,7 @@ export function createInstaller(io: FileIO, configDir: string, http: HttpGet): (
       }
       if (manifest.id !== pluginId) {
         throw new DownloadError(
-          `${pluginId}'s release identifies as "${manifest.id}" — install it manually from the community browser`
+          `${pluginId}'s release identifies as "${manifest.id}"; install it manually from the community browser`
         );
       }
       return { manifestRaw, mainJs, base, version: manifest.version };
