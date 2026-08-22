@@ -3587,9 +3587,14 @@ export class SyncCenterView extends ItemView {
     // Settings' own (the remote card is the device card with a different counterpart; it invents
     // no interaction of its own).
     if (narrowed) value.createDiv({ cls: "config-sync-keys-limited", text: "limited by This remote" });
+    // One line for the one gesture (Q2/Q3): the click writes `Neither way` for that key, and the
+    // hint says exactly that — "add a rule for it" undersold the effect, and the legend underneath
+    // restated the same click in different words (with a colour lesson the rule rows above already
+    // teach by sitting next to their own keys). Settings keeps its own legend; its click answers a
+    // different question.
     const hint = value.createDiv({ cls: "config-sync-json-hint" });
     setIcon(hint.createSpan({ cls: "config-sync-json-hint-icon" }), "plus");
-    hint.createSpan({ text: "Click any key to add a rule for it" });
+    hint.createSpan({ text: "Click any key to hold it back from this remote" });
     const host = value.createDiv();
     void this.host.storeCopyOf(ref).then((doc) => {
       if (doc === null) {
@@ -3613,15 +3618,6 @@ export class SyncCenterView extends ItemView {
           void this.host.setRemoteKeyDirection(remoteName, ref, key, "none"); // reload arrives via the debounced notify
         },
       });
-      // The same legend Settings puts under this document, in THIS surface's words: over there a
-      // key's colour answers "who shares this value", here it answers "which way it travels" —
-      // two different questions on one renderer is exactly why each surface must say its own
-      // (acceptance H3: the states were unexplained).
-      const legend = host.createDiv({ cls: "config-sync-json-legend" });
-      legend.createSpan({ cls: "config-sync-json-key config-sync-json-key-ruled", text: "key" });
-      legend.appendText(" has its own direction · ");
-      legend.createSpan({ cls: "config-sync-json-key config-sync-json-clickable", text: "key" });
-      legend.appendText(" click to hold it back from this remote");
     });
   }
 

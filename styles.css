@@ -639,6 +639,9 @@ body.is-mobile.config-sync-mobile-statusbar .status-bar {
    two went missing when the class unified — the icon fell back to plain text grey (N1). */
 .config-sync-fate-ic.is-push { color: var(--color-pink); }
 .config-sync-fate-ic.is-pull { color: var(--color-cyan); }
+/* The in-sync ✓ at row size (Q1) — FOLD_ICON_COLOR_CLASS hands this class to the fate column too,
+   and without a rule here the row's check sat in plain grey while every other ✓ surface was green. */
+.config-sync-fate-ic.is-ok { color: var(--color-green); }
 .config-sync-fate-ic svg { width: 14px; height: 14px; }
 .config-sync-fate-text { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 /* Red, not the orange `capture` already owns — see foldIcons.ts's CONFLICT_ICON for why the two

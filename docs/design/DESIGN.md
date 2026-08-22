@@ -815,11 +815,14 @@ noted):
   Under that row sits **`Key rules`** (spec 5.4's `Keys`, renamed in acceptance: the Settings
   drawer's block and the More row's tooltip already said `Key rules`, and one thing carries one
   name), one level down and the same gesture as that Settings `KEY RULES` block, deliberately —
-  and since the acceptance round, the same PRESENTATION too: the hint (`+ Click any key to add a
-  rule for it`) LEADS the open document instead of gating it, ruled keys coloured, clickable keys
-  dash-underlined, and a document past `KEY_DOC_FOLD_LINES` (12) starts clipped behind its own
-  `… Show all N keys` line — the fat-plugin worry met one level down instead of hiding the whole
-  document. The row sits DIRECTLY under `Files` (card order: state → `This remote` → `Files` →
+  and since the acceptance round, the same PRESENTATION too (J4): the filename line carries
+  Settings' own eye, and the eye opens the hint and the 220px scrolling document — ruled keys
+  coloured, clickable keys dash-underlined. ONE line for the one gesture (Q2/Q3): the hint reads
+  `+ Click any key to hold it back from this remote`, naming the click's actual effect (`add a
+  rule for it` undersold it, and readers took the document for a read-only preview), and there is
+  NO legend underneath — the colour lesson is taught by the rule rows sitting beside their own
+  keys, and a second line restating the same click in different words was noise. Settings keeps
+  its own hint wording and its legend; its click answers a different question. The row sits DIRECTLY under `Files` (card order: state → `This remote` → `Files` →
   `On/off` → `Key rules` → entrances last), because a key rule acts on keys inside the very files
   listed above it — subordination made adjacency. The rows above the document are the keys that
   already carry a rule, each with its own key-size segmented control showing the RESOLVED direction
