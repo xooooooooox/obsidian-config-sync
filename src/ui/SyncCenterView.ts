@@ -1868,6 +1868,16 @@ export class SyncCenterView extends ItemView {
   // and every entry below it answers "which items". Each remote carries its state icon here, so
   // "which remote needs attention" is readable without switching to it first.
   private renderViewPicker(container: HTMLElement): void {
+    const box = container.createDiv({ cls: "config-sync-view-picker" });
+    this.paintViewPicker(box);
+  }
+
+  // Painted in place: toggling the dropdown repaints THIS box alone, never the main region — a
+  // full render on every open/close flashed the whole list for a purely local gesture
+  // (acceptance H2). Picking an option still runs the full render, because the relation really
+  // did change.
+  private paintViewPicker(box: HTMLElement): void {
+    box.empty();
     const relation = this.relation;
     // The device row's numbers come from the device's OWN rows, never from whatever relation is on
     // screen — `rows()` answers for the current relation, and while a remote is selected that would
@@ -1890,7 +1900,6 @@ export class SyncCenterView extends ItemView {
     });
     const current = opts.find((o) => o.active) ?? opts[0];
     if (current === undefined) return;
-    const box = container.createDiv({ cls: "config-sync-view-picker" });
     const head = box.createDiv({
       cls: `config-sync-view-current${this.viewPickerOpen ? " is-open" : ""}`,
       attr: { "aria-label": relationHint(current.relation) },
@@ -1909,7 +1918,7 @@ export class SyncCenterView extends ItemView {
     head.addEventListener("click", (e) => {
       e.stopPropagation();
       this.viewPickerOpen = !this.viewPickerOpen;
-      this.render(this.renderGen);
+      this.paintViewPicker(box);
     });
     if (!this.viewPickerOpen) return;
     const menu = box.createDiv({ cls: "config-sync-view-menu" });
@@ -3424,6 +3433,15 @@ export class SyncCenterView extends ItemView {
         // other two stops are one more click away on the row it just created.
         onPick: (key) => void this.host.setRemoteKeyDirection(remoteName, ref, key, "none").then(() => this.reload()),
       });
+      // The same legend Settings puts under this document, in THIS surface's words: over there a
+      // key's colour answers "who shares this value", here it answers "which way it travels" —
+      // two different questions on one renderer is exactly why each surface must say its own
+      // (acceptance H3: the states were unexplained).
+      const legend = host.createDiv({ cls: "config-sync-json-legend" });
+      legend.createSpan({ cls: "config-sync-json-key config-sync-json-key-ruled", text: "key" });
+      legend.appendText(" has its own direction · ");
+      legend.createSpan({ cls: "config-sync-json-key config-sync-json-clickable", text: "key" });
+      legend.appendText(" click to hold it back from this remote");
     });
   }
 

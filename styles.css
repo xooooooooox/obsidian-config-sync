@@ -1018,7 +1018,10 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
    down the right edge, and a label that only took its own width would leave them ragged against the
    sidebar entries directly below. */
 .config-sync-view-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.config-sync-view-chev { display: inline-flex; align-items: center; margin-left: auto; color: var(--text-faint); }
+/* No auto margin of its own: the counts span owns the row's slack, so badges and chevron sit
+   together at the right edge instead of two auto margins halving the gap between them
+   (acceptance H1). */
+.config-sync-view-chev { display: inline-flex; align-items: center; color: var(--text-faint); }
 .config-sync-view-chev svg { width: 13px; height: 13px; }
 .config-sync-view-menu { display: flex; flex-direction: column; gap: 3px; padding: 4px; border: 1px solid var(--background-modifier-border); border-radius: 8px; background: var(--background-primary); }
 .config-sync-view-opt { display: flex; align-items: center; gap: 5px; padding: 5px 8px; border-radius: 6px; cursor: pointer; font-size: var(--font-ui-small); }
