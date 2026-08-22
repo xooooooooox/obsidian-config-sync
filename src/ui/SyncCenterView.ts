@@ -763,7 +763,10 @@ export class SyncCenterView extends ItemView {
     };
     const countable = this.countable(this.rows());
     const needs: SidebarRowNeed[] = [
-      { name: relationShortLabel(this.relation), badges: 3 },
+      // The masthead's two lines: the title row holds the icon tile and the state pill (≈ two
+      // badges' worth beside the name), the relation row nothing but a chevron.
+      { name: "Config Sync", badges: 2 },
+      { name: relationShortLabel(this.relation), badges: 0 },
       { name: "All items", badges: badgesFor(countable) },
     ];
     // The same presence set renderSectionEntries draws from — the width the pane reserves must be
@@ -1629,30 +1632,6 @@ export class SyncCenterView extends ItemView {
 
   // The config-sync self layer lives in its own sidebar destination (the "Config Sync" entry),
   // not in the item list. This entry carries a direction badge; clicking it opens the pane.
-  private renderSelfEntry(container: HTMLElement): void {
-    const info = this.selfInfo;
-    const active = this.destination.kind === "self";
-    // A distinct hero card, not a stray list row: this is the plugin syncing its own settings to
-    // the store — a meta destination separate from the config items below. The icon tile, title +
-    // sublabel, and status pill echo the pinned sidebar row and the self pane this opens.
-    const card = container.createDiv({ cls: `config-sync-side-self${active ? " is-active" : ""}` });
-    const tile = card.createSpan({ cls: "config-sync-side-self-ic" });
-    setIcon(tile, "settings-2");
-    const text = card.createDiv({ cls: "config-sync-side-self-text" });
-    text.createDiv({ cls: "config-sync-side-self-title", text: "Config Sync" });
-    text.createDiv({ cls: "config-sync-side-self-sub", text: "plugin settings ↔ store" });
-    if (info !== null) {
-      const pill = this.selfStatePill(info);
-      if (pill !== null) card.createSpan({ cls: `config-sync-side-self-pill ${pill.cls}`, text: pill.text });
-    }
-    card.addEventListener("click", () => {
-      // Already here: re-rendering would only flash the pane it rebuilds (acceptance J3).
-      if (this.destination.kind === "self" && !this.switcherOpen) return;
-      this.destination = { kind: "self" };
-      this.switcherOpen = false;
-      this.render(this.renderGen);
-    });
-  }
 
   private selfStatePill(info: SelfSyncInfo): { text: string; cls: string } | null {
     const adoptN = info.delta.added.length + info.delta.removed.length;
@@ -1920,9 +1899,10 @@ export class SyncCenterView extends ItemView {
 
   private renderSidebar(shell: HTMLElement): void {
     const side = shell.createDiv({ cls: "config-sync-side" });
-    // The picker leads (acceptance C3-a): choose what you are looking at, then filter it. It lives
-    // OUTSIDE the section container so a keystroke's rebuild never touches it.
-    this.renderViewPicker(side);
+    // The masthead leads (T2/V3a, superseding C3-a's standalone picker): choose what you are
+    // looking at, then filter it. It lives OUTSIDE the section container so a keystroke's rebuild
+    // never touches it.
+    this.renderMasthead(side);
     const searchWrap = side.createDiv({ cls: "config-sync-search-wrap" });
     const searchEl = searchWrap.createEl("input", {
       type: "search",
@@ -1935,7 +1915,7 @@ export class SyncCenterView extends ItemView {
     // place — the search input (and the autocomplete anchored to it) stays put, keeping focus and
     // never blinking mid-type.
     this.sideSectionEl = side.createDiv({ cls: "config-sync-side-section" });
-    this.renderSectionEntries(this.sideSectionEl, { withPicker: false });
+    this.renderSectionEntries(this.sideSectionEl);
     searchEl.addEventListener("input", () => {
       const wasSearching = this.searching();
       this.search = searchEl.value; // the field itself is native/instant — never waits on the render below
@@ -1950,16 +1930,45 @@ export class SyncCenterView extends ItemView {
       this.debounceSearchRender(() => {
         if (this.sideSectionEl !== null) {
           this.sideSectionEl.empty();
-          this.renderSectionEntries(this.sideSectionEl, { withPicker: false });
+          this.renderSectionEntries(this.sideSectionEl);
         }
         this.renderMainRegion();
       });
     });
   }
 
-  // The head of the section list, above everything: it answers "which relation am I looking at",
-  // and every entry below it answers "which items". Each remote carries its state icon here, so
-  // "which remote needs attention" is readable without switching to it first.
+  // The two-line masthead (acceptance T2/V3a): the self card and the View picker merged into ONE
+  // hero card with two rows and two click targets. Row one is the self entry — icon tile, the
+  // plugin's name, its own state pill; row two is the slimmed relation picker. The old
+  // `plugin settings ↔ store` sublabel moved into the self pane row one opens, and the closed
+  // picker's count pair retired outright — it repeated the All items row's first two badges one
+  // screen-line below.
+  private renderMasthead(container: HTMLElement): void {
+    const card = container.createDiv({ cls: "config-sync-masthead" });
+    const r1 = card.createDiv({ cls: `config-sync-mast-self${this.destination.kind === "self" ? " is-active" : ""}` });
+    setIcon(r1.createSpan({ cls: "config-sync-side-self-ic" }), "settings-2");
+    r1.createDiv({ cls: "config-sync-side-self-title", text: "Config Sync" });
+    // 案B: the pill answers for THIS DEVICE ↔ store, so it shows only while that is the view —
+    // on a remote view's masthead it read as that remote's summary, which it never was. Back on
+    // the device view it reappears.
+    const info = this.selfInfo;
+    if (info !== null && this.relation.kind === "device") {
+      const pill = this.selfStatePill(info);
+      if (pill !== null) r1.createSpan({ cls: `config-sync-side-self-pill ${pill.cls}`, text: pill.text });
+    }
+    r1.addEventListener("click", () => {
+      // Already here: re-rendering would only flash the pane it rebuilds (acceptance J3).
+      if (this.destination.kind === "self" && !this.switcherOpen) return;
+      this.destination = { kind: "self" };
+      this.switcherOpen = false;
+      this.render(this.renderGen);
+    });
+    this.renderViewPicker(card);
+  }
+
+  // The masthead's second row: it answers "which relation am I looking at", and everything below
+  // answers "which items". Each remote's own badge rides its dropdown row, so "which remote needs
+  // attention" is readable without switching to it first.
   private renderViewPicker(container: HTMLElement): void {
     const box = container.createDiv({ cls: "config-sync-view-picker" });
     this.paintViewPicker(box);
@@ -2015,8 +2024,10 @@ export class SyncCenterView extends ItemView {
     head.createSpan({ cls: "config-sync-view-label", text: relationShortLabel(current.relation) });
     // The current view's own counts ride the closed control (acceptance C3-a): the strip that used
     // to sit in the panel header counted exactly this view, so this row is where it belongs.
+    // No counts on the closed control any more (T2): the pair it carried repeated the All items
+    // row's first two badges. Only the pending dot survives — a state, not a count.
     const tail = head.createSpan({ cls: "config-sync-view-counts" });
-    this.renderPickerCounts(tail);
+    if (this.remoteCountsPending()) this.renderPendingDot(tail);
     setIcon(head.createSpan({ cls: "config-sync-view-chev" }), "chevrons-up-down");
     head.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -2073,38 +2084,6 @@ export class SyncCenterView extends ItemView {
     parent.createSpan({ cls: "config-sync-pending-dot", attr: { "aria-label": `Checking ${name}…` } });
   }
 
-  // The current view's own count strip, on the picker's closed control (acceptance C3-a) — the
-  // pills the panel header used to carry, moved to the row that names what they count. Same
-  // producers, same zero-suppression rules; only `ok` shows unconditionally, its long precedent.
-  // The DIRECTION PAIR only (acceptance F2+F3): the same two badges the dropdown rows wear, so
-  // the closed control and its menu speak one shape. The bucket census (✓/⊖/○/can't-compare)
-  // lives complete in the filter-pill row — repeating it here is what squeezed the view's own
-  // name down to one letter. While a remote's comparison is still in flight, a pending dot holds
-  // the slot instead (acceptance F4): empty means nothing, the dot means still counting.
-  private renderPickerCounts(tail: HTMLElement): void {
-    if (this.remoteCountsPending()) {
-      this.renderPendingDot(tail);
-      return;
-    }
-    const { up, down } = this.presentedCounts(this.countable(this.rows()));
-    const upAction = this.directionAction("up");
-    const downAction = this.directionAction("down");
-    // side-badge, not pill: the dropdown rows and the section list below all speak the sidebar's
-    // badge shape (with its digit-width column), and the closed control sits in that column too —
-    // two badge shapes one row apart read as two different things (acceptance J2).
-    if (up > 0) {
-      renderActionCount(
-        tail.createSpan({ cls: `config-sync-side-badge ${ACTION_COLOR_CLASS[upAction]}`, attr: { "aria-label": `${up} item${up === 1 ? "" : "s"} to ${upAction}` } }),
-        upAction, up,
-      );
-    }
-    if (down > 0) {
-      renderActionCount(
-        tail.createSpan({ cls: `config-sync-side-badge ${ACTION_COLOR_CLASS[downAction]}`, attr: { "aria-label": `${down} item${down === 1 ? "" : "s"} to ${downAction}` } }),
-        downAction, down,
-      );
-    }
-  }
 
   private renderViewBadge(row: HTMLElement, b: ViewBadge): void {
     if (b.kind === "remote-state") {
@@ -2122,14 +2101,11 @@ export class SyncCenterView extends ItemView {
     renderActionCount(row.createSpan({ cls: `config-sync-side-badge ${ACTION_COLOR_CLASS[b.kind]}` }), b.kind, b.count);
   }
 
-  private renderSectionEntries(container: HTMLElement, opts: { withPicker: boolean }): void {
-    if (opts.withPicker) this.renderViewPicker(container);
-    container.createDiv({ cls: "config-sync-side-divider" });
-    this.renderSelfEntry(container);
-    // No group heads anywhere in the sidebar: the self card's own "plugin settings ↔ store"
-    // subtitle already carries the device↔store relation. Remotes are not entries here at all —
-    // they live in the View picker above, each carrying its own state icon; re-checking them
-    // belongs to the main region's global refresh button alone.
+  private renderSectionEntries(container: HTMLElement): void {
+    // Sections and History alone: the self entry and the relation picker both live on the
+    // masthead (T2/V3a) — in compact mode too — so this list never repeats them. Remotes are not
+    // entries here either: they are the picker's dropdown rows. No group heads anywhere;
+    // re-checking remotes belongs to the main region's global refresh button alone.
     container.createDiv({ cls: "config-sync-side-divider" });
 
     const deviceEntry = (cat: StorageSection | "beta" | "all", label: string, rows: StatusRow[]): void => {
@@ -2200,8 +2176,11 @@ export class SyncCenterView extends ItemView {
     }
   }
 
-  // Compact replacement for the sidebar: current section as a button; dropdown mirrors the sidebar.
+  // Compact replacement for the sidebar: the masthead rides on top — the SAME two-line card,
+  // narrowed (T2/V3a); its pill never wraps (nowrap; the title ellipsizes instead). Below it, the
+  // current section as a button whose dropdown mirrors the sidebar's section list.
   private renderSwitcher(shell: HTMLElement): void {
+    this.renderMasthead(shell);
     const sw = shell.createDiv({ cls: "config-sync-switcher" });
     if (this.destination.kind === "items") {
       const cat = this.destination.cat;
@@ -2233,7 +2212,7 @@ export class SyncCenterView extends ItemView {
     });
     if (this.switcherOpen) {
       const menu = shell.createDiv({ cls: "config-sync-switcher-menu" });
-      this.renderSectionEntries(menu, { withPicker: true });
+      this.renderSectionEntries(menu);
     }
   }
 

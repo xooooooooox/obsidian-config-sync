@@ -518,20 +518,20 @@ noted):
   saying `↑19` on one screen.
 - **Sidebar** `config-sync-side-item/-side-badge` — sections with tiny count
   badges; active = accent tint. **The sidebar answers one question only: which items to show.**
-  Which RELATION is on screen is the `View` picker's question — `config-sync-view-picker` LEADS the
-  whole sidebar, above the search box (choose what you look at, then filter it: the reversed order
-  had the filter scoped by a control beneath it). Its closed control reads icon + SHORT name
-  (`-view-ic` + `relationShortLabel`: `monitor` + `This device`, or `cloud` + the remote's name —
-  cloud is already this panel's remote glyph family, one mark for every transport type), with the
-  full relation (`relationLabel`) and the `relationHint` sentence in hover/aria, and the CURRENT
-  view's own DIRECTION PAIR riding its right edge (`-view-counts`) — the same two badges its
-  dropdown rows wear, in the relation's own family (F1: capture/apply arrows under the device
-  relation, push/pull clouds in pink/cyan under a remote — one glyph, one meaning, decided once in
-  `directionAction`). The bucket census (✓/⊖/○/can't-compare) deliberately does NOT ride here: it
-  lives complete in the filter-pill row, and repeating it squeezed the view's own name to one
-  letter (F3 — the name now never truncates). While a remote's comparison is in flight, a pulsing
-  `-pending-dot` holds the slot instead (F4): an empty slot reads as "nothing to do", the dot as
-  "still counting"; static under reduced motion, and the sidebar section badges hold the same dot.
+  Which RELATION is on screen is the `View` picker's question — since T2/V3a the picker is the
+  SECOND ROW of the two-line masthead (`config-sync-masthead`) that LEADS the whole sidebar, above
+  the search box (choose what you look at, then filter it). Its closed control reads icon + SHORT
+  name (`-view-ic` + `relationShortLabel`: `monitor` + `This device`, or `cloud` + the remote's
+  name — cloud is already this panel's remote glyph family, one mark for every transport type),
+  with the full relation (`relationLabel`) and the `relationHint` sentence in hover/aria. The
+  closed control carries NO counts (T2, retiring C3-a/F2/F3's direction pair): the pair it wore
+  repeated the `All items` row's first two badges one screen-line below — the census's one home is
+  the section list (plus the filter-pill row), and each remote's own pair rides its dropdown row
+  (F1's family rule still decides the glyphs there: capture/apply arrows under the device
+  relation, push/pull clouds in pink/cyan under a remote, decided once in `directionAction`).
+  While a remote's comparison is in flight, a pulsing `-pending-dot` holds the closed control's
+  tail (F4): an empty tail reads as "nothing to do", the dot as "still counting"; static under
+  reduced motion, and the sidebar section badges hold the same dot.
   A remote never CHECKED this session pends the same way (M1): the check table lives in memory, so
   after a reload the verdict table's absence is indistinguishable from "nothing waiting" — the
   panel used to render a false all-clear that silently flipped when the 30-second startup check
@@ -591,16 +591,19 @@ noted):
   while one badge reads fine in the same column. Same width, two answers. `< 700` survives as a
   floor (below it the main pane has nothing left to be narrow into) and a phone is always narrow;
   everything between is decided by the fit. Leaving compact needs room to spare
-  (`FIT_HYSTERESIS_PX`), since one shared threshold flips on every pixel of a window drag. The Config Sync self layer leads as a distinct hero card
-  `config-sync-side-self` (`-side-self-ic` icon tile, `-side-self-title`/`-side-self-sub`,
-  `-side-self-pill` reusing `selfStatePill`). Grouping is by
-  `config-sync-side-divider` hairlines alone: View picker / self card / scope list /
-  History each separated by one divider, with NO group heads anywhere. Re-checking remotes
-  belongs to the main region's global refresh button alone (it re-scans local state AND
-  re-checks every remote; its tooltip carries the refreshed-age), and each remote entry's own
-  state icon carries the result. The self card's own `plugin settings ↔ store` subtitle
-  already carries the device↔store relation. **Switcher**
-  `config-sync-switcher` — compact replacement.
+  (`FIT_HYSTERESIS_PX`), since one shared threshold flips on every pixel of a window drag. The Config Sync self layer is the masthead's FIRST ROW
+  (`config-sync-mast-self`: `-side-self-ic` icon tile, `-side-self-title`, `-side-self-pill`
+  reusing `selfStatePill`) — the T2/V3a merge of the old standalone hero card and the picker into
+  one card with two rows and two click targets, split by an inner hairline with per-row hover.
+  The pill shows only under the device relation (案B): it answers for this device ↔ store, and on
+  a remote view's masthead it read as that remote's summary. The old `plugin settings ↔ store`
+  sublabel lives in the self pane the row opens. The pill never wraps (nowrap); a narrow masthead
+  ellipsizes the title instead. Grouping is by `config-sync-side-divider` hairlines alone:
+  masthead / search / scope list / History, with NO group heads anywhere. Re-checking remotes
+  belongs to the main region's global refresh button alone (it re-scans local state AND re-checks
+  every remote; its tooltip carries the refreshed-age). **Switcher** `config-sync-switcher` —
+  compact replacement for the section list alone: the masthead rides above it unchanged, and its
+  dropdown holds sections and History only (the self entry and the picker never repeat there).
 - **Rows** `config-sync-hub-row` — one object = one row: chevron, name (`-rule-name`),
   a spacer, then the fate chips (`config-sync-fatechip`, rendered only when a fact deviates
   from default — `not installed here` · `desktop only` · `stays off` · `off here — your rule`
