@@ -914,8 +914,10 @@ noted):
   as `After install`/`Enablement` beside them; each keeps its DIRECTION colour at rest — before
   anything is picked, each side already says which way it goes — and picking deepens that colour
   and takes the border with it. Since R4 the pair is drawn in exactly ONE place: inside the
-  `Files` block at the entry list's indent, under the entries and whichever diff they open —
-  visible with the block collapsed too — with the multi-file scope disclosure directly beneath.
+  `Files` block's EXPANDED content, under the entries and whichever diff they open, folding with
+  them — collapsed, the row's conflict badge and its "open to compare each side before choosing"
+  sentence carry the invitation, so the pair never shows before the evidence can — with the
+  multi-file scope disclosure directly beneath.
   The standalone `Resolve` row is gone, and so is the copy every open diff toolbar drew: the same
   pair twice on one screen. `ui/resolveSegment.ts` still owns the painting; `pickConflictSide`'s
   in-place repaint finds every copy by its `data-cs-resolve` mark) · `Enabled on` (plugins whose carrier is synced) / `After install`

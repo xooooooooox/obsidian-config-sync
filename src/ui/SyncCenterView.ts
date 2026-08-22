@@ -3966,7 +3966,22 @@ export class SyncCenterView extends ItemView {
       // the side that actually changed — the remote — i.e. the same reading a pull would use, minus
       // the pull. (Their per-entry consequence tooltips still speak the device relation's words:
       // known copy debt, tracked with the rest of the card's remote wording.)
-      if (expanded) this.renderUnifiedFiles(list, r, changes, dir ?? "apply", encrypted);
+      if (expanded) {
+        this.renderUnifiedFiles(list, r, changes, dir ?? "apply", encrypted);
+        // R4, folded (user refinement): THE choice pair — one on the whole panel — is part of the
+        // Files block's expanded content, under the entries and whichever diff they open. Folded,
+        // the row's conflict badge and its "open to compare each side before choosing" sentence
+        // carry the invitation; the pair never shows before the evidence can.
+        if (resolve !== null) {
+          const block = list.createDiv({ cls: "config-sync-resolve-inline" });
+          renderResolveSegment(block.createDiv({ cls: "config-sync-segrow" }), {
+            group: resolve.group,
+            chosen: resolve.chosen,
+            onPick: resolve.onPick,
+          });
+          if (resolve.scopeNote !== null) block.createDiv({ cls: "config-sync-resolve-scope", text: resolve.scopeNote });
+        }
+      }
     };
     // THE ROW is the target, not the badge. Every card control sits on the card's right edge, so
     // listening on the badge alone would leave the `FILES` label and the whole stretch between it
@@ -3996,21 +4011,6 @@ export class SyncCenterView extends ItemView {
     build();
     detail.appendChild(row);
     detail.appendChild(list);
-    // R4: THE choice pair — one on the whole panel. It lives inside the Files block at the entry
-    // list's own indent, under the entries (and under whichever diff they open), visible whether
-    // or not anything is expanded: the RESOLVE row it replaces is gone, and so is the copy every
-    // open diff toolbar drew — the same pair twice on one screen was the complaint. The scope
-    // disclosure rides directly beneath it.
-    if (resolve !== null) {
-      const block = createDiv({ cls: "config-sync-files-list config-sync-resolve-inline" });
-      renderResolveSegment(block.createDiv({ cls: "config-sync-segrow" }), {
-        group: resolve.group,
-        chosen: resolve.chosen,
-        onPick: resolve.onPick,
-      });
-      if (resolve.scopeNote !== null) block.createDiv({ cls: "config-sync-resolve-scope", text: resolve.scopeNote });
-      detail.appendChild(block);
-    }
   }
 
   // Files row: direction-aware entries via fileEntryFor, reusing the same
