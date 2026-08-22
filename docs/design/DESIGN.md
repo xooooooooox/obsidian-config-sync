@@ -818,6 +818,19 @@ noted):
   edited therefore folds into `In sync` with no checkbox; the card is where it still answers, with
   `<remote> changed N files. Push only, so they stay there.` and a `Files` badge in the neutral
   `files` glyph (`is-neutral`) — the direction colors all promise a run, and this one promises none.
+  **A record-only direction says so.** The row's direction is decided from the two sides' capture
+  records and the FILES evidence from the bytes, so a row can honestly read `To pull` while every
+  byte already matches: the other side re-captured with nothing new. Such a card renders no FILES
+  row, correctly — the same verdict the device relation gives version drift (Version drift above) —
+  and the `On pull` clause is where it answers, replacing the terse fate sentence:
+  `main captured more recently, but the settings are already the same. Pulling changes nothing
+  here; it just clears this row back to in sync.` — push mirrored as `You captured more recently,
+  … changes nothing on <remote> …` (capture is a person's act; whichever device did it, `You` is
+  who). The clause is said only with the evidence in hand — a settled compare whose entries carry
+  nothing for this family; before one settles the terse sentence stands, because "the settings are
+  already the same" would describe bytes nobody read (spec 3.8's honesty rule). Rows that install,
+  update or turn on branch off their FACTS first and never reach it, the same discipline the
+  capture side's version-ahead clause keeps.
   Every row's card carries a `This remote` row — four stops, `Both ways` (the
   default, and the only one that leaves the row without a chip) / `Push only` / `Pull only` /
   `Neither way` — as an icon+tooltip TRIGGER on the control track (`renderDirectionMenu`; B2

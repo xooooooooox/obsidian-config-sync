@@ -67,6 +67,8 @@ import {
   onOffFlips,
   onOffNarrationLines,
   nosettingsLineText,
+  recordOnlyPullClause,
+  recordOnlyPushClause,
   PanelFilter,
   presentedState,
   relationCopy,
@@ -3513,12 +3515,15 @@ export class SyncCenterView extends ItemView {
   }
 
   // This remote's settled comparison entry for one row, companions already folded in — the same
-  // shape remoteRows() built the row from. null under the device relation, and for a row the
-  // comparison never mentioned.
+  // shape remoteRows() built the row from, INCLUDING its stale-settled fallback: while a fresh
+  // compare runs, the rows draw from the last settled result, and the diff must read that same
+  // result or a FILES entry would silently fall through to diffPair (store vs this device — a
+  // different question). null under the device relation, and for a row the comparison never
+  // mentioned.
   private remoteEntryFor(group: string): RemoteDiffEntry | null {
     const relation = this.relation;
     if (relation.kind !== "remote") return null;
-    const result = this.remoteResultFor(relation.name);
+    const result = this.remoteResultFor(relation.name) ?? this.lastSettledCompare.get(relation.name) ?? null;
     if (result === null) return null;
     const folded = foldCompanionEntries(result.entries, (g) => this.host.companionParentOf(g));
     return folded.find((e) => e.group === group) ?? null;
@@ -3930,6 +3935,15 @@ export class SyncCenterView extends ItemView {
     if (r.remote !== undefined) {
       const held = this.withheldKeysFor(r, input.direction === "apply" ? "pull" : "push");
       if (held !== null) return held;
+      // A record-only direction: the capture records disagree while every compared byte matches,
+      // so the run settles the records and touches no file. Said only with the evidence in hand —
+      // a settled comparison that carries nothing for this family (the exact complement of the
+      // FILES row's gate) — because "already the same" must never describe bytes nobody read.
+      // Before a comparison settles, the terse fate sentence stands.
+      const settled = this.remoteResultFor(r.remote) ?? this.lastSettledCompare.get(r.remote) ?? null;
+      if (settled !== null && !hasChanges(this.familyChanges(r))) {
+        return input.direction === "apply" ? recordOnlyPullClause(r.remote) : recordOnlyPushClause(r.remote);
+      }
     }
     let text = fate.sentence;
     if (input.direction === "apply" && !input.installed) {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { destinationKey, pickerBadgeDigits, excludedLineText, foldStateKey, withheldChangeClause, insyncLineText, PanelDestination, PanelRelation, relationCopy, relationHint, relationKey, relationLabel, relationShortLabel, viewOptions } from "../src/ui/panelModel";
+import { destinationKey, pickerBadgeDigits, excludedLineText, foldStateKey, recordOnlyPullClause, recordOnlyPushClause, withheldChangeClause, insyncLineText, PanelDestination, PanelRelation, relationCopy, relationHint, relationKey, relationLabel, relationShortLabel, viewOptions } from "../src/ui/panelModel";
 
 describe("relationLabel", () => {
   it("names the two relations exactly as the design says", () => {
@@ -162,6 +162,20 @@ describe("withheldChangeClause", () => {
 
   it("keeps the singular honest", () => {
     expect(withheldChangeClause("main", 1)).toBe("main changed 1 file. Push only, so they stay there.");
+  });
+});
+
+describe("record-only clauses — a direction with no byte behind it says so", () => {
+  it("pull: names who captured, promises nothing changes, and where the row lands", () => {
+    expect(recordOnlyPullClause("main")).toBe(
+      "main captured more recently, but the settings are already the same. Pulling changes nothing here; it just clears this row back to in sync."
+    );
+  });
+
+  it("push mirrors with You as the captor and the remote as the untouched side", () => {
+    expect(recordOnlyPushClause("main")).toBe(
+      "You captured more recently, but the settings are already the same. Pushing changes nothing on main; it just clears this row back to in sync."
+    );
   });
 });
 
