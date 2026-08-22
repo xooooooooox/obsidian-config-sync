@@ -1,16 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { SyncCenterView } from "../src/ui/SyncCenterView";
 import { FileChanges } from "../src/core/types";
-import type { DiffResolveControl } from "../src/ui/diffView";
-
-// Resolving a conflict now has TWO entrances — the card's `Resolve` row and the segmented control
-// in each open diff's toolbar — and they must be the same decision, not two that happen to agree.
-// The diff one exists because of what a diff in this plugin IS: `diffPair`'s `produced` has already
-// been through captureTransform/applyTransform, so a diff never shows "how these two files differ",
-// it shows "what THIS choice would do". The side you are looking at and the side you are choosing
-// are the same parameter, so the control that switches one has to be the control that commits the
-// other. Both entrances route through `pickConflictSide`; these tests drive it and the descriptor
-// the toolbar is handed.
+// Resolving a conflict has ONE control since R4 — the pair inside the Files block, under the
+// entry list — and one decision behind it. A diff in this plugin shows "what THIS choice would
+// do" (`diffPair`'s `produced` is post-transform), so the choice pair lives in the same block the
+// diffs open in. Everything routes through `pickConflictSide`; these tests drive it and the
+// descriptor the pair is handed (`conflictResolve`'s DiffResolveControl, now the view's own type).
 
 interface ResolveInternals {
   conflictChoice: Map<string, "apply" | "capture">;
@@ -20,7 +15,7 @@ interface ResolveInternals {
   refreshItemRow: (name: string) => void;
   refreshActionBar: () => void;
   pickConflictSide: (name: string, choice: "apply" | "capture") => void;
-  conflictResolve: (r: unknown, changes: FileChanges) => DiffResolveControl;
+  conflictResolve: (r: unknown, changes: FileChanges) => { group: string; chosen: "apply" | "capture" | null; scopeNote: string | null; onPick: (side: "apply" | "capture") => void };
 }
 
 // The three repaints a choice triggers all need a live pane; the decision under test is what runs

@@ -1,5 +1,4 @@
 import { Platform, setIcon } from "obsidian";
-import { renderResolveSegment, type ResolveSide } from "./resolveSegment";
 
 // Shared git-style diff renderer (extracted from ConflictModal):
 // unified/split views, LCS line diff with a cap, session-level view preference. Consumed by
@@ -134,25 +133,6 @@ function renderSplit(pane: HTMLElement, rows: DiffRow[], leftLabel: string, righ
 // diffed, off to the left.
 // `onExpand` renders the "open this in a bigger window" button. `null` where there is nowhere
 // bigger to go — inside the modal that button opens, and inside the pull-conflict modal.
-//
-// `resolve` puts the `Use theirs` / `Keep mine` choice IN the toolbar, for a row whose two sides
-// both moved. It belongs here rather than only on the card because of what a diff in this plugin
-// IS: `diffPair`'s `produced` has already been through captureTransform/applyTransform, so a diff
-// never shows "how these two files differ" — it shows "what THIS choice would do". Direction is not
-// a parameter for viewing the difference; it is the thing being viewed. So the control that picks a
-// side and the control that picks a preview are the same control, and asking someone to choose on
-// the card and then look somewhere else got the order backwards: the evidence arrived after the
-// decision.
-export interface DiffResolveControl {
-  // The item this decides for — the segment carries it so an in-place repaint can find every copy.
-  group: string;
-  chosen: ResolveSide | null;
-  // Set only when this file is not the whole story — a folder item or one with companions, where
-  // the run writes every file together and picking a side here settles them all. Null on a
-  // single-file item, where the file IS the item and there is nothing to disclose.
-  scopeNote: string | null;
-  onPick: (side: ResolveSide) => void;
-}
 
 export function renderDiffPanel(
   host: HTMLElement,
@@ -161,8 +141,7 @@ export function renderDiffPanel(
   leftLabel: string,
   rightLabel: string,
   meta: { name: string; sorted: boolean },
-  onExpand: (() => void) | null,
-  resolve: DiffResolveControl | null
+  onExpand: (() => void) | null
 ): void {
   const toolbar = host.createDiv({ cls: "config-sync-cm-difftools" });
   const metaEl = toolbar.createSpan({ cls: "config-sync-cm-diffmeta", text: meta.name });
@@ -170,11 +149,6 @@ export function renderDiffPanel(
     metaEl.setAttribute("aria-label", `${meta.name} — both sides are shown with their keys in the same sorted order, not the order they appear in the file.`);
   }
   toolbar.createDiv({ cls: "config-sync-rule-spacer" });
-  // Before the view controls: this one changes WHAT you are looking at (and what will happen);
-  // those change how it is drawn.
-  if (resolve !== null) {
-    renderResolveSegment(toolbar, { group: resolve.group, chosen: resolve.chosen, onPick: resolve.onPick });
-  }
   if (onExpand !== null) {
     // Left of the view toggles: this button changes WHERE you read the diff, they change HOW.
     const expand = toolbar.createEl("button", { cls: "config-sync-cm-viewbtn", attr: { "aria-label": "Open in a bigger window" } });
@@ -183,9 +157,6 @@ export function renderDiffPanel(
       e.stopPropagation();
       onExpand();
     });
-  }
-  if (resolve !== null && resolve.scopeNote !== null) {
-    host.createDiv({ cls: "config-sync-cm-resolvescope", text: resolve.scopeNote });
   }
   const pane = host.createDiv({ cls: "config-sync-cm-diffpane" });
   const render = (): void => {

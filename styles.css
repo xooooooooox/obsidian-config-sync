@@ -872,6 +872,10 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 .config-sync-hcard-pill.is-iss { background: rgba(var(--color-orange-rgb), 0.14); color: var(--color-orange); }
 
 .config-sync-segrow { display: flex; align-items: center; gap: var(--size-4-2); }
+/* R4: the one conflict-choice pair, inside the Files block — the entry list's indent, a breath of
+   space above, the multi-file scope disclosure directly beneath. */
+.config-sync-resolve-inline { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
+.config-sync-resolve-scope { color: var(--text-faint); font-size: var(--font-ui-smaller); }
 .config-sync-fpill.is-leftover { color: var(--color-orange); border-color: rgba(var(--color-orange-rgb), 0.5); }
 .config-sync-fpill.is-leftover.is-active { background: var(--color-orange); border-color: var(--color-orange); color: var(--background-primary); }
 .config-sync-section.is-leftover { border-color: rgba(var(--color-orange-rgb), 0.45); }
@@ -1826,7 +1830,6 @@ button.config-sync-add-row, button.config-sync-add-row:hover { background: none;
 /* Only rendered for a multi-file item, where picking a side settles files this window is not
    showing. A quiet line under the toolbar rather than a warning box: it is a fact about scope, not
    a problem. */
-.config-sync-cm-resolvescope { padding: var(--size-4-1) var(--size-4-3); border-top: 1px solid var(--background-modifier-border); color: var(--text-faint); font-size: var(--font-ui-smaller); }
 .config-sync-cm-viewseg { display: flex; border: 1px solid var(--background-modifier-border); border-radius: var(--radius-s); overflow: hidden; }
 /* Unified/Split and Collapse/Full are icon segments (setIcon, aria-label carries
    the button label) — padding/sizing set for a centered

@@ -205,8 +205,7 @@ export class ConflictModal extends Modal {
       "local  (this device)",
       `remote (${this.remoteName})`,
       { name: c.kind === "definition" ? "sync rule" : "--- local · +++ remote", sorted: c.kind !== "definition" && sortedView },
-      null, // already a modal — there is nowhere bigger to open
-      null // this modal has its own per-conflict side picker; the toolbar one is for ROW conflicts
+      null // already a modal — there is nowhere bigger to open
     );
   }
 }
