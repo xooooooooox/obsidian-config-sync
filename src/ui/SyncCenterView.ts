@@ -3,7 +3,7 @@ import { ApplyItem, CaptureItem, orderInstallsCatalogFirst, ProgressFn, StateAct
 import { lockRefFor, refItemId } from "../core/itemKeys";
 import { GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry, RemoteDiffFile } from "../core/status";
 import { SECTION_LABELS, findGroupByName, SELF_GROUP_NAME, sectionForGroup, communityGroupName } from "../core/catalog";
-import { itemDirection, keyDirection, keyPatternsFor, keyStopsWithin, withheldPatternsFor } from "../core/remoteRules";
+import { itemDirection, keyDirection, keyHasOwnRule, keyPatternsFor, keyStopsWithin, withheldPatternsFor } from "../core/remoteRules";
 import { EVERYWHERE, FileChanges, FileSharing, GroupResult, hasChanges, ItemRef, Remote, RemoteDirection, Sharing, SyncGroup, StorageSection } from "../core/types";
 import { DeviceElementState } from "../core/deviceElements";
 import { RuleListId } from "../core/enablementRules";
@@ -3606,9 +3606,12 @@ export class SyncCenterView extends ItemView {
       renderJsonKeyDoc(pre, {
         raw,
         // Two states, the same two Settings shows: a key that already carries a rule is coloured,
-        // every other key wears the dashed underline that says it can be clicked.
-        classOf: (key) => (keyDirection(remote.items, ref, key) === "both" ? null : "config-sync-json-key-ruled"),
-        clickable: (key) => keyDirection(remote.items, ref, key) === "both",
+        // every other key wears the dashed underline that says it can be clicked. Asked of
+        // keyHasOwnRule, NOT keyDirection === "both": under a narrowed item every un-ruled key
+        // resolves to the item's own push/pull, and the old test painted them all as ruled and
+        // left nothing clickable (acceptance Q2 follow-up — the document really was inert).
+        classOf: (key) => (keyHasOwnRule(remote.items, ref, key) ? "config-sync-json-key-ruled" : null),
+        clickable: (key) => !keyHasOwnRule(remote.items, ref, key),
         // A click writes `Neither way`, not the default. The default is `Both ways`, which by the
         // writer's own discipline is never stored — so clicking would produce no rule, no row, and
         // look like a dead control. Anyone reaching for a key here wants it to stop travelling; the

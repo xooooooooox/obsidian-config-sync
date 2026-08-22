@@ -32,6 +32,17 @@ export function keyDirection(items: RemoteItems | undefined, ref: ItemRef, key: 
   return item;
 }
 
+// Whether this KEY carries a rule of its own — an entry in the item's key map matches it — as
+// opposed to merely inheriting the item's direction. The panel's document asks this to pick colour
+// and clickability: keyDirection alone cannot answer it under a narrowed item, where an un-ruled
+// key resolves to the item's own push/pull and becomes indistinguishable from a ruled one (the bug
+// that made every key unclickable the moment an item left Both ways).
+export function keyHasOwnRule(items: RemoteItems | undefined, ref: ItemRef, key: string): boolean {
+  const keys = ruleFor(items, ref)?.keys;
+  if (keys === undefined) return false;
+  return Object.keys(keys).some((pattern) => keyMatchesAny(key, [pattern]));
+}
+
 // Write one item's direction. The default is never stored: an entry that carries nothing else is
 // removed, and a map that ends up empty becomes undefined, so a document only ever holds decisions
 // somebody actually made.

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { itemDirection, keyDirection, keyStopsWithin, refsBlockedFor, withheldPatternsFor, withItemDirection, withKeyDirection } from "../src/core/remoteRules";
+import { itemDirection, keyDirection, keyHasOwnRule, keyStopsWithin, refsBlockedFor, withheldPatternsFor, withItemDirection, withKeyDirection } from "../src/core/remoteRules";
 import { directionFlows, intersectDirection, ItemRef, RemoteDirection, RemoteItems } from "../src/core/types";
 
 describe("directionFlows", () => {
@@ -53,6 +53,22 @@ describe("itemDirection", () => {
   it("reads the stored value when there is one", () => {
     expect(itemDirection(RULES, "community/config-sync")).toBe("none");
     expect(itemDirection(RULES, "community/dataview")).toBe("push");
+  });
+});
+
+describe("keyHasOwnRule", () => {
+  it("is false for a key that only inherits its item's direction — even a narrowed one", () => {
+    // Under a push-only item, keyDirection resolves every un-ruled key to "push"; the document's
+    // colour/clickability must still tell it apart from a key somebody actually ruled.
+    expect(keyHasOwnRule(RULES, "community/dataview", "cssTheme")).toBe(false);
+    expect(keyHasOwnRule(RULES, "core/backlink", "anything")).toBe(false);
+    expect(keyHasOwnRule(undefined, "community/dataview", "accentColor")).toBe(false);
+  });
+
+  it("is true for a stored key rule, exact or glob, whatever the item's own direction", () => {
+    expect(keyHasOwnRule(RULES, "community/dataview", "accentColor")).toBe(true);
+    expect(keyHasOwnRule(RULES, "obsidian/appearance", "accentColor")).toBe(true);
+    expect(keyHasOwnRule(RULES, "obsidian/appearance", "accentFont")).toBe(true); // via "accent*"
   });
 });
 
