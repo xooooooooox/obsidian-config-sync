@@ -60,37 +60,36 @@ count by fate; the folds below the rows file by both. Everything here comes from
 the code (`src/ui/panelTaxonomy.ts`), so a state can never wear two different marks on two different
 surfaces again.
 
-**Where a state can show up.** Five surfaces carry state, and they are not five copies of one thing —
+**Where a state can show up.** Four surfaces carry state, and they are not four copies of one thing —
 each answers a different question, which is why the same item can be counted in one and absent from
 another:
 
-1. **Header strip** (top, right of the Config Sync chip) — the whole vault at a glance, **plus** the
-   remote `push`/`pull` totals. The only place row states and remote states sit side by side.
-2. **Sidebar counts** (`All items`, `Obsidian`, `Core plugins`, …) — the same numbers, split by
+1. **Sidebar counts** (`All items`, `Obsidian`, `Core plugins`, …) — the numbers, split by
    category. Navigation, not filtering: clicking one changes which category you are looking at.
-3. **Filter pills** (above the list) — the current category's numbers, and clicking one hides
+   `All items` is the whole vault at a glance.
+2. **Filter pills** (above the list) — the current category's numbers, and clicking one hides
    everything else. While a search is running they count the matches instead.
-4. **Section fold lines** (inside `Obsidian`, `Core plugins`, …) — where the quiet rows actually
+3. **Section fold lines** (inside `Obsidian`, `Core plugins`, …) — where the quiet rows actually
    live. **These exist only under `All` with no search**: any filter or search flattens the section
    into one plain list, because the pill you just clicked already is the filing.
-5. **The section header's own number** — a total (`31`, or `6/31` once narrowed), not a state. It is
+4. **The section header's own number** — a total (`31`, or `6/31` once narrowed), not a state. It is
    grey for that reason.
 
-Surfaces 1–3 all read the same counter, so they can never contradict each other; only their scope
+Surfaces 1–2 read the same counter, so they can never contradict each other; only their scope
 differs.
 
-**Fate** — what the next run would do. The header strip, the sidebar counts and the filter pills all
+**Fate** — what the next run would do. The sidebar counts and the filter pills both
 count these, and the three foldable ones each own a trailing fold line whose words match their
 pill's.
 
 | State | Pill / fold line | Icon | Colour | Where you see it | What it means |
 |---|---|---|---|---|---|
-| To capture | `To capture N` | `arrow-up-from-line` | orange | Header · sidebar · pill · on the row. Never folds — work stays visible | This device's settings are the newer ones; capturing writes them to the store |
+| To capture | `To capture N` | `arrow-up-from-line` | orange | Sidebar · pill · on the row. Never folds — work stays visible | This device's settings are the newer ones; capturing writes them to the store |
 | To apply | `To apply N` | `arrow-down-to-line` | accent | Same as above | The store is newer; applying brings it to this device |
 | Changed on both sides | counted under `To apply` | `triangle-alert` | red | Counted inside `To apply` everywhere; on the row it keeps its sentence on screen instead of hiding it in a tooltip | Both sides moved since your last sync. Unstageable until you resolve it |
-| In sync | `In sync N` · `N items in sync` | `check` | green | Header (shown even at 0) · sidebar (hidden at 0) · pill (shown even at 0) · fold line | Identical on both sides — nothing to do |
-| Not synced here | `Not synced here N` · `N items not synced on this device` | `circle-minus` | purple | Header · sidebar · pill · fold line — all four disappear entirely when nothing is excluded | You turned this item off on THIS device, or a device rule keeps it off this device's class. Your other devices keep syncing it |
-| No settings yet | `No settings yet N` · `N items with no settings yet` | `circle` | muted | Header (hidden at 0) · sidebar (hidden at 0) · pill (shown even at 0) · fold line | Nothing saved for it anywhere yet |
+| In sync | `In sync N` · `N items in sync` | `check` | green | Sidebar (hidden at 0) · pill (shown even at 0) · fold line | Identical on both sides — nothing to do |
+| Not synced here | `Not synced here N` · `N items not synced on this device` | `circle-minus` | purple | Sidebar · pill · fold line — all three disappear entirely when nothing is excluded | You turned this item off on THIS device, or a device rule keeps it off this device's class. Your other devices keep syncing it |
+| No settings yet | `No settings yet N` · `N items with no settings yet` | `circle` | muted | Sidebar (hidden at 0) · pill (shown even at 0) · fold line | Nothing saved for it anywhere yet |
 | Locked | counted under `No settings yet` (with a remote selected: its own `Can't compare` group) | `lock` chip (whole-file) or `encrypted keys` chip (field-level) | muted | Counted inside `No settings yet`; visible as a row only under `All`. With a remote selected it has its own pill and folds away under `N items can't be compared` | Encrypted, and this device has no passphrase — it can't be compared, so it has no fate |
 
 **Availability** — whether this device can act at all. These live in **one** surface only: the amber
@@ -115,16 +114,21 @@ can find it again.
 
 **Transport** — desktop only, and about remotes rather than rows: `push` (`cloud-upload`, pink) is
 store changes not yet pushed to a remote, `pull` (`cloud-download`, cyan) is remote changes not yet
-pulled. As totals these appear in the header strip and the status bar only — never in a sidebar
-count, a filter pill or a fold, all of which are about items. Each remote's own state (`✓` matches,
-`↓` remote is newer, `↑` remote is older, `—` no store there yet, `?` unknown) shows beside its name
-in the sidebar and on its own pane. **Leftover** (amber) is a section, not a row state: store files
+pulled. As cross-remote totals these appear in the status bar only. Each remote's own numbers ride
+its row in the View picker's dropdown — a counted remote wears its push/pull pair right there, a
+remote that can't be counted item by item shows its whole-store state instead (`✓` matches, `↓`
+remote is newer, `↑` remote is older, `—` no store there yet, `?` unknown), and a remote still
+being checked shows a pulsing dot. Select a remote and the sidebar/pill counts speak ITS push/pull
+numbers in the same cloud glyphs. **Leftover** (amber) is a section, not a row state: store files
 nothing syncs any more.
 
 **Row chips** — quiet icons on the row's right, each appearing only when a fact deviates from the
 default: `not installed here` (`circle-dashed`), `desktop only` (`monitor`), `stays off`
 (`power-off`), `your rule` / `off here — your rule` / `on here — your rule`
-(`sliders-horizontal`), `encrypted` (`lock`), `your choice` (`check`).
+(`sliders-horizontal`), `encrypted` (`lock`), `encrypted keys` (`file-key` — individual values
+encrypted, keys still open to per-key choices), `your choice` (`check`). With a remote selected, a
+non-default **This remote** rule adds its own chip (`push only` / `pull only` / `neither way`) —
+except when the row's fate icon already wears that same mark.
 
 #### The expanded card
 
@@ -132,7 +136,7 @@ Click a row's name to expand it into a card, in order (each row omitted when it 
 
 - **On apply** / **On capture** / **State** — the fate sentence spelled out as a full clause: install source (`from the community catalog` / `via BRAT`), update versions (`Updates 2.14.0 → 2.15.1`), what capturing publishes (`Shares your settings with your other devices`).
 - **Files** — collapsed behind one small badge carrying the direction and the count (hover it for `N files change` and which side they land on: into the store while capturing, onto this device while applying). On a conflict that you haven't resolved yet the badge wears the conflict mark instead of a direction arrow, because the row hasn't got one yet — and the row is listed there precisely so you can read the difference *before* deciding, not after. Click anywhere on it to expand a `+`/`~`/`−` entry per file (added / updated / removed), in both directions — hover any entry for what happens (`New in the store — starts syncing to your other devices`, `Deleted from this device`, and so on). The badge fills in while the list is open. A diffable/viewable entry ends in one small icon; click it to view the change (or the incoming content, if there's nothing local yet to diff against) — and any diff has an expand button in its toolbar that reopens it in a window big enough to read, resizable by its corner, sharing the unified/split and collapse settings with the inline view. Encrypted content reads `changed — encrypted, no preview` instead.
-- **Resolve** (conflicts only) — `Use theirs` / `Keep mine`; the row stays unstageable until you pick one, then reads as a normal directed row plus a `your choice` chip. The same control also sits in the toolbar of every diff this row has open, and there it does double duty: **the side you're looking at is the side you'd be choosing**. That's not a shortcut — a diff here never shows "how these two files differ", it shows what one *choice* would do (the content has already been through the same transform a real run would apply), so switching the preview and picking the side are one action. Pick from either place; it's one decision, and the other place follows. Clicking the side that's already picked clears it again.
+- **Resolving a conflict** — expand the **Files** row and the `Use theirs` / `Keep mine` pair sits under the file entries (and under whichever diff you open): one control on the whole panel, and it lives where the evidence is, because a diff here never shows "how these two files differ" — it shows what one *choice* would do (the content has already been through the same transform a real run would apply), so switching the preview and picking the side are one action. The row stays unstageable until you pick; picking makes it a normal directed row plus a `your choice` chip, and clicking the picked side clears it again. At rest the pair is as quiet as the card's other controls, direction colour on the icons alone; the side you hover — and above all the side you picked — takes the colour. A multi-file item says so right beneath: it is written as a whole, one choice covers all its files.
 - **Enabled on** (plugins, while the Core/Community on/off list itself is a synced item) — one small control holding two glyphs, no wordmark on the row itself: the shared answer, then this device's own state. Hovering it reads both in one line — what the shared answer actually does (`Every device turns it on.`, `Desktops turn it on. On phones it stays off.`, and so on), then what this device does about it. Most of the time the second glyph just says this device matches the shared answer (`This device: follows what's shared.`) — there's nothing to say, because this device does whatever the shared answer says. The moment you tell it to do something else here, that glyph turns purple (`This device: always on.` / `always off.`). Clicking anywhere on the control opens one menu carrying both answers under their own headings — **Enabled on** for the shared one, **On this device** for this machine's. See [Not shared, and this device's own exceptions](#not-shared-and-this-devices-own-exceptions) below for what that second glyph means and where else it shows up.
 - **After install** / **Enablement** — the fallback when the on/off list ISN'T itself shared (a section header's small read-only chip shows which it is: hover it for `Which plugins are on is shared with your other devices` or `…stays on this device`, and click it to jump to where that's set — the on/off list's own card in Settings, see below): `Turn it on` or `Leave it off`, offered for a plugin this run installs, or one that's already installed but off.
 - **Settings sync** — the item's own file-level sharing rule, in the same two-glyph control as above (hover reads `Every device syncs this file.` / `Only desktops sync this file. Phones don't sync it at all.` / its mobile mirror, then `This device: not synced. Your other devices keep sharing it.` once you've opted this one out). Its menu's shared heading is **Shared with**. An item under per-key rules has no whole-file rule to move, so instead of a list of values that half of the menu says the fact and offers the one thing you can do about it, as two lines: **Per-key rules decide this** (a statement, not a choice — it can't be picked) and **Open the per-key rules**, which lands on the item's own rules. This device's own opt-out still works as usual.
@@ -152,9 +156,9 @@ Whatever the shared rule says, **this device can still say something different**
 
 The Core plugins and Community plugins on/off lists are cards of their own now, under the **Obsidian** tab in Settings, alongside App settings/Appearance/Hotkeys — not just a list of individual plugin cards. Each carries a badge for how many plugins have a shared rule set (`N device-scoped` — decisions you made, so a `Desktop only` rule on a plugin that can only run on desktop anyway doesn't count) and how many this device has excepted for itself (`N left to me`), and its drawer lists every plugin under an **Enabled on** header (hover it for the full sentence: which devices turn each plugin on) — one row per plugin, same shared-answer-plus-this-device control as everywhere else.
 
-#### Header chip and the this-device pane
+#### The masthead and the this-device pane
 
-The header chip opens the **Config Sync** pane, where the plugin's own configuration is captured and applied like any other item. A fresh device with no store yet reads `No store on this device yet`, offering `Pull from {remote}` when a remote is configured; once a store has arrived (via your note sync or a Pull), the pane instead offers **Adopt**, a one-time guide that imports the store's full sync list — every field it depends on, down to which plugins are tracked via BRAT — onto this device, without applying anything or capturing over it with empty defaults. When the list later changes in the store, an expandable *view change* shows the exact `data.json` delta.
+The sidebar leads with a two-row masthead: the top row — **Config Sync** with its own state pill — opens the plugin's own pane, and the row beneath is the **View picker** (`This device`, or a remote's name). The pill answers for this device ↔ store, so it shows on the `This device` view only. The pane is where the plugin's own configuration is captured and applied like any other item. A fresh device with no store yet reads `No store on this device yet`, offering `Pull from {remote}` when a remote is configured; once a store has arrived (via your note sync or a Pull), the pane instead offers **Adopt**, a one-time guide that imports the store's full sync list — every field it depends on, down to which plugins are tracked via BRAT — onto this device, without applying anything or capturing over it with empty defaults. When the list later changes in the store, an expandable *view change* shows the exact `data.json` delta.
 
 #### Result strip and History
 
@@ -309,13 +313,13 @@ How the store travels between devices, beyond this device's own Capture/Apply (s
 - The Sync Center auto-checks whether a git or vault remote was captured after your local store; each remote carries the answer in the View picker.
 - **What "in sync" means here.** It means there is nothing left to do *in a direction you allow*, not that the two copies are identical. Set an item to **Push only** and the other side edits it: that item stops asking for your attention, because pulling it is not something you want. Open its card and it still tells you what changed over there — and that those changes stay there.
 - **Deciding what a remote gets.** Every item can travel both ways with a remote, only out (**Push only**), only in (**Pull only**), or not at all (**Neither way**). Select the remote in the View picker, open the item's card, and set **This remote**. Config Sync's own settings are one of those items — if this vault keeps a setup of its own, set that item to **Neither way** and Pull, Push and the comparison all leave it alone.
-- **Setting one key's direction.** Select the remote, open the item, and look under **Keys**: the keys you have already decided about are listed there, each with the same four choices the item itself has. To add one, click **Click any key to add a rule for it** and pick a key out of the file — it stops travelling straight away, and the row that appears lets you change it to only-out or only-in. A key can never travel further than its item, so narrowing the item shortens what its keys can be set to.
+- **Setting one key's direction.** Select the remote, open the item, and look under **Key rules**: the keys you have already decided about are listed there, each with its own direction control — the same menu the item's **This remote** row uses, plus a **Remove rule** entry that returns the key to following its item. To add one, click the eye beside the file name: the file opens with `+ Click any key to add a rule for it` above it — click a key and it stops travelling straight away, and its new row lets you change that to only-out or only-in. A key can never travel further than its item, so narrowing the item shortens what its keys can be set to.
 - **A single setting can stay behind while the rest of its item travels.** Hold a key back from a remote and Pull takes everything else while your value stays put; Push sends everything else and **leaves their value where it is**. That second half is the part worth knowing: your settings files travel whole, so a key that was simply left out would be *deleted* over there the next time that device applied its settings. Config Sync writes their own value back in instead, so neither side loses what it had.
 - **A Push that finds the other side has moved stops, having written nothing.** It works out everything it is going to send, checks the other end still looks the way it did, and only then writes — so another device saving while you push can never leave half a push behind, and can never quietly restore the value it just changed.
 - **A pick made on an old comparison is not acted on.** If an item you ticked has moved on at the other end since you last compared, Push stops and asks you to refresh and pick again rather than overwriting it.
 - **A setting held back in both directions stops counting as unfinished work.** Those two values are meant to differ, so Config Sync no longer treats them as a difference: the item stops asking to be pulled every time the other device saves, and its card stops listing a file you could never reconcile. Anything else in that same item still shows normally.
 - **What a Push leaves alone, it leaves alone completely.** An item you keep out of a remote — or one you simply left unticked for that run — keeps the other side's own record of it, not just its settings. That record is what the devices over there read to tell whether they are behind, so it stays theirs, as does how far they have pulled. Only the items you actually sent are described by yours.
-- Expand a remote for a Pull/Push preview: the same four sections as the main list group its entries (companion families folded together the same way), a divergent Core/Community on/off list surfaces as one pinned `On/off list · differs for N plugins ▸` line naming which plugins flip on which side (capped at five names, or `its entire list — N plugins` on a fresh device), and each file entry expands into content diffs — the summary separates what Pull would bring from files that exist only in your store (Pull never removes files).
+- Selecting a remote IS the Pull/Push preview: the same four sections, rows and cards as the `This device` view (companion families folded together the same way). A divergent Core/Community on/off list narrates on that carrier's own card — an **On/off** row naming which plugins flip on which side — and each file entry expands into content diffs; what Pull would bring is kept apart from files that exist only in your store (Pull never removes files).
 
 **Mixed versions** — updating every device at once is not required. The store's own settings travel wholesale, so Config Sync refuses anything it would have to guess at rather than resetting it. A few releases are the exception and ask you to update everywhere first; those are listed in [UPGRADING.md](../UPGRADING.md).
 
@@ -329,7 +333,7 @@ How the store travels between devices, beyond this device's own Capture/Apply (s
 **While your devices are on mixed versions** — some updated, some not — expect this:
 
 - Nothing breaks in either direction. A device on an older build reads the store fine; it simply doesn't understand the newer bookkeeping and drops it when it writes the store back. The next Capture from an updated device writes it again. That coming and going is not itself compared — bookkeeping only one side records is skipped rather than counted as a change.
-- Freshness gets more precise as devices update. Where both ends of a comparison carry the current bookkeeping, the check weighs the store **item by item** rather than by one whole-store timestamp: a purely cosmetic change (a plugin renamed on one device) stops reading as something to Pull, and a store that is merely older in clock terms while holding the same items can read as up to date. Two cases keep the coarser, whole-store reading. An item whose store copy is encrypted can't be fingerprinted, because every device encrypts to different bytes, so it is judged by when it was captured; capture it on one device and the others will still offer a Pull, even though the settings are identical. And when two stores are each ahead of the other in different items, the whole-store timestamps decide.
+- Freshness gets more precise as devices update. Where both ends of a comparison carry the current bookkeeping, the check weighs the store **item by item** rather than by one whole-store timestamp: a purely cosmetic change (a plugin renamed on one device) stops reading as something to Pull, and a store that is merely older in clock terms while holding the same items can read as up to date. One case keeps the coarser, whole-store reading: when two stores are each ahead of the other in different items, the whole-store timestamps decide. An encrypted item is no longer that case — every device encrypts to different bytes, so it can't be fingerprinted, but the comparison now opens both copies and compares what they say: identical settings read as in sync even though the stored bytes never match.
 - **On this device** is remembered on the device itself, so a Pull or an Adopt cannot erase it. That choice is never written into your settings file, so it cannot travel to another device and cannot be overwritten by one.
 
 ## Status bar & ribbon
