@@ -1058,20 +1058,17 @@ export function unorderedChangeClause(files: number): string {
 }
 
 // The record-only direction's card clause: the two sides' capture records disagree while every
-// compared byte matches — the other side re-captured with nothing new, and the run only settles
-// the records. Ordered by the reader's questions: why the row lights up, whether anything of
-// theirs changes, what pressing the button does. `capture` is the one product verb kept; no
-// store/copy/record nouns — three copy rounds showed they read as jargon here. The caller may
-// only say this with the evidence in hand (a settled comparison that carries nothing for this
-// family): "already the same" must never describe bytes nobody read.
-export function recordOnlyPullClause(remoteName: string): string {
-  return `${remoteName} captured more recently, but the settings are already the same. Pulling changes nothing here; it just clears this row back to in sync.`;
-}
+// compared byte matches, so the run only settles the records. The sentence keeps the On pull /
+// On push contract — verb-first, nothing but what pressing the button does; the substance is two
+// facts (no settings change, the row clears) and the cause stays unsaid (three copy rounds cut
+// it: cause explanations and store/copy/record nouns all read as noise on this row). The caller
+// may only say this with the evidence in hand (a settled comparison that carries nothing for
+// this family): "changes nothing" must never describe bytes nobody read.
+export const RECORD_ONLY_PULL_CLAUSE = "Changes nothing in your settings; just clears this row back to in sync.";
 
-// Pull's mirror. The subject is `You`, not this device: capture is a person's act, and whichever
-// device it happened on, the person reading the card is who did it.
+// Pull's mirror; the untouched side is the remote's, so it is named.
 export function recordOnlyPushClause(remoteName: string): string {
-  return `You captured more recently, but the settings are already the same. Pushing changes nothing on ${remoteName}; it just clears this row back to in sync.`;
+  return `Changes nothing in ${remoteName}'s settings; just clears this row back to in sync.`;
 }
 
 // spec 5.4's `Keys` row, decided in one place. The three notes are structural facts the user cannot

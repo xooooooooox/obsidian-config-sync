@@ -823,10 +823,11 @@ noted):
   byte already matches: the other side re-captured with nothing new. Such a card renders no FILES
   row, correctly — the same verdict the device relation gives version drift (Version drift above) —
   and the `On pull` clause is where it answers, replacing the terse fate sentence:
-  `main captured more recently, but the settings are already the same. Pulling changes nothing
-  here; it just clears this row back to in sync.` — push mirrored as `You captured more recently,
-  … changes nothing on <remote> …` (capture is a person's act; whichever device did it, `You` is
-  who). The clause is said only with the evidence in hand — a settled compare whose entries carry
+  `Changes nothing in your settings; just clears this row back to in sync.` — push mirrored with
+  `<remote>'s settings` as the untouched side. The clause keeps the fate-sentence contract:
+  verb-first, nothing but what pressing the button does — the cause lives in the row's direction
+  mark, not in words (copy rounds cut both the cause explanation and every store/copy/record
+  noun as noise here). The clause is said only with the evidence in hand — a settled compare whose entries carry
   nothing for this family; before one settles the terse sentence stands, because "the settings are
   already the same" would describe bytes nobody read (spec 3.8's honesty rule). Rows that install,
   update or turn on branch off their FACTS first and never reach it, the same discipline the

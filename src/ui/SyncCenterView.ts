@@ -67,7 +67,7 @@ import {
   onOffFlips,
   onOffNarrationLines,
   nosettingsLineText,
-  recordOnlyPullClause,
+  RECORD_ONLY_PULL_CLAUSE,
   recordOnlyPushClause,
   PanelFilter,
   presentedState,
@@ -3942,7 +3942,7 @@ export class SyncCenterView extends ItemView {
       // Before a comparison settles, the terse fate sentence stands.
       const settled = this.remoteResultFor(r.remote) ?? this.lastSettledCompare.get(r.remote) ?? null;
       if (settled !== null && !hasChanges(this.familyChanges(r))) {
-        return input.direction === "apply" ? recordOnlyPullClause(r.remote) : recordOnlyPushClause(r.remote);
+        return input.direction === "apply" ? RECORD_ONLY_PULL_CLAUSE : recordOnlyPushClause(r.remote);
       }
     }
     let text = fate.sentence;

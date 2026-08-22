@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { destinationKey, pickerBadgeDigits, excludedLineText, foldStateKey, recordOnlyPullClause, recordOnlyPushClause, withheldChangeClause, insyncLineText, PanelDestination, PanelRelation, relationCopy, relationHint, relationKey, relationLabel, relationShortLabel, viewOptions } from "../src/ui/panelModel";
+import { destinationKey, pickerBadgeDigits, excludedLineText, foldStateKey, RECORD_ONLY_PULL_CLAUSE, recordOnlyPushClause, withheldChangeClause, insyncLineText, PanelDestination, PanelRelation, relationCopy, relationHint, relationKey, relationLabel, relationShortLabel, viewOptions } from "../src/ui/panelModel";
 
 describe("relationLabel", () => {
   it("names the two relations exactly as the design says", () => {
@@ -165,17 +165,13 @@ describe("withheldChangeClause", () => {
   });
 });
 
-describe("record-only clauses — a direction with no byte behind it says so", () => {
-  it("pull: names who captured, promises nothing changes, and where the row lands", () => {
-    expect(recordOnlyPullClause("main")).toBe(
-      "main captured more recently, but the settings are already the same. Pulling changes nothing here; it just clears this row back to in sync."
-    );
+describe("record-only clauses — a direction with no byte behind it states the run's substance", () => {
+  it("pull: only what pressing the button does — no settings change, the row clears", () => {
+    expect(RECORD_ONLY_PULL_CLAUSE).toBe("Changes nothing in your settings; just clears this row back to in sync.");
   });
 
-  it("push mirrors with You as the captor and the remote as the untouched side", () => {
-    expect(recordOnlyPushClause("main")).toBe(
-      "You captured more recently, but the settings are already the same. Pushing changes nothing on main; it just clears this row back to in sync."
-    );
+  it("push mirrors with the remote's settings as the untouched side", () => {
+    expect(recordOnlyPushClause("main")).toBe("Changes nothing in main's settings; just clears this row back to in sync.");
   });
 });
 
