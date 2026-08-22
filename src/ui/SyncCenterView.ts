@@ -3509,7 +3509,7 @@ export class SyncCenterView extends ItemView {
         return;
       }
       for (const pattern of model.keys) this.renderKeyRuleRow(value, r.group.name, relation.name, remote, ref, item, pattern);
-      this.renderKeyDocument(value, r, relation.name, remote, ref, model.narrowed);
+      this.renderKeyDocument(value, r, relation.name, remote, ref);
     });
   }
 
@@ -3559,7 +3559,7 @@ export class SyncCenterView extends ItemView {
   // through two different gestures taught nobody either gesture — Settings' form is the settled
   // one, so this borrows it verbatim (same icon, same open-state language, same 220px scrolling
   // preview underneath; the interim `Show all N keys` fold retired with the always-open form).
-  private renderKeyDocument(value: HTMLElement, r: StatusRow, remoteName: string, remote: Remote, ref: ItemRef, narrowed: boolean): void {
+  private renderKeyDocument(value: HTMLElement, r: StatusRow, remoteName: string, remote: Remote, ref: ItemRef): void {
     const open = this.keyDocOpen.has(r.group.name);
     const pathLine = value.createDiv({ cls: "config-sync-card-pathline config-sync-keydoc-pathline" });
     pathLine.createSpan({ cls: "config-sync-card-path", text: basename(r.group.path) });
@@ -3581,20 +3581,15 @@ export class SyncCenterView extends ItemView {
       }
     });
     if (!open) return;
-    // `limited by This remote` lives HERE, not on the resting card (P2): it answers "why are there
-    // fewer stops to pick", a question only asked once the rules are on screen — an always-on line
-    // above the filename read as a property of the file, and the resting card's shape should stay
-    // Settings' own (the remote card is the device card with a different counterpart; it invents
-    // no interaction of its own).
-    if (narrowed) value.createDiv({ cls: "config-sync-keys-limited", text: "limited by This remote" });
-    // One line for the one gesture (Q2/Q3): the click writes `Neither way` for that key, and the
-    // hint says exactly that — "add a rule for it" undersold the effect, and the legend underneath
-    // restated the same click in different words (with a colour lesson the rule rows above already
-    // teach by sitting next to their own keys). Settings keeps its own legend; its click answers a
-    // different question.
+    // One line for the one gesture (Q3): Settings' own sentence, verbatim — and the word `key`
+    // wears the SAME dashed underline the clickable keys in the document wear, so the hint
+    // teaches the affordance by showing it, not by adding words (the legend that used to restate
+    // this click is gone).
     const hint = value.createDiv({ cls: "config-sync-json-hint" });
     setIcon(hint.createSpan({ cls: "config-sync-json-hint-icon" }), "plus");
-    hint.createSpan({ text: "Click any key to hold it back from this remote" });
+    hint.createSpan({ text: "Click any " });
+    hint.createSpan({ cls: "config-sync-json-key config-sync-json-clickable", text: "key" });
+    hint.appendText(" to add a rule for it");
     const host = value.createDiv();
     void this.host.storeCopyOf(ref).then((doc) => {
       if (doc === null) {

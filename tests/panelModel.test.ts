@@ -1285,12 +1285,11 @@ describe("keysRowModel", () => {
     expect(keysRowModel({ item: "both", group: file, encrypted: false, patterns: ["apiKey", "theme"] })).toEqual({
       kind: "rules",
       keys: ["apiKey", "theme"],
-      narrowed: false,
     });
   });
 
-  it("flags the narrowing when the item's own direction shortens what a key may be set to", () => {
-    expect(keysRowModel({ item: "pull", group: file, encrypted: false, patterns: [] })).toEqual({ kind: "rules", keys: [], narrowed: true });
+  it("says nothing extra under a narrowed item — the key controls' own stops carry that fact", () => {
+    expect(keysRowModel({ item: "pull", group: file, encrypted: false, patterns: [] })).toEqual({ kind: "rules", keys: [] });
   });
 });
 

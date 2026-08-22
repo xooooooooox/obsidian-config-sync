@@ -817,20 +817,21 @@ noted):
   name), one level down and the same gesture as that Settings `KEY RULES` block, deliberately —
   and since the acceptance round, the same PRESENTATION too (J4): the filename line carries
   Settings' own eye, and the eye opens the hint and the 220px scrolling document — ruled keys
-  coloured, clickable keys dash-underlined. ONE line for the one gesture (Q2/Q3): the hint reads
-  `+ Click any key to hold it back from this remote`, naming the click's actual effect (`add a
-  rule for it` undersold it, and readers took the document for a read-only preview), and there is
-  NO legend underneath — the colour lesson is taught by the rule rows sitting beside their own
-  keys, and a second line restating the same click in different words was noise. Settings keeps
-  its own hint wording and its legend; its click answers a different question. The row sits DIRECTLY under `Files` (card order: state → `This remote` → `Files` →
+  coloured, clickable keys dash-underlined. ONE line for the one gesture (Q3): Settings' own
+  sentence verbatim (`+ Click any key to add a rule for it`) with the word `key` wearing the same
+  dashed underline the document's clickable keys wear — the hint teaches the affordance by showing
+  it. NO legend underneath, and NO narrowing caption either: the colour lesson is taught by the
+  rule rows sitting beside their own keys, and the item's direction shortening a key's stops shows
+  itself on the key controls (every caption written for it was misread as a limit on WHICH keys
+  can be ruled). Settings keeps its own legend; its click answers a different question. The row sits DIRECTLY under `Files` (card order: state → `This remote` → `Files` →
   `On/off` → `Key rules` → entrances last), because a key rule acts on keys inside the very files
   listed above it — subordination made adjacency. The rows above the document are the keys that
   already carry a rule, each with its own key-size segmented control showing the RESOLVED direction
   and offering only `keyStopsWithin` the item's own, because a key can never travel further than
-  the item it lives in; the opened document leads with `limited by This remote` when that narrowing is
-  real — beside the "Click any key" hint, not on the resting card (P2): the line answers "why are
-  there fewer stops", a question only asked once the rules are on screen, and the resting card's
-  shape stays Settings' own.
+  the item it lives in; no caption
+  announces that narrowing (the `limited by This remote` line tried twice — on the resting card,
+  then beside the hint — and read both times as a limit on which keys can be ruled; the controls'
+  own stops say it better), and the resting card's shape stays Settings' own.
   Clicking an un-ruled key writes `Neither way` (the default is never stored, so a click that wrote
   the default would produce no rule, no row, and look like a dead control). Four shapes, decided in `keysRowModel`
   (panelModel.ts): the rules list, or one of three sentences naming a structural fact the user

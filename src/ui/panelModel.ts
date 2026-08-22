@@ -1,6 +1,5 @@
 import { BucketCounts, GroupState, GroupStatus, RemoteDiffEntry, RemoteState } from "../core/status";
 import { FileChanges, RemoteDirection, sharingClass, StorageSection, SyncGroup } from "../core/types";
-import { keyStopsWithin } from "../core/remoteRules";
 import { Availability, VersionDrift } from "../core/availability";
 import { carrierRef, refItemId } from "../core/itemKeys";
 import { ApplyItem, CaptureItem, StateAction } from "../core/ConfigSyncCore";
@@ -1059,7 +1058,7 @@ export function withheldChangeClause(remoteName: string, files: number): string 
 export type KeysRow =
   | { kind: "hidden" }
   | { kind: "note"; text: string }
-  | { kind: "rules"; keys: string[]; narrowed: boolean };
+  | { kind: "rules"; keys: string[] };
 
 export function keysRowModel(input: {
   item: RemoteDirection;
@@ -1071,10 +1070,11 @@ export function keysRowModel(input: {
   if (input.group.type === "folder") return { kind: "note", text: "A folder travels as a whole — the direction above covers every file in it." };
   if (input.encrypted) return { kind: "note", text: "This file is stored as one encrypted blob — it travels whole or not at all." };
   if (!input.group.path.endsWith(".json")) return { kind: "note", text: "No keys in this file — it travels whole or not at all." };
-  // `narrowed` drives the `limited by This remote` line inside the opened key document (beside the
-  // "Click any key" hint — the moment the question "why fewer stops" is actually asked): shown only
-  // when the item's own direction really does shorten what a key may be set to, never as decoration.
-  return { kind: "rules", keys: [...input.patterns], narrowed: keyStopsWithin(input.item).length < 4 };
+  // No narrowing note: the item's own direction shortening what a key may be set to shows itself
+  // on the key controls (keyStopsWithin drives their stops), and every sentence written for it was
+  // read as a limit on WHICH keys can be ruled — the control teaching by its own shape beats a
+  // caption that keeps being misread.
+  return { kind: "rules", keys: [...input.patterns] };
 }
 
 // The `On push` / `On pull` sentence when some of this item's keys stay behind. The half that

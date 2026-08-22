@@ -1466,7 +1466,6 @@ body.is-mobile .config-sync-tworow-chev { display: none; }
    between centered and top on every eye toggle (P1). */
 .config-sync-card-fieldrow:has(.config-sync-json-hint) .config-sync-explabel,
 .config-sync-card-fieldrow:has(.config-sync-keydoc-pathline) .config-sync-explabel { align-self: start; }
-.config-sync-keys-limited { color: var(--text-faint); font-size: var(--font-ui-smaller); margin-bottom: var(--size-2-1); }
 .config-sync-json-empty { color: var(--text-muted); font-size: var(--font-ui-smaller); }
 
 /* Legend: color dots + neutral words, sharing classes shared with the
