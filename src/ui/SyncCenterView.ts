@@ -178,26 +178,62 @@ const REMOTE_DIRECTION_ICON: Record<RemoteDirection, string> = {
   pull: "cloud-download",
   none: "circle-slash",
 };
-// The four-stop segmented control (acceptance B2-V1): every offered stop visible at once, the
-// current one lit, one click to change — no menu between the reader and the answer. `stops` is the
-// caller's because a KEY may only be set within its item's own subset (keyStopsWithin); a segment
-// this control does not draw is a stop that click could not honestly write.
-function renderDirectionSeg(
+// The direction control as the card's own icon+tooltip trigger (B2 reopened, superseding the
+// four-stop seg): one icon shows the CURRENT stop, the whole story rides the hover, and the stops
+// open as a menu with words. The seg was this card's single invented interaction — every other
+// rule control here is a trigger + menu — and the menu form also gives a KEY row's `Remove rule`
+// the same home Settings' rule menus have. `stops` is the caller's because a key may only be set
+// within its item's own subset (keyStopsWithin); a stop this menu does not list is one a click
+// could not honestly write. `is-set` marks a non-default answer, the trigger family's own accent
+// rule — a stored KEY rule never resolves to `both`, so a key trigger is always set.
+function renderDirectionMenu(
   parent: HTMLElement,
-  input: { stops: readonly RemoteDirection[]; current: RemoteDirection; ariaOf: (d: RemoteDirection) => string; onPick: (d: RemoteDirection) => void }
-): void {
-  const seg = parent.createSpan({ cls: "config-sync-dirseg" });
-  for (const d of input.stops) {
-    const btn = seg.createEl("button", {
-      cls: `config-sync-dirseg-btn${d === input.current ? " is-on" : ""}`,
-      attr: { "aria-label": input.ariaOf(d), "aria-pressed": d === input.current ? "true" : "false" },
-    });
-    setIcon(btn, REMOTE_DIRECTION_ICON[d]);
-    btn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      if (d !== input.current) input.onPick(d);
-    });
+  input: {
+    stops: readonly RemoteDirection[];
+    current: RemoteDirection;
+    aria: string;
+    onPick: (d: RemoteDirection) => void;
+    // The key rows' delete entry (W1): after a separator, warning-styled. null on the item row —
+    // an item's direction always exists; only a KEY RULE is a removable thing.
+    remove: (() => void) | null;
   }
+): void {
+  const trigger = parent.createSpan({
+    cls: `config-sync-sharingicon config-sync-card-trigger${input.current === "both" ? "" : " is-set"}`,
+    attr: { "aria-label": input.aria, role: "button", tabindex: "0" },
+  });
+  setIcon(trigger, REMOTE_DIRECTION_ICON[input.current]);
+  const open = (e: Event): void => {
+    e.stopPropagation();
+    const menu = new Menu();
+    for (const d of input.stops) {
+      menu.addItem((item) =>
+        item
+          .setTitle(REMOTE_DIRECTION_LABEL[d])
+          .setIcon(REMOTE_DIRECTION_ICON[d])
+          .setChecked(d === input.current)
+          .onClick(() => {
+            if (d !== input.current) input.onPick(d);
+          })
+      );
+    }
+    const remove = input.remove;
+    if (remove !== null) {
+      menu.addSeparator();
+      menu.addItem((item) => item.setTitle("Remove rule").setIcon("x").setWarning(true).onClick(remove));
+    }
+    if (e instanceof MouseEvent) menu.showAtMouseEvent(e);
+    else {
+      const r = trigger.getBoundingClientRect();
+      menu.showAtPosition({ x: r.left, y: r.bottom + 4 });
+    }
+  };
+  trigger.addEventListener("click", open);
+  trigger.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    open(e);
+  });
 }
 
 // The row's own chip for a non-default stop (FATE_CHIP_ICON carries their glyphs).
@@ -1909,38 +1945,13 @@ export class SyncCenterView extends ItemView {
     // looking at, then filter it. It lives OUTSIDE the section container so a keystroke's rebuild
     // never touches it.
     this.renderMasthead(side);
-    const searchWrap = side.createDiv({ cls: "config-sync-search-wrap" });
-    const searchEl = searchWrap.createEl("input", {
-      type: "search",
-      cls: "config-sync-side-search",
-      attr: { placeholder: "Filter by name…" },
-    });
-    searchEl.value = this.search;
-    this.qac.attach(searchEl);
-    // The section list lives in its own container so a keystroke can refresh its hit-count badges in
-    // place — the search input (and the autocomplete anchored to it) stays put, keeping focus and
-    // never blinking mid-type.
+    // No search here (V2/V-a): the ONE search lives in the main region's toolbar beside the
+    // filter pills — where the compact layout always had it — because search and the pills filter
+    // the same list. The sidebar is pure navigation: masthead → sections → History. The section
+    // list keeps its own container so the toolbar search's keystrokes can refresh its hit-count
+    // badges in place without touching the masthead.
     this.sideSectionEl = side.createDiv({ cls: "config-sync-side-section" });
     this.renderSectionEntries(this.sideSectionEl);
-    searchEl.addEventListener("input", () => {
-      const wasSearching = this.searching();
-      this.search = searchEl.value; // the field itself is native/instant — never waits on the render below
-      if (!wasSearching && this.searching()) {
-        this.filter = "all"; // searching means "find this item"
-        this.expandAllTypeSections(); // transition into search: expand once so hits are discoverable
-      }
-      // The heavy part — sidebar hit badges + the whole main pane
-      // (pills, list, sections all read this.search) — is debounced so a fast typist's in-between
-      // keystrokes never pay for a render; `debounceSearchRender` always reads live `this.search`
-      // when it fires, so the LAST keystroke in a burst is the one that settles, never a stale one.
-      this.debounceSearchRender(() => {
-        if (this.sideSectionEl !== null) {
-          this.sideSectionEl.empty();
-          this.renderSectionEntries(this.sideSectionEl);
-        }
-        this.renderMainRegion();
-      });
-    });
   }
 
   // The two-line masthead (acceptance T2/V3a): the self card and the View picker merged into ONE
@@ -2616,16 +2627,15 @@ export class SyncCenterView extends ItemView {
     const pillPool = this.countable(inSection);
     const bar = main.createDiv({ cls: "config-sync-mainbar" });
     const pillRow = bar.createDiv({ cls: "config-sync-fpillrow" });
-    let searchEl: HTMLInputElement | null = null;
-    if (this.compact) {
-      const searchWrap = bar.createDiv({ cls: "config-sync-search-wrap" });
-      searchEl = searchWrap.createEl("input", {
-        type: "search",
-        cls: "config-sync-mainbar-search",
-        attr: { placeholder: "Filter by name…" },
-      });
-      searchEl.value = this.search;
-    }
+    // The one search, both widths (V2/V-a): search and the pills filter the same list, so they
+    // share this toolbar; the sidebar (which the compact layout never had) is pure navigation.
+    const searchWrap = bar.createDiv({ cls: "config-sync-search-wrap" });
+    const searchEl: HTMLInputElement = searchWrap.createEl("input", {
+      type: "search",
+      cls: "config-sync-mainbar-search",
+      attr: { placeholder: "Filter by name…" },
+    });
+    searchEl.value = this.search;
     const selectAll = bar.createEl("input", { type: "checkbox", cls: "config-sync-selectall", attr: { "aria-label": "Select all visible items" } });
     const sectionsHost = main.createDiv();
 
@@ -2726,9 +2736,10 @@ export class SyncCenterView extends ItemView {
     renderSectionsBody();
     this.wireGlobalSelectAll(selectAll, pillPool);
 
-    // The compact search co-renders everything except its own input element, so the soft
-    // keyboard stays open while pills, sections and select-all track the search.
-    if (searchEl !== null) {
+    // The search co-renders everything except its own input element, so focus (and the soft
+    // keyboard on mobile) stays put while pills, sections, the sidebar's hit badges and
+    // select-all all track the search.
+    {
       const input = searchEl;
       input.addEventListener("input", () => {
         const wasSearching = this.searching();
@@ -2741,6 +2752,10 @@ export class SyncCenterView extends ItemView {
         // Same trailing debounce as the desktop sidebar search — this
         // is the mobile/narrow-pane path, at least as latency-sensitive as desktop.
         this.debounceSearchRender(() => {
+          if (this.sideSectionEl !== null) {
+            this.sideSectionEl.empty();
+            this.renderSectionEntries(this.sideSectionEl);
+          }
           renderPills();
           renderSectionsBody();
           this.refreshGlobalSelectAll(selectAll, pillPool);
@@ -3458,16 +3473,17 @@ export class SyncCenterView extends ItemView {
     const current = itemDirection(remote.items, ref);
     const name = relation.name;
     const row = this.cardRowShell("This remote", true);
-    renderDirectionSeg(row.createSpan({ cls: "config-sync-cardrow-ctl" }), {
+    renderDirectionMenu(row.createSpan({ cls: "config-sync-cardrow-ctl" }), {
       stops: REMOTE_DIRECTION_ORDER,
       current,
-      ariaOf: (d) => `${REMOTE_DIRECTION_LABEL[d]} — which way ${name} exchanges this item`,
+      aria: `${REMOTE_DIRECTION_LABEL[current]} — which way ${name} exchanges this item`,
       // No explicit reload: the write ends in refreshRemoteChecks, whose notifies land here as
       // ONE debounced reload — a second reload from this handler was one more full repaint.
       onPick: (d) => {
         this.anchorCard(r.group.name);
         void this.host.setRemoteItemDirection(name, ref, d);
       },
+      remove: null,
     });
     fields.appendChild(row);
   }
@@ -3529,16 +3545,22 @@ export class SyncCenterView extends ItemView {
     const row = value.createDiv({ cls: "config-sync-keyrule-row" });
     row.createSpan({ cls: "config-sync-keyrule-name", text: pattern });
     const current = keyDirection(remote.items, ref, pattern);
-    // The item row's segmented control at key size, drawing ONLY the stops this item still allows
-    // (keyStopsWithin): a segment offering more would let a click write a rule the reader resolves
+    // The item row's trigger at key scope, listing ONLY the stops this item still allows
+    // (keyStopsWithin): a menu offering more would let a click write a rule the reader resolves
     // to something else, i.e. a control lying about its own effect.
-    renderDirectionSeg(row.createSpan({ cls: "config-sync-keyrule-ctl" }), {
+    renderDirectionMenu(row.createSpan({ cls: "config-sync-keyrule-ctl" }), {
       stops: keyStopsWithin(item),
       current,
-      ariaOf: (d) => `${REMOTE_DIRECTION_LABEL[d]} — which way ${remoteName} exchanges ${pattern}`,
+      aria: `${REMOTE_DIRECTION_LABEL[current]} — which way ${remoteName} exchanges ${pattern}`,
       onPick: (d) => {
         this.anchorCard(groupName);
         void this.host.setRemoteKeyDirection(remoteName, ref, pattern, d); // reload arrives via the debounced notify
+      },
+      // Remove rule (W1): writing the default IS the delete — withKeyDirection never stores a
+      // `both` entry — and the key goes back to following its item.
+      remove: () => {
+        this.anchorCard(groupName);
+        void this.host.setRemoteKeyDirection(remoteName, ref, pattern, "both");
       },
     });
   }

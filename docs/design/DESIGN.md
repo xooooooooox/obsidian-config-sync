@@ -519,8 +519,7 @@ noted):
 - **Sidebar** `config-sync-side-item/-side-badge` — sections with tiny count
   badges; active = accent tint. **The sidebar answers one question only: which items to show.**
   Which RELATION is on screen is the `View` picker's question — since T2/V3a the picker is the
-  SECOND ROW of the two-line masthead (`config-sync-masthead`) that LEADS the whole sidebar, above
-  the search box (choose what you look at, then filter it). Its closed control reads icon + SHORT
+  SECOND ROW of the two-line masthead (`config-sync-masthead`) that LEADS the whole sidebar. Its closed control reads icon + SHORT
   name (`-view-ic` + `relationShortLabel`: `monitor` + `This device`, or `cloud` + the remote's
   name — cloud is already this panel's remote glyph family, one mark for every transport type),
   with the full relation (`relationLabel`) and the `relationHint` sentence in hover/aria. The
@@ -599,7 +598,11 @@ noted):
   a remote view's masthead it read as that remote's summary. The old `plugin settings ↔ store`
   sublabel lives in the self pane the row opens. The pill never wraps (nowrap); a narrow masthead
   ellipsizes the title instead. Grouping is by `config-sync-side-divider` hairlines alone:
-  masthead / search / scope list / History, with NO group heads anywhere. Re-checking remotes
+  masthead / scope list / History, with NO group heads anywhere. The sidebar carries NO search
+  (V2/V-a): the one search box lives in the main region's toolbar beside the filter pills at every
+  width — search and the pills filter the same list, the compact layout always kept it there, and
+  two homes for one control was a fork; the toolbar search's keystrokes still refresh the
+  sidebar's hit-count badges in place. Re-checking remotes
   belongs to the main region's global refresh button alone (it re-scans local state AND re-checks
   every remote; its tooltip carries the refreshed-age). **Switcher** `config-sync-switcher` —
   compact replacement for the section list alone: the masthead rides above it unchanged, and its
@@ -803,12 +806,16 @@ noted):
   `files` glyph (`is-neutral`) — the direction colors all promise a run, and this one promises none.
   Every row's card carries a `This remote` row — four stops, `Both ways` (the
   default, and the only one that leaves the row without a chip) / `Push only` / `Pull only` /
-  `Neither way` — rendered as a SEGMENTED control on the control track (`config-sync-dirseg`,
-  acceptance B2-V1): every stop visible at once as its transport glyph (`arrow-up-down`,
-  `cloud-upload`, `cloud-download`, `circle-slash`), the current one lit in accent, one click to
-  change, stop names in hover/aria. Each key rule's row carries the same control at key size,
-  drawing ONLY `keyStopsWithin` the item's own direction. A row with no ref carries no such
-  control, because a rule is stored under a ref. Carrier divergence is then that row's own card row (`On/off`, the per-plugin
+  `Neither way` — as an icon+tooltip TRIGGER on the control track (`renderDirectionMenu`; B2
+  reopened in acceptance, superseding the four-stop seg): the current stop's transport glyph
+  (`arrow-up-down`, `cloud-upload`, `cloud-download`, `circle-slash`) in the card-trigger family
+  (`is-set` when non-default), the full sentence in hover/aria, and the stops as a MENU with words
+  — the seg was this card's one invented interaction, and every other rule control here is a
+  trigger + menu. Each key rule's row carries the same trigger, its menu listing ONLY
+  `keyStopsWithin` the item's own direction, plus — after a separator — a warning-styled
+  `Remove rule` (W1: the same home Settings' rule menus give it; writing the default IS the
+  delete, and the key follows its item again). A row with no ref carries no such control, because
+  a rule is stored under a ref. Carrier divergence is then that row's own card row (`On/off`, the per-plugin
   flip narration, `config-sync-remote-flip-value`); per-file differences are that item's `Files` row, each entry
   opening the store-vs-remote content diff. Companion families fold the same way here: companion
   diff entries merge into their parent's entry, each file re-pathed under a `<companion>/` prefix
@@ -830,9 +837,9 @@ noted):
   `Settings sync` → `Files` → `On/off` → `Key rules` → `More` last; the device card, with no
   `This remote` row, keeps `Settings sync` at its tail), because a key rule acts on keys inside
   the very files listed above it — subordination made adjacency. The rows above the document are the keys that
-  already carry a rule, each with its own key-size segmented control showing the RESOLVED direction
-  and offering only `keyStopsWithin` the item's own, because a key can never travel further than
-  the item it lives in; no caption
+  already carry a rule, each with its own direction trigger (menu incl. `Remove rule`, above)
+  showing the RESOLVED direction and offering only `keyStopsWithin` the item's own, because a key
+  can never travel further than the item it lives in; no caption
   announces that narrowing (the `limited by This remote` line tried twice — on the resting card,
   then beside the hint — and read both times as a limit on which keys can be ruled; the controls'
   own stops say it better), and the resting card's shape stays Settings' own.

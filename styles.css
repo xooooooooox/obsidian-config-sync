@@ -1388,7 +1388,6 @@ body.is-mobile .config-sync-tworow-chev { display: none; }
 /* Upright, aligned to the title's own start — italic stays the placeholder/empty-state voice,
    and there is no chevron here to indent under (DESIGN.md's Leftover section). */
 .config-sync-section-note { color: var(--text-faint); font-size: var(--font-ui-smaller); padding: 4px 0 2px; }
-.config-sync-side-search { width: 100%; margin-bottom: 6px; }
 .config-sync-side-badge.is-neutral { background: var(--background-modifier-hover); color: var(--text-normal); }
 
 /* Settings-mutation rollback: inline per-row error when a write fails. */
@@ -1461,14 +1460,6 @@ body.is-mobile .config-sync-tworow-chev { display: none; }
    controls (Settings sync, More) are borderless icons on the row's right edge, and a bordered
    segment among them read as a foreign widget (acceptance J5). Only the ACTIVE stop keeps a
    filled pill; the rest stay faint until hovered. */
-.config-sync-dirseg { display: inline-flex; gap: 2px; align-items: center; }
-.config-sync-dirseg-btn { all: unset; cursor: pointer; display: inline-flex; align-items: center; padding: 3px 5px; border-radius: 5px; color: var(--text-faint); opacity: 0.6; }
-.config-sync-dirseg-btn:hover { color: var(--text-normal); background: var(--background-modifier-hover); opacity: 1; }
-.config-sync-dirseg-btn:focus-visible { box-shadow: inset 0 0 0 2px var(--interactive-accent); opacity: 1; }
-.config-sync-dirseg-btn.is-on { background: rgba(var(--interactive-accent-rgb), 0.18); color: var(--interactive-accent); opacity: 1; }
-.config-sync-dirseg-btn svg { width: 13px; height: 13px; }
-.config-sync-keyrule-ctl .config-sync-dirseg-btn { padding: 2px 4px; }
-.config-sync-keyrule-ctl .config-sync-dirseg-btn svg { width: 12px; height: 12px; }
 
 /* The Key rules row's own filename line (acceptance J4): the same pathline + eye Settings uses,
    scoped so the value column's flex layout applies. */
