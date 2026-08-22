@@ -1452,7 +1452,10 @@ body.is-mobile .config-sync-tworow-chev { display: none; }
    also lines the chips up in one column, the way the label/control rows above them do. */
 .config-sync-keyrule-name { flex: 0 1 auto; min-width: 210px; max-width: 100%; font-family: var(--font-monospace); font-size: var(--font-ui-smaller); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .config-sync-keyrule-row { justify-content: flex-start; }
-.config-sync-keyrule-ctl { margin-left: auto; display: inline-flex; }
+/* margin-right matches .config-sync-cardrow-ctl's chev-slot: this control lives inside the value
+   cell (which runs to the row's edge), and without the same reserve its seg stuck out 14px past
+   every other row's control rail (V1). */
+.config-sync-keyrule-ctl { margin-left: auto; margin-right: var(--cs-chev-slot); display: inline-flex; }
 
 /* The four-stop control (This remote / each key rule): plain icons, no box — the card's other
    controls (Settings sync, More) are borderless icons on the row's right edge, and a bordered
