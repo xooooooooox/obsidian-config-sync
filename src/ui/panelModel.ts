@@ -899,8 +899,20 @@ export function relationKey(r: PanelRelation): string {
   return r.kind === "device" ? "device" : `remote:${r.name}`;
 }
 
+// The long form, kept for tooltips and aria: it spells the whole relation. The picker's CLOSED
+// control and its dropdown rows wear the short form below — you are choosing what to look at, and
+// the counterpart (the store) is the same on every row, so naming it on each is noise.
 export function relationLabel(r: PanelRelation): string {
   return r.kind === "device" ? "This device ↔ store" : `store ↔ ${r.name}`;
+}
+
+export function relationShortLabel(r: PanelRelation): string {
+  return r.kind === "device" ? "This device" : r.name;
+}
+
+// What hovering the closed picker says — a sentence, not the arrow shorthand.
+export function relationHint(r: PanelRelation): string {
+  return r.kind === "device" ? "Comparing this device with your store" : `Comparing your store with ${r.name}`;
 }
 
 export function destinationKey(d: PanelDestination): string {

@@ -92,7 +92,8 @@ import {
   foldStateKey,
   PanelDestination,
   PanelRelation,
-  relationLabel,
+  relationHint,
+  relationShortLabel,
   viewOptions,
   ViewBadge,
   keysRowModel,
@@ -718,7 +719,7 @@ export class SyncCenterView extends ItemView {
     };
     const countable = this.countable(this.rows());
     const needs: SidebarRowNeed[] = [
-      { name: relationLabel(this.relation), badges: 1 },
+      { name: relationShortLabel(this.relation), badges: 3 },
       { name: "All items", badges: badgesFor(countable) },
     ];
     for (const cat of ITEM_SECTION_ORDER) {
@@ -1516,7 +1517,7 @@ export class SyncCenterView extends ItemView {
     const active = this.destination.kind === "self";
     // A distinct hero card, not a stray list row: this is the plugin syncing its own settings to
     // the store — a meta destination separate from the config items below. The icon tile, title +
-    // sublabel, and status pill echo the self-chip in the header and the self pane this opens.
+    // sublabel, and status pill echo the pinned sidebar row and the self pane this opens.
     const card = container.createDiv({ cls: `config-sync-side-self${active ? " is-active" : ""}` });
     const tile = card.createSpan({ cls: "config-sync-side-self-ic" });
     setIcon(tile, "settings-2");
@@ -1800,6 +1801,9 @@ export class SyncCenterView extends ItemView {
 
   private renderSidebar(shell: HTMLElement): void {
     const side = shell.createDiv({ cls: "config-sync-side" });
+    // The picker leads (acceptance C3-a): choose what you are looking at, then filter it. It lives
+    // OUTSIDE the section container so a keystroke's rebuild never touches it.
+    this.renderViewPicker(side);
     const searchWrap = side.createDiv({ cls: "config-sync-search-wrap" });
     const searchEl = searchWrap.createEl("input", {
       type: "search",
@@ -1812,7 +1816,7 @@ export class SyncCenterView extends ItemView {
     // place — the search input (and the autocomplete anchored to it) stays put, keeping focus and
     // never blinking mid-type.
     this.sideSectionEl = side.createDiv({ cls: "config-sync-side-section" });
-    this.renderSectionEntries(this.sideSectionEl);
+    this.renderSectionEntries(this.sideSectionEl, { withPicker: false });
     searchEl.addEventListener("input", () => {
       const wasSearching = this.searching();
       this.search = searchEl.value; // the field itself is native/instant — never waits on the render below
@@ -1827,7 +1831,7 @@ export class SyncCenterView extends ItemView {
       this.debounceSearchRender(() => {
         if (this.sideSectionEl !== null) {
           this.sideSectionEl.empty();
-          this.renderSectionEntries(this.sideSectionEl);
+          this.renderSectionEntries(this.sideSectionEl, { withPicker: false });
         }
         this.renderMainRegion();
       });
@@ -1861,8 +1865,20 @@ export class SyncCenterView extends ItemView {
     const current = opts.find((o) => o.active) ?? opts[0];
     if (current === undefined) return;
     const box = container.createDiv({ cls: "config-sync-view-picker" });
-    const head = box.createDiv({ cls: `config-sync-view-current${this.viewPickerOpen ? " is-open" : ""}` });
-    head.createSpan({ cls: "config-sync-view-label", text: current.label });
+    const head = box.createDiv({
+      cls: `config-sync-view-current${this.viewPickerOpen ? " is-open" : ""}`,
+      attr: { "aria-label": relationHint(current.relation) },
+    });
+    // Icon + the SHORT name (acceptance A2-V1): you are choosing what to look at, and the store —
+    // the same counterpart on every row — moved into the hover sentence. `cloud` is already this
+    // panel's remote-direction glyph family, so it is the one mark for every remote regardless of
+    // transport type.
+    setIcon(head.createSpan({ cls: "config-sync-view-ic" }), current.relation.kind === "device" ? "monitor" : "cloud");
+    head.createSpan({ cls: "config-sync-view-label", text: relationShortLabel(current.relation) });
+    // The current view's own counts ride the closed control (acceptance C3-a): the strip that used
+    // to sit in the panel header counted exactly this view, so this row is where it belongs.
+    const tail = head.createSpan({ cls: "config-sync-view-counts" });
+    this.renderPickerCounts(tail);
     setIcon(head.createSpan({ cls: "config-sync-view-chev" }), "chevrons-up-down");
     head.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -1872,8 +1888,9 @@ export class SyncCenterView extends ItemView {
     if (!this.viewPickerOpen) return;
     const menu = box.createDiv({ cls: "config-sync-view-menu" });
     for (const opt of opts) {
-      const row = menu.createDiv({ cls: `config-sync-view-opt${opt.active ? " is-active" : ""}` });
-      row.createSpan({ cls: "config-sync-view-label", text: opt.label });
+      const row = menu.createDiv({ cls: `config-sync-view-opt${opt.active ? " is-active" : ""}`, attr: { "aria-label": relationHint(opt.relation) } });
+      setIcon(row.createSpan({ cls: "config-sync-view-ic" }), opt.relation.kind === "device" ? "monitor" : "cloud");
+      row.createSpan({ cls: "config-sync-view-label", text: relationShortLabel(opt.relation) });
       for (const b of opt.badges) this.renderViewBadge(row, b);
       row.addEventListener("click", () => {
         this.relation = opt.relation;
@@ -1882,6 +1899,61 @@ export class SyncCenterView extends ItemView {
         // A relation change never moves the destination: the sidebar's answer is still the user's.
         this.render(this.renderGen);
       });
+    }
+  }
+
+  // The current view's own count strip, on the picker's closed control (acceptance C3-a) — the
+  // pills the panel header used to carry, moved to the row that names what they count. Same
+  // producers, same zero-suppression rules; only `ok` shows unconditionally, its long precedent.
+  private renderPickerCounts(tail: HTMLElement): void {
+    const counts = this.presentedCounts(this.countable(this.rows()));
+    const { up, down, ok, excluded } = counts;
+    const none = nonePresented(counts, this.relation);
+    if (up > 0) {
+      renderActionCount(
+        tail.createSpan({ cls: "config-sync-pill is-up", attr: { "aria-label": `${up} item${up === 1 ? "" : "s"} to capture` } }),
+        "capture", up,
+      );
+    }
+    if (down > 0) {
+      renderActionCount(
+        tail.createSpan({ cls: "config-sync-pill is-down", attr: { "aria-label": `${down} item${down === 1 ? "" : "s"} to apply` } }),
+        "apply", down,
+      );
+    }
+    renderFoldCount(
+      tail.createSpan({ cls: "config-sync-pill is-ok", attr: { "aria-label": `${ok} item${ok === 1 ? "" : "s"} in sync` } }),
+      FATE_PILL_FOLD.ok, ok,
+    );
+    if (excluded > 0) {
+      renderFoldCount(
+        tail.createSpan({
+          cls: "config-sync-pill is-excluded",
+          attr: { "aria-label": `${excluded} item${excluded === 1 ? "" : "s"} not synced on this device` },
+        }),
+        FATE_PILL_FOLD.excluded, excluded,
+      );
+    }
+    if (none > 0) {
+      renderFoldCount(
+        tail.createSpan({
+          cls: "config-sync-pill is-none",
+          attr: { "aria-label": `${none} item${none === 1 ? "" : "s"} with no settings yet` },
+        }),
+        FATE_PILL_FOLD.none, none,
+      );
+    }
+    // The remote relation's own bucket (spec 5.1) — uncoloured on purpose: every coloured pill in
+    // this strip promises a run, and this one reports what could not be read.
+    if (this.relation.kind === "remote" && counts.locked > 0) {
+      const n = counts.locked;
+      renderFoldCount(
+        tail.createSpan({
+          cls: "config-sync-pill is-unknown",
+          attr: { "aria-label": `${n} item${n === 1 ? "" : "s"} that can't be compared` },
+        }),
+        FATE_PILL_FOLD.locked, n,
+      );
     }
   }
 
@@ -1894,8 +1966,8 @@ export class SyncCenterView extends ItemView {
     renderActionCount(row.createSpan({ cls: `config-sync-side-badge ${ACTION_COLOR_CLASS[b.kind]}` }), b.kind, b.count);
   }
 
-  private renderSectionEntries(container: HTMLElement): void {
-    this.renderViewPicker(container);
+  private renderSectionEntries(container: HTMLElement, opts: { withPicker: boolean }): void {
+    if (opts.withPicker) this.renderViewPicker(container);
     container.createDiv({ cls: "config-sync-side-divider" });
     this.renderSelfEntry(container);
     // No group heads anywhere in the sidebar: the self card's own "plugin settings ↔ store"
@@ -1993,55 +2065,21 @@ export class SyncCenterView extends ItemView {
     });
     if (this.switcherOpen) {
       const menu = shell.createDiv({ cls: "config-sync-switcher-menu" });
-      this.renderSectionEntries(menu);
+      this.renderSectionEntries(menu, { withPicker: true });
     }
   }
 
-  // The self chip for the global status bar (Layout B): Config Sync's own state,
-  // always shown (green check when in sync) so mobile can confirm self status
-  // even with the sidebar collapsed. Reuses selfStatePill so the pane and the
-  // header can't drift. Clicking opens the self pane.
-  private renderSelfChip(parent: HTMLElement): void {
-    const info = this.selfInfo;
-    if (info === null) return;
-    const pill = this.selfStatePill(info);
-    if (pill === null) return;
-    const chip = parent.createSpan({ cls: `config-sync-self-chip ${pill.cls}`, attr: { "aria-label": `Config Sync: ${pill.text}` } });
-    const ic = chip.createSpan({ cls: "config-sync-self-chip-ic" });
-    setIcon(ic, pill.cls === "is-ok" ? "check" : pill.cls === "is-behind" ? "arrow-down-to-line" : "settings");
-    chip.createSpan({ text: pill.text });
-    chip.addEventListener("click", () => {
-      this.destination = { kind: "self" };
-      this.switcherOpen = false;
-      this.render(this.renderGen);
-    });
-  }
-
   private renderHeader(): void {
-    // No title span: the pane header already reads "Sync Center".
+    // No title span: the pane header already reads "Sync Center". This strip carries the FLEET
+    // half only (spec 5.5's remote aggregate) plus the refresh — the current view's own counts
+    // moved onto the View picker's closed control (acceptance C3-a), and the self chip retired
+    // with them: the pinned sidebar row already is the self destination (acceptance A3).
     const head = this.contentEl.createDiv({ cls: "config-sync-center-head" });
-    this.renderSelfChip(head);
-    if (this.selfInfo !== null) head.createSpan({ cls: "config-sync-head-divider" });
-    const counts = this.presentedCounts(this.countable(this.rows()));
-    const { up, down, ok, excluded } = counts;
-    const none = nonePresented(counts, this.relation);
     // Same producer the status bar reads (spec 5.5): these two pills count ITEMS waiting with the
     // remotes, and `spread` — how many remotes they came from — rides in their tooltips.
     const checks = this.host.remotes().map((r) => this.host.remoteCheck(r.name)?.check).filter((c): c is RemoteCheck => c !== undefined);
     const { push, pull, remotes: spread } = sumRemoteItemCounts(checks);
     const pills = head.createSpan({ cls: "config-sync-report-pills" });
-    if (up > 0) {
-      renderActionCount(
-        pills.createSpan({ cls: "config-sync-pill is-up", attr: { "aria-label": `${up} item${up === 1 ? "" : "s"} to capture` } }),
-        "capture", up,
-      );
-    }
-    if (down > 0) {
-      renderActionCount(
-        pills.createSpan({ cls: "config-sync-pill is-down", attr: { "aria-label": `${down} item${down === 1 ? "" : "s"} to apply` } }),
-        "apply", down,
-      );
-    }
     if (push > 0) {
       renderActionCount(
         pills.createSpan({
@@ -2058,45 +2096,6 @@ export class SyncCenterView extends ItemView {
           attr: { "aria-label": `${pull} item${pull === 1 ? "" : "s"} to pull across ${spread} remote${spread === 1 ? "" : "s"}` },
         }),
         "pull", pull,
-      );
-    }
-    renderFoldCount(
-      pills.createSpan({ cls: "config-sync-pill is-ok", attr: { "aria-label": `${ok} item${ok === 1 ? "" : "s"} in sync` } }),
-      FATE_PILL_FOLD.ok, ok,
-    );
-    // Mirrors the ok/none pills' own shape — unconditional-count vs.
-    // N=0-suppressed is inconsistent between ok (always shown) and none (suppressed) even today;
-    // `excluded` follows `none`'s precedent (suppressed at 0), matching the explicit
-    // empty-state rule for the FILTER pill, applied consistently here too.
-    if (excluded > 0) {
-      renderFoldCount(
-        pills.createSpan({
-          cls: "config-sync-pill is-excluded",
-          attr: { "aria-label": `${excluded} item${excluded === 1 ? "" : "s"} not synced on this device` },
-        }),
-        FATE_PILL_FOLD.excluded, excluded,
-      );
-    }
-    if (none > 0) {
-      renderFoldCount(
-        pills.createSpan({
-          cls: "config-sync-pill is-none",
-          attr: { "aria-label": `${none} item${none === 1 ? "" : "s"} with no settings yet` },
-        }),
-        FATE_PILL_FOLD.none, none,
-      );
-    }
-    // The remote relation's own bucket (spec 5.1). Suppressed at 0 like the two above it, and
-    // deliberately uncoloured: every coloured pill in this strip promises a run, and this one
-    // promises none — it reports what could not be read, not what is waiting.
-    if (this.relation.kind === "remote" && counts.locked > 0) {
-      const n = counts.locked;
-      renderFoldCount(
-        pills.createSpan({
-          cls: "config-sync-pill is-unknown",
-          attr: { "aria-label": `${n} item${n === 1 ? "" : "s"} that can't be compared` },
-        }),
-        FATE_PILL_FOLD.locked, n,
       );
     }
     // Manual refresh: re-scans local state, catching plugin toggles made in Obsidian's

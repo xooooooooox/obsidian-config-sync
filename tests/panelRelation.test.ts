@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { destinationKey, excludedLineText, foldStateKey, withheldChangeClause, insyncLineText, PanelDestination, PanelRelation, relationCopy, relationKey, relationLabel, viewOptions } from "../src/ui/panelModel";
+import { destinationKey, excludedLineText, foldStateKey, withheldChangeClause, insyncLineText, PanelDestination, PanelRelation, relationCopy, relationHint, relationKey, relationLabel, relationShortLabel, viewOptions } from "../src/ui/panelModel";
 
 describe("relationLabel", () => {
   it("names the two relations exactly as the design says", () => {
@@ -153,5 +153,14 @@ describe("withheldChangeClause", () => {
 
   it("keeps the singular honest", () => {
     expect(withheldChangeClause("main", 1)).toBe("main changed 1 file. Push only, so they stay there.");
+  });
+});
+
+describe("relation short labels — the picker names what you look at", () => {
+  it("shortens without losing the counterpart from hover", () => {
+    expect(relationShortLabel({ kind: "device" })).toBe("This device");
+    expect(relationShortLabel({ kind: "remote", name: "main" })).toBe("main");
+    expect(relationHint({ kind: "device" })).toBe("Comparing this device with your store");
+    expect(relationHint({ kind: "remote", name: "main" })).toBe("Comparing your store with main");
   });
 });
