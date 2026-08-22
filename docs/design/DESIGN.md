@@ -823,9 +823,10 @@ noted):
   it. NO legend underneath, and NO narrowing caption either: the colour lesson is taught by the
   rule rows sitting beside their own keys, and the item's direction shortening a key's stops shows
   itself on the key controls (every caption written for it was misread as a limit on WHICH keys
-  can be ruled). Settings keeps its own legend; its click answers a different question. The row sits DIRECTLY under `Files` (card order: state → `This remote` → `Files` →
-  `On/off` → `Key rules` → entrances last), because a key rule acts on keys inside the very files
-  listed above it — subordination made adjacency. The rows above the document are the keys that
+  can be ruled). Settings keeps its own legend; its click answers a different question. The row sits DIRECTLY under `Files` (card order since T1: state → `This remote` →
+  `Settings sync` → `Files` → `On/off` → `Key rules` → `More` last; the device card, with no
+  `This remote` row, keeps `Settings sync` at its tail), because a key rule acts on keys inside
+  the very files listed above it — subordination made adjacency. The rows above the document are the keys that
   already carry a rule, each with its own key-size segmented control showing the RESOLVED direction
   and offering only `keyStopsWithin` the item's own, because a key can never travel further than
   the item it lives in; no caption

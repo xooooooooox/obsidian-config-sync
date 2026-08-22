@@ -3387,10 +3387,14 @@ export class SyncCenterView extends ItemView {
       }
     });
 
-    // Acceptance C2-V3's order: the relation's own rule first (This remote), then the file
-    // evidence with its subordinate Key rules adjacent — a key rule acts on keys INSIDE the files
-    // listed right above it — and the entrances (Settings sync, More) keep the tail.
-    if (remoteRelation) this.renderThisRemoteRow(fields, r);
+    // Acceptance C2-V3's order, amended by T1: the relation's own rules first — This remote, with
+    // Settings sync directly under it — then the file evidence with its subordinate Key rules
+    // adjacent (a key rule acts on keys INSIDE the files listed right above it), and More keeps
+    // the tail. The device card has no This remote row and keeps Settings sync at its tail.
+    if (remoteRelation) {
+      this.renderThisRemoteRow(fields, r);
+      this.renderSettingsSyncRow(fields, r);
+    }
     const changes = this.familyChanges(r);
     // An unresolved conflict has no direction yet, so the FILES row must not be gated on one:
     // gating it asks the user to pick a side while showing nothing to pick it from, revealing the
@@ -3434,7 +3438,7 @@ export class SyncCenterView extends ItemView {
       this.renderEnablementRow(fields, r);
     }
 
-    this.renderSettingsSyncRow(fields, r);
+    if (!remoteRelation) this.renderSettingsSyncRow(fields, r);
     this.renderMoreRow(fields, name);
 
     if (name === "hotkeys") {
