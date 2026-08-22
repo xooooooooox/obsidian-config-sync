@@ -1458,7 +1458,11 @@ body.is-mobile .config-sync-tworow-chev { display: none; }
 
 /* A tall value (the key rules plus the document) puts its label at the top, like every other
    card row's single line does — centring it against a 20-line document loses the pairing. */
-.config-sync-card-fieldrow:has(.config-sync-json-hint) .config-sync-explabel { align-self: start; }
+/* Top-aligned in BOTH of the document's states, keyed off the pathline (always present), not the
+   hint (rendered only while the eye is open) — anchoring on the hint alone made the label jump
+   between centered and top on every eye toggle (P1). */
+.config-sync-card-fieldrow:has(.config-sync-json-hint) .config-sync-explabel,
+.config-sync-card-fieldrow:has(.config-sync-keydoc-pathline) .config-sync-explabel { align-self: start; }
 .config-sync-keys-limited { color: var(--text-faint); font-size: var(--font-ui-smaller); margin-bottom: var(--size-2-1); }
 .config-sync-json-empty { color: var(--text-muted); font-size: var(--font-ui-smaller); }
 
