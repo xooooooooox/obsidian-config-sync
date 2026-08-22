@@ -664,6 +664,15 @@ noted):
   with no other verb it stands alone. Such a card renders **no FILES row, correctly**: nothing
   in any file changes, and the sentence says so. The generic `Captures files` fallback must
   never be what a version-drift row degrades to — it promises an edit the run will not make.
+  Under a REMOTE relation the family is also the staging unit end to end: the row's state
+  reads companion verdicts too (`remoteRowStatuses`'s `companionRefsOf` — a family whose
+  only waiting member is a companion is store-newer, never in-sync), and every ref list
+  crossing the pull/push seam is family-expanded (`familyRefs`: parent + companion refs),
+  so an unstaged family withholds its companions' files and a staged one carries them. A
+  directional remote row whose companions contribute file diffs wears a faint
+  `N files` note after its name (`-row-files`, `--text-faint`) — the count of
+  companion-contributed rels in the folded evidence; the expanded card's FILES section
+  lists them.
   A conflict on any member,
   or actionable members split across both directions, renders the family `⚠ Changed on
   both sides` and reuses the existing Resolve grammar (`Use theirs ↓` / `Keep mine ↑`) at
@@ -1151,6 +1160,23 @@ noted):
   unchanged runs into `-cm-dgap` "⋯ N unchanged lines ⋯" rows); exclude-extras
   `-exclude-row/-modal-buttons`. Cold-start adopt is not a banner: the self pane (above)
   renders the coldstart state and drives it via `adoptConfiguration`.
+  Conflict rows group by provenance (`-cm-sect/-sect-label/-sect-n/-sect-why`, `is-came`
+  on the second section): `On items you picked · N`, then `Came along with the pull · N`
+  with the fixed subtitle `a pull compares the whole remote, and these also changed on
+  both sides` — the came-along label wears `--color-orange`. Headers appear only when
+  the list is MIXED: all-picked conflicts render flat with no header (nothing to tell
+  apart), a purely came-along list keeps its one explanatory header. Rows, All local/
+  All remote, footer, and apply semantics are untouched. Ordering comes from the caller
+  (`pullFrom` partitions by the staged, family-expanded refs; choices stay index-aligned).
+  **Every number in the modal speaks files and real writes only** (`mergeDisclosure`,
+  `core/merge.ts`): definition identicals and kept-local definitions are invisible in
+  this modal (Pull never resolves definitions) and so appear in no count and no fold
+  row. When nothing merges cleanly under that scope the green auto box does not render,
+  the header sub drops `· N items compared` (just `Pulling from <remote>`), and the CTA
+  reads `Apply merge (n/m)` without the `0 +`.
+  The self hint (`-cm-selfhint`, "…you can leave it out of this remote") renders at most
+  once per modal, and only while the remote carries NO written rule for config-sync
+  (`hasItemRule`) — a user with a stored rule has already used the control it teaches.
 - **Cold-start guidance banner** `config-sync-coldstart-*` — accent-tinted
   banner above the result strip in item mode, shown only while the plugin's own settings are
   pending (coldstart/adopt/both) AND some group has never synced here (`showColdStartBanner`);

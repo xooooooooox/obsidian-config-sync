@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { itemDirection, keyDirection, keyHasOwnRule, keyStopsWithin, refsBlockedFor, withheldPatternsFor, withItemDirection, withKeyDirection } from "../src/core/remoteRules";
+import { hasItemRule, itemDirection, keyDirection, keyHasOwnRule, keyStopsWithin, refsBlockedFor, withheldPatternsFor, withItemDirection, withKeyDirection } from "../src/core/remoteRules";
 import { directionFlows, intersectDirection, ItemRef, RemoteDirection, RemoteItems } from "../src/core/types";
 
 describe("directionFlows", () => {
@@ -53,6 +53,15 @@ describe("itemDirection", () => {
   it("reads the stored value when there is one", () => {
     expect(itemDirection(RULES, "community/config-sync")).toBe("none");
     expect(itemDirection(RULES, "community/dataview")).toBe("push");
+  });
+});
+
+describe("hasItemRule", () => {
+  it("tells a written rule apart from the default — which itemDirection alone cannot", () => {
+    expect(hasItemRule(RULES, "community/config-sync")).toBe(true);
+    expect(hasItemRule(RULES, "obsidian/appearance")).toBe(true); // keys-only entry is still a written rule
+    expect(hasItemRule(RULES, "core/backlink")).toBe(false);
+    expect(hasItemRule(undefined, "community/config-sync")).toBe(false);
   });
 });
 

@@ -4,7 +4,7 @@ import { lockRefFor, refItemId } from "../core/itemKeys";
 import { GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry, RemoteDiffFile } from "../core/status";
 import { SECTION_LABELS, findGroupByName, SELF_GROUP_NAME, sectionForGroup, communityGroupName } from "../core/catalog";
 import { itemDirection, keyDirection, keyHasOwnRule, keyPatternsFor, keyStopsWithin, withheldPatternsFor } from "../core/remoteRules";
-import { EVERYWHERE, FileChanges, FileSharing, GroupResult, hasChanges, ItemRef, Remote, RemoteDirection, Sharing, SyncGroup, StorageSection } from "../core/types";
+import { directionFlows, EVERYWHERE, FileChanges, FileSharing, GroupResult, hasChanges, ItemRef, Remote, RemoteDirection, Sharing, SyncGroup, StorageSection } from "../core/types";
 import { DeviceElementState } from "../core/deviceElements";
 import { RuleListId } from "../core/enablementRules";
 import {
@@ -84,6 +84,7 @@ import {
   TYPE_SECTION_TITLES,
   typeSectionForRow,
   unifiedFooterSummary,
+  unorderedChangeClause,
   withheldChangeClause,
   visibleUnderFilter,
   pickerBadgeDigits,
@@ -470,7 +471,7 @@ export interface SyncCenterHost {
   // when there is nothing to show (never captured, not JSON, or ciphertext), all three of which the
   // Keys row has already explained in words before it would ask.
   storeCopyOf(ref: ItemRef): Promise<Record<string, unknown> | null>;
-  pullFrom(remote: Remote, skipRefs: ItemRef[]): Promise<GroupResult[] | null>;
+  pullFrom(remote: Remote, skipRefs: ItemRef[], pickedRefs: ItemRef[]): Promise<GroupResult[] | null>;
   // `expectPush` is what the user PICKED — the judgement they acted on. Separate from skipRefs,
   // which mixes their unticked rows with the items this remote's own rules withhold.
   pushTo(remote: Remote, skipRefs: ItemRef[], expectPush: ItemRef[]): Promise<GroupResult[] | null>;
@@ -1076,6 +1077,14 @@ export class SyncCenterView extends ItemView {
     return r.group.type === "folder" && r.status.changes !== undefined ? this.folderChangeCount(r.status.changes) : 0;
   }
 
+  // The refs a row's checkbox stages: the parent's plus its compiled companions'. Companions have
+  // no rows (familyGroups folds them out), so a ref list built from rows alone could never skip
+  // their store files — every list that crosses the pull/push seam goes through here.
+  private familyRefs(r: StatusRow): ItemRef[] {
+    const companions = this.groups.filter((g) => this.host.companionParentOf(g.name) === r.group.name);
+    return [r.group.ref, ...companions.map((g) => g.ref)].filter((ref): ref is ItemRef => ref !== undefined);
+  }
+
   // The family rollup for a row (itself + its companions) — shared by computeFateInput (fate/
   // direction/conflict), familyState (counts/filters/visibility), stagedRows' companion fan-out,
   // and renderUnifiedFiles' merged Files section. Memoized via deriveRow.
@@ -1359,6 +1368,8 @@ export class SyncCenterView extends ItemView {
       verdicts,
       uncomparable: Object.keys(this.host.remoteCheck(name)?.check.uncomparable ?? {}),
       refOf: (g) => this.itemRefFor(g) ?? findGroupByName(this.groups, g)?.ref,
+      companionRefsOf: (g) =>
+        this.groups.filter((c) => this.host.companionParentOf(c.name) === g && c.ref !== undefined).map((c) => c.ref as ItemRef),
       localGroupNames,
     })
       .map((status) => ({ group: findGroupByName(this.groups, status.group) ?? remoteOnlyGroup(status.group), status, remote: name }));
@@ -3231,6 +3242,21 @@ export class SyncCenterView extends ItemView {
 
   // The unified row: `[checkbox] Name [chips…] <fate sentence> ▸`. One object, one row
   // — `fate.chips`/`fate.sentence`/`fate.stageable` carry everything the row states.
+  // "N files" beside a directional remote row's name: how many of its differing files the
+  // companions contribute (foldCompanionEntries prefixed their rels with the companion's group
+  // name). The number answers "what travels with this row beyond its own settings file" — the
+  // expanded card's FILES section lists them; a family with no companion diff shows nothing.
+  private renderCompanionFileNote(row: HTMLElement, r: StatusRow): void {
+    const changes = r.status.changes;
+    if (changes === undefined) return;
+    const companions = this.groups.filter((g) => this.host.companionParentOf(g.name) === r.group.name).map((g) => g.name);
+    if (companions.length === 0) return;
+    const rels = [...changes.added, ...changes.updated, ...changes.deleted];
+    const n = rels.filter((rel) => companions.some((c) => rel.startsWith(`${c}/`))).length;
+    if (n === 0) return;
+    row.createSpan({ cls: "config-sync-row-files", text: `${n} file${n === 1 ? "" : "s"}` });
+  }
+
   private renderItemRow(card: HTMLElement, r: StatusRow): void {
     const { group } = r;
     const { fate: rawFate, input } = this.fateWithInput(r);
@@ -3251,6 +3277,7 @@ export class SyncCenterView extends ItemView {
     });
     const chev = renderFoldChevron(row, expanded, null);
     this.renderRuleName(row, group.name, group.label);
+    if (r.remote !== undefined && (fate.glyph === "↑" || fate.glyph === "↓")) this.renderCompanionFileNote(row, r);
     row.createDiv({ cls: "config-sync-rule-spacer" });
     // Chips are icon-only and live on the row's RIGHT, one quiet cluster just
     // before the fate/state column — not tags trailing the name. Display order is the model's
@@ -3881,7 +3908,16 @@ export class SyncCenterView extends ItemView {
           });
         }
         const changed = r.status.changes === undefined ? 0 : this.folderChangeCount(r.status.changes);
-        if (changed > 0 && !input.excludedHere) return withheldChangeClause(r.remote, changed);
+        if (changed > 0 && !input.excludedHere) {
+          // "Push only, so they stay there" may only be said by a rule that actually closes the
+          // incoming direction. With pull open, a quiet row with differing files means the two
+          // records could not be ordered (e.g. a pre-stamp lock entry) — a different sentence,
+          // or the card blames a rule that isn't there.
+          const ref = this.itemRefFor(r.group.name) ?? r.group.ref;
+          const remote = this.host.remotes().find((x) => x.name === r.remote);
+          const rule: RemoteDirection = ref === undefined || remote === undefined ? "both" : itemDirection(remote.items, ref);
+          return directionFlows(rule).pull ? unorderedChangeClause(changed) : withheldChangeClause(r.remote, changed);
+        }
         return `${fate.sentence}.`;
       }
       if (input.excludedHere) return "Not synced on this device: your Settings sync rule excludes it.";
@@ -4789,7 +4825,9 @@ export class SyncCenterView extends ItemView {
     if (remote === undefined) return;
     const bar = macro.createDiv({ cls: "config-sync-actionbar" });
     const rows = this.rows();
-    const refsOf = (subset: StatusRow[]): ItemRef[] => subset.map((r) => r.group.ref).filter((x): x is ItemRef => x !== undefined);
+    // Family-expanded (parent + companion refs): see familyRefs — an unstaged family withholds
+    // its companions' files too, and a staged one carries them.
+    const refsOf = (subset: StatusRow[]): ItemRef[] => subset.flatMap((r) => this.familyRefs(r));
     const allRefs = refsOf(rows);
     const stagedIn = (bucket: "apply" | "capture"): StatusRow[] =>
       rows.filter((r) => this.selected.has(r.group.name) && this.rowBucket(r) === bucket);
@@ -4800,7 +4838,7 @@ export class SyncCenterView extends ItemView {
       const skip = skipRefsForSelection({ allRefs, selectedRefs: picked });
       // Push carries WHAT WAS PICKED as well as what to skip: this list is the judgement the user
       // acted on, and the seam refuses rather than act on one the far end has moved past (spec 3.7).
-      const results = dir === "pull" ? await this.host.pullFrom(remote, skip) : await this.host.pushTo(remote, skip, picked);
+      const results = dir === "pull" ? await this.host.pullFrom(remote, skip, picked) : await this.host.pushTo(remote, skip, picked);
       this.setLastRun(dir, remote.name, results);
       this.selected.clear();
       await this.reload();

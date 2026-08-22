@@ -25,9 +25,13 @@ export function remoteRowStatuses(input: {
   // is a claim about a comparison, and for these there was none.
   uncomparable: readonly string[];
   refOf: (group: string) => string | undefined;
+  // A family row's companions' refs. Companions have no rows (the caller folds them into their
+  // parent), so the parent's state must read their verdicts too or a family whose only waiting
+  // member is a companion counts as in sync while the pull still writes its files.
+  companionRefsOf: (group: string) => readonly string[];
   localGroupNames: readonly string[];
 }): GroupStatus[] {
-  const { entries, verdicts, refOf, localGroupNames } = input;
+  const { entries, verdicts, refOf, companionRefsOf, localGroupNames } = input;
   const unreadable = new Set<string>(input.uncomparable);
   const changesByGroup = new Map<string, FileChanges>();
   for (const e of entries) {
@@ -45,8 +49,11 @@ export function remoteRowStatuses(input: {
     // The same state the device relation gives an encrypted item it cannot open — one word for one
     // thing, and the relation's own copy table is what makes it read as `Can't compare` here.
     if (unreadable.has(ref)) return "locked";
-    const verdict = verdicts[ref];
-    return verdict === "pull" ? "store-newer" : verdict === "push" ? "local-changed" : "in-sync";
+    // The family speaks with one direction. When members disagree (own push, companion pull),
+    // pull is shown: the remote relation has no "differs" word, and an incoming write is the one
+    // the reader must see before staging the row.
+    const family = [verdicts[ref], ...companionRefsOf(group).map((r) => verdicts[r])];
+    return family.includes("pull") ? "store-newer" : family.includes("push") ? "local-changed" : "in-sync";
   };
   const names = [...new Set([...localGroupNames, ...changesByGroup.keys()])];
   return names.map((group) => {
@@ -59,6 +66,8 @@ export function remoteRowStatuses(input: {
 // The rows the user did NOT tick, as the skip list the transport already speaks. The checkbox means
 // the same thing under both relations — "does this run include this row" — and under the remote
 // relation that is exactly `skipRefs`, which planImport/pushExternal have taken since schema v5.
+// Both ref lists arrive family-expanded (parent + companion refs, the view's familyRefs): a
+// companion has no row of its own, so leaving its ref out of `allRefs` would make it unskippable.
 export function skipRefsForSelection(input: { allRefs: readonly ItemRef[]; selectedRefs: readonly ItemRef[] }): ItemRef[] {
   const keep = new Set<string>(input.selectedRefs);
   return input.allRefs.filter((r) => !keep.has(r));

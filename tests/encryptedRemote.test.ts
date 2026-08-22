@@ -114,6 +114,7 @@ describe("an encrypted item compared with a remote", () => {
       verdicts: result.itemVerdicts ?? {},
       uncomparable: Object.keys(result.uncomparable),
       refOf: () => REF,
+      companionRefsOf: () => [],
       localGroupNames: ["secrets"],
     });
     expect(rows.find((r) => r.group === "secrets")?.state).toBe("in-sync");
@@ -161,6 +162,7 @@ describe("an encrypted item compared with a remote", () => {
       verdicts: result.itemVerdicts ?? {},
       uncomparable: Object.keys(result.uncomparable),
       refOf: () => REF,
+      companionRefsOf: () => [],
       localGroupNames: ["secrets"],
     });
     expect(rows.find((r) => r.group === "secrets")?.state).toBe("locked");

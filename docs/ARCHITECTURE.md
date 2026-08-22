@@ -294,8 +294,14 @@ functions.
   but whose difference runs in a closed direction is in sync (spec 3.3), and an item the table names
   that the diff never mentioned still gets a row (the remote can be ahead on bookkeeping alone: a
   newer recorded version over identical bytes, which is a real pull). A row with no `ref` has no rule
-  and no lock entry to judge by, so there the file diff is all there is. `skipRefsForSelection` turns
+  and no lock entry to judge by, so there the file diff is all there is. A family row's state reads
+  its companions' verdicts too (`companionRefsOf`): companions have no rows, so without this a
+  family whose only waiting member is a companion would count as in sync while the pull still
+  writes its files. `skipRefsForSelection` turns
   the checkboxes into the skip list the transport already takes: the rows the user did NOT tick.
+  Both ref lists at that seam arrive family-expanded (the view's `familyRefs`: parent + companion
+  refs) — a companion ref absent from `allRefs` could never be skipped, which is exactly how theme
+  files used to join every pull regardless of staging.
 - `core/status.ts` — per-item status (`statusForGroups`), remote freshness (`diffRemote`,
   `remoteLockAhead`), and the counts the UI shows (`bucketCounts`; `remoteItemCounts` /
   `sumRemoteItemCounts` — the ⇡ push / ⇣ pull totals behind the header pills and the status bar,

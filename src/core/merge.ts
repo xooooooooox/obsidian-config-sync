@@ -19,6 +19,23 @@ export interface MergePlan {
   conflicts: MergeConflict[];
 }
 
+// What the pull-conflict modal counts and lists: file entries plus real writes. Group-definition
+// identicals and kept-local definitions never appear in that modal (Pull does not resolve
+// definitions), so counting them would inflate "items compared" with entries the reader can never
+// see — on a real vault the two sync lists alone contributed 100+ "identical" rows about nothing.
+export interface MergeDisclosure {
+  add: number; // addGroups + writeFiles: entries a pull actually writes
+  identicalFiles: string[]; // "file:<rel>" identical entries (prefix kept for the modal's labels)
+  keptFiles: string[]; // local-only rels, kept
+  count: number; // the modal's auto total, same scope as the three fields above
+}
+
+export function mergeDisclosure(auto: MergeAuto): MergeDisclosure {
+  const identicalFiles = auto.identical.filter((id) => id.startsWith("file:"));
+  const add = auto.addGroups.length + auto.writeFiles.length;
+  return { add, identicalFiles, keptFiles: auto.keptLocalFiles, count: add + identicalFiles.length + auto.keptLocalFiles.length };
+}
+
 // Resolves the owning group name from either side's groups (a 2-way merge has no single
 // authoritative group list); local takes precedence, falling back to remote, then "" (store
 // metadata / unmatched, e.g. store.lock.json).

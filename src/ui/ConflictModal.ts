@@ -1,6 +1,6 @@
 import { App, Modal } from "obsidian";
 import { isSelfStoreRel, PendingPull } from "../core/ConfigSyncCore";
-import { MergeConflict, sortKeysDeep } from "../core/merge";
+import { MergeConflict, mergeDisclosure, sortKeysDeep } from "../core/merge";
 import { SyncGroup } from "../core/types";
 import { renderDiffPanel } from "./diffView";
 import { isSwitchListGroup, switchListSortedView } from "../core/switchList";
@@ -18,11 +18,19 @@ export class ConflictModal extends Modal {
   private statusEl: HTMLElement | null = null;
   private rowEls: HTMLElement[] = [];
   private decided = false;
+  private selfHintShown = false;
 
   constructor(
     app: App,
     private pending: PendingPull,
     private remoteName: string,
+    // Conflicts arrive ordered: the first `pickedCount` sit on items the user staged, the rest
+    // came along with the whole-store merge (an unstaged family, a remote-only item, an
+    // unattributable file). The two render as sections; the caller owns the ordering.
+    private pickedCount: number,
+    // Whether the self-item hint may render at all: false once this remote carries a written
+    // rule for config-sync — that user has already used the control the hint teaches.
+    private showSelfHint: boolean,
     private displayName: (name: string) => string,
     private onResolve: (choices: Side[]) => void,
     private onCancel: () => void
@@ -34,44 +42,45 @@ export class ConflictModal extends Modal {
   onOpen(): void {
     const { plan } = this.pending;
     this.modalEl.addClass("config-sync-cm");
-    const auto = plan.auto;
-    const autoCount = auto.addGroups.length + auto.writeFiles.length + auto.keptLocalGroups.length + auto.keptLocalFiles.length + auto.identical.length;
-    const compared = autoCount + plan.conflicts.length;
+    // Files and real writes only (mergeDisclosure): definition entries are invisible in this
+    // modal, so they appear in no number here either.
+    const auto = mergeDisclosure(plan.auto);
+    const compared = auto.count + plan.conflicts.length;
 
     const header = this.contentEl.createDiv({ cls: "config-sync-cm-header" });
     header.createDiv({ cls: "config-sync-cm-title", text: "Resolve pull conflicts" });
-    header.createDiv({ cls: "config-sync-cm-sub", text: `Pulling from ${this.remoteName} · ${compared} items compared` });
+    // "· N items compared" travels with the box below: when nothing merges cleanly, the
+    // conflicts are the whole story and the header has no second number to explain.
+    header.createDiv({ cls: "config-sync-cm-sub", text: auto.count === 0 ? `Pulling from ${this.remoteName}` : `Pulling from ${this.remoteName} · ${compared} items compared` });
 
     const body = this.contentEl.createDiv({ cls: "config-sync-cm-body" });
 
-    const addCount = auto.addGroups.length + auto.writeFiles.length;
-    const identCount = auto.identical.length;
-    const keptCount = auto.keptLocalGroups.length + auto.keptLocalFiles.length;
-    const autoBox = body.createDiv({ cls: "config-sync-cm-auto" });
-    const autoHead = autoBox.createDiv({ cls: "config-sync-cm-auto-head" });
-    autoHead.createSpan({ cls: "config-sync-cm-auto-check", text: "✓" });
-    autoHead.createSpan({ cls: "config-sync-cm-auto-label", text: `${autoCount} item${autoCount === 1 ? "" : "s"} merge cleanly` });
-    autoHead.createSpan({ cls: "config-sync-cm-auto-counts", text: `＋${addCount} · ＝${identCount} · ⌂${keptCount}` });
-    autoHead.createDiv({ cls: "config-sync-rule-spacer" });
-    const autoChev = renderFoldChevron(autoHead, false, "config-sync-cm-chev");
-    const autoList = autoBox.createDiv({ cls: "config-sync-cm-auto-list" });
-    autoList.hide();
-    const reason = (mark: string, cls: string, text: string): void => {
-      const line = autoList.createDiv({ cls: "config-sync-cm-auto-line" });
-      line.createSpan({ cls: `config-sync-cm-mark ${cls}`, text: mark });
-      line.createSpan({ text });
-    };
-    for (const g of auto.addGroups) reason("＋", "is-add", `${this.displayName(g.name)}: new item from remote (added, incl. its store files)`);
-    for (const f of auto.writeFiles) reason("＋", "is-add", `${f.name === "" ? f.rel : this.displayName(f.name)}: store file only on remote (written locally)`);
-    for (const id of auto.identical) reason("＝", "is-same", `${this.autoLabel(id)}: identical on both sides`);
-    for (const name of auto.keptLocalGroups) reason("⌂", "is-kept", `${this.displayName(name)}: only exists locally (kept, never deleted)`);
-    for (const rel of auto.keptLocalFiles) reason("⌂", "is-kept", `${rel}: only exists locally (kept)`);
-    autoHead.addEventListener("click", () => {
-      const open = autoList.isShown();
-      if (open) autoList.hide();
-      else autoList.show();
-      setFoldOpen(autoChev, !open);
-    });
+    if (auto.count > 0) {
+      const autoBox = body.createDiv({ cls: "config-sync-cm-auto" });
+      const autoHead = autoBox.createDiv({ cls: "config-sync-cm-auto-head" });
+      autoHead.createSpan({ cls: "config-sync-cm-auto-check", text: "✓" });
+      autoHead.createSpan({ cls: "config-sync-cm-auto-label", text: `${auto.count} item${auto.count === 1 ? "" : "s"} merge cleanly` });
+      autoHead.createSpan({ cls: "config-sync-cm-auto-counts", text: `＋${auto.add} · ＝${auto.identicalFiles.length} · ⌂${auto.keptFiles.length}` });
+      autoHead.createDiv({ cls: "config-sync-rule-spacer" });
+      const autoChev = renderFoldChevron(autoHead, false, "config-sync-cm-chev");
+      const autoList = autoBox.createDiv({ cls: "config-sync-cm-auto-list" });
+      autoList.hide();
+      const reason = (mark: string, cls: string, text: string): void => {
+        const line = autoList.createDiv({ cls: "config-sync-cm-auto-line" });
+        line.createSpan({ cls: `config-sync-cm-mark ${cls}`, text: mark });
+        line.createSpan({ text });
+      };
+      for (const g of plan.auto.addGroups) reason("＋", "is-add", `${this.displayName(g.name)}: new item from remote (added, incl. its store files)`);
+      for (const f of plan.auto.writeFiles) reason("＋", "is-add", `${f.name === "" ? f.rel : this.displayName(f.name)}: store file only on remote (written locally)`);
+      for (const id of auto.identicalFiles) reason("＝", "is-same", `${this.autoLabel(id)}: identical on both sides`);
+      for (const rel of auto.keptFiles) reason("⌂", "is-kept", `${rel}: only exists locally (kept)`);
+      autoHead.addEventListener("click", () => {
+        const open = autoList.isShown();
+        if (open) autoList.hide();
+        else autoList.show();
+        setFoldOpen(autoChev, !open);
+      });
+    }
 
     const chead = body.createDiv({ cls: "config-sync-cm-chead" });
     chead.createSpan({ cls: "config-sync-cm-ctitle", text: `${plan.conflicts.length} conflict${plan.conflicts.length === 1 ? "" : "s"}` });
@@ -82,7 +91,25 @@ export class ConflictModal extends Modal {
     allLocal.addEventListener("click", () => this.chooseAll("local"));
     allRemote.addEventListener("click", () => this.chooseAll("remote"));
 
-    plan.conflicts.forEach((c, i) => this.renderConflict(body, c, i));
+    // Section headers answer "why is this row here" — the came-along one carries the
+    // explanation in its own subtitle, so a conflict on an item the user never staged is
+    // announced rather than discovered. A section with no rows renders no header.
+    const cameCount = plan.conflicts.length - this.pickedCount;
+    const section = (label: string, count: number, why: string | null, came: boolean): void => {
+      const head = body.createDiv({ cls: `config-sync-cm-sect${came ? " is-came" : ""}` });
+      head.createSpan({ cls: "config-sync-cm-sect-label", text: label });
+      head.createSpan({ cls: "config-sync-cm-sect-n", text: `${count}` });
+      if (why !== null) head.createSpan({ cls: "config-sync-cm-sect-why", text: why });
+    };
+    // Only a MIXED list needs the picked header — when every conflict is on a picked item there
+    // is nothing to tell apart and the list stays flat; a purely came-along list still gets its
+    // one header, since that header carries the explanation.
+    plan.conflicts.forEach((c, i) => {
+      if (i === 0 && this.pickedCount > 0 && cameCount > 0) section("On items you picked", this.pickedCount, null, false);
+      if (i === this.pickedCount && cameCount > 0)
+        section("Came along with the pull", cameCount, "a pull compares the whole remote, and these also changed on both sides", true);
+      this.renderConflict(body, c, i);
+    });
 
     const footer = this.contentEl.createDiv({ cls: "config-sync-cm-footer" });
     this.statusEl = footer.createSpan({ cls: "config-sync-cm-status" });
@@ -96,7 +123,7 @@ export class ConflictModal extends Modal {
       this.onResolve(this.choices as Side[]);
       this.close();
     });
-    this.refreshFooter(autoCount);
+    this.refreshFooter(auto.count);
   }
 
   onClose(): void {
@@ -159,7 +186,10 @@ export class ConflictModal extends Modal {
       diffHost.show();
       setFoldOpen(chev, true);
     });
-    if (c.kind === "file" && isSelfStoreRel(c.rel)) {
+    // Once per modal: the self item's three store files (data.json + two sidecars) can conflict
+    // together, and three copies of the same advice teach nothing more than one.
+    if (c.kind === "file" && isSelfStoreRel(c.rel) && this.showSelfHint && !this.selfHintShown) {
+      this.selfHintShown = true;
       row.createDiv({
         cls: "config-sync-cm-selfhint",
         text: "If this vault keeps its own Config Sync setup, you can leave it out of this remote (Settings → Remotes).",
@@ -183,13 +213,14 @@ export class ConflictModal extends Modal {
     this.statusEl?.setText(`${resolved} of ${total} resolved · nothing is written until you apply`);
     if (this.applyBtn) {
       this.applyBtn.disabled = resolved !== total;
-      this.applyBtn.setText(`Apply merge (${auto} + ${resolved}/${total})`);
+      // With nothing merging cleanly the "0 +" would be an empty claim; the conflicts alone
+      // ARE the merge then.
+      this.applyBtn.setText(auto === 0 ? `Apply merge (${resolved}/${total})` : `Apply merge (${auto} + ${resolved}/${total})`);
     }
   }
 
   private autoCount(): number {
-    const a = this.pending.plan.auto;
-    return a.addGroups.length + a.writeFiles.length + a.keptLocalGroups.length + a.keptLocalFiles.length + a.identical.length;
+    return mergeDisclosure(this.pending.plan.auto).count;
   }
 
   private buildDiff(host: HTMLElement, c: MergeConflict): void {

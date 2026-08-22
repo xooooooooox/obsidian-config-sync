@@ -566,6 +566,7 @@ body.is-mobile.config-sync-mobile-statusbar .status-bar {
 
 .config-sync-hub-row { display: flex; align-items: center; gap: var(--size-4-2); padding: var(--size-4-2) 0; border-bottom: 1px solid var(--background-modifier-border); cursor: pointer; white-space: nowrap; }
 .config-sync-hub-row .config-sync-rule-name { flex: none; }
+.config-sync-row-files { flex: none; font-size: var(--font-ui-smaller); color: var(--text-faint); }
 /* Hover-reveal: the item/self row's own fold chevron is invisible at rest, appears
    on hover or once the row is expanded (`is-open` always visible) — element stays in the DOM
    either way, so layout never shifts. Mobile drops it entirely (no hover to reveal it
@@ -1763,6 +1764,12 @@ button.config-sync-add-row, button.config-sync-add-row:hover { background: none;
 .config-sync-cm-ctitle { font-weight: 600; }
 .config-sync-cm-csub { color: var(--text-muted); font-size: var(--font-ui-smaller); }
 .config-sync-cm-allbtn { font-size: var(--font-ui-smaller); padding: 2px 10px; }
+
+.config-sync-cm-sect { display: flex; align-items: baseline; gap: var(--size-4-2); margin: var(--size-4-2) 0 var(--size-4-1); }
+.config-sync-cm-sect-label { font-size: var(--font-ui-smaller); letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-faint); }
+.config-sync-cm-sect.is-came .config-sync-cm-sect-label { color: var(--color-orange); }
+.config-sync-cm-sect-n { font-size: var(--font-ui-smaller); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.config-sync-cm-sect-why { font-size: var(--font-ui-smaller); color: var(--text-muted); }
 
 .config-sync-cm-conflict {
   border: 1px solid var(--background-modifier-border);

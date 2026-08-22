@@ -44,7 +44,7 @@ interface SecretStore {
   setSecret(id: string, secret: string): void;
 }
 import { bratRepoIndex, parseBratRepoList, resolveBratIndex, withBratRepos } from "./core/bratIndex";
-import { type CatalogSection, corePluginFile, displayLabelForGroup, findGroupByName, listBetaSections, listCoreSections, listDiscovered, listOptionSections, listPluginSections, SELF_GROUP_NAME, SELF_ITEM_ID, SELF_ITEM_SECTION, setCorePluginIds } from "./core/catalog";
+import { type CatalogSection, corePluginFile, displayLabelForGroup, findGroupByName, listBetaSections, listCoreSections, listDiscovered, listOptionSections, listPluginSections, SELF_GROUP_NAME, SELF_ITEM_ID, SELF_ITEM_REF, SELF_ITEM_SECTION, setCorePluginIds } from "./core/catalog";
 import { Availability, availabilityForGroup, desktopOnlyDrift, desktopOnlyPluginIds } from "./core/availability";
 import { listFilesRecursive, isJunkPath, FileIO } from "./core/io";
 import { LeftoverNames, LeftoverSection, leftoverStoreRels, storeSelfCopyGroups, selfListGroups } from "./core/leftover";
@@ -87,7 +87,7 @@ import { decideEnablement, EnablementDecision } from "./core/enablementDecision"
 import { classifySettings, CURRENT_SCHEMA, SCHEMA_FUTURE_NOTICE, SCHEMA_UPGRADE_NOTICE, withDefaults } from "./core/settingsMigration";
 import { deviceOptOutsFor, migrateV2Settings } from "./core/v2Migration";
 import { migrateV4Settings } from "./core/v4Migration";
-import { refsBlockedFor, withItemDirection, withKeyDirection } from "./core/remoteRules";
+import { hasItemRule, refsBlockedFor, withItemDirection, withKeyDirection } from "./core/remoteRules";
 import { unexchangedPatternPredicate, withheldPatternPredicate } from "./core/keyWithholding";
 import { compareStoreItem, refsNeedingContentCompare } from "./core/itemCompare";
 import { migrateV5Settings } from "./core/v5Migration";
@@ -1027,7 +1027,7 @@ export default class ConfigSyncPlugin extends Plugin {
           return null;
         }
       },
-      pullFrom: async (remote, skipRefs) => {
+      pullFrom: async (remote, skipRefs, pickedRefs) => {
         if (this.schemaStopped()) return null; // schema stop
         try {
           const ctx = await this.coreContext();
@@ -1059,7 +1059,18 @@ export default class ConfigSyncPlugin extends Plugin {
           // applied by Pull, so they don't prompt — the list converges via adopt.
           const fileConflicts = pending.plan.conflicts.filter((c) => c.kind === "file");
           if (fileConflicts.length > 0) {
-            const modalPending = { ...pending, plan: { ...pending.plan, conflicts: fileConflicts } };
+            // Provenance: a conflict on an item the user staged vs one the whole-store merge
+            // brought along (an unstaged family, a remote-only item, an unattributable file).
+            // The modal renders them as two sections, picked first — choices stay index-aligned
+            // with this ordering all the way into applyImport.
+            const picked = new Set<string>(pickedRefs);
+            const onPicked = (name: string): boolean => {
+              const ref = findGroupByName(this.compiledGroups, name)?.ref ?? findGroupByName(pending.remoteGroups, name)?.ref;
+              return ref !== undefined && picked.has(ref);
+            };
+            const pickedConflicts = fileConflicts.filter((c) => onPicked(c.name));
+            const cameAlong = fileConflicts.filter((c) => !onPicked(c.name));
+            const modalPending = { ...pending, plan: { ...pending.plan, conflicts: [...pickedConflicts, ...cameAlong] } };
             // Conflicted pull: pause for git-style resolution. Nothing has been written
             // (planImport is read-only); Cancel keeps it that way — all-or-nothing.
             const choices = await new Promise<("local" | "remote")[] | null>((resolve) => {
@@ -1067,8 +1078,12 @@ export default class ConfigSyncPlugin extends Plugin {
                 this.app,
                 modalPending,
                 remote.name,
+                pickedConflicts.length,
+                // The self hint teaches the Settings → Remotes control; a remote that already
+                // carries a written rule for config-sync belongs to a user who has used it.
+                !hasItemRule(remote.items, SELF_ITEM_REF),
                 (name) => this.displayName(name),
-                (picked) => resolve(picked),
+                (choice) => resolve(choice),
                 () => resolve(null)
               ).open();
             });

@@ -18,6 +18,13 @@ export function itemDirection(items: RemoteItems | undefined, ref: ItemRef): Rem
   return ruleFor(items, ref)?.direction ?? "both";
 }
 
+// Whether the user has WRITTEN a rule for this item on this remote — as opposed to the item
+// merely resolving to the default. itemDirection cannot answer this (a stored "both" and no rule
+// both read "both"); teaching surfaces ask it to stop teaching a control the user already used.
+export function hasItemRule(items: RemoteItems | undefined, ref: ItemRef): boolean {
+  return ruleFor(items, ref) !== undefined;
+}
+
 // The key's own answer, already intersected with its item's. A stored key rule outside the item's
 // subset is honoured as written and simply resolves to less — never rewritten, so widening the
 // item again restores the user's choice.

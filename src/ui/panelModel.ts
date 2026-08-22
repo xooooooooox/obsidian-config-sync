@@ -1047,6 +1047,16 @@ export function withheldChangeClause(remoteName: string, files: number): string 
   return `${remoteName} changed ${files} file${files === 1 ? "" : "s"}. Push only, so they stay there.`;
 }
 
+// The OTHER honest cause for a quiet row with differing files: nothing closes the incoming
+// direction, the two copies simply carry records that cannot be ordered (an entry captured
+// before stamps existed). Claiming "Push only" here would blame a rule that isn't there. The
+// unblock must hold no matter WHICH side's record is stampless — capturing only on the winner
+// does nothing when the stale record is the other side's — so the clause prescribes the one
+// sequence that always works: both sides capture, the winner last.
+export function unorderedChangeClause(files: number): string {
+  return `${files === 1 ? "1 file differs" : `${files} files differ`}, but there's no way to tell which side is newer. Capture on both sides; the side captured last wins.`;
+}
+
 // spec 5.4's `Keys` row, decided in one place. The three notes are structural facts the user cannot
 // change, so they are stated rather than left as an unexplained gap; the fourth case — the item
 // itself travels neither way — renders NOTHING, because the row directly above already says so and
