@@ -138,6 +138,16 @@ describe("selected-but-uninstalled items compile locally", () => {
     const defs = defsForForeignItems(installedDefs, itemsIn({ community: { dataview: on() } }), new Set());
     expect(defs.filter((d) => d.id === "dataview")).toHaveLength(1);
   });
+
+  // The marker every display surface keys off: a synthesized def's `label` is a bare-id
+  // placeholder, so the UI must resolve its name through the stored-label chain instead —
+  // an installed def's label is the manifest name and carries no marker.
+  it("only the synthesized def is marked synthesized", () => {
+    const env: RegistryEnv = { ...EMPTY_ENV, plugins: [{ id: "dataview", name: "Dataview" }] };
+    const defs = defsForForeignItems(buildItemDefs(env), itemsIn({ community: { dataview: on(), "remotely-save": on() } }), new Set());
+    expect(defs.find((d) => d.id === "remotely-save")?.synthesized).toBe(true);
+    expect(defs.find((d) => d.id === "dataview")?.synthesized).toBeUndefined();
+  });
 });
 
 // `beta` is a PRESENTED classification, never a stored one. A

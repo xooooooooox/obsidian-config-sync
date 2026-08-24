@@ -221,8 +221,13 @@ export interface CarrierElementRow {
 // element that already carries a rule or a local exception — a plugin uninstalled here still has a
 // choice recorded for the fleet, and a row that vanished the moment it was uninstalled would leave
 // that choice unreachable from the only card that shows it. Sorted by what the reader sees (the
-// def's label where the element is installed, the raw id where it is not), never by id.
-export function buildCarrierElementRows(defs: ItemDef[], list: RuleListId, ruledIds: string[], exceptionIds: string[]): CarrierElementRow[] {
+// def's resolved label where a def exists, the raw id where none does), never by id.
+//
+// `labelOf` is the caller's def → display-name resolver: this module is pure and a synthesized
+// def's own `label` is a bare-id placeholder (registry.ts's ItemDef.synthesized), so the name a
+// row shows has to come from the host-side chain the caller already titles its cards with. A
+// ruled-but-defless element has nothing to resolve and stays under its raw id.
+export function buildCarrierElementRows(defs: ItemDef[], list: RuleListId, ruledIds: string[], exceptionIds: string[], labelOf: (def: ItemDef) => string): CarrierElementRow[] {
   const installed = new Map<string, ItemDef>();
   for (const def of defs) {
     if (def.enablement?.list === list) installed.set(def.enablement.element, def);
@@ -231,7 +236,7 @@ export function buildCarrierElementRows(defs: ItemDef[], list: RuleListId, ruled
   return [...ids]
     .map((elementId) => {
       const def = installed.get(elementId);
-      return { elementId, label: def?.label ?? elementId, desktopOnly: def?.desktopOnly === true };
+      return { elementId, label: def !== undefined ? labelOf(def) : elementId, desktopOnly: def?.desktopOnly === true };
     })
     .sort((a, b) => a.label.localeCompare(b.label, "en", { sensitivity: "base" }));
 }

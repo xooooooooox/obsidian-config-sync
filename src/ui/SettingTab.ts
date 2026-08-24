@@ -976,11 +976,19 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     this.syncAllRebuilds.push(build);
   }
 
+  // The name a def is DISPLAYED under. A synthesized def's `label` is a bare-id placeholder
+  // (registry.ts's defsForForeignItems), so it resolves through the host's stored-label chain —
+  // and ONLY the synthesized case does: routing every def through displayName(groupName) would
+  // retitle the carrier cards to displayLabelForGroup's "… on/off" variants.
+  private itemLabel(def: ItemDef): string {
+    return def.synthesized === true ? this.host.displayName(def.groupName) : def.label;
+  }
+
   private renderItemCard(wrap: HTMLElement, def: ItemDef): void {
     wrap.empty();
     const item = this.itemOf(def);
     const expKey = cardExpandKey(defRef(def));
-    const row = new Setting(wrap).setName(def.label).setDesc(def.description);
+    const row = new Setting(wrap).setName(this.itemLabel(def)).setDesc(def.description);
     row.settingEl.setAttribute("data-search-anchor", itemAnchorId(defRef(def)));
     // Unified onto the shared FOLD helper — one rotating `chevron-right` instead of
     // swapping between `chevron-down`/`chevron-right`. `.setName` above already put the label
@@ -1053,7 +1061,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     // refuse before the modal opens, not after the user has decided in it. `stopSyncing`
     // still refuses on its own — this is the courtesy, that is the guarantee.
     if (!this.host.settingsWritable()) return;
-    const label = this.host.displayName(def.groupName, def.label);
+    const label = this.host.displayName(def.groupName, this.itemLabel(def));
     const count = await this.host.storeFileCount(def.groupName);
     new StopSyncingModal(this.app, label, count, async (deleteStore) => {
       const deleted = await this.host.stopSyncing(def.groupName, deleteStore);
@@ -1435,7 +1443,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     const headLabel = head.createDiv({ cls: "config-sync-explabel config-sync-explabel-inline", text: ENABLED_ON_LABEL });
     setTooltip(headLabel, CARRIER_ELEMENTS_LABEL);
     const listEl = exp.createDiv({ cls: "config-sync-card-carrierelements" });
-    const rows = buildCarrierElementRows(this.host.itemDefs(), list, ruledElementIds(this.host.settings.items, list), this.host.deviceElementIds(list));
+    const rows = buildCarrierElementRows(this.host.itemDefs(), list, ruledElementIds(this.host.settings.items, list), this.host.deviceElementIds(list), (d) => this.itemLabel(d));
     for (const row of rows) {
       this.renderElementRuleRow(listEl, {
         def,
@@ -1739,7 +1747,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
     // Every registry item's settingsFile carries a preset default path, so
     // ANY committed change here — first customization or a further edit — goes through the same
     // preset-change guard (D7).
-    const confirmed = await confirmPresetPathChange(this.app, def.label);
+    const confirmed = await confirmPresetPathChange(this.app, this.itemLabel(def));
     if (!confirmed) {
       this.customPathEditing.delete(editKey);
       this.renderItemCard(wrap, def); // Cancel: revert to the committed text view
@@ -2422,7 +2430,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
           return;
         }
         if (row.isPreset) {
-          const confirmed = await confirmPresetPathChange(this.app, def.label);
+          const confirmed = await confirmPresetPathChange(this.app, this.itemLabel(def));
           if (!confirmed) {
             cancel(); // revert the control to its prior value
             return;
@@ -2929,7 +2937,7 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         hits.push({
           section: tab,
           kind: "item",
-          name: def.label,
+          name: this.itemLabel(def),
           desc: [def.description, stateOnly ? "on/off only" : "", path ?? ""].filter((s) => s !== "").join(" "),
           anchorId: itemAnchorId(defRef(def)),
           // The type this item actually has, not a blanket "file". A registry item's own thing
@@ -2957,9 +2965,13 @@ export class ConfigSyncSettingTab extends PluginSettingTab {
         });
         continue;
       }
-      // core-plugins/community-plugins are the hidden enablement carriers registry.ts compiles —
-      // not reserved names, but still not a generic "Custom rule" a user could edit here.
-      if (g.origin !== undefined || reserved.has(g.name) || isSwitchListGroup(g.name)) continue;
+      // Everything the registry-derived model already speaks for is excluded through
+      // isManagedGroup — the SAME predicate renderAdvanced splits managed from custom with, never
+      // an inline re-derivation of it. That covers reserved names, the switch-list carriers, and a
+      // store-only synced plugin (community item, not installed on this device): its card hit
+      // above already stands for it, and a group the Advanced tab refuses to render as a Custom
+      // rule must not be indexed as one.
+      if (g.origin !== undefined || this.isManagedGroup(g, reserved)) continue;
       hits.push({
         section: "advanced",
         kind: "rule",

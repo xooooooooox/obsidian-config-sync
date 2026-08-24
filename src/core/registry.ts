@@ -57,6 +57,11 @@ export interface ItemDef {
   // is re-keyed to an ItemRef. Nothing reads meaning back OUT of it; consumers take section/id.
   groupName: string;
   label: string;
+  // Set only by defsForForeignItems: this def stands for a stored item whose plugin is not
+  // installed on this device, so `label` is a bare-id placeholder — anything DISPLAYING such a
+  // def must resolve the name through the host's stored-label chain (displayName → the store
+  // lock's display.label) instead of reading `label`.
+  synthesized?: true;
   description: string;
   enablement?: { list: EnablementList; element: string };
   settingsFile?: { defaultPath: string | null };
@@ -364,6 +369,7 @@ export function defsForForeignItems(defs: ItemDef[], items: ItemMap, betaIds: Re
       id,
       groupName: communityGroupName(id),
       label: id,
+      synthesized: true,
       description: COMMUNITY_PLUGIN_DESCRIPTION,
       enablement: { list: "community-plugins", element: id },
       settingsFile: { defaultPath: `{configDir}/plugins/${id}/data.json` },

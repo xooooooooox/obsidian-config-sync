@@ -620,8 +620,10 @@ describe("buildCarrierElementRows", () => {
     CORE_WITH_FILE_DEF, // Graph view, a DIFFERENT list
   ];
 
+  const byOwnLabel = (d: ItemDef): string => d.label;
+
   it("lists this list's installed elements by display label, carrying the desktop-only flag", () => {
-    expect(buildCarrierElementRows(DEFS, "community-plugins", [], [])).toEqual([
+    expect(buildCarrierElementRows(DEFS, "community-plugins", [], [], byOwnLabel)).toEqual([
       { elementId: "dataview", label: "Dataview", desktopOnly: false },
       { elementId: "git", label: "Obsidian Git", desktopOnly: true },
       { elementId: "templater", label: "Templater", desktopOnly: false },
@@ -629,13 +631,29 @@ describe("buildCarrierElementRows", () => {
   });
 
   it("keeps an element that is no longer installed but still has a rule or an exception — under its raw id", () => {
-    const rows = buildCarrierElementRows(DEFS, "community-plugins", ["zz-uninstalled"], ["aa-gone"]);
+    const rows = buildCarrierElementRows(DEFS, "community-plugins", ["zz-uninstalled"], ["aa-gone"], byOwnLabel);
     expect(rows.map((r) => r.elementId)).toEqual(["aa-gone", "dataview", "git", "templater", "zz-uninstalled"]);
     expect(rows[0]).toEqual({ elementId: "aa-gone", label: "aa-gone", desktopOnly: false });
   });
 
   it("an installed element that also has a rule appears once", () => {
-    expect(buildCarrierElementRows(DEFS, "community-plugins", ["dataview"], ["dataview"]).filter((r) => r.elementId === "dataview")).toHaveLength(1);
+    expect(buildCarrierElementRows(DEFS, "community-plugins", ["dataview"], ["dataview"], byOwnLabel).filter((r) => r.elementId === "dataview")).toHaveLength(1);
+  });
+
+  // A synthesized def's own label is a bare-id placeholder; the row shows — and sorts by —
+  // whatever the caller's resolver answers (SettingTab passes its itemLabel, the same producer
+  // that titles the card).
+  it("a synthesized def's row label comes from the caller's resolver, and sorts by it", () => {
+    const foreign = def({
+      section: "community",
+      id: "remotely-save",
+      groupName: "plugin-remotely-save",
+      label: "remotely-save",
+      synthesized: true,
+      enablement: { list: "community-plugins", element: "remotely-save" },
+    });
+    const rows = buildCarrierElementRows([...DEFS, foreign], "community-plugins", [], [], (d) => (d.synthesized === true ? "Remotely Save" : d.label));
+    expect(rows.map((r) => r.label)).toEqual(["Dataview", "Obsidian Git", "Remotely Save", "Templater"]);
   });
 });
 

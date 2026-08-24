@@ -3,7 +3,7 @@ import { parseQuery, applySuggestion, matchesQualifiers, suggest, type Qualifier
 import { syncTypeValue, syncModeValue, syncActionValue, SyncCenterView, SYNC_QUALIFIER_SPECS, SYNC_QUALIFIER_KEYS } from "../src/ui/SyncCenterView";
 import { ConfigSyncSettingTab, settingSectionValue, settingTypeValue, SETTING_QUALIFIER_RESOLVERS, SETTING_QUALIFIER_SPECS, SETTING_QUALIFIER_KEYS } from "../src/ui/SettingTab";
 import { sectionForGroup } from "../src/core/catalog";
-import { buildItemDefs, ItemDef, RegistryEnv } from "../src/core/registry";
+import { buildItemDefs, defsForForeignItems, emptyItem, ItemDef, RegistryEnv } from "../src/core/registry";
 import { SyncGroup } from "../src/core/types";
 import { itemsIn } from "./items";
 
@@ -246,12 +246,6 @@ describe("setting resolver values", () => {
     expect(values).toContain(sectionForGroup("my-rule"));
   });
 
-  // …and a name whose family is NOT custom says so instead of being labelled custom by position:
-  // a store-only entry for a plugin this device does not have renders among the Advanced rules.
-  it("section: an Advanced-tab entry that is really a community item answers community, not custom", () => {
-    expect(settingSectionValue({ section: "advanced", groupName: "plugin-not-installed" })).toEqual(["advanced", sectionForGroup("plugin-not-installed")]);
-  });
-
   it("type: only on item hits", () => {
     expect(settingTypeValue({ item: { type: "folder" } as never })).toBe("folder");
     expect(settingTypeValue({ item: { type: "file" } as never })).toBe("file");
@@ -287,7 +281,7 @@ describe("the two search boxes over the same items", () => {
     groupName?: string;
   }
 
-  async function settingsHits(): Promise<SettingHit[]> {
+  async function settingsHits(groups: SyncGroup[]): Promise<SettingHit[]> {
     const defs = [...buildItemDefs(ENV), STATE_ONLY];
     const host = {
       settings: { items: itemsIn({}) },
@@ -298,7 +292,7 @@ describe("the two search boxes over the same items", () => {
     };
     const tab = new ConfigSyncSettingTab({} as never, host as never);
     const priv = tab as unknown as { groups: SyncGroup[]; renderGen: number; buildSearchIndex: (gen: number) => Promise<SettingHit[] | null> };
-    priv.groups = GROUPS;
+    priv.groups = groups;
     return (await priv.buildSearchIndex(priv.renderGen)) ?? [];
   }
 
@@ -319,7 +313,7 @@ describe("the two search boxes over the same items", () => {
   }
 
   it("an item that is a folder answers type:folder — and stops answering type:file", async () => {
-    const hits = await settingsHits();
+    const hits = await settingsHits(GROUPS);
 
     expect(panelAnswers(hits, "type:folder")).toContain(FOLDER_RULE.name);
     expect(panelAnswers(hits, "type:file")).not.toContain(FOLDER_RULE.name);
@@ -327,7 +321,7 @@ describe("the two search boxes over the same items", () => {
   });
 
   it("every hit's type is the one the Sync Center reads off the same group", async () => {
-    const hits = await settingsHits();
+    const hits = await settingsHits(GROUPS);
     const byName = new Map(hits.map((h) => [h.name, h]));
 
     for (const g of GROUPS) {
@@ -341,7 +335,7 @@ describe("the two search boxes over the same items", () => {
   });
 
   it("an on/off-only item claims neither type — it has no file to be one", async () => {
-    const hits = await settingsHits();
+    const hits = await settingsHits(GROUPS);
 
     expect(hits.map((h) => h.name)).toContain(STATE_ONLY.label); // indexed, and findable by name
     expect(panelAnswers(hits, "type:file")).not.toContain(STATE_ONLY.label);
@@ -349,18 +343,62 @@ describe("the two search boxes over the same items", () => {
   });
 
   it("section:custom finds the custom rule in BOTH boxes", async () => {
-    const hits = await settingsHits();
+    const hits = await settingsHits(GROUPS);
 
     expect(centerAnswers("section:custom")).toContain(FOLDER_RULE.name); // as it already did
     expect(panelAnswers(hits, "section:custom")).toContain(FOLDER_RULE.name); // and now here too
   });
 
   it("section:advanced still means that tab — every item it renders", async () => {
-    const hits = await settingsHits();
+    const hits = await settingsHits(GROUPS);
     const advanced = panelAnswers(hits, "section:advanced");
 
     for (const g of GROUPS) expect(advanced).toContain(g.name);
     // …and the tab's word is not the family's: a card item is on no Advanced tab.
     expect(advanced).not.toContain("Graph view");
+  });
+
+  // A synthesized def (defsForForeignItems — a stored community item whose plugin is not
+  // installed on this device) carries a bare-id placeholder label; its hit name resolves through
+  // the host's stored-label chain, the same producer renderItemCard titles the card with. An
+  // installed def's hit stays its own label — producer versus producer, no literals pinned on
+  // either side alone.
+  it("a synthesized def is indexed under its resolved display name, not the placeholder id", async () => {
+    const defs = defsForForeignItems(buildItemDefs(ENV), itemsIn({ community: { "remotely-save": { ...emptyItem(), synced: true } } }), new Set());
+    const foreign = defs.find((d) => d.id === "remotely-save") as ItemDef;
+    const host = {
+      settings: { items: itemsIn({}) },
+      itemDefs: () => defs,
+      installedPluginIds: () => ENV.plugins.map((p) => p.id),
+      displayName: (name: string, label?: string) => (name === foreign.groupName ? "Remotely Save" : label ?? name),
+      consumePendingSettingsAnchor: () => null,
+    };
+    const tab = new ConfigSyncSettingTab({} as never, host as never);
+    const priv = tab as unknown as { groups: SyncGroup[]; renderGen: number; buildSearchIndex: (gen: number) => Promise<SettingHit[] | null> };
+    priv.groups = [];
+    const hits = (await priv.buildSearchIndex(priv.renderGen)) ?? [];
+    const names = hits.filter((h) => h.kind === "item").map((h) => h.name);
+
+    expect(names).toContain("Remotely Save");
+    expect(names).not.toContain(foreign.label); // the bare id never reaches the user
+    expect(names).toContain("Dataview"); // an installed def still answers with its own label
+  });
+
+  // A store-only synced plugin — a community item in the store for a plugin this device does not
+  // have installed. renderAdvanced classifies its compiled group as managed (isManagedGroup's
+  // syncedPlugin arm) and renders no Custom rule for it, so the index must not offer one either:
+  // the group's only representation in search is the item card hit.
+  it("a store-only synced plugin group is no Custom rule in the index", async () => {
+    const syncedPlugin: SyncGroup = {
+      name: "plugin-not-installed",
+      ref: "community/not-installed",
+      path: "{configDir}/plugins/not-installed/data.json",
+      type: "file",
+      devices: "all",
+    };
+    const hits = await settingsHits([...GROUPS, syncedPlugin]);
+
+    expect(hits.filter((h) => h.groupName === syncedPlugin.name)).toEqual([]);
+    expect(panelAnswers(hits, "section:advanced")).not.toContain(syncedPlugin.name);
   });
 });
